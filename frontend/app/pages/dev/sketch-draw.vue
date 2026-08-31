@@ -131,6 +131,31 @@ function pickSegment(pathId: EntityId, segIndex: number, additive = false) {
 }
 function clearSegSel() { selectedSegments.value = [] }
 
+// --- guided structural ops (Repeat / Mirror) ---
+// Repeat needs a CENTER point and Mirror needs an AXIS line — geometry the
+// user usually hasn't multi-selected alongside the unit. Rather than silently
+// no-op'ing when the selection isn't exactly right (the old failure the user
+// hit: "I have no idea how you're doing the repeat thing"), invoking the verb
+// arms a one-shot "now click the center / axis" mode. `pendingOp` holds the
+// units + params; the next point-click (repeat) or line-click (mirror) — or an
+// empty-canvas click, which drops a fresh fixed center — supplies the missing
+// piece and applies. Escape / tool-switch cancels it. opHint drives the banner.
+const pendingOp = ref<
+  | null
+  | { kind: 'repeat'; units: EntityId[]; count: number }
+  | { kind: 'mirror'; units: EntityId[] }
+>(null)
+function cancelPendingOp() { pendingOp.value = null }
+const opHint = computed(() => {
+  const op = pendingOp.value
+  if (!op) return null
+  if (op.kind === 'repeat') return `Click the center of the ring — an existing point, or empty space to drop one (×${op.count})`
+  return 'Click the mirror axis — a line to reflect across'
+})
+function isPointId(id: EntityId) {
+  return (doc.value.entities.find(e => e.id === id) as any)?.kind === 'point'
+}
+
 // --- undo/redo history: plain snapshots of `doc`, taken after every
 // mutating action settles. `histPtr` points at the entry matching the
 // current `doc.value`; undo/redo just move it and restore that snapshot.
@@ -204,6 +229,7 @@ function onKeydown(ev: KeyboardEvent) {
   if (gestureActive && ev.key === '.' && !dimBuffer.value.includes('.')) { ev.preventDefault(); dimBuffer.value += '.'; return }
 
   if (ev.key === 'Escape') {
+    if (pendingOp.value) { cancelPendingOp(); status.value = 'cancelled'; return }
     // clearing a live dimension buffer takes priority over everything else —
     // a first Escape just clears the typed value, a second (now-empty-buffer)
     // Escape falls through to the normal marquee/pan/path-cancel handling.
@@ -1009,24 +1035,57 @@ function finishPath(close = false) {
   commitHistory()
 }
 
+// low-level applies — used by both the fast path (center/axis already in the
+// selection) and the guided pick. clearSel first so the center-point click
+// that armed nothing lingers selected.
+function applyRepeat(units: EntityId[], center: EntityId, count: number) {
+  if (!units.length || !Number.isFinite(count) || count < 2) return
+  repeatEntities(doc.value, units, center, Math.round(count))
+  clearSel(); pendingOp.value = null; runSolve(); commitHistory()
+  status.value = `Repeated ×${Math.round(count)}`
+}
+function applyMirror(units: EntityId[], axisLine: EntityId) {
+  if (!units.length) return
+  mirrorEntities(doc.value, units, axisLine)
+  clearSel(); pendingOp.value = null; runSolve(); commitHistory()
+  status.value = 'Mirrored'
+}
+// kept for the test hook / fast path: exact-selection repeat (1 point + units)
 function doRepeat(count: number) {
-  const ptSel = selection.value.filter(id => (doc.value.entities.find(e => e.id === id) as any)?.kind === 'point')
+  const ptSel = selection.value.filter(id => isPointId(id))
   const entSel = selection.value.filter(id => !ptSel.includes(id))
-  if (ptSel.length !== 1 || entSel.length === 0 || !Number.isFinite(count) || count < 2) return
-  repeatEntities(doc.value, entSel, ptSel[0]!, Math.round(count))
-  clearSel(); runSolve(); commitHistory()
+  if (ptSel.length !== 1 || entSel.length === 0) return
+  applyRepeat(entSel, ptSel[0]!, count)
 }
 function repeatPrompt() {
-  const raw = window.prompt('Repeat count?', '6')
+  const ptSel = selection.value.filter(id => isPointId(id))
+  const entSel = selection.value.filter(id => !ptSel.includes(id))
+  if (entSel.length === 0) { status.value = 'Select a shape first, then Repeat…'; return }
+  const raw = window.prompt('How many copies around the ring?', '6')
   if (raw == null) return
-  doRepeat(Number(raw))
+  const count = Number(raw)
+  if (!Number.isFinite(count) || count < 2) { status.value = 'Repeat needs a count of 2 or more'; return }
+  // fast path: a center point is already part of the selection
+  if (ptSel.length === 1) { applyRepeat(entSel, ptSel[0]!, count); return }
+  // guided: arm the center pick
+  armRepeat(entSel, count)
+}
+// arm the guided center-pick for the given units + count (no prompt). Used by
+// repeatPrompt's guided branch and the __sketchDraw.armRepeat test hook.
+function armRepeat(units: EntityId[], count: number) {
+  if (!units.length || !Number.isFinite(count) || count < 2) return
+  pendingOp.value = { kind: 'repeat', units: [...units], count }
+  status.value = `Now click the center of the ring (×${count})`
 }
 function doMirror() {
   const lineSel = selection.value.filter(id => (doc.value.entities.find(e => e.id === id) as any)?.kind === 'line')
   const entSel = selection.value.filter(id => !lineSel.includes(id))
-  if (lineSel.length !== 1 || entSel.length === 0) return
-  mirrorEntities(doc.value, entSel, lineSel[0]!)
-  clearSel(); runSolve(); commitHistory()
+  if (entSel.length === 0) { status.value = 'Select a shape first, then Mirror'; return }
+  // fast path: an axis line is already part of the selection
+  if (lineSel.length === 1) { applyMirror(entSel, lineSel[0]!); return }
+  // guided: arm the axis pick
+  pendingOp.value = { kind: 'mirror', units: entSel }
+  status.value = 'Now click the mirror axis (a line)'
 }
 function flip(axis: 'h' | 'v') {
   const ptIds = pointClosure(doc.value, selection.value)
@@ -1325,6 +1384,11 @@ function onWheel(ev: WheelEvent) {
 }
 function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
   if (panTrigger(ev)) { startPan(ev); ev.stopPropagation(); return }
+  // guided Mirror: a line click supplies the axis
+  if (tool.value === 'select' && pendingOp.value?.kind === 'mirror' && (doc.value.entities.find(e => e.id === id) as any)?.kind === 'line') {
+    applyMirror(pendingOp.value.units, id)
+    ev.stopPropagation(); return
+  }
   // non-point entities (line/circle/path hit-paths) never drag via pointer —
   // only points do (see onPointerDownPoint) — so there's no click-vs-drag
   // ambiguity here: select immediately, replacing unless shift-held.
@@ -1333,6 +1397,11 @@ function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
 function onPointerDownPoint(id: EntityId, ev: PointerEvent) {
   if (panTrigger(ev)) { startPan(ev); ev.stopPropagation(); return }
   if (tool.value !== 'select') return
+  // guided Repeat: this point is the ring center
+  if (pendingOp.value?.kind === 'repeat') {
+    applyRepeat(pendingOp.value.units, id, pendingOp.value.count)
+    ev.stopPropagation(); return
+  }
   dragId = id; moved = false
   const p = doc.value.entities.find(e => e.id === id) as any
   dragHandleIds = p?.kind === 'point' ? handleIdsForAnchor(id) : []
@@ -1375,11 +1444,32 @@ function segmentPathScreen(pathId: EntityId, segIndex: number): string {
 }
 function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEvent) {
   if (panTrigger(ev)) { startPan(ev); ev.stopPropagation(); return }
-  if (tool.value === 'select') { pickSegment(pathId, segIndex, ev.shiftKey); ev.stopPropagation() }
+  if (tool.value !== 'select') return
+  // guided ops treat a path-body click as picking the whole path (the unit),
+  // never a segment — fall through to the whole-path selection below.
+  if (pendingOp.value) { pick(pathId, ev.shiftKey); ev.stopPropagation(); return }
+  // Default: a plain click selects the WHOLE path (what Repeat/Mirror/Delete/
+  // Construction all operate on — the intuitive "click the shape, select the
+  // shape"). Alt/Option-click drills in to the single segment under the cursor
+  // for the per-segment verbs (Horizontal/Vertical/Right-angle on one edge).
+  if (ev.altKey) pickSegment(pathId, segIndex, ev.shiftKey)
+  else pick(pathId, ev.shiftKey)
+  ev.stopPropagation()
 }
 function onPointerDownSvg(ev: PointerEvent) {
   if (panTrigger(ev)) { startPan(ev); return }
   if (tool.value === 'select') {
+    // guided Repeat with an empty-canvas click: drop a fresh FIXED center right
+    // where they clicked and repeat around it (so a ring never needs a
+    // pre-made center point). Mirror needs a real line, so an empty click there
+    // just cancels the armed op.
+    if (pendingOp.value?.kind === 'repeat') {
+      const w = svgXY(ev)
+      const center = addPoint(doc.value, w.x, w.y, { fixed: true })
+      applyRepeat(pendingOp.value.units, center, pendingOp.value.count)
+      return
+    }
+    if (pendingOp.value?.kind === 'mirror') { cancelPendingOp(); status.value = 'Mirror cancelled — click a line to reflect across'; return }
     // a miss — entity/point pointerdowns stopPropagation before this handler
     // ever runs. Start a marquee candidate; resolved on pointerup as either a
     // click-empty-deselect or a real box-select (see marqueeStart's comment).
@@ -1556,6 +1646,7 @@ function removeLastAnchor() {
 
 function selectTool(t: Tool) {
   cleanupPendingAndCommit()
+  cancelPendingOp()   // a half-armed Repeat/Mirror never survives a tool switch
   // switching to a draw tool must not carry a stale entity/segment
   // selection along with it — the verb bar, arrow-nudge, and Backspace-
   // delete all act on `selection`/`selectedSegments`, and a leftover pick
@@ -1636,6 +1727,18 @@ onMounted(() => {
     finishPath: (close = false) => finishPath(close),
     repeat: (ids: EntityId[], centerId: EntityId, count: number) => { repeatEntities(doc.value, ids, centerId, count); runSolve(); commitHistory() },
     mirror: (ids: EntityId[], axisId: EntityId) => { mirrorEntities(doc.value, ids, axisId); runSolve(); commitHistory() },
+    // guided-op test hooks: armRepeat/armMirror set pendingOp exactly as the
+    // Repeat…/Mirror verb buttons do (minus the window.prompt); pendingOp
+    // exposes the armed state so E2E can assert the "now click the center/axis"
+    // step, and the real point/line/empty clicks resolve it.
+    armRepeat: (count: number) => {
+      const ptSel = selection.value.filter(id => isPointId(id))
+      const entSel = selection.value.filter(id => !ptSel.includes(id))
+      armRepeat(entSel, count)
+    },
+    armMirror: () => doMirror(),
+    pendingOp: () => (pendingOp.value ? { kind: pendingOp.value.kind, units: [...pendingOp.value.units] } : null),
+    cancelOp: () => cancelPendingOp(),
     flipH: () => flip('h'),
     flipV: () => flip('v'),
     makeConstruction: () => makeConstruction(),
@@ -1711,6 +1814,12 @@ onUnmounted(() => {
       <button data-act="reset" @click="reset" style="padding: 4px 10px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer">reset</button>
       <span data-status style="margin-left: 8px; font-size: 12px; color: #9ca3af">{{ status }}</span>
     </div>
+    <div v-if="opHint" data-op-hint
+         style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid #2563eb; background: #10203f; color: #bfdbfe; font-size: 13px">
+      <span>👉 {{ opHint }}</span>
+      <button data-act="op-cancel" @click="cancelPendingOp"
+              style="padding: 2px 8px; border-radius: 6px; border: 1px solid #334155; background: #0b1220; color: #93c5fd; cursor: pointer; font-size: 12px">cancel (Esc)</button>
+    </div>
     <div v-if="tool === 'path'" style="display: flex; gap: 6px; margin-bottom: 8px; align-items: center">
       <span style="font-size: 12px; color: #9ca3af">click to place a point — drag before releasing to curve the segment into an arc; click the first point to close</span>
       <button data-act="close" @click="finishPath(true)"
@@ -1720,6 +1829,7 @@ onUnmounted(() => {
     </div>
     <div style="display: flex; gap: 6px; margin: 8px 0; min-height: 28px; align-items: center; flex-wrap: wrap">
       <span style="font-size: 12px; color: #9ca3af">sel: {{ selection.length }}{{ selectedSegments.length ? ' · seg: ' + selectedSegments.length : '' }}</span>
+      <span v-if="tool === 'select' && !selection.length && !selectedSegments.length" data-select-hint style="font-size: 12px; color: #6b7280">drag a point to move it · click a shape to select it · ⌥click an edge for one segment</span>
       <button v-for="v in availableConstraints()" :key="v.kind" :data-verb="v.kind"
               @click="() => applyWithValue(v)"
               style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">{{ v.label }}</button>

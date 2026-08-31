@@ -1123,7 +1123,7 @@ test('segment selection: pick a single line segment, apply Horizontal via the AP
   expect(out.dy).toBeLessThan(0.01)   // the segment's two anchors now share y
 })
 
-test('segment selection: clicking a segment hit-path selects it and clears entity selection; a live segment renders its own highlighted stroke', async ({ page }) => {
+test('path-body click selects the WHOLE path; Alt+click drills into one segment', async ({ page }) => {
   await page.goto('/dev/sketch-draw')
   await page.waitForSelector('[data-ready]')
   await page.waitForFunction(() => !!(window as any).__sketchDraw)
@@ -1142,23 +1142,68 @@ test('segment selection: clicking a segment hit-path selects it and clears entit
     D.finishPath(false)
     const path = D.doc.entities.find((e: any) => e.kind === 'path')
     D.setTool('select')
-    // pre-select an entity so the click's mutual-exclusivity clear is observable
-    D.pick(path.id)
+    D.clearSel()
     return { pathId: path.id }
   })
 
   const seg0 = page.locator(`[data-seg="${ids.pathId}:0"]`)
   await expect(seg0).toHaveCount(1)
-  await seg0.click()
 
-  const result = await page.evaluate(() => ({
+  // plain click on a path segment now selects the WHOLE path (the intuitive
+  // "click the shape, select the shape" — what Repeat/Mirror/Delete need).
+  await seg0.click()
+  const plain = await page.evaluate(() => ({
     segs: (window as any).__sketchDraw.selectedSegments,
     sel: (window as any).__sketchDraw.selection,
   }))
-  expect(result.segs).toEqual([{ pathId: ids.pathId, segIndex: 0 }])
-  expect(result.sel).toEqual([])   // entity selection cleared by the segment click
+  expect(plain.sel).toEqual([ids.pathId])
+  expect(plain.segs).toEqual([])
+  await expect(page.locator('[data-seg-selected]')).toHaveCount(0)
 
+  // Alt+click drills into the single segment under the cursor (segment verbs),
+  // clearing the whole-path selection.
+  await seg0.click({ modifiers: ['Alt'] })
+  const alt = await page.evaluate(() => ({
+    segs: (window as any).__sketchDraw.selectedSegments,
+    sel: (window as any).__sketchDraw.selection,
+  }))
+  expect(alt.segs).toEqual([{ pathId: ids.pathId, segIndex: 0 }])
+  expect(alt.sel).toEqual([])   // whole-path selection cleared by the segment pick
   await expect(page.locator('[data-seg-selected]')).toHaveCount(1)
+})
+
+test('guided Repeat: arm via Repeat verb, then a center-point click builds the ring', async ({ page }) => {
+  await page.goto('/dev/sketch-draw')
+  await page.waitForSelector('[data-ready]')
+  await page.waitForFunction(() => !!(window as any).__sketchDraw)
+
+  const ids = await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.reset()
+    D.setTool('point'); D.place(11, 6)
+    const center = D.doc.entities.find((e: any) => e.kind === 'point').id
+    D.doc.entities.find((e: any) => e.id === center).fixed = true
+    D.setTool('path'); D.place(11, 2); D.place(11, 4); D.place(13, 5); D.finishPath(false)
+    const unit = D.doc.entities.find((e: any) => e.kind === 'path').id
+    D.setTool('select')
+    D.pick(unit)          // whole-path selection, as a real click now gives
+    D.armRepeat(8)        // = clicking "Repeat…" and entering a count of 8
+    return { center, unit, armed: D.pendingOp() }
+  })
+  expect(ids.armed).toEqual({ kind: 'repeat', units: [ids.unit] })
+
+  // the hint banner is shown while armed
+  await expect(page.locator('[data-op-hint]')).toHaveCount(1)
+
+  // clicking the center point resolves the armed op into a ring of 8
+  await page.locator(`[data-point="${ids.center}"]`).click()
+  const out = await page.evaluate(() => ({
+    paths: (window as any).__sketchDraw.doc.entities.filter((e: any) => e.kind === 'path').length,
+    pendingOp: (window as any).__sketchDraw.pendingOp(),
+  }))
+  expect(out.paths).toBe(8)
+  expect(out.pendingOp).toBeNull()
+  await expect(page.locator('[data-op-hint]')).toHaveCount(0)
 })
 
 test('segment verbs: reject arc segments at the mutation layer (no constraint added)', async ({ page }) => {
