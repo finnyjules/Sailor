@@ -55,3 +55,20 @@ export function placeTemplate(
   }
   return { layers: [...current.layers, ...newLayers], groups: [...current.groups, ...newGroups], instance }
 }
+
+export function setInstanceSlot(
+  layers: LocalLayer[], t: Template, instance: TemplateInstance, slotId: string, value: string,
+): { layers: LocalLayer[]; instance: TemplateInstance } {
+  const slot = t.slots.find(s => s.id === slotId)
+  if (!slot) throw new Error(`no slot ${slotId}`)
+  const layerId = instance.placedKeys[slot.layerKey]
+  const next = layers.map(l => {
+    if (l.id !== layerId) return l
+    const copy: any = clone(l); applySlotToLayer(copy, slot.kind, value); return copy as LocalLayer
+  })
+  return { layers: next, instance: { ...instance, slotValues: { ...instance.slotValues, [slotId]: value } } }
+}
+
+export function freezeInstance(instances: TemplateInstance[], instanceId: string): TemplateInstance[] {
+  return instances.filter(i => i.instanceId !== instanceId)
+}

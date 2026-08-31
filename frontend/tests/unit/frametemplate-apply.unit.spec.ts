@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { placeTemplate, applySlotToLayer } from '~/lib/frametemplate/apply'
+import { placeTemplate, applySlotToLayer, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
 import type { Template } from '~/lib/frametemplate/types'
 
 /** Fresh, uniquely-numbered ctx per call (the shared `ctx` below reuses one fixed
@@ -115,5 +115,18 @@ describe('placeTemplate', () => {
     }
     // template's stored layers were not mutated by either placement
     expect(tpl.layers).toEqual(before)
+  })
+
+  it('setInstanceSlot updates the placed slot layer and the instance value', () => {
+    const placed = placeTemplate({ layers: [], groups: [] }, tpl, { 's-head': 'A' }, ctx)
+    const r = setInstanceSlot(placed.layers, tpl, placed.instance, 's-head', 'B')
+    const head = r.layers.find(l => l.id === placed.instance.placedKeys.head) as any
+    expect(head.text).toBe('B')
+    expect(r.instance.slotValues['s-head']).toBe('B')
+  })
+  it('freezeInstance drops the card and leaves layers alone', () => {
+    const placed = placeTemplate({ layers: [], groups: [] }, tpl, { 's-head': 'A' }, ctx)
+    const after = freezeInstance([placed.instance], placed.instance.instanceId)
+    expect(after).toEqual([])
   })
 })
