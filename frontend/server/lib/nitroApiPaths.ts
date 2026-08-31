@@ -29,7 +29,7 @@ export const NITRO_API_PATHS = [
 export const NITRO_API_PREFIXES = [
   '/api/billing', '/api/webhooks', '/api/admin', '/api/templates', '/api/cloud-train',
   '/api/voice-clone', '/api/training-queue', '/api/krea', '/api/vector', '/api/inpaint',
-  '/api/house-styles', '/api/brand-kits', '/api/template-fonts', '/api/library-font',
+  '/api/house-styles', '/api/brand-kits', '/api/frame-templates', '/api/template-fonts', '/api/library-font',
   '/api/characters-local', '/api/lipsync', '/api/meter', '/api/pool', '/api/scene3d',
   '/api/style-profile', '/api/fonts', '/api/depth', '/api/taste', '/api/moodboards',
   '/api/wardrobe',
