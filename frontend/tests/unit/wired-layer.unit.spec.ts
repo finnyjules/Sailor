@@ -580,6 +580,25 @@ describe('editor write-through hook', () => {
     expect(wv(node, 'layer1_x')).toBeCloseTo(0, 6)
   })
 
+  it('restores sailor_frametemplates on undo, atomically with the layers', () => {
+    const { node, ed } = makeEditor([createWiredLayer(0, { x: 0.5, y: 0.5, w: 1, lastAspect: 600 / 800 })])
+    ;(node.data.properties as any).sailor_frametemplates = [{ id: 't1', slotIndex: 0 }]
+    ed.recordHistory()
+    ;(node.data.properties as any).sailor_frametemplates = [{ id: 't1', slotIndex: 0 }, { id: 't2', slotIndex: 1 }]
+    expect((node.data.properties as any).sailor_frametemplates).toHaveLength(2)
+    ed.undo()
+    expect((node.data.properties as any).sailor_frametemplates).toEqual([{ id: 't1', slotIndex: 0 }])
+  })
+
+  it('snapshots/restores an empty sailor_frametemplates array when a Frame has none', () => {
+    const { node, ed } = makeEditor([createWiredLayer(0, { x: 0.5, y: 0.5, w: 1, lastAspect: 600 / 800 })])
+    const id = (node.data.properties.sailor_localLayers as LocalLayer[])[0]!.id
+    ed.setLocal(id, { x: 0.75 })
+    expect((node.data.properties as any).sailor_frametemplates).toBeUndefined()
+    ed.undo()
+    expect((node.data.properties as any).sailor_frametemplates).toEqual([])
+  })
+
   it('leaves the widgets alone when a wired layer is deleted (the edge disconnect removes it)', () => {
     const { node, ed } = makeEditor([createWiredLayer(0, { x: 0.75, y: 0.5, w: 1, lastAspect: 600 / 800 })])
     const id = (node.data.properties.sailor_localLayers as LocalLayer[])[0]!.id

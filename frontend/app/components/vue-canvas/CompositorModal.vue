@@ -682,6 +682,7 @@ function fillTemplateSlot(inst: TemplateInstance, t: Template, slotId: string, v
 }
 
 function freezeTemplateInstance(inst: TemplateInstance) {
+  recordHistory()
   commitTemplateInstances(freezeInstance(frameTemplateInstances.value, inst.instanceId))
   toast('Template copy frozen', { description: 'It stays on the frame as regular layers, no longer linked to the template.' })
 }
