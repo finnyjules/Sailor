@@ -48,7 +48,7 @@ import { loadMesh, meshCacheGet } from '~/lib/scene3d/meshCache'
 import { SculptSession, commitSculptToDoc } from '~/lib/scene3d/sculpt/session'
 import { applyBrush, type BrushKind, type BrushStamp } from '~/lib/scene3d/sculpt/brushes'
 import { expandStamp, type SymmetryMode, type SymmetrySpec } from '~/lib/scene3d/sculpt/symmetry'
-import Scene3DSculptPanel from '~/components/vue-canvas/studio/Scene3DSculptPanel.vue'
+import Scene3DSculptToolbar from '~/components/vue-canvas/studio/Scene3DSculptToolbar.vue'
 import { rebaseMany, groupObjects, ungroupMany, rootObjects, descendantIds, cloneSubtree, axisDeltaWrites, worldMatrixOf } from '~/lib/scene3d/hierarchy'
 import { remesh, boundsOf } from '~/lib/scene3d/voxel'
 import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
@@ -3400,8 +3400,8 @@ async function onClose() {
              fires (and a stray orbit-drag starts). Stop it at the overlay boundary. -->
         <!-- var(--studio-panel-inset) (set by the shell in full-bleed) clears the floating panels;
              back to left-3 the moment ⌘\ takes the panel away. -->
-        <div v-if="webglOk" class="absolute top-3 flex items-center gap-2 rounded-lg bg-black/60 p-1.5 backdrop-blur"
-             :class="panelsVisible ? 'left-[var(--studio-panel-inset)]' : 'left-3'" @pointerdown.stop>
+        <div v-if="webglOk" class="absolute top-3 flex items-center gap-2 rounded-lg bg-black/60 p-1.5 backdrop-blur transition-opacity"
+             :class="[panelsVisible ? 'left-[var(--studio-panel-inset)]' : 'left-3', sculpting ? 'pointer-events-none opacity-40' : '']" @pointerdown.stop>
           <button type="button" class="rounded px-2 py-1 text-xs"
             :class="snap ? 'bg-white/25 text-white' : 'bg-white/10 text-white/70 hover:bg-white/15'"
             @click="snap = !snap">snap</button>
@@ -3443,7 +3443,7 @@ async function onClose() {
              toolbar's face+caret grammar — the face repeats the last-used entry
              in one click, the slim caret beside it opens the unchanged menu.
              Hidden in Motion mode — the timeline panel above takes its place. -->
-        <div v-if="webglOk && activeTab !== 'motion'" class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10" data-prim-menu @pointerdown.stop>
+        <div v-if="webglOk && activeTab !== 'motion' && !sculpting" class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10" data-prim-menu @pointerdown.stop>
           <p v-if="uploadError" class="mb-2 text-center text-[11px] text-red-400/90">{{ uploadError }}</p>
           <div class="relative flex items-center gap-1 rounded-[12px] border border-[#2a2a2a] bg-[#1a1a1a]/95 p-1.5 shadow-lg">
             <!-- Two real buttons rather than hit-test zones inside one, so the
@@ -3667,6 +3667,30 @@ async function onClose() {
           </div>
         </div>
 
+        <!-- Sculpt bottom-dock toolbar: occupies the same bottom-center spot as the
+             add-toolbar while a sculpt session is open (add-toolbar is gated off by
+             `!sculpting` above). @pointerdown.stop so brush clicks don't reach
+             OrbitControls; the pill itself is pointer-events-auto. -->
+        <div v-if="webglOk && sculpting" class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10" @pointerdown.stop>
+          <Scene3DSculptToolbar
+            v-model:brush="sculptBrush"
+            v-model:size="sculptSize"
+            v-model:strength="sculptStrength"
+            v-model:symmetry="sculptSymmetry"
+            v-model:symmetryAxis="sculptSymmetryAxis"
+            v-model:symmetryCount="sculptSymmetryCount"
+            v-model:remeshResolution="sculptRemeshResolution"
+            :remesh-vertex-count="sculptVertexCount"
+            :remesh-kb="sculptMeshKB"
+            :remesh-busy="sculptRemeshBusy"
+            :remesh-error="convertError"
+            :committing="committing"
+            @apply="commitAndExitSculpt"
+            @exit="commitAndExitSculpt"
+            @remesh="remeshSculptSession"
+          />
+        </div>
+
         <!-- Light View labels: HTML chips (color dot + name + live intensity) at
              each light's projected screen position. pointer-events-none root so
              the viewport stays orbit/select-driven; @pointerdown.stop guards the
@@ -3820,36 +3844,6 @@ async function onClose() {
           @set="setControl"
         />
       </div>
-
-      <!-- Gap 3 fix: sculpt mode replaces ONLY the Geometry section below (a
-           sibling swap, not nested inside it) with Scene3DSculptPanel — brush
-           palette, Symmetry, in-panel Remesh, Apply/Exit, spec §6's exact
-           list. Modifiers/Cloner (inside the Geometry StudioSection below)
-           are swapped out along with it because they're genuinely INERT
-           during a live sculpt override: geometryForObject (engine.ts)
-           short-circuits straight to the session's raw buffer and never calls
-           applyModifiers while the override is set, so a Twist/Cloner edit
-           here would silently do nothing to the live viewport. Everything
-           ELSE in the inspector column (Transform above, Material below, the
-           Motion tab, the Save/Export footer) stays live per spec §6. -->
-      <Scene3DSculptPanel
-        v-if="sculpting && selectedMesh"
-        v-model:brush="sculptBrush"
-        v-model:size="sculptSize"
-        v-model:strength="sculptStrength"
-        v-model:symmetry="sculptSymmetry"
-        v-model:symmetryAxis="sculptSymmetryAxis"
-        v-model:symmetryCount="sculptSymmetryCount"
-        v-model:remeshResolution="sculptRemeshResolution"
-        :remesh-vertex-count="sculptVertexCount"
-        :remesh-kb="sculptMeshKB"
-        :remesh-busy="sculptRemeshBusy"
-        :remesh-error="convertError"
-        :committing="committing"
-        @apply="commitAndExitSculpt"
-        @exit="commitAndExitSculpt"
-        @remesh="remeshSculptSession"
-      />
 
       <!-- Geometry / Modifiers / Cloner — DRAWN FROM SCENE_CONTROLS, from the same
            `panelControls` row list the Transform panel above and the Material panel below
