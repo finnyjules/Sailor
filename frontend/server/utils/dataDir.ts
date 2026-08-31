@@ -9,13 +9,14 @@
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 
-export type StoreName = 'brand-kits' | 'moodboards' | 'templates-layouts' | 'templates-fonts-user' | 'data'
+export type StoreName = 'brand-kits' | 'moodboards' | 'templates-layouts' | 'templates-fonts-user' | 'frame-templates' | 'data'
 
 const LOCAL_PATHS: Record<StoreName, string[]> = {
   'brand-kits': ['server', 'brand-kits'],
   'moodboards': ['server', 'moodboards'],
   'templates-layouts': ['server', 'templates', 'layouts'],
   'templates-fonts-user': ['server', 'templates', 'fonts', 'user'],
+  'frame-templates': ['server', 'frame-templates'],
   'data': ['.data'],
 }
 
