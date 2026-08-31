@@ -21,18 +21,27 @@ async function save(entry: StoredTemplate): Promise<void> {
   const i = templates.value.findIndex(t => t.id === entry.id)
   if (i >= 0) templates.value.splice(i, 1, entry)
   else templates.value.unshift(entry)
-  const res = await fetch(`/api/frame-templates/${entry.id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(entry),
-  })
-  if (!res.ok) await refresh() // rollback to server truth
+  try {
+    const res = await fetch(`/api/frame-templates/${entry.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    })
+    if (!res.ok) await refresh() // rollback to server truth
+  } catch {
+    // Network-level rejection (offline/DNS/CORS) — roll back the same way.
+    await refresh()
+  }
 }
 
 async function remove(id: string): Promise<void> {
   templates.value = templates.value.filter(t => t.id !== id)
-  const res = await fetch(`/api/frame-templates/${id}`, { method: 'DELETE' })
-  if (!res.ok) await refresh()
+  try {
+    const res = await fetch(`/api/frame-templates/${id}`, { method: 'DELETE' })
+    if (!res.ok) await refresh()
+  } catch {
+    await refresh()
+  }
 }
 
 function get(id: string): StoredTemplate | undefined {

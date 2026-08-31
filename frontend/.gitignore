@@ -37,6 +37,7 @@ Thumbs.db
 # User-saved Smart Layout templates (runtime data, not source)
 server/templates/layouts/user-*.json
 server/brand-kits/*.json
+server/frame-templates/*.json
 # Uploaded licensed brand fonts (runtime data, not source)
 server/templates/fonts/user/
 
