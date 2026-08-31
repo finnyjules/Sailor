@@ -22,12 +22,18 @@ Sculpting a primitive **inherently** freezes it to a mesh (`convertToMesh`), and
 
 ## Design
 
-One coherent **floating viewport-overlay system**. A contextual bar sits over the 3D viewport. It has two modes:
+Two floating viewport overlays, split by how transient the state is:
 
-- **Selection mode** (`!sculpting`, selection has ≥1 applicable verb): shows verb chips.
-- **Sculpt mode** (`sculpting`): morphs into the sculpt toolbar.
+- **Selection verbs (top-center):** a lightweight contextual bar shown whenever `!sculpting` and the selection has ≥1 applicable verb. Selection is *transient* (you click objects constantly), so this bar floats **top-center** and leaves the bottom create shelf untouched — adding a second primitive never requires deselecting first.
+- **Sculpt toolbar (bottom-center dock):** sculpt is a *sustained mode*, so it **takes over the bottom-center dock**, evicting the add/create toolbar exactly as Motion mode already does. See "Bottom-center dock is mode-driven" below.
 
-Both mount in the same overlay region so entering/leaving sculpt reads as the same dock morphing, not a panel swapping columns. The right inspector column shows the **ordinary Transform/Material/Motion inspector at all times** — no sculpt-panel swap — preserving the Sculpt-and-Merge spec §6 promise that Material/Transform stay live and editable mid-sculpt.
+The right inspector column shows the **ordinary Transform/Material/Motion inspector at all times** — no sculpt-panel swap — preserving the Sculpt-and-Merge spec §6 promise that Material/Transform stay live and editable mid-sculpt.
+
+### Bottom-center dock is mode-driven (existing precedent)
+
+The `bottom-3 left-1/2` dock already hosts whichever toolbar fits the current mode: the **add/create toolbar** by default (`Scene3DStudioSurface.vue:3446`, gated `webglOk && activeTab !== 'motion'`), swapped for the **Motion timeline** in Motion mode (`:3425`, `activeTab === 'motion'`). This design adds a third occupant: the **sculpt toolbar while `sculpting`**. The add-toolbar's gate extends to `webglOk && activeTab !== 'motion' && !sculpting`, and the sculpt toolbar renders in the same dock when `sculpting`. One dock, three mutually-exclusive occupants — and this is what resolves the earlier collision worry (sculpt controls and the add-toolbar are no longer competing for the spot; they are the same dock).
+
+The top-left view toggles (`snap`, `Light`, `:3403`) stay put during plain selection — `snap` governs gizmo dragging, so it is *most* relevant with a selection. During sculpt they are inert (no gizmo dragging), so they dim while `sculpting` to keep the viewport calm.
 
 ### Components
 
@@ -37,15 +43,17 @@ Both mount in the same overlay region so entering/leaving sculpt reads as the sa
 | `Scene3DSculptToolbar.vue` (new) | Sculpt-mode floating toolbar. Replaces `Scene3DSculptPanel.vue`. |
 | `Scene3DSculptPanel.vue` | **Retired** (deleted). |
 
-Both are mounted as absolutely-positioned children of the viewport root (`viewportEl`, the `relative h-full w-full` div at `Scene3DStudioSurface.vue:3375`), following the existing snap/Light-toolbar precedent (`:3403`).
+Both are mounted as absolutely-positioned children of the viewport root (`viewportEl`, the `relative h-full w-full` div at `Scene3DStudioSurface.vue:3375`), following the existing bottom add-toolbar / snap-toolbar precedents.
+
+- `Scene3DViewportActions.vue` docks **top-center** (`absolute top-3 left-1/2 -translate-x-1/2`). Clear of the top-left snap/Light toggles (`:3403`, anchored `left`) and the top-right shader-frozen hint (`:3415`, anchored `right`).
+- `Scene3DSculptToolbar.vue` docks **bottom-center** (`absolute bottom-3 left-1/2 -translate-x-1/2`), the same coordinates as the add-toolbar it replaces (`:3446`).
 
 ### Mounting & pointer-events
 
 `viewportEl` is what OrbitControls binds to, so overlay bars must not start orbit drags or sculpt strokes:
 
 - Wrapper: `pointer-events-none absolute inset-0` so orbit/select/stroke pass through empty areas.
-- Each interactive bar: `pointer-events-auto`, `nodrag`, `@pointerdown.stop` (matches the snap-toolbar precedent at `:3396-3411` and the canvas-overlay pointer-events convention).
-- **Position constraint:** the existing snap/Light toolbar occupies `top-3` (`:3403`). The new bars must not collide with it — verify actual anchor during implementation and offset if needed.
+- Each interactive bar: `pointer-events-auto`, `nodrag`, `@pointerdown.stop` (matches the snap-toolbar and add-toolbar precedents at `:3404`/`:3446` and the canvas-overlay pointer-events convention).
 
 ### Selection-mode bar (`Scene3DViewportActions.vue`)
 
@@ -67,18 +75,25 @@ All handlers, gates, and merge state (`mergeOp/mergeBlend/mergeResolution/mergeB
 
 ### Sculpt-mode toolbar (`Scene3DSculptToolbar.vue`)
 
-Two clusters (per the chosen "floating over viewport" model):
+A **single centered pill** in the bottom-center dock (replacing the add-toolbar, comparable width to it), left→right:
 
-- **Top bar** (top-center, replacing the selection bar in the same dock): 7-brush icon segmented strip (tooltip per brush) → `Size` mini-slider → `Strength` mini-slider. "Hold Alt to carve inward" becomes a tooltip, not a permanent line. Dragging Size shows the live brush-radius ring (reuse `ensureSculptRing`/`updateSculptRing`); `[` / `]` nudge size via keyboard.
-- **Bottom bar** (bottom-center): `Symmetry ▾` popover (None/Mirror/Radial segmented + radial count/axis) · `Remesh ▾` popover (resolution slider + vertex/KB readout + Remesh button) · `Exit` · `Apply`.
+`[ 7-brush icon strip ] | Size · Strength | Symmetry ▾ | Remesh ▾ | Exit  Apply`
 
-Same `v-model` surface as the retired panel — `brush / size / strength / symmetry / symmetryAxis / symmetryCount / remeshResolution` — and the same emits `apply / exit / remesh`, so the surface's state and handlers (`commitAndExitSculpt`, `remeshSculptSession`) bind unchanged. `Apply` and `Exit` both commit-and-exit (unchanged).
+- **Brushes**: icon-only segmented strip, tooltip per brush. One click to switch.
+- **Size / Strength**: compact inline sliders (or steppers if width is tight). "Hold Alt to carve inward" becomes a tooltip, not a permanent line. Dragging Size shows the live brush-radius ring (reuse `ensureSculptRing`/`updateSculptRing`); `[` / `]` nudge size via keyboard.
+- **Symmetry ▾**: popover — None/Mirror/Radial segmented + radial count/axis.
+- **Remesh ▾**: popover — resolution slider + vertex/KB readout + Remesh button.
+- **Exit / Apply**: both commit-and-exit (unchanged).
 
-### Removed from `Scene3DStudioSurface.vue`
+Popovers open **upward** from the pill (the dock is at the viewport's bottom edge). Same `v-model` surface as the retired panel — `brush / size / strength / symmetry / symmetryAxis / symmetryCount / remeshResolution` — and the same emits `apply / exit / remesh`, so the surface's state and handlers (`commitAndExitSculpt`, `remeshSculptSession`) bind unchanged.
 
-- The verb pill row in the Objects panel header (`:3697-3713`).
-- The Merge inline popover in the aside (`:3717-3730`) — content moves to the Merge chip popover.
-- The Geometry-slot sculpt sibling-swap (`:3835-3852`) — Geometry now renders normally at all times; the `sculpting && selectedMesh` conditional there is deleted. This is a net simplification: no more sibling-swap coupling between the sculpt panel and the Geometry/Modifiers/Cloner cards.
+### Changed / removed in `Scene3DStudioSurface.vue`
+
+- **Add-toolbar gate** (`:3446`): `webglOk && activeTab !== 'motion'` → `webglOk && activeTab !== 'motion' && !sculpting`, so the create shelf yields the bottom dock to the sculpt toolbar during a sculpt session.
+- **Removed** — the verb pill row in the Objects panel header (`:3697-3713`).
+- **Removed** — the Merge inline popover in the aside (`:3717-3730`); content moves to the Merge chip popover.
+- **Removed** — the Geometry-slot sculpt sibling-swap (`:3835-3852`); Geometry now renders normally at all times and the `sculpting && selectedMesh` conditional is deleted. Net simplification: no more sibling-swap coupling between the sculpt panel and the Geometry/Modifiers/Cloner cards.
+- **Dim** the top-left snap/Light toggles while `sculpting` (they are inert without gizmo dragging).
 
 ## Data flow
 
@@ -104,7 +119,7 @@ No engine changes. Sculpt strokes still write the live engine override; commit s
   1. Selection bar appears over the viewport with the correct chips per selection type; hides when nothing selected.
   2. Bar doesn't eat the pointer — orbit + click-select still work through empty areas; chips don't start strokes/orbit.
   3. Merge popover opens from its chip and merges.
-  4. Sculpt on an existing mesh → enters directly; bar morphs to the sculpt toolbar; brushes switch one-click; a stroke lands (bar doesn't eat the pointer); Symmetry/Remesh popovers open; Apply commits and reverts the bar to selection mode.
+  4. Sculpt on an existing mesh → enters directly; the bottom add-toolbar is replaced by the sculpt pill; brushes switch one-click; a stroke lands (pill doesn't eat the pointer); Symmetry/Remesh popovers open upward; Apply commits, exits, and the add-toolbar returns to the bottom dock.
   5. Sculpt on a cube → confirm popover → convert + enter; Cancel leaves the cube intact and parametric; "Don't ask again" suppresses it for the session.
   6. "Convert to mesh" overflow freezes without entering sculpt.
   7. Right-column Material stays editable throughout a sculpt session (spec §6 promise held).
