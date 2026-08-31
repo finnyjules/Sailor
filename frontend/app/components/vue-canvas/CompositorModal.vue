@@ -4500,13 +4500,21 @@ async function onModalPaste(e: ClipboardEvent) {
     toast('Could not paste that image')
   }
 }
+// Templates gallery panel (sidebar door) dispatches this on "Place" — route
+// it straight into placeTemplateIntoFrame, same as the in-modal Place button.
+function handlePlaceTemplateEvent(e: Event) {
+  const t = (e as CustomEvent).detail?.template as Template | undefined
+  if (t) placeTemplateIntoFrame(t)
+}
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('paste', onModalPaste, true)   // capture — see onModalPaste
+  window.addEventListener('sailor:placeTemplate', handlePlaceTemplateEvent)
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('paste', onModalPaste, true)
+  window.removeEventListener('sailor:placeTemplate', handlePlaceTemplateEvent)
   pause()
 })
 </script>

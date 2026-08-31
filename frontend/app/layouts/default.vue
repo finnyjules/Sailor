@@ -149,7 +149,7 @@ const sidebarItems = [
   { label: 'More', icon: Ellipsis, submenu: 'more', dividerBefore: true },
   // Hidden for now. Re-add to restore.
   // { label: 'Apps', icon: AppWindow, tabId: 'apps' },
-  // { label: 'Templates', icon: LayoutTemplate },
+  { label: 'Templates', icon: LayoutTemplate, panel: 'templates' },
   // Help
   { label: 'Explain', icon: Sparkles, tool: 'explain', dividerBefore: true },
 ]
@@ -367,6 +367,7 @@ const loraLibraryPanelOpen = ref(false) // tracks whether the LoRA Library panel
 const charactersPanelOpen = ref(false) // tracks whether the Character Library panel is visible
 const blockLibraryPanelOpen = ref(false) // tracks whether the Block Library panel is visible
 const assetsPanelOpen = ref(false) // tracks whether the Assets panel is visible
+const templatesPanelOpen = ref(false) // tracks whether the Templates gallery panel is visible
 
 // Canvas → Actions panel deep-link: anything on the canvas can dispatch
 // `sailor:openActions` with an optional domain to open the panel on that
@@ -381,6 +382,7 @@ function handleOpenActions(e: Event) {
   loraLibraryPanelOpen.value = false
   charactersPanelOpen.value = false
   blockLibraryPanelOpen.value = false
+  templatesPanelOpen.value = false
   generatorsPanelOpen.value = true
 }
 
@@ -396,6 +398,7 @@ function isSidebarItemActive(item: any): boolean {
   if (item?.panel === 'characters') return charactersPanelOpen.value
   if (item?.panel === 'blocks') return blockLibraryPanelOpen.value
   if (item?.panel === 'assets') return assetsPanelOpen.value
+  if (item?.panel === 'templates') return templatesPanelOpen.value
   if (item?.submenu) return openSubmenu.value === item.submenu || (item.submenu === 'more' && (blockLibraryPanelOpen.value || vueNodesSidebarOpen.value))
   return activeSidebarItem.value === item?.label
 }
@@ -413,6 +416,7 @@ function toggleSidebarItem(label: string) {
     loraLibraryPanelOpen.value = false
     charactersPanelOpen.value = false
     blockLibraryPanelOpen.value = false
+    templatesPanelOpen.value = false
     openSubmenu.value = openSubmenu.value === item.submenu ? null : (item.submenu as SubmenuName)
     return
   }
@@ -437,7 +441,7 @@ function runSidebarItem(item: any) {
     }
     // In Vue mode, Select/Hand work natively via Vue Flow
   }
-  else if (item?.panel === 'toolbox' || item?.panel === 'generators' || item?.panel === 'loras' || item?.panel === 'characters' || item?.panel === 'blocks' || item?.panel === 'assets') {
+  else if (item?.panel === 'toolbox' || item?.panel === 'generators' || item?.panel === 'loras' || item?.panel === 'characters' || item?.panel === 'blocks' || item?.panel === 'assets' || item?.panel === 'templates') {
     // Left canvas panels are mutually exclusive — opening one closes the rest.
     const refs = {
       toolbox: toolboxPanelOpen,
@@ -446,6 +450,7 @@ function runSidebarItem(item: any) {
       characters: charactersPanelOpen,
       blocks: blockLibraryPanelOpen,
       assets: assetsPanelOpen,
+      templates: templatesPanelOpen,
     }
     const target = refs[item.panel as keyof typeof refs]
     const wasOpen = target.value
@@ -4378,6 +4383,20 @@ function dismissRunResult() {
         >
           <div v-if="assetsPanelOpen" class="absolute top-0 left-0 bottom-0 w-[350px] z-40">
             <VueCanvasAssetsPanel @close="assetsPanelOpen = false" />
+          </div>
+        </Transition>
+
+        <!-- Templates gallery left panel (mutually exclusive with the others) -->
+        <Transition
+          enter-active-class="transition-transform duration-300 ease-out"
+          enter-from-class="-translate-x-full"
+          enter-to-class="translate-x-0"
+          leave-active-class="transition-transform duration-300 ease-in"
+          leave-from-class="translate-x-0"
+          leave-to-class="-translate-x-full"
+        >
+          <div v-if="templatesPanelOpen" class="absolute top-0 left-0 bottom-0 w-[350px] z-40">
+            <VueCanvasTemplateLibraryPanel @close="templatesPanelOpen = false" />
           </div>
         </Transition>
 
