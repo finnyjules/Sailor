@@ -17,6 +17,10 @@ import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWi
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
 import { useLocalLayerEditor, resizableKind, cornerResizableKind } from '~/composables/useLocalLayerEditor'
+import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
+import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
+import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
+import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
 import {
   allGroupIds, childGroupIds, layersInGroup, groupDisplayName, isDescendantOrSelf,
@@ -83,7 +87,7 @@ import { VARIABLE_FONTS } from '~/data/variable-fonts'
 import type { GoogleFont } from '~/data/google-fonts'
 import { libraryFamily } from '~/data/library-fonts'
 import { defaultExpressiveParams, type ExpressiveParams } from '~~/shared/text-layout/expressive'
-import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid } from 'lucide-vue-next'
+import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid, LayoutTemplate, Snowflake } from 'lucide-vue-next'
 import {
   TOOLBAR_SHAPES, TOOLBAR_AI, TOOLBAR_INSERT,
   DEFAULT_SHAPE_FACE, DEFAULT_AI_FACE, DEFAULT_INSERT_FACE,
@@ -542,7 +546,7 @@ const {
   selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, recordHistory, commit, handleEditorKey, pasteClipboard,
   selectionBox, selectionHandles, startGroupResize,
   groupSelected, ungroupSelected, ungroupGroup, renameGroup, canGroup, canUngroup,
-  localGroups, selectGroupById, writeGroups,
+  localGroups, commitBoth, selectGroupById, writeGroups,
   setGroupHidden, setGroupLocked, setGroupOpacity, groupCascade,
   editingLayerNameId, layerNameDraft, startLayerRename, commitLayerRename,
   snapGuides, marquee, startMarquee, moveMarquee, endMarquee,
@@ -601,6 +605,180 @@ const {
 })
 // The agent's progress / proposed changes take over the right inspector while active.
 const caPanelActive = computed(() => caBusy.value || caReviewing.value || caHasProposal.value)
+
+// ── Frame templates: save / place / fill slots / freeze ─────────────────────
+// A template is a frozen snapshot of this frame's layers+groups with a subset
+// of layers marked as "slots" (text/color/image) — see lib/frametemplate/.
+// Placed COPIES persist as `TemplateInstance`s in
+// `node.data.properties.sailor_frametemplates` (an array), which round-trips
+// automatically because `convertToLiteGraph` passes `properties` through
+// wholesale. Id minting for placement lives HERE, not in the pure module —
+// the pure functions only ever take id factories.
+const templateLib = useTemplateLibrary()
+function templateFrameSize(): { w: number; h: number } { return { w: canvasDisplay.w, h: canvasDisplay.h } }
+const frameTemplateInstances = computed<TemplateInstance[]>(() =>
+  ((compositor.value?.data?.properties)?.sailor_frametemplates as TemplateInstance[]) ?? [])
+function commitTemplateInstances(next: TemplateInstance[]) {
+  const n = compositor.value; if (!n) return
+  if (!n.data.properties) n.data.properties = {}
+  n.data.properties.sailor_frametemplates = next
+}
+let _tplIdSeq = 0
+const mkTemplateId = (prefix: string) => () => `${prefix}-${Date.now().toString(36)}-${++_tplIdSeq}`
+
+/** Snapshot the current frame into a Template, applying any marked slots.
+ *  Pass `existingId` to re-save into an existing template (bumps its version
+ *  instead of minting a fresh one) — used by the future update flow. */
+async function saveAsTemplate(
+  name: string,
+  slotPicks: { layerId: string; kind: SlotKind; label: string }[],
+  existingId?: string,
+): Promise<Template> {
+  const id = existingId ?? `tpl-${Date.now().toString(36)}`
+  let t = snapshotFrameAsTemplate({
+    id, name, layers: localLayers.value, groups: localGroups.value,
+    frameSize: templateFrameSize(),
+    mkKey: (i) => `k${i}`,
+  })
+  // Map the user's tapped layer ids → template layer keys (same order as the snapshot).
+  const keyByLayerId = new Map(localLayers.value.map((l, i) => [l.id, `k${i}`]))
+  let slotSeq = 0
+  for (const pick of slotPicks) {
+    const key = keyByLayerId.get(pick.layerId); if (!key) continue
+    t = addSlot(t, key, pick.kind, pick.label, () => `slot-${slotSeq++}`)
+  }
+  // Re-saving an EXISTING template bumps its version (snapshotFrameAsTemplate
+  // always returns version 1) — required so a later update flow can tell a
+  // placed copy its template moved on.
+  const existing = templateLib.get(id)
+  if (existing) t = { ...t, version: (existing.version as number) + 1 }
+  await templateLib.save(t as any)
+  return t
+}
+
+/** Seed each slot's initial value from the template layer's current content. */
+function defaultSlotValues(t: Template): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const s of t.slots) {
+    const tl = t.layers.find(l => l.key === s.layerKey)?.layer as any
+    out[s.id] = s.kind === 'text' ? (tl?.text ?? '') : s.kind === 'image' ? (tl?.filename ?? '') : (tl?.color ?? tl?.fill ?? '#000000')
+  }
+  return out
+}
+
+function placeTemplateIntoFrame(t: Template) {
+  const r = placeTemplate({ layers: localLayers.value, groups: localGroups.value }, t, defaultSlotValues(t), {
+    mkLayerId: mkTemplateId('ll'), mkGroupId: mkTemplateId('g'), mkInstanceId: mkTemplateId('inst'),
+  })
+  recordHistory()
+  commitBoth(r.layers, r.groups)
+  commitTemplateInstances([...frameTemplateInstances.value, r.instance])
+}
+
+function fillTemplateSlot(inst: TemplateInstance, t: Template, slotId: string, value: string) {
+  const r = setInstanceSlot(localLayers.value, t, inst, slotId, value)
+  recordHistory(); commit(r.layers)
+  commitTemplateInstances(frameTemplateInstances.value.map(i => (i.instanceId === inst.instanceId ? r.instance : i)))
+}
+
+function freezeTemplateInstance(inst: TemplateInstance) {
+  commitTemplateInstances(freezeInstance(frameTemplateInstances.value, inst.instanceId))
+  toast('Template copy frozen', { description: 'It stays on the frame as regular layers, no longer linked to the template.' })
+}
+
+/** Which placed instance (if any) the current selection touches — any overlap
+ *  between the selected layer ids and the instance's placed layer ids counts,
+ *  so both a lone slot layer and the whole copy (selected as a group) resolve
+ *  to it. */
+const activeTemplateInstance = computed<TemplateInstance | null>(() => {
+  if (!selectedIds.value.size) return null
+  return frameTemplateInstances.value.find(inst =>
+    Object.values(inst.placedKeys).some(id => selectedIds.value.has(id))) ?? null
+})
+const activeTemplateInstanceTemplate = computed<Template | null>(() => {
+  const inst = activeTemplateInstance.value
+  if (!inst) return null
+  return (templateLib.get(inst.templateId) as unknown as Template) ?? null
+})
+
+// ── "Save as template" sheet: name it, tap layers in the left panel to mark
+// them as slots (kind defaults from the layer kind: text→text, image→image,
+// any shape→color; both are editable per pick). ───────────────────────────
+const templatesOpen = ref(false)
+const savingTemplate = ref(false)
+const saveTemplateName = ref('')
+interface SlotPick { layerId: string; kind: SlotKind; label: string }
+const slotPicks = ref<SlotPick[]>([])
+function defaultSlotKindFor(kind: string): SlotKind {
+  return kind === 'text' ? 'text' : kind === 'image' ? 'image' : 'color'
+}
+function defaultSlotLabelFor(l: any): string {
+  if (!l) return 'Layer'
+  if (l.kind === 'text') return (String(l.text ?? '').split('\n')[0] || 'Text').slice(0, 24)
+  return l.kind.charAt(0).toUpperCase() + l.kind.slice(1)
+}
+function openTemplatesPanel() { templatesOpen.value = true }
+function toggleTemplatesPanel() {
+  if (templatesOpen.value) { templatesOpen.value = false; cancelSaveTemplate() }
+  else openTemplatesPanel()
+}
+function beginSaveTemplate() {
+  templatesOpen.value = true
+  savingTemplate.value = true
+  saveTemplateName.value = ''
+  slotPicks.value = []
+}
+function cancelSaveTemplate() {
+  savingTemplate.value = false
+  saveTemplateName.value = ''
+  slotPicks.value = []
+}
+/** Toggle a layer's slot pick — the left layer panel calls this while the
+ *  save sheet is open (see `onRowClick`). */
+function toggleSlotPick(layerId: string) {
+  const i = slotPicks.value.findIndex(p => p.layerId === layerId)
+  if (i >= 0) { slotPicks.value.splice(i, 1); return }
+  const l = localLayers.value.find(x => x.id === layerId)
+  slotPicks.value.push({ layerId, kind: defaultSlotKindFor(l?.kind ?? ''), label: defaultSlotLabelFor(l) })
+}
+function isSlotPicked(layerId: string) { return slotPicks.value.some(p => p.layerId === layerId) }
+async function confirmSaveTemplate() {
+  const name = saveTemplateName.value.trim()
+  if (!name) { toast('Name the template first'); return }
+  const t = await saveAsTemplate(name, slotPicks.value)
+  toast(`Saved template "${t.name}"`)
+  cancelSaveTemplate()
+}
+
+// ── Slot-fill panel: per-slot value editors for a selected placed copy ──────
+const templateImageInputRef = ref<HTMLInputElement | null>(null)
+const pendingImageSlotId = ref<string | null>(null)
+function pickSlotImage(slotId: string) {
+  pendingImageSlotId.value = slotId
+  templateImageInputRef.value?.click()
+}
+async function onTemplateSlotImageFile(e: Event) {
+  const file = (e.target as HTMLInputElement)?.files?.[0]
+  const slotId = pendingImageSlotId.value
+  pendingImageSlotId.value = null
+  if (e.target) (e.target as HTMLInputElement).value = ''
+  const inst = activeTemplateInstance.value; const t = activeTemplateInstanceTemplate.value
+  if (!file || !slotId || !inst || !t) return
+  try {
+    const ts = Date.now()
+    const safe = `tpl_${ts}_${(file.name || 'image.png').replace(/[^\w.-]+/g, '_')}`
+    const fd = new FormData()
+    fd.append('image', new File([file], safe, { type: file.type }))
+    fd.append('overwrite', 'true')
+    const res = await fetch('/upload/image', { method: 'POST', body: fd })
+    if (!res.ok) throw new Error(`upload ${res.status}`)
+    const uploadedName = (await res.json())?.name || safe
+    fillTemplateSlot(inst, t, slotId, uploadedName)
+  } catch (err) {
+    console.error('[Compositor] template slot image upload failed:', err)
+    toast('Image upload failed')
+  }
+}
 
 // ── Prompt bar: collapsed pill until it's wanted ────────────────────────────
 // The AgentBar stays MOUNTED at all times — collapsing is width/opacity only —
@@ -1165,9 +1343,15 @@ function rowSelected(row: any) {
   // A `wired` ROW is now only ever a legacy, unmigrated slot (a schema-2 slot is
   // a layer and renders as a `local` row). Those have no selection state left.
   if (row.kind === 'wired') return false
+  // While the Save-as-template sheet is open, the panel shows slot picks
+  // instead of the normal selection (see `onRowClick`).
+  if (savingTemplate.value) return isSlotPicked(row.layerId)
   return selectedIds.value.has(row.layerId)
 }
 function onRowClick(row: any) {
+  // Save-as-template sheet open: tapping a real layer marks/unmarks it as a
+  // slot instead of selecting it (kind/label are edited in the sheet).
+  if (savingTemplate.value && (row.kind === 'local' || row.kind === 'child')) { toggleSlotPick(row.layerId); return }
   if (row.kind === 'group') selectGroup(row.groupId)
   else if (row.kind === 'wired') { /* legacy unmigrated slot — nothing to select */ }
   else selectLocal(row.layerId)
@@ -5215,9 +5399,20 @@ onUnmounted(() => {
         >
           <Palette class="size-4" />
         </button>
+        <div class="w-px h-5 bg-white/10 mx-0.5" />
+        <button
+          class="flex items-center justify-center size-8 rounded cursor-pointer"
+          :class="templatesOpen ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
+          data-testid="templates-toggle"
+          title="Templates — save this frame as a reusable template, or place one"
+          @click="toggleTemplatesPanel"
+        >
+          <LayoutTemplate class="size-4" />
+        </button>
         <input ref="imageInputRef" type="file" accept="image/*" class="hidden" @change="onAddImageFile" />
         <input ref="brushFillInputRef" type="file" accept="image/*" class="hidden" @change="onBrushFillImageFile" />
         <input ref="svgInputRef" type="file" accept=".svg,image/svg+xml" class="hidden" @change="onImportSvgFile" />
+        <input ref="templateImageInputRef" type="file" accept="image/*" class="hidden" @change="onTemplateSlotImageFile" />
       </div>
       </div>
 
@@ -5297,6 +5492,77 @@ onUnmounted(() => {
             :active-kit-id="projectBrand?.activeKitId.value ?? null"
             @set-active="(id) => projectBrand?.setBrandKit(id)"
           />
+        </div>
+      </template>
+
+      <!-- Frame templates: save this frame as a reusable template (tap layers in
+           the left panel to mark slots), or place one from the library. -->
+      <template v-else-if="templatesOpen">
+        <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+          <LayoutTemplate class="size-3.5 text-white/70" />
+          <span class="text-sm font-medium">Templates</span>
+          <button class="ml-auto text-white/40 hover:text-white/80 p-1" title="Close"
+            @click="templatesOpen = false; cancelSaveTemplate()"><X class="size-3.5" /></button>
+        </div>
+        <div class="p-4 flex-1 min-h-0 overflow-y-auto">
+          <template v-if="savingTemplate">
+            <div class="mb-3">
+              <div class="panel-label mb-1.5">Name</div>
+              <input v-model="saveTemplateName" type="text" placeholder="e.g. Product card"
+                data-testid="template-name-input"
+                class="w-full h-8 px-2 rounded bg-white/[0.06] text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+                @keydown.enter="confirmSaveTemplate" />
+            </div>
+            <p class="text-[10px] text-white/40 leading-snug mb-3">
+              Click layers in the left panel to mark them as slots — the parts a placed copy can customize.
+            </p>
+            <div v-if="slotPicks.length" class="space-y-2 mb-3" data-testid="template-slot-picks">
+              <div v-for="pick in slotPicks" :key="pick.layerId"
+                class="rounded border border-white/[0.06] bg-white/[0.03] p-2 space-y-1.5">
+                <div class="flex items-center gap-1.5">
+                  <input v-model="pick.label" type="text" placeholder="Slot label"
+                    class="flex-1 min-w-0 h-7 px-1.5 rounded bg-white/[0.06] text-[11px] outline-none" />
+                  <select v-model="pick.kind" class="h-7 px-1 rounded bg-white/[0.06] text-[11px] outline-none">
+                    <option value="text">Text</option>
+                    <option value="color">Color</option>
+                    <option value="image">Image</option>
+                  </select>
+                  <button class="text-white/35 hover:text-red-400 p-1 shrink-0" title="Remove slot"
+                    @click="toggleSlotPick(pick.layerId)"><X class="size-3.5" /></button>
+                </div>
+              </div>
+            </div>
+            <p v-else class="text-[10.5px] text-white/30 italic mb-3">No slots marked yet — the template will still place, just with nothing to customize.</p>
+            <div class="flex items-center gap-2">
+              <button class="flex-1 h-8 rounded text-[11px] bg-white/[0.05] hover:bg-white/10 text-white/75 cursor-pointer"
+                @click="cancelSaveTemplate">Cancel</button>
+              <button class="flex-1 h-8 rounded text-[11px] bg-white text-neutral-900 font-medium cursor-pointer disabled:opacity-40"
+                data-testid="template-save-confirm"
+                :disabled="!saveTemplateName.trim()"
+                @click="confirmSaveTemplate">Save template</button>
+            </div>
+          </template>
+          <template v-else>
+            <button
+              class="w-full flex items-center justify-center gap-1.5 h-8 rounded text-[12px] bg-white/[0.06] hover:bg-white/12 text-white/85 cursor-pointer mb-4"
+              data-testid="template-save-start"
+              @click="beginSaveTemplate">
+              <LayoutTemplate class="size-3.5" /> Save this frame as a template
+            </button>
+            <div class="panel-label mb-2">Library</div>
+            <p v-if="!templateLib.templates.value.length" class="text-[10.5px] text-white/30 italic">No saved templates yet.</p>
+            <div v-else class="space-y-1.5" data-testid="template-library-list">
+              <div v-for="t in templateLib.templates.value" :key="t.id"
+                class="flex items-center gap-2 rounded px-2 py-1.5 bg-white/[0.03] hover:bg-white/[0.06]">
+                <LayoutTemplate class="size-3.5 text-white/40 shrink-0" />
+                <span class="flex-1 min-w-0 truncate text-[12px]" :title="t.name">{{ t.name }}</span>
+                <span class="text-[10px] text-white/35 tabular-nums shrink-0">v{{ t.version }}</span>
+                <button class="h-6 px-2 rounded text-[11px] bg-white/[0.06] hover:bg-white/12 text-white/80 cursor-pointer shrink-0"
+                  data-testid="template-place"
+                  @click="placeTemplateIntoFrame(t as unknown as Template)">Place</button>
+              </div>
+            </div>
+          </template>
         </div>
       </template>
 
@@ -5559,6 +5825,46 @@ onUnmounted(() => {
           <button class="w-full h-7 rounded text-[11px] cursor-pointer"
             :class="brush.eraser.value ? 'bg-white text-neutral-900' : 'bg-white/[0.05] text-white/70 hover:bg-white/10'"
             @click="brush.eraser.value = !brush.eraser.value">{{ brush.eraser.value ? 'Eraser on' : 'Eraser' }}</button>
+        </div>
+      </template>
+
+      <!-- Placed template copy: slot-fill panel + Freeze. Takes over whenever the
+           selection touches a placed instance's layers (a single slot layer or
+           the whole copy selected as a group both resolve here). -->
+      <template v-else-if="activeTemplateInstance && activeTemplateInstanceTemplate">
+        <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+          <LayoutTemplate class="size-3.5 text-white/70" />
+          <span class="text-sm font-medium truncate" :title="activeTemplateInstanceTemplate!.name">{{ activeTemplateInstanceTemplate!.name }}</span>
+          <span class="text-[10px] text-white/35 tabular-nums shrink-0">v{{ activeTemplateInstance!.templateVersion }}</span>
+        </div>
+        <div class="p-4 flex-1 min-h-0 overflow-y-auto space-y-3" data-testid="template-instance-slots">
+          <p v-if="!activeTemplateInstanceTemplate!.slots.length" class="text-[10.5px] text-white/30 italic">This template has no slots to fill.</p>
+          <div v-for="slot in activeTemplateInstanceTemplate!.slots" :key="slot.id">
+            <div class="panel-label mb-1.5">{{ slot.label }}</div>
+            <input v-if="slot.kind === 'text'" type="text"
+              :value="activeTemplateInstance!.slotValues[slot.id] ?? ''"
+              data-testid="template-slot-text"
+              class="w-full h-8 px-2 rounded bg-white/[0.06] text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-white/20"
+              @change="fillTemplateSlot(activeTemplateInstance!, activeTemplateInstanceTemplate!, slot.id, ($event.target as HTMLInputElement).value)" />
+            <StudioColor v-else-if="slot.kind === 'color'"
+              :model-value="activeTemplateInstance!.slotValues[slot.id] ?? '#000000'"
+              @update:model-value="(v: string) => fillTemplateSlot(activeTemplateInstance!, activeTemplateInstanceTemplate!, slot.id, v)" />
+            <div v-else class="flex items-center gap-2">
+              <span class="flex-1 min-w-0 truncate text-[11px] text-white/50" :title="activeTemplateInstance!.slotValues[slot.id]">{{ activeTemplateInstance!.slotValues[slot.id] || 'No image' }}</span>
+              <button class="h-7 px-2 rounded text-[11px] bg-white/[0.06] hover:bg-white/12 text-white/80 cursor-pointer shrink-0"
+                data-testid="template-slot-image-pick"
+                @click="pickSlotImage(slot.id)">Change…</button>
+            </div>
+          </div>
+          <div class="border-t border-white/[0.06] pt-3">
+            <button
+              class="w-full flex items-center justify-center gap-1.5 h-8 rounded text-[12px] bg-white/[0.06] hover:bg-white/12 text-white/85 cursor-pointer"
+              data-testid="template-freeze"
+              title="Detach this copy from the template — it stays on the frame as regular layers, no longer linked."
+              @click="freezeTemplateInstance(activeTemplateInstance!)">
+              <Snowflake class="size-3.5" /> Freeze
+            </button>
+          </div>
         </div>
       </template>
 
