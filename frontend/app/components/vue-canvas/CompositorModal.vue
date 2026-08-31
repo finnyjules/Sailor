@@ -18,7 +18,7 @@ import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
 import { useLocalLayerEditor, resizableKind, cornerResizableKind } from '~/composables/useLocalLayerEditor'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
-import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
+import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
@@ -39,6 +39,7 @@ import { useVectorPen, buildPathLayerFromAnchors } from '~/composables/useVector
 import { useBrushPaint } from '~/composables/useBrushPaint'
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
+import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
 import { generateVectorFromText, vectorizeImage, urlToDataUrl } from '~/composables/useVectorAi'
 import { imageLayerUrl } from '~/composables/useCompositorLayers'
@@ -686,6 +687,44 @@ function freezeTemplateInstance(inst: TemplateInstance) {
   commitTemplateInstances(freezeInstance(frameTemplateInstances.value, inst.instanceId))
   toast('Template copy frozen', { description: 'It stays on the frame as regular layers, no longer linked to the template.' })
 }
+
+// ── Per-project "template changed" prompt ────────────────────────────────
+// Placed copies pin the template version they were placed/updated from
+// (`instance.templateVersion`). When the library's copy is newer AND the
+// copy's slots still line up (staleInstances excludes reshaped copies —
+// those aren't offered, matching Task 5's guard), surface a small
+// non-blocking banner instead of forcing the update.
+const pendingTemplateUpdates = ref<{ instance: TemplateInstance; template: Template }[]>([])
+function checkForTemplateUpdates() {
+  pendingTemplateUpdates.value = staleInstances(
+    frameTemplateInstances.value,
+    (id) => templateLib.get(id) as unknown as Template | undefined,
+  )
+}
+function dismissTemplateUpdates() { pendingTemplateUpdates.value = [] }
+function applyTemplateUpdate(u: { instance: TemplateInstance; template: Template }) {
+  const r = updateInstance({ layers: localLayers.value, groups: localGroups.value }, u.template, u.instance, {
+    mkLayerId: mkTemplateId('ll'), mkGroupId: mkTemplateId('g'),
+  })
+  recordHistory()
+  commitBoth(r.layers, r.groups)
+  commitTemplateInstances(frameTemplateInstances.value.map(i => (i.instanceId === u.instance.instanceId ? r.instance : i)))
+}
+function applyAllTemplateUpdates() {
+  const updates = pendingTemplateUpdates.value
+  pendingTemplateUpdates.value = []
+  for (const u of updates) applyTemplateUpdate(u)
+  toast(updates.length === 1 ? 'Updated 1 copy' : `Updated ${updates.length} copies`, {
+    description: 'Slot values kept; the rest re-synced from the template.',
+  })
+}
+// Detect stale copies as soon as the Frame binds (library may already be
+// warm from a prior modal), then again once the library has pulled server
+// truth — a template edited from another project/tab must be caught too.
+onMounted(() => {
+  checkForTemplateUpdates()
+  templateLib.refresh().then(checkForTemplateUpdates).catch(() => { /* offline — keep the pre-refresh check */ })
+})
 
 /** Which placed instance (if any) the current selection touches — any overlap
  *  between the selected layer ids and the instance's placed layer ids counts,
@@ -5449,6 +5488,23 @@ onUnmounted(() => {
       <button type="button" aria-label="Close" title="Close (Esc)"
         class="text-white/55 transition-colors hover:text-white text-base leading-none px-1 cursor-pointer"
         @click="emit('close')">✕</button>
+    </div>
+
+    <!-- Per-project "template changed" banner: non-blocking, top-center between the
+         title and close chips. Only ever lists copies staleInstances() considers
+         SAFE (behind AND still slot-compatible) — a reshaped copy silently keeps
+         its current version until someone re-picks its slots by hand. -->
+    <div
+      v-if="pendingTemplateUpdates.length"
+      data-testid="template-update-banner"
+      class="glass-panel absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 rounded-lg border border-white/10 bg-[#0e0e10]/75 backdrop-blur-md shadow-lg pl-2.5 pr-2 py-1.5"
+    >
+      <LayoutTemplate class="size-3.5 text-white/60 shrink-0" />
+      <span class="text-[12px] text-white/80 whitespace-nowrap">
+        {{ pendingTemplateUpdates.length === 1 ? '1 copy uses a template that changed' : `${pendingTemplateUpdates.length} copies use templates that changed` }} — review updates?
+      </span>
+      <StudioButton variant="primary" @click="applyAllTemplateUpdates">Update all</StudioButton>
+      <StudioButton variant="subtle" @click="dismissTemplateUpdates">Dismiss</StudioButton>
     </div>
 
     <!-- Right sidebar: floating glass properties panel -->
