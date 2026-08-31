@@ -72,3 +72,45 @@ export function setInstanceSlot(
 export function freezeInstance(instances: TemplateInstance[], instanceId: string): TemplateInstance[] {
   return instances.filter(i => i.instanceId !== instanceId)
 }
+
+export function slotCompatible(t: Template, instance: TemplateInstance): boolean {
+  const tplSlotIds = t.slots.map(s => s.id).sort()
+  const instSlotIds = Object.keys(instance.slotValues).sort()
+  if (tplSlotIds.length !== instSlotIds.length) return false
+  return tplSlotIds.every((id, i) => id === instSlotIds[i])
+}
+
+export function staleInstances(
+  instances: TemplateInstance[], byId: (id: string) => Template | undefined,
+): { instance: TemplateInstance; template: Template }[] {
+  const out: { instance: TemplateInstance; template: Template }[] = []
+  for (const instance of instances) {
+    const template = byId(instance.templateId)
+    if (!template) continue
+    if (instance.templateVersion < template.version && slotCompatible(template, instance)) out.push({ instance, template })
+  }
+  return out
+}
+
+export function updateInstance(
+  current: { layers: LocalLayer[]; groups: LayerGroup[] },
+  t: Template,
+  instance: TemplateInstance,
+  ctx: { mkLayerId: () => string; mkGroupId: () => string },
+): { layers: LocalLayer[]; groups: LayerGroup[]; instance: TemplateInstance } {
+  // Remove this copy's placed layers, then re-materialize from the new template,
+  // preserving slot values and reusing placed ids where the key still exists.
+  const placedIds = new Set(Object.values(instance.placedKeys))
+  const kept = current.layers.filter(l => !placedIds.has(l.id))
+  const re = placeTemplate({ layers: kept, groups: current.groups }, t, instance.slotValues, {
+    mkLayerId: ctx.mkLayerId, mkGroupId: ctx.mkGroupId, mkInstanceId: () => instance.instanceId,
+  })
+  // Reuse prior placed ids for keys that survived, so animation/mask refs stay put.
+  for (const [key, oldId] of Object.entries(instance.placedKeys)) {
+    const newId = re.instance.placedKeys[key]
+    if (!newId) continue
+    const layer = re.layers.find(l => l.id === newId); if (layer) (layer as any).id = oldId
+    re.instance.placedKeys[key] = oldId
+  }
+  return { layers: re.layers, groups: re.groups, instance: re.instance }
+}
