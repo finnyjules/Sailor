@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { describeCompositor, applyCompositorCommand, summarizeCompositorChange, verifyCompositor, type CompositorState } from '~/lib/agent/surfaces/compositor'
+import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
 
 function state(): CompositorState {
   return {
@@ -231,5 +232,98 @@ describe('post-processing effect commands', () => {
     expect(r.ok).toBe(true); if (!r.ok) return
     const d = (r.template as any).postEffects.find((e: any) => e.type === 'duotone')
     expect(d.shadows).toBe('#1a1a40') // invalid 5-char hex → default kept
+  })
+})
+
+// Frame Template agent ops (Task 10): "use my <name> template" / "set the
+// headline to …" / "swap the photo" / "freeze this" route through the pure
+// recipe (lib/frametemplate/apply.ts) — never raw layer edits — and undo
+// through the same `restore` inverse pattern as every other command.
+describe('frame template commands', () => {
+  const template: Template = {
+    id: 'tpl-1',
+    name: 'Poster',
+    version: 1,
+    layers: [
+      { key: 'k0', layer: { id: 'o1', kind: 'text', x: 0.5, y: 0.2, rotation: 0, opacity: 1, text: 'Headline', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.1, color: '#fff', align: 'center', lineHeight: 1.1, strokeColor: '', strokeWidth: 0 } as LocalLayer },
+      { key: 'k1', layer: { id: 'o2', kind: 'image', x: 0.5, y: 0.6, rotation: 0, opacity: 1, filename: 'photo.png', w: 0.5, h: 0.5 } as LocalLayer },
+    ],
+    groups: [],
+    slots: [
+      { id: 'slot-headline', layerKey: 'k0', kind: 'text', label: 'Headline' },
+      { id: 'slot-photo', layerKey: 'k1', kind: 'image', label: 'Photo' },
+    ],
+    frameSize: { w: 1080, h: 1080 },
+  }
+
+  it('placeTemplate materializes the template\'s layers and records a TemplateInstance', () => {
+    const before = state()
+    const r = applyCompositorCommand(before, {
+      op: 'placeTemplate',
+      args: { template, slotValues: { 'slot-headline': 'Launch Day', 'slot-photo': 'hero.png' } },
+    })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect(r.template.layers.length).toBe(before.layers.length + 2)
+    const placedText = r.template.layers.find(l => l.kind === 'text' && (l as any).text === 'Launch Day')
+    expect(placedText).toBeTruthy()
+    const placedImage = r.template.layers.find(l => l.kind === 'image' && (l as any).filename === 'hero.png')
+    expect(placedImage).toBeTruthy()
+    const instances = (r.template as any).templates as TemplateInstance[] | undefined
+    expect(instances?.length).toBe(1)
+    expect(instances![0]!.templateId).toBe('tpl-1')
+    // Undo removes the placed layers AND the recorded instance.
+    const undo = applyCompositorCommand(r.template, r.inverse)
+    expect(undo.ok).toBe(true); if (!undo.ok) return
+    expect(undo.template.layers).toEqual(before.layers)
+    expect(((undo.template as any).templates ?? []).length).toBe(0)
+  })
+
+  it('placeTemplate rejects a missing/invalid template', () => {
+    expect(applyCompositorCommand(state(), { op: 'placeTemplate', args: {} }).ok).toBe(false)
+    expect(applyCompositorCommand(state(), { op: 'placeTemplate', args: { template: { id: 'x' } } }).ok).toBe(false)
+  })
+
+  it('setTemplateSlot updates a placed copy\'s slot ("set the headline to …", "swap the photo") and is invertible', () => {
+    const placed = applyCompositorCommand(state(), {
+      op: 'placeTemplate', args: { template, slotValues: { 'slot-headline': 'Launch Day', 'slot-photo': 'hero.png' } },
+    })
+    expect(placed.ok).toBe(true); if (!placed.ok) return
+    const instanceId = ((placed.template as any).templates[0] as TemplateInstance).instanceId
+    const r = applyCompositorCommand(placed.template, {
+      op: 'setTemplateSlot', target: instanceId, args: { template, slotId: 'slot-headline', value: 'New Copy' },
+    })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect(r.template.layers.some(l => l.kind === 'text' && (l as any).text === 'New Copy')).toBe(true)
+    const instances = (r.template as any).templates as TemplateInstance[]
+    expect(instances[0]!.slotValues['slot-headline']).toBe('New Copy')
+    const undo = applyCompositorCommand(r.template, r.inverse)
+    expect(undo.ok).toBe(true); if (!undo.ok) return
+    expect(undo.template.layers).toEqual(placed.template.layers)
+    expect(undo.template).toEqual(placed.template)
+  })
+
+  it('setTemplateSlot rejects an unknown instance or slot', () => {
+    expect(applyCompositorCommand(state(), { op: 'setTemplateSlot', target: 'nope', args: { template, slotId: 'slot-headline', value: 'x' } }).ok).toBe(false)
+    const placed = applyCompositorCommand(state(), { op: 'placeTemplate', args: { template, slotValues: {} } })
+    expect(placed.ok).toBe(true); if (!placed.ok) return
+    const instanceId = ((placed.template as any).templates[0] as TemplateInstance).instanceId
+    expect(applyCompositorCommand(placed.template, { op: 'setTemplateSlot', target: instanceId, args: { template, slotId: 'no-such-slot', value: 'x' } }).ok).toBe(false)
+  })
+
+  it('freezeTemplate ("freeze this") detaches the copy — layers stay, the instance link is dropped — and is invertible', () => {
+    const placed = applyCompositorCommand(state(), { op: 'placeTemplate', args: { template, slotValues: {} } })
+    expect(placed.ok).toBe(true); if (!placed.ok) return
+    const instanceId = ((placed.template as any).templates[0] as TemplateInstance).instanceId
+    const r = applyCompositorCommand(placed.template, { op: 'freezeTemplate', target: instanceId })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect(((r.template as any).templates ?? []).length).toBe(0)
+    expect(r.template.layers).toEqual(placed.template.layers) // layers themselves are untouched
+    const undo = applyCompositorCommand(r.template, r.inverse)
+    expect(undo.ok).toBe(true); if (!undo.ok) return
+    expect(((undo.template as any).templates ?? []).length).toBe(1)
+  })
+
+  it('freezeTemplate rejects an unknown instance', () => {
+    expect(applyCompositorCommand(state(), { op: 'freezeTemplate', target: 'nope' }).ok).toBe(false)
   })
 })

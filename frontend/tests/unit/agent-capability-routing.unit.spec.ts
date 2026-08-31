@@ -138,6 +138,12 @@ const PARAPHRASES: { phrase: string; expect: string }[] = [
   { phrase: 'overlay a caption on the photo', expect: 'Compositor' },
   { phrase: 'put this image in a frame on a solid blue background', expect: 'Compositor' },
   { phrase: 'give the frame a coloured backdrop behind the layers', expect: 'Compositor' },
+  // Frame Templates agent ops (Task 10) — "use my <name> template", fill a
+  // slot, detach. Not verbatim intents: paraphrased to test generalization.
+  { phrase: 'drop my saved poster template into this frame', expect: 'Compositor' },
+  { phrase: 'update the headline copy on the placed template', expect: 'Compositor' },
+  { phrase: 'put a different photo in that template slot', expect: 'Compositor' },
+  { phrase: 'unlink this copy from the template', expect: 'Compositor' },
   { phrase: 'animate the word welcome in 3d', expect: 'SpaceType' },
   { phrase: 'change her shirt to red', expect: 'EditImageNode' },
   { phrase: 'restyle this in the look of that reference', expect: 'RestyleFromImageNode' },

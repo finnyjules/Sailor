@@ -345,7 +345,16 @@ const STUDIOS: AgentCapability[] = [
       // suffix keeps these from colliding with ShaderStudio's bare per-image shader
       // vocabulary ('vignette', 'bloom glow', 'duotone') and GradientStudio's.
       'add film grain to the frame', 'add a vignette to the frame', 'colour grade the frame', 'color grade the frame',
-      'add a bloom to the frame', 'duotone the composited frame', 'desaturate the frame', 'warm up the frame\'s colours'] },
+      'add a bloom to the frame', 'duotone the composited frame', 'desaturate the frame', 'warm up the frame\'s colours',
+      // Frame Templates (saved, reusable layer groups with fillable slots) —
+      // place one, fill its slots, or detach a placed copy. "template" is the
+      // anchor token; kept distinct from SwapBackgroundNode's product-scene
+      // swap and TextEditNode's generic copy edits by pairing with it.
+      'use my template', 'use my saved template', 'apply my template', 'place my template', 'place my template on this frame',
+      'drop in my template', 'insert my template', 'use my poster template', 'use my branded template',
+      'set the headline to', 'edit the headline on the template', 'update the headline copy on the template', 'edit the template headline',
+      'swap the photo in the template', 'swap the template photo', 'replace the photo in that template slot', 'put a different photo in the template slot',
+      'freeze this template copy', 'freeze this template', 'detach this from the template', 'unlink this copy from the template', 'stop tracking the template', 'make this template copy a regular layer'] },
   { nodeType: 'SmartLayout', kind: 'studio', frontendOnly: false, title: 'Smart Layout', summary: 'Format-aware Swiss/International-style auto-layout — design once, reflow to many ad aspect ratios; brand-themed.', inputs: [{ name: 'image_layer_1', type: 'IMAGE' }, { name: 'text_layer_1', type: 'STRING' }], outputs: [{ name: 'images', type: 'IMAGE' }],
     intents: ['make a poster layout', 'design a layout', 'auto-layout', 'arrange into a composition', 'create an ad layout', 'social media post layout', 'lay this out nicely', 'arrange text and images', 'make a flyer', 'design a banner', 'multi-format layout', 'resize this design to other formats', 'adapt to story or square', 'swiss design poster', 'grid layout', 'headline and body layout', 'brand-styled layout'] },
   {

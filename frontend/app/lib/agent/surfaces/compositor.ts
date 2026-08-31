@@ -15,6 +15,9 @@ import { SWISS_LIMITS } from '~/lib/agent/designPrinciples'
 import { defaultPostEffect, POST_EFFECT_DEFAULTS, POST_FX_PARAM_CLAMP, type PostEffect } from '~/lib/compositor/postEffects'
 import { sanitizeTornEdge, tornEdgeActive } from '~/lib/compositor/tornEdge'
 import { sanitizeFeather, featherActive } from '~/lib/compositor/feather'
+import type { LayerGroup } from '~/lib/compositor/layerGroups'
+import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
+import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
 
 export interface CompositorState {
   layers: LocalLayer[]
@@ -24,6 +27,13 @@ export interface CompositorState {
   /** Active brand kit's named palette — context only (compositor paints are
    *  literal hexes; the model translates "viridian" → its hex). */
   brandPalette?: { name: string; hex: string }[]
+  /** Nested-group registry (id/name/parentId) — only touched by frame-template
+   *  placement, which materializes a template as a group. Absent = no groups. */
+  groups?: LayerGroup[]
+  /** Placed frame-template copies (`node.data.properties.sailor_frametemplates`
+   *  round-trips through here). The agent addresses a copy by `instanceId` —
+   *  it never edits a template's placed layers directly. */
+  templates?: TemplateInstance[]
 }
 
 function clone<T>(v: T): T {
@@ -117,6 +127,9 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setPostEffect', hint: 'Add/update/remove a post-processing effect on the WHOLE FRAME — applied after all layers composite. Same args and effect vocabulary as setLayerEffect (no target), EXCEPT dof, which is per-image-layer only because it needs that image\'s depth map. This is what "make the whole thing warmer", "add film grain", "give it a vignette", "cinematic colour grade" mean.' },
   { op: 'setLayerTornEdge', hint: 'Give a layer a TORN-PAPER edge (ragged, grain-dissolved boundary with an optional white "lip"). target = layer id; args: { patch: {...}, remove? }. patch keys: style ("ripped"=organic meandering tear | "deckle"=soft handmade-paper edge | "shredded"=aggressive spiky rip), amount (tear depth in px, ~10 subtle … 60 deep), roughness (0..1 fray detail), grain (px, edge crumble/dissolve; 0 = crisp), grainTexture (0..1 paper-fibre texture on the lip only), lipWidth (px white underside band; 0 = no lip), lipVariation (0..1 how uneven the lip width is), lipColor ("#RRGGBB", warm white default), seed (integer; change it for a different random tear). Omitted keys keep their current value. remove:true removes the torn edge. This is what "torn paper edge", "ripped edges", "rough deckle border" mean.' },
   { op: 'setLayerFeather', hint: 'Feather (soften) a layer\'s edges so they fade smoothly to transparent — a soft edge-mask, uniform on all sides. target = layer id; args: { patch: {...}, remove? }. patch keys: amount (0..1, feather depth relative to the element\'s OWN size; ~0.1 subtle … 0.4 strong … 1 fades the edge in to the element\'s center), curve ("linear" = even fade | "smooth" = eased fade). Omitted keys keep their current value. remove:true removes the feather. This is what "feather the edges", "soften the edges", "fade the edges" mean.' },
+  { op: 'placeTemplate', hint: 'Place a saved FRAME TEMPLATE into this frame as a linked copy — "use my <name> template", "drop in my poster template". NEVER build the template\'s look from raw layers yourself; this op is the only way to place one. args: { template (the full Template object for the named template), slotValues? (Record<slotId, value> — text/color hex/image filename; omitted slots keep the template\'s own defaults) }. Materializes the template\'s layers as a group and records a linked copy the user can later edit via setTemplateSlot or detach via freezeTemplate.' },
+  { op: 'setTemplateSlot', hint: 'Fill one SLOT on an already-placed template copy — "set the headline to …", "swap the photo", "make the accent color orange". target = the copy\'s instance id (from a placeTemplate result / the document\'s templates list). args: { template (that copy\'s Template object), slotId, value (text string, "#RRGGBB" for a color slot, or a filename for an image slot) }. Edits ONLY the slot value through the template recipe — never patches the placed layer directly.' },
+  { op: 'freezeTemplate', hint: 'Detach a placed template copy from its template — "freeze this", "unlink this from the template". target = the copy\'s instance id. The copy\'s layers stay on the frame exactly as they are, as ordinary editable layers; it just stops tracking the template (no more slot edits or template-version updates).' },
 ]
 
 function findLayer(s: CompositorState, id?: string): LocalLayer | undefined {
@@ -150,6 +163,17 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
     if (l.visible === false) cur.hidden = true
     return { id: l.id, label: l.kind === 'text' ? `“${l.text}”` : l.kind, type: l.kind, current: cur }
   })
+  // Placed frame-template copies, addressable by instanceId for setTemplateSlot/
+  // freezeTemplate — kept separate from the layer objects above since the agent
+  // must never edit a copy's placed layers directly, only through its slots.
+  for (const inst of state.templates ?? []) {
+    objects.push({
+      id: inst.instanceId,
+      label: `template copy (${inst.templateId})`,
+      type: 'template-instance',
+      current: { templateId: inst.templateId, templateVersion: inst.templateVersion, slotValues: inst.slotValues },
+    })
+  }
   objects.push({
     id: 'document',
     label: 'Frame / document',
@@ -182,7 +206,7 @@ function defaultLayer(kind: LocalLayerKind, id: string): Record<string, unknown>
  *  Pure — the input is never mutated. */
 export function applyCompositorCommand(input: CompositorState, cmd: Command): CommandResult<CompositorState> {
   const state = clone(input)
-  const snapshot = (): Command => ({ op: 'restore', args: { layers: clone(input.layers), background: clone(input.background), postEffects: clone(input.postEffects) } })
+  const snapshot = (): Command => ({ op: 'restore', args: { layers: clone(input.layers), background: clone(input.background), postEffects: clone(input.postEffects), groups: clone(input.groups), templates: clone(input.templates) } })
 
   switch (cmd.op) {
     case 'setLayerProps': {
@@ -348,6 +372,48 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       if ('layers' in (cmd.args ?? {})) next.layers = clone(cmd.args!.layers as LocalLayer[])
       if ('background' in (cmd.args ?? {})) next.background = clone(cmd.args!.background as Paint | undefined)
       if ('postEffects' in (cmd.args ?? {})) next.postEffects = clone(cmd.args!.postEffects as PostEffect[] | undefined)
+      if ('groups' in (cmd.args ?? {})) next.groups = clone(cmd.args!.groups as LayerGroup[] | undefined)
+      if ('templates' in (cmd.args ?? {})) next.templates = clone(cmd.args!.templates as TemplateInstance[] | undefined)
+      return { ok: true, template: next, inverse: snapshot() }
+    }
+    case 'placeTemplate': {
+      const t = cmd.args?.template as Template | undefined
+      if (!t || typeof t !== 'object' || !Array.isArray(t.layers) || !Array.isArray(t.slots)) {
+        return { ok: false, reason: 'invalid', detail: 'missing/invalid args.template (needs the full Template object)' }
+      }
+      const slotValues = (cmd.args?.slotValues && typeof cmd.args.slotValues === 'object') ? cmd.args.slotValues as Record<string, string> : {}
+      // Deterministic id minting (no external counters/state available to a pure
+      // function): seeded from the current layer count, matching addLayer's
+      // existing `l_${state.layers.length + 1}_${kind}` pattern.
+      const base = state.layers.length
+      let li = 0
+      let gi = 0
+      const r = placeTemplate({ layers: state.layers, groups: state.groups ?? [] }, t, slotValues, {
+        mkLayerId: () => `tpl_${base}_${li++}_l`,
+        mkGroupId: () => `tpl_${base}_${gi++}_g`,
+        mkInstanceId: () => (typeof cmd.args?.instanceId === 'string' && cmd.args.instanceId) || `tpl_${base}_${(state.templates ?? []).length}_inst`,
+      })
+      const next: CompositorState = { ...state, layers: r.layers, groups: r.groups, templates: [...(state.templates ?? []), r.instance] }
+      return { ok: true, template: next, inverse: snapshot() }
+    }
+    case 'setTemplateSlot': {
+      const t = cmd.args?.template as Template | undefined
+      if (!t || typeof t !== 'object' || !Array.isArray(t.slots)) return { ok: false, reason: 'invalid', detail: 'missing/invalid args.template (needs the full Template object)' }
+      const slotId = cmd.args?.slotId
+      if (typeof slotId !== 'string' || !slotId) return { ok: false, reason: 'invalid', detail: 'missing args.slotId' }
+      const value = cmd.args?.value
+      if (typeof value !== 'string') return { ok: false, reason: 'invalid', detail: 'missing args.value' }
+      const instance = (state.templates ?? []).find(i => i.instanceId === cmd.target)
+      if (!instance) return { ok: false, reason: 'invalid', detail: `no placed template copy '${String(cmd.target)}'` }
+      if (!t.slots.some(s => s.id === slotId)) return { ok: false, reason: 'invalid', detail: `template '${t.id}' has no slot '${slotId}'` }
+      const r = setInstanceSlot(state.layers, t, instance, slotId, value)
+      const next: CompositorState = { ...state, layers: r.layers, templates: (state.templates ?? []).map(i => (i.instanceId === instance.instanceId ? r.instance : i)) }
+      return { ok: true, template: next, inverse: snapshot() }
+    }
+    case 'freezeTemplate': {
+      const instance = (state.templates ?? []).find(i => i.instanceId === cmd.target)
+      if (!instance) return { ok: false, reason: 'invalid', detail: `no placed template copy '${String(cmd.target)}'` }
+      const next: CompositorState = { ...state, templates: freezeInstance(state.templates ?? [], instance.instanceId) }
       return { ok: true, template: next, inverse: snapshot() }
     }
     default:
@@ -424,6 +490,12 @@ export function summarizeCompositorChange(state: CompositorState, cmd: Command):
       const had = !!state.postEffects?.some(e => e.type === type)
       return { label: `${type} effect (frame)`, before: had ? type : 'none', after: a.remove === true ? 'removed' : 'updated' }
     }
+    case 'placeTemplate': { const t = a.template as { name?: string } | undefined; return { label: 'Place template', before: '', after: t?.name ?? 'template' } }
+    case 'setTemplateSlot': {
+      const inst = state.templates?.find(i => i.instanceId === cmd.target)
+      return { label: `Template slot ${String(a.slotId ?? '')}`, before: inst?.slotValues[String(a.slotId ?? '')] ?? '', after: String(a.value ?? '') }
+    }
+    case 'freezeTemplate': return { label: 'Freeze template copy', before: 'linked', after: 'detached' }
     default: return { label: cmd.op, before: '', after: a ? JSON.stringify(a) : '' }
   }
 }
