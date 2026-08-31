@@ -26,11 +26,23 @@ it('restyle flows to a copy while its slot value survives', () => {
   expect(bg.fill).toBe('#c00')       // restyle reached the copy
   expect(head.text).toBe('Julien')   // slot value preserved
   expect(upd.instance.templateVersion).toBe(2)
+  // the 'head' key's placed layer id was reused, not regenerated, so animation/mask refs survive
+  expect(upd.instance.placedKeys.head).toBe(placed.instance.placedKeys.head)
+  // no stale/duplicate layers left behind
+  expect(upd.layers).toHaveLength(2)
 })
 
 it('a reshape (added slot) is NOT compatible and is skipped by staleInstances', () => {
   const placed = placeTemplate({ layers: [], groups: [] }, v1, { 's-head': 'Julien' }, mk())
   const v2: Template = { ...v1, version: 2, slots: [...v1.slots, { id: 's-new', layerKey: 'bg', kind: 'color', label: 'Accent' }] }
+  expect(slotCompatible(v2, placed.instance)).toBe(false)
+  expect(staleInstances([placed.instance], () => v2)).toEqual([])
+})
+
+it('a retype (same slot id, different kind) is NOT compatible and is skipped by staleInstances', () => {
+  const placed = placeTemplate({ layers: [], groups: [] }, v1, { 's-head': 'Julien' }, mk())
+  // v2 keeps the 's-head' id but changes its kind from text to color — this is a reshape, not a restyle
+  const v2: Template = { ...v1, version: 2, slots: [{ id: 's-head', layerKey: 'head', kind: 'color', label: 'Headline' }] }
   expect(slotCompatible(v2, placed.instance)).toBe(false)
   expect(staleInstances([placed.instance], () => v2)).toEqual([])
 })

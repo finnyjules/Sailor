@@ -30,5 +30,8 @@ export interface TemplateInstance {
   templateId: string
   templateVersion: number
   slotValues: Record<string, string>
+  /** The kind each slot had at placement time, so a later template version that keeps a slot's
+   *  id but changes its kind (e.g. text → color) is correctly treated as incompatible. */
+  slotKinds: Record<string, SlotKind>
   placedKeys: Record<string, string>
 }

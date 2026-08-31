@@ -51,6 +51,7 @@ export function placeTemplate(
     templateId: t.id,
     templateVersion: t.version,
     slotValues: { ...slotValues },
+    slotKinds: Object.fromEntries(t.slots.map(s => [s.id, s.kind])),
     placedKeys,
   }
   return { layers: [...current.layers, ...newLayers], groups: [...current.groups, ...newGroups], instance }
@@ -74,10 +75,10 @@ export function freezeInstance(instances: TemplateInstance[], instanceId: string
 }
 
 export function slotCompatible(t: Template, instance: TemplateInstance): boolean {
-  const tplSlotIds = t.slots.map(s => s.id).sort()
-  const instSlotIds = Object.keys(instance.slotValues).sort()
-  if (tplSlotIds.length !== instSlotIds.length) return false
-  return tplSlotIds.every((id, i) => id === instSlotIds[i])
+  const tplIds = t.slots.map(s => s.id).sort()
+  const instIds = Object.keys(instance.slotKinds).sort()
+  if (tplIds.length !== instIds.length || !tplIds.every((id, i) => id === instIds[i])) return false
+  return t.slots.every(s => instance.slotKinds[s.id] === s.kind)
 }
 
 export function staleInstances(
@@ -109,6 +110,8 @@ export function updateInstance(
   for (const [key, oldId] of Object.entries(instance.placedKeys)) {
     const newId = re.instance.placedKeys[key]
     if (!newId) continue
+    // Safe to mutate the id in place: placeTemplate deep-clones every layer per call, so `layer`
+    // here is a fresh object private to this update, not shared with any other instance/layer.
     const layer = re.layers.find(l => l.id === newId); if (layer) (layer as any).id = oldId
     re.instance.placedKeys[key] = oldId
   }
