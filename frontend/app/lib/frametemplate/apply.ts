@@ -31,7 +31,7 @@ export function placeTemplate(
   const newLayers = t.layers.map(({ key, layer }) => {
     const copy: any = clone(layer)
     copy.id = ctx.mkLayerId()
-    if (copy.groupId && groupIdMap.has(copy.groupId)) copy.groupId = groupIdMap.get(copy.groupId)
+    if (copy.groupId) copy.groupId = groupIdMap.has(copy.groupId) ? groupIdMap.get(copy.groupId) : undefined
     const slot = slotByLayerKey.get(key)
     const slotValue = slot ? slotValues[slot.id] : undefined
     if (slot && slotValue !== undefined) applySlotToLayer(copy, slot.kind, slotValue)
@@ -42,7 +42,7 @@ export function placeTemplate(
   const newGroups = t.groups.map(g => {
     const ng: any = clone(g)
     ng.id = groupIdMap.get(g.id)!
-    if (ng.parentId && groupIdMap.has(ng.parentId)) ng.parentId = groupIdMap.get(ng.parentId)
+    if (ng.parentId) ng.parentId = groupIdMap.has(ng.parentId) ? groupIdMap.get(ng.parentId) : undefined
     return ng as LayerGroup
   })
 
