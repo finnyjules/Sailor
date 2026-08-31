@@ -48,6 +48,22 @@ moving, dials not keyframes) is the declared bar for our timeline front door; th
 block ecosystem named a structural risk. **Elements queues behind this program by decision
 (2026-08-27)** — the door ships after the house stands. Next: implementation plan for the spec.
 
+### Frame Templates — LANDED 2026-08-31 (your reusable Frames, "Templates are yours; Elements are ours")
+
+User-authored counterpart to Elements: build a Frame, "Save as template", tap parts as
+text/color/image **slots**, reuse from a global owner-scoped library (a **Yours** section +
+an empty **Sailor** curated section = unowned rows). Place a copy into any Frame (a group —
+standalone into an empty Frame or overlaid onto a populated one); fill its slots; a per-project
+prompt offers **restyle** updates while a **reshape** (slot id/kind change) becomes a new
+version and is skipped; **freeze** detaches a copy. Colors are plain hex (no brand-kit coupling).
+Pure logic `app/lib/frametemplate/` (types/author/apply), UI in CompositorModal + a new
+TemplateLibraryPanel + sidebar door, agent ops in the compositor surface, E2E in
+`tests/frame-templates.spec.ts` (drives the real Compositor via /dev/frame-lab, pixel+state
+verified). Built subagent-driven (10 tasks); final review **READY TO LAND**. Spec/plan:
+`superpowers/specs|plans/2026-08-31-frame-templates*`. **Owed follow-ups (non-blocking):** a
+re-save/update-template UI gesture (must reuse stable slot ids/keys); the live voice bridge
+(ops built+tested but CompositorModal's agent state bridge doesn't expose `templates` yet).
+
 **BRIDGE PROBE RUN 2026-08-27 — VERDICT: the shallow bridge works at HEAD, and the piece
 sings.** One real piece made end-to-end: a $0.20 PixVerse shot (matte black perfume bottle,
 golden mist) + a transparent Space Type "NOIR" Cylinder title, layered on the shipped
