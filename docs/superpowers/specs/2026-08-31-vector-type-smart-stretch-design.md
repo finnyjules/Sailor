@@ -19,12 +19,12 @@ instead of becoming ellipses. Test: the stretched word next to the original
 should look like a sibling from the same family.
 
 Both axes are in scope: **horizontal** stretch (`stretch`, the width dial) and
-**vertical** stretch (`stretchY`, the height dial) — vertical is the same band
+**vertical** stretch (`stretchY`, the height dial) — vertical is the same flex
 machinery transposed to Y, and is a primary driver for expressive animation
 (letters springing up off the baseline).
 
 Out of scope for v1: lettering-style stroke elongation (extending an E's
-crossbar across a layout — a natural sequel on the same band analysis, noted
+crossbar across a layout — a natural sequel on the same flex analysis, noted
 below), non-Latin complex scripts (Arabic shaping, etc.).
 
 ## Approach chosen
@@ -41,24 +41,42 @@ ideas get interesting.
 New pure module `frontend/app/lib/vectortype/stretch.ts`, same philosophy as
 `outline.ts`: commands in, commands out, no canvas, fully unit-testable.
 
-### 1. Band analysis
+### 1. Flex profile (tangent-aligned band analysis)
 
-`analyzeBands(commands, bbox)`: flatten the outline to polylines and build
-band sets for **both axes**. Along X: histogram near-vertical ink coverage,
-emitting alternating **rigid** bands (stems, the curved flanks of an O) and
-**flexible** bands (counters, gaps). Along Y, the transpose: rigid bands where
-ink runs near-horizontal (crossbars, the top and bottom arches of rounds,
-serifs), flexible bands across the stem-lengths and counters between them.
-Cached per `(fontId, glyphId, quantized axis coords)` — axis coords are part
-of the key because a variable glyph's outline moves as axes move.
+`analyzeFlex(commands, bbox)`: flatten the outline to polylines and build a
+**flex profile** for each axis — a 1D array of per-bin stretchiness in [0, 1].
+For each histogram bin along the stretch axis, flex is
+`min over ink segments crossing the bin of |tangent · stretch-direction|^k`;
+bins with no ink get flex 1. A vertical stem under horizontal stretch has
+perpendicular tangents → flex ≈ 0 → rigid; counters, gaps, and crossbars →
+flex ≈ 1 → stretch freely; **diagonals get partial flex from the mid-range dot
+product**, which resolves the rigid-or-flexible dilemma for A/V/W/X
+structurally instead of by threshold. The exponent `k` is a quality dial: low
+k approaches uniform scaling, high k approaches hard 9-slice behavior — the
+binary rigid/flexible band model is the high-k special case, so there is one
+system, not two.
+
+The formulation follows Dave Pagurek's "Tangent-Aligned Text Stretching"
+(davepagurek.com/programming/stretch-text/). His *implementation* (k-d-tree
+tangent lookup over sampled boundary points) is not used — it is the source of
+his admitted artifacts (cusp misalignment, edge bending, confusion on
+self-overlapping outlines). We compute flex analytically from the flattened
+segments' own tangents, which is deterministic and reuses the histogram pass.
+
+Along Y, the transpose: crossbars and the arches of rounds are rigid,
+stem-lengths and counters flexible. Profiles are cached per
+`(fontId, glyphId, quantized axis coords)` — axis coords are part of the key
+because a variable glyph's outline moves as axes move.
 
 ### 2. The remap
 
-`stretchCommands(commands, bands, S, SY)`: monotone piecewise-linear maps, one
+`stretchCommands(commands, flex, S, SY)`: monotone piecewise-linear maps, one
 per axis, applied to every point and control point. `S` and `SY` are the
-stretch factors (1 = as drawn). Rigid bands keep their extent; flexible bands
-share all the change. Condensing floors: flexible bands shrink toward zero
-first, then rigid bands finally compress, clamped so no glyph collapses.
+stretch factors (1 = as drawn). Each bin's width scales in proportion to its
+flex value (flexbox-style), so rigid bins hold their extent and flexible bins
+share the change; the cumulative sum of scaled bins IS the remap. Condensing
+floors: flexible bins shrink toward zero first, then rigid bins finally
+compress, clamped so no glyph collapses.
 Command count never changes — the `gvar` property the studio's whole animation
 model rests on, so stretch is animation-legal by construction.
 
@@ -104,10 +122,16 @@ is judged by eye here before any studio wiring exists.
   variable font with `wdth` to exercise the cascade seam.
 - Two stretch sliders — width and height — each ~0.5×–2.5×.
 - **Three renderings side by side**: naive `scaleX`/`scaleY` (the control to
-  beat), the band remap, and — for variable fonts, horizontal only — the real
+  beat), the flex remap, and — for variable fonts, horizontal only — the real
   axis.
-- **Band overlay toggle**: rigid bands tinted over the glyphs, both axes, so a
-  bad result is diagnosable (band detection vs. remap) instead of guessed at.
+- **Flex overlay toggle**: the flex profile rendered as a tint gradient over
+  the glyphs (rigid → strong tint), both axes, so a bad result is diagnosable
+  (flex detection vs. remap) instead of guessed at.
+- **Dev-only `k` slider**: sweep the flex exponent live to find the sweet spot
+  between uniform scaling (low k) and hard 9-slice behavior (high k) by eye.
+- **Artifact watch list** from Pagurek's write-up, checked explicitly in the
+  lab: cusp behavior, edge-of-glyph slices (should resolve into sidebearings),
+  and self-overlapping outlines (e.g. an ornate W).
 - Pre-loaded torture strings: `OQCGS` (rounds), `AVWXY` (diagonals), `MNH`
   (dense stems), `aegs` (two-story lowercase), `gjpqy` (descenders, for the
   baseline-anchored vertical map), plus real words.
@@ -146,7 +170,7 @@ stays untouched — that is cartoon squash, a different tool; both should exist.
 change; use `scaleX`/`scaleY` motion for cartoon squash instead."
 
 **Per-frame cost.** Animated per-glyph stretch = remap + reflow each frame.
-Band analysis (the expensive part) is cached; the remap is a linear pass over
+Flex analysis (the expensive part) is cached; the remap is a linear pass over
 the command list, same order of work as the per-frame axis interpolation the
 weight wave already does. Per-glyph advance changes reflow pen positions
 through the existing reflow path (the "layout at base weight would make heavy
@@ -155,17 +179,18 @@ quantize stretch values for caching — not expected.
 
 ## Edge cases (decided)
 
-- **No flexible band on an axis** (horizontally: "I", "l", "."): the glyph
+- **All-rigid profile on an axis** (horizontally: "I", "l", "."): the glyph
   can't widen — horizontal stretch goes into sidebearings only.
   Typographically correct: an extended I *is* barely wider. Vertically the
   case is rare (most glyphs have stem-length to give); if it occurs, the glyph
   passes through unchanged.
-- **No rigid band** (hairline scripts): degrade to plain scale on that axis —
-  least harmful exactly where stroke contrast is lowest.
+- **All-flexible profile** (hairline scripts): degrades to plain scale on that
+  axis — least harmful exactly where stroke contrast is lowest, and with
+  continuous flex this fallback is gradual rather than a cliff.
 - **Extreme condense**: flexible floors first, then rigid compresses, clamped
   — no zero-width glyphs, no NaNs.
 - **Spaces/blanks**: advance stretches; no outline to remap.
-- **Ligatures**: multi-codepoint glyphs band-analyze like any other outline.
+- **Ligatures**: multi-codepoint glyphs flex-analyze like any other outline.
 
 ## Testing
 
@@ -188,12 +213,12 @@ Runtime verification after Phase B, honoring two house rules:
 - Drive the **live** control in the browser and **pixel-diff the smart path
   against naive scaleX** — a match means the remap silently didn't run
   (graceful-fallback trap) and the check must fail.
-- One run with band analysis deliberately disabled proves the diff catches it
+- One run with flex analysis deliberately disabled proves the diff catches it
   (verify-with-a-broken-control).
 
 ## Future directions (explicitly not v1)
 
 - **Lettering-style elongation** (Reading 2): expose flexible bands as
   grabbable, individually extendable segments — the sign-painter move of
-  stretching an E's crossbar or an L's base across a layout. The band analysis
+  stretching an E's crossbar or an L's base across a layout. The flex analysis
   built here is the prerequisite.
