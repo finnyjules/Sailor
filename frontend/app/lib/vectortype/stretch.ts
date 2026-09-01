@@ -42,10 +42,18 @@ export interface GlyphFlex {
 export interface FlexOptions {
   bins?: number
   k?: number
+  /** Ink components smaller than this (font units, larger dimension) are
+   *  fully rigid — a tittle, period, or diacritic keeps its exact shape and
+   *  rides the remap as a unit. 0/undefined disables. */
+  smallFeature?: number
 }
 
 const DEFAULT_BINS = 64
 const DEFAULT_K = 2
+/** Default small-feature limit as a fraction of the em. An i's dot or a
+ *  period is ~0.1–0.15 em; the smallest real letterform parts (a lowercase
+ *  counter) are well above 0.3 em. */
+export const SMALL_FEATURE_EM = 0.22
 /** Curve flattening steps for ANALYSIS only — the remap itself moves the real
  *  control points, so this resolution never appears in output geometry. */
 const CURVE_STEPS = 16
@@ -120,6 +128,7 @@ export function analyzeFlex(
 ): GlyphFlex {
   const bins = Math.max(4, Math.round(opts.bins ?? DEFAULT_BINS))
   const k = Math.max(0, opts.k ?? DEFAULT_K)
+  const smallFeature = opts.smallFeature ?? 0
   const w = bbox.maxX - bbox.minX
   const h = bbox.maxY - bbox.minY
   const flexX = new Float64Array(bins).fill(1)
@@ -213,6 +222,37 @@ export function analyzeFlex(
       c0 = Math.max(0, c0)
       c1 = Math.min(GRID - 1, c1)
       for (let c = c0; c <= c1; c++) ink[idx(c, r)] = 1
+    }
+  }
+
+  if (smallFeature > 0) {
+    const comp = new Int32Array(N).fill(-1)
+    const stack: number[] = []
+    for (let seed = 0; seed < N; seed++) {
+      if (!ink[seed] || comp[seed] !== -1) continue
+      let c0 = GRID, c1 = -1, r0 = GRID, r1 = -1
+      const cells: number[] = []
+      comp[seed] = seed
+      stack.push(seed)
+      while (stack.length) {
+        const j = stack.pop()!
+        cells.push(j)
+        const c = j % GRID, r = (j / GRID) | 0
+        if (c < c0) c0 = c
+        if (c > c1) c1 = c
+        if (r < r0) r0 = r
+        if (r > r1) r1 = r
+        if (c > 0 && ink[j - 1] && comp[j - 1] === -1) { comp[j - 1] = seed; stack.push(j - 1) }
+        if (c < GRID - 1 && ink[j + 1] && comp[j + 1] === -1) { comp[j + 1] = seed; stack.push(j + 1) }
+        if (r > 0 && ink[j - GRID] && comp[j - GRID] === -1) { comp[j - GRID] = seed; stack.push(j - GRID) }
+        if (r < GRID - 1 && ink[j + GRID] && comp[j + GRID] === -1) { comp[j + GRID] = seed; stack.push(j + GRID) }
+      }
+      // A feature is small when BOTH the grid says so and it is genuinely a
+      // fraction of the glyph — measured in font units, not cells, because
+      // the grid is anisotropic over non-square bboxes.
+      if (Math.max((c1 - c0 + 1) * cw, (r1 - r0 + 1) * ch) < smallFeature) {
+        for (const cell of cells) { ax[cell] = 0; ay[cell] = 0 }
+      }
     }
   }
 
@@ -406,7 +446,7 @@ export function stretchCommands(
 const flexCache = new WeakMap<GlyphOutline, Map<string, GlyphFlex>>()
 
 export function glyphFlexFor(g: GlyphOutline, opts: FlexOptions = {}): GlyphFlex {
-  const key = `${opts.bins ?? DEFAULT_BINS}|${opts.k ?? DEFAULT_K}`
+  const key = `${opts.bins ?? DEFAULT_BINS}|${opts.k ?? DEFAULT_K}|${opts.smallFeature ?? 0}`
   let byOpts = flexCache.get(g)
   if (!byOpts) {
     byOpts = new Map()
@@ -429,6 +469,7 @@ export function stretchOutlines(
   opts: FlexOptions = {},
 ): TextOutlines {
   if (S === 1 && SY === 1) return outlines
+  const flexOpts: FlexOptions = { smallFeature: SMALL_FEATURE_EM * outlines.unitsPerEm, ...opts }
   const glyphs: GlyphOutline[] = []
   let penOld = 0
   let penNew = 0
@@ -439,7 +480,7 @@ export function stretchOutlines(
     let inkW = 0
     let newInkW = 0
     if (hasInk(g)) {
-      const flex = glyphFlexFor(g, opts)
+      const flex = glyphFlexFor(g, flexOpts)
       const rx = buildRemap(flex.x, S)
       const ry = buildRemap(flex.y, SY, 0)
       commands = applyRemaps(g.commands, rx, ry)

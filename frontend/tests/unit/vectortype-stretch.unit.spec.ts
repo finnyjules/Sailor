@@ -348,21 +348,38 @@ describe('partial-sliver growth cap', () => {
     expect(remapValue(m, 50) - remapValue(m, 40)).toBeCloseTo(50, 4)
   })
 
-  it("keeps the dot of 'i' round-ish at S = 1.8 (no tittle horns)", () => {
+  it("keeps the dot of 'i' genuinely round at S = 1.8 (small features are rigid)", () => {
     const run = textOutlines(font, 'i')
     const g0 = run.glyphs[0]!
-    // 0.9 lands past the dot's widest cross-section, where the capped fix
-    // still only trims the horn rather than eliminating it (both pre- and
-    // post-fix ratios sit above 1.5 there). 0.886 lands on a still-plausible
-    // dot width (~88% of the dot's max width, well clear of the gap below
-    // the dot) where the fix's effect is decisive: pre-fix ratio ~1.54
-    // (fails), post-fix ratio ~1.47 (passes) — see fix report for the sweep.
-    const FRAC = 0.886
-    const dotY0 = g0.bbox.minY + (g0.bbox.maxY - g0.bbox.minY) * FRAC
-    const w0 = Math.max(...inkRunsAtY(g0.commands, dotY0).map(([a, b]) => b - a))
     const g2 = stretchOutlines(run, 1.8, 1).glyphs[0]!
-    const dotY2 = g2.bbox.minY + (g2.bbox.maxY - g2.bbox.minY) * FRAC
-    const w2 = Math.max(...inkRunsAtY(g2.commands, dotY2).map(([a, b]) => b - a))
-    expect(w2).toBeLessThan(w0 * 1.5)
+    // Sample the dot across its whole vertical span: at every scanline the
+    // ink may widen only marginally (remap-edge wobble), never lens out.
+    for (const f of [0.86, 0.88, 0.9, 0.92, 0.94]) {
+      const y0 = g0.bbox.minY + (g0.bbox.maxY - g0.bbox.minY) * f
+      const y2 = g2.bbox.minY + (g2.bbox.maxY - g2.bbox.minY) * f
+      const runs0 = inkRunsAtY(g0.commands, y0)
+      const runs2 = inkRunsAtY(g2.commands, y2)
+      if (!runs0.length || !runs2.length) continue
+      const w0 = Math.max(...runs0.map(([a, b]) => b - a))
+      const w2 = Math.max(...runs2.map(([a, b]) => b - a))
+      expect(w2).toBeLessThan(w0 * 1.15)
+    }
+  })
+
+  it('a small isolated component reads fully rigid on both axes', () => {
+    // A stem with a detached dot above it — an abstract i.
+    const stem = rect(0, 0, 100, 700)
+    const dot = rect(0, 760, 120, 880)
+    const bbox = { minX: 0, minY: 0, maxX: 120, maxY: 880 }
+    const { x, y } = analyzeFlex([...stem, ...dot], bbox, { bins: 24, smallFeature: 300 })
+    // The dot spans the full X range and the top Y rows: with the feature
+    // rule on, every X bin it covers is pinned, and so are its Y rows.
+    for (const f of x.flex) expect(f).toBeLessThan(0.05)
+    const topBins = Array.from(y.flex).slice(Math.ceil((760 / 880) * 24))
+    for (const f of topBins) expect(f).toBeLessThan(0.05)
+    // The gap rows between stem and dot stay fully flexible — vertical
+    // stretch moves the dot up rather than deforming it.
+    const gapBin = Math.floor((730 / 880) * 24)
+    expect(y.flex[gapBin]).toBe(1)
   })
 })
