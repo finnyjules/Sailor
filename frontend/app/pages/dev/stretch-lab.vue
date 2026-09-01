@@ -130,7 +130,7 @@ function rerender() {
   }
 }
 
-watch([font, text, S, SY, k, overlay, weightComp], rerender)
+watch([font, text, S, SY, k, overlay, weightComp], rerender, { flush: 'post' })
 watch(fontId, id => { void pickFont(id!) })
 
 onMounted(async () => {
