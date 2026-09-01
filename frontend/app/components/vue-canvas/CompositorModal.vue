@@ -2761,7 +2761,17 @@ function setSizePx(id: string, key: string, px: number) { setLocal(id, { [key]: 
 // the STORED ones (unclamped): the painter clamps to half the shorter side, so a
 // squashed rect still remembers the radius you typed.
 const radiusExpanded = ref(false)
-const CORNER_LABELS = ['Top left', 'Top right', 'Bottom right', 'Bottom left']
+// The radius array is stored clockwise [tl, tr, br, bl], but the 2-column grid
+// fills left-to-right per row — so the fields are laid out in SPATIAL order
+// (tl, tr on the top row; bl, br on the bottom row), each carrying its real
+// array index. Iterating the array order instead put "Bottom right" (index 2)
+// in the bottom-LEFT cell.
+const CORNER_FIELDS = [
+  { label: 'Top left', i: 0 },
+  { label: 'Top right', i: 1 },
+  { label: 'Bottom left', i: 3 },
+  { label: 'Bottom right', i: 2 },
+]
 function radiusCorners(l: any): number[] {
   const r = l?.radius
   const one = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
@@ -6161,12 +6171,12 @@ onUnmounted(() => {
                 </button>
               </div>
               <div v-if="radiusRowExpanded" class="grid grid-cols-2 gap-1.5 mt-1.5">
-                <div v-for="(label, i) in CORNER_LABELS" :key="label">
-                  <div class="panel-label mb-1">{{ label }}</div>
-                  <input v-scrubnum type="number" min="0" step="1" :value="pxW(radiusCorners(selectedLocal)[i]!)"
-                    :data-radius-corner="i"
+                <div v-for="corner in CORNER_FIELDS" :key="corner.label">
+                  <div class="panel-label mb-1">{{ corner.label }}</div>
+                  <input v-scrubnum type="number" min="0" step="1" :value="pxW(radiusCorners(selectedLocal)[corner.i]!)"
+                    :data-radius-corner="corner.i"
                     class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setRadiusCornerPx(selectedLocal, i, parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+                    @input="setRadiusCornerPx(selectedLocal, corner.i, parseFloat(($event.target as HTMLInputElement).value) || 0)" />
                 </div>
               </div>
             </div>
