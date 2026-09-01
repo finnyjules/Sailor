@@ -48,6 +48,22 @@ moving, dials not keyframes) is the declared bar for our timeline front door; th
 block ecosystem named a structural risk. **Elements queues behind this program by decision
 (2026-08-27)** — the door ships after the house stands. Next: implementation plan for the spec.
 
+### Start-modal image showcase — LANDED 2026-08-31 (the "Generate an image" pick seeds a sticky-noted tour)
+
+The Get Started modal's plain "Generate an image" pick (and the homepage starter card — same
+`materializeStartGraph` path) no longer drops one bare node: it seeds a 2×2 tour of ready-to-run
+ways to make an image — **describe it** (GenerateImageNode, sample prompt prefilled) · **give it
+a style** (FluxLoRARemoteNode) · **start from a sketch** (Image card wired → SketchToImageNode)
+· **start from references** (Image card wired → GenerateFromReferencesNode) — each introduced by
+a colored sticky, plus a yellow intro sticky ("pick one, press Run on it, delete the rest").
+Stickies are ordinary annotations (persist in `workflow.extra`, deletable). Ways missing from
+`object_info` are skipped, not fatal. Camera: `fitBounds` over the union of stickies + measured
+node dims (plain `fitView` ignores annotations and fires before ResizeObserver measures the
+cards). Single-source picks (Edit an image etc.) unchanged, now via shared `pushStartNode`/
+`wireStartPair` helpers. Browser-verified end-to-end (`595276aed`); verification note: the day's
+dev-server "IPC connection closed" 500s were a broken `v-else-if` committed mid-refactor in
+Scene3DStudioSurface.vue, not infra.
+
 ### Frame Templates — LANDED 2026-08-31 (your reusable Frames, "Templates are yours; Elements are ours")
 
 User-authored counterpart to Elements: build a Frame, "Save as template", tap parts as
