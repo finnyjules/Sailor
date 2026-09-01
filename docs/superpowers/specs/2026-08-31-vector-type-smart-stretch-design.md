@@ -124,11 +124,17 @@ is judged by eye here before any studio wiring exists.
 - **Three renderings side by side**: naive `scaleX`/`scaleY` (the control to
   beat), the flex remap, and — for variable fonts, horizontal only — the real
   axis.
-- **Flex overlay toggle**: the flex profile rendered as a tint gradient over
-  the glyphs (rigid → strong tint), both axes, so a bad result is diagnosable
-  (flex detection vs. remap) instead of guessed at.
+- **Flex overlay toggle**: the flex profiles rendered as a two-channel tint
+  over the glyphs (one color channel per axis, rigid → strong tint, after
+  Pagurek's red/blue visualization), so a bad result is diagnosable (flex
+  detection vs. remap) instead of guessed at.
 - **Dev-only `k` slider**: sweep the flex exponent live to find the sweet spot
   between uniform scaling (low k) and hard 9-slice behavior (high k) by eye.
+- **Optical weight compensation toggle** (Ahrens): on fonts with a `wght`
+  axis, couple a small weight nudge to stretch — a hair bolder when extended,
+  lighter when condensed — because constant stem width reads anemic next to
+  grown counters (optical color vs. geometry). Judged with/without in the lab;
+  Phase A decides whether it ships in Phase B.
 - **Artifact watch list** from Pagurek's write-up, checked explicitly in the
   lab: cusp behavior, edge-of-glyph slices (should resolve into sidebearings),
   and self-overlapping outlines (e.g. an ornate W).
@@ -218,6 +224,11 @@ Runtime verification after Phase B, honoring two house rules:
 
 ## Future directions (explicitly not v1)
 
+- **Ink mode** (after DJR's Fit): the inverted contract — hold the white
+  shapes constant and let the ink absorb the width change, producing
+  monumental slab forms instead of airy extended ones. A second aesthetic
+  system, not a fix to this one; the lab notes where on the dial the v1 mode
+  stops looking good.
 - **Lettering-style elongation** (Reading 2): expose flexible bands as
   grabbable, individually extendable segments — the sign-painter move of
   stretching an E's crossbar or an L's base across a layout. The flex analysis
