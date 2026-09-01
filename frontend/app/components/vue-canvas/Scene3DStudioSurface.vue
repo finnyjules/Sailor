@@ -13,7 +13,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import * as THREE from 'three'
 import {
-  Box, Boxes, Plus, Loader2, Upload, Lightbulb, Sparkles, Shuffle, Group, Ungroup, ClipboardPaste, Paintbrush, Combine,
+  Box, Boxes, Plus, Loader2, Upload, Lightbulb, Sparkles, Shuffle, ClipboardPaste,
   ChevronUp,
 } from 'lucide-vue-next'
 import {
@@ -49,6 +49,8 @@ import { SculptSession, commitSculptToDoc } from '~/lib/scene3d/sculpt/session'
 import { applyBrush, type BrushKind, type BrushStamp } from '~/lib/scene3d/sculpt/brushes'
 import { expandStamp, type SymmetryMode, type SymmetrySpec } from '~/lib/scene3d/sculpt/symmetry'
 import Scene3DSculptToolbar from '~/components/vue-canvas/studio/Scene3DSculptToolbar.vue'
+import Scene3DViewportActions from '~/components/vue-canvas/studio/Scene3DViewportActions.vue'
+import { sculptDecision } from '~/lib/scene3d/sculpt/decision'
 import { rebaseMany, groupObjects, ungroupMany, rootObjects, descendantIds, cloneSubtree, axisDeltaWrites, worldMatrixOf } from '~/lib/scene3d/hierarchy'
 import { remesh, boundsOf } from '~/lib/scene3d/voxel'
 import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
@@ -2405,6 +2407,31 @@ async function enterSculpt() {
   }
 }
 
+// Unified Sculpt verb: a mesh sculpts directly; a non-mesh primitive is frozen
+// to a mesh first (irreversible), gated behind a one-time confirm the user can
+// suppress for the session. `canEnterSculpt` merges the two existing gates.
+const sculptConfirmSuppressed = ref(false)
+const canEnterSculpt = computed(() => canSculpt.value || canConvertToMesh.value)
+const sculptConfirmNeeded = computed(() =>
+  canEnterSculpt.value && sculptDecision(canSculpt.value, sculptConfirmSuppressed.value) === 'confirm')
+const selectedKindLabel = computed(() => {
+  const o = selected.value
+  return o && o.kind === 'primitive' ? (o as PrimitiveObject).primitive : 'shape'
+})
+
+async function sculptSelection() {
+  const o = selected.value
+  if (!o || o.kind !== 'primitive') return
+  if ((o as PrimitiveObject).primitive !== 'mesh') {
+    await convertSelectionToMesh()
+    if (convertError.value) return
+  }
+  // convertSelectionToMesh replaces the object in place and reselects it; if
+  // the selection somehow isn't a mesh now, bail rather than enter a bad state.
+  if (!selectedMesh.value) return
+  await enterSculpt()
+}
+
 /** Ray-pick under the pointer, in the sculpted mesh's own object space —
  *  SculptSession.pick's contract. The ONE raycast path shared by hover/ring
  *  tracking and by brush application, so there is never a second picker to
@@ -3410,6 +3437,33 @@ async function onClose() {
             @click="lightView = !lightView"><Lightbulb class="size-3.5" /> Light</button>
         </div>
 
+        <!-- Contextual selection actions, top-center. Only while not sculpting and the
+             selection has an applicable verb. Clears the top-left snap toggles and the
+             top-right shader-frozen hint. @pointerdown.stop so chip clicks don't reach
+             OrbitControls. -->
+        <div v-if="webglOk && !sculpting && (canGroup || canUngroup || canEnterSculpt || canMerge)"
+             class="absolute top-3 left-1/2 -translate-x-1/2 z-10" @pointerdown.stop>
+          <Scene3DViewportActions
+            :can-group="canGroup"
+            :can-ungroup="canUngroup"
+            :can-enter-sculpt="canEnterSculpt"
+            :can-convert-to-mesh="canConvertToMesh"
+            :can-merge="canMerge"
+            :sculpt-confirm-needed="sculptConfirmNeeded"
+            :selected-kind-label="selectedKindLabel"
+            :merge-busy="mergeBusy"
+            v-model:mergeOp="mergeOpProxy"
+            v-model:mergeBlend="mergeBlend"
+            v-model:mergeResolution="mergeResolution"
+            @group="groupSelection"
+            @ungroup="ungroupSelection"
+            @convert="convertSelectionToMesh"
+            @sculpt="sculptSelection"
+            @merge="mergeSelection"
+            @suppress-confirm="sculptConfirmSuppressed = true"
+          />
+        </div>
+
         <!-- Shader-fill frozen hint: mirrors ShapeStudioSurface.vue's — no silent caps on any
              surface. Opposite corner from the snap/light toolbar so the two never collide. -->
         <div v-if="webglOk && shaderFrozenCount > 0"
@@ -3718,40 +3772,6 @@ async function onClose() {
            a panel-in-a-panel. -->
       <div class="flex h-full w-full flex-col overflow-hidden">
         <div class="shrink-0 px-3 py-2.5 text-[11px] font-medium text-white/50">Objects</div>
-        <div v-if="!sculpting && (canGroup || canUngroup || canConvertToMesh || canSculpt || canMerge)" class="flex shrink-0 flex-wrap gap-1 px-2 pb-2">
-          <StudioButton v-if="canGroup" @click="groupSelection">
-            <span class="flex items-center gap-1.5"><Group class="h-3.5 w-3.5" /> Group</span>
-          </StudioButton>
-          <StudioButton v-if="canUngroup" @click="ungroupSelection">
-            <span class="flex items-center gap-1.5"><Ungroup class="h-3.5 w-3.5" /> Ungroup</span>
-          </StudioButton>
-          <StudioButton v-if="canConvertToMesh" :disabled="converting" @click="convertSelectionToMesh">
-            <span class="flex items-center gap-1.5"><Boxes class="h-3.5 w-3.5" /> To mesh</span>
-          </StudioButton>
-          <StudioButton v-if="canSculpt" @click="enterSculpt">
-            <span class="flex items-center gap-1.5"><Paintbrush class="h-3.5 w-3.5" /> Sculpt</span>
-          </StudioButton>
-          <StudioButton v-if="canMerge" @click="mergeOpen = !mergeOpen">
-            <span class="flex items-center gap-1.5"><Combine class="h-3.5 w-3.5" /> Merge</span>
-          </StudioButton>
-        </div>
-        <!-- Merge popover (Task 16): operation + blend/resolution sliders, same
-             inline-panel convention as the SVG paste box below. Booleans go
-             through the shared voxel field — see merge.ts's header for why. -->
-        <div v-if="canMerge && mergeOpen" class="shrink-0 space-y-2 px-2 pb-2">
-          <StudioSegmented v-model="mergeOpProxy" :options="['union', 'subtract', 'intersect']" />
-          <p v-if="mergeOp === 'subtract'" class="text-[11px] leading-snug text-white/45">
-            Subtracts everything else FROM the first selected object.
-          </p>
-          <StudioSlider v-model="mergeBlend" label="Blend" :min="0" :max="0.3" :step="0.01" />
-          <StudioSlider v-model="mergeResolution" label="Resolution" :min="16" :max="REMESH_RESOLUTION_MAX" :step="1" />
-          <StudioButton :disabled="mergeBusy" @click="mergeSelection">
-            <span class="flex items-center gap-1.5">
-              <Loader2 v-if="mergeBusy" class="h-3.5 w-3.5 animate-spin" />
-              {{ mergeBusy ? 'Merging…' : 'Merge' }}
-            </span>
-          </StudioButton>
-        </div>
         <p v-if="convertError" class="shrink-0 px-2 pb-2 text-[11px] leading-snug text-red-400/90">{{ convertError }}</p>
         <div class="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
           <div v-if="!doc.objects.length" class="px-1 text-xs leading-relaxed text-white/40">
