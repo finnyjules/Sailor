@@ -7683,18 +7683,21 @@ function materializeStartGraph(opts: { sourceNodeType?: string; generatorNodeTyp
 
 /**
  * The "Generate an image" welcome tour: instead of one bare generator, seed a
- * 2×2 grid of ready-to-run ways to make an image, each introduced by a sticky
- * note (plus an intro sticky up top). Ways whose node type is missing from
- * object_info are skipped rather than failing the whole seed; the image-fed
- * ways get an Image card pre-wired in so the canvas also demonstrates wiring.
- * Stickies persist like any user annotation (workflow.extra), so the tour
- * survives save/load and the user deletes pieces as they claim the canvas.
+ * 2×2 grid of ready-to-run ways to make an image, each captioned by a small
+ * sticky note (plus one intro sticky up top). Deliberately quiet: one paper
+ * colour, zero rotation, caption-length copy, labels left-aligned above their
+ * cards on an even grid — the seeded canvas should read as a curated welcome,
+ * not a brainstorm wall (the first, louder version did). Ways whose node type
+ * is missing from object_info are skipped rather than failing the whole seed;
+ * the image-fed ways get an Image card pre-wired in so the canvas also
+ * demonstrates wiring. Stickies persist like any user annotation
+ * (workflow.extra), so the tour survives save/load and the user deletes
+ * pieces as they claim the canvas.
  */
 function materializeImageShowcase(): boolean {
   interface ShowcaseWay {
     nodeType: string
     note: string
-    color: string
     prompt?: string
     /** Pre-wire an Image artifact card into the generator's IMAGE input. */
     withImageSource?: boolean
@@ -7702,40 +7705,43 @@ function materializeImageShowcase(): boolean {
   const ways: ShowcaseWay[] = [
     {
       nodeType: 'GenerateImageNode',
-      color: '#bfdbfe', // blue
-      note: 'Describe it\n\nType what you want in the prompt and press Run. Click the model name to browse the gallery — every model has its own look.',
+      note: 'Describe it\nType a prompt and press Run.',
       prompt: 'A lighthouse on a rocky coast at golden hour, gouache painting',
     },
     {
       nodeType: 'FluxLoRARemoteNode',
-      color: '#fbcfe8', // pink
-      note: 'Give it a style\n\nThis one generates with a style (LoRA), so every image comes out with the same look. Pick a style you trained or downloaded, and include its trigger word in the prompt.',
+      note: 'Give it a style\nEvery image comes out in one look.',
     },
     {
       nodeType: 'SketchToImageNode',
-      color: '#bbf7d0', // green
-      note: 'Start from a sketch\n\nDrop a rough drawing into the Image card — the wire feeds it to the generator, which keeps your composition and finishes the image.',
+      note: 'Start from a sketch\nDrop a rough drawing into the card.',
       prompt: 'Turn this sketch into a soft watercolor illustration',
       withImageSource: true,
     },
     {
       nodeType: 'GenerateFromReferencesNode',
-      color: '#ddd6fe', // lavender
-      note: 'Start from references\n\nDrop a photo or a few reference images into the Image card, describe what to make, and the model blends them into something new.',
+      note: 'Start from references\nDrop in photos to blend and remix.',
       prompt: 'Combine these references into one scene',
       withImageSource: true,
     },
   ].filter(w => !!objectInfo.value[w.nodeType])
   if (!ways.length) return false
 
+  // One colour, no tilt — the classic sticky yellow is the single warm accent
+  // on the dark canvas.
+  const PAPER = '#fde68a'
+  const COL_PITCH = 680
+  const ROW_PITCH = 560
+  const LABEL_H = 84
+
   const intro = createSticky({
-    x: 340,
-    y: -170,
-    color: '#fde68a', // yellow
-    text: 'Four ways to make an image\n\nEach group below is ready to run. Pick the one that fits, press Run on it, and delete the rest — or press + to explore more.',
+    x: 0,
+    y: 0,
+    color: PAPER,
+    text: 'Four ways to make an image\nEvery card is ready to run — pick one, delete the rest.',
   })
   intro.width = 400
-  intro.height = 140
+  intro.height = LABEL_H
   intro.rotation = 0
 
   let idSeed = Date.now()
@@ -7744,24 +7750,26 @@ function materializeImageShowcase(): boolean {
   const stickyRects: { x: number; y: number; width: number; height: number }[] = [intro]
 
   ways.forEach((way, i) => {
-    const qx = (i % 2) * 880
-    const qy = 40 + Math.floor(i / 2) * 640
+    const qx = (i % 2) * COL_PITCH
+    const qy = 150 + Math.floor(i / 2) * ROW_PITCH
 
-    const sticky = createSticky({ x: qx, y: qy + 20, text: way.note, color: way.color })
-    sticky.width = 235
-    sticky.height = 220
+    const sticky = createSticky({ x: qx, y: qy, text: way.note, color: PAPER })
+    sticky.width = 260
+    sticky.height = LABEL_H
+    sticky.rotation = 0
     stickyRects.push(sticky)
 
     const generatorData = buildStartNodeData(way.nodeType)
     if (!generatorData) return
 
-    let generatorX = qx + 280
+    const contentY = qy + LABEL_H + 28
+    let generatorX = qx
     let sourceId: string | null = null
     if (way.withImageSource && imageSourceData) {
       sourceId = String(idSeed++)
-      pushStartNode({ id: sourceId, nodeType: 'Image', data: imageSourceData, x: generatorX, y: qy, size: [240, 280] })
+      pushStartNode({ id: sourceId, nodeType: 'Image', data: imageSourceData, x: qx, y: contentY, size: [240, 280] })
       placedIds.push(sourceId)
-      generatorX += 300
+      generatorX = qx + 320
     }
 
     const generatorId = String(idSeed++)
@@ -7770,7 +7778,7 @@ function materializeImageShowcase(): boolean {
       nodeType: way.nodeType,
       data: generatorData,
       x: generatorX,
-      y: qy,
+      y: contentY,
       size: [220, 120],
       prompt: way.prompt,
     })
@@ -7806,8 +7814,10 @@ function materializeImageShowcase(): boolean {
     const minX = Math.min(...rects.map(r => r.x))
     const minY = Math.min(...rects.map(r => r.y))
     const maxX = Math.max(...rects.map(r => r.x + r.width))
-    const maxY = Math.max(...rects.map(r => r.y + r.height))
-    fitBounds({ x: minX, y: minY, width: maxX - minX, height: maxY - minY }, { padding: 0.08 })
+    // Extra bottom margin: the floating prompt bar + toolbar overlay the
+    // viewport's lower edge, so a tight fit hides the bottom row behind them.
+    const maxY = Math.max(...rects.map(r => r.y + r.height)) + 180
+    fitBounds({ x: minX, y: minY, width: maxX - minX, height: maxY - minY }, { padding: 0.06 })
   })()
 
   return true
