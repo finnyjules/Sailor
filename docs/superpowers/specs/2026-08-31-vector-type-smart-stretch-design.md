@@ -209,6 +209,13 @@ quantize stretch values for caching — not expected.
   under-condenses; no zero-width glyphs, no NaNs). Profiles now carry per-bin
   ink occupancy so the floors know space from ink, and `stemWidthOf()` reads a
   glyph's stem width off its rigid runs.
+- **One stem weight per run** (lab-found 2026-09-01: an `I` thinned to reach S
+  while an `L` reached it through its foot — two stroke weights side by side):
+  how much a stem thins under condense depends on S ALONE, via one schedule
+  `stemFactor(S)` (1 down to S = 0.85, linear to the 60% floor at S = 0.4),
+  identical for every glyph. Counters take exactly the remainder; a
+  counter-less letter under-condenses rather than thinning past its
+  neighbours. A glyph never condenses PAST S.
 - **Letters never touch**: combined sidebearings condense no further than
   0.6 stem widths (fallback 0.09 em for glyphs with no rigid run).
 - **Small isolated ink components** (tittles, periods, colons, diacritics —
