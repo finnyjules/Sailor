@@ -61,12 +61,16 @@ block ecosystem named a structural risk. **Elements queues behind this program b
 
 ### Start-modal image showcase — LANDED 2026-08-31 (the "Generate an image" pick seeds a sticky-noted tour)
 
-The Get Started modal's plain "Generate an image" pick (and the homepage starter card — same
-`materializeStartGraph` path) no longer drops one bare node: it seeds a 2×2 tour of ready-to-run
-ways to make an image — **describe it** (GenerateImageNode, sample prompt prefilled) · **give it
-a style** (FluxLoRARemoteNode) · **start from a sketch** (Image card wired → SketchToImageNode)
-· **start from references** (Image card wired → GenerateFromReferencesNode) — each introduced by
-a colored sticky, plus a yellow intro sticky ("pick one, press Run on it, delete the rest").
+The Get Started modal's plain "Generate an image" pick no longer drops one bare node: it seeds a
+2×2 tour of ready-to-run ways to make an image — **describe it** (GenerateImageNode, sample
+prompt prefilled) · **give it a style** (FluxLoRARemoteNode) · **start from a sketch** (Image
+card wired → SketchToImageNode) · **start from references** (Image card wired →
+GenerateFromReferencesNode) — each captioned by a small sticky, plus an intro sticky ("pick one,
+delete the rest"). Owner feedback same day drove a quiet pass (`9ef827d0d`): one sticky yellow,
+zero rotation, caption-length copy that never wraps, labels left-aligned above their cards on an
+even grid — the seeded canvas reads as a curated welcome, not a brainstorm wall. (The homepage
+"Create an image" card is a different path — it seeds a single FluxLoRARemoteNode via
+seedNodeType and skips the tour.)
 Stickies are ordinary annotations (persist in `workflow.extra`, deletable). Ways missing from
 `object_info` are skipped, not fatal. Camera: `fitBounds` over the union of stickies + measured
 node dims (plain `fitView` ignores annotations and fires before ResizeObserver measures the
