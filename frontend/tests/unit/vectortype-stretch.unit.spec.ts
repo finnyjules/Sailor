@@ -15,7 +15,7 @@ import { normaliseAxes } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 import { textOutlines } from '~/lib/vectortype/outline'
 import type { PathCommand, TextOutlines, VtBBox } from '~/lib/vectortype/outline'
-import { analyzeFlex, buildRemap, glyphFlexFor, planStretch, remapValue, solveAxis, stemWidthOf, stretchCommands, stretchOutlines, weightCompensation } from '~/lib/vectortype/stretch'
+import { analyzeFlex, buildRemap, glyphFlexFor, planStretch, remapValue, solveAxis, stemFactor, stemWidthOf, stretchCommands, stretchOutlines, weightCompensation } from '~/lib/vectortype/stretch'
 
 /** Closed axis-aligned rectangle as outline commands (font-unit space, y-up). */
 function rect(x0: number, y0: number, x1: number, y1: number): PathCommand[] {
@@ -385,17 +385,19 @@ describe('partial-sliver growth cap', () => {
 })
 
 describe('condense — order of sacrifice', () => {
-  it('counters floor at 30%, stems give next and stop at 60% (mixed profile, S = 0.5)', () => {
+  it('stems follow the common schedule; counters absorb the rest; the glyph may under-condense (S = 0.5)', () => {
     const flex = new Float64Array([1, 1, 1, 0, 0, 0, 0, 1, 1, 1])
     const ink  = new Float64Array([0, 0, 0, 1, 1, 1, 1, 0, 0, 0])
     const m = buildRemap({ start: 0, binSize: 10, flex, ink }, 0.5)
     const width = (i: number) => remapValue(m, (i + 1) * 10) - remapValue(m, i * 10)
-    // empties hit their 30% floor (3) …
+    // stems thin by the common S-only schedule — never per-glyph negotiation …
+    for (const i of [3, 4, 5, 6]) expect(width(i)).toBeCloseTo(10 * stemFactor(0.5), 6)
+    // … counters absorb the rest and floor at 30%: the stems only gave
+    // 4 × (10 − 6.889) ≈ 12.4 of the 50, counters can give 42, so counters
+    // floor and ~4.4 is dropped rather than negotiated back from the stems.
     for (const i of [0, 1, 2, 7, 8, 9]) expect(width(i)).toBeCloseTo(3, 6)
-    // … the remaining deficit (50 − 42 = 8) comes out of the four stems evenly …
-    for (const i of [3, 4, 5, 6]) expect(width(i)).toBeCloseTo(8, 6)
-    // … and the glyph reaches S exactly.
-    expect(remapValue(m, 100) - remapValue(m, 0)).toBeCloseTo(50, 6)
+    // … so the glyph under-condenses instead of reaching S exactly.
+    expect(remapValue(m, 100) - remapValue(m, 0)).toBeCloseTo(4 * 10 * stemFactor(0.5) + 18, 6)
   })
 
   it('ink-bearing flexible bins (arches, crossbars) floor at 50% and the glyph under-condenses', () => {
@@ -466,5 +468,36 @@ describe('condense — order of sacrifice', () => {
       const a = inked[i]!, b = inked[i + 1]!
       expect(a.x + a.bbox.maxX).toBeLessThan(b.x + b.bbox.minX)
     }
+  })
+
+  it('stemFactor is 1 down to Condensed, then falls linearly to the floor', () => {
+    expect(stemFactor(1)).toBe(1)
+    expect(stemFactor(0.85)).toBe(1)
+    expect(stemFactor(0.4)).toBeCloseTo(0.6, 9)
+    expect(stemFactor(0.2)).toBeCloseTo(0.6, 9)
+    const mid = stemFactor(0.625)
+    expect(mid).toBeGreaterThan(0.6); expect(mid).toBeLessThan(1)
+  })
+
+  it("every glyph's stems thin by the SAME factor: 'l' stem vs 'o' flanks at S = 0.64", () => {
+    const S = 0.64
+    const l0 = textOutlines(font, 'l'), l1 = stretchOutlines(l0, S, 1)
+    const midY = (l0.glyphs[0]!.bbox.minY + l0.glyphs[0]!.bbox.maxY) / 2
+    const lw0 = inkRunsAtY(l0.glyphs[0]!.commands, midY)[0]!
+    const lw1 = inkRunsAtY(l1.glyphs[0]!.commands, midY)[0]!
+    const lRatio = (lw1[1] - lw1[0]) / (lw0[1] - lw0[0])
+    const o0 = textOutlines(font, 'o'), o1 = stretchOutlines(o0, S, 1)
+    const oy = (o0.glyphs[0]!.bbox.minY + o0.glyphs[0]!.bbox.maxY) / 2
+    const r0 = inkRunsAtY(o0.glyphs[0]!.commands, oy), r1 = inkRunsAtY(o1.glyphs[0]!.commands, oy)
+    const oRatio = (r1[0]![1] - r1[0]![0]) / (r0[0]![1] - r0[0]![0])
+    expect(Math.abs(lRatio - oRatio)).toBeLessThan(0.04)
+    expect(Math.abs(lRatio - stemFactor(S))).toBeLessThan(0.04)
+  })
+
+  it('a mild condense (S = 0.9) leaves every stem at full weight', () => {
+    const l0 = textOutlines(font, 'l'), l1 = stretchOutlines(l0, 0.9, 1)
+    const midY = (l0.glyphs[0]!.bbox.minY + l0.glyphs[0]!.bbox.maxY) / 2
+    const a = inkRunsAtY(l0.glyphs[0]!.commands, midY)[0]!, b = inkRunsAtY(l1.glyphs[0]!.commands, midY)[0]!
+    expect((b[1] - b[0]) / (a[1] - a[0])).toBeGreaterThan(0.97)
   })
 })

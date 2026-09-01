@@ -330,10 +330,26 @@ const EMPTY_BIN_FLOOR = 0.3
 /** … ink running parallel to the stretch (arches, crossbars, spines)
  *  shortens but a curve needs room to turn … */
 const INK_BIN_FLOOR = 0.5
-/** … and only once those are floored do the stems thin — Compressed cuts
- *  ARE lighter than Condensed. Below this the glyph simply under-condenses
- *  (leftover deficit is dropped; the run-level advance still tightens). */
+/** … and the stems thin on their OWN schedule (see `stemFactor` below),
+ *  never per-glyph negotiation — a typeface has ONE stem width, so how much a
+ *  stem thins depends on S alone. This is that schedule's END value: the
+ *  floor a stem reaches at Ultra-Compressed and goes no further than. Below
+ *  it the glyph simply under-condenses (leftover deficit is dropped; the
+ *  run-level advance still tightens). */
 const RIGID_BIN_FLOOR = 0.6
+/** Stems start thinning only once a cut is properly Condensed … */
+const STEM_THIN_START = 0.85
+/** … and reach their floor (`RIGID_BIN_FLOOR`) at Ultra-Compressed. */
+const STEM_THIN_END = 0.4
+/** The one stem-weight schedule every glyph follows under condense — a
+ *  typeface has ONE stem width, so how much a stem thins must depend on S
+ *  alone, never on whether THIS glyph had counters to give. A counter-less I
+ *  under-condenses instead of thinning past its neighbours. */
+export function stemFactor(S: number): number {
+  if (S >= STEM_THIN_START) return 1
+  const t = (STEM_THIN_START - Math.max(S, STEM_THIN_END)) / (STEM_THIN_START - STEM_THIN_END)
+  return 1 - t * (1 - RIGID_BIN_FLOOR)
+}
 /** A bin whose flex is at or above this is fully flexible — empty space, or
  *  ink running parallel to the stretch (a crossbar's interior) — and may
  *  absorb unlimited growth: stretching space IS the point. Below it, the bin
@@ -388,56 +404,55 @@ function binWidths(flex: Float64Array, w: number, S: number, ink?: Float64Array)
     // design — whitespace still scales, so the word's rhythm holds.
     return out
   }
-  // Condense: the ORDER OF SACRIFICE. Empty space (counters, gaps) gives
+  // Condense. Rigid bins (flex < 0.05) are a STEM: a typeface has ONE stem
+  // width, so how much a stem thins follows the deterministic `stemFactor(S)`
+  // schedule alone — identical for every glyph, never negotiated per-glyph
+  // against what else the glyph happens to hold. A counter-less 'I' simply
+  // under-condenses instead of stealing weight consistency from its
+  // neighbours.
+  for (let i = 0; i < n; i++) {
+    if (flex[i]! < 0.05) out[i] = w * stemFactor(S)
+  }
+  // The rest of the ORDER OF SACRIFICE: empty space (counters, gaps) gives
   // first but floors at EMPTY_BIN_FLOOR — thinner reads as a crack, not a
   // counter. Ink running parallel to the stretch (arches, crossbars, spines)
-  // shortens next, floored higher: a curve needs room to turn. Only once
-  // both are floored do stems thin, and even then no further than
-  // RIGID_BIN_FLOOR — a Compressed cut is lighter than a Condensed one, not
-  // collapsed. Each bin gets its own floor from what it actually holds.
+  // shortens next, floored higher: a curve needs room to turn. Each bin gets
+  // its own floor from what it actually holds.
   let deficit = -delta
   const floor = new Float64Array(n)
   for (let i = 0; i < n; i++) {
     const isInk = ink ? ink[i]! > 0 : flex[i]! < FULL_FLEX
     floor[i] = w * (flex[i]! < 0.05 ? RIGID_BIN_FLOOR : isInk ? INK_BIN_FLOOR : EMPTY_BIN_FLOOR)
   }
-  // Phase 1: bins that resist the stretch least (flex > 0 — empty space and
-  // ink-bearing-but-flexible slices) shrink toward their OWN floor first,
-  // proportional to flex, over up to 4 waterfall passes (a bin hitting its
-  // floor stops absorbing and the rest re-split what's left).
+  // Phase 1 (and only phase): bins that resist the stretch least (non-rigid —
+  // empty space and ink-bearing-but-flexible slices) shrink toward their OWN
+  // floor, proportional to flex, over up to 4 waterfall passes (a bin hitting
+  // its floor stops absorbing and the rest re-split what's left). Gated on
+  // `flex >= 0.05`, the same rigid cut used for the preset above and the floor
+  // table below — NOT `flex > 0` — because a real glyph's "rigid" column is
+  // never exactly 0 (chamfer-propagated tangents leave float noise like
+  // 0.00013); gating on literal positivity would let the stem's own bins
+  // sneak back into this waterfall and thin a second time on top of their
+  // schedule width. There is no second, headroom-proportional phase over all
+  // bins: the stems already had their say above, and letting counters
+  // renegotiate against the stems' fixed contribution is exactly the
+  // per-glyph negotiation that made an 'I' thin its one stem to reach S while
+  // an 'L' left its stem untouched. Whatever deficit is left when every
+  // eligible bin has floored is dropped — consistency of stem weight beats
+  // reaching S exactly; the run-level advance still tightens.
   for (let pass = 0; pass < 4 && deficit > 1e-9; pass++) {
     let sum = 0
-    for (let i = 0; i < n; i++) if (flex[i]! > 0 && out[i]! > floor[i]! + 1e-12) sum += flex[i]!
+    for (let i = 0; i < n; i++) if (flex[i]! >= 0.05 && out[i]! > floor[i]! + 1e-12) sum += flex[i]!
     if (sum < 1e-9) break
     let taken = 0
     for (let i = 0; i < n; i++) {
-      if (!(flex[i]! > 0) || out[i]! <= floor[i]! + 1e-12) continue
+      if (!(flex[i]! >= 0.05) || out[i]! <= floor[i]! + 1e-12) continue
       const can = Math.min(deficit * (flex[i]! / sum), out[i]! - floor[i]!)
       out[i]! -= can
       taken += can
     }
     deficit -= taken
     if (taken < 1e-12) break
-  }
-  // Phase 2: the stems' turn. Whatever deficit remains is distributed across
-  // ALL bins proportional to their remaining headroom (out[i] - floor[i]),
-  // which by construction never overshoots any single floor when the
-  // deficit is within the total headroom. When the deficit exceeds it, every
-  // bin lands exactly on its floor and the leftover is dropped — the glyph
-  // genuinely cannot condense further; the run-level advance still tightens.
-  if (deficit > 1e-9) {
-    let totalHeadroom = 0
-    for (let i = 0; i < n; i++) totalHeadroom += out[i]! - floor[i]!
-    if (totalHeadroom > 1e-9) {
-      if (deficit >= totalHeadroom - 1e-9) {
-        for (let i = 0; i < n; i++) out[i] = floor[i]!
-      } else {
-        for (let i = 0; i < n; i++) {
-          const headroom = out[i]! - floor[i]!
-          out[i]! -= deficit * (headroom / totalHeadroom)
-        }
-      }
-    }
   }
   return out
 }
