@@ -199,8 +199,18 @@ quantize stretch values for caching — not expected.
 - **All-flexible profile** (hairline scripts): degrades to plain scale on that
   axis — least harmful exactly where stroke contrast is lowest, and with
   continuous flex this fallback is gradual rather than a cliff.
-- **Extreme condense**: flexible floors first, then rigid compresses, clamped
-  — no zero-width glyphs, no NaNs.
+- **Condense follows the ORDER OF SACRIFICE** (lab-found catastrophe at S = 0.5,
+  2026-09-01: slit counters, pointed arches, folded S spine): empty space
+  (counters, gaps) closes first but floors at 30% of natural width — a counter
+  thinner than that reads as a crack; ink running parallel to the stretch
+  (arches, crossbars, spines) shortens but floors at 50% because a curve needs
+  room to turn; only then do stems thin, and they stop at 60% — Compressed cuts
+  ARE lighter than Condensed. Leftover deficit is dropped (the glyph
+  under-condenses; no zero-width glyphs, no NaNs). Profiles now carry per-bin
+  ink occupancy so the floors know space from ink, and `stemWidthOf()` reads a
+  glyph's stem width off its rigid runs.
+- **Letters never touch**: combined sidebearings condense no further than
+  0.6 stem widths (fallback 0.09 em for glyphs with no rigid run).
 - **Small isolated ink components** (tittles, periods, colons, diacritics —
   found lens-distorted in lab judgment 2026-09-01): components whose larger
   dimension is under `SMALL_FEATURE_EM = 0.22` em are made FULLY rigid by a
