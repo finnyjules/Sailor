@@ -215,8 +215,11 @@ Unit tests in the pure core, following the `vectortype-outline` precedent:
   feature in two numbers.
 - **Monotone remaps**: no coordinate crossings from either map.
 - **Baseline anchor**: y = 0 is a fixed point of the vertical map at every SY.
-- **Width contract**: stretched run width ≈ S × natural; fit solver hits its
-  target within epsilon and respects clamps.
+- **Width contract**: stretched run width grows monotonically with S and stays
+  ≤ S × natural — ink contributes its rigid width and only whitespace scales
+  (the §2 semantics), so stem-heavy text deliberately lands under S×. The fit
+  solver solves against MEASURED width, hits its target within epsilon, and
+  respects clamps.
 - **Seam continuity**: for a `wdth` font, width-vs-dial sampled densely is
   monotone and jump-free across the axis→remap handoff.
 

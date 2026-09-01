@@ -31,6 +31,17 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Vector Type — smart stretch engine, Phase A — LANDED 2026-08-31 (lab gate open)
+
+Typographic stretch: white space stretches, ink doesn't. Pure engine in `lib/vectortype/stretch.ts`
+(tangent-aligned flex profiles after Pagurek, nearest-boundary chamfer over a per-glyph grid,
+monotone X/Y remaps with baseline-anchored vertical, `wdth`-axis cascade, optical weight
+compensation helper) + judgment rig at `/dev/stretch-lab` (naive-vs-smart-vs-axis columns,
+two-channel flex overlay, k dial). 20 unit tests incl. measured stem/ring/arch preservation on a
+real Inter fixture; live-verified (k=0 ≡ naive pixel-identical; anti-fallback probe). Spec + plan
+in `docs/superpowers/`. **GATE: Julien judges the lab before Phase B (studio dial, fit-to-width,
+stretch motion tracks) is planned.** First Phase B task: seam-continuity test w/ wdth fixture.
+
 ### Motion — the living timeline: vision + first spec — DESIGNED 2026-08-27 (not built)
 
 Motion promoted from wedge to program. Vision: [MOTION.md](MOTION.md) — **everything on the
