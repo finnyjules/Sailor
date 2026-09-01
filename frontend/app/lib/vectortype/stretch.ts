@@ -410,15 +410,23 @@ function binWidths(flex: Float64Array, w: number, S: number, ink?: Float64Array)
   // against what else the glyph happens to hold. A counter-less 'I' simply
   // under-condenses instead of stealing weight consistency from its
   // neighbours.
+  // The stems' own reduction already counts against the deficit — without
+  // subtracting it here, the counter waterfall below runs against the FULL
+  // original deficit on top of what the stems just gave, and the two
+  // reductions stack: the glyph condenses past S instead of landing on it.
+  let deficit = -delta
   for (let i = 0; i < n; i++) {
-    if (flex[i]! < 0.05) out[i] = w * stemFactor(S)
+    if (flex[i]! < 0.05) {
+      const thinned = w * stemFactor(S)
+      deficit -= w - thinned
+      out[i] = thinned
+    }
   }
   // The rest of the ORDER OF SACRIFICE: empty space (counters, gaps) gives
   // first but floors at EMPTY_BIN_FLOOR — thinner reads as a crack, not a
   // counter. Ink running parallel to the stretch (arches, crossbars, spines)
   // shortens next, floored higher: a curve needs room to turn. Each bin gets
   // its own floor from what it actually holds.
-  let deficit = -delta
   const floor = new Float64Array(n)
   for (let i = 0; i < n; i++) {
     const isInk = ink ? ink[i]! > 0 : flex[i]! < FULL_FLEX

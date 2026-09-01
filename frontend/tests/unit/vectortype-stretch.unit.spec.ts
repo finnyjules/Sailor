@@ -385,19 +385,21 @@ describe('partial-sliver growth cap', () => {
 })
 
 describe('condense — order of sacrifice', () => {
-  it('stems follow the common schedule; counters absorb the rest; the glyph may under-condense (S = 0.5)', () => {
+  it('stems follow the common schedule, counters take exactly the remainder, the glyph lands on S (S = 0.5)', () => {
     const flex = new Float64Array([1, 1, 1, 0, 0, 0, 0, 1, 1, 1])
     const ink  = new Float64Array([0, 0, 0, 1, 1, 1, 1, 0, 0, 0])
     const m = buildRemap({ start: 0, binSize: 10, flex, ink }, 0.5)
     const width = (i: number) => remapValue(m, (i + 1) * 10) - remapValue(m, i * 10)
     // stems thin by the common S-only schedule — never per-glyph negotiation …
     for (const i of [3, 4, 5, 6]) expect(width(i)).toBeCloseTo(10 * stemFactor(0.5), 6)
-    // … counters absorb the rest and floor at 30%: the stems only gave
-    // 4 × (10 − 6.889) ≈ 12.4 of the 50, counters can give 42, so counters
-    // floor and ~4.4 is dropped rather than negotiated back from the stems.
-    for (const i of [0, 1, 2, 7, 8, 9]) expect(width(i)).toBeCloseTo(3, 6)
-    // … so the glyph under-condenses instead of reaching S exactly.
-    expect(remapValue(m, 100) - remapValue(m, 0)).toBeCloseTo(4 * 10 * stemFactor(0.5) + 18, 6)
+    // … the stems gave 4 × 10 × (1 − stemFactor(0.5)) ≈ 12.44 of the 50
+    // needed; the counters (all flex 1, so shared evenly) take exactly what's
+    // left, ≈ 6.26 each — above their 3.0 floor, so nothing is dropped.
+    const stemGive = 4 * 10 * (1 - stemFactor(0.5))
+    for (const i of [0, 1, 2, 7, 8, 9]) expect(width(i)).toBeCloseTo(10 - (50 - stemGive) / 6, 6)
+    // … so the glyph lands EXACTLY on S — the two reductions add up to the
+    // deficit, not past it.
+    expect(remapValue(m, 100) - remapValue(m, 0)).toBeCloseTo(50, 6)
   })
 
   it('ink-bearing flexible bins (arches, crossbars) floor at 50% and the glyph under-condenses', () => {
@@ -420,6 +422,29 @@ describe('condense — order of sacrifice', () => {
     for (let i = 0; i < 10; i++) {
       expect(remapValue(m, (i + 1) * 10) - remapValue(m, i * 10)).toBeGreaterThanOrEqual(floors[i]! - 1e-6)
     }
+  })
+
+  it('never condenses past S: total width is ≥ S × natural for every profile', () => {
+    const cases: Array<[number[], number[]]> = [
+      [[1, 1, 1, 0, 0, 0, 0, 1, 1, 1], [0, 0, 0, 1, 1, 1, 1, 0, 0, 0]],
+      [[1, 0.5, 0, 0, 1, 1, 0, 0.5, 1, 1], [0, 1, 1, 1, 0, 1, 1, 1, 0, 0]],
+      [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+      [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+    ]
+    for (const S of [0.9, 0.7, 0.5, 0.3]) {
+      for (const [f, i] of cases) {
+        const m = buildRemap({ start: 0, binSize: 10, flex: new Float64Array(f), ink: new Float64Array(i) }, S)
+        expect(remapValue(m, 100) - remapValue(m, 0)).toBeGreaterThanOrEqual(100 * S - 1e-6)
+      }
+    }
+  })
+
+  it("condensed 'o' at S = 0.64 lands on S when its counter has room (no overshoot)", () => {
+    const run = textOutlines(font, 'o')
+    const g0 = run.glyphs[0]!, g1 = stretchOutlines(run, 0.64, 1).glyphs[0]!
+    const w0 = g0.bbox.maxX - g0.bbox.minX, w1 = g1.bbox.maxX - g1.bbox.minX
+    expect(w1 / w0).toBeGreaterThan(0.64 - 0.01)
+    expect(w1 / w0).toBeLessThan(0.64 + 0.03)
   })
 
   it('analyzeFlex reports ink occupancy: stems > 0, gaps = 0', () => {
