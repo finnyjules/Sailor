@@ -22,7 +22,9 @@
  *
  * Coordinates are FONT UNITS, y-up, baseline at y = 0, matching outline.ts.
  */
+import type { VtFont } from './font'
 import type { GlyphOutline, PathCommand, TextOutlines, VtBBox } from './outline'
+import { textOutlines } from './outline'
 
 export interface FlexProfile {
   /** Left/bottom edge of bin 0, in font units. */
@@ -440,4 +442,87 @@ export function stretchOutlines(
     width: penNew,
     bbox: empty ? { minX: 0, minY: 0, maxX: 0, maxY: 0 } : { minX, minY, maxX, maxY },
   }
+}
+
+/** Binary search a monotone-increasing measurement for the axis value whose
+ *  measure hits `target`, clamped to [min, max]. 24 iterations ≈ float
+ *  precision on any real axis range. */
+export function solveAxis(
+  measure: (v: number) => number,
+  min: number,
+  max: number,
+  target: number,
+): number {
+  if (measure(max) <= target) return max
+  if (measure(min) >= target) return min
+  let lo = min, hi = max
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2
+    if (measure(mid) < target) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
+export interface StretchPlan {
+  coords: Record<string, number>
+  /** Stretch factor left for the geometric remap after the axis is spent. */
+  residual: number
+}
+
+/**
+ * Spend a real `wdth` axis before geometry: real interpolated outlines beat
+ * any remap, so the remap only carries what the axis can't reach. Calibration
+ * is by MEASURING shaped run width at candidate coords — axis units are not
+ * percent, and every family maps them differently.
+ *
+ * Horizontal only by design: there is no common height axis, so `stretchY` is
+ * always pure remap (see the spec's cascade section).
+ */
+export function planStretch(
+  font: VtFont,
+  text: string,
+  axes: Record<string, number>,
+  S: number,
+): StretchPlan {
+  const wdth = font.axes.find(a => a.tag === 'wdth')
+  if (!wdth || S === 1 || !text) return { coords: { ...axes }, residual: S }
+  const current = axes.wdth ?? wdth.default
+  const measure = (v: number) => textOutlines(font, text, { ...axes, wdth: v }).width
+  const baseWidth = measure(current)
+  if (baseWidth <= 0) return { coords: { ...axes }, residual: S }
+  const target = baseWidth * S
+  // Only spend headroom in the direction of travel from the user's own value.
+  const [lo, hi] = S > 1 ? [current, wdth.max] : [wdth.min, current]
+  const solved = solveAxis(measure, lo, hi, target)
+  const achieved = measure(solved)
+  return {
+    coords: { ...axes, wdth: solved },
+    residual: achieved > 0 ? target / achieved : S,
+  }
+}
+
+/**
+ * Optical colour compensation (Ahrens): a stem of constant measured width
+ * reads LIGHTER beside grown counters, so a genuinely drawn Extended cut is a
+ * touch heavier. On fonts with a `wght` axis, couple a small weight nudge to
+ * the stretch. `amount` is the lab's tuning dial; 1 ≈ 6% of the axis range at
+ * S = 2. Ships in Phase B only if the lab says it earns its keep.
+ */
+export function weightCompensation(
+  font: VtFont,
+  axes: Record<string, number>,
+  S: number,
+  SY: number,
+  amount = 1,
+): Record<string, number> {
+  const wght = font.axes.find(a => a.tag === 'wght')
+  if (!wght) return { ...axes }
+  const growth = Math.max(S, 1 / S) * Math.max(SY, 1 / SY) - 1
+  if (growth <= 0) return { ...axes }
+  const sign = S * SY >= 1 ? 1 : -1
+  const range = wght.max - wght.min
+  const base = axes.wght ?? wght.default
+  const nudged = base + sign * growth * range * 0.06 * amount
+  return { ...axes, wght: Math.min(wght.max, Math.max(wght.min, nudged)) }
 }

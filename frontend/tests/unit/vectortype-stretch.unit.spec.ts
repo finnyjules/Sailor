@@ -15,7 +15,7 @@ import { normaliseAxes } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 import { textOutlines } from '~/lib/vectortype/outline'
 import type { PathCommand, TextOutlines, VtBBox } from '~/lib/vectortype/outline'
-import { analyzeFlex, buildRemap, glyphFlexFor, remapValue, stretchCommands, stretchOutlines } from '~/lib/vectortype/stretch'
+import { analyzeFlex, buildRemap, glyphFlexFor, planStretch, remapValue, solveAxis, stretchCommands, stretchOutlines, weightCompensation } from '~/lib/vectortype/stretch'
 
 /** Closed axis-aligned rectangle as outline commands (font-unit space, y-up). */
 function rect(x0: number, y0: number, x1: number, y1: number): PathCommand[] {
@@ -297,5 +297,33 @@ describe('stretchOutlines (fixture font)', () => {
 
   it('S = SY = 1 returns the outlines unchanged', () => {
     expect(stretchOutlines(base, 1, 1)).toBe(base)
+  })
+})
+
+describe('cascade', () => {
+  it('solveAxis finds the value hitting the target on a monotone function', () => {
+    const measure = (v: number) => 100 + v * 2   // width grows with the axis
+    expect(solveAxis(measure, 0, 100, 200)).toBeCloseTo(50, 1)
+    // Target beyond reach clamps to the extreme.
+    expect(solveAxis(measure, 0, 100, 1000)).toBe(100)
+    expect(solveAxis(measure, 0, 100, 50)).toBe(0)
+  })
+
+  it('planStretch passes S through untouched when the font has no wdth axis', () => {
+    const plan = planStretch(font, 'Sailor', {}, 1.8)
+    expect(plan.residual).toBeCloseTo(1.8, 6)
+    expect(plan.coords.wdth).toBeUndefined()
+  })
+
+  it('weightCompensation nudges wght up when extending, and is clamped', () => {
+    const base = { wght: 400 }
+    const wide = weightCompensation(font, base, 2, 1)
+    expect(wide.wght!).toBeGreaterThan(400)
+    const extreme = weightCompensation(font, base, 2.5, 2.5, 5)
+    const wghtAxis = font.axes.find(a => a.tag === 'wght')!
+    expect(extreme.wght!).toBeLessThanOrEqual(wghtAxis.max)
+    // No wght axis -> untouched.
+    const bare: VtFont = { ...font, axes: font.axes.filter(a => a.tag !== 'wght') }
+    expect(weightCompensation(bare, base, 2, 1)).toEqual(base)
   })
 })
