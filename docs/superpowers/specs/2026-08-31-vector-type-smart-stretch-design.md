@@ -201,6 +201,14 @@ quantize stretch values for caching — not expected.
   continuous flex this fallback is gradual rather than a cliff.
 - **Extreme condense**: flexible floors first, then rigid compresses, clamped
   — no zero-width glyphs, no NaNs.
+- **Small isolated ink components** (tittles, periods, colons, diacritics —
+  found lens-distorted in lab judgment 2026-09-01): components whose larger
+  dimension is under `SMALL_FEATURE_EM = 0.22` em are made FULLY rigid by a
+  connected-component pass over the ink grid — a dot keeps its exact shape and
+  rides the remap as a unit; vertical stretch moves it up instead of deforming
+  it. Defense-in-depth beneath it: a resisting (partial-flex) bin may grow at
+  most `2·S` × its natural width, with clamped overflow spilling to fully
+  flexible bins — so no few slivers can ever absorb a whole glyph's stretch.
 - **Spaces/blanks**: advance stretches; no outline to remap.
 - **Ligatures**: multi-codepoint glyphs flex-analyze like any other outline.
 
