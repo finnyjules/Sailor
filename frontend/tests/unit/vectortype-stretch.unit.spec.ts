@@ -15,7 +15,7 @@ import { normaliseAxes } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 import { textOutlines } from '~/lib/vectortype/outline'
 import type { PathCommand, TextOutlines, VtBBox } from '~/lib/vectortype/outline'
-import { analyzeFlex, buildRemap, glyphFlexFor, planStretch, remapValue, solveAxis, stretchCommands, stretchOutlines, weightCompensation } from '~/lib/vectortype/stretch'
+import { analyzeFlex, buildRemap, glyphFlexFor, planStretch, remapValue, solveAxis, stemWidthOf, stretchCommands, stretchOutlines, weightCompensation } from '~/lib/vectortype/stretch'
 
 /** Closed axis-aligned rectangle as outline commands (font-unit space, y-up). */
 function rect(x0: number, y0: number, x1: number, y1: number): PathCommand[] {
@@ -381,5 +381,90 @@ describe('partial-sliver growth cap', () => {
     // stretch moves the dot up rather than deforming it.
     const gapBin = Math.floor((730 / 880) * 24)
     expect(y.flex[gapBin]).toBe(1)
+  })
+})
+
+describe('condense — order of sacrifice', () => {
+  it('counters floor at 30%, stems give next and stop at 60% (mixed profile, S = 0.5)', () => {
+    const flex = new Float64Array([1, 1, 1, 0, 0, 0, 0, 1, 1, 1])
+    const ink  = new Float64Array([0, 0, 0, 1, 1, 1, 1, 0, 0, 0])
+    const m = buildRemap({ start: 0, binSize: 10, flex, ink }, 0.5)
+    const width = (i: number) => remapValue(m, (i + 1) * 10) - remapValue(m, i * 10)
+    // empties hit their 30% floor (3) …
+    for (const i of [0, 1, 2, 7, 8, 9]) expect(width(i)).toBeCloseTo(3, 6)
+    // … the remaining deficit (50 − 42 = 8) comes out of the four stems evenly …
+    for (const i of [3, 4, 5, 6]) expect(width(i)).toBeCloseTo(8, 6)
+    // … and the glyph reaches S exactly.
+    expect(remapValue(m, 100) - remapValue(m, 0)).toBeCloseTo(50, 6)
+  })
+
+  it('ink-bearing flexible bins (arches, crossbars) floor at 50% and the glyph under-condenses', () => {
+    const flex = new Float64Array(10).fill(1)
+    const ink  = new Float64Array(10).fill(1)
+    const m = buildRemap({ start: 0, binSize: 10, flex, ink }, 0.3)
+    for (let i = 0; i < 10; i++) {
+      expect(remapValue(m, (i + 1) * 10) - remapValue(m, i * 10)).toBeCloseTo(5, 6)
+    }
+    expect(remapValue(m, 100) - remapValue(m, 0)).toBeCloseTo(50, 6)   // not 30
+  })
+
+  it('never breaches a floor even at an extreme S, and stays monotone', () => {
+    const flex = new Float64Array([1, 0.5, 0, 0, 1, 1, 0, 0.5, 1, 1])
+    const ink  = new Float64Array([0, 1, 1, 1, 0, 1, 1, 1, 0, 0])
+    const m = buildRemap({ start: 0, binSize: 10, flex, ink }, 0.2)
+    let prev = -Infinity
+    for (let v = 0; v <= 100; v += 1) { const r = remapValue(m, v); expect(r).toBeGreaterThanOrEqual(prev); prev = r }
+    const floors = [3, 5, 6, 6, 3, 5, 6, 5, 3, 3]
+    for (let i = 0; i < 10; i++) {
+      expect(remapValue(m, (i + 1) * 10) - remapValue(m, i * 10)).toBeGreaterThanOrEqual(floors[i]! - 1e-6)
+    }
+  })
+
+  it('analyzeFlex reports ink occupancy: stems > 0, gaps = 0', () => {
+    const left = rect(0, 0, 100, 700), right = rect(500, 0, 600, 700)
+    const { x } = analyzeFlex([...left, ...right], { minX: 0, minY: 0, maxX: 600, maxY: 700 }, { bins: 24 })
+    expect(x.ink).toBeDefined()
+    expect(x.ink![0]).toBeGreaterThan(0)
+    expect(x.ink![23]).toBeGreaterThan(0)
+    const gapStart = Math.ceil((100 - x.start) / x.binSize) + 1
+    const gapEnd = Math.floor((500 - x.start) / x.binSize) - 1
+    for (let i = gapStart; i < gapEnd; i++) expect(x.ink![i]).toBe(0)
+  })
+
+  it("stemWidthOf reads the 'l' stem and the 'o' flank off the fixture", () => {
+    const l = textOutlines(font, 'l').glyphs[0]!
+    const lw = l.bbox.maxX - l.bbox.minX
+    const sw = stemWidthOf(analyzeFlex(l.commands, l.bbox).x)
+    expect(sw).toBeGreaterThan(lw * 0.8)
+    expect(sw).toBeLessThanOrEqual(lw * 1.05)
+    const o = textOutlines(font, 'o').glyphs[0]!
+    const ow = stemWidthOf(analyzeFlex(o.commands, o.bbox).x)
+    expect(ow).toBeGreaterThan(0)
+    expect(ow).toBeLessThan((o.bbox.maxX - o.bbox.minX) * 0.35)
+  })
+
+  it("condensed 'o' at S = 0.5 keeps a real counter and thins its flanks no further than 60%", () => {
+    const run = textOutlines(font, 'o')
+    const g0 = run.glyphs[0]!
+    const g1 = stretchOutlines(run, 0.5, 1).glyphs[0]!
+    const midY = (g0.bbox.minY + g0.bbox.maxY) / 2
+    const r0 = inkRunsAtY(g0.commands, midY), r1 = inkRunsAtY(g1.commands, midY)
+    expect(r0.length).toBe(2); expect(r1.length).toBe(2)
+    const counter0 = r0[1]![0] - r0[0]![1], counter1 = r1[1]![0] - r1[0]![1]
+    expect(counter1).toBeGreaterThan(counter0 * 0.25)
+    for (let i = 0; i < 2; i++) {
+      const t0 = r0[i]![1] - r0[i]![0], t1 = r1[i]![1] - r1[i]![0]
+      expect(t1).toBeLessThanOrEqual(t0 * 1.02)
+      expect(t1).toBeGreaterThan(t0 * 0.55)
+    }
+  })
+
+  it("condensed 'Sailor' at S = 0.5 never lets neighbours touch", () => {
+    const out = stretchOutlines(textOutlines(font, 'Sailor'), 0.5, 1)
+    const inked = out.glyphs.filter(g => g.commands.length && g.bbox.maxX > g.bbox.minX)
+    for (let i = 0; i + 1 < inked.length; i++) {
+      const a = inked[i]!, b = inked[i + 1]!
+      expect(a.x + a.bbox.maxX).toBeLessThan(b.x + b.bbox.minX)
+    }
   })
 })

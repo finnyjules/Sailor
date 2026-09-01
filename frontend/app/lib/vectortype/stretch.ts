@@ -32,6 +32,11 @@ export interface FlexProfile {
   binSize: number
   /** Per-bin stretchiness in [0, 1]; 1 = fully flexible. */
   flex: Float64Array
+  /** Fraction of the bin's grid cells that are ink, in [0, 1]. Empty space
+   *  (counters, gaps) is 0; used to pick condense floors. Optional so
+   *  hand-built profiles in tests stay terse — absent means "infer from
+   *  flex": fully flexible ⇒ empty, anything resisting ⇒ ink. */
+  ink?: Float64Array
 }
 
 export interface GlyphFlex {
@@ -257,29 +262,59 @@ export function analyzeFlex(
   }
 
   // Per-column / per-row minima over INK cells only, then downsample to bins.
+  // colInk/rowInk count ink cells per column/row in the same pass, so bins
+  // can report how much of their span is actually ink (vs. counters/gaps).
   const colMin = new Float64Array(GRID).fill(1)
   const rowMin = new Float64Array(GRID).fill(1)
+  const colInk = new Float64Array(GRID)
+  const rowInk = new Float64Array(GRID)
   for (let r = 0; r < GRID; r++) {
     for (let c = 0; c < GRID; c++) {
       const j = idx(c, r)
       if (!ink[j]) continue
+      colInk[c]!++
+      rowInk[r]!++
       if (ax[j]! < colMin[c]!) colMin[c] = ax[j]!
       if (ay[j]! < rowMin[r]!) rowMin[r] = ay[j]!
     }
   }
+  const inkX = new Float64Array(bins)
+  const inkY = new Float64Array(bins)
   const cellsPerBin = GRID / bins
   for (let b = 0; b < bins; b++) {
     let mx = 1, my = 1
+    let ix = 0, iy = 0
     const g0 = Math.floor(b * cellsPerBin)
     const g1 = Math.min(GRID - 1, Math.ceil((b + 1) * cellsPerBin) - 1)
     for (let g = g0; g <= g1; g++) {
       if (colMin[g]! < mx) mx = colMin[g]!
       if (rowMin[g]! < my) my = rowMin[g]!
+      if (colInk[g]! / GRID > ix) ix = colInk[g]! / GRID
+      if (rowInk[g]! / GRID > iy) iy = rowInk[g]! / GRID
     }
     flexX[b] = Math.pow(mx, k)
     flexY[b] = Math.pow(my, k)
+    inkX[b] = ix
+    inkY[b] = iy
   }
+  out.x.ink = inkX
+  out.y.ink = inkY
   return out
+}
+
+/** Stem width estimate from a profile: the longest contiguous run of rigid,
+ *  ink-bearing bins, in font units. 0 when the glyph has no rigid run (a
+ *  hairline script, an S whose only verticals are short terminals). */
+export function stemWidthOf(profile: FlexProfile): number {
+  const { flex, ink, binSize } = profile
+  let best = 0, run = 0
+  for (let i = 0; i < flex.length; i++) {
+    const isInk = ink ? ink[i]! > 0 : true
+    const rigid = flex[i]! < 0.05 && isInk
+    run = rigid ? run + 1 : 0
+    if (run > best) best = run
+  }
+  return best * binSize
 }
 
 export interface Remap {
@@ -287,12 +322,18 @@ export interface Remap {
   dst: Float64Array
 }
 
-/** Fraction of its natural width a flexible bin may condense to before the
- *  deficit spills over to rigid bins. */
-const BIN_FLOOR = 0.02
-/** Uniform-compression floor once every bin is pinned — the "glyph never
- *  collapses" clamp. */
-const MIN_TOTAL_SCALE = 0.25
+/** Condense floors, as fractions of a bin's natural width — the ORDER OF
+ *  SACRIFICE a Condensed→Compressed cut follows. Empty space (counters,
+ *  gaps) closes first but a counter thinner than this reads as a crack, not
+ *  a counter … */
+const EMPTY_BIN_FLOOR = 0.3
+/** … ink running parallel to the stretch (arches, crossbars, spines)
+ *  shortens but a curve needs room to turn … */
+const INK_BIN_FLOOR = 0.5
+/** … and only once those are floored do the stems thin — Compressed cuts
+ *  ARE lighter than Condensed. Below this the glyph simply under-condenses
+ *  (leftover deficit is dropped; the run-level advance still tightens). */
+const RIGID_BIN_FLOOR = 0.6
 /** A bin whose flex is at or above this is fully flexible — empty space, or
  *  ink running parallel to the stretch (a crossbar's interior) — and may
  *  absorb unlimited growth: stretching space IS the point. Below it, the bin
@@ -306,8 +347,11 @@ const FULL_FLEX = 0.95
  *  under-achieves S; the advance rule already covers a glyph that cannot
  *  widen (an extended I is barely wider). */
 const PARTIAL_GROWTH_CAP = 2
+/** Combined sidebearings may condense to this many stem widths but no
+ *  further — the rule that keeps condensed letters from touching. */
+const WHITESPACE_FLOOR_STEMS = 0.6
 
-function binWidths(flex: Float64Array, w: number, S: number): Float64Array {
+function binWidths(flex: Float64Array, w: number, S: number, ink?: Float64Array): Float64Array {
   const n = flex.length
   const out = new Float64Array(n).fill(w)
   const total = n * w
@@ -344,37 +388,64 @@ function binWidths(flex: Float64Array, w: number, S: number): Float64Array {
     // design — whitespace still scales, so the word's rhythm holds.
     return out
   }
-  // Condense: flexible bins give first (floored), then everything compresses
-  // uniformly, clamped so the glyph never collapses.
+  // Condense: the ORDER OF SACRIFICE. Empty space (counters, gaps) gives
+  // first but floors at EMPTY_BIN_FLOOR — thinner reads as a crack, not a
+  // counter. Ink running parallel to the stretch (arches, crossbars, spines)
+  // shortens next, floored higher: a curve needs room to turn. Only once
+  // both are floored do stems thin, and even then no further than
+  // RIGID_BIN_FLOOR — a Compressed cut is lighter than a Condensed one, not
+  // collapsed. Each bin gets its own floor from what it actually holds.
   let deficit = -delta
-  const floor = w * BIN_FLOOR
+  const floor = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    const isInk = ink ? ink[i]! > 0 : flex[i]! < FULL_FLEX
+    floor[i] = w * (flex[i]! < 0.05 ? RIGID_BIN_FLOOR : isInk ? INK_BIN_FLOOR : EMPTY_BIN_FLOOR)
+  }
+  // Phase 1: bins that resist the stretch least (flex > 0 — empty space and
+  // ink-bearing-but-flexible slices) shrink toward their OWN floor first,
+  // proportional to flex, over up to 4 waterfall passes (a bin hitting its
+  // floor stops absorbing and the rest re-split what's left).
   for (let pass = 0; pass < 4 && deficit > 1e-9; pass++) {
     let sum = 0
-    for (let i = 0; i < n; i++) if (flex[i]! > 0 && out[i]! > floor + 1e-12) sum += flex[i]!
+    for (let i = 0; i < n; i++) if (flex[i]! > 0 && out[i]! > floor[i]! + 1e-12) sum += flex[i]!
     if (sum < 1e-9) break
     let taken = 0
     for (let i = 0; i < n; i++) {
-      if (!(flex[i]! > 0) || out[i]! <= floor + 1e-12) continue
-      const can = Math.min(deficit * (flex[i]! / sum), out[i]! - floor)
+      if (!(flex[i]! > 0) || out[i]! <= floor[i]! + 1e-12) continue
+      const can = Math.min(deficit * (flex[i]! / sum), out[i]! - floor[i]!)
       out[i]! -= can
       taken += can
     }
     deficit -= taken
     if (taken < 1e-12) break
   }
+  // Phase 2: the stems' turn. Whatever deficit remains is distributed across
+  // ALL bins proportional to their remaining headroom (out[i] - floor[i]),
+  // which by construction never overshoots any single floor when the
+  // deficit is within the total headroom. When the deficit exceeds it, every
+  // bin lands exactly on its floor and the leftover is dropped — the glyph
+  // genuinely cannot condense further; the run-level advance still tightens.
   if (deficit > 1e-9) {
-    let cur = 0
-    for (const v of out) cur += v
-    const scale = Math.max(MIN_TOTAL_SCALE, (cur - deficit) / cur)
-    for (let i = 0; i < n; i++) out[i]! *= scale
+    let totalHeadroom = 0
+    for (let i = 0; i < n; i++) totalHeadroom += out[i]! - floor[i]!
+    if (totalHeadroom > 1e-9) {
+      if (deficit >= totalHeadroom - 1e-9) {
+        for (let i = 0; i < n; i++) out[i] = floor[i]!
+      } else {
+        for (let i = 0; i < n; i++) {
+          const headroom = out[i]! - floor[i]!
+          out[i]! -= deficit * (headroom / totalHeadroom)
+        }
+      }
+    }
   }
   return out
 }
 
 export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number): Remap {
-  const { start, binSize: w, flex } = profile
+  const { start, binSize: w, flex, ink } = profile
   const n = flex.length
-  const widths = binWidths(flex, w, S)
+  const widths = binWidths(flex, w, S, ink)
   const src = new Float64Array(n + 1)
   const dst = new Float64Array(n + 1)
   let acc = start
@@ -479,8 +550,9 @@ export function stretchOutlines(
     let bbox = g.bbox
     let inkW = 0
     let newInkW = 0
+    let flex: GlyphFlex | undefined
     if (hasInk(g)) {
-      const flex = glyphFlexFor(g, flexOpts)
+      flex = glyphFlexFor(g, flexOpts)
       const rx = buildRemap(flex.x, S)
       const ry = buildRemap(flex.y, SY, 0)
       commands = applyRemaps(g.commands, rx, ry)
@@ -496,9 +568,16 @@ export function stretchOutlines(
     // Sidebearings are flexible space: the ink contributes its own (possibly
     // rigid) new width, and the whitespace around it scales with S. An 'l'
     // whose ink cannot widen still gains a little air — an extended I *is*
-    // barely wider.
+    // barely wider. But combined sidebearings may condense only so far:
+    // below WHITESPACE_FLOOR_STEMS stem widths, neighbouring letters touch.
     const whitespace = g.advance - inkW
-    const advance = newInkW + whitespace * S
+    let advance: number
+    if (flex && S < 1 && whitespace > 0) {
+      const stemRef = stemWidthOf(flex.x) || 0.09 * outlines.unitsPerEm
+      advance = newInkW + Math.max(whitespace * S, Math.min(whitespace, WHITESPACE_FLOOR_STEMS * stemRef))
+    } else {
+      advance = newInkW + whitespace * S
+    }
     // xOffset positioning (g.x drifting from the accumulated pen) is preserved
     // proportionally rather than dropped.
     const offset = (g.x - penOld) * S
