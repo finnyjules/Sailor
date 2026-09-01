@@ -3880,7 +3880,7 @@ async function onClose() {
            string + font pickers, the mesh remesh/solidify block, the five modifier group
            captions, the four index-valued segmented pickers, the Cloner's Step caption and
            its live cost readout. -->
-      <div v-else-if="selectedIsPrimitive" class="flex flex-col gap-2" @pointerdown.capture="onControlsPointerDown">
+      <div v-if="selectedIsPrimitive && !sculpting" class="flex flex-col gap-2" @pointerdown.capture="onControlsPointerDown">
         <StudioControlPanel
           :controls="panelControls"
           :order="SCENE_GEOMETRY_SECTIONS"
