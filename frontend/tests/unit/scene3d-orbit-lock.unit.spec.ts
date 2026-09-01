@@ -14,9 +14,16 @@ describe('orbit lock', () => {
     expect(orbitShouldBeEnabled(true, false, false)).toBe(false)  // camera motion
     expect(orbitShouldBeEnabled(false, true, false)).toBe(false)  // gizmo drag
     expect(orbitShouldBeEnabled(false, false, true)).toBe(false)  // sculpting
+    expect(orbitShouldBeEnabled(false, false, false, true)).toBe(false)  // decal grab-drag
+  })
+
+  it('the decal-drag lock defaults off when omitted', () => {
+    // The 4th arg is optional so the pre-decal-drag call sites (and these tests) still read
+    // as three concerns; omitting it must not silently disable orbit.
+    expect(orbitShouldBeEnabled(false, false, false)).toBe(true)
   })
 
   it('stays disabled while several overlap', () => {
-    expect(orbitShouldBeEnabled(true, true, true)).toBe(false)
+    expect(orbitShouldBeEnabled(true, true, true, true)).toBe(false)
   })
 })

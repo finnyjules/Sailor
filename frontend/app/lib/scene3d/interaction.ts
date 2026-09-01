@@ -51,8 +51,9 @@ export function orbitShouldBeEnabled(
   cameraLocked: boolean,
   gizmoDragging: boolean,
   sculpting: boolean,
+  decalDragging = false,
 ): boolean {
-  return !cameraLocked && !gizmoDragging && !sculpting
+  return !cameraLocked && !gizmoDragging && !sculpting && !decalDragging
 }
 
 /** REMOVE every handle (visual AND picker) whose name isn't in `keep`.
@@ -166,6 +167,15 @@ export class SceneInteraction {
   // dropping out of placement mode; `cb` fires once, with the hit already
   // resolved into the target's local space.
   private placement: { valid: (id: string) => boolean; cb: (hit: PlacementHit) => void } | null = null
+  // Grab-to-move a decal: armed in `onDown` when the pointer goes down over a draggable
+  // decal (see callbacks.decalTargetFor), consumed by `onMove` (re-projects the sticker onto
+  // `targetRoot` under the cursor) and cleared in `onUp`. `decalDragging` is the orbit lock —
+  // like `sculpting`/`gizmoDragging`, it disables OrbitControls for the gesture so a grab
+  // slides the sticker instead of orbiting. `moved` gates the >4px click/drag split: a grab
+  // that never crosses it is a plain select, not a reposition.
+  private decalDrag: { decalId: string; targetRoot: THREE.Object3D } | null = null
+  private decalDragging = false
+  private decalDragMoved = false
 
   constructor(
     private engine: SceneEngine,
@@ -190,6 +200,16 @@ export class SceneInteraction {
        *  otherwise stay armed with nothing left to consume it. */
       onPlacementCancelled?: () => void
       onCameraChange?: () => void
+      /** Given a scene id, return the target surface id if it's a DRAGGABLE decal, else
+       *  null. The surface answers from the doc (`kind === 'decal' → targetId`). Its
+       *  presence is what enables grab-to-move: `onDown` consults it, and a non-null answer
+       *  arms a live reposition (camera locked) instead of an orbit/select. */
+      decalTargetFor?: (id: string) => string | null
+      /** Fired on each move of a decal grab-drag with the new surface hit (target-local),
+       *  same shape `beginPlacement` resolves — the surface writes position/rotation the
+       *  same way `onDecalPlaced` does. The target never changes mid-drag (the ray tests the
+       *  original surface only), so a drag slides the sticker across its own solid. */
+      onDecalReposition?: (decalId: string, hit: PlacementHit) => void
     },
   ) {
     this.orbit = new OrbitControls(engine.camera, domElement)
@@ -298,7 +318,7 @@ export class SceneInteraction {
   /** Recomputes `orbit.enabled` from the three locks. Called whenever any
    *  changes — never write `orbit.enabled` directly (see field comments). */
   private updateOrbitEnabled(): void {
-    this.orbit.enabled = orbitShouldBeEnabled(this.cameraLocked, this.gizmoDragging, this.sculpting)
+    this.orbit.enabled = orbitShouldBeEnabled(this.cameraLocked, this.gizmoDragging, this.sculpting, this.decalDragging)
   }
 
   /** Surface-owned lock: true while camera motion is animating playback.
@@ -410,6 +430,17 @@ export class SceneInteraction {
   // Shift OFF — synthetic drags annotate only pointerdown/up, and the drag's
   // starting state should govern. Pressing Shift mid-drag still engages live.
   private onMove = (e: PointerEvent) => {
+    if (this.decalDrag) {
+      // Hold off until the pointer clears the 4px click threshold, so a plain click on a
+      // sticker still selects instead of nudging it by a sub-pixel jitter.
+      if (!this.decalDragMoved) {
+        const d = this.downAt
+        if (!d || Math.hypot(e.clientX - d[0], e.clientY - d[1]) <= 4) return
+        this.decalDragMoved = true
+      }
+      this.dragDecalTo(e)
+      return
+    }
     const dragging = this.gizmos.some((g) => g.dragging)
     if (!dragging || e.shiftKey) this.shiftDown = e.shiftKey
   }
@@ -433,17 +464,113 @@ export class SceneInteraction {
   }
   private suppressNextContextMenu = false
 
+  /** Pointer → normalized device coords against the canvas rect. */
+  private ndcFrom(e: PointerEvent): THREE.Vector2 {
+    const rect = this.domElement.getBoundingClientRect()
+    return new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    )
+  }
+
+  /** Walk up to the nearest ancestor stamped with a scene id (object roots carry one). */
+  private sceneIdAt(obj: THREE.Object3D | null): string | undefined {
+    let n: THREE.Object3D | null = obj
+    while (n && !n.userData.sceneId) n = n.parent
+    return n?.userData.sceneId as string | undefined
+  }
+
+  /** If the pointer is over a draggable decal (front-most coplanar cluster — the sticker sits
+   *  ON its surface, so surface and sticker hits share a depth), return the grab context.
+   *  `decalTargetFor` is what decides drag-ability; a missing callback means the feature is off. */
+  private decalGrabUnderPointer(e: PointerEvent): { decalId: string; targetRoot: THREE.Object3D } | null {
+    const decalTargetFor = this.callbacks.decalTargetFor
+    if (!decalTargetFor) return null
+    this.raycaster.setFromCamera(this.ndcFrom(e), this.engine.camera)
+    const roots = [...this.engine.objectRoots.values()].filter((r) => r.visible)
+    const hits = this.raycaster.intersectObjects(roots, true)
+    if (!hits.length) return null
+    const frontDist = hits[0]!.distance
+    for (const hit of hits) {
+      if (hit.distance > frontDist + 0.05) break // only the front-most coplanar cluster
+      if (hit.object.userData.isGizmoHelper) continue
+      const id = this.sceneIdAt(hit.object)
+      if (!id) continue
+      const targetId = decalTargetFor(id)
+      if (!targetId) continue
+      const targetRoot = this.engine.objectRoots.get(targetId)
+      if (targetRoot) return { decalId: id, targetRoot }
+    }
+    return null
+  }
+
+  /** Re-project the dragged decal onto its target surface under the cursor and fire the
+   *  reposition callback. Raycasts ONLY the original target (not the whole scene), skipping
+   *  any decal geometry on it (its own sticker or siblings, coplanar with the surface) so the
+   *  ray lands on the solid, never on the sticker being dragged. A miss (dragged off the
+   *  surface) leaves the sticker where it was. */
+  private dragDecalTo(e: PointerEvent): void {
+    const drag = this.decalDrag!
+    this.raycaster.setFromCamera(this.ndcFrom(e), this.engine.camera)
+    const hits = this.raycaster.intersectObject(drag.targetRoot, true)
+    for (const hit of hits) {
+      if (!hit.face) continue
+      let n: THREE.Object3D | null = hit.object
+      let onDecal = false
+      while (n && n !== drag.targetRoot) { if (n.userData.decalObj) { onDecal = true; break } n = n.parent }
+      if (onDecal) continue
+      const lp = drag.targetRoot.worldToLocal(hit.point.clone())
+      const targetId = drag.targetRoot.userData.sceneId as string
+      this.callbacks.onDecalReposition?.(drag.decalId, {
+        targetId,
+        localPoint: [lp.x, lp.y, lp.z],
+        localNormal: [hit.face.normal.x, hit.face.normal.y, hit.face.normal.z],
+      })
+      return
+    }
+  }
+
   private onDown = (e: PointerEvent) => {
     this.shiftDown = e.shiftKey
     if (e.button === 2 && this.placementActive) { this.rightDownAt = [e.clientX, e.clientY]; return }
     if (e.button !== 0) return
     this.downAt = [e.clientX, e.clientY]
+    // Grab-to-move a decal: if the press lands on a draggable sticker (and we're not placing,
+    // sculpting, or already grabbing a gizmo handle — its own pointerdown ran first), arm a
+    // live reposition and lock the camera for the gesture. A grab that never moves >4px falls
+    // through to a plain select in `onUp`.
+    if (!this.placement && !this.sculptModeActive && !this.gizmos.some((g) => g.dragging)) {
+      const grab = this.decalGrabUnderPointer(e)
+      if (grab) {
+        this.decalDrag = grab
+        this.decalDragMoved = false
+        this.decalDragging = true
+        this.updateOrbitEnabled()
+        try { this.domElement.setPointerCapture(e.pointerId) } catch { /* capture best-effort */ }
+        return
+      }
+    }
     // NOTE: do not reset gizmoDragged here — the gizmos' earlier-registered
     // pointerdown listeners have already latched it for handle grabs, and the
     // element's setPointerCapture guarantees onUp always fires to consume it.
   }
 
   private onUp = (e: PointerEvent) => {
+    // End a decal grab first (it owns the whole gesture): release the camera lock and pointer
+    // capture. A grab that never moved is a plain click → select the sticker, matching the
+    // normal select path this branch pre-empted in `onDown`.
+    if (this.decalDrag) {
+      const decalId = this.decalDrag.decalId
+      const moved = this.decalDragMoved
+      this.decalDrag = null
+      this.decalDragging = false
+      this.decalDragMoved = false
+      this.updateOrbitEnabled()
+      try { this.domElement.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
+      this.downAt = null
+      if (!moved) this.callbacks.onSelect(decalId, e.shiftKey || e.metaKey || e.ctrlKey)
+      return
+    }
     if (e.button === 2) {
       const down = this.rightDownAt
       this.rightDownAt = null

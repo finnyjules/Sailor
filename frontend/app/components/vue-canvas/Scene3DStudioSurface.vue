@@ -1569,6 +1569,18 @@ onMounted(() => {
     // A right-click in the viewport dropped the armed placement — clear the
     // surface's half of that mode (crosshair, hint banner, "Click a surface…").
     onPlacementCancelled: () => { placingDecal.value = null },
+    // Grab-to-move a sticker: a decal is draggable, and its surface is its own target.
+    decalTargetFor: (id) => {
+      const o = doc.objects.find((x) => x.id === id)
+      return o?.kind === 'decal' ? o.targetId : null
+    },
+    // Live reposition during a drag — same write as onDecalPlaced's reposition branch, minus
+    // the target swap (a drag stays on the original solid). The engine re-projects the sticker
+    // because decalKeyFor includes position/rotation.
+    onDecalReposition: (decalId, hit) => {
+      const d = doc.objects.find((x) => x.id === decalId)
+      if (d?.kind === 'decal') { d.position = hit.localPoint; d.rotation = eulerFromNormal(hit.localNormal) }
+    },
   })
   interaction.orbit.target.set(...doc.camera.target)
   engine.syncFromDoc(doc)
@@ -4101,6 +4113,7 @@ async function onClose() {
             <StudioButton class="w-full" :disabled="!!placingDecal" @click="beginDecalPlacement({ decalId: selectedDecal!.id })">
               {{ placingDecal ? 'Click a surface…' : 'Reposition' }}
             </StudioButton>
+            <p class="mt-1 text-[10px] text-white/35">Or drag the sticker on the canvas</p>
           </template>
 
           <!-- Imported models keep their baked materials until overridden. -->
