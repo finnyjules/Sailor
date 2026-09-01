@@ -239,6 +239,14 @@ quantize stretch values for caching — not expected.
   into its momentarily-vertical parts (the "5"-shaped S at k = 3.5). Symmetric
   glyphs are detected and their profiles mirrored. k defaults to 1. A
   `shapeRules` switch restores the plain-min model for A/B in the lab.
+- **Vertical zones are shared** (lab-found 2026-09-01: at Height 2.5 the `i`'s
+  stem rose above the x-height letters because its own bbox — dot included —
+  had to reach 2.5× as a whole): the Y remap is solved PER ALIGNMENT BAND
+  (descender → baseline → x-height → cap height → ascender, from the font's
+  own metrics, now carried on `TextOutlines.metrics`), so every glyph maps
+  those lines to the same targets and its flex only decides how the inside of
+  a band stretches. An all-rigid sliver band (the overshoot above the
+  x-height) keeps its absolute size — the optical-overshoot rule for free.
 - **Spaces/blanks**: advance stretches; no outline to remap.
 - **Ligatures**: multi-codepoint glyphs flex-analyze like any other outline.
 
