@@ -239,3 +239,115 @@ export function analyzeFlex(
   }
   return out
 }
+
+export interface Remap {
+  src: Float64Array
+  dst: Float64Array
+}
+
+/** Fraction of its natural width a flexible bin may condense to before the
+ *  deficit spills over to rigid bins. */
+const BIN_FLOOR = 0.02
+/** Uniform-compression floor once every bin is pinned — the "glyph never
+ *  collapses" clamp. */
+const MIN_TOTAL_SCALE = 0.25
+
+function binWidths(flex: Float64Array, w: number, S: number): Float64Array {
+  const n = flex.length
+  const out = new Float64Array(n).fill(w)
+  const total = n * w
+  const delta = (S - 1) * total
+  if (Math.abs(delta) < 1e-12) return out
+  if (delta > 0) {
+    let sum = 0
+    for (const f of flex) sum += f
+    if (sum < 1e-9) return out   // all-rigid: the glyph cannot widen
+    for (let i = 0; i < n; i++) out[i] = w + delta * (flex[i]! / sum)
+    return out
+  }
+  // Condense: flexible bins give first (floored), then everything compresses
+  // uniformly, clamped so the glyph never collapses.
+  let deficit = -delta
+  const floor = w * BIN_FLOOR
+  for (let pass = 0; pass < 4 && deficit > 1e-9; pass++) {
+    let sum = 0
+    for (let i = 0; i < n; i++) if (flex[i]! > 0 && out[i]! > floor + 1e-12) sum += flex[i]!
+    if (sum < 1e-9) break
+    let taken = 0
+    for (let i = 0; i < n; i++) {
+      if (!(flex[i]! > 0) || out[i]! <= floor + 1e-12) continue
+      const can = Math.min(deficit * (flex[i]! / sum), out[i]! - floor)
+      out[i]! -= can
+      taken += can
+    }
+    deficit -= taken
+    if (taken < 1e-12) break
+  }
+  if (deficit > 1e-9) {
+    let cur = 0
+    for (const v of out) cur += v
+    const scale = Math.max(MIN_TOTAL_SCALE, (cur - deficit) / cur)
+    for (let i = 0; i < n; i++) out[i]! *= scale
+  }
+  return out
+}
+
+export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number): Remap {
+  const { start, binSize: w, flex } = profile
+  const n = flex.length
+  const widths = binWidths(flex, w, S)
+  const src = new Float64Array(n + 1)
+  const dst = new Float64Array(n + 1)
+  let acc = start
+  for (let i = 0; i <= n; i++) {
+    src[i] = start + i * w
+    dst[i] = acc
+    if (i < n) acc += widths[i]!
+  }
+  const m = { src, dst }
+  if (fixedPoint !== undefined) {
+    const shift = remapValue(m, fixedPoint) - fixedPoint
+    for (let i = 0; i <= n; i++) dst[i]! -= shift
+  }
+  return m
+}
+
+/** Piecewise-linear lookup; slope 1 outside the profile's span so points a
+ *  hair beyond the bbox (rounding, overshoot) translate instead of scaling. */
+export function remapValue(m: Remap, v: number): number {
+  const { src, dst } = m
+  const n = src.length - 1
+  if (n < 1) return v
+  if (v <= src[0]!) return dst[0]! + (v - src[0]!)
+  if (v >= src[n]!) return dst[n]! + (v - src[n]!)
+  let lo = 0, hi = n
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1
+    if (src[mid]! <= v) lo = mid
+    else hi = mid
+  }
+  const span = src[lo + 1]! - src[lo]!
+  const t = span > 0 ? (v - src[lo]!) / span : 0
+  return dst[lo]! + t * (dst[lo + 1]! - dst[lo]!)
+}
+
+export function stretchCommands(
+  commands: readonly PathCommand[],
+  flex: GlyphFlex,
+  S: number,
+  SY: number,
+): PathCommand[] {
+  const rx = buildRemap(flex.x, S)
+  // Baseline anchor: y = 0 is a fixed point, so letters grow up off the
+  // baseline and descenders grow down, instead of smearing around a centre.
+  const ry = buildRemap(flex.y, SY, 0)
+  return commands.map(c => {
+    if (!c.args.length) return { command: c.command, args: [] }
+    const args = c.args.slice()
+    for (let i = 0; i + 1 < args.length; i += 2) {
+      args[i] = remapValue(rx, args[i]!)
+      args[i + 1] = remapValue(ry, args[i + 1]!)
+    }
+    return { command: c.command, args }
+  })
+}

@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { PathCommand, VtBBox } from '~/lib/vectortype/outline'
-import { analyzeFlex } from '~/lib/vectortype/stretch'
+import { analyzeFlex, buildRemap, remapValue, stretchCommands } from '~/lib/vectortype/stretch'
 
 /** Closed axis-aligned rectangle as outline commands (font-unit space, y-up). */
 function rect(x0: number, y0: number, x1: number, y1: number): PathCommand[] {
@@ -79,5 +79,74 @@ describe('analyzeFlex', () => {
     const mid = x.flex[8]!
     expect(mid).toBeGreaterThan(0.3)
     expect(mid).toBeLessThan(0.7)
+  })
+})
+
+describe('buildRemap / remapValue', () => {
+  const uniform: import('~/lib/vectortype/stretch').FlexProfile = {
+    start: 0, binSize: 10, flex: new Float64Array(10).fill(1),
+  }
+
+  it('scales a fully flexible profile uniformly', () => {
+    const m = buildRemap(uniform, 2)
+    expect(remapValue(m, 0)).toBeCloseTo(0, 6)
+    expect(remapValue(m, 50)).toBeCloseTo(100, 6)
+    expect(remapValue(m, 100)).toBeCloseTo(200, 6)
+  })
+
+  it('holds rigid bins and grows flexible ones', () => {
+    const flex = new Float64Array(10).fill(1)
+    flex[4] = 0; flex[5] = 0            // rigid core at [40, 60]
+    const m = buildRemap({ start: 0, binSize: 10, flex }, 1.5)
+    // Total width 100 -> 150; the rigid 20 stays 20.
+    expect(remapValue(m, 60) - remapValue(m, 40)).toBeCloseTo(20, 6)
+    expect(remapValue(m, 100) - remapValue(m, 0)).toBeCloseTo(150, 6)
+  })
+
+  it('is monotone even under heavy condensing', () => {
+    const flex = new Float64Array(10).fill(0)
+    flex[2] = 1; flex[7] = 1
+    const m = buildRemap({ start: 0, binSize: 10, flex }, 0.5)
+    let prev = -Infinity
+    for (let v = 0; v <= 100; v += 1) {
+      const r = remapValue(m, v)
+      expect(r).toBeGreaterThanOrEqual(prev)
+      prev = r
+    }
+    // Clamps stop total collapse.
+    expect(remapValue(m, 100) - remapValue(m, 0)).toBeGreaterThan(25)
+  })
+
+  it('honours a fixed point (baseline anchor)', () => {
+    const flex = new Float64Array(10).fill(1)
+    // Profile spans [-30, 70] like a glyph with a descender below baseline 0.
+    const m = buildRemap({ start: -30, binSize: 10, flex }, 2, 0)
+    expect(remapValue(m, 0)).toBeCloseTo(0, 6)
+    expect(remapValue(m, 70)).toBeCloseTo(140, 6)   // grows up
+    expect(remapValue(m, -30)).toBeCloseTo(-60, 6)  // descender grows down
+  })
+
+  it('an all-rigid profile leaves geometry untouched', () => {
+    const flex = new Float64Array(10).fill(0)
+    const m = buildRemap({ start: 0, binSize: 10, flex }, 2)
+    expect(remapValue(m, 0)).toBeCloseTo(0, 6)
+    expect(remapValue(m, 100)).toBeCloseTo(100, 6)
+  })
+})
+
+describe('stretchCommands', () => {
+  it('never changes the command count and keeps closePath args empty', () => {
+    const cmds: PathCommand[] = [
+      { command: 'moveTo', args: [0, 0] },
+      { command: 'bezierCurveTo', args: [10, 80, 90, 80, 100, 0] },
+      { command: 'quadraticCurveTo', args: [50, -40, 0, 0] },
+      { command: 'closePath', args: [] },
+    ]
+    const flex = analyzeFlex(cmds, { minX: 0, minY: -40, maxX: 100, maxY: 80 })
+    for (const [s, sy] of [[0.5, 1], [1, 1], [1.8, 1], [1, 2.2], [2.4, 0.6]] as const) {
+      const out = stretchCommands(cmds, flex, s, sy)
+      expect(out.map(c => c.command)).toEqual(cmds.map(c => c.command))
+      expect(out.map(c => c.args.length)).toEqual(cmds.map(c => c.args.length))
+    }
   })
 })
