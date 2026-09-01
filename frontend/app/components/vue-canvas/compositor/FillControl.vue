@@ -152,7 +152,12 @@ function shuffle() {
 function setColor(key: 'a' | 'b', v: string) { fill[key] = v; push() }
 function setNum(key: 'angle' | 'density', v: number) { fill[key] = v; push() }
 function toggleNone() {
-  if (isNone.value) push()                          // re-enable with the current fill
+  // Adding a fill from the none state: emit the editable fill DIRECTLY, not via
+  // push() — push()'s `if (!isNone.value)` guard (which stops colour edits from
+  // leaking out while the swatch reads "none") is still true here because the
+  // prop hasn't flipped yet, so routing through it would emit nothing and the
+  // "Add" button would do nothing (the bug that made a shape's stroke un-addable).
+  if (isNone.value) emit('update:modelValue', fill.type === 'gradient' ? grad.value : paintFromFill(fill))
   else emit('update:modelValue', 'none')
 }
 

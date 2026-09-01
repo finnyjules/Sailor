@@ -2754,6 +2754,18 @@ const outWidth = computed(() => {
 function pxW(norm: number) { return Math.round(norm * outWidth.value) }
 function setSizePx(id: string, key: string, px: number) { setLocal(id, { [key]: Math.max(0, px) / outWidth.value }) }
 
+// A shape's stroke needs BOTH a colour and a width > 0 to show. New shapes start
+// at strokeWidth 0, so adding a stroke colour alone paints nothing — the stroke
+// reads as "didn't work". When a colour is added to a widthless stroke, give it a
+// visible default (~6px on a standard frame), Figma-style; removing the colour
+// (→ 'none') leaves the width alone so re-adding restores it.
+const DEFAULT_STROKE_W = 0.005 // normalized to canvas width
+function setStroke(id: string, v: any) {
+  const l = localLayers.value.find((x: any) => x.id === id) as any
+  const addingColour = v && v !== 'none' && !((l?.strokeWidth as number) > 0)
+  setLocal(id, addingColour ? { stroke: v, strokeWidth: DEFAULT_STROKE_W } : { stroke: v })
+}
+
 // ── Corner radius (linked ⇔ per-corner) ──────────────────────────────────────
 // A rect stores `radius` as ONE number (uniform) or as [tl, tr, br, bl]. The
 // linked field writes a plain number — editing it always re-links all four —
@@ -6146,7 +6158,7 @@ onUnmounted(() => {
             <div>
               <div class="panel-label mb-1.5">Stroke</div>
               <FillControl allow-none :model-value="(selectedLocal as any).stroke"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { stroke: v })" />
+                @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
               <input v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                 class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                 @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
@@ -6192,7 +6204,7 @@ onUnmounted(() => {
             <div>
               <div class="panel-label mb-1.5">Stroke</div>
               <FillControl allow-none :model-value="(selectedLocal as any).stroke"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { stroke: v })" />
+                @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
               <input v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                 class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                 @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
@@ -6225,7 +6237,7 @@ onUnmounted(() => {
             <div>
               <div class="panel-label mb-1.5">Stroke</div>
               <FillControl allow-none :model-value="(selectedLocal as any).stroke"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { stroke: v })" />
+                @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
               <input v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                 class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                 @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
@@ -6259,7 +6271,7 @@ onUnmounted(() => {
             <div>
               <div class="panel-label mb-1.5">Color</div>
               <FillControl allow-none :model-value="(selectedLocal as any).stroke"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { stroke: v })" />
+                @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
             </div>
             <div>
               <div class="panel-label mb-1.5">Thickness</div>
@@ -6283,7 +6295,7 @@ onUnmounted(() => {
             <div>
               <div class="panel-label mb-1.5">Stroke</div>
               <FillControl allow-none :model-value="(selectedLocal as any).stroke"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { stroke: v })" />
+                @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
               <StrokeStyleRow class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
                 show-align :out-width="outWidth" :scale="(selectedLocal as any).scale || 1"
                 @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
