@@ -226,6 +226,19 @@ quantize stretch values for caching — not expected.
   it. Defense-in-depth beneath it: a resisting (partial-flex) bin may grow at
   most `2·S` × its natural width, with clamped overflow spilling to fully
   flexible bins — so no few slivers can ever absorb a whole glyph's stretch.
+- **Shape integrity — three kinds of ink, three rules** (lab-found
+  2026-09-01; one exponent k cannot serve all three). *Straight stems* pin
+  their slices hard (column min). *Straight diagonals stay straight*: every
+  long straight diagonal segment (≥ 12% of the glyph's larger dimension) forces
+  a CONSTANT flex across its span, exempting bins a true stem crosses (Y's arms
+  bend once at the junction, never mid-stroke) — Inter's X crossing was frozen
+  by two 140-unit vertical notch facets and its arms kinked at the wall.
+  *Curves flow*: short lines (caps, facets, terminal cuts — the S's real
+  freeze) pin only in proportion to the ink they own in a slice, so a
+  continuous curved stroke spreads its stretch smoothly instead of dumping it
+  into its momentarily-vertical parts (the "5"-shaped S at k = 3.5). Symmetric
+  glyphs are detected and their profiles mirrored. k defaults to 1. A
+  `shapeRules` switch restores the plain-min model for A/B in the lab.
 - **Spaces/blanks**: advance stretches; no outline to remap.
 - **Ligatures**: multi-codepoint glyphs flex-analyze like any other outline.
 
