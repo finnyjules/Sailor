@@ -15,6 +15,18 @@
  * diagonal sits in between. k = 0 degenerates to uniform scaling — the lab's
  * "naive" comparison column is this same code path, not a second renderer.
  *
+ * On top of that, three SHAPE-INTEGRITY rules (`shapeRules`, default on),
+ * because ink comes in three kinds and one exponent treats them alike:
+ *   1. stroke edges — straight lines ≥ `straightMin`, and every curve — pin
+ *      by min; short lines (caps, notch facets, terminal cuts) only pin in
+ *      proportion to the ink they own in the slice, so an S's cut terminals
+ *      and an X's crossing facets no longer freeze whole slices;
+ *   2. a straight diagonal stroke stretches UNIFORMLY along its span (stems
+ *      crossing it exempt), so it stays straight instead of kinking where
+ *      the stretch changes — `uniformSpans`;
+ *   3. a mirror-symmetric outline gets a mirror-symmetric profile —
+ *      `symmetrize`.
+ *
  * The min runs over the ink's INTERIOR, computed by propagating each cell's
  * nearest-boundary tangent across a small per-glyph grid with a chamfer
  * distance transform — NOT by sampled-boundary nearest-neighbour lookup,
@@ -51,10 +63,41 @@ export interface FlexOptions {
    *  fully rigid — a tittle, period, or diacritic keeps its exact shape and
    *  rides the remap as a unit. 0/undefined disables. */
   smallFeature?: number
+  /** A `lineTo` at least this long (font units) is a STRAIGHT STROKE — its ink
+   *  is hard-rigid (min) and, when diagonal, must stretch uniformly along its
+   *  whole span so it stays straight. Shorter lines (a notch facet, a cut
+   *  terminal) and every flattened curve sample are soft ink (mean). Default:
+   *  `STRAIGHT_MIN_EM` × the glyph's larger bbox dimension, so hand-built
+   *  rects without a unitsPerEm still classify sensibly; `stretchOutlines`
+   *  passes `STRAIGHT_MIN_EM` × unitsPerEm explicitly. */
+  straightMin?: number
+  /** Shape-integrity rules (default on): hard/soft ink channels, straight-
+   *  span uniformity, mirror symmetry. Off = the original pure-min
+   *  aggregation with neither pass — the lab's A/B control. */
+  shapeRules?: boolean
 }
 
 const DEFAULT_BINS = 64
-const DEFAULT_K = 2
+/** k = 1 by default: with the hard/soft split, stems are rigid regardless of
+ *  k (hard min), so k only shapes how curves flow — and at k ≈ 1 an S under
+ *  Height 2.29 keeps flowing instead of freezing its spine into a "5". */
+const DEFAULT_K = 1
+/** Straight-stroke threshold as a fraction of the em (or, for bare
+ *  `analyzeFlex` calls, of the glyph's larger dimension). Inter's X has
+ *  140-unit vertical notch facets at its crossing on a 1490-tall glyph — 9%,
+ *  NOT a stroke; a 700-tall stem edge is; a 21-unit curve sample never is. */
+export const STRAIGHT_MIN_EM = 0.12
+/** Bins at or below this raw hard alignment are a stem crossing a straight
+ *  span: they stay rigid and the span's uniformity is enforced around them
+ *  (a Y's arm bends exactly once, at the junction). Same cut `binWidths` and
+ *  `stemWidthOf` use for "rigid". */
+const HARD_RIGID = 0.05
+/** Straight segments whose |tangent·axis| lies strictly inside this band are
+ *  DIAGONAL for that axis: a stem (≈ 0) is already pinned by the hard min and
+ *  a crossbar (≈ 1) is fully flexible, so only the in-between needs the
+ *  straightness rule. */
+const DIAG_LO = 0.3
+const DIAG_HI = 0.95
 /** Default small-feature limit as a fraction of the em. An i's dot or a
  *  period is ~0.1–0.15 em; the smallest real letterform parts (a lowercase
  *  counter) are well above 0.3 em. */
@@ -63,17 +106,30 @@ export const SMALL_FEATURE_EM = 0.22
  *  control points, so this resolution never appears in output geometry. */
 const CURVE_STEPS = 16
 
-interface Seg { x0: number; y0: number; x1: number; y1: number }
+/** What kind of ink a boundary segment is — the three kinds stretch
+ *  differently (see `analyzeFlex`). */
+const KIND_SHORT = 0     // a `lineTo` shorter than `straightMin`: cap, facet, terminal cut
+const KIND_STRAIGHT = 1  // a `lineTo` at least `straightMin` long: a straight stroke edge
+const KIND_CURVE = 2     // a flattened curve sample: a curved stroke edge
+
+interface Seg {
+  x0: number; y0: number; x1: number; y1: number
+  kind: number
+}
 
 /** Flatten commands to line segments for tangent analysis. closePath emits the
  *  implicit closing segment — without it every subpath would leak a fake gap
- *  of "no ink" where the closing edge runs. */
-function flattenToSegments(commands: readonly PathCommand[]): Seg[] {
+ *  of "no ink" where the closing edge runs. Each segment is tagged
+ *  with its ink kind (see `Seg`) so the ink it pins is classified at stamping. */
+function flattenToSegments(commands: readonly PathCommand[], straightMin: number): Seg[] {
   const segs: Seg[] = []
   let px = 0, py = 0
   let sx = 0, sy = 0
-  const emit = (x1: number, y1: number) => {
-    if (x1 !== px || y1 !== py) segs.push({ x0: px, y0: py, x1, y1 })
+  const emit = (x1: number, y1: number, fromLine: boolean) => {
+    if (x1 !== px || y1 !== py) {
+      const kind = !fromLine ? KIND_CURVE : Math.hypot(x1 - px, y1 - py) >= straightMin ? KIND_STRAIGHT : KIND_SHORT
+      segs.push({ x0: px, y0: py, x1, y1, kind })
+    }
     px = x1; py = y1
   }
   for (const c of commands) {
@@ -83,14 +139,14 @@ function flattenToSegments(commands: readonly PathCommand[]): Seg[] {
         px = a[0]!; py = a[1]!; sx = px; sy = py
         break
       case 'lineTo':
-        emit(a[0]!, a[1]!)
+        emit(a[0]!, a[1]!, true)
         break
       case 'quadraticCurveTo': {
         const [cx, cy, x, y] = a as [number, number, number, number]
         const x0 = px, y0 = py
         for (let i = 1; i <= CURVE_STEPS; i++) {
           const t = i / CURVE_STEPS, u = 1 - t
-          emit(u * u * x0 + 2 * u * t * cx + t * t * x, u * u * y0 + 2 * u * t * cy + t * t * y)
+          emit(u * u * x0 + 2 * u * t * cx + t * t * x, u * u * y0 + 2 * u * t * cy + t * t * y, false)
         }
         break
       }
@@ -102,12 +158,13 @@ function flattenToSegments(commands: readonly PathCommand[]): Seg[] {
           emit(
             u * u * u * x0 + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x,
             u * u * u * y0 + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y,
+            false,
           )
         }
         break
       }
       case 'closePath':
-        emit(sx, sy)
+        emit(sx, sy, true)
         break
     }
   }
@@ -126,6 +183,107 @@ function flattenToSegments(commands: readonly PathCommand[]): Seg[] {
  */
 const GRID = 96
 
+/**
+ * Straight-span uniformity — the straightness rule. A straight stroke can
+ * only stay straight if the local stretch is CONSTANT across its span, so
+ * every bin a diagonal straight segment covers is set to the span's mean
+ * flex. Bins whose raw hard alignment is rigid (a true stem crossing the
+ * span — a Y's stem under its arm) are exempt: they stay pinned and the arm
+ * bends exactly once, at the junction.
+ *
+ * Spans that overlap are merged first and flattened together: two straight
+ * strokes sharing bins (an X's arms chain across its whole width) can only
+ * BOTH stay straight if they share one constant, and processing them one
+ * after another would let the later span un-flatten the earlier one.
+ * Spans are inclusive bin ranges; mutates `flex`.
+ */
+export function uniformSpans(flex: Float64Array, hard: Float64Array, spans: Array<[number, number]>): void {
+  const n = flex.length
+  if (!spans.length) return
+  const sorted = spans
+    .map(([s0, s1]): [number, number] => [Math.max(0, Math.min(s0, s1)), Math.min(n - 1, Math.max(s0, s1))])
+    .filter(([a, b]) => a <= b)
+    .sort((p, q) => p[0] - q[0])
+  const groups: Array<[number, number]> = []
+  for (const [a, b] of sorted) {
+    const last = groups[groups.length - 1]
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b)
+    else groups.push([a, b])
+  }
+  for (const [a, b] of groups) {
+    let sum = 0, cnt = 0
+    for (let i = a; i <= b; i++) {
+      if (hard[i]! < HARD_RIGID) continue
+      sum += flex[i]!
+      cnt++
+    }
+    if (!cnt) continue
+    const m = sum / cnt
+    for (let i = a; i <= b; i++) if (hard[i]! >= HARD_RIGID) flex[i] = m
+  }
+}
+
+/** Mirror a profile about its centre: bin i and bin n−1−i both take their
+ *  mean. Applied when the outline itself is mirror-symmetric, so the two
+ *  halves' float noise (the o's flanks at 9.6e-5 vs 9.8e-5) and any one-sided
+ *  span rounding cannot make a symmetric letter stretch asymmetrically. */
+export function symmetrize(flex: Float64Array): void {
+  const n = flex.length
+  for (let i = 0, j = n - 1; i < j; i++, j--) {
+    const m = (flex[i]! + flex[j]!) / 2
+    flex[i] = m
+    flex[j] = m
+  }
+}
+
+/** Fraction of flattened points that must have a mirrored twin … */
+const SYMMETRY_MIN_FRACTION = 0.95
+/** … within this fraction of the bbox's mirrored dimension. */
+const SYMMETRY_TOLERANCE = 0.02
+
+/** Is the flattened outline mirror-symmetric about the bbox's centre line
+ *  perpendicular to `axis`? (`'x'` = the vertical centre line, for the X
+ *  profile.) Hash-grid nearest search on the mirrored point set. */
+function isMirrorSymmetric(pts: Float64Array, axis: 'x' | 'y', bbox: VtBBox): boolean {
+  const count = pts.length >> 1
+  if (count < 3) return false
+  const w = bbox.maxX - bbox.minX, h = bbox.maxY - bbox.minY
+  const tol = SYMMETRY_TOLERANCE * (axis === 'x' ? w : h)
+  if (!(tol > 0)) return false
+  const cx = (bbox.minX + bbox.maxX) / 2, cy = (bbox.minY + bbox.maxY) / 2
+  const cell = tol
+  const key = (x: number, y: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)}`
+  const grid = new Map<string, number[]>()
+  for (let i = 0; i < count; i++) {
+    const x = pts[2 * i]!, y = pts[2 * i + 1]!
+    const k = key(x, y)
+    let bucket = grid.get(k)
+    if (!bucket) { bucket = []; grid.set(k, bucket) }
+    bucket.push(i)
+  }
+  const tol2 = tol * tol
+  let matched = 0
+  for (let i = 0; i < count; i++) {
+    const x = pts[2 * i]!, y = pts[2 * i + 1]!
+    const mx = axis === 'x' ? 2 * cx - x : x
+    const my = axis === 'y' ? 2 * cy - y : y
+    const gx = Math.floor(mx / cell), gy = Math.floor(my / cell)
+    let hit = false
+    for (let dx = -1; dx <= 1 && !hit; dx++) {
+      for (let dy = -1; dy <= 1 && !hit; dy++) {
+        const bucket = grid.get(`${gx + dx},${gy + dy}`)
+        if (!bucket) continue
+        for (const j of bucket) {
+          const ex = pts[2 * j]! - mx, ey = pts[2 * j + 1]! - my
+          if (ex * ex + ey * ey <= tol2) { hit = true; break }
+        }
+      }
+    }
+    if (hit) matched++
+  }
+  return matched / count >= SYMMETRY_MIN_FRACTION
+}
+
 export function analyzeFlex(
   commands: readonly PathCommand[],
   bbox: VtBBox,
@@ -134,8 +292,10 @@ export function analyzeFlex(
   const bins = Math.max(4, Math.round(opts.bins ?? DEFAULT_BINS))
   const k = Math.max(0, opts.k ?? DEFAULT_K)
   const smallFeature = opts.smallFeature ?? 0
+  const shapeRules = opts.shapeRules ?? true
   const w = bbox.maxX - bbox.minX
   const h = bbox.maxY - bbox.minY
+  const straightMin = opts.straightMin ?? STRAIGHT_MIN_EM * Math.max(w, h)
   const flexX = new Float64Array(bins).fill(1)
   const flexY = new Float64Array(bins).fill(1)
   const out: GlyphFlex = {
@@ -144,7 +304,7 @@ export function analyzeFlex(
   }
   if (w <= 0 || h <= 0 || !commands.length) return out
 
-  const segs = flattenToSegments(commands)
+  const segs = flattenToSegments(commands, straightMin)
   if (!segs.length) return out
   const cw = w / GRID
   const ch = h / GRID
@@ -152,14 +312,19 @@ export function analyzeFlex(
   const dist = new Float64Array(N).fill(Infinity)
   // |tangent·x̂| and |tangent·ŷ| of the nearest boundary, propagated together
   // with the distance (the nearest boundary is one point; both alignments
-  // come from its one tangent).
+  // come from its one tangent) — and which KIND of boundary it is: a straight
+  // stroke edge, a curved stroke edge, or a short line (cap / facet / cut).
   const ax = new Float64Array(N).fill(1)
   const ay = new Float64Array(N).fill(1)
+  const kind = new Uint8Array(N)
   const idx = (c: number, r: number) => r * GRID + c
 
-  // Stamp boundary cells with exact segment tangents. Where two segments meet
-  // in one cell (corners), keep the more rigid alignment per axis — the min
-  // in the flex formula makes conservative-rigid the faithful tie-break.
+  // Stamp boundary cells with exact segment tangents. Where two segments of
+  // the same kind meet in one cell (corners), keep the more rigid alignment
+  // per axis — the min in the flex formula makes conservative-rigid the
+  // faithful tie-break. Across kinds a stroke edge (straight, then curved)
+  // always wins over a short line: a notch facet sharing a corner cell with
+  // an arm must not turn that stroke cell rigid.
   for (const s of segs) {
     const dx = s.x1 - s.x0, dy = s.y1 - s.y0
     const len = Math.hypot(dx, dy)
@@ -172,22 +337,29 @@ export function analyzeFlex(
       const c = Math.max(0, Math.min(GRID - 1, Math.floor((s.x0 + dx * t - bbox.minX) / cw)))
       const r = Math.max(0, Math.min(GRID - 1, Math.floor((s.y0 + dy * t - bbox.minY) / ch)))
       const j = idx(c, r)
-      if (dist[j]! > 0) { dist[j] = 0; ax[j] = tx; ay[j] = ty }
-      else { ax[j] = Math.min(ax[j]!, tx); ay[j] = Math.min(ay[j]!, ty) }
+      const rank = s.kind === KIND_STRAIGHT ? 2 : s.kind === KIND_CURVE ? 1 : 0
+      const have = kind[j] === KIND_STRAIGHT ? 2 : kind[j] === KIND_CURVE ? 1 : 0
+      if (dist[j]! > 0) {
+        dist[j] = 0; ax[j] = tx; ay[j] = ty; kind[j] = s.kind
+      } else if (rank > have) {
+        ax[j] = tx; ay[j] = ty; kind[j] = s.kind
+      } else if (rank === have) {
+        ax[j] = Math.min(ax[j]!, tx); ay[j] = Math.min(ay[j]!, ty)
+      }
     }
   }
 
-  // Two-pass chamfer: propagate (distance, tangent) from each cell's already-
-  // visited neighbours. Step costs are in FONT UNITS, not grid steps — the
-  // grid is GRID×GRID over a bbox that is usually far from square (a stem is
-  // ~100×700), and unit-step costs would let a stem's caps out-compete its
+  // Two-pass chamfer: propagate (distance, tangent, kind) from each cell's
+  // already-visited neighbours. Step costs are in FONT UNITS, not grid steps —
+  // the grid is GRID×GRID over a bbox that is usually far from square (a stem
+  // is ~100×700), and unit-step costs would let a stem's caps out-compete its
   // side walls for half the interior, mislabelling it flexible in Y.
   const costH = cw
   const costV = ch
   const costD = Math.hypot(cw, ch)
   const relax = (j: number, n: number, cost: number) => {
     const d = dist[n]! + cost
-    if (d < dist[j]!) { dist[j] = d; ax[j] = ax[n]!; ay[j] = ay[n]! }
+    if (d < dist[j]!) { dist[j] = d; ax[j] = ax[n]!; ay[j] = ay[n]!; kind[j] = kind[n]! }
   }
   for (let r = 0; r < GRID; r++) {
     for (let c = 0; c < GRID; c++) {
@@ -254,18 +426,46 @@ export function analyzeFlex(
       }
       // A feature is small when BOTH the grid says so and it is genuinely a
       // fraction of the glyph — measured in font units, not cells, because
-      // the grid is anisotropic over non-square bboxes.
+      // the grid is anisotropic over non-square bboxes. A rigid dot counts
+      // as HARD ink: it pins its slices like a stem would.
       if (Math.max((c1 - c0 + 1) * cw, (r1 - r0 + 1) * ch) < smallFeature) {
-        for (const cell of cells) { ax[cell] = 0; ay[cell] = 0 }
+        for (const cell of cells) { ax[cell] = 0; ay[cell] = 0; kind[cell] = KIND_STRAIGHT }
       }
     }
   }
 
-  // Per-column / per-row minima over INK cells only, then downsample to bins.
-  // colInk/rowInk count ink cells per column/row in the same pass, so bins
-  // can report how much of their span is actually ink (vs. counters/gaps).
+  // Per-column / per-row aggregation over INK cells only. Three kinds of ink
+  // pin a slice differently:
+  //   • `hard`   = min over cells pinned by STRAIGHT stroke edges. A stem pins
+  //                its slice outright, and only hard-rigid bins are exempt
+  //                from the straightness rule below.
+  //   • `stroke` = min over cells pinned by straight OR curved stroke edges.
+  //                A curve is a stroke too: the o's flank is near-vertical ink
+  //                made of curve samples, and any slice through it thickens
+  //                under X stretch exactly like a stem's would — so it takes
+  //                the min, not a mean (a column mean through the flank also
+  //                crosses the shoulders and arches and reads 0.3, and the
+  //                flank grows 37% at S = 2).
+  //   • `soft`   = mean over ALL of the slice's ink. Short lines — caps,
+  //                notch facets, terminal cuts — are not strokes: they mark a
+  //                stroke's END, and an end can lengthen along the stroke.
+  //                A short line therefore pins a slice only in proportion to
+  //                the ink it owns there: an S terminal's cut owns a third of
+  //                its rows (→ 0.5, flows) while an l's cap owns all of its
+  //                (→ 0, pinned); an X's notch facets can no longer freeze
+  //                the crossing.
+  // Slice value = min(stroke, soft). `colMin` is the original single-channel
+  // min, kept for the shape-rules-off control. colInk/rowInk count ink cells
+  // per column/row in the same pass, so bins can report how much of their
+  // span is actually ink (vs. counters/gaps).
   const colMin = new Float64Array(GRID).fill(1)
   const rowMin = new Float64Array(GRID).fill(1)
+  const colHard = new Float64Array(GRID).fill(1)
+  const rowHard = new Float64Array(GRID).fill(1)
+  const colStroke = new Float64Array(GRID).fill(1)
+  const rowStroke = new Float64Array(GRID).fill(1)
+  const colSum = new Float64Array(GRID)
+  const rowSum = new Float64Array(GRID)
   const colInk = new Float64Array(GRID)
   const rowInk = new Float64Array(GRID)
   for (let r = 0; r < GRID; r++) {
@@ -274,29 +474,88 @@ export function analyzeFlex(
       if (!ink[j]) continue
       colInk[c]!++
       rowInk[r]!++
-      if (ax[j]! < colMin[c]!) colMin[c] = ax[j]!
-      if (ay[j]! < rowMin[r]!) rowMin[r] = ay[j]!
+      const vx = ax[j]!, vy = ay[j]!
+      colSum[c]! += vx
+      rowSum[r]! += vy
+      if (vx < colMin[c]!) colMin[c] = vx
+      if (vy < rowMin[r]!) rowMin[r] = vy
+      if (kind[j] === KIND_SHORT) continue
+      if (vx < colStroke[c]!) colStroke[c] = vx
+      if (vy < rowStroke[r]!) rowStroke[r] = vy
+      if (kind[j] !== KIND_STRAIGHT) continue
+      if (vx < colHard[c]!) colHard[c] = vx
+      if (vy < rowHard[r]!) rowHard[r] = vy
     }
   }
   const inkX = new Float64Array(bins)
   const inkY = new Float64Array(bins)
+  const hardX = new Float64Array(bins).fill(1)
+  const hardY = new Float64Array(bins).fill(1)
   const cellsPerBin = GRID / bins
   for (let b = 0; b < bins; b++) {
-    let mx = 1, my = 1
+    let mx = 1, my = 1          // single-channel min (control)
+    let hx = 1, hy = 1          // hard: min over the bin's columns
+    let kx = 1, ky = 1          // stroke: min over the bin's columns
+    let sx = 1, sy = 1          // soft: min over the bin's column MEANS
     let ix = 0, iy = 0
     const g0 = Math.floor(b * cellsPerBin)
     const g1 = Math.min(GRID - 1, Math.ceil((b + 1) * cellsPerBin) - 1)
     for (let g = g0; g <= g1; g++) {
       if (colMin[g]! < mx) mx = colMin[g]!
       if (rowMin[g]! < my) my = rowMin[g]!
+      if (colHard[g]! < hx) hx = colHard[g]!
+      if (rowHard[g]! < hy) hy = rowHard[g]!
+      if (colStroke[g]! < kx) kx = colStroke[g]!
+      if (rowStroke[g]! < ky) ky = rowStroke[g]!
+      const cs = colInk[g]! ? colSum[g]! / colInk[g]! : 1
+      const rs = rowInk[g]! ? rowSum[g]! / rowInk[g]! : 1
+      if (cs < sx) sx = cs
+      if (rs < sy) sy = rs
       if (colInk[g]! / GRID > ix) ix = colInk[g]! / GRID
       if (rowInk[g]! / GRID > iy) iy = rowInk[g]! / GRID
     }
-    flexX[b] = Math.pow(mx, k)
-    flexY[b] = Math.pow(my, k)
+    hardX[b] = hx
+    hardY[b] = hy
+    const vx = shapeRules ? Math.min(kx, sx) : mx
+    const vy = shapeRules ? Math.min(ky, sy) : my
+    flexX[b] = Math.pow(vx, k)
+    flexY[b] = Math.pow(vy, k)
     inkX[b] = ix
     inkY[b] = iy
   }
+
+  if (shapeRules) {
+    // Straight-span uniformity: every diagonal straight stroke stretches
+    // uniformly along its whole span, stems inside it exempt.
+    const spansX: Array<[number, number]> = []
+    const spansY: Array<[number, number]> = []
+    const bwX = out.x.binSize, bwY = out.y.binSize
+    const binRange = (lo: number, hi: number, start: number, size: number): [number, number] => [
+      Math.max(0, Math.min(bins - 1, Math.floor((lo - start) / size))),
+      Math.max(0, Math.min(bins - 1, Math.ceil((hi - start) / size) - 1)),
+    ]
+    for (const s of segs) {
+      if (s.kind !== KIND_STRAIGHT) continue
+      const dx = s.x1 - s.x0, dy = s.y1 - s.y0
+      const len = Math.hypot(dx, dy)
+      if (len === 0) continue
+      const tx = Math.abs(dx) / len, ty = Math.abs(dy) / len
+      if (tx > DIAG_LO && tx < DIAG_HI) spansX.push(binRange(Math.min(s.x0, s.x1), Math.max(s.x0, s.x1), bbox.minX, bwX))
+      if (ty > DIAG_LO && ty < DIAG_HI) spansY.push(binRange(Math.min(s.y0, s.y1), Math.max(s.y0, s.y1), bbox.minY, bwY))
+    }
+    const longestFirst = (a: [number, number], b: [number, number]) => (b[1] - b[0]) - (a[1] - a[0])
+    spansX.sort(longestFirst)
+    spansY.sort(longestFirst)
+    uniformSpans(flexX, hardX, spansX)
+    uniformSpans(flexY, hardY, spansY)
+
+    // Symmetry: a mirror-symmetric outline gets a mirror-symmetric profile.
+    const pts = new Float64Array(segs.length * 2)
+    for (let i = 0; i < segs.length; i++) { pts[2 * i] = segs[i]!.x0; pts[2 * i + 1] = segs[i]!.y0 }
+    if (isMirrorSymmetric(pts, 'x', bbox)) { symmetrize(flexX); symmetrize(hardX) }
+    if (isMirrorSymmetric(pts, 'y', bbox)) { symmetrize(flexY); symmetrize(hardY) }
+  }
+
   out.x.ink = inkX
   out.y.ink = inkY
   return out
@@ -540,7 +799,7 @@ export function stretchCommands(
 const flexCache = new WeakMap<GlyphOutline, Map<string, GlyphFlex>>()
 
 export function glyphFlexFor(g: GlyphOutline, opts: FlexOptions = {}): GlyphFlex {
-  const key = `${opts.bins ?? DEFAULT_BINS}|${opts.k ?? DEFAULT_K}|${opts.smallFeature ?? 0}`
+  const key = `${opts.bins ?? DEFAULT_BINS}|${opts.k ?? DEFAULT_K}|${opts.smallFeature ?? 0}|${opts.straightMin ?? 'auto'}|${opts.shapeRules ?? true}`
   let byOpts = flexCache.get(g)
   if (!byOpts) {
     byOpts = new Map()
@@ -563,7 +822,11 @@ export function stretchOutlines(
   opts: FlexOptions = {},
 ): TextOutlines {
   if (S === 1 && SY === 1) return outlines
-  const flexOpts: FlexOptions = { smallFeature: SMALL_FEATURE_EM * outlines.unitsPerEm, ...opts }
+  const flexOpts: FlexOptions = {
+    smallFeature: SMALL_FEATURE_EM * outlines.unitsPerEm,
+    straightMin: STRAIGHT_MIN_EM * outlines.unitsPerEm,
+    ...opts,
+  }
   const glyphs: GlyphOutline[] = []
   let penOld = 0
   let penNew = 0

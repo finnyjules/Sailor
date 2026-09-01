@@ -15,7 +15,7 @@ import { normaliseAxes } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 import { textOutlines } from '~/lib/vectortype/outline'
 import type { PathCommand, TextOutlines, VtBBox } from '~/lib/vectortype/outline'
-import { analyzeFlex, buildRemap, glyphFlexFor, planStretch, remapValue, solveAxis, stemFactor, stemWidthOf, stretchCommands, stretchOutlines, weightCompensation } from '~/lib/vectortype/stretch'
+import { analyzeFlex, buildRemap, glyphFlexFor, planStretch, remapValue, solveAxis, stemFactor, stemWidthOf, stretchCommands, stretchOutlines, symmetrize, uniformSpans, weightCompensation } from '~/lib/vectortype/stretch'
 
 /** Closed axis-aligned rectangle as outline commands (font-unit space, y-up). */
 function rect(x0: number, y0: number, x1: number, y1: number): PathCommand[] {
@@ -524,5 +524,95 @@ describe('condense — order of sacrifice', () => {
     const midY = (l0.glyphs[0]!.bbox.minY + l0.glyphs[0]!.bbox.maxY) / 2
     const a = inkRunsAtY(l0.glyphs[0]!.commands, midY)[0]!, b = inkRunsAtY(l1.glyphs[0]!.commands, midY)[0]!
     expect((b[1] - b[0]) / (a[1] - a[0])).toBeGreaterThan(0.97)
+  })
+})
+
+describe('shape integrity', () => {
+  it('uniformSpans flattens a span to its mean but leaves hard-rigid bins alone', () => {
+    const flex = new Float64Array([1, 0.2, 0.6, 0, 0, 0.9, 0.3, 1])
+    const hard = new Float64Array([1, 1, 1, 0, 0, 1, 1, 1])
+    uniformSpans(flex, hard, [[1, 6]])
+    // non-exempt bins 1,2,5,6 -> mean(0.2,0.6,0.9,0.3) = 0.5; stems at 3,4 untouched
+    expect(Array.from(flex)).toEqual([1, 0.5, 0.5, 0, 0, 0.5, 0.5, 1])
+  })
+
+  it('symmetrize mirrors a profile about its centre', () => {
+    const flex = new Float64Array([0, 0.2, 1, 0.6, 0.4])
+    symmetrize(flex)
+    expect(Array.from(flex)).toEqual([0.2, 0.4, 1, 0.4, 0.2])
+  })
+
+  it('a straight X keeps a uniform profile across its arms — no frozen crossing', () => {
+    // One merged X outline (12 vertices) with two short vertical notch facets
+    // at the crossing, like Inter's: facets are ~9% of the height, so they are
+    // NOT straight strokes and must not pin the crossing.
+    const X: PathCommand[] = [
+      { command: 'moveTo', args: [0, 0] },
+      { command: 'lineTo', args: [140, 0] },
+      { command: 'lineTo', args: [400, 640] },
+      { command: 'lineTo', args: [660, 0] },
+      { command: 'lineTo', args: [800, 0] },
+      { command: 'lineTo', args: [470, 800] },
+      { command: 'lineTo', args: [470, 940] },     // right notch facet (vertical, 140 tall)
+      { command: 'lineTo', args: [800, 1490] },
+      { command: 'lineTo', args: [660, 1490] },
+      { command: 'lineTo', args: [400, 850] },
+      { command: 'lineTo', args: [140, 1490] },
+      { command: 'lineTo', args: [0, 1490] },
+      { command: 'lineTo', args: [330, 940] },
+      { command: 'lineTo', args: [330, 800] },     // left notch facet
+      { command: 'closePath', args: [] },
+    ]
+    const bbox = { minX: 0, minY: 0, maxX: 800, maxY: 1490 }
+    const { x } = analyzeFlex(X, bbox, { bins: 32 })
+    const vals = Array.from(x.flex)
+    expect(Math.max(...vals) - Math.min(...vals)).toBeLessThan(0.05)
+    expect(Math.min(...vals)).toBeGreaterThan(0.1)       // not frozen
+    // and with shape rules off the old behaviour returns: a frozen crossing
+    const old = analyzeFlex(X, bbox, { bins: 32, shapeRules: false })
+    expect(Math.min(...Array.from(old.x.flex))).toBeLessThan(0.05)
+  })
+
+  it("a Y-like glyph keeps its stem rigid while the arm span is uniform elsewhere", () => {
+    // Stem + one straight arm as a single polygon.
+    const Y: PathCommand[] = [
+      { command: 'moveTo', args: [300, 0] },
+      { command: 'lineTo', args: [480, 0] },
+      { command: 'lineTo', args: [480, 700] },
+      { command: 'lineTo', args: [1000, 1400] },
+      { command: 'lineTo', args: [860, 1490] },
+      { command: 'lineTo', args: [390, 850] },
+      { command: 'lineTo', args: [300, 850] },
+      { command: 'closePath', args: [] },
+    ]
+    const bbox = { minX: 300, minY: 0, maxX: 1000, maxY: 1490 }
+    const { x } = analyzeFlex(Y, bbox, { bins: 35 })
+    // stem columns (x 300..480 -> bins 0..8) stay rigid
+    for (let i = 0; i <= 8; i++) expect(x.flex[i]).toBeLessThan(0.05)
+    // arm columns beyond the stem are uniform
+    const arm = Array.from(x.flex).slice(10)
+    expect(Math.max(...arm) - Math.min(...arm)).toBeLessThan(0.05)
+  })
+
+  it("the 'o' is symmetric, so its X profile is mirror-equal", () => {
+    const g = textOutlines(font, 'o').glyphs[0]!
+    const { x } = analyzeFlex(g.commands, g.bbox)
+    const n = x.flex.length
+    for (let i = 0; i < n; i++) expect(x.flex[i]).toBeCloseTo(x.flex[n - 1 - i]!, 9)
+  })
+
+  it("the 'S' flows under Height 2.29: no adjacent Y-profile jump larger than 0.5, and its arches still hold thickness", () => {
+    const run = textOutlines(font, 'S')
+    const g0 = run.glyphs[0]!
+    const { y } = analyzeFlex(g0.commands, g0.bbox, { straightMin: 0.12 * font.unitsPerEm })
+    let maxJump = 0
+    for (let i = 1; i < y.flex.length; i++) maxJump = Math.max(maxJump, Math.abs(y.flex[i]! - y.flex[i - 1]!))
+    expect(maxJump).toBeLessThan(0.5)
+    // arch thickness (vertical run through the top arch, sampled at the glyph's x-centre)
+    const g1 = stretchOutlines(run, 1, 2.29).glyphs[0]!
+    const cx0 = (g0.bbox.minX + g0.bbox.maxX) / 2, cx1 = (g1.bbox.minX + g1.bbox.maxX) / 2
+    const runs0 = inkRunsAtX(g0.commands, cx0), runs1 = inkRunsAtX(g1.commands, cx1)
+    const top0 = runs0[runs0.length - 1]!, top1 = runs1[runs1.length - 1]!
+    expect((top1[1] - top1[0]) / (top0[1] - top0[0])).toBeLessThan(1.3)
   })
 })

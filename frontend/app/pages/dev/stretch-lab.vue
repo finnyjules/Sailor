@@ -11,7 +11,8 @@ import { loadVariableFont } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 import { textOutlines } from '~/lib/vectortype/outline'
 import type { TextOutlines } from '~/lib/vectortype/outline'
-import { glyphFlexFor, planStretch, stretchOutlines, weightCompensation } from '~/lib/vectortype/stretch'
+import { glyphFlexFor, planStretch, SMALL_FEATURE_EM, STRAIGHT_MIN_EM, stretchOutlines, weightCompensation } from '~/lib/vectortype/stretch'
+import type { FlexOptions } from '~/lib/vectortype/stretch'
 
 const LAB_FONTS = ['inter', 'roboto-flex', 'archivo', 'fraunces', 'source-serif', 'unbounded']
 const TORTURE = ['Sailor', 'OQCGS', 'AVWXY', 'MNH', 'aegs', 'gjpqy', 'STRETCH the word']
@@ -20,7 +21,8 @@ const fontId = ref(LAB_FONTS[0]!)
 const text = ref('Sailor')
 const S = ref(1.6)
 const SY = ref(1)
-const k = ref(2)
+const k = ref(1)
+const shapeRules = ref(true)
 const overlay = ref(false)
 const weightComp = ref(false)
 const ready = ref(false)
@@ -40,6 +42,20 @@ async function pickFont(id: string) {
 }
 
 const hasWdth = computed(() => !!font.value?.axes.some(a => a.tag === 'wdth'))
+
+/** ONE options object for the smart column AND its overlay, so the tint shows
+ *  exactly the profile the remap used — the overlay must not silently fall
+ *  back to engine defaults the smart column didn't get. */
+const flexOpts = computed<FlexOptions>(() => {
+  const f = font.value
+  const upm = f?.unitsPerEm ?? 1000
+  return {
+    k: k.value,
+    shapeRules: shapeRules.value,
+    smallFeature: SMALL_FEATURE_EM * upm,
+    straightMin: STRAIGHT_MIN_EM * upm,
+  }
+})
 
 const naiveCanvas = ref<HTMLCanvasElement | null>(null)
 const smartCanvas = ref<HTMLCanvasElement | null>(null)
@@ -86,7 +102,7 @@ function render(canvas: HTMLCanvasElement | null, o: TextOutlines | null, withOv
     // Two-channel flex tint (after Pagurek): red = horizontally rigid,
     // blue = vertically rigid. Strong tint = the remap holds that slice.
     for (const g of o.glyphs) {
-      const flex = glyphFlexFor(g, { k: k.value })
+      const flex = glyphFlexFor(g, flexOpts.value)
       const { start, binSize, flex: fx } = flex.x
       for (let i = 0; i < fx.length; i++) {
         const a = (1 - fx[i]!) * 0.35
@@ -121,7 +137,7 @@ function rerender() {
     ? weightCompensation(f, plan.coords, S.value, SY.value)
     : plan.coords
   const smartBase = textOutlines(f, text.value, smartAxes)
-  render(smartCanvas.value, stretchOutlines(smartBase, plan.residual, SY.value, { k: k.value }), overlay.value)
+  render(smartCanvas.value, stretchOutlines(smartBase, plan.residual, SY.value, flexOpts.value), overlay.value)
 
   if (hasWdth.value) {
     render(axisCanvas.value, textOutlines(f, text.value, plan.coords), false)
@@ -130,7 +146,7 @@ function rerender() {
   }
 }
 
-watch([font, text, S, SY, k, overlay, weightComp], rerender, { flush: 'post' })
+watch([font, text, S, SY, k, shapeRules, overlay, weightComp], rerender, { flush: 'post' })
 watch(fontId, id => { void pickFont(id!) })
 
 onMounted(async () => {
@@ -174,6 +190,9 @@ onMounted(async () => {
       <label class="flex items-center gap-2">
         k {{ k.toFixed(1) }}
         <input v-model.number="k" type="range" min="0" max="8" step="0.1" class="w-32" data-test="k" />
+      </label>
+      <label class="flex items-center gap-2">
+        <input v-model="shapeRules" type="checkbox" data-test="shape-rules" /> shape rules
       </label>
       <label class="flex items-center gap-2">
         <input v-model="overlay" type="checkbox" data-test="overlay" /> flex overlay
