@@ -7727,9 +7727,9 @@ function materializeImageShowcase(): boolean {
   ].filter(w => !!objectInfo.value[w.nodeType])
   if (!ways.length) return false
 
-  // One colour, no tilt — the classic sticky yellow is the single warm accent
-  // on the dark canvas.
-  const PAPER = '#fde68a'
+  // One colour, no tilt — soft white paper, gallery-label style on the dark
+  // canvas (owner: sticky yellow read as ugly here).
+  const PAPER = '#f8f8f6'
   const COL_PITCH = 680
   const ROW_PITCH = 560
   const LABEL_H = 84
