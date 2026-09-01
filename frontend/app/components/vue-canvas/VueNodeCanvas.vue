@@ -1014,7 +1014,7 @@ provide('vueFlowEdges', edges)
 const runLeafNodeIds = computed(() => computeRunLeafIds(activeRunNodeIds.value, edges.value as any[]))
 provide('runLeafNodeIds', runLeafNodeIds)
 const {
-  onConnect, addEdges, fitView, zoomIn: vfZoomIn, zoomOut: vfZoomOut,
+  onConnect, addEdges, fitView, fitBounds, zoomIn: vfZoomIn, zoomOut: vfZoomOut,
   project, removeNodes, removeEdges, viewport: vfViewport, onNodeDragStop, onNodeDrag,
   onConnectStart, onConnectEnd, onEdgesChange,
 } = useVueFlow()
@@ -7533,11 +7533,110 @@ function materializeAutoImageSinks(targetIds: string[]): string[] {
 }
 
 /**
+ * Shared scaffolding for start-graph seeding (Get Started modal / homepage
+ * starter cards): build the node-data blob a Vue-flow node needs from
+ * object_info, push a node, and wire a source into a generator on the first
+ * matching port-type pair.
+ */
+function buildStartNodeData(nodeType: string) {
+  const info = objectInfo.value[nodeType]
+  if (!info) return null
+  const widgetDefs = getWidgetDefs(nodeType)
+  const inputs = [
+    ...Object.entries((info?.input?.required ?? {}) as Record<string, any>).map(([n, s]) => ({ n, s, optional: false })),
+    ...Object.entries((info?.input?.optional ?? {}) as Record<string, any>).map(([n, s]) => ({ n, s, optional: true })),
+  ]
+    .filter(({ s }) => {
+      const specArr = Array.isArray(s) ? s : [s]
+      const type = specArr[0]
+      const cfg = specArr[1] || {}
+      if (Array.isArray(type)) return false
+      if (cfg.forceInput) return true
+      return !['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'].includes(String(type))
+    })
+    .map(({ n, s, optional }) => ({
+      name: n,
+      type: Array.isArray(s) ? String(s[0]) : String(s),
+      link: null,
+      optional,
+    }))
+  const outputs = (info?.output || []).map((type: string, i: number) => ({
+    name: info?.output_name?.[i] || type,
+    type,
+    links: null,
+  }))
+  return {
+    info, widgetDefs, inputs, outputs,
+  }
+}
+
+type StartNodeData = NonNullable<ReturnType<typeof buildStartNodeData>>
+
+function pushStartNode(opts: {
+  id: string
+  nodeType: string
+  data: StartNodeData
+  x: number
+  y: number
+  size: [number, number]
+  /** Prefill the widget named "prompt" so the card runs (or reads) well on first sight. */
+  prompt?: string
+}) {
+  nodes.value.push({
+    id: opts.id,
+    type: getVueFlowType(opts.nodeType),
+    position: { x: opts.x, y: opts.y },
+    data: {
+      nodeType: opts.nodeType,
+      title: opts.data.info?.display_name || opts.nodeType,
+      inputs: opts.data.inputs,
+      outputs: opts.data.outputs,
+      widgetsValues: opts.data.widgetDefs.map((w: any) =>
+        (opts.prompt && w.name === 'prompt') ? opts.prompt : (w.default ?? null)),
+      widgetDefs: opts.data.widgetDefs,
+      properties: {},
+      mode: 0,
+      size: opts.size,
+      category: opts.data.info?.category || '',
+      outputNode: !!opts.data.info?.output_node,
+      priceBadge: opts.data.info?.price_badge || null,
+    },
+  } as any)
+}
+
+/** Wire source → generator on the first matching type pair (e.g. source IMAGE
+ * output to generator's first IMAGE input). No-op when no pair matches. */
+function wireStartPair(sourceId: string, sourceData: StartNodeData, generatorId: string, generatorData: StartNodeData) {
+  const srcPrimary = sourceData.outputs.findIndex(
+    (o: any) => /^(IMAGE|AUDIO|VIDEO|STRING)$/i.test(String(o.type)),
+  )
+  if (srcPrimary < 0) return
+  const srcType = String(sourceData.outputs[srcPrimary].type).toUpperCase()
+  const genInputIdx = generatorData.inputs.findIndex(
+    (i: any) => String(i.type).toUpperCase() === srcType,
+  )
+  if (genInputIdx < 0) return
+  edges.value.push({
+    id: `e-start-${generatorId}`,
+    source: sourceId,
+    sourceHandle: `output-${srcPrimary}`,
+    target: generatorId,
+    targetHandle: `input-${genInputIdx}`,
+    type: 'comfy',
+    data: { dataType: srcType },
+  } as any)
+}
+
+/**
  * Drop a "start graph" onto an empty canvas — used by the Get Started modal
  * after the user picks a (from, to, model) combo. When `sourceNodeType` is
  * given, a matching artifact card lands to the left of the generator and is
  * wired into it via the first input port whose type matches the source's
  * primary output. Otherwise just the generator is placed (prompt-only path).
+ *
+ * The plain "Generate an image" pick is special-cased into a showcase tour
+ * (several ready-to-run ways to make an image, explained by sticky notes) —
+ * see materializeImageShowcase below.
  *
  * Positions are absolute canvas coords — fitView at the end frames whatever
  * we just dropped, so the user doesn't have to zoom around.
@@ -7546,119 +7645,170 @@ function materializeStartGraph(opts: { sourceNodeType?: string; generatorNodeTyp
   const genInfo = objectInfo.value[opts.generatorNodeType]
   if (!genInfo) return false
 
-  const buildNodeData = (nodeType: string) => {
-    const info = objectInfo.value[nodeType]
-    if (!info) return null
-    const widgetDefs = getWidgetDefs(nodeType)
-    const inputs = [
-      ...Object.entries((info?.input?.required ?? {}) as Record<string, any>).map(([n, s]) => ({ n, s, optional: false })),
-      ...Object.entries((info?.input?.optional ?? {}) as Record<string, any>).map(([n, s]) => ({ n, s, optional: true })),
-    ]
-      .filter(({ s }) => {
-        const specArr = Array.isArray(s) ? s : [s]
-        const type = specArr[0]
-        const cfg = specArr[1] || {}
-        if (Array.isArray(type)) return false
-        if (cfg.forceInput) return true
-        return !['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'].includes(String(type))
-      })
-      .map(({ n, s, optional }) => ({
-        name: n,
-        type: Array.isArray(s) ? String(s[0]) : String(s),
-        link: null,
-        optional,
-      }))
-    const outputs = (info?.output || []).map((type: string, i: number) => ({
-      name: info?.output_name?.[i] || type,
-      type,
-      links: null,
-    }))
-    return {
-      info, widgetDefs, inputs, outputs,
-    }
+  if (opts.generatorNodeType === 'GenerateImageNode' && !opts.sourceNodeType) {
+    return materializeImageShowcase()
   }
 
   let idSeed = Date.now()
   const sourceId = opts.sourceNodeType ? String(idSeed++) : null
   const generatorId = String(idSeed++)
 
-  const sourceData = opts.sourceNodeType ? buildNodeData(opts.sourceNodeType) : null
-  const generatorData = buildNodeData(opts.generatorNodeType)
+  const sourceData = opts.sourceNodeType ? buildStartNodeData(opts.sourceNodeType) : null
+  const generatorData = buildStartNodeData(opts.generatorNodeType)
   if (!generatorData) return false
 
   // Pick canvas-coord positions. Left source, right generator. If no source,
   // generator sits roughly centered.
-  const sourceX = 80
-  const generatorX = sourceId ? 420 : 200
-
   if (sourceId && sourceData) {
-    nodes.value.push({
-      id: sourceId,
-      type: getVueFlowType(opts.sourceNodeType!),
-      position: { x: sourceX, y: 80 },
-      data: {
-        nodeType: opts.sourceNodeType,
-        title: sourceData.info?.display_name || opts.sourceNodeType,
-        inputs: sourceData.inputs,
-        outputs: sourceData.outputs,
-        widgetsValues: sourceData.widgetDefs.map((w: any) => w.default ?? null),
-        widgetDefs: sourceData.widgetDefs,
-        properties: {},
-        mode: 0,
-        size: [240, 280],
-        category: sourceData.info?.category || '',
-        outputNode: !!sourceData.info?.output_node,
-      },
-    } as any)
+    pushStartNode({ id: sourceId, nodeType: opts.sourceNodeType!, data: sourceData, x: 80, y: 80, size: [240, 280] })
   }
-
-  nodes.value.push({
+  pushStartNode({
     id: generatorId,
-    type: getVueFlowType(opts.generatorNodeType),
-    position: { x: generatorX, y: 80 },
-    data: {
-      nodeType: opts.generatorNodeType,
-      title: generatorData.info?.display_name || opts.generatorNodeType,
-      inputs: generatorData.inputs,
-      outputs: generatorData.outputs,
-      widgetsValues: generatorData.widgetDefs.map((w: any) => w.default ?? null),
-      widgetDefs: generatorData.widgetDefs,
-      properties: {},
-      mode: 0,
-      size: [220, 120],
-      category: generatorData.info?.category || '',
-      outputNode: !!generatorData.info?.output_node,
-      priceBadge: generatorData.info?.price_badge || null,
-    },
-  } as any)
+    nodeType: opts.generatorNodeType,
+    data: generatorData,
+    x: sourceId ? 420 : 200,
+    y: 80,
+    size: [220, 120],
+  })
 
-  // Wire source → generator on the first matching type pair (e.g. source IMAGE
-  // output to generator's first IMAGE input).
   if (sourceId && sourceData) {
-    const srcPrimary = sourceData.outputs.findIndex(
-      (o: any) => /^(IMAGE|AUDIO|VIDEO|STRING)$/i.test(String(o.type)),
-    )
-    if (srcPrimary >= 0) {
-      const srcType = String(sourceData.outputs[srcPrimary].type).toUpperCase()
-      const genInputIdx = generatorData.inputs.findIndex(
-        (i: any) => String(i.type).toUpperCase() === srcType,
-      )
-      if (genInputIdx >= 0) {
-        edges.value.push({
-          id: `e-start-${generatorId}`,
-          source: sourceId,
-          sourceHandle: `output-${srcPrimary}`,
-          target: generatorId,
-          targetHandle: `input-${genInputIdx}`,
-          type: 'comfy',
-          data: { dataType: srcType },
-        } as any)
-      }
-    }
+    wireStartPair(sourceId, sourceData, generatorId, generatorData)
   }
 
   // Frame what we just dropped.
   nextTick(() => fitView({ padding: 0.3 }))
+
+  return true
+}
+
+/**
+ * The "Generate an image" welcome tour: instead of one bare generator, seed a
+ * 2×2 grid of ready-to-run ways to make an image, each introduced by a sticky
+ * note (plus an intro sticky up top). Ways whose node type is missing from
+ * object_info are skipped rather than failing the whole seed; the image-fed
+ * ways get an Image card pre-wired in so the canvas also demonstrates wiring.
+ * Stickies persist like any user annotation (workflow.extra), so the tour
+ * survives save/load and the user deletes pieces as they claim the canvas.
+ */
+function materializeImageShowcase(): boolean {
+  interface ShowcaseWay {
+    nodeType: string
+    note: string
+    color: string
+    prompt?: string
+    /** Pre-wire an Image artifact card into the generator's IMAGE input. */
+    withImageSource?: boolean
+  }
+  const ways: ShowcaseWay[] = [
+    {
+      nodeType: 'GenerateImageNode',
+      color: '#bfdbfe', // blue
+      note: 'Describe it\n\nType what you want in the prompt and press Run. Click the model name to browse the gallery — every model has its own look.',
+      prompt: 'A lighthouse on a rocky coast at golden hour, gouache painting',
+    },
+    {
+      nodeType: 'FluxLoRARemoteNode',
+      color: '#fbcfe8', // pink
+      note: 'Give it a style\n\nThis one generates with a style (LoRA), so every image comes out with the same look. Pick a style you trained or downloaded, and include its trigger word in the prompt.',
+    },
+    {
+      nodeType: 'SketchToImageNode',
+      color: '#bbf7d0', // green
+      note: 'Start from a sketch\n\nDrop a rough drawing into the Image card — the wire feeds it to the generator, which keeps your composition and finishes the image.',
+      prompt: 'Turn this sketch into a soft watercolor illustration',
+      withImageSource: true,
+    },
+    {
+      nodeType: 'GenerateFromReferencesNode',
+      color: '#ddd6fe', // lavender
+      note: 'Start from references\n\nDrop a photo or a few reference images into the Image card, describe what to make, and the model blends them into something new.',
+      prompt: 'Combine these references into one scene',
+      withImageSource: true,
+    },
+  ].filter(w => !!objectInfo.value[w.nodeType])
+  if (!ways.length) return false
+
+  const intro = createSticky({
+    x: 340,
+    y: -170,
+    color: '#fde68a', // yellow
+    text: 'Four ways to make an image\n\nEach group below is ready to run. Pick the one that fits, press Run on it, and delete the rest — or press + to explore more.',
+  })
+  intro.width = 400
+  intro.height = 140
+  intro.rotation = 0
+
+  let idSeed = Date.now()
+  const imageSourceData = buildStartNodeData('Image')
+  const placedIds: string[] = []
+  const stickyRects: { x: number; y: number; width: number; height: number }[] = [intro]
+
+  ways.forEach((way, i) => {
+    const qx = (i % 2) * 880
+    const qy = 40 + Math.floor(i / 2) * 640
+
+    const sticky = createSticky({ x: qx, y: qy + 20, text: way.note, color: way.color })
+    sticky.width = 235
+    sticky.height = 220
+    stickyRects.push(sticky)
+
+    const generatorData = buildStartNodeData(way.nodeType)
+    if (!generatorData) return
+
+    let generatorX = qx + 280
+    let sourceId: string | null = null
+    if (way.withImageSource && imageSourceData) {
+      sourceId = String(idSeed++)
+      pushStartNode({ id: sourceId, nodeType: 'Image', data: imageSourceData, x: generatorX, y: qy, size: [240, 280] })
+      placedIds.push(sourceId)
+      generatorX += 300
+    }
+
+    const generatorId = String(idSeed++)
+    pushStartNode({
+      id: generatorId,
+      nodeType: way.nodeType,
+      data: generatorData,
+      x: generatorX,
+      y: qy,
+      size: [220, 120],
+      prompt: way.prompt,
+    })
+    placedIds.push(generatorId)
+
+    if (sourceId && imageSourceData) {
+      wireStartPair(sourceId, imageSourceData, generatorId, generatorData)
+    }
+  })
+
+  // Frame the whole tour — stickies included, which plain fitView would crop
+  // (it only measures vue-flow nodes). Vue Flow measures new nodes via
+  // ResizeObserver AFTER they render — bounds computed from stated sizes
+  // frame a fraction of the real cards, so wait (bounded) until every card
+  // carries real dimensions, then fit the union of cards and stickies.
+  ;(async () => {
+    await nextTick()
+    let picked: any[] = []
+    for (let i = 0; i < 20; i++) {
+      picked = (nodes.value as any[]).filter((n: any) => placedIds.includes(String(n.id)))
+      if (picked.length === placedIds.length && picked.every((n: any) => (n.dimensions?.width ?? 0) > 0)) break
+      await new Promise<void>(r => requestAnimationFrame(() => r()))
+    }
+    const rects = [
+      ...stickyRects,
+      ...picked.map((n: any) => ({
+        x: n.position.x,
+        y: n.position.y,
+        width: n.dimensions?.width || 240,
+        height: n.dimensions?.height || 280,
+      })),
+    ]
+    const minX = Math.min(...rects.map(r => r.x))
+    const minY = Math.min(...rects.map(r => r.y))
+    const maxX = Math.max(...rects.map(r => r.x + r.width))
+    const maxY = Math.max(...rects.map(r => r.y + r.height))
+    fitBounds({ x: minX, y: minY, width: maxX - minX, height: maxY - minY }, { padding: 0.08 })
+  })()
 
   return true
 }
