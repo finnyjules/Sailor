@@ -4,7 +4,7 @@
 // toolbar there (the same dock Motion mode's timeline uses) and supersedes the
 // retired Scene3DSculptPanel. Same v-model surface + apply/exit/remesh emits,
 // so the surface's state and handlers bind unchanged.
-import { ref, computed } from 'vue'
+import { ref, computed, type Component } from 'vue'
 import { Paintbrush, Feather, Wind, Hammer, Hand, Magnet, Spline, Minus, Plus, Loader2, ChevronUp } from 'lucide-vue-next'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
@@ -31,7 +31,7 @@ const props = defineProps<{
 
 defineEmits<{ apply: []; exit: []; remesh: [] }>()
 
-const BRUSHES: { kind: BrushKind; icon: unknown; label: string }[] = [
+const BRUSHES: { kind: BrushKind; icon: Component; label: string }[] = [
   { kind: 'draw', icon: Paintbrush, label: 'Draw' },
   { kind: 'smooth', icon: Feather, label: 'Smooth' },
   { kind: 'inflate', icon: Wind, label: 'Inflate' },

@@ -21,6 +21,7 @@ const props = defineProps<{
   sculptConfirmNeeded: boolean
   selectedKindLabel: string
   mergeBusy?: boolean
+  converting?: boolean
 }>()
 
 const mergeOp = defineModel<string>('mergeOp', { required: true })
@@ -80,7 +81,7 @@ function confirmSculpt() {
     <div v-if="canConvertToMesh" class="relative">
       <StudioButton variant="subtle" @click="overflowOpen = !overflowOpen; mergeOpen = false"><MoreHorizontal class="h-4 w-4" /></StudioButton>
       <div v-if="overflowOpen" class="absolute right-0 top-full mt-2 w-48 rounded-lg border border-white/10 bg-[#1a1a1a] p-1 shadow-xl">
-        <button type="button" class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 hover:bg-white/10" @click="overflowOpen = false; $emit('convert')"><Boxes class="h-3.5 w-3.5" /> Convert to mesh</button>
+        <button type="button" class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 hover:bg-white/10 disabled:opacity-40" :disabled="converting" @click="overflowOpen = false; $emit('convert')"><Boxes class="h-3.5 w-3.5" /> Convert to mesh</button>
       </div>
     </div>
   </div>

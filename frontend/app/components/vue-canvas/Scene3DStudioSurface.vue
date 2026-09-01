@@ -2062,7 +2062,6 @@ async function solidifySelection() {
 // that beats exact mesh CSG here: the result is already a clean uniform mesh,
 // ready for Sculpt with no remesh step, at the cost of sharp edges softening to
 // grid resolution.
-const mergeOpen = ref(false) // popover visibility, distinct from remeshOpen above
 const mergeOp = ref<MergeOp>('union')
 const mergeOpProxy = enumProxy<MergeOp>(() => mergeOp.value, (v) => { mergeOp.value = v })
 const mergeBlend = ref(0)
@@ -2209,7 +2208,6 @@ async function mergeSelection() {
         return t ? { ...o, ...t } : o
       })
       selectedIds.value = [merged.id]
-      mergeOpen.value = false
     } finally {
       geo.dispose()
     }
@@ -2220,7 +2218,6 @@ async function mergeSelection() {
     mergeBusy.value = false
   }
 }
-watch(canMerge, (can) => { if (!can) mergeOpen.value = false })
 
 // ── Sculpt mode (Task 13) ─────────────────────────────────────────────────────
 // The session (Tasks 10–12) holds the working vertex buffer; NOTHING here ever
@@ -2399,6 +2396,11 @@ async function enterSculpt() {
     // it only locks once a pointermove finds the cursor over the mesh, or a
     // stroke begins. See interaction.ts's `setSculptMode` vs `setSculpting`.
     interaction?.setSculptMode(true)
+    // Fix 1 (dock exclusivity): sculpt owns the bottom-center dock, and the
+    // Motion timeline claims that same spot for activeTab === 'motion' — force
+    // Build here (and the tab buttons below lock while sculpting.value is
+    // true) so the two docked panels can never both satisfy their v-if at once.
+    activeTab.value = 'build'
     sculpting.value = true
     sculptHovering = false
   } catch (err) {
@@ -3452,6 +3454,7 @@ async function onClose() {
             :sculpt-confirm-needed="sculptConfirmNeeded"
             :selected-kind-label="selectedKindLabel"
             :merge-busy="mergeBusy"
+            :converting="converting"
             v-model:mergeOp="mergeOpProxy"
             v-model:mergeBlend="mergeBlend"
             v-model:mergeResolution="mergeResolution"
@@ -3829,10 +3832,12 @@ async function onClose() {
            `commitSculptIfNeeded` — so neither one can persist the pre-sculpt
            mesh out from under an open sculpt session. -->
       <div class="mb-2 flex gap-1 rounded-lg bg-white/[0.04] p-1 text-[11px]">
-        <button type="button" class="nodrag flex-1 rounded px-2 py-1"
+        <button type="button" class="nodrag flex-1 rounded px-2 py-1 disabled:opacity-40 disabled:pointer-events-none"
+                :disabled="sculpting"
                 :class="activeTab === 'build' ? 'bg-white/15 text-white' : 'text-white/55 hover:text-white/80'"
                 @click="activeTab = 'build'">Build</button>
-        <button type="button" class="nodrag flex-1 rounded px-2 py-1"
+        <button type="button" class="nodrag flex-1 rounded px-2 py-1 disabled:opacity-40 disabled:pointer-events-none"
+                :disabled="sculpting"
                 :class="activeTab === 'motion' ? 'bg-white/15 text-white' : 'text-white/55 hover:text-white/80'"
                 @click="activeTab = 'motion'">Motion</button>
       </div>
