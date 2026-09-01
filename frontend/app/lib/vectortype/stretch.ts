@@ -1,0 +1,241 @@
+/**
+ * Vector Type Studio — smart stretch. PURE.
+ *
+ * Typographic stretch: white space stretches, ink doesn't. Each glyph gets a
+ * per-axis FLEX PROFILE — how stretchable each thin slice of the glyph is —
+ * and stretching is a monotone piecewise-linear remap of outline coordinates
+ * whose slice widths scale in proportion to flex. Points only ever MOVE, so
+ * the command count is constant across any stretch value: the same `gvar`
+ * property the motion system already relies on for variable-axis animation.
+ *
+ * Flex follows Pagurek's tangent-aligned formulation
+ * (davepagurek.com/programming/stretch-text/): a slice's flex is the MINIMUM
+ * over its ink of |tangent · stretch-direction|^k. A vertical stem pins its
+ * X slices (tangent ⊥ stretch), a counter or crossbar stretches freely, a
+ * diagonal sits in between. k = 0 degenerates to uniform scaling — the lab's
+ * "naive" comparison column is this same code path, not a second renderer.
+ *
+ * The min runs over the ink's INTERIOR, computed by propagating each cell's
+ * nearest-boundary tangent across a small per-glyph grid with a chamfer
+ * distance transform — NOT by sampled-boundary nearest-neighbour lookup,
+ * which is where the original write-up's cusp/edge artifacts came from.
+ *
+ * Coordinates are FONT UNITS, y-up, baseline at y = 0, matching outline.ts.
+ */
+import type { PathCommand, VtBBox } from './outline'
+
+export interface FlexProfile {
+  /** Left/bottom edge of bin 0, in font units. */
+  start: number
+  binSize: number
+  /** Per-bin stretchiness in [0, 1]; 1 = fully flexible. */
+  flex: Float64Array
+}
+
+export interface GlyphFlex {
+  x: FlexProfile
+  y: FlexProfile
+}
+
+export interface FlexOptions {
+  bins?: number
+  k?: number
+}
+
+const DEFAULT_BINS = 64
+const DEFAULT_K = 2
+/** Curve flattening steps for ANALYSIS only — the remap itself moves the real
+ *  control points, so this resolution never appears in output geometry. */
+const CURVE_STEPS = 16
+
+interface Seg { x0: number; y0: number; x1: number; y1: number }
+
+/** Flatten commands to line segments for tangent analysis. closePath emits the
+ *  implicit closing segment — without it every subpath would leak a fake gap
+ *  of "no ink" where the closing edge runs. */
+function flattenToSegments(commands: readonly PathCommand[]): Seg[] {
+  const segs: Seg[] = []
+  let px = 0, py = 0
+  let sx = 0, sy = 0
+  const emit = (x1: number, y1: number) => {
+    if (x1 !== px || y1 !== py) segs.push({ x0: px, y0: py, x1, y1 })
+    px = x1; py = y1
+  }
+  for (const c of commands) {
+    const a = c.args
+    switch (c.command) {
+      case 'moveTo':
+        px = a[0]!; py = a[1]!; sx = px; sy = py
+        break
+      case 'lineTo':
+        emit(a[0]!, a[1]!)
+        break
+      case 'quadraticCurveTo': {
+        const [cx, cy, x, y] = a as [number, number, number, number]
+        const x0 = px, y0 = py
+        for (let i = 1; i <= CURVE_STEPS; i++) {
+          const t = i / CURVE_STEPS, u = 1 - t
+          emit(u * u * x0 + 2 * u * t * cx + t * t * x, u * u * y0 + 2 * u * t * cy + t * t * y)
+        }
+        break
+      }
+      case 'bezierCurveTo': {
+        const [c1x, c1y, c2x, c2y, x, y] = a as [number, number, number, number, number, number]
+        const x0 = px, y0 = py
+        for (let i = 1; i <= CURVE_STEPS; i++) {
+          const t = i / CURVE_STEPS, u = 1 - t
+          emit(
+            u * u * u * x0 + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x,
+            u * u * u * y0 + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y,
+          )
+        }
+        break
+      }
+      case 'closePath':
+        emit(sx, sy)
+        break
+    }
+  }
+  return segs
+}
+
+/**
+ * Grid resolution for nearest-boundary tangent propagation. The min in the
+ * flex formula runs over the ink's INTERIOR: a slice through the middle of a
+ * stem crosses only the stem's horizontal caps, so boundary crossings alone
+ * would call the stem flexible — what pins it is interior ink inheriting the
+ * tangent of its NEAREST boundary (the stem's vertical side walls). Nearest-
+ * boundary is computed with a two-pass chamfer distance transform over a
+ * small per-glyph grid: deterministic, one cached pass, no sampled k-d tree
+ * (which is where the original write-up's cusp/edge artifacts came from).
+ */
+const GRID = 96
+
+export function analyzeFlex(
+  commands: readonly PathCommand[],
+  bbox: VtBBox,
+  opts: FlexOptions = {},
+): GlyphFlex {
+  const bins = Math.max(4, Math.round(opts.bins ?? DEFAULT_BINS))
+  const k = Math.max(0, opts.k ?? DEFAULT_K)
+  const w = bbox.maxX - bbox.minX
+  const h = bbox.maxY - bbox.minY
+  const flexX = new Float64Array(bins).fill(1)
+  const flexY = new Float64Array(bins).fill(1)
+  const out: GlyphFlex = {
+    x: { start: bbox.minX, binSize: w > 0 ? w / bins : 1, flex: flexX },
+    y: { start: bbox.minY, binSize: h > 0 ? h / bins : 1, flex: flexY },
+  }
+  if (w <= 0 || h <= 0 || !commands.length) return out
+
+  const segs = flattenToSegments(commands)
+  if (!segs.length) return out
+  const cw = w / GRID
+  const ch = h / GRID
+  const N = GRID * GRID
+  const dist = new Float64Array(N).fill(Infinity)
+  // |tangent·x̂| and |tangent·ŷ| of the nearest boundary, propagated together
+  // with the distance (the nearest boundary is one point; both alignments
+  // come from its one tangent).
+  const ax = new Float64Array(N).fill(1)
+  const ay = new Float64Array(N).fill(1)
+  const idx = (c: number, r: number) => r * GRID + c
+
+  // Stamp boundary cells with exact segment tangents. Where two segments meet
+  // in one cell (corners), keep the more rigid alignment per axis — the min
+  // in the flex formula makes conservative-rigid the faithful tie-break.
+  for (const s of segs) {
+    const dx = s.x1 - s.x0, dy = s.y1 - s.y0
+    const len = Math.hypot(dx, dy)
+    if (len === 0) continue
+    const tx = Math.abs(dx) / len
+    const ty = Math.abs(dy) / len
+    const steps = Math.max(1, Math.ceil(len / (Math.min(cw, ch) * 0.5)))
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps
+      const c = Math.max(0, Math.min(GRID - 1, Math.floor((s.x0 + dx * t - bbox.minX) / cw)))
+      const r = Math.max(0, Math.min(GRID - 1, Math.floor((s.y0 + dy * t - bbox.minY) / ch)))
+      const j = idx(c, r)
+      if (dist[j]! > 0) { dist[j] = 0; ax[j] = tx; ay[j] = ty }
+      else { ax[j] = Math.min(ax[j]!, tx); ay[j] = Math.min(ay[j]!, ty) }
+    }
+  }
+
+  // Two-pass chamfer: propagate (distance, tangent) from each cell's already-
+  // visited neighbours. Step costs are in FONT UNITS, not grid steps — the
+  // grid is GRID×GRID over a bbox that is usually far from square (a stem is
+  // ~100×700), and unit-step costs would let a stem's caps out-compete its
+  // side walls for half the interior, mislabelling it flexible in Y.
+  const costH = cw
+  const costV = ch
+  const costD = Math.hypot(cw, ch)
+  const relax = (j: number, n: number, cost: number) => {
+    const d = dist[n]! + cost
+    if (d < dist[j]!) { dist[j] = d; ax[j] = ax[n]!; ay[j] = ay[n]! }
+  }
+  for (let r = 0; r < GRID; r++) {
+    for (let c = 0; c < GRID; c++) {
+      const j = idx(c, r)
+      if (c > 0) relax(j, idx(c - 1, r), costH)
+      if (r > 0) relax(j, idx(c, r - 1), costV)
+      if (c > 0 && r > 0) relax(j, idx(c - 1, r - 1), costD)
+      if (c < GRID - 1 && r > 0) relax(j, idx(c + 1, r - 1), costD)
+    }
+  }
+  for (let r = GRID - 1; r >= 0; r--) {
+    for (let c = GRID - 1; c >= 0; c--) {
+      const j = idx(c, r)
+      if (c < GRID - 1) relax(j, idx(c + 1, r), costH)
+      if (r < GRID - 1) relax(j, idx(c, r + 1), costV)
+      if (c < GRID - 1 && r < GRID - 1) relax(j, idx(c + 1, r + 1), costD)
+      if (c > 0 && r < GRID - 1) relax(j, idx(c - 1, r + 1), costD)
+    }
+  }
+
+  // Ink mask by even-odd scanline per row. Even-odd matches nonzero for
+  // ordinary glyphs (outer contour + counters); self-overlapping outlines are
+  // the known artifact class the lab watches for.
+  const ink = new Uint8Array(N)
+  for (let r = 0; r < GRID; r++) {
+    const yLine = bbox.minY + (r + 0.5) * ch
+    const xs: number[] = []
+    for (const s of segs) {
+      if ((s.y0 <= yLine && s.y1 > yLine) || (s.y1 <= yLine && s.y0 > yLine)) {
+        xs.push(s.x0 + ((yLine - s.y0) / (s.y1 - s.y0)) * (s.x1 - s.x0))
+      }
+    }
+    xs.sort((a, b) => a - b)
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+      let c0 = Math.ceil((xs[i]! - bbox.minX) / cw - 0.5)
+      let c1 = Math.floor((xs[i + 1]! - bbox.minX) / cw - 0.5)
+      c0 = Math.max(0, c0)
+      c1 = Math.min(GRID - 1, c1)
+      for (let c = c0; c <= c1; c++) ink[idx(c, r)] = 1
+    }
+  }
+
+  // Per-column / per-row minima over INK cells only, then downsample to bins.
+  const colMin = new Float64Array(GRID).fill(1)
+  const rowMin = new Float64Array(GRID).fill(1)
+  for (let r = 0; r < GRID; r++) {
+    for (let c = 0; c < GRID; c++) {
+      const j = idx(c, r)
+      if (!ink[j]) continue
+      if (ax[j]! < colMin[c]!) colMin[c] = ax[j]!
+      if (ay[j]! < rowMin[r]!) rowMin[r] = ay[j]!
+    }
+  }
+  const cellsPerBin = GRID / bins
+  for (let b = 0; b < bins; b++) {
+    let mx = 1, my = 1
+    const g0 = Math.floor(b * cellsPerBin)
+    const g1 = Math.min(GRID - 1, Math.ceil((b + 1) * cellsPerBin) - 1)
+    for (let g = g0; g <= g1; g++) {
+      if (colMin[g]! < mx) mx = colMin[g]!
+      if (rowMin[g]! < my) my = rowMin[g]!
+    }
+    flexX[b] = Math.pow(mx, k)
+    flexY[b] = Math.pow(my, k)
+  }
+  return out
+}
