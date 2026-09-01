@@ -6,7 +6,7 @@
 // ever look identical on a stem-heavy string, the flex path silently didn't
 // run — that is a bug, not a coincidence.
 definePageMeta({ layout: false })
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, markRaw, onMounted, shallowRef, watch } from 'vue'
 import { loadVariableFont } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 import { textOutlines } from '~/lib/vectortype/outline'
@@ -27,12 +27,12 @@ const ready = ref(false)
 const error = ref('')
 
 const fonts = new Map<string, VtFont>()
-const font = ref<VtFont | null>(null)
+const font = shallowRef<VtFont | null>(null)
 
 async function pickFont(id: string) {
   try {
     if (!fonts.has(id)) fonts.set(id, await loadVariableFont(id))
-    font.value = fonts.get(id)!
+    font.value = markRaw(fonts.get(id)!)
     error.value = ''
   } catch (e) {
     error.value = String(e)
