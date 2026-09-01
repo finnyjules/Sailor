@@ -724,10 +724,68 @@ function binWidths(flex: Float64Array, w: number, S: number, ink?: Float64Array)
   return out
 }
 
-export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number): Remap {
+/**
+ * Split a profile's bins into consecutive BANDS by the shared alignment
+ * lines in `zones`, and solve each band's widths independently (each calls
+ * `binWidths` on its own flex/ink slice with the same `S`).
+ *
+ * Every glyph shares the same typeface-level lines (baseline, x-height, cap
+ * height, ascender, descender): without this, each glyph's Y remap is solved
+ * over its OWN bbox extent, so a glyph whose bbox happens to include extra
+ * rigid ink (an i's dot above its stem) must push its whole shape further to
+ * reach the same total height — and its x-height line lands somewhere else
+ * than its neighbours'. Solving band-by-band instead means the boundary
+ * between bands (a zone line) always lands at exactly S × its natural
+ * position, because that boundary is precisely where one band's cumulative
+ * width ends and the next begins — independent of how each band's own ink
+ * happens to resist.
+ *
+ * A band that is entirely rigid (no bin in it has any flex) cannot widen at
+ * all and keeps its absolute size — this is not a bug to route around: an
+ * overshoot sliver sitting above the x-height (or below the baseline) SHOULD
+ * keep its drawn size rather than stretch, which is exactly classic optical
+ * overshoot compensation.
+ */
+function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number[]): Float64Array {
   const { start, binSize: w, flex, ink } = profile
   const n = flex.length
-  const widths = binWidths(flex, w, S, ink)
+  const total = n * w
+  // Keep only lines strictly inside the profile's own span, sorted and
+  // deduped — a line at or beyond either end contributes no boundary.
+  const lines = Array.from(new Set(zones.filter(z => z > start && z < start + total))).sort((a, b) => a - b)
+  if (!lines.length) return binWidths(flex, w, S, ink)
+
+  // A bin belongs to the band containing its CENTRE, not its edges — so a
+  // zone line that lands mid-bin (the common case; zones rarely fall on a
+  // bin boundary) still assigns that whole bin to one side consistently.
+  const bandOf = new Int32Array(n)
+  let li = 0
+  for (let i = 0; i < n; i++) {
+    const centre = start + (i + 0.5) * w
+    while (li < lines.length && lines[li]! <= centre) li++
+    bandOf[i] = li
+  }
+
+  const out = new Float64Array(n)
+  let lo = 0
+  for (let i = 1; i <= n; i++) {
+    if (i === n || bandOf[i] !== bandOf[lo]) {
+      // Float64Array.subarray is a VIEW — binWidths only reads flex/ink, so
+      // this never copies, and the result is written back into `out` at the
+      // band's own offset.
+      const bandFlex = flex.subarray(lo, i)
+      const bandInk = ink ? ink.subarray(lo, i) : undefined
+      out.set(binWidths(bandFlex, w, S, bandInk), lo)
+      lo = i
+    }
+  }
+  return out
+}
+
+export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number, zones?: readonly number[]): Remap {
+  const { start, binSize: w, flex, ink } = profile
+  const n = flex.length
+  const widths = zones && zones.length ? bandedBinWidths(profile, S, zones) : binWidths(flex, w, S, ink)
   const src = new Float64Array(n + 1)
   const dst = new Float64Array(n + 1)
   let acc = start
@@ -827,6 +885,13 @@ export function stretchOutlines(
     straightMin: STRAIGHT_MIN_EM * outlines.unitsPerEm,
     ...opts,
   }
+  // Shared vertical zones: every glyph's Y remap is solved band-by-band
+  // against the FONT's alignment lines, not each glyph's own bbox, so the
+  // baseline/x-height/cap-height/ascender/descender land at the same place
+  // in every glyph (see `bandedBinWidths`'s doc comment for why this fixes
+  // the "i's stem sits above its neighbours" bug).
+  const m = outlines.metrics
+  const zones = [0, m.xHeight, m.capHeight, m.ascent, m.descent]
   const glyphs: GlyphOutline[] = []
   let penOld = 0
   let penNew = 0
@@ -840,7 +905,7 @@ export function stretchOutlines(
     if (hasInk(g)) {
       flex = glyphFlexFor(g, flexOpts)
       const rx = buildRemap(flex.x, S)
-      const ry = buildRemap(flex.y, SY, 0)
+      const ry = buildRemap(flex.y, SY, 0, zones)
       commands = applyRemaps(g.commands, rx, ry)
       bbox = {
         minX: remapValue(rx, g.bbox.minX),

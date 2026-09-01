@@ -616,3 +616,52 @@ describe('shape integrity', () => {
     expect((top1[1] - top1[0]) / (top0[1] - top0[0])).toBeLessThan(1.3)
   })
 })
+
+describe('shared vertical zones', () => {
+  it('textOutlines exposes plausible font metrics', () => {
+    const o = textOutlines(font, 'x')
+    expect(o.metrics.xHeight).toBeGreaterThan(font.unitsPerEm * 0.3)
+    expect(o.metrics.xHeight).toBeLessThan(font.unitsPerEm * 0.7)
+    expect(o.metrics.capHeight).toBeGreaterThan(o.metrics.xHeight)
+    expect(o.metrics.ascent).toBeGreaterThanOrEqual(o.metrics.capHeight)
+    expect(o.metrics.descent).toBeLessThan(0)
+  })
+
+  it('a zone line lands exactly at S × its position, regardless of how rigid each band is', () => {
+    // Band A (bins 0-4) is mostly flexible, band B (bins 5-9) mostly rigid.
+    const flex = new Float64Array([1, 1, 0, 0, 1, 0, 0, 0, 0, 1])
+    const ink  = new Float64Array([0, 0, 1, 1, 0, 1, 1, 1, 1, 0])
+    const withZones = buildRemap({ start: 0, binSize: 10, flex, ink }, 2, undefined, [50])
+    expect(remapValue(withZones, 50)).toBeCloseTo(100, 6)
+    expect(remapValue(withZones, 100)).toBeCloseTo(200, 6)
+    const without = buildRemap({ start: 0, binSize: 10, flex, ink }, 2)
+    expect(Math.abs(remapValue(without, 50) - 100)).toBeGreaterThan(5)   // the old behaviour drifts
+  })
+
+  it("the i's stem top stays level with the x-height letters at Height 2.5", () => {
+    const run = textOutlines(font, 'ai')
+    const tall = stretchOutlines(run, 1, 2.5)
+    const stemTop = (g: typeof run.glyphs[0]) => {
+      const cx = (g.bbox.minX + g.bbox.maxX) / 2
+      const runs = inkRunsAtX(g.commands, cx)   // [stem run, dot run] bottom to top
+      return runs[0]![1]
+    }
+    const a0 = run.glyphs[0]!, i0 = run.glyphs[1]!
+    const a1 = tall.glyphs[0]!, i1 = tall.glyphs[1]!
+    const gap0 = a0.bbox.maxY - stemTop(i0)         // ≈ the a's overshoot above the stem top
+    const gap1 = a1.bbox.maxY - stemTop(i1)
+    // The relationship survives: the gap may not grow by more than 2% of the new x-height.
+    expect(Math.abs(gap1 - gap0)).toBeLessThan(0.02 * 2.5 * run.metrics.xHeight)
+    // and the stem top itself sits at S × x-height (± 2%)
+    expect(Math.abs(stemTop(i1) - 2.5 * stemTop(i0))).toBeLessThan(0.02 * 2.5 * stemTop(i0))
+  })
+
+  it('the baseline stays a fixed point with zones in play', () => {
+    const run = textOutlines(font, 'g')
+    const tall = stretchOutlines(run, 1, 2)
+    const g0 = run.glyphs[0]!, g1 = tall.glyphs[0]!
+    // descender grows down, x-height part grows up, baseline unmoved
+    expect(g1.bbox.minY).toBeLessThan(g0.bbox.minY * 1.5)
+    expect(g1.bbox.maxY).toBeGreaterThan(g0.bbox.maxY * 1.8)
+  })
+})

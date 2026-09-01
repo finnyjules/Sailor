@@ -55,6 +55,18 @@ export interface GlyphOutline {
   codePoints: number[]
 }
 
+/** A typeface's shared alignment lines, in font units (y-up, baseline at 0).
+ *  These are properties of the FONT, not any one glyph — every glyph's Y
+ *  remap must map them to the same targets, or letters that individually
+ *  reach the same total height (an i's bbox including its dot, an o's bbox
+ *  not) drift apart at the x-height line. */
+export interface FontMetrics {
+  xHeight: number
+  capHeight: number
+  ascent: number
+  descent: number
+}
+
 export interface TextOutlines {
   glyphs: GlyphOutline[]
   /** Total advance of the run, in font units. */
@@ -65,6 +77,8 @@ export interface TextOutlines {
   coords: Record<string, number>
   /** Union of every glyph's bounds, placed on the line. Zero-area if empty. */
   bbox: VtBBox
+  /** The font's shared alignment lines — see `FontMetrics`. */
+  metrics: FontMetrics
 }
 
 const EMPTY_BBOX: VtBBox = { minX: 0, minY: 0, maxX: 0, maxY: 0 }
@@ -104,6 +118,29 @@ function copyCommands(raw: unknown): PathCommand[] {
   return out
 }
 
+/**
+ * Read the font's shared alignment lines off fontkit, falling back to
+ * em-fraction defaults when a field is missing, non-finite, or out of the
+ * plausible range (≤ 0 for the three above-baseline lines; descent is
+ * BELOW the baseline and must be negative — a font that reports its
+ * magnitude as a positive number gets it negated).
+ */
+function readMetrics(raw: any, unitsPerEm: number): FontMetrics {
+  const xHeight = num(raw?.xHeight, NaN)
+  const capHeight = num(raw?.capHeight, NaN)
+  const ascent = num(raw?.ascent, NaN)
+  const descentRaw = num(raw?.descent, NaN)
+  const descent = Number.isFinite(descentRaw) && descentRaw !== 0
+    ? (descentRaw > 0 ? -descentRaw : descentRaw)
+    : NaN
+  return {
+    xHeight: Number.isFinite(xHeight) && xHeight > 0 ? xHeight : 0.5 * unitsPerEm,
+    capHeight: Number.isFinite(capHeight) && capHeight > 0 ? capHeight : 0.7 * unitsPerEm,
+    ascent: Number.isFinite(ascent) && ascent > 0 ? ascent : 0.9 * unitsPerEm,
+    descent: Number.isFinite(descent) && descent < 0 ? descent : -0.25 * unitsPerEm,
+  }
+}
+
 /** fontkit reports `{minX: null, …}` for a blank glyph (a space). */
 function copyBBox(raw: any): VtBBox {
   if (!raw || raw.minX === null || raw.minX === undefined) return { ...EMPTY_BBOX }
@@ -125,9 +162,10 @@ export function textOutlines(
 ): TextOutlines {
   const unitsPerEm = num(font?.unitsPerEm, 1000) || 1000
   const coords = resolveCoords(font, axes)
+  const metrics = readMetrics(font?.raw, unitsPerEm)
 
   if (!text) {
-    return { glyphs: [], width: 0, unitsPerEm, coords, bbox: { ...EMPTY_BBOX } }
+    return { glyphs: [], width: 0, unitsPerEm, coords, bbox: { ...EMPTY_BBOX }, metrics }
   }
 
   const instance: any = font.raw.getVariation(coords)
@@ -175,7 +213,7 @@ export function textOutlines(
     ? { minX, minY, maxX, maxY }
     : { ...EMPTY_BBOX }
 
-  return { glyphs, width: penX, unitsPerEm, coords, bbox }
+  return { glyphs, width: penX, unitsPerEm, coords, bbox, metrics }
 }
 
 /** Total command count across the run. The number that must not move when an
