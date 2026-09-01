@@ -57,11 +57,17 @@ binary rigid/flexible band model is the high-k special case, so there is one
 system, not two.
 
 The formulation follows Dave Pagurek's "Tangent-Aligned Text Stretching"
-(davepagurek.com/programming/stretch-text/). His *implementation* (k-d-tree
-tangent lookup over sampled boundary points) is not used — it is the source of
-his admitted artifacts (cusp misalignment, edge bending, confusion on
-self-overlapping outlines). We compute flex analytically from the flattened
-segments' own tangents, which is deterministic and reuses the histogram pass.
+(davepagurek.com/programming/stretch-text/). The min must run over the ink's
+INTERIOR, not just the slice's boundary crossings — a slice through the middle
+of a stem crosses only the stem's horizontal caps, so boundary crossings alone
+would call the stem flexible; what pins it is that interior ink inherits the
+tangent of its NEAREST boundary (the stem's vertical side walls). His k-d-tree
+sampling implements that but is the source of his admitted artifacts (cusp
+misalignment, edge bending). We instead rasterize each glyph onto a small grid
+(~96×96), stamp boundary cells with their exact segment tangents, propagate
+nearest-boundary tangents inward with a two-pass chamfer distance transform,
+mask ink by scanline, and take per-column/row minima — deterministic, cheap
+(one cached pass per glyph), no sampling jank.
 
 Along Y, the transpose: crossbars and the arches of rounds are rigid,
 stem-lengths and counters flexible. Profiles are cached per
