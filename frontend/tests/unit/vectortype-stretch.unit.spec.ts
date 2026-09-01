@@ -327,3 +327,42 @@ describe('cascade', () => {
     expect(weightCompensation(bare, base, 2, 1)).toEqual(base)
   })
 })
+
+describe('partial-sliver growth cap', () => {
+  it('caps partial slivers so they cannot absorb a whole glyph of stretch', () => {
+    const flex = new Float64Array(10).fill(0)
+    flex[4] = 0.5; flex[5] = 0.5            // two partial slivers in an otherwise rigid glyph
+    const m = buildRemap({ start: 0, binSize: 10, flex }, 2)
+    // cap = 2 * S * w = 40: each sliver stops there instead of absorbing 50 each
+    expect(remapValue(m, 50) - remapValue(m, 40)).toBeLessThanOrEqual(40 + 1e-6)
+    // the glyph under-achieves S = 2 rather than growing horns
+    expect(remapValue(m, 100) - remapValue(m, 0)).toBeLessThan(200)
+  })
+
+  it('spills clamped overflow into fully flexible bins so the total still reaches S', () => {
+    const flex = new Float64Array(10).fill(0)
+    flex[4] = 0.5; flex[5] = 1              // one capped partial, one uncapped full bin
+    const m = buildRemap({ start: 0, binSize: 10, flex }, 2.5)
+    expect(remapValue(m, 100) - remapValue(m, 0)).toBeCloseTo(250, 4)
+    // the partial bin sits exactly at its cap (2 * 2.5 * 10 = 50)
+    expect(remapValue(m, 50) - remapValue(m, 40)).toBeCloseTo(50, 4)
+  })
+
+  it("keeps the dot of 'i' round-ish at S = 1.8 (no tittle horns)", () => {
+    const run = textOutlines(font, 'i')
+    const g0 = run.glyphs[0]!
+    // 0.9 lands past the dot's widest cross-section, where the capped fix
+    // still only trims the horn rather than eliminating it (both pre- and
+    // post-fix ratios sit above 1.5 there). 0.886 lands on a still-plausible
+    // dot width (~88% of the dot's max width, well clear of the gap below
+    // the dot) where the fix's effect is decisive: pre-fix ratio ~1.54
+    // (fails), post-fix ratio ~1.47 (passes) — see fix report for the sweep.
+    const FRAC = 0.886
+    const dotY0 = g0.bbox.minY + (g0.bbox.maxY - g0.bbox.minY) * FRAC
+    const w0 = Math.max(...inkRunsAtY(g0.commands, dotY0).map(([a, b]) => b - a))
+    const g2 = stretchOutlines(run, 1.8, 1).glyphs[0]!
+    const dotY2 = g2.bbox.minY + (g2.bbox.maxY - g2.bbox.minY) * FRAC
+    const w2 = Math.max(...inkRunsAtY(g2.commands, dotY2).map(([a, b]) => b - a))
+    expect(w2).toBeLessThan(w0 * 1.5)
+  })
+})

@@ -253,6 +253,19 @@ const BIN_FLOOR = 0.02
 /** Uniform-compression floor once every bin is pinned — the "glyph never
  *  collapses" clamp. */
 const MIN_TOTAL_SCALE = 0.25
+/** A bin whose flex is at or above this is fully flexible — empty space, or
+ *  ink running parallel to the stretch (a crossbar's interior) — and may
+ *  absorb unlimited growth: stretching space IS the point. Below it, the bin
+ *  holds ink that resists, and its growth is capped so a few partial slivers
+ *  cannot absorb a whole glyph's stretch. */
+const FULL_FLEX = 0.95
+/** Max width of a resisting bin under expansion, as a multiple of the
+ *  uniform-stretch bin width S·w. Without this, a glyph whose only flexible
+ *  slices are tiny partial slivers (the shoulders of an i's dot) dumps its
+ *  ENTIRE width delta into them and the dot grows horns. Capped ink
+ *  under-achieves S; the advance rule already covers a glyph that cannot
+ *  widen (an extended I is barely wider). */
+const PARTIAL_GROWTH_CAP = 2
 
 function binWidths(flex: Float64Array, w: number, S: number): Float64Array {
   const n = flex.length
@@ -261,10 +274,34 @@ function binWidths(flex: Float64Array, w: number, S: number): Float64Array {
   const delta = (S - 1) * total
   if (Math.abs(delta) < 1e-12) return out
   if (delta > 0) {
-    let sum = 0
-    for (const f of flex) sum += f
-    if (sum < 1e-9) return out   // all-rigid: the glyph cannot widen
-    for (let i = 0; i < n; i++) out[i] = w + delta * (flex[i]! / sum)
+    let sum0 = 0
+    for (const f of flex) sum0 += f
+    if (sum0 < 1e-9) return out   // all-rigid: the glyph cannot widen
+    const cap = PARTIAL_GROWTH_CAP * S * w
+    let remaining = delta
+    for (let pass = 0; pass < 4 && remaining > 1e-9; pass++) {
+      let sum = 0
+      for (let i = 0; i < n; i++) {
+        if (!(flex[i]! > 0)) continue
+        if (flex[i]! >= FULL_FLEX || out[i]! < cap - 1e-12) sum += flex[i]!
+      }
+      if (sum < 1e-9) break
+      let absorbed = 0
+      for (let i = 0; i < n; i++) {
+        if (!(flex[i]! > 0)) continue
+        const full = flex[i]! >= FULL_FLEX
+        if (!full && out[i]! >= cap - 1e-12) continue
+        const want = remaining * (flex[i]! / sum)
+        const take = full ? want : Math.min(want, cap - out[i]!)
+        out[i]! += take
+        absorbed += take
+      }
+      remaining -= absorbed
+      if (absorbed < 1e-12) break
+    }
+    // Leftover means every resisting bin hit its cap and nothing fully
+    // flexible exists: the ink genuinely cannot widen to S. Dropped by
+    // design — whitespace still scales, so the word's rhythm holds.
     return out
   }
   // Condense: flexible bins give first (floored), then everything compresses
