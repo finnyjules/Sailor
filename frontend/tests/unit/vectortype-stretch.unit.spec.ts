@@ -7,9 +7,15 @@
  * and the remap is monotone — because the motion system animates through
  * these outlines and relies on point-for-point correspondence.
  */
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import * as fontkit from 'fontkit'
 import { describe, expect, it } from 'vitest'
-import type { PathCommand, VtBBox } from '~/lib/vectortype/outline'
-import { analyzeFlex, buildRemap, remapValue, stretchCommands } from '~/lib/vectortype/stretch'
+import { normaliseAxes } from '~/lib/vectortype/font'
+import type { VtFont } from '~/lib/vectortype/font'
+import { textOutlines } from '~/lib/vectortype/outline'
+import type { PathCommand, TextOutlines, VtBBox } from '~/lib/vectortype/outline'
+import { analyzeFlex, buildRemap, glyphFlexFor, remapValue, stretchCommands, stretchOutlines } from '~/lib/vectortype/stretch'
 
 /** Closed axis-aligned rectangle as outline commands (font-unit space, y-up). */
 function rect(x0: number, y0: number, x1: number, y1: number): PathCommand[] {
@@ -148,5 +154,148 @@ describe('stretchCommands', () => {
       expect(out.map(c => c.command)).toEqual(cmds.map(c => c.command))
       expect(out.map(c => c.args.length)).toEqual(cmds.map(c => c.args.length))
     }
+  })
+})
+
+const FIXTURE = fileURLToPath(new URL('../fixtures/inter-subset-var.ttf', import.meta.url))
+
+function loadFixtureFont(): VtFont {
+  const bytes = new Uint8Array(readFileSync(FIXTURE))
+  const raw: any = (fontkit as any).create(bytes)
+  return { id: 'inter-subset', axes: normaliseAxes(raw?.variationAxes), unitsPerEm: Number(raw?.unitsPerEm) || 1000, raw }
+}
+
+const font = loadFixtureFont()
+
+/** Ink intervals where the horizontal line y = yLine crosses the glyph,
+ *  measured on the flattened outline via sorted crossings. Assumes the chosen
+ *  scanline meets the glyph an even number of times and winding does not
+ *  overlap (true for the stems and rings used below) — a measuring stick for
+ *  tests, not a general rasteriser. */
+function inkRunsAtY(commands: readonly PathCommand[], yLine: number): Array<[number, number]> {
+  const xs: number[] = []
+  // Flatten exactly like the engine: reuse its resolution by sampling curves
+  // at 32 steps — finer than analysis so measurement error stays below
+  // assertion tolerance.
+  let px = 0, py = 0, sx = 0, sy = 0
+  const seg = (x0: number, y0: number, x1: number, y1: number) => {
+    if ((y0 <= yLine && y1 > yLine) || (y1 <= yLine && y0 > yLine)) {
+      xs.push(x0 + ((yLine - y0) / (y1 - y0)) * (x1 - x0))
+    }
+  }
+  const emit = (x1: number, y1: number) => { seg(px, py, x1, y1); px = x1; py = y1 }
+  for (const c of commands) {
+    const a = c.args
+    if (c.command === 'moveTo') { px = a[0]!; py = a[1]!; sx = px; sy = py }
+    else if (c.command === 'lineTo') emit(a[0]!, a[1]!)
+    else if (c.command === 'quadraticCurveTo') {
+      const [cx, cy, x, y] = a as [number, number, number, number]
+      const x0 = px, y0 = py
+      for (let i = 1; i <= 32; i++) {
+        const t = i / 32, u = 1 - t
+        emit(u * u * x0 + 2 * u * t * cx + t * t * x, u * u * y0 + 2 * u * t * cy + t * t * y)
+      }
+    } else if (c.command === 'bezierCurveTo') {
+      const [c1x, c1y, c2x, c2y, x, y] = a as [number, number, number, number, number, number]
+      const x0 = px, y0 = py
+      for (let i = 1; i <= 32; i++) {
+        const t = i / 32, u = 1 - t
+        emit(
+          u * u * u * x0 + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x,
+          u * u * u * y0 + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y,
+        )
+      }
+    } else if (c.command === 'closePath') emit(sx, sy)
+  }
+  xs.sort((a, b) => a - b)
+  const runs: Array<[number, number]> = []
+  for (let i = 0; i + 1 < xs.length; i += 2) runs.push([xs[i]!, xs[i + 1]!])
+  return runs
+}
+
+/** Same measuring stick rotated: ink intervals along x = xLine. */
+function inkRunsAtX(commands: readonly PathCommand[], xLine: number): Array<[number, number]> {
+  const swapped = commands.map(c => ({
+    command: c.command,
+    args: c.args.map((v, i) => (i % 2 === 0 ? c.args[i + 1]! : c.args[i - 1]!)),
+  }))
+  return inkRunsAtY(swapped, xLine)
+}
+
+function glyphOf(o: TextOutlines, ch: string) {
+  const g = o.glyphs.find(g => g.codePoints.includes(ch.codePointAt(0)!))
+  if (!g) throw new Error(`fixture has no '${ch}'`)
+  return g
+}
+
+describe('stretchOutlines (fixture font)', () => {
+  const base = textOutlines(font, 'Sailor')
+
+  it('keeps command count constant across a stretch sweep', () => {
+    const count = (o: TextOutlines) => o.glyphs.reduce((n, g) => n + g.commands.length, 0)
+    for (const [s, sy] of [[0.6, 1], [1, 1], [1.7, 1], [1, 1.8], [2.4, 2.4]] as const) {
+      expect(count(stretchOutlines(base, s, sy))).toBe(count(base))
+    }
+  })
+
+  it("preserves the stem width of 'l' at S = 2", () => {
+    const g0 = glyphOf(base, 'l')
+    const midY = (g0.bbox.minY + g0.bbox.maxY) / 2
+    const w0 = inkRunsAtY(g0.commands, midY).map(([a, b]) => b - a)
+    const g2 = glyphOf(stretchOutlines(base, 2, 1), 'l')
+    const w2 = inkRunsAtY(g2.commands, midY).map(([a, b]) => b - a)
+    expect(w2.length).toBe(w0.length)
+    // 5%: bin quantisation moves stem edges by at most one 1/64 slice.
+    expect(w2[0]!).toBeGreaterThan(w0[0]! * 0.95)
+    expect(w2[0]!).toBeLessThan(w0[0]! * 1.05)
+  })
+
+  it("preserves the ring thickness of 'o' at S = 2 (sides) and SY = 2 (arches)", () => {
+    const g0 = glyphOf(base, 'o')
+    const midY = (g0.bbox.minY + g0.bbox.maxY) / 2
+    const sides0 = inkRunsAtY(g0.commands, midY).map(([a, b]) => b - a)
+    const gS = glyphOf(stretchOutlines(base, 2, 1), 'o')
+    const sidesS = inkRunsAtY(gS.commands, midY).map(([a, b]) => b - a)
+    expect(sidesS.length).toBe(2)
+    // 15%: the ring's flanks are curved, so some tangent leakage is expected —
+    // the point is beating naive scaling, which would give 100% growth.
+    for (let i = 0; i < 2; i++) {
+      expect(sidesS[i]!).toBeLessThan(sides0[i]! * 1.15)
+    }
+    const midX0 = (g0.bbox.minX + g0.bbox.maxX) / 2
+    const arch0 = inkRunsAtX(g0.commands, midX0).map(([a, b]) => b - a)
+    const gY = glyphOf(stretchOutlines(base, 1, 2), 'o')
+    const midXY = (gY.bbox.minX + gY.bbox.maxX) / 2
+    const archY = inkRunsAtX(gY.commands, midXY).map(([a, b]) => b - a)
+    expect(archY.length).toBe(2)
+    for (let i = 0; i < 2; i++) {
+      expect(archY[i]!).toBeLessThan(arch0[i]! * 1.15)
+    }
+  })
+
+  it('anchors the baseline: l sits on y = 0 at SY = 2, g grows its descender down', () => {
+    const tall = stretchOutlines(base, 1, 2)
+    const l0 = glyphOf(base, 'l'), l2 = glyphOf(tall, 'l')
+    expect(Math.abs(l2.bbox.minY - l0.bbox.minY)).toBeLessThan(font.unitsPerEm * 0.01)
+    expect(l2.bbox.maxY).toBeGreaterThan(l0.bbox.maxY * 1.5)
+    const gBase = textOutlines(font, 'g')
+    const gTall = stretchOutlines(gBase, 1, 2)
+    expect(gTall.glyphs[0]!.bbox.minY).toBeLessThan(gBase.glyphs[0]!.bbox.minY * 1.2)
+  })
+
+  it('grows the run width at S = 1.5, but less than naive 1.5x', () => {
+    const out = stretchOutlines(base, 1.5, 1)
+    expect(out.width).toBeGreaterThan(base.width * 1.05)
+    expect(out.width).toBeLessThanOrEqual(base.width * 1.5 + 1)
+  })
+
+  it('vertical stretch leaves advances alone', () => {
+    const out = stretchOutlines(base, 1, 2.2)
+    expect(out.width).toBeCloseTo(base.width, 3)
+    out.glyphs.forEach((g, i) => expect(g.advance).toBeCloseTo(base.glyphs[i]!.advance, 3))
+  })
+
+  it('S = SY = 1 returns the outlines unchanged', () => {
+    expect(stretchOutlines(base, 1, 1)).toBe(base)
   })
 })

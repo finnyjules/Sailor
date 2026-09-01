@@ -22,7 +22,7 @@
  *
  * Coordinates are FONT UNITS, y-up, baseline at y = 0, matching outline.ts.
  */
-import type { PathCommand, VtBBox } from './outline'
+import type { GlyphOutline, PathCommand, TextOutlines, VtBBox } from './outline'
 
 export interface FlexProfile {
   /** Left/bottom edge of bin 0, in font units. */
@@ -331,6 +331,22 @@ export function remapValue(m: Remap, v: number): number {
   return dst[lo]! + t * (dst[lo + 1]! - dst[lo]!)
 }
 
+/** Map every (x, y) coordinate pair in `commands` through its axis remap.
+ *  Shared by `stretchCommands` (per-glyph, caller-supplied flex) and
+ *  `stretchOutlines` (run-level, flex computed and cached per glyph) so the
+ *  point-mapping logic exists exactly once. */
+function applyRemaps(commands: readonly PathCommand[], rx: Remap, ry: Remap): PathCommand[] {
+  return commands.map(c => {
+    if (!c.args.length) return { command: c.command, args: [] }
+    const args = c.args.slice()
+    for (let i = 0; i + 1 < args.length; i += 2) {
+      args[i] = remapValue(rx, args[i]!)
+      args[i + 1] = remapValue(ry, args[i + 1]!)
+    }
+    return { command: c.command, args }
+  })
+}
+
 export function stretchCommands(
   commands: readonly PathCommand[],
   flex: GlyphFlex,
@@ -341,13 +357,87 @@ export function stretchCommands(
   // Baseline anchor: y = 0 is a fixed point, so letters grow up off the
   // baseline and descenders grow down, instead of smearing around a centre.
   const ry = buildRemap(flex.y, SY, 0)
-  return commands.map(c => {
-    if (!c.args.length) return { command: c.command, args: [] }
-    const args = c.args.slice()
-    for (let i = 0; i + 1 < args.length; i += 2) {
-      args[i] = remapValue(rx, args[i]!)
-      args[i + 1] = remapValue(ry, args[i + 1]!)
+  return applyRemaps(commands, rx, ry)
+}
+
+/** Flex analysis is the expensive step, so it is memoised on the outline
+ *  object itself. GlyphOutline objects are fresh per textOutlines() call, so
+ *  this never conflates different fonts, texts, or axis positions. Keying by
+ *  (fontId, glyphId, coords) for cross-call reuse is Phase B, in the studio. */
+const flexCache = new WeakMap<GlyphOutline, Map<string, GlyphFlex>>()
+
+export function glyphFlexFor(g: GlyphOutline, opts: FlexOptions = {}): GlyphFlex {
+  const key = `${opts.bins ?? DEFAULT_BINS}|${opts.k ?? DEFAULT_K}`
+  let byOpts = flexCache.get(g)
+  if (!byOpts) {
+    byOpts = new Map()
+    flexCache.set(g, byOpts)
+  }
+  const hit = byOpts.get(key)
+  if (hit) return hit
+  const flex = analyzeFlex(g.commands, g.bbox, opts)
+  byOpts.set(key, flex)
+  return flex
+}
+
+const hasInk = (g: GlyphOutline): boolean =>
+  g.commands.length > 0 && g.bbox.maxX > g.bbox.minX && g.bbox.maxY > g.bbox.minY
+
+export function stretchOutlines(
+  outlines: TextOutlines,
+  S: number,
+  SY: number,
+  opts: FlexOptions = {},
+): TextOutlines {
+  if (S === 1 && SY === 1) return outlines
+  const glyphs: GlyphOutline[] = []
+  let penOld = 0
+  let penNew = 0
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const g of outlines.glyphs) {
+    let commands = g.commands
+    let bbox = g.bbox
+    let inkW = 0
+    let newInkW = 0
+    if (hasInk(g)) {
+      const flex = glyphFlexFor(g, opts)
+      const rx = buildRemap(flex.x, S)
+      const ry = buildRemap(flex.y, SY, 0)
+      commands = applyRemaps(g.commands, rx, ry)
+      bbox = {
+        minX: remapValue(rx, g.bbox.minX),
+        maxX: remapValue(rx, g.bbox.maxX),
+        minY: remapValue(ry, g.bbox.minY),
+        maxY: remapValue(ry, g.bbox.maxY),
+      }
+      inkW = g.bbox.maxX - g.bbox.minX
+      newInkW = bbox.maxX - bbox.minX
     }
-    return { command: c.command, args }
-  })
+    // Sidebearings are flexible space: the ink contributes its own (possibly
+    // rigid) new width, and the whitespace around it scales with S. An 'l'
+    // whose ink cannot widen still gains a little air — an extended I *is*
+    // barely wider.
+    const whitespace = g.advance - inkW
+    const advance = newInkW + whitespace * S
+    // xOffset positioning (g.x drifting from the accumulated pen) is preserved
+    // proportionally rather than dropped.
+    const offset = (g.x - penOld) * S
+    const x = penNew + offset
+    glyphs.push({ ...g, commands, bbox, advance, x, y: g.y })
+    if (hasInk(g)) {
+      minX = Math.min(minX, x + bbox.minX)
+      minY = Math.min(minY, g.y + bbox.minY)
+      maxX = Math.max(maxX, x + bbox.maxX)
+      maxY = Math.max(maxY, g.y + bbox.maxY)
+    }
+    penOld += g.advance
+    penNew += advance
+  }
+  const empty = !Number.isFinite(minX)
+  return {
+    ...outlines,
+    glyphs,
+    width: penNew,
+    bbox: empty ? { minX: 0, minY: 0, maxX: 0, maxY: 0 } : { minX, minY, maxX, maxY },
+  }
 }
