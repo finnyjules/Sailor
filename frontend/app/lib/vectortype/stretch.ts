@@ -867,6 +867,40 @@ const SPLIT_FLEX_MAX = 0.5
  *  end, else the lower of two neighbouring minima wins. */
 const SPLIT_PROMINENCE = 0.1
 
+/** The bell's shape over a free run, BY DIRECTION (`'auto'`):
+ *   • GROWING (delta > 0) — `'sine'`, `sin(π·(j + 0.5)/L)`: a LINEAR rise
+ *     from the run's edges to a smooth peak mid-run, so the rows right after
+ *     an apex band already stretch and the shoulder opens as soon as the
+ *     plateau ends. The raised cosine's zero edge slope left the shoulder at
+ *     its drawn (tight) curvature while the sides elongated — an S or an a
+ *     under Height 2.5 read as having a CORNER where the arch meets the side
+ *     (measured: the first free row after the o's apex band grows 1.11× with
+ *     the sine vs 1.01× with the cosine at Height 2.5).
+ *   • SHRINKING (delta < 0) — `'cosine'`, `0.5 − 0.5·cos(2π·(j + 0.5)/L)`.
+ *     Under a floor-clipped condense the transition S allows is a short
+ *     cliff at the plateau's edge; a linear rise only smears that cliff into
+ *     a long ramp with two corners spanning the whole shoulder (the o at
+ *     [0.7, 2.41] went 8 → 12 inflections with the sine under condense).
+ *  `'sine'` / `'cosine'` force one shape in both directions — kept reachable
+ *  for the lab's comparison. */
+const BELL_SHAPE: 'auto' | 'sine' | 'cosine' = 'auto'
+
+/** The bell over a free run, at parameter t ∈ (0, 1): tapered towards both
+ *  ends, or only the left / only the right (a half bump); the shape per
+ *  `BELL_SHAPE` and the run's direction. */
+function bellAt(t: number, taperL: boolean, taperR: boolean, grow: boolean): number {
+  if (!taperL && !taperR) return 1
+  const shape = BELL_SHAPE === 'auto' ? (grow ? 'sine' : 'cosine') : BELL_SHAPE
+  if (shape === 'sine') {
+    return taperL && taperR ? Math.sin(Math.PI * t)
+      : taperL ? Math.sin(Math.PI * t / 2)
+      : Math.cos(Math.PI * t / 2)
+  }
+  return taperL && taperR ? 0.5 - 0.5 * Math.cos(2 * Math.PI * t)
+    : taperL ? 0.5 - 0.5 * Math.cos(Math.PI * t)
+    : 0.5 + 0.5 * Math.cos(Math.PI * t)
+}
+
 /** What a free run's end abuts — decides whether the bell tapers there and,
  *  under condense, whether it anchors at the plateau's own scale. */
 const END_NONE = 0      // the profile's edge, or a zone line with free ink beyond: flat
@@ -879,8 +913,7 @@ const END_SPLIT = 2     // a waist between two bulges: taper to ~0, no anchor
 const TURN_CURVED = 0.5
 
 /** Raised cosine over a span of `L` bins: 0 at the span's edges, 1 at its
- *  middle; a span of 1 gets 1. Shared by the bell distribution and the
- *  tapered turn pass. */
+ *  middle; a span of 1 gets 1. The turn pass's taper (see `binWidths`). */
 function raisedCosine(j: number, L: number): number {
   return 0.5 - 0.5 * Math.cos(2 * Math.PI * (j + 0.5) / L)
 }
@@ -929,7 +962,7 @@ interface BellShape {
 /**
  * Sharing weights for the BELL distribution. The tangent analysis decides
  * what is rigid (flex < HARD_RIGID); between rigid features the change is
- * spread as smoothly as possible: over each free run a raised cosine — near
+ * spread as smoothly as possible: over each free run a bell (`BELL_SHAPE`) — near
  * zero beside the plateaus (a round's shoulders), peaking mid-run (the flank
  * / the counter). Whitespace in the middle of a counter stretches most, which
  * is typographically right; a crossbar spanning a counter elongates
@@ -948,7 +981,7 @@ interface BellShape {
  * with one CONSTANT weight — the mean bell weight over their span — so a
  * straight diagonal stays straight.
  */
-function bellWeights(flex: Float64Array, uniform: Uint8Array | undefined, rigidBeyond: readonly [boolean, boolean]): BellShape {
+function bellWeights(flex: Float64Array, uniform: Uint8Array | undefined, rigidBeyond: readonly [boolean, boolean], grow: boolean): BellShape {
   const n = flex.length
   const share = new Float64Array(n)
   const bell = new Float64Array(n)
@@ -966,13 +999,7 @@ function bellWeights(flex: Float64Array, uniform: Uint8Array | undefined, rigidB
       const kL = r === 0 ? endL : END_SPLIT
       const kR = r + 2 === bounds.length ? endR : END_SPLIT
       const L = b - a
-      for (let q = a; q < b; q++) {
-        const t = (q - a + 0.5) / L
-        bell[q] = kL && kR ? raisedCosine(q - a, L)
-          : kL ? 0.5 - 0.5 * Math.cos(Math.PI * t)
-          : kR ? 0.5 + 0.5 * Math.cos(Math.PI * t)
-          : 1
-      }
+      for (let q = a; q < b; q++) bell[q] = bellAt((q - a + 0.5) / L, kL !== END_NONE, kR !== END_NONE, grow)
       if (uniform) {
         let u = a
         while (u < b) {
@@ -1018,7 +1045,7 @@ function binWidths(
   // What decides each bin's SHARE of the change. Everything else — which
   // bins are rigid, the floors and caps, the turn pass below — reads `flex`
   // exactly as before; only the proportional split reads `share`.
-  const shape = mode === 'bell' ? bellWeights(flex, uniform, rigidBeyond) : undefined
+  const shape = mode === 'bell' ? bellWeights(flex, uniform, rigidBeyond, delta > 0) : undefined
   const share = shape ? shape.share : flex
   if (Math.abs(delta) >= 1e-12) {
     if (delta > 0) {

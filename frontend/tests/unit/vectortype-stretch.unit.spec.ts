@@ -965,7 +965,7 @@ describe('the remap is C1 — stretching adds no ripples', () => {
 // free bin stretches, because scaling fastest exactly where a curve is
 // turning is what fought the drawn curvature and grew the ripples above.
 describe('bell distribution — harmony between rigid features', () => {
-  it('bell mode: a free run between two stems takes its growth as a raised cosine, stems untouched', () => {
+  it('bell mode: a free run between two stems takes its growth as a bell, stems untouched', () => {
     const flex = new Float64Array([0, 0, 1, 1, 1, 1, 1, 1, 0, 0])
     const ink  = new Float64Array([1, 1, 0, 0, 0, 0, 0, 0, 1, 1])
     const m = buildRemap({ start: 0, binSize: 10, flex, ink }, 1.6, undefined, undefined, undefined, undefined, 'bell')
@@ -1006,8 +1006,17 @@ describe('bell distribution — harmony between rigid features', () => {
     // ink, so every free bin floors at 0.5w; reaching S needs 34 of the 40
     // free bins AT the floor, and the 3-bin cliff at the plateau's edge is
     // the only transition S allows (`1.00 | 0.98 0.83 0.52 | 0.50 …`).
-    // Reaching S wins over bell shape here — accepted as physics. Guard 8.
-    expect(inflectionsOf(stretchOutlines(run, 0.7, 2.41).glyphs[0]!.commands)).toBeLessThanOrEqual(8)
+    // Reaching S wins over bell shape here — accepted as physics: 8 pairs at
+    // the apex/shoulder cliffs.
+    // Condense + tall (0.7, 2.41) carries FOUR more: single flips, one per
+    // flank, on near-straight rows where the sine-opened shoulder rows
+    // (1.1–1.5× in Y) coincide with the X floor cliff compressing the same
+    // rows — measured at out (616, 585), (585, 2372), (320, 2097), (351,
+    // 313); present with roundCoupling 0 too. Invisible in the lab, and the
+    // alternative (cosine whenever either axis condenses) keeps a visible
+    // corner on tall-condensed letters. Guard 12. Context at this setting,
+    // not asserted: S 20, a 18.
+    expect(inflectionsOf(stretchOutlines(run, 0.7, 2.41).glyphs[0]!.commands)).toBeLessThanOrEqual(12)
     expect(inflectionsOf(stretchOutlines(run, 0.5, 1).glyphs[0]!.commands)).toBeLessThanOrEqual(8)
   })
 
@@ -1020,5 +1029,27 @@ describe('bell distribution — harmony between rigid features', () => {
     expect(inflectionsOf(a.glyphs[0]!.commands)).toBe(6)
     expect(inflectionsOf(stretchOutlines(S, 1, 2.5).glyphs[0]!.commands)).toBeLessThanOrEqual(6)
     expect(inflectionsOf(stretchOutlines(a, 1, 2.5).glyphs[0]!.commands)).toBeLessThanOrEqual(12)
+  })
+
+  it('the bell opens the shoulder: the first free row after an apex band grows at Height 2.5', () => {
+    // Growth must open the shoulder as soon as the plateau ends, or the
+    // arch/side junction reads as a corner: the sine bump's LINEAR rise from
+    // the run's edge gives the first free row after the o's apex band 1.11×
+    // at Height 2.5; the raised cosine's zero edge slope gave 1.01× (RED with
+    // BELL_SHAPE = 'cosine', green with 'auto' — confirmed both ways). The
+    // turn-height metric (rows down to the 2% approach of the flank's
+    // extreme) does NOT tell the shapes apart (o 1.74 vs 1.88, S 2.71 vs
+    // 2.68 — see bell-report.md), so it is not the test.
+    const run = textOutlines(font, 'o')
+    const g = run.glyphs[0]!
+    const { y } = analyzeFlex(g.commands, g.bbox, { smallFeature: 0.22 * font.unitsPerEm, straightMin: 0.12 * font.unitsPerEm })
+    let firstFree = 0
+    while (firstFree < y.flex.length && y.flex[firstFree]! < 0.05) firstFree++
+    expect(firstFree).toBeGreaterThan(2)   // the apex band is a real plateau
+    const m = run.metrics
+    const ry = buildRemap(y, 2.5, 0, [0, m.xHeight, m.capHeight, m.ascent, m.descent], 1, 1, 'bell')
+    const width = (i: number) => (remapValue(ry, y.start + (i + 1) * y.binSize) - remapValue(ry, y.start + i * y.binSize)) / y.binSize
+    expect(width(firstFree - 1)).toBeCloseTo(1, 6)   // the plateau's last row never moves
+    expect(width(firstFree)).toBeGreaterThanOrEqual(1.08)
   })
 })
