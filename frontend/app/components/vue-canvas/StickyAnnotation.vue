@@ -269,11 +269,18 @@ const rayStyle = computed(() => ({
 .sticky-annotation--dark .sticky-annotation__resize {
   background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.35) 50%);
 }
+.sticky-annotation--dark .sticky-annotation__glitter {
+  opacity: 0.02;
+}
 .sticky-annotation--dark .sticky-annotation__glint {
-  opacity: 0.4; /* screen has huge headroom on black — full-strength dots glare */
+  opacity: 0.15; /* screen has huge headroom on black — anything stronger glares */
 }
 .sticky-annotation--dark .sticky-annotation__ray {
-  opacity: 0.5;
+  opacity: 0.25;
+}
+/* Dark papers get a dark-grey→black hairline instead of white→black. */
+.sticky-annotation--dark::after {
+  background: linear-gradient(180deg, #4a4a4e 0%, #000000 100%);
 }
 
 /* Hairline stroke: a 1px ring carrying a vertical white→black gradient
