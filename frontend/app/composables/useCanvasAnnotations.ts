@@ -114,13 +114,24 @@ export type Annotation =
   | PinResultAnnotation
   | ArrowAnnotation
 
-// Sticky paper: one soft white, gallery-placard style on the dark canvas.
-// The FigJam-flavored colour palette (yellow/pink/blue/green/lavender/peach)
-// was retired 2026-09-01 by owner call — colours read loud and messy for a
-// creative tool. STICKY_COLORS stays as the (single-entry) palette so the
-// picker code path survives; the picker itself hides while there's only one.
+// Sticky paper: soft white by default, gallery-placard style on the dark
+// canvas, plus two dark papers (graphite, ink). The FigJam-flavored colour
+// palette (yellow/pink/blue/green/lavender/peach) was retired 2026-09-01 by
+// owner call — colours read loud and messy for a creative tool. The picker
+// shows whenever STICKY_COLORS has more than one entry.
 export const STICKY_PAPER = '#f8f8f6'
-export const STICKY_COLORS: string[] = [STICKY_PAPER]
+export const STICKY_GRAPHITE = '#2a2a2d'
+export const STICKY_INK = '#111113'
+export const STICKY_COLORS: string[] = [STICKY_PAPER, STICKY_GRAPHITE, STICKY_INK]
+
+/** True for papers dark enough that the note's text and chrome must go light. */
+export function isDarkPaper(hex: string): boolean {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return false
+  const n = parseInt(m[1]!, 16)
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.45
+}
 
 type VueFlowNode = Node<Record<string, any>>
 
@@ -135,7 +146,6 @@ export interface AnnotationsBridge {
 
 export function useCanvasAnnotations(_nodesRef: Ref<VueFlowNode[]>) {
   const annotations = ref<Annotation[]>([])
-  let stickyColorCursor = 0
 
   // ---- Queries --------------------------------------------------------------
 
@@ -163,7 +173,7 @@ export function useCanvasAnnotations(_nodesRef: Ref<VueFlowNode[]>) {
       width: 200,
       height: 200,
       text: opts.text ?? '',
-      color: opts.color ?? STICKY_COLORS[stickyColorCursor++ % STICKY_COLORS.length]!,
+      color: opts.color ?? STICKY_PAPER, // always white by default; dark papers are picked, never cycled
       rotation: 0, // was ±2° "hand-placed" tilt — retired with the palette; square reads calmer
       attachedToGroup: opts.attachedToGroup ?? null,
     }

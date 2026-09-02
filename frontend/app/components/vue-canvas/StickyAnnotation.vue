@@ -2,7 +2,7 @@
 import { useVueFlow } from '@vue-flow/core'
 import { Trash2, Palette } from 'lucide-vue-next'
 import type { StickyAnnotation } from '~/composables/useCanvasAnnotations'
-import { STICKY_COLORS } from '~/composables/useCanvasAnnotations'
+import { STICKY_COLORS, isDarkPaper } from '~/composables/useCanvasAnnotations'
 
 const props = defineProps<{
   annotation: StickyAnnotation
@@ -105,6 +105,8 @@ function pickColor(c: string) {
 // is per-instance random (set at create time) — small, just enough to feel
 // hand-placed rather than software-stamped.
 const rotation = computed(() => props.annotation.rotation ?? 0)
+// Dark papers flip the text and chrome to light (see --dark rules).
+const isDark = computed(() => isDarkPaper(props.annotation.color))
 
 // Foil glitter (Pokémon-card style, à la simeydotme): a static field of
 // small silvery dots. At rest they're barely there; a wide light band sweeps
@@ -135,6 +137,7 @@ const rayStyle = computed(() => ({
 <template>
   <div
     class="sticky-annotation absolute pointer-events-auto"
+    :class="{ 'sticky-annotation--dark': isDark }"
     :style="{
       left: `${annotation.x}px`,
       top: `${annotation.y}px`,
@@ -238,6 +241,36 @@ const rayStyle = computed(() => ({
     rgba(0, 0, 0, 0.10) 65%, rgba(0, 0, 0, 0.22) 100%);
   display: flex;
   flex-direction: column;
+}
+
+/* ── Dark paper ────────────────────────────────────────────────────────────
+   Graphite / ink stickies: light text and chrome, a much softer paper
+   gradient (the white sheen that lifts white paper would turn a black note
+   grey), and the screened glitter reads brighter by nature. */
+.sticky-annotation--dark {
+  background-image: linear-gradient(135deg,
+    rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0) 40%,
+    rgba(0, 0, 0, 0.18) 70%, rgba(0, 0, 0, 0.35) 100%);
+}
+.sticky-annotation--dark .sticky-annotation__text {
+  color: rgba(245, 245, 243, 0.92);
+}
+.sticky-annotation--dark .sticky-annotation__text::placeholder {
+  color: rgba(245, 245, 243, 0.42);
+}
+.sticky-annotation--dark .sticky-annotation__btn {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(245, 245, 243, 0.75);
+}
+.sticky-annotation--dark .sticky-annotation__btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: rgba(245, 245, 243, 0.98);
+}
+.sticky-annotation--dark .sticky-annotation__resize {
+  background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.35) 50%);
+}
+.sticky-annotation--dark .sticky-annotation__ray {
+  opacity: 0.8; /* pigment has more room on dark paper */
 }
 
 /* Hairline stroke: a 1px ring carrying a vertical white→black gradient
