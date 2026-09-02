@@ -279,7 +279,7 @@ const rayStyle = computed(() => ({
   opacity: 0.25;
 }
 /* Dark papers get a dark-grey→black hairline instead of white→black. */
-.sticky-annotation--dark::after {
+.sticky-annotation.sticky-annotation--dark::after { /* out-specifies the base ::after below */
   background: linear-gradient(180deg, #4a4a4e 0%, #000000 100%);
 }
 
