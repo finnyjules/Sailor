@@ -348,6 +348,7 @@ const rayStyle = computed(() => ({
 
 .sticky-annotation__toolbar {
   position: absolute;
+  z-index: 2; /* above the textarea (z 1), which sits above the shimmer */
   top: 4px;
   right: 4px;
   display: flex;
@@ -382,6 +383,7 @@ const rayStyle = computed(() => ({
 
 .sticky-annotation__colors {
   position: absolute;
+  z-index: 2;
   top: 30px;
   right: 4px;
   display: flex;
@@ -405,6 +407,7 @@ const rayStyle = computed(() => ({
 
 .sticky-annotation__resize {
   position: absolute;
+  z-index: 2;
   bottom: 0;
   right: 0;
   width: 14px;
