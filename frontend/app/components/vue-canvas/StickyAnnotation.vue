@@ -270,13 +270,13 @@ const rayStyle = computed(() => ({
   background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.35) 50%);
 }
 .sticky-annotation--dark .sticky-annotation__glitter {
-  opacity: 0.02;
+  opacity: 0;
 }
 .sticky-annotation--dark .sticky-annotation__glint {
-  opacity: 0.08; /* screen has huge headroom on black — anything stronger glares */
+  opacity: 0.035; /* screen has huge headroom on black — owner wants it hardly visible */
 }
 .sticky-annotation--dark .sticky-annotation__ray {
-  opacity: 0.12;
+  opacity: 0.05;
 }
 /* Dark papers get a dark-grey→black hairline instead of white→black. */
 .sticky-annotation.sticky-annotation--dark::after { /* out-specifies the base ::after below */
