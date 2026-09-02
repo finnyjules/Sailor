@@ -13,6 +13,7 @@ import { textOutlines } from '~/lib/vectortype/outline'
 import type { TextOutlines } from '~/lib/vectortype/outline'
 import { glyphFlexFor, planStretch, SMALL_FEATURE_EM, STRAIGHT_MIN_EM, stretchOutlines, weightCompensation } from '~/lib/vectortype/stretch'
 import type { FlexOptions } from '~/lib/vectortype/stretch'
+import { stretchOutlines2D } from '~/lib/vectortype/stretch2d'
 
 const LAB_FONTS = ['inter', 'roboto-flex', 'archivo', 'fraunces', 'source-serif', 'unbounded']
 const TORTURE = ['Sailor', 'OQCGS', 'AVWXY', 'MNH', 'aegs', 'gjpqy', 'STRETCH the word']
@@ -61,6 +62,7 @@ const flexOpts = computed<FlexOptions>(() => {
 const naiveCanvas = ref<HTMLCanvasElement | null>(null)
 const smartCanvas = ref<HTMLCanvasElement | null>(null)
 const axisCanvas = ref<HTMLCanvasElement | null>(null)
+const fieldCanvas = ref<HTMLCanvasElement | null>(null)
 
 function drawCommands(ctx: CanvasRenderingContext2D, o: TextOutlines) {
   const path = new Path2D()
@@ -146,6 +148,9 @@ function rerender() {
   // the smart column's own stretchOutlines call, not into flexOpts, so the
   // overlay (which reads flexOpts via glyphFlexFor) is unaffected by it.
   render(smartCanvas.value, stretchOutlines(smartBase, plan.residual, SY.value, { ...flexOpts.value, roundCoupling: roundCoupling.value }), overlay.value)
+  // 2D-field spike: same base and residual as the smart column, default
+  // field constants (see stretch2d.ts DEFAULT_FIELD_OPTIONS). No controls.
+  render(fieldCanvas.value, stretchOutlines2D(smartBase, plan.residual, SY.value), false)
 
   if (hasWdth.value) {
     render(axisCanvas.value, textOutlines(f, text.value, plan.coords), false)
@@ -226,6 +231,10 @@ onMounted(async () => {
       <div v-if="hasWdth">
         <div class="mb-1 font-mono text-xs text-neutral-500">axis only (real wdth, no remap)</div>
         <canvas ref="axisCanvas" class="rounded bg-neutral-900" data-test="canvas-axis" />
+      </div>
+      <div>
+        <div class="mb-1 font-mono text-xs text-neutral-500">field (2D spike — lattice deformation, stroke-aware stiffness)</div>
+        <canvas ref="fieldCanvas" class="rounded bg-neutral-900" data-test="canvas-field" />
       </div>
     </div>
   </div>
