@@ -189,6 +189,64 @@ through the existing reflow path (the "layout at base weight would make heavy
 glyphs collide" machinery in `canvas.ts`). If lab profiling disagrees,
 quantize stretch values for caching — not expected.
 
+## The laws (engine-independent) — added 2026-09-02
+
+Phase A's lab produced fourteen rules. Sorted honestly they are two piles.
+**Pile 1 — typographic laws** a type designer would sign: constraints ANY engine
+must satisfy, and the acceptance criteria for the 2D-field spike below.
+**Pile 2 — slice-model patches**: fixes to how a 1D per-axis profile is shaped.
+In a 2D model most of pile 2 should be emergent; if it is not, the model is
+wrong. Every law comes with the probe that measures it (all probes exist in
+`tests/unit/vectortype-stretch.unit.spec.ts` or the session's scratch probes).
+
+### Pile 1 — laws (keep under any engine)
+
+| # | Law | What it protects | Probe |
+|---|---|---|---|
+| L1 | **Small marks are rigid.** Dots, periods, diacritics keep their exact shape and ride as one unit. | tittles, punctuation | dot width across scanlines ≤ 1.15× |
+| L2 | **Condense follows the order of sacrifice.** Counters close first (floor ~30%), then horizontal ink (~50%), stems thin last (~60%); letters never touch. | condensed cuts | o counter/flank ratios at S 0.5; no-touch test |
+| L3 | **One stem weight per run.** Stems thin by one schedule of the run, never per glyph; counter-less letters under-condense. | I vs L | stem ratio l vs o flank within 4% |
+| L4 | **Stems follow area, not width.** Stems thin only when S × SY < 1. | tall condensed | l stem at 0.7×2.5 ≥ 0.97 |
+| L5 | **Vertical zones are shared, and hard.** Baseline, x-height, cap, ascender, descender land in the same place on every glyph; a band always reaches its target when it has any free ink. | word alignment | i stem top vs a top; Fraunces a at ×2.3 |
+| L6 | **Terminals keep their cut, and a cut is never a stroke edge.** | a's terminal; Unbounded S | cut angle Δ < 8°; S profile no mid bands |
+| L7 | **Optical weight compensates growth** (Ahrens): extended a hair bolder, compressed lighter. | colour | wght nudge exists; default TBD |
+| L8 | **Overshoot is constant.** Rounds overshoot flat lines by a fixed amount regardless of stretch. | o vs x-height | overshoot sliver keeps size |
+| L9 | **Straight strokes stay straight; parallel strokes stay parallel; diagonal angles agree across letters.** | A V W X Y K N | X profile uniform; Y arm uniform; (run-level angle test TBD) |
+| L10 | **Serifs are furniture, not strokes.** Length and bracket radius change modestly, never proportionally. | Fraunces, Source Serif | serif length ratio (TBD) |
+| L11 | **Apertures never close.** The gap between a terminal and its facing stroke stays ≥ ~0.5 stroke width. | c e s a under condense | aperture gap probe (TBD) |
+| L12 | **Thin strokes stay thin.** Hairlines never thicken in any direction. | contrast faces, diagonal hairlines | thickness-by-angle on A/V (TBD) |
+| L13 | **Joins keep their shape.** Bowl/stem junctions scale with the stroke, not the counter. | a b d n p q h | the a's residual inflections → 6 |
+| L14 | **Slant is a design constant.** Italics/obliques are re-sheared to their drawn angle after any stretch. | italics | stem angle Δ < 1° (TBD) |
+| L15 | **Monoline stays monoline.** Low-contrast faces thin horizontals and verticals together. | geometric sans under condense | arch vs stem ratio (TBD) |
+| L16 | **Spacing follows counters.** Sidebearings track the resulting counter width. | rhythm, fit-to-width | (TBD) |
+| L17 | **Junctions don't clog.** Ink density at acute joins never exceeds the drawn density. | v w M k condensed | ink-density probe (TBD), lowest priority |
+
+Half-laws (design choices, exposed as dials, never guessed): how much heavier an
+extended cut gets (L7's constant); whether descenders shorten in tall/condensed
+cuts; how round a wide o's corners get (round coupling).
+
+### Pile 2 — slice-model patches (should be emergent in a 2D model)
+
+Curves stay smooth · rounds stay round · C1 remap · bell distribution (sine /
+cosine) · turn taper · k inert · symmetric solve · the partial-sliver cap. Each
+exists because two independent 1D maps cannot see a stroke. Residuals at HEAD
+with all of them: a at 8 inflections (drawn 6), Unbounded S at 6 (drawn 4),
+wide o at 8 (drawn 0).
+
+### The 2D-field spike (started 2026-09-02, two days, bounded)
+
+Premise: deform the ink as a **body**, not as rows and columns — a lattice over
+the glyph with per-cell anisotropic stiffness from the existing tangent
+analysis (stiff ACROSS a stroke, free ALONG it, soft in whitespace, rigid on
+small marks and terminals), zone rows and the bbox as constraints, solved as a
+sparse least-squares; outline control points ride the deformed lattice, so the
+command count stays constant. Judged ONLY by the probes above, against the
+slice engine, on Inter, Fraunces and Unbounded: inflection counts, thickness by
+angle, zone alignment, stem ratios. Exit: if the field clears the pile-2
+residuals it becomes the Phase B engine with pile 1 as its constraints; if not,
+Phase B ships the slice engine with conservative ranges (≈0.7–1.6× wide, ≤1.8×
+tall) and stroke vectors (skeleton + thickness) become the destination.
+
 ## Edge cases (decided)
 
 - **All-rigid profile on an axis** (horizontally: "I", "l", "."): the glyph
