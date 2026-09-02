@@ -6,6 +6,8 @@ import { STICKY_COLORS, isDarkPaper } from '~/composables/useCanvasAnnotations'
 
 const props = defineProps<{
   annotation: StickyAnnotation
+  /** Selected state — owned by the canvas (one sticky at a time, like arrows). */
+  selected?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -13,6 +15,7 @@ const emit = defineEmits<{
   'resize': [id: string, w: number, h: number]
   'update': [id: string, patch: Partial<StickyAnnotation>]
   'remove': [id: string]
+  'select': [id: string]
 }>()
 
 const { viewport } = useVueFlow()
@@ -33,6 +36,8 @@ function onPointerDown(e: PointerEvent) {
   const target = e.target as HTMLElement
   if (target.closest('button')) return
   e.stopPropagation()
+  // Any press selects — a plain click and the start of a drag both count.
+  emit('select', props.annotation.id)
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   dragLast = { x: e.clientX, y: e.clientY }
 }
@@ -55,6 +60,7 @@ let resizeLast: { x: number; y: number; w: number; h: number } | null = null
 function onResizeDown(e: PointerEvent) {
   if (e.button !== 0) return
   e.stopPropagation()
+  emit('select', props.annotation.id)
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   resizeLast = { x: e.clientX, y: e.clientY, w: props.annotation.width, h: props.annotation.height }
 }
@@ -137,7 +143,7 @@ const rayStyle = computed(() => ({
 <template>
   <div
     class="sticky-annotation absolute pointer-events-auto"
-    :class="{ 'sticky-annotation--dark': isDark }"
+    :class="{ 'sticky-annotation--dark': isDark, 'sticky-annotation--selected': selected }"
     :style="{
       left: `${annotation.x}px`,
       top: `${annotation.y}px`,
@@ -165,7 +171,10 @@ const rayStyle = computed(() => ({
          pointerdown is conditionally stopped: while editing, we stop it so
          the parent's drag handler doesn't hijack click-to-position-cursor;
          while readonly, we let it bubble so the user can drag from the body. -->
+    <!-- Escape leaves text editing but keeps the note selected (the canvas
+         handles the second Escape / Delete once nothing is being typed). -->
     <textarea
+      @keydown.esc.stop="(e) => (e.target as HTMLTextAreaElement).blur()"
       ref="textareaRef"
       v-model="textDraft"
       class="sticky-annotation__text"
@@ -281,6 +290,16 @@ const rayStyle = computed(() => ({
 /* Dark papers get a dark-grey→black hairline instead of white→black. */
 .sticky-annotation.sticky-annotation--dark::after { /* out-specifies the base ::after below */
   background: linear-gradient(180deg, #4a4a4e 0%, #000000 100%);
+}
+
+/* Selected: an action-blue ring just outside the hairline, plus the paper's
+   own shadows. Same on light and dark papers — blue is Sailor's one accent. */
+.sticky-annotation--selected {
+  box-shadow:
+    0 0 0 1.5px #4f8cff,
+    0 0 0 4px rgba(79, 140, 255, 0.28),
+    0 1px 1px rgba(0, 0, 0, 0.18),
+    0 6px 14px rgba(0, 0, 0, 0.28);
 }
 
 /* Hairline stroke: a 1px ring carrying a vertical white→black gradient

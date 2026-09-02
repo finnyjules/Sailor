@@ -1369,9 +1369,27 @@ const selectedArrowId = ref<string | null>(null)
 
 function selectArrow(id: string) {
   selectedArrowId.value = id
+  selectedStickyId.value = null
 }
 function clearArrowSelection() {
   selectedArrowId.value = null
+}
+
+// ---- Sticky selection ------------------------------------------------------
+// One sticky at a time, mirroring arrows: press selects, empty-canvas click /
+// Escape clears, Delete removes (never while typing in the note).
+const selectedStickyId = ref<string | null>(null)
+function selectSticky(id: string) {
+  selectedStickyId.value = id
+  selectedArrowId.value = null
+}
+function clearStickySelection() {
+  selectedStickyId.value = null
+}
+function deleteSelectedSticky() {
+  if (!selectedStickyId.value) return
+  removeAnnotation(selectedStickyId.value)
+  selectedStickyId.value = null
 }
 
 // Endpoint drag from ArrowsLayer: handle is reporting graph-space coords.
@@ -1480,11 +1498,21 @@ function onGlobalKey(e: KeyboardEvent) {
       e.preventDefault()
       return
     }
+    if (selectedStickyId.value && !isTypingTarget()) {
+      clearStickySelection()
+      e.preventDefault()
+      return
+    }
   }
-  // Delete / Backspace removes the selected arrow. Skip when typing so we
-  // don't eat text-editing keystrokes.
+  // Delete / Backspace removes the selected arrow / sticky. Skip when typing
+  // so we don't eat text-editing keystrokes.
   if ((e.key === 'Delete' || e.key === 'Backspace') && selectedArrowId.value && !isTypingTarget()) {
     deleteSelectedArrow()
+    e.preventDefault()
+    return
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedStickyId.value && !isTypingTarget()) {
+    deleteSelectedSticky()
     e.preventDefault()
     return
   }
@@ -7071,6 +7099,7 @@ function handlePaneClick(event: MouseEvent) {
     return
   }
   if (selectedArrowId.value) clearArrowSelection()
+  if (selectedStickyId.value) clearStickySelection()
 }
 
 // Track cursor in graph space while an arrow is pending so the preview path
@@ -8070,6 +8099,8 @@ defineExpose({
           <StickyAnnotation
             v-if="a.kind === 'sticky'"
             :annotation="(a as any)"
+            :selected="a.id === selectedStickyId"
+            @select="(id) => selectSticky(id)"
             @drag="(id, dx, dy) => moveAnnotationWithAttach(id, dx, dy)"
             @resize="(id, w, h) => resizeAnnotation(id, w, h)"
             @update="(id, patch) => updateAnnotation(id, patch as any)"
