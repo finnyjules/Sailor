@@ -156,6 +156,7 @@ const glintStyle = computed(() => {
          text, ignores the pointer. -->
     <div class="sticky-annotation__shimmer" aria-hidden="true">
       <div class="sticky-annotation__glitter" :style="glitterStyle" />
+      <div class="sticky-annotation__glint sticky-annotation__glint--glow" :style="glintStyle" />
       <div class="sticky-annotation__glint" :style="glintStyle" />
     </div>
 
@@ -269,8 +270,8 @@ const glintStyle = computed(() => {
 .sticky-annotation__glitter {
   background-image: linear-gradient(100deg,
     #f6a5c0, #f7d08a, #a9e8bf, #9fd0f7, #cdb4f6, #f6a5c0);
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E");
   -webkit-mask-repeat: repeat;
   mask-repeat: repeat;
   -webkit-mask-size: 130px 130px;
@@ -279,20 +280,26 @@ const glintStyle = computed(() => {
 }
 .sticky-annotation__glint {
   background-image: linear-gradient(100deg,
-    #ff8fb1, #ffd166, #7ee8a2, #7cc4ff, #c7a2ff, #ff8fb1);
+    #ff5f9e, #ffbf2e, #3ddc84, #3fa9ff, #a86bff, #ff5f9e);
   -webkit-mask-image:
-    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E"),
-    linear-gradient(115deg, rgba(0, 0, 0, 0) 36%, #000 50%, rgba(0, 0, 0, 0) 64%);
+    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E"),
+    linear-gradient(115deg, rgba(0, 0, 0, 0) 22%, #000 50%, rgba(0, 0, 0, 0) 78%);
   mask-image:
-    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E"),
-    linear-gradient(115deg, rgba(0, 0, 0, 0) 36%, #000 50%, rgba(0, 0, 0, 0) 64%);
+    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E"),
+    linear-gradient(115deg, rgba(0, 0, 0, 0) 22%, #000 50%, rgba(0, 0, 0, 0) 78%);
   -webkit-mask-repeat: repeat, repeat;
   mask-repeat: repeat, repeat;
-  -webkit-mask-size: 130px 130px, 440px 100%;
-  mask-size: 130px 130px, 440px 100%;
+  -webkit-mask-size: 130px 130px, 520px 100%;
+  mask-size: 130px 130px, 520px 100%;
   -webkit-mask-composite: source-in;
   mask-composite: intersect;
-  opacity: 0.95;
+  opacity: 1;
+}
+/* Bloom: a blurred twin of the glint under it, so lit flecks glow instead
+   of sitting flat on the paper. */
+.sticky-annotation__glint--glow {
+  filter: blur(2.5px);
+  opacity: 0.9;
 }
 
 .sticky-annotation__text {
