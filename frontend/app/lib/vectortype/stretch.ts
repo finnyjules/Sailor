@@ -236,6 +236,25 @@ export function symmetrize(flex: Float64Array): void {
   }
 }
 
+/** Curves stay smooth: flex may not climb away from a rigid plateau faster
+ *  than one stroke width allows, so an arch eases into a flank instead of
+ *  cornering (a 9-slice keeps the drawn radius verbatim on a taller shape —
+ *  a designer's tall o has a LARGER radius). Only lowers values, only on
+ *  ink bins; empty space stays fully free. `rampBins` = stroke width in bins. */
+export function smoothProfile(flex: Float64Array, ink: Float64Array | undefined, rampBins: number): void {
+  if (rampBins < 1) return
+  const step = 1 / rampBins
+  const n = flex.length
+  for (let i = 1; i < n; i++) {
+    if (ink && !(ink[i]! > 0)) continue
+    flex[i] = Math.min(flex[i]!, flex[i - 1]! + step)
+  }
+  for (let i = n - 2; i >= 0; i--) {
+    if (ink && !(ink[i]! > 0)) continue
+    flex[i] = Math.min(flex[i]!, flex[i + 1]! + step)
+  }
+}
+
 /** Fraction of flattened points that must have a mirrored twin … */
 const SYMMETRY_MIN_FRACTION = 0.95
 /** … within this fraction of the bbox's mirrored dimension. */
@@ -523,8 +542,22 @@ export function analyzeFlex(
     inkX[b] = ix
     inkY[b] = iy
   }
+  // Attached here (not at the end) so `stemWidthOf` below — which reads
+  // `profile.ink` — sees real ink occupancy rather than undefined.
+  out.x.ink = inkX
+  out.y.ink = inkY
 
   if (shapeRules) {
+    // Curves stay smooth: ease the freshly-powed profile away from its rigid
+    // plateaus (the stem/flank ink) by at most one stroke width per bin,
+    // BEFORE the straight-span pass — so e.g. a Y's arm is re-flattened over
+    // its whole span and only bends once, at the junction it already bends
+    // at, instead of at the smoothing ramp too.
+    const rampX = stemWidthOf(out.x) / out.x.binSize
+    if (rampX > 0) smoothProfile(flexX, inkX, rampX)
+    const rampY = stemWidthOf(out.y) / out.y.binSize
+    if (rampY > 0) smoothProfile(flexY, inkY, rampY)
+
     // Straight-span uniformity: every diagonal straight stroke stretches
     // uniformly along its whole span, stems inside it exempt.
     const spansX: Array<[number, number]> = []
@@ -556,8 +589,6 @@ export function analyzeFlex(
     if (isMirrorSymmetric(pts, 'y', bbox)) { symmetrize(flexY); symmetrize(hardY) }
   }
 
-  out.x.ink = inkX
-  out.y.ink = inkY
   return out
 }
 
@@ -626,7 +657,7 @@ const PARTIAL_GROWTH_CAP = 2
  *  further — the rule that keeps condensed letters from touching. */
 const WHITESPACE_FLOOR_STEMS = 0.6
 
-function binWidths(flex: Float64Array, w: number, S: number, ink?: Float64Array): Float64Array {
+function binWidths(flex: Float64Array, w: number, S: number, ink?: Float64Array, stemScale: number = stemFactor(S)): Float64Array {
   const n = flex.length
   const out = new Float64Array(n).fill(w)
   const total = n * w
@@ -676,7 +707,7 @@ function binWidths(flex: Float64Array, w: number, S: number, ink?: Float64Array)
   let deficit = -delta
   for (let i = 0; i < n; i++) {
     if (flex[i]! < 0.05) {
-      const thinned = w * stemFactor(S)
+      const thinned = w * stemScale
       deficit -= w - thinned
       out[i] = thinned
     }
@@ -746,14 +777,14 @@ function binWidths(flex: Float64Array, w: number, S: number, ink?: Float64Array)
  * keep its drawn size rather than stretch, which is exactly classic optical
  * overshoot compensation.
  */
-function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number[]): Float64Array {
+function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number[], stemScale?: number): Float64Array {
   const { start, binSize: w, flex, ink } = profile
   const n = flex.length
   const total = n * w
   // Keep only lines strictly inside the profile's own span, sorted and
   // deduped — a line at or beyond either end contributes no boundary.
   const lines = Array.from(new Set(zones.filter(z => z > start && z < start + total))).sort((a, b) => a - b)
-  if (!lines.length) return binWidths(flex, w, S, ink)
+  if (!lines.length) return binWidths(flex, w, S, ink, stemScale)
 
   // A bin belongs to the band containing its CENTRE, not its edges — so a
   // zone line that lands mid-bin (the common case; zones rarely fall on a
@@ -775,17 +806,17 @@ function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number
       // band's own offset.
       const bandFlex = flex.subarray(lo, i)
       const bandInk = ink ? ink.subarray(lo, i) : undefined
-      out.set(binWidths(bandFlex, w, S, bandInk), lo)
+      out.set(binWidths(bandFlex, w, S, bandInk, stemScale), lo)
       lo = i
     }
   }
   return out
 }
 
-export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number, zones?: readonly number[]): Remap {
+export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number, zones?: readonly number[], stemScale?: number): Remap {
   const { start, binSize: w, flex, ink } = profile
   const n = flex.length
-  const widths = zones && zones.length ? bandedBinWidths(profile, S, zones) : binWidths(flex, w, S, ink)
+  const widths = zones && zones.length ? bandedBinWidths(profile, S, zones, stemScale) : binWidths(flex, w, S, ink, stemScale)
   const src = new Float64Array(n + 1)
   const dst = new Float64Array(n + 1)
   let acc = start
@@ -892,6 +923,12 @@ export function stretchOutlines(
   // the "i's stem sits above its neighbours" bug).
   const m = outlines.metrics
   const zones = [0, m.xHeight, m.capHeight, m.ascent, m.descent]
+  // Stems follow AREA, not width: a tall compressed display face (S small,
+  // SY large) keeps heavy stems — the letter isn't getting smaller, it's
+  // getting taller. The one stem-weight schedule takes S × SY, shared by
+  // both axes, so a rigid Y bin (an arch/crossbar thickness) thins by the
+  // same rule a rigid X bin (a stem) does.
+  const stemScale = stemFactor(S * SY)
   const glyphs: GlyphOutline[] = []
   let penOld = 0
   let penNew = 0
@@ -904,8 +941,8 @@ export function stretchOutlines(
     let flex: GlyphFlex | undefined
     if (hasInk(g)) {
       flex = glyphFlexFor(g, flexOpts)
-      const rx = buildRemap(flex.x, S)
-      const ry = buildRemap(flex.y, SY, 0, zones)
+      const rx = buildRemap(flex.x, S, undefined, undefined, stemScale)
+      const ry = buildRemap(flex.y, SY, 0, zones, stemScale)
       commands = applyRemaps(g.commands, rx, ry)
       bbox = {
         minX: remapValue(rx, g.bbox.minX),

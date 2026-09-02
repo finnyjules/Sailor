@@ -15,7 +15,7 @@ import { normaliseAxes } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 import { textOutlines } from '~/lib/vectortype/outline'
 import type { PathCommand, TextOutlines, VtBBox } from '~/lib/vectortype/outline'
-import { analyzeFlex, buildRemap, glyphFlexFor, planStretch, remapValue, solveAxis, stemFactor, stemWidthOf, stretchCommands, stretchOutlines, symmetrize, uniformSpans, weightCompensation } from '~/lib/vectortype/stretch'
+import { analyzeFlex, buildRemap, glyphFlexFor, planStretch, remapValue, smoothProfile, solveAxis, stemFactor, stemWidthOf, stretchCommands, stretchOutlines, symmetrize, uniformSpans, weightCompensation } from '~/lib/vectortype/stretch'
 
 /** Closed axis-aligned rectangle as outline commands (font-unit space, y-up). */
 function rect(x0: number, y0: number, x1: number, y1: number): PathCommand[] {
@@ -48,7 +48,8 @@ describe('analyzeFlex', () => {
     for (const f of x.flex) expect(f).toBeLessThan(0.05)
     // Y bins in the stem's interior see only vertical ink -> flex ~ 1;
     // only the bins holding the horizontal caps are pinned.
-    const interior = Array.from(y.flex).slice(2, -2)
+    // The caps pin their rows, and the smoothing rule ramps flex off them over one stroke width — the interior starts past that ramp.
+    const interior = Array.from(y.flex).slice(4, -4)
     for (const f of interior) expect(f).toBeGreaterThan(0.95)
     expect(y.flex[0]).toBeLessThan(0.05)
     expect(y.flex[y.flex.length - 1]).toBeLessThan(0.05)
@@ -663,5 +664,80 @@ describe('shared vertical zones', () => {
     // descender grows down, x-height part grows up, baseline unmoved
     expect(g1.bbox.minY).toBeLessThan(g0.bbox.minY * 1.5)
     expect(g1.bbox.maxY).toBeGreaterThan(g0.bbox.maxY * 1.8)
+  })
+})
+
+describe('stems follow area; curves stay smooth', () => {
+  it('stemScale overrides the schedule for rigid bins under condense', () => {
+    const flex = new Float64Array([1, 1, 0, 0, 0, 0, 1, 1, 1, 1])
+    const ink  = new Float64Array([0, 0, 1, 1, 1, 1, 0, 0, 0, 0])
+    const held = buildRemap({ start: 0, binSize: 10, flex, ink }, 0.7, undefined, undefined, 1)
+    for (let i = 2; i <= 5; i++) expect(remapValue(held, (i + 1) * 10) - remapValue(held, i * 10)).toBeCloseTo(10, 6)
+    const thinned = buildRemap({ start: 0, binSize: 10, flex, ink }, 0.7)
+    for (let i = 2; i <= 5; i++) expect(remapValue(thinned, (i + 1) * 10) - remapValue(thinned, i * 10)).toBeCloseTo(10 * stemFactor(0.7), 6)
+  })
+
+  it("condense + tall (S 0.7, SY 2.5) keeps the 'l' stem at full weight; condense alone thins it", () => {
+    const run = textOutlines(font, 'l')
+    const g0 = run.glyphs[0]!
+    const midY = (g0.bbox.minY + g0.bbox.maxY) / 2
+    const w0 = inkRunsAtY(g0.commands, midY)[0]!
+    const tall = stretchOutlines(run, 0.7, 2.5).glyphs[0]!
+    const yTall = (tall.bbox.minY + tall.bbox.maxY) / 2
+    const w1 = inkRunsAtY(tall.commands, yTall)[0]!
+    expect((w1[1] - w1[0]) / (w0[1] - w0[0])).toBeGreaterThan(0.97)
+    const narrow = stretchOutlines(run, 0.7, 1).glyphs[0]!
+    const w2 = inkRunsAtY(narrow.commands, midY)[0]!
+    expect(Math.abs((w2[1] - w2[0]) / (w0[1] - w0[0]) - stemFactor(0.7))).toBeLessThan(0.04)
+  })
+
+  it('smoothProfile ramps ink bins away from a plateau and never touches empty bins', () => {
+    const flex = new Float64Array([0, 0, 1, 1, 1, 1, 1, 1])
+    const ink  = new Float64Array([1, 1, 1, 1, 0, 0, 1, 1])
+    smoothProfile(flex, ink, 4)          // step 0.25
+    expect(Array.from(flex).map(v => +v.toFixed(2))).toEqual([0, 0, 0.25, 0.5, 1, 1, 1, 1])
+  })
+
+  it("the 'o' eases from arch to flank: no Y-profile jump larger than 1.5 steps of its arch thickness", () => {
+    const g = textOutlines(font, 'o').glyphs[0]!
+    const { y } = analyzeFlex(g.commands, g.bbox)
+    const rampBins = stemWidthOf(y) / y.binSize
+    expect(rampBins).toBeGreaterThan(2)
+    let maxJump = 0
+    for (let i = 1; i < y.flex.length; i++) {
+      if (!(y.ink![i]! > 0 && y.ink![i - 1]! > 0)) continue
+      maxJump = Math.max(maxJump, Math.abs(y.flex[i]! - y.flex[i - 1]!))
+    }
+    expect(maxJump).toBeLessThan(1.5 / rampBins)
+    const old = analyzeFlex(g.commands, g.bbox, { shapeRules: false })
+    let oldJump = 0
+    for (let i = 1; i < old.y.flex.length; i++) oldJump = Math.max(oldJump, Math.abs(old.y.flex[i]! - old.y.flex[i - 1]!))
+    expect(oldJump).toBeGreaterThan(maxJump)
+  })
+
+  it("the 'o' at Height 2.5 grows a larger corner radius: the flank's straight run is shorter than a 9-slice would give", () => {
+    // A 9-slice keeps the arch's absolute size and makes the whole added height a
+    // straight flank; easing spends some of it on the corner. Measure the flank's
+    // straight run as the vertical extent over which the outer contour's x stays
+    // within 1% of the extreme.
+    const run = textOutlines(font, 'o')
+    const g0 = run.glyphs[0]!
+    const g1 = stretchOutlines(run, 1, 2.5).glyphs[0]!
+    const straightRun = (cmds: PathCommand[], bbox: { minX: number; maxX: number; minY: number; maxY: number }) => {
+      const h = bbox.maxY - bbox.minY
+      let lo = Infinity, hi = -Infinity
+      for (let i = 0; i <= 200; i++) {
+        const yy = bbox.minY + (i / 200) * h
+        const runs = inkRunsAtY(cmds, yy)
+        if (!runs.length) continue
+        if (runs[0]![0] <= bbox.minX + 0.01 * (bbox.maxX - bbox.minX)) { lo = Math.min(lo, yy); hi = Math.max(hi, yy) }
+      }
+      return Number.isFinite(lo) ? hi - lo : 0
+    }
+    const added = (g1.bbox.maxY - g1.bbox.minY) - (g0.bbox.maxY - g0.bbox.minY)
+    const straight1 = straightRun(g1.commands, g1.bbox)
+    const straight0 = straightRun(g0.commands, g0.bbox)
+    // a pure 9-slice would put ALL added height into the straight run
+    expect(straight1 - straight0).toBeLessThan(added * 0.9)
   })
 })
