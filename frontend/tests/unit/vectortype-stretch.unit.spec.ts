@@ -1142,3 +1142,46 @@ describe('zones are hard constraints; k is inert under shape rules', () => {
     expect(remapValue(m, 100) - remapValue(m, 50)).toBeCloseTo(50, 6)   // band B all-rigid: keeps natural size
   })
 })
+
+describe('stroke-relative straightness; bell weights carry freeness', () => {
+  it("the a's arch terminal no longer hard-pins a band: no 0.00 rows between the bowl top and the arch", () => {
+    const g = textOutlines(font, 'a').glyphs[0]!
+    const { y } = analyzeFlex(g.commands, g.bbox, { smallFeature: 0.22 * font.unitsPerEm })
+    // rows between y ≈ 700 and y ≈ 950 (the aperture under the arch) must all be non-rigid
+    for (let i = 0; i < y.flex.length; i++) {
+      const yy = y.start + (i + 0.5) * y.binSize
+      if (yy > 700 && yy < 950) expect(y.flex[i]).toBeGreaterThan(0.05)
+    }
+  })
+
+  it("the a at Height 2.5 keeps its drawn inflection count", () => {
+    const run = textOutlines(font, 'a')
+    const base = inflectionsOf(run.glyphs[0]!.commands)
+    expect(inflectionsOf(stretchOutlines(run, 1, 2.5).glyphs[0]!.commands)).toBeLessThanOrEqual(base)
+  })
+
+  it("the a's bowl-top stroke keeps its thickness at Height 2.5 (freeness)", () => {
+    const run = textOutlines(font, 'a')
+    const g0 = run.glyphs[0]!, g1 = stretchOutlines(run, 1, 2.5).glyphs[0]!
+    // vertical scanline through the bowl (left of the stem): the topmost run inside the bowl region is the bowl's top stroke
+    const x0 = g0.bbox.minX + (g0.bbox.maxX - g0.bbox.minX) * 0.45
+    const x1 = g1.bbox.minX + (g1.bbox.maxX - g1.bbox.minX) * 0.45
+    const r0 = inkRunsAtX(g0.commands, x0), r1 = inkRunsAtX(g1.commands, x1)
+    // pick the run whose centre is nearest to y = 570 (bowl top in the fixture) / 570×2.5 after
+    const pick = (runs: Array<[number, number]>, yc: number) => runs.reduce((b, r) => Math.abs((r[0] + r[1]) / 2 - yc) < Math.abs((b[0] + b[1]) / 2 - yc) ? r : b)
+    const t0 = pick(r0, 570), t1 = pick(r1, 570 * 2.5)
+    expect((t1[1] - t1[0]) / (t0[1] - t0[0])).toBeLessThan(1.25)
+  })
+
+  it('straightness is stroke-relative: a heavy glyph\'s short flat cut is not a stroke edge, its long side is', () => {
+    // 300-thick vertical stroke, 1400 tall, flat caps 300 long (≥ 12% of 1400 — the old rule called them straight)
+    const bar = rect(0, 0, 300, 1400)
+    const { y } = analyzeFlex(bar, { minX: 0, minY: 0, maxX: 300, maxY: 1400 }, { bins: 28 })
+    // caps are terminals/short: the rows just inside them are not hard-pinned
+    expect(y.flex[1]).toBeGreaterThan(0.05)
+    expect(y.flex[26]).toBeGreaterThan(0.05)
+    // and the long sides still pin X hard
+    const { x } = analyzeFlex(bar, { minX: 0, minY: 0, maxX: 300, maxY: 1400 }, { bins: 12 })
+    for (const f of x.flex) expect(f).toBeLessThan(0.05)
+  })
+})

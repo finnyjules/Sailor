@@ -118,6 +118,15 @@ export const STRAIGHT_MIN_EM = 0.12
  *  (a Y's arm bends exactly once, at the junction). Same cut `binWidths` and
  *  `stemWidthOf` use for "rigid". */
 const HARD_RIGID = 0.05
+/** Fix 1 (continued): a diagonal terminal too SHORT to earn rule 11's
+ *  outright rigid patch (`termHard` false) is still pinned to a small,
+ *  SOFT value on both axes rather than left to its natural (often much
+ *  higher — measured ~0.86) alignment: soft-pinned (0.05–0.15, same band
+ *  `freenessOf`'s doc comment calls out) is enough to clear the "not
+ *  hard-rigid" bar a plain terminal-owned row needs, while keeping the
+ *  bell's freeness factor suppressing its share of any nearby growth close
+ *  to zero, so it does not amplify the way a genuinely free bin does. */
+const SOFT_TERMINAL_PIN = 0.065
 /** Straight segments whose |tangent·axis| lies strictly inside this band are
  *  DIAGONAL for that axis: a stem (≈ 0) is already pinned by the hard min and
  *  a crossbar (≈ 1) is fully flexible, so only the in-between needs the
@@ -131,6 +140,16 @@ export const SMALL_FEATURE_EM = 0.22
 /** Curve flattening steps for ANALYSIS only — the remap itself moves the real
  *  control points, so this resolution never appears in output geometry. */
 const CURVE_STEPS = 16
+/** Fix: straightness is STROKE-relative, not glyph-relative (see
+ *  `resolveStraightMin`). A line counts as a straight stroke edge only when
+ *  it is at least this many stroke widths long — Inter's 'a' has a ~150-unit
+ *  flat cut at the end of its arch (~180-unit stroke): longer than 12% of
+ *  the glyph (the old rule), so it hard-pinned a band, but well under 1.5×
+ *  its own stroke's thickness, so it is a terminal, not a stroke edge. */
+const STROKE_REL_MIN = 1.5
+/** Below this many ink cells a stroke-width percentile is noise (a tiny
+ *  synthetic shape in a test) — fall back to the old glyph-relative value. */
+const STROKE_EST_MIN_INK = 20
 /** Rounds stay round: a round's turn-region height follows its WIDTH (a
  *  semicircle is half as tall as it is wide). Shoulder rows scale by
  *  S^ROUND_COUPLING regardless of the height dial; 1 = fully round corners on
@@ -522,6 +541,17 @@ function buildGrid(segs: Seg[], bbox: VtBBox, w: number, h: number, smallFeature
   const termFlag = new Uint8Array(N)
   const termReach = new Float64Array(N)
   const termDiag = new Uint8Array(N)
+  // Fix 1 (continued): whether the terminal's OWN pre-override classification
+  // was a genuine stroke-length straight line (`KIND_STRAIGHT`, under the
+  // stroke-relative threshold `resolveStraightMin` resolved) rather than a
+  // short cap/facet. Gates the diagonal-terminal rigid patch below: a
+  // terminal long enough to be a stroke edge in its own right (a heavy
+  // face's flat spine cut) still gets its drawn angle protected outright, but
+  // a terminal that is SHORT relative to its own stroke (Inter's 'a' arch
+  // terminal, ~150 units against a ~180-unit-thick arch) must not hard-pin
+  // the ink around it to 0 — it is governed by the ordinary soft channel
+  // instead, same as any other short line.
+  const termHard = new Uint8Array(N)
   // Spike bookkeeping (`analyzeGrid`): which ink cells rule 11 made rigid
   // as a terminal patch, and which the small-feature pass made rigid. Written
   // alongside the existing arrays; nothing below reads them.
@@ -561,9 +591,11 @@ function buildGrid(segs: Seg[], bbox: VtBBox, w: number, h: number, smallFeature
       if (dist[j]! > 0) {
         dist[j] = 0; ax[j] = tx; ay[j] = ty; kind[j] = effKind
         termFlag[j] = s.terminal ? 1 : 0; termReach[j] = s.terminal ? len : 0; termDiag[j] = s.terminalDiagonal ? 1 : 0
+        termHard[j] = s.terminal && s.kind === KIND_STRAIGHT ? 1 : 0
       } else if (rank > have) {
         ax[j] = tx; ay[j] = ty; kind[j] = effKind
         termFlag[j] = s.terminal ? 1 : 0; termReach[j] = s.terminal ? len : 0; termDiag[j] = s.terminalDiagonal ? 1 : 0
+        termHard[j] = s.terminal && s.kind === KIND_STRAIGHT ? 1 : 0
       } else if (rank === have) {
         ax[j] = Math.min(ax[j]!, tx); ay[j] = Math.min(ay[j]!, ty)
       }
@@ -584,6 +616,7 @@ function buildGrid(segs: Seg[], bbox: VtBBox, w: number, h: number, smallFeature
     if (d < dist[j]!) {
       dist[j] = d; ax[j] = ax[n]!; ay[j] = ay[n]!; kind[j] = kind[n]!
       termFlag[j] = termFlag[n]!; termReach[j] = termReach[n]!; termDiag[j] = termDiag[n]!
+      termHard[j] = termHard[n]!
     }
   }
   for (let r = 0; r < GRID; r++) {
@@ -637,11 +670,27 @@ function buildGrid(segs: Seg[], bbox: VtBBox, w: number, h: number, smallFeature
   // in — governed by the stroke's other ink, never hard-pinned. A shape-
   // integrity rule like the other three, so gated the same way: off when
   // `shapeRules` is off (the lab's, and the tests', A/B control).
+  //
+  // Fix 1 (continued): the patch's STRENGTH is also gated on `termHard` — the
+  // cut's OWN length relative to the stroke-relative threshold. A terminal
+  // long enough to be a stroke edge in its own right (a heavy face's flat
+  // spine cut) gets the outright rigid protection (ax = ay = 0) as before.
+  // A terminal that is SHORT relative to its own stroke (Inter's 'a' arch
+  // terminal, ~150 units against a ~180-unit-thick arch) is promoted to the
+  // hard/stroke MIN channel too (`kind = KIND_STRAIGHT`, so it isn't
+  // entirely diluted into the mean by unrelated ink sharing its row/column —
+  // measured: 30°+ drift with no promotion at all) but at its OWN,
+  // unmodified alignment (`ax`/`ay` already hold the cut's real tangent from
+  // the stamping pass, untouched here) rather than artificial full rigidity
+  // — without this gate, the patch's radius (`termReach`, the cut's own
+  // length) froze several rows to EXACTLY 0 regardless of how thin the
+  // stroke actually is, which is the bug this fix corrects.
   if (shapeRules) {
     for (let j = 0; j < N; j++) {
       if (!ink[j]) continue
       if (termFlag[j] && termDiag[j] && dist[j]! <= termReach[j]! + 1e-9) {
-        ax[j] = 0; ay[j] = 0; kind[j] = KIND_STRAIGHT; termRigid[j] = 1
+        if (termHard[j]) { ax[j] = 0; ay[j] = 0; termRigid[j] = 1 } else { ax[j] = SOFT_TERMINAL_PIN; ay[j] = SOFT_TERMINAL_PIN }
+        kind[j] = KIND_STRAIGHT
       }
     }
   }
@@ -704,6 +753,57 @@ export interface AnalysisGrid {
   small: Uint8Array
 }
 
+/** Stroke width estimate from an unbiased first chamfer pass (Fix 1): 2× the
+ *  90th percentile of nearest-boundary distance over ink cells, in font
+ *  units. Most of a stem's or an arch's interior sits close to its own
+ *  half-thickness away from a side wall, so the upper percentile of that
+ *  distribution reads out close to the true half-thickness regardless of
+ *  terminals/caps/corners pulling the low end down — doubled back into a
+ *  full stroke width. Falls back to `fallback` (the old 12%-of-glyph value)
+ *  when there are too few ink cells for a stable percentile. */
+function estimateStrokeWidth(dist: Float64Array, ink: Uint8Array, fallback: number): number {
+  let n = 0
+  for (let j = 0; j < ink.length; j++) if (ink[j]) n++
+  if (n < STROKE_EST_MIN_INK) return fallback
+  const vals = new Float64Array(n)
+  let k = 0
+  for (let j = 0; j < ink.length; j++) if (ink[j]) vals[k++] = dist[j]!
+  vals.sort((a, b) => a - b)
+  const idx = 0.9 * (n - 1)
+  const lo = Math.floor(idx), hi = Math.ceil(idx)
+  const p90 = vals[lo]! + (vals[hi]! - vals[lo]!) * (idx - lo)
+  return 2 * p90
+}
+
+/** Resolve the STROKE-RELATIVE straightMin (Fix 1). `straight` classification
+ *  happens at flatten time, before the chamfer distance field that the
+ *  stroke-width estimate reads exists — so this runs the stamp + chamfer
+ *  TWICE: once with every lineTo classified soft (`straightMin: Infinity`,
+ *  so the distance field isn't biased by a straightMin guess), to estimate
+ *  stroke width from; then the real threshold is `1.5×` that estimate,
+ *  floored by an explicit caller value (`straightMinOpt` is an
+ *  override/floor, never lowered by the estimate). One extra 96×96 pass —
+ *  fine; the real (second) pass, with the resolved threshold, is what
+ *  `analyzeFlex`/`analyzeGrid` actually build their output from. */
+function resolveStraightMin(
+  commands: readonly PathCommand[],
+  bbox: VtBBox,
+  w: number,
+  h: number,
+  smallFeature: number,
+  shapeRules: boolean,
+  straightMinOpt: number | undefined,
+): number {
+  const floor = straightMinOpt ?? 0
+  const fallback = STRAIGHT_MIN_EM * Math.max(w, h)
+  const softSegs = flattenToSegments(commands, Infinity)
+  if (!softSegs.length) return Math.max(fallback, floor)
+  markTerminalCuts(softSegs)
+  const grid = buildGrid(softSegs, bbox, w, h, smallFeature, shapeRules)
+  const strokeW = estimateStrokeWidth(grid.dist, grid.ink, fallback)
+  return Math.max(STROKE_REL_MIN * strokeW, floor)
+}
+
 export function analyzeGrid(commands: readonly PathCommand[], bbox: VtBBox, opts: FlexOptions = {}): AnalysisGrid {
   const N = GRID * GRID
   const w = bbox.maxX - bbox.minX
@@ -714,11 +814,13 @@ export function analyzeGrid(commands: readonly PathCommand[], bbox: VtBBox, opts
     straight: new Uint8Array(N), terminal: new Uint8Array(N), small: new Uint8Array(N),
   })
   if (w <= 0 || h <= 0 || !commands.length) return empty()
-  const straightMin = opts.straightMin ?? STRAIGHT_MIN_EM * Math.max(w, h)
+  const smallFeature = opts.smallFeature ?? 0
+  const shapeRules = opts.shapeRules ?? true
+  const straightMin = resolveStraightMin(commands, bbox, w, h, smallFeature, shapeRules, opts.straightMin)
   const segs = flattenToSegments(commands, straightMin)
   if (!segs.length) return empty()
   markTerminalCuts(segs)
-  const g = buildGrid(segs, bbox, w, h, opts.smallFeature ?? 0, opts.shapeRules ?? true)
+  const g = buildGrid(segs, bbox, w, h, smallFeature, shapeRules)
   const straight = new Uint8Array(N)
   for (let j = 0; j < N; j++) if (g.kind[j] === KIND_STRAIGHT) straight[j] = 1
   return { size: GRID, cw: g.cw, ch: g.ch, ink: g.ink, ax: g.ax, ay: g.ay, straight, terminal: g.termRigid, small: g.small }
@@ -746,7 +848,6 @@ export function analyzeFlex(
   const kEff = shapeRules ? 1 : k
   const w = bbox.maxX - bbox.minX
   const h = bbox.maxY - bbox.minY
-  const straightMin = opts.straightMin ?? STRAIGHT_MIN_EM * Math.max(w, h)
   const flexX = new Float64Array(bins).fill(1)
   const flexY = new Float64Array(bins).fill(1)
   const out: GlyphFlex = {
@@ -755,6 +856,7 @@ export function analyzeFlex(
   }
   if (w <= 0 || h <= 0 || !commands.length) return out
 
+  const straightMin = resolveStraightMin(commands, bbox, w, h, smallFeature, shapeRules, opts.straightMin)
   const segs = flattenToSegments(commands, straightMin)
   if (!segs.length) return out
   markTerminalCuts(segs)
@@ -898,7 +1000,15 @@ export function analyzeFlex(
       Math.max(0, Math.min(bins - 1, Math.ceil((hi - start) / size) - 1)),
     ]
     for (const s of segs) {
-      if (s.kind !== KIND_STRAIGHT) continue
+      // Fix 1 (continued): a diagonal TERMINAL that is short relative to its
+      // own stroke (see `termHard` in `buildGrid`) no longer gets rule 11's
+      // outright rigid patch, so it needs a different way to keep its drawn
+      // angle from rotating — the same one a genuine diagonal stroke uses:
+      // LOCAL UNIFORMITY across its own span, so every row/column it touches
+      // grows by the same factor even though that factor isn't near zero.
+      // Skipped for bins the diagonal patch (or a stem) still holds rigid —
+      // `uniformSpans` itself exempts those (`hard < HARD_RIGID`).
+      if (s.kind !== KIND_STRAIGHT && !(s.terminal && s.terminalDiagonal)) continue
       const dx = s.x1 - s.x0, dy = s.y1 - s.y0
       const len = Math.hypot(dx, dy)
       if (len === 0) continue
@@ -1104,11 +1214,30 @@ function waistSplits(flex: Float64Array, i: number, j: number): number[] {
   return acc.map(b => (flex[b + 1]! < flex[b - 1]! ? b : b + 1))
 }
 
+/** Fix 2: a bell bin's weight is `bell(j) × freeness(flex)`, not `bell(j)`
+ *  alone. Free-run DETECTION stays at `HARD_RIGID` (0.05) — a bin at or
+ *  above it is still part of the run — but within the run a SOFT-PINNED bin
+ *  (flex 0.05–0.15: a curved horizontal stroke, drawn hard-adjacent but only
+ *  partially aligned, not truly free) barely grows; the fully free bins
+ *  around it (flex ≥ 0.5) pick up the slack, because the bell's own
+ *  per-sub-run normalisation (`scale` below) always re-targets the sub-run's
+ *  total share to its length regardless of how the raw weight is spread.
+ *  0 at `HARD_RIGID` itself (rigid), 1 at flex ≥ 0.5 (fully free), linear
+ *  between. */
+const FREENESS_SPAN = 0.45
+function freenessOf(flex: number): number {
+  return Math.max(0, Math.min(1, (flex - HARD_RIGID) / FREENESS_SPAN))
+}
+
 interface BellShape {
   /** Sharing weights: each sub-run's bell normalised to sum to its bin
    *  count, so a sub-run's share of the delta is ∝ its length. 0 on rigid. */
   share: Float64Array
-  /** The raw bell in [0, 1] per bin (uniform spans flattened to their mean). */
+  /** The raw bell in [0, 1] per bin, already scaled by `freenessOf` (uniform
+   *  spans flattened to their mean — see `freenessOf`'s doc comment on why
+   *  that mean already equals "constant bell × the span's own freeness": a
+   *  `uniformSpans`-flattened span has one constant flex value, so every bin
+   *  in it already carries the same freeness before this averaging runs). */
   bell: Float64Array
   /** How much of a bin's condense shrink is the PLATEAU'S OWN thinning: 1 −
    *  bell on the half of a sub-run whose end is a rigid plateau, 0 elsewhere.
@@ -1157,7 +1286,7 @@ function bellWeights(flex: Float64Array, uniform: Uint8Array | undefined, rigidB
       const kL = r === 0 ? endL : END_SPLIT
       const kR = r + 2 === bounds.length ? endR : END_SPLIT
       const L = b - a
-      for (let q = a; q < b; q++) bell[q] = bellAt((q - a + 0.5) / L, kL !== END_NONE, kR !== END_NONE, grow)
+      for (let q = a; q < b; q++) bell[q] = bellAt((q - a + 0.5) / L, kL !== END_NONE, kR !== END_NONE, grow) * freenessOf(flex[q]!)
       if (uniform) {
         let u = a
         while (u < b) {
@@ -1539,7 +1668,7 @@ function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number
       // past its own slice.
       const rigidBeyond: [boolean, boolean] = [lo > 0 && flex[lo - 1]! < HARD_RIGID, i < n && flex[i]! < HARD_RIGID]
       const bandWidths = binWidths(bandFlex, w, S, bandInk, stemScale, bandTurn, turnScale, mode, bandUniform, rigidBeyond)
-      enforceZoneBandTarget(bandWidths, bandFlex, bandInk, w, S)
+      enforceZoneBandTarget(bandWidths, bandFlex, bandInk, w, S, mode)
       out.set(bandWidths, lo)
       lo = i
     }
@@ -1572,7 +1701,7 @@ function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number
  * `bandedBinWidths`: an all-rigid band keeps its natural, un-stretched
  * size rather than being forced to grow.
  */
-function enforceZoneBandTarget(bandWidths: Float64Array, flex: Float64Array, ink: Float64Array | undefined, w: number, S: number): void {
+function enforceZoneBandTarget(bandWidths: Float64Array, flex: Float64Array, ink: Float64Array | undefined, w: number, S: number, mode: DistributionMode = 'flex'): void {
   const n = bandWidths.length
   const target = S * n * w
   let total = 0
@@ -1583,10 +1712,17 @@ function enforceZoneBandTarget(bandWidths: Float64Array, flex: Float64Array, ink
   for (let q = 0; q < n; q++) if (flex[q]! >= HARD_RIGID) nonRigid.push(q)
   if (!nonRigid.length) return   // all-rigid band: keep its natural size
   if (diff > 0) {
+    // Fix 2 (continued): the leftover growth this hard constraint forces is
+    // also weighted by `freenessOf` in bell mode — otherwise a SOFT-PINNED
+    // bin (a short terminal promoted to the min channel by Fix 1, say) gets
+    // its ordinary bell share correctly suppressed only to have this
+    // clean-up pass hand it right back, proportional to plain width, once
+    // the band's own rigid ink leaves too little headroom elsewhere.
+    const weightOf = (q: number) => mode === 'bell' ? bandWidths[q]! * freenessOf(flex[q]!) : bandWidths[q]!
     let sumW = 0
-    for (const q of nonRigid) sumW += bandWidths[q]!
+    for (const q of nonRigid) sumW += weightOf(q)
     if (sumW > 1e-9) {
-      for (const q of nonRigid) bandWidths[q]! += diff * (bandWidths[q]! / sumW)
+      for (const q of nonRigid) bandWidths[q]! += diff * (weightOf(q) / sumW)
     } else {
       for (const q of nonRigid) bandWidths[q]! += diff / nonRigid.length
     }
@@ -1908,3 +2044,9 @@ export function weightCompensation(
   const nudged = base + sign * growth * range * 0.06 * amount
   return { ...axes, wght: Math.min(wght.max, Math.max(wght.min, nudged)) }
 }
+
+// TEMP DEBUG — remove before commit
+export const __debugResolveStraightMin = resolveStraightMin
+export const __debugFlatten = flattenToSegments
+export const __debugMarkTerminal = markTerminalCuts
+export const __debugBuildGrid = buildGrid
