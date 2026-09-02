@@ -170,6 +170,7 @@ const sheenStyle = computed(() => ({
     <!-- Toolbar: appears on hover via CSS. Color picker + delete. -->
     <div class="sticky-annotation__toolbar" @pointerdown.stop>
       <button
+        v-if="STICKY_COLORS.length > 1"
         type="button"
         class="sticky-annotation__btn"
         title="Color"

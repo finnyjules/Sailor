@@ -114,16 +114,13 @@ export type Annotation =
   | PinResultAnnotation
   | ArrowAnnotation
 
-// Sticky palette — FigJam-flavored: warm, saturated, with enough variation
-// that two adjacent stickies don't blend into one shape.
-export const STICKY_COLORS: string[] = [
-  '#fde68a', // yellow
-  '#fbcfe8', // pink
-  '#bfdbfe', // blue
-  '#bbf7d0', // green
-  '#ddd6fe', // lavender
-  '#fed7aa', // peach
-]
+// Sticky paper: one soft white, gallery-placard style on the dark canvas.
+// The FigJam-flavored colour palette (yellow/pink/blue/green/lavender/peach)
+// was retired 2026-09-01 by owner call — colours read loud and messy for a
+// creative tool. STICKY_COLORS stays as the (single-entry) palette so the
+// picker code path survives; the picker itself hides while there's only one.
+export const STICKY_PAPER = '#f8f8f6'
+export const STICKY_COLORS: string[] = [STICKY_PAPER]
 
 type VueFlowNode = Node<Record<string, any>>
 
@@ -167,7 +164,7 @@ export function useCanvasAnnotations(_nodesRef: Ref<VueFlowNode[]>) {
       height: 200,
       text: opts.text ?? '',
       color: opts.color ?? STICKY_COLORS[stickyColorCursor++ % STICKY_COLORS.length]!,
-      rotation: (Math.random() * 4 - 2), // ±2° for personality
+      rotation: 0, // was ±2° "hand-placed" tilt — retired with the palette; square reads calmer
       attachedToGroup: opts.attachedToGroup ?? null,
     }
     annotations.value.push(a)
@@ -184,7 +181,7 @@ export function useCanvasAnnotations(_nodesRef: Ref<VueFlowNode[]>) {
       height: 220,
       title: opts.title ?? 'To try',
       items: [],
-      color: '#fde68a',
+      color: STICKY_PAPER,
       attachedToGroup: opts.attachedToGroup ?? null,
     }
     annotations.value.push(a)

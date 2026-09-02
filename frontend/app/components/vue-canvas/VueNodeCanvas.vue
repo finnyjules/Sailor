@@ -21,7 +21,7 @@ import { registerWireDrag } from '~/composables/useWireDrag'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { useCanvasHistory } from '~/composables/useCanvasHistory'
 import { useCanvasGroups, GROUP_COLORS, type CanvasGroup } from '~/composables/useCanvasGroups'
-import { useCanvasAnnotations, STICKY_COLORS, type Annotation, type ArrowEndpoint } from '~/composables/useCanvasAnnotations'
+import { useCanvasAnnotations, STICKY_COLORS, STICKY_PAPER, type Annotation, type ArrowEndpoint } from '~/composables/useCanvasAnnotations'
 import { applyArtifactLocks, applyVariantFanOut, backfillStandaloneArtifactImages, buildFilteredWorkflow, collectKeepSet, realignWidgetValues, setNamedWidget } from '~/composables/useFilteredPrompt'
 import { type LocalLayer, ensureLayerFonts, ensureLayerImages, bakeOverlay, createImageLayer, parseIdeogramLayers, parseSeedreamLayers, drawWiredImageLayer, drawLayerSilhouette } from '~/composables/useCompositorLayers'
 import { framePresentKeys, legacyWiredFlagsActive } from '~/lib/compositor/frameStack'
@@ -7727,9 +7727,8 @@ function materializeImageShowcase(): boolean {
   ].filter(w => !!objectInfo.value[w.nodeType])
   if (!ways.length) return false
 
-  // One colour, no tilt — soft white paper, gallery-label style on the dark
-  // canvas (owner: sticky yellow read as ugly here).
-  const PAPER = '#f8f8f6'
+  // One colour, no tilt — the shared soft-white sticky paper.
+  const PAPER = STICKY_PAPER
   const COL_PITCH = 680
   const ROW_PITCH = 560
   const LABEL_H = 84
