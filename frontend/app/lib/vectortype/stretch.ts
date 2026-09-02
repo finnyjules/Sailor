@@ -478,40 +478,31 @@ function isMirrorSymmetric(pts: Float64Array, axis: 'x' | 'y', bbox: VtBBox): bo
   return matched / count >= SYMMETRY_MIN_FRACTION
 }
 
-export function analyzeFlex(
-  commands: readonly PathCommand[],
-  bbox: VtBBox,
-  opts: FlexOptions = {},
-): GlyphFlex {
-  const bins = Math.max(4, Math.round(opts.bins ?? DEFAULT_BINS))
-  const k = Math.max(0, opts.k ?? DEFAULT_K)
-  const smallFeature = opts.smallFeature ?? 0
-  const shapeRules = opts.shapeRules ?? true
-  // Fix: k is INERT under the shape rules. With the hard/soft split, a
-  // straight stroke is already pinned by min regardless of exponent — k's
-  // only remaining job is to shape how a CURVE flows between rigid
-  // plateaus. But an all-curve glyph (an 'S', an 'a') has almost no straight
-  // ink to anchor it, so raising k pushes nearly every one of its rows below
-  // the rigid threshold, leaving the x-height band with no non-rigid bin
-  // left to reach its zone target (see `bandedBinWidths`). k keeps its old
-  // meaning only for the pre-shape-rules model (`shapeRules: false`, the
-  // lab's A/B control); under shape rules the exponent is fixed at 1 and
-  // tangent alignment alone (via the bell) decides how a curve stretches.
-  const kEff = shapeRules ? 1 : k
-  const w = bbox.maxX - bbox.minX
-  const h = bbox.maxY - bbox.minY
-  const straightMin = opts.straightMin ?? STRAIGHT_MIN_EM * Math.max(w, h)
-  const flexX = new Float64Array(bins).fill(1)
-  const flexY = new Float64Array(bins).fill(1)
-  const out: GlyphFlex = {
-    x: { start: bbox.minX, binSize: w > 0 ? w / bins : 1, flex: flexX },
-    y: { start: bbox.minY, binSize: h > 0 ? h / bins : 1, flex: flexY },
-  }
-  if (w <= 0 || h <= 0 || !commands.length) return out
+/** The per-cell analysis grid, as `analyzeFlex` builds it before its
+ *  per-column / per-row aggregation. Internal shape — `analyzeGrid` is the
+ *  public projection. */
+interface AnalysisGridInternal {
+  cw: number
+  ch: number
+  dist: Float64Array
+  ax: Float64Array
+  ay: Float64Array
+  kind: Uint8Array
+  ink: Uint8Array
+  termFlag: Uint8Array
+  termReach: Float64Array
+  termDiag: Uint8Array
+  termRigid: Uint8Array
+  small: Uint8Array
+}
 
-  const segs = flattenToSegments(commands, straightMin)
-  if (!segs.length) return out
-  markTerminalCuts(segs)
+/** Build the GRID×GRID analysis grid over `bbox` from flattened, terminal-
+ *  marked segments: nearest-boundary tangent alignment per cell (chamfer
+ *  propagated), the ink mask, the rule-11 terminal patch and the small-
+ *  feature pass. Extracted verbatim from `analyzeFlex` so the 2D-field
+ *  spike (`stretch2d.ts`) can read the raw cells via `analyzeGrid`; the
+ *  aggregation that turns this into flex profiles stays in `analyzeFlex`. */
+function buildGrid(segs: Seg[], bbox: VtBBox, w: number, h: number, smallFeature: number, shapeRules: boolean): AnalysisGridInternal {
   const cw = w / GRID
   const ch = h / GRID
   const N = GRID * GRID
@@ -531,6 +522,11 @@ export function analyzeFlex(
   const termFlag = new Uint8Array(N)
   const termReach = new Float64Array(N)
   const termDiag = new Uint8Array(N)
+  // Spike bookkeeping (`analyzeGrid`): which ink cells rule 11 made rigid
+  // as a terminal patch, and which the small-feature pass made rigid. Written
+  // alongside the existing arrays; nothing below reads them.
+  const termRigid = new Uint8Array(N)
+  const small = new Uint8Array(N)
   const idx = (c: number, r: number) => r * GRID + c
 
   // Stamp boundary cells with exact segment tangents. Where two segments of
@@ -645,7 +641,7 @@ export function analyzeFlex(
     for (let j = 0; j < N; j++) {
       if (!ink[j]) continue
       if (termFlag[j] && termDiag[j] && dist[j]! <= termReach[j]! + 1e-9) {
-        ax[j] = 0; ay[j] = 0; kind[j] = KIND_STRAIGHT
+        ax[j] = 0; ay[j] = 0; kind[j] = KIND_STRAIGHT; termRigid[j] = 1
       }
     }
   }
@@ -677,10 +673,95 @@ export function analyzeFlex(
       // the grid is anisotropic over non-square bboxes. A rigid dot counts
       // as HARD ink: it pins its slices like a stem would.
       if (Math.max((c1 - c0 + 1) * cw, (r1 - r0 + 1) * ch) < smallFeature) {
-        for (const cell of cells) { ax[cell] = 0; ay[cell] = 0; kind[cell] = KIND_STRAIGHT }
+        for (const cell of cells) { ax[cell] = 0; ay[cell] = 0; kind[cell] = KIND_STRAIGHT; small[cell] = 1 }
       }
     }
   }
+
+  return { cw, ch, dist, ax, ay, kind, ink, termFlag, termReach, termDiag, termRigid, small }
+}
+
+/** Raw per-cell analysis data for one glyph — the 2D-field spike's input.
+ *  `size`×`size` cells over `bbox` (column-major within a row: index
+ *  `r * size + c`, row 0 at `bbox.minY`), cell size `cw`×`ch` in font units.
+ *  `ax`/`ay` = |tangent·x̂| / |tangent·ŷ| of the cell's nearest boundary;
+ *  `ink` = inside the outline (even-odd); `straight` = the nearest boundary
+ *  is a straight stroke edge (or the cell was made hard ink by the terminal
+ *  patch / small-feature pass); `terminal` = an ink cell rule 11 made rigid
+ *  as a diagonal terminal patch (axis-aligned cuts are NOT flagged — they
+ *  have no angle to protect, exactly as in `analyzeFlex`); `small` = an ink
+ *  cell of a small-feature component. Same options as `analyzeFlex`
+ *  (`smallFeature`, `straightMin`, `shapeRules`); `bins`/`k` are ignored. */
+export interface AnalysisGrid {
+  size: number
+  cw: number
+  ch: number
+  ink: Uint8Array
+  ax: Float64Array
+  ay: Float64Array
+  straight: Uint8Array
+  terminal: Uint8Array
+  small: Uint8Array
+}
+
+export function analyzeGrid(commands: readonly PathCommand[], bbox: VtBBox, opts: FlexOptions = {}): AnalysisGrid {
+  const N = GRID * GRID
+  const w = bbox.maxX - bbox.minX
+  const h = bbox.maxY - bbox.minY
+  const empty = (): AnalysisGrid => ({
+    size: GRID, cw: w > 0 ? w / GRID : 1, ch: h > 0 ? h / GRID : 1,
+    ink: new Uint8Array(N), ax: new Float64Array(N).fill(1), ay: new Float64Array(N).fill(1),
+    straight: new Uint8Array(N), terminal: new Uint8Array(N), small: new Uint8Array(N),
+  })
+  if (w <= 0 || h <= 0 || !commands.length) return empty()
+  const straightMin = opts.straightMin ?? STRAIGHT_MIN_EM * Math.max(w, h)
+  const segs = flattenToSegments(commands, straightMin)
+  if (!segs.length) return empty()
+  markTerminalCuts(segs)
+  const g = buildGrid(segs, bbox, w, h, opts.smallFeature ?? 0, opts.shapeRules ?? true)
+  const straight = new Uint8Array(N)
+  for (let j = 0; j < N; j++) if (g.kind[j] === KIND_STRAIGHT) straight[j] = 1
+  return { size: GRID, cw: g.cw, ch: g.ch, ink: g.ink, ax: g.ax, ay: g.ay, straight, terminal: g.termRigid, small: g.small }
+}
+
+export function analyzeFlex(
+  commands: readonly PathCommand[],
+  bbox: VtBBox,
+  opts: FlexOptions = {},
+): GlyphFlex {
+  const bins = Math.max(4, Math.round(opts.bins ?? DEFAULT_BINS))
+  const k = Math.max(0, opts.k ?? DEFAULT_K)
+  const smallFeature = opts.smallFeature ?? 0
+  const shapeRules = opts.shapeRules ?? true
+  // Fix: k is INERT under the shape rules. With the hard/soft split, a
+  // straight stroke is already pinned by min regardless of exponent — k's
+  // only remaining job is to shape how a CURVE flows between rigid
+  // plateaus. But an all-curve glyph (an 'S', an 'a') has almost no straight
+  // ink to anchor it, so raising k pushes nearly every one of its rows below
+  // the rigid threshold, leaving the x-height band with no non-rigid bin
+  // left to reach its zone target (see `bandedBinWidths`). k keeps its old
+  // meaning only for the pre-shape-rules model (`shapeRules: false`, the
+  // lab's A/B control); under shape rules the exponent is fixed at 1 and
+  // tangent alignment alone (via the bell) decides how a curve stretches.
+  const kEff = shapeRules ? 1 : k
+  const w = bbox.maxX - bbox.minX
+  const h = bbox.maxY - bbox.minY
+  const straightMin = opts.straightMin ?? STRAIGHT_MIN_EM * Math.max(w, h)
+  const flexX = new Float64Array(bins).fill(1)
+  const flexY = new Float64Array(bins).fill(1)
+  const out: GlyphFlex = {
+    x: { start: bbox.minX, binSize: w > 0 ? w / bins : 1, flex: flexX },
+    y: { start: bbox.minY, binSize: h > 0 ? h / bins : 1, flex: flexY },
+  }
+  if (w <= 0 || h <= 0 || !commands.length) return out
+
+  const segs = flattenToSegments(commands, straightMin)
+  if (!segs.length) return out
+  markTerminalCuts(segs)
+  const grid = buildGrid(segs, bbox, w, h, smallFeature, shapeRules)
+  const { ax, ay, kind, ink } = grid
+  const N = GRID * GRID
+  const idx = (c: number, r: number) => r * GRID + c
 
   // Per-column / per-row aggregation over INK cells only. Three kinds of ink
   // pin a slice differently:
