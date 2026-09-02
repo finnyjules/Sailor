@@ -133,6 +133,13 @@ export interface SceneMaterial {
   gradientOffset?: number   // -1..1, slides the ramp along the direction
   gradientSpread?: number   // 0.1..3, compresses (<1) / stretches (>1)
   image?: string
+  /** A real-world PBR surface from the ambientCG library (see lib/scene3d/textures.ts).
+   *  RESOLVED form is `ambientcg:<AssetId>`; a bare phrase (`wood`) is the agent's
+   *  unresolved ask and renders untextured until studioTune resolves it. Only read by
+   *  the standard / glass / opalescent types; other types keep it but ignore it. */
+  texture?: string
+  /** How many times the texture set repeats across the object's UVs. Absent = 1. */
+  textureTiling?: number
   /** `shaderFill` only — a catalog effect run over `shader.input`, mapped through the mesh's
    *  own UVs (object anchor). Frame anchor is out of scope for Scene3D: `shader.anchor` is
    *  never read by the material factory, so a `frame`-anchored spec (e.g. hand-edited JSON, or
@@ -515,9 +522,12 @@ export const MATERIAL_DEFAULTS = {
   reliefScale: 0.25,
   reliefContrast: 1,
   reliefTiling: 1,
+  textureTiling: 1,
   shader: DEFAULT_SHADER_SPEC,
   unlit: false,
 }
+
+export const TEXTURE_TILING_RANGE = { min: 0.25, max: 12, step: 0.25 } as const
 
 // ── Gradient derivations (shared by the material factory and the Selection UI,
 // so the editor and the render can never disagree) ───────────────────────────
@@ -1003,6 +1013,8 @@ export function parseDoc(json: string): SceneDoc {
     if (typeof m?.gradientOffset === 'number') out.gradientOffset = num(m.gradientOffset, MATERIAL_DEFAULTS.gradientOffset)
     if (typeof m?.gradientSpread === 'number') out.gradientSpread = num(m.gradientSpread, MATERIAL_DEFAULTS.gradientSpread)
     if (typeof m?.image === 'string') out.image = m.image
+    if (typeof m?.texture === 'string' && m.texture.trim()) out.texture = m.texture.trim()
+    if (typeof m?.textureTiling === 'number') out.textureTiling = num(m.textureTiling, MATERIAL_DEFAULTS.textureTiling)
     if (typeof m?.clearcoat === 'number') out.clearcoat = num(m.clearcoat, MATERIAL_DEFAULTS.clearcoat)
     if (typeof m?.clearcoatRoughness === 'number') out.clearcoatRoughness = num(m.clearcoatRoughness, MATERIAL_DEFAULTS.clearcoatRoughness)
     if (typeof m?.sheen === 'number') out.sheen = num(m.sheen, MATERIAL_DEFAULTS.sheen)

@@ -580,3 +580,37 @@ describe('scene3d lights model', () => {
     })
   })
 })
+
+describe('texture set fields', () => {
+  it('round-trips texture and textureTiling on a material', () => {
+    const doc = defaultDoc()
+    const obj = createPrimitive('box')
+    obj.material.texture = 'ambientcg:Wood095'
+    obj.material.textureTiling = 2.5
+    doc.objects.push(obj)
+    const back = parseDoc(serializeDoc(doc))
+    const m = (back.objects[0] as any).material
+    expect(m.texture).toBe('ambientcg:Wood095')
+    expect(m.textureTiling).toBe(2.5)
+  })
+  it('keeps an unresolved phrase and drops junk', () => {
+    const doc = defaultDoc()
+    const obj = createPrimitive('box')
+    ;(obj.material as any).texture = 'wood'
+    ;(obj.material as any).textureTiling = 'nope'
+    doc.objects.push(obj)
+    const m = (parseDoc(serializeDoc(doc)).objects[0] as any).material
+    expect(m.texture).toBe('wood')
+    expect(m.textureTiling).toBeUndefined()
+  })
+  it('drops an empty texture string', () => {
+    const doc = defaultDoc()
+    const obj = createPrimitive('box')
+    ;(obj.material as any).texture = ''
+    doc.objects.push(obj)
+    expect((parseDoc(serializeDoc(doc)).objects[0] as any).material.texture).toBeUndefined()
+  })
+  it('has a default tiling of 1', () => {
+    expect(MATERIAL_DEFAULTS.textureTiling).toBe(1)
+  })
+})
