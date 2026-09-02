@@ -392,6 +392,18 @@ destination; the spike's advance-box lattice and no-rotation shear carry over.**
   rigid angle-keeping patch stays diagonal-only. Unbounded's S: 16 → 6.
   Lesson for Phase B: heavy faces need stroke-relative thresholds, not em- or
   glyph-relative ones.
+- **Straightness is stroke-relative; rigidity is ink-aware** (lab-found on
+  Inter's a 2026-09-02: its arch terminal was hard-pinned — by a glyph-relative
+  straightness threshold and an unconditional terminal-angle patch — leaving a
+  three-row sliver under the arch that got its own bell bump; and its bowl-top
+  stroke read 0.12 through the soft channel and was treated as free, thickening
+  2.2×). A line counts as a stroke edge only when it is ≥ 1.5 × the glyph's
+  stroke thickness (measured from the distance field, two-pass); the terminal
+  angle patch pins softly (`SOFT_TERMINAL_PIN`); and a bin is rigid for the
+  bell when flex < 0.05 OR (flex < 0.15 and ink ≥ 0.7) — a long low-flex band
+  that is mostly ink is a horizontal stroke, a short one with little ink is a
+  shoulder. Result: bowl-top 2.2× → 1.10×, a 10 → 8 inflections (drawn 6),
+  Unbounded S at its drawn 4, Fraunces a at its drawn 7. Shoulders still open.
 - **Spaces/blanks**: advance stretches; no outline to remap.
 - **Ligatures**: multi-codepoint glyphs flex-analyze like any other outline.
 
