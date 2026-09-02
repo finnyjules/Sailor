@@ -903,6 +903,48 @@ describe('rounds stay round; terminals keep their angle', () => {
   })
 })
 
+describe('a terminal cut is never a stroke edge', () => {
+  it('a heavy diagonal bar with flat cut ends does not hard-pin the rows near its cuts', () => {
+    // 200-unit-thick diagonal stroke, horizontal cuts at both ends (a heavy S spine).
+    // A steep lean (200,700 slope) keeps the cut genuinely near-perpendicular
+    // to the stroke's own sides — a shallow lean would make the cut-to-side
+    // angle itself closer to parallel than perpendicular, which is a
+    // different (and rarer) shape entirely.
+    const bar: PathCommand[] = [
+      { command: 'moveTo', args: [0, 0] },
+      { command: 'lineTo', args: [200, 0] },        // bottom terminal cut, 200 long (> 12% of 700)
+      { command: 'lineTo', args: [300, 700] },
+      { command: 'lineTo', args: [100, 700] },      // top terminal cut
+      { command: 'closePath', args: [] },
+    ]
+    const bbox = { minX: 0, minY: 0, maxX: 700, maxY: 700 }
+    const { y } = analyzeFlex(bar, bbox, { bins: 28 })
+    // Old model (rule 11 off): the cut's own length classifies it hard, and
+    // the chamfer spreads that rigidity into five whole bins (~a stroke's
+    // half-thickness) before the diagonal side's own alignment takes over —
+    // measured exactly 0 at rows 0-4 and 23-27.
+    const { y: old } = analyzeFlex(bar, bbox, { bins: 28, shapeRules: false })
+    for (const i of [1, 2, 3]) expect(old.flex[i]).toBeLessThan(0.01)
+    for (const i of [24, 25, 26]) expect(old.flex[i]).toBeLessThan(0.01)
+    // New model: the cut is a terminal (rule 11), stamps into the soft
+    // channel, and rows 1–3 sit just above the bottom cut — inside the
+    // stroke, nearest the cut — are governed by the diagonal ink instead: a
+    // smooth ramp climbing away from the cut, not a rigid plateau.
+    expect(y.flex[1]).toBeGreaterThan(0.15)
+    expect(y.flex[2]).toBeGreaterThan(0.3)
+    expect(y.flex[3]).toBeGreaterThan(0.5)
+    expect(y.flex[24]).toBeGreaterThan(0.5)
+    expect(y.flex[25]).toBeGreaterThan(0.3)
+    expect(y.flex[26]).toBeGreaterThan(0.15)
+  })
+
+  it('a stem cap still pins its own edge row', () => {
+    const { y } = analyzeFlex(rect(0, 0, 100, 700), { minX: 0, minY: 0, maxX: 100, maxY: 700 }, { bins: 16 })
+    expect(y.flex[0]).toBeLessThan(0.05)
+    expect(y.flex[15]).toBeLessThan(0.05)
+  })
+})
+
 /** Flatten commands into per-subpath polylines (curves at 24 steps). */
 function subpathsOf(commands: readonly PathCommand[]): Array<Array<[number, number]>> {
   const out: Array<Array<[number, number]>> = []

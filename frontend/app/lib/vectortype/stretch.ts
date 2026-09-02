@@ -167,11 +167,20 @@ interface Seg {
    *  terminal-cut detection looks at a segment's neighbours WITHIN its own
    *  subpath, wrapping around at the contour's close. */
   subpath: number
-  /** Set by `markTerminalCuts`: a short lineTo/closePath segment whose two
-   *  flattened neighbours are near-parallel to each other and near-
-   *  perpendicular to it — a drawn terminal cut (an a's top-stroke end, an
-   *  S's cut terminals), not a notch facet or a curve sample. */
+  /** Set by `markTerminalCuts`: a lineTo/closePath segment — SHORT or
+   *  STRAIGHT, any length — whose two flattened neighbours are near-parallel
+   *  to each other and near-perpendicular to it — a drawn terminal cut (an
+   *  a's top-stroke end, an S's cut terminals, a heavy face's flat spine
+   *  cut), not a notch facet or a curve sample. A terminal cut is NEVER a
+   *  stroke edge regardless of its own length: it stamps into the SOFT
+   *  channel like a short line (see the stamping loop in `analyzeFlex`). */
   terminal: boolean
+  /** Set alongside `terminal`: the cut's own tangent is MEANINGFULLY
+   *  diagonal (neither axis component near 0 — `TERMINAL_DIAGONAL_MIN`).
+   *  Gates rule 11's rigid-patch (protecting a terminal's drawn ANGLE) only —
+   *  an axis-aligned cut has no angle to protect and must not create a rigid
+   *  patch, but it is still `terminal` for the soft-channel stamping above. */
+  terminalDiagonal: boolean
 }
 
 /** Flatten commands to line segments for tangent analysis. closePath emits the
@@ -186,7 +195,7 @@ function flattenToSegments(commands: readonly PathCommand[], straightMin: number
   const emit = (x1: number, y1: number, fromLine: boolean) => {
     if (x1 !== px || y1 !== py) {
       const kind = !fromLine ? KIND_CURVE : Math.hypot(x1 - px, y1 - py) >= straightMin ? KIND_STRAIGHT : KIND_SHORT
-      segs.push({ x0: px, y0: py, x1, y1, kind, subpath, terminal: false })
+      segs.push({ x0: px, y0: py, x1, y1, kind, subpath, terminal: false, terminalDiagonal: false })
     }
     px = x1; py = y1
   }
@@ -230,22 +239,59 @@ function flattenToSegments(commands: readonly PathCommand[], straightMin: number
   return segs
 }
 
-/** Terminal-cut detection (rule 11): a short lineTo/closePath segment
- *  (`KIND_SHORT`) is a drawn TERMINAL CUT — not a notch facet (an X's
- *  crossing, whose neighbours diverge) and not a curve sample (excluded by
- *  kind) — when its two flattened neighbours, within its own subpath and
- *  wrapping around, are near-parallel to each other and the cut itself is
- *  near-perpendicular to them.
+/** Terminal-cut detection (rule 11): a lineTo/closePath segment — of EITHER
+ *  `KIND_SHORT` or `KIND_STRAIGHT`, whatever its length — is a drawn
+ *  TERMINAL CUT — not a notch facet (an X's crossing, whose neighbours
+ *  diverge) and not a curve sample (excluded by kind) — when its two
+ *  flattened neighbours, within its own subpath and wrapping around, are
+ *  near-parallel to each other and the cut itself is near-perpendicular to
+ *  them. A terminal cut is NEVER a stroke edge: length alone cannot tell a
+ *  heavy face's flat spine cut (as long as the stroke is thick) from a
+ *  hairline's short one, so classification drops the old `< straightMin`
+ *  precondition and runs this same geometric test on every line segment.
  *
  *  A converging wedge tip (two long straight arms meeting at a shallow
  *  point, flattened flat) satisfies that same parallel/perpendicular test —
  *  the geometry of a hairpin turn can't be told apart from a genuine
- *  terminal by tangent alignment alone. What DOES tell them apart is scale:
- *  a real terminal is a stroke's flat-cut END, so its neighbours are the
- *  fine curve samples (or short cap-adjacent lines) immediately either side
- *  of it — shorter than the cut itself. A wedge tip's neighbours are the
- *  FULL straight arms that converge to it — far LONGER than the cut. So a
- *  cut counts only when it is at least as long as both of its neighbours. */
+ *  terminal by tangent alignment alone. What DOES tell them apart is scale,
+ *  compared two different ways depending on the case:
+ *    • a SHORT candidate (`KIND_SHORT`), OR any candidate whose neighbour is
+ *      a flattened CURVE sample, keeps the original comparison — it counts
+ *      only when at least as long as BOTH neighbours. This covers a short
+ *      candidate with long straight arms either side (the classic wedge
+ *      tip, correctly rejected: a Y-like arm's short flat end between its
+ *      two long, near-parallel straight edges reads geometrically just like
+ *      a genuine terminal, so it is protected by SCALE alone, the same way
+ *      it always was — nothing about the candidate's OWN length changed).
+ *      It also covers the common real-glyph case where the candidate is
+ *      long but its neighbours are tiny curve samples as the outline curves
+ *      away (Unbounded's 'S' has a 134-unit flat cut at its waist between
+ *      two ~10-unit curve samples, easily longer than both — this is what
+ *      dropping the `< straightMin` precondition exists to catch).
+ *    • a STRAIGHT candidate (`KIND_STRAIGHT`) whose BOTH neighbours are
+ *      ALSO straight lines (no curve, no short segment either) is checked
+ *      the other way — it counts only when SHORTER than both neighbours.
+ *      Here the neighbours are the stroke's own two long parallel sides
+ *      continuing the run on either side of the cut (a heavy, hard-
+ *      cornered face's flat spine cut, 200 units thick, between two
+ *      860-unit diagonal sides); the candidate is the CROSS-cut, not the
+ *      run. Without this flip, a plain stem's SIDE — long, with two short
+ *      straight caps as neighbours — satisfies parallel/perpendicular
+ *      against its own caps exactly as convincingly as a genuine cut does,
+ *      and would wrongly stamp the stem's rigid edge into the soft channel;
+ *      the flip rejects it (a side is never shorter than its own caps)
+ *      while accepting the heavy cut (always the shortest of the three in a
+ *      real stroke, since a stroke's run is invariably longer than it is
+ *      thick). This branch only applies among segments that are ALL
+ *      straight lines with no curve in sight — a hard-cornered synthetic
+ *      shape or a genuinely blocky glyph — which is exactly the case the
+ *      first branch's scale protection does not otherwise cover.
+ *
+ *  `terminalDiagonal` is set alongside `terminal` (not as a precondition of
+ *  it): a perfectly axis-aligned cut (dx = 0 or dy = 0 exactly) still gets
+ *  the soft-channel stamping below, but rule 11's rigid-patch — which
+ *  protects a terminal's drawn ANGLE — has no angle to protect on an
+ *  axis-aligned cut and stays gated on this flag alone. */
 function markTerminalCuts(segs: Seg[]): void {
   const bySubpath = new Map<number, number[]>()
   segs.forEach((s, i) => {
@@ -264,17 +310,22 @@ function markTerminalCuts(segs: Seg[]): void {
     for (let k = 0; k < m; k++) {
       const i = idxs[k]!
       const s = segs[i]!
-      if (s.kind !== KIND_SHORT) continue
+      if (s.kind === KIND_CURVE) continue
       const prev = segs[idxs[(k - 1 + m) % m]!]!
       const next = segs[idxs[(k + 1) % m]!]!
       const dPrev = dir(prev), dNext = dir(next), dCut = dir(s)
       if (!dPrev || !dNext || !dCut) continue
       const cutLen = len(s)
-      if (cutLen < len(prev) || cutLen < len(next)) continue
-      if (Math.abs(dCut[0]) < TERMINAL_DIAGONAL_MIN || Math.abs(dCut[1]) < TERMINAL_DIAGONAL_MIN) continue
+      const prevLen = len(prev), nextLen = len(next)
+      if (s.kind === KIND_SHORT || prev.kind === KIND_CURVE || next.kind === KIND_CURVE) {
+        if (cutLen < prevLen || cutLen < nextLen) continue
+      } else if (cutLen >= prevLen || cutLen >= nextLen) continue
       const parallel = Math.abs(dPrev[0] * dNext[0] + dPrev[1] * dNext[1])
       const perp = Math.abs(dCut[0] * dPrev[0] + dCut[1] * dPrev[1])
-      if (parallel > TERMINAL_PARALLEL && perp < TERMINAL_PERP) s.terminal = true
+      if (parallel > TERMINAL_PARALLEL && perp < TERMINAL_PERP) {
+        s.terminal = true
+        s.terminalDiagonal = Math.abs(dCut[0]) >= TERMINAL_DIAGONAL_MIN && Math.abs(dCut[1]) >= TERMINAL_DIAGONAL_MIN
+      }
     }
   }
 }
@@ -472,12 +523,14 @@ export function analyzeFlex(
   const ax = new Float64Array(N).fill(1)
   const ay = new Float64Array(N).fill(1)
   const kind = new Uint8Array(N)
-  // Terminal-cut carry: whether the nearest boundary is a terminal cut, and
-  // that cut's own length (its "reach") — propagated alongside (dist, ax,
-  // ay, kind) through the chamfer exactly like they are, since the nearest
-  // boundary is one point and both come from it.
+  // Terminal-cut carry: whether the nearest boundary is a terminal cut, that
+  // cut's own length (its "reach"), and whether the cut is meaningfully
+  // diagonal — propagated alongside (dist, ax, ay, kind) through the chamfer
+  // exactly like they are, since the nearest boundary is one point and all
+  // of them come from it.
   const termFlag = new Uint8Array(N)
   const termReach = new Float64Array(N)
+  const termDiag = new Uint8Array(N)
   const idx = (c: number, r: number) => r * GRID + c
 
   // Stamp boundary cells with exact segment tangents. Where two segments of
@@ -485,27 +538,36 @@ export function analyzeFlex(
   // per axis — the min in the flex formula makes conservative-rigid the
   // faithful tie-break. Across kinds a stroke edge (straight, then curved)
   // always wins over a short line: a notch facet sharing a corner cell with
-  // an arm must not turn that stroke cell rigid.
+  // an arm must not turn that stroke cell rigid. A TERMINAL cut stamps as if
+  // it were `KIND_SHORT` regardless of its own length — it is never a stroke
+  // edge (see `markTerminalCuts`) — so the corner tie-break and the soft/
+  // stroke/hard channel split downstream both see it as a cap/facet/cut, not
+  // a stem or crossbar edge.
   for (const s of segs) {
     const dx = s.x1 - s.x0, dy = s.y1 - s.y0
     const len = Math.hypot(dx, dy)
     if (len === 0) continue
     const tx = Math.abs(dx) / len
     const ty = Math.abs(dy) / len
+    // Terminal softening is rule 11 — a shape-integrity rule like the other
+    // three, so gated the same way: off when `shapeRules` is off (the lab's,
+    // and the tests', A/B control), leaving the old single-channel model's
+    // classification untouched.
+    const effKind = shapeRules && s.terminal ? KIND_SHORT : s.kind
     const steps = Math.max(1, Math.ceil(len / (Math.min(cw, ch) * 0.5)))
     for (let i = 0; i <= steps; i++) {
       const t = i / steps
       const c = Math.max(0, Math.min(GRID - 1, Math.floor((s.x0 + dx * t - bbox.minX) / cw)))
       const r = Math.max(0, Math.min(GRID - 1, Math.floor((s.y0 + dy * t - bbox.minY) / ch)))
       const j = idx(c, r)
-      const rank = s.kind === KIND_STRAIGHT ? 2 : s.kind === KIND_CURVE ? 1 : 0
+      const rank = effKind === KIND_STRAIGHT ? 2 : effKind === KIND_CURVE ? 1 : 0
       const have = kind[j] === KIND_STRAIGHT ? 2 : kind[j] === KIND_CURVE ? 1 : 0
       if (dist[j]! > 0) {
-        dist[j] = 0; ax[j] = tx; ay[j] = ty; kind[j] = s.kind
-        termFlag[j] = s.terminal ? 1 : 0; termReach[j] = s.terminal ? len : 0
+        dist[j] = 0; ax[j] = tx; ay[j] = ty; kind[j] = effKind
+        termFlag[j] = s.terminal ? 1 : 0; termReach[j] = s.terminal ? len : 0; termDiag[j] = s.terminalDiagonal ? 1 : 0
       } else if (rank > have) {
-        ax[j] = tx; ay[j] = ty; kind[j] = s.kind
-        termFlag[j] = s.terminal ? 1 : 0; termReach[j] = s.terminal ? len : 0
+        ax[j] = tx; ay[j] = ty; kind[j] = effKind
+        termFlag[j] = s.terminal ? 1 : 0; termReach[j] = s.terminal ? len : 0; termDiag[j] = s.terminalDiagonal ? 1 : 0
       } else if (rank === have) {
         ax[j] = Math.min(ax[j]!, tx); ay[j] = Math.min(ay[j]!, ty)
       }
@@ -525,7 +587,7 @@ export function analyzeFlex(
     const d = dist[n]! + cost
     if (d < dist[j]!) {
       dist[j] = d; ax[j] = ax[n]!; ay[j] = ay[n]!; kind[j] = kind[n]!
-      termFlag[j] = termFlag[n]!; termReach[j] = termReach[n]!
+      termFlag[j] = termFlag[n]!; termReach[j] = termReach[n]!; termDiag[j] = termDiag[n]!
     }
   }
   for (let r = 0; r < GRID; r++) {
@@ -570,15 +632,19 @@ export function analyzeFlex(
   }
 
   // Terminal cuts keep their angle (rule 11): every ink cell whose nearest
-  // boundary is a terminal cut, within that cut's own length, is rigid on
-  // BOTH axes and counts as hard ink (straight) so it enters the hard
-  // channel — before the column aggregation below sees it. A shape-
+  // boundary is a DIAGONAL terminal cut, within that cut's own length, is
+  // rigid on BOTH axes and counts as hard ink (straight) so it enters the
+  // hard channel — before the column aggregation below sees it. Gated on
+  // `termDiag`, not just `termFlag`: an axis-aligned cut (a construction
+  // shelf, or a heavy face's flat spine cut) has no drawn angle to protect,
+  // so it stays in the soft channel the stamping loop above already put it
+  // in — governed by the stroke's other ink, never hard-pinned. A shape-
   // integrity rule like the other three, so gated the same way: off when
   // `shapeRules` is off (the lab's, and the tests', A/B control).
   if (shapeRules) {
     for (let j = 0; j < N; j++) {
       if (!ink[j]) continue
-      if (termFlag[j] && dist[j]! <= termReach[j]! + 1e-9) {
+      if (termFlag[j] && termDiag[j] && dist[j]! <= termReach[j]! + 1e-9) {
         ax[j] = 0; ay[j] = 0; kind[j] = KIND_STRAIGHT
       }
     }
