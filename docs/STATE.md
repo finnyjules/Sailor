@@ -91,6 +91,8 @@ cards). Single-source picks (Edit an image etc.) unchanged, now via shared `push
 dev-server "IPC connection closed" 500s were a broken `v-else-if` committed mid-refactor in
 Scene3DStudioSurface.vue, not infra.
 
+- **Sticky selected state (784d2a6c3, 2026-09-02):** press selects (action-blue ring, one at a time, mirrors arrows); Escape inside a note leaves editing but keeps the selection, second Escape deselects, Delete/Backspace removes, pane click clears.
+
 ### Frame Templates — LANDED 2026-08-31 (your reusable Frames, "Templates are yours; Elements are ours")
 
 User-authored counterpart to Elements: build a Frame, "Save as template", tap parts as
