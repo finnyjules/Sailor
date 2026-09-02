@@ -294,8 +294,8 @@ const rayStyle = computed(() => ({
    one colour per column (the reference's distribution). */
 .sticky-annotation__ray {
   background-image: linear-gradient(115deg,
-    rgba(255, 255, 255, 0) 30%, #7fe9f2 37%, #b79cff 44%, #ff9fd0 52%,
-    #ffe98a 60%, #9ff0b4 67%, rgba(255, 255, 255, 0) 74%);
+    rgba(255, 255, 255, 0) 30%, #b9f2f7 37%, #d3c6ff 44%, #ffc6e3 52%,
+    #fff3b8 60%, #c8f5d3 67%, rgba(255, 255, 255, 0) 74%);
   background-repeat: repeat;
   background-size: 520px 100%;
   -webkit-mask-size: 96px 96px;
