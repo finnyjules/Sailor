@@ -8,6 +8,7 @@ import {
   defaultDoc, createPrimitive, createLight, createGlbObject, MATERIAL_DEFAULTS, DEFAULT_MATERIAL,
 } from '~/lib/scene3d/config'
 import { getByPath } from '~/lib/studio/path'
+import { describeControls, validatePatch } from '~/lib/spacetype/controlDescriptor'
 
 describe('SCENE_CONTROLS integrity', () => {
   it('every control has a non-empty key, label and group', () => {
@@ -83,6 +84,7 @@ describe('SCENE_CONTROLS integrity', () => {
     'object.material.gradientPitch': 'gradientPitch',
     'object.material.gradientOffset': 'gradientOffset',
     'object.material.gradientSpread': 'gradientSpread',
+    'object.material.textureTiling': 'textureTiling',
   }
 
   it('slider defaults match MATERIAL_DEFAULTS where a matching entry exists', () => {
@@ -210,5 +212,20 @@ describe('visibleSceneControls', () => {
     const seenGroups = visible.map((c) => SCENE_SECTIONS.indexOf(c.group as (typeof SCENE_SECTIONS)[number]))
     const sorted = [...seenGroups].sort((a, b) => a - b)
     expect(seenGroups).toEqual(sorted)
+  })
+})
+
+describe('text-kind controls for the agent', () => {
+  const ctl = { key: 'object.material.texture', label: 'Texture', kind: 'text', default: '', group: 'Material', aiEditable: true, hint: 'h' } as any
+  it('is described only when opted in', () => {
+    expect(describeControls([ctl], {})).toHaveLength(1)
+    expect(describeControls([{ ...ctl, aiEditable: undefined }], {})).toHaveLength(0)
+  })
+  it('validates as a trimmed, capped string', () => {
+    const d = describeControls([ctl], {})
+    expect(validatePatch({ 'object.material.texture': '  wood planks ' }, d)).toEqual({ 'object.material.texture': 'wood planks' })
+    expect(validatePatch({ 'object.material.texture': '' }, d)).toEqual({})
+    expect(validatePatch({ 'object.material.texture': 7 }, d)).toEqual({})
+    expect(validatePatch({ 'object.material.texture': 'x'.repeat(200) }, d)['object.material.texture']).toHaveLength(80)
   })
 })

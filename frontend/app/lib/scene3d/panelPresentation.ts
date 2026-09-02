@@ -407,6 +407,7 @@ const SCENE_PANEL_ANCHORS: readonly ScenePanelAnchor[] = [
   // Material card
   { key: 'ui.material.override', label: 'Override materials', visible: (_d, o) => o?.kind === 'glb' },
   { key: 'ui.material.surface', label: 'Surface', visible: (_d, o) => isType(o, 'standard', 'glass') },
+  { key: 'ui.material.textureSet', label: 'Surface texture', visible: (_d, o) => isType(o, 'standard', 'glass', 'opalescent') },
   { key: 'ui.material.matcap', label: 'Matcap', visible: (_d, o) => isType(o, 'matcap') },
   {
     key: 'ui.material.harmony', label: 'Harmony',
@@ -487,8 +488,14 @@ export const SCENE_PANEL_ANCHOR_KEYS: ReadonlySet<string> = new Set(SCENE_PANEL_
 const MATERIAL_HEAD = ['ui.material.override', 'object.material.type']
 
 const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
-  standard: ['ui.material.surface', 'object.material.color', 'object.material.roughness', 'object.material.metalness'],
-  glass: ['ui.material.surface', 'object.material.color', 'object.material.roughness', 'object.material.metalness'],
+  standard: [
+    'ui.material.surface', 'object.material.color', 'object.material.roughness', 'object.material.metalness',
+    'ui.material.textureSet', 'object.material.textureTiling',
+  ],
+  glass: [
+    'ui.material.surface', 'object.material.color', 'object.material.roughness', 'object.material.metalness',
+    'ui.material.textureSet', 'object.material.textureTiling',
+  ],
   phong: ['object.material.color', 'object.material.shininess', 'object.material.specular'],
   toon: ['object.material.color', 'object.material.toonSteps'],
   matcap: ['ui.material.matcap'],
@@ -507,6 +514,7 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
     'object.material.opalStrength', 'object.material.opalFlowSpeed',
     'object.material.roughness', 'object.material.metalness',
     'object.material.clearcoat', 'object.material.clearcoatRoughness', 'object.material.envMapIntensity',
+    'ui.material.textureSet', 'object.material.textureTiling',
   ],
   image: ['ui.material.image', 'object.material.roughness', 'object.material.metalness'],
   shaderFill: [
@@ -889,6 +897,10 @@ export function scenePanelControls(
   const post: ControlSpec[] = []
   for (const c of controls) {
     if (isScenePostGroup(c.group)) { post.push(c); continue }
+    // The bespoke `ui.material.textureSet` anchor draws this control's row (thumbnail +
+    // picker, Task 9) — the permissive Material-group fall-through below would otherwise
+    // ALSO draw the raw `text` schema row, doubling it up.
+    if (c.key === 'object.material.texture') continue
     const card = panelCardOf(c.key, matType, c.group)
     if (!card) continue
     if (!scenePanelVisible(c, doc, obj, ctx)) continue

@@ -6,7 +6,7 @@ import { cleanStops, serializeStops } from '~/lib/shaderfx/params'
 export interface DescribedControl {
   path: string
   label: string
-  kind: 'slider' | 'select' | 'color' | 'font' | 'gradientStops' | 'switch'
+  kind: 'slider' | 'select' | 'color' | 'font' | 'gradientStops' | 'switch' | 'text'
   min?: number
   max?: number
   step?: number
@@ -19,6 +19,8 @@ export interface DescribedControl {
 
 const AI_EDITABLE_KINDS = new Set(['slider', 'select', 'color', 'font', 'gradientStops', 'switch'])
 
+// 'text' is opt-in via aiEditable — a free string is only safe where the consumer
+// resolves it (Scene3D's texture phrase).
 function isEditable(c: ControlSpec): boolean {
   if (typeof c.aiEditable === 'boolean') return c.aiEditable
   return AI_EDITABLE_KINDS.has(c.kind)
@@ -93,6 +95,9 @@ export function validatePatch(
     }
     else if (d.kind === 'font') {
       if (typeof raw === 'string' && raw.trim()) out[key] = raw
+    }
+    else if (d.kind === 'text') {
+      if (typeof raw === 'string' && raw.trim()) out[key] = raw.trim().slice(0, 80)
     }
     else if (d.kind === 'gradientStops') {
       // Structural, all-or-nothing: a ramp with one bad stop is dropped rather

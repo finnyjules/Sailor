@@ -257,3 +257,31 @@ describe('SCENE_GUIDANCE', () => {
     }
   })
 })
+
+describe('texture set vocabulary', () => {
+  it('offers texture + tiling for physical types and withholds them otherwise', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box')
+    doc.objects.push(box)
+    const keys = (d: SceneDoc) => sceneBindableControls(d).map(c => c.key)
+    expect(keys(doc)).toContain(`objects.${box.id}.material.texture`)
+    expect(keys(doc)).toContain(`objects.${box.id}.material.textureTiling`)
+    box.material.type = 'toon'
+    expect(keys(doc)).not.toContain(`objects.${box.id}.material.texture`)
+    box.material.type = 'opalescent'
+    expect(keys(doc)).toContain(`objects.${box.id}.material.texture`)
+  })
+  it('the texture control is a text control the agent may write', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box')
+    doc.objects.push(box)
+    const c = sceneBindableControls(doc).find(x => x.key === `objects.${box.id}.material.texture`) as any
+    expect(c.kind).toBe('text')
+    expect(c.aiEditable).toBe(true)
+    expect(c.hint).toMatch(/wood/)
+  })
+  it('the guide carries the wooden-box example', () => {
+    expect(SCENE_GUIDANCE).toContain('"object.material.texture":"wood"')
+    expect(SCENE_GUIDANCE).toMatch(/SURFACE TEXTURES/)
+  })
+})

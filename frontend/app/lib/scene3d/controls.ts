@@ -2,7 +2,7 @@ import type { ControlSpec } from '~/lib/spacetype/effect'
 import { postControls, POST_SECTIONS } from '~/lib/studio/post/controls'
 import {
   MATERIAL_TYPES, MATERIAL_DEFAULTS, DEFAULT_MATERIAL, LIGHTING_PRESETS, ENVIRONMENT_KINDS, defaultDoc,
-  PRIMITIVE_KINDS, LIGHT_DEFAULTS, DECAL_DEFAULTS, DECAL_BLENDS, lightIntensityMax,
+  PRIMITIVE_KINDS, LIGHT_DEFAULTS, DECAL_DEFAULTS, DECAL_BLENDS, lightIntensityMax, TEXTURE_TILING_RANGE,
   type SceneDoc, type SceneObject, type MaterialType,
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, type ParamSpec } from './primParams'
@@ -476,6 +476,21 @@ export const SCENE_CONTROLS: SceneControl[] = [
     key: 'object.material.relief.invert', label: 'Invert', kind: 'switch', default: false, group: 'Material',
     when: reliefApplies, agent: false,
   } as SceneControl,
+
+  // ambientCG texture set — a photographed PBR surface (see lib/scene3d/textures.ts).
+  // Physical types only: it binds map/roughnessMap/normalMap/aoMap/metalnessMap, which
+  // only the physical pipeline reads. The row itself is bespoke (thumbnail + picker,
+  // `ui.material.textureSet` in panelPresentation); this entry is the AGENT's handle and
+  // the Collections binding — `text` kind, opted in via aiEditable because the value is a
+  // free phrase the apply path resolves server-side (studioTune's resolveTexturePatches).
+  {
+    key: 'object.material.texture', label: 'Texture', kind: 'text', default: '', group: 'Material',
+    aiEditable: true, animatable: false,
+    hint: 'A real-world surface from the ambientCG library. Write a plain material word such as wood, brick, marble, concrete, leather, fabric, metal, tiles, grass, or an exact set id. Needs a standard, glass, or opalescent material type.',
+    when: hasReflectiveCoat,
+  } as SceneControl,
+  slider('object.material.textureTiling', 'Texture tiling', TEXTURE_TILING_RANGE.min, TEXTURE_TILING_RANGE.max, TEXTURE_TILING_RANGE.step, 'Material', MATERIAL_DEFAULTS.textureTiling,
+    'How many times the surface pattern repeats across the object', { when: hasReflectiveCoat }),
 
   // --- Lighting (doc-level; no active object needed) -------------------------------
   select('lighting.preset', 'Lighting preset', [...LIGHTING_PRESETS], D.lighting.preset, 'Lighting'),
