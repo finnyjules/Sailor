@@ -247,6 +247,15 @@ residuals it becomes the Phase B engine with pile 1 as its constraints; if not,
 Phase B ships the slice engine with conservative ranges (≈0.7–1.6× wide, ≤1.8×
 tall) and stroke vectors (skeleton + thickness) become the destination.
 
+**Spike verdict (2026-09-02, `docs/superpowers/spikes/2026-09-02-stretch-2d-field-spike.md`): MIXED — the field does not earn Phase B.** It wins where the slice
+model is weakest (wide o: 8 → 0 inflections, ring thickness 0.88 = drawn vs
+0.78; zone alignment exact; overshoot emergent from stiffness alone) but adds
+lattice-scale ripple on S / a / Fraunces (worse with finer lattices), folds
+under deep condense (structural: hard width target + linear springs), and its
+headline depends on the lattice resolution. 5.6 ms per glyph. **Decision path:
+Phase B ships the slice engine with conservative ranges; stroke vectors are the
+destination; the spike's advance-box lattice and no-rotation shear carry over.**
+
 ## Edge cases (decided)
 
 - **All-rigid profile on an axis** (horizontally: "I", "l", "."): the glyph
