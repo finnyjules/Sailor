@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
-import { materialFor, updateMaterial, disposeMaterial, buildRampTexture, MATCAP_IDS } from '~/lib/scene3d/materials'
+import { materialFor, updateMaterial, disposeMaterial, buildRampTexture, MATCAP_IDS, __bindTextureMapsForTest, applyTextureSet } from '~/lib/scene3d/materials'
 import { gradientAngles, gradientDirection, MATERIAL_DEFAULTS, type GradientStop, type SceneMaterial } from '~/lib/scene3d/config'
 
 const base = (patch: Partial<SceneMaterial> = {}): SceneMaterial =>
@@ -385,5 +385,54 @@ describe('scene3d gradient projection equivalence', () => {
     expect(radialT([0, 0, 0], bmin, bmax)).toBe(0)                 // centre
     expect(radialT([1, 1, 1], bmin, bmax)).toBe(1)                 // corner = radius
     expect(radialT([1, 0, 0], bmin, bmax)).toBeCloseTo(1 / Math.sqrt(3), 12)
+  })
+})
+
+describe('texture sets', () => {
+  const manifest = { id: 'Wood095', maps: ['color', 'roughness', 'normal', 'displacement', 'ao', 'metalness'] as const, fetchedAt: 'x' }
+
+  it('binds every listed map onto a physical material with ao on the primary UVs', () => {
+    const m = materialFor(base({ texture: 'ambientcg:Wood095' })) as THREE.MeshPhysicalMaterial
+    __bindTextureMapsForTest(m, base({ texture: 'ambientcg:Wood095' }), manifest as any)
+    // In node there is no DOM so the texture cache returns null — assert the slots were
+    // touched via userData, which the binder stamps regardless (see materials.ts).
+    expect(m.userData.textureMaps).toEqual(['color', 'roughness', 'normal', 'displacement', 'ao', 'metalness'])
+    expect(m.userData.textureAoChannel).toBe(0)
+  })
+
+  it('binds only the maps the manifest lists', () => {
+    const m = materialFor(base({ texture: 'ambientcg:X' })) as THREE.MeshPhysicalMaterial
+    __bindTextureMapsForTest(m, base({ texture: 'ambientcg:X' }), { id: 'X', maps: ['color'], fetchedAt: 'x' })
+    expect(m.userData.textureMaps).toEqual(['color'])
+  })
+
+  it('skips non-physical types and unresolved phrases', () => {
+    const toon = materialFor(base({ type: 'toon', texture: 'ambientcg:Wood095' }))
+    __bindTextureMapsForTest(toon, base({ type: 'toon', texture: 'ambientcg:Wood095' }), manifest as any)
+    expect(toon.userData.textureMaps).toBeUndefined()
+    const phrase = materialFor(base({ texture: 'wood' }))
+    applyTextureSet(phrase, base({ texture: 'wood' }))
+    expect(phrase.userData.textureId).toBeUndefined()
+  })
+
+  it('leaves the user normal map alone when one is set', () => {
+    const mat = base({ texture: 'ambientcg:Wood095', normalImage: 'mine.png' })
+    const m = materialFor(mat)
+    __bindTextureMapsForTest(m, mat, manifest as any)
+    expect(m.userData.textureMaps).not.toContain('normal')
+  })
+
+  it('does not use displacement as bump when an explicit relief is on', () => {
+    const mat = base({ texture: 'ambientcg:Wood095', relief: { source: 'image', image: 'h.png', scale: 0.3 } })
+    const m = materialFor(mat)
+    __bindTextureMapsForTest(m, mat, manifest as any)
+    expect(m.userData.textureMaps).not.toContain('displacement')
+  })
+
+  it('texture change rebuilds; tiling updates in place', () => {
+    const m = materialFor(base({ texture: 'ambientcg:Wood095' }))
+    expect(updateMaterial(m, base({ texture: 'ambientcg:Bricks075A' }))).toBe(false)
+    expect(updateMaterial(m, base({ texture: 'ambientcg:Wood095', textureTiling: 3 }))).toBe(true)
+    expect(m.userData.textureTiling).toBe(3)
   })
 })

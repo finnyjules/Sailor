@@ -16,6 +16,7 @@ import {
   type GradientStop, type ReliefSpec, type SceneMaterial,
 } from './config'
 import { toHeightPixels } from './relief'
+import { isResolvedTexture, textureMapFilename, ensureTextureFetched, type TextureManifest } from './textures'
 // The field module — the ONLY place a ShaderSpec becomes pixels (see its ownership contract).
 // Scene3D is a second, independent consumer alongside Space Type/Shape Studio's
 // ~/lib/spacetype/fills.ts: it never routes through `Fill`/`FILL_TYPES` (SceneMaterial has no
@@ -135,6 +136,17 @@ const UNOWNED_SCENE3D = '__scene3d_unowned__'
  *  per resolveField's ownership contract (its canvas is bound directly as `.image`, never
  *  copied). */
 const shaderFillMaterials = new Set<THREE.Material>()
+
+/** `/view` URL for an input-dir file. A slash-joined `filename` (`sailor_textures/Wood095/Color.jpg`)
+ *  is split into ComfyUI's `subfolder` + basename — /view basenames `filename` itself, so the
+ *  folder MUST travel in the separate query param. */
+function inputViewUrl(filename: string): string {
+  const i = filename.lastIndexOf('/')
+  const q = new URLSearchParams({ filename: i >= 0 ? filename.slice(i + 1) : filename, type: 'input' })
+  if (i >= 0) q.set('subfolder', filename.slice(0, i))
+  return `/view?${q}`
+}
+
 /** `colorSpace` (I1 fix, final review): defaults to sRGB for the diffuse-map callers this was
  *  originally written for, but a REAL tangent-space normal map is non-colour data — sRGB-
  *  decoding it turns a flat texel (128,128,255) into ≈(0.216,0.216,1.0), which after `*2-1`
@@ -148,7 +160,7 @@ function getImageTexture(filename: string, colorSpace: THREE.ColorSpace = THREE.
   let t = imageCache.get(key)
   if (!t) {
     const tex = new THREE.TextureLoader().load(
-      `/view?${new URLSearchParams({ filename, type: 'input' })}`,
+      inputViewUrl(filename),
       undefined,
       undefined,
       () => {
@@ -239,7 +251,7 @@ function getReliefImageSource(filename: string, onReady: () => void): ReliefSour
     entry!.subs = new Set()
     for (const cb of subs) cb()
   }
-  img.src = `/view?filename=${encodeURIComponent(filename)}&type=input`
+  img.src = inputViewUrl(filename)
   return entry
 }
 
@@ -442,6 +454,103 @@ export function applyRelief(m: THREE.Material, mat: SceneMaterial, ownerId: stri
   // getImageTexture's doc).
   target.normalMap = mat.normalImage ? getImageTexture(mat.normalImage, THREE.NoColorSpace) : null
   target.needsUpdate = true
+}
+
+// ── ambientCG texture sets ────────────────────────────────────────────────────
+// Only the three PBR-substrate types carry a real albedo/roughness/normal stack; the stylised
+// types (toon/matcap/gradient/...) either have no such slots or would fight the look.
+const TEXTURE_TYPES = new Set(['standard', 'glass', 'opalescent'])
+
+function textureApplies(m: THREE.Material, mat: SceneMaterial): boolean {
+  return TEXTURE_TYPES.has(mat.type) && 'map' in m && isResolvedTexture(mat.texture)
+}
+
+function setRepeat(tex: THREE.Texture | null, tiling: number): void {
+  if (!tex) return
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+  tex.repeat.set(tiling, tiling)
+}
+
+/** Synchronous inner bind: given a manifest, point each slot at the cached texture.
+ *  Stamps `userData.textureMaps` with what was bound so tests (node, no DOM → textures
+ *  are null) and the heal path can see the decision, not just the slots. Exported under a
+ *  test name only. */
+export function __bindTextureMapsForTest(m: THREE.Material, mat: SceneMaterial, manifest: TextureManifest): void {
+  bindTextureMaps(m, mat, manifest)
+}
+
+function bindTextureMaps(m: THREE.Material, mat: SceneMaterial, manifest: TextureManifest): void {
+  if (!textureApplies(m, mat)) return
+  const id = mat.texture!
+  const t = m as THREE.MeshPhysicalMaterial
+  const tiling = mat.textureTiling ?? MATERIAL_DEFAULTS.textureTiling
+  const has = (k: TextureManifest['maps'][number]) => manifest.maps.includes(k)
+  const bound = new Set<TextureManifest['maps'][number]>()
+
+  // One Texture PER MATERIAL, not the shared getImageTexture cache: `repeat` lives on the
+  // Texture, so two objects tiling the same set differently need their own instances, and
+  // in-place tiling (updateMaterial) must not reach into another object's maps. Cloning the
+  // cached texture is wrong — Texture.clone() copies `image` at clone time, so a clone taken
+  // before the async load finishes stays empty forever. The browser HTTP cache dedupes the
+  // bytes; the decode is repeated per material, which is cheap at 1K.
+  const tex = (k: TextureManifest['maps'][number], cs: THREE.ColorSpace) => {
+    if (!hasDOM) return null
+    const own = new THREE.TextureLoader().load(inputViewUrl(textureMapFilename(id, k)), undefined, undefined, () => {
+      // Load failure: drop just this slot so the material degrades to the plain surface.
+      for (const slot of ['map', 'roughnessMap', 'metalnessMap', 'normalMap', 'aoMap', 'bumpMap'] as const) {
+        if ((t as any)[slot] === own) { (t as any)[slot] = null; t.needsUpdate = true }
+      }
+    })
+    own.colorSpace = cs
+    setRepeat(own, tiling)
+    return own
+  }
+
+  if (has('color')) { t.map = tex('color', THREE.SRGBColorSpace); bound.add('color') }
+  if (has('roughness')) { t.roughnessMap = tex('roughness', THREE.NoColorSpace); bound.add('roughness') }
+  if (has('metalness')) { t.metalnessMap = tex('metalness', THREE.NoColorSpace); bound.add('metalness') }
+  if (has('normal') && !mat.normalImage) { t.normalMap = tex('normal', THREE.NoColorSpace); bound.add('normal') }
+  if (has('ao')) {
+    t.aoMap = tex('ao', THREE.NoColorSpace)
+    if (t.aoMap) t.aoMap.channel = 0 // primary UVs, not the uv1 three.js defaults to
+    t.userData.textureAoChannel = 0
+    bound.add('ao')
+  }
+  // Displacement → bump ONLY when the user has no relief of their own. An explicit relief
+  // always wins (applyRelief already set bumpMap; leave it).
+  const reliefOff = !mat.relief || mat.relief.source === 'none'
+  if (has('displacement') && reliefOff) {
+    t.bumpMap = tex('displacement', THREE.NoColorSpace)
+    t.bumpScale = MATERIAL_DEFAULTS.reliefScale
+    bound.add('displacement')
+  }
+  t.userData.textureId = id
+  // Reported in the SET's own map order, not bind order: the stamp reads as "which of this
+  // set's maps are live", and updateMaterial's retile loop is order-agnostic.
+  t.userData.textureMaps = manifest.maps.filter((k) => bound.has(k))
+  t.userData.textureTiling = tiling
+  t.needsUpdate = true
+}
+
+/** Bind an ambientCG texture set onto an already-constructed material. Async: the manifest
+ *  comes from the fetch route (cached per id per session); until it lands the material
+ *  renders untextured, then the maps bind and `needsUpdate` fires — same shape as the
+ *  relief heal. Applied AFTER applyRelief so an explicit relief's bump survives. */
+export function applyTextureSet(m: THREE.Material, mat: SceneMaterial): void {
+  if (!textureApplies(m, mat)) return
+  // Stamped BEFORE the DOM guard: updateMaterial's in-place tiling block keys off
+  // `userData.textureId`, and it must retile a material whose maps are still in flight (or,
+  // under node, never bind at all) rather than silently dropping the new tiling.
+  m.userData.textureId = mat.texture
+  m.userData.textureTiling = mat.textureTiling ?? MATERIAL_DEFAULTS.textureTiling
+  if (!hasDOM) return // node/unit tests: no TextureLoader, nothing to bind
+  const id = mat.texture!
+  ensureTextureFetched(id).then((manifest) => {
+    // The material may have been rebuilt/disposed while we waited; only bind if it still
+    // wants this exact set.
+    if (m.userData.identity !== identityKey(mat)) return
+    bindTextureMaps(m, mat, manifest)
+  }).catch(() => { /* row shows the error; the material stays untextured */ })
 }
 
 // ── Fresnel / gradient: LIT materials (Spline-style layers over lighting) ────
@@ -888,6 +997,7 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
   m.userData.matType = mat.type
   m.userData.identity = identityKey(mat)
   applyRelief(m, mat, ownerId)
+  applyTextureSet(m, mat)
   return m
 }
 
@@ -912,7 +1022,7 @@ function reliefKey(mat: SceneMaterial): string {
     : r.source === 'image'
       ? `i:${r.image ?? ''}:${r.invert ? 1 : 0}`
       : `s:${r.spec ? JSON.stringify(r.spec) : ''}:${r.invert ? 1 : 0}`
-  return `|${relief}|n:${mat.normalImage ?? ''}`
+  return `|${relief}|n:${mat.normalImage ?? ''}|t:${mat.texture ?? ''}`
 }
 
 /** Params that require a rebuild when they change (texture/ramp identity). */
@@ -957,6 +1067,20 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
         m.userData.reliefContrastApplied = c
         ;(rt.bumpMap.userData.reliefSetContrast as ((c: number) => void) | undefined)?.(c)
       }
+    }
+  }
+  // Texture-set tiling updates in place, like relief tiling — a slider drag must not rebuild.
+  if (m.userData.textureId) {
+    const tt = mat.textureTiling ?? MATERIAL_DEFAULTS.textureTiling
+    if (m.userData.textureTiling !== tt) {
+      m.userData.textureTiling = tt
+      const t = m as THREE.MeshPhysicalMaterial
+      // Only the slots THIS set bound — an explicit relief's bumpMap is not ours to retile.
+      const slotOf: Record<string, THREE.Texture | null> = {
+        color: t.map, roughness: t.roughnessMap, metalness: t.metalnessMap,
+        normal: t.normalMap, ao: t.aoMap, displacement: t.bumpMap,
+      }
+      for (const k of (m.userData.textureMaps as string[] | undefined) ?? []) slotOf[k]?.repeat.set(tt, tt)
     }
   }
   switch (mat.type) {
@@ -1116,6 +1240,19 @@ export function disposeMaterial(m: THREE.Material): void {
   // stashed directly by the `case 'image':` branch of `materialFor` instead of being parsed
   // back out of `identity`.
   if (map) { map.dispose(); if (m.userData.matType === 'image' && m.userData.imageFilename) imageCache.delete(m.userData.imageFilename as string) }
+  // ambientCG texture set: bindTextureMaps builds a Texture PER MATERIAL for every slot it
+  // binds (see its doc), so the slots THIS set bound are exclusively ours to free. `map` and
+  // `bumpMap` are already disposed above; the other four would otherwise leak a full-size GPU
+  // texture on every rebuild. Gated on `textureMaps` rather than on the slots being non-null:
+  // a `normalMap` the set did NOT bind is the user's own, and comes from the SHARED imageCache.
+  const setMaps = (m.userData.textureMaps as string[] | undefined) ?? []
+  if (setMaps.length) {
+    const ts = m as THREE.MeshPhysicalMaterial
+    if (setMaps.includes('roughness')) ts.roughnessMap?.dispose()
+    if (setMaps.includes('metalness')) ts.metalnessMap?.dispose()
+    if (setMaps.includes('normal')) ts.normalMap?.dispose()
+    if (setMaps.includes('ao')) ts.aoMap?.dispose()
+  }
   m.dispose()
 }
 
