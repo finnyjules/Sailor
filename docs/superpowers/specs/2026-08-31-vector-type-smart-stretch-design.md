@@ -284,6 +284,24 @@ quantize stretch values for caching — not expected.
   the stretch axis, where it is invisible. That merges rules 2, 9 and 10 into
   a curve model rather than more slice rules; pure-curve glyphs (S, C) need
   their transitions to sit on their straightest part.
+- **Bell distribution — harmony between rigid features** (lab-found
+  2026-09-01, the last structural finding of Phase A): the tangent analysis
+  keeps its real jobs — what is RIGID (stems, apex bands, tittles, terminals),
+  what is a TURN (round coupling), what is a STRAIGHT SPAN (uniformity) — but
+  it no longer decides how much each free bin stretches. Between rigid
+  features the change spreads as a **raised cosine per free run** (near zero
+  next to the plateaus, peaking mid-flank / mid-counter), one bell per bulge
+  (runs split at partial waists below 0.5 flex, e.g. the S's spine), anchored
+  at the plateau's own scale under condense, with straight spans held uniform
+  inside a run and the round-coupling factor tapered so it never steps into
+  the flank. Measured: the o at Height 2.5 goes from 8 spurious inflections to
+  0; the S returns to its drawn 4 (was 12); the a 16 → 10. Two honest limits:
+  under deep condense the floors clip the bell (reaching S wins — the 3-bin
+  cliff at a plateau edge is the only transition S allows), and wide stretch
+  with round coupling can still step at the turn/flank edge. **Consequence for
+  Phase B: `k` no longer shapes anything except the rigid threshold — it
+  becomes an internal constant, not a dial.** The old tangent-proportional
+  distribution survives as `mode: 'flex'` behind the lab's shape-rules toggle.
 - **Spaces/blanks**: advance stretches; no outline to remap.
 - **Ligatures**: multi-codepoint glyphs flex-analyze like any other outline.
 
