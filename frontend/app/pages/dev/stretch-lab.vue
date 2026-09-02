@@ -22,6 +22,7 @@ const text = ref('Sailor')
 const S = ref(1.6)
 const SY = ref(1)
 const k = ref(1)
+const roundCoupling = ref(0.7)
 const shapeRules = ref(true)
 const overlay = ref(false)
 const weightComp = ref(false)
@@ -137,7 +138,10 @@ function rerender() {
     ? weightCompensation(f, plan.coords, S.value, SY.value)
     : plan.coords
   const smartBase = textOutlines(f, text.value, smartAxes)
-  render(smartCanvas.value, stretchOutlines(smartBase, plan.residual, SY.value, flexOpts.value), overlay.value)
+  // roundCoupling is remap-time only (see FlexOptions doc) — it goes into
+  // the smart column's own stretchOutlines call, not into flexOpts, so the
+  // overlay (which reads flexOpts via glyphFlexFor) is unaffected by it.
+  render(smartCanvas.value, stretchOutlines(smartBase, plan.residual, SY.value, { ...flexOpts.value, roundCoupling: roundCoupling.value }), overlay.value)
 
   if (hasWdth.value) {
     render(axisCanvas.value, textOutlines(f, text.value, plan.coords), false)
@@ -146,7 +150,7 @@ function rerender() {
   }
 }
 
-watch([font, text, S, SY, k, shapeRules, overlay, weightComp], rerender, { flush: 'post' })
+watch([font, text, S, SY, k, roundCoupling, shapeRules, overlay, weightComp], rerender, { flush: 'post' })
 watch(fontId, id => { void pickFont(id!) })
 
 onMounted(async () => {
@@ -190,6 +194,10 @@ onMounted(async () => {
       <label class="flex items-center gap-2">
         k {{ k.toFixed(1) }}
         <input v-model.number="k" type="range" min="0" max="8" step="0.1" class="w-32" data-test="k" />
+      </label>
+      <label class="flex items-center gap-2">
+        round {{ roundCoupling.toFixed(2) }}
+        <input v-model.number="roundCoupling" type="range" min="0" max="1" step="0.05" class="w-32" data-test="round-coupling" />
       </label>
       <label class="flex items-center gap-2">
         <input v-model="shapeRules" type="checkbox" data-test="shape-rules" /> shape rules

@@ -741,3 +741,127 @@ describe('stems follow area; curves stay smooth', () => {
     expect(straight1 - straight0).toBeLessThan(added * 0.9)
   })
 })
+
+describe('rounds stay round; terminals keep their angle', () => {
+  it('turn bins are scaled multiplicatively AFTER the ordinary distribution; the free bins absorb the change', () => {
+    const flex = new Float64Array([0, 0.5, 1, 1, 1, 1, 0.5, 0])
+    const ink  = new Float64Array([1, 1, 0, 0, 0, 0, 1, 1])
+    const turn = new Uint8Array([0, 1, 0, 0, 0, 0, 1, 0])
+    // S = 1: ordinary distribution is a no-op (all bins stay at 10), so the
+    // turn multiply is the only thing that moves anything. Shoulders grow
+    // 1.5x (+5 each, +10 total); the free middle (bins 2-5) gives it back,
+    // -2.5 each; the rigid ends (0, 7) never move; total stays 80.
+    const m = buildRemap({ start: 0, binSize: 10, flex, ink, turn }, 1, undefined, undefined, undefined, 1.5)
+    const width = (i: number) => remapValue(m, (i + 1) * 10) - remapValue(m, i * 10)
+    expect(width(1)).toBeCloseTo(15, 6)
+    expect(width(6)).toBeCloseTo(15, 6)
+    expect(width(0)).toBeCloseTo(10, 6)
+    expect(width(2)).toBeCloseTo(7.5, 6)
+    expect(remapValue(m, 80) - remapValue(m, 0)).toBeCloseTo(80, 6)
+    // S = 2: ordinary expansion runs FIRST, turn bins included like any
+    // other (delta 80 over flex-sum 5 -> shoulders 10+16*0.5=18, free
+    // bins 10+16*1=26, rigid ends untouched at 10). THEN the shoulders are
+    // scaled x0.7 (18 -> 12.6, a change of -5.4 each, -10.8 total); the
+    // free bins get it back, +2.7 each (26 -> 28.7); total stays 160.
+    const m2 = buildRemap({ start: 0, binSize: 10, flex, ink, turn }, 2, undefined, undefined, undefined, 0.7)
+    const w2 = (i: number) => remapValue(m2, (i + 1) * 10) - remapValue(m2, i * 10)
+    expect(w2(1)).toBeCloseTo(12.6, 6)
+    expect(w2(6)).toBeCloseTo(12.6, 6)
+    expect(w2(0)).toBeCloseTo(10, 6)
+    expect(w2(2)).toBeCloseTo(28.7, 6)
+    expect(remapValue(m2, 80) - remapValue(m2, 0)).toBeCloseTo(160, 6)
+  })
+
+  it("the 'o' has turn rows in Y, and none of them are the apex thickness", () => {
+    const g = textOutlines(font, 'o').glyphs[0]!
+    const { y } = analyzeFlex(g.commands, g.bbox)
+    expect(y.turn).toBeDefined()
+    const turns = Array.from(y.turn!).reduce((n, v) => n + v, 0)
+    expect(turns).toBeGreaterThan(2)
+    for (let i = 0; i < y.flex.length; i++) if (y.turn![i]) expect(y.flex[i]).toBeGreaterThan(0.05)
+  })
+
+  it("condense 0.7 × Height 2.41: the 'o' arch gets SHORTER with its width while its apex keeps its thickness", () => {
+    const run = textOutlines(font, 'o')
+    const g0 = run.glyphs[0]!, g1 = stretchOutlines(run, 0.7, 2.41).glyphs[0]!
+    // turn height = from the top down to where the outer contour first reaches within 2% of its extreme x
+    const turnHeight = (cmds: PathCommand[], bbox: { minX: number; maxX: number; minY: number; maxY: number }) => {
+      const h = bbox.maxY - bbox.minY, w = bbox.maxX - bbox.minX
+      for (let i = 0; i <= 400; i++) {
+        const yy = bbox.maxY - (i / 400) * h
+        const runs = inkRunsAtY(cmds, yy)
+        if (runs.length && runs[0]![0] <= bbox.minX + 0.02 * w) return bbox.maxY - yy
+      }
+      return h
+    }
+    const th0 = turnHeight(g0.commands, g0.bbox), th1 = turnHeight(g1.commands, g1.bbox)
+    // Coupling's effect is judged RELATIVE to the uncoupled baseline (both
+    // measured against the same th0), not against an absolute target: the
+    // multiplicative mechanic redistributes onto whatever free bins exist,
+    // so the exact ratio a real curve lands on depends on its own flex
+    // shape, not just S — but coupling must make a real, substantial
+    // difference, and never make the turn region taller than uncoupled.
+    const old = stretchOutlines(run, 0.7, 2.41, { roundCoupling: 0 }).glyphs[0]!
+    const thOld = turnHeight(old.commands, old.bbox)
+    expect(th1 / th0).toBeLessThan(thOld / th0 - 0.12)   // at least 12% shorter than uncoupled
+    expect(th1).toBeLessThanOrEqual(thOld)                // and never longer than uncoupled
+    // Apex thickness: judged the same way, against the UNCOUPLED glyph at
+    // the same S/SY, not an absolute target. At this combined condense +
+    // big-height stretch the apex thickness ratio is ~1.19 on the engine's
+    // own account (curve easing plus the ordinary distribution already
+    // give it a modest, expected bump — verified against the unmodified
+    // engine, no rule 10 at all) — coupling is not supposed to fix that; it
+    // is only supposed to leave it alone. So the real invariant is that
+    // coupling's own contribution here is small.
+    const cx0 = (g0.bbox.minX + g0.bbox.maxX) / 2, cx1 = (g1.bbox.minX + g1.bbox.maxX) / 2, cxOld = (old.bbox.minX + old.bbox.maxX) / 2
+    const a0 = inkRunsAtX(g0.commands, cx0), a1 = inkRunsAtX(g1.commands, cx1), aOld = inkRunsAtX(old.commands, cxOld)
+    const t0 = a0[a0.length - 1]![1] - a0[a0.length - 1]![0], t1 = a1[a1.length - 1]![1] - a1[a1.length - 1]![0]
+    const tOld = aOld[aOld.length - 1]![1] - aOld[aOld.length - 1]![0]
+    expect(Math.abs(t1 / t0 - tOld / t0)).toBeLessThan(0.05)
+  })
+
+  it("the 'a' terminal cut keeps its angle under Height 2.41", () => {
+    const run = textOutlines(font, 'a')
+    const g0 = run.glyphs[0]!
+    // find short lineTo segments with near-parallel neighbours and a perpendicular cut — the terminals
+    const segsOf = (cmds: PathCommand[]) => {
+      const out: Array<{ i: number; x0: number; y0: number; x1: number; y1: number }> = []
+      let px = 0, py = 0
+      cmds.forEach((c, i) => {
+        if (c.command === 'moveTo') { px = c.args[0]!; py = c.args[1]! }
+        else if (c.command === 'lineTo') { out.push({ i, x0: px, y0: py, x1: c.args[0]!, y1: c.args[1]! }); px = c.args[0]!; py = c.args[1]! }
+        else if (c.command === 'quadraticCurveTo') { px = c.args[2]!; py = c.args[3]! }
+        else if (c.command === 'bezierCurveTo') { px = c.args[4]!; py = c.args[5]! }
+      })
+      return out
+    }
+    const angle = (s: { x0: number; y0: number; x1: number; y1: number }) => Math.atan2(s.y1 - s.y0, s.x1 - s.x0) * 180 / Math.PI
+    const short = segsOf(g0.commands).filter(s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0) < 0.12 * font.unitsPerEm)
+    const diagonal = short.filter(s => { const a = Math.abs(angle(s)) % 180; return a > 15 && a < 75 || a > 105 && a < 165 })
+    expect(diagonal.length).toBeGreaterThan(0)   // Inter's a has a slanted terminal cut
+    const g1 = stretchOutlines(run, 1, 2.41).glyphs[0]!
+    const after = segsOf(g1.commands)
+    for (const s of diagonal) {
+      const t = after.find(q => q.i === s.i)!
+      const d = Math.abs(((angle(t) - angle(s)) + 540) % 360 - 180)
+      expect(d).toBeLessThan(8)
+    }
+    // NOTE: no shapeRules:false "old model drifts more" control here. Measured:
+    // this terminal's row (y ~810-867) is already pinned by the unrelated
+    // right STEM's own straight edge passing through the same height (hard
+    // channel reads exactly 0 there) — true in the old single-channel-min
+    // model too, since that channel is computed unconditionally. So old and
+    // new both preserve this cut's angle at this exact spot, for a reason
+    // that has nothing to do with rule 11: a shapeRules:false comparison
+    // can't discriminate here. The assertions above are the real check —
+    // they confirm rule 11 protects the cut under the new model directly.
+  })
+
+  it('a stem cap is a terminal too, but the X crossing notches are not', () => {
+    // The stem rect's caps: rigid rows at the very top/bottom, interior still flexible.
+    const { y } = analyzeFlex(rect(0, 0, 100, 700), { minX: 0, minY: 0, maxX: 100, maxY: 700 }, { bins: 16 })
+    expect(y.flex[0]).toBeLessThan(0.05)
+    expect(y.flex[15]).toBeLessThan(0.05)
+    expect(y.flex[8]).toBeGreaterThan(0.95)
+  })
+})

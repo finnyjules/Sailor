@@ -49,6 +49,13 @@ export interface FlexProfile {
    *  hand-built profiles in tests stay terse — absent means "infer from
    *  flex": fully flexible ⇒ empty, anything resisting ⇒ ink. */
   ink?: Float64Array
+  /** 1 for a TURN bin — its pinning ink is curved and only partially
+   *  aligned to this axis (no straight stem pins it, but it isn't free
+   *  either): a round's shoulder, not its apex. Rounds-stay-round (rule 10)
+   *  presets these bins to a width tied to the OTHER axis's stretch factor
+   *  instead of letting the ordinary flex distribution hold or grow them.
+   *  Optional for the same reason `ink` is. */
+  turn?: Uint8Array
 }
 
 export interface GlyphFlex {
@@ -75,6 +82,11 @@ export interface FlexOptions {
    *  span uniformity, mirror symmetry. Off = the original pure-min
    *  aggregation with neither pass — the lab's A/B control. */
   shapeRules?: boolean
+  /** Rounds-stay-round coupling (rule 10): a round's turn-region height
+   *  follows its WIDTH. Remap-time only — does not affect `analyzeFlex`, so
+   *  it is deliberately left out of `glyphFlexFor`'s cache key. See
+   *  `ROUND_COUPLING`. */
+  roundCoupling?: number
 }
 
 const DEFAULT_BINS = 64
@@ -105,6 +117,28 @@ export const SMALL_FEATURE_EM = 0.22
 /** Curve flattening steps for ANALYSIS only — the remap itself moves the real
  *  control points, so this resolution never appears in output geometry. */
 const CURVE_STEPS = 16
+/** Rounds stay round: a round's turn-region height follows its WIDTH (a
+ *  semicircle is half as tall as it is wide). Shoulder rows scale by
+ *  S^ROUND_COUPLING regardless of the height dial; 1 = fully round corners on
+ *  an extended o, 0 = the old flat-sided racetrack. A taste constant — the
+ *  lab exposes it. */
+export const ROUND_COUPLING = 0.7
+/** A terminal cut's two neighbours must be at least this parallel to each
+ *  other … */
+const TERMINAL_PARALLEL = 0.8
+/** … and the cut itself must be at least this perpendicular to them. Below
+ *  this it's a notch facet (X's crossing) or a diverging corner, not a
+ *  drawn terminal (an a's top-stroke end, an S's cut terminals). */
+const TERMINAL_PERP = 0.5
+/** … and the cut itself must be MEANINGFULLY diagonal — neither axis
+ *  component of its own tangent may be this close to 0. Rule 11 exists to
+ *  keep a terminal's DRAWN ANGLE from rotating; a perfectly axis-aligned
+ *  cut (dx = 0 or dy = 0 exactly) has no such angle to protect — it's a
+ *  construction shelf (Inter's S has two, at its waist, cutting straight
+ *  across from one edge of the ribbon to the other where the bowl turns),
+ *  not an expressive terminal, and it satisfies the parallel/perpendicular
+ *  test just as convincingly as a real one does. */
+const TERMINAL_DIAGONAL_MIN = 0.05
 
 /** What kind of ink a boundary segment is — the three kinds stretch
  *  differently (see `analyzeFlex`). */
@@ -115,6 +149,15 @@ const KIND_CURVE = 2     // a flattened curve sample: a curved stroke edge
 interface Seg {
   x0: number; y0: number; x1: number; y1: number
   kind: number
+  /** Which subpath (moveTo-delimited contour) this segment belongs to —
+   *  terminal-cut detection looks at a segment's neighbours WITHIN its own
+   *  subpath, wrapping around at the contour's close. */
+  subpath: number
+  /** Set by `markTerminalCuts`: a short lineTo/closePath segment whose two
+   *  flattened neighbours are near-parallel to each other and near-
+   *  perpendicular to it — a drawn terminal cut (an a's top-stroke end, an
+   *  S's cut terminals), not a notch facet or a curve sample. */
+  terminal: boolean
 }
 
 /** Flatten commands to line segments for tangent analysis. closePath emits the
@@ -125,10 +168,11 @@ function flattenToSegments(commands: readonly PathCommand[], straightMin: number
   const segs: Seg[] = []
   let px = 0, py = 0
   let sx = 0, sy = 0
+  let subpath = -1
   const emit = (x1: number, y1: number, fromLine: boolean) => {
     if (x1 !== px || y1 !== py) {
       const kind = !fromLine ? KIND_CURVE : Math.hypot(x1 - px, y1 - py) >= straightMin ? KIND_STRAIGHT : KIND_SHORT
-      segs.push({ x0: px, y0: py, x1, y1, kind })
+      segs.push({ x0: px, y0: py, x1, y1, kind, subpath, terminal: false })
     }
     px = x1; py = y1
   }
@@ -136,6 +180,7 @@ function flattenToSegments(commands: readonly PathCommand[], straightMin: number
     const a = c.args
     switch (c.command) {
       case 'moveTo':
+        subpath++
         px = a[0]!; py = a[1]!; sx = px; sy = py
         break
       case 'lineTo':
@@ -169,6 +214,55 @@ function flattenToSegments(commands: readonly PathCommand[], straightMin: number
     }
   }
   return segs
+}
+
+/** Terminal-cut detection (rule 11): a short lineTo/closePath segment
+ *  (`KIND_SHORT`) is a drawn TERMINAL CUT — not a notch facet (an X's
+ *  crossing, whose neighbours diverge) and not a curve sample (excluded by
+ *  kind) — when its two flattened neighbours, within its own subpath and
+ *  wrapping around, are near-parallel to each other and the cut itself is
+ *  near-perpendicular to them.
+ *
+ *  A converging wedge tip (two long straight arms meeting at a shallow
+ *  point, flattened flat) satisfies that same parallel/perpendicular test —
+ *  the geometry of a hairpin turn can't be told apart from a genuine
+ *  terminal by tangent alignment alone. What DOES tell them apart is scale:
+ *  a real terminal is a stroke's flat-cut END, so its neighbours are the
+ *  fine curve samples (or short cap-adjacent lines) immediately either side
+ *  of it — shorter than the cut itself. A wedge tip's neighbours are the
+ *  FULL straight arms that converge to it — far LONGER than the cut. So a
+ *  cut counts only when it is at least as long as both of its neighbours. */
+function markTerminalCuts(segs: Seg[]): void {
+  const bySubpath = new Map<number, number[]>()
+  segs.forEach((s, i) => {
+    let idxs = bySubpath.get(s.subpath)
+    if (!idxs) { idxs = []; bySubpath.set(s.subpath, idxs) }
+    idxs.push(i)
+  })
+  const dir = (s: Seg): [number, number] | null => {
+    const dx = s.x1 - s.x0, dy = s.y1 - s.y0, len = Math.hypot(dx, dy)
+    return len > 0 ? [dx / len, dy / len] : null
+  }
+  const len = (s: Seg) => Math.hypot(s.x1 - s.x0, s.y1 - s.y0)
+  for (const idxs of bySubpath.values()) {
+    const m = idxs.length
+    if (m < 3) continue
+    for (let k = 0; k < m; k++) {
+      const i = idxs[k]!
+      const s = segs[i]!
+      if (s.kind !== KIND_SHORT) continue
+      const prev = segs[idxs[(k - 1 + m) % m]!]!
+      const next = segs[idxs[(k + 1) % m]!]!
+      const dPrev = dir(prev), dNext = dir(next), dCut = dir(s)
+      if (!dPrev || !dNext || !dCut) continue
+      const cutLen = len(s)
+      if (cutLen < len(prev) || cutLen < len(next)) continue
+      if (Math.abs(dCut[0]) < TERMINAL_DIAGONAL_MIN || Math.abs(dCut[1]) < TERMINAL_DIAGONAL_MIN) continue
+      const parallel = Math.abs(dPrev[0] * dNext[0] + dPrev[1] * dNext[1])
+      const perp = Math.abs(dCut[0] * dPrev[0] + dCut[1] * dPrev[1])
+      if (parallel > TERMINAL_PARALLEL && perp < TERMINAL_PERP) s.terminal = true
+    }
+  }
 }
 
 /**
@@ -325,6 +419,7 @@ export function analyzeFlex(
 
   const segs = flattenToSegments(commands, straightMin)
   if (!segs.length) return out
+  markTerminalCuts(segs)
   const cw = w / GRID
   const ch = h / GRID
   const N = GRID * GRID
@@ -336,6 +431,12 @@ export function analyzeFlex(
   const ax = new Float64Array(N).fill(1)
   const ay = new Float64Array(N).fill(1)
   const kind = new Uint8Array(N)
+  // Terminal-cut carry: whether the nearest boundary is a terminal cut, and
+  // that cut's own length (its "reach") — propagated alongside (dist, ax,
+  // ay, kind) through the chamfer exactly like they are, since the nearest
+  // boundary is one point and both come from it.
+  const termFlag = new Uint8Array(N)
+  const termReach = new Float64Array(N)
   const idx = (c: number, r: number) => r * GRID + c
 
   // Stamp boundary cells with exact segment tangents. Where two segments of
@@ -360,25 +461,31 @@ export function analyzeFlex(
       const have = kind[j] === KIND_STRAIGHT ? 2 : kind[j] === KIND_CURVE ? 1 : 0
       if (dist[j]! > 0) {
         dist[j] = 0; ax[j] = tx; ay[j] = ty; kind[j] = s.kind
+        termFlag[j] = s.terminal ? 1 : 0; termReach[j] = s.terminal ? len : 0
       } else if (rank > have) {
         ax[j] = tx; ay[j] = ty; kind[j] = s.kind
+        termFlag[j] = s.terminal ? 1 : 0; termReach[j] = s.terminal ? len : 0
       } else if (rank === have) {
         ax[j] = Math.min(ax[j]!, tx); ay[j] = Math.min(ay[j]!, ty)
       }
     }
   }
 
-  // Two-pass chamfer: propagate (distance, tangent, kind) from each cell's
-  // already-visited neighbours. Step costs are in FONT UNITS, not grid steps —
-  // the grid is GRID×GRID over a bbox that is usually far from square (a stem
-  // is ~100×700), and unit-step costs would let a stem's caps out-compete its
-  // side walls for half the interior, mislabelling it flexible in Y.
+  // Two-pass chamfer: propagate (distance, tangent, kind, terminal reach)
+  // from each cell's already-visited neighbours. Step costs are in FONT
+  // UNITS, not grid steps — the grid is GRID×GRID over a bbox that is
+  // usually far from square (a stem is ~100×700), and unit-step costs would
+  // let a stem's caps out-compete its side walls for half the interior,
+  // mislabelling it flexible in Y.
   const costH = cw
   const costV = ch
   const costD = Math.hypot(cw, ch)
   const relax = (j: number, n: number, cost: number) => {
     const d = dist[n]! + cost
-    if (d < dist[j]!) { dist[j] = d; ax[j] = ax[n]!; ay[j] = ay[n]!; kind[j] = kind[n]! }
+    if (d < dist[j]!) {
+      dist[j] = d; ax[j] = ax[n]!; ay[j] = ay[n]!; kind[j] = kind[n]!
+      termFlag[j] = termFlag[n]!; termReach[j] = termReach[n]!
+    }
   }
   for (let r = 0; r < GRID; r++) {
     for (let c = 0; c < GRID; c++) {
@@ -418,6 +525,21 @@ export function analyzeFlex(
       c0 = Math.max(0, c0)
       c1 = Math.min(GRID - 1, c1)
       for (let c = c0; c <= c1; c++) ink[idx(c, r)] = 1
+    }
+  }
+
+  // Terminal cuts keep their angle (rule 11): every ink cell whose nearest
+  // boundary is a terminal cut, within that cut's own length, is rigid on
+  // BOTH axes and counts as hard ink (straight) so it enters the hard
+  // channel — before the column aggregation below sees it. A shape-
+  // integrity rule like the other three, so gated the same way: off when
+  // `shapeRules` is off (the lab's, and the tests', A/B control).
+  if (shapeRules) {
+    for (let j = 0; j < N; j++) {
+      if (!ink[j]) continue
+      if (termFlag[j] && dist[j]! <= termReach[j]! + 1e-9) {
+        ax[j] = 0; ay[j] = 0; kind[j] = KIND_STRAIGHT
+      }
     }
   }
 
@@ -510,6 +632,13 @@ export function analyzeFlex(
   const inkY = new Float64Array(bins)
   const hardX = new Float64Array(bins).fill(1)
   const hardY = new Float64Array(bins).fill(1)
+  // Turn bins (rule 10): pinning ink is curved and only PARTIALLY aligned —
+  // no straight stem pins the bin (hard ≥ HARD_RIGID) but it isn't free
+  // either (soft strictly between HARD_RIGID and FULL_FLEX). A round's
+  // shoulder, not its apex (fully aligned, soft ≈ 0) or its flank (fully
+  // free, soft ≈ 1).
+  const turnX = new Uint8Array(bins)
+  const turnY = new Uint8Array(bins)
   const cellsPerBin = GRID / bins
   for (let b = 0; b < bins; b++) {
     let mx = 1, my = 1          // single-channel min (control)
@@ -535,6 +664,17 @@ export function analyzeFlex(
     }
     hardX[b] = hx
     hardY[b] = hy
+    // The "no straight stem pins it" half reads the HARD channel (straight
+    // ink only — a pure-curve glyph like an o never lowers it, so this
+    // correctly never excludes curve ink). The "partially aligned" half
+    // must read the STROKE channel (curve ink's own min, kx/ky) rather than
+    // the mean-based `soft` channel: soft averages a row's cells, so an
+    // apex row (one cell dead-on, its neighbours a little off) can average
+    // above HARD_RIGID even though the row's real pinning — the min any
+    // single cell forces — is near zero. Using stroke keeps the apex
+    // (near-0) and the flank (near-1) both OUT, leaving only the shoulder.
+    turnX[b] = hx >= HARD_RIGID && kx > HARD_RIGID && kx < FULL_FLEX ? 1 : 0
+    turnY[b] = hy >= HARD_RIGID && ky > HARD_RIGID && ky < FULL_FLEX ? 1 : 0
     const vx = shapeRules ? Math.min(kx, sx) : mx
     const vy = shapeRules ? Math.min(ky, sy) : my
     flexX[b] = Math.pow(vx, k)
@@ -546,6 +686,8 @@ export function analyzeFlex(
   // `profile.ink` — sees real ink occupancy rather than undefined.
   out.x.ink = inkX
   out.y.ink = inkY
+  out.x.turn = turnX
+  out.y.turn = turnY
 
   if (shapeRules) {
     // Curves stay smooth: ease the freshly-powed profile away from its rigid
@@ -657,100 +799,179 @@ const PARTIAL_GROWTH_CAP = 2
  *  further — the rule that keeps condensed letters from touching. */
 const WHITESPACE_FLOOR_STEMS = 0.6
 
-function binWidths(flex: Float64Array, w: number, S: number, ink?: Float64Array, stemScale: number = stemFactor(S)): Float64Array {
+function binWidths(
+  flex: Float64Array,
+  w: number,
+  S: number,
+  ink?: Float64Array,
+  stemScale: number = stemFactor(S),
+  turn?: Uint8Array,
+  turnScale?: number,
+): Float64Array {
   const n = flex.length
   const out = new Float64Array(n).fill(w)
   const total = n * w
   const delta = (S - 1) * total
-  if (Math.abs(delta) < 1e-12) return out
-  if (delta > 0) {
-    let sum0 = 0
-    for (const f of flex) sum0 += f
-    if (sum0 < 1e-9) return out   // all-rigid: the glyph cannot widen
-    const cap = PARTIAL_GROWTH_CAP * S * w
-    let remaining = delta
-    for (let pass = 0; pass < 4 && remaining > 1e-9; pass++) {
-      let sum = 0
-      for (let i = 0; i < n; i++) {
-        if (!(flex[i]! > 0)) continue
-        if (flex[i]! >= FULL_FLEX || out[i]! < cap - 1e-12) sum += flex[i]!
+  if (Math.abs(delta) >= 1e-12) {
+    if (delta > 0) {
+      let sum0 = 0
+      for (const f of flex) sum0 += f
+      if (sum0 >= 1e-9) {   // else all-rigid: the glyph cannot widen at all
+        const cap = PARTIAL_GROWTH_CAP * S * w
+        let remaining = delta
+        for (let pass = 0; pass < 4 && remaining > 1e-9; pass++) {
+          let sum = 0
+          for (let i = 0; i < n; i++) {
+            if (!(flex[i]! > 0)) continue
+            if (flex[i]! >= FULL_FLEX || out[i]! < cap - 1e-12) sum += flex[i]!
+          }
+          if (sum < 1e-9) break
+          let absorbed = 0
+          for (let i = 0; i < n; i++) {
+            if (!(flex[i]! > 0)) continue
+            const full = flex[i]! >= FULL_FLEX
+            if (!full && out[i]! >= cap - 1e-12) continue
+            const want = remaining * (flex[i]! / sum)
+            const take = full ? want : Math.min(want, cap - out[i]!)
+            out[i]! += take
+            absorbed += take
+          }
+          remaining -= absorbed
+          if (absorbed < 1e-12) break
+        }
+        // Leftover means every resisting bin hit its cap and nothing fully
+        // flexible exists: the ink genuinely cannot widen to S. Dropped by
+        // design — whitespace still scales, so the word's rhythm holds.
       }
-      if (sum < 1e-9) break
-      let absorbed = 0
+    } else {
+      // Condense. Rigid bins (flex < 0.05) are a STEM: a typeface has ONE
+      // stem width, so how much a stem thins follows the deterministic
+      // `stemFactor(S)` schedule alone — identical for every glyph, never
+      // negotiated per-glyph against what else the glyph happens to hold. A
+      // counter-less 'I' simply under-condenses instead of stealing weight
+      // consistency from its neighbours.
+      // The stems' own reduction already counts against the deficit —
+      // without subtracting it here, the counter waterfall below runs
+      // against the FULL original deficit on top of what the stems just
+      // gave, and the two reductions stack: the glyph condenses past S
+      // instead of landing on it.
+      let deficit = -delta
       for (let i = 0; i < n; i++) {
-        if (!(flex[i]! > 0)) continue
-        const full = flex[i]! >= FULL_FLEX
-        if (!full && out[i]! >= cap - 1e-12) continue
-        const want = remaining * (flex[i]! / sum)
-        const take = full ? want : Math.min(want, cap - out[i]!)
-        out[i]! += take
-        absorbed += take
+        if (flex[i]! < 0.05) {
+          const thinned = w * stemScale
+          deficit -= w - thinned
+          out[i] = thinned
+        }
       }
-      remaining -= absorbed
-      if (absorbed < 1e-12) break
+      // The rest of the ORDER OF SACRIFICE: empty space (counters, gaps)
+      // gives first but floors at EMPTY_BIN_FLOOR — thinner reads as a
+      // crack, not a counter. Ink running parallel to the stretch (arches,
+      // crossbars, spines) shortens next, floored higher: a curve needs
+      // room to turn. Each bin gets its own floor from what it actually
+      // holds.
+      const floor = new Float64Array(n)
+      for (let i = 0; i < n; i++) {
+        const isInk = ink ? ink[i]! > 0 : flex[i]! < FULL_FLEX
+        floor[i] = w * (flex[i]! < 0.05 ? RIGID_BIN_FLOOR : isInk ? INK_BIN_FLOOR : EMPTY_BIN_FLOOR)
+      }
+      // Phase 1 (and only phase): bins that resist the stretch least
+      // (non-rigid — empty space and ink-bearing-but-flexible slices)
+      // shrink toward their OWN floor, proportional to flex, over up to 4
+      // waterfall passes (a bin hitting its floor stops absorbing and the
+      // rest re-split what's left). Gated on `flex >= 0.05`, the same rigid
+      // cut used for the preset above and the floor table below — NOT
+      // `flex > 0` — because a real glyph's "rigid" column is never exactly
+      // 0 (chamfer-propagated tangents leave float noise like 0.00013);
+      // gating on literal positivity would let the stem's own bins sneak
+      // back into this waterfall and thin a second time on top of their
+      // schedule width. There is no second, headroom-proportional phase
+      // over all bins: the stems already had their say above, and letting
+      // counters renegotiate against the stems' fixed contribution is
+      // exactly the per-glyph negotiation that made an 'I' thin its one
+      // stem to reach S while an 'L' left its stem untouched. Whatever
+      // deficit is left when every eligible bin has floored is dropped —
+      // consistency of stem weight beats reaching S exactly; the run-level
+      // advance still tightens.
+      for (let pass = 0; pass < 4 && deficit > 1e-9; pass++) {
+        let sum = 0
+        for (let i = 0; i < n; i++) if (flex[i]! >= 0.05 && out[i]! > floor[i]! + 1e-12) sum += flex[i]!
+        if (sum < 1e-9) break
+        let taken = 0
+        for (let i = 0; i < n; i++) {
+          if (!(flex[i]! >= 0.05) || out[i]! <= floor[i]! + 1e-12) continue
+          const can = Math.min(deficit * (flex[i]! / sum), out[i]! - floor[i]!)
+          out[i]! -= can
+          taken += can
+        }
+        deficit -= taken
+        if (taken < 1e-12) break
+      }
     }
-    // Leftover means every resisting bin hit its cap and nothing fully
-    // flexible exists: the ink genuinely cannot widen to S. Dropped by
-    // design — whitespace still scales, so the word's rhythm holds.
-    return out
   }
-  // Condense. Rigid bins (flex < 0.05) are a STEM: a typeface has ONE stem
-  // width, so how much a stem thins follows the deterministic `stemFactor(S)`
-  // schedule alone — identical for every glyph, never negotiated per-glyph
-  // against what else the glyph happens to hold. A counter-less 'I' simply
-  // under-condenses instead of stealing weight consistency from its
-  // neighbours.
-  // The stems' own reduction already counts against the deficit — without
-  // subtracting it here, the counter waterfall below runs against the FULL
-  // original deficit on top of what the stems just gave, and the two
-  // reductions stack: the glyph condenses past S instead of landing on it.
-  let deficit = -delta
-  for (let i = 0; i < n; i++) {
-    if (flex[i]! < 0.05) {
-      const thinned = w * stemScale
-      deficit -= w - thinned
-      out[i] = thinned
-    }
-  }
-  // The rest of the ORDER OF SACRIFICE: empty space (counters, gaps) gives
-  // first but floors at EMPTY_BIN_FLOOR — thinner reads as a crack, not a
-  // counter. Ink running parallel to the stretch (arches, crossbars, spines)
-  // shortens next, floored higher: a curve needs room to turn. Each bin gets
-  // its own floor from what it actually holds.
-  const floor = new Float64Array(n)
-  for (let i = 0; i < n; i++) {
-    const isInk = ink ? ink[i]! > 0 : flex[i]! < FULL_FLEX
-    floor[i] = w * (flex[i]! < 0.05 ? RIGID_BIN_FLOOR : isInk ? INK_BIN_FLOOR : EMPTY_BIN_FLOOR)
-  }
-  // Phase 1 (and only phase): bins that resist the stretch least (non-rigid —
-  // empty space and ink-bearing-but-flexible slices) shrink toward their OWN
-  // floor, proportional to flex, over up to 4 waterfall passes (a bin hitting
-  // its floor stops absorbing and the rest re-split what's left). Gated on
-  // `flex >= 0.05`, the same rigid cut used for the preset above and the floor
-  // table below — NOT `flex > 0` — because a real glyph's "rigid" column is
-  // never exactly 0 (chamfer-propagated tangents leave float noise like
-  // 0.00013); gating on literal positivity would let the stem's own bins
-  // sneak back into this waterfall and thin a second time on top of their
-  // schedule width. There is no second, headroom-proportional phase over all
-  // bins: the stems already had their say above, and letting counters
-  // renegotiate against the stems' fixed contribution is exactly the
-  // per-glyph negotiation that made an 'I' thin its one stem to reach S while
-  // an 'L' left its stem untouched. Whatever deficit is left when every
-  // eligible bin has floored is dropped — consistency of stem weight beats
-  // reaching S exactly; the run-level advance still tightens.
-  for (let pass = 0; pass < 4 && deficit > 1e-9; pass++) {
-    let sum = 0
-    for (let i = 0; i < n; i++) if (flex[i]! >= 0.05 && out[i]! > floor[i]! + 1e-12) sum += flex[i]!
-    if (sum < 1e-9) break
-    let taken = 0
+  // Rounds stay round (rule 10) — MULTIPLICATIVE coupling, applied AFTER the
+  // ordinary distribution above (turn bins take part in it exactly like any
+  // other bin; nothing above even reads `turn`). This makes the rule an
+  // IDENTITY at turnScale = 1 by construction — no separate "no-op preset"
+  // path needed, and no bins are ever excluded from the ordinary pool (the
+  // failure mode of the earlier preset-based mechanic, which concentrated
+  // the whole band's growth onto whatever few bins were left).
+  //
+  // Multiply each turn bin's freshly-computed width by turnScale, then push
+  // the resulting total change onto the FREE bins (flex ≥ HARD_RIGID and not
+  // turn — a rigid bin never moves) proportional to each one's OWN current
+  // width. Growing back is uncapped (turnScale ≤ 1 only ever gives turn bins
+  // back to the free pool what they would otherwise have absorbed); shrinking
+  // reuses the same per-bin floor the condense waterfall above uses, over the
+  // same waterfall shape, so a floored free bin stops absorbing and the rest
+  // re-split what's left. No free bins, or every free bin already floored:
+  // the shortfall is dropped, same "leftover" philosophy as everywhere else
+  // in this function — the band's total may then land a hair off S, which is
+  // preferable to breaching a floor or over-crediting a bin that has none to
+  // give.
+  if (turn && turnScale !== undefined) {
+    let diff = 0
     for (let i = 0; i < n; i++) {
-      if (!(flex[i]! >= 0.05) || out[i]! <= floor[i]! + 1e-12) continue
-      const can = Math.min(deficit * (flex[i]! / sum), out[i]! - floor[i]!)
-      out[i]! -= can
-      taken += can
+      if (!turn[i]) continue
+      const next = out[i]! * turnScale
+      diff += next - out[i]!
+      out[i] = next
     }
-    deficit -= taken
-    if (taken < 1e-12) break
+    if (Math.abs(diff) > 1e-12) {
+      const isFree = (i: number) => !turn[i] && flex[i]! >= HARD_RIGID
+      let freeTotal = 0
+      for (let i = 0; i < n; i++) if (isFree(i)) freeTotal += out[i]!
+      if (freeTotal > 1e-9) {
+        const push = -diff
+        if (push >= 0) {
+          for (let i = 0; i < n; i++) {
+            if (!isFree(i)) continue
+            out[i]! += push * (out[i]! / freeTotal)
+          }
+        } else {
+          const floor = new Float64Array(n)
+          for (let i = 0; i < n; i++) {
+            if (!isFree(i)) continue
+            const isInk = ink ? ink[i]! > 0 : flex[i]! < FULL_FLEX
+            floor[i] = w * (isInk ? INK_BIN_FLOOR : EMPTY_BIN_FLOOR)
+          }
+          let need = -push
+          for (let pass = 0; pass < 4 && need > 1e-9; pass++) {
+            let sum = 0
+            for (let i = 0; i < n; i++) if (isFree(i) && out[i]! > floor[i]! + 1e-12) sum += out[i]!
+            if (sum < 1e-9) break
+            let taken = 0
+            for (let i = 0; i < n; i++) {
+              if (!isFree(i) || out[i]! <= floor[i]! + 1e-12) continue
+              const can = Math.min(need * (out[i]! / sum), out[i]! - floor[i]!)
+              out[i]! -= can
+              taken += can
+            }
+            need -= taken
+            if (taken < 1e-12) break
+          }
+        }
+      }
+    }
   }
   return out
 }
@@ -777,14 +998,14 @@ function binWidths(flex: Float64Array, w: number, S: number, ink?: Float64Array,
  * keep its drawn size rather than stretch, which is exactly classic optical
  * overshoot compensation.
  */
-function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number[], stemScale?: number): Float64Array {
-  const { start, binSize: w, flex, ink } = profile
+function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number[], stemScale?: number, turnScale?: number): Float64Array {
+  const { start, binSize: w, flex, ink, turn } = profile
   const n = flex.length
   const total = n * w
   // Keep only lines strictly inside the profile's own span, sorted and
   // deduped — a line at or beyond either end contributes no boundary.
   const lines = Array.from(new Set(zones.filter(z => z > start && z < start + total))).sort((a, b) => a - b)
-  if (!lines.length) return binWidths(flex, w, S, ink, stemScale)
+  if (!lines.length) return binWidths(flex, w, S, ink, stemScale, turn, turnScale)
 
   // A bin belongs to the band containing its CENTRE, not its edges — so a
   // zone line that lands mid-bin (the common case; zones rarely fall on a
@@ -806,17 +1027,20 @@ function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number
       // band's own offset.
       const bandFlex = flex.subarray(lo, i)
       const bandInk = ink ? ink.subarray(lo, i) : undefined
-      out.set(binWidths(bandFlex, w, S, bandInk, stemScale), lo)
+      const bandTurn = turn ? turn.subarray(lo, i) : undefined
+      out.set(binWidths(bandFlex, w, S, bandInk, stemScale, bandTurn, turnScale), lo)
       lo = i
     }
   }
   return out
 }
 
-export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number, zones?: readonly number[], stemScale?: number): Remap {
-  const { start, binSize: w, flex, ink } = profile
+export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number, zones?: readonly number[], stemScale?: number, turnScale?: number): Remap {
+  const { start, binSize: w, flex, ink, turn } = profile
   const n = flex.length
-  const widths = zones && zones.length ? bandedBinWidths(profile, S, zones, stemScale) : binWidths(flex, w, S, ink, stemScale)
+  const widths = zones && zones.length
+    ? bandedBinWidths(profile, S, zones, stemScale, turnScale)
+    : binWidths(flex, w, S, ink, stemScale, turn, turnScale)
   const src = new Float64Array(n + 1)
   const dst = new Float64Array(n + 1)
   let acc = start
@@ -929,6 +1153,11 @@ export function stretchOutlines(
   // both axes, so a rigid Y bin (an arch/crossbar thickness) thins by the
   // same rule a rigid X bin (a stem) does.
   const stemScale = stemFactor(S * SY)
+  // Rounds stay round (rule 10): a round's turn-region height follows its
+  // WIDTH, so the Y remap (and only the Y remap — X gets no turn preset)
+  // presets its turn bins to S^roundCoupling.
+  const roundCoupling = opts.roundCoupling ?? ROUND_COUPLING
+  const turnScaleY = Math.pow(S, roundCoupling)
   const glyphs: GlyphOutline[] = []
   let penOld = 0
   let penNew = 0
@@ -942,7 +1171,7 @@ export function stretchOutlines(
     if (hasInk(g)) {
       flex = glyphFlexFor(g, flexOpts)
       const rx = buildRemap(flex.x, S, undefined, undefined, stemScale)
-      const ry = buildRemap(flex.y, SY, 0, zones, stemScale)
+      const ry = buildRemap(flex.y, SY, 0, zones, stemScale, turnScaleY)
       commands = applyRemaps(g.commands, rx, ry)
       bbox = {
         minX: remapValue(rx, g.bbox.minX),
