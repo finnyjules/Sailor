@@ -119,19 +119,27 @@ const shimmerPhase = computed(() => {
   return (vp.x + vp.y) * 0.7
     + (props.annotation.x + props.annotation.y) * (vp.zoom || 1) * 0.35
 })
+// Colour cycling: every fleck carries its own random hue (baked into the
+// speck texture), and the whole field hue-rotates with the pan — so a
+// fleck's colour changes as the band crosses it, with no gradient tiles
+// (a tiled gradient left a visible seam).
+const hueTurn = computed(() => `${(shimmerPhase.value * 0.8).toFixed(1)}deg`)
 const glitterStyle = computed(() => ({
-  backgroundPosition: `${shimmerPhase.value.toFixed(1)}px 0px`,
+  filter: `hue-rotate(${hueTurn.value})`,
 }))
-// The glint layer carries TWO masks (specks ∩ moving band): the speck mask
-// stays put, the band mask slides with the pan at 1.6× so it rakes across.
-const glintStyle = computed(() => {
-  const band = `0px 0px, ${(shimmerPhase.value * 1.6).toFixed(1)}px 0px`
-  return {
-    backgroundPosition: `${shimmerPhase.value.toFixed(1)}px 0px`,
-    maskPosition: band,
-    WebkitMaskPosition: band,
-  }
-})
+// The glint layers are masked by the moving light band only (the flecks are
+// already in the texture); the band mask slides with the pan at 1.6×.
+const bandPosition = computed(() => `${(shimmerPhase.value * 1.6).toFixed(1)}px 0px`)
+const glintStyle = computed(() => ({
+  filter: `hue-rotate(${hueTurn.value})`,
+  maskPosition: bandPosition.value,
+  WebkitMaskPosition: bandPosition.value,
+}))
+const glowStyle = computed(() => ({
+  filter: `blur(2.5px) hue-rotate(${hueTurn.value})`,
+  maskPosition: bandPosition.value,
+  WebkitMaskPosition: bandPosition.value,
+}))
 </script>
 
 <template>
@@ -156,7 +164,7 @@ const glintStyle = computed(() => {
          text, ignores the pointer. -->
     <div class="sticky-annotation__shimmer" aria-hidden="true">
       <div class="sticky-annotation__glitter" :style="glitterStyle" />
-      <div class="sticky-annotation__glint sticky-annotation__glint--glow" :style="glintStyle" />
+      <div class="sticky-annotation__glint sticky-annotation__glint--glow" :style="glowStyle" />
       <div class="sticky-annotation__glint" :style="glintStyle" />
     </div>
 
@@ -241,17 +249,16 @@ const glintStyle = computed(() => {
 }
 
 /* ── Foil glitter ─────────────────────────────────────────────────────────
-   Two layers over one static speck field (SVG feTurbulence mask), neither
-   self-animating — positions slide with the canvas pan via inline styles
-   (see shimmerPhase in the script).
-   - glitter: the resting flecks — the iridescent gradient through the speck
-     mask at very low opacity, so the paper reads white with a faint
-     texture until light hits it.
-   - glint: the SAME specks, but additionally masked by a moving light band
-     (mask-composite intersect), showing a saturated iridescent gradient at
-     near-full opacity. Only the flecks under the band flash — the shimmer
-     is on the speck, never a wash over the paper. The hue gradient slides
-     with the pan too, so a fleck changes colour as the band crosses it. */
+   One speck texture (SVG feTurbulence, ~17% coverage) coloured by a low-
+   frequency saturated noise, so flecks form drifting patches of hue — real
+   multi-colour glitter, no gradient tiles; stitchTiles keeps the repeat
+   seamless. Nothing self-animates; the pan drives everything via inline
+   styles (see shimmerPhase): the field hue-rotates, and a light band mask
+   slides across the glint layers.
+   - glitter: the resting flecks at very low opacity — the paper reads white
+     with a faint dusting until light hits it.
+   - glint (+ a blurred --glow twin beneath it): the same flecks at full
+     strength, masked by the moving band — only flecks under the light flash. */
 .sticky-annotation__shimmer {
   position: absolute;
   inset: 0;
@@ -263,42 +270,25 @@ const glintStyle = computed(() => {
 .sticky-annotation__glint {
   position: absolute;
   inset: 0;
-  /* Short hue period so one light band holds several colours at once —
-     multi-colour glitter, not a monochrome streak. */
-  background-size: 110px 100%;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='260'%20height='260'%3E%3Cfilter%20id='s'%20color-interpolation-filters='sRGB'%20x='0'%20y='0'%20width='100%'%20height='100%'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.012'%20numOctaves='1'%20seed='3'%20stitchTiles='stitch'%20result='col'/%3E%3CfeColorMatrix%20in='col'%20type='saturate'%20values='14'%20result='sat'/%3E%3CfeComponentTransfer%20in='sat'%20result='color'%3E%3CfeFuncR%20type='gamma'%20amplitude='1.3'%20exponent='0.7'/%3E%3CfeFuncG%20type='gamma'%20amplitude='1.3'%20exponent='0.7'/%3E%3CfeFuncB%20type='gamma'%20amplitude='1.3'%20exponent='0.7'/%3E%3CfeFuncA%20type='linear'%20slope='0'%20intercept='1'/%3E%3C/feComponentTransfer%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'%20stitchTiles='stitch'%20result='sp'/%3E%3CfeComponentTransfer%20in='sp'%20result='alpha'%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3CfeComposite%20in='color'%20in2='alpha'%20operator='in'/%3E%3C/filter%3E%3Crect%20width='260'%20height='260'%20filter='url(%23s)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 260px 260px;
 }
 .sticky-annotation__glitter {
-  background-image: linear-gradient(100deg,
-    #f6a5c0, #f7d08a, #a9e8bf, #9fd0f7, #cdb4f6, #f6a5c0);
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E");
-  -webkit-mask-repeat: repeat;
-  mask-repeat: repeat;
-  -webkit-mask-size: 130px 130px;
-  mask-size: 130px 130px;
   opacity: 0.14;
 }
 .sticky-annotation__glint {
-  background-image: linear-gradient(100deg,
-    #ff5f9e, #ffbf2e, #3ddc84, #3fa9ff, #a86bff, #ff5f9e);
-  -webkit-mask-image:
-    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E"),
-    linear-gradient(115deg, rgba(0, 0, 0, 0) 22%, #000 50%, rgba(0, 0, 0, 0) 78%);
-  mask-image:
-    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='turbulence'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'/%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type='discrete'%20tableValues='0%200%200%200%200%200%200%200%201%201%201%201%201%201%201%201%201%201%201%201'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E"),
-    linear-gradient(115deg, rgba(0, 0, 0, 0) 22%, #000 50%, rgba(0, 0, 0, 0) 78%);
-  -webkit-mask-repeat: repeat, repeat;
-  mask-repeat: repeat, repeat;
-  -webkit-mask-size: 130px 130px, 520px 100%;
-  mask-size: 130px 130px, 520px 100%;
-  -webkit-mask-composite: source-in;
-  mask-composite: intersect;
+  -webkit-mask-image: linear-gradient(115deg, rgba(0, 0, 0, 0) 22%, #000 50%, rgba(0, 0, 0, 0) 78%);
+  mask-image: linear-gradient(115deg, rgba(0, 0, 0, 0) 22%, #000 50%, rgba(0, 0, 0, 0) 78%);
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
+  -webkit-mask-size: 520px 100%;
+  mask-size: 520px 100%;
   opacity: 1;
 }
 /* Bloom: a blurred twin of the glint under it, so lit flecks glow instead
    of sitting flat on the paper. */
 .sticky-annotation__glint--glow {
-  filter: blur(2.5px);
   opacity: 0.9;
 }
 
