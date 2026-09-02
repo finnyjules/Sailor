@@ -770,6 +770,28 @@ describe('rounds stay round; terminals keep their angle', () => {
     expect(w2(0)).toBeCloseTo(10, 6)
     expect(w2(2)).toBeCloseTo(28.7, 6)
     expect(remapValue(m2, 80) - remapValue(m2, 0)).toBeCloseTo(160, 6)
+    // A turn SPAN is scaled by a TAPERED factor that is CONTINUOUS with what
+    // it abuts: 1 on its plateau side, the flank's own level c on its flank
+    // side, and turnScale at its peak — base(t) = (1 − t)·1 + t·c, factor =
+    // base + (turnScale − base)·bell(t). The single-bin spans above have
+    // bell = 1, so their numbers are the flat multiply's. Three shoulder bins
+    // (equal flex, so t = 1/6, 1/2, 5/6 and bell = 0.25, 1, 0.25) at S = 1,
+    // turnScale 1.5, rigid bin 0 on the left, free bins 4–6 on the right:
+    // f0 = (5/6 + c/6)·0.75 + 0.375 = 1 + c/8, f1 = 1.5, f2 = (1/6 + 5c/6)·0.75
+    // + 0.375 = 0.5 + 5c/8. Conservation 10·Σ(f − 1) + 30·(c − 1) = 0 →
+    // 7.5c + 30c = 30 → c = 0.8 → widths 11, 15, 10; the free bins 8 each;
+    // the rigid ends never move; total stays 80.
+    const flex3 = new Float64Array([0, 0.5, 0.5, 0.5, 1, 1, 1, 0])
+    const ink3  = new Float64Array([1, 1, 1, 1, 0, 0, 0, 1])
+    const turn3 = new Uint8Array([0, 1, 1, 1, 0, 0, 0, 0])
+    const m3 = buildRemap({ start: 0, binSize: 10, flex: flex3, ink: ink3, turn: turn3 }, 1, undefined, undefined, undefined, 1.5)
+    const w3 = (i: number) => remapValue(m3, (i + 1) * 10) - remapValue(m3, i * 10)
+    expect(w3(1)).toBeCloseTo(11, 6)
+    expect(w3(2)).toBeCloseTo(15, 6)
+    expect(w3(3)).toBeCloseTo(10, 6)
+    for (const i of [4, 5, 6]) expect(w3(i)).toBeCloseTo(8, 6)
+    expect(w3(0)).toBeCloseTo(10, 6); expect(w3(7)).toBeCloseTo(10, 6)
+    expect(remapValue(m3, 80) - remapValue(m3, 0)).toBeCloseTo(80, 6)
   })
 
   it("the 'o' has turn rows in Y, and none of them are the apex thickness", () => {
@@ -799,11 +821,17 @@ describe('rounds stay round; terminals keep their angle', () => {
     // measured against the same th0), not against an absolute target: the
     // multiplicative mechanic redistributes onto whatever free bins exist,
     // so the exact ratio a real curve lands on depends on its own flex
-    // shape, not just S — but coupling must make a real, substantial
-    // difference, and never make the turn region taller than uncoupled.
+    // shape, not just S — but coupling must make a real difference, and
+    // never make the turn region taller than uncoupled.
+    // Bound history: 0.12 under the flat multiply. The tapered, continuous
+    // turn pass (peak = turnScale, all variation inside the corner rows, the
+    // span's straighter rows flat at the flank's level) deliberately gives
+    // up most of that magnitude for a shoulder that stays a shoulder — the
+    // measured shortening is 0.0171 (thOld/th0 1.9373 → th1/th0 1.9202);
+    // the bound is that measurement minus 0.01, a labelled guard.
     const old = stretchOutlines(run, 0.7, 2.41, { roundCoupling: 0 }).glyphs[0]!
     const thOld = turnHeight(old.commands, old.bbox)
-    expect(th1 / th0).toBeLessThan(thOld / th0 - 0.12)   // at least 12% shorter than uncoupled
+    expect(th1 / th0).toBeLessThan(thOld / th0 - 0.007)   // measured 0.0171 shorter than uncoupled
     expect(th1).toBeLessThanOrEqual(thOld)                // and never longer than uncoupled
     // Apex thickness: judged the same way, against the UNCOUPLED glyph at
     // the same S/SY, not an absolute target. At this combined condense +
@@ -906,14 +934,8 @@ function inflectionsOf(commands: readonly PathCommand[]): number {
 }
 
 // The C1 map removes the bin-edge kink (a genuine derivative discontinuity,
-// verified below). The inflection counts on real glyphs do NOT drop to their
-// drawn baseline, though — what's left comes from a smooth but NON-AFFINE
-// local scale crossing a curve's shoulders (the remap's second derivative
-// fighting the drawn curvature within a single bin, not a jump between
-// bins). Removing that residual needs an affine-per-turn-region model, not a
-// smoother interpolant; that's a separate, not-yet-written spec. The two
-// tests below are regression GUARDS against the measured pre-fix numbers,
-// not the aspirational zero — see /Users/julien/Documents/GitHub/Sailor/.superpowers/sdd/c1-remap-report.md.
+// verified below). The inflection guards for real glyphs live in the bell
+// block further down — see /Users/julien/Documents/GitHub/Sailor/.superpowers/sdd/bell-report.md.
 describe('the remap is C1 — stretching adds no ripples', () => {
   it('remapValue is smooth: no slope jump at bin edges, exact at breakpoints, monotone', () => {
     const flex = new Float64Array([1, 1, 0, 0, 1, 1, 0.3, 1, 1, 1])
@@ -933,23 +955,70 @@ describe('the remap is C1 — stretching adds no ripples', () => {
     }
     void acc
   })
+})
 
-  it('a convex o gains no MORE inflections than the piecewise-linear remap did (target: 0 — needs affine turn regions, see spec)', () => {
-    const run = textOutlines(font, 'o')
-    expect(inflectionsOf(run.glyphs[0]!.commands)).toBe(0)
-    for (const [S, SY] of [[1, 2.5], [1.8, 1], [0.7, 2.41], [0.5, 1]] as const) {
-      expect(inflectionsOf(stretchOutlines(run, S, SY).glyphs[0]!.commands)).toBeLessThanOrEqual(8)
-    }
+// Between rigid features, stretch is distributed as a raised-cosine bell over
+// each free run — near zero beside the plateaus (a round's shoulders), peaking
+// mid-run (the flank / the counter) — instead of in proportion to each bin's
+// tangent alignment. The tangent analysis keeps deciding what is RIGID, what
+// is a TURN and what is a STRAIGHT SPAN; it no longer decides HOW MUCH each
+// free bin stretches, because scaling fastest exactly where a curve is
+// turning is what fought the drawn curvature and grew the ripples above.
+describe('bell distribution — harmony between rigid features', () => {
+  it('bell mode: a free run between two stems takes its growth as a raised cosine, stems untouched', () => {
+    const flex = new Float64Array([0, 0, 1, 1, 1, 1, 1, 1, 0, 0])
+    const ink  = new Float64Array([1, 1, 0, 0, 0, 0, 0, 0, 1, 1])
+    const m = buildRemap({ start: 0, binSize: 10, flex, ink }, 1.6, undefined, undefined, undefined, undefined, 'bell')
+    const width = (i: number) => remapValue(m, (i + 1) * 10) - remapValue(m, i * 10)
+    expect(width(0)).toBeCloseTo(10, 6); expect(width(9)).toBeCloseTo(10, 6)
+    // symmetric bell: edges of the run grow least, the middle most
+    expect(width(2)).toBeCloseTo(width(7), 6)
+    expect(width(4)).toBeCloseTo(width(5), 6)
+    expect(width(2)).toBeLessThan(width(3)); expect(width(3)).toBeLessThan(width(4))
+    expect(remapValue(m, 100) - remapValue(m, 0)).toBeCloseTo(160, 6)
   })
 
-  it('the S and the a do not get worse than the measured baseline (target: their drawn count)', () => {
-    // Drawn (unstretched) counts are S: 4, a: 6 — that's the real target, not
-    // met yet (affine turn regions, see spec). These guard the measured
-    // pre-fix ceiling at Height 2.5 so a future regression is caught even
-    // though the fix doesn't reach the drawn count.
-    const runS = textOutlines(font, 'S')
-    expect(inflectionsOf(stretchOutlines(runS, 1, 2.5).glyphs[0]!.commands)).toBeLessThanOrEqual(12)
-    const runA = textOutlines(font, 'a')
-    expect(inflectionsOf(stretchOutlines(runA, 1, 2.5).glyphs[0]!.commands)).toBeLessThanOrEqual(18)
+  it('bell mode keeps a straight span uniform inside a run', () => {
+    const flex = new Float64Array([0, 1, 1, 1, 1, 1, 1, 1, 1, 0])
+    const ink  = new Float64Array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+    const uniform = new Uint8Array([0, 0, 1, 1, 1, 1, 1, 1, 0, 0])
+    const m = buildRemap({ start: 0, binSize: 10, flex, ink, uniform }, 1.5, undefined, undefined, undefined, undefined, 'bell')
+    const width = (i: number) => remapValue(m, (i + 1) * 10) - remapValue(m, i * 10)
+    for (let i = 3; i <= 7; i++) expect(width(i)).toBeCloseTo(width(2), 6)
+    expect(remapValue(m, 100) - remapValue(m, 0)).toBeCloseTo(150, 6)
+  })
+
+  it('a convex o gains no inflections under Height 2.5; the other directions are guarded at their measured counts (bell)', () => {
+    const run = textOutlines(font, 'o')
+    expect(inflectionsOf(run.glyphs[0]!.commands)).toBe(0)
+    // Pure vertical stretch: the bell peaks at the flank's extreme, which is
+    // the one place a rising-then-falling scale agrees with the drawn
+    // curvature on both sides. Hard zero. (HEAD before the bell: 8.)
+    expect(inflectionsOf(stretchOutlines(run, 1, 2.5).glyphs[0]!.commands)).toBe(0)
+    // Wide (S = 1.8): rule 10's turn pass must bring the flank rows below
+    // the shoulder rows, and the bezier that owns the flank also has control
+    // points up in the corner rows where that taper varies — control-point
+    // remapping distorts the cubic and its flattest part flips: one pair per
+    // shoulder, 8. Only an affine map over each bezier's span could avoid
+    // it. With roundCoupling: 0 this setting measures 0. Target 0; guard 8.
+    expect(inflectionsOf(stretchOutlines(run, 1.8, 1).glyphs[0]!.commands)).toBeLessThanOrEqual(8)
+    // Deep condense (S = 0.7 and 0.5): every counter column carries arch
+    // ink, so every free bin floors at 0.5w; reaching S needs 34 of the 40
+    // free bins AT the floor, and the 3-bin cliff at the plateau's edge is
+    // the only transition S allows (`1.00 | 0.98 0.83 0.52 | 0.50 …`).
+    // Reaching S wins over bell shape here — accepted as physics. Guard 8.
+    expect(inflectionsOf(stretchOutlines(run, 0.7, 2.41).glyphs[0]!.commands)).toBeLessThanOrEqual(8)
+    expect(inflectionsOf(stretchOutlines(run, 0.5, 1).glyphs[0]!.commands)).toBeLessThanOrEqual(8)
+  })
+
+  it('the S and the a stay close to their drawn inflection counts under Height 2.5 (bell)', () => {
+    // Drawn counts are the target: S 4, a 6. One bell per bulge (the run
+    // splits at the S's spine / the a's bowl-arch junction) lands the S on
+    // exactly 4 and the a on 10 (HEAD: 12 / 16). Guards at 6 / 12.
+    const S = textOutlines(font, 'S'), a = textOutlines(font, 'a')
+    expect(inflectionsOf(S.glyphs[0]!.commands)).toBe(4)
+    expect(inflectionsOf(a.glyphs[0]!.commands)).toBe(6)
+    expect(inflectionsOf(stretchOutlines(S, 1, 2.5).glyphs[0]!.commands)).toBeLessThanOrEqual(6)
+    expect(inflectionsOf(stretchOutlines(a, 1, 2.5).glyphs[0]!.commands)).toBeLessThanOrEqual(12)
   })
 })

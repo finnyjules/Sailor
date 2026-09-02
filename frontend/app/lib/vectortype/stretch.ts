@@ -56,7 +56,21 @@ export interface FlexProfile {
    *  instead of letting the ordinary flex distribution hold or grow them.
    *  Optional for the same reason `ink` is. */
   turn?: Uint8Array
+  /** 1 for a bin that `uniformSpans` flattened — it lies on a straight
+   *  diagonal stroke and must stretch by the same amount as the rest of
+   *  that stroke's span, so the stroke stays straight. The bell
+   *  distribution reads this to give such a span one constant weight
+   *  instead of the bell's varying one. Optional like `ink` and `turn`. */
+  uniform?: Uint8Array
 }
+
+/** How a free bin's share of the stretch is decided (see `binWidths`):
+ *  `'flex'` — in proportion to its tangent alignment (the original
+ *  formulation; k shapes it); `'bell'` — as a raised cosine across each
+ *  maximal run of non-rigid bins, so the change is near zero beside the
+ *  rigid plateaus and largest mid-run. `stretchOutlines` uses `'bell'`
+ *  whenever shape rules are on. */
+export type DistributionMode = 'flex' | 'bell'
 
 export interface GlyphFlex {
   x: FlexProfile
@@ -291,7 +305,7 @@ const GRID = 96
  * after another would let the later span un-flatten the earlier one.
  * Spans are inclusive bin ranges; mutates `flex`.
  */
-export function uniformSpans(flex: Float64Array, hard: Float64Array, spans: Array<[number, number]>): void {
+export function uniformSpans(flex: Float64Array, hard: Float64Array, spans: Array<[number, number]>, mask?: Uint8Array): void {
   const n = flex.length
   if (!spans.length) return
   const sorted = spans
@@ -313,7 +327,11 @@ export function uniformSpans(flex: Float64Array, hard: Float64Array, spans: Arra
     }
     if (!cnt) continue
     const m = sum / cnt
-    for (let i = a; i <= b; i++) if (hard[i]! >= HARD_RIGID) flex[i] = m
+    for (let i = a; i <= b; i++) {
+      if (hard[i]! < HARD_RIGID) continue
+      flex[i] = m
+      if (mask) mask[i] = 1
+    }
   }
 }
 
@@ -327,6 +345,18 @@ export function symmetrize(flex: Float64Array): void {
     const m = (flex[i]! + flex[j]!) / 2
     flex[i] = m
     flex[j] = m
+  }
+}
+
+/** Mirror a 0/1 mask the same way (`symmetrize`): a bin is flagged when
+ *  either it or its mirror twin is — a symmetric outline's straight spans
+ *  are symmetric, so this only tidies one-sided bin rounding. */
+function symmetrizeMask(mask: Uint8Array): void {
+  const n = mask.length
+  for (let i = 0, j = n - 1; i < j; i++, j--) {
+    const v = mask[i]! | mask[j]!
+    mask[i] = v
+    mask[j] = v
   }
 }
 
@@ -721,14 +751,18 @@ export function analyzeFlex(
     const longestFirst = (a: [number, number], b: [number, number]) => (b[1] - b[0]) - (a[1] - a[0])
     spansX.sort(longestFirst)
     spansY.sort(longestFirst)
-    uniformSpans(flexX, hardX, spansX)
-    uniformSpans(flexY, hardY, spansY)
+    const uniformX = new Uint8Array(bins)
+    const uniformY = new Uint8Array(bins)
+    uniformSpans(flexX, hardX, spansX, uniformX)
+    uniformSpans(flexY, hardY, spansY, uniformY)
+    out.x.uniform = uniformX
+    out.y.uniform = uniformY
 
     // Symmetry: a mirror-symmetric outline gets a mirror-symmetric profile.
     const pts = new Float64Array(segs.length * 2)
     for (let i = 0; i < segs.length; i++) { pts[2 * i] = segs[i]!.x0; pts[2 * i + 1] = segs[i]!.y0 }
-    if (isMirrorSymmetric(pts, 'x', bbox)) { symmetrize(flexX); symmetrize(hardX) }
-    if (isMirrorSymmetric(pts, 'y', bbox)) { symmetrize(flexY); symmetrize(hardY) }
+    if (isMirrorSymmetric(pts, 'x', bbox)) { symmetrize(flexX); symmetrize(hardX); symmetrizeMask(uniformX) }
+    if (isMirrorSymmetric(pts, 'y', bbox)) { symmetrize(flexY); symmetrize(hardY); symmetrizeMask(uniformY) }
   }
 
   return out
@@ -824,6 +858,147 @@ const PARTIAL_GROWTH_CAP = 2
  *  further — the rule that keeps condensed letters from touching. */
 const WHITESPACE_FLOOR_STEMS = 0.6
 
+/** Free runs split into one bell PER BULGE at a partial waist: an interior
+ *  local minimum of the flex profile below this (the S's spine at 0.26, the
+ *  a's bowl/arch junction) … */
+const SPLIT_FLEX_MAX = 0.5
+/** … that is a real dip, not float noise on a ramp: the profile must rise at
+ *  least this much on both sides of it before the next minimum or the run's
+ *  end, else the lower of two neighbouring minima wins. */
+const SPLIT_PROMINENCE = 0.1
+
+/** What a free run's end abuts — decides whether the bell tapers there and,
+ *  under condense, whether it anchors at the plateau's own scale. */
+const END_NONE = 0      // the profile's edge, or a zone line with free ink beyond: flat
+const END_PLATEAU = 1   // a rigid plateau: taper to ~0, anchor at stemScale under condense
+const END_SPLIT = 2     // a waist between two bulges: taper to ~0, no anchor
+/** Rows of a turn span with flex below this are still clearly TURNING (the
+ *  ink's tangent within ~30° of perpendicular to the axis); the turn pass
+ *  confines its whole rise/peak/descent to them and holds the span's
+ *  straighter rows flat at the flank's level — see `binWidths`. */
+const TURN_CURVED = 0.5
+
+/** Raised cosine over a span of `L` bins: 0 at the span's edges, 1 at its
+ *  middle; a span of 1 gets 1. Shared by the bell distribution and the
+ *  tapered turn pass. */
+function raisedCosine(j: number, L: number): number {
+  return 0.5 - 0.5 * Math.cos(2 * Math.PI * (j + 0.5) / L)
+}
+
+/** Waist bins that split the free run [i, j) into one sub-run per bulge —
+ *  each returned index starts a new sub-run. Interior local minima below
+ *  `SPLIT_FLEX_MAX`; a flat minimum counts once (its first bin); neighbouring
+ *  minima without `SPLIT_PROMINENCE` of rise between them collapse to the
+ *  lower one; a minimum without that much rise on its outer side is just the
+ *  ramp's own noise and is dropped. The boundary bin joins the sub-run whose
+ *  neighbour is lower. Deterministic. */
+function waistSplits(flex: Float64Array, i: number, j: number): number[] {
+  const acc: number[] = []
+  const peakBetween = (a: number, b: number) => { let m = -Infinity; for (let q = a; q < b; q++) if (flex[q]! > m) m = flex[q]!; return m }
+  for (let b = i + 1; b < j - 1; b++) {
+    const v = flex[b]!
+    if (v >= SPLIT_FLEX_MAX || v > flex[b - 1]! || v > flex[b + 1]!) continue
+    if (acc.length) {
+      const last = acc[acc.length - 1]!
+      if (peakBetween(last + 1, b) - Math.max(flex[last]!, v) < SPLIT_PROMINENCE) {
+        if (v < flex[last]!) acc[acc.length - 1] = b
+        continue
+      }
+    }
+    acc.push(b)
+  }
+  if (!acc.length) return acc
+  if (peakBetween(i, acc[0]!) - flex[acc[0]!]! < SPLIT_PROMINENCE) acc.shift()
+  if (acc.length && peakBetween(acc[acc.length - 1]! + 1, j) - flex[acc[acc.length - 1]!]! < SPLIT_PROMINENCE) acc.pop()
+  return acc.map(b => (flex[b + 1]! < flex[b - 1]! ? b : b + 1))
+}
+
+interface BellShape {
+  /** Sharing weights: each sub-run's bell normalised to sum to its bin
+   *  count, so a sub-run's share of the delta is ∝ its length. 0 on rigid. */
+  share: Float64Array
+  /** The raw bell in [0, 1] per bin (uniform spans flattened to their mean). */
+  bell: Float64Array
+  /** How much of a bin's condense shrink is the PLATEAU'S OWN thinning: 1 −
+   *  bell on the half of a sub-run whose end is a rigid plateau, 0 elsewhere.
+   *  Under condense a run beside a plateau starts from `stemScale` at that
+   *  end and dips from there, so there is no bump at the plateau's edge. */
+  anchor: Float64Array
+}
+
+/**
+ * Sharing weights for the BELL distribution. The tangent analysis decides
+ * what is rigid (flex < HARD_RIGID); between rigid features the change is
+ * spread as smoothly as possible: over each free run a raised cosine — near
+ * zero beside the plateaus (a round's shoulders), peaking mid-run (the flank
+ * / the counter). Whitespace in the middle of a counter stretches most, which
+ * is typographically right; a crossbar spanning a counter elongates
+ * non-uniformly, which is invisible on a straight horizontal line.
+ *
+ * ONE BELL PER BULGE: a free run is split at its partial waists (see
+ * `waistSplits`) so an S gets a bell per bowl, each peaking at that bowl's
+ * own extreme — the only place a rising-then-falling scale agrees with the
+ * drawn curvature on both sides.
+ *
+ * A run tapers only towards a plateau or a waist. Where it ends at the
+ * profile's own edge, or at a zone line with FREE ink on the far side
+ * (`rigidBeyond`), there is nothing to ease into, so that side stays flat (a
+ * half bell, or no bell at all — an all-free profile, k = 0, scales
+ * uniformly exactly as it always did). Bins `uniformSpans` flattened share
+ * with one CONSTANT weight — the mean bell weight over their span — so a
+ * straight diagonal stays straight.
+ */
+function bellWeights(flex: Float64Array, uniform: Uint8Array | undefined, rigidBeyond: readonly [boolean, boolean]): BellShape {
+  const n = flex.length
+  const share = new Float64Array(n)
+  const bell = new Float64Array(n)
+  const anchor = new Float64Array(n)
+  let i = 0
+  while (i < n) {
+    if (flex[i]! < HARD_RIGID) { i++; continue }
+    let j = i
+    while (j < n && flex[j]! >= HARD_RIGID) j++
+    const endL = i > 0 || rigidBeyond[0] ? END_PLATEAU : END_NONE
+    const endR = j < n || rigidBeyond[1] ? END_PLATEAU : END_NONE
+    const bounds = [i, ...waistSplits(flex, i, j), j]
+    for (let r = 0; r + 1 < bounds.length; r++) {
+      const a = bounds[r]!, b = bounds[r + 1]!
+      const kL = r === 0 ? endL : END_SPLIT
+      const kR = r + 2 === bounds.length ? endR : END_SPLIT
+      const L = b - a
+      for (let q = a; q < b; q++) {
+        const t = (q - a + 0.5) / L
+        bell[q] = kL && kR ? raisedCosine(q - a, L)
+          : kL ? 0.5 - 0.5 * Math.cos(Math.PI * t)
+          : kR ? 0.5 + 0.5 * Math.cos(Math.PI * t)
+          : 1
+      }
+      if (uniform) {
+        let u = a
+        while (u < b) {
+          if (!uniform[u]) { u++; continue }
+          let v = u, sum = 0
+          while (v < b && uniform[v]) { sum += bell[v]!; v++ }
+          const mean = sum / (v - u)
+          for (let q = u; q < v; q++) bell[q] = mean
+          u = v
+        }
+      }
+      for (let q = a; q < b; q++) {
+        const nearL = q - a < b - 1 - q || (q - a === b - 1 - q && kL === END_PLATEAU)
+        const k = nearL ? kL : kR
+        anchor[q] = k === END_PLATEAU ? 1 - bell[q]! : 0
+      }
+      let sum = 0
+      for (let q = a; q < b; q++) sum += bell[q]!
+      const scale = sum > 0 ? L / sum : 0
+      for (let q = a; q < b; q++) share[q] = bell[q]! * scale
+    }
+    i = j
+  }
+  return { share, bell, anchor }
+}
+
 function binWidths(
   flex: Float64Array,
   w: number,
@@ -832,31 +1007,39 @@ function binWidths(
   stemScale: number = stemFactor(S),
   turn?: Uint8Array,
   turnScale?: number,
+  mode: DistributionMode = 'flex',
+  uniform?: Uint8Array,
+  rigidBeyond: readonly [boolean, boolean] = [false, false],
 ): Float64Array {
   const n = flex.length
   const out = new Float64Array(n).fill(w)
   const total = n * w
   const delta = (S - 1) * total
+  // What decides each bin's SHARE of the change. Everything else — which
+  // bins are rigid, the floors and caps, the turn pass below — reads `flex`
+  // exactly as before; only the proportional split reads `share`.
+  const shape = mode === 'bell' ? bellWeights(flex, uniform, rigidBeyond) : undefined
+  const share = shape ? shape.share : flex
   if (Math.abs(delta) >= 1e-12) {
     if (delta > 0) {
       let sum0 = 0
-      for (const f of flex) sum0 += f
+      for (const f of share) sum0 += f
       if (sum0 >= 1e-9) {   // else all-rigid: the glyph cannot widen at all
         const cap = PARTIAL_GROWTH_CAP * S * w
         let remaining = delta
         for (let pass = 0; pass < 4 && remaining > 1e-9; pass++) {
           let sum = 0
           for (let i = 0; i < n; i++) {
-            if (!(flex[i]! > 0)) continue
-            if (flex[i]! >= FULL_FLEX || out[i]! < cap - 1e-12) sum += flex[i]!
+            if (!(share[i]! > 0)) continue
+            if (flex[i]! >= FULL_FLEX || out[i]! < cap - 1e-12) sum += share[i]!
           }
           if (sum < 1e-9) break
           let absorbed = 0
           for (let i = 0; i < n; i++) {
-            if (!(flex[i]! > 0)) continue
+            if (!(share[i]! > 0)) continue
             const full = flex[i]! >= FULL_FLEX
             if (!full && out[i]! >= cap - 1e-12) continue
-            const want = remaining * (flex[i]! / sum)
+            const want = remaining * (share[i]! / sum)
             const take = full ? want : Math.min(want, cap - out[i]!)
             out[i]! += take
             absorbed += take
@@ -899,6 +1082,26 @@ function binWidths(
         const isInk = ink ? ink[i]! > 0 : flex[i]! < FULL_FLEX
         floor[i] = w * (flex[i]! < 0.05 ? RIGID_BIN_FLOOR : isInk ? INK_BIN_FLOOR : EMPTY_BIN_FLOOR)
       }
+      // Bell mode: a free run beside a plateau starts from the plateau's own
+      // scale. The part of each bin's shrink that is the plateau's thinning
+      // — w·(1 − stemScale), fading out with 1 − bell towards the run's
+      // middle — is preset here, deterministically, like the stems' own
+      // schedule above; only the remaining deficit is negotiated by the
+      // bell below. Scaled down (never up) so the preset can't out-shrink a
+      // deficit that is smaller than the stems' schedule would imply.
+      if (shape && stemScale < 1) {
+        let want = 0
+        for (let i = 0; i < n; i++) if (flex[i]! >= 0.05) want += w * (1 - stemScale) * shape.anchor[i]!
+        if (want > 1e-12 && deficit > 1e-12) {
+          const k = Math.min(1, deficit / want)
+          for (let i = 0; i < n; i++) {
+            if (!(flex[i]! >= 0.05)) continue
+            const next = Math.max(floor[i]!, out[i]! - w * (1 - stemScale) * shape.anchor[i]! * k)
+            deficit -= out[i]! - next
+            out[i] = next
+          }
+        }
+      }
       // Phase 1 (and only phase): bins that resist the stretch least
       // (non-rigid — empty space and ink-bearing-but-flexible slices)
       // shrink toward their OWN floor, proportional to flex, over up to 4
@@ -919,12 +1122,12 @@ function binWidths(
       // advance still tightens.
       for (let pass = 0; pass < 4 && deficit > 1e-9; pass++) {
         let sum = 0
-        for (let i = 0; i < n; i++) if (flex[i]! >= 0.05 && out[i]! > floor[i]! + 1e-12) sum += flex[i]!
+        for (let i = 0; i < n; i++) if (flex[i]! >= 0.05 && out[i]! > floor[i]! + 1e-12) sum += share[i]!
         if (sum < 1e-9) break
         let taken = 0
         for (let i = 0; i < n; i++) {
           if (!(flex[i]! >= 0.05) || out[i]! <= floor[i]! + 1e-12) continue
-          const can = Math.min(deficit * (flex[i]! / sum), out[i]! - floor[i]!)
+          const can = Math.min(deficit * (share[i]! / sum), out[i]! - floor[i]!)
           out[i]! -= can
           taken += can
         }
@@ -936,36 +1139,134 @@ function binWidths(
   // Rounds stay round (rule 10) — MULTIPLICATIVE coupling, applied AFTER the
   // ordinary distribution above (turn bins take part in it exactly like any
   // other bin; nothing above even reads `turn`). This makes the rule an
-  // IDENTITY at turnScale = 1 by construction — no separate "no-op preset"
-  // path needed, and no bins are ever excluded from the ordinary pool (the
-  // failure mode of the earlier preset-based mechanic, which concentrated
-  // the whole band's growth onto whatever few bins were left).
+  // IDENTITY at turnScale = 1 by construction, and no bins are ever excluded
+  // from the ordinary pool (the failure mode of the earlier preset-based
+  // mechanic, which concentrated a band's growth onto whatever was left).
   //
-  // Multiply each turn bin's freshly-computed width by turnScale, then push
-  // the resulting total change onto the FREE bins (flex ≥ HARD_RIGID and not
-  // turn — a rigid bin never moves) proportional to each one's OWN current
-  // width. Growing back is uncapped (turnScale ≤ 1 only ever gives turn bins
-  // back to the free pool what they would otherwise have absorbed); shrinking
-  // reuses the same per-bin floor the condense waterfall above uses, over the
-  // same waterfall shape, so a floored free bin stops absorbing and the rest
-  // re-split what's left. No free bins, or every free bin already floored:
-  // the shortfall is dropped, same "leftover" philosophy as everywhere else
-  // in this function — the band's total may then land a hair off S, which is
-  // preferable to breaching a floor or over-crediting a bin that has none to
-  // give.
+  // Each contiguous turn span gets a TAPERED factor, and the taper's two ends
+  // are CONTINUOUS with what they abut: 1 on a plateau side (rigid neighbour
+  // or band edge — the plateau never moves) and, on a flank side, the free
+  // neighbour's own level after compensation, so the width sequence runs
+  // smoothly from shoulder into flank. On a near-straight flank any change
+  // in local scale reads as a curvature flip, so the whole shoulder-to-flank
+  // transition has to happen INSIDE the curved shoulder — never as a step at
+  // its edge, never spread across the flank (a flat multiply stepped 3:1 at
+  // the turn/flank edge; a taper that returned to 1 at both ends still
+  // stepped against the flat flank). Between the ends the factor is a raised
+  // cosine from that linear base up to a peak P at the span's centre.
+  //
+  // The taper runs over CURVATURE, not bins: the span's parameter advances
+  // only through rows whose flex is below TURN_CURVED — rows whose ink is
+  // still clearly turning — so the rise, the peak and the descent all happen
+  // in the corner, and the span's straighter tail sits exactly flat at the
+  // flank's level (a span with no such row falls back to the plain bell).
+  // Measured on Inter's o at S = 1.8: a mean-preserving peak (2–6× over the
+  // few corner rows) or any variation on the straighter rows both READ as
+  // curvature flips; the moderate peak with the flat tail is what survives.
+  //
+  // The peak is turnScale itself. The flank level is one scalar c (every
+  // free bin scales by c, the same own-width-proportional push as before),
+  // linear in the conservation equation, so it is solved in closed form.
+  // Where the flank's floor would be breached, CONTINUITY WINS: c is pinned
+  // at the floor level and the common peak is solved instead. Turn bins keep
+  // their own condense floor, which the closed form doesn't see, so c is
+  // then iterated to a fixed point with the clamps applied. The change is
+  // finally pushed onto the free bins exactly as before — grow uncapped,
+  // shrink floor-clamped over the same waterfall — and any shortfall is
+  // dropped, same "leftover" philosophy as everywhere else in this function.
+  // Deliberately NOT mean-preserving: a raised cosine's mean is half its
+  // peak, so the coupling's total effect is smaller than the old flat
+  // multiply's — the price of a shoulder that stays a shoulder.
   if (turn && turnScale !== undefined) {
-    let diff = 0
-    for (let i = 0; i < n; i++) {
-      if (!turn[i]) continue
-      const next = out[i]! * turnScale
-      diff += next - out[i]!
-      out[i] = next
+    const isFree = (i: number) => !turn[i] && flex[i]! >= HARD_RIGID
+    const floorOf = (i: number) => {
+      const isInk = ink ? ink[i]! > 0 : flex[i]! < FULL_FLEX
+      return w * (isInk ? INK_BIN_FLOOR : EMPTY_BIN_FLOOR)
     }
-    if (Math.abs(diff) > 1e-12) {
-      const isFree = (i: number) => !turn[i] && flex[i]! >= HARD_RIGID
-      let freeTotal = 0
-      for (let i = 0; i < n; i++) if (isFree(i)) freeTotal += out[i]!
+    let freeTotal = 0, cMin = 0
+    for (let i = 0; i < n; i++) {
+      if (!isFree(i)) continue
+      freeTotal += out[i]!
+      if (out[i]! > 0) cMin = Math.max(cMin, floorOf(i) / out[i]!)
+    }
+    // Spans, with per-bin base = b0 + b1·c and the bell; with the peak fixed
+    // at turnScale the conservation equation is A + B·c + (c − 1)·freeTotal
+    // = 0. SB = Σ width·bell, for solving the peak when c is pinned.
+    interface Span { i0: number; i1: number; b0: Float64Array; b1: Float64Array; bell: Float64Array }
+    const spans: Span[] = []
+    let A = 0, B = 0, SB = 0, turnTotal = 0
+    for (let i0 = 0; i0 < n;) {
+      if (!turn[i0]) { i0++; continue }
+      let i1 = i0
+      while (i1 < n && turn[i1]) i1++
+      const L = i1 - i0
+      const flankL = i0 > 0 && isFree(i0 - 1) && out[i0]! > 0
+      const flankR = i1 < n && isFree(i1) && out[i1 - 1]! > 0
+      const rL = flankL ? out[i0 - 1]! / out[i0]! : 0
+      const rR = flankR ? out[i1]! / out[i1 - 1]! : 0
+      const b0 = new Float64Array(L), b1 = new Float64Array(L), bell = new Float64Array(L)
+      let W = 0
+      for (let j = 0; j < L; j++) W += Math.max(0, TURN_CURVED - flex[i0 + j]!)
+      const wOf = W > 1e-9 ? (j: number) => Math.max(0, TURN_CURVED - flex[i0 + j]!) / W : () => 1 / L
+      let cum = 0
+      for (let j = 0; j < L; j++) {
+        const wj = wOf(j)
+        const t = cum + 0.5 * wj
+        cum += wj
+        bell[j] = 0.5 - 0.5 * Math.cos(2 * Math.PI * t)
+        b0[j] = (flankL ? 0 : 1 - t) + (flankR ? 0 : t)
+        b1[j] = (flankL ? rL * (1 - t) : 0) + (flankR ? rR * t : 0)
+        const o = out[i0 + j]!, u = 1 - bell[j]!
+        A += o * (b0[j]! * u + turnScale * bell[j]! - 1)
+        B += o * b1[j]! * u
+        SB += o * bell[j]!
+        turnTotal += o
+      }
+      spans.push({ i0, i1, b0, b1, bell })
+      i0 = i1
+    }
+    if (spans.length) {
+      let c = 1, P = turnScale
+      let pinned = false
       if (freeTotal > 1e-9) {
+        const denom = B + freeTotal
+        c = Math.abs(denom) > 1e-12 ? (freeTotal - A) / denom : 1
+        if (c < cMin) {
+          // Continuity wins: pin the flank at its floor and solve the common
+          // peak from conservation instead.
+          c = cMin
+          pinned = true
+          let base = 0
+          for (const sp of spans) for (let j = 0; j < sp.i1 - sp.i0; j++) base += out[sp.i0 + j]! * (sp.b0[j]! + sp.b1[j]! * c) * (1 - sp.bell[j]!)
+          P = SB > 1e-12 ? (turnTotal - (c - 1) * freeTotal - base) / SB : turnScale
+        }
+      }
+      const apply = (write: boolean): number => {
+        let d = 0
+        for (const sp of spans) {
+          for (let j = 0; j < sp.i1 - sp.i0; j++) {
+            const i = sp.i0 + j
+            const base = sp.b0[j]! + sp.b1[j]! * c
+            const f = base + (P - base) * sp.bell[j]!
+            const next = Math.max(floorOf(i), out[i]! * f)
+            d += next - out[i]!
+            if (write) out[i] = next
+          }
+        }
+        return d
+      }
+      if (freeTotal > 1e-9 && !pinned) {
+        // Floor clamps on turn bins change the total; re-derive the flank
+        // level from the clamped total until it settles (a few steps — the
+        // clamped bins are insensitive to c).
+        for (let it = 0; it < 8; it++) {
+          const cNext = Math.max(cMin, 1 - apply(false) / freeTotal)
+          if (Math.abs(cNext - c) < 1e-9) break
+          c = cNext
+        }
+      }
+      const diff = apply(true)
+      if (Math.abs(diff) > 1e-12 && freeTotal > 1e-9) {
         const push = -diff
         if (push >= 0) {
           for (let i = 0; i < n; i++) {
@@ -973,21 +1274,15 @@ function binWidths(
             out[i]! += push * (out[i]! / freeTotal)
           }
         } else {
-          const floor = new Float64Array(n)
-          for (let i = 0; i < n; i++) {
-            if (!isFree(i)) continue
-            const isInk = ink ? ink[i]! > 0 : flex[i]! < FULL_FLEX
-            floor[i] = w * (isInk ? INK_BIN_FLOOR : EMPTY_BIN_FLOOR)
-          }
           let need = -push
           for (let pass = 0; pass < 4 && need > 1e-9; pass++) {
             let sum = 0
-            for (let i = 0; i < n; i++) if (isFree(i) && out[i]! > floor[i]! + 1e-12) sum += out[i]!
+            for (let i = 0; i < n; i++) if (isFree(i) && out[i]! > floorOf(i) + 1e-12) sum += out[i]!
             if (sum < 1e-9) break
             let taken = 0
             for (let i = 0; i < n; i++) {
-              if (!isFree(i) || out[i]! <= floor[i]! + 1e-12) continue
-              const can = Math.min(need * (out[i]! / sum), out[i]! - floor[i]!)
+              if (!isFree(i) || out[i]! <= floorOf(i) + 1e-12) continue
+              const can = Math.min(need * (out[i]! / sum), out[i]! - floorOf(i))
               out[i]! -= can
               taken += can
             }
@@ -1023,14 +1318,14 @@ function binWidths(
  * keep its drawn size rather than stretch, which is exactly classic optical
  * overshoot compensation.
  */
-function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number[], stemScale?: number, turnScale?: number): Float64Array {
-  const { start, binSize: w, flex, ink, turn } = profile
+function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number[], stemScale?: number, turnScale?: number, mode: DistributionMode = 'flex'): Float64Array {
+  const { start, binSize: w, flex, ink, turn, uniform } = profile
   const n = flex.length
   const total = n * w
   // Keep only lines strictly inside the profile's own span, sorted and
   // deduped — a line at or beyond either end contributes no boundary.
   const lines = Array.from(new Set(zones.filter(z => z > start && z < start + total))).sort((a, b) => a - b)
-  if (!lines.length) return binWidths(flex, w, S, ink, stemScale, turn, turnScale)
+  if (!lines.length) return binWidths(flex, w, S, ink, stemScale, turn, turnScale, mode, uniform)
 
   // A bin belongs to the band containing its CENTRE, not its edges — so a
   // zone line that lands mid-bin (the common case; zones rarely fall on a
@@ -1053,19 +1348,24 @@ function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number
       const bandFlex = flex.subarray(lo, i)
       const bandInk = ink ? ink.subarray(lo, i) : undefined
       const bandTurn = turn ? turn.subarray(lo, i) : undefined
-      out.set(binWidths(bandFlex, w, S, bandInk, stemScale, bandTurn, turnScale), lo)
+      const bandUniform = uniform ? uniform.subarray(lo, i) : undefined
+      // The bell tapers a run only towards a plateau: tell the band whether
+      // the bin just beyond each of its edges is rigid, since it cannot see
+      // past its own slice.
+      const rigidBeyond: [boolean, boolean] = [lo > 0 && flex[lo - 1]! < HARD_RIGID, i < n && flex[i]! < HARD_RIGID]
+      out.set(binWidths(bandFlex, w, S, bandInk, stemScale, bandTurn, turnScale, mode, bandUniform, rigidBeyond), lo)
       lo = i
     }
   }
   return out
 }
 
-export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number, zones?: readonly number[], stemScale?: number, turnScale?: number): Remap {
-  const { start, binSize: w, flex, ink, turn } = profile
+export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number, zones?: readonly number[], stemScale?: number, turnScale?: number, mode: DistributionMode = 'flex'): Remap {
+  const { start, binSize: w, flex, ink, turn, uniform } = profile
   const n = flex.length
   const widths = zones && zones.length
-    ? bandedBinWidths(profile, S, zones, stemScale, turnScale)
-    : binWidths(flex, w, S, ink, stemScale, turn, turnScale)
+    ? bandedBinWidths(profile, S, zones, stemScale, turnScale, mode)
+    : binWidths(flex, w, S, ink, stemScale, turn, turnScale, mode, uniform)
   const src = new Float64Array(n + 1)
   const dst = new Float64Array(n + 1)
   let acc = start
@@ -1202,6 +1502,10 @@ export function stretchOutlines(
   // presets its turn bins to S^roundCoupling.
   const roundCoupling = opts.roundCoupling ?? ROUND_COUPLING
   const turnScaleY = Math.pow(S, roundCoupling)
+  // Bell distribution between rigid features is a shape-integrity rule like
+  // the others, so it rides the same switch; off = the original tangent-
+  // proportional split (the lab's A/B control).
+  const mode: DistributionMode = flexOpts.shapeRules === false ? 'flex' : 'bell'
   const glyphs: GlyphOutline[] = []
   let penOld = 0
   let penNew = 0
@@ -1214,8 +1518,8 @@ export function stretchOutlines(
     let flex: GlyphFlex | undefined
     if (hasInk(g)) {
       flex = glyphFlexFor(g, flexOpts)
-      const rx = buildRemap(flex.x, S, undefined, undefined, stemScale)
-      const ry = buildRemap(flex.y, SY, 0, zones, stemScale, turnScaleY)
+      const rx = buildRemap(flex.x, S, undefined, undefined, stemScale, undefined, mode)
+      const ry = buildRemap(flex.y, SY, 0, zones, stemScale, turnScaleY, mode)
       commands = applyRemaps(g.commands, rx, ry)
       bbox = {
         minX: remapValue(rx, g.bbox.minX),
