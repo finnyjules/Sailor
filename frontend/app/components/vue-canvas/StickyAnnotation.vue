@@ -141,7 +141,7 @@ const rayStyle = computed(() => ({
       width: `${annotation.width}px`,
       height: `${annotation.height}px`,
       transform: `rotate(${rotation}deg)`,
-      background: annotation.color,
+      backgroundColor: annotation.color, // -color, not the shorthand: keep the class's paper gradient
     }"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
@@ -231,9 +231,11 @@ const rayStyle = computed(() => ({
   box-shadow:
     0 1px 1px rgba(0, 0, 0, 0.18),
     0 6px 14px rgba(0, 0, 0, 0.28);
-  /* Subtle paper grain via a faint diagonal gradient overlay. */
-  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(0, 0, 0, 0.05) 100%);
-  background-blend-mode: overlay;
+  /* Light-grey diagonal gradient over the paper colour — gives the screen-
+     blended shimmer something to glow against (flat white has no headroom). */
+  background-image: linear-gradient(135deg,
+    rgba(255, 255, 255, 0.70) 0%, rgba(255, 255, 255, 0) 40%,
+    rgba(0, 0, 0, 0.06) 70%, rgba(0, 0, 0, 0.13) 100%);
   display: flex;
   flex-direction: column;
 }
@@ -257,6 +259,10 @@ const rayStyle = computed(() => ({
   border-radius: inherit;
   overflow: hidden;
   pointer-events: none;
+  /* Screen: the dots can only LIGHTEN the paper — foil highlights, not
+     paint. The sticky root is a stacking context (transform), so this
+     blends against the paper only, never the dark canvas. */
+  mix-blend-mode: screen;
 }
 .sticky-annotation__glitter,
 .sticky-annotation__glint,
