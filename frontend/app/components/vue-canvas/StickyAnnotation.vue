@@ -106,13 +106,14 @@ function pickColor(c: string) {
 // hand-placed rather than software-stamped.
 const rotation = computed(() => props.annotation.rotation ?? 0)
 
-// Foil shimmer (Pokémon-card style, à la simeydotme): a static field of tiny
-// specks masked over an iridescent gradient, plus a soft sheen band. Neither
-// animates on its own — the gradient positions are driven by the CANVAS PAN,
-// so the sparkles glint and the sheen rakes across the paper only while the
-// user moves the canvas, like light passing over foil. Each sticky adds its
-// own canvas position into the phase so neighbours glint at different
-// moments instead of in lockstep.
+// Foil glitter (Pokémon-card style, à la simeydotme): a static field of tiny
+// specks. At rest they're barely there; a light band sweeps across and the
+// specks UNDER it flash saturated iridescent colour — the shimmer lives on
+// the flecks, never as a wash over the paper. Nothing animates on its own:
+// the band and the hue cycle are driven by the CANVAS PAN, so the foil only
+// glints while the user moves the canvas, like light raking over a card.
+// Each sticky adds its own canvas position into the phase so neighbours
+// glint at different moments instead of in lockstep.
 const shimmerPhase = computed(() => {
   const vp = viewport.value
   return (vp.x + vp.y) * 0.7
@@ -121,9 +122,16 @@ const shimmerPhase = computed(() => {
 const glitterStyle = computed(() => ({
   backgroundPosition: `${shimmerPhase.value.toFixed(1)}px 0px`,
 }))
-const sheenStyle = computed(() => ({
-  backgroundPosition: `${(shimmerPhase.value * 1.6).toFixed(1)}px 0px`,
-}))
+// The glint layer carries TWO masks (specks ∩ moving band): the speck mask
+// stays put, the band mask slides with the pan at 1.6× so it rakes across.
+const glintStyle = computed(() => {
+  const band = `0px 0px, ${(shimmerPhase.value * 1.6).toFixed(1)}px 0px`
+  return {
+    backgroundPosition: `${shimmerPhase.value.toFixed(1)}px 0px`,
+    maskPosition: band,
+    WebkitMaskPosition: band,
+  }
+})
 </script>
 
 <template>
@@ -148,7 +156,7 @@ const sheenStyle = computed(() => ({
          text, ignores the pointer. -->
     <div class="sticky-annotation__shimmer" aria-hidden="true">
       <div class="sticky-annotation__glitter" :style="glitterStyle" />
-      <div class="sticky-annotation__sheen" :style="sheenStyle" />
+      <div class="sticky-annotation__glint" :style="glintStyle" />
     </div>
 
     <!-- Body: textarea always present; just toggles between read-only and editable.
@@ -231,15 +239,18 @@ const sheenStyle = computed(() => ({
   flex-direction: column;
 }
 
-/* ── Foil shimmer ─────────────────────────────────────────────────────────
-   Two layers, neither self-animating — both slide with the canvas pan via
-   inline background-position (see shimmerPhase in the script).
-   - glitter: an iridescent gradient showing only through a static field of
-     tiny specks (SVG feTurbulence mask). The mask never moves; the gradient
-     under it does, so individual specks cycle hue as you pan — reads as
-     sparkles glinting.
-   - sheen: a wide soft pastel band raking across the paper, slightly faster
-     than the glitter for a parallax-foil feel. */
+/* ── Foil glitter ─────────────────────────────────────────────────────────
+   Two layers over one static speck field (SVG feTurbulence mask), neither
+   self-animating — positions slide with the canvas pan via inline styles
+   (see shimmerPhase in the script).
+   - glitter: the resting flecks — the iridescent gradient through the speck
+     mask at very low opacity, so the paper reads white with a faint
+     texture until light hits it.
+   - glint: the SAME specks, but additionally masked by a moving light band
+     (mask-composite intersect), showing a saturated iridescent gradient at
+     near-full opacity. Only the flecks under the band flash — the shimmer
+     is on the speck, never a wash over the paper. The hue gradient slides
+     with the pan too, so a fleck changes colour as the band crosses it. */
 .sticky-annotation__shimmer {
   position: absolute;
   inset: 0;
@@ -248,30 +259,38 @@ const sheenStyle = computed(() => ({
   pointer-events: none;
 }
 .sticky-annotation__glitter,
-.sticky-annotation__sheen {
+.sticky-annotation__glint {
   position: absolute;
   inset: 0;
+  background-size: 300px 100%;
 }
 .sticky-annotation__glitter {
   background-image: linear-gradient(100deg,
     #f6a5c0, #f7d08a, #a9e8bf, #9fd0f7, #cdb4f6, #f6a5c0);
-  background-size: 300px 100%;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.55'%20numOctaves='2'%20seed='11'/%3E%3CfeColorMatrix%20type='matrix'%20values='0%200%200%200%201%200%200%200%200%201%200%200%200%200%201%2018%2018%2018%20-40%200'/%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.55'%20numOctaves='2'%20seed='11'/%3E%3CfeColorMatrix%20type='matrix'%20values='0%200%200%200%201%200%200%200%200%201%200%200%200%200%201%2018%2018%2018%20-40%200'/%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E");
   -webkit-mask-repeat: repeat;
   mask-repeat: repeat;
   -webkit-mask-size: 130px 130px;
   mask-size: 130px 130px;
-  opacity: 0.32;
+  opacity: 0.14;
 }
-.sticky-annotation__sheen {
-  background-image: linear-gradient(115deg,
-    rgba(255, 255, 255, 0) 34%,
-    rgba(159, 208, 247, 0.12) 44%,
-    rgba(246, 165, 192, 0.14) 50%,
-    rgba(247, 208, 138, 0.12) 56%,
-    rgba(255, 255, 255, 0) 66%);
-  background-size: 460px 100%;
+.sticky-annotation__glint {
+  background-image: linear-gradient(100deg,
+    #ff8fb1, #ffd166, #7ee8a2, #7cc4ff, #c7a2ff, #ff8fb1);
+  -webkit-mask-image:
+    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.55'%20numOctaves='2'%20seed='11'/%3E%3CfeColorMatrix%20type='matrix'%20values='0%200%200%200%201%200%200%200%200%201%200%200%200%200%201%2018%2018%2018%20-40%200'/%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E"),
+    linear-gradient(115deg, rgba(0, 0, 0, 0) 36%, #000 50%, rgba(0, 0, 0, 0) 64%);
+  mask-image:
+    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='130'%20height='130'%3E%3Cfilter%20id='s'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.55'%20numOctaves='2'%20seed='11'/%3E%3CfeColorMatrix%20type='matrix'%20values='0%200%200%200%201%200%200%200%200%201%200%200%200%200%201%2018%2018%2018%20-40%200'/%3E%3C/filter%3E%3Crect%20width='130'%20height='130'%20filter='url(%23s)'/%3E%3C/svg%3E"),
+    linear-gradient(115deg, rgba(0, 0, 0, 0) 36%, #000 50%, rgba(0, 0, 0, 0) 64%);
+  -webkit-mask-repeat: repeat, repeat;
+  mask-repeat: repeat, repeat;
+  -webkit-mask-size: 130px 130px, 440px 100%;
+  mask-size: 130px 130px, 440px 100%;
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  opacity: 0.95;
 }
 
 .sticky-annotation__text {
