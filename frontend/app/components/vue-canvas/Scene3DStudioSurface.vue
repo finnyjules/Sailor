@@ -34,6 +34,7 @@ import { AVAILABLE_FONTS, loadFont, fontDisplayName, fontCacheGet, parseGoogleFo
 import { loadGoogleCatalog, type GoogleFont } from '~/data/google-fonts'
 import { libraryToken, resolveLibraryFace, libraryFamily } from '~/data/library-fonts'
 import FontPicker from '~/components/vue-canvas/FontPicker.vue'
+import TexturePicker from '~/components/vue-canvas/TexturePicker.vue'
 import { PRIM_GROUPS } from '~/lib/scene3d/primGroups'
 import {
   DEFAULT_PRIM_FACE, resolvePrimFace, primFaceLabel, primFaceIcon,
@@ -598,6 +599,13 @@ function matParam<K extends keyof typeof MATERIAL_DEFAULTS>(key: K) {
   })
 }
 const matMatcap = matParam('matcap')
+// ambientCG surface: the row is bespoke (thumbnail + picker); `''` clears the field outright
+// rather than leaving an empty string on the doc. `matParam` is keyed on MATERIAL_DEFAULTS,
+// which has no `texture` entry, hence the hand-written proxy.
+const matTexture = computed<string | undefined>({
+  get: () => selected.value?.material.texture,
+  set: (v) => applyMaterial((m) => { if (v) m.texture = v; else delete m.texture }),
+})
 // Palette: when paletteMode is 'harmony' the ramp is GENERATED from hue/sat/light + this
 // scheme (see rampStopsOf in config.ts) instead of the authored gradientStops the ramp
 // editor writes.
@@ -4152,9 +4160,10 @@ async function onClose() {
             </div>
           </template>
 
-          <!-- Placeholder: Task 9 replaces this with the TexturePicker row. -->
+          <!-- Real-world PBR surfaces from ambientCG. The picker fetches the set before it
+               writes the id, so a failed download leaves the material as it was. -->
           <template #control-ui.material.textureSet>
-            <p class="text-[11px] text-white/55">Texture</p>
+            <TexturePicker v-model="matTexture" />
           </template>
 
           <!-- Palette: Manual keeps the authored ramp editor; Harmony instead GENERATES the
