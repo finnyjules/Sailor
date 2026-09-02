@@ -3424,7 +3424,7 @@ async function onClose() {
       <div ref="viewportEl" class="relative h-full w-full min-h-0" :class="placingDecal ? 'cursor-crosshair' : ''">
         <!-- NOTHING may be inserted between these two: they are one v-if/v-else pair
              (a sibling with its own v-if in the gap would steal the v-else). -->
-        <canvas v-if="webglOk" ref="canvasEl" class="h-full w-full" />
+        <canvas v-if="webglOk" ref="canvasEl" data-scene3d class="h-full w-full" />
         <div v-else class="flex h-full items-center justify-center text-sm text-white/50">
           WebGL is unavailable — the 3D Studio needs a WebGL-capable browser.
         </div>
