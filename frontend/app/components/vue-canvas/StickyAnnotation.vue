@@ -240,6 +240,25 @@ const rayStyle = computed(() => ({
   flex-direction: column;
 }
 
+/* Hairline stroke: a 1px ring carrying a vertical white→black gradient
+   (borders can't take gradients, so it's a padded pseudo-element masked to
+   its own border ring). Sits above the text layer but only ever covers the
+   outermost pixel, well outside the textarea's padding. */
+.sticky-annotation::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, #ffffff 0%, #000000 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 3;
+}
+
 /* ── Foil glitter ─────────────────────────────────────────────────────────
    Modelled on the reference card: a dense, even scatter of small SILVERY
    dots (procedural SVG tile — jittered square lattice, bounded jitter so no
