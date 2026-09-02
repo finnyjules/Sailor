@@ -259,6 +259,31 @@ quantize stretch values for caching — not expected.
   ink bins only — empty counters stay fully free), run before the straight-span
   pass so straight arms stay straight. A designer's tall o has a LARGER corner
   radius; now so does ours.
+- **Rounds stay round** (lab-found 2026-09-01: condense 0.7 × Height 2.41 grew
+  bumps at the o's apex — the arch narrowed while its height was held, and a
+  semicircle is half as tall as it is wide): the Y remap's shoulder rows
+  (curve-pinned, partially aligned) are scaled by `S^ROUND_COUPLING` on top of
+  their normal share, the difference renormalised onto the free bins — an
+  identity at S = 1. `ROUND_COUPLING = 0.7` is a taste constant the lab exposes
+  (1 = fully round corners on an extended o, 0 = the flat-sided racetrack).
+- **Terminals keep their cut angle** (same session: the a's slanted terminal
+  cut went far steeper under Height 2.41): a short, non-axis-aligned line
+  whose neighbours are near-parallel and perpendicular to it is a terminal cut;
+  the ink within its own length of it is rigid in BOTH axes. The X's notch
+  facets (diverging neighbours) and the S's axis-aligned construction shelves
+  are excluded by construction.
+- **The remap is C1** (lab-found: curves read "bumpy" at every k): the
+  cumulative widths are interpolated with a monotone cubic (Fritsch–Butland
+  slopes) instead of straight lines, so the map's slope no longer jumps at bin
+  edges. Measured honestly: this removes the kinks but NOT the inflections —
+  a convex o still gains 8 under Height 2.5 — because any smooth, non-affine
+  local scale crossing a curve's shoulders makes f″ fight the drawn curvature.
+  **Open design, the next step for rounds: turn regions as affine blocks** —
+  each curved turn (apex + shoulders) takes ONE local scale (rule 10's
+  coupling), and all scale variation lives in the straight runs parallel to
+  the stretch axis, where it is invisible. That merges rules 2, 9 and 10 into
+  a curve model rather than more slice rules; pure-curve glyphs (S, C) need
+  their transitions to sit on their straightest part.
 - **Spaces/blanks**: advance stretches; no outline to remap.
 - **Ligatures**: multi-codepoint glyphs flex-analyze like any other outline.
 
