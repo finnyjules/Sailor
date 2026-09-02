@@ -752,6 +752,31 @@ export function stemWidthOf(profile: FlexProfile): number {
 export interface Remap {
   src: Float64Array
   dst: Float64Array
+  /** Derivative (d dst / d src) at each breakpoint, one per entry in `src`/
+   *  `dst`. Makes the map C1: a monotone-cubic (Fritsch–Carlson / PCHIP)
+   *  Hermite spline through the breakpoints instead of a piecewise-linear
+   *  one. Piecewise-linear interpolation of the cumulative widths has a
+   *  slope that jumps at every bin edge, and each jump is a kink in
+   *  curvature wherever a curve crosses that edge — visible as extra
+   *  inflections (a convex 'o' picks up sign changes it never had). The
+   *  harmonic-mean slope choice (Fritsch–Butland, uniform spacing) is what
+   *  keeps this monotone: unlike a plain centred-difference (Catmull-Rom)
+   *  slope, it cannot overshoot past a neighbouring breakpoint, so the
+   *  remap never folds back on itself. */
+  slope: Float64Array
+}
+
+/** Hermite evaluator shared by `buildRemap` (fixed-point shift) and
+ *  `remapValue`. `v` must already be known to fall in [src[lo], src[lo+1]]
+ *  (or exactly at `src[lo]`, `h = 0` uniform bins). */
+function hermiteAt(src: Float64Array, dst: Float64Array, slope: Float64Array, lo: number, h: number, v: number): number {
+  const t = h > 0 ? (v - src[lo]!) / h : 0
+  const t2 = t * t, t3 = t2 * t
+  const h00 = 2 * t3 - 3 * t2 + 1
+  const h10 = t3 - 2 * t2 + t
+  const h01 = -2 * t3 + 3 * t2
+  const h11 = t3 - t2
+  return h00 * dst[lo]! + h10 * h * slope[lo]! + h01 * dst[lo + 1]! + h11 * h * slope[lo + 1]!
 }
 
 /** Condense floors, as fractions of a bin's natural width — the ORDER OF
@@ -1049,7 +1074,26 @@ export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number,
     dst[i] = acc
     if (i < n) acc += widths[i]!
   }
-  const m = { src, dst }
+  // Monotone cubic (Fritsch–Carlson / PCHIP) slopes at each breakpoint, from
+  // the per-bin secant slopes δ_i = (dst[i+1] − dst[i]) / w (uniform bins, so
+  // ≥ 0 always). Interior breakpoints take the harmonic mean of their two
+  // neighbouring secants — the Fritsch–Butland form for uniform spacing —
+  // which is monotone-preserving: it cannot overshoot past either neighbour
+  // the way a plain average (Catmull-Rom) slope can. A secant sign change (a
+  // local extremum, only possible here at floor/cap clamps) sets the slope
+  // to 0 so the spline doesn't overshoot through it either.
+  const slope = new Float64Array(n + 1)
+  if (n >= 1) {
+    const delta = new Float64Array(n)
+    for (let i = 0; i < n; i++) delta[i] = w > 0 ? widths[i]! / w : 0
+    slope[0] = delta[0]!
+    slope[n] = delta[n - 1]!
+    for (let i = 1; i < n; i++) {
+      const d0 = delta[i - 1]!, d1 = delta[i]!
+      slope[i] = d0 * d1 <= 0 ? 0 : 2 / (1 / d0 + 1 / d1)
+    }
+  }
+  const m = { src, dst, slope }
   if (fixedPoint !== undefined) {
     const shift = remapValue(m, fixedPoint) - fixedPoint
     for (let i = 0; i <= n; i++) dst[i]! -= shift
@@ -1057,10 +1101,11 @@ export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number,
   return m
 }
 
-/** Piecewise-linear lookup; slope 1 outside the profile's span so points a
- *  hair beyond the bbox (rounding, overshoot) translate instead of scaling. */
+/** Monotone-cubic (Hermite) lookup — C1, so no curvature kink at a bin edge;
+ *  slope 1 outside the profile's span so points a hair beyond the bbox
+ *  (rounding, overshoot) translate instead of scaling. */
 export function remapValue(m: Remap, v: number): number {
-  const { src, dst } = m
+  const { src, dst, slope } = m
   const n = src.length - 1
   if (n < 1) return v
   if (v <= src[0]!) return dst[0]! + (v - src[0]!)
@@ -1072,8 +1117,7 @@ export function remapValue(m: Remap, v: number): number {
     else hi = mid
   }
   const span = src[lo + 1]! - src[lo]!
-  const t = span > 0 ? (v - src[lo]!) / span : 0
-  return dst[lo]! + t * (dst[lo + 1]! - dst[lo]!)
+  return hermiteAt(src, dst, slope, lo, span, v)
 }
 
 /** Map every (x, y) coordinate pair in `commands` through its axis remap.
