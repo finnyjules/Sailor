@@ -62,6 +62,14 @@ export interface FlexProfile {
    *  distribution reads this to give such a span one constant weight
    *  instead of the bell's varying one. Optional like `ink` and `turn`. */
   uniform?: Uint8Array
+  /** 1 for a bin the diagonal-terminal patch pinned to `SOFT_TERMINAL_PIN`
+   *  rather than full rigidity (a terminal too short to earn rule 11's
+   *  outright rigid protection). Its reported `flex` reads well above
+   *  `HARD_RIGID` by design (it must not hard-pin to exactly 0), but it must
+   *  still be excluded from ordinary bell/run growth-sharing — `bellWeights`
+   *  reads this alongside `isBellRigid`'s ink-aware check. Optional like
+   *  `ink`, `turn` and `uniform`. */
+  softTerm?: Uint8Array
 }
 
 /** How a free bin's share of the stretch is decided (see `binWidths`):
@@ -121,11 +129,14 @@ const HARD_RIGID = 0.05
 /** Fix 1 (continued): a diagonal terminal too SHORT to earn rule 11's
  *  outright rigid patch (`termHard` false) is still pinned to a small,
  *  SOFT value on both axes rather than left to its natural (often much
- *  higher — measured ~0.86) alignment: soft-pinned (0.05–0.15, same band
- *  `freenessOf`'s doc comment calls out) is enough to clear the "not
- *  hard-rigid" bar a plain terminal-owned row needs, while keeping the
- *  bell's freeness factor suppressing its share of any nearby growth close
- *  to zero, so it does not amplify the way a genuinely free bin does. */
+ *  higher — measured ~0.86) alignment: soft-pinned (below `HARD_RIGID`'s
+ *  neighbourhood, same 0.05–0.15 band `isBellRigid` treats as a candidate
+ *  for ink-aware rigidity) is enough to clear the "not hard-rigid" bar a
+ *  plain terminal-owned row needs, while staying low enough that a
+ *  sufficiently ink-heavy row around it still reads as a held stroke rather
+ *  than a free bin that would amplify the way a genuinely free bin does.
+ *  Tuned empirically (0.055–0.09 sweep): values ≥ 0.07 reopen the
+ *  terminal-angle regression this patch exists to prevent. */
 const SOFT_TERMINAL_PIN = 0.065
 /** Straight segments whose |tangent·axis| lies strictly inside this band are
  *  DIAGONAL for that axis: a stem (≈ 0) is already pinned by the hard min and
@@ -512,6 +523,15 @@ interface AnalysisGridInternal {
   termReach: Float64Array
   termDiag: Uint8Array
   termRigid: Uint8Array
+  /** Cells the diagonal-terminal patch pinned to `SOFT_TERMINAL_PIN` rather
+   *  than full rigidity (`termHard` false) — see the patch below. Aggregated
+   *  per-bin in `analyzeFlex` as `FlexProfile.softTerm` so `bellWeights` can
+   *  exclude these bins from bell/run growth-sharing even though their
+   *  reported `flex` reads well above `HARD_RIGID` (by design — a terminal's
+   *  row must not hard-pin to exactly 0, but must also not be treated as an
+   *  ordinary free bin that would amplify under a big free run's bell,
+   *  which is what caused the terminal-angle regression this flag fixes). */
+  termSoft: Uint8Array
   small: Uint8Array
 }
 
@@ -556,6 +576,7 @@ function buildGrid(segs: Seg[], bbox: VtBBox, w: number, h: number, smallFeature
   // as a terminal patch, and which the small-feature pass made rigid. Written
   // alongside the existing arrays; nothing below reads them.
   const termRigid = new Uint8Array(N)
+  const termSoft = new Uint8Array(N)
   const small = new Uint8Array(N)
   const idx = (c: number, r: number) => r * GRID + c
 
@@ -689,7 +710,7 @@ function buildGrid(segs: Seg[], bbox: VtBBox, w: number, h: number, smallFeature
     for (let j = 0; j < N; j++) {
       if (!ink[j]) continue
       if (termFlag[j] && termDiag[j] && dist[j]! <= termReach[j]! + 1e-9) {
-        if (termHard[j]) { ax[j] = 0; ay[j] = 0; termRigid[j] = 1 } else { ax[j] = SOFT_TERMINAL_PIN; ay[j] = SOFT_TERMINAL_PIN }
+        if (termHard[j]) { ax[j] = 0; ay[j] = 0; termRigid[j] = 1 } else { ax[j] = SOFT_TERMINAL_PIN; ay[j] = SOFT_TERMINAL_PIN; termSoft[j] = 1 }
         kind[j] = KIND_STRAIGHT
       }
     }
@@ -727,7 +748,7 @@ function buildGrid(segs: Seg[], bbox: VtBBox, w: number, h: number, smallFeature
     }
   }
 
-  return { cw, ch, dist, ax, ay, kind, ink, termFlag, termReach, termDiag, termRigid, small }
+  return { cw, ch, dist, ax, ay, kind, ink, termFlag, termReach, termDiag, termRigid, termSoft, small }
 }
 
 /** Raw per-cell analysis data for one glyph — the 2D-field spike's input.
@@ -861,7 +882,7 @@ export function analyzeFlex(
   if (!segs.length) return out
   markTerminalCuts(segs)
   const grid = buildGrid(segs, bbox, w, h, smallFeature, shapeRules)
-  const { ax, ay, kind, ink } = grid
+  const { ax, ay, kind, ink, termSoft } = grid
   const N = GRID * GRID
   const idx = (c: number, r: number) => r * GRID + c
 
@@ -899,6 +920,13 @@ export function analyzeFlex(
   const rowSum = new Float64Array(GRID)
   const colInk = new Float64Array(GRID)
   const rowInk = new Float64Array(GRID)
+  // Fix 1 (continued): which columns/rows contain at least one cell the
+  // diagonal-terminal patch soft-pinned (`termSoft`, see `buildGrid`) —
+  // aggregated into per-bin `softTermX`/`softTermY` below so `bellWeights`
+  // can exclude these bins from growth-sharing (see that flag's own doc
+  // comment on `AnalysisGridInternal.termSoft` for why).
+  const colSoft = new Uint8Array(GRID)
+  const rowSoft = new Uint8Array(GRID)
   for (let r = 0; r < GRID; r++) {
     for (let c = 0; c < GRID; c++) {
       const j = idx(c, r)
@@ -908,6 +936,7 @@ export function analyzeFlex(
       const vx = ax[j]!, vy = ay[j]!
       colSum[c]! += vx
       rowSum[r]! += vy
+      if (termSoft[j]) { colSoft[c] = 1; rowSoft[r] = 1 }
       if (vx < colMin[c]!) colMin[c] = vx
       if (vy < rowMin[r]!) rowMin[r] = vy
       if (kind[j] === KIND_SHORT) continue
@@ -929,6 +958,8 @@ export function analyzeFlex(
   // free, soft ≈ 1).
   const turnX = new Uint8Array(bins)
   const turnY = new Uint8Array(bins)
+  const softTermX = new Uint8Array(bins)
+  const softTermY = new Uint8Array(bins)
   const cellsPerBin = GRID / bins
   for (let b = 0; b < bins; b++) {
     let mx = 1, my = 1          // single-channel min (control)
@@ -936,6 +967,7 @@ export function analyzeFlex(
     let kx = 1, ky = 1          // stroke: min over the bin's columns
     let sx = 1, sy = 1          // soft: min over the bin's column MEANS
     let ix = 0, iy = 0
+    let softX = 0, softY = 0
     const g0 = Math.floor(b * cellsPerBin)
     const g1 = Math.min(GRID - 1, Math.ceil((b + 1) * cellsPerBin) - 1)
     for (let g = g0; g <= g1; g++) {
@@ -951,7 +983,11 @@ export function analyzeFlex(
       if (rs < sy) sy = rs
       if (colInk[g]! / GRID > ix) ix = colInk[g]! / GRID
       if (rowInk[g]! / GRID > iy) iy = rowInk[g]! / GRID
+      if (colSoft[g]) softX = 1
+      if (rowSoft[g]) softY = 1
     }
+    softTermX[b] = softX
+    softTermY[b] = softY
     hardX[b] = hx
     hardY[b] = hy
     // The "no straight stem pins it" half reads the HARD channel (straight
@@ -978,6 +1014,8 @@ export function analyzeFlex(
   out.y.ink = inkY
   out.x.turn = turnX
   out.y.turn = turnY
+  out.x.softTerm = softTermX
+  out.y.softTerm = softTermY
 
   if (shapeRules) {
     // Curves stay smooth: ease the freshly-powed profile away from its rigid
@@ -1000,14 +1038,19 @@ export function analyzeFlex(
       Math.max(0, Math.min(bins - 1, Math.ceil((hi - start) / size) - 1)),
     ]
     for (const s of segs) {
-      // Fix 1 (continued): a diagonal TERMINAL that is short relative to its
-      // own stroke (see `termHard` in `buildGrid`) no longer gets rule 11's
-      // outright rigid patch, so it needs a different way to keep its drawn
-      // angle from rotating — the same one a genuine diagonal stroke uses:
-      // LOCAL UNIFORMITY across its own span, so every row/column it touches
-      // grows by the same factor even though that factor isn't near zero.
-      // Skipped for bins the diagonal patch (or a stem) still holds rigid —
-      // `uniformSpans` itself exempts those (`hard < HARD_RIGID`).
+      // Fix 1 (continued, kept — NOT part of the freeness revert): a diagonal
+      // TERMINAL too short to earn rule 11's outright rigid patch
+      // (`termHard` false in `buildGrid`) is pinned only to `SOFT_TERMINAL_PIN`
+      // there, on both axes independently — nothing else keeps the ROWS it
+      // touches growing at the SAME rate as each other. Without this, Inter's
+      // 'a' arch terminal (whose own ink occupancy is too low to qualify as
+      // ink-rigid — a diagonal cut, not a horizontal stroke) still rotates
+      // under stretch (measured ~29° at Height 2.41, budget 8°). Folding it
+      // into a `uniformSpans` candidate — the same LOCAL UNIFORMITY a genuine
+      // diagonal stroke gets — keeps every row/column it touches growing by
+      // one shared factor, so the segment's own two endpoints don't drift
+      // apart. `uniformSpans` itself still exempts any bin the diagonal patch
+      // (or a stem) holds genuinely rigid.
       if (s.kind !== KIND_STRAIGHT && !(s.terminal && s.terminalDiagonal)) continue
       const dx = s.x1 - s.x0, dy = s.y1 - s.y0
       const len = Math.hypot(dx, dy)
@@ -1214,30 +1257,36 @@ function waistSplits(flex: Float64Array, i: number, j: number): number[] {
   return acc.map(b => (flex[b + 1]! < flex[b - 1]! ? b : b + 1))
 }
 
-/** Fix 2: a bell bin's weight is `bell(j) × freeness(flex)`, not `bell(j)`
- *  alone. Free-run DETECTION stays at `HARD_RIGID` (0.05) — a bin at or
- *  above it is still part of the run — but within the run a SOFT-PINNED bin
- *  (flex 0.05–0.15: a curved horizontal stroke, drawn hard-adjacent but only
- *  partially aligned, not truly free) barely grows; the fully free bins
- *  around it (flex ≥ 0.5) pick up the slack, because the bell's own
- *  per-sub-run normalisation (`scale` below) always re-targets the sub-run's
- *  total share to its length regardless of how the raw weight is spread.
- *  0 at `HARD_RIGID` itself (rigid), 1 at flex ≥ 0.5 (fully free), linear
- *  between. */
-const FREENESS_SPAN = 0.45
-function freenessOf(flex: number): number {
-  return Math.max(0, Math.min(1, (flex - HARD_RIGID) / FREENESS_SPAN))
+/** Fix 2 (revised): a bin is RIGID for BELL/RUN purposes — excluded from any
+ *  free run entirely, so it neither grows nor gets a share of a neighbour's
+ *  growth — not just when `flex < HARD_RIGID` (a plain hard pin), but ALSO
+ *  when `flex < INK_RIGID_FLEX` AND its ink occupancy is at least
+ *  `INK_RIGID_MIN`. Rationale: a LONG, low-flex band that is MOSTLY ink is a
+ *  horizontal stroke seen through the soft (mean) channel — the a's bowl top
+ *  reads flex ≈ 0.12 with ink ≈ 0.74–0.86 — and it must hold its thickness
+ *  like any other stroke, not stretch as if it were a curve easing toward a
+ *  plateau. A SHORT low-flex ramp with little ink (a genuine curve's
+ *  shoulder, mostly counter with only a sliver of curve ink) has ink well
+ *  under `INK_RIGID_MIN` and stays free, so it still opens as designed —
+ *  this is what keeps the plateau-edge shoulder-opening invariant intact.
+ *
+ *  An earlier version of this fix multiplied each bin's bell weight by a
+ *  continuous "freeness" factor instead of excluding ink-heavy bins outright;
+ *  that suppressed the FIRST FREE ROW after an apex band too (a shipped,
+ *  eye-judged invariant), so it was reverted in favour of this binary,
+ *  ink-aware classification. */
+const INK_RIGID_FLEX = 0.15
+const INK_RIGID_MIN = 0.7
+function isBellRigid(flex: number, ink: number): boolean {
+  return flex < HARD_RIGID || (flex < INK_RIGID_FLEX && ink >= INK_RIGID_MIN)
 }
 
 interface BellShape {
   /** Sharing weights: each sub-run's bell normalised to sum to its bin
-   *  count, so a sub-run's share of the delta is ∝ its length. 0 on rigid. */
+   *  count, so a sub-run's share of the delta is ∝ its length. 0 on rigid
+   *  (including ink-rigid, see `isBellRigid`). */
   share: Float64Array
-  /** The raw bell in [0, 1] per bin, already scaled by `freenessOf` (uniform
-   *  spans flattened to their mean — see `freenessOf`'s doc comment on why
-   *  that mean already equals "constant bell × the span's own freeness": a
-   *  `uniformSpans`-flattened span has one constant flex value, so every bin
-   *  in it already carries the same freeness before this averaging runs). */
+  /** The raw bell in [0, 1] per bin (uniform spans flattened to their mean). */
   bell: Float64Array
   /** How much of a bin's condense shrink is the PLATEAU'S OWN thinning: 1 −
    *  bell on the half of a sub-run whose end is a rigid plateau, 0 elsewhere.
@@ -1248,7 +1297,9 @@ interface BellShape {
 
 /**
  * Sharing weights for the BELL distribution. The tangent analysis decides
- * what is rigid (flex < HARD_RIGID); between rigid features the change is
+ * what is rigid — `isBellRigid`: a plain hard pin (flex < HARD_RIGID), OR a
+ * long, ink-heavy low-flex band (a horizontal stroke seen through the soft
+ * channel, not a curve's shoulder) — between rigid features the change is
  * spread as smoothly as possible: over each free run a bell (`BELL_SHAPE`) — near
  * zero beside the plateaus (a round's shoulders), peaking mid-run (the flank
  * / the counter). Whitespace in the middle of a counter stretches most, which
@@ -1268,16 +1319,25 @@ interface BellShape {
  * with one CONSTANT weight — the mean bell weight over their span — so a
  * straight diagonal stays straight.
  */
-function bellWeights(flex: Float64Array, uniform: Uint8Array | undefined, rigidBeyond: readonly [boolean, boolean], grow: boolean): BellShape {
+function bellWeights(flex: Float64Array, ink: Float64Array | undefined, softTerm: Uint8Array | undefined, uniform: Uint8Array | undefined, rigidBeyond: readonly [boolean, boolean], grow: boolean): BellShape {
   const n = flex.length
   const share = new Float64Array(n)
   const bell = new Float64Array(n)
   const anchor = new Float64Array(n)
+  const inkAt = (q: number) => ink ? ink[q]! : 0
+  // `softTerm` bins (a short diagonal terminal's own soft pin — see
+  // `FlexProfile.softTerm`) are excluded from bell/run growth-sharing
+  // outright, same as `isBellRigid`'s ink-heavy horizontal strokes: their
+  // reported `flex` is intentionally well above `HARD_RIGID` (a terminal's
+  // row must not hard-pin to exactly 0), so `isBellRigid` alone would treat
+  // them as an ordinary free bin and hand them a full bell share — which is
+  // what caused the terminal-angle regression this exclusion fixes.
+  const rigid = (q: number) => isBellRigid(flex[q]!, inkAt(q)) || !!softTerm?.[q]
   let i = 0
   while (i < n) {
-    if (flex[i]! < HARD_RIGID) { i++; continue }
+    if (rigid(i)) { i++; continue }
     let j = i
-    while (j < n && flex[j]! >= HARD_RIGID) j++
+    while (j < n && !rigid(j)) j++
     const endL = i > 0 || rigidBeyond[0] ? END_PLATEAU : END_NONE
     const endR = j < n || rigidBeyond[1] ? END_PLATEAU : END_NONE
     const bounds = [i, ...waistSplits(flex, i, j), j]
@@ -1286,7 +1346,7 @@ function bellWeights(flex: Float64Array, uniform: Uint8Array | undefined, rigidB
       const kL = r === 0 ? endL : END_SPLIT
       const kR = r + 2 === bounds.length ? endR : END_SPLIT
       const L = b - a
-      for (let q = a; q < b; q++) bell[q] = bellAt((q - a + 0.5) / L, kL !== END_NONE, kR !== END_NONE, grow) * freenessOf(flex[q]!)
+      for (let q = a; q < b; q++) bell[q] = bellAt((q - a + 0.5) / L, kL !== END_NONE, kR !== END_NONE, grow)
       if (uniform) {
         let u = a
         while (u < b) {
@@ -1324,6 +1384,7 @@ function binWidths(
   mode: DistributionMode = 'flex',
   uniform?: Uint8Array,
   rigidBeyond: readonly [boolean, boolean] = [false, false],
+  softTerm?: Uint8Array,
 ): Float64Array {
   const n = flex.length
   const out = new Float64Array(n).fill(w)
@@ -1332,7 +1393,7 @@ function binWidths(
   // What decides each bin's SHARE of the change. Everything else — which
   // bins are rigid, the floors and caps, the turn pass below — reads `flex`
   // exactly as before; only the proportional split reads `share`.
-  const shape = mode === 'bell' ? bellWeights(flex, uniform, rigidBeyond, delta > 0) : undefined
+  const shape = mode === 'bell' ? bellWeights(flex, ink, softTerm, uniform, rigidBeyond, delta > 0) : undefined
   const share = shape ? shape.share : flex
   if (Math.abs(delta) >= 1e-12) {
     if (delta > 0) {
@@ -1633,13 +1694,13 @@ function binWidths(
  * overshoot compensation.
  */
 function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number[], stemScale?: number, turnScale?: number, mode: DistributionMode = 'flex'): Float64Array {
-  const { start, binSize: w, flex, ink, turn, uniform } = profile
+  const { start, binSize: w, flex, ink, turn, uniform, softTerm } = profile
   const n = flex.length
   const total = n * w
   // Keep only lines strictly inside the profile's own span, sorted and
   // deduped — a line at or beyond either end contributes no boundary.
   const lines = Array.from(new Set(zones.filter(z => z > start && z < start + total))).sort((a, b) => a - b)
-  if (!lines.length) return binWidths(flex, w, S, ink, stemScale, turn, turnScale, mode, uniform)
+  if (!lines.length) return binWidths(flex, w, S, ink, stemScale, turn, turnScale, mode, uniform, undefined, softTerm)
 
   // A bin belongs to the band containing its CENTRE, not its edges — so a
   // zone line that lands mid-bin (the common case; zones rarely fall on a
@@ -1663,12 +1724,19 @@ function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number
       const bandInk = ink ? ink.subarray(lo, i) : undefined
       const bandTurn = turn ? turn.subarray(lo, i) : undefined
       const bandUniform = uniform ? uniform.subarray(lo, i) : undefined
+      const bandSoftTerm = softTerm ? softTerm.subarray(lo, i) : undefined
       // The bell tapers a run only towards a plateau: tell the band whether
       // the bin just beyond each of its edges is rigid, since it cannot see
-      // past its own slice.
-      const rigidBeyond: [boolean, boolean] = [lo > 0 && flex[lo - 1]! < HARD_RIGID, i < n && flex[i]! < HARD_RIGID]
-      const bandWidths = binWidths(bandFlex, w, S, bandInk, stemScale, bandTurn, turnScale, mode, bandUniform, rigidBeyond)
-      enforceZoneBandTarget(bandWidths, bandFlex, bandInk, w, S, mode)
+      // past its own slice. Ink-aware (`isBellRigid`) and softTerm-aware,
+      // same as the bell's own run detection, so a stroke (or a soft-pinned
+      // terminal) that happens to sit right at a band boundary is still seen
+      // as a plateau from the neighbouring band's side.
+      const rigidBeyond: [boolean, boolean] = [
+        lo > 0 && (isBellRigid(flex[lo - 1]!, ink ? ink[lo - 1]! : 0) || !!softTerm?.[lo - 1]),
+        i < n && (isBellRigid(flex[i]!, ink ? ink[i]! : 0) || !!softTerm?.[i]),
+      ]
+      const bandWidths = binWidths(bandFlex, w, S, bandInk, stemScale, bandTurn, turnScale, mode, bandUniform, rigidBeyond, bandSoftTerm)
+      enforceZoneBandTarget(bandWidths, bandFlex, bandInk, w, S, mode, bandSoftTerm)
       out.set(bandWidths, lo)
       lo = i
     }
@@ -1701,28 +1769,35 @@ function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number
  * `bandedBinWidths`: an all-rigid band keeps its natural, un-stretched
  * size rather than being forced to grow.
  */
-function enforceZoneBandTarget(bandWidths: Float64Array, flex: Float64Array, ink: Float64Array | undefined, w: number, S: number, mode: DistributionMode = 'flex'): void {
+function enforceZoneBandTarget(bandWidths: Float64Array, flex: Float64Array, ink: Float64Array | undefined, w: number, S: number, mode: DistributionMode = 'flex', softTerm?: Uint8Array): void {
   const n = bandWidths.length
   const target = S * n * w
   let total = 0
   for (let q = 0; q < n; q++) total += bandWidths[q]!
   const diff = target - total
   if (Math.abs(diff) <= 1e-6) return
+  // Fix 2 (continued): in bell mode, "non-rigid" here is the same
+  // classification `bellWeights` uses — ink-aware (`isBellRigid`) AND
+  // softTerm-aware — not just the plain `flex >= HARD_RIGID` cut. Otherwise a
+  // bin the ordinary bell pass correctly excluded (a horizontal stroke, or a
+  // short diagonal terminal's own soft pin) would still be handed a share of
+  // THIS hard constraint's leftover growth, proportional to plain width,
+  // once the band's genuinely rigid ink leaves too little headroom elsewhere
+  // — undoing the exclusion right back. 'flex' mode (the lab's A/B control)
+  // keeps the original plain cut.
   const nonRigid: number[] = []
-  for (let q = 0; q < n; q++) if (flex[q]! >= HARD_RIGID) nonRigid.push(q)
+  for (let q = 0; q < n; q++) {
+    const isRigid = mode === 'bell'
+      ? isBellRigid(flex[q]!, ink ? ink[q]! : 0) || !!softTerm?.[q]
+      : flex[q]! < HARD_RIGID
+    if (!isRigid) nonRigid.push(q)
+  }
   if (!nonRigid.length) return   // all-rigid band: keep its natural size
   if (diff > 0) {
-    // Fix 2 (continued): the leftover growth this hard constraint forces is
-    // also weighted by `freenessOf` in bell mode — otherwise a SOFT-PINNED
-    // bin (a short terminal promoted to the min channel by Fix 1, say) gets
-    // its ordinary bell share correctly suppressed only to have this
-    // clean-up pass hand it right back, proportional to plain width, once
-    // the band's own rigid ink leaves too little headroom elsewhere.
-    const weightOf = (q: number) => mode === 'bell' ? bandWidths[q]! * freenessOf(flex[q]!) : bandWidths[q]!
     let sumW = 0
-    for (const q of nonRigid) sumW += weightOf(q)
+    for (const q of nonRigid) sumW += bandWidths[q]!
     if (sumW > 1e-9) {
-      for (const q of nonRigid) bandWidths[q]! += diff * (weightOf(q) / sumW)
+      for (const q of nonRigid) bandWidths[q]! += diff * (bandWidths[q]! / sumW)
     } else {
       for (const q of nonRigid) bandWidths[q]! += diff / nonRigid.length
     }
@@ -1757,11 +1832,11 @@ function enforceZoneBandTarget(bandWidths: Float64Array, flex: Float64Array, ink
 }
 
 export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number, zones?: readonly number[], stemScale?: number, turnScale?: number, mode: DistributionMode = 'flex'): Remap {
-  const { start, binSize: w, flex, ink, turn, uniform } = profile
+  const { start, binSize: w, flex, ink, turn, uniform, softTerm } = profile
   const n = flex.length
   const widths = zones && zones.length
     ? bandedBinWidths(profile, S, zones, stemScale, turnScale, mode)
-    : binWidths(flex, w, S, ink, stemScale, turn, turnScale, mode, uniform)
+    : binWidths(flex, w, S, ink, stemScale, turn, turnScale, mode, uniform, undefined, softTerm)
   const src = new Float64Array(n + 1)
   const dst = new Float64Array(n + 1)
   let acc = start
