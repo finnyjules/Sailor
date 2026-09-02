@@ -247,6 +247,18 @@ quantize stretch values for caching — not expected.
   those lines to the same targets and its flex only decides how the inside of
   a band stretches. An all-rigid sliver band (the overshoot above the
   x-height) keeps its absolute size — the optical-overshoot rule for free.
+- **Stems follow AREA, not width** (lab-found 2026-09-01: condense 0.7 ×
+  Height 2.5 gave spindly letters): the one-stem-weight schedule is driven by
+  `S × SY`, shared by both axes — stems thin only when the letter LOSES area.
+  A tall compressed display face keeps its stems heavy.
+- **Curves stay smooth** (same session: the o's arches were held exactly and
+  its flanks stretched fully — a 9-slice with the drawn corner radius verbatim
+  on a 2.5×-taller shape, reading as a rounded rectangle with a kink): the
+  profile may not climb away from a rigid plateau faster than one stroke
+  width allows (`smoothProfile`, a slope limit that only LOWERS values, on
+  ink bins only — empty counters stay fully free), run before the straight-span
+  pass so straight arms stay straight. A designer's tall o has a LARGER corner
+  radius; now so does ours.
 - **Spaces/blanks**: advance stretches; no outline to remap.
 - **Ligatures**: multi-codepoint glyphs flex-analyze like any other outline.
 
