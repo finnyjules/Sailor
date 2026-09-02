@@ -483,7 +483,11 @@ function bindTextureMaps(m: THREE.Material, mat: SceneMaterial, manifest: Textur
   if (!textureApplies(m, mat)) return
   const id = mat.texture!
   const t = m as THREE.MeshPhysicalMaterial
-  const tiling = mat.textureTiling ?? MATERIAL_DEFAULTS.textureTiling
+  // Live tiling, same reasoning as the relief heal's I2 fix above: `updateMaterial`'s in-place
+  // block may have advanced `userData.textureTiling` while the manifest was in flight, so the
+  // stamp — not the construction-time `SceneMaterial` — is the truth. Falling back to `mat`
+  // keeps the direct (test/first-bind) call working before anything is stamped.
+  const tiling = (m.userData.textureTiling as number | undefined) ?? mat.textureTiling ?? MATERIAL_DEFAULTS.textureTiling
   const has = (k: TextureManifest['maps'][number]) => manifest.maps.includes(k)
   const bound = new Set<TextureManifest['maps'][number]>()
 
@@ -496,10 +500,15 @@ function bindTextureMaps(m: THREE.Material, mat: SceneMaterial, manifest: Textur
   const tex = (k: TextureManifest['maps'][number], cs: THREE.ColorSpace) => {
     if (!hasDOM) return null
     const own = new THREE.TextureLoader().load(inputViewUrl(textureMapFilename(id, k)), undefined, undefined, () => {
-      // Load failure: drop just this slot so the material degrades to the plain surface.
+      // Load failure: drop just this slot so the material degrades to the plain surface. Free
+      // the dead Texture and un-stamp its key — `textureMaps` is what disposeMaterial and the
+      // retile loop trust, so a key left behind claims a live map that is not there.
       for (const slot of ['map', 'roughnessMap', 'metalnessMap', 'normalMap', 'aoMap', 'bumpMap'] as const) {
         if ((t as any)[slot] === own) { (t as any)[slot] = null; t.needsUpdate = true }
       }
+      own.dispose()
+      const stamped = t.userData.textureMaps as string[] | undefined
+      if (stamped) t.userData.textureMaps = stamped.filter((sk) => sk !== k)
     })
     own.colorSpace = cs
     setRepeat(own, tiling)
@@ -512,7 +521,10 @@ function bindTextureMaps(m: THREE.Material, mat: SceneMaterial, manifest: Textur
   if (has('normal') && !mat.normalImage) { t.normalMap = tex('normal', THREE.NoColorSpace); bound.add('normal') }
   if (has('ao')) {
     t.aoMap = tex('ao', THREE.NoColorSpace)
-    if (t.aoMap) t.aoMap.channel = 0 // primary UVs, not the uv1 three.js defaults to
+    // Pin the ao lookup to the primary UVs as a stated contract. three 0.171's Texture.channel
+    // already defaults to 0; the explicit write is what keeps a future default change (or an
+    // upstream uv1 default, as older docs describe) from silently moving the occlusion.
+    if (t.aoMap) t.aoMap.channel = 0
     t.userData.textureAoChannel = 0
     bound.add('ao')
   }
@@ -537,6 +549,7 @@ function bindTextureMaps(m: THREE.Material, mat: SceneMaterial, manifest: Textur
  *  renders untextured, then the maps bind and `needsUpdate` fires — same shape as the
  *  relief heal. Applied AFTER applyRelief so an explicit relief's bump survives. */
 export function applyTextureSet(m: THREE.Material, mat: SceneMaterial): void {
+  if (m.userData.disposed) return // nothing left to bind onto — see the .then guard below
   if (!textureApplies(m, mat)) return
   // Stamped BEFORE the DOM guard: updateMaterial's in-place tiling block keys off
   // `userData.textureId`, and it must retile a material whose maps are still in flight (or,
@@ -546,8 +559,13 @@ export function applyTextureSet(m: THREE.Material, mat: SceneMaterial): void {
   if (!hasDOM) return // node/unit tests: no TextureLoader, nothing to bind
   const id = mat.texture!
   ensureTextureFetched(id).then((manifest) => {
-    // The material may have been rebuilt/disposed while we waited; only bind if it still
-    // wants this exact set.
+    // A disposed material still awaiting its texture set must not be re-populated — same
+    // hazard as `reliefHealPending`, and checked BEFORE the identity guard because disposal
+    // leaves `identity` intact (a delete-during-fetch, or an A→B→A flip inside the fetch
+    // window, passes that guard) and these six textures could never be freed again.
+    if (m.userData.disposed) return
+    // The material may have been rebuilt while we waited; only bind if it still wants this
+    // exact set.
     if (m.userData.identity !== identityKey(mat)) return
     bindTextureMaps(m, mat, manifest)
   }).catch(() => { /* row shows the error; the material stays untextured */ })
@@ -1216,6 +1234,7 @@ export function disposeMaterial(m: THREE.Material): void {
   if (m.userData.matType === 'shaderFill') shaderFillMaterials.delete(m)
   if (m.userData.matType === 'opalescent') opalMaterials.delete(m as THREE.MeshStandardMaterial)
   reliefHealPending.delete(m) // a disposed material still awaiting its relief heal must not leak
+  m.userData.disposed = true // ...and an in-flight applyTextureSet must not bind onto it (see its .then)
   // The gradient ramp LUT is owned by exactly one material — as is the opal ramp (its own
   // uniform bucket), so dispose whichever this material carries.
   const ramp = (m.userData.gradUniforms as { uRamp?: { value?: THREE.Texture } } | undefined)?.uRamp?.value

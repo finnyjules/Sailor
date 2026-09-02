@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import * as THREE from 'three'
 import { materialFor, updateMaterial, disposeMaterial, buildRampTexture, MATCAP_IDS, __bindTextureMapsForTest, applyTextureSet } from '~/lib/scene3d/materials'
 import { gradientAngles, gradientDirection, MATERIAL_DEFAULTS, type GradientStop, type SceneMaterial } from '~/lib/scene3d/config'
@@ -434,5 +434,62 @@ describe('texture sets', () => {
     expect(updateMaterial(m, base({ texture: 'ambientcg:Bricks075A' }))).toBe(false)
     expect(updateMaterial(m, base({ texture: 'ambientcg:Wood095', textureTiling: 3 }))).toBe(true)
     expect(m.userData.textureTiling).toBe(3)
+  })
+
+  // Under node the loader never runs, so these two stamp `userData.textureMaps` by hand and
+  // hang stub Textures on the slots — exactly the state a real bind leaves behind. That is
+  // what disposal and the retile loop actually read, so the decision IS testable here.
+  it('disposal frees only the slots this set bound, leaving a shared-cache normalMap alone', () => {
+    const m = materialFor(base({ texture: 'ambientcg:Wood095', normalImage: 'mine.png' })) as THREE.MeshPhysicalMaterial
+    const ours = { roughnessMap: new THREE.Texture(), metalnessMap: new THREE.Texture(), aoMap: new THREE.Texture() }
+    m.roughnessMap = ours.roughnessMap
+    m.metalnessMap = ours.metalnessMap
+    m.aoMap = ours.aoMap
+    const shared = new THREE.Texture() // the user's own normal map — lives in the shared imageCache
+    m.normalMap = shared
+    m.userData.textureMaps = ['color', 'roughness', 'metalness', 'ao'] // note: no 'normal'
+    const spies = {
+      roughness: vi.spyOn(ours.roughnessMap, 'dispose'),
+      metalness: vi.spyOn(ours.metalnessMap, 'dispose'),
+      ao: vi.spyOn(ours.aoMap, 'dispose'),
+      shared: vi.spyOn(shared, 'dispose'),
+    }
+    disposeMaterial(m)
+    expect(spies.roughness).toHaveBeenCalled()
+    expect(spies.metalness).toHaveBeenCalled()
+    expect(spies.ao).toHaveBeenCalled()
+    expect(spies.shared).not.toHaveBeenCalled()
+  })
+
+  it('in-place retile touches exactly the stamped slots, not an unstamped bumpMap', () => {
+    const m = materialFor(base({ texture: 'ambientcg:Wood095' })) as THREE.MeshPhysicalMaterial
+    const color = new THREE.Texture()
+    const rough = new THREE.Texture()
+    const bump = new THREE.Texture() // an explicit relief's bump — not ours to retile
+    m.map = color
+    m.roughnessMap = rough
+    m.bumpMap = bump
+    m.userData.textureMaps = ['color', 'roughness']
+    const spies = {
+      color: vi.spyOn(color.repeat, 'set'),
+      rough: vi.spyOn(rough.repeat, 'set'),
+      bump: vi.spyOn(bump.repeat, 'set'),
+    }
+    expect(updateMaterial(m, base({ texture: 'ambientcg:Wood095', textureTiling: 4 }))).toBe(true)
+    expect(spies.color).toHaveBeenCalledWith(4, 4)
+    expect(spies.rough).toHaveBeenCalledWith(4, 4)
+    expect(spies.bump).not.toHaveBeenCalled()
+  })
+
+  it('does not apply a texture set to a disposed material', () => {
+    // The async `.then` guard itself is DOM-only (node never reaches the loader), so this
+    // exercises the synchronous half: a disposed material is not even stamped.
+    const m = materialFor(base({ texture: 'ambientcg:Wood095' }))
+    disposeMaterial(m)
+    expect(m.userData.disposed).toBe(true)
+    const fresh = new THREE.MeshPhysicalMaterial()
+    fresh.userData.disposed = true
+    expect(() => applyTextureSet(fresh, base({ texture: 'ambientcg:Wood095' }))).not.toThrow()
+    expect(fresh.userData.textureId).toBeUndefined()
   })
 })
