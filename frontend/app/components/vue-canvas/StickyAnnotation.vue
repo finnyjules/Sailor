@@ -125,11 +125,13 @@ const hueTurn = computed(() => `${(shimmerPhase.value * 0.9).toFixed(1)}deg`)
 // The glint layer is masked by the moving light band; the band mask slides
 // with the pan at 1.6× so it rakes across the paper.
 const bandPosition = computed(() => `${(shimmerPhase.value * 1.6).toFixed(1)}px 0px`)
+// A touch of blur softens the dots into foil rather than confetti.
+const DOT_BLUR = 'blur(0.6px)'
 const glitterStyle = computed(() => ({
-  filter: `hue-rotate(${hueTurn.value})`,
+  filter: `${DOT_BLUR} hue-rotate(${hueTurn.value})`,
 }))
 const glintStyle = computed(() => ({
-  filter: `hue-rotate(${hueTurn.value})`,
+  filter: `${DOT_BLUR} hue-rotate(${hueTurn.value})`,
   maskPosition: bandPosition.value,
   WebkitMaskPosition: bandPosition.value,
 }))
