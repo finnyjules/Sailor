@@ -204,7 +204,7 @@ onMounted(async () => {
         <input v-model.number="roundCoupling" type="range" min="0" max="1" step="0.05" class="w-32" data-test="round-coupling" />
       </label>
       <label class="flex items-center gap-2">
-        <input v-model="shapeRules" type="checkbox" data-test="shape-rules" /> shape rules (bell)
+        <input v-model="shapeRules" type="checkbox" data-test="shape-rules" /> shape rules (bell) — off = old model, k active
       </label>
       <label class="flex items-center gap-2">
         <input v-model="overlay" type="checkbox" data-test="overlay" /> flex overlay
