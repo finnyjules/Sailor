@@ -273,10 +273,10 @@ const rayStyle = computed(() => ({
   opacity: 0.02;
 }
 .sticky-annotation--dark .sticky-annotation__glint {
-  opacity: 0.15; /* screen has huge headroom on black — anything stronger glares */
+  opacity: 0.08; /* screen has huge headroom on black — anything stronger glares */
 }
 .sticky-annotation--dark .sticky-annotation__ray {
-  opacity: 0.25;
+  opacity: 0.12;
 }
 /* Dark papers get a dark-grey→black hairline instead of white→black. */
 .sticky-annotation.sticky-annotation--dark::after { /* out-specifies the base ::after below */
