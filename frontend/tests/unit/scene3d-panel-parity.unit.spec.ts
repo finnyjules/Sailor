@@ -94,6 +94,8 @@ const ROW: Record<string, Row> = {
   [`${M}color`]: { label: 'Color', kind: 'color' },
   [`${M}roughness`]: { label: 'Roughness', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'How matte or glossy the surface is' },
   [`${M}metalness`]: { label: 'Metalness', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Blends between plastic-like and metal reflections' },
+  // Sits under the bespoke `ui.material.textureSet` block on the three physical types.
+  [`${M}textureTiling`]: { label: 'Texture tiling', kind: 'slider', min: 0.25, max: 12, step: 0.25, hint: 'How many times the surface pattern repeats across the object' },
 
   // <details> Coat & sheen
   [`${M}clearcoat`]: { label: 'Clearcoat', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Adds a thin glossy varnish layer on top' },
@@ -185,6 +187,7 @@ const OPAL_ROW: Record<string, Row> = {
 const ANCHOR_LABEL: Record<string, string> = {
   'ui.material.override': 'Override materials',
   'ui.material.surface': 'Surface',
+  'ui.material.textureSet': 'Surface texture',
   'ui.material.matcap': 'Matcap',
   'ui.material.harmony': 'Harmony',
   'ui.material.gradientStops': 'Colours',
@@ -250,7 +253,10 @@ const RELIEF_OFF = [`${M}relief.source`]
  *  always-present Surface relief card. */
 const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>> = {
   standard: {
-    Material: [`${M}type`, 'ui.material.surface', `${M}color`, `${M}roughness`, `${M}metalness`],
+    Material: [
+      `${M}type`, 'ui.material.surface', `${M}color`, `${M}roughness`, `${M}metalness`,
+      'ui.material.textureSet', `${M}textureTiling`,
+    ],
     'Coat & sheen': [`${M}clearcoat`, `${M}clearcoatRoughness`, `${M}sheen`, `${M}sheenColor`],
     Glow: [`${M}emissive`, `${M}emissiveIntensity`],
     Transparency: ['ui.material.prism', `${M}opacity`, `${M}transmission`, `${M}ior`, `${M}thickness`, `${M}dispersion`, `${M}attenuationColor`, `${M}attenuationDistance`],
@@ -259,7 +265,10 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
     'Surface relief': RELIEF_OFF,
   },
   glass: {
-    Material: [`${M}type`, 'ui.material.surface', `${M}color`, `${M}roughness`, `${M}metalness`],
+    Material: [
+      `${M}type`, 'ui.material.surface', `${M}color`, `${M}roughness`, `${M}metalness`,
+      'ui.material.textureSet', `${M}textureTiling`,
+    ],
     'Coat & sheen': [`${M}clearcoat`, `${M}clearcoatRoughness`, `${M}sheen`, `${M}sheenColor`],
     Glow: [`${M}emissive`, `${M}emissiveIntensity`],
     Transparency: ['ui.material.prism', `${M}opacity`, `${M}transmission`, `${M}ior`, `${M}thickness`, `${M}dispersion`, `${M}attenuationColor`, `${M}attenuationDistance`],
@@ -298,6 +307,7 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
       `${M}type`, 'ui.material.opalStops', `${M}color`,
       `${M}opalHueShift`, `${M}opalFrequency`, `${M}opalAngleMix`, `${M}opalStrength`, `${M}opalFlowSpeed`,
       `${M}roughness`, `${M}metalness`, `${M}clearcoat`, `${M}clearcoatRoughness`, `${M}envMapIntensity`,
+      'ui.material.textureSet', `${M}textureTiling`,
     ],
     'Surface relief': RELIEF_OFF,
   },
@@ -510,6 +520,7 @@ describe('Scene3D panel parity — selection states', () => {
     const cards = designCards(doc, glb)
     expect(cards.find((s) => s.title === 'Material')!.keys).toEqual([
       'ui.material.override', `${M}type`, 'ui.material.surface', `${M}color`, `${M}roughness`, `${M}metalness`,
+      'ui.material.textureSet', `${M}textureTiling`,
     ])
     expect(cards.map((s) => s.title)).toEqual([
       ...Object.keys(MATERIAL_SCENARIO.standard), ...Object.keys(DOC_SCENARIO),

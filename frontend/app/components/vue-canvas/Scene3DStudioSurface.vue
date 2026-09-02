@@ -4152,6 +4152,11 @@ async function onClose() {
             </div>
           </template>
 
+          <!-- Placeholder: Task 9 replaces this with the TexturePicker row. -->
+          <template #control-ui.material.textureSet>
+            <p class="text-[11px] text-white/55">Texture</p>
+          </template>
+
           <!-- Palette: Manual keeps the authored ramp editor; Harmony instead GENERATES the
                ramp from hue/sat/light + a scheme (rampStopsOf in config.ts) — the two are
                mutually exclusive views onto the same `gradientStops` field, so only one
