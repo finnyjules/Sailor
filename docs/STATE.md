@@ -14,7 +14,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 |---|---|---|---|---|---|
 | Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls) | ✅ descriptor | 11,202 |
 | Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
-| Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers) | ✅ descriptor (object.* + id-addressed) | ~6,300 (+ SVG import) |
+| Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers) | ✅ descriptor (object.* + id-addressed) | ~6,300 (+ SVG import) + ambientCG textures |
 | Compositor / Frame | ✅ | ✅ motion clips | ✅ | ✅ commands | 1,667 (+1,041 motion) |
 | Timeline (NLE) | ✅ webm/mp4 + server | ✅ native | ✅ | ❌ | shared/timeline |
 | Gradient Studio | ✅ | ✅ 30 targets, path-based | ✅ (**schema-drawn** from GRADIENT_CONTROLS) | ✅ descriptor | 2,620 (+ 4 primitives + alpha + per-layer layout) |
@@ -30,6 +30,18 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Pose Mannequin | ✅ control img | ❌ | modal | ❌ (excluded) | — |
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
+
+### 3D Studio — ambientCG surface textures — LANDED 2026-09-01
+
+3D Studio solids can now wear **real photographed PBR surfaces** — wood, brick, concrete, fabric, metal, marble — pulled from the free [ambientCG](https://ambientcg.com) library (~2,000 CC0 sets). A set is fetched **on demand** at 1K JPG into ComfyUI's input folder (`input/sailor_textures/`) and cached there, so the repo carries no texture bytes and a set is downloaded once per machine; colour, roughness, normal, ambient-occlusion and metalness maps are bound to the material, and displacement rides in as a bump map. Per-material **tiling** repeats the set across the surface.
+
+Two ways in. By hand: the **Texture** row in the Material panel — search plus category chips, pick a set, the box wears it. By words: the agent's `object.material.texture` control takes a plain phrase like `wood` or `brick`, and `resolveTexturePatches` (`frontend/app/lib/agent/studioTune.ts`) turns it into an `ambientcg:<Id>` before the patch lands — so "a wooden box" comes back a box wearing wood, via the guide's worked example `{"primitive":"box","object.material.type":"standard","object.material.texture":"wood","object.material.roughness":0.8}`.
+
+Verified: the picker live in the Browser pane (picking a wood set textures the box), and a **pixel-parity E2E** (`frontend/tests/scene3d-texture-parity.spec.ts`) that a textured box must differ in pixels from a plain one. **The live agent check is OWED** — the dev machine has no Anthropic key (client localStorage empty, `/api/ai-status` → `configured: false`), so the prompt bar refuses "a wooden box" with the 503 setup notice before any model call; no key was entered. What did run without a model: `POST /api/scene3d/textures/resolve` returns 200 with `ambientcg:Wood095` for "wood", `ambientcg:Bricks097` for "brick" and `{"id":null}` for a miss, and the `resolveTexturePatches` unit spec is green — so the whole path except the model's own patch is proven.
+
+Next: **HDRI environments** from the same library (the natural sequel — real skies behind the real surfaces); higher resolutions than 1K; and roughness/metalness stay **multipliers** over the map today rather than replacing it.
+
+Spec: [2026-09-01-scene3d-ambientcg-textures-design.md](superpowers/specs/2026-09-01-scene3d-ambientcg-textures-design.md) · plan: [2026-09-01-scene3d-ambientcg-textures.md](superpowers/plans/2026-09-01-scene3d-ambientcg-textures.md).
 
 ### Vector Type — smart stretch engine, Phase A — LANDED 2026-08-31 (lab gate open)
 
