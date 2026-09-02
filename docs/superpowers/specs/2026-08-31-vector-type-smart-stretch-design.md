@@ -315,6 +315,16 @@ quantize stretch values for caching — not expected.
   all-rigid sliver keeps its natural size — the overshoot rule), and under the
   shape rules the profile uses exponent 1 whatever k says. The lab greys the k
   slider; the naive column passes `shapeRules: false` explicitly.
+- **A terminal cut is never a stroke edge** (lab-found on Unbounded 2026-09-01
+  — the first heavy face: its S gained 16 inflections because its flat terminal
+  cuts are as long as its stroke is thick, cleared the 12%-of-glyph "straight"
+  threshold, hard-pinned a band half a stroke thick at mid-height twice, and
+  left only the spine and shoulders to absorb the height). Terminal-cut
+  detection (parallel neighbours, perpendicular cut) now runs on every line
+  segment regardless of length and a detected cut always pins SOFTLY; the
+  rigid angle-keeping patch stays diagonal-only. Unbounded's S: 16 → 6.
+  Lesson for Phase B: heavy faces need stroke-relative thresholds, not em- or
+  glyph-relative ones.
 - **Spaces/blanks**: advance stretches; no outline to remap.
 - **Ligatures**: multi-codepoint glyphs flex-analyze like any other outline.
 
