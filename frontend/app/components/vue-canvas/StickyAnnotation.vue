@@ -126,7 +126,7 @@ const hueTurn = computed(() => `${(shimmerPhase.value * 0.9).toFixed(1)}deg`)
 // with the pan at 1.6× so it rakes across the paper.
 const bandPosition = computed(() => `${(shimmerPhase.value * 1.6).toFixed(1)}px 0px`)
 // A touch of blur softens the dots into foil rather than confetti.
-const DOT_BLUR = 'blur(0.6px)'
+const DOT_BLUR = 'blur(0.2px)'
 const glitterStyle = computed(() => ({
   filter: `${DOT_BLUR} hue-rotate(${hueTurn.value})`,
 }))
