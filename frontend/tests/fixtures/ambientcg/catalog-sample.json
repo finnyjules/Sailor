@@ -1,0 +1,27 @@
+{
+  "numberOfResults": 3,
+  "foundAssets": [
+    {
+      "assetId": "Wood095", "displayName": "Wood 095", "dataType": "Material",
+      "displayCategory": "Wood", "popularityScore": 81.2,
+      "tags": ["095", "95", "beige", "clean", "natural", "polished", "wood"],
+      "previewImage": { "256-JPG-242424": "https://acg-media.struffelproductions.com/file/ambientCG-Web/media/thumbnail/256-JPG-242424/Wood095.jpg" }
+    },
+    {
+      "assetId": "Bricks075A", "displayName": "Bricks 075 A", "dataType": "Material",
+      "displayCategory": "Bricks", "popularityScore": 64.0,
+      "tags": ["075", "bricks", "brick", "red", "wall", "outdoor"],
+      "previewImage": { "256-JPG-242424": "https://acg-media.struffelproductions.com/file/ambientCG-Web/media/thumbnail/256-JPG-242424/Bricks075A.jpg" }
+    },
+    {
+      "assetId": "WoodFloor051", "displayName": "Wood Floor 051", "dataType": "Material",
+      "displayCategory": "Wood", "popularityScore": 90.5,
+      "tags": ["051", "wood", "floor", "planks", "brown", "indoor"],
+      "previewImage": { "256-JPG-242424": "https://acg-media.struffelproductions.com/file/ambientCG-Web/media/thumbnail/256-JPG-242424/WoodFloor051.jpg" }
+    },
+    {
+      "assetId": "NotAMaterial", "displayName": "Ignore me", "dataType": "HDRI",
+      "displayCategory": "Sky", "popularityScore": 1, "tags": ["sky"], "previewImage": {}
+    }
+  ]
+}
