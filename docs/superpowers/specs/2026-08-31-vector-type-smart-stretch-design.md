@@ -305,6 +305,16 @@ quantize stretch values for caching — not expected.
   Phase B: `k` no longer shapes anything except the rigid threshold — it
   becomes an internal constant, not a dial.** The old tangent-proportional
   distribution survives as `mode: 'flex'` behind the lab's shape-rules toggle.
+- **Zone bands are hard constraints; k is inert under the shape rules**
+  (lab-found on Fraunces 2026-09-01: at k = 3.5 the all-curve a reached only
+  ×1.18 of Height 2.31 while o/i/l landed — `pow(k)` had pushed every curved
+  row below the rigid threshold, the x-height band had nothing left to stretch,
+  the cap bound, the leftover was dropped, and the shared x-height broke). Now a
+  band always reaches its target whenever it has any non-rigid row (shortfall
+  redistributed over them, cap lifted; floors still win under condense; an
+  all-rigid sliver keeps its natural size — the overshoot rule), and under the
+  shape rules the profile uses exponent 1 whatever k says. The lab greys the k
+  slider; the naive column passes `shapeRules: false` explicitly.
 - **Spaces/blanks**: advance stretches; no outline to remap.
 - **Ligatures**: multi-codepoint glyphs flex-analyze like any other outline.
 
