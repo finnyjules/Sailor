@@ -48,6 +48,7 @@ import { mergeConfig as mergeVtConfig } from '~/lib/vectortype/config'
 import { VT_GUIDANCE, vtAgentControls } from '~/lib/vectortype/agentControls'
 import type { VtAxis as VtAxisLike } from '~/lib/vectortype/font'
 import { fetchShaderFxCatalog, getEffect, getEffectSync } from '~/lib/shaderfx/catalog'
+import { isResolvedTexture, resolveTexturePhrase } from '~/lib/scene3d/textures'
 // Scene3D (3D Studio): config.ts/agentControls.ts are three-free by construction (same
 // constraint controls.ts documents), so — like Gradient/Shape — these import statically
 // rather than dynamically; only VectorType's font.ts needs the dynamic-import treatment.
@@ -375,6 +376,30 @@ interface PatchAdapter {
   recontrol?: (config: any, raw: Record<string, ParamValue>) => ControlSpec[] | Promise<ControlSpec[]>
 }
 
+/** Scene3D texture phrases: the model writes `object.material.texture: "wood"`; the engine
+ *  only binds RESOLVED ids (`ambientcg:Wood095`). Resolve every such key server-side before
+ *  the patch lands, drop misses, and say so in plain words. Pure over an injected resolver
+ *  so it is unit-testable without the network. */
+export async function resolveTexturePatches(
+  patch: Record<string, ParamValue>,
+  resolve: (phrase: string) => Promise<{ id: string | null; name: string | null }> = resolveTexturePhrase,
+): Promise<{ patch: Record<string, ParamValue>; notes: string[] }> {
+  const out: Record<string, ParamValue> = { ...patch }
+  const notes: string[] = []
+  for (const [key, value] of Object.entries(patch)) {
+    if (!key.endsWith('.material.texture') || typeof value !== 'string' || isResolvedTexture(value)) continue
+    try {
+      const r = await resolve(value)
+      if (r.id) out[key] = r.id
+      else { delete out[key]; notes.push(`No texture set matched '${value}'`) }
+    } catch {
+      delete out[key]
+      notes.push(`The texture library couldn't be reached, so '${value}' was skipped`)
+    }
+  }
+  return { patch: out, notes }
+}
+
 async function runParamPatch(node: any, request: string, apiKey: string, a: PatchAdapter): Promise<TuneResult> {
   const read0 = await a.read(node)
   let config = read0.config
@@ -436,13 +461,16 @@ async function runParamPatch(node: any, request: string, apiKey: string, a: Patc
     delete patch[macroKey]
   }
 
+  const resolved = await resolveTexturePatches(patch)
+  patch = resolved.patch
   for (const [key, value] of Object.entries(patch)) {
     const before = params[key]
     params[key] = value // write-through the proxy → mutates the live config
     pushTuneRow(rows, { label: byPath.get(key)?.label ?? key, before: String(before ?? ''), after: String(value), rationale })
   }
+  const noteText = resolved.notes.length ? resolved.notes.join(' · ') : undefined
   if (rows.length) a.write(node, config)
-  return { ok: rows.length > 0, rows, restore, notice: rows.length ? undefined : (rationale || 'No adjustable change for that — try naming a colour, style or amount.') }
+  return { ok: rows.length > 0, rows, restore, notice: noteText ?? (rows.length ? undefined : (rationale || 'No adjustable change for that — try naming a colour, style or amount.')) }
 }
 
 /** Gradient Studio: config under sailor_gradientStudio; controls depend on the
