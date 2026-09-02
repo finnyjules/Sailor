@@ -289,8 +289,11 @@ quantize stretch values for caching — not expected.
   keeps its real jobs — what is RIGID (stems, apex bands, tittles, terminals),
   what is a TURN (round coupling), what is a STRAIGHT SPAN (uniformity) — but
   it no longer decides how much each free bin stretches. Between rigid
-  features the change spreads as a **raised cosine per free run** (near zero
-  next to the plateaus, peaking mid-flank / mid-counter), one bell per bulge
+  features the change spreads as a **bell per free run** — a sine bump under
+  growth (linear rise at the plateau edge, so a shoulder opens the moment its
+  arch ends; a raised cosine left the shoulder effectively rigid and read as a
+  corner) and a raised cosine under condense (a linear rise only smears the
+  floor-clipped cliff into two corners) — one bell per bulge
   (runs split at partial waists below 0.5 flex, e.g. the S's spine), anchored
   at the plateau's own scale under condense, with straight spans held uniform
   inside a run and the round-coupling factor tapered so it never steps into
