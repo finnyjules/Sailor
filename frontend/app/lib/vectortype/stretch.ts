@@ -436,6 +436,17 @@ export function analyzeFlex(
   const k = Math.max(0, opts.k ?? DEFAULT_K)
   const smallFeature = opts.smallFeature ?? 0
   const shapeRules = opts.shapeRules ?? true
+  // Fix: k is INERT under the shape rules. With the hard/soft split, a
+  // straight stroke is already pinned by min regardless of exponent — k's
+  // only remaining job is to shape how a CURVE flows between rigid
+  // plateaus. But an all-curve glyph (an 'S', an 'a') has almost no straight
+  // ink to anchor it, so raising k pushes nearly every one of its rows below
+  // the rigid threshold, leaving the x-height band with no non-rigid bin
+  // left to reach its zone target (see `bandedBinWidths`). k keeps its old
+  // meaning only for the pre-shape-rules model (`shapeRules: false`, the
+  // lab's A/B control); under shape rules the exponent is fixed at 1 and
+  // tangent alignment alone (via the bell) decides how a curve stretches.
+  const kEff = shapeRules ? 1 : k
   const w = bbox.maxX - bbox.minX
   const h = bbox.maxY - bbox.minY
   const straightMin = opts.straightMin ?? STRAIGHT_MIN_EM * Math.max(w, h)
@@ -707,8 +718,8 @@ export function analyzeFlex(
     turnY[b] = hy >= HARD_RIGID && ky > HARD_RIGID && ky < FULL_FLEX ? 1 : 0
     const vx = shapeRules ? Math.min(kx, sx) : mx
     const vy = shapeRules ? Math.min(ky, sy) : my
-    flexX[b] = Math.pow(vx, k)
-    flexY[b] = Math.pow(vy, k)
+    flexX[b] = Math.pow(vx, kEff)
+    flexY[b] = Math.pow(vy, kEff)
     inkX[b] = ix
     inkY[b] = iy
   }
@@ -1380,11 +1391,86 @@ function bandedBinWidths(profile: FlexProfile, S: number, zones: readonly number
       // the bin just beyond each of its edges is rigid, since it cannot see
       // past its own slice.
       const rigidBeyond: [boolean, boolean] = [lo > 0 && flex[lo - 1]! < HARD_RIGID, i < n && flex[i]! < HARD_RIGID]
-      out.set(binWidths(bandFlex, w, S, bandInk, stemScale, bandTurn, turnScale, mode, bandUniform, rigidBeyond), lo)
+      const bandWidths = binWidths(bandFlex, w, S, bandInk, stemScale, bandTurn, turnScale, mode, bandUniform, rigidBeyond)
+      enforceZoneBandTarget(bandWidths, bandFlex, bandInk, w, S)
+      out.set(bandWidths, lo)
       lo = i
     }
   }
   return out
+}
+
+/**
+ * Zone bands are HARD CONSTRAINTS (Fix: zones always reach their target).
+ * `binWidths` alone under-achieves a band whenever its non-rigid bins hit
+ * the partial-growth cap on expansion, or their floors on condense, and
+ * over-achieves is impossible by construction but a mixed band can still
+ * land short — either way the band's own line (the boundary the NEXT band
+ * starts from) drifts off S × its natural position. That is invisible for
+ * an ordinary, non-zoned remap (`binWidths`'s own leftover-is-dropped
+ * philosophy), but a zone line is an ALIGNMENT LINE SHARED ACROSS EVERY
+ * GLYPH — an x-height, a cap-height — so one glyph quietly under-achieving
+ * its band breaks that line for the whole word, not just for itself.
+ *
+ * So here, after the ordinary solve, the leftover (or overshoot) is forced
+ * onto the band's own non-rigid bins (flex ≥ `HARD_RIGID`), proportional to
+ * their current width, ignoring the partial-growth cap — the cap exists to
+ * protect a lone sliver from absorbing a whole glyph's stretch, but a zone
+ * line matters more than that protection. Under condense the bins' floors
+ * still apply: if the floors alone make the target unreachable, this stops
+ * there (the documented deep-condense limit) rather than breaching them.
+ *
+ * A band with NO non-rigid bin (every bin flex < `HARD_RIGID`) is left
+ * untouched — the overshoot-sliver exemption already documented on
+ * `bandedBinWidths`: an all-rigid band keeps its natural, un-stretched
+ * size rather than being forced to grow.
+ */
+function enforceZoneBandTarget(bandWidths: Float64Array, flex: Float64Array, ink: Float64Array | undefined, w: number, S: number): void {
+  const n = bandWidths.length
+  const target = S * n * w
+  let total = 0
+  for (let q = 0; q < n; q++) total += bandWidths[q]!
+  const diff = target - total
+  if (Math.abs(diff) <= 1e-6) return
+  const nonRigid: number[] = []
+  for (let q = 0; q < n; q++) if (flex[q]! >= HARD_RIGID) nonRigid.push(q)
+  if (!nonRigid.length) return   // all-rigid band: keep its natural size
+  if (diff > 0) {
+    let sumW = 0
+    for (const q of nonRigid) sumW += bandWidths[q]!
+    if (sumW > 1e-9) {
+      for (const q of nonRigid) bandWidths[q]! += diff * (bandWidths[q]! / sumW)
+    } else {
+      for (const q of nonRigid) bandWidths[q]! += diff / nonRigid.length
+    }
+    return
+  }
+  // Condense: shrink the band's non-rigid bins toward their own floors,
+  // proportional to current width, over a waterfall like `binWidths`'s own
+  // condense passes — a bin at its floor stops absorbing and the rest
+  // re-split what's left. Whatever remains when every eligible bin has
+  // floored is dropped (the deep-condense limit).
+  let need = -diff
+  for (let pass = 0; pass < 4 && need > 1e-9; pass++) {
+    let sumW = 0
+    for (const q of nonRigid) {
+      const isInk = ink ? ink[q]! > 0 : flex[q]! < FULL_FLEX
+      const floor = w * (isInk ? INK_BIN_FLOOR : EMPTY_BIN_FLOOR)
+      if (bandWidths[q]! > floor + 1e-12) sumW += bandWidths[q]!
+    }
+    if (sumW < 1e-9) break
+    let taken = 0
+    for (const q of nonRigid) {
+      const isInk = ink ? ink[q]! > 0 : flex[q]! < FULL_FLEX
+      const floor = w * (isInk ? INK_BIN_FLOOR : EMPTY_BIN_FLOOR)
+      if (bandWidths[q]! <= floor + 1e-12) continue
+      const can = Math.min(need * (bandWidths[q]! / sumW), bandWidths[q]! - floor)
+      bandWidths[q]! -= can
+      taken += can
+    }
+    need -= taken
+    if (taken < 1e-12) break
+  }
 }
 
 export function buildRemap(profile: FlexProfile, S: number, fixedPoint?: number, zones?: readonly number[], stemScale?: number, turnScale?: number, mode: DistributionMode = 'flex'): Remap {

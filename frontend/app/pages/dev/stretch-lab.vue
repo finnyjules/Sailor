@@ -130,8 +130,12 @@ function rerender() {
   // Naive column: identical pipeline at k = 0 — uniform scaling by
   // construction, so any visible difference against smart is the flex doing
   // its job (and no difference on stem-heavy text means it is NOT running).
+  // shapeRules: false alongside it — k is inert under the shape rules (see
+  // stretch.ts `analyzeFlex`), so without this the naive column would
+  // silently render at k = 1 (the shape-rules profile) instead of true
+  // uniform scaling, defeating the control this column exists to be.
   const naiveBase = textOutlines(f, text.value, baseAxes)
-  render(naiveCanvas.value, stretchOutlines(naiveBase, S.value, SY.value, { k: 0 }), false)
+  render(naiveCanvas.value, stretchOutlines(naiveBase, S.value, SY.value, { k: 0, shapeRules: false }), false)
 
   const plan = planStretch(f, text.value, baseAxes, S.value)
   const smartAxes = weightComp.value
@@ -191,9 +195,9 @@ onMounted(async () => {
         Height {{ SY.toFixed(2) }}×
         <input v-model.number="SY" type="range" min="0.5" max="2.5" step="0.01" class="w-48" data-test="stretch-y" />
       </label>
-      <label class="flex items-center gap-2">
-        k {{ k.toFixed(1) }}
-        <input v-model.number="k" type="range" min="0" max="8" step="0.1" class="w-32" data-test="k" />
+      <label class="flex items-center gap-2" :class="{ 'text-neutral-500': shapeRules }">
+        {{ shapeRules ? 'k (inert with shape rules)' : `k ${k.toFixed(1)}` }}
+        <input v-model.number="k" type="range" min="0" max="8" step="0.1" class="w-32" :disabled="shapeRules" data-test="k" />
       </label>
       <label class="flex items-center gap-2">
         round {{ roundCoupling.toFixed(2) }}

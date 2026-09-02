@@ -67,13 +67,22 @@ describe('analyzeFlex', () => {
   })
 
   it('k = 0 makes every inked slice fully flexible (uniform-scaling mode)', () => {
+    // shapeRules: false — this is the pre-shape-rules model's own exponent
+    // semantics (k = 0 degenerates the min-based profile to uniform
+    // scaling; that's the lab's naive/"control to beat" column). Under
+    // shape rules (the default) k is inert, so this k = 0 -> flex = 1
+    // behaviour no longer holds there — it holds only for the old model.
     const cmds = rect(0, 0, 100, 700)
-    const { x, y } = analyzeFlex(cmds, bboxOf([0, 0, 100, 700]), { bins: 16, k: 0 })
+    const { x, y } = analyzeFlex(cmds, bboxOf([0, 0, 100, 700]), { bins: 16, k: 0, shapeRules: false })
     for (const f of x.flex) expect(f).toBe(1)
     for (const f of y.flex) expect(f).toBe(1)
   })
 
   it('gives diagonals partial flex', () => {
+    // shapeRules: false — this test is about the OLD exponent semantics
+    // (k shaping how much a diagonal flexes); under shape rules k is inert
+    // (see stretch.ts `analyzeFlex`), so this reads as a plain synthetic bar
+    // with the pre-shape-rules model, the same A/B control the lab exposes.
     // A 45-degree bar: |tangent . x-hat| = cos(45) ~ 0.707, squared ~ 0.5.
     const cmds: PathCommand[] = [
       { command: 'moveTo', args: [0, 0] },
@@ -82,7 +91,7 @@ describe('analyzeFlex', () => {
       { command: 'lineTo', args: [60, 0] },
       { command: 'closePath', args: [] },
     ]
-    const { x } = analyzeFlex(cmds, bboxOf([0, 0, 760, 700]), { bins: 16, k: 2 })
+    const { x } = analyzeFlex(cmds, bboxOf([0, 0, 760, 700]), { bins: 16, k: 2, shapeRules: false })
     const mid = x.flex[8]!
     expect(mid).toBeGreaterThan(0.3)
     expect(mid).toBeLessThan(0.7)
@@ -1051,5 +1060,43 @@ describe('bell distribution — harmony between rigid features', () => {
     const width = (i: number) => (remapValue(ry, y.start + (i + 1) * y.binSize) - remapValue(ry, y.start + i * y.binSize)) / y.binSize
     expect(width(firstFree - 1)).toBeCloseTo(1, 6)   // the plateau's last row never moves
     expect(width(firstFree)).toBeGreaterThanOrEqual(1.08)
+  })
+})
+
+// Two related fixes: zone bands are HARD CONSTRAINTS (a glyph whose band
+// under- or over-achieves S breaks the shared x-height/cap-height line for
+// the whole word), and k is INERT under the shape rules (with the hard/soft
+// split, a curve's flow is decided by the bell, not by an exponent — a high k
+// on an all-curve glyph like an S or an a pushed nearly every row below the
+// rigid threshold and starved the x-height band of any bin left to reach its
+// target). See stretch.ts `analyzeFlex` and `bandedBinWidths`.
+describe('zones are hard constraints; k is inert under shape rules', () => {
+  it("an all-curve glyph lands on its zone targets at any k: the fixture 'S' and 'o' at Height 2.31", () => {
+    for (const k of [1, 3.5, 8]) {
+      for (const ch of ['S', 'o', 'a']) {
+        const run = textOutlines(font, ch)
+        const g0 = run.glyphs[0]!, g1 = stretchOutlines(run, 1, 2.31, { k }).glyphs[0]!
+        const r = g1.bbox.maxY / g0.bbox.maxY
+        expect(r).toBeGreaterThan(2.31 - 0.06)
+        expect(r).toBeLessThan(2.31 + 0.06)
+      }
+    }
+  })
+
+  it('under shape rules the profile ignores k', () => {
+    const g = textOutlines(font, 'S').glyphs[0]!
+    const a = analyzeFlex(g.commands, g.bbox, { k: 1 })
+    const b = analyzeFlex(g.commands, g.bbox, { k: 3.5 })
+    expect(Array.from(b.y.flex)).toEqual(Array.from(a.y.flex))
+    const c = analyzeFlex(g.commands, g.bbox, { k: 3.5, shapeRules: false })
+    expect(Array.from(c.y.flex)).not.toEqual(Array.from(a.y.flex))
+  })
+
+  it('a band with a single non-rigid bin still reaches its target (cap lifted for zones)', () => {
+    const flex = new Float64Array([0, 0, 0, 0.3, 0, 0, 0, 0, 0, 0])
+    const ink  = new Float64Array(10).fill(1)
+    const m = buildRemap({ start: 0, binSize: 10, flex, ink }, 2, undefined, [50], undefined, undefined, 'bell')
+    expect(remapValue(m, 50)).toBeCloseTo(100, 6)     // band A: bin 3 absorbs +50, past the cap
+    expect(remapValue(m, 100) - remapValue(m, 50)).toBeCloseTo(50, 6)   // band B all-rigid: keeps natural size
   })
 })
