@@ -497,6 +497,14 @@ function bindTextureMaps(m: THREE.Material, mat: SceneMaterial, manifest: Textur
   // cached texture is wrong — Texture.clone() copies `image` at clone time, so a clone taken
   // before the async load finishes stays empty forever. The browser HTTP cache dedupes the
   // bytes; the decode is repeated per material, which is cheap at 1K.
+  // The COST, stated honestly: a 1K RGBA map with mips is ~5 MB of VRAM, and a fully-mapped
+  // set is six of them, so ~30 MB per textured material. A dozen objects on one set is
+  // roughly 380 MB — and the visible failure is not a slow frame but WebGL context loss
+  // (the whole canvas goes blank; see scene3d-webgl-context-loss-recovery).
+  // The remedy when that ceiling is actually hit: a texture cache keyed by (set, map,
+  // tiling) instead of per material. That key keeps the `repeat` correctness above — two
+  // objects at different tilings still get different Textures — and turns in-place retile
+  // from a mutation into a rebind, so it is a swap of this function's body, not a redesign.
   const tex = (k: TextureManifest['maps'][number], cs: THREE.ColorSpace) => {
     if (!hasDOM) return null
     const own = new THREE.TextureLoader().load(inputViewUrl(textureMapFilename(id, k)), undefined, undefined, () => {
@@ -568,7 +576,13 @@ export function applyTextureSet(m: THREE.Material, mat: SceneMaterial): void {
     // exact set.
     if (m.userData.identity !== identityKey(mat)) return
     bindTextureMaps(m, mat, manifest)
-  }).catch(() => { /* row shows the error; the material stays untextured */ })
+    // Swallowed deliberately, and NOT because something else reports it: the picker row only
+    // shows an error for a fetch the picker itself started. On document load, or when an
+    // agent sets `texture`, nothing surfaces — the material just stays untextured, which is
+    // the spec's stated behaviour for this path (error table: "silent, keeps the plain
+    // surface"). Anything louder here would fire on every reopened document while
+    // ambientcg.com is down.
+  }).catch(() => {})
 }
 
 // ── Fresnel / gradient: LIT materials (Spline-style layers over lighting) ────

@@ -118,6 +118,18 @@ test('a textured box renders differently from a plain one', async ({ page }) => 
   const plain = await canvasHash(page)
   expect(await isBlankBlack(page), 'plain capture must not be a blank black frame').toBe(false)
 
+  // This spec's own premise, asserted rather than assumed: the poll-until-differ
+  // loop below only proves a texture reached the pixels if an UNCHANGED scene
+  // renders identically frame to frame. Today it does — the default post stack
+  // has grain off and nothing else animates — but a future time-varying default
+  // (animated grain, a drifting env, a subtle idle rotation) would make the loop
+  // succeed on its very first iteration and the spec would pass without a single
+  // texel ever being bound. Two captures a few hundred ms apart, before anything
+  // is picked, catch that: if they differ, the diff below means nothing and this
+  // guard fails loudly instead of the real assertion passing for free.
+  await page.waitForTimeout(400)
+  expect(await canvasHash(page), 'an unpicked scene must render identically frame to frame — otherwise the diff below proves nothing').toBe(plain)
+
   // The picker's search splits on whitespace and requires every word to match
   // the set's name/category/tags (TexturePicker.vue's `filtered`); ambientCG's
   // catalog names this set "Wood 095" (a space, not "Wood095"), and its tags
