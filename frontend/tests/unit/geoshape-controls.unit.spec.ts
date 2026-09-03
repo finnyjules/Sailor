@@ -165,8 +165,15 @@ describe('geoAgentControls', () => {
     }
   })
 
-  it('guidance names only keys that exist in the schema', () => {
-    const keys = new Set(GEO_CONTROLS.map((c) => c.key))
+  it('guidance names only keys — or select option VALUES — that exist in the schema', () => {
+    // A recipe has to be able to name the value it wants, not paraphrase it:
+    // "fillStrategy \"perClone\"" is what the model must emit, so the guidance
+    // spells it. Option values of every select count as vocabulary alongside
+    // the control keys themselves (perClone, leftRight, easeInOut…).
+    const keys = new Set([
+      ...GEO_CONTROLS.map((c) => c.key),
+      ...GEO_CONTROLS.filter((c) => c.kind === 'select').flatMap((c) => (c as { options: string[] }).options),
+    ])
     // Extract candidates INDEPENDENTLY of `keys` — every multi-word control
     // field GEO_GUIDANCE names is written in camelCase (roundCorners,
     // starInner, gridCols, angleStep, rotateStep, scaleStart, fillMode,
@@ -176,7 +183,9 @@ describe('geoAgentControls', () => {
     // or dead/renamed field (e.g. "roundCornerz") gets pulled out as a
     // candidate and fails the membership check below. The old version
     // filtered candidates through `keys` before ever asserting membership,
-    // so it could never fail no matter what the guidance said.
+    // so it could never fail no matter what the guidance said. Typo detection
+    // is unchanged by widening `keys` to option values: "roundCornerz" and
+    // "perClonee" are in neither set.
     const camelCaseToken = /\b[a-z][a-z0-9]*[A-Z][a-zA-Z0-9]*\b/g
     const candidates = new Set(GEO_GUIDANCE.match(camelCaseToken) ?? [])
     // Sanity: the extraction actually found real field references, so an
