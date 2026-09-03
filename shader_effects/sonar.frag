@@ -60,7 +60,8 @@ void main() {
     float h = fbmN(p + vec2(t, -t * 0.7), u_seed, oct);
     // Coastline: the chance of "land" rises across the shore band, and the ordered
     // dither turns that chance into a stippled edge.
-    float prob = smoothstep(u_level - u_edge, u_level + u_edge, h);
+    float e = max(u_edge, 1e-4);   // equal smoothstep edges are undefined in GLSL; keep a hair of width
+    float prob = smoothstep(u_level - e, u_level + e, h);
     float land = step(bayer4(px), prob);
     vec3 col = mix(u_sea, u_land, land);
 

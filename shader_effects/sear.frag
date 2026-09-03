@@ -77,7 +77,7 @@ void main() {
     vec2 uv = (px + 0.5) * cell / u_resolution;
     float t = u_time * u_speed * 0.15;
     int oct = int(clamp(u_detail, 1.0, 8.0) + 0.5);
-    float frame = floor(u_time * 6.0);   // the row breaks re-roll at ~6 fps, like dropped frames
+    float frame = floor(u_time * u_speed * 10.0);   // row breaks re-roll ~6x/s at default Speed and freeze at Speed 0
 
     // Drag: every row slides sideways by its own amount. Tear: a few rows jump a long way.
     float row = px.y;
@@ -89,9 +89,11 @@ void main() {
 
     // Streak: a row holds its hottest value for a stretch to the left (a horizontal max-smear).
     float h = heat(suv, t, oct);
-    for (int k = 1; k <= 4; k++) {
-        float off = float(k) * u_streak * 0.04;
-        h = max(h, heat(suv - vec2(off, 0.0), t, oct) - float(k) * 0.02);
+    if (u_streak > 0.0) {
+        for (int k = 1; k <= 4; k++) {
+            float off = float(k) * u_streak * 0.04;
+            h = max(h, heat(suv - vec2(off, 0.0), t, oct) - float(k) * 0.02);
+        }
     }
     h = clamp((h - 0.5) * 2.0 + 0.5, 0.0, 1.0);
 
