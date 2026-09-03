@@ -1416,7 +1416,14 @@ function setMaterialControl(field: string, value: string | number | boolean): vo
   // `{ density: 60 }` the parser would read as pattern none.
   if (field.startsWith('screen.')) {
     const sub = field.slice('screen.'.length)
-    applyMaterial((m) => { m.screen = { ...screenOf(m), [sub]: value } as ScreenSpec })
+    // Glass is skipped in the fan-out: the row is only offered because the PRIMARY
+    // selection can take a screen, but a multi-selection may include glass, and
+    // buildMaterial ignores `screen` there — writing it would leave a spec on the doc
+    // that nothing renders and that would come alive if the material type ever changed.
+    applyMaterial((m) => {
+      if (m.type === 'glass') return
+      m.screen = { ...screenOf(m), [sub]: value } as ScreenSpec
+    })
     return
   }
   applyMaterial((m) => writeMaterialField(m, field, value))

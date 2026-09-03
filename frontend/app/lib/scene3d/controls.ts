@@ -494,7 +494,7 @@ export const SCENE_CONTROLS: SceneControl[] = [
   slider('object.material.screen.angle', 'Screen angle', 0, 180, 1, 'Material', MATERIAL_DEFAULTS.screenAngle,
     'Rotates the dot grid', { when: screenApplies }),
   slider('object.material.screen.contrast', 'Screen contrast', 0.25, 4, 0.05, 'Material', MATERIAL_DEFAULTS.screenContrast,
-    'How fast dots shrink into shadow', { when: screenApplies }),
+    'How fast dots shrink into shadow. Brightness is measured before display gamma, so values around 0.45 spread dots into the midtones', { when: screenApplies }),
   slider('object.material.screen.softness', 'Screen softness', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.screenSoftness,
     'Edge blur on each dot', { when: screenApplies }),
   slider('object.material.screen.misregister', 'Misregister', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.screenMisregister,

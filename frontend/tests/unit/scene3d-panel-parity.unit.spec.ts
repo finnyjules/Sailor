@@ -166,7 +166,7 @@ const ROW: Record<string, Row> = {
   [`${M}screen.pattern`]: { label: 'Pattern', kind: 'select', options: ['none', 'dots', 'lines', 'cross'], optionLabels: ['None', 'Dots', 'Lines', 'Cross'] },
   [`${M}screen.density`]: { label: 'Density', kind: 'slider', min: 4, max: 200, step: 1, hint: 'How many dots across the surface' },
   [`${M}screen.angle`]: { label: 'Angle', kind: 'slider', min: 0, max: 180, step: 1, hint: 'Rotates the dot grid' },
-  [`${M}screen.contrast`]: { label: 'Contrast', kind: 'slider', min: 0.25, max: 4, step: 0.05, hint: 'How fast dots shrink into shadow' },
+  [`${M}screen.contrast`]: { label: 'Contrast', kind: 'slider', min: 0.25, max: 4, step: 0.05, hint: 'How fast dots shrink into shadow. Brightness is measured before display gamma, so values around 0.45 spread dots into the midtones' },
   [`${M}screen.softness`]: { label: 'Softness', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Edge blur on each dot' },
   [`${M}screen.misregister`]: { label: 'Misregister', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Offsets red and blue so edges fringe like a misprint' },
   [`${M}screen.invert`]: { label: 'Invert', kind: 'switch' },
