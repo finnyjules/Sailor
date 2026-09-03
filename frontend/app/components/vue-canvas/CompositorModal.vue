@@ -4224,11 +4224,19 @@ const hasLibraryShape = computed(() => !!libraryShape.value)
  *  already downgraded to the default — computed once and reused by the face
  *  button's v-if, :is and title, rather than each re-deriving it. */
 const shapeFaceResolved = computed(() => resolveShapeFace(shapeFace.value, hasLibraryShape.value))
-// search row + 5×36px grid rows + padding; the picker clamps itself if the guess is off
-const SHAPE_PICKER_APPROX_HEIGHT = 340
+// ~310px panel (28px search row + 8px margin + max-h-64 [256px] grid + 16px
+// padding) plus a small gap; the picker clamps itself if the guess is off
+const SHAPE_PICKER_APPROX_HEIGHT = 310
 const libraryPickerOpen = ref(false)
 const libraryPickerAnchor = ref({ x: 0, y: 0 })
 const shapesClusterRef = ref<HTMLElement | null>(null)
+/** Declared here, beside libraryPickerOpen, rather than down by its own
+ *  open/pick helpers: closeToolbarMenus (below) references it, and a
+ *  declaration after that reference would be a TDZ hazard the moment
+ *  closeToolbarMenus is called before this module finishes initializing. */
+const inspectorShapePickerOpen = ref(false)
+const inspectorShapeAnchor = ref({ x: 0, y: 0 })
+const inspectorShapeButtonRef = ref<HTMLElement | null>(null)
 const SHAPE_ICONS: Record<ToolbarShapeId, Component> = {
   rect: Square, ellipse: Circle, line: Minus, polygon: Hexagon, star: Star, library: Shapes,
 }
@@ -4289,9 +4297,6 @@ const selectedShape = computed(() => {
   const l = selectedLocal.value
   return l && l.kind === 'path' && l.shapeId ? shapeById(l.shapeId) : undefined
 })
-const inspectorShapePickerOpen = ref(false)
-const inspectorShapeAnchor = ref({ x: 0, y: 0 })
-const inspectorShapeButtonRef = ref<HTMLElement | null>(null)
 function openInspectorShapePicker() {
   const r = inspectorShapeButtonRef.value?.getBoundingClientRect()
   inspectorShapeAnchor.value = r ? { x: r.right - SHAPE_PICKER_WIDTH, y: r.bottom + 4 } : { x: 16, y: 16 }
@@ -4423,6 +4428,10 @@ async function onBrushFillImageFile(e: Event) {
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  // A shape picker owns the keyboard while open (Delete/Backspace must not
+  // reach the layer) — see onKeydown's matching guard for the full story on
+  // why the picker, not this handler, is the source of truth for its own keys.
+  if (libraryPickerOpen.value || inspectorShapePickerOpen.value) return
   const ae = document.activeElement
   // Where the key was pressed, not only where focus is NOW: the inline
   // textarea's own Escape handler ends the edit, Vue unmounts the box in the
@@ -4433,13 +4442,15 @@ function handleKeydown(e: KeyboardEvent) {
   const typing = (tgt instanceof Element && !!tgt.closest('input, textarea, [contenteditable]'))
     || (ae instanceof Element && ae.matches('input, textarea, [contenteditable]'))
   if (e.key === 'Escape') {
+    // ShapePicker handles Escape on window capture and preventDefaults it — by
+    // the time we run, its flag is already false, so the event itself is the
+    // only reliable signal.
+    if (e.defaultPrevented) return
     if (zoomMenuOpen.value) { zoomMenuOpen.value = false; return }
     if (shapesMenuOpen.value) { shapesMenuOpen.value = false; return }
     if (aiMenuOpen.value) { aiMenuOpen.value = false; return }
     if (insertMenuOpen.value) { insertMenuOpen.value = false; return }
     if (pickerDialogOpen.value) { pickerDialogOpen.value = false; return }
-    if (libraryPickerOpen.value) { libraryPickerOpen.value = false; return }
-    if (inspectorShapePickerOpen.value) { inspectorShapePickerOpen.value = false; return }
     if (editingId.value) { endEdit(); return }
     if (typing) return
     // The busy guard now lives inside exitSmartMode itself.
