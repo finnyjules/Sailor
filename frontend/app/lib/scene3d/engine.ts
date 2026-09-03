@@ -1219,13 +1219,26 @@ export class SceneEngine {
     const prevBackground = scene.background
     scene.background = null
     for (const h of helpers) h.traverse((o) => o.layers.set(GIZMO_OVERLAY_LAYER))
-    camera.layers.set(GIZMO_OVERLAY_LAYER)
-    this.renderer.autoClear = false
-    this.renderer.render(scene, camera)
-    this.renderer.autoClear = prevAutoClear
-    scene.background = prevBackground
-    camera.layers.mask = camMask
-    for (const h of helpers) h.traverse((o) => o.layers.set(0))
+    // try/finally around the whole swap: a throw inside the overlay render (a lost context
+    // mid-frame, a helper with a broken material) must never leave the camera parked on the
+    // private gizmo layer — every subsequent frame would then render an empty scene.
+    try {
+      camera.layers.set(GIZMO_OVERLAY_LAYER)
+      this.renderer.autoClear = false
+      // The composer's final full-screen quad drew at depth 0 across the entire frame, so the
+      // depth buffer now says "something is in front of everything". Any helper that keeps
+      // depthTest on (the light marker sphere, the light widgets, the sculpt cursor ring)
+      // would fail that test and vanish the moment a post effect came on. Clear DEPTH only —
+      // autoClear is off, so the composited colour survives — giving the overlay a fresh
+      // buffer to sort itself against.
+      this.renderer.clearDepth()
+      this.renderer.render(scene, camera)
+    } finally {
+      this.renderer.autoClear = prevAutoClear
+      scene.background = prevBackground
+      camera.layers.mask = camMask
+      for (const h of helpers) h.traverse((o) => o.layers.set(0))
+    }
   }
 
   /** Set per-object opacity for a motion frame. Ids not in `map` are forced opaque.
