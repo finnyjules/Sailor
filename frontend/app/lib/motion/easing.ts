@@ -1,6 +1,7 @@
 // frontend/app/lib/motion/easing.ts
 /** Pure easing math (GSAP-compatible subset). Every fn maps [0,1]→~[0,1]
  *  with f(0)=0, f(1)=1 (back/elastic overshoot in between by design). */
+import { bezierEase } from '~/lib/spacetype/motion'
 
 export type EaseFn = (t: number) => number
 
@@ -46,6 +47,8 @@ export function steps(n: number): EaseFn {
 export function resolveEase(name: string | undefined): EaseFn {
   if (!name || name === 'power2.out') return powerOut(2)
   if (name === 'none' || name === 'linear') return linear
+  const bez = /^bezier\(([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)\)$/.exec(name)
+  if (bez) { const cps: [number, number, number, number] = [Number(bez[1]), Number(bez[2]), Number(bez[3]), Number(bez[4])]; return (t: number) => bezierEase(t, cps) }
   const power = /^power(\d)\.(out|in|inOut)$/.exec(name)
   if (power) {
     const p = Number(power[1])
