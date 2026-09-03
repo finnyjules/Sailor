@@ -60,10 +60,13 @@ import {
 import { vtAxisPreset } from '~/lib/vectortype/axisPresets'
 import { vtApplyTrackPreset, vtOppositeHue, vtTrackPresetActive, vtTrackPresetOffers } from '~/lib/vectortype/trackPresets'
 import { loadVariableFont, type VtAxis, type VtFont } from '~/lib/vectortype/font'
+import StudioRow from '~/components/vue-canvas/studio/StudioRow.vue'
+import { formatValue } from '~/lib/studio/row'
+import { controlKindToVariableType } from '~/lib/collection/studioBindables'
 import MotionPresetPicker from '~/components/vue-canvas/motion/MotionPresetPicker.vue'
 import PresetThumb from '~/components/vue-canvas/motion/PresetThumb.vue'
 import VectorTypeThumb from '~/components/vue-canvas/motion/VectorTypeThumb.vue'
-import { drawVectorTypeToCanvas, vectorTypeSVG, vtExportName, vtIsAnimated, type VtBoxOptions } from '~/lib/vectortype/canvas'
+import { drawVectorTypeToCanvas, vectorTypeSVG, vtExportName, vtIsAnimated, type VtBoxOptions, type VtFrame } from '~/lib/vectortype/canvas'
 // NEVER FROM THE DRAW LOOP (plan trap 5). `prepareSolidExtrudes` runs paper.js
 // boolean unions — orders of magnitude too slow for a frame — so every call site
 // here is `await`ed off the loop: two one-shot full-resolution renders (the PNG
@@ -892,6 +895,35 @@ const previewTime = ref(0)
  * field truncated without a word reads as "my shader stopped working".
  */
 const frozenFieldCount = ref(0)
+/**
+ * What the STRETCH pipeline actually did on the last frame — read off the frame
+ * `drawVectorType` returns, for the same reason `frozenFieldCount` is: it is the
+ * renderer's own decision, not a second guess at the same rule.
+ *
+ * Two things in the panel depend on it. `fit: width` SOLVES the width dial, so
+ * the Stretch row must show the solved number rather than the one the user left
+ * behind — and must stop pretending to be a slider. And when both dials are
+ * pushed the engine receives a softened second axis (the range policy), which is
+ * invisible in the picture unless the panel says so.
+ */
+const lastStretch = ref<VtFrame['stretch'] | null>(null)
+/** The solved width dial, or null when `fit` is off / the solve was inert. */
+const fittedStretch = computed(() => (
+  config.value.fit === 'width' && lastStretch.value?.fitted != null ? lastStretch.value.fitted : null
+))
+/** Both dials pushed — the engine got a damped second axis. */
+const stretchEased = computed(() => lastStretch.value?.damped === true)
+/**
+ * The Stretch row while `fit` owns it. `kind: 'text'` is chosen for its
+ * BEHAVIOUR, exactly as ComfyNodeWidget's seed row chooses it: it keeps
+ * StudioRow from adding the drag gesture, the fill band and the slider role,
+ * all of which would promise an edit that `fit` immediately overwrites. The
+ * `#value` slot then draws the solved number in place of the registry's field.
+ */
+const fittedStretchSpec = {
+  ...(VT_CONTROLS.find(c => c.key === 'stretch') as ControlSpec),
+  kind: 'text',
+} as ControlSpec
 let timer = 0
 let startedAt = 0
 let disposed = false
@@ -1089,6 +1121,7 @@ function render() {
         commands: cmds,
       }
       frozenFieldCount.value = frame.frozenFields
+      lastStretch.value = frame.stretch
     }
   } catch (e) {
     console.error('[vector-type] preview render failed', e)
@@ -1582,6 +1615,48 @@ const frameCount = computed(() => Math.round((config.value.motion.fps || 30) * (
               class="w-full rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-xs text-white/85 outline-none focus-visible:ring-2 focus-visible:ring-white/20"
               @input="setControl('text', ($event.target as HTMLInputElement).value)"
             />
+          </template>
+
+          <!-- FIT OWNS THE STRETCH DIAL. `fit: width` solves the width stretch so the
+               run fills the box, and the solve wins over whatever the dial says — so the
+               row shows the number the RENDERER decided (`frame.stretch.fitted`) and
+               stops offering the drag that would be overwritten on the next frame. The
+               read-only form is StudioRow with a `kind: 'text'` spec and a `#value`
+               slot — the same override ComfyNodeWidget's seed row uses, chosen for the
+               behaviour: no drag gesture, no fill band, no slider role. Right-click is
+               stopped here too: a binding on a dial `fit` writes would never be read. -->
+          <template #control-stretch="slotProps">
+            <div v-if="fittedStretch !== null" data-testid="vt-stretch-fitted" @contextmenu.stop>
+              <StudioRow :spec="fittedStretchSpec" :model-value="fittedStretch" :bindable="false">
+                <template #value>
+                  <span class="font-mono text-[11px] tabular-nums text-white/45"
+                        title="Solved by Fit — the run fills the output width. Set Fit to “off” to take the dial back.">{{ formatValue(fittedStretch, 0.01) }}</span>
+                </template>
+              </StudioRow>
+            </div>
+            <!-- Fit off: the ordinary schema row, wired exactly as StudioSectionTree
+                 wires every other one (the slot replaces that branch, so the wiring
+                 has to be repeated here — `menu` excepted, which the panel's own
+                 wrapper around this slot still emits). -->
+            <StudioRow
+              v-else
+              :spec="slotControl(slotProps)"
+              :model-value="controlValue('stretch')"
+              :bound="boundFor('stretch')"
+              :bindable="slotControl(slotProps).bindable !== false && controlKindToVariableType(slotControl(slotProps).kind) !== null"
+              @update:model-value="(v: string | number | boolean) => setControl('stretch', v as string | number)"
+              @promote="promoteControl(slotControl(slotProps))"
+              @go-to-collection="goToCollection()"
+            />
+          </template>
+
+          <!-- Both dials pushed: the engine received a softened second axis, and
+               nothing in the picture says so. `frame.stretch.damped` is the renderer's
+               own report, not a re-derivation of the rule. -->
+          <template #section-Layout>
+            <p v-if="stretchEased" data-testid="vt-stretch-eased" class="text-[10px] leading-snug text-white/45">
+              eased — both dials are pushed, so the second is softened for the letters
+            </p>
           </template>
 
           <template #section-Axes>
