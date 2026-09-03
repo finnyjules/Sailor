@@ -473,6 +473,12 @@ export interface PathLayer extends LayerCommon, StrokeStyleFields {
   fillRule: 'nonzero' | 'evenodd'
   stroke: Paint
   strokeWidth: number     // local units at scale=1 (scales with the shape)
+  /** Provenance when the geometry came from the shape library (lib/shapes): the
+   *  manifest id. Lets the inspector offer a swap and the agent name the shape.
+   *  Absent on imported / drawn / boolean-result paths. Node editing rebuilds the
+   *  layer through createPathLayer, which never sets it — so hand-edited geometry
+   *  drops the id by construction. */
+  shapeId?: string
 }
 
 export interface LineLayer extends LayerCommon {
