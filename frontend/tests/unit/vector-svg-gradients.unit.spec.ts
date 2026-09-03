@@ -713,3 +713,22 @@ describe('the export stays REAL vector', () => {
     }
   })
 })
+
+describe('stroke paint servers — a gradient stroke is a real <linearGradient> referenced by url(#…)', () => {
+  const grad = { type: 'linear' as const, x1: 0, y1: 0, x2: 1, y2: 0, stops: TWO_STOPS }
+  it('writes stroke="url(#…)" and ONE gradient def shared by fill and stroke when they are equal', () => {
+    const svg = shapesToSVG([
+      { commands: square(10, 10, 30), fill: null, stroke: grad, strokeWidth: 1 },
+      { commands: square(60, 10, 30), fill: grad, stroke: grad, strokeWidth: 1 },
+    ], DOC)
+    expect(count(svg, LINEARS)).toBe(1)
+    expect(svg).toMatch(/stroke="url\(#[^"]+-g0\)"/)
+    expect(svg).toMatch(/fill="url\(#[^"]+-g0\)"/)
+    expect(svg).toContain('fill="none"')
+  })
+  it('a solid stroke string is written verbatim, as before', () => {
+    const svg = shapesToSVG([{ commands: square(10, 10, 30), fill: null, stroke: '#ff0000', strokeWidth: 1 }], DOC)
+    expect(svg).toContain('stroke="#ff0000"')
+    expect(count(svg, LINEARS)).toBe(0)
+  })
+})

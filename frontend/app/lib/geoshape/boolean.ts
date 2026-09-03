@@ -41,17 +41,22 @@ function cloneColour(fills: Paint[], rank: number, total: number, cfg: GeoShapeC
   return fills[rank % fills.length]!
 }
 
-/** Where a shape's colour lands, per `paintTarget`. `strokeColour` is the colour
+/** Where a shape's colour lands, per `paintTarget`. `strokeColour` is the PAINT
  *  an outline takes — the clone's own colour in per-clone/pieces mode, the
- *  single stroke (or fill) in single mode. `fill: null` is an explicit
- *  fill="none": drawToCanvas reads `paint ?? fill` and skips a falsy value,
- *  toSvg writes none — so outline mode needs no renderer change. */
-function styled(paint: Paint, cfg: GeoShapeConfig, strokeColour: string): Pick<GeoVectorShape, 'paint' | 'fill' | 'stroke' | 'strokeWidth'> {
+ *  single stroke (or fill) in single mode. A gradient/pattern clone colour
+ *  rides `strokePaint` (the renderers resolve it exactly like `paint`), and
+ *  `stroke` keeps the solid fallback for readers that only understand a
+ *  string — the old code passed `solidOf(...)` here and so painted every
+ *  gradient outline mid-grey. `fill: null` is an explicit fill="none":
+ *  drawToCanvas reads `paint ?? fill` and skips a falsy value, toSvg writes
+ *  none — so outline mode needs no renderer change. */
+function styled(paint: Paint, cfg: GeoShapeConfig, strokeColour: Paint): Pick<GeoVectorShape, 'paint' | 'fill' | 'stroke' | 'strokePaint' | 'strokeWidth'> {
+  const strokePaint = typeof strokeColour === 'string' ? undefined : strokeColour
   switch (cfg.paintTarget) {
     case 'outline':
-      return { paint: undefined, fill: null, stroke: strokeColour, strokeWidth: cfg.strokeWidth || 1 }
+      return { paint: undefined, fill: null, stroke: solidOf(strokeColour), strokePaint, strokeWidth: cfg.strokeWidth || 1 }
     case 'both':
-      return { paint, fill: solidOf(paint), stroke: strokeColour, strokeWidth: cfg.strokeWidth || 1 }
+      return { paint, fill: solidOf(paint), stroke: solidOf(strokeColour), strokePaint, strokeWidth: cfg.strokeWidth || 1 }
     default:
       return { paint, fill: solidOf(paint), stroke: cfg.stroke, strokeWidth: cfg.strokeWidth || undefined }
   }
@@ -79,6 +84,36 @@ async function paperScope(): Promise<paper.PaperScope> {
 
 const OP: Record<Exclude<GeoShapeConfig['fillMode'], 'evenodd'>, 'unite' | 'subtract' | 'intersect' | 'exclude'> = {
   unite: 'unite', subtract: 'subtract', intersect: 'intersect', exclude: 'exclude',
+}
+
+/**
+ * Fold `items` with one paper.js boolean op as a balanced tree, not a
+ * left-to-right chain. A chain re-walks the whole accumulated outline for every
+ * clone; `exclude` keeps every ring it has seen, so that walk grows with the
+ * clone index and the fold is O(N³) — 150 radial hexagons took over four
+ * minutes on the main thread, and a 150-step Blend (128-point outlines) never
+ * finished. A tree merges equal-sized halves and stays near O(N²).
+ *
+ * unite / intersect / exclude are associative and commutative, so the tree
+ * yields the same region as the chain. subtract is neither: the chain
+ * a − b − c − … equals a − (b ∪ c ∪ …), so it is one subtract off a tree-united
+ * rest.
+ */
+function foldBoolean(items: paper.PathItem[], op: 'unite' | 'subtract' | 'intersect' | 'exclude'): paper.PathItem {
+  const tree = (level: paper.PathItem[], o: 'unite' | 'intersect' | 'exclude'): paper.PathItem => {
+    while (level.length > 1) {
+      const next: paper.PathItem[] = []
+      for (let i = 0; i + 1 < level.length; i += 2) next.push((level[i] as any)[o](level[i + 1]) as paper.PathItem)
+      if (level.length % 2) next.push(level[level.length - 1]!)
+      level = next
+    }
+    return level[0]!
+  }
+  if (op === 'subtract') {
+    if (items.length === 1) return items[0]!
+    return (items[0] as any).subtract(tree(items.slice(1), 'unite')) as paper.PathItem
+  }
+  return tree(items.slice(), op)
 }
 
 function hexClipD(r: number): string {
@@ -188,7 +223,7 @@ export async function composite(baseD: string | string[], placements: ClonePlace
         .filter(({ path }) => path && path.bounds && path.bounds.width > 1e-6 && path.bounds.height > 1e-6)
         .map(({ path, paint }) => ({
           commands: paperToCommands(path),
-          ...styled(paint, cfg, solidOf(paint)),
+          ...styled(paint, cfg, paint),
           fillRule: 'nonzero' as const,
         }))
     }
@@ -321,7 +356,7 @@ export async function composite(baseD: string | string[], placements: ClonePlace
         .filter(({ path }) => nonEmpty(path))
         .map(({ path, paint }) => ({
           commands: paperToCommands(path),
-          ...styled(paint, cfg, solidOf(paint)),
+          ...styled(paint, cfg, paint),
           fillRule: 'nonzero' as const,
         }))
     }
@@ -385,13 +420,7 @@ export async function composite(baseD: string | string[], placements: ClonePlace
       cp.fillRule = 'evenodd'
       acc = cp
     } else {
-      const op = OP[cfg.fillMode as Exclude<GeoShapeConfig['fillMode'], 'evenodd'>]
-      acc = clones[0] as paper.PathItem
-      for (let i = 1; i < clones.length; i++) {
-        const next = clones[i] as paper.PathItem
-        const combined = (acc as any)[op](next)
-        acc = combined
-      }
+      acc = foldBoolean(clones as paper.PathItem[], OP[cfg.fillMode as Exclude<GeoShapeConfig['fillMode'], 'evenodd'>])
     }
 
     // 3.5. symmetry for subtract/exclude/intersect: fold the originals into the
@@ -428,7 +457,7 @@ export async function composite(baseD: string | string[], placements: ClonePlace
     // 5. paper → VectorShape[]. evenodd sets the fill-rule; shape mode adds
     // the overlap as a second shape painted with `overlapFill`.
     const fillRule: 'evenodd' | 'nonzero' = cfg.fillMode === 'evenodd' ? 'evenodd' : 'nonzero'
-    const singleStroke = cfg.paintTarget === 'outline' ? (cfg.stroke ?? solidOf(cfg.fill)) : (cfg.stroke ?? '#000000')
+    const singleStroke: Paint = cfg.paintTarget === 'outline' ? (cfg.stroke ?? cfg.fill) : (cfg.stroke ?? '#000000')
     const out: GeoVectorShape[] = [{
       commands: paperToCommands(acc),
       ...styled(cfg.fill, cfg, singleStroke),
@@ -440,7 +469,7 @@ export async function composite(baseD: string | string[], placements: ClonePlace
       // the fold, not the crossing. Outline/both target the crossing too.
       const ov = cfg.paintTarget === 'fill'
         ? { paint: cfg.overlapFill, fill: solidOf(cfg.overlapFill) }
-        : styled(cfg.overlapFill, cfg, cfg.stroke ?? solidOf(cfg.overlapFill))
+        : styled(cfg.overlapFill, cfg, cfg.stroke ?? cfg.overlapFill)
       out.push({ commands: paperToCommands(overlap), ...ov, fillRule: 'nonzero' })
     }
     return out

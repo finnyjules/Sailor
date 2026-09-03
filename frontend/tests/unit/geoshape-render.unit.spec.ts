@@ -294,3 +294,19 @@ describe('outline mode reaches the SVG and the canvas paths', () => {
     expect(shapePaints(shapes)).toEqual([])
   })
 })
+
+describe('geoshape SVG export — per-clone outline in a gradient colour', () => {
+  it('toSvg writes the outline stroke as a gradient paint server, not mid-grey', async () => {
+    const G = { type: 'linear' as const, angle: 45, stops: [{ offset: 0, color: '#e5484d' }, { offset: 1, color: '#000000' }] }
+    const cfg = { ...DEFAULT_CONFIG, layout: 'blend' as const, count: 4, fillStrategy: 'perClone' as const, paintTarget: 'outline' as const, fills: [G], strokeWidth: 0.75, clipMask: 'none' as const, symmetry: false }
+    const svg = await toSvg(cfg)
+    expect(svg).toContain('<linearGradient')
+    expect(svg).toMatch(/stroke="url\(#/)
+    expect(svg).not.toContain('#808080')
+  })
+  it('shapePaints reports a gradient outline paint (so image/shader outlines get warmed)', async () => {
+    const G = { type: 'linear' as const, angle: 45, stops: [{ offset: 0, color: '#e5484d' }, { offset: 1, color: '#000000' }] }
+    const shapes = await renderShapes({ ...DEFAULT_CONFIG, fillStrategy: 'perClone', paintTarget: 'outline', fills: [G], count: 3, layout: 'linear' })
+    expect(shapePaints(shapes)).toEqual([G, G, G])
+  })
+})

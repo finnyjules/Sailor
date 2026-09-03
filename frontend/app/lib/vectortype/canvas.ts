@@ -2760,12 +2760,11 @@ export function vectorTypeSVG(
       // `fill="none"`, and without it the letter would come out solid black under
       // its own outline.
       //
-      // A stroke's paint is flattened to its primary COLOUR, which is a real
-      // limitation and not a choice: `VectorShape.stroke` is `string | null`, so
-      // the spine cannot reference a paint server from a stroke at all. A
-      // gradient-stroked layer therefore exports as its `a` colour. Widening the
-      // spine is a change to a studio-agnostic file with a second consumer coming;
-      // it is named in the task report rather than made in passing.
+      // A stroke's paint is flattened to its primary COLOUR here. The spine's
+      // `VectorShape.stroke` now takes a paint server too (widened for Shape
+      // Studio's gradient outlines, 2026-09-03), so a gradient-stroked layer
+      // exporting as its `a` colour is this studio's own remaining gap, not the
+      // spine's — routing it through `paintToVectorPaint` is a follow-up.
       fill: stroking ? null : layerPaint,
       // The stroke is an ATTRIBUTE, not outlined into geometry: a designer opening
       // this can restyle or remove it, and the path still describes the letterform

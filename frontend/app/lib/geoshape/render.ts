@@ -21,7 +21,7 @@
  * is a different feature — `paint.ts`'s header already scopes it out for the
  * identical reason — and is left for a future task.
  */
-import type { VectorShape } from '~/lib/vector/svg'
+import type { VectorShape, VectorPaint } from '~/lib/vector/svg'
 import { commandsToPathData, shapesToSVG, transformCommands, type SvgDocOptions } from '~/lib/vector/svg'
 import { baseShapePath } from './shapes'
 import { arrange } from './arrange'
@@ -55,7 +55,14 @@ import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
  * to resolve a canvas fillStyle. `.fill` stays a plain solid-or-null fallback
  * for any reader that doesn't know about `.paint`.
  */
-export type GeoVectorShape = VectorShape & { paint?: Paint }
+export type GeoVectorShape = VectorShape & {
+  paint?: Paint
+  /** The authored `Paint` an outline is drawn in when it is not a solid
+   *  (per-clone/pieces outline or both, single-mode outline of a gradient
+   *  fill). `stroke` then holds a solid fallback for `.paint`-unaware readers,
+   *  exactly as `fill` does for `paint`. */
+  strokePaint?: Paint
+}
 
 /**
  * `GeoShapeConfig` -> the final composed mark, as paintable `VectorShape[]`
@@ -214,23 +221,35 @@ export async function toSvg(cfg: GeoShapeConfig, opts: Partial<SvgDocOptions> = 
 async function embedShapePaints(shapes: VectorShape[]): Promise<void> {
   for (const s of shapes as GeoVectorShape[]) {
     if (s.paint && typeof s.paint !== 'string') {
-      const sb = contentBounds([s])
-      const box = { x: sb.minX, y: sb.minY, width: sb.w, height: sb.h }
-      let vp = paintToVectorPaint(s.paint, { units: 'userSpaceOnUse', box })
-      // TIER 3 embed: rasterize the paint over `box` on an offscreen canvas —
-      // same `resolvePaintCanvas` path `drawToCanvas`/`warmPaints` use, so the
-      // embedded pixels match the live preview — and ask again with the raster
-      // in hand, which the image/shader arms both turn into a
-      // `<pattern>`-with-`<image>` (see `rasterTile` in toVector.ts). DOM-only:
-      // under SSR or a headless unit test (no `document`) this stays skipped
-      // and the shape keeps its solid-fallback `.fill`.
-      if (vp === null && typeof document !== 'undefined') {
-        const raster = await rasterizePaint(s.paint, box.width, box.height)
-        if (raster) vp = paintToVectorPaint(s.paint, { units: 'userSpaceOnUse', box, raster })
-      }
+      const vp = await vectorPaintFor(s, s.paint)
       if (vp) s.fill = vp
     }
+    // A gradient/pattern OUTLINE embeds the same way — the SVG writer takes a
+    // paint server on `stroke` just as on `fill`.
+    if (s.strokePaint && typeof s.strokePaint !== 'string') {
+      const vp = await vectorPaintFor(s, s.strokePaint)
+      if (vp) s.stroke = vp
+    }
   }
+}
+
+/** One shape's authored `paint` → a `VectorPaint` boxed to that shape's bounds. */
+async function vectorPaintFor(s: VectorShape, paint: Paint): Promise<VectorPaint | null> {
+  const sb = contentBounds([s])
+  const box = { x: sb.minX, y: sb.minY, width: sb.w, height: sb.h }
+  let vp = paintToVectorPaint(paint, { units: 'userSpaceOnUse', box })
+  // TIER 3 embed: rasterize the paint over `box` on an offscreen canvas —
+  // same `resolvePaintCanvas` path `drawToCanvas`/`warmPaints` use, so the
+  // embedded pixels match the live preview — and ask again with the raster
+  // in hand, which the image/shader arms both turn into a
+  // `<pattern>`-with-`<image>` (see `rasterTile` in toVector.ts). DOM-only:
+  // under SSR or a headless unit test (no `document`) this stays skipped
+  // and the shape keeps its solid fallback.
+  if (vp === null && typeof document !== 'undefined') {
+    const raster = await rasterizePaint(paint, box.width, box.height)
+    if (raster) vp = paintToVectorPaint(paint, { units: 'userSpaceOnUse', box, raster })
+  }
+  return vp
 }
 
 /**
@@ -406,10 +425,26 @@ export function drawToCanvas(shapes: VectorShape[], ctx: CanvasRenderingContext2
         ctx.restore()
       }
     }
-    if (s.stroke) {
-      ctx.strokeStyle = s.stroke
+    const strokePaint = (s as GeoVectorShape).strokePaint ?? s.stroke
+    if (strokePaint) {
       ctx.lineWidth = s.strokeWidth ?? 1
-      ctx.stroke(path)
+      if (typeof strokePaint === 'string') {
+        ctx.strokeStyle = strokePaint
+        ctx.stroke(path)
+      } else {
+        // Same object-anchored frame as the fill arm above: the ramp spans THIS
+        // shape's own bounds, so every outlined clone shows its full gradient.
+        const sb = contentBounds([s])
+        const cx = sb.minX + sb.w / 2, cy = sb.minY + sb.h / 2
+        ctx.save()
+        ctx.translate(cx, cy)
+        const style = resolvePaintCanvas(ctx, strokePaint as Paint, { w: sb.w, h: sb.h }, STILL_FIELD)
+        const local = new Path2D()
+        local.addPath(path, new DOMMatrix().translateSelf(-cx, -cy))
+        ctx.strokeStyle = (style as any) ?? FALLBACK_FILL
+        ctx.stroke(local)
+        ctx.restore()
+      }
     }
   }
   ctx.restore()
@@ -425,6 +460,10 @@ export function shapePaints(shapes: VectorShape[]): Paint[] {
   for (const s of shapes) {
     const p = (s as GeoVectorShape).paint ?? s.fill
     if (p) out.push(p as Paint)
+    // A non-solid OUTLINE paint warms like a fill; a solid stroke string has
+    // nothing to warm, so an outline-only solid mark still reports nothing.
+    const sp = (s as GeoVectorShape).strokePaint
+    if (sp && typeof sp !== 'string') out.push(sp)
   }
   return out
 }
