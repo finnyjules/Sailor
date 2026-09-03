@@ -356,3 +356,58 @@ describe('composite with a per-clone d list', () => {
     expect(edgeCount(1)).toBe(3)
   })
 })
+
+describe('colour ramp + paint target', () => {
+  const five = [
+    { x: -200, y: 0, scale: 1, rotate: 0, skew: 0 },
+    { x: -100, y: 0, scale: 1, rotate: 0, skew: 0 },
+    { x: 0, y: 0, scale: 1, rotate: 0, skew: 0 },
+    { x: 100, y: 0, scale: 1, rotate: 0, skew: 0 },
+    { x: 200, y: 0, scale: 1, rotate: 0, skew: 0 },
+  ]
+  const base = { ...DEFAULT_CONFIG, fillStrategy: 'perClone' as const, fillOrder: 'created' as const, fills: ['#000000', '#ffffff'], clipMask: 'none' as const, symmetry: false }
+
+  it('ramp: five clones over two fills give five distinct colours whose ends are the stops', async () => {
+    const shapes = await composite(SQUARE, five, { ...base, fillCycle: 'ramp' })
+    const cols = shapes.map(s => s.paint)
+    expect(cols[0]).toBe('#000000')
+    expect(cols[4]).toBe('#ffffff')
+    expect(new Set(cols).size).toBe(5)
+  })
+
+  it('cycle (default) still alternates the two fills', async () => {
+    const shapes = await composite(SQUARE, five, base)
+    expect(shapes.map(s => s.paint)).toEqual(['#000000', '#ffffff', '#000000', '#ffffff', '#000000'])
+  })
+
+  it('outline: no fill, stroke takes the clone colour and the stroke width', async () => {
+    const shapes = await composite(SQUARE, five, { ...base, paintTarget: 'outline', strokeWidth: 0.5 })
+    for (const s of shapes) {
+      expect(s.fill).toBeNull()
+      expect(s.paint).toBeUndefined()
+      expect(s.strokeWidth).toBe(0.5)
+    }
+    expect(shapes[0]!.stroke).toBe('#000000')
+    expect(shapes[1]!.stroke).toBe('#ffffff')
+  })
+
+  it('both: fill and stroke both take the clone colour', async () => {
+    const shapes = await composite(SQUARE, five, { ...base, paintTarget: 'both', strokeWidth: 2 })
+    expect(shapes[1]!.fill).toBe('#ffffff')
+    expect(shapes[1]!.stroke).toBe('#ffffff')
+    expect(shapes[1]!.paint).toBe('#ffffff')
+  })
+
+  it('single mode outline: the fold is outlined in stroke ?? fill with no fill', async () => {
+    const shapes = await composite(SQUARE, five.slice(0, 2), { ...DEFAULT_CONFIG, fillStrategy: 'single', fill: '#123456', stroke: null, paintTarget: 'outline', strokeWidth: 1, clipMask: 'none', symmetry: false })
+    expect(shapes[0]!.fill).toBeNull()
+    expect(shapes[0]!.stroke).toBe('#123456')
+  })
+
+  it('pieces mode ramps solo pieces by rank', async () => {
+    const shapes = await composite(SQUARE, five.slice(0, 3), { ...base, fillStrategy: 'pieces', fillCycle: 'ramp', fills: ['#000000', '#ffffff'] })
+    const solids = shapes.filter(s => typeof s.paint === 'string').map(s => s.paint as string)
+    expect(solids).toContain('#000000')
+    expect(solids).toContain('#ffffff')
+  })
+})

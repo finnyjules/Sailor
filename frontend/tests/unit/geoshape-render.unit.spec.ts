@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderShapes, toSvg, contentBounds, framePad, fitScale } from '~/lib/geoshape/render'
+import { renderShapes, toSvg, contentBounds, framePad, fitScale, shapePaints } from '~/lib/geoshape/render'
 import { DEFAULT_CONFIG } from '~/lib/geoshape/config'
 import { paintToVectorPaint } from '~/lib/paint/toVector'
 import type { ImageFill } from '~/lib/compositor/paint'
@@ -268,5 +268,18 @@ describe('blend layout', () => {
     const shapes = await renderShapes(cfg)
     const b = contentBounds([shapes[1]!])
     expect(b.w).toBeCloseTo(100 * Math.SQRT2, 0) // a 45° square spans its diagonal
+  })
+})
+
+describe('outline mode reaches the SVG and the canvas paths', () => {
+  it('toSvg writes fill="none" and a stroke per outline shape', async () => {
+    const svg = await toSvg({ ...DEFAULT_CONFIG, fillStrategy: 'perClone', paintTarget: 'outline', fills: ['#ff0000', '#00ff00'], strokeWidth: 1, count: 2, layout: 'linear', spacing: 300 })
+    expect(svg).toContain('fill="none"')
+    expect(svg).toContain('stroke="#ff0000"')
+    expect(svg).toContain('stroke="#00ff00"')
+  })
+  it('shapePaints skips outline shapes (nothing to warm)', async () => {
+    const shapes = await renderShapes({ ...DEFAULT_CONFIG, fillStrategy: 'perClone', paintTarget: 'outline', count: 3, layout: 'linear' })
+    expect(shapePaints(shapes)).toEqual([])
   })
 })
