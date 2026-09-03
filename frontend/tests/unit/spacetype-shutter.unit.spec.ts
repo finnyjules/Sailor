@@ -5,9 +5,9 @@ import { defaultsFromControls } from '../../app/lib/spacetype/effect'
 
 describe('shutter effect', () => {
   it('is registered and resolvable by id', () => {
-    expect(SPACE_TYPE_EFFECTS).toContain(shutterEffect)
-    expect(getEffect('shutter')).toBe(shutterEffect)
-    expect(getEffect('SHUTTER')).toBe(shutterEffect) // case-insensitive
+    expect(SPACE_TYPE_EFFECTS.map(e => e.id)).toContain(shutterEffect.id)
+    expect(getEffect('shutter').id).toBe(shutterEffect.id)
+    expect(getEffect('SHUTTER').id).toBe(shutterEffect.id) // case-insensitive
   })
 
   it('has a backend-valid id and the speed-line + motion controls', () => {

@@ -21,6 +21,6 @@ describe('streamerEffect contract', () => {
   })
   it('is registered and resolvable by id', () => {
     expect(SPACE_TYPE_EFFECTS.map(e => e.id)).toContain('streamer')
-    expect(getEffect('streamer')).toBe(streamerEffect)
+    expect(getEffect('streamer').id).toBe(streamerEffect.id)
   })
 })

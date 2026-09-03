@@ -21,6 +21,6 @@ describe('tunnelEffect contract', () => {
   })
   it('is registered and resolvable by id', () => {
     expect(SPACE_TYPE_EFFECTS.map(e => e.id)).toContain('tunnel')
-    expect(getEffect('tunnel')).toBe(tunnelEffect)
+    expect(getEffect('tunnel').id).toBe(tunnelEffect.id)
   })
 })

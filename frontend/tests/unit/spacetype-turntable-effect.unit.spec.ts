@@ -30,6 +30,6 @@ describe('turntableEffect contract', () => {
 
   it('is registered and resolvable by id', () => {
     expect(SPACE_TYPE_EFFECTS.map(e => e.id)).toContain('turntable')
-    expect(getEffect('turntable')).toBe(turntableEffect)
+    expect(getEffect('turntable').id).toBe(turntableEffect.id)
   })
 })

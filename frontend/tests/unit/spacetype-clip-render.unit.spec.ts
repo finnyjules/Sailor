@@ -43,11 +43,20 @@ vi.mock('../../app/lib/spacetype/textTexture', () => ({
 // unregistered ids fall back to a trivial effect (keeps the pre-existing 'ribbon'/'tunnel'
 // identity tests working unchanged); __registerEffect lets a test pin exact liveKeys so the
 // "ignores live params" case asserts against real logic instead of an early-return.
-vi.mock('../../app/lib/spacetype/effects/index', () => {
+// 'ribbon' is special-cased to its real `controls` array (plain data — no canvas/DOM touched
+// at import time) run through withSeparatorControls, matching production's getEffect('ribbon')
+// exactly: defaultSpaceTypeState() (unmocked, called by several tests below) reads
+// getEffect('ribbon').controls to build its defaults, so a trivial [] here would silently
+// starve it of params instead of exercising real behaviour.
+vi.mock('../../app/lib/spacetype/effects/index', async () => {
+  const { ribbonEffect } = await import('../../app/lib/spacetype/effects/ribbon')
+  const { withSeparatorControls } = await import('../../app/lib/spacetype/separator')
+  const realRibbon = withSeparatorControls(ribbonEffect)
   const registry = new Map<string, any>()
   function getEffect(id: string) {
     const key = String(id).toLowerCase()
     if (registry.has(key)) return registry.get(key)
+    if (key === 'ribbon') return realRibbon
     return { id, label: id, controls: [], buildScene: (three: any) => new three.Object3D(), update: () => {} }
   }
   return {

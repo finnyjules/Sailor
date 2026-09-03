@@ -59,6 +59,6 @@ describe('contourEffect contract', () => {
     const ids = SPACE_TYPE_EFFECTS.map(e => e.id)
     expect(ids).toContain('contour')
     expect(ids).toContain('tunnel')
-    expect(getEffect('contour')).toBe(contourEffect)
+    expect(getEffect('contour').id).toBe(contourEffect.id)
   })
 })

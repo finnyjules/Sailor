@@ -30,6 +30,6 @@ describe('ballEffect contract', () => {
 
   it('is registered and resolvable by id', () => {
     expect(SPACE_TYPE_EFFECTS.map(e => e.id)).toContain('ball')
-    expect(getEffect('ball')).toBe(ballEffect)
+    expect(getEffect('ball').id).toBe(ballEffect.id)
   })
 })

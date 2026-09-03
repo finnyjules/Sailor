@@ -8,7 +8,7 @@ import * as THREE from 'three'
 describe('ticker registration', () => {
   it('is registered and resolvable by id', () => {
     expect(getEffect('ticker').id).toBe('ticker')
-    expect(SPACE_TYPE_EFFECTS).toContain(tickerEffect)
+    expect(SPACE_TYPE_EFFECTS.map(e => e.id)).toContain(tickerEffect.id)
   })
   it('is not hidden', () => {
     expect(tickerEffect.hidden).toBeFalsy()

@@ -30,7 +30,7 @@ describe('slitScanEffect contract', () => {
 
   it('is registered and resolvable by id', () => {
     expect(SPACE_TYPE_EFFECTS.map(e => e.id)).toContain('slitscan')
-    expect(getEffect('slitscan')).toBe(slitScanEffect)
+    expect(getEffect('slitscan').id).toBe(slitScanEffect.id)
   })
 
   it('Gradient selector is the FIRST control in the Warp section', () => {

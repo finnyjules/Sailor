@@ -25,6 +25,6 @@ describe('spiralEffect contract', () => {
   })
   it('is registered and resolvable by id', () => {
     expect(SPACE_TYPE_EFFECTS.map(e => e.id)).toContain('spiral')
-    expect(getEffect('spiral')).toBe(spiralEffect)
+    expect(getEffect('spiral').id).toBe(spiralEffect.id)
   })
 })

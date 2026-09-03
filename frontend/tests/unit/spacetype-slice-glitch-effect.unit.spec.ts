@@ -21,6 +21,6 @@ describe('sliceGlitchEffect contract', () => {
   })
   it('is registered and resolvable by id', () => {
     expect(SPACE_TYPE_EFFECTS.map(e => e.id)).toContain('sliceglitch')
-    expect(getEffect('sliceglitch')).toBe(sliceGlitchEffect)
+    expect(getEffect('sliceglitch').id).toBe(sliceGlitchEffect.id)
   })
 })

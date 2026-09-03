@@ -30,6 +30,6 @@ describe('tearEffect contract', () => {
 
   it('is registered and resolvable by id', () => {
     expect(SPACE_TYPE_EFFECTS.map(e => e.id)).toContain('tear')
-    expect(getEffect('tear')).toBe(tearEffect)
+    expect(getEffect('tear').id).toBe(tearEffect.id)
   })
 })
