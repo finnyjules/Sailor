@@ -700,8 +700,8 @@ function onPatchCfg(patch: Record<string, unknown>) {
  * Everything else (a preset move, a Custom/preset `'tracks'` move) is a real
  * stored move and is pushed.
  *
- * The freshly-picked move should open — `MovesPanel`'s own `onAdd` already
- * emits `set-open(move.id)` right after `add-move`, but for Blink/Scatter
+ * The freshly-picked move should open — `MovesPanel`'s own `onGalleryAdd`
+ * already emits `set-open(move.id)` right after `add-move`, but for Blink/Scatter
  * that id is the gallery's freshly-minted candidate id, not the FIXED
  * `__blink`/`__scatter` id the derived card actually carries. `nextTick`
  * corrects `openMoveId` after that synchronous `set-open` has already run.
@@ -743,22 +743,20 @@ function onPatchMove(move: Move, partial: Partial<Move>) {
 }
 
 /**
- * "Change" on a move's card — `MoveCard.vue` only offers it for a plain
- * `'tracks'` move (no `cardBody`, so the fallback dial editor renders the
- * button), meaning a preset/blink/scatter move never reaches this handler.
- *
- * Simplest option, per the brief: this panel has no re-pick-in-place UI of
- * its own (`MovesPanel.vue`'s `change-move` doc says the PARENT decides what
- * "change" means), and building one means exposing `MovesPanel`'s internal
- * gallery to an external "replace this move" trigger — real scope, and a
- * Task 8 API surface this task did not otherwise need to touch. So Change
- * drops the move and lets the user re-add a replacement from the gallery,
- * rather than reopening a picker pre-aimed at this move's dial. Left as a
- * known simplification — see the task report.
+ * "Change" on a move's card, resolved by `MovesPanel` itself (its own
+ * `replace-move` doc): the gallery reopens pre-aimed at the move's phase,
+ * and the pick comes back here already merged — `newMove.id === oldMove.id`
+ * always, with `duration`/`ease`/`play` carried over from the old move
+ * unless the pick landed in a different phase. This handler just splices
+ * `clip.moves` at that id, immutably, same as `onPatchMove` — `MoveCard.vue`
+ * only offers "Change" for a plain `'tracks'` move (no `cardBody`), so a
+ * preset/blink/scatter move never reaches this handler.
  */
-function onChangeMove(move: Move) {
-  config.value.motion.moves = config.value.motion.moves.filter(m => m.id !== move.id)
-  if (openMoveId.value === move.id) openMoveId.value = null
+function onReplaceMove(oldMove: Move, newMove: Move) {
+  const idx = config.value.motion.moves.findIndex(m => m.id === oldMove.id)
+  if (idx === -1) return
+  config.value.motion.moves[idx] = { ...newMove, id: oldMove.id } as VtMove
+  playing.value = true
 }
 
 // ── preview loop ────────────────────────────────────────────────────────────
@@ -1665,7 +1663,7 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
           @add-move="onAddMove"
           @remove-move="onRemoveMove"
           @patch-move="onPatchMove"
-          @change-move="onChangeMove"
+          @replace-move="onReplaceMove"
           @set-open="(id: string | null) => (openMoveId = id)"
         >
           <!-- Real outlines for an axis preset (the letterforms themselves are

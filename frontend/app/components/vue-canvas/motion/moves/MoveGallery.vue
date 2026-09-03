@@ -16,6 +16,16 @@
  *
  * NOTHING here may import from `lib/vectortype`; studio specifics arrive
  * ONLY through `adapter`/`cfg` and the `#thumb` slot.
+ *
+ * `initialPhase` (optional): opens the gallery pre-selected to that phase's
+ * tab (In/Loop/Out — falls back to the default, first visible phase tab or
+ * Custom, if that phase's tab is hidden) AND seeds the Custom tab's own
+ * phase sub-toggle (`customPhase`) the same way, so switching to Custom
+ * still lands on the right phase. Used by `MovesPanel`'s "Change" flow
+ * (`MovesPanel.vue`'s `changingMove` doc) to land the user on the move
+ * being swapped's own phase — every "Change"-able move is a `'tracks'`
+ * move, whose `phase` is always `'in' | 'loop' | 'out'`, never `'custom'`.
+ * Absent, behavior is unchanged.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { X } from 'lucide-vue-next'
@@ -23,7 +33,7 @@ import type { MovesAdapter, MoveOffer, MovePhase, DialDef } from '~/lib/studio/m
 import type { Move } from '~/lib/studio/moves/types'
 import { DEFAULT_EASE } from '~/lib/studio/moves/ease'
 
-const props = defineProps<{ adapter: MovesAdapter<any>; cfg: any }>()
+const props = defineProps<{ adapter: MovesAdapter<any>; cfg: any; initialPhase?: MovePhase }>()
 const emit = defineEmits<{ (e: 'add', move: Move): void; (e: 'close'): void }>()
 
 const PHASES: MovePhase[] = ['in', 'loop', 'out']
@@ -47,7 +57,10 @@ const galleryByPhase = computed(() => {
 const visiblePhaseTabs = computed(() => PHASES.filter((p) => (galleryByPhase.value.get(p) ?? []).length > 0))
 
 type Tab = MovePhase | 'custom'
-const activeTab = ref<Tab>(visiblePhaseTabs.value[0] ?? 'custom')
+const initialTab: Tab = props.initialPhase && visiblePhaseTabs.value.includes(props.initialPhase)
+  ? props.initialPhase
+  : (visiblePhaseTabs.value[0] ?? 'custom')
+const activeTab = ref<Tab>(initialTab)
 
 /** `offer.build()` already returns a complete-enough `Partial<Move>` (every
  *  adapter in this codebase fills phase/kind/duration/ease/play) — these
@@ -91,7 +104,7 @@ function pick(resolved: ResolvedOffer) {
 
 // ── Custom tab ───────────────────────────────────────────────────────────
 
-const customPhase = ref<MovePhase>('loop')
+const customPhase = ref<MovePhase>(props.initialPhase ?? 'loop')
 
 // `cfg.motion.duration` is the shared clip-length convention (`MotionClip`,
 // `~/lib/studio/moves/types`) every studio's config carries its moves under

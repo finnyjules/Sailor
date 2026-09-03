@@ -41,11 +41,14 @@
  *    (patch `clip.moves`) from a derived one (Vector Type: no-op today —
  *    Blink/Scatter's evaluators never read a Move's own fields, only
  *    `cfg.motion.blink`/`.scatter` directly) without re-deriving anything.
- *  - `change-move(move: Move)` — a card's "Change" button (re-point a
- *    `'tracks'` move at a different dial). This panel has no gallery mode
- *    for "replace this move's dial", so it only forwards the request; the
- *    parent decides what "change" means (e.g. open the gallery's Custom
- *    tab and swap the move's `tracks` on pick).
+ *  - `replace-move(oldMove: Move, newMove: Move)` — a card's "Change"
+ *    button, resolved entirely within this panel (see `changingMove`
+ *    below): reopens the gallery pre-selected to the move's own phase,
+ *    and on the next pick emits this instead of `add-move`, carrying the
+ *    OLD move (identity: `id`, plus `duration`/`ease`/`play` when the pick
+ *    is the same phase — see `changingMove`'s doc) and the freshly-built
+ *    NEW move (`kind`/`presetId`/`tracks`/`params`). The parent's job is
+ *    just to splice `clip.moves` at `oldMove.id`, keeping that id.
  *  - `set-open(id: string | null)` — a card's collapsed row was clicked, or
  *    the gallery just added a move that should open. Only one card is open
  *    at a time: this component computes the next id (toggling the clicked
@@ -81,7 +84,7 @@ const emit = defineEmits<{
   (e: 'add-move', move: Move): void
   (e: 'remove-move', move: Move): void
   (e: 'patch-move', move: Move, partial: Partial<Move>): void
-  (e: 'change-move', move: Move): void
+  (e: 'replace-move', oldMove: Move, newMove: Move): void
   (e: 'set-open', id: string | null): void
 }>()
 
@@ -116,16 +119,65 @@ function onPatch(move: Move, partial: Partial<Move>) {
 function onRemove(move: Move) {
   emit('remove-move', move)
 }
+
+// ── Add move gallery / Change-in-place ─────────────────────────────────────
+/**
+ * `changingMove`: the move a card's "Change" button asked to replace, or
+ * null for a plain Add. Both flows share the one `MoveGallery` instance
+ * below — `onChange` opens it pre-selected to the move's own phase
+ * (`MoveGallery`'s `initialPhase` prop); `onGalleryAdd` then either appends
+ * a brand-new move (`changingMove` null) or, when it's set, resolves the
+ * swap itself and emits `replace-move` instead of `add-move` — see that
+ * function's own doc for the merge policy. Closing the gallery without a
+ * pick (`onGalleryClose`, from `MoveGallery`'s `close`) just clears
+ * `changingMove`, leaving the move being replaced untouched.
+ */
+const changingMove = ref<Move | null>(null)
+const galleryOpen = ref(false)
+
+function openAddGallery() {
+  changingMove.value = null
+  galleryOpen.value = true
+}
 function onChange(move: Move) {
-  emit('change-move', move)
+  changingMove.value = move
+  galleryOpen.value = true
 }
 
-// ── Add move gallery ─────────────────────────────────────────────────────
-
-const galleryOpen = ref(false)
-function onAdd(move: Move) {
-  emit('add-move', move)
-  emit('set-open', move.id)
+/**
+ * A tile/dial picked in the gallery. Plain Add: forward as `add-move`,
+ * same as before. Change-in-place (`changingMove` set): swap the OLD
+ * move's identity-carrying fields onto the NEW pick — keep the old
+ * `id` always (so band strip / open-card tracking survive the swap), and
+ * keep its `duration`/`ease`/`play` too UNLESS the new pick lands in a
+ * different phase (an In/Loop/Out preset tile in a different tab than the
+ * move being changed), in which case those no longer make sense against
+ * the new phase's own window and the pick's own values win instead. Kind/
+ * presetId/tracks/params always come from the new pick.
+ */
+function onGalleryAdd(picked: Move) {
+  const old = changingMove.value
+  if (old) {
+    const samePhase = picked.phase === old.phase
+    const merged: Move = {
+      ...picked,
+      id: old.id,
+      duration: samePhase ? old.duration : picked.duration,
+      ease: samePhase ? old.ease : picked.ease,
+      play: samePhase ? old.play : picked.play,
+    }
+    emit('replace-move', old, merged)
+    emit('set-open', old.id)
+    changingMove.value = null
+    galleryOpen.value = false
+    return
+  }
+  emit('add-move', picked)
+  emit('set-open', picked.id)
+  galleryOpen.value = false
+}
+function onGalleryClose() {
+  changingMove.value = null
   galleryOpen.value = false
 }
 </script>
@@ -168,7 +220,7 @@ function onAdd(move: Move) {
           <button
             type="button"
             class="flex items-center gap-1 normal-case text-white/40 hover:text-white"
-            @click.stop="galleryOpen = true"
+            @click.stop="openAddGallery()"
           ><Plus class="h-3 w-3" /> Add move</button>
         </span>
       </template>
@@ -191,7 +243,10 @@ function onAdd(move: Move) {
       <MoveBandStrip :moves="clip.moves" :clip="clip.duration" />
     </StudioSection>
 
-    <MoveGallery v-if="galleryOpen" :adapter="adapter" :cfg="cfg" @add="onAdd" @close="galleryOpen = false">
+    <MoveGallery
+      v-if="galleryOpen" :adapter="adapter" :cfg="cfg" :initial-phase="changingMove?.phase"
+      @add="onGalleryAdd" @close="onGalleryClose"
+    >
       <template v-if="$slots.thumb" #thumb="slotProps"><slot name="thumb" v-bind="slotProps" /></template>
     </MoveGallery>
   </div>
