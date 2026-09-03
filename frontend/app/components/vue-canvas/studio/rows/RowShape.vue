@@ -5,6 +5,7 @@
 import { computed, ref } from 'vue'
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import { shapeById } from '~/lib/shapes/catalog'
+import { SHAPE_PICKER_WIDTH } from '~/lib/shapes/pickerLayout'
 import ShapePicker from '../ShapePicker.vue'
 
 const props = defineProps<{ value: string | number | boolean; spec: ControlSpec; step: number; editing: boolean }>()
@@ -16,31 +17,38 @@ const open = ref(false)
 const anchor = ref({ x: 0, y: 0 })
 
 function openPicker(e: MouseEvent) {
+  // The picker's own outside-mousedown listener already closes it on this
+  // same press (mousedown fires before click), so by the time this handler
+  // runs `open` is already back to false — this branch just makes the
+  // toggle explicit and idempotent instead of relying on that ordering.
+  if (open.value) { open.value = false; return }
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  anchor.value = { x: r.right - 360, y: r.bottom + 4 }
+  anchor.value = { x: r.right - SHAPE_PICKER_WIDTH, y: r.bottom + 4 }
   open.value = true
 }
 </script>
 
 <template>
-  <button
-    type="button"
-    :aria-label="spec.label"
-    class="flex h-6 items-center gap-1.5 rounded-[6px] px-1.5 text-[11px] text-white/90 transition-colors hover:bg-white/[0.06]"
-    @pointerdown.stop
-    @click="openPicker"
-  >
-    <svg v-if="current" viewBox="0 0 96 96" width="16" height="16" fill="currentColor" aria-hidden="true">
-      <path :d="current.d" :fill-rule="current.fillRule" />
-    </svg>
-    <span>{{ current ? current.name : 'None' }}</span>
-  </button>
-  <ShapePicker
-    v-if="open"
-    :model-value="String(value)"
-    :allow-none="allowNone"
-    :anchor="anchor"
-    @update:model-value="(v: string) => emit('update:value', v)"
-    @close="open = false"
-  />
+  <span class="contents">
+    <button
+      type="button"
+      :aria-label="spec.label"
+      class="flex h-6 items-center gap-1.5 rounded-[6px] px-1.5 text-[11px] text-white/90 transition-colors hover:bg-white/[0.06]"
+      @pointerdown.stop
+      @click="openPicker"
+    >
+      <svg v-if="current" viewBox="0 0 96 96" width="16" height="16" fill="currentColor" aria-hidden="true">
+        <path :d="current.d" :fill-rule="current.fillRule" />
+      </svg>
+      <span>{{ current ? current.name : 'None' }}</span>
+    </button>
+    <ShapePicker
+      v-if="open"
+      :model-value="String(value)"
+      :allow-none="allowNone"
+      :anchor="anchor"
+      @update:model-value="(v: string) => emit('update:value', v)"
+      @close="open = false"
+    />
+  </span>
 </template>

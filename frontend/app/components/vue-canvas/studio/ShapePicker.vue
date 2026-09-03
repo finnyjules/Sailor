@@ -10,6 +10,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { SHAPE_FAMILIES, SHAPE_NONE, familyOf, searchShapes, type ShapeFamily } from '~/lib/shapes/catalog'
+import { SHAPE_PICKER_WIDTH } from '~/lib/shapes/pickerLayout'
 
 const props = withDefaults(defineProps<{
   modelValue: string
@@ -41,6 +42,8 @@ onMounted(() => {
     let x = props.anchor.x, y = props.anchor.y
     if (x + r.width + 8 > window.innerWidth) x = Math.max(8, window.innerWidth - r.width - 8)
     if (y + r.height + 8 > window.innerHeight) y = Math.max(8, window.innerHeight - r.height - 8)
+    x = Math.max(8, x)
+    y = Math.max(8, y)
     pos.value = { x, y }
     searchRef.value?.focus()
   })
@@ -71,8 +74,8 @@ const tileOn = 'bg-white text-neutral-900'
   <Teleport to="body">
     <div
       ref="rootRef"
-      class="fixed z-[210] w-[360px] rounded-lg border border-white/10 bg-[#141414] p-2 text-[12px] text-white/90 shadow-2xl"
-      :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
+      class="fixed z-[210] rounded-lg border border-white/10 bg-[#141414] p-2 text-[12px] text-white/90 shadow-2xl"
+      :style="{ left: `${pos.x}px`, top: `${pos.y}px`, width: `${SHAPE_PICKER_WIDTH}px` }"
       role="dialog"
       aria-label="Choose a shape"
     >
