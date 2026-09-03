@@ -1423,6 +1423,9 @@ async function renderBlobWithOverrides(overrides: Record<string, string | number
     return null
   } finally {
     config.value = snapshot
+    // Same reason as the import above: the last frame drawn was the sweep row's
+    // config, not the restored one, so its solve must not survive the restore.
+    lastStretch.value = null
   }
 }
 
@@ -1443,6 +1446,9 @@ async function onImportFile(e: Event) {
   if (!file) return
   try {
     config.value = mergeConfig(JSON.parse(await file.text()))
+    // A whole new config: the frame's last solve belongs to the old one, and the
+    // fit-off watch below would write it over the imported stretch.
+    lastStretch.value = null
     actionError.value = ''
   } catch (err) {
     console.error('[vector-type] import settings failed', err)

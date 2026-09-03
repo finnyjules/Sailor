@@ -261,21 +261,27 @@ const PRESETS: VtTrackPreset[] = [
   // policy): each moves one dial and leaves the other at 1.
   {
     id: 'stretch-in', label: 'Stretch In', pitch: 'Lands wide and settles to its drawn width', ...RUN,
-    // An ENTRANCE ends still: `to` is exactly 1, the dial value, so the word
-    // is left as the user set it. Starts at 1.6 — an extended cut, not a smear.
+    // An ENTRANCE ends still: `to` is 1, the drawn width — an ABSOLUTE value,
+    // like every track in this table, not a delta on the dial. A user who set
+    // the dial to 1.4 gets a word that lands at 1.0; the dial is the resting
+    // value only while no track claims that path. Starts at 1.6 — an extended
+    // cut, not a smear.
     build: () => [track('stretch', 1.6, 1, { easing: 'easeinout' })],
   },
   {
     id: 'stretch-wave', label: 'Stretch Wave', pitch: 'A crest of width travels through the word', ...RUN,
-    // A LOOP about 1 within ±15%: wide enough to read, inside the range the
-    // engine holds. The travel comes from the stagger — with delay 0 the whole
-    // word breathes together, which is the honest fallback, not a bug.
+    // A LOOP about 1, −12% to +15%: wide enough to read, inside the range the
+    // engine holds, and absolute like the rest of this table. The travel comes
+    // from the stagger — with delay 0 the whole word breathes together, which
+    // is the honest fallback, not a bug.
     build: () => [track('stretch', 0.88, 1.15, { easing: 'pingpong', loops: 2 })],
   },
   {
     id: 'spring-up', label: 'Spring Up', pitch: 'Letters land tall off the baseline and settle', ...RUN,
     // Height only — the baseline is the fixed point of the vertical remap, so
     // this reads as letters springing UP, not smearing about their centres.
+    // `to` is 1, the drawn height: absolute, like every track in this table, so
+    // a user who set the height dial to 1.4 gets letters that land at 1.0.
     build: () => [track('stretchY', 1.8, 1, { easing: 'easeinout' })],
   },
 ]

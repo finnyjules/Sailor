@@ -162,6 +162,40 @@ describe('vectorTypeFrame — the fit solve is paid for once, not every frame', 
   })
 })
 
+describe('vectorTypeFrame — fit is solved from the RESTING config', () => {
+  // Fit is a COMPOSITION decision, made once, at rest. Keyed on the animated
+  // config it went cold on every tick — the shipped Spring Up preset moves
+  // `stretchY`, so a fitted studio running it paid a ~300 ms solve per frame
+  // and reported a `fitted` that shivered. The dials the solve reads are the
+  // user's own, before any track claims them.
+  const trackAt = (path: string, from: number, to: number) =>
+    ({ path, from, to, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 })
+
+  it('a height track never re-solves the fit, and `fitted` holds still', () => {
+    const base = vectorTypeFrame(font, cfg({}), 0)
+    // A ratio no other test in this file uses, so the memo is cold here.
+    const targetUnits = base.outlines.width * 1.23
+    const c = cfg({
+      fit: 'width',
+      motion: { ...DEFAULT_CONFIG.motion, tracks: [trackAt('stretchY', 1, 1.8)] },
+    } as any)
+    const fitBoxWidth = boxFor(targetUnits, c.size, base.outlines.unitsPerEm)
+    const before = fitCalls.n
+    const f0 = vectorTypeFrame(font, c, 0, { fitBoxWidth })
+    const f1 = vectorTypeFrame(font, c, 1, { fitBoxWidth })
+    const f2 = vectorTypeFrame(font, c, 2, { fitBoxWidth })
+    expect(f0.stretch.fitted).not.toBeNull()
+    expect(f1.stretch.fitted).toBe(f0.stretch.fitted)
+    expect(f2.stretch.fitted).toBe(f0.stretch.fitted)
+    // Three frames, ONE solve — the track moved `stretchY` and the fit did not
+    // notice, because it was never asked about the animated value.
+    expect(fitCalls.n - before).toBe(1)
+    // …and the width the solve promised survives the wave: the run still fills
+    // the box at t = 2, where the height dial reads 1.4.
+    expect(Math.abs(f2.outlines.width - targetUnits) / targetUnits).toBeLessThan(0.02)
+  })
+})
+
 describe('vectorTypeFrame — fit beats a per-glyph width wave', () => {
   // The controller's call: when the run was FITTED, the solver's promise is
   // that the run fills the box. A staggered `stretch` track would break that
@@ -240,6 +274,20 @@ describe('vectorTypeFrame — the wdth cascade, at the seam the studio uses', ()
     const f = vectorTypeFrame(archivo, cfg({ stretch: 2.2 }), 0)
     expect(f.outlines.coords.wdth).toBeCloseTo(wdth.max, 9)
     expect(f.stretch.S).toBeGreaterThan(1.3)
+  })
+
+  it('a FITTED run spends the axis too — the cascade is not skipped by the solve', () => {
+    // The fit path reaches the engine through the same plan as a typed dial, so
+    // a reachable target on a family with a real `wdth` has to be paid for by
+    // the AXIS first. Asserting the width alone would pass on a run that got
+    // there by smearing every letter.
+    const rest = vectorTypeFrame(archivo, cfg({}), 0)
+    const targetUnits = rest.outlines.width * 1.18
+    const c = cfg({ fit: 'width' })
+    const fitBoxWidth = boxFor(targetUnits, c.size, rest.outlines.unitsPerEm)
+    const f = vectorTypeFrame(archivo, c, 0, { fitBoxWidth })
+    expect(f.outlines.coords.wdth).toBeGreaterThan(wdth.default)
+    expect(Math.abs(f.outlines.width - targetUnits) / targetUnits).toBeLessThan(0.02)
   })
 })
 

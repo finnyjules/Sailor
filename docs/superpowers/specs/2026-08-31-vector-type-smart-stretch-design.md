@@ -191,9 +191,14 @@ and goes read-only. Text/font/size/tracking changes re-solve. Fit is only a
 solver on the same dial — no new geometry.
 
 **Motion.** `stretch` and `stretchY` become motion-track paths exactly like
-`axes.<tag>`: per-glyph, staggerable, wave-able. Track values are a **delta on
-top of** the config's base stretch, so animation settles back to what the user
-set. Three starter presets: **Stretch In** (letters land expanded → settle, or
+`axes.<tag>`: per-glyph, staggerable, wave-able. Track values are **absolute**,
+exactly like every other track path in the table — a track that says `to: 1`
+ends at the drawn width, not at the user's dial. So an entrance preset lands on
+1.0 even for a user whose dial reads 1.4, and the dial is the resting value only
+while no track claims that path. (Decided 2026-09-02, over a "delta on top of
+the base" reading: one rule for all track paths beats a special case for two of
+them, and "settles to the drawn width" is the thing an entrance is actually
+promising.) Three starter presets: **Stretch In** (letters land expanded → settle, or
 the reverse), **Stretch Wave** (a crest of width travels through the word,
 sibling of Weight Wave), and **Spring Up** (letters land tall off the baseline
 and settle to natural height). The existing geometric `scaleX`/`scaleY` motion
@@ -211,6 +216,45 @@ weight wave already does. Per-glyph advance changes reflow pen positions
 through the existing reflow path (the "layout at base weight would make heavy
 glyphs collide" machinery in `canvas.ts`). If lab profiling disagrees,
 quantize stretch values for caching — not expected.
+
+### Phase B — what shipped, and how it differs from the plan
+
+Written 2026-09-02, after the whole-branch review. The plan above is the
+intent; these are the places the build had to disagree with it.
+
+- **Per-glyph planning replaced the residual-ratio shortcut.** A staggered
+  stretch wave was to scale each glyph's dial by the run's `residual / dial`.
+  That is a line through the origin, and the real relationship passes through
+  (1, 1): a trough glyph asking for exactly 1 came out visibly condensed,
+  charged a discount for a `wdth` move it never received. Every glyph now runs
+  the whole pipeline on its OWN dial — spend the real axis, hand the remainder
+  to the remap, damp — and its resting coords carry its own spent `wdth`.
+- **Fit solves through the damping, and from the RESTING config.**
+  `fitStretch(font, text, axes, target, min, max, SY)` measures at the damped
+  width, so a fitted run with a tall height dial still fills the box. Its inputs
+  are the un-animated config (text, axes, size, height dial), because fit is a
+  composition decision taken at rest: a track on any of them would otherwise
+  re-solve ~300 ms of binary search every frame and report a `fitted` that
+  shivers. The width is damped against that same resting height dial, so a
+  height wave keeps the fitted width; an animated `size` keeps the fitted dial
+  and may over- or under-fill the box mid-animation — the accepted trade.
+- **Dials are clamped at the frame boundary.** `mergeConfig` clamps what is
+  stored, but `applyMotion` runs after it and writes raw track values, so the
+  frame re-clamps the run's dials and every staggered glyph's into
+  [`VT_STRETCH_MIN`, `VT_STRETCH_MAX`]. A non-finite dial is replaced by 1, not
+  clamped: NaN has no nearest legal value.
+- **Both solves are memoised.** The fit answer and the `wdth` plan are each
+  cached in a 64-entry insertion-ordered map keyed on their whole input. Without
+  them a fitted, animated studio paid a full solve per frame — and a staggered
+  wave paid one plan per glyph per frame.
+- **Track presets are absolute** (see Motion above), including Stretch In and
+  Spring Up, whose `to: 1` is the drawn width.
+- **`prepareSolidExtrudes` passes its box; thumbnails do not.** The solid union
+  owns the same `VtBoxOptions` it hands to `vtPlacement`, so it builds its frame
+  with `fitBoxWidth` exactly as `drawVectorType` does — otherwise the fused body
+  disagrees with the drawn glyph and its cache never hits. `thumbPreview` stays
+  inert: a thumbnail is a picture of the config, not a composition inside a box
+  the user is fitting to.
 
 ## The laws (engine-independent) — added 2026-09-02
 

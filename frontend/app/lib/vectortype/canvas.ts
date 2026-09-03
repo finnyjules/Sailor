@@ -132,8 +132,13 @@ export const VT_FIT_INSET = 0.02
 /** What a caller who owns a BOX can tell the frame about it. */
 export interface VtFrameOptions {
   /** The box's available width in OUTPUT px (padding already removed) — the
-   *  fit target. Only the two callers that own a box pass it; a frame asked
-   *  for without it treats `fit` as inert and renders the dial value. */
+   *  fit target. Passed by the three callers that own a box: `drawVectorType`,
+   *  `vectorTypeSVG` and `prepareSolidExtrudes` (the solid union has to fuse
+   *  around the geometry the other two draw, or the bake disagrees with the
+   *  preview and its body cache never hits). `thumbPreview` deliberately does
+   *  NOT: a thumbnail is a picture of the config, not a composition inside a
+   *  box the user is fitting to, so `fit` is inert there and the dial rules.
+   *  A frame asked for without a box renders the dial value — never wrong. */
   fitBoxWidth?: number
 }
 
@@ -313,12 +318,17 @@ function clampDial(v: number): number {
  *
  * `fitStretch` binary-searches 24 candidates, and every candidate is a full
  * shape-and-remap of the whole run — ~295 ms on a six-glyph word here, against
- * a frame budget of 16. Its answer depends on four things only (the FONT, the
- * TEXT, the resting AXES, the target WIDTH), and every one of them changes when
- * the user types or drags a box edge, never when the clock ticks. So a fitted
- * studio was re-deriving the same number sixty times a second; memoised, it
- * pays for it once per edit and the frame drops back to the ordinary stretch
- * cost.
+ * a frame budget of 16.
+ *
+ * What it is asked is the RESTING composition: the font, the text, the axes and
+ * the dials as the user set them, before any track claims one. That is not a
+ * memo trick, it is what fit MEANS — "this word fills this box" is a decision
+ * taken while the thing is standing still, and a run whose fit was re-solved on
+ * the animated config would answer a different question sixty times a second
+ * (the shipped Spring Up preset moves `stretchY`, so it did exactly that: a
+ * ~300 ms solve per frame and a `fitted` readout that shivered). Solved at
+ * rest, the answer is a constant for the whole animation and the memo is simply
+ * where that constant lives.
  *
  * Bounded, because a long editing session types a lot of words: 64 entries,
  * oldest INSERTION evicted (a Map iterates in insertion order). Not an LRU —
@@ -335,7 +345,8 @@ function memoisedFit(
   // sub-hundredth of a unit cannot move the solve, but it would miss the key.
   // `SY` is part of the key because it is part of the QUESTION — the solve
   // measures through the damping, so the same box asked with a different height
-  // dial has a different answer.
+  // dial has a different answer. It is the RESTING height dial (see above), so
+  // an animated one cannot move this key.
   const key = `${font.id}|${text}|${coordsKey(axes)}|${targetUnits.toFixed(2)}|${SY.toFixed(4)}`
   const hit = fitMemo.get(key)
   if (hit !== undefined) return hit
@@ -423,28 +434,48 @@ export function vectorTypeFrame(
   // there is no run to fill a box with, and reporting a `fitted` of 1 would put
   // a number on a read-only control that nothing solved.
   const runSY = clampDial(base.stretchY)
+  // The height dial AS THE USER SET IT — `cfg`, not `base`, so no track has
+  // touched it. Fit answers for this one and the width is damped against it
+  // below; `runSY` (the animated one) is what the HEIGHT itself renders at.
+  const fitSY = clampDial(cfg.stretchY)
   let dialS = clampDial(base.stretch)
   let fitted: number | null = null
   const fitBox = frameOpts.fitBoxWidth
   if (
-    base.fit === 'width' && base.text
-    && typeof fitBox === 'number' && Number.isFinite(fitBox) && fitBox > 0 && base.size > 0
+    cfg.fit === 'width' && cfg.text
+    && typeof fitBox === 'number' && Number.isFinite(fitBox) && fitBox > 0 && cfg.size > 0
   ) {
-    // Same px↔unit line `vtPlacement` uses (`config.size / upem`, on the
-    // post-motion config), so a fitted run lands where placement expects it.
-    const targetUnits = (fitBox * (1 - 2 * VT_FIT_INSET)) / (base.size / upem)
+    // Same px↔unit line `vtPlacement` uses (`config.size / upem`) — read off the
+    // RESTING size for the same reason as the dials: fit is the composition at
+    // rest. A `size` track therefore keeps the fitted dial and lets the run
+    // over- or under-fill the box mid-animation; that is the trade, and it is
+    // the right one — the alternative is a word that refuses to grow.
+    const targetUnits = (fitBox * (1 - 2 * VT_FIT_INSET)) / (cfg.size / upem)
     // The height dial goes INTO the solve, because the frame damps the answer
     // on the way out: solved against an undamped pipeline, `fit: 'width'` with
     // `stretchY: 2` lands a tenth of the box short and `fitted` reports a value
     // nothing ever applied. `fitted` is still the DIAL — what the read-only
     // control shows — and the damped version of it is what the engine gets.
-    fitted = memoisedFit(font, base.text, runAxes, targetUnits, runSY)
+    fitted = memoisedFit(font, cfg.text, cfg.axes ?? {}, targetUnits, fitSY)
     dialS = fitted
   }
   // The wdth cascade spends the real axis before geometry and before damping:
   // a designer-drawn width is never damped.
   const plan = memoPlan(font, base.text, runAxes, dialS)
-  const runDamped = dampedStretch(plan.residual, runSY)
+  // Two damping questions, one plan. HEIGHT is damped against the width the
+  // frame is actually drawing; WIDTH under fit is damped against the RESTING
+  // height the solve answered for — damp it against a travelling `stretchY`
+  // and the run reopens exactly the width the solve closed, drifting out of
+  // the box on every frame of a Spring Up while still reporting `fitted`.
+  const heightDamped = dampedStretch(plan.residual, runSY)
+  const widthDamped = fitted !== null && fitSY !== runSY
+    ? dampedStretch(plan.residual, fitSY)
+    : heightDamped
+  const runDamped = {
+    S: widthDamped.S,
+    SY: heightDamped.SY,
+    damped: heightDamped.damped || widthDamped.damped,
+  }
 
   const shaped = textOutlines(font, base.text, plan.coords)
   const n = shaped.glyphs.length
@@ -512,17 +543,19 @@ export function vectorTypeFrame(
       // answer depend on how much of the move the cascade happened to absorb.
       if (ownS !== dialS || ownSY !== runSY) perGlyphStretch = true
       const own = memoPlan(font, base.text, gcAxes, ownS)
-      // Damp the WIDTH against the RUN's height dial under fit, not the
-      // glyph's own: the fit solve answered for `runSY`, and damping is a
+      // Damp the WIDTH against the RESTING height dial under fit, not the
+      // glyph's own: the fit solve answered for `fitSY`, and damping is a
       // function of BOTH dials together, so re-damping against a travelling
       // `ownSY` reopens exactly the width the solve closed — the run under-
       // fills the box one glyph at a time even though every glyph reports the
       // fitted width. The solve's whole promise is that the run fills the box,
-      // and that promise is measured at `runSY`, so the width has to be too.
+      // and that promise is measured at `fitSY`, so the width has to be too.
       // The height keeps its own clock either way — it was never part of the
-      // promise fit makes.
-      S = (fitted !== null ? dampedStretch(own.residual, runSY) : dampedStretch(own.residual, ownSY)).S
-      SY = dampedStretch(own.residual, ownSY).SY
+      // promise fit makes, which is why ONE damping call serves both and only
+      // the fitted width needs a second.
+      const ownDamped = dampedStretch(own.residual, ownSY)
+      S = fitted !== null ? dampedStretch(own.residual, fitSY).S : ownDamped.S
+      SY = ownDamped.SY
       rest = own.coords
     }
     resting.push(rest)

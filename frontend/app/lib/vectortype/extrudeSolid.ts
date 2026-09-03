@@ -336,7 +336,13 @@ export async function prepareSolidExtrudes(
   opts: VtBoxOptions,
 ): Promise<VtSolidBodies> {
   const out = new Map<string, VectorCommand[]>()
-  const frame = vectorTypeFrame(font, cfg, t)
+  // The SAME box `vtPlacement` is given below, so `fit: 'width'` solves against
+  // it here exactly as it does in `drawVectorType`. Without it this frame is a
+  // different run — the union fuses around geometry the preview never drew, and
+  // the body cache, keyed on the placed commands, can never hit the drawn glyph.
+  const frame = vectorTypeFrame(font, cfg, t, {
+    fitBoxWidth: Math.max(0, opts.width - 2 * (opts.padding ?? 0)),
+  })
   const solids = vtSolidExtrudeLayers(frame.config, frame.outlines.glyphs.length)
   if (!solids.length) return out
 

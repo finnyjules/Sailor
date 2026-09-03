@@ -58,7 +58,7 @@ import {
   subpathCount,
   unionCommandLists,
 } from '~/lib/vectortype/extrudeSolid'
-import { drawVectorType, vtPlacement, vtSolidExtrudeLayers } from '~/lib/vectortype/canvas'
+import { drawVectorType, vectorTypeFrame, vtPlacement, vtSolidExtrudeLayers } from '~/lib/vectortype/canvas'
 import { glyphTransform as glyphPlacement, placeOutlines } from '~/lib/vectortype/render'
 import { textOutlines } from '~/lib/vectortype/outline'
 
@@ -548,6 +548,69 @@ describe('prepareSolidExtrudes — the bake entry point', () => {
     const many = vtSolidExtrudeLayers(c, 500) // way past VT_EXTRUDE_FRAME_BUDGET
     expect(few[0]?.copies.length).toBe(32)
     expect(many[0]?.copies.length).toBeLessThan(32)
+  })
+
+  // ── the box this function owns ────────────────────────────────────────────
+  // `fit: 'width'` is solved against a box, and only a caller that HAS one can
+  // say so. This function owns the very box it hands to `vtPlacement`, so a
+  // frame built without it fits nothing: the union fuses around geometry the
+  // preview never drew, and the body cache — keyed on the placed commands —
+  // can never hit the drawn glyph's entry.
+
+  /** The extent of a command list, over its on-path points. Enough to say two
+   *  bodies are the same body: a run fitted to a different width lands its ink
+   *  somewhere else entirely. */
+  function extent(commands: readonly VectorCommand[]): { minX: number; maxX: number; minY: number; maxY: number } {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    for (const c of commands) {
+      const a = c.args
+      for (let i = 0; i + 1 < a.length; i += 2) {
+        minX = Math.min(minX, a[i] as number); maxX = Math.max(maxX, a[i] as number)
+        minY = Math.min(minY, a[i + 1] as number); maxY = Math.max(maxY, a[i + 1] as number)
+      }
+    }
+    return { minX, maxX, minY, maxY }
+  }
+  const round = (b: ReturnType<typeof extent>) => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, Math.round(v * 100) / 100]))
+
+  /** `prepareSolidExtrudes`' own loop, over a frame THIS test chose — so the
+   *  only thing under test is which frame the real one builds. */
+  async function bodiesFor(frame: ReturnType<typeof vectorTypeFrame>): Promise<Map<string, VectorCommand[]>> {
+    const out = new Map<string, VectorCommand[]>()
+    const place = vtPlacement(frame, BOX)
+    const placed = placeOutlines(frame.outlines, place)
+    for (const layer of vtSolidExtrudeLayers(frame.config, frame.outlines.glyphs.length)) {
+      for (let i = 0; i < placed.length; i++) {
+        const glyph = frame.outlines.glyphs[i]
+        const commands = placed[i]
+        if (!glyph || !commands?.length) continue
+        const body = await solidExtrudeBody(
+          commands, layer.copies, glyphPlacement(glyph, place), glyph.advance * place.scale)
+        if (body.length) out.set(vtSolidKey(layer.id, i), body)
+      }
+    }
+    return out
+  }
+
+  it('solves fit against the SAME box it places into', async () => {
+    const c = cfg({
+      fit: 'width',
+      appearance: [vtLayer({ id: 'L0', kind: 'extrude', paint: BLUE, depth: 5, distance: 4, angle: 0, solid: true })],
+    })
+    const fitBoxWidth = Math.max(0, BOX.width - 2 * 0)
+    const fitted = vectorTypeFrame(font, c, 0, { fitBoxWidth })
+    const blind = vectorTypeFrame(font, c, 0)
+    // Teeth: the two frames really are different runs, so an equality below
+    // cannot pass by accident.
+    expect(Math.abs(fitted.outlines.width - blind.outlines.width)).toBeGreaterThan(1)
+
+    clearSolidExtrudeCache()
+    const got = await prepareSolidExtrudes(font, c, 0, BOX)
+    const want = await bodiesFor(fitted)
+    expect([...got.keys()].sort()).toEqual([...want.keys()].sort())
+    for (const [key, body] of want) {
+      expect(round(extent(got.get(key) as VectorCommand[])), key).toEqual(round(extent(body)))
+    }
   })
 
   it('skips a layer with NO id rather than colliding every one onto one key', async () => {
