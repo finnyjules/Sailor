@@ -174,6 +174,12 @@ export interface VtFrame {
    * `S`/`SY` are the run-level values handed to the engine; `fitted` is the
    * width dial fit solved (null when fit was off or inert); `perGlyph` says at
    * least one glyph took its own pair, which is the travelling-wave path.
+   *
+   * `S`/`SY` here are always the RUN's values, even on a staggered frame —
+   * per-glyph engine values can differ from them (and from each other) once a
+   * staggered axis track has moved the cascade, because each glyph spends its
+   * own `wdth` before its own remap. `perGlyph` only says whether glyphs took
+   * their own DIALS; it is not a promise that `S`/`SY` describe every glyph.
    */
   stretch: { S: number; SY: number; damped: boolean; fitted: number | null; perGlyph: boolean }
   /**
@@ -404,6 +410,11 @@ export function vectorTypeFrame(
 ): VtFrame {
   const base = applyMotion(cfg, t)
   const upem = font.unitsPerEm || 1000
+  // A legacy appearance blob that never went through `mergeConfig` can carry no
+  // `axes` at all — `coordsKey` already tolerates that, but `planStretch`
+  // throws on a missing record the moment the dial isn't 1. Normalised once,
+  // here, so every read below (run and per-glyph alike) sees a real record.
+  const runAxes = base.axes ?? {}
 
   // ── SMART STRETCH: resolve the run-level dials ONCE ────────────────────────
   // Fit solves the width dial against the box the caller owns; a config whose
@@ -427,12 +438,12 @@ export function vectorTypeFrame(
     // `stretchY: 2` lands a tenth of the box short and `fitted` reports a value
     // nothing ever applied. `fitted` is still the DIAL — what the read-only
     // control shows — and the damped version of it is what the engine gets.
-    fitted = memoisedFit(font, base.text, base.axes, targetUnits, runSY)
+    fitted = memoisedFit(font, base.text, runAxes, targetUnits, runSY)
     dialS = fitted
   }
   // The wdth cascade spends the real axis before geometry and before damping:
   // a designer-drawn width is never damped.
-  const plan = memoPlan(font, base.text, base.axes, dialS)
+  const plan = memoPlan(font, base.text, runAxes, dialS)
   const runDamped = dampedStretch(plan.residual, runSY)
 
   const shaped = textOutlines(font, base.text, plan.coords)
@@ -487,6 +498,7 @@ export function vectorTypeFrame(
       // own clock and clones the config to do it, so the axes and the dials are
       // read off the SAME evaluation rather than paying for two.
       const gc = glyphConfig(cfg, t, i, n)
+      const gcAxes = gc.axes ?? {}
       // FIT WINS over a per-glyph width wave. When the run was fitted, the
       // solve's whole promise is that the run fills the box; letting a
       // staggered `stretch` track re-widen each glyph would break that promise
@@ -499,11 +511,19 @@ export function vectorTypeFrame(
       // apart mean the wave is on, and comparing the engine's outputs made the
       // answer depend on how much of the move the cascade happened to absorb.
       if (ownS !== dialS || ownSY !== runSY) perGlyphStretch = true
-      const own = memoPlan(font, base.text, gc.axes, ownS)
-      const damped = dampedStretch(own.residual, ownSY)
+      const own = memoPlan(font, base.text, gcAxes, ownS)
+      // Damp the WIDTH against the RUN's height dial under fit, not the
+      // glyph's own: the fit solve answered for `runSY`, and damping is a
+      // function of BOTH dials together, so re-damping against a travelling
+      // `ownSY` reopens exactly the width the solve closed — the run under-
+      // fills the box one glyph at a time even though every glyph reports the
+      // fitted width. The solve's whole promise is that the run fills the box,
+      // and that promise is measured at `runSY`, so the width has to be too.
+      // The height keeps its own clock either way — it was never part of the
+      // promise fit makes.
+      S = (fitted !== null ? dampedStretch(own.residual, runSY) : dampedStretch(own.residual, ownSY)).S
+      SY = dampedStretch(own.residual, ownSY).SY
       rest = own.coords
-      S = damped.S
-      SY = damped.SY
     }
     resting.push(rest)
     transforms.push(vtGlyphMotion(cfg, t, i, n, em, { axes: font.axes, resting: rest, wordOf }))

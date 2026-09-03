@@ -2184,8 +2184,3 @@ export function weightCompensation(
   return { ...axes, wght: Math.min(wght.max, Math.max(wght.min, nudged)) }
 }
 
-// TEMP DEBUG — remove before commit
-export const __debugResolveStraightMin = resolveStraightMin
-export const __debugFlatten = flattenToSegments
-export const __debugMarkTerminal = markTerminalCuts
-export const __debugBuildGrid = buildGrid

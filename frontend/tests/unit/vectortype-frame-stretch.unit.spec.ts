@@ -197,10 +197,15 @@ describe('vectorTypeFrame — fit beats a per-glyph width wave', () => {
   it('a staggered stretchY track is still a wave under fit', () => {
     const base = vectorTypeFrame(font, cfg({}), 0)
     const c = cfg({ fit: 'width', motion: waveOn('stretchY') } as any)
-    const fitBoxWidth = boxFor(base.outlines.width * 1.42, c.size, base.outlines.unitsPerEm)
+    const targetUnits = base.outlines.width * 1.42
+    const fitBoxWidth = boxFor(targetUnits, c.size, base.outlines.unitsPerEm)
     const f = vectorTypeFrame(font, c, 3, { fitBoxWidth })
     expect(f.stretch.fitted).not.toBeNull()
     expect(f.stretch.perGlyph).toBe(true)
+    // The height wave must not cost the width its fit: like the sibling test
+    // above, the run still has to fill the box (minus the inset) even though
+    // every glyph is on its own `stretchY` clock.
+    expect(Math.abs(f.outlines.width - targetUnits) / targetUnits).toBeLessThan(0.02)
   })
 })
 
