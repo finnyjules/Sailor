@@ -294,6 +294,28 @@ export function evaluatePresetUnit(
 }
 
 /**
+ * A kinetic IN/OUT preset's NATIVE ease — the GSAP-style string
+ * `evalSpecUnits` falls back to (`spec.ease ?? entry.ease`) when a spec
+ * doesn't override it, i.e. the ease the OLD (pre-moves) engine always ran
+ * that preset at.
+ *
+ * Exposed for callers outside this module that must reproduce a preset's
+ * original motion rather than the moves engine's own `smooth` default —
+ * Vector Type's legacy→move migration (`lib/vectortype/config.ts`) is the
+ * first: a stored `in`/`out` slot from a document that pre-dates moves never
+ * had an `ease` string of its own, and must inherit this one instead of
+ * silently going smooth.
+ *
+ * `undefined` for an unknown id, or for `loop` (loop presets have no ease of
+ * their own — `evaluateAnimation` runs a loop's phase LINEARLY, un-eased;
+ * see its own body above).
+ */
+export function nativeEaseFor(slot: 'in' | 'out', presetId: string): string | undefined {
+  const table = slot === 'in' ? IN_EVAL : OUT_EVAL
+  return table[presetId]?.ease
+}
+
+/**
  * Presets whose ENTIRE effect is the per-unit stagger window.
  *
  * `typewriter` is `opacity: e > 0.01 ? 1 : 0` — a step, with no intermediate

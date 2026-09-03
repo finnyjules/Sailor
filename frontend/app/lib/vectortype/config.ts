@@ -29,8 +29,16 @@
 // string there, so a studio adapter can add its own) to the four kinds this
 // studio actually produces; `mergeMove` and `convertLegacyTracks` are the pure,
 // studio-neutral merge/migration this file's `mergeMotion` builds on.
-import type { Move, MoveEaseName } from '~/lib/studio/moves/types'
+import type { Move, MoveEase, MoveEaseName } from '~/lib/studio/moves/types'
 import { convertLegacyTracks, mergeMove, type LegacyMotionTrack } from '~/lib/studio/moves/merge'
+// Two readers of a preset's NATIVE ease, for the SAME reason `mergeMotion`'s
+// preset-slot migration below needs them: an axis preset carries its ease on
+// itself (`VtAxisPreset.ease`); a kinetic preset's lives in the shared
+// engine's private IN/OUT tables, reached through `nativeEaseFor`. Neither
+// import is circular — `axisPresets.ts` only reaches `./font`/`./random`,
+// and `lib/motion/evaluate.ts` only reaches its own `./types`/`./easing`.
+import { vtAxisPreset } from './axisPresets'
+import { nativeEaseFor } from '~/lib/motion/evaluate'
 import { isFill, isGradient, type Gradient, type Paint } from '~/lib/compositor/paint'
 // The migration-only legacy-track → preset matcher. A CIRCULAR import
 // (`trackPresets.ts` imports `VT_STACK_PREFIX`/types back from this module):
@@ -1540,6 +1548,48 @@ function legacyPresetEaseName(ease: string | undefined): MoveEaseName | null {
 }
 
 /**
+ * The ease a migrated `in`/`out`/`loop` preset slot gets when the STORED slot
+ * carried no `ease` string of its own — which is every real saved document,
+ * since `ease` was never a field the pre-moves slot schema wrote. This is the
+ * render-parity fix: the old engine did not run a slot at a fixed `smooth` —
+ * it ran each preset at ITS OWN native ease (an axis preset's `.ease`, a
+ * kinetic preset's IN/OUT-table ease, both looked up and mapped through the
+ * SAME `legacyPresetEaseName` above; a loop's phase LINEARLY, un-eased). A
+ * migrated move that instead defaults to `smooth` — the moves engine's own
+ * default, applied when `mergeMove` is handed no `ease` at all — silently
+ * changes every migrated preset's motion: grow-in stops overshooting,
+ * elastic-drop bounces on the wrong curve, fade-out decelerates instead of
+ * accelerating, and every loop preset's wave deforms (a non-`none` ease
+ * warps a periodic phase into something that no longer closes the loop).
+ *
+ * `loop` short-circuits to `none` rather than going through a table lookup:
+ * no loop preset ever had an ease of its own to look up (the old engine ran
+ * `LOOP_EVAL` directly against the raw cycle phase — see
+ * `lib/motion/evaluate.ts`'s `evaluateAnimation`), so `none` (linear) is the
+ * one faithful answer, not a fallback.
+ *
+ * For `in`/`out`: an axis preset (`vtAxisPreset`) is checked first because a
+ * presetId can only ever be ONE of the two tables (axis ids and kinetic ids
+ * are drawn from disjoint namespaces — see `presetMotion.ts`'s
+ * `vtAxisPresetIdsFor`/`presetIdsFor`), so the order is never ambiguous; a
+ * kinetic id simply misses the axis table and falls through to
+ * `nativeEaseFor`. Whatever native ease string is found — engine-shaped
+ * (`back.out(1.7)`, `power3.out`, …) either way — goes through the SAME
+ * `legacyPresetEaseName` map above, so an axis preset and a kinetic preset
+ * land on a `MoveEaseName` by identical rules. A preset id neither table
+ * recognises (should not happen — this only ever runs against a `presetId`
+ * that was itself validated moments earlier by `mergeMove`) or a native ease
+ * that names none of the ten falls back to `smooth`, the same safe default
+ * the un-migrated code path already used.
+ */
+function legacyPresetNativeEase(slot: VtPresetSlot, presetId: string): MoveEase {
+  if (slot === 'loop') return { kind: 'named', name: 'none' }
+  const native = vtAxisPreset(slot, presetId)?.ease ?? nativeEaseFor(slot, presetId)
+  const mapped = legacyPresetEaseName(native)
+  return { kind: 'named', name: mapped ?? 'smooth' }
+}
+
+/**
  * Rebuild the motion block, converting an OLD-shape document to `moves` as it
  * loads.
  *
@@ -1620,14 +1670,22 @@ function mergeMotion(raw: unknown, remap?: (path: string) => string | null): VtM
       const so = rawSlot as Record<string, unknown>
       const presetId = typeof so.presetId === 'string' ? so.presetId.trim() : ''
       if (!presetId) continue
-      const easeName = legacyPresetEaseName(typeof so.ease === 'string' ? so.ease : undefined)
+      // A stored `ease` string (never written by any real pre-moves document,
+      // but honoured if present) is mapped and kept as-is — an EXPLICIT ease
+      // is never overridden. Its absence is the real-world case, and gets the
+      // preset's own NATIVE ease (`legacyPresetNativeEase`), not the moves
+      // engine's `smooth` default — see that function's doc for why.
+      const storedEase = typeof so.ease === 'string' ? so.ease : undefined
+      const ease: MoveEase = storedEase !== undefined
+        ? { kind: 'named', name: legacyPresetEaseName(storedEase) ?? 'smooth' }
+        : legacyPresetNativeEase(slot, presetId)
       const m = asVtMove(mergeMove({
         id: `move-${slot}`,
         phase: slot,
         kind: 'preset',
         presetId,
         duration: num(so.duration, VT_PRESET_DURATIONS[slot]),
-        ease: easeName ? { kind: 'named', name: easeName } : undefined,
+        ease,
         play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
         params: so.params,
       }, mergeTrackFn))

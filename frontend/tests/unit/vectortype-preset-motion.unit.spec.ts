@@ -35,7 +35,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as fontkit from 'fontkit'
 import { describe, expect, it } from 'vitest'
-import { PRESET_CAPABILITIES } from '~/lib/motion/evaluate'
+import { PRESET_CAPABILITIES, evaluateAnimation, nativeEaseFor } from '~/lib/motion/evaluate'
+import type { LayerAnimation, FrameMotion } from '~/lib/motion/types'
 import type { MoveEase, MoveEaseName } from '~/lib/studio/moves/types'
 import {
   DEFAULT_CONFIG,
@@ -545,5 +546,195 @@ describe('a config straight out of storage', () => {
     const c = cfg()
     expect(presetTransform(c, 1.5, 2, WORD.length)).toEqual({ ...IDENTITY_GLYPH_MOTION, axes: {} })
     expect(vtGlyphMotion(c, 1.5, 2, WORD.length)).toEqual({ ...IDENTITY_GLYPH_MOTION, axes: {} })
+  })
+})
+
+// ── THE RENDER-PARITY GATE: migrated presets must keep their NATIVE ease ────
+
+/**
+ * `mergeConfig`'s OLD-shape branch (`config.ts`'s `mergeMotion`) converts a
+ * pre-moves document's `in`/`out`/`loop` slot into one preset move. Before
+ * this block's fix, a slot with no STORED `ease` string — every real saved
+ * document, since the pre-moves slot schema never wrote one — fell all the
+ * way through to the moves engine's own default, `smooth`. The OLD engine
+ * never ran a slot at a fixed `smooth`: it ran each preset at ITS OWN native
+ * ease (`lib/motion/evaluate.ts`'s `IN_EVAL`/`OUT_EVAL` tables, or LINEAR for
+ * a loop's phase). A silent `smooth` default is a render-parity break: a
+ * document saved before moves existed must animate identically after this
+ * migration runs, not slightly (or wildly) differently.
+ *
+ * These tests build an OLD-shape config for one preset per family, migrate it
+ * through the real `mergeConfig`, and check the result against an ORACLE built
+ * from `evaluateAnimation` — the untouched, pre-moves evaluator — called with
+ * the SAME preset id, at the SAME times, on the SAME per-glyph clock
+ * (`stagger: 0`, matching `presetTransform`'s own rule that the engine's
+ * stagger is always forced inert — see `presetMotion.ts`'s header, trap 2).
+ *
+ * `legacyPresetEaseName` (`config.ts`) maps a GSAP-style ease string onto only
+ * TEN named eases, and does so by FAMILY, not by exact curve — every
+ * `power*.out` collapses to `smooth` regardless of its exponent, and both
+ * `power*.in` variants collapse to `accelerate`. So the "native ease" a
+ * migrated move actually gets is the CORRECT FAMILY, not always a
+ * bit-identical curve. `grow-in` (`back.out(1.7)`), `elastic-drop`
+ * (`elastic.out(1, 0.3)`, whose amplitude/period `resolveEase` ignores either
+ * way — see `easing.ts`'s own doc) and `wave` (no ease at all) land close
+ * enough to their true native curve for a tight numeric oracle. `fade-out`
+ * (`power2.in`, family-mapped to `accelerate` → engine `power3.in`) and
+ * `mask-up` (`power3.out`, family-mapped to `smooth` → engine `power2.out`)
+ * do NOT reproduce their literal native curve — the family map is
+ * deliberately rough (`legacyPresetEaseName`'s own doc: "not a lossless
+ * round-trip") — so those two assert against the family the fix is supposed
+ * to select, per this task's own fallback rule for exactly this situation.
+ */
+describe('migration parity — an OLD-shape document keeps its native ease', () => {
+  const motion: FrameMotion = { fps: 30, duration: 4 }
+
+  /** An OLD-shape (pre-moves) document: one populated preset slot, no `moves`
+   *  key at all — the shape `mergeMotion`'s `hasOldShape` branch converts. */
+  function oldShapeCfg(slot: 'in' | 'out' | 'loop', presetId: string, duration: number): VectorTypeConfig {
+    return mergeConfig({
+      ...cloneConfig(DEFAULT_CONFIG),
+      text: WORD,
+      size: 100,
+      motion: { duration: 4, [slot]: { presetId, duration } },
+    })
+  }
+
+  /** The migrated move's own ease — the thing that was silently `smooth`
+   *  before the fix, for every one of these five presets. */
+  function migratedEase(cfg: VectorTypeConfig): MoveEaseName {
+    const mv = cfg.motion.moves[0]
+    expect(mv, 'the old-shape slot must have migrated to exactly one move').toBeTruthy()
+    expect(mv!.ease.kind).toBe('named')
+    return (mv!.ease as { kind: 'named'; name: MoveEaseName }).name
+  }
+
+  it('grow-in (in) — overshoots (back.out(1.7)), not smooth: scale/opacity track the ORACLE, not a smooth curve', () => {
+    const D = 0.8
+    const cfg = oldShapeCfg('in', 'grow-in', D)
+    expect(migratedEase(cfg)).toBe('overshoot')   // not 'smooth' — the bug's default
+
+    const anim: LayerAnimation = { offset: 0, in: { presetId: 'grow-in', duration: D, stagger: 0 } }
+    for (const frac of [0.2, 0.5, 0.8]) {
+      const t = frac * D
+      const migrated = presetTransform(cfg, t, 0, WORD.length)
+      const oracle = evaluateAnimation(anim, t, motion, WORD.length).units![0]!
+      // `overshoot`'s engine curve (`back.out`, implicit s=1.70158) is a hair
+      // off `grow-in`'s literal native `back.out(1.7)` — both constants name
+      // the same "back" family, and the residual is ≤ 2×10⁻⁴ (verified by
+      // direct calculation), well inside this 3-decimal tolerance. A
+      // `smooth`-eased grow-in would miss by tenths, not ten-thousandths — see
+      // the sibling assertion below for that comparison, made explicit.
+      expect(migrated.scale, `scale at t=${t}`).toBeCloseTo(oracle.scale, 3)
+      expect(migrated.opacity, `opacity at t=${t}`).toBeCloseTo(oracle.opacity, 3)
+    }
+
+    // The bug this test exists to catch, made concrete: a smooth-eased
+    // grow-in overshoots nothing (scale never exceeds 1) — the whole point of
+    // `back.out` is that it DOES, past 1, before settling. Prove the migrated
+    // move overshoots like the oracle, which a smooth curve structurally cannot.
+    const midT = 0.5 * D
+    const migratedMid = presetTransform(cfg, midT, 0, WORD.length)
+    expect(migratedMid.scale).toBeGreaterThan(1)
+  })
+
+  it('elastic-drop (in) — elastic.out(1, 0.3), exact match (resolveEase ignores the amplitude/period params either way)', () => {
+    const D = 0.8
+    const cfg = oldShapeCfg('in', 'elastic-drop', D)
+    expect(migratedEase(cfg)).toBe('elastic')
+
+    const anim: LayerAnimation = { offset: 0, in: { presetId: 'elastic-drop', duration: D, stagger: 0 } }
+    for (const frac of [0.2, 0.5, 0.8]) {
+      const t = frac * D
+      const migrated = presetTransform(cfg, t, 0, WORD.length)
+      const oracle = evaluateAnimation(anim, t, motion, WORD.length).units![0]!
+      // `resolveEase` maps ANY `elastic.*` string — with or without params —
+      // onto the SAME fixed-amplitude/period `elasticOut` (`easing.ts`'s own
+      // doc: "ignores GSAP's amplitude/period params"), so the migrated
+      // move's `elastic` ease and the oracle's literal `elastic.out(1, 0.3)`
+      // run the identical function: this should be bit-exact, not merely close.
+      expect(migrated.dy / 100, `dy at t=${t}`).toBeCloseTo(oracle.dy, 6)
+    }
+  })
+
+  it('fade-out (out) — accelerates (power-in family), not smooth: family-correct, not curve-exact (documented rough map)', () => {
+    const D = 0.8
+    const cfg = oldShapeCfg('out', 'fade-out', D)
+    expect(migratedEase(cfg)).toBe('accelerate')   // not 'smooth' — the bug's default
+
+    // `power2.in` (the true native) has no exact slot in the ten-name
+    // vocabulary; `legacyPresetEaseName` puts every `power*.in` in
+    // `accelerate` (engine `power3.in`) BY FAMILY. So the oracle comparison
+    // this suite prefers is not exact here (`power2.in` vs `power3.in` differ
+    // by tenths mid-curve) — per this task's own fallback, assert the ease
+    // name (above) and that the migrated move is clearly NOT smooth-eased,
+    // which is the actual bug this test exists to catch.
+    const smoothMove = { ...cfg.motion.moves[0]!, ease: { kind: 'named', name: 'smooth' } as MoveEase }
+    const smoothCfg: VectorTypeConfig = { ...cfg, motion: { ...cfg.motion, moves: [smoothMove] } }
+    for (const frac of [0.2, 0.5, 0.8]) {
+      const t = (4 - D) + frac * D
+      const migrated = presetTransform(cfg, t, 0, WORD.length)
+      const smooth = presetTransform(smoothCfg, t, 0, WORD.length)
+      // `accelerate` (power-in, starts slow) and `smooth` (power-out, starts
+      // fast) diverge hard away from the phase's own edges — at least a
+      // quarter of the opacity range at every sampled fraction, verified by
+      // direct calculation (0.35, 0.63, 0.45 at these three fractions).
+      expect(Math.abs(migrated.opacity - smooth.opacity), `t=${t}`).toBeGreaterThan(0.2)
+    }
+  })
+
+  it('mask-up (in) — power3.out family-maps to smooth (engine power2.out): pinned to the FAMILY the fix selects', () => {
+    const D = 0.8
+    const cfg = oldShapeCfg('in', 'mask-up', D)
+    // `mask-up`'s true native (`nativeEaseFor` — the raw IN_EVAL entry) IS
+    // `power3.out`, and `legacyPresetEaseName` puts every `power*.out` in
+    // `smooth` regardless of exponent — the SAME bucket the pre-fix bug's
+    // `smooth` default happened to land in too. So, uniquely among these
+    // five, `mask-up`'s ease name does not flip between the buggy and fixed
+    // code paths (`grow-in`/`elastic-drop`/`fade-out`/`wave` all do — see
+    // their own tests, and the pre-fix-failure check this file's block
+    // opens with). What DOES change is that the fix reaches `smooth` by
+    // DELIBERATELY sourcing and mapping `power3.out`, rather than by falling
+    // through to a default that would silently drift if `DEFAULT_EASE` ever
+    // stopped being `smooth` — asserted here by pinning both the raw native
+    // string and the family it resolves to.
+    expect(nativeEaseFor('in', 'mask-up')).toBe('power3.out')
+    expect(migratedEase(cfg)).toBe('smooth')
+
+    // The motion itself is exact against the FAMILY oracle (native ease
+    // forced to the engine name `smooth` maps to, `power2.out` — the curve
+    // `legacyPresetEaseName` actually selects for this preset).
+    const anim: LayerAnimation = { offset: 0, in: { presetId: 'mask-up', duration: D, ease: 'power2.out', stagger: 0 } }
+    for (const frac of [0.2, 0.5, 0.8]) {
+      const t = frac * D
+      const migrated = presetTransform(cfg, t, 0, WORD.length)
+      const oracle = evaluateAnimation(anim, t, motion, WORD.length).units![0]!
+      expect(migrated.dy / 100, `dy at t=${t}`).toBeCloseTo(oracle.dy, 6)
+      expect(migrated.clip, `clip at t=${t}`).toEqual(oracle.clip)
+    }
+  })
+
+  it('wave (loop) — runs its cycle phase LINEARLY (ease: none), not smooth-warped: exact match, sign and phase both', () => {
+    const cycle = 2
+    const cfg = oldShapeCfg('loop', 'wave', cycle)
+    expect(migratedEase(cfg)).toBe('none')   // not 'smooth' — a non-linear ease deforms a periodic phase
+
+    const anim: LayerAnimation = { offset: 0, loop: { presetId: 'wave', duration: cycle, stagger: 0 } }
+    // t=0.75 (phase 0.375 of the cycle) is the failing example an opus review
+    // caught against this exact oracle: a `smooth`-eased wave is out of phase
+    // at this point, badly enough to invert dy's sign (verified directly:
+    // the un-eased phase gives dy≈−17.7, a `smooth`-eased version +15.9).
+    for (const t of [0.75, 1.5, 3.3]) {
+      const migrated = presetTransform(cfg, t, 0, WORD.length)
+      const oracle = evaluateAnimation(anim, t, motion, WORD.length).units![0]!
+      expect(migrated.dy / 100, `dy at t=${t}`).toBeCloseTo(oracle.dy, 6)
+    }
+
+    // Concretely, at t=0.75: assert the migrated move lands on the OLD
+    // engine's sign, not the inverted one a smooth ease would give.
+    const migrated075 = presetTransform(cfg, 0.75, 0, WORD.length)
+    const oracle075 = evaluateAnimation(anim, 0.75, motion, WORD.length).units![0]!
+    expect(migrated075.dy).toBeLessThan(0)
+    expect(Math.sign(migrated075.dy)).toBe(Math.sign(oracle075.dy))
   })
 })

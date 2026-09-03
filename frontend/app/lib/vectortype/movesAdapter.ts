@@ -45,7 +45,7 @@ import type {
   MovesAdapter,
 } from '~/lib/studio/moves/adapter'
 import type { Move, MoveEase, MoveEaseName } from '~/lib/studio/moves/types'
-import { presetIdsFor } from '~/lib/motion/evaluate'
+import { presetIdsFor, nativeEaseFor } from '~/lib/motion/evaluate'
 import { KINETIC_GROUP_LABELS, KINETIC_PRESETS_BY_ID, type KineticGroup } from '~/data/kinetic-presets'
 import type { VtAxis } from './font'
 import type { VectorTypeConfig, VtMove } from './config'
@@ -89,15 +89,31 @@ const KINDS: Record<string, MoveKindDef<VectorTypeConfig>> = {
  * Falls back to `'smooth'`, `resolveEase`'s own default, for anything not in
  * the ten-name set (a bare `power2.out` with no matching name, a preset added
  * later that doesn't map cleanly) — the tile still gets a real, usable ease.
+ *
+ * Also fed the shared kinetic engine's OWN native eases now (`engineOffer`
+ * below, via `nativeEaseFor` — this is FIX 2 for the render-parity bug: a
+ * freshly-added "grow-in" tile must overshoot like the preset always did, not
+ * default to `smooth`), so the table carries every exact ease string
+ * `lib/motion/evaluate.ts`'s `IN_EVAL`/`OUT_EVAL` use, not only the axis
+ * presets' handful. `power2.in`/`back.in(1.7)`/`back.in(2)`/`back.out(1.4)`
+ * are the four that axis presets never needed — added here on the SAME family
+ * rule `lib/vectortype/config.ts`'s `legacyPresetEaseName` uses for the
+ * migration path (`power*.in` → `accelerate`, any `back.*` → `overshoot`), so
+ * the two mapping tables agree rather than diverging on presets that happen
+ * to use a `.in`/non-`(1.7)` variant.
  */
 const ENGINE_TO_MOVE_EASE: Record<string, MoveEaseName> = {
   none: 'none',
   'power2.out': 'smooth',
+  'power2.in': 'accelerate',
   'sine.inOut': 'natural',
   'power3.out': 'slowDown',
   'power3.in': 'accelerate',
   'back.out(1.7)': 'overshoot',
+  'back.out(1.4)': 'overshoot',
   'back.out': 'overshoot',
+  'back.in(1.7)': 'overshoot',
+  'back.in(2)': 'overshoot',
   'elastic.out(1, 0.3)': 'elastic',
   'elastic.out': 'elastic',
   'bounce.out': 'bounce',
@@ -115,7 +131,11 @@ function easeFromEngineName(name: string | undefined): MoveEase {
 /** The default duration/ease/play a freshly-added preset move gets. Loop
  *  presets are periodic on their own — `ease: none`, `play: repeat ×1` — per
  *  the design spec §1; In/Out get the preset's OWN native ease (axis presets
- *  carry one; engine presets default to `smooth`) and `play: once`. */
+ *  carry one on `preset.ease`; engine presets' lives in the shared engine's
+ *  IN/OUT tables, passed in by `engineOffer` via `nativeEaseFor` — see its
+ *  call below) and `play: once`, so a freshly-added "grow-in" tile overshoots
+ *  the same way a pre-moves document's `in` slot always did, rather than
+ *  going smooth. */
 function defaultTiming(phase: MovePhase, engineEase?: string): { duration: number; ease: MoveEase; play: Move['play'] } {
   if (phase === 'loop') return { duration: 1.5, ease: { kind: 'named', name: 'none' }, play: { mode: 'repeat', times: 1 } }
   return { duration: 0.8, ease: easeFromEngineName(engineEase), play: { mode: 'once', times: 1 } }
@@ -140,6 +160,10 @@ function axisOffer(preset: VtAxisPreset, phase: MovePhase): MoveOffer {
 
 function engineOffer(id: string, phase: MovePhase): MoveOffer {
   const meta = KINETIC_PRESETS_BY_ID[id]
+  // `nativeEaseFor` only knows `'in' | 'out'` (a loop preset has no ease of
+  // its own — see its doc) — `defaultTiming` ignores the ease arg for
+  // `phase === 'loop'` anyway, so passing `undefined` there is harmless.
+  const engineEase = phase === 'loop' ? undefined : nativeEaseFor(phase, id)
   return {
     id: `preset:${id}`,
     label: meta?.label ?? id,
@@ -151,7 +175,7 @@ function engineOffer(id: string, phase: MovePhase): MoveOffer {
       phase,
       kind: 'preset',
       presetId: id,
-      ...defaultTiming(phase),
+      ...defaultTiming(phase, engineEase),
     }),
   }
 }
