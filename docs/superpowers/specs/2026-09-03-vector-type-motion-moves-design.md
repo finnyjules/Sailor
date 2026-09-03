@@ -2,6 +2,7 @@
 
 **Date:** 2026-09-03
 **Status:** designed, not built
+**Amended 2026-09-03** by `2026-09-03-motion-moves-shared-core-design.md`: the move/ease/play types, phase windows, track composition, and the panel (clip block, cards, gallery shell, ease picker, band strip) are built once in a shared core under `lib/studio/moves/` and `components/vue-canvas/motion/moves/`; Vector Type keeps its preset/blink/scatter kinds, the old-document conversion, and the agent words as an adapter. Behaviour described below is unchanged.
 **Scope:** the Motion tab of the Vector Type Studio (`frontend/app/components/vue-canvas/VectorTypeSurface.vue`), the motion part of its config (`frontend/app/lib/vectortype/config.ts`), the preset evaluator (`presetMotion.ts`), the shared ease resolver (`frontend/app/lib/motion/easing.ts`), and one new gallery component. Nothing outside Vector Type changes except one additive ease-name form in the shared resolver.
 
 ## In plain words

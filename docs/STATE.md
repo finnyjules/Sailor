@@ -31,6 +31,18 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Die Doing techniques — Shape Blend + 3D Screen finish + shared motion moves — DESIGNED 2026-09-03 (not built)
+
+Julien adores Carsten Gueth (@die_doing): hundreds of thin outlines stepping from one shape to another so a gradient appears from line density and breaks into moiré up close; spheres and blobs whose shading is made of dots that wrap the form, shrink into shadow, fringe red and blue, and dissolve into the ground. An inventory of Sailor at HEAD showed the dot-screened forms are mostly reachable today (3D Studio → gradient material → post-stack Dot screen + Chroma, or wired into Shader Studio's risograph), while two things were missing. Both are now specified, plus a third that fell out of the second.
+
+**Shape Blend** (`superpowers/specs/2026-09-03-shape-blend-design.md`): Shape Studio gains a fourth layout, **Blend** — the steps between shape A and a new shape B (kind, size, rotation, offset), with Spacing and Twist dials; plus two colour options for every layout — **Colour ramp** (a smooth fade across the copies) and **Colour applies to** fill / outline / both. A pure morph module flattens, resamples, aligns (winding + best start offset + twist) and interpolates outlines, with an exact control-point path when the two shapes share a skeleton. Stills only in this pass; reaches the Frame as a still layer.
+
+**3D Screen finish** (`superpowers/specs/2026-09-03-scene3d-screen-finish-design.md`): every 3D material except glass gains a Screen section — dots / lines / cross anchored to the object's surface coordinates, dot size from the lit shading, red/blue misregistration, transparent or coloured gaps, lit or fixed ink. One helper chains onto any material's existing shader injection at the `opaque_fragment` point; all dials are schema sliders, so the agent and motion tracks get them for free.
+
+**Shared motion moves** (`superpowers/specs/2026-09-03-motion-moves-shared-core-design.md`, amends the Vector Type moves spec): Julien asked whether the in-flight Motion tab redesign should be unified across studios. Answer: yes — the move/ease/play types, phase windows, track composition and the panel (clip block, cards, gallery shell, ease picker, band strip) land once in `lib/studio/moves/` + `components/vue-canvas/motion/moves/`; Vector Type keeps preset/blink/scatter as an adapter; **Shape Studio is consumer two** (no old tracks to convert), which is how blends will animate; Gradient and Shader convert later. Decided order: Blend (stills) → Screen → shared core + Vector Type adapter → Shape Studio motion → Gradient/Shader.
+
+Plans: not yet written.
+
 ### Vector Type — Motion tab as a stack of moves — DESIGNED 2026-09-03 (`c6efd4e58`, not built)
 
 The Motion tab had grown five ways of animating, each with its own look: three preset slots behind a modal, a "Motion" slider block that is really Stagger plus two effects, two inline tile galleries, raw track rows, and clip length at the bottom, held together by five paragraphs of explanation. No ease curve was visible or editable, a preset's ease was hidden, ping-pong was offered as an ease, and you could not stack two entrances. Julien: "a complete mess, rethink it completely."
