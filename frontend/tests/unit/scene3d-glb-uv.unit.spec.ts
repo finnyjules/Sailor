@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
 import { ensureUv } from '~/lib/scene3d/glb'
+import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 
 describe('ensureUv — GLB meshes without UVs', () => {
   it('adds spherical UVs only to geometries that lack them', () => {
@@ -20,5 +21,24 @@ describe('ensureUv — GLB meshes without UVs', () => {
     // The box's own UVs are untouched.
     expect(withUv.geometry.getAttribute('uv').count).toBe(24)
     expect(ensureUv(g)).toBe(0)
+  })
+})
+
+describe('geometryFromMeshData — the `mesh` primitive', () => {
+  it('gives sculpt/remesh/text-to-3D bakes spherical UVs', () => {
+    // A tetrahedron: the smallest closed mesh, so the spherical projection has something
+    // to wrap. Without UVs the screen finish samples one texel and the whole object
+    // renders as a single giant dot.
+    const geo = geometryFromMeshData({
+      positions: new Float32Array([1, 1, 1, -1, -1, 1, -1, 1, -1, 1, -1, -1]),
+      indices: new Uint32Array([0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2]),
+    })
+    const uv = geo.getAttribute('uv')
+    expect(uv, 'geometryFromMeshData produced no uv attribute').toBeDefined()
+    expect(uv.count).toBe(geo.getAttribute('position').count)
+    for (let i = 0; i < uv.count; i++) {
+      expect(uv.getX(i)).toBeGreaterThanOrEqual(0); expect(uv.getX(i)).toBeLessThanOrEqual(1)
+      expect(uv.getY(i)).toBeGreaterThanOrEqual(0); expect(uv.getY(i)).toBeLessThanOrEqual(1)
+    }
   })
 })
