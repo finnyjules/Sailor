@@ -28,6 +28,7 @@ export function shapeGeometry(shape: LibraryShape, targetWidth: number): ShapeGe
   while ((m = re.exec(shape.d))) {
     if (m[1]) {
       if (!'MLCZ'.includes(m[1])) throw new Error(`shapeGeometry: unsupported path command "${m[1]}" in shape "${shape.id}"`)
+      if (pending !== null) throw new Error(`shapeGeometry: odd coordinate count in shape "${shape.id}"`)
       out += m[1]
       pending = null
     } else {
@@ -60,6 +61,9 @@ export function createShapeLayer(shape: LibraryShape, o: CreateShapeLayerOpts = 
 
 /** Same layer, new shape: layout and paint kept, geometry regenerated at the current ink width. */
 export function swapShapeLayer(layer: PathLayer, shape: LibraryShape): PathLayer {
+  // A persisted layer with a zero/NaN bbox (e.g. hand-edited JSON) falls back to the
+  // default width instead of feeding shapeGeometry a non-positive targetWidth, which
+  // would otherwise throw or produce degenerate geometry.
   const g = shapeGeometry(shape, layer.bbox.w > 0 ? layer.bbox.w : SHAPE_LAYER_DEFAULT_WIDTH)
   return { ...layer, d: g.d, bbox: g.bbox, fillRule: shape.fillRule, shapeId: shape.id }
 }

@@ -33,6 +33,12 @@ describe('shapeGeometry', () => {
     expect(() => shapeGeometry({ ...tall, d: 'M0,0A5,5 0 0 1 10,10' }, 0.3)).toThrow(/unsupported/)
     expect(() => shapeGeometry({ ...tall, box: [0, 0, 0, 10] }, 0.3)).toThrow(/tall/)
   })
+  it('rejects an odd coordinate count when the stray value is interior, not only at end of string', () => {
+    expect(() => shapeGeometry({ ...tall, d: 'M10,10,20L30,10Z' }, 0.3)).toThrow(/odd coordinate count/)
+  })
+  it('rejects an odd coordinate count at end of string', () => {
+    expect(() => shapeGeometry({ ...tall, d: 'M10,10L30' }, 0.3)).toThrow(/odd coordinate count/)
+  })
 })
 
 describe('createShapeLayer', () => {
