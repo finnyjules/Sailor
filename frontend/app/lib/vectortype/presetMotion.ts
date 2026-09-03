@@ -69,11 +69,10 @@ import {
   presetIdsFor,
   presetNeedsStagger,
 } from '~/lib/motion/evaluate'
-import { resolveEase } from '~/lib/motion/easing'
 // The shared moves core: N moves per phase now, not one spec per slot — see
 // `presetTransform`'s header note below. `movePhase`/`moveWindows` replace
-// this file's old `vtSlotPhase` for that purpose (kept, unchanged, for its
-// OTHER callers — see its own doc comment); `mergeEase`/`mergePlay` give a
+// this file's old `vtSlotPhase` (removed — it had no callers left once
+// `presetTransform` switched to `movePhase`); `mergeEase`/`mergePlay` give a
 // raw/untrusted move a well-formed ease+play the same way `mergeTrack` gives
 // one to a raw track, and `easeToEngineName` is how a move's ease reaches
 // `vtPresetSpecs`'s engine-shaped `LayerAnimSpec.ease` string.
@@ -529,72 +528,6 @@ export function vtStillTime(cfg: VectorTypeConfig | null | undefined): number {
   const outStarts = windows.filter(w => w.move.phase === 'out').map(w => w.start)
   const outStart = outStarts.length ? Math.min(...outStarts) : duration
   return Math.max(0, Math.min(rest, outStart, duration - 1e-6))
-}
-
-/** The engine's floor on a unit's animating window (`MIN_UNIT_DUR`). Restated
- *  rather than imported because `evaluate.ts` keeps it private; the parity test
- *  pins the two together against real engine output. */
-const MIN_UNIT_DUR = 0.05
-
-/** Which slot owns time `gt`, and how far through it that glyph is. */
-export interface VtSlotPhase {
-  slot: VtPresetSlot
-  /** EASED progress 0→1 for `in`/`out`; RAW phase 0→1 for `loop`. */
-  e: number
-}
-
-/**
- * The slot the clock is inside, mirroring `evaluateAnimation`'s own branch
- * order exactly: `in` while `gt < inDuration`, then `out` from `outStart`, then
- * `loop`. Returns null when nothing is live.
- *
- * This exists because the axis presets are evaluated OUTSIDE the engine (their
- * values depend on the loaded font, which the engine does not know), and they
- * must still land on the same instant as an engine preset would — otherwise a
- * `weight-in` and a `slide-up` picked together would finish at different times.
- *
- * It is a restatement of engine-private arithmetic, which is a drift risk, so
- * the spec cross-checks it against real `evaluateAnimation` output on presets
- * whose easing is `none` (fade-in's opacity IS `e`, fade-out's is `1 − e`,
- * spin-loop's rotation is `360·phase`). If the engine's windowing ever changes,
- * that test goes red rather than the axis presets quietly desynchronising.
- *
- * The engine's own stagger is 0 here (see the header), so a unit's window is
- * the whole slot and `unitProgress` collapses to `gt / duration`.
- */
-export function vtSlotPhase(
-  specs: Partial<Record<VtPresetSlot, LayerAnimSpec>>,
-  gt: number,
-  duration: number,
-): VtSlotPhase | null {
-  const W = Math.max(0.001, fin(duration, DEFAULT_MOTION.duration))
-  const t = Math.max(0, fin(gt, 0))
-  const inDur = specs.in ? Math.max(0.01, specs.in.duration) : 0
-  const outDur = specs.out ? Math.max(0.01, specs.out.duration) : 0
-  const outStart = Math.max(inDur, W - outDur)
-
-  if (specs.in && t < inDur) {
-    const eased = resolveEase(specs.in.ease ?? easeOf('in', specs.in.presetId))
-    return { slot: 'in', e: eased(clamp01(t / Math.max(MIN_UNIT_DUR, specs.in.duration))) }
-  }
-  if (specs.out && t >= outStart && W > inDur) {
-    const effDur = Math.max(0.01, W - outStart)
-    const eased = resolveEase(specs.out.ease ?? easeOf('out', specs.out.presetId))
-    return { slot: 'out', e: eased(clamp01((t - outStart) / Math.max(MIN_UNIT_DUR, effDur))) }
-  }
-  if (specs.loop) {
-    const cycle = Math.max(0.1, specs.loop.duration)
-    // Phase 0 at loop start, so an in→loop handoff is seamless (the engine's rule).
-    const phase = (((t - inDur) / cycle) % 1 + 1) % 1
-    return { slot: 'loop', e: phase }
-  }
-  return null
-}
-
-/** The default easing for a slot's preset — the axis table's own, so a Vector
- *  Type preset eases like the entrance it is unless the spec overrides it. */
-function easeOf(slot: VtPresetSlot, presetId: string): string | undefined {
-  return vtAxisPreset(slot, presetId)?.ease
 }
 
 /**

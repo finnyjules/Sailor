@@ -118,13 +118,25 @@ function stripLegacy(t: LegacyMotionTrack): MoveTrack {
   return track
 }
 
-/** `linear` → none/once, `easeinout` → natural/once, `pingpong` → none/backAndForth; `loops` → `play.times` (default 1). */
+/**
+ * `linear` → none, `easeinout` → natural, `pingpong` → none/backAndForth;
+ * `loops` → `play.times` (default 1).
+ *
+ * The OLD evaluator WRAPPED (a `loops`-cycle sawtooth across the clip) once
+ * `loops > 1`, clamping only at `loops <= 1`. `mode: 'once'` here CLAMPS
+ * always (`trackRawProgress` in `./tracks.ts`: `clamp(local * times, 0, 1)`),
+ * so for non-pingpong easing with `loops > 1` it must be `mode: 'repeat'`
+ * instead — that path wraps (`phase % 1`), reproducing the old sawtooth.
+ * `pingpong` already gets `backAndForth`, which triangulates correctly at
+ * any `loops`, so it is untouched.
+ */
 function legacyTrackEasePlay(easing: unknown, loops: unknown): { ease: MoveEase; play: MovePlay } {
   const times = isNum(loops) ? Math.max(1, Math.round(loops)) : 1
   const NONE: MoveEaseName = 'none'
   if (easing === 'pingpong') return { ease: { kind: 'named', name: NONE }, play: { mode: 'backAndForth', times } }
-  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, play: { mode: 'once', times } }
-  return { ease: { kind: 'named', name: NONE }, play: { mode: 'once', times } }
+  const mode: MovePlay['mode'] = times > 1 ? 'repeat' : 'once'
+  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, play: { mode, times } }
+  return { ease: { kind: 'named', name: NONE }, play: { mode, times } }
 }
 
 /**

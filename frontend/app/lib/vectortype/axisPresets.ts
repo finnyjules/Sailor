@@ -257,8 +257,9 @@ export const VT_GRADE_FLICKER_STEPS = FLICKER_STEPS
  * this preset is deterministic.
  *
  * `Math.floor(phase × steps)` is a pure function of the phase, which is itself a
- * pure function of `t` (`vtSlotPhase`). So a preview and a bake evaluating the
- * same `t` land on the same step and draw the same frame; no state, no
+ * pure function of `t` (`movePhase`, `~/lib/studio/moves/phase`). So a preview
+ * and a bake evaluating the same `t` land on the same step and draw the same
+ * frame; no state, no
  * `Math.random`, no dependence on how many frames have been drawn. It is
  * `timeBucket` in the loop's own coordinates rather than in seconds, because the
  * loop duration is what times every other preset here.

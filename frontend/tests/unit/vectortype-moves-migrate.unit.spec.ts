@@ -1,6 +1,7 @@
 // frontend/tests/unit/vectortype-moves-migrate.unit.spec.ts
 import { describe, expect, it } from 'vitest'
 import { cloneConfig, DEFAULT_CONFIG, mergeConfig } from '~/lib/vectortype/config'
+import { applyMotion } from '~/lib/vectortype/motion'
 import type { Move } from '~/lib/studio/moves/types'
 
 describe('vt motion migration', () => {
@@ -96,5 +97,46 @@ describe('vt motion migration', () => {
     const cfg = mergeConfig(old)
     expect(cfg.motion.duration).toBe(6)
     expect(cfg.motion.moves[0]!.duration).toBe(6)
+  })
+
+  it('a non-pingpong legacy track with loops > 1 WRAPS across the clip, matching the old evaluator, instead of ramping once and freezing', () => {
+    // The OLD evaluator ran a `loops`-cycle sawtooth across the clip whenever
+    // `loops > 1` (clamping only at `loops <= 1`). `legacyTrackEasePlay` used
+    // to map every `linear`/`easeinout` track to `play: { mode: 'once' }`
+    // regardless of `loops`, and `mode: 'once'` CLAMPS — so a saved `loops: 3`
+    // track reached full value at local progress `1/3` and held there for the
+    // rest of the clip. This is the exact failing doc from the review.
+    const old = cloneConfig(DEFAULT_CONFIG) as any
+    old.motion = {
+      duration: 4,
+      fps: 30,
+      size: 1080,
+      tracks: [{ path: 'size', from: 100, to: 900, easing: 'linear', loops: 3, hold: 0, cycleOffset: 0, delay: 0 }],
+      stagger: { delay: 0, order: 'forward', seed: 0 },
+      blink: { amount: 0 },
+      scatter: { spread: 0 },
+    }
+    const cfg = mergeConfig(old)
+    const move = cfg.motion.moves[0]!
+    // Wraps, not clamps: `repeat` is what makes `trackRawProgress` do
+    // `phase % 1` (./tracks.ts) instead of `clamp(phase, 0, 1)`.
+    expect(move.play).toEqual({ mode: 'repeat', times: 3 })
+
+    // OLD value at t=2 of a 4s clip, loops=3: from + (to-from) * ((2/4*3) % 1)
+    // = 100 + 800 * 0.5 = 500. The buggy `mode: 'once'` clamp instead gives
+    // from + (to-from) * clamp(1.5, 0, 1) = 900.
+    const atTwo = applyMotion(cfg, 2)
+    expect((atTwo as any).size).toBeCloseTo(500, 6)
+    expect((atTwo as any).size).not.toBeCloseTo(900, 6)
+
+    // Just past one full cycle (4/3 s) it is back near `from` — proof this is
+    // a repeating wrap, not a single ramp that happens to pass through 500.
+    // Offset slightly off the exact wrap seam (4/3) to avoid asserting on a
+    // floating-point boundary; a bounds check (not toBeCloseTo) keeps this
+    // robust to exactly where the offset lands within the new cycle.
+    const atOneCycle = applyMotion(cfg, 4 / 3 + 0.05)
+    const size = (atOneCycle as any).size as number
+    expect(size).toBeGreaterThan(100 - 1)
+    expect(size).toBeLessThan(300)
   })
 })

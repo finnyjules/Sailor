@@ -49,7 +49,7 @@ import {
   vtKnowsPreset,
   vtAxisOffers,
   vtPresetIdsFor,
-  vtSlotPhase,
+  IDENTITY_GLYPH_MOTION,
   VT_PRESET_CAPABILITIES,
 } from '~/lib/vectortype/presetMotion'
 import { ALL_PRESET_CAPABILITIES, evaluateAnimation, presetIdsFor } from '~/lib/motion/evaluate'
@@ -452,50 +452,70 @@ describe('availability is per FONT, and says why', () => {
 })
 
 // ── The clock, restated and pinned ──────────────────────────────────────────
+//
+// These used to drive the old `vtSlotPhase` (a private restatement of the
+// engine's own in/out/loop windowing, kept only so the axis presets could
+// land on the same instant an engine preset would). `vtSlotPhase` was removed
+// once `presetTransform` switched to the shared `movePhase`/`moveWindows`
+// (`~/lib/studio/moves/phase`) — the SAME windowing code every move (preset
+// or track) now goes through. So the parity claim these tests exist to pin —
+// "our progress/windowing agrees with `evaluateAnimation`'s own" — is now
+// asserted through `presetTransform`, the real production entry point,
+// instead of a since-deleted private helper.
 
 describe('the axis clock is the ENGINE\'s clock', () => {
-  const specs = (o: any) => o as Parameters<typeof vtSlotPhase>[0]
   const motion = { fps: 30, duration: 4 }
 
   it('IN progress matches evaluateAnimation exactly', () => {
     const spec = { presetId: 'fade-in', duration: 1.2, ease: 'none', stagger: 0 }
+    const c = preset('in', { presetId: 'fade-in', duration: 1.2 })
     for (let k = 0; k <= 20; k++) {
       const gt = (k / 20) * 1.2 * 0.999
-      const mine = vtSlotPhase(specs({ in: spec }), gt, 4)
+      const mine = presetTransform(c, gt, 0, 1, 100)
       const engine = evaluateAnimation({ offset: 0, duration: 4, in: spec } as any, gt, motion, 1)
-      expect(mine!.slot).toBe('in')
-      // fade-in with ease 'none' has opacity === e, so the engine states its `e`.
-      expect(mine!.e, `t=${gt}`).toBeCloseTo(engine.units![0]!.opacity, 12)
+      // fade-in with ease 'none' has opacity === e on both sides, so the two
+      // only agree if `presetTransform`'s progress/windowing (via `movePhase`)
+      // matches the engine's own.
+      expect(mine.opacity, `t=${gt}`).toBeCloseTo(engine.units![0]!.opacity, 12)
     }
   })
 
   it('OUT progress matches evaluateAnimation exactly, window and all', () => {
     const spec = { presetId: 'fade-out', duration: 1, ease: 'none', stagger: 0 }
+    const c = preset('out', { presetId: 'fade-out', duration: 1 })
     for (let k = 0; k <= 20; k++) {
       const gt = 3 + (k / 20) * 0.999
-      const mine = vtSlotPhase(specs({ out: spec }), gt, 4)
+      const mine = presetTransform(c, gt, 0, 1, 100)
       const engine = evaluateAnimation({ offset: 0, duration: 4, out: spec } as any, gt, motion, 1)
-      expect(mine!.slot).toBe('out')
-      expect(mine!.e, `t=${gt}`).toBeCloseTo(1 - engine.units![0]!.opacity, 12)
+      // fade-out's opacity is `1 - e` on BOTH sides, so comparing opacity
+      // directly still pins the underlying progress/windowing agreement.
+      expect(mine.opacity, `t=${gt}`).toBeCloseTo(engine.units![0]!.opacity, 12)
     }
   })
 
   it('LOOP phase matches — including the in→loop handoff', () => {
     const inSpec = { presetId: 'fade-in', duration: 1, stagger: 0 }
     const loop = { presetId: 'spin-loop', duration: 1.5, stagger: 0 }
+    const withIn = preset('in', { presetId: 'fade-in', duration: 1 })
+    const c = preset('loop', { presetId: 'spin-loop', duration: 1.5 }, {}, withIn.motion)
     for (let k = 0; k <= 20; k++) {
       const gt = 1 + (k / 20) * 2.9
-      const mine = vtSlotPhase(specs({ in: inSpec, loop }), gt, 4)
+      const mine = presetTransform(c, gt, 0, 1, 100)
       const engine = evaluateAnimation({ offset: 0, duration: 4, in: inSpec, loop } as any, gt, motion, 1)
-      expect(mine!.slot).toBe('loop')
-      // spin-loop's rotation IS 360·phase.
-      expect(mine!.e * 360, `t=${gt}`).toBeCloseTo(engine.units![0]!.rotation, 10)
+      // spin-loop's rotation IS 360·phase, on both sides.
+      expect(mine.rotate, `t=${gt}`).toBeCloseTo(engine.units![0]!.rotation, 10)
     }
   })
 
-  it('nothing live is null, not a guess', () => {
-    expect(vtSlotPhase(specs({}), 1, 4)).toBeNull()
-    expect(vtSlotPhase(specs({ in: { presetId: 'fade-in', duration: 1, stagger: 0 } }), 2, 4)).toBeNull()
+  it('nothing live contributes no motion', () => {
+    const empty = cfg({ motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: [] } })
+    expect(presetTransform(empty, 1, 0, 1, 100)).toEqual({ ...IDENTITY_GLYPH_MOTION, axes: {} })
+
+    // The In move's own window (duration 1) has already closed by t=2, and
+    // nothing else is live — same "nothing live" case `vtSlotPhase` used to
+    // report as `null`, restated as "the identity motion, not a guess".
+    const inOnly = preset('in', { presetId: 'fade-in', duration: 1 })
+    expect(presetTransform(inOnly, 2, 0, 1, 100)).toEqual({ ...IDENTITY_GLYPH_MOTION, axes: {} })
   })
 })
 
