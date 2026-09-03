@@ -104,7 +104,7 @@ function palette(p: Params): Fill[] {
 // Cache 2D-canvas pattern tiles by fill recipe so we don't rebuild them every frame.
 const _tileCache = new Map<string, HTMLCanvasElement>()
 function tileFor(fill: Fill): HTMLCanvasElement {
-  const k = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') : ''}`
+  const k = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap : ''}`
   let t = _tileCache.get(k)
   if (!t) { t = fillTileCanvas(fill); _tileCache.set(k, t) }
   return t

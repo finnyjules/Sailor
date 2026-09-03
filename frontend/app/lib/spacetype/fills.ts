@@ -339,7 +339,7 @@ export function fillTexture(three: typeof THREE, fill: Fill): THREE.Texture | nu
   if (fill.type === 'solid') return null
   // shapeId is only meaningful for `shapes`; include it in the key so two shape patterns that
   // share colours/density/angle but differ in shape don't alias to the same cached texture.
-  const key = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') : ''}`
+  const key = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap : ''}`
   const hit = _cache.get(key)
   if (hit) return hit
   const t = fill.type === 'gradient' ? gradientRamp(three, fill.a, fill.b)
@@ -397,7 +397,7 @@ const _atlasCache = new Map<string, THREE.Texture>()
 export function fillAtlasTexture(three: typeof THREE, fills: Fill[]): THREE.Texture {
   // shapeId only matters for `shapes`; fold it in so two shape patterns that differ only by shape
   // (same colours/density/angle) don't collide onto one cached atlas (mirrors fillTexture's key).
-  const key = fills.map(f => `${f.type}:${f.a}:${f.b}:${f.angle}:${f.density}${f.type === 'shapes' ? ':' + (f.shapeId ?? 'sparkle') : ''}`).join('|')
+  const key = fills.map(f => `${f.type}:${f.a}:${f.b}:${f.angle}:${f.density}${f.type === 'shapes' ? ':' + (f.shapeId ?? 'sparkle') + ':' + f.shapeSize + ':' + f.shapeGap : ''}`).join('|')
   const hit = _atlasCache.get(key)
   if (hit) return hit
   const BAND = 256, W = 256, nb = Math.max(1, fills.length)

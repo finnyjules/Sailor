@@ -131,9 +131,14 @@ function setType(t: FillType) {
   // real to bind to immediately, rather than relying on the `?? DEFAULT_SHADER_SPEC`
   // fallback below until the user's first edit.
   if (t === 'shader' && !fill.shader) fill.shader = structuredClone(DEFAULT_SHADER_SPEC)
-  // Switching INTO shapes seeds a default library shape so the tile has something
-  // real to draw immediately, rather than the fallback inside fillTileCanvas.
-  if (t === 'shapes' && !fill.shapeId) fill.shapeId = 'sparkle'
+  // Switching INTO shapes seeds a default library shape plus Size/Spacing so the tile
+  // and both dials have real values immediately, rather than the fallbacks inside
+  // fillTileCanvas / paintShapesTile.
+  if (t === 'shapes') {
+    if (!fill.shapeId) fill.shapeId = 'sparkle'
+    fill.shapeSize = 0.1
+    fill.shapeGap = 0.03
+  }
   fill.type = t; push()
 }
 function onGrad(g: Gradient) { grad.value = g; push() }
@@ -156,7 +161,7 @@ function shuffle() {
   drawPreview()
 }
 function setColor(key: 'a' | 'b', v: string) { fill[key] = v; push() }
-function setNum(key: 'angle' | 'density', v: number) { fill[key] = v; push() }
+function setNum(key: 'angle' | 'density' | 'shapeSize' | 'shapeGap', v: number) { fill[key] = v; push() }
 function toggleNone() {
   // Adding a fill from the none state: emit the editable fill DIRECTLY, not via
   // push() — push()'s `if (!isNone.value)` guard (which stops colour edits from
@@ -179,7 +184,9 @@ function applyBrandColor(hex: string) {
 // Gradient gets its own editor; patterns keep the A/B + angle + density controls.
 const needsB = computed(() => fill.type !== 'solid' && fill.type !== 'gradient')
 const needsAngle = computed(() => fill.type === 'ombre' || fill.type === 'stripes' || fill.type === 'shapes')
-const needsDensity = computed(() => fill.type === 'grid' || fill.type === 'checkerboard' || fill.type === 'stripes' || fill.type === 'noise' || fill.type === 'qr' || fill.type === 'shapes')
+const needsDensity = computed(() => fill.type === 'grid' || fill.type === 'checkerboard' || fill.type === 'stripes' || fill.type === 'noise' || fill.type === 'qr')
+// Shapes steers count via Size + Spacing (tile fractions) instead of a raw Density.
+const needsShapeGrid = computed(() => fill.type === 'shapes')
 
 // Shapes fill: pick the library shape tiled across the grid, and let the tile
 // sit on a transparent background instead of a solid `b`.
@@ -351,10 +358,26 @@ watch(imageFill, drawPreview, { deep: true })
 
       <div v-if="needsDensity">
         <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-          <span>{{ fill.type === 'shapes' ? 'Count' : 'Density' }}</span><span class="tabular-nums normal-case">{{ Math.round(fill.density) }}</span>
+          <span>Density</span><span class="tabular-nums normal-case">{{ Math.round(fill.density) }}</span>
         </div>
         <input type="range" min="1" max="32" step="1" :value="fill.density" class="w-full accent-white cursor-pointer"
           @input="setNum('density', Number(($event.target as HTMLInputElement).value))" />
+      </div>
+
+      <div v-if="needsShapeGrid">
+        <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
+          <span>Size</span><span class="tabular-nums normal-case">{{ Math.round((fill.shapeSize ?? 0.1) * 100) }}%</span>
+        </div>
+        <input type="range" min="0.02" max="0.5" step="0.005" :value="fill.shapeSize ?? 0.1" class="w-full accent-white cursor-pointer"
+          @input="setNum('shapeSize', Number(($event.target as HTMLInputElement).value))" />
+      </div>
+
+      <div v-if="needsShapeGrid">
+        <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
+          <span>Spacing</span><span class="tabular-nums normal-case">{{ Math.round((fill.shapeGap ?? 0.03) * 100) }}%</span>
+        </div>
+        <input type="range" min="0" max="0.4" step="0.005" :value="fill.shapeGap ?? 0.03" class="w-full accent-white cursor-pointer"
+          @input="setNum('shapeGap', Number(($event.target as HTMLInputElement).value))" />
       </div>
     </div>
   </div>
