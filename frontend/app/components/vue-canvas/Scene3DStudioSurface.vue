@@ -14,7 +14,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import * as THREE from 'three'
 import {
   Box, Boxes, Plus, Loader2, Upload, Lightbulb, Sparkles, Shuffle, ClipboardPaste,
-  ChevronUp,
+  ChevronUp, Shapes,
 } from 'lucide-vue-next'
 import {
   parseDoc, serializeDoc, createPrimitive, createGlbObject, createLight, createGroup, createDecal,
@@ -35,6 +35,9 @@ import { loadGoogleCatalog, type GoogleFont } from '~/data/google-fonts'
 import { libraryToken, resolveLibraryFace, libraryFamily } from '~/data/library-fonts'
 import FontPicker from '~/components/vue-canvas/FontPicker.vue'
 import TexturePicker from '~/components/vue-canvas/TexturePicker.vue'
+import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
+import { shapeById } from '~/lib/shapes/catalog'
+import { shapeToSvg } from '~/lib/shapes/svg'
 import { PRIM_GROUPS } from '~/lib/scene3d/primGroups'
 import {
   DEFAULT_PRIM_FACE, resolvePrimFace, primFaceLabel, primFaceIcon,
@@ -340,6 +343,24 @@ const svgBusy = ref(false)
 const primMenuOpen = ref(false)
 const lightMenuOpen = ref(false)
 const decalMenuOpen = ref(false)
+/** The shape-library picker opened from the primitives menu's "Shape library…" row.
+ *  Not a face: a library shape is not a PrimitiveKind, so the last-used face keeps
+ *  pointing at a real primitive. */
+const libraryPickerOpen = ref(false)
+const libraryPickerAnchor = ref({ x: 0, y: 0 })
+const primClusterRef = ref<HTMLElement | null>(null)
+const LIBRARY_PICKER_APPROX_HEIGHT = 308 + 8   // the picker's panel plus a gap; it clamps itself if the guess is off
+function openLibraryPicker() {
+  const r = primClusterRef.value?.getBoundingClientRect()
+  libraryPickerAnchor.value = r ? { x: r.left, y: Math.max(8, r.top - LIBRARY_PICKER_APPROX_HEIGHT) } : { x: 16, y: 16 }
+  closeAddMenus()
+  libraryPickerOpen.value = true
+}
+async function onLibraryPick(id: string) {
+  const s = shapeById(id)
+  if (!s) return
+  await importSvgSource(shapeToSvg(s), s.name)
+}
 // Generate's own open flag lives HERE, with its three siblings, rather than down
 // in the Generate-panel block: the shared outside-click watch below takes all
 // four refs as an eagerly-evaluated source array, so a later `const genOpen`
@@ -358,6 +379,7 @@ function closeAddMenus() {
   lightMenuOpen.value = false
   decalMenuOpen.value = false
   genOpen.value = false
+  libraryPickerOpen.value = false
 }
 function togglePrimMenu() { const next = !primMenuOpen.value; closeAddMenus(); primMenuOpen.value = next }
 function toggleLightMenu() { const next = !lightMenuOpen.value; closeAddMenus(); lightMenuOpen.value = next }
@@ -1831,6 +1853,10 @@ function onKey(e: KeyboardEvent) {
   if (inField) return
   // (No W/E/R mode shortcuts — the combined gizmo moves/rotates/scales at once.)
   if (e.key === 'Escape') {
+    // The shape-library picker owns Escape while open. Our capture listener runs
+    // BEFORE the picker's (it registered later), so yielding here lets the picker
+    // close itself and preventDefault, which the shell already honours.
+    if (libraryPickerOpen.value) return
     // Open primitive/light/decal/generate menu owns Esc: close it, never the modal.
     if (primMenuOpen.value || lightMenuOpen.value || decalMenuOpen.value || genOpen.value) {
       e.preventDefault()
@@ -3527,7 +3553,7 @@ async function onClose() {
                  narrow caret is still a real target (Frame toolbar's rule).
                  Each group is `relative` so its popup anchors ABOVE ITS OWN
                  trigger, not the pill's far edge. -->
-            <div class="relative flex items-center">
+            <div ref="primClusterRef" class="relative flex items-center">
               <button
                 type="button"
                 class="flex h-8 items-center gap-1.5 whitespace-nowrap rounded-l px-2.5 text-[12px] text-white/70 transition-colors hover:bg-white/10 hover:text-white cursor-pointer"
@@ -3570,7 +3596,28 @@ async function onClose() {
                     </button>
                   </div>
                 </div>
+                <div class="mb-1.5 last:mb-0">
+                  <p class="mb-1 px-1 text-[10px] uppercase tracking-[0.12em] text-white/35">Library</p>
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 transition-colors hover:bg-white/10 hover:text-white cursor-pointer"
+                    data-testid="prim-menu-library"
+                    @click="openLibraryPicker()"
+                  >
+                    <Shapes class="size-4 shrink-0 opacity-70" />
+                    Shape library…
+                  </button>
+                </div>
               </div>
+              <ShapePicker
+                v-if="libraryPickerOpen"
+                model-value="none"
+                :allow-none="false"
+                :anchor="libraryPickerAnchor"
+                :ignore="primClusterRef"
+                @update:model-value="onLibraryPick"
+                @close="libraryPickerOpen = false"
+              />
             </div>
             <div class="mx-0.5 h-5 w-px bg-white/10" />
             <button
