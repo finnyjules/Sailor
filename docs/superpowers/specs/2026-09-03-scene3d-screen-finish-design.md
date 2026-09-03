@@ -1,7 +1,7 @@
 # 3D Studio — Screen finish (surface-anchored halftone on any material)
 
 **Date:** 2026-09-03
-**Status:** designed, not built
+**Status:** LANDED 2026-09-03 on main, `61fc02096`..`de6713290`
 **Surface:** Scene3D Studio (`frontend/app/lib/scene3d/`, schema-drawn inspector, `Scene3DStudioSurface.vue`)
 **Reference:** Carsten Gueth / @die_doing — spheres and blobs whose shading is made of dots or lines that wrap the form, denser in shadow, with red/blue fringes at the edges, dissolving into the background between dots.
 
