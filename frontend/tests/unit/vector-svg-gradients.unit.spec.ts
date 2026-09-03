@@ -366,8 +366,8 @@ describe('paintToVectorPaint — which of the nine fills have a vector form', ()
       .not.toHaveProperty('aspect')
   })
 
-  it('returns NULL for the seven kinds that are not gradients — the bridge stays', () => {
-    for (const type of ['ombre', 'grid', 'noise', 'checkerboard', 'stripes', 'qr', 'shader'] as const) {
+  it('returns NULL for the eight kinds that are not gradients — the bridge stays', () => {
+    for (const type of ['ombre', 'grid', 'noise', 'checkerboard', 'stripes', 'qr', 'shader', 'shapes'] as const) {
       expect(paintToVectorPaint({ ...DEFAULT_FILL, type }, obb)).toBeNull()
     }
     expect(paintToVectorPaint(undefined, obb)).toBeNull()
@@ -447,8 +447,8 @@ describe('vectorTypeSVG — a gradient exports as a real paint server', () => {
     expect(svg).toContain('fill="#ff2200"')
   })
 
-  it('still degrades the seven non-gradient kinds to a flat colour — the bridge', () => {
-    for (const type of ['ombre', 'grid', 'noise', 'checkerboard', 'stripes', 'qr', 'shader'] as const) {
+  it('still degrades the eight non-gradient kinds to a flat colour — the bridge', () => {
+    for (const type of ['ombre', 'grid', 'noise', 'checkerboard', 'stripes', 'qr', 'shader', 'shapes'] as const) {
       const { svg } = vectorTypeSVG(font, cfg({ fill: { ...RAMP, type } }), 0, BOX)
       expect(svg).not.toContain('Gradient')
       expect(svg).toContain('fill="#ff0000"')
