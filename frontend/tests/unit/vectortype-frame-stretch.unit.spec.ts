@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import * as fontkit from 'fontkit'
 import { describe, expect, it, vi } from 'vitest'
 import { vectorTypeFrame, VT_FIT_INSET } from '~/lib/vectortype/canvas'
-import { DEFAULT_CONFIG, mergeConfig } from '~/lib/vectortype/config'
+import { DEFAULT_CONFIG, mergeConfig, VT_STRETCH_MAX, VT_STRETCH_MIN } from '~/lib/vectortype/config'
 import { normaliseAxes } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 
@@ -25,7 +25,7 @@ import type { VtFont } from '~/lib/vectortype/font'
 // (vite's ssr transform gives the namespace getters, no setters). Everything
 // else passes straight through, so the rest of this spec still measures the
 // real engine.
-const { fitCalls } = vi.hoisted(() => ({ fitCalls: { n: 0 } }))
+const { fitCalls, planCalls } = vi.hoisted(() => ({ fitCalls: { n: 0 }, planCalls: { n: 0 } }))
 vi.mock('~/lib/vectortype/stretch', async (importOriginal) => {
   const actual = await importOriginal<typeof import('~/lib/vectortype/stretch')>()
   return {
@@ -33,6 +33,14 @@ vi.mock('~/lib/vectortype/stretch', async (importOriginal) => {
     fitStretch: (...args: Parameters<typeof actual.fitStretch>) => {
       fitCalls.n++
       return actual.fitStretch(...args)
+    },
+    // `planStretch` is counted for the same reason and reads only the calls
+    // `canvas.ts` makes: `fitStretch` reaches its own plan through the module's
+    // internal binding, which this wrapper cannot see. That is what we want —
+    // the memo under test is the frame's, not the solver's.
+    planStretch: (...args: Parameters<typeof actual.planStretch>) => {
+      planCalls.n++
+      return actual.planStretch(...args)
     },
   }
 })
@@ -53,6 +61,15 @@ describe('vectorTypeFrame — smart stretch', () => {
     expect(a.stretch).toEqual({ S: 1, SY: 1, damped: false, fitted: null, perGlyph: false })
     const b = vectorTypeFrame(font, cfg({ stretch: 1, stretchY: 1 }), 0)
     expect(b.outlines.glyphs.map(g => g.commands)).toEqual(a.outlines.glyphs.map(g => g.commands))
+    // Not just the drawing: the numbers every downstream consumer measures with.
+    // A glyph that went round the engine and came back "equal" would still have
+    // a re-derived bbox and a re-accumulated advance, so those are pinned too,
+    // and `perGlyph` says on the record that no glyph took its own dial.
+    expect(b.outlines.glyphs.map(g => g.bbox)).toEqual(a.outlines.glyphs.map(g => g.bbox))
+    expect(b.outlines.glyphs.map(g => g.advance)).toEqual(a.outlines.glyphs.map(g => g.advance))
+    expect(b.outlines.coords).toEqual(a.outlines.coords)
+    expect(b.outlines.width).toBe(a.outlines.width)
+    expect(b.stretch.perGlyph).toBe(false)
   })
 
   it('stretch widens the run, holds the l stem, keeps the command count', () => {
@@ -218,5 +235,103 @@ describe('vectorTypeFrame — the wdth cascade, at the seam the studio uses', ()
     const f = vectorTypeFrame(archivo, cfg({ stretch: 2.2 }), 0)
     expect(f.outlines.coords.wdth).toBeCloseTo(wdth.max, 9)
     expect(f.stretch.S).toBeGreaterThan(1.3)
+  })
+})
+
+describe('vectorTypeFrame — a width wave is planned PER GLYPH', () => {
+  // Archivo's wdth (62–125) is the only way to see this. When the run spends
+  // real axis, the run's residual is SMALLER than the dial it came from — and
+  // scaling every staggered glyph by that residual/dial ratio handed each one a
+  // discount for an axis move it never received. A glyph asking for exactly 1
+  // came out condensed. The fix is to plan each glyph on its OWN dial, so its
+  // resting coords carry its own spent wdth and its residual is its own.
+  const archivo = loadArchivo()
+  const trackAt = (path: string, from: number, to: number) =>
+    ({ path, from, to, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 })
+  const inkW = (f: ReturnType<typeof vectorTypeFrame>, i: number) => {
+    const g = f.outlines.glyphs[i]!
+    return g.bbox.maxX - g.bbox.minX
+  }
+
+  it('the trough glyph is left at its resting width while the crest glyph widens', () => {
+    // Duration is 4 s and the ramp is linear 1 → 1.8, so at `delay: 0.8` and
+    // `t = 4` glyph i reads t = 4 − 0.8·i: glyph 0 sits at the END of the ramp
+    // (dial 1.8, the crest) and glyph 5 at its START (dial 1, the trough).
+    const wave = cfg({
+      motion: {
+        ...DEFAULT_CONFIG.motion,
+        tracks: [trackAt('stretch', 1, 1.8)],
+        stagger: { ...DEFAULT_CONFIG.motion.stagger, delay: 0.8 },
+      },
+    } as any)
+    const f = vectorTypeFrame(archivo, wave, 4)
+    const rest = vectorTypeFrame(archivo, cfg({}), 0)
+    expect(f.stretch.perGlyph).toBe(true)
+    // A dial of 1 must draw the glyph the font draws — same axis position, same
+    // remap (none). Half a percent is float noise, not a stretch.
+    expect(Math.abs(inkW(f, 5) - inkW(rest, 5)) / inkW(rest, 5)).toBeLessThan(0.005)
+    expect(inkW(f, 0)).toBeGreaterThan(inkW(rest, 0) * 1.2)
+  })
+
+  it('a track that drives the dial outside the range is clamped at the frame', () => {
+    // `applyMotion` writes raw track values — `mergeConfig`'s clamp is upstream
+    // of it and cannot help. The frame is the last boundary before the engine.
+    const wild = cfg({
+      motion: { ...DEFAULT_CONFIG.motion, tracks: [trackAt('stretch', 0, 4)] },
+    } as any)
+    const ceiling = vectorTypeFrame(archivo, cfg({ stretch: VT_STRETCH_MAX }), 0)
+    const floor = vectorTypeFrame(archivo, cfg({ stretch: VT_STRETCH_MIN }), 0)
+    const hi = vectorTypeFrame(archivo, wild, 4)   // track reads 4
+    const lo = vectorTypeFrame(archivo, wild, 0)   // track reads 0
+    expect(hi.stretch.S).toBeCloseTo(ceiling.stretch.S, 9)
+    expect(lo.stretch.S).toBeCloseTo(floor.stretch.S, 9)
+    for (const f of [hi, lo]) {
+      expect(Number.isFinite(f.outlines.width)).toBe(true)
+      for (const g of f.outlines.glyphs) {
+        for (const v of [g.bbox.minX, g.bbox.maxX, g.bbox.minY, g.bbox.maxY, g.advance]) {
+          expect(Number.isFinite(v)).toBe(true)
+        }
+      }
+    }
+  })
+})
+
+describe('vectorTypeFrame — the wdth plan is paid for once, not every frame', () => {
+  const archivo = loadArchivo()
+  it('a second frame with the same plan inputs reuses the answer', () => {
+    // A dial no other test in this file uses, so the memo is cold here.
+    const c = cfg({ stretch: 1.47 })
+    const before = planCalls.n
+    const a = vectorTypeFrame(archivo, c, 0)
+    const b = vectorTypeFrame(archivo, c, 0)
+    expect(planCalls.n - before).toBe(1)
+    expect(b.stretch.S).toBeCloseTo(a.stretch.S, 12)
+    // …and it is a KEY, not a blanket skip: a different dial re-solves.
+    vectorTypeFrame(archivo, cfg({ stretch: 1.53 }), 0)
+    expect(planCalls.n - before).toBe(2)
+  })
+})
+
+describe('vectorTypeFrame — fit solves against the DAMPED pipeline', () => {
+  it('fit plus a tall stretchY still fills the box, and fitted reports the dial', () => {
+    const base = vectorTypeFrame(font, cfg({}), 0)
+    const c = cfg({ fit: 'width', stretchY: 2 })
+    const targetUnits = base.outlines.width * 1.3
+    const fitBoxWidth = boxFor(targetUnits, c.size, base.outlines.unitsPerEm)
+    const f = vectorTypeFrame(font, c, 0, { fitBoxWidth })
+    expect(Math.abs(f.outlines.width - targetUnits) / targetUnits).toBeLessThan(0.02)
+    // `fitted` is the DIAL the read-only control shows; the ENGINE got the
+    // damped value. On a diagonal move the two must differ — a `fitted` equal
+    // to `S` here would mean the solve was answering a question the frame never
+    // asked.
+    expect(f.stretch.fitted!).toBeGreaterThan(f.stretch.S + 0.05)
+    // With no vertical move there is nothing to damp, so they agree again.
+    const flat = vectorTypeFrame(font, cfg({ fit: 'width' }), 0, { fitBoxWidth })
+    expect(flat.stretch.fitted!).toBeCloseTo(flat.stretch.S, 9)
+  })
+
+  it('fit with empty text reports no solve at all', () => {
+    const f = vectorTypeFrame(font, cfg({ fit: 'width', text: '' }), 0, { fitBoxWidth: 400 })
+    expect(f.stretch.fitted).toBeNull()
   })
 })

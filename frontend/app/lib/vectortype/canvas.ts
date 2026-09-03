@@ -48,6 +48,8 @@ import type { BlendKind } from '~/lib/studio/blend'
 import {
   VT_ARC_MAX,
   VT_SKEW_MAX,
+  VT_STRETCH_MAX,
+  VT_STRETCH_MIN,
   migrateLegacyAppearance,
   vtBaseAppearance,
   type VectorTypeConfig,
@@ -122,7 +124,7 @@ import { pathLength, vtDrawOnDash, type VtDashSpec } from './pathLength'
 // are. This file decides WHICH numbers each glyph is stretched by; `./stretch.ts`
 // decides what a stretch does to an outline, and the split is deliberate: the
 // remap is the part that has 87 tests of its own.
-import { dampedStretch, fitStretch, planStretch, stretchGlyph } from './stretch'
+import { dampedStretch, fitStretch, planStretch, stretchGlyph, type StretchPlan } from './stretch'
 
 /** The "small margin" fit leaves on each side of the box: 2% of its width. */
 export const VT_FIT_INSET = 0.02
@@ -270,11 +272,34 @@ function clipGlyphCell(
 
 /** A stable key for a coords record, so two glyphs that land on the same axis
  *  position share one `getVariation` instance instead of paying for it twice. */
-function coordsKey(coords: Record<string, number>): string {
-  const tags = Object.keys(coords).sort()
+// Tolerates a MISSING record, because the configs that reach here are not all
+// `mergeConfig` output: a legacy blob (and anything `applyMotion` cloned from
+// one) can carry no `axes` at all, and the engine below already treats that as
+// "no axis position" rather than an error. Keying it as the empty set is the
+// same answer, one step earlier.
+function coordsKey(coords: Record<string, number> | null | undefined): string {
+  const c = coords ?? {}
+  const tags = Object.keys(c).sort()
   let out = ''
-  for (const tag of tags) out += `${tag}:${coords[tag]};`
+  for (const tag of tags) out += `${tag}:${c[tag]};`
   return out
+}
+
+/**
+ * The range policy, enforced where it can actually bite.
+ *
+ * `mergeConfig` clamps the stored dials, but MOTION runs after it: `applyMotion`
+ * writes a track's raw value straight onto the config, so a `stretch` track from
+ * 0 to 4 hands this file numbers Phase A never proved and the remap has no
+ * meaning for (a dial of 0 is a run of zero width). The frame is the last
+ * boundary before the engine, so the clamp lives here — on the run's dials and
+ * on every staggered glyph's alike. A non-finite dial is not clamped but
+ * REPLACED: NaN has no nearest legal value, and 1 is the one answer that draws
+ * the font as drawn.
+ */
+function clampDial(v: number): number {
+  if (!Number.isFinite(v)) return 1
+  return v < VT_STRETCH_MIN ? VT_STRETCH_MIN : v > VT_STRETCH_MAX ? VT_STRETCH_MAX : v
 }
 
 /**
@@ -297,17 +322,54 @@ function coordsKey(coords: Record<string, number>): string {
 const FIT_MEMO_MAX = 64
 const fitMemo = new Map<string, number>()
 
-function memoisedFit(font: VtFont, text: string, axes: Record<string, number>, targetUnits: number): number {
+function memoisedFit(
+  font: VtFont, text: string, axes: Record<string, number>, targetUnits: number, SY: number,
+): number {
   // The target is rounded to 1/100 of a font unit: a box edge dragged by a
   // sub-hundredth of a unit cannot move the solve, but it would miss the key.
-  const key = `${font.id}|${text}|${coordsKey(axes)}|${targetUnits.toFixed(2)}`
+  // `SY` is part of the key because it is part of the QUESTION — the solve
+  // measures through the damping, so the same box asked with a different height
+  // dial has a different answer.
+  const key = `${font.id}|${text}|${coordsKey(axes)}|${targetUnits.toFixed(2)}|${SY.toFixed(4)}`
   const hit = fitMemo.get(key)
   if (hit !== undefined) return hit
-  const solved = fitStretch(font, text, axes, targetUnits)
+  const solved = fitStretch(font, text, axes, targetUnits, VT_STRETCH_MIN, VT_STRETCH_MAX, SY)
   fitMemo.set(key, solved)
   if (fitMemo.size > FIT_MEMO_MAX) {
     const oldest = fitMemo.keys().next().value
     if (oldest !== undefined) fitMemo.delete(oldest)
+  }
+  return solved
+}
+
+/**
+ * The `wdth` cascade, remembered — for the same reason and at the same price.
+ *
+ * `planStretch` calibrates by MEASURING: 24 candidate axis positions, each a
+ * full shape of the run, because axis units are not percent and every family
+ * maps them differently. On any font with a `wdth` axis that is the cost of
+ * every non-1 stretch, on every frame — and a staggered width wave now asks for
+ * one plan PER GLYPH, so the same solve that was once per frame is n times per
+ * frame. It answers to (font, text, resting axes, dial), all of which are held
+ * still by an animation clock that only moves the dial in small steps.
+ *
+ * The dial is keyed to four decimals: finer than any control emits and finer
+ * than the remap can show, so two frames a hair apart still share an answer.
+ * Same bound and same eviction rule as the fit memo above — 64 entries, oldest
+ * insertion out — which on a six-glyph wave is about ten frames of history.
+ */
+const PLAN_MEMO_MAX = 64
+const planMemo = new Map<string, StretchPlan>()
+
+function memoPlan(font: VtFont, text: string, axes: Record<string, number>, dial: number): StretchPlan {
+  const key = `${font.id}|${text}|${coordsKey(axes)}|${dial.toFixed(4)}`
+  const hit = planMemo.get(key)
+  if (hit) return hit
+  const solved = planStretch(font, text, axes, dial)
+  planMemo.set(key, solved)
+  if (planMemo.size > PLAN_MEMO_MAX) {
+    const oldest = planMemo.keys().next().value
+    if (oldest !== undefined) planMemo.delete(oldest)
   }
   return solved
 }
@@ -346,21 +408,32 @@ export function vectorTypeFrame(
   // ── SMART STRETCH: resolve the run-level dials ONCE ────────────────────────
   // Fit solves the width dial against the box the caller owns; a config whose
   // fit is on but whose caller passed no box (thumbnails, solids) falls back
-  // to the dial value — inert, never wrong.
-  let dialS = base.stretch
+  // to the dial value — inert, never wrong. Empty text is the other inert case:
+  // there is no run to fill a box with, and reporting a `fitted` of 1 would put
+  // a number on a read-only control that nothing solved.
+  const runSY = clampDial(base.stretchY)
+  let dialS = clampDial(base.stretch)
   let fitted: number | null = null
   const fitBox = frameOpts.fitBoxWidth
-  if (base.fit === 'width' && typeof fitBox === 'number' && fitBox > 0 && base.size > 0) {
+  if (
+    base.fit === 'width' && base.text
+    && typeof fitBox === 'number' && Number.isFinite(fitBox) && fitBox > 0 && base.size > 0
+  ) {
     // Same px↔unit line `vtPlacement` uses (`config.size / upem`, on the
     // post-motion config), so a fitted run lands where placement expects it.
     const targetUnits = (fitBox * (1 - 2 * VT_FIT_INSET)) / (base.size / upem)
-    fitted = memoisedFit(font, base.text, base.axes, targetUnits)
+    // The height dial goes INTO the solve, because the frame damps the answer
+    // on the way out: solved against an undamped pipeline, `fit: 'width'` with
+    // `stretchY: 2` lands a tenth of the box short and `fitted` reports a value
+    // nothing ever applied. `fitted` is still the DIAL — what the read-only
+    // control shows — and the damped version of it is what the engine gets.
+    fitted = memoisedFit(font, base.text, base.axes, targetUnits, runSY)
     dialS = fitted
   }
   // The wdth cascade spends the real axis before geometry and before damping:
   // a designer-drawn width is never damped.
-  const plan = planStretch(font, base.text, base.axes, dialS)
-  const runDamped = dampedStretch(plan.residual, base.stretchY)
+  const plan = memoPlan(font, base.text, base.axes, dialS)
+  const runDamped = dampedStretch(plan.residual, runSY)
 
   const shaped = textOutlines(font, base.text, plan.coords)
   const n = shaped.glyphs.length
@@ -385,21 +458,56 @@ export function vectorTypeFrame(
   // every frame rather than gated on the blink being on, because the cost is one
   // pass over an array a `Path2D` rebuild dwarfs.
   const wordOf = wordIndexOfGlyph(shaped.glyphs)
+  // ── SMART STRETCH: a staggered run is planned PER GLYPH ────────────────────
+  // The cascade is not a run-level discount that can be shared out afterwards.
+  // Every glyph asks for its own dial, and the pipeline that answers a dial —
+  // spend the real `wdth`, hand the remainder to the remap, damp it against the
+  // height dial — has to run for THAT dial, from the resting position, or the
+  // glyph is charged for an axis move it never got. (Scaling each glyph's dial
+  // by the run's `residual/dial` was a line through the origin; the real
+  // relationship passes through (1, 1), so a trough glyph asking for exactly 1
+  // came out visibly condensed.)
+  //
+  // The plan's coords become the glyph's RESTING axes, which is what makes this
+  // whole; the spent `wdth` is then the position the shaping cache keys on and
+  // the position a `wdth` PRESET composes on top of through `vtAxisCoords`,
+  // exactly as for the un-staggered run.
+  //
+  // Under fit the dial is the run's solved one for every glyph — see the fit
+  // note in the per-glyph values below.
   const resting: Record<string, number>[] = []
   const transforms: VtGlyphMotion[] = []
+  const glyphDials: { S: number; SY: number }[] = []
+  let perGlyphStretch = false
   for (let i = 0; i < n; i++) {
-    // The glyph's resting axes: its own clock when a stagger is on, the shared
-    // one otherwise. Preset deltas are added to THIS, so a preset composes with
-    // an axis track instead of replacing it.
-    // `plan.coords`, not `base.axes`: the shared resting position now carries
-    // the `wdth` the cascade already spent, so it is the same position the
-    // shaping above used and a `wdth` PRESET still composes on top of it
-    // through `vtAxisCoords`. A staggered glyph keeps reading its own clock —
-    // the cascade is a RUN-level decision and is folded back in below, as the
-    // residual ratio every glyph's own dial is scaled by.
-    const rest = staggered ? glyphConfig(cfg, t, i, n).axes : plan.coords
+    let rest = plan.coords
+    let S = runDamped.S, SY = runDamped.SY
+    if (staggered) {
+      // ONE `glyphConfig` for this glyph. It replays every track on the glyph's
+      // own clock and clones the config to do it, so the axes and the dials are
+      // read off the SAME evaluation rather than paying for two.
+      const gc = glyphConfig(cfg, t, i, n)
+      // FIT WINS over a per-glyph width wave. When the run was fitted, the
+      // solve's whole promise is that the run fills the box; letting a
+      // staggered `stretch` track re-widen each glyph would break that promise
+      // letter by letter for a wave nobody can read against the box edge it is
+      // fighting. So under fit every glyph takes the run's width dial and only
+      // the HEIGHT keeps its own clock — height was never part of the promise.
+      const ownS = fitted ?? clampDial(gc.stretch)
+      const ownSY = clampDial(gc.stretchY)
+      // Read off the DIALS, not the resulting geometry: two dials a float
+      // apart mean the wave is on, and comparing the engine's outputs made the
+      // answer depend on how much of the move the cascade happened to absorb.
+      if (ownS !== dialS || ownSY !== runSY) perGlyphStretch = true
+      const own = memoPlan(font, base.text, gc.axes, ownS)
+      const damped = dampedStretch(own.residual, ownSY)
+      rest = own.coords
+      S = damped.S
+      SY = damped.SY
+    }
     resting.push(rest)
     transforms.push(vtGlyphMotion(cfg, t, i, n, em, { axes: font.axes, resting: rest, wordOf }))
+    glyphDials.push({ S, SY })
   }
 
   // THE FAST PATH, widened (Task 4's hand-off). `delay === 0` is the DEFAULT, and
@@ -441,37 +549,16 @@ export function vectorTypeFrame(
     source.push(...shaped.glyphs)
   }
 
-  // ── SMART STRETCH: per glyph, on the font's shared zones ───────────────────
-  // A staggered `stretch`/`stretchY` track gives each glyph its own clock, so
-  // each reads its own dial values; otherwise every glyph takes the run's.
-  //
-  // The zones come from the RUN's shaping (`shaped.metrics`), never from the
-  // glyph's own bbox, so an `i` and an `l` at different stretch values still
-  // put the baseline, x-height and cap-height in the same place — that shared
-  // solve is the whole reason `stretchGlyph` takes a context at all.
-  //
-  // Per-glyph residuals reuse the RUN's wdth plan (the axis is spent once); the
-  // glyph's own dial is scaled by the same residual/dial ratio so a wave on a
-  // wdth font still travels through the remap consistently.
+  // ── SMART STRETCH: the remap, on the font's shared zones ───────────────────
+  // Each glyph's numbers were resolved with its resting axes above; this is
+  // only where they are spent. What matters here is the CONTEXT: the zones come
+  // from the RUN's shaping (`shaped.metrics`), never from the glyph's own bbox,
+  // so an `i` and an `l` at different stretch values still put the baseline,
+  // x-height and cap-height in the same place — that shared solve is the whole
+  // reason `stretchGlyph` takes a context at all.
   const stretchCtx = { metrics: shaped.metrics, unitsPerEm: upem }
-  const ratio = dialS !== 0 ? plan.residual / dialS : 1
-  let perGlyphStretch = false
   const stretched: GlyphOutline[] = source.map((g, i) => {
-    let S = runDamped.S, SY = runDamped.SY
-    if (staggered) {
-      const gc = glyphConfig(cfg, t, i, n)
-      // FIT WINS over a per-glyph width wave. When the run was fitted, the
-      // solve's whole promise is that the run fills the box; letting a
-      // staggered `stretch` track re-widen each glyph would break that promise
-      // letter by letter for a wave nobody can read against the box edge it is
-      // fighting. So under fit every glyph takes the run's width and only the
-      // HEIGHT dial keeps its own clock — height was never part of the promise.
-      const own = fitted !== null
-        ? { S: runDamped.S, SY: dampedStretch(plan.residual, gc.stretchY).SY }
-        : dampedStretch(gc.stretch * ratio, gc.stretchY)
-      if (own.S !== S || own.SY !== SY) perGlyphStretch = true
-      S = own.S; SY = own.SY
-    }
+    const { S, SY } = glyphDials[i] ?? runDamped
     // The identity is returned UNTOUCHED rather than round-tripped through the
     // engine: this is the default frame, and "stretch = 1 changes nothing" has
     // to be an equality, not an approximation, or every existing golden moves.

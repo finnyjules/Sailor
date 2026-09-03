@@ -2074,15 +2074,29 @@ export function dampedStretch(S: number, SY: number): { S: number; SY: number; d
   return { S: 1 + (S - 1) * fS, SY: 1 + (SY - 1) * fSY, damped: true }
 }
 
-/** Solve the width dial so the shaped run (axis cascade + remap) is `targetUnits` wide. */
+/**
+ * Solve the width dial so the shaped run (axis cascade + remap) is
+ * `targetUnits` wide.
+ *
+ * `SY` is the HEIGHT dial the caller will render at, and it belongs in the
+ * solve because `dampedStretch` sits between the answer and the geometry: a
+ * diagonal move trims the width the caller asked for, so a value solved against
+ * an undamped pipeline lands short of the box by exactly the damping. Measuring
+ * at the damped S with a vertical of 1 is EXACT rather than an approximation —
+ * vertical never changes advances, so it cannot move the run's width.
+ *
+ * Returns the DIAL, not the damped value: the caller damps it itself, and a
+ * read-only "fitted" control has to show the number a user could have typed.
+ */
 export function fitStretch(
   font: VtFont, text: string, axes: Record<string, number>, targetUnits: number,
-  min = 0.5, max = 2.5,
+  min = 0.5, max = 2.5, SY = 1,
 ): number {
   if (!text || !(targetUnits > 0)) return 1
   const measure = (S: number): number => {
     const plan = planStretch(font, text, axes, S)
-    return stretchOutlines(textOutlines(font, text, plan.coords), plan.residual, 1).width
+    const run = textOutlines(font, text, plan.coords)
+    return stretchOutlines(run, dampedStretch(plan.residual, SY).S, 1).width
   }
   return solveAxis(measure, min, max, targetUnits)
 }
