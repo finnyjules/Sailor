@@ -209,6 +209,9 @@ export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
   { words: 'symmetrical pixels / mirrored pixel field / pixel banner / totem / kaleidoscope pixels', ids: ['pixel_bloom'] },
   { words: 'threads / fibres / flowing lines / string field / filament', ids: ['filament', 'light_beams'] },
   { words: 'thermal camera / heat map smear / infrared / dropped frame bands / sear', ids: ['sear', 'terrain_bands'] },
+  { words: 'pixel aurora / dither', ids: ['aurora', 'bayer_dither'] },
+  { words: 'text-mode map / ascii', ids: ['terrain_bands', 'ascii_dither'] },
+  { words: 'glitch terrain', ids: ['terrain_bands', 'block_glitch', 'pixel_sort'] },
 ]
 
 /**
