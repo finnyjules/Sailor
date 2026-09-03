@@ -3047,6 +3047,76 @@
       "params": [
         { "uniform": "u_amount", "label": "Amount", "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "step": 0.02 }
       ]
+    },
+    {
+      "id": "topographic",
+      "name": "Contour Lines",
+      "category": "stylize",
+      "animated": false,
+      "passes": 1,
+      "centerParam": null,
+      "textures": [],
+      "generative": false,
+      "params": [
+        { "uniform": "u_levels", "label": "Levels", "type": "float", "min": 2, "max": 24, "default": 10, "step": 1 },
+        { "uniform": "u_thickness", "label": "Line weight", "type": "float", "min": 0.02, "max": 0.6, "default": 0.15, "step": 0.01 },
+        { "uniform": "u_mode", "label": "Paper", "type": "enum", "default": 1,
+          "options": [
+            { "label": "Over the image", "value": 0 },
+            { "label": "Ink on paper", "value": 1 },
+            { "label": "Glow on dark", "value": 2 }
+          ] },
+        { "uniform": "u_bands", "label": "Band tint", "type": "float", "min": 0.0, "max": 1.0, "default": 0.6, "step": 0.05 }
+      ]
+    },
+    {
+      "id": "stipple",
+      "name": "Stipple",
+      "category": "stylize",
+      "animated": false,
+      "passes": 1,
+      "centerParam": null,
+      "textures": [],
+      "generative": false,
+      "params": [
+        { "uniform": "u_density", "label": "Dots across", "type": "float", "min": 12, "max": 200, "default": 72, "step": 1 },
+        { "uniform": "u_jitter", "label": "Jitter", "type": "float", "min": 0.0, "max": 1.0, "default": 0.3, "step": 0.05 },
+        { "uniform": "u_dotSize", "label": "Dot size", "type": "float", "min": 0.3, "max": 2.0, "default": 1.0, "step": 0.05 },
+        { "uniform": "u_contrast", "label": "Contrast", "type": "float", "min": 0.3, "max": 3.0, "default": 1.0, "step": 0.05 },
+        { "uniform": "u_mode", "label": "Paper", "type": "enum", "default": 0,
+          "options": [
+            { "label": "Ink on paper", "value": 0 },
+            { "label": "Image colour on white", "value": 1 },
+            { "label": "Image colour on black", "value": 2 }
+          ] }
+      ]
+    },
+    {
+      "id": "pixel_sort",
+      "name": "Pixel Sort",
+      "category": "distortion",
+      "animated": false,
+      "passes": 1,
+      "centerParam": null,
+      "textures": [],
+      "generative": false,
+      "params": [
+        { "uniform": "u_direction", "label": "Direction", "type": "enum", "default": 1,
+          "options": [
+            { "label": "Up", "value": 0 },
+            { "label": "Down", "value": 1 },
+            { "label": "Left", "value": 2 },
+            { "label": "Right", "value": 3 }
+          ] },
+        { "uniform": "u_low", "label": "Band low", "type": "float", "min": 0.0, "max": 1.0, "default": 0.25, "step": 0.01 },
+        { "uniform": "u_high", "label": "Band high", "type": "float", "min": 0.0, "max": 1.0, "default": 0.75, "step": 0.01 },
+        { "uniform": "u_length", "label": "Streak length", "type": "float", "min": 0.0, "max": 1.0, "default": 0.5, "step": 0.02 },
+        { "uniform": "u_mode", "label": "Carry", "type": "enum", "default": 0,
+          "options": [
+            { "label": "Lightest", "value": 0 },
+            { "label": "Darkest", "value": 1 }
+          ] }
+      ]
     }
   ]
 }

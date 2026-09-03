@@ -178,7 +178,7 @@ export const SHADER_HONESTY_CLAUSE = 'If the requested look is not achievable wi
  * exists. Kept to real ids only — no aspirational ones.
  */
 export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
-  { words: 'glitchy / vhs / broken signal / datamosh / corrupted', ids: ['block_glitch', 'rgb_glitch', 'crt_scanlines', 'post_grain'] },
+  { words: 'glitchy / vhs / broken signal / datamosh / corrupted / pixel sort / streaked', ids: ['block_glitch', 'rgb_glitch', 'crt_scanlines', 'post_grain', 'pixel_sort'] },
   { words: 'halftone / newsprint / comic / risograph / screenprint', ids: ['halftone', 'dot_screen', 'risograph', 'bayer_dither', 'crosshatch'] },
   { words: 'pixel / 8-bit / lo-fi / blocky / ascii / terminal', ids: ['pixelate', 'blocks', 'ascii_dither', 'glyph_dither'] },
   { words: 'painterly / hand-made / illustrated / sketched', ids: ['oil_paint', 'crosshatch', 'outline'] },
@@ -200,6 +200,8 @@ export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
   { words: 'noisy displacement / turbulent / smoky', ids: ['noise_distortion', 'fbm_warp', 'wisps'] },
   { words: 'flag / cloth / banner / ripple in fabric', ids: ['flag', 'wave'] },
   { words: 'film / grain / analog / dusty', ids: ['post_grain', 'risograph'] },
+  { words: 'contour lines / topographic map / isolines / terrain map', ids: ['topographic'] },
+  { words: 'stipple / pointillist / dots of light / engraved dots', ids: ['stipple'] },
   { words: 'BACKGROUND FROM NOTHING (generative — these ignore the input image and draw their own field)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel'] },
 ]
 
