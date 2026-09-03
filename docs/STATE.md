@@ -15,7 +15,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes** on 20 effects incl. Cylinder) | ✅ descriptor (+ `shape` kind) | 11,202 |
 | Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc + **smart stretch: Stretch/Height dials, Fit**) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
 | Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers, **shape library shelf**) | ✅ descriptor (object.* + id-addressed; library shapes not yet) | ~6,300 (+ SVG import) + ambientCG textures |
-| Compositor / Frame | ✅ | ✅ motion clips | ✅ (+ **shape library** insert/swap, **mask break-out**) | ✅ commands (+ `addShape`, `setLayerMaskBreak`) | 1,667 (+1,041 motion) |
+| Compositor / Frame | ✅ | ✅ motion clips | ✅ (+ **shape library** insert/swap, **mask break-out**, **shapes pattern fill**) | ✅ commands (+ `addShape`, `setLayerMaskBreak`, `setFill{type:shapes}`) | 1,667 (+1,041 motion) |
 | Timeline (NLE) | ✅ webm/mp4 + server | ✅ native | ✅ | ❌ | shared/timeline |
 | Gradient Studio | ✅ | ✅ 30 targets, path-based | ✅ (**schema-drawn** from GRADIENT_CONTROLS) | ✅ descriptor | 2,620 (+ 4 primitives + alpha + per-layer layout) |
 | Shader Studio | ✅ | ✅ path tracks (+ mask region) | ✅ (data-driven, + per-effect spatial mask, + mode-gated params) | ✅ descriptor (+ mask, + **effect macro + ungated stages + derived guidance**) | 806 + 62 effects |
@@ -90,6 +90,20 @@ Mask a subject inside a shape but let one edge **open** so part of him escapes �
 **Fast-follows.** An on-canvas draggable break line (the `angle` field already supports it); an additive brush release for non-straight openings (boolean-union an arbitrary region into the mask); break-out under motion.
 
 Spec: [2026-09-03-compositor-mask-break-out-design.md](superpowers/specs/2026-09-03-compositor-mask-break-out-design.md) · plan: [2026-09-03-compositor-mask-break-out.md](superpowers/plans/2026-09-03-compositor-mask-break-out.md).
+
+### Shapes as a pattern fill — LANDED 2026-09-03 (`21fd4155a`..`206589791`)
+
+Fill anything — a box, text, a background — with a **repeating library shape**: a field of sparkles, a grid of suns, tiled leaves. The sixth consumer of the [shape library](#shape-library--expressive-studio-separator--landed-2026-09-02), and the one that reaches the most surfaces for the least code, because every studio edits a fill through one shared editor and paints it through two shared tile builders.
+
+**One addition, everywhere.** A new `shapes` arm on `FillType` plus a branch in `fillTileCanvas` / `fillTileBox` (`lib/spacetype/fillTile.ts`) lights up shape-pattern fills across the Compositor, Vector Type, Shape Studio and Space Type at once. `Fill` gains an optional `shapeId` (read only when `type==='shapes'`, carried through `normalizeFill`, dropped on every other type); `a` is the shape colour, `b` the background (`'none'`/`''` ⇒ a transparent tile — the "sparkles on nothing" case), `angle` the per-shape rotation, `density` the shapes across the tile (clamped 1–32). `paintShapesTile` draws the `d×d` grid with `drawShape`, each shape inset ~12% inside its cell and rotated about the cell centre, so the tile repeats seamlessly. The shared `FillControl.vue` gets one new control — a shape picker — plus a "Transparent background" toggle; the swatch already renders through `fillTileCanvas`, so it previews for free. The agent's `paintLabel` names it ("sun rays pattern") and the `setFill` hint documents the shape.
+
+**GPU parity (the trap).** Adding `shapes` to the shared `FILL_TYPES` made it selectable on the Space Type / Shape Studio surfaces, whose THREE render path is `fillTexture` (`lib/spacetype/fills.ts`) — which had no `shapes` arm and would have silently fallen through to the QR builder. A final whole-branch review caught it; `shapesTex` now wraps the same `fillTileCanvas` tile in a `CanvasTexture` (GPU matches CPU, transparent background survives as alpha), and the texture cache keys on `shapeId` so two shapes sharing colours/density/angle don't alias. The "shared catalog, two consumers — grep every consumer" lesson, paid again.
+
+**Verified.** Unit: the tile builders draw `d×d` shape fills in colour `a`, paint the background only for a colour `b`, skip it for `'none'`, fall back to sparkle for an unknown id, rotate by `angle`; `normalizeFill` carries/defaults/drops `shapeId` correctly; the SVG export tier for `shapes` is `raster` (no throw); `fillTexture` routes a shapes fill through the shape tiler, not QR, and caches per shape. Live (Compositor, shared server): a box filled with `shapes` tiles Sparkle, then Sun rays at count 4, with the shape picker, transparent-background toggle, A/B colours and Angle/Count all live. **Owed:** the Space Type GPU-surface screenshot (server held by a parallel session this run; the arm is unit-proven and the dev bundle confirmed serving `shapesTex`).
+
+**Fast-follows.** Per-cell scatter + rotation jitter (seeded); multiple shapes per tile; half-drop / brick offset; a true vector `<pattern>` export carrying the shape `<path>` (v1 exports the raster tile, like `noise`).
+
+Spec: [2026-09-03-shapes-pattern-fill-design.md](superpowers/specs/2026-09-03-shapes-pattern-fill-design.md) · plan: [2026-09-03-shapes-pattern-fill.md](superpowers/plans/2026-09-03-shapes-pattern-fill.md).
 
 ### Compositor — shape library layers — LANDED 2026-09-02 (`8aeb1c49d`..`4d9dd3735` + polish)
 
