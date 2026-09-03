@@ -3193,6 +3193,38 @@
         { "uniform": "u_speed", "label": "Drift", "type": "float", "min": 0.0, "max": 3.0, "default": 0.6, "step": 0.05 },
         { "uniform": "u_mix", "label": "Image mix", "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "step": 0.05 }
       ]
+    },
+    {
+      "id": "pixel_bloom",
+      "name": "Pixel Bloom",
+      "category": "generative",
+      "animated": true,
+      "passes": 1,
+      "centerParam": null,
+      "textures": [],
+      "generative": true,
+      "params": [
+        { "uniform": "u_ramp", "label": "Inks", "type": "gradient", "maxStops": 8,
+          "default": [
+            { "pos": 0.0, "color": "#0a0a0f" },
+            { "pos": 0.25, "color": "#1d3a8a" },
+            { "pos": 0.5, "color": "#3c8dde" },
+            { "pos": 0.75, "color": "#8ee1ff" },
+            { "pos": 1.0, "color": "#ffffff" }
+          ] },
+        { "uniform": "u_cells", "label": "Cells across", "type": "float", "min": 8, "max": 96, "default": 24, "step": 1 },
+        { "uniform": "u_levels", "label": "Levels", "type": "float", "min": 2, "max": 8, "default": 4, "step": 1 },
+        { "uniform": "u_mirror", "label": "Mirror", "type": "enum", "default": 1,
+          "options": [
+            { "label": "None", "value": 0 },
+            { "label": "Left-right", "value": 1 },
+            { "label": "Top-bottom", "value": 2 },
+            { "label": "Both", "value": 3 }
+          ] },
+        { "uniform": "u_scale", "label": "Field scale", "type": "float", "min": 0.5, "max": 6.0, "default": 2.0, "step": 0.1 },
+        { "uniform": "u_speed", "label": "Speed", "type": "float", "min": 0.0, "max": 3.0, "default": 0.5, "step": 0.05 },
+        { "uniform": "u_mix", "label": "Image mix", "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "step": 0.05 }
+      ]
     }
   ]
 }
