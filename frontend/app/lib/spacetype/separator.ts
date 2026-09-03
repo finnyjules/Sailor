@@ -42,7 +42,13 @@ export function separatorEligible(effectId: string): boolean {
 export function withSeparatorControls(effect: SpaceTypeEffect): SpaceTypeEffect {
   if (!separatorEligible(effect.id)) return effect
   if (effect.controls.some(c => c.key === 'separator')) return effect
-  return { ...effect, controls: [...effect.controls, ...SEPARATOR_CONTROLS] }
+  // Per-glyph effects (cylinder) place glyphs at uniform angles by index — separatorGap
+  // only pads the tile atlas, which cylinder never samples, so the dial does nothing
+  // visible there. Tile-based effects keep all three controls.
+  const controls = PER_GLYPH_SEPARATOR_READY.has(effect.id)
+    ? SEPARATOR_CONTROLS.filter(c => c.key !== 'separatorGap')
+    : SEPARATOR_CONTROLS
+  return { ...effect, controls: [...effect.controls, ...controls] }
 }
 
 export interface SeparatorSpec {

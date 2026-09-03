@@ -23,9 +23,12 @@ describe('separator controls are injected once at registration', () => {
   })
   for (const e of SPACE_TYPE_EFFECTS) {
     const eligible = !INELIGIBLE.includes(e.id)
-    it(`${e.id}: ${eligible ? 'has' : 'lacks'} the three Type controls`, () => {
+    // Per-glyph effects (cylinder) place glyphs at uniform angles by index, so separatorGap
+    // — which only pads the tile atlas — is dead there; they get separator + separatorSize only.
+    const expectedKeys = !eligible ? [] : PER_GLYPH_SEPARATOR_READY.has(e.id) ? ['separator', 'separatorSize'] : KEYS
+    it(`${e.id}: ${eligible ? 'has' : 'lacks'} the Type controls`, () => {
       const keys = e.controls.filter(c => KEYS.includes(c.key)).map(c => c.key)
-      expect(keys).toEqual(eligible ? KEYS : [])
+      expect(keys).toEqual(expectedKeys)
       expect(separatorEligible(e.id)).toBe(eligible)
       // The implementation's own predicate must agree with the literal list. cylinder is the
       // one PER_GLYPH_EFFECTS id carved back in by PER_GLYPH_SEPARATOR_READY (see separator.ts).
@@ -33,6 +36,9 @@ describe('separator controls are injected once at registration', () => {
       for (const c of e.controls.filter(c => KEYS.includes(c.key))) expect(c.group).toBe('Type')
     })
   }
+  it('cylinder has no separatorGap control (angular placement by index ignores it)', () => {
+    expect(getEffect('cylinder').controls.some(c => c.key === 'separatorGap')).toBe(false)
+  })
   it('is idempotent and does not touch ineligible effects', () => {
     const twice = withSeparatorControls(withSeparatorControls(ribbonEffect))
     expect(twice.controls.filter(c => c.key === 'separator').length).toBe(1)

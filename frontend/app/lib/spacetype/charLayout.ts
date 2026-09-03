@@ -16,7 +16,7 @@ import type { SeparatorSpec } from './separator'
  * spreads (and `centerT` spaces out) correctly.
  */
 export interface CharGlyph {
-  char: string
+  char: string     // usually one text character, but may hold a shape-library id (the separator glyph) instead; no consumer prints it
   u0: number       // left edge of the glyph in texture UV (0..1)
   u1: number       // right edge of the glyph in texture UV (0..1)
   aspect: number   // glyph width / row height (used to size the quad)
@@ -95,7 +95,8 @@ export function layoutChars(opts: CharLayoutOpts): CharLayout {
   }
 
   // Separator: one more cell after the last letter — [gap][shape][gap] — so a ring that
-  // wraps the word once reads "WORD ✦" at its seam. Same numbers as the tile painter.
+  // wraps the word once reads "WORD ✦" at its seam. Same size and gap formulas as the
+  // tile painter; the vertical origin differs (row centre, not the ink midline).
   const sep = opts.separator
   if (sep) {
     const gapPx = sep.gap * fontPx * 0.25
