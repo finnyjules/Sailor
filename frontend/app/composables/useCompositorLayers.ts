@@ -47,7 +47,9 @@ import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
 import { applyTornEdge, tornEdgeActive } from '~/lib/compositor/tornEdge'
 import { applyFeather, featherActive } from '~/lib/compositor/feather'
 import {
-  LruCache, SILHOUETTE_CACHE_CAP, SILHOUETTE_RASTER_PAD_PX, silhouetteCacheKey,
+  LruCache, SILHOUETTE_CACHE_CAP, silhouetteCacheKey,
+  silhouettePadPx as silhouettePadPxPure, silhouetteContentReady as silhouetteContentReadyPure,
+  silhouetteRasterFits,
 } from '~/lib/compositor/silhouetteCache'
 import { paintMaskRelease } from '~/lib/compositor/maskBreak'
 // Runtime import is safe: wiredLayer.ts only imports the WiredLayer TYPE back from
@@ -1383,26 +1385,30 @@ function textFontReady(layer: TextLayer, W: number): boolean {
 /** Whether everything this layer draws with is actually in hand. Image layers and
  *  image fills paint a placeholder until their bitmap decodes, and fonts fall back
  *  until they load — none of that is visible to the cache key, so baking one would
- *  freeze the placeholder for as long as nothing else about the layer changes. */
+ *  freeze the placeholder for as long as nothing else about the layer changes.
+ *  DOM/cache lookups happen here; the actual three-way rule is the pure
+ *  `silhouetteContentReadyPure` in silhouetteCache.ts (CPU-only, unit-tested). */
 function silhouetteContentReady(layer: LocalLayer, W: number): boolean {
-  if (layer.kind === 'text' && !textFontReady(layer, W)) return false
+  const font = layer.kind !== 'text' || textFontReady(layer, W)
+  let image = true
   if (layer.kind === 'image') {
     const img = _imageCache.get(imageLayerUrl(layer.filename))
-    if (!img || !img.complete || !img.naturalWidth) return false
+    image = !!img && img.complete && !!img.naturalWidth
   }
-  for (const p of layerPaints(layer)) if (isImageFill(p) && p.src && !getFillBitmap(p.src)) return false
-  return true
+  const fillBitmaps = !layerPaints(layer).some(p => isImageFill(p) && p.src && !getFillBitmap(p.src))
+  return silhouetteContentReadyPure(layer.kind, { font, image, fillBitmaps })
 }
 
-/** Padding (logical px) around `localLayerBox` for a baked silhouette raster:
- *  an outside-aligned stroke paints wholly beyond the box (outsideStrokePadPx);
- *  text ink overshoots the measured line block on a tight lineHeight, a descender
- *  or an outline; and both effects need a transparent margin to measure the edge
- *  from at all (SILHOUETTE_RASTER_PAD_PX). */
-function silhouettePadPx(layer: LocalLayer, W: number): number {
-  let pad = outsideStrokePadPx(layer, W)
-  if (layer.kind === 'text') pad += layer.fontSize * W * 0.5 + Math.max(0, layer.strokeWidth) * W
-  return pad + SILHOUETTE_RASTER_PAD_PX
+/** Padding (logical px) around `localLayerBox` for a baked silhouette raster. Resolves
+ *  the layer down to primitives (kind, font size / stroke width already scaled to
+ *  logical px by W) and the current device scale `s`, then defers to the pure
+ *  `silhouettePadPxPure` in silhouetteCache.ts for the actual arithmetic. `strokeWidth`
+ *  is guarded (`|| 0`) so a missing/NaN value can never make `bwD` NaN downstream. */
+function silhouettePadPx(layer: LocalLayer, W: number, s: number): number {
+  const basePad = outsideStrokePadPx(layer, W)
+  const fontPx = layer.kind === 'text' ? layer.fontSize * W : 0
+  const strokePx = layer.kind === 'text' ? Math.max(0, layer.strokeWidth || 0) * W : 0
+  return silhouettePadPxPure(basePad, layer.kind, fontPx, strokePx, s)
 }
 
 function paintLayer(
@@ -1469,9 +1475,14 @@ function paintLayer(
     silhouetteMemo = null
     if (!silhouetteCacheable) return silhouetteMemo
     const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
-    const pad = silhouettePadPx(layer, W)
+    const pad = silhouettePadPx(layer, W, s)
     const bwL = box.w + pad * 2, bhL = box.h + pad * 2                                     // logical px
     const bwD = Math.max(1, Math.round(bwL * s)), bhD = Math.max(1, Math.round(bhL * s))   // device px
+    // Past this cap `getContext('2d')` isn't guaranteed to return null on an
+    // oversized canvas (some engines hand back a context over a blank backing
+    // store instead), so an unbounded bwD/bhD could silently cache emptiness for
+    // a huge layer. Bail to the uncached path — same as a null context below.
+    if (!silhouetteRasterFits(bwD, bhD)) return silhouetteMemo
     const key = silhouetteCacheKey(layer as unknown as Record<string, unknown>, s, bwD, bhD, W)
     const hit = _silhouetteCache.get(key)
     if (hit) { silhouetteMemo = { canvas: hit, w: bwL, h: bhL }; return silhouetteMemo }
@@ -1615,7 +1626,10 @@ function paintLayer(
         // faithful render of it, bake that box once and stamp the cached raster here
         // instead. The tear/feather noise is then sampled in the layer's own box rather
         // than at its position in the frame, so the pattern travels with the layer.
-        const raster = silhouetteRaster(s)
+        // Only at clone scale 1: the raster is baked at device scale `s` alone, so a
+        // cloner falloff with `ls !== 1` would stamp a resampled (soft/aliased) copy —
+        // that clone falls through to the uncached path instead.
+        const raster = ls === 1 ? silhouetteRaster(s) : null
         if (raster) {
           applyXform(octx, lx, ly, lrot, ls)
           octx.drawImage(raster.canvas, -raster.w / 2, -raster.h / 2, raster.w, raster.h)   // 1:1 device px under `t`

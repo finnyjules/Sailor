@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   silhouetteCacheKey, LruCache, SILHOUETTE_CACHE_CAP, SILHOUETTE_RASTER_PAD_PX,
+  silhouettePadPx, silhouetteContentReady, silhouetteRasterFits, SILHOUETTE_RASTER_MAX_PX,
 } from '~/lib/compositor/silhouetteCache'
 import { applyTornEdgeToData, DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
 import { applyFeatherToData, DEFAULT_FEATHER } from '~/lib/compositor/feather'
@@ -32,9 +33,17 @@ describe('silhouetteCacheKey', () => {
     expect(key(b)).toBe(key(a))
   })
 
-  it('ignores property insertion order', () => {
-    const a = { id: 'l1', kind: 'brush', w: 0.4, fill: '#ff0000' } as Record<string, unknown>
-    const b = { fill: '#ff0000', w: 0.4, kind: 'brush', id: 'l1' } as Record<string, unknown>
+  it('ignores property insertion order, including inside nested objects', () => {
+    // A top-level-only key sort would still vary the key here: `tornEdge` is the
+    // same object with its OWN keys in a different order.
+    const a = {
+      id: 'l1', kind: 'brush', w: 0.4, fill: '#ff0000',
+      tornEdge: { amount: 5, seed: 2, roughness: 0.3, frequency: 4 },
+    } as Record<string, unknown>
+    const b = {
+      fill: '#ff0000', w: 0.4, kind: 'brush', id: 'l1',
+      tornEdge: { frequency: 4, roughness: 0.3, seed: 2, amount: 5 },
+    } as Record<string, unknown>
     expect(key(b)).toBe(key(a))
   })
 
@@ -143,5 +152,81 @@ describe('SILHOUETTE_RASTER_PAD_PX', () => {
     const padded = fill(40 + P * 2, 40 + P * 2, P, P, P + 40, P + 40)
     applyFeatherToData(padded, 40 + P * 2, 40 + P * 2, { ...DEFAULT_FEATHER })
     expect(alphas(padded)).toBeGreaterThan(0)
+  })
+})
+
+describe('silhouettePadPx', () => {
+  it('a rect/brush gets only the base pad plus the raster margin', () => {
+    expect(silhouettePadPx(5, 'rect', 999, 999, 1)).toBe(5 + SILHOUETTE_RASTER_PAD_PX)
+    expect(silhouettePadPx(5, 'brush', 999, 999, 1)).toBe(5 + SILHOUETTE_RASTER_PAD_PX)
+  })
+
+  it('text adds a FULL em of font size plus the stroke width (not half)', () => {
+    expect(silhouettePadPx(5, 'text', 40, 6, 1)).toBe(5 + SILHOUETTE_RASTER_PAD_PX + 40 + 6)
+  })
+
+  it('at device scale 0.5 the raster margin doubles in logical px', () => {
+    const atS1 = silhouettePadPx(0, 'rect', 0, 0, 1)
+    const atHalf = silhouettePadPx(0, 'rect', 0, 0, 0.5)
+    expect(atS1).toBe(SILHOUETTE_RASTER_PAD_PX)
+    expect(atHalf).toBe(SILHOUETTE_RASTER_PAD_PX * 2)
+  })
+
+  it('at device scale 2 the raster margin does not shrink below the base', () => {
+    expect(silhouettePadPx(0, 'rect', 0, 0, 2)).toBe(SILHOUETTE_RASTER_PAD_PX)
+  })
+
+  it('non-finite font/stroke inputs do not propagate as NaN', () => {
+    expect(silhouettePadPx(5, 'text', NaN, NaN, 1)).toBe(5 + SILHOUETTE_RASTER_PAD_PX)
+    expect(silhouettePadPx(5, 'text', Infinity, 6, 1)).toBe(5 + SILHOUETTE_RASTER_PAD_PX + 6)
+    expect(Number.isFinite(silhouettePadPx(5, 'text', NaN, NaN, 1))).toBe(true)
+  })
+})
+
+describe('silhouetteContentReady', () => {
+  it('is true when font, image and fill bitmaps are all ready', () => {
+    expect(silhouetteContentReady('text', { font: true, image: true, fillBitmaps: true })).toBe(true)
+  })
+
+  it('is false for a text layer whose real font has not loaded', () => {
+    expect(silhouetteContentReady('text', { font: false, image: true, fillBitmaps: true })).toBe(false)
+  })
+
+  it('is false for an image layer whose bitmap has not decoded', () => {
+    expect(silhouetteContentReady('image', { font: false || true, image: false, fillBitmaps: true })).toBe(false)
+  })
+
+  it('is false whenever a fill bitmap is missing, regardless of kind', () => {
+    expect(silhouetteContentReady('rect', { font: true, image: true, fillBitmaps: false })).toBe(false)
+  })
+
+  it('ignores font readiness for a non-text kind', () => {
+    expect(silhouetteContentReady('rect', { font: false, image: true, fillBitmaps: true })).toBe(true)
+  })
+
+  it('ignores image readiness for a non-image kind', () => {
+    expect(silhouetteContentReady('text', { font: true, image: false, fillBitmaps: true })).toBe(true)
+  })
+})
+
+describe('silhouetteRasterFits', () => {
+  it('accepts a raster within the cap', () => {
+    expect(silhouetteRasterFits(1000, 1000)).toBe(true) // 1,000,000 px
+  })
+
+  it('rejects a raster past SILHOUETTE_RASTER_MAX_PX', () => {
+    expect(silhouetteRasterFits(5000, 5000)).toBe(false) // 25,000,000 px
+    expect(SILHOUETTE_RASTER_MAX_PX).toBe(16_000_000)
+  })
+
+  it('rejects non-finite dimensions', () => {
+    expect(silhouetteRasterFits(NaN, 100)).toBe(false)
+    expect(silhouetteRasterFits(100, Infinity)).toBe(false)
+  })
+
+  it('rejects dimensions below 1px', () => {
+    expect(silhouetteRasterFits(0, 100)).toBe(false)
+    expect(silhouetteRasterFits(100, 0.5)).toBe(false)
+    expect(silhouetteRasterFits(-5, 100)).toBe(false)
   })
 })
