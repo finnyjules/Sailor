@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { ControlSpec, Params, SpaceTypeEffect } from '../effect'
 import { layoutChars } from '../charLayout'
+import type { SeparatorSpec } from '../separator'
 import { resolveFontFamily, fontHasWeightAxis } from '~/lib/font/resolveFamily'
 import { parseFills, fillShaderTexture, fillIsTextured, fillTiling, fillPrimary } from '../fills'
 import { fillIsShader } from '../fillTile'
@@ -128,10 +129,9 @@ export const cylinderEffect: SpaceTypeEffect = {
     return rates
   },
 
-  // We build our own per-glyph texture via layoutChars; the passed surface
-  // textTexture (a tiled ribbon line) is ignored.
-  buildScene(three, params, _textTexture, env) {
-    void _textTexture
+  // We build our own per-glyph texture via layoutChars; the passed surface textTexture
+  // (a tiled ribbon line) is ignored except for its resolved separator (see separator.ts).
+  buildScene(three, params, textTexture, env) {
     const root = new three.Group()
     const glyphs: CylinderGlyph[] = []
 
@@ -179,6 +179,7 @@ export const cylinderEffect: SpaceTypeEffect = {
       color: '#ffffff',
       strokeColor: '#000000',
       strokeWidth: n(params, 'typeStroke'),
+      separator: textTexture?.userData?.separator as SeparatorSpec | undefined,
     }
     // ONE STRING PER RING: each text gets its own layout (texture + glyph set); ring i shows
     // text i%N. Layouts are built lazily + cached, so only the texts actually used by a ring

@@ -183,6 +183,7 @@ export function makeTextTexture(opts: TextTextureOptions): THREE.CanvasTexture {
   tex.userData.inkHeightFrac = inkHeightFrac
   tex.userData.inkVMid = inkVMid
   tex.userData.naturalWidthFrac = naturalWidthFrac
+  tex.userData.separator = opts.separator
   tex.userData.gradient = (opts.gradientOn && opts.gradientStops && opts.gradientStops.some(s => s.on))
     ? makeGradientTexture(opts.gradientStops, opts.typeColor)
     : undefined

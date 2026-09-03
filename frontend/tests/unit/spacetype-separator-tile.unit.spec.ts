@@ -45,6 +45,7 @@ describe('makeTextTexture without a separator', () => {
     expect(last.ctx.ops.find(o => o[0] === 'fillText')?.[1]).toBe('SAILOR   ')
     // identity case: no tracking, no separator ⇒ untracked width over its own tile is 1
     expect(tex.userData.naturalWidthFrac).toBe(1)
+    expect(tex.userData.separator).toBeUndefined()
   })
 })
 
@@ -68,6 +69,7 @@ describe('makeTextTexture with a separator', () => {
     expect(tr?.[2]).toBeCloseTo(83, 6)
     // untracked (no tracking set) ⇒ naturalWidthFrac is exactly 1 for the identity case
     expect(tex.userData.naturalWidthFrac).toBe(1)
+    expect(tex.userData.separator?.shape.id).toBe('half')
   })
   it('strokes the shape when the type has a stroke', async () => {
     const { makeTextTexture } = await import('../../app/lib/spacetype/textTexture')

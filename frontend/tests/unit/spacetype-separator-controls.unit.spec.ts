@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { SPACE_TYPE_EFFECTS, getEffect } from '../../app/lib/spacetype/effects'
 import { RAW_WORD_EFFECTS, PER_GLYPH_EFFECTS } from '../../app/lib/spacetype/effect'
-import { SEPARATOR_CONTROLS, separatorEligible, separatorFromParams, withSeparatorControls } from '../../app/lib/spacetype/separator'
+import { SEPARATOR_CONTROLS, separatorEligible, separatorFromParams, withSeparatorControls, PER_GLYPH_SEPARATOR_READY } from '../../app/lib/spacetype/separator'
 import { showIfVisible } from '../../app/lib/studio/sections'
 import { texOptsFromState, defaultSpaceTypeState } from '../../app/lib/spacetype/state'
 import { buildTexOpts } from '~/lib/embed/surfaces/spacetype'
@@ -15,7 +15,7 @@ const KEYS = ['separator', 'separatorSize', 'separatorGap']
 // in or out of those sets. This literal list is the second opinion — an
 // effect changing eligibility has to be a deliberate edit here too. Every id
 // is asserted to still exist below, so the list cannot rot into a no-op.
-const INELIGIBLE = ['coil', 'elastic', 'echo', 'blend', 'cascade', 'cylinder', 'onionburst', 'ring', 'slot']
+const INELIGIBLE = ['coil', 'elastic', 'echo', 'blend', 'cascade', 'onionburst', 'ring', 'slot']
 
 describe('separator controls are injected once at registration', () => {
   it('every ineligible id is still a registered effect', () => {
@@ -27,8 +27,9 @@ describe('separator controls are injected once at registration', () => {
       const keys = e.controls.filter(c => KEYS.includes(c.key)).map(c => c.key)
       expect(keys).toEqual(eligible ? KEYS : [])
       expect(separatorEligible(e.id)).toBe(eligible)
-      // The implementation's own predicate must agree with the literal list.
-      expect(!RAW_WORD_EFFECTS.has(e.id) && !PER_GLYPH_EFFECTS.has(e.id)).toBe(eligible)
+      // The implementation's own predicate must agree with the literal list. cylinder is the
+      // one PER_GLYPH_EFFECTS id carved back in by PER_GLYPH_SEPARATOR_READY (see separator.ts).
+      expect(!RAW_WORD_EFFECTS.has(e.id) && (!PER_GLYPH_EFFECTS.has(e.id) || PER_GLYPH_SEPARATOR_READY.has(e.id))).toBe(eligible)
       for (const c of e.controls.filter(c => KEYS.includes(c.key))) expect(c.group).toBe('Type')
     })
   }
@@ -46,6 +47,11 @@ describe('separator controls are injected once at registration', () => {
     const ribbon = getEffect('ribbon')
     expect(ribbon.controls.some(c => c.key === 'separator')).toBe(true)
     expect(defaultSpaceTypeState().params.separator).toBe('none')
+  })
+  it('cylinder is the one per-glyph effect that takes a separator', () => {
+    expect(separatorEligible('cylinder')).toBe(true)
+    for (const id of ['blend', 'cascade', 'onionburst', 'ring', 'slot']) expect(separatorEligible(id)).toBe(false)
+    expect(getEffect('cylinder').controls.some(c => c.key === 'separator')).toBe(true)
   })
 })
 

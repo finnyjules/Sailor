@@ -1,4 +1,7 @@
 import * as THREE from 'three'
+import { drawShape, shapeAspect } from '~/lib/shapes/path2d'
+import type { LibraryShape } from '~/lib/shapes/catalog'
+import type { SeparatorSpec } from './separator'
 
 /**
  * Per-character layout for the per-glyph Space Type effects (cylinder, …).
@@ -39,6 +42,8 @@ export interface CharLayoutOpts {
   // Full variable-font axes (e.g. { wght: 700, wdth: 80, slnt: -10 }). When given, drives
   // fontVariationSettings; otherwise just weight. Non-weight axes need Chromium.
   axes?: Record<string, number>
+  /** Shape painted as one extra glyph after the last letter — see separator.ts. */
+  separator?: SeparatorSpec
 }
 
 /** Apply font + variation + letterSpacing to a 2D context (mirrors makeTextTexture). */
@@ -80,7 +85,7 @@ export function layoutChars(opts: CharLayoutOpts): CharLayout {
   applyFont(ctx, font, opts.fontWeight, tracking, opts.axes)
   const chars = Array.from(opts.text)
   let cursor = 0 // unscaled px advance so far
-  const measured: { char: string; x: number; w: number; isSpace: boolean }[] = []
+  const measured: { char: string; x: number; w: number; isSpace: boolean; shape?: LibraryShape; shapeH?: number }[] = []
   for (let i = 0; i < chars.length; i++) {
     const ch = chars[i]!
     const w = ctx.measureText(ch).width
@@ -88,6 +93,20 @@ export function layoutChars(opts: CharLayoutOpts): CharLayout {
     cursor += w
     if (i < chars.length - 1) cursor += tracking // inter-char letter-spacing
   }
+
+  // Separator: one more cell after the last letter — [gap][shape][gap] — so a ring that
+  // wraps the word once reads "WORD ✦" at its seam. Same numbers as the tile painter.
+  const sep = opts.separator
+  if (sep) {
+    const gapPx = sep.gap * fontPx * 0.25
+    const cap = ctx.measureText('H').actualBoundingBoxAscent || fontPx * 0.72
+    const shapeH = Math.min(cap * sep.size, lineHeightPx)
+    const shapeW = shapeH * shapeAspect(sep.shape)
+    cursor += gapPx
+    measured.push({ char: sep.shape.id, x: cursor, w: shapeW, isSpace: false, shape: sep.shape, shapeH })
+    cursor += shapeW + gapPx
+  }
+
   const totalAdvance = Math.max(1, cursor) // unscaled total width (excl. trailing tracking)
 
   // Canvas width = widened total advance; height = row height.
@@ -118,6 +137,14 @@ export function layoutChars(opts: CharLayoutOpts): CharLayout {
   }
   for (const m of measured) {
     if (m.isSpace) continue
+    if (m.shape) {
+      drawShape(ctx, m.shape, {
+        x: m.x, y: h / 2 - (m.shapeH ?? 0) / 2, w: m.w, h: m.shapeH ?? 0,
+        fill: opts.color,
+        stroke: stroke ? { color: opts.strokeColor ?? '#000000', width: opts.strokeWidth as number } : undefined,
+      })
+      continue
+    }
     if (stroke) ctx.strokeText(m.char, m.x, h / 2)
     ctx.fillText(m.char, m.x, h / 2)
   }

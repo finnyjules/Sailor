@@ -24,9 +24,14 @@ export const SEPARATOR_CONTROLS: ControlSpec[] = [
     group: 'Type', showIf: { key: 'separator', notEquals: SHAPE_NONE } },
 ]
 
-/** Tile-based effects only: raw-word effects have no tile gap, per-glyph effects never sample the tile. */
+/** Per-glyph effects whose layout can carry the separator as an extra glyph (charLayout's `separator`). */
+export const PER_GLYPH_SEPARATOR_READY: ReadonlySet<string> = new Set(['cylinder'])
+
+/** Tile-based effects, plus per-glyph effects that opted in via PER_GLYPH_SEPARATOR_READY:
+ *  raw-word effects have no tile gap; the rest of the per-glyph effects never sample the tile. */
 export function separatorEligible(effectId: string): boolean {
-  return !RAW_WORD_EFFECTS.has(effectId) && !PER_GLYPH_EFFECTS.has(effectId)
+  if (RAW_WORD_EFFECTS.has(effectId)) return false
+  return !PER_GLYPH_EFFECTS.has(effectId) || PER_GLYPH_SEPARATOR_READY.has(effectId)
 }
 
 /**
