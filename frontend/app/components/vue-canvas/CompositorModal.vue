@@ -4,7 +4,7 @@ import {
   Type, Square, Circle, Minus, Plus, Trash2,
   AlignLeft, AlignCenter, AlignRight, AlignJustify, Bold, ArrowUp, ArrowDown, Lock, LockOpen,
   Eye, EyeOff, Underline, Strikethrough, CaseUpper, CaseLower, CaseSensitive,
-  Hexagon, Star, Copy,
+  Hexagon, Star, Copy, Shapes,
 } from 'lucide-vue-next'
 import {
   type TextLayer, type RectLayer, type EllipseLayer, type LocalLayer, type StackItem, type CornerPin, type BrushLayer, type Paint,
@@ -96,6 +96,10 @@ import {
   resolveAiFace, aiFaceLabel, resolveInsertFace, insertFaceLabel,
   type ToolbarShapeId, type ToolbarAiId, type ToolbarInsertId,
 } from '~/lib/compositor/toolbarMenus'
+import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
+import { shapeById } from '~/lib/shapes/catalog'
+import { createShapeLayer, swapShapeLayer } from '~/lib/shapes/pathLayer'
+import { SHAPE_PICKER_WIDTH } from '~/lib/shapes/pickerLayout'
 import type { Component, ComputedRef } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
 import { brandSwatches } from '~~/shared/brand/resolve'
@@ -4206,11 +4210,38 @@ const insertMenuOpen = ref(false)
 const shapeFace = ref<ToolbarShapeId>(DEFAULT_SHAPE_FACE)
 const aiFace = ref<ToolbarAiId>(DEFAULT_AI_FACE)
 const insertFace = ref<ToolbarInsertId>(DEFAULT_INSERT_FACE)
+/** The library shape the face wears once one has been picked; null on a fresh
+ *  modal (component state on purpose — no persistence, like shapeFace). */
+const libraryShapeId = ref<string | null>(null)
+const libraryShape = computed(() => (libraryShapeId.value ? shapeById(libraryShapeId.value) : undefined))
+const hasLibraryShape = computed(() => !!libraryShape.value)
+const libraryPickerOpen = ref(false)
+const libraryPickerAnchor = ref({ x: 0, y: 0 })
+const shapesClusterRef = ref<HTMLElement | null>(null)
 const SHAPE_ICONS: Record<ToolbarShapeId, Component> = {
-  rect: Square, ellipse: Circle, line: Minus, polygon: Hexagon, star: Star,
+  rect: Square, ellipse: Circle, line: Minus, polygon: Hexagon, star: Star, library: Shapes,
+}
+function stampLibraryShape() {
+  const s = libraryShape.value
+  if (!s) { openLibraryPicker(); return }
+  addLocal(createShapeLayer(s))
 }
 const SHAPE_STAMP: Record<ToolbarShapeId, () => void> = {
-  rect: addRect, ellipse: addEllipse, line: addLine, polygon: addPolygon, star: addStar,
+  rect: addRect, ellipse: addEllipse, line: addLine, polygon: addPolygon, star: addStar, library: stampLibraryShape,
+}
+/** Anchor the picker above the Shapes cluster; the picker clamps itself to the viewport. */
+function openLibraryPicker() {
+  const r = shapesClusterRef.value?.getBoundingClientRect()
+  libraryPickerAnchor.value = r ? { x: r.left, y: Math.max(8, r.top - 340) } : { x: 16, y: 16 }
+  shapesMenuOpen.value = false
+  libraryPickerOpen.value = true
+}
+function onLibraryPick(id: string) {
+  const s = shapeById(id)
+  if (!s) return
+  libraryShapeId.value = id
+  shapeFace.value = 'library'
+  addLocal(createShapeLayer(s))
 }
 const AI_ICONS: Record<ToolbarAiId, Component> = {
   vector: Sparkles, region: Wand2, smart: Lasso,
@@ -4223,19 +4254,40 @@ function closeToolbarMenus() {
   shapesMenuOpen.value = false
   aiMenuOpen.value = false
   insertMenuOpen.value = false
+  libraryPickerOpen.value = false
 }
 function toggleInsertMenu() { const next = !insertMenuOpen.value; closeToolbarMenus(); insertMenuOpen.value = next }
 function toggleZoomMenu() { const next = !zoomMenuOpen.value; closeToolbarMenus(); zoomMenuOpen.value = next }
 function toggleShapesMenu() { const next = !shapesMenuOpen.value; closeToolbarMenus(); shapesMenuOpen.value = next }
 function toggleAiMenu() { const next = !aiMenuOpen.value; closeToolbarMenus(); aiMenuOpen.value = next }
-/** Menu row → stamp it now AND wear it, so repeat stamping is one click. */
+/** Menu row → stamp it now AND wear it, so repeat stamping is one click.
+ *  The library row opens the picker instead; the pick both stamps and wears. */
 function pickShape(id: ToolbarShapeId) {
+  if (id === 'library') { openLibraryPicker(); return }
   shapeFace.value = id
   shapesMenuOpen.value = false
   SHAPE_STAMP[id]()
 }
 /** The face button itself: stamp the current shape without opening anything. */
-function stampFaceShape() { closeToolbarMenus(); SHAPE_STAMP[resolveShapeFace(shapeFace.value)]() }
+function stampFaceShape() { closeToolbarMenus(); SHAPE_STAMP[resolveShapeFace(shapeFace.value, hasLibraryShape.value)]() }
+const selectedShape = computed(() => {
+  const l = selectedLocal.value
+  return l && l.kind === 'path' && l.shapeId ? shapeById(l.shapeId) : undefined
+})
+const inspectorShapePickerOpen = ref(false)
+const inspectorShapeAnchor = ref({ x: 0, y: 0 })
+const inspectorShapeButtonRef = ref<HTMLElement | null>(null)
+function openInspectorShapePicker() {
+  const r = inspectorShapeButtonRef.value?.getBoundingClientRect()
+  inspectorShapeAnchor.value = r ? { x: r.right - SHAPE_PICKER_WIDTH, y: r.bottom + 4 } : { x: 16, y: 16 }
+  inspectorShapePickerOpen.value = true
+}
+function onInspectorShapePick(id: string) {
+  const l = selectedLocal.value
+  const s = shapeById(id)
+  if (!l || l.kind !== 'path' || !s) return
+  setLocal(l.id, swapShapeLayer(l, s))
+}
 /** Called during render (not a computed): `selectedWiredImage()` reads the DOM,
  *  so it must be re-evaluated with the rest of the template, exactly as the old
  *  Smart-select button's :disabled/:title bindings did. */
@@ -5329,12 +5381,15 @@ onUnmounted(() => {
         <!-- Shapes: the face stamps the last-used shape (one click to repeat),
              the chevron opens the list. Two real buttons rather than hit-testing
              zones inside one, so a 16px chevron target is still a real target. -->
-        <div class="relative flex items-center" @click.stop>
+        <div class="relative flex items-center" ref="shapesClusterRef" @click.stop>
           <button
             class="flex items-center justify-center h-8 w-7 rounded-l hover:bg-white/10 text-white/80 cursor-pointer"
-            data-testid="shapes-face" :title="'Add ' + shapeFaceLabel(shapeFace).toLowerCase()"
+            data-testid="shapes-face" :title="'Add ' + (resolveShapeFace(shapeFace, hasLibraryShape) === 'library' && libraryShape ? libraryShape.name : shapeFaceLabel(shapeFace, hasLibraryShape)).toLowerCase()"
             @click="stampFaceShape()">
-            <component :is="SHAPE_ICONS[shapeFace]" class="size-4" />
+            <svg v-if="resolveShapeFace(shapeFace, hasLibraryShape) === 'library' && libraryShape" viewBox="0 0 96 96" class="size-4" fill="currentColor" aria-hidden="true">
+              <path :d="libraryShape.d" :fill-rule="libraryShape.fillRule" />
+            </svg>
+            <component v-else :is="SHAPE_ICONS[resolveShapeFace(shapeFace, hasLibraryShape)]" class="size-4" />
           </button>
           <button
             class="flex items-center justify-center h-8 w-4 rounded-r cursor-pointer"
@@ -5362,6 +5417,15 @@ onUnmounted(() => {
               </button>
             </div>
           </Transition>
+          <ShapePicker
+            v-if="libraryPickerOpen"
+            :model-value="libraryShapeId ?? 'none'"
+            :allow-none="false"
+            :anchor="libraryPickerAnchor"
+            :ignore="shapesClusterRef"
+            @update:model-value="onLibraryPick"
+            @close="libraryPickerOpen = false"
+          />
         </div>
         <button
           class="flex items-center justify-center size-8 rounded cursor-pointer"
@@ -6295,6 +6359,28 @@ onUnmounted(() => {
 
           <!-- Path (vector) controls -->
           <template v-if="selectedLocal.kind === 'path'">
+            <div v-if="selectedShape">
+              <div class="panel-label mb-1.5">Shape</div>
+              <button
+                ref="inspectorShapeButtonRef"
+                type="button"
+                class="w-full flex items-center gap-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 cursor-pointer transition-colors"
+                title="Swap for another library shape"
+                @click="openInspectorShapePicker"
+              >
+                <svg viewBox="0 0 96 96" class="size-4 shrink-0" fill="currentColor" aria-hidden="true"><path :d="selectedShape.d" :fill-rule="selectedShape.fillRule" /></svg>
+                <span class="flex-1 text-left">{{ selectedShape.name }}</span>
+              </button>
+              <ShapePicker
+                v-if="inspectorShapePickerOpen"
+                :model-value="selectedShape.id"
+                :allow-none="false"
+                :anchor="inspectorShapeAnchor"
+                :ignore="inspectorShapeButtonRef"
+                @update:model-value="onInspectorShapePick"
+                @close="inspectorShapePickerOpen = false"
+              />
+            </div>
             <div>
               <div class="panel-label mb-1.5">Fill</div>
               <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill"
