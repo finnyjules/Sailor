@@ -54,7 +54,10 @@ export function getSpaceTypeEffectEntries() {
   // match — catches a half-finished edit (import added but not registered,
   // or vice versa) rather than silently emitting a bundle for an effect the
   // live studio doesn't actually expose, or skipping one it does.
-  const arrayMatch = indexSrc.match(/SPACE_TYPE_EFFECTS[^=]*=\s*\[([\s\S]*?)\]/)
+  // `[^[]*` (not `\s*`) between `=` and `[` so a /* @__PURE__ */ annotation —
+  // which the registry needs for Rollup to tree-shake the .map() call — does
+  // not make this regex silently fail to match.
+  const arrayMatch = indexSrc.match(/SPACE_TYPE_EFFECTS[^=]*=[^[]*\[([\s\S]*?)\]/)
   if (!arrayMatch) {
     throw new Error('spacetype-effect-list: could not find the SPACE_TYPE_EFFECTS array literal in effects/index.ts')
   }

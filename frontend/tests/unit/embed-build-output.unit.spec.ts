@@ -136,6 +136,39 @@ describe.each(builtFiles.map(f => [f] as const))('prebuilt %s embed bundle', (fi
     expect(bytes).toBeLessThan(ceilingFor(fileName))
   })
 
+  // A size ceiling cannot tell "this surface grew a dependency" from "the
+  // per-effect split stopped working" — both just make one number bigger, and
+  // a ceiling generous enough for the legitimate outlier (boost) has room for
+  // a lot of illegitimate growth underneath it. That is not hypothetical: a
+  // top-level `.map(withSeparatorControls)` in effects/index.ts read to Rollup
+  // as a retained side effect, so every per-effect bundle re-absorbed all 25
+  // effect modules — 1.21MB, comfortably under the 1.75MB ceiling, and this
+  // suite stayed green. These marker greps assert the SHAPE of the split
+  // instead of its size: a bundle may only contain a given effect's code if it
+  // IS that effect's bundle. Both markers were checked to occur in exactly one
+  // effect module and (post-fix) in exactly one built bundle: 'ribbonStretch'
+  // is a control key declared only in effects/ribbon.ts (NOT 'ribbonHeight' —
+  // spiral.ts and streamer.ts declare that key too, so it is not a ribbon
+  // marker), and 'Helvetiker' names the vendored typeface JSON that only
+  // boost.ts imports. Both survive minification — one is a control-key string
+  // literal, the other JSON data — which is what makes them usable markers
+  // where an identifier name would not be.
+  it('contains no other effect\'s marker code (the split is by shape, not just size)', () => {
+    const js = fs.readFileSync(OUT, 'utf8')
+    const markers: { marker: string, owner: string }[] = [
+      { marker: 'ribbonStretch', owner: 'spacetype-ribbon.js' },
+      { marker: 'Helvetiker', owner: 'spacetype-boost.js' },
+    ]
+    for (const { marker, owner } of markers) {
+      if (fileName === owner) continue
+      expect(
+        js.includes(marker),
+        `${fileName} contains "${marker}", which belongs to ${owner} — the per-effect embed split has stopped splitting `
+        + `(check effects/index.ts's /* @__PURE__ */ annotation and anything newly importing effects/index.ts).`,
+      ).toBe(false)
+    }
+  })
+
   it('emits a single self-contained file with no import statements', () => {
     const js = fs.readFileSync(OUT, 'utf8')
     expect(js).not.toMatch(/^\s*import\s/m)
