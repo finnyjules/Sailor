@@ -60,8 +60,10 @@ uniform float u_mix;
 
 void main() {
     vec2 asp = vec2(u_resolution.x / u_resolution.y, 1.0);
-    // Coarse cell grid, `u_cells` across the short axis; one field sample per cell.
-    vec2 grid = max(u_cells, 2.0) * asp;
+    // Coarse cell grid, `u_cells` across the short axis (rounded to whole cells on the long axis); one field sample per cell.
+    // Whole cell counts on both axes so a mirrored cell lands exactly on its twin on any
+    // frame size; cells are then square to within one part in u_cells, not exactly square.
+    vec2 grid = floor(max(u_cells, 2.0) * asp + 0.5);
     vec2 cellId = floor(v_texCoord * grid);
     vec2 uv = (cellId + 0.5) / grid;
 
