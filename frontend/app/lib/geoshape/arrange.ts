@@ -5,7 +5,7 @@
  * imports, just arithmetic. Callers turn each ClonePlacement into a paper
  * `Matrix` (translate + rotate + scale + skew) when rendering.
  */
-import type { GeoShapeConfig } from './config'
+import type { GeoShapeConfig, GeoBlendEase } from './config'
 
 export interface ClonePlacement {
   x: number
@@ -13,6 +13,8 @@ export interface ClonePlacement {
   scale: number
   rotate: number
   skew: number
+  /** Blend layout only: 0 = shape A, 1 = shape B, eased by `blendEase`. */
+  blend?: number
 }
 
 const DEG2RAD = Math.PI / 180
@@ -24,6 +26,16 @@ function lerp(a: number, b: number, t: number): number {
 /** i/(count-1) guarded against divide-by-zero when count is 1. */
 function rampT(i: number, count: number): number {
   return count > 1 ? i / (count - 1) : 0
+}
+
+/** How the blend steps bunch up. `u` is the raw 0..1 step position. */
+export function blendEaseT(u: number, ease: GeoBlendEase): number {
+  switch (ease) {
+    case 'easeIn': return u * u
+    case 'easeOut': return 1 - (1 - u) * (1 - u)
+    case 'easeInOut': return u * u * (3 - 2 * u)
+    default: return u
+  }
 }
 
 /**
@@ -77,6 +89,26 @@ export function arrange(cfg: GeoShapeConfig): ClonePlacement[] {
         scale: lerp(cfg.scaleStart, cfg.scaleEnd, t),
         rotate: cfg.rotateBase + i * cfg.rotateStep,
         skew: cfg.skew,
+      })
+    }
+    return placements
+  }
+
+  if (cfg.layout === 'blend') {
+    // The steps between shape A (at the origin) and shape B (at blendX/blendY).
+    // Position and blend fraction share the eased t so a bunched spacing also
+    // bunches the shape change; the scale ramp keeps the raw t like every layout.
+    const placements: ClonePlacement[] = []
+    for (let i = 0; i < count; i++) {
+      const u = rampT(i, count)
+      const t = blendEaseT(u, cfg.blendEase)
+      placements.push({
+        x: lerp(0, cfg.blendX, t),
+        y: lerp(0, cfg.blendY, t),
+        scale: lerp(cfg.scaleStart, cfg.scaleEnd, u),
+        rotate: cfg.rotateBase + i * cfg.rotateStep,
+        skew: cfg.skew,
+        blend: t,
       })
     }
     return placements
