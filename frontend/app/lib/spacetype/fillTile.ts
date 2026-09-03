@@ -22,6 +22,8 @@ import { isGradient, isFill, sortedClampedStops, type Paint } from '~/lib/compos
 // (`lib/vector/svg` imports nothing at all).
 import { gradientUnitAxis } from '~/lib/vector/svg'
 import type { GradientStop, ParamValue } from '~/lib/shaderfx/types'
+import { drawShape } from '~/lib/shapes/path2d'
+import { shapeById } from '~/lib/shapes/catalog'
 
 // Local, deliberately NOT imported from ~/lib/shaderfx/params. This module sits in
 // a documented import cycle with ~/lib/compositor/paint (see the header), so every
@@ -31,10 +33,12 @@ import type { GradientStop, ParamValue } from '~/lib/shaderfx/types'
 // digits, because StudioColor emits #rrggbbaa.
 const PARAM_HEX = /^#?([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 
-export type FillType = 'solid' | 'gradient' | 'ombre' | 'grid' | 'noise' | 'checkerboard' | 'stripes' | 'qr' | 'shader'
+export type FillType = 'solid' | 'gradient' | 'ombre' | 'grid' | 'noise' | 'checkerboard' | 'stripes' | 'qr' | 'shader' | 'shapes'
 /** `a`/`b` drive the slot's fill (stripe); `textColor` is the solid colour for type on that row.
- *  `angle` (degrees) applies to `stripes`/`gradient`/`ombre`; `density` controls cell/stripe count. */
-export interface Fill { type: FillType; a: string; b: string; textColor: string; angle: number; density: number; shader?: ShaderSpec }
+ *  `angle` (degrees) applies to `stripes`/`gradient`/`ombre`/`shapes` (per-shape rotation);
+ *  `density` controls cell/stripe count. `shapeId` is only meaningful (and only ever set by
+ *  `normalizeFill`) for `type === 'shapes'` — the library shape tiled across the cell grid. */
+export interface Fill { type: FillType; a: string; b: string; textColor: string; angle: number; density: number; shader?: ShaderSpec; shapeId?: string }
 
 /** A shader fill runs `input` through a catalog effect against any `Paint` — a flat
  *  colour, a linear/radial gradient, or another (non-shader) `Fill`. `input` is NEVER
@@ -51,7 +55,7 @@ export interface ShaderSpec {
 }
 
 /** All fill types, in picker order. SINGLE SOURCE OF TRUTH — imported by every fill dropdown. */
-export const FILL_TYPES: FillType[] = ['solid', 'gradient', 'ombre', 'grid', 'noise', 'checkerboard', 'stripes', 'qr', 'shader']
+export const FILL_TYPES: FillType[] = ['solid', 'gradient', 'ombre', 'grid', 'noise', 'checkerboard', 'stripes', 'qr', 'shader', 'shapes']
 export const DEFAULT_FILL: Fill = { type: 'solid', a: '#ffffff', b: '#000000', textColor: '#ffffff', angle: 45, density: 8 }
 
 export const DEFAULT_SHADER_SPEC: ShaderSpec = {
@@ -135,6 +139,10 @@ export function normalizeFill(f: unknown, depth = 0): Fill {
     angle: typeof o.angle === 'number' ? o.angle : 45,
     density: typeof o.density === 'number' ? o.density : 8,
   }
+  // `shapeId` is only ever set for a `shapes` fill — a bad/missing id defaults to
+  // 'sparkle' here so every downstream consumer (the tile painters below) can
+  // assume `fill.shapeId` is a real id whenever `fill.type === 'shapes'`.
+  if (type === 'shapes') base.shapeId = typeof o.shapeId === 'string' ? o.shapeId : 'sparkle'
   if (type !== 'shader') return base            // a spec on a non-shader fill is dropped
   return { ...base, shader: normalizeShaderSpec(o.shader, depth) }
 }
@@ -343,6 +351,27 @@ export function patternImageData(w: number, h: number, colA: [number, number, nu
   return img
 }
 
+/** Paint a density×density grid of the fill's library shape onto a size-agnostic tile. */
+function paintShapesTile(ctx: CanvasRenderingContext2D, fill: Fill, W: number, H: number): void {
+  const shape = shapeById(fill.shapeId ?? '') ?? shapeById('sparkle')!
+  const d = Math.max(1, Math.min(32, Math.round(fill.density)))
+  const bg = fill.b
+  if (bg && bg !== 'none') { ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H) }
+  const cw = W / d, ch = H / d, pad = 0.12
+  const rot = (fill.angle * Math.PI) / 180
+  for (let iy = 0; iy < d; iy++) for (let ix = 0; ix < d; ix++) {
+    const cx = (ix + 0.5) * cw, cy = (iy + 0.5) * ch
+    const bw = cw * (1 - 2 * pad), bh = ch * (1 - 2 * pad)
+    if (rot) {
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot); ctx.translate(-cx, -cy)
+      drawShape(ctx, shape, { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh, fill: fill.a })
+      ctx.restore()
+    } else {
+      drawShape(ctx, shape, { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh, fill: fill.a })
+    }
+  }
+}
+
 /**
  * Build a tileable 2D canvas for a fill — the CPU companion to the THREE texture path.
  * `solid` returns a flat swatch; `gradient` a vertical A→B ramp; the rest reuse the same
@@ -372,6 +401,7 @@ export function fillTileCanvas(fillIn: Fill, size = 128): HTMLCanvasElement {
     }
     return c
   }
+  if (fill.type === 'shapes') { paintShapesTile(ctx, fill, size, size); return c }
   const colA = hexBytes(fill.a), colB = hexBytes(fill.b), d = Math.max(2, Math.round(fill.density))
   // The swatch keeps its own `max(2, …)` density floor (which predates the box
   // tile's `max(1, …)`), but WHICH cell is `b` comes from the shared predicates
@@ -416,6 +446,7 @@ export function fillTileBox(fillIn: Fill, w: number, h: number): HTMLCanvasEleme
     ctx.putImageData(patternImageData(W, H, hexBytes(fill.a), hexBytes(fill.b), ombrePicker(W, H, fill.angle)), 0, 0)
     return c
   }
+  if (fill.type === 'shapes') { paintShapesTile(ctx, fill, W, H); return c }
   // THE cell edge, and the same call the `<pattern>` emitter makes with the box
   // in document units — see `fillPatternCell`, including why it no longer rounds.
   const cell = fillPatternCell(W, fill.density)
