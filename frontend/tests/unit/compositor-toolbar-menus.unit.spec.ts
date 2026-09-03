@@ -8,8 +8,8 @@ import {
 
 describe('compositor toolbar menus', () => {
   it('pins the shapes menu contents and order', () => {
-    expect(TOOLBAR_SHAPES.map(s => s.id)).toEqual(['rect', 'ellipse', 'line', 'polygon', 'star'])
-    expect(TOOLBAR_SHAPES.map(s => s.label)).toEqual(['Rectangle', 'Ellipse', 'Line', 'Polygon', 'Star'])
+    expect(TOOLBAR_SHAPES.map(s => s.id)).toEqual(['rect', 'ellipse', 'line', 'polygon', 'star', 'library'])
+    expect(TOOLBAR_SHAPES.map(s => s.label)).toEqual(['Rectangle', 'Ellipse', 'Line', 'Polygon', 'Star', 'Shape library…'])
   })
 
   it('defaults the face to Rectangle', () => {
@@ -21,8 +21,18 @@ describe('compositor toolbar menus', () => {
   })
 
   it('keeps a picked shape as the face', () => {
-    for (const s of TOOLBAR_SHAPES) expect(resolveShapeFace(s.id)).toBe(s.id)
+    // library is gated on hasLibraryShape (see below); pass it here so this
+    // loop still expresses "once picked, id is kept as the face" for every row.
+    for (const s of TOOLBAR_SHAPES) expect(resolveShapeFace(s.id, true)).toBe(s.id)
     expect(shapeFaceLabel('star')).toBe('Star')
+  })
+
+  it('wears the library face only once a library shape is known', () => {
+    expect(resolveShapeFace('library')).toBe('rect')
+    expect(resolveShapeFace('library', false)).toBe('rect')
+    expect(resolveShapeFace('library', true)).toBe('library')
+    expect(shapeFaceLabel('library', true)).toBe('Shape library…')
+    expect(shapeFaceLabel('library')).toBe('Rectangle')
   })
 
   it('pins the AI menu contents and order', () => {

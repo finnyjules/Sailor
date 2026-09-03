@@ -7,7 +7,7 @@
  *  over the editor. Keeping the lists pure lets the unit suite pin the menu
  *  contents and the last-used-face reducer without mounting the modal. */
 
-export type ToolbarShapeId = 'rect' | 'ellipse' | 'line' | 'polygon' | 'star'
+export type ToolbarShapeId = 'rect' | 'ellipse' | 'line' | 'polygon' | 'star' | 'library'
 
 export interface ToolbarShapeRow {
   id: ToolbarShapeId
@@ -22,20 +22,26 @@ export const TOOLBAR_SHAPES: readonly ToolbarShapeRow[] = [
   { id: 'line', label: 'Line' },
   { id: 'polygon', label: 'Polygon' },
   { id: 'star', label: 'Star' },
+  // Opens the shape library picker instead of stamping; the picked shape then
+  // becomes the face so repeat stamping stays one click (see CompositorModal).
+  { id: 'library', label: 'Shape library…' },
 ]
 
 /** The face a freshly-opened modal wears. Last-used is NOT persisted (spec). */
 export const DEFAULT_SHAPE_FACE: ToolbarShapeId = 'rect'
 
 /** Last-used-face reducer: anything unknown falls back to the default, so a
- *  stale or hand-set value can never leave the button without an icon. */
-export function resolveShapeFace(id: string | null | undefined): ToolbarShapeId {
+ *  stale or hand-set value can never leave the button without an icon. The
+ *  library face is only valid while the modal knows which library shape to
+ *  stamp (`hasLibraryShape`); a fresh modal has none, so it falls back too. */
+export function resolveShapeFace(id: string | null | undefined, hasLibraryShape = false): ToolbarShapeId {
+  if (id === 'library') return hasLibraryShape ? 'library' : DEFAULT_SHAPE_FACE
   return TOOLBAR_SHAPES.some(s => s.id === id) ? id as ToolbarShapeId : DEFAULT_SHAPE_FACE
 }
 
 /** Label for a face id (used in the face button's tooltip). */
-export function shapeFaceLabel(id: string | null | undefined): string {
-  const face = resolveShapeFace(id)
+export function shapeFaceLabel(id: string | null | undefined, hasLibraryShape = false): string {
+  const face = resolveShapeFace(id, hasLibraryShape)
   return TOOLBAR_SHAPES.find(s => s.id === face)!.label
 }
 
