@@ -99,7 +99,7 @@ import {
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
 import { shapeById } from '~/lib/shapes/catalog'
 import { createShapeLayer, swapShapeLayer } from '~/lib/shapes/pathLayer'
-import { SHAPE_PICKER_WIDTH } from '~/lib/shapes/pickerLayout'
+import { SHAPE_PICKER_WIDTH, anchorAbove } from '~/lib/shapes/pickerLayout'
 import type { Component, ComputedRef } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
 import { brandSwatches } from '~~/shared/brand/resolve'
@@ -4226,8 +4226,6 @@ const hasLibraryShape = computed(() => !!libraryShape.value)
  *  button's v-if, :is and title, rather than each re-deriving it. */
 const shapeFaceResolved = computed(() => resolveShapeFace(shapeFace.value, hasLibraryShape.value))
 const faceTitle = computed(() => shapeFaceResolved.value === 'library' && libraryShape.value ? 'Add ' + libraryShape.value.name : 'Add ' + shapeFaceLabel(shapeFace.value, hasLibraryShape.value).toLowerCase())
-// panel = 16 padding + 28 search row + 8 margin + 256 grid (max-h-64) = 308px, plus an 8px gap above the toolbar; the picker clamps itself if the guess is off
-const SHAPE_PICKER_APPROX_HEIGHT = 308 + 8
 const libraryPickerOpen = ref(false)
 const libraryPickerAnchor = ref({ x: 0, y: 0 })
 const shapesClusterRef = ref<HTMLElement | null>(null)
@@ -4254,8 +4252,7 @@ const SHAPE_STAMP: Record<ToolbarShapeId, () => void> = {
 }
 /** Anchor the picker above the Shapes cluster; the picker clamps itself to the viewport. */
 function openLibraryPicker() {
-  const r = shapesClusterRef.value?.getBoundingClientRect()
-  libraryPickerAnchor.value = r ? { x: r.left, y: Math.max(8, r.top - SHAPE_PICKER_APPROX_HEIGHT) } : { x: 16, y: 16 }
+  libraryPickerAnchor.value = anchorAbove(shapesClusterRef.value?.getBoundingClientRect())
   shapesMenuOpen.value = false
   libraryPickerOpen.value = true
 }

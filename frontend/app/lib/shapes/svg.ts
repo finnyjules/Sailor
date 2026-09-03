@@ -9,5 +9,8 @@ import type { LibraryShape } from '~~/shared/shape-library'
 
 export function shapeToSvg(shape: LibraryShape, opts: { fill?: string } = {}): string {
   const fill = opts.fill ?? shape.sourceColor
+  // No XML escaping below: `d` is generator-restricted to M/L/C/Z commands plus
+  // numbers, and every `sourceColor` is a 6-digit hex string — both pinned by
+  // shape-library-manifest.unit.spec.ts — so neither can carry a `"` or `<`.
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path d="${shape.d}" fill="${fill}" fill-rule="${shape.fillRule}"/></svg>`
 }

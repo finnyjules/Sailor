@@ -38,6 +38,7 @@ import TexturePicker from '~/components/vue-canvas/TexturePicker.vue'
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapeToSvg } from '~/lib/shapes/svg'
+import { anchorAbove } from '~/lib/shapes/pickerLayout'
 import { PRIM_GROUPS } from '~/lib/scene3d/primGroups'
 import {
   DEFAULT_PRIM_FACE, resolvePrimFace, primFaceLabel, primFaceIcon,
@@ -349,10 +350,8 @@ const decalMenuOpen = ref(false)
 const libraryPickerOpen = ref(false)
 const libraryPickerAnchor = ref({ x: 0, y: 0 })
 const primClusterRef = ref<HTMLElement | null>(null)
-const LIBRARY_PICKER_APPROX_HEIGHT = 308 + 8   // the picker's panel plus a gap; it clamps itself if the guess is off
 function openLibraryPicker() {
-  const r = primClusterRef.value?.getBoundingClientRect()
-  libraryPickerAnchor.value = r ? { x: r.left, y: Math.max(8, r.top - LIBRARY_PICKER_APPROX_HEIGHT) } : { x: 16, y: 16 }
+  libraryPickerAnchor.value = anchorAbove(primClusterRef.value?.getBoundingClientRect())
   closeAddMenus()
   libraryPickerOpen.value = true
 }
@@ -360,6 +359,7 @@ async function onLibraryPick(id: string) {
   const s = shapeById(id)
   if (!s) return
   await importSvgSource(shapeToSvg(s), s.name)
+  if (svgError.value) uploadError.value = svgError.value
 }
 // Generate's own open flag lives HERE, with its three siblings, rather than down
 // in the Generate-panel block: the shared outside-click watch below takes all
