@@ -870,6 +870,14 @@ function removeTrack(i: number) { config.value.motion.tracks.splice(i, 1) }
  * and removing one greys them with the reason.
  */
 const trackPresets = computed(() => vtTrackPresetOffers(config.value))
+// Two galleries from one offer list. The run-level presets (`kind: 'run'` —
+// the stretch dials) need no layer and go FIRST under their own heading: filed
+// after the layer-gated tiles under "Stack motion" they were invisible, because
+// that heading promises a layer requirement they do not have (found live, 09-02).
+const trackPresetGroups = computed(() => [
+  { key: 'run', label: 'Stretch', offers: trackPresets.value.filter(o => o.preset.kind === 'run') },
+  { key: 'stack', label: 'Stack motion', offers: trackPresets.value.filter(o => o.preset.kind !== 'run') },
+].filter(g => g.offers.length))
 const activeTrackPreset = (id: string) => vtTrackPresetActive(config.value, id)
 
 function applyTrackPreset(id: string) {
@@ -1880,16 +1888,18 @@ const frameCount = computed(() => Math.round((config.value.motion.fps || 30) * (
             Add a track to animate an axis (or a per-glyph offset) over the clip.
           </p>
 
-          <!-- THE APPEARANCE-STACK MOTIONS. They belong here rather than in the
+          <!-- THE TRACK PRESETS, in two groups. They belong here rather than in the
                preset gallery because they ARE tracks — one click writes the rows
-               below, and every one stays editable afterwards. Disabled tiles keep
-               their reason on screen: the fix is a layer the user owns and can
-               add in the Layers section, exactly like a missing font axis. -->
-          <div v-if="trackPresets.length" class="mb-2">
-            <div class="mb-1 text-[10px] uppercase tracking-[0.12em] text-white/45">Stack motion</div>
+               below, and every one stays editable afterwards. "Stretch" holds the
+               run-level ones (no layer needed); "Stack motion" the appearance-stack
+               ones, whose disabled tiles keep their reason on screen: the fix is a
+               layer the user owns and can add in the Layers section, exactly like a
+               missing font axis. -->
+          <div v-for="g in trackPresetGroups" :key="g.key" class="mb-2">
+            <div class="mb-1 text-[10px] uppercase tracking-[0.12em] text-white/45">{{ g.label }}</div>
             <div class="grid grid-cols-2 gap-1.5">
               <button
-                v-for="o in trackPresets" :key="o.preset.id"
+                v-for="o in g.offers" :key="o.preset.id"
                 type="button"
                 class="rounded-lg border p-1.5 text-left transition-colors"
                 :class="!o.available
