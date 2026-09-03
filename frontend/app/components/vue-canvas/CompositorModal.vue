@@ -1155,6 +1155,11 @@ function onKeydown(e: KeyboardEvent) {
   // doesn't fire while typing in a field or text-editing a layer.
   const t = e.target as HTMLElement | null
   const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+  // The shape-library picker (toolbar face or inspector) owns the keyboard while
+  // open — it has its own arrow-key grid nav and Escape handling, so the editor
+  // must not also nudge the selection, toggle tools, or start a space-hold pan.
+  const shapePickerOpen = libraryPickerOpen.value || inspectorShapePickerOpen.value
+  if (shapePickerOpen) return
   if (!typing && !editingId.value && handleEditorKey(e)) return
   if (e.key === 'Escape' && pen.active.value) { e.stopPropagation(); pen.setActive(false); return }
   if (e.key === 'Enter' && pen.active.value && pen.anchors.value.length >= 2) { e.preventDefault(); finishPen(); return }
@@ -4215,6 +4220,12 @@ const insertFace = ref<ToolbarInsertId>(DEFAULT_INSERT_FACE)
 const libraryShapeId = ref<string | null>(null)
 const libraryShape = computed(() => (libraryShapeId.value ? shapeById(libraryShapeId.value) : undefined))
 const hasLibraryShape = computed(() => !!libraryShape.value)
+/** The face id actually worn right now, with the library-without-a-shape case
+ *  already downgraded to the default — computed once and reused by the face
+ *  button's v-if, :is and title, rather than each re-deriving it. */
+const shapeFaceResolved = computed(() => resolveShapeFace(shapeFace.value, hasLibraryShape.value))
+// search row + 5×36px grid rows + padding; the picker clamps itself if the guess is off
+const SHAPE_PICKER_APPROX_HEIGHT = 340
 const libraryPickerOpen = ref(false)
 const libraryPickerAnchor = ref({ x: 0, y: 0 })
 const shapesClusterRef = ref<HTMLElement | null>(null)
@@ -4223,6 +4234,9 @@ const SHAPE_ICONS: Record<ToolbarShapeId, Component> = {
 }
 function stampLibraryShape() {
   const s = libraryShape.value
+  // Defensive only: every caller reaches this fn via shapeFaceResolved, which
+  // already downgrades 'library' to the default face when hasLibraryShape is
+  // false — so `s` should always be set here. Kept as a guard, not a live path.
   if (!s) { openLibraryPicker(); return }
   addLocal(createShapeLayer(s))
 }
@@ -4232,7 +4246,7 @@ const SHAPE_STAMP: Record<ToolbarShapeId, () => void> = {
 /** Anchor the picker above the Shapes cluster; the picker clamps itself to the viewport. */
 function openLibraryPicker() {
   const r = shapesClusterRef.value?.getBoundingClientRect()
-  libraryPickerAnchor.value = r ? { x: r.left, y: Math.max(8, r.top - 340) } : { x: 16, y: 16 }
+  libraryPickerAnchor.value = r ? { x: r.left, y: Math.max(8, r.top - SHAPE_PICKER_APPROX_HEIGHT) } : { x: 16, y: 16 }
   shapesMenuOpen.value = false
   libraryPickerOpen.value = true
 }
@@ -4255,6 +4269,7 @@ function closeToolbarMenus() {
   aiMenuOpen.value = false
   insertMenuOpen.value = false
   libraryPickerOpen.value = false
+  inspectorShapePickerOpen.value = false
 }
 function toggleInsertMenu() { const next = !insertMenuOpen.value; closeToolbarMenus(); insertMenuOpen.value = next }
 function toggleZoomMenu() { const next = !zoomMenuOpen.value; closeToolbarMenus(); zoomMenuOpen.value = next }
@@ -4288,6 +4303,10 @@ function onInspectorShapePick(id: string) {
   if (!l || l.kind !== 'path' || !s) return
   setLocal(l.id, swapShapeLayer(l, s))
 }
+// A picker anchored to the inspector's shape swatch is only meaningful for the
+// layer it opened on — switching selection out from under it would swap some
+// OTHER layer's shape on pick, so close it the moment selection changes.
+watch(() => selectedLocal.value?.id, () => { inspectorShapePickerOpen.value = false })
 /** Called during render (not a computed): `selectedWiredImage()` reads the DOM,
  *  so it must be re-evaluated with the rest of the template, exactly as the old
  *  Smart-select button's :disabled/:title bindings did. */
@@ -4419,6 +4438,8 @@ function handleKeydown(e: KeyboardEvent) {
     if (aiMenuOpen.value) { aiMenuOpen.value = false; return }
     if (insertMenuOpen.value) { insertMenuOpen.value = false; return }
     if (pickerDialogOpen.value) { pickerDialogOpen.value = false; return }
+    if (libraryPickerOpen.value) { libraryPickerOpen.value = false; return }
+    if (inspectorShapePickerOpen.value) { inspectorShapePickerOpen.value = false; return }
     if (editingId.value) { endEdit(); return }
     if (typing) return
     // The busy guard now lives inside exitSmartMode itself.
@@ -5384,12 +5405,12 @@ onUnmounted(() => {
         <div class="relative flex items-center" ref="shapesClusterRef" @click.stop>
           <button
             class="flex items-center justify-center h-8 w-7 rounded-l hover:bg-white/10 text-white/80 cursor-pointer"
-            data-testid="shapes-face" :title="'Add ' + (resolveShapeFace(shapeFace, hasLibraryShape) === 'library' && libraryShape ? libraryShape.name : shapeFaceLabel(shapeFace, hasLibraryShape)).toLowerCase()"
+            data-testid="shapes-face" :title="shapeFaceResolved === 'library' && libraryShape ? 'Add ' + libraryShape.name : 'Add ' + shapeFaceLabel(shapeFace, hasLibraryShape).toLowerCase()"
             @click="stampFaceShape()">
-            <svg v-if="resolveShapeFace(shapeFace, hasLibraryShape) === 'library' && libraryShape" viewBox="0 0 96 96" class="size-4" fill="currentColor" aria-hidden="true">
+            <svg v-if="shapeFaceResolved === 'library' && libraryShape" viewBox="0 0 96 96" class="size-4" fill="currentColor" aria-hidden="true">
               <path :d="libraryShape.d" :fill-rule="libraryShape.fillRule" />
             </svg>
-            <component v-else :is="SHAPE_ICONS[resolveShapeFace(shapeFace, hasLibraryShape)]" class="size-4" />
+            <component v-else :is="SHAPE_ICONS[shapeFaceResolved]" class="size-4" />
           </button>
           <button
             class="flex items-center justify-center h-8 w-4 rounded-r cursor-pointer"
