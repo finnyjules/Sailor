@@ -13,6 +13,8 @@
 
 **What falls out of it.** Every existing ramp (rotation step, scale start/end, skew) still applies on top of a blend. The layer stack, symmetry, clip masks, PNG, and SVG export all work unchanged because a blend is just a different set of clone shapes handed to the same compositor. A Shape Studio node wired into a Frame shows the blend as a still layer.
 
+**Two phases.** Phase one is everything below in Shape Studio, as stills. Phase two (section 11, approved 2026-09-03) adds a native **Blend layer** to the Frame: pick two shape layers you already placed and blend between them in place, Illustrator-style. Phase one builds the morph and colour-ramp modules as pure, studio-free code so phase two reuses them unchanged.
+
 **What is not in this pass.** Motion. Shape Studio makes stills today, and it will gain motion through the shared moves panel (see `2026-09-03-motion-moves-shared-core-design.md`), where it is the second consumer. Building the old track rows here first would be throwaway work.
 
 **What is risky.** Matching up two different outlines is guesswork when their point counts and start points differ. The rules below (winding fix, best start offset, twist) handle the common cases; odd shapes may fold through themselves, and Twist is the user's escape hatch. A blend in **single** fill mode runs a boolean fold over up to 200 morphed shapes, which is slow; **per-clone** (the default for the reference look) is pure drawing and fast.
@@ -54,9 +56,9 @@ For `layout === 'blend'` with `count` steps:
 
 Stagger, radius, spacing, spin, and evenAngle are ignored in this layout.
 
-## 3. The morph (`lib/geoshape/morph.ts`, new, pure)
+## 3. The morph (`lib/vector/morph.ts`, new, pure)
 
-Dependency-light like `arrange.ts`: no paper.js, no DOM, no `three`. Input is two SVG `d` strings; output is one `d` string.
+Lives beside `lib/vector/svg.ts`, not under `geoshape/`, because the Frame is its second consumer (section 11). Dependency-light like `arrange.ts`: no paper.js, no DOM, no `three`, no studio imports. Input is two SVG `d` strings; output is one `d` string.
 
 - `parsePathD(d)` → subpaths of absolute segments (line, cubic). Accepts `M L H V C S Q T A Z` in absolute and relative forms; arcs convert to cubics (standard endpoint-to-centre parameterisation). Base shapes emit `M L C Q A Z`; library shapes emit `M L C Z`.
 - `flattenSubpath(sub)` → closed polyline; each curve splits into a fixed 12 segments (deterministic, no tolerance knob).
@@ -74,7 +76,7 @@ Dependency-light like `arrange.ts`: no paper.js, no DOM, no `three`. Input is tw
 
 ## 4. Colour (`lib/geoshape/boolean.ts` emit sites, `lib/geoshape/render.ts`)
 
-- **Colour ramp.** Where per-clone and pieces modes hand out `fills[rank % fills.length]`, `fillCycle === 'ramp'` instead takes `rampColour(fills, rank / (N − 1))`: the fills list is treated as evenly spaced stops and the colour is interpolated between the two nearest, in OKLCH via `lib/color/mix.ts`. Only solid colours interpolate; a gradient or pattern stop is used as-is at its nearest position (no interpolation into or out of it). Single mode ignores `fillCycle` (one fill).
+- **Colour ramp.** Where per-clone and pieces modes hand out `fills[rank % fills.length]`, `fillCycle === 'ramp'` instead takes `rampColour(fills, rank / (N − 1))` (new, in `lib/color/ramp.ts`, shared with phase two): the fills list is treated as evenly spaced stops and the colour is interpolated between the two nearest with `mixHex` from `lib/color/mix.ts` in OKLCH. Only solid colours interpolate; a gradient or pattern stop is used as-is at its nearest position (no interpolation into or out of it). Single mode ignores `fillCycle` (one fill).
 - **Colour applies to.** At every shape emit site:
   - `fill` (today): shape fill = clone paint, stroke = the single `stroke` colour if set.
   - `outline`: shape `fill: null` (SVG `fill="none"`), stroke = the clone's colour (solid; a non-solid clone paint falls back to `solidOf`), `strokeWidth` as set.
@@ -118,7 +120,7 @@ New fields flow into the agent vocabulary through `GEO_CONTROLS`. `GEO_GUIDANCE`
 
 ## 9. Testing (TDD, `tests/unit`)
 
-- `geoshape-morph`: parse+flatten handles `M L C Q A Z` (a rounded polygon with arcs flattens to a closed polyline whose bounds match `controlPointBounds` within 1%); `resample` returns `K` points with segment lengths within 1% of each other; alignment recovers a known index rotation of B; a reversed copy of A blends to A at `t = 0.5` (winding fix); twist shifts the start offset by `round(twist·K)`; same-skeleton hexagon→hexagon at `t = 0.5` equals the argument-wise midpoint exactly; `t = 0` / `t = 1` reproduce A / B; an unpaired subpath collapses to the partner's centroid.
+- `vector-morph`: parse+flatten handles `M L C Q A Z` (a rounded polygon with arcs flattens to a closed polyline whose bounds match `controlPointBounds` within 1%); `resample` returns `K` points with segment lengths within 1% of each other; alignment recovers a known index rotation of B; a reversed copy of A blends to A at `t = 0.5` (winding fix); twist shifts the start offset by `round(twist·K)`; same-skeleton hexagon→hexagon at `t = 0.5` equals the argument-wise midpoint exactly; `t = 0` / `t = 1` reproduce A / B; an unpaired subpath collapses to the partner's centroid.
 - `geoshape-arrange`: blend with `count 5`, `blendX 100` gives x = 0, 25, 50, 75, 100; easeIn is monotone and front-loaded; `count 1` yields one placement at `blend 0`.
 - `geoshape-render`: blend `count 1` renders the same commands as linear `count 1` (parity with shape A); `paintTarget 'outline'` yields `fill: null` and a stroke on every shape; `fillCycle 'ramp'` with two fills and five clones yields five distinct colours whose ends equal the stops.
 - `geoshape-config`: defaults for every new field; junk `blendEase` → linear; `blendSides` clamps.
@@ -129,6 +131,62 @@ New fields flow into the agent vocabulary through `GEO_CONTROLS`. `GEO_GUIDANCE`
 ## 10. Out of scope
 
 - Motion (shared moves panel, separate spec).
-- A Frame-native blend layer between two Frame shape layers.
 - Chains of more than two key shapes (A→B→C). The layer stack can approximate it today with two blend layers.
 - Feature-matching correspondence (corners to corners). Twist plus the best-offset search is the v1 answer.
+
+## 11. Phase two — a native Blend layer in the Frame (approved 2026-09-03, planned after phase one)
+
+**In plain words.** In the Frame editor you select two shape layers you already placed, choose **Blend…**, and a new layer appears that draws the steps between them. The two originals stay where they are and stay editable; move or reshape either one and the steps follow. The blend has the same dials as the studio's Blend group (steps, spacing, twist, colour ramp, colour applies to, stroke width). **Expand** turns it into ordinary path layers when you want to edit the steps by hand.
+
+**Why a second phase.** Phase one proves the look and builds the pure pieces. What phase two adds is a *derived* layer — one whose geometry comes from two other layers — which is a new idea in the Frame's layer model, plus a new layer kind across the roughly fourteen files that switch on layer kinds.
+
+### 11.1 Data model (`composables/useCompositorLayers.ts`)
+
+```ts
+export interface BlendLayer extends LayerCommon, StrokeStyleFields {
+  kind: 'blend'
+  fromId: string          // source layer ids; both must be shape-like (path, rect, ellipse, polygon, star)
+  toId: string
+  steps: number           // 2..200, steps drawn BETWEEN the sources
+  ease: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut'
+  twist: number           // 0..1
+  fillCycle: 'cycle' | 'ramp'
+  paintTarget: 'fill' | 'outline' | 'both'
+  fills: Paint[]          // per-step colours, cycled or ramped
+}
+```
+
+`LocalLayerKind` gains `'blend'`. A blend layer has no transform of its own: `x, y, w, h, rotation` are derived from its steps' union box for hit-testing and selection outlines, and are recomputed whenever a source changes. It is never a boolean operand, never a mask target, and never a repeat-stamp face.
+
+### 11.2 Geometry
+
+At paint time the two sources are read from the live layer list: each shape-like layer becomes an SVG `d` in canvas space through the existing shape→path conversion (the same one node-editing uses), including its transform. `blendPath(dA, dB, t, { twist })` from `lib/vector/morph.ts` gives each step's outline; step colours come from `rampColour` / cycling exactly as in section 4. Sources that are wired image layers, text, or brush strokes are refused with a one-line reason ("Blend needs two shapes").
+
+### 11.3 Rules for a derived layer
+
+- **Deleting a source** deletes the blend too (one undo step restores both).
+- **Duplicating the blend** duplicates the link (same two sources). Duplicating a source does not add it to any blend.
+- **Grouping / moving a source** is fine: the blend reads the source's effective canvas-space geometry.
+- **Expand** replaces the blend with `steps` plain path layers carrying the step colours, in the blend's z-position.
+- **Reordering** is allowed; the blend is created just below the upper source.
+- Wired layers cannot be sources. A Shape Studio node wired into the Frame remains the route for a blend the studio made.
+
+### 11.4 Where it shows up
+
+- **Creation:** with exactly two shape layers selected, a **Blend…** row in the Shapes ▾ menu and the layer context menu; the agent gets `blendLayers(fromId, toId, steps)`.
+- **Inspector:** a Blend section with the dials above and an Expand button; the Fill row becomes the fills list editor from Shape Studio; Stroke rows as today.
+- **Painter (`drawLocalLayer`):** one branch drawing the steps; so preview, the Frame card's client bake, thumbnails, and the Timeline's Frame clips all render it with no server change. The plan verifies the ComfyUI Run path composites it through the same painted image the other local layers use.
+- **SVG export:** each step emitted as a path with `fill="none"` where outline-only.
+- **Motion:** the blend animates as one layer under the Frame's presets and keyframes (it moves as a whole). Per-step stagger is a later idea.
+- **Seams to touch** (the switch sites): layer creation helpers, the painter, hit-testing, selection outline, the inspector panel, the inline toolbar (Expand), group resize (a blend is skipped — resize its sources), `lib/agent/surfaces/compositor.ts`, the SVG writer, and the sketch tools (which must ignore it).
+
+### 11.5 Testing
+
+- Unit: creating a blend from two rects yields `steps` outlines whose first and last approach the sources; moving a source changes the blend's derived box; deleting a source removes the blend; Expand yields `steps` path layers with the ramped colours; wired/text sources are refused.
+- Painter parity: a Frame with a blend layer painted at two sizes scales cleanly (no per-step drift).
+- Live: place a circle and a star, Blend… with 60 steps, outline, ramp; drag the star and watch the steps follow; Expand and edit one step; export SVG.
+
+### 11.6 Out of scope for phase two
+
+Blending more than two layers; per-step motion stagger; blending text outlines (would need glyph-to-path first); a blend as a mask or boolean operand.
+
