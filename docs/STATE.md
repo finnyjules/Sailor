@@ -12,7 +12,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 
 | Surface | bake | motion | inspector | agent | engine LOC |
 |---|---|---|---|---|---|
-| Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls) | ✅ descriptor | 11,202 |
+| Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes**) | ✅ descriptor (+ `shape` kind) | 11,202 |
 | Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
 | Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers) | ✅ descriptor (object.* + id-addressed) | ~6,300 (+ SVG import) + ambientCG textures |
 | Compositor / Frame | ✅ | ✅ motion clips | ✅ | ✅ commands | 1,667 (+1,041 motion) |
@@ -30,6 +30,22 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Pose Mannequin | ✅ control img | ❌ | modal | ❌ (excluded) | — |
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
+
+### Shape library + Expressive Studio separator — LANDED 2026-09-02 (`b596e3d50`..`0304d6088`)
+
+Julien's 100 drawn shapes (`Assets/Shapes/*.svg`, now committed) are a **bundled shape library** every studio can read, and Expressive Studio is the first consumer: a **separator shape between word repeats** — "SAILOR ✦ SAILOR ✦" — on every tile-based effect.
+
+**Foundation.** `frontend/scripts/build-shape-library.mjs` (+ pure `shapeLibrary.mjs`) parses each SVG — only `M L H V C S Z`, polygon/rect/circle, element `transform` composed — into absolute `M L C Z` path data with an ink bounding box, and writes `app/data/shape-library.manifest.json` (100 shapes, 2-decimal numbers, one per line; the SVG fill is kept as a hint and never used to paint). Any arc, quadratic, rounded rect, foreign element, non-96 viewBox or id collision fails the build with the filename; a partial manifest is never written. `lib/shapes/catalog.ts` is the pure catalog (lookup, six families by ordered rules, search, the agent's option list); `lib/shapes/path2d.ts` fits a shape's ink box into any canvas box (`drawShape`, cached `Path2D`). A new **`shape` control kind** on `ControlSpec` gets a row renderer (`RowShape`) and one teleported **`ShapePicker`** (search, family rail, None tile, roving arrow focus), and `controlDescriptor` describes it to the agent as an enum of ids that `validatePatch` enforces — so "put a sparkle between the words" resolves to `{ separator: 'sparkle' }` with no new capability entry.
+
+**Separator.** `lib/spacetype/separator.ts` declares the three controls once (Separator · size 0.3–1.5 of cap height · spacing 0–3 quarter-ems, the latter two hidden at None) and `effects/index.ts` appends them at registration to every effect that is neither raw-word (coil/elastic/echo) nor per-glyph (blend/cascade/cylinder/onionburst/ring/slot) — 19 effects, no per-effect edits. **One resolver** (`separatorFromParams`) feeds the studio's `texOptsFromState`, the embed's `buildTexOpts` and the dev harness, so modal, node card, clip renderer, headless bake and web embed cannot disagree. `makeTextTexture` lays the tile out as `[text][gap][shape][gap]` — trimmed text, shape at cap height in the type colour with the type's outline stroke, clamped to its row — and is byte-identical when no separator is set (guarded by a fake-canvas test whose numbers derive from the implementation, not the fake).
+
+**Verified.** 86 new unit tests across 8 specs (parser incl. the rhombus transform and a Z-then-number infinite-loop guard, manifest invariants, catalog, drawShape geometry, describer, controls injection + eligibility, tile layout, picker). Live in the real studio (Ribbon: Separator row → picker → Sparkle → "SAILOR ✦ SAILOR" on the ribbons, Size/Spacing rows appear, None restores the gap) and **export parity** proven by Render on canvas → As image (the baked PNG carries the separator).
+
+**The review that mattered.** The whole-branch review found what eight per-task reviews and the size ceiling missed: `SPACE_TYPE_EFFECTS = [...].map(withSeparatorControls)` is a module-scope call Rollup must keep, which pulled all 28 effects back into every per-effect embed bundle (tear.js 813 KB → 1.21 MB — under the 1.75 MB ceiling, so the gate stayed green). Fixed with `/* @__PURE__ */` on the call (the effect-list scanner's regex widened to allow it), bundles back to ~873 KB, and a **cross-effect content test** now fails if any bundle carries another effect's marker. Lesson recorded: a ceiling cannot tell "grew a dependency" from "stopped splitting".
+
+**Owed / next.** Three more consumers, each its own spec in the agreed order: **Compositor** (a Shapes entry beside rect/ellipse/line inserting a real `path` layer), **Shape Studio** (a `library` base shape), **3D Studio** (an extruded shelf through the SVG import). The separator on the six per-glyph effects (as a glyph-sized tile in `charLayout`). Collections binding for the `shape` kind. Pre-existing and unrelated, surfaced by the run: `public/embed/gradient.js` is 294 KB against its 90 KB ceiling (the embed size spec is red on main) and `spacetype-palette` has four stale fill-default failures.
+
+Spec: [2026-09-02-shape-library-foundation-expressive-separator-design.md](superpowers/specs/2026-09-02-shape-library-foundation-expressive-separator-design.md) · plan: [2026-09-02-shape-library-foundation-expressive-separator.md](superpowers/plans/2026-09-02-shape-library-foundation-expressive-separator.md).
 
 ### 3D Studio — ambientCG surface textures — LANDED 2026-09-01
 
