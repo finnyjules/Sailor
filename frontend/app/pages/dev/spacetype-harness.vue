@@ -13,6 +13,7 @@ import { SpaceTypeEngine } from '~/lib/spacetype/engine'
 import { getEffect } from '~/lib/spacetype/effects'
 import { ensureBoostFont } from '~/lib/spacetype/effects/boost'
 import { defaultsFromControls, type Params } from '~/lib/spacetype/effect'
+import { separatorFromParams } from '~/lib/spacetype/separator'
 import type { TextTextureOptions } from '~/lib/spacetype/textTexture'
 
 definePageMeta({ layout: false })
@@ -52,6 +53,8 @@ function texOpts(): TextTextureOptions {
     tracking: Number(params.tracking ?? 0),
     strokeColor: '#000000',
     strokeWidth: Number(params.typeStroke ?? 0),
+    // Same resolver as texOptsFromState / the embed's buildTexOpts, so the harness shows the separator too.
+    separator: separatorFromParams(effectId.value, params),
   }
 }
 
