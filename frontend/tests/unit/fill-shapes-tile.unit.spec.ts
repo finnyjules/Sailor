@@ -15,6 +15,7 @@ class FakeCtx {
   createLinearGradient() { return { addColorStop() {} } }
   putImageData() {}
   getImageData() { return { data: new Uint8ClampedArray(4) } }
+  drawImage(img: any, x: number, y: number) { this.ops.push(['drawImage', x, y]) }
   moveTo() {} lineTo() {} clip() {} clearRect() {} setTransform() {} getContext() { return this }
 }
 class FakeCanvas { width = 0; height = 0; ctx = new FakeCtx(); getContext() { return this.ctx } }
@@ -103,5 +104,29 @@ describe('fillTexture (GPU path) — shapes', () => {
     const t1again = fillTexture(THREE, shapesFill({ a: '#abcdef', shapeId: 'sparkle', density: 2 }))
     expect(t2).not.toBe(t1)      // different shape → different cache entry
     expect(t1again).toBe(t1)     // same shape → cache hit
+  })
+})
+
+// Regression (final review, follow-up): fillAtlasTexture (the shutter/coil per-band atlas) is a
+// SECOND, independent GPU tile builder that never calls fillTexture — its `else` branch rendered a
+// shapes fill as a flat `a`-colour band, and its cache key omitted shapeId. Assert it now stamps
+// the shape tile (Path2D fills) and keys on shapeId.
+import { fillAtlasTexture } from '../../app/lib/spacetype/fills'
+
+describe('fillAtlasTexture (shutter/coil atlas) — shapes', () => {
+  it('stamps the shape tile into the band, not a flat colour', () => {
+    created = []
+    fillAtlasTexture(THREE, [shapesFill({ a: '#22aa44', shapeId: 'sun-rays', density: 2 })])
+    // the atlas canvas is created[0]; the stamped tile is a nested canvas created by fillTileCanvas
+    const tileCanvas = created.find(c => c.ctx.ops.some((o: any) => o[0] === 'fill' && o[2] === '#22aa44'))
+    expect(tileCanvas).toBeTruthy()
+    expect(tileCanvas!.ctx.ops.filter((o: any) => o[0] === 'fill' && o[2] === '#22aa44').length).toBe(4)
+  })
+  it('caches atlases per shapeId', () => {
+    const a = fillAtlasTexture(THREE, [shapesFill({ a: '#334455', shapeId: 'sparkle', density: 2 })])
+    const b = fillAtlasTexture(THREE, [shapesFill({ a: '#334455', shapeId: 'sun-rays', density: 2 })])
+    const aAgain = fillAtlasTexture(THREE, [shapesFill({ a: '#334455', shapeId: 'sparkle', density: 2 })])
+    expect(b).not.toBe(a)
+    expect(aAgain).toBe(a)
   })
 })

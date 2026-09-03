@@ -395,7 +395,9 @@ export function fillTiling(fill: Fill): number {
 const _atlasCache = new Map<string, THREE.Texture>()
 
 export function fillAtlasTexture(three: typeof THREE, fills: Fill[]): THREE.Texture {
-  const key = fills.map(f => `${f.type}:${f.a}:${f.b}:${f.angle}:${f.density}`).join('|')
+  // shapeId only matters for `shapes`; fold it in so two shape patterns that differ only by shape
+  // (same colours/density/angle) don't collide onto one cached atlas (mirrors fillTexture's key).
+  const key = fills.map(f => `${f.type}:${f.a}:${f.b}:${f.angle}:${f.density}${f.type === 'shapes' ? ':' + (f.shapeId ?? 'sparkle') : ''}`).join('|')
   const hit = _atlasCache.get(key)
   if (hit) return hit
   const BAND = 256, W = 256, nb = Math.max(1, fills.length)
@@ -434,6 +436,10 @@ export function fillAtlasTexture(three: typeof THREE, fills: Fill[]): THREE.Text
       drawPatternBand(ctx, fill, y0, W, BAND)
     } else if (fill.type === 'qr') {
       drawPatternBand(ctx, fill, y0, W, BAND)
+    } else if (fill.type === 'shapes') {
+      // Stamp the shared shape tile into this band (the band is exactly one BAND×BAND tile cell),
+      // so shutter/coil copies get tiled shapes instead of a flat colour. Transparent bg survives.
+      ctx.drawImage(fillTileCanvas(fill, BAND), 0, y0)
     } else {
       ctx.fillStyle = fill.a; ctx.fillRect(0, y0, W, BAND)
     }
