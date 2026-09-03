@@ -1544,6 +1544,7 @@ function legacyPresetEaseName(ease: string | undefined): MoveEaseName | null {
   if (e.startsWith('back')) return 'overshoot'
   if (e.startsWith('elastic')) return 'elastic'
   if (e.startsWith('bounce')) return 'bounce'
+  if (e.startsWith('steps')) return 'steps'
   return null
 }
 

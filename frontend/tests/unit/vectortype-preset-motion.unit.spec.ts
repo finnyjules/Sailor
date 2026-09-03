@@ -737,4 +737,36 @@ describe('migration parity — an OLD-shape document keeps its native ease', () 
     expect(migrated075.dy).toBeLessThan(0)
     expect(Math.sign(migrated075.dy)).toBe(Math.sign(oracle075.dy))
   })
+
+  it('glitch-in (in) — steps(6) judder, not smooth: exact match (steps maps 1:1 onto the engine\'s own steps(6))', () => {
+    const D = 0.8
+    const cfg = oldShapeCfg('in', 'glitch-in', D)
+    expect(migratedEase(cfg)).toBe('steps')   // not 'smooth' — the bug's default
+
+    const anim: LayerAnimation = { offset: 0, in: { presetId: 'glitch-in', duration: D, stagger: 0 } }
+    for (const frac of [0.2, 0.5, 0.8]) {
+      const t = frac * D
+      const migrated = presetTransform(cfg, t, 0, WORD.length)
+      const oracle = evaluateAnimation(anim, t, motion, WORD.length).units![0]!
+      // Unlike the family-mapped presets above, `steps` names the SAME string
+      // `glitch-in`'s own native ease already is (`evaluate.ts`'s `IN_EVAL`:
+      // `steps(6)`) — `ease.ts`'s `ENGINE_NAME` table sends `steps` straight
+      // back to `steps(6)`. So this is bit-exact, not a family match — and
+      // `glitch-in`'s per-unit jitter (`seeded(i, salt)`) is a deterministic
+      // hash, not `Math.random()`, so the oracle is reproducible too.
+      expect(migrated.dx / 100, `dx at t=${t}`).toBeCloseTo(oracle.dx, 6)
+      expect(migrated.dy / 100, `dy at t=${t}`).toBeCloseTo(oracle.dy, 6)
+    }
+
+    // The bug this test exists to catch, made concrete: a smooth-eased
+    // glitch is a continuous curve — it visits every progress value between
+    // 0 and 1. A steps(6)-eased one is quantized into 6 flat plateaus, so two
+    // times inside the same step must produce IDENTICAL motion — something a
+    // smooth curve structurally cannot do. 0.1×D and 0.15×D both fall inside
+    // steps(6)'s first plateau (width 1/6 ≈ 0.167 of the move's own progress).
+    const step = presetTransform(cfg, 0.1 * D, 0, WORD.length)
+    const stepLater = presetTransform(cfg, 0.15 * D, 0, WORD.length)
+    expect(step.dx).toBeCloseTo(stepLater.dx, 10)
+    expect(step.dy).toBeCloseTo(stepLater.dy, 10)
+  })
 })
