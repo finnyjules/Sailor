@@ -14,7 +14,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 |---|---|---|---|---|---|
 | Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes**) | ✅ descriptor (+ `shape` kind) | 11,202 |
 | Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc + **smart stretch: Stretch/Height dials, Fit**) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
-| Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers) | ✅ descriptor (object.* + id-addressed) | ~6,300 (+ SVG import) + ambientCG textures |
+| Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers, **shape library shelf**) | ✅ descriptor (object.* + id-addressed; library shapes not yet) | ~6,300 (+ SVG import) + ambientCG textures |
 | Compositor / Frame | ✅ | ✅ motion clips | ✅ (+ **shape library** insert/swap) | ✅ commands (+ `addShape`) | 1,667 (+1,041 motion) |
 | Timeline (NLE) | ✅ webm/mp4 + server | ✅ native | ✅ | ❌ | shared/timeline |
 | Gradient Studio | ✅ | ✅ 30 targets, path-based | ✅ (**schema-drawn** from GRADIENT_CONTROLS) | ✅ descriptor | 2,620 (+ 4 primitives + alpha + per-layer layout) |
@@ -30,6 +30,16 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Pose Mannequin | ✅ control img | ❌ | modal | ❌ (excluded) | — |
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
+
+### 3D Studio — shape library shelf — LANDED 2026-09-02 (`cd4f9c7a9`..`e7c0dbfc0`)
+
+The primitives menu gains a **"Shape library…"** row: pick one of the 100 drawn shapes and it lands as an **extruded solid** through the existing SVG import path — the fourth consumer of the [shape library](#shape-library--expressive-studio-separator--landed-2026-09-02), and the thinnest of them. `lib/shapes/svg.ts` turns a manifest shape into a one-path SVG string (`shapeToSvg`), with the drawing's own colour as the `fill` — the one place the library's colour hint is worth spending, because a solid needs a starting material and the drawing's beats a default. The surface hands that string to `importSvgSource(svg, shape.name)`, so parsing, normalisation (`targetWidth 1.5`), stroke outlining, naming, grouping and selection are all the SVG importer's, unchanged: the result is a group named after the shape holding one `svgPath` child. Escape inside the picker is gated in the surface's window-capture `onKey` (which runs before the picker's own listener, so a plain open-flag check is sound here — the opposite of the Frame, where the picker ran first).
+
+**Verified.** Unit: the SVG string is exact, a fill override works, a real manifest shape round-trips; a library path imports as a group named `Sparkle` with one `svgPath` child carrying the path and the seeded colour. Live: primitives ▾ → Shape library… → Sparkle: "Sparkle → Path" extruded in the drawing's pale gold, selected with the gizmo; Escape inside the picker leaves the studio open; a second pick adds "Sun rays → Path 2".
+
+**Owed.** The agent cannot yet ask for a library solid ("add a 3D sparkle") — the 3D `primitive` macro is keyed by `PrimitiveKind`, so a library-shape macro is its own seam. The Render footer bake with a library solid (backend down).
+
+Spec: [2026-09-02-scene3d-shape-library-shelf-design.md](superpowers/specs/2026-09-02-scene3d-shape-library-shelf-design.md) · plan: [2026-09-02-scene3d-shape-library-shelf.md](superpowers/plans/2026-09-02-scene3d-shape-library-shelf.md).
 
 ### Shape Studio — library base shape — LANDED 2026-09-02 (`f7c90ba0e`..`a1281ef58`)
 
