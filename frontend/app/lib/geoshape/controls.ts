@@ -147,7 +147,7 @@ export const GEO_CONTROLS: GeoControl[] = [
 
   // --- Blend (layout 'blend': the steps between shape A and shape B) --------
   select('blendShape', 'Blend to', SHAPES, DEFAULT_CONFIG.blendShape, 'Blend',
-    'The shape the steps run toward. Same choices as Shape; Count is the number of steps.', { when: isBlend }),
+    'The shape the steps run toward. Same choices as Shape; Count is the number of steps. Detailed library shapes blend with fewer points per outline, so a many-piece shape stays fast.', { when: isBlend }),
   shapeC('blendLibraryShape', 'Blend to library shape', DEFAULT_CONFIG.blendLibraryShape, 'Blend',
     'library only: which of the 100 drawn shapes the steps run toward', { when: blendIsLibrary }),
   slider('blendSides', 'Blend to sides', 3, 24, 1, 'Blend', DEFAULT_CONFIG.blendSides, undefined, { when: blendUsesSides }),

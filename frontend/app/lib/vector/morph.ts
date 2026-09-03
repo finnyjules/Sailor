@@ -8,8 +8,13 @@
  * Pipeline: `parsePathD` → `Subpath[]` (lines + cubics; quadratics and arcs are
  * converted) → `flattenSubpath` → closed polyline → `resample` to K evenly spaced
  * points → `alignCorrespondence` (winding + best start + twist) → lerp. When both
- * inputs share the same command skeleton, `blendPath` skips all of that and
- * interpolates control points directly, so curves stay curves.
+ * inputs share the same command skeleton AND no twist is asked for, `prepareBlend`
+ * skips all of that and interpolates control points directly, so curves stay curves.
+ *
+ * `prepareBlend(dA, dB, opts)` does that whole set-up ONCE and returns a closure
+ * that only lerps + serialises per `t` — a 200-step blend parses, flattens,
+ * resamples and aligns one time instead of two hundred. `blendPath` is the
+ * one-shot wrapper around it.
  */
 import { formatNumber } from './svg'
 
@@ -271,6 +276,16 @@ export function subpathsToD(subs: Subpath[], precision = 2): string {
  *  outline stack under ~350 KB of SVG while hiding the polyline at print size. */
 export const BLEND_SAMPLES = 128
 
+/** Points per outline once `n` subpaths are paired, so a detailed multi-subpath
+ *  library shape cannot multiply into an unbounded point count: 1–3 subpaths keep
+ *  the full `BLEND_SAMPLES`, above that the budget (3 × BLEND_SAMPLES points in
+ *  total) is shared out and floored at 24 so even a 25-subpath shape still reads
+ *  as a shape. Exported so the cost model is testable rather than inferred. */
+export function samplesForSubpaths(n: number): number {
+  if (n <= 3) return BLEND_SAMPLES
+  return Math.max(24, Math.min(BLEND_SAMPLES, Math.round((BLEND_SAMPLES * 3) / n)))
+}
+
 /** `k` points spaced evenly by arc length around a CLOSED polyline. */
 export function resample(poly: Pt[], k: number): Pt[] {
   const n = poly.length
@@ -351,51 +366,82 @@ function skeleton(subs: Subpath[]): string {
 const lerpPt = (p: Pt, q: Pt, t: number): Pt => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]
 
 /**
- * The outline `t` of the way from `dA` (t = 0) to `dB` (t = 1).
+ * Prepare a blend between `dA` and `dB` ONCE and get back the per-step function.
  *
- * Exact path: identical command skeletons → interpolate every point, so a
- * hexagon→hexagon or leaf→leaf blend keeps its curves and stays small.
- * Resampled path: subpaths paired by index after sorting each side by |area|
- * (largest first); each pair is flattened, resampled to `samples`, aligned, and
- * lerped into an `M … L … Z` polyline. A subpath with no partner pairs with the
- * partner shape's centroid repeated, so it shrinks to a point.
+ * Everything that does not depend on `t` — parsing, the skeleton check,
+ * flattening, resampling, alignment — happens here; the returned closure only
+ * lerps and serialises. Shape Studio's Blend layout calls this once and maps it
+ * over its placements, so cost is O(setup + steps × points) rather than
+ * O(steps × setup).
+ *
+ * Exact branch: identical command skeletons AND no twist → interpolate every
+ * point, so a hexagon→hexagon or leaf→leaf blend keeps its curves and stays
+ * small. A non-zero twist has no meaning there (there is no point
+ * correspondence to rotate), so it falls through to the resampled branch, which
+ * is the one that implements it.
+ * Resampled branch: subpaths paired by index after sorting each side by |area|
+ * (largest first); each pair is flattened, resampled to `samples`
+ * (`samplesForSubpaths` by default), aligned, and lerped into an `M … L … Z`
+ * polyline. A subpath with no partner pairs with ITS OWN centroid repeated, so
+ * it shrinks in place to a point rather than sliding to the other shape.
  */
-export function blendPath(dA: string, dB: string, t: number, opts: { twist?: number; samples?: number } = {}): string {
+export function prepareBlend(dA: string, dB: string, opts: { twist?: number; samples?: number } = {}): (t: number) => string {
   const A = parsePathD(dA), B = parsePathD(dB)
-  const tt = Math.max(0, Math.min(1, t))
-  if (A.length && skeleton(A) === skeleton(B)) {
-    const out: Subpath[] = A.map((sa, si) => {
-      const sb = B[si]!
-      return {
-        start: lerpPt(sa.start, sb.start, tt),
-        closed: sa.closed,
-        segs: sa.segs.map((ga, gi) => {
-          const gb = sb.segs[gi]!
-          if (ga.kind === 'line' && gb.kind === 'line') return { kind: 'line' as const, to: lerpPt(ga.to, gb.to, tt) }
-          const ca = ga as Extract<Seg, { kind: 'cubic' }>, cb = gb as Extract<Seg, { kind: 'cubic' }>
-          return { kind: 'cubic' as const, c1: lerpPt(ca.c1, cb.c1, tt), c2: lerpPt(ca.c2, cb.c2, tt), to: lerpPt(ca.to, cb.to, tt) }
-        }),
-      }
-    })
-    return subpathsToD(out)
+  const twist = opts.twist ?? 0
+  const clamp01 = (t: number) => Math.max(0, Math.min(1, t))
+  if (!twist && A.length && skeleton(A) === skeleton(B)) {
+    return (t: number) => {
+      const tt = clamp01(t)
+      const out: Subpath[] = A.map((sa, si) => {
+        const sb = B[si]!
+        return {
+          start: lerpPt(sa.start, sb.start, tt),
+          closed: sa.closed,
+          segs: sa.segs.map((ga, gi) => {
+            const gb = sb.segs[gi]!
+            if (ga.kind === 'line' && gb.kind === 'line') return { kind: 'line' as const, to: lerpPt(ga.to, gb.to, tt) }
+            const ca = ga as Extract<Seg, { kind: 'cubic' }>, cb = gb as Extract<Seg, { kind: 'cubic' }>
+            return { kind: 'cubic' as const, c1: lerpPt(ca.c1, cb.c1, tt), c2: lerpPt(ca.c2, cb.c2, tt), to: lerpPt(ca.to, cb.to, tt) }
+          }),
+        }
+      })
+      return subpathsToD(out)
+    }
   }
-  const k = opts.samples ?? BLEND_SAMPLES
+  // Flatten ONCE per subpath and carry the polyline alongside its area — the
+  // sort key and the geometry are the same flattening, so computing it twice
+  // (as an earlier revision did) just doubled the work.
   const byArea = (subs: Subpath[]) => subs
-    .map(s => ({ poly: flattenSubpath(s), area: Math.abs(signedArea(flattenSubpath(s))) }))
+    .map(s => { const poly = flattenSubpath(s); return { poly, area: Math.abs(signedArea(poly)) } })
     .sort((p, q) => q.area - p.area)
     .map(x => x.poly)
   const pa = byArea(A), pb = byArea(B)
   const n = Math.max(pa.length, pb.length)
-  const out: Subpath[] = []
+  const k = opts.samples ?? samplesForSubpaths(n)
+  const pairs: { a: Pt[]; b: Pt[] }[] = []
   for (let i = 0; i < n; i++) {
     const a = pa[i], b = pb[i]
     const polyA = a ? resample(a, k) : resample([centroid(b!)], k)
     const polyBraw = b ? resample(b, k) : resample([centroid(a!)], k)
-    const polyB = alignCorrespondence(polyA, polyBraw, opts.twist ?? 0)
-    const pts = polyA.map((p, j) => lerpPt(p, polyB[j]!, tt))
-    out.push({ start: pts[0]!, segs: pts.slice(1).map(p => ({ kind: 'line' as const, to: p })), closed: true })
+    pairs.push({ a: polyA, b: alignCorrespondence(polyA, polyBraw, twist) })
   }
-  return subpathsToD(out)
+  return (t: number) => {
+    const tt = clamp01(t)
+    const out: Subpath[] = pairs.map(({ a, b }) => {
+      const pts = a.map((p, j) => lerpPt(p, b[j]!, tt))
+      return { start: pts[0]!, segs: pts.slice(1).map(p => ({ kind: 'line' as const, to: p })), closed: true }
+    })
+    return subpathsToD(out)
+  }
+}
+
+/**
+ * The outline `t` of the way from `dA` (t = 0) to `dB` (t = 1) — the one-shot
+ * form of `prepareBlend` (see it for the two branches and their rules). Blending
+ * a whole stack of steps should call `prepareBlend` once instead.
+ */
+export function blendPath(dA: string, dB: string, t: number, opts: { twist?: number; samples?: number } = {}): string {
+  return prepareBlend(dA, dB, opts)(t)
 }
 
 /** Rotate every point of `d` about the origin by `degrees` (clockwise in SVG's

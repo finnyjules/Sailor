@@ -27,7 +27,7 @@ import { baseShapePath } from './shapes'
 import { arrange } from './arrange'
 import { composite, overlapFaces } from './boolean'
 import { resolvePaint } from './paint'
-import { blendPath, rotatePathD } from '~/lib/vector/morph'
+import { prepareBlend, rotatePathD } from '~/lib/vector/morph'
 import type { GeoShapeConfig } from './config'
 import type { GeoStudioDoc, GeoLayer } from './studio'
 import { isFill, isImageFill, type Paint } from '~/lib/compositor/paint'
@@ -92,7 +92,10 @@ export async function renderShapes(cfg: GeoShapeConfig): Promise<VectorShape[]> 
     roundRadius: cfg.roundRadius,
     libraryShape: cfg.blendLibraryShape,
   }), cfg.blendRotate)
-  const ds = placements.map((pl) => blendPath(baseD, targetD, pl.blend ?? 0, { twist: cfg.blendTwist }))
+  // Prepare ONCE: the parse / skeleton check / flatten / resample / align does not
+  // depend on the step, so a 200-step blend pays for it once instead of 200 times.
+  const step = prepareBlend(baseD, targetD, { twist: cfg.blendTwist })
+  const ds = placements.map((pl) => step(pl.blend ?? 0))
   return composite(ds, placements, cfg2)
 }
 
