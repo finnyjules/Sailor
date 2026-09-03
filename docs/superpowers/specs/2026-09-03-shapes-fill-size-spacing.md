@@ -1,7 +1,7 @@
 # Shapes pattern fill — Size + Spacing dials — design
 
 Date: 2026-09-03
-Status: Approved (design agreed in-session), implementing
+Status: LANDED 2026-09-03 (`b1574087c`). Review APPROVE-WITH-MINORS; live slider screenshot OWED (shared-server engine contended).
 Follow-up to [shapes as a pattern fill](2026-09-03-shapes-pattern-fill-design.md). Replaces the
 single **Count** dial (for the `shapes` fill only) with two: **Size** and **Spacing**.
 
