@@ -76,13 +76,13 @@ Lives beside `lib/vector/svg.ts`, not under `geoshape/`, because the Frame is it
 
 ## 4. Colour (`lib/geoshape/boolean.ts` emit sites, `lib/geoshape/render.ts`)
 
-- **Colour ramp.** Where per-clone and pieces modes hand out `fills[rank % fills.length]`, `fillCycle === 'ramp'` instead takes `rampColour(fills, rank / (N − 1))` (new, in `lib/color/ramp.ts`, shared with phase two): the fills list is treated as evenly spaced stops and the colour is interpolated between the two nearest with `mixHex` from `lib/color/mix.ts` in OKLCH. Only solid colours interpolate; a gradient or pattern stop is used as-is at its nearest position (no interpolation into or out of it). Single mode ignores `fillCycle` (one fill).
+- **Colour ramp.** Where per-clone and pieces modes hand out `fills[rank % fills.length]`, `fillCycle === 'ramp'` instead takes `rampColour(fills, rank / (N − 1))` (new, in `lib/color/ramp.ts`, shared with phase two): the fills list is treated as evenly spaced stops and the colour is interpolated between the two nearest with `mixHex` from `lib/color/mix.ts` in its default space (OKLab — a straight perceptual line with no hue-wrap decision). Only solid colours interpolate; a gradient or pattern stop is used as-is at its nearest position (no interpolation into or out of it). Single mode ignores `fillCycle` (one fill).
 - **Colour applies to.** At every shape emit site:
   - `fill` (today): shape fill = clone paint, stroke = the single `stroke` colour if set.
   - `outline`: shape `fill: null` (SVG `fill="none"`), stroke = the clone's colour (solid; a non-solid clone paint falls back to `solidOf`), `strokeWidth` as set.
   - `both`: fill = clone paint AND stroke = the clone's colour.
   - Single mode: `outline` = the fold outlined in `stroke ?? fill`, no fill; `both` = fill plus stroke in `stroke ?? '#000000'`.
-- `drawToCanvas` skips the fill call when a shape has `fill === null` and no `paint` (today it would paint `FALLBACK_FILL`). `toSvg` already writes `fill="none"` for `null`.
+- `drawToCanvas` already skips the fill call when a shape has no `paint` and `fill === null` (`paint ?? fill` is falsy), and `toSvg` already writes `fill="none"` for `null`; a render test pins both so outline mode cannot regress.
 - `framePad` already adds `strokeWidth / 2`, so hairline outlines are not clipped.
 
 ## 5. Controls (`lib/geoshape/controls.ts`)
@@ -101,7 +101,7 @@ Lives beside `lib/vector/svg.ts`, not under `geoshape/`, because the Frame is it
 
 ## 6. Re-roll (`lib/geoshape/randomize.ts`)
 
-Re-roll may pick `blend` as a layout. When it does, it also rolls `blendShape` (and its library id / sides / inner as applicable), `blendSize` in the same range as `size`, `blendRotate` in −45..45, `blendX`/`blendY` in −0.5·size..0.5·size, `blendTwist` in 0..0.25, `blendEase` linear. Paint rolls may pick `fillCycle: 'ramp'` and `paintTarget: 'outline'` at low probability so re-roll surfaces the look.
+Re-roll may pick `blend` as a layout. A new `blend` roll group (lock key `blend`, like the other `GEO_SECTIONS` names) rolls `blendShape` (and its library id / sides / inner), `blendSize` 80..320, `blendRotate` −45..45, `blendX`/`blendY` −160..160, `blendTwist` 0..0.25, `blendEase` linear. Paint stays curated: `fillCycle` and `paintTarget` are never rolled, matching the existing rule that re-roll never touches the Paint group.
 
 ## 7. Agent (`GEO_GUIDANCE`, `geoAgentControls`)
 
