@@ -63,6 +63,8 @@ import {
   vtLayer,
   vtLayerId,
   type VectorTypeConfig,
+  type VtMotionTrack,
+  type VtMove,
 } from '~/lib/vectortype/config'
 import {
   VT_AXES_GROUP,
@@ -85,6 +87,13 @@ const cfg = (over: Partial<VectorTypeConfig> = {}): VectorTypeConfig =>
  *  config has already been migrated. */
 const legacyCfg = (over: Record<string, unknown> = {}): VectorTypeConfig =>
   mergeConfig({ text: 'Saved', fontId: 'inter', size: 120, ...over })
+
+/** Every track any `'tracks'`-kind move in `cfg.motion.moves` owns, flattened
+ *  — the direct replacement for reading the old flat `motion.tracks` array
+ *  (GONE: a track's home is a move's own `tracks` array now, see
+ *  `VtMotionConfig.moves`'s doc in `~/lib/vectortype/config`). */
+const allTracks = (c: VectorTypeConfig): VtMotionTrack[] =>
+  c.motion.moves.filter(m => m.kind === 'tracks').flatMap(m => (m.tracks ?? []) as VtMotionTrack[])
 
 /** A config whose ACTIVE layer (index 0) is a STROKE layer — what `layer.width`
  *  is gated on now that the stroke is a layer rather than a width on the config. */
@@ -402,21 +411,35 @@ describe('mergeConfig is a strict rebuild', () => {
 
   describe('motion', () => {
     it('drops a track that targets nothing', () => {
-      const m = mergeConfig({ motion: { tracks: [{ from: 0, to: 1 }, { path: '  ' }, null, 'track', { path: 'size', from: 10, to: 200 }] } }).motion
-      expect(m.tracks.map((t) => t.path)).toEqual(['size'])
+      const c = mergeConfig({ motion: { tracks: [{ from: 0, to: 1 }, { path: '  ' }, null, 'track', { path: 'size', from: 10, to: 200 }] } })
+      expect(allTracks(c).map((t) => t.path)).toEqual(['size'])
     })
 
     it('rebuilds a track field by field', () => {
-      const [t] = mergeConfig({ motion: { tracks: [{ path: 'axes.wght', from: '100', to: 900, easing: 'wobble', loops: 0, hold: 9, cycleOffset: -3, delay: -5 }] } }).motion.tracks
-      expect(t).toEqual({
-        path: 'axes.wght', from: 0, to: 900, easing: 'linear',
-        loops: 1, hold: 0.5, cycleOffset: 0, delay: 0,
-      })
+      // GONE from a bare track: `easing`/`loops` — the OWNING MOVE this legacy
+      // single track converts into carries them now (`~/lib/studio/moves/merge`'s
+      // `legacyTrackEasePlay`: an unrecognised easing string, 'wobble', and
+      // loops: 0 both fall to its default, `none`/`once ×1`).
+      const c = mergeConfig({ motion: { tracks: [{ path: 'axes.wght', from: '100', to: 900, easing: 'wobble', loops: 0, hold: 9, cycleOffset: -3, delay: -5 }] } })
+      const moves = c.motion.moves.filter(m => m.kind === 'tracks')
+      expect(moves).toHaveLength(1)
+      expect(moves[0]!.ease).toEqual({ kind: 'named', name: 'none' })
+      expect(moves[0]!.play).toEqual({ mode: 'once', times: 1 })
+      const [t] = allTracks(c)
+      expect(t).toEqual({ path: 'axes.wght', from: 0, to: 900, hold: 0.5, cycleOffset: 0, delay: 0 })
     })
 
     it('keeps a well-formed track exactly', () => {
-      const track = { path: 'axes.GRAD', from: -200, to: 150, easing: 'pingpong' as const, loops: 3, hold: 0.2, cycleOffset: 0.5, delay: 1 }
-      expect(mergeConfig({ motion: { tracks: [track] } }).motion.tracks).toEqual([track])
+      // `easing: 'pingpong'`/`loops: 3` maps onto the owning move's `ease`/
+      // `play` (`none`/`backAndForth ×3`) rather than the track, which keeps
+      // only its own timing fields (`from`/`to`/`hold`/`cycleOffset`/`delay`).
+      const rawTrack = { path: 'axes.GRAD', from: -200, to: 150, easing: 'pingpong' as const, loops: 3, hold: 0.2, cycleOffset: 0.5, delay: 1 }
+      const c = mergeConfig({ motion: { tracks: [rawTrack] } })
+      const moves = c.motion.moves.filter(m => m.kind === 'tracks')
+      expect(moves).toHaveLength(1)
+      expect(moves[0]!.ease).toEqual({ kind: 'named', name: 'none' })
+      expect(moves[0]!.play).toEqual({ mode: 'backAndForth', times: 3 })
+      expect(allTracks(c)).toEqual([{ path: 'axes.GRAD', from: -200, to: 150, hold: 0.2, cycleOffset: 0.5, delay: 1 }])
     })
 
     it('clamps the clip settings to what the exporter can do', () => {
@@ -428,7 +451,7 @@ describe('mergeConfig is a strict rebuild', () => {
     })
 
     it('survives a tracks value that is not an array', () => {
-      expect(mergeConfig({ motion: { tracks: { 0: { path: 'size' } } } }).motion.tracks).toEqual([])
+      expect(allTracks(mergeConfig({ motion: { tracks: { 0: { path: 'size' } } } }))).toEqual([])
     })
   })
 
@@ -561,14 +584,19 @@ describe('mergeConfig is a strict rebuild', () => {
   })
 
   it('cloneConfig shares nothing mutable with its source', () => {
-    const a = cfg({ axes: { wght: 700 }, motion: { ...DEFAULT_CONFIG.motion, tracks: [{ path: 'size', from: 1, to: 2, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 }] } })
+    const trackMove: VtMove = {
+      id: 'move-t1', phase: 'loop', kind: 'tracks', presetId: 'custom', duration: 4,
+      ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: 1 },
+      tracks: [{ path: 'size', from: 1, to: 2, hold: 0, cycleOffset: 0, delay: 0 }],
+    }
+    const a = cfg({ axes: { wght: 700 }, motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove] } })
     const b = cloneConfig(a)
     b.axes.wght = 100
-    b.motion.tracks[0]!.to = 99
+    b.motion.moves[0]!.tracks![0]!.to = 99
     b.appearance[0]!.width = 99
     ;(b.appearance[0]!.paint as any).a = '#123123'
     expect(a.axes.wght).toBe(700)
-    expect(a.motion.tracks[0]!.to).toBe(2)
+    expect(a.motion.moves[0]!.tracks![0]!.to).toBe(2)
     expect(a.appearance[0]!.width).toBe(VT_DEFAULT_STROKE_WIDTH)
     expect((a.appearance[0]!.paint as any).a).toBe(DEFAULT_FILL.a)
     // …and the module-level default is untouched, which is the bug the previous
@@ -634,13 +662,15 @@ describe('the appearance stack — the model, and the legacy migration (trap 4)'
       expect(animated.appearance.map((l) => l.kind)).toEqual(['fill', 'stroke'])
       // …and the TRACK follows it, or the animation is still lost. It is written
       // POSITIONALLY by `remapLegacyTrackPath` and then lifted onto the layer's
-      // id by `migrateStackTrackPaths`, in the same `mergeConfig` pass — so what
-      // comes out of a load is the id form, whatever vintage went in.
-      expect(animated.motion.tracks.map((t) => t.path)).toEqual([`appearance.${VT_BASE_STROKE_ID}.width`])
+      // id by `migrateStackTrackPaths`/`migrateMoveTrackPaths`, in the same
+      // `mergeConfig` pass — so what comes out of a load is the id form,
+      // whatever vintage went in (and now lives inside the converted move's
+      // own `tracks` array — see `allTracks`).
+      expect(allTracks(animated).map((t) => t.path)).toEqual([`appearance.${VT_BASE_STROKE_ID}.width`])
       // A track that animates 0 → 0 is not an exception; it is still invisible.
       const flat = legacyCfg({ strokeWidth: 0, motion: { tracks: [{ path: 'strokeWidth', from: 0, to: 0 }] } })
       expect(flat.appearance.map((l) => l.kind)).toEqual(['fill'])
-      expect(flat.motion.tracks).toEqual([])
+      expect(allTracks(flat)).toEqual([])
     })
 
     it('remaps legacy fill.* motion tracks onto the migrated layer', () => {
@@ -654,7 +684,7 @@ describe('the appearance stack — the model, and the legacy migration (trap 4)'
       })
       // Id-addressed on the way out — see the note above. `axes.wght` is NOT a
       // member path and is left exactly as written.
-      expect(c.motion.tracks.map((t) => t.path)).toEqual([`appearance.${VT_BASE_FILL_ID}.paint.angle`, 'axes.wght'])
+      expect(allTracks(c).map((t) => t.path)).toEqual([`appearance.${VT_BASE_FILL_ID}.paint.angle`, 'axes.wght'])
       // The remapped track ANIMATES — a path that merely looks right proves
       // nothing, since `applyMotion` skips a path whose parent is missing.
       const at = applyMotion(c, 2)

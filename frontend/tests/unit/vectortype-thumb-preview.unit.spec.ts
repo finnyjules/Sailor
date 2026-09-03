@@ -120,15 +120,22 @@ describe('vtThumbConfig — a REAL config, through the one render path', () => {
     expect(mergeConfig(cfg)).toEqual(cfg)
   })
 
-  it('fills exactly the named slot, at the tile\'s phase length', () => {
+  it('fills exactly the named slot, at the tile\'s phase length — ONE preset move', () => {
     for (const slot of ['in', 'out', 'loop'] as const) {
       const cfg = vtThumbConfig({ ...base, slot, presetId: 'weight-in' })
-      // No `stagger` key: `mergeAnimSpec` does not store one, so a tile config
-      // carrying it would be a config the studio could never save.
-      expect(cfg.motion[slot]).toEqual({ presetId: 'weight-in', duration: VT_THUMB_PHASE[slot] })
+      // No `stagger` key on the move's `params`: `mergeAnimSpec` does not store
+      // one, so a tile config carrying it would be a config the studio could
+      // never save.
+      expect(cfg.motion.moves).toHaveLength(1)
+      const mv = cfg.motion.moves[0]!
+      expect(mv.phase).toBe(slot)
+      expect(mv.kind).toBe('preset')
+      expect(mv.presetId).toBe('weight-in')
+      expect(mv.duration).toBe(VT_THUMB_PHASE[slot])
       expect(cfg.motion.duration).toBe(VT_THUMB_CYCLE[slot])
+      // Exactly one move — no move at any OTHER phase snuck in.
       for (const other of ['in', 'out', 'loop'] as const) {
-        if (other !== slot) expect(cfg.motion[other]).toBeUndefined()
+        if (other !== slot) expect(cfg.motion.moves.some(m => m.phase === other)).toBe(false)
       }
     }
   })
@@ -136,7 +143,7 @@ describe('vtThumbConfig — a REAL config, through the one render path', () => {
   it('a blank preset id makes a STILL tile — no slot, nothing animated', () => {
     for (const id of ['', '   ']) {
       const cfg = vtThumbConfig({ ...base, presetId: id })
-      expect(cfg.motion.loop).toBeUndefined()
+      expect(cfg.motion.moves).toEqual([])
       expect(vtHasPreset(cfg)).toBe(false)
       expect(vtIsAnimated(cfg)).toBe(false)
     }
@@ -164,7 +171,8 @@ describe('vtThumbConfig — a REAL config, through the one render path', () => {
     // it goes through the same `mergeFill` `mergeConfig` uses. The colour the
     // caller asked for lands on `a`.
     expect(vtBaseAppearance(cfg).fill).toEqual({ ...DEFAULT_FILL, a: '#ff0000' })
-    expect(cfg.motion.tracks).toEqual([])
+    // The move built is a PRESET move, not a tracks one — no `tracks` array.
+    expect(cfg.motion.moves.every(m => !m.tracks)).toBe(true)
     // No stroke LAYER at all — the tile never had one, and the migration must
     // not materialise a dead layer for a zero-width stroke (trap 4, rule 3).
     expect(vtBaseAppearance(cfg).strokeWidth).toBe(0)

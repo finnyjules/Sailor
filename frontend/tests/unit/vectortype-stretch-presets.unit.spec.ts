@@ -14,11 +14,21 @@ describe('stretch motion presets', () => {
     const tr = byId('stretch-in').build({ layers: [], duration: 2 })
     expect(tr).toHaveLength(1)
     expect(tr[0]!.path).toBe('stretch'); expect(tr[0]!.to).toBe(1); expect(tr[0]!.from).toBeGreaterThan(1)
-    expect(tr[0]!.easing).toBe('easeinout')
+    // `easing`/`loops` are GONE from a bare track — the OWNING MOVE (the
+    // preset itself, since a track preset builds one move) carries them now:
+    // 'easeinout'/once maps to ease 'natural'/play once, the same mapping
+    // `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses.
+    expect(byId('stretch-in').ease).toEqual({ kind: 'named', name: 'natural' })
+    expect(byId('stretch-in').play).toEqual({ mode: 'once', times: 1 })
   })
   it('Stretch Wave ping-pongs around 1, bounded to the proven single-axis range', () => {
     const tr = byId('stretch-wave').build({ layers: [], duration: 2 })
-    expect(tr[0]!.path).toBe('stretch'); expect(tr[0]!.easing).toBe('pingpong'); expect(tr[0]!.loops).toBeGreaterThanOrEqual(2)
+    expect(tr[0]!.path).toBe('stretch')
+    // Same move-level home for the timing: 'pingpong'/loops maps to ease
+    // 'none'/play backAndForth ×times.
+    expect(byId('stretch-wave').ease).toEqual({ kind: 'named', name: 'none' })
+    expect(byId('stretch-wave').play.mode).toBe('backAndForth')
+    expect(byId('stretch-wave').play.times).toBeGreaterThanOrEqual(2)
     expect(Math.min(tr[0]!.from, tr[0]!.to)).toBeGreaterThanOrEqual(0.8)
     expect(Math.max(tr[0]!.from, tr[0]!.to)).toBeLessThanOrEqual(1.3)
   })
@@ -38,8 +48,10 @@ describe('stretch motion presets', () => {
     for (const id of ['stretch-in', 'stretch-wave', 'spring-up']) {
       const o = offers.find(x => x.preset.id === id)!
       expect(o.available).toBe(true); expect(o.reason).toBeUndefined()
-      const tracks = vtApplyTrackPreset(cfg, id)
-      expect(tracks.some(t => t.path === 'stretch' || t.path === 'stretchY')).toBe(true)
+      // `vtApplyTrackPreset` now returns `VtMove[]` (moves, not bare tracks) —
+      // the path lives inside each `kind: 'tracks'` move's own `tracks` array.
+      const moves = vtApplyTrackPreset(cfg, id)
+      expect(moves.some(m => m.tracks?.some(t => t.path === 'stretch' || t.path === 'stretchY'))).toBe(true)
     }
   })
 })

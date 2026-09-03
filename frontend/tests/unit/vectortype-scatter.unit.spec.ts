@@ -32,10 +32,11 @@ import { describe, expect, it } from 'vitest'
 import { normaliseAxes, type VtAxis, type VtFont } from '~/lib/vectortype/font'
 import {
   DEFAULT_CONFIG,
+  VT_PRESET_DURATIONS,
   cloneConfig,
   mergeConfig,
   type VectorTypeConfig,
-  type VtMotionTrack,
+  type VtMove,
 } from '~/lib/vectortype/config'
 import { vectorTypeFrame, vectorTypeSVG, vtIsAnimated } from '~/lib/vectortype/canvas'
 import { animatableTargets } from '~/lib/vectortype/motion'
@@ -117,6 +118,40 @@ const scatterCfg = (o: Partial<VtScatterConfig> = {}, over: Partial<VectorTypeCo
 
 const env = (c: VectorTypeConfig) => ({ axes: font.axes, resting: c.axes })
 const N = 6
+
+/** One `kind: 'preset'` move — the moves-shaped equivalent of the old
+ *  `motion.loop = { presetId, duration }` slot. `ease: 'none'` throughout:
+ *  nothing below checks eased output. */
+let scatterPresetMoveSeq = 0
+function presetMove(slot: 'in' | 'out' | 'loop', spec: { presetId: string; duration?: number }): VtMove {
+  scatterPresetMoveSeq += 1
+  return {
+    id: `move-${slot}-${scatterPresetMoveSeq}`,
+    phase: slot,
+    kind: 'preset',
+    presetId: spec.presetId,
+    duration: spec.duration ?? VT_PRESET_DURATIONS[slot],
+    ease: { kind: 'named', name: 'none' },
+    play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
+  }
+}
+
+/** One `kind: 'tracks'` move wrapping a single track — `ease: 'none'`/
+ *  `play: once ×1` reproduce the old default `easing: 'linear'`. */
+let scatterTrackMoveSeq = 0
+function trackMove(t: { path: string; from: number; to: number }): VtMove {
+  scatterTrackMoveSeq += 1
+  return {
+    id: `move-track-${scatterTrackMoveSeq}`,
+    phase: 'loop',
+    kind: 'tracks',
+    presetId: 'custom',
+    duration: 4,
+    ease: { kind: 'named', name: 'none' },
+    play: { mode: 'once', times: 1 },
+    tracks: [{ path: t.path, from: t.from, to: t.to, hold: 0, cycleOffset: 0, delay: 0 }],
+  }
+}
 
 /** Every glyph's `wght` delta at time `t`, through the function every renderer
  *  calls. Not `vtScatterDelta` directly: the composition is the thing under
@@ -491,11 +526,11 @@ describe('COMPOSITION — a scatter and a weight wave are BOTH visible', () => {
   const wave = { presetId: 'weight-wave', duration: 2 }
   const waveOnly = () => cfg({
     text: 'Sailor',
-    motion: { ...cloneConfig(DEFAULT_CONFIG).motion, loop: { ...wave } } as any,
+    motion: { ...cloneConfig(DEFAULT_CONFIG).motion, moves: [presetMove('loop', wave)] } as any,
   })
   const scatterOnly = () => scatterCfg({ spread: 0.5, mode: 'wander', rate: 0.7 })
   const both = () => scatterCfg({ spread: 0.5, mode: 'wander', rate: 0.7 }, {
-    motion: { ...cloneConfig(DEFAULT_CONFIG).motion, loop: { ...wave } } as any,
+    motion: { ...cloneConfig(DEFAULT_CONFIG).motion, moves: [presetMove('loop', wave)] } as any,
   })
 
   it('the composite is EXACTLY the sum, glyph for glyph, at every sampled time', () => {
@@ -545,9 +580,9 @@ describe('COMPOSITION — a scatter and a weight wave are BOTH visible', () => {
   })
 
   it('composes with an axis TRACK too — the scatter is about the MOVED base', () => {
-    const track: VtMotionTrack = { path: 'axes.wght', from: 200, to: 800, easing: 'linear' } as VtMotionTrack
+    const track = { path: 'axes.wght', from: 200, to: 800 }
     const c = scatterCfg({ spread: 0.3, mode: 'wander', rate: 0.7 }, {
-      motion: { ...cloneConfig(DEFAULT_CONFIG).motion, tracks: [track] } as any,
+      motion: { ...cloneConfig(DEFAULT_CONFIG).motion, moves: [trackMove(track)] } as any,
     })
     // The base the scatter is drawn around moves with the track, so the whole
     // cloud of glyph weights moves with it.
@@ -686,10 +721,10 @@ describe('determinism — the preview, the bake and the export agree', () => {
    * luck, and nothing in the studio had exercised that case before.
    */
   it('an ACCUMULATING clock and a computed one agree to far below one font unit', () => {
-    const track: VtMotionTrack = { path: 'axes.wght', from: 200, to: 800, easing: 'linear' } as VtMotionTrack
+    const track = { path: 'axes.wght', from: 200, to: 800 }
     const trackOnly = () => cfg({
       text: 'Sailor',
-      motion: { ...cloneConfig(DEFAULT_CONFIG).motion, tracks: [track] } as any,
+      motion: { ...cloneConfig(DEFAULT_CONFIG).motion, moves: [trackMove(track)] } as any,
     })
     const points = (cf: VectorTypeConfig, t: number) =>
       vectorTypeFrame(font, cf, t).outlines.glyphs.flatMap(g => g.commands.flatMap(cmd => cmd.args ?? []))
@@ -767,12 +802,12 @@ describe('the config layer', () => {
   })
 
   it('a TRACK on spread drives it, and can switch the effect on mid-clip', () => {
-    const track: VtMotionTrack = { path: 'motion.scatter.spread', from: 0, to: 1, easing: 'linear' } as VtMotionTrack
+    const track = { path: 'motion.scatter.spread', from: 0, to: 1 }
     const c = cfg({
       text: 'Sailor',
       motion: {
         ...cloneConfig(DEFAULT_CONFIG).motion,
-        tracks: [track],
+        moves: [trackMove(track)],
         scatter: scatterBlock({ spread: 0, mode: 'wander', rate: 1 }),
       } as any,
     })

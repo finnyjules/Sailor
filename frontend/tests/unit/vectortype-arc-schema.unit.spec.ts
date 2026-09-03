@@ -33,6 +33,7 @@ import {
   VT_SKEW_MAX,
   mergeConfig,
   type VectorTypeConfig,
+  type VtMove,
 } from '~/lib/vectortype/config'
 import { VT_CONTROLS, VT_GUIDANCE, VT_SECTIONS } from '~/lib/vectortype/controls'
 import { vtAgentControls, vtBindableControls } from '~/lib/vectortype/agentControls'
@@ -57,12 +58,30 @@ const BOX = { width: 640, height: 400 }
 const cfg = (patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig =>
   mergeConfig({ ...DEFAULT_CONFIG, text: WORD, size: 100, ...patch })
 
+/** One `kind: 'tracks'` move wrapping a single track — `ease: 'none'`/
+ *  `play: once ×1` reproduce the old default `easing: 'linear'`/`loops: 1`
+ *  (the mapping `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses). */
+let trackMoveSeq = 0
+function trackMove(path: string, from: number, to: number): VtMove {
+  trackMoveSeq += 1
+  return {
+    id: `move-t${trackMoveSeq}`,
+    phase: 'loop',
+    kind: 'tracks',
+    presetId: 'custom',
+    duration: 1,
+    ease: { kind: 'named', name: 'none' },
+    play: { mode: 'once', times: 1 },
+    tracks: [{ path, from, to, hold: 0, cycleOffset: 0, delay: 0 }],
+  }
+}
+
 /** A one-track motion block. `duration: 1` so `t` reads as the track fraction. */
 const track = (path: string, from: number, to: number): Partial<VectorTypeConfig> => ({
   motion: {
     ...DEFAULT_CONFIG.motion,
     duration: 1,
-    tracks: [{ path, from, to, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 }],
+    moves: [trackMove(path, from, to)],
   },
 } as Partial<VectorTypeConfig>)
 
@@ -274,10 +293,7 @@ describe('motion is free for skew and arc — confirmed, not assumed', () => {
       motion: {
         ...DEFAULT_CONFIG.motion,
         duration: 1,
-        tracks: [
-          { path: 'arc', from: 0, to: 180, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 },
-          { path: 'skewX', from: 0, to: 30, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 },
-        ],
+        moves: [trackMove('arc', 0, 180), trackMove('skewX', 0, 30)],
       },
     } as Partial<VectorTypeConfig>)
     const svg = vectorTypeSVG(font, both, 1, BOX).svg

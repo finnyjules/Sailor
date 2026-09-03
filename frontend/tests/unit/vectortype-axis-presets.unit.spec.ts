@@ -21,7 +21,13 @@ import { fileURLToPath } from 'node:url'
 import * as fontkit from 'fontkit'
 import { describe, expect, it } from 'vitest'
 import { normaliseAxes, type VtAxis, type VtFont } from '~/lib/vectortype/font'
-import { DEFAULT_CONFIG, mergeConfig, type VectorTypeConfig } from '~/lib/vectortype/config'
+import {
+  DEFAULT_CONFIG,
+  VT_PRESET_DURATIONS,
+  mergeConfig,
+  type VectorTypeConfig,
+  type VtMove,
+} from '~/lib/vectortype/config'
 import { vectorTypeFrame, vtIsAnimated } from '~/lib/vectortype/canvas'
 import {
   VT_AXIS_PRESETS,
@@ -95,16 +101,50 @@ function cfg(patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig {
   return mergeConfig({ ...DEFAULT_CONFIG, text: WORD, ...patch })
 }
 
-/** A config carrying one preset in one slot. */
+/** One `kind: 'tracks'` move wrapping a single track — `ease: 'none'`/
+ *  `play: once ×1` reproduce the old default `easing: 'linear'`/`loops: 1`. */
+let axisTrackMoveSeq = 0
+function trackMove(path: string, from: number, to: number): VtMove {
+  axisTrackMoveSeq += 1
+  return {
+    id: `move-track-${axisTrackMoveSeq}`,
+    phase: 'loop',
+    kind: 'tracks',
+    presetId: 'custom',
+    duration: 4,
+    ease: { kind: 'named', name: 'none' },
+    play: { mode: 'once', times: 1 },
+    tracks: [{ path, from, to, hold: 0, cycleOffset: 0, delay: 0 }],
+  }
+}
+
+/** A config carrying one preset move in one slot, plus whatever other motion
+ *  the caller adds (including its own `moves`, e.g. a `trackMove`). `ease:
+ *  'none'` throughout: nothing here checks eased output, only that the
+ *  preset runs and reports itself — see Task 6's report for why that is a
+ *  safe stand-in for the preset's own native ease. */
+let axisPresetMoveSeq = 0
 function preset(
   slot: 'in' | 'out' | 'loop',
   spec: { presetId: string; duration?: number; ease?: string },
   patch: Partial<VectorTypeConfig> = {},
   motion: Partial<VectorTypeConfig['motion']> = {},
 ): VectorTypeConfig {
+  axisPresetMoveSeq += 1
+  const mv: VtMove = {
+    id: `move-${slot}-${axisPresetMoveSeq}`,
+    phase: slot,
+    kind: 'preset',
+    presetId: spec.presetId,
+    duration: spec.duration ?? VT_PRESET_DURATIONS[slot],
+    ease: { kind: 'named', name: 'none' },
+    play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
+  }
+  const baseMotion = { ...DEFAULT_CONFIG.motion, duration: 4, ...motion } as VectorTypeConfig['motion']
+  const priorMoves = Array.isArray(baseMotion.moves) ? baseMotion.moves : []
   return cfg({
     ...patch,
-    motion: { ...DEFAULT_CONFIG.motion, duration: 4, ...motion, [slot]: spec } as VectorTypeConfig['motion'],
+    motion: { ...baseMotion, moves: [...priorMoves, mv] },
   })
 }
 
@@ -544,7 +584,7 @@ describe('an axis preset changes the GLYPH OUTLINES — with stagger delay 0', (
       {},
       {
         stagger: { delay: 0, order: 'forward', seed: 0 },
-        tracks: [{ path: 'axes.wght', from: 100, to: 900, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 }],
+        moves: [trackMove('axes.wght', 100, 900)],
       })
     const f = vectorTypeFrame(font, c, 2.3)         // linear 100→900 over 4 s ⇒ 560
     expect(f.config.axes.wght).toBeCloseTo(560, 6)

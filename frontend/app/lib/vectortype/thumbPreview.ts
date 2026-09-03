@@ -51,8 +51,6 @@
  * are not, on purpose: a slide is supposed to carry the letters in from outside
  * the frame, exactly as the real render does.
  */
-import type { LayerAnimSpec } from '~/lib/motion/types'
-import type { Paint } from '~/lib/compositor/paint'
 import { vectorTypeFrame } from './canvas'
 import {
   DEFAULT_CONFIG,
@@ -60,9 +58,11 @@ import {
   DEFAULT_STAGGER,
   migrateLegacyAppearance,
   type VectorTypeConfig,
+  type VtMove,
   type VtPresetSlot,
 } from './config'
 import type { VtFont } from './font'
+import type { Paint } from '~/lib/compositor/paint'
 
 /** Tile size in CSS pixels — `PresetThumb`'s, so the two can sit in one grid. */
 export const VT_THUMB_W = 72
@@ -153,17 +153,38 @@ export interface VtThumbSpec {
  * `stagger.delay` stays 0 — the studio's default. Task 7's fast-path fix is what
  * makes an axis preset visible there, and a tile that quietly switched the
  * stagger on would advertise motion the user will not get.
+ *
+ * ONE preset move, not a slot spec. `motion.in`/`out`/`loop` are gone (see
+ * `./config.ts`'s `VtMotionConfig.moves`); a tile now builds exactly the move
+ * `mergeConfig` would itself build from an equivalent slot, and MUST — the
+ * round-trip test (`mergeConfig(cfg)).toEqual(cfg)`) pins that this file's
+ * output is byte-identical to what the merge would rebuild it into, since
+ * `mergeMove` re-validates every field of an already-moves-shaped `motion`.
+ * `ease: 'none'` keeps the preset's own progress un-warped — the same LINEAR
+ * progress the old per-slot reader always fed an axis preset's `fn` (see
+ * `vtAxisDelta`'s caller, `presetTransform`) — so a tile's animation is not
+ * shaped differently from what a fresh preset pick in the studio itself would
+ * play at `ease: 'none'`, the default this file's callers hand a picked
+ * preset before the user ever touches the Ease dial.
  */
 export function vtThumbConfig(spec: VtThumbSpec): VectorTypeConfig {
   const slot: VtPresetSlot = spec.slot
   const presetId = typeof spec.presetId === 'string' ? spec.presetId.trim() : ''
-  // No `stagger` on the spec: `mergeAnimSpec` deliberately does not store one
-  // (Vector Type has the richer `motion.stagger`, and `vtPresetSpecs` forces the
-  // engine's to 0), so carrying it would make the tile's config differ from any
-  // config the studio can actually save.
-  const slotSpec: Partial<Record<VtPresetSlot, LayerAnimSpec>> = presetId
-    ? { [slot]: { presetId, duration: VT_THUMB_PHASE[slot] } }
-    : {}
+  // No `stagger` on the spec, matching the old slot's contract: Vector Type has
+  // the richer `motion.stagger`, and `vtPresetSpecs` forces the engine's to 0,
+  // so carrying one here would make the tile's config differ from any config
+  // the studio can actually save.
+  const moves: VtMove[] = presetId
+    ? [{
+        id: 'thumb',
+        phase: slot,
+        kind: 'preset',
+        presetId,
+        duration: VT_THUMB_PHASE[slot],
+        ease: { kind: 'named', name: 'none' },
+        play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
+      }]
+    : []
   return {
     ...DEFAULT_CONFIG,
     text: vtThumbWord(spec.text),
@@ -183,10 +204,9 @@ export function vtThumbConfig(spec: VtThumbSpec): VectorTypeConfig {
     appearance: migrateLegacyAppearance({ fill: spec.fill || '#ffffff', strokeWidth: 0 }),
     motion: {
       ...DEFAULT_MOTION,
-      tracks: [],
+      moves,
       duration: VT_THUMB_CYCLE[slot],
       stagger: { ...DEFAULT_STAGGER },
-      ...slotSpec,
     },
   }
 }

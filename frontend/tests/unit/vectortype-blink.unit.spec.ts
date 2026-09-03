@@ -43,6 +43,7 @@ import {
   mergeConfig,
   type VectorTypeConfig,
   type VtMotionTrack,
+  type VtMove,
 } from '~/lib/vectortype/config'
 import { vectorTypeFrame, vectorTypeSVG, vtIsAnimated } from '~/lib/vectortype/canvas'
 import { vtGlyphMotion } from '~/lib/vectortype/presetMotion'
@@ -103,6 +104,27 @@ function cfg(over: Partial<VectorTypeConfig> = {}, b: Partial<VtBlinkConfig> = {
 
 const track = (o: Partial<VtMotionTrack> & { path: string; from: number; to: number }): VtMotionTrack =>
   ({ easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...o })
+
+/** One `kind: 'tracks'` move wrapping a single track, matching the
+ *  moves-shaped equivalent of the old flat `motion.tracks: [track(...)]`
+ *  array — `easing: 'linear'`/`loops: 1` (the `track()` default above) maps
+ *  to `ease: 'none'`/`play: once ×1`, the same mapping
+ *  `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses. */
+let trackMoveSeq = 0
+function trackMove(t: VtMotionTrack): VtMove {
+  trackMoveSeq += 1
+  const { path, from, to, hold, cycleOffset, delay } = t
+  return {
+    id: `move-t${trackMoveSeq}`,
+    phase: 'loop',
+    kind: 'tracks',
+    presetId: 'custom',
+    duration: 4,
+    ease: { kind: 'named', name: 'none' },
+    play: { mode: 'once', times: 1 },
+    tracks: [{ path, from, to, hold, cycleOffset, delay }],
+  }
+}
 
 /** Every glyph's composed opacity at time `t`, through the ONE function both
  *  renderers go through. `vectorTypeFrame` is what the editor preview, the node
@@ -777,7 +799,7 @@ describe('real ink, measured', () => {
 describe('blink composes rather than replacing', () => {
   it('multiplies with a glyph.opacity track — dark stays dark', () => {
     const a = cfg(
-      { text: ONE_WORD, motion: { ...DEFAULT_CONFIG.motion, tracks: [track({ path: 'glyph.opacity', from: 0.5, to: 0.5 })] } as any },
+      { text: ONE_WORD, motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove(track({ path: 'glyph.opacity', from: 0.5, to: 0.5 }))] } as any },
       { amount: 1, rate: RATE, stayLit: 0.5 },
     )
     let sawHalf = false
@@ -795,7 +817,7 @@ describe('blink composes rather than replacing', () => {
 
   it('a track on motion.blink.amount ramps the effect in', () => {
     const a = cfg(
-      { text: ONE_WORD, motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks: [track({ path: 'motion.blink.amount', from: 0, to: 1 })] } as any },
+      { text: ONE_WORD, motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: [trackMove(track({ path: 'motion.blink.amount', from: 0, to: 1 }))] } as any },
       { amount: 0, rate: RATE, stayLit: 0.5 },
     )
     expect(vtResolveBlink(a, 0).amount).toBeCloseTo(0, 6)

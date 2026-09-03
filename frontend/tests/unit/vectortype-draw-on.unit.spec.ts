@@ -58,6 +58,7 @@ import {
   type VectorTypeConfig,
   type VtAppearanceLayer,
   type VtMotionTrack,
+  type VtMove,
 } from '~/lib/vectortype/config'
 import { visibleVtControls } from '~/lib/vectortype/controls'
 import { animatableTargets, applyMotion } from '~/lib/vectortype/motion'
@@ -99,6 +100,25 @@ const cfg = (patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig =>
   mergeConfig({ ...DEFAULT_CONFIG, text: 'Sail', size: 100, ...patch })
 const track = (o: Partial<VtMotionTrack> & { path: string; from: number; to: number }): VtMotionTrack =>
   ({ easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...o })
+
+/** One `kind: 'tracks'` move wrapping a single track — `ease: 'none'`/
+ *  `play: once ×1` reproduce the old default `easing: 'linear'`/`loops: 1`
+ *  (the `track()` default above). */
+let drawOnTrackMoveSeq = 0
+function trackMove(t: VtMotionTrack): VtMove {
+  drawOnTrackMoveSeq += 1
+  const { path, from, to, hold, cycleOffset, delay } = t
+  return {
+    id: `move-t${drawOnTrackMoveSeq}`,
+    phase: 'loop',
+    kind: 'tracks',
+    presetId: 'custom',
+    duration: 4,
+    ease: { kind: 'named', name: 'none' },
+    play: { mode: 'once', times: 1 },
+    tracks: [{ path, from, to, hold, cycleOffset, delay }],
+  }
+}
 
 /** A single STROKE layer, nothing under it — so every measured pixel is the
  *  stroke's and a fill cannot flatter an ink count. */
@@ -525,7 +545,7 @@ describe('`draw` is a real config leaf on the LAYER', () => {
       motion: {
         ...DEFAULT_CONFIG.motion,
         duration: 4,
-        tracks: [track({ path: 'appearance.Lstroke.draw', from: 0, to: 1 })],
+        moves: [trackMove(track({ path: 'appearance.Lstroke.draw', from: 0, to: 1 }))],
       },
     })
     const at = (t: number) => (applyMotion(c, t).appearance[0] as VtAppearanceLayer).draw
@@ -802,7 +822,7 @@ describe('canvas and SVG agree on the dash, exactly', () => {
       motion: {
         ...DEFAULT_CONFIG.motion,
         duration: 4,
-        tracks: [track({ path: 'appearance.Lstroke.draw', from: 0, to: 1 })],
+        moves: [trackMove(track({ path: 'appearance.Lstroke.draw', from: 0, to: 1 }))],
       },
     })
     const offsets: number[] = []
@@ -928,7 +948,7 @@ describe('the letters visibly draw themselves', () => {
         ...DEFAULT_CONFIG.motion,
         duration: 4,
         stagger: { ...DEFAULT_CONFIG.motion.stagger, delay, order: 'forward' as const },
-        tracks: [track({ path: 'appearance.Lstroke.draw', from: 0, to: 1 })],
+        moves: [trackMove(track({ path: 'appearance.Lstroke.draw', from: 0, to: 1 }))],
       },
     })
     const fracOf = (svg: string) =>

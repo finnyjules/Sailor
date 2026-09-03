@@ -41,7 +41,13 @@ import { fileURLToPath } from 'node:url'
 import * as fontkit from 'fontkit'
 import { afterEach, describe, expect, it } from 'vitest'
 import { normaliseAxes, type VtAxis, type VtFont } from '~/lib/vectortype/font'
-import { DEFAULT_CONFIG, mergeConfig, type VectorTypeConfig } from '~/lib/vectortype/config'
+import {
+  DEFAULT_CONFIG,
+  VT_PRESET_DURATIONS,
+  mergeConfig,
+  type VectorTypeConfig,
+  type VtMove,
+} from '~/lib/vectortype/config'
 import { vectorTypeFrame, vtIsAnimated } from '~/lib/vectortype/canvas'
 import {
   VT_AXIS_PRESETS,
@@ -136,19 +142,31 @@ function cfg(patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig {
 /** A config carrying one preset in one slot, with the stagger left at its
  *  shipped 0 — the FAST PATH, where a preset that emits axes has to widen the
  *  shaping itself or it returns numbers nothing ever draws. */
+let flickerPresetMoveSeq = 0
 function preset(
   slot: 'in' | 'out' | 'loop',
   spec: { presetId: string; duration?: number; ease?: string },
   motion: Partial<VectorTypeConfig['motion']> = {},
 ): VectorTypeConfig {
+  flickerPresetMoveSeq += 1
+  const mv: VtMove = {
+    id: `move-${slot}-${flickerPresetMoveSeq}`,
+    phase: slot,
+    kind: 'preset',
+    presetId: spec.presetId,
+    duration: spec.duration ?? VT_PRESET_DURATIONS[slot],
+    ease: { kind: 'named', name: 'none' },
+    play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
+  }
+  const baseMotion = {
+    ...DEFAULT_CONFIG.motion,
+    duration: 4,
+    stagger: { delay: 0, order: 'forward', seed: 0 },
+    ...motion,
+  } as VectorTypeConfig['motion']
+  const priorMoves = Array.isArray(baseMotion.moves) ? baseMotion.moves : []
   return cfg({
-    motion: {
-      ...DEFAULT_CONFIG.motion,
-      duration: 4,
-      stagger: { delay: 0, order: 'forward', seed: 0 },
-      ...motion,
-      [slot]: spec,
-    } as VectorTypeConfig['motion'],
+    motion: { ...baseMotion, moves: [...priorMoves, mv] },
   })
 }
 

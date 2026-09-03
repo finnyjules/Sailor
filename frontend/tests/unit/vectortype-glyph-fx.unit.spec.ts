@@ -51,13 +51,21 @@ function cfg(patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig {
   return mergeConfig({ ...DEFAULT_CONFIG, text: WORD, size: 100, ...patch })
 }
 
-/** A preset in one slot, with the engine's own easing replaced by `none` so
- *  progress is linear and every expected number below is exact. */
+/** A preset move in one phase, with `ease: 'none'` so progress is linear and
+ *  every expected number below is exact — the moves-shaped equivalent of the
+ *  old `motion[slot] = { presetId, duration, ease: 'none' }`. */
 function withPreset(slot: 'in' | 'out' | 'loop', presetId: string, patch: Partial<VectorTypeConfig> = {}) {
   const c = cfg(patch)
   return mergeConfig({
     ...c,
-    motion: { ...c.motion, [slot]: { presetId, duration: 1, ease: 'none' } },
+    motion: {
+      ...c.motion,
+      moves: [{
+        id: `move-${slot}`, phase: slot, kind: 'preset', presetId, duration: 1,
+        ease: { kind: 'named', name: 'none' },
+        play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
+      }],
+    },
   })
 }
 
@@ -225,7 +233,10 @@ describe('per-glyph blur', () => {
       ...c,
       motion: {
         ...c.motion,
-        in: { presetId: 'blur-in', duration: 1, ease: 'none' },
+        moves: [{
+          id: 'move-in', phase: 'in', kind: 'preset', presetId: 'blur-in', duration: 1,
+          ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: 1 },
+        }],
         stagger: { ...c.motion.stagger, delay: 0.3, order: 'forward' },
       },
     })

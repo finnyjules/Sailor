@@ -65,10 +65,21 @@ function stack(...layers: Partial<VtAppearanceLayer>[]): VectorTypeConfig {
   return cfg({ appearance: layers.map((l, i) => vtLayer({ id: `L${i}`, ...l })) })
 }
 
-/** A preset in one slot with the engine's easing replaced by `none`, so progress
- *  is linear and the motion opacity below is an exact number. */
+/** A preset move in one phase with `ease: 'none'`, so progress is linear and
+ *  the motion opacity below is an exact number — the moves-shaped equivalent
+ *  of the old `motion[slot] = { presetId, duration, ease: 'none' }`. */
 function withPreset(c: VectorTypeConfig, slot: 'in' | 'out' | 'loop', presetId: string): VectorTypeConfig {
-  return mergeConfig({ ...c, motion: { ...c.motion, [slot]: { presetId, duration: 1, ease: 'none' } } })
+  return mergeConfig({
+    ...c,
+    motion: {
+      ...c.motion,
+      moves: [{
+        id: `move-${slot}`, phase: slot, kind: 'preset', presetId, duration: 1,
+        ease: { kind: 'named', name: 'none' },
+        play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
+      }],
+    },
+  })
 }
 
 const RED = '#ff0000'

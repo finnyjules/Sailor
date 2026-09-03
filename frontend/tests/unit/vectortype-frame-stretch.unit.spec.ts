@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import * as fontkit from 'fontkit'
 import { describe, expect, it, vi } from 'vitest'
 import { vectorTypeFrame, VT_FIT_INSET } from '~/lib/vectortype/canvas'
-import { DEFAULT_CONFIG, mergeConfig, VT_STRETCH_MAX, VT_STRETCH_MIN } from '~/lib/vectortype/config'
+import { DEFAULT_CONFIG, mergeConfig, VT_STRETCH_MAX, VT_STRETCH_MIN, type VtMove } from '~/lib/vectortype/config'
 import { normaliseAxes } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 
@@ -52,6 +52,26 @@ function loadFixtureFont(): VtFont {
 }
 const font = loadFixtureFont()
 const cfg = (over: Partial<typeof DEFAULT_CONFIG>) => mergeConfig({ ...DEFAULT_CONFIG, text: 'Sailor', ...over } as any)
+
+/** One `kind: 'tracks'` move wrapping a single track — the moves-shaped
+ *  equivalent of the old flat `motion.tracks: [{ path, from, to, easing:
+ *  'linear', loops: 1, ... }]` entry every helper in this file used to build.
+ *  `ease: 'none'`/`play: once ×1` reproduce that same linear, single-pass
+ *  default. */
+let stretchTrackMoveSeq = 0
+function trackMove(path: string, from: number, to: number): VtMove {
+  stretchTrackMoveSeq += 1
+  return {
+    id: `move-t${stretchTrackMoveSeq}`,
+    phase: 'loop',
+    kind: 'tracks',
+    presetId: 'custom',
+    duration: 4,
+    ease: { kind: 'named', name: 'none' },
+    play: { mode: 'once', times: 1 },
+    tracks: [{ path, from, to, hold: 0, cycleOffset: 0, delay: 0 }],
+  }
+}
 const width = (f: ReturnType<typeof vectorTypeFrame>) => f.outlines.width
 const commandCount = (f: ReturnType<typeof vectorTypeFrame>) => f.outlines.glyphs.reduce((n, g) => n + g.commands.length, 0)
 
@@ -108,7 +128,7 @@ describe('vectorTypeFrame — smart stretch', () => {
     const c = cfg({
       motion: {
         ...DEFAULT_CONFIG.motion,
-        tracks: [{ path: 'stretch', from: 1, to: 1.8, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 }],
+        moves: [trackMove('stretch', 1, 1.8)],
         stagger: { ...DEFAULT_CONFIG.motion.stagger, delay: 0.5 },
       },
     } as any)
@@ -168,16 +188,13 @@ describe('vectorTypeFrame — fit is solved from the RESTING config', () => {
   // `stretchY`, so a fitted studio running it paid a ~300 ms solve per frame
   // and reported a `fitted` that shivered. The dials the solve reads are the
   // user's own, before any track claims them.
-  const trackAt = (path: string, from: number, to: number) =>
-    ({ path, from, to, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 })
-
   it('a height track never re-solves the fit, and `fitted` holds still', () => {
     const base = vectorTypeFrame(font, cfg({}), 0)
     // A ratio no other test in this file uses, so the memo is cold here.
     const targetUnits = base.outlines.width * 1.23
     const c = cfg({
       fit: 'width',
-      motion: { ...DEFAULT_CONFIG.motion, tracks: [trackAt('stretchY', 1, 1.8)] },
+      motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove('stretchY', 1, 1.8)] },
     } as any)
     const fitBoxWidth = boxFor(targetUnits, c.size, base.outlines.unitsPerEm)
     const before = fitCalls.n
@@ -202,10 +219,9 @@ describe('vectorTypeFrame — fit beats a per-glyph width wave', () => {
   // promise letter by letter for a wave nobody can read against the box edge
   // it is fighting, so fit wins and the width track is ignored. Height is not
   // part of the promise, so `stretchY` still waves.
-  const track = { path: 'stretch', from: 1, to: 1.8, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 }
   const waveOn = (path: string) => ({
     ...DEFAULT_CONFIG.motion,
-    tracks: [{ ...track, path }],
+    moves: [trackMove(path, 1, 1.8)],
     stagger: { ...DEFAULT_CONFIG.motion.stagger, delay: 0.5 },
   })
 
@@ -299,8 +315,6 @@ describe('vectorTypeFrame — a width wave is planned PER GLYPH', () => {
   // came out condensed. The fix is to plan each glyph on its OWN dial, so its
   // resting coords carry its own spent wdth and its residual is its own.
   const archivo = loadArchivo()
-  const trackAt = (path: string, from: number, to: number) =>
-    ({ path, from, to, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 })
   const inkW = (f: ReturnType<typeof vectorTypeFrame>, i: number) => {
     const g = f.outlines.glyphs[i]!
     return g.bbox.maxX - g.bbox.minX
@@ -313,7 +327,7 @@ describe('vectorTypeFrame — a width wave is planned PER GLYPH', () => {
     const wave = cfg({
       motion: {
         ...DEFAULT_CONFIG.motion,
-        tracks: [trackAt('stretch', 1, 1.8)],
+        moves: [trackMove('stretch', 1, 1.8)],
         stagger: { ...DEFAULT_CONFIG.motion.stagger, delay: 0.8 },
       },
     } as any)
@@ -330,7 +344,7 @@ describe('vectorTypeFrame — a width wave is planned PER GLYPH', () => {
     // `applyMotion` writes raw track values — `mergeConfig`'s clamp is upstream
     // of it and cannot help. The frame is the last boundary before the engine.
     const wild = cfg({
-      motion: { ...DEFAULT_CONFIG.motion, tracks: [trackAt('stretch', 0, 4)] },
+      motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove('stretch', 0, 4)] },
     } as any)
     const ceiling = vectorTypeFrame(archivo, cfg({ stretch: VT_STRETCH_MAX }), 0)
     const floor = vectorTypeFrame(archivo, cfg({ stretch: VT_STRETCH_MIN }), 0)

@@ -38,15 +38,35 @@ import {
   VT_TYPING_STAGGER,
   vtGlyphMotion,
   vtStaggerBumpFor,
-  vtStaggerStarvedSlots,
+  vtStaggerStarvedMoves,
 } from '~/lib/vectortype/presetMotion'
 
 const WORD = 'Sailor'
 const N = 6
 
-function cfg(motion: Record<string, unknown> = {}): VectorTypeConfig {
+/** Build a config with one `in`-phase preset move plus the given stagger —
+ *  the moves-shaped equivalent of the old `motion.in = { presetId, duration }`
+ *  slot these tests used to build directly. `ease: 'none'` keeps the preset's
+ *  timing linear so these tests measure the stagger window, not an eased ramp. */
+function cfgWithInPreset(presetId: string, duration: number, stagger: Record<string, unknown>): VectorTypeConfig {
   const base = cloneConfig(DEFAULT_CONFIG)
-  return mergeConfig({ ...base, text: WORD, motion: { ...base.motion, ...motion } })
+  return mergeConfig({
+    ...base,
+    text: WORD,
+    motion: {
+      ...base.motion,
+      stagger,
+      moves: [{
+        id: 'm-in',
+        phase: 'in',
+        kind: 'preset',
+        presetId,
+        duration,
+        ease: { kind: 'named', name: 'none' },
+        play: { mode: 'once', times: 1 },
+      }],
+    },
+  })
 }
 
 /** Distinct per-unit state signatures a preset produces over the OPEN window
@@ -118,14 +138,14 @@ describe('vtStaggerBumpFor — the policy Vector Type applies', () => {
   })
 
   it('the bumped delay makes the word actually type, per-glyph', () => {
-    const dead = cfg({ in: { presetId: 'typewriter', duration: 1 }, stagger: { delay: 0, order: 'forward', seed: 0 } })
+    const dead = cfgWithInPreset('typewriter', 1, { delay: 0, order: 'forward', seed: 0 })
     const deadOps = Array.from({ length: N }, (_, i) => vtGlyphMotion(dead, 0.2, i, N).opacity)
     // The bug, reproduced: every glyph fully on at the same instant.
     expect(new Set(deadOps).size).toBe(1)
 
     const bump = vtStaggerBumpFor('typewriter', dead.motion.stagger.delay)
     expect(bump).not.toBeNull()
-    const live = cfg({ in: { presetId: 'typewriter', duration: 1 }, stagger: { delay: bump!, order: 'forward', seed: 0 } })
+    const live = cfgWithInPreset('typewriter', 1, { delay: bump!, order: 'forward', seed: 0 })
     const liveOps = Array.from({ length: N }, (_, i) => vtGlyphMotion(live, 0.2, i, N).opacity)
     // …and the fix: within ONE frame, some glyphs are on and some are not.
     expect(new Set(liveOps).size).toBeGreaterThan(1)
@@ -134,15 +154,17 @@ describe('vtStaggerBumpFor — the policy Vector Type applies', () => {
   })
 })
 
-describe('vtStaggerStarvedSlots — the safety net for the paths that skip the bump', () => {
-  it('names a slot whose preset cannot express itself at the stored delay', () => {
-    const imported = cfg({ in: { presetId: 'typewriter', duration: 1 }, stagger: { delay: 0, order: 'forward', seed: 0 } })
-    expect(vtStaggerStarvedSlots(imported)).toEqual(['in'])
+describe('vtStaggerStarvedMoves — the safety net for the paths that skip the bump', () => {
+  it('names the move whose preset cannot express itself at the stored delay', () => {
+    const imported = cfgWithInPreset('typewriter', 1, { delay: 0, order: 'forward', seed: 0 })
+    const starved = vtStaggerStarvedMoves(imported)
+    expect(starved.map(m => m.phase)).toEqual(['in'])
+    expect(starved.map(m => m.presetId)).toEqual(['typewriter'])
   })
 
   it('says nothing once the delay is live, or for a preset that never needed one', () => {
-    expect(vtStaggerStarvedSlots(cfg({ in: { presetId: 'typewriter', duration: 1 }, stagger: { delay: 0.06, order: 'forward', seed: 0 } }))).toEqual([])
-    expect(vtStaggerStarvedSlots(cfg({ in: { presetId: 'slide-up', duration: 1 }, stagger: { delay: 0, order: 'forward', seed: 0 } }))).toEqual([])
-    expect(vtStaggerStarvedSlots(null)).toEqual([])
+    expect(vtStaggerStarvedMoves(cfgWithInPreset('typewriter', 1, { delay: 0.06, order: 'forward', seed: 0 }))).toEqual([])
+    expect(vtStaggerStarvedMoves(cfgWithInPreset('slide-up', 1, { delay: 0, order: 'forward', seed: 0 }))).toEqual([])
+    expect(vtStaggerStarvedMoves(null)).toEqual([])
   })
 })

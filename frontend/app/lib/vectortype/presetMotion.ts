@@ -94,6 +94,7 @@ import {
 import {
   DEFAULT_CONFIG,
   DEFAULT_MOTION,
+  VT_PRESET_DURATIONS,
   VT_PRESET_SLOTS,
   type VectorTypeConfig,
   type VtMove,
@@ -279,10 +280,21 @@ export function vtAxisOffers(
  * trusted, so a raw move missing either (or carrying garbage) still gets a
  * well-formed one — the same "nothing is trusted" rule `mergeTrack` follows
  * for a raw track.
+ *
+ * NO `moves` KEY AT ALL falls back to `legacySlotMoves` below — a raw blob
+ * that has never been through `mergeConfig` (the node card, the baker, the
+ * frame source all read `properties.sailor_vectorType` straight off storage,
+ * per the module header) may still carry the pre-moves `in`/`out`/`loop`
+ * slots, and this is the one place both `presetTransform` and every helper
+ * below reads its moves from — so THIS function has to speak both vintages,
+ * not `mergeConfig` alone. An EMPTY `moves: []` is not this case (that is a
+ * config that legitimately has no presets) — only a MISSING key falls
+ * through, exactly `mergeMotion`'s own `hasNewShape` test.
  */
 function presetMoves(cfg: VectorTypeConfig | null | undefined): VtMove[] {
-  const raw = (cfg?.motion as { moves?: unknown } | undefined)?.moves
-  if (!Array.isArray(raw)) return []
+  const motion = cfg?.motion as { moves?: unknown } & Record<string, unknown> | undefined
+  const raw = motion?.moves
+  if (!Array.isArray(raw)) return legacySlotMoves(motion)
   const out: VtMove[] = []
   for (const entry of raw) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
@@ -308,6 +320,44 @@ function presetMoves(cfg: VectorTypeConfig | null | undefined): VtMove[] {
 }
 
 /**
+ * The pre-moves `in`/`out`/`loop` slots → one `preset` move per populated
+ * slot, KEPT CHEAP — this runs on the defensive runtime path above, possibly
+ * once per glyph per frame, so it is deliberately NOT `mergeConfig`'s own
+ * old-shape migration (`mergeMotion`'s `hasOldShape` branch), which looks up
+ * each preset's NATIVE ease for on-load render parity and is meant to run
+ * ONCE. `ease: 'none'` here instead — the same neutral default the moves
+ * gallery hands a freshly-picked preset before the user ever touches the
+ * Ease dial — which is exact at both window boundaries (every ease function
+ * agrees that 0 maps to 0 and 1 to 1) and only differs from the native ease
+ * at an intermediate frame, which nothing on this defensive path promises.
+ * Once a document is actually opened in the editor, `mergeConfig` runs and
+ * this fallback never fires again for it.
+ */
+function legacySlotMoves(motion: Record<string, unknown> | undefined): VtMove[] {
+  const out: VtMove[] = []
+  for (const slot of VT_PRESET_SLOTS) {
+    const rawSlot = motion?.[slot]
+    if (!rawSlot || typeof rawSlot !== 'object' || Array.isArray(rawSlot)) continue
+    const so = rawSlot as Record<string, unknown>
+    const presetId = typeof so.presetId === 'string' ? so.presetId.trim() : ''
+    if (!presetId || !vtKnowsPreset(slot, presetId)) continue
+    out.push({
+      id: `legacy-${slot}`,
+      phase: slot,
+      kind: 'preset',
+      presetId,
+      duration: Math.max(0.05, fin(so.duration, VT_PRESET_DURATIONS[slot])),
+      ease: { kind: 'named', name: 'none' },
+      play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
+      ...(so.params && typeof so.params === 'object' && !Array.isArray(so.params)
+        ? { params: so.params as Record<string, number> }
+        : {}),
+    })
+  }
+  return out
+}
+
+/**
  * The slots that will actually animate, from a config of any vintage.
  *
  * A REPRESENTATIVE view, not an exhaustive one: `LayerAnimSpec` (the shared
@@ -316,7 +366,7 @@ function presetMoves(cfg: VectorTypeConfig | null | undefined): VtMove[] {
  * redesign — this reports the FIRST live one per phase. `presetTransform`
  * below is the exhaustive reader (it folds every one of them); this function
  * remains for callers that only ever need "is there a preset in this slot,
- * and roughly what" — `vtStillTime`, `vtStaggerStarvedSlots`, the axis-preset
+ * and roughly what" — `vtStillTime`, `vtStaggerStarvedMoves`, the axis-preset
  * gallery's still-thumbnail and `MotionPresetPicker`'s "currently picked"
  * pill — none of which yet knows how to show more than one.
  *
@@ -383,8 +433,12 @@ export function vtStaggerBumpFor(presetId: unknown, currentDelay: unknown): numb
 }
 
 /**
- * The slots holding a preset that CANNOT express itself at the config's stored
- * stagger — i.e. a tile that is silently doing nothing.
+ * Every live `kind: 'preset'` MOVE that CANNOT express itself at the config's
+ * stored stagger — i.e. a tile that is silently doing nothing. Returns moves,
+ * not slots: several `preset` moves can share one phase now, and each is its
+ * own tile in the gallery, so the caller (`VectorTypeSurface.vue`) only ever
+ * needed the count (`.length`) — a slot-shaped answer would have hidden a
+ * second starved move sharing a phase with a healthy one.
  *
  * The bump above covers the moment of picking. This covers everything else: a
  * config imported from JSON, an agent-written one, or a user who dragged Stagger
@@ -392,11 +446,10 @@ export function vtStaggerBumpFor(presetId: unknown, currentDelay: unknown): numb
  * "the preview is frozen and I do not know why" is never the user's problem to
  * work out.
  */
-export function vtStaggerStarvedSlots(cfg: VectorTypeConfig | null | undefined): VtPresetSlot[] {
+export function vtStaggerStarvedMoves(cfg: VectorTypeConfig | null | undefined): VtMove[] {
   const { delay } = resolveStagger(cfg as VectorTypeConfig)
   if (isNum(delay) && delay > 0) return []
-  const specs = vtPresetSpecs(cfg)
-  return VT_PRESET_SLOTS.filter(s => presetNeedsStagger(specs[s]?.presetId))
+  return presetMoves(cfg).filter(mv => presetNeedsStagger(mv.presetId))
 }
 
 /** True when any slot names a preset the engine can actually run. The `?` in

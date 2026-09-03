@@ -54,7 +54,7 @@ import {
   vtAxisOffers,
   vtPresetSpecs,
   vtStaggerBumpFor,
-  vtStaggerStarvedSlots,
+  vtStaggerStarvedMoves,
   vtStillTime,
 } from '~/lib/vectortype/presetMotion'
 import { vtAxisPreset } from '~/lib/vectortype/axisPresets'
@@ -781,7 +781,7 @@ const activePresetSummary = computed(() =>
  * silently doing nothing, and nothing may change under them unannounced. See
  * `vtStaggerBumpFor`.
  */
-const staggerStarved = computed(() => vtStaggerStarvedSlots(config.value))
+const staggerStarved = computed(() => vtStaggerStarvedMoves(config.value))
 /**
  * A live scatter aimed at an axis THIS font does not have.
  *

@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import * as fontkit from 'fontkit'
 import { describe, expect, it } from 'vitest'
 import { normaliseAxes, type VtFont } from '~/lib/vectortype/font'
-import { DEFAULT_CONFIG, mergeConfig, vtLayer, type VectorTypeConfig } from '~/lib/vectortype/config'
+import { DEFAULT_CONFIG, mergeConfig, vtLayer, type VectorTypeConfig, type VtMove } from '~/lib/vectortype/config'
 import {
   vectorTypeFrame,
   vectorTypeSVG,
@@ -74,6 +74,25 @@ function wghtTrack(from = 100, to = 900) {
   return { path: 'axes.wght', from, to, easing: 'linear' as const, loops: 1, hold: 0, cycleOffset: 0, delay: 0 }
 }
 
+/** One `kind: 'tracks'` move wrapping one or more tracks — the moves-shaped
+ *  equivalent of the old flat `motion.tracks: [...]` array. `ease: 'none'`/
+ *  `play: once ×1` reproduce the old default `easing: 'linear'`/`loops: 1`
+ *  every raw track spec in this file is built with. */
+let canvasTrackMoveSeq = 0
+function trackMove(...tracks: Array<{ path: string; from: number; to: number }>): VtMove {
+  canvasTrackMoveSeq += 1
+  return {
+    id: `move-t${canvasTrackMoveSeq}`,
+    phase: 'loop',
+    kind: 'tracks',
+    presetId: 'custom',
+    duration: 4,
+    ease: { kind: 'named', name: 'none' },
+    play: { mode: 'once', times: 1 },
+    tracks: tracks.map(t => ({ path: t.path, from: t.from, to: t.to, hold: 0, cycleOffset: 0, delay: 0 })),
+  }
+}
+
 describe('vectorTypeFrame — the shared render path', () => {
   it('lays out one glyph per shaped glyph, with the run width in font units', () => {
     const f = vectorTypeFrame(font, cfg(), 0)
@@ -104,7 +123,7 @@ describe('vectorTypeFrame — the shared render path', () => {
   })
 
   it('an axis track moves the OUTLINE — geometry, not a bitmap', () => {
-    const c = cfg({ motion: { ...DEFAULT_CONFIG.motion, tracks: [wghtTrack()], duration: 4 } })
+    const c = cfg({ motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove(wghtTrack())], duration: 4 } })
     const light = vectorTypeFrame(font, c, 0)
     const heavy = vectorTypeFrame(font, c, 4)
     expect(light.config.axes.wght).toBeCloseTo(100, 6)
@@ -117,7 +136,7 @@ describe('vectorTypeFrame — the shared render path', () => {
   })
 
   it('does not mutate the config it was handed', () => {
-    const c = cfg({ motion: { ...DEFAULT_CONFIG.motion, tracks: [wghtTrack()], duration: 4 } })
+    const c = cfg({ motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove(wghtTrack())], duration: 4 } })
     const before = structuredClone(c)
     vectorTypeFrame(font, c, 1.7)
     expect(c).toEqual(before)
@@ -128,7 +147,7 @@ describe('the travelling wave, as PIXELS would see it', () => {
   const staggered = () => cfg({
     motion: {
       ...DEFAULT_CONFIG.motion,
-      tracks: [wghtTrack()],
+      moves: [trackMove(wghtTrack())],
       duration: 4,
       stagger: { delay: 0.4, order: 'forward', seed: 0 },
     },
@@ -145,7 +164,7 @@ describe('the travelling wave, as PIXELS would see it', () => {
 
   it('gives the glyphs DIFFERENT geometry at one instant (not the same word re-drawn)', () => {
     const wave = vectorTypeFrame(font, staggered(), 2)
-    const flat = vectorTypeFrame(font, cfg({ motion: { ...DEFAULT_CONFIG.motion, tracks: [wghtTrack()], duration: 4 } }), 2)
+    const flat = vectorTypeFrame(font, cfg({ motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove(wghtTrack())], duration: 4 } }), 2)
     // The un-staggered run puts every glyph at ONE weight; the staggered one must
     // not produce the same advances, or the wave never happened.
     const adv = (f: typeof wave) => f.outlines.glyphs.map(g => Math.round(g.advance))
@@ -185,7 +204,7 @@ describe('the travelling wave, as PIXELS would see it', () => {
     const c = cfg({
       motion: {
         ...DEFAULT_CONFIG.motion,
-        tracks: [{ path: 'glyph.opacity', from: 0, to: 1, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 }],
+        moves: [trackMove({ path: 'glyph.opacity', from: 0, to: 1 })],
         duration: 4,
         stagger: { delay: 0.5, order: 'forward', seed: 0 },
       },
@@ -243,7 +262,7 @@ describe('vtIsAnimated', () => {
   it('is true only when there are tracks — stagger alone animates nothing', () => {
     expect(vtIsAnimated(cfg())).toBe(false)
     expect(vtIsAnimated(cfg({ motion: { ...DEFAULT_CONFIG.motion, stagger: { delay: 0.5, order: 'forward', seed: 0 } } }))).toBe(false)
-    expect(vtIsAnimated(cfg({ motion: { ...DEFAULT_CONFIG.motion, tracks: [wghtTrack()] } }))).toBe(true)
+    expect(vtIsAnimated(cfg({ motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove(wghtTrack())] } }))).toBe(true)
   })
 
   it('survives a config straight out of storage', () => {
@@ -367,7 +386,7 @@ describe('vectorTypeSVG — editable outlines, not a raster embed', () => {
   })
 
   it('exports the frame at time `t`, not the base config', () => {
-    const c = cfg({ motion: { ...DEFAULT_CONFIG.motion, tracks: [wghtTrack()], duration: 4 } })
+    const c = cfg({ motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove(wghtTrack())], duration: 4 } })
     const a = vectorTypeSVG(font, c, 0, BOX)
     const b = vectorTypeSVG(font, c, 4, BOX)
     expect(a.frame.config.axes.wght).toBeCloseTo(100, 6)
@@ -412,10 +431,10 @@ describe('vectorTypeSVG — editable outlines, not a raster embed', () => {
         ...DEFAULT_CONFIG.motion,
         duration: 4,
         stagger: { delay: 0.4, order: 'forward', seed: 0 },
-        tracks: [
-          { path: 'glyph.dy', from: -120, to: 0, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 },
-          { path: 'glyph.opacity', from: 0, to: 1, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 },
-        ],
+        moves: [trackMove(
+          { path: 'glyph.dy', from: -120, to: 0 },
+          { path: 'glyph.opacity', from: 0, to: 1 },
+        )],
       },
     })
     const { svg, frame } = vectorTypeSVG(font, c, 2, BOX)

@@ -302,7 +302,13 @@ describe('the <defs> hold one entry per distinct PAINT, not per shape', () => {
         vtLayer({ id: 'L1', kind: 'stroke', width: 4, paint: BLUE }),
         vtLayer({ id: 'L2', kind: 'fill', paint: '#00ff00', opacity: 0.4 }),
       ],
-      motion: { ...DEFAULT_CONFIG.motion, in: { presetId: 'blur-in', duration: 1, ease: 'none' } },
+      motion: {
+        ...DEFAULT_CONFIG.motion,
+        moves: [{
+          id: 'move-in', phase: 'in', kind: 'preset', presetId: 'blur-in', duration: 1,
+          ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: 1 },
+        }],
+      },
     })
     const { svg } = vectorTypeSVG(font, c, 0.5, BOX)
     expect(paths(svg)).toHaveLength(12)
@@ -347,7 +353,13 @@ describe('a layer’s opacity MULTIPLIES the glyph’s, and its blend survives',
     const c = cfg({
       text: 'Sail',
       appearance: [vtLayer({ id: 'L0', kind: 'fill', paint: RED, opacity: 0.5 })],
-      motion: { ...DEFAULT_CONFIG.motion, in: { presetId: 'fade-in', duration: 1, ease: 'none' } },
+      motion: {
+        ...DEFAULT_CONFIG.motion,
+        moves: [{
+          id: 'move-in', phase: 'in', kind: 'preset', presetId: 'fade-in', duration: 1,
+          ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: 1 },
+        }],
+      },
     })
     const solidOpacity = paths(vectorTypeSVG(font, stack({ kind: 'fill', paint: RED, opacity: 0.5 }), 0, BOX).svg)
       .map(t => attr(t, 'opacity'))
