@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parsePathD, flattenSubpath, subpathsToD, resample, signedArea, alignCorrespondence, blendPath, prepareBlend, samplesForSubpaths, rotatePathD, BLEND_SAMPLES } from '~/lib/vector/morph'
+import { parsePathD, flattenSubpath, subpathsToD, resample, signedArea, alignCorrespondence, blendPath, prepareBlend, samplesForSubpaths, rotatePathD, BLEND_SAMPLES, dropCollinear } from '~/lib/vector/morph'
 
 const SQUARE = 'M -50 -50 L 50 -50 L 50 50 L -50 50 Z'
 const HEX = (() => {
@@ -108,6 +108,21 @@ describe('morph: resample', () => {
   })
 })
 
+describe('morph: dropCollinear', () => {
+  it('drops points on a straight run and keeps the corners', () => {
+    const sq = resample(flatOf(SQUARE), 40)
+    expect(dropCollinear(sq, 1e-6)).toHaveLength(4)
+  })
+  it('keeps every point of a ring with no straight runs', () => {
+    const ring = Array.from({ length: 12 }, (_, i) => [Math.cos(i / 12 * Math.PI * 2) * 50, Math.sin(i / 12 * Math.PI * 2) * 50] as [number, number])
+    expect(dropCollinear(ring, 1e-6)).toHaveLength(12)
+  })
+  it('returns the input when everything would be dropped (a ring collapsed to one point)', () => {
+    const dot = Array.from({ length: 8 }, () => [3, 4] as [number, number])
+    expect(dropCollinear(dot, 1e-6)).toBe(dot)
+  })
+})
+
 describe('morph: alignCorrespondence', () => {
   it('recovers a known index rotation of the same polygon', () => {
     const a = resample(flatOf(SQUARE), 32)
@@ -154,7 +169,25 @@ describe('morph: blendPath', () => {
     }
     expect(onOutline(flatOf(d0), HEX)).toBe(true)
     expect(onOutline(flatOf(d1), TRI)).toBe(true)
-    expect(flatOf(d0)).toHaveLength(BLEND_SAMPLES)
+    // Straight-edged pairs shed the resampled points along each edge (they are
+    // collinear): what survives is at most the two samples straddling each
+    // corner, so a hexagon step is ≤ 12 points instead of 128 and the boolean
+    // fold in single fill mode stays cheap.
+    expect(flatOf(d0).length).toBeLessThanOrEqual(2 * 6)
+    expect(flatOf(d1).length).toBeLessThanOrEqual(2 * 3)
+  })
+
+  it('a mid-way step between straight-edged shapes carries only its corners (≤ 2 × (cornersA + cornersB))', () => {
+    const mid = flatOf(blendPath(HEX, TRI, 0.5))
+    expect(mid.length).toBeGreaterThanOrEqual(3)
+    expect(mid.length).toBeLessThanOrEqual(2 * (6 + 3))
+  })
+
+  it('a curved pair keeps most of its resampled points (only samples on one flattened chord collapse)', () => {
+    const circle = 'M 50 0 A 50 50 0 0 1 -50 0 A 50 50 0 0 1 50 0 Z'
+    const mid = flatOf(blendPath(circle, 'M 40 0 A 40 40 0 0 1 -40 0 A 40 40 0 0 1 40 0 Z', 0.5, { twist: 0.1 }))
+    expect(mid.length).toBeGreaterThan(BLEND_SAMPLES / 2)
+    expect(mid.length).toBeLessThanOrEqual(BLEND_SAMPLES)
   })
 
   it('an unpaired subpath collapses to ITS OWN centroid, not the partner shape\u2019s', () => {

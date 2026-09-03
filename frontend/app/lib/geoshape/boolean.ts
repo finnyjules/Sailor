@@ -82,25 +82,23 @@ async function paperScope(): Promise<paper.PaperScope> {
   return _scope
 }
 
-const OP: Record<Exclude<GeoShapeConfig['fillMode'], 'evenodd'>, 'unite' | 'subtract' | 'intersect' | 'exclude'> = {
-  unite: 'unite', subtract: 'subtract', intersect: 'intersect', exclude: 'exclude',
+const OP: Record<Exclude<GeoShapeConfig['fillMode'], 'evenodd' | 'exclude'>, 'unite' | 'subtract' | 'intersect'> = {
+  unite: 'unite', subtract: 'subtract', intersect: 'intersect',
 }
 
 /**
  * Fold `items` with one paper.js boolean op as a balanced tree, not a
  * left-to-right chain. A chain re-walks the whole accumulated outline for every
- * clone; `exclude` keeps every ring it has seen, so that walk grows with the
- * clone index and the fold is O(N³) — 150 radial hexagons took over four
- * minutes on the main thread, and a 150-step Blend (128-point outlines) never
- * finished. A tree merges equal-sized halves and stays near O(N²).
+ * clone, so its cost grows with the clone index; a tree merges equal-sized
+ * halves and pays each level once. (Measured on the exclude op before it moved
+ * to the even-odd branch: a 150-step Blend went from never finishing to 12 s.)
  *
- * unite / intersect / exclude are associative and commutative, so the tree
- * yields the same region as the chain. subtract is neither: the chain
- * a − b − c − … equals a − (b ∪ c ∪ …), so it is one subtract off a tree-united
- * rest.
+ * unite / intersect are associative and commutative, so the tree yields the
+ * same region as the chain. subtract is neither: the chain a − b − c − … equals
+ * a − (b ∪ c ∪ …), so it is one subtract off a tree-united rest.
  */
-function foldBoolean(items: paper.PathItem[], op: 'unite' | 'subtract' | 'intersect' | 'exclude'): paper.PathItem {
-  const tree = (level: paper.PathItem[], o: 'unite' | 'intersect' | 'exclude'): paper.PathItem => {
+function foldBoolean(items: paper.PathItem[], op: 'unite' | 'subtract' | 'intersect'): paper.PathItem {
+  const tree = (level: paper.PathItem[], o: 'unite' | 'intersect'): paper.PathItem => {
     while (level.length > 1) {
       const next: paper.PathItem[] = []
       for (let i = 0; i + 1 < level.length; i += 2) next.push((level[i] as any)[o](level[i + 1]) as paper.PathItem)
@@ -361,7 +359,15 @@ export async function composite(baseD: string | string[], placements: ClonePlace
         }))
     }
 
-    const isEvenOdd = cfg.fillMode === 'evenodd'
+    // `exclude` (XOR) is the even-odd region by definition — a point is inside
+    // when an odd number of clones cover it — and every clone edge stays a
+    // boundary of that region, so the even-odd compound draws the same fill AND
+    // the same outlines as a resolved XOR. Resolving it with paper.js instead
+    // kept every ring it had seen and grew cubically: 150 near-coincident Blend
+    // steps never finished (over five minutes) and 150 radial hexagons took four,
+    // and what came back was thousands of sliver pieces. So exclude takes the
+    // even-odd branch; only unite / subtract / intersect still fold.
+    const isEvenOdd = cfg.fillMode === 'evenodd' || cfg.fillMode === 'exclude'
 
     // Symmetry for evenodd is applied at the clone level (mirror every clone and
     // add the copies) rather than uniting the composited result: uniting a
@@ -420,7 +426,7 @@ export async function composite(baseD: string | string[], placements: ClonePlace
       cp.fillRule = 'evenodd'
       acc = cp
     } else {
-      acc = foldBoolean(clones as paper.PathItem[], OP[cfg.fillMode as Exclude<GeoShapeConfig['fillMode'], 'evenodd'>])
+      acc = foldBoolean(clones as paper.PathItem[], OP[cfg.fillMode as Exclude<GeoShapeConfig['fillMode'], 'evenodd' | 'exclude'>])
     }
 
     // 3.5. symmetry for subtract/exclude/intersect: fold the originals into the
@@ -456,7 +462,7 @@ export async function composite(baseD: string | string[], placements: ClonePlace
 
     // 5. paper → VectorShape[]. evenodd sets the fill-rule; shape mode adds
     // the overlap as a second shape painted with `overlapFill`.
-    const fillRule: 'evenodd' | 'nonzero' = cfg.fillMode === 'evenodd' ? 'evenodd' : 'nonzero'
+    const fillRule: 'evenodd' | 'nonzero' = isEvenOdd ? 'evenodd' : 'nonzero'
     const singleStroke: Paint = cfg.paintTarget === 'outline' ? (cfg.stroke ?? cfg.fill) : (cfg.stroke ?? '#000000')
     const out: GeoVectorShape[] = [{
       commands: paperToCommands(acc),

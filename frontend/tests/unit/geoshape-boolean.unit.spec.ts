@@ -95,9 +95,11 @@ describe('geoshape boolean composite', () => {
     // the SVG actually carries real path data, not an empty mark
     expect(svg).toMatch(/<path d="M-?\d/)
   })
-  it('the boolean fold is a balanced tree that matches the left-to-right chain for every op', async () => {
+  it('the boolean fold is a balanced tree that matches the left-to-right chain for every op (exclude = even-odd compound)', async () => {
     // Seven squares stepping along a diagonal with partial overlaps — enough clones
     // for the tree to have an odd leftover and for exclude to keep several rings.
+    // exclude no longer folds at all (it is the even-odd region), so for it this
+    // checks the compound covers exactly what a resolved XOR chain covers.
     const placements = Array.from({ length: 7 }, (_, i) => ({ x: i * 40, y: i * 25, rotate: i * 9, scale: 1 }))
     const paperMod = ((await import('paper')) as unknown as { default: typeof import('paper') }).default
     const sc = new paperMod.PaperScope(); sc.setup(new sc.Size(1024, 1024))
@@ -105,16 +107,28 @@ describe('geoshape boolean composite', () => {
       const p = new sc.CompoundPath(SQUARE); const m = new sc.Matrix()
       m.translate(pl.x, pl.y); m.rotate(pl.rotate, new sc.Point(0, 0)); m.scale(pl.scale); p.transform(m); return p as any
     }
+    // Compared by point containment on a grid, not by `.area`: paper's exclude
+    // emits the same region with different child windings depending on the
+    // fold order, so signed areas disagree while the covered region is identical.
+    const covered = (items: any[]) => {
+      const hit: boolean[] = []
+      for (let x = -70; x <= 340; x += 4) for (let y = -70; y <= 240; y += 4) hit.push(items.some(it => it.contains(new sc.Point(x, y))))
+      return hit
+    }
     for (const fillMode of ['unite', 'subtract', 'intersect', 'exclude'] as const) {
       sc.activate()
       let chain: any = clone(placements[0]!)
       for (const pl of placements.slice(1)) chain = chain[fillMode](clone(pl))
-      const chainArea = Math.abs(chain.area)
+      const chainHits = covered([chain])
       const shapes = await composite(SQUARE, placements, { ...DEFAULT_CONFIG, fillMode, clipMask: 'none', strokeWidth: 0 })
       sc.activate()
-      let treeArea = 0
-      for (const s of shapes) { const p = new sc.CompoundPath(commandsToPathData(s.commands)); p.fillRule = 'nonzero'; treeArea += Math.abs(p.area) }
-      expect(treeArea, fillMode).toBeCloseTo(chainArea, 0)
+      const treeItems = shapes.map((s) => { const p = new sc.CompoundPath(commandsToPathData(s.commands)); p.fillRule = s.fillRule ?? 'nonzero'; return p })
+      const treeHits = covered(treeItems)
+      const disagree = chainHits.filter((h, i) => h !== treeHits[i]).length
+      if (fillMode !== 'intersect') expect(chainHits.filter(Boolean).length, fillMode).toBeGreaterThan(50)
+      // Samples right on an edge may land on either side depending on how the
+      // fold placed that edge numerically: allow 0.5% of the grid to differ.
+      expect(disagree, fillMode).toBeLessThanOrEqual(chainHits.length * 0.005)
       sc.project.clear()
     }
   })

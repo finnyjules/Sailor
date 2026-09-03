@@ -181,7 +181,7 @@ export const GEO_CONTROLS: GeoControl[] = [
   // split into pieces), so these have no effect there — hide them so they don't
   // read as ignored knobs.
   select('fillMode', 'Fill mode', FILLMODES, DEFAULT_CONFIG.fillMode, 'Composite',
-    'How the clones fold together: evenodd cuts holes where they cross, unite/subtract/intersect/exclude are true boolean ops',
+    'How the clones fold together: evenodd and exclude cut holes where they cross (exclude is the same region, kept as one even-odd shape), unite/subtract/intersect are true boolean ops',
     { when: isSingleFill }),
   select('overlapMode', 'Overlap mode', OVERLAPMODES, DEFAULT_CONFIG.overlapMode, 'Composite',
     'hole = crossings read as a cut-through; shape = crossings paint as their own region in Overlap fill',
@@ -255,7 +255,7 @@ LAYOUT: count is how many clones to place (grid layout instead uses gridCols × 
 
 TRANSFORM: rotateBase + i*rotateStep rotates each successive clone (a spiral/fan feel as rotateStep grows). scaleStart→scaleEnd ramps clone size across the sequence (shrink/grow trails). skew shears every clone; spin only matters for radial layout.
 
-COMPOSITE: fillMode is the boolean fold across all clones (evenodd = classic cut-hole overlap; unite/subtract/intersect/exclude are true boolean ops). overlapMode governs crossings specifically — "hole" cuts through, "shape" paints the crossing itself in overlapFill (a spot-color trick: use it to highlight where clones intersect).
+COMPOSITE: fillMode is the boolean fold across all clones (evenodd = classic cut-hole overlap; exclude draws the same region; unite/subtract/intersect are true boolean ops). overlapMode governs crossings specifically — "hole" cuts through, "shape" paints the crossing itself in overlapFill (a spot-color trick: use it to highlight where clones intersect).
 
 SYMMETRY mirrors the whole composed mark across symmetryAxis (vertical/horizontal), offset by symmetrySpacing. CLIP crops the finished mark to clipMask (circle/square/hexagon) sized by clipMaskSize; invert swaps the mark's fill/ground so the shape reads as negative space.
 

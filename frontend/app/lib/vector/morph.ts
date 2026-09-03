@@ -276,6 +276,9 @@ export function subpathsToD(subs: Subpath[], precision = 2): string {
  *  outline stack under ~350 KB of SVG while hiding the polyline at print size. */
 export const BLEND_SAMPLES = 128
 
+/** `dropCollinear` tolerance as a fraction of the blend pair's bounding diagonal. */
+export const COLLINEAR_EPS_REL = 1e-6
+
 /** Points per outline once `n` subpaths are paired, so a detailed multi-subpath
  *  library shape cannot multiply into an unbounded point count: 1–3 subpaths keep
  *  the full `BLEND_SAMPLES`, above that the budget (3 × BLEND_SAMPLES points in
@@ -319,6 +322,34 @@ export function signedArea(poly: Pt[]): number {
     s += a[0] * b[1] - b[0] * a[1]
   }
   return s / 2
+}
+
+/**
+ * Drop every point that sits on the straight line between its two neighbours
+ * (perpendicular distance ≤ `eps`), treating `pts` as a closed ring.
+ *
+ * `resample` lays ~20 points along each hexagon edge, and lerping two
+ * straight-edged outlines keeps every run straight, so a hexagon→triangle step
+ * is really a ≤ 9-gon carrying 128 points. paper.js booleans (Shape Studio's
+ * single fill mode) cost by point count squared per clone pair, and an
+ * exclude fold keeps every ring, so those phantom points are what turned a
+ * 150-step blend into a minutes-long tab freeze. Curved runs never have three
+ * collinear points in a row, so they are untouched and nothing visible changes.
+ * Falls back to the input when fewer than three points survive (a subpath that
+ * has collapsed to a point keeps its point list).
+ */
+export function dropCollinear(pts: Pt[], eps: number): Pt[] {
+  const n = pts.length
+  if (n < 4) return pts
+  const out: Pt[] = []
+  for (let i = 0; i < n; i++) {
+    const p = pts[(i - 1 + n) % n]!, c = pts[i]!, q = pts[(i + 1) % n]!
+    const vx = q[0] - p[0], vy = q[1] - p[1], wx = c[0] - p[0], wy = c[1] - p[1]
+    const len = Math.hypot(vx, vy)
+    const dist = len > 0 ? Math.abs(vx * wy - vy * wx) / len : Math.hypot(wx, wy)
+    if (dist > eps) out.push(c)
+  }
+  return out.length >= 3 ? out : pts
 }
 
 function centroid(poly: Pt[]): Pt {
@@ -419,16 +450,22 @@ export function prepareBlend(dA: string, dB: string, opts: { twist?: number; sam
   const n = Math.max(pa.length, pb.length)
   const k = opts.samples ?? samplesForSubpaths(n)
   const pairs: { a: Pt[]; b: Pt[] }[] = []
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (let i = 0; i < n; i++) {
     const a = pa[i], b = pb[i]
     const polyA = a ? resample(a, k) : resample([centroid(b!)], k)
     const polyBraw = b ? resample(b, k) : resample([centroid(a!)], k)
     pairs.push({ a: polyA, b: alignCorrespondence(polyA, polyBraw, twist) })
+    for (const [x, y] of polyA.concat(polyBraw)) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y) }
   }
+  // Collinearity tolerance scaled to the pair's extent: lerped straight runs are
+  // collinear to ~1e-12 relative, so a millionth of the diagonal drops exactly
+  // those and nothing a curve produced.
+  const eps = COLLINEAR_EPS_REL * Math.max(1e-9, Math.hypot(maxX - minX, maxY - minY))
   return (t: number) => {
     const tt = clamp01(t)
     const out: Subpath[] = pairs.map(({ a, b }) => {
-      const pts = a.map((p, j) => lerpPt(p, b[j]!, tt))
+      const pts = dropCollinear(a.map((p, j) => lerpPt(p, b[j]!, tt)), eps)
       return { start: pts[0]!, segs: pts.slice(1).map(p => ({ kind: 'line' as const, to: p })), closed: true }
     })
     return subpathsToD(out)
