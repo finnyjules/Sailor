@@ -21,6 +21,9 @@ import { brandSwatches as kitSwatches } from '~~/shared/brand/resolve'
 import FillImagePicker from '~/components/vue-canvas/compositor/FillImagePicker.vue'
 import { getFillBitmap, ensureFillBitmaps } from '~/lib/paint/imageFillCache'
 import { imageFillRect } from '~/lib/compositor/paint'
+import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
+import { shapeById } from '~/lib/shapes/catalog'
+import { anchorAbove } from '~/lib/shapes/pickerLayout'
 
 const props = withDefaults(defineProps<{
   modelValue: Paint | undefined
@@ -128,6 +131,9 @@ function setType(t: FillType) {
   // real to bind to immediately, rather than relying on the `?? DEFAULT_SHADER_SPEC`
   // fallback below until the user's first edit.
   if (t === 'shader' && !fill.shader) fill.shader = structuredClone(DEFAULT_SHADER_SPEC)
+  // Switching INTO shapes seeds a default library shape so the tile has something
+  // real to draw immediately, rather than the fallback inside fillTileCanvas.
+  if (t === 'shapes' && !fill.shapeId) fill.shapeId = 'sparkle'
   fill.type = t; push()
 }
 function onGrad(g: Gradient) { grad.value = g; push() }
@@ -172,8 +178,22 @@ function applyBrandColor(hex: string) {
 
 // Gradient gets its own editor; patterns keep the A/B + angle + density controls.
 const needsB = computed(() => fill.type !== 'solid' && fill.type !== 'gradient')
-const needsAngle = computed(() => fill.type === 'ombre' || fill.type === 'stripes')
-const needsDensity = computed(() => fill.type === 'grid' || fill.type === 'checkerboard' || fill.type === 'stripes' || fill.type === 'noise' || fill.type === 'qr')
+const needsAngle = computed(() => fill.type === 'ombre' || fill.type === 'stripes' || fill.type === 'shapes')
+const needsDensity = computed(() => fill.type === 'grid' || fill.type === 'checkerboard' || fill.type === 'stripes' || fill.type === 'noise' || fill.type === 'qr' || fill.type === 'shapes')
+
+// Shapes fill: pick the library shape tiled across the grid, and let the tile
+// sit on a transparent background instead of a solid `b`.
+const shapePickerOpen = ref(false)
+const shapePickerAnchor = ref({ x: 0, y: 0 })
+const shapeBtnRef = ref<HTMLElement | null>(null)
+const currentShape = computed(() => (fill.type === 'shapes' ? shapeById(fill.shapeId ?? '') : undefined))
+function openShapePicker() {
+  shapePickerAnchor.value = anchorAbove(shapeBtnRef.value?.getBoundingClientRect() ?? null)
+  shapePickerOpen.value = true
+}
+function setShape(id: string) { fill.shapeId = id; push() }
+const bgTransparent = computed(() => fill.type === 'shapes' && (fill.b === 'none' || fill.b === ''))
+function setBgTransparent(on: boolean) { fill.b = on ? 'none' : '#000000'; push() }
 
 function drawGradientPreview(ctx: CanvasRenderingContext2D, w: number, h: number) {
   const g = grad.value
@@ -293,13 +313,32 @@ watch(imageFill, drawPreview, { deep: true })
 
       <ShaderFillEditor v-else-if="fill.type === 'shader'" :model-value="fill.shader ?? DEFAULT_SHADER_SPEC" :show-anchor="showAnchor" @update:model-value="onShaderSpec" />
 
-      <div v-else class="flex items-center gap-1.5">
-        <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 shrink-0">{{ needsB ? 'A' : 'Color' }}</span>
-        <StudioColor :model-value="fill.a" @update:model-value="(v: string) => setColor('a', v)" />
-        <template v-if="needsB">
-          <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 shrink-0 pl-1">B</span>
-          <StudioColor :model-value="fill.b" @update:model-value="(v: string) => setColor('b', v)" />
-        </template>
+      <div v-else class="space-y-2.5">
+        <div v-if="fill.type === 'shapes'" class="mb-1">
+          <div class="panel-sublabel mb-1">Shape</div>
+          <button ref="shapeBtnRef" type="button"
+            class="w-full flex items-center gap-2 h-8 rounded border border-[#2a2a2a] bg-[#1a1a1a] px-2 text-xs text-white/85 cursor-pointer hover:text-white"
+            @click="openShapePicker">
+            <svg v-if="currentShape" viewBox="0 0 96 96" class="size-4 shrink-0" fill="currentColor" aria-hidden="true"><path :d="currentShape.d" :fill-rule="currentShape.fillRule" /></svg>
+            <span class="flex-1 text-left">{{ currentShape ? currentShape.name : 'Sparkle' }}</span>
+          </button>
+          <ShapePicker v-if="shapePickerOpen" :model-value="fill.shapeId ?? 'sparkle'" :allow-none="false"
+            :anchor="shapePickerAnchor" :ignore="shapeBtnRef"
+            @update:model-value="(id: string) => setShape(id)" @close="shapePickerOpen = false" />
+          <label class="mt-1.5 flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
+            <input type="checkbox" :checked="bgTransparent" @change="setBgTransparent((($event.target as HTMLInputElement).checked))" />
+            Transparent background
+          </label>
+        </div>
+
+        <div class="flex items-center gap-1.5">
+          <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 shrink-0">{{ needsB ? 'A' : 'Color' }}</span>
+          <StudioColor :model-value="fill.a" @update:model-value="(v: string) => setColor('a', v)" />
+          <template v-if="needsB && !bgTransparent">
+            <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 shrink-0 pl-1">B</span>
+            <StudioColor :model-value="fill.b" @update:model-value="(v: string) => setColor('b', v)" />
+          </template>
+        </div>
       </div>
 
       <div v-if="needsAngle">
@@ -312,7 +351,7 @@ watch(imageFill, drawPreview, { deep: true })
 
       <div v-if="needsDensity">
         <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-          <span>Density</span><span class="tabular-nums normal-case">{{ Math.round(fill.density) }}</span>
+          <span>{{ fill.type === 'shapes' ? 'Count' : 'Density' }}</span><span class="tabular-nums normal-case">{{ Math.round(fill.density) }}</span>
         </div>
         <input type="range" min="1" max="32" step="1" :value="fill.density" class="w-full accent-white cursor-pointer"
           @input="setNum('density', Number(($event.target as HTMLInputElement).value))" />
