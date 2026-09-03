@@ -104,26 +104,51 @@ test('terrain_bands as a Frame layer fill paints the field, not the fallback gra
   // duplicate Compositor nodes behind and breaking the exact-2 count this
   // assertion depends on. Each attempt starts from a fresh nodes.value (a new
   // navigation), so there is no accumulation to worry about.
+  // Cardinality alone ("count === 2") doesn't prove WHICH two cards those are:
+  // a concurrent session's project-restore can add/remove Frame nodes on this
+  // shared dev box, and if it happens to leave exactly two frame-card canvases
+  // that aren't the pair we added, nth(0)/nth(1) below would silently compare
+  // the wrong cards. The cards expose no layer id in the DOM, so identity is
+  // established by construction instead: verify zero cards before we add
+  // anything, then step the count to 1 (shader added) and to 2 (gradient
+  // added), then reconfirm it's still 2 after the settle wait. Each step is
+  // asserted inside the retry so a foreign node at any point fails the whole
+  // attempt rather than mis-pairing the screenshots.
   let ready = false
+  let failStep = 'navigate'
   for (let attempt = 0; attempt < 3 && !ready; attempt++) {
     try {
       await openBlankWorkflow(page)
+      failStep = 'pre-add zero-count'
+      await expect(canvases).toHaveCount(0, { timeout: 5_000 })
+      failStep = 'shader add'
       await addFrame(page, 'll-gen-shader', SHADER)
+      await expect(canvases).toHaveCount(1, { timeout: 5_000 })
+      failStep = 'gradient add'
       await addFrame(page, 'll-gen-gradient', GRADIENT)
-      ready = await canvases.count().then((n) => n === 2)
+      await expect(canvases).toHaveCount(2, { timeout: 5_000 })
+      failStep = 'settle'
+      // Let the catalog fetch land and the static repaint run.
+      await page.waitForTimeout(2_500)
+      if ((await canvases.count()) !== 2) {
+        throw new Error(`canvas count changed during settle wait (expected 2)`)
+      }
+      ready = true
     } catch (err) {
       // A transient UI hiccup mid-attempt (e.g. the "Start a blank project"
-      // button losing visibility while another concurrently-running session
-      // churns the same shared ComfyUI backend's project state) must not abort
-      // the whole test — it's exactly what this retry exists to ride out.
-      console.warn(`[frame-generative-fill] setup attempt ${attempt} threw:`, err)
+      // button losing visibility, or a foreign node from another
+      // concurrently-running session's project-restore churning the same
+      // shared ComfyUI backend's project state) must not abort the whole
+      // test — it's exactly what this retry exists to ride out.
+      console.warn(`[frame-generative-fill] setup attempt ${attempt} failed at step "${failStep}":`, err)
     }
     if (!ready) await page.waitForTimeout(1_000)
   }
   await expect(canvases).toHaveCount(2, { timeout: 10_000 })
-  // Let the catalog fetch land and the static repaint run.
-  await page.waitForTimeout(2_500)
 
+  // Step "shader add" above proved the shader card landed as the first (and
+  // only) card before the gradient card was added, so nth(0) is the shader
+  // card and nth(1) is the gradient card.
   const shaderShot = PNG.sync.read(await canvases.nth(0).screenshot())
   const gradientShot = PNG.sync.read(await canvases.nth(1).screenshot())
   expect(shaderShot.width).toBe(gradientShot.width)
