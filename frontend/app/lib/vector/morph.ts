@@ -14,6 +14,7 @@
 import { formatNumber } from './svg'
 
 export type Pt = [number, number]
+export type ArcCubic = [number, number, number, number, number, number]
 export type Seg = { kind: 'line'; to: Pt } | { kind: 'cubic'; c1: Pt; c2: Pt; to: Pt }
 export interface Subpath { start: Pt; segs: Seg[]; closed: boolean }
 
@@ -153,7 +154,8 @@ export function parsePathD(d: string): Subpath[] {
         break
       }
       case 'Z': {
-        if (cur) { cur.closed = true; cx = sx; cy = sy }
+        const open = cur as Subpath | null
+        if (open) { open.closed = true; cx = sx; cy = sy }
         resetControls()
         // A Z followed by coordinates without a command is invalid SVG; stop.
         if (peekNumber()) throw new Error(`morph.parsePathD: coordinates after Z in "${d}"`)
@@ -168,7 +170,7 @@ export function parsePathD(d: string): Subpath[] {
 /** SVG endpoint arc → up to four cubic segments (each ≤ 90°), per the SVG
  *  implementation notes' centre-parameterisation (F.6.5). Returns
  *  [x1,y1,x2,y2,x,y] tuples. */
-function arcToCubics(x0: number, y0: number, rx: number, ry: number, rotDeg: number, large: boolean, sweep: boolean, x: number, y: number): number[][] {
+function arcToCubics(x0: number, y0: number, rx: number, ry: number, rotDeg: number, large: boolean, sweep: boolean, x: number, y: number): ArcCubic[] {
   if (rx === 0 || ry === 0) return [[x0, y0, x, y, x, y]]
   if (x0 === x && y0 === y) return []
   const phi = (rotDeg * Math.PI) / 180
@@ -206,7 +208,7 @@ function arcToCubics(x0: number, y0: number, rx: number, ry: number, rotDeg: num
   const n = Math.max(1, Math.ceil(Math.abs(dtheta) / (Math.PI / 2)))
   const delta = dtheta / n
   const k = (4 / 3) * Math.tan(delta / 4)
-  const out: number[][] = []
+  const out: ArcCubic[] = []
   let th = theta1
   const point = (t: number): Pt => {
     const ex = rx * Math.cos(t), ey = ry * Math.sin(t)
