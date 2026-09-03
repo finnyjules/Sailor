@@ -18,7 +18,7 @@ import CompositorInlineToolbar from '~/components/vue-canvas/CompositorInlineToo
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
-import { onCanvasOcclusion } from '~/lib/studio/occlusion'
+import { onCanvasOcclusion, createOcclusionRepaintGate } from '~/lib/studio/occlusion'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { resolveWiredSourceKind } from '~/lib/studio/frameResolve'
 import { frameSourceEpoch, type StudioFrameSource } from '~/lib/studio/frameSource'
@@ -492,6 +492,7 @@ const stackCanvas = ref<HTMLCanvasElement | null>(null)
 // defaulting to t=0 is byte-identical to "no clock needed" — see `hasAnimatedFill` below
 // for the predicate that decides whether that default is actually being exercised.
 function renderStack(t?: number, live = false) {
+  if (!repaintGate.shouldPaint()) return
   const cv = stackCanvas.value
   if (!cv) return
   const W = box.value.w, H = box.value.h
@@ -615,6 +616,10 @@ function stopAnim() { cancelAnimationFrame(animRaf); animRaf = 0 }
 // canvas), so this Frame pauses behind every such modal — not just the Compositor.
 const gate = { visible: true, tabActive: true, editorOpen: false, hovered: false }
 function gateOk() { return gate.visible && gate.tabActive && !gate.editorOpen && gate.hovered }
+// `gate`/`applyGate` above only pause the rAF loop. `renderStack`'s poster repaints
+// are watch-driven (fire even with no loop running), so they need their own gate —
+// see createOcclusionRepaintGate's doc comment for why.
+const repaintGate = createOcclusionRepaintGate()
 function applyGate() {
   const shouldRun = needsClock.value && gateOk()
   if (shouldRun && !animRaf) startAnim()
@@ -846,7 +851,11 @@ onMounted(() => {
   // rendering the wired scene behind the modal, and that per-frame render competes with
   // the studio preview for the main thread (measured ~13fps). Fires immediately with the
   // current state, so a Frame dropped onto the canvas mid-modal starts out paused.
-  unsubOcclusion = onCanvasOcclusion((open) => { gate.editorOpen = open; applyGate() })
+  unsubOcclusion = onCanvasOcclusion((open) => {
+    gate.editorOpen = open
+    applyGate()
+    if (repaintGate.setOccluded(open)) renderPosterFrame()
+  })
   applyGate()
 })
 onBeforeUnmount(() => {

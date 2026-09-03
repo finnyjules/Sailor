@@ -62,3 +62,26 @@ export function onCanvasOcclusion(cb: (open: boolean) => void): () => void {
   cb(_occluded)
   return () => window.removeEventListener(CANVAS_OCCLUSION_EVENT, handler)
 }
+
+/**
+ * `applyGate` above only pauses the rAF loop — fine for cards whose paints are
+ * driven by that loop, but the Frame card's poster repaints are watch-driven
+ * (a `JSON.stringify(localLayers)` watch fires on every layer edit, loop or no
+ * loop). Dragging a layer inside a fullscreen modal still fires that watch for
+ * the occluded card behind it, repainting pixels nobody can see (~110ms/move
+ * on a torn-edge card). This gate is the watch-driven equivalent of `applyGate`:
+ * "Repaint now, or remember that one is owed?" for a card whose paints are
+ * watch-driven (not a loop). While occluded, every request is swallowed and marked
+ * owed; the first un-occlude returns true exactly once so the caller paints the
+ * deferred state.
+ */
+export function createOcclusionRepaintGate() {
+  let occluded = false, owed = false
+  return {
+    /** Call before painting. true ⇒ paint now. false ⇒ occluded; a repaint is now owed. */
+    shouldPaint(): boolean { if (occluded) { owed = true; return false } return true },
+    /** Feed the occlusion signal. Returns true when the card just became visible AND a repaint is owed. */
+    setOccluded(open: boolean): boolean { occluded = open; if (open) return false; const due = owed; owed = false; return due },
+    get occluded() { return occluded }, get owed() { return owed },
+  }
+}
