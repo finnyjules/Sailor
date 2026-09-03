@@ -11,6 +11,7 @@ import {
   BLEND_EASES,
   FILL_CYCLES,
   PAINT_TARGETS,
+  LAYOUTS as CONFIG_LAYOUTS,
 } from './config'
 import { BASE_SHAPES, type BaseShapeKind } from './shapes'
 import type { Paint } from '~/lib/compositor/paint'
@@ -32,16 +33,19 @@ export type GeoControl = ControlSpec & { when?: (cfg: GeoShapeConfig) => boolean
 /** Emission order; a control whose group is not listed here is dropped. */
 export const GEO_SECTIONS = ['Shape', 'Layout', 'Blend', 'Transform', 'Composite', 'Symmetry', 'Clip', 'Style', 'Paint'] as const
 
-// Mirror of config.ts's own (private) enum lists — kept local rather than
-// exported from config.ts because Task 7's commit stages only the new lib
-// files, not a config.ts edit. Keep these in sync with config.ts's
-// SHAPES/LAYOUTS/FILLMODES/OVERLAPMODES/SYMMETRY_AXES/CLIP_MASKS if that
-// file's enums ever grow.
+// The enum lists, widened from config.ts's `as const` tuples to the mutable
+// arrays the control builders and randomize.ts's `pick` take.
+//
+// `LAYOUTS` is READ FROM config.ts — one list, no hand-sync. The four below it
+// are still spelled out here because config.ts keeps its own copies private;
+// keep them in step with config.ts's
+// FILLMODES/OVERLAPMODES/SYMMETRY_AXES/CLIP_MASKS/CROSSING_MODES if those grow,
+// and prefer exporting from config.ts (as LAYOUTS now is) when you touch one.
 //
 // Exported so randomize.ts (and any other geoshape module) shares this one
 // copy instead of keeping its own verbatim duplicate.
 export const SHAPES: BaseShapeKind[] = BASE_SHAPES
-export const LAYOUTS: GeoLayout[] = ['radial', 'grid', 'linear', 'blend']
+export const LAYOUTS: GeoLayout[] = [...CONFIG_LAYOUTS]
 export const FILLMODES: GeoFillMode[] = ['evenodd', 'unite', 'subtract', 'intersect', 'exclude']
 export const OVERLAPMODES: GeoOverlapMode[] = ['hole', 'shape']
 export const SYMMETRY_AXES: GeoSymmetryAxis[] = ['vertical', 'horizontal']
@@ -158,7 +162,7 @@ export const GEO_CONTROLS: GeoControl[] = [
   slider('blendX', 'Blend to X', -800, 800, 1, 'Blend', DEFAULT_CONFIG.blendX, 'Where the target shape sits, left to right. 0 = on top of the base shape', { when: isBlend }),
   slider('blendY', 'Blend to Y', -800, 800, 1, 'Blend', DEFAULT_CONFIG.blendY, 'Where the target shape sits, up and down', { when: isBlend }),
   select('blendEase', 'Spacing', [...BLEND_EASES], DEFAULT_CONFIG.blendEase, 'Blend',
-    'How the steps bunch up: even, toward the start, toward the end, or toward both ends',
+    'How the steps bunch up: even, toward the start, toward the end, or toward both ends. Fill per-clone stays fast at high counts; single folds every step and is slow above ~60.',
     { when: isBlend, optionLabels: ['Even', 'Ease in', 'Ease out', 'Ease in-out'] }),
   slider('blendTwist', 'Twist', 0, 1, 0.01, 'Blend', DEFAULT_CONFIG.blendTwist,
     'Rotates which point of the base shape meets which point of the target — small values spiral the outlines', { when: isBlend }),

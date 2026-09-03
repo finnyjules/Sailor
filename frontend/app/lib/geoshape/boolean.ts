@@ -291,7 +291,12 @@ export async function composite(baseD: string | string[], placements: ClonePlace
           const ranks = rankOrder(overlaps.map((p, i) => ({ cx: p.cx, cy: p.cy, i })), cfg.fillOrder, bandSize)
           overlaps.forEach((p, i) => colored.push({ path: p.path, paint: ov![ranks[i]! % ov!.length]! }))
         } else {
-          // depth-indexed (depth mode, or split with depth/created order)
+          // depth-indexed (depth mode, or split with depth/created order).
+          // Deliberately CYCLED (`% length`) even when `fillCycle` is 'ramp':
+          // the index here is an overlap DEPTH (2, 3, 4 clones deep), not a rank
+          // in a sequence, and there is no total to ramp across — one colour per
+          // depth band is the readable answer. The solo pieces above go through
+          // `cloneColour`, so they ramp while these cycle, on purpose.
           overlaps.forEach((p) => {
             const paint = cfg.overlapSeparate ? ov![(p.depth - 2) % ov!.length]! : fills[(p.depth - 1) % fills.length]!
             colored.push({ path: p.path, paint })

@@ -423,6 +423,23 @@ describe('colour ramp + paint target', () => {
     expect(shapes[1]!.strokeWidth).toBeUndefined()
   })
 
+  it('single mode, both target: the fold AND the overlap piece carry a fill and a stroke', async () => {
+    const two = [
+      { x: -30, y: 0, scale: 1, rotate: 0, skew: 0 },
+      { x: 30, y: 0, scale: 1, rotate: 0, skew: 0 },
+    ]
+    const shapes = await composite(SQUARE, two, { ...DEFAULT_CONFIG, fillStrategy: 'single', overlapMode: 'shape', fill: '#123456', overlapFill: '#00ff00', stroke: null, strokeWidth: 2, paintTarget: 'both', clipMask: 'none', symmetry: false })
+    expect(shapes).toHaveLength(2)
+    // Fold: its own fill, outlined in the single-mode default stroke.
+    expect(shapes[0]!.fill).toBe('#123456')
+    expect(shapes[0]!.stroke).toBe('#000000')
+    expect(shapes[0]!.strokeWidth).toBe(2)
+    // Overlap piece: filled AND outlined in its own colour (no user stroke set).
+    expect(shapes[1]!.fill).toBe('#00ff00')
+    expect(shapes[1]!.stroke).toBe('#00ff00')
+    expect(shapes[1]!.strokeWidth).toBe(2)
+  })
+
   it('single mode, outline target: the overlap piece is outlined too, with no fill', async () => {
     const two = [
       { x: -30, y: 0, scale: 1, rotate: 0, skew: 0 },

@@ -56,6 +56,17 @@ describe('geoshape render', () => {
     expect(framePad({ padding: -100, strokeWidth: 8 })).toBe(-96)
   })
 
+  it('framePad reserves the outline arm\u2019s 1-unit fallback so a 0-width outline is not clipped', () => {
+    // `styled` draws an outline/both shape at `strokeWidth || 1`, so a
+    // strokeWidth of 0 still puts a 1-unit line on the canvas. Padding by
+    // strokeWidth/2 alone would clip half of it at the frame edge.
+    expect(framePad({ padding: 10, strokeWidth: 0, paintTarget: 'outline' })).toBe(10.5)
+    expect(framePad({ padding: 10, strokeWidth: 0, paintTarget: 'both' })).toBe(10.5)
+    // A real stroke width still wins over the fallback, and fill mode is unchanged.
+    expect(framePad({ padding: 10, strokeWidth: 8, paintTarget: 'outline' })).toBe(14)
+    expect(framePad({ padding: 10, strokeWidth: 0, paintTarget: 'fill' })).toBe(10)
+  })
+
   it('fitScale grows as padding shrinks, and pad 0 fills the tight axis edge-to-edge', () => {
     const b = { w: 400, h: 300 }
     const full = fitScale(b, 1024, 1024, 0)

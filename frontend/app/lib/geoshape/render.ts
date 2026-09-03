@@ -133,11 +133,22 @@ export function contentBounds(shapes: VectorShape[]): { minX: number; minY: numb
  *   = 0  fills the frame edge-to-edge on its tight axis,
  *   < 0  overscans — the mark grows past the frame and is cropped by the edges
  *        (how you fill the WHOLE canvas on both axes, not just the tight one).
- * `strokeWidth/2` keeps a drawn outline from being clipped at the edge when
- * padding is non-negative; it's a rounding term next to any real overscan.
+ * Half the DRAWN outline width keeps an outline from being clipped at the edge
+ * when padding is non-negative; it's a rounding term next to any real overscan.
+ * "Drawn" matters: `boolean.ts`'s `styled` paints an outline/both shape at
+ * `strokeWidth || 1`, so a strokeWidth of 0 still puts a 1-unit line on the
+ * canvas — the same fallback is applied here or half of that hairline clips.
+ * `paintTarget` is optional so a caller with only the two numbers (the layered
+ * stack's `studioFramePad`, which folds the rule in per layer) still type-checks.
  */
-export function framePad(cfg: Pick<GeoShapeConfig, 'padding' | 'strokeWidth'>): number {
-  return cfg.padding + cfg.strokeWidth / 2
+export function framePad(cfg: Pick<GeoShapeConfig, 'padding' | 'strokeWidth'> & Partial<Pick<GeoShapeConfig, 'paintTarget'>>): number {
+  return cfg.padding + drawnStrokeWidth(cfg.strokeWidth, cfg.paintTarget) / 2
+}
+
+/** The width an outline is actually drawn at — `styled`'s `strokeWidth || 1`
+ *  fallback for the outline/both targets, 0 (no outline of its own) for fill. */
+function drawnStrokeWidth(strokeWidth: number, paintTarget: GeoShapeConfig['paintTarget'] = 'fill'): number {
+  return Math.max(strokeWidth, paintTarget !== 'fill' ? 1 : 0)
 }
 
 /** How far one axis of the mark may be grown when overscanning (negative pad):
@@ -294,12 +305,13 @@ export async function renderStudio(doc: GeoStudioDoc): Promise<VectorShape[]> {
 }
 
 /** The frame margin (document units) for a whole layered composite — `framePad`
- *  driven by the stack `doc.padding`, with the largest enabled-layer stroke
- *  half-width folded in so no outline clips at the edge (mirrors `framePad`'s
- *  single-mark `strokeWidth/2` term). */
+ *  driven by the stack `doc.padding`, with the largest enabled-layer DRAWN stroke
+ *  half-width folded in so no outline clips at the edge. Each layer is measured
+ *  by the same rule `framePad` uses for a single mark (an outline layer draws at
+ *  `strokeWidth || 1`), because each layer carries its own `paintTarget`. */
 export function studioFramePad(doc: GeoStudioDoc): number {
   let maxStroke = 0
-  for (const l of doc.layers) if (l.enabled) maxStroke = Math.max(maxStroke, l.mark.strokeWidth)
+  for (const l of doc.layers) if (l.enabled) maxStroke = Math.max(maxStroke, drawnStrokeWidth(l.mark.strokeWidth, l.mark.paintTarget))
   return framePad({ padding: doc.padding, strokeWidth: maxStroke })
 }
 

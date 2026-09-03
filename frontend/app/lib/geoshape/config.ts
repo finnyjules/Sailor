@@ -193,7 +193,9 @@ const clampNum = (v: unknown, d: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, Math.round(num(v, d))))
 
 const SHAPES = BASE_SHAPES
-const LAYOUTS = ['radial', 'grid', 'linear', 'blend'] as const
+// Exported (like BLEND_EASES/FILL_CYCLES/PAINT_TARGETS) so controls.ts reads THIS
+// list rather than keeping a second copy of it in sync by hand.
+export const LAYOUTS = ['radial', 'grid', 'linear', 'blend'] as const
 const FILLMODES = ['evenodd', 'unite', 'subtract', 'intersect', 'exclude'] as const
 const OVERLAPMODES = ['hole', 'shape'] as const
 const SYMMETRY_AXES = ['vertical', 'horizontal'] as const

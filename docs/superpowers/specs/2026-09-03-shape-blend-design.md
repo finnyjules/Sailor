@@ -68,11 +68,11 @@ Lives beside `lib/vector/svg.ts`, not under `geoshape/`, because the Frame is it
   2. Choose the start offset `s` in `[0, K)` that minimises `Σ |A_i − B_(i+s) mod K|²` (O(K²), ~16k operations per pair, computed once per render).
   3. Add `round(twist · K)` to `s`.
 - `blendPath(dA, dB, t, { twist })`:
-  - **Exact path.** If A and B have the same command skeleton (same subpath count, same command sequence per subpath), interpolate the numeric arguments directly. Curves stay curves; output stays small. B is rotated by `blendRotate` (about the origin) before comparison and interpolation.
-  - **Resampled path.** Otherwise pair subpaths by index after sorting each shape's subpaths by absolute area, largest first; resample each pair to `K` points, align, and interpolate point by point. A subpath with no partner pairs with `K` copies of the other shape's centroid, so it shrinks to a point over the blend. Output is `M x,y L … Z` per subpath, coordinates rounded to 2 decimals.
+  - **Exact path.** If A and B have the same command skeleton (same subpath count, same command sequence per subpath) **and no twist is asked for**, interpolate the numeric arguments directly. Curves stay curves; output stays small. B is rotated by `blendRotate` (about the origin) before comparison and interpolation. A non-zero `twist` has no meaning here (there is no point correspondence to rotate), so it falls through to the resampled path, which is the one that implements it.
+  - **Resampled path.** Otherwise pair subpaths by index after sorting each shape's subpaths by absolute area, largest first; resample each pair to `K` points, align, and interpolate point by point. A subpath with no partner pairs with `K` copies of ITS OWN centroid, so it shrinks in place to a point over the blend (it does not slide across to the other shape). `K` is `BLEND_SAMPLES` while at most three subpaths pair up and is shared out below that (`samplesForSubpaths`, floored at 24), so a detailed library shape cannot multiply into an unbounded point count. Output is `M x,y L … Z` per subpath, coordinates rounded to 2 decimals.
   - `t = 0` reproduces A's geometry, `t = 1` reproduces B's (within flattening error on the resampled path).
 
-`renderShapes` (render.ts) builds `dA` as today and, in Blend layout, `dB` from the `blend*` fields, then `ds[i] = blendPath(dA, dB, placements[i].blend, { twist })`. `composite(baseD: string | string[], …)` accepts a per-clone array; a string means "same shape for every clone" (today). No other change to `composite`'s three fill strategies.
+`renderShapes` (render.ts) builds `dA` as today and, in Blend layout, `dB` from the `blend*` fields, then prepares the blend ONCE — `const step = prepareBlend(dA, dB, { twist })` — and maps it: `ds[i] = step(placements[i].blend)`. `prepareBlend` does the parse / skeleton check / flatten / resample / align once and returns a closure that only lerps and serialises per step; `blendPath(dA, dB, t, opts)` is the one-shot wrapper around it. `composite(baseD: string | string[], …)` accepts a per-clone array; a string means "same shape for every clone" (today). No other change to `composite`'s three fill strategies.
 
 ## 4. Colour (`lib/geoshape/boolean.ts` emit sites, `lib/geoshape/render.ts`)
 
@@ -83,7 +83,7 @@ Lives beside `lib/vector/svg.ts`, not under `geoshape/`, because the Frame is it
   - `both`: fill = clone paint AND stroke = the clone's colour.
   - Single mode: `outline` = the fold outlined in `stroke ?? fill`, no fill; `both` = fill plus stroke in `stroke ?? '#000000'`.
 - `drawToCanvas` already skips the fill call when a shape has no `paint` and `fill === null` (`paint ?? fill` is falsy), and `toSvg` already writes `fill="none"` for `null`; a render test pins both so outline mode cannot regress.
-- `framePad` already adds `strokeWidth / 2`, so hairline outlines are not clipped.
+- `framePad` adds half the DRAWN outline width, so hairline outlines are not clipped — including a `strokeWidth` of 0, which the outline/both arms still draw at 1 unit (`strokeWidth || 1`).
 
 ## 5. Controls (`lib/geoshape/controls.ts`)
 
@@ -120,7 +120,7 @@ New fields flow into the agent vocabulary through `GEO_CONTROLS`. `GEO_GUIDANCE`
 
 ## 9. Testing (TDD, `tests/unit`)
 
-- `vector-morph`: parse+flatten handles `M L C Q A Z` (a rounded polygon with arcs flattens to a closed polyline whose bounds match `controlPointBounds` within 1%); `resample` returns `K` points with segment lengths within 1% of each other; alignment recovers a known index rotation of B; a reversed copy of A blends to A at `t = 0.5` (winding fix); twist shifts the start offset by `round(twist·K)`; same-skeleton hexagon→hexagon at `t = 0.5` equals the argument-wise midpoint exactly; `t = 0` / `t = 1` reproduce A / B; an unpaired subpath collapses to the partner's centroid.
+- `vector-morph`: parse+flatten handles `M L C Q A Z` (a rounded polygon with arcs flattens to a closed polyline whose bounds match `controlPointBounds` within 1%); `resample` returns `K` points with segment lengths within 1% of each other; alignment recovers a known index rotation of B; a reversed copy of A blends to A at `t = 0.5` (winding fix); twist shifts the start offset by `round(twist·K)`; same-skeleton hexagon→hexagon at `t = 0.5` equals the argument-wise midpoint exactly; a non-zero twist on a same-skeleton pair still spirals (it takes the resampled path); `prepareBlend`'s closure matches `blendPath` at every `t`; `samplesForSubpaths` bounds subpaths × samples; `t = 0` / `t = 1` reproduce A / B; an unpaired subpath collapses to its OWN centroid (pinned with an off-centre inner subpath, so the two readings are distinguishable).
 - `geoshape-arrange`: blend with `count 5`, `blendX 100` gives x = 0, 25, 50, 75, 100; easeIn is monotone and front-loaded; `count 1` yields one placement at `blend 0`.
 - `geoshape-render`: blend `count 1` renders the same commands as linear `count 1` (parity with shape A); `paintTarget 'outline'` yields `fill: null` and a stroke on every shape; `fillCycle 'ramp'` with two fills and five clones yields five distinct colours whose ends equal the stops.
 - `geoshape-config`: defaults for every new field; junk `blendEase` → linear; `blendSides` clamps.
