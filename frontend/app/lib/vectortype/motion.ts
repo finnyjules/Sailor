@@ -76,6 +76,7 @@ import {
   cloneConfig,
   type VectorTypeConfig,
   type VtMotionTrack,
+  type VtMove,
   type VtStaggerConfig,
   type VtStaggerOrder,
 } from './config'
@@ -87,17 +88,18 @@ import { vtLayerLabels } from './layerLabel'
 import { hash32 } from './random'
 import { getByPath, setByPath } from '~/lib/studio/path'
 import { parseIdPath, resolveIdPath, setByIdPath } from '~/lib/studio/idPath'
-import { trackProgress, trackValue } from '~/lib/studio/track'
 import { makeListRemap } from '~/lib/studio/listRemap'
-// Flattens `motion.moves`' `'tracks'`-kind moves back into a flat track list —
-// the SHIM this module reads through now that tracks live inside moves rather
-// than at `motion.tracks` directly. A compiling stand-in only: it does not
-// carry a move's own ease/play into the numbers below (every read here still
-// assumes the OLD per-track `easing`/`loops`, which no longer exist), so the
-// values this module computes are not yet correct for a converted document —
-// see this file's own header and the task report for what a full rewrite onto
-// `movePhase`/`moveTracks` (in `~/lib/studio/moves`) still owes.
-import { moveTracks } from '~/lib/studio/moves/tracks'
+// The shared moves core. `moveTracks` flattens every `'tracks'`-kind move's
+// tracks into one list, each TAGGED with its OWNING MOVE's `ease`/`play`
+// (`__ease`/`__play`) — a track no longer carries its own `easing`/`loops`,
+// the move replaces them. `trackProgressAt`/`trackValueAt` read a tagged
+// track through that tagging; `applyMoveTracks` is THE COMPOSITION for every
+// NUMERIC (non-colour) track, reused here rather than restated — see
+// `applyMotion` below for where Vector Type's own colour-track write picks
+// up where it leaves off, and `VtTaggedMotionTrack` for why the cast at
+// `usableTracks` is safe.
+import { applyMoveTracks, moveTracks, trackProgressAt, trackValueAt, type MoveTrackIO } from '~/lib/studio/moves/tracks'
+import type { MotionClip, MoveEase, MovePlay } from '~/lib/studio/moves/types'
 // Perceptual colour interpolation. Pure arithmetic over two strings — see
 // `lib/color/mix.ts` for the measured reason the default is not an RGB lerp.
 import { DEFAULT_COLOR_MIX_SPACE, mixHex } from '~/lib/color/mix'
@@ -223,7 +225,11 @@ export function trackLayerId(cfg: VectorTypeConfig, path: string): string | unde
 }
 
 /**
- * Drop tracks whose stack path no longer resolves to a layer.
+ * Drop tracks whose stack path no longer resolves to a layer — the MOVES-
+ * shaped twin of the flat-array version this replaced: a track's home is now
+ * inside the `'tracks'`-kind move that owns its ease/play, so pruning walks
+ * `cfg.motion.moves` and returns the whole (possibly trimmed) moves list, not
+ * a bare track array.
  *
  * Removing a layer is the one mutation an id path cannot absorb: the layer is
  * genuinely gone, so the track has nothing to drive. `applyMotion` already
@@ -232,17 +238,32 @@ export function trackLayerId(cfg: VectorTypeConfig, path: string): string | unde
  * the positional `VT_APPEARANCE_REMAP.onRemove` used to prevent by dropping it.
  * Same outcome, asked of the config rather than of an index.
  *
- * Returns the SAME array when nothing is dangling, so a caller can skip the
- * write (and the deep watcher it would trigger).
+ * A move EMPTIED of every track it owned is dropped entirely — an empty
+ * `'tracks'` move is not a state `mergeMove` ever produces (it returns
+ * `undefined` for one), so leaving one behind here would be a card in the
+ * Moves list with nothing to show.
+ *
+ * Returns the SAME array when nothing is dangling, and a move whose own
+ * tracks did not change is itself returned BY REFERENCE, so a caller can skip
+ * the write (and the deep watcher it would trigger) when nothing pruned, and
+ * an unrelated move's identity survives a prune that only touched one other.
  */
-export function pruneStackTracks(cfg: VectorTypeConfig): VtMotionTrack[] {
-  const tracks = moveTracks(cfg?.motion) as unknown as VtMotionTrack[]
-  const kept = tracks.filter((t) => {
-    const path = typeof t?.path === 'string' ? t.path.trim() : ''
-    if (!isStackPath(path)) return true
-    return resolveIdPath(cfg, path) !== undefined
-  })
-  return kept.length === tracks.length ? tracks : kept
+export function pruneStackTracks(cfg: VectorTypeConfig): VtMove[] {
+  const moves = Array.isArray(cfg?.motion?.moves) ? cfg.motion.moves : []
+  let changedAny = false
+  const kept: VtMove[] = []
+  for (const mv of moves) {
+    if (mv.kind !== 'tracks' || !Array.isArray(mv.tracks) || !mv.tracks.length) { kept.push(mv); continue }
+    const remaining = mv.tracks.filter((t) => {
+      const path = typeof t?.path === 'string' ? t.path.trim() : ''
+      if (!isStackPath(path)) return true
+      return resolveIdPath(cfg, path) !== undefined
+    })
+    if (!remaining.length) { changedAny = true; continue }
+    if (remaining.length !== mv.tracks.length) { changedAny = true; kept.push({ ...mv, tracks: remaining }); continue }
+    kept.push(mv)
+  }
+  return changedAny ? kept : moves
 }
 
 /**
@@ -405,24 +426,34 @@ export function isColorTrack(track: VtMotionTrack | null | undefined): boolean {
 }
 
 /**
+ * A `VtMotionTrack` exactly as `moveTracks` flattens it: still carrying
+ * Vector Type's own `space` field (not the shared `MoveTrack.mix` — see
+ * `usableTracks`'s own note on why that is the right field to keep reading),
+ * plus the OWNING MOVE's `ease`/`play` riding along as `__ease`/`__play`. A
+ * track no longer carries its own `easing`/`loops`; every timing read in this
+ * file now goes through this tag, via `trackProgressAt`/`trackValueAt`
+ * (`~/lib/studio/moves/tracks`).
+ */
+export type VtTaggedMotionTrack = VtMotionTrack & { __ease: MoveEase; __play: MovePlay }
+
+/**
  * The colour a colour track holds at time `t` — its own two endpoints mixed at
  * the track's eased progress, in the track's chosen space.
  *
- * `trackProgress` is the SAME timing engine `trackValue` runs on (it is now
- * literally what `trackValue` is built from), so easing, loops, hold, cycleOffset
- * and delay behave identically on a colour track and on a numeric one — one
- * implementation, nothing to keep in step, and it is asserted by equality rather
- * than asserted twice (see the colour-track spec's timing table).
+ * `trackProgressAt` is the shared moves core's timing engine — the same one
+ * `applyMoveTracks` runs every numeric track through — so easing, play mode,
+ * hold, cycleOffset and delay behave identically on a colour track and on a
+ * numeric one; nothing here restates that arithmetic.
  *
  * The per-glyph STAGGER is the exception, and not because of anything here: it
  * shifts the clock a glyph reads at, and a layer's colour is resolved once for the
  * run. See this module's header.
  */
-export function trackColor(track: VtMotionTrack, t: number, duration: number): string {
+export function trackColor(track: VtTaggedMotionTrack, t: number, duration: number): string {
   return mixHex(
     track.fromColor as string,
     track.toColor as string,
-    trackProgress(track, t, duration),
+    trackProgressAt(track, t, duration),
     track.space ?? DEFAULT_COLOR_MIX_SPACE,
   )
 }
@@ -432,31 +463,115 @@ function resolveDuration(cfg: VectorTypeConfig): number {
   return Math.max(0.001, finite(cfg?.motion?.duration, DEFAULT_MOTION.duration))
 }
 
-/** Tracks worth evaluating: real path, and either real numbers or two real
- *  colours. A track that fails this is skipped rather than defaulted — writing
- *  `NaN` into `size` from a half-parsed blob is worse than not animating, and so
- *  is writing `undefined` into a fill.
+/**
+ * Tracks worth evaluating: real path, and either real numbers or two real
+ * colours. A track that fails this is skipped rather than defaulted — writing
+ * `NaN` into `size` from a half-parsed blob is worse than not animating, and so
+ * is writing `undefined` into a fill.
  *
- *  A COLOUR track is admitted on its colours alone: `mergeTrack` gives it
- *  `from: 0, to: 1`, but a hand-written or agent-written blob may carry the two
- *  swatches and no numbers at all, and `trackProgress` reads neither. */
-function usableTracks(cfg: VectorTypeConfig): VtMotionTrack[] {
-  const raw = moveTracks(cfg?.motion) as unknown as VtMotionTrack[]
-  return raw.filter((t): t is VtMotionTrack =>
-    !!t && typeof t === 'object'
-    && typeof (t as VtMotionTrack).path === 'string' && (t as VtMotionTrack).path.trim() !== ''
-    && (isColorTrack(t as VtMotionTrack)
-      || (isFinite_((t as VtMotionTrack).from) && isFinite_((t as VtMotionTrack).to))))
+ * A COLOUR track is admitted on its colours alone: `mergeTrack` gives it
+ * `from: 0, to: 1`, but a hand-written or agent-written blob may carry the two
+ * swatches and no numbers at all, and `trackProgressAt` reads neither.
+ *
+ * THE CAST, and why it is safe: `moveTracks` (the shared core) types a
+ * flattened track as `TaggedMoveTrack = MoveTrack & {__ease,__play}`, where
+ * `MoveTrack` carries a generic `mix?: string` for a colour's mix space. But
+ * every track actually stored in THIS studio's moves was built by ITS OWN
+ * `mergeTrack` (config.ts) — the `mergeTrackFn` `mergeMotion` always hands
+ * `mergeMove`/`mergeClip` — which writes `.space`, never `.mix`. So the
+ * runtime object always has Vector Type's field, never the shared one, and
+ * casting through it here (rather than mapping `mix` → `space` on every read)
+ * is the simpler of the two fixes the brief allows for the colour mix-space
+ * field: this file already reads `.space` everywhere else (`colorTargets`,
+ * `isColorTrack`), so keeping that is what makes colour tracks render
+ * identically to before this rewrite.
+ */
+/** Is this raw track worth evaluating at all — real path, and either real
+ *  numbers or two real colours? Shared by `usableTracks` (the flattened,
+ *  tagged view `trackColor`/`glyphStackLeaf`/`glyphTransform` read) and
+ *  `cleanedMoves` below (which needs the SAME judgement per-track, inside
+ *  each move, before handing the clip to the studio-neutral `applyMoveTracks`
+ *  — that function trusts every track it is given, the way a `mergeConfig`-ed
+ *  one always is, so a raw blob's malformed numbers have to be filtered out
+ *  before it ever sees them). */
+const isUsableTrack = (t: unknown): t is VtMotionTrack =>
+  !!t && typeof t === 'object'
+  && typeof (t as VtMotionTrack).path === 'string' && (t as VtMotionTrack).path.trim() !== ''
+  && (isColorTrack(t as VtMotionTrack) || (isFinite_((t as VtMotionTrack).from) && isFinite_((t as VtMotionTrack).to)))
+
+function usableTracks(cfg: VectorTypeConfig): VtTaggedMotionTrack[] {
+  const raw = moveTracks(cfg?.motion) as unknown as VtTaggedMotionTrack[]
+  return raw.filter(isUsableTrack)
+}
+
+/**
+ * `cfg.motion.moves`, with every `'tracks'`-kind move's OWN tracks filtered
+ * to `isUsableTrack` — a move left with none is dropped.
+ *
+ * `applyMoveTracks` (the shared core) does not validate a track's numbers;
+ * it trusts every one it is handed, because a `mergeConfig`-ed config always
+ * has already — `mergeTrack` (config.ts) rejects a track whose `from`/`to`
+ * are not both finite. This function is what stands in for that validation
+ * on a raw blob straight out of storage (the node card, the baker, the frame
+ * source — see this file's header), so `applyMoveTracks` never has to
+ * compute `undefined + (to − undefined) × eased` and write `NaN` into the
+ * config for something a bad blob merely mentioned.
+ */
+function cleanedMoves(cfg: VectorTypeConfig): VtMove[] {
+  const moves = Array.isArray(cfg?.motion?.moves) ? cfg.motion.moves : []
+  return moves.reduce<VtMove[]>((out, mv) => {
+    if (mv?.kind !== 'tracks') { out.push(mv); return out }
+    const tracks = Array.isArray(mv.tracks) ? mv.tracks.filter(isUsableTrack) : []
+    if (tracks.length) out.push(tracks.length === mv.tracks?.length ? mv : { ...mv, tracks })
+    return out
+  }, [])
+}
+
+const vtIo: MoveTrackIO = {
+  getByPath,
+  // `applyMoveTracks` (the shared core) always calls `setByPath` — it cannot
+  // tell an id-addressed stack path from an ordinary dotted one (that
+  // knowledge is studio-specific; see its own doc comment on `io`). So THIS
+  // wrapper is where Vector Type routes an `appearance.<id>.*` path to
+  // `setByIdPath` instead — the carry-forward the brief calls out — and where
+  // it keeps the two guards `applyMotion` always had: the per-glyph `glyph.*`
+  // namespace is `glyphTransform`'s, never the config's, and a track cannot
+  // fabricate a missing parent container (an absent or non-object parent is
+  // silently skipped, exactly as before).
+  setByPath(cfgObj, path, value) {
+    if (typeof path !== 'string' || path.startsWith(VT_GLYPH_PREFIX)) return
+    if (isStackPath(path)) { setByIdPath(cfgObj, path, value); return }
+    const lastDot = path.lastIndexOf('.')
+    const parentPath = lastDot === -1 ? '' : path.slice(0, lastDot)
+    const parent = parentPath ? getByPath(cfgObj, parentPath) : cfgObj
+    if (typeof parent !== 'object' || parent === null) return
+    setByPath(cfgObj, path, value)
+  },
+  setByIdPath,
 }
 
 /**
  * Build a frame-specific config: clone `cfg` and overwrite each animated path
  * with its value at time `t`.
  *
+ * THE NUMERIC PART is `applyMoveTracks` (`~/lib/studio/moves/tracks`) —
+ * Vector Type's own tracks folded through the shared composition rather than
+ * a second copy of it, reading each track's timing off its OWNING MOVE via
+ * `vtIo` above. THE COLOUR PART stays here: `applyMoveTracks` explicitly
+ * leaves colour tracks untouched (its own doc comment says so), so this
+ * function writes them on the SAME clone immediately afterwards, through the
+ * identical path-resolution rules (`vtIo`'s guards, restated inline because a
+ * colour track's value is a resolved STRING rather than something `io` can
+ * compute on its own).
+ *
  * CLONES, never mutates — a mutating version would write animation values back
  * into the config the surface is holding, and the next save would persist frame
- * 37 as the user's settings.
+ * 37 as the user's settings. `cfg` is run through `cloneConfig` BEFORE
+ * `applyMoveTracks` (which clones again, via `structuredClone`) rather than
+ * handed to it directly — see the call site's own note on why a raw,
+ * never-`mergeConfig`-ed blob needs the studio's own normalisation first.
  *
+
  * With nothing to animate it returns `cfg` ITSELF rather than a pointless copy
  * (Gradient does the same), so the result is read-only to callers either way.
  */
@@ -464,41 +579,28 @@ export function applyMotion(cfg: VectorTypeConfig, t: number): VectorTypeConfig 
   const tracks = usableTracks(cfg)
   if (!tracks.length) return cfg
   const duration = resolveDuration(cfg)
-  const out = cloneConfig(cfg)
+  // `cloneConfig` FIRST, not `cfg` directly: `applyMoveTracks` clones with
+  // `structuredClone`, which mirrors EXACTLY what is there and invents
+  // nothing — right for a well-formed (`mergeConfig`-ed) config, wrong for a
+  // raw blob straight out of storage that never had, say, an `axes` key at
+  // all. `cloneConfig` is this studio's own normalisation (sparse-but-real
+  // `axes`/`appearance`/`moves` on every output, the same guarantee every
+  // other reader in this file leans on), so running it first means
+  // `applyMoveTracks`'s clone-of-a-clone still produces a config shaped like
+  // every other `VectorTypeConfig` this studio hands around — a raw-blob
+  // caller (the node card, the baker, the frame source) gets back something
+  // it can read the same way it reads a merged one.
+  const clip: MotionClip = { moves: cleanedMoves(cfg), duration, fps: finite(cfg?.motion?.fps, DEFAULT_MOTION.fps) }
+  const out = applyMoveTracks(cloneConfig(cfg), clip, t, vtIo)
   for (const track of tracks) {
+    if (!isColorTrack(track)) continue
     const path = track.path.trim()
-    // The per-glyph namespace is `glyphTransform`'s, not the config's. Skipped
-    // explicitly rather than relying on the parent guard below, so it stays
-    // skipped even if a future config ever grows a real `glyph` field.
     if (path.startsWith(VT_GLYPH_PREFIX)) continue
-    // A COLOUR track writes a STRING. Everything else about it — the path
-    // resolution, the id addressing, the parent guard, the last-write-wins
-    // overwrite — is the numeric path verbatim, which is the point of resolving
-    // the value up here instead of duplicating the two write branches below.
-    // `setByPath`/`setByIdPath` already take `unknown`, so neither needed a change.
-    const value: number | string = isColorTrack(track)
-      ? trackColor(track, t, duration)
-      : trackValue(track, t, duration)
-    // A STACK path is id-addressed (`appearance.Lstroke.width`), so it must be
-    // resolved to a position before `setByPath` sees it — handed the raw id,
-    // `setByPath` would create a property named `Lstroke` ON THE ARRAY and write
-    // into it. `setByIdPath` resolves, applies the SAME parent guard as the
-    // branch below, and returns false rather than guessing:
-    //
-    //   an unknown id (the layer was deleted) → the track is IGNORED, never
-    //   re-aimed at whichever layer slid into its slot.
-    //
-    // An in-range positional path passes through unchanged, so tracks saved
-    // before ids — and the ones `migrateLegacyAppearance` writes — still animate.
+    const value = trackColor(track, t, duration)
     if (isStackPath(path)) {
       setByIdPath(out, path, value)
       continue
     }
-    // Guard on the PARENT container, not the leaf: `axes` is SPARSE by design,
-    // so `axes.wght` legitimately has no leaf until something writes one. What
-    // must not happen is fabricating structure — `setByPath` creates missing
-    // containers, so a typo'd path would silently grow junk into the config and
-    // then get SAVED. An absent or non-object parent is skipped.
     const lastDot = path.lastIndexOf('.')
     const parentPath = lastDot === -1 ? '' : path.slice(0, lastDot)
     const parent = parentPath ? getByPath(out, parentPath) : out
@@ -644,7 +746,7 @@ export function glyphStackLeaf(
   if (!(delay > 0) || count <= 1 || !layerId) return fallback
   const tracks = usableTracks(cfg)
   if (!tracks.length) return fallback
-  let hit: VtMotionTrack | null = null
+  let hit: VtTaggedMotionTrack | null = null
   for (const track of tracks) {
     const p = track.path.trim()
     if (!isStackPath(p)) continue
@@ -661,7 +763,7 @@ export function glyphStackLeaf(
     hit = track
   }
   if (!hit) return fallback
-  return trackValue(hit, glyphTime(cfg, t, index, count), resolveDuration(cfg))
+  return trackValueAt(hit, glyphTime(cfg, t, index, count), resolveDuration(cfg))
 }
 
 /**
@@ -690,7 +792,7 @@ export function glyphTransform(
     // hand-written track can name one, and `NaN` in `scale` makes the CTM
     // singular and Chrome drops the glyph entirely.
     if (isColorTrack(track)) continue
-    out[field] = trackValue(track, gt, duration)
+    out[field] = trackValueAt(track, gt, duration)
   }
   return out
 }

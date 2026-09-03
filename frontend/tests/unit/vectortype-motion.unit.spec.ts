@@ -16,6 +16,18 @@
  *    exercised against a config that has never seen `mergeConfig`.
  *
  * Plus the one the studio is FOR: a weight wave that travels across a word.
+ *
+ * ## The move shape, since Task 4/5
+ *
+ * A track is no longer a flat entry in `motion.tracks`; it lives inside a
+ * `kind: 'tracks'` MOVE (`motion.moves`), which owns the track's old
+ * `easing`/`loops` as its own `ease`/`play` — `applyMotion` is now
+ * `applyMoveTracks` (`~/lib/studio/moves/tracks`) plus Vector Type's own
+ * colour write. `track()` below stays a convenient "track intent" DSL
+ * (path/from/to/easing/loops), and `trackMoves()` is what turns a list of
+ * them into the moves a real config stores — one move per track, so each can
+ * carry its own timing exactly as a flat array of independently-eased tracks
+ * used to.
  */
 import { describe, it, expect } from 'vitest'
 import {
@@ -26,8 +38,10 @@ import {
   vtLayer,
   type VectorTypeConfig,
   type VtMotionTrack,
+  type VtMove,
   type VtStaggerOrder,
 } from '~/lib/vectortype/config'
+import type { MoveEase, MovePlay } from '~/lib/studio/moves/types'
 import { VT_CONTROLS, visibleVtControls } from '~/lib/vectortype/controls'
 import { DEFAULT_FILL } from '~/lib/spacetype/fillTile'
 import type { VtAxis } from '~/lib/vectortype/font'
@@ -50,16 +64,57 @@ const RICH_AXES: VtAxis[] = [
   { tag: 'GRAD', name: 'Grade', min: -200, max: 150, default: 0 },
 ]
 
-const track = (over: Partial<VtMotionTrack> = {}): VtMotionTrack => ({
-  path: 'axes.wght', from: 100, to: 900, easing: 'linear',
+/** A track "intent" — path/from/to plus the OLD easing/loops vocabulary. Not
+ *  what a real config stores any more (see `trackMoves` below); a convenient
+ *  DSL this file's tests keep, since it names the same timing this suite has
+ *  always tested. */
+const track = (over: Partial<VtMotionTrack> & { easing?: 'linear' | 'pingpong' | 'easeinout'; loops?: number } = {}) => ({
+  path: 'axes.wght', from: 100, to: 900, easing: 'linear' as const,
   loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...over,
 })
+
+/** `easing`/`loops` → the owning move's `ease`/`play` — the exact mapping
+ *  `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses for a legacy
+ *  document, restated here as the corresponding test-side DSL. */
+function easeAndPlay(easing: 'linear' | 'pingpong' | 'easeinout', loops: number): { ease: MoveEase; play: MovePlay } {
+  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, play: { mode: 'backAndForth', times: loops } }
+  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, play: { mode: 'once', times: loops } }
+  return { ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: loops } }
+}
+
+let moveSeq = 0
+/** One `kind: 'tracks'` move per track — a track's cycle length is always
+ *  the CLIP's duration (`applyMoveTracks` never reads a `'tracks'` move's own
+ *  `duration`), so that field is a placeholder here. */
+function trackMoves(tracks: ReturnType<typeof track>[]): VtMove[] {
+  return tracks.map((t) => {
+    moveSeq += 1
+    const { ease, play } = easeAndPlay(t.easing, t.loops)
+    const { path, from, to, hold, cycleOffset, delay } = t
+    const extra = t as Record<string, unknown>
+    return {
+      id: `move-legacy-${moveSeq}`,
+      phase: 'loop',
+      kind: 'tracks',
+      presetId: 'custom',
+      duration: 4,
+      ease,
+      play,
+      tracks: [{
+        path, from, to, hold, cycleOffset, delay,
+        ...(typeof extra.fromColor === 'string' ? { fromColor: extra.fromColor } : {}),
+        ...(typeof extra.toColor === 'string' ? { toColor: extra.toColor } : {}),
+        ...(extra.space ? { space: extra.space } : {}),
+      }],
+    } as VtMove
+  })
+}
 
 const cfg = (over: Partial<VectorTypeConfig> = {}): VectorTypeConfig =>
   mergeConfig({ ...cloneConfig(DEFAULT_CONFIG), ...over })
 
-const withTracks = (tracks: VtMotionTrack[], over: Partial<VectorTypeConfig> = {}): VectorTypeConfig =>
-  cfg({ ...over, motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks } })
+const withTracks = (tracks: ReturnType<typeof track>[], over: Partial<VectorTypeConfig> = {}): VectorTypeConfig =>
+  cfg({ ...over, motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: trackMoves(tracks) } })
 
 /** A config with a stroke layer above its fill, so the stroke vocabulary is
  *  reachable. `cfg({ strokeWidth })` no longer means anything: the stack is
@@ -67,13 +122,18 @@ const withTracks = (tracks: VtMotionTrack[], over: Partial<VectorTypeConfig> = {
 const strokedCfg = (over: Partial<VectorTypeConfig> = {}) =>
   cfg({ ...over, appearance: [vtLayer({ id: 'Lfill' }), vtLayer({ id: 'Lstroke', kind: 'stroke', width: 3 })] })
 
-const staggered = (delay: number, order: VtStaggerOrder = 'forward', seed = 0, tracks: VtMotionTrack[] = []) =>
-  cfg({ motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks, stagger: { delay, order, seed } } })
+const staggered = (delay: number, order: VtStaggerOrder = 'forward', seed = 0, tracks: ReturnType<typeof track>[] = []) =>
+  cfg({ motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: trackMoves(tracks), stagger: { delay, order, seed } } })
 
 /** A config as it comes off the wire: JSON, partial, never through mergeConfig.
  *  No `axes` record, no `stagger` block, no `align`/`fill`/`fps`/`size`. */
 function storageBlob(motion: Record<string, unknown>): VectorTypeConfig {
   return JSON.parse(JSON.stringify({ text: 'Wave', fontId: 'inter', size: 120, motion })) as VectorTypeConfig
+}
+
+/** `storageBlob` helper for the common case: one plain `moves` array, raw. */
+function storageBlobMoves(moves: unknown[], rest: Record<string, unknown> = {}): VectorTypeConfig {
+  return storageBlob({ duration: 4, moves, ...rest })
 }
 
 describe('animatableTargets — derived from the one declaration', () => {
@@ -210,9 +270,11 @@ describe('applyMotion', () => {
     expect(out).not.toBe(c)
     expect(out.axes).not.toBe(c.axes)
     expect(out.motion).not.toBe(c.motion)
-    expect(out.motion.tracks[0]).not.toBe(c.motion.tracks[0])
-    out.motion.tracks[0]!.to = -1
-    expect(c.motion.tracks[0]!.to).toBe(900)
+    const outTrackMove = out.motion.moves.find(m => m.kind === 'tracks')!
+    const cTrackMove = c.motion.moves.find(m => m.kind === 'tracks')!
+    expect(outTrackMove.tracks![0]).not.toBe(cTrackMove.tracks![0])
+    outTrackMove.tracks![0]!.to = -1
+    expect(cTrackMove.tracks![0]!.to).toBe(900)
   })
 
   it('returns the SAME config when nothing animates', () => {
@@ -241,10 +303,10 @@ describe('applyMotion', () => {
 
   it('animating a layer paint leaves the SOURCE layer — and DEFAULT_CONFIG — untouched', () => {
     // A layer's `paint` is a mutable object and `paint.angle` is an animatable
-    // slider, so `cloneConfig`'s shallow spread would have let `applyMotion`
-    // write frame 37's angle into the config the surface holds. Worse: every
-    // config built from `DEFAULT_CONFIG` shares ONE layer object unless the
-    // clone is deep, so the module-level default itself would drift.
+    // slider, so a shallow clone would have let `applyMotion` write frame 37's
+    // angle into the config the surface holds. Worse: every config built from
+    // `DEFAULT_CONFIG` shares ONE layer object unless the clone is deep, so the
+    // module-level default itself would drift.
     const before = { ...(DEFAULT_CONFIG.appearance[0]!.paint as Record<string, unknown>) }
     const c = withTracks([track({ path: 'appearance.0.paint.angle', from: 0, to: 300 })])
     const out = applyMotion(c, 2)
@@ -273,15 +335,12 @@ describe('applyMotion', () => {
   it('skips a track whose numbers are not numbers rather than writing NaN', () => {
     // Un-merged on purpose: mergeConfig would repair these (and a test above
     // pins that it does). This is the un-normalised path, where it cannot.
-    const raw = storageBlob({
-      duration: 4,
-      tracks: [
-        { ...track(), from: undefined },
-        { ...track({ path: 'size' }), to: 'big' },
-        { ...track({ path: 'tracking', from: 0, to: 100 }), from: null },
-        track({ path: 'strokeWidth', from: 0, to: 10 }), // one good one, so the loop runs
-      ],
-    })
+    const raw = storageBlobMoves([
+      ...trackMoves([{ ...track(), from: undefined as any }]),
+      ...trackMoves([{ ...track({ path: 'size' }), to: 'big' as any }]),
+      ...trackMoves([{ ...track({ path: 'tracking', from: 0, to: 100 }), from: null as any }]),
+      ...trackMoves([track({ path: 'strokeWidth', from: 0, to: 10 })]), // one good one, so the loop runs
+    ])
     const out = applyMotion(raw, 2)
     expect(out).not.toBe(raw)
     expect(out.strokeWidth).toBeCloseTo(5, 6)
@@ -292,7 +351,7 @@ describe('applyMotion', () => {
 
   describe('a config straight out of storage, never normalised', () => {
     it('animates from a raw blob with no axes record and no stagger block', () => {
-      const raw = storageBlob({ duration: 2, tracks: [track()] })
+      const raw = storageBlobMoves(trackMoves([track()]), { duration: 2 })
       expect(raw.axes).toBeUndefined()
       const out = applyMotion(raw, 1)
       expect(out.axes.wght).toBeCloseTo(500, 6)
@@ -300,13 +359,13 @@ describe('applyMotion', () => {
     })
 
     it('falls back to the default clip length when duration is missing', () => {
-      const raw = storageBlob({ tracks: [track()] })
+      const raw = storageBlob({ moves: trackMoves([track()]) })
       // Default duration is 4, so t=2 is the midpoint.
       expect(applyMotion(raw, 2).axes.wght).toBeCloseTo(500, 6)
     })
 
-    it('survives a motion block that is missing, junk, or has non-array tracks', () => {
-      for (const motion of [undefined, null, 'later', 42, { tracks: { 0: track() } }, {}] as any[]) {
+    it('survives a motion block that is missing, junk, or has non-array moves', () => {
+      for (const motion of [undefined, null, 'later', 42, { moves: { 0: trackMoves([track()])[0] } }, {}] as any[]) {
         const raw = storageBlob(motion)
         expect(() => applyMotion(raw, 1)).not.toThrow()
         expect(applyMotion(raw, 1)).toBe(raw)
@@ -317,7 +376,7 @@ describe('applyMotion', () => {
 
 describe('per-glyph stagger', () => {
   it('resolveStagger defaults field by field from a raw blob', () => {
-    expect(resolveStagger(storageBlob({ tracks: [] }))).toEqual({ delay: 0, order: 'forward', seed: 0 })
+    expect(resolveStagger(storageBlob({ moves: [] }))).toEqual({ delay: 0, order: 'forward', seed: 0 })
     expect(resolveStagger(storageBlob({ stagger: { delay: 0.2, order: 'edges', seed: 7 } })))
       .toEqual({ delay: 0.2, order: 'edges', seed: 7 })
     expect(resolveStagger(storageBlob({ stagger: { delay: 'soon', order: 'sideways', seed: null } })))
@@ -499,7 +558,7 @@ describe('glyphTransform', () => {
     const raw = storageBlob({
       duration: 4,
       stagger: { delay: 0.5, order: 'reverse' },
-      tracks: [track({ path: 'glyph.opacity', from: 0, to: 1 })],
+      moves: trackMoves([track({ path: 'glyph.opacity', from: 0, to: 1 })]),
     })
     expect(glyphTransform(raw, 2, 3, 4).opacity).toBeCloseTo(0.5, 10)
     expect(glyphTransform(raw, 2, 0, 4).opacity).toBeCloseTo(0.125, 10)

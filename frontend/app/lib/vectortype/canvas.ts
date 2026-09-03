@@ -85,6 +85,8 @@ import type { VtFont } from './font'
 import type { GlyphOutline, TextOutlines } from './outline'
 import { textOutlines } from './outline'
 import { applyMotion, glyphConfig, glyphStackLeaf, resolveStagger } from './motion'
+// Tracks live inside `motion.moves` now — see blink.ts's identical import.
+import { moveTracks } from '~/lib/studio/moves/tracks'
 // Word grouping for `unit: 'word'` blink. Imports nothing itself, so this costs
 // the render path a single pass over the shaped run.
 import { wordIndexOfGlyph } from './words'
@@ -2919,8 +2921,8 @@ export function vtExportName(cfg: VectorTypeConfig | null | undefined): string {
  * takes, so `spread: 0` (the shipped default) does not spin a still node.
  */
 export function vtIsAnimated(cfg: VectorTypeConfig | null | undefined): boolean {
-  const tracks = cfg?.motion?.tracks
-  if (Array.isArray(tracks) && tracks.length > 0) return true
+  const tracks = moveTracks(cfg?.motion)
+  if (tracks.length > 0) return true
   if (vtHasPreset(cfg)) return true
   if (vtBlinkActive(cfg?.motion?.blink)) return true
   if (vtScatterActive(cfg?.motion?.scatter)) return true

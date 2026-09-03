@@ -42,7 +42,9 @@ import {
   type VectorTypeConfig,
   type VtAppearanceLayer,
   type VtMotionTrack,
+  type VtMove,
 } from '~/lib/vectortype/config'
+import type { MoveEase, MovePlay } from '~/lib/studio/moves/types'
 import { VT_CONTROLS, VT_LAYER_PREFIX, visibleVtControls } from '~/lib/vectortype/controls'
 import { vtLayerLabels } from '~/lib/vectortype/layerLabel'
 import {
@@ -79,12 +81,58 @@ function cfg(patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig {
 function stack(...layers: Partial<VtAppearanceLayer>[]): VectorTypeConfig {
   return cfg({ appearance: layers.map(l => vtLayer(l)) })
 }
-const track = (path: string, from = 0, to = 1): VtMotionTrack =>
+/** A track "spec" in the OLD shape (`easing`/`loops`) — used two ways below:
+ *  as a raw literal inside an old-shape `motion.tracks` blob fed to
+ *  `mergeConfig` (section 6, testing the LEGACY conversion itself, where the
+ *  fields must still be there for `mergeTrack`/`convertLegacyTracks` to
+ *  read), and as the input `withTracks` (below) wraps into a fresh MOVE. */
+const track = (path: string, from = 0, to = 1): VtMotionTrack & { easing: string; loops: number } =>
   ({ path, from, to, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 })
-const withTracks = (c: VectorTypeConfig, ...tracks: VtMotionTrack[]): VectorTypeConfig => {
-  c.motion = { ...c.motion, duration: 4, tracks }
+
+/** `easing`/`loops` → the owning move's `ease`/`play` — see the identical
+ *  helper in `vectortype-motion.unit.spec.ts`. Every `track()` call in this
+ *  file uses the default `'linear'`/`1`, so this only ever produces
+ *  `ease: none, play: once` here — restated in full for parity with the
+ *  other specs that build this way. */
+function easeAndPlay(easing: string, loops: number): { ease: MoveEase; play: MovePlay } {
+  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, play: { mode: 'backAndForth', times: loops } }
+  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, play: { mode: 'once', times: loops } }
+  return { ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: loops } }
+}
+
+let trackMoveSeq = 0
+/** One `kind: 'tracks'` move per track spec — the fresh-config path (sections
+ *  1–5). Bypasses `mergeConfig`: these tests build `c.motion` directly and
+ *  call `applyMotion`/etc. straight on it, exactly as the original flat
+ *  `motion.tracks` assignment did. */
+function trackMoves(specs: ReturnType<typeof track>[]): VtMove[] {
+  return specs.map((t) => {
+    trackMoveSeq += 1
+    const { ease, play } = easeAndPlay(t.easing, t.loops)
+    const { path, from, to, hold, cycleOffset, delay } = t
+    return {
+      id: `move-t${trackMoveSeq}`, phase: 'loop', kind: 'tracks', presetId: 'custom',
+      duration: 4, ease, play, tracks: [{ path, from, to, hold, cycleOffset, delay }],
+    } as VtMove
+  })
+}
+
+const withTracks = (c: VectorTypeConfig, ...tracks: ReturnType<typeof track>[]): VectorTypeConfig => {
+  c.motion = { ...c.motion, duration: 4, moves: trackMoves(tracks) }
   return c
 }
+
+/** Every track any `'tracks'`-kind move owns, flattened — the direct
+ *  replacement for reading the old flat `motion.tracks` array. */
+const allTracks = (c: VectorTypeConfig): VtMotionTrack[] =>
+  c.motion.moves.filter(m => m.kind === 'tracks').flatMap(m => (m.tracks ?? []) as VtMotionTrack[])
+/** The first (and, in every section-6 fixture, only) track — the direct
+ *  replacement for `c.motion.tracks[0]`. */
+const firstTrack = (c: VectorTypeConfig): VtMotionTrack | undefined => allTracks(c)[0]
+/** The move owning the first track, for tests that mutate the stored path in
+ *  place (`firstTrack(c)!.path = ...` in the old shape). */
+const firstTrackMove = (c: VectorTypeConfig): VtMove =>
+  c.motion.moves.find(m => m.kind === 'tracks' && (m.tracks?.length ?? 0) > 0)!
 /** A layer read back BY ID, so no assertion in this file can be satisfied by
  *  "whatever is at index N". */
 const byId = (c: VectorTypeConfig, id: string): VtAppearanceLayer =>
@@ -195,7 +243,7 @@ describe('reorder is a NO-OP for a motion track — the SAME layer still animate
     reorder(c, 0, 2)
     expect(c.appearance.map(l => l.id)).toEqual(['Lcyan', 'Lgreen', 'Lred'])
     // Not one byte of the motion block was touched by the reorder.
-    expect(c.motion.tracks.map(t => t.path)).toEqual(['appearance.Lcyan.opacity'])
+    expect(allTracks(c).map(t => t.path)).toEqual(['appearance.Lcyan.opacity'])
 
     const post = applyMotion(c, 4)
     expect(byId(post, 'Lcyan').opacity).toBe(1)
@@ -326,12 +374,13 @@ describe('a binding or track to a DELETED layer is ignored, never re-aimed', () 
     const c = withTracks(three(),
       track('appearance.Lcyan.opacity'), track('appearance.Lred.opacity'), track('axes.wght'))
     c.appearance.splice(1, 1)
-    expect(pruneStackTracks(c).map(t => t.path)).toEqual(['appearance.Lred.opacity', 'axes.wght'])
+    const pruned = pruneStackTracks(c).filter(m => m.kind === 'tracks').flatMap(m => m.tracks ?? [])
+    expect(pruned.map(t => t.path)).toEqual(['appearance.Lred.opacity', 'axes.wght'])
   })
 
   it('returns the SAME array when nothing is dangling, so no watcher fires', () => {
     const c = withTracks(three(), track('appearance.Lcyan.opacity'), track('size'))
-    expect(pruneStackTracks(c)).toBe(c.motion.tracks)
+    expect(pruneStackTracks(c)).toBe(c.motion.moves)
   })
 
   it('makes the params proxy refuse the unknown id — read undefined, write dropped', () => {
@@ -578,7 +627,12 @@ describe('an unresolvable path grows NO junk into the config', () => {
 
 describe('a POSITIONAL stack track is migrated onto its layer’s id at load', () => {
   /** What a project saved before Task 9 holds: real layer ids on the stack, a
-   *  positional path on the track. */
+   *  positional path on the track. `DEFAULT_CONFIG.motion` is deliberately
+   *  NOT spread here — it carries today's `moves: []`, and `mergeMotion`
+   *  takes the new-shape branch (ignoring `tracks` entirely) the moment
+   *  `Array.isArray(o.moves)` is true, even on an empty array. A document
+   *  saved before moves existed has no `moves` key at all, which is the
+   *  scenario this whole describe block means to reproduce. */
   const saved = (path: string) => ({
     ...DEFAULT_CONFIG,
     text: 'Sail',
@@ -588,14 +642,25 @@ describe('a POSITIONAL stack track is migrated onto its layer’s id at load', (
       vtLayer({ id: 'Lstroke', kind: 'stroke', width: 3 }),
       vtLayer({ id: 'Lyellow', kind: 'fill' }),
     ],
-    motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks: [track(path, 0, 24)] },
+    motion: {
+      duration: 4,
+      fps: DEFAULT_CONFIG.motion.fps,
+      size: DEFAULT_CONFIG.motion.size,
+      stagger: DEFAULT_CONFIG.motion.stagger,
+      blink: DEFAULT_CONFIG.motion.blink,
+      scatter: DEFAULT_CONFIG.motion.scatter,
+      tracks: [track(path, 0, 24)],
+    },
   })
 
   it('rewrites `appearance.<index>.<leaf>` to `appearance.<id>.<leaf>`', () => {
     const c = mergeConfig(saved('appearance.1.width'))
-    expect(c.motion.tracks[0]!.path).toBe('appearance.Lstroke.width')
-    // …and only the member segment: the leaf and every track field survive.
-    expect(c.motion.tracks[0]).toMatchObject({ from: 0, to: 24, easing: 'linear' })
+    expect(firstTrack(c)!.path).toBe('appearance.Lstroke.width')
+    // …and only the member segment: the leaf survives, and the timing
+    // (`easing: 'linear'` → the owning move's `ease: none`/`play: once`)
+    // landed on the move that now owns it.
+    expect(firstTrack(c)).toMatchObject({ from: 0, to: 24 })
+    expect(firstTrackMove(c)).toMatchObject({ ease: { kind: 'named', name: 'none' }, play: { mode: 'once' } })
   })
 
   it('drives the SAME layer it drove before the migration', () => {
@@ -626,7 +691,7 @@ describe('a POSITIONAL stack track is migrated onto its layer’s id at load', (
     // t=0 and t=4.
     const c = mergeConfig(saved('appearance.1.width'))
     reorder(c, 1, 2)
-    c.motion.tracks[0]!.path = 'appearance.1.width'
+    firstTrack(c)!.path = 'appearance.1.width'
     const out = applyMotion(c, 4)
     expect(byId(out, 'Lstroke').width).toBe(3)        // untouched: the animation is dead
     expect(byId(out, 'Lyellow').width).toBe(24)       // …and landed on a fill
@@ -643,7 +708,7 @@ describe('a POSITIONAL stack track is migrated onto its layer’s id at load', (
     // The un-migrated control emits the SAME document at both times.
     const dead = mergeConfig(saved('appearance.1.width'))
     reorder(dead, 1, 2)
-    dead.motion.tracks[0]!.path = 'appearance.1.width'
+    firstTrack(dead)!.path = 'appearance.1.width'
     const deadSvg = (t: number) => vectorTypeSVG(font, applyMotion(dead, t), t, BOX).svg
     expect(deadSvg(4)).toBe(deadSvg(0))
   })
@@ -657,21 +722,32 @@ describe('a POSITIONAL stack track is migrated onto its layer’s id at load', (
       motion: { duration: 4, tracks: [{ path: 'strokeWidth', from: 0, to: 18, easing: 'linear' }] },
     })
     const strokeId = c.appearance.find(l => l.kind === 'stroke')!.id
-    expect(c.motion.tracks[0]!.path).toBe(`appearance.${strokeId}.width`)
+    expect(firstTrack(c)!.path).toBe(`appearance.${strokeId}.width`)
     expect(byId(applyMotion(c, 4), strokeId).width).toBe(18)
   })
 
   it('is IDEMPOTENT — a second load rewrites nothing', () => {
     const once = mergeConfig(saved('appearance.1.width'))
     const twice = mergeConfig(JSON.parse(JSON.stringify(once)))
-    expect(twice.motion.tracks[0]!.path).toBe('appearance.Lstroke.width')
-    expect(JSON.stringify(twice)).toBe(JSON.stringify(once))
+    expect(firstTrack(twice)!.path).toBe('appearance.Lstroke.width')
+    // DEEP equality, not a JSON-string comparison: the first merge builds its
+    // move via the shared core's `convertLegacyTracks` (old-shape branch),
+    // the second via `mergeMove` (new-shape branch, since `once` already
+    // carries `moves`) — same fields, same values, but the two build the
+    // object with a different KEY ORDER, which `JSON.stringify` would (and
+    // did) treat as a difference despite the configs being identical.
+    expect(twice).toEqual(once)
   })
 
   it('returns the SAME tracks array when nothing needs lifting, so no watcher fires', () => {
+    // `migrateStackTrackPaths` itself is still exported and still pure — the
+    // flat-array shape it has always taken, exercised directly against a
+    // freshly-extracted list (its moves-shaped twin, `migrateMoveTrackPaths`,
+    // is what `mergeConfig` actually calls now, per move — see config.ts).
     const c = mergeConfig(saved('appearance.Lstroke.width'))
-    const again = migrateStackTrackPaths(c.motion.tracks, c.appearance)
-    expect(again).toBe(c.motion.tracks)
+    const tracks = allTracks(c)
+    const again = migrateStackTrackPaths(tracks, c.appearance)
+    expect(again).toBe(tracks)
   })
 
   it('leaves an OUT-OF-RANGE index alone rather than resurrecting it onto a real layer', () => {
@@ -679,7 +755,7 @@ describe('a POSITIONAL stack track is migrated onto its layer’s id at load', (
     // Inventing an id for it would apply a real value to a real layer, which is
     // strictly worse than a row that animates nothing.
     const c = mergeConfig(saved('appearance.7.width'))
-    expect(c.motion.tracks[0]!.path).toBe('appearance.7.width')
+    expect(firstTrack(c)!.path).toBe('appearance.7.width')
     const out = applyMotion(c, 4)
     // Every layer keeps its stored width: the track applied to nothing at all.
     for (const l of out.appearance) expect(l.width).toBe(VT_DEFAULT_STROKE_WIDTH)
@@ -687,14 +763,14 @@ describe('a POSITIONAL stack track is migrated onto its layer’s id at load', (
 
   it('DROPS NOTHING — a load must never delete a row the user can see', () => {
     const c = mergeConfig(saved('appearance.7.width'))
-    expect(c.motion.tracks).toHaveLength(1)
+    expect(allTracks(c)).toHaveLength(1)
   })
 
   it('leaves the ordinary config paths alone', () => {
     const raw = saved('appearance.1.width')
     raw.motion.tracks = [track('axes.wght', 100, 900), track('size', 40, 240), track('glyph.dy', 0, 30)]
     const c = mergeConfig(raw)
-    expect(c.motion.tracks.map(t => t.path)).toEqual(['axes.wght', 'size', 'glyph.dy'])
+    expect(allTracks(c).map(t => t.path)).toEqual(['axes.wght', 'size', 'glyph.dy'])
   })
 
   it('rewrites against the MERGED indices, not the raw ones', () => {
@@ -705,10 +781,11 @@ describe('a POSITIONAL stack track is migrated onto its layer’s id at load', (
     const c = mergeConfig({
       ...DEFAULT_CONFIG,
       appearance: [vtLayer({ id: 'Lfill', kind: 'fill' }), null, vtLayer({ id: 'Lstroke', kind: 'stroke', width: 3 })],
-      motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks: [track('appearance.1.width', 0, 24)] },
+      // Old shape, `moves` deliberately absent — see `saved`'s note above.
+      motion: { duration: 4, tracks: [track('appearance.1.width', 0, 24)] },
     })
     expect(c.appearance.map(l => l.id)).toEqual(['Lfill', 'Lstroke'])
-    expect(c.motion.tracks[0]!.path).toBe('appearance.Lstroke.width')
+    expect(firstTrack(c)!.path).toBe('appearance.Lstroke.width')
     expect(byId(applyMotion(c, 4), 'Lstroke').width).toBe(24)
   })
 
@@ -720,10 +797,10 @@ describe('a POSITIONAL stack track is migrated onto its layer’s id at load', (
     // `appearance.1` — a member with no leaf — is a real positional path and is
     // lifted; nothing downstream writes through it, and refusing it would be a
     // second rule for no reason.
-    expect(mergeConfig(saved('appearance.1')).motion.tracks[0]!.path).toBe('appearance.Lstroke')
+    expect(firstTrack(mergeConfig(saved('appearance.1')))!.path).toBe('appearance.Lstroke')
     // A leading zero is not an index this codebase mints, but /^\d+$/ matches it
     // and `Number('01')` is 1 — so it lifts to the same layer rather than being
     // left as a path that resolves differently in two places.
-    expect(mergeConfig(saved('appearance.01.width')).motion.tracks[0]!.path).toBe('appearance.Lstroke.width')
+    expect(firstTrack(mergeConfig(saved('appearance.01.width')))!.path).toBe('appearance.Lstroke.width')
   })
 })

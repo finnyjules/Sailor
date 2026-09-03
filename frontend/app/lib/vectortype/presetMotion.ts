@@ -61,16 +61,25 @@
  * are identity-at-rest (0 / 1), so a config with only one source is bit-identical
  * to what that source produced alone.
  */
-import type { FrameMotion, LayerAnimation, LayerAnimSpec } from '~/lib/motion/types'
+import type { LayerAnimSpec } from '~/lib/motion/types'
 import type { PresetCapability, UnitState } from '~/lib/motion/evaluate'
 import {
   ALL_PRESET_CAPABILITIES,
-  IDENTITY_UNIT,
-  evaluateAnimation,
+  evaluatePresetUnit,
   presetIdsFor,
   presetNeedsStagger,
 } from '~/lib/motion/evaluate'
 import { resolveEase } from '~/lib/motion/easing'
+// The shared moves core: N moves per phase now, not one spec per slot — see
+// `presetTransform`'s header note below. `movePhase`/`moveWindows` replace
+// this file's old `vtSlotPhase` for that purpose (kept, unchanged, for its
+// OTHER callers — see its own doc comment); `mergeEase`/`mergePlay` give a
+// raw/untrusted move a well-formed ease+play the same way `mergeTrack` gives
+// one to a raw track, and `easeToEngineName` is how a move's ease reaches
+// `vtPresetSpecs`'s engine-shaped `LayerAnimSpec.ease` string.
+import { movePhase, moveWindows } from '~/lib/studio/moves/phase'
+import { mergeEase, mergePlay, easeToEngineName } from '~/lib/studio/moves/ease'
+import { moveTracks, trackValueAt } from '~/lib/studio/moves/tracks'
 // TYPE-ONLY against ./font.ts (it loads fontkit at module scope); ./axisPresets
 // is deliberately type-only against it too, so this stays a light import.
 import type { VtAxis } from './font'
@@ -87,6 +96,7 @@ import {
   DEFAULT_MOTION,
   VT_PRESET_SLOTS,
   type VectorTypeConfig,
+  type VtMove,
   type VtPresetSlot,
 } from './config'
 import {
@@ -112,7 +122,6 @@ import {
   vtScatterDelta,
   vtScatterStillTime,
 } from './scatter'
-import { trackValue } from '~/lib/studio/track'
 
 /** A one-sided reveal of the glyph's own box: `amount` is the fraction hidden
  *  from `side`. Structurally `UnitState['clip']`, restated as a named type
@@ -251,24 +260,87 @@ export function vtAxisOffers(
  * `evaluateAnimation` silently substitutes `fade-in`/`fade-out` for an unknown
  * id, so forwarding it would show the user a fade they never asked for.
  */
+/**
+ * Every LIVE `kind: 'preset'` move (any number per phase, N total), read off
+ * `cfg.motion.moves` — the one place both `presetTransform` and the helpers
+ * below get their moves from, so they can never disagree about which ones
+ * exist.
+ *
+ * Tolerant of a config straight out of storage for the same reason every
+ * other reader in this file is (see the module header, trap "the defensive
+ * contract"): `motion`, `motion.moves`, and any one entry may be anything at
+ * all. A move whose `kind` isn't `'preset'`, whose `phase` isn't one of the
+ * three, or whose `presetId` names nothing this studio's engine tables (the
+ * kinetic catalog OR the axis-preset table) knows about is DROPPED, not
+ * defaulted — same rule the old per-slot reader followed ("KEEPS an unknown
+ * preset id — and refuses to animate it").
+ *
+ * `ease`/`play` are run through `mergeEase`/`mergePlay` here rather than
+ * trusted, so a raw move missing either (or carrying garbage) still gets a
+ * well-formed one — the same "nothing is trusted" rule `mergeTrack` follows
+ * for a raw track.
+ */
+function presetMoves(cfg: VectorTypeConfig | null | undefined): VtMove[] {
+  const raw = (cfg?.motion as { moves?: unknown } | undefined)?.moves
+  if (!Array.isArray(raw)) return []
+  const out: VtMove[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const m = entry as Record<string, unknown>
+    if (m.kind !== 'preset') continue
+    const phase = m.phase
+    if (phase !== 'in' && phase !== 'out' && phase !== 'loop') continue
+    if (!vtKnowsPreset(phase, m.presetId)) continue
+    out.push({
+      id: typeof m.id === 'string' && m.id ? m.id : `move-${out.length}`,
+      phase,
+      kind: 'preset',
+      presetId: (m.presetId as string).trim(),
+      duration: Math.max(0.05, fin(m.duration, 0.8)),
+      ease: mergeEase(m.ease),
+      play: mergePlay(m.play),
+      ...(m.params && typeof m.params === 'object' && !Array.isArray(m.params)
+        ? { params: m.params as Record<string, number> }
+        : {}),
+    })
+  }
+  return out
+}
+
+/**
+ * The slots that will actually animate, from a config of any vintage.
+ *
+ * A REPRESENTATIVE view, not an exhaustive one: `LayerAnimSpec` (the shared
+ * kinetic engine's own shape) has room for exactly one spec per slot, so with
+ * several `preset` moves sharing a phase — the whole point of the N-move
+ * redesign — this reports the FIRST live one per phase. `presetTransform`
+ * below is the exhaustive reader (it folds every one of them); this function
+ * remains for callers that only ever need "is there a preset in this slot,
+ * and roughly what" — `vtStillTime`, `vtStaggerStarvedSlots`, the axis-preset
+ * gallery's still-thumbnail and `MotionPresetPicker`'s "currently picked"
+ * pill — none of which yet knows how to show more than one.
+ *
+ * Defensive for the reason `./motion.ts` is: only the editor surface holds a
+ * `mergeConfig`-ed ref — the node card, the baker and the frame source read
+ * `properties.sailor_vectorType` as parsed JSON. So a `motion` that is missing, a
+ * string, or an array must behave as "no presets" rather than throw.
+ *
+ * An id the engine does not have is DROPPED here rather than passed on:
+ * `evaluateAnimation` silently substitutes `fade-in`/`fade-out` for an unknown
+ * id, so forwarding it would show the user a fade they never asked for.
+ */
 export function vtPresetSpecs(cfg: VectorTypeConfig | null | undefined): Partial<Record<VtPresetSlot, LayerAnimSpec>> {
-  const m = cfg?.motion as Record<string, unknown> | undefined
   const out: Partial<Record<VtPresetSlot, LayerAnimSpec>> = {}
-  if (!m || typeof m !== 'object') return out
-  for (const slot of VT_PRESET_SLOTS) {
-    const raw = m[slot] as Partial<LayerAnimSpec> | undefined
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
-    if (!vtKnowsPreset(slot, raw.presetId)) continue
-    out[slot] = {
-      presetId: (raw.presetId as string).trim(),
-      duration: Math.max(0.05, fin(raw.duration, 0.8)),
+  for (const mv of presetMoves(cfg)) {
+    if (out[mv.phase]) continue
+    out[mv.phase] = {
+      presetId: mv.presetId!,
+      duration: mv.duration,
       // See the header: the engine's own stagger is forced off so `motion.stagger`
       // is the single source. Not "left absent" — absent means 0.04.
       stagger: 0,
-      ...(typeof raw.ease === 'string' && raw.ease.trim() ? { ease: raw.ease.trim() } : {}),
-      ...(raw.params && typeof raw.params === 'object' && !Array.isArray(raw.params)
-        ? { params: raw.params as Record<string, number> }
-        : {}),
+      ease: easeToEngineName(mv.ease),
+      ...(mv.params ? { params: mv.params } : {}),
     }
   }
   return out
@@ -331,11 +403,7 @@ export function vtStaggerStarvedSlots(cfg: VectorTypeConfig | null | undefined):
  *  `vtIsAnimated`'s widening (trap 2: a preset-only config used to report
  *  "not animated" and render frozen). */
 export function vtHasPreset(cfg: VectorTypeConfig | null | undefined): boolean {
-  for (const slot of VT_PRESET_SLOTS) {
-    const raw = (cfg?.motion as any)?.[slot]
-    if (raw && typeof raw === 'object' && !Array.isArray(raw) && vtKnowsPreset(slot, raw.presetId)) return true
-  }
-  return false
+  return presetMoves(cfg).length > 0
 }
 
 /** Clip length in seconds, however the blob spells it. */
@@ -354,13 +422,13 @@ function clipDuration(cfg: VectorTypeConfig | null | undefined): number {
  */
 export function vtEmSize(cfg: VectorTypeConfig | null | undefined, t: number): number {
   let em = fin(cfg?.size, DEFAULT_CONFIG.size)
-  const tracks = cfg?.motion?.tracks
-  if (Array.isArray(tracks)) {
+  const tracks = moveTracks(cfg?.motion)
+  if (tracks.length) {
     const d = clipDuration(cfg)
     for (const tr of tracks) {
       if (!tr || typeof tr !== 'object' || tr.path?.trim?.() !== 'size') continue
       if (!isNum(tr.from) || !isNum(tr.to)) continue
-      em = trackValue(tr, t, d)
+      em = trackValueAt(tr, t, d)
     }
   }
   return isNum(em) ? em : DEFAULT_CONFIG.size
@@ -391,17 +459,22 @@ export function vtEmSize(cfg: VectorTypeConfig | null | undefined, t: number): n
  * its `t = 0` already IS the configured word.
  */
 export function vtStillTime(cfg: VectorTypeConfig | null | undefined): number {
-  const specs = vtPresetSpecs(cfg)
+  const moves = presetMoves(cfg)
   const settle = vtScatterStillTime(cfg)
-  if (!specs.in && !(settle > 0)) return 0
-  const inDur = specs.in ? specs.in.duration : 0
+  if (!moves.length && !(settle > 0)) return 0
   const duration = clipDuration(cfg)
+  // `moveWindows` gives `longestIn` across every In move (generalising the old
+  // single `specs.in.duration`) and, per move, the window it lives in — an Out
+  // move's `start` is exactly `outStart` used to be, computed per-move by the
+  // SAME shared rule `presetTransform` composes with, so this cannot drift out
+  // of step with what actually renders. The EARLIEST out window across every
+  // Out move is the one that first starts hiding the word.
+  const { longestIn, windows } = moveWindows(moves, duration)
   const glyphs = Math.max(1, [...String(cfg?.text ?? '')].length)
   const { delay } = resolveStagger(cfg as VectorTypeConfig)
-  const rest = Math.max(inDur, settle) + delay * (glyphs - 1)
-  const outStart = specs.out
-    ? Math.max(inDur, duration - specs.out.duration)
-    : duration
+  const rest = Math.max(longestIn, settle) + delay * (glyphs - 1)
+  const outStarts = windows.filter(w => w.move.phase === 'out').map(w => w.start)
+  const outStart = outStarts.length ? Math.min(...outStarts) : duration
   return Math.max(0, Math.min(rest, outStart, duration - 1e-6))
 }
 
@@ -506,76 +579,72 @@ export interface VtGlyphEnv {
 export type VtAxisEnv = VtGlyphEnv
 
 /**
- * The engine's per-glyph state, or identity when no slot is live.
+ * Fold one engine `UnitState` (already at its move's own eased progress) INTO
+ * the running accumulator, by the composition rule every doc comment in this
+ * file states and this is now the one place that applies it:
  *
- * COST: `evaluateAnimation` evaluates the whole run and we keep one unit, so a
- * frame is O(n²) preset calls. Deliberately not memoised — the obvious cache key
- * is the config OBJECT, and the surfaces mutate their config in place (a
- * reactive ref, same reference before and after an edit), so an identity-keyed
- * memo would serve stale motion the moment a slider moved while paused. The
- * arithmetic is a handful of floats per call against per-glyph font shaping and
- * a `Path2D` rebuild every frame, which are orders of magnitude dearer.
+ *   dx, dy, rotate, blur   ADD      (identity 0)
+ *   scale, scaleX, scaleY  MULTIPLY (identity 1)
+ *   opacity                MULTIPLY (identity 1), clamped once at the end
+ *   axes                   ADD per tag (via `addAxes`, dropping zero sums)
+ *   clip                   the LARGEST `amount` wins; ties keep the first
+ *
+ * Mutates `acc` in place — this is a tight per-glyph-per-frame inner loop
+ * (`presetTransform` calls it once per live move), and `Accumulator` never
+ * escapes this module, so there is no aliasing risk to defend against.
  */
-function unitStateFor(
-  cfg: VectorTypeConfig,
-  t: number,
-  index: number,
-  count: number,
-  env?: VtGlyphEnv | null,
-): UnitState {
-  const specs = vtPresetSpecs(cfg)
-  if (!specs.in && !specs.out && !specs.loop) return IDENTITY_UNIT
+interface Accumulator {
+  dx: number; dy: number; rotate: number; blur: number
+  scale: number; scaleX: number; scaleY: number; opacity: number
+  axes: Record<string, number>
+  clipSide: VtGlyphClip['side'] | null
+  clipAmount: number
+}
 
-  const duration = clipDuration(cfg)
-  const n = Math.max(1, Math.floor(count))
-  const i = Math.min(n - 1, Math.max(0, Math.floor(index)))
-
-  // The glyph's own clock — the SAME `glyphTime` the tracks are read at, so one
-  // stagger drives both sources and a wave cannot travel at two speeds.
-  //
-  // CLAMPED into the clip, never allowed to fall outside it. `evaluateAnimation`
-  // reports HIDDEN outside [start, end): before its turn a staggered glyph would
-  // vanish (right for an entrance, catastrophic for a loop — every glyph would
-  // blink out for its first `rank·delay` seconds), and past the end the whole run
-  // would disappear on the final frame of a bake. Clamping instead pins the
-  // pre-roll to progress 0 (an entrance's own "fully out" state) and the tail to
-  // the last frame's state, which is exactly what `trackValue` does with a
-  // single-play track.
-  const raw = glyphTime(cfg, t, i, n)
-  const gt = Math.min(Math.max(0, isNum(raw) ? raw : 0), duration - 1e-6)
-
-  // AXIS PRESETS FIRST. They are not in the engine's tables — their values are
-  // fractions of the loaded font's own range, which the engine cannot know — so
-  // the live slot is resolved here and, when it holds an axis preset, that
-  // preset's output REPLACES what the engine would have returned for this
-  // instant. The unknown id is still passed to `evaluateAnimation` below (for
-  // the other slots' sake: `in`'s duration is what times a loop's handoff), and
-  // the fade it substitutes is discarded on this branch rather than shown.
-  const live = vtSlotPhase(specs, gt, duration)
-  const axisPreset = live ? vtAxisPreset(live.slot, specs[live.slot]?.presetId) : null
-  if (live && axisPreset) {
-    const axes = env?.axes
-    if (!axes?.length) return IDENTITY_UNIT
-    const resting = env?.resting ?? (cfg?.axes as Record<string, number> | undefined) ?? null
-    const delta = vtAxisDelta(axisPreset, live.e, i, n, axes, resting)
-    // An axis preset moves ONLY axes: no offset, no scale, no fade. The word is
-    // re-cut, not moved, which is the distinction the whole section rests on.
-    return Object.keys(delta).length ? { ...IDENTITY_UNIT, axes: delta } : IDENTITY_UNIT
+function foldUnit(acc: Accumulator, u: UnitState): void {
+  acc.dx += fin(u.dx, 0)
+  acc.dy += fin(u.dy, 0)
+  acc.rotate += fin(u.rotation, 0)
+  acc.blur += Math.max(0, fin(u.blur, 0))
+  acc.scale *= fin(u.scale, 1)
+  acc.scaleX *= fin(u.scaleX, 1)
+  acc.scaleY *= fin(u.scaleY, 1)
+  acc.opacity *= clamp01(fin(u.opacity, 1))
+  if (u.axes && typeof u.axes === 'object') acc.axes = addAxes(acc.axes, u.axes)
+  if (u.clip && (CLIP_SIDES as readonly string[]).includes(u.clip.side) && isNum(u.clip.amount)) {
+    const amount = clamp01(u.clip.amount)
+    if (amount > acc.clipAmount) { acc.clipAmount = amount; acc.clipSide = u.clip.side }
   }
-
-  const anim: LayerAnimation = { offset: 0, duration, ...specs }
-  const motion: FrameMotion = { fps: Math.max(1, fin(cfg?.motion?.fps, DEFAULT_MOTION.fps)), duration }
-  const state = evaluateAnimation(anim, gt, motion, n)
-  if (!state.visible) return IDENTITY_UNIT
-  return state.units?.[i] ?? IDENTITY_UNIT
 }
 
 /**
- * What the PRESETS alone add to glyph `index` at time `t`.
+ * What the PRESETS alone add to glyph `index` at time `t` — folded across
+ * EVERY live `kind: 'preset'` move, generalising the old "one spec per slot"
+ * evaluator from one preset per phase to any number stacked (Vector Type
+ * moves spec §2).
  *
- * The unit conversion lives here and nowhere else: `dx`, `dy` and `blur` come out
- * of the engine in unit-box heights and leave in output pixels, multiplied by the
- * em at run time `t` (see the header, trap 1).
+ * Per move: `movePhase` (`~/lib/studio/moves/phase`) is asked whether this
+ * move is live at the glyph's own clock and, if so, its own eased 0→1
+ * progress (`in`/`out`) or 0..1 cycle phase (`loop`) — the SAME windowing
+ * `applyMotion`'s tracks and the shared moves panel use, so an entrance
+ * window shown on a band strip can never disagree with what actually plays.
+ * A move that is not live contributes nothing (its fold is skipped
+ * entirely, which is what makes multiplicative fields — scale, opacity —
+ * start from identity rather than from a live move's own value).
+ *
+ * AXIS PRESETS FIRST, exactly as before: they are not in the engine's
+ * tables (their values are fractions of the loaded font's own range, which
+ * the engine cannot know), so a `preset` move whose id names one is resolved
+ * against `./axisPresets.ts` and contributes ONLY an axis delta — no offset,
+ * no scale, no fade. Everything else goes through the engine's own tables via
+ * `evaluatePresetUnit` (`~/lib/motion/evaluate`), fed the move's own eased
+ * progress directly rather than re-deriving it, so this file's phase/ease
+ * math is the ONLY phase/ease math a preset move's motion goes through.
+ *
+ * The unit conversion lives here and nowhere else: `dx`, `dy` and `blur` come
+ * out of the engine in unit-box heights and leave in output pixels, multiplied
+ * by the em at run time `t` (see the header, trap 1) — done ONCE, after every
+ * move has folded in unit-box space, so N moves cost one multiply each, not N.
  *
  * `em` may be passed explicitly by a caller that has already resolved it — the
  * renderer knows the exact size it is drawing at, and passing it keeps the
@@ -589,36 +658,77 @@ export function presetTransform(
   em: number = vtEmSize(cfg, t),
   env?: VtGlyphEnv | null,
 ): VtGlyphMotion {
-  const u = unitStateFor(cfg, t, index, count, env)
-  if (u === IDENTITY_UNIT) return { ...IDENTITY_GLYPH_MOTION, axes: {} }
+  const moves = presetMoves(cfg)
+  if (!moves.length) return { ...IDENTITY_GLYPH_MOTION, axes: {} }
 
-  const scale = fin(u.scale, 1)
+  const duration = clipDuration(cfg)
+  const n = Math.max(1, Math.floor(count))
+  const i = Math.min(n - 1, Math.max(0, Math.floor(index)))
+
+  // The glyph's own clock — the SAME `glyphTime` the tracks are read at, so one
+  // stagger drives both sources and a wave cannot travel at two speeds.
+  //
+  // CLAMPED into the clip, never allowed to fall outside it. `movePhase`
+  // reports NOT LIVE outside a move's own window: before its turn a staggered
+  // glyph would vanish (right for an entrance, catastrophic for a loop — every
+  // glyph would blink out for its first `rank·delay` seconds), and past the
+  // end the whole run would disappear on the final frame of a bake. Clamping
+  // instead pins the pre-roll to progress 0 (an entrance's own "fully out"
+  // state) and the tail to the last frame's state, which is exactly what
+  // `trackValue` does with a single-play track.
+  const raw = glyphTime(cfg, t, i, n)
+  const gt = Math.min(Math.max(0, isNum(raw) ? raw : 0), duration - 1e-6)
+
+  // `longestIn` is shared across every move's window — an Out move never
+  // starts before the longest In has finished, and a Loop's phase 0 sits at
+  // the same instant, exactly as `applyMoveTracks`' tracks resolve theirs.
+  const { longestIn } = moveWindows(moves, duration)
+
+  const acc: Accumulator = {
+    dx: 0, dy: 0, rotate: 0, blur: 0, scale: 1, scaleX: 1, scaleY: 1, opacity: 1,
+    axes: {}, clipSide: null, clipAmount: 0,
+  }
+  let any = false
+
+  for (const mv of moves) {
+    const e = movePhase(mv, gt, duration, longestIn)
+    if (e == null) continue
+    any = true
+
+    const axisPreset = vtAxisPreset(mv.phase, mv.presetId)
+    if (axisPreset) {
+      const axes = env?.axes
+      if (!axes?.length) continue
+      const resting = env?.resting ?? (cfg?.axes as Record<string, number> | undefined) ?? null
+      const delta = vtAxisDelta(axisPreset, e, i, n, axes, resting)
+      if (Object.keys(delta).length) acc.axes = addAxes(acc.axes, delta)
+      continue
+    }
+
+    const u = evaluatePresetUnit(mv.phase, mv.presetId!, e, i, n, mv.params ?? {})
+    foldUnit(acc, u)
+  }
+
+  if (!any) return { ...IDENTITY_GLYPH_MOTION, axes: {} }
+
   const emPx = isNum(em) ? em : DEFAULT_CONFIG.size
-
-  const axes: Record<string, number> = {}
-  if (u.axes && typeof u.axes === 'object') {
-    for (const [tag, v] of Object.entries(u.axes)) if (isNum(v) && v !== 0) axes[tag] = v
-  }
-
-  let clip: VtGlyphClip | null = null
-  if (u.clip && (CLIP_SIDES as readonly string[]).includes(u.clip.side) && isNum(u.clip.amount)) {
-    const amount = clamp01(u.clip.amount)
-    // A zero-amount clip hides nothing; emitting it would make every consumer
-    // set up a clipping region per glyph for no visual difference.
-    if (amount > 0) clip = { side: u.clip.side, amount }
-  }
+  // A zero-amount clip hides nothing; emitting it would make every consumer
+  // set up a clipping region per glyph for no visual difference.
+  const clip: VtGlyphClip | null = acc.clipAmount > 0 && acc.clipSide
+    ? { side: acc.clipSide, amount: acc.clipAmount }
+    : null
 
   return {
-    dx: fin(u.dx, 0) * emPx,
-    dy: fin(u.dy, 0) * emPx,
-    scale,
-    scaleX: fin(u.scaleX, 1),
-    scaleY: fin(u.scaleY, 1),
-    rotate: fin(u.rotation, 0),
-    opacity: clamp01(fin(u.opacity, 1)),
-    blur: Math.max(0, fin(u.blur, 0) * emPx),
+    dx: acc.dx * emPx,
+    dy: acc.dy * emPx,
+    scale: acc.scale,
+    scaleX: acc.scaleX,
+    scaleY: acc.scaleY,
+    rotate: acc.rotate,
+    opacity: clamp01(acc.opacity),
+    blur: Math.max(0, acc.blur * emPx),
     clip,
-    axes,
+    axes: acc.axes,
   }
 }
 

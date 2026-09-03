@@ -90,7 +90,9 @@ import type { VectorTypeConfig } from './config'
 import type { VtAxis } from './font'
 import { vtAxisTagAvailability, type VtAxisTagOffer } from './axisPresets'
 import { glyphRandom } from './random'
-import { trackValue } from '~/lib/studio/track'
+// See blink.ts's identical import: tracks now live inside `motion.moves`, and
+// a tagged track's timing comes from its owning move now, not its own fields.
+import { moveTracks, trackValueAt } from '~/lib/studio/moves/tracks'
 
 /** How the scatter behaves over time. */
 export const VT_SCATTER_MODES = ['settle', 'wander'] as const
@@ -386,7 +388,7 @@ function hasSpreadTrack(tracks: unknown): boolean {
  */
 export function vtResolveScatter(cfg: VectorTypeConfig | null | undefined, t: number): VtScatterConfig {
   const raw = (cfg?.motion as { scatter?: Partial<VtScatterConfig> } | undefined)?.scatter
-  const tracks = cfg?.motion?.tracks
+  const tracks = moveTracks(cfg?.motion)
 
   // THE HOT PATH, and the reason a config with scatter off is byte-identical to
   // one written before this feature: `spread` is the only control that can
@@ -414,9 +416,9 @@ export function vtResolveScatter(cfg: VectorTypeConfig | null | undefined, t: nu
     // Last writer wins, matching `vtEmSize` and `vtResolveBlink`: two tracks on
     // one path overwrite rather than compose, and that rule is stated once for
     // the whole studio.
-    if (path === 'motion.scatter.spread') out.spread = clamp01(trackValue(tr, t, duration))
-    else if (path === 'motion.scatter.settle') out.settle = Math.max(0, trackValue(tr, t, duration))
-    else if (path === 'motion.scatter.rate') out.rate = Math.max(0, trackValue(tr, t, duration))
+    if (path === 'motion.scatter.spread') out.spread = clamp01(trackValueAt(tr, t, duration))
+    else if (path === 'motion.scatter.settle') out.settle = Math.max(0, trackValueAt(tr, t, duration))
+    else if (path === 'motion.scatter.rate') out.rate = Math.max(0, trackValueAt(tr, t, duration))
   }
   return out
 }

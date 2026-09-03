@@ -52,16 +52,24 @@ import {
   type VtAppearanceLayer,
   type VtLayerKind,
   type VtMotionTrack,
+  type VtMove,
 } from './config'
 import { isFill } from '~/lib/compositor/paint'
 import type { ColorMixSpace } from '~/lib/color/mix'
 import { hexToOklch, oklchToHexInGamut, parseHexA } from '~/lib/color/convert'
+// A track preset now builds a `VtMove` (kind 'tracks'), not a bare track
+// array — the move owns the ease/play a track used to carry as its own
+// `easing`/`loops`. `moveTracks` reads the moves array back into a flat,
+// tagged list where `vtMatchLegacyTrackPreset` (below) still needs one.
+import type { MoveEase, MovePlay } from '~/lib/studio/moves/types'
+import { moveTracks } from '~/lib/studio/moves/tracks'
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
-/** One motion track, with this studio's own track defaults filled in. */
+/** One motion track. `easing`/`loops` are GONE from `VtMotionTrack` — the
+ *  owning move's `ease`/`play` (declared per preset below) replace them. */
 function track(path: string, from: number, to: number, over: Partial<VtMotionTrack> = {}): VtMotionTrack {
-  return { path, from, to, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...over }
+  return { path, from, to, hold: 0, cycleOffset: 0, delay: 0, ...over }
 }
 
 /**
@@ -90,6 +98,22 @@ export interface VtTrackPresetContext {
   duration: number
 }
 
+/**
+ * One dial a later Move card can point at a track this preset produced —
+ * `trackIndex`/`field` name WHICH number the dial edits (`build()`'s output
+ * order; a per-layer preset like Light Sweep produces one track per matched
+ * layer, so `trackIndex: 0` is a representative first row rather than an
+ * exhaustive per-layer expansion, which is card-UI work for a later task).
+ */
+export interface VtTrackPresetDial {
+  label: string
+  trackIndex: number
+  field: 'from' | 'to'
+  min: number
+  max: number
+  step: number
+}
+
 export interface VtTrackPreset {
   id: string
   label: string
@@ -108,9 +132,28 @@ export interface VtTrackPreset {
   usable: (l: VtAppearanceLayer) => boolean
   /** What an unusable layer is missing, spliced into the reason sentence. */
   requirement: string
+  /** Which phase the move this preset builds plays in — an entrance (Stretch
+   *  In, Spring Up) settles once and stays; the rest run for the whole loop. */
+  phase: 'in' | 'loop' | 'out'
+  /** The owning move's fixed ease/play — the SAME mapping a migrated legacy
+   *  track's `easing`/`loops` collapse to (`~/lib/studio/moves/merge`'s
+   *  `legacyTrackEasePlay`): a settle is `none`/`once`, a ping-pong drift is
+   *  `none`/`backAndForth`, a multi-cycle wave adds `times`. Kept in step with
+   *  that mapping on purpose — a preset and a hand-converted legacy document
+   *  that produced the "same" motion should end up with the same timing. */
+  ease: MoveEase
+  play: MovePlay
   /** The tracks, derived from the layers it matched. */
   build: (ctx: VtTrackPresetContext) => VtMotionTrack[]
+  /** Dials a later card can edit the produced tracks with. */
+  dials: VtTrackPresetDial[]
 }
+
+const EASE_NONE: MoveEase = { kind: 'named', name: 'none' }
+const EASE_NATURAL: MoveEase = { kind: 'named', name: 'natural' }
+const PLAY_ONCE: MovePlay = { mode: 'once', times: 1 }
+const PLAY_REPEAT_1: MovePlay = { mode: 'repeat', times: 1 }
+const playBackAndForth = (times: number): MovePlay => ({ mode: 'backAndForth', times })
 
 /**
  * The offset a misregistration drifts to when the plate is sitting at zero.
@@ -188,6 +231,11 @@ const PRESETS: VtTrackPreset[] = [
     minLayers: 1,
     usable: usableExtrude,
     requirement: 'a depth of at least 1',
+    // A continuous turn, once per cycle — `none`/`repeat ×1`, the same timing
+    // `convertLegacyTracks` gives a matched run-level loop.
+    phase: 'loop',
+    ease: EASE_NONE,
+    play: PLAY_REPEAT_1,
     // ONE FULL TURN, starting where the user parked the slider. Starting at 0
     // instead would snap the design on the first frame; `angle + 360` is the
     // same direction as `angle`, so frame 0 and the last frame are identical and
@@ -200,6 +248,7 @@ const PRESETS: VtTrackPreset[] = [
       const from = isNum(l.angle) ? l.angle : 0
       return track(`${VT_STACK_PREFIX}${l.id}.angle`, from, from + 360)
     }),
+    dials: [{ label: 'Turns', trackIndex: 0, field: 'to', min: 90, max: 1440, step: 90 }],
   },
   {
     id: 'misregistration',
@@ -209,6 +258,11 @@ const PRESETS: VtTrackPreset[] = [
     minLayers: 1,
     usable: usableExtrude,
     requirement: 'a depth of at least 1',
+    // Ping-pong: `none`/`backAndForth ×1` — the mapping `legacyTrackEasePlay`
+    // gives a track whose old `easing` was `'pingpong'`.
+    phase: 'loop',
+    ease: EASE_NONE,
+    play: playBackAndForth(1),
     // PING-PONG from ZERO, so the word starts perfectly registered and drifts —
     // that is the whole read of the effect, and it also makes frame 0 the
     // in-register frame a still bake will capture.
@@ -222,8 +276,8 @@ const PRESETS: VtTrackPreset[] = [
     // preset that overwrote it would throw away the design it was applied to.
     build: ({ layers }) => layers.map(l =>
       track(`${VT_STACK_PREFIX}${l.id}.distance`, 0,
-        isNum(l.distance) && l.distance > 0 ? l.distance : VT_MISREGISTRATION_DRIFT,
-        { easing: 'pingpong' })),
+        isNum(l.distance) && l.distance > 0 ? l.distance : VT_MISREGISTRATION_DRIFT)),
+    dials: [{ label: 'Drift', trackIndex: 0, field: 'to', min: 1, max: 64, step: 1 }],
   },
   {
     id: 'colour-cycle',
@@ -239,6 +293,9 @@ const PRESETS: VtTrackPreset[] = [
       return !!hex && hexToOklch(hex)[1] >= CYCLE_MIN_CHROMA
     })(),
     requirement: 'a solid or gradient paint in a colour with some saturation',
+    phase: 'loop',
+    ease: EASE_NONE,
+    play: playBackAndForth(1),
     // PING-PONG from the colour the user already chose, so frame 0 is their own
     // design and a still bake captures it — the same rule Misregistration
     // follows, for the same reason. The far end is that colour's opposite hue at
@@ -252,8 +309,11 @@ const PRESETS: VtTrackPreset[] = [
     build: ({ layers }) => layers.flatMap((l) => {
       const hex = fillColorOf(l)
       if (!hex) return []
-      return [colorTrack(`${VT_STACK_PREFIX}${l.id}.paint.a`, hex, vtOppositeHue(hex), 'oklch', { easing: 'pingpong' })]
+      return [colorTrack(`${VT_STACK_PREFIX}${l.id}.paint.a`, hex, vtOppositeHue(hex), 'oklch')]
     }),
+    // No numeric dial: the two endpoints are colours, and a later card edits
+    // those with swatches, not a `VtTrackPresetDial`'s From/To numbers.
+    dials: [],
   },
 
   // ── Smart stretch — run-level, no layer needed ─────────────────────────────
@@ -261,28 +321,44 @@ const PRESETS: VtTrackPreset[] = [
   // policy): each moves one dial and leaves the other at 1.
   {
     id: 'stretch-in', label: 'Stretch In', pitch: 'Lands wide and settles to its drawn width', ...RUN,
+    // An entrance settles once: `natural`/`once` — the mapping
+    // `legacyTrackEasePlay` gives a track whose old `easing` was `'easeinout'`.
+    phase: 'in',
+    ease: EASE_NATURAL,
+    play: PLAY_ONCE,
     // An ENTRANCE ends still: `to` is 1, the drawn width — an ABSOLUTE value,
     // like every track in this table, not a delta on the dial. A user who set
     // the dial to 1.4 gets a word that lands at 1.0; the dial is the resting
     // value only while no track claims that path. Starts at 1.6 — an extended
     // cut, not a smear.
-    build: () => [track('stretch', 1.6, 1, { easing: 'easeinout' })],
+    build: () => [track('stretch', 1.6, 1)],
+    dials: [{ label: 'Start width', trackIndex: 0, field: 'from', min: 1, max: 2.5, step: 0.05 }],
   },
   {
     id: 'stretch-wave', label: 'Stretch Wave', pitch: 'A crest of width travels through the word', ...RUN,
-    // A LOOP about 1, −12% to +15%: wide enough to read, inside the range the
-    // engine holds, and absolute like the rest of this table. The travel comes
-    // from the stagger — with delay 0 the whole word breathes together, which
-    // is the honest fallback, not a bug.
-    build: () => [track('stretch', 0.88, 1.15, { easing: 'pingpong', loops: 2 })],
+    // A LOOP: ping-pong ×2 — the mapping a legacy `{easing:'pingpong',
+    // loops:2}` track collapses to.
+    phase: 'loop',
+    ease: EASE_NONE,
+    play: playBackAndForth(2),
+    // About 1, −12% to +15%: wide enough to read, inside the range the engine
+    // holds, and absolute like the rest of this table. The travel comes from
+    // the stagger — with delay 0 the whole word breathes together, which is
+    // the honest fallback, not a bug.
+    build: () => [track('stretch', 0.88, 1.15)],
+    dials: [{ label: 'Amount', trackIndex: 0, field: 'to', min: 1, max: 1.5, step: 0.01 }],
   },
   {
     id: 'spring-up', label: 'Spring Up', pitch: 'Letters land tall off the baseline and settle', ...RUN,
+    phase: 'in',
+    ease: EASE_NATURAL,
+    play: PLAY_ONCE,
     // Height only — the baseline is the fixed point of the vertical remap, so
     // this reads as letters springing UP, not smearing about their centres.
     // `to` is 1, the drawn height: absolute, like every track in this table, so
     // a user who set the height dial to 1.4 gets letters that land at 1.0.
-    build: () => [track('stretchY', 1.8, 1, { easing: 'easeinout' })],
+    build: () => [track('stretchY', 1.8, 1)],
+    dials: [{ label: 'Start height', trackIndex: 0, field: 'from', min: 1, max: 2.5, step: 0.05 }],
   },
 ]
 
@@ -359,15 +435,21 @@ export function vtTrackPresetOffers(cfg: VectorTypeConfig | null | undefined): V
 // ── Application ─────────────────────────────────────────────────────────────
 
 /**
- * The track list this config should have after applying `preset` — the CURRENT
- * tracks with the preset's own paths replaced, plus the preset's tracks.
+ * The moves list this config should have after applying `preset` — the
+ * CURRENT moves with the preset's own paths replaced (across every
+ * `'tracks'`-kind move, not just one of this preset's own making — see
+ * below), plus ONE new move carrying the preset's tracks.
  *
- * REPLACE, not append, and only on the paths the preset itself writes. Applying
- * a preset twice must not stack two tracks on one path (`applyMotion` is a plain
- * write per track, so the last one silently wins and the first is a dead row in
- * the timeline — measured: two opposed `glyph.dx` tracks compose to the second
- * one alone, not to their sum). Everything else the user authored is untouched,
- * because these presets compose with tracks and with the slot presets alike.
+ * REPLACE, not append, and only on the paths the preset itself writes.
+ * Applying a preset twice must not stack two tracks on one path
+ * (`applyMoveTracks` is a plain write per track, so the last one silently
+ * wins and the first is a dead row in the timeline — measured: two opposed
+ * `glyph.dx` tracks compose to the second one alone, not to their sum).
+ * Everything else the user authored is untouched, because these presets
+ * compose with tracks and with preset moves alike. A move that is left with
+ * NO tracks once its claimed paths are removed is dropped entirely — same
+ * rule `pruneStackTracks` (`./motion.ts`) follows for a move a stack edit
+ * emptied out.
  *
  * Returns the SAME array when the preset cannot run, so a caller can skip the
  * write and the deep watcher it would trigger.
@@ -375,8 +457,8 @@ export function vtTrackPresetOffers(cfg: VectorTypeConfig | null | undefined): V
 export function vtApplyTrackPreset(
   cfg: VectorTypeConfig,
   presetId: unknown,
-): VtMotionTrack[] {
-  const existing = Array.isArray(cfg?.motion?.tracks) ? cfg.motion.tracks : []
+): VtMove[] {
+  const existing = Array.isArray(cfg?.motion?.moves) ? cfg.motion.moves : []
   const preset = vtTrackPreset(presetId)
   if (!preset) return existing
   const offer = vtTrackPresetOffer(preset, cfg)
@@ -386,7 +468,24 @@ export function vtApplyTrackPreset(
     duration: isNum(cfg?.motion?.duration) ? cfg.motion.duration : 4,
   })
   const claimed = new Set(added.map(t => t.path))
-  return [...existing.filter(t => !claimed.has(typeof t?.path === 'string' ? t.path.trim() : '')), ...added]
+  const kept: VtMove[] = []
+  for (const mv of existing) {
+    if (mv.kind !== 'tracks' || !Array.isArray(mv.tracks)) { kept.push(mv); continue }
+    const remaining = mv.tracks.filter(t => !claimed.has(typeof t?.path === 'string' ? t.path.trim() : ''))
+    if (!remaining.length) continue
+    kept.push(remaining.length === mv.tracks.length ? mv : { ...mv, tracks: remaining })
+  }
+  const newMove: VtMove = {
+    id: `move-preset-${preset.id}`,
+    phase: preset.phase,
+    kind: 'tracks',
+    presetId: preset.id,
+    duration: isNum(cfg?.motion?.duration) ? cfg.motion.duration : 4,
+    ease: preset.ease,
+    play: preset.play,
+    tracks: added,
+  }
+  return [...kept, newMove]
 }
 
 /**
@@ -407,13 +506,18 @@ export function vtTrackPresetActive(cfg: VectorTypeConfig, presetId: unknown): b
     layers: offer.layers,
     duration: isNum(cfg?.motion?.duration) ? cfg.motion.duration : 4,
   })
-  const have = Array.isArray(cfg?.motion?.tracks) ? cfg.motion.tracks : []
+  // The `.space` cast: see `motion.ts`'s `usableTracks` note — every track
+  // this studio stores was built by ITS OWN `mergeTrack`, which always writes
+  // `.space`, never the shared `MoveTrack.mix` the inherited type declares.
+  const have = ((Array.isArray(cfg?.motion?.moves) ? cfg.motion.moves : [])
+    .filter(m => m.kind === 'tracks')
+    .flatMap(m => m.tracks ?? [])) as unknown as VtMotionTrack[]
   // A COLOUR track's `from`/`to` are 0 and 1 on EVERY colour track, so comparing
   // only those would make one colour preset read as active whenever any other
   // had been applied to the same leaf. The endpoints that identify it are the two
   // colours and the space they are mixed in.
   return wanted.length > 0 && wanted.every(w => have.some(h =>
-    h?.path === w.path && h.from === w.from && h.to === w.to && h.easing === w.easing
+    h?.path === w.path && h.from === w.from && h.to === w.to
     && h.fromColor === w.fromColor && h.toColor === w.toColor && h.space === w.space))
 }
 

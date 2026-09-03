@@ -77,6 +77,36 @@ function trackRawProgress(track: MoveTrack, play: MovePlay, t: number, clipDurat
 const isColorTrack = (t: MoveTrack): boolean => typeof t.fromColor === 'string' && typeof t.toColor === 'string'
 
 /**
+ * The EASED 0..1 progress of ONE tagged track at time `t` — everything
+ * `trackValueAt` knows about timing, with nothing said about `from`/`to`.
+ * Split out for a COLOUR track (Vector Type's `trackColor`), which mixes two
+ * swatches at this progress rather than lerping a `from`/`to` pair — the same
+ * split `~/lib/studio/track`'s `trackProgress`/`trackValue` make, for the
+ * same reason (see that module's own doc comment).
+ *
+ * Honors the track's OWNING MOVE's `ease`/`play` (the `__ease`/`__play` tag
+ * `moveTracks` attaches) and the track's own `delay`/`cycleOffset`/`hold`.
+ */
+export function trackProgressAt(track: TaggedMoveTrack, t: number, clipDuration: number): number {
+  return easeSample(track.__ease, trackRawProgress(track, track.__play, t, clipDuration))
+}
+
+/**
+ * The value of ONE tagged track at time `t` within a clip of `clipDuration`
+ * seconds — the exact arithmetic `applyMoveTracks` applies per track, exposed
+ * directly for a caller that reads one leaf's animated value without writing
+ * a whole cloned config (Vector Type's `vtEmSize`/`blink.ts`/`scatter.ts`,
+ * which each read one or three `motion.*` leaves straight off the tagged
+ * tracks, on their own hot per-glyph-per-frame paths where cloning the config
+ * is the wrong price — same reasoning `applyMoveTracks`'s own doc comment
+ * gives for why colour tracks are a studio's own problem).
+ */
+export function trackValueAt(track: TaggedMoveTrack, t: number, clipDuration: number): number {
+  const eased = trackProgressAt(track, t, clipDuration)
+  return track.from + (track.to - track.from) * eased
+}
+
+/**
  * Clone `cfg` and write every track's value at time `t`. Colour tracks
  * (both `fromColor` and `toColor` present) are OUT OF SCOPE here — passed
  * through unchanged; a studio with colour tracks (Vector Type) keeps its own
@@ -90,10 +120,7 @@ export function applyMoveTracks<Cfg>(cfg: Cfg, clip: MotionClip | null | undefin
     if (isColorTrack(track)) continue
     const path = track.path.trim()
     if (!path) continue
-    const progress = trackRawProgress(track, track.__play, t, clip?.duration ?? 4)
-    const eased = easeSample(track.__ease, progress)
-    const value = track.from + (track.to - track.from) * eased
-    io.setByPath(out, path, value)
+    io.setByPath(out, path, trackValueAt(track, t, clip?.duration ?? 4))
   }
   return out
 }

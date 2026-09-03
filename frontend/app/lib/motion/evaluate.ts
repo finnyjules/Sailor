@@ -253,6 +253,47 @@ export const SUPPORTED_OUT_IDS = Object.keys(OUT_EVAL)
 export const SUPPORTED_LOOP_IDS = Object.keys(LOOP_EVAL)
 
 /**
+ * Evaluate ONE preset's `UnitState` directly from an ALREADY-RESOLVED
+ * progress, bypassing `evaluateAnimation`'s own window/ease machinery.
+ *
+ * Added for the moves engines (Vector Type's `presetMotion.ts` first): once a
+ * caller owns its own phase/window/ease computation over N stacked moves —
+ * `lib/studio/moves/phase.ts`'s `movePhase`, which every move (however many
+ * per phase) is evaluated against independently — `evaluateAnimation`'s
+ * single-slot-per-phase windowing no longer applies, but the per-preset
+ * VISUAL function (`IN_EVAL['slide-up'].fn`, etc.) still needs to run. This is
+ * that function, exposed directly.
+ *
+ * `progress` means: for `slot: 'in' | 'out'`, the EASED 0→1 progress of that
+ * pass (what `evalSpecUnits` would have computed as `ease(unitProgress(...))`
+ * — do not ease it again here). For `slot: 'loop'`, the 0..1 CYCLE PHASE
+ * (what `LOOP_EVAL`'s functions call `phase`).
+ *
+ * `evaluateAnimation` and this function are two independent readers of the
+ * SAME private tables — deliberately: neither is built in terms of the other,
+ * so `evaluateAnimation`'s own windowing (the Compositor's still path) is
+ * untouched by this addition.
+ */
+export function evaluatePresetUnit(
+  slot: 'in' | 'out' | 'loop',
+  presetId: string,
+  progress: number,
+  i: number,
+  n: number,
+  params: Record<string, number> = {},
+): UnitState {
+  const p = Number.isFinite(progress) ? progress : 0
+  const ii = Math.max(0, Math.floor(i))
+  const nn = Math.max(1, Math.floor(n))
+  if (slot === 'in') { const entry = IN_EVAL[presetId] ?? IN_EVAL['fade-in']!; return entry.fn(p, ii, nn, params) }
+  if (slot === 'out') { const entry = OUT_EVAL[presetId] ?? OUT_EVAL['fade-out']!; return entry.fn(p, ii, nn, params) }
+  const loopFn = LOOP_EVAL[presetId]
+  if (!loopFn) return IDENTITY_UNIT
+  const phase = ((p % 1) + 1) % 1
+  return loopFn(phase, ii, nn, params)
+}
+
+/**
  * Presets whose ENTIRE effect is the per-unit stagger window.
  *
  * `typewriter` is `opacity: e > 0.01 ? 1 : 0` — a step, with no intermediate

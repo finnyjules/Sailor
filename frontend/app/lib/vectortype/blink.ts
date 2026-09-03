@@ -69,7 +69,13 @@
 import type { VectorTypeConfig } from './config'
 import { glyphRandom, timeBucket } from './random'
 import { VT_NO_WORD } from './words'
-import { trackValue } from '~/lib/studio/track'
+// The tracks now live inside `motion.moves` (each a 'tracks'-kind Move), not
+// at a flat `motion.tracks` any more — `moveTracks` flattens every move's
+// tracks back into one list, which is all this file ever needed a `tracks`
+// array for (it only reads three leaf paths off it, run-level, below).
+// `trackValueAt` reads one tagged track's value honoring its OWNING MOVE's
+// ease/play (a track no longer carries its own `easing`/`loops`).
+import { moveTracks, trackValueAt } from '~/lib/studio/moves/tracks'
 
 /** What a blink treats as one thing. */
 export const VT_BLINK_UNITS = ['letter', 'word'] as const
@@ -283,7 +289,7 @@ export function vtBlinkActive(blink: VtBlinkConfig | null | undefined): boolean 
  */
 export function vtResolveBlink(cfg: VectorTypeConfig | null | undefined, t: number): VtBlinkConfig {
   const raw = (cfg?.motion as { blink?: Partial<VtBlinkConfig> } | undefined)?.blink
-  const tracks = cfg?.motion?.tracks
+  const tracks = moveTracks(cfg?.motion)
 
   // THE HOT PATH. `vtGlyphMotion` runs once per glyph per frame for every config
   // in the product, and the overwhelming majority of them will never blink — so
@@ -310,9 +316,9 @@ export function vtResolveBlink(cfg: VectorTypeConfig | null | undefined, t: numb
     const path = typeof tr.path === 'string' ? tr.path.trim() : ''
     // Last writer wins, matching `vtEmSize`: two tracks on one path overwrite
     // rather than compose, and that rule is stated once for the whole studio.
-    if (path === 'motion.blink.amount') out.amount = clamp01(trackValue(tr, t, duration))
-    else if (path === 'motion.blink.rate') out.rate = Math.max(0, trackValue(tr, t, duration))
-    else if (path === 'motion.blink.stayLit') out.stayLit = clamp01(trackValue(tr, t, duration))
+    if (path === 'motion.blink.amount') out.amount = clamp01(trackValueAt(tr, t, duration))
+    else if (path === 'motion.blink.rate') out.rate = Math.max(0, trackValueAt(tr, t, duration))
+    else if (path === 'motion.blink.stayLit') out.stayLit = clamp01(trackValueAt(tr, t, duration))
   }
   return out
 }

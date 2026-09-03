@@ -317,7 +317,10 @@ function colorCycleTracks(config: VectorTypeConfig): VtMotionTrack[] {
     // OKLCH, matching the studio's own Colour Cycle tile: this pair is a HUE
     // ROTATION, and the default straight-line space would take it through grey.
     space: 'oklch',
-    easing: 'pingpong', loops: 1, hold: 0, cycleOffset: 0, delay: 0,
+    // `easing`/`loops` are GONE from `VtMotionTrack` — the ping-pong timing is
+    // the owning move's now (`ease: none`, `play: backAndForth`, set at the
+    // call site below), not the track's.
+    hold: 0, cycleOffset: 0, delay: 0,
   }]
 }
 
@@ -443,7 +446,28 @@ export function kineticParamsToVectorType(rawParams: unknown): KineticMigration 
   // merge minted. Pushed rather than re-merged: it is already in `mergeTrack`'s
   // output shape (every field present, colours long-form lower-case), which its
   // own round-trip test pins — so a save/load cycle returns it unchanged.
-  if (mapped?.colorCycle) config.motion.tracks.push(...colorCycleTracks(config))
+  //
+  // CARRY-FORWARD (motion moves, Task 5): `motion.tracks` no longer exists —
+  // a track lives inside a `kind: 'tracks'` MOVE now. Wrapped in one here with
+  // the exact ease/play the studio's own Colour Cycle track preset uses
+  // (`./trackPresets.ts`'s `colour-cycle`: ping-pong, i.e. `ease: none`,
+  // `play: backAndForth ×1`), so a migrated node's cycle plays identically to
+  // one a user added from the gallery.
+  if (mapped?.colorCycle) {
+    const tracks = colorCycleTracks(config)
+    if (tracks.length) {
+      config.motion.moves.push({
+        id: 'move-color-cycle',
+        phase: 'loop',
+        kind: 'tracks',
+        presetId: 'colour-cycle',
+        duration,
+        ease: { kind: 'named', name: 'none' },
+        play: { mode: 'backAndForth', times: 1 },
+        tracks,
+      })
+    }
+  }
 
   const bg = typeof o.bg === 'string' ? o.bg : KINETIC_DEFAULTS.bg
   const frames = Array.isArray(o.rendered)

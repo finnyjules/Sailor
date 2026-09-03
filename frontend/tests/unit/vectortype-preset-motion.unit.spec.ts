@@ -1,7 +1,7 @@
 /**
  * Vector Type — the shared motion engine adapted to glyphs (`presetMotion.ts`).
  *
- * Four failures these tests exist to prevent. Every one of them is silent — the
+ * Five failures these tests exist to prevent. Every one of them is silent — the
  * word still renders, so nothing errors and a screenshot looks plausible.
  *
  * 1. THE UNIT CONVERSION. `UnitState.dx/dy/blur` are unit-box heights; a glyph
@@ -17,19 +17,33 @@
  *    the REAL render path, with both sources live in one frame.
  * 4. TWO STAGGERS FIGHTING. `LayerAnimSpec.stagger` and `motion.stagger` are the
  *    same idea; only Vector Type's own may be live.
+ * 5. N STACKED MOVES SILENTLY COLLAPSING TO ONE. The moves redesign (Task 5)
+ *    generalises "one preset per phase" to "any number stacked" — two In moves
+ *    must BOTH show, not just the last one merged.
+ *
+ * ## The move shape, since Task 4
+ *
+ * `motion.moves: VtMove[]` replaced the old three preset slots
+ * (`motion.in`/`out`/`loop`) and the flat `motion.tracks` array — every preset,
+ * every track, every entrance/exit/loop is one move (`~/lib/studio/moves/types`'s
+ * `Move`, narrowed to Vector Type's four kinds in `config.ts`). `preset()` and
+ * `trackMove()` below build one; `cfg()` always round-trips through
+ * `mergeConfig`, so these tests exercise the real merge path (`mergeMove`,
+ * `mergeEase`, `mergePlay`) as well as the evaluator.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as fontkit from 'fontkit'
 import { describe, expect, it } from 'vitest'
-import type { LayerAnimSpec } from '~/lib/motion/types'
 import { PRESET_CAPABILITIES } from '~/lib/motion/evaluate'
+import type { MoveEase, MoveEaseName } from '~/lib/studio/moves/types'
 import {
   DEFAULT_CONFIG,
   cloneConfig,
   mergeConfig,
   type VectorTypeConfig,
   type VtMotionTrack,
+  type VtMove,
 } from '~/lib/vectortype/config'
 import {
   IDENTITY_GLYPH_MOTION,
@@ -60,68 +74,119 @@ function cfg(patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig {
   return mergeConfig({ ...cloneConfig(DEFAULT_CONFIG), text: WORD, ...patch })
 }
 
-/** A config with one preset slot and nothing else. `ease: 'none'` throughout, so
- *  progress is LINEAR and every expected number below is exact arithmetic rather
- *  than a curve sampled to 3 decimals. */
-function preset(slot: 'in' | 'out' | 'loop', spec: Partial<LayerAnimSpec> & { presetId: string }, patch: Partial<VectorTypeConfig> = {}) {
+const ease = (name: MoveEaseName): MoveEase => ({ kind: 'named', name })
+
+let moveSeq = 0
+/** One `preset`-kind move. `ease: 'none'` throughout, so progress is LINEAR
+ *  and every expected number below is exact arithmetic rather than a curve
+ *  sampled to 3 decimals. */
+function presetMove(
+  phase: 'in' | 'out' | 'loop',
+  spec: { presetId: string; duration?: number; params?: Record<string, number> },
+  over: Partial<VtMove> = {},
+): VtMove {
+  moveSeq += 1
+  return {
+    id: `move-${moveSeq}`,
+    phase,
+    kind: 'preset',
+    presetId: spec.presetId,
+    duration: spec.duration ?? 1,
+    ease: ease('none'),
+    play: phase === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
+    ...(spec.params ? { params: spec.params } : {}),
+    ...over,
+  }
+}
+
+/** One `tracks`-kind move wrapping a single track — the Custom-move shape a
+ *  hand-authored track now takes. `ease: 'none'`/`play: once` reproduce the
+ *  old default (linear, single pass) unless overridden. */
+function trackMove(
+  phase: 'in' | 'out' | 'loop',
+  path: string,
+  from: number,
+  to: number,
+  over: Partial<VtMotionTrack> = {},
+  moveOver: Partial<VtMove> = {},
+): VtMove {
+  moveSeq += 1
+  return {
+    id: `move-${moveSeq}`,
+    phase,
+    kind: 'tracks',
+    presetId: 'custom',
+    duration: 1,
+    ease: ease('none'),
+    play: { mode: 'once', times: 1 },
+    tracks: [{ path, from, to, hold: 0, cycleOffset: 0, delay: 0, ...over }],
+    ...moveOver,
+  }
+}
+
+/** A config carrying exactly one preset move in `slot`, and nothing else —
+ *  the direct replacement for the old `preset(slot, spec)` helper. */
+function preset(
+  slot: 'in' | 'out' | 'loop',
+  spec: { presetId: string; duration?: number; params?: Record<string, number> },
+  patch: Partial<VectorTypeConfig> = {},
+): VectorTypeConfig {
+  const patchMotion = (patch.motion ?? {}) as Partial<VectorTypeConfig['motion']>
+  const priorMoves = Array.isArray(patchMotion.moves) ? patchMotion.moves : []
   return cfg({
     ...patch,
     motion: {
       ...DEFAULT_CONFIG.motion,
       duration: 4,
-      ...(patch.motion ?? {}),
-      [slot]: { duration: 1, ease: 'none', ...spec },
+      ...patchMotion,
+      moves: [presetMove(slot, spec), ...priorMoves],
     } as VectorTypeConfig['motion'],
   })
 }
 
-function track(path: string, from: number, to: number): VtMotionTrack {
-  return { path, from, to, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 }
-}
-
 // ── the config schema ───────────────────────────────────────────────────────
 
-describe('mergeConfig — preset slots', () => {
-  it('keeps a well-formed spec, field by field', () => {
+describe('mergeConfig — moves', () => {
+  it('keeps a well-formed preset move, field by field', () => {
     const m = mergeConfig({
-      motion: { in: { presetId: 'slide-up', duration: 1.25, ease: 'power3.out', params: { overshoot: 2 } } },
+      motion: { moves: [presetMove('in', { presetId: 'slide-up', duration: 1.25, params: { overshoot: 2 } }, { ease: ease('slowDown') })] },
     }).motion
-    expect(m.in).toEqual({ presetId: 'slide-up', duration: 1.25, ease: 'power3.out', params: { overshoot: 2 } })
+    expect(m.moves).toHaveLength(1)
+    expect(m.moves[0]).toMatchObject({ phase: 'in', kind: 'preset', presetId: 'slide-up', duration: 1.25, params: { overshoot: 2 } })
+    expect(m.moves[0]!.ease).toEqual(ease('slowDown'))
   })
 
-  it('leaves no key behind when a slot is absent — a default config round-trips', () => {
+  it('leaves the list empty when nothing is stored — a default config round-trips', () => {
     const m = mergeConfig({}).motion
-    expect('in' in m).toBe(false)
-    expect('out' in m).toBe(false)
-    expect('loop' in m).toBe(false)
+    expect(m.moves).toEqual([])
     expect(mergeConfig(DEFAULT_CONFIG)).toEqual(DEFAULT_CONFIG)
   })
 
   it('survives a hostile blob', () => {
-    // null / non-object / array / missing presetId → the slot is dropped, not defaulted
-    for (const junk of [null, undefined, 'slide-up', 7, [], [{ presetId: 'slide-up' }], { duration: 2 }, { presetId: '   ' }, { presetId: 42 }]) {
-      expect(mergeConfig({ motion: { in: junk } }).motion.in, JSON.stringify(junk) ?? 'undefined').toBeUndefined()
+    // null / non-object / array / missing presetId → the move is dropped, not defaulted
+    for (const junk of [null, undefined, 'slide-up', 7, [], { duration: 2 }, { kind: 'preset', presetId: '   ' }, { kind: 'preset', presetId: 42 }]) {
+      expect(mergeConfig({ motion: { moves: [junk] } }).motion.moves, JSON.stringify(junk) ?? 'undefined').toEqual([])
     }
     // NaN / missing / absurd durations fall back or clamp; nothing NaN escapes
-    expect(mergeConfig({ motion: { in: { presetId: 'fade-in', duration: NaN } } }).motion.in!.duration).toBe(0.8)
-    expect(mergeConfig({ motion: { loop: { presetId: 'wave', duration: '3' } } }).motion.loop!.duration).toBe(1.5)
-    expect(mergeConfig({ motion: { in: { presetId: 'fade-in', duration: 0 } } }).motion.in!.duration).toBe(0.05)
-    expect(mergeConfig({ motion: { in: { presetId: 'fade-in', duration: 1e9 } } }).motion.in!.duration).toBe(60)
+    expect(mergeConfig({ motion: { moves: [{ kind: 'preset', presetId: 'fade-in', duration: NaN }] } }).motion.moves[0]!.duration).toBeCloseTo(1, 10)
+    expect(mergeConfig({ motion: { moves: [{ kind: 'preset', presetId: 'fade-in', duration: 0 } as any] } }).motion.moves[0]!.duration).toBe(0.05)
+    expect(mergeConfig({ motion: { moves: [{ kind: 'preset', presetId: 'fade-in', duration: 1e9 } as any] } }).motion.moves[0]!.duration).toBe(60)
     // knobs: non-numeric values dropped, empty record not stored
-    expect(mergeConfig({ motion: { loop: { presetId: 'wiggle', params: { amplitude: 0.3, cycles: '2', junk: null } } } }).motion.loop!.params)
+    expect(mergeConfig({ motion: { moves: [{ kind: 'preset', presetId: 'wiggle', params: { amplitude: 0.3, cycles: '2', junk: null } } as any] } }).motion.moves[0]!.params)
       .toEqual({ amplitude: 0.3 })
-    expect(mergeConfig({ motion: { loop: { presetId: 'wiggle', params: { cycles: 'x' } } } }).motion.loop).not.toHaveProperty('params')
-    expect(mergeConfig({ motion: { in: { presetId: 'fade-in', ease: 42 } } }).motion.in).not.toHaveProperty('ease')
+    expect(mergeConfig({ motion: { moves: [{ kind: 'preset', presetId: 'wiggle', params: { cycles: 'x' } } as any] } }).motion.moves[0]).not.toHaveProperty('params')
+    // a garbage ease falls back to the default rather than surviving unrecognised
+    expect(mergeConfig({ motion: { moves: [{ kind: 'preset', presetId: 'fade-in', ease: 42 } as any] } }).motion.moves[0]!.ease.kind).toBe('named')
   })
 
   it('KEEPS an unknown preset id — and refuses to animate it', () => {
     // Same rule as an axis tag the current font lacks: the config layer does not
     // own the catalog, so a newer version's preset survives an older load.
-    const c = mergeConfig({ motion: { in: { presetId: 'quantum-swirl', duration: 1 } } })
-    expect(c.motion.in).toEqual({ presetId: 'quantum-swirl', duration: 1 })
-    // …but nothing downstream guesses. `evaluateAnimation` would substitute
-    // fade-in; the adapter drops the slot instead, so the user sees no motion
-    // rather than a fade they never picked.
+    const c = mergeConfig({ motion: { moves: [presetMove('in', { presetId: 'quantum-swirl', duration: 1 })] } })
+    expect(c.motion.moves).toHaveLength(1)
+    expect(c.motion.moves[0]!.presetId).toBe('quantum-swirl')
+    // …but nothing downstream guesses. The evaluator drops the move instead of
+    // substituting a fade, so the user sees no motion rather than one they never picked.
     expect(vtKnowsPreset('in', 'quantum-swirl')).toBe(false)
     expect(vtPresetSpecs(c).in).toBeUndefined()
     expect(vtHasPreset(c)).toBe(false)
@@ -129,25 +194,31 @@ describe('mergeConfig — preset slots', () => {
     expect(presetTransform(c, 0.5, 0, 6)).toEqual({ ...IDENTITY_GLYPH_MOTION, axes: {} })
   })
 
-  it('does NOT store the spec\'s own stagger — Vector Type has exactly one', () => {
-    const c = mergeConfig({ motion: { in: { presetId: 'slide-up', duration: 1, stagger: 0.25 } } })
-    expect(c.motion.in).not.toHaveProperty('stagger')
-    // …and it is inert even when a raw blob carries it (the node card and the
-    // baker never see `mergeConfig`).
-    const raw = { text: WORD, size: 100, motion: { duration: 4, in: { presetId: 'slide-up', duration: 1, ease: 'none', stagger: 0.25 } } } as any
+  it('the engine\'s own per-unit stagger stays forced off — Vector Type has exactly one', () => {
+    // A move carries no `stagger` concept at all any more (the old
+    // `LayerAnimSpec.stagger` was a slot-spec field; `vtPresetSpecs` always
+    // forces `stagger: 0` for the engine regardless of what a raw blob says),
+    // so the behavioural guarantee is what is asserted directly: a raw,
+    // never-merged move naming a stagger has no effect on the per-glyph
+    // offset — `motion.stagger` (this studio's own single clock) is the only
+    // source, and with it absent every glyph reads the same instant.
+    const raw = {
+      text: WORD, size: 100,
+      motion: { duration: 4, moves: [{ id: 'm', phase: 'in', kind: 'preset', presetId: 'slide-up', duration: 1, ease: ease('none'), play: { mode: 'once', times: 1 }, stagger: 0.25 }] },
+    } as any
     const a = presetTransform(raw, 0.5, 0, 6)
     const b = presetTransform(raw, 0.5, 5, 6)
-    expect(a.dy).toBe(b.dy)     // no per-unit offset from the engine's stagger
+    expect(a.dy).toBe(b.dy)     // no per-unit offset from a stray `stagger` key
     expect(vtPresetSpecs(raw).in!.stagger).toBe(0)
   })
 
-  it('cloneConfig shares no preset object with its source', () => {
-    const a = mergeConfig({ motion: { loop: { presetId: 'wiggle', duration: 2, params: { amplitude: 0.3 } } } })
+  it('cloneConfig shares no move object with its source', () => {
+    const a = mergeConfig({ motion: { moves: [presetMove('loop', { presetId: 'wiggle', duration: 2, params: { amplitude: 0.3 } })] } })
     const b = cloneConfig(a)
-    b.motion.loop!.duration = 9
-    b.motion.loop!.params!.amplitude = 9
-    expect(a.motion.loop!.duration).toBe(2)
-    expect(a.motion.loop!.params!.amplitude).toBe(0.3)
+    b.motion.moves[0]!.duration = 9
+    b.motion.moves[0]!.params!.amplitude = 9
+    expect(a.motion.moves[0]!.duration).toBe(2)
+    expect(a.motion.moves[0]!.params!.amplitude).toBe(0.3)
   })
 })
 
@@ -195,7 +266,7 @@ describe('presetTransform — unit-box heights → OUTPUT PIXELS', () => {
     // so the offsets must be in that same em — not the resting one.
     const c = preset('in', { presetId: 'slide-up' }, {
       size: 100,
-      motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks: [track('size', 100, 500)] } as VectorTypeConfig['motion'],
+      motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: [trackMove('loop', 'size', 100, 500)] } as VectorTypeConfig['motion'],
     })
     expect(vtEmSize(c, 0)).toBe(100)
     expect(vtEmSize(c, 2)).toBe(300)                     // half-way through 100→500
@@ -218,7 +289,7 @@ describe('vtIsAnimated — two sources, both counted', () => {
     for (const slot of ['in', 'out', 'loop'] as const) {
       const id = slot === 'in' ? 'fade-in' : slot === 'out' ? 'fade-out' : 'wave'
       const c = preset(slot, { presetId: id })
-      expect(c.motion.tracks).toHaveLength(0)
+      expect(c.motion.moves.filter(m => m.kind === 'tracks')).toHaveLength(0)
       expect(vtIsAnimated(c), slot).toBe(true)
     }
   })
@@ -227,8 +298,8 @@ describe('vtIsAnimated — two sources, both counted', () => {
     expect(vtIsAnimated(cfg())).toBe(false)
     expect(vtIsAnimated(undefined)).toBe(false)
     expect(vtIsAnimated({ motion: 'later' } as any)).toBe(false)
-    expect(vtIsAnimated({ motion: { in: { presetId: '' } } } as any)).toBe(false)
-    expect(vtIsAnimated({ motion: { in: ['slide-up'] } } as any)).toBe(false)
+    expect(vtIsAnimated({ motion: { moves: [{ kind: 'preset', presetId: '' }] } } as any)).toBe(false)
+    expect(vtIsAnimated({ motion: { moves: 'slide-up' } } as any)).toBe(false)
   })
 
   it('a preset-only config still bakes a VISIBLE still', () => {
@@ -255,12 +326,12 @@ describe('presets ∘ tracks — both are visible, neither wins', () => {
   })
 
   it('offsets and rotation ADD', () => {
-    const withTrack = base({ tracks: [track('glyph.dy', 10, 10)] })
+    const withTrack = base({ moves: [trackMove('loop', 'glyph.dy', 10, 10)] })
     // preset alone = 25px, track alone = 10px, together = 35px. Overwriting
     // either way would give 25 or 10 and still look like motion.
     expect(presetTransform(withTrack, 0.5, 0, WORD.length).dy).toBeCloseTo(25, 10)
     expect(vtGlyphMotion(base(), 0.5, 0, WORD.length).dy).toBeCloseTo(25, 10)
-    expect(vtGlyphMotion(cfg({ motion: { ...DEFAULT_CONFIG.motion, tracks: [track('glyph.dy', 10, 10)] } }), 0.5, 0, WORD.length).dy).toBe(10)
+    expect(vtGlyphMotion(cfg({ motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove('loop', 'glyph.dy', 10, 10)] } }), 0.5, 0, WORD.length).dy).toBe(10)
     expect(vtGlyphMotion(withTrack, 0.5, 0, WORD.length).dy).toBeCloseTo(35, 10)
   })
 
@@ -269,7 +340,7 @@ describe('presets ∘ tracks — both are visible, neither wins', () => {
       size: 100,
       motion: {
         ...DEFAULT_CONFIG.motion, duration: 4,
-        tracks: [track('glyph.scale', 2, 2), track('glyph.opacity', 0.5, 0.5)],
+        moves: [trackMove('loop', 'glyph.scale', 2, 2), trackMove('loop', 'glyph.opacity', 0.5, 0.5)],
       } as VectorTypeConfig['motion'],
     })
     const m = vtGlyphMotion(c, 0.5, 0, WORD.length)
@@ -280,7 +351,7 @@ describe('presets ∘ tracks — both are visible, neither wins', () => {
 
   it('opacity stays inside 0..1 however the two compose', () => {
     const c = preset('in', { presetId: 'fade-in' }, {
-      motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks: [track('glyph.opacity', 4, 4)] } as VectorTypeConfig['motion'],
+      motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: [trackMove('loop', 'glyph.opacity', 4, 4)] } as VectorTypeConfig['motion'],
     })
     expect(vtGlyphMotion(c, 3.9, 0, WORD.length).opacity).toBe(1)
   })
@@ -290,7 +361,7 @@ describe('presets ∘ tracks — both are visible, neither wins', () => {
     // preview, the node card, the bake and the SVG export all cross.
     const c = preset('in', { presetId: 'slide-up' }, {
       size: 100,
-      motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks: [track('axes.wght', 100, 900)] } as VectorTypeConfig['motion'],
+      motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: [trackMove('loop', 'axes.wght', 100, 900)] } as VectorTypeConfig['motion'],
     })
     const frame = vectorTypeFrame(font, c, 0.5)
     // the TRACK ran: the run was shaped at the animated weight (0.5/4 of 100→900)
@@ -304,7 +375,7 @@ describe('presets ∘ tracks — both are visible, neither wins', () => {
     // …and neither source changed what the other produced.
     const trackOnly = vectorTypeFrame(font, cfg({
       size: 100,
-      motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks: [track('axes.wght', 100, 900)] } as VectorTypeConfig['motion'],
+      motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: [trackMove('loop', 'axes.wght', 100, 900)] } as VectorTypeConfig['motion'],
     }), 0.5)
     const presetOnly = vectorTypeFrame(font, preset('in', { presetId: 'slide-up' }, { size: 100 }), 0.5)
     expect(trackOnly.outlines.coords.wght).toBeCloseTo(frame.outlines.coords.wght!, 10)
@@ -342,9 +413,11 @@ describe('stagger — motion.stagger wins, and it is the only one', () => {
   })
 
   it('a glyph whose turn has not come is HELD at the start, never hidden', () => {
-    // `evaluateAnimation` reports HIDDEN outside the window; forwarding that
-    // would blink every staggered glyph out of existence before its entrance —
-    // and would blank a LOOP preset's first seconds entirely.
+    // Before its turn a staggered glyph must not vanish (right for an entrance,
+    // catastrophic for a loop — every glyph would blink out for its first
+    // `rank·delay` seconds), and past the end the whole run would disappear on
+    // the final frame of a bake. `presetTransform` clamps the pre-roll to
+    // progress 0 (an entrance's own "fully out" state) instead.
     const c = staggered(0.5)
     expect(presetTransform(c, 0, 5, WORD.length).opacity).toBe(0)          // pre-roll of an entrance: fully out
     const loop = preset('loop', { presetId: 'wave', duration: 2 }, {
@@ -354,9 +427,9 @@ describe('stagger — motion.stagger wins, and it is the only one', () => {
   })
 
   it('the last frame of the clip still MOVES', () => {
-    // t === duration is outside [start, end), where `evaluateAnimation` reports
-    // HIDDEN. Un-clamped, the final frame of every bake would fall back to a
-    // motionless run — a loop that visibly stops on its last frame.
+    // t === duration is outside the clip; un-clamped, the final frame of every
+    // bake would fall back to a motionless run — a loop that visibly stops on
+    // its last frame. `presetTransform` clamps `t` into the clip instead.
     const c = preset('loop', { presetId: 'wave', duration: 3 }, { size: 100 })
     // wave dy = −0.25·sin(2π·phase) unit-box heights; phase = (4⁻/3) mod 1 = ⅓
     const expected = -0.25 * Math.sin((2 * Math.PI) / 3) * 100
@@ -367,13 +440,87 @@ describe('stagger — motion.stagger wins, and it is the only one', () => {
   })
 })
 
+// ── TRAP 5: N STACKED MOVES ──────────────────────────────────────────────────
+
+describe('stacked moves', () => {
+  it('two In moves both live at t=0.5 compose — opacity partial AND vertical offset present', () => {
+    const c = cfg({
+      size: 100,
+      motion: {
+        ...DEFAULT_CONFIG.motion, duration: 4,
+        moves: [
+          presetMove('in', { presetId: 'fade-in', duration: 1 }),
+          presetMove('in', { presetId: 'slide-up', duration: 1 }),
+        ],
+      } as VectorTypeConfig['motion'],
+    })
+    const m = presetTransform(c, 0.5, 0, WORD.length)
+    // fade-in alone: opacity 0.5. slide-up alone: opacity 0.5 too, dy = 0.25·em.
+    // Composed: opacity MULTIPLIES (0.5 × 0.5 = 0.25), dy ADDS (only slide-up
+    // contributes one, so it passes through) — both effects visibly present,
+    // neither move silently overwritten by the other.
+    expect(m.opacity).toBeCloseTo(0.25, 10)
+    expect(m.dy).toBeCloseTo(25, 10)
+    // A single fade-in alone would read 0.5, not 0.25 — the number that would
+    // come out if the second move had silently won instead of composing.
+    const fadeAlone = presetTransform(preset('in', { presetId: 'fade-in', duration: 1 }, { size: 100 }), 0.5, 0, WORD.length)
+    expect(fadeAlone.opacity).toBeCloseTo(0.5, 10)
+    expect(m.opacity).not.toBeCloseTo(fadeAlone.opacity, 5)
+  })
+
+  it('a preset move and a custom axis track compose without throwing', () => {
+    const c = cfg({
+      size: 100,
+      motion: {
+        ...DEFAULT_CONFIG.motion, duration: 4,
+        moves: [
+          presetMove('in', { presetId: 'slide-up', duration: 1 }),
+          trackMove('loop', 'axes.wght', 100, 900),
+        ],
+      } as VectorTypeConfig['motion'],
+    })
+    expect(() => presetTransform(c, 0.5, 0, WORD.length)).not.toThrow()
+    const m = presetTransform(c, 0.5, 0, WORD.length)
+    expect(m.dy).toBeCloseTo(25, 10)     // the preset move still ran
+    expect(m.axes).toEqual({})           // presetTransform alone does not read tracks — axes.wght is applyMotion's job
+    expect(() => vectorTypeFrame(font, c, 0.5)).not.toThrow()
+    const frame = vectorTypeFrame(font, c, 0.5)
+    expect(frame.outlines.coords.wght).toBeCloseTo(200, 10)  // the track ran through applyMotion
+    expect(frame.transforms[0]!.dy).toBeCloseTo(25, 10)      // …and the preset ran too
+  })
+
+  it('no live move → identity {dx:0,dy:0,scale:1,opacity:1}', () => {
+    // Every move's window has closed (both durations are 1s, sampled at t=2 of
+    // a longer clip with no loop to hand off to): nothing is live, and the
+    // fold must return true identity rather than a stale/partial state.
+    const c = cfg({
+      motion: {
+        ...DEFAULT_CONFIG.motion, duration: 4,
+        moves: [
+          presetMove('in', { presetId: 'fade-in', duration: 1 }),
+          presetMove('out', { presetId: 'fade-out', duration: 1 }),
+        ],
+      } as VectorTypeConfig['motion'],
+    })
+    const m = presetTransform(c, 2, 0, WORD.length)
+    expect(m.dx).toBe(0)
+    expect(m.dy).toBe(0)
+    expect(m.scale).toBe(1)
+    expect(m.opacity).toBe(1)
+    expect(m).toEqual({ ...IDENTITY_GLYPH_MOTION, axes: {} })
+  })
+})
+
 // ── the defensive contract ──────────────────────────────────────────────────
 
 describe('a config straight out of storage', () => {
   it('evaluates presets from a blob that never saw mergeConfig', () => {
     // The surface holds a merged ref; the node card, the baker and the frame
     // source read parsed JSON. Same choke-point rule as ./motion.ts.
-    const raw = { text: WORD, size: 200, motion: { duration: 4, in: { presetId: 'slide-up', duration: 1, ease: 'none' } } } as any
+    const raw = {
+      text: WORD, size: 200,
+      motion: { duration: 4, moves: [{ id: 'm', phase: 'in', kind: 'preset', presetId: 'slide-up', duration: 1, ease: ease('none'), play: { mode: 'once', times: 1 } }] },
+    } as any
     expect(vtHasPreset(raw)).toBe(true)
     expect(vtIsAnimated(raw)).toBe(true)
     expect(presetTransform(raw, 0.5, 0, WORD.length).dy).toBeCloseTo(50, 10)
@@ -382,7 +529,10 @@ describe('a config straight out of storage', () => {
   it('never emits NaN, whatever the blob says', () => {
     const raw = {
       text: WORD, size: 'big',
-      motion: { duration: 'soon', fps: null, stagger: { delay: NaN }, in: { presetId: 'slide-up', duration: NaN } },
+      motion: {
+        duration: 'soon', fps: null, stagger: { delay: NaN },
+        moves: [{ id: 'm', phase: 'in', kind: 'preset', presetId: 'slide-up', duration: NaN, ease: ease('none'), play: { mode: 'once', times: 1 } }],
+      },
     } as any
     const m = vtGlyphMotion(raw, 0.5, 0, WORD.length)
     for (const [k, v] of Object.entries(m)) {

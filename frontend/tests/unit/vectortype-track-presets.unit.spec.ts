@@ -39,6 +39,18 @@
  * NO NETWORK: the same eight-character Inter variable subset every other Vector
  * Type spec uses. The rasteriser is `@resvg/resvg-js`, already a dependency, so
  * "pixels" here are real pixels and not a canvas recorder's opinion.
+ *
+ * ## The move shape, since Task 4/5
+ *
+ * A track lives inside a `kind: 'tracks'` MOVE now (`motion.moves`), which owns
+ * the track's old `easing`/`loops` as its own `ease`/`play` —
+ * `vtApplyTrackPreset` returns `VtMove[]`, not a bare track array, and each
+ * track-preset entry now declares its own `phase`/`ease`/`play`
+ * (`trackPresets.ts`). `track()` below stays the "spec" DSL for a hand-authored
+ * custom track (path/from/to/easing/loops); `trackMoves()` wraps a list of
+ * them into one move each, and `builtTrack()` is what a PRODUCED track (out of
+ * `preset.build()`, which no longer carries `easing`/`loops` at all) compares
+ * against.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -53,7 +65,9 @@ import {
   type VectorTypeConfig,
   type VtAppearanceLayer,
   type VtMotionTrack,
+  type VtMove,
 } from '~/lib/vectortype/config'
+import type { MoveEase, MovePlay } from '~/lib/studio/moves/types'
 import { vectorTypeSVG } from '~/lib/vectortype/canvas'
 import { animatableTargets, applyMotion, glyphTransform } from '~/lib/vectortype/motion'
 import {
@@ -94,8 +108,48 @@ const paint = (a: string) => ({ ...DEFAULT_CONFIG.appearance[0]!.paint, type: 's
 const layer = (o: Partial<VtAppearanceLayer>): VtAppearanceLayer => vtLayer(o)
 const cfg = (patch: Partial<VectorTypeConfig>): VectorTypeConfig =>
   mergeConfig({ ...DEFAULT_CONFIG, text: 'Sail', size: 100, ...patch })
-const track = (o: Partial<VtMotionTrack> & { path: string; from: number; to: number }): VtMotionTrack =>
-  ({ easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...o })
+
+/** A hand-authored track "spec" — the OLD shape (`easing`/`loops`), which now
+ *  belong to the owning MOVE (`trackMoves` below), not the track. */
+const track = (o: Partial<VtMotionTrack> & { path: string; from: number; to: number } & { easing?: 'linear' | 'pingpong' | 'easeinout'; loops?: number }) =>
+  ({ easing: 'linear' as const, loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...o })
+
+/** A track the way `preset.build()` PRODUCES one — no `easing`/`loops` at all. */
+const builtTrack = (o: Partial<VtMotionTrack> & { path: string; from: number; to: number }): VtMotionTrack =>
+  ({ hold: 0, cycleOffset: 0, delay: 0, ...o })
+
+/** `easing`/`loops` → the owning move's `ease`/`play`, the same mapping
+ *  `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses. */
+function easeAndPlay(easing: 'linear' | 'pingpong' | 'easeinout', loops: number): { ease: MoveEase; play: MovePlay } {
+  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, play: { mode: 'backAndForth', times: loops } }
+  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, play: { mode: 'once', times: loops } }
+  return { ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: loops } }
+}
+
+let trackMoveSeq = 0
+/** One `kind: 'tracks'` move per track spec. */
+function trackMoves(specs: ReturnType<typeof track>[]): VtMove[] {
+  return specs.map((t) => {
+    trackMoveSeq += 1
+    const { ease, play } = easeAndPlay(t.easing, t.loops)
+    const { path, from, to, hold, cycleOffset, delay } = t
+    return {
+      id: `move-t${trackMoveSeq}`,
+      phase: 'loop',
+      kind: 'tracks',
+      presetId: 'custom',
+      duration: 4,
+      ease,
+      play,
+      tracks: [{ path, from, to, hold, cycleOffset, delay }],
+    } as VtMove
+  })
+}
+
+/** Every track any `'tracks'`-kind move in `cfg.motion.moves` owns, flattened —
+ *  the direct replacement for reading the old flat `motion.tracks` array. */
+const allTracks = (c: VectorTypeConfig): VtMotionTrack[] =>
+  c.motion.moves.filter(m => m.kind === 'tracks').flatMap(m => (m.tracks ?? []) as VtMotionTrack[])
 
 // ── the measurement harness ─────────────────────────────────────────────────
 
@@ -154,7 +208,7 @@ function sweepConfig(over: Partial<VtAppearanceLayer> = {}): VectorTypeConfig {
   const ext = layer({ id: 'Lext', kind: 'extrude', depth: 6, distance: 8, taper: 0, angle: 0, paint: paint('#ff0000'), ...over })
   return cfg({
     appearance: [ext, layer({ id: 'Lface', kind: 'fill', paint: paint('#0000ff') })],
-    motion: { ...DEFAULT_CONFIG.motion, duration: 8, tracks: [] },
+    motion: { ...DEFAULT_CONFIG.motion, duration: 8, moves: [] },
   })
 }
 
@@ -163,12 +217,12 @@ function sweepConfig(over: Partial<VtAppearanceLayer> = {}): VectorTypeConfig {
 describe('extrude light sweep — already free, and the shadow really moves', () => {
   const swept = (): VectorTypeConfig => {
     const c = sweepConfig()
-    return mergeConfig({ ...c, motion: { ...c.motion, tracks: vtApplyTrackPreset(c, 'extrude-sweep') } })
+    return mergeConfig({ ...c, motion: { ...c.motion, moves: vtApplyTrackPreset(c, 'extrude-sweep') } })
   }
 
   it('sweeps the layer leaf through a full turn without touching the face', () => {
     const c = swept()
-    expect(c.motion.tracks.map(t => t.path)).toEqual(['appearance.Lext.angle'])
+    expect(allTracks(c).map(t => t.path)).toEqual(['appearance.Lext.angle'])
     const angles = [0, 2, 4, 6].map(t => Math.round((applyMotion(c, t).appearance[0] as VtAppearanceLayer).angle))
     expect(angles).toEqual([0, 90, 180, 270])
     // The FACE is untouched: a sweep moves the light, not the word.
@@ -222,12 +276,12 @@ describe('extrude light sweep — already free, and the shadow really moves', ()
 // ── 2. the misregistration that is NOT expressible ──────────────────────────
 
 describe('per-layer glyph offsets do not exist — three ways of saying so', () => {
-  const twoFills = (tracks: VtMotionTrack[]): VectorTypeConfig => cfg({
+  const twoFills = (specs: ReturnType<typeof track>[]): VectorTypeConfig => cfg({
     appearance: [
       layer({ id: 'Lred', kind: 'fill', paint: paint('#ff0000') }),
       layer({ id: 'Lblue', kind: 'fill', paint: paint('#0000ff') }),
     ],
-    motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks },
+    motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: trackMoves(specs) },
   })
 
   it('no such path is ever offered as a target', () => {
@@ -283,19 +337,24 @@ describe('misregistration as opposed extrude plates', () => {
       // to rotate and the preset would (correctly) refuse it.
       layer({ id: 'Lface', kind: 'fill', paint: paint('#cc2200') }),
     ],
-    motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks: [] },
+    motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: [] },
   })
   const applied = (): VectorTypeConfig => {
     const c = plates()
-    return mergeConfig({ ...c, motion: { ...c.motion, tracks: vtApplyTrackPreset(c, 'misregistration') } })
+    return mergeConfig({ ...c, motion: { ...c.motion, moves: vtApplyTrackPreset(c, 'misregistration') } })
   }
 
   it('drives every plate from zero to the offset the user already chose', () => {
     const c = applied()
-    expect(c.motion.tracks).toEqual([
-      track({ path: 'appearance.Lc.distance', from: 0, to: 14, easing: 'pingpong' }),
-      track({ path: 'appearance.Lm.distance', from: 0, to: 14, easing: 'pingpong' }),
+    expect(allTracks(c)).toEqual([
+      builtTrack({ path: 'appearance.Lc.distance', from: 0, to: 14 }),
+      builtTrack({ path: 'appearance.Lm.distance', from: 0, to: 14 }),
     ])
+    // Ping-pong: `ease: none`, `play: backAndForth` — the preset's own fixed
+    // timing (`trackPresets.ts`'s `misregistration` entry).
+    const mv = c.motion.moves.find(m => m.kind === 'tracks')!
+    expect(mv.ease).toEqual({ kind: 'named', name: 'none' })
+    expect(mv.play.mode).toBe('backAndForth')
   })
 
   it('separates the plates by exactly twice the distance, measured alone', () => {
@@ -320,11 +379,11 @@ describe('misregistration as opposed extrude plates', () => {
         layer({ id: 'Lc', kind: 'extrude', depth: 1, distance: 0, taper: 0, angle: 0, paint: paint('#ff0000') }),
         layer({ id: 'Lface', kind: 'fill', paint: paint('#111111') }),
       ],
-      motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks: [] },
+      motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: [] },
     })
-    const c = mergeConfig({ ...one, motion: { ...one.motion, tracks: vtApplyTrackPreset(one, 'misregistration') } })
+    const c = mergeConfig({ ...one, motion: { ...one.motion, moves: vtApplyTrackPreset(one, 'misregistration') } })
     // With no offset set, the declared default is what it reaches for.
-    expect(c.motion.tracks[0]!.to).toBe(VT_MISREGISTRATION_DRIFT)
+    expect(allTracks(c)[0]!.to).toBe(VT_MISREGISTRATION_DRIFT)
     const registered = ink(frameAt(c, 0), RED).n
     const drifted = ink(frameAt(c, 2), RED).n
     // In register the plate is hidden behind the face — what survives is the
@@ -349,6 +408,12 @@ describe('the track-preset table', () => {
       expect(p.pitch.trim()).not.toBe('')
       if (p.kind === 'run') expect(p.minLayers).toBe(0)
       else expect(p.minLayers).toBeGreaterThan(0)
+      // Every preset now declares which phase its move plays in, and a fixed
+      // ease/play — the timing a later card would show is data, not a guess.
+      expect(['in', 'loop', 'out']).toContain(p.phase)
+      expect(p.ease.kind).toBe('named')
+      expect(['once', 'backAndForth', 'repeat']).toContain(p.play.mode)
+      expect(Array.isArray(p.dials)).toBe(true)
     }
     expect(vtTrackPreset('extrude-sweep')?.kind).toBe('extrude')
     // Not every preset drives an extrude any more — Colour Cycle drives a FILL,
@@ -396,33 +461,39 @@ describe('the track-preset table', () => {
     const c0 = plentiful()
     const withUser = mergeConfig({
       ...c0,
-      motion: { ...c0.motion, tracks: [track({ path: 'axes.wght', from: 100, to: 900 })] },
+      motion: { ...c0.motion, moves: trackMoves([track({ path: 'axes.wght', from: 100, to: 900 })]) },
     })
     const once = vtApplyTrackPreset(withUser, 'extrude-sweep')
     const twice = vtApplyTrackPreset(
-      mergeConfig({ ...withUser, motion: { ...withUser.motion, tracks: once } }),
+      mergeConfig({ ...withUser, motion: { ...withUser.motion, moves: once } }),
       'extrude-sweep',
     )
     expect(twice).toEqual(once)
-    expect(once.filter(t => t.path === 'axes.wght')).toHaveLength(1)
-    expect(once.filter(t => t.path.endsWith('.angle'))).toHaveLength(2)
+    const onceTracks = once.filter(m => m.kind === 'tracks').flatMap(m => m.tracks ?? [])
+    expect(onceTracks.filter(t => t.path === 'axes.wght')).toHaveLength(1)
+    expect(onceTracks.filter(t => t.path.endsWith('.angle'))).toHaveLength(2)
   })
 
   it('returns the SAME array when it cannot run', () => {
     const noExtrude = cfg({ appearance: [layer({ id: 'Lf', kind: 'fill' })] })
-    expect(vtApplyTrackPreset(noExtrude, 'extrude-sweep')).toBe(noExtrude.motion.tracks)
-    expect(vtApplyTrackPreset(noExtrude, 'not-a-preset')).toBe(noExtrude.motion.tracks)
+    expect(vtApplyTrackPreset(noExtrude, 'extrude-sweep')).toBe(noExtrude.motion.moves)
+    expect(vtApplyTrackPreset(noExtrude, 'not-a-preset')).toBe(noExtrude.motion.moves)
   })
 
   it('reports itself active only while its own tracks are still what it wrote', () => {
     const c0 = plentiful()
     expect(vtTrackPresetActive(c0, 'extrude-sweep')).toBe(false)
-    const on = mergeConfig({ ...c0, motion: { ...c0.motion, tracks: vtApplyTrackPreset(c0, 'extrude-sweep') } })
+    const on = mergeConfig({ ...c0, motion: { ...c0.motion, moves: vtApplyTrackPreset(c0, 'extrude-sweep') } })
     expect(vtTrackPresetActive(on, 'extrude-sweep')).toBe(true)
     // The user drags the track: it is theirs now, and the tile stops claiming it.
     const edited = mergeConfig({
       ...on,
-      motion: { ...on.motion, tracks: on.motion.tracks.map(t => ({ ...t, to: t.to / 2 })) },
+      motion: {
+        ...on.motion,
+        moves: on.motion.moves.map(m => (m.kind === 'tracks' && m.tracks
+          ? { ...m, tracks: m.tracks.map(t => ({ ...t, to: t.to / 2 })) }
+          : m)),
+      },
     })
     expect(vtTrackPresetActive(edited, 'extrude-sweep')).toBe(false)
   })
@@ -430,7 +501,8 @@ describe('the track-preset table', () => {
   it('survives a raw stored blob with no motion block at all', () => {
     const raw = { appearance: [layer({ id: 'Le', kind: 'extrude', depth: 4 })] } as unknown as VectorTypeConfig
     expect(() => vtTrackPresetOffers(raw)).not.toThrow()
-    expect(vtApplyTrackPreset(raw, 'extrude-sweep').map(t => t.path)).toEqual(['appearance.Le.angle'])
+    const moves = vtApplyTrackPreset(raw, 'extrude-sweep')
+    expect(moves.filter(m => m.kind === 'tracks').flatMap(m => m.tracks ?? []).map(t => t.path)).toEqual(['appearance.Le.angle'])
     // A missing config still has no addressable layers, so every LAYER-KIND
     // preset stays off — but a RUN-LEVEL one needs no layer, so it is on
     // regardless. That is the same rule as line ~369, restated for `null`.
@@ -448,6 +520,6 @@ function plentiful(): VectorTypeConfig {
       // to rotate and the preset would (correctly) refuse it.
       layer({ id: 'Lface', kind: 'fill', paint: paint('#cc2200') }),
     ],
-    motion: { ...DEFAULT_CONFIG.motion, duration: 4, tracks: [] },
+    motion: { ...DEFAULT_CONFIG.motion, duration: 4, moves: [] },
   })
 }

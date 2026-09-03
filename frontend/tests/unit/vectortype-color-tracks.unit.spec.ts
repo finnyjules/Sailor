@@ -54,16 +54,18 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { hexToOklch, oklchToHex, parseHexA } from '~/lib/color/convert'
 import { COLOR_MIX_SPACES, DEFAULT_COLOR_MIX_SPACE, isColorMixSpace, mixHex } from '~/lib/color/mix'
 import { trackProgress, trackValue } from '~/lib/studio/track'
+import { trackValueAt } from '~/lib/studio/moves/tracks'
+import type { MoveEase, MovePlay } from '~/lib/studio/moves/types'
 import { normaliseAxes, type VtFont } from '~/lib/vectortype/font'
 import {
   DEFAULT_CONFIG,
   DEFAULT_FILL,
-  VT_TRACK_IS_GRADIENT_COMPATIBLE,
   mergeConfig,
   vtLayer,
   type VectorTypeConfig,
   type VtAppearanceLayer,
   type VtMotionTrack,
+  type VtMove,
 } from '~/lib/vectortype/config'
 import {
   applyMotion,
@@ -116,20 +118,74 @@ function stack(...layers: Partial<VtAppearanceLayer>[]): VectorTypeConfig {
   return cfg({ appearance: layers.map((l, i) => vtLayer({ id: `L${i}`, ...l })) })
 }
 
-/** A colour track with this studio's own defaults, spelled the way `mergeTrack`
- *  spells one: `from`/`to` are the 0..1 PROGRESS DOMAIN. */
-function ctrack(path: string, fromColor: string, toColor: string, over: Partial<VtMotionTrack> = {}): VtMotionTrack {
+/** A track "spec" in the OLD shape — `easing`/`loops` moved onto the owning
+ *  MOVE now (`trackMoves` below); this is the test-local DSL that still
+ *  names them, for either a numeric or a colour track. */
+interface TrackSpec {
+  path: string
+  from: number
+  to: number
+  fromColor?: string
+  toColor?: string
+  space?: string
+  easing: 'linear' | 'pingpong' | 'easeinout'
+  loops: number
+  hold: number
+  cycleOffset: number
+  delay: number
+}
+
+/** A colour track spec with this studio's own defaults, spelled the way
+ *  `mergeTrack` used to spell one: `from`/`to` are the 0..1 PROGRESS DOMAIN. */
+function ctrack(path: string, fromColor: string, toColor: string, over: Partial<TrackSpec> = {}): TrackSpec {
   return {
     path, from: 0, to: 1, fromColor, toColor, space: DEFAULT_COLOR_MIX_SPACE,
     easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...over,
   }
 }
 
+/** `easing`/`loops` → the owning move's `ease`/`play` — the exact mapping
+ *  `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses for a legacy
+ *  document, restated as this file's test-side DSL (see
+ *  `vectortype-motion.unit.spec.ts`'s identical helper). */
+function easeAndPlay(easing: 'linear' | 'pingpong' | 'easeinout', loops: number): { ease: MoveEase; play: MovePlay } {
+  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, play: { mode: 'backAndForth', times: loops } }
+  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, play: { mode: 'once', times: loops } }
+  return { ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: loops } }
+}
+
+let trackMoveSeq = 0
+/** One `kind: 'tracks'` move per track spec — a track's cycle length is
+ *  always the CLIP's duration (`applyMoveTracks` never reads a `'tracks'`
+ *  move's own `duration`), so that field is a placeholder here. */
+function trackMoves(specs: TrackSpec[]): VtMove[] {
+  return specs.map((t) => {
+    trackMoveSeq += 1
+    const { ease, play } = easeAndPlay(t.easing, t.loops)
+    const { path, from, to, hold, cycleOffset, delay, fromColor, toColor, space } = t
+    return {
+      id: `move-t${trackMoveSeq}`,
+      phase: 'loop',
+      kind: 'tracks',
+      presetId: 'custom',
+      duration: DURATION,
+      ease,
+      play,
+      tracks: [{
+        path, from, to, hold, cycleOffset, delay,
+        ...(fromColor ? { fromColor } : {}),
+        ...(toColor ? { toColor } : {}),
+        ...(space ? { space } : {}),
+      }],
+    } as VtMove
+  })
+}
+
 /** One solid fill layer whose colour a track drives, over a 4 s clip. */
-function fillCfg(tracks: VtMotionTrack[], layer: Partial<VtAppearanceLayer> = {}): VectorTypeConfig {
+function fillCfg(tracks: TrackSpec[], layer: Partial<VtAppearanceLayer> = {}): VectorTypeConfig {
   return mergeConfig({
     ...stack({ id: 'Lfill', kind: 'fill', paint: { ...DEFAULT_FILL, a: RED }, ...layer }),
-    motion: { ...DEFAULT_CONFIG.motion, duration: DURATION, tracks },
+    motion: { ...DEFAULT_CONFIG.motion, duration: DURATION, moves: trackMoves(tracks) },
   })
 }
 
@@ -333,10 +389,10 @@ describe('applyMotion writes a COLOUR into the leaf a track names', () => {
       motion: {
         ...DEFAULT_CONFIG.motion,
         duration: DURATION,
-        tracks: [
+        moves: trackMoves([
           ctrack('appearance.Lfill.paint.a', RED, BLUE),
           ctrack('appearance.Lfill.paint.b', '#00ff00', '#ffff00'),
-        ],
+        ]),
       },
     })
     const mid = applyMotion(k, 2).appearance[0]!.paint as { a: string; b: string }
@@ -353,7 +409,7 @@ describe('applyMotion writes a COLOUR into the leaf a track names', () => {
       motion: {
         ...DEFAULT_CONFIG.motion,
         duration: DURATION,
-        tracks: [ctrack('appearance.Lgone.paint.a', RED, BLUE)],
+        moves: trackMoves([ctrack('appearance.Lgone.paint.a', RED, BLUE)]),
       },
     })
     // The surviving layer keeps its own colour at every time. A positional
@@ -375,7 +431,7 @@ describe('applyMotion writes a COLOUR into the leaf a track names', () => {
     const k = fillCfg(
       [
         ctrack('appearance.Lfill.paint.a', RED, BLUE),
-        { path: 'appearance.Lfill.opacity', from: 1, to: 0.25, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 },
+        { path: 'appearance.Lfill.opacity', from: 1, to: 0.25, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 } as TrackSpec,
       ],
       { opacity: 1 },
     )
@@ -395,10 +451,10 @@ describe('applyMotion writes a COLOUR into the leaf a track names', () => {
         ...DEFAULT_CONFIG.motion,
         duration: DURATION,
         stagger: { delay: 0.4, order: 'forward', seed: 0 },
-        tracks: [
+        moves: trackMoves([
           ctrack('glyph.scale', RED, BLUE),
           ctrack('appearance.Lstroke.draw', RED, BLUE),
-        ],
+        ]),
       },
     })
     for (const t of [0, 1, 2, 4]) {
@@ -417,8 +473,14 @@ describe('applyMotion writes a COLOUR into the leaf a track names', () => {
 
 describe('the shared timing engine — extracted, not changed', () => {
   /** Every timing shape that matters, so the golden table below is not just the
-   *  easy case. */
-  const SHAPES: Array<Partial<VtMotionTrack>> = [
+   *  easy case. `trackProgress`/`trackValue` (`~/lib/studio/track`) are the
+   *  SHARED, studio-agnostic timing primitives, unaffected by the moves
+   *  redesign — they know nothing about Vector Type's own storage shape,
+   *  only about `{from,to,easing,loops,hold,cycleOffset,delay}`, so these two
+   *  hand-built shapes are legitimate direct inputs, not a stand-in for a
+   *  real stored track. */
+  interface LegacyShape { easing: 'linear' | 'pingpong' | 'easeinout'; loops?: number; hold?: number; cycleOffset?: number; delay?: number }
+  const SHAPES: LegacyShape[] = [
     { easing: 'linear' },
     { easing: 'easeinout' },
     { easing: 'pingpong' },
@@ -435,7 +497,7 @@ describe('the shared timing engine — extracted, not changed', () => {
     // independent reimplementation of the identity rather than against a snapshot
     // of the function's own output.
     for (const shape of SHAPES) {
-      const tk = { path: 'size', from: 100, to: 900, loops: 1, hold: 0, cycleOffset: 0, delay: 0, easing: 'linear', ...shape } as VtMotionTrack
+      const tk = { path: 'size', from: 100, to: 900, loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...shape }
       for (const t of TIMES) {
         const p = trackProgress(tk, t, DURATION)
         expect(p, `${JSON.stringify(shape)} @ ${t}`).toBeGreaterThanOrEqual(0)
@@ -447,22 +509,33 @@ describe('the shared timing engine — extracted, not changed', () => {
   })
 
   it('trackValue still returns `from` before its delay, and `trackProgress` returns 0', () => {
-    const tk = { path: 'size', from: 100, to: 900, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 2 } as VtMotionTrack
+    const tk = { path: 'size', from: 100, to: 900, easing: 'linear' as const, loops: 1, hold: 0, cycleOffset: 0, delay: 2 }
     expect(trackValue(tk, 0, DURATION)).toBe(100)
     expect(trackValue(tk, 1.99, DURATION)).toBe(100)
     expect(trackProgress(tk, 0, DURATION)).toBe(0)
   })
 
   it('a COLOUR track honours every timing knob identically to a numeric one', () => {
+    // A track's timing is now the OWNING MOVE's `ease`/`play` (Task 5), so
+    // "one engine, not two" is now proved by driving BOTH a numeric and a
+    // colour track through the SAME real production functions —
+    // `trackValueAt`/`trackColor` (`~/lib/studio/moves/tracks`,
+    // `~/lib/vectortype/motion`) — tagged with the SAME `__ease`/`__play`,
+    // rather than comparing against the old, now-parallel `trackValue`
+    // engine (which no longer shares a timing vocabulary with a stored
+    // track: `easing: 'easeinout'` mapped to a literal quadratic curve there,
+    // and now maps to the ten-name `'natural'`/sine.inOut — a deliberate,
+    // different curve in the same family, not a preserved one).
     for (const shape of SHAPES) {
-      const timing = { loops: 1, hold: 0, cycleOffset: 0, delay: 0, easing: 'linear', ...shape }
-      const numeric = { path: 'size', from: 0, to: 1, ...timing } as VtMotionTrack
-      const colour = ctrack('appearance.Lfill.paint.a', RED, BLUE, timing)
+      const { ease, play } = easeAndPlay(shape.easing, shape.loops ?? 1)
+      const timing = { hold: shape.hold ?? 0, cycleOffset: shape.cycleOffset ?? 0, delay: shape.delay ?? 0 }
+      const numeric = { path: 'size', from: 0, to: 1, ...timing, __ease: ease, __play: play }
+      const colour = { path: 'appearance.Lfill.paint.a', from: 0, to: 1, fromColor: RED, toColor: BLUE, ...timing, __ease: ease, __play: play }
       for (const t of TIMES) {
         // The colour a track shows at `t` is exactly the mix at the numeric
         // track's own value at `t` — one engine, proved by equality.
         expect(trackColor(colour, t, DURATION), `${JSON.stringify(shape)} @ ${t}`)
-          .toBe(mixHex(RED, BLUE, trackValue(numeric, t, DURATION), 'oklab'))
+          .toBe(mixHex(RED, BLUE, trackValueAt(numeric, t, DURATION), 'oklab'))
       }
     }
   })
@@ -603,7 +676,7 @@ describe('canvas and SVG agree on an animated colour', () => {
       motion: {
         ...DEFAULT_CONFIG.motion,
         duration: DURATION,
-        tracks: [ctrack('appearance.Lstroke.paint.a', RED, BLUE)],
+        moves: trackMoves([ctrack('appearance.Lstroke.paint.a', RED, BLUE)]),
       },
     })
     for (const t of TIMES_9) {
@@ -756,7 +829,7 @@ describe('colorTargets — derived from VT_CONTROLS, gated per layer', () => {
     for (const t of colorTargets(c)) {
       const written = applyMotion(mergeConfig({
         ...c,
-        motion: { ...DEFAULT_CONFIG.motion, duration: DURATION, tracks: [ctrack(t.path, RED, BLUE)] },
+        motion: { ...DEFAULT_CONFIG.motion, duration: DURATION, moves: trackMoves([ctrack(t.path, RED, BLUE)]) },
       }), DURATION)
       const segs = t.path.split('.')
       const layer = written.appearance.find(l => l.id === segs[1])!
@@ -798,18 +871,30 @@ describe('colorTargets — derived from VT_CONTROLS, gated per layer', () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 describe('the stored shape', () => {
-  const load = (tracks: unknown[]): VtMotionTrack[] =>
-    mergeConfig({ ...DEFAULT_CONFIG, motion: { ...DEFAULT_CONFIG.motion, tracks } as any }).motion.tracks
+  // `load` puts raw tracks straight inside one `'tracks'`-kind move — the
+  // per-TRACK merge (`mergeTrack` in config.ts, the function every one of
+  // these tests is really about) runs identically whether the move around it
+  // is well-formed or minimal, since `mergeMove` defaults everything else.
+  const load = (tracks: unknown[]): VtMotionTrack[] => {
+    const merged = mergeConfig({ ...DEFAULT_CONFIG, motion: { ...DEFAULT_CONFIG.motion, moves: [{ kind: 'tracks', tracks }] } as any })
+    const mv = merged.motion.moves.find(m => m.kind === 'tracks')
+    return (mv?.tracks ?? []) as VtMotionTrack[]
+  }
+
+  /** A raw TRACK (not a `ctrack` "spec" — no `easing`/`loops`, which are the
+   *  owning MOVE's now, not stored on the track at all). */
+  const rawTrack = (path: string, fromColor: string, toColor: string, over: Partial<VtMotionTrack> = {}): VtMotionTrack =>
+    ({ path, from: 0, to: 1, fromColor, toColor, space: DEFAULT_COLOR_MIX_SPACE, hold: 0, cycleOffset: 0, delay: 0, ...over })
 
   it('round-trips a colour track through mergeConfig unchanged', () => {
-    const t = ctrack('appearance.L0.paint.a', RED, BLUE, { easing: 'pingpong', loops: 2, hold: 0.1, cycleOffset: 0.25, delay: 0.5, space: 'oklch' })
+    const t = rawTrack('appearance.L0.paint.a', RED, BLUE, { hold: 0.1, cycleOffset: 0.25, delay: 0.5, space: 'oklch' })
     expect(load([t])[0]).toEqual(t)
     // …and a second pass is a fixed point, which is what a save/load cycle is.
     expect(load(load([t]))[0]).toEqual(t)
   })
 
   it('normalises the colour spelling — short form, upper case, alpha', () => {
-    const [a] = load([{ ...ctrack('size', '#F00', '#00FF00CC') }])
+    const [a] = load([{ ...rawTrack('size', '#F00', '#00FF00CC') }])
     expect(a!.fromColor).toBe('#ff0000')
     expect(a!.toColor).toBe('#00ff00cc')
   })
@@ -818,7 +903,7 @@ describe('the stored shape', () => {
     // `clampHex` would have made this `#000000`, and the fill would animate to
     // black — which reads as a rendering bug rather than as a bad value.
     for (const junk of ['red', '', '#12', 'rgb(0,0,0)', 42, null, {}]) {
-      const [t] = load([{ ...ctrack('appearance.L0.paint.a', RED, BLUE), toColor: junk }])
+      const [t] = load([{ ...rawTrack('appearance.L0.paint.a', RED, BLUE), toColor: junk }])
       expect(t!.fromColor, String(junk)).toBeUndefined()
       expect(t!.toColor, String(junk)).toBeUndefined()
       expect(t!.space, String(junk)).toBeUndefined()
@@ -828,44 +913,46 @@ describe('the stored shape', () => {
   })
 
   it('writes ALL THREE colour fields or NONE — never a half state', () => {
-    const [half] = load([{ path: 'size', from: 0, to: 1, easing: 'linear', fromColor: RED }])
+    const [half] = load([{ path: 'size', from: 0, to: 1, fromColor: RED }])
     expect(half!.fromColor).toBeUndefined()
     expect(half!.toColor).toBeUndefined()
     expect(half!.space).toBeUndefined()
-    const [full] = load([{ path: 'size', from: 0, to: 1, easing: 'linear', fromColor: RED, toColor: BLUE }])
+    const [full] = load([{ path: 'size', from: 0, to: 1, fromColor: RED, toColor: BLUE }])
     expect(full!.space).toBe(DEFAULT_COLOR_MIX_SPACE)
   })
 
   it('falls back on an unknown space rather than passing it to a renderer', () => {
-    const [t] = load([{ ...ctrack('size', RED, BLUE), space: 'cielab' }])
+    const [t] = load([{ ...rawTrack('size', RED, BLUE), space: 'cielab' }])
     expect(t!.space).toBe(DEFAULT_COLOR_MIX_SPACE)
   })
 
-  it('leaves a NUMERIC track byte-identical to what it was before colour existed', () => {
-    const numeric = { path: 'axes.wght', from: 100, to: 900, easing: 'easeinout', loops: 2, hold: 0.1, cycleOffset: 0.2, delay: 0.3 }
+  it('leaves a NUMERIC track free of colour fields — and free of the retired easing/loops, now the owning move\'s job', () => {
+    const numeric = { path: 'axes.wght', from: 100, to: 900, hold: 0.1, cycleOffset: 0.2, delay: 0.3 }
     expect(load([numeric])[0]).toEqual(numeric)
     expect(Object.keys(load([numeric])[0]!).sort())
-      .toEqual(['cycleOffset', 'delay', 'easing', 'from', 'hold', 'loops', 'path', 'to'])
+      .toEqual(['cycleOffset', 'delay', 'from', 'hold', 'path', 'to'])
   })
 
   it('cloneConfig carries the colour fields, and shares nothing', () => {
     const k = fillCfg([ctrack('appearance.Lfill.paint.a', RED, BLUE)])
     const frame = applyMotion(k, 2)
-    expect(frame.motion.tracks[0]!.fromColor).toBe(RED)
-    frame.motion.tracks[0]!.toColor = '#00ff00'
-    expect(k.motion.tracks[0]!.toColor).toBe(BLUE)
+    const frameTrack = frame.motion.moves.find(m => m.kind === 'tracks')!.tracks![0]!
+    expect(frameTrack.fromColor).toBe(RED)
+    frameTrack.toColor = '#00ff00'
+    const sourceTrack = k.motion.moves.find(m => m.kind === 'tracks')!.tracks![0]!
+    expect(sourceTrack.toColor).toBe(BLUE)
   })
 
-  it('VT_TRACK_IS_GRADIENT_COMPATIBLE still holds — one easing engine, three studios', () => {
-    // The compile-time half is the declaration's own type; this is the runtime
-    // half, plus the thing it protects: a VT colour track fed to the shared
-    // engine still gets correct TIMING, because extra properties are invisible
-    // to it.
-    expect(VT_TRACK_IS_GRADIENT_COMPATIBLE).toBe(true)
-    const colour = ctrack('appearance.L0.paint.a', RED, BLUE, { easing: 'pingpong', loops: 2 })
-    expect(trackProgress(colour, 1, DURATION)).toBeCloseTo(1, 6)
-    expect(trackValue(colour, 1, DURATION)).toBeCloseTo(1, 6)
-  })
+  // `VT_TRACK_IS_GRADIENT_COMPATIBLE` — the compile-time structural proof that
+  // a VT colour track satisfies the SAME `TrackTiming` the Gradient/Scene3D
+  // engine reads — no longer exists (config.ts's own header: "the two
+  // vocabularies diverged on purpose the moment ease/play moved onto the
+  // move, so that compile-time proof would now fail by design rather than by
+  // drift, and was removed rather than kept red"). A stored `VtMotionTrack`
+  // genuinely no longer carries `easing`/`loops` at all, so it is no longer
+  // assignable to `TrackTiming` — correctly, since its timing now lives on
+  // the owning Move. Nothing here replaces the assertion; the invariant it
+  // protected does not hold any more, on purpose.
 })
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -878,12 +965,17 @@ describe('the Colour Cycle track preset', () => {
   it('is offered on a coloured fill layer and writes ONE colour track', () => {
     const c = stack({ id: 'Lfill', kind: 'fill', paint: { ...DEFAULT_FILL, a: RED } })
     expect(vtTrackPresetOffer(preset(), c).available).toBe(true)
-    const tracks = vtApplyTrackPreset(c, 'colour-cycle')
-    expect(tracks).toHaveLength(1)
-    const t = tracks[0]!
+    const moves = vtApplyTrackPreset(c, 'colour-cycle')
+    expect(moves).toHaveLength(1)
+    const mv = moves[0]!
+    expect(mv.tracks).toHaveLength(1)
+    const t = mv.tracks![0]!
     expect(t.path).toBe('appearance.Lfill.paint.a')
     expect(t.fromColor).toBe(RED)
-    expect(t.easing).toBe('pingpong')
+    // PING-PONG — `ease: none`, `play: backAndForth`, the preset's own fixed
+    // timing (see `trackPresets.ts`'s `colour-cycle` entry).
+    expect(mv.ease).toEqual({ kind: 'named', name: 'none' })
+    expect(mv.play.mode).toBe('backAndForth')
     // A hue ROTATION, so OKLCH — not the track default. In OKLab this exact pair
     // is a straight line through the middle of the a/b plane, i.e. through grey.
     expect(t.space).toBe('oklch')
@@ -901,7 +993,7 @@ describe('the Colour Cycle track preset', () => {
     // the WRONG space for a hue rotation, because a straight line from a colour to
     // its own opposite passes through the middle of the a/b plane.
     const c = stack({ id: 'Lfill', kind: 'fill', paint: { ...DEFAULT_FILL, a: RED } })
-    const t = vtApplyTrackPreset(c, 'colour-cycle')[0]!
+    const t = vtApplyTrackPreset(c, 'colour-cycle')[0]!.tracks![0]!
     const shipped = mixHex(t.fromColor!, t.toColor!, 0.5, 'oklch')
     const control = mixHex(t.fromColor!, t.toColor!, 0.5, 'oklab')
     console.log('cycle midpoint  oklch', shipped, LC(shipped), '   oklab control', control, LC(control))
@@ -913,11 +1005,11 @@ describe('the Colour Cycle track preset', () => {
   it('reads as ACTIVE once applied, and not merely because some colour track exists', () => {
     const c = stack({ id: 'Lfill', kind: 'fill', paint: { ...DEFAULT_FILL, a: RED } })
     expect(vtTrackPresetActive(c, 'colour-cycle')).toBe(false)
-    c.motion.tracks = vtApplyTrackPreset(c, 'colour-cycle')
+    c.motion.moves = vtApplyTrackPreset(c, 'colour-cycle')
     expect(vtTrackPresetActive(c, 'colour-cycle')).toBe(true)
     // A DIFFERENT colour pair on the same leaf is not this preset. Every colour
     // track carries from: 0, to: 1, so comparing only those would say yes here.
-    c.motion.tracks = [ctrack('appearance.Lfill.paint.a', RED, '#00ff00', { easing: 'pingpong' })]
+    c.motion.moves = trackMoves([ctrack('appearance.Lfill.paint.a', RED, '#00ff00', { easing: 'pingpong' })])
     expect(vtTrackPresetActive(c, 'colour-cycle')).toBe(false)
   })
 
@@ -941,7 +1033,7 @@ describe('the Colour Cycle track preset', () => {
   it('really animates — the preset’s own tracks, through the real evaluator', () => {
     const c = stack({ id: 'Lfill', kind: 'fill', paint: { ...DEFAULT_FILL, a: RED } })
     c.motion.duration = DURATION
-    c.motion.tracks = vtApplyTrackPreset(c, 'colour-cycle')
+    c.motion.moves = vtApplyTrackPreset(c, 'colour-cycle')
     const mid = colorAt(c, DURATION / 2)
     expect(colorAt(c, 0)).toBe(RED)
     expect(mid).not.toBe(RED)
@@ -994,10 +1086,11 @@ describe('KineticType `color-cycle` crosses the migration for the first time', (
   it('produces a colour track on the migrated fill layer, that really animates', () => {
     const m = kineticParamsToVectorType(params())
     expect(m.fidelity).toBe('partial')
-    expect(m.config.motion.tracks).toHaveLength(1)
-    const t = m.config.motion.tracks[0]!
+    const colourMove = m.config.motion.moves.find(mv => mv.kind === 'tracks' && mv.presetId === 'colour-cycle')
+    expect(colourMove?.tracks).toHaveLength(1)
+    const t = colourMove!.tracks![0]!
     expect(t.fromColor).toBe('#ff2200')
-    expect(t.easing).toBe('pingpong')
+    expect(colourMove!.play.mode).toBe('backAndForth')
     expect(t.path).toBe(`appearance.${m.config.appearance[0]!.id}.paint.a`)
     // The real evaluator, on the real config: frame 0 is the saved colour (a
     // migrated project must open looking like itself) and the middle is not.
@@ -1010,13 +1103,13 @@ describe('KineticType `color-cycle` crosses the migration for the first time', (
   it('survives a save/load cycle', () => {
     const m = kineticParamsToVectorType(params())
     const reloaded = mergeConfig(JSON.parse(JSON.stringify(m.config)))
-    expect(reloaded.motion.tracks).toEqual(m.config.motion.tracks)
+    expect(reloaded.motion.moves).toEqual(m.config.motion.moves)
   })
 
-  it('adds NO track for a grey node rather than a row that animates nothing', () => {
+  it('adds NO colour move for a grey node rather than a row that animates nothing', () => {
     for (const color of ['#ffffff', '#000000', '#888888']) {
       const m = kineticParamsToVectorType(params({ color }))
-      expect(m.config.motion.tracks, color).toEqual([])
+      expect(m.config.motion.moves.some(mv => mv.presetId === 'colour-cycle'), color).toBe(false)
       // Still reported as `partial`, because the preset IS mapped — the config
       // simply had no hue to rotate.
       expect(m.fidelity, color).toBe('partial')
