@@ -3146,6 +3146,27 @@
         { "uniform": "u_speed", "label": "Speed", "type": "float", "min": 0.0, "max": 3.0, "default": 0.5, "step": 0.05 },
         { "uniform": "u_mix", "label": "Image mix", "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "step": 0.05 }
       ]
+    },
+    {
+      "id": "sonar",
+      "name": "Sonar",
+      "category": "generative",
+      "animated": true,
+      "passes": 1,
+      "centerParam": null,
+      "textures": [],
+      "generative": true,
+      "params": [
+        { "uniform": "u_sea", "label": "Sea", "type": "color", "default": "#0b1d3a" },
+        { "uniform": "u_land", "label": "Land", "type": "color", "default": "#e8e2d0" },
+        { "uniform": "u_level", "label": "Sea level", "type": "float", "min": 0.0, "max": 1.0, "default": 0.5, "step": 0.01 },
+        { "uniform": "u_edge", "label": "Shore width", "type": "float", "min": 0.0, "max": 0.5, "default": 0.12, "step": 0.01 },
+        { "uniform": "u_scale", "label": "Field scale", "type": "float", "min": 0.5, "max": 8.0, "default": 2.0, "step": 0.1 },
+        { "uniform": "u_detail", "label": "Detail", "type": "float", "min": 1, "max": 7, "default": 5, "step": 1 },
+        { "uniform": "u_cell", "label": "Pixel size", "type": "float", "min": 1, "max": 8, "default": 3, "step": 1 },
+        { "uniform": "u_speed", "label": "Speed", "type": "float", "min": 0.0, "max": 3.0, "default": 0.4, "step": 0.05 },
+        { "uniform": "u_mix", "label": "Image mix", "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "step": 0.05 }
+      ]
     }
   ]
 }

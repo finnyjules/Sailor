@@ -202,8 +202,9 @@ export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
   { words: 'film / grain / analog / dusty', ids: ['post_grain', 'risograph'] },
   { words: 'contour lines / topographic map / isolines / terrain map', ids: ['topographic'] },
   { words: 'stipple / pointillist / dots of light / engraved dots', ids: ['stipple'] },
-  { words: 'BACKGROUND FROM NOTHING (generative — these ignore the input image and draw their own field)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel', 'terrain_bands'] },
+  { words: 'BACKGROUND FROM NOTHING (generative — these ignore the input image and draw their own field)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel', 'terrain_bands', 'sonar'] },
   { words: 'banded terrain / contour landscape / heat map bands / posterised landscape', ids: ['terrain_bands', 'topographic'] },
+  { words: 'dithered map / landmasses / islands / radar map / sonar', ids: ['sonar'] },
 ]
 
 /**
