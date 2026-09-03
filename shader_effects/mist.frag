@@ -47,6 +47,7 @@ void main() {
 
     vec3 col = u_ramp[0];                                  // first ink is the paper
     float sharp = mix(6.0, 1.5, clamp(u_soft, 0.0, 1.0));  // softer = wider falloff
+    float sprayBase = hash2(px, u_seed + 31.0);
     for (int i = 0; i < 12; i++) {
         if (i >= n) break;
         float fi = float(i);
@@ -56,10 +57,11 @@ void main() {
         float d = length(uv - c) / max(u_size, 0.05);
         float w = exp(-d * d * sharp);
         // Spray: per-pixel noise eats into the wash more toward its edge.
-        float spray = 1.0 - u_grain * hash2(px, u_seed + 31.0 + fi) * (0.3 + 0.7 * min(d, 1.5));
+        float spray = 1.0 - u_grain * fract(sprayBase + fi * 0.37) * (0.3 + 0.7 * min(d, 1.5));
         w = clamp(w * spray, 0.0, 1.0);
-        // Skip the paper ink (ramp position 0) so washes are always the bright inks.
-        vec3 ink = rampAt(0.15 + 0.85 * fract(fi * 0.618034 + 0.31));
+        // Washes only use the inks after the paper: start the lookup at the second stop.
+        float inkStart = (int(u_rampCount + 0.5) >= 2) ? u_rampPos[1] : 0.0;
+        vec3 ink = rampAt(inkStart + (1.0 - inkStart) * fract(fi * 0.618034 + 0.31));
         col = 1.0 - (1.0 - col) * (1.0 - ink * w);         // screen blend: neon adds light
     }
 
