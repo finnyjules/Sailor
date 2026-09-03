@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { makeGradientTexture, type GradientStop } from './gradient'
 import type { SeparatorSpec } from './separator'
+import { drawShape, shapeAspect } from '~/lib/shapes/path2d'
 
 export interface TextTextureOptions {
   label: string                 // already includes the trailing gap (buildRibbonLabel)
@@ -60,7 +61,22 @@ export function makeTextTexture(opts: TextTextureOptions): THREE.CanvasTexture {
   }
 
   applyFont()
-  const widths = labels.map(l => Math.max(1, ctx.measureText(l).width))
+  const sep = opts.separator
+  // Per-row TEXT width. With a separator the trailing gap that buildRibbonLabel
+  // appends is discarded — the tile becomes [text][gap][shape][gap] and the gap
+  // is the separator's own. Without one, the label (gap included) is measured
+  // exactly as before, so the old tile is byte-identical.
+  const textWidths = labels.map(l => Math.max(1, ctx.measureText(sep ? l.trimEnd() : l).width))
+  let shapeW = 0, shapeH = 0, gapPx = 0
+  if (sep) {
+    const m = ctx.measureText((labels[0] ?? ' ').trimEnd())
+    const cap = (m as TextMetrics).actualBoundingBoxAscent || fontPx * 0.72
+    shapeH = cap * sep.size
+    shapeW = shapeH * shapeAspect(sep.shape)
+    gapPx = sep.gap * fontPx * 0.25
+  }
+  const sepExtra = sep ? gapPx * 2 + shapeW : 0
+  const widths = textWidths.map(w => w + sepExtra)
   const maxLabelW = Math.max(...widths, 1)
   // Natural (untracked) width of the first label ÷ its tracked width. Tiling effects use this to
   // treat Tracking as pure letter-spacing instead of a horizontal squeeze: because the whole word
@@ -74,16 +90,20 @@ export function makeTextTexture(opts: TextTextureOptions): THREE.CanvasTexture {
     lsCtx.letterSpacing = '0px'
     const untracked = Math.max(1, ctx.measureText(labels[0] ?? ' ').width)
     lsCtx.letterSpacing = savedLS
-    naturalWidthFrac = untracked / widths[0]!
+    naturalWidthFrac = untracked / (sep ? textWidths[0]! : widths[0]!)
   }
   const measured = Math.max(2, Math.ceil(maxLabelW))
   const w = Math.max(2, Math.ceil(measured * scaleX))
   // Per-row width fraction (each text's width ÷ the widest), so effects can size their
   // per-text region/segment proportionally to the text length.
   const wordFracs = widths.map(x => x / maxLabelW)
-  // Word INK fraction (visible word ÷ its own tile, incl. the trailing gap from
-  // buildRibbonLabel): lets an effect centre a single repeat within its slot.
-  const wordInkFracs = labels.map((l, k) => Math.min(1, Math.max(1, ctx.measureText(l.trimEnd()).width) / widths[k]!))
+  // Word INK fraction: visible content ÷ its tile. With a separator the ink runs
+  // from the first letter through the shape (one leading gap included, the
+  // trailing one excluded) so an effect that centres a repeat centres the unit.
+  const wordInkFracs = labels.map((l, k) => {
+    const ink = sep ? textWidths[k]! + gapPx + shapeW : Math.max(1, ctx.measureText(l.trimEnd()).width)
+    return Math.min(1, ink / widths[k]!)
+  })
   // Vertical ink box of the FIRST label (glyph top/bottom, not the whole row) — lets an effect
   // fit/centre the actual letters rather than the full tile. MUST measure with the SAME baseline
   // the glyph is drawn at (middle), or actualBoundingBox* is relative to the alphabetic baseline
@@ -110,15 +130,26 @@ export function makeTextTexture(opts: TextTextureOptions): THREE.CanvasTexture {
   // mapping their across-band v into that range.
   labels.forEach((label, k) => {
     const cy = (n - 1 - k) * rowH + rowH / 2
+    const drawn = sep ? label.trimEnd() : label
     ctx.setTransform(scaleX, 0, 0, 1, 0, 0)
     applyFont()
     if ((opts.strokeWidth ?? 0) > 0) {
       ctx.lineWidth = opts.strokeWidth as number
       ctx.strokeStyle = opts.strokeColor ?? '#000000'
       ctx.lineJoin = 'round'
-      ctx.strokeText(label, 0, cy)
+      ctx.strokeText(drawn, 0, cy)
     }
-    ctx.fillText(label, 0, cy)
+    ctx.fillText(drawn, 0, cy)
+    if (sep) {
+      // Centre the shape on the text's ink midline (baseline 'middle' puts the em
+      // box centre at cy; the measured cap/descender pair shifts it to the letters).
+      const mid = cy + (desc0 - asc0) / 2
+      drawShape(ctx, sep.shape, {
+        x: textWidths[k]! + gapPx, y: mid - shapeH / 2, w: shapeW, h: shapeH,
+        fill: opts.typeColor,
+        stroke: (opts.strokeWidth ?? 0) > 0 ? { color: opts.strokeColor ?? '#000000', width: opts.strokeWidth as number } : undefined,
+      })
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0)
   })
 
