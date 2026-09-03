@@ -74,9 +74,27 @@ const SHADER = {
 function diffCount(a: PNG, b: PNG, tol = 12): number {
   let n = 0
   for (let i = 0; i < Math.min(a.data.length, b.data.length); i += 4 * 23) {
-    if (Math.abs(a.data[i]! - b.data[i]!) > tol) n++
+    const dr = Math.abs(a.data[i]! - b.data[i]!)
+    const dg = Math.abs(a.data[i + 1]! - b.data[i + 1]!)
+    const db = Math.abs(a.data[i + 2]! - b.data[i + 2]!)
+    if (Math.max(dr, dg, db) > tol) n++
   }
   return n
+}
+
+// Positive control for the shader card alone: quantise each sampled pixel's channels
+// to 32 levels and count the distinct r,g,b combinations. terrain_bands at defaults
+// paints six hard ink bands, so a real render always clears a couple of distinct
+// colours here — an all-black, all-white, or NaN-poisoned render would collapse to 1.
+function distinctQuantisedColours(png: PNG): number {
+  const seen = new Set<string>()
+  for (let i = 0; i < png.data.length; i += 4 * 23) {
+    const r = png.data[i]! >> 3
+    const g = png.data[i + 1]! >> 3
+    const b = png.data[i + 2]! >> 3
+    seen.add(`${r},${g},${b}`)
+  }
+  return seen.size
 }
 
 test('terrain_bands as a Frame layer fill paints the field, not the fallback gradient', async ({ page }) => {
@@ -116,6 +134,7 @@ test('terrain_bands as a Frame layer fill paints the field, not the fallback gra
   // attempt rather than mis-pairing the screenshots.
   let ready = false
   let failStep = 'navigate'
+  let lastErr: unknown = null
   for (let attempt = 0; attempt < 3 && !ready; attempt++) {
     try {
       await openBlankWorkflow(page)
@@ -141,10 +160,11 @@ test('terrain_bands as a Frame layer fill paints the field, not the fallback gra
       // shared ComfyUI backend's project state) must not abort the whole
       // test — it's exactly what this retry exists to ride out.
       console.warn(`[frame-generative-fill] setup attempt ${attempt} failed at step "${failStep}":`, err)
+      lastErr = err
     }
     if (!ready) await page.waitForTimeout(1_000)
   }
-  await expect(canvases).toHaveCount(2, { timeout: 10_000 })
+  await expect(canvases, `setup failed after 3 attempts; last error: ${lastErr}`).toHaveCount(2, { timeout: 10_000 })
 
   // Step "shader add" above proved the shader card landed as the first (and
   // only) card before the gradient card was added, so nth(0) is the shader
@@ -156,4 +176,9 @@ test('terrain_bands as a Frame layer fill paints the field, not the fallback gra
 
   // The load-bearing check: a fallback would render the same gradient on both cards.
   expect(diffCount(shaderShot, gradientShot)).toBeGreaterThan(40)
+
+  // Positive control on the shader card alone: terrain_bands at defaults paints six
+  // hard ink bands, so an all-black or single-colour NaN render fails here even if it
+  // happens to differ from the gradient card by enough to pass the diff check above.
+  expect(distinctQuantisedColours(shaderShot)).toBeGreaterThan(2)
 })
