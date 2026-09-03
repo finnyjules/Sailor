@@ -105,6 +105,40 @@ describe('the `shape` macro lets the agent reach a library shape in ONE turn', (
     expect(savedMark(n).shape).toBe('hexagon')
   })
 
+  it('lands the whole stacked-outlines recipe in ONE turn (layout/fillStrategy/paintTarget gate the rest)', async () => {
+    // GEO_GUIDANCE's worked example. On a DEFAULT mark none of fillCycle
+    // (gated on fillStrategy !== single), strokeWidth (gated on stroke set or
+    // paintTarget !== fill) or the blend* keys (gated on layout === blend) are
+    // even DESCRIBED — so without the gating-field contract every one of them
+    // is dropped as an unknown key and the recipe half-lands.
+    fetchMock.mockResolvedValueOnce({
+      rationale: 'stacked outlines',
+      changes: [
+        { key: 'layout', value: 'blend' },
+        { key: 'fillStrategy', value: 'perClone' },
+        { key: 'paintTarget', value: 'outline' },
+        { key: 'fillCycle', value: 'ramp' },
+        { key: 'strokeWidth', value: 0.75 },
+        { key: 'blendShape', value: 'circle' },
+        { key: 'blendTwist', value: 0.1 },
+      ],
+    })
+    const n = shapeNode({})
+    const res = await tuneShapeNode(n, 'stacked outlines, die doing style', KEY)
+    expect(res.ok).toBe(true)
+    const offered = vibeBody().controls.map(c => c.path)
+    expect(offered).not.toContain('fillCycle')
+    expect(offered).not.toContain('blendTwist')
+    const mark = savedMark(n)
+    expect(mark.layout).toBe('blend')
+    expect(mark.fillStrategy).toBe('perClone')
+    expect(mark.paintTarget).toBe('outline')
+    expect(mark.fillCycle).toBe('ramp')
+    expect(mark.strokeWidth).toBe(0.75)
+    expect(mark.blendShape).toBe('circle')
+    expect(mark.blendTwist).toBe(0.1)
+  })
+
   it('still works the two-turn way: a bare libraryShape on a mark already on library', async () => {
     fetchMock.mockResolvedValueOnce({ changes: [{ key: 'libraryShape', value: 'sun-rays' }], rationale: 'rays' })
     const n = shapeNode({ shape: 'library', libraryShape: 'sparkle' })
