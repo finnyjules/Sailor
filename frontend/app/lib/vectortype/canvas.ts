@@ -278,6 +278,41 @@ function coordsKey(coords: Record<string, number>): string {
 }
 
 /**
+ * The fit solve, remembered.
+ *
+ * `fitStretch` binary-searches 24 candidates, and every candidate is a full
+ * shape-and-remap of the whole run — ~295 ms on a six-glyph word here, against
+ * a frame budget of 16. Its answer depends on four things only (the FONT, the
+ * TEXT, the resting AXES, the target WIDTH), and every one of them changes when
+ * the user types or drags a box edge, never when the clock ticks. So a fitted
+ * studio was re-deriving the same number sixty times a second; memoised, it
+ * pays for it once per edit and the frame drops back to the ordinary stretch
+ * cost.
+ *
+ * Bounded, because a long editing session types a lot of words: 64 entries,
+ * oldest INSERTION evicted (a Map iterates in insertion order). Not an LRU —
+ * the working set of a studio session is one config, and a bigger cache would
+ * buy nothing an eviction rule could not.
+ */
+const FIT_MEMO_MAX = 64
+const fitMemo = new Map<string, number>()
+
+function memoisedFit(font: VtFont, text: string, axes: Record<string, number>, targetUnits: number): number {
+  // The target is rounded to 1/100 of a font unit: a box edge dragged by a
+  // sub-hundredth of a unit cannot move the solve, but it would miss the key.
+  const key = `${font.id}|${text}|${coordsKey(axes)}|${targetUnits.toFixed(2)}`
+  const hit = fitMemo.get(key)
+  if (hit !== undefined) return hit
+  const solved = fitStretch(font, text, axes, targetUnits)
+  fitMemo.set(key, solved)
+  if (fitMemo.size > FIT_MEMO_MAX) {
+    const oldest = fitMemo.keys().next().value
+    if (oldest !== undefined) fitMemo.delete(oldest)
+  }
+  return solved
+}
+
+/**
  * Shape the run at time `t`, giving each glyph its OWN axis position whenever
  * something has moved it there — a staggered axis TRACK, or an axis PRESET.
  *
@@ -319,7 +354,7 @@ export function vectorTypeFrame(
     // Same px↔unit line `vtPlacement` uses (`config.size / upem`, on the
     // post-motion config), so a fitted run lands where placement expects it.
     const targetUnits = (fitBox * (1 - 2 * VT_FIT_INSET)) / (base.size / upem)
-    fitted = fitStretch(font, base.text, base.axes, targetUnits)
+    fitted = memoisedFit(font, base.text, base.axes, targetUnits)
     dialS = fitted
   }
   // The wdth cascade spends the real axis before geometry and before damping:
@@ -425,7 +460,15 @@ export function vectorTypeFrame(
     let S = runDamped.S, SY = runDamped.SY
     if (staggered) {
       const gc = glyphConfig(cfg, t, i, n)
-      const own = dampedStretch(gc.stretch * ratio, gc.stretchY)
+      // FIT WINS over a per-glyph width wave. When the run was fitted, the
+      // solve's whole promise is that the run fills the box; letting a
+      // staggered `stretch` track re-widen each glyph would break that promise
+      // letter by letter for a wave nobody can read against the box edge it is
+      // fighting. So under fit every glyph takes the run's width and only the
+      // HEIGHT dial keeps its own clock — height was never part of the promise.
+      const own = fitted !== null
+        ? { S: runDamped.S, SY: dampedStretch(plan.residual, gc.stretchY).SY }
+        : dampedStretch(gc.stretch * ratio, gc.stretchY)
       if (own.S !== S || own.SY !== SY) perGlyphStretch = true
       S = own.S; SY = own.SY
     }

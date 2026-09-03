@@ -12,11 +12,30 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as fontkit from 'fontkit'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { vectorTypeFrame, VT_FIT_INSET } from '~/lib/vectortype/canvas'
 import { DEFAULT_CONFIG, mergeConfig } from '~/lib/vectortype/config'
 import { normaliseAxes } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
+
+// The fit solve is COUNTED, not stubbed: this wraps the real engine
+// (`importOriginal`) and tallies every entry into `fitStretch`, which is the
+// only honest way to prove the frame's memo is doing its job — timing an
+// assertion would be flaky, and `vi.spyOn` cannot touch an ESM export here
+// (vite's ssr transform gives the namespace getters, no setters). Everything
+// else passes straight through, so the rest of this spec still measures the
+// real engine.
+const { fitCalls } = vi.hoisted(() => ({ fitCalls: { n: 0 } }))
+vi.mock('~/lib/vectortype/stretch', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('~/lib/vectortype/stretch')>()
+  return {
+    ...actual,
+    fitStretch: (...args: Parameters<typeof actual.fitStretch>) => {
+      fitCalls.n++
+      return actual.fitStretch(...args)
+    },
+  }
+})
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/inter-subset-var.ttf', import.meta.url))
 function loadFixtureFont(): VtFont {
@@ -99,5 +118,105 @@ describe('vectorTypeFrame — smart stretch', () => {
     // without a box width, fit is inert and the dial value rules
     const g = vectorTypeFrame(font, cfg({ fit: 'width', stretch: 1.2 }), 0)
     expect(g.stretch.fitted).toBeNull(); expect(g.stretch.S).toBeCloseTo(1.2, 9)
+  })
+})
+
+/** The box that leaves exactly `targetUnits` of run after the inset. */
+function boxFor(targetUnits: number, size: number, upem: number): number {
+  return (targetUnits * (size / upem)) / (1 - 2 * VT_FIT_INSET)
+}
+const inkOf = (f: ReturnType<typeof vectorTypeFrame>) => f.outlines.glyphs.filter(g => g.commands.length)
+
+describe('vectorTypeFrame — the fit solve is paid for once, not every frame', () => {
+  it('a second frame with the same fit inputs reuses the solved answer', () => {
+    const c = cfg({ fit: 'width' })
+    const base = vectorTypeFrame(font, cfg({}), 0)
+    // A target no other test in this file uses, so the memo is cold here.
+    const fitBoxWidth = boxFor(base.outlines.width * 1.37, c.size, base.outlines.unitsPerEm)
+    const before = fitCalls.n
+    const a = vectorTypeFrame(font, c, 0, { fitBoxWidth })
+    const b = vectorTypeFrame(font, c, 0, { fitBoxWidth })
+    expect(a.stretch.fitted).not.toBeNull()
+    expect(b.stretch.fitted).toBe(a.stretch.fitted)
+    expect(fitCalls.n - before).toBe(1)          // the second frame never entered the solver
+    // …and the memo is a KEY, not a blanket skip: a different box re-solves.
+    vectorTypeFrame(font, c, 0, { fitBoxWidth: fitBoxWidth * 1.19 })
+    expect(fitCalls.n - before).toBe(2)
+  })
+})
+
+describe('vectorTypeFrame — fit beats a per-glyph width wave', () => {
+  // The controller's call: when the run was FITTED, the solver's promise is
+  // that the run fills the box. A staggered `stretch` track would break that
+  // promise letter by letter for a wave nobody can read against the box edge
+  // it is fighting, so fit wins and the width track is ignored. Height is not
+  // part of the promise, so `stretchY` still waves.
+  const track = { path: 'stretch', from: 1, to: 1.8, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 }
+  const waveOn = (path: string) => ({
+    ...DEFAULT_CONFIG.motion,
+    tracks: [{ ...track, path }],
+    stagger: { ...DEFAULT_CONFIG.motion.stagger, delay: 0.5 },
+  })
+
+  it('every glyph takes the fitted run width, and the run still fills the box', () => {
+    const plain = cfg({ fit: 'width' })
+    const base = vectorTypeFrame(font, cfg({}), 0)
+    const targetUnits = base.outlines.width * 1.42
+    const fitBoxWidth = boxFor(targetUnits, plain.size, base.outlines.unitsPerEm)
+    const still = vectorTypeFrame(font, plain, 3, { fitBoxWidth })
+    const waved = vectorTypeFrame(font, cfg({ fit: 'width', motion: waveOn('stretch') } as any), 3, { fitBoxWidth })
+
+    expect(waved.stretch.fitted).toBeCloseTo(still.stretch.fitted!, 9)
+    expect(waved.stretch.perGlyph).toBe(false)   // no glyph took its own width
+    const stillInk = inkOf(still)
+    const ratios = inkOf(waved).map((g, i) => {
+      const s = stillInk[i]!
+      return (g.bbox.maxX - g.bbox.minX) / (s.bbox.maxX - s.bbox.minX)
+    })
+    expect(Math.max(...ratios) - Math.min(...ratios)).toBeLessThan(1e-6)
+    expect(Math.abs(waved.outlines.width - targetUnits) / targetUnits).toBeLessThan(0.02)
+  })
+
+  it('a staggered stretchY track is still a wave under fit', () => {
+    const base = vectorTypeFrame(font, cfg({}), 0)
+    const c = cfg({ fit: 'width', motion: waveOn('stretchY') } as any)
+    const fitBoxWidth = boxFor(base.outlines.width * 1.42, c.size, base.outlines.unitsPerEm)
+    const f = vectorTypeFrame(font, c, 3, { fitBoxWidth })
+    expect(f.stretch.fitted).not.toBeNull()
+    expect(f.stretch.perGlyph).toBe(true)
+  })
+})
+
+const ARCHIVO = fileURLToPath(new URL('../fixtures/archivo-subset-var.ttf', import.meta.url))
+function loadArchivo(): VtFont {
+  const raw: any = (fontkit as any).create(new Uint8Array(readFileSync(ARCHIVO)))
+  return { id: 'archivo-subset', axes: normaliseAxes(raw?.variationAxes), unitsPerEm: Number(raw?.unitsPerEm) || 1000, raw }
+}
+
+describe('vectorTypeFrame — the wdth cascade, at the seam the studio uses', () => {
+  // Inter (the fixture above) has no `wdth`, so every assertion up to here runs
+  // the no-cascade path. Archivo carries wdth 62–125, which is the only way to
+  // pin the ORDER at this seam: the real axis is spent first, it reaches the
+  // frame's shaping as `outlines.coords`, and what the remap gets is the
+  // RESIDUAL — never the dial, and never damped on the way.
+  const archivo = loadArchivo()
+  const wdth = archivo.axes.find(a => a.tag === 'wdth')!
+
+  it('the fixture really carries a wdth axis', () => {
+    expect(wdth).toBeDefined()
+    expect(wdth.min).toBeLessThan(wdth.default)
+    expect(wdth.max).toBeGreaterThan(wdth.default)
+  })
+
+  it('a small move is paid by the axis alone — the engine receives ~1', () => {
+    const f = vectorTypeFrame(archivo, cfg({ stretch: 1.15 }), 0)
+    expect(f.outlines.coords.wdth).toBeGreaterThan(wdth.default)
+    expect(Math.abs(f.stretch.S - 1)).toBeLessThan(0.01)
+  })
+
+  it('a move past the axis spends it to the max and hands the rest to the remap', () => {
+    const f = vectorTypeFrame(archivo, cfg({ stretch: 2.2 }), 0)
+    expect(f.outlines.coords.wdth).toBeCloseTo(wdth.max, 9)
+    expect(f.stretch.S).toBeGreaterThan(1.3)
   })
 })
