@@ -923,6 +923,7 @@ async function commitNodeEdit() {
   if (!rebuilt || !nodeEdit.layerId.value) return
   rebuilt.id = nodeEdit.layerId.value // keep identity → in-place edit + clean undo
   recordHistory()
+  // Replace, not setLocal-merge: a merge would resurrect shapeId (and other stale fields) on hand-edited geometry — the rebuilt layer is the whole truth.
   commit(localLayers.value.map(l => (l.id === rebuilt.id ? rebuilt : l)))
 }
 async function deleteNodeAnchor() {
@@ -4224,9 +4225,9 @@ const hasLibraryShape = computed(() => !!libraryShape.value)
  *  already downgraded to the default — computed once and reused by the face
  *  button's v-if, :is and title, rather than each re-deriving it. */
 const shapeFaceResolved = computed(() => resolveShapeFace(shapeFace.value, hasLibraryShape.value))
-// ~310px panel (28px search row + 8px margin + max-h-64 [256px] grid + 16px
-// padding) plus a small gap; the picker clamps itself if the guess is off
-const SHAPE_PICKER_APPROX_HEIGHT = 310
+const faceTitle = computed(() => shapeFaceResolved.value === 'library' && libraryShape.value ? 'Add ' + libraryShape.value.name : 'Add ' + shapeFaceLabel(shapeFace.value, hasLibraryShape.value).toLowerCase())
+// panel = 16 padding + 28 search row + 8 margin + 256 grid (max-h-64) = 308px, plus an 8px gap above the toolbar; the picker clamps itself if the guess is off
+const SHAPE_PICKER_APPROX_HEIGHT = 308 + 8
 const libraryPickerOpen = ref(false)
 const libraryPickerAnchor = ref({ x: 0, y: 0 })
 const shapesClusterRef = ref<HTMLElement | null>(null)
@@ -4298,6 +4299,7 @@ const selectedShape = computed(() => {
   return l && l.kind === 'path' && l.shapeId ? shapeById(l.shapeId) : undefined
 })
 function openInspectorShapePicker() {
+  if (inspectorShapePickerOpen.value) { inspectorShapePickerOpen.value = false; return }
   const r = inspectorShapeButtonRef.value?.getBoundingClientRect()
   inspectorShapeAnchor.value = r ? { x: r.right - SHAPE_PICKER_WIDTH, y: r.bottom + 4 } : { x: 16, y: 16 }
   inspectorShapePickerOpen.value = true
@@ -4442,9 +4444,7 @@ function handleKeydown(e: KeyboardEvent) {
   const typing = (tgt instanceof Element && !!tgt.closest('input, textarea, [contenteditable]'))
     || (ae instanceof Element && ae.matches('input, textarea, [contenteditable]'))
   if (e.key === 'Escape') {
-    // ShapePicker handles Escape on window capture and preventDefaults it — by
-    // the time we run, its flag is already false, so the event itself is the
-    // only reliable signal.
+    // Any handler that preventDefaults Escape has already consumed it (ShapePicker, SweepPopover, the inline text/rename inputs). A picker's own open-flag is already false by the time this bubble-phase handler runs, so the event is the only reliable signal.
     if (e.defaultPrevented) return
     if (zoomMenuOpen.value) { zoomMenuOpen.value = false; return }
     if (shapesMenuOpen.value) { shapesMenuOpen.value = false; return }
@@ -5416,7 +5416,7 @@ onUnmounted(() => {
         <div class="relative flex items-center" ref="shapesClusterRef" @click.stop>
           <button
             class="flex items-center justify-center h-8 w-7 rounded-l hover:bg-white/10 text-white/80 cursor-pointer"
-            data-testid="shapes-face" :title="shapeFaceResolved === 'library' && libraryShape ? 'Add ' + libraryShape.name : 'Add ' + shapeFaceLabel(shapeFace, hasLibraryShape).toLowerCase()"
+            data-testid="shapes-face" :title="faceTitle"
             @click="stampFaceShape()">
             <svg v-if="shapeFaceResolved === 'library' && libraryShape" viewBox="0 0 96 96" class="size-4" fill="currentColor" aria-hidden="true">
               <path :d="libraryShape.d" :fill-rule="libraryShape.fillRule" />

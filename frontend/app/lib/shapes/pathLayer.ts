@@ -34,6 +34,7 @@ export function shapeGeometry(shape: LibraryShape, targetWidth: number): ShapeGe
     } else {
       const v = Number(m[2])
       if (pending === null) { pending = v; continue }
+      if (!out) throw new Error(`shapeGeometry: path data must start with a command in shape "${shape.id}"`)
       const x = (pending - cx) * k, y = (v - cy) * k
       out += (out.endsWith('M') || out.endsWith('L') || out.endsWith('C') ? '' : ',') + `${r5(x)},${r5(y)}`
       pending = null

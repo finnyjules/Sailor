@@ -39,6 +39,9 @@ describe('shapeGeometry', () => {
   it('rejects an odd coordinate count at end of string', () => {
     expect(() => shapeGeometry({ ...tall, d: 'M10,10L30' }, 0.3)).toThrow(/odd coordinate count/)
   })
+  it('rejects path data that starts with a number instead of a command', () => {
+    expect(() => shapeGeometry({ ...tall, d: '10,10L30,10Z' }, 0.3)).toThrow(/must start with a command/)
+  })
 })
 
 describe('createShapeLayer', () => {

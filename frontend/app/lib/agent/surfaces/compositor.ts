@@ -19,9 +19,9 @@ import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
 import { shapeById, SHAPES } from '~/lib/shapes/catalog'
+import { createShapeLayer, SHAPE_LAYER_DEFAULT_WIDTH } from '~/lib/shapes/pathLayer'
 /** Every id addShape accepts — built once, the description hands the same array out each turn. */
 const SHAPE_LIBRARY_IDS: readonly string[] = SHAPES.map(s => s.id)
-import { createShapeLayer, SHAPE_LAYER_DEFAULT_WIDTH } from '~/lib/shapes/pathLayer'
 
 export interface CompositorState {
   layers: LocalLayer[]
@@ -191,7 +191,7 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
       postEffects: state.postEffects?.filter(e => e.visible).map(e => e.type).join(', ') || 'none',
       // The frame is a unit square in normalized coords: x/y/sizes are 0..1.
       coordinateSpace: 'normalized 0..1 (0,0 = top-left, 0.5,0.5 = centre)',
-      // Every id addShape accepts. ~1 KB; listed so the model never guesses a name.
+      // Every id addShape accepts. ~1.5 KB (measured 1,530 chars serialised); listed so the model never guesses a name.
       shapeLibrary: SHAPE_LIBRARY_IDS,
       ...(state.brandPalette?.length
         ? { brandPalette: state.brandPalette.map(s => `${s.name} ${s.hex}`).join(', ') }
