@@ -162,6 +162,19 @@ const ROW: Record<string, Row> = {
   [`${M}relief.tiling`]: { label: 'Tiling', kind: 'slider', min: 0.25, max: 12, step: 0.25, hint: 'How many times the pattern repeats across the surface — higher is finer.' },
   [`${M}relief.invert`]: { label: 'Invert', kind: 'switch' },
 
+  // Screen — collapsed to its pattern row until a pattern is picked
+  [`${M}screen.pattern`]: { label: 'Pattern', kind: 'select', options: ['none', 'dots', 'lines', 'cross'], optionLabels: ['None', 'Dots', 'Lines', 'Cross'] },
+  [`${M}screen.density`]: { label: 'Density', kind: 'slider', min: 4, max: 200, step: 1, hint: 'How many dots across the surface' },
+  [`${M}screen.angle`]: { label: 'Angle', kind: 'slider', min: 0, max: 180, step: 1, hint: 'Rotates the dot grid' },
+  [`${M}screen.contrast`]: { label: 'Contrast', kind: 'slider', min: 0.25, max: 4, step: 0.05, hint: 'How fast dots shrink into shadow' },
+  [`${M}screen.softness`]: { label: 'Softness', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Edge blur on each dot' },
+  [`${M}screen.misregister`]: { label: 'Misregister', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Offsets red and blue so edges fringe like a misprint' },
+  [`${M}screen.invert`]: { label: 'Invert', kind: 'switch' },
+  [`${M}screen.gap`]: { label: 'Gaps', kind: 'select', options: ['transparent', 'colour'], optionLabels: ['Transparent', 'Colour'] },
+  [`${M}screen.gapColor`]: { label: 'Gap colour', kind: 'color' },
+  [`${M}screen.ink`]: { label: 'Ink', kind: 'select', options: ['lit', 'colour'], optionLabels: ['Lit colour', 'Colour'] },
+  [`${M}screen.inkColor`]: { label: 'Ink colour', kind: 'color' },
+
   // Camera / Lighting / Background
   'camera.fov': { label: 'FOV', kind: 'slider', min: 15, max: 100, step: 1, hint: 'Camera field of view — how wide the lens sees' },
   'lighting.preset': { label: 'Preset', kind: 'select', options: LIGHTING_PRESETS },
@@ -247,6 +260,7 @@ const textDecal = (): SceneObject =>
     { type: 'text', text: 'LABEL', font: 'google:Inter@700', color: '#1a1a1a' }, [])
 
 const RELIEF_OFF = [`${M}relief.source`]
+const SCREEN_OFF = [`${M}screen.pattern`]
 
 /** Every card the shipped inspector drew, in order, for a primitive of each material type —
  *  including the shared head (`Override materials` never shows for a primitive) and the
@@ -263,6 +277,7 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
     Iridescence: [`${M}iridescence`, `${M}iridescenceIOR`],
     Reflection: [`${M}envMapIntensity`],
     'Surface relief': RELIEF_OFF,
+    Screen: SCREEN_OFF,
   },
   glass: {
     Material: [
@@ -279,18 +294,22 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
   phong: {
     Material: [`${M}type`, `${M}color`, `${M}shininess`, `${M}specular`],
     'Surface relief': RELIEF_OFF,
+    Screen: SCREEN_OFF,
   },
   toon: {
     Material: [`${M}type`, `${M}color`, `${M}toonSteps`],
     'Surface relief': RELIEF_OFF,
+    Screen: SCREEN_OFF,
   },
   matcap: {
     Material: [`${M}type`, 'ui.material.matcap'],
     'Surface relief': RELIEF_OFF,
+    Screen: SCREEN_OFF,
   },
   fresnel: {
     Material: [`${M}type`, `${M}color`, `${M}fresnelColor`, `${M}fresnelPower`],
     'Surface relief': RELIEF_OFF,
+    Screen: SCREEN_OFF,
   },
   // Manual palette (the default) shows the ramp editor; linear (the default) shows the
   // axis-preset grid + Yaw/Pitch. Both branches get their own scenario below.
@@ -301,6 +320,7 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
       `${M}gradientOffset`, `${M}gradientSpread`, `${M}gradientShading`,
     ],
     'Surface relief': RELIEF_OFF,
+    Screen: SCREEN_OFF,
   },
   opalescent: {
     Material: [
@@ -310,14 +330,17 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
       'ui.material.textureSet', `${M}textureTiling`,
     ],
     'Surface relief': RELIEF_OFF,
+    Screen: SCREEN_OFF,
   },
   image: {
     Material: [`${M}type`, 'ui.material.image', `${M}roughness`, `${M}metalness`],
     'Surface relief': RELIEF_OFF,
+    Screen: SCREEN_OFF,
   },
   shaderFill: {
     Material: [`${M}type`, 'ui.material.shader', `${M}unlit`, `${M}roughness`, `${M}metalness`],
     'Surface relief': RELIEF_OFF,
+    Screen: SCREEN_OFF,
   },
 }
 
@@ -501,6 +524,48 @@ describe('Scene3D panel parity — Surface relief', () => {
     o.material.normalImage = 'normal.png'
     const keys = designCards(doc(), o).find((s) => s.title === 'Surface relief')!.keys
     expect(keys).toEqual([`${M}relief.source`, 'ui.relief.normalMapBound'])
+  })
+})
+
+describe('Scene3D panel parity — Screen', () => {
+  const sphereWith = (screen: Record<string, unknown>) => {
+    const doc = defaultDoc()
+    const o = createPrimitive('sphere', doc.objects)
+    o.material.screen = screen as any
+    doc.objects.push(o)
+    return { doc, o }
+  }
+  it('a picked pattern reveals the dials, in order, with the colour rows following their mode', () => {
+    const { doc, o } = sphereWith({ pattern: 'dots' })
+    const card = designCards(doc, o).find((s) => s.title === 'Screen')!
+    expect(card.keys).toEqual([
+      `${M}screen.pattern`, `${M}screen.density`, `${M}screen.angle`, `${M}screen.contrast`, `${M}screen.softness`,
+      `${M}screen.misregister`, `${M}screen.invert`, `${M}screen.gap`, `${M}screen.ink`,
+    ])
+    const { doc: d2, o: o2 } = sphereWith({ pattern: 'dots', gap: 'colour', ink: 'colour' })
+    const keys2 = designCards(d2, o2).find((s) => s.title === 'Screen')!.keys
+    expect(keys2).toContain(`${M}screen.gapColor`)
+    expect(keys2).toContain(`${M}screen.inkColor`)
+    expect(keys2.indexOf(`${M}screen.gapColor`)).toBe(keys2.indexOf(`${M}screen.gap`) + 1)
+  })
+  it('reads nested screen values off the document with defaults for absent fields', () => {
+    const { doc, o } = sphereWith({ pattern: 'lines', density: 90 })
+    expect(readSceneControl(doc, o, `${M}screen.pattern`)).toBe('lines')
+    expect(readSceneControl(doc, o, `${M}screen.density`)).toBe(90)
+    expect(readSceneControl(doc, o, `${M}screen.angle`)).toBe(45)
+    expect(readSceneControl(doc, o, `${M}screen.gap`)).toBe('transparent')
+    const plain = createPrimitive('box', [])
+    expect(readSceneControl(defaultDoc(), plain, `${M}screen.pattern`)).toBe('none')
+  })
+  it('glass draws no Screen card', () => {
+    const doc = defaultDoc()
+    const o = createPrimitive('sphere', doc.objects)
+    o.material.type = 'glass'
+    doc.objects.push(o)
+    expect(designCards(doc, o).map((s) => s.title)).not.toContain('Screen')
+  })
+  it('the Screen card starts collapsed', () => {
+    expect(scenePanelChrome('standard').Screen).toEqual({ open: false })
   })
 })
 
@@ -1358,6 +1423,7 @@ describe('Scene3D panel contract', () => {
     expect(scenePanelChrome('standard')).toEqual({
       'Coat & sheen': { open: false }, Glow: { open: false },
       Transparency: { open: false }, Iridescence: { open: false }, Reflection: { open: false },
+      Screen: { open: false },
       // Geometry's own two bare <details>, collapsed for the same reason.
       Modifiers: { open: false }, Cloner: { open: false },
     })

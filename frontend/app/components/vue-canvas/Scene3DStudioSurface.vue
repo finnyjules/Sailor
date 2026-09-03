@@ -18,9 +18,9 @@ import {
 } from 'lucide-vue-next'
 import {
   parseDoc, serializeDoc, createPrimitive, createGlbObject, createLight, createGroup, createDecal,
-  MATERIAL_DEFAULTS, LIGHT_KINDS, gradientAngles, gradientStopsOf, opalStopsOf,
+  MATERIAL_DEFAULTS, LIGHT_KINDS, gradientAngles, gradientStopsOf, opalStopsOf, screenOf,
   DEFAULT_FONT_URL, DECAL_DEFAULTS, sceneHasShaderFill, sceneHasOpalFlow,
-  type SceneDoc, type SceneObject, type PrimitiveObject, type PrimitiveKind, type MaterialType, type GradientStop, type LightKind, type LightObject, type ReliefSpec, type SceneMaterial, type Vec3,
+  type SceneDoc, type SceneObject, type PrimitiveObject, type PrimitiveKind, type MaterialType, type GradientStop, type LightKind, type LightObject, type ReliefSpec, type SceneMaterial, type ScreenSpec, type Vec3,
   type DecalObject, type DecalContent,
 } from '~/lib/scene3d/config'
 import { eulerFromNormal } from '~/lib/scene3d/decals'
@@ -1411,6 +1411,14 @@ function readControl(key: string): string | number | boolean {
 function setMaterialControl(field: string, value: string | number | boolean): void {
   if (field === 'relief.source') { setReliefSource(value as 'none' | 'shader' | 'image'); return }
   if (field.startsWith('relief.')) { setReliefField(field.slice('relief.'.length), value); return }
+  // Screen: always write a FULL block (every field filled from defaults) so a first dial
+  // write from a screen-less material creates a valid ScreenSpec rather than a bare
+  // `{ density: 60 }` the parser would read as pattern none.
+  if (field.startsWith('screen.')) {
+    const sub = field.slice('screen.'.length)
+    applyMaterial((m) => { m.screen = { ...screenOf(m), [sub]: value } as ScreenSpec })
+    return
+  }
   applyMaterial((m) => writeMaterialField(m, field, value))
 }
 
