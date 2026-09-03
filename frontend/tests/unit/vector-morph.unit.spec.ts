@@ -43,6 +43,32 @@ describe('morph: parsePathD', () => {
     expect(subs).toHaveLength(2)
     expect(subs[1]!.start).toEqual([20, 20])
   })
+
+  it('does not reflect a Q control point across an S (S after Q starts from the current point)', () => {
+    const subs = parsePathD('M 0 0 Q 30 60 60 0 S 90 -60 120 0')
+    const seg = subs[0]!.segs[1]!
+    expect(seg.kind).toBe('cubic')
+    if (seg.kind === 'cubic') {
+      expect(seg.c1).toEqual([60, 0])
+      expect(seg.c2).toEqual([90, -60])
+      expect(seg.to).toEqual([120, 0])
+    }
+  })
+
+  it('tokenises packed arc flags without separators (e.g. "0140" = large 0, sweep 1, x 40, y 30)', () => {
+    const subs = parsePathD('M 0 0 A 50 50 0 0140 30')
+    expect(subs).toHaveLength(1)
+    const pts = flattenSubpath({ ...subs[0]!, closed: false })
+    const last = pts[pts.length - 1]!
+    expect(last[0]).toBeCloseTo(40, 6)
+    expect(last[1]).toBeCloseTo(30, 6)
+  })
+
+  it('produces identical geometry for packed and spaced arc flags', () => {
+    const packed = flattenSubpath(parsePathD('M 0 0 A 50 50 0 1140 30')[0]!)
+    const spaced = flattenSubpath(parsePathD('M 0 0 A 50 50 0 1 1 40 30')[0]!)
+    expect(packed).toEqual(spaced)
+  })
 })
 
 describe('morph: flattenSubpath / subpathsToD', () => {

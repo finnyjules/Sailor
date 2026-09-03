@@ -22,13 +22,50 @@ export interface Subpath { start: Pt; segs: Seg[]; closed: boolean }
  *  depends on that determinism. */
 export const CURVE_STEPS = 12
 
-const TOKEN = /([MmLlHhVvCcSsQqTtAaZz])|(-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)/g
+const COMMAND_CHARS = new Set(['M', 'm', 'L', 'l', 'H', 'h', 'V', 'v', 'C', 'c', 'S', 's', 'Q', 'q', 'T', 't', 'A', 'a', 'Z', 'z'])
+// Sticky (not global) so `lastIndex` can be pinned to an exact scan position before each match.
+const NUMBER_RE = /-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/y
 
 export function parsePathD(d: string): Subpath[] {
-  const tokens: (string | number)[] = []
-  let m: RegExpExecArray | null
-  while ((m = TOKEN.exec(d))) tokens.push(m[1] ? m[1] : Number(m[2]))
-  TOKEN.lastIndex = 0
+  // Streaming lexer over `d` (not a pre-tokenised array): real-world SVG packs
+  // the two arc flags and the following coordinate with no separators, e.g.
+  // "A 50 50 0 0140 30" (large=0, sweep=1, x=40, y=30) — a token array built by
+  // one number regex misreads "0140" as a single number.
+  const n = d.length
+  let i = 0
+  const isSep = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === ','
+  const skipSep = () => { while (i < n && isSep(d[i])) i++ }
+  const isNumStart = (c: string | undefined) => c === '-' || c === '.' || (c !== undefined && c >= '0' && c <= '9')
+  const nextNumber = (): number => {
+    skipSep()
+    NUMBER_RE.lastIndex = i
+    const m = NUMBER_RE.exec(d)
+    if (!m) throw new Error(`morph.parsePathD: expected a number in "${d}"`)
+    i = NUMBER_RE.lastIndex
+    return Number(m[0])
+  }
+  const nextFlag = (): boolean => {
+    skipSep()
+    const c = d[i]
+    if (c !== '0' && c !== '1') throw new Error(`morph.parsePathD: expected an arc flag (0 or 1) in "${d}"`)
+    i++
+    return c === '1'
+  }
+  const peekCommand = (): string | null => {
+    skipSep()
+    const c = d[i]
+    return c !== undefined && COMMAND_CHARS.has(c) ? c : null
+  }
+  const nextCommand = (): string => {
+    const c = peekCommand()
+    if (!c) throw new Error(`morph.parsePathD: expected a command in "${d}"`)
+    i++
+    return c
+  }
+  const peekNumber = (): boolean => {
+    skipSep()
+    return isNumStart(d[i])
+  }
 
   const subs: Subpath[] = []
   let cur: Subpath | null = null
@@ -37,13 +74,6 @@ export function parsePathD(d: string): Subpath[] {
   let lastC: Pt | null = null // last cubic control point (for S)
   let lastQ: Pt | null = null // last quadratic control point (for T)
   let cmd = ''
-  let i = 0
-  const num = (): number => {
-    const v = tokens[i++]
-    if (typeof v !== 'number') throw new Error(`morph.parsePathD: expected a number in "${d}"`)
-    return v
-  }
-  const peekNumber = () => typeof tokens[i] === 'number'
   const begin = (x: number, y: number) => {
     cur = { start: [x, y], segs: [], closed: false }
     subs.push(cur)
@@ -65,50 +95,59 @@ export function parsePathD(d: string): Subpath[] {
     // c1 = P0 + 2/3 (Q − P0), c2 = P1 + 2/3 (Q − P1).
     cubic(cx + (2 / 3) * (qx - cx), cy + (2 / 3) * (qy - cy), x + (2 / 3) * (qx - x), y + (2 / 3) * (qy - y), x, y)
     lastQ = [qx, qy]
+    // cubic() just set lastC for its (degree-elevated) control point, but per
+    // the SVG spec S only reflects a control point after C/S — never after
+    // Q/T. Clear it so a following S starts from the current point instead.
+    lastC = null
   }
 
-  while (i < tokens.length) {
-    const t = tokens[i]
-    if (typeof t === 'string') { cmd = t; i++ }
-    else if (!cmd) throw new Error(`morph.parsePathD: path data must start with a command in "${d}"`)
+  while (true) {
+    if (peekCommand()) { cmd = nextCommand() } else if (!(cmd && peekNumber())) {
+      skipSep()
+      if (i >= n) break
+      if (!cmd) throw new Error(`morph.parsePathD: path data must start with a command in "${d}"`)
+      throw new Error(`morph.parsePathD: expected a command or number in "${d}"`)
+    }
+    // else: implicit repeat — reuse `cmd`, argument parsing picks up at `i`.
     const rel = cmd === cmd.toLowerCase() && cmd !== 'z' && cmd !== 'Z'
     const rx = rel ? cx : 0, ry = rel ? cy : 0
     const resetControls = () => { lastC = null; lastQ = null }
     switch (cmd.toUpperCase()) {
       case 'M': {
-        const x = num() + rx, y = num() + ry
+        const x = nextNumber() + rx, y = nextNumber() + ry
         begin(x, y)
         // Implicit repeats after M are lineTo.
         cmd = rel ? 'l' : 'L'
         resetControls()
         break
       }
-      case 'L': { line(num() + rx, num() + ry); resetControls(); break }
-      case 'H': { line(num() + rx, cy); resetControls(); break }
-      case 'V': { line(cx, num() + ry); resetControls(); break }
+      case 'L': { line(nextNumber() + rx, nextNumber() + ry); resetControls(); break }
+      case 'H': { line(nextNumber() + rx, cy); resetControls(); break }
+      case 'V': { line(cx, nextNumber() + ry); resetControls(); break }
       case 'C': {
-        const x1 = num() + rx, y1 = num() + ry, x2 = num() + rx, y2 = num() + ry, x = num() + rx, y = num() + ry
+        const x1 = nextNumber() + rx, y1 = nextNumber() + ry, x2 = nextNumber() + rx, y2 = nextNumber() + ry, x = nextNumber() + rx, y = nextNumber() + ry
         cubic(x1, y1, x2, y2, x, y); lastQ = null
         break
       }
       case 'S': {
-        const x2 = num() + rx, y2 = num() + ry, x = num() + rx, y = num() + ry
+        const x2 = nextNumber() + rx, y2 = nextNumber() + ry, x = nextNumber() + rx, y = nextNumber() + ry
         const x1 = lastC ? 2 * cx - lastC[0] : cx
         const y1 = lastC ? 2 * cy - lastC[1] : cy
         cubic(x1, y1, x2, y2, x, y); lastQ = null
         break
       }
-      case 'Q': { const qx = num() + rx, qy = num() + ry, x = num() + rx, y = num() + ry; quad(qx, qy, x, y); break }
+      case 'Q': { const qx = nextNumber() + rx, qy = nextNumber() + ry, x = nextNumber() + rx, y = nextNumber() + ry; quad(qx, qy, x, y); break }
       case 'T': {
-        const x = num() + rx, y = num() + ry
+        const x = nextNumber() + rx, y = nextNumber() + ry
         const qx = lastQ ? 2 * cx - lastQ[0] : cx
         const qy = lastQ ? 2 * cy - lastQ[1] : cy
         quad(qx, qy, x, y)
         break
       }
       case 'A': {
-        const rxA = Math.abs(num()), ryA = Math.abs(num()), rot = num(), large = num() !== 0, sweep = num() !== 0
-        const x = num() + rx, y = num() + ry
+        const rxA = Math.abs(nextNumber()), ryA = Math.abs(nextNumber()), rot = nextNumber()
+        const large = nextFlag(), sweep = nextFlag()
+        const x = nextNumber() + rx, y = nextNumber() + ry
         for (const c of arcToCubics(cx, cy, rxA, ryA, rot, large, sweep, x, y)) cubic(c[0], c[1], c[2], c[3], c[4], c[5])
         resetControls()
         break
