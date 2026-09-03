@@ -1188,3 +1188,47 @@ describe('stroke-relative straightness; ink-aware bell rigidity', () => {
     for (const f of x.flex) expect(f).toBeLessThan(0.05)
   })
 })
+
+const ARCHIVO = fileURLToPath(new URL('../fixtures/archivo-subset-var.ttf', import.meta.url))
+function loadArchivo(): VtFont {
+  const bytes = new Uint8Array(readFileSync(ARCHIVO))
+  const raw: any = (fontkit as any).create(bytes)
+  return { id: 'archivo-subset', axes: normaliseAxes(raw?.variationAxes), unitsPerEm: Number(raw?.unitsPerEm) || 1000, raw }
+}
+
+describe('the wdth cascade seam (Archivo fixture)', () => {
+  const archivo = loadArchivo()
+  const widthAt = (S: number): number => {
+    const plan = planStretch(archivo, 'Sailor', {}, S)
+    const run = textOutlines(archivo, 'Sailor', plan.coords)
+    return stretchOutlines(run, plan.residual, 1).width
+  }
+
+  it('the fixture really carries a wdth axis', () => {
+    expect(archivo.axes.some(a => a.tag === 'wdth' && a.min < a.default && a.max > a.default)).toBe(true)
+  })
+
+  it('run width is monotone and jump-free across the whole dial, through the axis→remap handoff', () => {
+    const natural = widthAt(1)
+    let prev = widthAt(0.5)
+    let maxStep = 0
+    for (let S = 0.51; S <= 2.5 + 1e-9; S += 0.01) {
+      const w = widthAt(Number(S.toFixed(2)))
+      expect(w).toBeGreaterThanOrEqual(prev - 1e-6)          // monotone
+      maxStep = Math.max(maxStep, (w - prev) / natural)
+      prev = w
+    }
+    // one 0.01 dial step never moves the run by more than 1.5% of its natural width
+    expect(maxStep).toBeLessThan(0.015)
+  })
+
+  it('spends the real axis first: at the axis extremes the residual is 1 and beyond them it grows', () => {
+    const wdth = archivo.axes.find(a => a.tag === 'wdth')!
+    const atMax = planStretch(archivo, 'Sailor', {}, 1.15)
+    expect(atMax.coords.wdth).toBeGreaterThan(wdth.default)
+    expect(atMax.residual).toBeCloseTo(1, 2)
+    const past = planStretch(archivo, 'Sailor', {}, 2.2)
+    expect(past.coords.wdth).toBeCloseTo(wdth.max, 6)
+    expect(past.residual).toBeGreaterThan(1.3)
+  })
+})
