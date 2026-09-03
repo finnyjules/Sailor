@@ -113,6 +113,7 @@ describe('animatableTargets', () => {
   }
 
   const RELIEF = ['material.relief.contrast', 'material.relief.scale', 'material.relief.tiling']
+  const SCREEN = ['material.screen.angle', 'material.screen.contrast', 'material.screen.density', 'material.screen.misregister', 'material.screen.softness']
   const PBR = ['material.metalness', 'material.roughness']
   const COAT = ['material.clearcoat', 'material.clearcoatRoughness', 'material.envMapIntensity']
   // The ambientCG texture set's tiling — animatable by default, like relief.tiling. Offered
@@ -172,17 +173,17 @@ describe('animatableTargets', () => {
   })
 
   it.each([
-    ['standard', [...PBR, ...PHYSICAL, ...RELIEF, ...TEXTURE]],
+    ['standard', [...PBR, ...PHYSICAL, ...RELIEF, ...TEXTURE, ...SCREEN]],
     ['glass', [...PBR, ...PHYSICAL, ...RELIEF, ...TEXTURE]],
-    ['phong', ['material.shininess', ...RELIEF]],
-    ['toon', RELIEF],
-    ['matcap', RELIEF],
-    ['fresnel', RELIEF],
-    ['gradient', RELIEF],
-    ['image', [...PBR, ...RELIEF]],
-    ['shaderFill', [...PBR, ...RELIEF]],
+    ['phong', ['material.shininess', ...RELIEF, ...SCREEN]],
+    ['toon', [...RELIEF, ...SCREEN]],
+    ['matcap', [...RELIEF, ...SCREEN]],
+    ['fresnel', [...RELIEF, ...SCREEN]],
+    ['gradient', [...RELIEF, ...SCREEN]],
+    ['image', [...PBR, ...RELIEF, ...SCREEN]],
+    ['shaderFill', [...PBR, ...RELIEF, ...SCREEN]],
     ['opalescent', [
-      ...PBR, ...COAT, ...RELIEF, ...TEXTURE,
+      ...PBR, ...COAT, ...RELIEF, ...TEXTURE, ...SCREEN,
       'material.opalAngleMix', 'material.opalFlowSpeed', 'material.opalFrequency',
       'material.opalHueShift', 'material.opalStrength',
     ]],

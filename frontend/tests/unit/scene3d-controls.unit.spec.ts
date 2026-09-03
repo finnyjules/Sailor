@@ -6,6 +6,7 @@ import {
 } from '~/lib/scene3d/controls'
 import {
   defaultDoc, createPrimitive, createLight, createGlbObject, MATERIAL_DEFAULTS, DEFAULT_MATERIAL,
+  MATERIAL_TYPES, type MaterialType,
 } from '~/lib/scene3d/config'
 import { getByPath } from '~/lib/studio/path'
 import { describeControls, validatePatch } from '~/lib/spacetype/controlDescriptor'
@@ -85,6 +86,11 @@ describe('SCENE_CONTROLS integrity', () => {
     'object.material.gradientOffset': 'gradientOffset',
     'object.material.gradientSpread': 'gradientSpread',
     'object.material.textureTiling': 'textureTiling',
+    'object.material.screen.density': 'screenDensity',
+    'object.material.screen.angle': 'screenAngle',
+    'object.material.screen.contrast': 'screenContrast',
+    'object.material.screen.softness': 'screenSoftness',
+    'object.material.screen.misregister': 'screenMisregister',
   }
 
   it('slider defaults match MATERIAL_DEFAULTS where a matching entry exists', () => {
@@ -227,5 +233,43 @@ describe('text-kind controls for the agent', () => {
     expect(validatePatch({ 'object.material.texture': '' }, d)).toEqual({})
     expect(validatePatch({ 'object.material.texture': 7 }, d)).toEqual({})
     expect(validatePatch({ 'object.material.texture': 'x'.repeat(200) }, d)['object.material.texture']).toHaveLength(80)
+  })
+})
+
+describe('screen finish controls', () => {
+  const keysFor = (type: MaterialType) => {
+    const doc = defaultDoc()
+    const prim = createPrimitive('sphere', [])
+    prim.material.type = type
+    return visibleSceneControls(doc, prim).map((c) => c.key)
+  }
+  it('offers the screen rows on every material type except glass', () => {
+    for (const type of MATERIAL_TYPES) {
+      const keys = keysFor(type)
+      const has = keys.includes('object.material.screen.pattern')
+      expect(has, type).toBe(type !== 'glass')
+      if (has) {
+        for (const k of ['density', 'angle', 'contrast', 'softness', 'misregister', 'invert', 'gap', 'gapColor', 'ink', 'inkColor']) {
+          expect(keys, `${type} ${k}`).toContain(`object.material.screen.${k}`)
+        }
+      }
+    }
+  })
+  it('the pattern select lists none/dots/lines/cross with plain labels', () => {
+    const c = SCENE_CONTROLS.find((c) => c.key === 'object.material.screen.pattern') as any
+    expect(c.options).toEqual(['none', 'dots', 'lines', 'cross'])
+    expect(c.optionLabels).toEqual(['None', 'Dots', 'Lines', 'Cross'])
+  })
+  it('every screen row has a plain-language hint (except the colour rows and the switch)', () => {
+    for (const c of SCENE_CONTROLS.filter((c) => c.key.startsWith('object.material.screen.'))) {
+      if (c.kind === 'color' || c.kind === 'switch') continue
+      expect((c as any).hint, c.key).toBeTruthy()
+    }
+  })
+  it('gap and ink colours show only when their mode is colour', () => {
+    const gap = SCENE_CONTROLS.find((c) => c.key === 'object.material.screen.gapColor') as any
+    expect(gap.showIf).toEqual({ key: 'object.material.screen.gap', equals: 'colour' })
+    const ink = SCENE_CONTROLS.find((c) => c.key === 'object.material.screen.inkColor') as any
+    expect(ink.showIf).toEqual({ key: 'object.material.screen.ink', equals: 'colour' })
   })
 })
