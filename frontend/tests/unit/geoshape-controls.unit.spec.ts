@@ -3,6 +3,7 @@ import { GEO_CONTROLS, GEO_SECTIONS, visibleGeoControls, GEO_GUIDANCE } from '..
 import { geoAgentControls } from '../../app/lib/geoshape/agentControls'
 import { reroll } from '../../app/lib/geoshape/randomize'
 import { DEFAULT_CONFIG, type GeoShapeConfig } from '../../app/lib/geoshape/config'
+import { isShapeId } from '../../app/lib/shapes/catalog'
 
 // Fields on GeoShapeConfig that are NOT a renderable control: `locks` is
 // re-roll section-lock metadata, not a parameter a knob addresses. `fills`
@@ -260,5 +261,38 @@ describe('reroll', () => {
     const locks = { shape: true, style: false }
     const out = reroll(DEFAULT_CONFIG, locks)
     expect(out.locks).toEqual(locks)
+  })
+})
+
+describe('library base shape controls', () => {
+  it('shows the Library shape row only for the library kind, hides rounding under it', () => {
+    const lib = { ...DEFAULT_CONFIG, shape: 'library' as const }
+    const keys = (c: GeoShapeConfig) => visibleGeoControls(c).map(x => x.key)
+    expect(keys(lib)).toContain('libraryShape')
+    expect(keys(lib)).not.toContain('roundCorners')
+    expect(keys(lib)).not.toContain('roundRadius')
+    expect(keys(lib)).not.toContain('sides')
+    expect(keys(DEFAULT_CONFIG)).not.toContain('libraryShape')
+    expect(keys(DEFAULT_CONFIG)).toContain('roundCorners')
+  })
+  it('declares the row as a shape control without None and with sparkle as default', () => {
+    const c = GEO_CONTROLS.find(x => x.key === 'libraryShape')!
+    expect(c.kind).toBe('shape'); expect((c as any).allowNone).toBe(false); expect(c.default).toBe('sparkle'); expect(c.group).toBe('Shape')
+  })
+  it('guidance names the library family', () => {
+    expect(GEO_GUIDANCE).toMatch(/library/)
+  })
+  it('re-roll yields a valid library id', () => {
+    // reroll's real signature is (cfg, locks: Record<string, boolean>) — it
+    // is pure w.r.t. cfg.seed, so vary the starting seed each iteration
+    // rather than passing a seed string directly (see randomize.ts).
+    const noLocks: Record<string, boolean> = {}
+    for (let i = 0; i < 5; i++) {
+      const start: GeoShapeConfig = { ...DEFAULT_CONFIG, seed: 1000 + i }
+      const out = reroll(start, noLocks)
+      expect(typeof out.libraryShape).toBe('string')
+      expect(out.libraryShape.length).toBeGreaterThan(0)
+      expect(isShapeId(out.libraryShape)).toBe(true)
+    }
   })
 })

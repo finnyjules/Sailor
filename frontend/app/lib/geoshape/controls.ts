@@ -52,6 +52,8 @@ const usesSides = (c: GeoShapeConfig) => c.shape === 'star' || c.shape === 'irre
 const isStar = (c: GeoShapeConfig) => c.shape === 'star'
 const isIrregular = (c: GeoShapeConfig) => c.shape === 'irregular'
 const hasRoundCorners = (c: GeoShapeConfig) => c.roundCorners > 0
+const isLibrary = (c: GeoShapeConfig) => c.shape === 'library'
+const notLibrary = (c: GeoShapeConfig) => c.shape !== 'library'
 const isGrid = (c: GeoShapeConfig) => c.layout === 'grid'
 const isRadial = (c: GeoShapeConfig) => c.layout === 'radial'
 const isGridOrLinear = (c: GeoShapeConfig) => c.layout === 'grid' || c.layout === 'linear'
@@ -93,7 +95,9 @@ const switchC = (key: string, label: string, def: boolean, group: string, extra:
 export const GEO_CONTROLS: GeoControl[] = [
   // --- Shape (baseShapePath's BaseShapeOpts) --------------------------------
   select('shape', 'Shape', SHAPES, DEFAULT_CONFIG.shape, 'Shape',
-    'polygon/star/irregular use Sides; hexagon is a fixed 6-gon'),
+    'polygon/star/irregular use Sides; hexagon is a fixed 6-gon; library clones one of the 100 drawn shapes (Library shape)'),
+  { key: 'libraryShape', label: 'Library shape', kind: 'shape', allowNone: false, default: DEFAULT_CONFIG.libraryShape, group: 'Shape',
+    hint: 'library only: which of the 100 drawn shapes is cloned (sparkle, sun-rays, leaf, heart, swirl…)', when: isLibrary } as GeoControl,
   slider('sides', 'Sides', 3, 24, 1, 'Shape', DEFAULT_CONFIG.sides, undefined, { when: usesSides }),
   // DEFAULT_CONFIG.starInner is 0.45, already inside starVertices' own
   // [0.01, 0.99] clamp (polygonGeometry.ts), so this control's default sits
@@ -102,8 +106,8 @@ export const GEO_CONTROLS: GeoControl[] = [
   slider('irregularSeed', 'Irregular seed', 1, 9999, 1, 'Shape', DEFAULT_CONFIG.irregularSeed, undefined, { when: isIrregular }),
   slider('size', 'Size', 20, 600, 1, 'Shape', DEFAULT_CONFIG.size),
   slider('roundCorners', 'Round corners', 0, 100, 1, 'Shape', DEFAULT_CONFIG.roundCorners,
-    '0 = sharp corners; above 0 rounds by Round radius'),
-  slider('roundRadius', 'Round radius', 0, 100, 1, 'Shape', DEFAULT_CONFIG.roundRadius, undefined, { when: hasRoundCorners }),
+    '0 = sharp corners; above 0 rounds by Round radius', { when: notLibrary }),
+  slider('roundRadius', 'Round radius', 0, 100, 1, 'Shape', DEFAULT_CONFIG.roundRadius, undefined, { when: (c) => hasRoundCorners(c) && notLibrary(c) }),
 
   // --- Layout (arrange.ts) --------------------------------------------------
   select('layout', 'Layout', LAYOUTS, DEFAULT_CONFIG.layout, 'Layout'),
@@ -199,7 +203,7 @@ export function visibleGeoControls(cfg: GeoShapeConfig): GeoControl[] {
  */
 export const GEO_GUIDANCE = `This is a PROCEDURAL 2D-VECTOR "clone and arrange" LOGO generator — one base shape, repeated and folded into a single flat mark, not a raster illustration.
 
-BASE SHAPE: "shape" picks the family — polygon (regular N-gon via sides), star (N points via sides + starInner, the inner-vertex radius as a fraction of the outer radius, 0.01=needle-thin points, 0.99=almost a polygon), hexagon (fixed 6-gon, ignores sides), irregular (a polygon jittered per-vertex by irregularSeed — same seed always gives the same silhouette). size is the shape's radius before any clone spread. roundCorners (0=off) gates roundRadius, the corner-rounding fraction.
+BASE SHAPE: "shape" picks the family — polygon (regular N-gon via sides), star (N points via sides + starInner, the inner-vertex radius as a fraction of the outer radius, 0.01=needle-thin points, 0.99=almost a polygon), hexagon (fixed 6-gon, ignores sides), irregular (a polygon jittered per-vertex by irregularSeed — same seed always gives the same silhouette), library (one of the 100 drawn library shapes, chosen by libraryShape — sparkle, sun-rays, leaf, heart, swirl…; sides and corner rounding do not apply). size is the shape's radius before any clone spread. roundCorners (0=off) gates roundRadius, the corner-rounding fraction.
 
 LAYOUT: count is how many clones to place (grid layout instead uses gridCols × gridRows and ignores count). layout picks the placement curve: "radial" rings the clones around the center at radius; by default (evenAngle) they spread evenly (360/count) so any count forms a clean ring, and turning evenAngle off spaces them by angleStep degrees instead (for fans/spirals). spin is the ring's starting angle offset. "grid" tiles gridCols × gridRows clones spacing apart. "linear" strings count clones in a row, spacing apart. For grid/linear, stagger (incremental|alternate) shifts successive columns/rows by (stepX, stepY) — incremental cascades progressively (a diagonal shear), alternate offsets every other one (a brick/zigzag); stepAxis chooses whether a grid steps by column or row.
 

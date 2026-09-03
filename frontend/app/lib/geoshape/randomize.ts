@@ -17,6 +17,9 @@
  */
 import type { GeoShapeConfig } from './config'
 import { SHAPES, LAYOUTS, FILLMODES, OVERLAPMODES, SYMMETRY_AXES, CLIP_MASKS } from './controls'
+import { SHAPES as LIBRARY_SHAPES } from '~/lib/shapes/catalog'
+
+const LIBRARY_IDS = LIBRARY_SHAPES.map(s => s.id)
 
 interface Rng {
   /** Uniform float in [0,1). */
@@ -77,7 +80,7 @@ function nextSeed(prevSeed: number): number {
 // One roll group per GEO_SECTIONS entry (controls.ts), minus 'Paint' — colour
 // is curated by the user, never randomized, matching shapefx/randomize.ts's
 // own posture of leaving `fill`/`style.background` untouched by reroll.
-type ShapeGroup = Pick<GeoShapeConfig, 'shape' | 'sides' | 'starInner' | 'irregularSeed' | 'size' | 'roundCorners' | 'roundRadius'>
+type ShapeGroup = Pick<GeoShapeConfig, 'shape' | 'sides' | 'starInner' | 'irregularSeed' | 'size' | 'roundCorners' | 'roundRadius' | 'libraryShape'>
 type LayoutGroup = Pick<GeoShapeConfig, 'layout' | 'count' | 'gridCols' | 'gridRows' | 'radius' | 'spacing' | 'angleStep'>
 type TransformGroup = Pick<GeoShapeConfig, 'rotateBase' | 'rotateStep' | 'scaleStart' | 'scaleEnd' | 'skew' | 'spin'>
 type CompositeGroup = Pick<GeoShapeConfig, 'fillMode' | 'overlapMode'>
@@ -95,6 +98,7 @@ function rollShape(seed: string): ShapeGroup {
     size: r.int(80, 320),
     roundCorners: r.chance(0.4) ? r.int(10, 100) : 0,
     roundRadius: r.int(0, 100),
+    libraryShape: r.pick(LIBRARY_IDS),
   }
 }
 
@@ -171,7 +175,7 @@ export function reroll(cfg: GeoShapeConfig, locks: Record<string, boolean>): Geo
   const s = String(seed)
 
   const shapeGroup: ShapeGroup = locks.shape
-    ? { shape: cfg.shape, sides: cfg.sides, starInner: cfg.starInner, irregularSeed: cfg.irregularSeed, size: cfg.size, roundCorners: cfg.roundCorners, roundRadius: cfg.roundRadius }
+    ? { shape: cfg.shape, sides: cfg.sides, starInner: cfg.starInner, irregularSeed: cfg.irregularSeed, size: cfg.size, roundCorners: cfg.roundCorners, roundRadius: cfg.roundRadius, libraryShape: cfg.libraryShape }
     : rollShape(s)
   const layoutGroup: LayoutGroup = locks.layout
     ? { layout: cfg.layout, count: cfg.count, gridCols: cfg.gridCols, gridRows: cfg.gridRows, radius: cfg.radius, spacing: cfg.spacing, angleStep: cfg.angleStep }
