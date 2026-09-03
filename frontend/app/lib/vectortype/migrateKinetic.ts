@@ -13,20 +13,52 @@
  *
  * Text, font, size, spacing, colour, background, axis positions, clip duration,
  * fps and the per-glyph stagger all carry across: they are the same quantity in
- * both studios. The MOTION PRESET mostly does not. Kinetic presets were GSAP
- * timelines over DOM properties (blur filters, clip-paths, 3-D flips, scrambled
- * text content, seeded jitter); Vector Type animates a config over time plus a
- * five-field per-glyph transform (`glyph.dx/dy/scale/rotate/opacity`).
+ * both studios.
  *
- * So `PRESET_MOTION` maps ONLY the presets whose identity is fully expressible
- * in those five fields — plus, since colour tracks landed, the one whose identity
- * is a COLOUR (`color-cycle`; see `colorCycleTracks`, and note that its sibling
- * `color-wave` is still dropped for a different reason entirely — a layer's
- * colour is resolved once per frame, not per glyph). Everything else is dropped,
- * and the text arrives with no motion at all. That is the deliberate trade: a missing animation is visible
- * and re-addable, a subtly wrong one is neither. `presetFidelity()` reports
- * which of the three a preset got, and it is the thing to read before claiming
- * coverage.
+ * ## The preset crosses through the SAME evaluator, not a hand-copied one
+ *
+ * A KineticType node's `presetId` was never a DOM-only idea for the presets that
+ * had no GSAP `build()` — `~/data/kinetic-presets.ts` says so directly: every
+ * "canvas-native" preset (which is most of them — everything except a handful of
+ * GSAP-only physics/text tricks) was already evaluated by
+ * `~/lib/motion/evaluate.ts`'s `IN_EVAL`/`OUT_EVAL`/`LOOP_EVAL` tables, because
+ * that is what baked the `rendered[]` frames the node produced. Vector Type's own
+ * preset gallery (`presetMotion.ts`) reads the exact same tables through
+ * `evaluatePresetUnit`/`vtKnowsPreset` — so a Kinetic id that evaluator knows is
+ * not approximated here, it IS the preset, one `kind: 'preset'` move carrying
+ * the id straight across:
+ *
+ *   `vtKnowsPreset(category, presetId)` — where `category` is the id's own
+ *   `KINETIC_PRESETS_BY_ID[id].category` (`'in' | 'out' | 'loop'`, the same
+ *   partition Kinetic always used) — decides whether it crosses at all
+ *   (`presetFidelity`). If it does, the migration hands `mergeConfig` the OLD
+ *   `motion.{in,out,loop}` slot shape (`{ presetId, duration }`, no `ease` of its
+ *   own) and lets `mergeMotion`'s existing legacy-slot conversion build the move:
+ *   phase = the slot, `duration` = the node's own saved duration (Kinetic had
+ *   exactly one — there was never a separate "how long is the reveal" field),
+ *   ease = the preset's NATIVE ease if the evaluator names one (`legacyPresetNativeEase`),
+ *   play = `repeat ×1` for a loop and `once ×1` for an in/out — reproducing
+ *   exactly how the old engine ran that preset.
+ *
+ * What does NOT cross is a preset the shared evaluator never got: a handful of
+ * GSAP-only DOM tricks (3-D `flip-*`, `jello`'s skew, `scramble-*`'s glyph
+ * rewrites, …) and the four presets whose whole identity is DRAWING EXTRA COPIES
+ * (`inward-echoes`, `grid-scroll-*`, `noise-tile`) — Vector Type renders one
+ * outline per glyph, never copies (`presetMotion.ts`'s `VT_PRESET_CAPABILITIES`
+ * deliberately excludes `'copies'`). `DROPPED_REASONS` names each one; the text
+ * still arrives, with no motion. That is the deliberate trade: a missing
+ * animation is visible and re-addable, a subtly wrong one is neither.
+ *
+ * `color-cycle` is its own case, unchanged by any of the above: it animates the
+ * FILL COLOUR, which the shared per-glyph evaluator has no channel for at all
+ * (`UnitState` is geometry/opacity, never a colour). It crosses as `partial`
+ * via a hand-built colour TRACK (`colorCycleTracks`, appended as a `kind:'tracks'`
+ * move after the merge, once the fill layer's id exists to aim at) — see that
+ * function's own doc.
+ *
+ * An axis keyframe pair (`axisKeyframes`) is independent of the preset entirely
+ * — a real from→to on `axes.<tag>` — and still crosses as a literal track
+ * through the same old-shape `motion.tracks` mechanism (`axisTracks`).
  *
  * ## Baked frames are not thrown away
  *
@@ -45,12 +77,19 @@ import {
   type VectorTypeConfig,
   type VtEasing,
   type VtMotionTrack,
+  type VtPresetSlot,
 } from './config'
 import { isFill } from '~/lib/compositor/paint'
 import { hexToOklch, parseHexA } from '~/lib/color/convert'
 // The 180° hue rotation, shared with the studio's own Colour Cycle tile so a
 // migrated node and a freshly-applied preset produce the SAME pair of colours.
 import { vtOppositeHue } from './trackPresets'
+// The SAME "does the shared evaluator know this preset id, for this slot"
+// question the studio's own gallery/thumbnails ask (`presetMotion.ts`'s own
+// header names this migration as its reason for existing) — reused rather than
+// re-derived, so "what crosses" can never drift from "what the gallery offers".
+import { vtKnowsPreset } from './presetMotion'
+import { KINETIC_PRESETS_BY_ID } from '~/data/kinetic-presets'
 
 /** What the retired node defaulted to when a field was absent — NOT what Vector
  *  Type defaults to. A params blob with no `text` rendered the word "Hello" on
@@ -76,192 +115,86 @@ export const LEGACY_KINETIC_TYPE = 'KineticType'
 /** How faithfully a preset survived the crossing. Reported, not guessed at. */
 export type PresetFidelity = 'honest' | 'partial' | 'dropped'
 
-interface PresetMotion {
-  /** Tracks in the `glyph.` namespace, minus the timing fields that come from
-   *  the saved clip (`delay` is always 0; `duration` is the clip's). */
-  tracks: { path: string; from: number; to: number; easing: VtEasing; loops?: number }[]
-  fidelity: Exclude<PresetFidelity, 'dropped'>
-  /** The preset's own multiplier on `opts.stagger` (several loop presets used
-   *  `i * opts.stagger * 2`), so the wave travels at the speed it used to. */
-  staggerScale?: number
-  /** Why it is only `partial`. Present exactly when fidelity is 'partial'. */
-  note?: string
-  /**
-   * This preset animates the FILL COLOUR, so its track is built after the merge.
-   *
-   * It cannot be declared in `tracks` above like every other one, and the reason
-   * is mechanical: a colour track addresses `appearance.<layerId>.paint.a`, and
-   * the layer id is MINTED BY `mergeConfig` (this migration hands it the legacy
-   * flat `fill` string and lets the stack migration build the layer — see the
-   * comment at the `fill:` line below). So the path does not exist until the
-   * config does. `colorCycleTrack` builds it from the merged stack.
-   */
-  colorCycle?: boolean
-}
+/** This node's own presetId, migrated to `Colour Cycle`'s hand-built track —
+ *  see the module doc's "color-cycle is its own case" section. */
+const COLOR_CYCLE_ID = 'color-cycle'
 
-const T = (path: string, from: number, to: number, easing: VtEasing = 'easeinout', loops?: number) =>
-  ({ path, from, to, easing, ...(loops ? { loops } : {}) })
+/** Loop-category presets whose original stagger ran at TWICE the saved rate
+ *  (`i * opts.stagger * 2`, in the retired GSAP/canvas engine) — preserved here
+ *  so a migrated wave/pulse/spin travels across the word at the speed it used
+ *  to, independent of which evaluator draws the motion itself. */
+const STAGGER_DOUBLE_LOOP_IDS: ReadonlySet<string> = new Set(['float', 'throb', 'spin-loop'])
 
-/** What a `color-cycle` gives up on the way across. Declared BEFORE
- *  `PRESET_MOTION` because that table is a module-level const that reads it. */
-const COLOR_CYCLE_NOTE =
-  'the full hue wheel becomes a ping-pong to the OPPOSITE hue and back — half the wheel each way, from the '
-  + 'colour that was saved; the mix runs in OKLCH, so the chroma survives the crossing instead of going grey halfway'
-
-/**
- * Kinetic preset id → Vector Type glyph tracks.
- *
- * A preset is in this table only if `{dx, dy, scale, rotate, opacity}` and the
- * three easing curves can express what it DID. Presets left out are listed in
- * `DROPPED_REASONS` with the reason, so "unknown" and "known-impossible" stay
- * distinguishable.
- *
- * Offsets are the presets' own pixel values, unscaled. Kinetic ran them against
- * a preview font-size of `min(72, size/2)`; Vector Type runs them against `size`
- * itself, so the motion reads slightly smaller relative to the type. Rescaling
- * them by an invented factor would be a guess, so they are left literal.
- *
- * TIMING IS RE-SPREAD. A Kinetic "in" preset finished in 40–70% of the clip and
- * held; a Vector Type track spans the whole clip (`hold` pins both ends
- * symmetrically, so "finish early and stay" is not expressible). Start and end
- * states are exact; the reveal is slower. Every in/out entry carries that.
- */
-const PRESET_MOTION: Record<string, PresetMotion> = {
-  // ── IN ────────────────────────────────────────────────────────────────────
-  'fade-in':    { fidelity: 'honest', tracks: [T('glyph.opacity', 0, 1)] },
-  'slide-up':   { fidelity: 'honest', tracks: [T('glyph.dy', 40, 0), T('glyph.opacity', 0, 1)] },
-  'slide-down': { fidelity: 'honest', tracks: [T('glyph.dy', -40, 0), T('glyph.opacity', 0, 1)] },
-  'slide-left': { fidelity: 'honest', tracks: [T('glyph.dx', 40, 0), T('glyph.opacity', 0, 1)] },
-  'slide-right': { fidelity: 'honest', tracks: [T('glyph.dx', -40, 0), T('glyph.opacity', 0, 1)] },
-  'shrink-in':  { fidelity: 'honest', tracks: [T('glyph.scale', 2.5, 1), T('glyph.opacity', 0, 1)] },
-  'grow-in': {
-    fidelity: 'partial', note: 'back.out(1.7) overshoot lost — it settles instead of overshooting',
-    tracks: [T('glyph.scale', 0, 1), T('glyph.opacity', 0, 1)],
-  },
-  'spin-in': {
-    fidelity: 'partial', note: 'back.out(1.4) overshoot lost',
-    tracks: [T('glyph.rotate', 180, 0), T('glyph.scale', 0, 1), T('glyph.opacity', 0, 1)],
-  },
-  'swing-in': {
-    fidelity: 'partial', note: 'elastic.out swing lost, and the pivot is the glyph origin, not its top edge',
-    tracks: [T('glyph.rotate', -90, 0), T('glyph.opacity', 0, 1)],
-  },
-  'roll-in': {
-    fidelity: 'partial', note: 'back.out overshoot lost, and the pivot is the glyph origin, not bottom-center',
-    tracks: [T('glyph.dx', -40, 0), T('glyph.rotate', -120, 0), T('glyph.opacity', 0, 1)],
-  },
-
-  // ── OUT ───────────────────────────────────────────────────────────────────
-  'fade-out':        { fidelity: 'honest', tracks: [T('glyph.opacity', 1, 0)] },
-  'slide-out-up':    { fidelity: 'honest', tracks: [T('glyph.dy', 0, -40), T('glyph.opacity', 1, 0)] },
-  'slide-out-down':  { fidelity: 'honest', tracks: [T('glyph.dy', 0, 40), T('glyph.opacity', 1, 0)] },
-  'slide-out-left':  { fidelity: 'honest', tracks: [T('glyph.dx', 0, -40), T('glyph.opacity', 1, 0)] },
-  'slide-out-right': { fidelity: 'honest', tracks: [T('glyph.dx', 0, 40), T('glyph.opacity', 1, 0)] },
-  'grow-out':        { fidelity: 'honest', tracks: [T('glyph.scale', 1, 2.5), T('glyph.opacity', 1, 0)] },
-  'shrink-out': {
-    fidelity: 'partial', note: 'back.in(1.7) anticipation lost',
-    tracks: [T('glyph.scale', 1, 0), T('glyph.opacity', 1, 0)],
-  },
-  'spin-out': {
-    fidelity: 'honest',
-    tracks: [T('glyph.rotate', 0, 180), T('glyph.scale', 1, 0), T('glyph.opacity', 1, 0)],
-  },
-  'swing-out': {
-    fidelity: 'partial', note: 'the pivot is the glyph origin, not its top edge',
-    tracks: [T('glyph.rotate', 0, 90), T('glyph.opacity', 1, 0)],
-  },
-  'roll-out': {
-    fidelity: 'partial', note: 'the pivot is the glyph origin, not bottom-center',
-    tracks: [T('glyph.dx', 0, 40), T('glyph.rotate', 0, 120), T('glyph.opacity', 1, 0)],
-  },
-
-  // ── LOOP ──────────────────────────────────────────────────────────────────
-  // A yoyo repeat is `pingpong` with `loops` = clip / (2 × half-cycle). Kinetic's
-  // half-cycles were fractions of the clip, so the loop count is rounded to the
-  // nearest whole cycle — the oscillation is the same shape, its rate is within
-  // a cycle of the original.
-  'wave':  { fidelity: 'honest', tracks: [T('glyph.dy', 0, -20, 'pingpong', 2)] },
-  'float': { fidelity: 'honest', staggerScale: 2, tracks: [T('glyph.dy', 0, -8, 'pingpong'), T('glyph.dx', 0, 3, 'pingpong')] },
-  'sway':  { fidelity: 'partial', note: 'the pivot is the glyph origin, not top-center', tracks: [T('glyph.rotate', 0, 8, 'pingpong', 2)] },
-  'throb': { fidelity: 'honest', staggerScale: 2, tracks: [T('glyph.scale', 1, 1.2, 'pingpong', 2)] },
-  'rock':  { fidelity: 'partial', note: 'the pivot is the glyph origin, not bottom-center', tracks: [T('glyph.rotate', 0, 12, 'pingpong', 2)] },
-  'spin-loop': { fidelity: 'honest', staggerScale: 2, tracks: [T('glyph.rotate', 0, 360, 'linear')] },
-
-  // ── COLOUR ────────────────────────────────────────────────────────────────
-  // Dropped until Task 6, with the reason "tracks carry numbers, not colours".
-  // They do now, so this crosses — as `partial`, and the note says exactly what
-  // was lost rather than implying a full revival.
-  'color-cycle': { fidelity: 'partial', note: COLOR_CYCLE_NOTE, tracks: [], colorCycle: true },
-}
+const NO_EVALUATOR = 'no canvas-native evaluator — a GSAP/DOM-only trick that was never ported to lib/motion/evaluate.ts'
+const NEEDS_COPIES = "needs the 'copies' capability (extra per-glyph draws) — Vector Type renders one outline per "
+  + "glyph, never copies (see presetMotion.ts's VT_PRESET_CAPABILITIES)"
 
 /**
  * Why each unmapped preset is unmapped. Not consumed by the migration — it is
  * the audit trail for "we looked at this one and it cannot cross", so a future
  * reader does not have to re-derive it from GSAP builders that no longer exist.
+ * Every key here is checked against the live Kinetic catalog and against
+ * `presetFidelity` by this module's own test suite, so it cannot silently drift
+ * out of date as `lib/motion/evaluate.ts` grows.
  */
 export const DROPPED_REASONS: Record<string, string> = {
-  'appear': 'instant per-glyph cut — no step easing',
-  'disappear': 'instant per-glyph cut — no step easing',
-  'typewriter': 'instant per-glyph cut — no step easing',
-  'typewriter-out': 'instant per-glyph cut — no step easing',
-  'mask-up': 'clip-path reveal — no per-glyph clipping',
-  'mask-down': 'clip-path reveal — no per-glyph clipping',
-  'mask-out-up': 'clip-path reveal — no per-glyph clipping',
-  'mask-out-down': 'clip-path reveal — no per-glyph clipping',
-  'blur-in': 'CSS blur filter — not a vector operation',
-  'blur-out': 'CSS blur filter — not a vector operation',
-  'blur-slide-up': 'blur is not a glyph track field (and no legacy slate ever saved this id)',
-  'zoom-blur-in': 'CSS blur filter — not a vector operation',
-  'zoom-blur-out': 'CSS blur filter — not a vector operation',
-  'focus-pull': 'CSS blur filter — not a vector operation',
-  'flip-in': '3-D rotationY with perspective — the transform is 2-D',
-  'flip-out': '3-D rotationY with perspective — the transform is 2-D',
-  'card-flip-h': '3-D card flip (canvas-native utility preset)',
-  'card-flip-v': '3-D card flip (canvas-native utility preset)',
-  'card-flip-h-out': '3-D card flip (canvas-native utility preset)',
-  'card-flip-v-out': '3-D card flip (canvas-native utility preset)',
-  'elastic-drop': 'the elastic bounce IS the preset — without it, it is just a slide',
-  'elastic-launch': 'the elastic anticipation IS the preset',
-  'rubber-band': 'non-uniform scaleX/scaleY — glyph.scale is uniform',
-  'rubber-band-out': 'non-uniform scaleX/scaleY — glyph.scale is uniform',
-  'rubber-loop': 'non-uniform scaleX/scaleY — glyph.scale is uniform',
-  'jello': 'skewX/skewY — not in the glyph transform',
-  'curtain': 'per-glyph direction and distance from the middle — a track is uniform across glyphs',
-  'curtain-close': 'per-glyph direction and distance from the middle — a track is uniform across glyphs',
-  'shuffle': 'alternating per-glyph direction — a track is uniform across glyphs',
-  'glitch-in': 'seeded random offsets with step easing',
-  'glitch-out': 'seeded random offsets with step easing',
-  'glitch-loop': 'seeded random offsets with step easing',
-  'tremble': 'random micro-jitter with step easing',
-  'wiggle': 'random positional jitter (canvas-native utility preset)',
-  'scan-line': 'step-eased sweep with per-glyph phase',
-  'neon-flicker': 'a scripted multi-step opacity sequence, not a curve',
-  'heartbeat': 'a double-beat envelope, not a single curve — and it scales the whole word',
-  'scramble-in': 'rewrites the glyphs themselves',
-  'scramble-out': 'rewrites the glyphs themselves',
-  // `color-cycle` is NO LONGER HERE — tracks carry colours as of Task 6, and it
-  // crosses as a `partial` (see COLOR_CYCLE_NOTE). This entry stays only as the
-  // record that it was once impossible.
-  'color-wave': 'per-glyph hue offset — a layer\'s colour is resolved once per FRAME, not per glyph (see motion.ts)',
-  'bounce': 'animates whole WORDS — Vector Type motion is per-glyph',
-  'breathe': 'scales the whole container — Vector Type motion is per-glyph',
-  'marquee': 'scrolls the whole container across the frame',
-  'pop-loop': 'back.out(3) pop with a repeat delay — no repeat-delay in a track',
-  'inward-echoes': 'draws multiple echo copies of the run',
-  'grid-scroll-x': 'tiles the run across the frame',
-  'grid-scroll-y': 'tiles the run across the frame',
-  'noise-tile': 'tiles the run across the frame',
+  'flip-in': `3-D rotationY with perspective — ${NO_EVALUATOR} (only the 2-D card-flip-h/v variants did)`,
+  'flip-out': `3-D rotationY with perspective — ${NO_EVALUATOR} (only the 2-D card-flip-h/v variants did)`,
+  'swing-in': `pendulum swing — ${NO_EVALUATOR}`,
+  'swing-out': `pendulum swing — ${NO_EVALUATOR}`,
+  'roll-in': `tumble roll — ${NO_EVALUATOR}`,
+  'roll-out': `tumble roll — ${NO_EVALUATOR}`,
+  'rubber-band': `non-uniform squash-and-stretch — ${NO_EVALUATOR}`,
+  'rubber-band-out': `non-uniform squash-and-stretch — ${NO_EVALUATOR}`,
+  'rubber-loop': `non-uniform squash-and-stretch — ${NO_EVALUATOR}`,
+  'curtain': `per-glyph direction and distance from the middle — ${NO_EVALUATOR}`,
+  'curtain-close': `per-glyph direction and distance from the middle — ${NO_EVALUATOR}`,
+  'scramble-in': `rewrites the glyphs themselves — ${NO_EVALUATOR}`,
+  'scramble-out': `rewrites the glyphs themselves — ${NO_EVALUATOR}`,
+  'zoom-blur-in': `a blur+rush combination — ${NO_EVALUATOR} (blur-in/blur-out/blur-slide-up did get one)`,
+  'zoom-blur-out': `a blur+rush combination — ${NO_EVALUATOR} (blur-in/blur-out/blur-slide-up did get one)`,
+  'focus-pull': `a staggered blur in-and-out — ${NO_EVALUATOR}`,
+  'bounce': `animates whole WORDS with a bounce curve — ${NO_EVALUATOR}`,
+  'jello': `skewX/skewY wobble — ${NO_EVALUATOR}`,
+  'tremble': `rapid micro-shake — ${NO_EVALUATOR}`,
+  'heartbeat': `a scripted double-pulse envelope, not a single curve — ${NO_EVALUATOR}`,
+  'neon-flicker': `a scripted multi-step opacity sequence — ${NO_EVALUATOR}`,
+  'color-wave': "per-glyph hue offset — a layer's colour is resolved once per FRAME, not per glyph (see motion.ts); "
+    + `also ${NO_EVALUATOR}`,
+  'scan-line': `a step-eased sweep with per-glyph phase — ${NO_EVALUATOR}`,
+  'pop-loop': `a staggered pop with a repeat delay — ${NO_EVALUATOR}`,
+  'shuffle': `alternating per-glyph direction swaps — ${NO_EVALUATOR}`,
+  'inward-echoes': NEEDS_COPIES,
+  'grid-scroll-x': NEEDS_COPIES,
+  'grid-scroll-y': NEEDS_COPIES,
+  'noise-tile': NEEDS_COPIES,
 }
 
-/** What happened to a preset. `dropped` covers both "known impossible" and
- *  "never heard of it" — in both cases the text arrives without motion. */
+/**
+ * What happened to a preset. `honest` means it crosses as a `kind: 'preset'`
+ * move running the exact same evaluator (`lib/motion/evaluate.ts`) the retired
+ * node's own canvas bake ran — not an approximation of it. `color-cycle` is
+ * `partial` — see the module doc. `dropped` covers both "known impossible"
+ * (`DROPPED_REASONS`) and "never heard of it"; either way the text arrives
+ * with no motion.
+ */
 export function presetFidelity(presetId: string): PresetFidelity {
-  return PRESET_MOTION[presetId]?.fidelity ?? 'dropped'
+  if (presetId === COLOR_CYCLE_ID) return 'partial'
+  const category = KINETIC_PRESETS_BY_ID[presetId]?.category
+  return category && vtKnowsPreset(category, presetId) ? 'honest' : 'dropped'
 }
 
 /** Every preset id this migration can carry across, for tests and reporting. */
 export function mappedPresetIds(): string[] {
-  return Object.keys(PRESET_MOTION).sort()
+  return Object.keys(KINETIC_PRESETS_BY_ID).filter(id => presetFidelity(id) !== 'dropped').sort()
+}
+
+/** The slot a crossing preset lands in, and the (unmodified) id it lands under.
+ *  `null` when the preset does not cross — see `presetFidelity`. */
+function presetCrossing(presetId: string): { slot: VtPresetSlot; presetId: string } | null {
+  const category = KINETIC_PRESETS_BY_ID[presetId]?.category
+  if (!category || !vtKnowsPreset(category, presetId)) return null
+  return { slot: category, presetId }
 }
 
 // ── Value coercion ──────────────────────────────────────────────────────────
@@ -280,17 +213,36 @@ function hex6(v: unknown, fallback: string): string {
   return fallback
 }
 
-/** A finished track: the preset's shape plus the timing every track needs. */
-function fullTrack(t: { path: string; from: number; to: number; easing: VtEasing; loops?: number }): VtMotionTrack {
-  return { path: t.path, from: t.from, to: t.to, easing: t.easing, loops: t.loops ?? 1, hold: 0, cycleOffset: 0, delay: 0 }
+/**
+ * A raw, pre-validated track handed to `mergeConfig`'s OLD-SHAPE `motion.tracks`
+ * array — the same fields `mergeTrack` (`~/lib/vectortype/config.ts`) reads,
+ * plus `easing`/`loops`, which `mergeMotion`'s old-shape branch reads directly
+ * off the raw object (not through `mergeTrack`) to build the converted move's
+ * own ease/play (`legacyTrackEasePlay`, `~/lib/studio/moves/merge.ts`).
+ *
+ * Deliberately NOT `VtMotionTrack`: that type dropped `easing`/`loops` when
+ * ease/play moved onto the owning MOVE (see its own doc comment) — but the OLD,
+ * pre-moves document shape this migration still speaks to `mergeConfig` still
+ * carries both, so a literal of this shape is a type error against
+ * `VtMotionTrack` even though it is exactly what the old-shape reader wants.
+ */
+interface RawLegacyTrack {
+  path: string
+  from: number
+  to: number
+  hold: number
+  cycleOffset: number
+  delay: number
+  easing: VtEasing
+  loops?: number
 }
 
 /**
  * The `color-cycle` track, built against the MERGED config.
  *
- * Has to run after the merge, for the reason `PresetMotion.colorCycle` gives: the
- * fill layer's stable id does not exist until `mergeConfig` has minted it. So this
- * is not a track the table can declare — it is one this function derives from the
+ * Has to run after the merge, for the reason the module doc gives: the fill
+ * layer's stable id does not exist until `mergeConfig` has minted it. So this
+ * is not a track a slot can declare — it is one this function derives from the
  * stack the merge produced, aimed at that layer BY ID exactly as every other
  * persisted reference to a layer is.
  *
@@ -332,7 +284,7 @@ function colorCycleTracks(config: VectorTypeConfig): VtMotionTrack[] {
  * an approximation of it would be exactly the guess this migration avoids.
  * Only tags present in BOTH keyframes with different values become tracks.
  */
-function axisTracks(raw: unknown, duration: number): VtMotionTrack[] {
+function axisTracks(raw: unknown, duration: number): RawLegacyTrack[] {
   if (!Array.isArray(raw) || raw.length !== 2) return []
   const sorted = [...raw].sort((a: any, b: any) => num(a?.t, 0) - num(b?.t, 0))
   const [a, b] = sorted as any[]
@@ -342,7 +294,7 @@ function axisTracks(raw: unknown, duration: number): VtMotionTrack[] {
   // names collapse to the two curves a track can draw.
   const easeName = typeof a?.ease === 'string' ? a.ease : ''
   const easing: VtEasing = (easeName === '' || easeName === 'none' || easeName === 'linear') ? 'linear' : 'easeinout'
-  const out: VtMotionTrack[] = []
+  const out: RawLegacyTrack[] = []
   for (const [tag, v] of Object.entries(from)) {
     if (typeof v !== 'number' || !Number.isFinite(v)) continue
     const end = to[tag]
@@ -391,8 +343,8 @@ export function kineticParamsToVectorType(rawParams: unknown): KineticMigration 
   }
 
   const presetId = typeof o.presetId === 'string' ? o.presetId : KINETIC_DEFAULTS.presetId
-  const mapped = PRESET_MOTION[presetId]
   const duration = clamp(num(o.duration, KINETIC_DEFAULTS.duration), 0.1, 60)
+  const crossing = presetCrossing(presetId)
 
   // Google-hosted families cannot cross: Vector Type resolves `fontId` against
   // its own catalog of downloadable variable fonts, and a Google family has no
@@ -408,11 +360,32 @@ export function kineticParamsToVectorType(rawParams: unknown): KineticMigration 
     axes.wght = o.weight
   }
 
-  const staggerScale = mapped?.staggerScale ?? 1
-  const tracks: VtMotionTrack[] = [
-    ...(mapped?.tracks ?? []).map(fullTrack),
-    ...axisTracks(o.axisKeyframes, duration),
-  ]
+  const staggerScale = STAGGER_DOUBLE_LOOP_IDS.has(presetId) ? 2 : 1
+  const axisTr = axisTracks(o.axisKeyframes, duration)
+
+  // The OLD document shape `mergeMotion` still reads (`~/lib/vectortype/config.ts`):
+  // a preset lands in the slot named by its own phase (`in`/`out`/`loop`), a
+  // literal track array lands in `tracks`. No `ease` is set on the slot — an
+  // absent one means "use the preset's own NATIVE ease", exactly the render-
+  // parity rule `legacyPresetNativeEase` documents, and exactly what "a
+  // sensible ease — native if easily available, else default" means here.
+  const motion: Record<string, unknown> = {
+    duration,
+    fps: clamp(Math.round(num(o.fps, KINETIC_DEFAULTS.fps)), 1, 60),
+    size: 1080,
+    stagger: {
+      delay: clamp(num(o.stagger, KINETIC_DEFAULTS.stagger) * staggerScale, 0, 1),
+      order: 'forward',
+      seed: 0,
+    },
+  }
+  if (crossing) {
+    // The node's own saved `duration` IS the move's duration — Kinetic never
+    // had a separate "how long is the reveal/cycle" field, so the one number
+    // it did save is the honest answer for both.
+    motion[crossing.slot] = { presetId: crossing.presetId, duration }
+  }
+  if (axisTr.length) motion.tracks = axisTr
 
   const config = mergeConfig({
     text: typeof o.text === 'string' ? o.text : KINETIC_DEFAULTS.text,
@@ -429,31 +402,18 @@ export function kineticParamsToVectorType(rawParams: unknown): KineticMigration 
     // be a second, hand-maintained copy of that migration.
     fill: hex6(o.color, KINETIC_DEFAULTS.color),
     strokeWidth: 0,
-    motion: {
-      tracks,
-      duration,
-      fps: clamp(Math.round(num(o.fps, KINETIC_DEFAULTS.fps)), 1, 60),
-      size: 1080,
-      stagger: {
-        delay: clamp(num(o.stagger, KINETIC_DEFAULTS.stagger) * staggerScale, 0, 1),
-        order: 'forward',
-        seed: 0,
-      },
-    },
+    motion,
   })
 
   // The COLOUR track, appended after the merge because it needs the layer id the
   // merge minted. Pushed rather than re-merged: it is already in `mergeTrack`'s
   // output shape (every field present, colours long-form lower-case), which its
-  // own round-trip test pins — so a save/load cycle returns it unchanged.
-  //
-  // CARRY-FORWARD (motion moves, Task 5): `motion.tracks` no longer exists —
-  // a track lives inside a `kind: 'tracks'` MOVE now. Wrapped in one here with
-  // the exact ease/play the studio's own Colour Cycle track preset uses
+  // own round-trip test pins — so a save/load cycle returns it unchanged. The
+  // exact ease/play the studio's own Colour Cycle track preset uses
   // (`./trackPresets.ts`'s `colour-cycle`: ping-pong, i.e. `ease: none`,
   // `play: backAndForth ×1`), so a migrated node's cycle plays identically to
   // one a user added from the gallery.
-  if (mapped?.colorCycle) {
+  if (presetId === COLOR_CYCLE_ID) {
     const tracks = colorCycleTracks(config)
     if (tracks.length) {
       config.motion.moves.push({

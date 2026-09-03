@@ -673,7 +673,22 @@ const vectorTypeAdapter: PatchAdapter = {
     } catch { /* offline / unknown family — static vocabulary only */ }
     return { config, controls: vtAgentControls(config, axes as any) }
   },
-  params: (config: any) => makeConfigParams(() => config, () => 0),
+  // `listKey: 'appearance'` — the DEFAULT ('layers') never matched this
+  // studio's stack, so every `layer.*`/`appearance.<id>.*` key `vtAgentControls`
+  // offers was silently DEAD through this adapter (read `undefined`, write
+  // fabricating a stray property on the array) until now; caught while wiring
+  // moves below, fixed alongside it rather than left for its own turn.
+  // `extraLists: [{ key: 'moves', at: 'motion.moves' }]` is Task 10's own
+  // addition — it is what makes `moves.<id>.duration`/`.ease`/`.params.<key>`/
+  // `.tracks.<i>.from` (`agentControls.ts`'s `vtMoveFieldControls`) resolve
+  // rather than fabricate a dead `config.moves.<id>` property: the control's
+  // own key is the short `moves.<id>.…` (matching `appearance.<id>.…`'s
+  // grammar), but the array it actually addresses lives at `motion.moves` —
+  // `at` is what tells `makeConfigParams` where to really look (see its own
+  // `ExtraIdList` doc).
+  params: (config: any) => makeConfigParams(
+    () => config, () => 0, 'appearance', 'id', 'layer', [{ key: 'moves', at: 'motion.moves' }],
+  ),
   write: (n: any, config: any) => {
     if (!n.data) n.data = {}
     if (!n.data.properties) n.data.properties = {}

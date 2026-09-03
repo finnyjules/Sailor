@@ -1,5 +1,4 @@
 import type { Params, ParamValue } from '~/lib/spacetype/effect'
-import { indexOfId } from '~/lib/studio/idPath'
 
 /**
  * Bridge a nested reactive config object (Gradient/Shader studios use a single
@@ -40,10 +39,63 @@ import { indexOfId } from '~/lib/studio/idPath'
  *
  * Additive for the other studios: an all-digit member segment is still a plain
  * index, and no other studio declares a key beginning `<listKey>.`.
+ *
+ * ## `extraLists` — a SECOND id-addressed list, nested arbitrarily deep
+ *
+ * `listKey` (+ its `layer.` relative prefix) is still exactly one list, one
+ * level below the root — everything above was already true before this
+ * parameter existed. `extraLists` adds more of the SAME `<key>.<id>.<rest>`
+ * addressing for lists whose ADDRESS (the prefix a control key spells) is not
+ * the same as where the array actually lives: Vector Type's moves stack is
+ * addressed `moves.<id>.duration` (short, matching `appearance.<id>.*`'s own
+ * grammar — see `vectortype/agentControls.ts`'s `vtMoveFieldControls`), but it
+ * actually lives at `cfg.motion.moves`, nested under the clip. `key` is the
+ * address prefix (what a control's own key starts with); `at` is the real
+ * dotted path to the array from the config root, defaulting to `key` itself
+ * for the common case where the two are the same word (a list living at the
+ * config's top level, addressed by that same name). Each entry can name its
+ * own `idKey` (defaults to `'id'`, matching every stack in this codebase so
+ * far); resolution is identical in every other respect to the primary
+ * `listKey` — duplicate ids resolve to the lowest index, an unresolvable id or
+ * an out-of-range index makes the key dead (read `undefined`, write a no-op),
+ * never a fabricated container. `listKey` is checked first, so a caller that
+ * also uses it for `layer.*` sees no change in precedence.
  */
 type AnyObj = Record<string, unknown>
 
 const isIndex = (k: string): boolean => /^\d+$/.test(k)
+
+export interface ExtraIdList {
+  /** The address prefix a control key starts with — e.g. `'moves'` for `moves.<id>.duration`. */
+  key: string
+  /** Dotted path to the array from the config root — e.g. `'motion.moves'`. Defaults to `key`. */
+  at?: string
+  /** Field holding a member's stable id. Defaults to `'id'`. */
+  idKey?: string
+}
+
+/** Walk `obj` down `segs` (each a plain property name), stopping at the first
+ *  non-object. Shared by the relative-prefix and absolute-id branches below,
+ *  and by every entry in `extraLists`, so a nested list resolves exactly the
+ *  same way a top-level one always did. */
+function walk(obj: AnyObj | null, segs: readonly string[]): unknown {
+  let cur: unknown = obj
+  for (const s of segs) {
+    if (cur == null || typeof cur !== 'object') return undefined
+    cur = (cur as AnyObj)[s]
+  }
+  return cur
+}
+
+/** `indexOfId`'s rule (lowest index wins a duplicate), applied to an
+ *  ALREADY-RESOLVED array rather than re-deriving it from `cfg[list]` — the
+ *  nested lists this module resolves are not one property lookup, so the
+ *  single-segment `~/lib/studio/idPath.ts` helper cannot be reused as-is;
+ *  this is that same logic, generalised to any list already in hand. */
+function indexInList(list: readonly unknown[], id: string, idKey: string): number | undefined {
+  const i = list.findIndex((m) => (m as AnyObj | null)?.[idKey] === id)
+  return i === -1 ? undefined : i
+}
 
 export function makeConfigParams(
   root: () => unknown,
@@ -63,18 +115,22 @@ export function makeConfigParams(
    *  matters: without it a relative key would fall through to the root and the
    *  write below would fabricate a bogus top-level `object` property. */
   relativePrefix = 'layer',
+  extraLists: readonly ExtraIdList[] = [],
 ): Params {
+  const lists = [{ key: listKey, at: listKey, idKey }, ...extraLists.map(l => ({ ...l, at: l.at ?? l.key }))]
+
   function base(key: string): { obj: AnyObj | null; parts: string[] } {
     const parts = key.split('.')
     let obj = root() as AnyObj | null
     if (parts[0] === relativePrefix) {
-      const layers = (obj as AnyObj | null)?.[listKey] as AnyObj[] | undefined
+      const layers = walk(obj, [listKey]) as AnyObj[] | undefined
       obj = layers?.[activeLayer()] ?? null
       parts.shift()
       return { obj, parts }
     }
-    const member = parts[1]
-    if (parts[0] === listKey && member !== undefined) {
+    for (const l of lists) {
+      const addrSegs = l.key.split('.')
+      if (parts.length <= addrSegs.length || !addrSegs.every((s, i) => parts[i] === s)) continue
       // Refuse rather than guess — see the header. `null` makes read `undefined`
       // and write a no-op, so nothing is fabricated on the array.
       //
@@ -83,11 +139,16 @@ export function makeConfigParams(
       // on a two-layer stack would grow a sparse array of empty objects that the
       // renderer then reads as real layers. `resolveIdPath` takes exactly this
       // posture (`lib/studio/idPath.ts`).
-      const list = (obj as AnyObj | null)?.[listKey]
+      const member = parts[addrSegs.length]!
+      const locSegs = l.at.split('.')
+      const list = walk(obj, locSegs)
       if (!Array.isArray(list)) return { obj: null, parts }
-      const i = isIndex(member) ? Number(member) : indexOfId(obj, listKey, member, idKey)
+      const i = isIndex(member) ? Number(member) : indexInList(list, member, l.idKey ?? 'id')
       if (i === undefined || i < 0 || i >= list.length) return { obj: null, parts }
-      parts[1] = String(i)
+      // The REAL absolute path from root — `locSegs` may differ from `addrSegs`
+      // (moves.<id>.duration addresses `motion.moves.<i>.duration`), so this is
+      // built fresh rather than patched in place over the address's own parts.
+      return { obj, parts: [...locSegs, String(i), ...parts.slice(addrSegs.length + 1)] }
     }
     return { obj, parts }
   }

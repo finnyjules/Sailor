@@ -19,9 +19,10 @@ import {
 } from '~/lib/vectortype/migrateKinetic'
 import { KINETIC_PRESETS_BY_ID } from '~/data/kinetic-presets'
 import { DEFAULT_FILL, paintPrimaryColor } from '~/lib/spacetype/fillTile'
-import { applyMotion, glyphTransform } from '~/lib/vectortype/motion'
+import { applyMotion } from '~/lib/vectortype/motion'
+import { presetTransform } from '~/lib/vectortype/presetMotion'
 import { vtBaseAppearance } from '~/lib/vectortype/config'
-import { resolveIdPath } from '~/lib/studio/idPath'
+import { moveTracks } from '~/lib/studio/moves/tracks'
 
 /** A realistic saved `params` blob, in the shape WidgetKineticType.parse read. */
 const SAVED_PARAMS = {
@@ -131,22 +132,25 @@ describe('kineticParamsToVectorType — what carries across', () => {
 })
 
 describe('kineticParamsToVectorType — preset mapping', () => {
-  it('produces real glyph tracks for a mapped preset', () => {
+  it('produces one preset move, at the phase the Kinetic preset always ran at', () => {
     const m = kineticParamsToVectorType(JSON.stringify({ ...SAVED_PARAMS, presetId: 'slide-up' }))
     expect(m.fidelity).toBe('honest')
-    const paths = m.config.motion.tracks.map(t => t.path).sort()
-    expect(paths).toEqual(['glyph.dy', 'glyph.opacity'])
-    const dy = m.config.motion.tracks.find(t => t.path === 'glyph.dy')!
-    expect([dy.from, dy.to]).toEqual([40, 0])
+    expect(m.config.motion.moves).toHaveLength(1)
+    const mv = m.config.motion.moves[0]!
+    expect(mv.kind).toBe('preset')
+    expect(mv.presetId).toBe('slide-up')
+    expect(mv.phase).toBe('in')          // slide-up's own KineticPreset.category
+    expect(mv.duration).toBe(3)          // the node's own saved duration, carried
+    expect(mv.play).toEqual({ mode: 'once', times: 1 })   // in/out → once
   })
 
   it('leaves motion EMPTY for a preset with no honest equivalent', () => {
-    // `color-cycle` was in this list until colour tracks landed — it is now
-    // `partial` and gets a real track. See the colour-track spec for its numbers.
-    for (const id of ['scramble-in', 'blur-in', 'jello', 'color-wave', 'marquee']) {
+    // Every id here is GSAP/DOM-only — never ported to lib/motion/evaluate.ts —
+    // so `vtKnowsPreset` cannot find it for its own category. See DROPPED_REASONS.
+    for (const id of ['scramble-in', 'jello', 'color-wave', 'rubber-band', 'flip-in']) {
       const m = kineticParamsToVectorType(JSON.stringify({ ...SAVED_PARAMS, presetId: id }))
       expect(m.fidelity, id).toBe('dropped')
-      expect(m.config.motion.tracks, id).toEqual([])
+      expect(m.config.motion.moves, id).toEqual([])
       expect(m.config.text, id).toBe('LAUNCH')   // the text still crosses
     }
   })
@@ -154,23 +158,26 @@ describe('kineticParamsToVectorType — preset mapping', () => {
   it('treats an unknown preset id as dropped, not as the default preset', () => {
     const m = kineticParamsToVectorType(JSON.stringify({ ...SAVED_PARAMS, presetId: 'preset-from-the-future' }))
     expect(m.fidelity).toBe('dropped')
-    expect(m.config.motion.tracks).toEqual([])
+    expect(m.config.motion.moves).toEqual([])
     expect(m.config.text).toBe('LAUNCH')
   })
 
-  it('every mapped preset id is a REAL preset id, and every track targets something real', () => {
-    const GLYPH_FIELDS = ['glyph.dx', 'glyph.dy', 'glyph.scale', 'glyph.rotate', 'glyph.opacity']
+  it('every non-dropped preset id crosses as one real move, phased to its own Kinetic category', () => {
     for (const id of mappedPresetIds()) {
       expect(KINETIC_PRESETS_BY_ID[id], `${id} is not a real kinetic preset`).toBeTruthy()
+      const category = KINETIC_PRESETS_BY_ID[id]!.category
       const m = kineticParamsToVectorType(JSON.stringify({ ...SAVED_PARAMS, presetId: id }))
-      expect(m.config.motion.tracks.length, id).toBeGreaterThan(0)
-      for (const t of m.config.motion.tracks) {
-        // A COLOUR track aims at a fill layer's own paint rather than at the
-        // per-glyph namespace, and it must RESOLVE — a path naming a layer that
-        // is not there would pass a "starts with appearance." check and animate
-        // nothing, which is the failure this assertion exists to catch.
-        if (t.fromColor) expect(resolveIdPath(m.config, t.path), `${id} → ${t.path}`).toBeDefined()
-        else expect(GLYPH_FIELDS, id).toContain(t.path)
+      expect(m.config.motion.moves, id).toHaveLength(1)
+      const mv = m.config.motion.moves[0]!
+      expect(mv.phase, id).toBe(category)
+      if (id === 'color-cycle') {
+        // The one id whose identity is a COLOUR, not a glyph transform — its own
+        // hand-built track move, not a pass-through `kind: 'preset'`.
+        expect(mv.kind, id).toBe('tracks')
+      } else {
+        expect(mv.kind, id).toBe('preset')
+        expect(mv.presetId, id).toBe(id)
+        expect(mv.duration, id).toBeGreaterThan(0)
       }
     }
   })
@@ -189,15 +196,18 @@ describe('kineticParamsToVectorType — preset mapping', () => {
   })
 
   it('the mapped motion actually MOVES when the evaluator reads it', () => {
-    // Not "the tracks exist" — the real evaluator, on the real config, at two
-    // times, giving two different glyph transforms. A track pointing at a path
-    // nothing reads would pass the shape checks above and fail this one.
+    // Not "the move exists" — the real preset evaluator, on the real config, at
+    // two times, giving two different glyph transforms. `presetTransform` is the
+    // preset-only half of `vtGlyphMotion` (tracks and blink excluded), the same
+    // evaluator the studio's own gallery presets run through.
     const m = kineticParamsToVectorType(JSON.stringify({ ...SAVED_PARAMS, presetId: 'slide-up', stagger: 0 }))
-    const start = glyphTransform(m.config, 0, 0, 6)
-    const end = glyphTransform(m.config, m.config.motion.duration, 0, 6)
-    expect(start.dy).toBeCloseTo(40, 3)
+    const start = presetTransform(m.config, 0, 0, 6)
+    const end = presetTransform(m.config, m.config.motion.duration, 0, 6)
+    // IN_EVAL['slide-up']: dy = (1 - e) * 0.5 unit-heights, opacity = e — in
+    // OUTPUT PIXELS that is ±0.5 * config.size (180 here, from SAVED_PARAMS).
+    expect(start.dy).toBeCloseTo(90, 1)
     expect(start.opacity).toBeCloseTo(0, 3)
-    expect(end.dy).toBeCloseTo(0, 3)
+    expect(end.dy).toBeCloseTo(0, 1)
     expect(end.opacity).toBeCloseTo(1, 3)
   })
 
@@ -208,7 +218,10 @@ describe('kineticParamsToVectorType — preset mapping', () => {
       axes: { wght: 100 },
       axisKeyframes: [{ t: 0, axes: { wght: 100 } }, { t: 1, axes: { wght: 900 } }],
     }))
-    const track = m.config.motion.tracks.find(t => t.path === 'axes.wght')
+    // An axis track is independent of the preset — it lands in its own
+    // `kind: 'tracks'` move, so it is read back through the shared flattener
+    // rather than off a (now nonexistent) flat `motion.tracks` array.
+    const track = moveTracks(m.config.motion).find(t => t.path === 'axes.wght')
     expect(track).toBeTruthy()
     expect([track!.from, track!.to]).toEqual([100, 900])
     expect(applyMotion(m.config, m.config.motion.duration).axes.wght).toBeCloseTo(900, 3)
@@ -220,7 +233,7 @@ describe('kineticParamsToVectorType — preset mapping', () => {
       presetId: 'unmapped-on-purpose',
       axisKeyframes: [{ t: 0, axes: { wght: 100 } }, { t: 0.5, axes: { wght: 900 } }, { t: 1, axes: { wght: 100 } }],
     }))
-    expect(m.config.motion.tracks).toEqual([])
+    expect(m.config.motion.moves).toEqual([])
   })
 })
 
@@ -261,7 +274,7 @@ describe('kineticParamsToVectorType — hostile input', () => {
       expect(m.config.motion.duration).toBeGreaterThan(0)
       expect(Number.isFinite(m.config.motion.fps)).toBe(true)
       expect(m.config.motion.fps).toBeGreaterThan(0)
-      expect(Array.isArray(m.config.motion.tracks)).toBe(true)
+      expect(Array.isArray(m.config.motion.moves)).toBe(true)
       expect(Array.isArray(m.frames)).toBe(true)
       // Through the same collapse the renderer uses, so this still asserts
       // "a usable colour reaches the canvas" rather than a storage shape.
