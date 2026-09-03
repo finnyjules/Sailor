@@ -43,6 +43,51 @@ describe('ShapePicker', () => {
     expect(w.emitted('close')).toHaveLength(1)
     w.unmount()
   })
+  // The spec's keyboard contract: arrows move, Enter picks, Escape closes.
+  // The grid is 5 columns, so ArrowDown is +5 tiles, not +1.
+  it('moves focus with the arrow keys and picks with Enter', async () => {
+    const w = mountPicker()
+    const tiles = w.findAll('[data-shape]').map(t => t.element as HTMLElement)
+    tiles[0]!.focus()
+
+    tiles[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    expect(document.activeElement).toBe(tiles[1])
+
+    tiles[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(document.activeElement).toBe(tiles[6])
+
+    const focused = document.activeElement as HTMLElement
+    focused.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(w.emitted('update:modelValue')).toEqual([[focused.dataset.shape]])
+    w.unmount()
+  })
+  it('clamps arrow movement at both ends and jumps with Home/End', async () => {
+    const w = mountPicker()
+    const tiles = w.findAll('[data-shape]').map(t => t.element as HTMLElement)
+    tiles[0]!.focus()
+    tiles[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+    expect(document.activeElement).toBe(tiles[0])
+    tiles[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    expect(document.activeElement).toBe(tiles[tiles.length - 1])
+    w.unmount()
+  })
+  it('ArrowDown from the search box moves focus onto the current shape', async () => {
+    const w = mountPicker({ modelValue: 'sparkle' })
+    const input = w.find('input[type="search"]').element as HTMLInputElement
+    input.focus()
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect((document.activeElement as HTMLElement).dataset.shape).toBe('sparkle')
+    w.unmount()
+  })
+  it('mirrors the pressed state as aria-selected for the listbox role', () => {
+    const w = mountPicker({ modelValue: 'sparkle' })
+    expect(w.find('[role="listbox"]').exists()).toBe(true)
+    const tile = w.find('[data-shape="sparkle"]')
+    expect(tile.attributes('role')).toBe('option')
+    expect(tile.attributes('aria-selected')).toBe('true')
+    expect(w.find('[data-shape="none"]').attributes('aria-selected')).toBe('false')
+    w.unmount()
+  })
   it('closes on Escape', async () => {
     const w = mountPicker()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
@@ -65,14 +110,17 @@ describe('RowShape', () => {
       attachTo: document.body,
     })
 
-    for (const call of warnSpy.mock.calls) {
-      expect(String(call[0])).not.toContain('Extraneous')
-    }
+    expect(warnSpy.mock.calls.filter(c => String(c[0]).includes('Extraneous'))).toEqual([])
 
     expect(w.find('button').text()).toContain('Sparkle')
 
     await w.find('button').trigger('click')
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
+
+    // The button is the picker's `ignore` element, so it never doubles as an
+    // outside click — a second press is a plain toggle back to closed.
+    await w.find('button').trigger('click')
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
 
     w.unmount()
     warnSpy.mockRestore()

@@ -67,7 +67,7 @@ export function searchShapes(query: string): LibraryShape[] {
   const q = query.trim().toLowerCase()
   if (!q) return [...SHAPES]
   const qDashed = q.replace(/\s+/g, '-')
-  return SHAPES.filter(s => s.id.includes(qDashed) || s.name.toLowerCase().includes(q))
+  return SHAPES.filter(s => s.id.toLowerCase().includes(qDashed) || s.name.toLowerCase().includes(q))
 }
 
 /** The option list a `shape` control exposes to the agent: 'none' first when allowed, then every id. */

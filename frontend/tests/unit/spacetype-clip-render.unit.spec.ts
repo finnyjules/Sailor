@@ -51,6 +51,9 @@ vi.mock('../../app/lib/spacetype/textTexture', () => ({
 vi.mock('../../app/lib/spacetype/effects/index', async () => {
   const { ribbonEffect } = await import('../../app/lib/spacetype/effects/ribbon')
   const { withSeparatorControls } = await import('../../app/lib/spacetype/separator')
+  // Mirrors effects/index.ts, which registers every effect through
+  // withSeparatorControls — this mock must be updated in step with that
+  // wrapper, or the effect under test here stops matching the real registry.
   const realRibbon = withSeparatorControls(ribbonEffect)
   const registry = new Map<string, any>()
   function getEffect(id: string) {

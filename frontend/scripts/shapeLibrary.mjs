@@ -95,6 +95,11 @@ export function parsePath(d) {
         px = x2; py = y2; cx = x; cy = y; break
       }
       case 'Z': case 'z': {
+        // Z takes no arguments, so this branch consumes no token. A number
+        // sitting right after it would therefore be re-read as Z forever
+        // (an infinite loop that OOMs the build) — SVG requires a new
+        // subpath to open with M, so reject it explicitly instead.
+        if (typeof tokens[i] === 'number') throw new Error('unexpected number after "Z" — a new subpath must start with M')
         out.push({ c: 'Z', p: [] })
         cx = sx; cy = sy; px = cx; py = cy; break
       }
@@ -155,10 +160,14 @@ export function applyMatrix(cmds, m) {
 /** Ink bbox [x, y, w, h]: lines exactly, cubics sampled at 16 steps. */
 export function pathBounds(cmds) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  let cx = 0, cy = 0
+  let cx = 0, cy = 0, sx = 0, sy = 0
   const add = (x, y) => { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y }
   for (const { c, p } of cmds) {
-    if (c === 'M' || c === 'L') { cx = p[0]; cy = p[1]; add(cx, cy) }
+    if (c === 'M') { cx = sx = p[0]; cy = sy = p[1]; add(cx, cy) }
+    else if (c === 'L') { cx = p[0]; cy = p[1]; add(cx, cy) }
+    // Z returns the pen to the subpath start, so a C right after it must
+    // sample its cubic from there — not from wherever the last L landed.
+    else if (c === 'Z') { cx = sx; cy = sy }
     else if (c === 'C') {
       for (let k = 1; k <= 16; k++) {
         const t = k / 16, mt = 1 - t

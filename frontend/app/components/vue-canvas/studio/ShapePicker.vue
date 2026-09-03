@@ -16,6 +16,10 @@ const props = withDefaults(defineProps<{
   modelValue: string
   allowNone?: boolean
   anchor: { x: number; y: number }
+  /** The element that opened this picker. A press on it is NOT an outside
+   *  click: the trigger owns the open/closed toggle, and closing here as well
+   *  would make the same press close and immediately reopen the panel. */
+  ignore?: HTMLElement | null
 }>(), { allowNone: true })
 const emit = defineEmits<{ (e: 'update:modelValue', v: string): void; (e: 'close'): void }>()
 
@@ -52,8 +56,58 @@ onMounted(() => {
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') { e.preventDefault(); emit('close') }
 }
+
+/** Roving focus across the tile grid. The grid is a fixed 5-column CSS grid
+ *  (grid-cols-5 below), so Down/Up is ±5 tiles and Right/Left is ±1; the
+ *  column count lives here as GRID_COLS because nothing in the DOM reports
+ *  it. Movement clamps at both ends rather than wrapping — the None tile and
+ *  the last shape are the edges of the list, not a ring. */
+const GRID_COLS = 5
+const gridRef = ref<HTMLDivElement | null>(null)
+
+function tiles(): HTMLElement[] {
+  return Array.from(gridRef.value?.querySelectorAll<HTMLElement>('[data-shape]') ?? [])
+}
+function focusTile(index: number) {
+  const list = tiles()
+  if (!list.length) return
+  list[Math.min(list.length - 1, Math.max(0, index))]!.focus()
+}
+
+function onGridKeydown(e: KeyboardEvent) {
+  const list = tiles()
+  const i = list.indexOf(document.activeElement as HTMLElement)
+  if (i < 0) return
+  const steps: Record<string, number | undefined> = {
+    ArrowRight: 1, ArrowLeft: -1, ArrowDown: GRID_COLS, ArrowUp: -GRID_COLS,
+  }
+  const step = steps[e.key]
+  if (step !== undefined) { e.preventDefault(); focusTile(i + step); return }
+  if (e.key === 'Home') { e.preventDefault(); focusTile(0); return }
+  if (e.key === 'End') { e.preventDefault(); focusTile(list.length - 1); return }
+  if (e.key === 'Enter' || e.key === ' ') {
+    // A focused <button> already activates on Enter/Space; preventDefault
+    // stops the browser ALSO synthesising a click, which would pick the same
+    // tile twice. Picking here keeps the behaviour identical either way.
+    e.preventDefault()
+    const id = list[i]!.dataset.shape
+    if (id) pick(id)
+  }
+}
+
+/** Focus stays in the search box on open (typing is the common first move);
+ *  ArrowDown is the documented way into the grid, landing on the current
+ *  shape when it is visible so the selection is where the eye already is. */
+function onSearchKeydown(e: KeyboardEvent) {
+  if (e.key !== 'ArrowDown') return
+  e.preventDefault()
+  const current = tiles().findIndex(el => el.dataset.shape === props.modelValue)
+  focusTile(current >= 0 ? current : 0)
+}
 function onOutside(e: MouseEvent) {
-  if (rootRef.value?.contains(e.target as Node)) return
+  const target = e.target as Node
+  if (rootRef.value?.contains(target)) return
+  if (props.ignore?.contains(target)) return
   emit('close')
 }
 onMounted(() => {
@@ -86,6 +140,7 @@ const tileOn = 'bg-white text-neutral-900'
         placeholder="Search shapes"
         spellcheck="false"
         class="mb-2 h-7 w-full rounded-[6px] bg-white/[0.06] px-2 text-[11px] text-white/90 outline-none placeholder:text-white/30 focus:bg-white/[0.10]"
+        @keydown="onSearchKeydown"
       />
       <div class="flex gap-2">
         <div class="flex w-24 shrink-0 flex-col gap-0.5">
@@ -97,16 +152,24 @@ const tileOn = 'bg-white text-neutral-900'
             @click="family = f.id"
           >{{ f.label }}</button>
         </div>
-        <div class="grid max-h-64 flex-1 grid-cols-5 content-start gap-1 overflow-y-auto pr-1">
+        <div
+          ref="gridRef"
+          class="grid max-h-64 flex-1 grid-cols-5 content-start gap-1 overflow-y-auto pr-1"
+          role="listbox"
+          aria-label="Shapes"
+          @keydown="onGridKeydown"
+        >
           <button
-            v-if="allowNone" type="button" data-shape="none" title="None"
+            v-if="allowNone" type="button" data-shape="none" title="None" role="option"
             :aria-pressed="modelValue === SHAPE_NONE ? 'true' : 'false'"
+            :aria-selected="modelValue === SHAPE_NONE ? 'true' : 'false'"
             :class="[tile, modelValue === SHAPE_NONE ? tileOn : tileIdle]"
             @click="pick(SHAPE_NONE)"
           ><span class="text-[11px]">None</span></button>
           <button
-            v-for="s in visible" :key="s.id" type="button" :data-shape="s.id" :title="s.name"
+            v-for="s in visible" :key="s.id" type="button" :data-shape="s.id" :title="s.name" role="option"
             :aria-pressed="modelValue === s.id ? 'true' : 'false'"
+            :aria-selected="modelValue === s.id ? 'true' : 'false'"
             :class="[tile, modelValue === s.id ? tileOn : tileIdle]"
             @click="pick(s.id)"
           >

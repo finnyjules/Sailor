@@ -67,13 +67,35 @@ export function makeTextTexture(opts: TextTextureOptions): THREE.CanvasTexture {
   // is the separator's own. Without one, the label (gap included) is measured
   // exactly as before, so the old tile is byte-identical.
   const textWidths = labels.map(l => Math.max(1, ctx.measureText(sep ? l.trimEnd() : l).width))
+  // Vertical ink box of the FIRST label (glyph top/bottom, not the whole row) — lets an effect
+  // fit/centre the actual letters rather than the full tile. MUST measure with the SAME baseline
+  // the glyph is drawn at (middle), or actualBoundingBox* is relative to the alphabetic baseline
+  // and the box is offset (clips letters with ascenders/caps). Metrics may be unsupported → fall
+  // back to typical cap proportions.
+  //
+  // Measured HERE, ahead of the separator block, because the shape's row clamp
+  // below needs asc0/desc0. The baseline is set to 'middle' for this
+  // measurement ONLY and put straight back: `cap` below reads
+  // actualBoundingBoxAscent off the default 'alphabetic' baseline and would
+  // measure something else otherwise. The draw loop sets 'middle' again itself.
+  ctx.textBaseline = 'middle'
+  const m0 = ctx.measureText((labels[0] ?? ' ').trimEnd())
+  const asc0 = (m0 as TextMetrics).actualBoundingBoxAscent || fontPx * 0.36
+  const desc0 = (m0 as TextMetrics).actualBoundingBoxDescent || fontPx * 0.04
+  ctx.textBaseline = 'alphabetic'
+
   let shapeW = 0, shapeH = 0, gapPx = 0
   if (sep) {
     const m = ctx.measureText((labels[0] ?? ' ').trimEnd())
     const cap = (m as TextMetrics).actualBoundingBoxAscent || fontPx * 0.72
     // Rows share one canvas with no per-row clip, so a shape taller than a row
-    // would bleed into its neighbour — clamp it to the row height.
-    shapeH = Math.min(cap * sep.size, rowH)
+    // would bleed into its neighbour. The shape is centred on the ink midline
+    // `mid = cy + (desc0 - asc0) / 2`, which sits (desc0 - asc0) / 2 off the
+    // row centre — so the height that actually fits inside the band is the row
+    // minus twice that offset, not the whole row. asc0/desc0 are row-0 metrics
+    // and rowH is shared, so this offset is the same for every row.
+    const avail = Math.max(1, rowH - Math.abs(desc0 - asc0))
+    shapeH = Math.min(cap * sep.size, avail)
     shapeW = shapeH * shapeAspect(sep.shape)
     gapPx = sep.gap * fontPx * 0.25
   }
@@ -106,15 +128,6 @@ export function makeTextTexture(opts: TextTextureOptions): THREE.CanvasTexture {
     const ink = sep ? textWidths[k]! + gapPx + shapeW : Math.max(1, ctx.measureText(l.trimEnd()).width)
     return Math.min(1, ink / widths[k]!)
   })
-  // Vertical ink box of the FIRST label (glyph top/bottom, not the whole row) — lets an effect
-  // fit/centre the actual letters rather than the full tile. MUST measure with the SAME baseline
-  // the glyph is drawn at (middle), or actualBoundingBox* is relative to the alphabetic baseline
-  // and the box is offset (clips letters with ascenders/caps). Metrics may be unsupported → fall
-  // back to typical cap proportions.
-  ctx.textBaseline = 'middle'
-  const m0 = ctx.measureText((labels[0] ?? ' ').trimEnd())
-  const asc0 = (m0 as TextMetrics).actualBoundingBoxAscent || fontPx * 0.36
-  const desc0 = (m0 as TextMetrics).actualBoundingBoxDescent || fontPx * 0.04
   const cy0 = (n - 1) * rowH + rowH / 2   // canvas-y where row 0 is drawn (textBaseline 'middle')
   const totalH0 = rowH * n
   const inkHeightFrac = Math.min(1, (asc0 + desc0) / totalH0)

@@ -34,6 +34,12 @@ describe('parsePath', () => {
     expect(() => parsePath('M0,0A5,5 0 0 1 10,10')).toThrow(/unsupported path command "A"/)
     expect(() => parsePath('M0,0Q5,5 10,10')).toThrow(/unsupported path command "Q"/)
   })
+  // Z consumes no token, so without an explicit guard the parser re-reads the
+  // same trailing number as another Z forever and the build OOMs rather than
+  // reporting a bad path.
+  it('rejects a number after Z instead of looping forever', () => {
+    expect(() => parsePath('M0,0L10,0Z5,5')).toThrow(/after "Z"/)
+  })
   it('serialises with 2-decimal numbers and no separators between commands', () => {
     expect(serializePath(parsePath('M1.23456,2.5l1,1Z'))).toBe('M1.23,2.5L2.23,3.5Z')
   })
@@ -54,6 +60,12 @@ describe('transforms', () => {
 describe('pathBounds', () => {
   it('bounds a rectangle exactly', () => {
     expect(pathBounds(parsePath('M8,8h80v80h-80Z'))).toEqual([8, 8, 80, 80])
+  })
+  // The cubic starts where Z put the pen (the subpath start, 0,0) — not at
+  // 10,10 where the preceding L landed. Sampling from the wrong point puts
+  // this box's height at ~16.5 instead of 15.
+  it('resumes from the subpath start after Z', () => {
+    expect(pathBounds(parsePath('M0,0L10,0L10,10ZC0,20,0,20,0,0'))).toEqual([0, 0, 10, 15])
   })
   it('bounds a cubic by sampling (circle of r=44 at 48,48)', () => {
     const d = elementToPath('circle', { cx: '48', cy: '48', r: '44' })

@@ -9,13 +9,26 @@ import { ribbonEffect } from '../../app/lib/spacetype/effects/ribbon'
 
 const KEYS = ['separator', 'separatorSize', 'separatorGap']
 
+// Written out rather than derived from RAW_WORD_EFFECTS/PER_GLYPH_EFFECTS: a
+// test that recomputes the implementation's own predicate agrees with it no
+// matter what either says, so it would stay green if an effect silently moved
+// in or out of those sets. This literal list is the second opinion — an
+// effect changing eligibility has to be a deliberate edit here too. Every id
+// is asserted to still exist below, so the list cannot rot into a no-op.
+const INELIGIBLE = ['coil', 'elastic', 'echo', 'blend', 'cascade', 'cylinder', 'onionburst', 'ring', 'slot']
+
 describe('separator controls are injected once at registration', () => {
+  it('every ineligible id is still a registered effect', () => {
+    expect(INELIGIBLE.every(id => SPACE_TYPE_EFFECTS.some(e => e.id === id))).toBe(true)
+  })
   for (const e of SPACE_TYPE_EFFECTS) {
-    const eligible = !RAW_WORD_EFFECTS.has(e.id) && !PER_GLYPH_EFFECTS.has(e.id)
+    const eligible = !INELIGIBLE.includes(e.id)
     it(`${e.id}: ${eligible ? 'has' : 'lacks'} the three Type controls`, () => {
       const keys = e.controls.filter(c => KEYS.includes(c.key)).map(c => c.key)
       expect(keys).toEqual(eligible ? KEYS : [])
       expect(separatorEligible(e.id)).toBe(eligible)
+      // The implementation's own predicate must agree with the literal list.
+      expect(!RAW_WORD_EFFECTS.has(e.id) && !PER_GLYPH_EFFECTS.has(e.id)).toBe(eligible)
       for (const c of e.controls.filter(c => KEYS.includes(c.key))) expect(c.group).toBe('Type')
     })
   }
