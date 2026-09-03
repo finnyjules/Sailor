@@ -153,6 +153,29 @@ is judged by eye here before any studio wiring exists.
 start until this sign-off. If the heuristic falls short (diagonals are the
 known soft spot), iteration happens in the lab, where it is throwaway-cheap.
 
+## Phase B range policy — decided 2026-09-02
+
+Julien's lab finding: the engine is proven at **single-axis extremes** (Archivo
+condensed to 0.5× at height ~1 reads as a cut; squat to 0.5× height at width ~1
+reads as a cut) and weak on **diagonal moves** through the (Stretch, Height)
+plane (0.7 × 2.41, 1.38 × 2.31 were every troubled case). Everything Phase B
+ships is single-axis: fit-to-width moves width only; Spring Up is height only;
+Stretch In and Stretch Wave are width only.
+
+Policy: **per-axis ranges, damped when both deviate.** Each dial alone ranges
+0.5–2.5×. When both dials deviate from 1 at once, the second axis's effective
+deviation is scaled by `1 − 0.5·min(1, |log S|/log 2)` (and symmetrically),
+so a strongly condensed letter can still grow taller but not to the frontier
+the engine cannot hold. The damping is applied to the values the engine
+receives, never to what the user typed — the dial reads what they set, and a
+small hint says "eased" when damping is active. The lab keeps undamped dials
+(the frontier must stay visible for judgment). The wdth cascade runs before
+damping (a real axis is never damped).
+
+k, round coupling, the bell shape and the shape-rules toggle are lab-only
+constants; the studio exposes Stretch, Height and Fit — nothing the user must
+understand.
+
 ## Phase B — studio surface
 
 Only after Phase A sign-off. Reuses the exact `stretch.ts` the lab validated.
