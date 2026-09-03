@@ -189,7 +189,9 @@ function resolveImageFill(
 const FILL_TILE_CAP = 1024
 const _fillTileCache = new Map<string, HTMLCanvasElement>()
 function fillTileCached(fill: Fill, tw: number, th: number): HTMLCanvasElement {
-  const key = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${tw}x${th}`
+  // shapeId only matters for `shapes`; fold it in so switching the shape (same colours/density/
+  // angle/size) doesn't return the previously cached tile of a different shape.
+  const key = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${tw}x${th}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') : ''}`
   let t = _fillTileCache.get(key)
   if (!t) {
     t = fillTileBox(fill, tw, th)
