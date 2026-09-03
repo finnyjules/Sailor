@@ -15,7 +15,7 @@ import { LIGHT_DEFAULTS, DEFAULT_FONT_URL } from './config'
 import { buildDecalMesh, decalTextureFor, decalKeyFor, decalContentKey, releaseDecalTexture } from './decals'
 import { buildEnvironmentScene, type GelEnvOptions } from './environments'
 import { orderParentsFirst } from './hierarchy'
-import { loadGlb, clearGlbCache } from './glb'
+import { loadGlb, clearGlbCache, ensureUv } from './glb'
 import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/contextRegistry'
 import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/lib/scene3d/outlines'
 import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime } from './materials'
@@ -24,9 +24,15 @@ import { PRIMITIVE_PARAMS, paramValue, MODIFIER_SPECS, modifierValue } from '~/l
 import { pathToShapes } from './svgPath'
 import { buildLightWidget, setWidgetSelected, disposeWidget } from '~/lib/scene3d/lightWidgets'
 import { PostChain, postEnabled, DEFAULT_POST, type PostSettings } from '~/lib/spacetype/post'
+import { collectEditorHelpers } from '~/lib/scene3d/passes'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry } from './gem'
+
+/** Private THREE layer used to overlay editor gizmos on top of the post-processed
+ *  image without bloom/grade catching them. Nothing else in the scene uses layers,
+ *  so this is only ever set transiently during renderWithPost's overlay pass. */
+const GIZMO_OVERLAY_LAYER = 31
 
 /** Unit vector toward the sun for azimuth (deg, around Y) / elevation (deg above horizon). */
 export function sunDirection(azimuthDeg: number, elevationDeg: number): Vec3 {
@@ -892,6 +898,7 @@ export class SceneEngine {
         loadGlb(obj.url).then((g) => {
           if (this.glbTokens.get(obj.id) !== tok) return // stale (object deleted/replaced)
           g.traverse((c) => { if ((c as THREE.Mesh).isMesh) { c.castShadow = c.receiveShadow = true } })
+          ensureUv(g)
           root!.add(g)
           // The load can finish after later syncs already ran against the empty
           // placeholder — apply against the LATEST object state (stamped on the
@@ -1190,7 +1197,35 @@ export class SceneEngine {
     if (!this.postChain) { this.postChain = new PostChain(this.renderer, scene, camera, s.x, s.y); this.postW = s.x; this.postH = s.y }
     else if (this.postW !== s.x || this.postH !== s.y) { this.postChain.setSize(s.x, s.y); this.postW = s.x; this.postH = s.y }
     this.postChain.setSettings(post, elapsedSec)
-    this.postChain.render(scene, camera)
+    // Editor gizmos share engine.scene, so they'd otherwise flow through the post
+    // chain and pick up bloom/grade (a glowing transform handle). Hide them for the
+    // composited pass, then overlay them un-post-processed. The overlay renders only
+    // the gizmo by parking it on a private layer the composer camera never sees — a
+    // whole-scene re-render would paint crisp geometry back over the bloom halos.
+    // The layer swap is bracketed by this synchronous render, and TransformControls
+    // picks against layer 0 only on pointer events (which never interleave with a
+    // render frame), so dragging is unaffected.
+    const helpers = collectEditorHelpers(scene)
+    if (!helpers.length) { this.postChain.render(scene, camera); return }
+    for (const h of helpers) h.visible = false
+    try { this.postChain.render(scene, camera) }
+    finally { for (const h of helpers) h.visible = true }
+    const camMask = camera.layers.mask
+    const prevAutoClear = this.renderer.autoClear
+    // A solid scene.background makes renderer.render force-clear the canvas even with
+    // autoClear off (WebGLBackground sets forceClear for a Color background), which would
+    // wipe the composited bloom before the gizmo draws. Null it for the overlay so the
+    // pass leaves the existing pixels intact and only paints the gizmo on top.
+    const prevBackground = scene.background
+    scene.background = null
+    for (const h of helpers) h.traverse((o) => o.layers.set(GIZMO_OVERLAY_LAYER))
+    camera.layers.set(GIZMO_OVERLAY_LAYER)
+    this.renderer.autoClear = false
+    this.renderer.render(scene, camera)
+    this.renderer.autoClear = prevAutoClear
+    scene.background = prevBackground
+    camera.layers.mask = camMask
+    for (const h of helpers) h.traverse((o) => o.layers.set(0))
   }
 
   /** Set per-object opacity for a motion frame. Ids not in `map` are forced opaque.
