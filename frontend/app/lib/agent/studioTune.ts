@@ -41,6 +41,8 @@ import { buildShaderGuidance, shaderAgentControls, SHADER_EFFECT_MACRO_KEY } fro
 import type { EffectDef as ShaderEffectDef } from '~/lib/shaderfx/types'
 import { studioDocFromPersisted } from '~/lib/geoshape/studio'
 import { geoAgentControls as shapeAgentControls, GEO_GUIDANCE as SHAPE_GUIDANCE } from '~/lib/geoshape/agentControls'
+import { BASE_SHAPES, type BaseShapeKind } from '~/lib/geoshape/shapes'
+import type { GeoShapeConfig } from '~/lib/geoshape/config'
 // Vector Type's config + control schema are fontkit-free (controls.ts imports
 // VtAxis TYPE-only, on purpose); only ./font.ts loads the parser, and that one is
 // imported dynamically inside the adapter below.
@@ -613,6 +615,30 @@ const shapeAdapter: PatchAdapter = {
   clone: (mark: any) => JSON.parse(JSON.stringify(mark)),
   label: 'Shape studio',
   guidance: SHAPE_GUIDANCE,
+  // `shape` is a MACRO for the same reason Shader's `effect` is: it decides which
+  // of the other Shape keys are described at all. geoAgentControls only offers
+  // `libraryShape` while cfg.shape === 'library' (and `sides`/`starInner`/
+  // `irregularSeed` only under their own families), so a patch that switches the
+  // family AND sets the family's own knob — the natural one-turn request, "make
+  // it the swirl shape" → { shape: 'library', libraryShape: 'swirl' } — used to
+  // lose its second half as an unknown key, leaving the mark on whichever library
+  // id happened to be stored. Applying `shape` first and re-describing fixes the
+  // whole family of those, not just library's.
+  macroKey: 'shape',
+  macroBefore: (config: GeoShapeConfig) => String(config.shape),
+  // A pure field swap (the base mark is one flat config — nothing to re-seed),
+  // guarded so an off-vocabulary kind resolves to nothing rather than writing a
+  // shape the renderer cannot draw. validatePatch already snaps `shape` to the
+  // select's options; this is the floor for a future caller that does not.
+  applyPreset: (value: string, config: GeoShapeConfig) =>
+    (BASE_SHAPES as string[]).includes(value)
+      ? { ...config, shape: value as BaseShapeKind }
+      : null,
+  // Re-describe against the SWAPPED config so the same patch's family-specific
+  // keys validate against the new family's vocabulary (runParamPatch re-validates
+  // the original raw patch against this list). Keys naming the OLD family's knobs
+  // drop out, which is the honest outcome — they mean nothing on the new shape.
+  recontrol: (config: GeoShapeConfig) => shapeAgentControls(config),
 }
 
 /** Exposed for tests only — the adapter is otherwise reached via the registry. */

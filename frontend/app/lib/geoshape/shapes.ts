@@ -1,5 +1,5 @@
 import { polygonVertices, starVertices, roundedPolygonPath, type Pt } from '~/lib/compositor/polygonGeometry'
-import { shapeById } from '~/lib/shapes/catalog'
+import { SHAPES, shapeById } from '~/lib/shapes/catalog'
 import { fitShapePath } from '~/lib/shapes/geometry'
 
 export type BaseShapeKind =
@@ -24,7 +24,12 @@ export interface BaseShapeOpts {
 
 /** A library shape fitted so its larger ink side spans `size`, centred like every other base shape. */
 function libraryPath(id: string | undefined, size: number): string {
-  const shape = (id && shapeById(id)) || shapeById(DEFAULT_LIBRARY_SHAPE)!
+  // Floor the lookup instead of asserting: an id the catalog no longer has falls
+  // back to DEFAULT_LIBRARY_SHAPE, and — if that id were ever renamed out of the
+  // manifest too — to the catalog's first shape. A missing base shape must not be
+  // able to throw inside a render pass.
+  const shape = (id ? shapeById(id) : undefined) ?? shapeById(DEFAULT_LIBRARY_SHAPE) ?? SHAPES[0]
+  if (!shape) return ''
   return fitShapePath(shape, size).d
 }
 

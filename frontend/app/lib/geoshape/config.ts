@@ -5,7 +5,7 @@
  * sits under Shape Studio's dynamic-import chain, same posture as
  * `shapefx/config.ts`, and must not drag in `three` or `paper`.
  */
-import { BASE_SHAPES, type BaseShapeKind } from './shapes'
+import { BASE_SHAPES, DEFAULT_LIBRARY_SHAPE, type BaseShapeKind } from './shapes'
 import type { Paint } from '~/lib/compositor/paint'
 import { isShapeId } from '~/lib/shapes/catalog'
 
@@ -96,7 +96,7 @@ export interface GeoShapeConfig {
 
 export const DEFAULT_CONFIG: GeoShapeConfig = {
   shape: 'hexagon',
-  libraryShape: 'sparkle',
+  libraryShape: DEFAULT_LIBRARY_SHAPE,
   sides: 6,
   starInner: 0.45,
   irregularSeed: 1,

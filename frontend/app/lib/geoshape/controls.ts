@@ -92,12 +92,21 @@ const color = (key: string, label: string, def: string, group: string, extra: Pa
 const switchC = (key: string, label: string, def: boolean, group: string, extra: Partial<GeoControl> = {}): GeoControl =>
   ({ key, label, kind: 'switch', default: def, group, ...extra } as GeoControl)
 
+/** A shape-library picker row (ControlSpec `kind: 'shape'`). `allowNone` defaults
+ *  to false — every consumer here needs an actual shape — and stays overridable
+ *  through `extra`, exactly like the other builders' optional fields. */
+const shapeC = (
+  key: string, label: string, def: string, group: string,
+  hint?: string, extra: Partial<GeoControl> = {},
+): GeoControl =>
+  ({ key, label, kind: 'shape', allowNone: false, default: def, group, ...(hint ? { hint } : {}), ...extra } as GeoControl)
+
 export const GEO_CONTROLS: GeoControl[] = [
   // --- Shape (baseShapePath's BaseShapeOpts) --------------------------------
   select('shape', 'Shape', SHAPES, DEFAULT_CONFIG.shape, 'Shape',
     'polygon/star/irregular use Sides; hexagon is a fixed 6-gon; library clones one of the 100 drawn shapes (Library shape)'),
-  { key: 'libraryShape', label: 'Library shape', kind: 'shape', allowNone: false, default: DEFAULT_CONFIG.libraryShape, group: 'Shape',
-    hint: 'library only: which of the 100 drawn shapes is cloned (sparkle, sun-rays, leaf, heart, swirl…)', when: isLibrary } as GeoControl,
+  shapeC('libraryShape', 'Library shape', DEFAULT_CONFIG.libraryShape, 'Shape',
+    'library only: which of the 100 drawn shapes is cloned (sparkle, sun-rays, leaf, heart, swirl…)', { when: isLibrary }),
   slider('sides', 'Sides', 3, 24, 1, 'Shape', DEFAULT_CONFIG.sides, undefined, { when: usesSides }),
   // DEFAULT_CONFIG.starInner is 0.45, already inside starVertices' own
   // [0.01, 0.99] clamp (polygonGeometry.ts), so this control's default sits
@@ -203,7 +212,7 @@ export function visibleGeoControls(cfg: GeoShapeConfig): GeoControl[] {
  */
 export const GEO_GUIDANCE = `This is a PROCEDURAL 2D-VECTOR "clone and arrange" LOGO generator — one base shape, repeated and folded into a single flat mark, not a raster illustration.
 
-BASE SHAPE: "shape" picks the family — polygon (regular N-gon via sides), star (N points via sides + starInner, the inner-vertex radius as a fraction of the outer radius, 0.01=needle-thin points, 0.99=almost a polygon), hexagon (fixed 6-gon, ignores sides), irregular (a polygon jittered per-vertex by irregularSeed — same seed always gives the same silhouette), library (one of the 100 drawn library shapes, chosen by libraryShape — sparkle, sun-rays, leaf, heart, swirl…; sides and corner rounding do not apply). size is the shape's radius before any clone spread. roundCorners (0=off) gates roundRadius, the corner-rounding fraction.
+BASE SHAPE: "shape" picks the family — polygon (regular N-gon via sides), star (N points via sides + starInner, the inner-vertex radius as a fraction of the outer radius, 0.01=needle-thin points, 0.99=almost a polygon), hexagon (fixed 6-gon, ignores sides), irregular (a polygon jittered per-vertex by irregularSeed — same seed always gives the same silhouette), library (one of the 100 drawn library shapes, chosen by libraryShape — sparkle, sun-rays, leaf, heart, swirl…; sides and corner rounding do not apply). size is the shape's full width/height (its larger side) before any clone spread. roundCorners (0=off) gates roundRadius, the corner-rounding fraction.
 
 LAYOUT: count is how many clones to place (grid layout instead uses gridCols × gridRows and ignores count). layout picks the placement curve: "radial" rings the clones around the center at radius; by default (evenAngle) they spread evenly (360/count) so any count forms a clean ring, and turning evenAngle off spaces them by angleStep degrees instead (for fans/spirals). spin is the ring's starting angle offset. "grid" tiles gridCols × gridRows clones spacing apart. "linear" strings count clones in a row, spacing apart. For grid/linear, stagger (incremental|alternate) shifts successive columns/rows by (stepX, stepY) — incremental cascades progressively (a diagonal shear), alternate offsets every other one (a brick/zigzag); stepAxis chooses whether a grid steps by column or row.
 
@@ -213,6 +222,6 @@ COMPOSITE: fillMode is the boolean fold across all clones (evenodd = classic cut
 
 SYMMETRY mirrors the whole composed mark across symmetryAxis (vertical/horizontal), offset by symmetrySpacing. CLIP crops the finished mark to clipMask (circle/square/hexagon) sized by clipMaskSize; invert swaps the mark's fill/ground so the shape reads as negative space.
 
-STYLE: padding is the margin framed around the mark in the preview, the PNG, and the SVG alike — lower it to grow the mark toward the canvas edges, 0 fills the canvas edge-to-edge, and NEGATIVE padding overscans so the mark bleeds past the edges and crops to fill the whole canvas on both axes (this is the lever for "make it bigger / fill the canvas / bleed off the edges", NOT size, which is the base shape's radius and is auto-fit into the frame). strokeWidth is the outline width wherever stroke is set. seed drives irregularSeed-style jitter and re-roll — same seed, same mark.
+STYLE: padding is the margin framed around the mark in the preview, the PNG, and the SVG alike — lower it to grow the mark toward the canvas edges, 0 fills the canvas edge-to-edge, and NEGATIVE padding overscans so the mark bleeds past the edges and crops to fill the whole canvas on both axes (this is the lever for "make it bigger / fill the canvas / bleed off the edges", NOT size, which is the base shape's own width/height and is auto-fit into the frame). strokeWidth is the outline width wherever stroke is set. seed drives irregularSeed-style jitter and re-roll — same seed, same mark.
 
 PAINT: fill colors the mark, stroke outlines it (leave stroke unset for a fill-only flat mark, the common logo case), overlapFill only matters when overlapMode is "shape". fillStrategy switches between one flat fill (single), one colour per clone (per-clone), or per-piece colouring with its own overlap regions (pieces); fillOrder sets the sequence those colours are handed out in (creation order, depth, left-to-right, top-to-bottom, row-by-row, column-by-column, center-out, or around like a colour wheel) whenever fillStrategy isn't single, and overlapSeparate (pieces only) gives crossing regions their own colours instead of reusing the piece colours. crossingMode (pieces only) picks how those crossings are cut: "depth" gives every overlap depth one shared colour, "split" breaks each crossing into its own piece coloured by fillOrder.`

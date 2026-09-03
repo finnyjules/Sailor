@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { baseShapePath, BASE_SHAPES, DEFAULT_LIBRARY_SHAPE } from '~/lib/geoshape/shapes'
+import { isShapeId } from '~/lib/shapes/catalog'
 
 const base = { sides: 6, starInner: 0.45, irregularSeed: 1, size: 180, roundCorners: 6, roundRadius: 0 }
 
@@ -51,5 +52,9 @@ describe('library base shape', () => {
   })
   it('falls back to the default library shape for an unknown id', () => {
     expect(baseShapePath('library', { ...base, libraryShape: 'unicorn' })).toBe(baseShapePath('library', { ...base, libraryShape: DEFAULT_LIBRARY_SHAPE }))
+    // …which only holds while the fallback id is itself in the catalog. Pin it:
+    // a rename that orphaned DEFAULT_LIBRARY_SHAPE would silently drop every
+    // library mark to the catalog's first shape instead.
+    expect(isShapeId(DEFAULT_LIBRARY_SHAPE)).toBe(true)
   })
 })

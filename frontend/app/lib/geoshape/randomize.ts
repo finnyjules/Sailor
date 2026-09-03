@@ -90,7 +90,15 @@ type StyleGroup = Pick<GeoShapeConfig, 'padding' | 'strokeWidth'>
 
 function rollShape(seed: string): ShapeGroup {
   const r = makeRng(seed, 'shape')
-  return {
+  // Draw in the SAME order as before and blank afterwards, rather than branching
+  // inside the literal: every draw here shares one stream, so skipping one would
+  // shift every value after it for one shape family and not another (same seed,
+  // different mark). Corner rounding does not apply to a library shape, so a
+  // rolled `roundCorners` left in the config would make two visually identical
+  // library marks differ in stored state — and would spring back into effect the
+  // moment the user switched shape family. `roundRadius` stays as rolled: it is
+  // gated behind roundCorners > 0 anyway, so it is inert.
+  const g: ShapeGroup = {
     shape: r.pick(SHAPES),
     sides: r.int(3, 24),
     starInner: +r.range(0.01, 0.99).toFixed(2),
@@ -100,6 +108,8 @@ function rollShape(seed: string): ShapeGroup {
     roundRadius: r.int(0, 100),
     libraryShape: r.pick(LIBRARY_IDS),
   }
+  if (g.shape === 'library') g.roundCorners = 0
+  return g
 }
 
 function rollLayout(seed: string): LayoutGroup {
