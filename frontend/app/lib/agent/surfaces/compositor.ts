@@ -18,6 +18,8 @@ import { sanitizeFeather, featherActive } from '~/lib/compositor/feather'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
+import { shapeById, SHAPES } from '~/lib/shapes/catalog'
+import { createShapeLayer, SHAPE_LAYER_DEFAULT_WIDTH } from '~/lib/shapes/pathLayer'
 
 export interface CompositorState {
   layers: LocalLayer[]
@@ -59,6 +61,9 @@ const clamp = (v: unknown, lo: number, hi: number, fallback: number): number => 
   const n = typeof v === 'number' ? v : Number(v)
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback
 }
+
+/** A Paint is a "#RRGGBB" string or a gradient/pattern object — same predicate setFill uses. */
+const isValidPaint = (v: unknown): boolean => v != null && (typeof v === 'string' || typeof v === 'object')
 
 /** Merge model-provided effect params over current/defaults with clamps; null = invalid type. */
 function sanitizePostEffect(raw: unknown, cur?: PostEffect): PostEffect | null {
@@ -117,6 +122,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setStroke', hint: 'Set a layer\'s STROKE/outline. target = layer id; args: { paint, width? }. paint as in setFill (or "none"); width is 0..1 of canvas width.' },
   { op: 'setSize', hint: 'Resize a SHAPE/image/line layer. target = layer id; args: { w?, h?, scale? } (0..1 of canvas width; line uses w as length; path uses scale). TEXT size is NOT here — use setTextStyle fontSize.' },
   { op: 'addLayer', hint: 'Add a NEW layer. args: { layer }. layer needs: kind ("text"|"rect"|"ellipse"|"line"), x, y (0..1, center). text also: text + you may set fontFamily/fontWeight/fontSize/color inline (a HUGE headline = fontSize 0.25–0.45, fontWeight 800; Impact-style font = "Anton"). Give the layer an id you choose so you can target it next. New layers land ON TOP by default — to put one BEHIND the image/other layers, follow with setLayerDepth …"back". (For images use generateImage.)' },
+  { op: 'addShape', hint: 'Add a SHAPE from the shape library (sparkle, sun-rays, leaf, heart, plus, stairs, hexagon, swirl…) as a vector layer. args: { shape (an id from document.shapeLibrary), x?, y? (0..1, centre; default 0.5,0.5), w? (0..1 of canvas width; default 0.3), fill? ("#RRGGBB" or a gradient object), id? (choose one so you can target it next) }. This is what "add a sparkle", "put a sun top-right", "drop in a heart" mean. Recolour later with setFill, resize with setSize scale, rotate with setLayerProps.' },
   { op: 'removeLayer', hint: 'Delete a layer by id. target = layer id.' },
   { op: 'setLayerDepth', hint: 'Change a layer\'s stacking depth (z-order). target = layer id; args: { to: "back" | "front" }. "back" puts it BEHIND every other layer including the connected/wired image — use this for "put the headline BEHIND the image". "front" brings it to the top.' },
   { op: 'setBackground', hint: 'Set the FRAME background that sits behind every layer. args: { paint } — a "#RRGGBB" colour, a gradient object, or "none". Use for "make the background blue / a sunset gradient".' },
@@ -159,7 +165,7 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
     else if (l.kind === 'rect') { cur.w = l.w; cur.h = l.h; cur.fill = paintLabel(l.fill); if (l.radius) cur.radius = Array.isArray(l.radius) ? l.radius.join(' / ') : l.radius; if (l.stroke) { cur.stroke = paintLabel(l.stroke); cur.strokeWidth = l.strokeWidth } }
     else if (l.kind === 'ellipse') { cur.w = l.w; cur.h = l.h; cur.fill = paintLabel(l.fill); if (l.stroke) { cur.stroke = paintLabel(l.stroke); cur.strokeWidth = l.strokeWidth } }
     else if (l.kind === 'line') { cur.length = l.w; cur.stroke = paintLabel(l.stroke); cur.strokeWidth = l.strokeWidth }
-    else if (l.kind === 'path') { cur.fill = paintLabel(l.fill) }
+    else if (l.kind === 'path') { cur.fill = paintLabel(l.fill); if (l.shapeId && shapeById(l.shapeId)) cur.shape = l.shapeId }
     if (l.visible === false) cur.hidden = true
     return { id: l.id, label: l.kind === 'text' ? `“${l.text}”` : l.kind, type: l.kind, current: cur }
   })
@@ -183,6 +189,8 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
       postEffects: state.postEffects?.filter(e => e.visible).map(e => e.type).join(', ') || 'none',
       // The frame is a unit square in normalized coords: x/y/sizes are 0..1.
       coordinateSpace: 'normalized 0..1 (0,0 = top-left, 0.5,0.5 = centre)',
+      // Every id addShape accepts. ~1 KB; listed so the model never guesses a name.
+      shapeLibrary: SHAPES.map(s => s.id),
       ...(state.brandPalette?.length
         ? { brandPalette: state.brandPalette.map(s => `${s.name} ${s.hex}`).join(', ') }
         : {}),
@@ -252,7 +260,7 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
     }
     case 'setFill': {
       const paint = cmd.args?.paint as Paint | undefined
-      if (paint == null || (typeof paint !== 'string' && typeof paint !== 'object')) return { ok: false, reason: 'invalid', detail: 'missing args.paint' }
+      if (!isValidPaint(paint)) return { ok: false, reason: 'invalid', detail: 'missing args.paint' }
       const layer = findLayer(state, cmd.target)
       if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
       const field = fillField(layer.kind)
@@ -294,6 +302,21 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       const id = typeof raw.id === 'string' ? raw.id : `l_${state.layers.length + 1}_${kind}`
       if (state.layers.some(l => l.id === id)) return { ok: false, reason: 'invalid', detail: `layer id '${id}' already exists` }
       const layer = { ...defaultLayer(kind, id), ...clone(raw), id, kind } as unknown as LocalLayer
+      return { ok: true, template: { ...state, layers: [...state.layers, layer] }, inverse: snapshot() }
+    }
+    case 'addShape': {
+      const a = (cmd.args ?? {}) as Record<string, unknown>
+      const shape = typeof a.shape === 'string' ? shapeById(a.shape) : undefined
+      if (!shape) return { ok: false, reason: 'invalid', detail: `unknown shape id '${String(a.shape)}' — use one from document.shapeLibrary` }
+      const id = typeof a.id === 'string' && a.id ? a.id : `l_${state.layers.length + 1}_shape`
+      if (state.layers.some(l => l.id === id)) return { ok: false, reason: 'invalid', detail: `layer id '${id}' already exists` }
+      const layer = createShapeLayer(shape, {
+        id,
+        x: clamp(a.x, PROP_CLAMP.x![0], PROP_CLAMP.x![1], 0.5),
+        y: clamp(a.y, PROP_CLAMP.y![0], PROP_CLAMP.y![1], 0.5),
+        targetWidth: clamp(a.w, 0.02, 2, SHAPE_LAYER_DEFAULT_WIDTH),
+        fill: isValidPaint(a.fill) ? (a.fill as Paint) : undefined,
+      })
       return { ok: true, template: { ...state, layers: [...state.layers, layer] }, inverse: snapshot() }
     }
     case 'removeLayer': {
@@ -474,6 +497,7 @@ export function summarizeCompositorChange(state: CompositorState, cmd: Command):
     case 'setLayerProps': { const p = (a.patch ?? {}) as Record<string, unknown>; return { label: name || 'Layer', before: '', after: Object.keys(p).map(k => `${k}: ${String(p[k])}`).join(', ') } }
     case 'setSize': return { label: `${name} size`, before: '', after: ['w', 'h', 'scale'].filter(k => k in a).map(k => `${k}: ${String((a as Record<string, unknown>)[k])}`).join(', ') }
     case 'addLayer': { const l = a.layer as { kind?: string; text?: string } | undefined; return { label: 'Add layer', before: '', after: l?.kind === 'text' ? `text “${String(l.text ?? '')}”` : (l?.kind ?? 'layer') } }
+    case 'addShape': return { label: 'Add shape', before: '', after: String(a.shape ?? 'shape') }
     case 'removeLayer': return { label: 'Remove layer', before: name, after: 'deleted' }
     case 'setLayerDepth': return { label: `${name} order`, before: '', after: String(a.to ?? '') === 'back' ? 'behind everything' : 'bring to front' }
     case 'setBackground': return { label: 'Frame background', before: paintLabel(state.background), after: paintLabel(a.paint as Paint) }
