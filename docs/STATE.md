@@ -15,7 +15,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes**) | ✅ descriptor (+ `shape` kind) | 11,202 |
 | Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc + **smart stretch: Stretch/Height dials, Fit**) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
 | Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers) | ✅ descriptor (object.* + id-addressed) | ~6,300 (+ SVG import) + ambientCG textures |
-| Compositor / Frame | ✅ | ✅ motion clips | ✅ | ✅ commands | 1,667 (+1,041 motion) |
+| Compositor / Frame | ✅ | ✅ motion clips | ✅ (+ **shape library** insert/swap) | ✅ commands (+ `addShape`) | 1,667 (+1,041 motion) |
 | Timeline (NLE) | ✅ webm/mp4 + server | ✅ native | ✅ | ❌ | shared/timeline |
 | Gradient Studio | ✅ | ✅ 30 targets, path-based | ✅ (**schema-drawn** from GRADIENT_CONTROLS) | ✅ descriptor | 2,620 (+ 4 primitives + alpha + per-layer layout) |
 | Shader Studio | ✅ | ✅ path tracks (+ mask region) | ✅ (data-driven, + per-effect spatial mask, + mode-gated params) | ✅ descriptor (+ mask, + **effect macro + ungated stages + derived guidance**) | 806 + 62 effects |
@@ -30,6 +30,18 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Pose Mannequin | ✅ control img | ❌ | modal | ❌ (excluded) | — |
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
+
+### Compositor — shape library layers — LANDED 2026-09-02 (`8aeb1c49d`..`4d9dd3735` + polish)
+
+The Frame's layer editor gets the 100 library shapes as a Canva-style "insert a shape" move — the second consumer of the [shape library](#shape-library--expressive-studio-separator--landed-2026-09-02). A picked shape is an **ordinary `path` layer** (fill, stroke, resize, rotate, booleans, masks, motion, export and the agent all work with no new kind) plus one optional field, `shapeId`, that remembers where it came from.
+
+**How it is built.** `lib/shapes/pathLayer.ts` is pure arithmetic: the manifest's absolute `M L C Z` data is recentred on its ink box and scaled into the PathLayer local frame (`shapeGeometry`), `createShapeLayer` lands it centred at 30% of the canvas width in the default blue, `swapShapeLayer` regenerates geometry while keeping id, position, rotation, opacity, paint, scale and the current width. In the Frame: the **Shapes ▾ menu gains a "Shape library…" row** that opens the shared `ShapePicker`; the picked shape **becomes the face**, so stamping ten sparkles is ten clicks (last-used-face, like rectangle/star). The **inspector shows a Shape row** for shape-backed paths and swaps in place. Provenance drops wherever a path is rebuilt — node editing, boolean results, rect/ellipse conversion — by construction (each builds through `createPathLayer` with an explicit field list). The **agent** gets `addShape { shape, x?, y?, w?, fill?, id? }` (unknown id ⇒ invalid; clamped; undoable), path layers report `shape`, and the document lists `shapeLibrary` (all 100 ids, ~1.5 KB) so "add a sparkle top-right" never guesses a name.
+
+**Keyboard seams (found in review, fixed twice).** Mounting a teleported picker inside the modal exposed two real paths: arrow keys in the picker nudged the selected layer, and Escape from a focused tile closed the whole Frame — the picker's capture-phase Escape flips its own open-flag before the modal's bubble-phase handler checks it, so a ref guard is dead by construction. Fixed with a picker gate in the window capture handler (arrows/Space/Backspace/Delete) and an `e.defaultPrevented` gate in the modal's Escape chain — which also fixes a pre-existing bug where Escape over an open gradient sweep popover closed the Frame.
+
+**Verified.** 26 new unit tests (geometry from hand-computed numbers, provenance round trip, swap, agent op + describer + summary, toolbar rows/face gating, leading-number and odd-coordinate guards). Live in the real Frame editor: menu row → picker (100 tiles, six families) → Sparkle centred; face glyph reads "Add Sparkle"; two more stamps; inspector swap to Sun rays keeps the frame; Escape/arrows/Backspace behave after the fixes; node preview PNG captured. **Owed:** a boolean subtract with a library shape and a ComfyUI "Render this" bake, both not exercised live (selection through the browser pane is unreliable; backend was down) — the static path is verified.
+
+Spec: [2026-09-02-compositor-shape-library-layer-design.md](superpowers/specs/2026-09-02-compositor-shape-library-layer-design.md) · plan: [2026-09-02-compositor-shape-library-layer.md](superpowers/plans/2026-09-02-compositor-shape-library-layer.md).
 
 ### Shape library + Expressive Studio separator — LANDED 2026-09-02 (`b596e3d50`..`0304d6088`)
 
