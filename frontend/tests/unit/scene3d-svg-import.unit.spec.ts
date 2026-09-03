@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { buildSvgObjects, SVG_SPLIT_THRESHOLD } from '~/lib/scene3d/svgImport'
 import type { SvgLeafPath } from '~/composables/useVectorSvg'
 import type { PrimitiveObject } from '~/lib/scene3d/config'
+import { shapeById } from '~/lib/shapes/catalog'
 
 function leaf(d: string, fill = '#ff0000', cx = 0, cy = 0): SvgLeafPath {
   return { d, fill, stroke: 'none', strokeWidth: 0, fillRule: 'nonzero', cx, cy }
@@ -91,5 +92,17 @@ describe('scene3d svg import', () => {
 
   it('exports a split threshold', () => {
     expect(SVG_SPLIT_THRESHOLD).toBe(40)
+  })
+
+  it('a library shape imports as a group named after the shape with one svgPath child in its colour', () => {
+    const s = shapeById('sparkle')!
+    const objs = buildSvgObjects([leaf(s.d, s.sourceColor)], [], { name: s.name })
+    expect(objs).toHaveLength(2)
+    const group = objs.find((o) => o.kind === 'group')!
+    expect(group.name).toBe('Sparkle')
+    const child = objs.find((o) => o.id !== group.id) as PrimitiveObject
+    expect(child.primitive).toBe('svgPath')
+    expect(child.content?.path).toBe(s.d)
+    expect(String(child.material?.color ?? (child as any).color ?? '').toLowerCase()).toBe(s.sourceColor.toLowerCase())
   })
 })
