@@ -7,6 +7,7 @@
  */
 import { BASE_SHAPES, type BaseShapeKind } from './shapes'
 import type { Paint } from '~/lib/compositor/paint'
+import { isShapeId } from '~/lib/shapes/catalog'
 
 export type GeoLayout = 'radial' | 'grid' | 'linear'
 export type GeoFillMode = 'evenodd' | 'unite' | 'subtract' | 'intersect' | 'exclude'
@@ -29,6 +30,8 @@ export type GeoCrossingMode = 'depth' | 'split'
 
 export interface GeoShapeConfig {
   shape: BaseShapeKind
+  /** `shape === 'library'` only: a shape-library id. */
+  libraryShape: string
   sides: number
   starInner: number
   irregularSeed: number
@@ -93,6 +96,7 @@ export interface GeoShapeConfig {
 
 export const DEFAULT_CONFIG: GeoShapeConfig = {
   shape: 'hexagon',
+  libraryShape: 'sparkle',
   sides: 6,
   starInner: 0.45,
   irregularSeed: 1,
@@ -211,6 +215,7 @@ export function mergeConfig(raw: unknown): GeoShapeConfig {
   }
   return {
     shape: oneOf(o.shape, SHAPES, d.shape),
+    libraryShape: isShapeId(o.libraryShape) ? o.libraryShape : d.libraryShape,
     sides: clampNum(o.sides, d.sides, 3, 24),
     starInner: num(o.starInner, d.starInner),
     irregularSeed: num(o.irregularSeed, d.irregularSeed),

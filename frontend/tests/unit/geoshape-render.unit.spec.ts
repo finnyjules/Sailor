@@ -214,4 +214,13 @@ describe('geoshape render', () => {
     expect(x1s.length).toBeGreaterThanOrEqual(2)          // one gradient per clone
     expect(new Set(x1s).size).toBeGreaterThanOrEqual(2)   // each anchored to its OWN box (== 1 under the whole-mark bug)
   })
+
+  it('renders a library base shape into shapes and an SVG', async () => {
+    const cfg = { ...DEFAULT_CONFIG, shape: 'library' as const, libraryShape: 'swirl', count: 6 }
+    const shapes = await renderShapes(cfg)
+    expect(shapes.length).toBeGreaterThanOrEqual(1)
+    expect(shapes.some(s => s.commands.length > 4)).toBe(true)
+    const svg = await toSvg(cfg)
+    expect(svg).toMatch(/<path/)
+  })
 })

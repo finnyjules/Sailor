@@ -69,6 +69,7 @@ export async function renderShapes(cfg: GeoShapeConfig): Promise<VectorShape[]> 
     size: cfg.size,
     roundCorners: cfg.roundCorners,
     roundRadius: cfg.roundRadius,
+    libraryShape: cfg.libraryShape,
   })
   const placements = arrange(cfg)
   const rp = resolvePaint(cfg)

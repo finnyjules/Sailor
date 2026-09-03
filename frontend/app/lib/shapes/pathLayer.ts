@@ -7,41 +7,19 @@
 import type { PathLayer } from '~/composables/useCompositorLayers'
 import type { Paint } from '~/lib/compositor/paint'
 import type { LibraryShape } from '~/lib/shapes/catalog'
+import { transformShapePath } from '~/lib/shapes/geometry'
 
 export const SHAPE_LAYER_DEFAULT_WIDTH = 0.3
 const DEFAULT_FILL = '#3b82f6'   // createPathLayer's default — the manifest colour is a hint only
 
 export interface ShapeGeometry { d: string; bbox: { w: number; h: number } }
 
-const r5 = (v: number) => { const x = Math.round(v * 1e5) / 1e5; return Object.is(x, -0) ? 0 : x }
-
 /** Ink box → `targetWidth` wide, centred on (0,0). Throws on a non-MLCZ command or a degenerate box. */
 export function shapeGeometry(shape: LibraryShape, targetWidth: number): ShapeGeometry {
   const [bx, by, bw, bh] = shape.box
   if (!(bw > 0) || !(bh > 0) || !(targetWidth > 0)) throw new Error(`shapeGeometry: degenerate box for shape "${shape.id}"`)
   const k = targetWidth / bw
-  const cx = bx + bw / 2, cy = by + bh / 2
-  let out = ''
-  const re = /([A-Za-z])|(-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)/g
-  let m: RegExpExecArray | null
-  let pending: number | null = null
-  while ((m = re.exec(shape.d))) {
-    if (m[1]) {
-      if (!'MLCZ'.includes(m[1])) throw new Error(`shapeGeometry: unsupported path command "${m[1]}" in shape "${shape.id}"`)
-      if (pending !== null) throw new Error(`shapeGeometry: odd coordinate count in shape "${shape.id}"`)
-      out += m[1]
-      pending = null
-    } else {
-      const v = Number(m[2])
-      if (pending === null) { pending = v; continue }
-      if (!out) throw new Error(`shapeGeometry: path data must start with a command in shape "${shape.id}"`)
-      const x = (pending - cx) * k, y = (v - cy) * k
-      out += (out.endsWith('M') || out.endsWith('L') || out.endsWith('C') ? '' : ',') + `${r5(x)},${r5(y)}`
-      pending = null
-    }
-  }
-  if (pending !== null) throw new Error(`shapeGeometry: odd coordinate count in shape "${shape.id}"`)
-  return { d: out, bbox: { w: bw * k, h: bh * k } }
+  return { d: transformShapePath(shape, k, bx + bw / 2, by + bh / 2), bbox: { w: bw * k, h: bh * k } }
 }
 
 let seq = 0

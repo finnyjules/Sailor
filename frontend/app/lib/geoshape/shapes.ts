@@ -1,18 +1,31 @@
 import { polygonVertices, starVertices, roundedPolygonPath, type Pt } from '~/lib/compositor/polygonGeometry'
+import { shapeById } from '~/lib/shapes/catalog'
+import { fitShapePath } from '~/lib/shapes/geometry'
 
 export type BaseShapeKind =
   | 'circle' | 'square' | 'triangle' | 'diamond' | 'pentagon' | 'hexagon'
-  | 'octagon' | 'star' | 'semicircle' | 'cross' | 'leaf' | 'irregular'
+  | 'octagon' | 'star' | 'semicircle' | 'cross' | 'leaf' | 'irregular' | 'library'
 
 /** Canonical order for menus/validation — append, don't reorder. */
 export const BASE_SHAPES: BaseShapeKind[] = [
   'circle', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon',
-  'octagon', 'star', 'semicircle', 'cross', 'leaf', 'irregular',
+  'octagon', 'star', 'semicircle', 'cross', 'leaf', 'irregular', 'library',
 ]
+
+/** The library shape a fresh Library base shape shows, and the fallback for an id the catalog no longer has. */
+export const DEFAULT_LIBRARY_SHAPE = 'sparkle'
 
 export interface BaseShapeOpts {
   sides: number; starInner: number; irregularSeed: number
   size: number; roundCorners: number; roundRadius: number
+  /** `library` only: a shape-library id. */
+  libraryShape?: string
+}
+
+/** A library shape fitted so its larger ink side spans `size`, centred like every other base shape. */
+function libraryPath(id: string | undefined, size: number): string {
+  const shape = (id && shapeById(id)) || shapeById(DEFAULT_LIBRARY_SHAPE)!
+  return fitShapePath(shape, size).d
 }
 
 // Small seeded RNG (mulberry32 over an xmur3 hash) — self-contained.
@@ -89,5 +102,6 @@ export function baseShapePath(kind: BaseShapeKind, o: BaseShapeOpts): string {
     case 'cross':      return roundedPolygonPath(crossVertices(o.size), cr)
     case 'leaf':       return leafPath(o.size)
     case 'irregular':  return roundedPolygonPath(irregularVertices(o.sides, o.size, o.irregularSeed), cr)
+    case 'library':    return libraryPath(o.libraryShape, o.size)
   }
 }

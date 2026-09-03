@@ -66,3 +66,14 @@ describe('geoshape config', () => {
     expect(mergeConfig({ crossingMode: 'nope' }).crossingMode).toBe('depth')
   })
 })
+
+describe('libraryShape', () => {
+  it('defaults to sparkle and keeps a valid id', () => {
+    expect(mergeConfig({}).libraryShape).toBe('sparkle')
+    expect(mergeConfig({ libraryShape: 'sun-rays' }).libraryShape).toBe('sun-rays')
+  })
+  it('falls back on an unknown id and accepts the library kind', () => {
+    expect(mergeConfig({ libraryShape: 'unicorn' }).libraryShape).toBe('sparkle')
+    expect(mergeConfig({ shape: 'library' }).shape).toBe('library')
+  })
+})
