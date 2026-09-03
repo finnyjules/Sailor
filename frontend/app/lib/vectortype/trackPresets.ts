@@ -95,8 +95,10 @@ export interface VtTrackPreset {
   label: string
   /** One line for the tile, in the picker's voice. */
   pitch: string
-  /** THE DECLARATION — the layer kind this preset cannot run without. */
-  kind: VtLayerKind
+  /** THE DECLARATION — the layer kind this preset cannot run without, or
+   *  'run' for a preset on a RUN-LEVEL dial (stretch, height) that needs no
+   *  layer at all and is always offered. */
+  kind: VtLayerKind | 'run'
   /** How many such layers it needs. Two means two, and the reason says so. */
   minLayers: number
   /** The extra condition that makes a layer of that kind actually usable. A
@@ -174,6 +176,9 @@ export function vtOppositeHue(hex: string): string {
  *  with a reason. */
 const CYCLE_MIN_CHROMA = 0.02
 
+/** Shared shape for every RUN-LEVEL preset: no layer to find, so always on. */
+const RUN = { kind: 'run' as const, minLayers: 0, usable: () => true, requirement: '' }
+
 const PRESETS: VtTrackPreset[] = [
   {
     id: 'extrude-sweep',
@@ -249,6 +254,29 @@ const PRESETS: VtTrackPreset[] = [
       if (!hex) return []
       return [colorTrack(`${VT_STACK_PREFIX}${l.id}.paint.a`, hex, vtOppositeHue(hex), 'oklch', { easing: 'pingpong' })]
     }),
+  },
+
+  // ── Smart stretch — run-level, no layer needed ─────────────────────────────
+  // All three stay inside the proven SINGLE-AXIS regime (Phase B range
+  // policy): each moves one dial and leaves the other at 1.
+  {
+    id: 'stretch-in', label: 'Stretch In', pitch: 'Lands wide and settles to its drawn width', ...RUN,
+    // An ENTRANCE ends still: `to` is exactly 1, the dial value, so the word
+    // is left as the user set it. Starts at 1.6 — an extended cut, not a smear.
+    build: () => [track('stretch', 1.6, 1, { easing: 'easeinout' })],
+  },
+  {
+    id: 'stretch-wave', label: 'Stretch Wave', pitch: 'A crest of width travels through the word', ...RUN,
+    // A LOOP about 1 within ±15%: wide enough to read, inside the range the
+    // engine holds. The travel comes from the stagger — with delay 0 the whole
+    // word breathes together, which is the honest fallback, not a bug.
+    build: () => [track('stretch', 0.88, 1.15, { easing: 'pingpong', loops: 2 })],
+  },
+  {
+    id: 'spring-up', label: 'Spring Up', pitch: 'Letters land tall off the baseline and settle', ...RUN,
+    // Height only — the baseline is the fixed point of the vertical remap, so
+    // this reads as letters springing UP, not smearing about their centres.
+    build: () => [track('stretchY', 1.8, 1, { easing: 'easeinout' })],
   },
 ]
 

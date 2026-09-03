@@ -338,16 +338,23 @@ describe('misregistration as opposed extrude plates', () => {
 
 describe('the track-preset table', () => {
   it('declares a frame and derives the rest', () => {
-    expect(VT_TRACK_PRESETS.map(p => p.id)).toEqual(['extrude-sweep', 'misregistration', 'colour-cycle'])
+    expect(VT_TRACK_PRESETS.map(p => p.id)).toEqual([
+      'extrude-sweep', 'misregistration', 'colour-cycle',
+      // RUN-LEVEL — no layer to find, so `minLayers` is 0, not "greater than
+      // 0" like every layer-addressed preset above.
+      'stretch-in', 'stretch-wave', 'spring-up',
+    ])
     for (const p of VT_TRACK_PRESETS) {
       expect(p.label.trim()).not.toBe('')
       expect(p.pitch.trim()).not.toBe('')
-      expect(p.minLayers).toBeGreaterThan(0)
+      if (p.kind === 'run') expect(p.minLayers).toBe(0)
+      else expect(p.minLayers).toBeGreaterThan(0)
     }
     expect(vtTrackPreset('extrude-sweep')?.kind).toBe('extrude')
     // Not every preset drives an extrude any more — Colour Cycle drives a FILL,
     // which is what made the reason sentence's article derived rather than fixed.
     expect(vtTrackPreset('colour-cycle')?.kind).toBe('fill')
+    expect(vtTrackPreset('stretch-in')?.kind).toBe('run')
     expect(vtTrackPreset('nope')).toBeNull()
     expect(vtTrackPreset(undefined)).toBeNull()
   })
@@ -366,6 +373,9 @@ describe('the track-preset table', () => {
     // third. Every preset must say something the user can act on.
     const bare = cfg({ appearance: [layer({ id: 'Lf', kind: 'fill' })] })
     for (const o of vtTrackPresetOffers(bare)) {
+      // RUN-LEVEL presets need no layer at all, so a bare stack does not
+      // disable them — they are the one kind this loop expects to stay on.
+      if (o.preset.kind === 'run') { expect(o.available, o.preset.id).toBe(true); continue }
       expect(o.available, o.preset.id).toBe(false)
       // The reason names the preset's OWN kind, so a fill preset does not tell
       // the user to add an extrude.
@@ -421,7 +431,10 @@ describe('the track-preset table', () => {
     const raw = { appearance: [layer({ id: 'Le', kind: 'extrude', depth: 4 })] } as unknown as VectorTypeConfig
     expect(() => vtTrackPresetOffers(raw)).not.toThrow()
     expect(vtApplyTrackPreset(raw, 'extrude-sweep').map(t => t.path)).toEqual(['appearance.Le.angle'])
-    expect(vtTrackPresetOffers(null).every(o => !o.available)).toBe(true)
+    // A missing config still has no addressable layers, so every LAYER-KIND
+    // preset stays off — but a RUN-LEVEL one needs no layer, so it is on
+    // regardless. That is the same rule as line ~369, restated for `null`.
+    expect(vtTrackPresetOffers(null).every(o => o.preset.kind === 'run' ? o.available : !o.available)).toBe(true)
   })
 })
 
