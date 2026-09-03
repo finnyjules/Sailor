@@ -53,6 +53,8 @@ describe('screen finish — build', () => {
     expect(sh.vertexShader).toContain('varying vec2 vScrUv;')
     expect(sh.vertexShader).toMatch(/#include <uv_vertex>[\s\S]*vScrUv = uv;/)
     expect(sh.fragmentShader).toContain('scrCoverage')
+    // A duplicated declaration is a GLSL compile error that makes the mesh silently vanish — pin one `vec2 p`.
+    expect(sh.fragmentShader.split('vec2 p = mat2(').length - 1).toBe(1)
     expect(sh.fragmentShader).not.toContain('#include <opaque_fragment>')
     expect(sh.fragmentShader).toContain('gl_FragColor')
     expect(sh.uniforms.uScrDensity!.value).toBe(48)
