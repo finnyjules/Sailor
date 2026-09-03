@@ -430,11 +430,13 @@ export async function composite(baseD: string | string[], placements: ClonePlace
       fillRule,
     }]
     if (overlap) {
-      out.push({
-        commands: paperToCommands(overlap),
-        ...styled(cfg.overlapFill, cfg, cfg.stroke ?? solidOf(cfg.overlapFill)),
-        fillRule: 'nonzero',
-      })
+      // Default target: the overlap piece was never outlined before paintTarget
+      // existed, so it keeps carrying no stroke — a user-set `stroke` outlines
+      // the fold, not the crossing. Outline/both target the crossing too.
+      const ov = cfg.paintTarget === 'fill'
+        ? { paint: cfg.overlapFill, fill: solidOf(cfg.overlapFill) }
+        : styled(cfg.overlapFill, cfg, cfg.stroke ?? solidOf(cfg.overlapFill))
+      out.push({ commands: paperToCommands(overlap), ...ov, fillRule: 'nonzero' })
     }
     return out
   } finally {
