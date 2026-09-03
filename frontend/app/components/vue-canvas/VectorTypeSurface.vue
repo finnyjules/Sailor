@@ -923,6 +923,7 @@ const stretchEased = computed(() => lastStretch.value?.damped === true)
 const fittedStretchSpec = {
   ...(VT_CONTROLS.find(c => c.key === 'stretch') as ControlSpec),
   kind: 'text',
+  hint: 'Solved by Fit so the run fills the box — follows the text. Set Fit to off to take the dial back. A bound column is ignored while Fit is on.',
 } as ControlSpec
 let timer = 0
 let startedAt = 0
@@ -1629,32 +1630,38 @@ const frameCount = computed(() => Math.round((config.value.motion.fps || 30) * (
             <div v-if="fittedStretch !== null" data-testid="vt-stretch-fitted" @contextmenu.stop>
               <StudioRow :spec="fittedStretchSpec" :model-value="fittedStretch" :bindable="false">
                 <template #value>
-                  <span class="font-mono text-[11px] tabular-nums text-white/45"
-                        title="Solved by Fit — the run fills the output width. Set Fit to “off” to take the dial back.">{{ formatValue(fittedStretch, 0.01) }}</span>
+                  <span class="font-mono text-[11px] tabular-nums text-white/45">{{ formatValue(fittedStretch, 0.01) }}</span>
                 </template>
               </StudioRow>
             </div>
             <!-- Fit off: the ordinary schema row, wired exactly as StudioSectionTree
                  wires every other one (the slot replaces that branch, so the wiring
-                 has to be repeated here — `menu` excepted, which the panel's own
-                 wrapper around this slot still emits). -->
-            <StudioRow
-              v-else
-              :spec="slotControl(slotProps)"
-              :model-value="controlValue('stretch')"
-              :bound="boundFor('stretch')"
-              :bindable="slotControl(slotProps).bindable !== false && controlKindToVariableType(slotControl(slotProps).kind) !== null"
-              @update:model-value="(v: string | number | boolean) => setControl('stretch', v as string | number)"
-              @promote="promoteControl(slotControl(slotProps))"
-              @go-to-collection="goToCollection()"
-            />
+                 has to be repeated here). `@contextmenu.stop` on the wrapper stops the
+                 native event from also reaching the panel's own slot wrapper — StudioRow
+                 already emits `menu` for both the row body's right-click and the pink
+                 glyph's click/right-click, so wiring `@menu` here directly makes StudioRow
+                 the single source; without the stop, a right-click on the row body would
+                 bubble past StudioRow's root and fire the panel wrapper's own handler too,
+                 opening the menu twice. -->
+            <div v-else @contextmenu.stop>
+              <StudioRow
+                :spec="slotControl(slotProps)"
+                :model-value="controlValue('stretch')"
+                :bound="boundFor('stretch')"
+                :bindable="slotControl(slotProps).bindable !== false && controlKindToVariableType(slotControl(slotProps).kind) !== null"
+                @update:model-value="(v: string | number | boolean) => setControl('stretch', v as string | number)"
+                @promote="promoteControl(slotControl(slotProps))"
+                @menu="(e: MouseEvent) => openVarMenu(e, bindableControl(slotControl(slotProps)))"
+                @go-to-collection="goToCollection()"
+              />
+            </div>
           </template>
 
           <!-- Both dials pushed: the engine received a softened second axis, and
                nothing in the picture says so. `frame.stretch.damped` is the renderer's
                own report, not a re-derivation of the rule. -->
           <template #section-Layout>
-            <p v-if="stretchEased" data-testid="vt-stretch-eased" class="text-[10px] leading-snug text-white/45">
+            <p v-if="stretchEased" data-testid="vt-stretch-eased" class="text-[10px] leading-snug text-white/30">
               eased — both dials are pushed, so the second is softened for the letters
             </p>
           </template>
