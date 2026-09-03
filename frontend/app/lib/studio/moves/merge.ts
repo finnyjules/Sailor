@@ -136,12 +136,22 @@ function legacyTrackEasePlay(easing: unknown, loops: unknown): { ease: MoveEase;
  *
  * Phase is always `'loop'`: there is no safe way to tell an entrance from a
  * loop in old data.
+ *
+ * `clipDuration` is the converted move's `duration` — i.e. its cycle length.
+ * A pre-moves loop ran ONE cycle over the whole clip (there was no per-track
+ * cycle count separate from the clip length), so reproducing that old
+ * behaviour means the converted move's cycle must equal the CLIP's duration,
+ * not a hardcoded guess. Getting this wrong is a real parity bug: a move
+ * whose `duration` disagrees with the clip's plays the old loop at the wrong
+ * speed (Task 3 review carry-forward).
  */
 export function convertLegacyTracks(
   tracks: readonly LegacyMotionTrack[],
   matchPreset: (tracks: readonly MoveTrack[]) => string | null,
+  clipDuration: number,
 ): Move[] {
   if (!tracks.length) return []
+  const duration = clampDur(isNum(clipDuration) ? clipDuration : 4)
   const merged = tracks.map(stripLegacy)
   const presetId = matchPreset(merged)
   if (presetId) {
@@ -150,7 +160,7 @@ export function convertLegacyTracks(
       phase: 'loop',
       kind: 'tracks',
       presetId,
-      duration: 4,
+      duration,
       ease: { kind: 'named', name: 'none' },
       play: { mode: 'repeat', times: 1 },
       tracks: merged,
@@ -163,7 +173,7 @@ export function convertLegacyTracks(
       phase: 'loop',
       kind: 'tracks',
       presetId: 'custom',
-      duration: 4,
+      duration,
       ease,
       play,
       tracks: [merged[i]!],

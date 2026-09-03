@@ -89,6 +89,15 @@ import { getByPath, setByPath } from '~/lib/studio/path'
 import { parseIdPath, resolveIdPath, setByIdPath } from '~/lib/studio/idPath'
 import { trackProgress, trackValue } from '~/lib/studio/track'
 import { makeListRemap } from '~/lib/studio/listRemap'
+// Flattens `motion.moves`' `'tracks'`-kind moves back into a flat track list —
+// the SHIM this module reads through now that tracks live inside moves rather
+// than at `motion.tracks` directly. A compiling stand-in only: it does not
+// carry a move's own ease/play into the numbers below (every read here still
+// assumes the OLD per-track `easing`/`loops`, which no longer exist), so the
+// values this module computes are not yet correct for a converted document —
+// see this file's own header and the task report for what a full rewrite onto
+// `movePhase`/`moveTracks` (in `~/lib/studio/moves`) still owes.
+import { moveTracks } from '~/lib/studio/moves/tracks'
 // Perceptual colour interpolation. Pure arithmetic over two strings — see
 // `lib/color/mix.ts` for the measured reason the default is not an RGB lerp.
 import { DEFAULT_COLOR_MIX_SPACE, mixHex } from '~/lib/color/mix'
@@ -227,7 +236,7 @@ export function trackLayerId(cfg: VectorTypeConfig, path: string): string | unde
  * write (and the deep watcher it would trigger).
  */
 export function pruneStackTracks(cfg: VectorTypeConfig): VtMotionTrack[] {
-  const tracks = Array.isArray(cfg?.motion?.tracks) ? cfg.motion.tracks : []
+  const tracks = moveTracks(cfg?.motion) as unknown as VtMotionTrack[]
   const kept = tracks.filter((t) => {
     const path = typeof t?.path === 'string' ? t.path.trim() : ''
     if (!isStackPath(path)) return true
@@ -432,8 +441,7 @@ function resolveDuration(cfg: VectorTypeConfig): number {
  *  `from: 0, to: 1`, but a hand-written or agent-written blob may carry the two
  *  swatches and no numbers at all, and `trackProgress` reads neither. */
 function usableTracks(cfg: VectorTypeConfig): VtMotionTrack[] {
-  const raw = cfg?.motion?.tracks
-  if (!Array.isArray(raw)) return []
+  const raw = moveTracks(cfg?.motion) as unknown as VtMotionTrack[]
   return raw.filter((t): t is VtMotionTrack =>
     !!t && typeof t === 'object'
     && typeof (t as VtMotionTrack).path === 'string' && (t as VtMotionTrack).path.trim() !== ''

@@ -25,8 +25,21 @@
  * landed, not because the shape got clearer.
  */
 import type { MotionTrack as GradientMotionTrack } from '~/lib/gradientfx/types'
-import type { LayerAnimSpec } from '~/lib/motion/types'
+// The shared move vocabulary every parameter studio's clip is built from — see
+// lib/studio/moves/types.ts's header. `VtMove` narrows `Move.kind` (a plain
+// string there, so a studio adapter can add its own) to the four kinds this
+// studio actually produces; `mergeMove` and `convertLegacyTracks` are the pure,
+// studio-neutral merge/migration this file's `mergeMotion` builds on.
+import type { Move, MoveEaseName } from '~/lib/studio/moves/types'
+import { convertLegacyTracks, mergeMove, type LegacyMotionTrack } from '~/lib/studio/moves/merge'
 import { isFill, isGradient, type Gradient, type Paint } from '~/lib/compositor/paint'
+// The migration-only legacy-track → preset matcher. A CIRCULAR import
+// (`trackPresets.ts` imports `VT_STACK_PREFIX`/types back from this module):
+// safe here because both sides only reach the other's binding from inside a
+// function body (`mergeMotion` below; `PRESETS`' own `build` closures in
+// trackPresets.ts), never at module top-level, so neither module needs the
+// other to have finished initialising before its own top-level code runs.
+import { vtMatchLegacyTrackPreset } from './trackPresets'
 import { DEFAULT_FILL, normalizePaint, type Fill } from '~/lib/spacetype/fillTile'
 // CPU-only (plain strings plus a GLSL source string), so it is safe in the
 // Collection control resolver and every node card — the same bar `fillTile`
@@ -258,13 +271,22 @@ export interface VtAppearanceLayer {
 export type VtEasing = 'linear' | 'pingpong' | 'easeinout'
 
 /**
- * One animation track. Structurally the subset of gradientfx's `MotionTrack`
- * that its `trackValue` actually reads — minus the deprecated `{layer, param}`
- * legacy targeting, which this studio has no saved configs to carry.
+ * One animation track — a dotted path plus a numeric or colour range and its
+ * per-track timing (hold/cycleOffset/delay). `easing`/`loops` used to live
+ * here too; they are GONE, not merely renamed — a track never carries its own
+ * ease or play mode any more, because the MOVE that owns it does (a `'tracks'`
+ * move's `ease`/`play`, applied to every track it holds; see
+ * `~/lib/studio/moves/types`'s `Move`). That is what makes several tracks
+ * share one timing rather than repeating it on each: `mergeMove` /
+ * `convertLegacyTracks` are the only two places a track is produced without an
+ * owning move already declared, and both hand back a move whose `ease`/`play`
+ * came from exactly this pair on the legacy shape.
  *
- * Task 6 evaluates these; keeping the shape assignable to gradientfx's means it
- * can reuse `trackValue` outright instead of writing a second easing engine.
- * `VT_TRACK_IS_GRADIENT_COMPATIBLE` below fails to COMPILE if the two drift.
+ * No longer structurally checked against gradientfx's `MotionTrack` (which
+ * still carries its own `easing`/`loops`) — the two vocabularies diverged on
+ * purpose the moment ease/play moved onto the move, so that compile-time proof
+ * would now fail by design rather than by drift and was removed rather than
+ * kept red.
  */
 export interface VtMotionTrack {
   /** Absolute dotted path into VectorTypeConfig, e.g. `axes.wght`. */
@@ -309,9 +331,6 @@ export interface VtMotionTrack {
    *  (OKLab) — a naive RGB lerp drops through a dark, desaturated trough, and
    *  `lib/color/mix.ts` carries the measured numbers. */
   space?: ColorMixSpace
-  easing: VtEasing
-  /** Cycles within the clip; >= 1. */
-  loops: number
   /** Hold at extremes, 0..0.5. */
   hold: number
   /** Phase offset into the cycle, 0..1. */
@@ -342,7 +361,15 @@ export interface VtStaggerConfig {
 }
 
 export interface VtMotionConfig {
-  tracks: VtMotionTrack[]
+  /**
+   * The stack of moves — every preset, track and entrance/exit/loop is one
+   * move on the shared `Move` shape (`~/lib/studio/moves/types`). Replaces
+   * the old three preset slots (`in`/`out`/`loop`) plus the flat `tracks`
+   * array; `mergeMotion` converts a document saved before this existed (see
+   * its old-shape branch) so an old document renders identically once
+   * migrated.
+   */
+  moves: Move[]
   /** Clip length in seconds. */
   duration: number
   fps: number
@@ -376,31 +403,7 @@ export interface VtMotionConfig {
    * declared here as real config state rather than as evaluator-only knobs.
    */
   scatter: VtScatterConfig
-  /**
-   * Entrance / exit / loop presets from the SHARED kinetic engine
-   * (`~/lib/motion/evaluate`), evaluated by `./presetMotion.ts`.
-   *
-   * `LayerAnimSpec` is adopted VERBATIM — the same shape the Compositor stores
-   * and the same shape `MotionPresetPicker` emits — so the picker can be mounted
-   * here with no conversion layer. A parallel VT-shaped type would have to be
-   * translated at the picker, at the evaluator and at every test, and the
-   * translation is exactly where a field quietly stops being carried.
-   *
-   * These COMPOSE with `tracks`; they do not replace them. A Slide-Up preset and
-   * a `axes.wght` track are both visible at once (see `./presetMotion.ts` for the
-   * composition rule). Absent = that slot contributes nothing.
-   *
-   * `LayerAnimSpec.stagger` is DELIBERATELY NOT STORED — see `mergeAnimSpec`.
-   */
-  in?: LayerAnimSpec
-  out?: LayerAnimSpec
-  loop?: LayerAnimSpec
 }
-
-/** Compile-time proof that a VT track can be fed to gradientfx's `trackValue`
- *  (Task 6 reuses it rather than reimplementing easing). If the shapes ever
- *  drift this line stops type-checking — that is its whole job. */
-export const VT_TRACK_IS_GRADIENT_COMPATIBLE: VtMotionTrack extends GradientMotionTrack ? true : false = true
 
 export interface VectorTypeConfig {
   /** The word(s) to set. Long strings are a real performance cost (hundreds of
@@ -622,7 +625,7 @@ export interface VtLegacyPaint {
 export const DEFAULT_STAGGER: VtStaggerConfig = { delay: 0, order: 'forward', seed: 0 }
 
 export const DEFAULT_MOTION: VtMotionConfig = {
-  tracks: [], duration: 4, fps: 30, size: 1080,
+  moves: [], duration: 4, fps: 30, size: 1080,
   stagger: { ...DEFAULT_STAGGER }, blink: { ...DEFAULT_BLINK }, scatter: { ...DEFAULT_SCATTER },
 }
 
@@ -789,7 +792,7 @@ export const DEFAULT_CONFIG: VectorTypeConfig = {
   // Spread is shallow: `stagger`, `blink` and `scatter` must be copied too, or
   // DEFAULT_CONFIG and DEFAULT_MOTION would share one mutable object.
   motion: {
-    ...DEFAULT_MOTION, tracks: [],
+    ...DEFAULT_MOTION, moves: [],
     stagger: { ...DEFAULT_STAGGER }, blink: { ...DEFAULT_BLINK }, scatter: { ...DEFAULT_SCATTER },
   },
 }
@@ -1281,6 +1284,39 @@ export function migrateStackTrackPaths(
 }
 
 /**
+ * The moves-shaped twin of `migrateStackTrackPaths` above: lifts every
+ * POSITIONAL stack track path onto the layer's stable id, across every
+ * `'tracks'`-kind MOVE's own `tracks` array rather than a flat top-level one —
+ * a track's home is now inside the move that owns its ease/play (see
+ * `VtMotionConfig.moves`), so this is what `mergeConfig` calls instead.
+ *
+ * Same rule, same reasoning as `migrateStackTrackPaths` (only what resolves is
+ * rewritten; nothing is ever dropped here), and the same identity contract:
+ * returns the SAME `moves` array when nothing changed, and a move whose own
+ * tracks did not change is itself returned BY REFERENCE, so an unrelated
+ * move's identity survives a load that only touched one other move.
+ */
+function migrateMoveTrackPaths(moves: Move[], appearance: VtAppearanceLayer[]): Move[] {
+  const host = { [VT_STACK_LIST]: appearance }
+  let changedAny = false
+  const out = moves.map((mv) => {
+    if (mv.kind !== 'tracks' || !Array.isArray(mv.tracks) || !mv.tracks.length) return mv
+    let changed = false
+    const tracks = mv.tracks.map((t) => {
+      if (!t.path.startsWith(VT_STACK_PREFIX)) return t
+      const id = toIdPath(host, t.path)
+      if (!id || id === t.path) return t
+      changed = true
+      return { ...t, path: id }
+    })
+    if (!changed) return mv
+    changedAny = true
+    return { ...mv, tracks }
+  })
+  return changedAny ? out : moves
+}
+
+/**
  * ## THE BRIDGE — Task 3 deletes this, and nothing else should grow a caller
  *
  * "Which single fill and which single stroke would the pre-stack renderer have
@@ -1387,8 +1423,6 @@ function mergeTrack(raw: unknown, remap?: (path: string) => string | null): VtMo
     path,
     from: num(o.from, 0),
     to: num(o.to, 0),
-    easing: oneOf(o.easing, VT_EASINGS, 'linear'),
-    loops: Math.max(1, Math.round(num(o.loops, 1))),
     hold: clamp(num(o.hold, 0), 0, 0.5),
     cycleOffset: clamp(num(o.cycleOffset, 0), 0, 1),
     delay: Math.max(0, num(o.delay, 0)),
@@ -1470,80 +1504,149 @@ function mergeScatter(raw: unknown): VtScatterConfig {
   }
 }
 
-/** Rebuild a preset's knob values: finite numbers only, and `undefined` rather
- *  than an empty record so an untouched preset stores nothing. A non-numeric
- *  knob is DROPPED, not coerced — `resolveParams` spreads this straight over the
- *  preset defaults, so a `"3"` would reach the maths as a string. */
-function mergeParams(raw: unknown): Record<string, number> | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
-  const out: Record<string, number> = {}
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v
-  }
-  return Object.keys(out).length ? out : undefined
+/**
+ * A legacy engine-name ease string (e.g. `power2.out`, `sine.inOut`) → the
+ * nearest of the ten NAMED eases, or `null` when it names none of them (a
+ * bezier string, or nothing at all) — `mergeMove`'s own `mergeEase` then falls
+ * back to `DEFAULT_EASE`, exactly the rule the spec calls for: "ease from the
+ * spec's `ease` string if it names one of the ten, else default."
+ *
+ * A ROUGH map, on purpose: the old preset engine's own vocabulary (Compositor's
+ * `MotionPresetPicker`) is a different, larger set than the ten this stack
+ * offers, so this is "the closest family", not a lossless round-trip. It only
+ * ever runs once, at the migration of a document that pre-dates moves.
+ */
+function legacyPresetEaseName(ease: string | undefined): MoveEaseName | null {
+  if (!ease) return null
+  const e = ease.trim()
+  if (e === 'none' || e === 'linear') return 'none'
+  if (e.startsWith('power')) return e.includes('.in') && !e.includes('inOut') ? 'accelerate' : 'smooth'
+  if (e === 'sine.inOut') return 'natural'
+  if (e.startsWith('back')) return 'overshoot'
+  if (e.startsWith('elastic')) return 'elastic'
+  if (e.startsWith('bounce')) return 'bounce'
+  return null
 }
 
 /**
- * Rebuild one preset slot, or `undefined` if it names no preset.
+ * Rebuild the motion block, converting an OLD-shape document to `moves` as it
+ * loads.
  *
- * Same rule as `mergeTrack`: a spec with no `presetId` cannot be evaluated or
- * edited, so it is dropped rather than defaulted to some preset the user never
- * picked. An UNKNOWN-but-well-formed id is KEPT — the config layer does not own
- * the preset catalog, and dropping ids would silently delete a newer version's
- * work on an older load (the same reason `mergeAxes` keeps a tag the current
- * font lacks). `./presetMotion.ts` refuses to evaluate an id the engine does not
- * have rather than guessing, so an unknown id animates nothing instead of
- * animating the wrong thing.
+ * TWO INPUT SHAPES, told apart by which keys are present — never by a version
+ * number, because none was ever stored:
  *
- * `stagger` IS NOT CARRIED. `LayerAnimSpec.stagger` and `motion.stagger.delay`
- * are two spellings of the same idea, and Vector Type already has the richer one
- * (delay + order + seed, feeding `glyphTime`). The evaluator therefore drives the
- * engine with a per-glyph CLOCK and a zeroed spec stagger, which makes a stored
- * `stagger` structurally dead — so it is not stored, rather than stored and
- * silently ignored.
+ *  - **NEW** — a `moves` array. Every entry goes straight through the shared,
+ *    studio-neutral `mergeMove` (its own `mergeTrackFn` is `mergeTrack`, so a
+ *    `'tracks'`-kind move's tracks are validated exactly as a bare track
+ *    always was — path, range, hold/cycleOffset/delay, and the colour triple).
+ *  - **OLD** — the three preset slots (`in`/`out`/`loop`) and/or a flat
+ *    `tracks` array, with no `moves` key at all. CONVERTED, once, here:
+ *
+ *      1. each slot with a `presetId` becomes ONE preset move at that phase —
+ *         `play` is `repeat ×1` for `loop` (the old loop ran forever, and
+ *         `repeat` is what "no play mode" meant before play modes existed)
+ *         and `once` for `in`/`out`, matching how those two always played;
+ *      2. the flat `tracks` array is handed to the shared, studio-neutral
+ *         `convertLegacyTracks` (`~/lib/studio/moves/merge`) with THIS clip's
+ *         `duration` as the converted move's cycle length — a pre-moves loop
+ *         always ran one cycle over the whole clip, so anything else would
+ *         change the old loop's SPEED, not just its representation.
+ *
+ * Blink and Scatter are untouched by either branch: they were never slots or
+ * tracks, they are their own config blocks in both the old and new shapes, and
+ * `mergeMotion` reads them the same way regardless — see `mergeBlink` /
+ * `mergeScatter` below.
+ *
+ * A raw motion block with NEITHER a `moves` key nor any old-shape key (a
+ * completely fresh document, or a corrupted one) produces `moves: []` — the
+ * same default a brand-new config has, so nothing is invented from nothing.
  */
-function mergeAnimSpec(raw: unknown, slot: VtPresetSlot): LayerAnimSpec | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
-  const o = raw as Record<string, unknown>
-  const presetId = typeof o.presetId === 'string' ? o.presetId.trim() : ''
-  if (!presetId) return undefined
-  const spec: LayerAnimSpec = {
-    presetId,
-    // 0.05 is the engine's own floor (MIN_UNIT_DUR); below it a phase cannot be
-    // seen, and `evaluateAnimation` clamps there anyway.
-    duration: clamp(num(o.duration, VT_PRESET_DURATIONS[slot]), 0.05, 60),
-  }
-  const ease = typeof o.ease === 'string' ? o.ease.trim() : ''
-  if (ease) spec.ease = ease
-  const params = mergeParams(o.params)
-  if (params) spec.params = params
-  return spec
-}
-
 function mergeMotion(raw: unknown, remap?: (path: string) => string | null): VtMotionConfig {
   const o = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>
-  const rawTracks = Array.isArray(o.tracks) ? o.tracks : []
-  const tracks: VtMotionTrack[] = []
-  for (const t of rawTracks) {
-    const track = mergeTrack(t, remap)
-    if (track) tracks.push(track)
+  // Every 'tracks'-kind move's own tracks go through the SAME per-track
+  // validation a bare track always used — `mergeTrack` — including the
+  // pre-stack `remap`, so a track inside a move is exactly as strict as one
+  // used to be at the top level. `mergeMove` wants `undefined`, not `null`,
+  // for "no track" — `mergeTrack` returns `null`, so the two are bridged here.
+  const mergeTrackFn = (t: unknown): VtMotionTrack | undefined => mergeTrack(t, remap) ?? undefined
+  const duration = clamp(num(o.duration, DEFAULT_MOTION.duration), 0.1, 60)
+
+  const hasNewShape = Array.isArray(o.moves)
+  const hasOldShape = !hasNewShape && (('tracks' in o) || VT_PRESET_SLOTS.some(slot => slot in o))
+  const moves: Move[] = []
+
+  if (hasNewShape) {
+    for (const rawMove of o.moves as unknown[]) {
+      const m = mergeMove(rawMove, mergeTrackFn)
+      if (m) moves.push(m)
+    }
+  } else if (hasOldShape) {
+    // 1) The three preset slots → one preset move per populated slot.
+    for (const slot of VT_PRESET_SLOTS) {
+      const rawSlot = o[slot]
+      if (!rawSlot || typeof rawSlot !== 'object' || Array.isArray(rawSlot)) continue
+      const so = rawSlot as Record<string, unknown>
+      const presetId = typeof so.presetId === 'string' ? so.presetId.trim() : ''
+      if (!presetId) continue
+      const easeName = legacyPresetEaseName(typeof so.ease === 'string' ? so.ease : undefined)
+      const m = mergeMove({
+        id: `move-${slot}`,
+        phase: slot,
+        kind: 'preset',
+        presetId,
+        duration: num(so.duration, VT_PRESET_DURATIONS[slot]),
+        ease: easeName ? { kind: 'named', name: easeName } : undefined,
+        play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
+        params: so.params,
+      }, mergeTrackFn)
+      if (m) moves.push(m)
+    }
+    // 2) The flat `tracks` array → the shared, studio-neutral legacy
+    // conversion — a matched run-level preset collapses to one move, and
+    // every leftover track becomes its own Custom move (see
+    // `convertLegacyTracks`'s own doc for the exact rule).
+    const rawTracks = Array.isArray(o.tracks) ? (o.tracks as unknown[]) : []
+    const legacyTracks: LegacyMotionTrack[] = []
+    for (const t of rawTracks) {
+      // `mergeTrack` is the ONE place a track's path/range/timing/colour are
+      // validated — reused here rather than re-parsed, so a legacy track
+      // converts under exactly the same rules a bare one always did.
+      const merged = mergeTrack(t, remap)
+      if (!merged) continue
+      const to = (t && typeof t === 'object' ? (t as Record<string, unknown>) : {})
+      legacyTracks.push({
+        path: merged.path,
+        from: merged.from,
+        to: merged.to,
+        hold: merged.hold,
+        cycleOffset: merged.cycleOffset,
+        delay: merged.delay,
+        ...(merged.fromColor ? { fromColor: merged.fromColor } : {}),
+        ...(merged.toColor ? { toColor: merged.toColor } : {}),
+        // `mix` is the shared shape's generic name for what this studio calls
+        // `space` — carried across so a migrated colour track (e.g. a
+        // Colour Cycle track saved with `space: 'oklch'`) keeps its mix space
+        // rather than silently falling back to the default.
+        ...(merged.space ? { mix: merged.space } : {}),
+        // Raw, barely-typed: `convertLegacyTracks`'s own `legacyTrackEasePlay`
+        // falls back the same way `mergeTrack` used to for an unrecognised
+        // `easing` or a non-finite `loops` — only the TS shape (`string` /
+        // `number`, not `unknown`) needs narrowing here.
+        ...(typeof to.easing === 'string' ? { easing: to.easing } : {}),
+        ...(typeof to.loops === 'number' ? { loops: to.loops } : {}),
+      })
+    }
+    moves.push(...convertLegacyTracks(legacyTracks, vtMatchLegacyTrackPreset, duration))
   }
-  // Spread-when-present, not `in: undefined`: an absent slot must leave no key
-  // behind, so a round-tripped default config is byte-identical to the default.
-  const slots: Partial<Record<VtPresetSlot, LayerAnimSpec>> = {}
-  for (const slot of VT_PRESET_SLOTS) {
-    const spec = mergeAnimSpec(o[slot], slot)
-    if (spec) slots[slot] = spec
-  }
+
   return {
-    tracks,
-    duration: clamp(num(o.duration, DEFAULT_MOTION.duration), 0.1, 60),
+    moves,
+    duration,
     fps: clamp(Math.round(num(o.fps, DEFAULT_MOTION.fps)), 1, 60),
     size: oneOfNum(o.size, VT_MOTION_SIZES, DEFAULT_MOTION.size),
     stagger: mergeStagger(o.stagger),
     blink: mergeBlink(o.blink),
     scatter: mergeScatter(o.scatter),
-    ...slots,
   }
 }
 
@@ -1573,8 +1676,9 @@ export function mergeConfig(raw: unknown): VectorTypeConfig {
   // saved before ids existed, and the `appearance.<i>.width` that
   // `remapLegacyTrackPath` just wrote a line above for a legacy `strokeWidth`
   // animation. Same rewrite, one call, after the stack it is addressed against
-  // is final.
-  const tracks = migrateStackTrackPaths(motion.tracks, appearance)
+  // is final. `migrateMoveTrackPaths` is `migrateStackTrackPaths`'s moves-shaped
+  // twin — a track's home is a move's `tracks` array now, not a flat one.
+  const moves = migrateMoveTrackPaths(motion.moves, appearance)
   return {
     text: str(o.text, d.text),
     // An unknown font id is NOT kept: every later stage (the proxy, the loader,
@@ -1597,7 +1701,7 @@ export function mergeConfig(raw: unknown): VectorTypeConfig {
     stretchY: clamp(num(o.stretchY, d.stretchY), VT_STRETCH_MIN, VT_STRETCH_MAX),
     fit: oneOf(o.fit, VT_FITS, d.fit),
     appearance,
-    motion: tracks === motion.tracks ? motion : { ...motion, tracks },
+    motion: moves === motion.moves ? motion : { ...motion, moves },
   }
 }
 
@@ -1617,20 +1721,26 @@ function legacyStrokeIsAnimated(rawMotion: unknown): boolean {
 /** A deep copy safe to mutate — what motion evaluation clones before applying
  *  tracks, and what the surface hands to a preview render. */
 export function cloneConfig(cfg: VectorTypeConfig): VectorTypeConfig {
-  // Tolerant of a config straight out of storage (`motion`/`tracks`/`stagger`
+  // Tolerant of a config straight out of storage (`motion`/`moves`/`stagger`
   // absent), because `applyMotion` clones BEFORE anything normalises — see the
   // choke-point note in ./motion.ts. Values are copied, never invented: a
   // missing block clones as empty and the evaluator resolves defaults itself.
   const m = cfg.motion
-  // Preset slots carry a nested `params` record, so a shallow spread would leave
-  // the clone sharing one knob object with its source.
-  const spec = (s: LayerAnimSpec | undefined): LayerAnimSpec | undefined =>
-    s ? { ...s, ...(s.params ? { params: { ...s.params } } : {}) } : undefined
-  const slots: Partial<Record<VtPresetSlot, LayerAnimSpec>> = {}
-  for (const slot of VT_PRESET_SLOTS) {
-    const copy = spec(m?.[slot])
-    if (copy) slots[slot] = copy
-  }
+  // Every move carries nested OBJECTS a shallow spread would leave shared with
+  // the source — `ease`/`play`, a `'tracks'` move's own `tracks` array, and a
+  // `'preset'` move's `params` knob record. Same reasoning as `blink`/`scatter`
+  // below: `applyMotion` writes THROUGH this clone, so anything left shared
+  // would let frame 37's value land back in the config the surface is holding.
+  const cloneMove = (mv: Move): Move => ({
+    ...mv,
+    ease: mv.ease.kind === 'bezier'
+      ? { kind: 'bezier', cps: [...mv.ease.cps] as [number, number, number, number] }
+      : { ...mv.ease },
+    play: { ...mv.play },
+    ...(mv.params ? { params: { ...mv.params } } : {}),
+    ...(mv.tracks ? { tracks: mv.tracks.map(t => ({ ...t })) } : {}),
+  })
+  const moves: Move[] = Array.isArray(m?.moves) ? m.moves.map(cloneMove) : []
   return {
     ...cfg,
     axes: { ...cfg.axes },
@@ -1659,8 +1769,7 @@ export function cloneConfig(cfg: VectorTypeConfig): VectorTypeConfig {
       blink: { ...m?.blink } as VtBlinkConfig,
       // Same story for `motion.scatter.spread` / `.settle` / `.rate`.
       scatter: { ...m?.scatter } as VtScatterConfig,
-      tracks: Array.isArray(m?.tracks) ? m.tracks.map(t => ({ ...t })) : [],
-      ...slots,
+      moves,
     },
   }
 }

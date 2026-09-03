@@ -9,14 +9,20 @@ describe('studio moves merge', () => {
     expect(mergeMove({ id: 'a', phase: 'loop', kind: 'preset' })).toBeUndefined()
   })
   it('a pingpong legacy track becomes a custom back-and-forth move', () => {
-    const moves = convertLegacyTracks([{ path: 'axes.wght', from: 100, to: 900, easing: 'pingpong', loops: 2 }], () => null)
+    const moves = convertLegacyTracks([{ path: 'axes.wght', from: 100, to: 900, easing: 'pingpong', loops: 2 }], () => null, 4)
     expect(moves).toHaveLength(1)
     expect(moves[0]!.kind).toBe('tracks'); expect(moves[0]!.presetId).toBe('custom')
     expect(moves[0]!.play).toEqual({ mode: 'backAndForth', times: 2 }); expect(moves[0]!.ease).toEqual({ kind: 'named', name: 'none' })
   })
   it('a matched preset collapses its tracks to one move', () => {
-    const moves = convertLegacyTracks([{ path: 'layout.stretch', from: 1, to: 1.5, easing: 'linear', loops: 1 }], (t) => t.some(x => x.path === 'layout.stretch') ? 'stretch-wave' : null)
+    const moves = convertLegacyTracks([{ path: 'layout.stretch', from: 1, to: 1.5, easing: 'linear', loops: 1 }], (t) => t.some(x => x.path === 'layout.stretch') ? 'stretch-wave' : null, 4)
     expect(moves).toHaveLength(1); expect(moves[0]!.presetId).toBe('stretch-wave')
+  })
+  it('a converted move\'s duration equals the given clip duration, not a hardcoded value', () => {
+    const moves = convertLegacyTracks([{ path: 'axes.wght', from: 100, to: 900, easing: 'pingpong', loops: 2 }], () => null, 6)
+    expect(moves[0]!.duration).toBe(6)
+    const matched = convertLegacyTracks([{ path: 'layout.stretch', from: 1, to: 1.5 }], () => 'stretch-wave', 9)
+    expect(matched[0]!.duration).toBe(9)
   })
 })
 

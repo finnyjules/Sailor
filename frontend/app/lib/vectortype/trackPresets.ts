@@ -416,3 +416,45 @@ export function vtTrackPresetActive(cfg: VectorTypeConfig, presetId: unknown): b
     h?.path === w.path && h.from === w.from && h.to === w.to && h.easing === w.easing
     && h.fromColor === w.fromColor && h.toColor === w.toColor && h.space === w.space))
 }
+
+// ── Legacy-track → preset matching, for the moves migration ────────────────
+
+/**
+ * Which paths each RUN-LEVEL preset's `build()` writes, verified against the
+ * `PRESETS` table above rather than assumed — `stretch-in` and `stretch-wave`
+ * both write a single `stretch` track (they cannot be told apart by path
+ * alone: the earlier one in `PRESETS` wins, see `vtMatchLegacyTrackPreset`),
+ * `spring-up` writes `stretchY`. Layer-addressed presets (Light Sweep,
+ * Misregistration, Colour Cycle) are NOT here — their paths are per-layer id
+ * paths (`appearance.<id>.angle`), which can never equal a fixed signature,
+ * so a legacy document can only ever match one of the three RUN presets.
+ */
+const PRESET_SIGNATURE_PATHS: Record<string, string[]> = {
+  'stretch-in': ['stretch'],
+  'stretch-wave': ['stretch'],
+  'spring-up': ['stretchY'],
+}
+
+/**
+ * Does this legacy tracks list match a known preset's signature — same SET of
+ * paths, nothing more and nothing fewer? Used once, at `mergeMotion`'s
+ * old-shape conversion (`~/lib/studio/moves/merge`'s `convertLegacyTracks`),
+ * to collapse a matched legacy track back into one preset move instead of a
+ * pile of Custom ones.
+ *
+ * `null` when nothing matches — including the (structurally impossible today,
+ * since two presets share the `stretch` signature) case of an ambiguous
+ * match; `PRESET_SIGNATURE_PATHS` is walked in `VT_TRACK_PRESETS`' own gallery
+ * order, so a `stretch` track always resolves to `stretch-in`, the earlier of
+ * the two — a legacy `stretch-wave` document converts as Custom instead,
+ * which still plays back correctly (Custom carries the real stored values),
+ * just without the gallery tile lighting up as active.
+ */
+export function vtMatchLegacyTrackPreset(tracks: readonly { path: string }[]): string | null {
+  const paths = new Set(tracks.map(t => t.path))
+  for (const preset of VT_TRACK_PRESETS) {
+    const sig = PRESET_SIGNATURE_PATHS[preset.id]
+    if (sig && sig.length === paths.size && sig.every(p => paths.has(p))) return preset.id
+  }
+  return null
+}
