@@ -20,7 +20,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Gradient Studio | ✅ | ✅ 30 targets, path-based | ✅ (**schema-drawn** from GRADIENT_CONTROLS) | ✅ descriptor | 2,620 (+ 4 primitives + alpha + per-layer layout) |
 | Shader Studio | ✅ | ✅ path tracks (+ mask region) | ✅ (data-driven, + per-effect spatial mask, + mode-gated params) | ✅ descriptor (+ mask, + **effect macro + ungated stages + derived guidance**) | 806 + 62 effects |
 | Texture Studio | ✅ | ❌ | ✅ (data-driven, + **chips/Worley** mode) | ✅ commands (+ approximation honesty) | ~2,300 |
-| Shape Studio (geologo) | ✅ PNG + SVG | ❌ | ✅ + **layer stack** (rail, per-layer scoping, placement) | ✅ descriptor (active layer only) | ~1,900 (lib/geoshape + studio.ts) |
+| Shape Studio (geologo) | ✅ PNG + SVG | ❌ | ✅ + **layer stack** (rail, per-layer scoping, placement) + **library base shape** | ✅ descriptor (active layer only, + `libraryShape`) | ~1,900 (lib/geoshape + studio.ts) |
 | Shot Director | ✅ | ✅ keyframes | ✅ | ❌ | 988 |
 | Smart Layout | ✅ batch export | ❌ | ✅ | ✅ commands | 7,262 (UI) |
 | Lip-Sync Studio | ❌ (server) | ❌ | ✅ | ❌ | 82 |
@@ -30,6 +30,16 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Pose Mannequin | ✅ control img | ❌ | modal | ❌ (excluded) | — |
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
+
+### Shape Studio — library base shape — LANDED 2026-09-02 (`f7c90ba0e`..`a1281ef58`)
+
+The geologo generator's base shape can now be **any of the 100 library shapes** — the third consumer of the [shape library](#shape-library--expressive-studio-separator--landed-2026-09-02). Pick **Library** in the Shape select and a **Library shape** row appears (the shared picker); the chosen shape is fitted so its larger ink side spans `size`, exactly like the twelve built-ins, then cloned, arranged and even-odd folded as before. A swirl cloned six times around a circle is a mark none of the built-ins could make.
+
+**How.** `lib/shapes/geometry.ts` is the one recentre-and-scale helper (`transformShapePath`, `fitShapePath`), now also backing the Compositor's `shapeGeometry`. `geoshape/shapes.ts` appends `'library'` to `BASE_SHAPES` (append, never reorder) and `baseShapePath('library', { libraryShape })` falls back to Sparkle for an id the catalog no longer has; `config.ts` gains `libraryShape` (normalised through `isShapeId`, default `'sparkle'`, so every old doc loads unchanged); `controls.ts` declares the `Library shape` row as a `shape`-kind control gated to the library kind and hides corner rounding under it; `randomize.ts` lets re-roll land on Library with a random id; `GEO_GUIDANCE` tells the agent the family exists. **No surface code changed** — the schema panel already renders `shape` rows through `RowShape`.
+
+**Verified.** 20 new/extended unit tests (fit math from hand-computed numbers, 13 kinds, config fallback, control gating, drift guard, render + SVG of a library config, re-roll validity). Live: Shape = Library → six radial sparkles and the rounding rows vanish; picker → Swirl re-renders; Escape inside the picker leaves the studio open (no keyboard chain to fight here, unlike the Frame); ten re-rolls landed twice on library shapes. Proof PNG captured from the studio canvas. **Owed:** the ComfyUI bake with a library mark (backend down).
+
+Spec: [2026-09-02-shape-studio-library-base-shape-design.md](superpowers/specs/2026-09-02-shape-studio-library-base-shape-design.md) · plan: [2026-09-02-shape-studio-library-base-shape.md](superpowers/plans/2026-09-02-shape-studio-library-base-shape.md).
 
 ### Compositor — shape library layers — LANDED 2026-09-02 (`8aeb1c49d`..`4d9dd3735` + polish)
 
