@@ -18,6 +18,15 @@ export function backOut(s = 1.70158): EaseFn {
 export function backIn(s = 1.70158): EaseFn {
   return t => (s + 1) * t * t * t - s * t * t
 }
+export function backInOut(s = 1.70158): EaseFn {
+  const c = s * 1.525
+  return t => {
+    t *= 2
+    if (t < 1) return 0.5 * (t * t * ((c + 1) * t - c))
+    t -= 2
+    return 0.5 * (t * t * ((c + 1) * t + c) + 2)
+  }
+}
 
 export const elasticOut: EaseFn = (t) => {
   if (t === 0 || t === 1) return t
@@ -40,7 +49,7 @@ export function steps(n: number): EaseFn {
 }
 
 /** GSAP-style name → EaseFn. Handles the names appearing in kinetic-presets.ts:
- *  powerN.out / powerN.in, back.out(s) / back.in(s), elastic.out(...),
+ *  powerN.out / powerN.in, back.out(s) / back.in(s) / back.inOut(s), elastic.out(...),
  *  bounce.out, sine.inOut, steps(n), none/linear. Unknown → power2.out.
  *  Known approximations: powerN.inOut maps to quad in-out (exact only for
  *  N=2); elastic.* ignores GSAP's amplitude/period params (fixed 1/0.3). */
@@ -56,10 +65,12 @@ export function resolveEase(name: string | undefined): EaseFn {
     if (power[2] === 'in') return powerIn(p)
     return easeInOutQuad
   }
-  const back = /^back\.(out|in)(?:\(([\d.]+)\))?$/.exec(name)
+  const back = /^back\.(out|in|inOut)(?:\(([\d.]+)\))?$/.exec(name)
   if (back) {
     const s = back[2] ? parseFloat(back[2]) : 1.70158
-    return back[1] === 'out' ? backOut(s) : backIn(s)
+    if (back[1] === 'out') return backOut(s)
+    if (back[1] === 'in') return backIn(s)
+    return backInOut(s)
   }
   if (name.startsWith('elastic')) return elasticOut
   if (name.startsWith('bounce')) return bounceOut

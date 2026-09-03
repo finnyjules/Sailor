@@ -17,9 +17,18 @@ describe('studio moves ease', () => {
     const fn = resolveEase(easeToEngineName(ease))
     expect(fn(0.25)).toBeLessThan(0.25); expect(fn(0)).toBeCloseTo(0, 4); expect(fn(1)).toBeCloseTo(1, 4)
   })
-  it('the glyph path is monotone in x', () => {
-    const xs = [...easeGlyphPath({ kind: 'named', name: 'smooth' }, 40, 20).matchAll(/[ML] ([\d.]+)/g)].map(m => Number(m[1]))
-    for (let i = 1; i < xs.length; i++) expect(xs[i]).toBeGreaterThanOrEqual(xs[i - 1])
+  it('the glyph path for a monotonic ease is monotone non-increasing in screen-y', () => {
+    // y = (1 - easeSample(t)) * h, so a monotonically-increasing ease (smooth)
+    // must produce screen-y values that never increase as x increases.
+    const ys = [...easeGlyphPath({ kind: 'named', name: 'smooth' }, 40, 20).matchAll(/[ML] [\d.]+ ([\d.]+)/g)].map(m => Number(m[1]))
+    for (let i = 1; i < ys.length; i++) expect(ys[i]).toBeLessThanOrEqual(ys[i - 1])
+  })
+  it('swing is a distinct overshoot ease (back.inOut), not a plain quad', () => {
+    const swing = (t: number) => easeSample({ kind: 'named', name: 'swing' }, t)
+    expect(swing(0)).toBeCloseTo(0, 6)
+    expect(swing(1)).toBeCloseTo(1, 6)
+    expect(swing(0.25)).toBeLessThan(0)
+    expect(swing(0.75)).toBeGreaterThan(1)
   })
   it('mergeEase and mergePlay reject junk and clamp', () => {
     expect(mergeEase(undefined)).toEqual(DEFAULT_EASE)
