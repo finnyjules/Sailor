@@ -12,7 +12,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 
 | Surface | bake | motion | inspector | agent | engine LOC |
 |---|---|---|---|---|---|
-| Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes**) | ✅ descriptor (+ `shape` kind) | 11,202 |
+| Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes** on 20 effects incl. Cylinder) | ✅ descriptor (+ `shape` kind) | 11,202 |
 | Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc + **smart stretch: Stretch/Height dials, Fit**) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
 | Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers, **shape library shelf**) | ✅ descriptor (object.* + id-addressed; library shapes not yet) | ~6,300 (+ SVG import) + ambientCG textures |
 | Compositor / Frame | ✅ | ✅ motion clips | ✅ (+ **shape library** insert/swap) | ✅ commands (+ `addShape`) | 1,667 (+1,041 motion) |
@@ -30,6 +30,14 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Pose Mannequin | ✅ control img | ❌ | modal | ❌ (excluded) | — |
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
+
+### Expressive Studio — separator on the per-glyph Cylinder effect — LANDED 2026-09-02 (`8beee59d3`)
+
+The fifth and last piece of the shape library programme. The tile separator reaches the 19 effects that sample the word tile; six effects lay letters out one by one and never see it. Of those, **Cylinder** is where a separator means something — each ring carries its word once around the circle, so the seam between the word's end and its start is exactly where "SAILOR ✦" wants its shape. `layoutChars` now takes the same `separator` the tile painter takes and appends one glyph cell after the last letter — `[gap][shape][gap]`, drawn with `drawShape` at cap height, clamped to the row, filled and stroked like the letters — so the per-glyph effects' only contract (the atlas + UV windows) carries the shape with no effect-side geometry change. `makeTextTexture` stashes the resolved separator on `tex.userData.separator`; Cylinder reads it off the texture argument it used to ignore. Eligibility opens exactly one per-glyph effect (`PER_GLYPH_SEPARATOR_READY = {cylinder}`); Blend, Cascade and Onionburst show a single word with no seam, Slot reels whole words, and Ring arranges content tiles where a separator would be a content item of its own — a later seam.
+
+**Verified.** Fake-canvas unit tests derive every number from the layout math (60 + 35 + 25 + 35, `u0` 95/155, translate (95, 75), clamp at the row, `scaleX` widening the whole run) and pin the no-separator path byte-for-byte; the controls spec's literal ineligible list drops `cylinder`. Live in the harness: Cylinder, three rings, separator Sparkle — a sparkle glyph at each ring's seam.
+
+Spec: [2026-09-02-cylinder-per-glyph-separator-design.md](superpowers/specs/2026-09-02-cylinder-per-glyph-separator-design.md) · plan: [2026-09-02-cylinder-per-glyph-separator.md](superpowers/plans/2026-09-02-cylinder-per-glyph-separator.md).
 
 ### 3D Studio — shape library shelf — LANDED 2026-09-02 (`cd4f9c7a9`..`e7c0dbfc0`)
 
