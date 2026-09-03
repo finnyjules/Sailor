@@ -72,7 +72,9 @@ void main() {
     float line = 1.0 - smoothstep(th - aa, th + aa, dEdge);
 
     // Each thread picks its own ink; the first ink is the ground between threads.
-    vec3 ink = rampAt(0.2 + 0.8 * fract(floor(f) * 0.618034));
+    // Round to the NEAREST integer: a thread is centred on integer f and its band straddles
+    // it, so floor(f) would change ink halfway across the thread.
+    vec3 ink = rampAt(0.2 + 0.8 * fract(floor(f + 0.5) * 0.618034));
     vec3 col = mix(u_ramp[0], ink, line);
 
     if (u_hasInput > 0.5 && u_mix > 0.0) {
