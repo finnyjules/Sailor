@@ -32,11 +32,14 @@ import {
   VT_DEFAULT_STROKE_WIDTH,
   VT_EXTRUDE_DEPTH_MAX,
   VT_FILL_ANCHORS,
+  VT_FITS,
   VT_FONT_IDS,
   VT_SKEW_MAX,
   VT_STAGGER_DELAY_MAX,
   VT_STAGGER_ORDERS,
   VT_STAGGER_SEED_MAX,
+  VT_STRETCH_MAX,
+  VT_STRETCH_MIN,
   type VectorTypeConfig,
   type VtAppearanceLayer,
 } from './config'
@@ -324,6 +327,18 @@ export const VT_CONTROLS: VtControl[] = [
   // smooth unbending rather than a pop at the moment the curve appears.
   slider('arc', 'Arc', -VT_ARC_MAX, VT_ARC_MAX, 1, 'Layout', DEFAULT_CONFIG.arc,
     'Bends the baseline into an arc, in degrees of TOTAL SWEEP: 0 is straight, positive arches the word upward like a rainbow, negative bowls it downward, and ±360 closes it into a ring. The letters themselves are not bent — each one is moved onto the curve and turned to follow it, so the letterforms and the spacing are untouched.'),
+
+  // ── STRETCH — typographic, not geometric ────────────────────────────────────
+  // The whole point of Phase A: white space stretches, ink doesn't. The hint says
+  // what the dial is NOT (a scale) because `scaleX`/`scaleY` motion exists and
+  // does the cartoon thing; a user reaching for "wider letters" must land here.
+  slider('stretch', 'Stretch', VT_STRETCH_MIN, VT_STRETCH_MAX, 0.01, 'Layout', DEFAULT_CONFIG.stretch,
+    'Widens or condenses the LETTERS the way a type designer would draw a wider or narrower cut: counters and spacing take the change, stems keep their weight, rounds flatten their sides. Uses the font’s own Width axis first when it has one. Not a scale — for cartoon squash use the scale motion instead.'),
+  slider('stretchY', 'Height', VT_STRETCH_MIN, VT_STRETCH_MAX, 0.01, 'Layout', DEFAULT_CONFIG.stretchY,
+    'Makes the letters taller or squatter typographically: stems lengthen, arches and crossbars keep their thickness, every letter keeps the same x-height and cap height. Animate it per glyph for letters that spring up off the baseline.'),
+  select('fit', 'Fit', [...VT_FITS], DEFAULT_CONFIG.fit, 'Layout',
+    'width: solves Stretch so the run fills the output width (minus a small margin) — the Stretch dial shows the solved value and follows the text. off: Stretch is yours.',
+    { animatable: false }),
 
   // --- Paint ----------------------------------------------------------------
   // The ACTIVE APPEARANCE LAYER's own keys, declared once under the `layer.`
@@ -696,6 +711,8 @@ LAYOUT. \`size\` is the em size in output pixels. \`tracking\` is extra letter s
 SKEW LEANS THE WHOLE RUN, and it is the CRUDER way to slant type. \`skewX\` shears the run sideways in degrees and \`skewY\` tilts it vertically; both apply to the composition as one piece, so the word leans rather than each letter leaning inside an upright word. When the user asks for italic or slanted type and the font declares a slant axis, reach for \`axes.slnt\` FIRST — that is a true oblique the type designer drew, with round counters and even stems, where a shear stretches the finished outlines into ovals and thins the horizontals. Use skew when the font has no slant axis, when the user explicitly asks to skew or shear, or when the whole block of type should lean. \`skewY\` has no font-axis equivalent at all.
 
 ARC BENDS THE BASELINE. \`arc\` is the total sweep in DEGREES, not a radius: 0 is a straight line, positive arches the word upward like a rainbow, negative bowls it downward, and ±360 closes the run into a full ring. Reach for it whenever the user asks for curved, arched, bowed, circular or badge-style type. Only the BASELINE bends — every letter is moved onto the curve and turned to follow it, so the letterforms and the letter spacing are exactly what they were on the straight run, and there is no separate radius to set: the word keeps its own length, so a longer word on the same sweep simply describes a bigger circle. A gentle headline arch is roughly 20 to 60; a half-circle is 180; a seal or a badge is at or near 360. Combine it with \`skewX\` freely — the run bends first and the whole bent composition then leans.
+
+STRETCH IS TYPOGRAPHIC, NOT A SCALE. \`stretch\` (width) and \`stretchY\` (height) redraw the letters the way a type designer would draw a wider/narrower or taller/squatter cut: white space and counters take the change, stems and crossbars keep their weight, and rounds flatten rather than turning into ellipses. 1 is as drawn; the range is 0.5 to 2.5. \`stretch\` spends the font's own Width axis first when it has one. Reach for these when the user asks for wider, narrower, condensed, extended, taller or squatter LETTERS — for a cartoon squash-and-stretch of the whole composition, use the scale motion instead. \`fit\` set to "width" solves \`stretch\` so the run fills the output width and the dial follows along read-only; "off" (the default) leaves \`stretch\` to you.
 
 STAGGER MAKES IT KINETIC. \`motion.stagger.delay\` is the gap in seconds between one glyph and the next; at 0 the whole word animates as one, and raising it turns any animated axis into a wave that travels across the word. \`motion.stagger.order\` picks which glyph leads — forward, reverse, center (middle outwards), edges (outermost inwards) or random — and \`motion.stagger.seed\` re-rolls the random one. Reach for these when the user asks for letters to cascade, ripple, or come in one at a time.
 

@@ -1,0 +1,38 @@
+import { describe, expect, it } from 'vitest'
+import { DEFAULT_CONFIG, mergeConfig, VT_STRETCH_MAX, VT_STRETCH_MIN } from '~/lib/vectortype/config'
+import { VT_CONTROLS } from '~/lib/vectortype/controls'
+import { animatableTargets } from '~/lib/vectortype/motion'
+
+describe('smart stretch config + controls', () => {
+  it('defaults to no stretch and fit off', () => {
+    expect(DEFAULT_CONFIG.stretch).toBe(1)
+    expect(DEFAULT_CONFIG.stretchY).toBe(1)
+    expect(DEFAULT_CONFIG.fit).toBe('off')
+  })
+
+  it('parses and clamps persisted values; unknown fit falls back to off', () => {
+    const c = mergeConfig({ stretch: 9, stretchY: 0.1, fit: 'height' } as any)
+    expect(c.stretch).toBe(VT_STRETCH_MAX)
+    expect(c.stretchY).toBe(VT_STRETCH_MIN)
+    expect(c.fit).toBe('off')
+    const d = mergeConfig({ stretch: 1.6, fit: 'width' } as any)
+    expect(d.stretch).toBeCloseTo(1.6, 9)
+    expect(d.fit).toBe('width')
+  })
+
+  it('declares the two dials and the fit select in the Layout group, nothing lab-only', () => {
+    const keys = VT_CONTROLS.map(c => c.key)
+    expect(keys).toContain('stretch'); expect(keys).toContain('stretchY'); expect(keys).toContain('fit')
+    for (const k of ['k', 'roundCoupling', 'shapeRules']) expect(keys).not.toContain(k)
+    const s = VT_CONTROLS.find(c => c.key === 'stretch') as any
+    expect(s.group).toBe('Layout'); expect(s.min).toBe(VT_STRETCH_MIN); expect(s.max).toBe(VT_STRETCH_MAX); expect(s.step).toBe(0.01)
+    const f = VT_CONTROLS.find(c => c.key === 'fit') as any
+    expect(f.kind).toBe('select'); expect(f.options).toEqual(['off', 'width'])
+  })
+
+  it('the dials are motion targets; fit is not', () => {
+    const paths = animatableTargets(DEFAULT_CONFIG, []).map(t => t.path)
+    expect(paths).toContain('stretch'); expect(paths).toContain('stretchY')
+    expect(paths).not.toContain('fit')
+  })
+})

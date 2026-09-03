@@ -495,6 +495,19 @@ export interface VectorTypeConfig {
    */
   arc: number
   /**
+   * Typographic stretch of the run — width (`stretch`) and height (`stretchY`),
+   * 1 = as drawn. NOT a scale: white space stretches, ink doesn't (stems and
+   * crossbars keep their weight, counters take the change, rounds flatten
+   * like a real Extended cut). Spends a real `wdth` axis first when the font
+   * has one. Per glyph under a staggered track — a wave of width or height —
+   * on the same alignment zones, so the x-height never scatters.
+   */
+  stretch: number
+  stretchY: number
+  /** `'width'` solves `stretch` so the run fills the output box (minus a small
+   *  margin); the dial shows the solved value and goes read-only. */
+  fit: VtFit
+  /**
    * The appearance stack — multiple fills, multiple strokes, extrudes, painted
    * BACK TO FRONT. Illustrator's Appearance panel, in a config.
    *
@@ -764,6 +777,11 @@ export const DEFAULT_CONFIG: VectorTypeConfig = {
   // No bend — `vtRunCurve` returns `null` for this, so the placement is the
   // straight-baseline one it has always been, to the bit.
   arc: 0,
+  // As drawn. `stretchOutlines` returns the outlines untouched at (1, 1), so a
+  // config that never touched the dials renders byte-identically.
+  stretch: 1,
+  stretchY: 1,
+  fit: 'off',
   // One white fill and nothing else — the same picture the legacy
   // `fill: '#ffffff'` + `strokeWidth: 0` default painted, said in the stack's
   // vocabulary. The default config's PIXELS are unchanged by this task.
@@ -813,6 +831,12 @@ export const VT_STAGGER_SEED_MAX = 999
  * and a 40° lean is already past caricature.
  */
 export const VT_SKEW_MAX = 40
+/** The dials' range. Each axis alone is proven to 0.5–2.5 in the lab; the
+ *  studio damps the SECOND axis when both deviate (see `dampedStretch`). */
+export const VT_STRETCH_MIN = 0.5
+export const VT_STRETCH_MAX = 2.5
+export const VT_FITS = ['off', 'width'] as const
+export type VtFit = (typeof VT_FITS)[number]
 /**
  * The bound on `arc`, in degrees of total sweep.
  *
@@ -1569,6 +1593,9 @@ export function mergeConfig(raw: unknown): VectorTypeConfig {
     skewY: num(o.skewY, d.skewY),
     // Same reasoning, same choke point — `vtArcSweep`.
     arc: num(o.arc, d.arc),
+    stretch: clamp(num(o.stretch, d.stretch), VT_STRETCH_MIN, VT_STRETCH_MAX),
+    stretchY: clamp(num(o.stretchY, d.stretchY), VT_STRETCH_MIN, VT_STRETCH_MAX),
+    fit: oneOf(o.fit, VT_FITS, d.fit),
     appearance,
     motion: tracks === motion.tracks ? motion : { ...motion, tracks },
   }
