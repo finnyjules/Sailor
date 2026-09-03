@@ -275,12 +275,44 @@ describe('reroll', () => {
     expect(out.blendTwist).toBeGreaterThanOrEqual(0); expect(out.blendTwist).toBeLessThanOrEqual(0.25)
     expect(out.blendEase).toBe('linear')
     expect(out.fillCycle).toBe('ramp'); expect(out.paintTarget).toBe('outline'); expect(out.fills).toEqual(start.fills)
+    // The group must actually have ROLLED, not merely sat on defaults that happen
+    // to be inside the ranges — at least one dial differs from DEFAULT_CONFIG.
+    const moved = out.blendSize !== DEFAULT_CONFIG.blendSize
+      || out.blendRotate !== DEFAULT_CONFIG.blendRotate
+      || out.blendX !== DEFAULT_CONFIG.blendX
+      || out.blendY !== DEFAULT_CONFIG.blendY
+      || out.blendTwist !== DEFAULT_CONFIG.blendTwist
+      || out.blendShape !== DEFAULT_CONFIG.blendShape
+    expect(moved).toBe(true)
   })
 
   it('a locked blend section is unchanged', () => {
-    const start: GeoShapeConfig = { ...DEFAULT_CONFIG, blendShape: 'star', blendSize: 222, blendTwist: 0.4 }
+    const start: GeoShapeConfig = {
+      ...DEFAULT_CONFIG,
+      blendShape: 'star',
+      blendLibraryShape: 'heart',
+      blendSides: 9,
+      blendStarInner: 0.3,
+      blendIrregularSeed: 77,
+      blendSize: 222,
+      blendRotate: 12,
+      blendX: 55,
+      blendY: -21,
+      blendEase: 'easeOut',
+      blendTwist: 0.4
+    }
     const out = reroll(start, { blend: true })
-    expect(out.blendShape).toBe('star'); expect(out.blendSize).toBe(222); expect(out.blendTwist).toBe(0.4)
+    expect(out.blendShape).toBe('star')
+    expect(out.blendLibraryShape).toBe('heart')
+    expect(out.blendSides).toBe(9)
+    expect(out.blendStarInner).toBe(0.3)
+    expect(out.blendIrregularSeed).toBe(77)
+    expect(out.blendSize).toBe(222)
+    expect(out.blendRotate).toBe(12)
+    expect(out.blendX).toBe(55)
+    expect(out.blendY).toBe(-21)
+    expect(out.blendEase).toBe('easeOut')
+    expect(out.blendTwist).toBe(0.4)
   })
 
   it('a re-rolled config is a fixed point of mergeConfig', () => {
