@@ -30,6 +30,20 @@ const visible = computed(() =>
   searchShapes(query.value).filter(s => family.value === 'all' || familyOf(s.id) === family.value),
 )
 
+/** Roving tabindex: the grid is one Tab stop, not one per tile. The selected
+ *  tile (or the first tile when nothing currently rendered is selected) gets
+ *  tabindex="0"; every other tile gets "-1" so arrow-key navigation (below)
+ *  moves focus within the grid without Tab stepping through every shape.
+ *  Recomputed off `visible`, so a search/family filter that hides the
+ *  selected shape rolls the roving stop onto the first visible tile. */
+const tileIds = computed(() => [
+  ...(props.allowNone ? [SHAPE_NONE] : []),
+  ...visible.value.map(s => s.id),
+])
+const rovingId = computed(() =>
+  tileIds.value.includes(props.modelValue) ? props.modelValue : tileIds.value[0],
+)
+
 function pick(id: string) {
   emit('update:modelValue', id)
   emit('close')
@@ -161,15 +175,15 @@ const tileOn = 'bg-white text-neutral-900'
         >
           <button
             v-if="allowNone" type="button" data-shape="none" title="None" role="option"
-            :aria-pressed="modelValue === SHAPE_NONE ? 'true' : 'false'"
             :aria-selected="modelValue === SHAPE_NONE ? 'true' : 'false'"
+            :tabindex="rovingId === SHAPE_NONE ? 0 : -1"
             :class="[tile, modelValue === SHAPE_NONE ? tileOn : tileIdle]"
             @click="pick(SHAPE_NONE)"
           ><span class="text-[11px]">None</span></button>
           <button
             v-for="s in visible" :key="s.id" type="button" :data-shape="s.id" :title="s.name" role="option"
-            :aria-pressed="modelValue === s.id ? 'true' : 'false'"
             :aria-selected="modelValue === s.id ? 'true' : 'false'"
+            :tabindex="rovingId === s.id ? 0 : -1"
             :class="[tile, modelValue === s.id ? tileOn : tileIdle]"
             @click="pick(s.id)"
           >

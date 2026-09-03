@@ -35,7 +35,7 @@ import { withSeparatorControls } from '../separator'
  *  not per effect. */
 // The /* @__PURE__ */ annotation is load-bearing, not cosmetic: without it
 // Rollup treats this top-level .map() as a retained side effect, so importing
-// ANY symbol from this module drags all 25 effect modules into the bundle.
+// ANY symbol from this module drags all 28 effect modules into the bundle.
 // That silently defeated the per-effect embed split (every
 // public/embed/spacetype-<id>.js grew from ~813KB to ~1.21MB) — see
 // tests/unit/embed-build-output.unit.spec.ts's marker-content test.

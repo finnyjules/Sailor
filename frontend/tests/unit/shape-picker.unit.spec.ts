@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import ShapePicker from '../../app/components/vue-canvas/studio/ShapePicker.vue'
 import RowShape from '../../app/components/vue-canvas/studio/rows/RowShape.vue'
 
@@ -16,7 +17,7 @@ describe('ShapePicker', () => {
     const w = mountPicker({ modelValue: 'sparkle' })
     expect(w.find('[data-shape="none"]').exists()).toBe(true)
     expect(w.findAll('[data-shape]').length).toBe(101)
-    expect(w.find('[data-shape="sparkle"]').attributes('aria-pressed')).toBe('true')
+    expect(w.find('[data-shape="sparkle"]').attributes('aria-selected')).toBe('true')
     w.unmount()
   })
   it('hides None when allowNone is false', () => {
@@ -114,12 +115,24 @@ describe('RowShape', () => {
 
     expect(w.find('button').text()).toContain('Sparkle')
 
-    await w.find('button').trigger('click')
+    // `trigger('click')` alone dispatches no `mousedown`, so it can't tell
+    // apart the real toggle from a version that lacks the picker's `ignore`
+    // wiring (the outside-click handler listens on `mousedown`, capture
+    // phase). Dispatch both events, like a real press does, so this test
+    // actually discriminates the two.
+    const btn = w.find('button').element
+    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+    await flushPromises()
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
 
     // The button is the picker's `ignore` element, so it never doubles as an
     // outside click — a second press is a plain toggle back to closed.
-    await w.find('button').trigger('click')
+    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+    await flushPromises()
     expect(document.body.querySelector('[role="dialog"]')).toBeNull()
 
     w.unmount()
