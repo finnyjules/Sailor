@@ -1971,11 +1971,28 @@ export function stretchGlyph(g: GlyphOutline, S: number, SY: number, ctx: Stretc
   // nothing else happens — exactly what the run loop did before this refactor.
   if (!hasInk(g)) return { commands: g.commands, bbox: g.bbox, advance: g.advance * S }
   if (S === 1 && SY === 1) return { commands: g.commands, bbox: g.bbox, advance: g.advance }
+  // Shared vertical zones: this glyph's Y remap is solved band-by-band
+  // against the FONT's alignment lines (ctx.metrics), not its own bbox, so
+  // the baseline/x-height/cap-height/ascender/descender land at the same
+  // place in every glyph this function is called for (see
+  // `bandedBinWidths`'s doc comment for why this fixes the "i's stem sits
+  // above its neighbours" bug).
   const m = ctx.metrics
   const zones = [0, m.xHeight, m.capHeight, m.ascent, m.descent]
+  // Stems follow AREA, not width: a tall compressed display face (S small,
+  // SY large) keeps heavy stems — the letter isn't getting smaller, it's
+  // getting taller. The one stem-weight schedule takes S × SY, shared by
+  // both axes, so a rigid Y bin (an arch/crossbar thickness) thins by the
+  // same rule a rigid X bin (a stem) does.
   const stemScale = stemFactor(S * SY)
+  // Rounds stay round (rule 10): a round's turn-region height follows its
+  // WIDTH, so the Y remap (and only the Y remap — X gets no turn preset)
+  // presets its turn bins to S^roundCoupling.
   const roundCoupling = flexOpts.roundCoupling ?? ROUND_COUPLING
   const turnScaleY = Math.pow(S, roundCoupling)
+  // Bell distribution between rigid features is a shape-integrity rule like
+  // the others, so it rides the same switch; off = the original tangent-
+  // proportional split (the lab's A/B control).
   const mode: DistributionMode = flexOpts.shapeRules === false ? 'flex' : 'bell'
   const flex = glyphFlexFor(g, flexOpts)
   const rx = buildRemap(flex.x, S, undefined, undefined, stemScale, undefined, mode)
@@ -1987,6 +2004,11 @@ export function stretchGlyph(g: GlyphOutline, S: number, SY: number, ctx: Stretc
   }
   const inkW = g.bbox.maxX - g.bbox.minX
   const newInkW = bbox.maxX - bbox.minX
+  // Sidebearings are flexible space: the ink contributes its own (possibly
+  // rigid) new width, and the whitespace around it scales with S. An 'l'
+  // whose ink cannot widen still gains a little air — an extended I *is*
+  // barely wider. But combined sidebearings may condense only so far:
+  // below WHITESPACE_FLOOR_STEMS stem widths, neighbouring letters touch.
   const whitespace = g.advance - inkW
   let advance: number
   if (S < 1 && whitespace > 0) {
