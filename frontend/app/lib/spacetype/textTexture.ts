@@ -71,7 +71,9 @@ export function makeTextTexture(opts: TextTextureOptions): THREE.CanvasTexture {
   if (sep) {
     const m = ctx.measureText((labels[0] ?? ' ').trimEnd())
     const cap = (m as TextMetrics).actualBoundingBoxAscent || fontPx * 0.72
-    shapeH = cap * sep.size
+    // Rows share one canvas with no per-row clip, so a shape taller than a row
+    // would bleed into its neighbour — clamp it to the row height.
+    shapeH = Math.min(cap * sep.size, rowH)
     shapeW = shapeH * shapeAspect(sep.shape)
     gapPx = sep.gap * fontPx * 0.25
   }
@@ -88,7 +90,7 @@ export function makeTextTexture(opts: TextTextureOptions): THREE.CanvasTexture {
     const lsCtx = ctx as CanvasRenderingContext2D & { letterSpacing: string }
     const savedLS = lsCtx.letterSpacing
     lsCtx.letterSpacing = '0px'
-    const untracked = Math.max(1, ctx.measureText(labels[0] ?? ' ').width)
+    const untracked = Math.max(1, ctx.measureText(sep ? (labels[0] ?? ' ').trimEnd() : (labels[0] ?? ' ')).width)
     lsCtx.letterSpacing = savedLS
     naturalWidthFrac = untracked / (sep ? textWidths[0]! : widths[0]!)
   }
@@ -143,6 +145,9 @@ export function makeTextTexture(opts: TextTextureOptions): THREE.CanvasTexture {
     if (sep) {
       // Centre the shape on the text's ink midline (baseline 'middle' puts the em
       // box centre at cy; the measured cap/descender pair shifts it to the letters).
+      // asc0/desc0 and shapeH are row-0 metrics ON PURPOSE (matching inkVMid/
+      // inkHeightFrac below): the separator holds one size and one line across
+      // every row of a multi-text atlas rather than resizing per row.
       const mid = cy + (desc0 - asc0) / 2
       drawShape(ctx, sep.shape, {
         x: textWidths[k]! + gapPx, y: mid - shapeH / 2, w: shapeW, h: shapeH,

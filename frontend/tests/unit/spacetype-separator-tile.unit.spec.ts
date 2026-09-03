@@ -43,6 +43,8 @@ describe('makeTextTexture without a separator', () => {
     expect(tex.userData.wordInkFracs[0]).toBeCloseTo(60 / 90, 6)
     expect(last.ctx.ops.some(o => o[0] === 'fill')).toBe(false)
     expect(last.ctx.ops.find(o => o[0] === 'fillText')?.[1]).toBe('SAILOR   ')
+    // identity case: no tracking, no separator ⇒ untracked width over its own tile is 1
+    expect(tex.userData.naturalWidthFrac).toBe(1)
   })
 })
 
@@ -61,6 +63,11 @@ describe('makeTextTexture with a separator', () => {
     // the shape's target box starts after text + gap; translate x = 85 - box.x×scale (box.x is 0)
     const tr = last.ctx.ops.find(o => o[0] === 'translate')
     expect(tr?.[1]).toBeCloseTo(85, 6)
+    // vertical placement: rowH 256, cy 128, mid = 128 + (10-50)/2 = 108, shapeH 50 ⇒
+    // target y = 83; fit scale 0.5 makes bh×s = 50 = o.h, so dy = 83
+    expect(tr?.[2]).toBeCloseTo(83, 6)
+    // untracked (no tracking set) ⇒ naturalWidthFrac is exactly 1 for the identity case
+    expect(tex.userData.naturalWidthFrac).toBe(1)
   })
   it('strokes the shape when the type has a stroke', async () => {
     const { makeTextTexture } = await import('../../app/lib/spacetype/textTexture')
@@ -72,6 +79,11 @@ describe('makeTextTexture with a separator', () => {
     makeTextTexture({ ...base, labels: ['SAILOR   ', 'SEA   '], separator: { shape, size: 1, gap: 1 } })
     expect(last.ctx.ops.filter(o => o[0] === 'fill').length).toBe(2)
     expect(last.width).toBe(135)                      // widest row wins
+    // each row's shape sits after its OWN text + gap, not the widest row's:
+    // row 0 (SAILOR, 60px) ⇒ 60 + 25 = 85; row 1 (SEA, 30px) ⇒ 30 + 25 = 55
+    const translates = last.ctx.ops.filter(o => o[0] === 'translate')
+    expect(translates[0]?.[1]).toBeCloseTo(85, 6)
+    expect(translates[1]?.[1]).toBeCloseTo(55, 6)
   })
   it('scaleX widens the canvas for the whole tile', async () => {
     const { makeTextTexture } = await import('../../app/lib/spacetype/textTexture')
