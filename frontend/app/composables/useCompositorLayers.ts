@@ -47,7 +47,7 @@ import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
 import { applyTornEdge, tornEdgeActive } from '~/lib/compositor/tornEdge'
 import { applyFeather, featherActive } from '~/lib/compositor/feather'
 import {
-  LruCache, SILHOUETTE_CACHE_CAP, silhouetteCacheKey,
+  LruCache, SILHOUETTE_CACHE_CAP, SILHOUETTE_CACHE_MAX_BYTES, silhouetteCacheKey,
   silhouettePadPx as silhouettePadPxPure, silhouetteContentReady as silhouetteContentReadyPure,
   silhouetteRasterFits,
 } from '~/lib/compositor/silhouetteCache'
@@ -1369,7 +1369,13 @@ function compositeInnerShadow(off: HTMLCanvasElement, fx: InnerShadowEffect, W: 
 // re-tore the whole device-resolution bitmap on every pointer move although only
 // x/y had changed. Bake the layer's own local box once, keyed on everything that
 // changes its pixels, and later repaints just stamp that raster (see paintLayer).
-const _silhouetteCache = new LruCache<HTMLCanvasElement>(SILHOUETTE_CACHE_CAP)
+// Bounded by BOTH a count cap and a byte budget: the values are device-resolution
+// canvases, so a count alone would let this module-global cache reach hundreds of MB
+// (24 full-screen retina rasters). 4 bytes per device px is the backing store's size.
+const _silhouetteCache = new LruCache<HTMLCanvasElement>(SILHOUETTE_CACHE_CAP, {
+  sizeOf: c => c.width * c.height * 4,
+  maxBytes: SILHOUETTE_CACHE_MAX_BYTES,
+})
 
 /** Whether a text layer's REAL font face is loaded. A fallback-font render must
  *  never be baked: the cache key can't see that the font arrived later, so the
@@ -1400,15 +1406,41 @@ function silhouetteContentReady(layer: LocalLayer, W: number): boolean {
 }
 
 /** Padding (logical px) around `localLayerBox` for a baked silhouette raster. Resolves
- *  the layer down to primitives (kind, font size / stroke width already scaled to
- *  logical px by W) and the current device scale `s`, then defers to the pure
- *  `silhouettePadPxPure` in silhouetteCache.ts for the actual arithmetic. `strokeWidth`
- *  is guarded (`|| 0`) so a missing/NaN value can never make `bwD` NaN downstream. */
-function silhouettePadPx(layer: LocalLayer, W: number, s: number): number {
-  const basePad = outsideStrokePadPx(layer, W)
-  const fontPx = layer.kind === 'text' ? layer.fontSize * W : 0
-  const strokePx = layer.kind === 'text' ? Math.max(0, layer.strokeWidth || 0) * W : 0
-  return silhouettePadPxPure(basePad, layer.kind, fontPx, strokePx, s)
+ *  the layer down to primitives (kind, real stroke alignment, and the font size / stroke
+ *  width / height box already scaled to logical px by W) plus the box `localLayerBox`
+ *  actually measured, then defers to the pure `silhouettePadPxPure` in silhouetteCache.ts
+ *  for the arithmetic (raster margin + ink overhang).
+ *
+ *  NOT `outsideStrokePadPx`: that answers a narrower question for the corner-pin
+ *  offscreen and is 0 for the DEFAULT 'center' alignment, whose ink still reaches half a
+ *  stroke width past the box — padding by it alone clipped the outer half of every
+ *  default stroke out of the cached raster. `strokeWidth` is guarded (`|| 0`) so a
+ *  missing/NaN value can never make `bwD` NaN downstream. */
+function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { w: number; h: number }): number {
+  const l = layer as unknown as { strokeWidth?: number; strokeAlign?: unknown; stroke?: Paint; scale?: number; fontSize?: number; boxH?: number }
+  const width = Math.max(0, l.strokeWidth || 0)
+  let strokePx = 0
+  let strokeAlign: StrokeAlign = 'center'
+  if (layer.kind === 'text') {
+    strokePx = width * W
+  } else if (layer.kind === 'line') {
+    // drawLayerContent floors a line's lineWidth at 1px, so a hairline still caps.
+    strokePx = Math.max(1, width * W)
+  } else if (layer.kind === 'rect' || layer.kind === 'ellipse' || layer.kind === 'polygon' || layer.kind === 'star' || layer.kind === 'path') {
+    // A path's strokeWidth is stored in local units AT scale=1 (see PathLayer), so its
+    // px extent carries the layer's own uniform scale — same correction outsideStrokePadPx makes.
+    if (hasPaint(l.stroke)) strokePx = width * (layer.kind === 'path' ? (l.scale ?? 1) : 1) * W
+    strokeAlign = strokeAlignOf(l.strokeAlign)
+  }
+  const isText = layer.kind === 'text'
+  return silhouettePadPxPure({
+    kind: layer.kind,
+    strokeAlign,
+    strokePx,
+    fontPx: isText ? Math.max(0, l.fontSize || 0) * W : 0,
+    boxHPx: isText ? Math.max(0, l.boxH || 0) * W : 0,
+    boxHeightPx: box.h,
+  }, s)
 }
 
 function paintLayer(
@@ -1475,17 +1507,23 @@ function paintLayer(
     silhouetteMemo = null
     if (!silhouetteCacheable) return silhouetteMemo
     const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
-    const pad = silhouettePadPx(layer, W, s)
+    const pad = silhouettePadPx(layer, W, s, box)
     const bwL = box.w + pad * 2, bhL = box.h + pad * 2                                     // logical px
     const bwD = Math.max(1, Math.round(bwL * s)), bhD = Math.max(1, Math.round(bhL * s))   // device px
-    // Past this cap `getContext('2d')` isn't guaranteed to return null on an
+    // The LOGICAL size the caller stamps at, derived BACK from the rounded device
+    // size rather than from bwL/bhL: drawn under scale `s` this lands on exactly
+    // bwD × bhD device px, so the raster resamples not at all. Using bwL directly
+    // would ask for `bwL * s` device px out of a `bwD`-wide bitmap — up to half a
+    // pixel of resampling on every stamp, for nothing.
+    const bwLx = bwD / s, bhLx = bhD / s
+    // Past these caps `getContext('2d')` isn't guaranteed to return null on an
     // oversized canvas (some engines hand back a context over a blank backing
     // store instead), so an unbounded bwD/bhD could silently cache emptiness for
     // a huge layer. Bail to the uncached path — same as a null context below.
     if (!silhouetteRasterFits(bwD, bhD)) return silhouetteMemo
     const key = silhouetteCacheKey(layer as unknown as Record<string, unknown>, s, bwD, bhD, W)
     const hit = _silhouetteCache.get(key)
-    if (hit) { silhouetteMemo = { canvas: hit, w: bwL, h: bhL }; return silhouetteMemo }
+    if (hit) { silhouetteMemo = { canvas: hit, w: bwLx, h: bhLx }; return silhouetteMemo }
     const cc = document.createElement('canvas'); cc.width = bwD; cc.height = bhD
     const cctx = cc.getContext('2d')
     if (!cctx) return silhouetteMemo   // no raster ⇒ the caller takes the uncached path
@@ -1494,7 +1532,7 @@ function paintLayer(
     if (tornEdge) applyTornEdge(cc, tornEdge, { scale: s })
     if (feather) applyFeather(cc, feather)
     _silhouetteCache.set(key, cc)
-    silhouetteMemo = { canvas: cc, w: bwL, h: bhL }
+    silhouetteMemo = { canvas: cc, w: bwLx, h: bhLx }
     return silhouetteMemo
   }
   const applyXform = (c: CanvasRenderingContext2D, lx2: number, ly2: number, lrot2: number, ls2: number) => {
@@ -1632,7 +1670,12 @@ function paintLayer(
         const raster = ls === 1 ? silhouetteRaster(s) : null
         if (raster) {
           applyXform(octx, lx, ly, lrot, ls)
-          octx.drawImage(raster.canvas, -raster.w / 2, -raster.h / 2, raster.w, raster.h)   // 1:1 device px under `t`
+          // `raster.w/h` are the rounded DEVICE size divided back by `s`, so under `t`
+          // the destination is exactly the bitmap's own pixel size — no rescaling. The
+          // translation is still fractional (`lx * W` lands anywhere), so the stamp can
+          // resample by up to half a pixel in position; that is the same subpixel
+          // placement the uncached draw does, not an extra softening from the cache.
+          octx.drawImage(raster.canvas, -raster.w / 2, -raster.h / 2, raster.w, raster.h)
         } else {
           applyXform(octx, lx, ly, lrot, ls)
           drawContent(octx)
