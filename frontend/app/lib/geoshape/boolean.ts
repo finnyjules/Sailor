@@ -111,13 +111,18 @@ function splitFaces(sc: paper.PaperScope, band: paper.PathItem): paper.PathItem[
  * transformed clones as subpaths of ONE `CompoundPath` and lets the SVG/canvas
  * even-odd winding rule carve the overlap into negative space itself. Every
  * other `fillMode` maps straight onto a paper.js op and folds normally.
+ *
+ * `baseD` is ONE path for every clone (every layout but Blend) or ONE PATH PER
+ * CLONE (Blend: `render.ts` hands in the morphed steps). The three fill
+ * strategies below never look at `baseD` again — they work on `clones`.
  */
-export async function composite(baseD: string, placements: ClonePlacement[], cfg: GeoShapeConfig): Promise<GeoVectorShape[]> {
+export async function composite(baseD: string | string[], placements: ClonePlacement[], cfg: GeoShapeConfig): Promise<GeoVectorShape[]> {
   const sc = await paperScope()
+  const dFor = (i: number): string => typeof baseD === 'string' ? baseD : (baseD[i] ?? baseD[baseD.length - 1] ?? '')
   try {
     // 1. build a transformed paper path per placement
-    const clones = placements.map((pl) => {
-      const p = new sc.CompoundPath(baseD)
+    const clones = placements.map((pl, i) => {
+      const p = new sc.CompoundPath(dFor(i))
       const m = new sc.Matrix()
       m.translate(pl.x, pl.y)
       m.rotate(pl.rotate, new sc.Point(0, 0))

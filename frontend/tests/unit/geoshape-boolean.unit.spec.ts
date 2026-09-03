@@ -336,3 +336,23 @@ describe('geoshape boolean composite', () => {
     expect(overlapHues.size).toBeGreaterThanOrEqual(2)
   })
 })
+
+describe('composite with a per-clone d list', () => {
+  it('uses ds[i] for clone i in perClone mode', async () => {
+    const TRI = 'M 0 -50 L 43 25 L -43 25 Z'
+    const placements = [
+      { x: -100, y: 0, scale: 1, rotate: 0, skew: 0 },
+      { x: 100, y: 0, scale: 1, rotate: 0, skew: 0 },
+    ]
+    const cfg = { ...DEFAULT_CONFIG, fillStrategy: 'perClone' as const, fills: ['#ff0000', '#0000ff'], clipMask: 'none' as const, symmetry: false }
+    const shapes = await composite([SQUARE, TRI], placements, cfg)
+    expect(shapes).toHaveLength(2)
+    // A square has 4 corners; a triangle 3 — count lineTo/bezier commands per shape.
+    // (paperToCommands also emits a trailing closePath for a closed path — see
+    // extrudeSolid.ts:141 — so that's excluded here alongside moveTo, which is
+    // the one line this differs from the task-6 brief's verbatim test text.)
+    const edgeCount = (i: number) => shapes[i]!.commands.filter(c => c.command !== 'moveTo' && c.command !== 'closePath').length
+    expect(edgeCount(0)).toBe(4)
+    expect(edgeCount(1)).toBe(3)
+  })
+})

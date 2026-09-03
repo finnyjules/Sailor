@@ -224,3 +224,49 @@ describe('geoshape render', () => {
     expect(svg).toMatch(/<path/)
   })
 })
+
+describe('blend layout', () => {
+  it('count 1 renders the same geometry as linear count 1 (shape A only)', async () => {
+    const base = { ...DEFAULT_CONFIG, shape: 'hexagon' as const, fillStrategy: 'perClone' as const, count: 1 }
+    const a = await renderShapes({ ...base, layout: 'linear' })
+    const b = await renderShapes({ ...base, layout: 'blend', blendShape: 'circle', blendSize: 300 })
+    expect(b).toHaveLength(1)
+    // NOT a byte-for-byte commandsToPathData() match, unlike the task-6 brief's
+    // verbatim assertion: blendPath only takes the exact-skeleton (point-lerp)
+    // path when dA and dB share a command skeleton (morph.ts:366). Hexagon (all
+    // lineTo) and circle (arcs) never do, so even at blend=0/count=1 shape A
+    // comes back through blendPath's RESAMPLED branch — a many-point polyline
+    // approximation, not the original 8-command outline. Verified directly:
+    // a[0].commands has 8 commands (moveTo + 6 lineTo + closePath), b[0].commands
+    // has 130 (resampled to BLEND_SAMPLES points). So this compares geometry
+    // (bounds, single-closed-subpath shape) instead, per the brief's guidance for
+    // exactly this case.
+    const ab = contentBounds(a)
+    const bb = contentBounds(b)
+    expect(bb.minX).toBeCloseTo(ab.minX, 1)
+    expect(bb.maxX).toBeCloseTo(ab.maxX, 1)
+    expect(bb.minY).toBeCloseTo(ab.minY, 1)
+    expect(bb.maxY).toBeCloseTo(ab.maxY, 1)
+    expect(b[0]!.commands.filter(c => c.command === 'moveTo').length).toBe(1)
+    expect(b[0]!.commands.filter(c => c.command === 'closePath').length).toBe(1)
+  })
+
+  it('the last step lands on shape B, offset by blendX/blendY and sized by blendSize', async () => {
+    const cfg = { ...DEFAULT_CONFIG, shape: 'square' as const, size: 100, layout: 'blend' as const, count: 3, blendShape: 'square' as const, blendSize: 200, blendX: 300, blendY: 0, fillStrategy: 'perClone' as const }
+    const shapes = await renderShapes(cfg)
+    expect(shapes).toHaveLength(3)
+    const b = contentBounds([shapes[2]!])
+    expect(b.w).toBeCloseTo(200, 0)
+    expect(b.minX + b.w / 2).toBeCloseTo(300, 0)
+    const mid = contentBounds([shapes[1]!])
+    expect(mid.w).toBeCloseTo(150, 0)
+    expect(mid.minX + mid.w / 2).toBeCloseTo(150, 0)
+  })
+
+  it('a rotated shape B rotates the steps', async () => {
+    const cfg = { ...DEFAULT_CONFIG, shape: 'square' as const, size: 100, layout: 'blend' as const, count: 2, blendShape: 'square' as const, blendSize: 100, blendRotate: 45, fillStrategy: 'perClone' as const }
+    const shapes = await renderShapes(cfg)
+    const b = contentBounds([shapes[1]!])
+    expect(b.w).toBeCloseTo(100 * Math.SQRT2, 0) // a 45° square spans its diagonal
+  })
+})

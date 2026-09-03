@@ -27,6 +27,7 @@ import { baseShapePath } from './shapes'
 import { arrange } from './arrange'
 import { composite, overlapFaces } from './boolean'
 import { resolvePaint } from './paint'
+import { blendPath, rotatePathD } from '~/lib/vector/morph'
 import type { GeoShapeConfig } from './config'
 import type { GeoStudioDoc, GeoLayer } from './studio'
 import { isFill, isImageFill, type Paint } from '~/lib/compositor/paint'
@@ -77,7 +78,22 @@ export async function renderShapes(cfg: GeoShapeConfig): Promise<VectorShape[]> 
   // stroke/overlapFill straight off whatever `cfg` it is handed, so this is
   // the one place `invert` takes effect.
   const cfg2: GeoShapeConfig = { ...cfg, fill: rp.fill, stroke: rp.stroke, overlapFill: rp.overlapFill }
-  return composite(baseD, placements, cfg2)
+  if (cfg.layout !== 'blend') return composite(baseD, placements, cfg2)
+
+  // Blend: every clone is its own in-between outline. Shape B reuses the base
+  // shape vocabulary (its own kind/size/rounding) and is rotated before the
+  // morph so the point correspondence sees the rotated target.
+  const targetD = rotatePathD(baseShapePath(cfg.blendShape, {
+    sides: cfg.blendSides,
+    starInner: cfg.blendStarInner,
+    irregularSeed: cfg.blendIrregularSeed,
+    size: cfg.blendSize,
+    roundCorners: cfg.roundCorners,
+    roundRadius: cfg.roundRadius,
+    libraryShape: cfg.blendLibraryShape,
+  }), cfg.blendRotate)
+  const ds = placements.map((pl) => blendPath(baseD, targetD, pl.blend ?? 0, { twist: cfg.blendTwist }))
+  return composite(ds, placements, cfg2)
 }
 
 /**
