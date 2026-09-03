@@ -13,7 +13,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Surface | bake | motion | inspector | agent | engine LOC |
 |---|---|---|---|---|---|
 | Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes**) | ✅ descriptor (+ `shape` kind) | 11,202 |
-| Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
+| Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc + **smart stretch: Stretch/Height dials, Fit**) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
 | Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers) | ✅ descriptor (object.* + id-addressed) | ~6,300 (+ SVG import) + ambientCG textures |
 | Compositor / Frame | ✅ | ✅ motion clips | ✅ | ✅ commands | 1,667 (+1,041 motion) |
 | Timeline (NLE) | ✅ webm/mp4 + server | ✅ native | ✅ | ❌ | shared/timeline |
@@ -59,7 +59,38 @@ Next: **HDRI environments** from the same library (the natural sequel — real s
 
 Spec: [2026-09-01-scene3d-ambientcg-textures-design.md](superpowers/specs/2026-09-01-scene3d-ambientcg-textures-design.md) · plan: [2026-09-01-scene3d-ambientcg-textures.md](superpowers/plans/2026-09-01-scene3d-ambientcg-textures.md).
 
-### Vector Type — smart stretch engine, Phase A — LANDED 2026-08-31 (lab gate open)
+### Vector Type — smart stretch in the studio, Phase B — LANDED 2026-09-02 (`8d4521a37`..`2ccb7d5e9`)
+
+The Phase A engine is now a studio feature. **Stretch** and **Height** dials (0.5–2.5, step 0.01)
+and a **Fit** select (`off | width`) declared once in `lib/vectortype/controls.ts`, so the inspector
+rows, motion targets and agent controls derive with no further code. One seam: `vectorTypeFrame`
+resolves fit → `planStretch` (`wdth` axis spent first, never damped) → `dampedStretch` (range policy:
+when both dials deviate the second is damped by `1 − 0.5·min(1,|log S|/log 2)`), then stretches each
+glyph with `stretchGlyph` on the FONT's shared zones; under a stagger each glyph plans its own
+cascade and reads its own dials (a width or height wave), fit wins over a width wave; dials are
+clamped at the frame boundary; fit and plan solves are memoised (bounded maps). **Fit is solved once
+from the resting config** (text, axes, size, Height dial before tracks), so an animated axis, size or
+height never re-solves it and a Height wave keeps the fitted width. `fitBoxWidth` is passed by
+`drawVectorType`, `vectorTypeSVG` and the solid-extrude path (thumbnails keep fit inert).
+Three run-level track presets (`kind: 'run'`, no layer needed): **Stretch In** (1.6→1), **Stretch
+Wave** (0.88↔1.15 pingpong), **Spring Up** (Height 1.8→1) — each moves one dial; tracks are absolute
+like every other preset (an entrance lands at the drawn width, not the dial). Surface: under
+Fit the Stretch row shows the solved value read-only and hands it back to the dial when Fit turns
+off; an "eased" hint appears when both dials are pushed; `VT_GUIDANCE` teaches stretch vs scale.
+Archivo `wdth` fixture pins the axis→remap seam (monotone, ≤1.5% per 0.01 step). ~40 new unit
+tests on real fixtures; live-verified in the studio by canvas pixels: Stretch 1.8 grew the run 1.74×
+with the `i/l/o/r` stems held at 10–11 px; Height 2.2 kept width and levelled the zones; Fit filled
+92.9% of the canvas and re-solved on text change (clamps at 2.5 when the box is unreachable);
+(2,2) measured identical to (1.5,1); Spring Up and a staggered Stretch Wave animate per glyph; SVG
+export keeps path/command counts. **Skipped live:** the agent bar (no API key on the dev server).
+**Observation for Julien:** `vtPlacement` centres ink vertically, so the baseline drifts during
+Spring Up in the preview. **Follow-ups:** memos are module-lifetime keyed on `font.id` (no
+font-reload invalidation); a long staggered AXIS wave with a non-1 Stretch on a `wdth` font plans
+per glyph every frame (unmeasured); no Motion-tab hint that a staggered `stretch` track is ignored
+under Fit; a bound Stretch loses its binding chip under Fit. Plan:
+`docs/superpowers/plans/2026-09-02-vector-type-smart-stretch-phase-b.md`.
+
+### Vector Type — smart stretch engine, Phase A — LANDED 2026-08-31 (superseded by Phase B above)
 
 Typographic stretch: white space stretches, ink doesn't. Pure engine in `lib/vectortype/stretch.ts`
 (tangent-aligned flex profiles after Pagurek, nearest-boundary chamfer over a per-glyph grid,
