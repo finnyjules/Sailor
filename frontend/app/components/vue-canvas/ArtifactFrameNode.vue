@@ -1103,7 +1103,7 @@ onUnmounted(() => {
         @dblclick.capture="onArtboardDblClick"
         @pointerdown.capture="onArtboardPointerDown"
       >
-        <canvas ref="stackCanvas" class="absolute inset-0 pointer-events-none" :style="{ width: box.w + 'px', height: box.h + 'px' }" />
+        <canvas ref="stackCanvas" data-testid="frame-card-stack-canvas" class="absolute inset-0 pointer-events-none" :style="{ width: box.w + 'px', height: box.h + 'px' }" />
 
         <!-- Quick inline edit — appears over the preview on hover -->
         <button v-if="!editMode" class="nopan nodrag absolute left-2 top-2 z-10 h-6 px-2 rounded flex items-center gap-1 text-[10px] bg-black/55 backdrop-blur-sm text-white/85 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/75 cursor-pointer"
