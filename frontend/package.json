@@ -11,6 +11,7 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "build:embed": "node scripts/build-embed.mjs",
+    "build:shapes": "node scripts/build-shape-library.mjs",
     "test": "playwright test",
     "test:unit": "vitest run",
     "test:headed": "playwright test --headed",
