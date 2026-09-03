@@ -32,6 +32,7 @@ export function paintMaskRelease(mctx: CanvasRenderingContext2D, break_: MaskBre
   mctx.lineTo(ax + nx * S, ay + ny * S)
   mctx.closePath()
   mctx.clip()
+  mctx.globalCompositeOperation = 'source-over'
   mctx.fillStyle = '#ffffff'
   mctx.fillRect(0, 0, W, H)
   mctx.restore()
@@ -46,7 +47,7 @@ export function maskBreakFromEdge(edge: MaskBreakEdge, box: { x: number; y: numb
   switch (edge) {
     case 'top':    return { x: cx, y: top + offset * box.h, angle: 0 }
     case 'bottom': return { x: cx, y: bottom - offset * box.h, angle: 180 }
-    case 'left':   return { x: left + offset * box.w, y: cy, angle: 90 }
-    case 'right':  return { x: right - offset * box.w, y: cy, angle: 270 }
+    case 'left':   return { x: left + offset * box.w, y: cy, angle: 270 }
+    case 'right':  return { x: right - offset * box.w, y: cy, angle: 90 }
   }
 }

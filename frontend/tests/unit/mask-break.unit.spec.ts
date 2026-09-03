@@ -12,6 +12,7 @@ class RecCtx {
   clip() { this.ops.push('clip') }
   fillRect(x: number, y: number, w: number, h: number) { this.ops.push(`fillRect ${x} ${y} ${w} ${h}`) }
   fillStyle = ''
+  globalCompositeOperation = 'source-over'
 }
 
 const ctx = () => new RecCtx() as unknown as CanvasRenderingContext2D & { ops: string[] }
@@ -30,6 +31,7 @@ describe('paintMaskRelease', () => {
     expect(c.ops).toContain('fillRect 0 0 1000 800' /* covers full canvas; the clip limits it */)
     expect(c.ops[c.ops.length - 1]).toBe('restore')
     expect(c.fillStyle).toBe('#ffffff')
+    expect(c.globalCompositeOperation).toBe('source-over')
   })
   it('angle 0 releases the top: the clip polygon lies above the line y=0.4*H=320', () => {
     const c = ctx() as any
@@ -50,6 +52,28 @@ describe('maskBreakFromEdge', () => {
   })
   it('left is a vertical line at the shape left', () => {
     const b = maskBreakFromEdge('left', box, 0) as MaskBreak
-    expect(b.angle).toBe(90); expect(b.x).toBeCloseTo(0.3, 6)
+    expect(b.angle).toBe(270); expect(b.x).toBeCloseTo(0.3, 6)
+  })
+  it('left break releases outward to the left: the clip polygon lies left of the line', () => {
+    const W = 1000, H = 800
+    const b = maskBreakFromEdge('left', box, 0) as MaskBreak
+    const lineXpx = b.x * W // 0.3 * 1000 = 300
+    const c = ctx() as any
+    paintMaskRelease(c, b, W, H)
+    const xs = c.ops.filter((o: string) => o.startsWith('lineTo') || o.startsWith('moveTo')).map((o: string) => Number(o.split(' ')[1]))
+    // every polygon vertex is on or to the left of the line, extended past the canvas left edge
+    expect(Math.max(...xs)).toBeLessThanOrEqual(lineXpx + 0.0001)
+    expect(Math.min(...xs)).toBeLessThan(0)
+  })
+  it('right break releases outward to the right: the clip polygon lies right of the line', () => {
+    const W = 1000, H = 800
+    const b = maskBreakFromEdge('right', box, 0) as MaskBreak
+    const lineXpx = b.x * W // 0.7 * 1000 = 700
+    const c = ctx() as any
+    paintMaskRelease(c, b, W, H)
+    const xs = c.ops.filter((o: string) => o.startsWith('lineTo') || o.startsWith('moveTo')).map((o: string) => Number(o.split(' ')[1]))
+    // every polygon vertex is on or to the right of the line, extended past the canvas right edge
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(lineXpx - 0.0001)
+    expect(Math.max(...xs)).toBeGreaterThan(W)
   })
 })
