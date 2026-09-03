@@ -117,7 +117,7 @@ describe('screen finish — build', () => {
     // fwidth(p.x) alone collapses to ~0 at 90 degrees, where the cell varies along y.
     expect(sh.fragmentShader).toContain('max(fwidth(p.x), fwidth(p.y))')
     // A rising Angle must turn the grid the same way every other angle dial does.
-    expect(sh.fragmentShader).toContain('mat2(c, s, -s, c)')
+    expect(sh.fragmentShader).toContain('mat2(c, -s, s, c)')
   })
 
   it('gives a screened material its own program cache key', () => {

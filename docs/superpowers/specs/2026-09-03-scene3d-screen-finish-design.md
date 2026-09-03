@@ -47,8 +47,7 @@ One helper, `applyScreen(m, mat)`, runs at the end of `buildMaterial` after `app
   - vertex: append `varying vec2 vScrUv;` after `#include <uv_pars_vertex>` and `vScrUv = uv;` after `#include <uv_vertex>`. The `uv` attribute is always declared by three's vertex prefix, so this does not depend on `USE_UV` or on the material having a texture.
   - fragment: declare the varying and helpers after `#include <uv_pars_fragment>`; replace `#include <opaque_fragment>` with the screen body. `outgoingLight` and `diffuseColor.a` exist there in every built-in material (standard, physical, phong, toon, matcap, basic).
 - **Shader body** (`SCREEN_FRAG_BODY`):
-  - `p = rotate(uScrAngle) · vScrUv · uScrDensity`
-  - `lum = pow(clamp(luminance(outgoingLight), 0, 1), uScrContrast)`, flipped when `uScrInvert`
+  - `p = rotate(uScrAngle) · vScrUv · uScrDensity` (the same `mat2(c, -s, s, c)` form the 2D screen effects use; a rising Angle turns the pattern counter-clockwise)
   - coverage per pattern: dots — `r = sqrt(lum) · 0.7071` (dot area proportional to brightness), `cov = 1 − smoothstep(r − soft, r + soft, distance(fract(p) − 0.5))`; lines — half-width `lum · 0.5` around `fract(p.y) − 0.5`; cross — max of the line coverage in x and y. `soft = uScrSoft · 0.25 + fwidth(p) · 0.5` so edges stay anti-aliased at any zoom.
   - misregister: `covR = cov(p + (uScrMisreg·0.35, 0))`, `covG = cov(p)`, `covB = cov(p − (uScrMisreg·0.35, 0))`.
   - ink colour `c = uScrInkMode == 0 ? outgoingLight : uScrInkColor`; per channel `rgb = c · (covR, covG, covB)`.

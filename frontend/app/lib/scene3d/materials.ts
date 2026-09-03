@@ -776,8 +776,10 @@ diffuseColor.a = 1.0;
 #endif
 {
   float c = cos(uScrAngle), s = sin(uScrAngle);
-  // Counter-clockwise for a rising Angle, matching every other angle dial in the studio.
-  vec2 p = mat2(c, s, -s, c) * vScrUv * uScrDensity;
+  // Same rotation form as the repo's 2D screens (dot_screen/halftone): rotating the sampling coordinates this way turns the VISIBLE pattern counter-clockwise for a rising Angle.
+  vec2 p = mat2(c, -s, s, c) * vScrUv * uScrDensity;
+  // Same rotation form as the repo's 2D screens (dot_screen/halftone): rotating the sampling coordinates this way turns the VISIBLE pattern counter-clockwise for a rising Angle.
+  vec2 p = mat2(c, -s, s, c) * vScrUv * uScrDensity;
   float lum = clamp(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
   lum = pow(lum, uScrContrast);
   if (uScrInvert > 0.5) lum = 1.0 - lum;
