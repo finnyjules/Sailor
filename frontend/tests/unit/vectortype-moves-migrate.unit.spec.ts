@@ -49,6 +49,35 @@ describe('vt motion migration', () => {
     expect(m.ease).toEqual({ kind: 'named', name: 'none' })
   })
 
+  it('a saved Stretch Wave loop track keeps its own oscillation timing instead of being mislabeled as Stretch In', () => {
+    // `stretch-in` and `stretch-wave` both write a single `stretch` path, so
+    // this legacy track — pingpong/loops: 2, exactly what applying the
+    // Stretch Wave gallery preset produces — is ambiguous by path alone.
+    // Before the fix, `vtMatchLegacyTrackPreset` picked the earlier table
+    // entry (`stretch-in`) and the matched-preset branch in
+    // `convertLegacyTracks` discarded this track's own easing/loops for the
+    // preset's fixed `ease: none` / `play: repeat x1` — silently flattening a
+    // saved oscillating clip into a one-shot on load, and risking overwrite
+    // on re-save. It must instead fall through to the per-track Custom
+    // branch, which preserves the real stored timing and values.
+    const old = cloneConfig(DEFAULT_CONFIG) as any
+    old.motion = {
+      duration: 4,
+      fps: 30,
+      size: 1080,
+      tracks: [{ path: 'stretch', from: 0.88, to: 1.15, easing: 'pingpong', loops: 2, hold: 0, cycleOffset: 0, delay: 0 }],
+      stagger: { delay: 0, order: 'forward', seed: 0 },
+      blink: { amount: 0 },
+      scatter: { spread: 0 },
+    }
+    const m = mergeConfig(old).motion.moves[0]!
+    expect(m.kind).toBe('tracks')
+    expect(m.presetId).toBe('custom')
+    expect(m.play).toEqual({ mode: 'backAndForth', times: 2 })
+    expect(m.tracks[0]!.from).toBe(0.88)
+    expect(m.tracks[0]!.to).toBe(1.15)
+  })
+
   it('a new-shape config round-trips unchanged (empty moves)', () => {
     expect(mergeConfig(cloneConfig(DEFAULT_CONFIG)).motion.moves).toEqual([])
   })

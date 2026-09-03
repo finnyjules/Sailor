@@ -24,7 +24,6 @@
  * silent-dead-control failure — and it is declared now because the reader
  * landed, not because the shape got clearer.
  */
-import type { MotionTrack as GradientMotionTrack } from '~/lib/gradientfx/types'
 // The shared move vocabulary every parameter studio's clip is built from — see
 // lib/studio/moves/types.ts's header. `VtMove` narrows `Move.kind` (a plain
 // string there, so a studio adapter can add its own) to the four kinds this
@@ -360,6 +359,18 @@ export interface VtStaggerConfig {
   seed: number
 }
 
+/**
+ * `Move` narrowed to the four kinds this studio actually produces — `kind` is
+ * a plain `string` on the shared shape (so a studio adapter can add its own),
+ * but every move this studio's own code constructs (`mergeMotion`'s two
+ * branches, `convertLegacyTracks`, the preset galleries) is one of these
+ * four. Narrowing it here catches a move built with an out-of-range `kind`
+ * at the assignment into `VtMotionConfig.moves`, rather than silently
+ * accepting it and failing later at whatever reads `kind` expecting one of
+ * these four.
+ */
+export type VtMove = Move & { kind: 'preset' | 'tracks' | 'blink' | 'scatter' }
+
 export interface VtMotionConfig {
   /**
    * The stack of moves — every preset, track and entrance/exit/loop is one
@@ -369,7 +380,7 @@ export interface VtMotionConfig {
    * its old-shape branch) so an old document renders identically once
    * migrated.
    */
-  moves: Move[]
+  moves: VtMove[]
   /** Clip length in seconds. */
   duration: number
   fps: number
@@ -1296,7 +1307,7 @@ export function migrateStackTrackPaths(
  * tracks did not change is itself returned BY REFERENCE, so an unrelated
  * move's identity survives a load that only touched one other move.
  */
-function migrateMoveTrackPaths(moves: Move[], appearance: VtAppearanceLayer[]): Move[] {
+function migrateMoveTrackPaths(moves: VtMove[], appearance: VtAppearanceLayer[]): VtMove[] {
   const host = { [VT_STACK_LIST]: appearance }
   let changedAny = false
   const out = moves.map((mv) => {
@@ -1561,6 +1572,27 @@ function legacyPresetEaseName(ease: string | undefined): MoveEaseName | null {
  * completely fresh document, or a corrupted one) produces `moves: []` — the
  * same default a brand-new config has, so nothing is invented from nothing.
  */
+const VT_MOVE_KINDS: ReadonlySet<string> = new Set(['preset', 'tracks', 'blink', 'scatter'] satisfies VtMove['kind'][])
+
+/**
+ * Narrow a shared `Move` (`kind` is a plain `string` there) to this studio's
+ * `VtMove` — CHECKED at runtime, not merely asserted, because this is the one
+ * seam a move crosses from the studio-neutral merge module
+ * (`~/lib/studio/moves/merge`'s `mergeMove` / `convertLegacyTracks`) into this
+ * studio's own `moves` array, and both take untrusted, possibly-corrupted
+ * JSON as input. In practice neither producer ever emits anything outside the
+ * four: `mergeMove` collapses every non-`'tracks'` input to `'preset'`
+ * (`~/lib/studio/moves/merge.ts` — `o.kind === 'tracks' ? 'tracks' : 'preset'`)
+ * and `convertLegacyTracks` only ever builds `'tracks'`-kind moves — so this
+ * never actually drops anything today. It stays a real check rather than a
+ * cast so a future producer that adds a fifth kind fails by dropping the move
+ * (same "nothing is trusted" rule the rest of this merge follows) instead of
+ * by lying to the type system.
+ */
+function asVtMove(mv: Move | null | undefined): VtMove | null {
+  return mv && VT_MOVE_KINDS.has(mv.kind) ? (mv as VtMove) : null
+}
+
 function mergeMotion(raw: unknown, remap?: (path: string) => string | null): VtMotionConfig {
   const o = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>
   // Every 'tracks'-kind move's own tracks go through the SAME per-track
@@ -1573,11 +1605,11 @@ function mergeMotion(raw: unknown, remap?: (path: string) => string | null): VtM
 
   const hasNewShape = Array.isArray(o.moves)
   const hasOldShape = !hasNewShape && (('tracks' in o) || VT_PRESET_SLOTS.some(slot => slot in o))
-  const moves: Move[] = []
+  const moves: VtMove[] = []
 
   if (hasNewShape) {
     for (const rawMove of o.moves as unknown[]) {
-      const m = mergeMove(rawMove, mergeTrackFn)
+      const m = asVtMove(mergeMove(rawMove, mergeTrackFn))
       if (m) moves.push(m)
     }
   } else if (hasOldShape) {
@@ -1589,7 +1621,7 @@ function mergeMotion(raw: unknown, remap?: (path: string) => string | null): VtM
       const presetId = typeof so.presetId === 'string' ? so.presetId.trim() : ''
       if (!presetId) continue
       const easeName = legacyPresetEaseName(typeof so.ease === 'string' ? so.ease : undefined)
-      const m = mergeMove({
+      const m = asVtMove(mergeMove({
         id: `move-${slot}`,
         phase: slot,
         kind: 'preset',
@@ -1598,7 +1630,7 @@ function mergeMotion(raw: unknown, remap?: (path: string) => string | null): VtM
         ease: easeName ? { kind: 'named', name: easeName } : undefined,
         play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
         params: so.params,
-      }, mergeTrackFn)
+      }, mergeTrackFn))
       if (m) moves.push(m)
     }
     // 2) The flat `tracks` array → the shared, studio-neutral legacy
@@ -1636,7 +1668,10 @@ function mergeMotion(raw: unknown, remap?: (path: string) => string | null): VtM
         ...(typeof to.loops === 'number' ? { loops: to.loops } : {}),
       })
     }
-    moves.push(...convertLegacyTracks(legacyTracks, vtMatchLegacyTrackPreset, duration))
+    for (const mv of convertLegacyTracks(legacyTracks, vtMatchLegacyTrackPreset, duration)) {
+      const v = asVtMove(mv)
+      if (v) moves.push(v)
+    }
   }
 
   return {
@@ -1731,7 +1766,7 @@ export function cloneConfig(cfg: VectorTypeConfig): VectorTypeConfig {
   // `'preset'` move's `params` knob record. Same reasoning as `blink`/`scatter`
   // below: `applyMotion` writes THROUGH this clone, so anything left shared
   // would let frame 37's value land back in the config the surface is holding.
-  const cloneMove = (mv: Move): Move => ({
+  const cloneMove = (mv: VtMove): VtMove => ({
     ...mv,
     ease: mv.ease.kind === 'bezier'
       ? { kind: 'bezier', cps: [...mv.ease.cps] as [number, number, number, number] }
@@ -1740,7 +1775,7 @@ export function cloneConfig(cfg: VectorTypeConfig): VectorTypeConfig {
     ...(mv.params ? { params: { ...mv.params } } : {}),
     ...(mv.tracks ? { tracks: mv.tracks.map(t => ({ ...t })) } : {}),
   })
-  const moves: Move[] = Array.isArray(m?.moves) ? m.moves.map(cloneMove) : []
+  const moves: VtMove[] = Array.isArray(m?.moves) ? m.moves.map(cloneMove) : []
   return {
     ...cfg,
     axes: { ...cfg.axes },

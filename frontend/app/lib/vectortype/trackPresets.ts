@@ -423,8 +423,9 @@ export function vtTrackPresetActive(cfg: VectorTypeConfig, presetId: unknown): b
  * Which paths each RUN-LEVEL preset's `build()` writes, verified against the
  * `PRESETS` table above rather than assumed — `stretch-in` and `stretch-wave`
  * both write a single `stretch` track (they cannot be told apart by path
- * alone: the earlier one in `PRESETS` wins, see `vtMatchLegacyTrackPreset`),
- * `spring-up` writes `stretchY`. Layer-addressed presets (Light Sweep,
+ * alone: this is an AMBIGUOUS signature and `vtMatchLegacyTrackPreset` returns
+ * `null` for it rather than picking one), `spring-up` writes `stretchY`.
+ * Layer-addressed presets (Light Sweep,
  * Misregistration, Colour Cycle) are NOT here — their paths are per-layer id
  * paths (`appearance.<id>.angle`), which can never equal a fixed signature,
  * so a legacy document can only ever match one of the three RUN presets.
@@ -442,19 +443,25 @@ const PRESET_SIGNATURE_PATHS: Record<string, string[]> = {
  * to collapse a matched legacy track back into one preset move instead of a
  * pile of Custom ones.
  *
- * `null` when nothing matches — including the (structurally impossible today,
- * since two presets share the `stretch` signature) case of an ambiguous
- * match; `PRESET_SIGNATURE_PATHS` is walked in `VT_TRACK_PRESETS`' own gallery
- * order, so a `stretch` track always resolves to `stretch-in`, the earlier of
- * the two — a legacy `stretch-wave` document converts as Custom instead,
- * which still plays back correctly (Custom carries the real stored values),
- * just without the gallery tile lighting up as active.
+ * `null` when nothing matches, OR when more than one preset matches — and
+ * `stretch-in`/`stretch-wave` DO share a signature (`['stretch']`), so this is
+ * not a hypothetical: a real "Stretch Wave" loop (`pingpong`/`loops: 2`) and a
+ * one-shot "Stretch In" (`easeinout`/`loops: 1`) are indistinguishable by path
+ * alone. The matched-preset branch in `convertLegacyTracks` throws the track's
+ * own `easing`/`loops` away in favour of the PRESET's fixed timing (`ease:
+ * none`, `play: repeat ×1`) — correct only when the preset that wins really is
+ * the one that made the track. Picking `stretch-in` by table order here would
+ * silently relabel a saved oscillating loop as a flat one-shot AND discard its
+ * real timing, which is worse than not collapsing it at all. So an ambiguous
+ * signature returns `null` and falls through to the per-track Custom branch,
+ * which keeps the track's own `easing`/`loops` — the design survives, just
+ * without the gallery tile lighting up as active.
  */
 export function vtMatchLegacyTrackPreset(tracks: readonly { path: string }[]): string | null {
   const paths = new Set(tracks.map(t => t.path))
-  for (const preset of VT_TRACK_PRESETS) {
+  const matches = VT_TRACK_PRESETS.filter((preset) => {
     const sig = PRESET_SIGNATURE_PATHS[preset.id]
-    if (sig && sig.length === paths.size && sig.every(p => paths.has(p))) return preset.id
-  }
-  return null
+    return sig && sig.length === paths.size && sig.every(p => paths.has(p))
+  })
+  return matches.length === 1 ? matches[0]!.id : null
 }
