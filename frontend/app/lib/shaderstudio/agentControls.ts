@@ -202,16 +202,16 @@ export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
   { words: 'film / grain / analog / dusty', ids: ['post_grain', 'risograph'] },
   { words: 'contour lines / topographic map / isolines / terrain map', ids: ['topographic'] },
   { words: 'stipple / pointillist / engraved dots', ids: ['stipple'] },
-  { words: 'background from nothing / generative field (ignores the input image)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel', 'terrain_bands', 'sonar', 'mist', 'pixel_bloom', 'filament', 'sear'] },
+  { words: 'background from nothing / generative field (draws its own field; blend the input with Image mix)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel', 'terrain_bands', 'sonar', 'mist', 'pixel_bloom', 'filament', 'sear'] },
   { words: 'banded terrain / contour landscape / heat map bands / posterised landscape', ids: ['terrain_bands', 'topographic'] },
   { words: 'dithered map / landmasses / islands / radar map / sonar', ids: ['sonar'] },
   { words: 'neon wash / spray paint clouds / airbrush glow / mist', ids: ['mist', 'nebula'] },
   { words: 'symmetrical pixels / mirrored pixel field / totem', ids: ['pixel_bloom'] },
   { words: 'threads / fibres / flowing lines / string field / filament', ids: ['filament', 'light_beams'] },
   { words: 'thermal camera / heat map smear / infrared / dropped frame bands / sear', ids: ['sear', 'terrain_bands'] },
-  { words: 'pixel aurora / dithered northern lights (aurora, then bayer_dither)', ids: ['aurora', 'bayer_dither'] },
-  { words: 'ascii terrain / text-mode map (terrain_bands, then ascii_dither)', ids: ['terrain_bands', 'ascii_dither'] },
-  { words: 'corrupted satellite / broken map mosaic (terrain_bands, then block_glitch + pixel_sort)', ids: ['terrain_bands', 'block_glitch', 'pixel_sort'] },
+  { words: 'pixel aurora / dithered northern lights (base: aurora; add bayer_dither by hand)', ids: ['aurora', 'bayer_dither'] },
+  { words: 'ascii terrain / text-mode map (base: terrain_bands; add ascii_dither by hand)', ids: ['terrain_bands', 'ascii_dither'] },
+  { words: 'corrupted satellite / broken map mosaic (base: terrain_bands; add block_glitch + pixel_sort by hand)', ids: ['terrain_bands', 'block_glitch', 'pixel_sort'] },
 ]
 
 /**
