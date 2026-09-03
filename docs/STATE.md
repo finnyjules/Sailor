@@ -15,7 +15,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes** on 20 effects incl. Cylinder) | ✅ descriptor (+ `shape` kind) | 11,202 |
 | Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc + **smart stretch: Stretch/Height dials, Fit**) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
 | Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers, **shape library shelf**) | ✅ descriptor (object.* + id-addressed; library shapes not yet) | ~6,300 (+ SVG import) + ambientCG textures |
-| Compositor / Frame | ✅ | ✅ motion clips | ✅ (+ **shape library** insert/swap) | ✅ commands (+ `addShape`) | 1,667 (+1,041 motion) |
+| Compositor / Frame | ✅ | ✅ motion clips | ✅ (+ **shape library** insert/swap, **mask break-out**) | ✅ commands (+ `addShape`, `setLayerMaskBreak`) | 1,667 (+1,041 motion) |
 | Timeline (NLE) | ✅ webm/mp4 + server | ✅ native | ✅ | ❌ | shared/timeline |
 | Gradient Studio | ✅ | ✅ 30 targets, path-based | ✅ (**schema-drawn** from GRADIENT_CONTROLS) | ✅ descriptor | 2,620 (+ 4 primitives + alpha + per-layer layout) |
 | Shader Studio | ✅ | ✅ path tracks (+ mask region) | ✅ (data-driven, + per-effect spatial mask, + mode-gated params) | ✅ descriptor (+ mask, + **effect macro + ungated stages + derived guidance**) | 806 + 62 effects |
@@ -78,6 +78,18 @@ The geologo generator's base shape can now be **any of the 100 library shapes** 
 **Verified.** 20 new/extended unit tests (fit math from hand-computed numbers, 13 kinds, config fallback, control gating, drift guard, render + SVG of a library config, re-roll validity). Live: Shape = Library → six radial sparkles and the rounding rows vanish; picker → Swirl re-renders; Escape inside the picker leaves the studio open (no keyboard chain to fight here, unlike the Frame); ten re-rolls landed twice on library shapes. Proof PNG captured from the studio canvas. **Owed:** the ComfyUI bake with a library mark (backend down).
 
 Spec: [2026-09-02-shape-studio-library-base-shape-design.md](superpowers/specs/2026-09-02-shape-studio-library-base-shape-design.md) · plan: [2026-09-02-shape-studio-library-base-shape.md](superpowers/plans/2026-09-02-shape-studio-library-base-shape.md).
+
+### Compositor — mask break-out (partial shape mask) — LANDED 2026-09-03 (`4f26367eb`..`84cf9f92a`)
+
+Mask a subject inside a shape but let one edge **open** so part of him escapes — the head pops over the top of the circle while the bottom still clips him (the editorial "out of bounds" look). It is not a soft mask; it is a mask whose boundary is the shape **plus an opening on one side**, defined by a **break line**: everything on the open side is released, everything on the closed side stays clipped.
+
+**One mechanism.** Every silhouette mask renders the same way (`drawLocalLayer`, `drawItemMasked`): subject to an offscreen, mask alpha to a second, then `destination-in`. The break-out adds one step — `paintMaskRelease` fills the mask offscreen with opaque white on the release side of the line **before** the `destination-in`, so the effective mask is `shapeAlpha ∪ releaseHalfPlane`. One subject, one mask, no duplicated layer, no seam. `maskBreak {x,y,angle}` on the masked layer carries the line; absent ⇒ every mask renders byte-identically to before (the helper is a no-op). Release normal `n=(sin θ, −cos θ)`: top opens up, bottom down, left left, right right (a left/right sign error was caught in review and fixed). The inspector's **Break out** control (shown only when the mask is a local shape) is an Edge segmented + an Offset slider whose value round-trips exactly through `maskBreakFromEdge`; the agent op `setLayerMaskBreak { edge, offset?, remove? }` makes "let his head pop out the top" work.
+
+**Verified.** Unit: `paintMaskRelease` is a no-op when off, clips the correct half-plane extended past the canvas, and releases the right edge for all four directions; `maskBreakFromEdge` places the line at the shape edge + offset; the agent op resolves the mask box (ellipse y0.4 → top break y≈0.2), rejects an unmasked layer, clears on remove, and undoes via its snapshot; the inspector offset derivation is the exact algebraic inverse for all four edges. **Owed:** the end-to-end pop-out screenshot in the real Frame — the dev server's port was held by a parallel session this run, so the visual capture waits for a free server (the render, agent and inspector are each proven in isolation).
+
+**Fast-follows.** An on-canvas draggable break line (the `angle` field already supports it); an additive brush release for non-straight openings (boolean-union an arbitrary region into the mask); break-out under motion.
+
+Spec: [2026-09-03-compositor-mask-break-out-design.md](superpowers/specs/2026-09-03-compositor-mask-break-out-design.md) · plan: [2026-09-03-compositor-mask-break-out.md](superpowers/plans/2026-09-03-compositor-mask-break-out.md).
 
 ### Compositor — shape library layers — LANDED 2026-09-02 (`8aeb1c49d`..`4d9dd3735` + polish)
 
