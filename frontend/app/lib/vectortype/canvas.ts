@@ -117,6 +117,23 @@ import { buildCurveTable } from './curve'
 // same reason: a draw frame measures every glyph's outline (see
 // `./pathLength.ts`'s header).
 import { pathLength, vtDrawOnDash, type VtDashSpec } from './pathLength'
+// The smart-stretch engine — pure geometry, no canvas, no paper.js, so it is
+// safe on the draw path for the same reason `./curve.ts` and `./pathLength.ts`
+// are. This file decides WHICH numbers each glyph is stretched by; `./stretch.ts`
+// decides what a stretch does to an outline, and the split is deliberate: the
+// remap is the part that has 87 tests of its own.
+import { dampedStretch, fitStretch, planStretch, stretchGlyph } from './stretch'
+
+/** The "small margin" fit leaves on each side of the box: 2% of its width. */
+export const VT_FIT_INSET = 0.02
+
+/** What a caller who owns a BOX can tell the frame about it. */
+export interface VtFrameOptions {
+  /** The box's available width in OUTPUT px (padding already removed) — the
+   *  fit target. Only the two callers that own a box pass it; a frame asked
+   *  for without it treats `fit` as inert and renders the dial value. */
+  fitBoxWidth?: number
+}
 
 /** One frame's worth of resolved geometry: what to draw and how each glyph moves. */
 export interface VtFrame {
@@ -140,6 +157,23 @@ export interface VtFrame {
    *  glyph shares one axis position; up to `glyphs.length + 1` when a wave is
    *  travelling or an axis preset has moved the run off its resting position. */
   shapings: number
+  /**
+   * What SMART STRETCH actually applied — not what the user typed.
+   *
+   * The two are different on purpose and in three ways, all of which happen
+   * inside this function: `fit` overrules the width dial when the caller owns a
+   * box, the `wdth` cascade spends part of the move on the font's real axis
+   * (leaving a smaller residual for the remap), and a diagonal move is damped so
+   * the two dials together cannot take a letterform somewhere neither would
+   * alone. Reported for the same reason `staggered` and `shapings` are: a test —
+   * and the surface's read-only dial — must be able to ASSERT which path ran
+   * rather than infer it from a picture that always looks plausible.
+   *
+   * `S`/`SY` are the run-level values handed to the engine; `fitted` is the
+   * width dial fit solved (null when fit was off or inert); `perGlyph` says at
+   * least one glyph took its own pair, which is the travelling-wave path.
+   */
+  stretch: { S: number; SY: number; damped: boolean; fitted: number | null; perGlyph: boolean }
   /**
    * How many of this frame's shader fields `withFieldFrame` had to FREEZE at
    * `t = 0` because the frame asked for more live fields than
@@ -265,10 +299,35 @@ function coordsKey(coords: Record<string, number>): string {
  * passes. That is the font's real metric at that axis position; freezing the
  * layout at the base weight would make heavy glyphs collide.
  */
-export function vectorTypeFrame(font: VtFont, cfg: VectorTypeConfig, t: number): VtFrame {
+export function vectorTypeFrame(
+  font: VtFont,
+  cfg: VectorTypeConfig,
+  t: number,
+  frameOpts: VtFrameOptions = {},
+): VtFrame {
   const base = applyMotion(cfg, t)
   const upem = font.unitsPerEm || 1000
-  const shaped = textOutlines(font, base.text, base.axes)
+
+  // ── SMART STRETCH: resolve the run-level dials ONCE ────────────────────────
+  // Fit solves the width dial against the box the caller owns; a config whose
+  // fit is on but whose caller passed no box (thumbnails, solids) falls back
+  // to the dial value — inert, never wrong.
+  let dialS = base.stretch
+  let fitted: number | null = null
+  const fitBox = frameOpts.fitBoxWidth
+  if (base.fit === 'width' && typeof fitBox === 'number' && fitBox > 0 && base.size > 0) {
+    // Same px↔unit line `vtPlacement` uses (`config.size / upem`, on the
+    // post-motion config), so a fitted run lands where placement expects it.
+    const targetUnits = (fitBox * (1 - 2 * VT_FIT_INSET)) / (base.size / upem)
+    fitted = fitStretch(font, base.text, base.axes, targetUnits)
+    dialS = fitted
+  }
+  // The wdth cascade spends the real axis before geometry and before damping:
+  // a designer-drawn width is never damped.
+  const plan = planStretch(font, base.text, base.axes, dialS)
+  const runDamped = dampedStretch(plan.residual, base.stretchY)
+
+  const shaped = textOutlines(font, base.text, plan.coords)
   const n = shaped.glyphs.length
 
   const stagger = resolveStagger(cfg)
@@ -297,7 +356,13 @@ export function vectorTypeFrame(font: VtFont, cfg: VectorTypeConfig, t: number):
     // The glyph's resting axes: its own clock when a stagger is on, the shared
     // one otherwise. Preset deltas are added to THIS, so a preset composes with
     // an axis track instead of replacing it.
-    const rest = staggered ? glyphConfig(cfg, t, i, n).axes : base.axes
+    // `plan.coords`, not `base.axes`: the shared resting position now carries
+    // the `wdth` the cascade already spent, so it is the same position the
+    // shaping above used and a `wdth` PRESET still composes on top of it
+    // through `vtAxisCoords`. A staggered glyph keeps reading its own clock —
+    // the cascade is a RUN-level decision and is folded back in below, as the
+    // residual ratio every glyph's own dial is scaled by.
+    const rest = staggered ? glyphConfig(cfg, t, i, n).axes : plan.coords
     resting.push(rest)
     transforms.push(vtGlyphMotion(cfg, t, i, n, em, { axes: font.axes, resting: rest, wordOf }))
   }
@@ -341,6 +406,37 @@ export function vectorTypeFrame(font: VtFont, cfg: VectorTypeConfig, t: number):
     source.push(...shaped.glyphs)
   }
 
+  // ── SMART STRETCH: per glyph, on the font's shared zones ───────────────────
+  // A staggered `stretch`/`stretchY` track gives each glyph its own clock, so
+  // each reads its own dial values; otherwise every glyph takes the run's.
+  //
+  // The zones come from the RUN's shaping (`shaped.metrics`), never from the
+  // glyph's own bbox, so an `i` and an `l` at different stretch values still
+  // put the baseline, x-height and cap-height in the same place — that shared
+  // solve is the whole reason `stretchGlyph` takes a context at all.
+  //
+  // Per-glyph residuals reuse the RUN's wdth plan (the axis is spent once); the
+  // glyph's own dial is scaled by the same residual/dial ratio so a wave on a
+  // wdth font still travels through the remap consistently.
+  const stretchCtx = { metrics: shaped.metrics, unitsPerEm: upem }
+  const ratio = dialS !== 0 ? plan.residual / dialS : 1
+  let perGlyphStretch = false
+  const stretched: GlyphOutline[] = source.map((g, i) => {
+    let S = runDamped.S, SY = runDamped.SY
+    if (staggered) {
+      const gc = glyphConfig(cfg, t, i, n)
+      const own = dampedStretch(gc.stretch * ratio, gc.stretchY)
+      if (own.S !== S || own.SY !== SY) perGlyphStretch = true
+      S = own.S; SY = own.SY
+    }
+    // The identity is returned UNTOUCHED rather than round-tripped through the
+    // engine: this is the default frame, and "stretch = 1 changes nothing" has
+    // to be an equality, not an approximation, or every existing golden moves.
+    if (S === 1 && SY === 1) return g
+    const sg = stretchGlyph(g, S, SY, stretchCtx)
+    return { ...g, commands: sg.commands, bbox: sg.bbox, advance: sg.advance }
+  })
+
   // Re-accumulate the pen with tracking. Not added after the LAST glyph: CSS
   // letter-spacing does add it there, and the result is a run whose ink is
   // half a space off-centre at every non-zero tracking.
@@ -348,8 +444,8 @@ export function vectorTypeFrame(font: VtFont, cfg: VectorTypeConfig, t: number):
   const glyphs: GlyphOutline[] = []
   let penX = 0
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (let i = 0; i < source.length; i++) {
-    const g = source[i] as GlyphOutline
+  for (let i = 0; i < stretched.length; i++) {
+    const g = stretched[i] as GlyphOutline
     const placed: GlyphOutline = { ...g, x: penX, y: g.y }
     glyphs.push(placed)
     if (g.commands.length) {
@@ -358,7 +454,7 @@ export function vectorTypeFrame(font: VtFont, cfg: VectorTypeConfig, t: number):
       maxX = Math.max(maxX, placed.x + g.bbox.maxX)
       maxY = Math.max(maxY, placed.y + g.bbox.maxY)
     }
-    penX += g.advance + (i < source.length - 1 ? extra : 0)
+    penX += g.advance + (i < stretched.length - 1 ? extra : 0)
   }
 
   const bbox = Number.isFinite(minX)
@@ -366,9 +462,17 @@ export function vectorTypeFrame(font: VtFont, cfg: VectorTypeConfig, t: number):
     : { minX: 0, minY: 0, maxX: 0, maxY: 0 }
 
   return {
-    outlines: { glyphs, width: penX, unitsPerEm: upem, coords: uniform ?? shaped.coords, bbox },
+    // `metrics` rides along from the run's shaping: it is the font's shared
+    // alignment lines, so every consumer downstream (the SVG writer, the extrude
+    // solid, a second stretch pass) measures against the SAME zones this frame
+    // stretched against instead of re-deriving them from the placed bboxes.
+    outlines: { glyphs, width: penX, unitsPerEm: upem, coords: uniform ?? shaped.coords, bbox, metrics: shaped.metrics },
     config: base,
     transforms,
+    // What smart stretch actually applied — see `VtFrame.stretch`. The dial the
+    // user typed is untouched in `config`: this function is pure, and a fitted
+    // run reports its solved value here rather than writing it back.
+    stretch: { S: runDamped.S, SY: runDamped.SY, damped: runDamped.damped, fitted, perGlyph: perGlyphStretch },
     // Unchanged meaning: a TRAVELLING wave, i.e. glyphs on their own clocks. An
     // axis preset at delay 0 shapes off the resting position but every glyph
     // shares it, so it is not a wave and must not claim to be one — `shapings`
@@ -1311,7 +1415,10 @@ export function drawVectorType(
   }
   ctx.setTransform(k, 0, 0, k, 0, 0)
 
-  const frame = vectorTypeFrame(font, cfg, t)
+  // The box `fit: 'width'` solves against is the SAME one `vtPlacement` reads
+  // (`availW = opts.width − 2·pad`) — written once here rather than inside the
+  // frame, because only a caller that owns a box knows there is one to fit to.
+  const frame = vectorTypeFrame(font, cfg, t, { fitBoxWidth: Math.max(0, opts.width - 2 * (opts.padding ?? 0)) })
   const place = vtPlacement(frame, opts)
   // `outlinesToPath2D` is exactly these two lines, split apart because the
   // PLACED COMMAND LISTS are needed as well as the paths: they are the first of
@@ -2239,7 +2346,10 @@ export function vectorTypeSVG(
   t: number,
   opts: VtSvgOptions,
 ): VtSvgResult {
-  const frame = vectorTypeFrame(font, cfg, t)
+  // The box `fit: 'width'` solves against is the SAME one `vtPlacement` reads
+  // (`availW = opts.width − 2·pad`) — written once here rather than inside the
+  // frame, because only a caller that owns a box knows there is one to fit to.
+  const frame = vectorTypeFrame(font, cfg, t, { fitBoxWidth: Math.max(0, opts.width - 2 * (opts.padding ?? 0)) })
   const place = vtPlacement(frame, opts)
   const precision = opts.precision ?? 3
   const W = Math.max(1, opts.width)
