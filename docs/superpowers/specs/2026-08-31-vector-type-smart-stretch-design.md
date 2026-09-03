@@ -236,8 +236,14 @@ intent; these are the places the build had to disagree with it.
   composition decision taken at rest: a track on any of them would otherwise
   re-solve ~300 ms of binary search every frame and report a `fitted` that
   shivers. The width is damped against that same resting height dial, so a
-  height wave keeps the fitted width; an animated `size` keeps the fitted dial
-  and may over- or under-fill the box mid-animation — the accepted trade.
+  height wave keeps the fitted width; an animated `size` or `axis` keeps the
+  fitted dial and may over- or under-fill the box mid-animation — the accepted
+  trade. One consequence to know: because the fitted width is damped against
+  the resting height, a height track under Fit can hand the engine a diagonal
+  the dials could never produce — fitted 2.5 with Spring Up at 1.4 tall is
+  (2.5, 1.4) where damping would cap the width at 1.87. It starts above a
+  fitted ≈1.8 on a font with no `wdth` axis to absorb the move; a real `wdth`
+  shrinks the corner. Accepted for now; revisit if it reads wrong.
 - **Dials are clamped at the frame boundary.** `mergeConfig` clamps what is
   stored, but `applyMotion` runs after it and writes raw track values, so the
   frame re-clamps the run's dials and every staggered glyph's into
