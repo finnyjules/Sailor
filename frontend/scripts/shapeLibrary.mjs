@@ -209,6 +209,32 @@ export function elementToPath(name, a) {
   }
 }
 
+/**
+ * Turn a batch of `{ name, text }` SVG files into manifest shapes: slug the
+ * filename into an id, flag id collisions and empty ids, parse the rest via
+ * parseShapeSvg. One bad or colliding file is skipped and reported in
+ * `errors` — it never stops the others from parsing. Pure — no filesystem —
+ * so the collision/error paths are directly testable.
+ */
+export function buildShapes(files) {
+  const shapes = []
+  const seen = new Map()
+  const errors = []
+  for (const { name, text } of files) {
+    const id = slug(name)
+    if (!id) { errors.push(`${name}: empty id`); continue }
+    if (seen.has(id)) { errors.push(`${name}: id "${id}" collides with ${seen.get(id)}`); continue }
+    seen.set(id, name)
+    try {
+      const parsed = parseShapeSvg(text, name)
+      shapes.push({ id, name: displayName(id), ...parsed })
+    } catch (e) {
+      errors.push(String(e.message))
+    }
+  }
+  return { shapes, errors }
+}
+
 /** Whole file → { d, fillRule, box, sourceColor }. Throws with the filename on anything odd. */
 export function parseShapeSvg(svgText, fileName) {
   const vb = /viewBox="([^"]+)"/.exec(svgText)

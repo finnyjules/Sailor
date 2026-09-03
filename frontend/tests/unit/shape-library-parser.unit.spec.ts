@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   slug, displayName, parsePath, serializePath, parseTransform, applyMatrix, pathBounds,
-  elementToPath, parseShapeSvg,
+  elementToPath, parseShapeSvg, buildShapes,
 } from '../../scripts/shapeLibrary.mjs'
 
 describe('slug / displayName', () => {
@@ -25,6 +25,10 @@ describe('parsePath', () => {
   it('reflects the control point for S after C', () => {
     const cmds = parsePath('M0,0C0,10,10,10,10,0S20,-10,20,0')
     expect(cmds[2]).toEqual({ c: 'C', p: [10, -10, 20, -10, 20, 0] })
+  })
+  it('treats S after a non-C command as a C with the control point at the current point', () => {
+    const cmds = parsePath('M0,0L10,0S20,10,20,0')
+    expect(cmds[2]).toEqual({ c: 'C', p: [10, 0, 20, 10, 20, 0] })
   })
   it('rejects arcs and quadratics', () => {
     expect(() => parsePath('M0,0A5,5 0 0 1 10,10')).toThrow(/unsupported path command "A"/)
@@ -92,5 +96,45 @@ describe('parseShapeSvg', () => {
   })
   it('requires the 96 box', () => {
     expect(() => parseShapeSvg('<svg viewBox="0 0 24 24"><path d="M0,0Z"/></svg>', 'x.svg')).toThrow(/viewBox/)
+  })
+})
+
+describe('buildShapes', () => {
+  const svg = (inner: string) =>
+    `<?xml version="1.0" encoding="UTF-8"?><svg id="a" xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">${inner}</svg>`
+  const valid = svg('<path d="M8,8h80v80h-80Z" fill="#9b86bd" stroke-width="0"/>')
+  const sunRays = svg('<path d="M8,8h80v80h-80Z" fill="#9b86bd" stroke-width="0"/>')
+
+  it('reports a collision and drops the second file, zero shapes for it', () => {
+    const { shapes, errors } = buildShapes([
+      { name: 'triangle-double.svg', text: valid },
+      { name: 'triangle-double .svg', text: valid },
+    ])
+    expect(shapes.length).toBe(1)
+    expect(shapes[0].id).toBe('triangle-double')
+    expect(errors.length).toBe(1)
+    expect(errors[0]).toMatch(/collides/)
+  })
+
+  it("carries the malformed file's name in its error without stopping other files from parsing", () => {
+    const { shapes, errors } = buildShapes([
+      { name: 'broken.svg', text: svg('<path fill="#111"/>') },
+      { name: 'sun-rays.svg', text: sunRays },
+    ])
+    expect(errors.length).toBeGreaterThan(0)
+    expect(errors[0]).toContain('broken.svg')
+    expect(shapes.length).toBe(1)
+    expect(shapes[0].id).toBe('sun-rays')
+  })
+
+  it('produces two shapes in filename order with derived names for a clean pair', () => {
+    const { shapes, errors } = buildShapes([
+      { name: 'circle.svg', text: valid },
+      { name: 'sun-rays.svg', text: sunRays },
+    ])
+    expect(errors).toEqual([])
+    expect(shapes.length).toBe(2)
+    expect(shapes.map(s => s.id)).toEqual(['circle', 'sun-rays'])
+    expect(shapes[1].name).toBe('Sun rays')
   })
 })
