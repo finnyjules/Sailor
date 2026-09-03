@@ -925,6 +925,26 @@ const fittedStretchSpec = {
   kind: 'text',
   hint: 'Solved by Fit so the run fills the box — follows the text. Set Fit to off to take the dial back. A bound column is ignored while Fit is on.',
 } as ControlSpec
+/**
+ * The hint above promises the dial comes back "at the value it was solved
+ * to" the moment Fit turns off — this is what keeps that promise. The frame
+ * is pure and never writes its solve back into `config`, so left alone the
+ * Stretch row would repaint the STALE `config.stretch` it held before Fit
+ * turned on, and the run would snap to a width the composition was never
+ * tuned for. So on the width→off edge (and ONLY that edge — never off→width,
+ * never the initial mount, which is why this is a `watch` and not
+ * `immediate`) we read `lastStretch.value.fitted` — the frame's own last
+ * report, not `fittedStretch`, which has already gone null by the time this
+ * callback runs, since `fit` has already flipped to `'off'` — and write it
+ * through `setControl`, the same path the dial itself drags through, so
+ * undo/persistence see this exactly like a hand-drag.
+ */
+watch(() => config.value.fit, (fit, prevFit) => {
+  if (prevFit !== 'width' || fit !== 'off') return
+  const solved = lastStretch.value?.fitted
+  if (typeof solved !== 'number' || !Number.isFinite(solved)) return
+  setControl('stretch', Number(solved.toFixed(2)))
+})
 let timer = 0
 let startedAt = 0
 let disposed = false
