@@ -46,6 +46,7 @@ import { depthImageFor, requestDepth, depthSourceFromViewUrl, type DepthRef } fr
 import { ensureFillBitmaps } from '~/lib/paint/imageFillCache'
 import { applyTornEdge, tornEdgeActive } from '~/lib/compositor/tornEdge'
 import { applyFeather, featherActive } from '~/lib/compositor/feather'
+import { paintMaskRelease } from '~/lib/compositor/maskBreak'
 // Runtime import is safe: wiredLayer.ts only imports the WiredLayer TYPE back from
 // this file, and type imports are erased — so this is not a module cycle.
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
@@ -290,6 +291,9 @@ interface LayerCommon {
    *  shown, erase strokes cut holes (brush hides, eraser un-hides). 'hidden':
    *  fully clipped, non-erase strokes reveal (invert). */
   maskBase?: 'visible' | 'hidden'
+  /** Break-out: open the shape mask on one side of a line so the subject escapes
+   *  an edge (see lib/compositor/maskBreak). Only meaningful with maskedByKey. */
+  maskBreak?: import('~/lib/compositor/maskBreak').MaskBreak
   /** Linked cloner: stamp this layer N times (linear/grid/radial) with falloff.
    *  Absent/disabled ⇒ a single instance, i.e. today's behavior. */
   cloner?: Cloner
@@ -1169,6 +1173,7 @@ export function drawLocalLayer(
       if (mctx) {
         mctx.setTransform(t)
         drawLocalLayerSelf(mctx, maskLayer, W, H)
+        paintMaskRelease(mctx, layer.maskBreak, W, H)
         octx.setTransform(1, 0, 0, 1, 0, 0) // composite in device space
         octx.globalCompositeOperation = 'destination-in'
         octx.drawImage(maskOff, 0, 0)
@@ -2364,6 +2369,7 @@ function drawItemMasked(
   const mctx = maskOff.getContext('2d'); if (!mctx) return
   mctx.setTransform(t)
   drawItemContent(mctx, mask, W, H)
+  paintMaskRelease(mctx, content.type === 'local' ? content.layer.maskBreak : null, W, H)
   octx.setTransform(1, 0, 0, 1, 0, 0) // composite in device space
   octx.globalCompositeOperation = 'destination-in'
   octx.drawImage(maskOff, 0, 0)
