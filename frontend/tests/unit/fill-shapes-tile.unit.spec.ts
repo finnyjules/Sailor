@@ -78,3 +78,30 @@ describe('normalizeFill + shapeId', () => {
     expect((normalizeFill({ type: 'solid', shapeId: 'sun-rays' }) as any).shapeId).toBeUndefined()
   })
 })
+
+// Regression (final review, Major): `shapes` was added to the shared FILL_TYPES, so it appears
+// in the Space Type / Shape Studio pickers whose GPU render path is fillTexture(). fillTexture
+// had no `shapes` arm and silently fell through to qrTex — a shapes fill rendered as a QR lattice.
+// These assert fillTexture now routes `shapes` through the real shape tiler (fillTileCanvas →
+// paintShapesTile → drawShape → ctx.fill(Path2D)), not qrTex, and that the cache keys on shapeId.
+import * as THREE from 'three'
+import { fillTexture } from '../../app/lib/spacetype/fills'
+
+describe('fillTexture (GPU path) — shapes', () => {
+  it('routes a shapes fill through the shape tiler (Path2D fills), NOT qrTex', () => {
+    created = []
+    const tex = fillTexture(THREE, shapesFill({ a: '#0055ff', shapeId: 'sun-rays', density: 3 }))
+    expect(tex).toBeInstanceOf(THREE.CanvasTexture)
+    const ops = created[0]!.ctx.ops
+    const fills = ops.filter((o: any) => o[0] === 'fill' && o[2] === '#0055ff')
+    expect(fills.length).toBe(9)                          // 3×3 grid of shapes
+    expect(fills[0]![1]).toBe(shapeById('sun-rays')!.d)   // the picked shape, not sparkle/qr
+  })
+  it('caches shapes textures per shapeId (two shapes ≠ same texture)', () => {
+    const t1 = fillTexture(THREE, shapesFill({ a: '#abcdef', shapeId: 'sparkle', density: 2 }))
+    const t2 = fillTexture(THREE, shapesFill({ a: '#abcdef', shapeId: 'sun-rays', density: 2 }))
+    const t1again = fillTexture(THREE, shapesFill({ a: '#abcdef', shapeId: 'sparkle', density: 2 }))
+    expect(t2).not.toBe(t1)      // different shape → different cache entry
+    expect(t1again).toBe(t1)     // same shape → cache hit
+  })
+})
