@@ -653,6 +653,51 @@ export async function tuneShapeNode(node: any, request: string, apiKey: string):
 }
 
 /**
+ * `moves.<id>.ease` is a `kind:'select'` control whose `options` are bare
+ * `MoveEaseName` strings (`agentControls.ts`'s `vtMoveFieldControls` —
+ * there is no `bezier` option in that list, a bezier ease is not
+ * agent-settable through this select at all), but the config actually
+ * stores a `MoveEase` OBJECT — `{kind:'named', name} | {kind:'bezier', cps}`
+ * — because every reader of a move's ease (`mergeEase`, `EasePicker.vue`,
+ * `easeToEngineName`, `presetMotion.ts`) expects that shape. Before this
+ * wrapper, a write landed the bare string straight into
+ * `cfg.motion.moves[i].ease`: `easeToEngineName` reads `.kind`/`.name` off a
+ * plain string as `undefined` and silently falls back to `power2.out`, and
+ * the stored shape no longer matched `MoveEase` for every other reader.
+ *
+ * Wraps the flat `Params` proxy `makeConfigParams` returns so ONLY
+ * `moves.<id>.ease` keys are translated: a WRITE of a bare name coerces it
+ * to `{kind:'named', name}` before it reaches the underlying config, and a
+ * READ renders the stored object back down to its name — the same value
+ * `vtMoveFieldControls`'s own `default` already computes
+ * (`mv.ease?.kind === 'named' ? mv.ease.name : 'smooth'`) — so
+ * `describeControls`'s `current` and `runParamPatch`'s tune-row "before"
+ * text (both `String()` whatever `params[key]` hands back) stop rendering
+ * "[object Object]". Every other key passes straight through to `base`
+ * unchanged; a `bezier` ease already in the config (never written by this
+ * select) reads back as itself, not coerced.
+ */
+function vtMoveEaseAwareParams(base: Params): Params {
+  const EASE_KEY = /^moves\.[^.]+\.ease$/
+  return new Proxy(base, {
+    get: (target, key) => {
+      if (typeof key !== 'string' || !EASE_KEY.test(key)) return (target as any)[key]
+      const v = (target as any)[key]
+      return v && typeof v === 'object' && (v as any).kind === 'named' ? (v as any).name : v
+    },
+    set: (target, key, value) => {
+      if (typeof key === 'string' && EASE_KEY.test(key) && typeof value === 'string') {
+        (target as any)[key] = { kind: 'named', name: value }
+      } else {
+        (target as any)[key] = value
+      }
+      return true
+    },
+    has: (target, key) => key in target,
+  })
+}
+
+/**
  * Vector Type: a WRAPPER property like Shape's — { config, canvasW, canvasH,
  * aspectKey, background } — so `write` merges back rather than replacing.
  *
@@ -686,9 +731,9 @@ const vectorTypeAdapter: PatchAdapter = {
   // grammar), but the array it actually addresses lives at `motion.moves` —
   // `at` is what tells `makeConfigParams` where to really look (see its own
   // `ExtraIdList` doc).
-  params: (config: any) => makeConfigParams(
+  params: (config: any) => vtMoveEaseAwareParams(makeConfigParams(
     () => config, () => 0, 'appearance', 'id', 'layer', [{ key: 'moves', at: 'motion.moves' }],
-  ),
+  )),
   write: (n: any, config: any) => {
     if (!n.data) n.data = {}
     if (!n.data.properties) n.data.properties = {}

@@ -1,14 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+// studioTune.ts calls ofetch's $fetch (for /api/vibe) at module scope in
+// callers this file never exercises — stub it exactly like studio-tune.unit
+// .spec.ts does so importing `__vectorTypeAdapterForTest` doesn't need the
+// real package resolvable.
+vi.mock('ofetch', () => ({ $fetch: vi.fn() }))
+
 import { DEFAULT_CONFIG, mergeConfig } from '~/lib/vectortype/config'
-import {
-  VT_MOVE_ADD_KEY,
-  VT_MOVE_REMOVE_KEY,
-  vtAgentControls,
-  vtMoveAddControl,
-  vtMoveRemoveControl,
-} from '~/lib/vectortype/agentControls'
+import { vtAgentControls } from '~/lib/vectortype/agentControls'
 import { VT_GUIDANCE } from '~/lib/vectortype/controls'
 import { makeConfigParams } from '~/lib/agent/configParams'
+import { describeControls } from '~/lib/spacetype/controlDescriptor'
+import { easeToEngineName } from '~/lib/studio/moves/ease'
+import { __vectorTypeAdapterForTest } from '~/lib/agent/studioTune'
 
 describe('smart stretch — agent surface', () => {
   it('the agent sees stretch, height and fit with their hints', () => {
@@ -23,43 +27,19 @@ describe('smart stretch — agent surface', () => {
 })
 
 describe('moves — agent surface (Task 10)', () => {
-  // ADD/REMOVE are macros — a verb, not a config leaf — so they are NOT part
-  // of `vtAgentControls`'s own list, the same posture `scene3d/agentControls
-  // .ts`'s `primitive` macro takes relative to `sceneAgentControls`: a caller
-  // that knows how to intercept the macro (a future `studioTune.ts` wiring)
-  // composes it alongside `vtAgentControls`'s output. See both functions' own
-  // doc for why, and `~/lib/agent/configParams.ts`'s `ExtraIdList` for what
-  // makes the SET words below real, resolving leaves rather than another verb.
-  it('always offers a move-add word, with fade/wave-style options', () => {
-    const add = vtMoveAddControl()
-    expect(add.key).toBe(VT_MOVE_ADD_KEY)
-    expect(add.kind).toBe('select')
-    const options = (add as any).options as string[]
-    expect(options).toContain('in:fade-in')
-    expect(options).toContain('loop:wave')
-    expect(options).toContain('loop:blink')
-    expect(options).toContain('loop:scatter')
-    expect(add.hint).toMatch(/add/i)
-    // Never offered as a plain settable key inside vtAgentControls's own list
-    // — it would fail "every emitted key resolves" (vectortype-controls spec).
-    expect(vtAgentControls(DEFAULT_CONFIG, []).some(c => c.key === VT_MOVE_ADD_KEY)).toBe(false)
-  })
-
-  it('offers no move-remove word on a config with no motion', () => {
-    expect(vtMoveRemoveControl(DEFAULT_CONFIG)).toBeNull()
-  })
-
-  it('a move on the config gets a remove word and id-addressed set words, including duration', () => {
+  // `moves.add`/`moves.remove` macros were built and unit-tested in an
+  // earlier pass but never wired into `studioTune.ts`'s `vectorTypeAdapter`
+  // (there is no established "delete a list member" macro anywhere in this
+  // codebase, and `PatchAdapter` only supports ONE macro per adapter — see
+  // `~/lib/vectortype/agentControls.ts`'s "DELIBERATELY NOT WIRED" doc for
+  // the full path-A/path-B reasoning). They were removed as dead code rather
+  // than left declared-but-unreachable, so this file no longer tests them.
+  it('a move on the config gets id-addressed set words, including duration', () => {
     // The OLD-shape `in` slot `mergeMotion` still converts — the same route
     // `migrateKinetic.ts` uses — so this is one real `kind: 'preset'` move,
     // not a hand-built fixture that could drift from the real shape.
     const config = mergeConfig({ motion: { in: { presetId: 'fade-in', duration: 1.2 } } })
     const moveId = config.motion.moves[0]!.id
-
-    const remove = vtMoveRemoveControl(config)
-    expect(remove).toBeTruthy()
-    expect(remove!.key).toBe(VT_MOVE_REMOVE_KEY)
-    expect((remove as any).options).toContain(moveId)
 
     const controls = vtAgentControls(config, [])
     const duration = controls.find(c => c.key === `moves.${moveId}.duration`)
@@ -78,7 +58,6 @@ describe('moves — agent surface (Task 10)', () => {
     config.motion.moves = []
     const controls = vtAgentControls(config, [])
     expect(controls.find(c => c.key === `moves.${moveId}.duration`)).toBeUndefined()
-    expect(vtMoveRemoveControl(config)).toBeNull()
   })
 
   it('moves.<id>.duration actually resolves through the write-through proxy studioTune.ts uses', () => {
@@ -100,5 +79,49 @@ describe('moves — agent surface (Task 10)', () => {
     expect(params[`moves.${moveId}.duration`]).toBeUndefined()
     params[`moves.${moveId}.duration`] = 9
     expect(config.motion.moves).toEqual([])
+  })
+
+  // ── FIX 1 (Task 10 review, CRITICAL): the agent write path used to write
+  // the bare `MoveEaseName` STRING straight into `cfg.motion.moves[i].ease`,
+  // corrupting the stored shape — every reader (`mergeEase`, EasePicker.vue,
+  // `easeToEngineName`, `presetMotion.ts`) expects a `MoveEase` OBJECT
+  // (`{kind:'named', name} | {kind:'bezier', cps}`). This exercises the SAME
+  // `params()` factory `studioTune.ts`'s `vectorTypeAdapter` builds (not a
+  // hand-rolled proxy), so it fails before the fix and passes after.
+  it('writing a bare ease name through the agent patch path stores a MoveEase object, not a raw string', () => {
+    const config = mergeConfig({ motion: { in: { presetId: 'fade-in', duration: 1.2 } } })
+    const moveId = config.motion.moves[0]!.id
+    const params = __vectorTypeAdapterForTest.params(config)
+
+    // The model always emits the bare name — it's a `kind:'select'` control
+    // whose `options` are `MoveEaseName` strings (`vtMoveFieldControls`).
+    params[`moves.${moveId}.ease`] = 'bounce'
+
+    const stored = config.motion.moves[0]!.ease
+    expect(stored).toEqual({ kind: 'named', name: 'bounce' })
+    expect(easeToEngineName(stored)).toBe('bounce.out')
+    // Not the silent power2.out fallback a raw string produces (`easeToEngineName`
+    // reads `.kind`/`.name` off a plain string as `undefined`, then falls back).
+    expect(easeToEngineName(stored)).not.toBe('power2.out')
+  })
+
+  // ── FIX 1, display half: `describeControls`'s `current` used to read the
+  // raw `MoveEase` object straight off the params proxy, which renders as
+  // "[object Object]" once `runParamPatch`/the tune row `String()`s it. The
+  // same params proxy now hands back the ease's NAME for this key — mirroring
+  // how the control's own `default` is already computed
+  // (`vtMoveFieldControls`'s `mv.ease?.kind === 'named' ? mv.ease.name : 'smooth'`).
+  it("describeControls's current value for moves.<id>.ease is the ease name, not the raw object", () => {
+    const config = mergeConfig({ motion: { in: { presetId: 'fade-in', duration: 1.2 } } })
+    const moveId = config.motion.moves[0]!.id
+    expect(config.motion.moves[0]!.ease).toEqual({ kind: 'named', name: 'smooth' })
+
+    const params = __vectorTypeAdapterForTest.params(config)
+    const controls = vtAgentControls(config, [])
+    const described = describeControls(controls, params)
+    const ease = described.find(d => d.path === `moves.${moveId}.ease`)
+    expect(ease).toBeTruthy()
+    expect(ease!.current).toBe('smooth')
+    expect(String(ease!.current)).not.toBe('[object Object]')
   })
 })

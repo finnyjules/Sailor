@@ -11,9 +11,7 @@ import { vtLayerLabels } from './layerLabel'
 // adapter itself, which is Vue-laden (`markRaw`'d `.vue` card bodies) and would
 // pull that weight into this module's import graph for every caller, including
 // `studioTune.ts`'s plain-unit-spec-imported patch path.
-import { presetIdsFor } from '~/lib/motion/evaluate'
 import { KINETIC_PRESETS_BY_ID, presetParamDefault } from '~/data/kinetic-presets'
-import { VT_PRESET_CAPABILITIES } from './presetMotion'
 import { animatableTargets } from './motion'
 import type { MoveEaseName } from '~/lib/studio/moves/types'
 
@@ -118,87 +116,30 @@ export function vtStackControls(cfg: VectorTypeConfig): ControlSpec[] {
 }
 
 /**
- * ## Moves: add / remove / edit
+ * ## Moves: add / remove — DELIBERATELY NOT WIRED (Task 10 follow-up)
  *
- * Task 10's vocabulary over `cfg.motion.moves` (`~/lib/studio/moves/types`'s
- * `Move[]`, narrowed to `VtMove` — see `config.ts`). Follows the SAME
- * id-addressed posture `vtStackControls` above already established for
- * `appearance`: a word that names something by its own STABLE id, so a stale
- * word degrades to IGNORED rather than landing on whatever took the deleted
- * move's place.
- *
- * ADD and REMOVE are the one shape neither `ControlSpec` nor `vtStackControls`
- * had to solve before — there is no "insert" or "delete" control kind, only
- * settable leaves. The established answer elsewhere in this codebase is a
- * MACRO: a `kind: 'select'` control whose key is not a real config path and
- * whose value is a VERB, not a stored leaf (`scene3d/agentControls.ts`'s
- * `primitive`, `gradientfx`'s `preset`, `shaderstudio`'s `effect` — all
- * intercepted by `~/lib/agent/studioTune.ts`'s `runParamPatch` before the
- * generic per-key write-through runs). `VT_MOVE_ADD_KEY`/`VT_MOVE_REMOVE_KEY`
- * follow that same shape so a future wiring of `vectorTypeAdapter` in
- * `studioTune.ts` (not part of this task — see its own file for the current,
- * add/remove-less adapter) has a ready-made macro to intercept, exactly the
- * seam Scene3D's `primitive` already demonstrates working end to end.
- *
- * `options` is what makes degradation automatic and free: `/api/vibe`'s
- * `validatePatch` keeps a `select` value only when it is still IN `options` at
- * the moment of validation (every macro above relies on this the same way) —
- * so a `moves.remove` value naming an id that is no longer in the stack is
- * dropped before it ever reaches a write, with no bespoke "does this move
- * still exist" check needed here.
+ * `vtMoveAddControl`/`vtMoveRemoveControl` macros (and their
+ * `VT_MOVE_ADD_KEY`/`VT_MOVE_REMOVE_KEY`) were built and unit-tested in an
+ * earlier pass, but were never composed into `studioTune.ts`'s
+ * `vectorTypeAdapter` — so the agent could set a move's fields but never add
+ * or remove one. Investigated wiring them (Task 10 review, path A/B call):
+ * `~/lib/agent/studioTune.ts`'s `PatchAdapter` supports exactly ONE macro per
+ * adapter (`macroKey`/`applyPreset`/`macroBefore`/`recontrol`, all singular —
+ * see `runParamPatch`'s "MACRO ORDERING CONTRACT" block). Every existing
+ * macro in this codebase (Gradient's `preset`, Shader's `effect`, Scene3D's
+ * `primitive`) is an ADD/SWITCH; none is a DELETE, so there is no established
+ * "remove a list member" pattern to mirror either. Wiring BOTH `moves.add`
+ * (an add, like Scene3D's `primitive`) AND `moves.remove` (a delete, with no
+ * precedent anywhere in this codebase) into one adapter would mean
+ * generalizing `PatchAdapter`'s macro slot from one to many and adding
+ * delete semantics to `runParamPatch` shared by every other studio — an
+ * invasive change to code four adapters depend on, not a bounded one. So the
+ * macros were removed rather than shipped declared-but-unreachable; a future
+ * task that's willing to take on the shared `PatchAdapter` refactor can
+ * re-add them. Until then, an agent can shape an EXISTING move (duration,
+ * ease, params, track endpoints — `vtMoveFieldControls` below) but adding or
+ * removing a move is a user-only action via the Motion panel.
  */
-export const VT_MOVE_ADD_KEY = 'moves.add'
-export const VT_MOVE_REMOVE_KEY = 'moves.remove'
-
-/** `blink`/`scatter` are the two moves this studio adds that are not a
- *  `presetId` from the shared kinetic engine — see `movesAdapter.ts`'s
- *  `blinkOffer`/`scatterOffer`. Listed here under `loop` alongside it so
- *  "make the letters blink" and "make it fade in" are the same VERB. */
-const VT_MOVE_ADD_MARKER_TOKENS: { token: string; label: string }[] = [
-  { token: 'loop:blink', label: 'Blink (loop)' },
-  { token: 'loop:scatter', label: 'Scatter (loop)' },
-]
-
-/**
- * The `moves.add` macro. Value is `"<phase>:<presetId>"` — a preset id ALONE
- * is not enough to place the move (`vtKnowsPreset` needs both, and the same
- * kinetic id can differ in meaning across a studio's tables), so the token
- * carries both halves the way `presetCrossing` in `migrateKinetic.ts` derives
- * them from a stored Kinetic node, except here the model picks the phase
- * itself because there is no saved category to read.
- *
- * Built from `presetIdsFor`/`VT_PRESET_CAPABILITIES` — the exact same
- * capability-gated id set `vtKnowsPreset`/`vtMovesAdapter`'s gallery use — so
- * an id offered here is always one the studio can actually render (no
- * `copies`-only preset, nothing GSAP-only ever crosses to this table at all).
- * Axis and track-preset tiles (font-dependent, layer-dependent) are left to
- * the visual gallery; this is the "make it fade/wave/spin/glitch/blink/
- * scatter" vocabulary an agent turn realistically reaches for.
- */
-export function vtMoveAddControl(): ControlSpec {
-  const options: string[] = []
-  const optionLabels: string[] = []
-  for (const phase of ['in', 'loop', 'out'] as const) {
-    for (const id of presetIdsFor(phase, VT_PRESET_CAPABILITIES)) {
-      const meta = KINETIC_PRESETS_BY_ID[id]
-      options.push(`${phase}:${id}`)
-      optionLabels.push(`${meta?.label ?? id} (${phase})`)
-    }
-  }
-  for (const m of VT_MOVE_ADD_MARKER_TOKENS) { options.push(m.token); optionLabels.push(m.label) }
-  return {
-    key: VT_MOVE_ADD_KEY,
-    label: 'Add move',
-    kind: 'select',
-    options,
-    optionLabels,
-    default: '',
-    group: 'Motion',
-    hint: 'Add a move to the motion stack — pick ONE option, never invent a value. '
-      + '"in:*" plays once at the start, "out:*" once at the end, "loop:*" repeats for the '
-      + 'whole clip. "loop:blink"/"loop:scatter" turn on letter-blink / per-glyph scatter.',
-  }
-}
 
 /** A short, human label for a move — the same "name it something readable"
  *  job `moveCardLabel.ts` does for the panel, restated here pure (no
@@ -211,27 +152,6 @@ function vtMoveLabel(mv: VtMove): string {
     return path ? `Custom · ${path.split('.').pop()}` : 'Custom'
   }
   return KINETIC_PRESETS_BY_ID[mv.presetId ?? '']?.label ?? mv.presetId ?? mv.kind
-}
-
-/**
- * The `moves.remove` macro — `null` when the stack is empty, so an agent
- * turn on a config with no motion is never offered a verb with nothing to
- * name (the same posture `vtMoveFieldControls` below takes per move, and
- * `vtStackControls` takes for an unresolvable layer id).
- */
-export function vtMoveRemoveControl(cfg: VectorTypeConfig): ControlSpec | null {
-  const moves = Array.isArray(cfg?.motion?.moves) ? cfg.motion.moves : []
-  if (!moves.length) return null
-  return {
-    key: VT_MOVE_REMOVE_KEY,
-    label: 'Remove move',
-    kind: 'select',
-    options: moves.map(mv => mv.id),
-    optionLabels: moves.map(mv => `${vtMoveLabel(mv)} (${mv.phase})`),
-    default: '',
-    group: 'Motion',
-    hint: 'Remove one move from the stack by id — pick ONE option, never invent a value.',
-  }
 }
 
 const MOVE_EASE_NAMES: readonly MoveEaseName[] =
@@ -320,12 +240,9 @@ export function vtAgentControls(cfg: VectorTypeConfig, axes: VtAxis[] = [], acti
     ...vtStackControls(cfg),
     // `moves.<id>.duration`/`.ease`/`.params.<key>`/`.tracks.<i>.from`/`.to` —
     // these are real, resolving leaves (`cfg.motion.moves[i]…`), so they belong
-    // in the same list as every other settable word. `VT_MOVE_ADD_KEY`/
-    // `VT_MOVE_REMOVE_KEY` do NOT: they are VERBS with no backing leaf (see
-    // their own doc), so — exactly like `scene3d/agentControls.ts`'s
-    // `primitive` is deliberately left OUT of `sceneAgentControls` — they are
-    // exported separately for whichever caller composes the macro-interception
-    // (`vtMoveAddControl()`, `vtMoveRemoveControl(cfg)`), not bundled here.
+    // in the same list as every other settable word. Adding or removing a
+    // move outright has no macro here — see the "DELIBERATELY NOT WIRED"
+    // doc above `vtMoveLabel`.
     ...vtMoveFieldControls(cfg, axes),
   ]
   // The ACTIVE appearance layer's paint is a `Paint`; only its `Fill` arm can
