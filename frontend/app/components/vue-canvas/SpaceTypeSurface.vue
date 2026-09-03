@@ -1908,7 +1908,7 @@ async function exportWebEmbed() {
               <!-- No external caption for slider / font / single text: each self-labels inside
                    its own row (StudioSlider, FontPicker's row mode, StudioRow), carrying the
                    variable glyph there. textList still shows it — a list needs a header. -->
-              <label v-if="!['slider', 'font', 'text'].includes(c.kind)" class="mb-1 flex items-center gap-1.5 text-white/60 group">
+              <label v-if="!['slider', 'font', 'text', 'shape'].includes(c.kind)" class="mb-1 flex items-center gap-1.5 text-white/60 group">
                 <span>{{ c.label }}</span>
                 <VariableGlyph
                   v-if="controlKindToVariableType(c.kind) !== null"
@@ -1941,6 +1941,16 @@ async function exportWebEmbed() {
                 @promote="promote(controlDesc(c), params[c.key] as string | number)"
                 @menu="(e: MouseEvent) => openVarMenu(e, c)"
                 @go-to-collection="goToCollection"
+              />
+              <!-- Shape (library picker): a self-labelled StudioRow whose value side is
+                   RowShape. Not bindable to collections in v1 (controlKindToVariableType
+                   returns null for 'shape'). -->
+              <StudioRow
+                v-else-if="c.kind === 'shape'"
+                :spec="c"
+                :model-value="String(params[c.key] ?? c.default)"
+                :bindable="false"
+                @update:model-value="(v) => { params[c.key] = String(v); rebuild(); onEdit(c.key, String(v)) }"
               />
               <div v-else-if="c.kind === 'textList' && boundColumnFor(c.key)" class="flex items-center justify-between gap-2 rounded bg-white/[0.04] px-2 py-1.5">
                 <span class="truncate text-[12px]" style="color: var(--var-accent-text)">{{ boundColumnFor(c.key) }}</span>

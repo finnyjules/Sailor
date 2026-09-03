@@ -1,0 +1,119 @@
+<script setup lang="ts">
+/**
+ * The shape library picker — ONE component for every `shape` control (Space
+ * Type's separator today; Compositor, Shape Studio and 3D Studio next). A
+ * teleported, viewport-clamped floating panel anchored to its row, closed by
+ * Escape or a click outside (the SweepPopover / CanvasContextMenu conventions).
+ *
+ * Thumbnails are inline SVG in `currentColor`: the shape's source colour is a
+ * hint in the manifest, never something the picker shows.
+ */
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { SHAPE_FAMILIES, SHAPE_NONE, familyOf, searchShapes, type ShapeFamily } from '~/lib/shapes/catalog'
+
+const props = withDefaults(defineProps<{
+  modelValue: string
+  allowNone?: boolean
+  anchor: { x: number; y: number }
+}>(), { allowNone: true })
+const emit = defineEmits<{ (e: 'update:modelValue', v: string): void; (e: 'close'): void }>()
+
+const query = ref('')
+const family = ref<ShapeFamily | 'all'>('all')
+const rail = computed(() => [{ id: 'all' as const, label: 'All' }, ...SHAPE_FAMILIES])
+const visible = computed(() =>
+  searchShapes(query.value).filter(s => family.value === 'all' || familyOf(s.id) === family.value),
+)
+
+function pick(id: string) {
+  emit('update:modelValue', id)
+  emit('close')
+}
+
+const rootRef = ref<HTMLDivElement | null>(null)
+const searchRef = ref<HTMLInputElement | null>(null)
+const pos = ref({ x: props.anchor.x, y: props.anchor.y })
+onMounted(() => {
+  nextTick(() => {
+    const el = rootRef.value
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    let x = props.anchor.x, y = props.anchor.y
+    if (x + r.width + 8 > window.innerWidth) x = Math.max(8, window.innerWidth - r.width - 8)
+    if (y + r.height + 8 > window.innerHeight) y = Math.max(8, window.innerHeight - r.height - 8)
+    pos.value = { x, y }
+    searchRef.value?.focus()
+  })
+})
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') { e.preventDefault(); emit('close') }
+}
+function onOutside(e: MouseEvent) {
+  if (rootRef.value?.contains(e.target as Node)) return
+  emit('close')
+}
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown, true)
+  window.addEventListener('mousedown', onOutside, true)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown, true)
+  window.removeEventListener('mousedown', onOutside, true)
+})
+
+const tile = 'flex h-9 w-9 items-center justify-center rounded-md transition-colors'
+const tileIdle = 'text-white/70 hover:bg-white/10 hover:text-white'
+const tileOn = 'bg-white text-neutral-900'
+</script>
+
+<template>
+  <Teleport to="body">
+    <div
+      ref="rootRef"
+      class="fixed z-[210] w-[360px] rounded-lg border border-white/10 bg-[#141414] p-2 text-[12px] text-white/90 shadow-2xl"
+      :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
+      role="dialog"
+      aria-label="Choose a shape"
+    >
+      <input
+        ref="searchRef"
+        v-model="query"
+        type="search"
+        placeholder="Search shapes"
+        spellcheck="false"
+        class="mb-2 h-7 w-full rounded-[6px] bg-white/[0.06] px-2 text-[11px] text-white/90 outline-none placeholder:text-white/30 focus:bg-white/[0.10]"
+      />
+      <div class="flex gap-2">
+        <div class="flex w-24 shrink-0 flex-col gap-0.5">
+          <button
+            v-for="f in rail" :key="f.id" type="button"
+            :data-family="f.id"
+            class="rounded px-2 py-1 text-left text-[11px] transition-colors"
+            :class="family === f.id ? 'bg-white text-neutral-900' : 'text-white/55 hover:bg-white/10 hover:text-white/90'"
+            @click="family = f.id"
+          >{{ f.label }}</button>
+        </div>
+        <div class="grid max-h-64 flex-1 grid-cols-5 content-start gap-1 overflow-y-auto pr-1">
+          <button
+            v-if="allowNone" type="button" data-shape="none" title="None"
+            :aria-pressed="modelValue === SHAPE_NONE ? 'true' : 'false'"
+            :class="[tile, modelValue === SHAPE_NONE ? tileOn : tileIdle]"
+            @click="pick(SHAPE_NONE)"
+          ><span class="text-[11px]">None</span></button>
+          <button
+            v-for="s in visible" :key="s.id" type="button" :data-shape="s.id" :title="s.name"
+            :aria-pressed="modelValue === s.id ? 'true' : 'false'"
+            :class="[tile, modelValue === s.id ? tileOn : tileIdle]"
+            @click="pick(s.id)"
+          >
+            <svg viewBox="0 0 96 96" width="26" height="26" fill="currentColor" aria-hidden="true">
+              <path :d="s.d" :fill-rule="s.fillRule" />
+            </svg>
+          </button>
+          <p v-if="!visible.length" class="col-span-5 py-4 text-center text-[11px] text-white/40">No shapes match.</p>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+</template>

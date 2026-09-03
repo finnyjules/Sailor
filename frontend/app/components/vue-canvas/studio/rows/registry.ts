@@ -4,6 +4,7 @@ import RowSelect from './RowSelect.vue'
 import RowSwitch from './RowSwitch.vue'
 import RowColor from './RowColor.vue'
 import RowText from './RowText.vue'
+import RowShape from './RowShape.vue'
 
 /**
  * kind → the component that draws the VALUE side of a row. The row shell
@@ -16,6 +17,7 @@ export const rowRenderers: Record<string, Component> = {
   switch: RowSwitch,
   color: RowColor,
   text: RowText,
+  shape: RowShape,
 }
 
 /** Kinds whose value is a number the row itself can drag and type into. */
@@ -25,7 +27,7 @@ export const NUMERIC_KINDS = new Set(['slider'])
 const warned = new Set<string>()
 
 /**
- * The registry lookup. `ControlSpec` declares twelve kinds and this table covers five,
+ * The registry lookup. `ControlSpec` declares twelve kinds and this table covers six,
  * so `font`, `textList`, `gradientStops`, `fillList`, `path` and `curve` resolve to
  * `null` and `StudioRow` draws a label with an empty value side. That reads as "this
  * control is broken", not "this kind isn't built yet", and it is silent — so say so,
