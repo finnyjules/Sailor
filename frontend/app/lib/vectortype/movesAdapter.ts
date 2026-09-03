@@ -27,15 +27,23 @@
  * `evaluate` staying absent here is the honest statement of that: a preset
  * move's motion is not expressible as one `cfg → cfg` step.
  *
- * ## Why `clipExtras` is absent
+ * ## `clipExtras` and the card bodies (Task 9)
  *
- * It would be the Letter-by-letter (stagger) rows — a Vue component reading
- * `cfg.motion.stagger`. No `components/vue-canvas/motion/moves/` panel
- * exists yet to mount it into (Task 5's brief explicitly allows leaving this
- * to the panel task), so wiring a real `.vue` file here would be dead code
- * with no consumer. `clipExtras` is optional on `MovesAdapter` for exactly
- * this reason.
+ * `clipExtras` is `VtStaggerClipExtras.vue` — Letter-by-letter (stagger),
+ * the one Motion control that stays outside the move list (design spec
+ * §4: "the Motion group keeps only the stagger controls (they draw in the
+ * clip block)"). `KINDS.preset/blink/scatter` each carry a real `cardBody`
+ * now too (`components/vue-canvas/motion/moves/bodies/`) — `preset`'s
+ * renders the picked preset's tunable `params`; `blink`/`scatter`'s each
+ * read/write `cfg.motion.blink`/`.scatter` directly via `patch-cfg` (they
+ * are markers — see the `derivedMoves` doc below — so there is nothing on
+ * the MOVE itself worth a `patch` for). All four are real `.vue` imports,
+ * `markRaw`'d below: the shared panel this file drives
+ * (`components/vue-canvas/motion/moves/`) now exists (Task 8), so mounting
+ * them here is no longer dead code with no consumer, unlike when this
+ * module was first written.
  */
+import { markRaw } from 'vue'
 import type {
   AnimatableGroup,
   GalleryGroup,
@@ -63,18 +71,20 @@ import {
   vtTrackPresetOffer,
   type VtTrackPreset,
 } from './trackPresets'
+import VtPresetCardBody from '~/components/vue-canvas/motion/moves/bodies/VtPresetCardBody.vue'
+import VtBlinkCardBody from '~/components/vue-canvas/motion/moves/bodies/VtBlinkCardBody.vue'
+import VtScatterCardBody from '~/components/vue-canvas/motion/moves/bodies/VtScatterCardBody.vue'
+import VtStaggerClipExtras from '~/components/vue-canvas/motion/VtStaggerClipExtras.vue'
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
 // ── Kinds ────────────────────────────────────────────────────────────────
 
-/** No `cardBody` either: the card UI is the panel task's; a placeholder
- *  component here would be dead code with no consumer, same reasoning as
- *  `clipExtras` above. */
 const KINDS: Record<string, MoveKindDef<VectorTypeConfig>> = {
-  preset: { label: 'Preset' },
-  blink: { label: 'Blink' },
-  scatter: { label: 'Scatter' },
+  preset: { label: 'Preset', cardBody: markRaw(VtPresetCardBody) },
+  // noTiming: true — Blink/Scatter have no ease and no play (design spec §1).
+  blink: { label: 'Blink', cardBody: markRaw(VtBlinkCardBody), noTiming: true },
+  scatter: { label: 'Scatter', cardBody: markRaw(VtScatterCardBody), noTiming: true },
 }
 
 // ── Ease: engine name → the ten-name `MoveEase` vocabulary ─────────────────
@@ -216,6 +226,32 @@ function trackGroupLabel(preset: VtTrackPreset): string {
   return 'Layer'
 }
 
+/**
+ * Blink and Scatter as gallery tiles — spec §4 lists them first in the
+ * Loop tab's "Play" group, alongside the kinetic engine's own oscillating
+ * loop presets. `build()` returns only `{ phase: 'loop', kind }`: neither
+ * is a stored move (see `derivedMoves` below), so there is no duration/
+ * ease/play/tracks to seed — `VectorTypeSurface.vue`'s `onAddMove` reads
+ * `move.kind` off the picked candidate and turns the marker on by writing
+ * `cfg.motion.blink.amount`/`cfg.motion.scatter.spread` directly (spec §1:
+ * "Adding the Blink move sets `blink.amount` to 0.3 … Same for Scatter with
+ * `spread` 0.4"), rather than pushing anything into `clip.moves`.
+ */
+function blinkOffer(): MoveOffer {
+  return {
+    id: 'blink', label: 'Blink', kind: 'blink', phase: 'loop',
+    pitch: 'Letters or words drop out and come back in a seeded flicker.',
+    build: () => ({ phase: 'loop', kind: 'blink' }),
+  }
+}
+function scatterOffer(): MoveOffer {
+  return {
+    id: 'scatter', label: 'Scatter', kind: 'scatter', phase: 'loop',
+    pitch: 'Every letter sits at its own random position on one variable axis.',
+    build: () => ({ phase: 'loop', kind: 'scatter' }),
+  }
+}
+
 // ── Letterform: the curated ids that lead In and Loop (spec §4) ────────────
 
 const LETTERFORM_AXIS_IDS: Partial<Record<MovePhase, readonly string[]>> = {
@@ -247,6 +283,7 @@ export function vtMovesAdapter(
 ): MovesAdapter<VectorTypeConfig> {
   return {
     kinds: KINDS,
+    clipExtras: markRaw(VtStaggerClipExtras),
 
     gallery(cfg: VectorTypeConfig, phase: MovePhase): GalleryGroup[] {
       const groups = new Map<string, MoveOffer[]>()
@@ -286,6 +323,12 @@ export function vtMovesAdapter(
         const meta = KINETIC_PRESETS_BY_ID[id]
         const label = meta ? (KINETIC_GROUP_LABELS[meta.group as KineticGroup] ?? meta.group) : 'More'
         push(label, engineOffer(id, phase))
+      }
+
+      // Blink and Scatter lead the Loop tab's "Play" group (spec §4).
+      if (phase === 'loop') {
+        push('Play', blinkOffer())
+        push('Play', scatterOffer())
       }
 
       return [...groups.entries()].map(([label, offers]) => ({ label, offers }))
@@ -331,13 +374,14 @@ export function vtMovesAdapter(
         const offer = vtAxisAvailability(axisPreset, axes, fontLabel)
         return offer.available ? null : (offer.reason ?? 'Not available.')
       }
+      // Blink/Scatter are markers, never entries in `cfg.motion.moves` (see
+      // `derivedMoves` below) — "already added" means the CONFIG leaf that
+      // turns each on is already non-zero, not that a move record exists.
       if (candidate.kind === 'blink') {
-        const moves = Array.isArray(cfg?.motion?.moves) ? cfg.motion.moves : []
-        return moves.some(m => m.kind === 'blink') ? 'Blink is already added.' : null
+        return isNum(cfg?.motion?.blink?.amount) && cfg.motion.blink.amount > 0 ? 'Blink is already added.' : null
       }
       if (candidate.kind === 'scatter') {
-        const moves = Array.isArray(cfg?.motion?.moves) ? cfg.motion.moves : []
-        return moves.some(m => m.kind === 'scatter') ? 'Scatter is already added.' : null
+        return isNum(cfg?.motion?.scatter?.spread) && cfg.motion.scatter.spread > 0 ? 'Scatter is already added.' : null
       }
       return null
     },

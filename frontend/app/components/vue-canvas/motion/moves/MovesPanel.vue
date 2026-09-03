@@ -23,7 +23,11 @@
  *    letter reads/writes `cfg.motion.stagger`, which is not on `MotionClip`
  *    at all — this panel cannot know that shape, so `clipExtras` emits
  *    `patch` the same way a `MoveKindDef.cardBody` does, and this event is
- *    a pure pass-through of that).
+ *    a pure pass-through of that). ALSO forwarded from a `MoveCard`'s own
+ *    `patch-cfg` — a card body whose kind has no config of its own on the
+ *    move (Vector Type's Blink/Scatter, per `~/lib/studio/moves/adapter
+ *    .ts`'s `noTiming` doc) edits `cfg` directly the same way, and this
+ *    panel relays it unchanged rather than trying to interpret it.
  *  - `add-move(move: Move)` — a tile picked in `MoveGallery` (which already
  *    minted the move's `id`); append it to `clip.moves`.
  *  - `remove-move(move: Move)` — the FULL move, not just an id: a derived
@@ -178,6 +182,7 @@ function onAdd(move: Move) {
           :move="move" :adapter="adapter" :cfg="cfg" :open="move.id === openMoveId"
           @toggle="onToggle(move)"
           @patch="(p: Partial<Move>) => onPatch(move, p)"
+          @patch-cfg="(p: Record<string, unknown>) => emit('patch-cfg', p)"
           @remove="onRemove(move)"
           @change="onChange(move)"
         />

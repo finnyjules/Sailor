@@ -76,6 +76,17 @@ export interface MoveKindDef<Cfg> {
   /** Renders the move's own dials inside its card. */
   cardBody?: MovesComponent
   /**
+   * True for a kind with no ease/play of its own — Vector Type's Blink and
+   * Scatter, which run continuously rather than playing once through a
+   * phase window (design spec `2026-09-03-vector-type-motion-moves-design
+   * .md`: "Blink and Scatter have no ease and no play. Their cards show
+   * only their own dials."). `MoveCard.vue` hides the Ease and Play rows
+   * when this is true; Length stays (a marker move still carries one, even
+   * though it is cosmetic for these two kinds — see `movesAdapter.ts`'s
+   * `derivedMoves` doc). Absent/false for every kind with real timing.
+   */
+  noTiming?: boolean
+  /**
    * Applies this move at its own local progress (0..1, already phase- and
    * play-resolved by `movePhase`/`moveWindows` — see `./phase.ts`) to `cfg`,
    * returning the updated config. Absent for a marker-only kind whose

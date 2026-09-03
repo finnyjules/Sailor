@@ -32,10 +32,22 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'patch', partial: Partial<Move>): void
+  /**
+   * A card body's own config-level edit (Vector Type's Blink/Scatter — see
+   * `~/lib/studio/moves/adapter.ts`'s `noTiming` doc), bubbled straight
+   * through to `MovesPanel`'s own `patch-cfg`, which the surface applies to
+   * `cfg` at whatever shape the card body knows. This card never inspects
+   * or produces one itself — it only forwards what `cardBody` emits.
+   */
+  (e: 'patch-cfg', partial: Record<string, unknown>): void
   (e: 'remove'): void
   (e: 'change'): void
   (e: 'toggle'): void
 }>()
+
+/** No ease/play for this kind (Blink, Scatter) — `~/lib/studio/moves
+ *  /adapter.ts`'s `noTiming` doc. */
+const noTiming = computed(() => props.adapter.kinds[props.move.kind]?.noTiming === true)
 
 // ── Collapsed row ────────────────────────────────────────────────────────
 
@@ -145,8 +157,8 @@ function patchTrackNumber(index: number, field: 'from' | 'to', raw: string) {
         </span>
       </div>
 
-      <!-- Ease -->
-      <div class="flex flex-col gap-1.5">
+      <!-- Ease (absent for a noTiming kind — Blink/Scatter have no ease of their own) -->
+      <div v-if="!noTiming" class="flex flex-col gap-1.5">
         <button
           type="button"
           class="flex items-center justify-between gap-2 rounded border border-white/[0.07] bg-white/[0.02] px-2 py-1 text-left transition-colors hover:bg-white/[0.05]"
@@ -163,8 +175,9 @@ function patchTrackNumber(index: number, field: 'from' | 'to', raw: string) {
         <EasePicker v-if="easeOpen" :model-value="move.ease" @update:model-value="(v) => emit('patch', { ease: v })" />
       </div>
 
-      <!-- Play (loop only — in/out play exactly once through their own window) -->
-      <div v-if="move.phase === 'loop'" class="flex items-center justify-between gap-2">
+      <!-- Play (loop only — in/out play exactly once through their own window;
+           absent for a noTiming kind — Blink/Scatter have no play either) -->
+      <div v-if="move.phase === 'loop' && !noTiming" class="flex items-center justify-between gap-2">
         <span class="text-[11px] text-white/60">Play</span>
         <span class="flex items-center gap-1">
           <span class="flex overflow-hidden rounded border border-white/10">
@@ -193,6 +206,7 @@ function patchTrackNumber(index: number, field: 'from' | 'to', raw: string) {
           :move="move"
           :cfg="cfg"
           @patch="(p: Partial<Move>) => emit('patch', p)"
+          @patch-cfg="(p: Record<string, unknown>) => emit('patch-cfg', p)"
         />
       </div>
       <div v-else-if="move.kind === 'tracks'" class="flex flex-col gap-1.5 border-t border-white/[0.06] pt-2.5">

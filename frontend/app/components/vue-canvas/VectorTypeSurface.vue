@@ -23,49 +23,38 @@
  *    Four render surfaces that each grew their own copy is a failure this repo
  *    has already paid for more than once.
  */
-import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
-import { Combine, Plus, Trash2, X } from 'lucide-vue-next'
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
+import { Combine } from 'lucide-vue-next'
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import type { LayerAnimSpec } from '~/lib/motion/types'
-import { KINETIC_PRESETS_BY_ID, presetParamDefault } from '~/data/kinetic-presets'
 import { VARIABLE_FONTS } from '~/data/variable-fonts'
 import {
   VT_LAYER_KINDS,
   VT_LAYER_MAX,
-  VT_PRESET_DURATIONS,
-  VT_PRESET_SLOTS,
   mergeConfig,
   vtBaseAppearance,
   vtLayer,
   type VectorTypeConfig,
   type VtLayerKind,
-  type VtMotionTrack,
-  type VtPresetSlot,
+  type VtMove,
 } from '~/lib/vectortype/config'
 import { vtLayerLabels } from '~/lib/vectortype/layerLabel'
 import { VT_CONTROLS, VT_LAYER_PREFIX, VT_SECTIONS, derivedVtControls, type VtControl } from '~/lib/vectortype/controls'
-import { vtScatterAvailability } from '~/lib/vectortype/scatter'
 import { VT_GUIDANCE, vtAgentControls, vtBindableControls } from '~/lib/vectortype/agentControls'
-import { VT_APPEARANCE_REMAP, animatableTargets, colorTargets, pruneStackTracks } from '~/lib/vectortype/motion'
-import { COLOR_MIX_SPACES, COLOR_MIX_SPACE_LABELS, DEFAULT_COLOR_MIX_SPACE } from '~/lib/color/mix'
-import { getByIdPath } from '~/lib/studio/idPath'
+import { VT_APPEARANCE_REMAP, pruneStackTracks } from '~/lib/vectortype/motion'
 import {
   VT_PRESET_CAPABILITIES,
-  vtAxisOffers,
-  vtPresetSpecs,
-  vtStaggerBumpFor,
-  vtStaggerStarvedMoves,
   vtStillTime,
 } from '~/lib/vectortype/presetMotion'
 import { vtAxisPreset } from '~/lib/vectortype/axisPresets'
-import { vtApplyTrackPreset, vtOppositeHue, vtTrackPresetActive, vtTrackPresetOffers } from '~/lib/vectortype/trackPresets'
 import { loadVariableFont, type VtAxis, type VtFont } from '~/lib/vectortype/font'
 import StudioRow from '~/components/vue-canvas/studio/StudioRow.vue'
 import { formatValue } from '~/lib/studio/row'
 import { controlKindToVariableType } from '~/lib/collection/studioBindables'
-import MotionPresetPicker from '~/components/vue-canvas/motion/MotionPresetPicker.vue'
 import PresetThumb from '~/components/vue-canvas/motion/PresetThumb.vue'
 import VectorTypeThumb from '~/components/vue-canvas/motion/VectorTypeThumb.vue'
+import MovesPanel from '~/components/vue-canvas/motion/moves/MovesPanel.vue'
+import { vtMovesAdapter } from '~/lib/vectortype/movesAdapter'
+import type { Move, MotionClip } from '~/lib/studio/moves/types'
 import { drawVectorTypeToCanvas, vectorTypeSVG, vtExportName, vtIsAnimated, type VtBoxOptions, type VtFrame } from '~/lib/vectortype/canvas'
 // NEVER FROM THE DRAW LOOP (plan trap 5). `prepareSolidExtrudes` runs paper.js
 // boolean unions — orders of magnitude too slow for a frame — so every call site
@@ -86,7 +75,6 @@ import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
 import StudioActionsFooter from '~/components/vue-canvas/studio/StudioActionsFooter.vue'
 import StudioLayerStack from '~/components/vue-canvas/StudioLayerStack.vue'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
-import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
@@ -201,7 +189,6 @@ const onDesign = computed(() => inspectorTab.value === 'design')
 const onMotion = computed(() => inspectorTab.value === 'motion')
 
 const DESIGN_SECTIONS = VT_SECTIONS.filter(s => s !== 'Motion')
-const MOTION_SECTIONS = ['Motion'] as const
 
 /** The full inspector vocabulary: the declared frame plus the loaded font's own
  *  axes. One list, so the panel, the agent and the sweep menu cannot drift. */
@@ -210,69 +197,6 @@ const allControls = computed<ControlSpec[]>(() => [...VT_CONTROLS, ...derivedVtC
 // `layer.*` vocabulary on `appearance[active]`, so a stroke selected in the aside
 // is what makes `layer.width` offerable to the agent.
 const activeAgentControls = computed(() => vtAgentControls(config.value, fontAxes.value, activeLayerIndex.value))
-/** Motion targets, grouped by the target's OWN group — `Glyph` is not a
- *  VT_SECTIONS member (per-glyph offsets are animation outputs, not config
- *  leaves), so grouping strictly by section would drop them silently. */
-const animatable = computed(() => animatableTargets(config.value, fontAxes.value))
-/**
- * The COLOUR leaves, from the same `VT_CONTROLS` declaration read for its
- * `kind: 'color'` rows. A separate list because a colour has no numeric range —
- * see `VtColorTarget` — and the dropdown merges the two so a user picks a target
- * without first having to know which kind it is.
- */
-const colorTargetList = computed(() => colorTargets(config.value))
-const colorTargetPaths = computed(() => new Set(colorTargetList.value.map(t => t.path)))
-/** True for the track row whose target is a colour: two swatches, not two spinners. */
-const isColorRow = (tk: { path?: string }) => colorTargetPaths.value.has((tk.path ?? '').trim())
-const animatableGroups = computed(() => {
-  const groups = new Map<string, { path: string; label: string; group: string }[]>()
-  const push = (t: { path: string; label: string; group: string }) => {
-    const arr = groups.get(t.group)
-    if (arr) arr.push(t); else groups.set(t.group, [t])
-  }
-  for (const t of animatable.value) push(t)
-  for (const t of colorTargetList.value) push(t)
-  return [...groups.entries()]
-})
-
-/**
- * Point a track row at a new target — and REBUILD it for the new target's kind.
- *
- * Not a plain `v-model` on `tk.path`, because switching between a number and a
- * colour changes which fields carry the endpoints. Left to bind directly, a
- * number → colour switch would leave a track with no `fromColor`, which
- * `isColorTrack` reads as numeric — so `applyMotion` would write the NUMBER 0.6
- * into `paint.a` and the layer would paint nothing. The seed colours are the
- * layer's own current colour and its opposite hue, i.e. the same pair the Colour
- * Cycle tile writes, so a fresh colour row animates something visible at once.
- */
-function retargetTrack(tk: VtMotionTrack, path: string) {
-  const wantsColor = colorTargetPaths.value.has(path)
-  tk.path = path
-  if (wantsColor && !tk.fromColor) {
-    const seed = trackSeedColor(path)
-    tk.from = 0
-    tk.to = 1
-    tk.fromColor = seed
-    tk.toColor = vtOppositeHue(seed)
-    tk.space = DEFAULT_COLOR_MIX_SPACE
-  } else if (!wantsColor && tk.fromColor) {
-    delete tk.fromColor
-    delete tk.toColor
-    delete tk.space
-    const target = animatable.value.find(a => a.path === path)
-    if (target) { tk.from = target.min; tk.to = target.max }
-  }
-  onEdit('motion.tracks', config.value.motion.tracks.length)
-}
-
-/** The colour that leaf currently holds, so a new colour track starts from the
- *  design rather than from an invented default. Falls back to white, which is
- *  what a leaf that does not resolve would have been shown as anyway. */
-function trackSeedColor(path: string): string {
-  const cur = getByIdPath(config.value, path)
-  return typeof cur === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(cur.trim()) ? cur.trim() : '#ffffff'
-}
 
 const { getLocalSetting } = useLocalSettings()
 /**
@@ -508,11 +432,15 @@ const shaderSpec = computed<ShaderSpec>({
   },
 })
 
-function setControl(key: string, value: string | number) {
-  // Any write to the stagger retires the note explaining the last one — the
-  // user has taken the control back (and `assignPreset` re-arms it right after
-  // its own write, so its own bump is not swallowed here).
-  if (key === 'motion.stagger.delay') staggerNote.value = null
+// Pre-existing gap widened here rather than left for this task to trip over:
+// `StudioControlPanel`'s `set` event is typed `string | number | boolean`
+// (its emitter never narrows to what a given control kind actually uses),
+// but no VT_CONTROLS entry is ever boolean-valued — `controls.ts`'s own
+// `toggleSolid` note: "`ControlSpec` has no boolean kind". The cast below is
+// therefore type-only, not a behaviour change: every real caller still ever
+// passes a string or a number.
+function setControl(key: string, value: string | number | boolean) {
+  const v = value as string | number
   // Switching the fill type INTO 'shader' seeds a real ShaderSpec so
   // ShaderFillEditor has something to bind to the instant it mounts —
   // otherwise the picker/params/speed read the module-level default while the
@@ -525,8 +453,8 @@ function setControl(key: string, value: string | number) {
     const f = activeLayer.value?.paint
     if (isFill(f) && !f.shader) f.shader = structuredClone(DEFAULT_SHADER_SPEC)
   }
-  paramsProxy[key] = value
-  onEdit(key, value)
+  paramsProxy[key] = v
+  onEdit(key, v)
 }
 // Promotes the ACTIVE layer's own key, not the relative one — `bindableControl`.
 function promoteControl(c: ControlSpec) {
@@ -560,20 +488,29 @@ function slotControl(slotProps: unknown): ControlSpec {
  * `VT_APPEARANCE_REMAP` is still called, and it is not vestigial: it matches only
  * `appearance.<digits>.…`, which is what a track saved before ids — and what
  * `migrateLegacyAppearance` writes for a legacy `strokeWidth` animation — looks
- * like. It leaves an id path alone. So both vintages follow their layer.
+ * like. It leaves an id path alone (a no-op on every track this editor mints
+ * itself — `animatableTargets` only ever emits `appearance.<id>.…`). So both
+ * vintages follow their layer.
  *
  * REMOVE is the one mutation an id cannot absorb: the layer is gone, so
  * `pruneStackTracks` drops the tracks that pointed at it rather than leaving a
  * timeline row that animates nothing. `applyMotion` would ignore them anyway —
  * that is the guarantee, never a wrong layer — this is the tidy-up.
+ *
+ * A track's home moved from a flat `motion.tracks` array to the `tracks`
+ * array a `'tracks'`-kind MOVE owns (`~/lib/vectortype/config.ts`'s
+ * `VtMotionConfig.moves` doc), so this now walks `config.value.motion.moves`
+ * and remaps each such move's own tracks in place, rather than one flat list.
  */
 function remapLayerTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: number): void {
-  const tracks = config.value.motion.tracks
-  config.value.motion.tracks = kind === 'remove'
-    ? VT_APPEARANCE_REMAP.onRemove(tracks, a)
-    : kind === 'insert'
-      ? VT_APPEARANCE_REMAP.onInsert(tracks, a)
-      : VT_APPEARANCE_REMAP.onReorder(tracks, a, b!)
+  for (const mv of config.value.motion.moves) {
+    if (mv.kind !== 'tracks' || !mv.tracks?.length) continue
+    mv.tracks = kind === 'remove'
+      ? VT_APPEARANCE_REMAP.onRemove(mv.tracks, a)
+      : kind === 'insert'
+        ? VT_APPEARANCE_REMAP.onInsert(mv.tracks, a)
+        : VT_APPEARANCE_REMAP.onReorder(mv.tracks, a, b!)
+  }
 }
 
 /**
@@ -637,7 +574,7 @@ function removeLayer(i: number) {
   config.value.appearance.splice(i, 1)
   remapLayerTracks('remove', i)
   // …and the id-addressed tracks the positional remap does not see.
-  config.value.motion.tracks = pruneStackTracks(config.value)
+  config.value.motion.moves = pruneStackTracks(config.value)
   activeLayerIndex.value = Math.min(activeLayerIndex.value, config.value.appearance.length - 1)
 }
 function duplicateLayer(i: number) {
@@ -704,188 +641,124 @@ function toggleSolid(i: number) {
   L.solid = L.solid !== true
 }
 
-// ── motion presets ──────────────────────────────────────────────────────────
+// ── motion: the shared moves panel ──────────────────────────────────────────
 /**
- * The In / Out / Loop preset slots, and the gallery that fills them.
- *
- * Two things here are decisions rather than plumbing:
- *
- * 1. **What this studio can draw is stated ONCE, in the library.**
- *    `VT_PRESET_CAPABILITIES` is `blur` + `axes` — everything the engine knows
- *    except `copies`, which `VtGlyphMotion` has no field for. The same constant
- *    gates the gallery, the assigned-slot thumbnail and `vtKnowsPreset`, so a
- *    tile can never be offered for a preset the renderer will ignore, and a
- *    stored config can never claim to be animated by one.
- *
- * 2. **The axis section is rendered by THIS surface, into the picker's `lead`
- *    slot, so it sits above every engine section.** It cannot live in the
- *    shared picker: an axis preset's values are fractions of the LOADED FONT'S
- *    range and the engine is font-agnostic by design (see `axisPresets.ts`).
- *    And it is first on purpose — Fade, Slide and Grow are what every kinetic
- *    text tool already does; re-cutting `XOPQ`/`GRAD`/`YTAS` as design
- *    parameters is the only thing in this gallery that is ours.
+ * What this studio can draw, stated ONCE, in the library. `VT_PRESET_CAPABILITIES`
+ * is `blur` + `axes` — everything the engine knows except `copies`, which
+ * `VtGlyphMotion` has no field for. Handed to `PresetThumb` in the gallery's
+ * `#thumb` slot below so a tile's preview can never promise a capability the
+ * renderer will ignore.
  */
 const VT_CAPABILITIES = [...VT_PRESET_CAPABILITIES]
 
-const pickerFor = ref<VtPresetSlot | null>(null)
-const pickerAnchor = ref<{ top: number; left: number; width: number } | null>(null)
-function openPicker(slot: VtPresetSlot, e: MouseEvent) {
-  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  pickerAnchor.value = { top: r.top, left: r.left, width: r.width }
-  pickerFor.value = slot
-}
-
 const fontLabel = computed(() => VARIABLE_FONTS.find(f => f.id === config.value.fontId)?.label ?? 'This font')
-/** All five axis tiles for the open slot — unavailable ones included, each
- *  carrying the sentence that says which axis is missing. Never filtered: a
- *  hidden tile teaches nothing, and "pick Roboto Flex instead" is an action the
- *  user owns (Task 7's hide-vs-disable call). */
-const axisOffers = computed(() =>
-  pickerFor.value ? vtAxisOffers(pickerFor.value, fontAxes.value, fontLabel.value) : [],
-)
-/** The id sitting in the slot the gallery is open for. */
-const currentPresetId = computed(() => (pickerFor.value ? config.value.motion[pickerFor.value]?.presetId ?? null : null))
-
-/** An id's label, whichever table it came from. */
-function presetLabel(slot: VtPresetSlot, id: string): string {
-  return vtAxisPreset(slot, id)?.label ?? KINETIC_PRESETS_BY_ID[id]?.label ?? id
-}
-function isAxisPreset(slot: VtPresetSlot, id: string): boolean {
-  return vtAxisPreset(slot, id) !== null
-}
-/** Axis presets carry no tunable params; the engine's catalog ones may. */
-const presetParams = (id: string) => KINETIC_PRESETS_BY_ID[id]?.params ?? []
-const paramValue = (spec: LayerAnimSpec, key: string) => spec.params?.[key] ?? presetParamDefault(spec.presetId, key)
-
-const slotSpec = (slot: VtPresetSlot): LayerAnimSpec | undefined => config.value.motion[slot]
-/** The slots that will really animate — `vtPresetSpecs` drops an id no table
- *  knows, so this counts what the renderer will run, not what is stored. */
-const activePresets = computed(() => {
-  const specs = vtPresetSpecs(config.value)
-  return VT_PRESET_SLOTS.filter(s => specs[s]).map(s => ({ slot: s, spec: specs[s]! }))
-})
-const trackCount = computed(() => config.value.motion.tracks.length)
-/** Both sources, in one number, so the Motion tab can never read "no motion"
- *  while a preset is running (Task 4's hand-off #6). */
-const motionSourceCount = computed(() => activePresets.value.length + trackCount.value)
-const bothSourcesLive = computed(() => activePresets.value.length > 0 && trackCount.value > 0)
-const activePresetSummary = computed(() =>
-  activePresets.value.map(p => `${p.slot === 'loop' ? 'Loop' : p.slot === 'in' ? 'In' : 'Out'} ${presetLabel(p.slot, p.spec.presetId)}`).join(', '),
-)
 
 /**
- * The slots whose preset cannot express itself at the current stagger, and the
- * note explaining a delay this surface adopted on the user's behalf.
- *
- * Both exist for one rule: a user must never be looking at a preset that is
- * silently doing nothing, and nothing may change under them unannounced. See
- * `vtStaggerBumpFor`.
+ * The shared moves panel's driver for this studio — see `~/lib/vectortype
+ * /movesAdapter.ts` and the contract it implements, `~/lib/studio/moves
+ * /adapter.ts`. `_cfg` is not read by the factory itself (every adapter
+ * method gets its own fresh `cfg` at call time — the factory's own header
+ * says so); this only needs to stay reactive to the font (`fontAxes`/
+ * `fontLabel`) and a whole-config replacement (Import settings).
  */
-const staggerStarved = computed(() => vtStaggerStarvedMoves(config.value))
-/**
- * A live scatter aimed at an axis THIS font does not have.
- *
- * The tag is deliberately kept in the config rather than rewritten (see
- * `mergeScatter`), so switching back to a font that has it restores the setup —
- * which means there is a window where a real setting is doing nothing, and the
- * one rule this panel keeps is that the user is never looking at that silently.
- * DISABLED WITH A REASON, exactly as an axis preset tile is greyed with its own
- * `reason`; the sentence comes from the same generator.
- *
- * Null while the font is still loading: "no axes yet" is not "the font lacks
- * this axis", and flashing the warning on every font switch would teach the user
- * to ignore it.
- */
-const scatterUnavailable = computed<string | null>(() => {
-  const sc = config.value.motion?.scatter
-  if (!sc || !(sc.spread > 0) || !fontAxes.value.length) return null
-  const offer = vtScatterAvailability(sc, fontAxes.value, fontLabel.value)
-  return offer.available ? null : (offer.reason ?? null)
-})
-const staggerNote = ref<string | null>(null)
+const movesAdapter = computed(() => vtMovesAdapter(config.value, fontAxes.value, fontLabel.value))
+/** Which card is expanded — a controlled prop the panel asks this surface to
+ *  hold (`MovesPanel.vue`'s own `set-open` doc). */
+const openMoveId = ref<string | null>(null)
 
-function assignPreset(slot: VtPresetSlot, presetId: string) {
-  const cur = config.value.motion[slot]
-  // params reset on preset change — a param named for one preset means nothing
-  // to the next (the Compositor's editor does the same).
-  config.value.motion[slot] = { presetId, duration: cur?.duration ?? VT_PRESET_DURATIONS[slot] }
-  onEdit(`motion.${slot}`, presetId)
-  // Typewriter types by STAGGER — with none it is a word that is simply there.
-  // Written through `setControl`, the same path the Stagger slider takes, so the
-  // slider moves with it and the edit is recorded like any other.
-  const bump = vtStaggerBumpFor(presetId, config.value.motion.stagger.delay)
-  if (bump != null) {
-    setControl('motion.stagger.delay', bump)
-    staggerNote.value = `${presetLabel(slot, presetId)} types one glyph at a time — Stagger set to ${bump}s. Adjust it under Motion.`
-  } else {
-    staggerNote.value = null
+function onPatchClip(partial: Partial<Pick<MotionClip, 'duration' | 'fps'>>) {
+  if (partial.duration !== undefined) setControl('motion.duration', partial.duration)
+  if (partial.fps !== undefined) setControl('motion.fps', partial.fps)
+}
+
+/** Flatten a nested `patch-cfg` partial (`{ motion: { blink: { amount: 0.5 } } }`)
+ *  into leaf dotted-path/value pairs, so each one can go through `setControl`
+ *  — the same write path every Design-tab control already takes, which is
+ *  what makes a Collection column bound to e.g. `motion.blink.amount` keep
+ *  writing through when the value changes from a card body instead of the
+ *  old always-on slider. */
+function flattenPatch(obj: Record<string, unknown>, prefix = ''): Array<[string, string | number]> {
+  const out: Array<[string, string | number]> = []
+  for (const k of Object.keys(obj)) {
+    const v = obj[k]
+    const path = prefix ? `${prefix}.${k}` : k
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) out.push(...flattenPatch(v as Record<string, unknown>, path))
+    else out.push([path, v as string | number])
   }
-  pickerFor.value = null
-  restartPreview()
+  return out
 }
-function clearPreset(slot: VtPresetSlot) {
-  delete config.value.motion[slot]
-  onEdit(`motion.${slot}`, '')
-  staggerNote.value = null
-  pickerFor.value = null
-  restartPreview()
+function onPatchCfg(patch: Record<string, unknown>) {
+  for (const [key, value] of flattenPatch(patch)) setControl(key, value)
 }
-function patchSpec(slot: VtPresetSlot, patch: Partial<LayerAnimSpec>) {
-  const cur = config.value.motion[slot]
-  if (!cur) return
-  config.value.motion[slot] = { ...cur, ...patch }
-  restartPreview()
-}
-function patchParam(slot: VtPresetSlot, key: string, v: number) {
-  const cur = config.value.motion[slot]
-  if (!cur) return
-  patchSpec(slot, { params: { ...(cur.params ?? {}), [key]: v } })
-}
-
-// ── motion tracks ───────────────────────────────────────────────────────────
-function addTrack() {
-  const target = animatable.value.find(a => a.path.startsWith('axes.')) ?? animatable.value[0]
-  if (!target) return
-  config.value.motion.tracks.push({
-    path: target.path, from: target.min, to: target.max,
-    // pingpong loops seamlessly (frame 0 === frame N) — a linear default would
-    // hard-cut at the loop boundary of an exported clip.
-    easing: 'pingpong', loops: 1, hold: 0, cycleOffset: 0, delay: 0,
-  })
-  onEdit('motion.tracks', config.value.motion.tracks.length)
-  playing.value = true
-}
-function removeTrack(i: number) { config.value.motion.tracks.splice(i, 1) }
 
 /**
- * The APPEARANCE-STACK motions, as tiles rather than as a possibility.
+ * A tile picked from the gallery. Blink and Scatter are MARKERS (see
+ * `movesAdapter.ts`'s `derivedMoves` doc) — picking one never pushes into
+ * `clip.moves`, it turns the effect on at its own config leaf (spec §1:
+ * "Adding the Blink move sets `blink.amount` to 0.3 … Same for Scatter with
+ * `spread` 0.4"), and `derivedMoves` then synthesizes the card on its own.
+ * Everything else (a preset move, a Custom/preset `'tracks'` move) is a real
+ * stored move and is pushed.
  *
- * These are not gallery presets and structurally cannot be — a slot preset
- * evaluates to a per-glyph `UnitState`, with no channel to a config leaf and no
- * knowledge of which layer to aim at (see `lib/vectortype/trackPresets.ts`).
- * They are ordinary TRACKS the instant they land, editable in the rows below,
- * which is why they live in this section and not in the preset picker.
- *
- * Recomputed from the live stack, so adding an extrude layer lights the tiles up
- * and removing one greys them with the reason.
+ * The freshly-picked move should open — `MovesPanel`'s own `onAdd` already
+ * emits `set-open(move.id)` right after `add-move`, but for Blink/Scatter
+ * that id is the gallery's freshly-minted candidate id, not the FIXED
+ * `__blink`/`__scatter` id the derived card actually carries. `nextTick`
+ * corrects `openMoveId` after that synchronous `set-open` has already run.
  */
-const trackPresets = computed(() => vtTrackPresetOffers(config.value))
-// Two galleries from one offer list. The run-level presets (`kind: 'run'` —
-// the stretch dials) need no layer and go FIRST under their own heading: filed
-// after the layer-gated tiles under "Stack motion" they were invisible, because
-// that heading promises a layer requirement they do not have (found live, 09-02).
-const trackPresetGroups = computed(() => [
-  { key: 'run', label: 'Stretch', offers: trackPresets.value.filter(o => o.preset.kind === 'run') },
-  { key: 'stack', label: 'Stack motion', offers: trackPresets.value.filter(o => o.preset.kind !== 'run') },
-].filter(g => g.offers.length))
-const activeTrackPreset = (id: string) => vtTrackPresetActive(config.value, id)
+function onAddMove(move: Move) {
+  if (move.kind === 'blink') {
+    setControl('motion.blink.amount', 0.3)
+    void nextTick(() => { openMoveId.value = '__blink' })
+    restartPreview()
+    return
+  }
+  if (move.kind === 'scatter') {
+    setControl('motion.scatter.spread', 0.4)
+    void nextTick(() => { openMoveId.value = '__scatter' })
+    restartPreview()
+    return
+  }
+  config.value.motion.moves.push(move as VtMove)
+  if (move.kind === 'tracks') playing.value = true
+  else restartPreview()
+}
 
-function applyTrackPreset(id: string) {
-  const next = vtApplyTrackPreset(config.value, id)
-  if (next === config.value.motion.tracks) return
-  config.value.motion.tracks = next
-  onEdit('motion.tracks', next.length)
-  playing.value = true
+/** The full move, not just an id — a derived Blink/Scatter marker has no
+ *  `clip.moves` entry to splice (`MovesPanel.vue`'s `remove-move` doc). */
+function onRemoveMove(move: Move) {
+  if (move.kind === 'blink') { setControl('motion.blink.amount', 0); return }
+  if (move.kind === 'scatter') { setControl('motion.scatter.spread', 0); return }
+  config.value.motion.moves = config.value.motion.moves.filter(m => m.id !== move.id)
+}
+
+/** A derived marker (Blink/Scatter) has no stored entry to patch — its own
+ *  dials edit `cfg.motion.blink`/`.scatter` directly through `patch-cfg`
+ *  instead (the card body never emits a bare `patch` for one), so a `patch`
+ *  that names an id not in `moves` is simply a no-op here. */
+function onPatchMove(move: Move, partial: Partial<Move>) {
+  const idx = config.value.motion.moves.findIndex(m => m.id === move.id)
+  if (idx === -1) return
+  config.value.motion.moves[idx] = { ...config.value.motion.moves[idx], ...partial } as VtMove
+}
+
+/**
+ * "Change" on a move's card — `MoveCard.vue` only offers it for a plain
+ * `'tracks'` move (no `cardBody`, so the fallback dial editor renders the
+ * button), meaning a preset/blink/scatter move never reaches this handler.
+ *
+ * Simplest option, per the brief: this panel has no re-pick-in-place UI of
+ * its own (`MovesPanel.vue`'s `change-move` doc says the PARENT decides what
+ * "change" means), and building one means exposing `MovesPanel`'s internal
+ * gallery to an external "replace this move" trigger — real scope, and a
+ * Task 8 API surface this task did not otherwise need to touch. So Change
+ * drops the move and lets the user re-add a replacement from the gallery,
+ * rather than reopening a picker pre-aimed at this move's dial. Left as a
+ * known simplification — see the task report.
+ */
+function onChangeMove(move: Move) {
+  config.value.motion.moves = config.value.motion.moves.filter(m => m.id !== move.id)
+  if (openMoveId.value === move.id) openMoveId.value = null
 }
 
 // ── preview loop ────────────────────────────────────────────────────────────
@@ -1397,9 +1270,16 @@ async function renderBlobWithOverrides(overrides: Record<string, string | number
   const snapshot = JSON.parse(JSON.stringify(config.value)) as VectorTypeConfig
   try {
     // Suppress tracks aimed at a swept path (see 1 above) BEFORE the overrides
-    // land, so nothing can re-derive them mid-render.
+    // land, so nothing can re-derive them mid-render. A track's home is a
+    // 'tracks'-kind move's own `tracks` array now, not a flat list — filter
+    // each such move's tracks and drop a move left with none (the same
+    // "empty move is not a state we keep" rule `pruneStackTracks` follows).
     const swept = new Set(keys)
-    config.value.motion.tracks = config.value.motion.tracks.filter(t => !swept.has(t.path))
+    config.value.motion.moves = config.value.motion.moves
+      .map(mv => (mv.kind === 'tracks' && mv.tracks
+        ? { ...mv, tracks: mv.tracks.filter(t => !swept.has(t.path)) }
+        : mv))
+      .filter(mv => mv.kind !== 'tracks' || (mv.tracks?.length ?? 0) > 0)
     for (const key of keys) paramsProxy[key] = overrides[key]!
     // A row may sweep `fontId` — the new family must be parsed before it can be
     // shaped, and the loaded `font` ref still holds the old one.
@@ -1467,6 +1347,14 @@ async function onImportFile(e: Event) {
 }
 
 const frameCount = computed(() => Math.round((config.value.motion.fps || 30) * (config.value.motion.duration || 4)))
+
+/** The Motion tab badge and the header readout — "the number of moves"
+ *  (design spec §"Tab badge"). Blink and Scatter count too, even though
+ *  neither is a `clip.moves` entry — the same `derivedMoves` gating
+ *  `movesAdapter.ts` uses to decide whether to show their card at all. */
+const derivedMoveCount = computed(() =>
+  (config.value.motion.blink.amount > 0 ? 1 : 0) + (config.value.motion.scatter.spread > 0 ? 1 : 0))
+const motionMoveCount = computed(() => config.value.motion.moves.length + derivedMoveCount.value)
 </script>
 
 <template>
@@ -1571,11 +1459,7 @@ const frameCount = computed(() => Math.round((config.value.motion.fps || 30) * (
           <span>{{ stats.shapings }} shaping{{ stats.shapings === 1 ? '' : 's' }}</span>
           <span v-if="stats.staggered" class="text-white/60">wave</span>
           <span>t {{ previewTime.toFixed(2) }}s</span>
-          <!-- Presets and tracks are two INDEPENDENT sources that compose. Both
-               are named here so a user running one never wonders whether it
-               replaced the other. -->
-          <span v-if="activePresets.length" class="text-white/60">{{ activePresets.length }} preset{{ activePresets.length === 1 ? '' : 's' }}</span>
-          <span v-if="trackCount" class="text-white/60">{{ trackCount }} track{{ trackCount === 1 ? '' : 's' }}</span>
+          <span v-if="motionMoveCount" class="text-white/60">{{ motionMoveCount }} move{{ motionMoveCount === 1 ? '' : 's' }}</span>
         </div>
       </div>
     </template>
@@ -1612,10 +1496,10 @@ const frameCount = computed(() => Math.round((config.value.motion.fps || 30) * (
         <button type="button" class="flex-1 rounded px-2 py-1 text-[11px] transition"
                 :class="onMotion ? 'bg-white/15 text-white' : 'text-white/55 hover:text-white/80'"
                 @click="inspectorTab = 'motion'">
-          <!-- Counts BOTH sources. A preset with no track used to read as
-               "Motion" with no number at all — a live animation the tab denied. -->
-          Motion<span v-if="motionSourceCount" class="ml-1 text-white/40"
-                      :title="`${activePresets.length} preset${activePresets.length === 1 ? '' : 's'} · ${trackCount} track${trackCount === 1 ? '' : 's'}`">{{ motionSourceCount }}</span>
+          <!-- The number of moves — Blink and Scatter count too (design spec
+               §"Tab badge"), so the tab never reads "Motion" with no number
+               while an effect is running. -->
+          Motion<span v-if="motionMoveCount" class="ml-1 text-white/40">{{ motionMoveCount }}</span>
         </button>
       </div>
 
@@ -1768,290 +1652,44 @@ const frameCount = computed(() => Math.round((config.value.motion.fps || 30) * (
         </StudioSection>
       </template>
 
-      <!-- Motion: presets first (the gallery), then the schema's stagger block,
-           then the hand-authored tracks. The two motion sources COMPOSE — see
-           the notes each section carries about the other. -->
+      <!-- Motion: the shared moves panel — see ~/lib/vectortype/movesAdapter.ts
+           and ~/components/vue-canvas/motion/moves/MovesPanel.vue. -->
       <template v-else>
-        <StudioSection title="Presets">
-          <p class="text-[10px] leading-snug text-white/30">
-            Entrance, exit and loop. Variable-axis presets re-cut the letterforms themselves —
-            they sit at the top of each gallery.
-          </p>
-          <div v-for="slot in VT_PRESET_SLOTS" :key="slot" class="flex flex-col gap-1.5">
-            <div class="flex items-center justify-between">
-              <span class="text-[11px] capitalize text-white/55">{{ slot }}</span>
-              <button v-if="slotSpec(slot)" class="text-white/30 hover:text-white/75" :title="`Clear ${slot}`"
-                      @click="clearPreset(slot)"><X class="h-3 w-3" /></button>
-            </div>
-            <button
-              type="button"
-              class="flex items-center gap-2 rounded-lg border p-1.5 text-left transition-colors"
-              :class="slotSpec(slot) ? 'border-white/25 bg-white/[0.06]' : 'border-dashed border-white/[0.12] bg-white/[0.02] hover:bg-white/[0.05]'"
-              @click="(e: MouseEvent) => openPicker(slot, e)"
-            >
-              <!-- The real-outline thumb is used ONLY for axis presets: it costs
-                   an outline shaping per frame, and for Slide/Fade the abstract
-                   card is the honest picture anyway. -->
-              <div class="w-14 shrink-0">
-                <VectorTypeThumb
-                  v-if="slotSpec(slot) && isAxisPreset(slot, slotSpec(slot)!.presetId)"
-                  :preset-id="slotSpec(slot)!.presetId" :slot-kind="slot"
-                  :font-id="config.fontId" :text="config.text" :axes="config.axes" :font="font" :fill="baseFill ?? '#ffffff'"
-                />
-                <PresetThumb
-                  v-else-if="slotSpec(slot)"
-                  :preset-id="slotSpec(slot)!.presetId" :slot-kind="slot"
-                  :params="slotSpec(slot)!.params" :capabilities="VT_CAPABILITIES"
-                />
-              </div>
-              <span class="min-w-0 flex-1 truncate text-[11px]" :class="slotSpec(slot) ? 'text-white/90' : 'text-white/40'">
-                {{ slotSpec(slot) ? presetLabel(slot, slotSpec(slot)!.presetId) : `Choose ${slot} preset…` }}
-              </span>
-            </button>
-            <div v-if="slotSpec(slot)" class="flex flex-col gap-1.5 pl-1">
-              <label class="flex items-center gap-1 text-[11px] text-white/50">dur
-                <input type="number" min="0.1" step="0.1" :value="slotSpec(slot)!.duration"
-                       class="w-16 rounded-md border border-white/[0.08] bg-white/[0.04] px-1 py-0.5 text-white/90 outline-none"
-                       @change="patchSpec(slot, { duration: Math.max(0.1, Number(($event.target as HTMLInputElement).value) || VT_PRESET_DURATIONS[slot]) })">
-                <span class="text-white/30">s</span>
-              </label>
-              <label v-for="ps in presetParams(slotSpec(slot)!.presetId)" :key="ps.key"
-                     class="flex items-center gap-2 text-[11px] text-white/50">
-                <span class="w-14 truncate">{{ ps.label }}</span>
-                <input type="range" :min="ps.min" :max="ps.max" :step="ps.step" :value="paramValue(slotSpec(slot)!, ps.key)"
-                       class="studio-range flex-1"
-                       @input="patchParam(slot, ps.key, Number(($event.target as HTMLInputElement).value))">
-                <span class="w-8 text-right tabular-nums text-white/70">{{ paramValue(slotSpec(slot)!, ps.key) }}</span>
-              </label>
-            </div>
-          </div>
-          <!-- The stagger a typing preset needs. Two states, and both are the
-               same rule: never leave a preset silently doing nothing, and never
-               change a setting without saying so. -->
-          <p v-if="staggerStarved.length" class="rounded border border-amber-300/25 bg-amber-300/[0.06] px-2 py-1.5 text-[10px] leading-snug text-amber-100/70">
-            <span class="text-amber-100">Stagger is 0 — this types nothing.</span>
-            Typewriter reveals one glyph at a time, and that gap is the Stagger control under Motion.
-            Raise it above 0 or the whole word simply appears.
-          </p>
-          <p v-else-if="staggerNote" class="rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[10px] leading-snug text-white/50">
-            {{ staggerNote }}
-          </p>
-
-          <!-- The coexistence affordance, from the preset side. -->
-          <p v-if="bothSourcesLive" class="rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[10px] leading-snug text-white/50">
-            <span class="text-white/75">Both are running.</span>
-            {{ trackCount }} hand-authored track{{ trackCount === 1 ? ' plays' : 's play' }} alongside these presets —
-            neither replaces the other. Offsets and rotation add; scale and opacity multiply.
-          </p>
-        </StudioSection>
-
-        <StudioControlPanel
-          :controls="allControls"
-          :order="MOTION_SECTIONS"
-          :value="controlValue"
-          :visible="controlVisible"
-          :bound-for="boundFor"
-          :go-to-collection="goToCollection"
-          @set="setControl"
-          @promote="promoteControl"
-          @menu="(e: MouseEvent, c: ControlSpec) => openVarMenu(e, bindableControl(c))"
+        <MovesPanel
+          :clip="config.motion"
+          :adapter="movesAdapter"
+          :cfg="config"
+          :open-move-id="openMoveId"
+          @patch-clip="onPatchClip"
+          @patch-cfg="onPatchCfg"
+          @add-move="onAddMove"
+          @remove-move="onRemoveMove"
+          @patch-move="onPatchMove"
+          @change-move="onChangeMove"
+          @set-open="(id: string | null) => (openMoveId = id)"
         >
-          <template #section-Motion>
-            <p class="text-[10px] leading-snug text-white/30">
-              Stagger shifts the clock each glyph reads the tracks at — raise it and one axis track
-              becomes a wave travelling across the word.
-            </p>
-            <!-- Never leave a live setting silently doing nothing. The scatter's
-                 axis tag survives a font change on purpose, so this is the window
-                 where it is real and inert, and it says which axis and why. -->
-            <p v-if="scatterUnavailable" class="rounded border border-amber-300/25 bg-amber-300/[0.06] px-2 py-1.5 text-[10px] leading-snug text-amber-100/70">
-              <span class="text-amber-100">Scatter is not running.</span>
-              {{ scatterUnavailable }}
-            </p>
+          <!-- Real outlines for an axis preset (the letterforms themselves are
+               the picture — "Weight In" drawn as a growing rectangle is
+               indistinguishable from "Grow In"); the engine's own live-preview
+               card for everything else it has one for; a plain 2-letter tile
+               (MoveGallery's own fallback) for a track preset, Blink or
+               Scatter, none of which has a preview render of its own. -->
+          <template #thumb="{ offer }">
+            <VectorTypeThumb
+              v-if="offer.kind === 'preset' && vtAxisPreset(offer.phase, offer.presetId)"
+              :preset-id="offer.presetId!" :slot-kind="offer.phase"
+              :font-id="config.fontId" :text="config.text" :axes="config.axes" :font="font" :fill="baseFill ?? '#ffffff'"
+            />
+            <PresetThumb
+              v-else-if="offer.kind === 'preset'"
+              :preset-id="offer.presetId!" :slot-kind="offer.phase" :capabilities="VT_CAPABILITIES"
+            />
+            <span v-else class="text-[9px] text-white/25">{{ offer.label.slice(0, 2).toUpperCase() }}</span>
           </template>
-        </StudioControlPanel>
-
-        <StudioSection title="Tracks">
-          <template #badge>
-            <button class="flex items-center gap-1 normal-case text-white/40 hover:text-white" @click.stop="addTrack">
-              <Plus class="h-3 w-3" /> Track
-            </button>
-          </template>
-          <!-- …and from the track side. A user who just added a weight track
-               under a running Slide-Up preset must not conclude one replaced
-               the other. -->
-          <p v-if="activePresets.length" class="rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[10px] leading-snug text-white/50">
-            <span class="text-white/75">{{ activePresets.length }} preset{{ activePresets.length === 1 ? '' : 's' }} also running</span>
-            — {{ activePresetSummary }}. Tracks compose on top of them.
-          </p>
-          <p v-if="!config.motion.tracks.length" class="text-[11px] text-white/30">
-            Add a track to animate an axis (or a per-glyph offset) over the clip.
-          </p>
-
-          <!-- THE TRACK PRESETS, in two groups. They belong here rather than in the
-               preset gallery because they ARE tracks — one click writes the rows
-               below, and every one stays editable afterwards. "Stretch" holds the
-               run-level ones (no layer needed); "Stack motion" the appearance-stack
-               ones, whose disabled tiles keep their reason on screen: the fix is a
-               layer the user owns and can add in the Layers section, exactly like a
-               missing font axis. -->
-          <div v-for="g in trackPresetGroups" :key="g.key" class="mb-2">
-            <div class="mb-1 text-[10px] uppercase tracking-[0.12em] text-white/45">{{ g.label }}</div>
-            <div class="grid grid-cols-2 gap-1.5">
-              <button
-                v-for="o in g.offers" :key="o.preset.id"
-                type="button"
-                class="rounded-lg border p-1.5 text-left transition-colors"
-                :class="!o.available
-                  ? 'border-white/[0.06] bg-white/[0.02] cursor-not-allowed'
-                  : (activeTrackPreset(o.preset.id)
-                    ? 'border-white/60 bg-white/[0.08] cursor-pointer'
-                    : 'border-white/[0.07] bg-white/[0.03] hover:bg-white/[0.06] cursor-pointer')"
-                :disabled="!o.available"
-                :title="o.reason ?? o.preset.pitch"
-                @click="applyTrackPreset(o.preset.id)"
-              >
-                <span class="block truncate text-[10.5px]"
-                      :class="!o.available ? 'text-white/35' : (activeTrackPreset(o.preset.id) ? 'text-white' : 'text-white/70')">
-                  {{ o.preset.label }}
-                </span>
-                <span v-if="o.reason" class="mt-0.5 block text-[9px] leading-tight text-amber-200/55">{{ o.reason }}</span>
-                <span v-else class="mt-0.5 block text-[9px] leading-tight text-white/30">{{ o.preset.pitch }}</span>
-              </button>
-            </div>
-          </div>
-          <div v-for="(tk, i) in config.motion.tracks" :key="i" class="mb-2 rounded border border-white/10 p-2">
-            <div class="mb-1 flex items-center gap-1">
-              <!-- NOT a plain v-model: switching between a numeric and a colour
-                   target has to rebuild the row's endpoints. See `retargetTrack`. -->
-              <select
-                :value="tk.path"
-                class="min-w-0 flex-1 rounded-md border border-white/[0.08] bg-white/[0.04] px-1 py-0.5 text-[11px]"
-                @change="retargetTrack(tk, ($event.target as HTMLSelectElement).value)"
-              >
-                <option v-if="tk.path && !animatable.some(a => a.path === tk.path) && !colorTargetPaths.has(tk.path)" :value="tk.path">{{ tk.path }}</option>
-                <optgroup v-for="[group, targets] in animatableGroups" :key="group" :label="group">
-                  <option v-for="a in targets" :key="a.path" :value="a.path">{{ a.label }}</option>
-                </optgroup>
-              </select>
-              <button class="text-white/30 hover:text-white/70" @click="removeTrack(i)"><Trash2 class="h-3 w-3" /></button>
-            </div>
-            <!-- A COLOUR track's endpoints are two swatches and a mix space. Its
-                 `from`/`to` stay 0 and 1 (the progress domain) and are not shown:
-                 two spinners reading 0 and 1 beside two colours would invite an
-                 edit that changes nothing about the colours. -->
-            <!-- StudioColor, not `<input type=color>`: the OS picker only speaks
-                 6-digit hex, and these leaves may carry `#rrggbbaa` — it would
-                 show black and then WRITE black back on the first interaction. -->
-            <div v-if="isColorRow(tk)" class="mb-1 flex items-center gap-1 text-[11px] text-white/50">
-              <StudioColor :model-value="tk.fromColor ?? '#ffffff'" @update:model-value="(v: string) => { tk.fromColor = v }" />
-              <span>→</span>
-              <StudioColor :model-value="tk.toColor ?? '#ffffff'" @update:model-value="(v: string) => { tk.toColor = v }" />
-              <select
-                v-model="tk.space"
-                class="ml-auto min-w-0 rounded-md border border-white/[0.08] bg-white/[0.04] px-1 py-0.5 text-[11px]"
-                title="Which space the two colours are mixed in. Perceptual keeps the midpoint as bright as both ends; RGB sags dark and grey through the middle."
-              >
-                <option v-for="s in COLOR_MIX_SPACES" :key="s" :value="s">{{ COLOR_MIX_SPACE_LABELS[s] }}</option>
-              </select>
-            </div>
-            <div v-else class="mb-1 flex items-center gap-1 text-[11px] text-white/50">
-              <span>from</span><input v-model.number="tk.from" type="number" step="1" class="w-16 rounded-md border border-white/[0.08] bg-white/[0.04] px-1 py-0.5" />
-              <span>to</span><input v-model.number="tk.to" type="number" step="1" class="w-16 rounded-md border border-white/[0.08] bg-white/[0.04] px-1 py-0.5" />
-            </div>
-            <div class="flex items-center gap-1">
-              <select v-model="tk.easing" class="rounded-md border border-white/[0.08] bg-white/[0.04] px-1 py-0.5 text-[11px]">
-                <option value="linear">Linear</option><option value="pingpong">Ping-pong</option><option value="easeinout">Ease</option>
-              </select>
-              <select v-model.number="tk.loops" class="rounded-md border border-white/[0.08] bg-white/[0.04] px-1 py-0.5 text-[11px]">
-                <option :value="1">1</option><option :value="2">2</option><option :value="3">3</option><option :value="4">4</option>
-              </select>
-              <span class="text-[11px] text-white/40">loops</span>
-            </div>
-          </div>
-          <div class="mt-2 grid grid-cols-2 gap-2">
-            <div>
-              <label class="mb-1 flex justify-between text-[11px] text-white/60"><span>Duration</span><span class="text-white/40">{{ config.motion.duration }}s</span></label>
-              <input v-model.number="config.motion.duration" type="range" min="1" max="12" step="0.5" class="studio-range w-full" />
-            </div>
-            <div>
-              <label class="mb-1 block text-[11px] text-white/60">FPS</label>
-              <select v-model.number="config.motion.fps" class="w-full rounded-md border border-white/[0.08] bg-white/[0.04] px-1 py-0.5 text-[11px]">
-                <option :value="24">24</option><option :value="30">30</option><option :value="60">60</option>
-              </select>
-            </div>
-          </div>
-          <div class="mt-1 text-[10px] text-white/30">{{ frameCount }} frames</div>
-        </StudioSection>
+        </MovesPanel>
       </template>
     </template>
   </StudioModalShell>
-
-  <!-- The gallery. The axis section goes into `#lead`, i.e. ABOVE every engine
-       section — see the block comment on VT_CAPABILITIES. -->
-  <MotionPresetPicker
-    v-if="pickerFor"
-    :slot-kind="pickerFor"
-    :current-id="currentPresetId"
-    :anchor-rect="pickerAnchor"
-    :capabilities="VT_CAPABILITIES"
-    @pick="(id: string) => assignPreset(pickerFor!, id)"
-    @clear="clearPreset(pickerFor!)"
-    @close="pickerFor = null"
-  >
-    <template #lead>
-      <!-- No axis preset targets this slot at all (there is no axis EXIT yet):
-           an empty section header advertises a capability that is not there. -->
-      <div v-if="axisOffers.length">
-        <div class="mb-1 flex items-baseline justify-between gap-2">
-          <span class="text-[10px] uppercase tracking-[0.12em] text-white/70">Variable axes</span>
-          <span class="text-[9px] text-white/30">{{ fontLabel }} · {{ fontAxes.length }} axes</span>
-        </div>
-        <p class="mb-1.5 text-[9.5px] leading-snug text-white/35">
-          The letterforms are re-cut, not moved — real outline interpolation the font itself declares.
-        </p>
-        <!-- Before the file has parsed there ARE no axes, and every offer would
-             read "this font has no wght axis" — true of the empty list, a lie
-             about the font. Say what is actually happening instead. -->
-        <p v-if="fontLoading && !fontAxes.length" class="text-[10px] text-white/30">Reading the font's axes…</p>
-        <p v-else-if="fontError" class="text-[10px] text-amber-200/60">Font failed to load — no axes to animate.</p>
-        <div v-else class="grid grid-cols-2 gap-2">
-          <button
-            v-for="o in axisOffers" :key="o.preset.id"
-            type="button"
-            class="flex flex-col gap-1 rounded-lg border p-1.5 text-left transition-colors"
-            :class="!o.available
-              ? 'border-white/[0.06] bg-white/[0.02] cursor-not-allowed'
-              : (o.preset.id === currentPresetId
-                ? 'border-white/60 bg-white/[0.08] cursor-pointer'
-                : 'border-white/[0.07] bg-white/[0.03] hover:bg-white/[0.06] cursor-pointer')"
-            :disabled="!o.available"
-            :title="o.reason ?? o.preset.pitch"
-            @click="assignPreset(pickerFor!, o.preset.id)"
-          >
-            <!-- Real outlines, not a card: "Weight In" drawn as a growing
-                 rectangle is indistinguishable from "Grow In". This is the only
-                 section that pays for VectorTypeThumb. `:font` is handed down so
-                 five tiles cost zero extra fetches. -->
-            <VectorTypeThumb
-              :preset-id="o.preset.id" :slot-kind="pickerFor!"
-              :font-id="config.fontId" :text="config.text" :axes="config.axes" :font="font"
-              :fill="baseFill ?? '#ffffff'" :disabled="!o.available"
-            />
-            <span class="truncate text-[10.5px]"
-                  :class="!o.available ? 'text-white/35' : (o.preset.id === currentPresetId ? 'text-white' : 'text-white/70')">
-              {{ o.preset.label }}
-            </span>
-            <!-- The reason is RENDERED, not just a `disabled` attribute: a
-                 missing axis is fixable by the user (pick Roboto Flex), and a
-                 tooltip nobody hovers teaches nobody. -->
-            <span v-if="o.reason" class="text-[9px] leading-tight text-amber-200/55">{{ o.reason }}</span>
-            <span v-else class="text-[9px] leading-tight text-white/30">{{ o.preset.pitch }}</span>
-          </button>
-        </div>
-      </div>
-    </template>
-  </MotionPresetPicker>
 
   <CanvasContextMenu v-if="varMenu" :x="varMenu.x" :y="varMenu.y" :items="varMenu.items" @close="varMenu = null" />
   <SweepPopover

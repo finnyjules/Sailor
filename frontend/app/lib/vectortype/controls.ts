@@ -467,6 +467,21 @@ export const VT_CONTROLS: VtControl[] = [
   // `enabled` — the other boolean this schema deliberately does not declare.
 
   // --- Motion ---------------------------------------------------------------
+  // Task 9: `VectorTypeSurface.vue`'s Motion tab is now the shared moves panel
+  // (`~/components/vue-canvas/motion/moves/MovesPanel.vue`), not a
+  // `StudioControlPanel` over this group — so nothing below renders through
+  // `#section-Motion` any more. The stagger trio draws in the panel's Clip
+  // block, through `~/lib/vectortype/movesAdapter.ts`'s `clipExtras`
+  // (`VtStaggerClipExtras.vue`); Blink and Scatter draw inside their own
+  // move cards, through that same adapter's `KINDS.blink/scatter.cardBody`.
+  // Neither reads a control by walking this array — both are small
+  // hand-written components, since a card body/clipExtras only ever receives
+  // `{ move?, cfg }`, not the surface's `setControl`/`boundFor`/StudioRow
+  // machinery. The declarations stay: the agent vocabulary, Collection
+  // bindings and `animatableTargets` all still read this array by key, and a
+  // card body's `patch-cfg` is routed back through `setControl` for the same
+  // keys, so a bound column still writes through.
+  //
   // Stagger is NOT a track: it shifts the clock each glyph reads the tracks at.
   // So it is `animatable: false` on purpose — a track pointing at the stagger
   // block would be asking the timeline to rewrite its own reader mid-frame.
