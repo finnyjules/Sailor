@@ -1,7 +1,7 @@
 # Shape Studio — Blend layout (stacked outlines between two shapes)
 
 **Date:** 2026-09-03
-**Status:** designed, not built
+**Status:** phase one (§1–10) LANDED 2026-09-03 on main, `c3868f0f8`..`b60401c96`; phase two (§11) approved, not built
 **Surface:** Shape Studio (`frontend/app/lib/geoshape/*`, `frontend/app/components/vue-canvas/ShapeStudioSurface.vue`)
 **Reference:** Carsten Gueth / @die_doing — hundreds of thin outlines stepping from one shape to another, each a slightly different colour, reading as a gradient from afar and as moiré lines up close.
 
