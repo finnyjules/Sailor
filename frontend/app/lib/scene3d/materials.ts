@@ -754,7 +754,10 @@ uniform float uScrGapMode; uniform vec3 uScrGapColor; uniform float uScrInkMode;
 // half-bright cell is half covered; lines/cross use lum as the half-width.
 float scrCoverage(vec2 p, float lum) {
   vec2 cell = fract(p) - 0.5;
-  float soft = uScrSoft * 0.25 + fwidth(p.x) * 0.75;
+  // Both axes, because p is rotated: at 90° the cell varies along y while fwidth(p.x) is
+  // ~0, which would collapse the anti-aliasing term to nothing. Floored above zero so a
+  // fully-degenerate derivative can never make smoothstep's edges equal.
+  float soft = max(uScrSoft * 0.25 + max(fwidth(p.x), fwidth(p.y)) * 0.75, 1e-4);
   if (uScrPattern < 0.5) {
     float r = sqrt(lum) * 0.7071;
     return 1.0 - smoothstep(r - soft, r + soft, length(cell));
@@ -773,7 +776,8 @@ diffuseColor.a = 1.0;
 #endif
 {
   float c = cos(uScrAngle), s = sin(uScrAngle);
-  vec2 p = mat2(c, -s, s, c) * vScrUv * uScrDensity;
+  // Counter-clockwise for a rising Angle, matching every other angle dial in the studio.
+  vec2 p = mat2(c, s, -s, c) * vScrUv * uScrDensity;
   float lum = clamp(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
   lum = pow(lum, uScrContrast);
   if (uScrInvert > 0.5) lum = 1.0 - lum;
@@ -782,6 +786,11 @@ diffuseColor.a = 1.0;
   vec3 ink = uScrInkMode < 0.5 ? outgoingLight : uScrInkColor;
   if (uScrGapMode < 0.5) {
     float a = max(cov.r, max(cov.g, cov.b));
+    // Fully-open gaps leave the fragment entirely: alphaTest cannot do this job, because
+    // three runs <alphatest_fragment> BEFORE lighting, against diffuseColor.a, which knows
+    // nothing about the screen coverage computed here. Discarding keeps depthWrite on for
+    // the dots while the gaps write no depth, so an object behind still shows through.
+    if (a < 0.02) discard;
     gl_FragColor = vec4(ink * cov / max(a, 1e-4), a * diffuseColor.a);
   } else {
     gl_FragColor = vec4(mix(uScrGapColor, ink, cov), diffuseColor.a);
@@ -818,6 +827,14 @@ export function applyScreen(m: THREE.Material, mat: SceneMaterial): void {
     uScrInkMode: { value: 0 }, uScrInkColor: { value: new THREE.Color('#111111') },
   }
   writeScreenUniforms(u, s)
+  // Read EAGERLY, before onBeforeCompile is reassigned. Three's default
+  // customProgramCacheKey returns `this.onBeforeCompile.toString()` at call time, so a
+  // lazily-bound `prevKey()` would hash the screen wrapper below — one identical source
+  // string for every screened material — rather than whatever the base material's own
+  // injection contributed. Safe to snapshot: applyScreen is the LAST step of buildMaterial
+  // and every key it can sit on top of (three's default, and the fresnel/gradient/opal
+  // constants) is already settled by this point.
+  const baseKey = String(m.customProgramCacheKey())
   const prev = m.onBeforeCompile
   m.onBeforeCompile = (shader, renderer) => {
     prev.call(m, shader, renderer)
@@ -829,13 +846,14 @@ export function applyScreen(m: THREE.Material, mat: SceneMaterial): void {
       .replace('#include <uv_pars_fragment>', SCREEN_FRAG_PARS)
       .replace('#include <opaque_fragment>', SCREEN_FRAG_BODY)
   }
-  const prevKey = m.customProgramCacheKey.bind(m)
-  m.customProgramCacheKey = () => `${prevKey()}|screen`
+  m.customProgramCacheKey = () => `${baseKey}|screen`
   m.userData.screenUniforms = u
-  // Transparent gaps: alpha in the gaps, depth writes kept so the dots still occlude, a small
-  // cutoff so fully-open gaps don't write depth. Colour gaps stay opaque.
+  // Transparent gaps: alpha in the gaps, depth writes kept so the dots still occlude. The
+  // shader `discard`s fully-open gaps, so they write no depth either (no alphaTest here —
+  // it runs before lighting and would never see the coverage, while still forcing an extra
+  // shadow-program variant). Colour gaps stay opaque.
   m.userData.screenTransparent = s.gap === 'transparent'
-  if (m.userData.screenTransparent) { m.transparent = true; m.alphaTest = 0.02; m.depthWrite = true }
+  if (m.userData.screenTransparent) { m.transparent = true; m.depthWrite = true }
 }
 
 // ── Gradient ramp LUT ────────────────────────────────────────────────────────

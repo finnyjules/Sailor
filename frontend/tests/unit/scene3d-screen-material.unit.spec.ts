@@ -20,6 +20,23 @@ function compile(m: THREE.Material) {
   return shader
 }
 
+// The injection targets are three's own chunk names. If a three upgrade renames or drops
+// one of them, every replace() below silently becomes a no-op and the screen just stops
+// rendering — so assert the chunks exist before testing what we do with them.
+describe('screen finish — the three include points it depends on', () => {
+  it('three still ships the four chunks the screen injects at', () => {
+    for (const k of ['uv_pars_vertex', 'uv_vertex', 'uv_pars_fragment', 'opaque_fragment']) {
+      expect(THREE.ShaderChunk[k as keyof typeof THREE.ShaderChunk], k).toBeDefined()
+    }
+  })
+
+  it('every material family the screen applies to still includes <opaque_fragment>', () => {
+    for (const lib of ['physical', 'basic', 'toon', 'matcap', 'phong'] as const) {
+      expect(THREE.ShaderLib[lib].fragmentShader, lib).toContain('#include <opaque_fragment>')
+    }
+  })
+})
+
 describe('screen finish — build', () => {
   it('does nothing when the screen is absent or pattern is none', () => {
     for (const m of [materialFor(base()), materialFor(base({ screen: dots({ pattern: 'none' }) }))]) {
@@ -59,11 +76,13 @@ describe('screen finish — build', () => {
     disposeMaterial(m)
   })
 
-  it('transparent gaps flip the material transparent with an alpha cutoff and depth writes kept', () => {
+  it('transparent gaps flip the material transparent, keep depth writes, and discard open gaps', () => {
     const m = materialFor(base({ screen: dots({ gap: 'transparent' }) }))
     expect(m.transparent).toBe(true)
-    expect(m.alphaTest).toBeCloseTo(0.02)
     expect(m.depthWrite).toBe(true)
+    // Not alphaTest: three's <alphatest_fragment> runs BEFORE lighting, on diffuseColor.a,
+    // so it can never see the screen coverage. The shader discards the open gaps itself.
+    expect(compile(m).fragmentShader).toContain('discard')
     expect(m.userData.screenTransparent).toBe(true)
     const c = materialFor(base({ screen: dots({ gap: 'colour' }) }))
     expect(c.transparent).toBe(false)
@@ -91,6 +110,28 @@ describe('screen finish — build', () => {
     const g = materialFor(base({ type: 'glass', screen: dots() }))
     expect(g.userData.screenUniforms).toBeUndefined()
     disposeMaterial(g)
+  })
+
+  it('anti-aliases on BOTH axes and rotates counter-clockwise', () => {
+    const sh = compile(materialFor(base({ screen: dots() })))
+    // fwidth(p.x) alone collapses to ~0 at 90 degrees, where the cell varies along y.
+    expect(sh.fragmentShader).toContain('max(fwidth(p.x), fwidth(p.y))')
+    // A rising Angle must turn the grid the same way every other angle dial does.
+    expect(sh.fragmentShader).toContain('mat2(c, s, -s, c)')
+  })
+
+  it('gives a screened material its own program cache key', () => {
+    // Three's default customProgramCacheKey is onBeforeCompile.toString(); without a
+    // distinct key a screened and an unscreened toon material can share one program.
+    const plain = materialFor(base({ type: 'toon' }))
+    const screened = materialFor(base({ type: 'toon', screen: dots() }))
+    expect(String(screened.customProgramCacheKey())).not.toBe(String(plain.customProgramCacheKey()))
+    expect(String(screened.customProgramCacheKey())).toContain('|screen')
+    // And it must be the BASE material's key plus the suffix: capturing the previous key
+    // after replacing onBeforeCompile would hash the screen wrapper's own source instead,
+    // which is one identical string for every screened material.
+    expect(String(screened.customProgramCacheKey())).toBe(`${String(plain.customProgramCacheKey())}|screen`)
+    disposeMaterial(plain); disposeMaterial(screened)
   })
 })
 
