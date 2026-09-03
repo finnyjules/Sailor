@@ -100,4 +100,26 @@ export interface MovesAdapter<Cfg> {
   availability(cfg: Cfg, candidate: Move): string | null
   /** Optional rows for the clip block (Vector Type: Letter by letter). */
   clipExtras?: MovesComponent
+  /**
+   * Synthetic marker moves the panel should show ALONGSIDE the stored ones
+   * (`clip.moves`), for a studio whose effect lives outside the move list —
+   * Vector Type's Blink and Scatter, which read `cfg.motion.blink`/
+   * `cfg.motion.scatter` directly rather than being entries in
+   * `clip.moves`. `MovesPanel` renders `[...clip.moves,
+   * ...(adapter.derivedMoves?.(cfg) ?? [])]` as its card list, so a derived
+   * move gets a real card — collapsed row, expanded settings, remove — like
+   * any stored one.
+   *
+   * A derived move's `patch`/`remove` still flow up through the panel's
+   * normal `patch-move`/`remove-move` events; this module has no way to
+   * write them back (it cannot know `cfg`'s shape), so the SURFACE owns
+   * translating them — e.g. a `remove-move` for Vector Type's `__blink`
+   * marker becomes `cfg.motion.blink.amount = 0`, not an attempt to splice
+   * a `clip.moves` entry that was never there.
+   *
+   * Optional and additive: an adapter that omits it (Shape Studio, and
+   * every existing adapter/test as of this addition) is unaffected — the
+   * panel treats a missing `derivedMoves` as "no derived moves".
+   */
+  derivedMoves?(cfg: Cfg): Move[]
 }

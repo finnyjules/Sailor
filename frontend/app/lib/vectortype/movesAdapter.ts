@@ -341,5 +341,52 @@ export function vtMovesAdapter(
       }
       return null
     },
+
+    // Blink/Scatter are markers (see the `KINDS` comment above): their
+    // settings live at `cfg.motion.blink`/`cfg.motion.scatter`, not in
+    // `clip.moves`, so the panel would show no card for either without this.
+    // `adapter.ts`'s `derivedMoves` doc: the panel renders these ALONGSIDE
+    // `clip.moves`, and a remove/patch on one flows up for the SURFACE (not
+    // this module) to translate back into the config it actually lives in —
+    // spec `2026-09-03-vector-type-motion-moves-design.md` §1: "Adding the
+    // Blink move sets `blink.amount` to 0.3; removing it sets 0."
+    //
+    // `duration`/`ease`/`play` on these markers are cosmetic defaults for the
+    // shared MoveCard's Length/Ease/Play rows — Blink and Scatter's own
+    // evaluators (`./blink.ts`, `./scatter.ts`) never read a Move's timing,
+    // only `cfg.motion.blink`/`.scatter` directly, so these three fields
+    // going stale or unedited changes nothing about how either effect plays.
+    // `duration` is picked to mean something anyway rather than being an
+    // arbitrary constant: Blink's `rate` (blinks/sec) becomes one blink's
+    // period; Scatter's `settle` (spec: "seconds from fully scattered to the
+    // base value") already IS a duration.
+    derivedMoves(cfg: VectorTypeConfig): Move[] {
+      const out: Move[] = []
+      const blink = cfg?.motion?.blink
+      if (blink && isNum(blink.amount) && blink.amount > 0) {
+        const rate = isNum(blink.rate) && blink.rate > 0 ? blink.rate : 6
+        out.push({
+          id: '__blink',
+          phase: 'loop',
+          kind: 'blink',
+          duration: Math.max(0.05, Math.min(60, 1 / rate)),
+          ease: { kind: 'named', name: 'none' },
+          play: { mode: 'repeat', times: 1 },
+        })
+      }
+      const scatter = cfg?.motion?.scatter
+      if (scatter && isNum(scatter.spread) && scatter.spread > 0) {
+        const settle = isNum(scatter.settle) && scatter.settle > 0 ? scatter.settle : 0.8
+        out.push({
+          id: '__scatter',
+          phase: 'loop',
+          kind: 'scatter',
+          duration: Math.max(0.05, Math.min(60, settle)),
+          ease: { kind: 'named', name: 'none' },
+          play: { mode: 'once', times: 1 },
+        })
+      }
+      return out
+    },
   }
 }
