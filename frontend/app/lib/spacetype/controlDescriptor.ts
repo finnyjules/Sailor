@@ -1,12 +1,13 @@
 import type { ControlSpec, Params, ParamValue } from '~/lib/spacetype/effect'
 import { cleanStops, serializeStops } from '~/lib/shaderfx/params'
+import { shapeOptions } from '~/lib/shapes/catalog'
 
 /** A control normalized for the AI copilot. `path` equals the control key for
  *  Type/Texture (flat). A future Shader adapter will emit dotted paths here. */
 export interface DescribedControl {
   path: string
   label: string
-  kind: 'slider' | 'select' | 'color' | 'font' | 'gradientStops' | 'switch' | 'text'
+  kind: 'slider' | 'select' | 'color' | 'font' | 'gradientStops' | 'switch' | 'text' | 'shape'
   min?: number
   max?: number
   step?: number
@@ -17,7 +18,7 @@ export interface DescribedControl {
   current: ParamValue
 }
 
-const AI_EDITABLE_KINDS = new Set(['slider', 'select', 'color', 'font', 'gradientStops', 'switch'])
+const AI_EDITABLE_KINDS = new Set(['slider', 'select', 'color', 'font', 'gradientStops', 'switch', 'shape'])
 
 // 'text' is opt-in via aiEditable — a free string is only safe where the consumer
 // resolves it (Scene3D's texture phrase).
@@ -36,6 +37,10 @@ export function describeControls(controls: ControlSpec[], params: Params): Descr
     if (c.hint) d.hint = c.hint
     if (c.kind === 'slider') { d.min = c.min; d.max = c.max; d.step = c.step }
     if (c.kind === 'select') d.options = c.options
+    if (c.kind === 'shape') {
+      d.options = shapeOptions(c.allowNone !== false)
+      d.hint = c.hint ?? 'A shape id from the shape library, or none.'
+    }
     if (c.kind === 'gradientStops') {
       d.maxStops = c.maxStops ?? 8
       // Spell the shape out: the model has to emit this as text, and a stop list
@@ -79,6 +84,9 @@ export function validatePatch(
       out[key] = Number(clamped.toFixed(stepDecimals(d.step!)))
     }
     else if (d.kind === 'select') {
+      if (typeof raw === 'string' && d.options!.includes(raw)) out[key] = raw
+    }
+    else if (d.kind === 'shape') {
       if (typeof raw === 'string' && d.options!.includes(raw)) out[key] = raw
     }
     else if (d.kind === 'switch') {

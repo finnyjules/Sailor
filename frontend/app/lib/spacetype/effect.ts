@@ -103,6 +103,10 @@ export type ControlSpec = (
   // alongside `bindable`/`entry`, so the model always sees and writes raw option values.
   | { key: string; label: string; kind: 'select'; options: string[]; optionLabels?: string[]; default: string; group: string }
   | { key: string; label: string; kind: 'font'; default: string; group: string }
+  // A shape from the shape library (~/lib/shapes/catalog). Stores a shape id or
+  // 'none'. `allowNone: false` for consumers that always need a shape (a base
+  // shape); the default (true) offers a None tile and lists 'none' to the agent.
+  | { key: string; label: string; kind: 'shape'; default: string; allowNone?: boolean; group: string }
   // An interactive bézier path drawn on the preview (String effect). Stored as one JSON
   // string in params (StringPathDoc); the surface renders the StringPathEditor overlay.
   | { key: string; label: string; kind: 'path'; default: string; group: string }
@@ -128,6 +132,20 @@ export function defaultsFromControls(controls: ControlSpec[]): Params {
   for (const c of controls) out[c.key] = c.default
   return out
 }
+
+/**
+ * Effects that render the bare word, not the tiled ribbon label — no trailing
+ * gap, no separator. ONE definition: state.ts's texOptsFromState and the embed's
+ * buildTexOpts both read this (they used to carry private copies).
+ */
+export const RAW_WORD_EFFECTS: ReadonlySet<string> = new Set(['coil', 'elastic', 'echo'])
+
+/**
+ * Effects that lay out individual letters via layoutChars and never sample the
+ * tile texture as a whole — a separator painted into the tile would never show,
+ * so they are excluded from separator controls until the per-glyph follow-up.
+ */
+export const PER_GLYPH_EFFECTS: ReadonlySet<string> = new Set(['blend', 'cascade', 'cylinder', 'onionburst', 'ring', 'slot'])
 
 /**
  * The pluggable seam of the Space Type suite. Each effect declares its own
