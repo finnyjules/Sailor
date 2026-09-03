@@ -9,7 +9,16 @@ import { BASE_SHAPES, DEFAULT_LIBRARY_SHAPE, type BaseShapeKind } from './shapes
 import type { Paint } from '~/lib/compositor/paint'
 import { isShapeId } from '~/lib/shapes/catalog'
 
-export type GeoLayout = 'radial' | 'grid' | 'linear'
+export type GeoLayout = 'radial' | 'grid' | 'linear' | 'blend'
+/** Blend layout only: how the steps bunch up between shape A and shape B. */
+export type GeoBlendEase = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut'
+/** Every layout: cycle the fills list (today) or read it as a smooth ramp across the clones. */
+export type GeoFillCycle = 'cycle' | 'ramp'
+/** Every layout: where a clone's colour lands — its fill (today), its outline only, or both. */
+export type GeoPaintTarget = 'fill' | 'outline' | 'both'
+export const BLEND_EASES = ['linear', 'easeIn', 'easeOut', 'easeInOut'] as const
+export const FILL_CYCLES = ['cycle', 'ramp'] as const
+export const PAINT_TARGETS = ['fill', 'outline', 'both'] as const
 export type GeoFillMode = 'evenodd' | 'unite' | 'subtract' | 'intersect' | 'exclude'
 /** How overlapping clones resolve where they cross:
  *   hole  — evenodd-style cut, the overlap reads as a hole through both shapes
@@ -91,6 +100,23 @@ export interface GeoShapeConfig {
   fills: Paint[]
   gridCols: number
   gridRows: number
+  /** Blend layout — shape B, the shape the steps run toward. Same vocabulary as A. */
+  blendShape: BaseShapeKind
+  blendLibraryShape: string
+  blendSides: number
+  blendStarInner: number
+  blendIrregularSeed: number
+  blendSize: number
+  /** Degrees, about B's own centre. */
+  blendRotate: number
+  /** B's centre relative to A's, document units. 0,0 = concentric. */
+  blendX: number
+  blendY: number
+  blendEase: GeoBlendEase
+  /** 0..1 of a full turn of the point correspondence — spirals the outlines. */
+  blendTwist: number
+  fillCycle: GeoFillCycle
+  paintTarget: GeoPaintTarget
   locks: Record<string, boolean>
 }
 
@@ -141,6 +167,19 @@ export const DEFAULT_CONFIG: GeoShapeConfig = {
   fills: ['#1a1a2e', '#e5484d', '#f5a623'],
   gridCols: 3,
   gridRows: 2,
+  blendShape: 'triangle',
+  blendLibraryShape: DEFAULT_LIBRARY_SHAPE,
+  blendSides: 3,
+  blendStarInner: 0.45,
+  blendIrregularSeed: 1,
+  blendSize: 180,
+  blendRotate: 0,
+  blendX: 0,
+  blendY: 0,
+  blendEase: 'linear',
+  blendTwist: 0,
+  fillCycle: 'cycle',
+  paintTarget: 'fill',
   locks: {},
 }
 
@@ -154,7 +193,7 @@ const clampNum = (v: unknown, d: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, Math.round(num(v, d))))
 
 const SHAPES = BASE_SHAPES
-const LAYOUTS = ['radial', 'grid', 'linear'] as const
+const LAYOUTS = ['radial', 'grid', 'linear', 'blend'] as const
 const FILLMODES = ['evenodd', 'unite', 'subtract', 'intersect', 'exclude'] as const
 const OVERLAPMODES = ['hole', 'shape'] as const
 const SYMMETRY_AXES = ['vertical', 'horizontal'] as const
@@ -262,6 +301,19 @@ export function mergeConfig(raw: unknown): GeoShapeConfig {
     fills: paintList(o.fills, d.fills),
     gridCols: clampNum(o.gridCols, d.gridCols, 1, 24),
     gridRows: clampNum(o.gridRows, d.gridRows, 1, 24),
+    blendShape: oneOf(o.blendShape, SHAPES, d.blendShape),
+    blendLibraryShape: isShapeId(o.blendLibraryShape) ? o.blendLibraryShape : d.blendLibraryShape,
+    blendSides: clampNum(o.blendSides, d.blendSides, 3, 24),
+    blendStarInner: Math.min(0.99, Math.max(0.01, num(o.blendStarInner, d.blendStarInner))),
+    blendIrregularSeed: clampNum(o.blendIrregularSeed, d.blendIrregularSeed, 1, 9999),
+    blendSize: Math.min(600, Math.max(20, num(o.blendSize, d.blendSize))),
+    blendRotate: num(o.blendRotate, d.blendRotate),
+    blendX: num(o.blendX, d.blendX),
+    blendY: num(o.blendY, d.blendY),
+    blendEase: oneOf(o.blendEase, BLEND_EASES, d.blendEase),
+    blendTwist: Math.min(1, Math.max(0, num(o.blendTwist, d.blendTwist))),
+    fillCycle: oneOf(o.fillCycle, FILL_CYCLES, d.fillCycle),
+    paintTarget: oneOf(o.paintTarget, PAINT_TARGETS, d.paintTarget),
     locks,
   }
 }

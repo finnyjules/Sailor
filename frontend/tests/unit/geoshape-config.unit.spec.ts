@@ -65,6 +65,50 @@ describe('geoshape config', () => {
     expect(mergeConfig({ crossingMode: 'split' }).crossingMode).toBe('split')
     expect(mergeConfig({ crossingMode: 'nope' }).crossingMode).toBe('depth')
   })
+
+  it('blend + paint fields default so an old document renders identically', () => {
+    const cfg = mergeConfig({ shape: 'hexagon', count: 6 })
+    expect(cfg.layout).toBe('radial')
+    expect(cfg.blendShape).toBe('triangle')
+    expect(cfg.blendLibraryShape).toBe(DEFAULT_CONFIG.blendLibraryShape)
+    expect(cfg.blendSides).toBe(3)
+    expect(cfg.blendStarInner).toBe(0.45)
+    expect(cfg.blendIrregularSeed).toBe(1)
+    expect(cfg.blendSize).toBe(180)
+    expect(cfg.blendRotate).toBe(0)
+    expect(cfg.blendX).toBe(0)
+    expect(cfg.blendY).toBe(0)
+    expect(cfg.blendEase).toBe('linear')
+    expect(cfg.blendTwist).toBe(0)
+    expect(cfg.fillCycle).toBe('cycle')
+    expect(cfg.paintTarget).toBe('fill')
+  })
+
+  it('accepts layout blend and validates the blend enums', () => {
+    const cfg = mergeConfig({ layout: 'blend', blendEase: 'easeInOut', fillCycle: 'ramp', paintTarget: 'outline', blendShape: 'star', blendLibraryShape: 'heart' })
+    expect(cfg.layout).toBe('blend')
+    expect(cfg.blendEase).toBe('easeInOut')
+    expect(cfg.fillCycle).toBe('ramp')
+    expect(cfg.paintTarget).toBe('outline')
+    expect(cfg.blendShape).toBe('star')
+    expect(cfg.blendLibraryShape).toBe('heart')
+  })
+
+  it('junk blend values fall back and numeric ranges clamp', () => {
+    const cfg = mergeConfig({ blendEase: 'bouncy', fillCycle: 3, paintTarget: 'edges', blendShape: 'blob', blendLibraryShape: 'no-such-shape', blendSides: 99, blendTwist: 'x' })
+    expect(cfg.blendEase).toBe('linear')
+    expect(cfg.fillCycle).toBe('cycle')
+    expect(cfg.paintTarget).toBe('fill')
+    expect(cfg.blendShape).toBe('triangle')
+    expect(cfg.blendLibraryShape).toBe(DEFAULT_CONFIG.blendLibraryShape)
+    expect(cfg.blendSides).toBe(24)
+    expect(cfg.blendTwist).toBe(0)
+  })
+
+  it('round-trips a blend config', () => {
+    const cfg = { ...DEFAULT_CONFIG, layout: 'blend' as const, blendShape: 'circle' as const, blendSize: 240, blendX: 120, blendY: -40, blendTwist: 0.15, fillCycle: 'ramp' as const, paintTarget: 'outline' as const }
+    expect(mergeConfig(JSON.parse(JSON.stringify(cfg)))).toEqual(cfg)
+  })
 })
 
 describe('libraryShape', () => {
