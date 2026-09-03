@@ -296,3 +296,49 @@ describe('library base shape controls', () => {
     }
   })
 })
+
+describe('blend layout controls', () => {
+  const keys = (c: GeoShapeConfig) => visibleGeoControls(c).map(x => x.key)
+
+  it('the Blend group shows only in blend layout, and radius/spacing/stagger hide there', () => {
+    const blend = keys({ ...DEFAULT_CONFIG, layout: 'blend' })
+    for (const k of ['blendShape', 'blendSize', 'blendRotate', 'blendX', 'blendY', 'blendEase', 'blendTwist']) expect(blend).toContain(k)
+    expect(blend).toContain('count')
+    for (const k of ['radius', 'spacing', 'evenAngle', 'angleStep', 'stagger', 'spin']) expect(blend).not.toContain(k)
+    const radial = keys({ ...DEFAULT_CONFIG, layout: 'radial' })
+    expect(radial).not.toContain('blendShape')
+  })
+
+  it('shape B sub-controls follow B\'s kind like A\'s do', () => {
+    const star = keys({ ...DEFAULT_CONFIG, layout: 'blend', blendShape: 'star' })
+    expect(star).toContain('blendSides'); expect(star).toContain('blendStarInner'); expect(star).not.toContain('blendLibraryShape')
+    const lib = keys({ ...DEFAULT_CONFIG, layout: 'blend', blendShape: 'library' })
+    expect(lib).toContain('blendLibraryShape'); expect(lib).not.toContain('blendSides')
+    const irr = keys({ ...DEFAULT_CONFIG, layout: 'blend', blendShape: 'irregular' })
+    expect(irr).toContain('blendIrregularSeed'); expect(irr).toContain('blendSides')
+  })
+
+  it('Blend sits right after Layout in the section order', () => {
+    expect(GEO_SECTIONS.indexOf('Blend')).toBe(GEO_SECTIONS.indexOf('Layout') + 1)
+  })
+
+  it('paintTarget always shows; fillCycle only with a multi-colour strategy', () => {
+    const single = keys({ ...DEFAULT_CONFIG, fillStrategy: 'single' })
+    expect(single).toContain('paintTarget'); expect(single).not.toContain('fillCycle')
+    const per = keys({ ...DEFAULT_CONFIG, fillStrategy: 'perClone' })
+    expect(per).toContain('fillCycle')
+  })
+
+  it('strokeWidth shows for an outline with no stroke colour set, and reaches hairlines', () => {
+    const outline = visibleGeoControls({ ...DEFAULT_CONFIG, stroke: null, paintTarget: 'outline' })
+    const sw = outline.find(c => c.key === 'strokeWidth')
+    expect(sw).toBeDefined()
+    expect((sw as any).step).toBe(0.25)
+    expect(keys({ ...DEFAULT_CONFIG, stroke: null, paintTarget: 'fill' })).not.toContain('strokeWidth')
+  })
+
+  it('the layout select offers blend', () => {
+    const layout = GEO_CONTROLS.find(c => c.key === 'layout') as any
+    expect(layout.options).toContain('blend')
+  })
+})

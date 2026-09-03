@@ -8,6 +8,9 @@ import {
   type GeoSymmetryAxis,
   type GeoClipMask,
   type GeoCrossingMode,
+  BLEND_EASES,
+  FILL_CYCLES,
+  PAINT_TARGETS,
 } from './config'
 import { BASE_SHAPES, type BaseShapeKind } from './shapes'
 import type { Paint } from '~/lib/compositor/paint'
@@ -27,7 +30,7 @@ import type { Paint } from '~/lib/compositor/paint'
 export type GeoControl = ControlSpec & { when?: (cfg: GeoShapeConfig) => boolean }
 
 /** Emission order; a control whose group is not listed here is dropped. */
-export const GEO_SECTIONS = ['Shape', 'Layout', 'Transform', 'Composite', 'Symmetry', 'Clip', 'Style', 'Paint'] as const
+export const GEO_SECTIONS = ['Shape', 'Layout', 'Blend', 'Transform', 'Composite', 'Symmetry', 'Clip', 'Style', 'Paint'] as const
 
 // Mirror of config.ts's own (private) enum lists — kept local rather than
 // exported from config.ts because Task 7's commit stages only the new lib
@@ -38,7 +41,7 @@ export const GEO_SECTIONS = ['Shape', 'Layout', 'Transform', 'Composite', 'Symme
 // Exported so randomize.ts (and any other geoshape module) shares this one
 // copy instead of keeping its own verbatim duplicate.
 export const SHAPES: BaseShapeKind[] = BASE_SHAPES
-export const LAYOUTS: GeoLayout[] = ['radial', 'grid', 'linear']
+export const LAYOUTS: GeoLayout[] = ['radial', 'grid', 'linear', 'blend']
 export const FILLMODES: GeoFillMode[] = ['evenodd', 'unite', 'subtract', 'intersect', 'exclude']
 export const OVERLAPMODES: GeoOverlapMode[] = ['hole', 'shape']
 export const SYMMETRY_AXES: GeoSymmetryAxis[] = ['vertical', 'horizontal']
@@ -66,6 +69,12 @@ const isMultiFill = (c: GeoShapeConfig) => c.fillStrategy !== 'single'
 const isPieces = (c: GeoShapeConfig) => c.fillStrategy === 'pieces'
 const hasSymmetry = (c: GeoShapeConfig) => c.symmetry === true
 const hasClipMask = (c: GeoShapeConfig) => c.clipMask !== 'none'
+const isBlend = (c: GeoShapeConfig) => c.layout === 'blend'
+const blendUsesSides = (c: GeoShapeConfig) => isBlend(c) && (c.blendShape === 'star' || c.blendShape === 'irregular')
+const blendIsStar = (c: GeoShapeConfig) => isBlend(c) && c.blendShape === 'star'
+const blendIsIrregular = (c: GeoShapeConfig) => isBlend(c) && c.blendShape === 'irregular'
+const blendIsLibrary = (c: GeoShapeConfig) => isBlend(c) && c.blendShape === 'library'
+const hasOutline = (c: GeoShapeConfig) => c.stroke !== null || c.paintTarget !== 'fill'
 
 /** A `Paint` reduced to a `color`-control default: solids pass through,
  *  gradients/patterns/images fall back to a plain swatch — the schema's `fill`/
@@ -136,6 +145,24 @@ export const GEO_CONTROLS: GeoControl[] = [
     'Which grid index the stagger steps by — column pushes columns down/over, row does the classic brick offset',
     { when: hasStaggerGrid }),
 
+  // --- Blend (layout 'blend': the steps between shape A and shape B) --------
+  select('blendShape', 'Blend to', SHAPES, DEFAULT_CONFIG.blendShape, 'Blend',
+    'The shape the steps run toward. Same choices as Shape; Count is the number of steps.', { when: isBlend }),
+  shapeC('blendLibraryShape', 'Blend to library shape', DEFAULT_CONFIG.blendLibraryShape, 'Blend',
+    'library only: which of the 100 drawn shapes the steps run toward', { when: blendIsLibrary }),
+  slider('blendSides', 'Blend to sides', 3, 24, 1, 'Blend', DEFAULT_CONFIG.blendSides, undefined, { when: blendUsesSides }),
+  slider('blendStarInner', 'Blend to star inner', 0.01, 0.99, 0.01, 'Blend', DEFAULT_CONFIG.blendStarInner, undefined, { when: blendIsStar }),
+  slider('blendIrregularSeed', 'Blend to irregular seed', 1, 9999, 1, 'Blend', DEFAULT_CONFIG.blendIrregularSeed, undefined, { when: blendIsIrregular }),
+  slider('blendSize', 'Blend to size', 20, 600, 1, 'Blend', DEFAULT_CONFIG.blendSize, 'Size of the shape the steps run toward', { when: isBlend }),
+  slider('blendRotate', 'Blend to rotation', -180, 180, 1, 'Blend', DEFAULT_CONFIG.blendRotate, 'Turns the target shape; the steps twist to meet it', { when: isBlend }),
+  slider('blendX', 'Blend to X', -800, 800, 1, 'Blend', DEFAULT_CONFIG.blendX, 'Where the target shape sits, left to right. 0 = on top of the base shape', { when: isBlend }),
+  slider('blendY', 'Blend to Y', -800, 800, 1, 'Blend', DEFAULT_CONFIG.blendY, 'Where the target shape sits, up and down', { when: isBlend }),
+  select('blendEase', 'Spacing', [...BLEND_EASES], DEFAULT_CONFIG.blendEase, 'Blend',
+    'How the steps bunch up: even, toward the start, toward the end, or toward both ends',
+    { when: isBlend, optionLabels: ['Even', 'Ease in', 'Ease out', 'Ease in-out'] }),
+  slider('blendTwist', 'Twist', 0, 1, 0.01, 'Blend', DEFAULT_CONFIG.blendTwist,
+    'Rotates which point of the base shape meets which point of the target — small values spiral the outlines', { when: isBlend }),
+
   // --- Transform (per-clone ramps in arrange.ts) ----------------------------
   slider('rotateBase', 'Rotate base', -180, 180, 1, 'Transform', DEFAULT_CONFIG.rotateBase),
   slider('rotateStep', 'Rotate step', -180, 180, 1, 'Transform', DEFAULT_CONFIG.rotateStep),
@@ -170,7 +197,7 @@ export const GEO_CONTROLS: GeoControl[] = [
   // --- Style -------------------------------------------------------------------
   slider('padding', 'Padding', -400, 200, 1, 'Style', DEFAULT_CONFIG.padding,
     'Space framed around the mark. Lower it to grow the mark toward the canvas edges; 0 fills the canvas edge-to-edge; negative overscans so the mark bleeds past the edges and crops to fill the whole canvas.'),
-  slider('strokeWidth', 'Stroke width', 0, 60, 1, 'Style', DEFAULT_CONFIG.strokeWidth, undefined, { when: (c) => c.stroke !== null }),
+  slider('strokeWidth', 'Stroke width', 0, 60, 0.25, 'Style', DEFAULT_CONFIG.strokeWidth, 'Outline thickness. Below 1 gives hairlines for stacked outlines', { when: hasOutline }),
   slider('seed', 'Seed', 1, 999999, 1, 'Style', DEFAULT_CONFIG.seed,
     'The random seed behind Re-roll; use Re-roll to generate variations.'),
 
@@ -188,6 +215,12 @@ export const GEO_CONTROLS: GeoControl[] = [
   switchC('overlapSeparate', 'Separate overlap colours', DEFAULT_CONFIG.overlapSeparate, 'Paint', { when: isPieces }),
   select('crossingMode', 'Crossings', ['depth', 'split'], DEFAULT_CONFIG.crossingMode, 'Paint',
     'depth = one colour per overlap depth; split = each crossing its own piece, coloured by the colour order', { when: isPieces }),
+  select('fillCycle', 'Colour ramp', [...FILL_CYCLES], DEFAULT_CONFIG.fillCycle, 'Paint',
+    'cycle = repeat the colour list; ramp = fade smoothly through it across all the copies',
+    { when: isMultiFill, optionLabels: ['Cycle', 'Ramp'] }),
+  select('paintTarget', 'Colour applies to', [...PAINT_TARGETS], DEFAULT_CONFIG.paintTarget, 'Paint',
+    'fill = solid shapes (the default); outline = thin outlines only, no fill; both = fill and outline in the same colour',
+    { optionLabels: ['Fill', 'Outline', 'Both'] }),
   color('fill', 'Fill', paintDefault(DEFAULT_CONFIG.fill), 'Paint', { when: isSingleFill }),
   color('stroke', 'Stroke', DEFAULT_CONFIG.stroke ?? '#000000', 'Paint'),
 ]
@@ -214,7 +247,7 @@ export const GEO_GUIDANCE = `This is a PROCEDURAL 2D-VECTOR "clone and arrange" 
 
 BASE SHAPE: "shape" picks the family — polygon (regular N-gon via sides), star (N points via sides + starInner, the inner-vertex radius as a fraction of the outer radius, 0.01=needle-thin points, 0.99=almost a polygon), hexagon (fixed 6-gon, ignores sides), irregular (a polygon jittered per-vertex by irregularSeed — same seed always gives the same silhouette), library (one of the 100 drawn library shapes, chosen by libraryShape — sparkle, sun-rays, leaf, heart, swirl…; sides and corner rounding do not apply). size is the shape's full width/height (its larger side) before any clone spread. roundCorners (0=off) gates roundRadius, the corner-rounding fraction.
 
-LAYOUT: count is how many clones to place (grid layout instead uses gridCols × gridRows and ignores count). layout picks the placement curve: "radial" rings the clones around the center at radius; by default (evenAngle) they spread evenly (360/count) so any count forms a clean ring, and turning evenAngle off spaces them by angleStep degrees instead (for fans/spirals). spin is the ring's starting angle offset. "grid" tiles gridCols × gridRows clones spacing apart. "linear" strings count clones in a row, spacing apart. For grid/linear, stagger (incremental|alternate) shifts successive columns/rows by (stepX, stepY) — incremental cascades progressively (a diagonal shear), alternate offsets every other one (a brick/zigzag); stepAxis chooses whether a grid steps by column or row.
+LAYOUT: count is how many clones to place (grid layout instead uses gridCols × gridRows and ignores count). layout picks the placement curve: "radial" rings the clones around the center at radius; by default (evenAngle) they spread evenly (360/count) so any count forms a clean ring, and turning evenAngle off spaces them by angleStep degrees instead (for fans/spirals). spin is the ring's starting angle offset. "grid" tiles gridCols × gridRows clones spacing apart. "linear" strings count clones in a row, spacing apart. "blend" draws the steps between the base shape and a second shape (see BLEND). For grid/linear, stagger (incremental|alternate) shifts successive columns/rows by (stepX, stepY) — incremental cascades progressively (a diagonal shear), alternate offsets every other one (a brick/zigzag); stepAxis chooses whether a grid steps by column or row.
 
 TRANSFORM: rotateBase + i*rotateStep rotates each successive clone (a spiral/fan feel as rotateStep grows). scaleStart→scaleEnd ramps clone size across the sequence (shrink/grow trails). skew shears every clone; spin only matters for radial layout.
 
@@ -224,4 +257,8 @@ SYMMETRY mirrors the whole composed mark across symmetryAxis (vertical/horizonta
 
 STYLE: padding is the margin framed around the mark in the preview, the PNG, and the SVG alike — lower it to grow the mark toward the canvas edges, 0 fills the canvas edge-to-edge, and NEGATIVE padding overscans so the mark bleeds past the edges and crops to fill the whole canvas on both axes (this is the lever for "make it bigger / fill the canvas / bleed off the edges", NOT size, which is the base shape's own width/height and is auto-fit into the frame). strokeWidth is the outline width wherever stroke is set. seed drives irregularSeed-style jitter and re-roll — same seed, same mark.
 
-PAINT: fill colors the mark, stroke outlines it (leave stroke unset for a fill-only flat mark, the common logo case), overlapFill only matters when overlapMode is "shape". fillStrategy switches between one flat fill (single), one colour per clone (per-clone), or per-piece colouring with its own overlap regions (pieces); fillOrder sets the sequence those colours are handed out in (creation order, depth, left-to-right, top-to-bottom, row-by-row, column-by-column, center-out, or around like a colour wheel) whenever fillStrategy isn't single, and overlapSeparate (pieces only) gives crossing regions their own colours instead of reusing the piece colours. crossingMode (pieces only) picks how those crossings are cut: "depth" gives every overlap depth one shared colour, "split" breaks each crossing into its own piece coloured by fillOrder.`
+PAINT: fill colors the mark, stroke outlines it (leave stroke unset for a fill-only flat mark, the common logo case), overlapFill only matters when overlapMode is "shape". fillStrategy switches between one flat fill (single), one colour per clone (per-clone), or per-piece colouring with its own overlap regions (pieces); fillOrder sets the sequence those colours are handed out in (creation order, depth, left-to-right, top-to-bottom, row-by-row, column-by-column, center-out, or around like a colour wheel) whenever fillStrategy isn't single, and overlapSeparate (pieces only) gives crossing regions their own colours instead of reusing the piece colours. crossingMode (pieces only) picks how those crossings are cut: "depth" gives every overlap depth one shared colour, "split" breaks each crossing into its own piece coloured by fillOrder.
+
+BLEND: layout "blend" draws count steps between the base shape and a second shape. blendShape picks the target's family (same choices as shape; blendSides / blendStarInner / blendIrregularSeed / blendLibraryShape apply the same way), blendSize its size, blendRotate turns it, blendX / blendY put its centre relative to the base shape (0,0 = concentric — the classic ring-of-outlines look), blendEase bunches the steps (linear / ease in / ease out / ease in-out), and blendTwist rotates which point of the base meets which point of the target so the stacked outlines spiral and moiré. The rotation and scale ramps still apply on top.
+
+STACKED OUTLINES RECIPE: "blend", "stacked outlines", "moiré lines", "die doing", "gradient made of lines", "line art blend" all mean ONE look — layout "blend" with fillStrategy set to the per-clone strategy, paintTarget "outline", fillCycle "ramp", count 80–200, strokeWidth 0.5–1, two or three vivid fills, stroke unset, blendTwist 0.05–0.2. Worked example (add fillStrategy set to the per-clone strategy alongside this JSON): {"layout":"blend","paintTarget":"outline","fillCycle":"ramp","count":140,"strokeWidth":0.75,"blendShape":"circle","blendSize":260,"blendX":90,"blendTwist":0.1}. paintTarget also works in every other layout: "outline only" / "just the outlines" = paintTarget "outline"; fillCycle "ramp" turns a two-colour fills list into a smooth fade across the copies in any layout.`
