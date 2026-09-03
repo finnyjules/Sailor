@@ -41,6 +41,7 @@ import { useBrushPaint } from '~/composables/useBrushPaint'
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
+import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
 import { generateVectorFromText, vectorizeImage, urlToDataUrl } from '~/composables/useVectorAi'
 import { imageLayerUrl } from '~/composables/useCompositorLayers'
@@ -3109,6 +3110,12 @@ function maskBreakBox(): { x: number; y: number; w: number; h: number } | null {
   if (!m) return null
   const b = localLayerBox(null, m as any, 1, 1)
   return { x: (m as any).x, y: (m as any).y, w: b.w, h: b.h }
+}
+/** True only when the selected layer's mask is a LOCAL shape (a break-out can open it). */
+function maskIsLocalShape(): boolean {
+  const l = selectedLocal.value; if (!l) return false
+  const ref = currentMaskRef(localKey(l.id))
+  return !!ref && ref.startsWith('l:') && !!maskBreakBox()
 }
 function selectedBreak(): MaskBreak | null { return (selectedLocal.value as any)?.maskBreak ?? null }
 function breakEdge(): MaskBreakEdge {
@@ -6773,7 +6780,7 @@ onUnmounted(() => {
                 @change="setMaskShowSource(localKey(selectedLocal!.id), ($event.target as HTMLInputElement).checked)" />
               Show mask layer
             </label>
-            <div v-if="currentMaskRef(localKey(selectedLocal!.id))" class="mt-2">
+            <div v-if="maskIsLocalShape()" class="mt-2">
               <label class="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
                 <input type="checkbox" :checked="!!selectedBreak()" @change="setBreakEnabled(($event.target as HTMLInputElement).checked)" />
                 Break out
