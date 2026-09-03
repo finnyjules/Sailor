@@ -15,7 +15,7 @@ import { normaliseAxes } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 import { textOutlines } from '~/lib/vectortype/outline'
 import type { PathCommand, TextOutlines, VtBBox } from '~/lib/vectortype/outline'
-import { analyzeFlex, buildRemap, glyphFlexFor, planStretch, remapValue, smoothProfile, solveAxis, stemFactor, stemWidthOf, stretchCommands, stretchOutlines, symmetrize, uniformSpans, weightCompensation } from '~/lib/vectortype/stretch'
+import { analyzeFlex, buildRemap, dampedStretch, fitStretch, glyphFlexFor, planStretch, remapValue, smoothProfile, solveAxis, stemFactor, stemWidthOf, stretchCommands, stretchGlyph, stretchOutlines, symmetrize, uniformSpans, weightCompensation } from '~/lib/vectortype/stretch'
 
 /** Closed axis-aligned rectangle as outline commands (font-unit space, y-up). */
 function rect(x0: number, y0: number, x1: number, y1: number): PathCommand[] {
@@ -1230,5 +1230,60 @@ describe('the wdth cascade seam (Archivo fixture)', () => {
     const past = planStretch(archivo, 'Sailor', {}, 2.2)
     expect(past.coords.wdth).toBeCloseTo(wdth.max, 6)
     expect(past.residual).toBeGreaterThan(1.3)
+  })
+})
+
+describe('studio entry points', () => {
+  it('stretchGlyph reproduces stretchOutlines glyph-for-glyph (same S/SY everywhere)', () => {
+    const run = textOutlines(font, 'Sailor')
+    const whole = stretchOutlines(run, 1.6, 1.3)
+    const ctx = { metrics: run.metrics, unitsPerEm: run.unitsPerEm }
+    run.glyphs.forEach((g, i) => {
+      const one = stretchGlyph(g, 1.6, 1.3, ctx)
+      expect(one.commands).toEqual(whole.glyphs[i]!.commands)
+      expect(one.advance).toBeCloseTo(whole.glyphs[i]!.advance, 6)
+      expect(one.bbox).toEqual(whole.glyphs[i]!.bbox)
+    })
+  })
+
+  it('stretchGlyph keeps the x-height shared across glyphs at different SY (zones from metrics)', () => {
+    const run = textOutlines(font, 'ai')
+    const ctx = { metrics: run.metrics, unitsPerEm: run.unitsPerEm }
+    const a = stretchGlyph(run.glyphs[0]!, 1, 2.0, ctx)
+    const i = stretchGlyph(run.glyphs[1]!, 1, 2.0, ctx)
+    // both land their x-height band at 2.0 × xHeight: the a's top ≈ 2 × its drawn top (overshoot excluded)
+    expect(Math.abs(a.bbox.maxY - 2 * run.glyphs[0]!.bbox.maxY)).toBeLessThan(0.03 * 2 * run.metrics.xHeight)
+    expect(i.advance).toBeCloseTo(run.glyphs[1]!.advance, 6)   // vertical never changes advances
+  })
+
+  it('dampedStretch: identity when one axis is 1; damps the second when both deviate; symmetric', () => {
+    expect(dampedStretch(1.8, 1)).toEqual({ S: 1.8, SY: 1, damped: false })
+    expect(dampedStretch(1, 0.6)).toEqual({ S: 1, SY: 0.6, damped: false })
+    const d = dampedStretch(2, 2)                       // |log 2|/log 2 = 1 → factor 0.5 on the deviation
+    expect(d.damped).toBe(true)
+    expect(d.S).toBeCloseTo(1.5, 9)                     // 1 + (2 − 1) · 0.5
+    expect(d.SY).toBeCloseTo(1.5, 9)
+    const e = dampedStretch(0.5, 2.5)
+    expect(e.S).toBeGreaterThan(0.5); expect(e.SY).toBeLessThan(2.5)
+    const f = dampedStretch(1.3, 1.1)                   // small moves damp a little
+    expect(f.S).toBeLessThan(1.3); expect(f.S).toBeGreaterThan(1.25)
+  })
+
+  it('fitStretch lands the run on a target width (through the axis on Archivo, remap on Inter)', () => {
+    const run = textOutlines(font, 'Sailor')
+    const target = run.width * 1.35
+    const S = fitStretch(font, 'Sailor', {}, target)
+    const plan = planStretch(font, 'Sailor', {}, S)
+    const got = stretchOutlines(textOutlines(font, 'Sailor', plan.coords), plan.residual, 1).width
+    expect(Math.abs(got - target) / target).toBeLessThan(0.01)
+    const archivo = loadArchivo()
+    const arun = textOutlines(archivo, 'Sailor')
+    const atarget = arun.width * 0.8
+    const aS = fitStretch(archivo, 'Sailor', {}, atarget)
+    const aplan = planStretch(archivo, 'Sailor', {}, aS)
+    const agot = stretchOutlines(textOutlines(archivo, 'Sailor', aplan.coords), aplan.residual, 1).width
+    expect(Math.abs(agot - atarget) / atarget).toBeLessThan(0.01)
+    // clamps to the dial range rather than chasing an unreachable target
+    expect(fitStretch(font, 'Sailor', {}, run.width * 10)).toBe(2.5)
   })
 })

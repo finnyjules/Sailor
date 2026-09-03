@@ -1943,6 +1943,61 @@ export function glyphFlexFor(g: GlyphOutline, opts: FlexOptions = {}): GlyphFlex
 const hasInk = (g: GlyphOutline): boolean =>
   g.commands.length > 0 && g.bbox.maxX > g.bbox.minX && g.bbox.maxY > g.bbox.minY
 
+export interface StretchContext {
+  metrics: TextOutlines['metrics']
+  unitsPerEm: number
+  opts?: FlexOptions
+}
+export interface StretchedGlyph {
+  commands: PathCommand[]
+  bbox: VtBBox
+  advance: number
+}
+
+/**
+ * One glyph at its own (S, SY) — the studio's per-glyph entry point, so a
+ * staggered `stretch`/`stretchY` track becomes a travelling wave of width or
+ * height. The zones come from the FONT (ctx.metrics), not the glyph, so glyphs
+ * at different SY still land their x-height on the same line for the same SY.
+ * `stretchOutlines` is this, glyph by glyph, plus the pen.
+ */
+export function stretchGlyph(g: GlyphOutline, S: number, SY: number, ctx: StretchContext): StretchedGlyph {
+  const flexOpts: FlexOptions = {
+    smallFeature: SMALL_FEATURE_EM * ctx.unitsPerEm,
+    straightMin: STRAIGHT_MIN_EM * ctx.unitsPerEm,
+    ...(ctx.opts ?? {}),
+  }
+  // A blank glyph (space) is pure whitespace: its advance scales with S and
+  // nothing else happens — exactly what the run loop did before this refactor.
+  if (!hasInk(g)) return { commands: g.commands, bbox: g.bbox, advance: g.advance * S }
+  if (S === 1 && SY === 1) return { commands: g.commands, bbox: g.bbox, advance: g.advance }
+  const m = ctx.metrics
+  const zones = [0, m.xHeight, m.capHeight, m.ascent, m.descent]
+  const stemScale = stemFactor(S * SY)
+  const roundCoupling = flexOpts.roundCoupling ?? ROUND_COUPLING
+  const turnScaleY = Math.pow(S, roundCoupling)
+  const mode: DistributionMode = flexOpts.shapeRules === false ? 'flex' : 'bell'
+  const flex = glyphFlexFor(g, flexOpts)
+  const rx = buildRemap(flex.x, S, undefined, undefined, stemScale, undefined, mode)
+  const ry = buildRemap(flex.y, SY, 0, zones, stemScale, turnScaleY, mode)
+  const commands = applyRemaps(g.commands, rx, ry)
+  const bbox = {
+    minX: remapValue(rx, g.bbox.minX), maxX: remapValue(rx, g.bbox.maxX),
+    minY: remapValue(ry, g.bbox.minY), maxY: remapValue(ry, g.bbox.maxY),
+  }
+  const inkW = g.bbox.maxX - g.bbox.minX
+  const newInkW = bbox.maxX - bbox.minX
+  const whitespace = g.advance - inkW
+  let advance: number
+  if (S < 1 && whitespace > 0) {
+    const stemRef = stemWidthOf(flex.x) || 0.09 * ctx.unitsPerEm
+    advance = newInkW + Math.max(whitespace * S, Math.min(whitespace, WHITESPACE_FLOOR_STEMS * stemRef))
+  } else {
+    advance = newInkW + whitespace * S
+  }
+  return { commands, bbox, advance }
+}
+
 export function stretchOutlines(
   outlines: TextOutlines,
   S: number,
@@ -1950,70 +2005,14 @@ export function stretchOutlines(
   opts: FlexOptions = {},
 ): TextOutlines {
   if (S === 1 && SY === 1) return outlines
-  const flexOpts: FlexOptions = {
-    smallFeature: SMALL_FEATURE_EM * outlines.unitsPerEm,
-    straightMin: STRAIGHT_MIN_EM * outlines.unitsPerEm,
-    ...opts,
-  }
-  // Shared vertical zones: every glyph's Y remap is solved band-by-band
-  // against the FONT's alignment lines, not each glyph's own bbox, so the
-  // baseline/x-height/cap-height/ascender/descender land at the same place
-  // in every glyph (see `bandedBinWidths`'s doc comment for why this fixes
-  // the "i's stem sits above its neighbours" bug).
-  const m = outlines.metrics
-  const zones = [0, m.xHeight, m.capHeight, m.ascent, m.descent]
-  // Stems follow AREA, not width: a tall compressed display face (S small,
-  // SY large) keeps heavy stems — the letter isn't getting smaller, it's
-  // getting taller. The one stem-weight schedule takes S × SY, shared by
-  // both axes, so a rigid Y bin (an arch/crossbar thickness) thins by the
-  // same rule a rigid X bin (a stem) does.
-  const stemScale = stemFactor(S * SY)
-  // Rounds stay round (rule 10): a round's turn-region height follows its
-  // WIDTH, so the Y remap (and only the Y remap — X gets no turn preset)
-  // presets its turn bins to S^roundCoupling.
-  const roundCoupling = opts.roundCoupling ?? ROUND_COUPLING
-  const turnScaleY = Math.pow(S, roundCoupling)
-  // Bell distribution between rigid features is a shape-integrity rule like
-  // the others, so it rides the same switch; off = the original tangent-
-  // proportional split (the lab's A/B control).
-  const mode: DistributionMode = flexOpts.shapeRules === false ? 'flex' : 'bell'
+  const ctx: StretchContext = { metrics: outlines.metrics, unitsPerEm: outlines.unitsPerEm, opts }
   const glyphs: GlyphOutline[] = []
   let penOld = 0
   let penNew = 0
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const g of outlines.glyphs) {
-    let commands = g.commands
-    let bbox = g.bbox
-    let inkW = 0
-    let newInkW = 0
-    let flex: GlyphFlex | undefined
-    if (hasInk(g)) {
-      flex = glyphFlexFor(g, flexOpts)
-      const rx = buildRemap(flex.x, S, undefined, undefined, stemScale, undefined, mode)
-      const ry = buildRemap(flex.y, SY, 0, zones, stemScale, turnScaleY, mode)
-      commands = applyRemaps(g.commands, rx, ry)
-      bbox = {
-        minX: remapValue(rx, g.bbox.minX),
-        maxX: remapValue(rx, g.bbox.maxX),
-        minY: remapValue(ry, g.bbox.minY),
-        maxY: remapValue(ry, g.bbox.maxY),
-      }
-      inkW = g.bbox.maxX - g.bbox.minX
-      newInkW = bbox.maxX - bbox.minX
-    }
-    // Sidebearings are flexible space: the ink contributes its own (possibly
-    // rigid) new width, and the whitespace around it scales with S. An 'l'
-    // whose ink cannot widen still gains a little air — an extended I *is*
-    // barely wider. But combined sidebearings may condense only so far:
-    // below WHITESPACE_FLOOR_STEMS stem widths, neighbouring letters touch.
-    const whitespace = g.advance - inkW
-    let advance: number
-    if (flex && S < 1 && whitespace > 0) {
-      const stemRef = stemWidthOf(flex.x) || 0.09 * outlines.unitsPerEm
-      advance = newInkW + Math.max(whitespace * S, Math.min(whitespace, WHITESPACE_FLOOR_STEMS * stemRef))
-    } else {
-      advance = newInkW + whitespace * S
-    }
+    const sg = stretchGlyph(g, S, SY, ctx)
+    const { commands, bbox, advance } = sg
     // xOffset positioning (g.x drifting from the accumulated pen) is preserved
     // proportionally rather than dropped.
     const offset = (g.x - penOld) * S
@@ -2035,6 +2034,35 @@ export function stretchOutlines(
     width: penNew,
     bbox: empty ? { minX: 0, minY: 0, maxX: 0, maxY: 0 } : { minX, minY, maxX, maxY },
   }
+}
+
+/**
+ * The Phase B range policy: each dial alone is proven to its full range; the
+ * engine is weak on DIAGONAL moves through the (S, SY) plane. When both
+ * deviate from 1, the second axis's deviation is damped by
+ * 1 − 0.5·min(1, |log S|/log 2), symmetrically — a strongly condensed letter
+ * can still grow taller, but not to the frontier the slices cannot hold.
+ * Applied to what the ENGINE receives; the dials keep what the user typed.
+ */
+export function dampedStretch(S: number, SY: number): { S: number; SY: number; damped: boolean } {
+  const dev = (v: number) => Math.min(1, Math.abs(Math.log(v)) / Math.LN2)
+  if (S === 1 || SY === 1) return { S, SY, damped: false }
+  const fS = 1 - 0.5 * dev(SY)   // how much S keeps, given SY's deviation
+  const fSY = 1 - 0.5 * dev(S)
+  return { S: 1 + (S - 1) * fS, SY: 1 + (SY - 1) * fSY, damped: true }
+}
+
+/** Solve the width dial so the shaped run (axis cascade + remap) is `targetUnits` wide. */
+export function fitStretch(
+  font: VtFont, text: string, axes: Record<string, number>, targetUnits: number,
+  min = 0.5, max = 2.5,
+): number {
+  if (!text || !(targetUnits > 0)) return 1
+  const measure = (S: number): number => {
+    const plan = planStretch(font, text, axes, S)
+    return stretchOutlines(textOutlines(font, text, plan.coords), plan.residual, 1).width
+  }
+  return solveAxis(measure, min, max, targetUnits)
 }
 
 /** Binary search a monotone-increasing measurement for the axis value whose
