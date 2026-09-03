@@ -2,7 +2,8 @@ import type { EmbedSurface, EmbedHandle } from '../contract'
 import { fontFaceRule, fontFaceId } from '../fontFace'
 import { SpaceTypeEngine, type EngineOptions } from '~/lib/spacetype/engine'
 import { SPACE_TYPE_EFFECTS } from '~/lib/spacetype/effects/index'
-import type { SpaceTypeEffect, Params } from '~/lib/spacetype/effect'
+import { RAW_WORD_EFFECTS, type SpaceTypeEffect, type Params } from '~/lib/spacetype/effect'
+import { separatorFromParams } from '~/lib/spacetype/separator'
 import type { TextTextureOptions } from '~/lib/spacetype/textTexture'
 import { buildRibbonLabel } from '~/lib/spacetype/ribbonMath'
 import { resolveFontFamily, fontHasWeightAxis } from '~/lib/font/resolveFamily'
@@ -48,15 +49,10 @@ export interface SpaceTypeEmbedConfig {
 }
 
 // Effects whose glyphs size to their own (uppercased or as-typed) word with NO
-// trailing-gap pad, rather than the tiled-ribbon label. Mirrors RAW_WORD_EFFECTS
-// in ~/lib/spacetype/state.ts — duplicated (not imported) because state.ts's
-// import graph still reaches ~/data/variable-fonts.ts (ensureSpaceTypeFont's
-// VARIABLE_FONTS table of hardcoded fonts.googleapis.com + SIL/OFL URLs) for
-// unrelated reasons (defaultSpaceTypeState, ensureSpaceTypeFont). Font
-// resolution itself (resolveFontFamily/fontHasWeightAxis, see buildTexOpts
-// below) is fine to import directly — that lives in the network-free
-// ~/lib/font/resolveFamily now — but state.ts as a whole is not.
-const RAW_WORD_EFFECTS = new Set(['coil', 'elastic', 'echo'])
+// trailing-gap pad, rather than the tiled-ribbon label. RAW_WORD_EFFECTS now
+// comes straight from ~/lib/spacetype/effect.ts — that module is network-free
+// (state.ts, which is NOT safe for this bundle, is what used to force the
+// duplication; see effect.ts's own doc for the shared definition).
 
 /**
  * Text-texture options for one embed frame. Mirrors texOptsFromState in
@@ -127,6 +123,7 @@ function buildTexOpts(
     gradientStops: gradientStops.map(g => ({ ...g })),
     gradientOn: String(params.gradientMode) === 'on',
     uRepeat: Number(params.textRepeat),
+    separator: separatorFromParams(effect.id, params),
   }
 }
 

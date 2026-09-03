@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { makeGradientTexture, type GradientStop } from './gradient'
+import type { SeparatorSpec } from './separator'
 
 export interface TextTextureOptions {
   label: string                 // already includes the trailing gap (buildRibbonLabel)
@@ -18,6 +19,8 @@ export interface TextTextureOptions {
   gradientStops?: GradientStop[]
   gradientOn?: boolean
   uRepeat?: number
+  /** Shape painted between word repeats — see separator.ts. Undefined ⇒ byte-identical tile to before. */
+  separator?: SeparatorSpec
 }
 
 /** Format axes as a CSS font-variation-settings value. Pure + unit-tested. */

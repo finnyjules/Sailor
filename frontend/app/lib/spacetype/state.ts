@@ -1,6 +1,7 @@
-import { buildRibbonLabel, ribbonEffect } from './effects/ribbon'
+import { buildRibbonLabel } from './effects/ribbon'
 import { getEffect } from './effects'
-import { defaultsFromControls } from './effect'
+import { defaultsFromControls, RAW_WORD_EFFECTS } from './effect'
+import { separatorFromParams } from './separator'
 import { resolveFontFamily, fontHasWeightAxis } from '~/lib/font/resolveFamily'
 import { parseLibraryFontValue } from '~/lib/scene3d/outlines'
 import { googleFontCssUrl } from '~/data/google-fonts'
@@ -29,7 +30,7 @@ export const DIMS: Record<string, [number, number]> = {
 export function defaultSpaceTypeState(): SpaceTypeState {
   return {
     effectId: 'ribbon',
-    params: defaultsFromControls(ribbonEffect.controls),
+    params: defaultsFromControls(getEffect('ribbon').controls),
     gradientStops: [
       { color: '#3b5bff', on: true }, { color: '#ff3b3b', on: true },
       { color: '#ffd23b', on: true }, { color: '#ffffff', on: false },
@@ -89,12 +90,6 @@ export async function ensureSpaceTypeFont(value: string): Promise<void> {
   try { await document.fonts.load(`700 32px "${family}"`) } catch { /* best-effort */ }
 }
 
-// Effects whose glyphs size to their own (cased) word with NO trailing-gap pad,
-// rather than the tiled-ribbon label — the gap is dead space that throws off
-// centering. Mirrored (not imported) by lib/embed/surfaces/spacetype.ts, whose
-// bundle must not reach this module's import graph.
-const RAW_WORD_EFFECTS = new Set(['coil', 'elastic', 'echo'])
-
 /**
  * Text-texture options for one Space Type build — THE shared builder. The modal
  * passes its live variable-font axes via `extraAxes`; the card/headless/clip
@@ -152,5 +147,6 @@ export function texOptsFromState(
     gradientStops: s.gradientStops.map(g => ({ ...g })),
     gradientOn: String(p.gradientMode) === 'on',
     uRepeat: Number(p.textRepeat),
+    separator: separatorFromParams(effect.id, p),
   }
 }

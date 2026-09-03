@@ -27,8 +27,12 @@ import { shutterEffect } from './shutter'
 import { ringEffect } from './ring'
 import { loftEffect } from './loft'
 import { slotEffect } from './slot'
+import { withSeparatorControls } from '../separator'
 
-/** All registered Space Type effects, in picker order. Add new effect modules here. */
+/** All registered Space Type effects, in picker order. Add new effect modules here.
+ *  Every entry passes through withSeparatorControls, which appends the shared
+ *  separator controls to tile-based effects — declare the controls ONCE there,
+ *  not per effect. */
 export const SPACE_TYPE_EFFECTS: SpaceTypeEffect[] = [
   ribbonEffect,
   stripesEffect,
@@ -58,7 +62,7 @@ export const SPACE_TYPE_EFFECTS: SpaceTypeEffect[] = [
   ringEffect,
   loftEffect,
   slotEffect,
-]
+].map(withSeparatorControls)
 
 export function getEffect(id: string): SpaceTypeEffect {
   // Case-insensitive so configs saved under an old mixed-case id (e.g. 'cornerPin' → 'cornerpin')
