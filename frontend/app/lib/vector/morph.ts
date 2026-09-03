@@ -264,3 +264,151 @@ export function subpathsToD(subs: Subpath[], precision = 2): string {
   }
   return parts.join(' ')
 }
+
+// ── Resample / align / blend ─────────────────────────────────────────────────
+
+/** Evenly spaced points per subpath for the resampled blend. 128 keeps a 200-step
+ *  outline stack under ~350 KB of SVG while hiding the polyline at print size. */
+export const BLEND_SAMPLES = 128
+
+/** `k` points spaced evenly by arc length around a CLOSED polyline. */
+export function resample(poly: Pt[], k: number): Pt[] {
+  const n = poly.length
+  if (n === 0) return []
+  if (n === 1) return Array.from({ length: k }, () => [poly[0]![0], poly[0]![1]] as Pt)
+  const lens: number[] = []
+  let total = 0
+  for (let i = 0; i < n; i++) {
+    const a = poly[i]!, b = poly[(i + 1) % n]!
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1])
+    lens.push(l); total += l
+  }
+  if (total === 0) return Array.from({ length: k }, () => [poly[0]![0], poly[0]![1]] as Pt)
+  const out: Pt[] = []
+  let edge = 0, acc = 0
+  for (let i = 0; i < k; i++) {
+    const s = (i * total) / k
+    while (edge < n - 1 && acc + lens[edge]! < s) { acc += lens[edge]!; edge++ }
+    const a = poly[edge]!, b = poly[(edge + 1) % n]!
+    const f = lens[edge]! > 0 ? (s - acc) / lens[edge]! : 0
+    out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f])
+  }
+  return out
+}
+
+/** Shoelace area: positive for one winding, negative for the other. */
+export function signedArea(poly: Pt[]): number {
+  let s = 0
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]!, b = poly[(i + 1) % poly.length]!
+    s += a[0] * b[1] - b[0] * a[1]
+  }
+  return s / 2
+}
+
+function centroid(poly: Pt[]): Pt {
+  if (!poly.length) return [0, 0]
+  let x = 0, y = 0
+  for (const p of poly) { x += p[0]; y += p[1] }
+  return [x / poly.length, y / poly.length]
+}
+
+/**
+ * Re-order `b` so `b[i]` is the natural partner of `a[i]`:
+ *  1. reverse `b` when its winding differs from `a`'s (so the blend never folds
+ *     through itself),
+ *  2. pick the start offset minimising the summed squared distance (O(k²);
+ *     k = 128 → 16k steps, run once per render),
+ *  3. add `round(twist · k)` to that offset — the user's spiral knob.
+ */
+export function alignCorrespondence(a: Pt[], b: Pt[], twist: number): Pt[] {
+  const k = a.length
+  if (k === 0 || b.length !== k) throw new Error('morph.alignCorrespondence: polylines must have equal length')
+  let bb = b
+  const areaA = signedArea(a), areaB = signedArea(b)
+  if (areaA !== 0 && areaB !== 0 && Math.sign(areaA) !== Math.sign(areaB)) bb = [...b].reverse()
+  let best = 0, bestCost = Infinity
+  for (let s = 0; s < k; s++) {
+    let cost = 0
+    for (let i = 0; i < k; i++) {
+      const p = a[i]!, q = bb[(i + s) % k]!
+      const dx = p[0] - q[0], dy = p[1] - q[1]
+      cost += dx * dx + dy * dy
+      if (cost >= bestCost) break
+    }
+    if (cost < bestCost) { bestCost = cost; best = s }
+  }
+  const shift = (best + Math.round((twist || 0) * k)) % k
+  const out: Pt[] = new Array(k)
+  for (let i = 0; i < k; i++) out[i] = bb[(i + shift + k) % k]!
+  return out
+}
+
+function skeleton(subs: Subpath[]): string {
+  return subs.map(s => (s.closed ? 'z' : 'o') + s.segs.map(g => (g.kind === 'line' ? 'L' : 'C')).join('')).join('|')
+}
+
+const lerpPt = (p: Pt, q: Pt, t: number): Pt => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]
+
+/**
+ * The outline `t` of the way from `dA` (t = 0) to `dB` (t = 1).
+ *
+ * Exact path: identical command skeletons → interpolate every point, so a
+ * hexagon→hexagon or leaf→leaf blend keeps its curves and stays small.
+ * Resampled path: subpaths paired by index after sorting each side by |area|
+ * (largest first); each pair is flattened, resampled to `samples`, aligned, and
+ * lerped into an `M … L … Z` polyline. A subpath with no partner pairs with the
+ * partner shape's centroid repeated, so it shrinks to a point.
+ */
+export function blendPath(dA: string, dB: string, t: number, opts: { twist?: number; samples?: number } = {}): string {
+  const A = parsePathD(dA), B = parsePathD(dB)
+  const tt = Math.max(0, Math.min(1, t))
+  if (A.length && skeleton(A) === skeleton(B)) {
+    const out: Subpath[] = A.map((sa, si) => {
+      const sb = B[si]!
+      return {
+        start: lerpPt(sa.start, sb.start, tt),
+        closed: sa.closed,
+        segs: sa.segs.map((ga, gi) => {
+          const gb = sb.segs[gi]!
+          if (ga.kind === 'line' && gb.kind === 'line') return { kind: 'line' as const, to: lerpPt(ga.to, gb.to, tt) }
+          const ca = ga as Extract<Seg, { kind: 'cubic' }>, cb = gb as Extract<Seg, { kind: 'cubic' }>
+          return { kind: 'cubic' as const, c1: lerpPt(ca.c1, cb.c1, tt), c2: lerpPt(ca.c2, cb.c2, tt), to: lerpPt(ca.to, cb.to, tt) }
+        }),
+      }
+    })
+    return subpathsToD(out)
+  }
+  const k = opts.samples ?? BLEND_SAMPLES
+  const byArea = (subs: Subpath[]) => subs
+    .map(s => ({ poly: flattenSubpath(s), area: Math.abs(signedArea(flattenSubpath(s))) }))
+    .sort((p, q) => q.area - p.area)
+    .map(x => x.poly)
+  const pa = byArea(A), pb = byArea(B)
+  const n = Math.max(pa.length, pb.length)
+  const out: Subpath[] = []
+  for (let i = 0; i < n; i++) {
+    const a = pa[i], b = pb[i]
+    const polyA = a ? resample(a, k) : resample([centroid(b!)], k)
+    const polyBraw = b ? resample(b, k) : resample([centroid(a!)], k)
+    const polyB = alignCorrespondence(polyA, polyBraw, opts.twist ?? 0)
+    const pts = polyA.map((p, j) => lerpPt(p, polyB[j]!, tt))
+    out.push({ start: pts[0]!, segs: pts.slice(1).map(p => ({ kind: 'line' as const, to: p })), closed: true })
+  }
+  return subpathsToD(out)
+}
+
+/** Rotate every point of `d` about the origin by `degrees` (clockwise in SVG's
+ *  y-down space, matching `arrange`'s `rotate`). */
+export function rotatePathD(d: string, degrees: number): string {
+  if (!degrees) return d
+  const r = (degrees * Math.PI) / 180
+  const c = Math.cos(r), s = Math.sin(r)
+  const rot = (p: Pt): Pt => [p[0] * c - p[1] * s, p[0] * s + p[1] * c]
+  const subs = parsePathD(d).map(sp => ({
+    start: rot(sp.start),
+    closed: sp.closed,
+    segs: sp.segs.map(g => g.kind === 'line' ? { kind: 'line' as const, to: rot(g.to) } : { kind: 'cubic' as const, c1: rot(g.c1), c2: rot(g.c2), to: rot(g.to) }),
+  }))
+  return subpathsToD(subs, 3)
+}
