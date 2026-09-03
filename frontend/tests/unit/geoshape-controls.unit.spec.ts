@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { GEO_CONTROLS, GEO_SECTIONS, visibleGeoControls, GEO_GUIDANCE } from '../../app/lib/geoshape/controls'
 import { geoAgentControls } from '../../app/lib/geoshape/agentControls'
 import { reroll } from '../../app/lib/geoshape/randomize'
-import { DEFAULT_CONFIG, type GeoShapeConfig } from '../../app/lib/geoshape/config'
+import { DEFAULT_CONFIG, mergeConfig, type GeoShapeConfig } from '../../app/lib/geoshape/config'
 import { isShapeId } from '../../app/lib/shapes/catalog'
 
 // Fields on GeoShapeConfig that are NOT a renderable control: `locks` is
@@ -261,6 +261,31 @@ describe('reroll', () => {
     const locks = { shape: true, style: false }
     const out = reroll(DEFAULT_CONFIG, locks)
     expect(out.locks).toEqual(locks)
+  })
+
+  it('rolls the blend group with the other sections and never touches the paint group', () => {
+    const start: GeoShapeConfig = { ...DEFAULT_CONFIG, fillCycle: 'ramp', paintTarget: 'outline', fills: ['#111111', '#eeeeee'] }
+    // Walk seeds until re-roll lands on a blend layout, so the roll actually exercises the group.
+    let cfg = start, out = reroll(cfg, noLocks), tries = 0
+    while (out.layout !== 'blend' && tries < 200) { cfg = out; out = reroll(cfg, noLocks); tries++ }
+    expect(out.layout).toBe('blend')
+    expect(out.blendSize).toBeGreaterThanOrEqual(80); expect(out.blendSize).toBeLessThanOrEqual(320)
+    expect(Math.abs(out.blendRotate)).toBeLessThanOrEqual(45)
+    expect(Math.abs(out.blendX)).toBeLessThanOrEqual(160)
+    expect(out.blendTwist).toBeGreaterThanOrEqual(0); expect(out.blendTwist).toBeLessThanOrEqual(0.25)
+    expect(out.blendEase).toBe('linear')
+    expect(out.fillCycle).toBe('ramp'); expect(out.paintTarget).toBe('outline'); expect(out.fills).toEqual(start.fills)
+  })
+
+  it('a locked blend section is unchanged', () => {
+    const start: GeoShapeConfig = { ...DEFAULT_CONFIG, blendShape: 'star', blendSize: 222, blendTwist: 0.4 }
+    const out = reroll(start, { blend: true })
+    expect(out.blendShape).toBe('star'); expect(out.blendSize).toBe(222); expect(out.blendTwist).toBe(0.4)
+  })
+
+  it('a re-rolled config is a fixed point of mergeConfig', () => {
+    let out = reroll(DEFAULT_CONFIG, noLocks)
+    for (let i = 0; i < 20; i++) { expect(mergeConfig(JSON.parse(JSON.stringify(out)))).toEqual(out); out = reroll(out, noLocks) }
   })
 })
 

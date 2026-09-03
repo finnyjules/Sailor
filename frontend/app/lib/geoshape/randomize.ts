@@ -82,6 +82,7 @@ function nextSeed(prevSeed: number): number {
 // own posture of leaving `fill`/`style.background` untouched by reroll.
 type ShapeGroup = Pick<GeoShapeConfig, 'shape' | 'sides' | 'starInner' | 'irregularSeed' | 'size' | 'roundCorners' | 'roundRadius' | 'libraryShape'>
 type LayoutGroup = Pick<GeoShapeConfig, 'layout' | 'count' | 'gridCols' | 'gridRows' | 'radius' | 'spacing' | 'angleStep'>
+type BlendGroup = Pick<GeoShapeConfig, 'blendShape' | 'blendLibraryShape' | 'blendSides' | 'blendStarInner' | 'blendIrregularSeed' | 'blendSize' | 'blendRotate' | 'blendX' | 'blendY' | 'blendEase' | 'blendTwist'>
 type TransformGroup = Pick<GeoShapeConfig, 'rotateBase' | 'rotateStep' | 'scaleStart' | 'scaleEnd' | 'skew' | 'spin'>
 type CompositeGroup = Pick<GeoShapeConfig, 'fillMode' | 'overlapMode'>
 type SymmetryGroup = Pick<GeoShapeConfig, 'symmetry' | 'symmetryAxis' | 'symmetrySpacing'>
@@ -122,6 +123,23 @@ function rollLayout(seed: string): LayoutGroup {
     radius: r.int(60, 400),
     spacing: r.int(80, 400),
     angleStep: r.int(10, 90),
+  }
+}
+
+function rollBlend(seed: string): BlendGroup {
+  const r = makeRng(seed, 'blend')
+  return {
+    blendShape: r.pick(SHAPES),
+    blendLibraryShape: r.pick(LIBRARY_IDS),
+    blendSides: r.int(3, 24),
+    blendStarInner: +r.range(0.01, 0.99).toFixed(2),
+    blendIrregularSeed: r.int(1, 9999),
+    blendSize: r.int(80, 320),
+    blendRotate: r.int(-45, 45),
+    blendX: r.int(-160, 160),
+    blendY: r.int(-160, 160),
+    blendEase: 'linear',
+    blendTwist: +r.range(0, 0.25).toFixed(2),
   }
 }
 
@@ -176,7 +194,7 @@ function rollStyle(seed: string): StyleGroup {
  * sections carry over unchanged from `cfg`.
  *
  * `locks` keys are the lowercased `GEO_SECTIONS` names — 'shape', 'layout',
- * 'transform', 'composite', 'symmetry', 'clip', 'style' — a truthy value
+ * 'blend', 'transform', 'composite', 'symmetry', 'clip', 'style' — a truthy value
  * locks that section. 'paint' is not a lock key: fill/stroke/overlapFill are
  * never touched by reroll regardless of locks.
  */
@@ -190,6 +208,9 @@ export function reroll(cfg: GeoShapeConfig, locks: Record<string, boolean>): Geo
   const layoutGroup: LayoutGroup = locks.layout
     ? { layout: cfg.layout, count: cfg.count, gridCols: cfg.gridCols, gridRows: cfg.gridRows, radius: cfg.radius, spacing: cfg.spacing, angleStep: cfg.angleStep }
     : rollLayout(s)
+  const blendGroup: BlendGroup = locks.blend
+    ? { blendShape: cfg.blendShape, blendLibraryShape: cfg.blendLibraryShape, blendSides: cfg.blendSides, blendStarInner: cfg.blendStarInner, blendIrregularSeed: cfg.blendIrregularSeed, blendSize: cfg.blendSize, blendRotate: cfg.blendRotate, blendX: cfg.blendX, blendY: cfg.blendY, blendEase: cfg.blendEase, blendTwist: cfg.blendTwist }
+    : rollBlend(s)
   const transformGroup: TransformGroup = locks.transform
     ? { rotateBase: cfg.rotateBase, rotateStep: cfg.rotateStep, scaleStart: cfg.scaleStart, scaleEnd: cfg.scaleEnd, skew: cfg.skew, spin: cfg.spin }
     : rollTransform(s)
@@ -210,6 +231,7 @@ export function reroll(cfg: GeoShapeConfig, locks: Record<string, boolean>): Geo
     ...cfg,
     ...shapeGroup,
     ...layoutGroup,
+    ...blendGroup,
     ...transformGroup,
     ...compositeGroup,
     ...symmetryGroup,
