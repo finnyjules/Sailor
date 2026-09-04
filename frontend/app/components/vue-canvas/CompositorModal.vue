@@ -378,6 +378,20 @@ onBeforeUnmount(() => { motionRO?.disconnect(); motionRO = null })
 const stageWrapRef = ref<HTMLElement | null>(null)
 const view = reactive({ scale: 1, tx: 0, ty: 0 })
 const ZOOM_MIN = 0.2, ZOOM_MAX = 8
+// While the view is panning/zooming, the artboard slides UNDER the floating glass
+// panels, so their `backdrop-filter: blur(12px)` (two of them ~240×590 and ~288×590
+// CSS px, ×dpr²) is re-rasterised every single frame — a compositor cost that made
+// panning janky while the JS main thread sat idle (measured: no re-render, no long
+// tasks during a pan). `viewMoving` drops the blur for the duration of the gesture
+// and 180 ms after the last change; the panels are already 75–80 % opaque, so the
+// look barely changes mid-drag and returns to full glass at rest.
+const viewMoving = ref(false)
+let viewMoveTimer: ReturnType<typeof setTimeout> | null = null
+function markViewMoving() {
+  viewMoving.value = true
+  if (viewMoveTimer) clearTimeout(viewMoveTimer)
+  viewMoveTimer = setTimeout(() => { viewMoving.value = false; viewMoveTimer = null }, 180)
+}
 const viewStyle = computed(() => ({
   width: canvasDisplay.w + 'px',
   height: canvasDisplay.h + 'px',
@@ -391,6 +405,7 @@ function zoomAround(cx: number, cy: number, factor: number) {
   const s0 = view.scale
   const s1 = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, s0 * factor))
   if (s1 === s0) return
+  markViewMoving()
   // Keep the point under (cx,cy) fixed on screen.
   view.tx += (cx - rect.left) * (1 - s1 / s0)
   view.ty += (cy - rect.top) * (1 - s1 / s0)
@@ -482,6 +497,7 @@ const zoomMenuItems = computed(() => [
 
 function onStageWheel(e: WheelEvent) {
   e.preventDefault()
+  markViewMoving()
   if (e.ctrlKey || e.metaKey) zoomAround(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01))
   else { view.tx -= e.deltaX; view.ty -= e.deltaY } // two-finger / wheel scroll → pan
 }
@@ -501,6 +517,7 @@ function onStagePointerDownPan(e: PointerEvent) {
 function onStagePointerMovePan(e: PointerEvent) {
   if (!panFrom) return
   didPan = true
+  markViewMoving()
   view.tx = panFrom.tx + (e.clientX - panFrom.x)
   view.ty = panFrom.ty + (e.clientY - panFrom.y)
 }
@@ -1288,7 +1305,11 @@ function onKeyup(e: KeyboardEvent) { if (e.code === 'Space') spaceDown.value = f
 // cross-origin ComfyUI iframe, tab switch), the keyup lands elsewhere and
 // spaceDown would stay stuck true — freezing layer select/move behind pan mode.
 // Reset the whole pan gesture on blur / visibility loss.
-function clearPan() { spaceDown.value = false; panning.value = false; panFrom = null }
+function clearPan() {
+  spaceDown.value = false; panning.value = false; panFrom = null
+  if (viewMoveTimer) { clearTimeout(viewMoveTimer); viewMoveTimer = null }
+  viewMoving.value = false
+}
 function onVisibility() { if (document.hidden) clearPan() }
 onMounted(() => {
   window.addEventListener('keydown', onKeydown, true)
@@ -4811,7 +4832,7 @@ onUnmounted(() => {
     @dragover.prevent
     @drop.prevent
   >
-    <div class="w-full h-full max-w-[1560px] max-h-[960px] bg-[#0a0a0a] rounded-xl border border-white/10 shadow-2xl relative antialiased text-white/85 overflow-hidden">
+    <div class="w-full h-full max-w-[1560px] max-h-[960px] bg-[#0a0a0a] rounded-xl border border-white/10 shadow-2xl relative antialiased text-white/85 overflow-hidden" :class="{ 'view-moving': viewMoving }">
     <!-- Modal title (top-left, studio-style). The stage is full-bleed, so zoomed
          content passes UNDER this chip — it carries the same glass scrim as the
          floating panels so it stays readable over a bright layer. -->
@@ -7181,6 +7202,14 @@ onUnmounted(() => {
    bg-[#0e0e10]/80 fill is preserved). */
 .glass-panel {
   background-image: linear-gradient(140deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.008) 42%, rgba(255, 255, 255, 0.035) 100%);
+}
+/* While the view is panning/zooming, drop the glass panels' backdrop-blur so the
+   browser stops re-blurring the content sliding under them every frame (the pan-lag
+   root cause). The panels stay 75–80 % opaque, so this reads as the same panel; the
+   blur returns 180 ms after the gesture stops (see `viewMoving`). */
+.view-moving .glass-panel {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .inspector-body > div {
