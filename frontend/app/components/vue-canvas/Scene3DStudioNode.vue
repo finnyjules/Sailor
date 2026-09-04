@@ -10,7 +10,7 @@ import { minHeightForPorts } from '~/lib/canvas/portLayout'
 import { parseDoc } from '~/lib/scene3d/config'
 import { SceneEngine } from '~/lib/scene3d/engine'
 import { renderPasses } from '~/lib/scene3d/passes'
-import { sceneHasMotion, renderMotionFrameSettled } from '~/lib/scene3d/motion/render'
+import { sceneHasMotion, renderMotionFrameSettled, sceneFrameClock } from '~/lib/scene3d/motion/render'
 import { makeScene3DFrameSource } from '~/lib/scene3d/motion/frameSource'
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { registerScene3DRebaker, unregisterScene3DRebaker } from '~/lib/scene3d/rebake'
@@ -91,6 +91,25 @@ let headlessCanvas: HTMLCanvasElement | null = null
 let headlessEngine: SceneEngine | null = null
 let registered = false
 
+// Idle counter + release timer. A render/pull increments `inFlight` around its
+// async work; the release timer disposes the shared engine only when nothing is
+// in flight AND the scene is not animated. This preserves the "idle node opens no
+// WebGL context" guarantee now that STILL scenes also register a frame source
+// (and are therefore `registered`, which used to be the disposal gate).
+let inFlight = 0
+let releaseTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleEngineRelease(): void {
+  if (releaseTimer) clearTimeout(releaseTimer)
+  releaseTimer = setTimeout(() => {
+    releaseTimer = null
+    if (inFlight > 0) { scheduleEngineRelease(); return }   // a render/pull is mid-flight — retry
+    if (sceneHasMotion(sceneDoc.value)) return              // animated: rAF pulls keep it warm
+    if (!headlessEngine) return
+    headlessEngine.dispose(); headlessEngine = null; headlessCanvas = null
+  }, 400)
+}
+
 function ensureHeadless(w: number, h: number): SceneEngine | null {
   if (typeof document === 'undefined') return null
   if (!headlessCanvas) headlessCanvas = document.createElement('canvas')
@@ -104,25 +123,31 @@ function ensureHeadless(w: number, h: number): SceneEngine | null {
 
 function syncRegistration() {
   const doc = sceneDoc.value
-  const animated = sceneHasMotion(doc)
-  if (animated && !registered) {
+  const renderable = doc.objects.length > 0
+  if (renderable && !registered) {
     registerStudioFrameSource(props.id, makeScene3DFrameSource({
-      getClock: () => {
-        const d = sceneDoc.value
-        return { duration: d.motion.duration, fps: d.motion.fps, width: d.output.width, height: d.output.height }
-      },
+      // Still scenes report duration 0 (see sceneFrameClock) so the Frame pulls
+      // them once and runs no rAF; animated scenes report their real clock.
+      getClock: () => sceneFrameClock(sceneDoc.value),
       // Settled, not plain renderMotionFrame: decal meshes attach on a microtask
-      // after syncFromDoc (texture aspect), and a downstream Frame's bake pulls
-      // each frame exactly once — a synchronous render made the sticker pop in a
-      // few frames into the pulled sequence. getFrame already awaits this.
-      renderAt: (t01, w, h) => {
+      // after syncFromDoc, and a Frame pulls each frame exactly once — a sync
+      // render made the sticker pop in a few frames late. getFrame already awaits.
+      renderAt: async (t01, w, h) => {
         const eng = ensureHeadless(w, h)
         if (!eng) return null
-        return renderMotionFrameSettled(eng, sceneDoc.value, t01)
+        inFlight++
+        try {
+          return await renderMotionFrameSettled(eng, sceneDoc.value, t01)
+        } finally {
+          inFlight--
+          // Release AFTER the consumer copies (pullLiveFrame drawImages once our
+          // promise resolves); a synchronous dispose here would blank that canvas.
+          scheduleEngineRelease()
+        }
       },
     }))
     registered = true
-  } else if (!animated && registered) {
+  } else if (!renderable && registered) {
     unregisterStudioFrameSource(props.id)
     registered = false
   }
@@ -155,18 +180,17 @@ async function renderPreview(): Promise<void> {
   const h = Math.max(1, Math.round(doc.output.height * scale))
   const eng = ensureHeadless(w, h)
   if (!eng) return
+  inFlight++
   try {
     const url = (await renderMotionFrameSettled(eng, doc, 0)).toDataURL('image/png')
     if (gen === previewGen) livePreviewUrl.value = url
   }
   catch { /* transient WebGL hiccup — keep the previous preview */ }
   finally {
-    // Free the context when nothing else needs it (no active frame source, no
-    // newer preview run still using this engine). Identity-checked: the await
-    // above yields, so unmount may already have disposed and replaced this
-    // engine — disposing it twice would double-release the shared WebGL
-    // context handle.
-    if (gen === previewGen && !registered && headlessEngine === eng) { eng.dispose(); headlessEngine = null; headlessCanvas = null }
+    inFlight--
+    // Defer disposal: a still node releases when idle (400 ms), a wired still keeps
+    // its engine across the Frame's next pull, an animated scene stays warm.
+    scheduleEngineRelease()
   }
 }
 function schedulePreview(): void {
@@ -242,6 +266,7 @@ onMounted(() => registerScene3DRebaker(props.id, rebakePasses))
 
 onBeforeUnmount(() => {
   if (previewTimer) clearTimeout(previewTimer)
+  if (releaseTimer) clearTimeout(releaseTimer)
   unregisterScene3DRebaker(props.id)
   if (registered) unregisterStudioFrameSource(props.id)
   unsubFieldCatalog()
