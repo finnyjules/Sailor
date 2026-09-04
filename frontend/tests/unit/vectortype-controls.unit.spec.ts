@@ -942,13 +942,13 @@ describe('shader fills enter the agent vocabulary', () => {
 
   const keysOf = (c: VectorTypeConfig) => vtAgentControls(c).map((s) => s.key)
 
-  it('offers the three frozen shader keys only when the fill type is shader', () => {
+  it('offers the four frozen shader keys only when the fill type is shader', () => {
     // Measured before the branch was written: a shader-typed config emitted
     // `text, fontId, size, tracking, align, fill.type, fill.a, fill.b, fillAnchor,
     // strokeWidth, motion.stagger.*` and not one `layer.paint.shader` key. Nothing derives
     // them; Shape Studio needed the same explicit branch.
     const frozen = VT_SHADER_CONTROLS.map((c) => c.key)
-    expect(frozen).toEqual(['layer.paint.shader.effectId', 'layer.paint.shader.anchor', 'layer.paint.shader.speed'])
+    expect(frozen).toEqual(['layer.paint.shader.effectId', 'layer.paint.shader.anchor', 'layer.paint.shader.speed', 'layer.paint.shader.seed'])
     for (const k of frozen) expect(keysOf(shaderCfg()), k).toContain(k)
     for (const k of frozen) expect(keysOf(cfg()), k).not.toContain(k)
     expect(keysOf(paintCfg({ ...DEFAULT_FILL, type: 'stripes' })).some((k) => k.startsWith('layer.paint.shader'))).toBe(false)
@@ -1053,7 +1053,7 @@ describe('shader fills enter the agent vocabulary', () => {
     // it is painted with, so a shader fill reads them exactly like a solid one.
     expect(keysOf(shader).filter((k) => k.startsWith('layer.'))).toEqual([
       'layer.paint.type', 'layer.anchor', 'layer.opacity', 'layer.blend',
-      'layer.paint.shader.effectId', 'layer.paint.shader.anchor', 'layer.paint.shader.speed',
+      'layer.paint.shader.effectId', 'layer.paint.shader.anchor', 'layer.paint.shader.speed', 'layer.paint.shader.seed',
       'layer.paint.shader.params.segments', 'layer.paint.shader.params.zoom', 'layer.paint.shader.params.mode',
     ])
   })

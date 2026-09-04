@@ -82,6 +82,11 @@ export function shaderAgentControls(
   const macro = shaderEffectMacro(opts.catalog, active?.id ?? '')
   if (macro) out.push(macro)
 
+  // Variation — the field/tears/grain seed. A top-level config scalar, not
+  // per-layer, so "give me a different variation"/"reroll" resolves to ONE
+  // write regardless of which effect layer is active or enabled.
+  out.push(slider('seed', 'Variation', 1, 9999, 1, 'Effect', 'Re-rolls the generative field/tears/grain pattern. A new number is a different pattern; the same number reproduces it.'))
+
   // Active effect's own knobs (the heart of the stylize stage) — scoped to
   // whichever layer is selected in the aside StudioLayerStack.
   if (active?.enabled && effectDef) {
@@ -232,6 +237,10 @@ export const SHADER_TUNE_EXAMPLES: { ask: string; patch: Record<string, ParamVal
   {
     ask: 'halftone poster, navy on cream, mid band only',
     patch: { effect: 'halftone', 'effects.0.params.u_size': 0.03, 'duotone.enabled': true, 'duotone.ink': '#12203f', 'duotone.paper': '#f3ead8', 'effects.0.mask.enabled': true, 'effects.0.mask.shape': 'band', 'effects.0.mask.size': 0.3, 'effects.0.mask.feather': 0.4 },
+  },
+  {
+    ask: 'give me a different variation of this plasma field',
+    patch: { effect: 'plasma', seed: 2178 },
   },
 ]
 

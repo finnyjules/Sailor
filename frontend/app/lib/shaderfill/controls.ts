@@ -109,6 +109,18 @@ export function shaderFillControls(prefix = 'fill.shader'): ControlSpec[] {
       group: GROUP,
       hint: 'Animation rate multiplier for the effect; 0 = frozen (still).',
     },
+    {
+      key: `${prefix}.seed`,
+      label: 'Variation',
+      kind: 'slider',
+      min: 1,
+      max: 9999,
+      step: 1,
+      default: DEFAULT_SHADER_SPEC.seed,
+      group: GROUP,
+      hint: 'Varies the generative field — a different number gives a different pattern.',
+      animatable: false,
+    },
   ]
 }
 

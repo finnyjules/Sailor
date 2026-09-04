@@ -138,6 +138,7 @@ exports[`shader fills enter the agent vocabulary > is a characterization snapsho
       "qr",
       "shader",
       "shapes",
+      "paper",
     ],
   },
   {
@@ -247,6 +248,7 @@ exports[`shader fills enter the agent vocabulary > is a characterization snapsho
       "qr",
       "shader",
       "shapes",
+      "paper",
     ],
   },
   {
@@ -321,6 +323,17 @@ exports[`shader fills enter the agent vocabulary > is a characterization snapsho
     "max": 4,
     "min": 0,
     "step": 0.05,
+  },
+  {
+    "default": 42,
+    "group": "Shader",
+    "hint": "Varies the generative field — a different number gives a different pattern.",
+    "key": "layer.paint.shader.seed",
+    "kind": "slider",
+    "label": "Variation",
+    "max": 9999,
+    "min": 1,
+    "step": 1,
   },
   {
     "default": 6,
@@ -494,6 +507,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
       "qr",
       "shader",
       "shapes",
+      "paper",
     ],
   },
   {
@@ -610,6 +624,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
       "qr",
       "shader",
       "shapes",
+      "paper",
     ],
   },
   {
@@ -801,6 +816,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
       "qr",
       "shader",
       "shapes",
+      "paper",
     ],
   },
   {
@@ -983,6 +999,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
       "qr",
       "shader",
       "shapes",
+      "paper",
     ],
   },
   {
