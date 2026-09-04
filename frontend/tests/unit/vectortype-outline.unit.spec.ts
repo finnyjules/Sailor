@@ -32,12 +32,29 @@ import {
 } from '~/lib/vectortype/render'
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/inter-subset-var.ttf', import.meta.url))
+const STATIC_FIXTURE = fileURLToPath(new URL('../fixtures/inter-subset-static.ttf', import.meta.url))
 
 function loadFixtureFont(): VtFont {
   const bytes = new Uint8Array(readFileSync(FIXTURE))
   const raw: any = (fontkit as any).create(bytes)
   return {
     id: 'inter-subset',
+    axes: normaliseAxes(raw?.variationAxes),
+    unitsPerEm: Number(raw?.unitsPerEm) || 1000,
+    raw,
+  }
+}
+
+/** A STATIC cut — a Google family or a library face, `VtFont.axes === []`. No
+ *  `fvar`, so fontkit's own `raw` IS the instance; there is no `getVariation`
+ *  to call. This is the shape every "any font" pick that isn't a variable
+ *  font takes, and it is the fixture the live bug (picking a Google family
+ *  threw on every preview frame) never had a test through `textOutlines`. */
+function loadStaticFixtureFont(): VtFont {
+  const bytes = new Uint8Array(readFileSync(STATIC_FIXTURE))
+  const raw: any = (fontkit as any).create(bytes)
+  return {
+    id: 'google:Inter@700',
     axes: normaliseAxes(raw?.variationAxes),
     unitsPerEm: Number(raw?.unitsPerEm) || 1000,
     raw,
@@ -365,5 +382,25 @@ describe('the SVG writer is not type-specific', () => {
       { viewBox: [0, 0, 1, 1] },
     )
     expect(svg).toContain('data-label="a &amp; &quot;b&quot; &lt;c&gt;"')
+  })
+})
+
+describe('textOutlines on a STATIC font (no fvar/gvar) — the "any font" program', () => {
+  const staticFont = loadStaticFixtureFont()
+
+  it('is a static cut, not a variable font', () => {
+    expect(staticFont.axes).toEqual([])
+  })
+
+  it('shapes without calling fontkit\'s getVariation, and reports empty coords', () => {
+    // fontkit throws "Variations require a font with the fvar, gvar and glyf,
+    // or CFF2 tables" the moment `getVariation` is called on a font with no
+    // `fvar` — this is the exact live-found crash (picking a Google family
+    // blanked every preview frame). A static font has no axes to place, so
+    // there is nothing for `coords` to report either.
+    const o = textOutlines(staticFont, 'Sailor', {})
+    expect(o.glyphs).toHaveLength(6)
+    for (const g of o.glyphs) expect(g.commands.length).toBeGreaterThan(0)
+    expect(o.coords).toEqual({})
   })
 })

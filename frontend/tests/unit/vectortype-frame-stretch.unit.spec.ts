@@ -51,6 +51,13 @@ function loadFixtureFont(): VtFont {
   return { id: 'inter-subset', axes: normaliseAxes(raw?.variationAxes), unitsPerEm: Number(raw?.unitsPerEm) || 1000, raw }
 }
 const font = loadFixtureFont()
+
+// A STATIC cut — `axes: []` — the shape a Google family or library face takes.
+const STATIC_FIXTURE = fileURLToPath(new URL('../fixtures/inter-subset-static.ttf', import.meta.url))
+function loadStaticFixtureFont(): VtFont {
+  const raw: any = (fontkit as any).create(new Uint8Array(readFileSync(STATIC_FIXTURE)))
+  return { id: 'google:Inter@700', axes: normaliseAxes(raw?.variationAxes), unitsPerEm: Number(raw?.unitsPerEm) || 1000, raw }
+}
 const cfg = (over: Partial<typeof DEFAULT_CONFIG>) => mergeConfig({ ...DEFAULT_CONFIG, text: 'Sailor', ...over } as any)
 
 /** One `kind: 'tracks'` move wrapping a single track — the moves-shaped
@@ -400,5 +407,44 @@ describe('vectorTypeFrame — fit solves against the DAMPED pipeline', () => {
   it('fit with empty text reports no solve at all', () => {
     const f = vectorTypeFrame(font, cfg({ fit: 'width', text: '' }), 0, { fitBoxWidth: 400 })
     expect(f.stretch.fitted).toBeNull()
+  })
+})
+
+// A STATIC cut (`VtFont.axes === []`) is a first-class font since the any-font
+// program — a Google family or a library face, not a broken load. The live bug:
+// `textOutlines` called fontkit's `getVariation(coords)` unconditionally, and
+// fontkit throws "Variations require a font with the fvar, gvar and glyf, or
+// CFF2 tables" the instant a static font reaches it — every preview frame blew
+// up, `0 glyphs 0 commands`, blank canvas. These prove the frame — not just the
+// shaper — survives that font shape, including the two paths the bug report
+// called out by name: smart stretch, and a staggered (axis-free) run.
+describe('vectorTypeFrame — a STATIC font (no variation axes)', () => {
+  const staticFont = loadStaticFixtureFont()
+
+  it('renders ink for a static font', () => {
+    const f = vectorTypeFrame(staticFont, cfg({ fontId: 'google:Inter@700' }), 0)
+    expect(f.outlines.glyphs).toHaveLength(6)
+    expect(f.outlines.bbox.maxX - f.outlines.bbox.minX).toBeGreaterThan(0)
+    expect(f.outlines.coords).toEqual({})
+  })
+
+  it('smart stretch still widens a static cut, command count held', () => {
+    const base = vectorTypeFrame(staticFont, cfg({ fontId: 'google:Inter@700' }), 0)
+    const wide = vectorTypeFrame(staticFont, cfg({ fontId: 'google:Inter@700', stretch: 1.6 }), 0)
+    expect(width(wide)).toBeGreaterThan(width(base))
+    expect(commandCount(wide)).toBe(commandCount(base))
+  })
+
+  it('a staggered, axis-free run does not throw', () => {
+    const c = cfg({
+      fontId: 'google:Inter@700',
+      motion: {
+        ...DEFAULT_CONFIG.motion,
+        stagger: { ...DEFAULT_CONFIG.motion.stagger, delay: 0.5 },
+      },
+    } as any)
+    expect(() => vectorTypeFrame(staticFont, c, 0)).not.toThrow()
+    const f = vectorTypeFrame(staticFont, c, 0)
+    expect(f.outlines.glyphs.length).toBeGreaterThan(0)
   })
 })

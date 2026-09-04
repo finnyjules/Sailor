@@ -168,7 +168,14 @@ export function textOutlines(
     return { glyphs: [], width: 0, unitsPerEm, coords, bbox: { ...EMPTY_BBOX }, metrics }
   }
 
-  const instance: any = font.raw.getVariation(coords)
+  // A STATIC cut — a Google family or a library face, `axes: []` since the
+  // any-font program — has no `fvar`/`gvar`/`glyf`+CFF2 for fontkit to
+  // interpolate, and `getVariation` does not ignore that: it THROWS ("Variations
+  // require a font with the fvar, gvar and glyf, or CFF2 tables"). That is not
+  // a broken font reaching this line, it is the expected shape of most of the
+  // catalog now, so a static font skips the call entirely and shapes off
+  // `font.raw` itself — which is already the only instance it has.
+  const instance: any = font.axes.length > 0 ? font.raw.getVariation(coords) : font.raw
   const run: any = instance.layout(text)
   const runGlyphs: any[] = run?.glyphs ?? []
   const positions: any[] = run?.positions ?? []
