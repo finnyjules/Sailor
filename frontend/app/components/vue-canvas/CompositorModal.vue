@@ -42,6 +42,8 @@ import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, ty
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
+import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
 import { generateVectorFromText, vectorizeImage, urlToDataUrl } from '~/composables/useVectorAi'
 import { imageLayerUrl } from '~/composables/useCompositorLayers'
@@ -63,7 +65,7 @@ import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 import '~/lib/motion/paint' // registers the motion painter for paintLayerStack(t)
 import { bakeAndUpload, motionSourceKey, type MotionParams } from '~/lib/motion/bake'
 import { readGrid } from '~/lib/frame/gridConfig'
-import { resolveGrid } from '~/lib/frame/grid'
+import { resolveGrid, type FrameGrid } from '~/lib/frame/grid'
 import CompositorMotionTimeline from '~/components/vue-canvas/compositor/CompositorMotionTimeline.vue'
 import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
@@ -256,16 +258,24 @@ const baseAspect = computed(() => {
   return d && d.h ? d.w / d.h : 1
 })
 const canvasDisplay = reactive({ w: 680, h: 680 })
-// ── Grid overlay (editor-only guide) ────────────────────────────────────────
-// Read-only here: this modal never writes sailor_localGrid on its own (a later
-// grid-inspector task owns edits). Purely a display aid over the stage — never
-// consumed by any paintLayerStack/bake call in this file (those all draw into
-// an offscreen `off` canvas, not this DOM overlay), so it can't leak into an
-// export or embed. The modal IS the editor, so there is no separate "edit
-// mode" gate the way the card has — visible whenever the grid itself is on.
+// ── Grid overlay + inspector ─────────────────────────────────────────────────
+// `gridConfig` is display-only wiring: it feeds the overlay below (lines +
+// region rects drawn over the stage). It is never consumed by any
+// paintLayerStack/bake call in this file (those all draw into an offscreen
+// `off` canvas, not this DOM overlay), so it can't leak into an export or
+// embed. The modal IS the editor, so there is no separate "edit mode" gate
+// the way the card has — visible whenever the grid itself is on.
+// Writes go through the editor's `setGrid` (below, in the "No selection" panel's
+// Grid section) — same property-write path as `setBackground`/`setPostEffects`.
 const gridConfig = computed(() => readGrid(compositor.value?.data?.properties as any))
 const gridResolved = computed(() => resolveGrid(gridConfig.value, canvasDisplay.w, canvasDisplay.h))
 const showGridOverlay = computed(() => gridConfig.value.mode !== 'off' && gridConfig.value.overlay)
+function patchGrid(patch: Partial<FrameGrid>) {
+  setGrid({ ...gridConfig.value, ...patch })
+}
+function patchGen(patch: Partial<FrameGrid['gen']>) {
+  setGrid({ ...gridConfig.value, gen: { ...gridConfig.value.gen, ...patch } })
+}
 const stageBoxRef = ref<HTMLElement | null>(null)
 // The stage box is full-bleed (inset-0): the glass panels float ABOVE it, so
 // zoomed/panned content slides under them instead of cropping at their edge.
@@ -565,6 +575,7 @@ const {
   addPathLayers, addPathFromSvg, deleteLayers,
   background, setBackground,
   postEffects, setPostEffects,
+  setGrid,
   undo, redo, canUndo, canRedo,
   selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, recordHistory, commit, handleEditorKey, pasteClipboard,
   selectionBox, selectionHandles, startGroupResize,
@@ -6978,6 +6989,69 @@ onUnmounted(() => {
             <div class="panel-label mb-1.5">Post-processing</div>
             <p class="text-[10px] text-white/30 leading-snug mb-2">Grades the whole frame after all layers composite — bakes into renders, exports and motion stills.</p>
             <PostEffectsControls :effects="postEffects" @update="(fx: any[]) => setPostEffects(fx as any)" />
+          </div>
+          <!-- Grid — a layout guide (explicit or seeded-generated) that snaps
+               drag/resize and, optionally, draws an editor-only overlay. Never
+               baked into the render (see the comment above `gridConfig`). -->
+          <div class="border-t border-white/[0.06] pt-3">
+            <div class="panel-label mb-1.5">Grid</div>
+            <StudioSegmented :options="['off', 'explicit', 'generated']" :model-value="gridConfig.mode"
+              @update:model-value="(v: any) => patchGrid({ mode: v })" />
+
+            <template v-if="gridConfig.mode === 'explicit'">
+              <div class="mt-2 flex flex-col gap-1.5">
+                <StudioSlider label="Columns" :min="1" :max="24" :step="1" :bindable="false"
+                  :model-value="gridConfig.columns" @update:model-value="(v: number) => patchGrid({ columns: v })" />
+                <StudioSlider label="Rows" :min="1" :max="24" :step="1" :bindable="false"
+                  :model-value="gridConfig.rows" @update:model-value="(v: number) => patchGrid({ rows: v })" />
+                <StudioSlider label="Gutter" :min="0" :max="0.1" :step="0.002" :bindable="false"
+                  :model-value="gridConfig.gutter" @update:model-value="(v: number) => patchGrid({ gutter: v })" />
+                <StudioSlider label="Margin" :min="0" :max="0.2" :step="0.002" :bindable="false"
+                  :model-value="gridConfig.margin" @update:model-value="(v: number) => patchGrid({ margin: v })" />
+              </div>
+            </template>
+
+            <template v-else-if="gridConfig.mode === 'generated'">
+              <div class="mt-2 flex flex-col gap-1.5">
+                <div class="grid grid-cols-2 gap-1.5">
+                  <StudioSlider label="Cols min" :min="1" :max="24" :step="1" :bindable="false"
+                    :model-value="gridConfig.gen.colRange[0]"
+                    @update:model-value="(v: number) => patchGen({ colRange: [v, Math.max(v, gridConfig.gen.colRange[1])] })" />
+                  <StudioSlider label="Cols max" :min="1" :max="24" :step="1" :bindable="false"
+                    :model-value="gridConfig.gen.colRange[1]"
+                    @update:model-value="(v: number) => patchGen({ colRange: [Math.min(gridConfig.gen.colRange[0], v), v] })" />
+                </div>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <StudioSlider label="Rows min" :min="1" :max="24" :step="1" :bindable="false"
+                    :model-value="gridConfig.gen.rowRange[0]"
+                    @update:model-value="(v: number) => patchGen({ rowRange: [v, Math.max(v, gridConfig.gen.rowRange[1])] })" />
+                  <StudioSlider label="Rows max" :min="1" :max="24" :step="1" :bindable="false"
+                    :model-value="gridConfig.gen.rowRange[1]"
+                    @update:model-value="(v: number) => patchGen({ rowRange: [Math.min(gridConfig.gen.rowRange[0], v), v] })" />
+                </div>
+                <StudioSlider label="Regularity" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="gridConfig.gen.regularity" @update:model-value="(v: number) => patchGen({ regularity: v })" />
+                <StudioSwitch label="Merge cells" :model-value="gridConfig.gen.merge"
+                  @update:model-value="(v: boolean) => patchGen({ merge: v })" />
+                <StudioSlider v-if="gridConfig.gen.merge" label="Max span" :min="1" :max="8" :step="1" :bindable="false"
+                  :model-value="gridConfig.gen.mergeMaxSpan" @update:model-value="(v: number) => patchGen({ mergeMaxSpan: v })" />
+                <div class="panel-label mt-1 mb-1">Symmetry</div>
+                <StudioSegmented :options="['none', 'mirror']" :model-value="gridConfig.gen.symmetry"
+                  @update:model-value="(v: any) => patchGen({ symmetry: v })" />
+                <div class="mt-1 flex items-center gap-2">
+                  <StudioButton variant="secondary" @click="patchGen({ seed: Math.floor(Math.random() * 9999) + 1 })">New variation</StudioButton>
+                  <div class="min-w-0 flex-1">
+                    <StudioSlider label="Seed" :min="1" :max="9999" :step="1" :default="42" :bindable="false"
+                      :model-value="gridConfig.gen.seed" @update:model-value="(v: number) => patchGen({ seed: v })" />
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="gridConfig.mode !== 'off'" class="mt-2">
+              <StudioSwitch label="Show overlay" :model-value="gridConfig.overlay"
+                @update:model-value="(v: boolean) => patchGrid({ overlay: v })" />
+            </div>
           </div>
           <!-- Expressive arrange (a whole group is selected) -->
           <div v-if="soleSelectedGroup" class="border-t border-white/[0.06] pt-3">
