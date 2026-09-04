@@ -71,7 +71,13 @@ Julien adores Carsten Gueth (@die_doing): hundreds of thin outlines stepping fro
 
 Plans: not yet written.
 
-### Vector Type — Motion tab as a stack of moves (+ shared motion core) — LANDED 2026-09-03 (`d5963df25`, 17 commits)
+### Vector Type — Motion tab: card stack → DialKit-feel timeline — LANDED 2026-09-04 (`6332972b4`, 11 commits)
+
+The card stack (below, landed 09-03) read as messy and hard to see — Julien: "it feels messy and hard to read. a timeline feels clearer," pointing at Jitter and Josh Puckett's **DialKit** timeline. So the Motion tab became a **bottom-docked timeline** with the selected move's controls in the right inspector, built native over the same moves (not the DialKit library — same call as the DialKit-inspired sliders). A move gained a start time `at` + a `loop` flag; `phase`/`play` retired; **In/Out is now a toggle in the move's controls, not a label on the band** (derived from the preset's in/out pair, 17 pairs guarded by a catalog test). Each move is a **band** placed by `at`, sized by its length, **with its ease curve drawn inside it**; drag the body to move it in time, drag an edge to resize, drag the ruler to scrub (playhead seeks, playback pauses), Alt-drag to zoom. The gallery regrouped by move type (no In/Loop/Out tabs; in/out pairs shown as one tile). The composition engine, migration and ease all carried over; 09-03 documents convert identically (out-window compression reproduced exactly). Live-verified in the browser: ruler + playhead, add-move gallery, band with ease-in-curve, band drag, ruler scrub-and-pause, ease swap, In/Out hidden for unpaired presets. **A real TDZ crash** ("Cannot access VT_STRETCH_MAX before initialization") the unit tests missed was found live and fixed by moving the dial-range constants to a dependency-free leaf. ~1420 tests; per-task reviews (three parity bugs + the runtime crash, each fixed with a test). **Still owed** (carried): the Collection-binding chip; agent add/remove-move; the "Change" button on a Blink/Scatter card falls back to Add.
+
+Spec: [2026-09-04-motion-timeline-design.md](superpowers/specs/2026-09-04-motion-timeline-design.md) · plan: [2026-09-04-motion-timeline.md](superpowers/plans/2026-09-04-motion-timeline.md).
+
+### Vector Type — Motion tab as a stack of moves (+ shared motion core) — LANDED 2026-09-03 (`d5963df25`, 17 commits; superseded by the timeline above)
 
 The Motion tab had grown five ways of animating, each with its own look: three preset slots behind a modal, a "Motion" slider block that is really Stagger plus two effects, two inline tile galleries, raw track rows, and clip length at the bottom, held together by five paragraphs of explanation. No ease curve was visible or editable, a preset's ease was hidden, ping-pong was offered as an ease, and you could not stack two entrances. Julien: "a complete mess, rethink it completely."
 
