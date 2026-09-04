@@ -512,6 +512,8 @@ function onStagePointerDownPan(e: PointerEvent) {
   if (e.button === 1 || (spaceDown.value && e.button === 0)) {
     e.preventDefault(); e.stopPropagation()
     panning.value = true; didPan = false
+    markViewMoving() // pause the render loop at gesture START, not first move, so the
+    // pan doesn't wait a render cycle (~50–200 ms) before it starts moving smoothly
     panFrom = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty }
     ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
   }
