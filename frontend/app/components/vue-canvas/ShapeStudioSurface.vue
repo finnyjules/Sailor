@@ -26,6 +26,7 @@ import {
 import { reroll } from '~/lib/geoshape/randomize'
 import { GEO_CONTROLS, GEO_SECTIONS, visibleGeoControls, type GeoControl } from '~/lib/geoshape/controls'
 import { geoAgentControls, GEO_GUIDANCE } from '~/lib/geoshape/agentControls'
+import { distributeToGeoFills } from '~/lib/geoshape/distribute'
 import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioLayerStack from '~/components/vue-canvas/StudioLayerStack.vue'
@@ -34,8 +35,10 @@ import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vu
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPanel.vue'
+import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import type { Paint } from '~/lib/compositor/paint'
+import type { PaletteFamily } from '~/lib/color/seedFamily'
 import { useStudioAgent } from '~/composables/useStudioAgent'
 import { makeConfigParams } from '~/lib/agent/configParams'
 import { docAspect } from '~/lib/agent/takeThumbs'
@@ -305,6 +308,15 @@ function fillDrop(i: number) {
   fillDragEnd()
 }
 function fillDragEnd() { fillDrag.from = -1; fillDrag.over = -1 }
+
+// Seed-engine palette → discrete fills (Task 12: first DISCRETE-palette consumer —
+// lands N palette colors as N separate fills rather than a gradient projection).
+// Flips fillStrategy off 'single' so the write is visible immediately.
+function applyPaletteToFills(fam: PaletteFamily) {
+  const next = distributeToGeoFills(activeMark.value, fam.hexes)
+  setGeoControl('fills', next.fills)
+  setGeoControl('fillStrategy', next.fillStrategy)
+}
 
 function addOverlapFill() { setGeoControl('overlapFills', [...activeMark.value.overlapFills, '#ffffff']) }
 function removeOverlapFill(i: number) {
@@ -578,6 +590,11 @@ async function exportSvg() {
             <StudioColorField v-if="strokeEnabled" label="Stroke color" v-model="strokeHex" />
           </template>
         </StudioControlPanel>
+
+        <!-- Seed-engine palette → discrete fills. Shown regardless of fillStrategy —
+             applying a family flips fillStrategy off 'single' itself, so the picker
+             must stay reachable even from the (default) single-fill state. -->
+        <PalettePicker mode="stops" class="mt-2" @apply-family="applyPaletteToFills" />
 
         <!-- Fills list editor — under the Paint card when fillStrategy isn't 'single'. -->
         <div v-if="activeMark.fillStrategy !== 'single'" class="mt-2 space-y-2">
