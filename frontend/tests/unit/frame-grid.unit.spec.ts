@@ -20,6 +20,25 @@ describe('resolveGrid explicit', () => {
     expect(xs[0]).toBe(100)                             // left margin 0.1 * 1000
     expect(xs[xs.length - 1]).toBe(900)                // right margin
   })
+  it('gutter=0 is a no-op — regions match the ungapped cell boundaries', () => {
+    const g = { ...defaultGrid(), mode: 'explicit' as const, columns: 4, rows: 2, margin: 0, gutter: 0 }
+    const { xs, ys, regions } = resolveGrid(g, 1200, 800)
+    expect(regions[0]).toEqual({ x: 0, y: 0, w: 300, h: 400 })
+    expect(regions).toHaveLength((xs.length - 1) * (ys.length - 1))
+  })
+  it('gutter>0 shrinks every region and leaves a gap between neighbours', () => {
+    const g = { ...defaultGrid(), mode: 'explicit' as const, columns: 4, rows: 2, margin: 0, gutter: 0.02 }
+    const { regions } = resolveGrid(g, 1000, 1000)
+    const gutterPx = 0.02 * 1000 // 20px
+    const cellW = 1000 / 4 // 250px
+    // first region: inset by gutterPx/2 on each side, so width shrinks by gutterPx
+    expect(regions[0]!.x).toBeCloseTo(gutterPx / 2, 0)
+    expect(regions[0]!.w).toBeCloseTo(cellW - gutterPx, 0)
+    // adjacent regions (same row) no longer touch: a gap sits between them
+    const first = regions[0]!
+    const second = regions[1]!
+    expect(second.x).toBeGreaterThan(first.x + first.w)
+  })
 })
 
 function gen(over: Partial<FrameGrid['gen']> = {}): FrameGrid {

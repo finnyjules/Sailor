@@ -189,25 +189,45 @@ function mergeRegions(xs: number[], ys: number[], mergeMaxSpan: number, rng: () 
   return out
 }
 
+/**
+ * Inset every region by the gutter, leaving a gutter-wide gap between cells.
+ * Applied once, centrally, after regions are computed (explicit or generated) —
+ * `xs`/`ys` (the snap lines) stay at the cell boundaries; only the drawn
+ * regions shrink. gutterPx<=0 is a no-op.
+ */
+function applyGutter(regions: Rect[], gutterPx: number): Rect[] {
+  if (gutterPx <= 0) return regions
+  return regions.map(r => ({
+    x: r.x + gutterPx / 2,
+    y: r.y + gutterPx / 2,
+    w: Math.max(1, r.w - gutterPx),
+    h: Math.max(1, r.h - gutterPx),
+  }))
+}
+
 export function resolveGrid(grid: FrameGrid, w: number, h: number): { xs: number[]; ys: number[]; regions: Rect[] } {
   if (grid.mode === 'off') return { xs: [], ys: [], regions: [] }
   const mx = grid.margin * w, my = grid.margin * w   // margin normalized to width on both axes (uniform inset)
+  let xs: number[]
+  let ys: number[]
+  let regions: Rect[]
   if (grid.mode === 'explicit') {
-    const xs = evenEdges(mx, w - mx, Math.max(1, Math.round(grid.columns)))
-    const ys = evenEdges(my, h - my, Math.max(1, Math.round(grid.rows)))
-    return { xs, ys, regions: cellRegions(xs, ys) }
+    xs = evenEdges(mx, w - mx, Math.max(1, Math.round(grid.columns)))
+    ys = evenEdges(my, h - my, Math.max(1, Math.round(grid.rows)))
+    regions = cellRegions(xs, ys)
+  } else {
+    // generated
+    const rng = mulberry32(grid.gen.seed)
+    const cols = pickInt(rng, grid.gen.colRange[0], grid.gen.colRange[1])
+    const rows = pickInt(rng, grid.gen.rowRange[0], grid.gen.rowRange[1])
+    const modulePx = grid.baseModule * w
+    const mirror = grid.gen.symmetry === 'mirror'
+    xs = makeAxisEdges(rng, mx, w - mx, cols, grid.gen.regularity, modulePx, mirror)
+    ys = makeAxisEdges(rng, my, h - my, rows, grid.gen.regularity, modulePx, mirror)
+    regions = grid.gen.merge
+      ? mergeRegions(xs, ys, grid.gen.mergeMaxSpan, rng)
+      : cellRegions(xs, ys)
   }
-
-  // generated
-  const rng = mulberry32(grid.gen.seed)
-  const cols = pickInt(rng, grid.gen.colRange[0], grid.gen.colRange[1])
-  const rows = pickInt(rng, grid.gen.rowRange[0], grid.gen.rowRange[1])
-  const modulePx = grid.baseModule * w
-  const mirror = grid.gen.symmetry === 'mirror'
-  const xs = makeAxisEdges(rng, mx, w - mx, cols, grid.gen.regularity, modulePx, mirror)
-  const ys = makeAxisEdges(rng, my, h - my, rows, grid.gen.regularity, modulePx, mirror)
-  const regions = grid.gen.merge
-    ? mergeRegions(xs, ys, grid.gen.mergeMaxSpan, rng)
-    : cellRegions(xs, ys)
-  return { xs, ys, regions }
+  const gutterPx = grid.gutter * w
+  return { xs, ys, regions: applyGutter(regions, gutterPx) }
 }
