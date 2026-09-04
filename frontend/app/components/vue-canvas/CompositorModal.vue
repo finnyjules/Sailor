@@ -13,6 +13,7 @@ import {
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
 } from '~/composables/useCompositorLayers'
 import { DEAL_VOCABS, type DealVocab } from '~/lib/compositor/dealVocab'
+import { GRID_TEMPLATES, type GridTemplate } from '~/lib/frame/gridTemplates'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
@@ -644,6 +645,37 @@ function patchDealGrid(layer: DealLayer, patch: Partial<typeof layer.grid>) {
 /** Re-roll a deal's seed for a fresh coherent variation (layout + fills + density). */
 function rerollDeal(layer: DealLayer) {
   patchDealGrid(layer, { gen: { ...layer.grid.gen, seed: Math.floor(Math.random() * 9999) + 1 } })
+}
+
+// The shared grid TEMPLATES (Modular / Oddgrid / Parcel / Mosh / Static) as one-click
+// deal presets — the same named looks the agent's `template` word configures.
+const GRID_TEMPLATE_LIST = GRID_TEMPLATES
+
+/**
+ * Configure a deal layer to a template in ONE undoable step: palette + density +
+ * inset, and the template's gen fields merged over the layer's own grid with mode
+ * forced to 'generated'. The current seed is PRESERVED (the template carries no
+ * seed) so applying a template keeps the variation — the user re-rolls separately.
+ */
+function applyDealTemplate(layer: DealLayer, t: GridTemplate) {
+  setLocal(layer.id, {
+    vocab: t.deal.vocab,
+    density: t.deal.density,
+    cellInset: t.deal.cellInset,
+    grid: { ...layer.grid, mode: 'generated', gen: { ...layer.grid.gen, ...t.deal.gen } },
+  } as Partial<DealLayer>)
+}
+
+/** Picker action: apply the template to the selected deal, or — when no deal is
+ *  selected — create a fresh deal from the frame's grid already configured to the
+ *  template (one addLocal step; the frame grid's seed carries the variation). */
+function onDealTemplate(t: GridTemplate) {
+  if (selectedLocal.value?.kind === 'deal') { applyDealTemplate(selectedLocal.value as DealLayer, t); return }
+  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
+  g.mode = 'generated'
+  g.gen = { ...g.gen, ...t.deal.gen }
+  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, vocab: t.deal.vocab, density: t.deal.density, cellInset: t.deal.cellInset }))
 }
 
 // Normalize brush layers to a tight box: brush strokes are stored in absolute
@@ -6708,6 +6740,14 @@ onUnmounted(() => {
                section; this deal carries its OWN grid seeded from it. -->
           <template v-if="selectedLocal.kind === 'deal'">
             <div>
+              <div class="panel-label mb-1.5">Template</div>
+              <div class="flex flex-wrap gap-1.5">
+                <StudioButton v-for="t in GRID_TEMPLATE_LIST" :key="t.id" variant="secondary" :title="t.blurb"
+                  @click="applyDealTemplate(selectedLocal as DealLayer, t)">{{ t.name }}</StudioButton>
+              </div>
+              <p class="mt-1 text-[10px] text-white/30 leading-snug">One click sets the palette, density and cell layout; your current variation is kept.</p>
+            </div>
+            <div class="mt-2">
               <div class="panel-label mb-1.5">Palette</div>
               <StudioSegmented :options="DEAL_VOCABS as any" :model-value="(selectedLocal as any).vocab"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { vocab: v })" />
@@ -7202,6 +7242,11 @@ onUnmounted(() => {
               <StudioButton variant="secondary" @click="onFillGridWithSections">Fill grid with sections</StudioButton>
               <StudioButton variant="secondary" @click="onDealGrid">Deal grid</StudioButton>
               <p class="text-[10px] text-white/30 leading-snug">Deal fills every cell of a dense grid from a palette — one self-painting layer that bakes.</p>
+              <div class="panel-label mt-1 mb-1">Or deal a template</div>
+              <div class="flex flex-wrap gap-1.5">
+                <StudioButton v-for="t in GRID_TEMPLATE_LIST" :key="t.id" variant="secondary" :title="t.blurb"
+                  @click="onDealTemplate(t)">{{ t.name }}</StudioButton>
+              </div>
             </div>
           </div>
           <!-- Expressive arrange (a whole group is selected) -->
