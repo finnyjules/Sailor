@@ -1433,6 +1433,17 @@ function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { w: numb
     strokeAlign = strokeAlignOf(l.strokeAlign)
   }
   const isText = layer.kind === 'text'
+  // The widest of wrappedTextLines' lines, measured with the SAME font drawText uses —
+  // this is what catches a single word/URL wider than a fixed boxW (wrappedTextLines
+  // only breaks on whitespace), which localLayerBox's boxW branch doesn't reflect.
+  let maxLineWPx = 0
+  if (isText) {
+    const mctx = measureCtx()
+    if (mctx) {
+      applyFont(mctx, layer as TextLayer, W)
+      for (const ln of wrappedTextLines(mctx, layer as TextLayer, W)) maxLineWPx = Math.max(maxLineWPx, mctx.measureText(ln || ' ').width)
+    }
+  }
   return silhouettePadPxPure({
     kind: layer.kind,
     strokeAlign,
@@ -1440,6 +1451,8 @@ function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { w: numb
     fontPx: isText ? Math.max(0, l.fontSize || 0) * W : 0,
     boxHPx: isText ? Math.max(0, l.boxH || 0) * W : 0,
     boxHeightPx: box.h,
+    maxLineWPx,
+    boxWidthPx: box.w,
   }, s)
 }
 

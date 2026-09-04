@@ -86,6 +86,11 @@ export interface SilhouetteInkInput {
   boxHPx: number
   /** Text only: what `localLayerBox` measured for the same layer (`lines × lineHeight`). */
   boxHeightPx: number
+  /** Text only: the widest of `wrappedTextLines`' lines, measured with the layer's real
+   *  font (logical px). 0 when unknown/unmeasured. */
+  maxLineWPx: number
+  /** Text only: the box width `localLayerBox` measured for the same layer (logical px). */
+  boxWidthPx: number
 }
 
 /**
@@ -107,7 +112,11 @@ export interface SilhouetteInkInput {
  *    the stroke width — a bigger raster is cheap, a clipped glyph is a visible bug. On
  *    top of that, `drawText` positions its lines anywhere within ±boxH/2 under `valign`
  *    while `localLayerBox` reports only `lines × lineHeight`, so a short block in a tall
- *    height box sits up to half the slack outside the measured box.
+ *    height box sits up to half the slack outside the measured box. And with a fixed
+ *    `boxW`, `wrappedTextLines` only breaks on WHITESPACE — a single word or URL wider
+ *    than the box is emitted as one over-long line, while `localLayerBox` still reports
+ *    `w = boxW` for that layer. `drawText` centers each line at the box's own center, so
+ *    an over-long line straddles the box edges evenly — pad by half the overflow.
  *
  * Every input is guarded against non-finite values (NaN/Infinity count as 0) so a bad
  * measurement upstream can never produce a NaN raster size downstream.
@@ -118,7 +127,8 @@ export function silhouetteInkOverhangPx(input: SilhouetteInkInput): number {
   if (input.kind === 'text') {
     const boxHPx = fin(input.boxHPx)
     const valignSlack = boxHPx > 0 ? Math.max(0, (boxHPx - fin(input.boxHeightPx)) / 2) : 0
-    return fin(input.fontPx) + strokePx + valignSlack
+    const lineOverflowSlack = Math.max(0, (fin(input.maxLineWPx) - fin(input.boxWidthPx)) / 2)
+    return fin(input.fontPx) + strokePx + valignSlack + lineOverflowSlack
   }
   if (input.kind === 'line') return strokePx / 2
   if (input.strokeAlign === 'outside') return strokePx

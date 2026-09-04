@@ -249,7 +249,8 @@ describe('SILHOUETTE_RASTER_PAD_PX', () => {
 
 /** An ink-overhang input with everything off; spread the interesting fields over it. */
 const ink = (o: Partial<SilhouetteInkInput> = {}): SilhouetteInkInput => ({
-  kind: 'rect', strokeAlign: 'center', strokePx: 0, fontPx: 0, boxHPx: 0, boxHeightPx: 0, ...o,
+  kind: 'rect', strokeAlign: 'center', strokePx: 0, fontPx: 0, boxHPx: 0, boxHeightPx: 0,
+  maxLineWPx: 0, boxWidthPx: 0, ...o,
 })
 
 // The finding this covers: the raster used to be padded by `outsideStrokePadPx`,
@@ -305,6 +306,27 @@ describe('silhouetteInkOverhangPx', () => {
     expect(silhouetteInkOverhangPx(ink({ strokeAlign: 'outside', strokePx: Infinity }))).toBe(0)
     expect(silhouetteInkOverhangPx(ink({ kind: 'text', fontPx: NaN, strokePx: 6 }))).toBe(6)
     expect(Number.isFinite(silhouetteInkOverhangPx(ink({ kind: 'text', fontPx: NaN, strokePx: NaN, boxHPx: NaN, boxHeightPx: NaN })))).toBe(true)
+  })
+
+  // wrappedTextLines only breaks on whitespace, so a single word (or URL) wider than
+  // boxW is emitted as one over-long line; localLayerBox's text-with-boxW branch
+  // reports `w = boxW * W` regardless, so a cached raster sized off that box alone
+  // hard-clips the word. Pad it out by half the overflow, same shape as the
+  // centre-aligned stroke case above (the line straddles the box on both sides).
+  it('a line wider than the box overhangs by half the overflow', () => {
+    expect(silhouetteInkOverhangPx(ink({ kind: 'text', maxLineWPx: 300, boxWidthPx: 100 }))).toBe(100)
+  })
+
+  it('a line no wider than the box adds nothing for line overflow', () => {
+    expect(silhouetteInkOverhangPx(ink({ kind: 'text', maxLineWPx: 50, boxWidthPx: 100 }))).toBe(0)
+    expect(silhouetteInkOverhangPx(ink({ kind: 'text', maxLineWPx: 100, boxWidthPx: 100 }))).toBe(0)
+  })
+
+  it('non-finite line-width inputs count as zero rather than propagating NaN', () => {
+    expect(silhouetteInkOverhangPx(ink({ kind: 'text', maxLineWPx: NaN, boxWidthPx: 100 }))).toBe(0)
+    expect(silhouetteInkOverhangPx(ink({ kind: 'text', maxLineWPx: Infinity, boxWidthPx: 100 }))).toBe(0)
+    expect(Number.isFinite(silhouetteInkOverhangPx(ink({ kind: 'text', maxLineWPx: 300, boxWidthPx: NaN })))).toBe(true)
+    expect(Number.isFinite(silhouetteInkOverhangPx(ink({ kind: 'text', maxLineWPx: NaN, boxWidthPx: NaN })))).toBe(true)
   })
 })
 
