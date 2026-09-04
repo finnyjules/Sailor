@@ -12,7 +12,7 @@ describe('studio moves merge', () => {
     const moves = convertLegacyTracks([{ path: 'axes.wght', from: 100, to: 900, easing: 'pingpong', loops: 2 }], () => null, 4)
     expect(moves).toHaveLength(1)
     expect(moves[0]!.kind).toBe('tracks'); expect(moves[0]!.presetId).toBe('custom')
-    expect(moves[0]!.play).toEqual({ mode: 'backAndForth', times: 2 }); expect(moves[0]!.ease).toEqual({ kind: 'named', name: 'none' })
+    expect(moves[0]!.loop).toBe(true); expect(moves[0]!.bounce).toBe(true); expect(moves[0]!.ease).toEqual({ kind: 'named', name: 'none' })
   })
   it('a matched preset collapses its tracks to one move', () => {
     const moves = convertLegacyTracks([{ path: 'layout.stretch', from: 1, to: 1.5, easing: 'linear', loops: 1 }], (t) => t.some(x => x.path === 'layout.stretch') ? 'stretch-wave' : null, 4)
@@ -36,8 +36,8 @@ describe('applyMoveTracks', () => {
     duration: 4,
     fps: 30,
     moves: [{
-      id: 'm1', phase: 'loop', kind: 'tracks', presetId: 'custom', duration: 4,
-      ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: 1 },
+      id: 'm1', kind: 'tracks', presetId: 'custom', at: 0, duration: 4, loop: false,
+      ease: { kind: 'named', name: 'none' },
       tracks: [{ path: 'a', from: 0, to: 10 }],
     }],
   }
