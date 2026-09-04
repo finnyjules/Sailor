@@ -458,6 +458,21 @@ export function paintPaperTile(ctx: CanvasRenderingContext2D, fill: Fill, W: num
   ctx.restore()
 }
 
+/** The cache key for a fill's rendered tile — the `type|a|b|angle|density|<type-extra>` recipe
+ *  shared by every 2D tile cache (fillTexture, resolve.ts, sliceGlitch.ts). Centralised so a new
+ *  per-type field (like `shapes`' shapeId or `paper`'s grain) is threaded through every cache at
+ *  once, instead of being added to some keys and silently missed in others. Callers that also key
+ *  on tile SIZE append their own `|WxH`. (The vertical atlas in fills.ts uses a different
+ *  `:`-separated multi-fill format and intentionally does NOT use this.) */
+export function fillTileKey(fill: Fill): string {
+  const extra = fill.type === 'shapes'
+    ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap
+    : fill.type === 'paper'
+    ? String(fill.grain ?? 0.4)
+    : ''
+  return `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${extra}`
+}
+
 /**
  * Build a tileable 2D canvas for a fill — the CPU companion to the THREE texture path.
  * `solid` returns a flat swatch; `gradient` a vertical A→B ramp; the rest reuse the same

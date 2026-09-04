@@ -8,7 +8,7 @@ class FakeImageData {
 beforeAll(() => { vi.stubGlobal('ImageData', FakeImageData) })
 afterAll(() => vi.unstubAllGlobals())
 
-import { paperImageData, normalizeFill, FILL_TYPES, DEFAULT_FILL, hexBytes, type Fill } from '../../app/lib/spacetype/fillTile'
+import { paperImageData, normalizeFill, FILL_TYPES, DEFAULT_FILL, hexBytes, fillTileKey, type Fill } from '../../app/lib/spacetype/fillTile'
 
 const paper = (over: Partial<Fill> = {}): Fill =>
   ({ ...DEFAULT_FILL, type: 'paper', a: '#f3efe6', b: '#8b7d68', grain: 0.4, density: 12, angle: 0, ...over })
@@ -122,5 +122,33 @@ describe('paper fill — GPU atlas (fillAtlasTexture)', () => {
     fillAtlasTexture(THREE, [paper({ grain: 0.5 })])
     const tile = gpuCreated.find(c => c.ctx.ops.some((o: any) => o[0] === 'stroke'))
     expect(tile).toBeTruthy()   // a real paper tile (fibres) was stamped, not a flat fillRect band
+  })
+})
+
+// ── Shared cache key (regression: grain missing from resolve.ts / sliceGlitch.ts caches) ──
+describe('fillTileKey — shared cache key', () => {
+  it('two paper fills differing ONLY in grain produce DIFFERENT keys', () => {
+    const low = fillTileKey(paper({ grain: 0.3 }))
+    const high = fillTileKey(paper({ grain: 0.8 }))
+    expect(low).not.toBe(high)
+  })
+
+  it('two paper fills with the SAME fields produce the SAME key', () => {
+    const a = fillTileKey(paper({ grain: 0.5 }))
+    const b = fillTileKey(paper({ grain: 0.5 }))
+    expect(a).toBe(b)
+  })
+
+  it('a shapes fill still keys on shapeId', () => {
+    const shapes = (over: Partial<Fill> = {}): Fill =>
+      ({ ...DEFAULT_FILL, type: 'shapes', shapeId: 'sparkle', shapeSize: 0.3, shapeGap: 0.1, ...over })
+    const a = fillTileKey(shapes({ shapeId: 'sparkle' }))
+    const b = fillTileKey(shapes({ shapeId: 'circle' }))
+    expect(a).not.toBe(b)
+  })
+
+  it('for a non-shapes/non-paper type, the trailing extra segment is empty', () => {
+    const noise: Fill = { ...DEFAULT_FILL, type: 'noise' }
+    expect(fillTileKey(noise).endsWith('|')).toBe(true)
   })
 })

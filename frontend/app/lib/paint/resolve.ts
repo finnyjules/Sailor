@@ -18,7 +18,7 @@
  * which is corner-origin (`[0,0]..[w,h]`); see its doc at paint.ts:44-52. Do not
  * harmonise the two: callers pick the one matching their drawing convention.
  */
-import { type Fill, type ShaderSpec, fillTileBox, fillIsShader } from '~/lib/spacetype/fillTile'
+import { type Fill, type ShaderSpec, fillTileBox, fillIsShader, fillTileKey } from '~/lib/spacetype/fillTile'
 import { resolveField } from '~/lib/shaderfill/field'
 import { type Paint, type ImageFill, isGradient, isFill, isImageFill, imageFillRect } from '~/lib/compositor/paint'
 import { getFillBitmap } from '~/lib/paint/imageFillCache'
@@ -191,7 +191,7 @@ const _fillTileCache = new Map<string, HTMLCanvasElement>()
 function fillTileCached(fill: Fill, tw: number, th: number): HTMLCanvasElement {
   // shapeId only matters for `shapes`; fold it in so switching the shape (same colours/density/
   // angle/size) doesn't return the previously cached tile of a different shape.
-  const key = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${tw}x${th}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap : ''}`
+  const key = `${fillTileKey(fill)}|${tw}x${th}`
   let t = _fillTileCache.get(key)
   if (!t) {
     t = fillTileBox(fill, tw, th)

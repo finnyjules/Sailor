@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import type { ControlSpec, Params, SpaceTypeEffect } from '../effect'
-import { parseFills, fillTileCanvas, type Fill } from '../fills'
+import { parseFills, fillTileCanvas, fillTileKey, type Fill } from '../fills'
 import { defaultFillsFor } from '../palette'
 import { resolveFontFamily, fontHasWeightAxis } from '~/lib/font/resolveFamily'
 import { mulberry32, hashSeed } from '../rng'
@@ -104,7 +104,7 @@ function palette(p: Params): Fill[] {
 // Cache 2D-canvas pattern tiles by fill recipe so we don't rebuild them every frame.
 const _tileCache = new Map<string, HTMLCanvasElement>()
 function tileFor(fill: Fill): HTMLCanvasElement {
-  const k = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap : ''}`
+  const k = fillTileKey(fill)
   let t = _tileCache.get(k)
   if (!t) { t = fillTileCanvas(fill); _tileCache.set(k, t) }
   return t

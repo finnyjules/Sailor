@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { type Fill, type ShaderSpec, hexBytes, patternImageData, ombrePicker, fillIsShader, effectiveTileFill, fillTileCanvas } from './fillTile'
+import { type Fill, type ShaderSpec, hexBytes, patternImageData, ombrePicker, fillIsShader, effectiveTileFill, fillTileCanvas, fillTileKey } from './fillTile'
 import { paintTileBox } from '~/lib/compositor/paint'
 import { parseHexA, stripAlpha } from '~/lib/color/convert'
 import { resolveField, withFieldFrame, type FieldRequest } from '~/lib/shaderfill/field'
@@ -17,7 +17,7 @@ import { getEffectSync } from '~/lib/shaderfx/catalogStore'
 export {
   type Fill, type FillType, FILL_TYPES, DEFAULT_FILL,
   fillIsTextured, parseFills, serializeFills, normalizeFill,
-  hexBytes, patternImageData, ombrePicker, fillTileCanvas,
+  hexBytes, patternImageData, ombrePicker, fillTileCanvas, fillTileKey,
 } from './fillTile'
 
 /** The fill's primary colour — used for solid fills and for cross-row gradient-mode lerps.
@@ -339,7 +339,7 @@ export function fillTexture(three: typeof THREE, fill: Fill): THREE.Texture | nu
   if (fill.type === 'solid') return null
   // shapeId is only meaningful for `shapes`; include it in the key so two shape patterns that
   // share colours/density/angle but differ in shape don't alias to the same cached texture.
-  const key = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap : fill.type === 'paper' ? String(fill.grain ?? 0.4) : ''}`
+  const key = fillTileKey(fill)
   const hit = _cache.get(key)
   if (hit) return hit
   const t = fill.type === 'gradient' ? gradientRamp(three, fill.a, fill.b)
