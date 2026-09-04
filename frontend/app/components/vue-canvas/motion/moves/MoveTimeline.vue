@@ -266,13 +266,17 @@ function onEdgePointerDown(e: PointerEvent, m: Move, edge: 'left' | 'right') {
         data-ruler
         @pointerdown="onRulerPointerDown"
       >
+        <!-- Ticks styled like the studio slider's: one quiet 1px scale at 12%
+             white (see StudioRow.vue's tickStyle), uniform major/minor — the
+             mm:ss label alone marks the seconds, the marks are a ruler you read
+             past, not a second row of UI. -->
         <!-- minor ticks (unlabelled, quarter subdivisions) -->
         <div
           v-for="tk in ticks.minor" :key="`mn-${tk.t}`"
           class="absolute inset-y-0 flex items-end"
           :style="{ left: `${tk.leftPct}%` }"
         >
-          <span class="h-1 w-px bg-white/12"></span>
+          <span class="h-1.5 w-px bg-white/[0.12]"></span>
         </div>
         <!-- major ticks (mm:ss labelled) -->
         <div
@@ -281,7 +285,7 @@ function onEdgePointerDown(e: PointerEvent, m: Move, edge: 'left' | 'right') {
           :style="{ left: `${tk.leftPct}%` }"
         >
           <span class="absolute bottom-[1px] left-0.5 whitespace-nowrap text-[9px] text-white/45">{{ tk.label }}</span>
-          <span class="h-2 w-px bg-white/30"></span>
+          <span class="h-1.5 w-px bg-white/[0.12]"></span>
         </div>
         <!-- transport cluster (play/pause + reset zoom); pointerdown never starts a ruler seek/zoom -->
         <div
