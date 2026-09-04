@@ -226,8 +226,10 @@ loadGoogleCatalog().then((c) => { googleCatalog.value = c })
 const googleEntry = (family: string) => googleCatalog.value.find(f => f.family === family) ?? null
 
 /** The ten curated variable families, above the catalog under the "Sailor"
- *  header — they are the only fonts here with live axes, so they lead. */
-const pinnedFonts = VARIABLE_FONTS.map(f => ({ label: f.label, value: f.id }))
+ *  header — they are the only fonts here with live axes, so they lead.
+ *  `variable: true` for all ten: they ARE the curated variable families the
+ *  spec means by "pinned … badged `var`" — every one of them has live axes. */
+const pinnedFonts = VARIABLE_FONTS.map(f => ({ label: f.label, value: f.id, variable: true }))
 
 /**
  * Two strings, because the picker uses `modelValue` for BOTH the trigger text
@@ -1709,7 +1711,12 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
                 @menu="(e: MouseEvent) => openVarMenu(e, bindableControl(slotControl(slotProps)))"
                 @go-to-collection="goToCollection()"
               />
-              <div v-if="fontWeightCuts" class="mt-1.5" data-testid="vt-font-weight" @contextmenu.stop>
+              <!-- Hidden when `fontId` is bound to a Collection column, same rule the
+                   Stretch slot states for `fit`: a bound value is pushed back onto
+                   live state by `applyParamsPreview` every preview row, so a weight
+                   picked here would be written, autosaved, and then immediately
+                   stomped by the next preview tick. -->
+              <div v-if="fontWeightCuts && !boundFor('fontId')" class="mt-1.5" data-testid="vt-font-weight" @contextmenu.stop>
                 <StudioRow
                   :spec="fontWeightSpec"
                   :model-value="fontWeightValue"

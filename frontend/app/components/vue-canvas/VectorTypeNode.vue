@@ -18,6 +18,8 @@ import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch }
 import { Pencil, Type } from 'lucide-vue-next'
 import { mergeConfig, type VectorTypeConfig } from '~/lib/vectortype/config'
 import { loadVectorFont, type VtFont } from '~/lib/vectortype/font'
+import { DEFAULT_FONT_ID } from '~/data/variable-fonts'
+import { parseVtFontToken, vtFontRefLabel } from '~/lib/vectortype/fontToken'
 import { drawVectorTypeToCanvas, vtIsAnimated } from '~/lib/vectortype/canvas'
 import { vtStillTime } from '~/lib/vectortype/presetMotion'
 import { makeVectorTypeFrameSource } from '~/lib/vectortype/frameSource'
@@ -65,13 +67,40 @@ let timer = 0
 let startedAt = 0
 let disposed = false
 
+// On a failed load this does what the open studio does (VectorTypeSurface's
+// `loadFont`): fall back to Inter rather than leaving `font` null. Without
+// this the closed card showed a bare red line and NO drawing while the same
+// token, open in the studio, was drawing Inter — the two views disagreed
+// about whether anything had actually gone wrong.
 async function ensureFont(id: string): Promise<VtFont> {
-  const f = await loadVectorFont(id)
-  if (config.value.fontId === id) font.value = markRaw(f)
-  return f
+  try {
+    const f = await loadVectorFont(id)
+    if (config.value.fontId === id) { font.value = markRaw(f); renderError.value = null }
+    return f
+  } catch (e) {
+    // Stale by the time the await resolved — the caller already moved on.
+    if (config.value.fontId !== id) throw e
+    const parsed = parseVtFontToken(id)
+    renderError.value = `Couldn't load ${vtFontRefLabel(parsed ?? { kind: 'catalog', id: DEFAULT_FONT_ID })} — showing Inter.`
+    try {
+      const fallback = await loadVectorFont(DEFAULT_FONT_ID)
+      if (config.value.fontId === id) font.value = markRaw(fallback)
+      return fallback
+    } catch (fallbackError) {
+      // Inter itself failed — keep the original red-line behaviour (font stays
+      // null) rather than retrying, so this cannot loop.
+      if (config.value.fontId === id) {
+        font.value = null
+        renderError.value = String((fallbackError as any)?.message ?? fallbackError)
+      }
+      throw fallbackError
+    }
+  }
 }
 watch(() => config.value.fontId, (id) => {
-  ensureFont(id).catch((e) => { renderError.value = String(e?.message ?? e) })
+  // Already handled inside ensureFont; this only stops an unhandled rejection
+  // when both the token and the Inter fallback fail to load.
+  ensureFont(id).catch(() => {})
 }, { immediate: true })
 
 /** See the file header — a bare rAF loop does not advance in a hidden tab. */

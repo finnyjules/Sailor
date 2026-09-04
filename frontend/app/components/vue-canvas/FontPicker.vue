@@ -15,7 +15,7 @@ import VariableGlyph from '~/components/vue-canvas/studio/VariableGlyph.vue'
 
 withDefaults(defineProps<{
   modelValue: string
-  pinned?: { label: string; value: string }[]
+  pinned?: { label: string; value: string; variable?: boolean }[]
   showVariableToggle?: boolean
   // When set, the trigger reads as a 28px studio row — label left, font name and caret
   // right — so a Font control sits in the same rhythm as the sliders beside it instead of
@@ -193,6 +193,11 @@ watch(fontPickerOpen, (open) => { if (!open && fontSuggestRan.value) clearFontSu
                 class="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-white/10"
                 :class="{ 'bg-white/15': modelValue === p.value }">
           <span class="truncate">{{ p.label }}</span>
+          <!-- Same `var` badge as a Google catalog row (spec: "the ten curated
+               variable families are pinned at the top and badged `var`"). Only
+               a `pinned` caller who marks an entry `variable: true` sees it —
+               every other caller never passes it, so their rows are unchanged. -->
+          <span v-if="p.variable" class="ml-auto shrink-0 rounded bg-white/15 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-white/70">var</span>
         </button>
       </div>
       <div class="max-h-48 overflow-y-auto">
