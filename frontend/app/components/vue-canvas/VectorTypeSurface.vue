@@ -23,7 +23,7 @@
  *    Four render surfaces that each grew their own copy is a failure this repo
  *    has already paid for more than once.
  */
-import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import { Combine } from 'lucide-vue-next'
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import { DEFAULT_FONT_ID, VARIABLE_FONTS } from '~/data/variable-fonts'
@@ -56,6 +56,9 @@ import { controlKindToVariableType } from '~/lib/collection/studioBindables'
 import PresetThumb from '~/components/vue-canvas/motion/PresetThumb.vue'
 import VectorTypeThumb from '~/components/vue-canvas/motion/VectorTypeThumb.vue'
 import MovesPanel from '~/components/vue-canvas/motion/moves/MovesPanel.vue'
+import MoveTimeline from '~/components/vue-canvas/motion/moves/MoveTimeline.vue'
+import MoveGallery from '~/components/vue-canvas/motion/moves/MoveGallery.vue'
+import { moveCardLabel } from '~/components/vue-canvas/motion/moves/moveCardLabel'
 import { vtMovesAdapter } from '~/lib/vectortype/movesAdapter'
 import type { Move, MotionClip } from '~/lib/studio/moves/types'
 import { drawVectorTypeToCanvas, vectorTypeSVG, vtExportName, vtIsAnimated, type VtBoxOptions, type VtFrame } from '~/lib/vectortype/canvas'
@@ -823,9 +826,22 @@ const fontLabel = computed(() => vtFontRefLabel(fontRef.value))
  * `fontLabel`) and a whole-config replacement (Import settings).
  */
 const movesAdapter = computed(() => vtMovesAdapter(config.value, fontAxes.value, fontLabel.value))
-/** Which card is expanded — a controlled prop the panel asks this surface to
- *  hold (`MovesPanel.vue`'s own `set-open` doc). */
-const openMoveId = ref<string | null>(null)
+/** Which move's own controls the right panel shows — a controlled prop the
+ *  panel asks this surface to hold (`MovesPanel.vue`'s `selectedId` prop).
+ *  Names an id in `config.motion.moves` OR a derived Blink/Scatter marker
+ *  (`'__blink'`/`'__scatter'` — `movesAdapter.ts`'s `derivedMoves` doc).
+ *  Also drives `MoveTimeline`'s highlighted band and, together with the
+ *  gallery, whether a pick means Add or Change — see `onGalleryPick` below. */
+const selectedMoveId = ref<string | null>(null)
+/** Whether `MoveGallery` is mounted — opened by both the panel's Add (nothing
+ *  selected) and Change (a move selected) buttons, which the panel collapses
+ *  into the same bare `open-gallery` emit (its own doc: the surface alone
+ *  decides Add vs Change, since it already holds `selectedMoveId`). */
+const galleryOpen = ref(false)
+/** `MoveTimeline`'s row-label function — the same text `MovesPanel`'s "Move"
+ *  section header shows for the selected move, so a band and its own controls
+ *  never disagree about what to call it. */
+function moveLabelFn(m: Move): string { return moveCardLabel(m, movesAdapter.value) }
 
 function onPatchClip(partial: Partial<Pick<MotionClip, 'duration' | 'fps'>>) {
   if (partial.duration !== undefined) setControl('motion.duration', partial.duration)
@@ -853,41 +869,44 @@ function onPatchCfg(patch: Record<string, unknown>) {
 }
 
 /**
- * A tile picked from the gallery. Blink and Scatter are MARKERS (see
- * `movesAdapter.ts`'s `derivedMoves` doc) — picking one never pushes into
- * `clip.moves`, it turns the effect on at its own config leaf (spec §1:
- * "Adding the Blink move sets `blink.amount` to 0.3 … Same for Scatter with
- * `spread` 0.4"), and `derivedMoves` then synthesizes the card on its own.
+ * Push a freshly-picked move into the config as an ADD (never a Change — see
+ * `onGalleryPick` below, which is the only caller). Blink and Scatter are
+ * MARKERS (see `movesAdapter.ts`'s `derivedMoves` doc) — picking one never
+ * pushes into `clip.moves`, it turns the effect on at its own config leaf
+ * (spec §1: "Adding the Blink move sets `blink.amount` to 0.3 … Same for
+ * Scatter with `spread` 0.4"), and `derivedMoves` then synthesizes the card
+ * on its own, at the FIXED `__blink`/`__scatter` id — selected directly here,
+ * no `nextTick` correction needed (unlike the retired `set-open` path this
+ * replaces): `onGalleryPick` owns `selectedMoveId` itself now, synchronously.
  * Everything else (a preset move, a Custom/preset `'tracks'` move) is a real
- * stored move and is pushed.
- *
- * The freshly-picked move should open — `MovesPanel`'s own `onGalleryAdd`
- * already emits `set-open(move.id)` right after `add-move`, but for Blink/Scatter
- * that id is the gallery's freshly-minted candidate id, not the FIXED
- * `__blink`/`__scatter` id the derived card actually carries. `nextTick`
- * corrects `openMoveId` after that synchronous `set-open` has already run.
+ * stored move, pushed and selected the same way.
  */
-function onAddMove(move: Move) {
+function addPickedMove(move: Move) {
   if (move.kind === 'blink') {
     setControl('motion.blink.amount', 0.3)
-    void nextTick(() => { openMoveId.value = '__blink' })
+    selectedMoveId.value = '__blink'
     restartPreview()
     return
   }
   if (move.kind === 'scatter') {
     setControl('motion.scatter.spread', 0.4)
-    void nextTick(() => { openMoveId.value = '__scatter' })
+    selectedMoveId.value = '__scatter'
     restartPreview()
     return
   }
   config.value.motion.moves.push(move as VtMove)
+  selectedMoveId.value = move.id
   if (move.kind === 'tracks') playing.value = true
   else restartPreview()
 }
 
 /** The full move, not just an id — a derived Blink/Scatter marker has no
- *  `clip.moves` entry to splice (`MovesPanel.vue`'s `remove-move` doc). */
+ *  `clip.moves` entry to splice (`MovesPanel.vue`'s `remove-move` doc).
+ *  Clears the selection when the removed move was the selected one, so the
+ *  right panel falls back to the clip settings instead of showing a
+ *  now-nonexistent move's stale controls. */
 function onRemoveMove(move: Move) {
+  if (selectedMoveId.value === move.id) selectedMoveId.value = null
   if (move.kind === 'blink') { setControl('motion.blink.amount', 0); return }
   if (move.kind === 'scatter') { setControl('motion.scatter.spread', 0); return }
   config.value.motion.moves = config.value.motion.moves.filter(m => m.id !== move.id)
@@ -903,21 +922,62 @@ function onPatchMove(move: Move, partial: Partial<Move>) {
   config.value.motion.moves[idx] = { ...config.value.motion.moves[idx], ...partial } as VtMove
 }
 
+function onOpenGallery() {
+  galleryOpen.value = true
+}
+
 /**
- * "Change" on a move's card, resolved by `MovesPanel` itself (its own
- * `replace-move` doc): the gallery reopens pre-aimed at the move's phase,
- * and the pick comes back here already merged — `newMove.id === oldMove.id`
- * always, with `duration`/`ease`/`play` carried over from the old move
- * unless the pick landed in a different phase. This handler just splices
- * `clip.moves` at that id, immutably, same as `onPatchMove` — `MoveCard.vue`
- * only offers "Change" for a plain `'tracks'` move (no `cardBody`), so a
- * preset/blink/scatter move never reaches this handler.
+ * The single entry point for a `MoveGallery` pick — resolves Add vs Change
+ * purely off `selectedMoveId` at the moment of the pick, per `MovesPanel
+ * .vue`'s own `open-gallery` doc: the panel emits the SAME bare event for
+ * both its Add (nothing selected) and Change (a move selected) buttons,
+ * because the surface already holds `selectedMoveId` and is the only thing
+ * that can tell them apart.
+ *
+ * CHANGE only applies when the selection names a REAL entry in
+ * `config.motion.moves` — a derived Blink/Scatter marker (`'__blink'`/
+ * `'__scatter'`) has no such entry to patch, so picking with one selected
+ * falls back to `addPickedMove`, same as nothing selected. A real Change
+ * keeps the old move's `id`/`at`/`duration`/`ease`/`bounce` (this studio's
+ * counterpart to the retired `MovesPanel`'s `replace-move` doc: "duration/
+ * ease/play carried over from the old move") and takes the new pick's
+ * `kind`/`presetId`/`loop`/`params`/`tracks` — `selectedMoveId` needs no
+ * update afterward since the id itself never changes.
  */
-function onReplaceMove(oldMove: Move, newMove: Move) {
-  const idx = config.value.motion.moves.findIndex(m => m.id === oldMove.id)
-  if (idx === -1) return
-  config.value.motion.moves[idx] = { ...newMove, id: oldMove.id } as VtMove
-  playing.value = true
+function onGalleryPick(move: Move) {
+  const oldId = selectedMoveId.value
+  const idx = oldId ? config.value.motion.moves.findIndex(m => m.id === oldId) : -1
+  if (idx === -1) {
+    addPickedMove(move)
+  } else {
+    const old = config.value.motion.moves[idx]!
+    config.value.motion.moves[idx] = {
+      ...old,
+      kind: move.kind,
+      presetId: move.presetId,
+      loop: move.loop,
+      params: move.params,
+      tracks: move.tracks,
+    } as VtMove
+    if (move.kind === 'tracks') playing.value = true
+    else restartPreview()
+  }
+  galleryOpen.value = false
+}
+
+/**
+ * `MoveTimeline`'s ruler-drag scrub. Freezes the clock at `t` and pauses the
+ * loop — the minimum robust behaviour (`task-7-brief.md` step 2): the ruler
+ * emits `seek` continuously while dragging (`MoveTimeline.vue` has no
+ * separate scrub-end signal), so setting `playing.value = false` on every
+ * tick is idempotent after the first, and the existing `watch(playing, ...)`
+ * below already rebases `startedAt` off `previewTime` on the way back to
+ * `true` — so pressing Play (the footer's existing Pause/Play utility)
+ * resumes from exactly where the scrub left the clock, not from 0.
+ */
+function onSeek(t: number) {
+  previewTime.value = t
+  playing.value = false
 }
 
 // ── preview loop ────────────────────────────────────────────────────────────
@@ -1622,6 +1682,22 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
           <span>t {{ previewTime.toFixed(2) }}s</span>
           <span v-if="motionMoveCount" class="text-white/60">{{ motionMoveCount }} move{{ motionMoveCount === 1 ? '' : 's' }}</span>
         </div>
+
+        <!-- Motion tab: the shared timeline, docked full-width under the preview
+             (a timeline wants horizontal room the narrow right panel can't give
+             it — same reasoning as Scene3D's motion-timeline dock). Selecting a
+             band here is what drives the right panel's "Move" section below. -->
+        <div v-if="onMotion" class="w-full shrink-0 rounded-lg border border-white/[0.07] bg-white/[0.03] p-2" @pointerdown.stop>
+          <MoveTimeline
+            :clip="config.motion"
+            :selected-id="selectedMoveId"
+            :playhead="previewTime"
+            :label="moveLabelFn"
+            @select="selectedMoveId = $event"
+            @patch-move="onPatchMove"
+            @seek="onSeek"
+          />
+        </div>
       </div>
     </template>
 
@@ -1873,44 +1949,57 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
         </StudioSection>
       </template>
 
-      <!-- Motion: the shared moves panel — see ~/lib/vectortype/movesAdapter.ts
-           and ~/components/vue-canvas/motion/moves/MovesPanel.vue. -->
+      <!-- Motion: the shared moves panel — the SELECTED move's own controls, or
+           the clip settings when nothing is selected. The timeline itself lives
+           full-width under the preview above; the gallery (Add/Change) is a
+           top-level Teleported overlay, mounted below. See
+           ~/lib/vectortype/movesAdapter.ts and
+           ~/components/vue-canvas/motion/moves/MovesPanel.vue. -->
       <template v-else>
         <MovesPanel
           :clip="config.motion"
           :adapter="movesAdapter"
           :cfg="config"
-          :open-move-id="openMoveId"
+          :selected-id="selectedMoveId"
           @patch-clip="onPatchClip"
           @patch-cfg="onPatchCfg"
-          @add-move="onAddMove"
           @remove-move="onRemoveMove"
           @patch-move="onPatchMove"
-          @replace-move="onReplaceMove"
-          @set-open="(id: string | null) => (openMoveId = id)"
-        >
-          <!-- Real outlines for an axis preset (the letterforms themselves are
-               the picture — "Weight In" drawn as a growing rectangle is
-               indistinguishable from "Grow In"); the engine's own live-preview
-               card for everything else it has one for; a plain 2-letter tile
-               (MoveGallery's own fallback) for a track preset, Blink or
-               Scatter, none of which has a preview render of its own. -->
-          <template #thumb="{ offer }">
-            <VectorTypeThumb
-              v-if="offer.kind === 'preset' && vtAxisPreset(offer.phase, offer.presetId)"
-              :preset-id="offer.presetId!" :slot-kind="offer.phase"
-              :font-id="config.fontId" :text="config.text" :axes="config.axes" :font="font" :fill="baseFill ?? '#ffffff'"
-            />
-            <PresetThumb
-              v-else-if="offer.kind === 'preset'"
-              :preset-id="offer.presetId!" :slot-kind="offer.phase" :capabilities="VT_CAPABILITIES"
-            />
-            <span v-else class="text-[9px] text-white/25">{{ offer.label.slice(0, 2).toUpperCase() }}</span>
-          </template>
-        </MovesPanel>
+          @open-gallery="onOpenGallery"
+        />
       </template>
     </template>
   </StudioModalShell>
+
+  <!-- Add/Change gallery — Teleported over everything (see MoveGallery.vue's
+       header), so its position in this template is cosmetic. `onGalleryPick`
+       resolves Add vs Change off `selectedMoveId`. -->
+  <MoveGallery
+    v-if="galleryOpen"
+    :adapter="movesAdapter"
+    :cfg="config"
+    @add="onGalleryPick"
+    @close="galleryOpen = false"
+  >
+    <!-- Real outlines for an axis preset (the letterforms themselves are
+         the picture — "Weight In" drawn as a growing rectangle is
+         indistinguishable from "Grow In"); the engine's own live-preview
+         card for everything else it has one for; a plain 2-letter tile
+         (MoveGallery's own fallback) for a track preset, Blink or
+         Scatter, none of which has a preview render of its own. -->
+    <template #thumb="{ offer }">
+      <VectorTypeThumb
+        v-if="offer.kind === 'preset' && vtAxisPreset(offer.phase, offer.presetId)"
+        :preset-id="offer.presetId!" :slot-kind="offer.phase"
+        :font-id="config.fontId" :text="config.text" :axes="config.axes" :font="font" :fill="baseFill ?? '#ffffff'"
+      />
+      <PresetThumb
+        v-else-if="offer.kind === 'preset'"
+        :preset-id="offer.presetId!" :slot-kind="offer.phase" :capabilities="VT_CAPABILITIES"
+      />
+      <span v-else class="text-[9px] text-white/25">{{ offer.label.slice(0, 2).toUpperCase() }}</span>
+    </template>
+  </MoveGallery>
 
   <CanvasContextMenu v-if="varMenu" :x="varMenu.x" :y="varMenu.y" :items="varMenu.items" @close="varMenu = null" />
   <SweepPopover
