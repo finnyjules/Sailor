@@ -25,63 +25,76 @@ float fbmN(vec2 p, float seed, int oct) {
     float v = 0.0, a = 0.5, norm = 0.0;
     for (int i = 0; i < 8; i++) {
         if (i >= oct) break;
-        v += a * vnoise(p, seed + float(i) * 17.0); norm += a;
-        p *= 2.03; a *= 0.5;
+        v += a * vnoise(p, seed + float(i) * 131.0); norm += a;
+        p *= 2.0; a *= 0.5;
     }
     return v / max(norm, 1e-5);
 }
 
+// The inks are a ramp by order: slot 0 is the deepest band, the last the palest. Levels
+// wrap every `u_steps`, and every level lands on some ink whatever the step count, so no
+// swatch is ever dead.
 #define MAXS 8
 uniform vec3 u_ramp[MAXS];
 uniform float u_rampPos[MAXS];
 uniform float u_rampCount;
-vec3 rampAt(float t) {
-    t = clamp(t, 0.0, 1.0);
-    int n = int(u_rampCount + 0.5);
-    vec3 c = u_ramp[0];
-    for (int i = 1; i < MAXS; i++) {
-        if (i >= n) break;
-        float p0 = u_rampPos[i - 1], p1 = u_rampPos[i];
-        c = mix(c, u_ramp[i], clamp((t - p0) / max(p1 - p0, 1e-5), 0.0, 1.0));
-    }
-    return c;
-}
-float bandq(float t, float steps) {
-    steps = max(steps, 2.0);
-    return min(floor(clamp(t, 0.0, 0.9999) * steps), steps - 1.0) / (steps - 1.0);
+uniform float u_steps;
+vec3 rampLevel(float k) {
+    int n = max(1, int(u_rampCount + 0.5));
+    float s = max(2.0, floor(u_steps + 0.5));
+    float km = mod(k, s);                                    // 0 <= km < s, also for negative k
+    int idx = int(floor(km / s * float(n)));
+    return u_ramp[clamp(idx - (idx / n) * n, 0, MAXS - 1)];
 }
 
-uniform float u_cells;
-uniform float u_levels;
-uniform float u_mirror;
-uniform float u_scale;
+uniform float u_cols;
+uniform float u_rings;
+uniform float u_warp;
+uniform float u_grain;
+uniform float u_calm;
+uniform float u_ripple;
 uniform float u_speed;
 uniform float u_mix;
 
 void main() {
-    vec2 asp = vec2(u_resolution.x / u_resolution.y, 1.0);
-    // Coarse cell grid, `u_cells` across the short axis (rounded to whole cells on the long axis); one field sample per cell.
-    // Whole cell counts on both axes so a mirrored cell lands exactly on its twin on any
-    // frame size; cells are then square to within one part in u_cells, not exactly square,
-    // never fewer than 2 on either axis (extreme portrait frames would otherwise round to 0).
-    vec2 grid = max(floor(max(u_cells, 2.0) * asp + 0.5), vec2(2.0));
-    vec2 cellId = floor(v_texCoord * grid);
-    vec2 uv = (cellId + 0.5) / grid;
+    float W = u_resolution.x, H = u_resolution.y;
+    float cols = max(4.0, floor(u_cols + 0.5));
+    float cw = W / cols;
+    float rows = max(3.0, floor(H / cw + 0.5));
+    float ch = H / rows;
+    float asp = W / H;
 
-    // Mirroring folds the cell centre back onto its twin so the two halves match exactly.
-    int m = int(u_mirror + 0.5);
-    if (m == 1 || m == 3) uv.x = 0.5 - abs(uv.x - 0.5);
-    if (m == 2 || m == 3) uv.y = 0.5 - abs(uv.y - 0.5);
+    // The cell, mirrored: each cell reads the field at its own quadrant's coordinates, so
+    // the four quadrants are one decision read four times.
+    vec2 pxy = vec2(v_texCoord.x * W, (1.0 - v_texCoord.y) * H);
+    float i = floor(pxy.x / cw), j = floor(pxy.y / ch);
+    float mi = min(i, cols - 1.0 - i), mj = min(j, rows - 1.0 - j);
+    float u = (mi + 0.5) / cols, v = (mj + 0.5) / rows;
+    float dx = (0.5 - u) * asp, dy = 0.5 - v;
+    float r = length(vec2(dx, dy)) / length(vec2(0.5 * asp, 0.5));
 
-    vec2 p = (uv - 0.5) * asp * u_scale;
-    float t = u_time * u_speed * 0.15;
-    float h = fbmN(p + vec2(t, 0.0), u_seed, 5);
-    h = clamp((h - 0.5) * 2.2 + 0.5, 0.0, 1.0);
-    vec3 col = rampAt(bandq(h, u_levels));
+    // Rings pushed off true: a slow field swings whole lobes out of round, a quick one
+    // roughens their edges.
+    float slow = fbmN(vec2(u * 3.2 + 3.1, v * 3.2 + 7.7), u_seed + 11.0, 3) - 0.5;
+    float fast = fbmN(vec2(u * 9.5 + 13.7, v * 9.5 + 2.3), u_seed + 17.0, 2) - 0.5;
+    r += (slow * 1.35 + fast * 0.5) * u_warp;
+
+    // Ripple marches the bands outward a level at a time; still at Speed 0.
+    float march = u_time * u_speed * 0.5 * u_ripple;
+    float calmR = u_calm * 0.55;
+    float lvl;
+    if (r <= calmR) {
+        lvl = 0.0;                                           // the quiet middle is the innermost band
+    } else {
+        // Grain works in whole levels, not in radius: a tenth of a level never crosses a
+        // boundary, so it would do nothing you could see.
+        float g = (fbmN(vec2(u * 21.0 + 1.3, v * 21.0 + 9.1), u_seed + 29.0, 2) - 0.5) * u_grain * 2.4;
+        lvl = (r - calmR) / (1.0 - calmR) * max(1.0, u_rings) + g + march;
+    }
+    vec3 col = rampLevel(floor(lvl));
 
     if (u_hasInput > 0.5 && u_mix > 0.0) {
-        vec3 img = texture(u_image0, v_texCoord).rgb;
-        col = mix(col, img, u_mix);
+        col = mix(col, texture(u_image0, v_texCoord).rgb, u_mix);
     }
     fragColor0 = vec4(col, 1.0);
 }

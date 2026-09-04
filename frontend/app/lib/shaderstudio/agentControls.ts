@@ -206,7 +206,7 @@ export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
   { words: 'banded terrain / contour landscape / heat map bands / posterised landscape', ids: ['terrain_bands', 'topographic'] },
   { words: 'dithered map / landmasses / islands / radar map / sonar', ids: ['sonar'] },
   { words: 'neon wash / spray paint clouds / airbrush glow / mist', ids: ['mist', 'nebula'] },
-  { words: 'symmetrical pixels / mirrored pixel field / totem', ids: ['pixel_bloom'] },
+  { words: 'pixel rings / mirrored pixel banner / ripple target / totem', ids: ['pixel_bloom'] },
   { words: 'threads / fibres / flowing lines / string field / filament', ids: ['filament', 'light_beams'] },
   { words: 'thermal camera / heat map smear / infrared / dropped frame bands / sear', ids: ['sear', 'terrain_bands'] },
   { words: 'pixel aurora / dithered northern lights (base: aurora; add bayer_dither by hand)', ids: ['aurora', 'bayer_dither'] },
