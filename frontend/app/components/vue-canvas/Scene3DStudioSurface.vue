@@ -19,7 +19,7 @@ import {
 import {
   parseDoc, serializeDoc, createPrimitive, createGlbObject, createLight, createGroup, createDecal,
   MATERIAL_DEFAULTS, LIGHT_KINDS, gradientAngles, gradientStopsOf, opalStopsOf, screenOf,
-  DEFAULT_FONT_URL, DECAL_DEFAULTS, sceneHasShaderFill, sceneHasOpalFlow,
+  DEFAULT_FONT_URL, DECAL_DEFAULTS, sceneHasShaderFill, sceneHasOpalFlow, applySeedStopsToMaterial,
   type SceneDoc, type SceneObject, type PrimitiveObject, type PrimitiveKind, type MaterialType, type GradientStop, type LightKind, type LightObject, type ReliefSpec, type SceneMaterial, type ScreenSpec, type Vec3,
   type DecalObject, type DecalContent,
 } from '~/lib/scene3d/config'
@@ -36,6 +36,7 @@ import { libraryToken, resolveLibraryFace, libraryFamily } from '~/data/library-
 import FontPicker from '~/components/vue-canvas/FontPicker.vue'
 import TexturePicker from '~/components/vue-canvas/TexturePicker.vue'
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
+import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapeToSvg } from '~/lib/shapes/svg'
 import { anchorAbove } from '~/lib/shapes/pickerLayout'
@@ -666,6 +667,15 @@ const matOpalStops = computed<GradientStop[]>({
   get: () => (selected.value ? opalStopsOf(selected.value.material) : []),
   set: (v) => applyMaterial((m) => { m.gradientStops = v.map((s) => ({ ...s })) }),
 })
+
+/** Seed-engine palette (PalettePicker's "Seed engine" shelf, literal or cooked) applied to
+ *  every selected material — routes through applyMaterial like the setters above so a
+ *  multi-selection fans out, and through applySeedStopsToMaterial so paletteMode flips to
+ *  'manual' (a material caught in 'harmony' mode must show the applied stops immediately,
+ *  not the generated ramp — see rampStopsOf in config.ts). */
+function applySeedPaletteStops(stops: GradientStop[]): void {
+  applyMaterial((m) => applySeedStopsToMaterial(m, stops))
+}
 
 // ── shaderFill (object anchor only — Task 7) ─────────────────────────────────
 // Hand-wired: Scene3D has no control-schema/agent path (unlike Space Type/Shape Studio's
@@ -4247,6 +4257,14 @@ async function onClose() {
 
           <template #control-ui.material.gradientStops>
             <StudioGradientRamp v-model="matGradientStops" />
+            <PalettePicker
+              mode="stops"
+              :stop-count="matGradientStops.length"
+              :seed="matGradientStops[0]?.color ?? '#4f8ad9'"
+              class="mt-2"
+              @apply-stops="applySeedPaletteStops"
+              @apply-literal-stops="applySeedPaletteStops"
+            />
           </template>
 
           <template #control-ui.material.gradientDirection>

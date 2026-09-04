@@ -660,6 +660,15 @@ export function rampStopsOf(mat: SceneMaterial): GradientStop[] {
   return toStops(harmonize(seedHex, scheme, N), N)
 }
 
+/** Apply seed-engine palette stops (PalettePicker's literal/seed shelf results) to a
+ *  material as authored manual stops. Flips `paletteMode` to 'manual' so rampStopsOf
+ *  above does not shadow them with a generated harmony ramp on the very next render —
+ *  a material caught in 'harmony' mode must show the applied stops immediately. */
+export function applySeedStopsToMaterial(mat: SceneMaterial, stops: GradientStop[]): void {
+  mat.paletteMode = 'manual'
+  mat.gradientStops = stops.slice(0, GRADIENT_STOPS_MAX).map((s) => ({ pos: s.pos, color: s.color }))
+}
+
 /** A full-hue-wheel spectrum, CYCLIC (first stop == last) so the opal shader's `fract()` wrap has
  *  no colour seam. This is the opalescent default — unlike the gradient material, an opal with no
  *  authored stops must look holographic out of the box, not like the grey `color`→`gradientB`

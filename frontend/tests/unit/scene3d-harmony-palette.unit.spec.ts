@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { rampStopsOf, parseMaterialForTest } from './helpers/scene3d-material'
-import type { SceneMaterial } from '~/lib/scene3d/config'
+import { applySeedStopsToMaterial, type SceneMaterial } from '~/lib/scene3d/config'
 
 const base: SceneMaterial = { type: 'gradient', color: '#222222', roughness: 0.5, metalness: 0 }
 
@@ -32,5 +32,12 @@ describe('scene3d harmony palette', () => {
     expect(m.paletteMode).toBe('harmony')
     expect(m.paletteHue).toBe(123)
     expect(m.paletteHarmony).toBe('complementary')
+  })
+
+  it('applying seed stops flips paletteMode to manual and keeps exact colors', () => {
+    const mat: any = { paletteMode: 'harmony', gradientStops: [] }
+    applySeedStopsToMaterial(mat, [{ pos: 0, color: '#b64a1f' }, { pos: 1, color: '#f4e3d0' }])
+    expect(mat.paletteMode).toBe('manual')
+    expect(mat.gradientStops.map((s: any) => s.color)).toEqual(['#b64a1f', '#f4e3d0'])
   })
 })
