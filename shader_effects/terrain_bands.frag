@@ -8,7 +8,6 @@ uniform float u_hasInput;
 in vec2 v_texCoord;
 layout(location = 0) out vec4 fragColor0;
 
-// Hashing + value noise, same construction as fbm.frag (frags are self-contained).
 uint pcg(uint v) { v = v * 747796405u + 2891336453u; v = ((v >> ((v >> 28u) + 4u)) ^ v) * 277803737u; return (v >> 22u) ^ v; }
 float hash2(vec2 ip, float seed) {
     uvec2 q = uvec2(ivec2(ip) + 32768);
@@ -22,67 +21,67 @@ float vnoise(vec2 p, float seed) {
     float c = hash2(i + vec2(0, 1), seed), d = hash2(i + vec2(1, 1), seed);
     return mix(mix(a, b, u2.x), mix(c, d, u2.x), u2.y);
 }
-// Octave count is a dial ("Detail"); the loop bound is fixed because GLSL ES needs one.
 float fbmN(vec2 p, float seed, int oct) {
     float v = 0.0, a = 0.5, norm = 0.0;
     for (int i = 0; i < 8; i++) {
         if (i >= oct) break;
-        v += a * vnoise(p, seed + float(i) * 17.0); norm += a;
-        p *= 2.03; a *= 0.5;
+        v += a * vnoise(p, seed + float(i) * 1319.0); norm += a;
+        p *= 2.0; a *= 0.5;
     }
     return v / max(norm, 1e-5);
 }
 
-// A `gradient` manifest param expands to these three uniforms (see to_uniforms()).
+// One band per ink, low to high; the stop positions are ignored.
 #define MAXS 8
 uniform vec3 u_ramp[MAXS];
 uniform float u_rampPos[MAXS];
 uniform float u_rampCount;
-vec3 rampAt(float t) {
-    t = clamp(t, 0.0, 1.0);
-    int n = int(u_rampCount + 0.5);
-    vec3 c = u_ramp[0];
-    for (int i = 1; i < MAXS; i++) {
-        if (i >= n) break;
-        float p0 = u_rampPos[i - 1], p1 = u_rampPos[i];
-        c = mix(c, u_ramp[i], clamp((t - p0) / max(p1 - p0, 1e-5), 0.0, 1.0));
-    }
-    return c;
-}
-// Quantise 0..1 into `steps` hard bands. Band k lands on ramp position k/(steps-1), so
-// when steps equals the ink count every band is exactly one ink, never an in-between mix.
-float bandq(float t, float steps) {
-    steps = max(steps, 2.0);
-    return min(floor(clamp(t, 0.0, 0.9999) * steps), steps - 1.0) / (steps - 1.0);
-}
 
-uniform float u_steps;
 uniform float u_scale;
 uniform float u_warp;
 uniform float u_detail;
 uniform float u_contrast;
+uniform float u_balance;
 uniform float u_grain;
+uniform float u_block;
+uniform float u_drift;
 uniform float u_speed;
 uniform float u_mix;
 
 void main() {
-    vec2 asp = vec2(u_resolution.x / u_resolution.y, 1.0);
-    vec2 p = (v_texCoord - 0.5) * asp * u_scale;
-    float t = u_time * u_speed * 0.15;
-    int oct = int(clamp(u_detail, 1.0, 8.0) + 0.5);
+    float W = u_resolution.x, H = u_resolution.y;
+    float ar = H / W;
+    vec2 dev = floor(v_texCoord * u_resolution);                       // device pixel (grain is per pixel)
+    vec2 pxy = vec2(v_texCoord.x * W, (1.0 - v_texCoord.y) * H);       // canvas, y DOWN
 
-    // Domain-warped height field: the warp is what makes the contours lean and fold.
-    vec2 q = vec2(fbmN(p + vec2(0.0, t), u_seed, oct), fbmN(p + vec2(5.2, 1.3) - t, u_seed + 7.0, oct));
-    float h = fbmN(p + u_warp * (q - 0.5) * 2.0, u_seed + 17.0, oct);
-    h = clamp((h - 0.5) * u_contrast + 0.5, 0.0, 1.0);
+    // Blockiness: the tool snaps to blocks of N preview pixels; scaled to the short side
+    // so a 2400 px export carries the same block as the 700 px preview.
+    float blk = floor(u_block + 0.5) * max(1.0, min(W, H) / 700.0);
+    if (blk >= 1.0) pxy = floor(pxy / blk) * blk;
+    vec2 uv = pxy / vec2(W, H);
 
-    // Per-pixel grain roughens the joins between bands.
-    float g = (hash2(floor(v_texCoord * u_resolution), u_seed + 99.0) - 0.5) * u_grain / max(u_steps, 2.0);
-    vec3 col = rampAt(bandq(h + g, u_steps));
+    float u = uv.x * u_scale, v = uv.y * u_scale * ar;
+    int oct = int(clamp(u_detail, 1.0, 7.0) + 0.5);
+    // Drift: the tool walks a fourth noise axis on a circle; here the domain orbits.
+    float ph = u_time * u_speed * 0.25;
+    vec2 o = vec2(cos(ph), sin(ph)) * u_drift * 0.5;
+
+    float wx = fbmN(vec2(u + 5.2, v + 1.3) + o, u_seed + 11.0, 2);
+    float wy = fbmN(vec2(u + 9.1, v + 7.7) + o, u_seed + 29.0, 2);
+    float val = fbmN(vec2(u + u_warp * (wx - 0.5) * 2.0, v + u_warp * (wy - 0.5) * 2.0) + o, u_seed, oct);
+    val = clamp((val - 0.5) * u_contrast + 0.5, 0.0, 1.0);
+
+    // Grain straight into the value, per device pixel, before the cut into bands.
+    val = clamp(val + (hash2(dev, u_seed) - 0.5) * u_grain, 0.0, 1.0);
+    // Spread skews the bands toward the low or the high inks.
+    float q = pow(val, pow(2.0, -u_balance));
+
+    int n = max(1, int(u_rampCount + 0.5));
+    int idx = clamp(int(floor(q * float(n))), 0, n - 1);
+    vec3 col = u_ramp[clamp(idx, 0, MAXS - 1)];
 
     if (u_hasInput > 0.5 && u_mix > 0.0) {
-        vec3 img = texture(u_image0, v_texCoord).rgb;
-        col = mix(col, img, u_mix);
+        col = mix(col, texture(u_image0, v_texCoord).rgb, u_mix);
     }
     fragColor0 = vec4(col, 1.0);
 }
