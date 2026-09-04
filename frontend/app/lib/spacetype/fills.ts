@@ -339,7 +339,7 @@ export function fillTexture(three: typeof THREE, fill: Fill): THREE.Texture | nu
   if (fill.type === 'solid') return null
   // shapeId is only meaningful for `shapes`; include it in the key so two shape patterns that
   // share colours/density/angle but differ in shape don't alias to the same cached texture.
-  const key = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap : ''}`
+  const key = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap : fill.type === 'paper' ? String(fill.grain ?? 0.4) : ''}`
   const hit = _cache.get(key)
   if (hit) return hit
   const t = fill.type === 'gradient' ? gradientRamp(three, fill.a, fill.b)
@@ -349,6 +349,7 @@ export function fillTexture(three: typeof THREE, fill: Fill): THREE.Texture | nu
     : fill.type === 'checkerboard' ? checkerboardTex(three, fill.a, fill.b, fill.density)
     : fill.type === 'stripes' ? stripesTex(three, fill.a, fill.b, fill.angle, fill.density)
     : fill.type === 'shapes' ? shapesTex(three, fill)
+    : fill.type === 'paper' ? paperTex(three, fill)
     : qrTex(three, fill.a, fill.b, fill.density)
   _cache.set(key, t)
   return t
@@ -397,7 +398,7 @@ const _atlasCache = new Map<string, THREE.Texture>()
 export function fillAtlasTexture(three: typeof THREE, fills: Fill[]): THREE.Texture {
   // shapeId only matters for `shapes`; fold it in so two shape patterns that differ only by shape
   // (same colours/density/angle) don't collide onto one cached atlas (mirrors fillTexture's key).
-  const key = fills.map(f => `${f.type}:${f.a}:${f.b}:${f.angle}:${f.density}${f.type === 'shapes' ? ':' + (f.shapeId ?? 'sparkle') + ':' + f.shapeSize + ':' + f.shapeGap : ''}`).join('|')
+  const key = fills.map(f => `${f.type}:${f.a}:${f.b}:${f.angle}:${f.density}${f.type === 'shapes' ? ':' + (f.shapeId ?? 'sparkle') + ':' + f.shapeSize + ':' + f.shapeGap : f.type === 'paper' ? ':' + String(f.grain ?? 0.4) : ''}`).join('|')
   const hit = _atlasCache.get(key)
   if (hit) return hit
   const BAND = 256, W = 256, nb = Math.max(1, fills.length)
@@ -439,6 +440,10 @@ export function fillAtlasTexture(three: typeof THREE, fills: Fill[]): THREE.Text
     } else if (fill.type === 'shapes') {
       // Stamp the shared shape tile into this band (the band is exactly one BAND×BAND tile cell),
       // so shutter/coil copies get tiled shapes instead of a flat colour. Transparent bg survives.
+      ctx.drawImage(fillTileCanvas(fill, BAND), 0, y0)
+    } else if (fill.type === 'paper') {
+      // Stamp the shared paper tile into this band (one BAND×BAND cell), so per-segment
+      // palettes get real grain instead of a flat colour.
       ctx.drawImage(fillTileCanvas(fill, BAND), 0, y0)
     } else {
       ctx.fillStyle = fill.a; ctx.fillRect(0, y0, W, BAND)
@@ -511,6 +516,14 @@ function ombreTex(three: typeof THREE, a: string, b: string, angle: number): THR
 // background (b='none'/'') survives as real alpha through CanvasTexture. 512px keeps the motifs
 // crisp at high density; tunePattern sets SRGB + RepeatWrapping so it tiles seamlessly.
 function shapesTex(three: typeof THREE, fill: Fill): THREE.Texture {
+  const t = new three.CanvasTexture(fillTileCanvas(fill, 512))
+  tunePattern(three, t)
+  return t
+}
+
+/** Paper: the same CPU tile builder the swatch/box render use, so the GPU surface matches the
+ *  CPU render exactly. 512px keeps the grain crisp; tunePattern sets SRGB + RepeatWrapping. */
+function paperTex(three: typeof THREE, fill: Fill): THREE.Texture {
   const t = new three.CanvasTexture(fillTileCanvas(fill, 512))
   tunePattern(three, t)
   return t

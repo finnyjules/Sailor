@@ -68,3 +68,59 @@ describe('paperImageData — deterministic grain', () => {
     expect(intermediate).toBe(true)
   })
 })
+
+// ── GPU path ────────────────────────────────────────────────────────────────
+// fillTexture's dispatch ends in `: qrTex(...)`. A new shared FILL_TYPES member with no arm
+// renders as QR on every GPU surface. paintPaperTile strokes fibres (qr does not), so a paper
+// tile records `stroke` ops while a qr tile does not — that distinguishes the two.
+class FakeCtx {
+  ops: any[] = []
+  fillStyle: any = ''; strokeStyle = ''; lineWidth = 0; globalAlpha = 1
+  save() {} restore() {}
+  fillRect() {} beginPath() {} moveTo() {} lineTo() {}
+  stroke() { this.ops.push(['stroke']) }
+  putImageData() { this.ops.push(['putImageData']) }
+  createLinearGradient() { return { addColorStop() {} } }
+  getImageData() { return { data: new Uint8ClampedArray(4) } }
+  drawImage() {}
+  translate() {} rotate() {} scale() {} clip() {} clearRect() {} setTransform() {}
+}
+class FakeCanvas { width = 0; height = 0; ctx = new FakeCtx(); getContext() { return this.ctx } }
+
+let gpuCreated: FakeCanvas[] = []
+function installGpuDom() {
+  vi.stubGlobal('document', { createElement: () => { const c = new FakeCanvas(); gpuCreated.push(c); return c } })
+}
+
+import * as THREE from 'three'
+import { fillTexture, fillAtlasTexture } from '../../app/lib/spacetype/fills'
+
+describe('paper fill — GPU path (fillTexture)', () => {
+  beforeAll(() => installGpuDom())
+  it('routes paper through the paper tiler (fibre strokes), NOT qrTex', () => {
+    gpuCreated = []
+    const tex = fillTexture(THREE, paper({ grain: 0.5 }))
+    expect(tex).toBeInstanceOf(THREE.CanvasTexture)
+    // At least one produced canvas recorded a putImageData (grain) AND a stroke (fibre) — qr has no stroke.
+    const paperTile = gpuCreated.find(c => c.ctx.ops.some((o: any) => o[0] === 'stroke'))
+    expect(paperTile).toBeTruthy()
+    expect(paperTile!.ctx.ops.some((o: any) => o[0] === 'putImageData')).toBe(true)
+  })
+  it('caches per grain (changing only grain re-tiles)', () => {
+    const a = fillTexture(THREE, paper({ a: '#eeeeee', grain: 0.3 }))
+    const b = fillTexture(THREE, paper({ a: '#eeeeee', grain: 0.8 }))
+    const aAgain = fillTexture(THREE, paper({ a: '#eeeeee', grain: 0.3 }))
+    expect(b).not.toBe(a)
+    expect(aAgain).toBe(a)
+  })
+})
+
+describe('paper fill — GPU atlas (fillAtlasTexture)', () => {
+  beforeAll(() => installGpuDom())
+  it('stamps a paper tile into the band, not a flat colour', () => {
+    gpuCreated = []
+    fillAtlasTexture(THREE, [paper({ grain: 0.5 })])
+    const tile = gpuCreated.find(c => c.ctx.ops.some((o: any) => o[0] === 'stroke'))
+    expect(tile).toBeTruthy()   // a real paper tile (fibres) was stamped, not a flat fillRect band
+  })
+})
