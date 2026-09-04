@@ -21,7 +21,11 @@ export interface DescribedControl {
 const AI_EDITABLE_KINDS = new Set(['slider', 'select', 'color', 'font', 'gradientStops', 'switch', 'shape'])
 
 // 'text' is opt-in via aiEditable — a free string is only safe where the consumer
-// resolves it (Scene3D's texture phrase).
+// can absorb ANY string: either it resolves the words itself (Scene3D's texture
+// phrase) or it falls back visibly on one it cannot use (Vector Type's `fontId`,
+// where the studio draws Inter and says so, and the adapter's `write` re-merges
+// so the junk is never persisted). A consumer that would silently break on a
+// string it did not expect must not opt in.
 function isEditable(c: ControlSpec): boolean {
   if (typeof c.aiEditable === 'boolean') return c.aiEditable
   return AI_EDITABLE_KINDS.has(c.kind)

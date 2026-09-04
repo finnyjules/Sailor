@@ -789,7 +789,13 @@ const vectorTypeAdapter: PatchAdapter = {
     if (!n.data) n.data = {}
     if (!n.data.properties) n.data.properties = {}
     const prev = n.data.properties.sailor_vectorType ?? {}
-    n.data.properties.sailor_vectorType = { ...prev, config: JSON.parse(JSON.stringify(config)) }
+    // Re-merged, not stored verbatim: `makeConfigParams` writes whatever the
+    // agent names straight onto the live config, and a `text` control like
+    // `fontId` accepts any string — but Vector Type can only LOAD the three
+    // token shapes. `mergeConfig` is the same gate every stored config passes
+    // on the way in, so putting it here means a patch cannot persist a value
+    // the studio would have to fall back from on every later load.
+    n.data.properties.sailor_vectorType = { ...prev, config: JSON.parse(JSON.stringify(mergeVtConfig(config))) }
   },
   clone: (config: any) => JSON.parse(JSON.stringify(config)),
   label: 'Vector Type',

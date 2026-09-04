@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('ofetch', () => ({ $fetch: vi.fn() }))
 
 import { DEFAULT_CONFIG, mergeConfig } from '~/lib/vectortype/config'
+import { DEFAULT_FONT_ID } from '~/data/variable-fonts'
 import { vtAgentControls } from '~/lib/vectortype/agentControls'
 import { VT_GUIDANCE } from '~/lib/vectortype/controls'
 import { makeConfigParams } from '~/lib/agent/configParams'
@@ -123,5 +124,28 @@ describe('moves — agent surface (Task 10)', () => {
     expect(ease).toBeTruthy()
     expect(ease!.current).toBe('smooth')
     expect(String(ease!.current)).not.toBe('[object Object]')
+  })
+})
+
+describe('the adapter write is the last gate on config', () => {
+  // The params proxy writes whatever the agent names straight onto the live
+  // config object, and `fontId` is a `text` control — free-form by kind, but
+  // the ONLY strings Vector Type can actually load are the three token shapes.
+  // Without a re-merge here, "set the font to Helvetica" persisted `Helvetica`
+  // into the saved project, and every later load of that project would fall
+  // back to Inter while the row kept reporting a font that does not exist.
+  it('re-merges the config, so an unloadable fontId cannot be persisted', () => {
+    const node: any = {}
+    const config: any = { ...mergeConfig({}), fontId: 'Helvetica' }
+    __vectorTypeAdapterForTest.write(node, config)
+    expect(node.data.properties.sailor_vectorType.config.fontId).toBe(DEFAULT_FONT_ID)
+  })
+  it('leaves a real token alone', () => {
+    const node: any = {}
+    const config: any = { ...mergeConfig({}), fontId: 'google:Inter Tight@700', text: 'HELLO' }
+    __vectorTypeAdapterForTest.write(node, config)
+    const stored = node.data.properties.sailor_vectorType.config
+    expect(stored.fontId).toBe('google:Inter Tight@700')
+    expect(stored.text).toBe('HELLO')
   })
 })
