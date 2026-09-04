@@ -110,3 +110,44 @@ describe('summarizeTextureChange', () => {
     expect(sum?.after).toBe('#ff0000')
   })
 })
+
+describe('applyTextureCommand — dealt-grid template', () => {
+  function dealtState(): TextureState {
+    const params = textureDefaults()
+    params.mode = 'dealtgrid'
+    return { params }
+  }
+
+  it('setParam dgTemplate expands the whole preset (cells + density + variance + vocab)', () => {
+    const r = applyTextureCommand(dealtState(), { op: 'setParam', target: 'dgTemplate', args: { value: 'mosh' } })
+    if (!r.ok) throw new Error('template apply failed')
+    const p = r.template.params as Record<string, unknown>
+    // Matches gridTemplate('mosh').pattern.
+    expect(p.dgTemplate).toBe('mosh')
+    expect(p.dgCells).toBe(16)
+    expect(p.dgDensity).toBeCloseTo(0.8, 5)
+    expect(p.dgSizeVar).toBeCloseTo(0.7, 5)
+    expect(p.dgVocab).toBe('brand')
+  })
+
+  it('template application is exactly invertible (undo restores every touched dial)', () => {
+    const before = dealtState()
+    const beforeParams = { ...before.params } as Record<string, unknown>
+    const r = applyTextureCommand(before, { op: 'setParam', target: 'dgTemplate', args: { value: 'static' } })
+    if (!r.ok) throw new Error('apply failed')
+    const undo = applyTextureCommand(r.template, r.inverse)
+    if (!undo.ok) throw new Error('undo failed')
+    const p = undo.template.params as Record<string, unknown>
+    for (const k of ['dgTemplate', 'dgCells', 'dgDensity', 'dgSizeVar', 'dgVocab']) {
+      expect(p[k]).toEqual(beforeParams[k])
+    }
+  })
+
+  it('dgVocab recolours without touching the layout dials', () => {
+    const r = applyTextureCommand(dealtState(), { op: 'setParam', target: 'dgVocab', args: { value: 'mono' } })
+    if (!r.ok) throw new Error('vocab set failed')
+    const p = r.template.params as Record<string, unknown>
+    expect(p.dgVocab).toBe('mono')
+    expect(p.dgCells).toBe((textureDefaults() as Record<string, unknown>).dgCells)
+  })
+})

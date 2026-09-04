@@ -12,6 +12,7 @@ import { bakeSheetBlob } from '~/lib/texturefx/bake'
 import { drawSheet, fitLetterbox, isTileable, repeatsFor, sheetFromParams } from '~/lib/texturefx/sheet'
 import { rolesFor } from '~/lib/texturefx/roles'
 import { fillForRole } from '~/lib/texturefx/fills'
+import { applyGridTemplate } from '~/lib/texturefx/templates'
 import type { Fill } from '~/lib/texturefx/types'
 import type { ControlSpec, Params } from '~/lib/spacetype/effect'
 import type { TextureControl } from '~/lib/texturefx/controls'
@@ -258,6 +259,10 @@ function controlVisible(c: ControlSpec): boolean {
 // before the shared component existed (`params[key] = value; onParam()`), so
 // `onEdit`'s write-through behaves exactly like a user edit.
 function setParam(key: string, value: string | number) {
+  // The dealt-grid Template select is a convenience that expands into the individual
+  // dials (Cells / Density / Size variance / Colours) — apply it, don't store it as a
+  // lone param, or the picker would be a dead control that renders but does nothing.
+  if (key === 'dgTemplate') { applyGridTemplate(params, String(value)); onParam(); onEdit(key, value); return }
   (params as Record<string, unknown>)[key] = value
   onParam()
   onEdit(key, value)

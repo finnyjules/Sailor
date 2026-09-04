@@ -18,6 +18,7 @@ import { TEXTURE_CONTROLS, type TextureControl } from '~/lib/texturefx/controls'
 import { describeControls, validatePatch } from '~/lib/spacetype/controlDescriptor'
 import { activeFamily, rolesFor } from '~/lib/texturefx/roles'
 import { fillForRole } from '~/lib/texturefx/fills'
+import { applyGridTemplate } from '~/lib/texturefx/templates'
 import { contrastRatio, parseColor, type LayoutIssue } from '~/lib/agent/verify'
 import { SWISS_LIMITS } from '~/lib/agent/designPrinciples'
 
@@ -54,7 +55,7 @@ const TEXTURE_COMMANDS: CommandSpec[] = [
   { op: 'linkFill', hint: 'Make one ROLE reuse another role\'s fill. target = role key; args: { to: otherRoleKey }. Use for "make A and B the same".' },
   { op: 'setFillOpacity', hint: 'Set a ROLE fill\'s opacity. target = role key; args: { opacity: 0..1 }.' },
   { op: 'clearFill', hint: 'Reset a ROLE to its default colour (removes any custom fill). target = role key.' },
-  { op: 'setParam', hint: 'Tune a flat control (palette/lattice/motif/cells/…). target = control key (see settings); args: { value }. Value is clamped to the control\'s range / options. Use for "tighter cells", "warmer palette" (colorA/colorB/background), "more jitter".' },
+  { op: 'setParam', hint: 'Tune a flat control (palette/lattice/motif/cells/…). target = control key (see settings); args: { value }. Value is clamped to the control\'s range / options. Use for "tighter cells", "warmer palette" (colorA/colorB/background), "more jitter". In the dealt-grid mode, target "dgTemplate" with a value of "modular"/"oddgrid"/"parcel"/"mosh"/"static" applies a whole preset at once (cells + density + size variance + colours), and "dgVocab" ("brand"/"mono"/"warm"/"cool") recolours it.' },
   { op: 'restore', hint: 'internal — undo support.' },
 ]
 
@@ -183,12 +184,30 @@ export function applyTextureCommand(input: TextureState, cmd: Command): CommandR
       if (value === undefined) return { ok: false, reason: 'invalid', detail: 'missing args.value' }
       const valid = validatePatch({ [key]: value }, described)
       if (!(key in valid)) return { ok: false, reason: 'invalid', detail: `'${key}' is not a tunable control here, or the value is out of range` }
+      // The dealt-grid Template select expands into several dials — apply it rather
+      // than store a lone selector value (which would be a no-op on the render). The
+      // inverse restores every key the expansion touched, so undo is exact.
+      if (key === 'dgTemplate') {
+        const touched = ['dgTemplate', 'dgCells', 'dgDensity', 'dgSizeVar', 'dgVocab']
+        const before: Record<string, ParamValue> = {}
+        for (const k of touched) before[k] = p[k] as ParamValue
+        const next = applyGridTemplate({ ...p }, String(valid[key]))
+        return { ok: true, template: { params: next }, inverse: { op: 'restore', args: { params: before } } }
+      }
       const old = p[key]
       return { ok: true, template: { params: { ...p, [key]: valid[key]! } }, inverse: { op: 'setParam', target: key, args: { value: old as ParamValue } } }
     }
     case 'restore': {
       if (cmd.args && 'fills' in cmd.args) return { ok: true, template: { params: setFills(p, clone(cmd.args.fills as FillsByRole)) }, inverse: fillsSnapshot(p) }
-      return { ok: false, reason: 'invalid', detail: 'restore needs args.fills' }
+      // Multi-key param restore — the inverse of a template expansion (which changes
+      // several dials at once). Merges the saved key/values back over the params.
+      if (cmd.args && 'params' in cmd.args) {
+        const patch = clone(cmd.args.params as Record<string, ParamValue>)
+        const before: Record<string, ParamValue> = {}
+        for (const k of Object.keys(patch)) before[k] = p[k] as ParamValue
+        return { ok: true, template: { params: { ...p, ...patch } }, inverse: { op: 'restore', args: { params: before } } }
+      }
+      return { ok: false, reason: 'invalid', detail: 'restore needs args.fills or args.params' }
     }
     default:
       return { ok: false, reason: 'out-of-vocabulary', detail: `unknown op '${cmd.op}'` }
