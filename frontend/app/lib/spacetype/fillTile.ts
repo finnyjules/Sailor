@@ -22,6 +22,8 @@ import { isGradient, isFill, sortedClampedStops, type Paint } from '~/lib/compos
 // (`lib/vector/svg` imports nothing at all).
 import { gradientUnitAxis } from '~/lib/vector/svg'
 import type { GradientStop, ParamValue } from '~/lib/shaderfx/types'
+import { drawShape } from '~/lib/shapes/path2d'
+import { shapeById } from '~/lib/shapes/catalog'
 
 // Local, deliberately NOT imported from ~/lib/shaderfx/params. This module sits in
 // a documented import cycle with ~/lib/compositor/paint (see the header), so every
@@ -31,10 +33,14 @@ import type { GradientStop, ParamValue } from '~/lib/shaderfx/types'
 // digits, because StudioColor emits #rrggbbaa.
 const PARAM_HEX = /^#?([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 
-export type FillType = 'solid' | 'gradient' | 'ombre' | 'grid' | 'noise' | 'checkerboard' | 'stripes' | 'qr' | 'shader'
+export type FillType = 'solid' | 'gradient' | 'ombre' | 'grid' | 'noise' | 'checkerboard' | 'stripes' | 'qr' | 'shader' | 'shapes'
 /** `a`/`b` drive the slot's fill (stripe); `textColor` is the solid colour for type on that row.
- *  `angle` (degrees) applies to `stripes`/`gradient`/`ombre`; `density` controls cell/stripe count. */
-export interface Fill { type: FillType; a: string; b: string; textColor: string; angle: number; density: number; shader?: ShaderSpec }
+ *  `angle` (degrees) applies to `stripes`/`gradient`/`ombre`/`shapes` (per-shape rotation);
+ *  `density` controls cell/stripe count. `shapeId`, `shapeSize` and `shapeGap` are only meaningful
+ *  (and only ever set by `normalizeFill`) for `type === 'shapes'`: `shapeId` is the library shape
+ *  tiled across the grid, while `shapeSize` (shape span) and `shapeGap` (gap between shapes) are
+ *  tile fractions from which the grid count is DERIVED so the pattern still tiles seamlessly. */
+export interface Fill { type: FillType; a: string; b: string; textColor: string; angle: number; density: number; shader?: ShaderSpec; shapeId?: string; shapeSize?: number; shapeGap?: number }
 
 /** A shader fill runs `input` through a catalog effect against any `Paint` — a flat
  *  colour, a linear/radial gradient, or another (non-shader) `Fill`. `input` is NEVER
@@ -51,7 +57,7 @@ export interface ShaderSpec {
 }
 
 /** All fill types, in picker order. SINGLE SOURCE OF TRUTH — imported by every fill dropdown. */
-export const FILL_TYPES: FillType[] = ['solid', 'gradient', 'ombre', 'grid', 'noise', 'checkerboard', 'stripes', 'qr', 'shader']
+export const FILL_TYPES: FillType[] = ['solid', 'gradient', 'ombre', 'grid', 'noise', 'checkerboard', 'stripes', 'qr', 'shader', 'shapes']
 export const DEFAULT_FILL: Fill = { type: 'solid', a: '#ffffff', b: '#000000', textColor: '#ffffff', angle: 45, density: 8 }
 
 export const DEFAULT_SHADER_SPEC: ShaderSpec = {
@@ -134,6 +140,20 @@ export function normalizeFill(f: unknown, depth = 0): Fill {
     textColor: typeof o.textColor === 'string' ? o.textColor : '#ffffff',
     angle: typeof o.angle === 'number' ? o.angle : 45,
     density: typeof o.density === 'number' ? o.density : 8,
+  }
+  // `shapeId` is only ever set for a `shapes` fill — a bad/missing id defaults to
+  // 'sparkle' here so every downstream consumer (the tile painters below) can
+  // assume `fill.shapeId` is a real id whenever `fill.type === 'shapes'`.
+  if (type === 'shapes') {
+    // `shapeId` defaults to 'sparkle' so every downstream consumer can assume a real id.
+    // `shapeSize`/`shapeGap` are tile fractions; when absent they are DERIVED from `density`
+    // (0.76/0.24 split reproduces the pre-size/gap look — cells filled 1 − 2·0.12 = 0.76),
+    // so an old shapes fill (only `density`) migrates to the exact same appearance.
+    const cl = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+    base.shapeId = typeof o.shapeId === 'string' ? o.shapeId : 'sparkle'
+    const d = cl(typeof o.density === 'number' ? o.density : 8, 1, 64)
+    base.shapeSize = typeof o.shapeSize === 'number' ? cl(o.shapeSize, 0.01, 0.6) : 0.76 / d
+    base.shapeGap  = typeof o.shapeGap  === 'number' ? cl(o.shapeGap,  0,    0.6) : 0.24 / d
   }
   if (type !== 'shader') return base            // a spec on a non-shader fill is dropped
   return { ...base, shader: normalizeShaderSpec(o.shader, depth) }
@@ -343,6 +363,40 @@ export function patternImageData(w: number, h: number, colA: [number, number, nu
   return img
 }
 
+/** Paint a grid of the fill's library shape onto a size-agnostic tile. The grid COUNT is
+ *  derived from `shapeSize` + `shapeGap` (both tile fractions): each cell spans
+ *  `size + gap`, so `d = round(1 / (size + gap))` whole cells fit across (keeping the
+ *  pattern seamless), and the shape fills `size / (size + gap)` of its cell. Bigger size ⇒
+ *  larger shapes / fewer of them; bigger gap ⇒ same shapes with more air around each. */
+function paintShapesTile(ctx: CanvasRenderingContext2D, fill: Fill, W: number, H: number): void {
+  const shape = shapeById(fill.shapeId ?? '') ?? shapeById('sparkle')!
+  // Self-migrate: a fill that skipped normalizeFill (e.g. a compositor Paint fed straight to the
+  // tile builder) may carry only the legacy `density`. Derive size/gap from it with the same
+  // 0.76/0.24 split normalizeFill uses, so a density-only shapes fill renders at its saved count
+  // here too — not a flat fallback. Explicit size/gap always win.
+  const dDen = Math.max(1, Math.min(64, fill.density || 8))
+  const size = Math.max(0.01, Math.min(0.6, fill.shapeSize ?? 0.76 / dDen))
+  const gap  = Math.max(0,    Math.min(0.6, fill.shapeGap  ?? 0.24 / dDen))
+  const cellFrac = Math.max(0.02, size + gap)
+  const d = Math.max(1, Math.min(64, Math.round(1 / cellFrac)))
+  const fillFrac = Math.max(0.02, Math.min(1, size / cellFrac))
+  const bg = fill.b
+  if (bg && bg !== 'none') { ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H) }
+  const cw = W / d, ch = H / d
+  const rot = (fill.angle * Math.PI) / 180
+  for (let iy = 0; iy < d; iy++) for (let ix = 0; ix < d; ix++) {
+    const cx = (ix + 0.5) * cw, cy = (iy + 0.5) * ch
+    const bw = cw * fillFrac, bh = ch * fillFrac
+    if (rot) {
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot); ctx.translate(-cx, -cy)
+      drawShape(ctx, shape, { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh, fill: fill.a })
+      ctx.restore()
+    } else {
+      drawShape(ctx, shape, { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh, fill: fill.a })
+    }
+  }
+}
+
 /**
  * Build a tileable 2D canvas for a fill — the CPU companion to the THREE texture path.
  * `solid` returns a flat swatch; `gradient` a vertical A→B ramp; the rest reuse the same
@@ -372,6 +426,7 @@ export function fillTileCanvas(fillIn: Fill, size = 128): HTMLCanvasElement {
     }
     return c
   }
+  if (fill.type === 'shapes') { paintShapesTile(ctx, fill, size, size); return c }
   const colA = hexBytes(fill.a), colB = hexBytes(fill.b), d = Math.max(2, Math.round(fill.density))
   // The swatch keeps its own `max(2, …)` density floor (which predates the box
   // tile's `max(1, …)`), but WHICH cell is `b` comes from the shared predicates
@@ -416,6 +471,7 @@ export function fillTileBox(fillIn: Fill, w: number, h: number): HTMLCanvasEleme
     ctx.putImageData(patternImageData(W, H, hexBytes(fill.a), hexBytes(fill.b), ombrePicker(W, H, fill.angle)), 0, 0)
     return c
   }
+  if (fill.type === 'shapes') { paintShapesTile(ctx, fill, W, H); return c }
   // THE cell edge, and the same call the `<pattern>` emitter makes with the box
   // in document units — see `fillPatternCell`, including why it no longer rounds.
   const cell = fillPatternCell(W, fill.density)

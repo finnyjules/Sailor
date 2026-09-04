@@ -11,6 +11,26 @@ import {
 } from '~/lib/scene3d/config'
 import { PRIMITIVE_PARAMS } from '~/lib/scene3d/primParams'
 
+/** Every `WORKED EXAMPLE … {…}` block in the guidance, as `[label, parsed JSON]`.
+ *  Balanced-brace scan rather than a regex: the examples nest objects (gradient stops),
+ *  and a `[^}]*` match would stop at the first inner brace and silently check a
+ *  truncated — or, worse, an unparseable and therefore skipped — example. */
+function workedExamples(): [string, Record<string, unknown>][] {
+  const out: [string, Record<string, unknown>][] = []
+  for (const part of SCENE_GUIDANCE.split('WORKED EXAMPLE').slice(1)) {
+    const start = part.indexOf('{')
+    expect(start, `WORKED EXAMPLE with no JSON: ${part.slice(0, 60)}`).toBeGreaterThan(-1)
+    let depth = 0, end = -1
+    for (let i = start; i < part.length; i++) {
+      if (part[i] === '{') depth++
+      else if (part[i] === '}' && --depth === 0) { end = i + 1; break }
+    }
+    expect(end, `unbalanced braces in: ${part.slice(0, 60)}`).toBeGreaterThan(start)
+    out.push([part.slice(0, start).trim().slice(0, 60), JSON.parse(part.slice(start, end)) as Record<string, unknown>])
+  }
+  return out
+}
+
 // stripMeta is not exported — tested indirectly through the public functions, same
 // as vectortype/shapefx's own agentControls specs would (no module exposes it either).
 // Assert its contract directly here since the brief calls it out by name: every emitted
@@ -228,32 +248,38 @@ describe('SCENE_GUIDANCE', () => {
     expect(SCENE_GUIDANCE).toContain(SCENE_PRIMITIVE_MACRO_KEY)
     expect(SCENE_GUIDANCE).toMatch(/WORKED EXAMPLE/)
 
-    // Pull the example's JSON out of the prose and check every key/value for real.
-    const m = SCENE_GUIDANCE.match(/WORKED EXAMPLE[^:]*:\s*(\{[^}]*\})/)
-    expect(m, 'the worked example must be parseable JSON').toBeTruthy()
-    const example = JSON.parse(m![1]!) as Record<string, string | number>
+    // EVERY worked example, not just the first: each one teaches the model a set of keys,
+    // and an example naming a key that does not exist is a silent drop in the live call.
+    const examples = workedExamples()
+    expect(examples.length, 'no WORKED EXAMPLE blocks found').toBeGreaterThan(2)
 
-    // The macro's own value must be a placeable kind.
-    expect(PLACEABLE_PRIMITIVE_KINDS).toContain(example[SCENE_PRIMITIVE_MACRO_KEY] as PrimitiveKind)
-    expect(MATERIAL_TYPES).toContain(example['object.material.type'] as MaterialType)
-    expect(ENVIRONMENT_KINDS).toContain(example['lighting.environment'] as EnvironmentKind)
-
-    // Every `object.params.*` key must be a real param OF THE KIND the example
-    // creates — the pairing is the point, since params are per-kind.
-    const kind = example[SCENE_PRIMITIVE_MACRO_KEY] as PrimitiveKind
-    const kindParams = new Set((PRIMITIVE_PARAMS[kind] ?? []).map(p => p.key))
-    for (const key of Object.keys(example)) {
-      if (!key.startsWith('object.params.')) continue
-      expect(kindParams.has(key.slice('object.params.'.length)), `${key} is not a ${kind} param`).toBe(true)
-    }
-
-    // Every `object.material.*` / doc-level key must exist in the schema. The
-    // opal* ones are gated behind an opalescent material, which is exactly what
-    // the example sets, so assert against the FULL declared vocabulary.
     const declared = new Set(SCENE_CONTROLS.map(c => c.key))
-    for (const key of Object.keys(example)) {
-      if (key === SCENE_PRIMITIVE_MACRO_KEY || key.startsWith('object.params.')) continue
-      expect(declared.has(key), `${key} is not a declared control`).toBe(true)
+    for (const [label, example] of examples) {
+      // The macro's own value must be a placeable kind.
+      const kind = example[SCENE_PRIMITIVE_MACRO_KEY] as PrimitiveKind
+      expect(PLACEABLE_PRIMITIVE_KINDS, label).toContain(kind)
+      if ('object.material.type' in example) {
+        expect(MATERIAL_TYPES, label).toContain(example['object.material.type'] as MaterialType)
+      }
+      if ('lighting.environment' in example) {
+        expect(ENVIRONMENT_KINDS, label).toContain(example['lighting.environment'] as EnvironmentKind)
+      }
+
+      // Every `object.params.*` key must be a real param OF THE KIND the example
+      // creates — the pairing is the point, since params are per-kind.
+      const kindParams = new Set((PRIMITIVE_PARAMS[kind] ?? []).map(p => p.key))
+      for (const key of Object.keys(example)) {
+        if (!key.startsWith('object.params.')) continue
+        expect(kindParams.has(key.slice('object.params.'.length)), `${label}: ${key} is not a ${kind} param`).toBe(true)
+      }
+
+      // Every `object.material.*` / doc-level key must exist in the schema. The
+      // opal* ones are gated behind an opalescent material, which is exactly what
+      // one example sets, so assert against the FULL declared vocabulary.
+      for (const key of Object.keys(example)) {
+        if (key === SCENE_PRIMITIVE_MACRO_KEY || key.startsWith('object.params.')) continue
+        expect(declared.has(key), `${label}: ${key} is not a declared control`).toBe(true)
+      }
     }
   })
 })

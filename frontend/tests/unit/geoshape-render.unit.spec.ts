@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderShapes, toSvg, contentBounds, framePad, fitScale } from '~/lib/geoshape/render'
+import { renderShapes, toSvg, contentBounds, framePad, fitScale, shapePaints } from '~/lib/geoshape/render'
 import { DEFAULT_CONFIG } from '~/lib/geoshape/config'
 import { paintToVectorPaint } from '~/lib/paint/toVector'
 import type { ImageFill } from '~/lib/compositor/paint'
@@ -54,6 +54,17 @@ describe('geoshape render', () => {
     // Negative padding passes through (overscan) — the stroke half-width is a
     // rounding term next to it, not a floor at 0 any more.
     expect(framePad({ padding: -100, strokeWidth: 8 })).toBe(-96)
+  })
+
+  it('framePad reserves the outline arm\u2019s 1-unit fallback so a 0-width outline is not clipped', () => {
+    // `styled` draws an outline/both shape at `strokeWidth || 1`, so a
+    // strokeWidth of 0 still puts a 1-unit line on the canvas. Padding by
+    // strokeWidth/2 alone would clip half of it at the frame edge.
+    expect(framePad({ padding: 10, strokeWidth: 0, paintTarget: 'outline' })).toBe(10.5)
+    expect(framePad({ padding: 10, strokeWidth: 0, paintTarget: 'both' })).toBe(10.5)
+    // A real stroke width still wins over the fallback, and fill mode is unchanged.
+    expect(framePad({ padding: 10, strokeWidth: 8, paintTarget: 'outline' })).toBe(14)
+    expect(framePad({ padding: 10, strokeWidth: 0, paintTarget: 'fill' })).toBe(10)
   })
 
   it('fitScale grows as padding shrinks, and pad 0 fills the tight axis edge-to-edge', () => {
@@ -222,5 +233,80 @@ describe('geoshape render', () => {
     expect(shapes.some(s => s.commands.length > 4)).toBe(true)
     const svg = await toSvg(cfg)
     expect(svg).toMatch(/<path/)
+  })
+})
+
+describe('blend layout', () => {
+  it('count 1 renders the same geometry as linear count 1 (shape A only)', async () => {
+    const base = { ...DEFAULT_CONFIG, shape: 'hexagon' as const, fillStrategy: 'perClone' as const, count: 1 }
+    const a = await renderShapes({ ...base, layout: 'linear' })
+    const b = await renderShapes({ ...base, layout: 'blend', blendShape: 'circle', blendSize: 300 })
+    expect(b).toHaveLength(1)
+    // NOT a byte-for-byte commandsToPathData() match, unlike the task-6 brief's
+    // verbatim assertion: blendPath only takes the exact-skeleton (point-lerp)
+    // path when dA and dB share a command skeleton (morph.ts:366). Hexagon (all
+    // lineTo) and circle (arcs) never do, so even at blend=0/count=1 shape A
+    // comes back through blendPath's RESAMPLED branch — a many-point polyline
+    // approximation, not the original 8-command outline. Verified directly:
+    // a[0].commands has 8 commands (moveTo + 6 lineTo + closePath), b[0].commands
+    // has 130 (resampled to BLEND_SAMPLES points). So this compares geometry
+    // (bounds, single-closed-subpath shape) instead, per the brief's guidance for
+    // exactly this case.
+    const ab = contentBounds(a)
+    const bb = contentBounds(b)
+    expect(bb.minX).toBeCloseTo(ab.minX, 1)
+    expect(bb.maxX).toBeCloseTo(ab.maxX, 1)
+    expect(bb.minY).toBeCloseTo(ab.minY, 1)
+    expect(bb.maxY).toBeCloseTo(ab.maxY, 1)
+    expect(b[0]!.commands.filter(c => c.command === 'moveTo').length).toBe(1)
+    expect(b[0]!.commands.filter(c => c.command === 'closePath').length).toBe(1)
+  })
+
+  it('the last step lands on shape B, offset by blendX/blendY and sized by blendSize', async () => {
+    const cfg = { ...DEFAULT_CONFIG, shape: 'square' as const, size: 100, layout: 'blend' as const, count: 3, blendShape: 'square' as const, blendSize: 200, blendX: 300, blendY: 0, fillStrategy: 'perClone' as const }
+    const shapes = await renderShapes(cfg)
+    expect(shapes).toHaveLength(3)
+    const b = contentBounds([shapes[2]!])
+    expect(b.w).toBeCloseTo(200, 0)
+    expect(b.minX + b.w / 2).toBeCloseTo(300, 0)
+    const mid = contentBounds([shapes[1]!])
+    expect(mid.w).toBeCloseTo(150, 0)
+    expect(mid.minX + mid.w / 2).toBeCloseTo(150, 0)
+  })
+
+  it('a rotated shape B rotates the steps', async () => {
+    const cfg = { ...DEFAULT_CONFIG, shape: 'square' as const, size: 100, layout: 'blend' as const, count: 2, blendShape: 'square' as const, blendSize: 100, blendRotate: 45, fillStrategy: 'perClone' as const }
+    const shapes = await renderShapes(cfg)
+    const b = contentBounds([shapes[1]!])
+    expect(b.w).toBeCloseTo(100 * Math.SQRT2, 0) // a 45° square spans its diagonal
+  })
+})
+
+describe('outline mode reaches the SVG and the canvas paths', () => {
+  it('toSvg writes fill="none" and a stroke per outline shape', async () => {
+    const svg = await toSvg({ ...DEFAULT_CONFIG, fillStrategy: 'perClone', paintTarget: 'outline', fills: ['#ff0000', '#00ff00'], strokeWidth: 1, count: 2, layout: 'linear', spacing: 300 })
+    expect(svg).toContain('fill="none"')
+    expect(svg).toContain('stroke="#ff0000"')
+    expect(svg).toContain('stroke="#00ff00"')
+  })
+  it('shapePaints skips outline shapes (nothing to warm)', async () => {
+    const shapes = await renderShapes({ ...DEFAULT_CONFIG, fillStrategy: 'perClone', paintTarget: 'outline', count: 3, layout: 'linear' })
+    expect(shapePaints(shapes)).toEqual([])
+  })
+})
+
+describe('geoshape SVG export — per-clone outline in a gradient colour', () => {
+  it('toSvg writes the outline stroke as a gradient paint server, not mid-grey', async () => {
+    const G = { type: 'linear' as const, angle: 45, stops: [{ offset: 0, color: '#e5484d' }, { offset: 1, color: '#000000' }] }
+    const cfg = { ...DEFAULT_CONFIG, layout: 'blend' as const, count: 4, fillStrategy: 'perClone' as const, paintTarget: 'outline' as const, fills: [G], strokeWidth: 0.75, clipMask: 'none' as const, symmetry: false }
+    const svg = await toSvg(cfg)
+    expect(svg).toContain('<linearGradient')
+    expect(svg).toMatch(/stroke="url\(#/)
+    expect(svg).not.toContain('#808080')
+  })
+  it('shapePaints reports a gradient outline paint (so image/shader outlines get warmed)', async () => {
+    const G = { type: 'linear' as const, angle: 45, stops: [{ offset: 0, color: '#e5484d' }, { offset: 1, color: '#000000' }] }
+    const shapes = await renderShapes({ ...DEFAULT_CONFIG, fillStrategy: 'perClone', paintTarget: 'outline', fills: [G], count: 3, layout: 'linear' })
+    expect(shapePaints(shapes)).toEqual([G, G, G])
   })
 })

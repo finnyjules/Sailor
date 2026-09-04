@@ -18,6 +18,7 @@
 import { paperToCommands } from '~/lib/vectortype/extrudeSolid'
 import { commandsToPathData, type VectorShape } from '~/lib/vector/svg'
 import { rankOrder } from './order'
+import { rampColour } from '~/lib/color/ramp'
 import type { GeoShapeConfig } from './config'
 import type { GeoOverlap } from './studio'
 import type { ClonePlacement } from './arrange'
@@ -32,6 +33,34 @@ import type { GeoVectorShape } from './render'
  *  (a reader that only understands solids) gets a plain fallback instead —
  *  the real paint travels on `.paint` (see `GeoVectorShape` in `render.ts`). */
 const solidOf = (p: Paint): string => (typeof p === 'string' ? p : '#808080')
+
+/** The colour clone/piece `rank` of `total` gets from `fills`: cycled (today) or
+ *  read as a smooth ramp when `fillCycle` is 'ramp'. */
+function cloneColour(fills: Paint[], rank: number, total: number, cfg: GeoShapeConfig): Paint {
+  if (cfg.fillCycle === 'ramp') return rampColour(fills, total > 1 ? rank / (total - 1) : 0)
+  return fills[rank % fills.length]!
+}
+
+/** Where a shape's colour lands, per `paintTarget`. `strokeColour` is the PAINT
+ *  an outline takes — the clone's own colour in per-clone/pieces mode, the
+ *  single stroke (or fill) in single mode. A gradient/pattern clone colour
+ *  rides `strokePaint` (the renderers resolve it exactly like `paint`), and
+ *  `stroke` keeps the solid fallback for readers that only understand a
+ *  string — the old code passed `solidOf(...)` here and so painted every
+ *  gradient outline mid-grey. `fill: null` is an explicit fill="none":
+ *  drawToCanvas reads `paint ?? fill` and skips a falsy value, toSvg writes
+ *  none — so outline mode needs no renderer change. */
+function styled(paint: Paint, cfg: GeoShapeConfig, strokeColour: Paint): Pick<GeoVectorShape, 'paint' | 'fill' | 'stroke' | 'strokePaint' | 'strokeWidth'> {
+  const strokePaint = typeof strokeColour === 'string' ? undefined : strokeColour
+  switch (cfg.paintTarget) {
+    case 'outline':
+      return { paint: undefined, fill: null, stroke: solidOf(strokeColour), strokePaint, strokeWidth: cfg.strokeWidth || 1 }
+    case 'both':
+      return { paint, fill: solidOf(paint), stroke: solidOf(strokeColour), strokePaint, strokeWidth: cfg.strokeWidth || 1 }
+    default:
+      return { paint, fill: solidOf(paint), stroke: cfg.stroke, strokeWidth: cfg.strokeWidth || undefined }
+  }
+}
 
 // Pieces mode runs O(N²) paper.js boolean unions on the main thread (solo-piece
 // subtraction + incremental depth-band folding, both nested loops over the clone
@@ -53,8 +82,36 @@ async function paperScope(): Promise<paper.PaperScope> {
   return _scope
 }
 
-const OP: Record<Exclude<GeoShapeConfig['fillMode'], 'evenodd'>, 'unite' | 'subtract' | 'intersect' | 'exclude'> = {
-  unite: 'unite', subtract: 'subtract', intersect: 'intersect', exclude: 'exclude',
+const OP: Record<Exclude<GeoShapeConfig['fillMode'], 'evenodd' | 'exclude'>, 'unite' | 'subtract' | 'intersect'> = {
+  unite: 'unite', subtract: 'subtract', intersect: 'intersect',
+}
+
+/**
+ * Fold `items` with one paper.js boolean op as a balanced tree, not a
+ * left-to-right chain. A chain re-walks the whole accumulated outline for every
+ * clone, so its cost grows with the clone index; a tree merges equal-sized
+ * halves and pays each level once. (Measured on the exclude op before it moved
+ * to the even-odd branch: a 150-step Blend went from never finishing to 12 s.)
+ *
+ * unite / intersect are associative and commutative, so the tree yields the
+ * same region as the chain. subtract is neither: the chain a − b − c − … equals
+ * a − (b ∪ c ∪ …), so it is one subtract off a tree-united rest.
+ */
+function foldBoolean(items: paper.PathItem[], op: 'unite' | 'subtract' | 'intersect'): paper.PathItem {
+  const tree = (level: paper.PathItem[], o: 'unite' | 'intersect'): paper.PathItem => {
+    while (level.length > 1) {
+      const next: paper.PathItem[] = []
+      for (let i = 0; i + 1 < level.length; i += 2) next.push((level[i] as any)[o](level[i + 1]) as paper.PathItem)
+      if (level.length % 2) next.push(level[level.length - 1]!)
+      level = next
+    }
+    return level[0]!
+  }
+  if (op === 'subtract') {
+    if (items.length === 1) return items[0]!
+    return (items[0] as any).subtract(tree(items.slice(1), 'unite')) as paper.PathItem
+  }
+  return tree(items.slice(), op)
 }
 
 function hexClipD(r: number): string {
@@ -111,13 +168,18 @@ function splitFaces(sc: paper.PaperScope, band: paper.PathItem): paper.PathItem[
  * transformed clones as subpaths of ONE `CompoundPath` and lets the SVG/canvas
  * even-odd winding rule carve the overlap into negative space itself. Every
  * other `fillMode` maps straight onto a paper.js op and folds normally.
+ *
+ * `baseD` is ONE path for every clone (every layout but Blend) or ONE PATH PER
+ * CLONE (Blend: `render.ts` hands in the morphed steps). The three fill
+ * strategies below never look at `baseD` again — they work on `clones`.
  */
-export async function composite(baseD: string, placements: ClonePlacement[], cfg: GeoShapeConfig): Promise<GeoVectorShape[]> {
+export async function composite(baseD: string | string[], placements: ClonePlacement[], cfg: GeoShapeConfig): Promise<GeoVectorShape[]> {
   const sc = await paperScope()
+  const dFor = (i: number): string => typeof baseD === 'string' ? baseD : (baseD[i] ?? baseD[baseD.length - 1] ?? '')
   try {
     // 1. build a transformed paper path per placement
-    const clones = placements.map((pl) => {
-      const p = new sc.CompoundPath(baseD)
+    const clones = placements.map((pl, i) => {
+      const p = new sc.CompoundPath(dFor(i))
       const m = new sc.Matrix()
       m.translate(pl.x, pl.y)
       m.rotate(pl.rotate, new sc.Point(0, 0))
@@ -136,12 +198,13 @@ export async function composite(baseD: string, placements: ClonePlacement[], cfg
       const fills = cfg.fills.length ? cfg.fills : [cfg.fill]
       const band = Math.max(1, cfg.size)
       const ranks = rankOrder(placements.map((pl, i) => ({ cx: pl.x, cy: pl.y, i })), cfg.fillOrder, band)
-      let items: { path: paper.PathItem; pi: number }[] = clones.map((c, i) => ({ path: c as paper.PathItem, pi: ranks[i]! % fills.length }))
+      const total = placements.length
+      let items: { path: paper.PathItem; paint: Paint }[] = clones.map((c, i) => ({ path: c as paper.PathItem, paint: cloneColour(fills, ranks[i]!, total, cfg) }))
       if (cfg.symmetry) {
         const sm = new sc.Matrix()
         if (cfg.symmetryAxis === 'vertical') sm.scale(-1, 1); else sm.scale(1, -1)
         sm.translate(cfg.symmetryAxis === 'vertical' ? cfg.symmetrySpacing : 0, cfg.symmetryAxis === 'horizontal' ? cfg.symmetrySpacing : 0)
-        const mirrored = items.map(({ path, pi }) => { const mc = path.clone(); mc.transform(sm); return { path: mc as paper.PathItem, pi } })
+        const mirrored = items.map(({ path, paint }) => { const mc = path.clone(); mc.transform(sm); return { path: mc as paper.PathItem, paint } })
         items = items.concat(mirrored)
       }
       if (cfg.clipMask !== 'none') {
@@ -151,17 +214,14 @@ export async function composite(baseD: string, placements: ClonePlacement[], cfg
           : cfg.clipMask === 'square'
             ? new sc.Path.Rectangle(new sc.Rectangle(-r, -r, 2 * r, 2 * r))
             : new sc.CompoundPath(hexClipD(r))
-        items = items.map(({ path, pi }) => ({ path: (path as any).intersect(clip) as paper.PathItem, pi }))
+        items = items.map(({ path, paint }) => ({ path: (path as any).intersect(clip) as paper.PathItem, paint }))
         clip.remove()
       }
       return items
         .filter(({ path }) => path && path.bounds && path.bounds.width > 1e-6 && path.bounds.height > 1e-6)
-        .map(({ path, pi }) => ({
+        .map(({ path, paint }) => ({
           commands: paperToCommands(path),
-          paint: fills[pi]!,
-          fill: solidOf(fills[pi]!),
-          stroke: cfg.stroke,
-          strokeWidth: cfg.strokeWidth || undefined,
+          ...styled(paint, cfg, paint),
           fillRule: 'nonzero' as const,
         }))
     }
@@ -256,15 +316,20 @@ export async function composite(baseD: string, placements: ClonePlacement[], cfg
         // ALL pieces (solo + crossings) flow through `fills` as one ordered sequence.
         const all = [...solo, ...overlaps]
         const ranks = rankOrder(all.map((p, i) => ({ cx: p.cx, cy: p.cy, i })), cfg.fillOrder, bandSize)
-        all.forEach((p, i) => colored.push({ path: p.path, paint: fills[ranks[i]! % fills.length]! }))
+        all.forEach((p, i) => colored.push({ path: p.path, paint: cloneColour(fills, ranks[i]!, all.length, cfg) }))
       } else {
         // solo coloured by order (as today)
-        solo.forEach((p, i) => colored.push({ path: p.path, paint: fills[soloRanks[i]! % fills.length]! }))
+        solo.forEach((p, i) => colored.push({ path: p.path, paint: cloneColour(fills, soloRanks[i]!, solo.length, cfg) }))
         if (cfg.crossingMode === 'split' && cfg.overlapSeparate && spatial) {
           const ranks = rankOrder(overlaps.map((p, i) => ({ cx: p.cx, cy: p.cy, i })), cfg.fillOrder, bandSize)
           overlaps.forEach((p, i) => colored.push({ path: p.path, paint: ov![ranks[i]! % ov!.length]! }))
         } else {
-          // depth-indexed (depth mode, or split with depth/created order)
+          // depth-indexed (depth mode, or split with depth/created order).
+          // Deliberately CYCLED (`% length`) even when `fillCycle` is 'ramp':
+          // the index here is an overlap DEPTH (2, 3, 4 clones deep), not a rank
+          // in a sequence, and there is no total to ramp across — one colour per
+          // depth band is the readable answer. The solo pieces above go through
+          // `cloneColour`, so they ramp while these cycle, on purpose.
           overlaps.forEach((p) => {
             const paint = cfg.overlapSeparate ? ov![(p.depth - 2) % ov!.length]! : fills[(p.depth - 1) % fills.length]!
             colored.push({ path: p.path, paint })
@@ -289,15 +354,20 @@ export async function composite(baseD: string, placements: ClonePlacement[], cfg
         .filter(({ path }) => nonEmpty(path))
         .map(({ path, paint }) => ({
           commands: paperToCommands(path),
-          paint,
-          fill: solidOf(paint),
-          stroke: cfg.stroke,
-          strokeWidth: cfg.strokeWidth || undefined,
+          ...styled(paint, cfg, paint),
           fillRule: 'nonzero' as const,
         }))
     }
 
-    const isEvenOdd = cfg.fillMode === 'evenodd'
+    // `exclude` (XOR) is the even-odd region by definition — a point is inside
+    // when an odd number of clones cover it — and every clone edge stays a
+    // boundary of that region, so the even-odd compound draws the same fill AND
+    // the same outlines as a resolved XOR. Resolving it with paper.js instead
+    // kept every ring it had seen and grew cubically: 150 near-coincident Blend
+    // steps never finished (over five minutes) and 150 radial hexagons took four,
+    // and what came back was thousands of sliver pieces. So exclude takes the
+    // even-odd branch; only unite / subtract / intersect still fold.
+    const isEvenOdd = cfg.fillMode === 'evenodd' || cfg.fillMode === 'exclude'
 
     // Symmetry for evenodd is applied at the clone level (mirror every clone and
     // add the copies) rather than uniting the composited result: uniting a
@@ -356,13 +426,7 @@ export async function composite(baseD: string, placements: ClonePlacement[], cfg
       cp.fillRule = 'evenodd'
       acc = cp
     } else {
-      const op = OP[cfg.fillMode as Exclude<GeoShapeConfig['fillMode'], 'evenodd'>]
-      acc = clones[0] as paper.PathItem
-      for (let i = 1; i < clones.length; i++) {
-        const next = clones[i] as paper.PathItem
-        const combined = (acc as any)[op](next)
-        acc = combined
-      }
+      acc = foldBoolean(clones as paper.PathItem[], OP[cfg.fillMode as Exclude<GeoShapeConfig['fillMode'], 'evenodd' | 'exclude'>])
     }
 
     // 3.5. symmetry for subtract/exclude/intersect: fold the originals into the
@@ -398,22 +462,21 @@ export async function composite(baseD: string, placements: ClonePlacement[], cfg
 
     // 5. paper → VectorShape[]. evenodd sets the fill-rule; shape mode adds
     // the overlap as a second shape painted with `overlapFill`.
-    const fillRule: 'evenodd' | 'nonzero' = cfg.fillMode === 'evenodd' ? 'evenodd' : 'nonzero'
+    const fillRule: 'evenodd' | 'nonzero' = isEvenOdd ? 'evenodd' : 'nonzero'
+    const singleStroke: Paint = cfg.paintTarget === 'outline' ? (cfg.stroke ?? cfg.fill) : (cfg.stroke ?? '#000000')
     const out: GeoVectorShape[] = [{
       commands: paperToCommands(acc),
-      paint: cfg.fill,
-      fill: solidOf(cfg.fill),
-      stroke: cfg.stroke,
-      strokeWidth: cfg.strokeWidth || undefined,
+      ...styled(cfg.fill, cfg, singleStroke),
       fillRule,
     }]
     if (overlap) {
-      out.push({
-        commands: paperToCommands(overlap),
-        paint: cfg.overlapFill,
-        fill: solidOf(cfg.overlapFill),
-        fillRule: 'nonzero',
-      })
+      // Default target: the overlap piece was never outlined before paintTarget
+      // existed, so it keeps carrying no stroke — a user-set `stroke` outlines
+      // the fold, not the crossing. Outline/both target the crossing too.
+      const ov = cfg.paintTarget === 'fill'
+        ? { paint: cfg.overlapFill, fill: solidOf(cfg.overlapFill) }
+        : styled(cfg.overlapFill, cfg, cfg.stroke ?? cfg.overlapFill)
+      out.push({ commands: paperToCommands(overlap), ...ov, fillRule: 'nonzero' })
     }
     return out
   } finally {

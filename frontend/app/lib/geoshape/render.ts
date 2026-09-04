@@ -21,12 +21,13 @@
  * is a different feature — `paint.ts`'s header already scopes it out for the
  * identical reason — and is left for a future task.
  */
-import type { VectorShape } from '~/lib/vector/svg'
+import type { VectorShape, VectorPaint } from '~/lib/vector/svg'
 import { commandsToPathData, shapesToSVG, transformCommands, type SvgDocOptions } from '~/lib/vector/svg'
 import { baseShapePath } from './shapes'
 import { arrange } from './arrange'
 import { composite, overlapFaces } from './boolean'
 import { resolvePaint } from './paint'
+import { prepareBlend, rotatePathD } from '~/lib/vector/morph'
 import type { GeoShapeConfig } from './config'
 import type { GeoStudioDoc, GeoLayer } from './studio'
 import { isFill, isImageFill, type Paint } from '~/lib/compositor/paint'
@@ -54,7 +55,14 @@ import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
  * to resolve a canvas fillStyle. `.fill` stays a plain solid-or-null fallback
  * for any reader that doesn't know about `.paint`.
  */
-export type GeoVectorShape = VectorShape & { paint?: Paint }
+export type GeoVectorShape = VectorShape & {
+  paint?: Paint
+  /** The authored `Paint` an outline is drawn in when it is not a solid
+   *  (per-clone/pieces outline or both, single-mode outline of a gradient
+   *  fill). `stroke` then holds a solid fallback for `.paint`-unaware readers,
+   *  exactly as `fill` does for `paint`. */
+  strokePaint?: Paint
+}
 
 /**
  * `GeoShapeConfig` -> the final composed mark, as paintable `VectorShape[]`
@@ -77,7 +85,25 @@ export async function renderShapes(cfg: GeoShapeConfig): Promise<VectorShape[]> 
   // stroke/overlapFill straight off whatever `cfg` it is handed, so this is
   // the one place `invert` takes effect.
   const cfg2: GeoShapeConfig = { ...cfg, fill: rp.fill, stroke: rp.stroke, overlapFill: rp.overlapFill }
-  return composite(baseD, placements, cfg2)
+  if (cfg.layout !== 'blend') return composite(baseD, placements, cfg2)
+
+  // Blend: every clone is its own in-between outline. Shape B reuses the base
+  // shape vocabulary (its own kind/size/rounding) and is rotated before the
+  // morph so the point correspondence sees the rotated target.
+  const targetD = rotatePathD(baseShapePath(cfg.blendShape, {
+    sides: cfg.blendSides,
+    starInner: cfg.blendStarInner,
+    irregularSeed: cfg.blendIrregularSeed,
+    size: cfg.blendSize,
+    roundCorners: cfg.roundCorners,
+    roundRadius: cfg.roundRadius,
+    libraryShape: cfg.blendLibraryShape,
+  }), cfg.blendRotate)
+  // Prepare ONCE: the parse / skeleton check / flatten / resample / align does not
+  // depend on the step, so a 200-step blend pays for it once instead of 200 times.
+  const step = prepareBlend(baseD, targetD, { twist: cfg.blendTwist })
+  const ds = placements.map((pl) => step(pl.blend ?? 0))
+  return composite(ds, placements, cfg2)
 }
 
 /**
@@ -114,11 +140,22 @@ export function contentBounds(shapes: VectorShape[]): { minX: number; minY: numb
  *   = 0  fills the frame edge-to-edge on its tight axis,
  *   < 0  overscans — the mark grows past the frame and is cropped by the edges
  *        (how you fill the WHOLE canvas on both axes, not just the tight one).
- * `strokeWidth/2` keeps a drawn outline from being clipped at the edge when
- * padding is non-negative; it's a rounding term next to any real overscan.
+ * Half the DRAWN outline width keeps an outline from being clipped at the edge
+ * when padding is non-negative; it's a rounding term next to any real overscan.
+ * "Drawn" matters: `boolean.ts`'s `styled` paints an outline/both shape at
+ * `strokeWidth || 1`, so a strokeWidth of 0 still puts a 1-unit line on the
+ * canvas — the same fallback is applied here or half of that hairline clips.
+ * `paintTarget` is optional so a caller with only the two numbers (the layered
+ * stack's `studioFramePad`, which folds the rule in per layer) still type-checks.
  */
-export function framePad(cfg: Pick<GeoShapeConfig, 'padding' | 'strokeWidth'>): number {
-  return cfg.padding + cfg.strokeWidth / 2
+export function framePad(cfg: Pick<GeoShapeConfig, 'padding' | 'strokeWidth'> & Partial<Pick<GeoShapeConfig, 'paintTarget'>>): number {
+  return cfg.padding + drawnStrokeWidth(cfg.strokeWidth, cfg.paintTarget) / 2
+}
+
+/** The width an outline is actually drawn at — `styled`'s `strokeWidth || 1`
+ *  fallback for the outline/both targets, 0 (no outline of its own) for fill. */
+function drawnStrokeWidth(strokeWidth: number, paintTarget: GeoShapeConfig['paintTarget'] = 'fill'): number {
+  return Math.max(strokeWidth, paintTarget !== 'fill' ? 1 : 0)
 }
 
 /** How far one axis of the mark may be grown when overscanning (negative pad):
@@ -184,23 +221,35 @@ export async function toSvg(cfg: GeoShapeConfig, opts: Partial<SvgDocOptions> = 
 async function embedShapePaints(shapes: VectorShape[]): Promise<void> {
   for (const s of shapes as GeoVectorShape[]) {
     if (s.paint && typeof s.paint !== 'string') {
-      const sb = contentBounds([s])
-      const box = { x: sb.minX, y: sb.minY, width: sb.w, height: sb.h }
-      let vp = paintToVectorPaint(s.paint, { units: 'userSpaceOnUse', box })
-      // TIER 3 embed: rasterize the paint over `box` on an offscreen canvas —
-      // same `resolvePaintCanvas` path `drawToCanvas`/`warmPaints` use, so the
-      // embedded pixels match the live preview — and ask again with the raster
-      // in hand, which the image/shader arms both turn into a
-      // `<pattern>`-with-`<image>` (see `rasterTile` in toVector.ts). DOM-only:
-      // under SSR or a headless unit test (no `document`) this stays skipped
-      // and the shape keeps its solid-fallback `.fill`.
-      if (vp === null && typeof document !== 'undefined') {
-        const raster = await rasterizePaint(s.paint, box.width, box.height)
-        if (raster) vp = paintToVectorPaint(s.paint, { units: 'userSpaceOnUse', box, raster })
-      }
+      const vp = await vectorPaintFor(s, s.paint)
       if (vp) s.fill = vp
     }
+    // A gradient/pattern OUTLINE embeds the same way — the SVG writer takes a
+    // paint server on `stroke` just as on `fill`.
+    if (s.strokePaint && typeof s.strokePaint !== 'string') {
+      const vp = await vectorPaintFor(s, s.strokePaint)
+      if (vp) s.stroke = vp
+    }
   }
+}
+
+/** One shape's authored `paint` → a `VectorPaint` boxed to that shape's bounds. */
+async function vectorPaintFor(s: VectorShape, paint: Paint): Promise<VectorPaint | null> {
+  const sb = contentBounds([s])
+  const box = { x: sb.minX, y: sb.minY, width: sb.w, height: sb.h }
+  let vp = paintToVectorPaint(paint, { units: 'userSpaceOnUse', box })
+  // TIER 3 embed: rasterize the paint over `box` on an offscreen canvas —
+  // same `resolvePaintCanvas` path `drawToCanvas`/`warmPaints` use, so the
+  // embedded pixels match the live preview — and ask again with the raster
+  // in hand, which the image/shader arms both turn into a
+  // `<pattern>`-with-`<image>` (see `rasterTile` in toVector.ts). DOM-only:
+  // under SSR or a headless unit test (no `document`) this stays skipped
+  // and the shape keeps its solid fallback.
+  if (vp === null && typeof document !== 'undefined') {
+    const raster = await rasterizePaint(paint, box.width, box.height)
+    if (raster) vp = paintToVectorPaint(paint, { units: 'userSpaceOnUse', box, raster })
+  }
+  return vp
 }
 
 /**
@@ -275,12 +324,13 @@ export async function renderStudio(doc: GeoStudioDoc): Promise<VectorShape[]> {
 }
 
 /** The frame margin (document units) for a whole layered composite — `framePad`
- *  driven by the stack `doc.padding`, with the largest enabled-layer stroke
- *  half-width folded in so no outline clips at the edge (mirrors `framePad`'s
- *  single-mark `strokeWidth/2` term). */
+ *  driven by the stack `doc.padding`, with the largest enabled-layer DRAWN stroke
+ *  half-width folded in so no outline clips at the edge. Each layer is measured
+ *  by the same rule `framePad` uses for a single mark (an outline layer draws at
+ *  `strokeWidth || 1`), because each layer carries its own `paintTarget`. */
 export function studioFramePad(doc: GeoStudioDoc): number {
   let maxStroke = 0
-  for (const l of doc.layers) if (l.enabled) maxStroke = Math.max(maxStroke, l.mark.strokeWidth)
+  for (const l of doc.layers) if (l.enabled) maxStroke = Math.max(maxStroke, drawnStrokeWidth(l.mark.strokeWidth, l.mark.paintTarget))
   return framePad({ padding: doc.padding, strokeWidth: maxStroke })
 }
 
@@ -375,10 +425,26 @@ export function drawToCanvas(shapes: VectorShape[], ctx: CanvasRenderingContext2
         ctx.restore()
       }
     }
-    if (s.stroke) {
-      ctx.strokeStyle = s.stroke
+    const strokePaint = (s as GeoVectorShape).strokePaint ?? s.stroke
+    if (strokePaint) {
       ctx.lineWidth = s.strokeWidth ?? 1
-      ctx.stroke(path)
+      if (typeof strokePaint === 'string') {
+        ctx.strokeStyle = strokePaint
+        ctx.stroke(path)
+      } else {
+        // Same object-anchored frame as the fill arm above: the ramp spans THIS
+        // shape's own bounds, so every outlined clone shows its full gradient.
+        const sb = contentBounds([s])
+        const cx = sb.minX + sb.w / 2, cy = sb.minY + sb.h / 2
+        ctx.save()
+        ctx.translate(cx, cy)
+        const style = resolvePaintCanvas(ctx, strokePaint as Paint, { w: sb.w, h: sb.h }, STILL_FIELD)
+        const local = new Path2D()
+        local.addPath(path, new DOMMatrix().translateSelf(-cx, -cy))
+        ctx.strokeStyle = (style as any) ?? FALLBACK_FILL
+        ctx.stroke(local)
+        ctx.restore()
+      }
     }
   }
   ctx.restore()
@@ -394,6 +460,10 @@ export function shapePaints(shapes: VectorShape[]): Paint[] {
   for (const s of shapes) {
     const p = (s as GeoVectorShape).paint ?? s.fill
     if (p) out.push(p as Paint)
+    // A non-solid OUTLINE paint warms like a fill; a solid stroke string has
+    // nothing to warm, so an outline-only solid mark still reports nothing.
+    const sp = (s as GeoVectorShape).strokePaint
+    if (sp && typeof sp !== 'string') out.push(sp)
   }
   return out
 }

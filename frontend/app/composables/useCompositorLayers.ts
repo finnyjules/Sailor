@@ -43,9 +43,15 @@ import {
 } from '~/lib/compositor/postEffects'
 import { applyDof, dofAvailable, dofShouldRun } from '~/lib/compositor/dofPass'
 import { depthImageFor, requestDepth, depthSourceFromViewUrl, type DepthRef } from '~/lib/compositor/depthRegistry'
-import { ensureFillBitmaps } from '~/lib/paint/imageFillCache'
+import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
 import { applyTornEdge, tornEdgeActive } from '~/lib/compositor/tornEdge'
 import { applyFeather, featherActive } from '~/lib/compositor/feather'
+import {
+  LruCache, SILHOUETTE_CACHE_CAP, SILHOUETTE_CACHE_MAX_BYTES, silhouetteCacheKey,
+  silhouettePadPx as silhouettePadPxPure, silhouetteContentReady as silhouetteContentReadyPure,
+  silhouetteRasterFits,
+} from '~/lib/compositor/silhouetteCache'
+import { paintMaskRelease } from '~/lib/compositor/maskBreak'
 // Runtime import is safe: wiredLayer.ts only imports the WiredLayer TYPE back from
 // this file, and type imports are erased — so this is not a module cycle.
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
@@ -290,6 +296,9 @@ interface LayerCommon {
    *  shown, erase strokes cut holes (brush hides, eraser un-hides). 'hidden':
    *  fully clipped, non-erase strokes reveal (invert). */
   maskBase?: 'visible' | 'hidden'
+  /** Break-out: open the shape mask on one side of a line so the subject escapes
+   *  an edge (see lib/compositor/maskBreak). Only meaningful with maskedByKey. */
+  maskBreak?: import('~/lib/compositor/maskBreak').MaskBreak
   /** Linked cloner: stamp this layer N times (linear/grid/radial) with falloff.
    *  Absent/disabled ⇒ a single instance, i.e. today's behavior. */
   cloner?: Cloner
@@ -1169,6 +1178,7 @@ export function drawLocalLayer(
       if (mctx) {
         mctx.setTransform(t)
         drawLocalLayerSelf(mctx, maskLayer, W, H)
+        paintMaskRelease(mctx, layer.maskBreak, W, H)
         octx.setTransform(1, 0, 0, 1, 0, 0) // composite in device space
         octx.globalCompositeOperation = 'destination-in'
         octx.drawImage(maskOff, 0, 0)
@@ -1353,6 +1363,99 @@ function compositeInnerShadow(off: HTMLCanvasElement, fx: InnerShadowEffect, W: 
   }
 }
 
+// ── Silhouette raster cache (torn edge + feather) ────────────────────────────
+// Both effects are per-pixel CPU passes over the layer's rasterized alpha, and
+// paintLayer used to re-run them on every repaint — so dragging a torn-edge layer
+// re-tore the whole device-resolution bitmap on every pointer move although only
+// x/y had changed. Bake the layer's own local box once, keyed on everything that
+// changes its pixels, and later repaints just stamp that raster (see paintLayer).
+// Bounded by BOTH a count cap and a byte budget: the values are device-resolution
+// canvases, so a count alone would let this module-global cache reach hundreds of MB
+// (24 full-screen retina rasters). 4 bytes per device px is the backing store's size.
+const _silhouetteCache = new LruCache<HTMLCanvasElement>(SILHOUETTE_CACHE_CAP, {
+  sizeOf: c => c.width * c.height * 4,
+  maxBytes: SILHOUETTE_CACHE_MAX_BYTES,
+})
+
+/** Whether a text layer's REAL font face is loaded. A fallback-font render must
+ *  never be baked: the cache key can't see that the font arrived later, so the
+ *  wrong glyphs would stick. Same spec string `ensureLayerFonts` loads. */
+function textFontReady(layer: TextLayer, W: number): boolean {
+  try {
+    const fonts = typeof document !== 'undefined' ? (document as any).fonts : null
+    if (!fonts) return true
+    return !!fonts.check(`${layer.fontWeight} ${Math.max(8, layer.fontSize * W)}px ${cssFontStack(layer.fontFamily)}`)
+  } catch { return true }
+}
+
+/** Whether everything this layer draws with is actually in hand. Image layers and
+ *  image fills paint a placeholder until their bitmap decodes, and fonts fall back
+ *  until they load — none of that is visible to the cache key, so baking one would
+ *  freeze the placeholder for as long as nothing else about the layer changes.
+ *  DOM/cache lookups happen here; the actual three-way rule is the pure
+ *  `silhouetteContentReadyPure` in silhouetteCache.ts (CPU-only, unit-tested). */
+function silhouetteContentReady(layer: LocalLayer, W: number): boolean {
+  const font = layer.kind !== 'text' || textFontReady(layer, W)
+  let image = true
+  if (layer.kind === 'image') {
+    const img = _imageCache.get(imageLayerUrl(layer.filename))
+    image = !!img && img.complete && !!img.naturalWidth
+  }
+  const fillBitmaps = !layerPaints(layer).some(p => isImageFill(p) && p.src && !getFillBitmap(p.src))
+  return silhouetteContentReadyPure(layer.kind, { font, image, fillBitmaps })
+}
+
+/** Padding (logical px) around `localLayerBox` for a baked silhouette raster. Resolves
+ *  the layer down to primitives (kind, real stroke alignment, and the font size / stroke
+ *  width / height box already scaled to logical px by W) plus the box `localLayerBox`
+ *  actually measured, then defers to the pure `silhouettePadPxPure` in silhouetteCache.ts
+ *  for the arithmetic (raster margin + ink overhang).
+ *
+ *  NOT `outsideStrokePadPx`: that answers a narrower question for the corner-pin
+ *  offscreen and is 0 for the DEFAULT 'center' alignment, whose ink still reaches half a
+ *  stroke width past the box — padding by it alone clipped the outer half of every
+ *  default stroke out of the cached raster. `strokeWidth` is guarded (`|| 0`) so a
+ *  missing/NaN value can never make `bwD` NaN downstream. */
+function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { w: number; h: number }): number {
+  const l = layer as unknown as { strokeWidth?: number; strokeAlign?: unknown; stroke?: Paint; scale?: number; fontSize?: number; boxH?: number }
+  const width = Math.max(0, l.strokeWidth || 0)
+  let strokePx = 0
+  let strokeAlign: StrokeAlign = 'center'
+  if (layer.kind === 'text') {
+    strokePx = width * W
+  } else if (layer.kind === 'line') {
+    // drawLayerContent floors a line's lineWidth at 1px, so a hairline still caps.
+    strokePx = Math.max(1, width * W)
+  } else if (layer.kind === 'rect' || layer.kind === 'ellipse' || layer.kind === 'polygon' || layer.kind === 'star' || layer.kind === 'path') {
+    // A path's strokeWidth is stored in local units AT scale=1 (see PathLayer), so its
+    // px extent carries the layer's own uniform scale — same correction outsideStrokePadPx makes.
+    if (hasPaint(l.stroke)) strokePx = width * (layer.kind === 'path' ? (l.scale ?? 1) : 1) * W
+    strokeAlign = strokeAlignOf(l.strokeAlign)
+  }
+  const isText = layer.kind === 'text'
+  // The widest of wrappedTextLines' lines, measured with the SAME font drawText uses —
+  // this is what catches a single word/URL wider than a fixed boxW (wrappedTextLines
+  // only breaks on whitespace), which localLayerBox's boxW branch doesn't reflect.
+  let maxLineWPx = 0
+  if (isText) {
+    const mctx = measureCtx()
+    if (mctx) {
+      applyFont(mctx, layer as TextLayer, W)
+      for (const ln of wrappedTextLines(mctx, layer as TextLayer, W)) maxLineWPx = Math.max(maxLineWPx, mctx.measureText(ln || ' ').width)
+    }
+  }
+  return silhouettePadPxPure({
+    kind: layer.kind,
+    strokeAlign,
+    strokePx,
+    fontPx: isText ? Math.max(0, l.fontSize || 0) * W : 0,
+    boxHPx: isText ? Math.max(0, l.boxH || 0) * W : 0,
+    boxHeightPx: box.h,
+    maxLineWPx,
+    boxWidthPx: box.w,
+  }, s)
+}
+
 function paintLayer(
   ctx: CanvasRenderingContext2D,
   layer: LocalLayer,
@@ -1398,6 +1501,53 @@ function paintLayer(
   const shearA = hasSkew ? Math.tan((sky * Math.PI) / 180) : 0
   const shearC = hasSkew ? Math.tan((skx * Math.PI) / 180) : 0
   const cp = cornerPinActive(layer.cornerPin) ? layer.cornerPin : null
+
+  // Silhouette raster cache (see `_silhouetteCache`): only cases whose LOCAL BOX is a
+  // faithful, self-contained render of the layer qualify — everything else keeps the
+  // old full-canvas path, byte-identical.
+  const silhouetteCacheable = !!(tornEdge || feather)
+    && layer.kind !== 'wired'                                       // graph pixels change under us — no content signature
+    && !cp && !dof                                                  // corner-pin / DOF have their own offscreen flows
+    && !inner && !chain.length                                      // inner shadow + chain effects (bloom!) spread past the box
+    && !(layer.kind === 'text' && layer.expressive)                 // expressive layout places words outside localLayerBox
+    && !layerPaints(layer).some(p => isFill(p) && fillIsShader(p))  // shader fills are live / frame-anchored
+    && silhouetteContentReady(layer, W)
+  // Memoized like `dofContent` below: identical for every clone, and the key is a
+  // stringify of the layer, so it must not be rebuilt once per stamp.
+  let silhouetteMemo: { canvas: HTMLCanvasElement; w: number; h: number } | null | undefined
+  const silhouetteRaster = (s: number): { canvas: HTMLCanvasElement; w: number; h: number } | null => {
+    if (silhouetteMemo !== undefined) return silhouetteMemo
+    silhouetteMemo = null
+    if (!silhouetteCacheable) return silhouetteMemo
+    const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
+    const pad = silhouettePadPx(layer, W, s, box)
+    const bwL = box.w + pad * 2, bhL = box.h + pad * 2                                     // logical px
+    const bwD = Math.max(1, Math.round(bwL * s)), bhD = Math.max(1, Math.round(bhL * s))   // device px
+    // The LOGICAL size the caller stamps at, derived BACK from the rounded device
+    // size rather than from bwL/bhL: drawn under scale `s` this lands on exactly
+    // bwD × bhD device px, so the raster resamples not at all. Using bwL directly
+    // would ask for `bwL * s` device px out of a `bwD`-wide bitmap — up to half a
+    // pixel of resampling on every stamp, for nothing.
+    const bwLx = bwD / s, bhLx = bhD / s
+    // Past these caps `getContext('2d')` isn't guaranteed to return null on an
+    // oversized canvas (some engines hand back a context over a blank backing
+    // store instead), so an unbounded bwD/bhD could silently cache emptiness for
+    // a huge layer. Bail to the uncached path — same as a null context below.
+    if (!silhouetteRasterFits(bwD, bhD)) return silhouetteMemo
+    const key = silhouetteCacheKey(layer as unknown as Record<string, unknown>, s, bwD, bhD, W)
+    const hit = _silhouetteCache.get(key)
+    if (hit) { silhouetteMemo = { canvas: hit, w: bwLx, h: bhLx }; return silhouetteMemo }
+    const cc = document.createElement('canvas'); cc.width = bwD; cc.height = bhD
+    const cctx = cc.getContext('2d')
+    if (!cctx) return silhouetteMemo   // no raster ⇒ the caller takes the uncached path
+    cctx.setTransform(s, 0, 0, s, bwD / 2, bhD / 2)   // centred, at device scale — the geometry drawLayerContent expects
+    drawLayerContent(cctx, layer, W, wiredLive)
+    if (tornEdge) applyTornEdge(cc, tornEdge, { scale: s })
+    if (feather) applyFeather(cc, feather)
+    _silhouetteCache.set(key, cc)
+    silhouetteMemo = { canvas: cc, w: bwLx, h: bhLx }
+    return silhouetteMemo
+  }
   const applyXform = (c: CanvasRenderingContext2D, lx2: number, ly2: number, lrot2: number, ls2: number) => {
     c.translate(lx2 * W, ly2 * H)
     if (lrot2) c.rotate((lrot2 * Math.PI) / 180)
@@ -1522,22 +1672,41 @@ function paintLayer(
         // so a frame-anchored fill samples the shared field at the correct
         // frame-space location under any ctx scale (see resolveShaderFill).
         _fieldCtx = { ..._fieldCtx, base: t }
-        applyXform(octx, lx, ly, lrot, ls)
-        drawContent(octx)
-        if (inner) compositeInnerShadow(off, inner, W, s)
-        // scale = device px per logical px, so bloom radius / grain size land at the
-        // right physical size on a device-resolution buffer (mirrors applyStackPost).
-        if (chain.length) applyEffectChain(off, chain, { W, scale: s })
-        // Torn edge carves the offscreen's alpha + paints the lip, in device px,
-        // so preview and export tear identically. Runs after content + 2D effects
-        // so grain/adjust sit inside the tear, and before the stamp so drop-shadow
-        // and blur (applied below) follow the torn silhouette.
-        if (tornEdge) applyTornEdge(off, tornEdge, { scale: s })
-        // Feather softens whatever silhouette exists (including a torn one) by
-        // fading alpha inward. Runs before the drop-shadow/blur stamp below so
-        // those follow the feathered edge. amount is element-relative (derived
-        // from the rendered silhouette's own bbox), so no canvas/scale is passed.
-        if (feather) applyFeather(off, feather)
+        // Torn edge / feather are per-pixel CPU passes, so re-running them for a layer
+        // that only MOVED is the whole cost of a drag. When the layer's local box is a
+        // faithful render of it, bake that box once and stamp the cached raster here
+        // instead. The tear/feather noise is then sampled in the layer's own box rather
+        // than at its position in the frame, so the pattern travels with the layer.
+        // Only at clone scale 1: the raster is baked at device scale `s` alone, so a
+        // cloner falloff with `ls !== 1` would stamp a resampled (soft/aliased) copy —
+        // that clone falls through to the uncached path instead.
+        const raster = ls === 1 ? silhouetteRaster(s) : null
+        if (raster) {
+          applyXform(octx, lx, ly, lrot, ls)
+          // `raster.w/h` are the rounded DEVICE size divided back by `s`, so under `t`
+          // the destination is exactly the bitmap's own pixel size — no rescaling. The
+          // translation is still fractional (`lx * W` lands anywhere), so the stamp can
+          // resample by up to half a pixel in position; that is the same subpixel
+          // placement the uncached draw does, not an extra softening from the cache.
+          octx.drawImage(raster.canvas, -raster.w / 2, -raster.h / 2, raster.w, raster.h)
+        } else {
+          applyXform(octx, lx, ly, lrot, ls)
+          drawContent(octx)
+          if (inner) compositeInnerShadow(off, inner, W, s)
+          // scale = device px per logical px, so bloom radius / grain size land at the
+          // right physical size on a device-resolution buffer (mirrors applyStackPost).
+          if (chain.length) applyEffectChain(off, chain, { W, scale: s })
+          // Torn edge carves the offscreen's alpha + paints the lip, in device px,
+          // so preview and export tear identically. Runs after content + 2D effects
+          // so grain/adjust sit inside the tear, and before the stamp so drop-shadow
+          // and blur (applied below) follow the torn silhouette.
+          if (tornEdge) applyTornEdge(off, tornEdge, { scale: s })
+          // Feather softens whatever silhouette exists (including a torn one) by
+          // fading alpha inward. Runs before the drop-shadow/blur stamp below so
+          // those follow the feathered edge. amount is element-relative (derived
+          // from the rendered silhouette's own bbox), so no canvas/scale is passed.
+          if (feather) applyFeather(off, feather)
+        }
         ctx.save()
         // `off` already holds device pixels — stamp it 1:1 in device space, not under
         // `t` (which would upscale it a second time). Shadow/blur are specified in
@@ -2364,6 +2533,7 @@ function drawItemMasked(
   const mctx = maskOff.getContext('2d'); if (!mctx) return
   mctx.setTransform(t)
   drawItemContent(mctx, mask, W, H)
+  paintMaskRelease(mctx, content.type === 'local' ? content.layer.maskBreak : null, W, H)
   octx.setTransform(1, 0, 0, 1, 0, 0) // composite in device space
   octx.globalCompositeOperation = 'destination-in'
   octx.drawImage(maskOff, 0, 0)

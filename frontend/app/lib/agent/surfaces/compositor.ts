@@ -8,13 +8,14 @@
  * to `node.data.properties.sailor_localLayers` + the background, and runs the
  * media ops (generate/edit/remove-bg) which need async backend calls.
  */
-import type { LocalLayer, LocalLayerKind, Paint, TextLayer } from '~/composables/useCompositorLayers'
+import { layerMaskRef, localLayerBox, type LocalLayer, type LocalLayerKind, type Paint, type TextLayer } from '~/composables/useCompositorLayers'
 import type { Command, CommandResult, CommandSpec, SurfaceSnapshot } from '~/lib/agent/commandSurface'
 import { contrastRatio, parseColor, type LayoutIssue } from '~/lib/agent/verify'
 import { SWISS_LIMITS } from '~/lib/agent/designPrinciples'
 import { defaultPostEffect, POST_EFFECT_DEFAULTS, POST_FX_PARAM_CLAMP, type PostEffect } from '~/lib/compositor/postEffects'
 import { sanitizeTornEdge, tornEdgeActive } from '~/lib/compositor/tornEdge'
 import { sanitizeFeather, featherActive } from '~/lib/compositor/feather'
+import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
@@ -51,12 +52,26 @@ function paintLabel(p: Paint | undefined): string {
   if (p == null || p === '') return 'none'
   if (typeof p === 'string') return p
   if (typeof p === 'object' && 'type' in p) {
+    const gg = p as { type: string; shapeId?: string }
+    if (gg.type === 'shapes') return `${gg.shapeId ?? 'sparkle'} pattern`
     const g = p as { type: string; angle?: number; stops?: { color?: string }[] }
     const stops = Array.isArray(g.stops) ? g.stops.map(s => s.color).filter(Boolean).join('→') : ''
     const ang = g.type === 'linear' && typeof g.angle === 'number' ? ` ${g.angle}°` : ''
     return `${g.type} gradient${ang}${stops ? ` [${stops}]` : ''}`
   }
   return 'fill'
+}
+
+/** Map a MaskBreak's angle back to the edge word it was built from (agent-facing;
+ *  a break authored via maskBreakFromEdge always lands on one of these four). */
+function maskBreakEdgeLabel(b: MaskBreak): string {
+  switch (b.angle) {
+    case 0: return 'top'
+    case 180: return 'bottom'
+    case 270: return 'left'
+    case 90: return 'right'
+    default: return 'angled'
+  }
 }
 
 const clamp = (v: unknown, lo: number, hi: number, fallback: number): number => {
@@ -120,7 +135,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setLayerProps', hint: 'Move/transform a layer. target = layer id; args: { patch }. Keys: x, y (0..1 of canvas, layer CENTER), rotation (deg), opacity (0..1, so "50%"=0.5), blend ("normal"|"multiply"|"screen"|…), visible (bool), skewX/skewY (deg), radius (0..1, rectangle corner rounding). Positional presets (account for the layer\'s own size): centre 0.5,0.5; top-left ~0.15,0.12; top-centre 0.5,0.12; top-right ~0.85,0.12; bottom-left ~0.15,0.88; bottom-centre 0.5,0.88; bottom-right ~0.85,0.88. Relative moves ("up a bit") = adjust the CURRENT x/y shown.' },
   { op: 'setText', hint: 'Change a TEXT layer\'s copy. target = layer id; args: { text }. You may write/rewrite the copy yourself.' },
   { op: 'setTextStyle', hint: 'Style a TEXT layer. target = layer id; args: { patch }. Keys: fontFamily (ANY Google Font by name — for an Impact-style / bold condensed poster headline use "Anton" (also good: "Oswald", "Archivo Black", "Bebas Neue"); for body use "Inter"), fontWeight (100..900), fontSize (fraction of canvas WIDTH: body ~0.03, a normal heading ~0.08, a big headline ~0.15, a HUGE poster headline that fills the frame 0.25–0.45), align ("left"|"center"|"right"), lineHeight (multiplier), boxW (0..1 wrap width). For "huge headline" set fontSize ≥ 0.25 and usually fontWeight 700–900.' },
-  { op: 'setFill', hint: 'Set a layer\'s FILL — text colour, shape fill, or image tint. target = layer id; args: { paint }. paint is a "#RRGGBB" colour OR a gradient object {type:"linear",angle,stops:[{offset,color}]} / {type:"radial",stops}. "none"/"" = no fill. This is what "make it blue", "give it a sunset gradient" mean.' },
+  { op: 'setFill', hint: 'Set a layer\'s FILL — text colour, shape fill, or image tint. target = layer id; args: { paint }. paint is a "#RRGGBB" colour OR a gradient object {type:"linear",angle,stops:[{offset,color}]} / {type:"radial",stops}. "none"/"" = no fill. A SHAPE PATTERN is {type:"shapes", shapeId (a library shape id like "sparkle"), a (shape colour), b (background "#RRGGBB" or "none" for transparent), angle, shapeSize, shapeGap}. shapeSize and shapeGap are 0..1 fractions of the tile — bigger shapeSize = larger shapes, bigger shapeGap = more space between them; count is automatic. This is what "make it blue", "give it a sunset gradient", "fill it with sparkles" mean.' },
   { op: 'setStroke', hint: 'Set a layer\'s STROKE/outline. target = layer id; args: { paint, width? }. paint as in setFill (or "none"); width is 0..1 of canvas width.' },
   { op: 'setSize', hint: 'Resize a SHAPE/image/line layer. target = layer id; args: { w?, h?, scale? } (0..1 of canvas width; line uses w as length; path uses scale). TEXT size is NOT here — use setTextStyle fontSize.' },
   { op: 'addLayer', hint: 'Add a NEW layer. args: { layer }. layer needs: kind ("text"|"rect"|"ellipse"|"line"), x, y (0..1, center). text also: text + you may set fontFamily/fontWeight/fontSize/color inline (a HUGE headline = fontSize 0.25–0.45, fontWeight 800; Impact-style font = "Anton"). Give the layer an id you choose so you can target it next. New layers land ON TOP by default — to put one BEHIND the image/other layers, follow with setLayerDepth …"back". (For images use generateImage.)' },
@@ -135,6 +150,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setPostEffect', hint: 'Add/update/remove a post-processing effect on the WHOLE FRAME — applied after all layers composite. Same args and effect vocabulary as setLayerEffect (no target), EXCEPT dof, which is per-image-layer only because it needs that image\'s depth map. This is what "make the whole thing warmer", "add film grain", "give it a vignette", "cinematic colour grade" mean.' },
   { op: 'setLayerTornEdge', hint: 'Give a layer a TORN-PAPER edge (ragged, grain-dissolved boundary with an optional white "lip"). target = layer id; args: { patch: {...}, remove? }. patch keys: style ("ripped"=organic meandering tear | "deckle"=soft handmade-paper edge | "shredded"=aggressive spiky rip), amount (tear depth in px, ~10 subtle … 60 deep), roughness (0..1 fray detail), grain (px, edge crumble/dissolve; 0 = crisp), grainTexture (0..1 paper-fibre texture on the lip only), lipWidth (px white underside band; 0 = no lip), lipVariation (0..1 how uneven the lip width is), lipColor ("#RRGGBB", warm white default), seed (integer; change it for a different random tear). Omitted keys keep their current value. remove:true removes the torn edge. This is what "torn paper edge", "ripped edges", "rough deckle border" mean.' },
   { op: 'setLayerFeather', hint: 'Feather (soften) a layer\'s edges so they fade smoothly to transparent — a soft edge-mask, uniform on all sides. target = layer id; args: { patch: {...}, remove? }. patch keys: amount (0..1, feather depth relative to the element\'s OWN size; ~0.1 subtle … 0.4 strong … 1 fades the edge in to the element\'s center), curve ("linear" = even fade | "smooth" = eased fade). Omitted keys keep their current value. remove:true removes the feather. This is what "feather the edges", "soften the edges", "fade the edges" mean.' },
+  { op: 'setLayerMaskBreak', hint: 'Let a SUBJECT masked to a shape BREAK OUT of one edge — the head pops over the top of the circle while the rest stays clipped. target = the MASKED layer id (must already be masked to a shape, see maskBreak in its description). args: { edge ("top"|"bottom"|"left"|"right"), offset? (0..1, how far the break line sits into the shape from that edge; default 0 = the shape edge), remove? }. This is what "let his head pop out of the top", "break him out of the circle" mean.' },
   { op: 'placeTemplate', hint: 'Place a saved FRAME TEMPLATE into this frame as a linked copy — "use my <name> template", "drop in my poster template". NEVER build the template\'s look from raw layers yourself; this op is the only way to place one. args: { template (the full Template object for the named template), slotValues? (Record<slotId, value> — text/color hex/image filename; omitted slots keep the template\'s own defaults) }. Materializes the template\'s layers as a group and records a linked copy the user can later edit via setTemplateSlot or detach via freezeTemplate.' },
   { op: 'setTemplateSlot', hint: 'Fill one SLOT on an already-placed template copy — "set the headline to …", "swap the photo", "make the accent color orange". target = the copy\'s instance id (from a placeTemplate result / the document\'s templates list). args: { template (that copy\'s Template object), slotId, value (text string, "#RRGGBB" for a color slot, or a filename for an image slot) }. Edits ONLY the slot value through the template recipe — never patches the placed layer directly.' },
   { op: 'freezeTemplate', hint: 'Detach a placed template copy from its template — "freeze this", "unlink this from the template". target = the copy\'s instance id. The copy\'s layers stay on the frame exactly as they are, as ordinary editable layers; it just stops tracking the template (no more slot edits or template-version updates).' },
@@ -155,6 +171,7 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
     if (l.effects?.length) cur.effects = l.effects.filter(e => e.visible).map(e => e.type).join(', ')
     if (tornEdgeActive(l.tornEdge)) cur.tornEdge = `${l.tornEdge.style} (amount ${l.tornEdge.amount}, lip ${l.tornEdge.lipWidth})`
     if (featherActive(l.feather)) cur.feather = `${l.feather.curve} (amount ${l.feather.amount})`
+    if (l.maskBreak) cur.maskBreak = maskBreakEdgeLabel(l.maskBreak)
     if (l.kind === 'text') {
       cur.text = l.text; cur.fontFamily = l.fontFamily; cur.fontWeight = l.fontWeight
       cur.fontSize = l.fontSize; cur.color = paintLabel(l.color); cur.align = l.align; cur.lineHeight = l.lineHeight
@@ -381,6 +398,24 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       layer.feather = sanitizeFeather(patch, layer.feather)
       return { ok: true, template: state, inverse: snapshot() }
     }
+    case 'setLayerMaskBreak': {
+      const layer = findLayer(state, cmd.target)
+      if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
+      const ref = layerMaskRef(layer)
+      if (!ref) return { ok: false, reason: 'invalid', detail: `layer ${String(cmd.target)} is not masked to a shape — set a shape mask first` }
+      const a = cmd.args ?? {}
+      if (a.remove === true) { delete layer.maskBreak; return { ok: true, template: state, inverse: snapshot() } }
+      const edge = a.edge as MaskBreakEdge | undefined
+      if (edge !== 'top' && edge !== 'bottom' && edge !== 'left' && edge !== 'right') {
+        return { ok: false, reason: 'invalid', detail: 'args.edge must be "top" | "bottom" | "left" | "right"' }
+      }
+      const maskLayer = ref.startsWith('l:') ? state.layers.find(x => `l:${x.id}` === ref) : undefined
+      const box = maskLayer
+        ? { x: maskLayer.x, y: maskLayer.y, ...localLayerBox(null, maskLayer, 1, 1) }
+        : { x: 0.5, y: 0.5, w: 1, h: 1 }
+      layer.maskBreak = maskBreakFromEdge(edge, box, clamp(a.offset, 0, 1, 0))
+      return { ok: true, template: state, inverse: snapshot() }
+    }
     case 'setPostEffect': {
       const raw = cmd.args?.effect as Record<string, unknown> | undefined
       const type = raw?.type as string | undefined
@@ -516,6 +551,7 @@ export function summarizeCompositorChange(state: CompositorState, cmd: Command):
       const had = !!state.postEffects?.some(e => e.type === type)
       return { label: `${type} effect (frame)`, before: had ? type : 'none', after: a.remove === true ? 'removed' : 'updated' }
     }
+    case 'setLayerMaskBreak': return { label: `${name} break-out`, before: '', after: a.remove === true ? 'removed' : String(a.edge ?? '') }
     case 'placeTemplate': { const t = a.template as { name?: string } | undefined; return { label: 'Place template', before: '', after: t?.name ?? 'template' } }
     case 'setTemplateSlot': {
       const inst = state.templates?.find(i => i.instanceId === cmd.target)

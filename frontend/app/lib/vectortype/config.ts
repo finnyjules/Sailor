@@ -214,9 +214,9 @@ export interface VtAppearanceLayer {
    * The stroke vocabulary in this studio is a colour, not the nine-type fill
    * model. Widening it roughly doubles the extrude's control surface (a second
    * type / a / b / angle / density / anchor set) and multiplies the downstream
-   * work — the SVG spine's `VectorShape.stroke` is `string | null` and cannot
-   * reference a paint server at all, so a gradient outline would export as a flat
-   * colour anyway. A `stroke` LAYER's colour is its `paint` and is a full `Paint`;
+   * work — this studio's outline export flattens a paint to one colour today
+   * (the SVG spine itself accepts a paint server on `stroke` since Shape Studio's
+   * gradient outlines landed). A `stroke` LAYER's colour is its `paint` and is a full `Paint`;
    * this is the extrude's own outline and is one colour.
    *
    * On the LAYER, never inside `paint` — see this interface's header. A colour

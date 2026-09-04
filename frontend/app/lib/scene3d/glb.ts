@@ -2,6 +2,7 @@
 // before parsing; GLTFLoader.parse then works from the ArrayBuffer directly.
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { addSphericalUV } from './roundedGeometry'
 
 export const GLB_SIZE_CAP_BYTES = 50 * 1024 * 1024
 
@@ -37,4 +38,17 @@ async function fetchAndParse(url: string): Promise<THREE.Group> {
   const loader = new GLTFLoader()
   const gltf = await loader.parseAsync(buf, '')
   return gltf.scene
+}
+
+/** Imported meshes with no `uv` attribute would read every UV-anchored finish (the screen,
+ *  a shaderFill, a texture set) as one giant cell. Give them the same spherical projection
+ *  the gem hull gets. Returns how many geometries were patched. */
+export function ensureUv(root: THREE.Object3D): number {
+  let n = 0
+  root.traverse((c) => {
+    const mesh = c as THREE.Mesh
+    if (!mesh.isMesh || !mesh.geometry) return
+    if (!mesh.geometry.getAttribute('uv')) { addSphericalUV(mesh.geometry); n++ }
+  })
+  return n
 }

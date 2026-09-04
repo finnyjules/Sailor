@@ -169,7 +169,7 @@ export function shaderAgentControls(
  * Duplicated rather than imported because agentControls modules must not depend
  * on the tuner that consumes them.
  */
-export const SHADER_HONESTY_CLAUSE = 'If the requested look is not achievable with the effects and controls available here, do not force an exact match: configure the closest approximation you can with the controls above, and say so in "rationale" — name the requested look and state plainly that this only approximates it. Never present an approximation as an exact match.'
+export const SHADER_HONESTY_CLAUSE = 'If the look isn\'t achievable here, do not force an exact match: configure the closest approximation you can with the controls above, and say so in "rationale" — name the requested look and state plainly that this only approximates it. Never present an approximation as an exact match.'
 
 /**
  * Hand-written look-word → effect-id clusters. DATA, not prose, so the detector
@@ -178,7 +178,7 @@ export const SHADER_HONESTY_CLAUSE = 'If the requested look is not achievable wi
  * exists. Kept to real ids only — no aspirational ones.
  */
 export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
-  { words: 'glitchy / vhs / broken signal / datamosh / corrupted', ids: ['block_glitch', 'rgb_glitch', 'crt_scanlines', 'post_grain'] },
+  { words: 'glitchy / vhs / broken signal / datamosh / corrupted / pixel sort / streaked', ids: ['block_glitch', 'rgb_glitch', 'crt_scanlines', 'post_grain', 'pixel_sort'] },
   { words: 'halftone / newsprint / comic / risograph / screenprint', ids: ['halftone', 'dot_screen', 'risograph', 'bayer_dither', 'crosshatch'] },
   { words: 'pixel / 8-bit / lo-fi / blocky / ascii / terminal', ids: ['pixelate', 'blocks', 'ascii_dither', 'glyph_dither'] },
   { words: 'painterly / hand-made / illustrated / sketched', ids: ['oil_paint', 'crosshatch', 'outline'] },
@@ -200,7 +200,18 @@ export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
   { words: 'noisy displacement / turbulent / smoky', ids: ['noise_distortion', 'fbm_warp', 'wisps'] },
   { words: 'flag / cloth / banner / ripple in fabric', ids: ['flag', 'wave'] },
   { words: 'film / grain / analog / dusty', ids: ['post_grain', 'risograph'] },
-  { words: 'BACKGROUND FROM NOTHING (generative — these ignore the input image and draw their own field)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel'] },
+  { words: 'contour lines / topographic map / isolines / terrain map', ids: ['topographic'] },
+  { words: 'stipple / pointillist / engraved dots', ids: ['stipple'] },
+  { words: 'background from nothing / generative field (draws its own field; blend the input with Image mix)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel', 'terrain_bands', 'sonar', 'mist', 'pixel_bloom', 'filament', 'sear'] },
+  { words: 'banded terrain / contour landscape / heat map bands / posterised landscape', ids: ['terrain_bands', 'topographic'] },
+  { words: 'dithered map / landmasses / islands / radar map / sonar', ids: ['sonar'] },
+  { words: 'neon wash / spray paint clouds / airbrush glow / mist', ids: ['mist', 'nebula'] },
+  { words: 'symmetrical pixels / mirrored pixel field / totem', ids: ['pixel_bloom'] },
+  { words: 'threads / fibres / flowing lines / string field / filament', ids: ['filament', 'light_beams'] },
+  { words: 'thermal camera / heat map smear / infrared / dropped frame bands / sear', ids: ['sear', 'terrain_bands'] },
+  { words: 'pixel aurora / dithered northern lights (base: aurora; add bayer_dither by hand)', ids: ['aurora', 'bayer_dither'] },
+  { words: 'ascii terrain / text-mode map (base: terrain_bands; add ascii_dither by hand)', ids: ['terrain_bands', 'ascii_dither'] },
+  { words: 'corrupted satellite / broken map mosaic (base: terrain_bands; add block_glitch + pixel_sort by hand)', ids: ['terrain_bands', 'block_glitch', 'pixel_sort'] },
 ]
 
 /**
@@ -211,7 +222,7 @@ export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
  */
 export const SHADER_TUNE_EXAMPLES: { ask: string; patch: Record<string, ParamValue> }[] = [
   {
-    ask: 'make it a glitchy VHS still',
+    ask: 'glitchy VHS still',
     patch: { effect: 'block_glitch', 'effects.0.params.u_amount': 0.3, 'effects.0.params.u_grid': 28, 'post.chromatic.enabled': true, 'post.chromatic.amount': 0.45, 'adjust.enabled': true, 'adjust.saturation': -0.2 },
   },
   {
@@ -219,7 +230,7 @@ export const SHADER_TUNE_EXAMPLES: { ask: string; patch: Record<string, ParamVal
     patch: { effect: 'gaussian_blur', 'effects.0.params.u_radius': 0.03, 'post.bloom.enabled': true, 'post.bloom.intensity': 1.8, 'post.bloom.threshold': 0.45, 'adjust.enabled': true, 'adjust.temperature': 0.35 },
   },
   {
-    ask: 'halftone poster, navy ink on cream, only through the middle band',
+    ask: 'halftone poster, navy on cream, mid band only',
     patch: { effect: 'halftone', 'effects.0.params.u_size': 0.03, 'duotone.enabled': true, 'duotone.ink': '#12203f', 'duotone.paper': '#f3ead8', 'effects.0.mask.enabled': true, 'effects.0.mask.shape': 'band', 'effects.0.mask.size': 0.3, 'effects.0.mask.feather': 0.4 },
   },
 ]
@@ -282,30 +293,30 @@ export const SHADER_GUIDANCE_CEILING = 8000
  * never offered a switch it has no names for.
  */
 export function buildShaderGuidance(catalog: EffectDef[] | null | undefined): string {
-  const head = `This is a SHADER COMPOSITOR over an input image: ONE stylize effect (picked from a catalog) followed by fixed colour + post stages. Compose the WHOLE look — usually an effect plus 2-4 params, not one knob.`
-  const stages = `STAGES (each has an "…on" switch — turn it ON in the SAME patch as its params; a param set on an OFF stage does nothing):
-- duotone.* — two-colour ink/paper map. "duotone", "two-tone", "screenprint colours".
-- gradientMap.* — remap brightness through a colour ramp (ramp colours are picker-only; you can only set the mix).
-- adjust.* — exposure / brightness / contrast / saturation / hue / temperature / tint. "warmer", "cooler", "punchier", "desaturated", "moodier".
-- post.blur.* — lens blur with a focus point. "shallow depth of field", "soft background".
-- post.chromatic.* — RGB fringing. "lens fringing", "cheap lens", part of most glitch looks.
-- post.bloom.* — glow bleed off the brights. "glowy", "hazy light", "dreamy".
-- effects.0.mask.* — confine the EFFECT (not the post stages) to a region: shape radius | band | linear, plus centre/size/feather. "only in the middle", "just the top half", "a band across it".`
+  const head = `This is a SHADER COMPOSITOR over an input image: one stylize effect (from a catalog) plus fixed colour + post stages. Compose the WHOLE look — usually an effect plus 2-4 params, not one knob.`
+  const stages = `STAGES ("…on" switch — set it ON in the same patch as its params; a param on an OFF stage does nothing):
+- duotone.* — two-colour ink/paper map ("duotone").
+- gradientMap.* — brightness through a colour ramp (ramp colours picker-only; only mix is tunable).
+- adjust.* — exposure/brightness/contrast/saturation/hue/temperature/tint ("warmer", "punchier").
+- post.blur.* — lens blur with a focus point ("shallow depth of field").
+- post.chromatic.* — RGB fringing, part of most glitch looks.
+- post.bloom.* — glow bleed off the brights ("glowy", "dreamy").
+- effects.0.mask.* — confine the EFFECT (not post) to a region: radius | band | linear, plus centre/size/feather ("only in the middle").`
   const rules = `HOW TO ANSWER:
-- PICK THE EFFECT FIRST when the ask names a look the current effect cannot give ("effect": "<id>"). Switching resets that layer's params to the new effect's defaults; any effects.0.params.* keys you send in the SAME patch are then applied on top, so send both together.
-- Only send effects.0.params.* uniforms that belong to the effect you are picking. Uniforms of the OLD effect are dropped.
-- When merely ADJUSTING the current look ("more contrast", "less blur", "warmer"), do NOT set "effect" — tune the specific knobs.
+- PICK THE EFFECT FIRST when the ask needs a look the current effect can't give ("effect": "<id>"). Switching resets that layer's params to the new effect's defaults; effects.0.params.* keys in the SAME patch then apply on top — send both together.
+- Only send effects.0.params.* uniforms of the effect you're picking; uniforms of the OLD effect are dropped.
+- When merely ADJUSTING the current look ("more contrast", "warmer"), do NOT set "effect" — tune the specific knobs.
 - Prefer 2-4 meaningful changes over one, and over twenty.`
   const parts = [head]
   if (catalog?.length) {
-    parts.push(`EFFECTS YOU MAY PICK (id · name, grouped by family — set "effect" to an id):\n${shaderEffectIndex(catalog)}`)
-    parts.push(`LOOK WORDS → EFFECT IDS (recognise synonyms, not just these exact words):\n${renderClusters()}`)
-    parts.push(`MODES YOU CANNOT SET: these effects have a mode/style/pattern dropdown that is NOT in your controls — ${effectsWithUnsettableModes(catalog).join(', ')}. You get whichever mode the config already holds (its default on a fresh pick), and you can still tune their other params. If the ask depends on a specific mode of one of these, treat it as an approximation and say so.`)
+    parts.push(`EFFECTS (id · name, by family — set "effect" to an id):\n${shaderEffectIndex(catalog)}`)
+    parts.push(`LOOK WORDS → IDS (recognise synonyms too):\n${renderClusters()}`)
+    parts.push(`MODES YOU CANNOT SET: ${effectsWithUnsettableModes(catalog).join(', ')} have a mode dropdown not in your controls — you get whichever mode the config holds (default on a fresh pick), and can still tune other params. Treat a needed mode as an approximation and say so.`)
   } else {
     parts.push(`EFFECT LIST UNAVAILABLE this turn (the effect catalog could not be loaded), so the "effect" control is not offered: you CANNOT change which effect is applied. Tune the stages below on whatever effect is already selected, and say so if the ask needed a different effect.`)
   }
   parts.push(stages, rules)
-  if (catalog?.length) parts.push(`EXAMPLES — the exact changes to return:\n${renderExamples()}`)
+  if (catalog?.length) parts.push(`EXAMPLES — exact changes to return:\n${renderExamples()}`)
   parts.push(SHADER_HONESTY_CLAUSE)
   return parts.join('\n\n')
 }

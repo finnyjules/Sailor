@@ -527,7 +527,12 @@ export interface VectorShape {
    * explicit `fill="none"`; omitted leaves the attribute off entirely.
    */
   fill?: VectorPaint | null
-  stroke?: string | null
+  /**
+   * Same vocabulary as `fill`: a CSS colour or a paint server (a gradient
+   * stroke is a real `<linearGradient>` referenced by `url(#…)`, sharing the
+   * def with an equal fill). `null` writes no stroke attribute at all.
+   */
+  stroke?: VectorPaint | null
   strokeWidth?: number
   /**
    * `stroke-dasharray`, in DOCUMENT units — the same units `strokeWidth` and the
@@ -1102,6 +1107,7 @@ export function shapesToSVG(shapes: readonly VectorShape[], doc: SvgDocOptions =
   const drawn: Array<{
     pairs: Array<[string, string | number | null | undefined]>
     paint: { kind: 'g' | 'p'; key: string } | null
+    strokePaint: { kind: 'g' | 'p'; key: string } | null
     blur: string | null
     clip: string | null
   }> = []
@@ -1120,12 +1126,18 @@ export function shapesToSVG(shapes: readonly VectorShape[], doc: SvgDocOptions =
       isVectorGradient(s.fill) ? { kind: 'g', key: defs.gradientKey(s.fill) }
       : isVectorPattern(s.fill) ? { kind: 'p', key: defs.patternKey(s.fill) }
       : null
+    // A paint-server STROKE registers the same way; an equal fill and stroke
+    // share one def because the key is a function of the value alone.
+    const strokePaint: { kind: 'g' | 'p'; key: string } | null =
+      isVectorGradient(s.stroke) ? { kind: 'g', key: defs.gradientKey(s.stroke) }
+      : isVectorPattern(s.stroke) ? { kind: 'p', key: defs.patternKey(s.stroke) }
+      : null
     const dash = dashArrayAttr(s.dash, precision)
     const pairs: Array<[string, string | number | null | undefined]> = [
       ['d', d],
       ['fill', s.fill === null ? 'none' : paint?.key ?? (s.fill as string | undefined)],
       ['fill-rule', s.fillRule],
-      ['stroke', s.stroke === null ? undefined : s.stroke],
+      ['stroke', s.stroke === null ? undefined : strokePaint?.key ?? (s.stroke as string | undefined)],
       ['stroke-width', s.strokeWidth === undefined ? undefined : formatNumber(s.strokeWidth, precision)],
       ['stroke-dasharray', dash],
       // Rides on the dash, never written alone: an offset with no pattern to
@@ -1140,6 +1152,7 @@ export function shapesToSVG(shapes: readonly VectorShape[], doc: SvgDocOptions =
     drawn.push({
       pairs,
       paint,
+      strokePaint,
       blur: sd >= MIN_STD_DEVIATION ? defs.blurKey(sd) : null,
       clip: clip ? defs.clipKey(clip) : null,
     })
@@ -1158,6 +1171,10 @@ export function shapesToSVG(shapes: readonly VectorShape[], doc: SvgDocOptions =
     if (item.paint !== null) {
       const fill = item.pairs.find(pr => pr[0] === 'fill')
       if (fill) fill[1] = `url(#${defs.idFor(prefix, item.paint.kind, item.paint.key)})`
+    }
+    if (item.strokePaint !== null) {
+      const stroke = item.pairs.find(pr => pr[0] === 'stroke')
+      if (stroke) stroke[1] = `url(#${defs.idFor(prefix, item.strokePaint.kind, item.strokePaint.key)})`
     }
     let el = `<path${attrs(item.pairs)}/>`
     if (item.blur !== null || item.clip !== null) {

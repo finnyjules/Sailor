@@ -1,7 +1,7 @@
 # 3D Studio — Screen finish (surface-anchored halftone on any material)
 
 **Date:** 2026-09-03
-**Status:** designed, not built
+**Status:** LANDED 2026-09-03 on main, `61fc02096`..`de6713290`
 **Surface:** Scene3D Studio (`frontend/app/lib/scene3d/`, schema-drawn inspector, `Scene3DStudioSurface.vue`)
 **Reference:** Carsten Gueth / @die_doing — spheres and blobs whose shading is made of dots or lines that wrap the form, denser in shadow, with red/blue fringes at the edges, dissolving into the background between dots.
 
@@ -13,7 +13,7 @@
 
 **What falls out of it.** Every dial is a slider in the shared control schema, so the agent can set them and motion tracks can animate them (animating Angle or Density gives the breathing look). Viewport, still bake, video bake, and thumbnails all get it because it lives in the material.
 
-**What is risky.** Transparent gaps on a lit material need alpha blending, which can misorder overlapping objects. The design keeps depth writes on and uses a small alpha cutoff; the live check covers two overlapping spheres. If it looks wrong, the fallback is hard-edged cutouts (discard), which loses edge smoothing but never misorders.
+**What is risky.** Transparent gaps on a lit material need alpha blending, which can misorder overlapping objects. The design keeps depth writes on and has the shader `discard` fully open gaps, so a gap writes no depth while a dot still occludes what is behind it; the live check covers two overlapping spheres. (`alphaTest` cannot do this job: three runs it before lighting, on `diffuseColor.a`, which knows nothing about the screen coverage.)
 
 ## 1. Data model (`lib/scene3d/config.ts`)
 
@@ -47,19 +47,18 @@ One helper, `applyScreen(m, mat)`, runs at the end of `buildMaterial` after `app
   - vertex: append `varying vec2 vScrUv;` after `#include <uv_pars_vertex>` and `vScrUv = uv;` after `#include <uv_vertex>`. The `uv` attribute is always declared by three's vertex prefix, so this does not depend on `USE_UV` or on the material having a texture.
   - fragment: declare the varying and helpers after `#include <uv_pars_fragment>`; replace `#include <opaque_fragment>` with the screen body. `outgoingLight` and `diffuseColor.a` exist there in every built-in material (standard, physical, phong, toon, matcap, basic).
 - **Shader body** (`SCREEN_FRAG_BODY`):
-  - `p = rotate(uScrAngle) · vScrUv · uScrDensity`
-  - `lum = pow(clamp(luminance(outgoingLight), 0, 1), uScrContrast)`, flipped when `uScrInvert`
+  - `p = rotate(uScrAngle) · vScrUv · uScrDensity` (the same `mat2(c, -s, s, c)` form the 2D screen effects use; a rising Angle turns the pattern counter-clockwise)
   - coverage per pattern: dots — `r = sqrt(lum) · 0.7071` (dot area proportional to brightness), `cov = 1 − smoothstep(r − soft, r + soft, distance(fract(p) − 0.5))`; lines — half-width `lum · 0.5` around `fract(p.y) − 0.5`; cross — max of the line coverage in x and y. `soft = uScrSoft · 0.25 + fwidth(p) · 0.5` so edges stay anti-aliased at any zoom.
   - misregister: `covR = cov(p + (uScrMisreg·0.35, 0))`, `covG = cov(p)`, `covB = cov(p − (uScrMisreg·0.35, 0))`.
   - ink colour `c = uScrInkMode == 0 ? outgoingLight : uScrInkColor`; per channel `rgb = c · (covR, covG, covB)`.
   - gap transparent: `gl_FragColor = vec4(rgb / max(alpha, 1e-4), alpha · diffuseColor.a)` with `alpha = max(covR, covG, covB)`; gap colour: `gl_FragColor = vec4(mix(uScrGapColor, rgb, (covR, covG, covB)), diffuseColor.a)`.
-- **Transparent gaps** set `m.transparent = true`, `m.alphaTest = 0.02`, `m.depthWrite = true`. Colour gaps leave the material opaque.
+- **Transparent gaps** set `m.transparent = true`, `m.depthWrite = true`, and the shader `discard`s a fragment whose coverage is under 0.02 so fully open gaps write no depth. Not `alphaTest`: three's `alphatest_fragment` runs BEFORE lighting, against `diffuseColor.a`, so it never sees the screen coverage — it would only force an extra shadow-program variant. Colour gaps leave the material opaque.
 - **Program cache key**: `customProgramCacheKey` composes — the previous key (or `scene3d-<type>`) plus `|screen`. Pattern kind, gap mode, and ink mode are uniforms, so switching dots→lines or lit→colour ink does not recompile.
 - **Identity** (`identityKey`): a `screenKey(mat)` suffix with two boundaries only: screen off↔on, and gap transparent↔colour (it flips `transparent`). Everything else updates in place.
 - **`updateMaterial`**: when `m.userData.screenUniforms` exists, write every uniform `.value` from `mat.screen` — a slider drag never rebuilds.
 - Nothing to dispose (no textures, no tracking set) and no per-frame feed (no time uniform).
 
-**Geometry without surface coordinates.** The gem hull already gets spherical UVs (`addSphericalUV`). Extruded text and SVG solids carry UVs from `ExtrudeGeometry`. The GLB load path adds the same spherical fallback when a mesh has no `uv` attribute, so no object renders as one giant dot.
+**Geometry without surface coordinates.** The gem hull already gets spherical UVs (`addSphericalUV`). Extruded text and SVG solids carry UVs from `ExtrudeGeometry`. The GLB load path adds the same spherical fallback when a mesh has no `uv` attribute — and so does the `mesh` primitive (`geometryFromMeshData`), which is what every text-to-3D, remesh and sculpt bake decodes to: its codec stores positions and indices only, so without the fallback those objects render as one giant dot.
 
 ## 3. Controls (`lib/scene3d/controls.ts`)
 
@@ -99,3 +98,4 @@ A SCREEN paragraph: "halftone", "dot screen", "print dots", "engraved lines", "r
 - Paper grain or ink texture (post Grain exists).
 - A time-drift dial (an Angle track does this).
 - Glass. Transmission plus alpha gaps is a rendering rabbit hole; revisit if asked.
+- Shadows and depth-based post read a screened mesh as solid: the shadow pass uses three's depth materials, which cannot see the screen coverage; a dissolving sphere still throws a complete shadow. Needs a custom depth material — later.

@@ -376,6 +376,13 @@ interface PatchAdapter {
    *  knobs are offered at all, and it arrives in the same patch that wants to set
    *  them. Describing without looking at it would drop every gated override. */
   recontrol?: (config: any, raw: Record<string, ParamValue>) => ControlSpec[] | Promise<ControlSpec[]>
+  /** Control keys that GATE which OTHER controls exist, and that arrive in the
+   *  SAME patch as the keys they unlock. Unlike the macro they are ordinary
+   *  leaves — they are written through with everything else and produce their own
+   *  tune rows — but the rest of the patch has to be re-validated against the
+   *  vocabulary they imply, or every key they gate is dropped as unknown.
+   *  Requires `recontrol` (the re-describe seam); see runParamPatch. */
+  gateKeys?: string[]
 }
 
 /** Scene3D texture phrases: the model writes `object.material.texture: "wood"`; the engine
@@ -443,6 +450,7 @@ async function runParamPatch(node: any, request: string, apiKey: string, a: Patc
   // effect's uniforms are dropped, which is the honest outcome — the model was
   // told (guidance) to send only the picked effect's uniforms.
   const macroKey = a.macroKey ?? 'preset'
+  const macroHandled = !!a.applyPreset && typeof patch[macroKey] === 'string'
   if (a.applyPreset && typeof patch[macroKey] === 'string') {
     const macroValue = patch[macroKey] as string
     // Read the "before" FIRST: an adapter is free to swap IN PLACE (Shader's does,
@@ -461,6 +469,39 @@ async function runParamPatch(node: any, request: string, apiKey: string, a: Patc
       }
     }
     delete patch[macroKey]
+  }
+
+  // ── GATING FIELDS CONTRACT ─────────────────────────────────────────────────
+  // The macro above covers ONE key that decides the vocabulary. Some studios have
+  // several, and they are plain leaves rather than verbs: Shape's `layout`
+  // ('blend' is what makes the blend* controls exist at all), `fillStrategy`
+  // (anything but 'single' is what makes `fillCycle` exist) and `paintTarget`
+  // ('outline'/'both' is what makes `strokeWidth` reachable with no stroke set).
+  // They arrive in the SAME patch as the keys they unlock — the whole
+  // stacked-outlines recipe is one turn — so validating the rest against the
+  // PRE-patch vocabulary drops every gated key silently.
+  //
+  // So: apply the gate values to a CLONE, re-describe against that, and
+  // re-validate the model's original raw patch. The gates themselves are NOT
+  // written here — they flow through the ordinary write loop below like any other
+  // key, so their tune rows still read honestly ("radial → blend").
+  if (a.gateKeys?.length && a.recontrol) {
+    const gates: Record<string, ParamValue> = {}
+    for (const k of a.gateKeys) { const v = patch[k]; if (v !== undefined) gates[k] = v }
+    if (Object.keys(gates).length) {
+      const probe = a.clone(config)
+      const probeParams = a.params(probe)
+      for (const [k, v] of Object.entries(gates)) probeParams[k] = v
+      const describedGated = describeControls(await a.recontrol(probe, raw), probeParams)
+      // Re-merge the gate values themselves: they were already validated against
+      // the pre-patch vocabulary (they are unconditional controls) and must not
+      // depend on surviving the second pass.
+      patch = { ...validatePatch(raw, describedGated), ...gates }
+      byPath = new Map(describedGated.map(d => [d.path, d]))
+      // The macro is a verb, never a leaf — the second validation pass would put
+      // its key back into the patch.
+      if (macroHandled) delete patch[macroKey]
+    }
   }
 
   const resolved = await resolveTexturePatches(patch)
@@ -638,7 +679,17 @@ const shapeAdapter: PatchAdapter = {
   // keys validate against the new family's vocabulary (runParamPatch re-validates
   // the original raw patch against this list). Keys naming the OLD family's knobs
   // drop out, which is the honest outcome — they mean nothing on the new shape.
+  // Also the re-describe seam for `gateKeys` below.
   recontrol: (config: GeoShapeConfig) => shapeAgentControls(config),
+  // The three OTHER vocabulary-deciding fields (see runParamPatch's gating-fields
+  // contract). They are ordinary leaves, not macros — nothing needs re-seeding
+  // when they change, they just decide which controls geoAgentControls offers:
+  //   layout 'blend'        → the whole Blend group exists
+  //   fillStrategy != single → fillCycle exists
+  //   paintTarget != fill   → strokeWidth is reachable with no stroke set
+  // GEO_GUIDANCE's stacked-outlines recipe sets all three plus the keys they
+  // unlock in a single patch, so without this it lands as a bare layout switch.
+  gateKeys: ['layout', 'fillStrategy', 'paintTarget'],
 }
 
 /** Exposed for tests only — the adapter is otherwise reached via the registry. */

@@ -3,6 +3,7 @@ import { postControls, POST_SECTIONS } from '~/lib/studio/post/controls'
 import {
   MATERIAL_TYPES, MATERIAL_DEFAULTS, DEFAULT_MATERIAL, LIGHTING_PRESETS, ENVIRONMENT_KINDS, defaultDoc,
   PRIMITIVE_KINDS, LIGHT_DEFAULTS, DECAL_DEFAULTS, DECAL_BLENDS, lightIntensityMax, TEXTURE_TILING_RANGE,
+  SCREEN_PATTERNS, SCREEN_GAPS, SCREEN_INKS,
   type SceneDoc, type SceneObject, type MaterialType,
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, type ParamSpec } from './primParams'
@@ -167,6 +168,13 @@ const reliefApplies = (doc: SceneDoc, obj?: SceneObject): boolean => {
   if (materialTypeOf(obj) === 'shaderFill' && obj && obj.kind !== 'light' && obj.material.unlit === true) return false
   return true
 }
+
+// The screen finish sits after the per-type chain like relief, on every branch except glass
+// (transmission + alpha gaps is out of scope — see ScreenSpec). Dials stay in the schema
+// whatever the pattern is, so the agent can set pattern AND density in one patch; the panel
+// hides them while the pattern is none (panelPresentation's panelGate, the relief precedent).
+const screenApplies = (doc: SceneDoc, obj?: SceneObject): boolean =>
+  isEditableMaterial(doc, obj) && materialTypeOf(obj) !== 'glass'
 
 // Per-type branches the inspector draws but the schema had never described. Each is
 // `agent: false` AND `animatable: false`: declaring a control so the INSPECTOR can draw it
@@ -476,6 +484,35 @@ export const SCENE_CONTROLS: SceneControl[] = [
     key: 'object.material.relief.invert', label: 'Invert', kind: 'switch', default: false, group: 'Material',
     when: reliefApplies, agent: false,
   } as SceneControl,
+
+  // Screen finish — print-style dots/lines/cross anchored to the surface, sized by the lit shading.
+  select('object.material.screen.pattern', 'Screen', [...SCREEN_PATTERNS], 'none', 'Material',
+    'Print-style dots that wrap the object and shrink in shadow',
+    { when: screenApplies, optionLabels: ['None', 'Dots', 'Lines', 'Cross'] }),
+  slider('object.material.screen.density', 'Screen density', 4, 200, 1, 'Material', MATERIAL_DEFAULTS.screenDensity,
+    'How many dots across the surface', { when: screenApplies }),
+  slider('object.material.screen.angle', 'Screen angle', 0, 180, 1, 'Material', MATERIAL_DEFAULTS.screenAngle,
+    'Rotates the dot grid', { when: screenApplies }),
+  slider('object.material.screen.contrast', 'Screen contrast', 0.25, 4, 0.05, 'Material', MATERIAL_DEFAULTS.screenContrast,
+    'How fast dots shrink into shadow. Brightness is measured before display gamma, so values around 0.45 spread dots into the midtones', { when: screenApplies }),
+  slider('object.material.screen.softness', 'Screen softness', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.screenSoftness,
+    'Edge blur on each dot', { when: screenApplies }),
+  slider('object.material.screen.misregister', 'Misregister', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.screenMisregister,
+    'Offsets red and blue so edges fringe like a misprint', { when: screenApplies }),
+  {
+    key: 'object.material.screen.invert', label: 'Invert screen', kind: 'switch', default: false, group: 'Material',
+    hint: 'Dark areas get the big dots instead of bright ones', when: screenApplies, agent: false,
+  } as SceneControl,
+  select('object.material.screen.gap', 'Screen gaps', [...SCREEN_GAPS], 'transparent', 'Material',
+    'What shows between the dots — the background, or one colour',
+    { when: screenApplies, optionLabels: ['Transparent', 'Colour'] }),
+  color('object.material.screen.gapColor', 'Gap colour', MATERIAL_DEFAULTS.screenGapColor, 'Material',
+    { when: screenApplies, showIf: { key: 'object.material.screen.gap', equals: 'colour' } }),
+  select('object.material.screen.ink', 'Screen ink', [...SCREEN_INKS], 'lit', 'Material',
+    "Dot colour: the material's own shading, or one ink",
+    { when: screenApplies, optionLabels: ['Lit colour', 'Colour'] }),
+  color('object.material.screen.inkColor', 'Ink colour', MATERIAL_DEFAULTS.screenInkColor, 'Material',
+    { when: screenApplies, showIf: { key: 'object.material.screen.ink', equals: 'colour' } }),
 
   // ambientCG texture set — a photographed PBR surface (see lib/scene3d/textures.ts).
   // Physical types only: it binds map/roughnessMap/normalMap/aoMap/metalnessMap, which

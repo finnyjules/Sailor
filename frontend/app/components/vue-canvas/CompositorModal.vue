@@ -16,6 +16,7 @@ import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
+import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import { useLocalLayerEditor, resizableKind, cornerResizableKind } from '~/composables/useLocalLayerEditor'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance } from '~/lib/frametemplate/apply'
@@ -40,6 +41,7 @@ import { useBrushPaint } from '~/composables/useBrushPaint'
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
+import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
 import { generateVectorFromText, vectorizeImage, urlToDataUrl } from '~/composables/useVectorAi'
 import { imageLayerUrl } from '~/composables/useCompositorLayers'
@@ -3095,6 +3097,52 @@ function setMaskShowSource(key: StackKey, show: boolean) {
   if (!r) return
   if (r.type === 'local') setLocal(r.layer.id, { maskShowSource: show || undefined } as any)
   else setWiredMaskShowSource(compositor.value, (r.layer as Layer).slot, show)
+}
+
+// ── Mask break-out: open the mask on one edge so a masked subject escapes it ─
+/** The current mask layer's normalized box for the selected layer, or null. */
+function maskBreakBox(): { x: number; y: number; w: number; h: number } | null {
+  const l = selectedLocal.value
+  if (!l) return null
+  const ref = currentMaskRef(localKey(l.id))
+  if (!ref) return null
+  const m = localLayers.value.find(x => `l:${x.id}` === ref)   // local shape masks only (v1)
+  if (!m) return null
+  const b = localLayerBox(null, m as any, 1, 1)
+  return { x: (m as any).x, y: (m as any).y, w: b.w, h: b.h }
+}
+/** True only when the selected layer's mask is a LOCAL shape (a break-out can open it). */
+function maskIsLocalShape(): boolean {
+  const l = selectedLocal.value; if (!l) return false
+  const ref = currentMaskRef(localKey(l.id))
+  return !!ref && ref.startsWith('l:') && !!maskBreakBox()
+}
+function selectedBreak(): MaskBreak | null { return (selectedLocal.value as any)?.maskBreak ?? null }
+function breakEdge(): MaskBreakEdge {
+  const a = ((selectedBreak()?.angle ?? 0) % 360 + 360) % 360
+  return a === 180 ? 'bottom' : a === 270 ? 'left' : a === 90 ? 'right' : 'top'
+}
+/** Recover the 0..1 offset the break sits at, from the break + the mask box. */
+function breakOffset(): number {
+  const b = selectedBreak(); const box = maskBreakBox(); if (!b || !box) return 0
+  const e = breakEdge()
+  if (e === 'top')    return box.h ? (b.y - (box.y - box.h / 2)) / box.h : 0
+  if (e === 'bottom') return box.h ? ((box.y + box.h / 2) - b.y) / box.h : 0
+  if (e === 'left')   return box.w ? (b.x - (box.x - box.w / 2)) / box.w : 0
+  return box.w ? ((box.x + box.w / 2) - b.x) / box.w : 0
+}
+function setBreakEnabled(on: boolean) {
+  const l = selectedLocal.value; const box = maskBreakBox(); if (!l) return
+  setLocal(l.id, { maskBreak: on && box ? maskBreakFromEdge('top', box, 0) : undefined } as any)
+  renderStack()
+}
+function setBreakEdge(e: MaskBreakEdge) {
+  const l = selectedLocal.value; const box = maskBreakBox(); if (!l || !box) return
+  setLocal(l.id, { maskBreak: maskBreakFromEdge(e, box, breakOffset()) } as any); renderStack()
+}
+function setBreakOffset(v: number) {
+  const l = selectedLocal.value; const box = maskBreakBox(); if (!l || !box) return
+  setLocal(l.id, { maskBreak: maskBreakFromEdge(breakEdge(), box, Math.max(0, Math.min(1, v))) } as any); renderStack()
 }
 
 // ── Generative Fill: regenerate a region of an image in place ────────────────
@@ -6732,6 +6780,22 @@ onUnmounted(() => {
                 @change="setMaskShowSource(localKey(selectedLocal!.id), ($event.target as HTMLInputElement).checked)" />
               Show mask layer
             </label>
+            <div v-if="maskIsLocalShape()" class="mt-2">
+              <label class="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
+                <input type="checkbox" :checked="!!selectedBreak()" @change="setBreakEnabled(($event.target as HTMLInputElement).checked)" />
+                Break out
+              </label>
+              <div v-if="selectedBreak()" class="mt-1.5 space-y-1.5">
+                <StudioSegmented :options="['top','bottom','left','right']" :model-value="breakEdge()"
+                  @update:model-value="(e: string) => setBreakEdge(e as any)" />
+                <div>
+                  <div class="panel-sublabel mb-1">Offset</div>
+                  <input type="range" min="0" max="1" step="0.01" :value="breakOffset()"
+                    class="w-full accent-white cursor-pointer"
+                    @input="setBreakOffset(parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Crop to a rect/ellipse region -->

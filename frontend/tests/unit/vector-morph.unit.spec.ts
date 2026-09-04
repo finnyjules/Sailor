@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parsePathD, flattenSubpath, subpathsToD, resample, signedArea, alignCorrespondence, blendPath, rotatePathD, BLEND_SAMPLES } from '~/lib/vector/morph'
+import { parsePathD, flattenSubpath, subpathsToD, resample, signedArea, alignCorrespondence, blendPath, prepareBlend, samplesForSubpaths, rotatePathD, BLEND_SAMPLES, dropCollinear } from '~/lib/vector/morph'
 
 const SQUARE = 'M -50 -50 L 50 -50 L 50 50 L -50 50 Z'
 const HEX = (() => {
@@ -108,6 +108,21 @@ describe('morph: resample', () => {
   })
 })
 
+describe('morph: dropCollinear', () => {
+  it('drops points on a straight run and keeps the corners', () => {
+    const sq = resample(flatOf(SQUARE), 40)
+    expect(dropCollinear(sq, 1e-6)).toHaveLength(4)
+  })
+  it('keeps every point of a ring with no straight runs', () => {
+    const ring = Array.from({ length: 12 }, (_, i) => [Math.cos(i / 12 * Math.PI * 2) * 50, Math.sin(i / 12 * Math.PI * 2) * 50] as [number, number])
+    expect(dropCollinear(ring, 1e-6)).toHaveLength(12)
+  })
+  it('returns the input when everything would be dropped (a ring collapsed to one point)', () => {
+    const dot = Array.from({ length: 8 }, () => [3, 4] as [number, number])
+    expect(dropCollinear(dot, 1e-6)).toBe(dot)
+  })
+})
+
 describe('morph: alignCorrespondence', () => {
   it('recovers a known index rotation of the same polygon', () => {
     const a = resample(flatOf(SQUARE), 32)
@@ -154,17 +169,71 @@ describe('morph: blendPath', () => {
     }
     expect(onOutline(flatOf(d0), HEX)).toBe(true)
     expect(onOutline(flatOf(d1), TRI)).toBe(true)
-    expect(flatOf(d0)).toHaveLength(BLEND_SAMPLES)
+    // Straight-edged pairs shed the resampled points along each edge (they are
+    // collinear): what survives is at most the two samples straddling each
+    // corner, so a hexagon step is ≤ 12 points instead of 128 and the boolean
+    // fold in single fill mode stays cheap.
+    expect(flatOf(d0).length).toBeLessThanOrEqual(2 * 6)
+    expect(flatOf(d1).length).toBeLessThanOrEqual(2 * 3)
   })
 
-  it('an unpaired subpath collapses to the partner shape centroid', () => {
-    const ring = 'M -50 -50 L 50 -50 L 50 50 L -50 50 Z M -20 -20 L 20 -20 L 20 20 L -20 20 Z'
+  it('a mid-way step between straight-edged shapes carries only its corners (≤ 2 × (cornersA + cornersB))', () => {
+    const mid = flatOf(blendPath(HEX, TRI, 0.5))
+    expect(mid.length).toBeGreaterThanOrEqual(3)
+    expect(mid.length).toBeLessThanOrEqual(2 * (6 + 3))
+  })
+
+  it('a curved pair keeps most of its resampled points (only samples on one flattened chord collapse)', () => {
+    const circle = 'M 50 0 A 50 50 0 0 1 -50 0 A 50 50 0 0 1 50 0 Z'
+    const mid = flatOf(blendPath(circle, 'M 40 0 A 40 40 0 0 1 -40 0 A 40 40 0 0 1 40 0 Z', 0.5, { twist: 0.1 }))
+    expect(mid.length).toBeGreaterThan(BLEND_SAMPLES / 2)
+    expect(mid.length).toBeLessThanOrEqual(BLEND_SAMPLES)
+  })
+
+  it('an unpaired subpath collapses to ITS OWN centroid, not the partner shape\u2019s', () => {
+    // The inner square is deliberately OFF-CENTRE (centred at 15, -10) while the
+    // outer/partner square is centred at the origin, so the two readings of
+    // "collapses to a centroid" are distinguishable: its own says (15, -10), the
+    // partner's would say (0, 0).
+    const ring = 'M -50 -50 L 50 -50 L 50 50 L -50 50 Z M 5 -20 L 25 -20 L 25 0 L 5 0 Z'
     const solid = 'M -50 -50 L 50 -50 L 50 50 L -50 50 Z'
     const d = blendPath(ring, solid, 1)
     const subs = parsePathD(d)
     expect(subs).toHaveLength(2)
     const inner = flattenSubpath(subs[1]!)
-    for (const [x, y] of inner) { expect(Math.abs(x)).toBeLessThan(0.02); expect(Math.abs(y)).toBeLessThan(0.02) }
+    for (const [x, y] of inner) { expect(x).toBeCloseTo(15, 1); expect(y).toBeCloseTo(-10, 1) }
+  })
+
+  it('twist is honoured on a SAME-SKELETON pair (the exact branch cannot spiral)', () => {
+    // Two squares with an identical command skeleton. Twist rotates which point
+    // of A meets which point of B, so it MUST reach the resampled path — the
+    // exact branch interpolates argument-for-argument and can never spiral.
+    const offset = 'M -30 -30 L 70 -30 L 70 70 L -30 70 Z'
+    const plain = blendPath(SQUARE, offset, 0.5)
+    const twisted = blendPath(SQUARE, offset, 0.5, { twist: 0.25 })
+    expect(twisted).not.toBe(plain)
+    // twist 0 keeps the exact branch: still four line segments, not 128.
+    expect(blendPath(SQUARE, offset, 0.5, { twist: 0 })).toBe(plain)
+    expect(parsePathD(plain)[0]!.segs).toHaveLength(3)
+  })
+
+  it('prepareBlend lerps per step and matches blendPath at every t', () => {
+    for (const [a, b, opts] of [
+      [SQUARE, 'M -30 -30 L 70 -30 L 70 70 L -30 70 Z', {}],        // same skeleton (exact)
+      [HEX, TRI, {}],                                                // mixed (resampled)
+      [SQUARE, 'M -30 -30 L 70 -30 L 70 70 L -30 70 Z', { twist: 0.25 }], // same skeleton + twist
+    ] as [string, string, { twist?: number }][]) {
+      const step = prepareBlend(a, b, opts)
+      for (const t of [0, 0.3, 1]) expect(step(t)).toBe(blendPath(a, b, t, opts))
+    }
+  })
+
+  it('samplesForSubpaths bounds subpath count \u00d7 samples', () => {
+    expect(samplesForSubpaths(1)).toBe(128)
+    expect(samplesForSubpaths(3)).toBe(128)
+    expect(samplesForSubpaths(6)).toBe(64)
+    expect(samplesForSubpaths(25)).toBe(24)
+    expect(samplesForSubpaths(100)).toBe(24)
   })
 
   it('rotatePathD rotates about the origin', () => {

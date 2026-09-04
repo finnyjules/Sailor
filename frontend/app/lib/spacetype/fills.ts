@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { type Fill, type ShaderSpec, hexBytes, patternImageData, ombrePicker, fillIsShader, effectiveTileFill } from './fillTile'
+import { type Fill, type ShaderSpec, hexBytes, patternImageData, ombrePicker, fillIsShader, effectiveTileFill, fillTileCanvas } from './fillTile'
 import { paintTileBox } from '~/lib/compositor/paint'
 import { parseHexA, stripAlpha } from '~/lib/color/convert'
 import { resolveField, withFieldFrame, type FieldRequest } from '~/lib/shaderfill/field'
@@ -337,7 +337,9 @@ export function fillTexture(three: typeof THREE, fill: Fill): THREE.Texture | nu
   if (fillIsShader(fill)) return shaderFieldTexture(three, fill.shader)
   if (fill.type === 'shader') return fillTexture(three, effectiveTileFill(fill))   // no spec yet — degrade to input
   if (fill.type === 'solid') return null
-  const key = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}`
+  // shapeId is only meaningful for `shapes`; include it in the key so two shape patterns that
+  // share colours/density/angle but differ in shape don't alias to the same cached texture.
+  const key = `${fill.type}|${fill.a}|${fill.b}|${fill.angle}|${fill.density}|${fill.type === 'shapes' ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap : ''}`
   const hit = _cache.get(key)
   if (hit) return hit
   const t = fill.type === 'gradient' ? gradientRamp(three, fill.a, fill.b)
@@ -346,6 +348,7 @@ export function fillTexture(three: typeof THREE, fill: Fill): THREE.Texture | nu
     : fill.type === 'noise' ? noiseTex(three, fill.a, fill.b)
     : fill.type === 'checkerboard' ? checkerboardTex(three, fill.a, fill.b, fill.density)
     : fill.type === 'stripes' ? stripesTex(three, fill.a, fill.b, fill.angle, fill.density)
+    : fill.type === 'shapes' ? shapesTex(three, fill)
     : qrTex(three, fill.a, fill.b, fill.density)
   _cache.set(key, t)
   return t
@@ -392,7 +395,9 @@ export function fillTiling(fill: Fill): number {
 const _atlasCache = new Map<string, THREE.Texture>()
 
 export function fillAtlasTexture(three: typeof THREE, fills: Fill[]): THREE.Texture {
-  const key = fills.map(f => `${f.type}:${f.a}:${f.b}:${f.angle}:${f.density}`).join('|')
+  // shapeId only matters for `shapes`; fold it in so two shape patterns that differ only by shape
+  // (same colours/density/angle) don't collide onto one cached atlas (mirrors fillTexture's key).
+  const key = fills.map(f => `${f.type}:${f.a}:${f.b}:${f.angle}:${f.density}${f.type === 'shapes' ? ':' + (f.shapeId ?? 'sparkle') + ':' + f.shapeSize + ':' + f.shapeGap : ''}`).join('|')
   const hit = _atlasCache.get(key)
   if (hit) return hit
   const BAND = 256, W = 256, nb = Math.max(1, fills.length)
@@ -431,6 +436,10 @@ export function fillAtlasTexture(three: typeof THREE, fills: Fill[]): THREE.Text
       drawPatternBand(ctx, fill, y0, W, BAND)
     } else if (fill.type === 'qr') {
       drawPatternBand(ctx, fill, y0, W, BAND)
+    } else if (fill.type === 'shapes') {
+      // Stamp the shared shape tile into this band (the band is exactly one BAND×BAND tile cell),
+      // so shutter/coil copies get tiled shapes instead of a flat colour. Transparent bg survives.
+      ctx.drawImage(fillTileCanvas(fill, BAND), 0, y0)
     } else {
       ctx.fillStyle = fill.a; ctx.fillRect(0, y0, W, BAND)
     }
@@ -497,6 +506,16 @@ function ombreTex(three: typeof THREE, a: string, b: string, angle: number): THR
 }
 
 /** Grid: `a` cell fill + `b` border lines. */
+// Tiled library-shape pattern. Reuses the 2D canvas tile builder (the same one the compositor
+// swatch and box render use), so the GPU surface matches the CPU render exactly. A transparent
+// background (b='none'/'') survives as real alpha through CanvasTexture. 512px keeps the motifs
+// crisp at high density; tunePattern sets SRGB + RepeatWrapping so it tiles seamlessly.
+function shapesTex(three: typeof THREE, fill: Fill): THREE.Texture {
+  const t = new three.CanvasTexture(fillTileCanvas(fill, 512))
+  tunePattern(three, t)
+  return t
+}
+
 function gridTex(three: typeof THREE, a: string, b: string, density: number): THREE.Texture {
   const N = 512, d = Math.max(1, Math.round(density)), step = N / d
   const c = document.createElement('canvas'); c.width = N; c.height = N

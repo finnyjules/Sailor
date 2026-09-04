@@ -79,6 +79,17 @@ describe('geoshape studio render', () => {
     expect(studioFramePad(doc)).toBe(40)
   })
 
+  it('studioFramePad applies the outline fallback PER LAYER', () => {
+    // A hairline (0-width) outline layer still draws at 1 unit, so the stack
+    // frame must reserve half of it — the same rule framePad applies to a
+    // single mark.
+    const doc = mergeStudioDoc({
+      layers: [layerOf({ ...DEFAULT_CONFIG, strokeWidth: 0, paintTarget: 'outline' })],
+      padding: 30,
+    })
+    expect(studioFramePad(doc)).toBe(30.5)
+  })
+
   it('studioToSvg frames the union bounds and stays a valid document', async () => {
     const doc = mergeStudioDoc({
       layers: [layerOf(DEFAULT_CONFIG), layerOf({ ...DEFAULT_CONFIG, shape: 'star', sides: 5 }, { x: 300 })],

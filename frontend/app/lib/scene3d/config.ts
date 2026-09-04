@@ -91,6 +91,38 @@ export interface ReliefSpec {
   tiling?: number
 }
 
+/** Print-style screen — dots / lines / cross-hatch anchored to the object's own UVs, sized by
+ *  the LIT shading (bright = big dot). A finish on top of any material type except glass, not a
+ *  type of its own: the colour underneath (gradient, opal, toon…) shows through as the ink.
+ *  Absent = no screen. See materials.ts's applyScreen. */
+export type ScreenPattern = 'none' | 'dots' | 'lines' | 'cross'
+export type ScreenGap = 'transparent' | 'colour'
+export type ScreenInk = 'lit' | 'colour'
+export const SCREEN_PATTERNS = ['none', 'dots', 'lines', 'cross'] as const
+export const SCREEN_GAPS = ['transparent', 'colour'] as const
+export const SCREEN_INKS = ['lit', 'colour'] as const
+export interface ScreenSpec {
+  pattern: ScreenPattern
+  /** Cells across one UV span (4..200). */
+  density: number
+  /** Degrees, 0..180. */
+  angle: number
+  /** Gamma on the coverage — how fast dots shrink into shadow (0.25..4). */
+  contrast: number
+  /** Edge blur, 0..1. */
+  softness: number
+  /** Red/blue grid offset in cells, 0..1. */
+  misregister: number
+  /** false: bright = big dot. true: dark = big dot. */
+  invert?: boolean
+  /** What shows between the dots. */
+  gap: ScreenGap
+  gapColor?: string
+  /** Dot colour: the material's own lit colour, or one ink. */
+  ink: ScreenInk
+  inkColor?: string
+}
+
 export interface SceneMaterial {
   type: MaterialType
   color: string
@@ -152,6 +184,9 @@ export interface SceneMaterial {
   /** Surface relief. Absent = flat, exactly as before. Never applied to an `unlit`
    *  shaderFill: that builds a MeshBasicMaterial, which has no bump slot at all. */
   relief?: ReliefSpec
+  /** Surface-anchored print screen. Absent = off. Never applied to `glass` (transmission +
+   *  alpha gaps is out of scope). See ScreenSpec. */
+  screen?: ScreenSpec
   /** A REAL baked tangent-space normal map (Blender, a game asset) → `.normalMap`.
    *  Distinct from `relief` because a normal map must NOT go through the bump path —
    *  that would misread its blue channel as height. */
@@ -522,9 +557,34 @@ export const MATERIAL_DEFAULTS = {
   reliefScale: 0.25,
   reliefContrast: 1,
   reliefTiling: 1,
+  screenDensity: 48,
+  screenAngle: 45,
+  screenContrast: 1,
+  screenSoftness: 0.15,
+  screenMisregister: 0,
+  screenGapColor: '#ffffff',
+  screenInkColor: '#111111',
   textureTiling: 1,
   shader: DEFAULT_SHADER_SPEC,
   unlit: false,
+}
+
+/** The screen block with every field filled — what materials.ts and the panel read. */
+export function screenOf(mat: Pick<SceneMaterial, 'screen'>): Required<ScreenSpec> {
+  const s = mat.screen
+  return {
+    pattern: s?.pattern ?? 'none',
+    density: s?.density ?? MATERIAL_DEFAULTS.screenDensity,
+    angle: s?.angle ?? MATERIAL_DEFAULTS.screenAngle,
+    contrast: s?.contrast ?? MATERIAL_DEFAULTS.screenContrast,
+    softness: s?.softness ?? MATERIAL_DEFAULTS.screenSoftness,
+    misregister: s?.misregister ?? MATERIAL_DEFAULTS.screenMisregister,
+    invert: s?.invert === true,
+    gap: s?.gap ?? 'transparent',
+    gapColor: s?.gapColor ?? MATERIAL_DEFAULTS.screenGapColor,
+    ink: s?.ink ?? 'lit',
+    inkColor: s?.inkColor ?? MATERIAL_DEFAULTS.screenInkColor,
+  }
 }
 
 export const TEXTURE_TILING_RANGE = { min: 0.25, max: 12, step: 0.25 } as const
@@ -1053,6 +1113,26 @@ export function parseDoc(json: string): SceneDoc {
       if (typeof r.contrast === 'number') rel.contrast = num(r.contrast, MATERIAL_DEFAULTS.reliefContrast)
       if (typeof r.tiling === 'number') rel.tiling = num(r.tiling, MATERIAL_DEFAULTS.reliefTiling)
       out.relief = rel
+    }
+    // Screen: same copy-when-present rule; a junk pattern degrades to 'none' and every
+    // number clamps to its slider range so a hand-edited doc still loads.
+    if (m?.screen && typeof m.screen === 'object') {
+      const s = m.screen
+      const clamp = (v: unknown, fb: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, num(v, fb)))
+      const scr: ScreenSpec = {
+        pattern: (SCREEN_PATTERNS as readonly string[]).includes(s.pattern) ? s.pattern : 'none',
+        density: clamp(s.density, MATERIAL_DEFAULTS.screenDensity, 4, 200),
+        angle: clamp(s.angle, MATERIAL_DEFAULTS.screenAngle, 0, 180),
+        contrast: clamp(s.contrast, MATERIAL_DEFAULTS.screenContrast, 0.25, 4),
+        softness: clamp(s.softness, MATERIAL_DEFAULTS.screenSoftness, 0, 1),
+        misregister: clamp(s.misregister, MATERIAL_DEFAULTS.screenMisregister, 0, 1),
+        gap: (SCREEN_GAPS as readonly string[]).includes(s.gap) ? s.gap : 'transparent',
+        ink: (SCREEN_INKS as readonly string[]).includes(s.ink) ? s.ink : 'lit',
+      }
+      if (typeof s.invert === 'boolean') scr.invert = s.invert
+      if (typeof s.gapColor === 'string') scr.gapColor = s.gapColor
+      if (typeof s.inkColor === 'string') scr.inkColor = s.inkColor
+      out.screen = scr
     }
     if (typeof m?.normalImage === 'string') out.normalImage = m.normalImage
     return out

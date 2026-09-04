@@ -2,11 +2,11 @@
  * `exportTier` — the studio's central claim, stated per fill type.
  *
  * Vector Type's whole pitch is that its SVG is real, editable vector: "no
- * raster, no `<image>`, nothing traced". Six of the nine fill types keep that
- * promise. `ombre`, `noise` and `shader` cannot — a per-pixel hash and a
- * fragment program have no geometry to recover — so the export embeds a
- * picture. All nine shipped knowing that, on the condition that the product
- * says which is which.
+ * raster, no `<image>`, nothing traced". Six of the ten fill types keep that
+ * promise. `ombre`, `noise`, `shader` and `shapes` cannot — a per-pixel hash, a
+ * fragment program, and an arbitrary silhouette all have no geometry `patternFor`
+ * can recover — so the export embeds a picture. All ten shipped knowing that, on
+ * the condition that the product says which is which.
  *
  * The failure mode this file exists to prevent is NOT "the tier is wrong
  * today". It is **a tier table that drifts away from the emitters** and goes on
@@ -21,7 +21,7 @@
  *  1. **Exhaustive and derived.** Every member of `FILL_TYPES` gets a tier, the
  *     tier is a function of the KIND rather than of the box it was asked with,
  *     and nothing about it is a hand-written list of names.
- *  2. **Checked against the real document.** For each of the nine, a real SVG
+ *  2. **Checked against the real document.** For each of the ten, a real SVG
  *     comes out of `vectorTypeSVG` — the same function the Export SVG button
  *     calls — and its `<defs>` are classified independently. The tier must
  *     agree with what is actually in the file.
@@ -67,16 +67,20 @@ const TIERS: Record<FillType, ExportTier> = {
   ombre: 'raster',
   noise: 'raster',
   shader: 'raster',
+  // `shapes` has no cell structure of its own — it falls through `patternFor`
+  // to the same `rasterTile` fallback `noise` does, so it earns the same tier.
+  shapes: 'raster',
 }
 
 // ── half one: exhaustive, and about the kind ────────────────────────────────
 
-describe('exportTier — every one of the nine fill types has a tier', () => {
+describe('exportTier — every one of the ten fill types has a tier', () => {
   it('covers the catalog exactly — no kind unlisted, no kind invented', () => {
-    // Both directions. A tenth fill type added to `FILL_TYPES` without a tier
-    // fails the first; a tier for a kind that no longer exists fails the second.
+    // Both directions. An eleventh fill type added to `FILL_TYPES` without a
+    // tier fails the first; a tier for a kind that no longer exists fails the
+    // second.
     expect([...FILL_TYPES].sort()).toEqual(Object.keys(TIERS).sort())
-    expect(FILL_TYPES).toHaveLength(9)
+    expect(FILL_TYPES).toHaveLength(10)
   })
 
   it('answers with a real tier for every one of them — nothing falls through', () => {
@@ -87,12 +91,12 @@ describe('exportTier — every one of the nine fill types has a tier', () => {
     }
   })
 
-  it('splits six real-vector kinds from three raster ones — the number to watch', () => {
+  it('splits six real-vector kinds from four raster ones — the number to watch', () => {
     const byTier = FILL_TYPES.reduce<Record<string, FillType[]>>((acc, t) => {
       (acc[exportTier(fill(t))] ||= []).push(t)
       return acc
     }, {})
-    expect(byTier.raster).toEqual(['ombre', 'noise', 'shader'])
+    expect(byTier.raster).toEqual(['ombre', 'noise', 'shader', 'shapes'])
     expect([...(byTier.vector ?? []), ...(byTier.pattern ?? [])]).toHaveLength(6)
   })
 
@@ -137,17 +141,17 @@ describe('exportTier — every one of the nine fill types has a tier', () => {
     // THE TRAP. The tier 3 arm embeds the pixels as `<pattern><image
     // href="data:…">`, so the exported document DOES contain a `<pattern>` for a
     // shader fill — and a tier read as "did a pattern come back?" would flip
-    // those three to `pattern`, drop the note, and leave the studio silently
-    // claiming editable vector for the only three fills that are not. The
+    // those four to `pattern`, drop the note, and leave the studio silently
+    // claiming editable vector for the only four fills that are not. The
     // tile's CONTENT is what decides, never the element name.
     const RASTER = 'data:image/png;base64,iVBORw0KGgo='
     const box = { x: 0, y: 0, width: 240, height: 120 }
     const withRaster = (type: FillType) =>
       paintToVectorPaint(fill(type), { units: 'userSpaceOnUse', box, raster: RASTER } as any) as any
 
-    for (const type of ['ombre', 'noise', 'shader'] as FillType[]) {
+    for (const type of ['ombre', 'noise', 'shader', 'shapes'] as FillType[]) {
       // Written so it does not depend on WHICH tree it runs in: offered pixels,
-      // these three either come back as a picture in a pattern wrapper or do not
+      // these four either come back as a picture in a pattern wrapper or do not
       // come back at all. Neither is editable vector, and the tier says so
       // either way — that last line is the load-bearing one.
       const vp = withRaster(type)
@@ -306,8 +310,8 @@ describe('the copy the studio derives from the tier', () => {
       .toEqual(['solid', 'gradient', 'grid', 'checkerboard', 'stripes', 'qr'])
   })
 
-  it('names exactly the three that do not', () => {
+  it('names exactly the four that do not', () => {
     expect(FILL_TYPES.filter(t => !paintIsVector({ ...DEFAULT_FILL, type: t })))
-      .toEqual(['ombre', 'noise', 'shader'])
+      .toEqual(['ombre', 'noise', 'shader', 'shapes'])
   })
 })

@@ -148,6 +148,7 @@ exports[`shader fills enter the agent vocabulary > is a characterization snapsho
       "stripes",
       "qr",
       "shader",
+      "shapes",
     ],
   },
   {
@@ -256,6 +257,7 @@ exports[`shader fills enter the agent vocabulary > is a characterization snapsho
       "stripes",
       "qr",
       "shader",
+      "shapes",
     ],
   },
   {
@@ -513,6 +515,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
       "stripes",
       "qr",
       "shader",
+      "shapes",
     ],
   },
   {
@@ -628,6 +631,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
       "stripes",
       "qr",
       "shader",
+      "shapes",
     ],
   },
   {
@@ -829,6 +833,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
       "stripes",
       "qr",
       "shader",
+      "shapes",
     ],
   },
   {
@@ -1010,6 +1015,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
       "stripes",
       "qr",
       "shader",
+      "shapes",
     ],
   },
   {

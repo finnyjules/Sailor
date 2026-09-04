@@ -106,3 +106,34 @@ describe('geoshape arrange — stagger', () => {
     expect(DEFAULT_CONFIG.stepAxis).toBe('column')
   })
 })
+
+describe('geoshape arrange — blend', () => {
+  it('blend: x/y run from A (0,0) to B (blendX, blendY) and carry a 0..1 blend fraction', () => {
+    const p = arrange({ ...DEFAULT_CONFIG, layout: 'blend', count: 5, blendX: 100, blendY: -40, blendEase: 'linear' })
+    expect(p).toHaveLength(5)
+    expect(p.map(c => c.x)).toEqual([0, 25, 50, 75, 100])
+    expect(p.map(c => c.y)).toEqual([0, -10, -20, -30, -40])
+    expect(p.map(c => c.blend)).toEqual([0, 0.25, 0.5, 0.75, 1])
+  })
+
+  it('blend: easeIn is monotone and front-loaded; count 1 is a single placement at blend 0', () => {
+    const p = arrange({ ...DEFAULT_CONFIG, layout: 'blend', count: 6, blendX: 100, blendEase: 'easeIn' })
+    const xs = p.map(c => c.x)
+    for (let i = 1; i < xs.length; i++) expect(xs[i]!).toBeGreaterThan(xs[i - 1]!)
+    expect(xs[1]!).toBeLessThan(20) // linear would be 20
+    const one = arrange({ ...DEFAULT_CONFIG, layout: 'blend', count: 1, blendX: 100 })
+    expect(one).toEqual([{ x: 0, y: 0, scale: 1, rotate: 0, skew: 0, blend: 0 }])
+  })
+
+  it('blend: the existing scale/rotate ramps still apply and radius/spacing are ignored', () => {
+    const p = arrange({ ...DEFAULT_CONFIG, layout: 'blend', count: 3, scaleStart: 1, scaleEnd: 2, rotateStep: 10, radius: 500, spacing: 500 })
+    expect(p.map(c => c.scale)).toEqual([1, 1.5, 2])
+    expect(p.map(c => c.rotate)).toEqual([0, 10, 20])
+    expect(p.map(c => c.x)).toEqual([0, 0, 0])
+  })
+
+  it('non-blend layouts carry no blend fraction', () => {
+    const p = arrange({ ...DEFAULT_CONFIG, layout: 'linear', count: 3 })
+    for (const c of p) expect(c.blend).toBeUndefined()
+  })
+})

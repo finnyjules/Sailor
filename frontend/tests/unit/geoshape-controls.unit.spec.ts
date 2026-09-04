@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { GEO_CONTROLS, GEO_SECTIONS, visibleGeoControls, GEO_GUIDANCE } from '../../app/lib/geoshape/controls'
 import { geoAgentControls } from '../../app/lib/geoshape/agentControls'
 import { reroll } from '../../app/lib/geoshape/randomize'
-import { DEFAULT_CONFIG, type GeoShapeConfig } from '../../app/lib/geoshape/config'
+import { DEFAULT_CONFIG, mergeConfig, type GeoShapeConfig } from '../../app/lib/geoshape/config'
 import { isShapeId } from '../../app/lib/shapes/catalog'
 
 // Fields on GeoShapeConfig that are NOT a renderable control: `locks` is
@@ -165,8 +165,15 @@ describe('geoAgentControls', () => {
     }
   })
 
-  it('guidance names only keys that exist in the schema', () => {
-    const keys = new Set(GEO_CONTROLS.map((c) => c.key))
+  it('guidance names only keys — or select option VALUES — that exist in the schema', () => {
+    // A recipe has to be able to name the value it wants, not paraphrase it:
+    // "fillStrategy \"perClone\"" is what the model must emit, so the guidance
+    // spells it. Option values of every select count as vocabulary alongside
+    // the control keys themselves (perClone, leftRight, easeInOut…).
+    const keys = new Set([
+      ...GEO_CONTROLS.map((c) => c.key),
+      ...GEO_CONTROLS.filter((c) => c.kind === 'select').flatMap((c) => (c as { options: string[] }).options),
+    ])
     // Extract candidates INDEPENDENTLY of `keys` — every multi-word control
     // field GEO_GUIDANCE names is written in camelCase (roundCorners,
     // starInner, gridCols, angleStep, rotateStep, scaleStart, fillMode,
@@ -176,7 +183,9 @@ describe('geoAgentControls', () => {
     // or dead/renamed field (e.g. "roundCornerz") gets pulled out as a
     // candidate and fails the membership check below. The old version
     // filtered candidates through `keys` before ever asserting membership,
-    // so it could never fail no matter what the guidance said.
+    // so it could never fail no matter what the guidance said. Typo detection
+    // is unchanged by widening `keys` to option values: "roundCornerz" and
+    // "perClonee" are in neither set.
     const camelCaseToken = /\b[a-z][a-z0-9]*[A-Z][a-zA-Z0-9]*\b/g
     const candidates = new Set(GEO_GUIDANCE.match(camelCaseToken) ?? [])
     // Sanity: the extraction actually found real field references, so an
@@ -262,6 +271,63 @@ describe('reroll', () => {
     const out = reroll(DEFAULT_CONFIG, locks)
     expect(out.locks).toEqual(locks)
   })
+
+  it('rolls the blend group with the other sections and never touches the paint group', () => {
+    const start: GeoShapeConfig = { ...DEFAULT_CONFIG, fillCycle: 'ramp', paintTarget: 'outline', fills: ['#111111', '#eeeeee'] }
+    // Walk seeds until re-roll lands on a blend layout, so the roll actually exercises the group.
+    let cfg = start, out = reroll(cfg, noLocks), tries = 0
+    while (out.layout !== 'blend' && tries < 200) { cfg = out; out = reroll(cfg, noLocks); tries++ }
+    expect(out.layout).toBe('blend')
+    expect(out.blendSize).toBeGreaterThanOrEqual(80); expect(out.blendSize).toBeLessThanOrEqual(320)
+    expect(Math.abs(out.blendRotate)).toBeLessThanOrEqual(45)
+    expect(Math.abs(out.blendX)).toBeLessThanOrEqual(160)
+    expect(out.blendTwist).toBeGreaterThanOrEqual(0); expect(out.blendTwist).toBeLessThanOrEqual(0.25)
+    expect(out.blendEase).toBe('linear')
+    expect(out.fillCycle).toBe('ramp'); expect(out.paintTarget).toBe('outline'); expect(out.fills).toEqual(start.fills)
+    // The group must actually have ROLLED, not merely sat on defaults that happen
+    // to be inside the ranges — at least one dial differs from DEFAULT_CONFIG.
+    const moved = out.blendSize !== DEFAULT_CONFIG.blendSize
+      || out.blendRotate !== DEFAULT_CONFIG.blendRotate
+      || out.blendX !== DEFAULT_CONFIG.blendX
+      || out.blendY !== DEFAULT_CONFIG.blendY
+      || out.blendTwist !== DEFAULT_CONFIG.blendTwist
+      || out.blendShape !== DEFAULT_CONFIG.blendShape
+    expect(moved).toBe(true)
+  })
+
+  it('a locked blend section is unchanged', () => {
+    const start: GeoShapeConfig = {
+      ...DEFAULT_CONFIG,
+      blendShape: 'star',
+      blendLibraryShape: 'heart',
+      blendSides: 9,
+      blendStarInner: 0.3,
+      blendIrregularSeed: 77,
+      blendSize: 222,
+      blendRotate: 12,
+      blendX: 55,
+      blendY: -21,
+      blendEase: 'easeOut',
+      blendTwist: 0.4
+    }
+    const out = reroll(start, { blend: true })
+    expect(out.blendShape).toBe('star')
+    expect(out.blendLibraryShape).toBe('heart')
+    expect(out.blendSides).toBe(9)
+    expect(out.blendStarInner).toBe(0.3)
+    expect(out.blendIrregularSeed).toBe(77)
+    expect(out.blendSize).toBe(222)
+    expect(out.blendRotate).toBe(12)
+    expect(out.blendX).toBe(55)
+    expect(out.blendY).toBe(-21)
+    expect(out.blendEase).toBe('easeOut')
+    expect(out.blendTwist).toBe(0.4)
+  })
+
+  it('a re-rolled config is a fixed point of mergeConfig', () => {
+    let out = reroll(DEFAULT_CONFIG, noLocks)
+    for (let i = 0; i < 20; i++) { expect(mergeConfig(JSON.parse(JSON.stringify(out)))).toEqual(out); out = reroll(out, noLocks) }
+  })
 })
 
 describe('library base shape controls', () => {
@@ -294,5 +360,51 @@ describe('library base shape controls', () => {
       expect(out.libraryShape.length).toBeGreaterThan(0)
       expect(isShapeId(out.libraryShape)).toBe(true)
     }
+  })
+})
+
+describe('blend layout controls', () => {
+  const keys = (c: GeoShapeConfig) => visibleGeoControls(c).map(x => x.key)
+
+  it('the Blend group shows only in blend layout, and radius/spacing/stagger hide there', () => {
+    const blend = keys({ ...DEFAULT_CONFIG, layout: 'blend' })
+    for (const k of ['blendShape', 'blendSize', 'blendRotate', 'blendX', 'blendY', 'blendEase', 'blendTwist']) expect(blend).toContain(k)
+    expect(blend).toContain('count')
+    for (const k of ['radius', 'spacing', 'evenAngle', 'angleStep', 'stagger', 'spin']) expect(blend).not.toContain(k)
+    const radial = keys({ ...DEFAULT_CONFIG, layout: 'radial' })
+    expect(radial).not.toContain('blendShape')
+  })
+
+  it('shape B sub-controls follow B\'s kind like A\'s do', () => {
+    const star = keys({ ...DEFAULT_CONFIG, layout: 'blend', blendShape: 'star' })
+    expect(star).toContain('blendSides'); expect(star).toContain('blendStarInner'); expect(star).not.toContain('blendLibraryShape')
+    const lib = keys({ ...DEFAULT_CONFIG, layout: 'blend', blendShape: 'library' })
+    expect(lib).toContain('blendLibraryShape'); expect(lib).not.toContain('blendSides')
+    const irr = keys({ ...DEFAULT_CONFIG, layout: 'blend', blendShape: 'irregular' })
+    expect(irr).toContain('blendIrregularSeed'); expect(irr).toContain('blendSides')
+  })
+
+  it('Blend sits right after Layout in the section order', () => {
+    expect(GEO_SECTIONS.indexOf('Blend')).toBe(GEO_SECTIONS.indexOf('Layout') + 1)
+  })
+
+  it('paintTarget always shows; fillCycle only with a multi-colour strategy', () => {
+    const single = keys({ ...DEFAULT_CONFIG, fillStrategy: 'single' })
+    expect(single).toContain('paintTarget'); expect(single).not.toContain('fillCycle')
+    const per = keys({ ...DEFAULT_CONFIG, fillStrategy: 'perClone' })
+    expect(per).toContain('fillCycle')
+  })
+
+  it('strokeWidth shows for an outline with no stroke colour set, and reaches hairlines', () => {
+    const outline = visibleGeoControls({ ...DEFAULT_CONFIG, stroke: null, paintTarget: 'outline' })
+    const sw = outline.find(c => c.key === 'strokeWidth')
+    expect(sw).toBeDefined()
+    expect((sw as any).step).toBe(0.25)
+    expect(keys({ ...DEFAULT_CONFIG, stroke: null, paintTarget: 'fill' })).not.toContain('strokeWidth')
+  })
+
+  it('the layout select offers blend', () => {
+    const layout = GEO_CONTROLS.find(c => c.key === 'layout') as any
+    expect(layout.options).toContain('blend')
   })
 })

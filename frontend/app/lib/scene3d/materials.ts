@@ -12,7 +12,7 @@ import * as THREE from 'three'
 // degrades to opaque rather than turning the object white.
 import { stripAlpha } from '~/lib/color/convert'
 import {
-  MATERIAL_DEFAULTS, gradientAngles, gradientDirection, gradientStopsOf, rampStopsOf, opalStopsOf,
+  MATERIAL_DEFAULTS, gradientAngles, gradientDirection, gradientStopsOf, rampStopsOf, opalStopsOf, screenOf,
   type GradientStop, type ReliefSpec, type SceneMaterial,
 } from './config'
 import { toHeightPixels } from './relief'
@@ -733,6 +733,129 @@ const OPAL_FRAG_BODY = /* glsl */ `#include <emissivemap_fragment>
   diffuseColor.rgb = mix( diffuseColor.rgb, rainbow, clamp( uStrength, 0.0, 1.0 ) );
 }`
 
+// ── Screen finish: print-style dot/line/cross screen ─────────────────────────
+// A print-style dot/line/cross screen anchored to the mesh's own UVs, sized by
+// the LIT result. Injected AFTER lighting at <opaque_fragment> — the one chunk every built-in
+// material shares where `outgoingLight` and `diffuseColor.a` both exist — so it composes with
+// gradient/fresnel/opal (which inject at color_fragment/emissivemap_fragment) and with toon,
+// matcap and basic. Reads the `uv` attribute through its OWN varying: three's vertex prefix
+// always declares `attribute vec2 uv;`, so this never depends on USE_UV or on a texture being
+// bound. Kinds (pattern/gap/ink) are uniforms so switching them never recompiles.
+const SCREEN_VERT_PARS = /* glsl */ `#include <uv_pars_vertex>
+varying vec2 vScrUv;`
+const SCREEN_VERT_BODY = /* glsl */ `#include <uv_vertex>
+vScrUv = uv;`
+const SCREEN_FRAG_PARS = /* glsl */ `#include <uv_pars_fragment>
+varying vec2 vScrUv;
+uniform float uScrPattern; uniform float uScrDensity; uniform float uScrAngle; uniform float uScrContrast;
+uniform float uScrSoft; uniform float uScrMisreg; uniform float uScrInvert;
+uniform float uScrGapMode; uniform vec3 uScrGapColor; uniform float uScrInkMode; uniform vec3 uScrInkColor;
+// Coverage 0..1 of ink at grid position p for brightness lum. Dot AREA follows lum, so a
+// half-bright cell is half covered; lines/cross use lum as the half-width.
+float scrCoverage(vec2 p, float lum) {
+  vec2 cell = fract(p) - 0.5;
+  // Both axes, because p is rotated: at 90° the cell varies along y while fwidth(p.x) is
+  // ~0, which would collapse the anti-aliasing term to nothing. Floored above zero so a
+  // fully-degenerate derivative can never make smoothstep's edges equal.
+  float soft = max(uScrSoft * 0.25 + max(fwidth(p.x), fwidth(p.y)) * 0.75, 1e-4);
+  if (uScrPattern < 0.5) {
+    float r = sqrt(lum) * 0.7071;
+    return 1.0 - smoothstep(r - soft, r + soft, length(cell));
+  }
+  float hw = lum * 0.5;
+  float ly = 1.0 - smoothstep(hw - soft, hw + soft, abs(cell.y));
+  if (uScrPattern < 1.5) return ly;
+  float lx = 1.0 - smoothstep(hw - soft, hw + soft, abs(cell.x));
+  return max(lx, ly);
+}`
+// Replaces <opaque_fragment> outright (its OPAQUE clamp is reproduced; the transmission alpha
+// branch is not — glass never gets a screen).
+const SCREEN_FRAG_BODY = /* glsl */ `
+#ifdef OPAQUE
+diffuseColor.a = 1.0;
+#endif
+{
+  float c = cos(uScrAngle), s = sin(uScrAngle);
+  // Same rotation form as the repo's 2D screens (dot_screen/halftone): rotating the sampling coordinates this way turns the VISIBLE pattern counter-clockwise for a rising Angle.
+  vec2 p = mat2(c, -s, s, c) * vScrUv * uScrDensity;
+  float lum = clamp(dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+  lum = pow(lum, uScrContrast);
+  if (uScrInvert > 0.5) lum = 1.0 - lum;
+  float shift = uScrMisreg * 0.35;
+  vec3 cov = vec3(scrCoverage(p + vec2(shift, 0.0), lum), scrCoverage(p, lum), scrCoverage(p - vec2(shift, 0.0), lum));
+  vec3 ink = uScrInkMode < 0.5 ? outgoingLight : uScrInkColor;
+  if (uScrGapMode < 0.5) {
+    float a = max(cov.r, max(cov.g, cov.b));
+    // Fully-open gaps leave the fragment entirely: alphaTest cannot do this job, because
+    // three runs <alphatest_fragment> BEFORE lighting, against diffuseColor.a, which knows
+    // nothing about the screen coverage computed here. Discarding keeps depthWrite on for
+    // the dots while the gaps write no depth, so an object behind still shows through.
+    if (a < 0.02) discard;
+    gl_FragColor = vec4(ink * cov / max(a, 1e-4), a * diffuseColor.a);
+  } else {
+    gl_FragColor = vec4(mix(uScrGapColor, ink, cov), diffuseColor.a);
+  }
+}`
+const SCREEN_PATTERN_INDEX: Record<string, number> = { dots: 0, lines: 1, cross: 2 }
+
+/** Write the doc's screen dials into an existing material's screen uniforms (in place). */
+function writeScreenUniforms(u: Record<string, { value: unknown }>, s: ReturnType<typeof screenOf>): void {
+  u.uScrPattern!.value = SCREEN_PATTERN_INDEX[s.pattern] ?? 0
+  u.uScrDensity!.value = s.density
+  u.uScrAngle!.value = (s.angle * Math.PI) / 180
+  u.uScrContrast!.value = s.contrast
+  u.uScrSoft!.value = s.softness
+  u.uScrMisreg!.value = s.misregister
+  u.uScrInvert!.value = s.invert ? 1 : 0
+  u.uScrGapMode!.value = s.gap === 'colour' ? 1 : 0
+  ;(u.uScrGapColor!.value as THREE.Color).set(stripAlpha(s.gapColor))
+  u.uScrInkMode!.value = s.ink === 'colour' ? 1 : 0
+  ;(u.uScrInkColor!.value as THREE.Color).set(stripAlpha(s.inkColor))
+}
+
+/** The screen finish: chains a post-lighting screen onto whatever `onBeforeCompile` the
+ *  material already carries. No-op for glass and for `pattern: 'none'` (so a screen-less
+ *  material is byte-identical to before this feature existed). */
+export function applyScreen(m: THREE.Material, mat: SceneMaterial): void {
+  if (mat.type === 'glass') return
+  const s = screenOf(mat)
+  if (s.pattern === 'none') return
+  const u: Record<string, { value: unknown }> = {
+    uScrPattern: { value: 0 }, uScrDensity: { value: 0 }, uScrAngle: { value: 0 }, uScrContrast: { value: 1 },
+    uScrSoft: { value: 0 }, uScrMisreg: { value: 0 }, uScrInvert: { value: 0 },
+    uScrGapMode: { value: 0 }, uScrGapColor: { value: new THREE.Color('#ffffff') },
+    uScrInkMode: { value: 0 }, uScrInkColor: { value: new THREE.Color('#111111') },
+  }
+  writeScreenUniforms(u, s)
+  // Read EAGERLY, before onBeforeCompile is reassigned. Three's default
+  // customProgramCacheKey returns `this.onBeforeCompile.toString()` at call time, so a
+  // lazily-bound `prevKey()` would hash the screen wrapper below — one identical source
+  // string for every screened material — rather than whatever the base material's own
+  // injection contributed. Safe to snapshot: applyScreen is the LAST step of buildMaterial
+  // and every key it can sit on top of (three's default, and the fresnel/gradient/opal
+  // constants) is already settled by this point.
+  const baseKey = String(m.customProgramCacheKey())
+  const prev = m.onBeforeCompile
+  m.onBeforeCompile = (shader, renderer) => {
+    prev.call(m, shader, renderer)
+    Object.assign(shader.uniforms, u)
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <uv_pars_vertex>', SCREEN_VERT_PARS)
+      .replace('#include <uv_vertex>', SCREEN_VERT_BODY)
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <uv_pars_fragment>', SCREEN_FRAG_PARS)
+      .replace('#include <opaque_fragment>', SCREEN_FRAG_BODY)
+  }
+  m.customProgramCacheKey = () => `${baseKey}|screen`
+  m.userData.screenUniforms = u
+  // Transparent gaps: alpha in the gaps, depth writes kept so the dots still occlude. The
+  // shader `discard`s fully-open gaps, so they write no depth either (no alphaTest here —
+  // it runs before lighting and would never see the coverage, while still forcing an extra
+  // shadow-program variant). Colour gaps stay opaque.
+  m.userData.screenTransparent = s.gap === 'transparent'
+  if (m.userData.screenTransparent) { m.transparent = true; m.depthWrite = true }
+}
+
 // ── Gradient ramp LUT ────────────────────────────────────────────────────────
 const RAMP_WIDTH = 256
 
@@ -811,7 +934,9 @@ function applyPhysical(p: THREE.MeshPhysicalMaterial, mat: SceneMaterial): void 
   p.emissive.set(stripAlpha(mat.emissive ?? MATERIAL_DEFAULTS.emissive))
   p.emissiveIntensity = mat.emissiveIntensity ?? MATERIAL_DEFAULTS.emissiveIntensity
   p.opacity = mat.opacity ?? MATERIAL_DEFAULTS.opacity
-  p.transparent = p.opacity < 1
+  // A screen with transparent gaps owns `transparent` too — an unrelated slider drag must not
+  // flip it back to opaque (see applyScreen).
+  p.transparent = p.opacity < 1 || p.userData.screenTransparent === true
   p.dispersion = mat.dispersion ?? MATERIAL_DEFAULTS.dispersion
   p.attenuationColor.set(stripAlpha(mat.attenuationColor ?? MATERIAL_DEFAULTS.attenuationColor))
   const att = mat.attenuationDistance ?? MATERIAL_DEFAULTS.attenuationDistance
@@ -1030,6 +1155,7 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
   m.userData.identity = identityKey(mat)
   applyRelief(m, mat, ownerId)
   applyTextureSet(m, mat)
+  applyScreen(m, mat)
   return m
 }
 
@@ -1057,9 +1183,18 @@ function reliefKey(mat: SceneMaterial): string {
   return `|${relief}|n:${mat.normalImage ?? ''}|t:${mat.texture ?? ''}`
 }
 
+/** The two screen boundaries that need a rebuild: off↔on (the injection exists or not) and the
+ *  gap mode (it flips `transparent`, which moves the material between render lists). Every
+ *  other screen dial is a uniform written in place by updateMaterial. */
+function screenKey(mat: SceneMaterial): string {
+  if (mat.type === 'glass') return '|scr:-'
+  const s = screenOf(mat)
+  return s.pattern === 'none' ? '|scr:-' : `|scr:${s.gap === 'transparent' ? 't' : 'c'}`
+}
+
 /** Params that require a rebuild when they change (texture/ramp identity). */
 function identityKey(mat: SceneMaterial): string {
-  return baseIdentityKey(mat) + reliefKey(mat)
+  return baseIdentityKey(mat) + reliefKey(mat) + screenKey(mat)
 }
 
 function baseIdentityKey(mat: SceneMaterial): string {
@@ -1081,6 +1216,10 @@ function baseIdentityKey(mat: SceneMaterial): string {
 
 export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
   if (m.userData.matType !== mat.type || m.userData.identity !== identityKey(mat)) return false
+  // Screen dials update in place (the identity guard above already forced a rebuild for the
+  // two boundaries that need one).
+  const su = m.userData.screenUniforms as Record<string, { value: unknown }> | undefined
+  if (su) writeScreenUniforms(su, screenOf(mat))
   // Relief SCALE, TILING, and (C1 fix) CONTRAST are the in-place updates here — a slider drag
   // must not rebuild per tick. `invert` never reaches this block: identityKey includes it, so
   // a change fails the identity guard above and forces a rebuild instead.

@@ -18,6 +18,7 @@
 // bytes they would cost.
 import * as THREE from 'three'
 import { contentDigest } from '~/lib/scene3d/config'
+import { addSphericalUV } from './roundedGeometry'
 
 export { contentDigest }
 
@@ -126,6 +127,11 @@ export function geometryFromMeshData(data: MeshData): THREE.BufferGeometry {
   geo.setAttribute('position', new THREE.BufferAttribute(data.positions.slice(), 3))
   geo.setIndex(new THREE.BufferAttribute(data.indices.slice(), 1))
   geo.computeVertexNormals()
+  // Surface coordinates, same spherical fallback the GLB path and the gem hull use. The
+  // codec never stores UVs (positions + indices only), so without this every consumer that
+  // samples by uv — the screen finish above all — reads one texel and paints the whole
+  // sculpt as a single giant dot.
+  if (!geo.getAttribute('uv')) addSphericalUV(geo)
   geo.computeBoundingBox()
   geo.computeBoundingSphere()
   return geo

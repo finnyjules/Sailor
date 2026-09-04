@@ -95,6 +95,44 @@ describe('geoshape boolean composite', () => {
     // the SVG actually carries real path data, not an empty mark
     expect(svg).toMatch(/<path d="M-?\d/)
   })
+  it('the boolean fold is a balanced tree that matches the left-to-right chain for every op (exclude = even-odd compound)', async () => {
+    // Seven squares stepping along a diagonal with partial overlaps — enough clones
+    // for the tree to have an odd leftover and for exclude to keep several rings.
+    // exclude no longer folds at all (it is the even-odd region), so for it this
+    // checks the compound covers exactly what a resolved XOR chain covers.
+    const placements = Array.from({ length: 7 }, (_, i) => ({ x: i * 40, y: i * 25, rotate: i * 9, scale: 1 }))
+    const paperMod = ((await import('paper')) as unknown as { default: typeof import('paper') }).default
+    const sc = new paperMod.PaperScope(); sc.setup(new sc.Size(1024, 1024))
+    const clone = (pl: { x: number; y: number; rotate: number; scale: number }) => {
+      const p = new sc.CompoundPath(SQUARE); const m = new sc.Matrix()
+      m.translate(pl.x, pl.y); m.rotate(pl.rotate, new sc.Point(0, 0)); m.scale(pl.scale); p.transform(m); return p as any
+    }
+    // Compared by point containment on a grid, not by `.area`: paper's exclude
+    // emits the same region with different child windings depending on the
+    // fold order, so signed areas disagree while the covered region is identical.
+    const covered = (items: any[]) => {
+      const hit: boolean[] = []
+      for (let x = -70; x <= 340; x += 4) for (let y = -70; y <= 240; y += 4) hit.push(items.some(it => it.contains(new sc.Point(x, y))))
+      return hit
+    }
+    for (const fillMode of ['unite', 'subtract', 'intersect', 'exclude'] as const) {
+      sc.activate()
+      let chain: any = clone(placements[0]!)
+      for (const pl of placements.slice(1)) chain = chain[fillMode](clone(pl))
+      const chainHits = covered([chain])
+      const shapes = await composite(SQUARE, placements, { ...DEFAULT_CONFIG, fillMode, clipMask: 'none', strokeWidth: 0 })
+      sc.activate()
+      const treeItems = shapes.map((s) => { const p = new sc.CompoundPath(commandsToPathData(s.commands)); p.fillRule = s.fillRule ?? 'nonzero'; return p })
+      const treeHits = covered(treeItems)
+      const disagree = chainHits.filter((h, i) => h !== treeHits[i]).length
+      if (fillMode !== 'intersect') expect(chainHits.filter(Boolean).length, fillMode).toBeGreaterThan(50)
+      // Samples right on an edge may land on either side depending on how the
+      // fold placed that edge numerically: allow 0.5% of the grid to differ.
+      expect(disagree, fillMode).toBeLessThanOrEqual(chainHits.length * 0.005)
+      sc.project.clear()
+    }
+  })
+
   it('symmetry with subtract + an asymmetric placement folds first, then mirrors (regression: previously emptied)', async () => {
     // Clone-level mirror-append (correct for evenodd) is WRONG for subtract: running
     // mirrored clones through the same subtract fold as the originals is not the
@@ -334,5 +372,153 @@ describe('geoshape boolean composite', () => {
     // overlapFills palette → at least two distinct overlap hues appear.
     const overlapHues = new Set(shapes.map((s) => s.paint).filter((p) => p !== '#111111'))
     expect(overlapHues.size).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe('composite with a per-clone d list', () => {
+  it('uses ds[i] for clone i in perClone mode', async () => {
+    const TRI = 'M 0 -50 L 43 25 L -43 25 Z'
+    const placements = [
+      { x: -100, y: 0, scale: 1, rotate: 0, skew: 0 },
+      { x: 100, y: 0, scale: 1, rotate: 0, skew: 0 },
+    ]
+    const cfg = { ...DEFAULT_CONFIG, fillStrategy: 'perClone' as const, fills: ['#ff0000', '#0000ff'], clipMask: 'none' as const, symmetry: false }
+    const shapes = await composite([SQUARE, TRI], placements, cfg)
+    expect(shapes).toHaveLength(2)
+    // A square has 4 corners; a triangle 3 — count lineTo/bezier commands per shape.
+    // (paperToCommands also emits a trailing closePath for a closed path — see
+    // extrudeSolid.ts:141 — so that's excluded here alongside moveTo, which is
+    // the one line this differs from the task-6 brief's verbatim test text.)
+    const edgeCount = (i: number) => shapes[i]!.commands.filter(c => c.command !== 'moveTo' && c.command !== 'closePath').length
+    expect(edgeCount(0)).toBe(4)
+    expect(edgeCount(1)).toBe(3)
+  })
+})
+
+describe('colour ramp + paint target', () => {
+  const five = [
+    { x: -200, y: 0, scale: 1, rotate: 0, skew: 0 },
+    { x: -100, y: 0, scale: 1, rotate: 0, skew: 0 },
+    { x: 0, y: 0, scale: 1, rotate: 0, skew: 0 },
+    { x: 100, y: 0, scale: 1, rotate: 0, skew: 0 },
+    { x: 200, y: 0, scale: 1, rotate: 0, skew: 0 },
+  ]
+  const base = { ...DEFAULT_CONFIG, fillStrategy: 'perClone' as const, fillOrder: 'created' as const, fills: ['#000000', '#ffffff'], clipMask: 'none' as const, symmetry: false }
+
+  it('ramp: five clones over two fills give five distinct colours whose ends are the stops', async () => {
+    const shapes = await composite(SQUARE, five, { ...base, fillCycle: 'ramp' })
+    const cols = shapes.map(s => s.paint)
+    expect(cols[0]).toBe('#000000')
+    expect(cols[4]).toBe('#ffffff')
+    expect(new Set(cols).size).toBe(5)
+  })
+
+  it('cycle (default) still alternates the two fills', async () => {
+    const shapes = await composite(SQUARE, five, base)
+    expect(shapes.map(s => s.paint)).toEqual(['#000000', '#ffffff', '#000000', '#ffffff', '#000000'])
+  })
+
+  it('outline: no fill, stroke takes the clone colour and the stroke width', async () => {
+    const shapes = await composite(SQUARE, five, { ...base, paintTarget: 'outline', strokeWidth: 0.5 })
+    for (const s of shapes) {
+      expect(s.fill).toBeNull()
+      expect(s.paint).toBeUndefined()
+      expect(s.strokeWidth).toBe(0.5)
+    }
+    expect(shapes[0]!.stroke).toBe('#000000')
+    expect(shapes[1]!.stroke).toBe('#ffffff')
+  })
+
+  it('both: fill and stroke both take the clone colour', async () => {
+    const shapes = await composite(SQUARE, five, { ...base, paintTarget: 'both', strokeWidth: 2 })
+    expect(shapes[1]!.fill).toBe('#ffffff')
+    expect(shapes[1]!.stroke).toBe('#ffffff')
+    expect(shapes[1]!.paint).toBe('#ffffff')
+  })
+
+  it('single mode outline: the fold is outlined in stroke ?? fill with no fill', async () => {
+    const shapes = await composite(SQUARE, five.slice(0, 2), { ...DEFAULT_CONFIG, fillStrategy: 'single', fill: '#123456', stroke: null, paintTarget: 'outline', strokeWidth: 1, clipMask: 'none', symmetry: false })
+    expect(shapes[0]!.fill).toBeNull()
+    expect(shapes[0]!.stroke).toBe('#123456')
+  })
+
+  it('pieces mode ramps solo pieces by rank', async () => {
+    const shapes = await composite(SQUARE, five.slice(0, 3), { ...base, fillStrategy: 'pieces', fillCycle: 'ramp', fills: ['#000000', '#ffffff'] })
+    const solids = shapes.filter(s => typeof s.paint === 'string').map(s => s.paint as string)
+    expect(solids).toContain('#000000')
+    expect(solids).toContain('#ffffff')
+  })
+
+  it('single mode, default target: a user-set stroke outlines the fold but NOT the overlap piece (pre-task behaviour)', async () => {
+    const two = [
+      { x: -30, y: 0, scale: 1, rotate: 0, skew: 0 },
+      { x: 30, y: 0, scale: 1, rotate: 0, skew: 0 },
+    ]
+    const shapes = await composite(SQUARE, two, { ...DEFAULT_CONFIG, fillStrategy: 'single', overlapMode: 'shape', stroke: '#ff0000', strokeWidth: 3, paintTarget: 'fill', clipMask: 'none', symmetry: false })
+    expect(shapes).toHaveLength(2)
+    expect(shapes[0]!.stroke).toBe('#ff0000')
+    expect(shapes[1]!.stroke).toBeUndefined()
+    expect(shapes[1]!.strokeWidth).toBeUndefined()
+  })
+
+  it('single mode, both target: the fold AND the overlap piece carry a fill and a stroke', async () => {
+    const two = [
+      { x: -30, y: 0, scale: 1, rotate: 0, skew: 0 },
+      { x: 30, y: 0, scale: 1, rotate: 0, skew: 0 },
+    ]
+    const shapes = await composite(SQUARE, two, { ...DEFAULT_CONFIG, fillStrategy: 'single', overlapMode: 'shape', fill: '#123456', overlapFill: '#00ff00', stroke: null, strokeWidth: 2, paintTarget: 'both', clipMask: 'none', symmetry: false })
+    expect(shapes).toHaveLength(2)
+    // Fold: its own fill, outlined in the single-mode default stroke.
+    expect(shapes[0]!.fill).toBe('#123456')
+    expect(shapes[0]!.stroke).toBe('#000000')
+    expect(shapes[0]!.strokeWidth).toBe(2)
+    // Overlap piece: filled AND outlined in its own colour (no user stroke set).
+    expect(shapes[1]!.fill).toBe('#00ff00')
+    expect(shapes[1]!.stroke).toBe('#00ff00')
+    expect(shapes[1]!.strokeWidth).toBe(2)
+  })
+
+  it('single mode, outline target: the overlap piece is outlined too, with no fill', async () => {
+    const two = [
+      { x: -30, y: 0, scale: 1, rotate: 0, skew: 0 },
+      { x: 30, y: 0, scale: 1, rotate: 0, skew: 0 },
+    ]
+    const shapes = await composite(SQUARE, two, { ...DEFAULT_CONFIG, fillStrategy: 'single', overlapMode: 'shape', overlapFill: '#00ff00', stroke: null, strokeWidth: 2, paintTarget: 'outline', clipMask: 'none', symmetry: false })
+    expect(shapes[1]!.fill).toBeNull()
+    expect(shapes[1]!.stroke).toBe('#00ff00')
+    expect(shapes[1]!.strokeWidth).toBe(2)
+  })
+})
+
+describe('per-clone / pieces paint targets keep a GRADIENT clone colour on the outline', () => {
+  const five = [-200, -100, 0, 100, 200].map((x) => ({ x, y: 0, scale: 1, rotate: 0, skew: 0 }))
+  const G1 = { type: 'linear' as const, angle: 165, stops: [{ offset: 0, color: '#1a1a2e' }, { offset: 1, color: '#000000' }] }
+  const G2 = { type: 'linear' as const, angle: 45, stops: [{ offset: 0, color: '#e5484d' }, { offset: 1, color: '#000000' }] }
+  const base = { ...DEFAULT_CONFIG, fillStrategy: 'perClone' as const, fillOrder: 'created' as const, fills: [G1, G2], clipMask: 'none' as const, symmetry: false }
+
+  it('outline: the stroke carries the clone gradient on strokePaint (the solid `stroke` is only a fallback)', async () => {
+    const shapes = await composite(SQUARE, five, { ...base, paintTarget: 'outline', strokeWidth: 0.75 })
+    expect(shapes[0]!.fill).toBeNull()
+    expect(shapes[0]!.strokePaint).toEqual(G1)
+    expect(shapes[1]!.strokePaint).toEqual(G2)
+    expect(typeof shapes[0]!.stroke).toBe('string')
+  })
+
+  it('both: fill paint and stroke paint are the same clone gradient', async () => {
+    const shapes = await composite(SQUARE, five, { ...base, paintTarget: 'both', strokeWidth: 2 })
+    expect(shapes[1]!.paint).toEqual(G2)
+    expect(shapes[1]!.strokePaint).toEqual(G2)
+  })
+
+  it('outline with a SOLID clone colour sets no strokePaint (solids ride `stroke` as before)', async () => {
+    const shapes = await composite(SQUARE, five, { ...base, fills: ['#000000', '#ffffff'], paintTarget: 'outline' })
+    expect(shapes[0]!.stroke).toBe('#000000')
+    expect(shapes[0]!.strokePaint).toBeUndefined()
+  })
+
+  it('single mode outline with a gradient fill and no stroke outlines in that gradient', async () => {
+    const shapes = await composite(SQUARE, five.slice(0, 2), { ...DEFAULT_CONFIG, fillStrategy: 'single', fill: G1, stroke: null, paintTarget: 'outline', strokeWidth: 1, clipMask: 'none', symmetry: false })
+    expect(shapes[0]!.fill).toBeNull()
+    expect(shapes[0]!.strokePaint).toEqual(G1)
   })
 })

@@ -44,7 +44,7 @@ vi.mock('~/lib/spacetype/fillTile', async (orig) => {
     // reads `.width`/`.height` (the pattern matrix) or passes it to
     // `createPattern`, which this suite records.
     fillTileBox: (f: import('~/lib/spacetype/fillTile').Fill, w: number, h: number) =>
-      ({ tileOf: f.type, width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)) }),
+      ({ tileOf: f.type, shapeId: (f as { shapeId?: string }).shapeId, width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)) }),
   }
 })
 
@@ -201,6 +201,20 @@ describe('PaintSpread — the default is exactly today’s behaviour', () => {
       expect(b.patterns, type).toEqual(a.patterns)
       expect(b.gradients, type).toEqual(a.gradients)
     }
+  })
+
+  // Regression (final review, Major): the compositor tile cache (`_fillTileCache`) keyed without
+  // shapeId, so changing ONLY the shape (same colours/angle/density/box) returned the stale tile.
+  it('the compositor tile cache keys on shapeId — changing only the shape re-tiles', () => {
+    const shp = (id: string): Fill => fill('shapes', { a: '#0b1d2e', b: '#e7c94a', angle: 0, density: 4, shapeId: id })
+    const one = new RecCtx(), two = new RecCtx(), oneAgain = new RecCtx()
+    resolveFill(one as unknown as CanvasRenderingContext2D, shp('sparkle'), BOX, FIELD)
+    resolveFill(two as unknown as CanvasRenderingContext2D, shp('sun-rays'), BOX, FIELD)   // ONLY shapeId differs
+    resolveFill(oneAgain as unknown as CanvasRenderingContext2D, shp('sparkle'), BOX, FIELD)
+    expect(one.patterns[0]!.image).toMatchObject({ tileOf: 'shapes', shapeId: 'sparkle' })
+    // Pre-fix this was 'sparkle' (a stale cache hit); post-fix it is the shape actually requested.
+    expect(two.patterns[0]!.image).toMatchObject({ tileOf: 'shapes', shapeId: 'sun-rays' })
+    expect(oneAgain.patterns[0]!.image).toMatchObject({ tileOf: 'shapes', shapeId: 'sparkle' })
   })
 
   it('resolvePaint’s four-argument form (the Compositor’s call) is unchanged', () => {

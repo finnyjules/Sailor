@@ -3,7 +3,7 @@ import { POST_SECTIONS } from '~/lib/studio/post/controls'
 import { showIfVisible } from '~/lib/studio/sections'
 import { getByPath } from '~/lib/studio/path'
 import {
-  DEFAULT_MATERIAL, MATERIAL_DEFAULTS, gradientAngles,
+  DEFAULT_MATERIAL, MATERIAL_DEFAULTS, gradientAngles, screenOf,
   LIGHT_DEFAULTS, DECAL_DEFAULTS, lightIntensityMax, lightIntensityDefault,
   type MaterialType, type SceneDoc, type SceneObject,
 } from './config'
@@ -91,6 +91,7 @@ export const SCENE_PANEL_ORDER = [
   'Material/Iridescence',
   'Material/Reflection',
   'Material/Surface relief',
+  'Material/Screen',
   'Camera',
   'Lighting',
   'Background',
@@ -117,6 +118,7 @@ export function scenePanelChrome(matType: MaterialType | null): Record<string, {
     Transparency: { open: matType === 'glass' },
     Iridescence: { open: false },
     Reflection: { open: false },
+    Screen: { open: false },
     Modifiers: { open: false },
     Cloner: { open: false },
   }
@@ -134,6 +136,8 @@ const RELIEF_DEFAULTS: Record<string, ParamValue> = {
   tiling: MATERIAL_DEFAULTS.reliefTiling,
   invert: false,
 }
+
+const SCREEN_DEFAULTS = screenOf({}) as unknown as Record<string, ParamValue>
 
 const RAD2DEG = 180 / Math.PI
 
@@ -186,6 +190,11 @@ const materialField = (mat: SceneObject['material'], field: string): ParamValue 
     const sub = field.slice('relief.'.length)
     const v = (mat.relief as Record<string, unknown> | undefined)?.[sub]
     return (v ?? RELIEF_DEFAULTS[sub] ?? 0) as ParamValue
+  }
+  if (field.startsWith('screen.')) {
+    const sub = field.slice('screen.'.length)
+    const v = (mat.screen as Record<string, unknown> | undefined)?.[sub]
+    return (v ?? SCREEN_DEFAULTS[sub] ?? 0) as ParamValue
   }
   const v = (mat as unknown as Record<string, unknown>)[field]
   if (v !== undefined && v !== null) return v as ParamValue
@@ -541,6 +550,12 @@ const SUB_CARDS: Record<string, readonly string[]> = {
     'object.material.relief.scale', 'object.material.relief.contrast', 'object.material.relief.tiling',
     'object.material.relief.invert', 'ui.relief.image', 'ui.relief.shader',
   ],
+  'Material/Screen': [
+    'object.material.screen.pattern', 'object.material.screen.density', 'object.material.screen.angle',
+    'object.material.screen.contrast', 'object.material.screen.softness', 'object.material.screen.misregister',
+    'object.material.screen.invert', 'object.material.screen.gap', 'object.material.screen.gapColor',
+    'object.material.screen.ink', 'object.material.screen.inkColor',
+  ],
 }
 
 /** The Light and Decal cards, in the order the shipped `<template v-if>` chains drew
@@ -687,6 +702,14 @@ const OVERRIDE: Record<string, RowPatch> = {
   'object.material.relief.tiling': {
     label: 'Tiling', hint: 'How many times the pattern repeats across the surface — higher is finer.',
   },
+  'object.material.screen.pattern': { label: 'Pattern', hint: null },
+  'object.material.screen.density': { label: 'Density' },
+  'object.material.screen.angle': { label: 'Angle' },
+  'object.material.screen.contrast': { label: 'Contrast' },
+  'object.material.screen.softness': { label: 'Softness' },
+  'object.material.screen.invert': { label: 'Invert', hint: null },
+  'object.material.screen.gap': { label: 'Gaps', hint: null },
+  'object.material.screen.ink': { label: 'Ink', hint: null },
   'camera.fov': { label: 'FOV' },
   'lighting.preset': { label: 'Preset' },
   'lighting.environment': { label: 'Environment', options: [...ENV_OPTIONS], default: 'room' },
@@ -807,6 +830,9 @@ function panelGate(key: string, obj: SceneObject | null | undefined): boolean {
     const src = materialField(obj!.material, 'relief.source')
     if (src === 'none') return false
     if (src === 'image' && !!obj!.material.normalImage) return false
+  }
+  if (key.startsWith('object.material.screen.') && key !== 'object.material.screen.pattern') {
+    return materialField(obj!.material, 'screen.pattern') !== 'none'
   }
   return true
 }
