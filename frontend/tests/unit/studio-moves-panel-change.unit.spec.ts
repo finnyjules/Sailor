@@ -1,137 +1,152 @@
 // frontend/tests/unit/studio-moves-panel-change.unit.spec.ts
 // @vitest-environment happy-dom
 //
-// Covers the "Change" bug fix: a card's Change button used to delete the
-// move (see VectorTypeSurface.vue's old onChangeMove). MovesPanel now owns
-// the swap itself — Change reopens the shared gallery pre-aimed at the
-// move's own phase, and a pick there comes back as `replace-move` with the
-// old move's id (and, for a same-phase pick, its duration/ease/play) kept.
+// MovesPanel's real behaviour under the `at`/`loop` model
+// (`docs/superpowers/specs/2026-09-04-motion-timeline-design.md` §5): it
+// renders the SELECTED move's own controls when `selectedId` names one, and
+// the clip settings when nothing is selected. Filename kept from the
+// pre-timeline "Change" spec this replaces — MoveCard.vue and its
+// replace-in-place merge logic are retired; Change is now a simple
+// `open-gallery` emit the surface (Task 7) resolves via `patch-move`.
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MovesPanel from '~/components/vue-canvas/motion/moves/MovesPanel.vue'
-import MoveGallery from '~/components/vue-canvas/motion/moves/MoveGallery.vue'
 import type { MovesAdapter } from '~/lib/studio/moves/adapter'
 import type { Move, MotionClip } from '~/lib/studio/moves/types'
 
 const EASE = { kind: 'named', name: 'smooth' } as const
-const PLAY = { mode: 'repeat', times: 3 } as const
 
-const CUSTOM_MOVE: Move = {
+const TRACK_MOVE: Move = {
   id: 'm1',
-  phase: 'loop',
   kind: 'tracks',
   presetId: 'custom',
+  at: 0,
   duration: 1.2,
+  loop: false,
   ease: EASE,
-  play: PLAY,
   tracks: [{ path: 'motion.slant', from: 0, to: 45 }],
 }
 
-// No `kinds.tracks` entry — 'tracks' is the universal kind (adapter.ts's
-// `MoveKindDef` doc), so this move's card falls back to the plain tracks
-// editor, which is the only one that renders a "Change" button.
+const PRESET_MOVE: Move = {
+  id: 'm2',
+  kind: 'preset',
+  presetId: 'fade-in',
+  at: 0,
+  duration: 0.8,
+  loop: false,
+  ease: EASE,
+}
+
+const PRESET_PAIRS: Record<string, string> = { 'fade-in': 'fade-out', 'fade-out': 'fade-in' }
+
+// No `kinds.tracks` entry — 'tracks' is the universal kind, never listed in
+// `kinds` (adapter.ts's `MoveKindDef` doc). `kinds.preset` has no cardBody
+// either, so its card falls through to the "no settings yet" line — this
+// suite only needs its presetId to exercise the In/Out toggle.
 const ADAPTER: MovesAdapter<unknown> = {
-  kinds: {},
+  kinds: { preset: { label: 'Preset' } },
   gallery: () => [],
   animatable: () => [{ label: 'Motion', dials: [{ path: 'motion.slant', label: 'Slant', min: -45, max: 45 }] }],
   availability: () => null,
+  direction: (id) => (id in PRESET_PAIRS ? (id === 'fade-in' ? 'in' : 'out') : null),
+  flip: (id) => PRESET_PAIRS[id] ?? id,
 }
 
-function mountPanel(clip: MotionClip, openMoveId: string | null = CUSTOM_MOVE.id) {
-  return mount(MovesPanel, {
-    props: { clip, adapter: ADAPTER, cfg: {}, openMoveId },
-  })
+function mountPanel(moves: Move[], selectedId: string | null) {
+  const clip: MotionClip = { moves, duration: 4, fps: 30 }
+  return mount(MovesPanel, { props: { clip, adapter: ADAPTER, cfg: {}, selectedId } })
 }
 
-describe('MovesPanel Change-in-place', () => {
-  it('opens the gallery pre-selected to the move\'s own phase, not deleting it', async () => {
-    const clip: MotionClip = { moves: [CUSTOM_MOVE], duration: 4, fps: 30 }
-    const w = mountPanel(clip)
+describe('MovesPanel — selected move', () => {
+  it('renders the selected move\'s label and Length', () => {
+    const w = mountPanel([TRACK_MOVE], 'm1')
+    expect(w.text()).toContain('Custom · slant')
+    const duration = w.find('input[type="number"]')
+    expect((duration.element as HTMLInputElement).value).toBe('1.2')
+  })
 
-    await w.find('button[title="Remove move"]').exists() // sanity: card rendered
-    // The Change button lives inside the open card's fallback tracks editor.
-    const changeBtn = w.findAll('button').find(b => b.text() === 'Change')
-    expect(changeBtn).toBeTruthy()
+  it('toggling Loop emits patch-move with the flipped loop flag', async () => {
+    const w = mountPanel([TRACK_MOVE], 'm1')
+    const loopToggle = w.find('button[role="switch"]')
+    expect(loopToggle.attributes('aria-checked')).toBe('false')
+    await loopToggle.trigger('click')
+
+    const patches = w.emitted('patch-move') as Array<[Move, Partial<Move>]>
+    expect(patches).toBeTruthy()
+    const [move, partial] = patches![patches!.length - 1]!
+    expect(move).toEqual(TRACK_MOVE)
+    expect(partial).toEqual({ loop: true })
+  })
+
+  it('has no In/Out toggle for a move whose preset is unpaired', () => {
+    const w = mountPanel([TRACK_MOVE], 'm1')
+    expect(w.text()).not.toContain('Direction')
+  })
+
+  it('the In/Out toggle flips presetId via adapter.flip', async () => {
+    const w = mountPanel([PRESET_MOVE], 'm2')
+    expect(w.text()).toContain('Direction')
+    const outBtn = w.findAll('button').find((b) => b.text() === 'Out')
+    expect(outBtn).toBeTruthy()
+    await outBtn!.trigger('click')
+
+    const patches = w.emitted('patch-move') as Array<[Move, Partial<Move>]>
+    const [move, partial] = patches![patches!.length - 1]!
+    expect(move).toEqual(PRESET_MOVE)
+    expect(partial).toEqual({ presetId: 'fade-out' })
+  })
+
+  it('the Change button emits open-gallery, not a replace/remove', async () => {
+    const w = mountPanel([TRACK_MOVE], 'm1')
+    const changeBtn = w.findAll('button').find((b) => b.text() === 'Change')
     await changeBtn!.trigger('click')
-
-    const gallery = w.findComponent(MoveGallery)
-    expect(gallery.exists()).toBe(true)
-    expect(gallery.props('initialPhase')).toBe('loop')
-
-    // The move itself must NOT have been deleted just by opening the gallery.
+    expect(w.emitted('open-gallery')).toHaveLength(1)
     expect(w.emitted('remove-move')).toBeFalsy()
-    expect(w.emitted('replace-move')).toBeFalsy()
   })
 
-  it('a same-phase pick swaps kind/tracks but keeps the old id, duration, ease and play', async () => {
-    const clip: MotionClip = { moves: [CUSTOM_MOVE], duration: 4, fps: 30 }
-    const w = mountPanel(clip)
-    const changeBtn = w.findAll('button').find(b => b.text() === 'Change')
-    await changeBtn!.trigger('click')
-
-    const picked: Move = {
-      id: '__candidate__',
-      phase: 'loop',
-      kind: 'tracks',
-      presetId: 'custom',
-      duration: 9,
-      ease: { kind: 'named', name: 'bounce' },
-      play: { mode: 'once', times: 1 },
-      tracks: [{ path: 'motion.otherDial', from: 0, to: 1 }],
-    }
-    await w.findComponent(MoveGallery).vm.$emit('add', picked)
-
-    const replaced = w.emitted('replace-move')
-    expect(replaced).toHaveLength(1)
-    const [oldMove, newMove] = replaced![0] as [Move, Move]
-    expect(oldMove).toEqual(CUSTOM_MOVE)
-    expect(newMove.id).toBe(CUSTOM_MOVE.id) // identity preserved
-    expect(newMove.duration).toBe(CUSTOM_MOVE.duration) // kept — same phase
-    expect(newMove.ease).toEqual(CUSTOM_MOVE.ease) // kept — same phase
-    expect(newMove.play).toEqual(CUSTOM_MOVE.play) // kept — same phase
-    expect(newMove.tracks).toEqual(picked.tracks) // taken from the new pick
-    expect(w.emitted('add-move')).toBeFalsy() // never a plain add
-    expect(w.emitted('remove-move')).toBeFalsy() // never a delete
+  it('the Remove button emits remove-move with the full move', async () => {
+    const w = mountPanel([TRACK_MOVE], 'm1')
+    await w.find('button[title="Remove move"]').trigger('click')
+    expect(w.emitted('remove-move')).toEqual([[TRACK_MOVE]])
   })
 
-  it('a different-phase pick uses the new duration/ease/play instead of the old ones', async () => {
-    const clip: MotionClip = { moves: [CUSTOM_MOVE], duration: 4, fps: 30 }
-    const w = mountPanel(clip)
-    const changeBtn = w.findAll('button').find(b => b.text() === 'Change')
-    await changeBtn!.trigger('click')
+  it('editing a From/To track input emits patch-move with the updated tracks array', async () => {
+    const w = mountPanel([TRACK_MOVE], 'm1')
+    const inputs = w.findAll('input[type="number"]')
+    // duration is first; from is second
+    const fromInput = inputs[1]!
+    await fromInput.setValue('10')
+    await fromInput.trigger('change')
+    const patches = w.emitted('patch-move') as Array<[Move, Partial<Move>]>
+    const [, partial] = patches![patches!.length - 1]!
+    expect(partial.tracks).toEqual([{ path: 'motion.slant', from: 10, to: 45 }])
+    // the original move prop must not have been mutated
+    expect(TRACK_MOVE.tracks).toEqual([{ path: 'motion.slant', from: 0, to: 45 }])
+  })
+})
 
-    const picked: Move = {
-      id: '__candidate__',
-      phase: 'in', // different from CUSTOM_MOVE.phase ('loop')
-      kind: 'tracks',
-      presetId: 'custom',
-      duration: 0.6,
-      ease: { kind: 'named', name: 'overshoot' },
-      play: { mode: 'once', times: 1 },
-      tracks: [{ path: 'motion.otherDial', from: 0, to: 1 }],
-    }
-    await w.findComponent(MoveGallery).vm.$emit('add', picked)
-
-    const [, newMove] = w.emitted('replace-move')![0] as [Move, Move]
-    expect(newMove.id).toBe(CUSTOM_MOVE.id)
-    expect(newMove.phase).toBe('in')
-    expect(newMove.duration).toBe(0.6)
-    expect(newMove.ease).toEqual(picked.ease)
-    expect(newMove.play).toEqual(picked.play)
+describe('MovesPanel — nothing selected', () => {
+  it('renders the clip settings instead of a move', () => {
+    const w = mountPanel([TRACK_MOVE], null)
+    expect(w.text()).toContain('Clip')
+    expect(w.text()).toContain('Length')
+    expect(w.text()).toContain('Frame rate')
+    expect(w.text()).not.toContain('Custom · slant')
   })
 
-  it('closing the gallery without picking leaves the move alone (no replace, no remove)', async () => {
-    const clip: MotionClip = { moves: [CUSTOM_MOVE], duration: 4, fps: 30 }
-    const w = mountPanel(clip)
-    const changeBtn = w.findAll('button').find(b => b.text() === 'Change')
-    await changeBtn!.trigger('click')
-    expect(w.findComponent(MoveGallery).exists()).toBe(true)
+  it('changing the Length slider emits patch-clip', async () => {
+    const w = mountPanel([], null)
+    const slider = w.find('input[type="range"]')
+    await slider.setValue('6')
+    await slider.trigger('input')
+    expect(w.emitted('patch-clip')).toBeTruthy()
+  })
 
-    await w.findComponent(MoveGallery).vm.$emit('close')
-
-    expect(w.findComponent(MoveGallery).exists()).toBe(false)
-    expect(w.emitted('replace-move')).toBeFalsy()
-    expect(w.emitted('remove-move')).toBeFalsy()
-    expect(w.emitted('add-move')).toBeFalsy()
+  it('the Add move button emits open-gallery', async () => {
+    const w = mountPanel([], null)
+    const addBtn = w.findAll('button').find((b) => b.text().includes('Add move'))
+    expect(addBtn).toBeTruthy()
+    await addBtn!.trigger('click')
+    expect(w.emitted('open-gallery')).toHaveLength(1)
   })
 })

@@ -55,7 +55,7 @@ import type {
 import type { Move, MoveEase, MoveEaseName } from '~/lib/studio/moves/types'
 import { buildPairs } from '~/lib/studio/moves/direction'
 import { presetIdsFor, nativeEaseFor } from '~/lib/motion/evaluate'
-import { KINETIC_GROUP_LABELS, KINETIC_PRESETS_BY_ID, type KineticGroup } from '~/data/kinetic-presets'
+import { KINETIC_PRESETS_BY_ID, type KineticGroup } from '~/data/kinetic-presets'
 import type { VtAxis } from './font'
 import type { VectorTypeConfig, VtMove } from './config'
 import { VT_PRESET_CAPABILITIES, vtPresetSlotOf } from './presetMotion'
@@ -294,7 +294,7 @@ function engineOffer(id: string, phase: MovePhase, cfg: VectorTypeConfig): MoveO
   }
 }
 
-/** A track-preset tile. `cfg` is the CALLER's (the `gallery(cfg, phase)` that
+/** A track-preset tile. `cfg` is the CALLER's (the `gallery(cfg)` call that
  *  built this offer, always fresh — see the module header on why the
  *  adapter's own `cfg` parameter is never read here), so `build()` can bind
  *  the preset to the layers it would actually drive on THIS config. */
@@ -374,6 +374,33 @@ const LETTERFORM_TRACK_IDS: Partial<Record<MovePhase, readonly string[]>> = {
   loop: ['stretch-wave'],
 }
 
+/**
+ * `KineticGroup` (the engine catalog's own visual grouping, `kinetic-
+ * presets.ts`) → the gallery's TYPE section label (`2026-09-04-motion-
+ * timeline-design.md` §5: "Letterform, Appear, Slide, Scale, Blur, Rotate,
+ * Physics, Text, Loop-style, Effects"). Most groups pass through unchanged;
+ * the three purely-oscillating loop groups (Oscillate/Pulse/Color) collapse
+ * into "Loop-style", and the two odd-ones-out (Glitch, whose in/out/loop
+ * variants are all erratic, and Utility, the canvas-native params-only
+ * presets) collapse into "Effects" — both sit outside the shape/position
+ * vocabulary the other named sections share.
+ */
+const GALLERY_GROUP_LABEL: Record<KineticGroup, string> = {
+  appear: 'Appear',
+  slide: 'Slide',
+  mask: 'Mask',
+  scale: 'Scale',
+  blur: 'Blur',
+  rotate: 'Rotate',
+  physics: 'Physics',
+  text: 'Text',
+  glitch: 'Effects',
+  utility: 'Effects',
+  oscillate: 'Loop-style',
+  pulse: 'Loop-style',
+  color: 'Loop-style',
+}
+
 // ── The adapter ──────────────────────────────────────────────────────────
 
 /**
@@ -395,52 +422,91 @@ export function vtMovesAdapter(
   return {
     kinds: KINDS,
     clipExtras: markRaw(VtStaggerClipExtras),
+    direction: vtPresetDirection,
+    flip: vtPresetFlip,
 
-    gallery(cfg: VectorTypeConfig, phase: MovePhase): GalleryGroup[] {
+    /**
+     * ONE grouped-by-type list (`adapter.ts`'s `gallery` doc): no more
+     * phase argument, no more per-phase tab. Walked in the SAME preference
+     * order the old per-phase call used (Letterform first, then the rest of
+     * axis/track presets, then the shared kinetic engine's catalog, then
+     * Blink/Scatter) but over all three phases at once ('in' then 'loop'
+     * then 'out'), de-duplicating a paired preset onto ONE tile via
+     * `pushedIds` — reaching 'out' after its 'in' pair was already pushed
+     * (`VT_PRESET_IN_TO_OUT`) skips the redundant second tile; an unpaired
+     * id (axis/track presets never have an 'out' side; several engine
+     * presets have no pair either — `blur-slide-up`, `scramble-in`/`-out`,
+     * per that map's own doc) still gets its own tile. The tile's `build()`
+     * itself already picks a real placement (`placementFor`/`defaultTiming`
+     * above) for whichever phase it was built from — that phase is now
+     * purely an implementation-internal "which window shape" choice, not
+     * something the gallery UI shows; the panel's In/Out toggle
+     * (`direction`/`flip` above) is how a user reaches the other side of a
+     * pair after adding.
+     */
+    gallery(cfg: VectorTypeConfig): GalleryGroup[] {
       const groups = new Map<string, MoveOffer[]>()
       const push = (label: string, offer: MoveOffer) => {
         if (!groups.has(label)) groups.set(label, [])
         groups.get(label)!.push(offer)
       }
+      const pushedIds = new Set<string>()
 
-      // Letterform FIRST — curated axis + track-preset ids, in table order.
-      // Listed regardless of availability (a font without GRAD still shows
-      // the tile, greyed — `availability` below is what greys it).
-      for (const id of LETTERFORM_AXIS_IDS[phase] ?? []) {
-        const preset = vtAxisPreset(phase, id)
-        if (preset) push('Letterform', axisOffer(preset, phase, cfg))
-      }
-      for (const id of LETTERFORM_TRACK_IDS[phase] ?? []) {
-        const preset = vtTrackPreset(id)
-        if (preset && preset.phase === phase) push('Letterform', trackOffer(preset, cfg))
-      }
-
-      // Every other axis preset for this phase.
-      const letterformAxis = new Set(LETTERFORM_AXIS_IDS[phase] ?? [])
-      for (const offer of vtAxisOffersFor(phase, axes, fontLabel)) {
-        if (letterformAxis.has(offer.preset.id)) continue
-        push('Axis', axisOffer(offer.preset, phase, cfg))
+      // Letterform FIRST — curated axis + track-preset ids, in table order,
+      // 'in' then 'loop' (no curated 'out' ids exist). Listed regardless of
+      // availability (a font without GRAD still shows the tile, greyed —
+      // `availability` below is what greys it).
+      for (const phase of ['in', 'loop'] as const) {
+        for (const id of LETTERFORM_AXIS_IDS[phase] ?? []) {
+          const preset = vtAxisPreset(phase, id)
+          if (preset) { push('Letterform', axisOffer(preset, phase, cfg)); pushedIds.add(id) }
+        }
+        for (const id of LETTERFORM_TRACK_IDS[phase] ?? []) {
+          const preset = vtTrackPreset(id)
+          if (preset && preset.phase === phase) { push('Letterform', trackOffer(preset, cfg)); pushedIds.add(id) }
+        }
       }
 
-      // Every other track preset for this phase (Layer / Colour groups).
-      const letterformTracks = new Set(LETTERFORM_TRACK_IDS[phase] ?? [])
-      for (const preset of VT_TRACK_PRESETS) {
-        if (preset.phase !== phase || letterformTracks.has(preset.id)) continue
-        push(trackGroupLabel(preset), trackOffer(preset, cfg))
+      // Every other axis preset ('in' + 'loop' — no 'out' axis presets exist).
+      for (const phase of ['in', 'loop'] as const) {
+        for (const offer of vtAxisOffersFor(phase, axes, fontLabel)) {
+          if (pushedIds.has(offer.preset.id)) continue
+          push('Letterform', axisOffer(offer.preset, phase, cfg))
+          pushedIds.add(offer.preset.id)
+        }
       }
 
-      // The shared kinetic engine's own presets, grouped by its catalog.
-      for (const id of presetIdsFor(phase, VT_PRESET_CAPABILITIES)) {
-        const meta = KINETIC_PRESETS_BY_ID[id]
-        const label = meta ? (KINETIC_GROUP_LABELS[meta.group as KineticGroup] ?? meta.group) : 'More'
-        push(label, engineOffer(id, phase, cfg))
+      // Every other track preset (Layer / Colour groups).
+      for (const phase of ['in', 'loop', 'out'] as const) {
+        for (const preset of VT_TRACK_PRESETS) {
+          if (preset.phase !== phase || pushedIds.has(preset.id)) continue
+          push(trackGroupLabel(preset), trackOffer(preset, cfg))
+          pushedIds.add(preset.id)
+        }
       }
 
-      // Blink and Scatter lead the Loop tab's "Play" group (spec §4).
-      if (phase === 'loop') {
-        push('Play', blinkOffer())
-        push('Play', scatterOffer())
+      // The shared kinetic engine's own presets, 'in' then 'loop' then
+      // 'out' — an 'out' id whose 'in' pair already got a tile is skipped
+      // (`vtPresetFlip` on an out id returns its in id, or itself when
+      // unpaired, so the `!== id` guard only fires for a real pair).
+      for (const phase of ['in', 'loop', 'out'] as const) {
+        for (const id of presetIdsFor(phase, VT_PRESET_CAPABILITIES)) {
+          if (pushedIds.has(id)) continue
+          if (phase === 'out') {
+            const inId = vtPresetFlip(id)
+            if (inId !== id && pushedIds.has(inId)) continue
+          }
+          const meta = KINETIC_PRESETS_BY_ID[id]
+          const label = meta ? GALLERY_GROUP_LABEL[meta.group as KineticGroup] ?? 'Effects' : 'Effects'
+          push(label, engineOffer(id, phase, cfg))
+          pushedIds.add(id)
+        }
       }
+
+      // Blink and Scatter (spec §4's "Play" group) — continuous markers,
+      // grouped with the other always-on loop presets.
+      push('Loop-style', blinkOffer())
+      push('Loop-style', scatterOffer())
 
       return [...groups.entries()].map(([label, offers]) => ({ label, offers }))
     },

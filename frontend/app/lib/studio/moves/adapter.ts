@@ -103,14 +103,40 @@ export interface MoveKindDef<Cfg> {
 export interface MovesAdapter<Cfg> {
   /** Extra move kinds beyond 'tracks': card body renderer + evaluator hook. Empty for Shape Studio. */
   kinds: Record<string, MoveKindDef<Cfg>>
-  /** Gallery groups per phase (presets). Empty groups hide the phase's preset tabs, leaving Custom. */
-  gallery(cfg: Cfg, phase: MovePhase): GalleryGroup[]
-  /** Dials the Custom tab offers, grouped. */
+  /**
+   * ONE grouped list of every tile the gallery offers, grouped by move TYPE
+   * (e.g. Letterform, Appear, Slide, Scale, Blur, Rotate, Physics, Text,
+   * Loop-style, Effects) rather than by phase — the `at`/`loop` model
+   * (`./types.ts`'s header) has no phase to tab on any more. A tile whose
+   * preset has an in/out pair is offered ONCE (its `build()` picks a
+   * sensible default direction/placement); the panel's In/Out toggle
+   * (`MovesAdapter.direction`/`.flip` below) is how the user switches it
+   * after adding. `MoveGallery.vue` appends its own "Custom" section from
+   * `animatable(cfg)` below — that is not part of this list.
+   */
+  gallery(cfg: Cfg): GalleryGroup[]
+  /** Dials the Custom section offers, grouped. */
   animatable(cfg: Cfg): AnimatableGroup[]
   /** null = available; a string is the one-line reason a tile is greyed. */
   availability(cfg: Cfg, candidate: Move): string | null
   /** Optional rows for the clip block (Vector Type: Letter by letter). */
   clipExtras?: MovesComponent
+  /**
+   * `'in' | 'out' | null` for a preset id — whether it belongs to an
+   * in/out-paired family (`fade-in`/`fade-out`, `slide-up`/`slide-out-up`…)
+   * and which side it's on, or `null` for an unpaired/loop/custom preset.
+   * Drives `MovesPanel`'s In/Out toggle: hidden when this returns `null` for
+   * the selected move's `presetId`. Absent for an adapter with nothing
+   * pairable (Shape Studio) — the toggle never shows.
+   */
+  direction?(presetId: string): 'in' | 'out' | null
+  /**
+   * `presetId`'s opposite-direction id, or `presetId` itself when it has no
+   * pair. What the In/Out toggle asks for when the user flips a selected
+   * move's direction (`patch-move(move, { presetId: adapter.flip(move
+   * .presetId) })`).
+   */
+  flip?(presetId: string): string
   /**
    * Synthetic marker moves the panel should show ALONGSIDE the stored ones
    * (`clip.moves`), for a studio whose effect lives outside the move list —

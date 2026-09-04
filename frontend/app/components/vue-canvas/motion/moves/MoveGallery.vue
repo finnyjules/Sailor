@@ -1,15 +1,21 @@
 <script setup lang="ts">
 /**
- * Add-move gallery: In · Loop · Out · Custom tabs. The panel is driven
- * ENTIRELY through the `adapter` prop (`MovesAdapter<Cfg>`,
- * `~/lib/studio/moves/adapter.ts`) — the In/Loop/Out tabs render
- * `adapter.gallery(cfg, phase)`'s groups, Custom renders
- * `adapter.animatable(cfg)`'s dial groups, and every tile's grey/enabled
- * state comes from `adapter.availability(cfg, candidate)`. A studio's own
- * visuals reach a tile only two ways: the `#thumb` scoped slot (preferred —
- * lets a studio-specific renderer draw the tile without this component
- * knowing what it is) or, if the caller doesn't fill that slot, the
- * `MoveOffer.thumb` component the adapter itself supplied.
+ * Add-move gallery: ONE scrollable, grouped list — no more In/Loop/Out
+ * tabs (`2026-09-04-motion-timeline-design.md` §5: "the gallery loses the
+ * In/Out/Loop tabs — it now lists moves by type in one grouped list"). The
+ * panel is driven ENTIRELY through the `adapter` prop (`MovesAdapter<Cfg>`,
+ * `~/lib/studio/moves/adapter.ts`) — `adapter.gallery(cfg)`'s groups render
+ * first (Letterform / Appear / Slide / Scale / Blur / Rotate / Physics /
+ * Text / Loop-style / Effects, per that adapter's own grouping), followed
+ * by a "Custom" section built from `adapter.animatable(cfg)`'s dial groups
+ * (unchanged from before — this file still owns turning a `DialDef` into a
+ * one-shot `Move` candidate; the adapter only supplies the raw dials).
+ * Every tile's grey/enabled state comes from `adapter.availability(cfg,
+ * candidate)`. A studio's own visuals reach a tile only two ways: the
+ * `#thumb` scoped slot (preferred — lets a studio-specific renderer draw
+ * the tile without this component knowing what it is) or, if the caller
+ * doesn't fill that slot, the `MoveOffer.thumb` component the adapter
+ * itself supplied.
  *
  * Anchored/Teleported like `MotionPresetPicker.vue` (see its header) —
  * `close()` on backdrop click or Escape.
@@ -17,66 +23,47 @@
  * NOTHING here may import from `lib/vectortype`; studio specifics arrive
  * ONLY through `adapter`/`cfg` and the `#thumb` slot.
  *
- * `initialPhase` (optional): opens the gallery pre-selected to that phase's
- * tab (In/Loop/Out — falls back to the default, first visible phase tab or
- * Custom, if that phase's tab is hidden) AND seeds the Custom tab's own
- * phase sub-toggle (`customPhase`) the same way, so switching to Custom
- * still lands on the right phase. Used by `MovesPanel`'s "Change" flow
- * (`MovesPanel.vue`'s `changingMove` doc) to land the user on the move
- * being swapped's own phase — every "Change"-able move is a `'tracks'`
- * move, whose `phase` is always `'in' | 'loop' | 'out'`, never `'custom'`.
- * Absent, behavior is unchanged.
+ * A picked tile emits `add(move)` with a full, `id`-less-no-more (this
+ * component mints a fresh `id`) `Move` — an `at`/`loop`-anchored placement
+ * a gallery offer's own `build()` already chose (Vector Type: `placementFor`
+ * in `movesAdapter.ts`), or, for a Custom dial pick, `at: 0, loop: true` (an
+ * open-ended cycle — the sensible default for "animate this property
+ * continuously" absent a playhead to anchor a one-shot transition to; the
+ * mounting surface is free to re-anchor `at` to its own playhead before
+ * applying the patch, same as any other `patch-move`).
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { X } from 'lucide-vue-next'
-import type { MovesAdapter, MoveOffer, MovePhase, DialDef } from '~/lib/studio/moves/adapter'
+import type { MovesAdapter, MoveOffer, DialDef } from '~/lib/studio/moves/adapter'
 import type { Move } from '~/lib/studio/moves/types'
 import { DEFAULT_EASE } from '~/lib/studio/moves/ease'
 
-const props = defineProps<{ adapter: MovesAdapter<any>; cfg: any; initialPhase?: MovePhase }>()
+const props = defineProps<{ adapter: MovesAdapter<any>; cfg: any }>()
 const emit = defineEmits<{ (e: 'add', move: Move): void; (e: 'close'): void }>()
-
-const PHASES: MovePhase[] = ['in', 'loop', 'out']
-const PHASE_TAB_LABEL: Record<MovePhase, string> = { in: 'In', loop: 'Loop', out: 'Out' }
 
 function freshId(): string {
   const c = globalThis.crypto as Crypto | undefined
   return `move_${c?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`
 }
 
-// ── In / Loop / Out tabs ────────────────────────────────────────────────
-
-const galleryByPhase = computed(() => {
-  const m = new Map<MovePhase, ReturnType<MovesAdapter<any>['gallery']>>()
-  for (const p of PHASES) m.set(p, props.adapter.gallery(props.cfg, p))
-  return m
-})
-
-// Empty groups hide that phase's tab (adapter.ts §gallery doc), leaving
-// whatever else has offers, plus Custom which is always available.
-const visiblePhaseTabs = computed(() => PHASES.filter((p) => (galleryByPhase.value.get(p) ?? []).length > 0))
-
-type Tab = MovePhase | 'custom'
-const initialTab: Tab = props.initialPhase && visiblePhaseTabs.value.includes(props.initialPhase)
-  ? props.initialPhase
-  : (visiblePhaseTabs.value[0] ?? 'custom')
-const activeTab = ref<Tab>(initialTab)
+// ── Grouped list: adapter.gallery(cfg) ──────────────────────────────────
 
 /** `offer.build()` already returns a complete-enough `Partial<Move>` (every
- *  adapter in this codebase fills phase/kind/duration/ease/play) — these
- *  fallbacks are a defensive floor for an adapter that leaves one out, not
- *  the expected path. `id` is a placeholder used only to test availability;
- *  `add(...)` mints the real one. */
-function candidateFromOffer(offer: MoveOffer, phase: MovePhase): Move {
+ *  adapter in this codebase fills kind/presetId/at/duration/loop/ease) —
+ *  these fallbacks are a defensive floor for an adapter that leaves one out,
+ *  not the expected path. `id` is a placeholder used only to test
+ *  availability; `add(...)` mints the real one. */
+function candidateFromOffer(offer: MoveOffer): Move {
   const built = offer.build()
   return {
     id: '__candidate__',
-    phase: built.phase ?? phase,
     kind: built.kind ?? offer.kind,
     presetId: built.presetId ?? offer.presetId,
+    at: typeof built.at === 'number' ? built.at : 0,
     duration: typeof built.duration === 'number' ? built.duration : 1,
+    loop: typeof built.loop === 'boolean' ? built.loop : false,
+    bounce: built.bounce,
     ease: built.ease ?? DEFAULT_EASE,
-    play: built.play ?? { mode: phase === 'loop' ? 'repeat' : 'once', times: 1 },
     params: built.params,
     tracks: built.tracks,
   }
@@ -85,26 +72,22 @@ function candidateFromOffer(offer: MoveOffer, phase: MovePhase): Move {
 interface ResolvedOffer { offer: MoveOffer; candidate: Move; reason: string | null }
 interface ResolvedGroup { label: string; offers: ResolvedOffer[] }
 
-const activeGroups = computed<ResolvedGroup[]>(() => {
-  if (activeTab.value === 'custom') return []
-  const phase = activeTab.value
-  return (galleryByPhase.value.get(phase) ?? []).map((g) => ({
+const presetGroups = computed<ResolvedGroup[]>(() =>
+  props.adapter.gallery(props.cfg).map((g) => ({
     label: g.label,
     offers: g.offers.map((offer) => {
-      const candidate = candidateFromOffer(offer, phase)
+      const candidate = candidateFromOffer(offer)
       return { offer, candidate, reason: props.adapter.availability(props.cfg, candidate) }
     }),
-  }))
-})
+  })),
+)
 
 function pick(resolved: ResolvedOffer) {
   if (resolved.reason) return
   emit('add', { ...resolved.candidate, id: freshId() })
 }
 
-// ── Custom tab ───────────────────────────────────────────────────────────
-
-const customPhase = ref<MovePhase>(props.initialPhase ?? 'loop')
+// ── Custom section: adapter.animatable(cfg) dials ──────────────────────
 
 // `cfg.motion.duration` is the shared clip-length convention (`MotionClip`,
 // `~/lib/studio/moves/types`) every studio's config carries its moves under
@@ -116,15 +99,15 @@ const clipDuration = computed(() => {
   return typeof d === 'number' && Number.isFinite(d) && d > 0 ? d : 4
 })
 
-function dialCandidate(dial: DialDef, phase: MovePhase): Move {
+function dialCandidate(dial: DialDef): Move {
   return {
     id: '__candidate__',
-    phase,
     kind: 'tracks',
     presetId: 'custom',
+    at: 0,
     duration: clipDuration.value,
+    loop: true,
     ease: DEFAULT_EASE,
-    play: { mode: 'once', times: 1 },
     tracks: [{ path: dial.path, from: dial.min, to: dial.max, hold: 0, cycleOffset: 0, delay: 0 }],
   }
 }
@@ -132,16 +115,15 @@ function dialCandidate(dial: DialDef, phase: MovePhase): Move {
 interface ResolvedDial { dial: DialDef; candidate: Move; reason: string | null }
 interface ResolvedDialGroup { label: string; dials: ResolvedDial[] }
 
-const animatableGroups = computed<ResolvedDialGroup[]>(() => {
-  const phase = customPhase.value
-  return props.adapter.animatable(props.cfg).map((g) => ({
+const customGroups = computed<ResolvedDialGroup[]>(() =>
+  props.adapter.animatable(props.cfg).map((g) => ({
     label: g.label,
     dials: g.dials.map((dial) => {
-      const candidate = dialCandidate(dial, phase)
+      const candidate = dialCandidate(dial)
       return { dial, candidate, reason: props.adapter.availability(props.cfg, candidate) }
     }),
-  }))
-})
+  })),
+)
 
 function pickDial(resolved: ResolvedDial) {
   if (resolved.reason) return
@@ -171,66 +153,42 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <button class="cursor-pointer p-1 text-white/45 hover:text-white/80" @click="emit('close')"><X class="size-3.5" /></button>
         </div>
 
-        <div class="flex items-center gap-1 border-b border-white/10 px-3 py-1.5">
-          <button
-            v-for="p in visiblePhaseTabs" :key="p" type="button"
-            class="cursor-pointer rounded px-2 py-1 text-[11px] transition-colors"
-            :class="activeTab === p ? 'bg-white/[0.1] text-white' : 'text-white/50 hover:text-white/80'"
-            @click="activeTab = p"
-          >{{ PHASE_TAB_LABEL[p] }}</button>
-          <button
-            type="button"
-            class="cursor-pointer rounded px-2 py-1 text-[11px] transition-colors"
-            :class="activeTab === 'custom' ? 'bg-white/[0.1] text-white' : 'text-white/50 hover:text-white/80'"
-            @click="activeTab = 'custom'"
-          >Custom</button>
-        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto p-3 space-y-3">
+          <div v-if="!presetGroups.length && !customGroups.length" class="py-6 text-center text-[11px] text-white/35">
+            Nothing to offer here yet.
+          </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto p-3">
-          <!-- In / Loop / Out: adapter.gallery(cfg, phase) groups -->
-          <div v-if="activeTab !== 'custom'" class="space-y-3">
-            <div v-if="!activeGroups.length" class="py-6 text-center text-[11px] text-white/35">Nothing to offer here yet.</div>
-            <div v-for="group in activeGroups" :key="group.label">
-              <div class="mb-1.5 text-[10px] uppercase tracking-[0.12em] text-white/35">{{ group.label }}</div>
-              <div class="grid grid-cols-2 gap-2">
-                <button
-                  v-for="resolved in group.offers" :key="resolved.offer.id" type="button"
-                  class="group flex flex-col gap-1 rounded-lg border p-1.5 text-left transition-colors"
-                  :class="resolved.reason
-                    ? 'cursor-not-allowed border-white/[0.05] bg-white/[0.015] opacity-50'
-                    : 'cursor-pointer border-white/[0.07] bg-white/[0.03] hover:bg-white/[0.06]'"
-                  :disabled="!!resolved.reason"
-                  :title="resolved.reason ?? resolved.offer.pitch"
-                  @click="pick(resolved)"
-                >
-                  <div class="grid aspect-[4/3] w-full place-items-center overflow-hidden rounded bg-white/[0.02] text-white/40">
-                    <template v-if="$slots.thumb"><slot name="thumb" :offer="resolved.offer" /></template>
-                    <component :is="resolved.offer.thumb" v-else-if="resolved.offer.thumb" />
-                    <span v-else class="text-[9px] text-white/25">{{ resolved.offer.label.slice(0, 2).toUpperCase() }}</span>
-                  </div>
-                  <span class="truncate text-[10.5px]" :class="resolved.reason ? 'text-white/35' : 'text-white/85'">{{ resolved.offer.label }}</span>
-                  <span class="truncate text-[9px]" :class="resolved.reason ? 'text-white/30' : 'text-white/45'">
-                    {{ resolved.reason ?? resolved.offer.pitch }}
-                  </span>
-                </button>
-              </div>
+          <div v-for="group in presetGroups" :key="group.label">
+            <div class="mb-1.5 text-[10px] uppercase tracking-[0.12em] text-white/35">{{ group.label }}</div>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                v-for="resolved in group.offers" :key="resolved.offer.id" type="button"
+                class="group flex flex-col gap-1 rounded-lg border p-1.5 text-left transition-colors"
+                :class="resolved.reason
+                  ? 'cursor-not-allowed border-white/[0.05] bg-white/[0.015] opacity-50'
+                  : 'cursor-pointer border-white/[0.07] bg-white/[0.03] hover:bg-white/[0.06]'"
+                :disabled="!!resolved.reason"
+                :title="resolved.reason ?? resolved.offer.pitch"
+                @click="pick(resolved)"
+              >
+                <div class="grid aspect-[4/3] w-full place-items-center overflow-hidden rounded bg-white/[0.02] text-white/40">
+                  <template v-if="$slots.thumb"><slot name="thumb" :offer="resolved.offer" /></template>
+                  <component :is="resolved.offer.thumb" v-else-if="resolved.offer.thumb" />
+                  <span v-else class="text-[9px] text-white/25">{{ resolved.offer.label.slice(0, 2).toUpperCase() }}</span>
+                </div>
+                <span class="truncate text-[10.5px]" :class="resolved.reason ? 'text-white/35' : 'text-white/85'">{{ resolved.offer.label }}</span>
+                <span class="truncate text-[9px]" :class="resolved.reason ? 'text-white/30' : 'text-white/45'">
+                  {{ resolved.reason ?? resolved.offer.pitch }}
+                </span>
+              </button>
             </div>
           </div>
 
-          <!-- Custom: In/Loop/Out sub-toggle + adapter.animatable(cfg) dials -->
-          <div v-else class="space-y-3">
-            <div class="flex items-center gap-1">
-              <button
-                v-for="p in PHASES" :key="p" type="button"
-                class="cursor-pointer rounded border px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] transition-colors"
-                :class="customPhase === p ? 'border-white/50 bg-white/[0.08] text-white' : 'border-white/10 text-white/45 hover:text-white/70'"
-                @click="customPhase = p"
-              >{{ PHASE_TAB_LABEL[p] }}</button>
-            </div>
-
-            <div v-if="!animatableGroups.length" class="py-6 text-center text-[11px] text-white/35">No animatable properties.</div>
-            <div v-for="group in animatableGroups" :key="group.label">
-              <div class="mb-1.5 text-[10px] uppercase tracking-[0.12em] text-white/35">{{ group.label }}</div>
+          <!-- Custom: adapter.animatable(cfg) dials, always shown at the end -->
+          <template v-if="customGroups.length">
+            <div class="pt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">Custom</div>
+            <div v-for="group in customGroups" :key="`custom:${group.label}`">
+              <div class="mb-1.5 text-[10px] uppercase tracking-[0.1em] text-white/30">{{ group.label }}</div>
               <div class="flex flex-col gap-1">
                 <button
                   v-for="resolved in group.dials" :key="resolved.dial.path" type="button"
@@ -247,7 +205,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 </button>
               </div>
             </div>
-          </div>
+          </template>
         </div>
       </div>
     </div>

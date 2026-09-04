@@ -28,22 +28,33 @@ function cfg(patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig {
 }
 
 describe('vtMovesAdapter — gallery: Letterform leads', () => {
-  it('gallery(cfg, "in") returns Letterform as the FIRST group', () => {
+  it('gallery(cfg) returns Letterform as the FIRST group', () => {
     const adapter = vtMovesAdapter(DEFAULT_CONFIG, NO_AXES)
-    const groups = adapter.gallery(cfg(), 'in')
-    // Sanity: there really are other groups behind it (Axis / kinetic
-    // catalog groups) — otherwise "first" would be true for a trivial reason.
+    const groups = adapter.gallery(cfg())
+    // Sanity: there really are other groups behind it (Slide / Appear /
+    // kinetic catalog groups) — otherwise "first" would be true trivially.
     expect(groups.length).toBeGreaterThan(1)
     expect(groups[0]!.label).toBe('Letterform')
     expect(groups[0]!.offers.length).toBeGreaterThan(0)
   })
 
-  it('gallery(cfg, "loop") returns Letterform as the FIRST group', () => {
+  it('offers each in/out preset pair as ONE tile, not two', () => {
     const adapter = vtMovesAdapter(DEFAULT_CONFIG, NO_AXES)
-    const groups = adapter.gallery(cfg(), 'loop')
-    expect(groups.length).toBeGreaterThan(1)
-    expect(groups[0]!.label).toBe('Letterform')
-    expect(groups[0]!.offers.length).toBeGreaterThan(0)
+    const ids = adapter.gallery(cfg()).flatMap((g) => g.offers.map((o) => o.presetId))
+    // fade-in/fade-out are a real pair (VT_PRESET_IN_TO_OUT) — only the
+    // in-side tile should be offered; the out side is reached via the
+    // panel's In/Out toggle after adding.
+    expect(ids).toContain('fade-in')
+    expect(ids).not.toContain('fade-out')
+  })
+
+  it('direction/flip classify a paired preset id and swap it', () => {
+    const adapter = vtMovesAdapter(DEFAULT_CONFIG, NO_AXES)
+    expect(adapter.direction!('fade-in')).toBe('in')
+    expect(adapter.direction!('fade-out')).toBe('out')
+    expect(adapter.direction!('wave')).toBeNull() // a loop preset has no pair
+    expect(adapter.flip!('fade-in')).toBe('fade-out')
+    expect(adapter.flip!('fade-out')).toBe('fade-in')
   })
 })
 
