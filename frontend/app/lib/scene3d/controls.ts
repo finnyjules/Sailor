@@ -7,6 +7,7 @@ import {
   type SceneDoc, type SceneObject, type MaterialType,
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, type ParamSpec } from './primParams'
+import { LOOK_LIBRARY } from '~/lib/scene3d/lighting'
 
 /**
  * The single declarative description of Scene3D (3D Studio)'s parameters.
@@ -530,16 +531,27 @@ export const SCENE_CONTROLS: SceneControl[] = [
     'How many times the surface pattern repeats across the object', { when: hasReflectiveCoat }),
 
   // --- Lighting (doc-level; no active object needed) -------------------------------
-  select('lighting.preset', 'Lighting preset', [...LIGHTING_PRESETS], D.lighting.preset, 'Lighting'),
-  select('lighting.environment', 'Environment', [...ENVIRONMENT_KINDS], D.lighting.environment, 'Lighting'),
-  slider('lighting.sunAzimuth', 'Sun azimuth', 0, 360, 1, 'Lighting', D.lighting.sunAzimuth,
+  // Simple layer: pick a Look, then nudge three dials. Direction stays visible, so it's
+  // the one raw pair that stays ungated even in the simple view.
+  select('lighting.look', 'Look', LOOK_LIBRARY.map((l) => l.id), D.lighting.look, 'Lighting'),
+  slider('lighting.softness', 'Softness', 0, 1, 0.01, 'Lighting', D.lighting.softness),
+  slider('lighting.warmth', 'Warmth', 0, 1, 0.01, 'Lighting', D.lighting.warmth),
+  slider('lighting.brightness', 'Brightness', 0.25, 3, 0.05, 'Lighting', D.lighting.brightness),
+  slider('lighting.sunAzimuth', 'Light direction', 0, 360, 1, 'Lighting', D.lighting.sunAzimuth,
     'Compass direction the sunlight comes from'),
-  slider('lighting.sunElevation', 'Sun elevation', 5, 90, 1, 'Lighting', D.lighting.sunElevation,
+  slider('lighting.sunElevation', 'Light height', 5, 90, 1, 'Lighting', D.lighting.sunElevation,
     'How high the sun sits above the horizon'),
+  { key: 'lighting.advanced', label: 'Advanced lighting', kind: 'switch', default: D.lighting.advanced, group: 'Lighting',
+    hint: 'Show the raw shadow preset, environment, sun intensity, and ambient controls' } as SceneControl,
+  // Raw controls kept behind Advanced — nothing is removed, they just gain a `when` gate.
+  select('lighting.preset', 'Shadow preset', [...LIGHTING_PRESETS], D.lighting.preset, 'Lighting', undefined,
+    { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
+  select('lighting.environment', 'Environment', [...ENVIRONMENT_KINDS], D.lighting.environment, 'Lighting', undefined,
+    { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
   slider('lighting.sunIntensity', 'Sun intensity', 0, 3, 0.05, 'Lighting', D.lighting.sunIntensity,
-    'How bright the main sunlight is'),
+    'How bright the main sunlight is', { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
   slider('lighting.ambient', 'Ambient', 0, 2, 0.05, 'Lighting', D.lighting.ambient,
-    'Soft fill light that lifts the shadows'),
+    'Soft fill light that lifts the shadows', { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
   // Granular shaping of the `colorGels` world — shown only when it's the live environment.
   // ALL of these are inspector-only: editing any re-bakes the env (see engine.buildEnvironment),
   // so none may be animatable (a per-frame PMREM rebuild), and they're not part of the agent's
