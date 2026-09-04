@@ -111,7 +111,7 @@ function applyStops(v: GradientStop[]) { stops.value = v.map(s => ({ pos: s.pos,
         :mode="isStops ? 'stops' : 'duotone'"
         :stop-count="stops.length"
         :seed="isStops ? (stops[0]?.color ?? '#4f8ad9') : highlight"
-        @apply-duotone="applyDuotone" @apply-stops="applyStops"
+        @apply-duotone="applyDuotone" @apply-stops="applyStops" @apply-literal-stops="applyStops"
       />
     </div>
   </div>

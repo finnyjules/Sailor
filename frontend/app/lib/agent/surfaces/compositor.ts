@@ -17,6 +17,8 @@ import { sanitizeTornEdge, tornEdgeActive } from '~/lib/compositor/tornEdge'
 import { sanitizeFeather, featherActive } from '~/lib/compositor/feather'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
+import { readGrid } from '~/lib/frame/gridConfig'
+import type { FrameGrid } from '~/lib/frame/grid'
 import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
 import { shapeById, SHAPES } from '~/lib/shapes/catalog'
@@ -39,6 +41,10 @@ export interface CompositorState {
    *  round-trips through here). The agent addresses a copy by `instanceId` —
    *  it never edits a template's placed layers directly. */
   templates?: TemplateInstance[]
+  /** Doc-level layout grid (guide + snap source) — `sailor_localGrid` round-trips
+   *  through here like background/postEffects. Absent = mode 'off' (readGrid's
+   *  default), same as an old frame with no grid config saved yet. */
+  grid?: FrameGrid
 }
 
 function clone<T>(v: T): T {
@@ -143,6 +149,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'removeLayer', hint: 'Delete a layer by id. target = layer id.' },
   { op: 'setLayerDepth', hint: 'Change a layer\'s stacking depth (z-order). target = layer id; args: { to: "back" | "front" }. "back" puts it BEHIND every other layer including the connected/wired image — use this for "put the headline BEHIND the image". "front" brings it to the top.' },
   { op: 'setBackground', hint: 'Set the FRAME background that sits behind every layer. args: { paint } — a "#RRGGBB" colour, a gradient object, or "none". Use for "make the background blue / a sunset gradient".' },
+  { op: 'setGrid', hint: 'Set the layout grid on a Frame — a Swiss-style guide layers can snap to (editor-only, never baked/exported). args: { patch: {...}, generate? }. patch keys: mode ("off" | "explicit" | "generated"), baseModule (0..1 of canvas width, the alignment unit), gutter (0..1), margin (0..1), columns/rows (explicit mode counts), gen: { colRange/rowRange ([min,max] column/row counts, generated mode), regularity (0..1: 0 = loose/free spacing, 1 = strict/equal), merge (bool, merge adjacent cells into larger regions), mergeMaxSpan (max cells a merged region spans), symmetry ("none" | "mirror"), seed (integer) }, overlay (bool, show the guide lines). Omitted keys keep their current value. generate:true (or reroll:true) re-rolls a fresh random seed for a new generated-grid variation; switching mode to "generated" without giving gen.seed also rolls a fresh seed. This is what "add a layout grid", "give it a 6-column grid", "generate a new grid variation", "re-roll the grid" mean.' },
   { op: 'generateImage', hint: 'Generate a PHOTOGRAPHIC/illustrative AI image and add it as a layer — "generate a picture of a dog", "add a city photo". Not for gradients/colours (use setBackground/setFill). args: { prompt (vivid), aspectRatio? }.' },
   { op: 'removeImageBackground', hint: 'Cut out the subject of an existing IMAGE layer (transparent background). target = image layer id.' },
   { op: 'editImage', hint: 'Edit an existing IMAGE layer from an instruction (Flux Kontext) — "make it brighter", "change the sky". target = image layer id; args: { instruction }.' },
@@ -206,6 +213,11 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
     current: {
       background: paintLabel(state.background),
       postEffects: state.postEffects?.filter(e => e.visible).map(e => e.type).join(', ') || 'none',
+      grid: state.grid && state.grid.mode !== 'off'
+        ? (state.grid.mode === 'explicit'
+          ? `explicit ${state.grid.columns}×${state.grid.rows}`
+          : `generated cols ${state.grid.gen.colRange.join('-')} rows ${state.grid.gen.rowRange.join('-')} regularity ${state.grid.gen.regularity} seed ${state.grid.gen.seed}`)
+        : 'off',
       // The frame is a unit square in normalized coords: x/y/sizes are 0..1.
       coordinateSpace: 'normalized 0..1 (0,0 = top-left, 0.5,0.5 = centre)',
       // Every id addShape accepts. ~1.5 KB (measured 1,530 chars serialised); listed so the model never guesses a name.
@@ -359,6 +371,15 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       if (paint == null) return { ok: false, reason: 'invalid', detail: 'missing args.paint' }
       const bg = (paint === 'none' || paint === '') ? undefined : clone(paint as Paint)
       return { ok: true, template: { ...state, background: bg }, inverse: snapshot() }
+    }
+    case 'setGrid': {
+      const patch = (cmd.args?.patch ?? {}) as Partial<FrameGrid>
+      const g = readGrid(state.grid ? { sailor_localGrid: state.grid } : undefined)
+      const merged: FrameGrid = { ...g, ...patch, gen: { ...g.gen, ...(patch.gen ?? {}) } }
+      const reroll = cmd.args?.generate === true || cmd.args?.reroll === true
+      const enteringGeneratedNoSeed = patch.mode === 'generated' && patch.gen?.seed == null
+      if (reroll || enteringGeneratedNoSeed) merged.gen = { ...merged.gen, seed: Math.floor(Math.random() * 9999) + 1 }
+      return { ok: true, template: { ...state, grid: merged }, inverse: snapshot() }
     }
     case 'setImage': { // internal — used by the composable's edit/remove-bg media path
       const filename = cmd.args?.filename

@@ -13,6 +13,7 @@ import {
   OWN_BASE,
   RECIPES_SCHEMA,
   buildRecipesPrompt,
+  buildSeedMenu,
   materializeRecipe,
   moodMenu,
   salvageRecipes,
@@ -637,6 +638,21 @@ describe('the recipe menu only offers the versatile layout families', () => {
     const menu = lookMenu()
     for (const n of LOOK_NAMES) expect(menu, n).toContain(`${n} —`)
     for (const n of ['spectrum', 'stack', 'ripple']) expect(menu, n).not.toContain(`${n} —`)
+  })
+})
+
+describe('buildSeedMenu — the fixed hue-wheel menu the model picks a seed from', () => {
+  it('returns ~24 named hexes across the hue wheel', () => {
+    const menu = buildSeedMenu()
+    expect(menu.length).toBeGreaterThanOrEqual(20)
+    expect(menu.every(m => /^#[0-9a-f]{6}$/.test(m.hex) && m.name.length > 0)).toBe(true)
+  })
+
+  it('is deterministic and names every entry uniquely', () => {
+    const a = buildSeedMenu()
+    const b = buildSeedMenu()
+    expect(a).toEqual(b)
+    expect(new Set(a.map(m => m.name)).size).toBe(a.length)
   })
 })
 

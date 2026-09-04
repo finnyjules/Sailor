@@ -402,6 +402,9 @@ function applyGradientStops(stops: { pos: number; color: string }[]) {
   config.value.gradientMap.stops = stops.map(s => ({ pos: s.pos, color: s.color }))
   config.value.gradientMap.enabled = true
 }
+function applyEffectGradient(uniform: string, v: GradientStop[], maxStops = 8) {
+  setParam(uniform, v.slice(0, maxStops).map(s => ({ pos: s.pos, color: s.color })))
+}
 function rampCss(stops: { pos: number; color: string }[]): string {
   const s = [...stops].sort((a, b) => a.pos - b.pos)
   if (!s.length) return 'transparent'
@@ -989,7 +992,8 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
                 mode="stops"
                 :stop-count="stopsValue(p.uniform).length || 3"
                 :seed="stopsValue(p.uniform)[0]?.color ?? '#4f8ad9'"
-                @apply-stops="(v: GradientStop[]) => setParam(p.uniform, v.slice(0, p.maxStops ?? 8).map(s => ({ pos: s.pos, color: s.color })))"
+                @apply-stops="(v: GradientStop[]) => applyEffectGradient(p.uniform, v, p.maxStops ?? 8)"
+                @apply-literal-stops="(v: GradientStop[]) => applyEffectGradient(p.uniform, v, p.maxStops ?? 8)"
               />
             </div>
             <!-- float → the 28px row-as-track slider (was a bare label + <input type=range>).
@@ -1093,7 +1097,7 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
         <template #badge><StudioSwitch v-model="config.gradientMap.enabled" /></template>
         <template v-if="config.gradientMap.enabled">
           <div class="mb-2 h-6 overflow-hidden rounded border border-white/10" :style="{ background: gradientMapRampCss }" />
-          <PalettePicker mode="stops" :stop-count="config.gradientMap.stops.length" :seed="config.gradientMap.stops[0]?.color ?? '#4f8ad9'" @apply-stops="applyGradientStops" />
+          <PalettePicker mode="stops" :stop-count="config.gradientMap.stops.length" :seed="config.gradientMap.stops[0]?.color ?? '#4f8ad9'" @apply-stops="applyGradientStops" @apply-literal-stops="applyGradientStops" />
           <div class="mt-3">
             <label class="mb-1 block text-[11px] text-white/60">Mix</label>
             <input

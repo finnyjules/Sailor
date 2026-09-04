@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderShapes, toSvg, contentBounds, framePad, fitScale, shapePaints } from '~/lib/geoshape/render'
+import { renderShapes, toSvg, contentBounds, framePad, fitScale, shapePaints, drawToCanvas, studioWarmPaints } from '~/lib/geoshape/render'
 import { DEFAULT_CONFIG, mergeConfig } from '~/lib/geoshape/config'
 import { paintToVectorPaint } from '~/lib/paint/toVector'
 import type { ImageFill } from '~/lib/compositor/paint'
@@ -317,5 +317,58 @@ describe('blend to size 0', () => {
     const shapes = await renderShapes(cfg)
     expect(shapes.length).toBeGreaterThanOrEqual(11)
     for (const s of shapes) for (const c of s.commands) for (const a of c.args) expect(Number.isFinite(a)).toBe(true)
+  })
+})
+
+function mockCtx() {
+  const calls: any = { fillRectArgs: [], styles: [] }
+  const ctx: any = {
+    _fillStyle: null,
+    set fillStyle(v: any) { this._fillStyle = v; calls.styles.push(v) },
+    get fillStyle() { return this._fillStyle },
+    clearRect() {}, save() {}, restore() {}, translate() {}, scale() {},
+    fill() {}, stroke() {}, set strokeStyle(_v: any) {}, set lineWidth(_v: any) {},
+    fillRect(x: number, y: number, w: number, h: number) { calls.fillRectArgs.push([x, y, w, h]) },
+  }
+  return { ctx, calls }
+}
+
+describe('drawToCanvas background', () => {
+  it('paints a solid background over the whole output rect', () => {
+    const { ctx, calls } = mockCtx()
+    drawToCanvas([], ctx, 200, 100, 0, '#ff8800')
+    expect(calls.fillRectArgs).toContainEqual([0, 0, 200, 100])
+    expect(calls.styles).toContain('#ff8800')
+  })
+
+  it('paints nothing for a null background (transparent, the default)', () => {
+    const { ctx, calls } = mockCtx()
+    drawToCanvas([], ctx, 200, 100, 0, null)
+    expect(calls.fillRectArgs).toEqual([])
+  })
+
+  it('treats the none-sentinel as transparent', () => {
+    const { ctx, calls } = mockCtx()
+    drawToCanvas([], ctx, 200, 100, 0, 'none' as any)
+    expect(calls.fillRectArgs).toEqual([])
+  })
+
+  it('omitting the background arg stays transparent (back-compat)', () => {
+    const { ctx, calls } = mockCtx()
+    drawToCanvas([], ctx, 200, 100, 0)
+    expect(calls.fillRectArgs).toEqual([])
+  })
+})
+
+describe('studioWarmPaints', () => {
+  const img = { type: 'image', src: 'x.png' } as any
+  it('appends an image background to the shape paints', () => {
+    expect(studioWarmPaints([], img)).toContain(img)
+  })
+  it('appends a solid background too (harmless; hasAsyncPaint filters it)', () => {
+    expect(studioWarmPaints([], '#000')).toContain('#000')
+  })
+  it('omits a null background', () => {
+    expect(studioWarmPaints([], null)).toEqual([])
   })
 })

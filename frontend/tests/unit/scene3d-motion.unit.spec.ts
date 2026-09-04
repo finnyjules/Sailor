@@ -658,3 +658,29 @@ describe('sceneFrameClock', () => {
     expect(sceneFrameClock(doc).duration).toBe(6)
   })
 })
+
+describe('scene3d lighting fields', () => {
+  it('defaults the new simple-lighting fields', () => {
+    const d = defaultDoc()
+    expect(d.lighting.look).toBe('softbox-beauty')
+    expect(d.lighting.softness).toBe(0.85)
+    expect(d.lighting.warmth).toBe(0.5)
+    expect(d.lighting.brightness).toBe(1)
+    expect(d.lighting.sunColor).toBe('#ffffff')
+    expect(d.lighting.shadowSoftness).toBe(10.35)
+    expect(d.lighting.advanced).toBe(false)
+  })
+  it('round-trips the new fields and defaults them on an old doc', () => {
+    const d = defaultDoc()
+    d.lighting.look = 'rembrandt'; d.lighting.warmth = 0.8; d.lighting.sunColor = '#ffcc99'
+    const round = parseDoc(serializeDoc(d))
+    expect(round.lighting.look).toBe('rembrandt')
+    expect(round.lighting.warmth).toBe(0.8)
+    expect(round.lighting.sunColor).toBe('#ffcc99')
+    const raw = JSON.parse(serializeDoc(defaultDoc()))
+    delete raw.lighting.look; delete raw.lighting.sunColor
+    const old = parseDoc(JSON.stringify(raw))
+    expect(old.lighting.look).toBe('softbox-beauty')
+    expect(old.lighting.sunColor).toBe('#ffffff')
+  })
+})

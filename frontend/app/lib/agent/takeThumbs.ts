@@ -237,7 +237,7 @@ async function shapeThumb(config: unknown, size = DEFAULT_SIZE, aspect?: number)
   const { w, h } = thumbDimsFor('shape', config, size, aspect)
   const shapes = await renderStudio(doc)
   const out = freshCanvas(w, h)
-  drawToCanvas(shapes, out.getContext('2d')!, w, h, studioFramePad(doc))
+  drawToCanvas(shapes, out.getContext('2d')!, w, h, studioFramePad(doc), doc.background)
   return out
 }
 

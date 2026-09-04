@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRaw, w
 import { Dices, Lock, Minus, Plus, Trash2, Unlock } from 'lucide-vue-next'
 import { gradientFx } from '~/lib/gradientfx/renderer'
 import { LIQUID_PRESETS, buildConfig, defaultConfig, liquidConfig, liquidPresetConfig, meshConfig, reroll, rippleConfig, stackConfig, type RerollScope } from '~/lib/gradientfx/randomize'
-import { MESH_MAX_POINTS, buildMeshPoints, defaultMesh } from '~/lib/gradientfx/mesh'
+import { MESH_MAX_POINTS, buildMeshPoints, defaultMesh, recolorMeshPoints } from '~/lib/gradientfx/mesh'
 import { randomSeed } from '~/lib/gradientfx/rng'
 import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
@@ -570,6 +570,17 @@ function applyPaletteStops(stops: { pos: number; color: string }[]) {
   layer.value.color.stops = stops.map(s => ({ color: s.color, pos: s.pos }))
   stops.forEach((s, i) => onEdit(`layer.color.stops.${i}.color`, s.color))
 }
+// The seed-engine path: stops arrive already in their final colors+lightness,
+// so this must not re-launder them through toStops. Reuse applyPaletteStops
+// for the ramp, then recolor the mesh points too — the mesh layout renders
+// from layer.mesh.points, not color.stops (the "Molten Rust came out blue" bug).
+function applyLiteralStops(stops: { pos: number; color: string }[]) {
+  applyPaletteStops(stops)
+  const l = layer.value
+  if (l.mesh?.points?.length) {
+    l.mesh.points = recolorMeshPoints(l.mesh.points, stops, 'seed#meshcol')
+  }
+}
 
 // ── motion tracks ─────────────────────────────────────────────────────────────
 function addTrack() {
@@ -1070,7 +1081,7 @@ function onCurve(path: string, value: number | string) {
             <button class="mt-1 flex items-center gap-1 rounded bg-white/[0.06] px-2 py-1 text-[11px] text-white/60 hover:text-white" @click="addStop"><Plus class="h-3 w-3" /> Add stop</button>
           </div>
           <div class="mt-2 border-t border-white/[0.06] pt-2">
-            <PalettePicker mode="stops" :stop-count="layer.color.stops.length" :seed="layer.color.stops[0]?.color ?? '#4f8ad9'" @apply-stops="applyPaletteStops" />
+            <PalettePicker mode="stops" :stop-count="layer.color.stops.length" :seed="layer.color.stops[0]?.color ?? '#4f8ad9'" @apply-stops="applyPaletteStops" @apply-literal-stops="applyLiteralStops" />
           </div>
         </template>
 

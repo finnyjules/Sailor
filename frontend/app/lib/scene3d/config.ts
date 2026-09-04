@@ -393,6 +393,18 @@ export interface SceneLighting {
   sunElevation: number
   sunIntensity: number
   ambient: number
+  // Simple-lighting layer (see lib/scene3d/lighting.ts). `look`+dials are the USER
+  // intent the panel shows; the resolver writes them into the raw fields above plus
+  // sunColor/shadowSoftness, which the engine reads. Both persist so the round-trip
+  // and the picker/dials stay coherent.
+  look: string
+  softness: number
+  warmth: number
+  brightness: number
+  sunColor: string
+  shadowSoftness: number
+  // Later-task control gate (see task 4): true reveals the raw/advanced lighting controls.
+  advanced: boolean
   /** Granular shaping of the `colorGels` environment. Ignored by every other kind — the
    *  procedural scene bakes these into the reflected/refracted world, so any change rebuilds
    *  the env (see engine.buildEnvironment). Per-gel: colour, brightness (HDR intensity),
@@ -660,6 +672,15 @@ export function rampStopsOf(mat: SceneMaterial): GradientStop[] {
   return toStops(harmonize(seedHex, scheme, N), N)
 }
 
+/** Apply seed-engine palette stops (PalettePicker's literal/seed shelf results) to a
+ *  material as authored manual stops. Flips `paletteMode` to 'manual' so rampStopsOf
+ *  above does not shadow them with a generated harmony ramp on the very next render —
+ *  a material caught in 'harmony' mode must show the applied stops immediately. */
+export function applySeedStopsToMaterial(mat: SceneMaterial, stops: GradientStop[]): void {
+  mat.paletteMode = 'manual'
+  mat.gradientStops = stops.slice(0, GRADIENT_STOPS_MAX).map((s) => ({ pos: s.pos, color: s.color }))
+}
+
 /** A full-hue-wheel spectrum, CYCLIC (first stop == last) so the opal shader's `fract()` wrap has
  *  no colour seam. This is the opalescent default — unlike the gradient material, an opal with no
  *  authored stops must look holographic out of the box, not like the grey `color`→`gradientB`
@@ -687,8 +708,11 @@ export function defaultDoc(): SceneDoc {
     version: 1,
     objects: [],
     camera: { position: [4, 3, 6], target: [0, 0.5, 0], fov: 45 },
+    // Raw fields seeded to match the 'softbox-beauty' Look (lib/scene3d/lighting.ts) so a fresh scene renders what its Look name promises. Keep in sync if that recipe changes.
     lighting: {
-      preset: 'studio', environment: 'room', sunAzimuth: 35, sunElevation: 55, sunIntensity: 1.4, ambient: 0.5,
+      preset: 'soft', environment: 'softbox', sunAzimuth: 35, sunElevation: 40, sunIntensity: 1.2, ambient: 0.7,
+      look: 'softbox-beauty', softness: 0.85, warmth: 0.5, brightness: 1, sunColor: '#ffffff', shadowSoftness: 10.35,
+      advanced: false,
       gelColorA: '#ff0da6', gelBrightnessA: 7, gelSizeA: 1, gelAzimuthA: -100, gelHeightA: 1.5, gelDistanceA: 4.6,
       gelColorB: '#0dccff', gelBrightnessB: 7, gelSizeB: 1, gelAzimuthB: 100, gelHeightB: 1.5, gelDistanceB: 4.6,
       gelRim: true, gelRimColor: '#ffffff', gelRimBrightness: 4,
@@ -1258,6 +1282,13 @@ export function parseDoc(json: string): SceneDoc {
       sunElevation: typeof raw.lighting?.sunElevation === 'number' ? raw.lighting.sunElevation : d.lighting.sunElevation,
       sunIntensity: typeof raw.lighting?.sunIntensity === 'number' ? raw.lighting.sunIntensity : d.lighting.sunIntensity,
       ambient: typeof raw.lighting?.ambient === 'number' ? raw.lighting.ambient : d.lighting.ambient,
+      look: typeof raw.lighting?.look === 'string' ? raw.lighting.look : d.lighting.look,
+      softness: typeof raw.lighting?.softness === 'number' ? raw.lighting.softness : d.lighting.softness,
+      warmth: typeof raw.lighting?.warmth === 'number' ? raw.lighting.warmth : d.lighting.warmth,
+      brightness: typeof raw.lighting?.brightness === 'number' ? raw.lighting.brightness : d.lighting.brightness,
+      sunColor: typeof raw.lighting?.sunColor === 'string' ? raw.lighting.sunColor : d.lighting.sunColor,
+      shadowSoftness: typeof raw.lighting?.shadowSoftness === 'number' ? raw.lighting.shadowSoftness : d.lighting.shadowSoftness,
+      advanced: raw.lighting?.advanced === true,
       gelColorA: str(raw.lighting?.gelColorA, d.lighting.gelColorA),
       gelBrightnessA: num(raw.lighting?.gelBrightnessA, d.lighting.gelBrightnessA),
       gelSizeA: num(raw.lighting?.gelSizeA, d.lighting.gelSizeA),

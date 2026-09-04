@@ -66,6 +66,9 @@ export interface GeoStudioDoc {
   padding: number
   /** Stack-level reroll seed (each layer keeps its own `mark.seed` too). */
   seed: number
+  /** Full-composite background painted behind every layer. `null` = transparent
+   *  (historical behaviour). A `Paint` fills the entire output rect. */
+  background: Paint | null
 }
 
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d)
@@ -137,6 +140,15 @@ function mergeOverlap(raw: unknown): GeoOverlap {
   }
 }
 
+/** A background is any Paint, or null for transparent. The none-sentinels a
+ *  paint picker can emit ('none'/'') collapse to null so "transparent" has one
+ *  canonical stored form. */
+export function normalizeBackground(raw: unknown): Paint | null {
+  if (raw == null || raw === 'none' || raw === '') return null
+  if (typeof raw === 'string' || typeof raw === 'object') return raw as Paint
+  return null
+}
+
 /** A brand-new single-layer document (one default mark, overlap off). */
 export function defaultDoc(): GeoStudioDoc {
   return {
@@ -144,6 +156,7 @@ export function defaultDoc(): GeoStudioDoc {
     overlap: defaultOverlap(),
     padding: DEFAULT_CONFIG.padding,
     seed: DEFAULT_CONFIG.seed,
+    background: null,
   }
 }
 
@@ -158,6 +171,7 @@ export function mergeStudioDoc(raw: unknown): GeoStudioDoc {
     overlap: mergeOverlap(o.overlap),
     padding: num(o.padding, DEFAULT_CONFIG.padding),
     seed: num(o.seed, DEFAULT_CONFIG.seed),
+    background: normalizeBackground(o.background),
   }
 }
 
@@ -177,6 +191,7 @@ export function studioDocFromPersisted(persisted: unknown): GeoStudioDoc {
       overlap: defaultOverlap(),
       padding: mark.padding,
       seed: mark.seed,
+      background: null,
     }
   }
   return defaultDoc()

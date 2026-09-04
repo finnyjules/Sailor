@@ -30,6 +30,8 @@ import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { syncAllWiredWidgets, wiredLayerHeight, type ContentDims } from '~/lib/compositor/wiredLayer'
 import { inject, type Ref } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
+import { readGrid, gridProperty } from '~/lib/frame/gridConfig'
+import { resolveGrid, type FrameGrid, type Rect } from '~/lib/frame/grid'
 
 interface EditorOpts {
   node: () => any                       // the compositor node (reactive)
@@ -195,6 +197,18 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     else (n.data.properties as any).sailor_localFx = fx
   }
   function setPostEffects(fx: PostEffect[]) { recordHistory(); writeFx(fx) }
+
+  // Doc-level grid config (layout guide + snap source). Persisted like background/
+  // postEffects: on node properties, absent-key defaulted via readGrid so old
+  // frames (no sailor_localGrid at all) resolve to mode:'off'. Not part of the
+  // undo Snapshot below — a layout-guide tweak isn't a content edit, and folding
+  // it into history would push no-op restore entries (Snapshot has no grid field).
+  const grid = computed<FrameGrid>(() => readGrid(node()?.data?.properties as any))
+  function setGrid(g: FrameGrid) {
+    const n = node(); if (!n) return
+    if (!n.data.properties) n.data.properties = {}
+    Object.assign(n.data.properties, gridProperty(g))
+  }
 
   // ── Undo / redo (snapshot history over local layers + z-order) ──────────────
   // The editor is the single mutation choke point, so one history stack here
@@ -594,6 +608,19 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   const snapGuides = ref<{ vx: number | null; hy: number | null }>({ vx: null, hy: null })
   const SNAP_PX = 6 // snap distance threshold in screen pixels
 
+  // Grid line positions, normalized to [0,1], for drag snapping (Task 6). A Vue
+  // `computed` — recomputed only when `grid` (itself computed off the node's
+  // properties) or the canvas dims change, NOT on every pointermove; `resolveGrid`
+  // reseeds a PRNG and walks the axis-edge algorithm, so re-running it per pointer
+  // event would be real, avoidable work on every dragged pixel.
+  const gridSnapLines = computed(() => {
+    const g = grid.value
+    if (g.mode === 'off') return { xs: [] as number[], ys: [] as number[] }
+    const { w: W, h: H } = dims()
+    const { xs, ys } = resolveGrid(g, W, H)
+    return { xs: xs.map(x => x / W), ys: ys.map(y => y / H) }
+  })
+
   // screen px → normalized [0,1] within the artboard
   function toNorm(clientX: number, clientY: number, r: DOMRect) {
     return { nx: (clientX - r.left) / r.width, ny: (clientY - r.top) / r.height }
@@ -650,7 +677,8 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       const lb = boxPx(l)
       others.push({ cx: l.x, cy: l.y, hx: lb.w / 2 / W, hy: lb.h / 2 / H })
     }
-    const res = computeSnapAdjust({ cx, cy, hx, hy }, others, SNAP_PX / W, SNAP_PX / H)
+    const gl = gridSnapLines.value
+    const res = computeSnapAdjust({ cx, cy, hx, hy }, others, SNAP_PX / W, SNAP_PX / H, [0, 0.5, 1], gl.xs, gl.ys)
     snapGuides.value = { vx: res.guideX, hy: res.guideY }
     return { dx: dx + res.dx, dy: dy + res.dy }
   }
@@ -793,6 +821,100 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     window.addEventListener('pointerup', onUp, { once: true })
   }
 
+  // ── Grid-driven section ops (Task 7) ────────────────────────────────────────
+  // "Fill grid with sections", "Draw section" and "Re-snap to grid" all key off
+  // the same `gridSnapLines` (Task 6) the drag-snap already uses, so a section's
+  // edges always land exactly on the lines the overlay draws.
+
+  /** Create one empty (unfilled) `rect` layer per grid region — `regions` are the
+   *  PIXEL boxes `resolveGrid` returns, same basis as `dims()`. Grouped (when >1)
+   *  and selected together, in one history step. The caller enforces the
+   *  region-count cap (dense fills are a later feature) before calling this —
+   *  this function just lays the rects down. */
+  function fillGridWithSections(regions: Rect[]) {
+    if (!regions.length) return
+    const W = dims().w, H = dims().h
+    recordHistory()
+    const gid = regions.length > 1 ? `g-${Date.now().toString(36)}-${++_groupSeq}` : undefined
+    const layers = regions.map(r => createRectLayer({
+      x: (r.x + r.w / 2) / W, y: (r.y + r.h / 2) / H,
+      // RectLayer w/h are both normalized to canvas WIDTH (see localLayerBox).
+      w: r.w / W, h: r.h / W,
+      fill: 'none', stroke: '', strokeWidth: 0,
+      ...(gid ? { groupId: gid } : {}),
+    }))
+    commit([...localLayers.value, ...layers])
+    if (gid) writeGroups([...localGroups.value, { id: gid }])
+    selectedIds.value = new Set(layers.map(l => l.id))
+    selectedId.value = layers[layers.length - 1]?.id ?? null
+  }
+
+  /** Snap each currently-selected layer's box edges to the nearest grid line,
+   *  independently per layer, in one history step. A large threshold (0.5) means
+   *  it always finds the nearest line rather than requiring the layer to already
+   *  be close — "re-snap", not "snap if close". No-op with the grid off or an
+   *  empty selection. */
+  function resnapSelected() {
+    const gl = gridSnapLines.value
+    if (!gl.xs.length && !gl.ys.length) return
+    const sel = selectedLayers.value
+    if (!sel.length) return
+    const W = dims().w, H = dims().h
+    const patches = new Map<string, { x: number; y: number }>()
+    for (const l of sel) {
+      const b = boxPx(l)
+      const hx = b.w / 2 / W, hy = b.h / 2 / H
+      const res = computeSnapAdjust({ cx: l.x, cy: l.y, hx, hy }, [], 0.5, 0.5, [], gl.xs, gl.ys)
+      if (res.dx || res.dy) patches.set(l.id, { x: l.x + res.dx, y: l.y + res.dy })
+    }
+    if (!patches.size) return
+    recordHistory()
+    commit(localLayers.value.map(l => (patches.has(l.id) ? { ...l, ...patches.get(l.id)! } as LocalLayer : l)))
+  }
+
+  /** "Draw section" mode: while on, a marquee drag on the artboard creates a
+   *  snapped rect instead of selecting (see `finishDrawSection`). A separate flag
+   *  from every other tool mode — the host gates its own pointer handlers on it,
+   *  same pattern as brush/pen/node-edit — so normal marquee selection is
+   *  byte-identical when the mode is off. */
+  const drawSectionActive = ref(false)
+  function setDrawSectionActive(v: boolean) { drawSectionActive.value = v }
+
+  function nearestGridLine(v: number, lines: number[]): number {
+    if (!lines.length) return v
+    let best = lines[0]!, bd = Math.abs(v - lines[0]!)
+    for (const ln of lines) { const d = Math.abs(v - ln); if (d < bd) { bd = d; best = ln } }
+    return best
+  }
+
+  /** End a "Draw section" drag: reuses the same `marquee` rect `startMarquee`/
+   *  `moveMarquee` build, but on up snaps BOTH corners to the nearest grid line
+   *  (falling back to the canvas edges [0,1] with no grid) and creates a rect
+   *  instead of running the selection hit-test. Too-small drags (a click) are a
+   *  no-op, same threshold as `endMarquee`. */
+  function finishDrawSection() {
+    const m = marquee.value; marquee.value = null
+    if (!m) return
+    const W = dims().w, H = dims().h
+    const gl = gridSnapLines.value
+    const xs = gl.xs.length ? gl.xs : [0, 1]
+    const ys = gl.ys.length ? gl.ys : [0, 1]
+    const x0 = nearestGridLine(Math.min(m.x0, m.x1), xs)
+    const x1 = nearestGridLine(Math.max(m.x0, m.x1), xs)
+    const y0 = nearestGridLine(Math.min(m.y0, m.y1), ys)
+    const y1 = nearestGridLine(Math.max(m.y0, m.y1), ys)
+    const wN = x1 - x0            // fraction of W, same convention as x0/x1
+    const hN = ((y1 - y0) * H) / W // fraction of H → px → fraction of W (RectLayer.h convention)
+    if (wN < 0.005 || hN < 0.002) return // a click, not a drag
+    recordHistory()
+    const layer = createRectLayer({
+      x: x0 + wN / 2, y: y0 + (y1 - y0) / 2, w: wN, h: hN,
+      fill: 'none', stroke: '', strokeWidth: 0,
+    })
+    commit([...localLayers.value, layer])
+    selectLocal(layer.id)
+  }
+
   // Consumer binds these to the artboard element (capture phase recommended so
   // it wins over node-drag). Returns true if it handled (hit a layer).
   // `forcedId` lets the caller supply the hit layer from a more accurate (e.g.
@@ -924,6 +1046,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     addPathLayers, addPathFromSvg, deleteLayers, commit, recordHistory,
     background, setBackground,
     postEffects, setPostEffects,
+    grid, setGrid,
     undo, redo, canUndo, canRedo,
     selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, nudgeSelection, duplicateSelection, handleEditorKey,
     copySelection, pasteClipboard,
@@ -932,5 +1055,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     editingLayerNameId, layerNameDraft, startLayerRename, commitLayerRename, setLayerName,
     localGroups, commitBoth, writeGroups, setLayerGroup, setGroupParent, selectGroupById,
     snapGuides, marquee, startMarquee, moveMarquee, endMarquee,
+    fillGridWithSections, resnapSelected,
+    drawSectionActive, setDrawSectionActive, finishDrawSection,
   }
 }

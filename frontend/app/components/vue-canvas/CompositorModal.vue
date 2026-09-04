@@ -19,7 +19,7 @@ import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMask
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import { useLocalLayerEditor, resizableKind, cornerResizableKind } from '~/composables/useLocalLayerEditor'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
-import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance } from '~/lib/frametemplate/apply'
+import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
@@ -42,6 +42,8 @@ import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, ty
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
+import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
 import { generateVectorFromText, vectorizeImage, urlToDataUrl } from '~/composables/useVectorAi'
 import { imageLayerUrl } from '~/composables/useCompositorLayers'
@@ -62,6 +64,8 @@ import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 import '~/lib/motion/paint' // registers the motion painter for paintLayerStack(t)
 import { bakeAndUpload, motionSourceKey, type MotionParams } from '~/lib/motion/bake'
+import { readGrid } from '~/lib/frame/gridConfig'
+import { resolveGrid, type FrameGrid } from '~/lib/frame/grid'
 import CompositorMotionTimeline from '~/components/vue-canvas/compositor/CompositorMotionTimeline.vue'
 import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
@@ -73,6 +77,10 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import StrokeStyleRow from '~/components/vue-canvas/compositor/StrokeStyleRow.vue'
 import FillSwatch from '~/components/vue-canvas/compositor/FillSwatch.vue'
+import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
+import type { PaletteFamily } from '~/lib/color/seedFamily'
+import type { GradientStop } from '~/lib/color/harmony'
+import { layerPaletteAssignments } from '~/lib/compositor/distribute'
 import PostEffectsControls from '~/components/vue-canvas/PostEffectsControls.vue'
 import { isChainEffect, isGpuEffect } from '~/lib/compositor/postEffects'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
@@ -250,6 +258,24 @@ const baseAspect = computed(() => {
   return d && d.h ? d.w / d.h : 1
 })
 const canvasDisplay = reactive({ w: 680, h: 680 })
+// ── Grid overlay + inspector ─────────────────────────────────────────────────
+// `gridConfig` is display-only wiring: it feeds the overlay below (lines +
+// region rects drawn over the stage). It is never consumed by any
+// paintLayerStack/bake call in this file (those all draw into an offscreen
+// `off` canvas, not this DOM overlay), so it can't leak into an export or
+// embed. The modal IS the editor, so there is no separate "edit mode" gate
+// the way the card has — visible whenever the grid itself is on.
+// Writes go through the editor's `setGrid` (below, in the "No selection" panel's
+// Grid section) — same property-write path as `setBackground`/`setPostEffects`.
+const gridConfig = computed(() => readGrid(compositor.value?.data?.properties as any))
+const gridResolved = computed(() => resolveGrid(gridConfig.value, canvasDisplay.w, canvasDisplay.h))
+const showGridOverlay = computed(() => gridConfig.value.mode !== 'off' && gridConfig.value.overlay)
+function patchGrid(patch: Partial<FrameGrid>) {
+  setGrid({ ...gridConfig.value, ...patch })
+}
+function patchGen(patch: Partial<FrameGrid['gen']>) {
+  setGrid({ ...gridConfig.value, gen: { ...gridConfig.value.gen, ...patch } })
+}
 const stageBoxRef = ref<HTMLElement | null>(null)
 // The stage box is full-bleed (inset-0): the glass panels float ABOVE it, so
 // zoomed/panned content slides under them instead of cropping at their edge.
@@ -549,6 +575,7 @@ const {
   addPathLayers, addPathFromSvg, deleteLayers,
   background, setBackground,
   postEffects, setPostEffects,
+  setGrid,
   undo, redo, canUndo, canRedo,
   selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, recordHistory, commit, handleEditorKey, pasteClipboard,
   selectionBox, selectionHandles, startGroupResize,
@@ -558,7 +585,24 @@ const {
   editingLayerNameId, layerNameDraft, startLayerRename, commitLayerRename,
   snapGuides, marquee, startMarquee, moveMarquee, endMarquee,
   hud,
+  fillGridWithSections, resnapSelected,
+  drawSectionActive, setDrawSectionActive, finishDrawSection,
 } = editor
+
+// Region-count cap for "Fill grid with sections": a dense generated/explicit
+// grid (say 12×8) can resolve to dozens of cells — stamping a rect per cell past
+// this point is real, avoidable layer-panel/render clutter for a feature meant
+// for coarse layout grids. Dense fills are a later feature (see Task 7 brief).
+const GRID_SECTIONS_CAP = 24
+function onFillGridWithSections() {
+  const { regions } = gridResolved.value
+  if (!regions.length) { toast('Turn the grid on first', { description: 'Fill grid with sections needs an explicit or generated grid.' }); return }
+  if (regions.length > GRID_SECTIONS_CAP) {
+    toast('Too many regions for sections', { description: 'Use a coarser grid — dense fills are a later feature.' })
+    return
+  }
+  fillGridWithSections(regions)
+}
 
 // Normalize brush layers to a tight box: brush strokes are stored in absolute
 // artboard coords, and a layer's x/y/w/h should equal their bounds so the render
@@ -600,12 +644,14 @@ const {
     layers: localLayers.value,
     background: background.value,
     postEffects: postEffects.value,
+    grid: readGrid(compositor.value?.data?.properties as any),
     brandPalette: brandSwatches(projectBrand?.activeKit.value),
   }),
   setState: (s) => {
     commit(s.layers)
     if (s.background !== background.value) setBackground(s.background)
     if (JSON.stringify(s.postEffects ?? []) !== JSON.stringify(postEffects.value)) setPostEffects(s.postEffects ?? [])
+    if (s.grid && JSON.stringify(s.grid) !== JSON.stringify(gridConfig.value)) setGrid(s.grid)
   },
   apiKey: () => getLocalSetting('Sailor.AI.AnthropicApiKey') ?? '',
   dims: () => ({ w: canvasDisplay.w, h: canvasDisplay.h }),
@@ -857,6 +903,34 @@ function focusPrompt() {
 }
 
 const selectedCount = computed(() => selectedLayers.value.length)
+// Distribute a seed-engine palette across the multi-selection, one hex per
+// layer (cycling short / resampling long — layerPaletteAssignments). `wired`
+// layers have no paint field of their own (their pixels come from an upstream
+// node), so they're excluded from both the distribution and the write —
+// exactly like clonableSelection() excludes them from duplication.
+const showMultiPalette = ref(false)
+// Core of the distribution, reached via apply-stops only (gallery and harmony
+// panes emit apply-stops; the seed shelf emits apply-family separately, via
+// applyPaletteToSelection, and also emits apply-literal-stops — which is
+// deliberately NOT bound below, since binding it double-fires this on every
+// seed-tile click) — see the @apply-* bindings on the picker below.
+function distributePaletteToSelection(hexes: string[]) {
+  const targets = selectedLayers.value.filter(l => l.kind !== 'wired')
+  if (!targets.length) { showMultiPalette.value = false; return }
+  const assignments = layerPaletteAssignments(targets.map(l => l.id), hexes)
+  recordHistory()
+  commit(localLayers.value.map((l) => {
+    const hex = assignments[l.id]
+    if (!hex) return l
+    const copy: any = { ...l }
+    applySlotToLayer(copy, 'color', hex)
+    return copy as LocalLayer
+  }))
+  showMultiPalette.value = false
+}
+function applyPaletteToSelection(fam: PaletteFamily) {
+  distributePaletteToSelection(fam.hexes)
+}
 // Box layers (rect/ellipse/image) get full Figma-style resize (corners + edges,
 // anchored opposite side); text/line/path keep uniform corner scale (no 2D box).
 const selectedResizable = computed(() => !!selectedLocal.value && resizableKind(selectedLocal.value.kind))
@@ -1645,6 +1719,17 @@ function onCanvasPointerDownCapture(e: PointerEvent) {
   if (brush.active.value) { onBrushPointerDown(e); return } // brush mode owns the canvas
   if (pen.active.value) { onPenPointerDown(e); return } // pen mode owns the canvas
   if (nodeEdit.active.value) { onNodePointerDown(e); return } // node edit owns the canvas
+  if (drawSectionActive.value) {
+    // Draw-section mode owns the canvas: ALWAYS starts a fresh marquee (never a
+    // layer hit/move), so selection is untouched while the mode is on — see
+    // `finishDrawSection`, the separate branch that turns the drag into a rect.
+    // `lastDownHitLayer = true` stops the trailing `click` from deselecting the
+    // rect `finishDrawSection` just selected (same guard the layer-hit path uses).
+    lastDownHitLayer = true
+    const p = clientToNorm(e)
+    if (p) startMarquee(p.nx, p.ny)
+    return
+  }
   if ((e.target as HTMLElement)?.closest?.('[data-handle]')) return // a handle's own drag
   const key = hitTopStackKey(e.clientX, e.clientY)
   const res = key ? resolveStackKey(key) : null
@@ -1669,6 +1754,7 @@ function onCanvasPointerMoveCapture(e: PointerEvent) {
   if (brush.active.value) { onBrushPointerMove(e); return }
   if (pen.active.value) onPenPointerMove(e)
   else if (nodeEdit.active.value) onNodePointerMove(e)
+  else if (drawSectionActive.value) { if (marquee.value) { const p = clientToNorm(e); if (p) moveMarquee(p.nx, p.ny) } }
   else if (marquee.value) { const p = clientToNorm(e); if (p) moveMarquee(p.nx, p.ny) }
 }
 function onCanvasPointerUpCapture(e: PointerEvent) {
@@ -1677,6 +1763,7 @@ function onCanvasPointerUpCapture(e: PointerEvent) {
   if (brush.active.value) { void onBrushPointerUp(); return }
   if (pen.active.value) onPenPointerUp()
   else if (nodeEdit.active.value) onNodePointerUp()
+  else if (drawSectionActive.value) { if (marquee.value) finishDrawSection() }
   else if (marquee.value) endMarquee(e.shiftKey)
 }
 function onCanvasDblClickCapture(e: MouseEvent) {
@@ -4966,6 +5053,33 @@ onUnmounted(() => {
           :style="{ width: canvasDisplay.w + 'px', height: canvasDisplay.h + 'px' }"
         />
 
+        <!-- Grid overlay — editor guide only. Gated on the grid config; lives
+             entirely outside the paint/bake path (see gridConfig above, and every
+             paintLayerStack call in this file draws into an offscreen canvas, not
+             this DOM overlay), so it can never appear in an export or embed. -->
+        <svg
+          v-if="showGridOverlay"
+          data-testid="compositor-grid-overlay"
+          class="absolute inset-0 pointer-events-none"
+          :width="canvasDisplay.w" :height="canvasDisplay.h" :viewBox="`0 0 ${canvasDisplay.w} ${canvasDisplay.h}`"
+        >
+          <rect
+            v-for="(r, i) in gridResolved.regions" :key="'region-' + i"
+            :x="r.x" :y="r.y" :width="r.w" :height="r.h"
+            fill="#22d3ee" fill-opacity="0.05" stroke="none"
+          />
+          <line
+            v-for="(x, i) in gridResolved.xs" :key="'x-' + i"
+            :x1="x" :y1="0" :x2="x" :y2="canvasDisplay.h"
+            stroke="#22d3ee" stroke-opacity="0.35" stroke-width="1" vector-effect="non-scaling-stroke"
+          />
+          <line
+            v-for="(y, i) in gridResolved.ys" :key="'y-' + i"
+            :x1="0" :y1="y" :x2="canvasDisplay.w" :y2="y"
+            stroke="#22d3ee" stroke-opacity="0.35" stroke-width="1" vector-effect="non-scaling-stroke"
+          />
+        </svg>
+
         <!-- Shader-fill live-field ceiling hint (Task 6) — never truncate silently,
              same wording as Space Type / Shape Studio's own hint. -->
         <div v-if="shaderFieldsFrozen > 0"
@@ -5284,6 +5398,22 @@ onUnmounted(() => {
             class="h-7 px-2 rounded bg-white/[0.06] hover:bg-white/12 text-[11px] text-white/85 cursor-pointer"
             @click="applyBoolean(b.op)">{{ b.label }}</button>
         </template>
+        <div class="w-px h-5 bg-white/10 mx-0.5" />
+        <div class="relative">
+          <button
+            class="flex items-center justify-center size-7 rounded hover:bg-white/12 cursor-pointer"
+            :class="showMultiPalette ? 'text-yellow-400' : 'text-white/80'"
+            title="Apply palette to selected layers" @click="showMultiPalette = !showMultiPalette">
+            <Palette class="size-4" />
+          </button>
+          <div v-if="showMultiPalette"
+            class="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-[280px] rounded-[10px] border border-[#2a2a2a] bg-[#1a1a1a]/97 p-2 shadow-xl z-30"
+            @pointerdown.stop>
+            <div class="mb-1.5 text-[11px] text-white/60">Apply palette to {{ selectedCount }} selected layers</div>
+            <PalettePicker mode="stops" @apply-family="applyPaletteToSelection"
+              @apply-stops="(stops: GradientStop[]) => distributePaletteToSelection(stops.map(s => s.color))" />
+          </div>
+        </div>
       </div>
       <div
         v-else-if="nodeEdit.active.value"
@@ -6110,6 +6240,7 @@ onUnmounted(() => {
           <component :is="kindIcon(selectedLocal.kind)" class="size-3.5 text-white/60" />
           <span class="text-sm font-medium capitalize">{{ selectedLocal.kind }}</span>
           <div class="ml-auto flex items-center gap-1">
+            <button v-if="gridConfig.mode !== 'off'" class="text-white/40 hover:text-white/80 p-1" title="Re-snap to grid" @click="resnapSelected"><LayoutGrid class="size-3.5" /></button>
             <button class="text-white/40 hover:text-white/80 p-1" title="Bring forward" @click="moveStackZ(localKey(selectedLocal.id), 1)"><ArrowUp class="size-3.5" /></button>
             <button class="text-white/40 hover:text-white/80 p-1" title="Send backward" @click="moveStackZ(localKey(selectedLocal.id), -1)"><ArrowDown class="size-3.5" /></button>
             <button class="text-white/40 hover:text-red-400 p-1" title="Delete" @click="deleteLocal(selectedLocal.id)"><Trash2 class="size-3.5" /></button>
@@ -6891,6 +7022,72 @@ onUnmounted(() => {
             <div class="panel-label mb-1.5">Post-processing</div>
             <p class="text-[10px] text-white/30 leading-snug mb-2">Grades the whole frame after all layers composite — bakes into renders, exports and motion stills.</p>
             <PostEffectsControls :effects="postEffects" @update="(fx: any[]) => setPostEffects(fx as any)" />
+          </div>
+          <!-- Grid — a layout guide (explicit or seeded-generated) that snaps
+               drag/resize and, optionally, draws an editor-only overlay. Never
+               baked into the render (see the comment above `gridConfig`). -->
+          <div class="border-t border-white/[0.06] pt-3">
+            <div class="panel-label mb-1.5">Grid</div>
+            <StudioSegmented :options="['off', 'explicit', 'generated']" :model-value="gridConfig.mode"
+              @update:model-value="(v: any) => patchGrid({ mode: v })" />
+
+            <template v-if="gridConfig.mode === 'explicit'">
+              <div class="mt-2 flex flex-col gap-1.5">
+                <StudioSlider label="Columns" :min="1" :max="24" :step="1" :bindable="false"
+                  :model-value="gridConfig.columns" @update:model-value="(v: number) => patchGrid({ columns: v })" />
+                <StudioSlider label="Rows" :min="1" :max="24" :step="1" :bindable="false"
+                  :model-value="gridConfig.rows" @update:model-value="(v: number) => patchGrid({ rows: v })" />
+                <StudioSlider label="Gutter" :min="0" :max="0.1" :step="0.002" :bindable="false"
+                  :model-value="gridConfig.gutter" @update:model-value="(v: number) => patchGrid({ gutter: v })" />
+                <StudioSlider label="Margin" :min="0" :max="0.2" :step="0.002" :bindable="false"
+                  :model-value="gridConfig.margin" @update:model-value="(v: number) => patchGrid({ margin: v })" />
+              </div>
+            </template>
+
+            <template v-else-if="gridConfig.mode === 'generated'">
+              <div class="mt-2 flex flex-col gap-1.5">
+                <div class="grid grid-cols-2 gap-1.5">
+                  <StudioSlider label="Cols min" :min="1" :max="24" :step="1" :bindable="false"
+                    :model-value="gridConfig.gen.colRange[0]"
+                    @update:model-value="(v: number) => patchGen({ colRange: [v, Math.max(v, gridConfig.gen.colRange[1])] })" />
+                  <StudioSlider label="Cols max" :min="1" :max="24" :step="1" :bindable="false"
+                    :model-value="gridConfig.gen.colRange[1]"
+                    @update:model-value="(v: number) => patchGen({ colRange: [Math.min(gridConfig.gen.colRange[0], v), v] })" />
+                </div>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <StudioSlider label="Rows min" :min="1" :max="24" :step="1" :bindable="false"
+                    :model-value="gridConfig.gen.rowRange[0]"
+                    @update:model-value="(v: number) => patchGen({ rowRange: [v, Math.max(v, gridConfig.gen.rowRange[1])] })" />
+                  <StudioSlider label="Rows max" :min="1" :max="24" :step="1" :bindable="false"
+                    :model-value="gridConfig.gen.rowRange[1]"
+                    @update:model-value="(v: number) => patchGen({ rowRange: [Math.min(gridConfig.gen.rowRange[0], v), v] })" />
+                </div>
+                <StudioSlider label="Regularity" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="gridConfig.gen.regularity" @update:model-value="(v: number) => patchGen({ regularity: v })" />
+                <StudioSwitch label="Merge cells" :model-value="gridConfig.gen.merge"
+                  @update:model-value="(v: boolean) => patchGen({ merge: v })" />
+                <StudioSlider v-if="gridConfig.gen.merge" label="Max span" :min="1" :max="8" :step="1" :bindable="false"
+                  :model-value="gridConfig.gen.mergeMaxSpan" @update:model-value="(v: number) => patchGen({ mergeMaxSpan: v })" />
+                <div class="panel-label mt-1 mb-1">Symmetry</div>
+                <StudioSegmented :options="['none', 'mirror']" :model-value="gridConfig.gen.symmetry"
+                  @update:model-value="(v: any) => patchGen({ symmetry: v })" />
+                <div class="mt-1 flex items-center gap-2">
+                  <StudioButton variant="secondary" @click="patchGen({ seed: Math.floor(Math.random() * 9999) + 1 })">New variation</StudioButton>
+                  <div class="min-w-0 flex-1">
+                    <StudioSlider label="Seed" :min="1" :max="9999" :step="1" :default="42" :bindable="false"
+                      :model-value="gridConfig.gen.seed" @update:model-value="(v: number) => patchGen({ seed: v })" />
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="gridConfig.mode !== 'off'" class="mt-2 flex flex-col gap-1.5">
+              <StudioSwitch label="Show overlay" :model-value="gridConfig.overlay"
+                @update:model-value="(v: boolean) => patchGrid({ overlay: v })" />
+              <StudioSwitch label="Draw section" hint="Drag on the artboard to stamp a rect snapped to the grid"
+                :model-value="drawSectionActive" @update:model-value="(v: boolean) => setDrawSectionActive(v)" />
+              <StudioButton variant="secondary" @click="onFillGridWithSections">Fill grid with sections</StudioButton>
+            </div>
           </div>
           <!-- Expressive arrange (a whole group is selected) -->
           <div v-if="soleSelectedGroup" class="border-t border-white/[0.06] pt-3">

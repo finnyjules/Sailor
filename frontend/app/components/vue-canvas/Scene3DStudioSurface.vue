@@ -19,11 +19,12 @@ import {
 import {
   parseDoc, serializeDoc, createPrimitive, createGlbObject, createLight, createGroup, createDecal,
   MATERIAL_DEFAULTS, LIGHT_KINDS, gradientAngles, gradientStopsOf, opalStopsOf, screenOf,
-  DEFAULT_FONT_URL, DECAL_DEFAULTS, sceneHasShaderFill, sceneHasOpalFlow,
+  DEFAULT_FONT_URL, DECAL_DEFAULTS, sceneHasShaderFill, sceneHasOpalFlow, applySeedStopsToMaterial,
   type SceneDoc, type SceneObject, type PrimitiveObject, type PrimitiveKind, type MaterialType, type GradientStop, type LightKind, type LightObject, type ReliefSpec, type SceneMaterial, type ScreenSpec, type Vec3,
   type DecalObject, type DecalContent,
 } from '~/lib/scene3d/config'
 import { eulerFromNormal } from '~/lib/scene3d/decals'
+import { getLook, resolveLook, resolveDials } from '~/lib/scene3d/lighting'
 import { HARMONY_TYPES, HARMONY_LABELS } from '~/lib/color/harmony'
 import { MATCAP_IDS, matcapThumb, onTextureError } from '~/lib/scene3d/materials'
 import { toHeightPixels, heightGradient, RELIEF_FLAT_THRESHOLD } from '~/lib/scene3d/relief'
@@ -36,6 +37,7 @@ import { libraryToken, resolveLibraryFace, libraryFamily } from '~/data/library-
 import FontPicker from '~/components/vue-canvas/FontPicker.vue'
 import TexturePicker from '~/components/vue-canvas/TexturePicker.vue'
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
+import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapeToSvg } from '~/lib/shapes/svg'
 import { anchorAbove } from '~/lib/shapes/pickerLayout'
@@ -666,6 +668,15 @@ const matOpalStops = computed<GradientStop[]>({
   get: () => (selected.value ? opalStopsOf(selected.value.material) : []),
   set: (v) => applyMaterial((m) => { m.gradientStops = v.map((s) => ({ ...s })) }),
 })
+
+/** Seed-engine palette (PalettePicker's "Seed engine" shelf, literal or cooked) applied to
+ *  every selected material — routes through applyMaterial like the setters above so a
+ *  multi-selection fans out, and through applySeedStopsToMaterial so paletteMode flips to
+ *  'manual' (a material caught in 'harmony' mode must show the applied stops immediately,
+ *  not the generated ramp — see rampStopsOf in config.ts). */
+function applySeedPaletteStops(stops: GradientStop[]): void {
+  applyMaterial((m) => applySeedStopsToMaterial(m, stops))
+}
 
 // ── shaderFill (object anchor only — Task 7) ─────────────────────────────────
 // Hand-wired: Scene3D has no control-schema/agent path (unlike Space Type/Shape Studio's
@@ -1750,6 +1761,34 @@ watch(doc, () => {
   if (!interaction?.pivotDragActive) engine?.syncFromDoc(doc)
   scheduleHistory()
 }, { deep: true })
+// Look change → apply the whole recipe (direction, env, preset, default dials),
+// then recompute the dial-driven fields from those defaults.
+watch(() => doc.lighting.look, (id) => {
+  const recipe = getLook(id)
+  const p = resolveLook(recipe)
+  doc.lighting.sunAzimuth = p.sunAzimuth
+  doc.lighting.sunElevation = p.sunElevation
+  doc.lighting.environment = p.environment
+  doc.lighting.preset = p.preset
+  doc.lighting.softness = p.softness
+  doc.lighting.warmth = p.warmth
+  const d = resolveDials(recipe, { softness: p.softness, warmth: p.warmth, brightness: doc.lighting.brightness })
+  doc.lighting.sunIntensity = d.sunIntensity
+  doc.lighting.ambient = d.ambient
+  doc.lighting.sunColor = d.sunColor
+  doc.lighting.shadowSoftness = d.shadowSoftness
+})
+// Dial change → recompute ONLY the dial-driven fields; direction/env/preset untouched.
+watch(() => [doc.lighting.softness, doc.lighting.warmth, doc.lighting.brightness], () => {
+  const recipe = getLook(doc.lighting.look)
+  const d = resolveDials(recipe, {
+    softness: doc.lighting.softness, warmth: doc.lighting.warmth, brightness: doc.lighting.brightness,
+  })
+  doc.lighting.sunIntensity = d.sunIntensity
+  doc.lighting.ambient = d.ambient
+  doc.lighting.sunColor = d.sunColor
+  doc.lighting.shadowSoftness = d.shadowSoftness
+})
 // Watches the whole ORDERED selection, not just the primary: a modifier-click
 // that only extends the list leaves `selectedId` unchanged but still has to
 // rebuild the gizmo around a pivot.
@@ -4247,6 +4286,14 @@ async function onClose() {
 
           <template #control-ui.material.gradientStops>
             <StudioGradientRamp v-model="matGradientStops" />
+            <PalettePicker
+              mode="stops"
+              :stop-count="matGradientStops.length"
+              :seed="matGradientStops[0]?.color ?? '#4f8ad9'"
+              class="mt-2"
+              @apply-stops="applySeedPaletteStops"
+              @apply-literal-stops="applySeedPaletteStops"
+            />
           </template>
 
           <template #control-ui.material.gradientDirection>

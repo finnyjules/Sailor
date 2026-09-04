@@ -21,7 +21,7 @@
  * is a different feature — `paint.ts`'s header already scopes it out for the
  * identical reason — and is left for a future task.
  */
-import type { VectorShape, VectorPaint } from '~/lib/vector/svg'
+import type { VectorShape, VectorPaint, VectorCommand } from '~/lib/vector/svg'
 import { commandsToPathData, shapesToSVG, transformCommands, type SvgDocOptions } from '~/lib/vector/svg'
 import { baseShapePath } from './shapes'
 import { arrange } from './arrange'
@@ -252,6 +252,32 @@ async function vectorPaintFor(s: VectorShape, paint: Paint): Promise<VectorPaint
   return vp
 }
 
+/** The final framed box (document coords) a mark's `bounds` grown by `pad`
+ *  occupies — the SAME extent+centre `frameSvg`/`drawToCanvas` frame into. */
+function frameBox(bounds: { minX: number; minY: number; w: number; h: number }, pad: number): { x: number; y: number; w: number; h: number } {
+  const w = paddedExtent(bounds.w, pad)
+  const h = paddedExtent(bounds.h, pad)
+  const cx = bounds.minX + bounds.w / 2
+  const cy = bounds.minY + bounds.h / 2
+  return { x: cx - w / 2, y: cy - h / 2, w, h }
+}
+
+/** A full-frame rectangle shape carrying the background `paint`, drawn first
+ *  (behind the marks). Non-solid paints ride on `.paint` so `embedShapePaints`
+ *  boxes them to the rect's own (full-frame) bounds; the solid `.fill` is the
+ *  synchronous fallback. */
+function backgroundRectShape(box: { x: number; y: number; w: number; h: number }, paint: Paint): GeoVectorShape {
+  const { x, y, w, h } = box
+  const commands: VectorCommand[] = [
+    { command: 'moveTo', args: [x, y] },
+    { command: 'lineTo', args: [x + w, y] },
+    { command: 'lineTo', args: [x + w, y + h] },
+    { command: 'lineTo', args: [x, y + h] },
+    { command: 'closePath', args: [] },
+  ]
+  return { commands, fill: typeof paint === 'string' ? paint : FALLBACK_FILL, paint }
+}
+
 /**
  * Wrap paint-embedded `shapes` into an SVG document framed by `bounds` grown by
  * `pad`. Uses `paddedExtent` + a mark-CENTRED viewBox (rather than `minX - pad`)
@@ -341,8 +367,22 @@ export function studioFramePad(doc: GeoStudioDoc): number {
 export async function studioToSvg(doc: GeoStudioDoc, opts: Partial<SvgDocOptions> = {}): Promise<string> {
   const shapes = await renderStudio(doc)
   const b = contentBounds(shapes)
-  await embedShapePaints(shapes)
-  return frameSvg(shapes, b, studioFramePad(doc), opts)
+  const pad = studioFramePad(doc)
+  const bg = doc.background
+  const hasBg = !!bg && bg !== 'none'
+  // A SOLID background rides `shapesToSVG`'s own `background` option — the one
+  // case it already renders as a literal full-bleed `<rect>` behind every
+  // `<path>` (see its doc), which is both simpler and cheaper than a shape.
+  // A non-solid (gradient/pattern/image) background has no such native slot,
+  // so it is prepended as its own full-frame `VectorShape` instead, letting
+  // `embedShapePaints` turn its `.paint` into a real paint-server fill exactly
+  // like any other shape's.
+  const solidBg = hasBg && typeof bg === 'string' ? bg : undefined
+  const withBg = hasBg && typeof bg !== 'string'
+    ? [backgroundRectShape(frameBox(b, pad), bg as Paint), ...shapes]
+    : shapes
+  await embedShapePaints(withBg)   // embeds a gradient/image background too
+  return frameSvg(withBg, b, pad, { background: solidBg, ...opts })
 }
 
 /** A fallback colour for a fill `resolvePaintCanvas` cannot resolve yet (image/
@@ -389,8 +429,25 @@ const STILL_FIELD: ShaderFieldFrameCtx = { frameW: 1, frameH: 1, t: 0, fps: 30, 
  * the CALLER's job: `warmPaints` below, then call this again. That degrades
  * gracefully either way; it never throws.
  */
-export function drawToCanvas(shapes: VectorShape[], ctx: CanvasRenderingContext2D, w: number, h: number, pad = 0): void {
+export function drawToCanvas(
+  shapes: VectorShape[], ctx: CanvasRenderingContext2D,
+  w: number, h: number, pad = 0, background: Paint | null = null,
+): void {
   ctx.clearRect(0, 0, w, h)
+  // Document background: a full-output rect behind the padding frame and every
+  // shape. Painted in the UNTRANSFORMED device frame (before the fit/centre
+  // transform below) so it spans the whole canvas, not the mark's box. `null`
+  // and the 'none'/'' sentinels stay transparent (the historical behaviour).
+  if (background && background !== 'none') {
+    if (typeof background === 'string') {
+      ctx.fillStyle = background
+      ctx.fillRect(0, 0, w, h)
+    } else {
+      const style = resolvePaintCanvas(ctx, background as Paint, { w, h }, STILL_FIELD)
+      ctx.fillStyle = (style as any) ?? FALLBACK_FILL
+      ctx.fillRect(0, 0, w, h)
+    }
+  }
   const b = contentBounds(shapes)
   const scale = fitScale(b, w, h, pad)
   ctx.save()
@@ -465,6 +522,16 @@ export function shapePaints(shapes: VectorShape[]): Paint[] {
     const sp = (s as GeoVectorShape).strokePaint
     if (sp && typeof sp !== 'string') out.push(sp)
   }
+  return out
+}
+
+/** The paints a studio doc needs warmed before a real paint/rasterize: every
+ *  shape's authored paint (via `shapePaints`) plus the document background.
+ *  Solid/null entries are harmless — `hasAsyncPaint` filters them; only
+ *  image/shader entries actually cost a warm. */
+export function studioWarmPaints(shapes: VectorShape[], background: Paint | null): Paint[] {
+  const out = shapePaints(shapes)
+  if (background && background !== 'none') out.push(background)
   return out
 }
 

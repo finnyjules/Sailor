@@ -18,14 +18,15 @@ import { Dices } from 'lucide-vue-next'
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import type { GeoShapeConfig } from '~/lib/geoshape/config'
 import {
-  renderStudio, studioToSvg, drawToCanvas, warmPaints, shapePaints, hasAsyncPaint, studioFramePad,
+  renderStudio, studioToSvg, drawToCanvas, warmPaints, studioWarmPaints, hasAsyncPaint, studioFramePad,
 } from '~/lib/geoshape/render'
 import {
-  LAYER_MAX, mergeLayer, studioDocFromPersisted, type GeoStudioDoc, type GeoLayer,
+  LAYER_MAX, mergeLayer, studioDocFromPersisted, normalizeBackground, type GeoStudioDoc, type GeoLayer,
 } from '~/lib/geoshape/studio'
 import { reroll } from '~/lib/geoshape/randomize'
 import { GEO_CONTROLS, GEO_SECTIONS, visibleGeoControls, type GeoControl } from '~/lib/geoshape/controls'
 import { geoAgentControls, GEO_GUIDANCE } from '~/lib/geoshape/agentControls'
+import { distributeToGeoFills } from '~/lib/geoshape/distribute'
 import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioLayerStack from '~/components/vue-canvas/StudioLayerStack.vue'
@@ -34,8 +35,11 @@ import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vu
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPanel.vue'
+import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import type { Paint } from '~/lib/compositor/paint'
+import type { PaletteFamily } from '~/lib/color/seedFamily'
+import type { GradientStop } from '~/lib/color/harmony'
 import { useStudioAgent } from '~/composables/useStudioAgent'
 import { makeConfigParams } from '~/lib/agent/configParams'
 import { docAspect } from '~/lib/agent/takeThumbs'
@@ -175,6 +179,14 @@ function updateOverlapPaletteFill(i: number, p: Paint) {
   doc.value.overlap.fills = doc.value.overlap.fills.map((x, j) => (j === i ? p : x))
 }
 
+// ── Background — full-composite fill painted behind every layer. `null` is
+// transparent; `normalizeBackground` collapses the FillControl none-sentinels
+// ('none'/'') to that same `null` (see studio.ts). Direct doc mutation, like the
+// overlap-palette setters above — the deep watch in useStudioAutosave persists it.
+function setBackground(p: Paint) {
+  doc.value.background = normalizeBackground(p)
+}
+
 // ── re-roll — regenerates every UNLOCKED section of the SELECTED layer's mark from a
 // fresh derived seed. `mark.locks` starts empty, so a plain click re-rolls the whole
 // active mark.
@@ -306,6 +318,22 @@ function fillDrop(i: number) {
 }
 function fillDragEnd() { fillDrag.from = -1; fillDrag.over = -1 }
 
+// Seed-engine palette → discrete fills (Task 12: first DISCRETE-palette consumer —
+// lands N palette colors as N separate fills rather than a gradient projection).
+// Flips fillStrategy off 'single' so the write is visible immediately.
+// Shared by all three PalettePicker panes: the seed pane emits apply-family
+// (fam.hexes), gallery/harmony emit apply-stops / apply-literal-stops
+// (GradientStop[], mapped to hexes at the binding) — see the @apply-* bindings
+// on the picker below.
+function applyGeoPalette(hexes: string[]) {
+  const next = distributeToGeoFills(activeMark.value, hexes)
+  setGeoControl('fills', next.fills)
+  setGeoControl('fillStrategy', next.fillStrategy)
+}
+function applyPaletteToFills(fam: PaletteFamily) {
+  applyGeoPalette(fam.hexes)
+}
+
 function addOverlapFill() { setGeoControl('overlapFills', [...activeMark.value.overlapFills, '#ffffff']) }
 function removeOverlapFill(i: number) {
   if (activeMark.value.overlapFills.length <= 1) return
@@ -358,13 +386,13 @@ async function renderPreview() {
     const shapes = await renderStudio(doc.value)
     if (token !== renderToken) return // superseded by a later render
     const pad = studioFramePad(doc.value)
-    drawToCanvas(shapes, ctx, el.width, el.height, pad)
+    drawToCanvas(shapes, ctx, el.width, el.height, pad, doc.value.background)
     // Image/shader fills resolve to FALLBACK_FILL until warmed — warm-then-repaint.
-    const paints = shapePaints(shapes)
+    const paints = studioWarmPaints(shapes, doc.value.background)
     if (hasAsyncPaint(paints)) {
       await warmPaints(paints, { w: el.width, h: el.height })
       if (token !== renderToken) return
-      drawToCanvas(shapes, ctx, el.width, el.height, pad)
+      drawToCanvas(shapes, ctx, el.width, el.height, pad, doc.value.background)
     }
   } catch (e) {
     console.error('[shape-studio] preview render failed', e)
@@ -415,9 +443,9 @@ async function rasterizePng(): Promise<Blob | null> {
   const ctx = off.getContext('2d')
   if (!ctx) return null
   // A ONE-SHOT render gets no second chance — warm BEFORE the only draw.
-  const paints = shapePaints(shapes)
+  const paints = studioWarmPaints(shapes, doc.value.background)
   if (hasAsyncPaint(paints)) await warmPaints(paints, { w: off.width, h: off.height })
-  drawToCanvas(shapes, ctx, off.width, off.height, studioFramePad(doc.value))
+  drawToCanvas(shapes, ctx, off.width, off.height, studioFramePad(doc.value), doc.value.background)
   return await new Promise<Blob | null>((resolve) => off.toBlob(resolve, 'image/png'))
 }
 
@@ -579,6 +607,21 @@ async function exportSvg() {
           </template>
         </StudioControlPanel>
 
+        <!-- Seed-engine palette → discrete fills. Shown regardless of fillStrategy —
+             applying a family flips fillStrategy off 'single' itself, so the picker
+             must stay reachable even from the (default) single-fill state.
+             All three panes route through the same discrete applyGeoPalette path:
+             the seed pane emits apply-family (and apply-literal-stops alongside
+             it — both bound here to the same hexes, since setGeoControl writes
+             here aren't paired with an explicit recordHistory()/commit() the way
+             the Compositor's distributePaletteToSelection is, so a same-value
+             re-write from the second event isn't the doubled-undo hazard that
+             made the Compositor drop that binding); gallery/harmony emit
+             apply-stops only. -->
+        <PalettePicker mode="stops" class="mt-2" @apply-family="applyPaletteToFills"
+          @apply-stops="(stops: GradientStop[]) => applyGeoPalette(stops.map(s => s.color))"
+          @apply-literal-stops="(stops: GradientStop[]) => applyGeoPalette(stops.map(s => s.color))" />
+
         <!-- Fills list editor — under the Paint card when fillStrategy isn't 'single'. -->
         <div v-if="activeMark.fillStrategy !== 'single'" class="mt-2 space-y-2">
           <div v-for="(f, i) in activeMark.fills" :key="i" data-row
@@ -667,6 +710,16 @@ async function exportSvg() {
             <StudioSelect label="Colour order" v-model="doc.overlap.order" :options="OVERLAP_ORDERS" />
             <StudioSelect label="Crossings" v-model="doc.overlap.crossingMode" :options="OVERLAP_CROSSINGS" />
           </template>
+        </StudioSection>
+
+        <!-- Background — full-composite fill behind every layer. `null` = transparent. -->
+        <StudioSection title="Background">
+          <FillControl
+            allow-none
+            allow-image
+            :model-value="doc.background ?? 'none'"
+            @update:model-value="setBackground"
+          />
         </StudioSection>
 
         <!-- Canvas (export dimensions — not part of the doc) -->

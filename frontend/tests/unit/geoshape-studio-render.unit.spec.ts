@@ -111,4 +111,23 @@ describe('geoshape studio render', () => {
     const stud = await renderStudio(defaultDoc())
     expect(stud.length).toBeGreaterThanOrEqual(1)
   })
+
+  describe('studioToSvg background', () => {
+    const doc = (bg: any) => mergeStudioDoc({ layers: [{ mark: { shape: 'hexagon' } }], background: bg })
+
+    it('emits no background rect when transparent', async () => {
+      const svg = await studioToSvg(doc(null))
+      // No full-frame rect element (shapes are <path>, never <rect>).
+      expect(svg).not.toContain('<rect')
+    })
+
+    it('emits a solid background rect as the first drawable, behind the paths', async () => {
+      const svg = await studioToSvg(doc('#123456'))
+      const rectAt = svg.indexOf('<rect')
+      const pathAt = svg.indexOf('<path')
+      expect(rectAt).toBeGreaterThanOrEqual(0)
+      expect(svg).toContain('#123456')
+      expect(rectAt).toBeLessThan(pathAt)   // background is behind the marks
+    })
+  })
 })
