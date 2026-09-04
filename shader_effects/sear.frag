@@ -1,10 +1,12 @@
 #version 300 es
 precision highp float;
-uniform sampler2D u_image0;
+uniform sampler2D u_image0;   // pass 1 reads the heat field that pass 0 wrote
+uniform sampler2D u_source;   // the original input image (for Image mix)
 uniform vec2 u_resolution;
 uniform float u_time;
 uniform float u_seed;
 uniform float u_hasInput;
+uniform float u_pass;
 in vec2 v_texCoord;
 layout(location = 0) out vec4 fragColor0;
 
@@ -21,88 +23,144 @@ float vnoise(vec2 p, float seed) {
     float c = hash2(i + vec2(0, 1), seed), d = hash2(i + vec2(1, 1), seed);
     return mix(mix(a, b, u2.x), mix(c, d, u2.x), u2.y);
 }
-float fbmN(vec2 p, float seed, int oct) {
+// Rougher than the usual fbm on purpose (gain 0.58, lacunarity 2.05): the extra weight on
+// the fine octaves is what gives the colour blocks their ragged coastlines.
+float fbmR(vec2 p, float seed, int oct) {
     float v = 0.0, a = 0.5, norm = 0.0;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 5; i++) {
         if (i >= oct) break;
-        v += a * vnoise(p, seed + float(i) * 17.0); norm += a;
-        p *= 2.03; a *= 0.5;
+        v += a * vnoise(p, seed + float(i) * 131.0); norm += a;
+        p *= 2.05; a *= 0.58;
     }
     return v / max(norm, 1e-5);
 }
 
+// The inks are read as a ramp, coolest first, EVENLY spaced by order (the stop positions
+// are ignored, as in a thermal camera's lookup table).
 #define MAXS 8
 uniform vec3 u_ramp[MAXS];
 uniform float u_rampPos[MAXS];
 uniform float u_rampCount;
-vec3 rampAt(float t) {
-    t = clamp(t, 0.0, 1.0);
+vec3 rampEven(float t) {
     int n = int(u_rampCount + 0.5);
-    vec3 c = u_ramp[0];
-    for (int i = 1; i < MAXS; i++) {
-        if (i >= n) break;
-        float p0 = u_rampPos[i - 1], p1 = u_rampPos[i];
-        c = mix(c, u_ramp[i], clamp((t - p0) / max(p1 - p0, 1e-5), 0.0, 1.0));
-    }
-    return c;
-}
-float bandq(float t, float steps) {
-    steps = max(steps, 2.0);
-    return min(floor(clamp(t, 0.0, 0.9999) * steps), steps - 1.0) / (steps - 1.0);
+    if (n < 2) return u_ramp[0];
+    float u = clamp(t, 0.0, 1.0) * float(n - 1);
+    int k = min(n - 2, int(floor(u)));
+    return mix(u_ramp[k], u_ramp[min(k + 1, MAXS - 1)], u - float(k));
 }
 
-uniform float u_steps;
 uniform float u_scale;
-uniform float u_bend;
+uniform float u_warp;
 uniform float u_detail;
-uniform float u_streak;
+uniform float u_smear;
 uniform float u_drag;
 uniform float u_tear;
+uniform float u_steps;
 uniform float u_grain;
-uniform float u_cell;
+uniform float u_drift;
 uniform float u_speed;
 uniform float u_mix;
 
-// The heat field: fbm pushed through itself by `u_bend` so blobs lean and fold.
-float heat(vec2 uv, float t, int oct) {
-    vec2 asp = vec2(u_resolution.x / u_resolution.y, 1.0);
-    vec2 p = (uv - 0.5) * asp * u_scale;
-    vec2 q = vec2(fbmN(p + vec2(0.0, t), u_seed, oct), fbmN(p + vec2(4.1, 2.7) - t, u_seed + 7.0, oct));
-    return fbmN(p + u_bend * (q - 0.5) * 2.5, u_seed + 17.0, oct);
+// ---------- pass 0: the heat field ----------
+// `uv` is canvas space: x right, y DOWN, both 0..1.
+float heat(vec2 uv) {
+    float aspect = u_resolution.y / u_resolution.x;
+    float span = 0.7 + (1.0 - u_scale) * 7.5;      // how many blobs across the width
+    float k = u_warp * 2.6;
+    int oct = int(clamp(u_detail, 1.0, 5.0) + 0.5);
+    // Drift: the field orbits slowly; Speed sets the rate, Drift the radius.
+    float ph = u_time * u_speed * 0.25;
+    vec2 o = vec2(cos(ph), sin(ph)) * (u_drift * 1.4);
+    float u = uv.x * span, v = uv.y * span * aspect;
+    // Two warps: a slow one bends the whole field into lobes, the main fbm roughens it.
+    float wx = fbmR(vec2(u * 0.55 + 11.3 + o.x, v * 0.55 + 4.1 + o.y), u_seed + 7.0, 2) - 0.5;
+    float wy = fbmR(vec2(u * 0.55 + 2.7, v * 0.55 + 19.7 + o.y), u_seed + 13.0, 2) - 0.5;
+    float t = fbmR(vec2(u + wx * k + o.x * 0.6, v + wy * k + o.y * 0.6), u_seed, oct);
+    // Flatten the histogram so every slice of the ramp covers about the same amount of the
+    // picture: that is what turns a soft gradient into flat blocks of one colour. The tool
+    // measures its frame; here the fbm's spread is known per octave count (mean 0.5, sd
+    // 0.211 / 0.157 / 0.130 / 0.121 / 0.115 for 1..5 octaves) and a logistic stands in for
+    // the CDF; a stretched raw value keeps 12% of the original shape, as the tool does.
+    float sd = (oct <= 1) ? 0.211 : (oct == 2) ? 0.157 : (oct == 3) ? 0.130 : (oct == 4) ? 0.121 : 0.115;
+    float raw = clamp((t - 0.5) / (5.2 * sd) + 0.5, 0.0, 1.0);
+    float eq = 1.0 / (1.0 + exp(-1.702 * (t - 0.5) / sd));
+    return clamp(mix(raw, eq, 0.88), 0.0, 1.0);
+}
+
+// The field is carried between passes as 16 bits split over red and green, because the
+// intermediate texture is 8-bit and the streak threshold is finer than 1/255.
+vec4 encode16(float h) {
+    float v16 = floor(clamp(h, 0.0, 1.0) * 65535.0 + 0.5);
+    return vec4(floor(v16 / 256.0) / 255.0, mod(v16, 256.0) / 255.0, 0.0, 1.0);
+}
+// Read the field at canvas pixel (cx, cy) (y DOWN), sampling the exact texel centre.
+float fieldAt(float cx, float cy) {
+    vec2 tc = vec2((cx + 0.5) / u_resolution.x, 1.0 - (cy + 0.5) / u_resolution.y);
+    vec4 s = texture(u_image0, tc);
+    return (floor(s.r * 255.0 + 0.5) * 256.0 + floor(s.g * 255.0 + 0.5)) / 65535.0;
 }
 
 void main() {
-    float cell = max(u_cell, 1.0);
-    vec2 px = floor(v_texCoord * u_resolution / cell);
-    vec2 uv = (px + 0.5) * cell / u_resolution;
-    float t = u_time * u_speed * 0.15;
-    int oct = int(clamp(u_detail, 1.0, 8.0) + 0.5);
-    float frame = floor(u_time * u_speed * 10.0);   // row breaks re-roll ~6x/s at default Speed and freeze at Speed 0
-
-    // Drag: every row slides sideways by its own amount. Tear: a few rows jump a long way.
-    float row = px.y;
-    float dx = (hash2(vec2(row, 0.0), u_seed + frame) - 0.5) * u_drag * 0.25;
-    if (hash2(vec2(row, 1.0), u_seed + frame) < u_tear * 0.12) {
-        dx += (hash2(vec2(row, 2.0), u_seed + frame) - 0.5) * 0.8;
+    if (u_pass < 0.5) {
+        fragColor0 = encode16(heat(vec2(v_texCoord.x, 1.0 - v_texCoord.y)));
+        return;
     }
-    vec2 suv = vec2(uv.x + dx, uv.y);
 
-    // Streak: a row holds its hottest value for a stretch to the left (a horizontal max-smear).
-    float h = heat(suv, t, oct);
-    if (u_streak > 0.0) {
-        for (int k = 1; k <= 4; k++) {
-            float off = float(k) * u_streak * 0.04;
-            h = max(h, heat(suv - vec2(off, 0.0), t, oct) - float(k) * 0.02);
-        }
+    // ---------- pass 1: the rows ----------
+    float W = u_resolution.x, H = u_resolution.y;
+    vec2 px = floor(v_texCoord * u_resolution);
+    float x = px.x;
+    float y = (H - 1.0) - px.y;                     // canvas y, downwards
+
+    // Tear: some bands of rows are dragged so hard the whole row collapses into two or
+    // three stripes of flat colour and slides sideways with it.
+    float bandH = max(2.0, floor(H * 0.028 + 0.5));
+    float band = floor(y / bandH);
+    bool torn = hash2(vec2(band, 77.0), u_seed + 3.0) < u_tear * 0.62;
+    float shift = torn ? (hash2(vec2(band, 91.0), u_seed + 5.0) - 0.5) * W * 1.4 * u_tear : 0.0;
+
+    // Streak: how far a run of held colour may go, and how big a change breaks it.
+    float maxRun = max(2.0, floor((0.02 + u_smear * u_smear * 1.2) * W + 0.5));
+    float thresh = 0.0015 + pow(1.0 - u_smear, 2.2) * 0.22;
+    float rowRun = torn ? W : maxRun;
+    float rowThr = torn ? thresh + 0.45 * u_tear : thresh;
+
+    // Drag: the sample is pulled back along the row, and the pull wanders smoothly down the
+    // picture rather than jumping row to row, so edges lean and melt in one piece.
+    float pull = u_drag * W * 0.3
+               * (0.15 + 0.85 * vnoise(vec2(y * 0.014, band * 0.37), u_seed + 17.0))
+               * (0.5 + 0.5 * sin(y * 0.031));
+
+    // The field value the row sees at canvas x, after pull and the torn shift (wrapping).
+    #define FIELD(cx) fieldAt(mod(max((cx) - pull, 0.0) + shift, W), y)
+
+    // The tool scans each row left to right, holding a colour until the heat under it moves
+    // by `rowThr` or the run reaches `rowRun`. Per pixel that becomes: runs anchored on a
+    // per-row jittered grid of length rowRun, reset at the nearest edge to the left.
+    float v = FIELD(x);
+    float jitter = hash2(vec2(y, 5.0), u_seed + 23.0) * rowRun;
+    float x0 = max(0.0, floor((x + jitter) / rowRun) * rowRun - jitter);
+    float held = FIELD(x0);
+    float stride = max(1.0, (x - x0) / 16.0);
+    float prev = v;
+    for (int k = 1; k <= 16; k++) {
+        float cx = x - float(k) * stride;
+        if (cx < x0) break;
+        float w = FIELD(cx);
+        if (abs(w - prev) > rowThr) { held = prev; break; }   // an edge: the run restarted just right of it
+        prev = w;
     }
-    h = clamp((h - 0.5) * 2.0 + 0.5, 0.0, 1.0);
 
-    float g = (hash2(px, u_seed + 99.0) - 0.5) * u_grain / max(u_steps, 2.0);
-    vec3 col = rampAt(bandq(h + g, u_steps));
+    // Grain only shows where a band ends, so it reads as a dithered coastline.
+    float q = held + (hash2(vec2(x, y), u_seed + 29.0) - 0.5) * u_grain * 0.34;
+
+    // Posterise: every step gets the same slice of the range, ends included.
+    float steps = max(2.0, floor(u_steps + 0.5));
+    float t = min(steps - 1.0, floor(clamp(q, 0.0, 0.9999) * steps)) / (steps - 1.0);
+    vec3 col = rampEven(t);
 
     if (u_hasInput > 0.5 && u_mix > 0.0) {
-        vec3 img = texture(u_image0, v_texCoord).rgb;
-        col = mix(col, img, u_mix);
+        col = mix(col, texture(u_source, v_texCoord).rgb, u_mix);
     }
     fragColor0 = vec4(col, 1.0);
 }
