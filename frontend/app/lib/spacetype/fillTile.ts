@@ -33,14 +33,13 @@ import { shapeById } from '~/lib/shapes/catalog'
 // digits, because StudioColor emits #rrggbbaa.
 const PARAM_HEX = /^#?([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 
-export type FillType = 'solid' | 'gradient' | 'ombre' | 'grid' | 'noise' | 'checkerboard' | 'stripes' | 'qr' | 'shader' | 'shapes'
+export type FillType = 'solid' | 'gradient' | 'ombre' | 'grid' | 'noise' | 'checkerboard' | 'stripes' | 'qr' | 'shader' | 'shapes' | 'paper'
 /** `a`/`b` drive the slot's fill (stripe); `textColor` is the solid colour for type on that row.
- *  `angle` (degrees) applies to `stripes`/`gradient`/`ombre`/`shapes` (per-shape rotation);
- *  `density` controls cell/stripe count. `shapeId`, `shapeSize` and `shapeGap` are only meaningful
- *  (and only ever set by `normalizeFill`) for `type === 'shapes'`: `shapeId` is the library shape
- *  tiled across the grid, while `shapeSize` (shape span) and `shapeGap` (gap between shapes) are
- *  tile fractions from which the grid count is DERIVED so the pattern still tiles seamlessly. */
-export interface Fill { type: FillType; a: string; b: string; textColor: string; angle: number; density: number; shader?: ShaderSpec; shapeId?: string; shapeSize?: number; shapeGap?: number }
+ *  `angle` (degrees) applies to `stripes`/`gradient`/`ombre`/`shapes` (per-shape rotation) and to
+ *  `paper` (fibre direction); `density` controls cell/stripe count, and grain fineness for `paper`.
+ *  `shapeId`, `shapeSize`, `shapeGap` are only meaningful for `type === 'shapes'`. `grain` (0..1)
+ *  is only meaningful for `type === 'paper'`: the grain strength, set only by `normalizeFill`. */
+export interface Fill { type: FillType; a: string; b: string; textColor: string; angle: number; density: number; shader?: ShaderSpec; shapeId?: string; shapeSize?: number; shapeGap?: number; grain?: number }
 
 /** A shader fill runs `input` through a catalog effect against any `Paint` — a flat
  *  colour, a linear/radial gradient, or another (non-shader) `Fill`. `input` is NEVER
@@ -57,7 +56,7 @@ export interface ShaderSpec {
 }
 
 /** All fill types, in picker order. SINGLE SOURCE OF TRUTH — imported by every fill dropdown. */
-export const FILL_TYPES: FillType[] = ['solid', 'gradient', 'ombre', 'grid', 'noise', 'checkerboard', 'stripes', 'qr', 'shader', 'shapes']
+export const FILL_TYPES: FillType[] = ['solid', 'gradient', 'ombre', 'grid', 'noise', 'checkerboard', 'stripes', 'qr', 'shader', 'shapes', 'paper']
 export const DEFAULT_FILL: Fill = { type: 'solid', a: '#ffffff', b: '#000000', textColor: '#ffffff', angle: 45, density: 8 }
 
 export const DEFAULT_SHADER_SPEC: ShaderSpec = {
@@ -154,6 +153,11 @@ export function normalizeFill(f: unknown, depth = 0): Fill {
     const d = cl(typeof o.density === 'number' ? o.density : 8, 1, 64)
     base.shapeSize = typeof o.shapeSize === 'number' ? cl(o.shapeSize, 0.01, 0.6) : 0.76 / d
     base.shapeGap  = typeof o.shapeGap  === 'number' ? cl(o.shapeGap,  0,    0.6) : 0.24 / d
+  }
+  // `grain` (0..1) is only meaningful for a `paper` fill — the grain strength. Default 0.4,
+  // clamped, so every downstream consumer can assume a real number whenever `type === 'paper'`.
+  if (type === 'paper') {
+    base.grain = typeof o.grain === 'number' ? Math.max(0, Math.min(1, o.grain)) : 0.4
   }
   if (type !== 'shader') return base            // a spec on a non-shader fill is dropped
   return { ...base, shader: normalizeShaderSpec(o.shader, depth) }
@@ -397,6 +401,63 @@ function paintShapesTile(ctx: CanvasRenderingContext2D, fill: Fill, W: number, H
   }
 }
 
+/** Deterministic per-cell hash in [0,1) — the seed for paper's grain and fibre placement.
+ *  Fixed constants (no time, no Math.random) so a paper tile is byte-stable across renders,
+ *  which is what lets it tile and raster-export without shimmer. */
+function paperHash(cx: number, cy: number): number {
+  const v = Math.sin(cx * 127.1 + cy * 311.7) * 43758.5453
+  return v - Math.floor(v)
+}
+
+/**
+ * Paper grain as a pure ImageData: base colour `a` speckled toward the grain tint `b` on the
+ * dark side and toward white on the light side, giving paper "tooth". `grain` (0..1) scales the
+ * speckle strength; `density` sets grain fineness (bigger density ⇒ smaller grain cells, matching
+ * the other patterned fills' "more density = finer detail"). Exported so it can be unit-tested
+ * without a DOM canvas.
+ */
+export function paperImageData(w: number, h: number, fill: Fill): ImageData {
+  const base = hexBytes(fill.a), tint = hexBytes(fill.b)
+  const grain = Math.max(0, Math.min(1, fill.grain ?? 0.4))
+  const cell = Math.max(1, Math.round(24 / Math.max(1, fill.density || 1)))
+  const img = new ImageData(w, h)
+  for (let i = 0; i < img.data.length; i += 4) {
+    const px = (i / 4) % w, py = Math.floor((i / 4) / w)
+    const n = paperHash(Math.floor(px / cell), Math.floor(py / cell))   // 0..1 per grain cell
+    const k = (n - 0.5) * 2 * grain                                     // -grain..+grain
+    for (let ch = 0; ch < 3; ch++) {
+      const target = k >= 0 ? tint[ch]! : 255                           // dark fleck → tint, light fleck → white
+      img.data[i + ch] = Math.round(base[ch]! + (target - base[ch]!) * Math.abs(k))
+    }
+    img.data[i + 3] = 255
+  }
+  return img
+}
+
+/** Paint a paper fill onto a size-agnostic tile: the grain image, then a few faint directional
+ *  fibre streaks along `angle` tinted toward `b`. Fibre count/opacity grow with `grain`.
+ *  Deterministic (seeded via paperHash). */
+export function paintPaperTile(ctx: CanvasRenderingContext2D, fill: Fill, W: number, H: number): void {
+  ctx.putImageData(paperImageData(W, H, fill), 0, 0)
+  const grain = Math.max(0, Math.min(1, fill.grain ?? 0.4))
+  const count = Math.round(6 + grain * 18)
+  const rad = (fill.angle * Math.PI) / 180, dx = Math.cos(rad), dy = Math.sin(rad)
+  const maxLen = Math.max(W, H)
+  ctx.save()
+  ctx.strokeStyle = fill.b
+  ctx.globalAlpha = 0.05 + grain * 0.08
+  ctx.lineWidth = 1
+  for (let i = 0; i < count; i++) {
+    const cx = paperHash(i, 7) * W, cy = paperHash(i, 13) * H
+    const len = (0.1 + paperHash(i, 19) * 0.25) * maxLen
+    ctx.beginPath()
+    ctx.moveTo(cx - dx * len / 2, cy - dy * len / 2)
+    ctx.lineTo(cx + dx * len / 2, cy + dy * len / 2)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
 /**
  * Build a tileable 2D canvas for a fill — the CPU companion to the THREE texture path.
  * `solid` returns a flat swatch; `gradient` a vertical A→B ramp; the rest reuse the same
@@ -427,6 +488,7 @@ export function fillTileCanvas(fillIn: Fill, size = 128): HTMLCanvasElement {
     return c
   }
   if (fill.type === 'shapes') { paintShapesTile(ctx, fill, size, size); return c }
+  if (fill.type === 'paper') { paintPaperTile(ctx, fill, size, size); return c }
   const colA = hexBytes(fill.a), colB = hexBytes(fill.b), d = Math.max(2, Math.round(fill.density))
   // The swatch keeps its own `max(2, …)` density floor (which predates the box
   // tile's `max(1, …)`), but WHICH cell is `b` comes from the shared predicates
@@ -472,6 +534,7 @@ export function fillTileBox(fillIn: Fill, w: number, h: number): HTMLCanvasEleme
     return c
   }
   if (fill.type === 'shapes') { paintShapesTile(ctx, fill, W, H); return c }
+  if (fill.type === 'paper') { paintPaperTile(ctx, fill, W, H); return c }
   // THE cell edge, and the same call the `<pattern>` emitter makes with the box
   // in document units — see `fillPatternCell`, including why it no longer rounds.
   const cell = fillPatternCell(W, fill.density)

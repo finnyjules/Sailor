@@ -12,7 +12,7 @@ const shaderFill = (over: Partial<Fill> = {}): Fill => ({
 
 describe('shader fill model', () => {
   it('shader is the ninth fill type, appended so picker order is stable', () => {
-    expect(FILL_TYPES).toEqual(['solid','gradient','ombre','grid','noise','checkerboard','stripes','qr','shader','shapes'])
+    expect(FILL_TYPES).toEqual(['solid','gradient','ombre','grid','noise','checkerboard','stripes','qr','shader','shapes','paper'])
   })
 
   it('fillIsShader narrows only a shader fill carrying a spec', () => {

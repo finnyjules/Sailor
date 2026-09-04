@@ -1,0 +1,70 @@
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
+
+// node env has no ImageData — stub a minimal one (matches fill-shapes-tile's FakeCanvas approach).
+class FakeImageData {
+  data: Uint8ClampedArray; width: number; height: number
+  constructor(w: number, h: number) { this.width = w; this.height = h; this.data = new Uint8ClampedArray(w * h * 4) }
+}
+beforeAll(() => { vi.stubGlobal('ImageData', FakeImageData) })
+afterAll(() => vi.unstubAllGlobals())
+
+import { paperImageData, normalizeFill, FILL_TYPES, DEFAULT_FILL, hexBytes, type Fill } from '../../app/lib/spacetype/fillTile'
+
+const paper = (over: Partial<Fill> = {}): Fill =>
+  ({ ...DEFAULT_FILL, type: 'paper', a: '#f3efe6', b: '#8b7d68', grain: 0.4, density: 12, angle: 0, ...over })
+
+describe('paper fill — registration & model', () => {
+  it('is registered in FILL_TYPES', () => { expect(FILL_TYPES).toContain('paper') })
+
+  it('normalizeFill defaults grain to 0.4 and clamps to [0,1]', () => {
+    expect(normalizeFill({ type: 'paper' }).grain).toBe(0.4)
+    expect(normalizeFill({ type: 'paper', grain: 5 }).grain).toBe(1)
+    expect(normalizeFill({ type: 'paper', grain: -2 }).grain).toBe(0)
+    expect(normalizeFill({ type: 'paper', grain: 0.25 }).grain).toBeCloseTo(0.25, 6)
+  })
+
+  it('drops grain on a non-paper fill', () => {
+    expect((normalizeFill({ type: 'solid', grain: 0.4 }) as any).grain).toBeUndefined()
+  })
+})
+
+describe('paperImageData — deterministic grain', () => {
+  it('is byte-for-byte deterministic for the same fill', () => {
+    const a = paperImageData(16, 16, paper())
+    const b = paperImageData(16, 16, paper())
+    expect(Array.from(a.data)).toEqual(Array.from(b.data))
+  })
+
+  it('with grain 0 is a flat base color (no grain drawn)', () => {
+    const base = hexBytes('#f3efe6')
+    const img = paperImageData(8, 8, paper({ grain: 0 }))
+    for (let i = 0; i < img.data.length; i += 4) {
+      expect([img.data[i], img.data[i + 1], img.data[i + 2]]).toEqual(base)
+      expect(img.data[i + 3]).toBe(255)
+    }
+  })
+
+  it('with grain > 0 varies pixels away from the flat base (grain drew)', () => {
+    const base = hexBytes('#f3efe6')
+    const img = paperImageData(16, 16, paper({ grain: 0.6 }))
+    let varied = 0
+    for (let i = 0; i < img.data.length; i += 4) {
+      if (img.data[i] !== base[0] || img.data[i + 1] !== base[1] || img.data[i + 2] !== base[2]) varied++
+    }
+    expect(varied).toBeGreaterThan(0)
+  })
+
+  it('blends to INTERMEDIATE values (paper ≠ hard two-color noise)', () => {
+    // noise emits only exact-a or exact-b bytes; paper interpolates, so some channel
+    // value must fall strictly between base and tint for the red channel.
+    const baseR = hexBytes('#f3efe6')[0], tintR = hexBytes('#8b7d68')[0]
+    const lo = Math.min(baseR, tintR), hi = Math.max(baseR, tintR)
+    const img = paperImageData(16, 16, paper({ grain: 0.7 }))
+    let intermediate = false
+    for (let i = 0; i < img.data.length; i += 4) {
+      const r = img.data[i]
+      if (r > lo && r < hi) { intermediate = true; break }
+    }
+    expect(intermediate).toBe(true)
+  })
+})
