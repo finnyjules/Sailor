@@ -65,7 +65,8 @@ function pickInt(rng: () => number, lo: number, hi: number): number {
 
 /**
  * Edge positions for `n` divisions across [startPx, endPx].
- * regularity 0 → free (weighted-random) spacing; regularity 1 → equal, module-snapped spacing.
+ * regularity 0 → free (weighted-random) spacing, pulled toward module lines; regularity 1 →
+ * exactly equal spacing (NOT module-snapped — snapping equal widths would un-equalize odd counts).
  * mirror=true makes the resulting widths palindromic (left half drives the right half).
  */
 function makeAxisEdges(
@@ -119,9 +120,12 @@ function makeAxisEdges(
     const target = freeWidth * (1 - regularity) + equalStep * regularity
     if (modulePx <= 0) return target
     // Snap that target to the base module and pull toward it, strongest at low
-    // regularity — the Swiss discipline (columns align to module lines when free) the
-    // dial promises. Snapping the pre-blended target rather than the raw free width
-    // keeps a continuous, seed-dependent quantity in play at every regularity < 1, so
+    // regularity — a Swiss-discipline pull toward module lines when free. NOTE: the
+    // sum-to-span rescale below is not module-preserving, so for counts that don't divide
+    // the module evenly (e.g. 5, 7 on a 12-module page) the r=0 edges land near, not on,
+    // module lines — a known limitation, tracked for a fast-follow. Snapping the pre-blended
+    // target rather than the raw free width keeps a continuous, seed-dependent quantity in
+    // play at every regularity < 1, so
     // two different seeds whose column count happens to divide the module count evenly
     // don't collapse onto bit-identical edges — only the discrete correction term does.
     const snapped = Math.round(target / modulePx) * modulePx
