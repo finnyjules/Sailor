@@ -143,19 +143,25 @@ describe('deal + resolveGrid', () => {
 // the paint path ran and how many cells landed.
 describe('deal layer render (headless)', () => {
   const drawImages: string[] = []
+  // Cell placements + translates recorded on the MAIN ctx, so a test can assert WHERE
+  // cells land (box centering, corner-origin), not just how many there are.
+  const mainDraws: Array<{ x: number; y: number; w: number; h: number }> = []
+  const mainTranslates: Array<[number, number]> = []
   function recordingCtx(name: string) {
     const g = { addColorStop() {} }
     return {
       canvas: { width: 400, height: 400 },
       globalCompositeOperation: 'source-over', globalAlpha: 1,
       fillStyle: '', strokeStyle: '', lineWidth: 1, lineCap: '', lineJoin: '',
-      getTransform: () => ({}), setTransform() {}, save() {}, restore() {}, translate() {}, rotate() {}, scale() {}, clip() {},
+      getTransform: () => ({}), setTransform() {}, save() {}, restore() {},
+      translate(dx = 0, dy = 0) { if (name === 'main') mainTranslates.push([dx, dy]) },
+      rotate() {}, scale() {}, clip() {},
       beginPath() {}, moveTo() {}, lineTo() {}, arc() {}, roundRect() {}, ellipse() {}, rect() {}, closePath() {}, setLineDash() {},
       fill() {}, stroke() {}, fillRect() {}, clearRect() {},
       putImageData() {}, createImageData(w = 1, h = 1) { return { data: new Uint8ClampedArray(Math.max(1, w * h) * 4), width: w, height: h } },
       getImageData(_x = 0, _y = 0, w = 1, h = 1) { return { data: new Uint8ClampedArray(Math.max(1, w * h) * 4), width: w, height: h } },
       createRadialGradient() { return g }, createLinearGradient() { return g }, createPattern() { return g },
-      drawImage() { if (name === 'main') drawImages.push(name) },
+      drawImage(_img: unknown, x = 0, y = 0, w = 0, h = 0) { if (name === 'main') { drawImages.push(name); mainDraws.push({ x, y, w, h }) } },
     } as unknown as CanvasRenderingContext2D
   }
   let seq = 0
@@ -164,7 +170,7 @@ describe('deal layer render (headless)', () => {
     constructor(w: number, h: number) { this.width = w; this.height = h; this.data = new Uint8ClampedArray(Math.max(1, w * h) * 4) }
   }
   beforeEach(() => {
-    drawImages.length = 0; seq = 0
+    drawImages.length = 0; mainDraws.length = 0; mainTranslates.length = 0; seq = 0
     vi.stubGlobal('ImageData', FakeImageData)
     vi.stubGlobal('document', { createElement: () => { const c: any = { width: 0, height: 0 }; c.getContext = () => recordingCtx(`off-${++seq}`); return c } })
   })
@@ -196,6 +202,39 @@ describe('deal layer render (headless)', () => {
     drawImages.length = 0
     await drawDeal(dealLayer({ density: 1 }), 400, 400)
     expect(drawImages.length).toBe(20)
+  })
+
+  it('centres the box (boxH from WIDTH, not height) and places cells corner-origin inside it', async () => {
+    // Pass H ≠ W so a `* H` regression is distinguishable from the correct `* W`.
+    // layer.w=1, h=0.5, W=400 → boxW=400, boxH=0.5*400=200 (a `* H` bug would give 400).
+    await drawDeal(dealLayer({ w: 1, h: 0.5 }), 400, 800)
+    const boxW = 400, boxH = 200
+    // The deal branch centres the box: some translate must be (-boxW/2, -boxH/2).
+    expect(mainTranslates.some(([dx, dy]) => Math.abs(dx + boxW / 2) < 1 && Math.abs(dy + boxH / 2) < 1)).toBe(true)
+    // Every cell sits inside the box, corner-origin (x,y are the cell's top-left).
+    expect(mainDraws.length).toBe(20)
+    for (const d of mainDraws) {
+      expect(d.x).toBeGreaterThanOrEqual(-0.5)
+      expect(d.y).toBeGreaterThanOrEqual(-0.5)
+      expect(d.x + d.w).toBeLessThanOrEqual(boxW + 0.5)
+      expect(d.y + d.h).toBeLessThanOrEqual(boxH + 0.5)
+    }
+    // Cells fill the box, not clustered: something touches each edge/quadrant.
+    const minX = Math.min(...mainDraws.map(d => d.x)), maxR = Math.max(...mainDraws.map(d => d.x + d.w))
+    const minY = Math.min(...mainDraws.map(d => d.y)), maxB = Math.max(...mainDraws.map(d => d.y + d.h))
+    expect(minX).toBeLessThan(1); expect(maxR).toBeGreaterThan(boxW - 1)
+    expect(minY).toBeLessThan(1); expect(maxB).toBeGreaterThan(boxH - 1)
+  })
+
+  it('never renders fully blank at a low but non-zero density (force-kept cell)', async () => {
+    // A small grid at min slider density across many seeds: at least one cell always
+    // paints, so a deal the user just added is never invisible. density 0 stays empty.
+    for (let seed = 1; seed <= 30; seed++) {
+      drawImages.length = 0
+      const g = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 2, margin: 0, gutter: 0, gen: { ...defaultGrid().gen, seed } }
+      await drawDeal(dealLayer({ density: 0.05, grid: g }), 400, 400)
+      expect(drawImages.length).toBeGreaterThanOrEqual(1)
+    }
   })
 
   it('two different seeds produce different dealt sequences (pixel-signature proxy)', () => {

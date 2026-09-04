@@ -56,7 +56,7 @@ import { paintMaskRelease } from '~/lib/compositor/maskBreak'
 // this file, and type imports are erased — so this is not a module cycle.
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
 import { resolveGrid, defaultGrid, type FrameGrid } from '~/lib/frame/grid'
-import { pickDealPaint, keptCell, type DealVocab } from '~/lib/compositor/dealVocab'
+import { pickDealPaint, keptCell, forceKeptCell, type DealVocab } from '~/lib/compositor/dealVocab'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -2020,10 +2020,13 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     const seed = layer.grid.gen.seed
     const density = layer.density ?? 1
     const inset = Math.max(0, Math.min(0.4, layer.cellInset ?? 0))
+    // Force-keep one cell when density > 0 so a sparse deal never renders fully
+    // blank (an invisible layer the user just added). Explicit density 0 stays empty.
+    const forceIdx = density > 0 ? forceKeptCell(seed, regions.length) : -1
     ctx.save()
     ctx.translate(-boxW / 2, -boxH / 2)
     for (let i = 0; i < regions.length; i++) {
-      if (!keptCell(seed, i, density)) continue
+      if (i !== forceIdx && !keptCell(seed, i, density)) continue
       const r = regions[i]!
       const ins = inset * Math.min(r.w, r.h)
       const cw = r.w - ins * 2, ch = r.h - ins * 2

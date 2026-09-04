@@ -144,3 +144,21 @@ export function keptCell(seed: number, cellIndex: number, density: number): bool
   if (density <= 0) return false
   return mulberry32(hashSeed(`${seed}:keep:${cellIndex}`))() < density
 }
+
+/**
+ * The one cell force-kept so a deal never renders FULLY blank at a low (but > 0)
+ * density — the minimum keep-hash cell (the one most likely already kept, so the
+ * guarantee is visually seamless). Deterministic in (seed, cellCount). Returns -1
+ * for an empty grid. Callers apply it only when density > 0, so an explicit
+ * density of 0 still means an empty deal.
+ */
+export function forceKeptCell(seed: number, cellCount: number): number {
+  if (cellCount <= 0) return -1
+  let best = 0
+  let bestHash = Infinity
+  for (let i = 0; i < cellCount; i++) {
+    const h = mulberry32(hashSeed(`${seed}:keep:${i}`))()
+    if (h < bestHash) { bestHash = h; best = i }
+  }
+  return best
+}

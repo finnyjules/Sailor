@@ -6683,7 +6683,7 @@ onUnmounted(() => {
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { vocab: v })" />
             </div>
             <div class="mt-2 flex flex-col gap-1.5">
-              <StudioSlider label="Density" :min="0" :max="1" :step="0.02" :bindable="false"
+              <StudioSlider label="Density" :min="0.05" :max="1" :step="0.02" :bindable="false"
                 :model-value="(selectedLocal as any).density"
                 @update:model-value="(v: number) => setLocal(selectedLocal!.id, { density: v })" />
               <StudioSlider label="Cell inset" :min="0" :max="0.4" :step="0.01" :bindable="false"
