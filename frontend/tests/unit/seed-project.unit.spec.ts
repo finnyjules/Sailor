@@ -31,4 +31,16 @@ describe('distribute', () => {
   it('1:1 when equal', () => {
     expect(distribute(['#1', '#2', '#3'], 3)).toEqual(['#1', '#2', '#3'])
   })
+  it('returns a single color without dividing by zero when slotCount is 1', () => {
+    const out = distribute(['#111111', '#eeeeee', '#888888'], 1)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatch(/^#[0-9a-f]{6}$/)
+  })
+  it('ramp policy interpolates across slots with non-decreasing lightness', () => {
+    const out = distribute(['#111111', '#eeeeee'], 4, 'ramp')
+    expect(out).toHaveLength(4)
+    expect(out.every(h => /^#[0-9a-f]{6}$/.test(h))).toBe(true)
+    const Ls = out.map(h => hexToOklch(h)[0])
+    for (let i = 1; i < Ls.length; i++) expect(Ls[i]!).toBeGreaterThanOrEqual(Ls[i - 1]! - 1e-9)
+  })
 })

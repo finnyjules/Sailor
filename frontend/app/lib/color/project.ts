@@ -15,6 +15,7 @@ export type DistributePolicy = 'cycle' | 'ramp'
 
 export function distribute(hexes: string[], slotCount: number, policy: DistributePolicy = 'cycle'): string[] {
   if (slotCount <= 0 || hexes.length === 0) return []
+  if (slotCount === 1) return [hexes[0]!]
   if (slotCount === hexes.length) return [...hexes]
   if (slotCount < hexes.length) {
     // resample down, evenly spaced (endpoints included)
