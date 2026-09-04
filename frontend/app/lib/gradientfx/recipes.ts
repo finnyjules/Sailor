@@ -19,6 +19,7 @@ import type { GradientConfig } from './types'
 import { LOOK_NAMES, lookMenu } from './lookDescriptors'
 import { buildGradientPreset } from './presets'
 import { recolorMeshPoints } from './mesh'
+import { oklchToHexInGamut } from '../color/convert'
 
 // ── mood dials ───────────────────────────────────────────────────────────────
 //
@@ -64,6 +65,33 @@ export const MOOD_NAMES: string[] = Object.keys(MOOD_DIALS)
 /** The mood menu, for the prompt. */
 export function moodMenu(): string {
   return MOOD_NAMES.join(', ')
+}
+
+// ── seed menu ────────────────────────────────────────────────────────────────
+//
+// The same eye-pick contract as the palette menu the server builds from the
+// seed engine (`vibe-recipes.post.ts`): the model names an entry, never a hex.
+// This fixed hue-wheel menu is what it picks a SEED from when the request
+// carries no brand/taste key colour — 12 hues × 2 lightness levels, each hex
+// produced by the same in-gamut OKLCH conversion the rest of the colour system
+// uses, so every entry is a real, renderable colour.
+
+export interface SeedMenuEntry { name: string, hex: string }
+
+const SEED_HUES: [string, number][] = [
+  ['red', 25], ['orange', 60], ['amber', 90], ['lime', 130], ['green', 150],
+  ['teal', 185], ['cyan', 210], ['blue', 260], ['indigo', 290], ['violet', 320], ['magenta', 350], ['rose', 5],
+]
+
+/** A fixed 24-entry seed menu: 12 hues × 2 lightness levels. The model picks
+ *  one by name (never invents a hex), matching the recipes menu-pick contract. */
+export function buildSeedMenu(): SeedMenuEntry[] {
+  const out: SeedMenuEntry[] = []
+  for (const [name, h] of SEED_HUES) {
+    out.push({ name: `deep ${name}`, hex: oklchToHexInGamut(0.45, 0.16, h) })
+    out.push({ name: `bright ${name}`, hex: oklchToHexInGamut(0.72, 0.15, h) })
+  }
+  return out
 }
 
 // ── the recipe ───────────────────────────────────────────────────────────────
@@ -123,7 +151,24 @@ export const RECIPES_SCHEMA = {
   additionalProperties: false,
 }
 
-export function buildRecipesPrompt(phrase: string, yours: { base: string, palette: string[] }): string {
+/** One candidate palette the seed engine assembled — a menu entry the model may
+ *  copy verbatim instead of inventing colours. `note` names its origin (a
+ *  curated corpus entry vs. a composed one) so the model can tell them apart
+ *  when the request calls for one over the other. */
+export interface EnginePaletteCandidate { hexes: string[], note: string }
+
+export function buildRecipesPrompt(
+  phrase: string,
+  yours: { base: string, palette: string[] },
+  paletteMenu?: EnginePaletteCandidate[],
+): string {
+  const engineMenu = paletteMenu && paletteMenu.length
+    ? `
+
+A COLOUR ENGINE ALSO OFFERS THESE PALETTES, built from a curated corpus around a seed colour it chose for this request. Prefer COPYING one of these exactly (same colours, same order) for most of your readings — that gives the user a palette a colour system actually vetted, not one invented on the spot. You may still write your own colours for at most one or two readings, when the request names a colour or mood these do not cover.
+${paletteMenu.map((p, i) => `${i + 1}. ${p.hexes.join(' → ')} (${p.note})`).join('\n')}`
+    : ''
+
   return `The user asked for: "${phrase}"
 
 Compose 6 to 8 different readings of that request. You are NOT setting parameters — you are choosing from menus.
@@ -141,6 +186,7 @@ THE MOODS: ${moodMenu()}
 frosted, textured, deep and flat are LIQUID-SURFACE qualities — pair them with a liquid-family base (marble, oil, ink, lava, satin, liquid), or the texture has no surface to sit on.
 
 WHAT THE USER HAS NOW ("yours"): base ${yours.base}, colours ${yours.palette.join(' → ') || 'unknown'}.
+${engineMenu}
 
 Make them genuinely different from each other — vary the BASE look, not only the colours. At least one should keep the user's own base. If the request names colours, honour them; if it names a mood, pick the moods that match. Do not invent look or mood names that are not on the menus.`
 }
