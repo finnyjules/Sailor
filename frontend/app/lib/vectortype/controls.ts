@@ -80,7 +80,7 @@ import {
  *
  * The one structural difference from shader fills: they read their catalog from
  * a synchronous cache (`getEffectSync`), so `shapeAgentControls(cfg)` could keep
- * a one-argument signature. `loadVariableFont` exposes only promises, so the
+ * a one-argument signature. `loadVectorFont` exposes only promises, so the
  * loaded axes are passed IN — exactly as `shaderAgentControls(config, effectDef)`
  * already does for Shader Studio.
  */

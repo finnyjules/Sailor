@@ -36,7 +36,7 @@ export const VT_LAYER_SHADER_PREFIX = 'layer.paint.shader'
  *
  * `axes` is the LOADED font's axis list ("declare the frame, derive the
  * contents" — see ./controls.ts). It is a parameter rather than a lookup
- * because `loadVariableFont` exposes promises only, with no synchronous cache to
+ * because `loadVectorFont` exposes promises only, with no synchronous cache to
  * read; `shaderAgentControls(config, effectDef)` takes its `EffectDef` the same
  * way for the same reason. Omit it and the studio's static vocabulary is
  * returned unchanged — the axis sliders are simply not derived yet, which is
@@ -61,7 +61,7 @@ export const VT_LAYER_SHADER_PREFIX = 'layer.paint.shader'
  * callers. If nothing on the page has fetched the catalog yet the per-effect
  * params are simply absent this call — not wrong, just not derived yet, the same
  * graceful degradation `~/lib/shaderfill/field.ts` accepts for the same reason.
- * (The axes above cannot use that trick: `loadVariableFont` exposes promises
+ * (The axes above cannot use that trick: `loadVectorFont` exposes promises
  * only, with no synchronous cache to read, which is why they are a parameter.)
  */
 /**

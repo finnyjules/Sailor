@@ -164,7 +164,7 @@ describe('coords helpers', () => {
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { afterEach, vi } from 'vitest'
-import { clearVariableFontCache, loadVariableFont, loadVectorFont } from '~/lib/vectortype/font'
+import { clearVariableFontCache, clearVectorFontCache, loadVariableFont, loadVectorFont } from '~/lib/vectortype/font'
 
 const STATIC = fileURLToPath(new URL('../fixtures/inter-subset-static.ttf', import.meta.url))
 const VAR = fileURLToPath(new URL('../fixtures/inter-subset-var.ttf', import.meta.url))
@@ -178,7 +178,8 @@ function serve(map: Record<string, string>) {
   }))
   return calls
 }
-afterEach(() => { vi.unstubAllGlobals(); clearVariableFontCache() })
+afterEach(() => { vi.unstubAllGlobals(); clearVectorFontCache() })
+it('keeps the old cache-clear name as an alias', () => { expect(clearVariableFontCache).toBe(clearVectorFontCache) })
 
 describe('loadVectorFont', () => {
   it('loads a Google cut through the google-file route and yields a font with NO axes', async () => {
@@ -200,5 +201,31 @@ describe('loadVectorFont', () => {
     await expect(loadVectorFont('google:Nope@400')).rejects.toThrow(/HTTP 404/)
     serve({ '/api/fonts/google-file?family=Nope&weight=400': STATIC })
     await expect(loadVectorFont('google:Nope@400')).resolves.toBeTruthy()   // not poisoned
+  })
+  // A studio session that walks the Google catalog touches hundreds of families,
+  // and every entry pins a parsed fontkit font (megabytes of glyph tables) for
+  // the life of the tab. The cache is bounded, so the walk costs a working set
+  // rather than the whole catalog.
+  it('bounds the cache to the 24 most recently used fonts', async () => {
+    const calls = serve({ '/api/fonts/google-file': STATIC })
+    const token = (i: number) => `google:Fam${i}@400`
+    for (let i = 0; i < 25; i++) await loadVectorFont(token(i))
+    expect(calls.length).toBe(25)
+    await loadVectorFont(token(24))                 // newest — still cached
+    expect(calls.length).toBe(25)
+    await loadVectorFont(token(0))                  // oldest — evicted, so it refetches
+    expect(calls.length).toBe(26)
+  })
+  it('a cache hit refreshes recency, so the re-touched font outlives newer ones', async () => {
+    const calls = serve({ '/api/fonts/google-file': STATIC })
+    const token = (i: number) => `google:Fam${i}@400`
+    for (let i = 0; i < 24; i++) await loadVectorFont(token(i))
+    await loadVectorFont(token(0))                  // touch the oldest: now the newest
+    expect(calls.length).toBe(24)
+    await loadVectorFont(token(99))                 // pushes one out — token(1), not token(0)
+    await loadVectorFont(token(0))
+    expect(calls.length).toBe(25)
+    await loadVectorFont(token(1))
+    expect(calls.length).toBe(26)
   })
 })

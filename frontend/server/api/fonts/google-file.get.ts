@@ -1,12 +1,16 @@
 /**
  * GET /api/fonts/google-file?family=<name>&weight=<int>
  *
- * The shared, fail-closed Google Fonts cut route (Vector Type's "any font"
- * program). `family` must exist in the server's Google Fonts catalog
- * (server/utils/googleCatalog.ts) and `weight` must be one of that family's
- * shipped weights — validated via validateGoogleCut() BEFORE any upstream
- * fetch. An unknown family or unshipped weight is a 400, never a silent
- * fallback. A missing weight defaults to the family's weight nearest 400.
+ * The shared Google Fonts cut route (Vector Type's "any font" program),
+ * validated via validateGoogleCut() BEFORE any upstream fetch.
+ *
+ * The FAMILY is fail-closed: it must exist in the server's Google Fonts catalog
+ * (server/utils/googleCatalog.ts), and an unknown one is a 400, never a silent
+ * substitution. The WEIGHT is not: an unshipped weight SNAPS to the family's
+ * nearest shipped one (ties → the lower), as does a missing weight (nearest to
+ * 400). Archivo Black ships only 400, so a caller with a hardcoded `@700` would
+ * otherwise 400 for no benefit when 400 is the honest answer. Only a
+ * non-numeric weight is a 400.
  *
  * If the catalog itself can't be loaded (e.g. offline), this answers 503 —
  * it never falls open and fetches an unvalidated family/weight anyway.

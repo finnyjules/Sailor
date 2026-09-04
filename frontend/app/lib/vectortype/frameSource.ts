@@ -9,7 +9,7 @@
  * here — this source owns its own 2D canvas, so nothing else can clobber it and
  * no snapshot copy is needed.
  *
- * The font is the only asynchronous part, and `loadVariableFont` caches the
+ * The font is the only asynchronous part, and `loadVectorFont` caches the
  * promise, so `getFrame` awaiting it costs one fetch across every consumer.
  */
 import type { StudioFrameSource } from '~/lib/studio/frameSource'

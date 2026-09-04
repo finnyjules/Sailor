@@ -272,7 +272,7 @@ export function pruneStackTracks(cfg: VectorTypeConfig): VtMove[] {
  * animatable, and there is no second list to keep in step.
  *
  * `axes` is the loaded font's axis list, passed in for the reason
- * `vtAgentControls(cfg, axes)` takes it: `loadVariableFont` exposes promises
+ * `vtAgentControls(cfg, axes)` takes it: `loadVectorFont` exposes promises
  * only, with no synchronous cache. Omit it and you get the static targets plus
  * the glyph namespace — the honest answer before a font has loaded, not a
  * hard-coded guess at which axes exist.

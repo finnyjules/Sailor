@@ -1,17 +1,28 @@
 /**
  * Vector Type Studio — the font layer.
  *
- * Loads a VARIABLE ttf through `/api/fonts/variable` and parses it with
- * fontkit, so glyphs can be asked for their outline at any axis position.
- * three's vendored opentype parser is not an option here: it reads `fvar` (it
- * can name the axes) but has no `gvar` support, so it can never produce the
- * outline at an interpolated position.
+ * Fetches a ttf and parses it with fontkit, so glyphs can be asked for their
+ * outline. THREE routes feed it, one per token shape (`fontToken.ts`), and
+ * `vtFontFileUrl` is what picks between them — nothing here branches on source:
+ *  - `/api/fonts/variable?id=…` — a curated family, the VARIABLE file, the only
+ *    one whose outline can be asked for at an interpolated axis position;
+ *  - `/api/fonts/google-file?family=…&weight=…` — one STATIC cut of any Google
+ *    family, through the css2 → gstatic proxy;
+ *  - `/api/library-font/<faceId>` — one static face out of the committed
+ *    library manifest.
+ * The last two have no `fvar` at all, so `axes` is legitimately `[]` — a static
+ * font, not a broken one.
+ *
+ * three's vendored opentype parser is not an option for the variable route: it
+ * reads `fvar` (it can name the axes) but has no `gvar` support, so it can never
+ * produce the outline at an interpolated position.
  *
  * Two gotchas encoded here, both paid for once already:
  *  - fontkit has NO default export. `import fontkit from 'fontkit'` type-checks
  *    and then blows up at runtime. It must be `import * as fontkit`.
- *  - the font file cannot come from fonts.googleapis.com/css2, which only ever
- *    serves static instances. See server/api/fonts/variable.get.ts.
+ *  - a VARIABLE file cannot come from fonts.googleapis.com/css2, which only ever
+ *    serves static instances — hence the separate variable route. See
+ *    server/api/fonts/variable.get.ts.
  */
 import * as fontkit from 'fontkit'
 import { parseVtFontToken, variableFontUrl, vtFontFileUrl } from './fontToken'
@@ -114,6 +125,20 @@ export function clampCoords(font: VtFont, coords: Record<string, number>): Recor
  *  forever. */
 const cache = new Map<string, Promise<VtFont>>()
 
+/** How many fonts stay resident. A parsed fontkit font holds the file's whole
+ *  glyph/variation tables, so this is megabytes each, and a session that browses
+ *  the Google catalog would otherwise pin every family it ever previewed for the
+ *  life of the tab. 24 is comfortably more than any one composition uses (the
+ *  layer stack, the moves, the thumbs) while keeping the walk bounded. */
+const CACHE_MAX = 24
+
+/** Map preserves insertion order, so "oldest key" IS the least-recently-used one
+ *  as long as every touch re-inserts. Delete-then-set is the whole LRU. */
+function touch(token: string, p: Promise<VtFont>): void {
+  cache.delete(token)
+  cache.set(token, p)
+}
+
 /**
  * Load ANY of the three token shapes (`fontToken.ts`) into a `VtFont`.
  * A Google cut and a library face have no variation axes at all — that's not
@@ -125,7 +150,7 @@ const cache = new Map<string, Promise<VtFont>>()
  */
 export async function loadVectorFont(token: string): Promise<VtFont> {
   const hit = cache.get(token)
-  if (hit) return hit
+  if (hit) { touch(token, hit); return hit }
 
   const ref = parseVtFontToken(token)
   if (!ref) throw new Error(`Invalid font token: ${token}`)
@@ -142,7 +167,13 @@ export async function loadVectorFont(token: string): Promise<VtFont> {
   })()
 
   cache.set(token, p)
-  p.catch(() => cache.delete(token))
+  // The cap is enforced when a load SETTLES, not when it starts: an in-flight
+  // fetch that got evicted mid-flight would leave its callers sharing a promise
+  // nobody can find again, and the next caller would fetch the same bytes twice.
+  p.then(
+    () => { while (cache.size > CACHE_MAX) { const lru = cache.keys().next().value; if (lru === undefined) break; cache.delete(lru) } },
+    () => { cache.delete(token) },
+  )
   return p
 }
 
@@ -152,6 +183,10 @@ export async function loadVectorFont(token: string): Promise<VtFont> {
 export const loadVariableFont = loadVectorFont
 
 /** Test/HMR seam — forget everything loaded so far. */
-export function clearVariableFontCache(): void {
+export function clearVectorFontCache(): void {
   cache.clear()
 }
+
+/** Documented alias, same reason as `loadVariableFont` above: the cache holds
+ *  any of the three token shapes now, not only variable fonts. */
+export const clearVariableFontCache = clearVectorFontCache
