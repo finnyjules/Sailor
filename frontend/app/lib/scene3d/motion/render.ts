@@ -11,6 +11,21 @@ export function sceneHasMotion(doc: SceneDoc): boolean {
   return !!(doc.camera.motion && doc.camera.motion.preset !== 'none')
 }
 
+export interface SceneFrameClock { duration: number; fps: number; width: number; height: number }
+
+/** The frame source's clock for a scene. A still scene (no object/camera motion)
+ *  reports `duration: 0` so a downstream Frame treats it as a still — one pull, no
+ *  rAF — even when `doc.motion.duration` still carries its default non-zero value.
+ *  Mirrors `vtIsAnimated` / Gradient's `hasTracks || hasFlow` clock gating. */
+export function sceneFrameClock(doc: SceneDoc): SceneFrameClock {
+  return {
+    duration: sceneHasMotion(doc) ? doc.motion.duration : 0,
+    fps: doc.motion.fps,
+    width: doc.output.width,
+    height: doc.output.height,
+  }
+}
+
 /** Compose home∘motion(t01) into the live engine and render one beauty frame.
  *  Returns the engine's canvas (valid until the next call — upload before re-pulling).
  *

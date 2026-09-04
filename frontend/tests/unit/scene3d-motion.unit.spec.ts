@@ -627,3 +627,34 @@ describe('scene3d motion — panel knob lists match the evaluators', () => {
     expect(Math.round(doc.motion.fps * doc.motion.duration)).toBe(1800)
   })
 })
+
+import { sceneFrameClock } from '~/lib/scene3d/motion/render'
+
+describe('sceneFrameClock', () => {
+  it('reports duration 0 for a still scene (no motion), keeping fps and output size', () => {
+    const doc = defaultDoc()
+    doc.objects.push(createPrimitive('box', doc.objects))
+    doc.motion = { duration: 4, fps: 30, loop: true } // leftover non-zero duration
+    expect(sceneHasMotion(doc)).toBe(false)
+    expect(sceneFrameClock(doc)).toEqual({ duration: 0, fps: 30, width: doc.output.width, height: doc.output.height })
+  })
+
+  it('reports the real motion duration for an object-animated scene', () => {
+    const doc = defaultDoc()
+    const obj = createPrimitive('box', doc.objects)
+    obj.motion = { loop: { kind: 'spin', speed: 2, amount: 1 } }
+    doc.objects.push(obj)
+    doc.motion = { duration: 5, fps: 24, loop: true }
+    expect(sceneHasMotion(doc)).toBe(true)
+    expect(sceneFrameClock(doc)).toEqual({ duration: 5, fps: 24, width: doc.output.width, height: doc.output.height })
+  })
+
+  it('reports the real motion duration for a camera-only-animated scene', () => {
+    const doc = defaultDoc()
+    doc.objects.push(createPrimitive('box', doc.objects))
+    doc.camera.motion = { preset: 'orbit', speed: 1, amount: 1 }
+    doc.motion = { duration: 6, fps: 30, loop: true }
+    expect(sceneHasMotion(doc)).toBe(true)
+    expect(sceneFrameClock(doc).duration).toBe(6)
+  })
+})
