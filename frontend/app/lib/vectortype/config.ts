@@ -38,6 +38,11 @@ import { convertLegacyTracks, mergeMove, type LegacyMotionTrack } from '~/lib/st
 // import is circular — `axisPresets.ts` only reaches `./font`/`./random`,
 // and `lib/motion/evaluate.ts` only reaches its own `./types`/`./easing`.
 import { vtAxisPreset } from './axisPresets'
+// The dial ranges live in a dependency-free leaf to break a config↔trackPresets
+// import cycle (trackPresets' top-level PRESETS reads them at eval time). See
+// stretchRange.ts. Imported here for this module's own use, re-exported below so
+// every existing `from './config'` importer is unchanged.
+import { VT_STRETCH_MIN, VT_STRETCH_MAX, VT_HEIGHT_MIN, VT_HEIGHT_MAX } from './stretchRange'
 import { nativeEaseFor } from '~/lib/motion/evaluate'
 import { isFill, isGradient, type Gradient, type Paint } from '~/lib/compositor/paint'
 // The migration-only legacy-track → preset matcher. A CIRCULAR import
@@ -854,20 +859,10 @@ export const VT_STAGGER_SEED_MAX = 999
  * and a 40° lean is already past caricature.
  */
 export const VT_SKEW_MAX = 40
-/**
- * The dials' range, measured and decided 2026-09-03. A single range shared by
- * both axes sounds tidier, but a strictly-universal one is unusable: a
- * fragile display serif drags it down to no travel at all, so the honest move
- * is to split by axis — keep the mainstream of the width dial clean and pull
- * back its far corners, while the height dial (which tolerates more) gets its
- * own, wider ceiling. Damping still handles both-dials-pushed (see
- * `dampedStretch`) — these are the single-axis proven bounds, not a promise
- * about the diagonal.
- */
-export const VT_STRETCH_MIN = 0.6
-export const VT_STRETCH_MAX = 1.8
-export const VT_HEIGHT_MIN = 0.6
-export const VT_HEIGHT_MAX = 2.0
+// The dial ranges are defined in ./stretchRange (a leaf, to break the
+// config↔trackPresets import cycle) and re-exported here so importers of
+// './config' keep working unchanged.
+export { VT_STRETCH_MIN, VT_STRETCH_MAX, VT_HEIGHT_MIN, VT_HEIGHT_MAX }
 export const VT_FITS = ['off', 'width'] as const
 export type VtFit = (typeof VT_FITS)[number]
 /**
