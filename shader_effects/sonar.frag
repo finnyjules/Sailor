@@ -84,9 +84,10 @@ void main() {
 
     // One level cut through the field: d > 0 is land, d < 0 is sea, d = 0 is the coast.
     float h = heightAt(uv, t, oct);
-    // The field's values sit mostly in 0.15..0.85, so Coverage 0.1..0.9 is mapped onto that
-    // span: 0.1 is nearly all sea, 0.9 nearly all land, 0.5 is unchanged.
-    float level = mix(0.85, 0.15, clamp((u_level - 0.1) / 0.8, 0.0, 1.0));
+    // The field's values sit mostly in 0.3..0.7 (measured: 10th/90th percentiles ~0.35/0.68),
+    // so Coverage 0.1..0.9 is mapped onto a level of 0.72..0.28: 0.1 is ~5% land, 0.9 ~95%,
+    // 0.5 is unchanged and the whole slider does something.
+    float level = mix(0.72, 0.28, clamp((u_level - 0.1) / 0.8, 0.0, 1.0));
     float d = h - level;
 
     vec3 col = ink(0);
