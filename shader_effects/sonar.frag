@@ -25,102 +25,86 @@ float fbmN(vec2 p, float seed, int oct) {
     float v = 0.0, a = 0.5, norm = 0.0;
     for (int i = 0; i < 8; i++) {
         if (i >= oct) break;
-        v += a * vnoise(p, seed + float(i) * 17.0); norm += a;
-        p *= 2.03; a *= 0.5;
+        v += a * vnoise(p, seed + float(i) * 131.0); norm += a;
+        p *= 2.0; a *= 0.5;
     }
     return v / max(norm, 1e-5);
 }
-// 4x4 ordered dither threshold (same table as bayer_dither.frag's B4).
-const int B4[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
-float bayer4(vec2 px) {
-    ivec2 p = ivec2(mod(floor(px), 4.0));
-    return (float(B4[p.x + p.y * 4]) + 0.5) / 16.0;
-}
 
-// The `gradient` param is read as INK ROLES here, not as a ramp: the stops' order is the
-// role, their positions are ignored. 1 ground (sea), 2 land, 3 coast fringe, 4 specks,
-// 5 deep land, 6 shallows. Roles beyond the inks provided fall back by tier: land-tier
-// roles (land, deep) to the land ink, sea-tier roles (coast, specks, shallows) to the
-// ground ink, so a two-ink ramp never paints the sea in the land colour.
+// Ink ROLES by slot, as the tool does: 1 ground, 2 land, 3 coast A, 4 coast B. Slots past
+// the inks provided wrap round, so a two-ink ramp still draws.
 #define MAXS 8
 uniform vec3 u_ramp[MAXS];
 uniform float u_rampPos[MAXS];
 uniform float u_rampCount;
-const int LAND_TIER[6] = int[6](0, 1, 0, 0, 1, 0);
 vec3 ink(int role) {
-    int n = int(u_rampCount + 0.5);
-    int r = clamp(role, 0, 5);
-    if (r < n) return u_ramp[clamp(r, 0, MAXS - 1)];
-    int fb = (LAND_TIER[r] == 1) ? min(1, max(n - 1, 0)) : 0;
-    return u_ramp[clamp(fb, 0, MAXS - 1)];
+    int n = max(1, int(u_rampCount + 0.5));
+    return u_ramp[clamp(role - (role / n) * n, 0, MAXS - 1)];
 }
 
-uniform float u_level;     // Coverage: how much of the frame is land
-uniform float u_scale;     // Feature size
-uniform float u_warp;      // Distortion: the field pushed through itself
-uniform float u_detail;
-uniform float u_cell;      // Pixel size of the whole picture
-uniform float u_halftone;  // Halftone cells across the short axis
-uniform float u_depth;     // How far inland the halftone keeps thinning
-uniform float u_fringe;    // Width of the dithered coast band (ink 3)
-uniform float u_specks;    // Density of scattered specks near the coast (ink 4)
+uniform float u_level;
+uniform float u_scale;
+uniform float u_warp;
+uniform float u_grid;
+uniform float u_depth;
+uniform float u_fringe;
+uniform float u_spark;
+uniform float u_tide;
 uniform float u_speed;
 uniform float u_mix;
 
-float heightAt(vec2 uv, float t, int oct) {
-    vec2 asp = vec2(u_resolution.x / u_resolution.y, 1.0);
-    vec2 p = (uv - 0.5) * asp * u_scale;
-    vec2 q = vec2(fbmN(p + vec2(t, 0.0), u_seed, oct), fbmN(p + vec2(2.3, 5.1) - t, u_seed + 7.0, oct));
-    return fbmN(p + u_warp * (q - 0.5) * 2.0, u_seed + 17.0, oct);
+// Is canvas-local point `l` (0..cw, 0..ch) inside a square of side k centred in the cell?
+bool inSquare(vec2 l, float cw, float ch, float k) {
+    vec2 c0 = vec2((cw - k) * 0.5, (ch - k) * 0.5);
+    return l.x >= c0.x && l.x < c0.x + k && l.y >= c0.y && l.y < c0.y + k;
 }
 
 void main() {
-    // Snap to a coarse pixel grid first so every edge is chunky, not per-device-pixel.
-    float cell = max(u_cell, 1.0);
-    vec2 px = floor(v_texCoord * u_resolution / cell);
-    vec2 uv = (px + 0.5) * cell / u_resolution;
-    float t = u_time * u_speed * 0.1;
-    int oct = int(clamp(u_detail, 1.0, 8.0) + 0.5);
+    float W = u_resolution.x, H = u_resolution.y;
+    float cols = max(12.0, floor(u_grid + 0.5));
+    float cw = W / cols;
+    float rows = max(6.0, floor(H / cw + 0.5));
+    float ch = H / rows;
+    float asp = W / H;
+    float sc = max(0.5, u_scale);
 
-    // One level cut through the field: d > 0 is land, d < 0 is sea, d = 0 is the coast.
-    float h = heightAt(uv, t, oct);
-    // The field's values sit mostly in 0.3..0.7 (measured: 10th/90th percentiles ~0.35/0.68),
-    // so Coverage 0.1..0.9 is mapped onto a level of 0.72..0.28: 0.1 is ~5% land, 0.9 ~95%,
-    // 0.5 is unchanged and the whole slider does something.
-    float level = mix(0.72, 0.28, clamp((u_level - 0.1) / 0.8, 0.0, 1.0));
-    float d = h - level;
+    // Canvas pixel (y DOWN), its cell, and the position inside the cell.
+    vec2 pxy = vec2(v_texCoord.x * W, (1.0 - v_texCoord.y) * H);
+    float i = floor(pxy.x / cw), j = floor(pxy.y / ch);
+    vec2 local = pxy - vec2(i * cw, j * ch);
+
+    // The field at the cell centre, pushed around by a second field so blobs flow.
+    float u = (i + 0.5) / cols, v = (j + 0.5) / rows;
+    float x = u * sc * asp, y = v * sc;
+    float wx = fbmN(vec2(x * 0.6 + 11.3, y * 0.6 + 3.7), u_seed + 7.0, 3) - 0.5;
+    float wy = fbmN(vec2(x * 0.6 + 5.1, y * 0.6 + 19.9), u_seed + 13.0, 3) - 0.5;
+    float fv = fbmN(vec2(x + wx * u_warp * 2.4, y + wy * u_warp * 2.4), u_seed, 4);
+
+    // Tide breathes the cut level so the coast advances and retreats; still at Speed 0.
+    float tide = sin(u_time * u_speed * 0.5) * 0.10 * min(1.6, u_tide);
+    float lvl = clamp(u_level * 0.7 + 0.15, 0.05, 0.95) + tide;
+    float band = 0.012 + u_fringe * 0.07;      // how far either side the coast breaks up
+    float d = fv - lvl;
 
     vec3 col = ink(0);
-    if (d > 0.0) {
-        // Land: an ordered-dither halftone in SNAPPED-PIXEL space (whole pixel cells, so it
-        // cannot beat against the pixel grid) that is solid deep inland and thins to
-        // scattered squares at the coast; the squares are the land ink over the ground ink.
-        // Note: at the 128/256 px golden sizes hcell floors at 1, so the goldens do not
-        // exercise the Halftone cells dial; it is meaningful from ~1024 px up.
-        float hcell = max(1.0, floor(u_resolution.y / (max(u_halftone, 4.0) * cell) + 0.5));
-        float inland = clamp(d / max(u_depth * 0.25, 1e-3), 0.0, 1.0);
-        float dotOn = step(bayer4(floor(px / hcell)), inland);
-        col = mix(ink(0), ink(1), dotOn);
-        // The innermost land takes the deep ink, never before the halftone has gone solid.
-        if (d > max(u_depth * 0.25 * 1.1, 0.22)) col = ink(4);
-    } else {
-        // Shallows: a wide, faintly dithered band of sea just off the coast (ink 6),
-        // then the coast fringe right at the shore (ink 3), dithered so it speckles.
-        float shallows = 1.0 - smoothstep(0.0, 0.16, -d);
-        if (step(1.0 - bayer4(px), shallows * 0.6) > 0.5) col = ink(5);
-        if (u_fringe > 0.0) {
-            float fringe = 1.0 - smoothstep(0.0, u_fringe * 0.12, -d);
-            if (step(bayer4(px), fringe) > 0.5) col = ink(2);
+    if (d > band) {
+        // Inland: one land square per cell, growing with depth, so the fill carries the
+        // field's shading instead of being flat.
+        float t = min(1.0, (d - band) / (0.20 * (1.05 - u_depth * 0.85)));
+        float k = cw * (0.30 + 0.68 * t);
+        if (inSquare(local, cw, ch, k)) col = ink(1);
+    } else if (d > -band) {
+        // The coast: a speck appears more often the nearer the cell is to the cut, in one
+        // of two colours used nowhere else.
+        float near = 1.0 - abs(d) / band;
+        if (hash2(vec2(i, j), u_seed + 53.0) < near * near * u_spark * 1.35) {
+            float k = cw * (0.34 + 0.42 * near);
+            if (inSquare(local, cw, ch, k)) col = (hash2(vec2(i, j), u_seed + 59.0) < 0.5) ? ink(2) : ink(3);
         }
     }
 
-    // Specks: scattered single pixels of ink 4 along both sides of the coast.
-    float near = 1.0 - smoothstep(0.0, 0.08, abs(d));
-    if (hash2(px, u_seed + 51.0) < u_specks * 0.35 * near) col = ink(3);
-
     if (u_hasInput > 0.5 && u_mix > 0.0) {
-        vec3 img = texture(u_image0, v_texCoord).rgb;
-        col = mix(col, img, u_mix);
+        col = mix(col, texture(u_image0, v_texCoord).rgb, u_mix);
     }
     fragColor0 = vec4(col, 1.0);
 }
