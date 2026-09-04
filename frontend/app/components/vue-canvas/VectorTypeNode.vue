@@ -62,6 +62,8 @@ const canvasEl = ref<HTMLCanvasElement | null>(null)
 const font = shallowRef<VtFont | null>(null)
 const renderError = ref<string | null>(null)
 const animated = computed(() => vtIsAnimated(config.value))
+// fontId is a storage token (e.g. "google:Inter Tight@700"); the subtitle shows the human-readable name instead.
+const fontLabel = computed(() => vtFontRefLabel(parseVtFontToken(config.value.fontId) ?? { kind: 'catalog', id: DEFAULT_FONT_ID }))
 
 let timer = 0
 let startedAt = 0
@@ -210,7 +212,7 @@ const varsInputIndex = computed(() =>
       <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
         <Type class="h-3.5 w-3.5 text-white/70" />
         <span class="text-xs font-medium text-white/80">Vector Type</span>
-        <span class="ml-auto truncate text-[10px] text-white/40">{{ config.fontId }}</span>
+        <span class="ml-auto truncate text-[10px] text-white/40">{{ fontLabel }}</span>
       </div>
 
       <div class="flex items-center justify-center bg-neutral-950">
