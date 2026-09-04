@@ -644,12 +644,14 @@ const {
     layers: localLayers.value,
     background: background.value,
     postEffects: postEffects.value,
+    grid: readGrid(compositor.value?.data?.properties as any),
     brandPalette: brandSwatches(projectBrand?.activeKit.value),
   }),
   setState: (s) => {
     commit(s.layers)
     if (s.background !== background.value) setBackground(s.background)
     if (JSON.stringify(s.postEffects ?? []) !== JSON.stringify(postEffects.value)) setPostEffects(s.postEffects ?? [])
+    if (s.grid && JSON.stringify(s.grid) !== JSON.stringify(gridConfig.value)) setGrid(s.grid)
   },
   apiKey: () => getLocalSetting('Sailor.AI.AnthropicApiKey') ?? '',
   dims: () => ({ w: canvasDisplay.w, h: canvasDisplay.h }),
