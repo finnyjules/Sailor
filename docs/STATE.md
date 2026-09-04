@@ -175,6 +175,22 @@ Next: **HDRI environments** from the same library (the natural sequel — real s
 
 Spec: [2026-09-01-scene3d-ambientcg-textures-design.md](superpowers/specs/2026-09-01-scene3d-ambientcg-textures-design.md) · plan: [2026-09-01-scene3d-ambientcg-textures.md](superpowers/plans/2026-09-01-scene3d-ambientcg-textures.md).
 
+### Vector Type — dial range tightened to a measured generous range — LANDED 2026-09-03 (`7992f1df1`,`5a49ded0a`)
+
+The smart-stretch dials went from 0.5–2.5 to **Stretch (width) 0.6–1.8, Height
+0.6–2.0** (split bounds; `VT_STRETCH_MIN/MAX`, `VT_HEIGHT_MIN/MAX` in
+`config.ts`; `clampStretch`/`clampHeight` at the frame; Fit caps at 1.8; preset
+tuning dials capped to match). Why: a strictly-universal "never breaks any font"
+range was measured and proved unusable — a delicate display serif's `e` frays
+the instant the dial moves, dragging the safe range to near-zero travel — and
+the inflection meter over-fired versus the eye. So the range is generous,
+grounded in the live pixel check (1.8 / 2.2 held clean), not the meter; it cuts
+only the far 2.5 corners. The honest per-glyph breaking point needs the
+stroke-vector engine, whose Stage-1 spike (skeleton from the reused Phase A
+distance field, re-inflate, measure) reconstructed the shape to ~2% but came
+back visually LUMPY on Julien's eye — shelved with its charter and numbers kept
+(`docs/superpowers/spikes/2026-09-03-stroke-vector-skeleton-spike.md`).
+
 ### Vector Type — any font: shared picker, Google cuts, library faces — LANDED 2026-09-03 (`d476ea962`..`2c163261a`)
 
 The Font row is the shared `FontPicker` (row mode, pinned ten curated variable families badged

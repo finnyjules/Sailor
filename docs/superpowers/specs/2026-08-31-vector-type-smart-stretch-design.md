@@ -162,8 +162,27 @@ plane (0.7 × 2.41, 1.38 × 2.31 were every troubled case). Everything Phase B
 ships is single-axis: fit-to-width moves width only; Spring Up is height only;
 Stretch In and Stretch Wave are width only.
 
+**Range tightened — measured/decided 2026-09-03.** The 0.5–2.5 range broke the
+character at its far ends on fragile faces. A strictly-universal "never breaks
+any font" range was measured (inflection-count probe across Inter, Archivo,
+Source Serif, Fraunces, Unbounded) and proved **unusable**: a delicate display
+serif's `e` frays the instant the dial moves, so respecting every font leaves
+the dial with almost no travel. The inflection meter also over-fired versus the
+eye (it flagged Inter's condensed `S` and clean live 1.6–1.8 stretches as
+broken), so it is not trustworthy to hard-clamp against. Julien chose a
+**generous range grounded in the live pixel check**, not the meter: **Stretch
+(width) 0.6–1.8, Height 0.6–2.0** — split bounds, since height tolerates more
+than width. Height gets more reach because the vertical remap is baseline-fixed
+and adds fewer ripples than the horizontal. This keeps the expressive single-axis
+reach (1.8 and 2.2 held clean in the studio) and cuts only the far 2.5 corners.
+`VT_STRETCH_MIN/MAX` (0.6/1.8) and `VT_HEIGHT_MIN/MAX` (0.6/2.0) in `config.ts`;
+`clampStretch`/`clampHeight` enforce them at the frame; Fit caps at 1.8. The
+honest universal-range answer (a per-glyph breaking point) needs the
+stroke-vector engine, whose Stage-1 spike came back visually lumpy and is
+shelved (`docs/superpowers/spikes/2026-09-03-stroke-vector-skeleton-spike.md`).
+
 Policy: **per-axis ranges, damped when both deviate.** Each dial alone ranges
-0.5–2.5×. When both dials deviate from 1 at once, the second axis's effective
+its measured bound above. When both dials deviate from 1 at once, the second axis's effective
 deviation is scaled by `1 − 0.5·min(1, |log S|/log 2)` (and symmetrically),
 so a strongly condensed letter can still grow taller but not to the frontier
 the engine cannot hold. The damping is applied to the values the engine
@@ -181,7 +200,7 @@ understand.
 Only after Phase A sign-off. Reuses the exact `stretch.ts` the lab validated.
 
 **Controls.** Two sliders in the Layout group next to Size and Tracking:
-`stretch` (width) and `stretchY` (height), each range ~0.5–2.5, step 0.01,
+`stretch` (width) 0.6–1.8 and `stretchY` (height) 0.6–2.0, step 0.01,
 default 1.
 
 **Fit-to-width.** `fit` select in Layout: `off | width`. When on, the studio
