@@ -48,6 +48,27 @@ describe('resolveGrid generated', () => {
     const widths = xs.slice(1).map((x, i) => x - xs[i]!)
     expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1) // equal within rounding
   })
+  it('regularity 1 equalizes columns for multiple counts (not just the one that happens to work)', () => {
+    for (const n of [4, 5, 7]) {
+      const { xs } = resolveGrid(gen({ seed: 3, regularity: 1, colRange: [n, n], merge: false }), 1200, 800)
+      const widths = xs.slice(1).map((x, i) => x - xs[i]!)
+      expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1)
+    }
+  })
+  it('convergence toward equal widths is monotonic (non-increasing) as regularity rises', () => {
+    const spreadAt = (regularity: number) => {
+      const { xs } = resolveGrid(gen({ seed: 3, regularity, colRange: [5, 5], merge: false }), 1200, 800)
+      const widths = xs.slice(1).map((x, i) => x - xs[i]!)
+      return Math.max(...widths) - Math.min(...widths)
+    }
+    const s0 = spreadAt(0)
+    const s05 = spreadAt(0.5)
+    const s07 = spreadAt(0.7)
+    const s1 = spreadAt(1)
+    expect(s1).toBeLessThanOrEqual(s07)
+    expect(s07).toBeLessThanOrEqual(s05)
+    expect(s05).toBeLessThanOrEqual(s0)
+  })
   it('regularity 0 varies column widths', () => {
     const { xs } = resolveGrid(gen({ seed: 3, regularity: 0, colRange: [5, 5], merge: false }), 1200, 800)
     const widths = xs.slice(1).map((x, i) => x - xs[i]!)
@@ -65,6 +86,26 @@ describe('resolveGrid generated', () => {
     // regions tile the grid area exactly (no overlap, full cover)
     const gridArea = (xs[cols]! - xs[0]!) * (ys[rows]! - ys[0]!)
     expect(Math.abs(area - gridArea)).toBeLessThan(2)
+
+    // Real partition check: mark each region's covered grid cells (by matching its edges
+    // back to xs/ys indices, since columns/rows need not be uniform width) and require
+    // every cell covered exactly once — area sum alone can't catch an overlap+gap that
+    // happen to cancel out numerically.
+    const coverCount: number[][] = Array.from({ length: cols }, () => new Array(rows).fill(0))
+    for (const r of regions) {
+      const i0 = xs.indexOf(r.x)
+      const i1 = xs.indexOf(r.x + r.w)
+      const j0 = ys.indexOf(r.y)
+      const j1 = ys.indexOf(r.y + r.h)
+      expect(i0).toBeGreaterThanOrEqual(0); expect(i1).toBeGreaterThan(i0)
+      expect(j0).toBeGreaterThanOrEqual(0); expect(j1).toBeGreaterThan(j0)
+      for (let j = j0; j < j1; j++)
+        for (let i = i0; i < i1; i++)
+          coverCount[i]![j]!++
+    }
+    for (let i = 0; i < cols; i++)
+      for (let j = 0; j < rows; j++)
+        expect(coverCount[i]![j]).toBe(1)
   })
   it('mirror symmetry makes the column plan palindromic in widths', () => {
     const { xs } = resolveGrid(gen({ seed: 9, regularity: 0, symmetry: 'mirror', colRange: [6, 6], merge: false }), 1200, 800)

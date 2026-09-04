@@ -97,25 +97,51 @@ function makeAxisEdges(
   }
   const sum = weights.reduce((a, b) => a + b, 0)
   const norm = weights.map((wgt) => wgt / sum)
+  // Per-segment widths, working in width-space (not absolute position) rather than
+  // cumulative edge positions: the module snap below acts on a WIDTH, so a segment's
+  // treatment depends only on its own free weight and never on where along the axis it
+  // happens to sit. That is what keeps `mirror` exactly palindromic even though the axis
+  // now module-snaps at every regularity — snapping absolute positions instead would
+  // snap each mirrored edge to whichever module line is nearest ITS coordinate, which
+  // differs left vs right and silently breaks the palindrome.
+  const freeWidths = norm.map((f) => f * span)
 
-  const raw: number[] = [startPx]
-  let acc = startPx
-  for (let i = 0; i < n; i++) { acc += norm[i]! * span; raw.push(acc) }
-  raw[raw.length - 1] = endPx // clamp accumulated rounding drift
-
+  // "Perfectly regular" target: every column/row gets exactly this width at regularity=1
+  // — equal by construction, never itself module-snapped (snapping it would reintroduce
+  // the non-equal-at-regularity=1 bug).
   const equalStep = span / n
+
+  const blended = freeWidths.map((freeWidth) => {
+    // Lerp the free width toward the equal width FIRST. This single linear blend is what
+    // makes convergence monotonic in regularity and exact at regularity=1 (the weight on
+    // freeWidth is then zero, so the module snap below — which only ever nudges, and
+    // vanishes at regularity=1 — cannot perturb it).
+    const target = freeWidth * (1 - regularity) + equalStep * regularity
+    if (modulePx <= 0) return target
+    // Snap that target to the base module and pull toward it, strongest at low
+    // regularity — the Swiss discipline (columns align to module lines when free) the
+    // dial promises. Snapping the pre-blended target rather than the raw free width
+    // keeps a continuous, seed-dependent quantity in play at every regularity < 1, so
+    // two different seeds whose column count happens to divide the module count evenly
+    // don't collapse onto bit-identical edges — only the discrete correction term does.
+    const snapped = Math.round(target / modulePx) * modulePx
+    // Guard: a target width smaller than half a module can snap to 0, which would
+    // collapse a segment to zero width (two coincident edges). Keep it positive.
+    return Math.max(target * regularity + snapped * (1 - regularity), 1)
+  })
+
+  // Snapping widths independently can drift their sum away from `span`; rescale
+  // uniformly to land exactly on it. A uniform scale factor preserves both the
+  // regularity=1 equal-width result and the mirror palindrome (same factor applied to
+  // every entry of an already-equal or already-palindromic sequence keeps it so).
+  const blendedSum = blended.reduce((a, b) => a + b, 0)
+  const scale = blendedSum > 0 ? span / blendedSum : 1
+  const widths = blended.map((w) => w * scale)
+
   const out: number[] = [startPx]
-  for (let i = 1; i < n; i++) {
-    const pos = raw[i]!
-    const equalPos = startPx + i * equalStep
-    let blended = pos * (1 - regularity) + equalPos * regularity
-    if (modulePx > 0) {
-      const snapped = Math.round(blended / modulePx) * modulePx
-      blended = blended * (1 - regularity) + snapped * regularity
-    }
-    out.push(blended)
-  }
-  out.push(endPx)
+  let acc = startPx
+  for (let i = 0; i < n; i++) { acc += widths[i]!; out.push(acc) }
+  out[out.length - 1] = endPx // clamp accumulated rounding drift
   return out.map((v) => Math.round(v))
 }
 
