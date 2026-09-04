@@ -19,7 +19,7 @@ import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMask
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import { useLocalLayerEditor, resizableKind, cornerResizableKind } from '~/composables/useLocalLayerEditor'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
-import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance } from '~/lib/frametemplate/apply'
+import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
@@ -73,6 +73,9 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import StrokeStyleRow from '~/components/vue-canvas/compositor/StrokeStyleRow.vue'
 import FillSwatch from '~/components/vue-canvas/compositor/FillSwatch.vue'
+import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
+import type { PaletteFamily } from '~/lib/color/seedFamily'
+import { layerPaletteAssignments } from '~/lib/compositor/distribute'
 import PostEffectsControls from '~/components/vue-canvas/PostEffectsControls.vue'
 import { isChainEffect, isGpuEffect } from '~/lib/compositor/postEffects'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
@@ -857,6 +860,26 @@ function focusPrompt() {
 }
 
 const selectedCount = computed(() => selectedLayers.value.length)
+// Distribute a seed-engine palette across the multi-selection, one hex per
+// layer (cycling short / resampling long — layerPaletteAssignments). `wired`
+// layers have no paint field of their own (their pixels come from an upstream
+// node), so they're excluded from both the distribution and the write —
+// exactly like clonableSelection() excludes them from duplication.
+const showMultiPalette = ref(false)
+function applyPaletteToSelection(fam: PaletteFamily) {
+  const targets = selectedLayers.value.filter(l => l.kind !== 'wired')
+  if (!targets.length) return
+  const assignments = layerPaletteAssignments(targets.map(l => l.id), fam.hexes)
+  recordHistory()
+  commit(localLayers.value.map((l) => {
+    const hex = assignments[l.id]
+    if (!hex) return l
+    const copy: any = { ...l }
+    applySlotToLayer(copy, 'color', hex)
+    return copy as LocalLayer
+  }))
+  showMultiPalette.value = false
+}
 // Box layers (rect/ellipse/image) get full Figma-style resize (corners + edges,
 // anchored opposite side); text/line/path keep uniform corner scale (no 2D box).
 const selectedResizable = computed(() => !!selectedLocal.value && resizableKind(selectedLocal.value.kind))
@@ -5284,6 +5307,21 @@ onUnmounted(() => {
             class="h-7 px-2 rounded bg-white/[0.06] hover:bg-white/12 text-[11px] text-white/85 cursor-pointer"
             @click="applyBoolean(b.op)">{{ b.label }}</button>
         </template>
+        <div class="w-px h-5 bg-white/10 mx-0.5" />
+        <div class="relative">
+          <button
+            class="flex items-center justify-center size-7 rounded hover:bg-white/12 cursor-pointer"
+            :class="showMultiPalette ? 'text-yellow-400' : 'text-white/80'"
+            title="Apply palette to selected layers" @click="showMultiPalette = !showMultiPalette">
+            <Palette class="size-4" />
+          </button>
+          <div v-if="showMultiPalette"
+            class="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-[280px] rounded-[10px] border border-[#2a2a2a] bg-[#1a1a1a]/97 p-2 shadow-xl z-30"
+            @pointerdown.stop>
+            <div class="mb-1.5 text-[11px] text-white/60">Apply palette to {{ selectedCount }} selected layers</div>
+            <PalettePicker mode="stops" @apply-family="applyPaletteToSelection" />
+          </div>
+        </div>
       </div>
       <div
         v-else-if="nodeEdit.active.value"
