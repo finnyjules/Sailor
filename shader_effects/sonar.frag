@@ -74,7 +74,6 @@ void main() {
     float cell = max(u_cell, 1.0);
     vec2 px = floor(v_texCoord * u_resolution / cell);
     vec2 uv = (px + 0.5) * cell / u_resolution;
-    vec2 asp = vec2(u_resolution.x / u_resolution.y, 1.0);
     float t = u_time * u_speed * 0.1;
     int oct = int(clamp(u_detail, 1.0, 8.0) + 0.5);
 
@@ -84,15 +83,13 @@ void main() {
 
     vec3 col = ink(0);
     if (d > 0.0) {
-        // Land: a square-dot halftone that is solid deep inland and thins to nothing at
-        // the coast; the dots are the land ink over the ground ink.
-        vec2 g = uv * asp * max(u_halftone, 4.0);
-        vec2 gc = fract(g) - 0.5;
+        // Land: an ordered-dither halftone in SNAPPED-PIXEL space (whole pixel cells, so it
+        // cannot beat against the pixel grid) that is solid deep inland and thins to
+        // scattered squares at the coast; the squares are the land ink over the ground ink.
+        float hcell = max(1.0, floor(u_resolution.y / (max(u_halftone, 4.0) * cell) + 0.5));
         float inland = clamp(d / max(u_depth * 0.25, 1e-3), 0.0, 1.0);
-        float r = mix(0.1, 0.5, inland);
-        float dotOn = step(max(abs(gc.x), abs(gc.y)), r);
+        float dotOn = step(bayer4(floor(px / hcell)), inland);
         col = mix(ink(0), ink(1), dotOn);
-        if (inland >= 1.0) col = ink(1);
         // The innermost land takes the deep ink.
         if (d > 0.22) col = ink(4);
     } else {
