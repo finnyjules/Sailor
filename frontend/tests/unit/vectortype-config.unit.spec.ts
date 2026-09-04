@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_FONT_ID } from '~/data/variable-fonts'
 import { DEFAULT_CONFIG, mergeConfig, VT_STRETCH_MAX, VT_STRETCH_MIN } from '~/lib/vectortype/config'
 import { VT_CONTROLS } from '~/lib/vectortype/controls'
 import { animatableTargets } from '~/lib/vectortype/motion'
@@ -34,5 +35,14 @@ describe('smart stretch config + controls', () => {
     const paths = animatableTargets(DEFAULT_CONFIG, []).map(t => t.path)
     expect(paths).toContain('stretch'); expect(paths).toContain('stretchY')
     expect(paths).not.toContain('fit')
+  })
+})
+
+describe('fontId is token-tolerant on parse', () => {
+  it('keeps any valid font token on reload and resets junk to the default', () => {
+    expect(mergeConfig({ fontId: 'google:Inter Tight@700' } as any).fontId).toBe('google:Inter Tight@700')
+    expect(mergeConfig({ fontId: 'local:OT 2049@300i' } as any).fontId).toBe('local:OT 2049@300i')
+    expect(mergeConfig({ fontId: 'roboto-flex' } as any).fontId).toBe('roboto-flex')
+    expect(mergeConfig({ fontId: 'not-a-font' } as any).fontId).toBe(DEFAULT_FONT_ID)
   })
 })

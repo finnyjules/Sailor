@@ -32,7 +32,8 @@ export interface VtAxis {
 }
 
 export interface VtFont {
-  /** Catalog id it was loaded from. */
+  /** The token it was loaded from (`fontToken.ts`) — a curated catalog id, or a
+   *  `google:`/`local:` token; not necessarily a catalog id any more. */
   id: string
   /** Every axis the FILE declares — not the catalog's curated subset. */
   axes: VtAxis[]

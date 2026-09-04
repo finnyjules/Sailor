@@ -33,7 +33,6 @@ import {
   VT_EXTRUDE_DEPTH_MAX,
   VT_FILL_ANCHORS,
   VT_FITS,
-  VT_FONT_IDS,
   VT_SKEW_MAX,
   VT_STAGGER_DELAY_MAX,
   VT_STAGGER_ORDERS,
@@ -280,11 +279,23 @@ export const VT_CONTROLS: VtControl[] = [
   { key: 'text', label: 'Text', kind: 'text', default: DEFAULT_CONFIG.text, group: 'Text' },
 
   // --- Font -----------------------------------------------------------------
-  select('fontId', 'Font', VT_FONT_IDS, DEFAULT_CONFIG.fontId, 'Font',
-    'Which variable family to set the type in. Changing it changes WHICH AXES EXIST.',
+  // `fontId` is a TOKEN now (`fontToken.ts`), not a closed catalog id: any of
+  // the ten pinned ids, or a `google:`/`local:` cut of any other family. A
+  // `select` can no longer enumerate the option set, so this is `text` kind —
+  // same free-string shape as scene3d's Texture control — opted back INTO the
+  // agent's vocabulary with `aiEditable: true` (off by default for `text`,
+  // because most free strings are unsafe to hand the model; this one is safe
+  // because `mergeConfig`'s `isVtFontToken` gate is the same one a save/reload
+  // enforces, so a junk token degrades to the default rather than corrupting
+  // the config).
+  {
+    key: 'fontId', label: 'Font', kind: 'text', default: DEFAULT_CONFIG.fontId, group: 'Font',
+    aiEditable: true,
     // A different font is a different axis set, not a point on a scale: tweening
     // it would swap vocabularies mid-clip, not interpolate anything.
-    { animatable: false }),
+    animatable: false,
+    hint: 'A font token: one of the ten pinned variable families by id (inter, roboto-flex, archivo, fraunces, recursive, bricolage, big-shoulders, space-grotesk, unbounded, source-serif — these have live axes), or `google:Family@Weight` for any Google family as one static cut, or `local:Family@Weight` for a licensed library face. Changing it changes WHICH AXES EXIST.',
+  } as VtControl,
 
   // --- Layout ---------------------------------------------------------------
   slider('size', 'Size', 8, 600, 1, 'Layout', DEFAULT_CONFIG.size, 'Em size in output pixels (CSS font-size semantics).'),
@@ -717,7 +728,7 @@ export function derivedVtControls(cfg: VectorTypeConfig, axes: VtAxis[] = []): C
  */
 export const VT_GUIDANCE = `This is a VECTOR TYPE studio: real glyph OUTLINES pulled from a VARIABLE font and animated as geometry. Not a raster text layer, not 3D type.
 
-THE FONT COMES FIRST. \`fontId\` picks the variable family, and it decides WHICH AXES EXIST — change it before touching any axis, never after.
+THE FONT COMES FIRST. \`fontId\` picks the typeface, and it decides WHICH AXES EXIST — change it before touching any axis, never after. It takes one of three shapes: a pinned id (inter, roboto-flex, archivo, fraunces, recursive, bricolage, big-shoulders, space-grotesk, unbounded, source-serif) for a family with live variable axes; google:Family@Weight for any other Google family as one static cut with NO axes; or local:Family@Weight for a licensed library face, also with no axes. Prefer a pinned id whenever the axes matter to the request.
 
 AXES ARE THE POINT. Every axis the chosen font declares is a live slider at \`axes.<tag>\`: the familiar ones are \`axes.wght\` (weight), \`axes.wdth\` (width), \`axes.opsz\` (optical size) and \`axes.slnt\` (slant), and Roboto Flex adds the rare ones — \`axes.GRAD\` (grade: weight without changing the width the text occupies), \`axes.XOPQ\` (thick-stroke thickness), \`axes.XTRA\` (counter width), \`axes.YTAS\` (ascender height), \`axes.YTLC\` (x-height). These interpolate the OUTLINE itself, so reach for an axis before faking weight with an outline. Only tags the current font declares exist; anything else is ignored.
 

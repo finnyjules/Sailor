@@ -217,12 +217,19 @@ describe('VT_CONTROLS integrity', () => {
     }
   })
 
-  it('offers exactly the font ids mergeConfig will accept', () => {
-    // controls.ts derives its option list from config.ts's VT_FONT_IDS, which is
-    // derived from the catalog. Adding a family cannot leave the picker behind.
+  it('fontId is a token-tolerant free-text control, opted back into the agent vocabulary', () => {
+    // `mergeConfig` now accepts any of the three token shapes (`fontToken.ts`),
+    // not just a catalog id, so a fixed `options` list would reject a valid
+    // `google:`/`local:` token. `text` is the free-string kind — not
+    // agent-editable by default, so `aiEditable: true` opts it back in — and
+    // it is not animatable: a different font is a different axis set, not a
+    // point on a scale.
     const spec = VT_CONTROLS.find((c) => c.key === 'fontId')!
-    expect(spec.kind).toBe('select')
-    expect((spec as any).options).toEqual(VT_FONT_IDS)
+    expect(spec.kind).toBe('text')
+    expect((spec as any).options).toBeUndefined()
+    expect((spec as any).aiEditable).toBe(true)
+    expect((spec as any).animatable).toBe(false)
+    // The default itself is still one of the ten pinned ids.
     expect(VT_FONT_IDS).toContain(DEFAULT_CONFIG.fontId)
   })
 })

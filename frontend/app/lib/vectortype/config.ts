@@ -86,6 +86,7 @@ import {
   type VtScatterConfig,
 } from './scatter'
 import { DEFAULT_FONT_ID, VARIABLE_FONTS } from '~/data/variable-fonts'
+import { isVtFontToken } from './fontToken'
 
 /** Horizontal anchoring of the (single-line, v1) glyph run. */
 export type VtAlign = 'left' | 'center' | 'right'
@@ -1775,10 +1776,12 @@ export function mergeConfig(raw: unknown): VectorTypeConfig {
   const moves = migrateMoveTrackPaths(motion.moves, appearance)
   return {
     text: str(o.text, d.text),
-    // An unknown font id is NOT kept: every later stage (the proxy, the loader,
-    // the axis controls) resolves it against the catalog, so keeping it would
-    // leave the studio pointing at a font that can never load.
-    fontId: oneOf(o.fontId, VT_FONT_IDS, d.fontId),
+    // A token of any of the three shapes (`fontToken.ts`) is kept verbatim — a
+    // curated catalog id, or a `google:`/`local:` token. Anything that parses
+    // to none of the three is NOT kept: every later stage (the proxy, the
+    // loader, the axis controls) resolves it against a catalog, so keeping it
+    // would leave the studio pointing at a font that can never load.
+    fontId: isVtFontToken(o.fontId) ? String(o.fontId) : d.fontId,
     axes: mergeAxes(o.axes),
     size: num(o.size, d.size),
     tracking: num(o.tracking, d.tracking),
