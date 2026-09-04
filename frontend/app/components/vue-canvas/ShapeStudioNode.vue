@@ -4,6 +4,8 @@ import { Gem, Pencil } from 'lucide-vue-next'
 import { renderStudio, drawToCanvas, studioFramePad } from '~/lib/geoshape/render'
 import { studioDocFromPersisted } from '~/lib/geoshape/studio'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
+import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
+import { makeShapeFrameSource } from '~/lib/geoshape/frameSource'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 
 // Shape Studio — a frontend-only config node (no backend class_type, never
@@ -86,13 +88,40 @@ async function bakeOutput(): Promise<Blob | null> {
   }
 }
 
+// Live frame source so a direct Shape→Frame wire paints immediately (frameResolve
+// prefers a live source over a baked file), matching Gradient/Vector/Space/Scene3D.
+// Shape Studio is a still, so this renders the persisted config once per pull —
+// same renderStudio→drawToCanvas path as bakeOutput, but reusing one owned canvas
+// (the StudioFrameSource contract: the returned surface is valid only until the
+// next getFrame call, so consumers copy it out before pulling again).
+let frameCanvas: HTMLCanvasElement | null = null
+async function renderFrameSurface(w: number, h: number): Promise<TexImageSource> {
+  const blob = props.data?.properties?.sailor_shapeStudio as
+    { doc?: unknown; config?: unknown; canvasW?: number; canvasH?: number } | undefined
+  const studioDoc = studioDocFromPersisted(blob)
+  const shapes = await renderStudio(studioDoc)
+  if (!frameCanvas) frameCanvas = document.createElement('canvas')
+  frameCanvas.width = Math.max(1, Math.round(w))
+  frameCanvas.height = Math.max(1, Math.round(h))
+  const ctx = frameCanvas.getContext('2d')
+  if (!ctx) return frameCanvas
+  ctx.clearRect(0, 0, frameCanvas.width, frameCanvas.height)
+  drawToCanvas(shapes, ctx, frameCanvas.width, frameCanvas.height, studioFramePad(studioDoc))
+  return frameCanvas
+}
+
 onMounted(() => {
   window.addEventListener('sailor:shapeStudioOutput', onOutput)
   registerStudioBaker(props.id, bakeOutput)
+  registerStudioFrameSource(props.id, makeShapeFrameSource({
+    getPersisted: () => props.data?.properties?.sailor_shapeStudio,
+    render: renderFrameSurface,
+  }))
 })
 onBeforeUnmount(() => {
   window.removeEventListener('sailor:shapeStudioOutput', onOutput)
   unregisterStudioBaker(props.id)
+  unregisterStudioFrameSource(props.id)
   if (bakedThumb.value) URL.revokeObjectURL(bakedThumb.value)
 })
 
