@@ -26,6 +26,10 @@ export function lastPathSegment(path: string): string {
 }
 
 export function moveCardLabel(move: Move, adapter: MovesAdapter<any>): string {
+  // Studio's own catalog name for the actual move ("Wave", "Slide up") wins —
+  // the kind label ("Preset") is useless when many presets share a kind.
+  const named = adapter.moveLabel?.(move)
+  if (named) return named
   if (move.kind === 'tracks' && (!move.presetId || move.presetId === 'custom')) {
     const path = move.tracks?.[0]?.path
     return path ? `Custom · ${lastPathSegment(path)}` : 'Custom'

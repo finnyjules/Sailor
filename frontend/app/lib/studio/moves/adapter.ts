@@ -159,4 +159,16 @@ export interface MovesAdapter<Cfg> {
    * panel treats a missing `derivedMoves` as "no derived moves".
    */
   derivedMoves?(cfg: Cfg): Move[]
+  /**
+   * Human name for a move, shown on its timeline band and card row — the
+   * ACTUAL move ("Wave", "Slide up"), not the generic kind. A `'preset'`/
+   * `'tracks'` move's `presetId` is an internal id (`wave`, `slide-out-up`)
+   * whose display name lives in the studio's own catalog, which this shared
+   * module can't reach; the kind's `label` ("Preset") is a useless fallback
+   * when several presets share a kind. An adapter resolves the id here.
+   * Return `undefined` to defer to `moveCardLabel`'s generic chain (kind
+   * label → presetId → kind). Optional and additive — an adapter that omits
+   * it keeps the old generic labels.
+   */
+  moveLabel?(move: Move): string | undefined
 }

@@ -426,6 +426,32 @@ export function vtMovesAdapter(
     flip: vtPresetFlip,
 
     /**
+     * The move's real name for its timeline band / card row — the picked
+     * preset, not the kind. A `'preset'` move's id is either a shared kinetic
+     * preset (`wave` → `Wave`) or one of this studio's AXIS presets
+     * (`weight-wave` → `Weight Wave`, `axisOffer` above stamps those
+     * `kind:'preset'` too), so both catalogs are consulted. A `'tracks'` move
+     * built from a named track preset resolves in the track catalog
+     * (`Stretch Wave`, `Light Sweep`). Anything else — a hand-picked Custom
+     * dial, or a Blink/Scatter marker — returns `undefined` so `moveCardLabel`
+     * falls back to its generic chain ("Custom · <dial>", "Blink", "Scatter").
+     */
+    moveLabel(move: Move): string | undefined {
+      if (move.kind === 'preset' && move.presetId) {
+        const kinetic = KINETIC_PRESETS_BY_ID[move.presetId]?.label
+        if (kinetic) return kinetic
+        for (const slot of ['in', 'out', 'loop'] as const) {
+          const axis = vtAxisPreset(slot, move.presetId)?.label
+          if (axis) return axis
+        }
+        return undefined
+      }
+      if (move.kind === 'tracks' && move.presetId && move.presetId !== 'custom')
+        return vtTrackPreset(move.presetId)?.label ?? undefined
+      return undefined
+    },
+
+    /**
      * ONE grouped-by-type list (`adapter.ts`'s `gallery` doc): no more
      * phase argument, no more per-phase tab. Walked in the SAME preference
      * order the old per-phase call used (Letterform first, then the rest of

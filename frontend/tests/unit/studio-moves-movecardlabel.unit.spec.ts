@@ -62,4 +62,19 @@ describe('moveCardLabel', () => {
     const move = baseMove({ kind: 'mystery' })
     expect(moveCardLabel(move, ADAPTER)).toBe('mystery')
   })
+
+  it('prefers adapter.moveLabel over the generic kind label (preset name beats "Preset")', () => {
+    const withNames: MovesAdapter<unknown> = {
+      ...ADAPTER,
+      moveLabel: (m) => (m.presetId === 'wave' ? 'Wave' : undefined),
+    }
+    const wave = baseMove({ kind: 'preset', presetId: 'wave' })
+    expect(moveCardLabel(wave, withNames)).toBe('Wave')
+  })
+
+  it('defers to the generic chain when moveLabel returns undefined', () => {
+    const withNames: MovesAdapter<unknown> = { ...ADAPTER, moveLabel: () => undefined }
+    const blink = baseMove({ kind: 'blink', presetId: undefined })
+    expect(moveCardLabel(blink, withNames)).toBe('Blink')
+  })
 })
