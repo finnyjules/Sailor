@@ -78,7 +78,15 @@ const DEFAULT_CTX: MergeMoveCtx = { clipDuration: DEFAULT_CLIP_DURATION, longest
  *  - **2026-09-03** (`phase`/`play`, no `at`) — converted so an old document
  *    renders identically:
  *      - `phase: 'in'`   -> `at: 0`
- *      - `phase: 'out'`  -> `at: max(0, clipDuration - duration)`
+ *      - `phase: 'out'`  -> `at: max(longestIn, clipDuration - duration)`,
+ *        with `duration` COMPRESSED to `clipDuration - at`. The old engine
+ *        started an out at `max(longestIn, clipDuration - duration)` and
+ *        eased it over that compressed window, not over the raw `duration`
+ *        — so when an out's raw duration would overlap the longest in, both
+ *        the start and the eased span have to shift together, or the exit
+ *        blends into the entrance at a moment the old engine never touched.
+ *        (Flooring `at` at 0 alone reproduces only the non-overlapping case;
+ *        see the regression test in `tests/unit/studio-moves-migrate.unit.spec.ts`.)
  *      - `phase: 'loop'` -> `at: longestIn` — the doc's longest entrance, so
  *        a loop starts exactly where the entrance(s) it followed finish,
  *        matching the old evaluator's implicit in-then-loop ordering.
@@ -87,16 +95,25 @@ const DEFAULT_CTX: MergeMoveCtx = { clipDuration: DEFAULT_CLIP_DURATION, longest
  *    flag are the same idea told two ways across the format's history, so
  *    either one sets it. `bounce` is `play.mode === 'backAndForth'`.
  */
-function resolvePlacement(o: Record<string, unknown>, duration: number, ctx: MergeMoveCtx): { at: number; loop: boolean; bounce: boolean } {
+function resolvePlacement(o: Record<string, unknown>, duration: number, ctx: MergeMoveCtx): { at: number; loop: boolean; bounce: boolean; duration: number } {
   if (isNum(o.at)) {
-    return { at: Math.max(0, o.at), loop: o.loop === true, bounce: o.bounce === true }
+    return { at: Math.max(0, o.at), loop: o.loop === true, bounce: o.bounce === true, duration }
   }
   const phase: 'in' | 'out' | 'loop' = o.phase === 'in' || o.phase === 'out' ? o.phase : 'loop'
   const play: MovePlay = mergePlay(o.play)
-  const at = phase === 'in' ? 0 : phase === 'out' ? Math.max(0, ctx.clipDuration - duration) : ctx.longestIn
+  let at: number
+  let placedDuration = duration
+  if (phase === 'in') {
+    at = 0
+  } else if (phase === 'out') {
+    at = Math.max(ctx.longestIn, ctx.clipDuration - duration)
+    placedDuration = Math.max(0.001, ctx.clipDuration - at)
+  } else {
+    at = ctx.longestIn
+  }
   const loop = phase === 'loop' || play.mode === 'repeat'
   const bounce = play.mode === 'backAndForth'
-  return { at, loop, bounce }
+  return { at, loop, bounce, duration: placedDuration }
 }
 
 /**
@@ -113,8 +130,8 @@ export function mergeMove(raw: unknown, mergeTrackFn?: (t: unknown) => MoveTrack
   const kind: string = o.kind === 'tracks' ? 'tracks' : 'preset'
   const id = typeof o.id === 'string' && o.id ? o.id : `move-${Math.random().toString(36).slice(2, 9)}`
   const presetId = typeof o.presetId === 'string' && o.presetId.trim() ? o.presetId.trim() : undefined
-  const duration = clampDur(isNum(o.duration) ? o.duration : 1)
-  const { at, loop, bounce } = resolvePlacement(o, duration, ctx)
+  const rawDuration = clampDur(isNum(o.duration) ? o.duration : 1)
+  const { at, loop, bounce, duration } = resolvePlacement(o, rawDuration, ctx)
   const base: Move = {
     id,
     kind,
