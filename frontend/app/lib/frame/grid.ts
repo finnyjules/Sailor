@@ -46,6 +46,119 @@ function cellRegions(xs: number[], ys: number[]): Rect[] {
   return out
 }
 
+/** Seeded PRNG (mulberry32) — deterministic stream of floats in [0,1). */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return function next(): number {
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** Integer drawn uniformly from [lo, hi] (inclusive) off the seeded stream. */
+function pickInt(rng: () => number, lo: number, hi: number): number {
+  if (hi <= lo) return lo
+  return lo + Math.floor(rng() * (hi - lo + 1))
+}
+
+/**
+ * Edge positions for `n` divisions across [startPx, endPx].
+ * regularity 0 → free (weighted-random) spacing; regularity 1 → equal, module-snapped spacing.
+ * mirror=true makes the resulting widths palindromic (left half drives the right half).
+ */
+function makeAxisEdges(
+  rng: () => number,
+  startPx: number,
+  endPx: number,
+  n: number,
+  regularity: number,
+  modulePx: number,
+  mirror: boolean,
+): number[] {
+  if (n <= 1) return [Math.round(startPx), Math.round(endPx)]
+  const span = endPx - startPx
+  const variance = (1 - regularity) * 0.85
+
+  let weights: number[]
+  if (mirror) {
+    const half = Math.ceil(n / 2)
+    const halfWeights: number[] = []
+    for (let i = 0; i < half; i++) halfWeights.push(1 + (rng() * 2 - 1) * variance)
+    weights = new Array(n)
+    for (let i = 0; i < half; i++) {
+      weights[i] = halfWeights[i]!
+      weights[n - 1 - i] = halfWeights[i]!
+    }
+  } else {
+    weights = []
+    for (let i = 0; i < n; i++) weights.push(1 + (rng() * 2 - 1) * variance)
+  }
+  const sum = weights.reduce((a, b) => a + b, 0)
+  const norm = weights.map((wgt) => wgt / sum)
+
+  const raw: number[] = [startPx]
+  let acc = startPx
+  for (let i = 0; i < n; i++) { acc += norm[i]! * span; raw.push(acc) }
+  raw[raw.length - 1] = endPx // clamp accumulated rounding drift
+
+  const equalStep = span / n
+  const out: number[] = [startPx]
+  for (let i = 1; i < n; i++) {
+    const pos = raw[i]!
+    const equalPos = startPx + i * equalStep
+    let blended = pos * (1 - regularity) + equalPos * regularity
+    if (modulePx > 0) {
+      const snapped = Math.round(blended / modulePx) * modulePx
+      blended = blended * (1 - regularity) + snapped * regularity
+    }
+    out.push(blended)
+  }
+  out.push(endPx)
+  return out.map((v) => Math.round(v))
+}
+
+/**
+ * Walk the cell grid in raster order; for each still-unclaimed cell, grow a rectangular
+ * unit (bounded by mergeMaxSpan on each axis and by already-claimed neighbours) over
+ * unclaimed cells, mark it claimed, and emit its bounding rect. Every cell ends up in
+ * exactly one unit, so the result tiles the grid with no gaps or overlaps.
+ */
+function mergeRegions(xs: number[], ys: number[], mergeMaxSpan: number, rng: () => number): Rect[] {
+  const cols = xs.length - 1, rows = ys.length - 1
+  const maxSpan = Math.max(1, Math.round(mergeMaxSpan))
+  const claimed: boolean[][] = Array.from({ length: cols }, () => new Array(rows).fill(false))
+  const out: Rect[] = []
+
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      if (claimed[i]![j]) continue
+
+      // widest run of unclaimed cells to the right in this row, capped by maxSpan/grid edge
+      let maxW = 1
+      while (maxW < Math.min(maxSpan, cols - i) && !claimed[i + maxW]![j]) maxW++
+      const spanW = 1 + Math.floor(rng() * maxW)
+
+      // tallest run of rows below where the full [i, i+spanW) slice is still unclaimed
+      let maxH = 1
+      rowScan: while (maxH < Math.min(maxSpan, rows - j)) {
+        const rowY = j + maxH
+        for (let x = i; x < i + spanW; x++) if (claimed[x]![rowY]) break rowScan
+        maxH++
+      }
+      const spanH = 1 + Math.floor(rng() * maxH)
+
+      for (let y = j; y < j + spanH; y++)
+        for (let x = i; x < i + spanW; x++)
+          claimed[x]![y] = true
+
+      out.push({ x: xs[i]!, y: ys[j]!, w: xs[i + spanW]! - xs[i]!, h: ys[j + spanH]! - ys[j]! })
+    }
+  }
+  return out
+}
+
 export function resolveGrid(grid: FrameGrid, w: number, h: number): { xs: number[]; ys: number[]; regions: Rect[] } {
   if (grid.mode === 'off') return { xs: [], ys: [], regions: [] }
   const mx = grid.margin * w, my = grid.margin * w   // margin normalized to width on both axes (uniform inset)
@@ -54,5 +167,17 @@ export function resolveGrid(grid: FrameGrid, w: number, h: number): { xs: number
     const ys = evenEdges(my, h - my, Math.max(1, Math.round(grid.rows)))
     return { xs, ys, regions: cellRegions(xs, ys) }
   }
-  return { xs: [], ys: [], regions: [] }   // generated: Task 2
+
+  // generated
+  const rng = mulberry32(grid.gen.seed)
+  const cols = pickInt(rng, grid.gen.colRange[0], grid.gen.colRange[1])
+  const rows = pickInt(rng, grid.gen.rowRange[0], grid.gen.rowRange[1])
+  const modulePx = grid.baseModule * w
+  const mirror = grid.gen.symmetry === 'mirror'
+  const xs = makeAxisEdges(rng, mx, w - mx, cols, grid.gen.regularity, modulePx, mirror)
+  const ys = makeAxisEdges(rng, my, h - my, rows, grid.gen.regularity, modulePx, mirror)
+  const regions = grid.gen.merge
+    ? mergeRegions(xs, ys, grid.gen.mergeMaxSpan, rng)
+    : cellRegions(xs, ys)
+  return { xs, ys, regions }
 }
