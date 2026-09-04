@@ -97,12 +97,11 @@ float fieldAt(float cx, float cy) {
     return (floor(s.r * 255.0 + 0.5) * 256.0 + floor(s.g * 255.0 + 0.5)) / 65535.0;
 }
 
-// Flatten the histogram so every slice of the ramp covers about the same amount of the
-// picture: that is what turns a soft gradient into flat blocks of one colour. The tool
-// measures its whole frame; here the frame MEAN is estimated from a fixed 4x4 grid of taps
-// and the spread is known per octave count (sd 0.211 / 0.157 / 0.130 / 0.121 / 0.115 for
-// 1..5 octaves). A logistic stands in for the CDF; a stretched raw value keeps 12% of the
-// original shape, as the tool does.
+// Flatten the histogram so every slice of the ramp gets a fair share of the picture: that
+// is what turns a soft gradient into flat blocks of one colour. The tool measures its whole
+// frame; here the frame mean and spread are measured from a fixed 8x8 grid of taps. A
+// logistic stands in for the CDF; a stretched raw value keeps 12% of the original shape, as
+// the tool does.
 float flatten(float t, float mu, float sd) {
     float raw = clamp((t - mu) / (5.2 * sd) + 0.5, 0.0, 1.0);
     float eq = 1.0 / (1.0 + exp(-1.702 * (t - mu) / sd));
@@ -121,16 +120,18 @@ void main() {
     float x = px.x;
     float y = (H - 1.0) - px.y;                     // canvas y, downwards
 
-    // Frame mean of the raw field from a fixed 4x4 grid; the spread per octave count.
-    int oct = int(clamp(u_detail, 1.0, 5.0) + 0.5);
-    float sd = (oct <= 1) ? 0.211 : (oct == 2) ? 0.157 : (oct == 3) ? 0.130 : (oct == 4) ? 0.121 : 0.115;
-    float mu = 0.0;
-    for (int a = 0; a < 4; a++) {
-        for (int b = 0; b < 4; b++) {
-            mu += fieldAt((float(a) + 0.5) * W / 4.0, (float(b) + 0.5) * H / 4.0);
+    // Frame mean AND spread of the raw field from a fixed 8x8 grid. The tool measures its
+    // whole frame; a table of spreads per octave count ran 12–15% high and left the end
+    // inks under-used, and a regular 4x4 grid can lock onto the field's own period.
+    float mu = 0.0, m2 = 0.0;
+    for (int a = 0; a < 8; a++) {
+        for (int b = 0; b < 8; b++) {
+            float s = fieldAt((float(a) + 0.5) * W / 8.0, (float(b) + 0.5) * H / 8.0);
+            mu += s; m2 += s * s;
         }
     }
-    mu /= 16.0;
+    mu /= 64.0; m2 /= 64.0;
+    float sd = max(0.03, sqrt(max(m2 - mu * mu, 0.0)));
 
     // Tear: some bands of rows are dragged so hard the whole row collapses into two or
     // three stripes of flat colour and slides sideways with it.
