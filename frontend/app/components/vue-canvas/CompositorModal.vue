@@ -397,6 +397,15 @@ const viewStyle = computed(() => ({
   height: canvasDisplay.h + 'px',
   transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`,
   transformOrigin: '0 0',
+  // Promote the pan/zoom wrapper to its own compositor layer. Without this the
+  // wrapper is `will-change: auto`, so every pan/zoom re-rasters its whole subtree
+  // — chiefly the device-resolution stack canvas (~2400×1300) — on the raster
+  // thread each frame. That was the pan lag (the JS main thread stays idle; the
+  // cost is all compositing). Promoted, a pan is a cheap GPU layer transform.
+  willChange: 'transform',
+  // Belt-and-braces layer promotion for engines that ignore will-change on a
+  // transformed element; keeps the canvas crisp under sub-pixel translate.
+  backfaceVisibility: 'hidden' as const,
 }))
 function resetView() { view.scale = 1; view.tx = 0; view.ty = 0 }
 function zoomAround(cx: number, cy: number, factor: number) {
