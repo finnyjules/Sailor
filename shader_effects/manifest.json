@@ -3236,8 +3236,8 @@
       ]
     },
     {
-      "id": "filament",
-      "name": "Filament",
+      "id": "thread_contours",
+      "name": "Thread Contours",
       "category": "generative",
       "animated": true,
       "passes": 1,
