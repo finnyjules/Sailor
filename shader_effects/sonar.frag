@@ -37,33 +37,77 @@ float bayer4(vec2 px) {
     return (float(B4[p.x + p.y * 4]) + 0.5) / 16.0;
 }
 
-uniform vec3 u_sea;
-uniform vec3 u_land;
-uniform float u_level;
-uniform float u_edge;
-uniform float u_scale;
+// The `gradient` param is read as INK ROLES here, not as a ramp: the stops' order is the
+// role, their positions are ignored. 1 ground (sea), 2 land, 3 coast fringe, 4 specks,
+// 5 deep land, 6 shallows. Fewer stops fall back to the last one provided.
+#define MAXS 8
+uniform vec3 u_ramp[MAXS];
+uniform float u_rampPos[MAXS];
+uniform float u_rampCount;
+vec3 ink(int role) {
+    int n = int(u_rampCount + 0.5);
+    int i = clamp(min(role, n - 1), 0, MAXS - 1);
+    return u_ramp[i];
+}
+
+uniform float u_level;     // Coverage: how much of the frame is land
+uniform float u_scale;     // Feature size
+uniform float u_warp;      // Distortion: the field pushed through itself
 uniform float u_detail;
-uniform float u_cell;
+uniform float u_cell;      // Pixel size of the whole picture
+uniform float u_halftone;  // Halftone cells across the short axis
+uniform float u_depth;     // How far inland the halftone keeps thinning
+uniform float u_fringe;    // Width of the dithered coast band (ink 3)
+uniform float u_specks;    // Density of scattered specks near the coast (ink 4)
 uniform float u_speed;
 uniform float u_mix;
 
+float heightAt(vec2 uv, float t, int oct) {
+    vec2 asp = vec2(u_resolution.x / u_resolution.y, 1.0);
+    vec2 p = (uv - 0.5) * asp * u_scale;
+    vec2 q = vec2(fbmN(p + vec2(t, 0.0), u_seed, oct), fbmN(p + vec2(2.3, 5.1) - t, u_seed + 7.0, oct));
+    return fbmN(p + u_warp * (q - 0.5) * 2.0, u_seed + 17.0, oct);
+}
+
 void main() {
-    // Snap to a coarse pixel grid first so the dither is chunky, not per-device-pixel.
+    // Snap to a coarse pixel grid first so every edge is chunky, not per-device-pixel.
     float cell = max(u_cell, 1.0);
     vec2 px = floor(v_texCoord * u_resolution / cell);
     vec2 uv = (px + 0.5) * cell / u_resolution;
     vec2 asp = vec2(u_resolution.x / u_resolution.y, 1.0);
-    vec2 p = (uv - 0.5) * asp * u_scale;
     float t = u_time * u_speed * 0.1;
     int oct = int(clamp(u_detail, 1.0, 8.0) + 0.5);
 
-    float h = fbmN(p + vec2(t, -t * 0.7), u_seed, oct);
-    // Coastline: the chance of "land" rises across the shore band, and the ordered
-    // dither turns that chance into a stippled edge.
-    float e = max(u_edge, 1e-4);   // equal smoothstep edges are undefined in GLSL; keep a hair of width
-    float prob = smoothstep(u_level - e, u_level + e, h);
-    float land = step(bayer4(px), prob);
-    vec3 col = mix(u_sea, u_land, land);
+    // One level cut through the field: d > 0 is land, d < 0 is sea, d = 0 is the coast.
+    float h = heightAt(uv, t, oct);
+    float d = h - (1.0 - u_level);
+
+    vec3 col = ink(0);
+    if (d > 0.0) {
+        // Land: a square-dot halftone that is solid deep inland and thins to nothing at
+        // the coast; the dots are the land ink over the ground ink.
+        vec2 g = uv * asp * max(u_halftone, 4.0);
+        vec2 gc = fract(g) - 0.5;
+        float inland = clamp(d / max(u_depth * 0.25, 1e-3), 0.0, 1.0);
+        float r = mix(0.1, 0.5, inland);
+        float dotOn = step(max(abs(gc.x), abs(gc.y)), r);
+        col = mix(ink(0), ink(1), dotOn);
+        if (inland >= 1.0) col = ink(1);
+        // The innermost land takes the deep ink.
+        if (d > 0.22) col = ink(4);
+    } else {
+        // Shallows: a wide, faintly dithered band of sea just off the coast (ink 6),
+        // then the coast fringe right at the shore (ink 3), dithered so it speckles.
+        float shallows = 1.0 - smoothstep(0.0, 0.16, -d);
+        if (step(bayer4(px + 2.0), shallows * 0.6) > 0.5) col = ink(5);
+        float fw = max(u_fringe * 0.12, 1e-4);
+        float fringe = 1.0 - smoothstep(0.0, fw, -d);
+        if (step(bayer4(px), fringe) > 0.5) col = ink(2);
+    }
+
+    // Specks: scattered single pixels of ink 4 along both sides of the coast.
+    float near = 1.0 - smoothstep(0.0, 0.08, abs(d));
+    if (hash2(px, u_seed + 51.0) < u_specks * 0.35 * near) col = ink(3);
 
     if (u_hasInput > 0.5 && u_mix > 0.0) {
         vec3 img = texture(u_image0, v_texCoord).rgb;

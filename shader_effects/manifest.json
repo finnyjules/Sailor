@@ -3157,13 +3157,24 @@
       "textures": [],
       "generative": true,
       "params": [
-        { "uniform": "u_sea", "label": "Sea", "type": "color", "default": "#0b1d3a" },
-        { "uniform": "u_land", "label": "Land", "type": "color", "default": "#e8e2d0" },
-        { "uniform": "u_level", "label": "Sea level", "type": "float", "min": 0.0, "max": 1.0, "default": 0.5, "step": 0.01 },
-        { "uniform": "u_edge", "label": "Shore width", "type": "float", "min": 0.0, "max": 0.5, "default": 0.12, "step": 0.01 },
-        { "uniform": "u_scale", "label": "Field scale", "type": "float", "min": 0.5, "max": 8.0, "default": 2.0, "step": 0.1 },
+        { "uniform": "u_ramp", "label": "Inks (ground, land, coast, specks, deep, shallows)", "type": "gradient", "maxStops": 8,
+          "default": [
+            { "pos": 0.0, "color": "#0d0b1a" },
+            { "pos": 0.2, "color": "#d34fd8" },
+            { "pos": 0.4, "color": "#3b5bff" },
+            { "pos": 0.6, "color": "#c8ff3a" },
+            { "pos": 0.8, "color": "#7a1fa8" },
+            { "pos": 1.0, "color": "#262042" }
+          ] },
+        { "uniform": "u_level", "label": "Coverage", "type": "float", "min": 0.1, "max": 0.9, "default": 0.5, "step": 0.01 },
+        { "uniform": "u_scale", "label": "Feature size", "type": "float", "min": 0.5, "max": 8.0, "default": 2.2, "step": 0.1 },
+        { "uniform": "u_warp", "label": "Distortion", "type": "float", "min": 0.0, "max": 2.0, "default": 0.8, "step": 0.05 },
         { "uniform": "u_detail", "label": "Detail", "type": "float", "min": 1, "max": 7, "default": 5, "step": 1 },
         { "uniform": "u_cell", "label": "Pixel size", "type": "float", "min": 1, "max": 8, "default": 3, "step": 1 },
+        { "uniform": "u_halftone", "label": "Halftone cells", "type": "float", "min": 20, "max": 300, "default": 120, "step": 1 },
+        { "uniform": "u_depth", "label": "Halftone depth", "type": "float", "min": 0.0, "max": 1.0, "default": 0.7, "step": 0.05 },
+        { "uniform": "u_fringe", "label": "Coast fringe", "type": "float", "min": 0.0, "max": 1.0, "default": 0.45, "step": 0.05 },
+        { "uniform": "u_specks", "label": "Specks", "type": "float", "min": 0.0, "max": 1.0, "default": 0.6, "step": 0.05 },
         { "uniform": "u_speed", "label": "Speed", "type": "float", "min": 0.0, "max": 3.0, "default": 0.4, "step": 0.05 },
         { "uniform": "u_mix", "label": "Image mix", "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "step": 0.05 }
       ]
