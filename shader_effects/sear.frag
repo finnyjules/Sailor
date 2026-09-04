@@ -76,15 +76,7 @@ float heat(vec2 uv) {
     float wx = fbmR(vec2(u * 0.55 + 11.3 + o.x, v * 0.55 + 4.1 + o.y), u_seed + 7.0, 2) - 0.5;
     float wy = fbmR(vec2(u * 0.55 + 2.7, v * 0.55 + 19.7 + o.y), u_seed + 13.0, 2) - 0.5;
     float t = fbmR(vec2(u + wx * k + o.x * 0.6, v + wy * k + o.y * 0.6), u_seed, oct);
-    // Flatten the histogram so every slice of the ramp covers about the same amount of the
-    // picture: that is what turns a soft gradient into flat blocks of one colour. The tool
-    // measures its frame; here the fbm's spread is known per octave count (mean 0.5, sd
-    // 0.211 / 0.157 / 0.130 / 0.121 / 0.115 for 1..5 octaves) and a logistic stands in for
-    // the CDF; a stretched raw value keeps 12% of the original shape, as the tool does.
-    float sd = (oct <= 1) ? 0.211 : (oct == 2) ? 0.157 : (oct == 3) ? 0.130 : (oct == 4) ? 0.121 : 0.115;
-    float raw = clamp((t - 0.5) / (5.2 * sd) + 0.5, 0.0, 1.0);
-    float eq = 1.0 / (1.0 + exp(-1.702 * (t - 0.5) / sd));
-    return clamp(mix(raw, eq, 0.88), 0.0, 1.0);
+    return t;
 }
 
 // The field is carried between passes as 16 bits split over red and green, because the
@@ -105,6 +97,18 @@ float fieldAt(float cx, float cy) {
     return (floor(s.r * 255.0 + 0.5) * 256.0 + floor(s.g * 255.0 + 0.5)) / 65535.0;
 }
 
+// Flatten the histogram so every slice of the ramp covers about the same amount of the
+// picture: that is what turns a soft gradient into flat blocks of one colour. The tool
+// measures its whole frame; here the frame MEAN is estimated from a fixed 4x4 grid of taps
+// and the spread is known per octave count (sd 0.211 / 0.157 / 0.130 / 0.121 / 0.115 for
+// 1..5 octaves). A logistic stands in for the CDF; a stretched raw value keeps 12% of the
+// original shape, as the tool does.
+float flatten(float t, float mu, float sd) {
+    float raw = clamp((t - mu) / (5.2 * sd) + 0.5, 0.0, 1.0);
+    float eq = 1.0 / (1.0 + exp(-1.702 * (t - mu) / sd));
+    return clamp(mix(raw, eq, 0.88), 0.0, 1.0);
+}
+
 void main() {
     if (u_pass < 0.5) {
         fragColor0 = encode16(heat(vec2(v_texCoord.x, 1.0 - v_texCoord.y)));
@@ -116,6 +120,17 @@ void main() {
     vec2 px = floor(v_texCoord * u_resolution);
     float x = px.x;
     float y = (H - 1.0) - px.y;                     // canvas y, downwards
+
+    // Frame mean of the raw field from a fixed 4x4 grid; the spread per octave count.
+    int oct = int(clamp(u_detail, 1.0, 5.0) + 0.5);
+    float sd = (oct <= 1) ? 0.211 : (oct == 2) ? 0.157 : (oct == 3) ? 0.130 : (oct == 4) ? 0.121 : 0.115;
+    float mu = 0.0;
+    for (int a = 0; a < 4; a++) {
+        for (int b = 0; b < 4; b++) {
+            mu += fieldAt((float(a) + 0.5) * W / 4.0, (float(b) + 0.5) * H / 4.0);
+        }
+    }
+    mu /= 16.0;
 
     // Tear: some bands of rows are dragged so hard the whole row collapses into two or
     // three stripes of flat colour and slides sideways with it.
@@ -140,23 +155,26 @@ void main() {
                * (0.5 + 0.5 * sin(y * 0.031));
 
     // The field value the row sees at canvas x, after pull and the torn shift (wrapping).
-    #define FIELD(cx) fieldAt(mod(max((cx) - pull, 0.0) + shift, W), y)
+    #define FIELD(cx) flatten(fieldAt(mod(max((cx) - pull, 0.0) + shift, W), y), mu, sd)
 
     // The tool scans each row left to right, holding a colour until the heat under it moves
-    // by `rowThr` or the run reaches `rowRun`. Per pixel that becomes: runs anchored on a
-    // per-row jittered grid of length rowRun, reset at the nearest edge to the left.
+    // by `rowThr` from the HELD value or the run reaches `rowRun`. Per pixel: walk left on a
+    // fixed lattice (so every pixel of a run sees the same anchor and runs come out flat),
+    // accept each tap as the new anchor while the whole stretch back to x stays within
+    // `rowThr` of it, and stop at `rowRun`. Runs therefore anchor on the field's own
+    // iso-contours, which are coherent from row to row. 16 taps; more does not help.
     float v = FIELD(x);
-    float jitter = hash2(vec2(y, 5.0), u_seed + 23.0) * rowRun;
-    float x0 = max(0.0, floor((x + jitter) / rowRun) * rowRun - jitter);
-    float held = FIELD(x0);
-    float stride = max(1.0, (x - x0) / 16.0);
-    float prev = v;
-    for (int k = 1; k <= 16; k++) {
-        float cx = x - float(k) * stride;
-        if (cx < x0) break;
+    float held = v;
+    float stride = max(1.0, rowRun / 16.0);
+    float xa = floor(x / stride) * stride;
+    float lo = v, hi = v;
+    for (int k = 0; k < 16; k++) {
+        float cx = xa - float(k) * stride;
+        if (cx < 0.0 || x - cx > rowRun) break;
         float w = FIELD(cx);
-        if (abs(w - prev) > rowThr) { held = prev; break; }   // an edge: the run restarted just right of it
-        prev = w;
+        if (max(hi - w, w - lo) > rowThr) break;   // this tap cannot anchor a run that reaches x
+        lo = min(lo, w); hi = max(hi, w);
+        held = w;
     }
 
     // Grain only shows where a band ends, so it reads as a dithered coastline.
