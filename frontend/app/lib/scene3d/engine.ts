@@ -718,6 +718,8 @@ export class SceneEngine {
     this.sun.intensity = doc.lighting.sunIntensity
     this.sun.castShadow = preset.shadow
     this.ambient.intensity = doc.lighting.ambient
+    this.sun.color.set(stripAlpha(doc.lighting.sunColor || '#ffffff'))
+    this.sun.shadow.radius = doc.lighting.shadowSoftness ?? 3
     // Rebuild the (expensive) env on a kind switch, OR — only while colorGels is live — when
     // any gel field changes, since they're baked into the reflected/refracted world. Gel edits
     // are inspector-only (not animatable), so this never fires per frame.
