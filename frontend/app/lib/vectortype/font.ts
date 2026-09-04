@@ -15,6 +15,12 @@
  */
 import * as fontkit from 'fontkit'
 import { VARIABLE_FONTS_BY_ID } from '~/data/variable-fonts'
+import { variableFontUrl } from './fontToken'
+
+/** Re-exported so existing importers keep working — the implementation now
+ *  lives in `fontToken.ts` to avoid a cycle (Task 2's `fontToken` import of
+ *  `font.ts` would otherwise import back into itself). */
+export { variableFontUrl }
 
 /** One variation axis, normalised out of fontkit's keyed record. */
 export interface VtAxis {
@@ -76,12 +82,6 @@ export function normaliseAxes(raw: unknown): VtAxis[] {
     if (ia !== ib) return (ia < 0 ? PREFERRED_ORDER.length : ia) - (ib < 0 ? PREFERRED_ORDER.length : ib)
     return a.tag.localeCompare(b.tag)
   })
-}
-
-/** The proxy URL for a catalog id. Never a raw upstream URL — the server
- *  resolves the id against the catalog itself. */
-export function variableFontUrl(id: string): string {
-  return `/api/fonts/variable?id=${encodeURIComponent(id)}`
 }
 
 /** Every axis at its font-declared default, as a fontkit coords object. */
