@@ -93,8 +93,13 @@ vec4 encode16(float h) {
     float v16 = floor(clamp(h, 0.0, 1.0) * 65535.0 + 0.5);
     return vec4(floor(v16 / 256.0) / 255.0, mod(v16, 256.0) / 255.0, 0.0, 1.0);
 }
-// Read the field at canvas pixel (cx, cy) (y DOWN), sampling the exact texel centre.
+// Read the field at canvas pixel (cx, cy) (y DOWN). The coordinate is rounded to a whole
+// pixel first: the field is carried in two 8-bit bytes, so a filtered read between texels
+// would blend the bytes and decode to nonsense. The tool samples its 640-wide lattice with
+// bilinear interpolation; here the field is full resolution, so the nearest pixel is fine.
 float fieldAt(float cx, float cy) {
+    cx = clamp(floor(cx + 0.5), 0.0, u_resolution.x - 1.0);
+    cy = clamp(floor(cy + 0.5), 0.0, u_resolution.y - 1.0);
     vec2 tc = vec2((cx + 0.5) / u_resolution.x, 1.0 - (cy + 0.5) / u_resolution.y);
     vec4 s = texture(u_image0, tc);
     return (floor(s.r * 255.0 + 0.5) * 256.0 + floor(s.g * 255.0 + 0.5)) / 65535.0;
@@ -119,7 +124,10 @@ void main() {
     bool torn = hash2(vec2(band, 77.0), u_seed + 3.0) < u_tear * 0.62;
     float shift = torn ? (hash2(vec2(band, 91.0), u_seed + 5.0) - 0.5) * W * 1.4 * u_tear : 0.0;
 
-    // Streak: how far a run of held colour may go, and how big a change breaks it.
+    // Streak: how far a run of held colour may go, and how big a change breaks it. This is
+    // the tool's own pairing: at Streak 1 the run limit stops mattering but the hold breaks
+    // on tiny changes, so the visible streaking at the top of the dial comes from Drag; at
+    // Streak 0 runs are short but hold firmly. Kept as the tool has it.
     float maxRun = max(2.0, floor((0.02 + u_smear * u_smear * 1.2) * W + 0.5));
     float thresh = 0.0015 + pow(1.0 - u_smear, 2.2) * 0.22;
     float rowRun = torn ? W : maxRun;
