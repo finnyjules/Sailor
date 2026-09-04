@@ -21,7 +21,7 @@ import {
   renderStudio, studioToSvg, drawToCanvas, warmPaints, studioWarmPaints, hasAsyncPaint, studioFramePad,
 } from '~/lib/geoshape/render'
 import {
-  LAYER_MAX, mergeLayer, studioDocFromPersisted, type GeoStudioDoc, type GeoLayer,
+  LAYER_MAX, mergeLayer, studioDocFromPersisted, normalizeBackground, type GeoStudioDoc, type GeoLayer,
 } from '~/lib/geoshape/studio'
 import { reroll } from '~/lib/geoshape/randomize'
 import { GEO_CONTROLS, GEO_SECTIONS, visibleGeoControls, type GeoControl } from '~/lib/geoshape/controls'
@@ -176,6 +176,14 @@ function removeOverlapPaletteFill(i: number) {
 }
 function updateOverlapPaletteFill(i: number, p: Paint) {
   doc.value.overlap.fills = doc.value.overlap.fills.map((x, j) => (j === i ? p : x))
+}
+
+// ── Background — full-composite fill painted behind every layer. `null` is
+// transparent; `normalizeBackground` collapses the FillControl none-sentinels
+// ('none'/'') to that same `null` (see studio.ts). Direct doc mutation, like the
+// overlap-palette setters above — the deep watch in useStudioAutosave persists it.
+function setBackground(p: Paint) {
+  doc.value.background = normalizeBackground(p)
 }
 
 // ── re-roll — regenerates every UNLOCKED section of the SELECTED layer's mark from a
@@ -684,6 +692,16 @@ async function exportSvg() {
             <StudioSelect label="Colour order" v-model="doc.overlap.order" :options="OVERLAP_ORDERS" />
             <StudioSelect label="Crossings" v-model="doc.overlap.crossingMode" :options="OVERLAP_CROSSINGS" />
           </template>
+        </StudioSection>
+
+        <!-- Background — full-composite fill behind every layer. `null` = transparent. -->
+        <StudioSection title="Background">
+          <FillControl
+            allow-none
+            allow-image
+            :model-value="doc.background ?? 'none'"
+            @update:model-value="setBackground"
+          />
         </StudioSection>
 
         <!-- Canvas (export dimensions — not part of the doc) -->
