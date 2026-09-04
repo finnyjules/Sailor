@@ -1711,11 +1711,10 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
                 @menu="(e: MouseEvent) => openVarMenu(e, bindableControl(slotControl(slotProps)))"
                 @go-to-collection="goToCollection()"
               />
-              <!-- Hidden when `fontId` is bound to a Collection column, same rule the
-                   Stretch slot states for `fit`: a bound value is pushed back onto
-                   live state by `applyParamsPreview` every preview row, so a weight
-                   picked here would be written, autosaved, and then immediately
-                   stomped by the next preview tick. -->
+              <!-- Hidden when `fontId` is bound to a Collection column: `applyParamsPreview`
+                   (app/composables/useStudioVarBindings.ts) pushes the bound value back onto
+                   live state on every preview row, so a weight picked here would be written,
+                   autosaved, and then immediately stomped by the next preview tick. -->
               <div v-if="fontWeightCuts && !boundFor('fontId')" class="mt-1.5" data-testid="vt-font-weight" @contextmenu.stop>
                 <StudioRow
                   :spec="fontWeightSpec"

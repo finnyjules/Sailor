@@ -61,6 +61,8 @@ const canvasEl = ref<HTMLCanvasElement | null>(null)
 // reactive BELOW the reference — swapping families replaces the whole object.
 const font = shallowRef<VtFont | null>(null)
 const renderError = ref<string | null>(null)
+// Separate from `renderError`: draw() clears renderError on every successful frame, which would wipe this note as soon as the Inter fallback finished rendering.
+const fontNote = ref<string | null>(null)
 const animated = computed(() => vtIsAnimated(config.value))
 // fontId is a storage token (e.g. "google:Inter Tight@700"); the subtitle shows the human-readable name instead.
 const fontLabel = computed(() => vtFontRefLabel(parseVtFontToken(config.value.fontId) ?? { kind: 'catalog', id: DEFAULT_FONT_ID }))
@@ -75,6 +77,7 @@ let disposed = false
 // token, open in the studio, was drawing Inter — the two views disagreed
 // about whether anything had actually gone wrong.
 async function ensureFont(id: string): Promise<VtFont> {
+  fontNote.value = null
   try {
     const f = await loadVectorFont(id)
     if (config.value.fontId === id) { font.value = markRaw(f); renderError.value = null }
@@ -82,8 +85,12 @@ async function ensureFont(id: string): Promise<VtFont> {
   } catch (e) {
     // Stale by the time the await resolved — the caller already moved on.
     if (config.value.fontId !== id) throw e
+    // The token's own label when it parses, the RAW string when it does not — an
+    // unparseable token can only have arrived from a bound column or an agent
+    // patch, and naming the default in both halves ("Couldn't load Inter —
+    // showing Inter.") would hide exactly what went in. Matches VectorTypeSurface's `loadFont`.
     const parsed = parseVtFontToken(id)
-    renderError.value = `Couldn't load ${vtFontRefLabel(parsed ?? { kind: 'catalog', id: DEFAULT_FONT_ID })} — showing Inter.`
+    fontNote.value = `Couldn't load ${parsed ? vtFontRefLabel(parsed) : id} — showing ${vtFontRefLabel({ kind: 'catalog', id: DEFAULT_FONT_ID })}.`
     try {
       const fallback = await loadVectorFont(DEFAULT_FONT_ID)
       if (config.value.fontId === id) font.value = markRaw(fallback)
@@ -219,6 +226,7 @@ const varsInputIndex = computed(() =>
         <canvas ref="canvasEl" class="block w-full" :style="{ height: previewH + 'px' }" />
       </div>
       <div v-if="renderError" class="truncate px-3 py-1 text-[10px] text-red-300/90" :title="renderError">{{ renderError }}</div>
+      <div v-if="fontNote" class="truncate px-3 py-1 text-[10px] text-amber-100/70" :title="fontNote">{{ fontNote }}</div>
 
       <div class="flex items-center gap-1.5 border-t border-white/10 p-2">
         <button
