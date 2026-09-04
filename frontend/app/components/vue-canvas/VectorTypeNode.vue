@@ -17,7 +17,7 @@
 import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { Pencil, Type } from 'lucide-vue-next'
 import { mergeConfig, type VectorTypeConfig } from '~/lib/vectortype/config'
-import { loadVariableFont, type VtFont } from '~/lib/vectortype/font'
+import { loadVectorFont, type VtFont } from '~/lib/vectortype/font'
 import { drawVectorTypeToCanvas, vtIsAnimated } from '~/lib/vectortype/canvas'
 import { vtStillTime } from '~/lib/vectortype/presetMotion'
 import { makeVectorTypeFrameSource } from '~/lib/vectortype/frameSource'
@@ -66,7 +66,7 @@ let startedAt = 0
 let disposed = false
 
 async function ensureFont(id: string): Promise<VtFont> {
-  const f = await loadVariableFont(id)
+  const f = await loadVectorFont(id)
   if (config.value.fontId === id) font.value = markRaw(f)
   return f
 }

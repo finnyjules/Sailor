@@ -22,7 +22,7 @@
  *  2. **It never blocks the gallery on a font fetch.** The font is a network
  *     round trip through `/api/fonts/variable`; until it lands (or if it never
  *     does) the tile paints the same word in a system face, dimmed, so the
- *     gallery opens instantly at its final layout. `loadVariableFont` caches the
+ *     gallery opens instantly at its final layout. `loadVectorFont` caches the
  *     PROMISE per id, so twenty tiles asking for the same family share one fetch
  *     — which is the normal case here, since every axis tile is about the font
  *     the studio currently has open.
@@ -38,7 +38,7 @@ import type { Paint } from '~/lib/compositor/paint'
 import { registerThumb } from '~/lib/motion/thumbClock'
 import { drawVectorTypeToCanvas } from '~/lib/vectortype/canvas'
 import type { VtPresetSlot } from '~/lib/vectortype/config'
-import { loadVariableFont, type VtFont } from '~/lib/vectortype/font'
+import { loadVectorFont, type VtFont } from '~/lib/vectortype/font'
 import {
   VT_THUMB_CYCLE,
   VT_THUMB_H,
@@ -98,11 +98,11 @@ watch(
     if (props.font) return
     const id = props.fontId
     if (!id || loaded.value?.id === id) return
-    void loadVariableFont(id)
+    void loadVectorFont(id)
       .then((f) => { if (props.fontId === id) loaded.value = markRaw(f) })
       // A failed or slow font is a RESTING TILE, never a thrown gallery: the
       // picker still opens, still shows the word, still lets the user pick.
-      // `loadVariableFont` evicts a rejected promise itself, so a later mount
+      // `loadVectorFont` evicts a rejected promise itself, so a later mount
       // retries rather than inheriting the failure.
       .catch(() => { if (props.fontId === id) loaded.value = null })
   },

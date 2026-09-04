@@ -22,6 +22,14 @@ withDefaults(defineProps<{
   // a caption-above-a-dropdown. Omitted, the trigger keeps its original full-width form
   // for callers that already draw their own label.
   label?: string
+  // What the trigger READS, when that is not what the trigger MATCHES. `modelValue` is
+  // the identity the rows highlight against — a pinned entry's `value`, or a catalog /
+  // library family name — and for most callers that string is also the right thing to
+  // show. Vector Type is the exception: its pinned entries are catalog IDS
+  // (`big-shoulders`), so highlighting the current pick and reading it back as
+  // "Big Shoulders Display" are two different strings. Omitted, the trigger shows
+  // `modelValue`, exactly as it always has.
+  display?: string
   // A font is a bindable control. In row mode (`label` set), the variable glyph rides next
   // to the label and a bound value shows the pink column name instead of the picker — the
   // same treatment StudioColorField gives a bound colour, so binding survives the move off
@@ -130,7 +138,7 @@ watch(fontPickerOpen, (open) => { if (!open && fontSuggestRan.value) clearFontSu
       {{ label }}
       <VariableGlyph :bound="null" @promote="emit('promote')" @menu="emit('menu', $event)" />
     </span>
-    <span class="truncate" :class="label ? 'ml-auto text-[11px] text-white/90' : ''">{{ modelValue || 'Select font…' }}</span>
+    <span class="truncate" :class="label ? 'ml-auto text-[11px] text-white/90' : ''">{{ display || modelValue || 'Select font…' }}</span>
     <!-- The app's one caret: `›` turned, never ▾/▴/⌄. Those draw smaller than their type
          size implies and sit off the optical centre. Down when closed, up when open. -->
     <span class="inline-block shrink-0 text-white/40 transition-transform"

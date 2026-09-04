@@ -129,8 +129,8 @@ async function vectorTypeControls(node: any): Promise<StudioControlDesc[]> {
   const config = mergeConfig(node?.data?.properties?.sailor_vectorType?.config)
   let axes: any[] = []
   try {
-    const { loadVariableFont } = await import('~/lib/vectortype/font')
-    axes = (await loadVariableFont(config.fontId)).axes
+    const { loadVectorFont } = await import('~/lib/vectortype/font')
+    axes = (await loadVectorFont(config.fontId)).axes
   } catch {
     // Offline / unknown family — the static controls are still bindable, and an
     // axis binding that cannot be derived yet is better than an empty menu.

@@ -764,8 +764,8 @@ const vectorTypeAdapter: PatchAdapter = {
     const config = mergeVtConfig(n?.data?.properties?.sailor_vectorType?.config)
     let axes: VtAxisLike[] = []
     try {
-      const { loadVariableFont } = await import('~/lib/vectortype/font')
-      axes = (await loadVariableFont(config.fontId)).axes
+      const { loadVectorFont } = await import('~/lib/vectortype/font')
+      axes = (await loadVectorFont(config.fontId)).axes
     } catch { /* offline / unknown family — static vocabulary only */ }
     return { config, controls: vtAgentControls(config, axes as any) }
   },

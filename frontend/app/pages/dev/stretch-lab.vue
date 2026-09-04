@@ -7,7 +7,7 @@
 // run — that is a bug, not a coincidence.
 definePageMeta({ layout: false })
 import { computed, markRaw, onMounted, shallowRef, watch } from 'vue'
-import { loadVariableFont } from '~/lib/vectortype/font'
+import { loadVectorFont } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 import { textOutlines } from '~/lib/vectortype/outline'
 import type { TextOutlines } from '~/lib/vectortype/outline'
@@ -35,7 +35,7 @@ const font = shallowRef<VtFont | null>(null)
 
 async function pickFont(id: string) {
   try {
-    if (!fonts.has(id)) fonts.set(id, await loadVariableFont(id))
+    if (!fonts.has(id)) fonts.set(id, await loadVectorFont(id))
     font.value = markRaw(fonts.get(id)!)
     error.value = ''
   } catch (e) {

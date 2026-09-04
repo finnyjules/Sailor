@@ -36,7 +36,7 @@ import { textureDefaults } from '~/lib/texturefx/controls'
 import type { Params as TextureParams } from '~/lib/spacetype/effect'
 
 import { shaderFx } from '~/lib/shaderfx/renderer'
-import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
+import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
 import { composePasses } from '~/lib/shaderstudio/passes'
 import { hydrateConfig as hydrateShaderConfig, type ShaderStudioConfig } from '~/lib/shaderstudio/types'
 import { migrateShaderConfig } from '~/lib/shaderstudio/migrate'
@@ -45,7 +45,7 @@ import { renderStudio, drawToCanvas, studioFramePad } from '~/lib/geoshape/rende
 import { studioDocFromPersisted, type GeoStudioDoc } from '~/lib/geoshape/studio'
 
 import { drawVectorTypeToCanvas } from '~/lib/vectortype/canvas'
-import { loadVariableFont } from '~/lib/vectortype/font'
+import { loadVectorFont } from '~/lib/vectortype/font'
 import { mergeConfig as mergeVectorTypeConfig } from '~/lib/vectortype/config'
 import { vtStillTime } from '~/lib/vectortype/presetMotion'
 
@@ -212,7 +212,7 @@ async function shaderThumb(config: unknown, size = DEFAULT_SIZE): Promise<TakeTh
   // shape to be truer to.
   const cfg: ShaderStudioConfig = hydrateShaderConfig(migrateShaderConfig(config))
   const catalog = await fetchShaderFxCatalog()
-  const resolveDef = (id: string) => catalog.effects.find(e => e.id === id) ?? null
+  const resolveDef = (id: string) => catalog.effects.find(e => e.id === resolveEffectId(id)) ?? null
   const passes = composePasses(cfg, resolveDef, 0)
   const gpu = shaderFx.render(passes, shaderPlaceholderBase(), size, size)
   const out = freshCanvas(size)
@@ -253,7 +253,7 @@ async function shapeThumb(config: unknown, size = DEFAULT_SIZE, aspect?: number)
  */
 async function vectorTypeThumb(config: unknown, size = DEFAULT_SIZE, aspect?: number): Promise<TakeThumb> {
   const cfg = mergeVectorTypeConfig(config)
-  const font = await loadVariableFont(cfg.fontId)
+  const font = await loadVectorFont(cfg.fontId)
   const { w, h } = thumbDimsFor('vectortype', config, size, aspect)
   const out = freshCanvas(w, h)
   drawVectorTypeToCanvas(out, font, cfg, vtStillTime(cfg), { width: w, height: h, background: null })

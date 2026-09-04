@@ -26,7 +26,10 @@
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import { Combine } from 'lucide-vue-next'
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { VARIABLE_FONTS } from '~/data/variable-fonts'
+import { DEFAULT_FONT_ID, VARIABLE_FONTS } from '~/data/variable-fonts'
+import { loadGoogleCatalog, nearestWeight, type GoogleFont } from '~/data/google-fonts'
+import { libraryFamily, libraryToken, resolveLibraryFace } from '~/data/library-fonts'
+import { formatVtFontToken, parseVtFontToken, vtFontRefLabel, type VtFontRef } from '~/lib/vectortype/fontToken'
 import {
   VT_LAYER_KINDS,
   VT_LAYER_MAX,
@@ -46,7 +49,7 @@ import {
   vtStillTime,
 } from '~/lib/vectortype/presetMotion'
 import { vtAxisPreset } from '~/lib/vectortype/axisPresets'
-import { loadVariableFont, type VtAxis, type VtFont } from '~/lib/vectortype/font'
+import { loadVectorFont, type VtAxis, type VtFont } from '~/lib/vectortype/font'
 import StudioRow from '~/components/vue-canvas/studio/StudioRow.vue'
 import { formatValue } from '~/lib/studio/row'
 import { controlKindToVariableType } from '~/lib/collection/studioBindables'
@@ -79,6 +82,7 @@ import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vu
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPanel.vue'
+import FontPicker from '~/components/vue-canvas/FontPicker.vue'
 import CanvasContextMenu from '~/components/vue-canvas/CanvasContextMenu.vue'
 import SweepPopover from '~/components/vue-canvas/studio/SweepPopover.vue'
 import { useStudioAgent } from '~/composables/useStudioAgent'
@@ -157,7 +161,7 @@ const { saving: autoSaving, saved: autoSaved } = useStudioAutosave(
 
 // ── the font ────────────────────────────────────────────────────────────────
 // The axis sliders are DERIVED from the loaded file's own `fvar`, so nothing
-// below exists until this resolves. `loadVariableFont` caches the promise, so
+// below exists until this resolves. `loadVectorFont` caches the promise, so
 // the card, the baker and this surface share one fetch per family.
 // shallowRef + markRaw, NOT ref — see the note in VectorTypeNode.vue: Vue's deep
 // reactive proxy over a fontkit font object throws on its non-configurable
@@ -167,21 +171,153 @@ const fontError = ref('')
 const fontLoading = ref(false)
 const fontAxes = computed<VtAxis[]>(() => font.value?.axes ?? [])
 
-async function loadFont(id: string) {
+/**
+ * The token as a parsed ref, with the default standing in for anything
+ * unreadable. `mergeConfig` already gates `fontId` through `isVtFontToken`, so
+ * a stored junk token cannot reach here — but a control bound to a Collection
+ * column can put ANY string in `config.fontId` at any moment, and the whole
+ * font row is derived from this. Never null, so nothing downstream branches.
+ */
+const fontRef = computed<VtFontRef>(() => parseVtFontToken(config.value.fontId) ?? { kind: 'catalog', id: DEFAULT_FONT_ID })
+
+async function loadFont(token: string) {
   fontLoading.value = true
   fontError.value = ''
   try {
-    const f = await loadVariableFont(id)
+    const f = await loadVectorFont(token)
     // A slow load for a family the user has since switched away from must not
     // win the race and repaint with the wrong outlines.
-    if (config.value.fontId === id) font.value = markRaw(f)
-  } catch (e: any) {
-    if (config.value.fontId === id) { font.value = null; fontError.value = String(e?.message ?? e) }
+    if (config.value.fontId === token) font.value = markRaw(f)
+  } catch {
+    // A font that will not load must never leave a blank canvas — that is the
+    // whole difference between "any font" and "any font that happens to work".
+    // The user's own token STAYS in `config`: a Google cut that lost a race
+    // with the network heals on the next load, and silently rewriting their
+    // pick to Inter would take that chance away and hide that anything went
+    // wrong. So the canvas draws Inter meanwhile and the row says so.
+    if (config.value.fontId !== token) return
+    // The token's own label when it parses, the RAW string when it does not —
+    // an unparseable token can only have arrived from a bound column or an
+    // agent patch, and naming the default in both halves of the sentence
+    // ("Couldn't load Inter — showing Inter.") would hide exactly what went in.
+    const parsed = parseVtFontToken(token)
+    fontError.value = `Couldn't load ${parsed ? vtFontRefLabel(parsed) : token} — showing ${vtFontRefLabel({ kind: 'catalog', id: DEFAULT_FONT_ID })}.`
+    try {
+      const fallback = await loadVectorFont(DEFAULT_FONT_ID)
+      if (config.value.fontId === token) font.value = markRaw(fallback)
+    } catch {
+      if (config.value.fontId === token) font.value = null
+    }
   } finally {
-    if (config.value.fontId === id) fontLoading.value = false
+    if (config.value.fontId === token) fontLoading.value = false
   }
 }
-watch(() => config.value.fontId, id => { void loadFont(id) }, { immediate: true })
+watch(() => config.value.fontId, token => { void loadFont(token) }, { immediate: true })
+
+// ── the font row ────────────────────────────────────────────────────────────
+/**
+ * The shared `FontPicker` needs the catalog for one thing this surface owns: a
+ * freshly-picked family has to be pinned to a REAL shipped weight, and the
+ * Weight row's options are that family's `weights`. `loadGoogleCatalog` is
+ * module-cached, so this is the picker's own fetch, not a second one.
+ */
+const googleCatalog = ref<GoogleFont[]>([])
+loadGoogleCatalog().then((c) => { googleCatalog.value = c })
+const googleEntry = (family: string) => googleCatalog.value.find(f => f.family === family) ?? null
+
+/** The ten curated variable families, above the catalog under the "Sailor"
+ *  header — they are the only fonts here with live axes, so they lead. */
+const pinnedFonts = VARIABLE_FONTS.map(f => ({ label: f.label, value: f.id }))
+
+/**
+ * Two strings, because the picker uses `modelValue` for BOTH the trigger text
+ * and the row highlight, and for a curated pick those want different words: it
+ * highlights a pinned row by comparing against its `value` (the catalog id,
+ * `big-shoulders`) while the trigger should read "Big Shoulders Display". A
+ * Google or library pick highlights by FAMILY, and the family is also what the
+ * trigger should read — the weight has its own row directly below, so repeating
+ * it here would only say the same thing twice.
+ */
+const fontPickerValue = computed(() => (fontRef.value.kind === 'catalog' ? fontRef.value.id : fontRef.value.family))
+const fontPickerDisplay = computed(() => (fontRef.value.kind === 'catalog' ? vtFontRefLabel(fontRef.value) : fontRef.value.family))
+
+/**
+ * A pick from the shared picker, turned into a token. Each branch seeds a REAL
+ * shipped weight rather than a hopeful 400: the file route is fail-closed on
+ * both sides, and a token naming a cut the family does not ship is a load
+ * failure, not a near miss.
+ */
+function onFontSelect(payload:
+  | { kind: 'google'; family: string }
+  | { kind: 'pinned'; value: string }
+  | { kind: 'library'; family: string; foundry: string }) {
+  if (payload.kind === 'pinned') { setControl('fontId', payload.value); return }
+  if (payload.kind === 'google') {
+    const entry = googleEntry(payload.family)
+    setControl('fontId', formatVtFontToken({ kind: 'google', family: payload.family, weight: entry ? nearestWeight(entry, 400) : 400 }))
+    return
+  }
+  setControl('fontId', libraryToken(payload.family, resolveLibraryFace(payload.family, 400)?.weight))
+}
+
+/**
+ * The cuts the current family actually ships — Google from the catalog,
+ * library from the manifest. `null` for a curated family, which is what hides
+ * the row: its weight is a continuous AXIS in the Axes group, and offering a
+ * second, coarser weight control beside it would be two dials for one thing.
+ */
+const fontWeightCuts = computed<{ values: number[]; labels: string[] } | null>(() => {
+  const ref = fontRef.value
+  if (ref.kind === 'catalog') return null
+  // The CURRENT weight is always an option, even when the family does not ship
+  // it. The token can come from an agent patch or a bound column, and a select
+  // whose value matches none of its options renders blank — the row would then
+  // be reporting nothing about a font that is loading perfectly well (the file
+  // routes snap an unshipped weight to the nearest). Showing the token's own
+  // number keeps the row an honest readout of `fontId`.
+  const cuts = (shipped: number[], w: number) => [...new Set([...shipped, w])].sort((a, b) => a - b)
+  if (ref.kind === 'google') {
+    // Before the catalog resolves the row still draws, holding the one weight
+    // the token names — a select that briefly offers only the current value is
+    // honest; one that offers nothing looks broken.
+    const values = cuts(googleEntry(ref.family)?.weights ?? [], ref.weight)
+    return { values, labels: values.map(String) }
+  }
+  const fam = libraryFamily(ref.family)
+  const w = ref.weight ?? resolveLibraryFace(ref.family, 400)?.weight ?? 400
+  if (!fam) return { values: [w], labels: [String(w)] }
+  const values = cuts(fam.faces.map(f => f.weight), w)
+  // The foundry's own name for the cut ("Book", "Heavy"), which is what the
+  // user bought — the number beside it because Pangram's weights are not the
+  // usual 100-step ladder (Book is 375) and the name alone cannot be ordered.
+  return { values, labels: values.map(v => { const f = resolveLibraryFace(ref.family, v, ref.italic); return f ? `${v} ${f.style}` : String(v) }) }
+})
+
+/** A runtime spec, not a registry entry: `fontWeight` is not a config key —
+ *  the TOKEN carries the weight, and this row only re-tokens `fontId`. Not
+ *  bindable for the same reason (there is nothing to bind to; `fontId` itself
+ *  is the bindable control, and its binding rides on the picker above). */
+const fontWeightSpec = computed<ControlSpec>(() => ({
+  key: 'fontWeight',
+  label: 'Weight',
+  kind: 'select',
+  options: (fontWeightCuts.value?.values ?? []).map(String),
+  optionLabels: fontWeightCuts.value?.labels,
+  default: '400',
+  group: 'Font',
+}))
+const fontWeightValue = computed(() => {
+  const ref = fontRef.value
+  if (ref.kind === 'catalog') return ''
+  return String(ref.weight ?? resolveLibraryFace(ref.family, 400)?.weight ?? 400)
+})
+function setFontWeight(value: string) {
+  const ref = fontRef.value
+  if (ref.kind === 'catalog') return
+  const weight = Number(value)
+  if (!Number.isFinite(weight)) return
+  setControl('fontId', formatVtFontToken({ ...ref, weight }))
+}
 
 // ── inspector ───────────────────────────────────────────────────────────────
 const inspectorTab = ref<'design' | 'motion'>('design')
@@ -651,7 +787,10 @@ function toggleSolid(i: number) {
  */
 const VT_CAPABILITIES = [...VT_PRESET_CAPABILITIES]
 
-const fontLabel = computed(() => VARIABLE_FONTS.find(f => f.id === config.value.fontId)?.label ?? 'This font')
+/** How the moves panel names the font in prose ("Weight In · Inter Tight 700").
+ *  The token's own label, so a Google cut and a library face read as themselves
+ *  instead of collapsing to "This font" the moment the pick left the ten. */
+const fontLabel = computed(() => vtFontRefLabel(fontRef.value))
 
 /**
  * The shared moves panel's driver for this studio — see `~/lib/vectortype
@@ -1117,7 +1256,7 @@ function setActionError(msg: string) {
 /** Full-res render into a throwaway canvas. Shared by Export PNG and the
  *  Collection param baker, so the two can never disagree about framing. */
 async function renderFullResBlob(t: number): Promise<Blob | null> {
-  const f = font.value ?? await loadVariableFont(config.value.fontId)
+  const f = font.value ?? await loadVectorFont(config.value.fontId)
   // A ONE-SHOT render gets no second chance: unlike the live preview (which
   // re-resolves every tick and self-heals the moment field.ts's own catalog
   // fetch lands), this draws once and uploads whatever it got. Awaiting the
@@ -1205,7 +1344,7 @@ async function exportSvg() {
   svgExporting.value = true
   actionError.value = ''
   try {
-    const f = font.value ?? await loadVariableFont(config.value.fontId)
+    const f = font.value ?? await loadVectorFont(config.value.fontId)
     // Same one-shot reasoning as `renderFullResBlob` (:694) and the param baker
     // (:807), and it applies here MORE than to either: the two PNG paths draw
     // through the live canvas resolver, which self-heals on the next tick if the
@@ -1281,7 +1420,7 @@ async function renderBlobWithOverrides(overrides: Record<string, string | number
     for (const key of keys) paramsProxy[key] = overrides[key]!
     // A row may sweep `fontId` — the new family must be parsed before it can be
     // shaped, and the loaded `font` ref still holds the old one.
-    const f = await loadVariableFont(config.value.fontId).catch(() => font.value)
+    const f = await loadVectorFont(config.value.fontId).catch(() => font.value)
     if (!f) return null
     // Same one-shot reasoning as `renderFullResBlob` — a sweep row renders once
     // and is uploaded; there is no later frame to correct it.
@@ -1433,10 +1572,12 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
     <template #preview>
       <div class="relative flex h-full w-full flex-col items-center justify-center gap-2">
         <canvas ref="canvas" class="max-h-full max-w-full rounded-lg shadow-2xl" />
-        <div v-if="fontError" class="absolute inset-x-3 top-3 rounded-md border border-red-400/30 bg-black/70 px-3 py-2 text-[11px] text-red-200/90">
-          Font failed to load — {{ fontError }}
-        </div>
-        <div v-else-if="fontLoading && !font" class="absolute inset-0 flex items-center justify-center text-[11px] text-white/40">
+        <!-- No failure banner over the canvas any more. A font that will not load now
+             falls back to Inter and the picture is real — a red "failed to load" slab
+             across a perfectly good render would be describing a blank canvas that no
+             longer happens. The note lives in the Font row, next to the pick it is
+             about (`data-testid="vt-font-note"`). -->
+        <div v-if="fontLoading && !font" class="absolute inset-0 flex items-center justify-center text-[11px] text-white/40">
           Loading outlines…
         </div>
         <!-- Never truncate a shader silently: past LIVE_FIELD_CEILING live
@@ -1532,6 +1673,58 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
               class="w-full rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-xs text-white/85 outline-none focus-visible:ring-2 focus-visible:ring-white/20"
               @input="setControl('text', ($event.target as HTMLInputElement).value)"
             />
+          </template>
+
+          <!-- THE FONT ROW IS THE SHARED PICKER. `fontId` is declared `kind: 'text'`
+               (a token can no longer be enumerated as a select), and the panel would
+               draw that as a free-text field — so this slot replaces it with the same
+               `FontPicker` row Space Type mounts: the Google catalog, the licensed
+               library, and the ten curated variable families pinned on top because they
+               are the only ones here with live axes.
+
+               The Weight row rides underneath, and only for a static cut: it is not a
+               config key of its own — the TOKEN carries the weight — so it re-tokens
+               `fontId` through `setControl`, the same path a hand-edit takes. A curated
+               family shows no row; its weight is a continuous axis in the Axes group.
+
+               Right-click is NOT stopped at this wrapper, unlike the Stretch row below,
+               and the difference is which element carries the handler. StudioRow's own
+               root emits `menu` for a right-click anywhere on the row, so Stretch has to
+               stop the native event from ALSO reaching the panel's slot wrapper. The
+               picker has no such body handler — only its variable glyph, which already
+               stops the event itself — so the wrapper is what gives this row the
+               right-click-to-bind menu every other row has. The Weight row below does
+               stop it: it is a runtime row for a value that is not a control, so its
+               right-click must not open `fontId`'s menu by bubbling into it. -->
+          <template #control-fontId="slotProps">
+            <div>
+              <FontPicker
+                :model-value="fontPickerValue"
+                :display="fontPickerDisplay"
+                label="Font"
+                :pinned="pinnedFonts"
+                :bound="boundFor('fontId')"
+                @select="onFontSelect"
+                @promote="promoteControl(slotControl(slotProps))"
+                @menu="(e: MouseEvent) => openVarMenu(e, bindableControl(slotControl(slotProps)))"
+                @go-to-collection="goToCollection()"
+              />
+              <div v-if="fontWeightCuts" class="mt-1.5" data-testid="vt-font-weight" @contextmenu.stop>
+                <StudioRow
+                  :spec="fontWeightSpec"
+                  :model-value="fontWeightValue"
+                  :bindable="false"
+                  @update:model-value="(v: string | number | boolean) => setFontWeight(String(v))"
+                />
+              </div>
+              <!-- The fallback, said out loud. The canvas is drawing Inter and the row
+                   still shows the font the user picked — without this line those two
+                   facts contradict each other on screen. -->
+              <p v-if="fontError" data-testid="vt-font-note"
+                 class="mt-1.5 rounded border border-amber-300/25 bg-amber-300/[0.06] px-2 py-1.5 text-[10px] leading-snug text-amber-100/70">
+                {{ fontError }}
+              </p>
+            </div>
           </template>
 
           <!-- FIT OWNS THE STRETCH DIAL. `fit: width` solves the width stretch so the

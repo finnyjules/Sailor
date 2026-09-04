@@ -28,7 +28,7 @@ import { composePasses } from '~/lib/shaderstudio/passes'
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import { fetchShaderFxCatalog, getEffectSync } from '~/lib/shaderfx/catalog'
 import { drawVectorTypeToCanvas } from '~/lib/vectortype/canvas'
-import { loadVariableFont, type VtFont } from '~/lib/vectortype/font'
+import { loadVectorFont, type VtFont } from '~/lib/vectortype/font'
 import { DEFAULT_CONFIG, mergeConfig, type VectorTypeConfig } from '~/lib/vectortype/config'
 import { applyTasteToConfigs, CONFIDENCE_FLOOR, enforcePaletteOnGradient } from '~/lib/taste/mapping'
 import { applyEffectChain, type PostEffect } from '~/lib/compositor/postEffects'
@@ -186,7 +186,7 @@ function bases(): { gradient: GradientConfig; shader: ShaderStudioConfig; vector
 
 let vtFont: VtFont | null = null
 async function ensureFont(): Promise<VtFont> {
-  if (!vtFont) vtFont = await loadVariableFont('roboto-flex')
+  if (!vtFont) vtFont = await loadVectorFont('roboto-flex')
   return vtFont
 }
 
