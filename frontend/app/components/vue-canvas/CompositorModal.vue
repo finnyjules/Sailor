@@ -54,7 +54,7 @@ import { useRegionFx } from '~/composables/useRegionFx'
 import type { Cloner } from '~/composables/useCloner'
 import { resolveWiredSourceKind } from '~/lib/studio/frameResolve'
 import { frameSourceEpoch, type StudioFrameSource } from '~/lib/studio/frameSource'
-import { deriveMasterClock, slotPhase01 } from '~/lib/compositor/masterClock'
+import { deriveMasterClock, slotPhase01, masterFrameIndex } from '~/lib/compositor/masterClock'
 import {
   onDepthChange, depthImageFor, requestDepth, depthSourceFromViewUrl,
 } from '~/lib/compositor/depthRegistry'
@@ -1960,6 +1960,13 @@ const hasAnimatedFill = computed(() => hasAnimatedShaderFill(buildStackItems(), 
 const needsWallClock = computed(() => hasAnimatedFill.value && previewT.value == null)
 const needsLiveLoop = computed(() => hasAnimatedSlot.value || needsWallClock.value)
 let liveRaf = 0, liveStart = 0, liveInFlight = false, liveCapWarned = false
+// Live-preview cost controls, ported from the Frame card (ArtifactFrameNode). The modal
+// had neither, so its idle loop composited the whole stack at full device resolution on
+// EVERY rAF — the ~50 ms/frame that held it at ~19 fps. `LIVE_PREVIEW_MAXPX` caps the
+// live backing store; `SHADER_PREVIEW_FPS` caps how often a shader-only frame repaints;
+// `lastLiveFrame` is the content-frame-index guard that skips redundant repaints.
+const LIVE_PREVIEW_MAXPX = 640_000, SHADER_PREVIEW_FPS = 30
+let lastLiveFrame = -1
 function liveFrameTick(ts: number) {
   if (!liveStart) liveStart = ts
   // Pause the heavy per-frame composite while the user pans/zooms, so the gesture gets
@@ -1969,25 +1976,36 @@ function liveFrameTick(ts: number) {
   if (viewMoving.value) { liveRaf = requestAnimationFrame(liveFrameTick); return }
   const mc = liveMasterClock.value
   const wallT = (ts - liveStart) / 1000
-  if (!liveInFlight && mc && mc.duration > 0) {
-    liveInFlight = true
-    const t = wallT % mc.duration
-    let animated = layers.value.filter(l => l.live && l.live.duration > 0)
-    if (animated.length > MAX_LIVE_SLOTS) {
-      if (!liveCapWarned) { console.warn(`[Compositor] ${animated.length} animated slots > cap ${MAX_LIVE_SLOTS}; extras shown as stills`); liveCapWarned = true }
-      animated = animated.slice(0, MAX_LIVE_SLOTS)
+  // Render at CONTENT fps, not display refresh rate (ported from the Frame card): rAF
+  // fires up to 120 Hz, but the content has only `fps` distinct frames and each paint is
+  // an expensive pull + composite. Skip any tick mapping to the already-rendered frame
+  // index — repainting the same frame 2-4× is wasted work that starves interaction.
+  const previewFps = mc && mc.duration > 0 ? mc.fps : SHADER_PREVIEW_FPS
+  const frameIdx = masterFrameIndex(wallT, previewFps)
+  const frameChanged = frameIdx !== lastLiveFrame
+  if (mc && mc.duration > 0) {
+    if (!liveInFlight && frameChanged) {
+      lastLiveFrame = frameIdx
+      liveInFlight = true
+      const t = wallT % mc.duration
+      let animated = layers.value.filter(l => l.live && l.live.duration > 0)
+      if (animated.length > MAX_LIVE_SLOTS) {
+        if (!liveCapWarned) { console.warn(`[Compositor] ${animated.length} animated slots > cap ${MAX_LIVE_SLOTS}; extras shown as stills`); liveCapWarned = true }
+        animated = animated.slice(0, MAX_LIVE_SLOTS)
+      }
+      Promise.all(animated.map(l => pullLiveFrameModal(l, slotPhase01(t, l.live!.duration))))
+        .then(() => renderStack(wallT, true))
+        .finally(() => { liveInFlight = false })
     }
-    Promise.all(animated.map(l => pullLiveFrameModal(l, slotPhase01(t, l.live!.duration))))
-      .then(() => renderStack(wallT))
-      .finally(() => { liveInFlight = false })
-  } else if (needsWallClock.value) {
+  } else if (needsWallClock.value && frameChanged) {
     // No animated wired slot to pull frames for (mc idle/null), but a live shader fill
-    // still needs a fresh paint every tick to advance — no async work to gate on here.
-    renderStack(wallT)
+    // still needs a fresh paint to advance — throttled to SHADER_PREVIEW_FPS, not rAF.
+    lastLiveFrame = frameIdx
+    renderStack(wallT, true)
   }
   liveRaf = requestAnimationFrame(liveFrameTick)
 }
-function startLive() { cancelAnimationFrame(liveRaf); liveStart = 0; liveInFlight = false; if (needsLiveLoop.value) liveRaf = requestAnimationFrame(liveFrameTick) }
+function startLive() { cancelAnimationFrame(liveRaf); liveStart = 0; liveInFlight = false; lastLiveFrame = -1; if (needsLiveLoop.value) liveRaf = requestAnimationFrame(liveFrameTick) }
 function stopLive() { cancelAnimationFrame(liveRaf); liveRaf = 0 }
 watch(needsLiveLoop, startLive)
 onMounted(startLive)
@@ -2642,13 +2660,25 @@ const shaderFieldsFrozen = ref(0)
 // playhead is set it wins outright, and whenever it's null AND nothing is animating,
 // t=0 is indistinguishable from "no clock needed" (`hasAnimatedFill` is false, so the
 // wall-clock loop isn't running to call this with a real `wallT` anyway).
-function renderStack(wallT?: number) {
+function renderStack(wallT?: number, live = false) {
   const cv = overlayCanvas.value
   if (!cv) return
   const W = canvasDisplay.w, H = canvasDisplay.h
-  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
-  cv.width = Math.max(1, Math.round(W * dpr))
-  cv.height = Math.max(1, Math.round(H * dpr))
+  const deviceDpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
+  // Cap the backing store while the animation loop drives this (`live`): compositing the
+  // wired pull + every shader fill at full device resolution each tick is the modal's
+  // ~50 ms/frame cost. Static repaints, bakes and exports pass `live=false` and keep full
+  // resolution, so committed/exported quality is unchanged; only the moving preview is
+  // slightly softer. (Same cap the Frame card uses.)
+  const dpr = live
+    ? Math.max(1, Math.min(deviceDpr, Math.sqrt(LIVE_PREVIEW_MAXPX / Math.max(1, W * H))))
+    : deviceDpr
+  // Resize only when it actually changes — assigning width/height reallocates and clears
+  // the backing store, and doing that every tick is itself a jank source. `clearRect`
+  // below does the per-frame clear.
+  const dw = Math.max(1, Math.round(W * dpr)), dh = Math.max(1, Math.round(H * dpr))
+  if (cv.width !== dw) cv.width = dw
+  if (cv.height !== dh) cv.height = dh
   const ctx = cv.getContext('2d')!
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, W, H)
