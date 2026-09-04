@@ -2022,7 +2022,10 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // ride the shared LayerCommon machinery around this draw (paintLayer wraps it),
     // so this branch only lays down pixels.
     const boxW = Math.max(1, layer.w * W), boxH = Math.max(1, layer.h * W)
-    const { regions } = resolveGrid(layer.grid, boxW, boxH)
+    // Resolve cells FLUSH (gutter 0): the deal's only cell gap is `cellInset`, applied
+    // per cell below. The grid's own gutter would add a second, hidden gap so cells are
+    // never flush even at cellInset 0 — which is not what the inset control implies.
+    const { regions } = resolveGrid({ ...layer.grid, gutter: 0 }, boxW, boxH)
     if (!regions.length) return
     const seed = layer.grid.gen.seed
     const density = layer.density ?? 1

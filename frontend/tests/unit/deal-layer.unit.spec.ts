@@ -204,6 +204,20 @@ describe('deal layer render (headless)', () => {
     expect(drawImages.length).toBe(20)
   })
 
+  it('cellInset 0 draws flush cells even when the grid carries a gutter (no hidden gap)', async () => {
+    // A grid gutter would otherwise inset every cell independently of cellInset, so
+    // cells are never flush at inset 0. The deal must resolve flush and let cellInset
+    // be the only gap. 2 cols × 1 row over a 400px box → cells at [0,200] and [200,400].
+    const grid = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0.05 }
+    await drawDeal(dealLayer({ w: 1, h: 1, cellInset: 0, grid }), 400, 400)
+    expect(mainDraws.length).toBe(2)
+    const [a, b] = [...mainDraws].sort((p, q) => p.x - q.x)
+    // Left cell starts at the box left; the two cells meet with no gap; right cell ends at the box right.
+    expect(a!.x).toBeLessThan(0.5)
+    expect(Math.abs((a!.x + a!.w) - b!.x)).toBeLessThan(0.5)   // adjacent, no gutter gap
+    expect(b!.x + b!.w).toBeGreaterThan(400 - 0.5)
+  })
+
   it('centres the box (boxH from WIDTH, not height) and places cells corner-origin inside it', async () => {
     // Pass H ≠ W so a `* H` regression is distinguishable from the correct `* W`.
     // layer.w=1, h=0.5, W=400 → boxW=400, boxH=0.5*400=200 (a `* H` bug would give 400).
