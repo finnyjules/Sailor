@@ -1,76 +1,61 @@
 // frontend/app/lib/studio/moves/phase.ts
 /**
- * Pure phase / window / band math over the shared Move shape (reads only
- * `phase`/`duration`/`ease`/`play`). Studio-agnostic — NOTHING here may
- * import from lib/vectortype.
+ * Pure window / phase math over the shared Move shape (reads only
+ * `at`/`duration`/`loop`/`bounce`/`ease`). Studio-agnostic — NOTHING here
+ * may import from lib/vectortype.
  *
- * In runs [0, duration]; Out runs [clip − duration, clip] but never starts
- * before the longest In; Loop runs the whole clip with phase 0 at
- * `longestIn`. `play` shapes each pass (once / back-and-forth / repeat) and
- * the ease is applied to the pass's local progress.
+ * A move's window is `at`-anchored: a transition (`loop: false`) is live
+ * only inside `[at, at+duration]`; a loop (`loop: true`) is live inside
+ * `[at, clip]` and its local phase wraps continuously every `duration`
+ * seconds (no snap at the wrap — `((gt-at)/duration) mod 1` is a plain
+ * sawtooth). `bounce: true` folds that local (pre-ease) progress into a
+ * triangle — forward across the first half of the window/cycle, back
+ * across the second half — before the ease is applied.
  */
 import { easeSample } from './ease'
 import type { Move } from './types'
 
-type MoveTiming = Pick<Move, 'phase' | 'duration' | 'ease' | 'play'>
+export type MoveTiming = Pick<Move, 'at' | 'duration' | 'loop' | 'bounce' | 'ease'>
 
 export interface MoveWindow<T extends MoveTiming> { move: T; start: number; end: number }
 
-export function moveWindows<T extends MoveTiming>(moves: readonly T[], clip: number): { longestIn: number; windows: MoveWindow<T>[] } {
-  const W = Math.max(0.001, clip)
-  let longestIn = 0
-  for (const m of moves) if (m.phase === 'in') longestIn = Math.max(longestIn, Math.min(W, m.duration))
-  const windows = moves.map((m) => {
-    if (m.phase === 'in') return { move: m, start: 0, end: Math.min(W, m.duration) }
-    if (m.phase === 'out') return { move: m, start: Math.max(longestIn, W - m.duration), end: W }
-    return { move: m, start: longestIn, end: W }
-  })
-  return { longestIn, windows }
+/** Each move's `[start, end]` window: `[at, at+duration]` for a transition, `[at, clip]` for a loop. */
+export function moveWindows<T extends MoveTiming>(moves: readonly T[], clip: number): MoveWindow<T>[] {
+  return moves.map(m => ({ move: m, start: m.at, end: m.loop ? clip : m.at + m.duration }))
 }
 
-export function movePhase(move: MoveTiming, gt: number, clip: number, longestIn: number): number | null {
-  const W = Math.max(0.001, clip)
-  const t = Math.max(0, gt)
-  if (move.phase === 'in') {
-    const dur = Math.max(0.05, move.duration)
-    if (t >= dur) return null
-    return playAndEase(move, t / dur)
-  }
-  if (move.phase === 'out') {
-    const start = Math.max(longestIn, W - move.duration)
-    if (t < start || W <= longestIn) return null
-    const eff = Math.max(0.05, W - start)
-    return playAndEase(move, Math.min(1, (t - start) / eff))
-  }
-  const cycle = Math.max(0.1, move.duration)
-  const local = t - longestIn
-  if (local < 0) return null
-  const cyclePhase = ((local / cycle) % 1 + 1) % 1
-  if (move.play.mode === 'backAndForth') {
-    const p = cyclePhase < 0.5 ? cyclePhase * 2 : (1 - cyclePhase) * 2
+/** Folds a progress value into a forward-then-back triangle (0→1→0 over one period), wrapping first like a sawtooth. */
+function triangleFold(p: number): number {
+  const cyc = ((p % 1) + 1) % 1
+  return cyc < 0.5 ? cyc * 2 : (1 - cyc) * 2
+}
+
+/**
+ * The move's eased local progress at global time `gt` within a clip of
+ * `clip` seconds, or `null` when the move isn't live at `gt`.
+ *
+ * - Transition (`!loop`): live within `[at, at+duration]` (inclusive both
+ *   ends); raw progress is `(gt-at)/duration`.
+ * - Loop (`loop: true`): live within `[at, clip]`; raw progress is
+ *   `((gt-at)/duration) mod 1` — a continuous sawtooth, not a source of
+ *   any wrap discontinuity a caller would have to guard against.
+ *
+ * `bounce: true` runs the raw progress through `triangleFold` before the
+ * ease is applied.
+ */
+export function movePhase(move: MoveTiming, gt: number, clip: number): number | null {
+  const dur = Math.max(0.001, move.duration)
+  if (move.loop) {
+    const end = Math.max(0.001, clip)
+    if (gt < move.at || gt > end) return null
+    const raw = (gt - move.at) / dur
+    const cyc = ((raw % 1) + 1) % 1
+    const p = move.bounce ? triangleFold(cyc) : cyc
     return easeSample(move.ease, p)
   }
-  return easeSample(move.ease, cyclePhase)
-}
-
-function playAndEase(move: MoveTiming, p: number): number {
-  const { mode, times } = move.play
-  if (mode === 'once') return easeSample(move.ease, p)
-  if (mode === 'repeat') { const local = (p * Math.max(1, times)) % 1; return easeSample(move.ease, p >= 1 ? 1 : local) }
-  const cyc = (p * Math.max(1, times)) % 1
-  const tri = cyc < 0.5 ? cyc * 2 : (1 - cyc) * 2
-  return easeSample(move.ease, tri)
-}
-
-export function bandSpans(moves: readonly MoveTiming[], clip: number): { inFrac: number; loopFrac: number; outFrac: number } {
-  const W = Math.max(0.001, clip)
-  let inn = 0
-  let out = 0
-  for (const m of moves) {
-    if (m.phase === 'in') inn = Math.max(inn, Math.min(W, m.duration))
-    if (m.phase === 'out') out = Math.max(out, Math.min(W, m.duration))
-  }
-  const inFrac = inn / W
-  const outFrac = out / W
-  return { inFrac, loopFrac: Math.max(0, 1 - inFrac - outFrac), outFrac }
+  const end = move.at + dur
+  if (gt < move.at || gt > end) return null
+  const raw = (gt - move.at) / dur
+  const p = move.bounce ? triangleFold(raw) : raw
+  return easeSample(move.ease, p)
 }

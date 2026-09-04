@@ -17,18 +17,18 @@
  * the task report.
  */
 import { easeSample } from './ease'
-import type { MoveEase, MovePlay, MoveTrack, MotionClip } from './types'
+import type { MoveEase, MoveTrack, MotionClip } from './types'
 
-export type TaggedMoveTrack = MoveTrack & { __ease: MoveEase; __play: MovePlay }
+export type TaggedMoveTrack = MoveTrack & { __ease: MoveEase; __at: number; __duration: number; __loop: boolean; __bounce?: boolean }
 
-/** Flatten every `kind: 'tracks'` move's tracks, tagging each with its OWN move's ease/play. */
+/** Flatten every `kind: 'tracks'` move's tracks, tagging each with its OWN move's ease/timing. */
 export function moveTracks(clip: MotionClip | null | undefined): TaggedMoveTrack[] {
   const moves = clip?.moves
   if (!Array.isArray(moves)) return []
   const out: TaggedMoveTrack[] = []
   for (const m of moves) {
     if (m.kind !== 'tracks' || !Array.isArray(m.tracks)) continue
-    for (const t of m.tracks) out.push({ ...t, __ease: m.ease, __play: m.play })
+    for (const t of m.tracks) out.push({ ...t, __ease: m.ease, __at: m.at, __duration: m.duration, __loop: m.loop, __bounce: m.bounce })
   }
   return out
 }
@@ -40,37 +40,39 @@ export interface MoveTrackIO {
 }
 
 /**
- * Progress (0..1) of one track at time `t` within a clip of `clipDuration`
- * seconds, honoring the OWNING MOVE's `play` (mode + times) and the track's
- * own `delay`/`cycleOffset`/`hold` (the per-track timing fields `MoveTrack`
- * still carries — `easing`/`loops` do not exist on it any more, the move's
- * `ease`/`play` replace them).
- *
- * The model, per the brief: a simple 0..1 progress across the clip
- * (`t / clipDuration`), with `play.mode` interpreted the same way
- * `./phase.ts`'s `playAndEase` interprets it for a move's own local
- * progress — `once` clamps, `repeat` wraps `progress * times`, and
- * `backAndForth` triangulates the wrapped value.
+ * Raw (pre-ease) 0..1 progress of one tagged track at time `t`, computed
+ * across the OWNING MOVE's own window (`__at`/`__duration`/`__loop`/
+ * `__bounce`) the same way `./phase.ts`'s `movePhase` computes a move's own
+ * progress, layered with the track's own `delay` (shifts the window start),
+ * `cycleOffset` (shifts the raw phase before wrapping/clamping) and `hold`
+ * (clips a symmetric dead-zone at both ends of one cycle). Unlike
+ * `movePhase`, this never returns `null` — a track always has a value to
+ * write, so it clamps to 0 before its window and to 1 past a transition's
+ * end (a loop's window is capped to `clipDuration`, mirroring `movePhase`'s
+ * `[at, clip]`).
  */
-function trackRawProgress(track: MoveTrack, play: MovePlay, t: number, clipDuration: number): number {
-  const d = Math.max(0.001, clipDuration)
-  const local = (t - (track.delay || 0)) / d
-  if (local < 0) return 0
-  const times = Math.max(1, play.times || 1)
-  const phase = local * times + (track.cycleOffset || 0)
+function trackRawProgress(track: TaggedMoveTrack, t: number, clipDuration: number): number {
+  const tt = Math.min(t, Math.max(0.001, clipDuration))
+  const start = track.__at + (track.delay || 0)
+  const dur = Math.max(0.001, track.__duration)
   let cyc: number
-  if (play.mode === 'once') {
-    cyc = Math.min(1, Math.max(0, phase))
+  if (track.__loop) {
+    if (tt < start) {
+      cyc = 0
+    } else {
+      const raw = (tt - start) / dur + (track.cycleOffset || 0)
+      cyc = ((raw % 1) + 1) % 1
+    }
   } else {
-    cyc = phase % 1
-    if (cyc < 0) cyc += 1
+    const raw = (tt - start) / dur + (track.cycleOffset || 0)
+    cyc = Math.min(1, Math.max(0, raw))
   }
   const hold = Math.min(0.5, Math.max(0, track.hold || 0))
   if (hold > 0) {
     const active = 1 - 2 * hold
     cyc = active <= 0 ? 0 : Math.min(1, Math.max(0, (cyc - hold) / active))
   }
-  if (play.mode === 'backAndForth') cyc = cyc < 0.5 ? cyc * 2 : (1 - cyc) * 2
+  if (track.__bounce) cyc = cyc < 0.5 ? cyc * 2 : (1 - cyc) * 2
   return cyc
 }
 
@@ -84,11 +86,12 @@ const isColorTrack = (t: MoveTrack): boolean => typeof t.fromColor === 'string' 
  * split `~/lib/studio/track`'s `trackProgress`/`trackValue` make, for the
  * same reason (see that module's own doc comment).
  *
- * Honors the track's OWNING MOVE's `ease`/`play` (the `__ease`/`__play` tag
- * `moveTracks` attaches) and the track's own `delay`/`cycleOffset`/`hold`.
+ * Honors the track's OWNING MOVE's `ease`/`at`/`duration`/`loop`/`bounce`
+ * (the `__ease`/`__at`/`__duration`/`__loop`/`__bounce` tag `moveTracks`
+ * attaches) and the track's own `delay`/`cycleOffset`/`hold`.
  */
 export function trackProgressAt(track: TaggedMoveTrack, t: number, clipDuration: number): number {
-  return easeSample(track.__ease, trackRawProgress(track, track.__play, t, clipDuration))
+  return easeSample(track.__ease, trackRawProgress(track, t, clipDuration))
 }
 
 /**
