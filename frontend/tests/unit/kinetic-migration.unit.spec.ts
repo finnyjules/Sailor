@@ -20,7 +20,7 @@ import {
 import { KINETIC_PRESETS_BY_ID } from '~/data/kinetic-presets'
 import { DEFAULT_FILL, paintPrimaryColor } from '~/lib/spacetype/fillTile'
 import { applyMotion } from '~/lib/vectortype/motion'
-import { presetTransform } from '~/lib/vectortype/presetMotion'
+import { presetTransform, vtPresetSlotOf } from '~/lib/vectortype/presetMotion'
 import { vtBaseAppearance } from '~/lib/vectortype/config'
 import { moveTracks } from '~/lib/studio/moves/tracks'
 
@@ -139,9 +139,13 @@ describe('kineticParamsToVectorType — preset mapping', () => {
     const mv = m.config.motion.moves[0]!
     expect(mv.kind).toBe('preset')
     expect(mv.presetId).toBe('slide-up')
-    expect(mv.phase).toBe('in')          // slide-up's own KineticPreset.category
+    // `Move` dropped `phase`/`play` — which table a preset id belongs to is
+    // resolved from the id itself now (`vtPresetSlotOf`), and an `in`/`out`
+    // crossing is a one-shot transition (`loop: false`), not `play: once`.
+    expect(vtPresetSlotOf(mv.presetId)).toBe('in')   // slide-up's own KineticPreset.category
     expect(mv.duration).toBe(3)          // the node's own saved duration, carried
-    expect(mv.play).toEqual({ mode: 'once', times: 1 })   // in/out → once
+    expect(mv.at).toBe(0)
+    expect(mv.loop).toBe(false)
   })
 
   it('leaves motion EMPTY for a preset with no honest equivalent', () => {
@@ -169,15 +173,20 @@ describe('kineticParamsToVectorType — preset mapping', () => {
       const m = kineticParamsToVectorType(JSON.stringify({ ...SAVED_PARAMS, presetId: id }))
       expect(m.config.motion.moves, id).toHaveLength(1)
       const mv = m.config.motion.moves[0]!
-      expect(mv.phase, id).toBe(category)
       if (id === 'color-cycle') {
         // The one id whose identity is a COLOUR, not a glyph transform — its own
-        // hand-built track move, not a pass-through `kind: 'preset'`.
+        // hand-built track move, not a pass-through `kind: 'preset'`, so it has
+        // no table id for `vtPresetSlotOf` to resolve. Its own category is
+        // `loop`, checked directly against the move's `loop` flag instead.
+        expect(category, id).toBe('loop')
         expect(mv.kind, id).toBe('tracks')
+        expect(mv.loop, id).toBe(true)
       } else {
         expect(mv.kind, id).toBe('preset')
         expect(mv.presetId, id).toBe(id)
         expect(mv.duration, id).toBeGreaterThan(0)
+        // `Move` dropped `phase` — resolved from the preset id instead.
+        expect(vtPresetSlotOf(mv.presetId), id).toBe(category)
       }
     }
   })

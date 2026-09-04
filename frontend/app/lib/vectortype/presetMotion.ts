@@ -69,15 +69,16 @@ import {
   presetIdsFor,
   presetNeedsStagger,
 } from '~/lib/motion/evaluate'
-// The shared moves core: N moves per phase now, not one spec per slot — see
-// `presetTransform`'s header note below. `movePhase`/`moveWindows` replace
-// this file's old `vtSlotPhase` (removed — it had no callers left once
-// `presetTransform` switched to `movePhase`); `mergeEase`/`mergePlay` give a
-// raw/untrusted move a well-formed ease+play the same way `mergeTrack` gives
-// one to a raw track, and `easeToEngineName` is how a move's ease reaches
-// `vtPresetSpecs`'s engine-shaped `LayerAnimSpec.ease` string.
+// The shared moves core: any number of moves live now, each its own
+// `at`/`loop`/`bounce` window — see `presetTransform`'s header note below.
+// `movePhase`/`moveWindows` replace this file's old `vtSlotPhase` (removed —
+// it had no callers left once `presetTransform` switched to `movePhase`);
+// `mergeEase` gives a raw/untrusted move a well-formed ease the same way
+// `mergeTrack` gives one to a raw track, and `easeToEngineName` is how a
+// move's ease reaches `vtPresetSpecs`'s engine-shaped `LayerAnimSpec.ease`
+// string.
 import { movePhase, moveWindows } from '~/lib/studio/moves/phase'
-import { mergeEase, mergePlay, easeToEngineName } from '~/lib/studio/moves/ease'
+import { mergeEase, easeToEngineName } from '~/lib/studio/moves/ease'
 import { moveTracks, trackValueAt } from '~/lib/studio/moves/tracks'
 // TYPE-ONLY against ./font.ts (it loads fontkit at module scope); ./axisPresets
 // is deliberately type-only against it too, so this stays a light import.
@@ -227,6 +228,29 @@ export function vtKnowsPreset(slot: VtPresetSlot, presetId: unknown): boolean {
 }
 
 /**
+ * WHICH slot's table a preset id belongs to — the at/loop model's
+ * replacement for the retired `Move.phase`. A `kind: 'preset'` move no
+ * longer carries a stored phase (`~/lib/studio/moves/types`'s `Move` has
+ * `at`/`loop`/`bounce`, not `phase`/`play`), so anything that used to read
+ * `mv.phase` to pick the right table — `evaluatePresetUnit`'s own `slot`
+ * argument, `vtAxisPreset`'s `slot` — now looks the id up here instead.
+ *
+ * Total by construction: every kinetic id lives in exactly ONE of
+ * `IN_EVAL`/`OUT_EVAL`/`LOOP_EVAL` (`~/lib/motion/evaluate.ts`'s own tables
+ * are disjoint by id — `fade-in` vs `fade-out`, never both), and every axis
+ * preset declares exactly one `VtAxisPreset.slot` (`axisPresets.ts`), so
+ * `KNOWN_IDS`'s three sets never overlap and this never has to pick between
+ * two true answers. `null` for an id neither table knows (dropped, same as
+ * `vtKnowsPreset` returning false for every slot).
+ */
+export function vtPresetSlotOf(presetId: unknown): VtPresetSlot | null {
+  if (typeof presetId !== 'string') return null
+  const id = presetId.trim()
+  for (const slot of VT_PRESET_SLOTS) if (KNOWN_IDS[slot].has(id)) return slot
+  return null
+}
+
+/**
  * Everything a picker should offer for a slot, given the loaded font's axes.
  *
  * The engine's capability-gated ids (renderable by anything Vector Type draws)
@@ -289,6 +313,12 @@ export function vtAxisOffers(
  * not `mergeConfig` alone. An EMPTY `moves: []` is not this case (that is a
  * config that legitimately has no presets) — only a MISSING key falls
  * through, exactly `mergeMotion`'s own `hasNewShape` test.
+ *
+ * A raw entry is validated against the at/loop model directly (`at`/
+ * `duration`/`loop`/`bounce`), not the retired `phase`/`play` — `vtMove.kind
+ * === 'preset'` and a `presetId` `vtPresetSlotOf` recognises (in SOME
+ * table — which one is resolved per-move, at fold time, by `presetTransform`
+ * itself, not stored here) are what makes an entry usable.
  */
 function presetMoves(cfg: VectorTypeConfig | null | undefined): VtMove[] {
   const motion = cfg?.motion as { moves?: unknown } & Record<string, unknown> | undefined
@@ -299,17 +329,16 @@ function presetMoves(cfg: VectorTypeConfig | null | undefined): VtMove[] {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
     const m = entry as Record<string, unknown>
     if (m.kind !== 'preset') continue
-    const phase = m.phase
-    if (phase !== 'in' && phase !== 'out' && phase !== 'loop') continue
-    if (!vtKnowsPreset(phase, m.presetId)) continue
+    if (!vtPresetSlotOf(m.presetId)) continue
     out.push({
       id: typeof m.id === 'string' && m.id ? m.id : `move-${out.length}`,
-      phase,
       kind: 'preset',
       presetId: (m.presetId as string).trim(),
+      at: Math.max(0, fin(m.at, 0)),
       duration: Math.max(0.05, fin(m.duration, 0.8)),
+      loop: m.loop === true,
       ease: mergeEase(m.ease),
-      play: mergePlay(m.play),
+      ...(m.bounce === true ? { bounce: true } : {}),
       ...(m.params && typeof m.params === 'object' && !Array.isArray(m.params)
         ? { params: m.params as Record<string, number> }
         : {}),
@@ -331,23 +360,42 @@ function presetMoves(cfg: VectorTypeConfig | null | undefined): VtMove[] {
  * at an intermediate frame, which nothing on this defensive path promises.
  * Once a document is actually opened in the editor, `mergeConfig` runs and
  * this fallback never fires again for it.
+ *
+ * Placement follows the SAME rule `config.ts`'s real `mergeMotion` old-shape
+ * conversion uses (`~/lib/studio/moves/merge`'s `resolvePlacement`, restated
+ * here rather than imported so this stays the cheap, allocation-light path
+ * its own doc promises): `in` -> `at: 0`; `loop` -> `at: longestIn` (the
+ * `in` slot's own duration, found first since `VT_PRESET_SLOTS` visits `in`
+ * before `loop`); `out` -> `at: max(longestIn, clip - duration)`, with
+ * `duration` compressed to fit. `loop: slot === 'loop'` — this cheap path
+ * skips `play.mode === 'repeat'` (the old slot schema never wrote a `play`
+ * at all, so there is nothing to read) and `bounce` (no pre-moves slot was
+ * ever a ping-pong).
  */
 function legacySlotMoves(motion: Record<string, unknown> | undefined): VtMove[] {
   const out: VtMove[] = []
+  const clip = Math.max(0.001, fin(motion?.duration, DEFAULT_MOTION.duration))
+  let longestIn = 0
   for (const slot of VT_PRESET_SLOTS) {
     const rawSlot = motion?.[slot]
     if (!rawSlot || typeof rawSlot !== 'object' || Array.isArray(rawSlot)) continue
     const so = rawSlot as Record<string, unknown>
     const presetId = typeof so.presetId === 'string' ? so.presetId.trim() : ''
     if (!presetId || !vtKnowsPreset(slot, presetId)) continue
+    const rawDuration = Math.max(0.05, fin(so.duration, VT_PRESET_DURATIONS[slot]))
+    let at = 0
+    let duration = rawDuration
+    if (slot === 'in') { at = 0; longestIn = Math.max(longestIn, rawDuration) }
+    else if (slot === 'loop') { at = longestIn }
+    else { at = Math.max(longestIn, clip - rawDuration); duration = Math.max(0.05, clip - at) }
     out.push({
       id: `legacy-${slot}`,
-      phase: slot,
       kind: 'preset',
       presetId,
-      duration: Math.max(0.05, fin(so.duration, VT_PRESET_DURATIONS[slot])),
+      at,
+      duration,
+      loop: slot === 'loop',
       ease: { kind: 'named', name: 'none' },
-      play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
       ...(so.params && typeof so.params === 'object' && !Array.isArray(so.params)
         ? { params: so.params as Record<string, number> }
         : {}),
@@ -381,8 +429,9 @@ function legacySlotMoves(motion: Record<string, unknown> | undefined): VtMove[] 
 export function vtPresetSpecs(cfg: VectorTypeConfig | null | undefined): Partial<Record<VtPresetSlot, LayerAnimSpec>> {
   const out: Partial<Record<VtPresetSlot, LayerAnimSpec>> = {}
   for (const mv of presetMoves(cfg)) {
-    if (out[mv.phase]) continue
-    out[mv.phase] = {
+    const slot = vtPresetSlotOf(mv.presetId)
+    if (!slot || out[slot]) continue
+    out[slot] = {
       presetId: mv.presetId!,
       duration: mv.duration,
       // See the header: the engine's own stagger is forced off so `motion.stagger`
@@ -515,17 +564,27 @@ export function vtStillTime(cfg: VectorTypeConfig | null | undefined): number {
   const settle = vtScatterStillTime(cfg)
   if (!moves.length && !(settle > 0)) return 0
   const duration = clipDuration(cfg)
-  // `moveWindows` gives `longestIn` across every In move (generalising the old
-  // single `specs.in.duration`) and, per move, the window it lives in — an Out
-  // move's `start` is exactly `outStart` used to be, computed per-move by the
-  // SAME shared rule `presetTransform` composes with, so this cannot drift out
-  // of step with what actually renders. The EARLIEST out window across every
-  // Out move is the one that first starts hiding the word.
-  const { longestIn, windows } = moveWindows(moves, duration)
+  // `moveWindows` gives, per move, the `[start,end]` window it lives in — an
+  // Out move's `start` is exactly `outStart` used to be, computed per-move by
+  // the SAME shared rule `presetTransform` composes with, so this cannot
+  // drift out of step with what actually renders. Which moves are In/Out is
+  // no longer stored on the move itself (`Move` dropped `phase`) — resolved
+  // here the same way `presetTransform` resolves it, from the preset id's
+  // own table (`vtPresetSlotOf`). The LATEST In window's END across every In
+  // move generalises the old single `specs.in.duration` (an In move's `end`
+  // is `at + duration`, and every In move this studio itself ever places
+  // starts at `at: 0` — see `legacySlotMoves`/`config.ts`'s migration — so
+  // this equals the old value there and generalises correctly for any other
+  // placement). The EARLIEST out window across every Out move is the one
+  // that first starts hiding the word.
+  const windows = moveWindows(moves, duration)
+  const longestIn = windows
+    .filter(w => vtPresetSlotOf(w.move.presetId) === 'in')
+    .reduce((max, w) => Math.max(max, w.end), 0)
   const glyphs = Math.max(1, [...String(cfg?.text ?? '')].length)
   const { delay } = resolveStagger(cfg as VectorTypeConfig)
   const rest = Math.max(longestIn, settle) + delay * (glyphs - 1)
-  const outStarts = windows.filter(w => w.move.phase === 'out').map(w => w.start)
+  const outStarts = windows.filter(w => vtPresetSlotOf(w.move.presetId) === 'out').map(w => w.start)
   const outStart = outStarts.length ? Math.min(...outStarts) : duration
   return Math.max(0, Math.min(rest, outStart, duration - 1e-6))
 }
@@ -665,11 +724,6 @@ export function presetTransform(
   const raw = glyphTime(cfg, t, i, n)
   const gt = Math.min(Math.max(0, isNum(raw) ? raw : 0), duration - 1e-6)
 
-  // `longestIn` is shared across every move's window — an Out move never
-  // starts before the longest In has finished, and a Loop's phase 0 sits at
-  // the same instant, exactly as `applyMoveTracks`' tracks resolve theirs.
-  const { longestIn } = moveWindows(moves, duration)
-
   const acc: Accumulator = {
     dx: 0, dy: 0, rotate: 0, blur: 0, scale: 1, scaleX: 1, scaleY: 1, opacity: 1,
     axes: {}, clipSide: null, clipAmount: 0,
@@ -677,11 +731,21 @@ export function presetTransform(
   let any = false
 
   for (const mv of moves) {
-    const e = movePhase(mv, gt, duration, longestIn)
+    // The move's own `at`/`duration`/`loop`/`bounce` are a self-contained
+    // window now — no `longestIn` to thread through (that was the OLD
+    // slot-per-phase model's job; an at-anchored move already knows where it
+    // starts).
+    const e = movePhase(mv, gt, duration)
     if (e == null) continue
     any = true
 
-    const axisPreset = vtAxisPreset(mv.phase, mv.presetId)
+    // Which table (`in`/`out`/`loop`) this preset id belongs to is no longer
+    // stored on the move (`Move` dropped `phase`) — resolved from the id
+    // itself, the same lookup `vtKnowsPreset`/`vtPresetIdsFor` are built on.
+    const slot = vtPresetSlotOf(mv.presetId)
+    if (!slot) continue
+
+    const axisPreset = vtAxisPreset(slot, mv.presetId)
     if (axisPreset) {
       const axes = env?.axes
       if (!axes?.length) continue
@@ -691,7 +755,7 @@ export function presetTransform(
       continue
     }
 
-    const u = evaluatePresetUnit(mv.phase, mv.presetId!, e, i, n, mv.params ?? {})
+    const u = evaluatePresetUnit(slot, mv.presetId!, e, i, n, mv.params ?? {})
     foldUnit(acc, u)
   }
 

@@ -50,12 +50,12 @@ describe('vtMovesAdapter — gallery: Letterform leads', () => {
 describe('vtMovesAdapter — availability: same dial twice', () => {
   const existingTracksMove: VtMove = {
     id: 'move-existing',
-    phase: 'in',
     kind: 'tracks',
     presetId: 'custom',
+    at: 0,
     duration: 1,
+    loop: false,
     ease: { kind: 'named', name: 'none' },
-    play: { mode: 'once', times: 1 },
     tracks: [{ path: 'skewX', from: 0, to: 10, hold: 0, cycleOffset: 0, delay: 0 }],
   }
   const withExisting = cfg({
@@ -65,8 +65,8 @@ describe('vtMovesAdapter — availability: same dial twice', () => {
   it('returns a non-null reason for a candidate whose dial is already driven', () => {
     const adapter = vtMovesAdapter(DEFAULT_CONFIG, NO_AXES)
     const candidate: Move = {
-      id: 'candidate', phase: 'in', kind: 'tracks', presetId: 'custom',
-      duration: 1, ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: 1 },
+      id: 'candidate', kind: 'tracks', presetId: 'custom',
+      at: 0, duration: 1, loop: false, ease: { kind: 'named', name: 'none' },
       tracks: [{ path: 'skewX', from: 0, to: 20 }],   // same path the existing move already drives
     }
     const reason = adapter.availability(withExisting, candidate)
@@ -77,8 +77,8 @@ describe('vtMovesAdapter — availability: same dial twice', () => {
   it('returns null for a candidate whose dial is free', () => {
     const adapter = vtMovesAdapter(DEFAULT_CONFIG, NO_AXES)
     const candidate: Move = {
-      id: 'candidate', phase: 'in', kind: 'tracks', presetId: 'custom',
-      duration: 1, ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: 1 },
+      id: 'candidate', kind: 'tracks', presetId: 'custom',
+      at: 0, duration: 1, loop: false, ease: { kind: 'named', name: 'none' },
       tracks: [{ path: 'skewY', from: 0, to: 20 }],   // untouched by the existing move
     }
     expect(adapter.availability(withExisting, candidate)).toBeNull()

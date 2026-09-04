@@ -1670,12 +1670,55 @@ function mergeMotion(raw: unknown, remap?: (path: string) => string | null): VtM
   const moves: VtMove[] = []
 
   if (hasNewShape) {
+    // A `moves` array is not necessarily every entry's OWN native shape — a
+    // 2026-09-03 document's `phase`/`play` moves live in `motion.moves` too
+    // (that vintage already had the array; only the per-move shape changed
+    // under it), and `mergeMove` converts each one exactly as the `hasOldShape`
+    // branch below converts a pre-moves `in`/`out`/`loop` slot (see its own
+    // `resolvePlacement`). Same fix as that branch needed: `longestIn` — the
+    // max duration among this document's own `phase: 'in'` entries — has to be
+    // computed ONCE, over the RAW array, and threaded into every `mergeMove`
+    // call, or every `phase: 'loop'`/`'out'` entry places itself against the
+    // default `longestIn: 0` regardless of what this document's own entrance
+    // actually is (`~/lib/studio/moves/merge`'s own `mergeClip` computes this
+    // the identical way, for the identical reason). A raw entry already on the
+    // new shape (`at` present) is not counted — its placement does not depend
+    // on `longestIn` at all.
+    let longestIn = 0
     for (const rawMove of o.moves as unknown[]) {
-      const m = asVtMove(mergeMove(rawMove, mergeTrackFn))
+      if (!rawMove || typeof rawMove !== 'object' || Array.isArray(rawMove)) continue
+      const mo = rawMove as Record<string, unknown>
+      if (typeof mo.at === 'number' && Number.isFinite(mo.at)) continue
+      if (mo.phase === 'in') {
+        const d = clamp(num(mo.duration, 1), 0.05, 60)
+        if (d > longestIn) longestIn = d
+      }
+    }
+    const newCtx = { clipDuration: duration, longestIn }
+    for (const rawMove of o.moves as unknown[]) {
+      const m = asVtMove(mergeMove(rawMove, mergeTrackFn, newCtx))
       if (m) moves.push(m)
     }
   } else if (hasOldShape) {
     // 1) The three preset slots → one preset move per populated slot.
+    //
+    // `longestIn` — the 'in' slot's own (clamped) duration, or 0 when there is
+    // none — is computed ONCE, before the loop, and threaded into every
+    // `mergeMove` call as `ctx`: `resolvePlacement` (`~/lib/studio/moves/merge`)
+    // needs it to place a `loop` slot at the entrance's end and to compress an
+    // `out` slot's window against it, exactly as `mergeClip` does for a
+    // `moves`-shaped document. Omitting it (the pre-fix bug) silently placed
+    // every loop/out at `at: 0` against a `duration: 4` default clip instead of
+    // this document's own — wrong the moment an 'in' slot was populated or the
+    // clip's own duration was not 4.
+    const rawIn = o.in
+    const inPresetId = rawIn && typeof rawIn === 'object' && !Array.isArray(rawIn)
+      ? (typeof (rawIn as Record<string, unknown>).presetId === 'string' ? ((rawIn as Record<string, unknown>).presetId as string).trim() : '')
+      : ''
+    const longestIn = inPresetId
+      ? clamp(num((rawIn as Record<string, unknown>).duration, VT_PRESET_DURATIONS.in), 0.05, 60)
+      : 0
+    const slotCtx = { clipDuration: duration, longestIn }
     for (const slot of VT_PRESET_SLOTS) {
       const rawSlot = o[slot]
       if (!rawSlot || typeof rawSlot !== 'object' || Array.isArray(rawSlot)) continue
@@ -1700,7 +1743,7 @@ function mergeMotion(raw: unknown, remap?: (path: string) => string | null): VtM
         ease,
         play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
         params: so.params,
-      }, mergeTrackFn))
+      }, mergeTrackFn, slotCtx))
       if (m) moves.push(m)
     }
     // 2) The flat `tracks` array → the shared, studio-neutral legacy
@@ -1843,7 +1886,6 @@ export function cloneConfig(cfg: VectorTypeConfig): VectorTypeConfig {
     ease: mv.ease.kind === 'bezier'
       ? { kind: 'bezier', cps: [...mv.ease.cps] as [number, number, number, number] }
       : { ...mv.ease },
-    play: { ...mv.play },
     ...(mv.params ? { params: { ...mv.params } } : {}),
     ...(mv.tracks ? { tracks: mv.tracks.map(t => ({ ...t })) } : {}),
   })

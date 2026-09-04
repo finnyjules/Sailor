@@ -53,11 +53,12 @@ import type {
   MovesAdapter,
 } from '~/lib/studio/moves/adapter'
 import type { Move, MoveEase, MoveEaseName } from '~/lib/studio/moves/types'
+import { buildPairs } from '~/lib/studio/moves/direction'
 import { presetIdsFor, nativeEaseFor } from '~/lib/motion/evaluate'
 import { KINETIC_GROUP_LABELS, KINETIC_PRESETS_BY_ID, type KineticGroup } from '~/data/kinetic-presets'
 import type { VtAxis } from './font'
 import type { VectorTypeConfig, VtMove } from './config'
-import { VT_PRESET_CAPABILITIES } from './presetMotion'
+import { VT_PRESET_CAPABILITIES, vtPresetSlotOf } from './presetMotion'
 import { animatableTargets } from './motion'
 import {
   vtAxisAvailability,
@@ -86,6 +87,62 @@ const KINDS: Record<string, MoveKindDef<VectorTypeConfig>> = {
   blink: { label: 'Blink', cardBody: markRaw(VtBlinkCardBody), noTiming: true },
   scatter: { label: 'Scatter', cardBody: markRaw(VtScatterCardBody), noTiming: true },
 }
+
+// ── In/Out pairs, for the panel's In/Out toggle ─────────────────────────────
+
+/**
+ * Every kinetic-engine preset id that has a genuine In AND Out counterpart,
+ * `{ inId: outId }` — the one-directional source map `buildPairs`
+ * (`~/lib/studio/moves/direction`) needs to build a real `direction`/`flip`
+ * pair (its own doc: the `-in`/`In`-suffix heuristic gets real Vector Type
+ * pairs backwards — `slide-up`/`slide-out-up` and `grow-in`/`shrink-out`
+ * both break it — so a studio with the one-directional source MUST use this
+ * rather than guess from id text).
+ *
+ * Read straight off `~/lib/motion/evaluate.ts`'s own `IN_EVAL`/`OUT_EVAL`
+ * tables (mirrored here rather than derived, since neither table is
+ * exported — `SUPPORTED_IN_IDS`/`SUPPORTED_OUT_IDS` are, but the PAIRING
+ * between one In id and one Out id is a judgement call about which two read
+ * as "the same move, reversed", not something the tables themselves declare)
+ * — every id below is checked against that catalog by this module's own
+ * test suite, so a preset added or renamed there cannot silently drift out
+ * of step. `blur-slide-up` has no Out counterpart in the catalog (no
+ * `blur-slide-out-down` exists) and is deliberately left unpaired, per the
+ * brief: do not invent a pair that is not really there.
+ */
+const VT_PRESET_IN_TO_OUT: Record<string, string> = {
+  'appear': 'disappear',
+  'fade-in': 'fade-out',
+  'slide-up': 'slide-out-up',
+  'slide-down': 'slide-out-down',
+  'slide-left': 'slide-out-left',
+  'slide-right': 'slide-out-right',
+  'mask-up': 'mask-out-up',
+  'mask-down': 'mask-out-down',
+  'grow-in': 'shrink-out',
+  'shrink-in': 'grow-out',
+  'blur-in': 'blur-out',
+  'spin-in': 'spin-out',
+  'elastic-drop': 'elastic-launch',
+  'typewriter': 'typewriter-out',
+  'glitch-in': 'glitch-out',
+  'card-flip-h': 'card-flip-h-out',
+  'card-flip-v': 'card-flip-v-out',
+}
+
+const VT_PRESET_PAIRING = buildPairs(VT_PRESET_IN_TO_OUT)
+
+/** The symmetric `{ id: itsPair }` map — every id above AND its reverse. */
+export const VT_PRESET_PAIRS = VT_PRESET_PAIRING.pairs
+/** `'in' | 'out' | null` for a preset id in `VT_PRESET_PAIRS` — reads the
+ *  authoritative `VT_PRESET_IN_TO_OUT` map, not the `-in`/`In`-suffix guess
+ *  `~/lib/studio/moves/direction`'s bare `moveDirection` falls back to. What
+ *  the panel's In/Out toggle asks to decide which side a picked tile is on. */
+export const vtPresetDirection = VT_PRESET_PAIRING.direction
+/** `presetId`'s opposite-direction id (e.g. `fade-in` -> `fade-out`), or
+ *  `presetId` itself when it has no pair. What the toggle asks for when the
+ *  user flips a picked tile's direction. */
+export const vtPresetFlip = VT_PRESET_PAIRING.flip
 
 // ── Ease: engine name → the ten-name `MoveEase` vocabulary ─────────────────
 
@@ -138,20 +195,69 @@ function easeFromEngineName(name: string | undefined): MoveEase {
 
 // ── Offer builders ───────────────────────────────────────────────────────
 
-/** The default duration/ease/play a freshly-added preset move gets. Loop
- *  presets are periodic on their own — `ease: none`, `play: repeat ×1` — per
- *  the design spec §1; In/Out get the preset's OWN native ease (axis presets
- *  carry one on `preset.ease`; engine presets' lives in the shared engine's
- *  IN/OUT tables, passed in by `engineOffer` via `nativeEaseFor` — see its
- *  call below) and `play: once`, so a freshly-added "grow-in" tile overshoots
- *  the same way a pre-moves document's `in` slot always did, rather than
- *  going smooth. */
-function defaultTiming(phase: MovePhase, engineEase?: string): { duration: number; ease: MoveEase; play: Move['play'] } {
-  if (phase === 'loop') return { duration: 1.5, ease: { kind: 'named', name: 'none' }, play: { mode: 'repeat', times: 1 } }
-  return { duration: 0.8, ease: easeFromEngineName(engineEase), play: { mode: 'once', times: 1 } }
+/**
+ * The end of the latest zero-anchored, one-shot move already in `cfg` — this
+ * studio's own definition of "where the entrance(s) finish" under the
+ * at/loop model, which no longer stores a `phase` to ask "which move is the
+ * In". Structural rather than table-driven on purpose: it has to answer for
+ * a `'tracks'` move (a Custom In) exactly as it does for a `kind: 'preset'`
+ * one, and neither carries a preset id a table lookup could key on.
+ *
+ * A freshly-placed Loop or Out reads this so it starts where the current
+ * entrance(s) end — the SAME ordering `~/lib/studio/moves/merge`'s
+ * `resolvePlacement` gives an old-shape document's `phase: 'loop'`/`'out'`
+ * slot (`at: longestIn` / `at: max(longestIn, clip - duration)`), restated
+ * here for a move built FRESH from the gallery rather than migrated.
+ */
+function longestEntranceEnd(cfg: VectorTypeConfig | null | undefined): number {
+  let longest = 0
+  const moves = Array.isArray(cfg?.motion?.moves) ? (cfg!.motion.moves as VtMove[]) : []
+  for (const mv of moves) {
+    if (mv && mv.loop === false && mv.at === 0 && isNum(mv.duration) && mv.duration > longest) longest = mv.duration
+  }
+  return longest
 }
 
-function axisOffer(preset: VtAxisPreset, phase: MovePhase): MoveOffer {
+/**
+ * Where a freshly-picked tile of phase `phase` lands on the at-anchored
+ * timeline, and what `loop`/`bounce` it gets — the gallery's OWN "which
+ * window" decision, the fresh-add counterpart to `resolvePlacement`'s
+ * migration-time one (see `longestEntranceEnd`'s doc): `in` -> `at: 0`;
+ * `loop` -> `at: longestEntranceEnd(cfg)`, open-ended; `out` -> `at:
+ * max(longestEntranceEnd(cfg), clip - duration)`, with `duration` compressed
+ * to fit the clip exactly as an old-shape `out` slot's was.
+ */
+function placementFor(
+  phase: MovePhase,
+  cfg: VectorTypeConfig,
+  duration: number,
+  loop: boolean,
+  bounce: boolean,
+): { at: number; duration: number; loop: boolean; bounce?: boolean } {
+  const extra = bounce ? { bounce: true as const } : {}
+  if (phase === 'in') return { at: 0, duration, loop, ...extra }
+  if (phase === 'loop') return { at: longestEntranceEnd(cfg), duration, loop, ...extra }
+  const clip = isNum(cfg?.motion?.duration) ? cfg.motion.duration : 4
+  const at = Math.max(longestEntranceEnd(cfg), clip - duration)
+  return { at, duration: Math.max(0.05, clip - at), loop, ...extra }
+}
+
+/** The default duration/ease/placement a freshly-added preset move gets. Loop
+ *  presets are periodic on their own — `ease: none`, an open-ended cycle —
+ *  per the design spec §1; In/Out get the preset's OWN native ease (axis
+ *  presets carry one on `preset.ease`; engine presets' lives in the shared
+ *  engine's IN/OUT tables, passed in by `engineOffer` via `nativeEaseFor` —
+ *  see its call below) and a one-shot window, so a freshly-added "grow-in"
+ *  tile overshoots the same way a pre-moves document's `in` slot always did,
+ *  rather than going smooth. */
+function defaultTiming(cfg: VectorTypeConfig, phase: MovePhase, engineEase?: string): { duration: number; ease: MoveEase; at: number; loop: boolean; bounce?: boolean } {
+  if (phase === 'loop') {
+    return { ease: { kind: 'named', name: 'none' }, ...placementFor(phase, cfg, 1.5, true, false) }
+  }
+  return { ease: easeFromEngineName(engineEase), ...placementFor(phase, cfg, 0.8, false, false) }
+}
+
+function axisOffer(preset: VtAxisPreset, phase: MovePhase, cfg: VectorTypeConfig): MoveOffer {
   return {
     id: `axis:${preset.id}`,
     label: preset.label,
@@ -160,15 +266,14 @@ function axisOffer(preset: VtAxisPreset, phase: MovePhase): MoveOffer {
     presetId: preset.id,
     phase,
     build: () => ({
-      phase,
       kind: 'preset',
       presetId: preset.id,
-      ...defaultTiming(phase, preset.ease),
+      ...defaultTiming(cfg, phase, preset.ease),
     }),
   }
 }
 
-function engineOffer(id: string, phase: MovePhase): MoveOffer {
+function engineOffer(id: string, phase: MovePhase, cfg: VectorTypeConfig): MoveOffer {
   const meta = KINETIC_PRESETS_BY_ID[id]
   // `nativeEaseFor` only knows `'in' | 'out'` (a loop preset has no ease of
   // its own — see its doc) — `defaultTiming` ignores the ease arg for
@@ -182,10 +287,9 @@ function engineOffer(id: string, phase: MovePhase): MoveOffer {
     presetId: id,
     phase,
     build: () => ({
-      phase,
       kind: 'preset',
       presetId: id,
-      ...defaultTiming(phase, engineEase),
+      ...defaultTiming(cfg, phase, engineEase),
     }),
   }
 }
@@ -205,13 +309,19 @@ function trackOffer(preset: VtTrackPreset, cfg: VectorTypeConfig): MoveOffer {
     build: () => {
       const offer = vtTrackPresetOffer(preset, cfg)
       const duration = isNum(cfg?.motion?.duration) ? cfg.motion.duration : 4
+      // `preset.phase`/`preset.play` are the table's own DECLARATIVE fields
+      // (`trackPresets.ts` — unchanged by this task, out of its file list);
+      // translated here into the at/loop/bounce a real Move needs, the same
+      // `resolvePlacement` rule `defaultTiming` above applies to an engine
+      // preset: `loop = phase === 'loop' || play.mode === 'repeat'`, `bounce
+      // = play.mode === 'backAndForth'`.
+      const loop = preset.phase === 'loop' || preset.play.mode === 'repeat'
+      const bounce = preset.play.mode === 'backAndForth'
       return {
-        phase: preset.phase,
         kind: 'tracks',
         presetId: preset.id,
-        duration,
         ease: preset.ease,
-        play: preset.play,
+        ...placementFor(preset.phase, cfg, duration, loop, bounce),
         tracks: preset.build({ layers: offer.layers, duration }),
       }
     },
@@ -229,10 +339,11 @@ function trackGroupLabel(preset: VtTrackPreset): string {
 /**
  * Blink and Scatter as gallery tiles — spec §4 lists them first in the
  * Loop tab's "Play" group, alongside the kinetic engine's own oscillating
- * loop presets. `build()` returns only `{ phase: 'loop', kind }`: neither
- * is a stored move (see `derivedMoves` below), so there is no duration/
- * ease/play/tracks to seed — `VectorTypeSurface.vue`'s `onAddMove` reads
- * `move.kind` off the picked candidate and turns the marker on by writing
+ * loop presets. `build()` returns only `{ kind, at: 0, loop: true }`:
+ * neither is a stored move (see `derivedMoves` below), so there is no
+ * duration/ease/tracks worth seeding beyond a well-formed placement —
+ * `VectorTypeSurface.vue`'s `onAddMove` reads `move.kind` off the picked
+ * candidate and turns the marker on by writing
  * `cfg.motion.blink.amount`/`cfg.motion.scatter.spread` directly (spec §1:
  * "Adding the Blink move sets `blink.amount` to 0.3 … Same for Scatter with
  * `spread` 0.4"), rather than pushing anything into `clip.moves`.
@@ -241,14 +352,14 @@ function blinkOffer(): MoveOffer {
   return {
     id: 'blink', label: 'Blink', kind: 'blink', phase: 'loop',
     pitch: 'Letters or words drop out and come back in a seeded flicker.',
-    build: () => ({ phase: 'loop', kind: 'blink' }),
+    build: () => ({ kind: 'blink', at: 0, loop: true }),
   }
 }
 function scatterOffer(): MoveOffer {
   return {
     id: 'scatter', label: 'Scatter', kind: 'scatter', phase: 'loop',
     pitch: 'Every letter sits at its own random position on one variable axis.',
-    build: () => ({ phase: 'loop', kind: 'scatter' }),
+    build: () => ({ kind: 'scatter', at: 0, loop: true }),
   }
 }
 
@@ -297,7 +408,7 @@ export function vtMovesAdapter(
       // the tile, greyed — `availability` below is what greys it).
       for (const id of LETTERFORM_AXIS_IDS[phase] ?? []) {
         const preset = vtAxisPreset(phase, id)
-        if (preset) push('Letterform', axisOffer(preset, phase))
+        if (preset) push('Letterform', axisOffer(preset, phase, cfg))
       }
       for (const id of LETTERFORM_TRACK_IDS[phase] ?? []) {
         const preset = vtTrackPreset(id)
@@ -308,7 +419,7 @@ export function vtMovesAdapter(
       const letterformAxis = new Set(LETTERFORM_AXIS_IDS[phase] ?? [])
       for (const offer of vtAxisOffersFor(phase, axes, fontLabel)) {
         if (letterformAxis.has(offer.preset.id)) continue
-        push('Axis', axisOffer(offer.preset, phase))
+        push('Axis', axisOffer(offer.preset, phase, cfg))
       }
 
       // Every other track preset for this phase (Layer / Colour groups).
@@ -322,7 +433,7 @@ export function vtMovesAdapter(
       for (const id of presetIdsFor(phase, VT_PRESET_CAPABILITIES)) {
         const meta = KINETIC_PRESETS_BY_ID[id]
         const label = meta ? (KINETIC_GROUP_LABELS[meta.group as KineticGroup] ?? meta.group) : 'More'
-        push(label, engineOffer(id, phase))
+        push(label, engineOffer(id, phase, cfg))
       }
 
       // Blink and Scatter lead the Loop tab's "Play" group (spec §4).
@@ -369,7 +480,12 @@ export function vtMovesAdapter(
         return null
       }
       if (candidate.kind === 'preset') {
-        const axisPreset = vtAxisPreset(candidate.phase, candidate.presetId)
+        // Which table (`in`/`out`/`loop`) this candidate's preset id belongs
+        // to is no longer carried on the move itself (`Move` dropped
+        // `phase`) — resolved from the id, the same lookup `presetTransform`
+        // folds moves through.
+        const slot = vtPresetSlotOf(candidate.presetId)
+        const axisPreset = slot ? vtAxisPreset(slot, candidate.presetId) : null
         if (!axisPreset) return null // an engine preset is already capability-gated at gallery build time
         const offer = vtAxisAvailability(axisPreset, axes, fontLabel)
         return offer.available ? null : (offer.reason ?? 'Not available.')
@@ -395,15 +511,17 @@ export function vtMovesAdapter(
     // spec `2026-09-03-vector-type-motion-moves-design.md` §1: "Adding the
     // Blink move sets `blink.amount` to 0.3; removing it sets 0."
     //
-    // `duration`/`ease`/`play` on these markers are cosmetic defaults for the
-    // shared MoveCard's Length/Ease/Play rows — Blink and Scatter's own
-    // evaluators (`./blink.ts`, `./scatter.ts`) never read a Move's timing,
-    // only `cfg.motion.blink`/`.scatter` directly, so these three fields
-    // going stale or unedited changes nothing about how either effect plays.
-    // `duration` is picked to mean something anyway rather than being an
-    // arbitrary constant: Blink's `rate` (blinks/sec) becomes one blink's
-    // period; Scatter's `settle` (spec: "seconds from fully scattered to the
-    // base value") already IS a duration.
+    // `duration`/`ease`/`at`/`loop` on these markers are cosmetic defaults
+    // for the shared MoveCard's rows — Blink and Scatter's own evaluators
+    // (`./blink.ts`, `./scatter.ts`) never read a Move's timing, only
+    // `cfg.motion.blink`/`.scatter` directly, so these fields going stale or
+    // unedited changes nothing about how either effect plays. `duration` is
+    // picked to mean something anyway rather than being an arbitrary
+    // constant: Blink's `rate` (blinks/sec) becomes one blink's period;
+    // Scatter's `settle` (spec: "seconds from fully scattered to the base
+    // value") already IS a duration. `at: 0, loop: true` on both — they run
+    // continuously as full-clip loop bands, not a one-shot transition, which
+    // is what `at`/`loop` (not the retired `phase`/`play`) say now.
     derivedMoves(cfg: VectorTypeConfig): Move[] {
       const out: Move[] = []
       const blink = cfg?.motion?.blink
@@ -411,11 +529,11 @@ export function vtMovesAdapter(
         const rate = isNum(blink.rate) && blink.rate > 0 ? blink.rate : 6
         out.push({
           id: '__blink',
-          phase: 'loop',
           kind: 'blink',
+          at: 0,
           duration: Math.max(0.05, Math.min(60, 1 / rate)),
+          loop: true,
           ease: { kind: 'named', name: 'none' },
-          play: { mode: 'repeat', times: 1 },
         })
       }
       const scatter = cfg?.motion?.scatter
@@ -423,11 +541,11 @@ export function vtMovesAdapter(
         const settle = isNum(scatter.settle) && scatter.settle > 0 ? scatter.settle : 0.8
         out.push({
           id: '__scatter',
-          phase: 'loop',
           kind: 'scatter',
+          at: 0,
           duration: Math.max(0.05, Math.min(60, settle)),
+          loop: true,
           ease: { kind: 'named', name: 'none' },
-          play: { mode: 'once', times: 1 },
         })
       }
       return out

@@ -41,7 +41,7 @@ import {
   type VtMove,
   type VtStaggerOrder,
 } from '~/lib/vectortype/config'
-import type { MoveEase, MovePlay } from '~/lib/studio/moves/types'
+import type { MoveEase } from '~/lib/studio/moves/types'
 import { VT_CONTROLS, visibleVtControls } from '~/lib/vectortype/controls'
 import { DEFAULT_FILL } from '~/lib/spacetype/fillTile'
 import type { VtAxis } from '~/lib/vectortype/font'
@@ -73,33 +73,47 @@ const track = (over: Partial<VtMotionTrack> & { easing?: 'linear' | 'pingpong' |
   loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...over,
 })
 
-/** `easing`/`loops` → the owning move's `ease`/`play` — the exact mapping
- *  `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses for a legacy
- *  document, restated here as the corresponding test-side DSL. */
-function easeAndPlay(easing: 'linear' | 'pingpong' | 'easeinout', loops: number): { ease: MoveEase; play: MovePlay } {
-  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, play: { mode: 'backAndForth', times: loops } }
-  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, play: { mode: 'once', times: loops } }
-  return { ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: loops } }
+/** `easing` → the owning move's `ease`/`loop`/`bounce` — the exact mapping
+ *  `~/lib/studio/moves/merge`'s `legacyTrackEase`/`legacyTrackPlacement` use
+ *  for a legacy (flat-`tracks`-array) document, restated here as the
+ *  corresponding test-side DSL: `pingpong` -> an open-ended ping-pong cycle
+ *  (`loop: true, bounce: true`); anything else -> a ONE-SHOT transition
+ *  (`loop: false`) that reaches `to` and holds — which is what every
+ *  non-pingpong test in this file actually exercises (a track landing on its
+ *  end value by the clip's own end), not a repeating wave. `loops` (this
+ *  file never varies it past the default 1) is accepted but unused — the
+ *  at/loop model has no "N cycles across the clip" of its own; see
+ *  `legacyTrackPlacement`'s own doc for why that is an accepted, deliberate
+ *  loss for the >1 case, which this file's fixtures never exercise. */
+function easeAndLoop(easing: 'linear' | 'pingpong' | 'easeinout'): { ease: MoveEase; loop: boolean; bounce?: true } {
+  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, loop: true, bounce: true }
+  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, loop: false }
+  return { ease: { kind: 'named', name: 'none' }, loop: false }
 }
 
 let moveSeq = 0
-/** One `kind: 'tracks'` move per track — a track's cycle length is always
- *  the CLIP's duration (`applyMoveTracks` never reads a `'tracks'` move's own
- *  `duration`), so that field is a placeholder here. */
-function trackMoves(tracks: ReturnType<typeof track>[]): VtMove[] {
+/** One `kind: 'tracks'` move per track. `clip` (default 4, matching every
+ *  clip in this file except the one that overrides it) is used for the
+ *  move's own `duration` — under the at/loop model a `'tracks'` move's own
+ *  `duration` IS the window/cycle length `~/lib/studio/moves/tracks.ts`
+ *  reads (`__duration`), so a caller whose config's `motion.duration` is not
+ *  4 MUST pass its real clip length here, or the window ends (or the cycle
+ *  wraps) at the wrong instant. */
+function trackMoves(tracks: ReturnType<typeof track>[], clip = 4): VtMove[] {
   return tracks.map((t) => {
     moveSeq += 1
-    const { ease, play } = easeAndPlay(t.easing, t.loops)
+    const { ease, loop, bounce } = easeAndLoop(t.easing)
     const { path, from, to, hold, cycleOffset, delay } = t
     const extra = t as Record<string, unknown>
     return {
       id: `move-legacy-${moveSeq}`,
-      phase: 'loop',
       kind: 'tracks',
       presetId: 'custom',
-      duration: 4,
+      at: 0,
+      duration: clip,
+      loop,
+      ...(bounce ? { bounce: true } : {}),
       ease,
-      play,
       tracks: [{
         path, from, to, hold, cycleOffset, delay,
         ...(typeof extra.fromColor === 'string' ? { fromColor: extra.fromColor } : {}),
@@ -351,7 +365,7 @@ describe('applyMotion', () => {
 
   describe('a config straight out of storage, never normalised', () => {
     it('animates from a raw blob with no axes record and no stagger block', () => {
-      const raw = storageBlobMoves(trackMoves([track()]), { duration: 2 })
+      const raw = storageBlobMoves(trackMoves([track()], 2), { duration: 2 })
       expect(raw.axes).toBeUndefined()
       const out = applyMotion(raw, 1)
       expect(out.axes.wght).toBeCloseTo(500, 6)

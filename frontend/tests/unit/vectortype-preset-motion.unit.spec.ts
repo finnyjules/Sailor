@@ -77,6 +77,21 @@ function cfg(patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig {
 
 const ease = (name: MoveEaseName): MoveEase => ({ kind: 'named', name })
 
+/**
+ * `phase` -> `at`/`loop`, the at-model placement `~/lib/studio/moves/merge`'s
+ * `resolvePlacement` gives an old-shape slot: `in` -> `at: 0`; `loop` -> `at:
+ * 0` (no test in this file combines a `loop` move with a live `in` where a
+ * nonzero `longestIn` would change the outcome, so the simpler `0` is exact
+ * here, not an approximation); `out` -> `at: clip - duration` (this file's
+ * one `out` case shares its clip's default `duration: 4` — see `preset()`
+ * below — so this is exact for it too, not a coincidence).
+ */
+function phasePlacement(phase: 'in' | 'out' | 'loop', duration: number, clip = 4): { at: number; loop: boolean } {
+  if (phase === 'in') return { at: 0, loop: false }
+  if (phase === 'loop') return { at: 0, loop: true }
+  return { at: Math.max(0, clip - duration), loop: false }
+}
+
 let moveSeq = 0
 /** One `preset`-kind move. `ease: 'none'` throughout, so progress is LINEAR
  *  and every expected number below is exact arithmetic rather than a curve
@@ -87,22 +102,32 @@ function presetMove(
   over: Partial<VtMove> = {},
 ): VtMove {
   moveSeq += 1
+  const duration = spec.duration ?? 1
   return {
     id: `move-${moveSeq}`,
-    phase,
     kind: 'preset',
     presetId: spec.presetId,
-    duration: spec.duration ?? 1,
+    duration,
+    ...phasePlacement(phase, duration),
     ease: ease('none'),
-    play: phase === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
     ...(spec.params ? { params: spec.params } : {}),
     ...over,
   }
 }
 
 /** One `tracks`-kind move wrapping a single track — the Custom-move shape a
- *  hand-authored track now takes. `ease: 'none'`/`play: once` reproduce the
- *  old default (linear, single pass) unless overridden. */
+ *  hand-authored track now takes. `ease: 'none'`/one-shot-or-loop-per-`phase`
+ *  reproduce the old default (linear, single pass or open cycle) unless
+ *  overridden. `duration: 4` matches every config in this file's own clip
+ *  length: under the at/loop model a `'tracks'` move's own `duration` IS the
+ *  cycle length `~/lib/studio/moves/tracks.ts`'s `trackRawProgress` wraps
+ *  against (`__duration`, tagged straight off the owning move) — unlike the
+ *  OLD engine, which silently ran every loop track's cycle over the CLIP's
+ *  duration regardless of what a track's own (then-vestigial) `duration`
+ *  said. A mismatched value here does not throw; it just wraps at the wrong
+ *  rate, which is exactly the bug two of this suite's own assertions caught
+ *  (an animated `size`/`axes.wght` sampled mid-clip, where a from≠to track
+ *  actually exposes the rate). */
 function trackMove(
   phase: 'in' | 'out' | 'loop',
   path: string,
@@ -114,12 +139,11 @@ function trackMove(
   moveSeq += 1
   return {
     id: `move-${moveSeq}`,
-    phase,
     kind: 'tracks',
     presetId: 'custom',
-    duration: 1,
+    duration: 4,
+    ...phasePlacement(phase, 4),
     ease: ease('none'),
-    play: { mode: 'once', times: 1 },
     tracks: [{ path, from, to, hold: 0, cycleOffset: 0, delay: 0, ...over }],
     ...moveOver,
   }
@@ -153,7 +177,7 @@ describe('mergeConfig — moves', () => {
       motion: { moves: [presetMove('in', { presetId: 'slide-up', duration: 1.25, params: { overshoot: 2 } }, { ease: ease('slowDown') })] },
     }).motion
     expect(m.moves).toHaveLength(1)
-    expect(m.moves[0]).toMatchObject({ phase: 'in', kind: 'preset', presetId: 'slide-up', duration: 1.25, params: { overshoot: 2 } })
+    expect(m.moves[0]).toMatchObject({ at: 0, loop: false, kind: 'preset', presetId: 'slide-up', duration: 1.25, params: { overshoot: 2 } })
     expect(m.moves[0]!.ease).toEqual(ease('slowDown'))
   })
 
@@ -205,7 +229,7 @@ describe('mergeConfig — moves', () => {
     // source, and with it absent every glyph reads the same instant.
     const raw = {
       text: WORD, size: 100,
-      motion: { duration: 4, moves: [{ id: 'm', phase: 'in', kind: 'preset', presetId: 'slide-up', duration: 1, ease: ease('none'), play: { mode: 'once', times: 1 }, stagger: 0.25 }] },
+      motion: { duration: 4, moves: [{ id: 'm', at: 0, kind: 'preset', presetId: 'slide-up', duration: 1, loop: false, ease: ease('none'), stagger: 0.25 }] },
     } as any
     const a = presetTransform(raw, 0.5, 0, 6)
     const b = presetTransform(raw, 0.5, 5, 6)
@@ -520,7 +544,7 @@ describe('a config straight out of storage', () => {
     // source read parsed JSON. Same choke-point rule as ./motion.ts.
     const raw = {
       text: WORD, size: 200,
-      motion: { duration: 4, moves: [{ id: 'm', phase: 'in', kind: 'preset', presetId: 'slide-up', duration: 1, ease: ease('none'), play: { mode: 'once', times: 1 } }] },
+      motion: { duration: 4, moves: [{ id: 'm', at: 0, kind: 'preset', presetId: 'slide-up', duration: 1, loop: false, ease: ease('none') }] },
     } as any
     expect(vtHasPreset(raw)).toBe(true)
     expect(vtIsAnimated(raw)).toBe(true)
@@ -532,7 +556,7 @@ describe('a config straight out of storage', () => {
       text: WORD, size: 'big',
       motion: {
         duration: 'soon', fps: null, stagger: { delay: NaN },
-        moves: [{ id: 'm', phase: 'in', kind: 'preset', presetId: 'slide-up', duration: NaN, ease: ease('none'), play: { mode: 'once', times: 1 } }],
+        moves: [{ id: 'm', at: 0, kind: 'preset', presetId: 'slide-up', duration: NaN, ease: ease('none') }],
       },
     } as any
     const m = vtGlyphMotion(raw, 0.5, 0, WORD.length)
@@ -768,5 +792,118 @@ describe('migration parity — an OLD-shape document keeps its native ease', () 
     const stepLater = presetTransform(cfg, 0.15 * D, 0, WORD.length)
     expect(step.dx).toBeCloseTo(stepLater.dx, 10)
     expect(step.dy).toBeCloseTo(stepLater.dy, 10)
+  })
+})
+
+// ── THE AT-MODEL PARITY GATE ────────────────────────────────────────────────
+
+/**
+ * `mergeConfig`'s `hasNewShape` branch (`config.ts`'s `mergeMotion`) speaks
+ * TWO per-move shapes inside the same `motion.moves` array: the CURRENT
+ * `at`/`loop`/`bounce` one, and a 2026-09-03 document's `phase`/`play` one
+ * (`~/lib/studio/moves/merge`'s `mergeMove`/`resolvePlacement` converts the
+ * latter to the former, move by move). This block proves the conversion is
+ * exact, not merely plausible: build the SAME three presets (an in, an out,
+ * a loop) once in each shape, merge both, and check that `vtGlyphMotion`
+ * produces IDENTICAL numbers at several times across the clip — including a
+ * moment when the loop has started (after the entrance) and one when the
+ * out is compressed against it. `ease: 'none'` throughout keeps every
+ * expected number exact arithmetic.
+ */
+describe('at-model parity — a 2026-09-03 (phase/play) document merges to the same motion as the at-model document it converts to', () => {
+  const D_IN = 1
+  const D_OUT = 1
+  const D_LOOP = 2
+  const CLIP = 4
+
+  /** The 2026-09-03 shape: one populated `moves` array, each entry keyed by
+   *  `phase`/`play` — the shape `resolvePlacement` reads when a raw move has
+   *  no `at`. */
+  const oldShape: VectorTypeConfig = cfg({
+    size: 100,
+    motion: {
+      ...DEFAULT_CONFIG.motion,
+      duration: CLIP,
+      moves: [
+        { id: 'm-in', phase: 'in', kind: 'preset', presetId: 'fade-in', duration: D_IN, ease: ease('none'), play: { mode: 'once', times: 1 } },
+        { id: 'm-out', phase: 'out', kind: 'preset', presetId: 'fade-out', duration: D_OUT, ease: ease('none'), play: { mode: 'once', times: 1 } },
+        { id: 'm-loop', phase: 'loop', kind: 'preset', presetId: 'wave', duration: D_LOOP, ease: ease('none'), play: { mode: 'repeat', times: 1 } },
+      ],
+    } as unknown as VectorTypeConfig['motion'],
+  })
+
+  // The at-model document `resolvePlacement` is supposed to produce from the
+  // one above: `in` -> `at: 0`; `loop` -> `at: longestIn` (the in's own
+  // duration, 1); `out` -> `at: max(longestIn, clip - duration)` = `max(1, 3)`
+  // = 3, with `duration` compressed to `clip - at` = 1 (unchanged here, since
+  // 3 + 1 already lands exactly on the clip).
+  const atModel: VectorTypeConfig = cfg({
+    size: 100,
+    motion: {
+      ...DEFAULT_CONFIG.motion,
+      duration: CLIP,
+      moves: [
+        { id: 'm-in', kind: 'preset', presetId: 'fade-in', at: 0, duration: D_IN, loop: false, ease: ease('none') },
+        { id: 'm-out', kind: 'preset', presetId: 'fade-out', at: 3, duration: 1, loop: false, ease: ease('none') },
+        { id: 'm-loop', kind: 'preset', presetId: 'wave', at: D_IN, duration: D_LOOP, loop: true, ease: ease('none') },
+      ],
+    } as unknown as VectorTypeConfig['motion'],
+  })
+
+  it('converts the phase/play document to exactly the at-model document', () => {
+    expect(oldShape.motion.moves).toEqual(atModel.motion.moves)
+  })
+
+  it.each([
+    // in live (fade-in, [0,1]); loop and out not yet live.
+    0.5,
+    // in over; loop live ([1,4]); out not yet live ([3,4]).
+    2,
+    // in over; loop AND out both live — the compressed-out-against-the-loop case.
+    3.5,
+  ])('vtGlyphMotion agrees at t=%s', (t) => {
+    const a = vtGlyphMotion(oldShape, t, 0, WORD.length)
+    const b = vtGlyphMotion(atModel, t, 0, WORD.length)
+    expect(a.dx).toBeCloseTo(b.dx, 6)
+    expect(a.dy).toBeCloseTo(b.dy, 6)
+    expect(a.scale).toBeCloseTo(b.scale, 6)
+    expect(a.rotate).toBeCloseTo(b.rotate, 6)
+    expect(a.opacity).toBeCloseTo(b.opacity, 6)
+  })
+
+  /**
+   * TWO transition moves at DIFFERENT `at`, both live at once — the at-model
+   * scenario `movePhase`'s old `longestIn`-threaded signature could not even
+   * express (every move shared one clip-wide window offset before Task 1).
+   * `slide-up` (window `[0,2]`) contributes `dy`; `slide-left` (window
+   * `[1,3]`) contributes `dx`. At `t=1.5` both are live: `dx`/`dy` each pass
+   * through from the one move that supplies them (the composition rule's
+   * ADD, made visible whenever only one side is non-zero), and opacity
+   * MULTIPLIES the two independent fades — the same rule TRAP 3 pins for two
+   * moves sharing one `at`, now proven for two that do not.
+   */
+  it('stacked at-moves — two transitions at different `at` compose at a time when both are live', () => {
+    const c = cfg({
+      size: 100,
+      motion: {
+        ...DEFAULT_CONFIG.motion,
+        duration: CLIP,
+        moves: [
+          { id: 'm-a', kind: 'preset', presetId: 'slide-up', at: 0, duration: 2, loop: false, ease: ease('none') },
+          { id: 'm-b', kind: 'preset', presetId: 'slide-left', at: 1, duration: 2, loop: false, ease: ease('none') },
+        ],
+      } as unknown as VectorTypeConfig['motion'],
+    })
+    const m = presetTransform(c, 1.5, 0, WORD.length)
+    // slide-up at local progress (1.5-0)/2 = 0.75: dy = (1-0.75)×0.5 = 0.125 em, opacity 0.75.
+    // slide-left at local progress (1.5-1)/2 = 0.25: dx = (1-0.25)×0.5 = 0.375 em, opacity 0.25.
+    expect(m.dy).toBeCloseTo(0.125 * 100, 6)
+    expect(m.dx).toBeCloseTo(0.375 * 100, 6)
+    expect(m.opacity).toBeCloseTo(0.75 * 0.25, 6)
+
+    // Neither move alone reaches this opacity — proof the two are actually
+    // composing (multiplying), not one silently overwriting the other.
+    const aAlone = presetTransform(cfg({ size: 100, motion: { ...DEFAULT_CONFIG.motion, duration: CLIP, moves: [{ id: 'm-a', kind: 'preset', presetId: 'slide-up', at: 0, duration: 2, loop: false, ease: ease('none') }] } as unknown as VectorTypeConfig['motion'] }), 1.5, 0, WORD.length)
+    expect(m.opacity).not.toBeCloseTo(aAlone.opacity, 5)
   })
 })

@@ -21,15 +21,17 @@ describe('vt motion migration', () => {
     }
     const cfg = mergeConfig(old)
     expect(cfg.motion.moves).toHaveLength(3)
-    const inMove = cfg.motion.moves.find((m: Move) => m.phase === 'in')!
-    expect(inMove.presetId).toBe('fade-in')
-    expect(inMove.play.mode).toBe('once')
-    const outMove = cfg.motion.moves.find((m: Move) => m.phase === 'out')!
-    expect(outMove.presetId).toBe('fade-out')
-    expect(outMove.play.mode).toBe('once')
-    const loopMove = cfg.motion.moves.find((m: Move) => m.phase === 'loop')!
-    expect(loopMove.presetId).toBe('wave')
-    expect(loopMove.play.mode).toBe('repeat')
+    // `Move` dropped `phase`/`play` — a migrated slot is identified by its
+    // own `presetId` now, and its old `play.mode` shows up as `loop`/`bounce`
+    // (`~/lib/studio/moves/merge`'s `resolvePlacement`: `in`/`out` are
+    // one-shot transitions, `loop` is `loop: true`).
+    const inMove = cfg.motion.moves.find((m: Move) => m.presetId === 'fade-in')!
+    expect(inMove.at).toBe(0)
+    expect(inMove.loop).toBe(false)
+    const outMove = cfg.motion.moves.find((m: Move) => m.presetId === 'fade-out')!
+    expect(outMove.loop).toBe(false)
+    const loopMove = cfg.motion.moves.find((m: Move) => m.presetId === 'wave')!
+    expect(loopMove.loop).toBe(true)
   })
 
   it('a pingpong legacy track becomes a custom back-and-forth move', () => {
@@ -46,7 +48,13 @@ describe('vt motion migration', () => {
     const m = mergeConfig(old).motion.moves[0]!
     expect(m.kind).toBe('tracks')
     expect(m.presetId).toBe('custom')
-    expect(m.play).toEqual({ mode: 'backAndForth', times: 2 })
+    // `pingpong` -> an open-ended ping-pong cycle (`~/lib/studio/moves/merge`'s
+    // `legacyTrackPlacement`: `loop: true, bounce: true` — the retired `play:
+    // { mode: 'backAndForth' }` this replaces; the old `loops` COUNT has no
+    // home in the at/loop model, an accepted, documented loss for a
+    // continuous cycle — see that function's own doc).
+    expect(m.loop).toBe(true)
+    expect(m.bounce).toBe(true)
     expect(m.ease).toEqual({ kind: 'named', name: 'none' })
   })
 
@@ -74,7 +82,8 @@ describe('vt motion migration', () => {
     const m = mergeConfig(old).motion.moves[0]!
     expect(m.kind).toBe('tracks')
     expect(m.presetId).toBe('custom')
-    expect(m.play).toEqual({ mode: 'backAndForth', times: 2 })
+    expect(m.loop).toBe(true)
+    expect(m.bounce).toBe(true)
     expect(m.tracks[0]!.from).toBe(0.88)
     expect(m.tracks[0]!.to).toBe(1.15)
   })
@@ -100,12 +109,20 @@ describe('vt motion migration', () => {
   })
 
   it('a non-pingpong legacy track with loops > 1 WRAPS across the clip, matching the old evaluator, instead of ramping once and freezing', () => {
-    // The OLD evaluator ran a `loops`-cycle sawtooth across the clip whenever
-    // `loops > 1` (clamping only at `loops <= 1`). `legacyTrackEasePlay` used
-    // to map every `linear`/`easeinout` track to `play: { mode: 'once' }`
-    // regardless of `loops`, and `mode: 'once'` CLAMPS — so a saved `loops: 3`
-    // track reached full value at local progress `1/3` and held there for the
-    // rest of the clip. This is the exact failing doc from the review.
+    // The OLD (pre-moves) evaluator ran a `loops`-cycle sawtooth across the
+    // clip whenever `loops > 1` (clamping only at `loops <= 1`) — a bug this
+    // test used to pin against a `mode: 'once'` clamp that reached full value
+    // at local progress `1/3` and froze there.
+    //
+    // Under the at/loop model, `loop: true` (this file's own `loop = times >
+    // 1` rule, `~/lib/studio/moves/merge`'s `legacyTrackPlacement`) IS the
+    // wrap, restoring the "does not freeze" half of that fix — but the exact
+    // `loops` COUNT has no home in `at`/`loop`/`bounce` (there is no "N cycles
+    // across the clip" knob any more): `convertLegacyTracks` gives the
+    // converted move's `duration` the CLIP's own length regardless of
+    // `loops`, so a saved `loops: 3` track now wraps ONCE per clip, not
+    // three times. An accepted, documented loss (`legacyTrackPlacement`'s own
+    // doc), not a bug this test should still assert against.
     const old = cloneConfig(DEFAULT_CONFIG) as any
     old.motion = {
       duration: 4,
@@ -118,25 +135,32 @@ describe('vt motion migration', () => {
     }
     const cfg = mergeConfig(old)
     const move = cfg.motion.moves[0]!
-    // Wraps, not clamps: `repeat` is what makes `trackRawProgress` do
+    // Wraps, not clamps: `loop: true` is what makes `trackRawProgress` do
     // `phase % 1` (./tracks.ts) instead of `clamp(phase, 0, 1)`.
-    expect(move.play).toEqual({ mode: 'repeat', times: 3 })
+    expect(move.loop).toBe(true)
+    expect(move.duration).toBe(4)
 
-    // OLD value at t=2 of a 4s clip, loops=3: from + (to-from) * ((2/4*3) % 1)
-    // = 100 + 800 * 0.5 = 500. The buggy `mode: 'once'` clamp instead gives
-    // from + (to-from) * clamp(1.5, 0, 1) = 900.
+    // ONE cycle over the 4s clip (not three): at t=2 — the midpoint of both
+    // the clip and the move's own 4s cycle — from + (to-from) * 0.5 = 500,
+    // the same number the old 3-cycle-per-clip evaluator happened to land on
+    // at this exact sample (t=2 is also the midpoint of the 2nd of 3
+    // 4/3s-long cycles: (2/4×3) mod 1 = 0.5), so this assertion is unchanged
+    // even though the underlying cycle rate is not. The buggy `mode: 'once'`
+    // clamp this test was written against instead gave
+    // `clamp(1.5, 0, 1)` = 900.
     const atTwo = applyMotion(cfg, 2)
     expect((atTwo as any).size).toBeCloseTo(500, 6)
     expect((atTwo as any).size).not.toBeCloseTo(900, 6)
 
-    // Just past one full cycle (4/3 s) it is back near `from` — proof this is
-    // a repeating wrap, not a single ramp that happens to pass through 500.
-    // Offset slightly off the exact wrap seam (4/3) to avoid asserting on a
-    // floating-point boundary; a bounds check (not toBeCloseTo) keeps this
-    // robust to exactly where the offset lands within the new cycle.
-    const atOneCycle = applyMotion(cfg, 4 / 3 + 0.05)
+    // At the clip's own end (t=4, one full cycle of this move's own 4s
+    // period) it is back at `from` — proof this is a repeating wrap, not a
+    // clamp that would instead hold at `to` (900) past its pass. `toBeCloseTo`
+    // rather than a bounds check: the wrap seam is exact sawtooth arithmetic
+    // (`((gt-at)/dur) mod 1` — `~/lib/studio/moves/phase.ts`), not a
+    // floating-point edge to hedge against.
+    const atOneCycle = applyMotion(cfg, 4)
     const size = (atOneCycle as any).size as number
-    expect(size).toBeGreaterThan(100 - 1)
-    expect(size).toBeLessThan(300)
+    expect(size).toBeCloseTo(100, 6)
+    expect(size).not.toBeCloseTo(900, 6)
   })
 })

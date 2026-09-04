@@ -37,6 +37,7 @@ import {
 import {
   VT_TYPING_STAGGER,
   vtGlyphMotion,
+  vtPresetSlotOf,
   vtStaggerBumpFor,
   vtStaggerStarvedMoves,
 } from '~/lib/vectortype/presetMotion'
@@ -158,7 +159,10 @@ describe('vtStaggerStarvedMoves — the safety net for the paths that skip the b
   it('names the move whose preset cannot express itself at the stored delay', () => {
     const imported = cfgWithInPreset('typewriter', 1, { delay: 0, order: 'forward', seed: 0 })
     const starved = vtStaggerStarvedMoves(imported)
-    expect(starved.map(m => m.phase)).toEqual(['in'])
+    // `Move` dropped `phase` — which table (`in`/`out`/`loop`) a preset move
+    // belongs to is resolved from its id now (`vtPresetSlotOf`), the same way
+    // `presetTransform` resolves it.
+    expect(starved.map(m => vtPresetSlotOf(m.presetId))).toEqual(['in'])
     expect(starved.map(m => m.presetId)).toEqual(['typewriter'])
   })
 

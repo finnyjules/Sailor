@@ -67,7 +67,7 @@ import {
   type VtMotionTrack,
   type VtMove,
 } from '~/lib/vectortype/config'
-import type { MoveEase, MovePlay } from '~/lib/studio/moves/types'
+import type { MoveEase } from '~/lib/studio/moves/types'
 import { vectorTypeSVG } from '~/lib/vectortype/canvas'
 import { animatableTargets, applyMotion, glyphTransform } from '~/lib/vectortype/motion'
 import {
@@ -118,12 +118,16 @@ const track = (o: Partial<VtMotionTrack> & { path: string; from: number; to: num
 const builtTrack = (o: Partial<VtMotionTrack> & { path: string; from: number; to: number }): VtMotionTrack =>
   ({ hold: 0, cycleOffset: 0, delay: 0, ...o })
 
-/** `easing`/`loops` → the owning move's `ease`/`play`, the same mapping
- *  `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses. */
-function easeAndPlay(easing: 'linear' | 'pingpong' | 'easeinout', loops: number): { ease: MoveEase; play: MovePlay } {
-  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, play: { mode: 'backAndForth', times: loops } }
-  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, play: { mode: 'once', times: loops } }
-  return { ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: loops } }
+/** `easing` → the owning move's `ease`/`loop`/`bounce`, the same mapping
+ *  `~/lib/studio/moves/merge`'s `legacyTrackEase`/`legacyTrackPlacement` use
+ *  (see the identical helper in `vectortype-motion.unit.spec.ts` for the
+ *  full reasoning): `pingpong` -> an open-ended cycle; anything else -> a
+ *  one-shot transition. `loops` is accepted but unused (this file's own
+ *  call site never varies it). */
+function easeAndLoop(easing: 'linear' | 'pingpong' | 'easeinout'): { ease: MoveEase; loop: boolean; bounce?: true } {
+  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, loop: true, bounce: true }
+  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, loop: false }
+  return { ease: { kind: 'named', name: 'none' }, loop: false }
 }
 
 let trackMoveSeq = 0
@@ -131,16 +135,17 @@ let trackMoveSeq = 0
 function trackMoves(specs: ReturnType<typeof track>[]): VtMove[] {
   return specs.map((t) => {
     trackMoveSeq += 1
-    const { ease, play } = easeAndPlay(t.easing, t.loops)
+    const { ease, loop, bounce } = easeAndLoop(t.easing)
     const { path, from, to, hold, cycleOffset, delay } = t
     return {
       id: `move-t${trackMoveSeq}`,
-      phase: 'loop',
       kind: 'tracks',
       presetId: 'custom',
+      at: 0,
       duration: 4,
+      loop,
+      ...(bounce ? { bounce: true } : {}),
       ease,
-      play,
       tracks: [{ path, from, to, hold, cycleOffset, delay }],
     } as VtMove
   })
@@ -350,11 +355,17 @@ describe('misregistration as opposed extrude plates', () => {
       builtTrack({ path: 'appearance.Lc.distance', from: 0, to: 14 }),
       builtTrack({ path: 'appearance.Lm.distance', from: 0, to: 14 }),
     ])
-    // Ping-pong: `ease: none`, `play: backAndForth` — the preset's own fixed
-    // timing (`trackPresets.ts`'s `misregistration` entry).
+    // Ping-pong: `ease: none`, an open-ended `loop: true, bounce: true` cycle
+    // — the preset's own fixed timing (`trackPresets.ts`'s `misregistration`
+    // entry: `phase: 'loop'`, `play: backAndForth(1)`), converted through
+    // `mergeConfig`'s old-shape branch the same way any 2026-09-03 document's
+    // `phase`/`play` move is (`~/lib/studio/moves/merge`'s
+    // `resolvePlacement`: `loop = phase === 'loop' || …`, `bounce = play.mode
+    // === 'backAndForth'`).
     const mv = c.motion.moves.find(m => m.kind === 'tracks')!
     expect(mv.ease).toEqual({ kind: 'named', name: 'none' })
-    expect(mv.play.mode).toBe('backAndForth')
+    expect(mv.loop).toBe(true)
+    expect(mv.bounce).toBe(true)
   })
 
   it('separates the plates by exactly twice the distance, measured alone', () => {

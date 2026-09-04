@@ -90,16 +90,17 @@ import { getByPath, setByPath } from '~/lib/studio/path'
 import { parseIdPath, resolveIdPath, setByIdPath } from '~/lib/studio/idPath'
 import { makeListRemap } from '~/lib/studio/listRemap'
 // The shared moves core. `moveTracks` flattens every `'tracks'`-kind move's
-// tracks into one list, each TAGGED with its OWNING MOVE's `ease`/`play`
-// (`__ease`/`__play`) — a track no longer carries its own `easing`/`loops`,
-// the move replaces them. `trackProgressAt`/`trackValueAt` read a tagged
+// tracks into one list, each TAGGED with its OWNING MOVE's timing
+// (`__ease`/`__at`/`__duration`/`__loop`/`__bounce`) — a track no longer
+// carries its own `easing`/`loops`, the move replaces them. `trackProgressAt`/
+// `trackValueAt` read a tagged
 // track through that tagging; `applyMoveTracks` is THE COMPOSITION for every
 // NUMERIC (non-colour) track, reused here rather than restated — see
 // `applyMotion` below for where Vector Type's own colour-track write picks
 // up where it leaves off, and `VtTaggedMotionTrack` for why the cast at
 // `usableTracks` is safe.
 import { applyMoveTracks, moveTracks, trackProgressAt, trackValueAt, type MoveTrackIO } from '~/lib/studio/moves/tracks'
-import type { MotionClip, MoveEase, MovePlay } from '~/lib/studio/moves/types'
+import type { MotionClip, MoveEase } from '~/lib/studio/moves/types'
 // Perceptual colour interpolation. Pure arithmetic over two strings — see
 // `lib/color/mix.ts` for the measured reason the default is not an RGB lerp.
 import { DEFAULT_COLOR_MIX_SPACE, mixHex } from '~/lib/color/mix'
@@ -429,12 +430,14 @@ export function isColorTrack(track: VtMotionTrack | null | undefined): boolean {
  * A `VtMotionTrack` exactly as `moveTracks` flattens it: still carrying
  * Vector Type's own `space` field (not the shared `MoveTrack.mix` — see
  * `usableTracks`'s own note on why that is the right field to keep reading),
- * plus the OWNING MOVE's `ease`/`play` riding along as `__ease`/`__play`. A
- * track no longer carries its own `easing`/`loops`; every timing read in this
- * file now goes through this tag, via `trackProgressAt`/`trackValueAt`
- * (`~/lib/studio/moves/tracks`).
+ * plus the OWNING MOVE's timing riding along as `__ease`/`__at`/`__duration`/
+ * `__loop`/`__bounce` (`~/lib/studio/moves/tracks`'s `TaggedMoveTrack`,
+ * replacing the retired `__play` tag now that a move's timing is at/loop/
+ * bounce rather than ease+play). A track no longer carries its own
+ * `easing`/`loops`; every timing read in this file now goes through this
+ * tag, via `trackProgressAt`/`trackValueAt` (`~/lib/studio/moves/tracks`).
  */
-export type VtTaggedMotionTrack = VtMotionTrack & { __ease: MoveEase; __play: MovePlay }
+export type VtTaggedMotionTrack = VtMotionTrack & { __ease: MoveEase; __at: number; __duration: number; __loop: boolean; __bounce?: boolean }
 
 /**
  * The colour a colour track holds at time `t` — its own two endpoints mixed at
@@ -474,8 +477,9 @@ function resolveDuration(cfg: VectorTypeConfig): number {
  * swatches and no numbers at all, and `trackProgressAt` reads neither.
  *
  * THE CAST, and why it is safe: `moveTracks` (the shared core) types a
- * flattened track as `TaggedMoveTrack = MoveTrack & {__ease,__play}`, where
- * `MoveTrack` carries a generic `mix?: string` for a colour's mix space. But
+ * flattened track as `TaggedMoveTrack = MoveTrack & {__ease,__at,__duration,
+ * __loop,__bounce}`, where `MoveTrack` carries a generic `mix?: string` for
+ * a colour's mix space. But
  * every track actually stored in THIS studio's moves was built by ITS OWN
  * `mergeTrack` (config.ts) — the `mergeTrackFn` `mergeMotion` always hands
  * `mergeMove`/`mergeClip` — which writes `.space`, never `.mix`. So the

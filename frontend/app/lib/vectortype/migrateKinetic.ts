@@ -418,12 +418,18 @@ export function kineticParamsToVectorType(rawParams: unknown): KineticMigration 
     if (tracks.length) {
       config.motion.moves.push({
         id: 'move-color-cycle',
-        phase: 'loop',
         kind: 'tracks',
         presetId: 'colour-cycle',
+        // `at: 0, loop: true` — the at/loop model's open-ended cycle, the
+        // same motion `phase: 'loop'` used to mean before Move dropped it.
+        at: 0,
         duration,
+        loop: true,
+        // `bounce: true` — the ping-pong the retired `play: { mode:
+        // 'backAndForth' }` named; frame 0 is still the colour the node was
+        // saved with (the module doc's own "PING-PONG" note).
+        bounce: true,
         ease: { kind: 'named', name: 'none' },
-        play: { mode: 'backAndForth', times: 1 },
         tracks,
       })
     }

@@ -55,7 +55,7 @@ import { hexToOklch, oklchToHex, parseHexA } from '~/lib/color/convert'
 import { COLOR_MIX_SPACES, DEFAULT_COLOR_MIX_SPACE, isColorMixSpace, mixHex } from '~/lib/color/mix'
 import { trackProgress, trackValue } from '~/lib/studio/track'
 import { trackValueAt } from '~/lib/studio/moves/tracks'
-import type { MoveEase, MovePlay } from '~/lib/studio/moves/types'
+import type { MoveEase } from '~/lib/studio/moves/types'
 import { normaliseAxes, type VtFont } from '~/lib/vectortype/font'
 import {
   DEFAULT_CONFIG,
@@ -144,33 +144,40 @@ function ctrack(path: string, fromColor: string, toColor: string, over: Partial<
   }
 }
 
-/** `easing`/`loops` → the owning move's `ease`/`play` — the exact mapping
- *  `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses for a legacy
- *  document, restated as this file's test-side DSL (see
- *  `vectortype-motion.unit.spec.ts`'s identical helper). */
-function easeAndPlay(easing: 'linear' | 'pingpong' | 'easeinout', loops: number): { ease: MoveEase; play: MovePlay } {
-  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, play: { mode: 'backAndForth', times: loops } }
-  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, play: { mode: 'once', times: loops } }
-  return { ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: loops } }
+/** `easing` → the owning move's `ease`/`loop`/`bounce` — the exact mapping
+ *  `~/lib/studio/moves/merge`'s `legacyTrackEase`/`legacyTrackPlacement` use
+ *  for a legacy (flat-`tracks`-array) document, restated as this file's
+ *  test-side DSL (see `vectortype-motion.unit.spec.ts`'s identical helper):
+ *  `pingpong` -> an open-ended ping-pong cycle (`loop: true, bounce: true`);
+ *  anything else -> a ONE-SHOT transition (`loop: false`) that reaches `to`
+ *  and holds — what every non-pingpong colour track in this file actually
+ *  tests (arrives at its end colour by the clip's own end). `loops` is
+ *  accepted but unused, same as the sibling helper's own note. */
+function easeAndLoop(easing: 'linear' | 'pingpong' | 'easeinout'): { ease: MoveEase; loop: boolean; bounce?: true } {
+  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, loop: true, bounce: true }
+  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, loop: false }
+  return { ease: { kind: 'named', name: 'none' }, loop: false }
 }
 
 let trackMoveSeq = 0
-/** One `kind: 'tracks'` move per track spec — a track's cycle length is
- *  always the CLIP's duration (`applyMoveTracks` never reads a `'tracks'`
- *  move's own `duration`), so that field is a placeholder here. */
+/** One `kind: 'tracks'` move per track spec. `duration: DURATION` matches
+ *  every clip in this file — under the at/loop model a `'tracks'` move's own
+ *  `duration` IS the window/cycle length `~/lib/studio/moves/tracks.ts`
+ *  reads (`__duration`), so this is the real length, not a placeholder. */
 function trackMoves(specs: TrackSpec[]): VtMove[] {
   return specs.map((t) => {
     trackMoveSeq += 1
-    const { ease, play } = easeAndPlay(t.easing, t.loops)
+    const { ease, loop, bounce } = easeAndLoop(t.easing)
     const { path, from, to, hold, cycleOffset, delay, fromColor, toColor, space } = t
     return {
       id: `move-t${trackMoveSeq}`,
-      phase: 'loop',
       kind: 'tracks',
       presetId: 'custom',
+      at: 0,
       duration: DURATION,
+      loop,
+      ...(bounce ? { bounce: true } : {}),
       ease,
-      play,
       tracks: [{
         path, from, to, hold, cycleOffset, delay,
         ...(fromColor ? { fromColor } : {}),
@@ -516,21 +523,23 @@ describe('the shared timing engine — extracted, not changed', () => {
   })
 
   it('a COLOUR track honours every timing knob identically to a numeric one', () => {
-    // A track's timing is now the OWNING MOVE's `ease`/`play` (Task 5), so
-    // "one engine, not two" is now proved by driving BOTH a numeric and a
-    // colour track through the SAME real production functions —
-    // `trackValueAt`/`trackColor` (`~/lib/studio/moves/tracks`,
-    // `~/lib/vectortype/motion`) — tagged with the SAME `__ease`/`__play`,
-    // rather than comparing against the old, now-parallel `trackValue`
-    // engine (which no longer shares a timing vocabulary with a stored
-    // track: `easing: 'easeinout'` mapped to a literal quadratic curve there,
-    // and now maps to the ten-name `'natural'`/sine.inOut — a deliberate,
-    // different curve in the same family, not a preserved one).
+    // A track's timing is now the OWNING MOVE's `ease`/`at`/`duration`/
+    // `loop`/`bounce`, so "one engine, not two" is now proved by driving
+    // BOTH a numeric and a colour track through the SAME real production
+    // functions — `trackValueAt`/`trackColor` (`~/lib/studio/moves/tracks`,
+    // `~/lib/vectortype/motion`) — tagged with the SAME `__ease`/`__at`/
+    // `__duration`/`__loop`/`__bounce`, rather than comparing against the
+    // old, now-parallel `trackValue` engine (which no longer shares a timing
+    // vocabulary with a stored track: `easing: 'easeinout'` mapped to a
+    // literal quadratic curve there, and now maps to the ten-name
+    // `'natural'`/sine.inOut — a deliberate, different curve in the same
+    // family, not a preserved one).
     for (const shape of SHAPES) {
-      const { ease, play } = easeAndPlay(shape.easing, shape.loops ?? 1)
+      const { ease, loop, bounce } = easeAndLoop(shape.easing)
       const timing = { hold: shape.hold ?? 0, cycleOffset: shape.cycleOffset ?? 0, delay: shape.delay ?? 0 }
-      const numeric = { path: 'size', from: 0, to: 1, ...timing, __ease: ease, __play: play }
-      const colour = { path: 'appearance.Lfill.paint.a', from: 0, to: 1, fromColor: RED, toColor: BLUE, ...timing, __ease: ease, __play: play }
+      const tag = { __ease: ease, __at: 0, __duration: DURATION, __loop: loop, ...(bounce ? { __bounce: true } : {}) }
+      const numeric = { path: 'size', from: 0, to: 1, ...timing, ...tag }
+      const colour = { path: 'appearance.Lfill.paint.a', from: 0, to: 1, fromColor: RED, toColor: BLUE, ...timing, ...tag }
       for (const t of TIMES) {
         // The colour a track shows at `t` is exactly the mix at the numeric
         // track's own value at `t` — one engine, proved by equality.
@@ -548,11 +557,36 @@ describe('the shared timing engine — extracted, not changed', () => {
   })
 
   it('a DELAYED colour track holds its start colour, then moves', () => {
-    const k = fillCfg([ctrack('appearance.Lfill.paint.a', RED, BLUE, { delay: 2 })])
+    // A 2s delay eats into the window a one-shot transition (`loop: false`)
+    // has to complete in — `~/lib/studio/moves/tracks.ts`'s `trackRawProgress`
+    // measures the pass from `__at + delay` to `__at + delay + __duration`,
+    // clamped at the CLIP's own end (`tt`). `fillCfg`'s fixed 4s clip has no
+    // room left for a full pass after a 2s delay, so this test builds its own
+    // 6s clip with a 4s move `duration` — exactly enough room for the delay
+    // plus the pass to land on `to` by the clip's end, which is the point
+    // being tested ("holds, THEN MOVES [to completion]").
+    const CLIP = 6
+    const k = mergeConfig({
+      ...stack({ id: 'Lfill', kind: 'fill', paint: { ...DEFAULT_FILL, a: RED } }),
+      motion: {
+        ...DEFAULT_CONFIG.motion,
+        duration: CLIP,
+        moves: [{
+          id: 'move-delay',
+          kind: 'tracks',
+          presetId: 'custom',
+          at: 0,
+          duration: CLIP - 2,
+          loop: false,
+          ease: { kind: 'named', name: 'none' },
+          tracks: [{ path: 'appearance.Lfill.paint.a', from: 0, to: 1, fromColor: RED, toColor: BLUE, hold: 0, cycleOffset: 0, delay: 2 }],
+        }],
+      },
+    })
     expect(colorAt(k, 0)).toBe(RED)
     expect(colorAt(k, 1.9)).toBe(RED)
     expect(colorAt(k, 3)).not.toBe(RED)
-    expect(colorAt(k, 6)).toBe(BLUE)
+    expect(colorAt(k, CLIP)).toBe(BLUE)
   })
 })
 
@@ -1031,9 +1065,19 @@ describe('the Colour Cycle track preset', () => {
   })
 
   it('really animates — the preset’s own tracks, through the real evaluator', () => {
-    const c = stack({ id: 'Lfill', kind: 'fill', paint: { ...DEFAULT_FILL, a: RED } })
-    c.motion.duration = DURATION
-    c.motion.moves = vtApplyTrackPreset(c, 'colour-cycle')
+    // `vtApplyTrackPreset` still hands back a move in the 2026-09-03
+    // `phase`/`play` shape (`trackPresets.ts` — unchanged by this task, out
+    // of its file list; its own callers all re-merge before reading the
+    // result — see `vectortype-track-presets.unit.spec.ts`'s `swept()`/
+    // `applied()`), so a real `at`/`loop`/`bounce` move needs the same
+    // round-trip through `mergeConfig` here before `applyMotion` (which
+    // reads `at`/`loop` directly, with no conversion of its own) can play it.
+    const base = stack({ id: 'Lfill', kind: 'fill', paint: { ...DEFAULT_FILL, a: RED } })
+    base.motion.duration = DURATION
+    const c = mergeConfig({
+      ...base,
+      motion: { ...base.motion, duration: DURATION, moves: vtApplyTrackPreset(base, 'colour-cycle') },
+    })
     const mid = colorAt(c, DURATION / 2)
     expect(colorAt(c, 0)).toBe(RED)
     expect(mid).not.toBe(RED)
@@ -1090,7 +1134,11 @@ describe('KineticType `color-cycle` crosses the migration for the first time', (
     expect(colourMove?.tracks).toHaveLength(1)
     const t = colourMove!.tracks![0]!
     expect(t.fromColor).toBe('#ff2200')
-    expect(colourMove!.play.mode).toBe('backAndForth')
+    // PING-PONG — `at: 0, loop: true, bounce: true`, the at-model's open-ended
+    // cycle (`migrateKinetic.ts`'s own doc: the retired `play: { mode:
+    // 'backAndForth' }` this replaces).
+    expect(colourMove!.loop).toBe(true)
+    expect(colourMove!.bounce).toBe(true)
     expect(t.path).toBe(`appearance.${m.config.appearance[0]!.id}.paint.a`)
     // The real evaluator, on the real config: frame 0 is the saved colour (a
     // migrated project must open looking like itself) and the middle is not.
