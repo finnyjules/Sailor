@@ -169,7 +169,13 @@ const { saving: autoSaving, saved: autoSaved } = useStudioAutosave(
 const font = shallowRef<VtFont | null>(null)
 const fontError = ref('')
 const fontLoading = ref(false)
-const fontAxes = computed<VtAxis[]>(() => font.value?.axes ?? [])
+/** True while the canvas is drawing the DEFAULT font because the user's pick
+ *  would not load. `font.value` is Inter then, and Inter's axes are Inter's —
+ *  publishing them as the picked font's would put wght/opsz sliders under a
+ *  Google static cut and offer them to the agent, which is simply a lie about
+ *  what is on screen. */
+const fallbackActive = ref(false)
+const fontAxes = computed<VtAxis[]>(() => (fallbackActive.value ? [] : font.value?.axes ?? []))
 
 /**
  * The token as a parsed ref, with the default standing in for anything
@@ -183,6 +189,7 @@ const fontRef = computed<VtFontRef>(() => parseVtFontToken(config.value.fontId) 
 async function loadFont(token: string) {
   fontLoading.value = true
   fontError.value = ''
+  fallbackActive.value = false
   try {
     const f = await loadVectorFont(token)
     // A slow load for a family the user has since switched away from must not
@@ -204,7 +211,7 @@ async function loadFont(token: string) {
     fontError.value = `Couldn't load ${parsed ? vtFontRefLabel(parsed) : token} — showing ${vtFontRefLabel({ kind: 'catalog', id: DEFAULT_FONT_ID })}.`
     try {
       const fallback = await loadVectorFont(DEFAULT_FONT_ID)
-      if (config.value.fontId === token) font.value = markRaw(fallback)
+      if (config.value.fontId === token) { font.value = markRaw(fallback); fallbackActive.value = true }
     } catch {
       if (config.value.fontId === token) font.value = null
     }
@@ -255,11 +262,24 @@ function onFontSelect(payload:
   | { kind: 'library'; family: string; foundry: string }) {
   if (payload.kind === 'pinned') { setControl('fontId', payload.value); return }
   if (payload.kind === 'google') {
+    // The ten pinned families are REAL Google families, so each of them also
+    // appears in the catalog rows below — two rows, one font. The curated id is
+    // the better of the two by a mile: it loads the VARIABLE file, with live
+    // axes. Picking "Inter" from the catalog must land on the same font as
+    // picking it from the pinned list, not on a static 400 cut that quietly
+    // drops every axis the user came for.
+    const curated = VARIABLE_FONTS.find(f => f.label === payload.family)
+    if (curated) { setControl('fontId', curated.id); return }
     const entry = googleEntry(payload.family)
     setControl('fontId', formatVtFontToken({ kind: 'google', family: payload.family, weight: entry ? nearestWeight(entry, 400) : 400 }))
     return
   }
-  setControl('fontId', libraryToken(payload.family, resolveLibraryFace(payload.family, 400)?.weight))
+  // `italic: false` so a family that ships both slants opens UPRIGHT: nearest-
+  // by-weight alone can hand back the italic when it happens to sit closer to
+  // 400, and nobody picks a family expecting to land in its italic. A family
+  // with no uprights at all still resolves — `resolveLibraryFace` falls back to
+  // the other slant rather than returning null.
+  setControl('fontId', libraryToken(payload.family, resolveLibraryFace(payload.family, 400, false)?.weight))
 }
 
 /**
@@ -1722,6 +1742,10 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
                   :bindable="false"
                   @update:model-value="(v: string | number | boolean) => setFontWeight(String(v))"
                 />
+                <!-- This row exists ONLY for a static cut (it is hidden for a curated
+                     family, whose weight is a live axis instead), so the Axes group
+                     below is empty and there is nothing on screen saying why. -->
+                <p class="mt-1 text-[10px] leading-snug text-white/30">Static cut — no live axes. The pinned families have them.</p>
               </div>
               <!-- The fallback, said out loud. The canvas is drawing Inter and the row
                    still shows the font the user picked — without this line those two
