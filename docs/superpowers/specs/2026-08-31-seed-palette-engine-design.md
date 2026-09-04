@@ -50,6 +50,29 @@ No new dependencies: the recipes are ~150 lines on top of the existing OKLCH uti
 - **Shelf assembly:** ~12 candidates, the two sources woven alternately; reroll advances a page counter that pages the corpus ranking deeper and re-rolls the composed variants.
 - **Output contract unchanged:** results are `string[]` hexes flowing into the existing `toStops` / `toDuotone`. No consumer changes.
 
+## Gradient vs palette — one family, three projections
+
+The engine produces a **family**: an ordered set of related hexes plus the seed anchor(s) and facets. "Gradient" and "palette" are not different outputs — they are projections of the same family, and the only transform between them is ordering plus interpolation. There are three:
+
+- **`gradientize(family)`** → smooth `{pos, color}` stops for a ramp consumer. Orders for smoothness; **preserves the family's authored lightness** (this is the corrected `toStops` — see the toStops tax). Feeds Tier A.
+- **`paletteize(family)`** → the discrete swatches as-is, for the shelf preview and for any legibility-ordered discrete view.
+- **`distribute(family, target)`** → lands the N discrete colors as N separate fills in a studio whose color model is a list of distinct fills (not a ramp). This is the discrete-palette output.
+
+**Intent is a view toggle on the seed shelf**, not a per-studio setting: the shelf flips between "as gradient" and "as swatches," and Apply emits the matching projection. One seed exploration serves both; the user never re-picks a seed to change output shape. The prototype tile's swatch-row-plus-gradient-strip is the seed of this toggle.
+
+### The distribution policy (`distribute`)
+
+N palette colors onto a studio's M fill slots:
+
+- N = M → 1:1 in order.
+- N < M → cycle (wrap) or ramp (interpolate to fill). **Reuse GeoShape's existing `fillCycle: 'cycle' | 'ramp'` vocabulary** rather than inventing one.
+- N > M → resample down, evenly spaced.
+- Role-keyed studios (Texture) → map by the role list's order; each role gets `{type:'solid', color}`.
+
+**First discrete home: GeoShape.** It already has a variable `fills: Paint[]` with add/remove and the cycle/ramp semantic, so `distribute` reuses a native concept instead of imposing a new one — the lowest-risk place to prove the policy. Work required: wrap hex → `Paint`, and flip `fillStrategy` off `'single'` (its default) to `'perClone'`/`'pieces'`, or the write is invisible — the discrete analogue of Scene3D's `paletteMode = 'manual'` flip. **Second: Compositor per-layer fills** (one hex per selected layer). Texture / Space Type / Vector Type stay deferred until the policy is proven on these two.
+
+The **brand kit** (`shared/brand/`) is the natural persistent container for a discrete palette — already a named, ordered, stable-id color object. Out of scope here (one-shot `distribute` only), but it is where saved/reusable palettes would live if that need arises.
+
 ## Where it lives
 
 ```
@@ -96,12 +119,17 @@ Studios do **not** consume palettes uniformly. Scope this build to Tier A, with 
 - **Scene3D** carries both models on one object: authored `gradientStops`, and a `paletteMode: 'manual' | 'harmony'` that regenerates 5 stops from `paletteHue/Sat/Light/Harmony` at render time (`config.ts:652`). Writing a seed palette into `gradientStops` while `paletteMode === 'harmony'` renders **nothing** — the authored stops are silently shadowed. Any apply path must set `paletteMode = 'manual'`. Clamp to the 2..8 parser bounds. If applying to the opalescent ramp instead, re-append the first color: `opalStopsOf` expects a cyclic list whose first and last match, or it seams.
 - **Shape studio (`lib/shapefx/`)** stores *no hexes at all* — only `baseHue`/`saturation`/`lightness`/`harmony`, with every color manufactured at draw time. An arbitrary palette is not representable, and there is no inverse (three arbitrary hues do not solve back to one base hue plus a harmony type). It would need a discriminated `{mode:'derived'} | {mode:'explicit', colors}` field. **Out of scope:** the engine is declared retired in favor of Scene3D (`lib/scene3d/gem.ts:5`) and is only reachable from two `pages/dev/` harnesses.
 
-**Tier C — cardinality or keying is fixed by the render. Deferred; needs a mapping policy we have not designed.**
+**Tier C — discrete-fill studios, reached via `distribute` (see the distribution policy above).**
 
-- **Texture / Pattern**: colors are keyed by *role name* (`FillsByRole`), and the role set changes with family — `checker` has 2, `weave` has 3, `chips` has 3. Each value is a `Fill` union, not a hex, and its stops use a third key naming (`{c, p}`). Mapping N palette colors onto a varying named role set is an undesigned policy question.
-- **Space Type / Vector Type**: each fill-list entry is a *three-color* object (`a`, `b`, `textColor`), list length is a per-effect constant (6 for `ball`, 2 for `cascade`, 1 for ten effects), and the whole list round-trips through a serialized JSON string param. Vector Type additionally keeps `strokeColor` deliberately outside `Paint` — writing a color onto the `Paint` survives in memory and is dropped on next load.
-- **GeoShape**: three parallel `Paint[]` per mark plus a stack-level list. The cardinality is free-form, but the *routing* is the problem — applying to `fills` is invisible while `fillStrategy === 'single'`, which is the default.
-- **Compositor per-layer fills**: one `Paint` per layer, stops keyed `offset` not `pos`. "Distribute N colors across M layers" is a new concept; today's only bulk op picks one fill from a fixed brand table.
+*In scope, in order:*
+
+- **GeoShape** (first discrete home): three parallel `Paint[]` per mark plus a stack-level list; `fills` is the target. Cardinality is free-form and it already has the `fillCycle: 'cycle' | 'ramp'` semantic `distribute` reuses. The one hazard is routing: applying to `fills` is invisible while `fillStrategy === 'single'` (the default), so `distribute` must flip the strategy — the discrete analogue of the Scene3D `paletteMode` flip.
+- **Compositor per-layer fills** (second): one `Paint` per layer, one hex each, across the selected layers. Note stops there are keyed `offset` not `pos` — a converter is needed if a distributed color is itself a gradient (it is not, for `distribute`).
+
+*Deferred — need a per-effect mapping policy we have not designed:*
+
+- **Texture / Pattern**: colors keyed by *role name* (`FillsByRole`), role set varies with family (`checker` 2, `weave` 3, `chips` 3); each value is a `Fill` union, not a hex, and stops use a third key naming (`{c, p}`). `distribute`'s role-order mapping is the intended approach but is unproven; wait until GeoShape validates it.
+- **Space Type / Vector Type**: each fill-list entry is a *three-color* object (`a`, `b`, `textColor`), list length is a per-effect constant, and the list round-trips through a serialized JSON string param. Vector Type keeps `strokeColor` deliberately outside `Paint` — writing a color onto the `Paint` survives in memory and is dropped on next load.
 
 ### 3. Agent recipes (Gradient compose-and-pick)
 
