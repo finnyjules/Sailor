@@ -18,6 +18,8 @@ import {
   depthMessageFor, depthStatusFor, onDepthChange, requestDepth, type DepthRef,
 } from '~/lib/compositor/depthRegistry'
 import StudioGradientRamp from '~/components/vue-canvas/studio/StudioGradientRamp.vue'
+import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
+import type { GradientStop } from '~/lib/color/harmony'
 
 const props = defineProps<{
   effects: PostEffect[]
@@ -152,6 +154,14 @@ function fmt(v: unknown, step: number): string {
           v-if="s.ramp"
           :model-value="(fx(s.type)!.stops as GradientMapStop[])"
           @update:model-value="(v: GradientMapStop[]) => patch(s.type, 'stops', v)"
+        />
+        <PalettePicker
+          v-if="s.ramp"
+          mode="stops"
+          :stop-count="(fx(s.type)!.stops as GradientMapStop[]).length"
+          :seed="(fx(s.type)!.stops as GradientMapStop[])[0]?.color ?? '#4f8ad9'"
+          @apply-stops="(v: GradientStop[]) => patch(s.type, 'stops', v)"
+          @apply-literal-stops="(v: GradientStop[]) => patch(s.type, 'stops', v)"
         />
         <div v-for="p in s.params" :key="p.key" class="flex items-center gap-2">
           <div class="panel-sublabel w-16 shrink-0">{{ p.label }}</div>

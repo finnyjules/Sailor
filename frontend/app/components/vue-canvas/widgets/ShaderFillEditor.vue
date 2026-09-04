@@ -201,6 +201,9 @@ function rampCss(stops: GradientStop[]): string {
   if (!s.length) return 'transparent'
   return `linear-gradient(to right, ${s.map(x => `${x.color} ${Math.round(x.pos * 100)}%`).join(', ')})`
 }
+function applyRowStops(row: ParamRow, v: GradientStop[]) {
+  setParam(row.key, v.slice(0, row.maxStops ?? 8).map(s => ({ pos: s.pos, color: s.color })))
+}
 function setParam(key: string, v: ParamValue) {
   patch({ params: { ...props.modelValue.params, [key]: v } })
 }
@@ -295,7 +298,8 @@ function onInputChange(p: Paint) {
           mode="stops"
           :stop-count="stopsValue(row).length || 3"
           :seed="stopsValue(row)[0]?.color ?? '#4f8ad9'"
-          @apply-stops="(v: GradientStop[]) => setParam(row.key, v.slice(0, row.maxStops ?? 8).map(s => ({ pos: s.pos, color: s.color })))"
+          @apply-stops="(v: GradientStop[]) => applyRowStops(row, v)"
+          @apply-literal-stops="(v: GradientStop[]) => applyRowStops(row, v)"
         />
       </template>
       <StudioSlider
