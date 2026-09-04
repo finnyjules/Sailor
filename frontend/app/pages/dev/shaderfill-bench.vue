@@ -296,7 +296,7 @@ function paramOverridesForIndex(i: number, count: number): Record<string, number
  *  states which regime it wants rather than this function guessing from UI state. */
 function specForField(i: number, useDistinct: boolean): ShaderSpec {
   const params = useDistinct ? paramOverridesForIndex(i, MAX_FIELDS) : {}
-  return { effectId: effectDef!.id, params, anchor: 'object', speed: 1, input: baseFillSpec }
+  return { effectId: effectDef!.id, params, anchor: 'object', speed: 1, seed: 42, input: baseFillSpec }
 }
 
 function loop(now: number): void {
@@ -658,7 +658,7 @@ function runBatch(): unknown {
   const n = MAX_FIELDS
   const t = 0.5
   const mk = (params: Record<string, number>, speed = 1, tOverride = t): FieldRequest => ({
-    spec: { effectId: effectDef!.id, params, anchor: 'object', speed, input: baseFillSpec },
+    spec: { effectId: effectDef!.id, params, anchor: 'object', speed, seed: 42, input: baseFillSpec },
     w: FIELD_SIZE, h: FIELD_SIZE, t: tOverride, fps: BENCH_FPS,
   })
 

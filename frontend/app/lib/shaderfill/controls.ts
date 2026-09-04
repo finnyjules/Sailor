@@ -21,12 +21,13 @@ import { unprefixedKey } from './descriptor'
  * a live `EffectDef` rather than declaring them) — is to split the vocabulary into
  * two tiers:
  *
- *   fill.shader.effectId        <- DECLARED here, frozen forever (SHADER_FILL_CONTROLS)
- *   fill.shader.anchor          <- DECLARED here, frozen forever (SHADER_FILL_CONTROLS)
- *   fill.shader.speed           <- DECLARED here, frozen forever (SHADER_FILL_CONTROLS)
+ *   fill.shader.effectId        <- DECLARED here, frozen forever (getShaderFillControls)
+ *   fill.shader.anchor          <- DECLARED here, frozen forever (getShaderFillControls)
+ *   fill.shader.speed           <- DECLARED here, frozen forever (getShaderFillControls)
+ *   fill.shader.seed            <- DECLARED here, frozen forever (getShaderFillControls)
  *   fill.shader.params.<paramId> <- DERIVED per effect (derivedShaderFillControls)
  *
- * The three declared keys never change shape, so Collection bindings against them
+ * The four declared keys never change shape, so Collection bindings against them
  * are as safe as any hand-authored control. The derived `params.<paramId>` keys are
  * stable only PER EFFECT — switching `effectId` changes which `params.*` keys exist
  * and what they mean. That instability is inherent to what they represent (there is
@@ -55,13 +56,13 @@ import { unprefixedKey } from './descriptor'
 const GROUP = 'Shader'
 
 /**
- * The three declared keys, addressed under `prefix`.
+ * The four declared keys, addressed under `prefix`.
  *
  * A FACTORY rather than a bare constant because the host studio decides where a
  * `ShaderSpec` lives: Space Type, Shape Studio and the Compositor store it at
  * `fill.shader`, while Vector Type's appearance stack stores one PER LAYER and
  * addresses it relatively, at `layer.paint.shader`. `derivedShaderFillControls`
- * below already took a `prefix` for exactly this reason; the declared three had
+ * below already took a `prefix` for exactly this reason; the declared four had
  * hard-coded theirs, which meant a host with a different storage path could only
  * offer the derived half of the vocabulary.
  *
@@ -124,14 +125,14 @@ export function shaderFillControls(prefix = 'fill.shader'): ControlSpec[] {
   ]
 }
 
-/** The declared three at the default `fill.shader` prefix — the three studios
+/** The declared four at the default `fill.shader` prefix — the three studios
  *  that store a `ShaderSpec` there import this and are untouched by the factory
  *  above.
  *
  *  LAZY, not `= shaderFillControls()`. Evaluating it at module-init read
  *  `DEFAULT_SHADER_SPEC` while `~/lib/spacetype/fillTile` could still be
  *  mid-initialization — it sits in a documented cycle with
- *  `~/lib/compositor/paint` — so the three defaults came back `undefined` and
+ *  `~/lib/compositor/paint` — so the defaults came back `undefined` and
  *  this module threw on import. It only ever surfaced when some unrelated import
  *  reordered the traversal (adding one to this file did exactly that, and the
  *  resulting failure was intermittent across vitest workers, which is what a
