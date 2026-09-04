@@ -71,23 +71,57 @@ OKLCH per corpus color is computed lazily at runtime and memoized — the full 1
 - Seed swatch (StudioColor) plus an optional second seed.
 - Shelf of ~12 tiles with the existing apply-preview behavior (`preview()` shows the result of `toDuotone`/`toStops`, not the raw palette).
 - Character chips and a reroll button. No engine toggle in the app — the woven shelf **is** the product; the toggle was a prototype-comparison tool.
-- Emits the same `apply-duotone` / `apply-stops` events, so all four consumers (Gradient studio, Shader studio, and both node widgets) inherit the new mode with zero changes.
 - The curated-gallery pane (19 hand-tuned palettes) stays as-is.
 
-### 2. Agent recipes (Gradient compose-and-pick)
+**The `toStops` tax — the one thing that must change in the picker.** `PalettePicker.apply()` currently launders *every* palette through `toStops`/`toDuotone` before emitting. `toStops` overwrites every input lightness with `lerp(0.22, 0.92, t)` and damps chroma at the extremes; `toDuotone` reads only the first two hexes and re-lights both to fixed lightness values. That is correct for the existing flow — a `harmonize()` palette has no tonal structure of its own, so the ramp supplies one — but it would destroy exactly what the seed engine produces. A curated Sanzo Wada palette handed to today's picker comes back as a generic dark→light ramp wearing that palette's hues, and it would *look plausible*, which is how this kind of failure escapes review.
+
+So the picker gains a third emit path: seed-engine results are emitted **literally** (hexes in their own order and lightness, evenly spaced `pos`), never through `toStops`. The gallery and harmony panes keep the existing cooked path unchanged.
+
+### 2. Per-studio integration — three tiers
+
+Studios do **not** consume palettes uniformly. Scope this build to Tier A, with Scene3D (Tier B) as a stretch.
+
+**Tier A — stores literal hex lists of variable length. Drop-in.**
+
+| Surface | Where | Note |
+|---|---|---|
+| Gradient studio | `applyPaletteStops`, `GradientStudioSurface.vue:569` | Also recolor `layer.mesh.points` — the mesh layout renders from points, not stops (the "Molten Rust came out blue" bug). `materializeRecipe`'s redistribute-onto-existing-count logic is the pattern to reuse. |
+| Shader studio | 3 picker mounts: duotone `:1074`, gradient map `:1083`, per-effect gradient params `:975` | Apply must flip the feature on, as the existing handlers already do (`duotone.enabled`, `gradientMap.enabled`). Gradient map caps at 8 stops. |
+| `WidgetGradientEditor.vue` | `:110` | Serializes to a JSON string widget value. |
+| `ShaderFillEditor.vue` | `:286` | Handler is an inline arrow; give it a named function while we're here. |
+| Compositor post-FX gradient map | `PostEffectsControls.vue:151` | `{pos, color}` variable list — same shape, no picker mounted today. Cheap to add. |
+
+**Tier B — palette is DERIVED from sliders. Needs a state-model change.**
+
+- **Scene3D** carries both models on one object: authored `gradientStops`, and a `paletteMode: 'manual' | 'harmony'` that regenerates 5 stops from `paletteHue/Sat/Light/Harmony` at render time (`config.ts:652`). Writing a seed palette into `gradientStops` while `paletteMode === 'harmony'` renders **nothing** — the authored stops are silently shadowed. Any apply path must set `paletteMode = 'manual'`. Clamp to the 2..8 parser bounds. If applying to the opalescent ramp instead, re-append the first color: `opalStopsOf` expects a cyclic list whose first and last match, or it seams.
+- **Shape studio (`lib/shapefx/`)** stores *no hexes at all* — only `baseHue`/`saturation`/`lightness`/`harmony`, with every color manufactured at draw time. An arbitrary palette is not representable, and there is no inverse (three arbitrary hues do not solve back to one base hue plus a harmony type). It would need a discriminated `{mode:'derived'} | {mode:'explicit', colors}` field. **Out of scope:** the engine is declared retired in favor of Scene3D (`lib/scene3d/gem.ts:5`) and is only reachable from two `pages/dev/` harnesses.
+
+**Tier C — cardinality or keying is fixed by the render. Deferred; needs a mapping policy we have not designed.**
+
+- **Texture / Pattern**: colors are keyed by *role name* (`FillsByRole`), and the role set changes with family — `checker` has 2, `weave` has 3, `chips` has 3. Each value is a `Fill` union, not a hex, and its stops use a third key naming (`{c, p}`). Mapping N palette colors onto a varying named role set is an undesigned policy question.
+- **Space Type / Vector Type**: each fill-list entry is a *three-color* object (`a`, `b`, `textColor`), list length is a per-effect constant (6 for `ball`, 2 for `cascade`, 1 for ten effects), and the whole list round-trips through a serialized JSON string param. Vector Type additionally keeps `strokeColor` deliberately outside `Paint` — writing a color onto the `Paint` survives in memory and is dropped on next load.
+- **GeoShape**: three parallel `Paint[]` per mark plus a stack-level list. The cardinality is free-form, but the *routing* is the problem — applying to `fills` is invisible while `fillStrategy === 'single'`, which is the default.
+- **Compositor per-layer fills**: one `Paint` per layer, stops keyed `offset` not `pos`. "Distribute N colors across M layers" is a new concept; today's only bulk op picks one fill from a fixed brand table.
+
+### 3. Agent recipes (Gradient compose-and-pick)
 
 `buildRecipesPrompt` currently offers the model a static palette menu. Instead:
 
 - Derive seed(s): the active brand kit / taste profile's key colors when present. Otherwise the recipes schema gains one menu field — the model picks a seed from a fixed menu of ~24 named hexes (a hue wheel at two lightness levels), the same picks-from-menus contract as everything else in recipes.
 - Run the engine, put ~12–20 candidates in the menu (hexes plus short character labels), and the model picks **by index** — same philosophy as eye-pick: the model never invents hexes.
-- `salvageRecipes` / `materializeRecipe` unchanged, including the mesh-points recoloring path.
+- `salvageRecipes` / `materializeRecipe` unchanged, including the mesh-points recoloring path. Keep `RECIPES_SCHEMA` free of `minItems`/`maxItems` (the API rejects length keywords, and only on a live call) — counts stay enforced in `salvageRecipes`.
+
+**Respect the existing refusals.** Two surfaces deliberately forbid agent color writes: Shader's gradient-map ramp ("ramp colours picker-only; only mix is tunable") and Scene3D's entire gradient-material palette block (`agent: false`). The engine does not route around these. Where a studio refuses, the adapter returns a **reason string** rather than silently offering a key that `validatePatch` would drop — the pattern `MovesAdapter.availability()` already uses.
+
+**Structural note for later, not this build.** The recipe pipeline (`RECIPES_SCHEMA`, `buildRecipesPrompt`, `salvageRecipes`, `materializeRecipe`, `eyePick`) currently lives *inside* `lib/gradientfx/` and is imported by two server routes. Extending compose-and-pick to a second studio means lifting it to a studio-neutral `lib/studio/palette/` with per-studio adapters, following `lib/studio/moves/` — generic over the studio's config type, a header-stated ban on importing any studio, no Vue at module scope, and availability-as-reason-string. The existing `compose: { summarize, materialize }` seam in `useStudioAgent.ts:126` is already the right shape; only the `GradientRecipe` type and the two route imports are studio-bound. **This build keeps recipes where they are** and does the lift when a second studio actually needs it.
 
 ## Testing
 
 - **Unit** (`frontend/tests/unit/seed-palette.unit.spec.ts`): anchor exactness (every result contains the seed hex(es) verbatim — including with variation applied), gamut safety (every output parses as valid 6-digit hex), determinism (same inputs → identical shelf), two-seed fitting, neutral-seed handling, character-facet classification on known palettes, dedupe thresholds (a shelf never contains two near-identical palettes), corpus loader (shape + count).
 - **Component:** the rebuilt From-color pane renders a shelf, emits the same events with engine output, reroll changes the shelf deterministically.
 - **Agent path:** prompt-builder test that the palette menu comes from the engine and stays within the token budget; salvage still accepts model output.
-- **Live browser verification** (house rule): apply a seeded palette in Gradient and Shader studios and in a node widget; confirm the seed color is visibly present in the applied result.
+- **The literal-emit assertion.** A test that would fail if the seed-engine path were wired through `toStops`: apply a palette with a deliberately non-monotonic lightness order and assert the applied stops keep those exact hexes in that exact order. Without this, the `toStops` tax reappears as a silent regression that still looks fine on screen.
+- **Live browser verification** (house rule): apply a seeded palette in Gradient and Shader studios and in a node widget; confirm the seed color is visibly present in the applied result, and that the applied colors match the shelf tile pixel-for-pixel rather than merely sharing its hues.
 
 ## Not in scope
 
