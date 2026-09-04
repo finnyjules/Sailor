@@ -766,6 +766,9 @@ export interface AnalysisGrid {
   size: number
   cw: number
   ch: number
+  /** Interior distance-to-boundary field in FONT UNITS (chamfer transform;
+   *  boundary cells are 0). The medial-axis skeleton spike reads its ridge. */
+  dist: Float64Array
   ink: Uint8Array
   ax: Float64Array
   ay: Float64Array
@@ -831,6 +834,7 @@ export function analyzeGrid(commands: readonly PathCommand[], bbox: VtBBox, opts
   const h = bbox.maxY - bbox.minY
   const empty = (): AnalysisGrid => ({
     size: GRID, cw: w > 0 ? w / GRID : 1, ch: h > 0 ? h / GRID : 1,
+    dist: new Float64Array(N),
     ink: new Uint8Array(N), ax: new Float64Array(N).fill(1), ay: new Float64Array(N).fill(1),
     straight: new Uint8Array(N), terminal: new Uint8Array(N), small: new Uint8Array(N),
   })
@@ -844,7 +848,7 @@ export function analyzeGrid(commands: readonly PathCommand[], bbox: VtBBox, opts
   const g = buildGrid(segs, bbox, w, h, smallFeature, shapeRules)
   const straight = new Uint8Array(N)
   for (let j = 0; j < N; j++) if (g.kind[j] === KIND_STRAIGHT) straight[j] = 1
-  return { size: GRID, cw: g.cw, ch: g.ch, ink: g.ink, ax: g.ax, ay: g.ay, straight, terminal: g.termRigid, small: g.small }
+  return { size: GRID, cw: g.cw, ch: g.ch, dist: g.dist, ink: g.ink, ax: g.ax, ay: g.ay, straight, terminal: g.termRigid, small: g.small }
 }
 
 export function analyzeFlex(
