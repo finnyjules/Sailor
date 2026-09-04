@@ -496,8 +496,27 @@ describe('the axis clock is the ENGINE\'s clock', () => {
   it('LOOP phase matches — including the in→loop handoff', () => {
     const inSpec = { presetId: 'fade-in', duration: 1, stagger: 0 }
     const loop = { presetId: 'spin-loop', duration: 1.5, stagger: 0 }
-    const withIn = preset('in', { presetId: 'fade-in', duration: 1 })
-    const c = preset('loop', { presetId: 'spin-loop', duration: 1.5 }, {}, withIn.motion)
+    // Built directly in the final `at`/`loop` shape, matching how a FRESH
+    // gallery add places a Loop after an In in the real app
+    // (`~/lib/vectortype/movesAdapter.ts`'s `longestEntranceEnd`/
+    // `placementFor`: a Loop's `at` is the end of the latest zero-anchored
+    // one-shot move) — NOT the `preset()` helper's `phase`/`play` route: that
+    // one goes through `mergeConfig`'s MIGRATION path (`~/lib/studio/moves/
+    // merge`'s `resolvePlacement`), which computes `longestIn` only from raw
+    // `phase: 'in'` entries in the SAME merge call, and cannot see it across
+    // two separate `preset()` calls (the first already returns an in move
+    // merged onto `at`/`loop`, with no `phase` left for the second call's
+    // `longestIn` scan to find).
+    const c = cfg({
+      motion: {
+        ...DEFAULT_CONFIG.motion,
+        duration: 4,
+        moves: [
+          { id: 'move-in', kind: 'preset', presetId: 'fade-in', at: 0, duration: 1, loop: false, ease: { kind: 'named', name: 'none' } },
+          { id: 'move-loop', kind: 'preset', presetId: 'spin-loop', at: 1, duration: 1.5, loop: true, ease: { kind: 'named', name: 'none' } },
+        ],
+      },
+    })
     for (let k = 0; k <= 20; k++) {
       const gt = 1 + (k / 20) * 2.9
       const mine = presetTransform(c, gt, 0, 1, 100)

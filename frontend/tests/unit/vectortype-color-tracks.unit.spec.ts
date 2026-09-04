@@ -1006,10 +1006,13 @@ describe('the Colour Cycle track preset', () => {
     const t = mv.tracks![0]!
     expect(t.path).toBe('appearance.Lfill.paint.a')
     expect(t.fromColor).toBe(RED)
-    // PING-PONG — `ease: none`, `play: backAndForth`, the preset's own fixed
-    // timing (see `trackPresets.ts`'s `colour-cycle` entry).
+    // PING-PONG — `ease: none`, an open-ended ping-pong cycle (`loop: true,
+    // bounce: true`), the preset's own fixed timing (see `trackPresets.ts`'s
+    // `colour-cycle` entry: `phase: 'loop'`/`play: backAndForth` translated
+    // by `vtApplyTrackPreset`'s `placementForPhase`).
     expect(mv.ease).toEqual({ kind: 'named', name: 'none' })
-    expect(mv.play.mode).toBe('backAndForth')
+    expect(mv.loop).toBe(true)
+    expect(mv.bounce).toBe(true)
     // A hue ROTATION, so OKLCH — not the track default. In OKLab this exact pair
     // is a straight line through the middle of the a/b plane, i.e. through grey.
     expect(t.space).toBe('oklch')
@@ -1065,13 +1068,11 @@ describe('the Colour Cycle track preset', () => {
   })
 
   it('really animates — the preset’s own tracks, through the real evaluator', () => {
-    // `vtApplyTrackPreset` still hands back a move in the 2026-09-03
-    // `phase`/`play` shape (`trackPresets.ts` — unchanged by this task, out
-    // of its file list; its own callers all re-merge before reading the
-    // result — see `vectortype-track-presets.unit.spec.ts`'s `swept()`/
-    // `applied()`), so a real `at`/`loop`/`bounce` move needs the same
-    // round-trip through `mergeConfig` here before `applyMotion` (which
-    // reads `at`/`loop` directly, with no conversion of its own) can play it.
+    // `vtApplyTrackPreset` hands back a move already in the `at`/`loop`/
+    // `bounce` shape (`trackPresets.ts`'s `placementForPhase` — see its own
+    // doc), so the `mergeConfig` round-trip here is not converting a legacy
+    // shape; it is the same normalisation every other raw-blob caller in this
+    // studio runs a config through before `applyMotion` reads it.
     const base = stack({ id: 'Lfill', kind: 'fill', paint: { ...DEFAULT_FILL, a: RED } })
     base.motion.duration = DURATION
     const c = mergeConfig({

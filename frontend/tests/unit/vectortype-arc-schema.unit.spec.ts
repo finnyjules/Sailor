@@ -59,19 +59,20 @@ const cfg = (patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig =>
   mergeConfig({ ...DEFAULT_CONFIG, text: WORD, size: 100, ...patch })
 
 /** One `kind: 'tracks'` move wrapping a single track — `ease: 'none'`/
- *  `play: once ×1` reproduce the old default `easing: 'linear'`/`loops: 1`
- *  (the mapping `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses). */
+ *  `loop: false` (a one-shot transition) reproduce the old default
+ *  `easing: 'linear'`/`loops: 1` (the mapping `~/lib/studio/moves/merge`'s
+ *  `legacyTrackEase`/`legacyTrackPlacement` use). */
 let trackMoveSeq = 0
 function trackMove(path: string, from: number, to: number): VtMove {
   trackMoveSeq += 1
   return {
     id: `move-t${trackMoveSeq}`,
-    phase: 'loop',
+    at: 0,
     kind: 'tracks',
     presetId: 'custom',
     duration: 1,
+    loop: false,
     ease: { kind: 'named', name: 'none' },
-    play: { mode: 'once', times: 1 },
     tracks: [{ path, from, to, hold: 0, cycleOffset: 0, delay: 0 }],
   }
 }

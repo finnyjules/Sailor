@@ -102,20 +102,20 @@ const track = (o: Partial<VtMotionTrack> & { path: string; from: number; to: num
   ({ easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...o })
 
 /** One `kind: 'tracks'` move wrapping a single track — `ease: 'none'`/
- *  `play: once ×1` reproduce the old default `easing: 'linear'`/`loops: 1`
- *  (the `track()` default above). */
+ *  `loop: false` (a one-shot transition) reproduce the old default
+ *  `easing: 'linear'`/`loops: 1` (the `track()` default above). */
 let drawOnTrackMoveSeq = 0
 function trackMove(t: VtMotionTrack): VtMove {
   drawOnTrackMoveSeq += 1
   const { path, from, to, hold, cycleOffset, delay } = t
   return {
     id: `move-t${drawOnTrackMoveSeq}`,
-    phase: 'loop',
+    at: 0,
     kind: 'tracks',
     presetId: 'custom',
     duration: 4,
+    loop: false,
     ease: { kind: 'named', name: 'none' },
-    play: { mode: 'once', times: 1 },
     tracks: [{ path, from, to, hold, cycleOffset, delay }],
   }
 }

@@ -76,19 +76,20 @@ function wghtTrack(from = 100, to = 900) {
 
 /** One `kind: 'tracks'` move wrapping one or more tracks — the moves-shaped
  *  equivalent of the old flat `motion.tracks: [...]` array. `ease: 'none'`/
- *  `play: once ×1` reproduce the old default `easing: 'linear'`/`loops: 1`
- *  every raw track spec in this file is built with. */
+ *  `loop: false` (a one-shot transition) reproduce the old default
+ *  `easing: 'linear'`/`loops: 1` every raw track spec in this file is built
+ *  with. */
 let canvasTrackMoveSeq = 0
 function trackMove(...tracks: Array<{ path: string; from: number; to: number }>): VtMove {
   canvasTrackMoveSeq += 1
   return {
     id: `move-t${canvasTrackMoveSeq}`,
-    phase: 'loop',
+    at: 0,
     kind: 'tracks',
     presetId: 'custom',
     duration: 4,
+    loop: false,
     ease: { kind: 'named', name: 'none' },
-    play: { mode: 'once', times: 1 },
     tracks: tracks.map(t => ({ path: t.path, from: t.from, to: t.to, hold: 0, cycleOffset: 0, delay: 0 })),
   }
 }

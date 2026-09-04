@@ -425,27 +425,34 @@ describe('mergeConfig is a strict rebuild', () => {
     it('rebuilds a track field by field', () => {
       // GONE from a bare track: `easing`/`loops` — the OWNING MOVE this legacy
       // single track converts into carries them now (`~/lib/studio/moves/merge`'s
-      // `legacyTrackEasePlay`: an unrecognised easing string, 'wobble', and
-      // loops: 0 both fall to its default, `none`/`once ×1`).
+      // `legacyTrackEase`/`legacyTrackPlacement`: an unrecognised easing string,
+      // 'wobble', and loops: 0 both fall to its default, `ease: none`,
+      // `loop: false` — a one-shot transition, the at/loop model's "once").
       const c = mergeConfig({ motion: { tracks: [{ path: 'axes.wght', from: '100', to: 900, easing: 'wobble', loops: 0, hold: 9, cycleOffset: -3, delay: -5 }] } })
       const moves = c.motion.moves.filter(m => m.kind === 'tracks')
       expect(moves).toHaveLength(1)
       expect(moves[0]!.ease).toEqual({ kind: 'named', name: 'none' })
-      expect(moves[0]!.play).toEqual({ mode: 'once', times: 1 })
+      expect(moves[0]!.loop).toBe(false)
+      expect(moves[0]!.bounce).toBeUndefined()
       const [t] = allTracks(c)
       expect(t).toEqual({ path: 'axes.wght', from: 0, to: 900, hold: 0.5, cycleOffset: 0, delay: 0 })
     })
 
     it('keeps a well-formed track exactly', () => {
       // `easing: 'pingpong'`/`loops: 3` maps onto the owning move's `ease`/
-      // `play` (`none`/`backAndForth ×3`) rather than the track, which keeps
-      // only its own timing fields (`from`/`to`/`hold`/`cycleOffset`/`delay`).
+      // `loop`/`bounce` (`none`/an open-ended ping-pong cycle) rather than the
+      // track, which keeps only its own timing fields (`from`/`to`/`hold`/
+      // `cycleOffset`/`delay`). The at/loop model has no "N cycles" of its
+      // own, so `loops: 3` is accepted but does not change the outcome from
+      // `loops: 1` — see `legacyTrackPlacement`'s own doc for why that loss
+      // is deliberate.
       const rawTrack = { path: 'axes.GRAD', from: -200, to: 150, easing: 'pingpong' as const, loops: 3, hold: 0.2, cycleOffset: 0.5, delay: 1 }
       const c = mergeConfig({ motion: { tracks: [rawTrack] } })
       const moves = c.motion.moves.filter(m => m.kind === 'tracks')
       expect(moves).toHaveLength(1)
       expect(moves[0]!.ease).toEqual({ kind: 'named', name: 'none' })
-      expect(moves[0]!.play).toEqual({ mode: 'backAndForth', times: 3 })
+      expect(moves[0]!.loop).toBe(true)
+      expect(moves[0]!.bounce).toBe(true)
       expect(allTracks(c)).toEqual([{ path: 'axes.GRAD', from: -200, to: 150, hold: 0.2, cycleOffset: 0.5, delay: 1 }])
     })
 

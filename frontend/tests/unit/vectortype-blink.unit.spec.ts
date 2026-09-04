@@ -108,20 +108,21 @@ const track = (o: Partial<VtMotionTrack> & { path: string; from: number; to: num
 /** One `kind: 'tracks'` move wrapping a single track, matching the
  *  moves-shaped equivalent of the old flat `motion.tracks: [track(...)]`
  *  array — `easing: 'linear'`/`loops: 1` (the `track()` default above) maps
- *  to `ease: 'none'`/`play: once ×1`, the same mapping
- *  `~/lib/studio/moves/merge`'s `legacyTrackEasePlay` uses. */
+ *  to `ease: 'none'`/a one-shot transition (`at: 0, loop: false`), the same
+ *  mapping `~/lib/studio/moves/merge`'s `legacyTrackEase`/
+ *  `legacyTrackPlacement` use. */
 let trackMoveSeq = 0
 function trackMove(t: VtMotionTrack): VtMove {
   trackMoveSeq += 1
   const { path, from, to, hold, cycleOffset, delay } = t
   return {
     id: `move-t${trackMoveSeq}`,
-    phase: 'loop',
+    at: 0,
     kind: 'tracks',
     presetId: 'custom',
     duration: 4,
+    loop: false,
     ease: { kind: 'named', name: 'none' },
-    play: { mode: 'once', times: 1 },
     tracks: [{ path, from, to, hold, cycleOffset, delay }],
   }
 }

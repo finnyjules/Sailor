@@ -44,7 +44,7 @@ import {
   type VtMotionTrack,
   type VtMove,
 } from '~/lib/vectortype/config'
-import type { MoveEase, MovePlay } from '~/lib/studio/moves/types'
+import type { MoveEase } from '~/lib/studio/moves/types'
 import { VT_CONTROLS, VT_LAYER_PREFIX, visibleVtControls } from '~/lib/vectortype/controls'
 import { vtLayerLabels } from '~/lib/vectortype/layerLabel'
 import {
@@ -89,30 +89,33 @@ function stack(...layers: Partial<VtAppearanceLayer>[]): VectorTypeConfig {
 const track = (path: string, from = 0, to = 1): VtMotionTrack & { easing: string; loops: number } =>
   ({ path, from, to, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 })
 
-/** `easing`/`loops` → the owning move's `ease`/`play` — see the identical
- *  helper in `vectortype-motion.unit.spec.ts`. Every `track()` call in this
- *  file uses the default `'linear'`/`1`, so this only ever produces
- *  `ease: none, play: once` here — restated in full for parity with the
- *  other specs that build this way. */
-function easeAndPlay(easing: string, loops: number): { ease: MoveEase; play: MovePlay } {
-  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, play: { mode: 'backAndForth', times: loops } }
-  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, play: { mode: 'once', times: loops } }
-  return { ease: { kind: 'named', name: 'none' }, play: { mode: 'once', times: loops } }
+/** `easing`/`loops` → the owning move's `ease`/`loop`/`bounce` — the exact
+ *  mapping `~/lib/studio/moves/merge`'s `legacyTrackEase`/`legacyTrackPlacement`
+ *  use for a legacy document, restated as this file's test-side DSL (the
+ *  identical helper in `vectortype-motion.unit.spec.ts`). Every `track()` call
+ *  in this file uses the default `'linear'`/`1`, so this only ever produces
+ *  a ONE-SHOT transition (`loop: false`) that reaches `to` and holds. */
+function easeAndLoop(easing: string): { ease: MoveEase; loop: boolean; bounce?: true } {
+  if (easing === 'pingpong') return { ease: { kind: 'named', name: 'none' }, loop: true, bounce: true }
+  if (easing === 'easeinout') return { ease: { kind: 'named', name: 'natural' }, loop: false }
+  return { ease: { kind: 'named', name: 'none' }, loop: false }
 }
 
 let trackMoveSeq = 0
 /** One `kind: 'tracks'` move per track spec — the fresh-config path (sections
  *  1–5). Bypasses `mergeConfig`: these tests build `c.motion` directly and
  *  call `applyMotion`/etc. straight on it, exactly as the original flat
- *  `motion.tracks` assignment did. */
+ *  `motion.tracks` assignment did. Each move's own `duration` (4, matching
+ *  every clip built here) IS the window `~/lib/studio/moves/tracks.ts` reads. */
 function trackMoves(specs: ReturnType<typeof track>[]): VtMove[] {
   return specs.map((t) => {
     trackMoveSeq += 1
-    const { ease, play } = easeAndPlay(t.easing, t.loops)
+    const { ease, loop, bounce } = easeAndLoop(t.easing)
     const { path, from, to, hold, cycleOffset, delay } = t
     return {
-      id: `move-t${trackMoveSeq}`, phase: 'loop', kind: 'tracks', presetId: 'custom',
-      duration: 4, ease, play, tracks: [{ path, from, to, hold, cycleOffset, delay }],
+      id: `move-t${trackMoveSeq}`, at: 0, kind: 'tracks', presetId: 'custom',
+      duration: 4, loop, ...(bounce ? { bounce: true } : {}), ease,
+      tracks: [{ path, from, to, hold, cycleOffset, delay }],
     } as VtMove
   })
 }
@@ -657,10 +660,11 @@ describe('a POSITIONAL stack track is migrated onto its layer’s id at load', (
     const c = mergeConfig(saved('appearance.1.width'))
     expect(firstTrack(c)!.path).toBe('appearance.Lstroke.width')
     // …and only the member segment: the leaf survives, and the timing
-    // (`easing: 'linear'` → the owning move's `ease: none`/`play: once`)
+    // (`easing: 'linear'` → the owning move's `ease: none`/`loop: false`,
+    // via `~/lib/studio/moves/merge`'s `legacyTrackEase`/`legacyTrackPlacement`)
     // landed on the move that now owns it.
     expect(firstTrack(c)).toMatchObject({ from: 0, to: 24 })
-    expect(firstTrackMove(c)).toMatchObject({ ease: { kind: 'named', name: 'none' }, play: { mode: 'once' } })
+    expect(firstTrackMove(c)).toMatchObject({ ease: { kind: 'named', name: 'none' }, loop: false })
   })
 
   it('drives the SAME layer it drove before the migration', () => {

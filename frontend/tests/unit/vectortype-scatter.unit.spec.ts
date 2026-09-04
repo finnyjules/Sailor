@@ -137,18 +137,19 @@ function presetMove(slot: 'in' | 'out' | 'loop', spec: { presetId: string; durat
 }
 
 /** One `kind: 'tracks'` move wrapping a single track — `ease: 'none'`/
- *  `play: once ×1` reproduce the old default `easing: 'linear'`. */
+ *  `loop: false` (a one-shot transition) reproduce the old default
+ *  `easing: 'linear'`. */
 let scatterTrackMoveSeq = 0
 function trackMove(t: { path: string; from: number; to: number }): VtMove {
   scatterTrackMoveSeq += 1
   return {
     id: `move-track-${scatterTrackMoveSeq}`,
-    phase: 'loop',
+    at: 0,
     kind: 'tracks',
     presetId: 'custom',
     duration: 4,
+    loop: false,
     ease: { kind: 'named', name: 'none' },
-    play: { mode: 'once', times: 1 },
     tracks: [{ path: t.path, from: t.from, to: t.to, hold: 0, cycleOffset: 0, delay: 0 }],
   }
 }

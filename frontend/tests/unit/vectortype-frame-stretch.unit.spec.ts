@@ -63,19 +63,19 @@ const cfg = (over: Partial<typeof DEFAULT_CONFIG>) => mergeConfig({ ...DEFAULT_C
 /** One `kind: 'tracks'` move wrapping a single track — the moves-shaped
  *  equivalent of the old flat `motion.tracks: [{ path, from, to, easing:
  *  'linear', loops: 1, ... }]` entry every helper in this file used to build.
- *  `ease: 'none'`/`play: once ×1` reproduce that same linear, single-pass
- *  default. */
+ *  `ease: 'none'`/`loop: false` (a one-shot transition) reproduce that same
+ *  linear, single-pass default. */
 let stretchTrackMoveSeq = 0
 function trackMove(path: string, from: number, to: number): VtMove {
   stretchTrackMoveSeq += 1
   return {
     id: `move-t${stretchTrackMoveSeq}`,
-    phase: 'loop',
+    at: 0,
     kind: 'tracks',
     presetId: 'custom',
     duration: 4,
+    loop: false,
     ease: { kind: 'named', name: 'none' },
-    play: { mode: 'once', times: 1 },
     tracks: [{ path, from, to, hold: 0, cycleOffset: 0, delay: 0 }],
   }
 }

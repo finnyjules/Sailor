@@ -159,7 +159,14 @@ export interface VtThumbSpec {
  * `mergeConfig` would itself build from an equivalent slot, and MUST — the
  * round-trip test (`mergeConfig(cfg)).toEqual(cfg)`) pins that this file's
  * output is byte-identical to what the merge would rebuild it into, since
- * `mergeMove` re-validates every field of an already-moves-shaped `motion`.
+ * `mergeMove` re-validates every field of an already-`at`/`loop`/`bounce`-
+ * shaped `motion`. This file therefore builds `at`/`loop` DIRECTLY rather
+ * than a `phase`/`play` pair for `mergeMove` to convert (there is nothing
+ * upstream of a tile to convert FROM): `~/lib/studio/moves/merge`'s
+ * `resolvePlacement`, specialised to a single move with `longestIn: 0` (a
+ * tile never has a co-existing 'in' move) — `in` -> `at: 0`; `out` -> `at:
+ * clipDuration - duration` (the slot's own duration already fits inside its
+ * cycle, so the window is never compressed); `loop` -> `at: 0, loop: true`.
  * `ease: 'none'` keeps the preset's own progress un-warped — the same LINEAR
  * progress the old per-slot reader always fed an axis preset's `fn` (see
  * `vtAxisDelta`'s caller, `presetTransform`) — so a tile's animation is not
@@ -174,15 +181,17 @@ export function vtThumbConfig(spec: VtThumbSpec): VectorTypeConfig {
   // the richer `motion.stagger`, and `vtPresetSpecs` forces the engine's to 0,
   // so carrying one here would make the tile's config differ from any config
   // the studio can actually save.
+  const duration = VT_THUMB_PHASE[slot]
+  const at = slot === 'out' ? Math.max(0, VT_THUMB_CYCLE[slot] - duration) : 0
   const moves: VtMove[] = presetId
     ? [{
         id: 'thumb',
-        phase: slot,
+        at,
         kind: 'preset',
         presetId,
-        duration: VT_THUMB_PHASE[slot],
+        duration,
+        loop: slot === 'loop',
         ease: { kind: 'named', name: 'none' },
-        play: slot === 'loop' ? { mode: 'repeat', times: 1 } : { mode: 'once', times: 1 },
       }]
     : []
   return {

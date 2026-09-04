@@ -441,6 +441,46 @@ export function vtTrackPresetOffers(cfg: VectorTypeConfig | null | undefined): V
 // ── Application ─────────────────────────────────────────────────────────────
 
 /**
+ * The end of the latest zero-anchored, one-shot move already in `cfg` —
+ * duplicated from `~/lib/vectortype/movesAdapter.ts`'s OWN `longestEntranceEnd`
+ * rather than imported: that module imports `VT_TRACK_PRESETS`/`vtTrackPreset`
+ * FROM this one, so the reverse import would be circular. Kept in step with it
+ * on purpose — a track preset applied here and a preset move added fresh from
+ * the gallery there both place a Loop where the current entrance(s) end.
+ */
+function longestEntranceEnd(cfg: VectorTypeConfig | null | undefined): number {
+  let longest = 0
+  const moves = Array.isArray(cfg?.motion?.moves) ? cfg!.motion.moves : []
+  for (const mv of moves) {
+    if (mv && mv.loop === false && mv.at === 0 && isNum(mv.duration) && mv.duration > longest) longest = mv.duration
+  }
+  return longest
+}
+
+/**
+ * Where a track preset's own `phase` lands on the at-anchored timeline —
+ * the `vtApplyTrackPreset` counterpart to `movesAdapter.ts`'s `placementFor`
+ * (same duplication reasoning as `longestEntranceEnd` above): `in` -> `at:
+ * 0`; `loop` -> `at: longestEntranceEnd(cfg)`, open-ended; `out` -> `at:
+ * max(longestEntranceEnd(cfg), clip - duration)`, with `duration` compressed
+ * to fit the clip.
+ */
+function placementForPhase(
+  phase: 'in' | 'loop' | 'out',
+  cfg: VectorTypeConfig,
+  duration: number,
+  loop: boolean,
+  bounce: boolean,
+): { at: number; duration: number; loop: boolean; bounce?: boolean } {
+  const extra = bounce ? { bounce: true as const } : {}
+  if (phase === 'in') return { at: 0, duration, loop, ...extra }
+  if (phase === 'loop') return { at: longestEntranceEnd(cfg), duration, loop, ...extra }
+  const clip = isNum(cfg?.motion?.duration) ? cfg.motion.duration : 4
+  const at = Math.max(longestEntranceEnd(cfg), clip - duration)
+  return { at, duration: Math.max(0.05, clip - at), loop, ...extra }
+}
+
+/**
  * The moves list this config should have after applying `preset` — the
  * CURRENT moves with the preset's own paths replaced (across every
  * `'tracks'`-kind move, not just one of this preset's own making — see
@@ -481,14 +521,21 @@ export function vtApplyTrackPreset(
     if (!remaining.length) continue
     kept.push(remaining.length === mv.tracks.length ? mv : { ...mv, tracks: remaining })
   }
+  // `preset.phase`/`preset.play` are the table's own DECLARATIVE fields —
+  // translated into the `at`/`loop`/`bounce` a real Move needs, the same
+  // `resolvePlacement` rule `movesAdapter.ts`'s `defaultTiming` applies to a
+  // freshly-added preset move (see `placementForPhase` above): `loop = phase
+  // === 'loop' || play.mode === 'repeat'`, `bounce = play.mode ===
+  // 'backAndForth'`.
+  const rawDuration = isNum(cfg?.motion?.duration) ? cfg.motion.duration : 4
+  const loop = preset.phase === 'loop' || preset.play.mode === 'repeat'
+  const bounce = preset.play.mode === 'backAndForth'
   const newMove: VtMove = {
     id: `move-preset-${preset.id}`,
-    phase: preset.phase,
     kind: 'tracks',
     presetId: preset.id,
-    duration: isNum(cfg?.motion?.duration) ? cfg.motion.duration : 4,
     ease: preset.ease,
-    play: preset.play,
+    ...placementForPhase(preset.phase, cfg, rawDuration, loop, bounce),
     tracks: added,
   }
   return [...kept, newMove]

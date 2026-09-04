@@ -420,16 +420,17 @@ describe('canvas and SVG are the same transform, written three times', () => {
       motion: {
         ...cfg().motion,
         // The moves-shaped equivalent of the old flat `motion.tracks` entry: one
-        // `kind: 'tracks'` move, `ease: 'none'`/`play: once ×1` so the progress is
-        // pure LINEAR t/D — exactly what the old (unlabelled) track defaulted to.
+        // `kind: 'tracks'` move, `ease: 'none'`/`loop: false` (a one-shot
+        // transition) so the progress is pure LINEAR t/D — exactly what the old
+        // (unlabelled) track defaulted to.
         moves: [{
           id: 'move-skew',
-          phase: 'loop',
+          at: 0,
           kind: 'tracks',
           presetId: 'custom',
           duration: cfg().motion.duration,
+          loop: false,
           ease: { kind: 'named', name: 'none' },
-          play: { mode: 'once', times: 1 },
           tracks: [{ path: 'skewX', from: 0, to: 30, hold: 0, cycleOffset: 0, delay: 0 }],
         }],
       },

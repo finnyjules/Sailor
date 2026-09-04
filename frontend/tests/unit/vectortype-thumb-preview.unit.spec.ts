@@ -128,15 +128,17 @@ describe('vtThumbConfig — a REAL config, through the one render path', () => {
       // never save.
       expect(cfg.motion.moves).toHaveLength(1)
       const mv = cfg.motion.moves[0]!
-      expect(mv.phase).toBe(slot)
+      // `at`/`loop` placement — `~/lib/studio/moves/merge`'s `resolvePlacement`
+      // specialised to a single move with `longestIn: 0`: 'in' and 'loop' both
+      // start at the clip start ('loop' is the one that keeps cycling); 'out'
+      // is anchored to the end of the clip.
+      const expectAt = slot === 'out' ? VT_THUMB_CYCLE.out - VT_THUMB_PHASE.out : 0
+      expect(mv.at).toBeCloseTo(expectAt, 9)
+      expect(mv.loop).toBe(slot === 'loop')
       expect(mv.kind).toBe('preset')
       expect(mv.presetId).toBe('weight-in')
       expect(mv.duration).toBe(VT_THUMB_PHASE[slot])
       expect(cfg.motion.duration).toBe(VT_THUMB_CYCLE[slot])
-      // Exactly one move — no move at any OTHER phase snuck in.
-      for (const other of ['in', 'out', 'loop'] as const) {
-        if (other !== slot) expect(cfg.motion.moves.some(m => m.phase === other)).toBe(false)
-      }
     }
   })
 
