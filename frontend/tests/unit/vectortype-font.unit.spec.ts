@@ -158,3 +158,47 @@ describe('coords helpers', () => {
     expect(clampCoords(font, { wght: Number.NaN, wdth: 120 })).toEqual({ wdth: 120 })
   })
 })
+
+// Below: still no *real* network — fetch is stubbed to serve fixture bytes
+// from disk, so the "no network" promise above holds.
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { afterEach, vi } from 'vitest'
+import { clearVariableFontCache, loadVariableFont, loadVectorFont } from '~/lib/vectortype/font'
+
+const STATIC = fileURLToPath(new URL('../fixtures/inter-subset-static.ttf', import.meta.url))
+const VAR = fileURLToPath(new URL('../fixtures/inter-subset-var.ttf', import.meta.url))
+function serve(map: Record<string, string>) {
+  const calls: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    calls.push(String(url))
+    const file = Object.entries(map).find(([prefix]) => String(url).startsWith(prefix))?.[1]
+    if (!file) return new Response(null, { status: 404 })
+    return new Response(readFileSync(file), { status: 200 })
+  }))
+  return calls
+}
+afterEach(() => { vi.unstubAllGlobals(); clearVariableFontCache() })
+
+describe('loadVectorFont', () => {
+  it('loads a Google cut through the google-file route and yields a font with NO axes', async () => {
+    const calls = serve({ '/api/fonts/google-file?family=Inter%20Tight&weight=700': STATIC })
+    const f = await loadVectorFont('google:Inter Tight@700')
+    expect(calls).toEqual(['/api/fonts/google-file?family=Inter%20Tight&weight=700'])
+    expect(f.id).toBe('google:Inter Tight@700'); expect(f.axes).toEqual([]); expect(f.unitsPerEm).toBe(2048)
+  })
+  it('still loads a curated family through the variable route with its axes', async () => {
+    serve({ '/api/fonts/variable?id=inter': VAR })
+    const f = await loadVectorFont('inter')
+    expect(f.axes.map(a => a.tag).sort()).toEqual(['opsz', 'wght'])
+    expect(await loadVariableFont('inter')).toBe(f)             // alias shares the cache
+  })
+  it('rejects an invalid token without fetching, and evicts a failed load', async () => {
+    const calls = serve({})
+    await expect(loadVectorFont('no-such-font')).rejects.toThrow(/font token/i)
+    expect(calls).toEqual([])
+    await expect(loadVectorFont('google:Nope@400')).rejects.toThrow(/HTTP 404/)
+    serve({ '/api/fonts/google-file?family=Nope&weight=400': STATIC })
+    await expect(loadVectorFont('google:Nope@400')).resolves.toBeTruthy()   // not poisoned
+  })
+})

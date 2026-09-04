@@ -14,8 +14,7 @@
  *    serves static instances. See server/api/fonts/variable.get.ts.
  */
 import * as fontkit from 'fontkit'
-import { VARIABLE_FONTS_BY_ID } from '~/data/variable-fonts'
-import { variableFontUrl } from './fontToken'
+import { parseVtFontToken, variableFontUrl, vtFontFileUrl } from './fontToken'
 
 /** Re-exported so existing importers keep working — the implementation now
  *  lives in `fontToken.ts` to avoid a cycle (Task 2's `fontToken` import of
@@ -106,32 +105,50 @@ export function clampCoords(font: VtFont, coords: Record<string, number>): Recor
   return out
 }
 
-/** In-flight and settled loads, keyed by catalog id. Promises are cached (not
- *  just results) so N simultaneous callers share one fetch. A rejected load is
- *  evicted, so a transient network failure doesn't poison the id forever. */
+/** In-flight and settled loads, keyed by the TOKEN (not a resolved id) — so
+ *  caches, thumbs and race guards all key on what `config.fontId` actually
+ *  holds. Promises are cached (not just results) so N simultaneous callers
+ *  share one fetch. A rejected load is evicted, so a transient network
+ *  failure — or an unresolvable library face — doesn't poison the token
+ *  forever. */
 const cache = new Map<string, Promise<VtFont>>()
 
-export async function loadVariableFont(id: string): Promise<VtFont> {
-  const hit = cache.get(id)
+/**
+ * Load ANY of the three token shapes (`fontToken.ts`) into a `VtFont`.
+ * A Google cut and a library face have no variation axes at all — that's not
+ * a broken font, it's a static one, so `axes` may legitimately be `[]` and
+ * every axis-consuming call site already treats an empty list as "no
+ * variation, only the outline as-shipped." Only a malformed token or an
+ * unresolvable library face is an error; a font that merely doesn't vary
+ * is not.
+ */
+export async function loadVectorFont(token: string): Promise<VtFont> {
+  const hit = cache.get(token)
   if (hit) return hit
 
-  const entry = VARIABLE_FONTS_BY_ID[id]
-  if (!entry?.ttfPath) throw new Error(`Unknown variable font id: ${id}`)
+  const ref = parseVtFontToken(token)
+  if (!ref) throw new Error(`Invalid font token: ${token}`)
+  const url = vtFontFileUrl(ref)
+  if (!url) throw new Error(`Unknown library face: ${token}`)
 
   const p = (async (): Promise<VtFont> => {
-    const res = await fetch(variableFontUrl(id))
-    if (!res.ok) throw new Error(`Variable font ${id}: HTTP ${res.status}`)
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Font ${token}: HTTP ${res.status}`)
     const bytes = new Uint8Array(await res.arrayBuffer())
     const font: any = (fontkit as any).create(bytes)
     const axes = normaliseAxes(font?.variationAxes)
-    if (!axes.length) throw new Error(`Variable font ${id}: parsed, but no variation axes — this is a static cut`)
-    return { id, axes, unitsPerEm: Number(font?.unitsPerEm) || 1000, raw: font }
+    return { id: token, axes, unitsPerEm: Number(font?.unitsPerEm) || 1000, raw: font }
   })()
 
-  cache.set(id, p)
-  p.catch(() => cache.delete(id))
+  cache.set(token, p)
+  p.catch(() => cache.delete(token))
   return p
 }
+
+/** Documented alias — kept for one release while call sites migrate to the
+ *  name that reflects what it now loads (any of the three token shapes, not
+ *  only a variable font). Remove once nothing imports the old name. */
+export const loadVariableFont = loadVectorFont
 
 /** Test/HMR seam — forget everything loaded so far. */
 export function clearVariableFontCache(): void {
