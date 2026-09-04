@@ -13,7 +13,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Surface | bake | motion | inspector | agent | engine LOC |
 |---|---|---|---|---|---|
 | Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes** on 20 effects incl. Cylinder) | ✅ descriptor (+ `shape` kind) | 11,202 |
-| Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc + **smart stretch: Stretch/Height dials, Fit**) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
+| Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc + **smart stretch: Stretch/Height dials, Fit** + **any font: Google cuts + library faces**) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
 | Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers, **shape library shelf**) | ✅ descriptor (object.* + id-addressed; library shapes not yet) | ~6,300 (+ SVG import) + ambientCG textures |
 | Compositor / Frame | ✅ | ✅ motion clips | ✅ (+ **shape library** insert/swap, **mask break-out**, **shapes pattern fill**) | ✅ commands (+ `addShape`, `setLayerMaskBreak`, `setFill{type:shapes}`) | 1,667 (+1,041 motion) |
 | Timeline (NLE) | ✅ webm/mp4 + server | ✅ native | ✅ | ❌ | shared/timeline |
@@ -168,6 +168,32 @@ Verified: the picker live in the Browser pane (picking a wood set textures the b
 Next: **HDRI environments** from the same library (the natural sequel — real skies behind the real surfaces); higher resolutions than 1K; and roughness/metalness stay **multipliers** over the map today rather than replacing it.
 
 Spec: [2026-09-01-scene3d-ambientcg-textures-design.md](superpowers/specs/2026-09-01-scene3d-ambientcg-textures-design.md) · plan: [2026-09-01-scene3d-ambientcg-textures.md](superpowers/plans/2026-09-01-scene3d-ambientcg-textures.md).
+
+### Vector Type — any font: shared picker, Google cuts, library faces — LANDED 2026-09-03 (`d476ea962`..`2c163261a`)
+
+The Font row is the shared `FontPicker` (row mode, pinned ten curated variable families badged
+`var`, Google and Pangram tabs). One token grammar for `config.fontId` — bare curated id,
+`google:Family@400`, `local:Family@400[i]` (`lib/vectortype/fontToken.ts`) — with fail-closed file
+routes; one loader `loadVectorFont` (`loadVariableFont` aliased) that treats a static cut as a
+first-class font (`axes: []`); a shared Google cut proxy `/api/fonts/google-file` (family must be
+in the server catalog, weight snaps to the nearest shipped; the scene3d route re-exports it);
+`mergeConfig` keeps any token shape on reload; the `fontId` control is free text, agent-editable,
+with `VT_GUIDANCE` teaching the three shapes. Surface: a **Weight** row (shipped weights, hidden for
+curated families and under a Collection binding) re-tokens `fontId`; Inter fallback with a note
+on the studio row and the node card. The live check caught what network-free tests could not:
+fontkit throws on a static cut asked for a variation instance — `outline.ts` now guards
+`getVariation`, and the static fixture is shaped through `textOutlines`/`vectorTypeFrame` in
+tests. Verified live: Inter Tight 400→700 (stems 10→17 px), Stretch 1.6 on the static cut (same
+command count, stems held), PP Agrandir from the library with its faces listed, reload keeps the
+token, curated round trip restores the Axes group. **Out of scope:** italics for Google cuts,
+promoting arbitrary Google families to variable. The whole-program review's fix wave: the library lookup split into a
+side-effect-free module so Vector Type's config no longer pulls three.js; the agent adapter's write
+re-merges through `mergeConfig` (a junk `fontId` can no longer persist); a curated family picked from
+the Google catalog lands on its pinned id and keeps its axes; the loader cache is a 24-entry LRU;
+`fontAxes` is empty under the Inter fallback; a "static cut — no live axes" note under Weight.
+**Follow-ups:** a `validate` hook on `ControlSpec` so a text control declares its admissible set
+once; library italics collapse into the weight list. Spec:
+`docs/superpowers/specs/2026-09-03-vector-type-any-font-design.md`.
 
 ### Vector Type — smart stretch in the studio, Phase B — LANDED 2026-09-02 (`8d4521a37`..`2ccb7d5e9`)
 
