@@ -28,6 +28,11 @@ export const ROLES_BY_FAMILY: Record<string, string[]> = {
   // The ink count must equal CHIP_INK_ROLES in pattern.ts (pinned by a unit test),
   // and the ground role must stay LAST — chipSample() emits it as index inkRoles.
   chips: ['chipA', 'chipB', 'ground'],
+  // Dealt grid: each cell hashes to one of two inks; a dropped (density) or
+  // inset-gutter cell falls to ground. Same 2-ink + ground shape as chips (the ink
+  // count must equal DEALT_INK_ROLES in pattern.ts, and ground stays LAST —
+  // dealtGridSample() emits it as index inkRoles).
+  dealtgrid: ['inkA', 'inkB', 'ground'],
 }
 
 const PROCEDURAL_FAMILIES = new Set(['checker', 'stripes', 'dots', 'grid', 'rings', 'squares', 'diamonds', 'waves', 'zigzag', 'cross', 'graph'])
@@ -41,6 +46,8 @@ export function activeFamily(p: Params): string {
   if (String(p.mode) === 'shapes') return String(p.shapeFamily)
   // Chips has a single family — the mode IS the family (no family picker).
   if (String(p.mode) === 'chips') return 'chips'
+  // Dealt grid likewise — one family, implied by the mode (no picker).
+  if (String(p.mode) === 'dealtgrid') return 'dealtgrid'
   return 'checker' // raster mode has no roles; harmless default
 }
 export function rolesFor(p: Params): string[] {

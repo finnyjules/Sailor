@@ -9,7 +9,7 @@ import type { Params } from '~/lib/spacetype/effect'
 import { LATTICES, MOTIFS, MODES, TILE_FAMILIES, SHAPE_FAMILIES, postSettingsFromParams } from '~/lib/texturefx/types'
 import {
   truchetStates, multiscaleLevels, chipKeepCell,
-  CHIP_NEIGHBORHOOD, CHIP_R_MIN, CHIP_R_MAX, CHIP_INK_ROLES, CHIP_TONE_RANGE,
+  CHIP_NEIGHBORHOOD, CHIP_R_MIN, CHIP_R_MAX, CHIP_INK_ROLES, CHIP_TONE_RANGE, DEALT_INK_ROLES,
   CHIP_SALT_X, CHIP_SALT_Y, CHIP_SALT_R, CHIP_SALT_ROLE, CHIP_SALT_TONE, CHIP_SALT_DENSITY,
 } from '~/lib/texturefx/pattern'
 import { getRaster } from '~/lib/texturefx/raster'
@@ -66,6 +66,10 @@ uniform float u_placement;
 // and the fraction of cells that draw a chip at all (1 = fully packed).
 // Colour jitter reuses u_jitter above (it shifts chip LIGHTNESS here — see chipTone()).
 uniform float u_chipCells, u_chipGrout, u_chipSizeVar, u_chipDensity;
+// dealt grid mode: rigid grid size, the fraction of cells that fill (1 = every cell),
+// and the per-cell inset for size variance (0 = flush cells). Reuses the chip hash
+// + u_chipSalt lanes and u_chipKeep (loaded on dgCells in dealtgrid mode).
+uniform float u_dgCells, u_dgDensity, u_dgSizeVar;
 // Pre-hashed third hash lane per salt — 0 = X, 1 = Y, 2 = R, 3 = ROLE, 4 = TONE,
 // 5 = DENSITY (chipSaltLanes() below fills it; see chipHash() for why it arrives
 // pre-hashed). Lanes are APPENDED, never reordered — the indices are the contract.
@@ -516,6 +520,41 @@ int shapeRole(vec2 uv, out vec2 cf, out float shade) {
 }
 
 void main(){
+  // dealt grid mode (MODES index 5) -- a rigid cells x cells grid of solid cells,
+  // tileable by construction (every per-cell quantity is hashed on the WRAPPED cell
+  // index). Mirrors dealtGridSample() in pattern.ts: the same chipHash + salt lanes
+  // (u_chipSalt[3]=ROLE, [5]=DENSITY, [2]=R) and the same force-kept cell (u_chipKeep,
+  // loaded on dgCells here). Gated FIRST, ahead of the chips branch: that one is a
+  // bare u_mode > 3.5, which would otherwise catch index 5 too.
+  if (u_mode > 4.5) {
+    float C = max(2.0, floor(u_dgCells + 0.5));
+    vec2 g = v_uv * C;
+    float ix = floor(g.x), iy = floor(g.y);
+    float cx = posmod(ix, C), cy = posmod(iy, C);
+    vec2 fc = fract(g);   // cell-local frame, also the role-fill coord
+    float dens = clamp(u_dgDensity, 0.0, 1.0);
+    // Density: the cell fills iff its density lane hashes BELOW u_dgDensity -- the
+    // >= here is that rule's exact negation, matching the CPU. u_chipKeep is force-kept
+    // at any density (see chipKeepCell), so no setting renders a blank tile.
+    bool isKeep = (cx == u_chipKeep.x && cy == u_chipKeep.y);
+    bool dropped = !isKeep && chipHash(cx, cy, u_chipSalt[5]) >= dens;
+    // lone = the kept cell is the ONLY survivor (runner-up density hash failed too).
+    // It draws FLUSH (inset skipped) so the guaranteed cell is fully visible. Mirrors
+    // chipSample()'s lone-skips-grout exemption; inert at density 1.
+    bool lone = isKeep && u_chipKeep.z >= dens;
+    float sv = clamp(u_dgSizeVar, 0.0, 1.0);
+    float inset = lone ? 0.0 : sv * chipHash(cx, cy, u_chipSalt[2]) * 0.5;
+    bool inInset = fc.x >= inset && fc.x <= 1.0 - inset && fc.y >= inset && fc.y <= 1.0 - inset;
+    vec3 col;
+    if (dropped || !inInset) {
+      col = evalFill(${DEALT_INK_ROLES}, fc, v_uv);   // empty / gutter = the ground role
+    } else {
+      int role = int(min(float(${DEALT_INK_ROLES} - 1), floor(chipHash(cx, cy, u_chipSalt[3]) * float(${DEALT_INK_ROLES}))));
+      col = evalFill(role, fc, v_uv);
+    }
+    frag = vec4(col, 1.0);
+    return;
+  }
   // chips mode (MODES index 4) -- irregular scattered cells (terrazzo / mosaic /
   // pebbles). Mirrors chipSample() + chipTone() in pattern.ts: the same six
   // salts (interpolated from its exported constants, never retyped), the same
@@ -977,6 +1016,19 @@ class TextureFxRenderer {
     const keep = chipKeepCell(chipCells, chipSeed)
     gl.uniform3f(u('u_chipKeep'), keep.cx, keep.cy, keep.second)
     gl.uniform1fv(u('u_chipSalt[0]'), chipSaltLanes(chipSeed))
+    // Dealt grid knobs — reuses the chip hash + u_chipSalt lanes (same chipSeed). The
+    // grid is rounded HERE the same max(2, round()) way dealtGridSample() rounds it,
+    // so the GLSL and CPU grids agree cell-for-cell. u_chipKeep is shared, so when
+    // dealtgrid is the active mode it must key on dgCells — re-upload it here (leaves
+    // the chips path's own u_chipKeep above untouched, since only one mode renders).
+    const dgCells = Math.max(2, Math.round(Number(p.dgCells) || 8))
+    gl.uniform1f(u('u_dgCells'), dgCells)
+    gl.uniform1f(u('u_dgDensity'), Number.isFinite(Number(p.dgDensity)) ? Number(p.dgDensity) : 1)
+    gl.uniform1f(u('u_dgSizeVar'), Number.isFinite(Number(p.dgSizeVar)) ? Number(p.dgSizeVar) : 0)
+    if (String(p.mode) === 'dealtgrid') {
+      const dgKeep = chipKeepCell(dgCells, chipSeed)
+      gl.uniform3f(u('u_chipKeep'), dgKeep.cx, dgKeep.cy, dgKeep.second)
+    }
     gl.uniform1f(u('u_rotBias'), Number.isFinite(Number(p.rotBias)) ? Number(p.rotBias) : 0.5)
     gl.uniform1f(u('u_tw'), Number(p.truchetWeight) || 0.18)
     gl.uniform3fv(u('u_a'), hexToRgb(String(p.colorA)))

@@ -22,7 +22,10 @@ export function cloneParams<T>(value: T): T {
 // Content modes. APPEND ONLY — renderer.ts dispatches on MODES.indexOf(mode) and
 // saved scenes store the string. 'chips' (index 4) is the first non-lattice mode:
 // irregular scattered cells (terrazzo/mosaic/pebbles), see pattern.ts's chipSample.
-export const MODES = ['procedural', 'truchet', 'raster', 'shapes', 'chips'] as const
+// 'dealtgrid' (index 5) is the tileable cousin of the Frame's generative deal — a
+// rigid cells×cells grid where each cell hashes a colour role, a density drop, and
+// a size-variance inset; see pattern.ts's dealtGridSample.
+export const MODES = ['procedural', 'truchet', 'raster', 'shapes', 'chips', 'dealtgrid'] as const
 // Truchet tile families. multiscale MUST stay at index 3 — the GLSL reads it as a
 // bounded band (u_family in [2.5,3.5]) and the render() state-texture path keys on
 // the 'multiscale' string. maze/arcs2/arcdot are appended (indices 4-6): maze =

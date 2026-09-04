@@ -14,6 +14,7 @@ const isTruchet = (p: Params) => String(p.mode) === 'truchet'
 const isRaster = (p: Params) => String(p.mode) === 'raster'
 const isShapes = (p: Params) => String(p.mode) === 'shapes'
 const isChips = (p: Params) => String(p.mode) === 'chips'
+const isDealtGrid = (p: Params) => String(p.mode) === 'dealtgrid'
 
 // Which figure motifs read which knob. `bands` = concentric-band / wave-hump count;
 // `waveAmp` = wave amplitude; `lineWeight` = mark thickness (grid + the line figures).
@@ -22,10 +23,11 @@ const FIGURE_WAVE = new Set(['waves', 'zigzag'])
 const FIGURE_LINEWEIGHT = new Set(['grid', 'waves', 'zigzag', 'cross', 'graph'])
 
 export const TEXTURE_CONTROLS: TextureControl[] = [
-  // Lattice controls — hidden in raster mode (raster is whole-tile, no lattice)
-  // and in chips mode (chips scatter on their own grid, sized by 'Chips across').
-  { key: 'lattice', label: 'Lattice', kind: 'select', options: [...LATTICES], default: 'square', group: 'Lattice', when: (p) => !isRaster(p) && !isChips(p) },
-  { key: 'cells', label: 'Cells', kind: 'slider', min: 2, max: 40, step: 2, default: 8, group: 'Lattice', when: (p) => !isRaster(p) && !isChips(p) },
+  // Lattice controls — hidden in raster mode (raster is whole-tile, no lattice),
+  // in chips mode (chips scatter on their own grid, sized by 'Chips across'), and
+  // in dealt-grid mode (it owns its own grid, sized by 'Cells across').
+  { key: 'lattice', label: 'Lattice', kind: 'select', options: [...LATTICES], default: 'square', group: 'Lattice', when: (p) => !isRaster(p) && !isChips(p) && !isDealtGrid(p) },
+  { key: 'cells', label: 'Cells', kind: 'slider', min: 2, max: 40, step: 2, default: 8, group: 'Lattice', when: (p) => !isRaster(p) && !isChips(p) && !isDealtGrid(p) },
 
   { key: 'mode', label: 'Content', kind: 'select', options: [...MODES], default: 'procedural', group: 'Cell' },
   { key: 'shapeFamily', label: 'Shape', kind: 'select', options: [...SHAPE_FAMILIES], default: 'octagon', group: 'Cell', when: isShapes },
@@ -91,6 +93,17 @@ export const TEXTURE_CONTROLS: TextureControl[] = [
   { key: 'chipDensity', label: 'Density', kind: 'slider', min: 0.15, max: 1, step: 0.01, default: 1, group: 'Chips', when: isChips },
   { key: 'chipGrout', label: 'Grout width', kind: 'slider', min: 0, max: 0.25, step: 0.005, default: 0.05, group: 'Chips', when: isChips },
   { key: 'chipSizeVar', label: 'Chip size variance', kind: 'slider', min: 0, max: 1, step: 0.01, default: 0.7, group: 'Chips', when: isChips },
+
+  // Dealt grid controls — a rigid cells×cells grid, tileable by construction (every
+  // per-cell quantity is hashed on the WRAPPED cell index). 'Cells across' sizes the
+  // grid; 'Density' is the fraction of cells that draw at all (1 = every cell filled,
+  // lower scatters filled cells on the ground); 'Size variance' insets each filled
+  // square toward its centre for an irregular-tile / gutter look (0 = flush rigid
+  // grid). Colours come from the two inks + ground (roles.ts's dealtgrid family).
+  // See pattern.ts's dealtGridSample() for the cell math.
+  { key: 'dgCells', label: 'Cells across', kind: 'slider', min: 2, max: 24, step: 1, default: 8, group: 'Dealt grid', when: isDealtGrid },
+  { key: 'dgDensity', label: 'Density', kind: 'slider', min: 0.15, max: 1, step: 0.01, default: 1, group: 'Dealt grid', when: isDealtGrid },
+  { key: 'dgSizeVar', label: 'Size variance', kind: 'slider', min: 0, max: 1, step: 0.01, default: 0, group: 'Dealt grid', when: isDealtGrid },
 
   // Stroke controls — outline the boundaries between regions in shapes mode.
   // 'uniform' = one stroke color on all edges; 'per-role' = each region's edge

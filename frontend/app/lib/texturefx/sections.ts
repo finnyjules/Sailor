@@ -8,5 +8,6 @@ import { POST_SECTIONS } from '~/lib/studio/post/controls'
 // POST_SECTIONS (Bloom, Color, Duotone, ...) is appended so the shared post
 // stack's sections land after Fills — see controls.ts's `...postControls(...)`.
 // 'Chips' holds the terrazzo/mosaic knobs, shown only in chips mode.
-export const TEXTURE_SECTIONS = ['Lattice', 'Cell', 'Content', 'Truchet', 'Chips', 'Raster', 'Stroke', 'Stylize', 'Fills', 'Output', ...POST_SECTIONS] as const
+// 'Dealt grid' holds the tileable-deal knobs (cells/density/size variance), shown only in dealtgrid mode.
+export const TEXTURE_SECTIONS = ['Lattice', 'Cell', 'Content', 'Truchet', 'Chips', 'Dealt grid', 'Raster', 'Stroke', 'Stylize', 'Fills', 'Output', ...POST_SECTIONS] as const
 export type TextureSection = typeof TEXTURE_SECTIONS[number]

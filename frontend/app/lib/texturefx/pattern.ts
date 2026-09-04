@@ -84,6 +84,17 @@ export const CHIP_INK_ROLES = 2
 export const CHIP_TONE_RANGE = 0.6
 
 /**
+ * Ink roles the DEALT GRID cycles through; the ground role is index DEALT_INK_ROLES.
+ * Kept in step with ROLES_BY_FAMILY.dealtgrid in roles.ts (pinned by a unit test).
+ *
+ * Two inks + ground, exactly like chips — and for the same reason: the fill
+ * machinery resolves exactly three roles end-to-end (renderer.ts's u_fillType[3] …
+ * and the render() `for (r = 0; r < 3; r++)` loop), and roles.ts's legacyColor()
+ * hard-maps roleIndex 2 to the background, so a third ink is not a one-line change.
+ */
+export const DEALT_INK_ROLES = 2
+
+/**
  * Salts keeping the six per-cell hashes independent. Fractional, so `seed +
  * SALT` can never collide with another integer seed's salted value.
  *
@@ -308,6 +319,70 @@ export function chipSample(
   return { role, cellX: cx1, cellY: cy1, f1, f2, tone: chipHash(cx1, cy1, seed + CHIP_SALT_TONE) }
 }
 
+export type DealtGridSample = {
+  /** 0..DEALT_INK_ROLES-1 = the cell's ink role; DEALT_INK_ROLES = ground/empty. */
+  role: number
+  /** Wrapped id of the owning grid cell. */
+  cellX: number
+  cellY: number
+}
+
+/**
+ * The dealt grid: a rigid `cells × cells` grid in UV space (NOT Worley scatter),
+ * the tileable cousin of the Frame's generative deal. Seamless BY CONSTRUCTION —
+ * every per-cell quantity is hashed on the WRAPPED cell index posmod(ix,C),
+ * posmod(iy,C), so the tile repeats without a visible seam. Shares the chip hash
+ * and salt lanes (chipHash + CHIP_SALT_*), so the GLSL twin reuses the exact same
+ * u_chipSalt uniforms and needs no new hash — that is what keeps the twins in step.
+ *
+ * Per cell:
+ *  - ROLE by hash: floor(chipHash(cx,cy,seed+ROLE) * DEALT_INK_ROLES) → ink 0/1.
+ *  - DENSITY DROP: if chipHash(cx,cy,seed+DENSITY) >= density the cell is empty
+ *    (ground), EXCEPT the force-kept min-hash cell (chipKeepCell, shared with
+ *    chips), so no density can render a fully-blank tile. A dropped cell is ground
+ *    across its WHOLE area — filled cells SCATTERED on ground, not grown.
+ *  - SIZE VARIANCE: inset = sizeVar * chipHash(cx,cy,seed+R) * 0.5 shrinks the
+ *    filled square toward its centre (a gutter / irregular-tile look); the cell
+ *    outside the inset is ground. sizeVar 0 → flush cells (rigid grid).
+ *
+ * The lone survivor (kept cell is the only one left, keep.second >= density) is
+ * drawn FLUSH — its inset is skipped — so the guaranteed cell is always fully
+ * visible, mirroring the way chipSample() exempts its lone survivor from grout.
+ * Inert at density 1, where nothing is dropped.
+ *
+ * @param density Fraction of cells that fill, 0..1. Non-finite reads as 1 (a scene
+ *   saved before the control), which fills every cell. `>= density` is the exact
+ *   negation the GLSL twin carries.
+ * @param sizeVar Inset amount, 0..1. Non-finite reads as 0 (flush rigid grid).
+ */
+export function dealtGridSample(
+  u: number, v: number, cells: number, seed: number, density = 1, sizeVar = 0,
+): DealtGridSample {
+  const C = Math.max(2, Math.round(cells) || 8)
+  const gx = u * C, gy = v * C
+  const ix = Math.floor(gx), iy = Math.floor(gy)
+  const cx = posmod(ix, C), cy = posmod(iy, C)
+  const fx = gx - Math.floor(gx), fy = gy - Math.floor(gy)
+  const dens = clamp01(Number.isFinite(density) ? density : 1)
+  // Reuse chips' force-keep (a pure function of cells+seed): the min density-lane
+  // hash cell is never dropped, so no density renders a blank tile.
+  const keep = cachedKeep(C, seed)
+  const isKeep = cx === keep.cx && cy === keep.cy
+  const dropped = !isKeep && chipHash(cx, cy, seed + CHIP_SALT_DENSITY) >= dens
+  // `lone` = the kept cell is the ONLY survivor (runner-up density hash failed the
+  // test). It draws flush so the guaranteed cell is fully visible, not shrunk to a
+  // dot by its own size hash. Inert at density 1 (runner-up always passes).
+  const lone = isKeep && keep.second >= dens
+  const sv = clamp01(Number.isFinite(sizeVar) ? sizeVar : 0)
+  const inset = lone ? 0 : sv * chipHash(cx, cy, seed + CHIP_SALT_R) * 0.5
+  const inInset = fx >= inset && fx <= 1 - inset && fy >= inset && fy <= 1 - inset
+  const isGround = dropped || !inInset
+  const role = isGround
+    ? DEALT_INK_ROLES
+    : Math.min(DEALT_INK_ROLES - 1, Math.floor(chipHash(cx, cy, seed + CHIP_SALT_ROLE) * DEALT_INK_ROLES))
+  return { role, cellX: cx, cellY: cy }
+}
+
 /**
  * Colour jitter for a chip. Procedural mode spends `jitter` on a per-cell coin
  * flip that swaps the two ink roles (see `swap` in patternColor below); a chip
@@ -521,6 +596,19 @@ export function patternColor(p: Params, u: number, v: number): RGBA {
     const s = chipSample(u, v, chipCells, seed, grout, sizeVar, density)
     if (s.role >= CHIP_INK_ROLES) return out(BG)
     return out(chipTone(s.role === 0 ? A : B, s.tone, Number(p.jitter) || 0))
+  }
+
+  // Dealt grid — a rigid, tileable grid of solid-filled cells. Like chips it owns
+  // its own wrapped grid (dgCells), so it short-circuits before latticeCell().
+  // Roles: 0 = inkA, 1 = inkB, ground = background — matching ROLES_BY_FAMILY.dealtgrid
+  // / legacyColor's A/B/BG (v1 = solid cells only; no per-cell tone jitter).
+  if (String(p.mode) === 'dealtgrid') {
+    const dgCells = Math.max(2, Math.round(Number(p.dgCells) || 8))
+    const density = Number.isFinite(Number(p.dgDensity)) ? Number(p.dgDensity) : 1
+    const sizeVar = Number.isFinite(Number(p.dgSizeVar)) ? Number(p.dgSizeVar) : 0
+    const s = dealtGridSample(u, v, dgCells, seed, density, sizeVar)
+    if (s.role >= DEALT_INK_ROLES) return out(BG)
+    return out(s.role === 0 ? A : B)
   }
 
   const { cx, cy, fx, fy } = latticeCell(String(p.lattice), cells, u, v)

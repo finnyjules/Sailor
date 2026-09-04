@@ -40,7 +40,7 @@ import type { Params } from '~/lib/spacetype/effect'
 const TILE = 128        // tile render size
 const DISP = TILE * 2   // 2×2 repeat display
 
-interface Item { key: string; label: string; params: Params; kind: 'proc' | 'truchet' | 'shape' | 'chips'; delta: number }
+interface Item { key: string; label: string; params: Params; kind: 'proc' | 'truchet' | 'shape' | 'chips' | 'dealt'; delta: number }
 
 function mk(kind: Item['kind'], name: string, extra: Partial<Params>): Item {
   return { key: `${kind}:${name}`, label: name, kind, delta: 0, params: { ...textureDefaults(), cells: 8, ...extra } as Params }
@@ -69,12 +69,28 @@ const CHIP_LOOKS: { name: string; params: Partial<Params> }[] = [
   { name: 'big seed', params: { seed: 999983 } },   // float32 seed-precision check
 ]
 const chipItems = CHIP_LOOKS.map((l) => mk('chips', l.name, { mode: 'chips', ...l.params }))
+// Dealt grid — like chips, one family with sliders rather than a family list, so the
+// parity row is the looks those three sliders reach: a flush rigid grid, size-variance
+// gutters, sparse density (incl. the density floor where one force-kept cell survives),
+// a fine grid, and a big seed (float32 seed-precision check).
+const DEALT_LOOKS: { name: string; params: Partial<Params> }[] = [
+  { name: 'default', params: {} },
+  { name: 'flush', params: { dgCells: 10, dgDensity: 1, dgSizeVar: 0 } },
+  { name: 'gutters', params: { dgCells: 8, dgDensity: 1, dgSizeVar: 0.6 } },
+  { name: 'quilt', params: { dgCells: 6, dgDensity: 1, dgSizeVar: 0.9 } },
+  { name: 'sparse', params: { dgCells: 12, dgDensity: 0.4, dgSizeVar: 0.3 } },
+  { name: 'density floor', params: { dgCells: 4, seed: 20, dgDensity: 0.15, dgSizeVar: 0.6 } },
+  { name: 'fine', params: { dgCells: 24, dgDensity: 0.85, dgSizeVar: 0.2 } },
+  { name: 'big seed', params: { seed: 999983, dgCells: 10, dgSizeVar: 0.5 } },
+]
+const dealtItems = DEALT_LOOKS.map((l) => mk('dealt', l.name, { mode: 'dealtgrid', ...l.params }))
 
 const groups = reactive([
   { title: `Procedural motifs (${procItems.length})`, items: procItems },
   { title: `Truchet families (${truchetItems.length})`, items: truchetItems },
   { title: `Shape families (${shapeItems.length})`, items: shapeItems },
   { title: `Chips looks (${chipItems.length})`, items: chipItems },
+  { title: `Dealt grid looks (${dealtItems.length})`, items: dealtItems },
 ])
 
 const maxDelta = ref(0)
@@ -89,8 +105,8 @@ const hexRgb = (hex: string): [number, number, number] => {
 function cpuTile(item: Item): Uint8ClampedArray {
   const p = item.params
   const out = new Uint8ClampedArray(TILE * TILE * 4)
-  // Only the shape branch below reads `fam` (chips has a single family and takes
-  // the patternColor path, same as proc/truchet).
+  // Only the shape branch below reads `fam` (chips and dealt grid each have a single
+  // family and take the patternColor path, same as proc/truchet).
   const fam = String(item.kind === 'proc' ? p.motif : item.kind === 'truchet' ? p.tileFamily : p.shapeFamily)
   for (let y = 0; y < TILE; y++) {
     for (let x = 0; x < TILE; x++) {
