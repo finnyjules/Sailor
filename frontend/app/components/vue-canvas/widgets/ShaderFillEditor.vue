@@ -26,6 +26,7 @@ import { ChevronRight, RefreshCw, Sparkles } from 'lucide-vue-next'
 import CatalogModal from '~/components/CatalogModal.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
+import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
@@ -213,6 +214,13 @@ const speed = computed<number>({
   get: () => props.modelValue.speed,
   set: (v) => patch({ speed: v }),
 })
+const seed = computed<number>({
+  get: () => props.modelValue.seed,
+  set: (v) => patch({ seed: Math.max(1, Math.round(v)) }),
+})
+function rerollSeed() {
+  patch({ seed: Math.floor(Math.random() * 9999) + 1 })
+}
 
 // ── Nested input fill ─────────────────────────────────────────────────────────
 // `ShaderSpec.input` is `Paint` now (fillTile.ts), the same union FillControl
@@ -307,6 +315,14 @@ function onInputChange(p: Paint) {
 
     <!-- Speed -->
     <StudioSlider v-model="speed" label="Speed" :min="0" :max="4" :step="0.05" :default="DEFAULT_SHADER_SPEC.speed" />
+
+    <!-- Variation: re-rolls the field's seed. -->
+    <div class="flex items-center gap-2">
+      <StudioButton variant="secondary" @click="rerollSeed">New variation</StudioButton>
+      <div class="min-w-0 flex-1">
+        <StudioSlider v-model="seed" label="Variation" :min="1" :max="9999" :step="1" :default="DEFAULT_SHADER_SPEC.seed" />
+      </div>
+    </div>
 
     <!-- Nested input fill: the recursive half, depth-limited to 1 via `nested`. -->
     <div class="border-t border-white/10 pt-2.5">
