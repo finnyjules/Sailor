@@ -14,60 +14,89 @@ float hash2(vec2 ip, float seed) {
     uint h = pcg(q.x ^ pcg(q.y ^ pcg(uint(int(seed)))));
     return float(h) * (1.0 / 4294967295.0);
 }
+float vnoise(vec2 p, float seed) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u2 = f * f * (3.0 - 2.0 * f);
+    float a = hash2(i, seed), b = hash2(i + vec2(1, 0), seed);
+    float c = hash2(i + vec2(0, 1), seed), d = hash2(i + vec2(1, 1), seed);
+    return mix(mix(a, b, u2.x), mix(c, d, u2.x), u2.y);
+}
+// The tool's two fixed noise stacks: three taps for the curtain, two for the blots.
+float fbm3(vec2 p, float k) { return vnoise(p, k) * 0.55 + vnoise(p * 2.13, k + 11.0) * 0.28 + vnoise(p * 4.31, k + 23.0) * 0.17; }
+float fbm2t(vec2 p, float k) { return vnoise(p, k) * 0.62 + vnoise(p * 2.13, k + 11.0) * 0.38; }
 
+// Ink 1 is the neon; inks 2.. are the ground tints. Colours are squared before blending
+// and square-rooted after, so mixes stay glowing instead of muddy.
 #define MAXS 8
 uniform vec3 u_ramp[MAXS];
 uniform float u_rampPos[MAXS];
 uniform float u_rampCount;
-vec3 rampAt(float t) {
-    t = clamp(t, 0.0, 1.0);
-    int n = int(u_rampCount + 0.5);
-    vec3 c = u_ramp[0];
-    for (int i = 1; i < MAXS; i++) {
-        if (i >= n) break;
-        float p0 = u_rampPos[i - 1], p1 = u_rampPos[i];
-        c = mix(c, u_ramp[i], clamp((t - p0) / max(p1 - p0, 1e-5), 0.0, 1.0));
-    }
-    return c;
-}
 
-uniform float u_blobs;
-uniform float u_size;
+uniform float u_streaks;
+uniform float u_cover;
 uniform float u_soft;
+uniform float u_blot;
 uniform float u_grain;
+uniform float u_bleed;
 uniform float u_speed;
 uniform float u_mix;
 
 void main() {
-    vec2 asp = vec2(u_resolution.x / u_resolution.y, 1.0);
-    vec2 uv = v_texCoord * asp;
-    vec2 px = floor(v_texCoord * u_resolution);
-    float t = u_time * u_speed * 0.2;
-    int n = int(clamp(u_blobs, 1.0, 12.0) + 0.5);
+    float W = u_resolution.x, H = u_resolution.y;
+    float mind = min(W, H);
+    // Canvas coordinates centred, scaled by the short side, y DOWN (as the tool).
+    vec2 pxy = vec2(v_texCoord.x * W, (1.0 - v_texCoord.y) * H);
+    float nx = (pxy.x - W * 0.5) / mind * 1.7;
+    float ny = (pxy.y - H * 0.5) / mind * 1.7;
 
-    vec3 col = u_ramp[0];                                  // first ink is the paper
-    float sharp = mix(6.0, 1.5, clamp(u_soft, 0.0, 1.0));  // softer = wider falloff
-    float sprayBase = hash2(px, u_seed + 31.0);
-    for (int i = 0; i < 12; i++) {
-        if (i >= n) break;
-        float fi = float(i);
-        // Each wash has a seeded home position and drifts gently around it.
-        vec2 c = vec2(hash2(vec2(fi, 0.0), u_seed), hash2(vec2(fi, 1.0), u_seed)) * asp;
-        c += 0.08 * vec2(sin(t + fi * 1.7), cos(t * 0.8 + fi * 2.3));
-        float d = length(uv - c) / max(u_size, 0.05);
-        float w = exp(-d * d * sharp);
-        // Spray: per-pixel noise eats into the wash more toward its edge.
-        float spray = 1.0 - u_grain * fract(sprayBase + fi * 0.37) * (0.3 + 0.7 * min(d, 1.5));
-        w = clamp(w * spray, 0.0, 1.0);
-        // Washes only use the inks after the paper: start the lookup at the second stop.
-        float inkStart = (int(u_rampCount + 0.5) >= 2) ? u_rampPos[1] : 0.0;
-        vec3 ink = rampAt(inkStart + (1.0 - inkStart) * fract(fi * 0.618034 + 0.31));
-        col = 1.0 - (1.0 - col) * (1.0 - ink * w);         // screen blend: neon adds light
+    int n = max(1, int(u_rampCount + 0.5));
+    vec3 neon = u_ramp[0] * u_ramp[0];
+    int nB = max(1, n - 1);                                  // ground tints; a lone ink is its own ground
+
+    // Bleed lets the whole wash wander on a closed circle; still at Speed 0.
+    float ph = u_time * u_speed * 0.3;
+    float AA = min(1.6, u_bleed);
+    float zx = 0.45 * AA * cos(ph), zy = 0.45 * AA * sin(ph);
+
+    float th = 1.0 - u_cover * 0.9;
+    float del = 0.06 + u_soft * 0.24;
+    float stf = 2.6 * u_streaks + 1.2;
+    float bsc = 0.9 + u_blot * 2.2;
+    float gr = u_grain * 13.0 / 255.0;
+
+    // Seeded offsets stand in for the tool's per-seed random placements.
+    float sox = hash2(vec2(1.0, 0.0), u_seed) * 53.0, soy = hash2(vec2(2.0, 0.0), u_seed) * 29.0;
+
+    // Soft pastel ground: the base inks blot into each other.
+    float gx = nx * bsc + zx * 0.5, gy = ny * bsc + zy * 0.5;
+    vec3 acc = vec3(0.0); float sw = 0.0;
+    for (int b = 0; b < MAXS - 1; b++) {
+        if (b >= nB) break;
+        float ox = hash2(vec2(float(b), 3.0), u_seed) * 37.0, oy = hash2(vec2(float(b), 4.0), u_seed) * 43.0;
+        float nz = fbm2t(vec2(gx + ox, gy + oy), 60.0 + float(b));
+        float w = pow(max(nz, 0.002), 3.4);
+        vec3 tint = (n > 1) ? u_ramp[clamp(b + 1, 0, MAXS - 1)] : u_ramp[0];
+        acc += w * tint * tint; sw += w;
     }
+    vec3 ground = acc / max(sw, 1e-6);
+
+    // The neon curtain: tall thin noise, ragged edges, soft halo.
+    float q1 = fbm3(vec2(nx * 1.9 + 3.1, ny * 1.9 + 8.7), 91.0);
+    float sx2 = nx * stf + 0.5 * (q1 - 0.5) + sox + zx;
+    float sy2 = ny * 0.5 + soy + zy * 0.4;
+    float st = fbm3(vec2(sx2, sy2), 77.0) * 0.72 + fbm3(vec2(sx2 * 2.4, sy2 * 2.1), 78.0) * 0.28;
+    float m = smoothstep(th - del, th + del, st);
+    vec3 sq = mix(ground, neon, m);
+
+    // Grain with the tool's soft-blob character: the tool paints ~260 px wide and scales
+    // up smooth, so its per-pixel grain becomes soft bumps; value noise at that lattice
+    // gives the same.
+    float lat = 260.0 / mind;
+    float g2 = (vnoise(pxy * lat, u_seed + 7.0) - 0.5) * gr;
+    vec3 col = clamp(sqrt(max(sq, 0.0)) + g2, 0.0, 1.0);
 
     if (u_hasInput > 0.5 && u_mix > 0.0) {
-        vec3 img = texture(u_image0, v_texCoord).rgb;
-        col = mix(col, img, u_mix);
+        col = mix(col, texture(u_image0, v_texCoord).rgb, u_mix);
     }
-    fragColor0 = vec4(clamp(col, 0.0, 1.0), 1.0);
+    fragColor0 = vec4(col, 1.0);
 }
