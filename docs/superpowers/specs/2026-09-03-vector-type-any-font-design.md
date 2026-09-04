@@ -60,9 +60,17 @@ for one release so nothing else breaks.
 **Fail-closed server route for Google cuts.** `server/api/fonts/google-file.get.ts`
 is the 3D Studio's `scene3d/google-font-file` proxy moved to a shared home (the
 old path keeps working as an alias): `family` must exist in the server-side
-Google catalog (`server/utils/googleCatalog.ts`) and `weight` must be one of that
-family's listed weights, or the route answers 400 before touching the network.
-Same curl user-agent trick, same 24 h / 50-entry cache.
+Google catalog (`server/utils/googleCatalog.ts`), or the route answers 400 before
+touching the network. Same curl user-agent trick, same 24 h / 50-entry cache.
+
+**As built, the WEIGHT is not fail-closed — it snaps.** The family stays
+fail-closed (unknown → 400, never substituted), but a weight the family does not
+ship resolves to its nearest shipped one (ties → the lower); only a non-numeric
+weight is refused. Archivo Black ships a single weight, 400, and several callers
+(the 3D Studio among them, which shares this handler) send a hardcoded `@700`:
+refusing them would 400 a font that loads perfectly well, when 400 is the only
+honest answer the family has. The studio's Weight row keeps the token's own
+number as an option for the same reason, so the row never renders blank.
 
 **Config parse.** `mergeConfig` accepts any of the three token shapes (a
 validator `isVtFontToken`), falling back to the default id for anything else —
@@ -109,8 +117,9 @@ family name picks a static cut; the ten pinned families have live axes."
 - Token grammar: parse/format round-trips for all three shapes; junk → default.
 - Loader: a static TTF fixture parses to a `VtFont` with empty axes; the curated
   path still yields axes; a rejected load is evicted from the cache.
-- Server route: unknown family → 400 without a fetch; weight not shipped → 400;
-  known pair → TTF bytes (mocked upstream).
+- Server route: unknown family → 400 without a fetch; an unshipped weight SNAPS
+  to the family's nearest shipped one (non-numeric → 400); known pair → TTF
+  bytes (mocked upstream).
 - Surface: the Weight select lists the catalog's weights for a Google family and
   hides for a curated one (component-level test through the control schema).
 - Live: pick a Google family in the studio, see it render, export SVG; pick a

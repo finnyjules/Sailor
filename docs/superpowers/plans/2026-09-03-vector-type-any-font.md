@@ -289,14 +289,16 @@ const cat = [{ family: 'Inter Tight', weights: [400, 700] }, { family: 'Lora', w
 describe('validateGoogleCut', () => {
   it('accepts a listed family + shipped weight', () => expect(validateGoogleCut(cat, 'Inter Tight', '700')).toEqual({ ok: true, family: 'Inter Tight', weight: 700 }))
   it('defaults a missing weight to the nearest shipped one to 400', () => expect(validateGoogleCut(cat, 'Lora', undefined)).toEqual({ ok: true, family: 'Lora', weight: 400 }))
-  it('refuses an unknown family, an unshipped weight, and junk — before any fetch', () => {
-    for (const [f, w] of [['Nope', '400'], ['Inter Tight', '500'], ['', '400'], ['Inter Tight', 'abc'], ['Inter Tight&x=1', '400']] as const)
+  it('refuses an unknown family and junk — before any fetch', () => {
+    for (const [f, w] of [['Nope', '400'], ['', '400'], ['Inter Tight', 'abc'], ['Inter Tight&x=1', '400']] as const)
       expect(validateGoogleCut(cat, f, w).ok).toBe(false)
   })
+  // AS BUILT (corrected after the review): the WEIGHT snaps, it does not refuse.
+  it('snaps an unshipped weight to the nearest shipped one', () => expect(validateGoogleCut(cat, 'Inter Tight', '500')).toEqual({ ok: true, family: 'Inter Tight', weight: 400 }))
 })
 ```
 (Check the `~~/server/...` alias works in vitest — grep an existing spec importing from `server/utils`; if none does, use a relative import.)
-- [ ] **Step 2: Run** → FAIL. **Step 3:** implement `validateGoogleCut` (exact family match; weight must be in `weights`; missing weight → nearest to 400; non-finite → refuse) and move the fetch/cache code from the scene3d route into `fetchGoogleCutTtf` unchanged. The new route: `const cat = await getGoogleCatalog(); const v = validateGoogleCut(cat, query.family, query.weight); if (!v.ok) throw createError({ statusCode: 400, message: v.message }); const buf = await fetchGoogleCutTtf(v.family, v.weight); setHeader ttf + cache; return buf`. The scene3d route file becomes `export { default } from '../fonts/google-file.get'` (keep its doc comment pointing at the new home). If `getGoogleCatalog` can be unavailable (offline), the route answers 503 with a plain message — never falls open.
+- [ ] **Step 2: Run** → FAIL. **Step 3:** implement `validateGoogleCut` (exact family match, fail-closed; missing OR unshipped weight → the family's nearest shipped weight, ties to the lower; non-finite → refuse). The weight SNAPS rather than 400s: Archivo Black ships only 400 and callers with a hardcoded `@700` — the 3D Studio shares this handler — would otherwise fail on a font that loads fine. The family is the security boundary here; the weight is not. and move the fetch/cache code from the scene3d route into `fetchGoogleCutTtf` unchanged. The new route: `const cat = await getGoogleCatalog(); const v = validateGoogleCut(cat, query.family, query.weight); if (!v.ok) throw createError({ statusCode: 400, message: v.message }); const buf = await fetchGoogleCutTtf(v.family, v.weight); setHeader ttf + cache; return buf`. The scene3d route file becomes `export { default } from '../fonts/google-file.get'` (keep its doc comment pointing at the new home). If `getGoogleCatalog` can be unavailable (offline), the route answers 503 with a plain message — never falls open.
 - [ ] **Step 4:** tests + typecheck grep `googleFontFile|google-file|google-font-file`. Start nothing; the live check is Task 6.
 - [ ] **Step 5: Commit** — `feat(fonts): shared fail-closed Google cut route — family and weight validated against the catalog before any fetch`
 
