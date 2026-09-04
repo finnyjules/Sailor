@@ -57,6 +57,7 @@ import { paintMaskRelease } from '~/lib/compositor/maskBreak'
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
 import { resolveGrid, defaultGrid, type FrameGrid } from '~/lib/frame/grid'
 import { pickDealPaint, keptCell, forceKeptCell, type DealVocab } from '~/lib/compositor/dealVocab'
+import { paneCellGradient } from '~/lib/compositor/pane'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -584,6 +585,11 @@ export interface DealLayer extends LayerCommon {
   vocab: DealVocab            // named weighted fill vocabulary
   density: number             // 0..1 fraction of cells that get filled (rest transparent)
   cellInset: number           // 0..0.4 normalized inset per cell (gutter look on top of the grid's own)
+  // How each kept cell is painted. 'solid' (default / absent) = one vocabulary fill
+  // per cell; 'pane' = a hue-walked two-ink linear gradient per cell (a "gradient
+  // mosaic" / Pane look), from the same palette. Absent behaves as 'solid' so
+  // existing deals are unchanged.
+  cellFill?: 'solid' | 'pane'
 }
 
 export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer
@@ -722,6 +728,7 @@ export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
     vocab: 'brand',
     density: 1,
     cellInset: 0,
+    cellFill: 'solid',
     ...partial,
     grid,
   }
@@ -2034,7 +2041,12 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // paintTileBox paints ANY Paint (solid / gradient / pattern Fill) at corner
       // origin; a shader-typed Fill unwraps to its input there, so no field request
       // is needed (see layerPaints('deal')). Drawn into the cell's own sub-box.
-      const tile = paintTileBox(pickDealPaint(layer.vocab, seed, i), cw, ch)
+      // 'pane' cell fill swaps the solid vocabulary pick for a hue-walked two-ink
+      // gradient (a "gradient mosaic"); everything else about the cell is unchanged.
+      const cellPaint = layer.cellFill === 'pane'
+        ? paneCellGradient(layer.vocab, seed, i)
+        : pickDealPaint(layer.vocab, seed, i)
+      const tile = paintTileBox(cellPaint, cw, ch)
       ctx.drawImage(tile, r.x + ins, r.y + ins, cw, ch)
     }
     ctx.restore()

@@ -678,6 +678,27 @@ function onDealTemplate(t: GridTemplate) {
   addLocal(createDealLayer({ grid: g, w: 1, h: aspect, vocab: t.deal.vocab, density: t.deal.density, cellInset: t.deal.cellInset }))
 }
 
+/** One-click "Pane" — a gradient mosaic: an uneven grid whose every kept cell is a
+ *  hue-walked two-ink linear gradient (cellFill:'pane'). Configures the selected deal,
+ *  or — with none selected — creates a fresh deal from the frame's grid, in one
+ *  undoable step. Reuses the same setLocal / createDealLayer path as the templates,
+ *  with a suitably uneven grid (low regularity + merge on) so "Pane" is one click. */
+function onPane() {
+  if (selectedLocal.value?.kind === 'deal') {
+    const layer = selectedLocal.value as DealLayer
+    setLocal(layer.id, {
+      cellFill: 'pane',
+      grid: { ...layer.grid, mode: 'generated', gen: { ...layer.grid.gen, regularity: 0.35, merge: true } },
+    } as Partial<DealLayer>)
+    return
+  }
+  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
+  g.mode = 'generated'
+  g.gen = { ...g.gen, regularity: 0.35, merge: true }
+  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, cellFill: 'pane' }))
+}
+
 // Normalize brush layers to a tight box: brush strokes are stored in absolute
 // artboard coords, and a layer's x/y/w/h should equal their bounds so the render
 // centres them in place and selection/handles hug the marks. Layers painted before
@@ -6744,6 +6765,8 @@ onUnmounted(() => {
               <div class="flex flex-wrap gap-1.5">
                 <StudioButton v-for="t in GRID_TEMPLATE_LIST" :key="t.id" variant="secondary" :title="t.blurb"
                   @click="applyDealTemplate(selectedLocal as DealLayer, t)">{{ t.name }}</StudioButton>
+                <StudioButton variant="secondary" title="A gradient mosaic — every cell a hue-walked two-ink gradient at a crisp angle"
+                  @click="onPane()">Pane</StudioButton>
               </div>
               <p class="mt-1 text-[10px] text-white/30 leading-snug">One click sets the palette, density and cell layout; your current variation is kept.</p>
             </div>
@@ -6751,6 +6774,12 @@ onUnmounted(() => {
               <div class="panel-label mb-1.5">Palette</div>
               <StudioSegmented :options="DEAL_VOCABS as any" :model-value="(selectedLocal as any).vocab"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { vocab: v })" />
+            </div>
+            <div class="mt-2">
+              <div class="panel-label mb-1.5">Cell fill</div>
+              <StudioSegmented :options="['Solid', 'Gradient mosaic']"
+                :model-value="(selectedLocal as any).cellFill === 'pane' ? 'Gradient mosaic' : 'Solid'"
+                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { cellFill: v === 'Gradient mosaic' ? 'pane' : 'solid' })" />
             </div>
             <div class="mt-2 flex flex-col gap-1.5">
               <StudioSlider label="Density" :min="0.05" :max="1" :step="0.02" :bindable="false"
@@ -7246,6 +7275,8 @@ onUnmounted(() => {
               <div class="flex flex-wrap gap-1.5">
                 <StudioButton v-for="t in GRID_TEMPLATE_LIST" :key="t.id" variant="secondary" :title="t.blurb"
                   @click="onDealTemplate(t)">{{ t.name }}</StudioButton>
+                <StudioButton variant="secondary" title="A gradient mosaic — every cell a hue-walked two-ink gradient at a crisp angle"
+                  @click="onPane()">Pane</StudioButton>
               </div>
             </div>
           </div>
