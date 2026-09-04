@@ -139,6 +139,14 @@ function setType(t: FillType) {
     fill.shapeSize = 0.1
     fill.shapeGap = 0.03
   }
+  // Switching INTO paper seeds a grain amount plus tasteful paper colours + a fine grain scale,
+  // but only overwrites colours/density still at their solid defaults (never a user's own values).
+  if (t === 'paper') {
+    if (typeof fill.grain !== 'number') fill.grain = 0.4
+    if (fill.a === '#ffffff') fill.a = '#f3efe6'
+    if (fill.b === '#000000') fill.b = '#8b7d68'
+    if (fill.density === 8) fill.density = 12
+  }
   fill.type = t; push()
 }
 function onGrad(g: Gradient) { grad.value = g; push() }
@@ -161,7 +169,7 @@ function shuffle() {
   drawPreview()
 }
 function setColor(key: 'a' | 'b', v: string) { fill[key] = v; push() }
-function setNum(key: 'angle' | 'density' | 'shapeSize' | 'shapeGap', v: number) { fill[key] = v; push() }
+function setNum(key: 'angle' | 'density' | 'shapeSize' | 'shapeGap' | 'grain', v: number) { fill[key] = v; push() }
 function toggleNone() {
   // Adding a fill from the none state: emit the editable fill DIRECTLY, not via
   // push() — push()'s `if (!isNone.value)` guard (which stops colour edits from
@@ -183,10 +191,12 @@ function applyBrandColor(hex: string) {
 
 // Gradient gets its own editor; patterns keep the A/B + angle + density controls.
 const needsB = computed(() => fill.type !== 'solid' && fill.type !== 'gradient')
-const needsAngle = computed(() => fill.type === 'ombre' || fill.type === 'stripes' || fill.type === 'shapes')
-const needsDensity = computed(() => fill.type === 'grid' || fill.type === 'checkerboard' || fill.type === 'stripes' || fill.type === 'noise' || fill.type === 'qr')
+const needsAngle = computed(() => fill.type === 'ombre' || fill.type === 'stripes' || fill.type === 'shapes' || fill.type === 'paper')
+const needsDensity = computed(() => fill.type === 'grid' || fill.type === 'checkerboard' || fill.type === 'stripes' || fill.type === 'noise' || fill.type === 'qr' || fill.type === 'paper')
 // Shapes steers count via Size + Spacing (tile fractions) instead of a raw Density.
 const needsShapeGrid = computed(() => fill.type === 'shapes')
+// Paper exposes a grain-amount slider (0..1) on top of the shared A/B + density + angle rows.
+const needsGrain = computed(() => fill.type === 'paper')
 
 // Shapes fill: pick the library shape tiled across the grid, and let the tile
 // sit on a transparent background instead of a solid `b`.
@@ -362,6 +372,14 @@ watch(imageFill, drawPreview, { deep: true })
         </div>
         <input type="range" min="1" max="32" step="1" :value="fill.density" class="w-full accent-white cursor-pointer"
           @input="setNum('density', Number(($event.target as HTMLInputElement).value))" />
+      </div>
+
+      <div v-if="needsGrain">
+        <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
+          <span>Grain</span><span class="tabular-nums normal-case">{{ Math.round((fill.grain ?? 0.4) * 100) }}%</span>
+        </div>
+        <input type="range" min="0" max="1" step="0.02" :value="fill.grain ?? 0.4" class="w-full accent-white cursor-pointer"
+          @input="setNum('grain', Number(($event.target as HTMLInputElement).value))" />
       </div>
 
       <div v-if="needsShapeGrid">
