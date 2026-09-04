@@ -110,7 +110,7 @@ const KINDS: Record<string, MoveKindDef<VectorTypeConfig>> = {
  * `blur-slide-out-down` exists) and is deliberately left unpaired, per the
  * brief: do not invent a pair that is not really there.
  */
-const VT_PRESET_IN_TO_OUT: Record<string, string> = {
+export const VT_PRESET_IN_TO_OUT: Record<string, string> = {
   'appear': 'disappear',
   'fade-in': 'fade-out',
   'slide-up': 'slide-out-up',
