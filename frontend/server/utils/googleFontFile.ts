@@ -1,10 +1,17 @@
 /**
- * Shared, fail-closed Google Fonts cut fetcher.
+ * Shared, fail-closed(-ish) Google Fonts cut fetcher.
  *
  * `validateGoogleCut` checks a `family`/`weight` pair against the server's
  * Google Fonts catalog (server/utils/googleCatalog.ts) BEFORE any upstream
- * fetch happens — an unknown family or an unshipped weight is refused with
- * a 400, never silently substituted or fetched anyway.
+ * fetch happens. The FAMILY is fail-closed — unknown, empty, or junk is
+ * refused with a 400, never silently substituted or fetched anyway. The
+ * WEIGHT is not: a family that doesn't ship the requested weight SNAPS to its
+ * nearest shipped one (`nearestWeight`, ties → the lower) rather than
+ * refusing outright — Archivo Black ships only 400, and a caller with a
+ * hardcoded `@700` default (several studios do) would otherwise 400 for no
+ * benefit when 400 is the honest, requestable answer anyway. A non-finite or
+ * missing weight still falls back the same way, to the nearest shipped
+ * weight to 400.
  *
  * `fetchGoogleCutTtf` is the actual proxy: the Google Fonts CSS endpoint
  * (fonts.googleapis.com/css2) serves woff2 to modern browser user-agents but
@@ -53,11 +60,8 @@ export function validateGoogleCut(
     return { ok: false, status: 400, message: `Invalid weight: ${String(weight)}` }
   }
   const rounded = Math.round(weightNum)
-  if (!entry.weights.includes(rounded)) {
-    return { ok: false, status: 400, message: `${familyStr} does not ship weight ${rounded}` }
-  }
 
-  return { ok: true, family: entry.family, weight: rounded }
+  return { ok: true, family: entry.family, weight: nearestWeight(entry.weights, rounded) }
 }
 
 const TTL_MS = 24 * 60 * 60 * 1000
