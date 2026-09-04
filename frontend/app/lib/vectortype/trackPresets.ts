@@ -47,7 +47,9 @@
  * reaches the plate offset they already chose.
  */
 import {
+  VT_HEIGHT_MAX,
   VT_STACK_PREFIX,
+  VT_STRETCH_MAX,
   type VectorTypeConfig,
   type VtAppearanceLayer,
   type VtLayerKind,
@@ -332,7 +334,9 @@ const PRESETS: VtTrackPreset[] = [
     // value only while no track claims that path. Starts at 1.6 — an extended
     // cut, not a smear.
     build: () => [track('stretch', 1.6, 1)],
-    dials: [{ label: 'Start width', trackIndex: 0, field: 'from', min: 1, max: 2.5, step: 0.05 }],
+    // Cap at the width dial's own ceiling — a tuning dial must not promise
+    // headroom the frame's clampStretch silently caps at render.
+    dials: [{ label: 'Start width', trackIndex: 0, field: 'from', min: 1, max: VT_STRETCH_MAX, step: 0.05 }],
   },
   {
     id: 'stretch-wave', label: 'Stretch Wave', pitch: 'A crest of width travels through the word', ...RUN,
@@ -358,7 +362,9 @@ const PRESETS: VtTrackPreset[] = [
     // `to` is 1, the drawn height: absolute, like every track in this table, so
     // a user who set the height dial to 1.4 gets letters that land at 1.0.
     build: () => [track('stretchY', 1.8, 1)],
-    dials: [{ label: 'Start height', trackIndex: 0, field: 'from', min: 1, max: 2.5, step: 0.05 }],
+    // Cap at the height dial's own ceiling (higher than width) — same reason as
+    // Stretch In: no headroom the frame's clampHeight would silently cap.
+    dials: [{ label: 'Start height', trackIndex: 0, field: 'from', min: 1, max: VT_HEIGHT_MAX, step: 0.05 }],
   },
 ]
 
