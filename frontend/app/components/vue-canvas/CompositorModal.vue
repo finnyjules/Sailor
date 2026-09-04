@@ -585,7 +585,24 @@ const {
   editingLayerNameId, layerNameDraft, startLayerRename, commitLayerRename,
   snapGuides, marquee, startMarquee, moveMarquee, endMarquee,
   hud,
+  fillGridWithSections, resnapSelected,
+  drawSectionActive, setDrawSectionActive, finishDrawSection,
 } = editor
+
+// Region-count cap for "Fill grid with sections": a dense generated/explicit
+// grid (say 12×8) can resolve to dozens of cells — stamping a rect per cell past
+// this point is real, avoidable layer-panel/render clutter for a feature meant
+// for coarse layout grids. Dense fills are a later feature (see Task 7 brief).
+const GRID_SECTIONS_CAP = 24
+function onFillGridWithSections() {
+  const { regions } = gridResolved.value
+  if (!regions.length) { toast('Turn the grid on first', { description: 'Fill grid with sections needs an explicit or generated grid.' }); return }
+  if (regions.length > GRID_SECTIONS_CAP) {
+    toast('Too many regions for sections', { description: 'Use a coarser grid — dense fills are a later feature.' })
+    return
+  }
+  fillGridWithSections(regions)
+}
 
 // Normalize brush layers to a tight box: brush strokes are stored in absolute
 // artboard coords, and a layer's x/y/w/h should equal their bounds so the render
@@ -1700,6 +1717,17 @@ function onCanvasPointerDownCapture(e: PointerEvent) {
   if (brush.active.value) { onBrushPointerDown(e); return } // brush mode owns the canvas
   if (pen.active.value) { onPenPointerDown(e); return } // pen mode owns the canvas
   if (nodeEdit.active.value) { onNodePointerDown(e); return } // node edit owns the canvas
+  if (drawSectionActive.value) {
+    // Draw-section mode owns the canvas: ALWAYS starts a fresh marquee (never a
+    // layer hit/move), so selection is untouched while the mode is on — see
+    // `finishDrawSection`, the separate branch that turns the drag into a rect.
+    // `lastDownHitLayer = true` stops the trailing `click` from deselecting the
+    // rect `finishDrawSection` just selected (same guard the layer-hit path uses).
+    lastDownHitLayer = true
+    const p = clientToNorm(e)
+    if (p) startMarquee(p.nx, p.ny)
+    return
+  }
   if ((e.target as HTMLElement)?.closest?.('[data-handle]')) return // a handle's own drag
   const key = hitTopStackKey(e.clientX, e.clientY)
   const res = key ? resolveStackKey(key) : null
@@ -1724,6 +1752,7 @@ function onCanvasPointerMoveCapture(e: PointerEvent) {
   if (brush.active.value) { onBrushPointerMove(e); return }
   if (pen.active.value) onPenPointerMove(e)
   else if (nodeEdit.active.value) onNodePointerMove(e)
+  else if (drawSectionActive.value) { if (marquee.value) { const p = clientToNorm(e); if (p) moveMarquee(p.nx, p.ny) } }
   else if (marquee.value) { const p = clientToNorm(e); if (p) moveMarquee(p.nx, p.ny) }
 }
 function onCanvasPointerUpCapture(e: PointerEvent) {
@@ -1732,6 +1761,7 @@ function onCanvasPointerUpCapture(e: PointerEvent) {
   if (brush.active.value) { void onBrushPointerUp(); return }
   if (pen.active.value) onPenPointerUp()
   else if (nodeEdit.active.value) onNodePointerUp()
+  else if (drawSectionActive.value) { if (marquee.value) finishDrawSection() }
   else if (marquee.value) endMarquee(e.shiftKey)
 }
 function onCanvasDblClickCapture(e: MouseEvent) {
@@ -6208,6 +6238,7 @@ onUnmounted(() => {
           <component :is="kindIcon(selectedLocal.kind)" class="size-3.5 text-white/60" />
           <span class="text-sm font-medium capitalize">{{ selectedLocal.kind }}</span>
           <div class="ml-auto flex items-center gap-1">
+            <button v-if="gridConfig.mode !== 'off'" class="text-white/40 hover:text-white/80 p-1" title="Re-snap to grid" @click="resnapSelected"><LayoutGrid class="size-3.5" /></button>
             <button class="text-white/40 hover:text-white/80 p-1" title="Bring forward" @click="moveStackZ(localKey(selectedLocal.id), 1)"><ArrowUp class="size-3.5" /></button>
             <button class="text-white/40 hover:text-white/80 p-1" title="Send backward" @click="moveStackZ(localKey(selectedLocal.id), -1)"><ArrowDown class="size-3.5" /></button>
             <button class="text-white/40 hover:text-red-400 p-1" title="Delete" @click="deleteLocal(selectedLocal.id)"><Trash2 class="size-3.5" /></button>
@@ -7048,9 +7079,12 @@ onUnmounted(() => {
               </div>
             </template>
 
-            <div v-if="gridConfig.mode !== 'off'" class="mt-2">
+            <div v-if="gridConfig.mode !== 'off'" class="mt-2 flex flex-col gap-1.5">
               <StudioSwitch label="Show overlay" :model-value="gridConfig.overlay"
                 @update:model-value="(v: boolean) => patchGrid({ overlay: v })" />
+              <StudioSwitch label="Draw section" hint="Drag on the artboard to stamp a rect snapped to the grid"
+                :model-value="drawSectionActive" @update:model-value="(v: boolean) => setDrawSectionActive(v)" />
+              <StudioButton variant="secondary" @click="onFillGridWithSections">Fill grid with sections</StudioButton>
             </div>
           </div>
           <!-- Expressive arrange (a whole group is selected) -->
