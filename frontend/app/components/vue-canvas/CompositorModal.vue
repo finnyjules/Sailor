@@ -7191,7 +7191,10 @@ onUnmounted(() => {
           <ImageIcon class="size-3.5 text-white/60" />
           <span class="text-sm font-medium">No selection</span>
         </div>
-        <div class="p-4 flex flex-col gap-4">
+        <!-- Scrolls like every layer-selected panel does — without this, the frame
+             properties (Background → Post-processing → Grid → Deal grid → templates)
+             overflow the window and the lower controls become unreachable. -->
+        <div class="p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
           <!-- Canvas background fill (bottom-most; baked into the frame) -->
           <div>
             <div class="panel-label mb-1.5">Background</div>
