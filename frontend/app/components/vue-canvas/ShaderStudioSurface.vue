@@ -12,6 +12,7 @@ import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 // Explicit paths: Nuxt auto-import silently no-ops these row adapters here (the known
 // duplicated-path-segment gotcha), so import them by full path like ComfyNodeWidget does.
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
+import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import BindableRow from '~/components/vue-canvas/studio/BindableRow.vue'
@@ -304,6 +305,12 @@ function onUpload(ev: Event) {
   const reader = new FileReader()
   reader.onload = () => { config.value.source = { kind: 'upload', dataUrl: String(reader.result) } }
   reader.readAsDataURL(file)
+}
+
+// Re-rolls the field/tears/grain seed. The deep `watch(config, …)` below already
+// re-renders on any config mutation, so this only has to set the value.
+function rerollSeed() {
+  config.value.seed = Math.floor(Math.random() * 9999) + 1
 }
 
 // ── effect picker (CatalogModal) ───────────────────────────────────────────────
@@ -938,6 +945,12 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
         <label class="mb-1 block cursor-pointer rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-center text-[11px] text-white/80 hover:bg-white/20">
           Upload image<input type="file" accept="image/*" class="hidden" @change="onUpload" />
         </label>
+        <div class="mt-2 flex items-center gap-2">
+          <StudioButton variant="secondary" @click="rerollSeed">New variation</StudioButton>
+          <div class="min-w-0 flex-1">
+            <StudioSlider v-model="config.seed" label="Variation" :min="1" :max="9999" :step="1" :default="42" :bindable="false" />
+          </div>
+        </div>
       </StudioSection>
 
       <!-- Stylized Effects -->

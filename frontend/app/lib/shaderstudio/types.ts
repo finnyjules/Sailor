@@ -217,6 +217,8 @@ export interface ShaderStudioConfig {
   source: StudioSource
   /** long-edge cap (px) for preview/export sizing. */
   resolution: number
+  /** varies the generative field / tears / grain; 42 is the historical default so old docs are unchanged. */
+  seed: number
   /** stacked effect layers (max LAYER_MAX). */
   effects: StudioEffect[]
   duotone: StudioDuotone
@@ -228,9 +230,10 @@ export interface ShaderStudioConfig {
 
 export function defaultConfig(): ShaderStudioConfig {
   return {
-    version: 4,
+    version: 5,
     source: { kind: 'none' },
     resolution: 1536,
+    seed: 42,
     effects: [{ layerId: newLayerId(), id: '', params: {}, enabled: true, customChars: '', blend: 'normal', opacity: 1 }],
     duotone: { enabled: false, ink: '#1a1a2e', paper: '#f5f5f5' },
     gradientMap: {

@@ -48,7 +48,7 @@ export function composePasses(
     const tex = texFor(def, layer)
     const uniforms: Uniforms = {
       ...resolveUniforms(def, layer.params),
-      u_time: t, u_seed: 42, u_hasInput: 1, ...tex.uniforms,
+      u_time: t, u_seed: cfg.seed, u_hasInput: 1, ...tex.uniforms,
     }
     const needsComposite = layer.blend !== 'normal' || layer.opacity < 0.999
     const masked = !!layer.mask?.enabled
