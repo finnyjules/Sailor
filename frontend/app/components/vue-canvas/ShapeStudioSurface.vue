@@ -39,6 +39,7 @@ import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import type { Paint } from '~/lib/compositor/paint'
 import type { PaletteFamily } from '~/lib/color/seedFamily'
+import type { GradientStop } from '~/lib/color/harmony'
 import { useStudioAgent } from '~/composables/useStudioAgent'
 import { makeConfigParams } from '~/lib/agent/configParams'
 import { docAspect } from '~/lib/agent/takeThumbs'
@@ -320,10 +321,17 @@ function fillDragEnd() { fillDrag.from = -1; fillDrag.over = -1 }
 // Seed-engine palette → discrete fills (Task 12: first DISCRETE-palette consumer —
 // lands N palette colors as N separate fills rather than a gradient projection).
 // Flips fillStrategy off 'single' so the write is visible immediately.
-function applyPaletteToFills(fam: PaletteFamily) {
-  const next = distributeToGeoFills(activeMark.value, fam.hexes)
+// Shared by all three PalettePicker panes: the seed pane emits apply-family
+// (fam.hexes), gallery/harmony emit apply-stops / apply-literal-stops
+// (GradientStop[], mapped to hexes at the binding) — see the @apply-* bindings
+// on the picker below.
+function applyGeoPalette(hexes: string[]) {
+  const next = distributeToGeoFills(activeMark.value, hexes)
   setGeoControl('fills', next.fills)
   setGeoControl('fillStrategy', next.fillStrategy)
+}
+function applyPaletteToFills(fam: PaletteFamily) {
+  applyGeoPalette(fam.hexes)
 }
 
 function addOverlapFill() { setGeoControl('overlapFills', [...activeMark.value.overlapFills, '#ffffff']) }
@@ -601,8 +609,18 @@ async function exportSvg() {
 
         <!-- Seed-engine palette → discrete fills. Shown regardless of fillStrategy —
              applying a family flips fillStrategy off 'single' itself, so the picker
-             must stay reachable even from the (default) single-fill state. -->
-        <PalettePicker mode="stops" class="mt-2" @apply-family="applyPaletteToFills" />
+             must stay reachable even from the (default) single-fill state.
+             All three panes route through the same discrete applyGeoPalette path:
+             the seed pane emits apply-family (and apply-literal-stops alongside
+             it — both bound here to the same hexes, since setGeoControl writes
+             here aren't paired with an explicit recordHistory()/commit() the way
+             the Compositor's distributePaletteToSelection is, so a same-value
+             re-write from the second event isn't the doubled-undo hazard that
+             made the Compositor drop that binding); gallery/harmony emit
+             apply-stops only. -->
+        <PalettePicker mode="stops" class="mt-2" @apply-family="applyPaletteToFills"
+          @apply-stops="(stops: GradientStop[]) => applyGeoPalette(stops.map(s => s.color))"
+          @apply-literal-stops="(stops: GradientStop[]) => applyGeoPalette(stops.map(s => s.color))" />
 
         <!-- Fills list editor — under the Paint card when fillStrategy isn't 'single'. -->
         <div v-if="activeMark.fillStrategy !== 'single'" class="mt-2 space-y-2">

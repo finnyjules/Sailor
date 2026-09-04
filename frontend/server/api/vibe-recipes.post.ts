@@ -23,9 +23,21 @@ const HEX_RE = /^#[0-9a-fA-F]{6}$/
 // Nitro serves public/ through its own asset storage — process.cwd()+'/public'
 // is NOT the public root in the built server, so the corpus is read through
 // useStorage, not the filesystem or a relative fetch.
+//
+// `assets:public` is NOT a valid Nitro storage mount (public/ is served as a
+// static publicAsset, never registered in the storage layer), so that key
+// always resolved to null and this silently emptied the engine palette menu.
+// `useStorage('root').getItem('public/data/palette-corpus.json')` is the
+// verified fix: Nitro's default `root` mount is an fs driver rooted at the
+// server's rootDir (this frontend/ directory), so that key resolves relative
+// to frontend/ — i.e. frontend/public/data/palette-corpus.json. Verified
+// empirically against this repo's installed unstorage@1.17.4 fs driver
+// (both the raw `root:<key>` form and the `prefixStorage(storage, 'root')`
+// form Nitro's useStorage() actually returns), reading the full 1340-entry
+// array.
 let corpus: CorpusEntry[] | null = null
-async function getCorpus(): Promise<CorpusEntry[]> {
-  if (!corpus) corpus = await useStorage('assets:public').getItem('data/palette-corpus.json') as CorpusEntry[]
+async function getCorpus(): Promise<CorpusEntry[] | null> {
+  if (!corpus) corpus = await useStorage('root').getItem('public/data/palette-corpus.json') as CorpusEntry[] | null
   return corpus
 }
 

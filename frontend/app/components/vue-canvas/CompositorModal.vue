@@ -867,9 +867,11 @@ const selectedCount = computed(() => selectedLayers.value.length)
 // node), so they're excluded from both the distribution and the write —
 // exactly like clonableSelection() excludes them from duplication.
 const showMultiPalette = ref(false)
-// Core of the distribution, shared by all three PalettePicker panes (gallery
-// and harmony emit apply-stops; the seed shelf emits apply-family AND
-// apply-literal-stops) — see the @apply-* bindings on the picker below.
+// Core of the distribution, reached via apply-stops only (gallery and harmony
+// panes emit apply-stops; the seed shelf emits apply-family separately, via
+// applyPaletteToSelection, and also emits apply-literal-stops — which is
+// deliberately NOT bound below, since binding it double-fires this on every
+// seed-tile click) — see the @apply-* bindings on the picker below.
 function distributePaletteToSelection(hexes: string[]) {
   const targets = selectedLayers.value.filter(l => l.kind !== 'wired')
   if (!targets.length) { showMultiPalette.value = false; return }
@@ -5327,8 +5329,7 @@ onUnmounted(() => {
             @pointerdown.stop>
             <div class="mb-1.5 text-[11px] text-white/60">Apply palette to {{ selectedCount }} selected layers</div>
             <PalettePicker mode="stops" @apply-family="applyPaletteToSelection"
-              @apply-stops="(stops: GradientStop[]) => distributePaletteToSelection(stops.map(s => s.color))"
-              @apply-literal-stops="(stops: GradientStop[]) => distributePaletteToSelection(stops.map(s => s.color))" />
+              @apply-stops="(stops: GradientStop[]) => distributePaletteToSelection(stops.map(s => s.color))" />
           </div>
         </div>
       </div>
