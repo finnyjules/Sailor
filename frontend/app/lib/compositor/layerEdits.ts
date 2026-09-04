@@ -86,6 +86,8 @@ export function computeSnapAdjust(
   thresholdX: number,
   thresholdY: number,
   canvasTargets: number[] = [0, 0.5, 1],
+  gridX: number[] = [],
+  gridY: number[] = [],
 ): { dx: number; dy: number; guideX: number | null; guideY: number | null } {
   const xt = [...canvasTargets]
   const yt = [...canvasTargets]
@@ -93,6 +95,8 @@ export function computeSnapAdjust(
     xt.push(o.cx - o.hx, o.cx, o.cx + o.hx)
     yt.push(o.cy - o.hy, o.cy, o.cy + o.hy)
   }
+  xt.push(...gridX)
+  yt.push(...gridY)
   let bestX = { d: thresholdX, adj: 0, guide: null as number | null }
   for (const edge of [prim.cx - prim.hx, prim.cx, prim.cx + prim.hx]) for (const t of xt) {
     const dd = Math.abs(edge - t); if (dd < bestX.d) bestX = { d: dd, adj: t - edge, guide: t }
