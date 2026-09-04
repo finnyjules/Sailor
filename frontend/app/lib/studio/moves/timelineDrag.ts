@@ -55,6 +55,62 @@ export function resizeBand(band: Band, edge: 'left' | 'right', deltaSec: number,
 
 export interface TimelineView { start: number; end: number }
 
+/** Candidate labelled-tick steps (seconds), coarsest that clears the ~56px target wins. */
+export const NICE_STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
+
+/**
+ * `mm:ss` timecode for a ruler label. When the major step is sub-second, one
+ * decimal of the fractional part is appended IF nonzero (`00:01.5`), so
+ * fine-grained rulers still read distinctly; whole seconds stay `00:02`.
+ */
+export function fmtTimecode(t: number, majorStep: number): string {
+  const minutes = Math.floor(t / 60)
+  const secs = Math.floor(t % 60)
+  const mm = String(minutes).padStart(2, '0')
+  const ss = String(secs).padStart(2, '0')
+  if (majorStep < 1) {
+    const frac = Math.round((t - Math.floor(t)) * 10) / 10
+    if (frac > 1e-6) return `${mm}:${ss}.${Math.round(frac * 10)}`
+  }
+  return `${mm}:${ss}`
+}
+
+/**
+ * Two-tier ruler ticks for the current view. MAJORS use the coarsest
+ * `NICE_STEPS` value clearing ~56px and carry `mm:ss` labels; MINORS
+ * subdivide each major into four (majorStep / 4) and are unlabelled, with
+ * any minor coinciding with a major dropped. `leftPct` for both maps the
+ * tick time into the `[view.start, view.end]` window as a 0..100 percentage.
+ */
+export function rulerTicks(view: TimelineView, trackWidth: number): {
+  major: { t: number; leftPct: number; label: string }[]
+  minor: { t: number; leftPct: number }[]
+} {
+  const viewLen = Math.max(0.001, view.end - view.start)
+  const secPerPx = viewLen / Math.max(1, trackWidth)
+  const rawStep = secPerPx * 56 // ~56px between labelled ticks
+  const majorStep = NICE_STEPS.find(s => s >= rawStep) ?? NICE_STEPS[NICE_STEPS.length - 1]!
+  const minorStep = majorStep / 4
+  const pct = (t: number) => ((t - view.start) / viewLen) * 100
+
+  const major: { t: number; leftPct: number; label: string }[] = []
+  const firstMajor = Math.ceil(view.start / majorStep) * majorStep
+  for (let t = firstMajor; t <= view.end + 1e-6; t += majorStep) {
+    major.push({ t, leftPct: pct(t), label: fmtTimecode(t, majorStep) })
+  }
+
+  const minor: { t: number; leftPct: number }[] = []
+  const firstMinor = Math.ceil(view.start / minorStep) * minorStep
+  for (let t = firstMinor; t <= view.end + 1e-6; t += minorStep) {
+    // Skip minors that land on a major (within 1e-6 of an integer multiple of majorStep).
+    const ratio = t / majorStep
+    if (Math.abs(ratio - Math.round(ratio)) < 1e-6) continue
+    minor.push({ t, leftPct: pct(t) })
+  }
+
+  return { major, minor }
+}
+
 /**
  * Maps a move's window (`[at, at+duration]` for a transition, `[at, clip]`
  * for a loop — same window `moveWindows` in `./phase.ts` computes) into the

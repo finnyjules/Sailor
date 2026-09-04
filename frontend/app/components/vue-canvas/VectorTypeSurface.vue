@@ -1693,9 +1693,11 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
             :selected-id="selectedMoveId"
             :playhead="previewTime"
             :label="moveLabelFn"
+            :playing="playing"
             @select="selectedMoveId = $event"
             @patch-move="onPatchMove"
             @seek="onSeek"
+            @toggle-play="playing = !playing"
           />
         </div>
       </div>

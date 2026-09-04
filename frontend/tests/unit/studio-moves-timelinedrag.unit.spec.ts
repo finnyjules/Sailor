@@ -1,6 +1,6 @@
 // frontend/tests/unit/studio-moves-timelinedrag.unit.spec.ts
 import { describe, expect, it } from 'vitest'
-import { bandRect, moveBand, resizeBand, snapSeconds } from '~/lib/studio/moves/timelineDrag'
+import { bandRect, fmtTimecode, moveBand, resizeBand, rulerTicks, snapSeconds } from '~/lib/studio/moves/timelineDrag'
 
 describe('snapSeconds', () => {
   it('snaps to the nearest target within eps', () => {
@@ -112,5 +112,39 @@ describe('bandRect', () => {
     const r = bandRect({ at: 3.5, duration: 2, loop: false }, { start: 0, end: 4 }, 4)
     expect(r.leftPct).toBeCloseTo(87.5, 9)
     expect(r.widthPct).toBeCloseTo(12.5, 9)
+  })
+})
+
+describe('fmtTimecode', () => {
+  it('formats whole seconds as mm:ss', () => {
+    expect(fmtTimecode(2, 1)).toBe('00:02')
+    expect(fmtTimecode(65, 1)).toBe('01:05')
+  })
+
+  it('appends one decimal only for a sub-second major step with a nonzero fraction', () => {
+    expect(fmtTimecode(1.5, 0.5)).toBe('00:01.5')
+    expect(fmtTimecode(2, 0.5)).toBe('00:02') // whole second → no trailing .0
+  })
+})
+
+describe('rulerTicks', () => {
+  it('produces majors spanning the view with correct leftPct at the ends', () => {
+    // view [0,4], track 300px → rawStep ~0.75 → majorStep 1s → majors at 0,1,2,3,4
+    const { major } = rulerTicks({ start: 0, end: 4 }, 300)
+    expect(major.map(m => m.t)).toEqual([0, 1, 2, 3, 4])
+    expect(major[0]!.leftPct).toBeCloseTo(0, 9)
+    expect(major[major.length - 1]!.leftPct).toBeCloseTo(100, 9)
+  })
+
+  it('emits three interior minors between each pair of majors (four subdivisions) and never duplicates a major', () => {
+    const { major, minor } = rulerTicks({ start: 0, end: 4 }, 300)
+    const majorTimes = major.map(m => m.t)
+    // No minor coincides with a major.
+    for (const mn of minor) {
+      expect(majorTimes.some(mj => Math.abs(mj - mn.t) < 1e-6)).toBe(false)
+    }
+    // Exactly 3 minors strictly between majors 1 and 2.
+    const between = minor.filter(mn => mn.t > 1 + 1e-6 && mn.t < 2 - 1e-6)
+    expect(between.length).toBe(3)
   })
 })
