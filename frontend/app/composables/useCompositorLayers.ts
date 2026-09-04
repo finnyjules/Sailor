@@ -13,7 +13,7 @@
  * One renderer (`drawLocalLayer`) draws to any 2D context at any resolution.
  */
 
-export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'image' | 'polygon' | 'star' | 'brush' | 'wired'
+export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'image' | 'polygon' | 'star' | 'brush' | 'wired' | 'deal'
 
 // ── Motion painter indirection ───────────────────────────────────────────────
 // paintLayerStack(t) needs the motion module, but motion/paint.ts imports
@@ -55,6 +55,8 @@ import { paintMaskRelease } from '~/lib/compositor/maskBreak'
 // Runtime import is safe: wiredLayer.ts only imports the WiredLayer TYPE back from
 // this file, and type imports are erased — so this is not a module cycle.
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
+import { resolveGrid, defaultGrid, type FrameGrid } from '~/lib/frame/grid'
+import { pickDealPaint, keptCell, type DealVocab } from '~/lib/compositor/dealVocab'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -194,7 +196,7 @@ export {
   type GradientStop, type LinearGradient, type RadialGradient, type Gradient, type Paint, type ImageFill,
   isGradient, isFill, isImageFill,
 } from '~/lib/compositor/paint'
-import { type Paint, isFill, isImageFill } from '~/lib/compositor/paint'
+import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/paint'
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
 
 // Layer effects (Figma-style). All distances normalized to canvas width, like
@@ -565,7 +567,26 @@ export interface BrushLayer extends LayerCommon {
   h: number              // aspect (artboardH / artboardW)
 }
 
-export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer
+/**
+ * A "generative deal": ONE self-painting layer that deals every cell of a modular
+ * grid a fill from a weighted vocabulary, keyed by a seed. This is how a dense
+ * decorative grid (Oddgrid / Modular / Mosh / Static) is a single layer instead of
+ * N rect layers. The layer carries its OWN grid (so multiple deals can coexist and
+ * the deal is self-contained), and `grid.gen.seed` drives BOTH the cell layout
+ * (via resolveGrid) and the per-cell fill pick + density drop — so "New variation"
+ * re-rolls the whole look coherently. Unlike the editor-only grid OVERLAY, a deal
+ * is normal content: it renders, bakes and exports.
+ */
+export interface DealLayer extends LayerCommon {
+  kind: 'deal'
+  w: number; h: number        // box size, BOTH normalized to canvas width (like RectLayer)
+  grid: FrameGrid             // the cell layout for THIS layer
+  vocab: DealVocab            // named weighted fill vocabulary
+  density: number             // 0..1 fraction of cells that get filled (rest transparent)
+  cellInset: number           // 0..0.4 normalized inset per cell (gutter look on top of the grid's own)
+}
+
+export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer
 
 // Re-export so consumers of local layers can import the stroke type from one place.
 export type { PaintStroke } from '~/lib/compositor/brushStamp'
@@ -683,6 +704,26 @@ export function createRectLayer(partial: Partial<RectLayer> = {}): RectLayer {
     x: 0.5, y: 0.5, rotation: 0, opacity: 1,
     w: 0.3, h: 0.18, fill: '#3b82f6', stroke: '', strokeWidth: 0, radius: 0.02,
     ...partial,
+  }
+}
+
+/**
+ * A deal layer filling the whole frame by default. `grid` defaults to a generated
+ * grid (so a fresh deal is non-empty); pass a deep-copied grid to seed it from the
+ * frame's current layout. Both `w`/`h` are width-normalized: h defaults to a
+ * square deal — the caller should set it to the frame aspect to fill the frame.
+ */
+export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
+  const grid = partial.grid ?? { ...defaultGrid(), mode: 'generated' as const }
+  return {
+    id: newId(), kind: 'deal',
+    x: 0.5, y: 0.5, rotation: 0, opacity: 1,
+    w: 1, h: 1,
+    vocab: 'brand',
+    density: 1,
+    cellInset: 0,
+    ...partial,
+    grid,
   }
 }
 
@@ -1966,6 +2007,34 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     }
     // Centered at the layer origin, which the caller placed at the bounds' centre.
     ctx.drawImage(off, -w / 2, -h / 2, w, h)
+  } else if (layer.kind === 'deal') {
+    // The generative deal: resolve THIS layer's grid over its own box, then paint
+    // each kept cell a seeded fill from the chosen vocabulary. Centered like every
+    // other layer — shift so the box top-left sits at (-boxW/2, -boxH/2), then draw
+    // each cell at its corner-origin sub-box. Opacity / blend / mask / effects all
+    // ride the shared LayerCommon machinery around this draw (paintLayer wraps it),
+    // so this branch only lays down pixels.
+    const boxW = Math.max(1, layer.w * W), boxH = Math.max(1, layer.h * W)
+    const { regions } = resolveGrid(layer.grid, boxW, boxH)
+    if (!regions.length) return
+    const seed = layer.grid.gen.seed
+    const density = layer.density ?? 1
+    const inset = Math.max(0, Math.min(0.4, layer.cellInset ?? 0))
+    ctx.save()
+    ctx.translate(-boxW / 2, -boxH / 2)
+    for (let i = 0; i < regions.length; i++) {
+      if (!keptCell(seed, i, density)) continue
+      const r = regions[i]!
+      const ins = inset * Math.min(r.w, r.h)
+      const cw = r.w - ins * 2, ch = r.h - ins * 2
+      if (cw <= 0.5 || ch <= 0.5) continue
+      // paintTileBox paints ANY Paint (solid / gradient / pattern Fill) at corner
+      // origin; a shader-typed Fill unwraps to its input there, so no field request
+      // is needed (see layerPaints('deal')). Drawn into the cell's own sub-box.
+      const tile = paintTileBox(pickDealPaint(layer.vocab, seed, i), cw, ch)
+      ctx.drawImage(tile, r.x + ins, r.y + ins, cw, ch)
+    }
+    ctx.restore()
   }
 }
 
@@ -2266,6 +2335,10 @@ function layerPaints(layer: LocalLayer): Paint[] {
     case 'image': return layer.tint ? [layer.tint] : []
     case 'brush': return layer.stroke ? [layer.fill, layer.stroke] : [layer.fill]
     case 'wired': return []                    // graph pixels — no authored Paint slots
+    // v1 deal vocabularies are solid/gradient/pattern fills only (no live shaders),
+    // so there's nothing for the shader-field pre-pass to register. A future shader
+    // vocabulary would return its ShaderSpec fills here.
+    case 'deal': return []
     default: return [layer.fill, layer.stroke] // rect / ellipse / polygon / star / path
   }
 }

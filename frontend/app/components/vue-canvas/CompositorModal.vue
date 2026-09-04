@@ -8,10 +8,11 @@ import {
 } from 'lucide-vue-next'
 import {
   type TextLayer, type RectLayer, type EllipseLayer, type LocalLayer, type StackItem, type CornerPin, type BrushLayer, type Paint,
-  type WiredLayer,
-  cornerRadii, drawLocalLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, layerMaskRef, localLayerBox, createBrushLayer,
+  type WiredLayer, type DealLayer,
+  cornerRadii, drawLocalLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, layerMaskRef, localLayerBox, createBrushLayer, createDealLayer,
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
 } from '~/composables/useCompositorLayers'
+import { DEAL_VOCABS, type DealVocab } from '~/lib/compositor/dealVocab'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
@@ -397,15 +398,6 @@ const viewStyle = computed(() => ({
   height: canvasDisplay.h + 'px',
   transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`,
   transformOrigin: '0 0',
-  // Promote the pan/zoom wrapper to its own compositor layer. Without this the
-  // wrapper is `will-change: auto`, so every pan/zoom re-rasters its whole subtree
-  // — chiefly the device-resolution stack canvas (~2400×1300) — on the raster
-  // thread each frame. That was the pan lag (the JS main thread stays idle; the
-  // cost is all compositing). Promoted, a pan is a cheap GPU layer transform.
-  willChange: 'transform',
-  // Belt-and-braces layer promotion for engines that ignore will-change on a
-  // transformed element; keeps the canvas crisp under sub-pixel translate.
-  backfaceVisibility: 'hidden' as const,
 }))
 function resetView() { view.scale = 1; view.tx = 0; view.ty = 0 }
 function zoomAround(cx: number, cy: number, factor: number) {
@@ -628,6 +620,27 @@ function onFillGridWithSections() {
     return
   }
   fillGridWithSections(regions)
+}
+
+// ── The generative deal (grid slice 2) ──────────────────────────────────────
+// ONE self-painting layer that deals every cell of the CURRENT layout grid a fill
+// from a weighted vocabulary — a dense decorative grid as a single layer that
+// BAKES (unlike the editor-only grid overlay). Deep-copies the frame's grid so the
+// deal is self-contained; a grid that's off is dealt as a generated one.
+function onDealGrid() {
+  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
+  if (g.mode === 'off') g.mode = 'generated'
+  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  addLocal(createDealLayer({ grid: g, w: 1, h: aspect }))
+}
+
+/** Patch a deal layer's own grid (one history step via setLocal). */
+function patchDealGrid(layer: DealLayer, patch: Partial<typeof layer.grid>) {
+  setLocal(layer.id, { grid: { ...layer.grid, ...patch } })
+}
+/** Re-roll a deal's seed for a fresh coherent variation (layout + fills + density). */
+function rerollDeal(layer: DealLayer) {
+  patchDealGrid(layer, { gen: { ...layer.grid.gen, seed: Math.floor(Math.random() * 9999) + 1 } })
 }
 
 // Normalize brush layers to a tight box: brush strokes are stored in absolute
@@ -4339,7 +4352,7 @@ function kindIcon(kind: string) {
   return kind === 'text' ? Type : kind === 'rect' ? Square
     : kind === 'ellipse' ? Circle : kind === 'image' ? ImageIcon
     : kind === 'polygon' ? Hexagon : kind === 'star' ? Star
-    : kind === 'brush' ? Brush : Minus
+    : kind === 'brush' ? Brush : kind === 'deal' ? LayoutGrid : Minus
 }
 // A layer's fill Paint for the layer-list swatch, or null for kinds without a
 // meaningful fill (image = its own pixels, line = a stroke). Falls back to the
@@ -6652,6 +6665,38 @@ onUnmounted(() => {
             </div>
           </template>
 
+          <!-- Deal (generative grid): the vocabulary + density + inset + seed drive
+               the whole self-painting grid. Regularity/merge live in the doc Grid
+               section; this deal carries its OWN grid seeded from it. -->
+          <template v-if="selectedLocal.kind === 'deal'">
+            <div>
+              <div class="panel-label mb-1.5">Palette</div>
+              <StudioSegmented :options="DEAL_VOCABS as any" :model-value="(selectedLocal as any).vocab"
+                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { vocab: v })" />
+            </div>
+            <div class="mt-2 flex flex-col gap-1.5">
+              <StudioSlider label="Density" :min="0" :max="1" :step="0.02" :bindable="false"
+                :model-value="(selectedLocal as any).density"
+                @update:model-value="(v: number) => setLocal(selectedLocal!.id, { density: v })" />
+              <StudioSlider label="Cell inset" :min="0" :max="0.4" :step="0.01" :bindable="false"
+                :model-value="(selectedLocal as any).cellInset"
+                @update:model-value="(v: number) => setLocal(selectedLocal!.id, { cellInset: v })" />
+              <StudioSlider label="Regularity" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="(selectedLocal as DealLayer).grid.gen.regularity"
+                @update:model-value="(v: number) => patchDealGrid(selectedLocal as DealLayer, { gen: { ...(selectedLocal as DealLayer).grid.gen, regularity: v } })" />
+              <StudioSwitch label="Merge cells" :model-value="(selectedLocal as DealLayer).grid.gen.merge"
+                @update:model-value="(v: boolean) => patchDealGrid(selectedLocal as DealLayer, { gen: { ...(selectedLocal as DealLayer).grid.gen, merge: v } })" />
+            </div>
+            <div class="mt-2 flex items-center gap-2">
+              <StudioButton variant="secondary" @click="rerollDeal(selectedLocal as DealLayer)">New variation</StudioButton>
+              <div class="min-w-0 flex-1">
+                <StudioSlider label="Seed" :min="1" :max="9999" :step="1" :default="42" :bindable="false"
+                  :model-value="(selectedLocal as DealLayer).grid.gen.seed"
+                  @update:model-value="(v: number) => patchDealGrid(selectedLocal as DealLayer, { gen: { ...(selectedLocal as DealLayer).grid.gen, seed: v } })" />
+              </div>
+            </div>
+          </template>
+
           <!-- Image tint: fill blended over the image, clipped to its alpha -->
           <template v-if="selectedLocal.kind === 'image'">
             <div>
@@ -7117,6 +7162,8 @@ onUnmounted(() => {
               <StudioSwitch label="Draw section" hint="Drag on the artboard to stamp a rect snapped to the grid"
                 :model-value="drawSectionActive" @update:model-value="(v: boolean) => setDrawSectionActive(v)" />
               <StudioButton variant="secondary" @click="onFillGridWithSections">Fill grid with sections</StudioButton>
+              <StudioButton variant="secondary" @click="onDealGrid">Deal grid</StudioButton>
+              <p class="text-[10px] text-white/30 leading-snug">Deal fills every cell of a dense grid from a palette — one self-painting layer that bakes.</p>
             </div>
           </div>
           <!-- Expressive arrange (a whole group is selected) -->

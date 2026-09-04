@@ -19,6 +19,7 @@ import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/com
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { readGrid } from '~/lib/frame/gridConfig'
 import type { FrameGrid } from '~/lib/frame/grid'
+import { normalizeVocab } from '~/lib/compositor/dealVocab'
 import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
 import { shapeById, SHAPES } from '~/lib/shapes/catalog'
@@ -150,6 +151,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setLayerDepth', hint: 'Change a layer\'s stacking depth (z-order). target = layer id; args: { to: "back" | "front" }. "back" puts it BEHIND every other layer including the connected/wired image — use this for "put the headline BEHIND the image". "front" brings it to the top.' },
   { op: 'setBackground', hint: 'Set the FRAME background that sits behind every layer. args: { paint } — a "#RRGGBB" colour, a gradient object, or "none". Use for "make the background blue / a sunset gradient".' },
   { op: 'setGrid', hint: 'Set the layout grid on a Frame — a Swiss-style guide layers can snap to (editor-only, never baked/exported). args: { patch: {...}, generate? }. patch keys: mode ("off" | "explicit" | "generated"), baseModule (0..1 of canvas width, the alignment unit), gutter (0..1), margin (0..1), columns/rows (explicit mode counts), gen: { colRange/rowRange ([min,max] column/row counts, generated mode), regularity (0..1: 0 = loose/free spacing, 1 = strict/equal), merge (bool, merge adjacent cells into larger regions), mergeMaxSpan (max cells a merged region spans), symmetry ("none" | "mirror"), seed (integer) }, overlay (bool, show the guide lines). Omitted keys keep their current value. generate:true (or reroll:true) re-rolls a fresh random seed for a new generated-grid variation; switching mode to "generated" without giving gen.seed also rolls a fresh seed. This is what "add a layout grid", "give it a 6-column grid", "generate a new grid variation", "re-roll the grid" mean.' },
+  { op: 'dealGrid', hint: `Deal a decorative modular grid as ONE self-painting layer: every cell gets a fill from a weighted palette, keyed by a seed. This is a dense generative grid ("mosaic", "modular grid", "tiled pattern", "oddgrid") as a single layer that BAKES into the render (unlike setGrid's editor-only guide). To CREATE a new deal, omit target; to reconfigure an existing one, target = the deal layer's id. args: { vocab ("brand" | "mono" | "warm" | "cool" — the palette), density (0..1, fraction of cells filled; the rest are transparent; default 1 = every cell), cellInset (0..0.4, gap inset per cell), grid ({ colRange:[min,max], rowRange:[min,max], regularity (0..1), merge (bool), symmetry ("none"|"mirror") } — the cell layout; omitted keeps the current/frame grid), seed (integer, the variation), generate (bool — re-roll a fresh seed for a new variation), id? (choose one to target it later) }. "make a colourful mosaic", "deal a warm modular grid", "re-roll the pattern", "sparser grid" all mean this.` },
   { op: 'generateImage', hint: 'Generate a PHOTOGRAPHIC/illustrative AI image and add it as a layer — "generate a picture of a dog", "add a city photo". Not for gradients/colours (use setBackground/setFill). args: { prompt (vivid), aspectRatio? }.' },
   { op: 'removeImageBackground', hint: 'Cut out the subject of an existing IMAGE layer (transparent background). target = image layer id.' },
   { op: 'editImage', hint: 'Edit an existing IMAGE layer from an instruction (Flux Kontext) — "make it brighter", "change the sky". target = image layer id; args: { instruction }.' },
@@ -380,6 +382,47 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       const enteringGeneratedNoSeed = patch.mode === 'generated' && patch.gen?.seed == null
       if (reroll || enteringGeneratedNoSeed) merged.gen = { ...merged.gen, seed: Math.floor(Math.random() * 9999) + 1 }
       return { ok: true, template: { ...state, grid: merged }, inverse: snapshot() }
+    }
+    case 'dealGrid': {
+      const a = (cmd.args ?? {}) as Record<string, unknown>
+      const gridPatch = (a.grid ?? {}) as Partial<FrameGrid['gen']> & Partial<FrameGrid>
+      const reroll = a.generate === true || a.reroll === true
+      const target = cmd.target ? findLayer(state, cmd.target) : undefined
+      if (cmd.target && (!target || target.kind !== 'deal')) return { ok: false, reason: 'invalid', detail: `no deal layer '${String(cmd.target)}'` }
+
+      if (target && target.kind === 'deal') {
+        // Reconfigure an existing deal in place.
+        const d = target as unknown as Record<string, unknown>
+        if (a.vocab != null) d.vocab = normalizeVocab(a.vocab)
+        if (typeof a.density === 'number') d.density = clamp(a.density, 0, 1, 1)
+        if (typeof a.cellInset === 'number') d.cellInset = clamp(a.cellInset, 0, 0.4, 0)
+        const g = clone((target as { grid: FrameGrid }).grid)
+        // gen-level grid keys the model may send (colRange/rowRange/regularity/merge/symmetry).
+        g.gen = { ...g.gen, ...(gridPatch as Partial<FrameGrid['gen']>) }
+        if (typeof a.seed === 'number') g.gen.seed = Math.round(a.seed)
+        if (reroll) g.gen.seed = Math.floor(Math.random() * 9999) + 1
+        d.grid = g
+        return { ok: true, template: state, inverse: snapshot() }
+      }
+
+      // Create a new deal filling the frame, seeded from the frame's current grid.
+      const id = typeof a.id === 'string' && a.id ? a.id : `l_${state.layers.length + 1}_deal`
+      if (state.layers.some(l => l.id === id)) return { ok: false, reason: 'invalid', detail: `layer id '${id}' already exists` }
+      const base = readGrid(state.grid ? { sailor_localGrid: state.grid } : undefined)
+      const grid: FrameGrid = clone(base)
+      if (grid.mode === 'off') grid.mode = 'generated'
+      grid.gen = { ...grid.gen, ...(gridPatch as Partial<FrameGrid['gen']>) }
+      if (typeof a.seed === 'number') grid.gen.seed = Math.round(a.seed)
+      if (reroll) grid.gen.seed = Math.floor(Math.random() * 9999) + 1
+      const layer = {
+        id, kind: 'deal', x: 0.5, y: 0.5, rotation: 0, opacity: 1,
+        w: 1, h: 1,
+        vocab: normalizeVocab(a.vocab ?? 'brand'),
+        density: clamp(a.density, 0, 1, 1),
+        cellInset: clamp(a.cellInset, 0, 0.4, 0),
+        grid,
+      } as unknown as LocalLayer
+      return { ok: true, template: { ...state, layers: [...state.layers, layer] }, inverse: snapshot() }
     }
     case 'setImage': { // internal — used by the composable's edit/remove-bg media path
       const filename = cmd.args?.filename
