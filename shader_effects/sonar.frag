@@ -82,7 +82,7 @@ void main() {
 
     // Tide breathes the cut level so the coast advances and retreats; still at Speed 0.
     float tide = sin(u_time * u_speed * 0.5) * 0.10 * min(1.6, u_tide);
-    float lvl = clamp(u_level * 0.7 + 0.15, 0.05, 0.95) + tide;
+    float lvl = clamp(u_level * 0.7 + 0.15 + tide, 0.05, 0.95);
     float band = 0.012 + u_fringe * 0.07;      // how far either side the coast breaks up
     float d = fv - lvl;
 

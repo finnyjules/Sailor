@@ -32,8 +32,7 @@ float fbmN(vec2 p, float seed, int oct) {
 }
 
 // The inks are a ramp by order: slot 0 is the deepest band, the last the palest. Levels
-// wrap every `u_steps`, and every level lands on some ink whatever the step count, so no
-// swatch is ever dead.
+// wrap every `u_steps`; with fewer Steps than inks only every (inks/Steps)-th ink is used.
 #define MAXS 8
 uniform vec3 u_ramp[MAXS];
 uniform float u_rampPos[MAXS];
@@ -44,7 +43,7 @@ vec3 rampLevel(float k) {
     float s = max(2.0, floor(u_steps + 0.5));
     float km = mod(k, s);                                    // 0 <= km < s, also for negative k
     int idx = int(floor(km / s * float(n)));
-    return u_ramp[clamp(idx - (idx / n) * n, 0, MAXS - 1)];
+    return u_ramp[clamp(int(mod(float(idx), float(n))), 0, MAXS - 1)];
 }
 
 uniform float u_cols;

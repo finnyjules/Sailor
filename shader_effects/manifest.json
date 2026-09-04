@@ -3169,11 +3169,11 @@
         { "uniform": "u_level", "label": "Coverage", "type": "float", "min": 0.0, "max": 1.0, "default": 0.5, "step": 0.01 },
         { "uniform": "u_scale", "label": "Feature size", "type": "float", "min": 1.0, "max": 10.0, "default": 2.2, "step": 0.1 },
         { "uniform": "u_warp", "label": "Distortion", "type": "float", "min": 0.0, "max": 1.0, "default": 0.4, "step": 0.01 },
-        { "uniform": "u_grid", "label": "Resolution", "type": "float", "min": 40, "max": 320, "default": 150, "step": 1 },
+        { "uniform": "u_grid", "label": "Cells across", "type": "float", "min": 40, "max": 320, "default": 150, "step": 1 },
         { "uniform": "u_depth", "label": "Halftone depth", "type": "float", "min": 0.0, "max": 1.0, "default": 0.7, "step": 0.01 },
         { "uniform": "u_fringe", "label": "Coast fringe", "type": "float", "min": 0.0, "max": 1.0, "default": 0.45, "step": 0.01 },
         { "uniform": "u_spark", "label": "Specks", "type": "float", "min": 0.0, "max": 1.0, "default": 0.6, "step": 0.01 },
-        { "uniform": "u_tide", "label": "Tide", "type": "float", "min": 0.0, "max": 2.0, "default": 0.6, "step": 0.05 },
+        { "uniform": "u_tide", "label": "Tide", "type": "float", "min": 0.0, "max": 1.6, "default": 0.6, "step": 0.05 },
         { "uniform": "u_speed", "label": "Speed", "type": "float", "min": 0.0, "max": 3.0, "default": 1.0, "step": 0.05 },
         { "uniform": "u_mix", "label": "Image mix", "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "step": 0.05 }
       ]
@@ -3200,7 +3200,7 @@
         { "uniform": "u_soft", "label": "Softness", "type": "float", "min": 0.1, "max": 1.0, "default": 0.5, "step": 0.01 },
         { "uniform": "u_blot", "label": "Blot size", "type": "float", "min": 0.2, "max": 1.0, "default": 0.5, "step": 0.01 },
         { "uniform": "u_grain", "label": "Grain", "type": "float", "min": 0.0, "max": 1.0, "default": 0.4, "step": 0.01 },
-        { "uniform": "u_bleed", "label": "Bleed", "type": "float", "min": 0.0, "max": 2.0, "default": 0.8, "step": 0.05 },
+        { "uniform": "u_bleed", "label": "Bleed", "type": "float", "min": 0.0, "max": 1.6, "default": 0.8, "step": 0.05 },
         { "uniform": "u_speed", "label": "Speed", "type": "float", "min": 0.0, "max": 3.0, "default": 1.0, "step": 0.05 },
         { "uniform": "u_mix", "label": "Image mix", "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "step": 0.05 }
       ]

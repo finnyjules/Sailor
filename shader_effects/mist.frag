@@ -78,7 +78,7 @@ void main() {
         vec3 tint = (n > 1) ? u_ramp[clamp(b + 1, 0, MAXS - 1)] : u_ramp[0];
         acc += w * tint * tint; sw += w;
     }
-    vec3 ground = acc / max(sw, 1e-6);
+    vec3 ground = acc / max(sw, 1e-12);
 
     // The neon curtain: tall thin noise, ragged edges, soft halo.
     float q1 = fbm3(vec2(nx * 1.9 + 3.1, ny * 1.9 + 8.7), 91.0);
