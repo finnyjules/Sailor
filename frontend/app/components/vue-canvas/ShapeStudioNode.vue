@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Gem, Pencil } from 'lucide-vue-next'
-import { renderStudio, drawToCanvas, studioFramePad } from '~/lib/geoshape/render'
+import { renderStudio, drawToCanvas, studioFramePad, studioWarmPaints, hasAsyncPaint, warmPaints } from '~/lib/geoshape/render'
 import { studioDocFromPersisted } from '~/lib/geoshape/studio'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
@@ -67,6 +67,7 @@ async function bakeOutput(): Promise<Blob | null> {
   const blob = props.data?.properties?.sailor_shapeStudio as
     { doc?: unknown; config?: unknown; canvasW?: number; canvasH?: number } | undefined
   const studioDoc = studioDocFromPersisted(blob)
+  const bg = studioDoc.background
   const w = typeof blob?.canvasW === 'number' ? blob.canvasW : 1024
   const h = typeof blob?.canvasH === 'number' ? blob.canvasH : 1024
   try {
@@ -76,7 +77,9 @@ async function bakeOutput(): Promise<Blob | null> {
     canvas.height = Math.max(1, Math.round(h))
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
-    drawToCanvas(shapes, ctx, canvas.width, canvas.height, studioFramePad(studioDoc))
+    const paints = studioWarmPaints(shapes, bg)
+    if (hasAsyncPaint(paints)) await warmPaints(paints, { w: canvas.width, h: canvas.height })
+    drawToCanvas(shapes, ctx, canvas.width, canvas.height, studioFramePad(studioDoc), bg)
     const out = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
     if (!out) return null
     if (bakedThumb.value) URL.revokeObjectURL(bakedThumb.value)
@@ -106,7 +109,9 @@ async function renderFrameSurface(w: number, h: number): Promise<TexImageSource>
   const ctx = frameCanvas.getContext('2d')
   if (!ctx) return frameCanvas
   ctx.clearRect(0, 0, frameCanvas.width, frameCanvas.height)
-  drawToCanvas(shapes, ctx, frameCanvas.width, frameCanvas.height, studioFramePad(studioDoc))
+  const paints = studioWarmPaints(shapes, studioDoc.background)
+  if (hasAsyncPaint(paints)) await warmPaints(paints, { w: frameCanvas.width, h: frameCanvas.height })
+  drawToCanvas(shapes, ctx, frameCanvas.width, frameCanvas.height, studioFramePad(studioDoc), studioDoc.background)
   return frameCanvas
 }
 

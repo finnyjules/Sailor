@@ -18,7 +18,7 @@ import { Dices } from 'lucide-vue-next'
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import type { GeoShapeConfig } from '~/lib/geoshape/config'
 import {
-  renderStudio, studioToSvg, drawToCanvas, warmPaints, shapePaints, hasAsyncPaint, studioFramePad,
+  renderStudio, studioToSvg, drawToCanvas, warmPaints, studioWarmPaints, hasAsyncPaint, studioFramePad,
 } from '~/lib/geoshape/render'
 import {
   LAYER_MAX, mergeLayer, studioDocFromPersisted, type GeoStudioDoc, type GeoLayer,
@@ -370,13 +370,13 @@ async function renderPreview() {
     const shapes = await renderStudio(doc.value)
     if (token !== renderToken) return // superseded by a later render
     const pad = studioFramePad(doc.value)
-    drawToCanvas(shapes, ctx, el.width, el.height, pad)
+    drawToCanvas(shapes, ctx, el.width, el.height, pad, doc.value.background)
     // Image/shader fills resolve to FALLBACK_FILL until warmed — warm-then-repaint.
-    const paints = shapePaints(shapes)
+    const paints = studioWarmPaints(shapes, doc.value.background)
     if (hasAsyncPaint(paints)) {
       await warmPaints(paints, { w: el.width, h: el.height })
       if (token !== renderToken) return
-      drawToCanvas(shapes, ctx, el.width, el.height, pad)
+      drawToCanvas(shapes, ctx, el.width, el.height, pad, doc.value.background)
     }
   } catch (e) {
     console.error('[shape-studio] preview render failed', e)
@@ -427,9 +427,9 @@ async function rasterizePng(): Promise<Blob | null> {
   const ctx = off.getContext('2d')
   if (!ctx) return null
   // A ONE-SHOT render gets no second chance — warm BEFORE the only draw.
-  const paints = shapePaints(shapes)
+  const paints = studioWarmPaints(shapes, doc.value.background)
   if (hasAsyncPaint(paints)) await warmPaints(paints, { w: off.width, h: off.height })
-  drawToCanvas(shapes, ctx, off.width, off.height, studioFramePad(doc.value))
+  drawToCanvas(shapes, ctx, off.width, off.height, studioFramePad(doc.value), doc.value.background)
   return await new Promise<Blob | null>((resolve) => off.toBlob(resolve, 'image/png'))
 }
 
