@@ -85,6 +85,8 @@ describe('geoshape config', () => {
   })
 
   it('accepts layout blend and validates the blend enums', () => {
+    expect(mergeConfig({ blendSize: 0 }).blendSize).toBe(0)
+    expect(mergeConfig({ blendSize: -5 }).blendSize).toBe(0)
     const cfg = mergeConfig({ layout: 'blend', blendEase: 'easeInOut', fillCycle: 'ramp', paintTarget: 'outline', blendShape: 'star', blendLibraryShape: 'heart' })
     expect(cfg.layout).toBe('blend')
     expect(cfg.blendEase).toBe('easeInOut')

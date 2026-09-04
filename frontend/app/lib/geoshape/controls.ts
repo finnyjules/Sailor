@@ -157,7 +157,7 @@ export const GEO_CONTROLS: GeoControl[] = [
   slider('blendSides', 'Blend to sides', 3, 24, 1, 'Blend', DEFAULT_CONFIG.blendSides, undefined, { when: blendUsesSides }),
   slider('blendStarInner', 'Blend to star inner', 0.01, 0.99, 0.01, 'Blend', DEFAULT_CONFIG.blendStarInner, undefined, { when: blendIsStar }),
   slider('blendIrregularSeed', 'Blend to irregular seed', 1, 9999, 1, 'Blend', DEFAULT_CONFIG.blendIrregularSeed, undefined, { when: blendIsIrregular }),
-  slider('blendSize', 'Blend to size', 20, 600, 1, 'Blend', DEFAULT_CONFIG.blendSize, 'Size of the shape the steps run toward', { when: isBlend }),
+  slider('blendSize', 'Blend to size', 0, 600, 1, 'Blend', DEFAULT_CONFIG.blendSize, 'Size of the shape the steps run toward — 0 makes the outlines converge on a point', { when: isBlend }),
   slider('blendRotate', 'Blend to rotation', -180, 180, 1, 'Blend', DEFAULT_CONFIG.blendRotate, 'Turns the target shape; the steps twist to meet it', { when: isBlend }),
   slider('blendX', 'Blend to X', -800, 800, 1, 'Blend', DEFAULT_CONFIG.blendX, 'Where the target shape sits, left to right. 0 = on top of the base shape', { when: isBlend }),
   slider('blendY', 'Blend to Y', -800, 800, 1, 'Blend', DEFAULT_CONFIG.blendY, 'Where the target shape sits, up and down', { when: isBlend }),

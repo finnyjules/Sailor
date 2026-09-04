@@ -308,7 +308,7 @@ export function mergeConfig(raw: unknown): GeoShapeConfig {
     blendSides: clampNum(o.blendSides, d.blendSides, 3, 24),
     blendStarInner: Math.min(0.99, Math.max(0.01, num(o.blendStarInner, d.blendStarInner))),
     blendIrregularSeed: clampNum(o.blendIrregularSeed, d.blendIrregularSeed, 1, 9999),
-    blendSize: Math.min(600, Math.max(20, num(o.blendSize, d.blendSize))),
+    blendSize: Math.min(600, Math.max(0, num(o.blendSize, d.blendSize))),
     blendRotate: num(o.blendRotate, d.blendRotate),
     blendX: num(o.blendX, d.blendX),
     blendY: num(o.blendY, d.blendY),

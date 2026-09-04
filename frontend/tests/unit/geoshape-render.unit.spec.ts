@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderShapes, toSvg, contentBounds, framePad, fitScale, shapePaints } from '~/lib/geoshape/render'
-import { DEFAULT_CONFIG } from '~/lib/geoshape/config'
+import { DEFAULT_CONFIG, mergeConfig } from '~/lib/geoshape/config'
 import { paintToVectorPaint } from '~/lib/paint/toVector'
 import type { ImageFill } from '~/lib/compositor/paint'
 import type { Fill } from '~/lib/spacetype/fillTile'
@@ -308,5 +308,14 @@ describe('geoshape SVG export — per-clone outline in a gradient colour', () =>
     const G = { type: 'linear' as const, angle: 45, stops: [{ offset: 0, color: '#e5484d' }, { offset: 1, color: '#000000' }] }
     const shapes = await renderShapes({ ...DEFAULT_CONFIG, fillStrategy: 'perClone', paintTarget: 'outline', fills: [G], count: 3, layout: 'linear' })
     expect(shapePaints(shapes)).toEqual([G, G, G])
+  })
+})
+
+describe('blend to size 0', () => {
+  it('converges on a point without throwing, keeps every step but the degenerate last one, and stays finite', async () => {
+    const cfg = mergeConfig({ ...DEFAULT_CONFIG, layout: 'blend', fillStrategy: 'perClone', paintTarget: 'outline', count: 12, blendSize: 0, blendX: 60 })
+    const shapes = await renderShapes(cfg)
+    expect(shapes.length).toBeGreaterThanOrEqual(11)
+    for (const s of shapes) for (const c of s.commands) for (const a of c.args) expect(Number.isFinite(a)).toBe(true)
   })
 })

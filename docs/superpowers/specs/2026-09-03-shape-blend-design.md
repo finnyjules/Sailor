@@ -30,7 +30,7 @@ All new fields have defaults, so every saved document loads and renders exactly 
   - `blendSides: number` — 3..24, default 3
   - `blendStarInner: number` — 0.01..0.99, default 0.45
   - `blendIrregularSeed: number` — 1..9999, default 1
-  - `blendSize: number` — 20..600, default 180
+  - `blendSize: number` — 0..600, default 180 (0 lets the steps converge on a point; the A-side floor of 20 was inherited, not needed — lowered 2026-09-03)
   - `blendRotate: number` — −180..180 degrees, default 0
   - `blendX: number`, `blendY: number` — −800..800 document units, default 0 (concentric)
   - `blendEase: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut'` — default `'linear'`
