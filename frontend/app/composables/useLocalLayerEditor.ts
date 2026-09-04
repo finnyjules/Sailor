@@ -101,9 +101,12 @@ export function resizableKind(kind: string): boolean {
 /** A `wired` layer has no independent height — its height is `w * lastAspect`,
  *  set by the live content — so it gets no EDGE handles. Its corners still resize
  *  the Figma way (grabbed corner follows the pointer, opposite corner pinned);
- *  the aspect lock is implicit rather than a Shift modifier. */
+ *  the aspect lock is implicit rather than a Shift modifier. A `brush` layer is
+ *  the same shape of control: its height is derived too — `w × (its strokes'
+ *  natural aspect)`, not the wired `w * lastAspect` — so `w` alone drives a
+ *  uniform "keep proportions" scale of the whole painted shape. */
 export function aspectLockedResizeKind(kind: string): boolean {
-  return kind === 'wired'
+  return kind === 'wired' || kind === 'brush'
 }
 
 /** Kinds whose CORNER handles route to the anchored `resizeBox` path rather than

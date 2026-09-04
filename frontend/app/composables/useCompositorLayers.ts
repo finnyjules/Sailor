@@ -1088,8 +1088,14 @@ export function localLayerBox(
     // regardless of the layer's stored w/h (which may be stale full-frame values).
     // The box is centred at the layer's x/y, which is exactly where the render
     // centres the strokes' bounds — so it wraps the rendered marks precisely.
+    // Uniform "keep proportions" resize: the stored `w` drives a scale of the
+    // strokes' NATURAL width, and the height rides that same scale — so handles +
+    // hit-testing match the scaled render. At paint-commit `w == naturalW`, so
+    // scale === 1 and this box is byte-identical to the un-resized bounds.
     const b = strokeBounds((layer as BrushLayer).strokes)
-    return { w: Math.max(4, (b.maxX - b.minX) * W), h: Math.max(4, (b.maxY - b.minY) * W) }
+    const nw = b.maxX - b.minX, nh = b.maxY - b.minY
+    const scale = nw > 1e-6 ? (layer as BrushLayer).w / nw : 1
+    return { w: Math.max(4, nw * scale * W), h: Math.max(4, nh * scale * W) }
   }
   if (layer.kind === 'wired') {
     // A wired layer has no stored `h` (the height follows the content aspect), so
@@ -1983,16 +1989,25 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // resolution (dpr) so the committed layer stays crisp on retina — `ctx` is
     // DPR-scaled, so the final drawImage at LOGICAL size renders the hi-res offscreen 1:1.
     const b = strokeBounds(layer.strokes)
-    const w = Math.max(1, Math.round((b.maxX - b.minX) * W))
-    const h = Math.max(1, Math.round((b.maxY - b.minY) * W))
+    // Uniform "keep proportions" scale: `w` drives a scale of the strokes' natural
+    // width, and multiplying every artboard-width factor (W) by it below scales the
+    // whole shape AND the stroke thickness together, staying centred. At paint-commit
+    // `w == naturalW` so scale === 1 → every `* scale` is a no-op and this renders
+    // byte-identical to the un-resized brush.
+    // NOTE: painting MORE strokes onto a resized brush re-fits `w` to the new natural
+    // bounds (brushBoxFromStrokes), resetting the scale — acceptable, out of scope.
+    const nw = b.maxX - b.minX
+    const scale = nw > 1e-6 ? layer.w / nw : 1
+    const w = Math.max(1, Math.round((b.maxX - b.minX) * W * scale))
+    const h = Math.max(1, Math.round((b.maxY - b.minY) * W * scale))
     const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
     const dw = Math.max(1, Math.round(w * dpr))
     const dh = Math.max(1, Math.round(h * dpr))
     const off = document.createElement('canvas'); off.width = dw; off.height = dh
     const octx = off.getContext('2d'); if (!octx) return
     octx.save()
-    octx.translate(-b.minX * W * dpr, -b.minY * W * dpr) // bounds' top-left → offscreen origin
-    stampStrokes(octx, layer.strokes, W * dpr)           // base = artboard-width scale
+    octx.translate(-b.minX * W * dpr * scale, -b.minY * W * dpr * scale) // bounds' top-left → offscreen origin
+    stampStrokes(octx, layer.strokes, W * dpr * scale)   // base = artboard-width scale × keep-proportions scale
     octx.restore()
     if (hasPaint(layer.fill)) {
       octx.save()
@@ -2005,7 +2020,10 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // rather than inheriting whatever the outer shape transform last captured.
       const prevFieldBase = _fieldCtx.base
       if (typeof DOMMatrix !== 'undefined' && isFill(layer.fill) && fillIsShader(layer.fill) && layer.fill.shader.anchor === 'frame') {
-        _fieldCtx = { ..._fieldCtx, base: new DOMMatrix().translateSelf(-b.minX * W * dpr, -b.minY * W * dpr).scaleSelf(dpr) }
+        // Stroke space is now scaled by W*dpr*scale (see octx.translate above), so the
+        // translate carries `* scale` to match; scaleSelf(dpr) stays as-is (the field
+        // base maps stroke space → device, and the dpr scale of that mapping is unchanged).
+        _fieldCtx = { ..._fieldCtx, base: new DOMMatrix().translateSelf(-b.minX * W * dpr * scale, -b.minY * W * dpr * scale).scaleSelf(dpr) }
       }
       octx.fillStyle = resolvePaint(octx, layer.fill, { w: dw, h: dh }, _fieldCtx)
       _fieldCtx = { ..._fieldCtx, base: prevFieldBase }
