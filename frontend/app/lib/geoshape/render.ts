@@ -389,8 +389,25 @@ const STILL_FIELD: ShaderFieldFrameCtx = { frameW: 1, frameH: 1, t: 0, fps: 30, 
  * the CALLER's job: `warmPaints` below, then call this again. That degrades
  * gracefully either way; it never throws.
  */
-export function drawToCanvas(shapes: VectorShape[], ctx: CanvasRenderingContext2D, w: number, h: number, pad = 0): void {
+export function drawToCanvas(
+  shapes: VectorShape[], ctx: CanvasRenderingContext2D,
+  w: number, h: number, pad = 0, background: Paint | null = null,
+): void {
   ctx.clearRect(0, 0, w, h)
+  // Document background: a full-output rect behind the padding frame and every
+  // shape. Painted in the UNTRANSFORMED device frame (before the fit/centre
+  // transform below) so it spans the whole canvas, not the mark's box. `null`
+  // and the 'none'/'' sentinels stay transparent (the historical behaviour).
+  if (background && background !== 'none') {
+    if (typeof background === 'string') {
+      ctx.fillStyle = background
+      ctx.fillRect(0, 0, w, h)
+    } else {
+      const style = resolvePaintCanvas(ctx, background as Paint, { w, h }, STILL_FIELD)
+      ctx.fillStyle = (style as any) ?? FALLBACK_FILL
+      ctx.fillRect(0, 0, w, h)
+    }
+  }
   const b = contentBounds(shapes)
   const scale = fitScale(b, w, h, pad)
   ctx.save()
@@ -465,6 +482,16 @@ export function shapePaints(shapes: VectorShape[]): Paint[] {
     const sp = (s as GeoVectorShape).strokePaint
     if (sp && typeof sp !== 'string') out.push(sp)
   }
+  return out
+}
+
+/** The paints a studio doc needs warmed before a real paint/rasterize: every
+ *  shape's authored paint (via `shapePaints`) plus the document background.
+ *  Solid/null entries are harmless — `hasAsyncPaint` filters them; only
+ *  image/shader entries actually cost a warm. */
+export function studioWarmPaints(shapes: VectorShape[], background: Paint | null): Paint[] {
+  const out = shapePaints(shapes)
+  if (background && background !== 'none') out.push(background)
   return out
 }
 
