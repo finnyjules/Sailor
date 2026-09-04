@@ -28,6 +28,26 @@ describe('paper fill — registration & model', () => {
   })
 })
 
+describe('paper fill — density controls grain scale (no flat mega-blocks)', () => {
+  const channelAt = (img: ImageData, x: number, y: number, ch = 0) => img.data[(y * img.width + x) * 4 + ch]
+
+  it('keeps grain high-frequency at low density (does NOT render one flat block)', () => {
+    // The bug this guards: density mapped to a cell up to 24px, drawn as ONE flat value, so a
+    // low-density paper fill showed giant pixel-blocks ("blows up the texture"). Grain must stay
+    // varied pixel-to-pixel even at the coarsest density — a small neighbourhood is not one colour.
+    const img = paperImageData(32, 32, paper({ density: 1, grain: 0.7 }))
+    const vals = new Set<number>()
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) vals.add(channelAt(img, x, y))
+    expect(vals.size).toBeGreaterThan(1)
+  })
+
+  it('density changes the rendered grain (fine ≠ coarse)', () => {
+    const fine = paperImageData(24, 24, paper({ density: 32, grain: 0.7 }))
+    const coarse = paperImageData(24, 24, paper({ density: 1, grain: 0.7 }))
+    expect(Array.from(fine.data)).not.toEqual(Array.from(coarse.data))
+  })
+})
+
 describe('paperImageData — deterministic grain', () => {
   it('is byte-for-byte deterministic for the same fill', () => {
     const a = paperImageData(16, 16, paper())

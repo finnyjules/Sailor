@@ -409,21 +409,41 @@ function paperHash(cx: number, cy: number): number {
   return v - Math.floor(v)
 }
 
+/** Smooth value noise in [0,1): the per-lattice-point `paperHash` bilinearly interpolated with a
+ *  smoothstep fade, so a grain SCALE larger than one pixel reads as soft organic mottle rather than
+ *  the hard, flat pixel-blocks a `floor(px/cell)` sampling produced (which "blew up" at low
+ *  density). `s` is the lattice spacing in pixels; `s === 1` collapses back to per-pixel `paperHash`
+ *  at integer coordinates. */
+function paperValueNoise(x: number, y: number, s: number): number {
+  const gx = x / s, gy = y / s
+  const x0 = Math.floor(gx), y0 = Math.floor(gy)
+  const fx = gx - x0, fy = gy - y0
+  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy)   // smoothstep fade
+  const n00 = paperHash(x0, y0), n10 = paperHash(x0 + 1, y0)
+  const n01 = paperHash(x0, y0 + 1), n11 = paperHash(x0 + 1, y0 + 1)
+  return (n00 * (1 - u) + n10 * u) * (1 - v) + (n01 * (1 - u) + n11 * u) * v
+}
+
 /**
  * Paper grain as a pure ImageData: base colour `a` speckled toward the grain tint `b` on the
  * dark side and toward white on the light side, giving paper "tooth". `grain` (0..1) scales the
- * speckle strength; `density` sets grain fineness (bigger density ⇒ smaller grain cells, matching
- * the other patterned fills' "more density = finer detail"). Exported so it can be unit-tested
- * without a DOM canvas.
+ * speckle strength; `density` sets grain fineness — higher density = a finer grain lattice. The
+ * grain is a fine per-pixel tooth blended with a `density`-scaled soft mottle (`paperValueNoise`),
+ * so the whole density range stays paper-like and never pixelates into flat blocks. Exported so it
+ * can be unit-tested without a DOM canvas.
  */
 export function paperImageData(w: number, h: number, fill: Fill): ImageData {
   const base = hexBytes(fill.a), tint = hexBytes(fill.b)
   const grain = Math.max(0, Math.min(1, fill.grain ?? 0.4))
-  const cell = Math.max(1, Math.round(24 / Math.max(1, fill.density || 1)))
+  // Grain lattice spacing in px: higher density ⇒ finer. Bounded to [1,8] so the coarse end is a
+  // soft mottle (interpolated), never the 24px flat blocks the old `24/density` cell produced.
+  const scale = Math.max(1, Math.min(8, 24 / Math.max(1, fill.density || 1)))
   const img = new ImageData(w, h)
   for (let i = 0; i < img.data.length; i += 4) {
     const px = (i / 4) % w, py = Math.floor((i / 4) / w)
-    const n = paperHash(Math.floor(px / cell), Math.floor(py / cell))   // 0..1 per grain cell
+    // Fine per-pixel tooth (0.3) keeps grain at every density; the density-scaled mottle (0.7)
+    // is what the Density control actually moves — fine speckle ⇄ soft coarse grain.
+    const n = 0.3 * paperHash(px, py) + 0.7 * paperValueNoise(px, py, scale)   // 0..1
     const k = (n - 0.5) * 2 * grain                                     // -grain..+grain
     for (let ch = 0; ch < 3; ch++) {
       const target = k >= 0 ? tint[ch]! : 255                           // dark fleck → tint, light fleck → white
