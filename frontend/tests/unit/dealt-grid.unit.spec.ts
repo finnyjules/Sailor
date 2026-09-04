@@ -7,7 +7,7 @@ import {
 } from '~/lib/texturefx/pattern'
 import { TEXTURE_CONTROLS, textureDefaults } from '~/lib/texturefx/controls'
 import { TEXTURE_SECTIONS } from '~/lib/texturefx/sections'
-import { rolesFor } from '~/lib/texturefx/roles'
+import { rolesFor, DEALTGRID_VOCABS } from '~/lib/texturefx/roles'
 import { MODES } from '~/lib/texturefx/types'
 import { TEXTURE_FS } from '~/lib/texturefx/renderer'
 
@@ -101,9 +101,9 @@ describe('dealt grid controls', () => {
     expect(new Set<string>(TEXTURE_SECTIONS).has('Dealt grid')).toBe(true)
   })
 
-  it('draws the panel in list order: cells / density / size variance', () => {
+  it('draws the panel in list order: template / colours / cells / density / size variance', () => {
     const group = TEXTURE_CONTROLS.filter(c => c.group === 'Dealt grid').map(c => c.key)
-    expect(group).toEqual(['dgCells', 'dgDensity', 'dgSizeVar'])
+    expect(group).toEqual(['dgTemplate', 'dgVocab', 'dgCells', 'dgDensity', 'dgSizeVar'])
   })
 
   it('reveals the Dealt grid group only in dealtgrid mode', () => {
@@ -280,14 +280,40 @@ describe('dealt grid never renders a blank tile', () => {
 // --- colour ----------------------------------------------------------------
 
 describe('dealt grid colour', () => {
-  it('renders exactly the three role colours — inkA, inkB, ground, nothing off-palette', () => {
-    const p = dealtParams({ dgSizeVar: 0.5, dgDensity: 0.7, colorA: '#c94f3d', colorB: '#3d6bc9', background: '#f2ede4' })
-    const palette: RGBA[] = [[...hex('#c94f3d'), 1] as RGBA, [...hex('#3d6bc9'), 1] as RGBA, [...hex('#f2ede4'), 1] as RGBA]
+  it('renders exactly the active vocab\'s three role colours, nothing off-palette', () => {
+    // Colours come from the dgVocab family (DEALTGRID_VOCABS), NOT colorA/B/background —
+    // those are set here to garish off-palette values to prove they are ignored.
+    const c = DEALTGRID_VOCABS.brand
+    const p = dealtParams({ dgSizeVar: 0.5, dgDensity: 0.7, dgVocab: 'brand', colorA: '#c94f3d', colorB: '#3d6bc9', background: '#f2ede4' })
+    const palette: RGBA[] = [c.inkA, c.inkB, c.ground].map(h => [...hex(h.replace('#', '')), 1] as RGBA)
     for (let y = 0; y < 32; y++) {
       for (let x = 0; x < 32; x++) {
-        const c = patternColor(p, (x + 0.5) / 32, (y + 0.5) / 32)
-        expect(palette.some(q => eqRGBA(c, q)), `pixel ${x},${y} = ${c.join(',')}`).toBe(true)
+        const px = patternColor(p, (x + 0.5) / 32, (y + 0.5) / 32)
+        expect(palette.some(q => eqRGBA(px, q)), `pixel ${x},${y} = ${px.join(',')}`).toBe(true)
       }
+    }
+  })
+
+  it('each vocab resolves its own inks + ground, and switching vocab recolours', () => {
+    for (const v of ['brand', 'mono', 'warm', 'cool'] as const) {
+      const roles = rolesFor(dealtParams({ dgVocab: v }))
+      expect(roles).toEqual(['inkA', 'inkB', 'ground'])   // shape is identical across vocabs
+      const fam = DEALTGRID_VOCABS[v]
+      for (const slot of ['inkA', 'inkB', 'ground'] as const) {
+        expect(/^#[0-9a-f]{6}$/.test(fam[slot]), `${v}.${slot} valid hex`).toBe(true)
+      }
+    }
+    // mono ≠ brand: a grey vocab must not equal the brand vocab colour-for-colour.
+    expect(DEALTGRID_VOCABS.mono).not.toEqual(DEALTGRID_VOCABS.brand)
+  })
+
+  it('vocab changes colour but NOT the per-cell layout (parity-critical)', () => {
+    // The role FIELD (which cells keep, which fall to ground) must be byte-identical
+    // across vocabs — only the colours differ. Guards the twin: adding a colour family
+    // must never perturb the sampler geometry.
+    const base = roleField(dealtParams({ dgVocab: 'brand', dgSizeVar: 0.4, dgDensity: 0.7 }))
+    for (const v of ['mono', 'warm', 'cool'] as const) {
+      expect(roleField(dealtParams({ dgVocab: v, dgSizeVar: 0.4, dgDensity: 0.7 })), `layout for ${v}`).toEqual(base)
     }
   })
 })

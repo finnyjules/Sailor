@@ -1,4 +1,5 @@
 import type { Params } from '~/lib/spacetype/effect'
+import { DEALTGRID_VOCABS, dealtGridVocab } from '~/lib/texturefx/roles'
 
 export type RGBA = [number, number, number, number]
 
@@ -600,15 +601,18 @@ export function patternColor(p: Params, u: number, v: number): RGBA {
 
   // Dealt grid — a rigid, tileable grid of solid-filled cells. Like chips it owns
   // its own wrapped grid (dgCells), so it short-circuits before latticeCell().
-  // Roles: 0 = inkA, 1 = inkB, ground = background — matching ROLES_BY_FAMILY.dealtgrid
-  // / legacyColor's A/B/BG (v1 = solid cells only; no per-cell tone jitter).
+  // Roles: 0 = inkA, 1 = inkB, ground — colours come from the active COLOUR VOCAB
+  // (p.dgVocab), NOT colorA/B/background. The same DEALTGRID_VOCABS table feeds the
+  // GLSL role uniforms (via legacyColor), so this TS twin stays in parity while the
+  // vocab only swaps colours, never the per-cell layout (v1 = solid cells, no jitter).
   if (String(p.mode) === 'dealtgrid') {
     const dgCells = Math.max(2, Math.round(Number(p.dgCells) || 8))
     const density = Number.isFinite(Number(p.dgDensity)) ? Number(p.dgDensity) : 1
     const sizeVar = Number.isFinite(Number(p.dgSizeVar)) ? Number(p.dgSizeVar) : 0
+    const vocab = DEALTGRID_VOCABS[dealtGridVocab(p)]
     const s = dealtGridSample(u, v, dgCells, seed, density, sizeVar)
-    if (s.role >= DEALT_INK_ROLES) return out(BG)
-    return out(s.role === 0 ? A : B)
+    if (s.role >= DEALT_INK_ROLES) return out(hexToRgb(vocab.ground))
+    return out(hexToRgb(s.role === 0 ? vocab.inkA : vocab.inkB))
   }
 
   const { cx, cy, fx, fy } = latticeCell(String(p.lattice), cells, u, v)

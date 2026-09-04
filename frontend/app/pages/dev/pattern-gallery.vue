@@ -32,8 +32,10 @@ import { reactive, ref } from 'vue'
 import { textureFx } from '~/lib/texturefx/renderer'
 import { patternColor } from '~/lib/texturefx/pattern'
 import { shapeRegion } from '~/lib/texturefx/shapes'
-import { legacyColor } from '~/lib/texturefx/roles'
+import { legacyColor, DEALTGRID_VOCAB_IDS } from '~/lib/texturefx/roles'
 import { textureDefaults } from '~/lib/texturefx/controls'
+import { applyGridTemplate } from '~/lib/texturefx/templates'
+import { GRID_TEMPLATES } from '~/lib/frame/gridTemplates'
 import { MOTIFS, TILE_FAMILIES, SHAPE_FAMILIES } from '~/lib/texturefx/types'
 import type { Params } from '~/lib/spacetype/effect'
 
@@ -84,6 +86,17 @@ const DEALT_LOOKS: { name: string; params: Partial<Params> }[] = [
   { name: 'big seed', params: { seed: 999983, dgCells: 10, dgSizeVar: 0.5 } },
 ]
 const dealtItems = DEALT_LOOKS.map((l) => mk('dealt', l.name, { mode: 'dealtgrid', ...l.params }))
+// Vocab parity — the SAME dealt look under each colour vocabulary. The per-cell
+// layout is identical (vocab is colour-only), so this is the proof that adding a
+// colour family keeps the TS↔GLSL twin in parity for EVERY vocab, not just brand.
+const dealtVocabItems = DEALTGRID_VOCAB_IDS.map((v) =>
+  mk('dealt', `vocab:${v}`, { mode: 'dealtgrid', dgCells: 8, dgDensity: 0.8, dgSizeVar: 0.4, dgVocab: v }))
+// Template parity — each shared grid template applied one-click, then rendered at the
+// cells/density/sizeVar + vocab it configured. Proves the picker's output is in parity.
+const dealtTemplateItems = GRID_TEMPLATES.map((t) => ({
+  key: `dealt:tmpl:${t.id}`, label: `template:${t.id}`, kind: 'dealt' as const, delta: 0,
+  params: applyGridTemplate({ ...textureDefaults(), cells: 8, mode: 'dealtgrid' } as Params, t.id),
+}))
 
 const groups = reactive([
   { title: `Procedural motifs (${procItems.length})`, items: procItems },
@@ -91,6 +104,8 @@ const groups = reactive([
   { title: `Shape families (${shapeItems.length})`, items: shapeItems },
   { title: `Chips looks (${chipItems.length})`, items: chipItems },
   { title: `Dealt grid looks (${dealtItems.length})`, items: dealtItems },
+  { title: `Dealt grid vocab (${dealtVocabItems.length})`, items: dealtVocabItems },
+  { title: `Dealt grid templates (${dealtTemplateItems.length})`, items: dealtTemplateItems },
 ])
 
 const maxDelta = ref(0)
