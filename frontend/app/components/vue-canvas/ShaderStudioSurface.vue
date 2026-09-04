@@ -17,7 +17,7 @@ import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vu
 import BindableRow from '~/components/vue-canvas/studio/BindableRow.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import CanvasContextMenu from '~/components/vue-canvas/CanvasContextMenu.vue'
-import { assetUrl, fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
+import { assetUrl, fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
 import { resolveValues, resolveUniforms } from '~/lib/shaderfx/params'
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import type { EffectDef, GradientStop, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/types'
@@ -92,7 +92,7 @@ const GENERATIVE_BASE = (() => {
 const activeEffect = ref(0)
 const activeEffectCfg = computed<StudioEffect>(() => config.value.effects[activeEffect.value] ?? config.value.effects[0]!)
 const effectDef = computed<EffectDef | null>(
-  () => catalog.value?.effects.find(e => e.id === activeEffectCfg.value?.id) ?? null)
+  () => catalog.value?.effects.find(e => e.id === resolveEffectId(activeEffectCfg.value?.id ?? '')) ?? null)
 // Generative effects synthesize their own output and don't require a source
 // image — see ShaderEffectNode's `isGenerative`, which this mirrors.
 const isGenerative = computed(() => !!effectDef.value?.generative)
@@ -103,7 +103,7 @@ const effectValues = computed(() =>
   effectDef.value ? resolveValues(effectDef.value, activeEffectCfg.value?.params ?? {}) : {})
 /** Aside layer-stack label: the catalog def's display name, or 'Empty' if unpicked. */
 function effectLabel(e: StudioEffect): string {
-  return catalog.value?.effects.find(d => d.id === e.id)?.name ?? 'Empty'
+  return catalog.value?.effects.find(d => d.id === resolveEffectId(e.id))?.name ?? 'Empty'
 }
 
 // In-product agent — "tune" the shader in natural language (Phase 1). The nested
@@ -245,10 +245,11 @@ async function renderFrame(t01: number) {
     // cfg.motion.duration, so passing upstream-derived seconds against our own
     // (different) duration would run every track at the wrong rate.
     const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
-    const passes = composePasses(cfg, id => catalog.value?.effects.find(e => e.id === id) ?? null, t, (def, layer) => texBundle(def, layer))
+    const passes = composePasses(cfg, id => catalog.value?.effects.find(e => e.id === resolveEffectId(id)) ?? null, t, (def, layer) => texBundle(def, layer))
     el.getContext('2d')!.drawImage(shaderFx.render(passes, base, w, h), 0, 0)
     glError.value = null
   } catch (e: any) { glError.value = String(e?.message ?? e) }
+  measureMaskBox()
 }
 
 let raf = 0, start = 0, inFlight = false
@@ -413,6 +414,51 @@ function onFocusMove(ev: PointerEvent) {
 }
 function onFocusUp() { draggingFocus = false }
 
+// ── mask on-canvas handles ───────────────────────────────────────────────────
+// The overlay is positioned to cover the letterboxed <canvas> exactly (via its
+// offset box within the shared `relative` container), so handle positions and
+// the region outline line up with what the shader draws. Drag mapping matches
+// the focus-point handler above (normalize against the canvas' client rect).
+const maskBox = ref({ left: 0, top: 0, w: 0, h: 0 })
+function measureMaskBox() {
+  const el = canvas.value
+  if (!el) return
+  maskBox.value = { left: el.offsetLeft, top: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight }
+}
+const showMaskHandles = computed(() => maskOn.value && !!resolved.value && maskBox.value.w > 0)
+/** Image aspect (w/h) — the shader aspect-corrects x by this, so the outline must too. */
+const maskAr = computed(() => { const s = resolved.value; return s && s.height ? s.width / s.height : 1 })
+const maskCenterPx = computed(() => ({ x: maskCfg.value.cx * maskBox.value.w, y: maskCfg.value.cy * maskBox.value.h }))
+// Region half-extents in canvas px. A `size`-radius circle in the shader's
+// aspect-corrected space is `size * imageHeight` px in each axis (x also × aspect).
+const maskRadPx = computed(() => ({ x: maskCfg.value.size * maskBox.value.h * maskCfg.value.aspect, y: maskCfg.value.size * maskBox.value.h }))
+/** Size handle sits on the region's local +Y edge (the rotate group orients it). */
+const maskSizeHandlePx = computed(() => ({ x: maskCenterPx.value.x, y: maskCenterPx.value.y + maskRadPx.value.y }))
+
+function maskNormFromEvent(ev: PointerEvent): { x: number; y: number } {
+  const r = canvas.value!.getBoundingClientRect()
+  const clamp01 = (n: number) => Math.min(Math.max(n, 0), 1)
+  return { x: clamp01((ev.clientX - r.left) / r.width), y: clamp01((ev.clientY - r.top) / r.height) }
+}
+let maskDrag: null | 'center' | 'size' = null
+function onMaskDown(kind: 'center' | 'size', ev: PointerEvent) {
+  ev.stopPropagation()
+  maskDrag = kind;(ev.target as HTMLElement).setPointerCapture(ev.pointerId); onMaskMove(ev)
+}
+function onMaskMove(ev: PointerEvent) {
+  if (!maskDrag || !canvas.value) return
+  const n = maskNormFromEvent(ev)
+  if (maskDrag === 'center') { setMask('cx', n.x); setMask('cy', n.y) }
+  else {
+    // size = distance from centre in the shader's aspect-corrected metric, so the
+    // handle tracks the true region edge for any aspect ratio.
+    const dx = (n.x - maskCfg.value.cx) * maskAr.value
+    const dy = (n.y - maskCfg.value.cy)
+    setMask('size', Math.min(Math.max(Math.hypot(dx, dy), 0.02), 1))
+  }
+}
+function onMaskUp() { maskDrag = null }
+
 // ── motion tracks ────────────────────────────────────────────────────────────
 const animatablePaths = computed(() => [
   // Fixed-section paths are gated by their section's enable flag — a disabled
@@ -443,7 +489,15 @@ function addTrack() {
 function removeTrack(i: number) { config.value.motion.tracks.splice(i, 1) }
 
 // ── persistence ────────────────────────────────────────────────────────────────
-function loadConfig() { const c = currentNode()?.data?.properties?.sailor_shaderStudio; if (c && typeof c === 'object') config.value = hydrateConfig(migrateShaderConfig(c)) }
+function loadConfig() {
+  const c = currentNode()?.data?.properties?.sailor_shaderStudio
+  if (!c || typeof c !== 'object') return
+  const hydrated = hydrateConfig(migrateShaderConfig(c))
+  // Rewrite any legacy effect id to its current one, so the next saveConfig() persists the
+  // new id and the alias in catalogStore.ts's LEGACY_EFFECT_IDS can eventually be retired.
+  for (const e of hydrated.effects) e.id = resolveEffectId(e.id)
+  config.value = hydrated
+}
 function saveConfig() { const n = currentNode(); if (!n) return; n.data ||= {}; n.data.properties ||= {}; n.data.properties.sailor_shaderStudio = cloneConfig(config.value) }
 function closeEditor() { try { saveConfig() } catch (e) { console.error('[shader-studio] saveConfig failed', e) } emit('close') }
 
@@ -463,7 +517,7 @@ async function renderBlob(t01: number): Promise<Blob> {
   const t = t01 * dur
   const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
   const base = src ? await src.getFrame(t01, w, h) : GENERATIVE_BASE
-  shaderFx.render(composePasses(cfg, id => catalog.value?.effects.find(e => e.id === id) ?? null, t, (def, layer) => texBundle(def, layer)), base, w, h)
+  shaderFx.render(composePasses(cfg, id => catalog.value?.effects.find(e => e.id === resolveEffectId(id)) ?? null, t, (def, layer) => texBundle(def, layer)), base, w, h)
   const c = shaderFx.outputCanvas!
   return await new Promise<Blob>((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/png', 0.95))
 }
@@ -726,11 +780,16 @@ const clockLabel = computed(() => {
   return `${src.duration.toFixed(1)}s · ${frames} frames — from upstream`
 })
 
+let maskRO: ResizeObserver | null = null
 onMounted(async () => {
   loadConfig(); catalog.value = await fetchShaderFxCatalog().catch(() => null); startPreview()
   registerStudioParamBaker(props.nodeId, renderBlobWithOverrides)
+  // Keep the mask overlay aligned with the letterboxed canvas as the modal resizes
+  // (the canvas is max-w/h-full, so a container resize moves its box without a re-render).
+  await nextTick()
+  if (canvas.value) { maskRO = new ResizeObserver(() => measureMaskBox()); maskRO.observe(canvas.value); measureMaskBox() }
 })
-onBeforeUnmount(() => { saveConfig(); stopPreview(); unregisterStudioParamBaker(props.nodeId) })
+onBeforeUnmount(() => { saveConfig(); stopPreview(); unregisterStudioParamBaker(props.nodeId); maskRO?.disconnect() })
 
 function setParam(uniform: string, value: ParamValue) { const e = activeEffectCfg.value; if (e) e.params = { ...e.params, [uniform]: value } }
 
@@ -827,6 +886,28 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
           class="nopan nodrag absolute size-3 -ml-1.5 -mt-1.5 cursor-move rounded-full border-2 border-white bg-black/30"
           :style="{ left: `${config.post.blur.focusX * 100}%`, top: `${config.post.blur.focusY * 100}%` }"
           @pointerdown="onFocusDown" @pointermove="onFocusMove" @pointerup="onFocusUp" />
+        <!-- Mask region overlay: outline + draggable centre/size handles, sized to
+             cover the letterboxed canvas exactly. Root is pointer-events-none so it
+             never blocks the canvas; only the handles opt back in. -->
+        <svg v-if="showMaskHandles" class="nopan nodrag pointer-events-none absolute overflow-visible"
+          :style="{ left: `${maskBox.left}px`, top: `${maskBox.top}px`, width: `${maskBox.w}px`, height: `${maskBox.h}px` }"
+          :viewBox="`0 0 ${maskBox.w} ${maskBox.h}`"
+          @pointermove="onMaskMove" @pointerup="onMaskUp">
+          <g :transform="`rotate(${maskAngleDeg} ${maskCenterPx.x} ${maskCenterPx.y})`">
+            <g fill="none" stroke="#fff" stroke-opacity="0.85" stroke-width="1.5" stroke-dasharray="5 4">
+              <ellipse v-if="maskCfg.shape === 'radius'" :cx="maskCenterPx.x" :cy="maskCenterPx.y" :rx="maskRadPx.x" :ry="maskRadPx.y" />
+              <template v-else>
+                <line :x1="-maskBox.w" :x2="2 * maskBox.w" :y1="maskCenterPx.y - maskRadPx.y" :y2="maskCenterPx.y - maskRadPx.y" />
+                <line v-if="maskCfg.shape === 'band'" :x1="-maskBox.w" :x2="2 * maskBox.w" :y1="maskCenterPx.y + maskRadPx.y" :y2="maskCenterPx.y + maskRadPx.y" />
+              </template>
+            </g>
+            <circle class="cursor-ns-resize" style="pointer-events:auto"
+              :cx="maskSizeHandlePx.x" :cy="maskSizeHandlePx.y" r="6"
+              fill="#fff" stroke="rgba(0,0,0,0.4)" stroke-width="1.5" @pointerdown="onMaskDown('size', $event)" />
+          </g>
+          <circle class="cursor-move" style="pointer-events:auto" :cx="maskCenterPx.x" :cy="maskCenterPx.y" r="7"
+            fill="rgba(0,0,0,0.35)" stroke="#fff" stroke-width="2" @pointerdown="onMaskDown('center', $event)" />
+        </svg>
         <span v-if="!resolved && !isGenerative" class="absolute text-xs text-white/40">Add a source image to begin</span>
       </div>
     </template>

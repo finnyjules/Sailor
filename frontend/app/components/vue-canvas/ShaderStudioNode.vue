@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Pencil, Sparkles } from 'lucide-vue-next'
-import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
+import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import type { ShaderFxCatalog, EffectDef } from '~/lib/shaderfx/types'
 import { composePasses } from '~/lib/shaderstudio/passes'
@@ -78,7 +78,7 @@ watch([sourceKind, ownSourceUrl], async ([kind, ownUrl]) => {
 }, { immediate: true })
 
 function effectDef(id: string): EffectDef | null {
-  return catalog.value?.effects.find(e => e.id === id) ?? null
+  return catalog.value?.effects.find(e => e.id === resolveEffectId(id)) ?? null
 }
 
 async function renderFrame(t01: number) {

@@ -32,8 +32,15 @@ export function setShaderFxCatalog(cat: ShaderFxCatalog | null): void {
  * a canvas/WebGL readback bridge with no await point).
  */
 export function getEffectSync(id: string): EffectDef | null {
-  return cached?.effects.find(e => e.id === id) ?? null
+  return cached?.effects.find(e => e.id === resolveEffectId(id)) ?? null
 }
+
+/** Effects renamed after documents may have saved their old id. Resolved at every lookup so
+ *  a saved layer keeps rendering; rewrite the id on load so the alias can be retired. Lives
+ *  here (not catalog.ts) so the network-free embed bundle can resolve aliases too — see the
+ *  module doc above. */
+export const LEGACY_EFFECT_IDS: Readonly<Record<string, string>> = { filament: 'thread_contours' }
+export function resolveEffectId(id: string): string { return LEGACY_EFFECT_IDS[id] ?? id }
 
 // ── Self-heal hook for ~/lib/shaderfill/field.ts ───────────────────────────────
 // field.ts's resolveField() self-heals a catalog-load-race miss by kicking a

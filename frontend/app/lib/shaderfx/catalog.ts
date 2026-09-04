@@ -1,12 +1,15 @@
 import type { EffectDef, ShaderFxCatalog } from './types'
-import { getEffectSync, setShaderFxCatalog, setShaderFxRefetcher } from './catalogStore'
+import { getEffectSync, resolveEffectId, setShaderFxCatalog, setShaderFxRefetcher } from './catalogStore'
 
 // Re-exported so this module's 20+ existing importers (which only ever wanted
 // the synchronous reader, not a fetcher) keep working unchanged — see
 // catalogStore.ts for the actual cache + getEffectSync implementation. This
 // module now owns only what genuinely fetches: fetchShaderFxCatalog, getEffect,
-// and assetUrl.
-export { getEffectSync }
+// and assetUrl. LEGACY_EFFECT_IDS/resolveEffectId live in catalogStore.ts too
+// (network-free, so the embed bundle that never imports this module can still
+// resolve aliases) and are re-exported here for this module's callers.
+export { getEffectSync, resolveEffectId }
+export { LEGACY_EFFECT_IDS } from './catalogStore'
 
 let promise: Promise<ShaderFxCatalog> | null = null
 
@@ -39,7 +42,7 @@ setShaderFxRefetcher(fetchShaderFxCatalog)
 
 export async function getEffect(id: string): Promise<EffectDef | null> {
   const cat = await fetchShaderFxCatalog()
-  return cat.effects.find(e => e.id === id) ?? null
+  return cat.effects.find(e => e.id === resolveEffectId(id)) ?? null
 }
 
 export function assetUrl(file: string, v?: string | number): string {

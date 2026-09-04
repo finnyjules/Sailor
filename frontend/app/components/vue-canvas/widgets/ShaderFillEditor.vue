@@ -31,7 +31,7 @@ import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import { type ShaderSpec, DEFAULT_SHADER_SPEC } from '~/lib/spacetype/fillTile'
 import { type Paint, isFill } from '~/composables/useCompositorLayers'
-import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
+import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
 import type { EffectDef, GradientStop, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/types'
 import { cleanStops } from '~/lib/shaderfx/params'
 import { derivedShaderFillControls } from '~/lib/shaderfill/controls'
@@ -74,7 +74,7 @@ function loadCatalog() {
 onMounted(loadCatalog)
 
 const effectDef = computed<EffectDef | null>(
-  () => catalog.value?.effects.find((e) => e.id === props.modelValue.effectId) ?? null,
+  () => catalog.value?.effects.find((e) => e.id === resolveEffectId(props.modelValue.effectId)) ?? null,
 )
 
 function titleCase(s: string): string {

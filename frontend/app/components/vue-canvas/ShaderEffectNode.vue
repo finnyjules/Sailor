@@ -3,7 +3,7 @@ import { ChevronRight, Pause, Play, Sparkles } from 'lucide-vue-next'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CatalogModal from '~/components/CatalogModal.vue'
 import { getTypeColor } from '~/composables/useVueNodes'
-import { assetUrl, fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
+import { assetUrl, fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
 import { walkShaderChain } from '~/lib/shaderfx/chain'
 import { parseParams, resolveUniforms, serializeParams } from '~/lib/shaderfx/params'
 import { expandPasses, shaderFx } from '~/lib/shaderfx/renderer'
@@ -63,7 +63,7 @@ function setWidget(name: string, value: any) {
 
 const effectId = computed<string>(() => String(widgetVal('effect') ?? ''))
 const effectDef = computed<EffectDef | null>(
-  () => catalog.value?.effects.find(e => e.id === effectId.value) ?? null,
+  () => catalog.value?.effects.find(e => e.id === resolveEffectId(effectId.value)) ?? null,
 )
 const uniforms = computed<Record<string, number>>(() =>
   effectDef.value ? resolveUniforms(effectDef.value, parseParams(String(widgetVal('params') ?? '{}'))) : {},
@@ -130,7 +130,7 @@ function buildPasses(t: number) {
   // effects concatenate, so the renderer ping-pongs the whole flattened list.
   return chain.value.passes
     .flatMap((p) => {
-      const def = catalog.value!.effects.find(e => e.id === p.effectId)
+      const def = catalog.value!.effects.find(e => e.id === resolveEffectId(p.effectId))
       if (!def) return []
       // u_hasInput: 1 when a real image feeds the chain, 0 for standalone/placeholder
       // — lets hybrid effects (fbm) modulate the image or synthesize from scratch.

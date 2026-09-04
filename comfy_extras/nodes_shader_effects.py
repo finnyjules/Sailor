@@ -24,6 +24,8 @@ from comfy_extras._shader_effects import (
     to_uniforms,
 )
 
+LEGACY_EFFECT_IDS = {"filament": "thread_contours"}
+
 # The loader renames camelCase manifest keys to snake_case dataclass fields
 # (maxStops→max_stops, showWhen→show_when). Serialising a param straight from
 # vars(p) would ship those snake_case names to the browser, which reads the
@@ -117,6 +119,7 @@ class ShaderEffect(IO.ComfyNode):
         # (doesn't pass None), so it must default. Inputs are passed by keyword, so
         # signature order is free — `image` goes last to satisfy Python defaults.
         catalog = load_catalog()
+        effect = LEGACY_EFFECT_IDS.get(effect, effect)
         if effect not in catalog.effects:
             raise ValueError(f"ShaderEffect: unknown effect {effect!r}")
         eff = catalog.effects[effect]
