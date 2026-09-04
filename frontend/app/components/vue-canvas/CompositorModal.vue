@@ -75,6 +75,7 @@ import StrokeStyleRow from '~/components/vue-canvas/compositor/StrokeStyleRow.vu
 import FillSwatch from '~/components/vue-canvas/compositor/FillSwatch.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import type { PaletteFamily } from '~/lib/color/seedFamily'
+import type { GradientStop } from '~/lib/color/harmony'
 import { layerPaletteAssignments } from '~/lib/compositor/distribute'
 import PostEffectsControls from '~/components/vue-canvas/PostEffectsControls.vue'
 import { isChainEffect, isGpuEffect } from '~/lib/compositor/postEffects'
@@ -866,10 +867,13 @@ const selectedCount = computed(() => selectedLayers.value.length)
 // node), so they're excluded from both the distribution and the write —
 // exactly like clonableSelection() excludes them from duplication.
 const showMultiPalette = ref(false)
-function applyPaletteToSelection(fam: PaletteFamily) {
+// Core of the distribution, shared by all three PalettePicker panes (gallery
+// and harmony emit apply-stops; the seed shelf emits apply-family AND
+// apply-literal-stops) — see the @apply-* bindings on the picker below.
+function distributePaletteToSelection(hexes: string[]) {
   const targets = selectedLayers.value.filter(l => l.kind !== 'wired')
-  if (!targets.length) return
-  const assignments = layerPaletteAssignments(targets.map(l => l.id), fam.hexes)
+  if (!targets.length) { showMultiPalette.value = false; return }
+  const assignments = layerPaletteAssignments(targets.map(l => l.id), hexes)
   recordHistory()
   commit(localLayers.value.map((l) => {
     const hex = assignments[l.id]
@@ -879,6 +883,9 @@ function applyPaletteToSelection(fam: PaletteFamily) {
     return copy as LocalLayer
   }))
   showMultiPalette.value = false
+}
+function applyPaletteToSelection(fam: PaletteFamily) {
+  distributePaletteToSelection(fam.hexes)
 }
 // Box layers (rect/ellipse/image) get full Figma-style resize (corners + edges,
 // anchored opposite side); text/line/path keep uniform corner scale (no 2D box).
@@ -5319,7 +5326,9 @@ onUnmounted(() => {
             class="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-[280px] rounded-[10px] border border-[#2a2a2a] bg-[#1a1a1a]/97 p-2 shadow-xl z-30"
             @pointerdown.stop>
             <div class="mb-1.5 text-[11px] text-white/60">Apply palette to {{ selectedCount }} selected layers</div>
-            <PalettePicker mode="stops" @apply-family="applyPaletteToSelection" />
+            <PalettePicker mode="stops" @apply-family="applyPaletteToSelection"
+              @apply-stops="(stops: GradientStop[]) => distributePaletteToSelection(stops.map(s => s.color))"
+              @apply-literal-stops="(stops: GradientStop[]) => distributePaletteToSelection(stops.map(s => s.color))" />
           </div>
         </div>
       </div>
