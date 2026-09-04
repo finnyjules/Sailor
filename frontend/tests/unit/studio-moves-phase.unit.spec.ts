@@ -27,4 +27,9 @@ describe('at-anchored windows', () => {
     expect(ws[0]).toMatchObject({ start: 0.5, end: 1.5 })
     expect(ws[1]).toMatchObject({ start: 0, end: 4 })
   })
+  it('a looping bounce peaks mid-cycle and wraps back down at the cycle boundary', () => {
+    const m = mk({ at: 0, duration: 1, loop: true, bounce: true })
+    expect(movePhase(m, 0.5, 4)).toBeCloseTo(1, 6)
+    expect(movePhase(m, 1.0, 4)).toBeCloseTo(0, 6)
+  })
 })

@@ -21,7 +21,8 @@ export interface MoveWindow<T extends MoveTiming> { move: T; start: number; end:
 
 /** Each move's `[start, end]` window: `[at, at+duration]` for a transition, `[at, clip]` for a loop. */
 export function moveWindows<T extends MoveTiming>(moves: readonly T[], clip: number): MoveWindow<T>[] {
-  return moves.map(m => ({ move: m, start: m.at, end: m.loop ? clip : m.at + m.duration }))
+  const c = Math.max(0.001, clip)
+  return moves.map(m => ({ move: m, start: m.at, end: m.loop ? c : m.at + Math.max(0.001, m.duration) }))
 }
 
 /** Folds a progress value into a forward-then-back triangle (0→1→0 over one period), wrapping first like a sawtooth. */
