@@ -40,12 +40,27 @@ import { convertLegacyTracks, mergeMove, type LegacyMotionTrack } from '~/lib/st
 import { vtAxisPreset } from './axisPresets'
 import { nativeEaseFor } from '~/lib/motion/evaluate'
 import { isFill, isGradient, type Gradient, type Paint } from '~/lib/compositor/paint'
-// The migration-only legacy-track → preset matcher. A CIRCULAR import
-// (`trackPresets.ts` imports `VT_STACK_PREFIX`/types back from this module):
-// safe here because both sides only reach the other's binding from inside a
-// function body (`mergeMotion` below; `PRESETS`' own `build` closures in
-// trackPresets.ts), never at module top-level, so neither module needs the
-// other to have finished initialising before its own top-level code runs.
+// The leaf constants `trackPresets.ts` needs at MODULE-EVAL time, in a
+// dependency-free module — see its header and the comment on the
+// `trackPresets.ts` import below for why they moved out of this file.
+// Re-exported at their original declaration sites further down so every
+// existing `import { VT_STRETCH_MAX, ... } from './config'` is unchanged.
+import { VT_STRETCH_MIN, VT_STRETCH_MAX, VT_HEIGHT_MIN, VT_HEIGHT_MAX, VT_STACK_LIST, VT_STACK_PREFIX } from './constants'
+// The migration-only legacy-track → preset matcher. `trackPresets.ts` used to
+// import `VT_STACK_PREFIX`/`VT_STRETCH_MAX`/etc as VALUES from this module,
+// which made this pair a genuine runtime cycle: trackPresets.ts's top-level
+// `PRESETS` table read those bindings while being built, and this file
+// imports trackPresets.ts (right here) before it reaches their declarations
+// further down — a temporal-dead-zone crash ("Cannot access 'VT_STRETCH_MAX'
+// before initialization") that only showed up in the real app's module-load
+// order, not in unit tests. Those leaf constants now live in `./constants.ts`
+// (which imports nothing from `./config` or `./trackPresets`), and
+// trackPresets.ts reads them from there directly — see its own import
+// comment. What crosses this particular edge at runtime is now just
+// `vtMatchLegacyTrackPreset`, a function, called from inside `mergeMotion`'s
+// body below, never at module top-level; trackPresets.ts's own imports from
+// this module are TYPES, erased at runtime. So there is no runtime cycle left
+// on this edge, only a type-level one, which is harmless.
 import { vtMatchLegacyTrackPreset } from './trackPresets'
 import { DEFAULT_FILL, normalizePaint, type Fill } from '~/lib/spacetype/fillTile'
 // CPU-only (plain strings plus a GLSL source string), so it is safe in the
@@ -854,20 +869,11 @@ export const VT_STAGGER_SEED_MAX = 999
  * and a 40° lean is already past caricature.
  */
 export const VT_SKEW_MAX = 40
-/**
- * The dials' range, measured and decided 2026-09-03. A single range shared by
- * both axes sounds tidier, but a strictly-universal one is unusable: a
- * fragile display serif drags it down to no travel at all, so the honest move
- * is to split by axis — keep the mainstream of the width dial clean and pull
- * back its far corners, while the height dial (which tolerates more) gets its
- * own, wider ceiling. Damping still handles both-dials-pushed (see
- * `dampedStretch`) — these are the single-axis proven bounds, not a promise
- * about the diagonal.
- */
-export const VT_STRETCH_MIN = 0.6
-export const VT_STRETCH_MAX = 1.8
-export const VT_HEIGHT_MIN = 0.6
-export const VT_HEIGHT_MAX = 2.0
+// VT_STRETCH_MIN/MAX and VT_HEIGHT_MIN/MAX (the dials' range) now live in
+// `./constants.ts` — imported above, re-exported here so every existing
+// importer of them from this module is unchanged. See that file for the doc
+// comment on the range itself and the header on why they moved.
+export { VT_STRETCH_MIN, VT_STRETCH_MAX, VT_HEIGHT_MIN, VT_HEIGHT_MAX }
 export const VT_FITS = ['off', 'width'] as const
 export type VtFit = (typeof VT_FITS)[number]
 /**
@@ -1003,25 +1009,13 @@ function clonePaint(p: Paint): Paint {
 
 // ── The appearance stack: rebuild, migrate, and the render bridge ───────────
 
-/**
- * The config key the appearance stack lives at, and the prefix every absolute
- * stack path carries.
- *
- * ONE constant, because four things have to agree about which dotted paths are
- * member paths and which are ordinary config leaves: `animatableTargets` (which
- * builds them), `applyMotion` (which resolves them), `pruneStackTracks` (which
- * drops the dangling ones) and `migrateStackTrackPaths` below (which lifts the
- * positional ones). `axes.wght` is `<something>.<something>` too, and running it
- * through an id resolver would refuse it — there is no `axes` ARRAY — and
- * silently stop every variable axis animating.
- *
- * It lives HERE rather than in `./motion.ts` (which owned it until the migration
- * needed it) because `motion.ts` imports this module: the constant has to sit at
- * the bottom of that edge or the two form a cycle. `motion.ts` re-exports both
- * names, so every existing importer is unchanged.
- */
-export const VT_STACK_LIST = 'appearance'
-export const VT_STACK_PREFIX = `${VT_STACK_LIST}.`
+// VT_STACK_LIST/VT_STACK_PREFIX (the config key the appearance stack lives
+// at, and the prefix every absolute stack path carries) now live in
+// `./constants.ts` — imported above, re-exported here so every existing
+// importer of them from this module (including `./motion.ts`'s own
+// re-export of both names) is unchanged. See that file for the full doc
+// comment on why this is ONE constant and why it moved.
+export { VT_STACK_LIST, VT_STACK_PREFIX }
 
 /**
  * A stored id worth keeping, or `''`.

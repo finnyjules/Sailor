@@ -46,15 +46,23 @@
  * themselves — a sweep starts from the angle the user already set, and a drift
  * reaches the plate offset they already chose.
  */
-import {
-  VT_HEIGHT_MAX,
-  VT_STACK_PREFIX,
-  VT_STRETCH_MAX,
-  type VectorTypeConfig,
-  type VtAppearanceLayer,
-  type VtLayerKind,
-  type VtMotionTrack,
-  type VtMove,
+// VALUE import — from the dependency-free leaf module, NOT from `./config`.
+// `config.ts` imports this file (for `vtMatchLegacyTrackPreset`) before it
+// reaches its own re-export of these names, so a value import of them from
+// `./config` is a real runtime cycle: this file's top-level `PRESETS` table
+// reads them while being built, and they would still be in the temporal dead
+// zone — "Cannot access 'VT_STRETCH_MAX' before initialization". See
+// `./constants.ts`'s header and the comment on `config.ts`'s import of this
+// file for the full story.
+import { VT_HEIGHT_MAX, VT_STACK_PREFIX, VT_STRETCH_MAX } from './constants'
+// TYPE-ONLY import from `./config` — erased at runtime, so this does not
+// reintroduce the cycle above.
+import type {
+  VectorTypeConfig,
+  VtAppearanceLayer,
+  VtLayerKind,
+  VtMotionTrack,
+  VtMove,
 } from './config'
 import { isFill } from '~/lib/compositor/paint'
 import type { ColorMixSpace } from '~/lib/color/mix'
