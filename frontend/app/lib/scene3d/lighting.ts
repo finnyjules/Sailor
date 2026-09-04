@@ -85,6 +85,8 @@ export function softnessToRadius(s: number): number {
 
 export interface LightingDials { softness: number; warmth: number; brightness: number }
 
+export interface ResolvedLighting { sunAzimuth: number; sunElevation: number; sunIntensity: number; ambient: number; environment: EnvironmentKind; preset: LightingPreset; sunColor: string; shadowSoftness: number }
+
 /** Full recipe application — used when the Look itself changes. */
 export function resolveLook(recipe: LookRecipe) {
   return {
