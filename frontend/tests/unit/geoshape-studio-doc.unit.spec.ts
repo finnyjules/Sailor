@@ -85,3 +85,30 @@ describe('geoshape studio doc', () => {
     expect(studioDocFromPersisted({ nonsense: 1 }).layers).toHaveLength(1)
   })
 })
+
+describe('GeoStudioDoc background', () => {
+  it('defaults a missing background to null (transparent)', () => {
+    expect(mergeStudioDoc({ layers: [] }).background).toBeNull()
+    expect(defaultDoc().background).toBeNull()
+  })
+
+  it('collapses the none-sentinels to null', () => {
+    expect(mergeStudioDoc({ background: 'none' }).background).toBeNull()
+    expect(mergeStudioDoc({ background: '' }).background).toBeNull()
+    expect(mergeStudioDoc({ background: null }).background).toBeNull()
+  })
+
+  it('round-trips a solid-colour background', () => {
+    expect(mergeStudioDoc({ background: '#112233' }).background).toBe('#112233')
+  })
+
+  it('round-trips a gradient background object', () => {
+    const g = { type: 'linear', angle: 45, stops: [{ offset: 0, color: '#000' }, { offset: 1, color: '#fff' }] }
+    expect(mergeStudioDoc({ background: g }).background).toEqual(g)
+  })
+
+  it('migrates a legacy single-mark blob with a null background', () => {
+    // studioDocFromPersisted is already imported by this suite for other tests.
+    expect(studioDocFromPersisted({ config: { shape: 'hexagon' } }).background).toBeNull()
+  })
+})
