@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import { hexToRgb } from '~/lib/color/convert'
+import { gradientFromPaint } from '~/lib/compositor/fillPalette'
 import type { Gradient, GradientStop } from '~/lib/compositor/paint'
 
 // Two distant hues — orange vs blue — the case a straight sRGB ramp muddies.
@@ -84,14 +85,25 @@ describe('GradientEditor — hue-walk interpolation wiring', () => {
     expect(shortMid.map(Math.round)).not.toEqual(longMid.map(Math.round))
   })
 
-  it('round-trips: a saved hue gradient reloads, and Direct restores the author stops', async () => {
-    // Emit a hue-long gradient, then feed it back in as if reloaded from save.
+  it('round-trips THROUGH the real read-back normalizer: mode + author stops survive gradientFromPaint', async () => {
+    // Emit a hue-long gradient, then feed it back in the way the app actually does:
+    // FillControl.toGrad → gradientFromPaint before it reaches the editor. Mounting the
+    // saved object directly would bypass that path (and mask the stripping bug), so route
+    // it through the normalizer first — this test fails if interp/interpBase are dropped.
     const w1 = mountWith(direct2())
     await clickInterp(w1, 'Hue (long)')
     const saved = lastEmit(w1)
     expect(saved.interp).toBe('hue-long')
 
-    const w2 = mountWith(saved as Gradient)
+    // The normalizer must preserve the interpolation choice + the author stops.
+    const reloaded = gradientFromPaint(saved, ORANGE, BLUE, 90) as Gradient & { interp?: string; interpBase?: GradientStop[] }
+    expect(reloaded.interp).toBe('hue-long')
+    expect(reloaded.interpBase).toHaveLength(2)
+    expect(reloaded.interpBase![0]!.color).toBe(ORANGE)
+
+    // And the editor, re-fed the normalized gradient, still shows Hue (long) (not Direct),
+    // so Direct then cleanly restores the two author colours.
+    const w2 = mountWith(reloaded)
     await clickInterp(w2, 'Direct')
     const back = lastEmit(w2)
     expect(back.stops).toHaveLength(2)

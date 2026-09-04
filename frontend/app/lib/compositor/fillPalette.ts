@@ -39,9 +39,19 @@ export function rollPaintItem(n: number): Fill | Gradient {
 export function gradientFromPaint(p: Paint | undefined, a: string, b: string, angle: number): Gradient {
   if (paintIsGradient(p)) {
     const stops = (p.stops?.length ?? 0) >= 2 ? p.stops.map(s => ({ ...s })) : [{ offset: 0, color: a }, { offset: 1, color: b }]
-    return p.type === 'radial'
+    const g: Gradient = p.type === 'radial'
       ? { type: 'radial', stops }
       : { type: 'linear', angle: (p as { angle?: number }).angle ?? angle, stops }
+    // Carry the hue-walk interpolation choice through the normalizer. Without this,
+    // gradientFromPaint (the sole read-back path via FillControl.toGrad) strips the
+    // Interpolation mode + author stops, so the control silently reverts to Direct on
+    // the next reactive re-feed and eventually bakes over the user's authored colours.
+    const src = p as { interp?: unknown; interpBase?: unknown }
+    if (src.interp) {
+      ;(g as { interp?: unknown; interpBase?: unknown }).interp = src.interp
+      ;(g as { interp?: unknown; interpBase?: unknown }).interpBase = src.interpBase
+    }
+    return g
   }
   return { type: 'linear', angle, stops: [{ offset: 0, color: a }, { offset: 1, color: b }] }
 }
