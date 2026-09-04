@@ -68,11 +68,12 @@ Same curl user-agent trick, same 24 h / 50-entry cache.
 validator `isVtFontToken`), falling back to the default id for anything else —
 today's `oneOf(VT_FONT_IDS)` would silently reset a Google pick on reload.
 
-**Weight is a control.** A new `fontWeight: number` field (default 400) with a
-`select` control whose options derive from the current family's shipped weights
-(curated families: hidden, their weight is an axis). Changing it re-tokens
-`fontId` (`google:Family@<w>` / `local:Family@<w>`), so the token remains the
-single source of truth and persisted projects carry the weight inside it.
+**Weight is a row, not a field.** The token already carries the weight, so the
+studio draws a Weight row (a select whose options are the current family's
+shipped weights — Google from the catalog, library from the manifest) that
+re-tokens `fontId` (`google:Family@<w>` / `local:Family@<w>`). Curated families
+show no row: their weight is an axis. No second config field, so persisted
+projects, the agent and collections all address the weight through the token.
 
 **Everything downstream** already takes a `VtFont`; nothing reads the catalog by
 id except `variableFontUrl`/`loadVariableFont` and the `fontId` select options.
