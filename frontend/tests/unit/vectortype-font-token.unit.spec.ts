@@ -9,7 +9,10 @@ describe('vector type font tokens', () => {
     expect(parseVtFontToken('local:OT 2049@300')).toEqual({ kind: 'local', family: 'OT 2049', weight: 300, italic: false })
     expect(parseVtFontToken('local:OT 2049@300i')).toEqual({ kind: 'local', family: 'OT 2049', weight: 300, italic: true })
     expect(parseVtFontToken('local:OT 2049')).toEqual({ kind: 'local', family: 'OT 2049' })
-    for (const bad of ['', 'nope', 'google:', 'google:Inter', 'google:Inter@abc', 'local:', 42, null, undefined, 'http://x'])
+    // A `local:` family is validated against the manifest, exactly as a bare id is
+    // validated against the curated catalog — an unknown family is junk at PARSE time,
+    // not a token that parses and then dead-ends at `vtFontFileUrl`.
+    for (const bad of ['', 'nope', 'google:', 'google:Inter', 'google:Inter@abc', 'local:', 'local:No Such Family', 'local:No Such Family@400', 42, null, undefined, 'http://x'])
       expect(parseVtFontToken(bad)).toBeNull()
   })
   it('round-trips through format', () => {

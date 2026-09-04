@@ -7,13 +7,13 @@
  *   - `google:Family@400` is ONE static cut of any Google family, through the
  *     css2 → gstatic proxy (`/api/fonts/google-file`), so it has no axes;
  *   - `local:Family@400i` is the library's own token (see
- *     `app/data/library-fonts.ts`), resolved to a face id through the manifest.
+ *     `app/data/library-fonts-lookup.ts`), resolved to a face id through the manifest.
  * `google:` carries its prefix so a family name can never be mistaken for a
  * curated id, and vice versa. Anything else is invalid and the config parser
  * falls back to the default — a saved project never silently changes font.
  */
 import { VARIABLE_FONTS_BY_ID } from '~/data/variable-fonts'
-import { libraryFontUrl, resolveLibraryFace } from '~/data/library-fonts'
+import { libraryFamily, libraryFontUrl, resolveLibraryFace } from '~/data/library-fonts-lookup'
 
 export const VT_GOOGLE_FILE_ROUTE = '/api/fonts/google-file'
 
@@ -43,8 +43,14 @@ export function parseVtFontToken(token: unknown): VtFontRef | null {
     const body = token.slice(6)
     if (!body) return null
     const m = WEIGHT_RE.exec(body)
-    if (!m) return body.includes('@') ? null : { kind: 'local', family: body }
-    return { kind: 'local', family: m[1]!, weight: Number(m[2]), italic: m[3] === 'i' }
+    // The family is checked against the manifest, the same way a bare id is
+    // checked against the curated catalog: a family the library does not ship
+    // is junk HERE, so `mergeConfig` falls back to the default rather than
+    // storing a token that parses and then dead-ends with no file to fetch.
+    const family = m ? m[1]! : (body.includes('@') ? null : body)
+    if (!family || !libraryFamily(family)) return null
+    if (!m) return { kind: 'local', family }
+    return { kind: 'local', family, weight: Number(m[2]), italic: m[3] === 'i' }
   }
   return VARIABLE_FONTS_BY_ID[token] ? { kind: 'catalog', id: token } : null
 }

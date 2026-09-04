@@ -1,71 +1,29 @@
 /**
- * Shared client catalog over the committed font-library manifest. The single
- * consumer-facing surface for both font worlds: pickers read the grouped
- * families; the CSS world builds @font-face from faces; the outline world
- * resolves a `local:Family@weight` token to a route URL via the resolver this
- * module installs into outlines.ts. Network-free (imports static JSON only).
+ * Shared client catalog over the committed font-library manifest, PLUS the
+ * registration side: this module is what installs the catalog into the two
+ * resolver hooks (the CSS world's family list, the outline world's face
+ * resolver). The lookups themselves live in `./library-fonts-lookup` and are
+ * re-exported here so existing importers keep working.
+ *
+ * Import the LOOKUP module, not this one, unless you actually need
+ * `registerLibraryFonts`: `setLibraryFaceResolver` comes from
+ * `~/lib/scene3d/outlines`, so importing this file pulls three.js into your
+ * bundle even if all you wanted was a face id.
  */
-import manifest from './library-fonts.manifest.json'
-import type { LibraryManifest, LibraryFamily, LibraryFace, LibraryFoundry } from '~~/shared/library-fonts'
+import { LIBRARY_FONTS, resolveLibraryFace } from './library-fonts-lookup'
 import { setLibraryFamilies } from '~/lib/font/resolveFamily'
 import { setLibraryFaceResolver } from '~/lib/scene3d/outlines'
 
-export const LIBRARY_FONTS = manifest as unknown as LibraryManifest
-
-const byFamily = new Map<string, LibraryFamily>(LIBRARY_FONTS.families.map(f => [f.family, f]))
-
-export function librariesByFoundry(): { foundry: LibraryFoundry; families: LibraryFamily[] }[] {
-  return LIBRARY_FONTS.foundries.map(foundry => ({
-    foundry,
-    families: LIBRARY_FONTS.families.filter(f => f.foundry === foundry.id),
-  }))
-}
-
-/**
- * Search filter over the library catalog, grouped by foundry — pure, no DOM/network.
- * Shared by every library-font picker (FontPicker's Pangram tab first, more to follow)
- * so the "narrow families by substring, drop empty foundry groups" rule lives in one
- * place instead of being re-typed per component.
- */
-export function filterLibraryGroups(query: string): { foundry: LibraryFoundry; families: LibraryFamily[] }[] {
-  const q = query.trim().toLowerCase()
-  return librariesByFoundry().map(g => ({
-    foundry: g.foundry,
-    families: q ? g.families.filter(f => f.family.toLowerCase().includes(q)) : g.families,
-  })).filter(g => g.families.length)
-}
-
-export function libraryFamily(family: string): LibraryFamily | null {
-  return byFamily.get(family) ?? null
-}
-
-export function libraryFontUrl(faceId: string): string {
-  return `/api/library-font/${encodeURIComponent(faceId)}`
-}
-
-/**
- * Nearest face for family + weight. When `italic` is specified, only faces of
- * that slant are considered; if none exist, falls back to the other slant so a
- * family that ships italics-only still resolves. Nearest weight by abs distance.
- */
-export function resolveLibraryFace(family: string, weight = 400, italic?: boolean): LibraryFace | null {
-  const fam = byFamily.get(family)
-  if (!fam || !fam.faces.length) return null
-  let pool = fam.faces
-  if (italic !== undefined) {
-    const slant = fam.faces.filter(f => f.italic === italic)
-    pool = slant.length ? slant : fam.faces
-  }
-  return pool.reduce((best, f) =>
-    Math.abs(f.weight - weight) < Math.abs(best.weight - weight) ? f : best, pool[0]!)
-}
-
-/** Build a `local:` outline token. Weight/italic omitted → nearest resolves later. */
-export function libraryToken(family: string, weight?: number, italic?: boolean): string {
-  let t = `local:${family}`
-  if (weight !== undefined) t += `@${weight}${italic ? 'i' : ''}`
-  return t
-}
+export {
+  LIBRARY_FONTS,
+  librariesByFoundry,
+  filterLibraryGroups,
+  libraryFamily,
+  libraryFontUrl,
+  resolveLibraryFace,
+  libraryToken,
+} from './library-fonts-lookup'
+export type { LibraryManifest, LibraryFamily, LibraryFace, LibraryFoundry } from './library-fonts-lookup'
 
 /** Install this module into the two resolver hooks. Called once at startup. */
 export function registerLibraryFonts(): void {
