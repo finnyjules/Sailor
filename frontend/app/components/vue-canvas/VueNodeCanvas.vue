@@ -9,6 +9,7 @@ import { useSubgraphNavigation } from '~/composables/useSubgraphNavigation'
 import { matchStylesInText, type CanvasSnapshot, type StyleLite } from '~/lib/agent/surfaces/canvas'
 import { planFrameFromSelection, MAX_FRAME_LAYERS } from '~/lib/canvas/combineFrame'
 import { computeRunLeafIds } from '~/lib/canvas/runLeaves'
+import { edgeTopologyKey } from '~/lib/canvas/edgeTopologyKey'
 import type { Command } from '~/lib/agent/commandSurface'
 import { buildCatalog, type CatalogEntry } from '~/lib/portIntentCatalog'
 import { isTypeCompatible, linkInputPorts, outputPorts, type NodeTypeLite } from '~/lib/portIntent'
@@ -1015,7 +1016,7 @@ const runLeafNodeIds = computed(() => computeRunLeafIds(activeRunNodeIds.value, 
 provide('runLeafNodeIds', runLeafNodeIds)
 const {
   onConnect, addEdges, fitView, fitBounds, zoomIn: vfZoomIn, zoomOut: vfZoomOut,
-  project, removeNodes, removeEdges, viewport: vfViewport, onNodeDragStop, onNodeDrag,
+  project, removeNodes, removeEdges, viewport: vfViewport, onNodeDragStart, onNodeDragStop, onNodeDrag,
   onConnectStart, onConnectEnd, onEdgesChange,
 } = useVueFlow()
 
@@ -1163,7 +1164,18 @@ function scheduleSnapshot() {
   }, 350)
 }
 
-watch([nodes, edges], () => {
+// Deep, because a widget edit mutates a node's `data` in place: only a deep
+// watch sees it, and every edit must reach undo-history + autosave.
+//
+// Deep is also expensive: Vue re-traverses (and re-tracks) every reactive
+// property of every node's `data` — and, through each edge's
+// `sourceNode`/`targetNode` back-references, the graph again — on every
+// change. Measured on a 6-8 node graph: ~30 ms per pointer move with no edges,
+// ~250 ms with them. A node drag fires one change per pointer move, so we hold
+// this watch paused for the drag (see `onNodeDragStart`) and resume at drop —
+// `resume()` re-runs the callback once if anything changed while paused, which
+// is exactly the one snapshot + one dirty signal a drag should produce.
+const graphWatch = watch([nodes, edges], () => {
   scheduleSnapshot()
   // Signal the layout that the canvas changed — it debounces this into a
   // continuous autosave (sessionStorage + durable mirror). Fired from the same
@@ -1938,6 +1950,42 @@ function spliceableEdgeUnderNode(node: any, event: any): string | null {
   return null
 }
 
+// A node drag only ever moves positions, and the graph deep-watch above is the
+// most expensive listener on the canvas (~30 ms per pointer move on a bare node
+// set, ~250 ms once edges are wired, because a deep traversal of `edges` walks
+// their `sourceNode`/`targetNode` back-references into the whole graph). So we
+// hold it paused for the duration of the drag and resume at the end: `resume()`
+// re-evaluates the source once and runs the callback if anything changed, so the
+// drag still yields exactly one history snapshot and one `sailor:canvasDirty`.
+let graphWatchPausedForDrag = false
+function pauseGraphWatchForDrag() {
+  if (graphWatchPausedForDrag) return
+  graphWatchPausedForDrag = true
+  graphWatch.pause()
+}
+function resumeGraphWatchAfterDrag() {
+  if (!graphWatchPausedForDrag) return
+  graphWatchPausedForDrag = false
+  graphWatch.resume()
+}
+onNodeDragStart(() => pauseGraphWatchForDrag())
+
+// Vue Flow emits `nodeDragStop` from d3-drag's `end`, and d3's listeners are torn
+// down if the dragged node's element unmounts mid-drag (or the pointer is lost to
+// another window) — in which case `end`, and so `nodeDragStop`, never arrives. A
+// paused watch would then swallow every later edit, so a pointer release or a
+// window blur resumes it too. Both are no-ops when nothing is paused.
+onMounted(() => {
+  window.addEventListener('pointerup', resumeGraphWatchAfterDrag)
+  window.addEventListener('pointercancel', resumeGraphWatchAfterDrag)
+  window.addEventListener('blur', resumeGraphWatchAfterDrag)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('pointerup', resumeGraphWatchAfterDrag)
+  window.removeEventListener('pointercancel', resumeGraphWatchAfterDrag)
+  window.removeEventListener('blur', resumeGraphWatchAfterDrag)
+})
+
 // Live highlight while dragging an unconnected node over a compatible wire.
 onNodeDrag(({ event, node }) => {
   dragOverEdgeId.value = spliceableEdgeUnderNode(node, event)
@@ -1945,6 +1993,7 @@ onNodeDrag(({ event, node }) => {
 
 // Dropping a fully-unconnected node onto a compatible wire splices it in.
 onNodeDragStop(({ event, node }) => {
+  resumeGraphWatchAfterDrag()
   const id = spliceableEdgeUnderNode(node, event)
   dragOverEdgeId.value = null
   if (id) spliceExistingNodeIntoEdge(node.id, id)
@@ -3709,7 +3758,10 @@ function handleUncastCharacter(payload: CharacterBusEvents['uncastCharacter']) {
   if (drop.length) removeEdges(drop.map((d: any) => d.id))
 }
 
-watch(edges, () => syncAllShotDirectorCasts(), { deep: true })
+// Keyed on edge topology, not on a deep traversal of `edges` (whose objects
+// reach back into every node): cast sync only cares about wiring, and the
+// deep version re-walked the whole graph on every drag frame.
+watch(() => edgeTopologyKey(edges.value as any[]), () => syncAllShotDirectorCasts())
 
 // Space Type "Generate as image/video": create the artifact node to the right of
 // the SpaceType node and draw a provenance edge from the SpaceType node's single
@@ -4562,7 +4614,9 @@ function cancelLookupMatch() {
   if (drop.length) removeEdges(drop.map(e => e.id))
 }
 // Prune links whose LOOKUP edge no longer exists (covers disconnect + delete).
-watch(edges, () => {
+// Topology key rather than a deep watch, for the same reason as the cast sync
+// above: only add/remove/rewire can change which LOOKUP edges exist.
+watch(() => edgeTopologyKey(edges.value as any[]), () => {
   for (const n of nodes.value as any[]) {
     if (n?.data?.nodeType !== 'Collection') continue
     const c = n.data.properties?.[COLLECTION_PROP]
@@ -4571,7 +4625,7 @@ watch(edges, () => {
     const next = reconcileLinks(c.links, ids, () => null) // prune-only; never auto-add here
     if (next.length !== c.links.length) c.links = next
   }
-}, { deep: true })
+})
 
 // Shared "reuse the wired collection, else create one" logic used by BOTH the
 // studio-control promote handler and the Smart Layout element promote handler
