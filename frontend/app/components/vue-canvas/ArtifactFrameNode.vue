@@ -25,6 +25,8 @@ import { frameSourceEpoch, type StudioFrameSource } from '~/lib/studio/frameSour
 import { deriveMasterClock, slotPhase01, masterFrameIndex } from '~/lib/compositor/masterClock'
 import { portOffset } from '~/lib/canvas/portLayout'
 import { onFieldCatalogReady } from '~/lib/shaderfill/field'
+import { readGrid } from '~/lib/frame/gridConfig'
+import { resolveGrid } from '~/lib/frame/grid'
 import { toast } from 'vue-sonner'
 
 // The "Frame" — the Compositor as a first-class artboard artifact. Shows its
@@ -118,6 +120,19 @@ const box = computed(() => {
   const E = displayEdge.value
   return a >= 1 ? { w: E, h: Math.round(E / a) } : { w: Math.round(E * a), h: E }
 })
+
+// ── Grid overlay (editor-only guide) ────────────────────────────────────────
+// Read-only here: this card never writes sailor_localGrid (the modal's grid
+// inspector owns edits). Purely a display aid — never consumed by
+// `paintLayerStack`/`exportCompositeCanvas`/`bakeOutput`, so it can't leak into
+// a bake, export, or embed no matter what `editMode` does.
+const gridConfig = computed(() => readGrid(props.data.properties))
+const gridResolved = computed(() => resolveGrid(gridConfig.value, box.value.w, box.value.h))
+// Gate is defined here but only ever consulted from the edit-mode template
+// branch below (`v-if="showGridOverlay"` sits inside the artboard, itself only
+// reachable while `editMode` is true) — never from the stack-canvas paint path.
+const showGridOverlay = computed(() =>
+  editMode.value && gridConfig.value.mode !== 'off' && gridConfig.value.overlay)
 
 // Manual node resize — zoom-aware (mirrors StickyAnnotation). zoom is derived
 // from the artboard's on-screen rect vs its logical size, so no Vue Flow dep.
@@ -1113,6 +1128,32 @@ onUnmounted(() => {
         @pointerdown.capture="onArtboardPointerDown"
       >
         <canvas ref="stackCanvas" data-testid="frame-card-stack-canvas" class="absolute inset-0 pointer-events-none" :style="{ width: box.w + 'px', height: box.h + 'px' }" />
+
+        <!-- Grid overlay — editor guide only. Gated on edit mode + grid config;
+             lives entirely outside the paint/export/bake path (see gridConfig
+             above), so it can never appear in a rendered frame. -->
+        <svg
+          v-if="showGridOverlay"
+          data-testid="frame-card-grid-overlay"
+          class="absolute inset-0 pointer-events-none"
+          :width="box.w" :height="box.h" :viewBox="`0 0 ${box.w} ${box.h}`"
+        >
+          <rect
+            v-for="(r, i) in gridResolved.regions" :key="'region-' + i"
+            :x="r.x" :y="r.y" :width="r.w" :height="r.h"
+            fill="#22d3ee" fill-opacity="0.05" stroke="none"
+          />
+          <line
+            v-for="(x, i) in gridResolved.xs" :key="'x-' + i"
+            :x1="x" :y1="0" :x2="x" :y2="box.h"
+            stroke="#22d3ee" stroke-opacity="0.35" stroke-width="1" vector-effect="non-scaling-stroke"
+          />
+          <line
+            v-for="(y, i) in gridResolved.ys" :key="'y-' + i"
+            :x1="0" :y1="y" :x2="box.w" :y2="y"
+            stroke="#22d3ee" stroke-opacity="0.35" stroke-width="1" vector-effect="non-scaling-stroke"
+          />
+        </svg>
 
         <!-- Quick inline edit — appears over the preview on hover -->
         <button v-if="!editMode" class="nopan nodrag absolute left-2 top-2 z-10 h-6 px-2 rounded flex items-center gap-1 text-[10px] bg-black/55 backdrop-blur-sm text-white/85 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/75 cursor-pointer"

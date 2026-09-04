@@ -62,6 +62,8 @@ import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 import '~/lib/motion/paint' // registers the motion painter for paintLayerStack(t)
 import { bakeAndUpload, motionSourceKey, type MotionParams } from '~/lib/motion/bake'
+import { readGrid } from '~/lib/frame/gridConfig'
+import { resolveGrid } from '~/lib/frame/grid'
 import CompositorMotionTimeline from '~/components/vue-canvas/compositor/CompositorMotionTimeline.vue'
 import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
@@ -254,6 +256,16 @@ const baseAspect = computed(() => {
   return d && d.h ? d.w / d.h : 1
 })
 const canvasDisplay = reactive({ w: 680, h: 680 })
+// ── Grid overlay (editor-only guide) ────────────────────────────────────────
+// Read-only here: this modal never writes sailor_localGrid on its own (a later
+// grid-inspector task owns edits). Purely a display aid over the stage — never
+// consumed by any paintLayerStack/bake call in this file (those all draw into
+// an offscreen `off` canvas, not this DOM overlay), so it can't leak into an
+// export or embed. The modal IS the editor, so there is no separate "edit
+// mode" gate the way the card has — visible whenever the grid itself is on.
+const gridConfig = computed(() => readGrid(compositor.value?.data?.properties as any))
+const gridResolved = computed(() => resolveGrid(gridConfig.value, canvasDisplay.w, canvasDisplay.h))
+const showGridOverlay = computed(() => gridConfig.value.mode !== 'off' && gridConfig.value.overlay)
 const stageBoxRef = ref<HTMLElement | null>(null)
 // The stage box is full-bleed (inset-0): the glass panels float ABOVE it, so
 // zoomed/panned content slides under them instead of cropping at their edge.
@@ -4997,6 +5009,33 @@ onUnmounted(() => {
           class="absolute inset-0 pointer-events-none"
           :style="{ width: canvasDisplay.w + 'px', height: canvasDisplay.h + 'px' }"
         />
+
+        <!-- Grid overlay — editor guide only. Gated on the grid config; lives
+             entirely outside the paint/bake path (see gridConfig above, and every
+             paintLayerStack call in this file draws into an offscreen canvas, not
+             this DOM overlay), so it can never appear in an export or embed. -->
+        <svg
+          v-if="showGridOverlay"
+          data-testid="compositor-grid-overlay"
+          class="absolute inset-0 pointer-events-none"
+          :width="canvasDisplay.w" :height="canvasDisplay.h" :viewBox="`0 0 ${canvasDisplay.w} ${canvasDisplay.h}`"
+        >
+          <rect
+            v-for="(r, i) in gridResolved.regions" :key="'region-' + i"
+            :x="r.x" :y="r.y" :width="r.w" :height="r.h"
+            fill="#22d3ee" fill-opacity="0.05" stroke="none"
+          />
+          <line
+            v-for="(x, i) in gridResolved.xs" :key="'x-' + i"
+            :x1="x" :y1="0" :x2="x" :y2="canvasDisplay.h"
+            stroke="#22d3ee" stroke-opacity="0.35" stroke-width="1" vector-effect="non-scaling-stroke"
+          />
+          <line
+            v-for="(y, i) in gridResolved.ys" :key="'y-' + i"
+            :x1="0" :y1="y" :x2="canvasDisplay.w" :y2="y"
+            stroke="#22d3ee" stroke-opacity="0.35" stroke-width="1" vector-effect="non-scaling-stroke"
+          />
+        </svg>
 
         <!-- Shader-fill live-field ceiling hint (Task 6) — never truncate silently,
              same wording as Space Type / Shape Studio's own hint. -->
