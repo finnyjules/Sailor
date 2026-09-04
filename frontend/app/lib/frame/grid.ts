@@ -207,7 +207,10 @@ function applyGutter(regions: Rect[], gutterPx: number): Rect[] {
 
 export function resolveGrid(grid: FrameGrid, w: number, h: number): { xs: number[]; ys: number[]; regions: Rect[] } {
   if (grid.mode === 'off') return { xs: [], ys: [], regions: [] }
-  const mx = grid.margin * w, my = grid.margin * w   // margin normalized to width on both axes (uniform inset)
+  // Clamp so an extreme margin (agent-set or hand-typed) can't push the two
+  // insets past each other and invert the grid (negative-width regions).
+  const m = Math.min(Math.max(grid.margin, 0), 0.45)
+  const mx = m * w, my = m * w   // margin normalized to width on both axes (uniform inset)
   let xs: number[]
   let ys: number[]
   let regions: Rect[]

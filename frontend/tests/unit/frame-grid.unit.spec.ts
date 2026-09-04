@@ -39,6 +39,16 @@ describe('resolveGrid explicit', () => {
     const second = regions[1]!
     expect(second.x).toBeGreaterThan(first.x + first.w)
   })
+  it('an extreme margin is clamped to 0.45 so it cannot invert the grid', () => {
+    const g = { ...defaultGrid(), mode: 'explicit' as const, columns: 4, rows: 2, margin: 0.6, gutter: 0 }
+    const { xs, ys, regions } = resolveGrid(g, 1000, 1000)
+    // clamped to 0.45 * 1000 = 450px inset on each side
+    expect(xs[0]).toBe(450)
+    expect(xs[xs.length - 1]).toBe(550)
+    for (let i = 1; i < xs.length; i++) expect(xs[i]!).toBeGreaterThan(xs[i - 1]!)
+    for (let i = 1; i < ys.length; i++) expect(ys[i]!).toBeGreaterThan(ys[i - 1]!)
+    for (const r of regions) { expect(r.w).toBeGreaterThan(0); expect(r.h).toBeGreaterThan(0) }
+  })
 })
 
 function gen(over: Partial<FrameGrid['gen']> = {}): FrameGrid {
