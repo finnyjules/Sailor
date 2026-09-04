@@ -24,6 +24,7 @@ import {
   type DecalObject, type DecalContent,
 } from '~/lib/scene3d/config'
 import { eulerFromNormal } from '~/lib/scene3d/decals'
+import { getLook, resolveLook, resolveDials } from '~/lib/scene3d/lighting'
 import { HARMONY_TYPES, HARMONY_LABELS } from '~/lib/color/harmony'
 import { MATCAP_IDS, matcapThumb, onTextureError } from '~/lib/scene3d/materials'
 import { toHeightPixels, heightGradient, RELIEF_FLAT_THRESHOLD } from '~/lib/scene3d/relief'
@@ -1760,6 +1761,34 @@ watch(doc, () => {
   if (!interaction?.pivotDragActive) engine?.syncFromDoc(doc)
   scheduleHistory()
 }, { deep: true })
+// Look change → apply the whole recipe (direction, env, preset, default dials),
+// then recompute the dial-driven fields from those defaults.
+watch(() => doc.lighting.look, (id) => {
+  const recipe = getLook(id)
+  const p = resolveLook(recipe)
+  doc.lighting.sunAzimuth = p.sunAzimuth
+  doc.lighting.sunElevation = p.sunElevation
+  doc.lighting.environment = p.environment
+  doc.lighting.preset = p.preset
+  doc.lighting.softness = p.softness
+  doc.lighting.warmth = p.warmth
+  const d = resolveDials(recipe, { softness: p.softness, warmth: p.warmth, brightness: doc.lighting.brightness })
+  doc.lighting.sunIntensity = d.sunIntensity
+  doc.lighting.ambient = d.ambient
+  doc.lighting.sunColor = d.sunColor
+  doc.lighting.shadowSoftness = d.shadowSoftness
+})
+// Dial change → recompute ONLY the dial-driven fields; direction/env/preset untouched.
+watch(() => [doc.lighting.softness, doc.lighting.warmth, doc.lighting.brightness], () => {
+  const recipe = getLook(doc.lighting.look)
+  const d = resolveDials(recipe, {
+    softness: doc.lighting.softness, warmth: doc.lighting.warmth, brightness: doc.lighting.brightness,
+  })
+  doc.lighting.sunIntensity = d.sunIntensity
+  doc.lighting.ambient = d.ambient
+  doc.lighting.sunColor = d.sunColor
+  doc.lighting.shadowSoftness = d.shadowSoftness
+})
 // Watches the whole ORDERED selection, not just the primary: a modifier-click
 // that only extends the list leaves `selectedId` unchanged but still has to
 // rebuild the gizmo around a pivot.
