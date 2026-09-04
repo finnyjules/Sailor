@@ -379,6 +379,21 @@ onBeforeUnmount(() => { motionRO?.disconnect(); motionRO = null })
 const stageWrapRef = ref<HTMLElement | null>(null)
 const view = reactive({ scale: 1, tx: 0, ty: 0 })
 const ZOOM_MIN = 0.2, ZOOM_MAX = 8
+// True while the user is actively panning/zooming the stage. The live-preview render
+// loop (`liveFrameTick`) composites the whole stack — the wired studio pull plus every
+// shader fill — at full device resolution each frame (~50 ms on this frame; ~19 fps
+// even idle). Panning needs the frame budget for compositing the CSS transform, and the
+// loop steals it, so a pan drops to ~5 fps. This flag pauses the loop's heavy work for
+// the duration of the gesture (and 180 ms after the last move) so panning gets the whole
+// budget; the loop keeps its rAF alive and resumes animating the moment the gesture ends.
+// (No `will-change`/GPU-layer promotion here — that allocates VRAM and crashed the tab.)
+const viewMoving = ref(false)
+let viewMoveTimer: ReturnType<typeof setTimeout> | null = null
+function markViewMoving() {
+  viewMoving.value = true
+  if (viewMoveTimer) clearTimeout(viewMoveTimer)
+  viewMoveTimer = setTimeout(() => { viewMoving.value = false; viewMoveTimer = null }, 180)
+}
 const viewStyle = computed(() => ({
   width: canvasDisplay.w + 'px',
   height: canvasDisplay.h + 'px',
@@ -392,6 +407,7 @@ function zoomAround(cx: number, cy: number, factor: number) {
   const s0 = view.scale
   const s1 = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, s0 * factor))
   if (s1 === s0) return
+  markViewMoving()
   // Keep the point under (cx,cy) fixed on screen.
   view.tx += (cx - rect.left) * (1 - s1 / s0)
   view.ty += (cy - rect.top) * (1 - s1 / s0)
@@ -483,6 +499,7 @@ const zoomMenuItems = computed(() => [
 
 function onStageWheel(e: WheelEvent) {
   e.preventDefault()
+  markViewMoving()
   if (e.ctrlKey || e.metaKey) zoomAround(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01))
   else { view.tx -= e.deltaX; view.ty -= e.deltaY } // two-finger / wheel scroll → pan
 }
@@ -502,6 +519,7 @@ function onStagePointerDownPan(e: PointerEvent) {
 function onStagePointerMovePan(e: PointerEvent) {
   if (!panFrom) return
   didPan = true
+  markViewMoving()
   view.tx = panFrom.tx + (e.clientX - panFrom.x)
   view.ty = panFrom.ty + (e.clientY - panFrom.y)
 }
@@ -1310,7 +1328,11 @@ function onKeyup(e: KeyboardEvent) { if (e.code === 'Space') spaceDown.value = f
 // cross-origin ComfyUI iframe, tab switch), the keyup lands elsewhere and
 // spaceDown would stay stuck true — freezing layer select/move behind pan mode.
 // Reset the whole pan gesture on blur / visibility loss.
-function clearPan() { spaceDown.value = false; panning.value = false; panFrom = null }
+function clearPan() {
+  spaceDown.value = false; panning.value = false; panFrom = null
+  if (viewMoveTimer) { clearTimeout(viewMoveTimer); viewMoveTimer = null }
+  viewMoving.value = false
+}
 function onVisibility() { if (document.hidden) clearPan() }
 onMounted(() => {
   window.addEventListener('keydown', onKeydown, true)
@@ -1938,6 +1960,11 @@ const needsLiveLoop = computed(() => hasAnimatedSlot.value || needsWallClock.val
 let liveRaf = 0, liveStart = 0, liveInFlight = false, liveCapWarned = false
 function liveFrameTick(ts: number) {
   if (!liveStart) liveStart = ts
+  // Pause the heavy per-frame composite while the user pans/zooms, so the gesture gets
+  // the full frame budget. `liveStart` was captured once and `wallT` is derived from
+  // real elapsed time, so animation resumes at the right point when the gesture ends —
+  // no freeze, no jump. Keep the rAF chain alive.
+  if (viewMoving.value) { liveRaf = requestAnimationFrame(liveFrameTick); return }
   const mc = liveMasterClock.value
   const wallT = (ts - liveStart) / 1000
   if (!liveInFlight && mc && mc.duration > 0) {
