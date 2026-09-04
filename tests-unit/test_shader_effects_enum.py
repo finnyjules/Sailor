@@ -129,3 +129,23 @@ def test_catalog_payload_omits_gate_key_shape_for_ungated():
     mode = next(p for p in cp["params"] if p["uniform"] == "u_mode")
     assert "show_when" not in mode
     assert mode.get("showWhen") is None
+
+
+# ── ShaderEffect combo accepts legacy effect ids ────────────────────────────────
+# ComfyUI validates a COMBO widget's incoming value against its declared `options`
+# BEFORE execute() runs, so `LEGACY_EFFECT_IDS.get(effect, effect)` inside execute()
+# never gets a chance to run for a saved graph carrying an old id like "filament".
+# The declared options list must include the legacy ids too.
+
+def test_node_combo_accepts_legacy_effect_ids():
+    from comfy_extras import nodes_shader_effects as m
+
+    opts = m._effect_ids()
+    for old, new in m.LEGACY_EFFECT_IDS.items():
+        assert new in opts, f"alias target {new} missing from catalog"
+        assert old not in opts, f"{old} is still a live id; alias is stale"
+
+    schema = m.ShaderEffect.define_schema()
+    effect_input = next(i for i in schema.inputs if getattr(i, "id", None) == "effect")
+    for old in m.LEGACY_EFFECT_IDS:
+        assert old in effect_input.options, f"combo options must include legacy id {old!r}"

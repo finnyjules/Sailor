@@ -99,7 +99,11 @@ class ShaderEffect(IO.ComfyNode):
             category="image/effects",
             inputs=[
                 IO.Image.Input("image", optional=True),
-                IO.Combo.Input("effect", options=_effect_ids() or ["noise_distortion"]),
+                IO.Combo.Input(
+                    "effect",
+                    options=(_effect_ids() or ["noise_distortion"])
+                    + [k for k in LEGACY_EFFECT_IDS if k not in _effect_ids()],
+                ),
                 IO.String.Input("params", default="{}", multiline=True),
                 IO.Float.Input("time", default=0.0, min=0.0, max=3600.0, step=0.05),
                 IO.Float.Input("duration", default=0.0, min=0.0, max=60.0, step=0.5),
