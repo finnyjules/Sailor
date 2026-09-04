@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import * as fontkit from 'fontkit'
 import { describe, expect, it, vi } from 'vitest'
 import { vectorTypeFrame, VT_FIT_INSET } from '~/lib/vectortype/canvas'
-import { DEFAULT_CONFIG, mergeConfig, VT_STRETCH_MAX, VT_STRETCH_MIN, type VtMove } from '~/lib/vectortype/config'
+import { DEFAULT_CONFIG, mergeConfig, VT_HEIGHT_MAX, VT_HEIGHT_MIN, VT_STRETCH_MAX, VT_STRETCH_MIN, type VtMove } from '~/lib/vectortype/config'
 import { normaliseAxes } from '~/lib/vectortype/font'
 import type { VtFont } from '~/lib/vectortype/font'
 
@@ -118,10 +118,13 @@ describe('vectorTypeFrame — smart stretch', () => {
   })
 
   it('a diagonal move is damped for the engine, and the frame says so', () => {
-    const f = vectorTypeFrame(font, cfg({ stretch: 2, stretchY: 2 }), 0)
+    // Both dials pushed to their (now split) ceilings: stretch 1.8, stretchY
+    // 2.0. `dampedStretch(1.8, 2.0)` gives S = 1 + 0.8·0.5 = 1.4 and
+    // SY = 1 + 1·(1 − 0.5·|ln 1.8|/ln 2) ≈ 1.576.
+    const f = vectorTypeFrame(font, cfg({ stretch: VT_STRETCH_MAX, stretchY: VT_HEIGHT_MAX }), 0)
     expect(f.stretch.damped).toBe(true)
-    expect(f.stretch.S).toBeCloseTo(1.5, 9)
-    expect(f.stretch.SY).toBeCloseTo(1.5, 9)
+    expect(f.stretch.S).toBeCloseTo(1.4, 9)
+    expect(f.stretch.SY).toBeCloseTo(1.576001546722525, 9)
   })
 
   // The clock, chosen so the assertion measures a WAVE rather than one moving
@@ -367,6 +370,25 @@ describe('vectorTypeFrame — a width wave is planned PER GLYPH', () => {
         }
       }
     }
+  })
+
+  it('a track driven past either bound is clamped to that AXIS bound, not the other axis\'s', () => {
+    // `stretch` and `stretchY` now have DIFFERENT ceilings (1.8 vs 2.0), so a
+    // track that overshoots to 2.4 on each has to land on its OWN axis's
+    // clamp, not the other's — the failure mode a shared `clampDial` would
+    // reintroduce silently.
+    const wideTrack = cfg({
+      motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove('stretch', 1, 2.4)] },
+    } as any)
+    const tallTrack = cfg({
+      motion: { ...DEFAULT_CONFIG.motion, moves: [trackMove('stretchY', 1, 2.4)] },
+    } as any)
+    const atCeilingS = vectorTypeFrame(archivo, cfg({ stretch: VT_STRETCH_MAX }), 0)
+    const atCeilingSY = vectorTypeFrame(archivo, cfg({ stretchY: VT_HEIGHT_MAX }), 0)
+    const wide = vectorTypeFrame(archivo, wideTrack, 4)     // track reads 2.4
+    const tall = vectorTypeFrame(archivo, tallTrack, 4)     // track reads 2.4
+    expect(wide.stretch.S).toBeCloseTo(atCeilingS.stretch.S, 9)
+    expect(tall.stretch.SY).toBeCloseTo(atCeilingSY.stretch.SY, 9)
   })
 })
 

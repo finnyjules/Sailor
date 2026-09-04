@@ -2094,7 +2094,7 @@ export function dampedStretch(S: number, SY: number): { S: number; SY: number; d
  */
 export function fitStretch(
   font: VtFont, text: string, axes: Record<string, number>, targetUnits: number,
-  min = 0.5, max = 2.5, SY = 1,
+  min = 0.6, max = 1.8, SY = 1,
 ): number {
   if (!text || !(targetUnits > 0)) return 1
   const measure = (S: number): number => {

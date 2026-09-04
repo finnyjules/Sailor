@@ -1284,6 +1284,8 @@ describe('studio entry points', () => {
     const agot = stretchOutlines(textOutlines(archivo, 'Sailor', aplan.coords), aplan.residual, 1).width
     expect(Math.abs(agot - atarget) / atarget).toBeLessThan(0.01)
     // clamps to the dial range rather than chasing an unreachable target
-    expect(fitStretch(font, 'Sailor', {}, run.width * 10)).toBe(2.5)
+    // (the default range moved with the studio's dial bounds — 0.6-1.8 — since
+    // callers that don't pass explicit min/max still get an honest default)
+    expect(fitStretch(font, 'Sailor', {}, run.width * 10)).toBe(1.8)
   })
 })

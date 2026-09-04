@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_FONT_ID } from '~/data/variable-fonts'
-import { DEFAULT_CONFIG, mergeConfig, VT_STRETCH_MAX, VT_STRETCH_MIN } from '~/lib/vectortype/config'
+import { DEFAULT_CONFIG, mergeConfig, VT_HEIGHT_MAX, VT_HEIGHT_MIN, VT_STRETCH_MAX, VT_STRETCH_MIN } from '~/lib/vectortype/config'
 import { VT_CONTROLS } from '~/lib/vectortype/controls'
 import { animatableTargets } from '~/lib/vectortype/motion'
 
@@ -14,11 +14,18 @@ describe('smart stretch config + controls', () => {
   it('parses and clamps persisted values; unknown fit falls back to off', () => {
     const c = mergeConfig({ stretch: 9, stretchY: 0.1, fit: 'height' } as any)
     expect(c.stretch).toBe(VT_STRETCH_MAX)
-    expect(c.stretchY).toBe(VT_STRETCH_MIN)
+    expect(c.stretchY).toBe(VT_HEIGHT_MIN)
     expect(c.fit).toBe('off')
     const d = mergeConfig({ stretch: 1.6, fit: 'width' } as any)
     expect(d.stretch).toBeCloseTo(1.6, 9)
     expect(d.fit).toBe('width')
+  })
+
+  it('clamps stretch to its own bound and stretchY to the wider height bound', () => {
+    expect(mergeConfig({ stretch: 2.4 } as any).stretch).toBe(1.8)
+    expect(mergeConfig({ stretch: 0.4 } as any).stretch).toBe(0.6)
+    expect(mergeConfig({ stretchY: 2.4 } as any).stretchY).toBe(2.0)
+    expect(mergeConfig({ stretchY: 0.4 } as any).stretchY).toBe(0.6)
   })
 
   it('declares the two dials and the fit select in the Layout group, nothing lab-only', () => {
@@ -27,6 +34,8 @@ describe('smart stretch config + controls', () => {
     for (const k of ['k', 'roundCoupling', 'shapeRules']) expect(keys).not.toContain(k)
     const s = VT_CONTROLS.find(c => c.key === 'stretch') as any
     expect(s.group).toBe('Layout'); expect(s.min).toBe(VT_STRETCH_MIN); expect(s.max).toBe(VT_STRETCH_MAX); expect(s.step).toBe(0.01)
+    const sy = VT_CONTROLS.find(c => c.key === 'stretchY') as any
+    expect(sy.min).toBe(VT_HEIGHT_MIN); expect(sy.max).toBe(VT_HEIGHT_MAX)
     const f = VT_CONTROLS.find(c => c.key === 'fit') as any
     expect(f.kind).toBe('select'); expect(f.options).toEqual(['off', 'width'])
   })

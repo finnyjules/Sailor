@@ -854,10 +854,20 @@ export const VT_STAGGER_SEED_MAX = 999
  * and a 40° lean is already past caricature.
  */
 export const VT_SKEW_MAX = 40
-/** The dials' range. Each axis alone is proven to 0.5–2.5 in the lab; the
- *  studio damps the SECOND axis when both deviate (see `dampedStretch`). */
-export const VT_STRETCH_MIN = 0.5
-export const VT_STRETCH_MAX = 2.5
+/**
+ * The dials' range, measured and decided 2026-09-03. A single range shared by
+ * both axes sounds tidier, but a strictly-universal one is unusable: a
+ * fragile display serif drags it down to no travel at all, so the honest move
+ * is to split by axis — keep the mainstream of the width dial clean and pull
+ * back its far corners, while the height dial (which tolerates more) gets its
+ * own, wider ceiling. Damping still handles both-dials-pushed (see
+ * `dampedStretch`) — these are the single-axis proven bounds, not a promise
+ * about the diagonal.
+ */
+export const VT_STRETCH_MIN = 0.6
+export const VT_STRETCH_MAX = 1.8
+export const VT_HEIGHT_MIN = 0.6
+export const VT_HEIGHT_MAX = 2.0
 export const VT_FITS = ['off', 'width'] as const
 export type VtFit = (typeof VT_FITS)[number]
 /**
@@ -1795,7 +1805,7 @@ export function mergeConfig(raw: unknown): VectorTypeConfig {
     // Same reasoning, same choke point — `vtArcSweep`.
     arc: num(o.arc, d.arc),
     stretch: clamp(num(o.stretch, d.stretch), VT_STRETCH_MIN, VT_STRETCH_MAX),
-    stretchY: clamp(num(o.stretchY, d.stretchY), VT_STRETCH_MIN, VT_STRETCH_MAX),
+    stretchY: clamp(num(o.stretchY, d.stretchY), VT_HEIGHT_MIN, VT_HEIGHT_MAX),
     fit: oneOf(o.fit, VT_FITS, d.fit),
     appearance,
     motion: moves === motion.moves ? motion : { ...motion, moves },

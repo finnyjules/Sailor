@@ -47,6 +47,8 @@ import { withFieldFrame, type FieldRequest } from '~/lib/shaderfill/field'
 import type { BlendKind } from '~/lib/studio/blend'
 import {
   VT_ARC_MAX,
+  VT_HEIGHT_MAX,
+  VT_HEIGHT_MIN,
   VT_SKEW_MAX,
   VT_STRETCH_MAX,
   VT_STRETCH_MIN,
@@ -310,9 +312,18 @@ function coordsKey(coords: Record<string, number> | null | undefined): string {
  * REPLACED: NaN has no nearest legal value, and 1 is the one answer that draws
  * the font as drawn.
  */
-function clampDial(v: number): number {
+// Split by axis, not a shared helper: width and height clamp differently on
+// purpose — measured, height tolerates more range than width (see
+// `VT_HEIGHT_MIN`/`VT_HEIGHT_MAX` in config.ts) — so a single `clampDial`
+// would either over-restrict the height or under-restrict the width.
+function clampStretch(v: number): number {
   if (!Number.isFinite(v)) return 1
   return v < VT_STRETCH_MIN ? VT_STRETCH_MIN : v > VT_STRETCH_MAX ? VT_STRETCH_MAX : v
+}
+
+function clampHeight(v: number): number {
+  if (!Number.isFinite(v)) return 1
+  return v < VT_HEIGHT_MIN ? VT_HEIGHT_MIN : v > VT_HEIGHT_MAX ? VT_HEIGHT_MAX : v
 }
 
 /**
@@ -435,12 +446,12 @@ export function vectorTypeFrame(
   // to the dial value — inert, never wrong. Empty text is the other inert case:
   // there is no run to fill a box with, and reporting a `fitted` of 1 would put
   // a number on a read-only control that nothing solved.
-  const runSY = clampDial(base.stretchY)
+  const runSY = clampHeight(base.stretchY)
   // The height dial AS THE USER SET IT — `cfg`, not `base`, so no track has
   // touched it. Fit answers for this one and the width is damped against it
   // below; `runSY` (the animated one) is what the HEIGHT itself renders at.
-  const fitSY = clampDial(cfg.stretchY)
-  let dialS = clampDial(base.stretch)
+  const fitSY = clampHeight(cfg.stretchY)
+  let dialS = clampStretch(base.stretch)
   let fitted: number | null = null
   const fitBox = frameOpts.fitBoxWidth
   if (
@@ -538,8 +549,8 @@ export function vectorTypeFrame(
       // letter by letter for a wave nobody can read against the box edge it is
       // fighting. So under fit every glyph takes the run's width dial and only
       // the HEIGHT keeps its own clock — height was never part of the promise.
-      const ownS = fitted ?? clampDial(gc.stretch)
-      const ownSY = clampDial(gc.stretchY)
+      const ownS = fitted ?? clampStretch(gc.stretch)
+      const ownSY = clampHeight(gc.stretchY)
       // Read off the DIALS, not the resulting geometry: two dials a float
       // apart mean the wave is on, and comparing the engine's outputs made the
       // answer depend on how much of the move the cascade happened to absorb.
