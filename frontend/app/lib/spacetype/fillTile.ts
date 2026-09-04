@@ -52,6 +52,8 @@ export interface ShaderSpec {
   params: Record<string, ParamValue>
   anchor: 'object' | 'frame'
   speed: number
+  /** varies the generative field; 42 is the historical default. */
+  seed: number
   input: Paint
 }
 
@@ -60,7 +62,7 @@ export const FILL_TYPES: FillType[] = ['solid', 'gradient', 'ombre', 'grid', 'no
 export const DEFAULT_FILL: Fill = { type: 'solid', a: '#ffffff', b: '#000000', textColor: '#ffffff', angle: 45, density: 8 }
 
 export const DEFAULT_SHADER_SPEC: ShaderSpec = {
-  effectId: 'fbm_warp', params: {}, anchor: 'object', speed: 1,
+  effectId: 'fbm_warp', params: {}, anchor: 'object', speed: 1, seed: 42,
   input: { type: 'gradient', a: '#ffffff', b: '#000000', textColor: '#ffffff', angle: 45, density: 8 },
 }
 
@@ -190,6 +192,7 @@ export function normalizeShaderSpec(s: unknown, depth: number): ShaderSpec {
     params,
     anchor: o.anchor === 'frame' ? 'frame' : 'object',
     speed: typeof o.speed === 'number' && Number.isFinite(o.speed) ? o.speed : 1,
+    seed: typeof o.seed === 'number' && Number.isFinite(o.seed) ? o.seed : DEFAULT_SHADER_SPEC.seed,
     input: normalizePaint(o.input ?? DEFAULT_SHADER_SPEC.input, depth + 1),
   }
 }

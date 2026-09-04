@@ -534,7 +534,7 @@ export function resolveField(req: FieldRequest, token?: number): HTMLCanvasEleme
   // the SAME `toUniforms` expansion the studio uses, so a colour becomes a vec3 and a
   // gradient becomes its indexed arrays here exactly as it does there. A hand-rolled
   // copy of that expansion is how the two paths would drift.
-  const uniforms: Uniforms = { u_time: t, u_seed: 42, u_hasInput: 1 }
+  const uniforms: Uniforms = { u_time: t, u_seed: spec.seed, u_hasInput: 1 }
   const byUniform: Record<string, ParamValue> = {}
   for (const [k, v] of Object.entries(spec.params)) byUniform[`u_${k}`] = v
   Object.assign(uniforms, toUniforms(effect, byUniform))

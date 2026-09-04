@@ -89,7 +89,7 @@ function paramsKey(p: Record<string, ParamValue>): string {
  *  ten shapes sharing one shader fill produce one key and therefore one render. */
 export function fieldKey(spec: ShaderSpec, w: number, h: number, tq: number): string {
   const t = spec.speed === 0 ? 'static' : tq
-  return encode([spec.effectId, paramsKey(spec.params), spec.anchor, spec.speed,
+  return encode([spec.effectId, paramsKey(spec.params), spec.anchor, spec.speed, spec.seed,
                  inputKey(spec.input), w, h, t])
 }
 
@@ -109,7 +109,7 @@ export function fieldKey(spec: ShaderSpec, w: number, h: number, tq: number): st
  *  usual default-vs-explicit-value collapsing for key stability across a catalog load,
  *  which is a correctness requirement there, not an oversight. */
 export function specIdentityKey(spec: ShaderSpec): string {
-  return encode([spec.effectId, paramsKey(spec.params), spec.anchor, spec.speed, inputKey(spec.input)])
+  return encode([spec.effectId, paramsKey(spec.params), spec.anchor, spec.speed, spec.seed, inputKey(spec.input)])
 }
 
 /** The catalog stores each param's uniform name WITH the `u_` prefix already applied
