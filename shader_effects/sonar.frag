@@ -39,15 +39,20 @@ float bayer4(vec2 px) {
 
 // The `gradient` param is read as INK ROLES here, not as a ramp: the stops' order is the
 // role, their positions are ignored. 1 ground (sea), 2 land, 3 coast fringe, 4 specks,
-// 5 deep land, 6 shallows. Fewer stops fall back to the last one provided.
+// 5 deep land, 6 shallows. Roles beyond the inks provided fall back by tier: land-tier
+// roles (land, deep) to the land ink, sea-tier roles (coast, specks, shallows) to the
+// ground ink, so a two-ink ramp never paints the sea in the land colour.
 #define MAXS 8
 uniform vec3 u_ramp[MAXS];
 uniform float u_rampPos[MAXS];
 uniform float u_rampCount;
+const int LAND_TIER[6] = int[6](0, 1, 0, 0, 1, 0);
 vec3 ink(int role) {
     int n = int(u_rampCount + 0.5);
-    int i = clamp(min(role, n - 1), 0, MAXS - 1);
-    return u_ramp[i];
+    int r = clamp(role, 0, 5);
+    if (r < n) return u_ramp[clamp(r, 0, MAXS - 1)];
+    int fb = (LAND_TIER[r] == 1) ? min(1, max(n - 1, 0)) : 0;
+    return u_ramp[clamp(fb, 0, MAXS - 1)];
 }
 
 uniform float u_level;     // Coverage: how much of the frame is land
@@ -79,27 +84,33 @@ void main() {
 
     // One level cut through the field: d > 0 is land, d < 0 is sea, d = 0 is the coast.
     float h = heightAt(uv, t, oct);
-    float d = h - (1.0 - u_level);
+    // The field's values sit mostly in 0.15..0.85, so Coverage 0.1..0.9 is mapped onto that
+    // span: 0.1 is nearly all sea, 0.9 nearly all land, 0.5 is unchanged.
+    float level = mix(0.85, 0.15, clamp((u_level - 0.1) / 0.8, 0.0, 1.0));
+    float d = h - level;
 
     vec3 col = ink(0);
     if (d > 0.0) {
         // Land: an ordered-dither halftone in SNAPPED-PIXEL space (whole pixel cells, so it
         // cannot beat against the pixel grid) that is solid deep inland and thins to
         // scattered squares at the coast; the squares are the land ink over the ground ink.
+        // Note: at the 128/256 px golden sizes hcell floors at 1, so the goldens do not
+        // exercise the Halftone cells dial; it is meaningful from ~1024 px up.
         float hcell = max(1.0, floor(u_resolution.y / (max(u_halftone, 4.0) * cell) + 0.5));
         float inland = clamp(d / max(u_depth * 0.25, 1e-3), 0.0, 1.0);
         float dotOn = step(bayer4(floor(px / hcell)), inland);
         col = mix(ink(0), ink(1), dotOn);
-        // The innermost land takes the deep ink.
-        if (d > 0.22) col = ink(4);
+        // The innermost land takes the deep ink, never before the halftone has gone solid.
+        if (d > max(u_depth * 0.25 * 1.1, 0.22)) col = ink(4);
     } else {
         // Shallows: a wide, faintly dithered band of sea just off the coast (ink 6),
         // then the coast fringe right at the shore (ink 3), dithered so it speckles.
         float shallows = 1.0 - smoothstep(0.0, 0.16, -d);
-        if (step(bayer4(px + 2.0), shallows * 0.6) > 0.5) col = ink(5);
-        float fw = max(u_fringe * 0.12, 1e-4);
-        float fringe = 1.0 - smoothstep(0.0, fw, -d);
-        if (step(bayer4(px), fringe) > 0.5) col = ink(2);
+        if (step(1.0 - bayer4(px), shallows * 0.6) > 0.5) col = ink(5);
+        if (u_fringe > 0.0) {
+            float fringe = 1.0 - smoothstep(0.0, u_fringe * 0.12, -d);
+            if (step(bayer4(px), fringe) > 0.5) col = ink(2);
+        }
     }
 
     // Specks: scattered single pixels of ink 4 along both sides of the coast.
