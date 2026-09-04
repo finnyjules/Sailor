@@ -708,9 +708,10 @@ export function defaultDoc(): SceneDoc {
     version: 1,
     objects: [],
     camera: { position: [4, 3, 6], target: [0, 0.5, 0], fov: 45 },
+    // Raw fields seeded to match the 'softbox-beauty' Look (lib/scene3d/lighting.ts) so a fresh scene renders what its Look name promises. Keep in sync if that recipe changes.
     lighting: {
-      preset: 'studio', environment: 'room', sunAzimuth: 35, sunElevation: 55, sunIntensity: 1.4, ambient: 0.5,
-      look: 'softbox-beauty', softness: 0.85, warmth: 0.5, brightness: 1, sunColor: '#ffffff', shadowSoftness: 3,
+      preset: 'soft', environment: 'softbox', sunAzimuth: 35, sunElevation: 40, sunIntensity: 1.2, ambient: 0.7,
+      look: 'softbox-beauty', softness: 0.85, warmth: 0.5, brightness: 1, sunColor: '#ffffff', shadowSoftness: 10.35,
       advanced: false,
       gelColorA: '#ff0da6', gelBrightnessA: 7, gelSizeA: 1, gelAzimuthA: -100, gelHeightA: 1.5, gelDistanceA: 4.6,
       gelColorB: '#0dccff', gelBrightnessB: 7, gelSizeB: 1, gelAzimuthB: 100, gelHeightB: 1.5, gelDistanceB: 4.6,

@@ -667,7 +667,7 @@ describe('scene3d lighting fields', () => {
     expect(d.lighting.warmth).toBe(0.5)
     expect(d.lighting.brightness).toBe(1)
     expect(d.lighting.sunColor).toBe('#ffffff')
-    expect(d.lighting.shadowSoftness).toBe(3)
+    expect(d.lighting.shadowSoftness).toBe(10.35)
     expect(d.lighting.advanced).toBe(false)
   })
   it('round-trips the new fields and defaults them on an old doc', () => {
