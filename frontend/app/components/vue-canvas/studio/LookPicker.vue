@@ -63,8 +63,14 @@ const cardOn = 'bg-white/[0.12] ring-1 ring-white/40'
 
 <template>
   <Teleport to="body">
+    <!-- `data-look-picker` is the marker the 3D Studio surface's Escape handler
+         queries so it yields the key to us while we're open (the same DOM-marker
+         yield StudioColor uses via `data-studio-color-pop`). Without it the surface's
+         earlier-registered capture listener falls through and Escape closes the
+         whole editor, not just this picker. -->
     <div
       ref="rootRef"
+      data-look-picker
       class="fixed z-[210] rounded-lg border border-white/10 bg-[#141414] p-2 text-[12px] text-white/90 shadow-2xl"
       :style="{ left: `${pos.x}px`, top: `${pos.y}px`, width: `${LOOK_PICKER_WIDTH}px` }"
       role="dialog"

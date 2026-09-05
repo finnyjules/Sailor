@@ -1916,6 +1916,12 @@ function onKey(e: KeyboardEvent) {
     // BEFORE the picker's (it registered later), so yielding here lets the picker
     // close itself and preventDefault, which the shell already honours.
     if (libraryPickerOpen.value) return
+    // The Look library picker (RowLook → LookPicker) owns Escape while open, the same
+    // way StudioColor does below: it's a generic row renderer that can't reach our
+    // state, so it marks its root `data-look-picker` and we yield on that marker. It
+    // registered its capture listener after us, so yielding lets it close itself and
+    // preventDefault, which the shell honours — otherwise Escape would close the editor.
+    if (document.querySelector('[data-look-picker]')) return
     // Open primitive/light/decal/generate menu owns Esc: close it, never the modal.
     if (primMenuOpen.value || lightMenuOpen.value || decalMenuOpen.value || genOpen.value) {
       e.preventDefault()
