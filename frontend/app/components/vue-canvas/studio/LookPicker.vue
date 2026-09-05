@@ -93,7 +93,7 @@ const cardOn = 'bg-white/[0.12] ring-1 ring-white/40'
             @click="rail = r.id; query = ''"
           >{{ r.label }}</button>
         </div>
-        <div class="grid max-h-[340px] flex-1 grid-cols-4 content-start gap-1 overflow-y-auto pr-1" role="listbox" aria-label="Looks">
+        <div class="grid max-h-[400px] flex-1 grid-cols-3 content-start gap-1.5 overflow-y-auto pr-1" role="listbox" aria-label="Looks">
           <button
             v-for="l in visible" :key="l.id" type="button" role="option" :data-look="l.id"
             :aria-selected="modelValue === l.id ? 'true' : 'false'"
@@ -102,14 +102,14 @@ const cardOn = 'bg-white/[0.12] ring-1 ring-white/40'
             @click="pick(l.id)"
           >
             <span class="relative rounded-md bg-[#0d1016] p-1">
-              <LookPlot :recipe="l" :size="72" />
+              <LookPlot :recipe="l" :size="104" />
               <span v-if="l.additive" class="absolute right-1 top-1 rounded bg-white/15 px-1 text-[9px] leading-4 text-white/80" title="Adds to the current look">+</span>
               <span v-if="l.featured" class="absolute left-1 top-1 text-[10px] leading-4 text-amber-300/90" title="Featured">★</span>
             </span>
             <span class="w-full truncate text-[11px] leading-tight text-white/90">{{ l.label }}</span>
             <span class="w-full truncate text-[9.5px] leading-tight text-white/45">{{ l.blurb }}</span>
           </button>
-          <p v-if="!visible.length" class="col-span-4 py-6 text-center text-[11px] text-white/40">No looks match.</p>
+          <p v-if="!visible.length" class="col-span-3 py-6 text-center text-[11px] text-white/40">No looks match.</p>
         </div>
       </div>
     </div>
