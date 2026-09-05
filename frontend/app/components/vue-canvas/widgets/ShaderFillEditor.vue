@@ -48,7 +48,22 @@ const props = withDefaults(defineProps<{
    *  already has exactly that dead-toggle bug today. Defaults to shown so the three existing
    *  hosts (Space Type, Shape Studio, Compositor) are unaffected. */
   showAnchor?: boolean
-}>(), { showAnchor: true })
+  /** A host whose EFFECT is fixed by something else (the Compositor's Mosaic element:
+   *  its Style IS the effect — Oddgrid / Static) hides the picker so the spec can't be
+   *  repointed at an effect the host doesn't mean. Default off: every fill host lets
+   *  the person pick. */
+  lockEffect?: boolean
+  /** Hide the Speed slider: a host whose fill is a still (a Mosaic, speed pinned at 0)
+   *  would be offering a dead dial. Default shown. */
+  showSpeed?: boolean
+  /** Hide the Variation row: a host that owns the seed (a Mosaic mirrors its layer seed
+   *  into the spec, with its own New variation button) would otherwise show a second,
+   *  competing re-roll. Default shown. */
+  showSeed?: boolean
+  /** Hide the nested Input fill: a generative effect (Oddgrid / Static) mostly ignores
+   *  its input, and a Mosaic has no reason to expose it. Default shown. */
+  showInput?: boolean
+}>(), { showAnchor: true, lockEffect: false, showSpeed: true, showSeed: true, showInput: true })
 const emit = defineEmits<{ 'update:modelValue': [ShaderSpec] }>()
 
 /** Spread, never a listed-field rebuild — a `ShaderSpec` (or `Fill`) rebuilt by
@@ -243,8 +258,8 @@ function onInputChange(p: Paint) {
 
 <template>
   <div class="space-y-2.5 rounded-lg border border-white/10 bg-white/[0.02] p-2.5">
-    <!-- Effect picker -->
-    <div>
+    <!-- Effect picker (hidden when the host fixes the effect — see `lockEffect`) -->
+    <div v-if="!lockEffect">
       <div class="mb-1 flex items-center justify-between gap-2">
         <label class="block text-[9px] uppercase tracking-[0.1em] text-white/35">Effect</label>
         <!-- Item 4 fix (final review): manual escape hatch for CATALOG_RETRY_MAX give-up —
@@ -318,10 +333,10 @@ function onInputChange(p: Paint) {
     </div>
 
     <!-- Speed -->
-    <StudioSlider v-model="speed" label="Speed" :min="0" :max="4" :step="0.05" :default="DEFAULT_SHADER_SPEC.speed" />
+    <StudioSlider v-if="showSpeed" v-model="speed" label="Speed" :min="0" :max="4" :step="0.05" :default="DEFAULT_SHADER_SPEC.speed" />
 
     <!-- Variation: re-rolls the field's seed. -->
-    <div class="flex items-center gap-2">
+    <div v-if="showSeed" class="flex items-center gap-2">
       <StudioButton variant="secondary" @click="rerollSeed">New variation</StudioButton>
       <div class="min-w-0 flex-1">
         <StudioSlider v-model="seed" label="Variation" :min="1" :max="9999" :step="1" :default="DEFAULT_SHADER_SPEC.seed" />
@@ -329,7 +344,7 @@ function onInputChange(p: Paint) {
     </div>
 
     <!-- Nested input fill: the recursive half, depth-limited to 1 via `nested`. -->
-    <div class="border-t border-white/10 pt-2.5">
+    <div v-if="showInput" class="border-t border-white/10 pt-2.5">
       <label class="mb-1.5 block text-[9px] uppercase tracking-[0.1em] text-white/35">Input fill</label>
       <FillControl nested :model-value="modelValue.input" @update:model-value="onInputChange" />
     </div>

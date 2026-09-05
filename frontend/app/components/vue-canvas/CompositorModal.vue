@@ -13,7 +13,9 @@ import {
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
 } from '~/composables/useCompositorLayers'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
-import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf } from '~/lib/compositor/mosaic'
+import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf, mosaicStylePatch, mosaicSeedPatch, freshMosaicSeed, isMosaicShaderFill, mosaicShaderSpec, mosaicLookNames, mosaicLookOf, applyMosaicLook } from '~/lib/compositor/mosaic'
+import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
+import { onFieldCatalogReady } from '~/lib/shaderfill/field'
 import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
@@ -644,9 +646,41 @@ function onFillGridWithSections() {
 function patchDealGrid(layer: DealLayer, patch: Partial<typeof layer.grid>) {
   setLocal(layer.id, { grid: { ...layer.grid, ...patch } })
 }
-/** Re-roll a deal's seed for a fresh coherent variation (layout + fills + density). */
+/** Set a mosaic's seed — grid.gen.seed AND, for a shader style, the spec's seed
+ *  (one variation; see mosaicSeedPatch). One history step via setLocal. */
+function setDealSeed(layer: DealLayer, seed: number) {
+  setLocal(layer.id, mosaicSeedPatch(layer, seed))
+}
+/** Re-roll a mosaic's seed for a fresh coherent variation (layout + fills + density
+ *  for Tiles; the whole composition for every other style). */
 function rerollDeal(layer: DealLayer) {
-  patchDealGrid(layer, { gen: { ...layer.grid.gen, seed: Math.floor(Math.random() * 9999) + 1 } })
+  setDealSeed(layer, freshMosaicSeed())
+}
+/** The ShaderSpec the selected shader-style mosaic edits — derived at the layer's
+ *  seed when the layer has none yet (an agent-made layer), so the editor never
+ *  binds to undefined. */
+function mosaicShader(layer: DealLayer) {
+  return isMosaicShaderFill(layer.cellFill) ? mosaicShaderSpec(layer.cellFill, layer.grid.gen.seed, layer.shader) : null
+}
+/** The Look (the shader styles' Palette) the selected mosaic currently matches —
+ *  'Custom' once any dial moved off every Look. */
+const MOSAIC_CUSTOM_LOOK = 'Custom'
+const mosaicLook = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return ''
+  const spec = mosaicShader(l as DealLayer)
+  return spec ? (mosaicLookOf(spec) || MOSAIC_CUSTOM_LOOK) : ''
+})
+const mosaicLookOptions = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal' || !isMosaicShaderFill((l as DealLayer).cellFill)) return []
+  const names = mosaicLookNames((l as DealLayer).cellFill as string)
+  return mosaicLook.value === MOSAIC_CUSTOM_LOOK ? [...names, MOSAIC_CUSTOM_LOOK] : names
+})
+function applyMosaicLookTo(layer: DealLayer, name: string) {
+  const spec = mosaicShader(layer)
+  if (!spec || name === MOSAIC_CUSTOM_LOOK) return
+  setLocal(layer.id, { shader: applyMosaicLook(spec, name) } as Partial<DealLayer>)
 }
 
 /** Pane — the Pane generator (lib/compositor/pane): its own row-masonry of flush
@@ -752,13 +786,7 @@ const vocabDrivesLook = computed(() => {
  *  only the composition changes, so "New variation" history and placement survive
  *  a style hop. One history step via setLocal. */
 function setMosaicStyle(layer: DealLayer, label: string) {
-  const fill = cellFillOfLabel(label)
-  const patch: Partial<DealLayer> = { cellFill: fill }
-  if (fill === 'pane') patch.pane = layer.pane ?? defaultPane()
-  if (fill === 'modular') patch.modular = layer.modular ?? defaultModular()
-  if (fill === 'parcel') patch.parcel = layer.parcel ?? defaultParcel()
-  if (fill === 'mosh') patch.mosh = layer.mosh ?? defaultMosh()
-  setLocal(layer.id, patch)
+  setLocal(layer.id, mosaicStylePatch(layer, cellFillOfLabel(label)))
 }
 
 // Normalize brush layers to a tight box: brush strokes are stored in absolute
@@ -2849,6 +2877,13 @@ function renderStack(wallT?: number, live = false) {
 // happened to trigger a repaint.
 let stopDepthWatch: (() => void) | null = null
 onMounted(() => { stopDepthWatch = onDepthChange(() => renderStack()) })
+// A still shader fill (a Mosaic in the Oddgrid / Static style, speed 0) has no clock
+// to re-render it once the shader catalog lands — the first paint after a cold load
+// falls back to the spec's input paint and would stay that way until the next edit.
+// Same nudge ArtifactFrameNode / Scene3DStudioNode / VectorTypeSurface carry.
+let stopFieldCatalog: (() => void) | null = null
+onMounted(() => { stopFieldCatalog = onFieldCatalogReady(() => renderStack()) })
+onBeforeUnmount(() => { stopFieldCatalog?.(); stopFieldCatalog = null })
 onBeforeUnmount(() => { stopDepthWatch?.(); stopDepthWatch = null })
 
 watch(
@@ -6975,6 +7010,17 @@ onUnmounted(() => {
               <StudioSelect label="Palette" :options="PANE_PRESET_NAMES as any"
                 :model-value="panePreset" @update:model-value="(v: any) => applyPanePreset(selectedLocal as DealLayer, v)" />
             </div>
+            <!-- Oddgrid / Static: the shader styles. The style IS the effect, so the
+                 shared shader-fill editor mounts with its picker locked, its own seed
+                 / speed / input rows hidden (the Mosaic owns the seed; speed is 0;
+                 the input is meaningless here). The effect's Looks are its Palette. -->
+            <div v-else-if="isMosaicShaderFill((selectedLocal as any).cellFill)" class="mt-2 flex flex-col gap-1.5">
+              <ShaderFillEditor :model-value="mosaicShader(selectedLocal as DealLayer)!" lock-effect
+                :show-speed="false" :show-seed="false" :show-input="false"
+                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { shader: v } as any)" />
+              <StudioSelect label="Palette" :options="mosaicLookOptions"
+                :model-value="mosaicLook" @update:model-value="(v: any) => applyMosaicLookTo(selectedLocal as DealLayer, v)" />
+            </div>
             <!-- Tiles: the seeded grid itself — density / inset / regularity / merge. -->
             <div v-else class="mt-2 flex flex-col gap-1.5">
               <StudioSlider label="Density" :min="0.05" :max="1" :step="0.02" :bindable="false"
@@ -6991,9 +7037,11 @@ onUnmounted(() => {
             </div>
             <!-- The vocabulary palette only shows when something reads it: Tiles always,
                  Modular / Pane only while they have no inks of their own. Parcel and
-                 Mosh carry their own colours (see dealVocabDrivesLook). -->
+                 Mosh carry their own colours (see dealVocabDrivesLook). Labelled "Inks"
+                 beside a style that already has a Palette control of its own, so two
+                 adjacent rows never both say Palette. -->
             <div v-if="vocabDrivesLook" class="mt-2">
-              <div class="panel-label mb-1.5">Palette</div>
+              <div class="panel-label mb-1.5">{{ (selectedLocal as any).cellFill && (selectedLocal as any).cellFill !== 'solid' ? 'Inks' : 'Palette' }}</div>
               <StudioSegmented :options="DEAL_VOCABS as any" :model-value="(selectedLocal as any).vocab"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { vocab: v })" />
               <p v-if="(selectedLocal as any).cellFill && (selectedLocal as any).cellFill !== 'solid'" class="mt-1 text-[10px] text-white/30 leading-snug">This style has no inks of its own, so it draws from this palette.</p>
@@ -7003,7 +7051,7 @@ onUnmounted(() => {
               <div class="min-w-0 flex-1">
                 <StudioSlider label="Seed" :min="1" :max="9999" :step="1" :default="42" :bindable="false"
                   :model-value="(selectedLocal as DealLayer).grid.gen.seed"
-                  @update:model-value="(v: number) => patchDealGrid(selectedLocal as DealLayer, { gen: { ...(selectedLocal as DealLayer).grid.gen, seed: v } })" />
+                  @update:model-value="(v: number) => setDealSeed(selectedLocal as DealLayer, v)" />
               </div>
             </div>
           </template>

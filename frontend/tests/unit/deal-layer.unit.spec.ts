@@ -151,6 +151,9 @@ describe('deal layer render (headless)', () => {
   // captured at clip() time — so a test can assert the deal clips to exactly its box.
   const mainClips: Array<Array<{ x: number; y: number; w: number; h: number }>> = []
   let mainPathRects: Array<{ x: number; y: number; w: number; h: number }> = []
+  // fillRects on the MAIN ctx (with the fillStyle in force), so a test can assert the
+  // shader styles paint ONE box-sized rect with a resolved paint.
+  const mainFillRects: Array<{ x: number; y: number; w: number; h: number; style: unknown }> = []
   function recordingCtx(name: string) {
     const g = { addColorStop() {} }
     return {
@@ -162,7 +165,8 @@ describe('deal layer render (headless)', () => {
       rotate() {}, scale() {}, clip() { if (name === 'main') mainClips.push([...mainPathRects]) },
       beginPath() { if (name === 'main') mainPathRects = [] }, moveTo() {}, lineTo() {}, arc() {}, roundRect() {}, ellipse() {},
       rect(x = 0, y = 0, w = 0, h = 0) { if (name === 'main') mainPathRects.push({ x, y, w, h }) }, closePath() {}, setLineDash() {},
-      fill() {}, stroke() {}, fillRect() {}, clearRect() {},
+      fill() {}, stroke() {}, clearRect() {},
+      fillRect(x = 0, y = 0, w = 0, h = 0) { if (name === 'main') mainFillRects.push({ x, y, w, h, style: (this as any).fillStyle }) },
       putImageData() {}, createImageData(w = 1, h = 1) { return { data: new Uint8ClampedArray(Math.max(1, w * h) * 4), width: w, height: h } },
       getImageData(_x = 0, _y = 0, w = 1, h = 1) { return { data: new Uint8ClampedArray(Math.max(1, w * h) * 4), width: w, height: h } },
       createRadialGradient() { return g }, createLinearGradient() { return g }, createPattern() { return g },
@@ -175,7 +179,7 @@ describe('deal layer render (headless)', () => {
     constructor(w: number, h: number) { this.width = w; this.height = h; this.data = new Uint8ClampedArray(Math.max(1, w * h) * 4) }
   }
   beforeEach(() => {
-    drawImages.length = 0; mainDraws.length = 0; mainTranslates.length = 0; mainClips.length = 0; mainPathRects = []; seq = 0
+    drawImages.length = 0; mainDraws.length = 0; mainTranslates.length = 0; mainClips.length = 0; mainFillRects.length = 0; mainPathRects = []; seq = 0
     vi.stubGlobal('ImageData', FakeImageData)
     vi.stubGlobal('document', { createElement: () => { const c: any = { width: 0, height: 0 }; c.getContext = () => recordingCtx(`off-${++seq}`); return c } })
   })
@@ -266,6 +270,25 @@ describe('deal layer render (headless)', () => {
       const g = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 2, margin: 0, gutter: 0, gen: { ...defaultGrid().gen, seed } }
       await drawDeal(dealLayer({ density: 0.05, grid: g }), 400, 400)
       expect(drawImages.length).toBeGreaterThanOrEqual(1)
+    }
+  })
+
+  it('the shader styles paint ONE box-sized rect through resolvePaint, centred, inside the clip', async () => {
+    // No shader catalog in this harness, so resolvePaint takes its documented fallback
+    // (the spec's input paint) — the point here is the PATH: clip to the box, step
+    // back to the centre, one fillRect over the whole box with a resolved fillStyle.
+    for (const cellFill of ['oddgrid', 'static'] as const) {
+      mainFillRects.length = 0; mainClips.length = 0; mainTranslates.length = 0
+      const { mosaicShaderSpec } = await import('~/lib/compositor/mosaic')
+      const layer = dealLayer({ cellFill, w: 1, h: 0.5, shader: mosaicShaderSpec(cellFill, 7) })
+      await drawDeal(layer, 400, 400)
+      expect(mainClips[0]).toEqual([{ x: 0, y: 0, w: 400, h: 200 }])
+      // After the layer's own placement translate: to the box corner, then back to its centre.
+      expect(mainTranslates.slice(-2)).toEqual([[-200, -100], [200, 100]])
+      expect(mainFillRects).toHaveLength(1)
+      expect(mainFillRects[0]).toMatchObject({ x: -200, y: -100, w: 400, h: 200 })
+      expect(mainFillRects[0]!.style).toBeTruthy() // a resolved paint, never the empty default
+      expect(drawImages).toHaveLength(0) // no per-cell tiles: the whole box is one fill
     }
   })
 

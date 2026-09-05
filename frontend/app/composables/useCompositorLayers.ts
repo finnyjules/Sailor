@@ -26,7 +26,8 @@ import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
-import { fillIsShader } from '~/lib/spacetype/fillTile'
+import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
+import { dealShaderFill } from '~/lib/compositor/mosaic'
 import { withFieldFrame, type FieldRequest } from '~/lib/shaderfill/field'
 import {
   hasPaint, resolvePaint, OBJECT_SHADER_FIELD_PX, type ShaderFieldFrameCtx,
@@ -604,8 +605,18 @@ export interface DealLayer extends LayerCommon {
   // mosaic blocks / thin smears / scan rows / chevron), every mark a filled,
   // column-quantised rect in full-strength inks — grid / density / inset are
   // ignored too.
+  // 'oddgrid' / 'static' = the two SHADER styles (shader_effects/oddgrid.frag,
+  // static.frag): the box is painted with a shader Fill through the same
+  // resolvePaint path a rect uses, `shader` below holding the spec — grid /
+  // density / inset are ignored; the grid's seed is mirrored into the spec.
   // Absent behaves as 'solid'.
-  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh'
+  // People see these as the Mosaic element's STYLES (lib/compositor/mosaic maps the
+  // words: 'solid' is "Tiles"); the field keeps its name so saved frames load as-is.
+  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'oddgrid' | 'static'
+  // The ShaderSpec the shader styles paint with (effectId = the cellFill, seed =
+  // grid.gen.seed, speed 0, frame-anchored); only read when cellFill is 'oddgrid'
+  // or 'static'. Absent ⇒ derived at the layer's seed (mosaicShaderSpec).
+  shader?: ShaderSpec
   // Pane's tunables (rows / cells / vary / diag / soft / spread); only read when
   // cellFill is 'pane'. Absent ⇒ defaultPane().
   pane?: PaneParams
@@ -2100,7 +2111,22 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     ctx.beginPath()
     ctx.rect(0, 0, boxW, boxH)
     ctx.clip()
-    if (layer.cellFill === 'pane') {
+    const shaderFill = dealShaderFill(layer)
+    if (shaderFill) {
+      // Oddgrid / Static: paint the box with the layer's shader Fill through the SAME
+      // resolvePaint path a rect with a shader fill takes (its field was requested by
+      // the pre-pass via layerPaints('deal') — without that request resolveField has
+      // nothing and this falls back to the spec's input paint). resolvePaint's
+      // geometry is CENTRED on the origin (see ~/lib/paint/resolve), so step back to
+      // the box centre for the fill: the object-anchored pattern sits at
+      // (-boxW/2, -boxH/2); the frame-anchored one is positioned from _fieldCtx.base
+      // and ignores this translate either way. The clip above still bounds it.
+      ctx.save()
+      ctx.translate(boxW / 2, boxH / 2)
+      ctx.fillStyle = resolvePaint(ctx, shaderFill, { w: boxW, h: boxH }, _fieldCtx)
+      ctx.fillRect(-boxW / 2, -boxH / 2, boxW, boxH)
+      ctx.restore()
+    } else if (layer.cellFill === 'pane') {
       // Pane paints its OWN masonry — NOT the shared grid: every cell is flush and
       // filled, so regularity / merge / density / inset don't apply here. Each cell
       // gets a canvas linear gradient over its EXACT corner/edge endpoints (the
@@ -2456,18 +2482,23 @@ function applyDisplaceFromLayer(
 
 /** Every Paint slot a local layer can carry, kind-specific — walked by paintLayerStack's
  *  pre-pass (below) to find shader fills BEFORE anything paints, so beginFieldFrame sees
- *  the same set resolveFill will actually ask for during the pass. */
-function layerPaints(layer: LocalLayer): Paint[] {
+ *  the same set resolveFill will actually ask for during the pass. Exported so the
+ *  unit suite can pin that a shader-style mosaic registers its field (a missing
+ *  request is a BLANK box, not an error — the "graceful fallback hides integration
+ *  failure" trap). */
+export function layerPaints(layer: LocalLayer): Paint[] {
   switch (layer.kind) {
     case 'text': return [layer.color, layer.strokeColor]
     case 'line': return [layer.stroke]
     case 'image': return layer.tint ? [layer.tint] : []
     case 'brush': return layer.stroke ? [layer.fill, layer.stroke] : [layer.fill]
     case 'wired': return []                    // graph pixels — no authored Paint slots
-    // v1 deal vocabularies are solid/gradient/pattern fills only (no live shaders),
-    // so there's nothing for the shader-field pre-pass to register. A future shader
-    // vocabulary would return its ShaderSpec fills here.
-    case 'deal': return []
+    // The canvas styles' vocabularies are solid/gradient/pattern fills only (no live
+    // shaders), so there's nothing for the shader-field pre-pass to register. The two
+    // SHADER styles (oddgrid / static) paint ONE shader Fill over the box — the exact
+    // Fill drawLayerContent's deal branch hands to resolvePaint — and it MUST be
+    // returned here, or the pre-pass never renders the field and the box is blank.
+    case 'deal': { const f = dealShaderFill(layer); return f ? [f] : [] }
     default: return [layer.fill, layer.stroke] // rect / ellipse / polygon / star / path
   }
 }
