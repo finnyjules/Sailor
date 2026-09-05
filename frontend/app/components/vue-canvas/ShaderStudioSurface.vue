@@ -417,8 +417,13 @@ function pickAdjustPreset(name: string) { const p = ADJUST_PRESETS.find(x => x.n
 const CUSTOM_LOOK = 'Custom'
 const effectLooks = computed(() => (effectDef.value ? EFFECT_LOOKS[effectDef.value.id] ?? [] : []))
 // The row shows the look the current params match, or Custom once any slider moved.
+// A colour entry matches by hex (case-blind); a number by value.
+function lookParamMatches(k: string, v: number | string): boolean {
+  if (typeof v === 'string') return String(effectValues.value[k] ?? '').toLowerCase() === v.toLowerCase()
+  return Math.abs(numValue(k) - v) < 1e-6
+}
 const currentLook = computed(() =>
-  effectLooks.value.find(l => Object.entries(l.params).every(([k, v]) => Math.abs(numValue(k) - v) < 1e-6))?.name ?? CUSTOM_LOOK)
+  effectLooks.value.find(l => Object.entries(l.params).every(([k, v]) => lookParamMatches(k, v)))?.name ?? CUSTOM_LOOK)
 function pickEffectLook(name: string) {
   const look = effectLooks.value.find(l => l.name === name)
   if (!look) return

@@ -27,12 +27,24 @@ export const ADJUST_PRESETS: AdjustPreset[] = [
 /**
  * One-click looks for an effect: a named set of its own param values, keyed by
  * effect id. Applied through the same `setParam` path the sliders use, so a look
- * is just a bundle of edits — nothing else is stored. Inks and colours are left
- * alone so a look never throws away a chosen palette.
+ * is just a bundle of edits — nothing else is stored. A look names only the
+ * params it means to set: most leave inks and colours alone so they never throw
+ * away a chosen palette; a duotone look IS its colour pair, so it sets them.
  */
-export interface EffectLook { name: string; params: Record<string, number> }
+export interface EffectLook { name: string; params: Record<string, number | string> }
 
 export const EFFECT_LOOKS: Record<string, EffectLook[]> = {
+  // Static's riso duotone pairs (ink on paper), the tool's own set.
+  static: [
+    { name: 'Wine on Periwinkle', params: { u_ink: '#5C1226', u_bg: '#8286EC' } },
+    { name: 'Pink on Straw', params: { u_ink: '#F07BD8', u_bg: '#DCE2AA' } },
+    { name: 'Maroon on Orange', params: { u_ink: '#571020', u_bg: '#F0480F' } },
+    { name: 'Blue on Cream', params: { u_ink: '#1B3FA8', u_bg: '#F2E9D8' } },
+    { name: 'Green on Yellow', params: { u_ink: '#0E4D3C', u_bg: '#F5C21B' } },
+    { name: 'Blue on Pink', params: { u_ink: '#2B2BE0', u_bg: '#F0A7D8' } },
+    { name: 'Black on Lime', params: { u_ink: '#101010', u_bg: '#C6FF3D' } },
+    { name: 'Purple on Gold', params: { u_ink: '#7A1FA0', u_bg: '#FFD84D' } },
+  ],
   oddgrid: [
     { name: 'Patchwork', params: { u_scale: 13, u_density: 0.82, u_block: 0.75, u_bsize: 6, u_grain: 0.75, u_variety: 0.55, u_speck: 0.1, u_balance: 0, u_motif: 0, u_motifAmt: 0 } },
     { name: 'Bloom', params: { u_scale: 9, u_density: 0.52, u_block: 0.1, u_bsize: 4, u_grain: 0.28, u_variety: 0.15, u_speck: 0.04, u_balance: 0.1, u_motif: 1, u_motifAmt: 0.9 } },
