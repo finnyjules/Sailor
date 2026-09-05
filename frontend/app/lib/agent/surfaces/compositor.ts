@@ -20,6 +20,7 @@ import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { readGrid } from '~/lib/frame/gridConfig'
 import type { FrameGrid } from '~/lib/frame/grid'
 import { normalizeVocab } from '~/lib/compositor/dealVocab'
+import { mosaicStyleFromArgs, cellFillOfStyle, mosaicStyleOf, DEFAULT_MOSAIC_STYLE, type MosaicCellFill } from '~/lib/compositor/mosaic'
 import { defaultPane, normalizePane, panePresetPatch, panePresetOf, PANE_PRESET_NAMES, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
 import { defaultModular, normalizeModular, modularPresetPatch, modularPresetOf, MODULAR_PRESET_NAMES, type ModularParams, type ModularPresetName } from '~/lib/compositor/modular'
 import { defaultParcel, normalizeParcel, parcelPresetPatch, parcelPresetOf, PARCEL_PRESET_NAMES, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
@@ -52,7 +53,7 @@ export interface CompositorState {
   grid?: FrameGrid
   /** The frame's aspect as H/W (16:9 landscape = 0.5625, portrait > 1). Layer
    *  boxes are width-normalized, so a layer that fills the frame is `w: 1,
-   *  h: aspect` — dealGrid's create reads it. Absent = square (1). */
+   *  h: aspect` — the mosaic op's create reads it. Absent = square (1). */
   aspect?: number
 }
 
@@ -97,9 +98,11 @@ const clamp = (v: unknown, lo: number, hi: number, fallback: number): number => 
 /** A Paint is a "#RRGGBB" string or a gradient/pattern object — same predicate setFill uses. */
 const isValidPaint = (v: unknown): boolean => v != null && (typeof v === 'string' || typeof v === 'object')
 
-type DealFill = 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh'
+/** A Mosaic's internal `cellFill` — the style table in lib/compositor/mosaic maps the
+ *  agent's plain style words (tiles | pane | …) onto it; `solid` is the `tiles` style. */
+type DealFill = MosaicCellFill
 /** The four generator looks (every fill but solid) — each has its own tunables
- *  object on dealGrid's args and its own palette-preset table. */
+ *  object on the mosaic op's args and its own palette-preset table. */
 type DealLook = Exclude<DealFill, 'solid'>
 const isDealFill = (v: unknown): v is DealFill => v === 'solid' || v === 'pane' || v === 'modular' || v === 'parcel' || v === 'mosh'
 /** THE precedence order for an implied look — first wins. Shared by create and
@@ -118,13 +121,14 @@ const lookArgs = (a: Record<string, unknown>, look: DealLook): Record<string, un
   a[look] && typeof a[look] === 'object' ? a[look] as Record<string, unknown> : null
 
 /**
- * The ONE rule for which cell fill dealGrid's args imply when no explicit
- * `cellFill` was sent (used by create AND reconfigure):
+ * The ONE rule for which cell fill the mosaic op's args imply when no explicit
+ * `style` (or its `cellFill` alias) was sent (used by create AND reconfigure):
  *   1. a tunables object — pane → modular → parcel → mosh, FIRST wins;
  *   2. else a `palettePreset` whose name lives in one look's table (the four
  *      tables are disjoint), same order;
- *   3. else null (create ⇒ solid; reconfigure ⇒ keep the current fill).
- * An explicit `cellFill` always wins over all of this (see resolveDealFill).
+ *   3. else null (create ⇒ the default style, modular; reconfigure ⇒ keep the
+ *      current fill).
+ * An explicit style always wins over all of this (see resolveDealFill).
  */
 export function impliedDealFill(a: Record<string, unknown>): DealFill | null {
   for (const look of DEAL_LOOK_ORDER) if (lookArgs(a, look)) return look
@@ -136,11 +140,12 @@ export function impliedDealFill(a: Record<string, unknown>): DealFill | null {
  *  preset that names nothing there (wrong table, typo, or a fill with no table) is
  *  an error, never a silent no-op or a recolour of a look that isn't showing. */
 function resolveDealFill(a: Record<string, unknown>, current: DealFill): { ok: true; fill: DealFill; preset: string | null } | { ok: false; detail: string } {
-  const fill: DealFill = isDealFill(a.cellFill) ? a.cellFill : (impliedDealFill(a) ?? current)
+  const explicit = mosaicStyleFromArgs(a)
+  const fill: DealFill = explicit ? cellFillOfStyle(explicit) : (impliedDealFill(a) ?? current)
   if (a.palettePreset == null) return { ok: true, fill, preset: null }
   const raw = String(a.palettePreset)
   if (fill === 'solid') {
-    return { ok: false, detail: `palettePreset "${raw}" needs a look — send cellFill "pane" | "modular" | "parcel" | "mosh" (solid uses vocab)` }
+    return { ok: false, detail: `palettePreset "${raw}" needs a style with inks of its own — send style "pane" | "modular" | "parcel" | "mosh" (tiles uses vocab)` }
   }
   const preset = presetNameIn(fill, raw)
   if (!preset) return { ok: false, detail: `unknown palettePreset "${raw}" for ${fill}; options: ${DEAL_PRESET_NAMES[fill].join(' | ')}` }
@@ -155,7 +160,7 @@ function lookPatch<T>(a: Record<string, unknown>, look: DealLook, presetPatch: P
   if (!presetPatch && !explicit) return null
   return { ...(presetPatch ?? {}), ...(explicit ?? {}) }
 }
-/** All four looks' patches for one dealGrid call, given the resolved fill + preset. */
+/** All four looks' patches for one mosaic call, given the resolved fill + preset. */
 function dealLookPatches(a: Record<string, unknown>, fill: DealFill, preset: string | null) {
   const on = (look: DealLook) => fill === look && preset ? preset : null
   const paneName = on('pane'); const modName = on('modular'); const parName = on('parcel'); const moshName = on('mosh')
@@ -250,7 +255,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setLayerDepth', hint: 'Change a layer\'s stacking depth (z-order). target = layer id; args: { to: "back" | "front" }. "back" puts it BEHIND every other layer including the connected/wired image — use this for "put the headline BEHIND the image". "front" brings it to the top.' },
   { op: 'setBackground', hint: 'Set the FRAME background that sits behind every layer. args: { paint } — a "#RRGGBB" colour, a gradient object, or "none". Use for "make the background blue / a sunset gradient".' },
   { op: 'setGrid', hint: 'Set the layout grid on a Frame — a Swiss-style guide layers can snap to (editor-only, never baked/exported). args: { patch: {...}, generate? }. patch keys: mode ("off" | "explicit" | "generated"), baseModule (0..1 of canvas width, the alignment unit), gutter (0..1), margin (0..1), columns/rows (explicit mode counts), gen: { colRange/rowRange ([min,max] column/row counts, generated mode), regularity (0..1: 0 = loose/free spacing, 1 = strict/equal), merge (bool, merge adjacent cells into larger regions), mergeMaxSpan (max cells a merged region spans), symmetry ("none" | "mirror"), seed (integer) }, overlay (bool, show the guide lines). Omitted keys keep their current value. generate:true (or reroll:true) re-rolls a fresh random seed for a new generated-grid variation; switching mode to "generated" without giving gen.seed also rolls a fresh seed. This is what "add a layout grid", "give it a 6-column grid", "generate a new grid variation", "re-roll the grid" mean.' },
-  { op: 'dealGrid', hint: `Deal a decorative modular grid as ONE self-painting layer: every cell gets a fill from a weighted palette, keyed by a seed. This is a dense generative grid ("mosaic", "modular grid", "tiled pattern", "oddgrid") as a single layer that BAKES into the render (unlike setGrid's editor-only guide). To CREATE a new deal, omit target; to reconfigure an existing one, target = the deal layer's id. A one-word LOOK ("pane", "modular", "parcel", "mosh") is a cellFill — send cellFill or the matching empty tunables object (pane:{} / modular:{} / parcel:{} / mosh:{}) plus a palettePreset if a named colour set is wanted; there is no separate look/style word — a look IS a cellFill (+ palettePreset). An explicit cellFill always wins; without one, the first tunables object in the order pane → modular → parcel → mosh implies the look, then a palettePreset name does. palettePreset is checked against the FINAL look's table only — a name from another look's table is an error, not a silent recolour. A new deal fills the whole frame (w 1, h = the frame aspect). args: { vocab ("brand" | "mono" | "warm" | "cool" — the palette), density (0..1, fraction of cells filled; the rest are transparent; default 1 = every cell), cellInset (0..0.4, gap inset per cell), cellFill ("solid" | "pane" | "modular" | "parcel" | "mosh"; default "solid"; "pane" = the Pane look: rows of flush panes with their OWN row-masonry — grid/density/cellInset are ignored — each pane a two-colour ramp running corner to corner or edge to edge, inks drawn by distance along the palette; "modular" = the Modular look: a flush grid of modules, some merged 2×2 / 2-wide / 2-tall, over a background colour — each module empty, solid, a block field, a corner dot cluster, a fine line grid or a two-colour ramp — with faint hairlines over the whole grid; grid/density/cellInset are ignored; "parcel" = the Parcel look: a coarse two-tone field of chunky ink blocks on a ground colour — every cell is one or the other, hard cell edges, no gutter — with a few ragged rectangular clusters of fine hairline lattices ("survey grids") floating on top that darken whatever they cross; grid/density/cellInset are ignored; "mosh" = the Mosh look: a corrupted signal / datamosh / glitch texture — the frame stacked as uneven horizontal bands, each a different failure: confetti (short horizontal runs of colour), mosaic (coarse blocks cut by hard diagonal tears that go dark), smear (long thin runs held far past where they should change), scan (full-width rows of one colour, some cut by a short bright segment) and chevron (a herringbone motif) — every mark a hard-edged rect snapped to a column grid, in full-strength colour-cube inks with plenty of near-black dead patches; grid/density/cellInset are ignored), pane ({ rows (1..8, default 3), cells (nominal cells per row, 1..12, default 6; each row varies it), vary (0..1 how uneven rows/cells are, default 0.55), diag (0..1 share of corner-to-corner ramps vs flat ones, default 0.45), soft (0..1 how much of each pane is the blend; 0 = hard line, default 0.85), spread (0..1 how far apart in the palette the two inks are; 0 = neighbours, default 0.55), inks (ordered hex list the spread walks — the ORDER is the look; omitted = the tool's first palette; fewer than 2 = the vocab palette) } — sending pane implies cellFill "pane"; palettePreset also takes a Pane palette by name: "Hot pink" | "Electric" | "Deep" | "Sorbet" | "Candy" — the tool's five ordered 8-ink lists; explicit pane.inks override it; implies cellFill "pane"), modular ({ gcols (module columns 2..12, default 6; rows follow the frame aspect), unit (sub-cells per module side 2..8, default 4), merge (0..1 how often modules merge, default 0.45), w ({ empty, solid, blocks, dots, lines, grad } relative weights 0..50, defaults 34/20/24/14/12/10 — empty is most common on purpose), blockFill (0..1 coverage of block/dot fields, default 0.5), dot (0..1 dot diameter within its sub-cell, default 0.62), rules (0..1 hairline opacity over the whole grid, default 0.22; 0 = none), ruleW (1..3 line width, default 1), bg (hex background), rule (hex hairline colour), inks (ordered hex list; omitted = the vocab palette) } — sending modular implies cellFill "modular"), palettePreset ("Digital" | "Riso" | "Bloom" | "Heat" | "Mono" — a named Modular colour set: background + hairline colour + 4 inks; explicit modular.bg/rule/inks override it; also implies cellFill "modular"), parcel ({ cells (grid width in cells 8..40, default 16; rows follow the frame aspect), cover (0..1 how much of the field is ink, default 0.5), chunk (0.5..3 block scale — bigger = bigger blobs, default 1), grids (0..8 how many survey grids float on top, default 4), blend ("multiply" | "normal"; multiply = the hairlines darken ink and ground alike, default), ground (hex ground colour), ink (hex block colour), hairline (hex survey-line colour) } — sending parcel implies cellFill "parcel"; palettePreset also takes a Parcel triple by name: "Lime on grey" | "Blue on cream" | "Acid on black" | "Orange on cream" | "Cyan on stone" | "Blue on olive" — ground + ink + hairline; explicit parcel colours override it; implies cellFill "parcel"), mosh ({ bands (1..8 how many horizontal bands, default 6), cols (24..300 cells across — everything snaps to these columns, default 150), mix (0..1 how much of the palette each band draws from, default 0.62), tears (0..1 how many diagonal tears cut the mosaic bands, default 0.55; 0 = none), runs (0..1 how long the smear bands hold a value, default 0.5), bright (0..1 how often the bright ink cuts in — white cells in smears, white segments across scan rows — default 0.3), inks (ordered hex list of 8 full-strength inks; inks[1] is the bright one; omitted = the pure colour cube) } — sending mosh implies cellFill "mosh"; palettePreset also takes a Mosh cube by name: "Pure cube" | "Soft cube" | "Print cube" | "Warm cube" | "Cool cube" — 8 inks; explicit mosh.inks override it; implies cellFill "mosh"), grid ({ colRange:[min,max], rowRange:[min,max], regularity (0..1), merge (bool), symmetry ("none"|"mirror") } — the cell layout; omitted keeps the current/frame grid), seed (integer, the variation), generate (bool — re-roll a fresh seed for a new variation), id? (choose one to target it later) }. "make a colourful mosaic", "deal a warm modular grid", "re-roll the pattern", "sparser grid" all mean this.` },
+  { op: 'mosaic', hint: `Add a MOSAIC — a generative composition element (playgrnd-style: a whole dense pattern as ONE self-painting layer that BAKES into the render) — or restyle one. This is what "make a colourful mosaic", "add a modular grid", "a glitchy texture", "deal a warm grid", "re-roll the pattern", "sparser tiles" mean. To CREATE a new mosaic, omit target (it fills the whole frame: w 1, h = the frame aspect; default style modular); to restyle or reconfigure an existing one, target = the mosaic layer's id (its box is left alone). style (the plain word for which composition it is): "tiles" (the seeded grid itself: every kept cell one flat fill from a palette — vocab, density and cellInset apply only here) | "pane" (rows of flush panes, each a two-colour ramp running corner to corner or edge to edge, inks drawn by distance along the palette) | "modular" (a flush grid of modules, some merged 2×2 / 2-wide / 2-tall, over a background colour — each module empty, solid, a block field, a corner dot cluster, a fine line grid or a two-colour ramp — with faint hairlines over the whole grid) | "parcel" (a coarse two-tone field of chunky ink blocks on a ground colour — every cell one or the other, hard edges, no gutter — with a few ragged rectangular clusters of fine hairline lattices, "survey grids", floating on top and darkening what they cross) | "mosh" (a corrupted signal / datamosh / glitch texture — the frame stacked as uneven horizontal bands, each a different failure: confetti runs, coarse mosaic blocks cut by hard diagonal tears that go dark, long thin smears, full-width scan rows some cut by a short bright segment, a chevron herringbone — every mark a hard-edged rect snapped to a column grid, in full-strength colour-cube inks with near-black dead patches). cellFill is accepted as an alias of style. An explicit style always wins; without one, the first tunables object in the order pane → modular → parcel → mosh implies the style, then a palettePreset name does; a create with none of those is modular. palettePreset is checked against the FINAL style's table only — a name from another style's table is an error, not a silent recolour; tiles has no presets (it uses vocab). args: { style (see above), vocab ("brand" | "mono" | "warm" | "cool" — the palette tiles draws from; also what pane / modular draw from when they have no inks of their own), density (0..1, fraction of tiles filled; the rest are transparent; default 1), cellInset (0..0.4, gap inset per tile), pane ({ rows (1..8, default 3), cells (nominal cells per row, 1..12, default 6; each row varies it), vary (0..1 how uneven rows/cells are, default 0.55), diag (0..1 share of corner-to-corner ramps vs flat ones, default 0.45), soft (0..1 how much of each pane is the blend; 0 = hard line, default 0.85), spread (0..1 how far apart in the palette the two inks are; 0 = neighbours, default 0.55), inks (ordered hex list the spread walks — the ORDER is the look; omitted = the tool's first palette; fewer than 2 = the vocab palette) } — sending pane implies style "pane"; palettePreset also takes a Pane palette by name: "Hot pink" | "Electric" | "Deep" | "Sorbet" | "Candy" — five ordered 8-ink lists; explicit pane.inks override it), modular ({ gcols (module columns 2..12, default 6; rows follow the frame aspect), unit (sub-cells per module side 2..8, default 4), merge (0..1 how often modules merge, default 0.45), w ({ empty, solid, blocks, dots, lines, grad } relative weights 0..50, defaults 34/20/24/14/12/10 — empty is most common on purpose), blockFill (0..1 coverage of block/dot fields, default 0.5), dot (0..1 dot diameter within its sub-cell, default 0.62), rules (0..1 hairline opacity over the whole grid, default 0.22; 0 = none), ruleW (1..3 line width, default 1), bg (hex background), rule (hex hairline colour), inks (ordered hex list; omitted = the vocab palette) } — sending modular implies style "modular"; palettePreset: "Digital" | "Riso" | "Bloom" | "Heat" | "Mono" — background + hairline colour + 4 inks; explicit modular.bg/rule/inks override it), parcel ({ cells (grid width in cells 8..40, default 16; rows follow the frame aspect), cover (0..1 how much of the field is ink, default 0.5), chunk (0.5..3 block scale — bigger = bigger blobs, default 1), grids (0..8 how many survey grids float on top, default 4), blend ("multiply" | "normal"; multiply = the hairlines darken ink and ground alike, default), ground (hex ground colour), ink (hex block colour), hairline (hex survey-line colour) } — sending parcel implies style "parcel"; palettePreset: "Lime on grey" | "Blue on cream" | "Acid on black" | "Orange on cream" | "Cyan on stone" | "Blue on olive" — ground + ink + hairline; explicit parcel colours override it), mosh ({ bands (1..8 horizontal bands, default 6), cols (24..300 cells across — everything snaps to these columns, default 150), mix (0..1 how much of the palette each band draws from, default 0.62), tears (0..1 how many diagonal tears cut the mosaic bands, default 0.55; 0 = none), runs (0..1 how long the smear bands hold a value, default 0.5), bright (0..1 how often the bright ink cuts in, default 0.3), inks (ordered hex list of 8 full-strength inks; inks[1] is the bright one; omitted = the pure colour cube) } — sending mosh implies style "mosh"; palettePreset: "Pure cube" | "Soft cube" | "Print cube" | "Warm cube" | "Cool cube" — 8 inks; explicit mosh.inks override it), grid ({ colRange:[min,max], rowRange:[min,max], regularity (0..1), merge (bool), symmetry ("none"|"mirror") } — the tiles layout; omitted keeps the current/frame grid), seed (integer, the variation — every style reads it), generate (bool — re-roll a fresh seed for a new variation; the style, box and dials are kept), id? (choose one to target it later) }.` },
   { op: 'generateImage', hint: 'Generate a PHOTOGRAPHIC/illustrative AI image and add it as a layer — "generate a picture of a dog", "add a city photo". Not for gradients/colours (use setBackground/setFill). args: { prompt (vivid), aspectRatio? }.' },
   { op: 'removeImageBackground', hint: 'Cut out the subject of an existing IMAGE layer (transparent background). target = image layer id.' },
   { op: 'editImage', hint: 'Edit an existing IMAGE layer from an instruction (Flux Kontext) — "make it brighter", "change the sky". target = image layer id; args: { instruction }.' },
@@ -293,16 +298,20 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
     else if (l.kind === 'ellipse') { cur.w = l.w; cur.h = l.h; cur.fill = paintLabel(l.fill); if (l.stroke) { cur.stroke = paintLabel(l.stroke); cur.strokeWidth = l.strokeWidth } }
     else if (l.kind === 'line') { cur.length = l.w; cur.stroke = paintLabel(l.stroke); cur.strokeWidth = l.strokeWidth }
     else if (l.kind === 'path') { cur.fill = paintLabel(l.fill); if (l.shapeId && shapeById(l.shapeId)) cur.shape = l.shapeId }
-    // A deal reads back as its look + that look's tunables (preset name instead
-    // of ink arrays) so "sparser", "re-roll", "make it Riso" are answerable.
+    // A Mosaic (kind 'deal' internally) reads back as its style word + that
+    // style's tunables (preset name instead of ink arrays) so "sparser",
+    // "re-roll", "make it Riso" are answerable. `style` is the same vocabulary the
+    // mosaic op's args take (tiles for the internal 'solid').
     else if (l.kind === 'deal') {
       const fill: DealFill = l.cellFill ?? 'solid'
-      cur.cellFill = fill; cur.vocab = l.vocab; cur.density = l.density; cur.cellInset = l.cellInset
+      cur.style = mosaicStyleOf(fill); cur.vocab = l.vocab; cur.density = l.density; cur.cellInset = l.cellInset
       cur.seed = l.grid.gen.seed
       if (fill !== 'solid') cur[fill] = describeDealLook(l, fill)
     }
     if (l.visible === false) cur.hidden = true
-    return { id: l.id, label: l.kind === 'text' ? `“${l.text}”` : l.kind, type: l.kind, current: cur }
+    // The agent never sees the internal kind 'deal': that layer is a "mosaic".
+    const type = l.kind === 'deal' ? 'mosaic' : l.kind
+    return { id: l.id, label: l.kind === 'text' ? `“${l.text}”` : type, type, current: cur }
   })
   // Placed frame-template copies, addressable by instanceId for setTemplateSlot/
   // freezeTemplate — kept separate from the layer objects above since the agent
@@ -490,20 +499,24 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       if (reroll || enteringGeneratedNoSeed) merged.gen = { ...merged.gen, seed: Math.floor(Math.random() * 9999) + 1 }
       return { ok: true, template: { ...state, grid: merged }, inverse: snapshot() }
     }
+    // `dealGrid` is the op's old name — kept as a silent alias so a model (or a
+    // saved plan) that learned it still lands on the same handler. Not listed in
+    // COMPOSITOR_COMMANDS: the menu only teaches `mosaic`.
+    case 'mosaic':
     case 'dealGrid': {
       const a = (cmd.args ?? {}) as Record<string, unknown>
       const gridPatch = (a.grid ?? {}) as Partial<FrameGrid['gen']> & Partial<FrameGrid>
       const reroll = a.generate === true || a.reroll === true
       const target = cmd.target ? findLayer(state, cmd.target) : undefined
-      if (cmd.target && (!target || target.kind !== 'deal')) return { ok: false, reason: 'invalid', detail: `no deal layer '${String(cmd.target)}'` }
+      if (cmd.target && (!target || target.kind !== 'deal')) return { ok: false, reason: 'invalid', detail: `no mosaic layer '${String(cmd.target)}'` }
 
       if (target && target.kind === 'deal') {
-        // Reconfigure an existing deal in place.
+        // Reconfigure (restyle) an existing mosaic in place.
         const d = target as unknown as Record<string, unknown>
         if (a.vocab != null) d.vocab = normalizeVocab(a.vocab)
         if (typeof a.density === 'number') d.density = clamp(a.density, 0, 1, 1)
         if (typeof a.cellInset === 'number') d.cellInset = clamp(a.cellInset, 0, 0.4, 0)
-        // The fill is decided ONCE, by the same rule create uses (explicit cellFill
+        // The fill is decided ONCE, by the same rule create uses (explicit style
         // > first tunables object in pane → modular → parcel → mosh > a preset's
         // table > keep the current fill); the palettePreset resolves against that
         // final fill's table only. Every look's tunables the model sent still merge
@@ -526,10 +539,11 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
         return { ok: true, template: state, inverse: snapshot() }
       }
 
-      // Create a new deal filling the frame, seeded from the frame's current grid.
-      const id = typeof a.id === 'string' && a.id ? a.id : `l_${state.layers.length + 1}_deal`
+      // Create a new mosaic filling the frame, seeded from the frame's current grid.
+      // Default style: modular — the same default the toolbar stamp uses.
+      const id = typeof a.id === 'string' && a.id ? a.id : `l_${state.layers.length + 1}_mosaic`
       if (state.layers.some(l => l.id === id)) return { ok: false, reason: 'invalid', detail: `layer id '${id}' already exists` }
-      const resolved = resolveDealFill(a, 'solid')
+      const resolved = resolveDealFill(a, cellFillOfStyle(DEFAULT_MOSAIC_STYLE))
       if (!resolved.ok) return { ok: false, reason: 'invalid', detail: resolved.detail }
       const patches = dealLookPatches(a, resolved.fill, resolved.preset)
       const base = readGrid(state.grid ? { sailor_localGrid: state.grid } : undefined)
@@ -539,7 +553,7 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       if (typeof a.seed === 'number') grid.gen.seed = Math.round(a.seed)
       if (reroll) grid.gen.seed = Math.floor(Math.random() * 9999) + 1
       // Boxes are width-normalized, so filling the frame is h = aspect (H/W) —
-      // the same `h: aspect` the UI's Deal button uses; a square frame is 1.
+      // the same `h: aspect` the toolbar's Mosaic stamp uses; a square frame is 1.
       const aspect = typeof state.aspect === 'number' && Number.isFinite(state.aspect) && state.aspect > 0 ? state.aspect : 1
       const layer = {
         id, kind: 'deal', x: 0.5, y: 0.5, rotation: 0, opacity: 1,

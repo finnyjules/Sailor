@@ -418,9 +418,9 @@ describe('agent dealGrid parcel', () => {
     expect(l.cellFill).toBe('parcel')
     expect(l.parcel).toEqual({ ...defaultParcel(), cells: 24 })
   })
-  it('defaults: solid fill, parcel at the source defaults', () => {
+  it('defaults: a bare create is the Mosaic default (modular); parcel at the source defaults', () => {
     const l = (applyCompositorCommand(baseState(), { op: 'dealGrid', args: { id: 'd1' } }) as any).template.layers[0]
-    expect(l.cellFill).toBe('solid')
+    expect(l.cellFill).toBe('modular')
     expect(l.parcel).toEqual(defaultParcel())
     expect(l.modular).toBeDefined(); expect(l.pane).toBeDefined()
   })

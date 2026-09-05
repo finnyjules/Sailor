@@ -492,9 +492,9 @@ describe('agent dealGrid pane', () => {
     expect(l.cellFill).toBe('pane')
     expect(l.pane).toEqual({ ...defaultPane(), rows: 4 })
   })
-  it('defaults: solid fill, pane at the source defaults', () => {
+  it('defaults: a bare create is the Mosaic default (modular); pane at the source defaults', () => {
     const l = (applyCompositorCommand(baseState(), { op: 'dealGrid', args: { id: 'd1' } }) as any).template.layers[0]
-    expect(l.cellFill).toBe('solid')
+    expect(l.cellFill).toBe('modular')
     expect(l.pane).toEqual(defaultPane())
   })
   it('sending pane implies the Pane fill; reconfigure merges and clamps', () => {

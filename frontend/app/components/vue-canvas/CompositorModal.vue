@@ -13,6 +13,7 @@ import {
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
 } from '~/composables/useCompositorLayers'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
+import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf } from '~/lib/compositor/mosaic'
 import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
@@ -737,20 +738,21 @@ const moshPreset = computed(() => {
   if (!l || l.kind !== 'deal') return ''
   return moshPresetOf((l as DealLayer).mosh ?? defaultMosh()) ?? ''
 })
-/** The five cell fills as the segmented control's plain labels. */
-const DEAL_FILL_LABELS: readonly { fill: NonNullable<DealLayer['cellFill']>; label: string }[] = [
-  { fill: 'solid', label: 'Solid' }, { fill: 'pane', label: 'Pane' }, { fill: 'modular', label: 'Modular' }, { fill: 'parcel', label: 'Parcel' }, { fill: 'mosh', label: 'Mosh' },
-]
-const dealFillLabel = (layer: DealLayer) => DEAL_FILL_LABELS.find(f => f.fill === layer.cellFill)?.label ?? 'Solid'
-/** Whether the selected deal's vocabulary changes its look (gates the Palette
- *  control — Parcel / Mosh / a Pane with its own inks never read it). */
+/** The Mosaic's Style option currently showing (the style table lives in
+ *  lib/compositor/mosaic — one vocabulary for the inspector, the agent and the specs). */
+const mosaicStyleLabel = (layer: DealLayer) => mosaicLabelOf(layer.cellFill)
+/** Whether the selected mosaic's vocabulary changes its look (gates the vocabulary
+ *  Palette control — Parcel / Mosh / a Pane with its own inks never read it). */
 const vocabDrivesLook = computed(() => {
   const l = selectedLocal.value
   return !!l && l.kind === 'deal' && dealVocabDrivesLook(l as DealLayer)
 })
-/** Switch a deal's cell fill, seeding that fill's params with the defaults when absent. */
-function setDealFill(layer: DealLayer, label: string) {
-  const fill = DEAL_FILL_LABELS.find(f => f.label === label)?.fill ?? 'solid'
+/** Switch a Mosaic's style (its cellFill), seeding that style's params with the
+ *  defaults when absent. The layer, its box and its seed (grid.gen.seed) are kept —
+ *  only the composition changes, so "New variation" history and placement survive
+ *  a style hop. One history step via setLocal. */
+function setMosaicStyle(layer: DealLayer, label: string) {
+  const fill = cellFillOfLabel(label)
   const patch: Partial<DealLayer> = { cellFill: fill }
   if (fill === 'pane') patch.pane = layer.pane ?? defaultPane()
   if (fill === 'modular') patch.modular = layer.modular ?? defaultModular()
@@ -6444,7 +6446,7 @@ onUnmounted(() => {
       <template v-else-if="selectedLocal">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <component :is="kindIcon(selectedLocal.kind)" class="size-3.5 text-white/60" />
-          <span class="text-sm font-medium capitalize">{{ selectedLocal.kind }}</span>
+          <span class="text-sm font-medium capitalize">{{ selectedLocal.kind === 'deal' ? 'Mosaic' : selectedLocal.kind }}</span>
           <div class="ml-auto flex items-center gap-1">
             <button v-if="gridConfig.mode !== 'off'" class="text-white/40 hover:text-white/80 p-1" title="Re-snap to grid" @click="resnapSelected"><LayoutGrid class="size-3.5" /></button>
             <button class="text-white/40 hover:text-white/80 p-1" title="Bring forward" @click="moveStackZ(localKey(selectedLocal.id), 1)"><ArrowUp class="size-3.5" /></button>
@@ -6828,30 +6830,17 @@ onUnmounted(() => {
             </div>
           </template>
 
-          <!-- Deal (generative grid): the vocabulary + density + inset + seed drive
-               the whole self-painting grid. Regularity/merge live in the doc Grid
-               section; this deal carries its OWN grid seeded from it. -->
+          <!-- Mosaic (kind 'deal'): Style first — which composition this layer is —
+               then that style's dials, its Palette, and New variation. The layer
+               carries its OWN grid (Tiles reads it; the other styles have their own
+               layouts and only read its seed). -->
           <template v-if="selectedLocal.kind === 'deal'">
-            <!-- The vocabulary only shows when something reads it: Solid always,
-                 Modular / Pane only while they have no inks of their own. Parcel
-                 and Mosh carry their own colours (see dealVocabDrivesLook). -->
-            <div v-if="vocabDrivesLook" class="mt-2">
-              <div class="panel-label mb-1.5">Palette</div>
-              <StudioSegmented :options="DEAL_VOCABS as any" :model-value="(selectedLocal as any).vocab"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { vocab: v })" />
-              <p v-if="(selectedLocal as any).cellFill && (selectedLocal as any).cellFill !== 'solid'" class="mt-1 text-[10px] text-white/30 leading-snug">This look has no inks of its own, so it draws from this palette.</p>
-            </div>
-            <div class="mt-2">
-              <div class="panel-label mb-1.5">Cell fill</div>
-              <StudioSegmented :options="DEAL_FILL_LABELS.map(f => f.label)"
-                :model-value="dealFillLabel(selectedLocal as DealLayer)"
-                @update:model-value="(v: any) => setDealFill(selectedLocal as DealLayer, v)" />
-            </div>
+            <StudioSelect label="Style" :options="MOSAIC_STYLE_LABELS as any"
+              :model-value="mosaicStyleLabel(selectedLocal as DealLayer)"
+              @update:model-value="(v: any) => setMosaicStyle(selectedLocal as DealLayer, v)" />
             <!-- Mosh has its OWN layout (horizontal bands of glitch), so the grid controls
                  (density / inset / regularity / merge) don't apply to it. -->
             <div v-if="(selectedLocal as any).cellFill === 'mosh'" class="mt-2 flex flex-col gap-1.5">
-              <StudioSelect label="Palette preset" :options="MOSH_PRESET_NAMES as any"
-                :model-value="moshPreset" @update:model-value="(v: any) => applyMoshPreset(selectedLocal as DealLayer, v)" />
               <StudioSlider label="Bands" :min="MOSH_LIMITS.bands[0]" :max="MOSH_LIMITS.bands[1]" :step="1" :bindable="false"
                 :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).bands"
                 @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { bands: Math.round(v) })" />
@@ -6870,13 +6859,13 @@ onUnmounted(() => {
               <StudioSlider label="Bright" :min="MOSH_LIMITS.bright[0]" :max="MOSH_LIMITS.bright[1]" :step="0.01" :bindable="false"
                 :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).bright"
                 @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { bright: v })" />
+              <StudioSelect label="Palette" :options="MOSH_PRESET_NAMES as any"
+                :model-value="moshPreset" @update:model-value="(v: any) => applyMoshPreset(selectedLocal as DealLayer, v)" />
             </div>
             <!-- Parcel has its OWN layout (a coarse two-tone block field with survey grids
                  on top), so the grid controls (density / inset / regularity / merge) don't
                  apply to it. -->
             <div v-else-if="(selectedLocal as any).cellFill === 'parcel'" class="mt-2 flex flex-col gap-1.5">
-              <StudioSelect label="Palette preset" :options="PARCEL_PRESET_NAMES as any"
-                :model-value="parcelPreset" @update:model-value="(v: any) => applyParcelPreset(selectedLocal as DealLayer, v)" />
               <div class="flex items-center gap-2">
                 <div class="flex items-center gap-1.5 min-w-0 flex-1">
                   <span class="text-[11px] text-white/55">Ground</span>
@@ -6912,15 +6901,12 @@ onUnmounted(() => {
                   :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).blend === 'normal' ? 'Normal' : 'Multiply'"
                   @update:model-value="(v: any) => patchParcel(selectedLocal as DealLayer, { blend: v === 'Normal' ? 'normal' : 'multiply' })" />
               </div>
+              <StudioSelect label="Palette" :options="PARCEL_PRESET_NAMES as any"
+                :model-value="parcelPreset" @update:model-value="(v: any) => applyParcelPreset(selectedLocal as DealLayer, v)" />
             </div>
             <!-- Modular has its OWN layout (a merged module grid over a background), so the
                  grid controls (density / inset / regularity / merge) don't apply to it. -->
             <div v-else-if="(selectedLocal as any).cellFill === 'modular'" class="mt-2 flex flex-col gap-1.5">
-              <div>
-                <div class="panel-label mb-1.5">Palette preset</div>
-                <StudioSegmented :options="MODULAR_PRESET_NAMES as any" :model-value="modularPreset"
-                  @update:model-value="(v: any) => applyModularPreset(selectedLocal as DealLayer, v)" />
-              </div>
               <div class="flex items-center gap-2">
                 <div class="flex items-center gap-1.5 min-w-0 flex-1">
                   <span class="text-[11px] text-white/55">Background</span>
@@ -6959,12 +6945,15 @@ onUnmounted(() => {
               <StudioSlider label="Rule width" :min="MODULAR_LIMITS.ruleW[0]" :max="MODULAR_LIMITS.ruleW[1]" :step="0.5" :bindable="false"
                 :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).ruleW"
                 @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { ruleW: v })" />
+              <div>
+                <div class="panel-label mb-1.5">Palette</div>
+                <StudioSegmented :options="MODULAR_PRESET_NAMES as any" :model-value="modularPreset"
+                  @update:model-value="(v: any) => applyModularPreset(selectedLocal as DealLayer, v)" />
+              </div>
             </div>
             <!-- Pane has its OWN layout (row masonry, every cell flush and filled), so the
                  grid controls (density / inset / regularity / merge) don't apply to it. -->
             <div v-else-if="(selectedLocal as any).cellFill === 'pane'" class="mt-2 flex flex-col gap-1.5">
-              <StudioSelect label="Palette preset" :options="PANE_PRESET_NAMES as any"
-                :model-value="panePreset" @update:model-value="(v: any) => applyPanePreset(selectedLocal as DealLayer, v)" />
               <StudioSlider label="Rows" :min="PANE_LIMITS.rows[0]" :max="PANE_LIMITS.rows[1]" :step="1" :bindable="false"
                 :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).rows"
                 @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { rows: Math.round(v) })" />
@@ -6983,7 +6972,10 @@ onUnmounted(() => {
               <StudioSlider label="Spread" :min="0" :max="1" :step="0.01" :bindable="false"
                 :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).spread"
                 @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { spread: v })" />
+              <StudioSelect label="Palette" :options="PANE_PRESET_NAMES as any"
+                :model-value="panePreset" @update:model-value="(v: any) => applyPanePreset(selectedLocal as DealLayer, v)" />
             </div>
+            <!-- Tiles: the seeded grid itself — density / inset / regularity / merge. -->
             <div v-else class="mt-2 flex flex-col gap-1.5">
               <StudioSlider label="Density" :min="0.05" :max="1" :step="0.02" :bindable="false"
                 :model-value="(selectedLocal as any).density"
@@ -6996,6 +6988,15 @@ onUnmounted(() => {
                 @update:model-value="(v: number) => patchDealGrid(selectedLocal as DealLayer, { gen: { ...(selectedLocal as DealLayer).grid.gen, regularity: v } })" />
               <StudioSwitch label="Merge cells" :model-value="(selectedLocal as DealLayer).grid.gen.merge"
                 @update:model-value="(v: boolean) => patchDealGrid(selectedLocal as DealLayer, { gen: { ...(selectedLocal as DealLayer).grid.gen, merge: v } })" />
+            </div>
+            <!-- The vocabulary palette only shows when something reads it: Tiles always,
+                 Modular / Pane only while they have no inks of their own. Parcel and
+                 Mosh carry their own colours (see dealVocabDrivesLook). -->
+            <div v-if="vocabDrivesLook" class="mt-2">
+              <div class="panel-label mb-1.5">Palette</div>
+              <StudioSegmented :options="DEAL_VOCABS as any" :model-value="(selectedLocal as any).vocab"
+                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { vocab: v })" />
+              <p v-if="(selectedLocal as any).cellFill && (selectedLocal as any).cellFill !== 'solid'" class="mt-1 text-[10px] text-white/30 leading-snug">This style has no inks of its own, so it draws from this palette.</p>
             </div>
             <div class="mt-2 flex items-center gap-2">
               <StudioButton variant="secondary" @click="rerollDeal(selectedLocal as DealLayer)">New variation</StudioButton>

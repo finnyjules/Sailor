@@ -596,9 +596,9 @@ describe('agent dealGrid mosh', () => {
     expect(l.cellFill).toBe('mosh')
     expect(l.mosh).toEqual({ ...defaultMosh(), bands: 4 })
   })
-  it('defaults: solid fill, mosh at the source defaults alongside the other fills', () => {
+  it('defaults: a bare create is the Mosaic default (modular); mosh at the source defaults alongside the other fills', () => {
     const l = (applyCompositorCommand(baseState(), { op: 'dealGrid', args: { id: 'd1' } }) as any).template.layers[0]
-    expect(l.cellFill).toBe('solid')
+    expect(l.cellFill).toBe('modular')
     expect(l.mosh).toEqual(defaultMosh())
     expect(l.parcel).toBeDefined(); expect(l.modular).toBeDefined(); expect(l.pane).toBeDefined()
   })
