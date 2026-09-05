@@ -273,6 +273,17 @@ describe('deal layer render (headless)', () => {
     }
   })
 
+  // Fix 3: a partial carve object (hand-edited or imported frame) reaching paint with
+  // no `inks` must not throw. The deal branch used to hand paintCarve the RAW layer's
+  // `carve.inks` (undefined here), which threw at `palette.length` inside paintCarve
+  // and took the whole frame down; it must now go through normalizeCarve first.
+  it('a carve layer with a partial params object and no inks renders without throwing', async () => {
+    mainFillRects.length = 0; drawImages.length = 0
+    await drawDeal(dealLayer({ cellFill: 'carve', carve: { cuts: 3 } }), 400, 400)
+    // Something actually painted (the ground rect at least) — not a silent no-op.
+    expect(mainFillRects.length + drawImages.length).toBeGreaterThan(0)
+  })
+
   it('the shader styles paint ONE box-sized rect through resolvePaint, in box space, inside the clip', async () => {
     // No shader catalog in this harness, so resolvePaint takes its documented fallback
     // (the spec's input paint) — the point here is the PATH: clip to the box, then one

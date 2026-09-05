@@ -79,6 +79,7 @@
  * box and calls `paintCarve`.
  */
 import { mulberry32, hashSeed } from '~/lib/spacetype/rng'
+import { LruCache } from '~/lib/compositor/silhouetteCache'
 
 /** The five treatments a panel can wear. */
 export const CARVE_KINDS = ['flat', 'stripe', 'chev', 'grain', 'grid'] as const
@@ -276,12 +277,19 @@ function hexToRgb(hex: string): [number, number, number] {
  * `panelSeed mod 360`, bent by a slow sine streak across the ramp, roughened by
  * noise that tapers to nothing at both ends of the ramp. Returns RGBA for a
  * `w × h` block; pure, so the whole rule tests without a canvas.
+ *
+ * `cellPx` (buffer/device pixels, default 1 — the old per-device-pixel tooth) is the
+ * noise lattice's tooth: the hash is looked up at `floor(i/cellPx), floor(j/cellPx)`,
+ * not at the raw pixel, so the SAME tooth (in box units) survives any zoom/dpr and any
+ * bake size — see `carveGrainCellPx`, which computes it from the box width so the tooth
+ * always matches the source tool's fixed 2400px export.
  */
-export function carveGrainPixels(w: number, h: number, colA: string, colB: string, grain: number, panelSeed: number): Uint8ClampedArray {
+export function carveGrainPixels(w: number, h: number, colA: string, colB: string, grain: number, panelSeed: number, cellPx = 1): Uint8ClampedArray {
   const W = Math.max(1, Math.round(w)), H = Math.max(1, Math.round(h))
   const out = new Uint8ClampedArray(W * H * 4)
   const ca = hexToRgb(colA), cb = hexToRgb(colB)
   const g = Math.max(0, Math.min(1, grain))
+  const cell = Number.isFinite(cellPx) && cellPx > 0 ? cellPx : 1
   const ang = (panelSeed % 360) * Math.PI / 180
   const ux = Math.cos(ang), uy = Math.sin(ang)
   for (let j = 0, p = 0; j < H; j++) {
@@ -295,13 +303,28 @@ export function carveGrainPixels(w: number, h: number, colA: string, colB: strin
       let gr = ca[1] + (cb[1] - ca[1]) * t
       let bl = ca[2] + (cb[2] - ca[2]) * t
       if (g > 0.002) {
-        const n = (carveHash(i, j, panelSeed) - 0.5) * g * 104 * (1 - Math.abs(t - 0.5) * 1.1)
+        const n = (carveHash(Math.floor(i / cell), Math.floor(j / cell), panelSeed) - 0.5) * g * 104 * (1 - Math.abs(t - 0.5) * 1.1)
         r += n; gr += n; bl += n
       }
       out[p] = r; out[p + 1] = gr; out[p + 2] = bl; out[p + 3] = 255
     }
   }
   return out
+}
+
+/**
+ * C6 device-vs-box fidelity — the grain lattice's tooth, in BUFFER (device) pixels.
+ * The tool renders its export at a fixed 2400px width and its noise is one pixel of
+ * that, so `1/2400` of the box WIDTH is the tooth in box units; multiplying by `scale`
+ * (device px per box unit) turns that into the buffer pixels `carveGrainPixels` needs.
+ * Floored at 1: a lattice finer than one device pixel cannot be resolved anyway, so a
+ * small box (or a low device scale) clamps to the device-pixel tooth rather than going
+ * sub-pixel and losing the noise entirely.
+ */
+export function carveGrainCellPx(scale: number, boxW: number): number {
+  const s = Number.isFinite(scale) && scale > 0 ? scale : 1
+  const w = Number.isFinite(boxW) && boxW > 0 ? boxW : 1
+  return Math.max(1, s * w / 2400)
 }
 
 // ── Rule C: paint ────────────────────────────────────────────────────────────
@@ -345,6 +368,34 @@ function grainCanvas(w: number, h: number, pixels: Uint8ClampedArray): CanvasIma
   return c
 }
 
+/**
+ * Grain panel cache — `carveGrainPixels` is a per-pixel CPU pass (tens of ms at a
+ * typical preview box, ~100ms at the 6 Mpx cap), and every OTHER Mosaic style costs
+ * microseconds. A drag only moves the box, never the panel's own pixels, so keying the
+ * cache on everything that DOES determine those pixels (the panel's sub-seed, the
+ * buffer size, the two inks, the grain amount, and the lattice cell from
+ * `carveGrainCellPx`) makes a drag frame a cache hit. Bounded (insertion-order LRU,
+ * `GRAIN_CACHE_CAP` entries) so a long session never grows it unboundedly — see
+ * `LruCache` (shared with the torn-edge silhouette cache; same shape, same reason).
+ */
+const GRAIN_CACHE_CAP = 64
+const grainPanelCache = new LruCache<CanvasImageSource>(GRAIN_CACHE_CAP)
+
+function grainCanvasKey(gw: number, gh: number, colA: string, colB: string, grain: number, panelSeed: number, cellPx: number): string {
+  return `${gw}x${gh}|${colA}|${colB}|${grain}|${panelSeed}|${cellPx}`
+}
+
+/** Memoized `grainCanvas`: a cache hit skips both `carveGrainPixels` and the
+ *  offscreen canvas allocation entirely. */
+function memoGrainCanvas(gw: number, gh: number, colA: string, colB: string, grain: number, panelSeed: number, cellPx: number): CanvasImageSource | null {
+  const key = grainCanvasKey(gw, gh, colA, colB, grain, panelSeed, cellPx)
+  const hit = grainPanelCache.get(key)
+  if (hit) return hit
+  const img = grainCanvas(gw, gh, carveGrainPixels(gw, gh, colA, colB, grain, panelSeed, cellPx))
+  if (img) grainPanelCache.set(key, img)
+  return img
+}
+
 /** C5 — the 6-point stacked arrow of one chevron row, `dir` deciding which way it
  *  points and `t` its waist. Pure geometry so the shape tests without a canvas. */
 export function carveChevronRow(x: number, y0: number, w: number, step: number, dir: 0 | 1, t = 0.42): [number, number][] {
@@ -372,13 +423,16 @@ export function paintCarve(ctx: CarveCtx, params: CarveParams, palette: readonly
   const gap = p.gap * Math.min(W, H) * 0.02
   // C6's resolution: the device scale, held under the grain budget.
   const grainScale = Math.min(ctxScale(ctx), Math.sqrt(GRAIN_MAX_PIXELS / (W * H)))
+  // C6's tooth: fixed to the box WIDTH (not the device scale alone), so preview and
+  // bake show the same lattice — see carveGrainCellPx.
+  const grainCell = carveGrainCellPx(grainScale, W)
   for (const panel of panels) {
     const x = panel.x * W + gap / 2, y = panel.y * H + gap / 2
     const w = Math.max(1, panel.w * W - gap), h = Math.max(1, panel.h * H - gap)
     const A = pal[panel.a] ?? pal[0]!, B = pal[panel.b] ?? pal[pal.length - 1]!
     if (panel.kind === 'stripe') paintStripePanel(ctx, p, panel, x, y, w, h, A, B)
     else if (panel.kind === 'chev') paintChevronPanel(ctx, panel, x, y, w, h, A, B)
-    else if (panel.kind === 'grain') paintGrainPanel(ctx, p, panel, x, y, w, h, A, B, grainScale)
+    else if (panel.kind === 'grain') paintGrainPanel(ctx, p, panel, x, y, w, h, A, B, grainScale, grainCell)
     else if (panel.kind === 'grid') paintGridPanel(ctx, p, panel, x, y, w, h, A, B)
     else { ctx.fillStyle = A; ctx.fillRect(x, y, w, h) }   // C3 — flat
   }
@@ -435,10 +489,13 @@ function paintChevronPanel(ctx: CarveCtx, panel: CarveTreatedPanel, x: number, y
 }
 
 /** C6 — the photographic panel, through an offscreen canvas so the layer's opacity,
- *  transform and box clip all still apply (putImageData would ignore all three). */
-function paintGrainPanel(ctx: CarveCtx, p: CarveParams, panel: CarveTreatedPanel, x: number, y: number, w: number, h: number, A: string, B: string, scale: number) {
+ *  transform and box clip all still apply (putImageData would ignore all three).
+ *  `cellPx` is the grain lattice tooth in buffer pixels (carveGrainCellPx), and the
+ *  whole canvas is memoized (memoGrainCanvas) since a drag only moves the box, never
+ *  these pixels. */
+function paintGrainPanel(ctx: CarveCtx, p: CarveParams, panel: CarveTreatedPanel, x: number, y: number, w: number, h: number, A: string, B: string, scale: number, cellPx: number) {
   const gw = Math.max(1, Math.round(w * scale)), gh = Math.max(1, Math.round(h * scale))
-  const img = grainCanvas(gw, gh, carveGrainPixels(gw, gh, A, B, p.grain, panel.seed))
+  const img = memoGrainCanvas(gw, gh, A, B, p.grain, panel.seed, cellPx)
   if (img) { ctx.drawImage(img, x, y, w, h); return }
   // No canvas to render into: ship the ramp alone — exactly what the tool's own
   // SVG export does ("the ramp is what survives anywhere, the grain is there for

@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   CARVE_KINDS, CARVE_LIMITS, CARVE_PALETTE_PRESETS, CARVE_PRESET_NAMES,
   defaultCarve, normalizeCarve, carvePresetPatch, carvePresetOf,
-  carveSplit, carveTreatments, carveLayout, carveGrainPixels, paintCarve,
+  carveSplit, carveTreatments, carveLayout, carveGrainPixels, carveGrainCellPx, paintCarve,
   type CarveParams, type CarveCtx,
 } from '~/lib/compositor/carve'
 import { defaultGrid } from '~/lib/frame/grid'
@@ -203,6 +203,36 @@ describe('carveGrainPixels — the photographic panels', () => {
   })
 })
 
+// ── Fix 2: the grain lattice lives in BOX space, not device pixels ───────────
+describe('carveGrainCellPx — the grain lattice tooth is tied to the box, not the device', () => {
+  it('the same box gives the same lattice in BOX UNITS at any device scale', () => {
+    // cell is in buffer (device) px; dividing back by scale gives the box-unit tooth,
+    // which must match regardless of dpr/zoom — the whole point of the fix.
+    const boxW = 2400
+    const boxUnitTooth = (scale: number) => carveGrainCellPx(scale, boxW) / scale
+    expect(boxUnitTooth(1)).toBeCloseTo(boxUnitTooth(2), 9)
+    expect(boxUnitTooth(1)).toBeCloseTo(boxUnitTooth(3), 9)
+  })
+
+  it('reproduces the tool\'s own export exactly: one device pixel at its fixed 2400px width, scale 1', () => {
+    expect(carveGrainCellPx(1, 2400)).toBe(1)
+  })
+
+  it('a tiny box (or a sub-1 device scale) clamps to one device pixel, never sub-pixel', () => {
+    expect(carveGrainCellPx(1, 10)).toBe(1)
+    expect(carveGrainCellPx(3, 10)).toBe(1)
+    expect(carveGrainCellPx(0.5, 100)).toBe(1)
+  })
+
+  it('a larger box (still under 2400) gives a sub-integer-but-floored tooth, growing with box width and scale', () => {
+    const small = carveGrainCellPx(1, 1200)   // 1200/2400 = 0.5 -> floored to 1
+    const big = carveGrainCellPx(1, 4800)     // 4800/2400 = 2
+    expect(small).toBe(1)
+    expect(big).toBe(2)
+    expect(carveGrainCellPx(2, 4800)).toBe(4) // scale multiplies buffer-px tooth directly
+  })
+})
+
 // ── Params, limits, palettes ─────────────────────────────────────────────────
 describe('params and palettes', () => {
   it('the defaults are the source defaults', () => {
@@ -387,6 +417,42 @@ describe('paintCarve (headless)', () => {
     }
     expect(seen).toBe(1)
     expect((rec.ctx as unknown as Record<string, unknown>).putImageData).toBeUndefined()
+  })
+
+  // ── Fix 1: the grain canvas is memoized, so a drag (box moves, panel pixels don't)
+  // hits the cache instead of re-running carveGrainPixels + allocating a new canvas. ──
+  it('memoizes the grain canvas: redrawing the SAME panel makes no new offscreen canvas', () => {
+    let creates = 0
+    vi.stubGlobal('document', {
+      createElement: () => {
+        creates++
+        const c: any = { width: 0, height: 0 }
+        c.getContext = () => ({
+          createImageData: (w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
+          putImageData: () => {},
+        })
+        return c
+      },
+    })
+    const rec = recorder(2)
+    const params = P({ mix: 1, cuts: 5 })
+    // A seed whose layout has exactly one grain panel, so the redraw is unambiguous.
+    let seed = 0
+    for (let s = 1; s <= 80; s++) {
+      if (carveLayout(params, W, H, PAL.length, s).filter(q => q.kind === 'grain').length === 1) { seed = s; break }
+    }
+    expect(seed).toBeGreaterThan(0)
+    paintCarve(rec.ctx, params, PAL, W, H, seed)
+    const afterFirst = creates
+    expect(afterFirst).toBeGreaterThan(0)
+    // Redraw with everything that determines the grain pixels unchanged (a "drag" —
+    // only x/y of the box would move in the real caller, never reaching paintCarve's
+    // own arguments) — no new canvas should be allocated.
+    paintCarve(rec.ctx, params, PAL, W, H, seed)
+    expect(creates).toBe(afterFirst)
+    // Changing the grain amount is a real pixel change — must NOT be a cache hit.
+    paintCarve(rec.ctx, { ...params, grain: Math.min(1, params.grain + 0.3) }, PAL, W, H, seed)
+    expect(creates).toBeGreaterThan(afterFirst)
   })
 
   it('the hairline grid panel draws its lattice and its ~18% of dots', () => {

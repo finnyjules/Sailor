@@ -62,7 +62,7 @@ import { paneRegions, paneCellGradient, panePalette, defaultPane, type PaneParam
 import { paintModular, modularPalette, defaultModular, type ModularParams } from '~/lib/compositor/modular'
 import { paintParcel, defaultParcel, type ParcelParams } from '~/lib/compositor/parcel'
 import { paintMosh, defaultMosh, type MoshParams } from '~/lib/compositor/mosh'
-import { paintCarve, defaultCarve, type CarveParams } from '~/lib/compositor/carve'
+import { paintCarve, defaultCarve, normalizeCarve, type CarveParams } from '~/lib/compositor/carve'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -2195,7 +2195,11 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // an offscreen canvas and drawImage, so the layer's opacity, transform and
       // this box clip all still apply). Regularity / merge / density / inset /
       // force-keep don't apply; only the grid's seed carries the variation.
-      const carve = layer.carve ?? defaultCarve()
+      // Raw layers reach paint un-normalized (hand-edited or imported frames may carry
+      // a partial `carve` with no `inks`), and paintCarve's own internal normalizeCarve
+      // only guards `params`, not the separate `palette` argument — so normalize here
+      // and pass THAT object's inks, never the raw layer's.
+      const carve = normalizeCarve(layer.carve)
       paintCarve(ctx, carve, carve.inks, boxW, boxH, seed)
     } else {
       // Resolve cells FLUSH (gutter 0): the deal's only cell gap is `cellInset`, applied
