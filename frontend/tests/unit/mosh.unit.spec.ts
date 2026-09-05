@@ -638,3 +638,24 @@ describe('agent dealGrid mosh', () => {
     expect((r as any).template.layers[0].cellFill).toBe('mosh')
   })
 })
+
+// ── Robustness: a partial layer.mosh must never throw on the main paint path ──
+// (drawLayerContent is not try/caught there; a hand-authored or partially
+// persisted `mosh` object without `inks` reaches paintMosh with palette undefined.)
+describe('robustness: partial params', () => {
+  const partial = { ...defaultMosh(), inks: undefined } as unknown as MoshParams
+
+  it('moshRects falls back to the NORMALISED inks when no valid palette is passed, and an explicit valid palette still wins', () => {
+    expect(() => moshRects(partial, undefined as unknown as string[], 400, 300, 1)).not.toThrow()
+    const layout = moshRects(partial, undefined as unknown as string[], 400, 300, 1)
+    expect([...layout.roles.inks]).toEqual(normalizeMosh(partial).inks)   // the default preset
+    const pal = ['#000000', '#ffffff', '#ff0000']
+    expect([...moshRects(defaultMosh(), pal, 400, 300, 1).roles.inks]).toEqual(pal)
+    // A too-short explicit palette is not trusted either.
+    expect([...moshRects(defaultMosh(), ['#000000'], 400, 300, 1).roles.inks]).toEqual(defaultMosh().inks)
+  })
+
+  it('moshPresetOf tolerates a params object without inks', () => {
+    expect(() => moshPresetOf(partial)).not.toThrow()
+  })
+})

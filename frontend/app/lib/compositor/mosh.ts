@@ -103,7 +103,7 @@ export function moshPresetOf(params: MoshParams): MoshPresetName | null {
   const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
   for (const name of MOSH_PRESET_NAMES) {
     const p = MOSH_PALETTE_PRESETS[name]
-    if (params.inks.length === p.length && params.inks.every((c, i) => same(c, p[i]!))) return name
+    if (params.inks?.length === p.length && params.inks.every((c, i) => same(c, p[i]!))) return name
   }
   return null
 }
@@ -414,7 +414,11 @@ export function moshRects(params: MoshParams, palette: readonly string[], boxW: 
   const p = normalizeMosh(params)
   const W = Math.max(1, boxW), H = Math.max(1, boxH)
   const columns = moshColumns(p, W)
-  const roles = moshRoles(palette)
+  // Roles from an explicit palette when a valid one is given, else from the
+  // NORMALISED params' inks — never from a raw `layer.mosh.inks` that may be
+  // missing or short (a partial persisted object would otherwise throw inside the
+  // main paint path, which is not try/caught).
+  const roles = moshRoles(palette && palette.length >= 2 ? palette : p.inks)
   const bands = moshBands(p, H, seed)
   return { columns, roles, bands, rects: bands.map(band => moshBandRects(columns, roles, p, band, seed)) }
 }
