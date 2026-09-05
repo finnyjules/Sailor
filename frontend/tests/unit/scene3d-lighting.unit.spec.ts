@@ -63,3 +63,31 @@ describe('resolveLook', () => {
     expect(p.warmth).toBe(r.warmth)
   })
 })
+
+import { LOOK_GROUPS, looksInGroup, featuredLooks, searchLooks } from '~/lib/scene3d/lighting'
+
+describe('look library metadata for the picker', () => {
+  it('every look has a non-empty blurb', () => {
+    for (const r of LOOK_LIBRARY) expect(r.blurb.length, r.id).toBeGreaterThan(3)
+  })
+  it('rim positions, where present, are valid angles', () => {
+    for (const r of LOOK_LIBRARY) if (r.rim) {
+      expect(r.rim.azimuth).toBeGreaterThanOrEqual(0); expect(r.rim.azimuth).toBeLessThanOrEqual(360)
+      expect(r.rim.elevation).toBeGreaterThanOrEqual(5); expect(r.rim.elevation).toBeLessThanOrEqual(90)
+    }
+    expect(getLook('rim-on-dark').rim).toBeTruthy()
+    expect(getLook('three-point').rim).toBeTruthy()
+  })
+  it('groups cover every look exactly once, in display order', () => {
+    expect(LOOK_GROUPS.map(g => g.id)).toEqual(['product', 'portrait', 'cinematic', 'natural'])
+    const all = LOOK_GROUPS.flatMap(g => looksInGroup(g.id).map(l => l.id))
+    expect(all.length).toBe(LOOK_LIBRARY.length)
+    expect(new Set(all).size).toBe(LOOK_LIBRARY.length)
+  })
+  it('featuredLooks returns the eight featured; searchLooks filters by label/blurb', () => {
+    expect(featuredLooks().length).toBe(8)
+    expect(searchLooks('').length).toBe(LOOK_LIBRARY.length)
+    expect(searchLooks('golden').map(l => l.id)).toEqual(['golden-hour'])
+    expect(searchLooks('SNEAKER').some(l => l.id === 'rim-on-dark')).toBe(true)
+  })
+})

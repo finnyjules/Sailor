@@ -18,49 +18,79 @@ export interface LookRecipe {
   preset: LightingPreset   // reuse existing env-intensity + shadow bucket
   sunIntensity: number     // baseline exposure
   ambient: number
+  /** An extra edge light behind the subject, for looks that have one. Drawn by the
+   *  picker's plot; a future rig phase turns it into a real light object. */
+  rim?: { azimuth: number; elevation: number }
+  /** One line for the picker card — what the look is FOR, in the user's words. */
+  blurb: string
 }
 
 // The Look library — data, drawn from the design spec's Look tables. ★ = featured.
 export const LOOK_LIBRARY: LookRecipe[] = [
   // Product & commercial (featured heavy)
-  { id: 'softbox-beauty',  group: 'product',   label: 'Softbox beauty',     featured: true, azimuth: 35,  elevation: 40, softness: 0.85, warmth: 0.5,  environment: 'softbox',    preset: 'soft',     sunIntensity: 1.2, ambient: 0.7 },
-  { id: 'ecommerce-flat',  group: 'product',   label: 'E-commerce flat',    featured: true, azimuth: 45,  elevation: 45, softness: 0.9,  warmth: 0.5,  environment: 'softbox',    preset: 'flat',     sunIntensity: 1.0, ambient: 0.9 },
-  { id: 'rim-on-dark',     group: 'product',   label: 'Rim on dark',        featured: true, azimuth: 160, elevation: 35, softness: 0.3,  warmth: 0.5,  environment: 'darkStrips', preset: 'dramatic', sunIntensity: 1.6, ambient: 0.15 },
-  { id: 'hard-single-key', group: 'product',   label: 'Hard single key',    featured: true, azimuth: 40,  elevation: 35, softness: 0.15, warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.8, ambient: 0.25 },
-  { id: 'two-tone-gels',   group: 'product',   label: 'Two-tone gels',      featured: true, azimuth: 60,  elevation: 30, softness: 0.5,  warmth: 0.5,  environment: 'colorGels',  preset: 'studio',   sunIntensity: 0.8, ambient: 0.3 },
-  { id: 'three-point',     group: 'product',   label: 'Three-point',                        azimuth: 45,  elevation: 40, softness: 0.6,  warmth: 0.5,  environment: 'room',       preset: 'studio',   sunIntensity: 1.4, ambient: 0.5 },
-  { id: 'light-tent',      group: 'product',   label: 'Light tent / high-key',              azimuth: 40,  elevation: 50, softness: 0.95, warmth: 0.5,  environment: 'softbox',    preset: 'flat',     sunIntensity: 1.0, ambient: 1.0 },
-  { id: 'backlit',         group: 'product',   label: 'Backlit / contre-jour',              azimuth: 175, elevation: 30, softness: 0.5,  warmth: 0.5,  environment: 'room',       preset: 'soft',     sunIntensity: 1.7, ambient: 0.4 },
+  { id: 'softbox-beauty',  group: 'product',   label: 'Softbox beauty',     featured: true, azimuth: 35,  elevation: 40, softness: 0.85, warmth: 0.5,  environment: 'softbox',    preset: 'soft',     sunIntensity: 1.2, ambient: 0.7, blurb: 'clean catalog hero shot' },
+  { id: 'ecommerce-flat',  group: 'product',   label: 'E-commerce flat',    featured: true, azimuth: 45,  elevation: 45, softness: 0.9,  warmth: 0.5,  environment: 'softbox',    preset: 'flat',     sunIntensity: 1.0, ambient: 0.9, blurb: 'honest, even, shadow-light catalog' },
+  { id: 'rim-on-dark',     group: 'product',   label: 'Rim on dark',        featured: true, azimuth: 160, elevation: 35, softness: 0.3,  warmth: 0.5,  environment: 'darkStrips', preset: 'dramatic', sunIntensity: 1.6, ambient: 0.15, blurb: 'premium tech or sneaker, glowing edge on black', rim: { azimuth: 200, elevation: 35 } },
+  { id: 'hard-single-key', group: 'product',   label: 'Hard single key',    featured: true, azimuth: 40,  elevation: 35, softness: 0.15, warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.8, ambient: 0.25, blurb: 'editorial, crisp shadow, shows texture' },
+  { id: 'two-tone-gels',   group: 'product',   label: 'Two-tone gels',      featured: true, azimuth: 60,  elevation: 30, softness: 0.5,  warmth: 0.5,  environment: 'colorGels',  preset: 'studio',   sunIntensity: 0.8, ambient: 0.3, blurb: 'modern two-colour hype look' },
+  { id: 'three-point',     group: 'product',   label: 'Three-point',                        azimuth: 45,  elevation: 40, softness: 0.6,  warmth: 0.5,  environment: 'room',       preset: 'studio',   sunIntensity: 1.4, ambient: 0.5, blurb: 'the universal balanced base', rim: { azimuth: 180, elevation: 45 } },
+  { id: 'light-tent',      group: 'product',   label: 'Light tent / high-key',              azimuth: 40,  elevation: 50, softness: 0.95, warmth: 0.5,  environment: 'softbox',    preset: 'flat',     sunIntensity: 1.0, ambient: 1.0, blurb: 'glossy, reflective goods, near shadowless' },
+  { id: 'backlit',         group: 'product',   label: 'Backlit / contre-jour',              azimuth: 175, elevation: 30, softness: 0.5,  warmth: 0.5,  environment: 'room',       preset: 'soft',     sunIntensity: 1.7, ambient: 0.4, blurb: 'glow and translucency (gum soles, mesh)' },
   // Portrait & beauty
-  { id: 'rembrandt',       group: 'portrait',  label: 'Rembrandt',          featured: true, azimuth: 45,  elevation: 45, softness: 0.35, warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.6, ambient: 0.3 },
-  { id: 'loop',            group: 'portrait',  label: 'Loop',                               azimuth: 35,  elevation: 40, softness: 0.6,  warmth: 0.5,  environment: 'room',       preset: 'studio',   sunIntensity: 1.4, ambient: 0.5 },
-  { id: 'butterfly',       group: 'portrait',  label: 'Butterfly (Paramount)',              azimuth: 0,   elevation: 60, softness: 0.8,  warmth: 0.5,  environment: 'softbox',    preset: 'soft',     sunIntensity: 1.3, ambient: 0.6 },
-  { id: 'clamshell',       group: 'portrait',  label: 'Clamshell',                          azimuth: 0,   elevation: 55, softness: 0.9,  warmth: 0.5,  environment: 'softbox',    preset: 'soft',     sunIntensity: 1.2, ambient: 0.8 },
-  { id: 'split',           group: 'portrait',  label: 'Split',                              azimuth: 90,  elevation: 30, softness: 0.3,  warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.6, ambient: 0.2 },
-  { id: 'broad-short',     group: 'portrait',  label: 'Broad / Short',                      azimuth: 55,  elevation: 40, softness: 0.55, warmth: 0.5,  environment: 'room',       preset: 'studio',   sunIntensity: 1.4, ambient: 0.5 },
-  { id: 'rim-hair',        group: 'portrait',  label: 'Rim / hair',       additive: true,   azimuth: 180, elevation: 55, softness: 0.4,  warmth: 0.5,  environment: 'room',       preset: 'studio',   sunIntensity: 1.6, ambient: 0.5 },
+  { id: 'rembrandt',       group: 'portrait',  label: 'Rembrandt',          featured: true, azimuth: 45,  elevation: 45, softness: 0.35, warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.6, ambient: 0.3, blurb: 'dramatic character, one-source drama', rim: { azimuth: 190, elevation: 50 } },
+  { id: 'loop',            group: 'portrait',  label: 'Loop',                               azimuth: 35,  elevation: 40, softness: 0.6,  warmth: 0.5,  environment: 'room',       preset: 'studio',   sunIntensity: 1.4, ambient: 0.5, blurb: 'everyday flattering portrait light' },
+  { id: 'butterfly',       group: 'portrait',  label: 'Butterfly (Paramount)',              azimuth: 0,   elevation: 60, softness: 0.8,  warmth: 0.5,  environment: 'softbox',    preset: 'soft',     sunIntensity: 1.3, ambient: 0.6, blurb: 'glamour beauty, symmetric and soft' },
+  { id: 'clamshell',       group: 'portrait',  label: 'Clamshell',                          azimuth: 0,   elevation: 55, softness: 0.9,  warmth: 0.5,  environment: 'softbox',    preset: 'soft',     sunIntensity: 1.2, ambient: 0.8, blurb: 'cosmetics and skin, wrapping soft light' },
+  { id: 'split',           group: 'portrait',  label: 'Split',                              azimuth: 90,  elevation: 30, softness: 0.3,  warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.6, ambient: 0.2, blurb: 'moody half-lit edge' },
+  { id: 'broad-short',     group: 'portrait',  label: 'Broad / Short',                      azimuth: 55,  elevation: 40, softness: 0.55, warmth: 0.5,  environment: 'room',       preset: 'studio',   sunIntensity: 1.4, ambient: 0.5, blurb: 'widen or slim the face' },
+  { id: 'rim-hair',        group: 'portrait',  label: 'Rim / hair',       additive: true,   azimuth: 180, elevation: 55, softness: 0.4,  warmth: 0.5,  environment: 'room',       preset: 'studio',   sunIntensity: 1.6, ambient: 0.5, blurb: 'adds edge separation behind the subject' },
   // Cinematic & mood
-  { id: 'motivated',       group: 'cinematic', label: 'Motivated single source',            azimuth: 60,  elevation: 40, softness: 0.5,  warmth: 0.55, environment: 'room',       preset: 'dramatic', sunIntensity: 1.5, ambient: 0.35 },
-  { id: 'low-key-noir',    group: 'cinematic', label: 'Low-key / noir',                     azimuth: 70,  elevation: 35, softness: 0.15, warmth: 0.45, environment: 'room',       preset: 'dramatic', sunIntensity: 1.8, ambient: 0.1 },
-  { id: 'high-key',        group: 'cinematic', label: 'High-key',                           azimuth: 40,  elevation: 50, softness: 0.95, warmth: 0.5,  environment: 'softbox',    preset: 'flat',     sunIntensity: 1.0, ambient: 1.0 },
-  { id: 'chiaroscuro',     group: 'cinematic', label: 'Chiaroscuro',                        azimuth: 65,  elevation: 40, softness: 0.25, warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.7, ambient: 0.15 },
-  { id: 'silhouette',      group: 'cinematic', label: 'Silhouette',                         azimuth: 180, elevation: 30, softness: 0.5,  warmth: 0.5,  environment: 'room',       preset: 'soft',     sunIntensity: 2.0, ambient: 0.2 },
-  { id: 'top-light',       group: 'cinematic', label: 'Top light',                          azimuth: 0,   elevation: 88, softness: 0.2,  warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.6, ambient: 0.2 },
-  { id: 'underlight',      group: 'cinematic', label: 'Underlight',                         azimuth: 0,   elevation: 5,  softness: 0.3,  warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.5, ambient: 0.2 },
-  { id: 'edge-on-black',   group: 'cinematic', label: 'Edge-only on black',                 azimuth: 165, elevation: 40, softness: 0.3,  warmth: 0.5,  environment: 'darkStrips', preset: 'dramatic', sunIntensity: 1.7, ambient: 0.05 },
+  { id: 'motivated',       group: 'cinematic', label: 'Motivated single source',            azimuth: 60,  elevation: 40, softness: 0.5,  warmth: 0.55, environment: 'room',       preset: 'dramatic', sunIntensity: 1.5, ambient: 0.35, blurb: 'naturalistic, one believable source' },
+  { id: 'low-key-noir',    group: 'cinematic', label: 'Low-key / noir',                     azimuth: 70,  elevation: 35, softness: 0.15, warmth: 0.45, environment: 'room',       preset: 'dramatic', sunIntensity: 1.8, ambient: 0.1, blurb: 'tension, deep blacks, hard shadow' },
+  { id: 'high-key',        group: 'cinematic', label: 'High-key',                           azimuth: 40,  elevation: 50, softness: 0.95, warmth: 0.5,  environment: 'softbox',    preset: 'flat',     sunIntensity: 1.0, ambient: 1.0, blurb: 'airy, bright, near shadowless' },
+  { id: 'chiaroscuro',     group: 'cinematic', label: 'Chiaroscuro',                        azimuth: 65,  elevation: 40, softness: 0.25, warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.7, ambient: 0.15, blurb: 'painterly extreme light and dark' },
+  { id: 'silhouette',      group: 'cinematic', label: 'Silhouette',                         azimuth: 180, elevation: 30, softness: 0.5,  warmth: 0.5,  environment: 'room',       preset: 'soft',     sunIntensity: 2.0, ambient: 0.2, blurb: 'shape only, subject unlit' },
+  { id: 'top-light',       group: 'cinematic', label: 'Top light',                          azimuth: 0,   elevation: 88, softness: 0.2,  warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.6, ambient: 0.2, blurb: 'ominous, sculptural, straight down' },
+  { id: 'underlight',      group: 'cinematic', label: 'Underlight',                         azimuth: 0,   elevation: 5,  softness: 0.3,  warmth: 0.5,  environment: 'room',       preset: 'dramatic', sunIntensity: 1.5, ambient: 0.2, blurb: 'unsettling light from below' },
+  { id: 'edge-on-black',   group: 'cinematic', label: 'Edge-only on black',                 azimuth: 165, elevation: 40, softness: 0.3,  warmth: 0.5,  environment: 'darkStrips', preset: 'dramatic', sunIntensity: 1.7, ambient: 0.05, blurb: 'logo or tech reveal, rim only', rim: { azimuth: 195, elevation: 40 } },
   // Natural & time-of-day
-  { id: 'golden-hour',     group: 'natural',   label: 'Golden hour',        featured: true, azimuth: 110, elevation: 15, softness: 0.6,  warmth: 0.85, environment: 'room',       preset: 'soft',     sunIntensity: 1.5, ambient: 0.45 },
-  { id: 'overcast',        group: 'natural',   label: 'Overcast / open shade', featured: true, azimuth: 40, elevation: 70, softness: 1.0, warmth: 0.4, environment: 'room',        preset: 'flat',     sunIntensity: 0.9, ambient: 1.0 },
-  { id: 'blue-hour',       group: 'natural',   label: 'Blue hour / twilight',               azimuth: 130, elevation: 20, softness: 0.8,  warmth: 0.2,  environment: 'room',       preset: 'soft',     sunIntensity: 0.8, ambient: 0.6 },
-  { id: 'hard-noon',       group: 'natural',   label: 'Hard noon',                          azimuth: 30,  elevation: 80, softness: 0.1,  warmth: 0.45, environment: 'room',       preset: 'studio',   sunIntensity: 1.8, ambient: 0.4 },
-  { id: 'window-light',    group: 'natural',   label: 'Window light',                       azimuth: 80,  elevation: 35, softness: 0.7,  warmth: 0.5,  environment: 'room',       preset: 'soft',     sunIntensity: 1.4, ambient: 0.5 },
-  { id: 'sunset-backlight',group: 'natural',   label: 'Sunset backlight',                   azimuth: 170, elevation: 18, softness: 0.6,  warmth: 0.8,  environment: 'room',       preset: 'soft',     sunIntensity: 1.7, ambient: 0.45 },
-  { id: 'moonlight',       group: 'natural',   label: 'Moonlight',                          azimuth: 120, elevation: 40, softness: 0.5,  warmth: 0.15, environment: 'room',       preset: 'dramatic', sunIntensity: 1.2, ambient: 0.25 },
-  { id: 'firelight',       group: 'natural',   label: 'Firelight / candlelight',            azimuth: 55,  elevation: 25, softness: 0.6,  warmth: 0.95, environment: 'room',       preset: 'dramatic', sunIntensity: 1.3, ambient: 0.3 },
+  { id: 'golden-hour',     group: 'natural',   label: 'Golden hour',        featured: true, azimuth: 110, elevation: 15, softness: 0.6,  warmth: 0.85, environment: 'room',       preset: 'soft',     sunIntensity: 1.5, ambient: 0.45, blurb: 'warm, low, cinematic, long soft shadow', rim: { azimuth: 200, elevation: 20 } },
+  { id: 'overcast',        group: 'natural',   label: 'Overcast / open shade', featured: true, azimuth: 40, elevation: 70, softness: 1.0, warmth: 0.4, environment: 'room',        preset: 'flat',     sunIntensity: 0.9, ambient: 1.0, blurb: 'flattering, soft, shadowless, no-fuss' },
+  { id: 'blue-hour',       group: 'natural',   label: 'Blue hour / twilight',               azimuth: 130, elevation: 20, softness: 0.8,  warmth: 0.2,  environment: 'room',       preset: 'soft',     sunIntensity: 0.8, ambient: 0.6, blurb: 'cool, quiet twilight' },
+  { id: 'hard-noon',       group: 'natural',   label: 'Hard noon',                          azimuth: 30,  elevation: 80, softness: 0.1,  warmth: 0.45, environment: 'room',       preset: 'studio',   sunIntensity: 1.8, ambient: 0.4, blurb: 'punchy realism, short hard shadow' },
+  { id: 'window-light',    group: 'natural',   label: 'Window light',                       azimuth: 80,  elevation: 35, softness: 0.7,  warmth: 0.5,  environment: 'room',       preset: 'soft',     sunIntensity: 1.4, ambient: 0.5, blurb: 'classic soft interior light' },
+  { id: 'sunset-backlight',group: 'natural',   label: 'Sunset backlight',                   azimuth: 170, elevation: 18, softness: 0.6,  warmth: 0.8,  environment: 'room',       preset: 'soft',     sunIntensity: 1.7, ambient: 0.45, blurb: 'warm rim glow from behind' },
+  { id: 'moonlight',       group: 'natural',   label: 'Moonlight',                          azimuth: 120, elevation: 40, softness: 0.5,  warmth: 0.15, environment: 'room',       preset: 'dramatic', sunIntensity: 1.2, ambient: 0.25, blurb: 'cool stylised night' },
+  { id: 'firelight',       group: 'natural',   label: 'Firelight / candlelight',            azimuth: 55,  elevation: 25, softness: 0.6,  warmth: 0.95, environment: 'room',       preset: 'dramatic', sunIntensity: 1.3, ambient: 0.3, blurb: 'intimate warm glow from below' },
 ]
 
 export function getLook(id: string): LookRecipe {
   return LOOK_LIBRARY.find(l => l.id === id) ?? LOOK_LIBRARY[0]!
+}
+
+export const LOOK_GROUPS: ReadonlyArray<{ id: LookRecipe['group']; label: string }> = [
+  { id: 'product',   label: 'Product & commercial' },
+  { id: 'portrait',  label: 'Portrait & beauty' },
+  { id: 'cinematic', label: 'Cinematic & mood' },
+  { id: 'natural',   label: 'Natural & time of day' },
+]
+
+export function looksInGroup(id: LookRecipe['group']): LookRecipe[] {
+  return LOOK_LIBRARY.filter(l => l.group === id)
+}
+
+export function featuredLooks(): LookRecipe[] {
+  return LOOK_LIBRARY.filter(l => l.featured)
+}
+
+/** Case-insensitive match over label, blurb and group label. Empty query = everything. */
+export function searchLooks(q: string): LookRecipe[] {
+  const s = q.trim().toLowerCase()
+  if (!s) return [...LOOK_LIBRARY]
+  const groupLabel = (g: LookRecipe['group']) => LOOK_GROUPS.find(x => x.id === g)?.label ?? ''
+  return LOOK_LIBRARY.filter(l =>
+    l.label.toLowerCase().includes(s) || l.blurb.toLowerCase().includes(s) || groupLabel(l.group).toLowerCase().includes(s),
+  )
 }
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n))
