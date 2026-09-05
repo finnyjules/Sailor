@@ -616,6 +616,12 @@ function memoSheet(pw: number, ph: number, p: ChaffParams, seed: number, cell: n
   return img
 }
 
+/** Test seam — drops every cached sheet so cache-shape tests (eviction, memoization)
+ *  don't depend on suite order. */
+export function __resetChaffSheetCache(): void {
+  sheetCache.clear()
+}
+
 /**
  * Paint one Chaff sheet at the ctx's origin over `boxW × boxH`. The sheet is built
  * offscreen at the box's paint resolution (held under CHAFF_MAX_PIXELS) and drawn in,

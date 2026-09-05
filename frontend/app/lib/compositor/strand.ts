@@ -693,6 +693,12 @@ function memoSheet(pw: number, ph: number, p: StrandParams, seed: number, tooth:
   return img
 }
 
+/** Test seam — drops every cached sheet so cache-shape tests (eviction, memoization)
+ *  don't depend on suite order. */
+export function __resetStrandSheetCache(): void {
+  sheetCache.clear()
+}
+
 /**
  * H1 — paint one Strand sheet at the ctx's origin over `boxW × boxH`. The sheet is
  * built offscreen at the box's paint resolution and drawn in, so the layer's opacity,

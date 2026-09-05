@@ -9,6 +9,7 @@ import {
   defaultChaff, normalizeChaff, CHAFF_LIMITS, CHAFF_PALETTE_PRESETS, CHAFF_PRESET_NAMES,
   chaffPresetPatch, chaffPresetOf, chaffBlades, chaffProfile, chaffBladeOutline,
   chaffMask, chaffPixels, chaffGrainCellPx, paintChaff, CHAFF_SHAPES, BLADE_STATIONS,
+  __resetChaffSheetCache,
   type ChaffParams,
 } from '~/lib/compositor/chaff'
 
@@ -537,6 +538,7 @@ describe('paintChaff — how it behaves inside a Frame layer', () => {
   }
   beforeEach(() => {
     made.length = 0; drawn.length = 0
+    __resetChaffSheetCache()
     vi.stubGlobal('document', {
       createElement: () => {
         const c: Record<string, unknown> = { width: 0, height: 0 }

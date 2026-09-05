@@ -564,6 +564,12 @@ function memoSheet(pw: number, ph: number, fw: number, fh: number, p: HuskParams
   return img
 }
 
+/** Test seam — drops every cached sheet so cache-shape tests (eviction, memoization)
+ *  don't depend on suite order. */
+export function __resetHuskSheetCache(): void {
+  sheetCache.clear()
+}
+
 /**
  * H1 — paint one Husk sheet at the ctx's origin over `boxW × boxH`. The sheet is built
  * offscreen at the box's paint resolution (held under HUSK_MAX_PIXELS) and drawn in,

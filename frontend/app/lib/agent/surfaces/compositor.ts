@@ -111,7 +111,7 @@ const isValidPaint = (v: unknown): boolean => v != null && (typeof v === 'string
 /** A Mosaic's internal `cellFill` — the style table in lib/compositor/mosaic maps the
  *  agent's plain style words (tiles | pane | …) onto it; `solid` is the `tiles` style. */
 type DealFill = MosaicCellFill
-/** The four canvas-generator looks — each has its own tunables object on the
+/** The five canvas-generator looks — each has its own tunables object on the
  *  mosaic op's args and its own palette-preset table. The two SHADER styles
  *  (oddgrid / static) are not looks in this sense: their tunables live on a
  *  ShaderSpec and their "palette" is the effect's Looks (mosaicLookNames). */
@@ -140,7 +140,7 @@ const lookArgs = (a: Record<string, unknown>, look: DealLook): Record<string, un
  * The ONE rule for which cell fill the mosaic op's args imply when no explicit
  * `style` (or its `cellFill` alias) was sent (used by create AND reconfigure):
  *   1. a tunables object — pane → modular → parcel → mosh → carve, FIRST wins;
- *   2. else a `palettePreset` whose name lives in one look's table (the four
+ *   2. else a `palettePreset` whose name lives in one look's table (the five
  *      tables are disjoint), same order;
  *   3. else null (create ⇒ the default style, modular; reconfigure ⇒ keep the
  *      current fill).
@@ -184,7 +184,7 @@ function lookPatch<T>(a: Record<string, unknown>, look: DealLook, presetPatch: P
   if (!presetPatch && !explicit) return null
   return { ...(presetPatch ?? {}), ...(explicit ?? {}) }
 }
-/** All four looks' patches for one mosaic call, given the resolved fill + preset. */
+/** All five looks' patches for one mosaic call, given the resolved fill + preset. */
 function dealLookPatches(a: Record<string, unknown>, fill: DealFill, preset: string | null) {
   const on = (look: DealLook) => fill === look && preset ? preset : null
   const paneName = on('pane'); const modName = on('modular'); const parName = on('parcel')

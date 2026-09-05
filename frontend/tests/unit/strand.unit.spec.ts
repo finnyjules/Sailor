@@ -10,6 +10,7 @@ import {
   STRAND_PALETTE_PRESETS, STRAND_PRESET_NAMES, strandPresetPatch, strandPresetOf,
   strandRoles, strandWalks, strandRodPath, strandMasks, strandPixels,
   strandGrainCellPx, paintStrand, ROD_CAP, ROD_STATIONS,
+  __resetStrandSheetCache,
   type StrandParams,
 } from '~/lib/compositor/strand'
 
@@ -645,6 +646,7 @@ describe('paintStrand — how it behaves inside a Frame layer', () => {
   }
   beforeEach(() => {
     made.length = 0; drawn.length = 0
+    __resetStrandSheetCache()
     vi.stubGlobal('document', {
       createElement: () => {
         const c: Record<string, unknown> = { width: 0, height: 0 }

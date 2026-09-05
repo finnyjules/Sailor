@@ -7,8 +7,10 @@ import {
   CARVE_KINDS, CARVE_LIMITS, CARVE_PALETTE_PRESETS, CARVE_PRESET_NAMES,
   defaultCarve, normalizeCarve, carvePresetPatch, carvePresetOf,
   carveSplit, carveTreatments, carveLayout, carveGrainPixels, carveGrainCellPx, paintCarve,
+  GRAIN_CACHE_CAP, GRAIN_CACHE_BYTES, __resetCarveGrainCache, __carveGrainCacheBytes,
   type CarveParams, type CarveCtx,
 } from '~/lib/compositor/carve'
+import { LruCache } from '~/lib/compositor/silhouetteCache'
 import { defaultGrid } from '~/lib/frame/grid'
 import { dealVocabDrivesLook } from '~/lib/compositor/dealVocab'
 import { applyCompositorCommand, describeCompositor, impliedDealFill, type CompositorState } from '~/lib/agent/surfaces/compositor'
@@ -306,6 +308,9 @@ function stubCanvasDocument() {
 describe('paintCarve (headless)', () => {
   const W = 800, H = 600
   beforeEach(stubCanvasDocument)
+  // The grain cache is a module-global — reset it so a memoization test never sees a
+  // hit left behind by an earlier test (or an earlier run of itself).
+  beforeEach(__resetCarveGrainCache)
   afterEach(() => vi.unstubAllGlobals())
 
   it('lays the ground down first in the palette\'s first ink, then paints each panel', () => {
@@ -445,14 +450,41 @@ describe('paintCarve (headless)', () => {
     paintCarve(rec.ctx, params, PAL, W, H, seed)
     const afterFirst = creates
     expect(afterFirst).toBeGreaterThan(0)
+    // The entry's bytes are tracked (Fix 1's byte-budget shape), not just its count.
+    const bytesAfterFirst = __carveGrainCacheBytes()
+    expect(bytesAfterFirst).toBeGreaterThan(0)
     // Redraw with everything that determines the grain pixels unchanged (a "drag" —
     // only x/y of the box would move in the real caller, never reaching paintCarve's
-    // own arguments) — no new canvas should be allocated.
+    // own arguments) — no new canvas should be allocated, and the tracked bytes don't move.
     paintCarve(rec.ctx, params, PAL, W, H, seed)
     expect(creates).toBe(afterFirst)
-    // Changing the grain amount is a real pixel change — must NOT be a cache hit.
+    expect(__carveGrainCacheBytes()).toBe(bytesAfterFirst)
+    // Changing the grain amount is a real pixel change — must NOT be a cache hit, and
+    // the second entry's bytes must be added to the total, not replace it.
     paintCarve(rec.ctx, { ...params, grain: Math.min(1, params.grain + 0.3) }, PAL, W, H, seed)
     expect(creates).toBeGreaterThan(afterFirst)
+    expect(__carveGrainCacheBytes()).toBeGreaterThan(bytesAfterFirst)
+  })
+
+  // ── Fix 1 (byte budget) — Carve's grain cache is capped by bytes AND by entry
+  // count, the same shape as Chaff / Strand / Husk's sheet caches (see carve.ts's
+  // `grainPanelCache`). This drives the exact class + config Carve constructs its
+  // cache with, so a wide entry gets shed on the way in once the byte budget is
+  // exceeded — well before the far looser 64-entry count cap would ever bind. ──
+  it('the grain cache evicts by bytes once the tracked total exceeds its budget, not only by entry count', () => {
+    const cache = new LruCache<{ img: string; bytes: number }>(GRAIN_CACHE_CAP, {
+      maxBytes: GRAIN_CACHE_BYTES,
+      sizeOf: v => v.bytes,
+    })
+    // Five entries at 30 MB each: 150 MB total, comfortably over the 128 MB budget,
+    // yet only 5 of the 64 permitted entries — a count-only cap would keep all five.
+    const ENTRY_BYTES = 30 * 1024 * 1024
+    for (let i = 0; i < 5; i++) cache.set(`panel-${i}`, { img: `canvas-${i}`, bytes: ENTRY_BYTES })
+    expect(cache.size).toBeLessThan(5)
+    expect(cache.bytes).toBeLessThanOrEqual(GRAIN_CACHE_BYTES)
+    // The least-recently-used entries are the ones shed; the most recent survives.
+    expect(cache.get('panel-0')).toBeUndefined()
+    expect(cache.get('panel-4')).toEqual({ img: 'canvas-4', bytes: ENTRY_BYTES })
   })
 
   it('the hairline grid panel draws its lattice and its ~18% of dots', () => {

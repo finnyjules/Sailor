@@ -27,15 +27,26 @@
 import {
   defaultChaff, normalizeChaff, paintChaff, chaffPresetPatch, chaffPresetOf,
   CHAFF_LIMITS, CHAFF_PRESET_NAMES, CHAFF_SHAPES, type ChaffParams, type ChaffCtx,
+  __resetChaffSheetCache,
 } from '~/lib/compositor/chaff'
 import {
   defaultStrand, normalizeStrand, paintStrand, strandPresetPatch, strandPresetOf,
   STRAND_LIMITS, STRAND_PRESET_NAMES, STRAND_TEXTURES, type StrandParams,
+  __resetStrandSheetCache,
 } from '~/lib/compositor/strand'
 import {
   defaultHusk, normalizeHusk, paintHusk, huskPresetPatch, huskPresetOf,
   HUSK_LIMITS, HUSK_PRESET_NAMES, HUSK_BITES, type HuskParams,
+  __resetHuskSheetCache,
 } from '~/lib/compositor/husk'
+
+/** Test seam — drops every style's sheet cache in one call, so cross-file suite runs
+ *  (or a single style's cache-shape test) don't depend on run order. */
+export function __resetScatterSheetCaches(): void {
+  __resetChaffSheetCache()
+  __resetStrandSheetCache()
+  __resetHuskSheetCache()
+}
 
 /** The context a style's paint needs. Every scatter generator prints one sheet into
  *  the box, so this is deliberately the smallest surface a recording stub can fake. */

@@ -10,6 +10,7 @@ import {
   HUSK_PALETTE_PRESETS, HUSK_PRESET_NAMES, huskPresetPatch, huskPresetOf,
   huskRoles, huskFieldSize, huskShapes, huskDepthField, huskPixels,
   huskRefPx, huskGrainCellPx, huskCrumbleUnitPx, paintHusk,
+  __resetHuskSheetCache,
   type HuskParams, type HuskShape,
 } from '~/lib/compositor/husk'
 
@@ -437,6 +438,7 @@ describe('paintHusk — how it behaves inside a Frame layer', () => {
   }
   beforeEach(() => {
     made.length = 0; drawn.length = 0
+    __resetHuskSheetCache()
     vi.stubGlobal('document', {
       createElement: () => {
         const c: Record<string, unknown> = { width: 0, height: 0 }

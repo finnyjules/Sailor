@@ -374,12 +374,17 @@ function grainCanvas(w: number, h: number, pixels: Uint8ClampedArray): CanvasIma
  * microseconds. A drag only moves the box, never the panel's own pixels, so keying the
  * cache on everything that DOES determine those pixels (the panel's sub-seed, the
  * buffer size, the two inks, the grain amount, and the lattice cell from
- * `carveGrainCellPx`) makes a drag frame a cache hit. Bounded (insertion-order LRU,
- * `GRAIN_CACHE_CAP` entries) so a long session never grows it unboundedly — see
+ * `carveGrainCellPx`) makes a drag frame a cache hit. Bounded by BOTH an entry count
+ * AND a byte budget, same shape as Chaff / Strand / Husk's sheet caches — a count-only
+ * cap bounds nothing useful when the values are device-resolution canvases. See
  * `LruCache` (shared with the torn-edge silhouette cache; same shape, same reason).
  */
-const GRAIN_CACHE_CAP = 64
-const grainPanelCache = new LruCache<CanvasImageSource>(GRAIN_CACHE_CAP)
+export const GRAIN_CACHE_CAP = 64
+export const GRAIN_CACHE_BYTES = 128 * 1024 * 1024
+const grainPanelCache = new LruCache<{ img: CanvasImageSource; bytes: number }>(GRAIN_CACHE_CAP, {
+  maxBytes: GRAIN_CACHE_BYTES,
+  sizeOf: v => v.bytes,
+})
 
 function grainCanvasKey(gw: number, gh: number, colA: string, colB: string, grain: number, panelSeed: number, cellPx: number): string {
   return `${gw}x${gh}|${colA}|${colB}|${grain}|${panelSeed}|${cellPx}`
@@ -390,10 +395,22 @@ function grainCanvasKey(gw: number, gh: number, colA: string, colB: string, grai
 function memoGrainCanvas(gw: number, gh: number, colA: string, colB: string, grain: number, panelSeed: number, cellPx: number): CanvasImageSource | null {
   const key = grainCanvasKey(gw, gh, colA, colB, grain, panelSeed, cellPx)
   const hit = grainPanelCache.get(key)
-  if (hit) return hit
+  if (hit) return hit.img
   const img = grainCanvas(gw, gh, carveGrainPixels(gw, gh, colA, colB, grain, panelSeed, cellPx))
-  if (img) grainPanelCache.set(key, img)
+  if (img) grainPanelCache.set(key, { img, bytes: gw * gh * 4 })
   return img
+}
+
+/** Test seam — drops every cached grain panel so cache-shape tests (eviction,
+ *  memoization) don't depend on suite order. */
+export function __resetCarveGrainCache(): void {
+  grainPanelCache.clear()
+}
+
+/** Test seam — the grain cache's current tracked byte total (0 once every entry's
+ *  `bytes` has been evicted or the cache was just reset). */
+export function __carveGrainCacheBytes(): number {
+  return grainPanelCache.bytes
 }
 
 /** C5 — the 6-point stacked arrow of one chevron row, `dir` deciding which way it
