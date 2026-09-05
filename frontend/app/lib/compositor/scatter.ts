@@ -8,7 +8,7 @@
  *   style     what it is
  *   chaff     blades strewn over a sheet, printed through a mottled two-ink mask
  *   strand    branching chains of stubby rods, printed over a plate that sits off true
- *   (husk)    Task 5 — see the `// STYLE: husk` anchors
+ *   husk      warped ovals dropped into one depth field, the fill inside them eaten
  *
  * It is a SIBLING of the Mosaic element (`deal`), not one of its styles: a mosaic
  * is a composition — a frame divided and filled — while a scatter is loose marks
@@ -32,7 +32,10 @@ import {
   defaultStrand, normalizeStrand, paintStrand, strandPresetPatch, strandPresetOf,
   STRAND_LIMITS, STRAND_PRESET_NAMES, STRAND_TEXTURES, type StrandParams,
 } from '~/lib/compositor/strand'
-// STYLE: husk — Task 5 imports its module here.
+import {
+  defaultHusk, normalizeHusk, paintHusk, huskPresetPatch, huskPresetOf,
+  HUSK_LIMITS, HUSK_PRESET_NAMES, HUSK_BITES, type HuskParams,
+} from '~/lib/compositor/husk'
 
 /** The context a style's paint needs. Every scatter generator prints one sheet into
  *  the box, so this is deliberately the smallest surface a recording stub can fake. */
@@ -133,14 +136,37 @@ const STRAND_STYLE: ScatterStyleRow<'strand', StrandParams> = {
   paint: paintStrand,
 }
 
+// ── Husk ──────────────────────────────────────────────────────────────────────
+
+const HUSK_STYLE: ScatterStyleRow<'husk', HuskParams> = {
+  id: 'husk',
+  label: 'Husk',
+  defaults: defaultHusk,
+  normalize: normalizeHusk,
+  // The tool's own three groups, in its own order: the husks, the bite, the finish.
+  controls: [
+    { kind: 'slider', key: 'count', label: 'Husks', min: HUSK_LIMITS.count[0], max: HUSK_LIMITS.count[1], step: 1 },
+    { kind: 'slider', key: 'size', label: 'Size', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'vary', label: 'Size range', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'lump', label: 'Lumpiness', min: 0, max: 1, step: 0.01 },
+    { kind: 'select', key: 'bite', label: 'Bite', options: HUSK_BITES.map(b => ({ value: b, label: b[0]!.toUpperCase() + b.slice(1) })) },
+    { kind: 'slider', key: 'eat', label: 'Bite amount', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'tex', label: 'Bite texture', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'grain', label: 'Grain', min: 0, max: 1, step: 0.01 },
+  ],
+  presetNames: HUSK_PRESET_NAMES,
+  presetPatch: name => huskPresetPatch(name as Parameters<typeof huskPresetPatch>[0]),
+  presetOf: huskPresetOf,
+  paint: paintHusk,
+}
+
 // ── The registry ──────────────────────────────────────────────────────────────
 
-/** Inspector order, top to bottom. ONE line per style — the anchors below are where
- *  Tasks 4 and 5 add theirs. */
+/** Inspector order, top to bottom. ONE line per style. */
 export const SCATTER_STYLES = [
   CHAFF_STYLE,
   STRAND_STYLE,
-  // STYLE: husk — Task 5 adds `HUSK_STYLE,` here.
+  HUSK_STYLE,
 ] as const
 
 /** The style words, derived from the table — a new row widens this union for free. */

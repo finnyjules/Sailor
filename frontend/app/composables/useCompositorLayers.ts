@@ -66,6 +66,7 @@ import { paintMosh, defaultMosh, type MoshParams } from '~/lib/compositor/mosh'
 import { paintCarve, defaultCarve, normalizeCarve, type CarveParams } from '~/lib/compositor/carve'
 import type { ChaffParams } from '~/lib/compositor/chaff'
 import type { StrandParams } from '~/lib/compositor/strand'
+import type { HuskParams } from '~/lib/compositor/husk'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -674,7 +675,9 @@ export interface ScatterLayer extends LayerCommon {
   // offset / edge / texKind / tex / grain + its three ordered role inks); only read
   // when style is 'strand'. Absent ⇒ defaultStrand().
   strand?: StrandParams
-  // STYLE: husk — Task 5 adds `husk?: HuskParams` here.
+  // Husk's tunables (count / size / vary / lump / bite / eat / tex / grain + its
+  // three ordered role inks); only read when style is 'husk'. Absent ⇒ defaultHusk().
+  husk?: HuskParams
 }
 
 export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer | ScatterLayer
@@ -851,7 +854,7 @@ export function createScatterLayer(partial: Partial<ScatterLayer> = {}): Scatter
     w: 1, h: 1,
     seed: DEFAULT_SCATTER_SEED,
     style: DEFAULT_SCATTER_STYLE,
-    ...(styles as { chaff: ChaffParams; strand: StrandParams }),
+    ...(styles as { chaff: ChaffParams; strand: StrandParams; husk: HuskParams }),
     ...partial,
   }
 }

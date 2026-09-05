@@ -1,8 +1,8 @@
 /**
  * The Scatter element: thrown marks as ONE self-painting layer, added from the
  * toolbar's Shapes menu beside Mosaic and tuned in the inspector. Internally it is
- * the `scatter` layer kind; its Style picks which generator paints it (Chaff and
- * Strand now; Husk registers at the same anchors).
+ * the `scatter` layer kind; its Style picks which generator paints it (Chaff, Strand
+ * and Husk).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TOOLBAR_SHAPES, resolveShapeFace, shapeFaceLabel } from '~/lib/compositor/toolbarMenus'
@@ -16,6 +16,7 @@ import {
 } from '~/composables/useCompositorLayers'
 import { defaultChaff, normalizeChaff, CHAFF_PRESET_NAMES, CHAFF_PALETTE_PRESETS } from '~/lib/compositor/chaff'
 import { defaultStrand, STRAND_PRESET_NAMES, STRAND_PALETTE_PRESETS } from '~/lib/compositor/strand'
+import { defaultHusk, HUSK_PRESET_NAMES, HUSK_PALETTE_PRESETS } from '~/lib/compositor/husk'
 import { applyCompositorCommand, describeCompositor, type CompositorState } from '~/lib/agent/surfaces/compositor'
 
 // ── The Shapes menu ───────────────────────────────────────────────────────────
@@ -126,6 +127,23 @@ describe('the Scatter style registry', () => {
     const keys = row.controls.map(c => c.key)
     expect(new Set(keys).size).toBe(keys.length)
     expect(keys).toEqual(['count', 'len', 'wander', 'branch', 'thick', 'rod', 'notch', 'rough', 'offset', 'edge', 'texKind', 'tex', 'grain'])
+  })
+
+  it('Husk registers its own module\'s defaults, dials and palettes', () => {
+    const row = scatterStyleRow('husk')
+    expect(row.label).toBe('Husk')
+    expect(row.defaults()).toEqual(defaultHusk())
+    expect(row.presetNames).toEqual(HUSK_PRESET_NAMES)
+    expect(row.presetPatch('Ember')).toEqual({ inks: [...HUSK_PALETTE_PRESETS.Ember.inks] })
+    // The tool's own whole-number dial reaches the inspector through the registry.
+    expect(row.controls.find(c => c.key === 'count')).toMatchObject({ kind: 'slider', label: 'Husks', min: 1, max: 70, step: 1 })
+    const bite = row.controls.find(c => c.key === 'bite')!
+    expect(bite.kind).toBe('select')
+    expect((bite as { options: { value: string }[] }).options.map(o => o.value)).toEqual(['crumble', 'dots'])
+    // Every dial the tool shows is on the row, in its order, none of them twice.
+    const keys = row.controls.map(c => c.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(keys).toEqual(['count', 'size', 'vary', 'lump', 'bite', 'eat', 'tex', 'grain'])
   })
 
   it('an unknown style resolves to the default row rather than throwing', () => {
@@ -327,6 +345,25 @@ describe('agent scatter op', () => {
     const byPalette = applyCompositorCommand(baseState(), { op: 'scatter', args: { id: 'u', palettePreset: 'Vermilion' } })
     expect(byPalette.ok).toBe(true)
     expect(layerOf(byPalette)).toMatchObject({ style: 'strand' })
+  })
+
+  it('makes a Husk scatter, by name or from its dials alone', () => {
+    const named = applyCompositorCommand(baseState(), {
+      op: 'scatter',
+      args: { id: 's', style: 'husk', husk: { count: 12, bite: 'dots' }, palettePreset: 'Harbour', seed: 61 },
+    })
+    expect(named.ok).toBe(true)
+    const l = layerOf(named)
+    expect(l).toMatchObject({ style: 'husk', seed: 61 })
+    expect(l.husk).toMatchObject({ count: 12, bite: 'dots', inks: [...HUSK_PALETTE_PRESETS.Harbour.inks] })
+    // A tunables object on its own is enough to say which style is meant.
+    const implied = applyCompositorCommand(baseState(), { op: 'scatter', args: { id: 't', husk: { lump: 1 } } })
+    expect(implied.ok).toBe(true)
+    expect(layerOf(implied)).toMatchObject({ style: 'husk' })
+    // …and so is a palette name that only one style's table carries.
+    const byPalette = applyCompositorCommand(baseState(), { op: 'scatter', args: { id: 'u', palettePreset: 'Cinder' } })
+    expect(byPalette.ok).toBe(true)
+    expect(layerOf(byPalette)).toMatchObject({ style: 'husk' })
   })
 
   it('rejects a palette name that is not in the style\'s own table, with the options', () => {
