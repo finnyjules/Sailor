@@ -20,6 +20,7 @@ import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { readGrid } from '~/lib/frame/gridConfig'
 import type { FrameGrid } from '~/lib/frame/grid'
 import { normalizeVocab } from '~/lib/compositor/dealVocab'
+import { defaultPane, normalizePane, type PaneParams } from '~/lib/compositor/pane'
 import { gridTemplate } from '~/lib/frame/gridTemplates'
 import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
@@ -152,7 +153,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setLayerDepth', hint: 'Change a layer\'s stacking depth (z-order). target = layer id; args: { to: "back" | "front" }. "back" puts it BEHIND every other layer including the connected/wired image — use this for "put the headline BEHIND the image". "front" brings it to the top.' },
   { op: 'setBackground', hint: 'Set the FRAME background that sits behind every layer. args: { paint } — a "#RRGGBB" colour, a gradient object, or "none". Use for "make the background blue / a sunset gradient".' },
   { op: 'setGrid', hint: 'Set the layout grid on a Frame — a Swiss-style guide layers can snap to (editor-only, never baked/exported). args: { patch: {...}, generate? }. patch keys: mode ("off" | "explicit" | "generated"), baseModule (0..1 of canvas width, the alignment unit), gutter (0..1), margin (0..1), columns/rows (explicit mode counts), gen: { colRange/rowRange ([min,max] column/row counts, generated mode), regularity (0..1: 0 = loose/free spacing, 1 = strict/equal), merge (bool, merge adjacent cells into larger regions), mergeMaxSpan (max cells a merged region spans), symmetry ("none" | "mirror"), seed (integer) }, overlay (bool, show the guide lines). Omitted keys keep their current value. generate:true (or reroll:true) re-rolls a fresh random seed for a new generated-grid variation; switching mode to "generated" without giving gen.seed also rolls a fresh seed. This is what "add a layout grid", "give it a 6-column grid", "generate a new grid variation", "re-roll the grid" mean.' },
-  { op: 'dealGrid', hint: `Deal a decorative modular grid as ONE self-painting layer: every cell gets a fill from a weighted palette, keyed by a seed. This is a dense generative grid ("mosaic", "modular grid", "tiled pattern", "oddgrid") as a single layer that BAKES into the render (unlike setGrid's editor-only guide). To CREATE a new deal, omit target; to reconfigure an existing one, target = the deal layer's id. args: { template ("modular"|"oddgrid"|"parcel"|"mosh"|"static" — a one-word preset that pre-fills the whole look; any of the fields below still override it), vocab ("brand" | "mono" | "warm" | "cool" — the palette), density (0..1, fraction of cells filled; the rest are transparent; default 1 = every cell), cellInset (0..0.4, gap inset per cell), cellFill ("solid" | "pane"; default "solid"; "pane" makes every cell a hue-walked two-ink gradient — a gradient mosaic / "pane" look), grid ({ colRange:[min,max], rowRange:[min,max], regularity (0..1), merge (bool), symmetry ("none"|"mirror") } — the cell layout; omitted keeps the current/frame grid), seed (integer, the variation), generate (bool — re-roll a fresh seed for a new variation), id? (choose one to target it later) }. "make a colourful mosaic", "deal a warm modular grid", "re-roll the pattern", "sparser grid" all mean this.` },
+  { op: 'dealGrid', hint: `Deal a decorative modular grid as ONE self-painting layer: every cell gets a fill from a weighted palette, keyed by a seed. This is a dense generative grid ("mosaic", "modular grid", "tiled pattern", "oddgrid") as a single layer that BAKES into the render (unlike setGrid's editor-only guide). To CREATE a new deal, omit target; to reconfigure an existing one, target = the deal layer's id. args: { template ("modular"|"oddgrid"|"parcel"|"mosh"|"static" — a one-word preset that pre-fills the whole look; any of the fields below still override it), vocab ("brand" | "mono" | "warm" | "cool" — the palette), density (0..1, fraction of cells filled; the rest are transparent; default 1 = every cell), cellInset (0..0.4, gap inset per cell), cellFill ("solid" | "pane"; default "solid"; "pane" = the Pane look: rows of flush panes with their OWN row-masonry — grid/density/cellInset are ignored — each pane a two-colour ramp running corner to corner or edge to edge, inks drawn by distance along the palette), pane ({ rows (1..8, default 3), cells (nominal cells per row, 2..12, default 6; each row varies it), vary (0..1 how uneven rows/cells are, default 0.55), diag (0..1 share of corner-to-corner ramps vs flat ones, default 0.45), soft (0..1 how much of each pane is the blend; 0 = hard line, default 0.85), spread (0..1 how far apart in the palette the two inks are; 0 = neighbours, default 0.55) } — sending pane implies cellFill "pane"), grid ({ colRange:[min,max], rowRange:[min,max], regularity (0..1), merge (bool), symmetry ("none"|"mirror") } — the cell layout; omitted keeps the current/frame grid), seed (integer, the variation), generate (bool — re-roll a fresh seed for a new variation), id? (choose one to target it later) }. "make a colourful mosaic", "deal a warm modular grid", "re-roll the pattern", "sparser grid" all mean this.` },
   { op: 'generateImage', hint: 'Generate a PHOTOGRAPHIC/illustrative AI image and add it as a layer — "generate a picture of a dog", "add a city photo". Not for gradients/colours (use setBackground/setFill). args: { prompt (vivid), aspectRatio? }.' },
   { op: 'removeImageBackground', hint: 'Cut out the subject of an existing IMAGE layer (transparent background). target = image layer id.' },
   { op: 'editImage', hint: 'Edit an existing IMAGE layer from an instruction (Flux Kontext) — "make it brighter", "change the sky". target = image layer id; args: { instruction }.' },
@@ -403,6 +404,12 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
         if (typeof a.density === 'number') d.density = clamp(a.density, 0, 1, 1)
         if (typeof a.cellInset === 'number') d.cellInset = clamp(a.cellInset, 0, 0.4, 0)
         if (a.cellFill === 'solid' || a.cellFill === 'pane') d.cellFill = a.cellFill
+        // Pane tunables merge onto the current ones; sending them implies the Pane
+        // fill unless the model said 'solid' in the same breath.
+        if (a.pane && typeof a.pane === 'object') {
+          d.pane = normalizePane(a.pane, (d.pane as PaneParams | undefined) ?? defaultPane())
+          if (a.cellFill !== 'solid') d.cellFill = 'pane'
+        }
         const g = clone((target as { grid: FrameGrid }).grid)
         // Template pre-fill FIRST (forces generated mode, preserves current seed so
         // the variation is kept), then the model's explicit gen keys override.
@@ -433,7 +440,8 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
         vocab: normalizeVocab(a.vocab ?? tpl?.deal.vocab ?? 'brand'),
         density: clamp(a.density, 0, 1, tpl?.deal.density ?? 1),
         cellInset: clamp(a.cellInset, 0, 0.4, tpl?.deal.cellInset ?? 0),
-        cellFill: a.cellFill === 'pane' ? 'pane' : 'solid',
+        cellFill: a.cellFill === 'pane' || (a.pane && typeof a.pane === 'object' && a.cellFill !== 'solid') ? 'pane' : 'solid',
+        pane: normalizePane(a.pane),
         grid,
       } as unknown as LocalLayer
       return { ok: true, template: { ...state, layers: [...state.layers, layer] }, inverse: snapshot() }

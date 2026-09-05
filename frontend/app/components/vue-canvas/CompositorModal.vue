@@ -13,6 +13,7 @@ import {
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
 } from '~/composables/useCompositorLayers'
 import { DEAL_VOCABS, type DealVocab } from '~/lib/compositor/dealVocab'
+import { defaultPane, PANE_LIMITS, type PaneParams } from '~/lib/compositor/pane'
 import { GRID_TEMPLATES, type GridTemplate } from '~/lib/frame/gridTemplates'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
@@ -678,25 +679,26 @@ function onDealTemplate(t: GridTemplate) {
   addLocal(createDealLayer({ grid: g, w: 1, h: aspect, vocab: t.deal.vocab, density: t.deal.density, cellInset: t.deal.cellInset }))
 }
 
-/** One-click "Pane" — a gradient mosaic: an uneven grid whose every kept cell is a
- *  hue-walked two-ink linear gradient (cellFill:'pane'). Configures the selected deal,
- *  or — with none selected — creates a fresh deal from the frame's grid, in one
- *  undoable step. Reuses the same setLocal / createDealLayer path as the templates,
- *  with a suitably uneven grid (low regularity + merge on) so "Pane" is one click. */
+/** One-click "Pane" — the Pane generator (lib/compositor/pane): its own row-masonry
+ *  of flush cells, each a corner-to-corner two-ink ramp (cellFill:'pane'), at the
+ *  original's defaults (rows 3 / cells 6 / vary .55 / diag .45 / soft .85 / spread
+ *  .55). Configures the selected deal, or — with none selected — creates a fresh deal
+ *  filling the frame, in one undoable step. The deal's grid is untouched: Pane
+ *  ignores it (only its seed carries the variation). */
 function onPane() {
   if (selectedLocal.value?.kind === 'deal') {
     const layer = selectedLocal.value as DealLayer
-    setLocal(layer.id, {
-      cellFill: 'pane',
-      grid: { ...layer.grid, mode: 'generated', gen: { ...layer.grid.gen, regularity: 0.35, merge: true } },
-    } as Partial<DealLayer>)
+    setLocal(layer.id, { cellFill: 'pane', pane: defaultPane() } as Partial<DealLayer>)
     return
   }
   const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
-  g.mode = 'generated'
-  g.gen = { ...g.gen, regularity: 0.35, merge: true }
+  if (g.mode === 'off') g.mode = 'generated'
   const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
-  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, cellFill: 'pane' }))
+  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, cellFill: 'pane', pane: defaultPane() }))
+}
+/** Patch a deal's Pane tunables (one history step via setLocal). */
+function patchPane(layer: DealLayer, patch: Partial<PaneParams>) {
+  setLocal(layer.id, { pane: { ...(layer.pane ?? defaultPane()), ...patch } } as Partial<DealLayer>)
 }
 
 // Normalize brush layers to a tight box: brush strokes are stored in absolute
@@ -6765,7 +6767,7 @@ onUnmounted(() => {
               <div class="flex flex-wrap gap-1.5">
                 <StudioButton v-for="t in GRID_TEMPLATE_LIST" :key="t.id" variant="secondary" :title="t.blurb"
                   @click="applyDealTemplate(selectedLocal as DealLayer, t)">{{ t.name }}</StudioButton>
-                <StudioButton variant="secondary" title="A gradient mosaic — every cell a hue-walked two-ink gradient at a crisp angle"
+                <StudioButton variant="secondary" title="Pane — rows of flush panes, each a two-colour ramp running corner to corner or edge to edge"
                   @click="onPane()">Pane</StudioButton>
               </div>
               <p class="mt-1 text-[10px] text-white/30 leading-snug">One click sets the palette, density and cell layout; your current variation is kept.</p>
@@ -6777,11 +6779,35 @@ onUnmounted(() => {
             </div>
             <div class="mt-2">
               <div class="panel-label mb-1.5">Cell fill</div>
-              <StudioSegmented :options="['Solid', 'Gradient mosaic']"
-                :model-value="(selectedLocal as any).cellFill === 'pane' ? 'Gradient mosaic' : 'Solid'"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { cellFill: v === 'Gradient mosaic' ? 'pane' : 'solid' })" />
+              <StudioSegmented :options="['Solid', 'Pane']"
+                :model-value="(selectedLocal as any).cellFill === 'pane' ? 'Pane' : 'Solid'"
+                @update:model-value="(v: any) => setLocal(selectedLocal!.id, v === 'Pane'
+                  ? { cellFill: 'pane', pane: (selectedLocal as DealLayer).pane ?? defaultPane() } as Partial<DealLayer>
+                  : { cellFill: 'solid' })" />
             </div>
-            <div class="mt-2 flex flex-col gap-1.5">
+            <!-- Pane has its OWN layout (row masonry, every cell flush and filled), so the
+                 grid controls (density / inset / regularity / merge) don't apply to it. -->
+            <div v-if="(selectedLocal as any).cellFill === 'pane'" class="mt-2 flex flex-col gap-1.5">
+              <StudioSlider label="Rows" :min="PANE_LIMITS.rows[0]" :max="PANE_LIMITS.rows[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).rows"
+                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { rows: Math.round(v) })" />
+              <StudioSlider label="Cells per row" :min="2" :max="PANE_LIMITS.cells[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).cells"
+                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { cells: Math.round(v) })" />
+              <StudioSlider label="Vary" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).vary"
+                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { vary: v })" />
+              <StudioSlider label="Diagonals" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).diag"
+                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { diag: v })" />
+              <StudioSlider label="Softness" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).soft"
+                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { soft: v })" />
+              <StudioSlider label="Spread" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).spread"
+                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { spread: v })" />
+            </div>
+            <div v-else class="mt-2 flex flex-col gap-1.5">
               <StudioSlider label="Density" :min="0.05" :max="1" :step="0.02" :bindable="false"
                 :model-value="(selectedLocal as any).density"
                 @update:model-value="(v: number) => setLocal(selectedLocal!.id, { density: v })" />
@@ -7278,7 +7304,7 @@ onUnmounted(() => {
               <div class="flex flex-wrap gap-1.5">
                 <StudioButton v-for="t in GRID_TEMPLATE_LIST" :key="t.id" variant="secondary" :title="t.blurb"
                   @click="onDealTemplate(t)">{{ t.name }}</StudioButton>
-                <StudioButton variant="secondary" title="A gradient mosaic — every cell a hue-walked two-ink gradient at a crisp angle"
+                <StudioButton variant="secondary" title="Pane — rows of flush panes, each a two-colour ramp running corner to corner or edge to edge"
                   @click="onPane()">Pane</StudioButton>
               </div>
             </div>

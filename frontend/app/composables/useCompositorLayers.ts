@@ -57,7 +57,7 @@ import { paintMaskRelease } from '~/lib/compositor/maskBreak'
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
 import { resolveGrid, defaultGrid, type FrameGrid } from '~/lib/frame/grid'
 import { pickDealPaint, keptCell, forceKeptCell, type DealVocab } from '~/lib/compositor/dealVocab'
-import { paneCellGradient } from '~/lib/compositor/pane'
+import { paneRegions, paneCellGradient, paneInksFromVocab, defaultPane, type PaneParams } from '~/lib/compositor/pane'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -585,11 +585,15 @@ export interface DealLayer extends LayerCommon {
   vocab: DealVocab            // named weighted fill vocabulary
   density: number             // 0..1 fraction of cells that get filled (rest transparent)
   cellInset: number           // 0..0.4 normalized inset per cell (gutter look on top of the grid's own)
-  // How each kept cell is painted. 'solid' (default / absent) = one vocabulary fill
-  // per cell; 'pane' = a hue-walked two-ink linear gradient per cell (a "gradient
-  // mosaic" / Pane look), from the same palette. Absent behaves as 'solid' so
-  // existing deals are unchanged.
+  // How the deal is painted. 'solid' (default / absent) = the shared grid, one
+  // vocabulary fill per kept cell. 'pane' = the Pane generator (lib/compositor/pane):
+  // its OWN row-masonry (every cell flush and filled — grid / density / inset are
+  // ignored) with a corner-to-corner two-ink HSL ramp per cell, inks drawn by
+  // distance along the vocabulary's solids. Absent behaves as 'solid'.
   cellFill?: 'solid' | 'pane'
+  // Pane's tunables (rows / cells / vary / diag / soft / spread); only read when
+  // cellFill is 'pane'. Absent ⇒ defaultPane().
+  pane?: PaneParams
 }
 
 export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer
@@ -729,6 +733,7 @@ export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
     density: 1,
     cellInset: 0,
     cellFill: 'solid',
+    pane: defaultPane(),
     ...partial,
     grid,
   }
@@ -2042,12 +2047,32 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // ride the shared LayerCommon machinery around this draw (paintLayer wraps it),
     // so this branch only lays down pixels.
     const boxW = Math.max(1, layer.w * W), boxH = Math.max(1, layer.h * W)
+    const seed = layer.grid.gen.seed
+    if (layer.cellFill === 'pane') {
+      // Pane paints its OWN masonry — NOT the shared grid: every cell is flush and
+      // filled, so regularity / merge / density / inset don't apply here. Each cell
+      // gets a canvas linear gradient over its EXACT corner/edge endpoints (the
+      // direction is a vector in cell fractions, not an angle — building it directly
+      // on the cell rect keeps the endpoints on the cell's corners, which is the look).
+      const pane = layer.pane ?? defaultPane()
+      const palette = paneInksFromVocab(layer.vocab)
+      ctx.save()
+      ctx.translate(-boxW / 2, -boxH / 2)
+      for (const r of paneRegions(pane, boxW, boxH, seed)) {
+        const g = paneCellGradient(pane, palette, seed, r.i, r.j)
+        const grad = ctx.createLinearGradient(r.x + g.x0 * r.w, r.y + g.y0 * r.h, r.x + g.x1 * r.w, r.y + g.y1 * r.h)
+        for (const s of g.stops) grad.addColorStop(s.offset, s.color)
+        ctx.fillStyle = grad
+        ctx.fillRect(r.x, r.y, r.w, r.h)
+      }
+      ctx.restore()
+      return
+    }
     // Resolve cells FLUSH (gutter 0): the deal's only cell gap is `cellInset`, applied
     // per cell below. The grid's own gutter would add a second, hidden gap so cells are
     // never flush even at cellInset 0 — which is not what the inset control implies.
     const { regions } = resolveGrid({ ...layer.grid, gutter: 0 }, boxW, boxH)
     if (!regions.length) return
-    const seed = layer.grid.gen.seed
     const density = layer.density ?? 1
     const inset = Math.max(0, Math.min(0.4, layer.cellInset ?? 0))
     // Force-keep one cell when density > 0 so a sparse deal never renders fully
@@ -2064,12 +2089,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // paintTileBox paints ANY Paint (solid / gradient / pattern Fill) at corner
       // origin; a shader-typed Fill unwraps to its input there, so no field request
       // is needed (see layerPaints('deal')). Drawn into the cell's own sub-box.
-      // 'pane' cell fill swaps the solid vocabulary pick for a hue-walked two-ink
-      // gradient (a "gradient mosaic"); everything else about the cell is unchanged.
-      const cellPaint = layer.cellFill === 'pane'
-        ? paneCellGradient(layer.vocab, seed, i)
-        : pickDealPaint(layer.vocab, seed, i)
-      const tile = paintTileBox(cellPaint, cw, ch)
+      const tile = paintTileBox(pickDealPaint(layer.vocab, seed, i), cw, ch)
       ctx.drawImage(tile, r.x + ins, r.y + ins, cw, ch)
     }
     ctx.restore()
