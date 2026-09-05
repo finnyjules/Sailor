@@ -3243,6 +3243,50 @@
       ]
     },
     {
+      "id": "culture",
+      "name": "Culture",
+      "category": "generative",
+      "animated": true,
+      "passes": 1,
+      "centerParam": null,
+      "textures": [],
+      "generative": true,
+      "params": [
+        { "uniform": "u_ramp", "label": "Inks (plate first, then each ring inward)", "type": "gradient", "maxStops": 8,
+          "default": [
+            { "pos": 0.0, "color": "#EF8F14" },
+            { "pos": 0.5, "color": "#A81E12" },
+            { "pos": 1.0, "color": "#9FA8DA" }
+          ] },
+        { "uniform": "u_count", "label": "Cells", "type": "float", "min": 1, "max": 64, "default": 36, "step": 1 },
+        { "uniform": "u_size", "label": "Cell size", "type": "float", "min": 0.0, "max": 1.0, "default": 0.4, "step": 0.01 },
+        { "uniform": "u_fuse", "label": "Fusing", "type": "float", "min": 0.0, "max": 1.0, "default": 0.62, "step": 0.01 },
+        { "uniform": "u_cover", "label": "Coverage", "type": "float", "min": 0.0, "max": 1.0, "default": 0.72, "step": 0.01 },
+        { "uniform": "u_spread", "label": "Core tightness", "type": "float", "min": 0.2, "max": 4.0, "default": 1.7, "step": 0.05 },
+        { "uniform": "u_soft", "label": "Edge softness", "type": "float", "min": 0.0, "max": 1.0, "default": 0.3, "step": 0.01 },
+        { "uniform": "u_grain", "label": "Grain", "type": "float", "min": 0.0, "max": 1.0, "default": 0.62, "step": 0.01 },
+        { "uniform": "u_tex", "label": "Grain texture", "type": "enum", "default": 0,
+          "options": [
+            { "label": "Fine", "value": 0 },
+            { "label": "Stipple", "value": 1 }
+          ] },
+        { "uniform": "u_dot", "label": "Stipple size", "type": "float", "min": 1, "max": 8, "default": 2, "step": 1,
+          "showWhen": { "uniform": "u_tex", "equals": [1] } },
+        { "uniform": "u_motion", "label": "Motion", "type": "enum", "default": 0,
+          "options": [
+            { "label": "Still", "value": 0 },
+            { "label": "Drift", "value": 1 },
+            { "label": "Grow", "value": 2 },
+            { "label": "Cycle colours", "value": 3 }
+          ] },
+        { "uniform": "u_amount", "label": "Motion amount", "type": "float", "min": 0.0, "max": 1.0, "default": 0.6, "step": 0.01,
+          "showWhen": { "uniform": "u_motion", "equals": [1, 2, 3] } },
+        { "uniform": "u_speed", "label": "Speed", "type": "float", "min": 0.0, "max": 3.0, "default": 1.0, "step": 0.05,
+          "showWhen": { "uniform": "u_motion", "equals": [1, 2, 3] } },
+        { "uniform": "u_mix", "label": "Image mix", "type": "float", "min": 0.0, "max": 1.0, "default": 0.0, "step": 0.05 }
+      ]
+    },
+    {
       "id": "mist",
       "name": "Mist",
       "category": "generative",

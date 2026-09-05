@@ -207,9 +207,10 @@ export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
   { words: 'film / grain / analog / dusty', ids: ['post_grain', 'risograph'] },
   { words: 'contour lines / topographic map / isolines / terrain map', ids: ['topographic'] },
   { words: 'stipple / pointillist / engraved dots', ids: ['stipple'] },
-  { words: 'background from nothing / generative field (draws its own field; blend the input with Image mix)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel', 'terrain_bands', 'sonar', 'oddgrid', 'static', 'mist', 'pixel_bloom', 'thread_contours', 'sear'] },
+  { words: 'background from nothing / generative field (draws its own field; blend the input with Image mix)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel', 'terrain_bands', 'sonar', 'oddgrid', 'static', 'mist', 'pixel_bloom', 'thread_contours', 'sear', 'culture'] },
   { words: 'pixel patchwork / blocky colour regions / riso grid / quilt of cells / oddgrid', ids: ['oddgrid', 'mondrian'] },
   { words: 'glitch pixel poster / one-bit static / corrupted riso / scan bars / stacked pattern bands / static', ids: ['static', 'block_glitch'] },
+  { words: 'petri dish / bacterial colonies / blobs ringed in colour / culture', ids: ['culture', 'voronoi_cells'] },
   { words: 'banded terrain / contour landscape / heat map bands / posterised landscape', ids: ['terrain_bands', 'topographic'] },
   { words: 'dithered map / landmasses / islands / radar map / sonar', ids: ['sonar'] },
   { words: 'neon curtain / spray streaks over pastel blots / mist', ids: ['mist', 'nebula'] },
@@ -286,8 +287,13 @@ function renderExamples(): string {
 
 /** Stated ceiling for the whole guidance block (characters). Pinned by a test —
  *  the derived index grows with the catalog, and this is the budget that says
- *  how much prompt the shader domain may take before it needs compressing. */
-export const SHADER_GUIDANCE_CEILING = 8000
+ *  how much prompt the shader domain may take before it needs compressing.
+ *  Raised 8000 -> 8300 when `culture` landed (2026-09-04): the catalog entry, the
+ *  modes caveat and one cluster line together cost ~130 chars and the block was
+ *  already within 10 of the old figure. The NEXT effect to run it out should
+ *  compress the clusters (they are the longest derived section) rather than
+ *  raise this again — a ceiling that only ever moves up is not a budget. */
+export const SHADER_GUIDANCE_CEILING = 8300
 
 /**
  * Build the shader guidance. `catalog` is the live effect list.

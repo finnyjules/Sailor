@@ -417,8 +417,16 @@ function pickAdjustPreset(name: string) { const p = ADJUST_PRESETS.find(x => x.n
 const CUSTOM_LOOK = 'Custom'
 const effectLooks = computed(() => (effectDef.value ? EFFECT_LOOKS[effectDef.value.id] ?? [] : []))
 // The row shows the look the current params match, or Custom once any slider moved.
-// A colour entry matches by hex (case-blind); a number by value.
-function lookParamMatches(k: string, v: number | string): boolean {
+// A colour entry matches by hex (case-blind); a number by value; a gradient entry
+// (a Look that IS a palette, like Culture's ink roles) by its whole stop list, in
+// order, since the order is what gives each ink its role.
+function lookParamMatches(k: string, v: ParamValue): boolean {
+  if (Array.isArray(v)) {
+    const cur = effectValues.value[k]
+    if (!Array.isArray(cur) || cur.length !== v.length) return false
+    return v.every((s, i) => Math.abs((cur[i] as GradientStop).pos - s.pos) < 1e-6
+      && String((cur[i] as GradientStop).color).toLowerCase() === String(s.color).toLowerCase())
+  }
   if (typeof v === 'string') return String(effectValues.value[k] ?? '').toLowerCase() === v.toLowerCase()
   return Math.abs(numValue(k) - v) < 1e-6
 }
