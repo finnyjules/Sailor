@@ -58,6 +58,7 @@ import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
 import { resolveGrid, defaultGrid, type FrameGrid } from '~/lib/frame/grid'
 import { pickDealPaint, keptCell, forceKeptCell, type DealVocab } from '~/lib/compositor/dealVocab'
 import { paneRegions, paneCellGradient, paneInksFromVocab, defaultPane, type PaneParams } from '~/lib/compositor/pane'
+import { paintModular, modularPalette, defaultModular, type ModularParams } from '~/lib/compositor/modular'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -589,11 +590,19 @@ export interface DealLayer extends LayerCommon {
   // vocabulary fill per kept cell. 'pane' = the Pane generator (lib/compositor/pane):
   // its OWN row-masonry (every cell flush and filled — grid / density / inset are
   // ignored) with a corner-to-corner two-ink HSL ramp per cell, inks drawn by
-  // distance along the vocabulary's solids. Absent behaves as 'solid'.
-  cellFill?: 'solid' | 'pane'
+  // distance along the vocabulary's solids. 'modular' = the Modular generator
+  // (lib/compositor/modular): its OWN merged module grid over a background, each
+  // module empty / solid / block field / dot cluster / line grid / 2-stop ramp, with
+  // hairlines over the whole grid — grid / density / inset are ignored too.
+  // Absent behaves as 'solid'.
+  cellFill?: 'solid' | 'pane' | 'modular'
   // Pane's tunables (rows / cells / vary / diag / soft / spread); only read when
   // cellFill is 'pane'. Absent ⇒ defaultPane().
   pane?: PaneParams
+  // Modular's tunables (columns / unit / merge / type weights / blockFill / dot /
+  // rules / ruleW + bg / rule colour / ordered inks); only read when cellFill is
+  // 'modular'. Absent ⇒ defaultModular().
+  modular?: ModularParams
 }
 
 export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer
@@ -734,6 +743,7 @@ export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
     cellInset: 0,
     cellFill: 'solid',
     pane: defaultPane(),
+    modular: defaultModular(),
     ...partial,
     grid,
   }
@@ -2065,6 +2075,19 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
         ctx.fillStyle = grad
         ctx.fillRect(r.x, r.y, r.w, r.h)
       }
+      ctx.restore()
+      return
+    }
+    if (layer.cellFill === 'modular') {
+      // Modular paints its OWN module grid — NOT the shared grid: a background, then
+      // every module by its type (empty / solid / blocks / dots / lines / grad) and
+      // the hairlines over the whole box, straight on the real ctx (fillRect /
+      // createLinearGradient / arc / stroke). Regularity / merge / density / inset /
+      // force-keep don't apply; only the grid's seed carries the variation.
+      const modular = layer.modular ?? defaultModular()
+      ctx.save()
+      ctx.translate(-boxW / 2, -boxH / 2)
+      paintModular(ctx, modular, modularPalette(modular, layer.vocab), boxW, boxH, seed)
       ctx.restore()
       return
     }

@@ -14,6 +14,7 @@ import {
 } from '~/composables/useCompositorLayers'
 import { DEAL_VOCABS, type DealVocab } from '~/lib/compositor/dealVocab'
 import { defaultPane, PANE_LIMITS, type PaneParams } from '~/lib/compositor/pane'
+import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { GRID_TEMPLATES, type GridTemplate } from '~/lib/frame/gridTemplates'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
@@ -700,6 +701,51 @@ function onPane() {
 function patchPane(layer: DealLayer, patch: Partial<PaneParams>) {
   setLocal(layer.id, { pane: { ...(layer.pane ?? defaultPane()), ...patch } } as Partial<DealLayer>)
 }
+
+/** One-click "Modular" — the Modular generator (lib/compositor/modular): a merged
+ *  module grid over a background, each module empty / solid / block field / dot
+ *  cluster / line grid / 2-stop ramp, hairlines over the whole grid (cellFill:
+ *  'modular'), at the original's defaults (6 columns / unit 4 / merge .45 / the
+ *  source type weights / block fill .5 / dot .62 / rules .22 / rule width 1).
+ *  Configures the selected deal, or — with none selected — creates a fresh deal
+ *  filling the frame, in one undoable step. The deal's grid is untouched: Modular
+ *  ignores it (only its seed carries the variation). */
+function onModular() {
+  if (selectedLocal.value?.kind === 'deal') {
+    const layer = selectedLocal.value as DealLayer
+    setLocal(layer.id, { cellFill: 'modular', modular: defaultModular() } as Partial<DealLayer>)
+    return
+  }
+  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
+  if (g.mode === 'off') g.mode = 'generated'
+  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, cellFill: 'modular', modular: defaultModular() }))
+}
+/** Patch a deal's Modular tunables (one history step via setLocal). */
+function patchModular(layer: DealLayer, patch: Partial<ModularParams>) {
+  setLocal(layer.id, { modular: { ...(layer.modular ?? defaultModular()), ...patch } } as Partial<DealLayer>)
+}
+/** Patch ONE of Modular's six type weights. */
+function patchModularWeight(layer: DealLayer, type: ModularType, v: number) {
+  const m = layer.modular ?? defaultModular()
+  patchModular(layer, { w: { ...m.w, [type]: v } })
+}
+/** Apply a named palette preset (bg + rule + the ordered inks) to a Modular deal. */
+function applyModularPreset(layer: DealLayer, name: string) {
+  if (!(MODULAR_PRESET_NAMES as string[]).includes(name)) return
+  patchModular(layer, modularPresetPatch(name as ModularPresetName))
+}
+/** Which preset the selected Modular deal currently matches ('' when custom). */
+const modularPreset = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return ''
+  return modularPresetOf((l as DealLayer).modular ?? defaultModular()) ?? ''
+})
+/** Plain-language labels for the six module types, in pick order. */
+const MODULAR_TYPE_LABELS: readonly { type: ModularType; label: string }[] = [
+  { type: 'empty', label: 'Empty' }, { type: 'solid', label: 'Solid' }, { type: 'blocks', label: 'Blocks' },
+  { type: 'dots', label: 'Dots' }, { type: 'lines', label: 'Lines' }, { type: 'grad', label: 'Gradient' },
+]
 
 // Normalize brush layers to a tight box: brush strokes are stored in absolute
 // artboard coords, and a layer's x/y/w/h should equal their bounds so the render
@@ -6769,6 +6815,8 @@ onUnmounted(() => {
                   @click="applyDealTemplate(selectedLocal as DealLayer, t)">{{ t.name }}</StudioButton>
                 <StudioButton variant="secondary" title="Pane — rows of flush panes, each a two-colour ramp running corner to corner or edge to edge"
                   @click="onPane()">Pane</StudioButton>
+                <StudioButton variant="secondary" title="Modular — a merged module grid over a background: empty, solid, block fields, dot clusters, line grids and ramps, with hairlines"
+                  @click="onModular()">Modular</StudioButton>
               </div>
               <p class="mt-1 text-[10px] text-white/30 leading-snug">One click sets the palette, density and cell layout; your current variation is kept.</p>
             </div>
@@ -6779,19 +6827,68 @@ onUnmounted(() => {
             </div>
             <div class="mt-2">
               <div class="panel-label mb-1.5">Cell fill</div>
-              <StudioSegmented :options="['Solid', 'Pane']"
-                :model-value="(selectedLocal as any).cellFill === 'pane' ? 'Pane' : 'Solid'"
+              <StudioSegmented :options="['Solid', 'Pane', 'Modular']"
+                :model-value="(selectedLocal as any).cellFill === 'pane' ? 'Pane' : (selectedLocal as any).cellFill === 'modular' ? 'Modular' : 'Solid'"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, v === 'Pane'
                   ? { cellFill: 'pane', pane: (selectedLocal as DealLayer).pane ?? defaultPane() } as Partial<DealLayer>
-                  : { cellFill: 'solid' })" />
+                  : v === 'Modular'
+                    ? { cellFill: 'modular', modular: (selectedLocal as DealLayer).modular ?? defaultModular() } as Partial<DealLayer>
+                    : { cellFill: 'solid' })" />
+            </div>
+            <!-- Modular has its OWN layout (a merged module grid over a background), so the
+                 grid controls (density / inset / regularity / merge) don't apply to it. -->
+            <div v-if="(selectedLocal as any).cellFill === 'modular'" class="mt-2 flex flex-col gap-1.5">
+              <div>
+                <div class="panel-label mb-1.5">Palette preset</div>
+                <StudioSegmented :options="MODULAR_PRESET_NAMES as any" :model-value="modularPreset"
+                  @update:model-value="(v: any) => applyModularPreset(selectedLocal as DealLayer, v)" />
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                  <span class="text-[11px] text-white/55">Background</span>
+                  <StudioColor :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).bg"
+                    @update:model-value="(v: string) => patchModular(selectedLocal as DealLayer, { bg: v })" />
+                </div>
+                <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                  <span class="text-[11px] text-white/55">Rule</span>
+                  <StudioColor :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).rule"
+                    @update:model-value="(v: string) => patchModular(selectedLocal as DealLayer, { rule: v })" />
+                </div>
+              </div>
+              <StudioSlider label="Columns" :min="MODULAR_LIMITS.gcols[0]" :max="MODULAR_LIMITS.gcols[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).gcols"
+                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { gcols: Math.round(v) })" />
+              <StudioSlider label="Unit" :min="MODULAR_LIMITS.unit[0]" :max="MODULAR_LIMITS.unit[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).unit"
+                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { unit: Math.round(v) })" />
+              <StudioSlider label="Merge" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).merge"
+                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { merge: v })" />
+              <div class="panel-label mt-1">Module mix</div>
+              <StudioSlider v-for="t in MODULAR_TYPE_LABELS" :key="t.type" :label="t.label"
+                :min="MODULAR_LIMITS.weight[0]" :max="MODULAR_LIMITS.weight[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).w[t.type]"
+                @update:model-value="(v: number) => patchModularWeight(selectedLocal as DealLayer, t.type, Math.round(v))" />
+              <StudioSlider label="Block fill" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).blockFill"
+                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { blockFill: v })" />
+              <StudioSlider label="Dot size" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).dot"
+                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { dot: v })" />
+              <StudioSlider label="Rules" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).rules"
+                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { rules: v })" />
+              <StudioSlider label="Rule width" :min="MODULAR_LIMITS.ruleW[0]" :max="MODULAR_LIMITS.ruleW[1]" :step="0.5" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).ruleW"
+                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { ruleW: v })" />
             </div>
             <!-- Pane has its OWN layout (row masonry, every cell flush and filled), so the
                  grid controls (density / inset / regularity / merge) don't apply to it. -->
-            <div v-if="(selectedLocal as any).cellFill === 'pane'" class="mt-2 flex flex-col gap-1.5">
+            <div v-else-if="(selectedLocal as any).cellFill === 'pane'" class="mt-2 flex flex-col gap-1.5">
               <StudioSlider label="Rows" :min="PANE_LIMITS.rows[0]" :max="PANE_LIMITS.rows[1]" :step="1" :bindable="false"
                 :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).rows"
                 @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { rows: Math.round(v) })" />
-              <StudioSlider label="Cells per row" :min="2" :max="PANE_LIMITS.cells[1]" :step="1" :bindable="false"
+              <StudioSlider label="Cells per row" :min="PANE_LIMITS.cells[0]" :max="PANE_LIMITS.cells[1]" :step="1" :bindable="false"
                 :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).cells"
                 @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { cells: Math.round(v) })" />
               <StudioSlider label="Vary" :min="0" :max="1" :step="0.01" :bindable="false"
@@ -7306,6 +7403,8 @@ onUnmounted(() => {
                   @click="onDealTemplate(t)">{{ t.name }}</StudioButton>
                 <StudioButton variant="secondary" title="Pane — rows of flush panes, each a two-colour ramp running corner to corner or edge to edge"
                   @click="onPane()">Pane</StudioButton>
+                <StudioButton variant="secondary" title="Modular — a merged module grid over a background: empty, solid, block fields, dot clusters, line grids and ramps, with hairlines"
+                  @click="onModular()">Modular</StudioButton>
               </div>
             </div>
           </div>
