@@ -15,6 +15,7 @@ import {
 import { DEAL_VOCABS, type DealVocab } from '~/lib/compositor/dealVocab'
 import { defaultPane, PANE_LIMITS, type PaneParams } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
+import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
 import { GRID_TEMPLATES, type GridTemplate } from '~/lib/frame/gridTemplates'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
@@ -46,6 +47,7 @@ import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, ty
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
@@ -746,6 +748,55 @@ const MODULAR_TYPE_LABELS: readonly { type: ModularType; label: string }[] = [
   { type: 'empty', label: 'Empty' }, { type: 'solid', label: 'Solid' }, { type: 'blocks', label: 'Blocks' },
   { type: 'dots', label: 'Dots' }, { type: 'lines', label: 'Lines' }, { type: 'grad', label: 'Gradient' },
 ]
+
+/** One-click "Parcel" — the Parcel generator (lib/compositor/parcel): a coarse
+ *  two-tone block field (ground + ink, every cell one or the other) with ragged
+ *  hairline survey grids floating on top that darken what they cross (cellFill:
+ *  'parcel'), at the original's defaults (16 cells / cover .5 / chunk 1 / 4 survey
+ *  grids / multiply / lime ink on grey). Configures the selected deal, or — with
+ *  none selected — creates a fresh deal filling the frame, in one undoable step.
+ *  The deal's grid is untouched: Parcel ignores it (only its seed carries the
+ *  variation). */
+function onParcel() {
+  if (selectedLocal.value?.kind === 'deal') {
+    const layer = selectedLocal.value as DealLayer
+    setLocal(layer.id, { cellFill: 'parcel', parcel: defaultParcel() } as Partial<DealLayer>)
+    return
+  }
+  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
+  if (g.mode === 'off') g.mode = 'generated'
+  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, cellFill: 'parcel', parcel: defaultParcel() }))
+}
+/** Patch a deal's Parcel tunables (one history step via setLocal). */
+function patchParcel(layer: DealLayer, patch: Partial<ParcelParams>) {
+  setLocal(layer.id, { parcel: { ...(layer.parcel ?? defaultParcel()), ...patch } } as Partial<DealLayer>)
+}
+/** Apply a named palette preset (ground + ink + hairline) to a Parcel deal. */
+function applyParcelPreset(layer: DealLayer, name: string) {
+  if (!(PARCEL_PRESET_NAMES as string[]).includes(name)) return
+  patchParcel(layer, parcelPresetPatch(name as ParcelPresetName))
+}
+/** Which preset the selected Parcel deal currently matches ('' when custom). */
+const parcelPreset = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return ''
+  return parcelPresetOf((l as DealLayer).parcel ?? defaultParcel()) ?? ''
+})
+/** The four cell fills as the segmented control's plain labels. */
+const DEAL_FILL_LABELS: readonly { fill: NonNullable<DealLayer['cellFill']>; label: string }[] = [
+  { fill: 'solid', label: 'Solid' }, { fill: 'pane', label: 'Pane' }, { fill: 'modular', label: 'Modular' }, { fill: 'parcel', label: 'Parcel' },
+]
+const dealFillLabel = (layer: DealLayer) => DEAL_FILL_LABELS.find(f => f.fill === layer.cellFill)?.label ?? 'Solid'
+/** Switch a deal's cell fill, seeding that fill's params with the defaults when absent. */
+function setDealFill(layer: DealLayer, label: string) {
+  const fill = DEAL_FILL_LABELS.find(f => f.label === label)?.fill ?? 'solid'
+  const patch: Partial<DealLayer> = { cellFill: fill }
+  if (fill === 'pane') patch.pane = layer.pane ?? defaultPane()
+  if (fill === 'modular') patch.modular = layer.modular ?? defaultModular()
+  if (fill === 'parcel') patch.parcel = layer.parcel ?? defaultParcel()
+  setLocal(layer.id, patch)
+}
 
 // Normalize brush layers to a tight box: brush strokes are stored in absolute
 // artboard coords, and a layer's x/y/w/h should equal their bounds so the render
@@ -2764,6 +2815,7 @@ const shaderFieldsFrozen = ref(0)
 function renderStack(wallT?: number, live = false) {
   const cv = overlayCanvas.value
   if (!cv) return
+  const __probeS = performance.now()   // TEMP open-cost probe
   const W = canvasDisplay.w, H = canvasDisplay.h
   const deviceDpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
   // Cap the backing store while the animation loop drives this (`live`): compositing the
@@ -2822,6 +2874,14 @@ function renderStack(wallT?: number, live = false) {
       clockT, motionArg,
       wiredTreatments.value, background.value, localGroups.value, postEffects.value))
   shaderFieldsFrozen.value = frozenCount
+  // TEMP open-cost probe: count calls + per-call time, non-live only (skip the animation loop).
+  if (!live) {
+    const w = window as any
+    if (!w.__compRS) w.__compRS = { n: 0, ms: 0, t0: __probeS }
+    const d = performance.now() - __probeS
+    w.__compRS.n++; w.__compRS.ms += d
+    console.log(`[comp-open] renderStack #${w.__compRS.n}: ${d.toFixed(0)}ms · items=${items.length} · cumulative ${w.__compRS.ms.toFixed(0)}ms over ${(performance.now() - w.__compRS.t0).toFixed(0)}ms wall`)
+  }
 }
 
 // Depth maps arrive asynchronously (see lib/compositor/depthRegistry). paintLayer reads
@@ -6817,6 +6877,8 @@ onUnmounted(() => {
                   @click="onPane()">Pane</StudioButton>
                 <StudioButton variant="secondary" title="Modular — a merged module grid over a background: empty, solid, block fields, dot clusters, line grids and ramps, with hairlines"
                   @click="onModular()">Modular</StudioButton>
+                <StudioButton variant="secondary" title="Parcel — a coarse two-tone field of chunky ink blocks on a ground, with ragged hairline survey grids floating on top"
+                  @click="onParcel()">Parcel</StudioButton>
               </div>
               <p class="mt-1 text-[10px] text-white/30 leading-snug">One click sets the palette, density and cell layout; your current variation is kept.</p>
             </div>
@@ -6827,17 +6889,55 @@ onUnmounted(() => {
             </div>
             <div class="mt-2">
               <div class="panel-label mb-1.5">Cell fill</div>
-              <StudioSegmented :options="['Solid', 'Pane', 'Modular']"
-                :model-value="(selectedLocal as any).cellFill === 'pane' ? 'Pane' : (selectedLocal as any).cellFill === 'modular' ? 'Modular' : 'Solid'"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, v === 'Pane'
-                  ? { cellFill: 'pane', pane: (selectedLocal as DealLayer).pane ?? defaultPane() } as Partial<DealLayer>
-                  : v === 'Modular'
-                    ? { cellFill: 'modular', modular: (selectedLocal as DealLayer).modular ?? defaultModular() } as Partial<DealLayer>
-                    : { cellFill: 'solid' })" />
+              <StudioSegmented :options="DEAL_FILL_LABELS.map(f => f.label)"
+                :model-value="dealFillLabel(selectedLocal as DealLayer)"
+                @update:model-value="(v: any) => setDealFill(selectedLocal as DealLayer, v)" />
+            </div>
+            <!-- Parcel has its OWN layout (a coarse two-tone block field with survey grids
+                 on top), so the grid controls (density / inset / regularity / merge) don't
+                 apply to it. -->
+            <div v-if="(selectedLocal as any).cellFill === 'parcel'" class="mt-2 flex flex-col gap-1.5">
+              <StudioSelect label="Palette preset" :options="PARCEL_PRESET_NAMES as any"
+                :model-value="parcelPreset" @update:model-value="(v: any) => applyParcelPreset(selectedLocal as DealLayer, v)" />
+              <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                  <span class="text-[11px] text-white/55">Ground</span>
+                  <StudioColor :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).ground"
+                    @update:model-value="(v: string) => patchParcel(selectedLocal as DealLayer, { ground: v })" />
+                </div>
+                <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                  <span class="text-[11px] text-white/55">Ink</span>
+                  <StudioColor :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).ink"
+                    @update:model-value="(v: string) => patchParcel(selectedLocal as DealLayer, { ink: v })" />
+                </div>
+                <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                  <span class="text-[11px] text-white/55">Lines</span>
+                  <StudioColor :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).hairline"
+                    @update:model-value="(v: string) => patchParcel(selectedLocal as DealLayer, { hairline: v })" />
+                </div>
+              </div>
+              <StudioSlider label="Cells" :min="PARCEL_LIMITS.cells[0]" :max="PARCEL_LIMITS.cells[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).cells"
+                @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { cells: Math.round(v) })" />
+              <StudioSlider label="Cover" :min="PARCEL_LIMITS.cover[0]" :max="PARCEL_LIMITS.cover[1]" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).cover"
+                @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { cover: v })" />
+              <StudioSlider label="Chunk" :min="PARCEL_LIMITS.chunk[0]" :max="PARCEL_LIMITS.chunk[1]" :step="0.05" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).chunk"
+                @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { chunk: v })" />
+              <StudioSlider label="Survey grids" :min="PARCEL_LIMITS.grids[0]" :max="PARCEL_LIMITS.grids[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).grids"
+                @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { grids: Math.round(v) })" />
+              <div>
+                <div class="panel-label mb-1.5">Blend</div>
+                <StudioSegmented :options="['Multiply', 'Normal']"
+                  :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).blend === 'normal' ? 'Normal' : 'Multiply'"
+                  @update:model-value="(v: any) => patchParcel(selectedLocal as DealLayer, { blend: v === 'Normal' ? 'normal' : 'multiply' })" />
+              </div>
             </div>
             <!-- Modular has its OWN layout (a merged module grid over a background), so the
                  grid controls (density / inset / regularity / merge) don't apply to it. -->
-            <div v-if="(selectedLocal as any).cellFill === 'modular'" class="mt-2 flex flex-col gap-1.5">
+            <div v-else-if="(selectedLocal as any).cellFill === 'modular'" class="mt-2 flex flex-col gap-1.5">
               <div>
                 <div class="panel-label mb-1.5">Palette preset</div>
                 <StudioSegmented :options="MODULAR_PRESET_NAMES as any" :model-value="modularPreset"
@@ -7405,6 +7505,8 @@ onUnmounted(() => {
                   @click="onPane()">Pane</StudioButton>
                 <StudioButton variant="secondary" title="Modular — a merged module grid over a background: empty, solid, block fields, dot clusters, line grids and ramps, with hairlines"
                   @click="onModular()">Modular</StudioButton>
+                <StudioButton variant="secondary" title="Parcel — a coarse two-tone field of chunky ink blocks on a ground, with ragged hairline survey grids floating on top"
+                  @click="onParcel()">Parcel</StudioButton>
               </div>
             </div>
           </div>

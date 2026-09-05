@@ -22,6 +22,7 @@ import type { FrameGrid } from '~/lib/frame/grid'
 import { normalizeVocab } from '~/lib/compositor/dealVocab'
 import { defaultPane, normalizePane, type PaneParams } from '~/lib/compositor/pane'
 import { defaultModular, normalizeModular, modularPresetPatch, MODULAR_PRESET_NAMES, type ModularParams, type ModularPresetName } from '~/lib/compositor/modular'
+import { defaultParcel, normalizeParcel, parcelPresetPatch, PARCEL_PRESET_NAMES, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
 import { gridTemplate } from '~/lib/frame/gridTemplates'
 import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
@@ -102,12 +103,26 @@ function modularArgs(a: Record<string, unknown>): Partial<ModularParams> | null 
   if (!preset && !explicit) return null
   return { ...(preset ?? {}), ...(explicit ?? {}) }
 }
-/** The cell fill a NEW deal gets: an explicit cellFill wins; else sending pane / modular
- *  tunables implies that fill; else solid. */
-function newDealFill(a: Record<string, unknown>): 'solid' | 'pane' | 'modular' {
-  if (a.cellFill === 'solid' || a.cellFill === 'pane' || a.cellFill === 'modular') return a.cellFill
+/** dealGrid's Parcel args as one partial-params patch: `palettePreset` (a named
+ *  ground + ink + hairline triple — Parcel's preset names are disjoint from
+ *  Modular's) laid under the explicit `parcel:{…}` fields, or null when neither
+ *  was sent. */
+function parcelArgs(a: Record<string, unknown>): Partial<ParcelParams> | null {
+  const preset = typeof a.palettePreset === 'string' && (PARCEL_PRESET_NAMES as string[]).includes(a.palettePreset)
+    ? parcelPresetPatch(a.palettePreset as ParcelPresetName) : null
+  const explicit = a.parcel && typeof a.parcel === 'object' ? a.parcel as Partial<ParcelParams> : null
+  if (!preset && !explicit) return null
+  return { ...(preset ?? {}), ...(explicit ?? {}) }
+}
+type DealFill = 'solid' | 'pane' | 'modular' | 'parcel'
+const isDealFill = (v: unknown): v is DealFill => v === 'solid' || v === 'pane' || v === 'modular' || v === 'parcel'
+/** The cell fill a NEW deal gets: an explicit cellFill wins; else sending pane /
+ *  modular / parcel tunables implies that fill; else solid. */
+function newDealFill(a: Record<string, unknown>): DealFill {
+  if (isDealFill(a.cellFill)) return a.cellFill
   if (a.pane && typeof a.pane === 'object') return 'pane'
   if (modularArgs(a)) return 'modular'
+  if (parcelArgs(a)) return 'parcel'
   return 'solid'
 }
 
@@ -173,7 +188,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setLayerDepth', hint: 'Change a layer\'s stacking depth (z-order). target = layer id; args: { to: "back" | "front" }. "back" puts it BEHIND every other layer including the connected/wired image — use this for "put the headline BEHIND the image". "front" brings it to the top.' },
   { op: 'setBackground', hint: 'Set the FRAME background that sits behind every layer. args: { paint } — a "#RRGGBB" colour, a gradient object, or "none". Use for "make the background blue / a sunset gradient".' },
   { op: 'setGrid', hint: 'Set the layout grid on a Frame — a Swiss-style guide layers can snap to (editor-only, never baked/exported). args: { patch: {...}, generate? }. patch keys: mode ("off" | "explicit" | "generated"), baseModule (0..1 of canvas width, the alignment unit), gutter (0..1), margin (0..1), columns/rows (explicit mode counts), gen: { colRange/rowRange ([min,max] column/row counts, generated mode), regularity (0..1: 0 = loose/free spacing, 1 = strict/equal), merge (bool, merge adjacent cells into larger regions), mergeMaxSpan (max cells a merged region spans), symmetry ("none" | "mirror"), seed (integer) }, overlay (bool, show the guide lines). Omitted keys keep their current value. generate:true (or reroll:true) re-rolls a fresh random seed for a new generated-grid variation; switching mode to "generated" without giving gen.seed also rolls a fresh seed. This is what "add a layout grid", "give it a 6-column grid", "generate a new grid variation", "re-roll the grid" mean.' },
-  { op: 'dealGrid', hint: `Deal a decorative modular grid as ONE self-painting layer: every cell gets a fill from a weighted palette, keyed by a seed. This is a dense generative grid ("mosaic", "modular grid", "tiled pattern", "oddgrid") as a single layer that BAKES into the render (unlike setGrid's editor-only guide). To CREATE a new deal, omit target; to reconfigure an existing one, target = the deal layer's id. args: { template ("modular"|"oddgrid"|"parcel"|"mosh"|"static" — a one-word preset that pre-fills the whole look; any of the fields below still override it), vocab ("brand" | "mono" | "warm" | "cool" — the palette), density (0..1, fraction of cells filled; the rest are transparent; default 1 = every cell), cellInset (0..0.4, gap inset per cell), cellFill ("solid" | "pane" | "modular"; default "solid"; "pane" = the Pane look: rows of flush panes with their OWN row-masonry — grid/density/cellInset are ignored — each pane a two-colour ramp running corner to corner or edge to edge, inks drawn by distance along the palette; "modular" = the Modular look: a flush grid of modules, some merged 2×2 / 2-wide / 2-tall, over a background colour — each module empty, solid, a block field, a corner dot cluster, a fine line grid or a two-colour ramp — with faint hairlines over the whole grid; grid/density/cellInset are ignored), pane ({ rows (1..8, default 3), cells (nominal cells per row, 1..12, default 6; each row varies it), vary (0..1 how uneven rows/cells are, default 0.55), diag (0..1 share of corner-to-corner ramps vs flat ones, default 0.45), soft (0..1 how much of each pane is the blend; 0 = hard line, default 0.85), spread (0..1 how far apart in the palette the two inks are; 0 = neighbours, default 0.55) } — sending pane implies cellFill "pane"), modular ({ gcols (module columns 2..12, default 6; rows follow the frame aspect), unit (sub-cells per module side 2..8, default 4), merge (0..1 how often modules merge, default 0.45), w ({ empty, solid, blocks, dots, lines, grad } relative weights 0..50, defaults 34/20/24/14/12/10 — empty is most common on purpose), blockFill (0..1 coverage of block/dot fields, default 0.5), dot (0..1 dot diameter within its sub-cell, default 0.62), rules (0..1 hairline opacity over the whole grid, default 0.22; 0 = none), ruleW (1..3 line width, default 1), bg (hex background), rule (hex hairline colour), inks (ordered hex list; omitted = the vocab palette) } — sending modular implies cellFill "modular"), palettePreset ("Digital" | "Riso" | "Bloom" | "Heat" | "Mono" — a named Modular colour set: background + hairline colour + 4 inks; explicit modular.bg/rule/inks override it; also implies cellFill "modular"), grid ({ colRange:[min,max], rowRange:[min,max], regularity (0..1), merge (bool), symmetry ("none"|"mirror") } — the cell layout; omitted keeps the current/frame grid), seed (integer, the variation), generate (bool — re-roll a fresh seed for a new variation), id? (choose one to target it later) }. "make a colourful mosaic", "deal a warm modular grid", "re-roll the pattern", "sparser grid" all mean this.` },
+  { op: 'dealGrid', hint: `Deal a decorative modular grid as ONE self-painting layer: every cell gets a fill from a weighted palette, keyed by a seed. This is a dense generative grid ("mosaic", "modular grid", "tiled pattern", "oddgrid") as a single layer that BAKES into the render (unlike setGrid's editor-only guide). To CREATE a new deal, omit target; to reconfigure an existing one, target = the deal layer's id. args: { template ("modular"|"oddgrid"|"parcel"|"mosh"|"static" — a one-word preset that pre-fills the whole look; any of the fields below still override it), vocab ("brand" | "mono" | "warm" | "cool" — the palette), density (0..1, fraction of cells filled; the rest are transparent; default 1 = every cell), cellInset (0..0.4, gap inset per cell), cellFill ("solid" | "pane" | "modular" | "parcel"; default "solid"; "pane" = the Pane look: rows of flush panes with their OWN row-masonry — grid/density/cellInset are ignored — each pane a two-colour ramp running corner to corner or edge to edge, inks drawn by distance along the palette; "modular" = the Modular look: a flush grid of modules, some merged 2×2 / 2-wide / 2-tall, over a background colour — each module empty, solid, a block field, a corner dot cluster, a fine line grid or a two-colour ramp — with faint hairlines over the whole grid; grid/density/cellInset are ignored; "parcel" = the Parcel look: a coarse two-tone field of chunky ink blocks on a ground colour — every cell is one or the other, hard cell edges, no gutter — with a few ragged rectangular clusters of fine hairline lattices ("survey grids") floating on top that darken whatever they cross; grid/density/cellInset are ignored), pane ({ rows (1..8, default 3), cells (nominal cells per row, 1..12, default 6; each row varies it), vary (0..1 how uneven rows/cells are, default 0.55), diag (0..1 share of corner-to-corner ramps vs flat ones, default 0.45), soft (0..1 how much of each pane is the blend; 0 = hard line, default 0.85), spread (0..1 how far apart in the palette the two inks are; 0 = neighbours, default 0.55) } — sending pane implies cellFill "pane"), modular ({ gcols (module columns 2..12, default 6; rows follow the frame aspect), unit (sub-cells per module side 2..8, default 4), merge (0..1 how often modules merge, default 0.45), w ({ empty, solid, blocks, dots, lines, grad } relative weights 0..50, defaults 34/20/24/14/12/10 — empty is most common on purpose), blockFill (0..1 coverage of block/dot fields, default 0.5), dot (0..1 dot diameter within its sub-cell, default 0.62), rules (0..1 hairline opacity over the whole grid, default 0.22; 0 = none), ruleW (1..3 line width, default 1), bg (hex background), rule (hex hairline colour), inks (ordered hex list; omitted = the vocab palette) } — sending modular implies cellFill "modular"), palettePreset ("Digital" | "Riso" | "Bloom" | "Heat" | "Mono" — a named Modular colour set: background + hairline colour + 4 inks; explicit modular.bg/rule/inks override it; also implies cellFill "modular"), parcel ({ cells (grid width in cells 8..40, default 16; rows follow the frame aspect), cover (0..1 how much of the field is ink, default 0.5), chunk (0.5..3 block scale — bigger = bigger blobs, default 1), grids (0..8 how many survey grids float on top, default 4), blend ("multiply" | "normal"; multiply = the hairlines darken ink and ground alike, default), ground (hex ground colour), ink (hex block colour), hairline (hex survey-line colour) } — sending parcel implies cellFill "parcel"; palettePreset also takes a Parcel triple by name: "Lime on grey" | "Blue on cream" | "Acid on black" | "Orange on cream" | "Cyan on stone" | "Blue on olive" — ground + ink + hairline; explicit parcel colours override it; implies cellFill "parcel"), grid ({ colRange:[min,max], rowRange:[min,max], regularity (0..1), merge (bool), symmetry ("none"|"mirror") } — the cell layout; omitted keeps the current/frame grid), seed (integer, the variation), generate (bool — re-roll a fresh seed for a new variation), id? (choose one to target it later) }. "make a colourful mosaic", "deal a warm modular grid", "re-roll the pattern", "sparser grid" all mean this.` },
   { op: 'generateImage', hint: 'Generate a PHOTOGRAPHIC/illustrative AI image and add it as a layer — "generate a picture of a dog", "add a city photo". Not for gradients/colours (use setBackground/setFill). args: { prompt (vivid), aspectRatio? }.' },
   { op: 'removeImageBackground', hint: 'Cut out the subject of an existing IMAGE layer (transparent background). target = image layer id.' },
   { op: 'editImage', hint: 'Edit an existing IMAGE layer from an instruction (Flux Kontext) — "make it brighter", "change the sky". target = image layer id; args: { instruction }.' },
@@ -423,19 +438,26 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
         if (a.vocab != null) d.vocab = normalizeVocab(a.vocab)
         if (typeof a.density === 'number') d.density = clamp(a.density, 0, 1, 1)
         if (typeof a.cellInset === 'number') d.cellInset = clamp(a.cellInset, 0, 0.4, 0)
-        if (a.cellFill === 'solid' || a.cellFill === 'pane' || a.cellFill === 'modular') d.cellFill = a.cellFill
+        if (isDealFill(a.cellFill)) d.cellFill = a.cellFill
         // Pane tunables merge onto the current ones; sending them implies the Pane
-        // fill unless the model said 'solid' in the same breath.
+        // fill unless the model named another fill in the same breath.
         if (a.pane && typeof a.pane === 'object') {
           d.pane = normalizePane(a.pane, (d.pane as PaneParams | undefined) ?? defaultPane())
-          if (a.cellFill !== 'solid' && a.cellFill !== 'modular') d.cellFill = 'pane'
+          if (!isDealFill(a.cellFill)) d.cellFill = 'pane'
         }
         // Modular tunables likewise; a palettePreset lays bg + rule + inks under
         // whatever explicit colours were sent alongside.
         const modPatch = modularArgs(a)
         if (modPatch) {
           d.modular = normalizeModular(modPatch, (d.modular as ModularParams | undefined) ?? defaultModular())
-          if (a.cellFill !== 'solid' && a.cellFill !== 'pane') d.cellFill = 'modular'
+          if (!isDealFill(a.cellFill)) d.cellFill = 'modular'
+        }
+        // Parcel tunables likewise; a Parcel-named palettePreset lays the three
+        // colours under whatever explicit colours were sent alongside.
+        const parPatch = parcelArgs(a)
+        if (parPatch) {
+          d.parcel = normalizeParcel(parPatch, (d.parcel as ParcelParams | undefined) ?? defaultParcel())
+          if (!isDealFill(a.cellFill)) d.cellFill = 'parcel'
         }
         const g = clone((target as { grid: FrameGrid }).grid)
         // Template pre-fill FIRST (forces generated mode, preserves current seed so
@@ -470,6 +492,7 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
         cellFill: newDealFill(a),
         pane: normalizePane(a.pane),
         modular: normalizeModular(modularArgs(a) ?? {}),
+        parcel: normalizeParcel(parcelArgs(a) ?? {}),
         grid,
       } as unknown as LocalLayer
       return { ok: true, template: { ...state, layers: [...state.layers, layer] }, inverse: snapshot() }

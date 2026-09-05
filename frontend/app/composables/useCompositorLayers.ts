@@ -59,6 +59,7 @@ import { resolveGrid, defaultGrid, type FrameGrid } from '~/lib/frame/grid'
 import { pickDealPaint, keptCell, forceKeptCell, type DealVocab } from '~/lib/compositor/dealVocab'
 import { paneRegions, paneCellGradient, paneInksFromVocab, defaultPane, type PaneParams } from '~/lib/compositor/pane'
 import { paintModular, modularPalette, defaultModular, type ModularParams } from '~/lib/compositor/modular'
+import { paintParcel, defaultParcel, type ParcelParams } from '~/lib/compositor/parcel'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -594,8 +595,11 @@ export interface DealLayer extends LayerCommon {
   // (lib/compositor/modular): its OWN merged module grid over a background, each
   // module empty / solid / block field / dot cluster / line grid / 2-stop ramp, with
   // hairlines over the whole grid — grid / density / inset are ignored too.
+  // 'parcel' = the Parcel generator (lib/compositor/parcel): a coarse two-tone
+  // block field (ground + ink, every cell one or the other) with hairline survey
+  // grids floating on top — grid / density / inset are ignored too.
   // Absent behaves as 'solid'.
-  cellFill?: 'solid' | 'pane' | 'modular'
+  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel'
   // Pane's tunables (rows / cells / vary / diag / soft / spread); only read when
   // cellFill is 'pane'. Absent ⇒ defaultPane().
   pane?: PaneParams
@@ -603,6 +607,9 @@ export interface DealLayer extends LayerCommon {
   // rules / ruleW + bg / rule colour / ordered inks); only read when cellFill is
   // 'modular'. Absent ⇒ defaultModular().
   modular?: ModularParams
+  // Parcel's tunables (cells / cover / chunk / grids / blend + the ground / ink /
+  // hairline colours); only read when cellFill is 'parcel'. Absent ⇒ defaultParcel().
+  parcel?: ParcelParams
 }
 
 export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer
@@ -744,6 +751,7 @@ export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
     cellFill: 'solid',
     pane: defaultPane(),
     modular: defaultModular(),
+    parcel: defaultParcel(),
     ...partial,
     grid,
   }
@@ -2088,6 +2096,19 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       ctx.save()
       ctx.translate(-boxW / 2, -boxH / 2)
       paintModular(ctx, modular, modularPalette(modular, layer.vocab), boxW, boxH, seed)
+      ctx.restore()
+      return
+    }
+    if (layer.cellFill === 'parcel') {
+      // Parcel paints its OWN coarse grid — NOT the shared grid: ground over the
+      // box, cell-snapped ink runs, then the hairline survey lattices stroked with
+      // a multiply composite (when blend says so) straight on the real ctx, and the
+      // composite op put back. Regularity / merge / density / inset / force-keep
+      // don't apply; only the grid's seed carries the variation.
+      const parcel = layer.parcel ?? defaultParcel()
+      ctx.save()
+      ctx.translate(-boxW / 2, -boxH / 2)
+      paintParcel(ctx, parcel, boxW, boxH, seed)
       ctx.restore()
       return
     }
