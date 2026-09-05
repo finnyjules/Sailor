@@ -62,6 +62,7 @@ import { paneRegions, paneCellGradient, panePalette, defaultPane, type PaneParam
 import { paintModular, modularPalette, defaultModular, type ModularParams } from '~/lib/compositor/modular'
 import { paintParcel, defaultParcel, type ParcelParams } from '~/lib/compositor/parcel'
 import { paintMosh, defaultMosh, type MoshParams } from '~/lib/compositor/mosh'
+import { paintCarve, defaultCarve, type CarveParams } from '~/lib/compositor/carve'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -605,6 +606,10 @@ export interface DealLayer extends LayerCommon {
   // mosaic blocks / thin smears / scan rows / chevron), every mark a filled,
   // column-quantised rect in full-strength inks — grid / density / inset are
   // ignored too.
+  // 'carve' = the Carve generator (lib/compositor/carve): ONE rectangle carved
+  // into panels by repeated splits, each panel a printed treatment in two of its
+  // own inks — flat, two-pitch stripes, stacked chevrons, a grainy ramp, or the
+  // single hairline grid — grid / density / inset are ignored too.
   // 'oddgrid' / 'static' = the two SHADER styles (shader_effects/oddgrid.frag,
   // static.frag): the box is painted with a shader Fill through the same
   // resolvePaint path a rect uses, `shader` below holding the spec — grid /
@@ -612,7 +617,7 @@ export interface DealLayer extends LayerCommon {
   // Absent behaves as 'solid'.
   // People see these as the Mosaic element's STYLES (lib/compositor/mosaic maps the
   // words: 'solid' is "Tiles"); the field keeps its name so saved frames load as-is.
-  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'oddgrid' | 'static'
+  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'oddgrid' | 'static'
   // The ShaderSpec the shader styles paint with (effectId = the cellFill, seed =
   // grid.gen.seed, speed 0, frame-anchored); only read when cellFill is 'oddgrid'
   // or 'static'. Absent ⇒ derived at the layer's seed (mosaicShaderSpec).
@@ -634,6 +639,9 @@ export interface DealLayer extends LayerCommon {
   // Mosh's tunables (bands / cols / mix / tears / runs / bright + the 8 inks);
   // only read when cellFill is 'mosh'. Absent ⇒ defaultMosh().
   mosh?: MoshParams
+  // Carve's tunables (cuts / uneven / gap / mix / stripePitch / grain / gridDetail
+  // + the 6 ordered inks); only read when cellFill is 'carve'. Absent ⇒ defaultCarve().
+  carve?: CarveParams
 }
 
 export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer
@@ -777,6 +785,7 @@ export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
     modular: defaultModular(),
     parcel: defaultParcel(),
     mosh: defaultMosh(),
+    carve: defaultCarve(),
     ...partial,
     grid,
   }
@@ -2179,6 +2188,15 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // variation.
       const mosh = layer.mosh ?? defaultMosh()
       paintMosh(ctx, mosh, mosh.inks, boxW, boxH, seed)
+    } else if (layer.cellFill === 'carve') {
+      // Carve paints its OWN panels — NOT the shared grid: the box is carved by
+      // repeated splits and every panel gets one printed treatment in two of the
+      // style's own inks, straight on the real ctx (the grainy panels go through
+      // an offscreen canvas and drawImage, so the layer's opacity, transform and
+      // this box clip all still apply). Regularity / merge / density / inset /
+      // force-keep don't apply; only the grid's seed carries the variation.
+      const carve = layer.carve ?? defaultCarve()
+      paintCarve(ctx, carve, carve.inks, boxW, boxH, seed)
     } else {
       // Resolve cells FLUSH (gutter 0): the deal's only cell gap is `cellInset`, applied
       // per cell below. The grid's own gutter would add a second, hidden gap so cells are

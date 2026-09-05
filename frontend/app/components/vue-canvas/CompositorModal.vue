@@ -20,6 +20,7 @@ import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePrese
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
 import { defaultMosh, MOSH_LIMITS, MOSH_PRESET_NAMES, moshPresetPatch, moshPresetOf, type MoshParams, type MoshPresetName } from '~/lib/compositor/mosh'
+import { defaultCarve, CARVE_LIMITS, CARVE_PRESET_NAMES, carvePresetPatch, carvePresetOf, type CarveParams, type CarvePresetName } from '~/lib/compositor/carve'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
@@ -771,6 +772,26 @@ const moshPreset = computed(() => {
   const l = selectedLocal.value
   if (!l || l.kind !== 'deal') return ''
   return moshPresetOf((l as DealLayer).mosh ?? defaultMosh()) ?? ''
+})
+/** Carve — the Carve generator (lib/compositor/carve): ONE rectangle carved into
+ *  panels by repeated splits, each panel a printed treatment in two of the style's
+ *  own inks — flat, two-pitch stripes, stacked chevrons, a grainy ramp, or the one
+ *  hairline grid (cellFill:'carve'). The deal's grid is untouched: Carve ignores it
+ *  (only its seed carries the variation). */
+/** Patch a deal's Carve tunables (one history step via setLocal). */
+function patchCarve(layer: DealLayer, patch: Partial<CarveParams>) {
+  setLocal(layer.id, { carve: { ...(layer.carve ?? defaultCarve()), ...patch } } as Partial<DealLayer>)
+}
+/** Apply a named palette preset (the 6 ordered inks) to a Carve deal. */
+function applyCarvePreset(layer: DealLayer, name: string) {
+  if (!(CARVE_PRESET_NAMES as string[]).includes(name)) return
+  patchCarve(layer, carvePresetPatch(name as CarvePresetName))
+}
+/** Which preset the selected Carve deal currently matches ('' when custom). */
+const carvePreset = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return ''
+  return carvePresetOf((l as DealLayer).carve ?? defaultCarve()) ?? ''
 })
 /** The Mosaic's Style option currently showing (the style table lives in
  *  lib/compositor/mosaic — one vocabulary for the inspector, the agent and the specs). */
@@ -6985,6 +7006,34 @@ onUnmounted(() => {
                 <StudioSegmented :options="MODULAR_PRESET_NAMES as any" :model-value="modularPreset"
                   @update:model-value="(v: any) => applyModularPreset(selectedLocal as DealLayer, v)" />
               </div>
+            </div>
+            <!-- Carve has its OWN layout (one rectangle carved into panels), so the grid
+                 controls (density / inset / regularity / merge) don't apply to it. -->
+            <div v-else-if="(selectedLocal as any).cellFill === 'carve'" class="mt-2 flex flex-col gap-1.5">
+              <StudioSlider label="Cuts" :min="CARVE_LIMITS.cuts[0]" :max="CARVE_LIMITS.cuts[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).cuts"
+                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { cuts: Math.round(v) })" />
+              <StudioSlider label="Unevenness" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).uneven"
+                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { uneven: v })" />
+              <StudioSlider label="Gap" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).gap"
+                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { gap: v })" />
+              <div class="panel-label mt-1">Treatments</div>
+              <StudioSlider label="Patterned" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).mix"
+                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { mix: v })" />
+              <StudioSlider label="Stripe pitch" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).stripePitch"
+                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { stripePitch: v })" />
+              <StudioSlider label="Grain" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).grain"
+                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { grain: v })" />
+              <StudioSlider label="Grid detail" :min="0" :max="1" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).gridDetail"
+                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { gridDetail: v })" />
+              <StudioSelect label="Palette" :options="CARVE_PRESET_NAMES as any"
+                :model-value="carvePreset" @update:model-value="(v: any) => applyCarvePreset(selectedLocal as DealLayer, v)" />
             </div>
             <!-- Pane has its OWN layout (row masonry, every cell flush and filled), so the
                  grid controls (density / inset / regularity / merge) don't apply to it. -->

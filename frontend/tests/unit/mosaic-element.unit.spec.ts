@@ -14,6 +14,7 @@ import {
 } from '~/lib/compositor/mosaic'
 import { layerPaints, createDealLayer, type DealLayer } from '~/composables/useCompositorLayers'
 import { EFFECT_LOOKS } from '~/lib/shaderstudio/presets'
+import { defaultCarve } from '~/lib/compositor/carve'
 import { applyCompositorCommand, describeCompositor, type CompositorState } from '~/lib/agent/surfaces/compositor'
 
 describe('Mosaic in the Shapes menu', () => {
@@ -54,8 +55,8 @@ describe('newMosaicLayer — what the stamp creates', () => {
 // ── Style ↔ cellFill: one table for the inspector, the agent and the specs ──────
 describe('Mosaic styles', () => {
   it('the Style control offers the styles in table order, plain words', () => {
-    expect(MOSAIC_STYLE_LABELS).toEqual(['Tiles', 'Pane', 'Modular', 'Parcel', 'Mosh', 'Oddgrid', 'Static'])
-    expect(MOSAIC_STYLES.map(r => r.style)).toEqual(['tiles', 'pane', 'modular', 'parcel', 'mosh', 'oddgrid', 'static'])
+    expect(MOSAIC_STYLE_LABELS).toEqual(['Tiles', 'Pane', 'Modular', 'Parcel', 'Mosh', 'Carve', 'Oddgrid', 'Static'])
+    expect(MOSAIC_STYLES.map(r => r.style)).toEqual(['tiles', 'pane', 'modular', 'parcel', 'mosh', 'carve', 'oddgrid', 'static'])
   })
   it('maps every style onto its cellFill and back (tiles is the internal "solid")', () => {
     expect(cellFillOfStyle('tiles')).toBe('solid')
@@ -144,6 +145,16 @@ describe('agent mosaic op', () => {
 describe('Mosaic shader styles (Oddgrid / Static)', () => {
   const mosaic = (over: Partial<DealLayer> = {}) => createDealLayer({ cellFill: 'pane', w: 1, h: 0.5625, ...over })
 
+  it('switching to a canvas style seeds that style\'s params and leaves the box, the seed and the other styles alone', () => {
+    const l = mosaic()
+    const patch = mosaicStylePatch(l, 'carve')
+    expect(patch.cellFill).toBe('carve')
+    expect(patch.carve).toEqual(defaultCarve())
+    expect(patch).not.toHaveProperty('w'); expect(patch).not.toHaveProperty('grid'); expect(patch).not.toHaveProperty('shader')
+    // Params already on the layer are kept, not reset.
+    const tuned = { ...defaultCarve(), cuts: 3 }
+    expect(mosaicStylePatch({ ...l, carve: tuned }, 'carve').carve).toBe(tuned)
+  })
   it('switching to oddgrid seeds a ShaderSpec for that effect at the layer seed, still, frame-anchored, first Look', () => {
     const l = mosaic()
     const seed = l.grid.gen.seed
@@ -188,7 +199,7 @@ describe('Mosaic shader styles (Oddgrid / Static)', () => {
     expect(toPane).not.toHaveProperty('shader')
   })
   it('layerPaints returns exactly the shader Fill for the shader styles and nothing for the others', () => {
-    for (const fill of ['solid', 'pane', 'modular', 'parcel', 'mosh'] as const) {
+    for (const fill of ['solid', 'pane', 'modular', 'parcel', 'mosh', 'carve'] as const) {
       expect(layerPaints(mosaic({ cellFill: fill })), fill).toEqual([])
     }
     for (const fill of ['oddgrid', 'static'] as const) {

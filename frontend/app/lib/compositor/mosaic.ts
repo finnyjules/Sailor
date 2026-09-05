@@ -13,6 +13,7 @@
  *   modular   modular     a merged module grid over a background, with hairlines
  *   parcel    parcel      a coarse two-tone block field with survey-grid hairlines
  *   mosh      mosh        a corrupted signal: bands of glitch in hard inks
+ *   carve     carve       one rectangle carved into panels, each a printed treatment
  *   oddgrid   oddgrid     the Oddgrid SHADER (shader_effects/oddgrid.frag) as a fill
  *   static    static      the Static SHADER (shader_effects/static.frag) as a fill
  *
@@ -35,12 +36,13 @@ import { defaultPane } from '~/lib/compositor/pane'
 import { defaultModular } from '~/lib/compositor/modular'
 import { defaultParcel } from '~/lib/compositor/parcel'
 import { defaultMosh } from '~/lib/compositor/mosh'
+import { defaultCarve } from '~/lib/compositor/carve'
 
 /** A deal layer's `cellFill` value. Mirrors `DealLayer['cellFill']` (kept here so
  *  this module stays import-light — the agent surface and specs import it too). */
-export type MosaicCellFill = 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'oddgrid' | 'static'
+export type MosaicCellFill = 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'oddgrid' | 'static'
 /** The agent-facing / inspector-facing style word. */
-export type MosaicStyle = 'tiles' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'oddgrid' | 'static'
+export type MosaicStyle = 'tiles' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'oddgrid' | 'static'
 /** The styles painted by a shader field rather than a canvas generator. */
 export type MosaicShaderFill = 'oddgrid' | 'static'
 
@@ -58,6 +60,7 @@ export const MOSAIC_STYLES: readonly MosaicStyleRow[] = [
   { style: 'modular', cellFill: 'modular', label: 'Modular' },
   { style: 'parcel', cellFill: 'parcel', label: 'Parcel' },
   { style: 'mosh', cellFill: 'mosh', label: 'Mosh' },
+  { style: 'carve', cellFill: 'carve', label: 'Carve' },
   { style: 'oddgrid', cellFill: 'oddgrid', label: 'Oddgrid' },
   { style: 'static', cellFill: 'static', label: 'Static' },
 ]
@@ -224,6 +227,7 @@ export function mosaicStylePatch(layer: DealLayer, fill: MosaicCellFill): Partia
   if (fill === 'modular') patch.modular = layer.modular ?? defaultModular()
   if (fill === 'parcel') patch.parcel = layer.parcel ?? defaultParcel()
   if (fill === 'mosh') patch.mosh = layer.mosh ?? defaultMosh()
+  if (fill === 'carve') patch.carve = layer.carve ?? defaultCarve()
   if (isMosaicShaderFill(fill)) {
     // Prefer the spec last used for THIS effect (stashed below on the way out), then
     // the live slot when it already targets it, else a fresh one at the layer's seed.
