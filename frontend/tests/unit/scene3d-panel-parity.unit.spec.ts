@@ -15,7 +15,6 @@ import { groupIntoSections } from '~/lib/studio/sections'
 import { setByPath } from '~/lib/studio/path'
 import { POST_SECTIONS } from '~/lib/studio/post/controls'
 import { SCENE_CONTROLS, type SceneControl } from '~/lib/scene3d/controls'
-import { LOOK_LIBRARY } from '~/lib/scene3d/lighting'
 import {
   createDecal, createGlbObject, createLight, createPrimitive, defaultDoc,
   LIGHTING_PRESETS, MATERIAL_TYPES, PRIMITIVE_KINDS,
@@ -179,7 +178,7 @@ const ROW: Record<string, Row> = {
   // Camera / Lighting / Background
   'camera.fov': { label: 'FOV', kind: 'slider', min: 15, max: 100, step: 1, hint: 'Camera field of view — how wide the lens sees' },
   // Simple-lighting layer: Look leads, then the feel dials, then the Advanced toggle.
-  'lighting.look': { label: 'Look', kind: 'select', options: LOOK_LIBRARY.map((l) => l.id) },
+  'lighting.look': { label: 'Look', kind: 'look' },
   'lighting.softness': { label: 'Softness', kind: 'slider', min: 0, max: 1, step: 0.01 },
   'lighting.warmth': { label: 'Warmth', kind: 'slider', min: 0, max: 1, step: 0.01 },
   'lighting.brightness': { label: 'Brightness', kind: 'slider', min: 0.25, max: 3, step: 0.05 },

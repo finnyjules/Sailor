@@ -5,6 +5,7 @@ import RowSwitch from './RowSwitch.vue'
 import RowColor from './RowColor.vue'
 import RowText from './RowText.vue'
 import RowShape from './RowShape.vue'
+import RowLook from './RowLook.vue'
 
 /**
  * kind → the component that draws the VALUE side of a row. The row shell
@@ -18,6 +19,7 @@ export const rowRenderers: Record<string, Component> = {
   color: RowColor,
   text: RowText,
   shape: RowShape,
+  look: RowLook,
 }
 
 /** Kinds whose value is a number the row itself can drag and type into. */

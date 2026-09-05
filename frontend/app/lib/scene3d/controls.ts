@@ -7,7 +7,6 @@ import {
   type SceneDoc, type SceneObject, type MaterialType,
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, type ParamSpec } from './primParams'
-import { LOOK_LIBRARY } from '~/lib/scene3d/lighting'
 
 /**
  * The single declarative description of Scene3D (3D Studio)'s parameters.
@@ -533,7 +532,8 @@ export const SCENE_CONTROLS: SceneControl[] = [
   // --- Lighting (doc-level; no active object needed) -------------------------------
   // Simple layer: pick a Look, then nudge three dials. Direction stays visible, so it's
   // the one raw pair that stays ungated even in the simple view.
-  select('lighting.look', 'Look', LOOK_LIBRARY.map((l) => l.id), D.lighting.look, 'Lighting'),
+  // A `look` row: thumbnail + name that opens the Look library picker (RowLook/LookPicker).
+  { key: 'lighting.look', label: 'Look', kind: 'look', default: D.lighting.look, group: 'Lighting' } as SceneControl,
   slider('lighting.softness', 'Softness', 0, 1, 0.01, 'Lighting', D.lighting.softness),
   slider('lighting.warmth', 'Warmth', 0, 1, 0.01, 'Lighting', D.lighting.warmth),
   slider('lighting.brightness', 'Brightness', 0.25, 3, 0.05, 'Lighting', D.lighting.brightness),

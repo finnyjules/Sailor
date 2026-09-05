@@ -107,6 +107,7 @@ export type ControlSpec = (
   // 'none'. `allowNone: false` for consumers that always need a shape (a base
   // shape); the default (true) offers a None tile and lists 'none' to the agent.
   | { key: string; label: string; kind: 'shape'; default: string; allowNone?: boolean; group: string }
+  | { key: string; label: string; kind: 'look'; default: string; group: string }
   // An interactive bézier path drawn on the preview (String effect). Stored as one JSON
   // string in params (StringPathDoc); the surface renders the StringPathEditor overlay.
   | { key: string; label: string; kind: 'path'; default: string; group: string }
