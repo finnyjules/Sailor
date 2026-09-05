@@ -60,6 +60,7 @@ import { pickDealPaint, keptCell, forceKeptCell, type DealVocab } from '~/lib/co
 import { paneRegions, paneCellGradient, paneInksFromVocab, defaultPane, type PaneParams } from '~/lib/compositor/pane'
 import { paintModular, modularPalette, defaultModular, type ModularParams } from '~/lib/compositor/modular'
 import { paintParcel, defaultParcel, type ParcelParams } from '~/lib/compositor/parcel'
+import { paintMosh, defaultMosh, type MoshParams } from '~/lib/compositor/mosh'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -598,8 +599,13 @@ export interface DealLayer extends LayerCommon {
   // 'parcel' = the Parcel generator (lib/compositor/parcel): a coarse two-tone
   // block field (ground + ink, every cell one or the other) with hairline survey
   // grids floating on top — grid / density / inset are ignored too.
+  // 'mosh' = the Mosh generator (lib/compositor/mosh): a corrupted framebuffer —
+  // uneven horizontal bands, each a different failure (confetti runs / torn
+  // mosaic blocks / thin smears / scan rows / chevron), every mark a filled,
+  // column-quantised rect in full-strength inks — grid / density / inset are
+  // ignored too.
   // Absent behaves as 'solid'.
-  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel'
+  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh'
   // Pane's tunables (rows / cells / vary / diag / soft / spread); only read when
   // cellFill is 'pane'. Absent ⇒ defaultPane().
   pane?: PaneParams
@@ -610,6 +616,9 @@ export interface DealLayer extends LayerCommon {
   // Parcel's tunables (cells / cover / chunk / grids / blend + the ground / ink /
   // hairline colours); only read when cellFill is 'parcel'. Absent ⇒ defaultParcel().
   parcel?: ParcelParams
+  // Mosh's tunables (bands / cols / mix / tears / runs / bright + the 8 inks);
+  // only read when cellFill is 'mosh'. Absent ⇒ defaultMosh().
+  mosh?: MoshParams
 }
 
 export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer
@@ -752,6 +761,7 @@ export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
     pane: defaultPane(),
     modular: defaultModular(),
     parcel: defaultParcel(),
+    mosh: defaultMosh(),
     ...partial,
     grid,
   }
@@ -2109,6 +2119,20 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       ctx.save()
       ctx.translate(-boxW / 2, -boxH / 2)
       paintParcel(ctx, parcel, boxW, boxH, seed)
+      ctx.restore()
+      return
+    }
+    if (layer.cellFill === 'mosh') {
+      // Mosh paints its OWN bands — NOT the shared grid: uneven horizontal bands
+      // of column-quantised filled rects, straight on the real ctx, fillStyle +
+      // fillRect and nothing else (no alpha / composite writes — the layer's own
+      // opacity and blend already on the ctx ride through). Regularity / merge /
+      // density / inset / force-keep don't apply; only the grid's seed carries the
+      // variation.
+      const mosh = layer.mosh ?? defaultMosh()
+      ctx.save()
+      ctx.translate(-boxW / 2, -boxH / 2)
+      paintMosh(ctx, mosh, mosh.inks, boxW, boxH, seed)
       ctx.restore()
       return
     }

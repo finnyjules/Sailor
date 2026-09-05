@@ -16,6 +16,7 @@ import { DEAL_VOCABS, type DealVocab } from '~/lib/compositor/dealVocab'
 import { defaultPane, PANE_LIMITS, type PaneParams } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
+import { defaultMosh, MOSH_LIMITS, MOSH_PRESET_NAMES, moshPresetPatch, moshPresetOf, type MoshParams, type MoshPresetName } from '~/lib/compositor/mosh'
 import { GRID_TEMPLATES, type GridTemplate } from '~/lib/frame/gridTemplates'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
@@ -783,9 +784,45 @@ const parcelPreset = computed(() => {
   if (!l || l.kind !== 'deal') return ''
   return parcelPresetOf((l as DealLayer).parcel ?? defaultParcel()) ?? ''
 })
-/** The four cell fills as the segmented control's plain labels. */
+/** One-click "Mosh" — the Mosh generator (lib/compositor/mosh): a corrupted
+ *  framebuffer — uneven horizontal bands, each a different failure (confetti runs,
+ *  torn mosaic blocks, thin smears, full-width scan rows with bright cuts, a
+ *  chevron herringbone), every mark a column-quantised filled rect in
+ *  full-strength colour-cube inks with dead near-black patches (cellFill:'mosh'),
+ *  at the original's defaults (6 bands / 150 cells across / mix .62 / tears .55 /
+ *  runs .5 / bright .3 / the pure cube). Configures the selected deal, or — with
+ *  none selected — creates a fresh deal filling the frame, in one undoable step.
+ *  The deal's grid is untouched: Mosh ignores it (only its seed carries the
+ *  variation). */
+function onMosh() {
+  if (selectedLocal.value?.kind === 'deal') {
+    const layer = selectedLocal.value as DealLayer
+    setLocal(layer.id, { cellFill: 'mosh', mosh: defaultMosh() } as Partial<DealLayer>)
+    return
+  }
+  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
+  if (g.mode === 'off') g.mode = 'generated'
+  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, cellFill: 'mosh', mosh: defaultMosh() }))
+}
+/** Patch a deal's Mosh tunables (one history step via setLocal). */
+function patchMosh(layer: DealLayer, patch: Partial<MoshParams>) {
+  setLocal(layer.id, { mosh: { ...(layer.mosh ?? defaultMosh()), ...patch } } as Partial<DealLayer>)
+}
+/** Apply a named palette preset (the 8 inks) to a Mosh deal. */
+function applyMoshPreset(layer: DealLayer, name: string) {
+  if (!(MOSH_PRESET_NAMES as string[]).includes(name)) return
+  patchMosh(layer, moshPresetPatch(name as MoshPresetName))
+}
+/** Which preset the selected Mosh deal currently matches ('' when custom). */
+const moshPreset = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return ''
+  return moshPresetOf((l as DealLayer).mosh ?? defaultMosh()) ?? ''
+})
+/** The five cell fills as the segmented control's plain labels. */
 const DEAL_FILL_LABELS: readonly { fill: NonNullable<DealLayer['cellFill']>; label: string }[] = [
-  { fill: 'solid', label: 'Solid' }, { fill: 'pane', label: 'Pane' }, { fill: 'modular', label: 'Modular' }, { fill: 'parcel', label: 'Parcel' },
+  { fill: 'solid', label: 'Solid' }, { fill: 'pane', label: 'Pane' }, { fill: 'modular', label: 'Modular' }, { fill: 'parcel', label: 'Parcel' }, { fill: 'mosh', label: 'Mosh' },
 ]
 const dealFillLabel = (layer: DealLayer) => DEAL_FILL_LABELS.find(f => f.fill === layer.cellFill)?.label ?? 'Solid'
 /** Switch a deal's cell fill, seeding that fill's params with the defaults when absent. */
@@ -795,6 +832,7 @@ function setDealFill(layer: DealLayer, label: string) {
   if (fill === 'pane') patch.pane = layer.pane ?? defaultPane()
   if (fill === 'modular') patch.modular = layer.modular ?? defaultModular()
   if (fill === 'parcel') patch.parcel = layer.parcel ?? defaultParcel()
+  if (fill === 'mosh') patch.mosh = layer.mosh ?? defaultMosh()
   setLocal(layer.id, patch)
 }
 
@@ -6879,6 +6917,8 @@ onUnmounted(() => {
                   @click="onModular()">Modular</StudioButton>
                 <StudioButton variant="secondary" title="Parcel — a coarse two-tone field of chunky ink blocks on a ground, with ragged hairline survey grids floating on top"
                   @click="onParcel()">Parcel</StudioButton>
+                <StudioButton variant="secondary" title="Mosh — a corrupted signal: stacked bands of glitch, each a different failure, in hard full-strength inks with dead dark patches"
+                  @click="onMosh()">Mosh</StudioButton>
               </div>
               <p class="mt-1 text-[10px] text-white/30 leading-snug">One click sets the palette, density and cell layout; your current variation is kept.</p>
             </div>
@@ -6893,10 +6933,34 @@ onUnmounted(() => {
                 :model-value="dealFillLabel(selectedLocal as DealLayer)"
                 @update:model-value="(v: any) => setDealFill(selectedLocal as DealLayer, v)" />
             </div>
+            <!-- Mosh has its OWN layout (horizontal bands of glitch), so the grid controls
+                 (density / inset / regularity / merge) don't apply to it. -->
+            <div v-if="(selectedLocal as any).cellFill === 'mosh'" class="mt-2 flex flex-col gap-1.5">
+              <StudioSelect label="Palette preset" :options="MOSH_PRESET_NAMES as any"
+                :model-value="moshPreset" @update:model-value="(v: any) => applyMoshPreset(selectedLocal as DealLayer, v)" />
+              <StudioSlider label="Bands" :min="MOSH_LIMITS.bands[0]" :max="MOSH_LIMITS.bands[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).bands"
+                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { bands: Math.round(v) })" />
+              <StudioSlider label="Cells across" :min="MOSH_LIMITS.cols[0]" :max="MOSH_LIMITS.cols[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).cols"
+                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { cols: Math.round(v) })" />
+              <StudioSlider label="Mix" :min="MOSH_LIMITS.mix[0]" :max="MOSH_LIMITS.mix[1]" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).mix"
+                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { mix: v })" />
+              <StudioSlider label="Tears" :min="MOSH_LIMITS.tears[0]" :max="MOSH_LIMITS.tears[1]" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).tears"
+                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { tears: v })" />
+              <StudioSlider label="Runs" :min="MOSH_LIMITS.runs[0]" :max="MOSH_LIMITS.runs[1]" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).runs"
+                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { runs: v })" />
+              <StudioSlider label="Bright" :min="MOSH_LIMITS.bright[0]" :max="MOSH_LIMITS.bright[1]" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).bright"
+                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { bright: v })" />
+            </div>
             <!-- Parcel has its OWN layout (a coarse two-tone block field with survey grids
                  on top), so the grid controls (density / inset / regularity / merge) don't
                  apply to it. -->
-            <div v-if="(selectedLocal as any).cellFill === 'parcel'" class="mt-2 flex flex-col gap-1.5">
+            <div v-else-if="(selectedLocal as any).cellFill === 'parcel'" class="mt-2 flex flex-col gap-1.5">
               <StudioSelect label="Palette preset" :options="PARCEL_PRESET_NAMES as any"
                 :model-value="parcelPreset" @update:model-value="(v: any) => applyParcelPreset(selectedLocal as DealLayer, v)" />
               <div class="flex items-center gap-2">
@@ -7507,6 +7571,8 @@ onUnmounted(() => {
                   @click="onModular()">Modular</StudioButton>
                 <StudioButton variant="secondary" title="Parcel — a coarse two-tone field of chunky ink blocks on a ground, with ragged hairline survey grids floating on top"
                   @click="onParcel()">Parcel</StudioButton>
+                <StudioButton variant="secondary" title="Mosh — a corrupted signal: stacked bands of glitch, each a different failure, in hard full-strength inks with dead dark patches"
+                  @click="onMosh()">Mosh</StudioButton>
               </div>
             </div>
           </div>
