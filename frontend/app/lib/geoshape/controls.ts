@@ -212,13 +212,18 @@ export const GEO_CONTROLS: GeoControl[] = [
   // (ShapeStudioSurface's fills-list block), not a single-value row — so
   // they're excluded from the drift guard's expected-key set alongside
   // `locks` (see that test's NON_CONTROL_FIELDS).
+  // optionLabels: the stored values are internal identifiers (`perClone`) and must never
+  // reach the screen — every select shows a human, sentence-cased label instead.
   select('fillStrategy', 'Fill', ['single', 'perClone', 'pieces'], DEFAULT_CONFIG.fillStrategy, 'Paint',
-    'single = unified holes; perClone = one colour per shape; pieces = colour solo + overlap regions'),
+    'Single = unified holes; Per shape = one colour per shape; Pieces = colour solo and overlap regions',
+    { optionLabels: ['Single', 'Per shape', 'Pieces'] }),
   select('fillOrder', 'Colour order', ['created', 'depth', 'leftRight', 'topBottom', 'rows', 'columns', 'centerOut', 'around'], DEFAULT_CONFIG.fillOrder, 'Paint',
-    'order colours are handed out in (rows = reading order; around = colour wheel)', { when: isMultiFill }),
+    'Order colours are handed out in (Rows = reading order; Around = colour wheel)',
+    { when: isMultiFill, optionLabels: ['Created', 'Depth', 'Left to right', 'Top to bottom', 'Rows', 'Columns', 'Centre out', 'Around'] }),
   switchC('overlapSeparate', 'Separate overlap colours', DEFAULT_CONFIG.overlapSeparate, 'Paint', { when: isPieces }),
   select('crossingMode', 'Crossings', ['depth', 'split'], DEFAULT_CONFIG.crossingMode, 'Paint',
-    'depth = one colour per overlap depth; split = each crossing its own piece, coloured by the colour order', { when: isPieces }),
+    'Depth = one colour per overlap depth; Split = each crossing its own piece, coloured by the colour order',
+    { when: isPieces, optionLabels: ['Depth', 'Split'] }),
   select('fillCycle', 'Colour ramp', [...FILL_CYCLES], DEFAULT_CONFIG.fillCycle, 'Paint',
     'cycle = repeat the colour list; ramp = fade smoothly through it across all the copies',
     { when: isMultiFill, optionLabels: ['Cycle', 'Ramp'] }),
