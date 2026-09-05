@@ -119,11 +119,11 @@ describe('applyTextureCommand — dealt-grid template', () => {
   }
 
   it('setParam dgTemplate expands the whole preset (cells + density + variance + vocab)', () => {
-    const r = applyTextureCommand(dealtState(), { op: 'setParam', target: 'dgTemplate', args: { value: 'mosh' } })
+    const r = applyTextureCommand(dealtState(), { op: 'setParam', target: 'dgTemplate', args: { value: 'Packed' } })
     if (!r.ok) throw new Error('template apply failed')
     const p = r.template.params as Record<string, unknown>
-    // Matches gridTemplate('mosh').pattern.
-    expect(p.dgTemplate).toBe('mosh')
+    // Matches DEALTGRID_PRESETS.Packed.
+    expect(p.dgTemplate).toBe('Packed')
     expect(p.dgCells).toBe(16)
     expect(p.dgDensity).toBeCloseTo(0.8, 5)
     expect(p.dgSizeVar).toBeCloseTo(0.7, 5)
@@ -133,7 +133,7 @@ describe('applyTextureCommand — dealt-grid template', () => {
   it('template application is exactly invertible (undo restores every touched dial)', () => {
     const before = dealtState()
     const beforeParams = { ...before.params } as Record<string, unknown>
-    const r = applyTextureCommand(before, { op: 'setParam', target: 'dgTemplate', args: { value: 'static' } })
+    const r = applyTextureCommand(before, { op: 'setParam', target: 'dgTemplate', args: { value: 'Fine' } })
     if (!r.ok) throw new Error('apply failed')
     const undo = applyTextureCommand(r.template, r.inverse)
     if (!undo.ok) throw new Error('undo failed')

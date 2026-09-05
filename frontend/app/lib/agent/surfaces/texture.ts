@@ -55,7 +55,7 @@ const TEXTURE_COMMANDS: CommandSpec[] = [
   { op: 'linkFill', hint: 'Make one ROLE reuse another role\'s fill. target = role key; args: { to: otherRoleKey }. Use for "make A and B the same".' },
   { op: 'setFillOpacity', hint: 'Set a ROLE fill\'s opacity. target = role key; args: { opacity: 0..1 }.' },
   { op: 'clearFill', hint: 'Reset a ROLE to its default colour (removes any custom fill). target = role key.' },
-  { op: 'setParam', hint: 'Tune a flat control (palette/lattice/motif/cells/…). target = control key (see settings); args: { value }. Value is clamped to the control\'s range / options. Use for "tighter cells", "warmer palette" (colorA/colorB/background), "more jitter". In the dealt-grid mode, target "dgTemplate" with a value of "modular"/"oddgrid"/"parcel"/"mosh"/"static" applies a whole preset at once (cells + density + size variance + colours), and "dgVocab" ("brand"/"mono"/"warm"/"cool") recolours it.' },
+  { op: 'setParam', hint: 'Tune a flat control (palette/lattice/motif/cells/…). target = control key (see settings); args: { value }. Value is clamped to the control\'s range / options. Use for "tighter cells", "warmer palette" (colorA/colorB/background), "more jitter". In the dealt-grid mode, target "dgTemplate" with a value of "Even"/"Loose"/"Dense"/"Packed"/"Fine" applies a whole structural preset at once (cells + density + size variance + colours), and "dgVocab" ("brand"/"mono"/"warm"/"cool") recolours it.' },
   { op: 'restore', hint: 'internal — undo support.' },
 ]
 

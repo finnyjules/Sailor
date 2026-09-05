@@ -17,7 +17,6 @@ import { defaultPane, PANE_LIMITS, type PaneParams } from '~/lib/compositor/pane
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
 import { defaultMosh, MOSH_LIMITS, MOSH_PRESET_NAMES, moshPresetPatch, moshPresetOf, type MoshParams, type MoshPresetName } from '~/lib/compositor/mosh'
-import { GRID_TEMPLATES, type GridTemplate } from '~/lib/frame/gridTemplates'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
@@ -650,37 +649,6 @@ function patchDealGrid(layer: DealLayer, patch: Partial<typeof layer.grid>) {
 /** Re-roll a deal's seed for a fresh coherent variation (layout + fills + density). */
 function rerollDeal(layer: DealLayer) {
   patchDealGrid(layer, { gen: { ...layer.grid.gen, seed: Math.floor(Math.random() * 9999) + 1 } })
-}
-
-// The shared grid TEMPLATES (Modular / Oddgrid / Parcel / Mosh / Static) as one-click
-// deal presets — the same named looks the agent's `template` word configures.
-const GRID_TEMPLATE_LIST = GRID_TEMPLATES
-
-/**
- * Configure a deal layer to a template in ONE undoable step: palette + density +
- * inset, and the template's gen fields merged over the layer's own grid with mode
- * forced to 'generated'. The current seed is PRESERVED (the template carries no
- * seed) so applying a template keeps the variation — the user re-rolls separately.
- */
-function applyDealTemplate(layer: DealLayer, t: GridTemplate) {
-  setLocal(layer.id, {
-    vocab: t.deal.vocab,
-    density: t.deal.density,
-    cellInset: t.deal.cellInset,
-    grid: { ...layer.grid, mode: 'generated', gen: { ...layer.grid.gen, ...t.deal.gen } },
-  } as Partial<DealLayer>)
-}
-
-/** Picker action: apply the template to the selected deal, or — when no deal is
- *  selected — create a fresh deal from the frame's grid already configured to the
- *  template (one addLocal step; the frame grid's seed carries the variation). */
-function onDealTemplate(t: GridTemplate) {
-  if (selectedLocal.value?.kind === 'deal') { applyDealTemplate(selectedLocal.value as DealLayer, t); return }
-  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
-  g.mode = 'generated'
-  g.gen = { ...g.gen, ...t.deal.gen }
-  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
-  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, vocab: t.deal.vocab, density: t.deal.density, cellInset: t.deal.cellInset }))
 }
 
 /** One-click "Pane" — the Pane generator (lib/compositor/pane): its own row-masonry
@@ -6907,10 +6875,8 @@ onUnmounted(() => {
                section; this deal carries its OWN grid seeded from it. -->
           <template v-if="selectedLocal.kind === 'deal'">
             <div>
-              <div class="panel-label mb-1.5">Template</div>
+              <div class="panel-label mb-1.5">Generator</div>
               <div class="flex flex-wrap gap-1.5">
-                <StudioButton v-for="t in GRID_TEMPLATE_LIST" :key="t.id" variant="secondary" :title="t.blurb"
-                  @click="applyDealTemplate(selectedLocal as DealLayer, t)">{{ t.name }}</StudioButton>
                 <StudioButton variant="secondary" title="Pane — rows of flush panes, each a two-colour ramp running corner to corner or edge to edge"
                   @click="onPane()">Pane</StudioButton>
                 <StudioButton variant="secondary" title="Modular — a merged module grid over a background: empty, solid, block fields, dot clusters, line grids and ramps, with hairlines"
@@ -6920,7 +6886,7 @@ onUnmounted(() => {
                 <StudioButton variant="secondary" title="Mosh — a corrupted signal: stacked bands of glitch, each a different failure, in hard full-strength inks with dead dark patches"
                   @click="onMosh()">Mosh</StudioButton>
               </div>
-              <p class="mt-1 text-[10px] text-white/30 leading-snug">One click sets the palette, density and cell layout; your current variation is kept.</p>
+              <p class="mt-1 text-[10px] text-white/30 leading-snug">One click switches this deal to a generator at its own defaults; your current variation is kept.</p>
             </div>
             <div class="mt-2">
               <div class="panel-label mb-1.5">Palette</div>
@@ -7561,10 +7527,8 @@ onUnmounted(() => {
               <StudioButton variant="secondary" @click="onFillGridWithSections">Fill grid with sections</StudioButton>
               <StudioButton variant="secondary" @click="onDealGrid">Deal grid</StudioButton>
               <p class="text-[10px] text-white/30 leading-snug">Deal fills every cell of a dense grid from a palette — one self-painting layer that bakes.</p>
-              <div class="panel-label mt-1 mb-1">Or deal a template</div>
+              <div class="panel-label mt-1 mb-1">Generators</div>
               <div class="flex flex-wrap gap-1.5">
-                <StudioButton v-for="t in GRID_TEMPLATE_LIST" :key="t.id" variant="secondary" :title="t.blurb"
-                  @click="onDealTemplate(t)">{{ t.name }}</StudioButton>
                 <StudioButton variant="secondary" title="Pane — rows of flush panes, each a two-colour ramp running corner to corner or edge to edge"
                   @click="onPane()">Pane</StudioButton>
                 <StudioButton variant="secondary" title="Modular — a merged module grid over a background: empty, solid, block fields, dot clusters, line grids and ramps, with hairlines"

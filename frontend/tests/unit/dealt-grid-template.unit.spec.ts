@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { applyGridTemplate, DEALTGRID_TEMPLATE_NONE } from '~/lib/texturefx/templates'
-import { GRID_TEMPLATES, gridTemplate } from '~/lib/frame/gridTemplates'
+import { applyGridTemplate, DEALTGRID_PRESETS, DEALTGRID_PRESET_IDS, DEALTGRID_TEMPLATE_NONE } from '~/lib/texturefx/templates'
 import { textureDefaults } from '~/lib/texturefx/controls'
 import { DEALTGRID_VOCABS, dealtGridColors, dealtGridVocab, rolesFor } from '~/lib/texturefx/roles'
 import { dealtGridSample } from '~/lib/texturefx/pattern'
@@ -25,34 +24,49 @@ function roleField(p: any, n = 32): number[] {
   return out
 }
 
-// --- template application ---------------------------------------------------
+// --- preset application -----------------------------------------------------
 
-describe('dealt-grid template application', () => {
-  it('the five shared templates are the ones we wire (Modular / Oddgrid / Parcel / Mosh / Static)', () => {
-    expect(GRID_TEMPLATES.map(t => t.id)).toEqual(['modular', 'oddgrid', 'parcel', 'mosh', 'static'])
-  })
-
-  it('applying each template writes dgCells / dgDensity / dgSizeVar / dgVocab from its .pattern', () => {
-    for (const t of GRID_TEMPLATES) {
-      const p = dealt()
-      applyGridTemplate(p, t.id)
-      expect(p.dgCells, `${t.id} cells`).toBe(t.pattern.dgCells)
-      expect(p.dgDensity, `${t.id} density`).toBe(t.pattern.dgDensity)
-      expect(p.dgSizeVar, `${t.id} sizeVar`).toBe(t.pattern.dgSizeVar)
-      expect(p.dgVocab, `${t.id} vocab`).toBe(t.pattern.vocab)
-      expect(p.dgTemplate, `${t.id} records the choice`).toBe(t.id)
+describe('dealt-grid preset application', () => {
+  it('the five presets carry structural names, in picker order (no playgrnd tool names)', () => {
+    expect(DEALTGRID_PRESET_IDS).toEqual(['Even', 'Loose', 'Dense', 'Packed', 'Fine'])
+    expect(Object.keys(DEALTGRID_PRESETS)).toEqual(DEALTGRID_PRESET_IDS)
+    for (const id of DEALTGRID_PRESET_IDS) {
+      expect(['modular', 'oddgrid', 'parcel', 'mosh', 'static']).not.toContain(id.toLowerCase())
     }
   })
 
-  it('reuses the global seed — a template sets structure + palette, not the shuffle', () => {
+  it('the preset values are exact', () => {
+    expect(DEALTGRID_PRESETS).toEqual({
+      Even:   { dgCells: 8,  dgDensity: 1,   dgSizeVar: 0,    vocab: 'brand' },
+      Loose:  { dgCells: 10, dgDensity: 1,   dgSizeVar: 0.5,  vocab: 'brand' },
+      Dense:  { dgCells: 12, dgDensity: 1,   dgSizeVar: 0.25, vocab: 'warm' },
+      Packed: { dgCells: 16, dgDensity: 0.8, dgSizeVar: 0.7,  vocab: 'brand' },
+      Fine:   { dgCells: 22, dgDensity: 0.6, dgSizeVar: 0.1,  vocab: 'mono' },
+    })
+  })
+
+  it('applying each preset writes dgCells / dgDensity / dgSizeVar / dgVocab', () => {
+    for (const id of DEALTGRID_PRESET_IDS) {
+      const t = DEALTGRID_PRESETS[id]!
+      const p = dealt()
+      applyGridTemplate(p, id)
+      expect(p.dgCells, `${id} cells`).toBe(t.dgCells)
+      expect(p.dgDensity, `${id} density`).toBe(t.dgDensity)
+      expect(p.dgSizeVar, `${id} sizeVar`).toBe(t.dgSizeVar)
+      expect(p.dgVocab, `${id} vocab`).toBe(t.vocab)
+      expect(p.dgTemplate, `${id} records the choice`).toBe(id)
+    }
+  })
+
+  it('reuses the global seed — a preset sets structure + palette, not the shuffle', () => {
     const p = dealt({ seed: 4242 })
-    applyGridTemplate(p, 'oddgrid')
+    applyGridTemplate(p, 'Loose')
     expect(p.seed).toBe(4242)
   })
 
   it('mutates in place and returns the same bag (chainable)', () => {
     const p = dealt()
-    expect(applyGridTemplate(p, 'parcel')).toBe(p)
+    expect(applyGridTemplate(p, 'Dense')).toBe(p)
   })
 
   it('the neutral sentinel records the choice but leaves the dials untouched', () => {
@@ -62,17 +76,19 @@ describe('dealt-grid template application', () => {
     expect([p.dgCells, p.dgDensity, p.dgSizeVar, p.dgVocab]).toEqual([13, 0.42, 0.9, 'warm'])
   })
 
-  it('an unknown id is inert on the dials (records the choice only)', () => {
-    const p = dealt({ dgCells: 5 })
-    applyGridTemplate(p, 'not-a-template')
-    expect(p.dgCells).toBe(5)
-    expect(p.dgTemplate).toBe('not-a-template')
+  it('an unknown id (including the retired tool names) is inert on the dials', () => {
+    for (const id of ['not-a-preset', 'mosh', 'oddgrid', 'static']) {
+      const p = dealt({ dgCells: 5 })
+      applyGridTemplate(p, id)
+      expect(p.dgCells, id).toBe(5)
+      expect(p.dgTemplate, id).toBe(id)
+    }
   })
 
-  it('after applying, the dials are still editable (the template value is not sticky)', () => {
+  it('after applying, the dials are still editable (the preset value is not sticky)', () => {
     const p = dealt()
-    applyGridTemplate(p, 'mosh')
-    expect(p.dgCells).toBe(gridTemplate('mosh')!.pattern.dgCells)
+    applyGridTemplate(p, 'Packed')
+    expect(p.dgCells).toBe(DEALTGRID_PRESETS.Packed!.dgCells)
     p.dgCells = 3   // a plain edit, as the panel would write
     expect(p.dgCells).toBe(3)
   })
@@ -123,11 +139,11 @@ describe('dealt-grid vocab does not perturb the sampler (twin-safe)', () => {
     }
   })
 
-  it('a template + its vocab leaves the layout governed only by cells/density/sizeVar', () => {
-    // Applying a template then swapping just the vocab must not move a single cell.
-    const p = dealt(); applyGridTemplate(p, 'parcel')
-    const withTemplateVocab = roleField(p)
+  it('a preset + its vocab leaves the layout governed only by cells/density/sizeVar', () => {
+    // Applying a preset then swapping just the vocab must not move a single cell.
+    const p = dealt(); applyGridTemplate(p, 'Dense')
+    const withPresetVocab = roleField(p)
     const q = { ...p, dgVocab: 'cool' }
-    expect(roleField(q)).toEqual(withTemplateVocab)
+    expect(roleField(q)).toEqual(withPresetVocab)
   })
 })

@@ -3,8 +3,7 @@ import { DITHER_PATTERNS, LATTICES, MODES, MOTIFS, PLACEMENTS, SEAM_METHODS, SHA
 import { SHEET_PRESET_CUSTOM, SHEET_PRESET_TILE, SHEET_PRESETS, TILE_PX_OPTIONS } from '~/lib/texturefx/sheet'
 import { postControls } from '~/lib/studio/post/controls'
 import { DEALTGRID_VOCAB_IDS } from '~/lib/texturefx/roles'
-import { GRID_TEMPLATE_IDS } from '~/lib/frame/gridTemplates'
-import { DEALTGRID_TEMPLATE_NONE } from '~/lib/texturefx/templates'
+import { DEALTGRID_PRESET_IDS, DEALTGRID_TEMPLATE_NONE } from '~/lib/texturefx/templates'
 
 // Texture controls extend the shared ControlSpec with an optional `when`
 // predicate for contextual reveal (e.g. show procedural controls only in
@@ -104,12 +103,12 @@ export const TEXTURE_CONTROLS: TextureControl[] = [
   // square toward its centre for an irregular-tile / gutter look (0 = flush rigid
   // grid). Colours come from the two inks + ground (roles.ts's dealtgrid family).
   // See pattern.ts's dealtGridSample() for the cell math.
-  // 'Template' is a one-click starting point — picking one writes Cells / Density /
-  // Size variance / Colours from the shared grid templates (Modular / Oddgrid /
-  // Parcel / Mosh / Static; see lib/frame/gridTemplates.ts). '—' means hand-tuned.
-  // The surface expands the selection (TextureStudioSurface.applyGridTemplate); the
-  // dials below stay live so the look can be tweaked after applying.
-  { key: 'dgTemplate', label: 'Template', kind: 'select', options: [DEALTGRID_TEMPLATE_NONE, ...GRID_TEMPLATE_IDS], default: DEALTGRID_TEMPLATE_NONE, group: 'Dealt grid', when: isDealtGrid },
+  // 'Preset' is a one-click starting point — picking one writes Cells / Density /
+  // Size variance / Colours from a structural preset (Even / Loose / Dense / Packed /
+  // Fine; see lib/texturefx/templates.ts). '—' means hand-tuned. The surface expands
+  // the selection (TextureStudioSurface → applyGridTemplate); the dials below stay
+  // live so the look can be tweaked after applying.
+  { key: 'dgTemplate', label: 'Preset', kind: 'select', options: [DEALTGRID_TEMPLATE_NONE, ...DEALTGRID_PRESET_IDS], default: DEALTGRID_TEMPLATE_NONE, group: 'Dealt grid', when: isDealtGrid },
   // 'Colours' picks the role-colour vocabulary (brand / mono / warm / cool). It only
   // swaps which colours fill the two inks + ground — never the per-cell layout — so
   // the TS↔GLSL twin stays in parity. See roles.ts's DEALTGRID_VOCABS.
