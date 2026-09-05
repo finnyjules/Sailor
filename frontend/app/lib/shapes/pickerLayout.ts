@@ -8,3 +8,6 @@ export const SHAPE_PICKER_APPROX_HEIGHT = 308 + 8
 export function anchorAbove(rect: DOMRect | null | undefined): { x: number; y: number } {
   return rect ? { x: rect.left, y: Math.max(8, rect.top - SHAPE_PICKER_APPROX_HEIGHT) } : { x: 16, y: 16 }
 }
+
+// The Look library is wider than the shape picker: 4 card columns (~104px each) + the group rail.
+export const LOOK_PICKER_WIDTH = 540
