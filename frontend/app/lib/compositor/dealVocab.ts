@@ -23,6 +23,24 @@ import type { Paint, Gradient } from '~/lib/compositor/paint'
 export type DealVocab = 'brand' | 'mono' | 'warm' | 'cool'
 export const DEAL_VOCABS: readonly DealVocab[] = ['brand', 'mono', 'warm', 'cool'] as const
 
+/**
+ * Does the vocabulary change what this deal LOOKS like? Only `solid` deals every
+ * cell from it; `modular` reads it when its own ink list is empty (the default);
+ * `pane` only when it has fewer than 2 inks of its own (the default ships 8);
+ * `parcel` and `mosh` carry their own colours and never read it. The inspector
+ * hides the Palette control when this is false — a control that stores a value
+ * nothing consumes is a dead control.
+ */
+export function dealVocabDrivesLook(layer: { cellFill?: string; pane?: { inks?: string[] }; modular?: { inks?: string[] } }): boolean {
+  const fill = layer.cellFill ?? 'solid'
+  if (fill === 'solid') return true
+  // Absent params paint at the defaults: defaultModular() has NO inks (vocab
+  // read); defaultPane() ships 8 (vocab ignored).
+  if (fill === 'modular') return (layer.modular?.inks?.length ?? 0) === 0
+  if (fill === 'pane') return !!layer.pane && (layer.pane.inks?.length ?? 0) < 2
+  return false
+}
+
 /** One entry in a vocabulary: a Paint and its relative weight (bigger = more often). */
 interface WeightedPaint { paint: Paint; weight: number }
 

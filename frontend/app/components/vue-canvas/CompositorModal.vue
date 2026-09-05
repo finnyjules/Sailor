@@ -12,7 +12,7 @@ import {
   cornerRadii, drawLocalLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, layerMaskRef, localLayerBox, createBrushLayer, createDealLayer,
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
 } from '~/composables/useCompositorLayers'
-import { DEAL_VOCABS, type DealVocab } from '~/lib/compositor/dealVocab'
+import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
 import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
@@ -804,6 +804,12 @@ const DEAL_FILL_LABELS: readonly { fill: NonNullable<DealLayer['cellFill']>; lab
   { fill: 'solid', label: 'Solid' }, { fill: 'pane', label: 'Pane' }, { fill: 'modular', label: 'Modular' }, { fill: 'parcel', label: 'Parcel' }, { fill: 'mosh', label: 'Mosh' },
 ]
 const dealFillLabel = (layer: DealLayer) => DEAL_FILL_LABELS.find(f => f.fill === layer.cellFill)?.label ?? 'Solid'
+/** Whether the selected deal's vocabulary changes its look (gates the Palette
+ *  control — Parcel / Mosh / a Pane with its own inks never read it). */
+const vocabDrivesLook = computed(() => {
+  const l = selectedLocal.value
+  return !!l && l.kind === 'deal' && dealVocabDrivesLook(l as DealLayer)
+})
 /** Switch a deal's cell fill, seeding that fill's params with the defaults when absent. */
 function setDealFill(layer: DealLayer, label: string) {
   const fill = DEAL_FILL_LABELS.find(f => f.label === label)?.fill ?? 'solid'
@@ -856,6 +862,9 @@ const {
     background: background.value,
     postEffects: postEffects.value,
     grid: readGrid(compositor.value?.data?.properties as any),
+    // H/W, same as the UI's Deal buttons use, so an agent-created deal fills the
+    // frame instead of a square (layer boxes are width-normalized).
+    aspect: canvasDisplay.h / Math.max(1, canvasDisplay.w),
     brandPalette: brandSwatches(projectBrand?.activeKit.value),
   }),
   setState: (s) => {
@@ -6890,10 +6899,14 @@ onUnmounted(() => {
               </div>
               <p class="mt-1 text-[10px] text-white/30 leading-snug">One click switches this deal to a generator at its own defaults; your current variation is kept.</p>
             </div>
-            <div class="mt-2">
+            <!-- The vocabulary only shows when something reads it: Solid always,
+                 Modular / Pane only while they have no inks of their own. Parcel
+                 and Mosh carry their own colours (see dealVocabDrivesLook). -->
+            <div v-if="vocabDrivesLook" class="mt-2">
               <div class="panel-label mb-1.5">Palette</div>
               <StudioSegmented :options="DEAL_VOCABS as any" :model-value="(selectedLocal as any).vocab"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { vocab: v })" />
+              <p v-if="(selectedLocal as any).cellFill && (selectedLocal as any).cellFill !== 'solid'" class="mt-1 text-[10px] text-white/30 leading-snug">This look has no inks of its own, so it draws from this palette.</p>
             </div>
             <div class="mt-2">
               <div class="panel-label mb-1.5">Cell fill</div>

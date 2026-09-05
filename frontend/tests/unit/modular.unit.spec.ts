@@ -522,10 +522,13 @@ describe('agent dealGrid modular', () => {
     expect((r3 as any).template.layers[0].cellFill).toBe('pane')
     expect((r3 as any).template.layers[0].modular.unit).toBe(6)
   })
-  it('ignores an unknown cellFill / preset on reconfigure (keeps the prior fill)', () => {
+  it('ignores an unknown cellFill on reconfigure (keeps the prior fill); an unknown preset is rejected, not swallowed', () => {
     const s1 = (applyCompositorCommand(baseState(), { op: 'dealGrid', args: { id: 'dd', cellFill: 'modular' } }) as any).template
-    const r = applyCompositorCommand(s1, { op: 'dealGrid', target: 'dd', args: { cellFill: 'bogus', palettePreset: 'Nope' } })
+    const r = applyCompositorCommand(s1, { op: 'dealGrid', target: 'dd', args: { cellFill: 'bogus' } })
     expect((r as any).template.layers[0].cellFill).toBe('modular')
     expect((r as any).template.layers[0].modular).toEqual(defaultModular())
+    const bad = applyCompositorCommand(s1, { op: 'dealGrid', target: 'dd', args: { cellFill: 'bogus', palettePreset: 'Nope' } })
+    expect(bad.ok).toBe(false)
+    expect((bad as any).detail).toMatch(/unknown palettePreset "Nope" for modular/)
   })
 })
