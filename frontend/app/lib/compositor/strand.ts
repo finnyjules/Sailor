@@ -43,11 +43,11 @@
  *      qualify.
  *   A8 [99-104] Beyond `±0.32` of a side outside the sheet the chain is pulled round:
  *      wrap the gap between its heading and the bearing to the box's midpoint into
- *      `−π…π`, then apply one fifth. The fraction is the whole trick. Apply the lot and
- *      the apron behaves like a hard boundary that chains visibly ricochet off; apply a
- *      fifth and the correction spreads across several rods into a curve no different
- *      from what Wander already produces. It also keeps Length working: uncorrected, a
- *      long chain spends most of its rods outside the box, contributing nothing.
+ *      `−π…π`, then apply one fifth. The fraction matters: a full correction snaps the
+ *      heading in one step, which shows as a kink at the apron; a fifth per step bends
+ *      the chain back over several rods, indistinguishable from a Wander turn. Without
+ *      any steering, Length stops meaning much — the chain keeps walking off-sheet and
+ *      only its first few rods are ever seen.
  *   A9 [61, 83, 86] ROD_CAP = 7000 rods, tested at both loops. Branching is
  *      multiplicative, so the ceiling is what stops Chains 40 × Length 90 × Branching 1
  *      from running away.
@@ -64,8 +64,8 @@
  *   B2 [127, 141] The drawn length is `full = seg + wid`, and the stations run from
  *      `t = −wid/2` to `t = seg + wid/2` along the axis, centred on the rod's spot.
  *   B3 [128-129] `half = max(wid·0.05, wid/2 + grow)`. `grow` is negative for the
- *      shrunken depth pass, and the floor is what keeps that pass from crossing zero
- *      and producing an outline turned inside out.
+ *      shrunken depth pass; the floor guarantees the depth outline keeps a positive
+ *      half-width for every rod, thin ones included.
  *   B4 [130] ROD_STATIONS = 18 steps, so 19 points per edge.
  *   B5 [131-132, 135-136] The two ends open at different rates:
  *      `e0 = 0.06 + hash(sd,3,7)·0.34·rough` and `e1 = 0.06 + hash(sd,9,7)·0.60·rough`,
@@ -93,8 +93,8 @@
  *      spread is the working room rule D2's jitter needs. Rasterise the mask at full
  *      resolution and a boundary is one blended pixel wide: the jitter has a single
  *      pixel it can move, and every rod keeps a cleanly cut silhouette however far Grain
- *      is pushed. The fourfold saving in both the raster and the read-back is welcome
- *      but incidental.
+ *      is pushed. That the smaller mask is also cheaper to draw and to read is a side
+ *      effect, not the reason.
  *   C2 [196] The sheet is cleared to ground everywhere.
  *   C3 [181-184, 205-211] Pass one, into RED: the same rods, displaced by
  *      `offset·0.055·U` at 135° (down and to the left) and fattened by
@@ -102,14 +102,15 @@
  *   C4 [212-218] Pass two, into GREEN: those rods over again, square on and at their
  *      plain width. The two passes cover nearly the same pixels, and the print resolves
  *      fill ahead of plate (rule D7), so what stays visible of the plate is exactly the
- *      crescent the displacement failed to cover — up to `slip + grow` thick on one
- *      flank of a rod, and nothing at all on the flank the plate moved away from.
+ *      crescent the displacement failed to cover — up to `slip + grow` thick on the
+ *      flank the plate moved towards, and only as much as `grow` alone leaves on the
+ *      opposite flank (a full ring at Off-register 0 with Plate spread up).
  *   C5 [225-240] Pass three, into BLUE, and only above Coverage 0.004: a third go at the
  *      rods, shrunk by `eat = wide·0.5·0.38`, softened by a `blur(eat·0.8)` and
  *      accumulated under `lighter`. The blue channel then encodes depth — close to zero
  *      along a rod's boundary, close to full through its interior — and rule D4 divides
- *      the ink loss by it, so the dropout gathers where a rod is thin instead of
- *      spreading evenly over the whole silhouette. `eat` is quoted against the HALF
+ *      the ink loss by it, so the dropout concentrates along thin rods and edges while
+ *      the cores stay solid. `eat` is quoted against the HALF
  *      width; go past that and there would be no interior left to defend.
  *   C6 [238-239] The composite operation and the filter are put back afterwards. The
  *      source assigns its two defaults; this restores whatever the caller had, which is
@@ -180,6 +181,11 @@
  *      than a hidden export margin, so the column clamps here like the row does.
  *   H5 A rod carries the `depth` it was branched at. Paint ignores it entirely; the
  *      unit suite reads it to check rule A7 without reaching into the walk.
+ *   H6 The per-pixel pass samples the mask at `MW/W`, `MH/H` rather than the source's
+ *      fixed one half [262-268], so an odd sheet width (whose mask rounds up) still
+ *      lands the last mask column on the last sheet column — a sub-mask-pixel shift.
+ *   H7 The walk's aspect is taken from the mask (`MW/MH`), not the box, so the spots
+ *      and the raster agree to the pixel; the two differ only by the mask's rounding.
  */
 import { mulberry32, hashSeed } from '~/lib/spacetype/rng'
 import { LruCache } from '~/lib/compositor/silhouetteCache'
