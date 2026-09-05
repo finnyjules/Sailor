@@ -1,98 +1,144 @@
 /**
- * Chaff — a line-faithful port of the playgrnd "Chaff" generator, as the first
- * STYLE of the Scatter element (the `scatter` layer kind). Reimplemented from the
- * algorithm (the site has no licence; nothing here is copied — our own rng, our own
- * hash, our own noise, our own structure), but every RULE of the original is kept,
- * because the rules ARE the look: a handful of BLADES thrown at the paper, each an
- * arc with a width profile, printed through a half-size mask that a two-scale
- * mottle then thresholds into two inks.
+ * Chaff — the playgrnd "Chaff" generator, rebuilt as the first STYLE of the Scatter
+ * element (the `scatter` layer kind). The site carries no licence, so nothing here is
+ * lifted: the rng, the hash, the noise and the shape of the file are ours. What is
+ * kept is the RULE SET, because the rules are what make the look — a litter of BLADES
+ * strewn over a sheet, each one an arc carrying a width profile, stencilled into a
+ * coverage buffer at half resolution, then decided pixel by pixel into one of two inks
+ * by a noise of two scales.
  *
- * Rule checklist — each line maps to the captured reference
+ * Rule checklist — each entry names the captured reference's own lines
  * (`playgrnd-chaff-generator-reference.js`, line numbers in brackets):
  *
  *  A. THE THROW (chaffBlades)
- *   A1 [69] `count` blades: `min(1200, max(1, round(count)))` — the tool's own cap,
- *      under the dial's 4..400 range (CHAFF_LIMITS.count, the tool's slider).
- *   A2 [66-67, 77-78] Everything is measured in units of √(frame area): `fw = 1/√aspect`,
- *      `fh = √aspect` (aspect = boxH/boxW), so a wide box is not a busier box and a
- *      variation is the same picture at any size. A blade's spot runs
- *      `-0.25 … 1.25` of each side, so the big ones run OFF the edges instead of all
- *      sitting politely inside.
- *   A3 [72-75] The size spread is SQUARED: `k = 1 + (u·u·3.2 − 0.5)·vary`, so most
- *      blades sit near the base and a few run away large. A linear spread reads as
- *      two even ranks.
- *   A4 [68, 80] `base = 0.06 + size·0.38`; `L = base · max(0.12, k)` — a blade can
- *      never collapse to nothing.
- *   A5 [79, 81-82] Each blade gets its own heading, turn direction and sub-seed (its
- *      wobble), all off ONE stream seeded from the picture's seed [67] (our own rng —
- *      `mulberry32(hashSeed(...))`, drawn in the source's own order).
- *   A6 [85-87] Sorted BIGGEST FIRST, so the large blades sit at the back and the
- *      small ones read as lying on top rather than being swallowed.
+ *   A1 [69] `count` blades, rounded and floored at 1. The source also ceilings that
+ *      round at 1200 [60]; our Blades dial stops at 400 (CHAFF_LIMITS.count, read off
+ *      the tool's own slider), so the ceiling is unreachable here and is not restated
+ *      in code — the dial range subsumes it.
+ *   A2 [66-67, 77-78] Lengths and spots are quoted against √(frame area), never
+ *      against a side: `fw = 1/√aspect`, `fh = √aspect` (aspect = boxH/boxW). Two
+ *      consequences the eye can see — widening the box spreads one throw further
+ *      apart rather than crowding more marks into it, and a single seed reads as the
+ *      same layout at thumbnail size and at print size. Spots are drawn across
+ *      `-0.25 … 1.25` of each side, a quarter-frame apron all round, because a blade
+ *      is meant to be cut by the frame edge as often as it is contained by it.
+ *   A3 [72-75] `k = 1 + (u·u·3.2 − 0.5)·vary`, with `u` SQUARED before use. The square
+ *      bends the distribution: P(k ≤ x) = √x, so the median length lands roughly
+ *      quarter-way up the range where a linear roll would leave it halfway, and the
+ *      top of the range is reached only rarely. Roll linearly instead and the lengths
+ *      spread evenly, which the eye resolves into distinct sizes of blade rather than
+ *      one continuous population.
+ *   A4 [68, 80] `base = 0.06 + size·0.38`; `L = base · max(0.12, k)`. The floor stops
+ *      a low `k` reducing a blade to a speck.
+ *   A5 [79, 81-82] Heading, turn direction and a wobble sub-seed are drawn per blade
+ *      from ONE stream keyed to the picture's seed [67] — our own rng
+ *      (`mulberry32(hashSeed(...))`), pulled in the source's draw order so the
+ *      structure of a variation matches.
+ *   A6 [85-87] Sorted by descending length before anything is drawn. Draw order is the
+ *      only depth a canvas has, so the sort decides which blades survive: with the
+ *      giants laid down first every short blade drawn after them stays visible. Sort
+ *      the other way and the small marks are simply covered over, and the picture
+ *      loses a whole size class.
  *
- *  B. THE SILHOUETTE (chaffProfile) — width at `t` along the blade, 0 at both ends.
- *   B1 [105] crescent — `sin(πt)^(0.45 + taper·1.4)`: pointed at both ends.
- *   B2 [100-104] leaf — a fast head ramp `min(1, √(t/e))`, `e = 0.05 + taper·0.10`,
- *      times `(1−t)^(0.55 + taper·1.5)`: blunt at one end, drawn to a point at the other.
- *   B3 [95-99] bar — `min(1, √(t/e), √((1−t)/e))`, `e = 0.04 + taper·0.20`: near
- *      enough parallel-sided the whole way, with taper widening the end ramps.
+ *  B. THE SILHOUETTE (chaffProfile) — every profile is a 0..1 multiplier on `wide`,
+ *  evaluated at `t` (0 at the head, 1 at the tail) and reaching 0 at both ends. Three
+ *  curves are on offer under `shape`, and `taper` is an exponent inside each of them,
+ *  so one dial narrows a crescent's shoulders and lengthens a bar's end ramps.
+ *   B1 [105] crescent — `sin(πt)^(0.45 + taper·1.4)`: a spindle, fattest at dead
+ *      centre, thinning to nothing at either tip.
+ *   B2 [100-104] leaf — `min(1, √(t/e))` with `e = 0.05 + taper·0.10`, times
+ *      `(1−t)^(0.55 + taper·1.5)`: full width within the first few percent of the run,
+ *      then a long fall to a tip. A comma rather than a spindle.
+ *   B3 [95-99] bar — `min(1, √(t/e), √((1−t)/e))`, `e = 0.04 + taper·0.20`:
+ *      flat-topped, holding one width for most of the run with a short ramp at each
+ *      end; taper lengthens those ramps.
  *
  *  C. THE ARC AND ITS EDGES (chaffBladeOutline)
- *   C1 [113-127] The centre line is an ARC walked in N = 26 steps: the heading starts
- *      at `a0 = a − sweep·turn/2` and turns steadily by `sweep·turn` over the length,
- *      `sweep = curve·2.3` [187]. Walked rather than solved, so curve 0 is a straight
- *      stroke with no special branch.
- *   C2 [117] `L = blade.L · scale · U` and `wide = L·(0.10 + slim·0.42)` — the blade's
- *      girth is a fraction of its own length, and `U = √(boxW·boxH)` is what turns
- *      √area units into pixels.
- *   C3 [128-130] The blade hangs on its OWN MIDDLE (the mean of the centre stations),
- *      or Curve would swing it off its spot.
- *   C4 [133-142] At each station the edges are laid ±(profile · wide/2 · wob) along
- *      the normal, `wob = 1 + (noise(t·2.9 + sd·0.11, sd·0.07, sd) − 0.5)·0.34`: a
- *      slight swell of its own, so no two blades are the same casting. NOTE: the wobble
- *      is ONE value per station applied to BOTH edges — the outline is symmetric about
- *      the centre line and the WIDTH varies down the blade. (The brief called these
- *      "asymmetric wobble edges"; the source says otherwise, and the source wins.)
- *   C5 [143-146] One closed ring: down the left edge, back up the right.
+ *   C1 [113-127] N = 26 equal steps, the heading advancing by a constant
+ *      `sweep·turn/N` and starting half the total turn behind the blade's own angle
+ *      (`a0 = a − sweep·turn/2`), with `sweep = curve·2.3` [187]. Turning at a fixed
+ *      rate over a fixed step length is what a circular arc IS, so the spine is walked
+ *      out rather than solved for a centre and a radius: 26 sin/cos pairs cost nothing
+ *      here, and `curve` 0 needs no case of its own because a zero increment simply
+ *      walks straight ahead.
+ *   C2 [117] `L = blade.L · scale · U`, `wide = L·(0.10 + slim·0.42)`: a blade's
+ *      girth is quoted as a fraction of its own length, and `U = √(boxW·boxH)` is the
+ *      one conversion from √area units into pixels. Note the knockout hands `slim`
+ *      over already multiplied by its `pad` [201] and the source clamps NOTHING, so a
+ *      padded copy at a high Width really is fatter than `0.52·L`.
+ *   C3 [128-130] The 26 spine stations are averaged, and it is that average which is
+ *      set down on the blade's spot. Skip the centring and Curve becomes a position
+ *      dial as well as a shape dial — each blade would slide further from the spot the
+ *      throw gave it as the bend came up, so the two would be impossible to tune
+ *      independently.
+ *   C4 [133-142] Each station's half-width is `profile · wide/2` times a noise
+ *      reading `wob = 1 + (noise(t·2.9 + sd·0.11, sd·0.07, sd) − 0.5)·0.34`, stepped
+ *      off both ways along the normal. Varying the width by up to ±17 % station to
+ *      station is what keeps two blades of the same shape and length from arriving at
+ *      identical outlines. NOTE: the reading is ONE value per station used on BOTH
+ *      edges, so the outline stays symmetric about the spine and it is the WIDTH that
+ *      varies along the blade. (The brief said "asymmetric wobble edges"; the source
+ *      disagrees, and the source wins.)
+ *   C5 [143-146] The two edges close into a single ring: every station along one side,
+ *      then the same stations back along the other.
  *
  *  D. THE MASK (chaffMask)
- *   D1 [174-182] Drawn at HALF size on purpose: a full-size mask has hard edges, so
- *      the mottle could only nibble the one anti-aliased pixel at the boundary and the
- *      result reads as plotted. Half size gives every edge a ramp a few pixels wide
- *      for the noise to bite into — and costs a quarter of the drawing and the reading.
- *   D2 [184] Bare ground over the whole sheet first.
- *   D3 [196-207] `apart` is a KNOCKOUT, not a gap drawn afterwards: each blade first
- *      clears a fatter copy of itself (`pad = 1 + apart·0.5`, scaling the length AND
- *      the width) back to ground, then prints itself inside that. Whatever was there
- *      loses. At nothing the pile merges into one silhouette; wound up, every blade
- *      carries its own margin.
- *   D4 [208-215] Below `apart > 0.004` the whole scatter is ONE path and ONE fill — a
- *      tenth of the drawing of the branch above.
+ *   D1 [174-182] Rasterised at half the sheet's resolution, deliberately, for the blur
+ *      that costs. Sampled back up bilinearly by the print, each silhouette boundary
+ *      arrives spread over two or three pixels, and that spread is the only room the
+ *      mottle has to act in: against a hard edge the noise can move one blended pixel
+ *      and nothing else, so the blades keep a cut-out outline however high Mottle
+ *      goes. Rasterising into 25 % as many pixels, and sampling 25 % as many back, is
+ *      the incidental saving.
+ *   D2 [184] The sheet starts as bare ground, everywhere.
+ *   D3 [196-207] Every blade takes TWO fills on the mask: an enlarged outline
+ *      (`pad = 1 + apart·0.5`, applied to the length and to the width alike) painted
+ *      back to ground, then the blade itself painted into the hole that leaves.
+ *      Nothing is ever stroked or offset to make the margin — it exists only because a
+ *      blade wipes its surroundings before it prints, which means the clearance around
+ *      a blade belongs to whichever blade went down last, and a later blade eats into
+ *      the ones already on the sheet. With the dial down both fills land on the same
+ *      outline and the throw closes up into one continuous silhouette.
+ *   D4 [208-215] Below the `apart > 0.004` threshold no blade has anything to clear,
+ *      so the mask can accumulate every outline into one path and close it with one
+ *      fill: 2N canvas fills become 1. That saving is the reason for the threshold —
+ *      otherwise `pad = 1` would run harmlessly but expensively through the branch
+ *      above.
  *
  *  E. THE PRINT (chaffPixels)
- *   E1 [233-246] The mask's coverage is read back BILINEARLY (it is half size), off
- *      its green channel, into `G` in 0..1.
- *   E2 [221-225] The mottle is sized off the PICTURE, not the pixel: `U = √(W·H)`,
- *      `fine = U·(0.0022 + coarse·0.007)`, `big = fine·7.5`. A 6000px export is the
- *      same picture as the preview, not a finer one.
- *   E3 [226-231, 247-248] Two scales added: `0.66·fine + 0.34·coarse`, times
- *      `amp = mottle·2.6`. It HAS to push past 1 and below 0, or a flat area of ink
- *      would stay flat: the overshoot is what puts pale flecks out in the open ground
- *      and dark ones in the middle of a blade.
- *   E4 [249] One threshold, two roles: `G + n > 0.5 ? ink : ground` [161-163] —
- *      `inks[0]` is the ground, `inks[1]` the one ink thrown across it (a one-ink
- *      palette prints itself).
- *   E5 [220, 250-254] Grain last: `(hash − 0.5)·grain·52` added to all three channels
- *      and clamped. Ported with a box-space TOOTH (chaffGrainCellPx) — the source's
- *      hash is one value per pixel of its fixed 2400px export, so 1/2400 of the box
- *      width is the tooth, and preview and bake print the same grain.
- *   E6 [258] Every pixel is opaque: a Chaff sheet is a printed rectangle.
+ *   E1 [233-246] Coverage comes back off the half-size mask's green channel, sampled
+ *      BILINEARLY into `G` in 0..1.
+ *   E2 [221-225] Fleck size is derived from the sheet's own area — `U = √(W·H)`,
+ *      `fine = U·(0.0022 + coarse·0.007)`, `big = fine·7.5` — so the lattice grows
+ *      with the render. Bake at four times the preview's resolution and every fleck
+ *      comes out four times as wide in pixels, which means the two prints differ in
+ *      scale and in nothing else. Tie the lattice to the pixel instead and Coarseness
+ *      would quietly mean something different at every zoom.
+ *   E3 [226-231, 247-248] Two scales mixed 0.66 / 0.34 and multiplied by
+ *      `amp = mottle·2.6`. The amplitude is allowed to carry `G + n` outside 0..1, and
+ *      that is the difference between a mottle which only roughens outlines and one
+ *      which works across the whole sheet: only an out-of-range sum can flip a pixel
+ *      sitting at full coverage or at none, and those flipped pixels ARE the specks of
+ *      ground inside a blade and the specks of ink on empty paper. Hold the amplitude
+ *      to what the coverage ramp needs and the dial stops doing anything away from the
+ *      edges.
+ *   E4 [249] One comparison decides every pixel — `G + n > 0.5` takes `inks[1]`,
+ *      anything else takes `inks[0]` [161-163]. The palette is ORDERED by role: entry
+ *      0 is the sheet, entry 1 the mark laid on it, and a palette of one entry uses
+ *      that entry for both.
+ *   E5 [220, 250-254] Grain goes on last: `(hash − 0.5)·grain·52` added to r, g and b
+ *      alike, then clamped. Ported with a box-space TOOTH (chaffGrainCellPx), because
+ *      the source's hash is one value per pixel of its fixed 2400px export — 1/2400 of
+ *      the box width — so preview and bake carry the same grain.
+ *   E6 [258] Alpha is 255 everywhere: a Chaff sheet is a printed rectangle, not a
+ *      cut-out.
  *
  *  NOT ported: the motion modes [160, 169-172 `drift` / `spin` / `swell`] and the
- *  ratio picker [4-5] — a Scatter is a still element whose box IS its frame, so every
- *  phase term is 0 and the aspect comes from the box. The same call the six earlier
- *  ports made.
+ *  ratio picker [4-5]. A Scatter is a still element and its box IS its frame, so every
+ *  phase term sits at 0 and the aspect is read off the box — the same call the six
+ *  earlier ports made.
  *
- * Host integration: the source writes no `globalAlpha` and no composite op, so neither
+ * Host integration: the source sets no `globalAlpha` and no composite op, so neither
  * does this — the layer's own opacity and blend, already on the ctx, ride through. Its
  * `putImageData` would ignore alpha, transform and clip alike, so the whole sheet is
  * built on an OFFSCREEN canvas at the box's paint resolution (capped at 6 Mpx) and
@@ -126,7 +172,8 @@ export interface ChaffParams {
   inks: string[]           // ORDERED roles: [ground, ink]
 }
 
-/** A named palette: the tool's own two-role tables (ground, then the ink thrown on it). */
+/** A named palette: the tool's own two-entry tables — the sheet's colour first, the
+ *  mark's second (rule E4). */
 export interface ChaffPalettePreset { inks: readonly string[] }
 
 export const CHAFF_PALETTE_PRESETS = {
@@ -239,9 +286,9 @@ export function chaffRoles(params: ChaffParams): { ground: string; ink: string }
 
 // ── Rule A: the throw ────────────────────────────────────────────────────────
 
-/** One thrown blade. `x`/`y`/`L` are in units of √(box area) — the box spans
- *  `0..fw` × `0..fh` where `fw = 1/√aspect`, `fh = √aspect` — so one throw is the
- *  same picture at any render size (rule A2). */
+/** One thrown blade. `x`/`y`/`L` are quoted in √(box area) units — the box covers
+ *  `0..fw` × `0..fh`, `fw = 1/√aspect` and `fh = √aspect` — which is what lets a
+ *  single throw describe one layout at every render size (rule A2). */
 export interface ChaffBlade {
   x: number
   y: number
@@ -251,9 +298,6 @@ export interface ChaffBlade {
   sd: number           // its own sub-seed (the wobble)
 }
 
-/** The tool's own hard ceiling on how many blades one picture may hold [ref 60]. */
-export const CHAFF_BLADE_CAP = 1200
-
 /**
  * Rule A — throw `count` blades over a `boxW × boxH` box from ONE seeded stream,
  * biggest first. Pure: the whole layout tests without a canvas.
@@ -262,16 +306,18 @@ export function chaffBlades(params: ChaffParams, boxW: number, boxH: number, see
   const p = normalizeChaff(params)
   const W = Number.isFinite(boxW) && boxW > 0 ? boxW : 1
   const H = Number.isFinite(boxH) && boxH > 0 ? boxH : 1
-  // A2 — √area units: fw·U = boxW and fh·U = boxH, so a wide box spreads wider
-  // without the blades themselves growing.
+  // A2 — √area units: fw·U = boxW and fh·U = boxH, so stretching the box moves the
+  // spots apart without changing how long a blade is.
   const aspect = H / W
   const fw = 1 / Math.sqrt(aspect), fh = Math.sqrt(aspect)
   const rnd = mulberry32(hashSeed(`${seed}:chaff-blades`))
   const base = 0.06 + p.size * 0.38                                     // A4
-  const n = Math.min(CHAFF_BLADE_CAP, Math.max(1, Math.round(p.count))) // A1
+  // A1 — the source's 1200 ceiling [ref 60] is unreachable under a 4..400 dial, so
+  // only the round and the floor of 1 survive here.
+  const n = Math.max(1, Math.round(p.count))
   const out: ChaffBlade[] = []
   for (let i = 0; i < n; i++) {
-    // A3 — the spread is SQUARED, so most sit near the base and a few run away large.
+    // A3 — squaring `u` skews the lengths toward the base, with a long tail past it.
     const u = rnd()
     const k = 1 + (u * u * 3.2 - 0.5) * p.vary
     out.push({
@@ -283,7 +329,7 @@ export function chaffBlades(params: ChaffParams, boxW: number, boxH: number, see
       sd: Math.floor(rnd() * 9973),
     })
   }
-  // A6 — biggest first: the large blades sit at the back.
+  // A6 — longest first: the shorter blades land later and so sit above them.
   out.sort((a, b) => b.L - a.L)
   return out
 }
@@ -291,35 +337,37 @@ export function chaffBlades(params: ChaffParams, boxW: number, boxH: number, see
 // ── Rule B: the silhouette ───────────────────────────────────────────────────
 
 /**
- * Rule B — how wide the blade is at `t` (0..1) along it, from nothing at 0 to
- * nothing at 1. The shape picks the profile; `taper` sharpens or blunts it.
+ * Rule B — the width FACTOR at position `t` (0 at the head, 1 at the tail): a 0..1
+ * fraction of `wide` that vanishes at each end. `shape` selects the curve, `taper`
+ * moves its exponents.
  */
 export function chaffProfile(t: number, shape: ChaffShape, taper: number): number {
   const tp = Math.max(0, Math.min(1, taper))
   if (shape === 'bar') {
-    // B3 — parallel-sided, with a short ramp at each end.
+    // B3 — flat-topped, ramping only close to the ends.
     const e = 0.04 + tp * 0.20
     const w = Math.min(1, Math.sqrt(t / e), Math.sqrt((1 - t) / e))
     return w > 0 ? w : 0
   }
   if (shape === 'leaf') {
-    // B2 — a blunt head, drawn to a point at the tail.
+    // B2 — full width almost at once, then a long fall to a tip.
     const e = 0.05 + tp * 0.10
     const head = Math.min(1, Math.sqrt(t / e))
     return head * Math.pow(1 - t, 0.55 + tp * 1.5)
   }
-  // B1 — pointed at both ends.
+  // B1 — a spindle, fattest at the middle.
   return Math.pow(Math.sin(Math.PI * t), 0.45 + tp * 1.4)
 }
 
 // ── Rule C: the arc and its edges ────────────────────────────────────────────
 
-/** How many stations the centre line is walked in [ref 114]. */
-const BLADE_STATIONS = 26
+/** How many stations the spine is marched in [ref 114]. Exported so the unit suite
+ *  can pin the ring's exact point count rather than guessing at it. */
+export const BLADE_STATIONS = 26
 
 export interface ChaffOutlineOpts {
   /** The knockout's fattening factor (rule D3): scales BOTH the length and the width.
-   *  1 (the default) is the blade itself. */
+   *  At 1 (the default) the outline comes back unpadded. */
   pad?: number
 }
 
@@ -339,7 +387,9 @@ export function chaffBladeOutline(
   const pad = Number.isFinite(opts.pad) && (opts.pad as number) > 0 ? opts.pad as number : 1
   const N = BLADE_STATIONS
   const L = blade.L * pad * U
-  const wide = L * (0.10 + Math.min(1, p.slim * pad) * 0.42)
+  // C2 — `slim` arrives multiplied by `pad` and the source clamps it nowhere [ref
+  // 117, 201], so a knockout copy at a high Width is genuinely fatter than 0.52·L.
+  const wide = L * (0.10 + p.slim * pad * 0.42)
   const sweep = p.curve * 2.3                                   // C1
   const th = sweep * blade.turn
   const a0 = blade.a - th * 0.5
@@ -352,7 +402,7 @@ export function chaffBladeOutline(
     const h = a0 + th * (i / N)
     px += Math.cos(h) * step; py += Math.sin(h) * step
   }
-  // C3 — hang the blade on its own middle, or Curve swings it off its spot.
+  // C3 — set down the spine's mean, so Curve bends a blade without relocating it.
   const mx0 = sx / (N + 1), my0 = sy / (N + 1)
   const bx = blade.x * U - mx0, by = blade.y * U - my0
   const left: [number, number][] = [], right: [number, number][] = []
@@ -360,14 +410,14 @@ export function chaffBladeOutline(
     const t = i / N
     const h = a0 + th * t
     const nx = -Math.sin(h), ny = Math.cos(h)
-    // C4 — one swell per station, applied to both edges (see the note in the header).
+    // C4 — one noise reading per station, used on both edges (see the header's note).
     const wob = 1 + (chaffNoise(t * 2.9 + blade.sd * 0.11, blade.sd * 0.07, blade.sd) - 0.5) * 0.34
     const w = chaffProfile(t, p.shape, p.taper) * wide * 0.5 * wob
     const x = bx + cx[i]!, y = by + cy[i]!
     left.push([x + nx * w, y + ny * w])
     right.push([x - nx * w, y - ny * w])
   }
-  // C5 — one closed ring: down the left edge, back up the right.
+  // C5 — close the ring: one side forward, the other reversed onto the end of it.
   right.reverse()
   return [...left, ...right]
 }
@@ -401,7 +451,7 @@ export function chaffMask(ctx: ChaffMaskCtx, params: ChaffParams, mw: number, mh
     ctx.closePath()
   }
   if (p.apart > APART_EPS) {
-    // D3 — the knockout: clear a fatter copy back to ground, then print inside it.
+    // D3 — erase an enlarged copy, then print the blade into the hole it left.
     const pad = 1 + p.apart * 0.5
     for (const b of blades) {
       ctx.fillStyle = MASK_GROUND
@@ -411,7 +461,7 @@ export function chaffMask(ctx: ChaffMaskCtx, params: ChaffParams, mw: number, mh
     }
     return
   }
-  // D4 — nothing knocks anything out, so the whole scatter is one path and one fill.
+  // D4 — nothing to erase: every blade joins one path, and the sheet takes one fill.
   ctx.fillStyle = MASK_BLADE
   ctx.beginPath()
   for (const b of blades) trace(b, 1)
@@ -453,7 +503,7 @@ export function chaffPixels(
   const s = seed | 0
   const gl = p.grain * 52                                        // E5
   const cell = Number.isFinite(grainCell) && grainCell > 0 ? grainCell : 1
-  // E2 — sized off the picture, not the pixel.
+  // E2 — fleck size follows the sheet's area, so it grows with the render.
   const U = Math.sqrt(W * H)
   const fine = Math.max(1e-6, U * (0.0022 + p.coarse * 0.007))
   const big = fine * 7.5
@@ -475,7 +525,7 @@ export function chaffPixels(
       const Ga = mask[i00 + 1]! + (mask[i01 + 1]! - mask[i00 + 1]!) * fx
       const Gb = mask[i10 + 1]! + (mask[i11 + 1]! - mask[i10 + 1]!) * fx
       const G = (Ga + (Gb - Ga) * fy) / 255
-      // E3 — two scales, overshooting past 0 and 1 on purpose.
+      // E3 — two scales; the amplitude is meant to leave the 0..1 band.
       const n = ((chaffNoise(x / fine, y / fine, s + 41) - 0.5) * 0.66
         + (chaffNoise(x / big, y / big, s + 13) - 0.5) * 0.34) * amp
       // E4 — one threshold, two roles.
@@ -537,8 +587,8 @@ function sheetKey(pw: number, ph: number, p: ChaffParams, seed: number, cell: nu
  *  to give (SSR, a stub without createElement). */
 function renderSheet(pw: number, ph: number, p: ChaffParams, seed: number, cell: number): CanvasImageSource | null {
   if (typeof document === 'undefined') return null
-  // D1 — the mask is drawn at HALF size, so every edge has a ramp for the mottle to
-  // bite into (and it costs a quarter of the drawing and the reading back).
+  // D1 — half resolution, so the bilinear read-back turns every boundary into a soft
+  // ramp for the mottle to work in (and a quarter-area buffer is cheaper both ways).
   const mw = Math.max(2, Math.round(pw * 0.5)), mh = Math.max(2, Math.round(ph * 0.5))
   const maskCanvas = document.createElement('canvas')
   maskCanvas.width = mw; maskCanvas.height = mh

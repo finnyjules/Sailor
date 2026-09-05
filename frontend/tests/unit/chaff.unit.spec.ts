@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   defaultChaff, normalizeChaff, CHAFF_LIMITS, CHAFF_PALETTE_PRESETS, CHAFF_PRESET_NAMES,
   chaffPresetPatch, chaffPresetOf, chaffBlades, chaffProfile, chaffBladeOutline,
-  chaffMask, chaffPixels, chaffGrainCellPx, paintChaff, CHAFF_SHAPES,
+  chaffMask, chaffPixels, chaffGrainCellPx, paintChaff, CHAFF_SHAPES, BLADE_STATIONS,
   type ChaffParams,
 } from '~/lib/compositor/chaff'
 
@@ -23,7 +23,7 @@ describe('Chaff params', () => {
       shape: 'crescent', curve: 0.7, taper: 0.3, slim: 0.45,
       mottle: 0.62, coarse: 0.4, grain: 0.3,
     })
-    // Two roles, in order: the ground, then the one ink thrown across it [ref 11-18].
+    // Ordered by role: entry 0 the sheet, entry 1 the mark laid on it [ref 11-18].
     expect(d.inks).toEqual([...CHAFF_PALETTE_PRESETS[CHAFF_PRESET_NAMES[0]!].inks])
     expect(d.inks).toHaveLength(2)
   })
@@ -80,21 +80,21 @@ describe('chaffBlades', () => {
     expect(JSON.stringify(a)).not.toBe(JSON.stringify(chaffBlades(P(), 400, 500, 8)))
   })
 
-  it('draws the biggest FIRST, so the big blades sit at the back [ref 87]', () => {
+  it('sorts by descending length, so later blades lie on top of longer ones [ref 87]', () => {
     const bs = chaffBlades(P({ count: 60 }), 400, 500, 3)
     for (let i = 1; i < bs.length; i++) expect(bs[i]!.L).toBeLessThanOrEqual(bs[i - 1]!.L)
   })
 
-  it('spreads size SQUARED: most near the base, a few running away large [ref 72-75]', () => {
+  it('squares the size roll: a low bulk with a long tail above it [ref 72-75]', () => {
     const bs = chaffBlades(P({ count: 400, vary: 1 }), 400, 400, 11)
     const Ls = bs.map(b => b.L)
     const median = Ls[Math.floor(Ls.length / 2)]!        // the list is sorted descending
     const lo = Math.min(...Ls), hi = Math.max(...Ls)
-    // A squared spread has a long tail: the biggest runs well past the middle of the pack…
+    // A squared roll has a long tail: the longest runs well past the pack's middle…
     expect(hi / median).toBeGreaterThan(2)
-    // …and the pack sits LOW in its own range. Squaring the roll makes the median land
-    // around a quarter of the way up (P(k ≤ x) = √x); a LINEAR spread would put it at
-    // half. That gap is the whole rule — it is what stops the mix reading as two ranks.
+    // …and the pack sits LOW in its own range. Because P(k ≤ x) = √x, the median lands
+    // about 25 % up the range where a linear roll would leave it at 50 %. That gap IS
+    // the rule: it keeps the lengths continuous instead of splitting them into groups.
     expect((median - lo) / (hi - lo)).toBeLessThan(0.35)
     expect((median - lo) / (hi - lo)).toBeGreaterThan(0.1)
   })
@@ -111,7 +111,7 @@ describe('chaffBlades', () => {
     for (const b of bs) expect(b.L).toBeCloseTo(bs[0]!.L, 10)
   })
 
-  it('lets blades start well outside the frame, so the big ones run off the edges [ref 77-78]', () => {
+  it('places spots across a quarter-frame apron, so the frame edge cuts blades [ref 77-78]', () => {
     const bs = chaffBlades(P({ count: 400 }), 400, 400, 9)
     const fw = 1, fh = 1                                  // a square box: fw = fh = 1
     expect(bs.some(b => b.x < 0 || b.y < 0)).toBe(true)
@@ -124,7 +124,7 @@ describe('chaffBlades', () => {
     }
   })
 
-  it('measures everything in units of √(box area), so a wide box is not a busier box [ref 55-58, 66]', () => {
+  it('quotes lengths against √(box area), so a wider box spreads rather than crowds [ref 55-58, 66]', () => {
     // Same area, two shapes. Blade LENGTHS in pixels (L · √(boxW·boxH)) must match.
     const wide = chaffBlades(P(), 800, 200, 4)
     const tall = chaffBlades(P(), 200, 800, 4)
@@ -137,7 +137,7 @@ describe('chaffBlades', () => {
     expect(Math.max(...wide.map(b => b.y))).toBeLessThan(Math.max(...tall.map(b => b.y)))
   })
 
-  it('gives each blade a heading, a turn direction and a seed of its own [ref 79-82]', () => {
+  it('draws a per-blade heading, turn direction and wobble sub-seed [ref 79-82]', () => {
     const bs = chaffBlades(P({ count: 200 }), 400, 400, 6)
     expect(bs.some(b => b.turn === 1)).toBe(true)
     expect(bs.some(b => b.turn === -1)).toBe(true)
@@ -151,12 +151,12 @@ describe('chaffBlades', () => {
 })
 
 // ── Rule B: the width profile ────────────────────────────────────────────────
-describe('chaffProfile — the silhouette of one blade [ref 92-106]', () => {
+describe('chaffProfile — one blade\'s width profile [ref 92-106]', () => {
   it('offers exactly the tool\'s three shapes', () => {
     expect([...CHAFF_SHAPES]).toEqual(['crescent', 'leaf', 'bar'])
   })
 
-  it('crescent is pointed at BOTH ends and fattest in the middle [ref 105]', () => {
+  it('crescent is a spindle: fattest dead centre, nothing at either tip [ref 105]', () => {
     expect(chaffProfile(0, 'crescent', 0.3)).toBeCloseTo(0, 6)
     expect(chaffProfile(1, 'crescent', 0.3)).toBeCloseTo(0, 6)
     expect(chaffProfile(0.5, 'crescent', 0.3)).toBeCloseTo(1, 6)
@@ -164,11 +164,11 @@ describe('chaffProfile — the silhouette of one blade [ref 92-106]', () => {
     expect(chaffProfile(0.25, 'crescent', 0.3)).toBeCloseTo(chaffProfile(0.75, 'crescent', 0.3), 10)
   })
 
-  it('leaf is blunt at the head and drawn to a point at the tail [ref 100-104]', () => {
+  it('leaf reaches full width almost at once, then falls away to a tip [ref 100-104]', () => {
     const leaf = (t: number) => chaffProfile(t, 'leaf', 0.3)
     expect(leaf(0)).toBeCloseTo(0, 6)
     expect(leaf(1)).toBeCloseTo(0, 6)
-    // The head ramps up FAST (it is blunt): full width within the first few percent…
+    // The head ramp is very short: full width inside the first few percent of the run…
     expect(leaf(0.08)).toBeGreaterThan(0.8)
     // …and the fat part sits before the middle, unlike the crescent's dead centre.
     let peak = 0, at = 0
@@ -176,7 +176,7 @@ describe('chaffProfile — the silhouette of one blade [ref 92-106]', () => {
     expect(at).toBeLessThan(0.4)
   })
 
-  it('bar is near enough parallel-sided the whole way [ref 95-99]', () => {
+  it('bar is flat-topped: one width held across the middle of the run [ref 95-99]', () => {
     const bar = (t: number) => chaffProfile(t, 'bar', 0.3)
     expect(bar(0)).toBeCloseTo(0, 6)
     expect(bar(1)).toBeCloseTo(0, 6)
@@ -187,7 +187,7 @@ describe('chaffProfile — the silhouette of one blade [ref 92-106]', () => {
     // Crescent: a higher exponent pulls the shoulders in.
     expect(chaffProfile(0.25, 'crescent', 1)).toBeLessThan(chaffProfile(0.25, 'crescent', 0))
     expect(chaffProfile(0.5, 'crescent', 1)).toBeCloseTo(chaffProfile(0.5, 'crescent', 0), 9)
-    // Bar: a wider end ramp, so a point near the end is thinner.
+    // Bar: taper lengthens the end ramps, so a point near an end comes out thinner.
     expect(chaffProfile(0.03, 'bar', 1)).toBeLessThan(chaffProfile(0.03, 'bar', 0))
   })
 
@@ -209,10 +209,24 @@ describe('chaffBladeOutline — the arc and its edges [ref 113-147]', () => {
   const blade = (over: Record<string, number> = {}) =>
     ({ x: 0.5, y: 0.5, a: 0, L: 0.3, turn: 1 as const, sd: 17, ...over })
 
-  it('is one closed ring: N+1 points down the left edge, then back up the right [ref 143-146]', () => {
-    const pts = chaffBladeOutline(blade(), P(), 400, 400)
-    expect(pts.length).toBeGreaterThan(20)
-    expect(pts.length % 2).toBe(0)                       // left run + right run
+  it('is one closed ring: every station down one edge, the same stations back up the other [ref 143-146]', () => {
+    // A straight blade heading along +x, so the normal is (0, 1) and the two edges of
+    // a station share an x — which makes the pairing checkable exactly.
+    const pts = chaffBladeOutline(blade(), P({ curve: 0 }), 400, 400)
+    const n = BLADE_STATIONS + 1
+    expect(pts.length).toBe(2 * n)
+    const down = pts.slice(0, n), back = pts.slice(n)
+    for (let i = 0; i < n; i++) {
+      const l = down[i]!, r = back[n - 1 - i]!
+      expect(l[0]).toBeCloseTo(r[0], 9)                  // the same station…
+      const mid = (l[1] + r[1]) / 2
+      expect(l[1] - mid).toBeCloseTo(-(r[1] - mid), 9)   // …stepped off both ways from it
+    }
+    // The second half is that walk REVERSED: it starts at the tail and ends at the head.
+    expect(back[0]![0]).toBeCloseTo(down[n - 1]![0], 9)
+    expect(back[n - 1]![0]).toBeCloseTo(down[0]![0], 9)
+    expect(down[n - 1]![0]).toBeGreaterThan(down[0]![0])
+    expect(back[n - 1]![0]).toBeLessThan(back[0]![0])
   })
 
   it('curve 0 walks a straight centre line; curve up bends it into an arc [ref 108-112]', () => {
@@ -234,7 +248,7 @@ describe('chaffBladeOutline — the arc and its edges [ref 113-147]', () => {
     expect(Math.abs(cross2)).toBeGreaterThan(100)
   })
 
-  it('hangs the blade on its own middle, so Curve never swings it off its spot [ref 128-130]', () => {
+  it('sets the spine\'s mean on the spot, so Curve bends without relocating [ref 128-130]', () => {
     const spotOf = (curve: number) => {
       const pts = chaffBladeOutline(blade(), P({ curve, slim: 0.4 }), 400, 400)
       const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length
@@ -265,7 +279,7 @@ describe('chaffBladeOutline — the arc and its edges [ref 113-147]', () => {
     expect(spanOf(fat, 0)).toBeCloseTo(spanOf(thin, 0), 5)
   })
 
-  it('gives every blade a swell of its own, so no two are the same casting [ref 136-137]', () => {
+  it('reads its wobble from the blade\'s sub-seed, so outlines are not one template [ref 136-137]', () => {
     const a = chaffBladeOutline(blade({ sd: 1 }), P(), 400, 400)
     const b = chaffBladeOutline(blade({ sd: 2 }), P(), 400, 400)
     expect(JSON.stringify(a)).not.toBe(JSON.stringify(b))
@@ -296,29 +310,45 @@ describe('chaffMask — the half-size silhouette sheet [ref 149-215]', () => {
     return { ctx: ctx as never, calls }
   }
 
+  /** Same stub, but keeping the POINTS of each path so an outline can be compared. */
+  function pathRecordingCtx() {
+    const paths: { fill: string; pts: [number, number][] }[] = []
+    let cur: [number, number][] = []
+    const ctx = {
+      fillStyle: '',
+      fillRect() {},
+      beginPath() { cur = [] },
+      moveTo(x: number, y: number) { cur.push([x, y]) },
+      lineTo(x: number, y: number) { cur.push([x, y]) },
+      closePath() {},
+      fill() { paths.push({ fill: String(ctx.fillStyle), pts: cur }) },
+    }
+    return { ctx: ctx as never, paths }
+  }
+
   it('starts from bare ground over the whole sheet [ref 184]', () => {
     const { ctx, calls } = recordingCtx()
     chaffMask(ctx, P({ count: 4 }), 100, 120, 1)
     expect(calls.rects[0]).toEqual([0, 0, 100, 120])
   })
 
-  it('apart 0 is ONE path and ONE fill — a tenth of the drawing [ref 208-215]', () => {
+  it('apart 0 collapses the whole throw into a single path and a single fill [ref 208-215]', () => {
     const { ctx, calls } = recordingCtx()
     chaffMask(ctx, P({ count: 40, apart: 0 }), 100, 100, 1)
     expect(calls.fillCount).toBe(1)
   })
 
-  it('apart up is a KNOCKOUT: each blade clears a fatter copy, then prints itself [ref 196-207]', () => {
+  it('apart up erases before it prints: an enlarged copy, then the blade [ref 196-207]', () => {
     const { ctx, calls } = recordingCtx()
     chaffMask(ctx, P({ count: 6, apart: 1 }), 100, 100, 1)
     expect(calls.fillCount).toBe(12)                       // 2 per blade
-    // …and they alternate ground, ink, ground, ink — the clearance, then the print.
+    // …alternating ground, ink, ground, ink — the erase, then the blade inside it.
     for (let i = 0; i < 12; i += 2) expect(calls.fills[i]).not.toBe(calls.fills[i + 1])
     expect(new Set(calls.fills).size).toBe(2)
   })
 
-  it('the knockout copy is FATTER and LONGER than the blade it clears [ref 197, 201-205]', () => {
-    // pad = 1 + apart·0.5 scales BOTH the length and the width.
+  it('the erased copy runs both longer and wider than the blade printed in it [ref 197, 201-205]', () => {
+    // pad = 1 + apart·0.5 multiplies the length and the width alike.
     const b = { x: 0.5, y: 0.5, a: 0, L: 0.3, turn: 1 as const, sd: 5 }
     const plain = chaffBladeOutline(b, P({ curve: 0 }), 400, 400)
     const pad = chaffBladeOutline(b, P({ curve: 0 }), 400, 400, { pad: 1.5 })
@@ -326,6 +356,39 @@ describe('chaffMask — the half-size silhouette sheet [ref 149-215]', () => {
       Math.max(...pts.map(p => p[axis])) - Math.min(...pts.map(p => p[axis]))
     expect(span(pad, 0)).toBeGreaterThan(span(plain, 0) * 1.4)
     expect(span(pad, 1)).toBeGreaterThan(span(plain, 1) * 1.4)
+  })
+
+  it('lets the knockout width run past 0.52·L — the source clamps nothing [ref 117, 201]', () => {
+    // The source hands `slim·pad` straight into `wide = L·(0.10 + slim·0.42)`. A
+    // `min(1, slim·pad)` in that expression would cap the cleared copy at L·0.52 and
+    // rob Separation of most of its margin at a high Width; at Width 1 / Separation 1
+    // the real rule gives L·(0.10 + 1.5·0.42) = L·0.73, before the ±17 % wobble.
+    const b = { x: 0.5, y: 0.5, a: 0, L: 0.3, turn: 1 as const, sd: 5 }
+    const pad = 1 + 1 * 0.5
+    const pts = chaffBladeOutline(b, P({ slim: 1, curve: 0, taper: 0 }), 400, 400, { pad })
+    const n = BLADE_STATIONS + 1
+    let widest = 0
+    for (let i = 0; i < n; i++) {
+      const l = pts[i]!, r = pts[pts.length - 1 - i]!
+      widest = Math.max(widest, Math.hypot(l[0] - r[0], l[1] - r[1]))
+    }
+    const L = b.L * pad * Math.sqrt(400 * 400)
+    expect(widest).toBeGreaterThan(L * (0.10 + 0.42))            // the clamped ceiling
+    const unclamped = L * (0.10 + pad * 0.42)
+    expect(widest).toBeGreaterThan(unclamped * 0.82)             // …and inside the
+    expect(widest).toBeLessThan(unclamped * 1.18)                // wobble band around it
+  })
+
+  it('pins the knockout pad at 1 + apart·0.5 [ref 197, 201-205]', () => {
+    const { ctx, paths } = pathRecordingCtx()
+    const p = P({ count: 4, apart: 1 })
+    chaffMask(ctx, p, 100, 120, 3)
+    const blades = chaffBlades(p, 100, 120, 3)
+    // The first blade's two fills, exactly: what it clears is the pad-1.5 outline and
+    // the print inside it is the unpadded one. Move the 0.5 and this fails.
+    expect(paths[0]!.pts).toEqual(chaffBladeOutline(blades[0]!, p, 100, 120, { pad: 1.5 }))
+    expect(paths[1]!.pts).toEqual(chaffBladeOutline(blades[0]!, p, 100, 120))
+    expect(paths[0]!.fill).not.toBe(paths[1]!.fill)
   })
 
   it('a nothing-ish separation stays on the cheap single-path branch [ref 196]', () => {
@@ -360,7 +423,7 @@ describe('chaffPixels — the two-scale mottle and the threshold [ref 217-261]',
     expect(rgbAt(px, w, 2, 5)[3]).toBe(255)               // always opaque [ref 258]
   })
 
-  it('mottle 1 overshoots BOTH ways: pale flecks in the open, dark specks inside a blade [ref 224-231, 249]', () => {
+  it('mottle 1 leaves the 0..1 band both ways: specks of each ink in the other [ref 224-231, 249]', () => {
     const w = 96, h = 96
     const solid = chaffPixels(maskOf(48, 48, () => 255), 48, 48, w, h, P({ mottle: 1, grain: 0, inks }), 3)
     const empty = chaffPixels(maskOf(48, 48, () => 0), 48, 48, w, h, P({ mottle: 1, grain: 0, inks }), 3)
@@ -371,9 +434,9 @@ describe('chaffPixels — the two-scale mottle and the threshold [ref 217-261]',
     }
     expect(countGround(solid)).toBeGreaterThan(0)          // dark specks inside the ink
     expect(countGround(solid)).toBeLessThan(w * h)         // …but it is still mostly ink
-    expect(countGround(empty)).toBeLessThan(w * h)         // pale flecks out in the open
+    expect(countGround(empty)).toBeLessThan(w * h)         // ink specks on empty ground
     expect(countGround(empty)).toBeGreaterThan(0)
-    // Turn the mottle off and a flat area stays flat — the overshoot is what breaks it up.
+    // With the dial at 0 that same area prints as one colour: the overshoot is the cause.
     const flat = chaffPixels(maskOf(48, 48, () => 255), 48, 48, w, h, P({ mottle: 0, grain: 0, inks }), 3)
     expect(countGround(flat)).toBe(0)
   })
@@ -394,7 +457,7 @@ describe('chaffPixels — the two-scale mottle and the threshold [ref 217-261]',
     expect(flipsAt(1)).toBeLessThan(flipsAt(0) / 2)        // coarser ⇒ far bigger clumps
   })
 
-  it('is the same picture at any resolution — the mottle is sized off the picture, not the pixel [ref 221-224]', () => {
+  it('holds one layout at any resolution — fleck size follows the sheet\'s area [ref 221-224]', () => {
     const cov = (mw: number) => maskOf(mw, mw, (x, y) => ((x / mw) < 0.5 && (y / mw) < 0.5 ? 255 : 0))
     const small = chaffPixels(cov(100), 100, 100, 200, 200, P({ mottle: 1, grain: 0, inks }), 8)
     const big = chaffPixels(cov(300), 300, 300, 600, 600, P({ mottle: 1, grain: 0, inks }), 8)
@@ -427,11 +490,11 @@ describe('chaffPixels — the two-scale mottle and the threshold [ref 217-261]',
     expect(Array.from(a).join()).not.toBe(Array.from(b).join())
   })
 
-  it('reads the roles in order: inks[0] is the ground, inks[1] the one ink thrown on it [ref 162-163]', () => {
+  it('reads the palette by role: entry 0 the sheet, entry 1 the mark on it [ref 162-163]', () => {
     const px = chaffPixels(maskOf(4, 4, x => (x < 2 ? 255 : 0)), 4, 4, 8, 8, P({ mottle: 0, grain: 0, inks: ['#010203', '#fafbfc'] }), 1)
     expect(rgbAt(px, 8, 1, 1).slice(0, 3)).toEqual([...INK])
     expect(rgbAt(px, 8, 7, 1).slice(0, 3)).toEqual([...GROUND])
-    // A one-ink palette prints the ink over itself rather than throwing [ref 163].
+    // With only one entry, both roles resolve to it and the sheet prints flat [ref 163].
     const one = chaffPixels(maskOf(4, 4, () => 255), 4, 4, 8, 8, P({ mottle: 0, grain: 0, inks: ['#010203'] }), 1)
     expect(rgbAt(one, 8, 1, 1).slice(0, 3)).toEqual([...GROUND])
   })
@@ -507,7 +570,7 @@ describe('paintChaff — how it behaves inside a Frame layer', () => {
 
   it('caps the per-pixel pass at 6 Mpx however big the box or the zoom', () => {
     paintChaff(hostCtx(8) as never, P(), 4000, 3000, 1)
-    // Two canvases per sheet: the mask (drawn at HALF size, rule D1), then the print.
+    // Two canvases per sheet: the coverage buffer at half resolution (D1), then the print.
     expect(made).toHaveLength(2)
     const mask = made[0] as unknown as { width: number; height: number }
     const sheet = made[1] as unknown as { width: number; height: number }

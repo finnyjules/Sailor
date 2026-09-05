@@ -6,13 +6,13 @@
  * layer holding a scatter of thrown marks. Which marks is the layer's `style`:
  *
  *   style     what it is
- *   chaff     blades thrown at the paper, printed through a mottled mask
+ *   chaff     blades strewn over a sheet, printed through a mottled two-ink mask
  *   (strand)  Task 4 — see the `// STYLE: strand` anchors
  *   (husk)    Task 5 — see the `// STYLE: husk` anchors
  *
  * It is a SIBLING of the Mosaic element (`deal`), not one of its styles: a mosaic
- * is a composition — a frame divided and filled — while a scatter is marks thrown
- * across a sheet. The architecture mirrors the deal's exactly, though: one layer,
+ * is a composition — a frame divided and filled — while a scatter is loose marks
+ * littered over a sheet. The architecture mirrors the deal's exactly, though: one layer,
  * one seed, clipped to its own box, both box dims normalized to the frame WIDTH.
  *
  * A style is DATA + A PAINT FUNCTION. A row carries its own defaults, its
