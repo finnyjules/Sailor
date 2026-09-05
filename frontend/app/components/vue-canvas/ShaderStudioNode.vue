@@ -13,6 +13,7 @@ import { frameSourceEpoch } from '~/lib/studio/frameSource'
 import { loadImage } from '~/lib/shaderstudio/source'
 import { hydrateConfig, outputDims, type ShaderStudioConfig } from '~/lib/shaderstudio/types'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
+import { useCanvasCardPreviewLoop } from '~/composables/useCanvasCardPreviewLoop'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 
 const props = defineProps<{
@@ -54,26 +55,26 @@ const ownSourceUrl = computed(() => config.value.source.dataUrl
 /** Animate when EITHER our own tracks run or the source itself moves. */
 const sourceAnimated = computed(() => (resolved.value?.duration ?? 0) > 0)
 const shouldLoop = computed(() => animated.value || sourceAnimated.value)
-// Declared here (ahead of loop()/startLoop() below) because the immediate watch
-// just below can call startLoop() synchronously during setup — e.g. a graph
-// loaded with a live upstream studio already wired in. `let`/`const` bindings
-// are in the temporal dead zone until their statement runs, unlike the hoisted
-// `function` declarations, so this order is load-bearing, not stylistic.
-let raf = 0, start = 0, inFlight = false
-// Set while bakeOutput holds the shared shaderFx canvas. renderFrame is async now
+// Set while bakeOutput holds the shared shaderFx canvas. renderFrame is async
 // (it awaits getFrame), so a preview frame suspended at its await can resume mid-bake
 // and overwrite the canvas between bake's render() and its toBlob() read — corrupting
-// the blob. cancelAnimationFrame only stops FUTURE scheduling, not an in-flight frame.
+// the blob. renderFrame bails on `baking` AFTER its await (before it touches the shared
+// canvas), so a suspended tick can't corrupt the blob even though the gated loop keeps
+// ticking through the bake.
 let baking = false
+// IntersectionObserver + hover listeners for the shared gated/throttled preview loop
+// attach to this root. Declared before the immediate watch below, which resolves the
+// source during setup (TDZ-safe: `renderStill` is a hoisted function, not this const).
+const rootEl = ref<HTMLElement | null>(null)
 
 watch([sourceKind, ownSourceUrl], async ([kind, ownUrl]) => {
   resolved.value = null
-  if (kind?.kind === 'live') { resolved.value = makeLiveSource(kind.source); startLoop(); return }
+  if (kind?.kind === 'live') { resolved.value = makeLiveSource(kind.source); renderStill(); return }
   const url = kind?.kind === 'url' ? kind.url : ownUrl
-  if (!url) { renderFrame(0); return }
+  if (!url) { renderStill(); return }
   try {
     resolved.value = makeImageSource(await loadImage(url))
-    startLoop()
+    renderStill()
   } catch { resolved.value = null }
 }, { immediate: true })
 
@@ -122,33 +123,30 @@ function clockDuration(): number {
   return Math.max(0.1, config.value.motion?.duration ?? 4)
 }
 
-function loop(ts: number) {
-  if (!start) start = ts
-  // getFrame is async; skip a tick rather than queueing, so a slow upstream
-  // degrades to a lower frame rate instead of unbounded lag.
-  if (!inFlight) {
-    inFlight = true
-    const dur = clockDuration()
-    void renderFrame((((ts - start) / 1000) % dur) / dur).finally(() => { inFlight = false })
-  }
-  raf = requestAnimationFrame(loop)
-}
-function startLoop() {
-  cancelAnimationFrame(raf); start = 0; inFlight = false
-  if (shouldLoop.value) raf = requestAnimationFrame(loop)
-  else void renderFrame(0)
-}
+/** One-shot still (t=0) — the card's static preview and the paused/hover-leave poster. */
+function renderStill() { void renderFrame(0) }
+
+// Shared gated + fps-throttled preview loop. Pauses off-screen / tab-hidden / behind a
+// fullscreen studio modal / when un-hovered; throttles to 30fps (getFrame + shaderFx is
+// expensive and the display may repaint at 120Hz). The async in-flight guard skips ticks
+// while a getFrame is outstanding, so a slow upstream lowers the frame rate, not lags.
+const preview = useCanvasCardPreviewLoop({
+  rootEl,
+  active: () => shouldLoop.value,
+  fps: () => 30,
+  onFrame: ({ t }) => { const dur = clockDuration(); return renderFrame(((t % dur) / dur)) },
+  onIdle: renderStill,
+})
 
 // Headless full-res bake for the render cascade — same pipeline as the thumbnail,
 // at output resolution, with the input re-resolved fresh (picks up an upstream
 // studio's just-published output during a cascade).
 async function bakeOutput(): Promise<Blob | null> {
-  // `baking` (set before any await) makes an in-flight preview frame bail; the
-  // cancelAnimationFrame stops FUTURE ones. Both are needed — see `let baking`.
-  // The whole body is inside try/finally so `baking` is always cleared and the
-  // preview always restarts, even on the no-input early return.
+  // `baking` (set before any await) makes an in-flight preview frame bail before it
+  // touches the shared shaderFx canvas — see `let baking`. The whole body is inside
+  // try/finally so `baking` is always cleared and a fresh still repaints, even on the
+  // no-input early return.
   baking = true
-  cancelAnimationFrame(raf)
   try {
     let src = resolved.value
     // Re-resolve so a cascade picks up an upstream studio's just-published output;
@@ -167,20 +165,24 @@ async function bakeOutput(): Promise<Blob | null> {
     return await new Promise<Blob | null>(res => out.toBlob(b => res(b), 'image/png'))
   } finally {
     baking = false
-    startLoop()
+    renderStill()
   }
 }
 
 onMounted(async () => {
   registerStudioBaker(props.id, bakeOutput)   // register first, before the async catalog fetch
   catalog.value = await fetchShaderFxCatalog().catch(() => null)
-  startLoop()
+  renderStill()   // initial static preview; the gated loop animates only while hovered/visible
 })
-onBeforeUnmount(() => { cancelAnimationFrame(raf); unregisterStudioBaker(props.id) })
+onBeforeUnmount(() => { unregisterStudioBaker(props.id) })
 
 let timer: ReturnType<typeof setTimeout> | null = null
-watch(config, () => { if (timer) clearTimeout(timer); timer = setTimeout(startLoop, 60) }, { deep: true })
-watch(shouldLoop, startLoop)
+// Re-render on config change. While the loop is actively animating it picks up the new
+// config next tick; otherwise (paused/not hovered/static) repaint the still poster.
+watch(config, () => {
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(() => { if (shouldLoop.value && preview.gateOk()) return; renderStill() }, 60)
+}, { deep: true })
 
 function openEditor() {
   window.dispatchEvent(new CustomEvent('sailor:openShaderStudio', { detail: { nodeId: props.id } }))
@@ -196,7 +198,7 @@ const varsInputIndex = computed(() =>
   <!-- Ports live outside the card: the card clips its own content
        (overflow-hidden), which would otherwise cut the dots and their hit
        areas in half. As siblings they also tuck in behind it. -->
-  <div class="relative w-fit">
+  <div ref="rootEl" class="relative w-fit">
     <!-- Input handle (image in) -->
     <VueCanvasNodePort
       id="input-0" type="target" side="left" :index="0"
