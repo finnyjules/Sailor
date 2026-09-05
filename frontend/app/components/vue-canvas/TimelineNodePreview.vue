@@ -1,8 +1,11 @@
 <script setup lang="ts">
 /**
  * Animated thumbnail preview for the Timeline node, embedded in the node body.
- * Runs an independent rAF loop with hidden <video> elements per connected clip,
- * advancing a virtual playhead at real time and looping at total duration.
+ * Draws hidden <video> elements per connected clip onto a canvas, advancing a
+ * virtual playhead and looping at total duration. The loop is the shared
+ * `useCanvasCardPreviewLoop` — gated (pauses off-screen / tab-hidden / behind a
+ * fullscreen modal / un-hovered, pausing the videos with it) and throttled to the
+ * timeline's FPS; the playhead is derived from that loop's clock.
  *
  * Independent of the modal — both can coexist; each maintains its own
  * <video> pool so neither steps on the other's currentTime/play state.
@@ -224,10 +227,12 @@ watch(layers, (curr) => {
   }
 }, { immediate: true, deep: true })
 
-// Playhead in seconds, advances at real time, loops at totalDuration / FPS.
+// Playhead in seconds. Driven by the shared preview loop's clock (t, wrapped at
+// totalDuration / FPS), so it resets to 0 on pause/hover-leave — the hover-to-play poster.
 const playheadSec = ref(0)
-let lastTickAt = performance.now()
-let rafId = 0
+
+// IntersectionObserver + hover listeners for the shared gated/throttled preview loop.
+const rootEl = ref<HTMLElement | null>(null)
 
 // Canvas size auto-detected from the first loaded video, clamped for thumbnail.
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -259,7 +264,9 @@ function refreshCanvasSize() {
   }
 }
 
-function drawOnce() {
+// Paint the composite at the current `playheadSec`. `still` (poster mode) keeps every
+// video PAUSED instead of driving playback — used when the loop is stopped.
+function paint(still = false) {
   const canvas = canvasRef.value
   if (!canvas) return
   const ctx = canvas.getContext('2d')
@@ -291,7 +298,10 @@ function drawOnce() {
       if (!isFinite(dur) || dur <= 0) continue
       const localSec = playheadSec.value - startSec
       const target = ((localSec % dur) + dur) % dur
-      if (v.paused) {
+      if (still) {
+        // Poster: hold the current decoded frame, but never leave the video playing.
+        if (!v.paused) v.pause()
+      } else if (v.paused) {
         try { v.currentTime = target } catch {}
         v.play().catch(() => {})
       } else if (Math.abs(v.currentTime - target) > 0.2) {
@@ -352,24 +362,36 @@ function drawOnce() {
     try { ctx.drawImage(media as CanvasImageSource, -fitW / 2, -fitH / 2, fitW, fitH) } catch {}
     ctx.restore()
   }
+}
 
-  // Advance global playhead for the next frame.
-  const now = performance.now()
-  const dt = (now - lastTickAt) / 1000
-  lastTickAt = now
-  if (totalSec > 0) {
-    playheadSec.value = (playheadSec.value + dt) % totalSec
+/** Pause every pooled video — the loop is stopping, so nothing should keep decoding. */
+function pauseAllVideos() {
+  for (const slot of Object.keys(videos).map(Number)) {
+    const v = videos[slot]
+    if (v && !v.paused) { try { v.pause() } catch {} }
   }
 }
 
-function loop() {
-  drawOnce()
-  rafId = requestAnimationFrame(loop)
-}
+const hasAnySource = computed(() => layers.value.some(L => L.srcUrl))
+
+// Shared gated + fps-throttled preview loop. Pauses off-screen / tab-hidden / behind a
+// fullscreen studio modal / when un-hovered; throttles to the timeline's own FPS. The
+// playhead is derived from the loop's clock so it wraps at total duration and resets to
+// 0 on pause (the poster).
+useCanvasCardPreviewLoop({
+  rootEl,
+  active: () => hasAnySource.value,
+  fps: () => FPS.value,
+  onFrame: ({ t }) => {
+    const totalSec = totalDuration.value / FPS.value
+    playheadSec.value = totalSec > 0 ? t % totalSec : 0
+    paint()
+  },
+  onIdle: () => { playheadSec.value = 0; pauseAllVideos(); paint(true) },
+})
 
 onMounted(() => {
-  lastTickAt = performance.now()
-  loop()
+  paint(true)   // initial poster; the gated loop animates only while hovered/visible
   // Refresh canvas size as videos finish loading metadata.
   for (const slot of Object.keys(videos).map(Number)) {
     const v = videos[slot]
@@ -390,19 +412,17 @@ watch(layers, () => {
 })
 
 onUnmounted(() => {
-  if (rafId) cancelAnimationFrame(rafId)
+  // The rAF loop is owned (and cancelled) by useCanvasCardPreviewLoop's scope dispose.
   for (const slot of Object.keys(videos).map(Number)) {
     const v = videos[slot]
     if (v) { try { v.pause(); v.removeAttribute('src'); v.load() } catch {} }
     delete videos[slot]
   }
 })
-
-const hasAnySource = computed(() => layers.value.some(L => L.srcUrl))
 </script>
 
 <template>
-  <div class="w-full bg-black rounded-lg overflow-hidden ring-1 ring-white/5">
+  <div ref="rootEl" class="w-full bg-black rounded-lg overflow-hidden ring-1 ring-white/5">
     <canvas
       ref="canvasRef"
       class="w-full block"

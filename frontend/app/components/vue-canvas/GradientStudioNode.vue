@@ -7,6 +7,7 @@ import { aspectRatio, LAYOUT_LABELS, type GradientConfig } from '~/lib/gradientf
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { makeGradientFrameSource } from '~/lib/gradientfx/frameSource'
+import { useCanvasCardPreviewLoop } from '~/composables/useCanvasCardPreviewLoop'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 
 // Gradient Studio — a frontend-only config node (no backend class_type, never
@@ -42,8 +43,8 @@ const animated = computed(() => {
   return flowAnim || meshAnim
 })
 
-let raf = 0
-let start = 0
+// IntersectionObserver + hover listeners for the shared gated/throttled preview loop.
+const rootEl = ref<HTMLElement | null>(null)
 
 function renderFrame(t: number) {
   const canvas = canvasEl.value
@@ -59,20 +60,18 @@ function renderFrame(t: number) {
   }
 }
 
-function loop(ts: number) {
-  if (!start) start = ts
-  const dur = Math.max(0.1, config.value.motion?.duration ?? 4)
-  const t = ((ts - start) / 1000) % dur
-  renderFrame(t)
-  raf = requestAnimationFrame(loop)
-}
+/** One-shot still (t=0) — the static preview and the paused/hover-leave poster. */
+function renderStill() { renderFrame(0) }
 
-function startLoop() {
-  cancelAnimationFrame(raf)
-  start = 0
-  if (animated.value) raf = requestAnimationFrame(loop)
-  else renderFrame(0)
-}
+// Shared gated + fps-throttled preview loop. Pauses off-screen / tab-hidden / behind a
+// fullscreen studio modal / when un-hovered; throttles to 30fps.
+const preview = useCanvasCardPreviewLoop({
+  rootEl,
+  active: () => animated.value,
+  fps: () => 30,
+  onFrame: ({ t }) => { const dur = Math.max(0.1, config.value.motion?.duration ?? 4); renderFrame(t % dur) },
+  onIdle: renderStill,
+})
 
 // Headless full-res bake for the render cascade (generative — no input).
 const BAKE_W = 1536
@@ -82,24 +81,25 @@ async function bakeOutput(): Promise<Blob | null> {
 }
 
 onMounted(() => {
-  startLoop(); registerStudioBaker(props.id, bakeOutput)
+  renderStill(); registerStudioBaker(props.id, bakeOutput)
   registerStudioFrameSource(props.id, makeGradientFrameSource({
     getConfig: () => config.value,
     render: (cfg, w, h, time) => gradientFx.render(cfg, w, h, time),
   }))
 })
 onBeforeUnmount(() => {
-  cancelAnimationFrame(raf); unregisterStudioBaker(props.id)
+  unregisterStudioBaker(props.id)
   unregisterStudioFrameSource(props.id)
 })
 
 // Re-render when the saved config changes (editor writes back live). Debounced.
+// While the loop is actively animating it picks up the new config next tick; otherwise
+// (paused/not hovered/static) repaint the still poster.
 let timer: ReturnType<typeof setTimeout> | null = null
 watch(config, () => {
   if (timer) clearTimeout(timer)
-  timer = setTimeout(startLoop, 60)
+  timer = setTimeout(() => { if (animated.value && preview.gateOk()) return; renderStill() }, 60)
 }, { deep: true })
-watch(animated, startLoop)
 
 function openEditor() {
   window.dispatchEvent(new CustomEvent('sailor:openGradientStudio', { detail: { nodeId: props.id } }))
@@ -115,7 +115,7 @@ const varsInputIndex = computed(() =>
   <!-- Ports live outside the card: the card clips its own content
        (overflow-hidden), which would otherwise cut the dots and their hit
        areas in half. As siblings they also tuck in behind it. -->
-  <div class="relative w-fit">
+  <div ref="rootEl" class="relative w-fit">
     <!-- Variables input: a Collection's VARS output wires here. Rendering this
          port lets the VARS edge anchor so it survives reload. -->
     <VueCanvasNodePort

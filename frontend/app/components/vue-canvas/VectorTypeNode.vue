@@ -9,10 +9,14 @@
  * statelessness is why the frame source here is the easy Gradient case rather
  * than Scene3D's rebake registry.
  *
- * The loop uses `schedule()`, not a bare rAF: rAF is throttled to ZERO in a
- * hidden tab (a headless capture's normal state), so a pure rAF loop silently
- * never advances there. It also reschedules BEFORE its early returns, so the one
- * frame where the font has not parsed yet cannot kill the loop forever.
+ * The preview loop is the shared `useCanvasCardPreviewLoop` — gated (pauses
+ * off-screen / tab-hidden / behind a fullscreen modal / un-hovered) and throttled
+ * to 30fps (it used to repaint identical frames at the display rate). This loop is
+ * ONLY the on-card thumbnail: the headless capture path (a hidden tab) pulls frames
+ * through the registered frame source + baker, NOT through this loop, so pausing it
+ * in a hidden tab does not affect exported output. A frame where the font has not
+ * parsed yet is a no-op paint (guarded below) — the loop keeps ticking, so the next
+ * frame after the font lands paints normally.
  */
 import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { Pencil, Type } from 'lucide-vue-next'
@@ -25,6 +29,7 @@ import { vtStillTime } from '~/lib/vectortype/presetMotion'
 import { makeVectorTypeFrameSource } from '~/lib/vectortype/frameSource'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
+import { useCanvasCardPreviewLoop } from '~/composables/useCanvasCardPreviewLoop'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 
 const props = defineProps<{
@@ -67,9 +72,8 @@ const animated = computed(() => vtIsAnimated(config.value))
 // fontId is a storage token (e.g. "google:Inter Tight@700"); the subtitle shows the human-readable name instead.
 const fontLabel = computed(() => vtFontRefLabel(parseVtFontToken(config.value.fontId) ?? { kind: 'catalog', id: DEFAULT_FONT_ID }))
 
-let timer = 0
-let startedAt = 0
-let disposed = false
+// IntersectionObserver + hover listeners for the shared gated/throttled preview loop.
+const rootEl = ref<HTMLElement | null>(null)
 
 // On a failed load this does what the open studio does (VectorTypeSurface's
 // `loadFont`): fall back to Inter rather than leaving `font` null. Without
@@ -112,30 +116,12 @@ watch(() => config.value.fontId, (id) => {
   ensureFont(id).catch(() => {})
 }, { immediate: true })
 
-/** See the file header — a bare rAF loop does not advance in a hidden tab. */
-function schedule() {
-  if (disposed) return
-  if (typeof document !== 'undefined' && document.hidden) {
-    timer = window.setTimeout(draw, 1000 / 30) as unknown as number
-  } else {
-    timer = requestAnimationFrame(draw)
-  }
-}
-
-function draw() {
-  // Reschedule FIRST: the early returns below are transient (font still
-  // parsing, canvas not mounted) and must not be able to stop the loop.
-  schedule()
+/** Draw one frame at clip-local time `t` (seconds). A no-op while the font or
+ *  canvas isn't ready yet — the loop keeps ticking and paints once it is. */
+function paint(t: number) {
   const el = canvasEl.value
   const f = font.value
   if (!el || !f) return
-
-  let t = 0
-  if (animated.value) {
-    if (!startedAt) startedAt = performance.now()
-    const dur = Math.max(0.1, config.value.motion?.duration ?? 4)
-    t = ((performance.now() - startedAt) / 1000) % dur
-  }
   try {
     drawVectorTypeToCanvas(el, f, config.value, t, {
       width: outW.value, height: outH.value, background: background.value,
@@ -146,6 +132,21 @@ function draw() {
     renderError.value = String(e?.message ?? e)
   }
 }
+
+/** Static/paused poster: the config's representative still time (0 when the
+ *  config has no motion, so the static preview is byte-for-byte unchanged). */
+function renderStill() { paint(vtStillTime(config.value)) }
+
+// Shared gated + fps-throttled preview loop. Pauses off-screen / tab-hidden / behind a
+// fullscreen studio modal / when un-hovered; throttles to 30fps (it used to repaint
+// identical frames at the display rate).
+const preview = useCanvasCardPreviewLoop({
+  rootEl,
+  active: () => animated.value,
+  fps: () => 30,
+  onFrame: ({ t }) => { const dur = Math.max(0.1, config.value.motion?.duration ?? 4); paint(t % dur) },
+  onIdle: renderStill,
+})
 
 /** Headless full-res bake for the render cascade (generative — no input). */
 async function bakeOutput(): Promise<Blob | null> {
@@ -167,7 +168,7 @@ async function bakeOutput(): Promise<Blob | null> {
 }
 
 onMounted(() => {
-  schedule()
+  renderStill()   // initial static preview; the gated loop animates only while hovered/visible
   registerStudioBaker(props.id, bakeOutput)
   registerStudioFrameSource(props.id, makeVectorTypeFrameSource({
     getConfig: () => config.value,
@@ -177,16 +178,17 @@ onMounted(() => {
   }))
 })
 onBeforeUnmount(() => {
-  disposed = true
-  cancelAnimationFrame(timer)
-  clearTimeout(timer)
   unregisterStudioBaker(props.id)
   unregisterStudioFrameSource(props.id)
 })
 
-// Restart the clock when the animation state changes, so pausing/unpausing an
-// edit doesn't leave the preview showing a frame from a stale timeline.
-watch(animated, () => { startedAt = 0 })
+// The card used to repaint every frame, so a font load or a live config edit showed up
+// on its own. The gated loop doesn't run when the card is static/paused, so repaint the
+// still poster on those changes — unless the loop is actively animating (it'll pick the
+// change up next tick).
+function repaintStillIfIdle() { if (animated.value && preview.gateOk()) return; renderStill() }
+watch(font, repaintStillIfIdle)
+watch(config, repaintStillIfIdle, { deep: true })
 
 function openEditor() {
   window.dispatchEvent(new CustomEvent('sailor:openVectorType', { detail: { nodeId: props.id } }))
@@ -201,7 +203,7 @@ const varsInputIndex = computed(() =>
 <template>
   <!-- Ports live outside the card: the card clips its own content
        (overflow-hidden), which would otherwise cut the dots in half. -->
-  <div class="studio-node relative w-fit">
+  <div ref="rootEl" class="studio-node relative w-fit">
     <VueCanvasNodePort
       v-if="varsInputIndex >= 0"
       :id="`input-${varsInputIndex}`" type="target" side="left" :index="0"
