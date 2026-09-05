@@ -1456,6 +1456,11 @@ function setControl(key: string, value: string | number | boolean): void {
     return
   }
   if (key === 'lighting.gelRim') { doc.lighting.gelRim = value === true; return }
+  // Simple-lighting non-numeric fields must also bypass the numeric coercion below:
+  // `look` is a recipe id (string) and `advanced` is a boolean. Without this,
+  // Number('softbox-beauty') → NaN and the Look select never sticks.
+  if (key === 'lighting.look') { doc.lighting.look = String(value); return }
+  if (key === 'lighting.advanced') { doc.lighting.advanced = value === true; return }
   if (key.startsWith('lighting.')) {
     ;(doc.lighting as Record<string, unknown>)[key.slice('lighting.'.length)] = Number(value)
     return
