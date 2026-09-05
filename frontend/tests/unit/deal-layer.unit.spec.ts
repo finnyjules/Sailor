@@ -273,20 +273,23 @@ describe('deal layer render (headless)', () => {
     }
   })
 
-  it('the shader styles paint ONE box-sized rect through resolvePaint, centred, inside the clip', async () => {
+  it('the shader styles paint ONE box-sized rect through resolvePaint, in box space, inside the clip', async () => {
     // No shader catalog in this harness, so resolvePaint takes its documented fallback
-    // (the spec's input paint) — the point here is the PATH: clip to the box, step
-    // back to the centre, one fillRect over the whole box with a resolved fillStyle.
+    // (the spec's input paint) — the point here is the PATH: clip to the box, then one
+    // fillRect over the whole box IN BOX SPACE (the box is the shader's own frame: the
+    // deal branch swaps the field context's frame for the box while it paints, so
+    // there is no step back to the centre — the fill is positioned from the box's
+    // top-left, where its base transform was captured) with a resolved fillStyle.
     for (const cellFill of ['oddgrid', 'static'] as const) {
       mainFillRects.length = 0; mainClips.length = 0; mainTranslates.length = 0
       const { mosaicShaderSpec } = await import('~/lib/compositor/mosaic')
       const layer = dealLayer({ cellFill, w: 1, h: 0.5, shader: mosaicShaderSpec(cellFill, 7) })
       await drawDeal(layer, 400, 400)
       expect(mainClips[0]).toEqual([{ x: 0, y: 0, w: 400, h: 200 }])
-      // After the layer's own placement translate: to the box corner, then back to its centre.
-      expect(mainTranslates.slice(-2)).toEqual([[-200, -100], [200, 100]])
+      // The layer's own placement translate to the box corner is the LAST translate.
+      expect(mainTranslates.slice(-1)).toEqual([[-200, -100]])
       expect(mainFillRects).toHaveLength(1)
-      expect(mainFillRects[0]).toMatchObject({ x: -200, y: -100, w: 400, h: 200 })
+      expect(mainFillRects[0]).toMatchObject({ x: 0, y: 0, w: 400, h: 200 })
       expect(mainFillRects[0]!.style).toBeTruthy() // a resolved paint, never the empty default
       expect(drawImages).toHaveLength(0) // no per-cell tiles: the whole box is one fill
     }

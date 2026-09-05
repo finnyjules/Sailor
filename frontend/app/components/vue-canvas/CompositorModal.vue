@@ -7012,11 +7012,13 @@ onUnmounted(() => {
             </div>
             <!-- Oddgrid / Static: the shader styles. The style IS the effect, so the
                  shared shader-fill editor mounts with its picker locked, its own seed
-                 / speed / input rows hidden (the Mosaic owns the seed; speed is 0;
-                 the input is meaningless here). The effect's Looks are its Palette. -->
+                 / speed / input / anchor rows hidden (the Mosaic owns the seed; speed
+                 is 0; the input is meaningless here; the box IS the shader's frame —
+                 see the deal branch in useCompositorLayers). The effect's Looks are
+                 its Palette. -->
             <div v-else-if="isMosaicShaderFill((selectedLocal as any).cellFill)" class="mt-2 flex flex-col gap-1.5">
               <ShaderFillEditor :model-value="mosaicShader(selectedLocal as DealLayer)!" lock-effect
-                :show-speed="false" :show-seed="false" :show-input="false"
+                :show-anchor="false" :show-speed="false" :show-seed="false" :show-input="false"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { shader: v } as any)" />
               <StudioSelect label="Palette" :options="mosaicLookOptions"
                 :model-value="mosaicLook" @update:model-value="(v: any) => applyMosaicLookTo(selectedLocal as DealLayer, v)" />

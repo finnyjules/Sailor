@@ -617,6 +617,10 @@ export interface DealLayer extends LayerCommon {
   // grid.gen.seed, speed 0, frame-anchored); only read when cellFill is 'oddgrid'
   // or 'static'. Absent ⇒ derived at the layer's seed (mosaicShaderSpec).
   shader?: ShaderSpec
+  // The last ShaderSpec set for EACH shader style, so hopping Oddgrid → Static →
+  // Oddgrid brings back the Oddgrid dials (a single `shader` slot would reseed
+  // from the first Look on the way back). Written by mosaicStylePatch.
+  shaderSpecs?: Partial<Record<'oddgrid' | 'static', ShaderSpec>>
   // Pane's tunables (rows / cells / vary / diag / soft / spread); only read when
   // cellFill is 'pane'. Absent ⇒ defaultPane().
   pane?: PaneParams
@@ -2121,11 +2125,20 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // the box centre for the fill: the object-anchored pattern sits at
       // (-boxW/2, -boxH/2); the frame-anchored one is positioned from _fieldCtx.base
       // and ignores this translate either way. The clip above still bounds it.
-      ctx.save()
-      ctx.translate(boxW / 2, boxH / 2)
-      ctx.fillStyle = resolvePaint(ctx, shaderFill, { w: boxW, h: boxH }, _fieldCtx)
-      ctx.fillRect(-boxW / 2, -boxH / 2, boxW, boxH)
-      ctx.restore()
+      // The BOX is the shader's frame (review finding: a frame-anchored field is a
+      // window the box slides over, and a thumbnail / selection PNG painted outside a
+      // stack span read a stale frame base). Swapping _fieldCtx's frame for the box
+      // — its size AND its base transform, captured here at the box's top-left —
+      // makes the field render at the box's own aspect (square cells stay square),
+      // sit exactly on the box, travel with it, and repeat per cloner copy. The
+      // pre-pass requests this same box-sized field (see paintLayerStack), so the
+      // key matches. Restored right after: the rest of the layer still sees the frame.
+      const frameCtx = _fieldCtx
+      _fieldCtx = { ...frameCtx, frameW: boxW, frameH: boxH, base: ctx.getTransform() }
+      try {
+        ctx.fillStyle = resolvePaint(ctx, shaderFill, { w: boxW, h: boxH }, _fieldCtx)
+        ctx.fillRect(0, 0, boxW, boxH)
+      } finally { _fieldCtx = frameCtx }
     } else if (layer.cellFill === 'pane') {
       // Pane paints its OWN masonry — NOT the shared grid: every cell is flush and
       // filled, so regularity / merge / density / inset don't apply here. Each cell
@@ -2581,7 +2594,13 @@ export function paintLayerStack(
   const shaderRequests: FieldRequest[] = []
   for (const it of items) {
     if (it.type !== 'local') continue
-    for (const p of layerPaints(it.layer)) addShaderFieldRequest(shaderRequests, p, W, H, fieldT, fieldFps, bake)
+    // A deal (mosaic) paints its shader Fill with its BOX as the frame (see the deal
+    // branch in drawLayerContent), so its field must be requested at the box size —
+    // both width-normalized (`* W`), exactly as that branch computes them — or the
+    // pre-pass and the paint would ask for two different keys.
+    const fw = it.layer.kind === 'deal' ? Math.max(1, it.layer.w * W) : W
+    const fh = it.layer.kind === 'deal' ? Math.max(1, it.layer.h * W) : H
+    for (const p of layerPaints(it.layer)) addShaderFieldRequest(shaderRequests, p, fw, fh, fieldT, fieldFps, bake)
   }
   addShaderFieldRequest(shaderRequests, background, W, H, fieldT, fieldFps, bake)
 

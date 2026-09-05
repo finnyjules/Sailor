@@ -171,6 +171,22 @@ describe('Mosaic shader styles (Oddgrid / Static)', () => {
     // …but a different effect starts fresh from that effect's first Look.
     expect(mosaicStylePatch({ ...l, shader: tuned }, 'oddgrid').shader!.effectId).toBe('oddgrid')
   })
+  it('Oddgrid → Static → Oddgrid brings back the Oddgrid dials (per-effect specs are stashed on the hop)', () => {
+    const l = mosaic()
+    const odd = { ...mosaicStylePatch(l, 'oddgrid').shader!, params: { ...mosaicStylePatch(l, 'oddgrid').shader!.params, cols: 9 } }
+    const onOdd: DealLayer = { ...l, cellFill: 'oddgrid', shader: odd }
+    const toStatic = mosaicStylePatch(onOdd, 'static')
+    expect(toStatic.shader!.effectId).toBe('static')
+    expect(toStatic.shaderSpecs?.oddgrid).toBe(odd)            // the spec being left is stashed
+    const onStatic: DealLayer = { ...onOdd, ...toStatic }
+    const back = mosaicStylePatch(onStatic, 'oddgrid')
+    expect(back.shader).toBe(odd)                               // restored, dials intact
+    expect(back.shaderSpecs?.static).toBe(toStatic.shader)      // and Static's stashed in turn
+    // Hopping to a CANVAS style stashes too, and does not clear the live slot.
+    const toPane = mosaicStylePatch(onStatic, 'pane')
+    expect(toPane.shaderSpecs?.static).toBe(toStatic.shader)
+    expect(toPane).not.toHaveProperty('shader')
+  })
   it('layerPaints returns exactly the shader Fill for the shader styles and nothing for the others', () => {
     for (const fill of ['solid', 'pane', 'modular', 'parcel', 'mosh'] as const) {
       expect(layerPaints(mosaic({ cellFill: fill })), fill).toEqual([])

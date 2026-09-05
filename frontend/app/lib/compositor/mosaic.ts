@@ -145,8 +145,10 @@ export function mosaicLookNames(effectId: string): string[] {
  *  - `anchor: 'frame'`: an object-anchored field is a fixed 1024² stretched to the
  *    box (OBJECT_SHADER_FIELD_PX in paint/resolve), which would squash the shader's
  *    square cells on any non-square mosaic. Frame-anchored, the field renders at the
- *    frame's own aspect — pixel-true for the frame-filling default, a window of it
- *    when the box is smaller. The inspector's Anchor toggle can flip it.
+ *    frame's own aspect. The deal branch in useCompositorLayers then swaps the frame
+ *    for the BOX (its size and base transform) while it paints, so the field is
+ *    really rendered at the box's own aspect and travels with the box; the
+ *    inspector hides the Anchor toggle for a mosaic since the box is the frame.
  * `prev` (the layer's current spec) is kept when it already targets `effectId` —
  * only its seed is re-synced — so hopping Pane → Oddgrid → Pane → Oddgrid keeps the
  * dials a person set.
@@ -222,7 +224,16 @@ export function mosaicStylePatch(layer: DealLayer, fill: MosaicCellFill): Partia
   if (fill === 'modular') patch.modular = layer.modular ?? defaultModular()
   if (fill === 'parcel') patch.parcel = layer.parcel ?? defaultParcel()
   if (fill === 'mosh') patch.mosh = layer.mosh ?? defaultMosh()
-  if (isMosaicShaderFill(fill)) patch.shader = mosaicShaderSpec(fill, layer.grid.gen.seed, layer.shader)
+  if (isMosaicShaderFill(fill)) {
+    // Prefer the spec last used for THIS effect (stashed below on the way out), then
+    // the live slot when it already targets it, else a fresh one at the layer's seed.
+    const stashed = layer.shaderSpecs?.[fill]
+    patch.shader = mosaicShaderSpec(fill, layer.grid.gen.seed, stashed ?? layer.shader)
+  }
+  // Stash the spec of the style being left so the hop back restores its dials.
+  if (isMosaicShaderFill(layer.cellFill) && layer.shader && layer.cellFill !== fill) {
+    patch.shaderSpecs = { ...layer.shaderSpecs, [layer.cellFill]: layer.shader }
+  }
   return patch
 }
 

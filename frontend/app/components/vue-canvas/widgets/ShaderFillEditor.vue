@@ -171,6 +171,9 @@ const paramRows = computed<ParamRow[]>(() => {
   // commit. Any new derived kind needs a branch here AND in StudioControlPanel.
   return derivedShaderFillControls(eff, PREFIX).flatMap((c): ParamRow[] => {
     const key = c.key.startsWith(PARAM_PREFIX) ? c.key.slice(PARAM_PREFIX.length) : c.key
+    // `mix` blends the effect with its Input paint: when the host hides the Input
+    // rows the dial would silently blend in a paint nobody can see or change.
+    if (key === 'mix' && !props.showInput) return []
     if (c.kind === 'select') {
       // The control's own `options` are stringified NUMBERS — the stored value
       // domain (ShaderSpec.params is Record<string, number>; resolveEffectParams
