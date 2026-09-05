@@ -17,7 +17,7 @@ import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/composit
 import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf, mosaicStylePatch, mosaicSeedPatch, freshMosaicSeed, isMosaicShaderFill, mosaicShaderSpec, mosaicLookNames, mosaicLookOf, applyMosaicLook } from '~/lib/compositor/mosaic'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
 import { onFieldCatalogReady } from '~/lib/shaderfill/field'
-import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
+import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, panePalette, paneInkPatch, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
 import { defaultMosh, MOSH_LIMITS, MOSH_PRESET_NAMES, moshPresetPatch, moshPresetOf, type MoshParams, type MoshPresetName } from '~/lib/compositor/mosh'
@@ -697,6 +697,17 @@ function applyMosaicLookTo(layer: DealLayer, name: string) {
 function patchPane(layer: DealLayer, patch: Partial<PaneParams>) {
   setLocal(layer.id, { pane: { ...(layer.pane ?? defaultPane()), ...patch } } as Partial<DealLayer>)
 }
+/** One ink of the Pane's ordered palette, changed by hand (see paneInkPatch). */
+function patchPaneInk(layer: DealLayer, index: number, hex: string) {
+  const patch = paneInkPatch(layer.pane ?? defaultPane(), layer.vocab, index, hex)
+  if (patch) patchPane(layer, patch)
+}
+/** The ordered palette the selected Pane is painting with (its own inks or the vocab's). */
+const paneInks = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return [] as string[]
+  return panePalette((l as DealLayer).pane ?? defaultPane(), (l as DealLayer).vocab)
+})
 /** Apply a named palette preset (the ordered 8 inks) to a Pane deal. */
 function applyPanePreset(layer: DealLayer, name: string) {
   if (!(PANE_PRESET_NAMES as string[]).includes(name)) return
@@ -7132,6 +7143,13 @@ onUnmounted(() => {
               <StudioSlider label="Spread" :min="0" :max="1" :step="0.01" :bindable="false"
                 :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).spread"
                 @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { spread: v })" />
+              <!-- The ordered palette. Spread is a distance along THIS order (rule 5), so the
+                   swatches read left to right in palette order; editing one keeps the rest. -->
+              <div class="panel-label mt-1">Inks</div>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <StudioColor v-for="(ink, i) in paneInks" :key="i" :model-value="ink"
+                  @update:model-value="(v: string) => patchPaneInk(selectedLocal as DealLayer, i, v)" />
+              </div>
               <StudioSelect label="Palette" :options="PANE_PRESET_NAMES as any"
                 :model-value="panePreset" @update:model-value="(v: any) => applyPanePreset(selectedLocal as DealLayer, v)" />
             </div>

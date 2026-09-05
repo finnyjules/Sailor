@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   PANE_DIRS, PANE_RAMP_STEPS, defaultPane, normalizePane, paneWeights, paneRegions, paneCellPick,
   paneCellGradient, paneRampStops, paneInksFromVocab, panePalette, PANE_PALETTE_PRESETS, PANE_PRESET_NAMES,
-  panePresetPatch, panePresetOf, hexToHsl, hslToHex, type PaneParams,
+  panePresetPatch, panePresetOf, paneInkPatch, hexToHsl, hslToHex, type PaneParams,
 } from '~/lib/compositor/pane'
 import { DEAL_VOCABS } from '~/lib/compositor/dealVocab'
 import { defaultGrid } from '~/lib/frame/grid'
@@ -529,5 +529,31 @@ describe('agent dealGrid pane', () => {
     const s1 = (applyCompositorCommand(baseState(), { op: 'dealGrid', args: { id: 'dd', cellFill: 'pane' } }) as any).template
     const r = applyCompositorCommand(s1, { op: 'dealGrid', target: 'dd', args: { cellFill: 'bogus' } })
     expect((r as any).template.layers[0].cellFill).toBe('pane')
+  })
+})
+
+// ── Inspector: editing one ink by hand ───────────────────────────────────────
+describe('paneInkPatch (one ink changed in the inspector)', () => {
+  it('replaces just that ink, in order, keeping the other seven', () => {
+    const base = defaultPane()
+    const patch = paneInkPatch(base, 'brand', 2, '#123456')!
+    expect(patch.inks).toHaveLength(base.inks!.length)
+    expect(patch.inks[2]).toBe('#123456')
+    patch.inks.forEach((c, i) => { if (i !== 2) expect(c).toBe(base.inks![i]) })
+  })
+  it('a vocab-driven pane (fewer than 2 inks) pins the vocabulary palette on its first edit', () => {
+    const vocabDriven = { ...defaultPane(), inks: [] }
+    const expected = panePalette(vocabDriven, 'warm')
+    expect(expected.length).toBeGreaterThanOrEqual(2)
+    const patch = paneInkPatch(vocabDriven, 'warm', 0, '#ABCDEF')!
+    expect(patch.inks[0]).toBe('#ABCDEF')
+    expect(patch.inks.slice(1)).toEqual(expected.slice(1))
+  })
+  it('drops alpha (the picker emits #rrggbbaa) and rejects a bad index or a non-colour', () => {
+    const base = defaultPane()
+    expect(paneInkPatch(base, 'brand', 0, '#11223380')!.inks[0]).toBe('#112233')
+    expect(paneInkPatch(base, 'brand', 8, '#112233')).toBeNull()
+    expect(paneInkPatch(base, 'brand', -1, '#112233')).toBeNull()
+    expect(paneInkPatch(base, 'brand', 0, 'red')).toBeNull()
   })
 })

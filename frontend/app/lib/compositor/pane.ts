@@ -318,3 +318,19 @@ export function panePalette(params: PaneParams, vocab: DealVocab): string[] {
   if ((params.inks?.length ?? 0) >= 2) return params.inks!.slice()
   return paneInksFromVocab(vocab)
 }
+
+/**
+ * One ink changed by hand in the inspector: the patch that writes the WHOLE ordered
+ * palette back with ink `index` replaced by `hex`. Works from the palette the deal
+ * is actually painting with (its own inks, or the vocabulary's solids for a deal
+ * that has none), so the first edit on a vocab-driven Pane pins all of its inks and
+ * only that one changes. `null` when the index is outside the palette or `hex` is
+ * not a colour. Alpha is dropped: a pane ink is an opaque ramp end.
+ */
+export function paneInkPatch(params: PaneParams, vocab: DealVocab, index: number, hex: string): Pick<PaneParams, 'inks'> | null {
+  if (!isHex(hex)) return null
+  const inks = panePalette(params, vocab)
+  if (!Number.isInteger(index) || index < 0 || index >= inks.length) return null
+  inks[index] = hex.slice(0, 7)
+  return { inks }
+}
