@@ -65,6 +65,7 @@ import { paintParcel, defaultParcel, type ParcelParams } from '~/lib/compositor/
 import { paintMosh, defaultMosh, type MoshParams } from '~/lib/compositor/mosh'
 import { paintCarve, defaultCarve, normalizeCarve, type CarveParams } from '~/lib/compositor/carve'
 import type { ChaffParams } from '~/lib/compositor/chaff'
+import type { StrandParams } from '~/lib/compositor/strand'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -669,7 +670,10 @@ export interface ScatterLayer extends LayerCommon {
   // mottle / coarse / grain + its two ordered role inks); only read when style is
   // 'chaff'. Absent ⇒ defaultChaff().
   chaff?: ChaffParams
-  // STYLE: strand — Task 4 adds `strand?: StrandParams` here.
+  // Strand's tunables (count / len / wander / branch / thick / rod / notch / rough /
+  // offset / edge / texKind / tex / grain + its three ordered role inks); only read
+  // when style is 'strand'. Absent ⇒ defaultStrand().
+  strand?: StrandParams
   // STYLE: husk — Task 5 adds `husk?: HuskParams` here.
 }
 
@@ -847,7 +851,7 @@ export function createScatterLayer(partial: Partial<ScatterLayer> = {}): Scatter
     w: 1, h: 1,
     seed: DEFAULT_SCATTER_SEED,
     style: DEFAULT_SCATTER_STYLE,
-    ...(styles as { chaff: ChaffParams }),
+    ...(styles as { chaff: ChaffParams; strand: StrandParams }),
     ...partial,
   }
 }

@@ -7,7 +7,7 @@
  *
  *   style     what it is
  *   chaff     blades strewn over a sheet, printed through a mottled two-ink mask
- *   (strand)  Task 4 — see the `// STYLE: strand` anchors
+ *   strand    branching chains of stubby rods, printed over a plate that sits off true
  *   (husk)    Task 5 — see the `// STYLE: husk` anchors
  *
  * It is a SIBLING of the Mosaic element (`deal`), not one of its styles: a mosaic
@@ -28,7 +28,10 @@ import {
   defaultChaff, normalizeChaff, paintChaff, chaffPresetPatch, chaffPresetOf,
   CHAFF_LIMITS, CHAFF_PRESET_NAMES, CHAFF_SHAPES, type ChaffParams, type ChaffCtx,
 } from '~/lib/compositor/chaff'
-// STYLE: strand — Task 4 imports its module here.
+import {
+  defaultStrand, normalizeStrand, paintStrand, strandPresetPatch, strandPresetOf,
+  STRAND_LIMITS, STRAND_PRESET_NAMES, STRAND_TEXTURES, type StrandParams,
+} from '~/lib/compositor/strand'
 // STYLE: husk — Task 5 imports its module here.
 
 /** The context a style's paint needs. Every scatter generator prints one sheet into
@@ -101,13 +104,42 @@ const CHAFF_STYLE: ScatterStyleRow<'chaff', ChaffParams> = {
   paint: paintChaff,
 }
 
+// ── Strand ────────────────────────────────────────────────────────────────────
+
+const STRAND_STYLE: ScatterStyleRow<'strand', StrandParams> = {
+  id: 'strand',
+  label: 'Strand',
+  defaults: defaultStrand,
+  normalize: normalizeStrand,
+  // The tool's own three groups, in its own order: the chains, the rods, the print.
+  controls: [
+    { kind: 'slider', key: 'count', label: 'Chains', min: STRAND_LIMITS.count[0], max: STRAND_LIMITS.count[1], step: 1 },
+    { kind: 'slider', key: 'len', label: 'Length', min: STRAND_LIMITS.len[0], max: STRAND_LIMITS.len[1], step: 1 },
+    { kind: 'slider', key: 'wander', label: 'Wander', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'branch', label: 'Branching', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'thick', label: 'Thickness', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'rod', label: 'Rod length', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'notch', label: 'Notch', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'rough', label: 'Roughness', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'offset', label: 'Off-register', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'edge', label: 'Plate spread', min: 0, max: 1, step: 0.01 },
+    { kind: 'select', key: 'texKind', label: 'Ink texture', options: STRAND_TEXTURES.map(t => ({ value: t, label: t[0]!.toUpperCase() + t.slice(1) })) },
+    { kind: 'slider', key: 'tex', label: 'Coverage', min: 0, max: 1, step: 0.01 },
+    { kind: 'slider', key: 'grain', label: 'Grain', min: 0, max: 1, step: 0.01 },
+  ],
+  presetNames: STRAND_PRESET_NAMES,
+  presetPatch: name => strandPresetPatch(name as Parameters<typeof strandPresetPatch>[0]),
+  presetOf: strandPresetOf,
+  paint: paintStrand,
+}
+
 // ── The registry ──────────────────────────────────────────────────────────────
 
 /** Inspector order, top to bottom. ONE line per style — the anchors below are where
  *  Tasks 4 and 5 add theirs. */
 export const SCATTER_STYLES = [
   CHAFF_STYLE,
-  // STYLE: strand — Task 4 adds `STRAND_STYLE,` here.
+  STRAND_STYLE,
   // STYLE: husk — Task 5 adds `HUSK_STYLE,` here.
 ] as const
 

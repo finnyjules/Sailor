@@ -1,8 +1,8 @@
 /**
  * The Scatter element: thrown marks as ONE self-painting layer, added from the
  * toolbar's Shapes menu beside Mosaic and tuned in the inspector. Internally it is
- * the `scatter` layer kind; its Style picks which generator paints it (Chaff now;
- * Strand and Husk register at the same anchors).
+ * the `scatter` layer kind; its Style picks which generator paints it (Chaff and
+ * Strand now; Husk registers at the same anchors).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TOOLBAR_SHAPES, resolveShapeFace, shapeFaceLabel } from '~/lib/compositor/toolbarMenus'
@@ -15,6 +15,7 @@ import {
   createScatterLayer, newScatterLayer, layerPaints, type ScatterLayer,
 } from '~/composables/useCompositorLayers'
 import { defaultChaff, normalizeChaff, CHAFF_PRESET_NAMES, CHAFF_PALETTE_PRESETS } from '~/lib/compositor/chaff'
+import { defaultStrand, STRAND_PRESET_NAMES, STRAND_PALETTE_PRESETS } from '~/lib/compositor/strand'
 import { applyCompositorCommand, describeCompositor, type CompositorState } from '~/lib/agent/surfaces/compositor'
 
 // ── The Shapes menu ───────────────────────────────────────────────────────────
@@ -107,6 +108,24 @@ describe('the Scatter style registry', () => {
     const shape = row.controls.find(c => c.key === 'shape')!
     expect(shape.kind).toBe('select')
     expect((shape as { options: { value: string }[] }).options.map(o => o.value)).toEqual(['crescent', 'leaf', 'bar'])
+  })
+
+  it('Strand registers its own module\'s defaults, dials and palettes', () => {
+    const row = scatterStyleRow('strand')
+    expect(row.label).toBe('Strand')
+    expect(row.defaults()).toEqual(defaultStrand())
+    expect(row.presetNames).toEqual(STRAND_PRESET_NAMES)
+    expect(row.presetPatch('Cobalt')).toEqual({ inks: [...STRAND_PALETTE_PRESETS.Cobalt.inks] })
+    // The tool's own two whole-number dials reach the inspector through the registry.
+    expect(row.controls.find(c => c.key === 'count')).toMatchObject({ kind: 'slider', label: 'Chains', min: 1, max: 40, step: 1 })
+    expect(row.controls.find(c => c.key === 'len')).toMatchObject({ kind: 'slider', label: 'Length', min: 3, max: 90, step: 1 })
+    const tex = row.controls.find(c => c.key === 'texKind')!
+    expect(tex.kind).toBe('select')
+    expect((tex as { options: { value: string }[] }).options.map(o => o.value)).toEqual(['stipple', 'drag', 'screen'])
+    // Every dial the tool shows is on the row, none of them twice.
+    const keys = row.controls.map(c => c.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(keys).toEqual(['count', 'len', 'wander', 'branch', 'thick', 'rod', 'notch', 'rough', 'offset', 'edge', 'texKind', 'tex', 'grain'])
   })
 
   it('an unknown style resolves to the default row rather than throwing', () => {
@@ -289,6 +308,25 @@ describe('agent scatter op', () => {
     const l = layerOf(r)
     expect(l.seed).toBe(31)
     expect(l.chaff).toMatchObject({ count: 200, shape: 'bar', inks: [...CHAFF_PALETTE_PRESETS.Pine.inks] })
+  })
+
+  it('makes a Strand scatter, by name or from its dials alone', () => {
+    const named = applyCompositorCommand(baseState(), {
+      op: 'scatter',
+      args: { id: 's', style: 'strand', strand: { count: 20, texKind: 'screen' }, palettePreset: 'Beacon', seed: 44 },
+    })
+    expect(named.ok).toBe(true)
+    const l = layerOf(named)
+    expect(l).toMatchObject({ style: 'strand', seed: 44 })
+    expect(l.strand).toMatchObject({ count: 20, texKind: 'screen', inks: [...STRAND_PALETTE_PRESETS.Beacon.inks] })
+    // A tunables object on its own is enough to say which style is meant.
+    const implied = applyCompositorCommand(baseState(), { op: 'scatter', args: { id: 't', strand: { wander: 1 } } })
+    expect(implied.ok).toBe(true)
+    expect(layerOf(implied)).toMatchObject({ style: 'strand' })
+    // …and so is a palette name that only one style's table carries.
+    const byPalette = applyCompositorCommand(baseState(), { op: 'scatter', args: { id: 'u', palettePreset: 'Vermilion' } })
+    expect(byPalette.ok).toBe(true)
+    expect(layerOf(byPalette)).toMatchObject({ style: 'strand' })
   })
 
   it('rejects a palette name that is not in the style\'s own table, with the options', () => {

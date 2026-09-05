@@ -259,7 +259,7 @@ function describeDealLook(l: DealLayer, fill: DealLook): Record<string, unknown>
 /** One plain sentence per style, for the `scatter` op's hint. */
 const SCATTER_BLURBS: Record<string, string> = {
   chaff: 'a litter of curved blades strewn over the sheet, most modest with a few running huge (crescent: a spindle fattest at its middle; leaf: full width at the head, falling away to a tip; bar: flat-topped with a short ramp at each end), printed in two inks through a speckled mask that breaks up both the blades and the bare sheet',
-  // STYLE: strand — Task 4 adds its sentence here.
+  strand: 'chains of short rods set one after the next along a wandering line, a nick showing at every join, splitting into side arms as they travel; each rod carries a freehand contour rather than a stroked one, so no two of them match; they print in a third ink over a second impression of the same shapes offset a little down and to the left, and the ink is allowed to break up near each rod\'s rim — as loose specks, as long streaks running one way, or as the dots of a halftone screen',
   // STYLE: husk — Task 5 adds its sentence here.
 }
 
