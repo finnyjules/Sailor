@@ -13,7 +13,7 @@ import {
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
 } from '~/composables/useCompositorLayers'
 import { DEAL_VOCABS, type DealVocab } from '~/lib/compositor/dealVocab'
-import { defaultPane, PANE_LIMITS, type PaneParams } from '~/lib/compositor/pane'
+import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
 import { defaultMosh, MOSH_LIMITS, MOSH_PRESET_NAMES, moshPresetPatch, moshPresetOf, type MoshParams, type MoshPresetName } from '~/lib/compositor/mosh'
@@ -672,6 +672,17 @@ function onPane() {
 function patchPane(layer: DealLayer, patch: Partial<PaneParams>) {
   setLocal(layer.id, { pane: { ...(layer.pane ?? defaultPane()), ...patch } } as Partial<DealLayer>)
 }
+/** Apply a named palette preset (the ordered 8 inks) to a Pane deal. */
+function applyPanePreset(layer: DealLayer, name: string) {
+  if (!(PANE_PRESET_NAMES as string[]).includes(name)) return
+  patchPane(layer, panePresetPatch(name as PanePresetName))
+}
+/** Which preset the selected Pane deal currently matches ('' when custom / vocab). */
+const panePreset = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return ''
+  return panePresetOf((l as DealLayer).pane ?? defaultPane()) ?? ''
+})
 
 /** One-click "Modular" — the Modular generator (lib/compositor/modular): a merged
  *  module grid over a background, each module empty / solid / block field / dot
@@ -7006,6 +7017,8 @@ onUnmounted(() => {
             <!-- Pane has its OWN layout (row masonry, every cell flush and filled), so the
                  grid controls (density / inset / regularity / merge) don't apply to it. -->
             <div v-else-if="(selectedLocal as any).cellFill === 'pane'" class="mt-2 flex flex-col gap-1.5">
+              <StudioSelect label="Palette preset" :options="PANE_PRESET_NAMES as any"
+                :model-value="panePreset" @update:model-value="(v: any) => applyPanePreset(selectedLocal as DealLayer, v)" />
               <StudioSlider label="Rows" :min="PANE_LIMITS.rows[0]" :max="PANE_LIMITS.rows[1]" :step="1" :bindable="false"
                 :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).rows"
                 @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { rows: Math.round(v) })" />

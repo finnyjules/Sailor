@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   PANE_DIRS, PANE_RAMP_STEPS, defaultPane, normalizePane, paneWeights, paneRegions, paneCellPick,
-  paneCellGradient, paneRampStops, paneInksFromVocab, hexToHsl, hslToHex, type PaneParams,
+  paneCellGradient, paneRampStops, paneInksFromVocab, panePalette, PANE_PALETTE_PRESETS, PANE_PRESET_NAMES,
+  panePresetPatch, panePresetOf, hexToHsl, hslToHex, type PaneParams,
 } from '~/lib/compositor/pane'
 import { DEAL_VOCABS } from '~/lib/compositor/dealVocab'
 import { defaultGrid } from '~/lib/frame/grid'
@@ -313,8 +314,63 @@ describe('paneCellGradient', () => {
   })
   it('normalizePane clamps and falls back per field', () => {
     expect(normalizePane({ rows: 99, cells: -3, vary: 2, diag: 'x', soft: null, spread: 0.2 }))
-      .toEqual({ rows: 8, cells: 1, vary: 1, diag: 0.45, soft: 0.85, spread: 0.2 })
+      .toEqual({ rows: 8, cells: 1, vary: 1, diag: 0.45, soft: 0.85, spread: 0.2, inks: defaultPane().inks })
     expect(normalizePane(undefined)).toEqual(defaultPane())
+  })
+  it('normalizePane inks: keeps valid hex only, needs 2 to count (else []), absent = the base list', () => {
+    expect(normalizePane({ inks: ['#FF0000', 'red', '#00ff00', 12, '#0000FFAA'] }).inks).toEqual(['#FF0000', '#00ff00', '#0000FFAA'])
+    expect(normalizePane({ inks: ['#FF0000'] }).inks).toEqual([])          // one ink is not a palette
+    expect(normalizePane({ inks: 'nope' }).inks).toEqual(defaultPane().inks) // garbage ⇒ base
+    expect(normalizePane({}, { ...defaultPane(), inks: ['#111111', '#222222'] }).inks).toEqual(['#111111', '#222222'])
+    expect(normalizePane({}, { ...defaultPane(), inks: undefined }).inks).toEqual([])
+  })
+})
+
+// ── The ordered palette (the original's PALETTES) ────────────────────────────
+describe('Pane palette presets', () => {
+  it('the five presets are the source lists, exact, in order', () => {
+    expect(PANE_PRESET_NAMES).toEqual(['Hot pink', 'Electric', 'Deep', 'Sorbet', 'Candy'])
+    expect(PANE_PALETTE_PRESETS['Hot pink']).toEqual(['#FF3BD4', '#0B62F0', '#FF4A0A', '#D6B4FA', '#FFC9F2', '#FFFFFF', '#8B5CF6', '#4FA8FF'])
+    expect(PANE_PALETTE_PRESETS['Electric']).toEqual(['#FF2FA8', '#1E4FE0', '#FF6A00', '#C7B2F5', '#FFD6EE', '#FBF8FF', '#7A3BE0', '#38C6FF'])
+    expect(PANE_PALETTE_PRESETS['Deep']).toEqual(['#E8207A', '#0A3FD6', '#F55A1E', '#B9A6F0', '#FFC0DE', '#FFFFFF', '#6D28D9', '#22B8F0'])
+    expect(PANE_PALETTE_PRESETS['Sorbet']).toEqual(['#FF4FA0', '#2B4FD8', '#FFA02C', '#A8D8F5', '#FFE0F0', '#FFFDF7', '#5B2BD6', '#41E0C8'])
+    expect(PANE_PALETTE_PRESETS['Candy']).toEqual(['#F0308C', '#1B2FA8', '#FF7A1E', '#D8C4F0', '#FFE8F4', '#FFFFFF', '#9B4FE0', '#2CC8F0'])
+    for (const name of PANE_PRESET_NAMES) expect(PANE_PALETTE_PRESETS[name].length).toBe(8)
+  })
+  it('defaultPane carries the first preset, so a fresh Pane matches the tool, not the vocab', () => {
+    expect(defaultPane().inks).toEqual([...PANE_PALETTE_PRESETS['Hot pink']])
+    expect(panePresetOf(defaultPane())).toBe('Hot pink')
+    expect(panePalette(defaultPane(), 'brand')).toEqual([...PANE_PALETTE_PRESETS['Hot pink']])
+  })
+  it('presetPatch / presetOf round-trip; a custom or short list matches no preset', () => {
+    for (const name of PANE_PRESET_NAMES) expect(panePresetOf({ ...defaultPane(), ...panePresetPatch(name) })).toBe(name)
+    expect(panePresetOf({ ...defaultPane(), inks: ['#111111', '#222222'] })).toBeNull()
+    expect(panePresetOf({ ...defaultPane(), inks: [] })).toBeNull()
+    // Case-insensitive match (the picker may emit lowercase hex).
+    expect(panePresetOf({ ...defaultPane(), inks: PANE_PALETTE_PRESETS['Candy'].map(c => c.toLowerCase()) })).toBe('Candy')
+  })
+  it('panePalette falls back to the vocab solids when inks has fewer than 2 (or is absent)', () => {
+    expect(panePalette({ ...defaultPane(), inks: [] }, 'warm')).toEqual(paneInksFromVocab('warm'))
+    expect(panePalette({ ...defaultPane(), inks: ['#ffffff'] }, 'cool')).toEqual(paneInksFromVocab('cool'))
+    const legacy = { ...defaultPane() } as PaneParams; delete legacy.inks   // a layer saved before inks existed
+    expect(panePalette(legacy, 'mono')).toEqual(paneInksFromVocab('mono'))
+    expect(panePalette({ ...defaultPane(), inks: ['#111111', '#222222'] }, 'brand')).toEqual(['#111111', '#222222'])
+  })
+  it('spread is a distance in the INKS order: spread=0 ⇒ the two inks of every cell are ADJACENT in the preset list', () => {
+    const inks = [...PANE_PALETTE_PRESETS['Hot pink']]
+    const p = { ...defaultPane(), spread: 0, inks }
+    for (let i = 0; i < 12; i++) for (let j = 0; j < 6; j++) {
+      const g = paneCellGradient(p, panePalette(p, 'brand'), 9, i, j)
+      const A = inks.indexOf(g.stops[0]!.color), B = inks.indexOf(g.stops[g.stops.length - 1]!.color)
+      expect(A).toBeGreaterThanOrEqual(0); expect(B).toBeGreaterThanOrEqual(0)
+      expect(B).toBe((A + 1) % inks.length)   // the designed neighbour pair, never a hue-sorted one
+    }
+    // And reordering the same colours changes which pairs are neighbours (order is the look).
+    const shuffled = [inks[0]!, inks[2]!, inks[1]!, ...inks.slice(3)]
+    const q = { ...p, inks: shuffled }
+    const g0 = paneCellGradient(p, panePalette(p, 'brand'), 9, 0, 0), g1 = paneCellGradient(q, panePalette(q, 'brand'), 9, 0, 0)
+    expect(g0.pick.a).toBe(g1.pick.a)   // same slot picked (the hash ignores colour)…
+    expect([g0.stops[0]!.color, g0.stops[g0.stops.length - 1]!.color]).not.toEqual([g1.stops[0]!.color, g1.stops[g1.stops.length - 1]!.color])
   })
 })
 
@@ -378,6 +434,8 @@ describe('deal layer render with cellFill:pane (headless)', () => {
     ...over,
   })
 
+  // The default Pane paints its own 8 preset inks (not the 7 brand solids).
+  const N_INKS = defaultPane().inks!.length
   it('a Pane deal issues one createLinearGradient + fillRect per masonry region, endpoints on the cell corners/edges, cells flush', async () => {
     const layer = dealLayer({ cellFill: 'pane', pane: defaultPane() })
     await drawDeal(layer, 400, 400)
@@ -391,11 +449,11 @@ describe('deal layer render with cellFill:pane (headless)', () => {
       const r = regions[k]!, f = mainFills[k]!, g = mainGrads[k]!
       expect([f.x, f.y, f.w, f.h]).toEqual([r.x, r.y, r.w, r.h])
       expect(f.grad).toBe(g)
-      expect(g.stops).toBe(2 + (PANE_RAMP_STEPS - 1) + (paneCellPick(defaultPane(), 7, 9, r.i, r.j).p0 > 0 ? 1 : 0) + (paneCellPick(defaultPane(), 7, 9, r.i, r.j).p1 < 1 ? 1 : 0))
+      expect(g.stops).toBe(2 + (PANE_RAMP_STEPS - 1) + (paneCellPick(defaultPane(), N_INKS, 9, r.i, r.j).p0 > 0 ? 1 : 0) + (paneCellPick(defaultPane(), N_INKS, 9, r.i, r.j).p1 < 1 ? 1 : 0))
       // The gradient endpoints are EXACTLY the picked direction vector mapped over THIS
       // cell — not merely "some corner or edge" (which a transposed x0/y0 would also
       // satisfy). Ties the painted geometry to the pick.
-      const d = paneCellPick(defaultPane(), 7, 9, r.i, r.j).dir
+      const d = paneCellPick(defaultPane(), N_INKS, 9, r.i, r.j).dir
       expect([g.x0, g.y0, g.x1, g.y1]).toEqual([r.x + d[0] * r.w, r.y + d[1] * r.h, r.x + d[2] * r.w, r.y + d[3] * r.h])
     }
     // No cell has a gap to its row neighbour.
@@ -448,6 +506,24 @@ describe('agent dealGrid pane', () => {
     expect(l.pane).toEqual({ ...defaultPane(), diag: 1, rows: 8 })
     const r2 = applyCompositorCommand((r as any).template, { op: 'dealGrid', target: 'dd', args: { pane: { soft: 0.2 } } })
     expect((r2 as any).template.layers[0].pane).toEqual({ ...defaultPane(), diag: 1, rows: 8, soft: 0.2 })
+  })
+  it('a default deal Pane (create + one-click) carries the first preset inks', async () => {
+    const { createDealLayer } = await import('~/composables/useCompositorLayers')
+    expect(createDealLayer().pane!.inks).toEqual([...PANE_PALETTE_PRESETS['Hot pink']])
+    expect(createDealLayer({ cellFill: 'pane', pane: defaultPane() }).pane!.inks).toEqual([...PANE_PALETTE_PRESETS['Hot pink']])
+    const l = (applyCompositorCommand(baseState(), { op: 'dealGrid', args: { id: 'd1', cellFill: 'pane' } }) as any).template.layers[0]
+    expect(l.pane.inks).toEqual([...PANE_PALETTE_PRESETS['Hot pink']])
+  })
+  it('palettePreset by a Pane name applies the ordered inks and implies the Pane fill; explicit pane.inks win', () => {
+    const r = applyCompositorCommand(baseState(), { op: 'dealGrid', args: { id: 'd1', palettePreset: 'Candy' } })
+    const l = (r as any).template.layers[0]
+    expect(l.cellFill).toBe('pane')
+    expect(l.pane.inks).toEqual([...PANE_PALETTE_PRESETS['Candy']])
+    const r2 = applyCompositorCommand((r as any).template, { op: 'dealGrid', target: 'd1', args: { palettePreset: 'Sorbet', pane: { inks: ['#111111', '#222222'] } } })
+    expect((r2 as any).template.layers[0].pane.inks).toEqual(['#111111', '#222222'])
+    // A single ink is not a palette: normalizes to [] (vocab fallback at paint time).
+    const r3 = applyCompositorCommand((r2 as any).template, { op: 'dealGrid', target: 'd1', args: { pane: { inks: ['#111111'] } } })
+    expect((r3 as any).template.layers[0].pane.inks).toEqual([])
   })
   it('ignores an unknown cellFill value on reconfigure (keeps the prior fill)', () => {
     const s1 = (applyCompositorCommand(baseState(), { op: 'dealGrid', args: { id: 'dd', cellFill: 'pane' } }) as any).template

@@ -57,7 +57,7 @@ import { paintMaskRelease } from '~/lib/compositor/maskBreak'
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
 import { resolveGrid, defaultGrid, type FrameGrid } from '~/lib/frame/grid'
 import { pickDealPaint, keptCell, forceKeptCell, type DealVocab } from '~/lib/compositor/dealVocab'
-import { paneRegions, paneCellGradient, paneInksFromVocab, defaultPane, type PaneParams } from '~/lib/compositor/pane'
+import { paneRegions, paneCellGradient, panePalette, defaultPane, type PaneParams } from '~/lib/compositor/pane'
 import { paintModular, modularPalette, defaultModular, type ModularParams } from '~/lib/compositor/modular'
 import { paintParcel, defaultParcel, type ParcelParams } from '~/lib/compositor/parcel'
 import { paintMosh, defaultMosh, type MoshParams } from '~/lib/compositor/mosh'
@@ -2094,7 +2094,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // direction is a vector in cell fractions, not an angle — building it directly
       // on the cell rect keeps the endpoints on the cell's corners, which is the look).
       const pane = layer.pane ?? defaultPane()
-      const palette = paneInksFromVocab(layer.vocab)
+      const palette = panePalette(pane, layer.vocab)
       for (const r of paneRegions(pane, boxW, boxH, seed)) {
         const g = paneCellGradient(pane, palette, seed, r.i, r.j)
         const grad = ctx.createLinearGradient(r.x + g.x0 * r.w, r.y + g.y0 * r.h, r.x + g.x1 * r.w, r.y + g.y1 * r.h)

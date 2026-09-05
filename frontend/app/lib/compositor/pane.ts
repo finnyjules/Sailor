@@ -37,20 +37,69 @@ export interface PaneParams {
   diag: number     // 0..1 share of cells whose gradient runs corner-to-corner
   soft: number     // 0..1 how much of the cell is the blend (0 = hard line)
   spread: number   // 0..1 how far apart in the palette ORDER the two inks are drawn
+  /** The ORDERED palette `spread` walks (the original's 8-colour list). Fewer than
+   *  2 (or absent — layers saved before this field) ⇒ the deal vocabulary's solids. */
+  inks?: string[]
 }
 
+/**
+ * The original's five ordered 8-colour palettes, exact and in its order. The ORDER is
+ * part of the look — `spread` is a distance along it (pink → blue → orange → lavender
+ * → pale pink → white → violet → sky), so a neighbour pair is always a designed pair.
+ */
+export const PANE_PALETTE_PRESETS = {
+  'Hot pink': ['#FF3BD4', '#0B62F0', '#FF4A0A', '#D6B4FA', '#FFC9F2', '#FFFFFF', '#8B5CF6', '#4FA8FF'],
+  'Electric': ['#FF2FA8', '#1E4FE0', '#FF6A00', '#C7B2F5', '#FFD6EE', '#FBF8FF', '#7A3BE0', '#38C6FF'],
+  'Deep': ['#E8207A', '#0A3FD6', '#F55A1E', '#B9A6F0', '#FFC0DE', '#FFFFFF', '#6D28D9', '#22B8F0'],
+  'Sorbet': ['#FF4FA0', '#2B4FD8', '#FFA02C', '#A8D8F5', '#FFE0F0', '#FFFDF7', '#5B2BD6', '#41E0C8'],
+  'Candy': ['#F0308C', '#1B2FA8', '#FF7A1E', '#D8C4F0', '#FFE8F4', '#FFFFFF', '#9B4FE0', '#2CC8F0'],
+} as const satisfies Record<string, readonly string[]>
+export type PanePresetName = keyof typeof PANE_PALETTE_PRESETS
+export const PANE_PRESET_NAMES = Object.keys(PANE_PALETTE_PRESETS) as PanePresetName[]
+
+/** The original's defaults — including its first palette, so a fresh Pane reads in
+ *  the tool's pink / blue / orange / lavender / white register, not the brand vocab. */
 export function defaultPane(): PaneParams {
-  return { rows: 3, cells: 6, vary: 0.55, diag: 0.45, soft: 0.85, spread: 0.55 }
+  return { rows: 3, cells: 6, vary: 0.55, diag: 0.45, soft: 0.85, spread: 0.55, inks: [...PANE_PALETTE_PRESETS['Hot pink']] }
 }
 
 /** Bounds each param is clamped to (also the inspector's slider ranges). */
 export const PANE_LIMITS = { rows: [1, 8], cells: [1, 12] } as const
 
-/** Clamp/normalise a (possibly partial, possibly garbage) params object onto `base`. */
+/** The params patch a preset applies (the ordered ink list). */
+export function panePresetPatch(name: PanePresetName): Pick<PaneParams, 'inks'> {
+  return { inks: [...PANE_PALETTE_PRESETS[name]] }
+}
+
+/** Which preset the params currently match (every ink, in order), if any. */
+export function panePresetOf(params: PaneParams): PanePresetName | null {
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+  for (const name of PANE_PRESET_NAMES) {
+    const p = PANE_PALETTE_PRESETS[name]
+    if (params.inks?.length === p.length && params.inks.every((c, i) => same(c, p[i]!))) return name
+  }
+  return null
+}
+
+// 6-digit, or 8-digit with alpha (the shared colour picker emits #rrggbbaa for a
+// translucent pick; canvas gradient stops accept both).
+const HEX = /^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/
+const isHex = (v: unknown): v is string => typeof v === 'string' && HEX.test(v)
+
+/** Clamp/normalise a (possibly partial, possibly garbage) params object onto `base`.
+ *  `inks` keeps only valid hex, and needs at least 2 to count as a palette — fewer
+ *  ⇒ [] (the vocabulary fallback); absent ⇒ the base's list. */
 export function normalizePane(partial: unknown, base: PaneParams = defaultPane()): PaneParams {
   const p = (partial && typeof partial === 'object' ? partial : {}) as Record<string, unknown>
   const num = (v: unknown, lo: number, hi: number, fb: number) =>
     typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fb
+  let inks: string[]
+  if (Array.isArray(p.inks)) {
+    const valid = p.inks.filter(isHex)
+    inks = valid.length >= 2 ? valid : []
+  } else {
+    inks = (base.inks ?? []).slice()
+  }
   return {
     rows: Math.round(num(p.rows, PANE_LIMITS.rows[0], PANE_LIMITS.rows[1], base.rows)),
     cells: Math.round(num(p.cells, PANE_LIMITS.cells[0], PANE_LIMITS.cells[1], base.cells)),
@@ -58,6 +107,7 @@ export function normalizePane(partial: unknown, base: PaneParams = defaultPane()
     diag: num(p.diag, 0, 1, base.diag),
     soft: num(p.soft, 0, 1, base.soft),
     spread: num(p.spread, 0, 1, base.spread),
+    inks,
   }
 }
 
@@ -254,10 +304,17 @@ export function paneCellGradient(params: PaneParams, palette: readonly string[],
 }
 
 /**
- * v1 palette for a deal: the SOLID (string) paints of its vocabulary, in declaration
- * order — that order is what `spread` walks. A user-ORDERED palette control (the
- * original's 8-colour list) is the natural next step; the vocabulary stands in for it.
+ * Fallback palette for a deal with no `inks`: the SOLID (string) paints of its
+ * vocabulary, in declaration order — that order is what `spread` walks.
  */
 export function paneInksFromVocab(vocab: DealVocab): string[] {
   return dealVocabItems(vocab).map(it => it.paint).filter((p): p is string => typeof p === 'string')
+}
+
+/** The ORDERED palette a Pane deal paints with: its own `inks` when it has at least
+ *  2, else the vocabulary's solids (layers saved before `inks` existed keep looking
+ *  exactly as they did). */
+export function panePalette(params: PaneParams, vocab: DealVocab): string[] {
+  if ((params.inks?.length ?? 0) >= 2) return params.inks!.slice()
+  return paneInksFromVocab(vocab)
 }
