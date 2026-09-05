@@ -9,7 +9,7 @@ import {
 import {
   type TextLayer, type RectLayer, type EllipseLayer, type LocalLayer, type StackItem, type CornerPin, type BrushLayer, type Paint,
   type WiredLayer, type DealLayer,
-  cornerRadii, drawLocalLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, layerMaskRef, localLayerBox, createBrushLayer, createDealLayer,
+  cornerRadii, drawLocalLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, layerMaskRef, localLayerBox, createBrushLayer, newMosaicLayer,
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
 } from '~/composables/useCompositorLayers'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
@@ -630,17 +630,14 @@ function onFillGridWithSections() {
   fillGridWithSections(regions)
 }
 
-// ── The generative deal (grid slice 2) ──────────────────────────────────────
-// ONE self-painting layer that deals every cell of the CURRENT layout grid a fill
-// from a weighted vocabulary — a dense decorative grid as a single layer that
-// BAKES (unlike the editor-only grid overlay). Deep-copies the frame's grid so the
-// deal is self-contained; a grid that's off is dealt as a generated one.
-function onDealGrid() {
-  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
-  if (g.mode === 'off') g.mode = 'generated'
-  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
-  addLocal(createDealLayer({ grid: g, w: 1, h: aspect }))
-}
+// ── Mosaic (the generative deal layer, kind 'deal') ─────────────────────────
+// ONE self-painting layer — a playgrnd-style composition (Tiles / Pane / Modular /
+// Parcel / Mosh, and the Oddgrid / Static shaders) as a single layer that BAKES
+// (unlike the editor-only grid overlay). It is an ELEMENT: added from the toolbar's
+// Shapes menu (addMosaic, below with the other stamps), tuned in the inspector
+// while selected. The frame's Grid section is only the layout guide — it no longer
+// creates or configures mosaics. The layer carries its OWN grid, so the frame grid
+// is never read here.
 
 /** Patch a deal layer's own grid (one history step via setLocal). */
 function patchDealGrid(layer: DealLayer, patch: Partial<typeof layer.grid>) {
@@ -651,23 +648,9 @@ function rerollDeal(layer: DealLayer) {
   patchDealGrid(layer, { gen: { ...layer.grid.gen, seed: Math.floor(Math.random() * 9999) + 1 } })
 }
 
-/** One-click "Pane" — the Pane generator (lib/compositor/pane): its own row-masonry
- *  of flush cells, each a corner-to-corner two-ink ramp (cellFill:'pane'), at the
- *  original's defaults (rows 3 / cells 6 / vary .55 / diag .45 / soft .85 / spread
- *  .55). Configures the selected deal, or — with none selected — creates a fresh deal
- *  filling the frame, in one undoable step. The deal's grid is untouched: Pane
- *  ignores it (only its seed carries the variation). */
-function onPane() {
-  if (selectedLocal.value?.kind === 'deal') {
-    const layer = selectedLocal.value as DealLayer
-    setLocal(layer.id, { cellFill: 'pane', pane: defaultPane() } as Partial<DealLayer>)
-    return
-  }
-  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
-  if (g.mode === 'off') g.mode = 'generated'
-  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
-  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, cellFill: 'pane', pane: defaultPane() }))
-}
+/** Pane — the Pane generator (lib/compositor/pane): its own row-masonry of flush
+ *  cells, each a corner-to-corner two-ink ramp (cellFill:'pane'). The deal's grid is
+ *  untouched: Pane ignores it (only its seed carries the variation). */
 /** Patch a deal's Pane tunables (one history step via setLocal). */
 function patchPane(layer: DealLayer, patch: Partial<PaneParams>) {
   setLocal(layer.id, { pane: { ...(layer.pane ?? defaultPane()), ...patch } } as Partial<DealLayer>)
@@ -684,25 +667,10 @@ const panePreset = computed(() => {
   return panePresetOf((l as DealLayer).pane ?? defaultPane()) ?? ''
 })
 
-/** One-click "Modular" — the Modular generator (lib/compositor/modular): a merged
- *  module grid over a background, each module empty / solid / block field / dot
- *  cluster / line grid / 2-stop ramp, hairlines over the whole grid (cellFill:
- *  'modular'), at the original's defaults (6 columns / unit 4 / merge .45 / the
- *  source type weights / block fill .5 / dot .62 / rules .22 / rule width 1).
- *  Configures the selected deal, or — with none selected — creates a fresh deal
- *  filling the frame, in one undoable step. The deal's grid is untouched: Modular
- *  ignores it (only its seed carries the variation). */
-function onModular() {
-  if (selectedLocal.value?.kind === 'deal') {
-    const layer = selectedLocal.value as DealLayer
-    setLocal(layer.id, { cellFill: 'modular', modular: defaultModular() } as Partial<DealLayer>)
-    return
-  }
-  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
-  if (g.mode === 'off') g.mode = 'generated'
-  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
-  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, cellFill: 'modular', modular: defaultModular() }))
-}
+/** Modular — the Modular generator (lib/compositor/modular): a merged module grid
+ *  over a background, each module empty / solid / block field / dot cluster / line
+ *  grid / 2-stop ramp, hairlines over the whole grid (cellFill:'modular'). The deal's
+ *  grid is untouched: Modular ignores it (only its seed carries the variation). */
 /** Patch a deal's Modular tunables (one history step via setLocal). */
 function patchModular(layer: DealLayer, patch: Partial<ModularParams>) {
   setLocal(layer.id, { modular: { ...(layer.modular ?? defaultModular()), ...patch } } as Partial<DealLayer>)
@@ -729,25 +697,10 @@ const MODULAR_TYPE_LABELS: readonly { type: ModularType; label: string }[] = [
   { type: 'dots', label: 'Dots' }, { type: 'lines', label: 'Lines' }, { type: 'grad', label: 'Gradient' },
 ]
 
-/** One-click "Parcel" — the Parcel generator (lib/compositor/parcel): a coarse
- *  two-tone block field (ground + ink, every cell one or the other) with ragged
- *  hairline survey grids floating on top that darken what they cross (cellFill:
- *  'parcel'), at the original's defaults (16 cells / cover .5 / chunk 1 / 4 survey
- *  grids / multiply / lime ink on grey). Configures the selected deal, or — with
- *  none selected — creates a fresh deal filling the frame, in one undoable step.
- *  The deal's grid is untouched: Parcel ignores it (only its seed carries the
- *  variation). */
-function onParcel() {
-  if (selectedLocal.value?.kind === 'deal') {
-    const layer = selectedLocal.value as DealLayer
-    setLocal(layer.id, { cellFill: 'parcel', parcel: defaultParcel() } as Partial<DealLayer>)
-    return
-  }
-  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
-  if (g.mode === 'off') g.mode = 'generated'
-  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
-  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, cellFill: 'parcel', parcel: defaultParcel() }))
-}
+/** Parcel — the Parcel generator (lib/compositor/parcel): a coarse two-tone block
+ *  field (ground + ink, every cell one or the other) with ragged hairline survey
+ *  grids floating on top that darken what they cross (cellFill:'parcel'). The deal's
+ *  grid is untouched: Parcel ignores it (only its seed carries the variation). */
 /** Patch a deal's Parcel tunables (one history step via setLocal). */
 function patchParcel(layer: DealLayer, patch: Partial<ParcelParams>) {
   setLocal(layer.id, { parcel: { ...(layer.parcel ?? defaultParcel()), ...patch } } as Partial<DealLayer>)
@@ -763,27 +716,12 @@ const parcelPreset = computed(() => {
   if (!l || l.kind !== 'deal') return ''
   return parcelPresetOf((l as DealLayer).parcel ?? defaultParcel()) ?? ''
 })
-/** One-click "Mosh" — the Mosh generator (lib/compositor/mosh): a corrupted
- *  framebuffer — uneven horizontal bands, each a different failure (confetti runs,
- *  torn mosaic blocks, thin smears, full-width scan rows with bright cuts, a
- *  chevron herringbone), every mark a column-quantised filled rect in
- *  full-strength colour-cube inks with dead near-black patches (cellFill:'mosh'),
- *  at the original's defaults (6 bands / 150 cells across / mix .62 / tears .55 /
- *  runs .5 / bright .3 / the pure cube). Configures the selected deal, or — with
- *  none selected — creates a fresh deal filling the frame, in one undoable step.
- *  The deal's grid is untouched: Mosh ignores it (only its seed carries the
- *  variation). */
-function onMosh() {
-  if (selectedLocal.value?.kind === 'deal') {
-    const layer = selectedLocal.value as DealLayer
-    setLocal(layer.id, { cellFill: 'mosh', mosh: defaultMosh() } as Partial<DealLayer>)
-    return
-  }
-  const g = JSON.parse(JSON.stringify(gridConfig.value)) as typeof gridConfig.value
-  if (g.mode === 'off') g.mode = 'generated'
-  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
-  addLocal(createDealLayer({ grid: g, w: 1, h: aspect, cellFill: 'mosh', mosh: defaultMosh() }))
-}
+/** Mosh — the Mosh generator (lib/compositor/mosh): a corrupted framebuffer —
+ *  uneven horizontal bands, each a different failure (confetti runs, torn mosaic
+ *  blocks, thin smears, full-width scan rows with bright cuts, a chevron
+ *  herringbone), every mark a column-quantised filled rect in full-strength
+ *  colour-cube inks with dead near-black patches (cellFill:'mosh'). The deal's grid
+ *  is untouched: Mosh ignores it (only its seed carries the variation). */
 /** Patch a deal's Mosh tunables (one history step via setLocal). */
 function patchMosh(layer: DealLayer, patch: Partial<MoshParams>) {
   setLocal(layer.id, { mosh: { ...(layer.mosh ?? defaultMosh()), ...patch } } as Partial<DealLayer>)
@@ -1715,6 +1653,8 @@ function rowLabel(row: any) {
   // A wired layer's honest default name is its slot — "wired" tells you nothing
   // about WHICH input it is.
   if (l.kind === 'wired') return `Layer ${l.slot + 1}`
+  // A deal layer is the Mosaic element — "deal" is its internal kind, not a name.
+  if (l.kind === 'deal') return 'Mosaic'
   return l.kind === 'text' ? (l.text?.split('\n')[0] || 'Text') : l.kind
 }
 /** The 1-BASED modal slot a row's wired content lives on, or null when the row is
@@ -4631,7 +4571,14 @@ const inspectorShapePickerOpen = ref(false)
 const inspectorShapeAnchor = ref({ x: 0, y: 0 })
 const inspectorShapeButtonRef = ref<HTMLElement | null>(null)
 const SHAPE_ICONS: Record<ToolbarShapeId, Component> = {
-  rect: Square, ellipse: Circle, line: Minus, polygon: Hexagon, star: Star, library: Shapes,
+  rect: Square, ellipse: Circle, line: Minus, polygon: Hexagon, star: Star, mosaic: LayoutGrid, library: Shapes,
+}
+/** Stamp a Mosaic: a frame-filling Modular composition (one deal layer; see
+ *  newMosaicLayer). `h = aspect` because boxes are width-normalized — the same
+ *  expression the old Grid-section create used. Records history + selects via
+ *  addLocal, like every other stamp. */
+function addMosaic() {
+  addLocal(newMosaicLayer(canvasDisplay.h / Math.max(1, canvasDisplay.w)))
 }
 function stampLibraryShape() {
   const s = libraryShape.value
@@ -4642,7 +4589,7 @@ function stampLibraryShape() {
   addLocal(createShapeLayer(s))
 }
 const SHAPE_STAMP: Record<ToolbarShapeId, () => void> = {
-  rect: addRect, ellipse: addEllipse, line: addLine, polygon: addPolygon, star: addStar, library: stampLibraryShape,
+  rect: addRect, ellipse: addEllipse, line: addLine, polygon: addPolygon, star: addStar, mosaic: addMosaic, library: stampLibraryShape,
 }
 /** Anchor the picker above the Shapes cluster; the picker clamps itself to the viewport. */
 function openLibraryPicker() {
@@ -6885,20 +6832,6 @@ onUnmounted(() => {
                the whole self-painting grid. Regularity/merge live in the doc Grid
                section; this deal carries its OWN grid seeded from it. -->
           <template v-if="selectedLocal.kind === 'deal'">
-            <div>
-              <div class="panel-label mb-1.5">Generator</div>
-              <div class="flex flex-wrap gap-1.5">
-                <StudioButton variant="secondary" title="Pane — rows of flush panes, each a two-colour ramp running corner to corner or edge to edge"
-                  @click="onPane()">Pane</StudioButton>
-                <StudioButton variant="secondary" title="Modular — a merged module grid over a background: empty, solid, block fields, dot clusters, line grids and ramps, with hairlines"
-                  @click="onModular()">Modular</StudioButton>
-                <StudioButton variant="secondary" title="Parcel — a coarse two-tone field of chunky ink blocks on a ground, with ragged hairline survey grids floating on top"
-                  @click="onParcel()">Parcel</StudioButton>
-                <StudioButton variant="secondary" title="Mosh — a corrupted signal: stacked bands of glitch, each a different failure, in hard full-strength inks with dead dark patches"
-                  @click="onMosh()">Mosh</StudioButton>
-              </div>
-              <p class="mt-1 text-[10px] text-white/30 leading-snug">One click switches this deal to a generator at its own defaults; your current variation is kept.</p>
-            </div>
             <!-- The vocabulary only shows when something reads it: Solid always,
                  Modular / Pane only while they have no inks of their own. Parcel
                  and Mosh carry their own colours (see dealVocabDrivesLook). -->
@@ -7462,7 +7395,7 @@ onUnmounted(() => {
           <span class="text-sm font-medium">No selection</span>
         </div>
         <!-- Scrolls like every layer-selected panel does — without this, the frame
-             properties (Background → Post-processing → Grid → Deal grid → templates)
+             properties (Background → Post-processing → Grid → templates)
              overflow the window and the lower controls become unreachable. -->
         <div class="p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
           <!-- Canvas background fill (bottom-most; baked into the frame) -->
@@ -7542,19 +7475,6 @@ onUnmounted(() => {
               <StudioSwitch label="Draw section" hint="Drag on the artboard to stamp a rect snapped to the grid"
                 :model-value="drawSectionActive" @update:model-value="(v: boolean) => setDrawSectionActive(v)" />
               <StudioButton variant="secondary" @click="onFillGridWithSections">Fill grid with sections</StudioButton>
-              <StudioButton variant="secondary" @click="onDealGrid">Deal grid</StudioButton>
-              <p class="text-[10px] text-white/30 leading-snug">Deal fills every cell of a dense grid from a palette — one self-painting layer that bakes.</p>
-              <div class="panel-label mt-1 mb-1">Generators</div>
-              <div class="flex flex-wrap gap-1.5">
-                <StudioButton variant="secondary" title="Pane — rows of flush panes, each a two-colour ramp running corner to corner or edge to edge"
-                  @click="onPane()">Pane</StudioButton>
-                <StudioButton variant="secondary" title="Modular — a merged module grid over a background: empty, solid, block fields, dot clusters, line grids and ramps, with hairlines"
-                  @click="onModular()">Modular</StudioButton>
-                <StudioButton variant="secondary" title="Parcel — a coarse two-tone field of chunky ink blocks on a ground, with ragged hairline survey grids floating on top"
-                  @click="onParcel()">Parcel</StudioButton>
-                <StudioButton variant="secondary" title="Mosh — a corrupted signal: stacked bands of glitch, each a different failure, in hard full-strength inks with dead dark patches"
-                  @click="onMosh()">Mosh</StudioButton>
-              </div>
             </div>
           </div>
           <!-- Expressive arrange (a whole group is selected) -->

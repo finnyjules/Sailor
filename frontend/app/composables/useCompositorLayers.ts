@@ -767,6 +767,19 @@ export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
   }
 }
 
+/**
+ * The Mosaic element the toolbar's Shapes menu stamps: ONE deal layer filling the
+ * frame (`w: 1`, `h: aspect` — boxes are width-normalized, so a frame's H/W is the
+ * height that fills it), centred, in the Modular style at its defaults, on a fresh
+ * generated grid of its own. A pure seam so the unit suite can pin the stamped shape
+ * without mounting the modal. `kind` stays 'deal' and the style field stays
+ * `cellFill` (persisted data is untouched; "Mosaic" is the label people see).
+ */
+export function newMosaicLayer(aspect: number): DealLayer {
+  const h = Number.isFinite(aspect) && aspect > 0 ? aspect : 1
+  return createDealLayer({ cellFill: 'modular', w: 1, h, x: 0.5, y: 0.5 })
+}
+
 export function createEllipseLayer(partial: Partial<EllipseLayer> = {}): EllipseLayer {
   return {
     id: newId(), kind: 'ellipse',

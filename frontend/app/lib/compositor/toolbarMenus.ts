@@ -7,7 +7,7 @@
  *  over the editor. Keeping the lists pure lets the unit suite pin the menu
  *  contents and the last-used-face reducer without mounting the modal. */
 
-export type ToolbarShapeId = 'rect' | 'ellipse' | 'line' | 'polygon' | 'star' | 'library'
+export type ToolbarShapeId = 'rect' | 'ellipse' | 'line' | 'polygon' | 'star' | 'mosaic' | 'library'
 
 export interface ToolbarShapeRow {
   id: ToolbarShapeId
@@ -22,6 +22,12 @@ export const TOOLBAR_SHAPES: readonly ToolbarShapeRow[] = [
   { id: 'line', label: 'Line' },
   { id: 'polygon', label: 'Polygon' },
   { id: 'star', label: 'Star' },
+  // A Mosaic is a generative composition ELEMENT (the playgrnd-style ports:
+  // Tiles / Pane / Modular / Parcel / Mosh / Oddgrid / Static) — it is added from
+  // here like any shape and tuned in the inspector; the frame's Grid section is
+  // only the layout guide. Stamps a frame-filling Modular mosaic (see
+  // newMosaicLayer in useCompositorLayers).
+  { id: 'mosaic', label: 'Mosaic' },
   // Opens the shape library picker instead of stamping; the picked shape then
   // becomes the face so repeat stamping stays one click (see CompositorModal).
   { id: 'library', label: 'Shape library…' },
