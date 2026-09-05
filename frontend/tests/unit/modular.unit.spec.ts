@@ -36,6 +36,17 @@ describe('modularRegions (rule A)', () => {
     expect(shapes.has('2x2')).toBe(true); expect(shapes.has('2x1')).toBe(true); expect(shapes.has('1x2')).toBe(true)
     for (const s of shapes) expect(['1x1', '2x2', '2x1', '1x2']).toContain(s)
   })
+  it('merge thresholds keep their order: at merge=1, 2-tall > 2-wide > 2×2 (the .32 / .66 / 1 bands, eroded by free() failures)', () => {
+    // Swapping the .32/.66 thresholds would still produce every shape (so the
+    // shapes-appear test above passes) but would invert these proportions.
+    const counts: Record<string, number> = { '2x2': 0, '2x1': 0, '1x2': 0, '1x1': 0 }
+    let n = 0
+    for (let seed = 1; seed <= 100; seed++) for (const r of modularRegions(P({ merge: 1 }), 8, 6, PAL.length, seed)) { counts[`${r.w}x${r.h}`]!++; n++ }
+    const f = (k: string) => counts[k]! / n
+    expect(f('2x1')).toBeGreaterThan(f('2x2'))
+    expect(f('1x2')).toBeGreaterThan(f('2x1'))
+  })
+
   it('the type distribution over many seeds ≈ the weights; empty is the most common', () => {
     const w = defaultModular().w
     const total = MODULAR_TYPES.reduce((s, t) => s + w[t], 0)
@@ -82,6 +93,20 @@ describe('modularRegions (rule A)', () => {
     expect(a).toEqual(b)
     expect(JSON.stringify(a)).not.toBe(JSON.stringify(c))
   })
+  it('pins the DRAW ORDER from the single stream (k, type, ci, ci2, sub, onBg, corner, angle, phase)', () => {
+    // The order of draws is what shapes the whole composition: reorder `sub`↔`onBg`,
+    // or add/drop a draw, and every later module's type and colours change while the
+    // per-field marginals (and every other test here) stay green. A golden pins it.
+    const first4 = modularRegions(defaultModular(), 6, 4, 8, 7).slice(0, 4)
+      .map(r => [r.x, r.y, r.w, r.h, r.type, r.ci, r.ci2, r.onBg, r.inset, r.corner, r.angle])
+    expect(first4).toEqual([
+      [0, 0, 1, 1, 'empty', 2, 6, true, 2, 2, 1],
+      [1, 0, 1, 2, 'empty', 5, 3, false, 1, 1, 1],
+      [2, 0, 1, 2, 'dots', 5, 7, false, 0, 0, 3],
+      [3, 0, 1, 1, 'grad', 3, 6, false, 0, 1, 2],
+    ])
+  })
+
   it('rows follow the box aspect: gr = max(2, round(gcols · H/W))', () => {
     expect(modularRows(6, 1200, 800)).toBe(4)
     expect(modularRows(6, 1000, 1000)).toBe(6)
@@ -241,6 +266,24 @@ const inside = (px: number, py: number, x0: number, y0: number, x1: number, y1: 
 
 describe('paintModular (rule D, headless)', () => {
   const W = 1200, H = 800
+
+  it('scales every alpha by the INCOMING globalAlpha (the layer opacity) instead of writing absolutes', () => {
+    // The deal's inline render path sets the layer opacity on this ctx before
+    // painting. The source writes `globalAlpha = .85 / rules / 1` absolutely (it
+    // paints at 1), which here would stomp the layer opacity after the first line
+    // grid. Every fill/stroke must carry a0 × its own factor, and a0 must survive.
+    const p = normalizeModular(modularPresetPatch('Riso'))
+    const rec = recorder()
+    rec.ctx.globalAlpha = 0.5
+    paintModular(rec.ctx, p, p.inks, W, H, 7)
+    for (const r of rec.rects) expect(r.alpha).toBeCloseTo(0.5, 6)
+    expect(rec.strokes.length).toBeGreaterThan(0)
+    const hair = rec.strokes[rec.strokes.length - 1]!
+    expect(hair.style).toBe(p.rule)
+    expect(hair.alpha).toBeCloseTo(0.5 * p.rules, 6)
+    for (const s of rec.strokes.slice(0, -1)) expect(s.alpha).toBeCloseTo(0.5 * 0.85, 6)
+    expect(rec.ctx.globalAlpha).toBeCloseTo(0.5, 6)
+  })
 
   it('paints bg first (one full-box fillRect in bg), then per module exactly what its type implies, then the hairlines', () => {
     for (const seed of [7, 23, 101]) {

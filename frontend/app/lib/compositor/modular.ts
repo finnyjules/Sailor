@@ -285,7 +285,7 @@ const FALLBACK_INKS = ['#0e6bff', '#ff6259'] as const
 /** The ORDERED palette a Modular deal paints with: its own `inks` when set, else
  *  the vocabulary's solids in declaration order, else the fallback pair. */
 export function modularPalette(params: ModularParams, vocab: DealVocab): string[] {
-  if (params.inks.length) return params.inks.slice()
+  if (params.inks?.length) return params.inks.slice()
   const solids = dealVocabItems(vocab).map(it => it.paint).filter((p): p is string => typeof p === 'string')
   return solids.length ? solids : [...FALLBACK_INKS]
 }
@@ -302,6 +302,11 @@ export type ModularCtx = Pick<CanvasRenderingContext2D,
 export function paintModular(ctx: ModularCtx, params: ModularParams, palette: readonly string[], boxW: number, boxH: number, seed: number): ModularLayout {
   const p = normalizeModular(params)
   const pal = palette.length ? palette : FALLBACK_INKS
+  // The caller may already have set the LAYER's opacity on this ctx (the deal's
+  // inline render path does). The source paints at alpha 1, so its absolute
+  // `globalAlpha = .85 / rules / 1` writes are harmless there — here they would
+  // stomp the layer opacity mid-composition. Scale every alpha by the incoming one.
+  const a0 = ctx.globalAlpha
   const W = Math.max(1, boxW), H = Math.max(1, boxH)
   const layout = modularLayout(p, W, H, pal.length, seed)
   const { gc, gr, mx, my, regions } = layout
@@ -353,23 +358,23 @@ export function paintModular(ctx: ModularCtx, params: ModularParams, palette: re
     } else if (reg.type === 'lines') {
       // Interior sub-grid rules, crisp on the half-pixel.
       if (!reg.onBg) { ctx.fillStyle = col2; ctx.fillRect(x0, y0, rw, rh) }
-      ctx.strokeStyle = col; ctx.lineWidth = p.ruleW; ctx.globalAlpha = 0.85
+      ctx.strokeStyle = col; ctx.lineWidth = p.ruleW; ctx.globalAlpha = a0 * 0.85
       ctx.beginPath()
       for (let i = 1; i < uw; i++) { const X = ux[i]! + 0.5; ctx.moveTo(X, y0); ctx.lineTo(X, y1) }
       for (let j = 1; j < uh; j++) { const Y = uy[j]! + 0.5; ctx.moveTo(x0, Y); ctx.lineTo(x1, Y) }
       ctx.stroke()
-      ctx.globalAlpha = 1
+      ctx.globalAlpha = a0
     }
     // 'empty': nothing — the background shows.
   })
   // The hairline structure over the WHOLE composition.
   if (p.rules > 0) {
-    ctx.strokeStyle = p.rule; ctx.globalAlpha = p.rules; ctx.lineWidth = p.ruleW
+    ctx.strokeStyle = p.rule; ctx.globalAlpha = a0 * p.rules; ctx.lineWidth = p.ruleW
     ctx.beginPath()
     for (let i = 1; i < gc; i++) { const X = mx[i]! + 0.5; ctx.moveTo(X, 0); ctx.lineTo(X, H) }
     for (let j = 1; j < gr; j++) { const Y = my[j]! + 0.5; ctx.moveTo(0, Y); ctx.lineTo(W, Y) }
     ctx.stroke()
-    ctx.globalAlpha = 1
+    ctx.globalAlpha = a0
   }
   return layout
 }
