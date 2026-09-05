@@ -2821,7 +2821,6 @@ const shaderFieldsFrozen = ref(0)
 function renderStack(wallT?: number, live = false) {
   const cv = overlayCanvas.value
   if (!cv) return
-  const __probeS = performance.now()   // TEMP open-cost probe
   const W = canvasDisplay.w, H = canvasDisplay.h
   const deviceDpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
   // Cap the backing store while the animation loop drives this (`live`): compositing the
@@ -2880,14 +2879,6 @@ function renderStack(wallT?: number, live = false) {
       clockT, motionArg,
       wiredTreatments.value, background.value, localGroups.value, postEffects.value))
   shaderFieldsFrozen.value = frozenCount
-  // TEMP open-cost probe: count calls + per-call time, non-live only (skip the animation loop).
-  if (!live) {
-    const w = window as any
-    if (!w.__compRS) w.__compRS = { n: 0, ms: 0, t0: __probeS }
-    const d = performance.now() - __probeS
-    w.__compRS.n++; w.__compRS.ms += d
-    console.log(`[comp-open] renderStack #${w.__compRS.n}: ${d.toFixed(0)}ms · items=${items.length} · cumulative ${w.__compRS.ms.toFixed(0)}ms over ${(performance.now() - w.__compRS.t0).toFixed(0)}ms wall`)
-  }
 }
 
 // Depth maps arrive asynchronously (see lib/compositor/depthRegistry). paintLayer reads

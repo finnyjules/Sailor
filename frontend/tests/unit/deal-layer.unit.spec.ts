@@ -147,6 +147,10 @@ describe('deal layer render (headless)', () => {
   // cells land (box centering, corner-origin), not just how many there are.
   const mainDraws: Array<{ x: number; y: number; w: number; h: number }> = []
   const mainTranslates: Array<[number, number]> = []
+  // Clips on the MAIN ctx: the rect(s) added to the path since the last beginPath,
+  // captured at clip() time — so a test can assert the deal clips to exactly its box.
+  const mainClips: Array<Array<{ x: number; y: number; w: number; h: number }>> = []
+  let mainPathRects: Array<{ x: number; y: number; w: number; h: number }> = []
   function recordingCtx(name: string) {
     const g = { addColorStop() {} }
     return {
@@ -155,8 +159,9 @@ describe('deal layer render (headless)', () => {
       fillStyle: '', strokeStyle: '', lineWidth: 1, lineCap: '', lineJoin: '',
       getTransform: () => ({}), setTransform() {}, save() {}, restore() {},
       translate(dx = 0, dy = 0) { if (name === 'main') mainTranslates.push([dx, dy]) },
-      rotate() {}, scale() {}, clip() {},
-      beginPath() {}, moveTo() {}, lineTo() {}, arc() {}, roundRect() {}, ellipse() {}, rect() {}, closePath() {}, setLineDash() {},
+      rotate() {}, scale() {}, clip() { if (name === 'main') mainClips.push([...mainPathRects]) },
+      beginPath() { if (name === 'main') mainPathRects = [] }, moveTo() {}, lineTo() {}, arc() {}, roundRect() {}, ellipse() {},
+      rect(x = 0, y = 0, w = 0, h = 0) { if (name === 'main') mainPathRects.push({ x, y, w, h }) }, closePath() {}, setLineDash() {},
       fill() {}, stroke() {}, fillRect() {}, clearRect() {},
       putImageData() {}, createImageData(w = 1, h = 1) { return { data: new Uint8ClampedArray(Math.max(1, w * h) * 4), width: w, height: h } },
       getImageData(_x = 0, _y = 0, w = 1, h = 1) { return { data: new Uint8ClampedArray(Math.max(1, w * h) * 4), width: w, height: h } },
@@ -170,7 +175,7 @@ describe('deal layer render (headless)', () => {
     constructor(w: number, h: number) { this.width = w; this.height = h; this.data = new Uint8ClampedArray(Math.max(1, w * h) * 4) }
   }
   beforeEach(() => {
-    drawImages.length = 0; mainDraws.length = 0; mainTranslates.length = 0; seq = 0
+    drawImages.length = 0; mainDraws.length = 0; mainTranslates.length = 0; mainClips.length = 0; mainPathRects = []; seq = 0
     vi.stubGlobal('ImageData', FakeImageData)
     vi.stubGlobal('document', { createElement: () => { const c: any = { width: 0, height: 0 }; c.getContext = () => recordingCtx(`off-${++seq}`); return c } })
   })
@@ -238,6 +243,19 @@ describe('deal layer render (headless)', () => {
     const minY = Math.min(...mainDraws.map(d => d.y)), maxB = Math.max(...mainDraws.map(d => d.y + d.h))
     expect(minX).toBeLessThan(1); expect(maxR).toBeGreaterThan(boxW - 1)
     expect(minY).toBeLessThan(1); expect(maxB).toBeGreaterThan(boxH - 1)
+  })
+
+  it('clips every mode to its box (the ported generators rely on a canvas edge the box lacks)', async () => {
+    // Parcel strokes edge-touching hairlines at W+.5 and Mosh/Modular oversize rects
+    // by +1 — on the tool's own canvas the edge clips them; a deal box has none. So
+    // the deal branch clips ONCE to exactly (0,0,boxW,boxH) in box space, for every
+    // cellFill. layer.w=0.5, h=0.25, W=400 → boxW=200, boxH=100 (smaller than the frame).
+    for (const cellFill of ['pane', 'parcel', 'modular', 'mosh', 'solid'] as const) {
+      mainClips.length = 0
+      await drawDeal(dealLayer({ w: 0.5, h: 0.25, cellFill }), 400, 400)
+      expect(mainClips.length, `${cellFill}: one clip`).toBe(1)
+      expect(mainClips[0], `${cellFill}: the clip path is the box`).toEqual([{ x: 0, y: 0, w: 200, h: 100 }])
+    }
   })
 
   it('never renders fully blank at a low but non-zero density (force-kept cell)', async () => {

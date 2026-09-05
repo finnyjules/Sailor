@@ -2076,6 +2076,17 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // so this branch only lays down pixels.
     const boxW = Math.max(1, layer.w * W), boxH = Math.max(1, layer.h * W)
     const seed = layer.grid.gen.seed
+    ctx.save()
+    ctx.translate(-boxW / 2, -boxH / 2)
+    // Clip EVERY mode to the box. The ported generators rely on the canvas edge to
+    // clip them (Parcel strokes edge-touching hairlines at W+.5; Mosh / Modular rects
+    // are oversized by +1 so neighbours never show a seam) — a deal box has no edge,
+    // so without this they spill 1 px past the box whenever the deal is smaller than
+    // the frame. The solid path's tiles are drawn inside the box anyway; the clip
+    // is a no-op for them. Undone by the restore() below.
+    ctx.beginPath()
+    ctx.rect(0, 0, boxW, boxH)
+    ctx.clip()
     if (layer.cellFill === 'pane') {
       // Pane paints its OWN masonry — NOT the shared grid: every cell is flush and
       // filled, so regularity / merge / density / inset don't apply here. Each cell
@@ -2084,8 +2095,6 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // on the cell rect keeps the endpoints on the cell's corners, which is the look).
       const pane = layer.pane ?? defaultPane()
       const palette = paneInksFromVocab(layer.vocab)
-      ctx.save()
-      ctx.translate(-boxW / 2, -boxH / 2)
       for (const r of paneRegions(pane, boxW, boxH, seed)) {
         const g = paneCellGradient(pane, palette, seed, r.i, r.j)
         const grad = ctx.createLinearGradient(r.x + g.x0 * r.w, r.y + g.y0 * r.h, r.x + g.x1 * r.w, r.y + g.y1 * r.h)
@@ -2093,36 +2102,23 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
         ctx.fillStyle = grad
         ctx.fillRect(r.x, r.y, r.w, r.h)
       }
-      ctx.restore()
-      return
-    }
-    if (layer.cellFill === 'modular') {
+    } else if (layer.cellFill === 'modular') {
       // Modular paints its OWN module grid — NOT the shared grid: a background, then
       // every module by its type (empty / solid / blocks / dots / lines / grad) and
       // the hairlines over the whole box, straight on the real ctx (fillRect /
       // createLinearGradient / arc / stroke). Regularity / merge / density / inset /
       // force-keep don't apply; only the grid's seed carries the variation.
       const modular = layer.modular ?? defaultModular()
-      ctx.save()
-      ctx.translate(-boxW / 2, -boxH / 2)
       paintModular(ctx, modular, modularPalette(modular, layer.vocab), boxW, boxH, seed)
-      ctx.restore()
-      return
-    }
-    if (layer.cellFill === 'parcel') {
+    } else if (layer.cellFill === 'parcel') {
       // Parcel paints its OWN coarse grid — NOT the shared grid: ground over the
       // box, cell-snapped ink runs, then the hairline survey lattices stroked with
       // a multiply composite (when blend says so) straight on the real ctx, and the
       // composite op put back. Regularity / merge / density / inset / force-keep
       // don't apply; only the grid's seed carries the variation.
       const parcel = layer.parcel ?? defaultParcel()
-      ctx.save()
-      ctx.translate(-boxW / 2, -boxH / 2)
       paintParcel(ctx, parcel, boxW, boxH, seed)
-      ctx.restore()
-      return
-    }
-    if (layer.cellFill === 'mosh') {
+    } else if (layer.cellFill === 'mosh') {
       // Mosh paints its OWN bands — NOT the shared grid: uneven horizontal bands
       // of column-quantised filled rects, straight on the real ctx, fillStyle +
       // fillRect and nothing else (no alpha / composite writes — the layer's own
@@ -2130,35 +2126,29 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // density / inset / force-keep don't apply; only the grid's seed carries the
       // variation.
       const mosh = layer.mosh ?? defaultMosh()
-      ctx.save()
-      ctx.translate(-boxW / 2, -boxH / 2)
       paintMosh(ctx, mosh, mosh.inks, boxW, boxH, seed)
-      ctx.restore()
-      return
-    }
-    // Resolve cells FLUSH (gutter 0): the deal's only cell gap is `cellInset`, applied
-    // per cell below. The grid's own gutter would add a second, hidden gap so cells are
-    // never flush even at cellInset 0 — which is not what the inset control implies.
-    const { regions } = resolveGrid({ ...layer.grid, gutter: 0 }, boxW, boxH)
-    if (!regions.length) return
-    const density = layer.density ?? 1
-    const inset = Math.max(0, Math.min(0.4, layer.cellInset ?? 0))
-    // Force-keep one cell when density > 0 so a sparse deal never renders fully
-    // blank (an invisible layer the user just added). Explicit density 0 stays empty.
-    const forceIdx = density > 0 ? forceKeptCell(seed, regions.length) : -1
-    ctx.save()
-    ctx.translate(-boxW / 2, -boxH / 2)
-    for (let i = 0; i < regions.length; i++) {
-      if (i !== forceIdx && !keptCell(seed, i, density)) continue
-      const r = regions[i]!
-      const ins = inset * Math.min(r.w, r.h)
-      const cw = r.w - ins * 2, ch = r.h - ins * 2
-      if (cw <= 0.5 || ch <= 0.5) continue
-      // paintTileBox paints ANY Paint (solid / gradient / pattern Fill) at corner
-      // origin; a shader-typed Fill unwraps to its input there, so no field request
-      // is needed (see layerPaints('deal')). Drawn into the cell's own sub-box.
-      const tile = paintTileBox(pickDealPaint(layer.vocab, seed, i), cw, ch)
-      ctx.drawImage(tile, r.x + ins, r.y + ins, cw, ch)
+    } else {
+      // Resolve cells FLUSH (gutter 0): the deal's only cell gap is `cellInset`, applied
+      // per cell below. The grid's own gutter would add a second, hidden gap so cells are
+      // never flush even at cellInset 0 — which is not what the inset control implies.
+      const { regions } = resolveGrid({ ...layer.grid, gutter: 0 }, boxW, boxH)
+      const density = layer.density ?? 1
+      const inset = Math.max(0, Math.min(0.4, layer.cellInset ?? 0))
+      // Force-keep one cell when density > 0 so a sparse deal never renders fully
+      // blank (an invisible layer the user just added). Explicit density 0 stays empty.
+      const forceIdx = density > 0 ? forceKeptCell(seed, regions.length) : -1
+      for (let i = 0; i < regions.length; i++) {
+        if (i !== forceIdx && !keptCell(seed, i, density)) continue
+        const r = regions[i]!
+        const ins = inset * Math.min(r.w, r.h)
+        const cw = r.w - ins * 2, ch = r.h - ins * 2
+        if (cw <= 0.5 || ch <= 0.5) continue
+        // paintTileBox paints ANY Paint (solid / gradient / pattern Fill) at corner
+        // origin; a shader-typed Fill unwraps to its input there, so no field request
+        // is needed (see layerPaints('deal')). Drawn into the cell's own sub-box.
+        const tile = paintTileBox(pickDealPaint(layer.vocab, seed, i), cw, ch)
+        ctx.drawImage(tile, r.x + ins, r.y + ins, cw, ch)
+      }
     }
     ctx.restore()
   }
