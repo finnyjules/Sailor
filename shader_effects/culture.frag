@@ -21,9 +21,10 @@ layout(location = 0) out vec4 fragColor0;
 //
 //  1. ONE field, bumps SUMMED, profile (1-d^2)^2, nothing outside d<1   [ref 87-94]
 //       -> the cell loop in main(), `field += t * t`
-//  2. `fuse` scales each cell's radius and leaves its centre where it   [ref 68-74]
-//     was, so winding it up grows blobs into their neighbours rather
-//     than re-scattering the plate
+//  2. `fuse` is a radius multiplier only: the seeded centres are fixed,   [ref 68-74]
+//     and a bigger radius means more of the summed bumps overlap. That is
+//     why the dial reads as "how joined-up the colonies are" while the
+//     layout of the plate stays put.
 //       -> the (0.75 + fuse*0.8) factor in `baseR`; positions never see fuse
 //  3. the radius follows sqrt(AREA) * 0.87 — area, not width — so       [ref 71-74]
 //     reshaping the frame keeps roughly the coverage it had, instead of
