@@ -15,6 +15,7 @@ import { groupIntoSections } from '~/lib/studio/sections'
 import { setByPath } from '~/lib/studio/path'
 import { POST_SECTIONS } from '~/lib/studio/post/controls'
 import { SCENE_CONTROLS, type SceneControl } from '~/lib/scene3d/controls'
+import { LOOK_LIBRARY } from '~/lib/scene3d/lighting'
 import {
   createDecal, createGlbObject, createLight, createPrimitive, defaultDoc,
   LIGHTING_PRESETS, MATERIAL_TYPES, PRIMITIVE_KINDS,
@@ -177,10 +178,17 @@ const ROW: Record<string, Row> = {
 
   // Camera / Lighting / Background
   'camera.fov': { label: 'FOV', kind: 'slider', min: 15, max: 100, step: 1, hint: 'Camera field of view — how wide the lens sees' },
-  'lighting.preset': { label: 'Preset', kind: 'select', options: LIGHTING_PRESETS },
+  // Simple-lighting layer: Look leads, then the feel dials, then the Advanced toggle.
+  'lighting.look': { label: 'Look', kind: 'select', options: LOOK_LIBRARY.map((l) => l.id) },
+  'lighting.softness': { label: 'Softness', kind: 'slider', min: 0, max: 1, step: 0.01 },
+  'lighting.warmth': { label: 'Warmth', kind: 'slider', min: 0, max: 1, step: 0.01 },
+  'lighting.brightness': { label: 'Brightness', kind: 'slider', min: 0.25, max: 3, step: 0.05 },
+  'lighting.advanced': { label: 'Advanced lighting', kind: 'switch', hint: 'Show the raw shadow preset, environment, sun intensity, and ambient controls' },
+  // Raw rows behind Advanced. 'Shadow preset' (not 'Preset') so it never reads as a second Look.
+  'lighting.preset': { label: 'Shadow preset', kind: 'select', options: LIGHTING_PRESETS },
   'lighting.environment': { label: 'Environment', kind: 'select', options: ENV_OPTIONS },
-  'lighting.sunAzimuth': { label: 'Sun azimuth', kind: 'slider', min: 0, max: 360, step: 1, hint: 'Compass direction the sunlight comes from' },
-  'lighting.sunElevation': { label: 'Sun elevation', kind: 'slider', min: 5, max: 90, step: 1, hint: 'How high the sun sits above the horizon' },
+  'lighting.sunAzimuth': { label: 'Light direction', kind: 'slider', min: 0, max: 360, step: 1, hint: 'Compass direction the sunlight comes from' },
+  'lighting.sunElevation': { label: 'Light height', kind: 'slider', min: 5, max: 90, step: 1, hint: 'How high the sun sits above the horizon' },
   'lighting.sunIntensity': { label: 'Sun intensity', kind: 'slider', min: 0, max: 3, step: 0.05, hint: 'How bright the main sunlight is' },
   'lighting.ambient': { label: 'Ambient', kind: 'slider', min: 0, max: 2, step: 0.05, hint: 'Soft fill light that lifts the shadows' },
   showFloor: { label: 'Floor', kind: 'switch' },
@@ -346,7 +354,9 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
 
 const DOC_SCENARIO: Record<string, readonly string[]> = {
   Camera: ['camera.fov', 'ui.camera.output'],
-  Lighting: ['lighting.preset', 'lighting.environment', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.sunIntensity', 'lighting.ambient'],
+  // Default doc has `advanced: false`, so only the simple layer draws: Look, direction,
+  // the three feel dials, and the Advanced toggle. The four raw rows are `when`-gated off.
+  Lighting: ['lighting.look', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.softness', 'lighting.warmth', 'lighting.brightness', 'lighting.advanced'],
   Background: ['showFloor', 'ui.background.transparent', 'ui.background.color'],
 }
 
@@ -1302,6 +1312,8 @@ describe('Scene3D panel parity — reading values', () => {
 
   it('the Environment row reads and offers the SHORT labels the segmented control used', () => {
     const doc = defaultDoc()
+    // Environment is a raw row behind the Advanced toggle now; turn it on so the row draws.
+    doc.lighting.advanced = true
     doc.lighting.environment = 'darkStrips'
     expect(readSceneControl(doc, null, 'lighting.environment')).toBe('dark')
     const row = byKey(doc, null).get('lighting.environment') as unknown as { options: string[] }

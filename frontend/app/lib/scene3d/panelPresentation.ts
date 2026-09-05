@@ -605,9 +605,15 @@ const DOC_CARDS: Record<string, readonly string[]> = {
     'object.scale.0', 'object.scale.1', 'object.scale.2',
   ],
   Camera: ['camera.fov', 'ui.camera.output'],
+  // Simple-lighting hierarchy: the Look drives everything so it leads; then where the
+  // light comes from; then the three feel dials; then the Advanced toggle, followed by
+  // the raw rows it reveals (they carry a `when` gate, so they only draw when it's on).
   Lighting: [
-    'lighting.preset', 'lighting.environment',
-    'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.sunIntensity', 'lighting.ambient',
+    'lighting.look',
+    'lighting.sunAzimuth', 'lighting.sunElevation',
+    'lighting.softness', 'lighting.warmth', 'lighting.brightness',
+    'lighting.advanced',
+    'lighting.preset', 'lighting.environment', 'lighting.sunIntensity', 'lighting.ambient',
   ],
   Background: ['showFloor', 'ui.background.transparent', 'ui.background.color'],
 }
@@ -711,7 +717,9 @@ const OVERRIDE: Record<string, RowPatch> = {
   'object.material.screen.gap': { label: 'Gaps', hint: null },
   'object.material.screen.ink': { label: 'Ink', hint: null },
   'camera.fov': { label: 'FOV' },
-  'lighting.preset': { label: 'Preset' },
+  // 'Shadow preset', not 'Preset': it sits beside the Look select and a bare 'Preset'
+  // read as a second, competing mood picker. It only tunes the shadow/env-intensity bucket.
+  'lighting.preset': { label: 'Shadow preset' },
   'lighting.environment': { label: 'Environment', options: [...ENV_OPTIONS], default: 'room' },
   showFloor: { hint: null },
   // Degrees, and no 'Radians' tooltip: the row has ALWAYS been edited in degrees, so the
