@@ -15,6 +15,7 @@ import {
 import { layerPaints, createDealLayer, type DealLayer } from '~/composables/useCompositorLayers'
 import { EFFECT_LOOKS } from '~/lib/shaderstudio/presets'
 import { defaultCarve } from '~/lib/compositor/carve'
+import { defaultTotem } from '~/lib/compositor/totem'
 import { applyCompositorCommand, describeCompositor, type CompositorState } from '~/lib/agent/surfaces/compositor'
 
 describe('Mosaic in the Shapes menu', () => {
@@ -57,8 +58,8 @@ describe('newMosaicLayer — what the stamp creates', () => {
 // ── Style ↔ cellFill: one table for the inspector, the agent and the specs ──────
 describe('Mosaic styles', () => {
   it('the Style control offers the styles in table order, plain words', () => {
-    expect(MOSAIC_STYLE_LABELS).toEqual(['Tiles', 'Pane', 'Modular', 'Parcel', 'Mosh', 'Carve', 'Oddgrid', 'Static'])
-    expect(MOSAIC_STYLES.map(r => r.style)).toEqual(['tiles', 'pane', 'modular', 'parcel', 'mosh', 'carve', 'oddgrid', 'static'])
+    expect(MOSAIC_STYLE_LABELS).toEqual(['Tiles', 'Pane', 'Modular', 'Parcel', 'Mosh', 'Carve', 'Totem', 'Oddgrid', 'Static'])
+    expect(MOSAIC_STYLES.map(r => r.style)).toEqual(['tiles', 'pane', 'modular', 'parcel', 'mosh', 'carve', 'totem', 'oddgrid', 'static'])
   })
   it('maps every style onto its cellFill and back (tiles is the internal "solid")', () => {
     expect(cellFillOfStyle('tiles')).toBe('solid')
@@ -156,6 +157,13 @@ describe('Mosaic shader styles (Oddgrid / Static)', () => {
     // Params already on the layer are kept, not reset.
     const tuned = { ...defaultCarve(), cuts: 3 }
     expect(mosaicStylePatch({ ...l, carve: tuned }, 'carve').carve).toBe(tuned)
+    // Same contract for Totem, the other canvas style with dials of its own.
+    const toTotem = mosaicStylePatch(l, 'totem')
+    expect(toTotem.cellFill).toBe('totem')
+    expect(toTotem.totem).toEqual(defaultTotem())
+    expect(toTotem).not.toHaveProperty('shader')
+    const tunedTotem = { ...defaultTotem(), regions: 5 }
+    expect(mosaicStylePatch({ ...l, totem: tunedTotem }, 'totem').totem).toBe(tunedTotem)
   })
   it('switching to oddgrid seeds a ShaderSpec for that effect at the layer seed, still, frame-anchored, first Look', () => {
     const l = mosaic()
@@ -201,7 +209,7 @@ describe('Mosaic shader styles (Oddgrid / Static)', () => {
     expect(toPane).not.toHaveProperty('shader')
   })
   it('layerPaints returns exactly the shader Fill for the shader styles and nothing for the others', () => {
-    for (const fill of ['solid', 'pane', 'modular', 'parcel', 'mosh', 'carve'] as const) {
+    for (const fill of ['solid', 'pane', 'modular', 'parcel', 'mosh', 'carve', 'totem'] as const) {
       expect(layerPaints(mosaic({ cellFill: fill })), fill).toEqual([])
     }
     for (const fill of ['oddgrid', 'static'] as const) {

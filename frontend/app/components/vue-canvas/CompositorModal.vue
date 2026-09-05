@@ -22,6 +22,7 @@ import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatc
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
 import { defaultMosh, MOSH_LIMITS, MOSH_PRESET_NAMES, moshPresetPatch, moshPresetOf, type MoshParams, type MoshPresetName } from '~/lib/compositor/mosh'
 import { defaultCarve, CARVE_LIMITS, CARVE_PRESET_NAMES, carvePresetPatch, carvePresetOf, type CarveParams, type CarvePresetName } from '~/lib/compositor/carve'
+import { defaultTotem, normalizeTotem, TOTEM_LIMITS, TOTEM_PRESET_NAMES, totemPresetPatch, totemPresetOf, totemInkPatch, type TotemParams, type TotemPresetName } from '~/lib/compositor/totem'
 import {
   SCATTER_STYLE_LABELS, scatterStyleRow, scatterLabelOf, scatterStyleOfLabel, scatterParams,
   scatterStylePatch, scatterSeedPatch, freshScatterSeed, DEFAULT_SCATTER_SEED,
@@ -809,6 +810,36 @@ const carvePreset = computed(() => {
   const l = selectedLocal.value
   if (!l || l.kind !== 'deal') return ''
   return carvePresetOf((l as DealLayer).carve ?? defaultCarve()) ?? ''
+})
+/** Totem — the Totem generator (lib/compositor/totem): a framed screenprint plate on
+ *  a speckled mat, the left half carved into blocks of two-colour cell rules and
+ *  folded onto the right, with a nested emblem at the centre (cellFill:'totem'). The
+ *  deal's grid is untouched: only its seed carries the variation. */
+/** Patch a deal's Totem tunables (one history step via setLocal). */
+function patchTotem(layer: DealLayer, patch: Partial<TotemParams>) {
+  setLocal(layer.id, { totem: { ...(layer.totem ?? defaultTotem()), ...patch } } as Partial<DealLayer>)
+}
+/** One swatch of the Totem's ordered row, changed by hand (see totemInkPatch). */
+function patchTotemInk(layer: DealLayer, index: number, hex: string) {
+  const patch = totemInkPatch(layer.totem ?? defaultTotem(), index, hex)
+  if (patch) patchTotem(layer, patch)
+}
+/** The ordered row the selected Totem is printing with. */
+const totemInks = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return [] as string[]
+  return normalizeTotem((l as DealLayer).totem ?? defaultTotem()).inks
+})
+/** Apply a named palette preset (the 5 ordered inks) to a Totem deal. */
+function applyTotemPreset(layer: DealLayer, name: string) {
+  if (!(TOTEM_PRESET_NAMES as string[]).includes(name)) return
+  patchTotem(layer, totemPresetPatch(name as TotemPresetName))
+}
+/** Which preset the selected Totem deal currently matches ('' when custom). */
+const totemPreset = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return ''
+  return totemPresetOf(normalizeTotem((l as DealLayer).totem ?? defaultTotem())) ?? ''
 })
 /** The Mosaic's Style option currently showing (the style table lives in
  *  lib/compositor/mosaic — one vocabulary for the inspector, the agent and the specs). */
@@ -7121,6 +7152,51 @@ onUnmounted(() => {
                 @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { gridDetail: v })" />
               <StudioSelect label="Palette" :options="CARVE_PRESET_NAMES as any"
                 :model-value="carvePreset" @update:model-value="(v: any) => applyCarvePreset(selectedLocal as DealLayer, v)" />
+            </div>
+            <!-- Totem lays out its own framed plate, so the grid controls (density /
+                 inset / regularity / merge) have nothing to say about it. -->
+            <div v-else-if="(selectedLocal as any).cellFill === 'totem'" class="mt-2 flex flex-col gap-1.5">
+              <StudioSlider label="Border" :min="TOTEM_LIMITS.border[0]" :max="TOTEM_LIMITS.border[1]" :step="0.005" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).border"
+                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { border: v })" />
+              <StudioSlider label="Speckle" :min="TOTEM_LIMITS.mat[0]" :max="TOTEM_LIMITS.mat[1]" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).mat"
+                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { mat: v })" />
+              <StudioSlider label="Speckle size" :min="TOTEM_LIMITS.matGrain[0]" :max="TOTEM_LIMITS.matGrain[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).matGrain"
+                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { matGrain: Math.round(v) })" />
+              <div class="panel-label mt-1">Plate</div>
+              <StudioSlider label="Inset" :min="TOTEM_LIMITS.keyline[0]" :max="TOTEM_LIMITS.keyline[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).keyline"
+                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { keyline: Math.round(v) })" />
+              <StudioSlider label="Blocks" :min="TOTEM_LIMITS.regions[0]" :max="TOTEM_LIMITS.regions[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).regions"
+                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { regions: Math.round(v) })" />
+              <StudioSlider label="Detail" :min="TOTEM_LIMITS.grain[0]" :max="TOTEM_LIMITS.grain[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).grain"
+                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { grain: Math.round(v) })" />
+              <StudioSlider label="Mirror" :min="TOTEM_LIMITS.mirror[0]" :max="TOTEM_LIMITS.mirror[1]" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).mirror"
+                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { mirror: v })" />
+              <StudioSlider label="Variety" :min="TOTEM_LIMITS.variety[0]" :max="TOTEM_LIMITS.variety[1]" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).variety"
+                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { variety: v })" />
+              <div class="panel-label mt-1">Centre</div>
+              <StudioSlider label="Size" :min="TOTEM_LIMITS.core[0]" :max="TOTEM_LIMITS.core[1]" :step="0.01" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).core"
+                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { core: v })" />
+              <StudioSlider label="Rings" :min="TOTEM_LIMITS.coreRings[0]" :max="TOTEM_LIMITS.coreRings[1]" :step="1" :bindable="false"
+                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).coreRings"
+                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { coreRings: Math.round(v) })" />
+              <!-- The five inks, left to right as the picture reads them: the order is
+                   what hands out the jobs, so editing one leaves the rest where they are. -->
+              <div class="panel-label mt-1">Inks</div>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <StudioColor v-for="(ink, i) in totemInks" :key="i" :model-value="ink"
+                  @update:model-value="(v: string) => patchTotemInk(selectedLocal as DealLayer, i, v)" />
+              </div>
+              <StudioSelect label="Palette" :options="TOTEM_PRESET_NAMES as any"
+                :model-value="totemPreset" @update:model-value="(v: any) => applyTotemPreset(selectedLocal as DealLayer, v)" />
             </div>
             <!-- Pane has its OWN layout (row masonry, every cell flush and filled), so the
                  grid controls (density / inset / regularity / merge) don't apply to it. -->

@@ -36,7 +36,9 @@ describe('deal mode precedence — one rule for create and reconfigure', () => {
     expect(impliedDealFill({ mosh: {}, modular: {} })).toBe('modular')
     expect(impliedDealFill({ mosh: {} })).toBe('mosh')
     expect(impliedDealFill({ carve: {} })).toBe('carve')
-    expect(impliedDealFill({ carve: {}, mosh: {} })).toBe('mosh')   // carve is last in the order
+    expect(impliedDealFill({ carve: {}, mosh: {} })).toBe('mosh')   // carve outranked by mosh
+    expect(impliedDealFill({ totem: {} })).toBe('totem')
+    expect(impliedDealFill({ totem: {}, carve: {} })).toBe('carve') // totem is last in the order
     expect(impliedDealFill({})).toBeNull()
   })
   it('impliedDealFill: a lone palettePreset implies the look whose table names it (any case)', () => {
@@ -45,6 +47,7 @@ describe('deal mode precedence — one rule for create and reconfigure', () => {
     expect(impliedDealFill({ palettePreset: 'Print cube' })).toBe('mosh')
     expect(impliedDealFill({ palettePreset: 'CANDY' })).toBe('pane')
     expect(impliedDealFill({ palettePreset: 'broadsheet' })).toBe('carve')
+    expect(impliedDealFill({ palettePreset: 'CARNIVAL' })).toBe('totem')
     expect(impliedDealFill({ palettePreset: 'Nope' })).toBeNull()
     // A tunables object outranks the preset's table.
     expect(impliedDealFill({ mosh: {}, palettePreset: 'Riso' })).toBe('mosh')
@@ -70,7 +73,7 @@ describe('deal mode precedence — one rule for create and reconfigure', () => {
     expect(layerOf(r).modular.gcols).toBe(9)
   })
   it('a single mode arg implies that mode on both paths', () => {
-    for (const look of ['pane', 'modular', 'parcel', 'mosh', 'carve'] as const) {
+    for (const look of ['pane', 'modular', 'parcel', 'mosh', 'carve', 'totem'] as const) {
       expect(create({ [look]: {} }).layer.cellFill, `create ${look}`).toBe(look)
       const s = create({ cellFill: look === 'pane' ? 'mosh' : 'pane' }).state
       expect(layerOf(reconfigure(s, { [look]: {} })).cellFill, `reconfigure ${look}`).toBe(look)
@@ -106,7 +109,7 @@ describe('describeCompositor exposes a deal', () => {
     const { state } = create({ style: 'tiles', vocab: 'cool' })
     const cur = describeCompositor(state).objects.find(x => x.id === 'dd')!.current as Record<string, any>
     expect(cur).toMatchObject({ style: 'tiles', vocab: 'cool' })
-    for (const k of ['pane', 'modular', 'parcel', 'mosh', 'carve']) expect(cur).not.toHaveProperty(k)
+    for (const k of ['pane', 'modular', 'parcel', 'mosh', 'carve', 'totem']) expect(cur).not.toHaveProperty(k)
   })
   it('a deal saved without cellFill reads as tiles; custom / vocab palettes are named as such', () => {
     const s = create({ cellFill: 'modular' }).state
@@ -150,7 +153,7 @@ describe('an agent-created deal fills the frame', () => {
     expect(hint).toContain('fills the whole frame')
     expect(hint).toContain('default style modular')
     expect(hint).toContain('cellFill is accepted as an alias of style')
-    for (const w of ['"tiles"', '"pane"', '"modular"', '"parcel"', '"mosh"', '"carve"']) expect(hint).toContain(w)
+    for (const w of ['"tiles"', '"pane"', '"modular"', '"parcel"', '"mosh"', '"carve"', '"totem"']) expect(hint).toContain(w)
   })
 })
 
@@ -204,6 +207,7 @@ describe('the vocab Palette control only shows when the vocab is read', () => {
     expect(dealVocabDrivesLook({ cellFill: 'parcel' })).toBe(false)
     expect(dealVocabDrivesLook({ cellFill: 'mosh' })).toBe(false)
     expect(dealVocabDrivesLook({ cellFill: 'carve' })).toBe(false)   // carve ships its own six inks
+    expect(dealVocabDrivesLook({ cellFill: 'totem' })).toBe(false)   // totem ships its own five
     expect(dealVocabDrivesLook({ cellFill: 'pane', pane: defaultPane() })).toBe(false) // ships 8 inks
     expect(dealVocabDrivesLook({ cellFill: 'pane', pane: { ...defaultPane(), inks: [] } })).toBe(true)
     expect(dealVocabDrivesLook({ cellFill: 'pane', pane: { ...defaultPane(), inks: ['#111111'] } })).toBe(true)

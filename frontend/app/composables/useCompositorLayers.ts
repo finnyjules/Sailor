@@ -64,6 +64,7 @@ import { paintModular, modularPalette, defaultModular, type ModularParams } from
 import { paintParcel, defaultParcel, type ParcelParams } from '~/lib/compositor/parcel'
 import { paintMosh, defaultMosh, type MoshParams } from '~/lib/compositor/mosh'
 import { paintCarve, defaultCarve, normalizeCarve, type CarveParams } from '~/lib/compositor/carve'
+import { paintTotem, defaultTotem, normalizeTotem, type TotemParams } from '~/lib/compositor/totem'
 import type { ChaffParams } from '~/lib/compositor/chaff'
 import type { StrandParams } from '~/lib/compositor/strand'
 import type { HuskParams } from '~/lib/compositor/husk'
@@ -614,6 +615,10 @@ export interface DealLayer extends LayerCommon {
   // into panels by repeated splits, each panel a printed treatment in two of its
   // own inks — flat, two-pitch stripes, stacked chevrons, a grainy ramp, or the
   // single hairline grid — grid / density / inset are ignored too.
+  // 'totem' = the Totem generator (lib/compositor/totem): a framed screenprint
+  // plate on a speckled mat, its left half carved into blocks of two-colour cell
+  // rules and folded onto the right, with a small stack of rectangles standing at
+  // its exact middle — grid / density / inset are ignored too.
   // 'oddgrid' / 'static' = the two SHADER styles (shader_effects/oddgrid.frag,
   // static.frag): the box is painted with a shader Fill through the same
   // resolvePaint path a rect uses, `shader` below holding the spec — grid /
@@ -621,7 +626,7 @@ export interface DealLayer extends LayerCommon {
   // Absent behaves as 'solid'.
   // People see these as the Mosaic element's STYLES (lib/compositor/mosaic maps the
   // words: 'solid' is "Tiles"); the field keeps its name so saved frames load as-is.
-  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'oddgrid' | 'static'
+  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'totem' | 'oddgrid' | 'static'
   // The ShaderSpec the shader styles paint with (effectId = the cellFill, seed =
   // grid.gen.seed, speed 0, frame-anchored); only read when cellFill is 'oddgrid'
   // or 'static'. Absent ⇒ derived at the layer's seed (mosaicShaderSpec).
@@ -646,6 +651,10 @@ export interface DealLayer extends LayerCommon {
   // Carve's tunables (cuts / uneven / gap / mix / stripePitch / grain / gridDetail
   // + the 6 ordered inks); only read when cellFill is 'carve'. Absent ⇒ defaultCarve().
   carve?: CarveParams
+  // Totem's tunables (border / mat / matGrain / keyline / regions / grain / mirror /
+  // variety / core / coreRings + the 5 ordered inks); only read when cellFill is
+  // 'totem'. Absent ⇒ defaultTotem().
+  totem?: TotemParams
 }
 
 /**
@@ -822,6 +831,7 @@ export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
     parcel: defaultParcel(),
     mosh: defaultMosh(),
     carve: defaultCarve(),
+    totem: defaultTotem(),
     ...partial,
     grid,
   }
@@ -2267,6 +2277,16 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // and pass THAT object's inks, never the raw layer's.
       const carve = normalizeCarve(layer.carve)
       paintCarve(ctx, carve, carve.inks, boxW, boxH, seed)
+    } else if (layer.cellFill === 'totem') {
+      // Totem paints its OWN framed plate — NOT the shared grid: the mat, the border
+      // speckle, the blocks carved out of the left half and mirrored onto the right,
+      // and the emblem at the centre, all as filled rects on its own lattice straight
+      // on the real ctx. Regularity / merge / density / inset / force-keep have no part
+      // in it; only the grid's seed carries the variation. Raw layers reach paint
+      // un-normalized (an imported or hand-edited frame may hold a half-written
+      // `totem`), and paintTotem normalizes its params — including the ink row it reads
+      // the roles off — so the raw object is safe to hand it.
+      paintTotem(ctx, normalizeTotem(layer.totem ?? defaultTotem()), boxW, boxH, seed)
     } else {
       // Resolve cells FLUSH (gutter 0): the deal's only cell gap is `cellInset`, applied
       // per cell below. The grid's own gutter would add a second, hidden gap so cells are
