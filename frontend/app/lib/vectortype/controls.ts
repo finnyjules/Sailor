@@ -350,7 +350,7 @@ export const VT_CONTROLS: VtControl[] = [
   slider('stretchY', 'Height', VT_HEIGHT_MIN, VT_HEIGHT_MAX, 0.01, 'Layout', DEFAULT_CONFIG.stretchY,
     'Makes the letters taller or squatter typographically: stems lengthen, arches and crossbars keep their thickness, every letter keeps the same x-height and cap height. Animate it per glyph for letters that spring up off the baseline.'),
   select('fit', 'Fit', [...VT_FITS], DEFAULT_CONFIG.fit, 'Layout',
-    'width: solves Stretch so the run fills the output width (minus a small margin) — the Stretch dial shows the solved value and follows the text. off: Stretch is yours.',
+    'Width: solves Stretch so the run fills the output width (minus a small margin) — the Stretch dial shows the solved value and follows the text. Off: Stretch is yours.',
     { animatable: false }),
 
   // --- Paint ----------------------------------------------------------------
@@ -556,7 +556,7 @@ export const VT_CONTROLS: VtControl[] = [
   // Tweening it would interpolate nothing, so it opts out of motion like every
   // other select here.
   select('motion.scatter.mode', 'Scatter mode', [...VT_SCATTER_MODES], DEFAULT_CONFIG.motion.scatter.mode, 'Motion',
-    'settle: the letters start scattered and resolve onto the values you set — an entrance, and it ends exactly on your design. wander: the letters start on your design and drift off to their own positions, each at its own pace, and keep going.',
+    'Settle: the letters start scattered and resolve onto the values you set — an entrance, and it ends exactly on your design. Wander: the letters start on your design and drift off to their own positions, each at its own pace, and keep going.',
     { animatable: false, when: scattersAtAll }),
   slider('motion.scatter.settle', 'Settle time', 0, VT_SCATTER_SETTLE_MAX, 0.05, 'Motion',
     DEFAULT_CONFIG.motion.scatter.settle,

@@ -111,7 +111,7 @@ exports[`shader fills enter the agent vocabulary > is a characterization snapsho
   {
     "default": "off",
     "group": "Layout",
-    "hint": "width: solves Stretch so the run fills the output width (minus a small margin) — the Stretch dial shows the solved value and follows the text. off: Stretch is yours.",
+    "hint": "Width: solves Stretch so the run fills the output width (minus a small margin) — the Stretch dial shows the solved value and follows the text. Off: Stretch is yours.",
     "key": "fit",
     "kind": "select",
     "label": "Fit",
@@ -480,7 +480,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
   {
     "default": "off",
     "group": "Layout",
-    "hint": "width: solves Stretch so the run fills the output width (minus a small margin) — the Stretch dial shows the solved value and follows the text. off: Stretch is yours.",
+    "hint": "Width: solves Stretch so the run fills the output width (minus a small margin) — the Stretch dial shows the solved value and follows the text. Off: Stretch is yours.",
     "key": "fit",
     "kind": "select",
     "label": "Fit",
@@ -789,7 +789,7 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
   {
     "default": "off",
     "group": "Layout",
-    "hint": "width: solves Stretch so the run fills the output width (minus a small margin) — the Stretch dial shows the solved value and follows the text. off: Stretch is yours.",
+    "hint": "Width: solves Stretch so the run fills the output width (minus a small margin) — the Stretch dial shows the solved value and follows the text. Off: Stretch is yours.",
     "key": "fit",
     "kind": "select",
     "label": "Fit",

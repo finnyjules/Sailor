@@ -63,7 +63,7 @@ const color = (key: string, label: string, def: string, group: string, extra: Pa
 export const SHAPE_CONTROLS: ShapeControl[] = [
   // --- Form ---------------------------------------------------------------
   select('fillMode', 'Fill mode', ['facets', 'surface'], DEFAULT_CONFIG.fillMode, 'Form',
-    'facets = per-face colours from the palette; surface = one tiled fill over the whole solid'),
+    'Facets = per-face colours from the palette; Surface = one tiled fill over the whole solid'),
 
   // --- Shape ----------------------------------------------------------------
   select('shape.mode', 'Mode', ['primitive', 'gem'], DEFAULT_CONFIG.shape.mode, 'Shape'),

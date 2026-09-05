@@ -117,9 +117,9 @@ const shapeC = (
 export const GEO_CONTROLS: GeoControl[] = [
   // --- Shape (baseShapePath's BaseShapeOpts) --------------------------------
   select('shape', 'Shape', SHAPES, DEFAULT_CONFIG.shape, 'Shape',
-    'polygon/star/irregular use Sides; hexagon is a fixed 6-gon; library clones one of the 100 drawn shapes (Library shape)'),
+    'Polygon, star and irregular use Sides; Hexagon is a fixed 6-gon; Library clones one of the 100 drawn shapes (Library shape)'),
   shapeC('libraryShape', 'Library shape', DEFAULT_CONFIG.libraryShape, 'Shape',
-    'library only: which of the 100 drawn shapes is cloned (sparkle, sun-rays, leaf, heart, swirl…)', { when: isLibrary }),
+    'Library only: which of the 100 drawn shapes is cloned (sparkle, sun-rays, leaf, heart, swirl…)', { when: isLibrary }),
   slider('sides', 'Sides', 3, 24, 1, 'Shape', DEFAULT_CONFIG.sides, undefined, { when: usesSides }),
   // DEFAULT_CONFIG.starInner is 0.45, already inside starVertices' own
   // [0.01, 0.99] clamp (polygonGeometry.ts), so this control's default sits
@@ -153,7 +153,7 @@ export const GEO_CONTROLS: GeoControl[] = [
   select('blendShape', 'Blend to', SHAPES, DEFAULT_CONFIG.blendShape, 'Blend',
     'The shape the steps run toward. Same choices as Shape; Count is the number of steps. Detailed library shapes blend with fewer points per outline, so a many-piece shape stays fast.', { when: isBlend }),
   shapeC('blendLibraryShape', 'Blend to library shape', DEFAULT_CONFIG.blendLibraryShape, 'Blend',
-    'library only: which of the 100 drawn shapes the steps run toward', { when: blendIsLibrary }),
+    'Library only: which of the 100 drawn shapes the steps run toward', { when: blendIsLibrary }),
   slider('blendSides', 'Blend to sides', 3, 24, 1, 'Blend', DEFAULT_CONFIG.blendSides, undefined, { when: blendUsesSides }),
   slider('blendStarInner', 'Blend to star inner', 0.01, 0.99, 0.01, 'Blend', DEFAULT_CONFIG.blendStarInner, undefined, { when: blendIsStar }),
   slider('blendIrregularSeed', 'Blend to irregular seed', 1, 9999, 1, 'Blend', DEFAULT_CONFIG.blendIrregularSeed, undefined, { when: blendIsIrregular }),
@@ -184,7 +184,7 @@ export const GEO_CONTROLS: GeoControl[] = [
     'How the clones fold together: evenodd and exclude cut holes where they cross (exclude is the same region, kept as one even-odd shape), unite/subtract/intersect are true boolean ops',
     { when: isSingleFill }),
   select('overlapMode', 'Overlap mode', OVERLAPMODES, DEFAULT_CONFIG.overlapMode, 'Composite',
-    'hole = crossings read as a cut-through; shape = crossings paint as their own region in Overlap fill',
+    'Hole = crossings read as a cut-through; Shape = crossings paint as their own region in Overlap fill',
     { when: isSingleFill }),
   color('overlapFill', 'Overlap fill', paintDefault(DEFAULT_CONFIG.overlapFill), 'Composite', { when: isOverlapShapeAndSingleFill }),
 
@@ -225,10 +225,10 @@ export const GEO_CONTROLS: GeoControl[] = [
     'Depth = one colour per overlap depth; Split = each crossing its own piece, coloured by the colour order',
     { when: isPieces, optionLabels: ['Depth', 'Split'] }),
   select('fillCycle', 'Colour ramp', [...FILL_CYCLES], DEFAULT_CONFIG.fillCycle, 'Paint',
-    'cycle = repeat the colour list; ramp = fade smoothly through it across all the copies',
+    'Cycle = repeat the colour list; Ramp = fade smoothly through it across all the copies',
     { when: isMultiFill, optionLabels: ['Cycle', 'Ramp'] }),
   select('paintTarget', 'Colour applies to', [...PAINT_TARGETS], DEFAULT_CONFIG.paintTarget, 'Paint',
-    'fill = solid shapes (the default); outline = thin outlines only, no fill; both = fill and outline in the same colour',
+    'Fill = solid shapes (the default); Outline = thin outlines only, no fill; Both = fill and outline in the same colour',
     { optionLabels: ['Fill', 'Outline', 'Both'] }),
   color('fill', 'Fill', paintDefault(DEFAULT_CONFIG.fill), 'Paint', { when: isSingleFill }),
   color('stroke', 'Stroke', DEFAULT_CONFIG.stroke ?? '#000000', 'Paint'),

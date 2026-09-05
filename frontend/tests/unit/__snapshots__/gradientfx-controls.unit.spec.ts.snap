@@ -271,7 +271,7 @@ exports[`gradientAgentControls characterization > emits stable full specs for la
   {
     "default": "off",
     "group": "Focus",
-    "hint": "off = blur the whole thing evenly; radial = keep a round spot sharp; linear = keep an angled band sharp (tilt-shift)",
+    "hint": "Off = blur the whole thing evenly; Radial = keep a round spot sharp; Linear = keep an angled band sharp (tilt-shift)",
     "key": "focus.shape",
     "kind": "select",
     "label": "Focus region",
@@ -991,7 +991,7 @@ exports[`gradientAgentControls characterization > emits stable full specs for la
   {
     "default": "off",
     "group": "Focus",
-    "hint": "off = blur the whole thing evenly; radial = keep a round spot sharp; linear = keep an angled band sharp (tilt-shift)",
+    "hint": "Off = blur the whole thing evenly; Radial = keep a round spot sharp; Linear = keep an angled band sharp (tilt-shift)",
     "key": "focus.shape",
     "kind": "select",
     "label": "Focus region",
@@ -1665,7 +1665,7 @@ exports[`gradientAgentControls characterization > emits stable full specs for la
   {
     "default": "off",
     "group": "Focus",
-    "hint": "off = blur the whole thing evenly; radial = keep a round spot sharp; linear = keep an angled band sharp (tilt-shift)",
+    "hint": "Off = blur the whole thing evenly; Radial = keep a round spot sharp; Linear = keep an angled band sharp (tilt-shift)",
     "key": "focus.shape",
     "kind": "select",
     "label": "Focus region",
@@ -2355,7 +2355,7 @@ exports[`gradientAgentControls characterization > emits stable full specs for la
   {
     "default": "off",
     "group": "Focus",
-    "hint": "off = blur the whole thing evenly; radial = keep a round spot sharp; linear = keep an angled band sharp (tilt-shift)",
+    "hint": "Off = blur the whole thing evenly; Radial = keep a round spot sharp; Linear = keep an angled band sharp (tilt-shift)",
     "key": "focus.shape",
     "kind": "select",
     "label": "Focus region",
@@ -3045,7 +3045,7 @@ exports[`gradientAgentControls characterization > emits stable full specs for la
   {
     "default": "off",
     "group": "Focus",
-    "hint": "off = blur the whole thing evenly; radial = keep a round spot sharp; linear = keep an angled band sharp (tilt-shift)",
+    "hint": "Off = blur the whole thing evenly; Radial = keep a round spot sharp; Linear = keep an angled band sharp (tilt-shift)",
     "key": "focus.shape",
     "kind": "select",
     "label": "Focus region",
@@ -3731,7 +3731,7 @@ exports[`gradientAgentControls characterization > emits stable specs with includ
   {
     "default": "off",
     "group": "Focus",
-    "hint": "off = blur the whole thing evenly; radial = keep a round spot sharp; linear = keep an angled band sharp (tilt-shift)",
+    "hint": "Off = blur the whole thing evenly; Radial = keep a round spot sharp; Linear = keep an angled band sharp (tilt-shift)",
     "key": "focus.shape",
     "kind": "select",
     "label": "Focus region",
@@ -4368,7 +4368,7 @@ exports[`gradientAgentControls characterization — ramp default (Task 7) > emit
   {
     "default": "off",
     "group": "Focus",
-    "hint": "off = blur the whole thing evenly; radial = keep a round spot sharp; linear = keep an angled band sharp (tilt-shift)",
+    "hint": "Off = blur the whole thing evenly; Radial = keep a round spot sharp; Linear = keep an angled band sharp (tilt-shift)",
     "key": "focus.shape",
     "kind": "select",
     "label": "Focus region",

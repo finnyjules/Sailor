@@ -89,13 +89,13 @@ export const GRADIENT_CONTROLS: GradientControl[] = [
   // `<label>` read 'Shape', not 'Radial shape' (that string was only the BindableRow's
   // `label` prop, i.e. the promoted-variable display name, and got copied into the
   // row label by mistake during the retrofit).
-  { key: 'layer.ramp.shape', label: 'Shape', kind: 'select', options: ['circle', 'ellipse'], default: 'circle', group: 'Gradient', when: (c) => c.canvas.layout === 'radialRamp', hint: 'circle = aspect-corrected round; ellipse = stretched to the frame' } as GradientControl,
+  { key: 'layer.ramp.shape', label: 'Shape', kind: 'select', options: ['circle', 'ellipse'], default: 'circle', group: 'Gradient', when: (c) => c.canvas.layout === 'radialRamp', hint: 'Circle = aspect-corrected round; Ellipse = stretched to the frame' } as GradientControl,
   slider('layer.ramp.sweep', 'Sweep', 20, 360, 1, 'Gradient', 'Conic arc in degrees', { when: (c) => c.canvas.layout === 'conic' }),
   // bindable:false — shipped as a bare <input type="checkbox">, outside any BindableRow.
   { key: 'layer.ramp.closeLoop', label: 'Close loop', kind: 'switch', default: false, group: 'Gradient', when: (c) => c.canvas.layout === 'conic', bindable: false, hint: 'Wrap the ramp so the first and last colour meet seamlessly' } as GradientControl,
 
   // --- Curve (curve layout: a gradient that follows a parametric bezier) -----
-  { key: 'layer.curve.mode', label: 'Mode', kind: 'select', options: ['along', 'outward'], default: 'along', group: 'Curve', when: isCurve, hint: 'along = ramp runs down the curve; outward = ramp fades sideways off it' } as GradientControl,
+  { key: 'layer.curve.mode', label: 'Mode', kind: 'select', options: ['along', 'outward'], default: 'along', group: 'Curve', when: isCurve, hint: 'Along = ramp runs down the curve; Outward = ramp fades sideways off it' } as GradientControl,
   { key: 'layer.curve.shape', label: 'Shape', kind: 'select', options: ['line', 'arc', 's-curve', 'wave', 'loop'], default: 'arc', group: 'Curve', when: isCurve } as GradientControl,
   slider('layer.curve.start.x', 'Start X', 0, 1, 0.01, 'Curve', undefined, { when: isCurve }),
   slider('layer.curve.start.y', 'Start Y', 0, 1, 0.01, 'Curve', undefined, { when: isCurve }),
@@ -218,7 +218,7 @@ export const GRADIENT_CONTROLS: GradientControl[] = [
   { key: 'focus.shape', label: 'Focus region', kind: 'select', options: ['off', 'radial', 'linear'],
     optionLabels: ['Off — blur everything', 'Radial — sharp spot', 'Linear — tilt-shift band'],
     default: 'off', group: 'Focus',
-    hint: 'off = blur the whole thing evenly; radial = keep a round spot sharp; linear = keep an angled band sharp (tilt-shift)' },
+    hint: 'Off = blur the whole thing evenly; Radial = keep a round spot sharp; Linear = keep an angled band sharp (tilt-shift)' },
   slider('focus.radius', 'Focus size', 0, 1, 0.01, 'Focus', 'Size of the in-focus region (needs a radial/linear shape)'),
   slider('focus.softness', 'Focus falloff', 0, 100, 1, 'Focus', 'How gradually blur ramps in past the focus region'),
   slider('focus.x', 'Focus X', -0.5, 0.5, 0.01, 'Focus', 'Focus centre, left↔right'),
