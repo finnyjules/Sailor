@@ -8,8 +8,9 @@ import {
 } from 'lucide-vue-next'
 import {
   type TextLayer, type RectLayer, type EllipseLayer, type LocalLayer, type StackItem, type CornerPin, type BrushLayer, type Paint,
-  type WiredLayer, type DealLayer,
+  type WiredLayer, type DealLayer, type ScatterLayer,
   cornerRadii, drawLocalLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, layerMaskRef, localLayerBox, createBrushLayer, newMosaicLayer,
+  newScatterLayer,
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
 } from '~/composables/useCompositorLayers'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
@@ -21,6 +22,11 @@ import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatc
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
 import { defaultMosh, MOSH_LIMITS, MOSH_PRESET_NAMES, moshPresetPatch, moshPresetOf, type MoshParams, type MoshPresetName } from '~/lib/compositor/mosh'
 import { defaultCarve, CARVE_LIMITS, CARVE_PRESET_NAMES, carvePresetPatch, carvePresetOf, type CarveParams, type CarvePresetName } from '~/lib/compositor/carve'
+import {
+  SCATTER_STYLE_LABELS, scatterStyleRow, scatterLabelOf, scatterStyleOfLabel, scatterParams,
+  scatterStylePatch, scatterSeedPatch, freshScatterSeed, DEFAULT_SCATTER_SEED,
+  type ScatterControl, type ScatterSelectControl,
+} from '~/lib/compositor/scatter'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
@@ -108,7 +114,7 @@ import { VARIABLE_FONTS } from '~/data/variable-fonts'
 import type { GoogleFont } from '~/data/google-fonts'
 import { libraryFamily } from '~/data/library-fonts'
 import { defaultExpressiveParams, type ExpressiveParams } from '~~/shared/text-layout/expressive'
-import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid, LayoutTemplate, Snowflake } from 'lucide-vue-next'
+import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid, LayoutTemplate, Snowflake, Wheat } from 'lucide-vue-next'
 import {
   TOOLBAR_SHAPES, TOOLBAR_AI, TOOLBAR_INSERT,
   DEFAULT_SHAPE_FACE, DEFAULT_AI_FACE, DEFAULT_INSERT_FACE,
@@ -809,6 +815,67 @@ const vocabDrivesLook = computed(() => {
 function setMosaicStyle(layer: DealLayer, label: string) {
   setLocal(layer.id, mosaicStylePatch(layer, cellFillOfLabel(label)))
 }
+
+// ── Scatter (the thrown-marks layer, kind 'scatter') ────────────────────────
+// A SIBLING of the Mosaic element, not one of its styles: a mosaic is a composition
+// (a frame divided and filled), a scatter is marks thrown across a sheet. Added from
+// the toolbar's Shapes menu (addScatter, below with the other stamps) and tuned here.
+//
+// There is deliberately NO per-style block below: a style ships its own dials in its
+// registry row (lib/compositor/scatter), and the template renders them from that
+// list. That is why the anchors for the next two styles say "no edit here".
+//   STYLE: strand — no inspector change needed; its dials come from its registry row.
+//   STYLE: husk — no inspector change needed; its dials come from its registry row.
+
+/** The selected scatter's registry row (its label, dials and palettes). */
+const scatterRow = computed(() => scatterStyleRow((selectedLocal.value as ScatterLayer | null)?.style))
+/** …and its NORMALIZED params, so a hand-edited save still drives real controls. */
+const scatterDials = computed<Record<string, unknown>>(() => {
+  const l = selectedLocal.value
+  return l && l.kind === 'scatter' ? scatterParams(l as unknown as { style: string; seed: number }) : {}
+})
+/** Which palette preset the selected scatter matches ('' when custom). */
+const scatterPreset = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'scatter') return ''
+  return scatterRow.value.presetOf(scatterDials.value) ?? ''
+})
+/** Patch ONE dial of the selected scatter's style (one history step via setLocal). */
+function patchScatterParam(layer: ScatterLayer, key: string, value: unknown) {
+  const row = scatterStyleRow(layer.style)
+  const next = row.normalize({ ...scatterParams(layer as unknown as { style: string; seed: number }), [key]: value })
+  setLocal(layer.id, { [row.id]: next } as Partial<ScatterLayer>)
+}
+/** Apply a named palette preset (the style's roles, in order) to a scatter. */
+function applyScatterPreset(layer: ScatterLayer, name: string) {
+  const row = scatterStyleRow(layer.style)
+  if (!row.presetNames.includes(name)) return
+  const next = row.normalize({ ...scatterParams(layer as unknown as { style: string; seed: number }), ...row.presetPatch(name) })
+  setLocal(layer.id, { [row.id]: next } as Partial<ScatterLayer>)
+}
+/** Switch a Scatter's style, seeding that style's params with its defaults when
+ *  absent. The layer, its box and its seed are kept, so placement and variation
+ *  survive a style hop. */
+function setScatterStyle(layer: ScatterLayer, label: string) {
+  setLocal(layer.id, scatterStylePatch(layer, scatterStyleOfLabel(label)) as Partial<ScatterLayer>)
+}
+/** Set a scatter's seed — the whole variation. */
+function setScatterSeed(layer: ScatterLayer, seed: number) {
+  setLocal(layer.id, scatterSeedPatch(layer, seed) as Partial<ScatterLayer>)
+}
+/** Re-roll for a fresh variation. */
+function rerollScatter(layer: ScatterLayer) {
+  setScatterSeed(layer, freshScatterSeed())
+}
+/** A select dial's option LABELS, and the label ↔ value mapping (a style's enum dial
+ *  stores its own word; people read the capitalised one). */
+const scatterOptionLabels = (c: ScatterSelectControl) => c.options.map(o => o.label)
+const scatterOptionLabel = (c: ScatterSelectControl, value: unknown) =>
+  c.options.find(o => o.value === value)?.label ?? c.options[0]!.label
+const scatterOptionValue = (c: ScatterSelectControl, label: string) =>
+  c.options.find(o => o.label === label)?.value ?? c.options[0]!.value
+/** Narrowing helpers for the template (a discriminated union needs a cast there). */
+const asScatterSelect = (c: ScatterControl) => c as ScatterSelectControl
 
 // Normalize brush layers to a tight box: brush strokes are stored in absolute
 // artboard coords, and a layer's x/y/w/h should equal their bounds so the render
@@ -1706,6 +1773,8 @@ function rowLabel(row: any) {
   if (l.kind === 'wired') return `Layer ${l.slot + 1}`
   // A deal layer is the Mosaic element — "deal" is its internal kind, not a name.
   if (l.kind === 'deal') return 'Mosaic'
+  // A scatter layer is the Scatter element; its kind reads lowercase otherwise.
+  if (l.kind === 'scatter') return 'Scatter'
   return l.kind === 'text' ? (l.text?.split('\n')[0] || 'Text') : l.kind
 }
 /** The 1-BASED modal slot a row's wired content lives on, or null when the row is
@@ -4566,7 +4635,8 @@ function kindIcon(kind: string) {
   return kind === 'text' ? Type : kind === 'rect' ? Square
     : kind === 'ellipse' ? Circle : kind === 'image' ? ImageIcon
     : kind === 'polygon' ? Hexagon : kind === 'star' ? Star
-    : kind === 'brush' ? Brush : kind === 'deal' ? LayoutGrid : Minus
+    : kind === 'brush' ? Brush : kind === 'deal' ? LayoutGrid
+    : kind === 'scatter' ? Wheat : Minus
 }
 // A layer's fill Paint for the layer-list swatch, or null for kinds without a
 // meaningful fill (image = its own pixels, line = a stroke). Falls back to the
@@ -4629,7 +4699,7 @@ const inspectorShapePickerOpen = ref(false)
 const inspectorShapeAnchor = ref({ x: 0, y: 0 })
 const inspectorShapeButtonRef = ref<HTMLElement | null>(null)
 const SHAPE_ICONS: Record<ToolbarShapeId, Component> = {
-  rect: Square, ellipse: Circle, line: Minus, polygon: Hexagon, star: Star, mosaic: LayoutGrid, library: Shapes,
+  rect: Square, ellipse: Circle, line: Minus, polygon: Hexagon, star: Star, mosaic: LayoutGrid, scatter: Wheat, library: Shapes,
 }
 /** Stamp a Mosaic: a frame-filling Modular composition (one deal layer; see
  *  newMosaicLayer). `h = aspect` because boxes are width-normalized — the same
@@ -4637,6 +4707,12 @@ const SHAPE_ICONS: Record<ToolbarShapeId, Component> = {
  *  addLocal, like every other stamp. */
 function addMosaic() {
   addLocal(newMosaicLayer(canvasDisplay.h / Math.max(1, canvasDisplay.w)))
+}
+/** Stamp a Scatter: a frame-filling Chaff scatter (one scatter layer; see
+ *  newScatterLayer). `h = aspect` because boxes are width-normalized, the same as
+ *  the Mosaic stamp above. Records history + selects via addLocal. */
+function addScatter() {
+  addLocal(newScatterLayer(canvasDisplay.h / Math.max(1, canvasDisplay.w)))
 }
 function stampLibraryShape() {
   const s = libraryShape.value
@@ -4647,7 +4723,7 @@ function stampLibraryShape() {
   addLocal(createShapeLayer(s))
 }
 const SHAPE_STAMP: Record<ToolbarShapeId, () => void> = {
-  rect: addRect, ellipse: addEllipse, line: addLine, polygon: addPolygon, star: addStar, mosaic: addMosaic, library: stampLibraryShape,
+  rect: addRect, ellipse: addEllipse, line: addLine, polygon: addPolygon, star: addStar, mosaic: addMosaic, scatter: addScatter, library: stampLibraryShape,
 }
 /** Anchor the picker above the Shapes cluster; the picker clamps itself to the viewport. */
 function openLibraryPicker() {
@@ -7103,6 +7179,36 @@ onUnmounted(() => {
                 <StudioSlider label="Seed" :min="1" :max="9999" :step="1" :default="42" :bindable="false"
                   :model-value="(selectedLocal as DealLayer).grid.gen.seed"
                   @update:model-value="(v: number) => setDealSeed(selectedLocal as DealLayer, v)" />
+              </div>
+            </div>
+          </template>
+
+          <!-- Scatter (kind 'scatter'): Style first — which marks these are — then
+               that style's dials, its Palette, and New variation. The dials are
+               rendered from the style's REGISTRY ROW (lib/compositor/scatter), so a
+               new style ships its controls with its module and needs no block here. -->
+          <template v-if="selectedLocal.kind === 'scatter'">
+            <StudioSelect label="Style" :options="SCATTER_STYLE_LABELS as any"
+              :model-value="scatterLabelOf((selectedLocal as ScatterLayer).style)"
+              @update:model-value="(v: any) => setScatterStyle(selectedLocal as ScatterLayer, v)" />
+            <div class="mt-2 flex flex-col gap-1.5">
+              <template v-for="c in scatterRow.controls" :key="c.key">
+                <StudioSlider v-if="c.kind === 'slider'" :label="c.label" :min="c.min" :max="c.max" :step="c.step" :bindable="false"
+                  :model-value="(scatterDials[c.key] as number)"
+                  @update:model-value="(v: number) => patchScatterParam(selectedLocal as ScatterLayer, c.key, c.step >= 1 ? Math.round(v) : v)" />
+                <StudioSelect v-else :label="c.label" :options="scatterOptionLabels(asScatterSelect(c))"
+                  :model-value="scatterOptionLabel(asScatterSelect(c), scatterDials[c.key])"
+                  @update:model-value="(v: any) => patchScatterParam(selectedLocal as ScatterLayer, c.key, scatterOptionValue(asScatterSelect(c), v))" />
+              </template>
+              <StudioSelect label="Palette" :options="scatterRow.presetNames as any"
+                :model-value="scatterPreset" @update:model-value="(v: any) => applyScatterPreset(selectedLocal as ScatterLayer, v)" />
+            </div>
+            <div class="mt-2 flex items-center gap-2">
+              <StudioButton variant="secondary" @click="rerollScatter(selectedLocal as ScatterLayer)">New variation</StudioButton>
+              <div class="min-w-0 flex-1">
+                <StudioSlider label="Seed" :min="1" :max="9999" :step="1" :default="DEFAULT_SCATTER_SEED" :bindable="false"
+                  :model-value="(selectedLocal as ScatterLayer).seed"
+                  @update:model-value="(v: number) => setScatterSeed(selectedLocal as ScatterLayer, v)" />
               </div>
             </div>
           </template>

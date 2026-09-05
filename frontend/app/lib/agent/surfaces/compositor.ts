@@ -8,7 +8,7 @@
  * to `node.data.properties.sailor_localLayers` + the background, and runs the
  * media ops (generate/edit/remove-bg) which need async backend calls.
  */
-import { layerMaskRef, localLayerBox, type DealLayer, type LocalLayer, type LocalLayerKind, type Paint, type TextLayer } from '~/composables/useCompositorLayers'
+import { layerMaskRef, localLayerBox, type DealLayer, type LocalLayer, type LocalLayerKind, type Paint, type ScatterLayer, type TextLayer } from '~/composables/useCompositorLayers'
 import type { Command, CommandResult, CommandSpec, SurfaceSnapshot } from '~/lib/agent/commandSurface'
 import { contrastRatio, parseColor, type LayoutIssue } from '~/lib/agent/verify'
 import { SWISS_LIMITS } from '~/lib/agent/designPrinciples'
@@ -31,6 +31,10 @@ import { defaultModular, normalizeModular, modularPresetPatch, modularPresetOf, 
 import { defaultParcel, normalizeParcel, parcelPresetPatch, parcelPresetOf, PARCEL_PRESET_NAMES, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
 import { defaultMosh, normalizeMosh, moshPresetPatch, moshPresetOf, MOSH_PRESET_NAMES, type MoshParams, type MoshPresetName } from '~/lib/compositor/mosh'
 import { defaultCarve, normalizeCarve, carvePresetPatch, carvePresetOf, CARVE_PRESET_NAMES, type CarveParams, type CarvePresetName } from '~/lib/compositor/carve'
+import {
+  SCATTER_STYLES, DEFAULT_SCATTER_STYLE, DEFAULT_SCATTER_SEED, scatterStyleRow, scatterStyleOf,
+  scatterStyleFromArgs, scatterParams, freshScatterSeed, type ScatterStyle,
+} from '~/lib/compositor/scatter'
 import { placeTemplate, setInstanceSlot, freezeInstance } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
 import { shapeById, SHAPES } from '~/lib/shapes/catalog'
@@ -246,6 +250,109 @@ function describeDealLook(l: DealLayer, fill: DealLook): Record<string, unknown>
   return { palettePreset: moshPresetOf({ ...rest, inks }) ?? 'custom', ...rest }
 }
 
+// ── The Scatter element (kind 'scatter') ──────────────────────────────────────
+// A Scatter is a SIBLING of the Mosaic, not one of its styles, so it gets its own
+// op. Everything per-style is read off the registry (lib/compositor/scatter): the
+// style words, the dials, the palette tables and the paint. The ONE thing a person
+// still has to write per style is its sentence for the model — see SCATTER_BLURBS.
+
+/** One plain sentence per style, for the `scatter` op's hint. */
+const SCATTER_BLURBS: Record<string, string> = {
+  chaff: 'blades thrown at the paper — each a curved blade with a width profile (crescent: pointed at both ends; leaf: blunt at one end, drawn to a point at the other; bar: near enough parallel-sided), a few running huge, printed through a mottled two-ink press so flecks of the ground land inside a blade and flecks of ink out in the open',
+  // STYLE: strand — Task 4 adds its sentence here.
+  // STYLE: husk — Task 5 adds its sentence here.
+}
+
+/** The style's `<style>: {…}` args object, when the model sent one. */
+const scatterArgs = (a: Record<string, unknown>, style: string): Record<string, unknown> | null =>
+  a[style] && typeof a[style] === 'object' ? a[style] as Record<string, unknown> : null
+
+/** The canonical preset name `raw` spells in `style`'s table (case-insensitive), or null. */
+function scatterPresetNameIn(style: string, raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const lc = raw.trim().toLowerCase()
+  return scatterStyleRow(style).presetNames.find(n => n.toLowerCase() === lc) ?? null
+}
+
+/**
+ * Which style the args imply when no explicit `style` was sent (create AND
+ * reconfigure): a tunables object first, in registry order, then a palettePreset
+ * whose name lives in one style's table; else null (create ⇒ the default style,
+ * reconfigure ⇒ keep the current one). An explicit style always wins.
+ */
+export function impliedScatterStyle(a: Record<string, unknown>): ScatterStyle | null {
+  for (const row of SCATTER_STYLES) if (scatterArgs(a, row.id)) return row.id
+  for (const row of SCATTER_STYLES) if (scatterPresetNameIn(row.id, paletteArg(a))) return row.id
+  return null
+}
+
+/** The final style + the palettePreset resolved ONLY against that style's table. A
+ *  name that is in no table is an error, never a silent no-op. */
+function resolveScatterStyle(a: Record<string, unknown>, current: ScatterStyle):
+{ ok: true; style: ScatterStyle; preset: string | null } | { ok: false; detail: string } {
+  const ids = SCATTER_STYLES.map(r => r.id)
+  const explicit = scatterStyleFromArgs(a)
+  if (a.style != null && !explicit) {
+    return { ok: false, detail: `unknown style "${String(a.style)}"; options: ${ids.join(' | ')}` }
+  }
+  const style = explicit ?? impliedScatterStyle(a) ?? current
+  if (paletteArg(a) == null) return { ok: true, style, preset: null }
+  const raw = String(paletteArg(a))
+  const preset = scatterPresetNameIn(style, raw)
+  if (!preset) {
+    return { ok: false, detail: `unknown palettePreset "${raw}" for ${style}; options: ${scatterStyleRow(style).presetNames.join(' | ')}` }
+  }
+  return { ok: true, style, preset }
+}
+
+/** One style's params after a scatter call: the preset's colours (only when the
+ *  preset was resolved for THIS style) laid under the explicit `<style>:{…}` fields,
+ *  normalized onto whatever the layer already carries. null = the model never
+ *  mentioned this style, so leave it alone. */
+function scatterParamsAfter(a: Record<string, unknown>, style: string, preset: string | null, cur: unknown): Record<string, unknown> | null {
+  const row = scatterStyleRow(style)
+  const explicit = scatterArgs(a, style)
+  const presetPatch = preset ? row.presetPatch(preset) : null
+  if (!explicit && !presetPatch) return null
+  return row.normalize({ ...row.normalize(cur), ...(presetPatch ?? {}), ...(explicit ?? {}) })
+}
+
+/** A scatter's dials for describeCompositor: the preset NAME rather than the ink
+ *  list (the model reads and writes palettes by name, and an ink array is noise). */
+function describeScatter(l: ScatterLayer): Record<string, unknown> {
+  const row = scatterStyleRow(l.style)
+  const params = scatterParams(l as unknown as { style: string; seed: number }) as Record<string, unknown>
+  const { inks, ...rest } = params
+  void inks
+  return { palettePreset: row.presetOf(params) ?? 'custom', ...rest }
+}
+
+/**
+ * The `scatter` op's hint, built from the registry so a new style's dials, ranges and
+ * palettes reach the model from its own module — only its sentence (SCATTER_BLURBS)
+ * is written by hand.
+ */
+const SCATTER_HINT: string = (() => {
+  const styles = SCATTER_STYLES.map((row) => {
+    const dials = row.controls.map((c) => {
+      if (c.kind === 'select') return `${c.key} (${c.options.map(o => o.value).join(" | ")})`
+      const step = c.step >= 1 ? 'whole numbers' : ''
+      return `${c.key} (${c.min}..${c.max}${step ? ', ' + step : ''})`
+    }).join(', ')
+    return `"${row.id}" — ${SCATTER_BLURBS[row.id] ?? row.label}. ${row.id}: { ${dials} }; palettePreset: ${row.presetNames.join(' | ')}`
+  }).join('. ')
+  return 'Add a SCATTER — a generative element of thrown marks as ONE self-painting layer that BAKES into the render — or restyle one. '
+    + 'This is what "scatter some blades over it", "add a printed leaf pattern", "throw marks across the frame", "re-roll the scatter", "more blades", "bigger marks" mean. '
+    + 'To CREATE one, omit target (it fills the whole frame: w 1, h = the frame aspect; default style '
+    + `${DEFAULT_SCATTER_STYLE}); to restyle or reconfigure an existing one, target = the scatter layer's id (its box is left alone). `
+    + `style: ${styles}. `
+    + 'An explicit style always wins; without one, a tunables object implies its style, then a palettePreset name does. '
+    + 'palettePreset is checked against the FINAL style\'s table only — a name from another style\'s table is an error, not a silent recolour. '
+    + 'args: { style (see above), <style>: { … its dials … }, palettePreset (a palette by name), seed (integer 1..9999 — the variation), '
+    + 'generate (bool — re-roll a fresh seed for a new variation; the style, box and dials are kept), id? (choose one to target it later) }. '
+    + 'A Scatter is NOT a Mosaic: a mosaic is a composition (a frame divided and filled), a scatter is marks thrown across a sheet — use the `mosaic` op for the former.'
+})()
+
 /** Merge model-provided effect params over current/defaults with clamps; null = invalid type. */
 function sanitizePostEffect(raw: unknown, cur?: PostEffect): PostEffect | null {
   const r = (raw ?? {}) as Record<string, unknown>
@@ -309,6 +416,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setBackground', hint: 'Set the FRAME background that sits behind every layer. args: { paint } — a "#RRGGBB" colour, a gradient object, or "none". Use for "make the background blue / a sunset gradient".' },
   { op: 'setGrid', hint: 'Set the layout grid on a Frame — a Swiss-style guide layers can snap to (editor-only, never baked/exported). args: { patch: {...}, generate? }. patch keys: mode ("off" | "explicit" | "generated"), baseModule (0..1 of canvas width, the alignment unit), gutter (0..1), margin (0..1), columns/rows (explicit mode counts), gen: { colRange/rowRange ([min,max] column/row counts, generated mode), regularity (0..1: 0 = loose/free spacing, 1 = strict/equal), merge (bool, merge adjacent cells into larger regions), mergeMaxSpan (max cells a merged region spans), symmetry ("none" | "mirror"), seed (integer) }, overlay (bool, show the guide lines). Omitted keys keep their current value. generate:true (or reroll:true) re-rolls a fresh random seed for a new generated-grid variation; switching mode to "generated" without giving gen.seed also rolls a fresh seed. This is what "add a layout grid", "give it a 6-column grid", "generate a new grid variation", "re-roll the grid" mean.' },
   { op: 'mosaic', hint: `Add a MOSAIC — a generative composition element (playgrnd-style: a whole dense pattern as ONE self-painting layer that BAKES into the render) — or restyle one. This is what "make a colourful mosaic", "add a modular grid", "a glitchy texture", "deal a warm grid", "re-roll the pattern", "sparser tiles" mean. To CREATE a new mosaic, omit target (it fills the whole frame: w 1, h = the frame aspect; default style modular); to restyle or reconfigure an existing one, target = the mosaic layer's id (its box is left alone). style (the plain word for which composition it is): "tiles" (the seeded grid itself: every kept cell one flat fill from a palette — vocab, density and cellInset apply only here) | "pane" (rows of flush panes, each a two-colour ramp running corner to corner or edge to edge, inks drawn by distance along the palette) | "modular" (a flush grid of modules, some merged 2×2 / 2-wide / 2-tall, over a background colour — each module empty, solid, a block field, a corner dot cluster, a fine line grid or a two-colour ramp — with faint hairlines over the whole grid) | "parcel" (a coarse two-tone field of chunky ink blocks on a ground colour — every cell one or the other, hard edges, no gutter — with a few ragged rectangular clusters of fine hairline lattices, "survey grids", floating on top and darkening what they cross) | "mosh" (a corrupted signal / datamosh / glitch texture — the frame stacked as uneven horizontal bands, each a different failure: confetti runs, coarse mosaic blocks cut by hard diagonal tears that go dark, long thin smears, full-width scan rows some cut by a short bright segment, a chevron herringbone — every mark a hard-edged rect snapped to a column grid, in full-strength colour-cube inks with near-black dead patches) | "carve" (a panel collage / report cover — ONE rectangle carved into panels by repeated splits, each cut taken across the long side of one of the biggest panels, and every panel given a printed treatment in two inks: flat, hard stripes that change pitch partway across (the dropped signal), stacked chevron arrows, a grainy photographic ramp, or a single fine hairline grid with dots) | "oddgrid" (a SHADER: an uneven patchwork of coloured cells on a paper ground — some cells blocky clusters, some grainy, with optional small marks — dots, rings, squares, wedges — scattered in; still, seeded) | "static" (a SHADER: riso-print static — one ink on one paper colour, coarse noise cells in a few horizontal bands with glitch tears; still, seeded). cellFill is accepted as an alias of style. An explicit style always wins; without one, the first tunables object in the order pane → modular → parcel → mosh → carve implies the style, then a palettePreset name does; a create with none of those is modular. palettePreset is checked against the FINAL style's table only — a name from another style's table is an error, not a silent recolour; tiles has no presets (it uses vocab). For the two shader styles the palette is a LOOK: send look (or palettePreset — same thing) with one of oddgrid: "Patchwork" | "Bloom" | "Quilt" | "Scatter" | "Drift", static: "Wine on Periwinkle" | "Pink on Straw" | "Maroon on Orange" | "Blue on Cream" | "Green on Yellow" | "Blue on Pink" | "Black on Lime" | "Purple on Gold"; fine-tune with shader: { params: { … } } — oddgrid params: cols (cells across 8..96), scale (feature size 2..30), density (coverage 0..1), block (blockiness 0..1), bsize (block size 2..12), speck (0..0.5), grain (0..1), variety (0..1), balance (spread -1.5..1.5), motif (mark: 0 none, 1 dot, 2 ring, 3 square, 4 wedge, 5 mixed), motifAmt (marks 0..1), bg (paper hex), ramp (inks: [{pos,color}] up to 8); static params: ink (hex), bg (paper hex), res (cells across 24..160), regions (bands 1..6), glitch (0..1), mix (0..1). args: { style (see above), vocab ("brand" | "mono" | "warm" | "cool" — the palette tiles draws from; also what pane / modular draw from when they have no inks of their own), density (0..1, fraction of tiles filled; the rest are transparent; default 1), cellInset (0..0.4, gap inset per tile), pane ({ rows (1..8, default 3), cells (nominal cells per row, 1..12, default 6; each row varies it), vary (0..1 how uneven rows/cells are, default 0.55), diag (0..1 share of corner-to-corner ramps vs flat ones, default 0.45), soft (0..1 how much of each pane is the blend; 0 = hard line, default 0.85), spread (0..1 how far apart in the palette the two inks are; 0 = neighbours, default 0.55), inks (ordered hex list the spread walks — the ORDER is the look; omitted = the tool's first palette; fewer than 2 = the vocab palette) } — sending pane implies style "pane"; palettePreset also takes a Pane palette by name: "Hot pink" | "Electric" | "Deep" | "Sorbet" | "Candy" — five ordered 8-ink lists; explicit pane.inks override it), modular ({ gcols (module columns 2..12, default 6; rows follow the frame aspect), unit (sub-cells per module side 2..8, default 4), merge (0..1 how often modules merge, default 0.45), w ({ empty, solid, blocks, dots, lines, grad } relative weights 0..50, defaults 34/20/24/14/12/10 — empty is most common on purpose), blockFill (0..1 coverage of block/dot fields, default 0.5), dot (0..1 dot diameter within its sub-cell, default 0.62), rules (0..1 hairline opacity over the whole grid, default 0.22; 0 = none), ruleW (1..3 line width, default 1), bg (hex background), rule (hex hairline colour), inks (ordered hex list; omitted = the vocab palette) } — sending modular implies style "modular"; palettePreset: "Digital" | "Riso" | "Bloom" | "Heat" | "Mono" — background + hairline colour + 4 inks; explicit modular.bg/rule/inks override it), parcel ({ cells (grid width in cells 8..40, default 16; rows follow the frame aspect), cover (0..1 how much of the field is ink, default 0.5), chunk (0.5..3 block scale — bigger = bigger blobs, default 1), grids (0..8 how many survey grids float on top, default 4), blend ("multiply" | "normal"; multiply = the hairlines darken ink and ground alike, default), ground (hex ground colour), ink (hex block colour), hairline (hex survey-line colour) } — sending parcel implies style "parcel"; palettePreset: "Lime on grey" | "Blue on cream" | "Acid on black" | "Orange on cream" | "Cyan on stone" | "Blue on olive" — ground + ink + hairline; explicit parcel colours override it), mosh ({ bands (1..8 horizontal bands, default 6), cols (24..300 cells across — everything snaps to these columns, default 150), mix (0..1 how much of the palette each band draws from, default 0.62), tears (0..1 how many diagonal tears cut the mosaic bands, default 0.55; 0 = none), runs (0..1 how long the smear bands hold a value, default 0.5), bright (0..1 how often the bright ink cuts in, default 0.3), inks (ordered hex list of 8 full-strength inks; inks[1] is the bright one; omitted = the pure colour cube) } — sending mosh implies style "mosh"; palettePreset: "Pure cube" | "Soft cube" | "Print cube" | "Warm cube" | "Cool cube" — 8 inks; explicit mosh.inks override it), carve ({ cuts (1..16 how many times the frame is cut; panels = cuts + 1, default 7), uneven (0..1 how far off centre a cut may fall, default 0.55; 0 = every cut dead centre), gap (0..1 space between panels, default 0), mix (0..1 fraction of panels that are patterned rather than flat, default 0.7), stripePitch (0..1 band width on the striped panels, default 0.4), grain (0..1 noise on the photographic panels, default 0.5), gridDetail (0..1 how fine the one hairline grid panel is, default 0.5), inks (ordered hex list — two neutrals, inks[0] being the ground, then four loud inks) } — sending carve implies style "carve"; palettePreset: "Report" | "Signal" | "Playbill" | "Almanac" | "Broadsheet" — 6 ordered inks; explicit carve.inks override it), grid ({ colRange:[min,max], rowRange:[min,max], regularity (0..1), merge (bool), symmetry ("none"|"mirror") } — the tiles layout; omitted keeps the current/frame grid), seed (integer, the variation — every style reads it), generate (bool — re-roll a fresh seed for a new variation; the style, box and dials are kept), id? (choose one to target it later) }.` },
+  { op: 'scatter', hint: SCATTER_HINT },
   { op: 'generateImage', hint: 'Generate a PHOTOGRAPHIC/illustrative AI image and add it as a layer — "generate a picture of a dog", "add a city photo". Not for gradients/colours (use setBackground/setFill). args: { prompt (vivid), aspectRatio? }.' },
   { op: 'removeImageBackground', hint: 'Cut out the subject of an existing IMAGE layer (transparent background). target = image layer id.' },
   { op: 'editImage', hint: 'Edit an existing IMAGE layer from an instruction (Flux Kontext) — "make it brighter", "change the sky". target = image layer id; args: { instruction }.' },
@@ -364,6 +472,14 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
         const spec = mosaicShaderSpec(fill, l.grid.gen.seed, l.shader)
         cur[fill] = { look: mosaicLookOf(spec) || 'custom', ...spec.params }
       } else if (fill !== 'solid') cur[fill] = describeDealLook(l, fill)
+    }
+    // A Scatter reads back as its style word, its seed and that style's dials (the
+    // palette by NAME), so "more blades", "re-roll", "make it Pine" are answerable.
+    else if (l.kind === 'scatter') {
+      const style = scatterStyleOf(l.style)
+      cur.style = style
+      cur.seed = l.seed
+      cur[style] = describeScatter(l)
     }
     if (l.visible === false) cur.hidden = true
     // The agent never sees the internal kind 'deal': that layer is a "mosaic".
@@ -631,6 +747,58 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
         carve: normalizeCarve(patches.carve ?? {}),
         grid,
         ...(isMosaicShaderFill(resolved.fill) ? { shader: shaderSpecAfter(a, resolved.fill, grid.gen.seed, resolved.preset) } : {}),
+      } as unknown as LocalLayer
+      return { ok: true, template: { ...state, layers: [...state.layers, layer] }, inverse: snapshot() }
+    }
+    case 'scatter': {
+      const a = (cmd.args ?? {}) as Record<string, unknown>
+      const reroll = a.generate === true || a.reroll === true
+      const seedOf = (v: unknown, fb: number) => typeof v === 'number' && Number.isFinite(v)
+        ? Math.max(1, Math.min(9999, Math.round(v))) : fb
+      const target = cmd.target ? findLayer(state, cmd.target) : undefined
+      if (cmd.target && (!target || target.kind !== 'scatter')) {
+        return { ok: false, reason: 'invalid', detail: `no scatter layer '${String(cmd.target)}'` }
+      }
+
+      if (target && target.kind === 'scatter') {
+        // Reconfigure (restyle) an existing scatter in place. The style is decided
+        // ONCE, by the same rule create uses (explicit style > the first tunables
+        // object in registry order > a preset's table > keep the current style), and
+        // the palettePreset resolves against that final style's table only. Every
+        // style's dials the model sent still merge onto that style's params — a model
+        // may pre-set several — but only the showing style receives the preset's
+        // colours. The box (w/h) is left alone.
+        const d = target as unknown as Record<string, unknown>
+        const resolved = resolveScatterStyle(a, scatterStyleOf(d.style))
+        if (!resolved.ok) return { ok: false, reason: 'invalid', detail: resolved.detail }
+        d.style = resolved.style
+        for (const row of SCATTER_STYLES) {
+          const next = scatterParamsAfter(a, row.id, resolved.style === row.id ? resolved.preset : null, d[row.id])
+          if (next) d[row.id] = next
+        }
+        d.seed = reroll ? freshScatterSeed() : seedOf(a.seed, seedOf(d.seed, DEFAULT_SCATTER_SEED))
+        return { ok: true, template: state, inverse: snapshot() }
+      }
+
+      // Create a new scatter filling the frame, in the default style.
+      const id = typeof a.id === 'string' && a.id ? a.id : `l_${state.layers.length + 1}_scatter`
+      if (state.layers.some(l => l.id === id)) return { ok: false, reason: 'invalid', detail: `layer id '${id}' already exists` }
+      const resolved = resolveScatterStyle(a, DEFAULT_SCATTER_STYLE)
+      if (!resolved.ok) return { ok: false, reason: 'invalid', detail: resolved.detail }
+      // Boxes are width-normalized, so filling the frame is h = aspect (H/W) — the
+      // same `h: aspect` the toolbar's Scatter stamp uses; a square frame is 1.
+      const aspect = typeof state.aspect === 'number' && Number.isFinite(state.aspect) && state.aspect > 0 ? state.aspect : 1
+      const styleParams: Record<string, unknown> = {}
+      for (const row of SCATTER_STYLES) {
+        styleParams[row.id] = scatterParamsAfter(a, row.id, resolved.style === row.id ? resolved.preset : null, undefined)
+          ?? row.defaults()
+      }
+      const layer = {
+        id, kind: 'scatter', x: 0.5, y: 0.5, rotation: 0, opacity: 1,
+        w: 1, h: aspect,
+        seed: reroll ? freshScatterSeed() : seedOf(a.seed, DEFAULT_SCATTER_SEED),
+        style: resolved.style,
+        ...styleParams,
       } as unknown as LocalLayer
       return { ok: true, template: { ...state, layers: [...state.layers, layer] }, inverse: snapshot() }
     }

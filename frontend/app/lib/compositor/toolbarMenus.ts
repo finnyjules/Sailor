@@ -7,7 +7,7 @@
  *  over the editor. Keeping the lists pure lets the unit suite pin the menu
  *  contents and the last-used-face reducer without mounting the modal. */
 
-export type ToolbarShapeId = 'rect' | 'ellipse' | 'line' | 'polygon' | 'star' | 'mosaic' | 'library'
+export type ToolbarShapeId = 'rect' | 'ellipse' | 'line' | 'polygon' | 'star' | 'mosaic' | 'scatter' | 'library'
 
 export interface ToolbarShapeRow {
   id: ToolbarShapeId
@@ -28,6 +28,11 @@ export const TOOLBAR_SHAPES: readonly ToolbarShapeRow[] = [
   // only the layout guide. Stamps a frame-filling Modular mosaic (see
   // newMosaicLayer in useCompositorLayers).
   { id: 'mosaic', label: 'Mosaic' },
+  // A Scatter is a generative SCATTER element (the playgrnd-style ports of thrown
+  // marks: Chaff now, Strand and Husk next) — a sibling of Mosaic, not one of its
+  // styles: a mosaic is a composition, a scatter is marks thrown across a sheet.
+  // Stamps a frame-filling Chaff scatter (see newScatterLayer in useCompositorLayers).
+  { id: 'scatter', label: 'Scatter' },
   // Opens the shape library picker instead of stamping; the picked shape then
   // becomes the face so repeat stamping stays one click (see CompositorModal).
   { id: 'library', label: 'Shape library…' },

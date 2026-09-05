@@ -22,7 +22,9 @@ describe('Mosaic in the Shapes menu', () => {
     const ids = TOOLBAR_SHAPES.map(s => s.id)
     expect(ids).toContain('mosaic')
     expect(ids.indexOf('mosaic')).toBe(ids.indexOf('star') + 1)
-    expect(ids.indexOf('mosaic')).toBe(ids.indexOf('library') - 1)
+    // The Scatter element (its sibling) sits between the Mosaic and the library.
+    expect(ids.indexOf('mosaic')).toBe(ids.indexOf('scatter') - 1)
+    expect(ids.indexOf('scatter')).toBe(ids.indexOf('library') - 1)
     expect(TOOLBAR_SHAPES.find(s => s.id === 'mosaic')!.label).toBe('Mosaic')
   })
   it('can be worn as the last-used face, titled "Add mosaic" by the face button', () => {

@@ -13,7 +13,7 @@
  * One renderer (`drawLocalLayer`) draws to any 2D context at any resolution.
  */
 
-export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'image' | 'polygon' | 'star' | 'brush' | 'wired' | 'deal'
+export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'image' | 'polygon' | 'star' | 'brush' | 'wired' | 'deal' | 'scatter'
 
 // ── Motion painter indirection ───────────────────────────────────────────────
 // paintLayerStack(t) needs the motion module, but motion/paint.ts imports
@@ -28,6 +28,7 @@ import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
 import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { dealShaderFill } from '~/lib/compositor/mosaic'
+import { paintScatter, SCATTER_STYLES, DEFAULT_SCATTER_STYLE, DEFAULT_SCATTER_SEED, type ScatterStyle } from '~/lib/compositor/scatter'
 import { withFieldFrame, type FieldRequest } from '~/lib/shaderfill/field'
 import {
   hasPaint, resolvePaint, OBJECT_SHADER_FIELD_PX, type ShaderFieldFrameCtx,
@@ -63,6 +64,7 @@ import { paintModular, modularPalette, defaultModular, type ModularParams } from
 import { paintParcel, defaultParcel, type ParcelParams } from '~/lib/compositor/parcel'
 import { paintMosh, defaultMosh, type MoshParams } from '~/lib/compositor/mosh'
 import { paintCarve, defaultCarve, normalizeCarve, type CarveParams } from '~/lib/compositor/carve'
+import type { ChaffParams } from '~/lib/compositor/chaff'
 
 // Throwaway 2D context used only for text measurement (localLayerBox mutates the
 // ctx font), so it never touches a real render target.
@@ -644,7 +646,34 @@ export interface DealLayer extends LayerCommon {
   carve?: CarveParams
 }
 
-export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer
+/**
+ * A "scatter": ONE self-painting layer holding a scatter of thrown marks — the
+ * Scatter element (lib/compositor/scatter holds the STYLE registry). A sibling of
+ * the Mosaic element, not one of its styles: a mosaic is a composition (a frame
+ * divided and filled), a scatter is marks thrown across a sheet. Which marks is
+ * `style`; that style's own dials live under a field named after it, and `seed`
+ * drives the whole picture, so "New variation" re-rolls it coherently. Like a deal
+ * it is normal content: it renders, bakes and exports, and it is clipped to its own
+ * box (both dims normalized to the canvas WIDTH, like RectLayer).
+ */
+export interface ScatterLayer extends LayerCommon {
+  kind: 'scatter'
+  w: number; h: number        // box size, BOTH normalized to canvas width (like RectLayer)
+  seed: number                // 1..9999 — the one variation
+  // Which generator paints this layer. 'chaff' = the Chaff generator
+  // (lib/compositor/chaff): blades thrown at the paper, each an arc with a width
+  // profile, printed through a half-size mask that a two-scale mottle thresholds
+  // into two inks. Unknown / absent behaves as the default style (scatterStyleOf).
+  style: ScatterStyle
+  // Chaff's tunables (count / size / vary / apart / shape / curve / taper / slim /
+  // mottle / coarse / grain + its two ordered role inks); only read when style is
+  // 'chaff'. Absent ⇒ defaultChaff().
+  chaff?: ChaffParams
+  // STYLE: strand — Task 4 adds `strand?: StrandParams` here.
+  // STYLE: husk — Task 5 adds `husk?: HuskParams` here.
+}
+
+export type LocalLayer = TextLayer | RectLayer | EllipseLayer | LineLayer | ImageLayer | PathLayer | PolygonLayer | StarLayer | BrushLayer | WiredLayer | DealLayer | ScatterLayer
 
 // Re-export so consumers of local layers can import the stroke type from one place.
 export type { PaintStroke } from '~/lib/compositor/brushStamp'
@@ -802,6 +831,36 @@ export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
 export function newMosaicLayer(aspect: number): DealLayer {
   const h = Number.isFinite(aspect) && aspect > 0 ? aspect : 1
   return createDealLayer({ cellFill: 'modular', w: 1, h, x: 0.5, y: 0.5 })
+}
+
+/**
+ * A scatter layer filling the whole frame by default, in the default style at its
+ * defaults. EVERY registered style's params are seeded (like createDealLayer), so a
+ * style hop in the inspector never paints a blank box while its dials catch up.
+ */
+export function createScatterLayer(partial: Partial<ScatterLayer> = {}): ScatterLayer {
+  const styles: Record<string, unknown> = {}
+  for (const row of SCATTER_STYLES) styles[row.id] = row.defaults()
+  return {
+    id: newId(), kind: 'scatter',
+    x: 0.5, y: 0.5, rotation: 0, opacity: 1,
+    w: 1, h: 1,
+    seed: DEFAULT_SCATTER_SEED,
+    style: DEFAULT_SCATTER_STYLE,
+    ...(styles as { chaff: ChaffParams }),
+    ...partial,
+  }
+}
+
+/**
+ * The Scatter element the toolbar's Shapes menu stamps: ONE scatter layer filling
+ * the frame (`w: 1`, `h: aspect` — boxes are width-normalized, so a frame's H/W is
+ * the height that fills it), centred, in the Chaff style at its defaults. A pure
+ * seam so the unit suite can pin the stamped shape without mounting the modal.
+ */
+export function newScatterLayer(aspect: number): ScatterLayer {
+  const h = Number.isFinite(aspect) && aspect > 0 ? aspect : 1
+  return createScatterLayer({ style: DEFAULT_SCATTER_STYLE, w: 1, h, x: 0.5, y: 0.5 })
 }
 
 export function createEllipseLayer(partial: Partial<EllipseLayer> = {}): EllipseLayer {
@@ -2225,6 +2284,26 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       }
     }
     ctx.restore()
+  } else if (layer.kind === 'scatter') {
+    // The Scatter element: ONE self-painting layer of thrown marks. Centred like every
+    // other layer — shift so the box top-left sits at (-boxW/2, -boxH/2) — then the
+    // layer's STYLE paints one sheet over the box (lib/compositor/scatter routes it).
+    // Opacity / blend / mask / effects all ride the shared LayerCommon machinery
+    // around this draw (paintLayer wraps it), so this branch only lays down pixels.
+    const boxW = Math.max(1, layer.w * W), boxH = Math.max(1, layer.h * W)
+    ctx.save()
+    ctx.translate(-boxW / 2, -boxH / 2)
+    // Clip to the box, for the same reason the deal does: the ported generators rely
+    // on the canvas edge to clip them (a Chaff blade is allowed to start well outside
+    // the frame so the big ones run off the edges), and a scatter box has no edge.
+    ctx.beginPath()
+    ctx.rect(0, 0, boxW, boxH)
+    ctx.clip()
+    // Raw layers reach paint un-normalized (a hand-edited or imported frame may carry a
+    // partial style object, or none at all) — paintScatter normalizes through the
+    // style's own registry row before anything is drawn.
+    paintScatter(ctx, layer, boxW, boxH)
+    ctx.restore()
   }
 }
 
@@ -2534,6 +2613,11 @@ export function layerPaints(layer: LocalLayer): Paint[] {
     // Fill drawLayerContent's deal branch hands to resolvePaint — and it MUST be
     // returned here, or the pre-pass never renders the field and the box is blank.
     case 'deal': { const f = dealShaderFill(layer); return f ? [f] : [] }
+    // A Scatter paints its own sheet from its style's generator — it carries no
+    // authored Paint slot at all, so there is nothing for the pre-pass to register.
+    // (It must be listed: the default branch below reads `fill`/`stroke`, which a
+    // scatter has not got.)
+    case 'scatter': return []
     default: return [layer.fill, layer.stroke] // rect / ellipse / polygon / star / path
   }
 }

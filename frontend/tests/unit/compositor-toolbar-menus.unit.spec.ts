@@ -8,8 +8,8 @@ import {
 
 describe('compositor toolbar menus', () => {
   it('pins the shapes menu contents and order', () => {
-    expect(TOOLBAR_SHAPES.map(s => s.id)).toEqual(['rect', 'ellipse', 'line', 'polygon', 'star', 'mosaic', 'library'])
-    expect(TOOLBAR_SHAPES.map(s => s.label)).toEqual(['Rectangle', 'Ellipse', 'Line', 'Polygon', 'Star', 'Mosaic', 'Shape library…'])
+    expect(TOOLBAR_SHAPES.map(s => s.id)).toEqual(['rect', 'ellipse', 'line', 'polygon', 'star', 'mosaic', 'scatter', 'library'])
+    expect(TOOLBAR_SHAPES.map(s => s.label)).toEqual(['Rectangle', 'Ellipse', 'Line', 'Polygon', 'Star', 'Mosaic', 'Scatter', 'Shape library…'])
   })
 
   it('defaults the face to Rectangle', () => {
