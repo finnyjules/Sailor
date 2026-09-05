@@ -8,46 +8,55 @@ uniform float u_hasInput;
 in vec2 v_texCoord;
 layout(location = 0) out vec4 fragColor0;
 
-// Culture: a plate of colonies. `count` soft bumps are SUMMED into ONE field, so
-// where two cells meet the total climbs past either peak and they read as one fused
-// colony instead of two overlapping circles. The field is then coloured by a RING
-// LADDER: the first ink is the plate, every ink after it is a ring further in, and
-// the ring boundaries are placed by RADIUS so the rings come out even in width.
+// Culture: a plate of colonies. Each of `count` cells contributes one round, soft
+// hump to a SINGLE field — added, never maxed or layered. Two cells that overlap
+// therefore push the total above what either reaches alone, and the pair reads as
+// one grown-together blob. That field is then inked by a RING LADDER: the first ink
+// paints the ground; each later ink takes a ring one step nearer the middle. Every
+// boundary is chosen as a RADIUS — the reason the rings stay comparable in width
+// rather than collapsing into one fat centre behind a thread-thin outline.
 //
 // Ported rule for rule from the playgrnd generator (reference line numbers below);
 // every hash, every draw and every line of GLSL here is our own.
 //
 //  1. ONE field, bumps SUMMED, profile (1-d^2)^2, nothing outside d<1   [ref 87-94]
 //       -> the cell loop in main(), `field += t * t`
-//  2. `fuse` widens every cell WITHOUT moving it (turning it up melts   [ref 68-74]
-//     the colonies together instead of re-dealing the plate)
+//  2. `fuse` scales each cell's radius and leaves its centre where it   [ref 68-74]
+//     was, so winding it up grows blobs into their neighbours rather
+//     than re-scattering the plate
 //       -> the (0.75 + fuse*0.8) factor in `baseR`; positions never see fuse
-//  3. base radius off sqrt(AREA) * 0.87, never off the width, so a wide [ref 71-74]
-//     frame is not a denser plate
+//  3. the radius follows sqrt(AREA) * 0.87 — area, not width — so       [ref 71-74]
+//     reshaping the frame keeps roughly the coverage it had, instead of
+//     packing a wide frame solid
 //       -> `baseR` carries sqrt(aspect): in frame-width units,
 //          sqrt(FW*FH)/FW == sqrt(FH/FW) == sqrt(H/W)
-//  4. cells run OFF the edges — a plate is a crop of something bigger   [ref 77-78]
+//  4. centres are scattered past all four borders, so blobs get cut by  [ref 77-78]
+//     the frame instead of tidily fitting inside it
 //       -> centres drawn over [-0.15, 1.15] of each side
 //  5. each cell has its own radius factor 0.55..1.45 and its own wobble [ref 79-80]
 //     phase
 //       -> draws 53u and 37u
-//  6. ring boundaries by RADIUS, converted back to a field value:       [ref 112-127]
-//     `cover` sets the plate/first-ring edge (t0 -> dEdge), `spread`
-//     powers the radii inward so above 1 the core tightens and the
-//     body widens; the ladder is capped at 1.55
+//  6. ring boundaries are chosen as radii and pushed back through the   [ref 112-127]
+//     bump profile into field values: `cover` fixes the outermost one
+//     (t0 -> dEdge) and `spread` raises the inner radii to a power, so
+//     above 1 the middle ink takes more room and the centre ink less;
+//     the top of the ladder is pinned at 1.55
 //       -> `t0`, `dEdge`, the `TH` ladder
-//  7. band position counted in WHOLE RINGS, so grain bites the same     [ref 149-157]
-//     amount whatever width a ring happens to be
+//  7. a pixel's place is measured in WHOLE RINGS (ring index plus the   [ref 149-157]
+//     fraction across it), so one notch of grain moves a pixel the same
+//     share of a ring however thick that ring is
 //       -> `band`
-//  8. grain twice: on the band position (grain*1.05) and on the colour  [ref 129-130,
-//     itself (grain*46 of 255), from two independent fields                158-161,
-//       -> `gq` / `gl`                                                     173-177]
+//  8. grain lands twice, from two unrelated noise fields: on the ring   [ref 129-130,
+//     position (grain*1.05), which frays the boundaries, and on the         158-161,
+//     finished RGB (grain*46 of 255), which speckles every pixel            173-177]
+//       -> `gq` / `gl`
 //  9. `tex` fine | stipple: the grain reads a SNAPPED pixel, (x/dot|0), [ref 131-132,
 //     so stipple is a coarse grain that never beats against the grid       159, 174]
 //       -> `gp`
-// 10. the crossing sits at the TOP of each band, `soft` wide, smoothed, [ref 165-170]
-//     so a boundary lands exactly on its ring's edge; near nothing and
-//     the rings are cut edges, wide open and each melts into the next
+// 10. the change from one ink to the next is squeezed into the LAST     [ref 165-170]
+//     `soft` of a band and smoothed, so the colour turns over right at
+//     the ring's edge: a small `soft` cuts a stencil-hard border, a big
+//     one spreads the turnover across most of the ring
 //       -> `fr`
 // 11. motion, one loop long: drift moves each cell on its own wobble    [ref 64-67,
 //     (amount*0.05 of the width), grow breathes its radius                 80-82,
@@ -56,20 +65,21 @@ layout(location = 0) out vec4 fragColor0;
 //       -> `drift`, `grow`, `roll`
 
 // ── the inks ────────────────────────────────────────────────────────────────────
-// ORDERED INK ROLES, not a smooth ramp: ink 0 is the plate, ink 1 the first ring
-// in, and so on to the core. The order IS the stop position — both upload paths
+// The stops are ORDERED ROLES, not a smooth ramp: stop 0 is the ground the blobs
+// sit on, and each stop after it takes the next ring inward, the last one the very
+// middle of a blob. The order IS the stop position — both upload paths
 // (shaderfx/params.ts cleanStops and the server's _shader_effects.py) sort stops by
 // pos before filling u_ramp, so a person reorders the roles by moving stops.
 #define MAXS 8
 uniform vec3 u_ramp[MAXS];
 uniform float u_rampPos[MAXS];
-uniform float u_rampCount;   // how many inks: the plate plus one ring each
+uniform float u_rampCount;   // how many inks: one for the ground, one per ring
 
 uniform float u_count;    // cells dropped on the plate
 uniform float u_size;     // cell size
 uniform float u_fuse;     // how much they melt together
-uniform float u_cover;    // where the plate ends and the first ring starts
-uniform float u_spread;   // how tightly the rest of the rings stack inside it
+uniform float u_cover;    // how much of a blob the outermost ink keeps
+uniform float u_spread;   // how far the inner boundaries are pulled toward the middle
 uniform float u_soft;     // width of the crossing between rings
 uniform float u_tex;      // 0 fine, 1 stipple
 uniform float u_grain;
@@ -125,7 +135,7 @@ void main() {
     vec2 pix = clamp(floor(vec2(v_texCoord.x * W, (1.0 - v_texCoord.y) * H)), vec2(0.0), vec2(W, H) - 1.0);
     vec2 P = pix / W;
 
-    // 1-5. Every cell drops a soft bump and the bumps ADD UP.
+    // 1-5. Every cell adds its bump into the same running total, so overlaps compound.
     float baseR = (0.05 + u_size * 0.20) * (0.75 + u_fuse * 0.8) * 0.87 * sqrt(A);
     float field = 0.0;
     for (int k = 0; k < MAXCELLS; k++) {
@@ -140,10 +150,12 @@ void main() {
         if (d2 < 1.0) { float t = 1.0 - d2; field += t * t; }
     }
 
-    // 6. The ring ladder. A cell's bump is steep at its rim and almost flat through
-    // its middle, so evenly spaced VALUES would give a hairline outer ring around a
-    // bloated core. Work each boundary's radius out first and convert it back to a
-    // value — (1-D^2)^2 is the bump — and the rings come out even in width.
+    // 6. The ring ladder. The bump profile drops away quickly near a cell's rim and
+    // barely moves near its middle, so cutting the field at equal VALUE steps would hand
+    // nearly the whole blob to the innermost ink and leave the outer ring a thread wide.
+    // Pick each boundary as a radius D and push it back through the profile ((1-D^2)^2)
+    // to get the value to compare against; the inks then divide a blob into bands of
+    // comparable thickness.
     float t0 = clamp((1.0 - u_cover) * 0.9, 0.002, 0.998);
     float dEdge = sqrt(max(0.0, 1.0 - sqrt(t0)));
     float TH[MAXS + 1];
@@ -164,7 +176,7 @@ void main() {
         prev = val;
     }
 
-    // 7. Where this pixel sits on the ladder, counted in whole rings.
+    // 7. Locate this pixel on the ladder, measured in whole rings.
     float band;
     if (field < TH[1]) {
         band = TH[1] > 0.0 ? field / TH[1] : 0.0;
@@ -185,7 +197,7 @@ void main() {
     float gq = u_grain * 1.05;
     if (gq > 0.002) band += (pixHash(gp, 1301u, seed) - 0.5) * gq;
 
-    // 10. Two neighbouring roles, crossed at the TOP of the band.
+    // 10. Mix the two neighbouring roles, the turnover squeezed into the band's last `soft`.
     band = clamp(band, 0.0, float(n - 1));
     int i0 = min(int(floor(band)), n - 2);
     float fr = band - float(i0);
@@ -203,7 +215,7 @@ void main() {
     int ib = i0 + 1 + roll;  ib -= (ib / n) * n;
     vec3 col = mix(u_ramp[clamp(ia, 0, MAXS - 1)], u_ramp[clamp(ib, 0, MAXS - 1)], fr);
 
-    // 8. ...and on the colour itself, all over, from an independent field.
+    // 8. ...and a second time on the finished RGB, every pixel, from an unrelated field.
     float gl = u_grain * 46.0;
     if (gl > 0.002) col += vec3((pixHash(gp, 7919u, seed) - 0.5) * gl * (1.0 / 255.0));
     col = clamp(col, 0.0, 1.0);

@@ -6,6 +6,7 @@ import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import type { ShaderFxCatalog, EffectDef } from '~/lib/shaderfx/types'
 import { composePasses } from '~/lib/shaderstudio/passes'
+import { stackWantsClock } from '~/lib/shaderstudio/clock'
 import { migrateShaderConfig } from '~/lib/shaderstudio/migrate'
 import { applyMotion } from '~/lib/shaderstudio/motion'
 import { makeImageSource, makeLiveSource, motionConfigFor, resolveSourceKind, type ResolvedSource } from '~/lib/shaderstudio/resolve'
@@ -54,7 +55,12 @@ const ownSourceUrl = computed(() => config.value.source.dataUrl
 
 /** Animate when EITHER our own tracks run or the source itself moves. */
 const sourceAnimated = computed(() => (resolved.value?.duration ?? 0) > 0)
-const shouldLoop = computed(() => animated.value || sourceAnimated.value)
+/** …or an effect in the stack draws itself off the clock (Speed dial up, Motion mode
+ *  running). Same rule as the modal — see lib/shaderstudio/clock.ts. The card's loop
+ *  stays gated on hover/visibility/occlusion below; this only widens WHAT counts as
+ *  moving, never WHEN the gate opens. */
+const effectAnimated = computed(() => stackWantsClock(config.value.effects, effectDef))
+const shouldLoop = computed(() => animated.value || sourceAnimated.value || effectAnimated.value)
 // Set while bakeOutput holds the shared shaderFx canvas. renderFrame is async
 // (it awaits getFrame), so a preview frame suspended at its await can resume mid-bake
 // and overwrite the canvas between bake's render() and its toBlob() read — corrupting

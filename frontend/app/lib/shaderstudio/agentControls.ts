@@ -288,12 +288,14 @@ function renderExamples(): string {
 /** Stated ceiling for the whole guidance block (characters). Pinned by a test —
  *  the derived index grows with the catalog, and this is the budget that says
  *  how much prompt the shader domain may take before it needs compressing.
- *  Raised 8000 -> 8300 when `culture` landed (2026-09-04): the catalog entry, the
+ *  Raised 8000 -> 8150 when `culture` landed (2026-09-04): the catalog entry, the
  *  modes caveat and one cluster line together cost ~130 chars and the block was
- *  already within 10 of the old figure. The NEXT effect to run it out should
- *  compress the clusters (they are the longest derived section) rather than
- *  raise this again — a ceiling that only ever moves up is not a budget. */
-export const SHADER_GUIDANCE_CEILING = 8300
+ *  already within 10 of the old figure. 8150 is the measured length (8128) rounded
+ *  up to the next 50 — headroom you have not spent is headroom the next effect will
+ *  spend without a decision. The NEXT effect to run it out should compress the
+ *  clusters (they are the longest derived section) rather than raise this again —
+ *  a ceiling that only ever moves up is not a budget. */
+export const SHADER_GUIDANCE_CEILING = 8150
 
 /**
  * Build the shader guidance. `catalog` is the live effect list.

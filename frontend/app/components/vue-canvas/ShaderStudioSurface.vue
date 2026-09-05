@@ -24,6 +24,7 @@ import { shaderFx } from '~/lib/shaderfx/renderer'
 import type { EffectDef, GradientStop, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/types'
 import { matchesShowWhen } from '~/lib/shaderfx/showWhen'
 import { composePasses, type EffectTextureBundle } from '~/lib/shaderstudio/passes'
+import { stackWantsClock } from '~/lib/shaderstudio/clock'
 import { migrateShaderConfig } from '~/lib/shaderstudio/migrate'
 import { ANIMATABLE, applyMotion } from '~/lib/shaderstudio/motion'
 import { ADJUST_PRESETS, applyAdjustPreset, EFFECT_LOOKS } from '~/lib/shaderstudio/presets'
@@ -92,8 +93,12 @@ const GENERATIVE_BASE = (() => {
 // (`effects.<idx>.params.<uniform>`), remapped on add/remove/reorder below.
 const activeEffect = ref(0)
 const activeEffectCfg = computed<StudioEffect>(() => config.value.effects[activeEffect.value] ?? config.value.effects[0]!)
-const effectDef = computed<EffectDef | null>(
-  () => catalog.value?.effects.find(e => e.id === resolveEffectId(activeEffectCfg.value?.id ?? '')) ?? null)
+/** Catalog lookup by (possibly legacy) id — the resolver composePasses, the active
+ *  def and the preview clock all read through. */
+function defForId(id: string): EffectDef | null {
+  return catalog.value?.effects.find(e => e.id === resolveEffectId(id)) ?? null
+}
+const effectDef = computed<EffectDef | null>(() => defForId(activeEffectCfg.value?.id ?? ''))
 // Generative effects synthesize their own output and don't require a source
 // image — see ShaderEffectNode's `isGenerative`, which this mirrors.
 const isGenerative = computed(() => !!effectDef.value?.generative)
@@ -215,7 +220,12 @@ function texBundle(def: EffectDef | null, layer?: StudioEffect): EffectTextureBu
 const animated = computed(() => (config.value.motion?.tracks?.length ?? 0) > 0)
 /** Animate when EITHER our own tracks run or the source itself moves (mirrors ShaderStudioNode). */
 const sourceAnimated = computed(() => (resolved.value?.duration ?? 0) > 0)
-const shouldLoop = computed(() => animated.value || sourceAnimated.value)
+/** …or the picture itself is drawn off the clock: an effect in the stack has its own
+ *  Speed dial up (or a Motion mode running). Without this the preview rendered a
+ *  single frame at u_time = 0, so every such dial looked dead in the studio while
+ *  the very same effect animated as a Frame fill. */
+const effectAnimated = computed(() => stackWantsClock(config.value.effects, defForId))
+const shouldLoop = computed(() => animated.value || sourceAnimated.value || effectAnimated.value)
 
 /** Seconds per loop — the upstream source's clock when it has one, else our own. */
 function clockDuration(): number {
@@ -246,7 +256,7 @@ async function renderFrame(t01: number) {
     // cfg.motion.duration, so passing upstream-derived seconds against our own
     // (different) duration would run every track at the wrong rate.
     const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
-    const passes = composePasses(cfg, id => catalog.value?.effects.find(e => e.id === resolveEffectId(id)) ?? null, t, (def, layer) => texBundle(def, layer))
+    const passes = composePasses(cfg, defForId, t, (def, layer) => texBundle(def, layer))
     el.getContext('2d')!.drawImage(shaderFx.render(passes, base, w, h), 0, 0)
     glError.value = null
   } catch (e: any) { glError.value = String(e?.message ?? e) }
@@ -552,7 +562,7 @@ async function renderBlob(t01: number): Promise<Blob> {
   const t = t01 * dur
   const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
   const base = src ? await src.getFrame(t01, w, h) : GENERATIVE_BASE
-  shaderFx.render(composePasses(cfg, id => catalog.value?.effects.find(e => e.id === resolveEffectId(id)) ?? null, t, (def, layer) => texBundle(def, layer)), base, w, h)
+  shaderFx.render(composePasses(cfg, defForId, t, (def, layer) => texBundle(def, layer)), base, w, h)
   const c = shaderFx.outputCanvas!
   return await new Promise<Blob>((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/png', 0.95))
 }

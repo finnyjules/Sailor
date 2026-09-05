@@ -3252,7 +3252,7 @@
       "textures": [],
       "generative": true,
       "params": [
-        { "uniform": "u_ramp", "label": "Inks (plate first, then each ring inward)", "type": "gradient", "maxStops": 8,
+        { "uniform": "u_ramp", "label": "Inks (ground first, then rings inward)", "type": "gradient", "maxStops": 8,
           "default": [
             { "pos": 0.0, "color": "#EF8F14" },
             { "pos": 0.5, "color": "#A81E12" },
