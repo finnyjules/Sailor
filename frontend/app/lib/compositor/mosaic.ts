@@ -14,7 +14,7 @@
  *   parcel    parcel      a coarse two-tone block field with survey-grid hairlines
  *   mosh      mosh        a corrupted signal: bands of glitch in hard inks
  *   carve     carve       one rectangle carved into panels, each a printed treatment
- *   totem     totem        a framed, matted screenprint plate, mirrored, with a core
+ *   totem     totem       a framed, matted screenprint plate, mirrored, with a core
  *   oddgrid   oddgrid     the Oddgrid SHADER (shader_effects/oddgrid.frag) as a fill
  *   static    static      the Static SHADER (shader_effects/static.frag) as a fill
  *

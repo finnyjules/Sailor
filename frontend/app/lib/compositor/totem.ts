@@ -16,8 +16,8 @@
  *   A2 [38-40] Whichever swatch measures lowest becomes the plate colour — it is what
  *      the panel is grounded in and what its keylines are struck in. A tie goes to
  *      whichever swatch came first.
- *   A3 [41-42] Everything else stays exactly as the row has it — no sort. That is
- *      why the swatch ORDER is a control and not decoration.
+ *   A3 [41-42] The remaining inks are never sorted: their positions in the row are
+ *      read directly as jobs (A4), so moving a swatch changes the print.
  *   A4 [45-47] Off that ordered remainder: the first is the mat, the one two from
  *      the end is the speckle mark (a single leftover falls back to the plate), and
  *      the whole remainder is the pool the blocks draw from.
@@ -86,8 +86,8 @@
  *   F7 [210-212] It is drawn through a flipped frame, so the rule reads backwards —
  *      and that reversal is why the diagonals meet along the centre line instead of
  *      carrying straight on across it.
- *   F8 [216] The original goes down a second time on top, which protects it whenever
- *      a twin's footprint overlaps back across the middle.
+ *   F8 [216] After the twin, the left block is painted once more. A twin whose
+ *      footprint crosses the centre line would otherwise cover part of it.
  *
  *  G. THE CORE (`totemCore`, `paintTotem`)
  *   G1 [221] Nothing is drawn when the size dial is at its floor.
@@ -140,7 +140,7 @@ export interface TotemParams {
   grain: number       // 16..220 short side divided by this gives the lattice unit
   mirror: number      // 0..1 how often the twin repeats its partner's deal
   variety: number     // 0..1 how many of the eleven cell rules are in play
-  core: number        // 0..0.6 the centre emblem's width, as a share of the short side
+  core: number        // 0..0.6 width of the centre stack, as a share of the short side
   coreRings: number   // 0..8 nested rects around it
   inks: string[]      // the ORDERED row of five: the order is what assigns the jobs
 }
@@ -204,7 +204,9 @@ export function normalizeTotem(partial: unknown, base: TotemParams = defaultTote
     typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fb
   const whole = (v: unknown, lo: number, hi: number, fb: number) => Math.round(num(v, lo, hi, fb))
   const L = TOTEM_LIMITS
-  const inks = Array.isArray(p.inks) ? p.inks.filter(isHex) : base.inks.slice()
+  // A screenprint ink is opaque: the picker's #rrggbbaa is cut to #rrggbb here,
+  // once, so nothing translucent ever reaches fillStyle.
+  const inks = Array.isArray(p.inks) ? p.inks.filter(isHex).map(h => h.slice(0, 7)) : base.inks.slice()
   return {
     border: num(p.border, L.border[0], L.border[1], base.border),
     mat: num(p.mat, L.mat[0], L.mat[1], base.mat),
@@ -346,6 +348,9 @@ export function totemKinds(variety: number, rand: () => number): TotemMotif[] {
  * indices the mirrored frame produces.
  */
 export function totemMotifOn(kind: TotemMotif, i: number, j: number, w: number, h: number, phase: number, rand: () => number): boolean {
+  // `phase` may be negative in principle (a caller's choice); the modulo below is
+  // the mathematical one so a negative sum still lands in 0..m-1. Cell indices
+  // themselves are always 0..cols-1 — the mirrored twin flips the transform, not i/j.
   const wrap = (n: number, m: number) => ((n % m) + m) % m
   switch (kind) {
     case 'solid': return true
@@ -419,13 +424,18 @@ export function totemCarve(x: number, y: number, w: number, h: number, n: number
 }
 
 /**
- * Rule F3 — deal one block. `solid` sits in the bag beside the patterns, and at this
- * many blocks it would carry far more of them than it should, so a draw that lands on
- * it is put back once when the coin allows. The ground comes out of the same pool with
- * the mark taken away and the plate colour listed twice over, which doubles the odds
- * of a block being grounded in it.
+ * Rule F3 — deal one block. Kind: one draw from the bag; if it is `solid`, a second
+ * coin (p = 0.55) replaces it with a fresh draw — `solid` is one entry among up to
+ * eleven yet needs damping because a flat block reads much louder than a patterned
+ * one. Ink `a`: one draw from the inks. Ground `b`: one draw from the inks plus the
+ * plate colour entered TWICE, with `a` removed — the double entry gives the plate
+ * colour twice the weight of any other ground.
  */
 export function totemDeal(kinds: readonly TotemMotif[], inks: readonly string[], dark: string, u: number, rand: () => number): TotemHand {
+  // Two guards the source does not need (its bag and inks are never empty) and
+  // that never fire here either: totemKinds returns at least two kinds and
+  // totemRoles never returns an empty ink list. Kept so a hand-built call cannot
+  // index into nothing.
   const bag = kinds.length ? kinds : (['solid'] as const)
   const pool = inks.length ? inks : [dark]
   let kind = bag[(rand() * bag.length) | 0]!
@@ -446,13 +456,13 @@ export function totemMirror(g: TotemRegion, cx: number, cw: number, halfW: numbe
 
 // ── Rule G: the core ─────────────────────────────────────────────────────────
 
-/** One rect of the nested emblem. */
+/** One rect of the centre stack. */
 export interface TotemRing { x: number; y: number; w: number; h: number; color: string }
-/** The emblem: its rings, and the box left over for the last deal. */
+/** The centre stack: its rings, and the box left over for the last deal. */
 export interface TotemCoreLayout { rings: TotemRing[]; inner: TotemRegion }
 
 /**
- * Rules G1–G5 — the emblem's rects, plus the box the closing motif gets. `null` when
+ * Rules G1–G5 — the centre stack's rects, plus the box the closing motif gets. `null` when
  * the size dial sits on its floor. Pure, so the ring colours and the step inwards
  * test without painting anything.
  */
@@ -572,7 +582,7 @@ export function paintTotem(ctx: TotemCtx, params: TotemParams, boxW: number, box
     }
   }
 
-  // G1–G6 — the emblem.
+  // G1–G6 — the centre stack.
   const core = totemCore(cx, cy, cw, ch, p, u, seed, roles)
   if (core) {
     for (const ring of core.rings) {

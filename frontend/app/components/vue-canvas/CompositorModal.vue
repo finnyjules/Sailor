@@ -813,7 +813,7 @@ const carvePreset = computed(() => {
 })
 /** Totem — the Totem generator (lib/compositor/totem): a framed screenprint plate on
  *  a speckled mat, the left half carved into blocks of two-colour cell rules and
- *  folded onto the right, with a nested emblem at the centre (cellFill:'totem'). The
+ *  folded onto the right, with a stack of nested rects at its middle (cellFill:'totem'). The
  *  deal's grid is untouched: only its seed carries the variation. */
 /** Patch a deal's Totem tunables (one history step via setLocal). */
 function patchTotem(layer: DealLayer, patch: Partial<TotemParams>) {

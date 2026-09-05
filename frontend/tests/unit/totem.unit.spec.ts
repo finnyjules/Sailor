@@ -46,7 +46,7 @@ describe('params and palettes', () => {
       grain: 220, mirror: defaultTotem().mirror, variety: defaultTotem().variety,
       core: 0.6, coreRings: 0,
     })
-    expect(n.inks).toEqual(['#ABCDEF', '#112233ff'])
+    expect(n.inks).toEqual(['#ABCDEF', '#112233']) // alpha cut: an ink is opaque
     // Nothing sensible at all falls back to the defaults, inks included.
     expect(normalizeTotem(null)).toEqual(defaultTotem())
     expect(normalizeTotem({ inks: [] }).inks).toEqual(defaultTotem().inks)
@@ -268,7 +268,7 @@ describe('totemMotifOn — the eleven cell rules, pinned', () => {
     expect([on('hline', 0, 0), on('hline', 3, 0), on('hline', 0, 1)]).toEqual([true, true, false])
     expect([on('vline', 0, 0), on('vline', 0, 3), on('vline', 1, 0)]).toEqual([true, true, false])
   })
-  it('the two diagonals are two-on two-off bands running opposite ways, safe at negative indices', () => {
+  it('the two diagonals are two-on two-off bands running opposite ways, and a negative phase still wraps', () => {
     expect([0, 1, 2, 3, 4].map(i => on('diag', i, 0))).toEqual([true, true, false, false, true])
     expect([0, 1, 2, 3, 4].map(i => on('diagB', i, 0))).toEqual([true, true, false, false, true])
     expect([0, 1, 2, 3].map(j => on('diagB', 0, j))).toEqual([true, false, false, true])
@@ -357,7 +357,7 @@ describe('totemMirror — where the twin lands', () => {
 })
 
 // ── Rule H: the core ─────────────────────────────────────────────────────────
-describe('totemCore — the nested block at dead centre', () => {
+describe('totemCore — the centre stack', () => {
   const roles = totemRoles(PAL)
   it('sits centred on the lattice, taller than it is wide by a factor the seed picks', () => {
     const c = totemCore(105, 105, 590, 390, P(), 5, 12, roles)!
