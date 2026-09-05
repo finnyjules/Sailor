@@ -39,12 +39,13 @@ import { defaultParcel } from '~/lib/compositor/parcel'
 import { defaultMosh } from '~/lib/compositor/mosh'
 import { defaultCarve } from '~/lib/compositor/carve'
 import { defaultTotem } from '~/lib/compositor/totem'
+import { defaultBlueprint } from '~/lib/compositor/blueprint'
 
 /** A deal layer's `cellFill` value. Mirrors `DealLayer['cellFill']` (kept here so
  *  this module stays import-light — the agent surface and specs import it too). */
-export type MosaicCellFill = 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'totem' | 'oddgrid' | 'static'
+export type MosaicCellFill = 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'totem' | 'blueprint' | 'oddgrid' | 'static'
 /** The agent-facing / inspector-facing style word. */
-export type MosaicStyle = 'tiles' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'totem' | 'oddgrid' | 'static'
+export type MosaicStyle = 'tiles' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'totem' | 'blueprint' | 'oddgrid' | 'static'
 /** The styles painted by a shader field rather than a canvas generator. */
 export type MosaicShaderFill = 'oddgrid' | 'static'
 
@@ -64,6 +65,7 @@ export const MOSAIC_STYLES: readonly MosaicStyleRow[] = [
   { style: 'mosh', cellFill: 'mosh', label: 'Mosh' },
   { style: 'carve', cellFill: 'carve', label: 'Carve' },
   { style: 'totem', cellFill: 'totem', label: 'Totem' },
+  { style: 'blueprint', cellFill: 'blueprint', label: 'Blueprint' },
   { style: 'oddgrid', cellFill: 'oddgrid', label: 'Oddgrid' },
   { style: 'static', cellFill: 'static', label: 'Static' },
 ]
@@ -232,6 +234,7 @@ export function mosaicStylePatch(layer: DealLayer, fill: MosaicCellFill): Partia
   if (fill === 'mosh') patch.mosh = layer.mosh ?? defaultMosh()
   if (fill === 'carve') patch.carve = layer.carve ?? defaultCarve()
   if (fill === 'totem') patch.totem = layer.totem ?? defaultTotem()
+  if (fill === 'blueprint') patch.blueprint = layer.blueprint ?? defaultBlueprint()
   if (isMosaicShaderFill(fill)) {
     // Prefer the spec last used for THIS effect (stashed below on the way out), then
     // the live slot when it already targets it, else a fresh one at the layer's seed.

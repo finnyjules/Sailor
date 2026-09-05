@@ -27,7 +27,7 @@ export const DEAL_VOCABS: readonly DealVocab[] = ['brand', 'mono', 'warm', 'cool
  * Does the vocabulary change what this deal LOOKS like? Only `solid` deals every
  * cell from it; `modular` reads it when its own ink list is empty (the default);
  * `pane` only when it has fewer than 2 inks of its own (the default ships 8);
- * `parcel`, `mosh`, `carve` and `totem` carry their own colours and never read it. The inspector
+ * `parcel`, `mosh`, `carve`, `totem` and `blueprint` carry their own colours and never read it. The inspector
  * hides the Palette control when this is false — a control that stores a value
  * nothing consumes is a dead control.
  */

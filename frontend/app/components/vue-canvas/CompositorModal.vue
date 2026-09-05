@@ -23,6 +23,7 @@ import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, p
 import { defaultMosh, MOSH_LIMITS, MOSH_PRESET_NAMES, moshPresetPatch, moshPresetOf, type MoshParams, type MoshPresetName } from '~/lib/compositor/mosh'
 import { defaultCarve, CARVE_LIMITS, CARVE_PRESET_NAMES, carvePresetPatch, carvePresetOf, type CarveParams, type CarvePresetName } from '~/lib/compositor/carve'
 import { defaultTotem, normalizeTotem, TOTEM_LIMITS, TOTEM_PRESET_NAMES, totemPresetPatch, totemPresetOf, totemInkPatch, type TotemParams, type TotemPresetName } from '~/lib/compositor/totem'
+import { defaultBlueprint, normalizeBlueprint, BLUEPRINT_LIMITS, BLUEPRINT_CORNERS, BLUEPRINT_PRESET_NAMES, blueprintPresetPatch, blueprintPresetOf, type BlueprintParams, type BlueprintPresetName } from '~/lib/compositor/blueprint'
 import {
   SCATTER_STYLE_LABELS, scatterStyleRow, scatterLabelOf, scatterStyleOfLabel, scatterParams,
   scatterStylePatch, scatterSeedPatch, freshScatterSeed, DEFAULT_SCATTER_SEED,
@@ -840,6 +841,37 @@ const totemPreset = computed(() => {
   const l = selectedLocal.value
   if (!l || l.kind !== 'deal') return ''
   return totemPresetOf(normalizeTotem((l as DealLayer).totem ?? defaultTotem())) ?? ''
+})
+/** Blueprint — a technical drafting grid (lib/compositor/blueprint): a cartesian
+ *  minor/major lattice plus a polar overlay (dashed radial spokes, concentric arcs
+ *  with hatch ticks and angle labels) struck from a seeded origin (cellFill:'blueprint').
+ *  The deal's grid is untouched: only its seed carries the variation. */
+/** Patch a deal's Blueprint tunables (one history step via setLocal). */
+function patchBlueprint(layer: DealLayer, patch: Partial<BlueprintParams>) {
+  setLocal(layer.id, { blueprint: { ...(layer.blueprint ?? defaultBlueprint()), ...patch } } as Partial<DealLayer>)
+}
+/** One role ink of the Blueprint changed by hand — the picker's alpha is cut (an ink
+ *  is opaque; per-element dimming comes from the dials, not the hex). */
+function patchBlueprintInk(layer: DealLayer, role: 'paper' | 'ink' | 'inkDim', hex: string) {
+  const cut = /^#[0-9a-fA-F]{8}$/.test(hex) ? hex.slice(0, 7) : hex
+  patchBlueprint(layer, { [role]: cut } as Partial<BlueprintParams>)
+}
+/** The selected Blueprint's normalized params (for reading dials / swatches back). */
+const blueprintParams = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return defaultBlueprint()
+  return normalizeBlueprint((l as DealLayer).blueprint ?? defaultBlueprint())
+})
+/** Apply a named palette preset (paper + ink + inkDim) to a Blueprint deal. */
+function applyBlueprintPreset(layer: DealLayer, name: string) {
+  if (!(BLUEPRINT_PRESET_NAMES as string[]).includes(name)) return
+  patchBlueprint(layer, blueprintPresetPatch(name as BlueprintPresetName))
+}
+/** Which preset the selected Blueprint deal currently matches ('' when custom). */
+const blueprintPreset = computed(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'deal') return ''
+  return blueprintPresetOf(normalizeBlueprint((l as DealLayer).blueprint ?? defaultBlueprint())) ?? ''
 })
 /** The Mosaic's Style option currently showing (the style table lives in
  *  lib/compositor/mosaic — one vocabulary for the inspector, the agent and the specs). */
@@ -7197,6 +7229,63 @@ onUnmounted(() => {
               </div>
               <StudioSelect label="Palette" :options="TOTEM_PRESET_NAMES as any"
                 :model-value="totemPreset" @update:model-value="(v: any) => applyTotemPreset(selectedLocal as DealLayer, v)" />
+            </div>
+            <!-- Blueprint draws its OWN drafting grid, so the shared grid controls
+                 (density / inset / regularity / merge) have nothing to say about it. -->
+            <div v-else-if="(selectedLocal as any).cellFill === 'blueprint'" class="mt-2 flex flex-col gap-1.5">
+              <div class="panel-label mt-1">Grid</div>
+              <StudioSlider label="Cells" :min="BLUEPRINT_LIMITS.cells[0]" :max="BLUEPRINT_LIMITS.cells[1]" :step="1" :bindable="false"
+                :model-value="blueprintParams.cells"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { cells: Math.round(v) })" />
+              <StudioSlider label="Major every" :min="BLUEPRINT_LIMITS.major[0]" :max="BLUEPRINT_LIMITS.major[1]" :step="1" :bindable="false"
+                :model-value="blueprintParams.major"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { major: Math.round(v) })" />
+              <StudioSlider label="Minor opacity" :min="BLUEPRINT_LIMITS.minorAlpha[0]" :max="BLUEPRINT_LIMITS.minorAlpha[1]" :step="0.01" :bindable="false"
+                :model-value="blueprintParams.minorAlpha"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { minorAlpha: v })" />
+              <StudioSlider label="Major weight" :min="BLUEPRINT_LIMITS.majorWidth[0]" :max="BLUEPRINT_LIMITS.majorWidth[1]" :step="0.05" :bindable="false"
+                :model-value="blueprintParams.majorWidth"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { majorWidth: v })" />
+              <div class="panel-label mt-1">Origin &amp; fan</div>
+              <StudioSelect label="Corner" :options="BLUEPRINT_CORNERS as any"
+                :model-value="blueprintParams.corner" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { corner: v })" />
+              <StudioSlider label="Origin X" :min="BLUEPRINT_LIMITS.originX[0]" :max="BLUEPRINT_LIMITS.originX[1]" :step="0.01" :bindable="false"
+                :model-value="blueprintParams.originX"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { originX: v })" />
+              <StudioSlider label="Origin Y" :min="BLUEPRINT_LIMITS.originY[0]" :max="BLUEPRINT_LIMITS.originY[1]" :step="0.01" :bindable="false"
+                :model-value="blueprintParams.originY"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { originY: v })" />
+              <StudioSlider label="Angle start" :min="BLUEPRINT_LIMITS.angleStart[0]" :max="BLUEPRINT_LIMITS.angleStart[1]" :step="1" :bindable="false"
+                :model-value="blueprintParams.angleStart"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { angleStart: v })" />
+              <StudioSlider label="Angle step" :min="BLUEPRINT_LIMITS.angleStep[0]" :max="BLUEPRINT_LIMITS.angleStep[1]" :step="1" :bindable="false"
+                :model-value="blueprintParams.angleStep"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { angleStep: Math.round(v) })" />
+              <StudioSlider label="Angle spread" :min="BLUEPRINT_LIMITS.angleSpread[0]" :max="BLUEPRINT_LIMITS.angleSpread[1]" :step="1" :bindable="false"
+                :model-value="blueprintParams.angleSpread"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { angleSpread: v })" />
+              <div class="panel-label mt-1">Arcs &amp; labels</div>
+              <StudioSlider label="Arcs" :min="BLUEPRINT_LIMITS.arcs[0]" :max="BLUEPRINT_LIMITS.arcs[1]" :step="1" :bindable="false"
+                :model-value="blueprintParams.arcs"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { arcs: Math.round(v) })" />
+              <StudioSlider label="Arc gap" :min="BLUEPRINT_LIMITS.arcGap[0]" :max="BLUEPRINT_LIMITS.arcGap[1]" :step="0.01" :bindable="false"
+                :model-value="blueprintParams.arcGap"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { arcGap: v })" />
+              <StudioSlider label="Tick step" :min="BLUEPRINT_LIMITS.tickStep[0]" :max="BLUEPRINT_LIMITS.tickStep[1]" :step="1" :bindable="false"
+                :model-value="blueprintParams.tickStep"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { tickStep: Math.round(v) })" />
+              <StudioSlider label="Labels" :min="BLUEPRINT_LIMITS.labels[0]" :max="BLUEPRINT_LIMITS.labels[1]" :step="0.01" :bindable="false"
+                :model-value="blueprintParams.labels"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { labels: v })" />
+              <!-- Three role inks: paper (ground), ink (lines/labels), inkDim (minor grid). -->
+              <div class="panel-label mt-1">Inks</div>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <StudioColor :model-value="blueprintParams.paper" @update:model-value="(v: string) => patchBlueprintInk(selectedLocal as DealLayer, 'paper', v)" />
+                <StudioColor :model-value="blueprintParams.ink" @update:model-value="(v: string) => patchBlueprintInk(selectedLocal as DealLayer, 'ink', v)" />
+                <StudioColor :model-value="blueprintParams.inkDim" @update:model-value="(v: string) => patchBlueprintInk(selectedLocal as DealLayer, 'inkDim', v)" />
+              </div>
+              <StudioSelect label="Palette" :options="BLUEPRINT_PRESET_NAMES as any"
+                :model-value="blueprintPreset" @update:model-value="(v: any) => applyBlueprintPreset(selectedLocal as DealLayer, v)" />
             </div>
             <!-- Pane has its OWN layout (row masonry, every cell flush and filled), so the
                  grid controls (density / inset / regularity / merge) don't apply to it. -->

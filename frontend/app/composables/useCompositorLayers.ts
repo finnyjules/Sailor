@@ -65,6 +65,7 @@ import { paintParcel, defaultParcel, type ParcelParams } from '~/lib/compositor/
 import { paintMosh, defaultMosh, type MoshParams } from '~/lib/compositor/mosh'
 import { paintCarve, defaultCarve, normalizeCarve, type CarveParams } from '~/lib/compositor/carve'
 import { paintTotem, defaultTotem, normalizeTotem, type TotemParams } from '~/lib/compositor/totem'
+import { paintBlueprint, defaultBlueprint, normalizeBlueprint, type BlueprintParams } from '~/lib/compositor/blueprint'
 import type { ChaffParams } from '~/lib/compositor/chaff'
 import type { StrandParams } from '~/lib/compositor/strand'
 import type { HuskParams } from '~/lib/compositor/husk'
@@ -619,6 +620,10 @@ export interface DealLayer extends LayerCommon {
   // plate on a speckled mat, its left half carved into blocks of two-colour cell
   // rules and folded onto the right, with a small stack of rectangles standing at
   // its exact middle — grid / density / inset are ignored too.
+  // 'blueprint' = the Blueprint generator (lib/compositor/blueprint): a technical
+  // drafting grid — a cartesian minor/major lattice plus a polar overlay (radial
+  // dashed spokes, concentric arcs with hatch ticks and angle labels) struck from a
+  // seeded origin — grid / density / inset are ignored too.
   // 'oddgrid' / 'static' = the two SHADER styles (shader_effects/oddgrid.frag,
   // static.frag): the box is painted with a shader Fill through the same
   // resolvePaint path a rect uses, `shader` below holding the spec — grid /
@@ -626,7 +631,7 @@ export interface DealLayer extends LayerCommon {
   // Absent behaves as 'solid'.
   // People see these as the Mosaic element's STYLES (lib/compositor/mosaic maps the
   // words: 'solid' is "Tiles"); the field keeps its name so saved frames load as-is.
-  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'totem' | 'oddgrid' | 'static'
+  cellFill?: 'solid' | 'pane' | 'modular' | 'parcel' | 'mosh' | 'carve' | 'totem' | 'blueprint' | 'oddgrid' | 'static'
   // The ShaderSpec the shader styles paint with (effectId = the cellFill, seed =
   // grid.gen.seed, speed 0, frame-anchored); only read when cellFill is 'oddgrid'
   // or 'static'. Absent ⇒ derived at the layer's seed (mosaicShaderSpec).
@@ -655,6 +660,10 @@ export interface DealLayer extends LayerCommon {
   // variety / core / coreRings + the 5 ordered inks); only read when cellFill is
   // 'totem'. Absent ⇒ defaultTotem().
   totem?: TotemParams
+  // Blueprint's tunables (cells / major / minorAlpha / majorWidth / corner / origin /
+  // angleStart / angleStep / angleSpread / arcs / arcGap / tickStep / labels + the 3
+  // role inks); only read when cellFill is 'blueprint'. Absent ⇒ defaultBlueprint().
+  blueprint?: BlueprintParams
 }
 
 /**
@@ -832,6 +841,7 @@ export function createDealLayer(partial: Partial<DealLayer> = {}): DealLayer {
     mosh: defaultMosh(),
     carve: defaultCarve(),
     totem: defaultTotem(),
+    blueprint: defaultBlueprint(),
     ...partial,
     grid,
   }
@@ -2287,6 +2297,17 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // `totem`), and paintTotem normalizes its params — including the ink row it reads
       // the roles off — so the raw object is safe to hand it.
       paintTotem(ctx, normalizeTotem(layer.totem ?? defaultTotem()), boxW, boxH, seed)
+    } else if (layer.cellFill === 'blueprint') {
+      // Blueprint paints its OWN drafting grid — NOT the shared grid: the paper ground,
+      // the cartesian minor/major lattice, then the polar overlay (dashed radial spokes,
+      // concentric arcs with hatch ticks, and angle labels) struck from a seeded origin,
+      // straight on the real ctx. It writes no absolute globalAlpha / composite op (every
+      // per-element dim is baked into an rgba ink), and resets its spoke line-dash. The
+      // origin may sit outside the box; this branch's clip trims the fan. Regularity /
+      // merge / density / inset / force-keep don't apply; only the grid's seed carries the
+      // variation (it rolls the origin corner + offset). Raw layers reach paint
+      // un-normalized, and paintBlueprint normalizes its own params.
+      paintBlueprint(ctx, normalizeBlueprint(layer.blueprint ?? defaultBlueprint()), boxW, boxH, seed)
     } else {
       // Resolve cells FLUSH (gutter 0): the deal's only cell gap is `cellInset`, applied
       // per cell below. The grid's own gutter would add a second, hidden gap so cells are
