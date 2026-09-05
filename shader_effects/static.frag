@@ -173,8 +173,8 @@ bool originalBit(uint s, int n, float u, float v, float gw, float gh) {
 // from the last to the first maps this cell to the source cell whose original bit
 // it shows. Loop caps: 64 shifts, 16 smears, 8 drops (the counts are 0.3*rows,
 // 0.08*rows and 6 at full glitch; rows only pass 213 on a tall grid at max res).
-#define MAXSHIFT 64
-#define MAXSMEAR 16
+#define MAXSHIFT 96
+#define MAXSMEAR 26
 #define MAXDROP 8
 
 // Pixel edge of grid line `i` for `n` cells over `len` pixels: rounded to a whole
