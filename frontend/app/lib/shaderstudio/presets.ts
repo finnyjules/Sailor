@@ -24,6 +24,24 @@ export const ADJUST_PRESETS: AdjustPreset[] = [
   { name: 'B&W', values: { saturation: -1, contrast: 0.15 } },
 ]
 
+/**
+ * One-click looks for an effect: a named set of its own param values, keyed by
+ * effect id. Applied through the same `setParam` path the sliders use, so a look
+ * is just a bundle of edits — nothing else is stored. Inks and colours are left
+ * alone so a look never throws away a chosen palette.
+ */
+export interface EffectLook { name: string; params: Record<string, number> }
+
+export const EFFECT_LOOKS: Record<string, EffectLook[]> = {
+  oddgrid: [
+    { name: 'Patchwork', params: { u_scale: 13, u_density: 0.82, u_block: 0.75, u_bsize: 6, u_grain: 0.75, u_variety: 0.55, u_speck: 0.1, u_balance: 0, u_motif: 0, u_motifAmt: 0 } },
+    { name: 'Bloom', params: { u_scale: 9, u_density: 0.52, u_block: 0.1, u_bsize: 4, u_grain: 0.28, u_variety: 0.15, u_speck: 0.04, u_balance: 0.1, u_motif: 1, u_motifAmt: 0.9 } },
+    { name: 'Quilt', params: { u_scale: 8, u_density: 0.95, u_block: 0.28, u_bsize: 5, u_grain: 0.55, u_variety: 0.2, u_speck: 0.12, u_balance: 0.6, u_motif: 4, u_motifAmt: 0.12 } },
+    { name: 'Scatter', params: { u_scale: 12, u_density: 0.32, u_block: 0.05, u_bsize: 4, u_grain: 0.5, u_variety: 0.4, u_speck: 0.1, u_balance: 0, u_motif: 1, u_motifAmt: 0.55 } },
+    { name: 'Drift', params: { u_scale: 16, u_density: 0.65, u_block: 0.6, u_bsize: 9, u_grain: 0.18, u_variety: 0.5, u_speck: 0.03, u_balance: 0.2, u_motif: 0, u_motifAmt: 0 } },
+  ],
+}
+
 /** Reset to neutral, then apply the preset's overrides. Keeps `enabled` as-is. */
 export function applyAdjustPreset(adjust: StudioAdjust, preset: AdjustPreset): void {
   const neutral = ADJUST_PRESETS[0]!.values

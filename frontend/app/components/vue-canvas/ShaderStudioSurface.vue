@@ -26,7 +26,7 @@ import { matchesShowWhen } from '~/lib/shaderfx/showWhen'
 import { composePasses, type EffectTextureBundle } from '~/lib/shaderstudio/passes'
 import { migrateShaderConfig } from '~/lib/shaderstudio/migrate'
 import { ANIMATABLE, applyMotion } from '~/lib/shaderstudio/motion'
-import { ADJUST_PRESETS, applyAdjustPreset } from '~/lib/shaderstudio/presets'
+import { ADJUST_PRESETS, applyAdjustPreset, EFFECT_LOOKS } from '~/lib/shaderstudio/presets'
 import { assertEmbeddableSource, exportClock, makeImageSource, makeLiveSource, motionConfigFor, resolveSourceKind, type ResolvedSource } from '~/lib/shaderstudio/resolve'
 import { frameSourceEpoch } from '~/lib/studio/frameSource'
 import { loadImage } from '~/lib/shaderstudio/source'
@@ -412,6 +412,18 @@ function rampCss(stops: { pos: number; color: string }[]): string {
 }
 const gradientMapRampCss = computed(() => rampCss(config.value.gradientMap.stops))
 function pickAdjustPreset(name: string) { const p = ADJUST_PRESETS.find(x => x.name === name); if (p) { applyAdjustPreset(config.value.adjust, p); config.value.adjust.enabled = true } }
+
+// ── effect looks: one-click param bundles for effects that declare them ──────
+const CUSTOM_LOOK = 'Custom'
+const effectLooks = computed(() => (effectDef.value ? EFFECT_LOOKS[effectDef.value.id] ?? [] : []))
+// The row shows the look the current params match, or Custom once any slider moved.
+const currentLook = computed(() =>
+  effectLooks.value.find(l => Object.entries(l.params).every(([k, v]) => Math.abs(numValue(k) - v) < 1e-6))?.name ?? CUSTOM_LOOK)
+function pickEffectLook(name: string) {
+  const look = effectLooks.value.find(l => l.name === name)
+  if (!look) return
+  for (const [k, v] of Object.entries(look.params)) setParam(k, v)
+}
 
 // ── focus-point drag pad ────────────────────────────────────────────────────
 let draggingFocus = false
@@ -964,6 +976,14 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
           <span class="min-w-0 flex-1 truncate text-[11px] text-white/90">{{ effectDef?.name ?? 'Pick an effect' }}</span>
           <ChevronRight class="size-3.5 shrink-0 text-white/30" />
         </button>
+        <div v-if="effectLooks.length" class="mb-1.5">
+          <StudioSelect
+            label="Look"
+            :options="[CUSTOM_LOOK, ...effectLooks.map(l => l.name)]"
+            :model-value="currentLook"
+            @update:model-value="pickEffectLook"
+          />
+        </div>
         <template v-for="p in effectDef?.params ?? []" :key="p.uniform">
           <div v-if="matchesShowWhen(p.showWhen, numValue)" class="mb-1.5">
             <!-- enum → select row (map the manifest's numeric value ⟷ its label) -->
