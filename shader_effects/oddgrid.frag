@@ -44,7 +44,10 @@ float fbmN(vec2 p, float seed, int oct) {
 float stretch(float v, float k) { return clamp((v - 0.5) * k + 0.5, 0.0, 1.0); }
 
 // The palette is an ORDERED list of inks: a filled cell's field value picks an
-// index into it, low to high. Stop positions are ignored.
+// index into it, low to high. The order IS the stop position — both upload
+// paths (shaderfx/params.ts cleanStops and the server's _shader_effects.py)
+// sort stops by pos before filling u_ramp, so a user reorders inks by moving
+// stops, not by list order.
 #define MAXS 8
 uniform vec3 u_ramp[MAXS];
 uniform float u_rampPos[MAXS];
