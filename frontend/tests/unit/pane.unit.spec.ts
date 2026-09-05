@@ -269,6 +269,21 @@ describe('paneRampStops (rule 7)', () => {
     // …and the middle keeps its saturation (electric, not muddy).
     expect(hexToHsl(stops[Math.floor(stops.length / 2)]!.color)[1]).toBeGreaterThan(0.9)
   })
+
+  it('walks in HSL specifically (not OKLCH): the middle stop is the linear HSL midpoint, hue along the short arc', () => {
+    // Pins the colour SPACE. An OKLCH walk also passes the chord/saturation tests above,
+    // but its midpoint lands on a different HSL triple — this catches that substitution.
+    const stops = paneRampStops('#ff6259', '#0e6bff', 0, 1)
+    const A = hexToHsl('#ff6259'), B = hexToHsl('#0e6bff')
+    let dh = B[0] - A[0]
+    if (dh > 180) dh -= 360; else if (dh < -180) dh += 360
+    const [h, s, l] = hexToHsl(stops[Math.floor(stops.length / 2)]!.color)
+    const expectH = (((A[0] + dh / 2) % 360) + 360) % 360
+    const hueDiff = Math.min(Math.abs(h - expectH), 360 - Math.abs(h - expectH))
+    expect(hueDiff).toBeLessThan(1.5)                        // hex rounding only
+    expect(Math.abs(s - (A[1] + B[1]) / 2)).toBeLessThan(0.02)
+    expect(Math.abs(l - (A[2] + B[2]) / 2)).toBeLessThan(0.02)
+  })
 })
 
 // ── The whole cell ───────────────────────────────────────────────────────────
@@ -377,11 +392,11 @@ describe('deal layer render with cellFill:pane (headless)', () => {
       expect([f.x, f.y, f.w, f.h]).toEqual([r.x, r.y, r.w, r.h])
       expect(f.grad).toBe(g)
       expect(g.stops).toBe(2 + (PANE_RAMP_STEPS - 1) + (paneCellPick(defaultPane(), 7, 9, r.i, r.j).p0 > 0 ? 1 : 0) + (paneCellPick(defaultPane(), 7, 9, r.i, r.j).p1 < 1 ? 1 : 0))
-      // Each endpoint lies on a corner or an edge midpoint… of THIS cell.
-      for (const [px, py] of [[g.x0, g.y0], [g.x1, g.y1]] as const) {
-        expect([r.x, r.x + r.w]).toContain(px)
-        expect([r.y, r.y + r.h]).toContain(py)
-      }
+      // The gradient endpoints are EXACTLY the picked direction vector mapped over THIS
+      // cell — not merely "some corner or edge" (which a transposed x0/y0 would also
+      // satisfy). Ties the painted geometry to the pick.
+      const d = paneCellPick(defaultPane(), 7, 9, r.i, r.j).dir
+      expect([g.x0, g.y0, g.x1, g.y1]).toEqual([r.x + d[0] * r.w, r.y + d[1] * r.h, r.x + d[2] * r.w, r.y + d[3] * r.h])
     }
     // No cell has a gap to its row neighbour.
     const rows = new Map<number, typeof mainFills>()
