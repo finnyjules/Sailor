@@ -28,7 +28,7 @@ describe('params and palettes', () => {
     })
     const d = defaultBlueprint()
     expect(d).toMatchObject({
-      cells: 24, major: 5, minorAlpha: 0.35, majorWidth: 1.6, corner: 'bl',
+      cells: 32, major: 5, minorAlpha: 0.5, majorWidth: 1.6, corner: 'bl',
       originX: 0, originY: 0, angleStart: 0, angleStep: 15, angleSpread: 90,
       arcs: 4, arcGap: 0.22, tickStep: 5, labels: 1,
     })
@@ -239,9 +239,9 @@ describe('paintBlueprint', () => {
     paintBlueprint(rec.ctx, P(), W, H, 12)
     const strokes = rec.ops.filter(o => o.op === 'stroke') as Extract<Op, { op: 'stroke' }>[]
     const alpha = (rgba: string) => Number(rgba.split(',')[3]?.replace(')', '') ?? '1')
-    // The minor grid is the only dash-free stroke at minorAlpha (0.35); the major grid
+    // The minor grid is the only dash-free stroke at minorAlpha (0.5); the major grid
     // is the only dash-free full-strength stroke (arcs 0.9, ticks 0.9, spokes 0.7).
-    const minor = strokes.find(s => s.dash.length === 0 && Math.abs(alpha(s.style) - 0.35) < 0.02)!
+    const minor = strokes.find(s => s.dash.length === 0 && Math.abs(alpha(s.style) - 0.5) < 0.02)!
     const major = strokes.find(s => s.dash.length === 0 && alpha(s.style) === 1)!
     expect(minor).toBeDefined()
     expect(major).toBeDefined()

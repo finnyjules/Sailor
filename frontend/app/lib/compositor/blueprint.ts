@@ -92,7 +92,7 @@ export interface BlueprintPalettePreset { paper: string; ink: string; inkDim: st
 
 export const BLUEPRINT_PALETTE_PRESETS = {
   // The reference: bright green lines on a dark blueprint green.
-  Blueprint: { paper: '#12352a', ink: '#79e0a8', inkDim: '#3c6b54' },
+  Blueprint: { paper: '#173a2c', ink: '#e8e85a', inkDim: '#9aa046' },
   'Cyan on navy': { paper: '#0b1e3a', ink: '#4fd0e6', inkDim: '#2a5a78' },
   'Black on cream': { paper: '#efe9d8', ink: '#1c1c1c', inkDim: '#b3a988' },
   'Amber on charcoal': { paper: '#1c1a17', ink: '#f0a838', inkDim: '#6b5730' },
@@ -111,7 +111,7 @@ export const BLUEPRINT_LIMITS = {
 /** The opening picture — the reference blueprint green, a quarter fan of four arcs. */
 export function defaultBlueprint(): BlueprintParams {
   return {
-    cells: 24, major: 5, minorAlpha: 0.35, majorWidth: 1.6, corner: 'bl',
+    cells: 32, major: 5, minorAlpha: 0.5, majorWidth: 1.6, corner: 'bl',
     originX: 0, originY: 0, angleStart: 0, angleStep: 15, angleSpread: 90,
     arcs: 4, arcGap: 0.22, tickStep: 5, labels: 1,
     ...BLUEPRINT_PALETTE_PRESETS.Blueprint,
