@@ -2020,10 +2020,12 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // rather than inheriting whatever the outer shape transform last captured.
       const prevFieldBase = _fieldCtx.base
       if (typeof DOMMatrix !== 'undefined' && isFill(layer.fill) && fillIsShader(layer.fill) && layer.fill.shader.anchor === 'frame') {
-        // Stroke space is now scaled by W*dpr*scale (see octx.translate above), so the
-        // translate carries `* scale` to match; scaleSelf(dpr) stays as-is (the field
-        // base maps stroke space → device, and the dpr scale of that mapping is unchanged).
-        _fieldCtx = { ..._fieldCtx, base: new DOMMatrix().translateSelf(-b.minX * W * dpr * scale, -b.minY * W * dpr * scale).scaleSelf(dpr) }
+        // Stroke space → device is now `W*dpr*scale` per unit (see octx.translate +
+        // stampStrokes above), so BOTH the translate and the linear scale carry `* scale`
+        // — a frame-anchored shader field must sample at the same density the strokes are
+        // drawn at, or a resized brush's fill drifts out of alignment. (scale===1 for an
+        // un-resized brush ⇒ dpr*1 ⇒ byte-identical to before.)
+        _fieldCtx = { ..._fieldCtx, base: new DOMMatrix().translateSelf(-b.minX * W * dpr * scale, -b.minY * W * dpr * scale).scaleSelf(dpr * scale) }
       }
       octx.fillStyle = resolvePaint(octx, layer.fill, { w: dw, h: dh }, _fieldCtx)
       _fieldCtx = { ..._fieldCtx, base: prevFieldBase }
