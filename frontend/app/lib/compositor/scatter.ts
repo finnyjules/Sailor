@@ -145,7 +145,7 @@ const HUSK_STYLE: ScatterStyleRow<'husk', HuskParams> = {
   normalize: normalizeHusk,
   // The tool's own three groups, in its own order: the husks, the bite, the finish.
   controls: [
-    { kind: 'slider', key: 'count', label: 'Husks', min: HUSK_LIMITS.count[0], max: HUSK_LIMITS.count[1], step: 1 },
+    { kind: 'slider', key: 'count', label: 'Count', min: HUSK_LIMITS.count[0], max: HUSK_LIMITS.count[1], step: 1 },
     { kind: 'slider', key: 'size', label: 'Size', min: 0, max: 1, step: 0.01 },
     { kind: 'slider', key: 'vary', label: 'Size range', min: 0, max: 1, step: 0.01 },
     { kind: 'slider', key: 'lump', label: 'Lumpiness', min: 0, max: 1, step: 0.01 },

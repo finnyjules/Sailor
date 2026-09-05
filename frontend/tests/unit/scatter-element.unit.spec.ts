@@ -136,7 +136,7 @@ describe('the Scatter style registry', () => {
     expect(row.presetNames).toEqual(HUSK_PRESET_NAMES)
     expect(row.presetPatch('Ember')).toEqual({ inks: [...HUSK_PALETTE_PRESETS.Ember.inks] })
     // The tool's own whole-number dial reaches the inspector through the registry.
-    expect(row.controls.find(c => c.key === 'count')).toMatchObject({ kind: 'slider', label: 'Husks', min: 1, max: 70, step: 1 })
+    expect(row.controls.find(c => c.key === 'count')).toMatchObject({ kind: 'slider', label: 'Count', min: 1, max: 70, step: 1 })
     const bite = row.controls.find(c => c.key === 'bite')!
     expect(bite.kind).toBe('select')
     expect((bite as { options: { value: string }[] }).options.map(o => o.value)).toEqual(['crumble', 'dots'])

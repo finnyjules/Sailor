@@ -7,11 +7,11 @@
  * Husk differs from its two siblings in what it draws INTO. Chaff and Strand stencil
  * their marks onto a mask canvas; a husk is never stencilled at all. Every warped oval
  * writes a DEPTH across the cells it covers — 1 under its centre, tailing off to 0 at
- * its rim — and all of them write into one small shared grid. Where two of them land on
- * the same cell the larger number stays, which welds their bodies into a single shape;
- * the fill each carries is decided later, and separately, so the two interiors remain
- * two. The print reads that grid back between its cells and settles one question per
- * pixel: sheet, body, or surviving fill.
+ * its rim — and all of them write into one small shared grid. A cell under two husks
+ * keeps only the higher depth. The print then reads that grid back between its cells
+ * and settles one question per pixel: sheet, body, or surviving fill — the body/fill
+ * decision is made per pixel from the depth alone, which is what gives overlapping
+ * husks one outline and two separate cores.
  *
  * Rule checklist — the bracketed numbers are lines of the captured reference
  * (`playgrnd-husk-generator-reference.js`), so a reviewer can read the port against
@@ -74,9 +74,9 @@
  *   C5 [137, 168, 173-174] Bite = crumble: three octaves of value noise run through a
  *      smoothstep, which crowds the readings against 0 and 1, and the fill lives only
  *      where
- *      `dep > 0.02 + eat·(0.06 + 1.5·nse)`. That 1.5 is why the crumble is not an edge
- *      effect: the threshold can climb past any depth a husk holds, so the noise's high
- *      ground bites into a husk's interior and leaves its fill in pieces.
+ *      `dep > 0.02 + eat·(0.06 + 1.5·nse)`. With the 1.5 the threshold can exceed 1,
+ *      the deepest value a husk holds, so at high `eat` whole regions of a core fail
+ *      the test — the fill survives only as separate patches.
  *   C6 [176-177] Kept ⇒ the fill ink; eaten ⇒ the husk's body ink.
  *   C7 [140, 179-182] Grain last: one reading per pixel, `(hash − 0.5)·grain·40` added
  *      to all three channels alike and clamped.
@@ -94,23 +94,31 @@
  *     so the sheet is built on an OFFSCREEN canvas at the box's paint resolution and
  *     `drawImage`d in. No absolute `globalAlpha` / composite op is ever written on the
  *     caller's ctx (pinned by test): the layer's own ride through.
- *  H2 That sheet is held under HUSK_MAX_PIXELS (6 Mpx); the tool's own export tops out
- *     at 2400² = 5.76 Mpx, so this is the same order of work.
- *  H3 FIELD UNITS. The crumble's noise is scaled by the RENDER's own pixels [137],
- *     never by a fraction of the frame — the reference's note explains why: scaled to
- *     the frame, the reading changed too gradually to break a husk up, and each one came
- *     out merely edged. A tool
- *     whose export is a fixed 2400px wide can leave it at that; a Frame box is printed
- *     at a preview size and again at a bake size, and the same lattice in raw pixels
- *     would be two different pictures. So one pixel of the tool's 2400px export is the
- *     unit here (`huskRefPx` = 1/2400 of the box WIDTH in device pixels), and the
- *     crumble samples in those units — identical to the source at a 2400px bake, and
- *     the same picture at every other size. Neither lattice may go finer than the
+ *  H2 That sheet is held under HUSK_MAX_PIXELS (6 Mpx) — the plan's cap for every
+ *     per-pixel Scatter style. (The tool's export is a 600–6000 px slider, default
+ *     2400; its largest export is far bigger than this cap.)
+ *  H3 FIELD UNITS. The crumble's noise lattice is quoted in the tool's RENDER pixels
+ *     [137], so the tool's own crumble is not scale-stable: its 800 px preview, its
+ *     2400 px default export and its 6000 px export are three different textures. A
+ *     Frame box is printed at a preview size and again at a bake size and must be the
+ *     same picture, so ONE anchor had to be chosen: one pixel of the tool's DEFAULT
+ *     export (`huskRefPx` = 1/2400 of the box WIDTH in device pixels) is the unit here.
+ *     Consequence, stated plainly: the port matches the tool's 2400 px export, and at
+ *     a Frame preview it reads finer than the tool's on-screen preview (a 900 px box
+ *     has refPx ≈ 0.375, so the clumps are ~2.7× smaller relative to a husk — see
+ *     `husk-port-default.png` vs `husk-port-toolscale.png`); and once refPx·nsc drops
+ *     below one device pixel the floor below pins the lattice to the pixel and the
+ *     bite loses its clump structure — reachable on a small element on a normal
+ *     canvas. The tool's preview size (~800 px) would be the other defensible anchor;
+ *     it was not chosen because the export is what the tool ships. Neither lattice may go finer than the
  *     device can print, so each floors at one device pixel: for the grain the lattice
  *     IS the reference pixel (`huskGrainCellPx`), while the crumble's lattice is `nsc`
  *     of one, so its floor lands on `nsc` (`huskCrumbleUnitPx`). The dot screen needs
  *     no such treatment — it is quoted against `min(W,H)` [133] and so already scales
  *     with the render.
+ *  NOT PORTED: the tool page also carries a dither / finish stage (its own size,
+ *     levels and amount controls) that lives outside the captured generator slice; the
+ *     reference ends at `paint()`, so it is out of scope here by design.
  *  H4 The sheet is memoized on everything that decides its pixels, so a drag — which
  *     only moves the box — repaints from cache. The source memoizes its field on the
  *     same principle [64-70]; keying the finished sheet covers the field's inputs too.
@@ -227,7 +235,7 @@ function huskNoise(x: number, y: number, salt: number): number {
   return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v
 }
 
-/** C9 — three octaves of that noise, weighted 0.5 / 0.275 / 0.151 and normalised, so
+/** C9 — three octaves of that noise, amplitudes 0.5 / 0.275 / 0.151 (before the /total) and normalised, so
  *  the result still spans 0..1 whatever the octave count. */
 function huskFbm(x: number, y: number, salt: number): number {
   let sum = 0, amp = 0.5, freq = 1, total = 0
@@ -472,8 +480,9 @@ export function huskPixels(
           const v = Math.max(0, Math.min(1, (dep - 0.05) / 0.95))
           keep = rad < 0.52 * Math.sqrt(v) * (1.35 - eat * 0.85)
         } else {
-          // C5 — the smoothstep crowds the readings against 0 and 1, so the bite
-          // comes in clumps with clear ground between them.
+          // C5 — the smoothstep pushes the noise towards 0 and 1, so the threshold is
+          // mostly either far below or far above the depth: large contiguous keep
+          // and eat regions rather than a per-pixel scatter.
           const raw = huskFbm(x / unit * nsc, y / unit * nsc, s + 13)
           const nse = raw * raw * (3 - 2 * raw)
           keep = dep > 0.02 + eat * (0.06 + 1.5 * nse)
@@ -523,18 +532,17 @@ const sheetCache = new LruCache<{ img: CanvasImageSource; bytes: number }>(SHEET
   sizeOf: v => v.bytes,
 })
 
-function sheetKey(pw: number, ph: number, p: HuskParams, seed: number, refPx: number): string {
+function sheetKey(pw: number, ph: number, fw: number, fh: number, p: HuskParams, seed: number, refPx: number): string {
   return [
-    pw, ph, seed, refPx.toFixed(4),
+    pw, ph, fw, fh, seed, refPx.toFixed(4),
     p.count, p.size, p.vary, p.lump, p.bite, p.eat, p.tex, p.grain, p.inks.join(','),
   ].join('|')
 }
 
 /** Build one printed sheet at `pw × ph`, or null when this environment has no canvas
  *  to give (SSR, a stub without createElement). */
-function renderSheet(pw: number, ph: number, p: HuskParams, seed: number, refPx: number): CanvasImageSource | null {
+function renderSheet(pw: number, ph: number, fw: number, fh: number, p: HuskParams, seed: number, refPx: number): CanvasImageSource | null {
   if (typeof document === 'undefined') return null
-  const { fw, fh } = huskFieldSize(pw, ph)
   const field = huskDepthField(huskShapes(p, fw, fh, seed), fw, fh, p)
   const sheet = document.createElement('canvas')
   sheet.width = pw; sheet.height = ph
@@ -547,11 +555,11 @@ function renderSheet(pw: number, ph: number, p: HuskParams, seed: number, refPx:
 }
 
 /** Memoized `renderSheet` — a hit skips the grid AND the per-pixel print. */
-function memoSheet(pw: number, ph: number, p: HuskParams, seed: number, refPx: number): CanvasImageSource | null {
-  const key = sheetKey(pw, ph, p, seed, refPx)
+function memoSheet(pw: number, ph: number, fw: number, fh: number, p: HuskParams, seed: number, refPx: number): CanvasImageSource | null {
+  const key = sheetKey(pw, ph, fw, fh, p, seed, refPx)
   const hit = sheetCache.get(key)
   if (hit) return hit.img
-  const img = renderSheet(pw, ph, p, seed, refPx)
+  const img = renderSheet(pw, ph, fw, fh, p, seed, refPx)
   if (img) sheetCache.set(key, { img, bytes: pw * ph * 4 })
   return img
 }
@@ -567,7 +575,10 @@ export function paintHusk(ctx: HuskCtx, params: HuskParams, boxW: number, boxH: 
   const H = Number.isFinite(boxH) && boxH > 0 ? boxH : 1
   const scale = Math.min(ctxScale(ctx), Math.sqrt(HUSK_MAX_PIXELS / (W * H)))
   const pw = Math.max(2, Math.round(W * scale)), ph = Math.max(2, Math.round(H * scale))
-  const img = memoSheet(pw, ph, p, seed, huskRefPx(scale, W))
+  // The field's aspect comes from the BOX, not the rounded device buffer, so a
+  // thumbnail, a preview and a bake all lay their husks on the same grid (B1).
+  const { fw, fh } = huskFieldSize(W, H)
+  const img = memoSheet(pw, ph, fw, fh, p, seed, huskRefPx(scale, W))
   if (img) { ctx.drawImage(img, 0, 0, W, H); return }
   // Nowhere to render: lay the ground down on its own, so the box carries the
   // picture's colour instead of showing as a hole.
