@@ -118,8 +118,8 @@
  *      `amp = mottle·2.6`. The amplitude is allowed to carry `G + n` outside 0..1, and
  *      that is the difference between a mottle which only roughens outlines and one
  *      which works across the whole sheet: only an out-of-range sum can flip a pixel
- *      sitting at full coverage or at none, and those flipped pixels ARE the specks of
- *      ground inside a blade and the specks of ink on empty paper. Hold the amplitude
+ *      sitting at full coverage or at none. Without those flips a blade's interior and
+ *      the bare sheet would both stay perfectly clean. Hold the amplitude
  *      to what the coverage ramp needs and the dial stops doing anything away from the
  *      edges.
  *   E4 [249] One comparison decides every pixel — `G + n > 0.5` takes `inks[1]`,
@@ -167,7 +167,7 @@ export interface ChaffParams {
   taper: number            // 0..1 sharpens or blunts the profile's ends
   slim: number             // 0..1 the blade's girth as a fraction of its length (Width)
   mottle: number           // 0..1 how hard the two-scale noise chews the silhouette
-  coarse: number           // 0..1 how big the mottle's flecks are
+  coarse: number           // 0..1 the mottle's grain size
   grain: number            // 0..1 per-pixel print grain
   inks: string[]           // ORDERED roles: [ground, ink]
 }

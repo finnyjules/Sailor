@@ -258,7 +258,7 @@ function describeDealLook(l: DealLayer, fill: DealLook): Record<string, unknown>
 
 /** One plain sentence per style, for the `scatter` op's hint. */
 const SCATTER_BLURBS: Record<string, string> = {
-  chaff: 'a litter of curved blades strewn over the sheet, most modest with a few running huge (crescent: a spindle fattest at its middle; leaf: full width at the head, falling away to a tip; bar: flat-topped with a short ramp at each end), printed in two inks through a speckled mask, so specks of the sheet colour show up inside a blade and specks of ink land on empty ground',
+  chaff: 'a litter of curved blades strewn over the sheet, most modest with a few running huge (crescent: a spindle fattest at its middle; leaf: full width at the head, falling away to a tip; bar: flat-topped with a short ramp at each end), printed in two inks through a speckled mask that breaks up both the blades and the bare sheet',
   // STYLE: strand — Task 4 adds its sentence here.
   // STYLE: husk — Task 5 adds its sentence here.
 }
@@ -350,7 +350,7 @@ const SCATTER_HINT: string = (() => {
     + 'palettePreset is checked against the FINAL style\'s table only — a name from another style\'s table is an error, not a silent recolour. '
     + 'args: { style (see above), <style>: { … its dials … }, palettePreset (a palette by name), seed (integer 1..9999 — the variation), '
     + 'generate (bool — re-roll a fresh seed for a new variation; the style, box and dials are kept), id? (choose one to target it later) }. '
-    + 'A Scatter is NOT a Mosaic: a mosaic is a composition (a frame divided and filled), a scatter is marks thrown across a sheet — use the `mosaic` op for the former.'
+    + 'A Scatter is NOT a Mosaic: a mosaic is a composition (a frame divided and filled), a scatter is loose marks with no layout — use the `mosaic` op for the former.'
 })()
 
 /** Merge model-provided effect params over current/defaults with clamps; null = invalid type. */
