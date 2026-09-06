@@ -98,6 +98,11 @@ const ROW: Record<string, Row> = {
   [`${M}textureTiling`]: { label: 'Texture tiling', kind: 'slider', min: 0.25, max: 12, step: 0.25, hint: 'How many times the surface pattern repeats across the object' },
 
   // image — how the uploaded picture wraps and repeats (Task 3 of the image-options plan)
+  [`${M}imageFit`]: {
+    label: 'Fit', kind: 'select', options: ['stretch', 'cover', 'contain'],
+    optionLabels: ['Stretch', 'Cover', 'Contain'],
+    hint: 'How the picture shape is reconciled with the surface: squash it to fit, fill and crop, or fit the whole thing in',
+  },
   [`${M}imageWrap`]: {
     label: 'Edges', kind: 'select', options: ['clamp', 'tile', 'mirror'],
     optionLabels: ['Clamp', 'Tile', 'Mirror'],
@@ -398,8 +403,10 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
     // lists it unconditionally (scenePanelVisible/showIfVisible is what hides it at render).
     Material: [
       `${M}type`, 'ui.material.image',
-      `${M}imageWrap`,
+      `${M}imageFit`, `${M}imageWrap`,
       `${M}imageTiling`, `${M}imageTilingLinked`,
+      // NB imageTilingY is showIf-hidden while imageTilingLinked is true (its default), so it
+      // does NOT appear in the default rendered list — same as gradient palette rows.
       `${M}roughness`, `${M}metalness`,
     ],
     'Image placement': [

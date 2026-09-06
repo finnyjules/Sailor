@@ -3,7 +3,7 @@ import { postControls, POST_SECTIONS } from '~/lib/studio/post/controls'
 import {
   MATERIAL_TYPES, MATERIAL_DEFAULTS, DEFAULT_MATERIAL, LIGHTING_PRESETS, ENVIRONMENT_KINDS, defaultDoc,
   PRIMITIVE_KINDS, LIGHT_DEFAULTS, DECAL_DEFAULTS, DECAL_BLENDS, lightIntensityMax, TEXTURE_TILING_RANGE,
-  SCREEN_PATTERNS, SCREEN_GAPS, SCREEN_INKS, IMAGE_WRAPS, IMAGE_TILING_RANGE,
+  SCREEN_PATTERNS, SCREEN_GAPS, SCREEN_INKS, IMAGE_WRAPS, IMAGE_TILING_RANGE, IMAGE_FITS,
   type SceneDoc, type SceneObject, type MaterialType,
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, type ParamSpec } from './primParams'
@@ -568,6 +568,9 @@ export const SCENE_CONTROLS: SceneControl[] = [
     'How many times the surface pattern repeats across the object', { when: hasTextureSet }),
 
   // --- Image material: how the picture lands on the surface -------------------------
+  select('object.material.imageFit', 'Fit', [...IMAGE_FITS], MATERIAL_DEFAULTS.imageFit, 'Material',
+    'How the picture shape is reconciled with the surface: squash it to fit, fill and crop, or fit the whole thing in',
+    { when: isImageMaterial, optionLabels: ['Stretch', 'Cover', 'Contain'] }),
   select('object.material.imageWrap', 'Edges', [...IMAGE_WRAPS], MATERIAL_DEFAULTS.imageWrap, 'Material',
     'What happens outside the picture: hold the edge pixel, repeat it, or repeat it mirrored so the seam disappears',
     { when: isImageMaterial, optionLabels: ['Clamp', 'Tile', 'Mirror'] }),

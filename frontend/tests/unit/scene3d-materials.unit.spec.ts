@@ -526,3 +526,24 @@ describe('image material texture ownership', () => {
     expect(disposed).not.toHaveBeenCalled()
   })
 })
+
+describe('image fit', () => {
+  it('is an identity transform until the natural size lands, then crops', () => {
+    const mat = base({ type: 'image', image: 'a.png', imageFit: 'cover' })
+    const m = materialFor(mat) as THREE.MeshStandardMaterial
+    m.map = new THREE.Texture()
+    // No natural size yet — a wide picture must not be pre-cropped on a guess.
+    expect(updateMaterial(m, mat)).toBe(true)
+    expect(m.map.repeat.x).toBe(1)
+    // The loader's onLoad fills this; simulate it and re-run the in-place update.
+    m.userData.imageNatural = { w: 200, h: 100 }
+    expect(updateMaterial(m, mat)).toBe(true)
+    expect(m.map.repeat.x).toBeCloseTo(0.5)
+    expect(m.map.offset.x).toBeCloseTo(0.25)
+  })
+
+  it('does not force a rebuild when only the fit changes', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' }))
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageFit: 'contain' }))).toBe(true)
+  })
+})

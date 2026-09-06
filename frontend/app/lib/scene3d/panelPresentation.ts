@@ -541,7 +541,7 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
   ],
   image: [
     'ui.material.image',
-    'object.material.imageWrap',
+    'object.material.imageFit', 'object.material.imageWrap',
     'object.material.imageTiling', 'object.material.imageTilingLinked', 'object.material.imageTilingY',
     'object.material.roughness', 'object.material.metalness',
     // Note: image offset, rotation, and flip controls are in Material/Image placement sub-card
