@@ -3,7 +3,7 @@ import { postControls, POST_SECTIONS } from '~/lib/studio/post/controls'
 import {
   MATERIAL_TYPES, MATERIAL_DEFAULTS, DEFAULT_MATERIAL, LIGHTING_PRESETS, ENVIRONMENT_KINDS, defaultDoc,
   PRIMITIVE_KINDS, LIGHT_DEFAULTS, DECAL_DEFAULTS, DECAL_BLENDS, lightIntensityMax, TEXTURE_TILING_RANGE,
-  SCREEN_PATTERNS, SCREEN_GAPS, SCREEN_INKS,
+  SCREEN_PATTERNS, SCREEN_GAPS, SCREEN_INKS, IMAGE_WRAPS, IMAGE_TILING_RANGE,
   type SceneDoc, type SceneObject, type MaterialType,
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, type ParamSpec } from './primParams'
@@ -129,6 +129,12 @@ const isPhongMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
 // type has no MeshBasicMaterial-vs-MeshStandardMaterial choice at all.
 const isShaderFillMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
   isEditableMaterial(doc, obj) && materialTypeOf(obj) === 'shaderFill'
+
+// The uploaded-picture branch. Everything under `object.material.image*` is this type
+// only — a different material type keeps the stored values and ignores them, exactly as
+// `texture`/`textureTiling` behave outside standard/glass/opalescent.
+const isImageMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
+  isEditableMaterial(doc, obj) && materialTypeOf(obj) === 'image'
 
 // roughness/metalness apply to standard, glass and image (all PBR-lit) and to shaderFill
 // only while it isn't unlit (a MeshBasicMaterial has no roughness/metalness slot at all).
@@ -560,6 +566,25 @@ export const SCENE_CONTROLS: SceneControl[] = [
   } as SceneControl,
   slider('object.material.textureTiling', 'Texture tiling', TEXTURE_TILING_RANGE.min, TEXTURE_TILING_RANGE.max, TEXTURE_TILING_RANGE.step, 'Material', MATERIAL_DEFAULTS.textureTiling,
     'How many times the surface pattern repeats across the object', { when: hasTextureSet }),
+
+  // --- Image material: how the picture lands on the surface -------------------------
+  select('object.material.imageWrap', 'Edges', [...IMAGE_WRAPS], MATERIAL_DEFAULTS.imageWrap, 'Material',
+    'What happens outside the picture: hold the edge pixel, repeat it, or repeat it mirrored so the seam disappears',
+    { when: isImageMaterial, optionLabels: ['Clamp', 'Tile', 'Mirror'] }),
+  slider('object.material.imageTiling', 'Tiling', IMAGE_TILING_RANGE.min, IMAGE_TILING_RANGE.max, IMAGE_TILING_RANGE.step,
+    'Material', MATERIAL_DEFAULTS.imageTiling,
+    'How many times the picture repeats across the surface', { when: isImageMaterial }),
+  {
+    key: 'object.material.imageTilingLinked', label: 'Link tiling', kind: 'switch',
+    default: MATERIAL_DEFAULTS.imageTilingLinked, group: 'Material',
+    hint: 'One tiling number drives both directions', when: isImageMaterial,
+  } as SceneControl,
+  slider('object.material.imageTilingY', 'Vertical tiling', IMAGE_TILING_RANGE.min, IMAGE_TILING_RANGE.max,
+    IMAGE_TILING_RANGE.step, 'Material', MATERIAL_DEFAULTS.imageTiling,
+    'How many times the picture repeats top to bottom', {
+      when: isImageMaterial,
+      showIf: { key: 'object.material.imageTilingLinked', equals: false },
+    }),
 
   // --- Lighting (doc-level; no active object needed) -------------------------------
   // Simple layer: pick a Look, then nudge three dials. Direction stays visible, so it's

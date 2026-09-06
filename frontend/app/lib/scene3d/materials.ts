@@ -17,6 +17,7 @@ import {
 } from './config'
 import { toHeightPixels } from './relief'
 import { isResolvedTexture, textureMapFilename, ensureTextureFetched, type TextureManifest } from './textures'
+import { applyImageTransform, type NaturalSize } from './imageMap'
 // The field module — the ONLY place a ShaderSpec becomes pixels (see its ownership contract).
 // Scene3D is a second, independent consumer alongside Space Type/Shape Studio's
 // ~/lib/spacetype/fills.ts: it never routes through `Fill`/`FILL_TYPES` (SceneMaterial has no
@@ -106,9 +107,6 @@ export function onTextureError(cb: (filename: string) => void): () => void {
   errorSubs.add(cb)
   return () => errorSubs.delete(cb)
 }
-/** Materials currently holding an image texture — used to drop `map` on load failure. */
-const imageMaterials = new Set<THREE.MeshStandardMaterial>()
-
 /** Every live opalescent material, across every open Scene3D engine. Walked by `refreshOpalTime`
  *  once per host frame to write wall-clock seconds into each `uOpalTime` uniform — the only
  *  per-frame cost the opal material has, and only paid when the doc has a flowing opal (see
@@ -164,11 +162,11 @@ function getImageTexture(filename: string, colorSpace: THREE.ColorSpace = THREE.
       undefined,
       undefined,
       () => {
+        // Only the SHARED cache's users reach here now — a user-supplied normal map, or a
+        // relief source. The image material has owned its own Texture (and its own error
+        // handler) since the image-options work, so there is no `.map` to drop from here.
         imageCache.delete(key)
         errorSubs.forEach((cb) => cb(filename))
-        imageMaterials.forEach((mat) => {
-          if (mat.map === tex) { mat.map = null; mat.needsUpdate = true }
-        })
       },
     )
     t = tex
@@ -1015,6 +1013,50 @@ function applyPhysical(p: THREE.MeshPhysicalMaterial, mat: SceneMaterial): void 
   p.envMapIntensity = mat.envMapIntensity ?? MATERIAL_DEFAULTS.envMapIntensity
 }
 
+/**
+ * A Texture the image material owns OUTRIGHT, rather than the shared per-filename
+ * `imageCache`.
+ *
+ * Required by the feature: `repeat`, `offset`, `rotation` and `wrapS/wrapT` live on the
+ * TEXTURE, so two objects showing the same file at different tilings need two Textures.
+ * And it fixes a bug the shared cache had all along — `disposeMaterial` calls
+ * `map.dispose()`, which freed a texture every other material on that filename was still
+ * drawing with, blanking them.
+ *
+ * The cost is the same one `bindTextureMaps` already accepts one function below: the
+ * browser's HTTP cache dedupes the BYTES, so only the decode is repeated per material.
+ *
+ * Cloning a cached Texture is NOT an alternative: `Texture.clone()` copies `.image` by
+ * value at clone time, so a clone taken before the async load resolves stays empty forever.
+ */
+function ownedImageTexture(m: THREE.Material, filename: string): THREE.Texture | null {
+  if (!hasDOM || !filename) return null
+  const tex = new THREE.TextureLoader().load(
+    inputViewUrl(filename),
+    (loaded) => {
+      // A material disposed while its file was still downloading must not be touched —
+      // same hazard, and the same guard, as reliefHealPending and applyTextureSet.
+      if (m.userData.disposed) return
+      // The natural pixel size exists only now, so Fit's cover/contain were identity
+      // transforms until this point and settle here. `imageSpec` is the LIVE material —
+      // the user may have moved four sliders while the file was in flight.
+      const src = loaded.image as { width?: number; height?: number } | undefined
+      if (src?.width && src?.height) m.userData.imageNatural = { w: src.width, h: src.height }
+      const spec = m.userData.imageSpec as SceneMaterial | undefined
+      if (spec) applyImageTransform(loaded, spec, m.userData.imageNatural as NaturalSize | undefined)
+    },
+    undefined,
+    () => {
+      const s = m as THREE.MeshStandardMaterial
+      if (s.map === tex) { s.map = null; s.needsUpdate = true }
+      tex.dispose()
+      errorSubs.forEach((cb) => cb(filename))
+    },
+  )
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
 // ── Factory ──────────────────────────────────────────────────────────────────
 /** `ownerId` scopes a `shaderFill` material's live field to the calling engine (see
  *  `shaderFillMaterials`'s doc) — SceneEngine always passes its own stable `id`; callers with
@@ -1195,18 +1237,23 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
     }
     case 'image': {
       const t = new THREE.MeshStandardMaterial({
-        // White base so the texture shows untinted (the doc's colour is ignored
-        // for image materials — there is no colour control in the image UI).
+        // White base so the picture shows untinted. The doc's `color` is deliberately NOT
+        // read here — see SceneMaterial.imageTint, which is the tint control for this type.
         color: '#ffffff',
         roughness: mat.roughness,
         metalness: mat.metalness,
       })
-      const tex = getImageTexture(mat.image ?? '')
-      if (tex) t.map = tex
-      imageMaterials.add(t)
-      // I4 fix (final review): disposeMaterial needs the plain filename to evict this
-      // material's entry from `imageCache` — stash it directly rather than trying to parse it
-      // back out of `identity` (which now always carries a relief/normalImage suffix too).
+      // The live spec, re-stamped by updateMaterial below and read by the loader's onLoad
+      // (which fires long after this function returns). Same pattern shaderFill uses with
+      // `userData.shaderSpec` for refreshSceneShaderFields.
+      t.userData.imageSpec = mat
+      const tex = ownedImageTexture(t, mat.image ?? '')
+      if (tex) {
+        t.map = tex
+        // Natural size is unknown until the file decodes, so Fit is an identity transform
+        // on this first pass; onLoad re-applies with the real dimensions.
+        applyImageTransform(tex, mat, null)
+      }
       t.userData.imageFilename = mat.image ?? ''
       m = t
       break
@@ -1502,6 +1549,10 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
     case 'image': {
       const s = m as THREE.MeshStandardMaterial
       s.roughness = mat.roughness; s.metalness = mat.metalness
+      // Re-stamp before touching the map: the async onLoad reads this, and a file still in
+      // flight must settle onto the CURRENT dials, not the ones it was built with.
+      m.userData.imageSpec = mat
+      if (s.map) applyImageTransform(s.map, mat, m.userData.imageNatural as NaturalSize | undefined)
       return true
     }
     case 'shaderFill': {
@@ -1524,7 +1575,6 @@ export function disposeMaterial(m: THREE.Material): void {
   // Dispose textures the material exclusively owns. Matcaps are shared
   // module-lifetime singletons — skip them.
   if ((m as THREE.MeshToonMaterial).isMaterial && (m as any).gradientMap) (m as any).gradientMap.dispose()
-  if (m.userData.matType === 'image') imageMaterials.delete(m as THREE.MeshStandardMaterial)
   if (m.userData.matType === 'shaderFill') shaderFillMaterials.delete(m)
   if (m.userData.matType === 'opalescent') opalMaterials.delete(m as THREE.MeshStandardMaterial)
   reliefHealPending.delete(m) // a disposed material still awaiting its relief heal must not leak
@@ -1548,12 +1598,7 @@ export function disposeMaterial(m: THREE.Material): void {
     bumpMap.dispose()
   }
   const map = (m as THREE.MeshStandardMaterial).map
-  // I4 fix (final review): `identity` used to be exactly `image:foo.png` when this eviction was
-  // written; `reliefKey` now always appends at least `|-|n:`, so slicing `identity` stopped
-  // matching the `imageCache` key and this delete silently never fired. `imageFilename` is
-  // stashed directly by the `case 'image':` branch of `materialFor` instead of being parsed
-  // back out of `identity`.
-  if (map) { map.dispose(); if (m.userData.matType === 'image' && m.userData.imageFilename) imageCache.delete(m.userData.imageFilename as string) }
+  if (map) map.dispose()
   // ambientCG texture set: bindTextureMaps builds a Texture PER MATERIAL for every slot it
   // binds (see its doc), so the slots THIS set bound are exclusively ours to free. `map` and
   // `bumpMap` are already disposed above; the other four would otherwise leak a full-size GPU

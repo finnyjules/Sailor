@@ -93,6 +93,10 @@ describe('SCENE_CONTROLS integrity', () => {
     'object.material.gradientOffset': 'gradientOffset',
     'object.material.gradientSpread': 'gradientSpread',
     'object.material.textureTiling': 'textureTiling',
+    'object.material.imageTiling': 'imageTiling',
+    // Vertical tiling shares the SAME default key as horizontal — see MATERIAL_DEFAULTS'
+    // doc and imageTilingXY in imageMap.ts: there is no separate `imageTilingY` default.
+    'object.material.imageTilingY': 'imageTiling',
     'object.material.screen.density': 'screenDensity',
     'object.material.screen.angle': 'screenAngle',
     'object.material.screen.contrast': 'screenContrast',

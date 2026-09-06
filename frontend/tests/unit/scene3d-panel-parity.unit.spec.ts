@@ -97,6 +97,16 @@ const ROW: Record<string, Row> = {
   // Sits under the bespoke `ui.material.textureSet` block on the three physical types.
   [`${M}textureTiling`]: { label: 'Texture tiling', kind: 'slider', min: 0.25, max: 12, step: 0.25, hint: 'How many times the surface pattern repeats across the object' },
 
+  // image — how the uploaded picture wraps and repeats (Task 3 of the image-options plan)
+  [`${M}imageWrap`]: {
+    label: 'Edges', kind: 'select', options: ['clamp', 'tile', 'mirror'],
+    optionLabels: ['Clamp', 'Tile', 'Mirror'],
+    hint: 'What happens outside the picture: hold the edge pixel, repeat it, or repeat it mirrored so the seam disappears',
+  },
+  [`${M}imageTiling`]: { label: 'Tiling', kind: 'slider', min: 0.25, max: 12, step: 0.25, hint: 'How many times the picture repeats across the surface' },
+  [`${M}imageTilingLinked`]: { label: 'Link tiling', kind: 'switch', hint: 'One tiling number drives both directions' },
+  [`${M}imageTilingY`]: { label: 'Vertical tiling', kind: 'slider', min: 0.25, max: 12, step: 0.25, hint: 'How many times the picture repeats top to bottom' },
+
   // <details> Coat & sheen
   [`${M}clearcoat`]: { label: 'Clearcoat', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Adds a thin glossy varnish layer on top' },
   [`${M}clearcoatRoughness`]: { label: 'Coat roughness', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'How blurred or sharp that varnish coat looks' },
@@ -375,7 +385,16 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
     Screen: SCREEN_OFF,
   },
   image: {
-    Material: [`${M}type`, 'ui.material.image', `${M}roughness`, `${M}metalness`],
+    // imageTilingY is showIf-gated on imageTilingLinked === false; MATERIAL_DEFAULTS has it
+    // linked, so — same convention as gradient's paletteHue/Sat/Light below — it is absent
+    // from the default-state row list here even though panelPresentation.ts's MATERIAL_BODY
+    // lists it unconditionally (scenePanelVisible/showIfVisible is what hides it at render).
+    Material: [
+      `${M}type`, 'ui.material.image',
+      `${M}imageWrap`,
+      `${M}imageTiling`, `${M}imageTilingLinked`,
+      `${M}roughness`, `${M}metalness`,
+    ],
     'Surface relief': RELIEF_OFF,
     Screen: SCREEN_OFF,
   },

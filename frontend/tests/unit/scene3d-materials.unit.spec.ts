@@ -493,3 +493,36 @@ describe('texture sets', () => {
     expect(fresh.userData.textureId).toBeUndefined()
   })
 })
+
+describe('image material texture ownership', () => {
+  it('stamps the live spec so the async loader can re-apply the transform', () => {
+    const mat = base({ type: 'image', image: 'a.png', imageTiling: 3 })
+    const m = materialFor(mat)
+    expect(m.userData.imageSpec).toBe(mat)
+    const next = base({ type: 'image', image: 'a.png', imageTiling: 5 })
+    expect(updateMaterial(m, next)).toBe(true)
+    expect(m.userData.imageSpec).toBe(next)
+  })
+
+  it('applies the transform to a map it owns, without rebuilding', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' })) as THREE.MeshStandardMaterial
+    // Node has no DOM, so the loader never binds a map — stand one in, exactly as the
+    // normal-map sharing test below does, and prove updateMaterial retiles it in place.
+    m.map = new THREE.Texture()
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageTiling: 4, imageWrap: 'tile' }))).toBe(true)
+    expect(m.map.repeat.x).toBe(4)
+    expect(m.map.wrapS).toBe(THREE.RepeatWrapping)
+  })
+
+  it('disposing one image material leaves another on the same file untouched', () => {
+    const a = materialFor(base({ type: 'image', image: 'shared.png' })) as THREE.MeshStandardMaterial
+    const b = materialFor(base({ type: 'image', image: 'shared.png' })) as THREE.MeshStandardMaterial
+    a.map = new THREE.Texture()
+    b.map = new THREE.Texture()
+    expect(a.map).not.toBe(b.map)
+    const disposed = vi.fn()
+    b.map.addEventListener('dispose', disposed)
+    disposeMaterial(a)
+    expect(disposed).not.toHaveBeenCalled()
+  })
+})
