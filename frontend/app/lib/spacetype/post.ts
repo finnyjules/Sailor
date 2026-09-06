@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { TexturePass } from 'three/examples/jsm/postprocessing/TexturePass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js'
@@ -100,6 +101,11 @@ const GRADE_VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = proje
 export class PostChain {
   readonly composer: EffectComposer
   private renderPass: RenderPass
+  /** Alternative FIRST pass: copies an already-rendered texture into the chain instead of
+   *  drawing the scene — Scene3D's treatment stage hands its composited frame in here so
+   *  global bloom/grade/OutputPass run over it unchanged. Disabled unless `setInputTexture`
+   *  gave it a texture. */
+  private texturePass: TexturePass
   private gtaoPass: GTAOPass
   private bloomPass: UnrealBloomPass
   private halftonePass: HalftonePass
@@ -136,6 +142,8 @@ export class PostChain {
     this.composer = new EffectComposer(renderer, msaaTarget)
     this.composer.setSize(width, height)
     this.renderPass = new RenderPass(scene, camera)
+    this.texturePass = new TexturePass(null as unknown as THREE.Texture)
+    this.texturePass.enabled = false
     // @types/three's GTAOPass constructor only declares (scene, camera, width, height, parameters) —
     // the aoParameters/pdParameters args exist at runtime (see GTAOPass.js) but aren't in the .d.ts,
     // so they're set via updateGtaoMaterial() right after construction instead of the constructor.
@@ -190,6 +198,7 @@ export class PostChain {
     this.extrasResolution = new THREE.Vector2(width, height)
     this.outputPass = new OutputPass()
     this.composer.addPass(this.renderPass)
+    this.composer.addPass(this.texturePass)
     this.composer.addPass(this.gtaoPass)
     this.composer.addPass(this.duotonePass)
     this.composer.addPass(this.bloomPass)
@@ -270,6 +279,13 @@ export class PostChain {
     )
   }
 
+  /** Start the chain from `tex` (renderPass off) or, with null, from the live scene again. */
+  setInputTexture(tex: THREE.Texture | null): void {
+    this.texturePass.map = tex as THREE.Texture
+    this.texturePass.enabled = !!tex
+    this.renderPass.enabled = !tex
+  }
+
   /** Point the render pass at the current scene/camera (camera swaps per frame) and render. */
   render(scene: THREE.Scene, camera: THREE.Camera): void {
     this.renderPass.scene = scene
@@ -283,6 +299,7 @@ export class PostChain {
 
   dispose(): void {
     this.composer.dispose()
+    this.texturePass.dispose()
     this.gtaoPass.dispose()
     this.bloomPass.dispose()
     this.halftonePass.dispose()

@@ -26,6 +26,8 @@ import { buildLightWidget, setWidgetSelected, disposeWidget } from '~/lib/scene3
 import { PostChain, postEnabled, DEFAULT_POST, type PostSettings } from '~/lib/spacetype/post'
 import { collectEditorHelpers } from '~/lib/scene3d/passes'
 import { syncTreatmentShells } from './treatmentShells'
+import { TreatmentStage } from './treatmentStage'
+import { maskedTreatmentPlan } from './treatments'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry } from './gem'
@@ -504,6 +506,10 @@ export class SceneEngine {
   private postChain: PostChain | null = null
   private postW = 0
   private postH = 0
+  private treatmentStage: TreatmentStage | null = null
+  /** Test instrument (surface exposes it as window.__scene3dTreatmentStats): how many frames
+   *  ran through the composer WITH the stage, and how many groups the last one drew. */
+  readonly treatmentStats = { frames: 0, groups: 0 }
   private _frozenFieldCount = 0
   /** Non-zero when one or more shaderFill fields exceeded LIVE_FIELD_CEILING on the last
    *  refreshShaderFields() call and are showing a frozen (t=0) snapshot instead of animating.
@@ -1200,11 +1206,24 @@ export class SceneEngine {
     this.renderWithPost(this.scene, this.camera, this.lastDoc?.post ?? DEFAULT_POST, elapsedSec)
   }
 
+  /** Render one frame NOW and return the canvas as a PNG data URL. A test instrument
+   *  (surface: window.__scene3dSnapshot) — synchronous on purpose so the read happens in
+   *  the same task as the draw (preserveDrawingBuffer is on regardless). */
+  snapshot(): string {
+    this.render(0)
+    return (this.renderer.domElement as HTMLCanvasElement).toDataURL('image/png')
+  }
+
   /** Render `scene` through the shared PostChain when any effect is on, else a direct
    *  render. Lazily builds the chain and re-sizes it to match the current renderer, so it
    *  works for the viewport AND the output-resolution bake (bloom/grade land in exports). */
   renderWithPost(scene: THREE.Scene, camera: THREE.Camera, post: PostSettings, elapsedSec = 0): void {
-    if (!postEnabled(post)) { this.renderer.render(scene, camera); return }
+    // Per-object masked treatments (blur/glow/pixelate/fade) need the composer path even
+    // with every global effect off: the stage's composite is a texture, and only the
+    // composer's OutputPass tone-maps a texture to the canvas.
+    const plan = this.lastDoc ? maskedTreatmentPlan(this.lastDoc) : []
+    const stageGroups = plan.filter((g) => g.rendered).length
+    if (!postEnabled(post) && stageGroups === 0) { this.renderer.render(scene, camera); return }
     const s = this.renderer.getSize(new THREE.Vector2())
     if (!this.postChain) { this.postChain = new PostChain(this.renderer, scene, camera, s.x, s.y); this.postW = s.x; this.postH = s.y }
     else if (this.postW !== s.x || this.postH !== s.y) { this.postChain.setSize(s.x, s.y); this.postW = s.x; this.postH = s.y }
@@ -1218,10 +1237,19 @@ export class SceneEngine {
     // picks against layer 0 only on pointer events (which never interleave with a
     // render frame), so dragging is unaffected.
     const helpers = collectEditorHelpers(scene)
-    if (!helpers.length) { this.postChain.render(scene, camera); return }
     for (const h of helpers) h.visible = false
-    try { this.postChain.render(scene, camera) }
-    finally { for (const h of helpers) h.visible = true }
+    try {
+      if (stageGroups > 0) {
+        if (!this.treatmentStage) this.treatmentStage = new TreatmentStage(this.renderer)
+        this.postChain.setInputTexture(this.treatmentStage.render(scene, camera, plan, { objectRoots: this.objectRoots }))
+        this.treatmentStats.frames++
+      } else {
+        this.postChain.setInputTexture(null)
+      }
+      this.treatmentStats.groups = stageGroups
+      this.postChain.render(scene, camera)
+    } finally { for (const h of helpers) h.visible = true }
+    if (!helpers.length) return
     const camMask = camera.layers.mask
     const prevAutoClear = this.renderer.autoClear
     // A solid scene.background makes renderer.render force-clear the canvas even with
@@ -1318,6 +1346,8 @@ export class SceneEngine {
     this.envBackgroundTarget?.dispose()
     this.postChain?.dispose()
     this.postChain = null
+    this.treatmentStage?.dispose()
+    this.treatmentStage = null
     // forceContextLoss() BEFORE dispose(): dispose() alone leaves the GL context
     // alive until GC, so opening/closing studios silently piles up zombie contexts
     // toward the browser's ~16 cap (past which the oldest is killed — a "crash").
