@@ -238,10 +238,57 @@ git commit -m "test(shaderfx): holographic surface must render varied, input-ind
 **Files:**
 - Create: `tests-unit/shaderfx_golden/holographic_surface_128.png`, `holographic_surface_256.png`
 
-- [ ] **Step 1: Confirm the catalog-wide golden test currently fails**
+- [ ] **Step 1: Understand the two pre-existing problems before touching anything**
 
-Run: `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python -m pytest tests-unit/comfy_extras_test/shader_effects_test.py -x -q -k goldens`
-Expected: FAIL — `missing golden for holographic_surface at 128 — run generate_goldens.py`. That test loops the whole catalog, so a new effect is auto-covered and auto-failing until its goldens exist.
+Task 1's investigation found this task's original premise was wrong. The golden test does NOT
+fail with "missing golden for holographic_surface", and generating goldens alone will NOT make
+it pass. Two independent pre-existing faults sit in front of us:
+
+**(a) The suite is already red at HEAD.** `crystal_prism`, `oil_paint` and `blinds` fail the
+golden comparison at pristine HEAD, verified by rendering a `git archive` of HEAD in a scratch
+directory with identical numbers. The test is a single looping function with a plain `assert`,
+so it stops at the FIRST mismatch — `crystal_prism@128: max diff 54.16/255` — and never reaches
+our effect at all. **These are not ours and are out of scope.** Do not fix them; do not let them
+be attributed to this work.
+
+**(b) The test and the generator disagree about colour params.** The generator
+(`generate_goldens.py:53`) does `to_uniforms(eff, resolve_params(eff, "{}"))`, converting a hex
+colour into a vec3. The test (`shader_effects_test.py:213`) calls `resolve_params` alone, leaving
+a hex string that `render_effect` rejects — verified directly:
+`ValueError: could not convert string to float: '#1a1a2e'`. Three existing effects
+(`duotone`, `oddgrid`, `static`) already carry colour params and would hit this; they simply sit
+after `crystal_prism` in the loop, so nothing has ever reached them.
+
+`holographic_surface` has a colour param (`u_tint`), so this bug blocks it. Fixing it is in
+scope — it is the one thing standing between our effect and a passing comparison.
+
+Run: `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python -m pytest tests-unit/comfy_extras_test/shader_effects_test.py -q -k goldens`
+Expected: FAIL at `crystal_prism@128`, exactly as described above. Record the number.
+
+- [ ] **Step 1b: Make the test agree with the generator**
+
+In `tests-unit/comfy_extras_test/shader_effects_test.py:213`, change
+
+```python
+            uniforms = resolve_params(eff, "{}")
+```
+
+to match how the goldens were actually produced:
+
+```python
+            # to_uniforms converts a hex colour param into the vec3 the shader wants;
+            # resolve_params alone leaves it a string and render_effect rejects it. The
+            # generator (generate_goldens.py) has always done this — the test had drifted,
+            # and no colour-param effect was ever reached to expose it.
+            uniforms = to_uniforms(eff, resolve_params(eff, "{}"))
+```
+
+Add `to_uniforms` to that module's import on line 11.
+
+This should make `duotone`, `oddgrid` and `static` render the way their goldens were generated,
+so it fixes rather than breaks them. Confirm that: after the change, those three must compare
+clean. If any of them now mismatches, stop and report — that would mean their goldens were
+generated under different conditions and the story is more complicated than this.
 
 - [ ] **Step 2: Generate**
 
@@ -249,14 +296,42 @@ Run: `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python tests-unit/sh
 
 Goldens are GPU-calibrated, so they must be generated on this machine. The script regenerates the whole catalog; check `git status` afterwards and **commit only the two `holographic_surface_*.png` files**. If other goldens changed, that is a pre-existing drift unrelated to this work — report it, do not commit it.
 
-- [ ] **Step 3: Verify and commit**
+- [ ] **Step 3: Verify what you can, and be precise about what still fails**
 
-Run: `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python -m pytest tests-unit/comfy_extras_test/shader_effects_test.py -x -q`
-Expected: PASS, whole file.
+Run: `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python -m pytest tests-unit/comfy_extras_test/shader_effects_test.py -q`
+
+The golden test will STILL FAIL at `crystal_prism` — that is pre-existing and out of scope. What
+you must establish is that **our effect is no longer among the reasons it fails.** Prove it
+directly rather than inferring it, by rendering just our effect against its fresh goldens:
+
+```python
+# scratch, not committed
+import sys, os, numpy as np
+from unittest.mock import MagicMock
+sys.modules.setdefault("nodes", MagicMock())
+from PIL import Image
+from comfy_extras._shader_effects import load_catalog, render_effect, resolve_params, to_uniforms
+g = "tests-unit/shaderfx_golden"
+cat = load_catalog(refresh=True)
+eff = cat.effects["holographic_surface"]
+for size in (128, 256):
+    fixture = np.asarray(Image.open(f"{g}/fixture_{size}.png").convert("RGB"), np.float32) / 255.0
+    golden = np.asarray(Image.open(f"{g}/holographic_surface_{size}.png").convert("RGB"), np.float32) / 255.0
+    u = to_uniforms(eff, resolve_params(eff, "{}"))
+    jobs = [{"image": fixture, "uniforms": {**u, "u_time": 0.7, "u_seed": 42.0, "u_hasInput": 1.0}}]
+    out = render_effect(eff.source, size, size, jobs, passes=eff.passes)[0][..., :3]
+    print(size, "max diff", np.abs(out - golden).max() * 255)
+```
+
+Both sizes must be at or under `2.0/255`. Also confirm `duotone`, `oddgrid` and `static` compare
+clean the same way — they are the effects Step 1b's fix newly reaches.
+
+Report the full list of remaining golden failures BY NAME, and state plainly that they are the
+three pre-existing ones and nothing else.
 
 ```bash
-git add tests-unit/shaderfx_golden/holographic_surface_128.png tests-unit/shaderfx_golden/holographic_surface_256.png
-git commit -m "test(shaderfx): goldens for the holographic surface effect"
+git add tests-unit/shaderfx_golden/holographic_surface_128.png tests-unit/shaderfx_golden/holographic_surface_256.png tests-unit/comfy_extras_test/shader_effects_test.py
+git commit -m "test(shaderfx): goldens for the holographic surface, and let the golden test render colour params"
 ```
 
 ---
