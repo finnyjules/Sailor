@@ -121,6 +121,11 @@ const ROW: Record<string, Row> = {
 
   // image — look / colour (Task 6 of the image-options plan)
   [`${M}imageTint`]: { label: 'Tint', kind: 'color' },
+  // image — emissive self-light (Task 9 of the image-options plan)
+  [`${M}imageGlow`]: {
+    label: 'Glow', kind: 'slider', min: 0, max: 5, step: 0.05,
+    hint: 'Makes the picture light itself, like a screen or a sign',
+  },
 
   // <details> Coat & sheen
   [`${M}clearcoat`]: { label: 'Clearcoat', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Adds a thin glossy varnish layer on top' },
@@ -425,7 +430,7 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
       `${M}imageFlipX`, `${M}imageFlipY`,
     ],
     'Image look': [
-      `${M}imageTint`,
+      `${M}imageTint`, `${M}imageGlow`,
     ],
     // imageCutout is showIf-gated on imageAlpha === true; MATERIAL_DEFAULTS has it off, so
     // — same convention as imageTilingY above — it is absent from the default-state row
@@ -705,7 +710,7 @@ describe('Scene3D panel parity — image look sub-card', () => {
     const o = createPrimitive('box')
     o.material.type = 'image'
     const card = rendered(doc, o, SCENE_PANEL_SECTIONS).find((c) => c.title === 'Image look')
-    expect(card?.keys).toEqual([`${M}imageTint`])
+    expect(card?.keys).toEqual([`${M}imageTint`, `${M}imageGlow`])
   })
 })
 

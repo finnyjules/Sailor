@@ -99,6 +99,7 @@ describe('SCENE_CONTROLS integrity', () => {
     'object.material.imageOffsetY': 'imageOffsetY',
     'object.material.imageRotation': 'imageRotation',
     'object.material.imageCutout': 'imageCutout',
+    'object.material.imageGlow': 'imageGlow',
     'object.material.screen.density': 'screenDensity',
     'object.material.screen.angle': 'screenAngle',
     'object.material.screen.contrast': 'screenContrast',

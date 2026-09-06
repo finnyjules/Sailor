@@ -1045,6 +1045,32 @@ function applyImageTransparency(m: THREE.Material, mat: SceneMaterial): void {
 }
 
 /**
+ * Bind the picture as its own emissive map, so it lights itself — a screen, a sign, a
+ * light-box. Reuses the SAME Texture object as `.map` rather than loading a second copy:
+ * the UV transform, the wrap mode and the tiling all travel with it for free, which is
+ * exactly what you want (the glow must line up with the picture).
+ *
+ * Binding an emissive map with a BLACK `emissive` colour renders nothing at all — three
+ * multiplies the two — so the colour is driven to white alongside the map and back to
+ * black when the glow is off, rather than being exposed as a second control.
+ *
+ * A no-op on MeshBasicMaterial (the flat variant): there is no emissive slot, and there is
+ * no lighting model for one to feed.
+ */
+function applyImageGlow(m: THREE.Material, mat: SceneMaterial): void {
+  const s = m as THREE.MeshStandardMaterial
+  if (!('emissiveMap' in s)) return
+  const glow = mat.imageGlow ?? MATERIAL_DEFAULTS.imageGlow
+  const on = glow > 0 && !!s.map
+  const wasOn = !!s.emissiveMap
+  s.emissiveMap = on ? s.map : null
+  s.emissive.set(on ? '#ffffff' : '#000000')
+  s.emissiveIntensity = on ? glow : 1
+  // USE_EMISSIVEMAP is a program define three does not manage on assignment.
+  if (on !== wasOn) s.needsUpdate = true
+}
+
+/**
  * A Texture the image material owns OUTRIGHT, rather than the shared per-filename
  * `imageCache`.
  *
@@ -1308,6 +1334,7 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
       }
       t.userData.imageFilename = mat.image ?? ''
       applyImageTransparency(t, mat)
+      applyImageGlow(t, mat)
       m = t
       break
     }
@@ -1613,6 +1640,7 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
       m.userData.imageSpec = mat
       if (s.map) applyImageTransform(s.map, mat, m.userData.imageNatural as NaturalSize | undefined)
       applyImageTransparency(m, mat)
+      applyImageGlow(m, mat)
       return true
     }
     case 'shaderFill': {

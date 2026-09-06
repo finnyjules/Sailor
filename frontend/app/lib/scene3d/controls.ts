@@ -620,6 +620,11 @@ export const SCENE_CONTROLS: SceneControl[] = [
     hint: 'Mirrors the picture top to bottom', when: isImageMaterial,
   } as SceneControl,
   color('object.material.imageTint', 'Tint', MATERIAL_DEFAULTS.imageTint, 'Material', { when: isImageMaterial }),
+  slider('object.material.imageGlow', 'Glow', 0, 5, 0.05, 'Material', MATERIAL_DEFAULTS.imageGlow,
+    'Makes the picture light itself, like a screen or a sign', {
+      when: isImageMaterial,
+      showIf: { key: 'object.material.unlit', notEquals: true },
+    }),
   {
     key: 'object.material.imageAlpha', label: 'Use image transparency', kind: 'switch',
     default: MATERIAL_DEFAULTS.imageAlpha, group: 'Material',

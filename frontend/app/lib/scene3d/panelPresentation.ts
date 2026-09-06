@@ -562,7 +562,7 @@ const SUB_CARDS: Record<string, readonly string[]> = {
     'object.material.imageOffsetX', 'object.material.imageOffsetY', 'object.material.imageRotation',
     'object.material.imageFlipX', 'object.material.imageFlipY',
   ],
-  'Material/Image look': ['object.material.imageTint'],
+  'Material/Image look': ['object.material.imageTint', 'object.material.imageGlow'],
   'Material/Coat & sheen': [
     'object.material.clearcoat', 'object.material.clearcoatRoughness',
     'object.material.sheen', 'object.material.sheenColor',

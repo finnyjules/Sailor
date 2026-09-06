@@ -571,6 +571,38 @@ describe('image tint', () => {
   })
 })
 
+describe('image glow', () => {
+  it('is off by default', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' })) as THREE.MeshStandardMaterial
+    expect(m.emissiveMap).toBeNull()
+    expect(m.emissiveIntensity).toBe(1)
+  })
+
+  it('binds the same texture as the emissive map and drives its intensity', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' })) as THREE.MeshStandardMaterial
+    m.map = new THREE.Texture()
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageGlow: 2 }))).toBe(true)
+    expect(m.emissiveMap).toBe(m.map)
+    expect(m.emissiveIntensity).toBe(2)
+    // The emissive colour must be white, or the map is multiplied into black and nothing glows.
+    expect(`#${m.emissive.getHexString()}`).toBe('#ffffff')
+  })
+
+  it('unbinds when the glow returns to zero', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' })) as THREE.MeshStandardMaterial
+    m.map = new THREE.Texture()
+    updateMaterial(m, base({ type: 'image', image: 'a.png', imageGlow: 2 }))
+    updateMaterial(m, base({ type: 'image', image: 'a.png', imageGlow: 0 }))
+    expect(m.emissiveMap).toBeNull()
+    expect(`#${m.emissive.getHexString()}`).toBe('#000000')
+  })
+
+  it('is a no-op on the flat variant, which has no emissive slot', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', unlit: true, imageGlow: 2 }))
+    expect((m as unknown as { emissiveMap?: unknown }).emissiveMap).toBeUndefined()
+  })
+})
+
 describe('unlit image', () => {
   it('builds a Basic material so scene lights do not shade the picture', () => {
     const m = materialFor(base({ type: 'image', image: 'a.png', unlit: true }))
