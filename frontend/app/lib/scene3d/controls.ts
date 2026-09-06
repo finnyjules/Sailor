@@ -4,6 +4,7 @@ import {
   MATERIAL_TYPES, MATERIAL_DEFAULTS, DEFAULT_MATERIAL, LIGHTING_PRESETS, ENVIRONMENT_KINDS, defaultDoc,
   PRIMITIVE_KINDS, LIGHT_DEFAULTS, DECAL_DEFAULTS, DECAL_BLENDS, lightIntensityMax, TEXTURE_TILING_RANGE,
   SCREEN_PATTERNS, SCREEN_GAPS, SCREEN_INKS, IMAGE_WRAPS, IMAGE_TILING_RANGE, IMAGE_FITS,
+  IMAGE_PROJECTIONS, IMAGE_AXES,
   type SceneDoc, type SceneObject, type MaterialType,
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, type ParamSpec } from './primParams'
@@ -583,6 +584,28 @@ export const SCENE_CONTROLS: SceneControl[] = [
     'How many times the surface pattern repeats across the object', { when: hasTextureSet }),
 
   // --- Image material: how the picture lands on the surface -------------------------
+  // Placed BEFORE Fit: projection decides which coordinate is used; fit and tiling then
+  // shape it. Derives the texture coordinate from object-space position instead of the
+  // mesh's own UV attribute — the real gap on ExtrudeGeometry (text, SVG import) sidewalls
+  // and ConvexGeometry (no UV attribute at all).
+  select('object.material.imageProjection', 'Wrapping', [...IMAGE_PROJECTIONS], MATERIAL_DEFAULTS.imageProjection, 'Material',
+    'How the picture is laid onto the shape. Use the model follows the shape own texture coordinates; the others ignore them and project the picture on from outside, which is what you want on text, imported shapes and anything with poor coordinates',
+    {
+      when: isImageMaterial,
+      optionLabels: ['Use the model', 'Flat', 'Cylinder', 'Sphere', 'Box'],
+    }),
+  select('object.material.imageProjectionAxis', 'Facing', [...IMAGE_AXES], MATERIAL_DEFAULTS.imageProjectionAxis, 'Material',
+    'Which way the flat projection faces, or which axis the cylinder spins around',
+    {
+      when: isImageMaterial,
+      optionLabels: ['X', 'Y', 'Z'],
+      showIf: { key: 'object.material.imageProjection', in: ['planar', 'cylindrical'] },
+    }),
+  slider('object.material.imageBoxBlend', 'Box blend', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.imageBoxBlend,
+    'How softly the three box faces fade into each other at an edge', {
+      when: isImageMaterial,
+      showIf: { key: 'object.material.imageProjection', equals: 'box' },
+    }),
   select('object.material.imageFit', 'Fit', [...IMAGE_FITS], MATERIAL_DEFAULTS.imageFit, 'Material',
     'How the picture shape is reconciled with the surface: squash it to fit, fill and crop, or fit the whole thing in',
     { when: isImageMaterial, optionLabels: ['Stretch', 'Cover', 'Contain'] }),

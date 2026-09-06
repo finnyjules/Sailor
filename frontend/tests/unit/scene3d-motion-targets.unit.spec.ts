@@ -187,8 +187,10 @@ describe('animatableTargets', () => {
     // imageCutout and opacity are the two sliders Task 8 adds/widens onto image; imageGlow
     // is Task 9's (its showIf gate is not a factor here — iterateObjectControls filters on
     // `when` alone). imageBrightness/imageContrast/imageSaturation are Task 10's — plain
-    // sliders with no showIf gate, always reachable.
-    ['image', [...PBR, ...RELIEF, ...SCREEN, 'material.imageBrightness', 'material.imageContrast', 'material.imageCutout', 'material.imageGlow', 'material.imageOffsetX', 'material.imageOffsetY', 'material.imageRotation', 'material.imageSaturation', 'material.imageTiling', 'material.imageTilingY', 'material.opacity']],
+    // sliders with no showIf gate, always reachable. imageProjection/imageProjectionAxis
+    // (Task 11) are selects, so they never reach animatableTargets either; imageBoxBlend is
+    // a slider (its showIf gate is likewise not a factor here) and does.
+    ['image', [...PBR, ...RELIEF, ...SCREEN, 'material.imageBoxBlend', 'material.imageBrightness', 'material.imageContrast', 'material.imageCutout', 'material.imageGlow', 'material.imageOffsetX', 'material.imageOffsetY', 'material.imageRotation', 'material.imageSaturation', 'material.imageTiling', 'material.imageTilingY', 'material.opacity']],
     ['shaderFill', [...PBR, ...RELIEF, ...SCREEN]],
     ['opalescent', [
       ...PBR, ...COAT, ...RELIEF, ...TEXTURE, ...SCREEN,

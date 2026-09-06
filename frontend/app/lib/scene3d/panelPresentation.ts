@@ -546,6 +546,7 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
   ],
   image: [
     'ui.material.image', 'object.material.unlit',
+    'object.material.imageProjection', 'object.material.imageProjectionAxis', 'object.material.imageBoxBlend',
     'object.material.imageFit', 'object.material.imageWrap',
     'object.material.imageTiling', 'object.material.imageTilingLinked', 'object.material.imageTilingY',
     'object.material.roughness', 'object.material.metalness',

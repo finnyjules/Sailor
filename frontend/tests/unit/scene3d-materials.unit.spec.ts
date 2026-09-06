@@ -692,10 +692,17 @@ describe('image adjustments', () => {
 
   it('injects the adjustment into the compiled fragment shader', () => {
     const m = materialFor(base({ type: 'image', image: 'a.png' }))
-    const shader = { uniforms: {} as Record<string, unknown>, vertexShader: '', fragmentShader: 'void main() {\n#include <map_fragment>\n}' }
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader: 'void main() {\n#include <begin_vertex>\n}',
+      fragmentShader: 'void main() {\n#include <map_fragment>\n}',
+    }
     m.onBeforeCompile!(shader as never, null as never)
     expect(shader.fragmentShader).toContain('sailorImageAdjust')
-    expect(shader.fragmentShader).toContain('#include <map_fragment>')
+    // Task 11: imageMapFragment REPLACES the include outright (the projection has to choose
+    // the coordinate before the sample) rather than appending after it as the plain
+    // adjustment did — so the literal include tag is gone from the compiled source.
+    expect(shader.fragmentShader).not.toContain('#include <map_fragment>')
     expect(shader.uniforms.uImgContrast).toBe((m.userData.imageUniforms as { uImgContrast: unknown }).uImgContrast)
   })
 
@@ -721,5 +728,53 @@ describe('image adjustments', () => {
     m.version = 0
     updateMaterial(m, base({ type: 'image', image: 'a.png', unlit: true, imageBrightness: 0.2 }))
     expect(m.version).toBe(0)
+  })
+})
+
+describe('image projection', () => {
+  it('reads the object bounds from the geometry it is built against', () => {
+    const geo = new THREE.BoxGeometry(2, 4, 6)
+    const m = materialFor(base({ type: 'image', image: 'a.png', imageProjection: 'planar' }), geo)
+    const u = m.userData.imageUniforms as { uImgBoundsSize: { value: THREE.Vector3 } }
+    expect(u.uImgBoundsSize.value.x).toBeCloseTo(2)
+    expect(u.uImgBoundsSize.value.y).toBeCloseTo(4)
+    expect(u.uImgBoundsSize.value.z).toBeCloseTo(6)
+  })
+
+  it('never divides by a zero extent on a flat object', () => {
+    const geo = new THREE.PlaneGeometry(2, 2)
+    const m = materialFor(base({ type: 'image', image: 'a.png', imageProjection: 'planar' }), geo)
+    const u = m.userData.imageUniforms as { uImgBoundsSize: { value: THREE.Vector3 } }
+    expect(u.uImgBoundsSize.value.z).toBeGreaterThan(0)
+  })
+
+  // Addition B (required beyond the brief): Tasks 8 and 9 each shipped a ONE-SIDED
+  // define-boundary test. Both directions of the recompile contract must be asserted:
+  // the four single-sample modes share a program and switch on a uniform (no rebuild, no
+  // version bump), while 'box' is a genuinely different program (three samples instead of
+  // one) and MUST force a rebuild.
+  it('switches between the four single-sample modes without a rebuild or a version bump', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' }))
+    m.version = 0
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageProjection: 'spherical' }))).toBe(true)
+    expect(m.version).toBe(0)
+    expect((m.userData.imageUniforms as { uImgProjMode: { value: number } }).uImgProjMode.value).toBe(3)
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageProjection: 'planar' }))).toBe(true)
+    expect(m.version).toBe(0)
+    expect((m.userData.imageUniforms as { uImgProjMode: { value: number } }).uImgProjMode.value).toBe(1)
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageProjection: 'cylindrical' }))).toBe(true)
+    expect(m.version).toBe(0)
+    expect((m.userData.imageUniforms as { uImgProjMode: { value: number } }).uImgProjMode.value).toBe(2)
+  })
+
+  it('rebuilds for box, which is a different program', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' }))
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageProjection: 'box' }))).toBe(false)
+  })
+
+  it('gives the box program its own cache key', () => {
+    const plain = materialFor(base({ type: 'image', image: 'a.png' }))
+    const box = materialFor(base({ type: 'image', image: 'a.png', imageProjection: 'box' }))
+    expect(plain.customProgramCacheKey!()).not.toBe(box.customProgramCacheKey!())
   })
 })

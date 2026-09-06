@@ -97,6 +97,23 @@ const ROW: Record<string, Row> = {
   // Sits under the bespoke `ui.material.textureSet` block on the three physical types.
   [`${M}textureTiling`]: { label: 'Texture tiling', kind: 'slider', min: 0.25, max: 12, step: 0.25, hint: 'How many times the surface pattern repeats across the object' },
 
+  // image — projection: derives the texture coordinate from object-space position instead
+  // of the mesh's own UV attribute (Task 11 of the image-options plan)
+  [`${M}imageProjection`]: {
+    label: 'Wrapping', kind: 'select', options: ['uv', 'planar', 'cylindrical', 'spherical', 'box'],
+    optionLabels: ['Use the model', 'Flat', 'Cylinder', 'Sphere', 'Box'],
+    hint: 'How the picture is laid onto the shape. Use the model follows the shape own texture coordinates; the others ignore them and project the picture on from outside, which is what you want on text, imported shapes and anything with poor coordinates',
+  },
+  [`${M}imageProjectionAxis`]: {
+    label: 'Facing', kind: 'select', options: ['x', 'y', 'z'],
+    optionLabels: ['X', 'Y', 'Z'],
+    hint: 'Which way the flat projection faces, or which axis the cylinder spins around',
+  },
+  [`${M}imageBoxBlend`]: {
+    label: 'Box blend', kind: 'slider', min: 0, max: 1, step: 0.01,
+    hint: 'How softly the three box faces fade into each other at an edge',
+  },
+
   // image — how the uploaded picture wraps and repeats (Task 3 of the image-options plan)
   [`${M}imageFit`]: {
     label: 'Fit', kind: 'select', options: ['stretch', 'cover', 'contain'],
@@ -426,12 +443,20 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
     Screen: SCREEN_OFF,
   },
   image: {
+    // imageProjectionAxis is showIf-gated on imageProjection being 'planar'/'cylindrical',
+    // and imageBoxBlend on imageProjection === 'box'; MATERIAL_DEFAULTS has it 'uv' (Use the
+    // model), so — same convention as imageTilingY below — both are absent from the
+    // default-state row list here even though panelPresentation.ts's MATERIAL_BODY lists them
+    // unconditionally (scenePanelVisible/showIfVisible is what hides them at render). See the
+    // 'reveals the axis row'/'reveals the box blend row' cases below for the shown state.
+    //
     // imageTilingY is showIf-gated on imageTilingLinked === false; MATERIAL_DEFAULTS has it
     // linked, so — same convention as gradient's paletteHue/Sat/Light below — it is absent
     // from the default-state row list here even though panelPresentation.ts's MATERIAL_BODY
     // lists it unconditionally (scenePanelVisible/showIfVisible is what hides it at render).
     Material: [
       `${M}type`, 'ui.material.image', `${M}unlit`,
+      `${M}imageProjection`,
       `${M}imageFit`, `${M}imageWrap`,
       `${M}imageTiling`, `${M}imageTilingLinked`,
       // NB imageTilingY is showIf-hidden while imageTilingLinked is true (its default), so it
@@ -602,6 +627,44 @@ describe('Scene3D panel parity — Material, per material type', () => {
     const mat = cards.find((s) => s.title === 'Material')!.keys
     expect(mat).toEqual([`${M}type`, 'ui.material.shader', `${M}unlit`])
     expect(cards.find((s) => s.title === 'Surface relief')!.keys).toEqual(['ui.relief.unavailable'])
+  })
+
+  // Task 11: imageProjectionAxis and imageBoxBlend are showIf-gated (see the `image`
+  // MATERIAL_SCENARIO comment above) and so are absent from the default ('Use the model')
+  // rendered list. Setting imageProjection reveals exactly the row that mode uses.
+  it('setting the projection to flat reveals the axis row', () => {
+    const doc = defaultDoc()
+    const o = prim('image')
+    o.material.imageProjection = 'planar'
+    const rows = designCards(doc, o).find((s) => s.title === 'Material')!.keys
+    expect(rows).toContain(`${M}imageProjectionAxis`)
+    expect(rows).not.toContain(`${M}imageBoxBlend`)
+  })
+
+  it('setting the projection to cylinder also reveals the axis row', () => {
+    const doc = defaultDoc()
+    const o = prim('image')
+    o.material.imageProjection = 'cylindrical'
+    const rows = designCards(doc, o).find((s) => s.title === 'Material')!.keys
+    expect(rows).toContain(`${M}imageProjectionAxis`)
+  })
+
+  it('setting the projection to sphere reveals neither the axis nor the blend row', () => {
+    const doc = defaultDoc()
+    const o = prim('image')
+    o.material.imageProjection = 'spherical'
+    const rows = designCards(doc, o).find((s) => s.title === 'Material')!.keys
+    expect(rows).not.toContain(`${M}imageProjectionAxis`)
+    expect(rows).not.toContain(`${M}imageBoxBlend`)
+  })
+
+  it('setting the projection to box reveals the blend row, not the axis row', () => {
+    const doc = defaultDoc()
+    const o = prim('image')
+    o.material.imageProjection = 'box'
+    const rows = designCards(doc, o).find((s) => s.title === 'Material')!.keys
+    expect(rows).toContain(`${M}imageBoxBlend`)
+    expect(rows).not.toContain(`${M}imageProjectionAxis`)
   })
 
   it('an unlit image drops the two PBR rows', () => {

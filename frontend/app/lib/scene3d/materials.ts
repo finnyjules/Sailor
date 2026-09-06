@@ -18,7 +18,11 @@ import {
 import { toHeightPixels } from './relief'
 import { isResolvedTexture, textureMapFilename, ensureTextureFetched, type TextureManifest } from './textures'
 import { applyImageTransform, imageWrapMode, type NaturalSize } from './imageMap'
-import { imageUniforms, writeImageUniforms, IMAGE_ADJUST_GLSL, IMAGE_ADJUST_CALL, type ImageUniforms } from './imageShader'
+import {
+  imageUniforms, writeImageUniforms, syncImageMapMatrix,
+  IMAGE_ADJUST_GLSL, IMAGE_PROJECT_VERTEX_GLSL, IMAGE_PROJECT_VERTEX_CALL, imageMapFragment,
+  type ImageUniforms,
+} from './imageShader'
 // The field module — the ONLY place a ShaderSpec becomes pixels (see its ownership contract).
 // Scene3D is a second, independent consumer alongside Space Type/Shape Studio's
 // ~/lib/spacetype/fills.ts: it never routes through `Fill`/`FILL_TYPES` (SceneMaterial has no
@@ -1103,6 +1107,11 @@ function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture
       if (src?.width && src?.height) m.userData.imageNatural = { w: src.width, h: src.height }
       const spec = m.userData.imageSpec as SceneMaterial | undefined
       if (spec) applyImageTransform(loaded, spec, m.userData.imageNatural as NaturalSize | undefined)
+      // A projected picture (Fit's cover/contain feeding into uImgMapTx) settles once the
+      // natural size lands — without this, a projection keeps the identity-transform matrix
+      // it was built with until the NEXT dial move triggers updateMaterial.
+      const u = m.userData.imageUniforms as ImageUniforms | undefined
+      if (u) syncImageMapMatrix(u, loaded)
     },
     undefined,
     () => {
@@ -1336,18 +1345,29 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
       t.userData.imageFilename = mat.image ?? ''
       applyImageTransparency(t, mat)
       applyImageGlow(t, mat)
-      // Colour adjustments: always injected, identity by default — see imageShader.ts on
-      // why this is unconditional rather than gated on a non-neutral value.
-      const iu = imageUniforms(mat)
+      // Colour adjustments + projection: always injected, identity/UV by default — see
+      // imageShader.ts on why this is unconditional rather than gated on a non-neutral value.
+      // Bounds come from the geometry passed in here, at BUILD time only (see imageUniforms'
+      // doc — the gradient material has the same limitation).
+      const isBox = (mat.imageProjection ?? MATERIAL_DEFAULTS.imageProjection) === 'box'
+      const iu = imageUniforms(mat, geometry)
+      // syncImageMapMatrix must run here too: without it a projected picture ignores
+      // Tiling/Offset/Rotation/Fit until the first updateMaterial call moves a dial.
+      if (tex) syncImageMapMatrix(iu, tex)
       t.onBeforeCompile = (shader) => {
         Object.assign(shader.uniforms, iu)
+        shader.vertexShader = shader.vertexShader
+          .replace('void main() {', `${IMAGE_PROJECT_VERTEX_GLSL}\nvoid main() {`)
+          .replace('#include <begin_vertex>', IMAGE_PROJECT_VERTEX_CALL)
         shader.fragmentShader = shader.fragmentShader
           .replace('void main() {', `${IMAGE_ADJUST_GLSL}\nvoid main() {`)
-          .replace('#include <map_fragment>', IMAGE_ADJUST_CALL)
+          .replace('#include <map_fragment>', imageMapFragment(isBox))
       }
       // Without this, three pools the compiled program with every OTHER material that has
-      // the same feature defines — including materials with no injection at all.
-      t.customProgramCacheKey = () => 'scene3d-image'
+      // the same feature defines — including materials with no injection at all. 'box' is a
+      // separate PROGRAM (three texture samples instead of one), so it needs its own key —
+      // the other four modes share a program and switch on a uniform (see identityKey).
+      t.customProgramCacheKey = () => `scene3d-image:${isBox ? 'box' : 'single'}`
       t.userData.imageUniforms = iu
       m = t
       break
@@ -1450,9 +1470,13 @@ function baseIdentityKey(mat: SceneMaterial): string {
   switch (mat.type) {
     case 'toon': return `toon:${mat.toonSteps ?? MATERIAL_DEFAULTS.toonSteps}`
     case 'matcap': return `matcap:${mat.matcap ?? MATERIAL_DEFAULTS.matcap}`
-    // `unlit` picks the THREE material CLASS (Basic vs Standard) — that boundary needs a
-    // rebuild, exactly as it does for shaderFill below.
-    case 'image': return `image:${mat.image ?? ''}:${mat.unlit === true ? 1 : 0}`
+    // `unlit` picks the CLASS, and 'box' picks the PROGRAM (three texture samples rather
+    // than one) — both need a rebuild. Every other image option is a uniform or a Texture
+    // property and updates in place.
+    case 'image': {
+      const box = (mat.imageProjection ?? MATERIAL_DEFAULTS.imageProjection) === 'box' ? 1 : 0
+      return `image:${mat.image ?? ''}:${mat.unlit === true ? 1 : 0}:${box}`
+    }
     // `unlit` picks the THREE material CLASS (Basic vs Standard) — that boundary needs a
     // rebuild; the effect/params/speed/input inside `shader` are refreshed in place every
     // frame by refreshSceneShaderFields, never through this identity (see updateMaterial).
@@ -1656,7 +1680,14 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
       applyImageTransparency(m, mat)
       applyImageGlow(m, mat)
       const iu = m.userData.imageUniforms as ImageUniforms | undefined
-      if (iu) writeImageUniforms(iu, mat)
+      if (iu) {
+        writeImageUniforms(iu, mat)
+        // The UV matrix is what carries tiling/offset/rotation/fit into a projected
+        // sample — without this, those dials would silently stop applying under any
+        // projection but 'uv' the moment this update path (rather than the build path)
+        // is the one moving them.
+        syncImageMapMatrix(iu, s.map)
+      }
       return true
     }
     case 'shaderFill': {
