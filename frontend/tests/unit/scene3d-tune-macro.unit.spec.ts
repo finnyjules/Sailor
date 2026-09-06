@@ -227,14 +227,16 @@ describe('same-kind is a NO-OP that preserves hand-tuned work', () => {
         // A DOC-LEVEL key, so this tune succeeds on its own merits. Without it a
         // total failure (macro never fires, patch all dropped) would satisfy the
         // "no second gem" assertion vacuously — the count would be 1 because
-        // nothing ran, not because the guard held.
-        { key: 'lighting.ambient', value: 0.8 },
+        // nothing ran, not because the guard held. Brightness is one of the simple
+        // lighting dials, so it is offered on a default doc (ambient sits behind
+        // Advanced lighting and would be dropped as un-offered).
+        { key: 'lighting.brightness', value: 1.5 },
       ],
     })
     const node = sceneNode(doc)
     const res = await tuneScene3DNode(node, 'more rainbow', KEY)
     expect(res.ok, 'the tune must actually have run').toBe(true)
-    expect(readDoc(node).lighting.ambient).toBe(0.8)
+    expect(readDoc(node).lighting.brightness).toBe(1.5)
 
     const p = prims(readDoc(node))
     expect(p, 'a redundant macro must not append a second gem').toHaveLength(1)
@@ -245,6 +247,26 @@ describe('same-kind is a NO-OP that preserves hand-tuned work', () => {
     expect(p[0]!.material.opalHueShift).toBe(280)
     // …and the same patch's override still lands on that existing gem.
     expect(p[0]!.material.opalStrength).toBe(0.8)
+  })
+
+  it('flipping Advanced lighting and setting a raw sun dial land together in ONE patch', async () => {
+    // `lighting.sunIntensity` is withheld until `lighting.advanced` is on, and the two
+    // arrive in the same patch. Without the adapter's gate contract the switch would land
+    // and the dial would be dropped against the pre-patch vocabulary.
+    const doc = defaultDoc()
+    doc.objects.push(createPrimitive('box', []))
+    fetchMock.mockResolvedValueOnce({
+      rationale: 'harder sun',
+      changes: [
+        { key: 'lighting.advanced', value: true },
+        { key: 'lighting.sunIntensity', value: 2.5 },
+      ],
+    })
+    const node = sceneNode(doc)
+    const res = await tuneScene3DNode(node, 'harder sun', KEY)
+    expect(res.ok).toBe(true)
+    expect(readDoc(node).lighting.advanced).toBe(true)
+    expect(readDoc(node).lighting.sunIntensity).toBe(2.5)
   })
 
   it('a DIFFERENT kind adds alongside rather than mutating what is there', async () => {

@@ -560,8 +560,10 @@ describe('scene3d lights model', () => {
   })
 
   describe('lighting environment', () => {
-    it('defaults to room', () => {
-      expect(defaultDoc().lighting.environment).toBe('room')
+    // A fresh scene is seeded to the "Softbox beauty" look (lib/scene3d/lighting.ts), so its
+    // raw environment is `softbox`, not the old `room` default.
+    it('defaults to softbox', () => {
+      expect(defaultDoc().lighting.environment).toBe('softbox')
     })
 
     it('round-trips every environment kind', () => {
@@ -572,12 +574,12 @@ describe('scene3d lights model', () => {
       }
     })
 
-    it('normalizes missing and invalid environment to room', () => {
+    it('normalizes missing and invalid environment to softbox', () => {
       const raw = JSON.parse(serializeDoc(defaultDoc()))
       delete raw.lighting.environment
-      expect(parseDoc(JSON.stringify(raw)).lighting.environment).toBe('room')
+      expect(parseDoc(JSON.stringify(raw)).lighting.environment).toBe('softbox')
       raw.lighting.environment = 'disco'
-      expect(parseDoc(JSON.stringify(raw)).lighting.environment).toBe('room')
+      expect(parseDoc(JSON.stringify(raw)).lighting.environment).toBe('softbox')
     })
   })
 })
