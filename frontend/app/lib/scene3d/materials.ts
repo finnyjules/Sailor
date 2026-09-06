@@ -17,7 +17,7 @@ import {
 } from './config'
 import { toHeightPixels } from './relief'
 import { isResolvedTexture, textureMapFilename, ensureTextureFetched, type TextureManifest } from './textures'
-import { applyImageTransform, type NaturalSize } from './imageMap'
+import { applyImageTransform, imageWrapMode, type NaturalSize } from './imageMap'
 // The field module — the ONLY place a ShaderSpec becomes pixels (see its ownership contract).
 // Scene3D is a second, independent consumer alongside Space Type/Shape Studio's
 // ~/lib/spacetype/fills.ts: it never routes through `Fill`/`FILL_TYPES` (SceneMaterial has no
@@ -1029,7 +1029,8 @@ function applyPhysical(p: THREE.MeshPhysicalMaterial, mat: SceneMaterial): void 
  * Cloning a cached Texture is NOT an alternative: `Texture.clone()` copies `.image` by
  * value at clone time, so a clone taken before the async load resolves stays empty forever.
  */
-function ownedImageTexture(m: THREE.Material, filename: string): THREE.Texture | null {
+function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture | null {
+  const filename = mat.image ?? ''
   if (!hasDOM || !filename) return null
   const tex = new THREE.TextureLoader().load(
     inputViewUrl(filename),
@@ -1047,6 +1048,12 @@ function ownedImageTexture(m: THREE.Material, filename: string): THREE.Texture |
     },
     undefined,
     () => {
+      // A material disposed while its file was still downloading must not be touched — same
+      // guard as onLoad above. Without it, a request that fails AFTER disposeMaterial already
+      // ran would null `.map`/bump `needsUpdate` on a dead material, dispose `tex` a SECOND
+      // time (disposeMaterial already disposed it), and surface a load-failure notice for a
+      // file the user has already swapped away from (Finding 3, image-material follow-ups).
+      if (m.userData.disposed) return
       const s = m as THREE.MeshStandardMaterial
       if (s.map === tex) { s.map = null; s.needsUpdate = true }
       tex.dispose()
@@ -1054,6 +1061,16 @@ function ownedImageTexture(m: THREE.Material, filename: string): THREE.Texture |
     },
   )
   tex.colorSpace = THREE.SRGBColorSpace
+  // Finding 2 fix: prime wrapS/wrapT + the userData stamp to match `mat.imageWrap` BEFORE
+  // this texture is handed out. The caller applies the full transform immediately after
+  // (with `natural: null`, since the image hasn't decoded yet) — without this priming, that
+  // first `applyImageTransform` call always sees a fresh `undefined` stamp and bumps
+  // `needsUpdate` on a texture with no image yet, which three warns about on every build. A
+  // LATER genuine wrap-mode change still bumps normally: that call compares against this same
+  // stamp and finds it changed.
+  const { key, wrap } = imageWrapMode(mat)
+  tex.wrapS = tex.wrapT = wrap
+  tex.userData.imageWrapApplied = key
   return tex
 }
 
@@ -1247,7 +1264,7 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
       // (which fires long after this function returns). Same pattern shaderFill uses with
       // `userData.shaderSpec` for refreshSceneShaderFields.
       t.userData.imageSpec = mat
-      const tex = ownedImageTexture(t, mat.image ?? '')
+      const tex = ownedImageTexture(t, mat)
       if (tex) {
         t.map = tex
         // Natural size is unknown until the file decodes, so Fit is an identity transform

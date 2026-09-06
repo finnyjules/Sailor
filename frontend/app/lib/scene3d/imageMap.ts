@@ -21,6 +21,17 @@ const WRAP: Record<string, THREE.Wrapping> = {
   mirror: THREE.MirroredRepeatWrapping,
 }
 
+/** The wrap key (as stamped into `userData.imageWrapApplied`) and its THREE constant for a
+ *  material's `imageWrap` field, defaulting exactly like `applyImageTransform` below. Exported
+ *  so `ownedImageTexture` (materials.ts) can prime a freshly built texture's wrapS/wrapT +
+ *  stamp BEFORE handing it to the first `applyImageTransform` call — that first call fires
+ *  before the image has decoded, and without this priming it always sees a fresh `undefined`
+ *  stamp and bumps `needsUpdate` on an incomplete texture (Finding 2, image-material follow-ups). */
+export function imageWrapMode(mat: SceneMaterial): { key: string; wrap: THREE.Wrapping } {
+  const key = mat.imageWrap ?? MATERIAL_DEFAULTS.imageWrap
+  return { key, wrap: WRAP[key] ?? THREE.ClampToEdgeWrapping }
+}
+
 /** Horizontal and vertical repeats. The link switch means "one number drives both",
  *  so the second field is not merely defaulted when linked — it is ignored, and the
  *  value the user last typed into it survives being unlinked and relinked. */
@@ -79,8 +90,7 @@ export function imageFitTransform(
 export function applyImageTransform(
   tex: THREE.Texture, mat: SceneMaterial, natural?: NaturalSize | null,
 ): void {
-  const key = mat.imageWrap ?? MATERIAL_DEFAULTS.imageWrap
-  const wrap = WRAP[key] ?? THREE.ClampToEdgeWrapping
+  const { key, wrap } = imageWrapMode(mat)
   if (tex.userData.imageWrapApplied !== key) {
     tex.userData.imageWrapApplied = key
     tex.wrapS = tex.wrapT = wrap
