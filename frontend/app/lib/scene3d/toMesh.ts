@@ -24,6 +24,7 @@ export async function convertToMesh(
     scale: [...obj.scale] as PrimitiveObject['scale'],
     material: obj.material,
     ...(obj.motion ? { motion: obj.motion } : {}),
+    ...(obj.treatments ? { treatments: obj.treatments } : {}),
     ...(obj.parentId ? { parentId: obj.parentId } : {}),
     kind: 'primitive',
     primitive: 'mesh',

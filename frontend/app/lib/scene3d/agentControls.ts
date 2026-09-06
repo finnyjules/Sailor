@@ -3,7 +3,7 @@ import { getEffectSync } from '~/lib/shaderfx/catalog'
 import { derivedShaderFillControls, shaderFillControls } from '~/lib/shaderfill/controls'
 import { SCENE_CONTROLS, visibleSceneControls, type SceneControl } from './controls'
 import { MACRO_PRIMITIVE_KINDS, MACRO_NONE, type SceneDoc, type SceneObject, type PrimitiveObject } from './config'
-import { treatmentsOf, TREATMENT_LABELS, type Treatment } from '~/lib/scene3d/treatments'
+import { isTreatmentHost, treatmentsOf, TREATMENT_LABELS, type Treatment } from '~/lib/scene3d/treatments'
 import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentControls'
 
 /** Strip the schema-only fields (`when`/`agent`/`animatable`/`summary`/`bindable`/
@@ -116,6 +116,10 @@ export function iterateTreatmentControls(
   for (const obj of objects) {
     const id = obj?.id
     if (typeof id !== 'string' || id === '' || id.includes('.') || /^\d+$/.test(id)) continue
+    // Only primitives and GLBs host treatments (treatments.ts's own rule). A light or group
+    // carrying a stray `treatments` array — a hand-edited scene_state, or a doc written before
+    // the field was gated — must not mint controls the renderer will never honour.
+    if (!isTreatmentHost(obj)) continue
     for (const t of treatmentsOf(obj)) {
       for (const c of treatmentControls(t.kind)) {
         visit({
@@ -137,6 +141,7 @@ export function sceneStackControls(doc: SceneDoc): ControlSpec[] {
     out.push({ ...spec, key: `objects.${id}.${rest}`, label: `${obj.name || 'Object'} · ${c.label}` } as ControlSpec)
   })
   iterateTreatmentControls(doc, (c, obj, id) => {
+    if ((c as { agent?: boolean }).agent === false) return
     const rest = c.key.slice(OBJECT_PREFIX.length)
     const { when, agent, animatable, summary, bindable, entry, optionLabels, ...spec } = c as any
     out.push({ ...spec, key: `objects.${id}.${rest}`, label: `${obj.name || 'Object'} · ${c.label}` } as ControlSpec)
@@ -256,7 +261,11 @@ export function scenePrimitiveMacro(doc: SceneDoc): ControlSpec {
 export function sceneBindableControls(doc: SceneDoc): ControlSpec[] {
   return [
     ...stripMeta(visibleSceneControls(doc)).filter((c) => !c.key.startsWith(OBJECT_PREFIX)),
-    ...sceneStackControls(doc),
+    // Treatment rows are `bindable: false` by contract, but `sceneStackControls` strips that
+    // flag (like every other schema-only field) before the bind menu ever sees it — so the
+    // refusal has to be re-stated here, by key, or a Collection column could bind a dial that
+    // the treatment editor owns.
+    ...sceneStackControls(doc).filter((c) => !c.key.includes('.treatments.')),
   ]
 }
 

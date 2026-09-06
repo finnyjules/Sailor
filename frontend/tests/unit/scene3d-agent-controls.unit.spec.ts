@@ -353,4 +353,23 @@ describe('sceneStackControls: treatments', () => {
     doc.objects.push(createPrimitive('box', doc.objects))
     expect(sceneStackControls(doc).some((c) => c.key.includes('.treatments.'))).toBe(false)
   })
+  // Treatment rows are `bindable: false`, but sceneStackControls strips the flag along with
+  // every other schema-only field, so the bind menu can only refuse them by key.
+  it('treatment dials reach the agent stack but never the Collections bind menu', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.treatments = [createTreatment('blur')]
+    doc.objects.push(box)
+    expect(sceneStackControls(doc).some((c) => c.key.includes('.treatments.'))).toBe(true)
+    expect(sceneBindableControls(doc).filter((c) => c.key.includes('.treatments.'))).toEqual([])
+  })
+  // treatments.ts gates the field to primitives and GLBs; a light that somehow carries one
+  // (a hand-edited scene_state) must not mint controls the renderer will never honour.
+  it('a non-host object carrying treatments mints nothing', () => {
+    const doc = defaultDoc()
+    const light = createLight('point', doc.objects)
+    ;(light as unknown as { treatments: unknown[] }).treatments = [createTreatment('blur')]
+    doc.objects.push(light)
+    expect(sceneStackControls(doc).some((c) => c.key.includes('.treatments.'))).toBe(false)
+  })
 })

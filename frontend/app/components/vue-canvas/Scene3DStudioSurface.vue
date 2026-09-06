@@ -3256,7 +3256,7 @@ function cloneObject(src: SceneObject, existing: SceneObject[] = doc.objects): S
     ...(src.motion ? { motion: JSON.parse(JSON.stringify(src.motion)) } : {}),
     // Treatments travel with the copy under FRESH ids — a shared id would let one motion
     // track drive both copies (cloneTreatments's own doc).
-    ...(src.treatments ? { treatments: cloneTreatments(src.treatments) } : {}),
+    ...(src.treatments?.length ? { treatments: cloneTreatments(src.treatments) } : {}),
     ...(src.kind === 'glb' && src.materialOverride ? { materialOverride: true } : {}),
     // Light fields likewise travel with the copy — same discriminated-union
     // shape as material/params above, just flat on the object instead of nested.
@@ -3335,6 +3335,12 @@ function retryGlb(id: string) {
     // failed GLB inside a group at [5,0,0] jumps to the origin and leaves the
     // group the instant the user clicks Retry.
     ...(o.parentId ? { parentId: o.parentId } : {}),
+    // Treatments and motion travel too, for the same reason parentId does: Retry rebuilds
+    // the SAME object under a fresh id, so anything the rebuild does not copy is silently
+    // deleted from the user's scene by a button labelled "Retry". Ids are kept as they are
+    // (unlike cloneObject's fresh ones) — this is one object, not two.
+    ...(o.treatments ? { treatments: o.treatments } : {}),
+    ...(o.motion ? { motion: o.motion } : {}),
   })
   doc.objects.splice(idx, 1, fresh)
   if (selectedId.value === id) selectedId.value = fresh.id

@@ -372,6 +372,7 @@ export class TreatmentStage {
 
     const prevTarget = r.getRenderTarget()
     const prevAutoClear = r.autoClear
+    const prevShadowAutoUpdate = r.shadowMap.autoUpdate
     const prevClearAlpha = r.getClearAlpha()
     r.getClearColor(this.prevClearColor)
     const prevBackground = scene.background
@@ -385,6 +386,22 @@ export class TreatmentStage {
       // the accumulator before each composite blends into it. The scene draws below clear
       // explicitly, and a Color/texture scene.background still force-clears on its own.
       r.autoClear = false
+      // 0. Shadow-map warm-up, then FREEZE. three rebuilds the shadow map on every
+      //    renderer.render, and WebGLShadowMap skips invisible objects — so the base pass
+      //    below, which hides the treated roots, would rebuild the map WITHOUT them and the
+      //    frame would lose their cast shadows entirely (a Fade at 0.95 deleting the model's
+      //    contact shadow). drawAlone cannot put them back: the shadow catcher is outside the
+      //    object's subtree, and the shadow pass tests layer 0 against a camera drawAlone has
+      //    parked on STAGE_LAYER. So render ONE full frame with nothing hidden — that
+      //    populates the map from the whole scene — and hold that map for every pass after it.
+      //    Every later render reuses it, which also removes the N+1 shadow rebuilds.
+      //    `needsUpdate` is consumed by this first render; it must not be set again.
+      r.shadowMap.autoUpdate = false
+      r.shadowMap.needsUpdate = true
+      r.setRenderTarget(this.base)
+      r.setClearColor(0x000000, 0)
+      r.clear()
+      r.render(scene, camera)
       // 1. Base: everything but the treated objects — or, inverted, the inverted object alone.
       if (invertGroup) {
         this.drawAlone(scene, camera, ctx.objectRoots.get(invertGroup.objectId)!, treatedRoots, this.base, prevBackground)
@@ -432,6 +449,7 @@ export class TreatmentStage {
       scene.background = prevBackground
       r.setClearColor(this.prevClearColor, prevClearAlpha)
       r.autoClear = prevAutoClear
+      r.shadowMap.autoUpdate = prevShadowAutoUpdate
       r.setRenderTarget(prevTarget)
     }
     this.stats.frames++

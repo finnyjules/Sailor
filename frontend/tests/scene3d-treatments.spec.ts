@@ -44,6 +44,7 @@ const twoSpheres = (leftTreatments?: unknown[]) => ({
   ],
 })
 const BLUR = { id: 't-blur', kind: 'blur', enabled: true, invert: false, amount: 1 }
+const FADE = { id: 't-fade', kind: 'fade', enabled: true, invert: false, opacity: 0.95 }
 
 async function openLab(page: Page, state: unknown): Promise<void> {
   await page.goto(`/dev/scene3d-lab?state=${encodeURIComponent(JSON.stringify(state))}`)
@@ -73,6 +74,90 @@ async function sharpness(page: Page, dataUrl: string): Promise<{ left: number; r
 
 const stats = (page: Page) => page.evaluate(() => (window as any).__scene3dTreatmentStats() as { frames: number; groups: number })
 const snapshot = (page: Page) => page.evaluate(() => (window as any).__scene3dSnapshot() as string)
+
+/**
+ * The shadow probe (C1). A masked treatment hides its object for the BASE pass; three
+ * rebuilds the shadow map on every `renderer.render`, and `WebGLShadowMap` skips invisible
+ * objects — so without the shadow-map freeze in `TreatmentStage.render` the treated object's
+ * cast shadow vanishes from the floor even though the object itself is still composited back.
+ * A Fade at 0.95 is the cleanest witness: visually a no-op on the object, fatal to its shadow.
+ *
+ * Rather than hard-code pixels, the patches are PROJECTED: the floor point the sun puts the
+ * left sphere's shadow on, and a same-size patch of open floor on the same image row further
+ * left. Camera maths mirrors three's PerspectiveCamera (vertical fov, right-handed look-at),
+ * so the probe survives a viewport resize.
+ */
+const SUN_AZIMUTH = 90
+const shadowScene = () => ({
+  version: 1, background: '#202020', showFloor: true,
+  // The default 'soft' preset does not cast at all (PRESETS.soft.shadow === false) — the
+  // whole finding is about a shadow that EXISTS being deleted, so the scene must cast one.
+  // …and the sun is swung due east so the shadow lands BESIDE the sphere rather than
+  // behind it: at the default azimuth this shallow camera hides the shadow behind the
+  // sphere's own silhouette, leaving no floor to probe.
+  lighting: { preset: 'dramatic', sunAzimuth: SUN_AZIMUTH },
+  camera: { position: [0, 1.2, 5.5], target: [0, 0.6, 0], fov: 40 },
+  objects: [
+    sphere('left', 'Left', -1.4, '#d94f3a', [FADE]),
+    sphere('right', 'Right', 1.4, '#3a8ad9'),
+  ],
+})
+
+/** Mean luminance of an `w`×`h` patch centred on (cx, cy) in image px. */
+async function patchLuma(
+  page: Page, dataUrl: string, patches: { cx: number; cy: number }[], w: number, h: number,
+): Promise<{ values: number[]; width: number; height: number }> {
+  return page.evaluate(async ({ url, patches, w, h }) => {
+    const img = new Image(); img.src = url; await img.decode()
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+    const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+    const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height)
+    const mean = (cx: number, cy: number) => {
+      let s = 0, n = 0
+      for (let y = Math.round(cy - h / 2); y < Math.round(cy + h / 2); y++) {
+        for (let x = Math.round(cx - w / 2); x < Math.round(cx + w / 2); x++) {
+          if (x < 0 || y < 0 || x >= width || y >= height) continue
+          const i = (y * width + x) * 4
+          s += 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!; n++
+        }
+      }
+      return n ? s / n : 0
+    }
+    return { values: patches.map((p) => mean(p.cx, p.cy)), width, height }
+  }, { url: dataUrl, patches, w, h })
+}
+
+/** World → image px, matching three's PerspectiveCamera (fov is VERTICAL, look-at with +Y up). */
+function projectToImage(
+  world: [number, number, number], cam: { x: number; y: number; z: number; tx: number; ty: number; tz: number },
+  fovDeg: number, width: number, height: number,
+): { x: number; y: number } {
+  const sub = (a: number[], b: number[]) => [a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!]
+  const dot = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!
+  const cross = (a: number[], b: number[]) => [
+    a[1]! * b[2]! - a[2]! * b[1]!, a[2]! * b[0]! - a[0]! * b[2]!, a[0]! * b[1]! - a[1]! * b[0]!,
+  ]
+  const norm = (a: number[]) => { const l = Math.hypot(a[0]!, a[1]!, a[2]!) || 1; return [a[0]! / l, a[1]! / l, a[2]! / l] }
+  const eye = [cam.x, cam.y, cam.z]
+  const zAxis = norm(sub(eye, [cam.tx, cam.ty, cam.tz]))
+  const xAxis = norm(cross([0, 1, 0], zAxis))
+  const yAxis = cross(zAxis, xAxis)
+  const rel = sub(world as unknown as number[], eye)
+  const camX = dot(rel, xAxis), camY = dot(rel, yAxis), camZ = dot(rel, zAxis)
+  const t = Math.tan((fovDeg * Math.PI) / 360) * -camZ
+  const ndcX = camX / (t * (width / height))
+  const ndcY = camY / t
+  return { x: (ndcX * 0.5 + 0.5) * width, y: (1 - (ndcY * 0.5 + 0.5)) * height }
+}
+
+/** Where the sun (`SUN_AZIMUTH`, elevation 40° — the doc default) drops the shadow of a
+ *  sphere centred at `[x, y, z]` onto y = 0. Mirrors `engine.ts`'s `sunDirection`. */
+function shadowFootWorld(x: number, y: number, z: number): [number, number, number] {
+  const az = (SUN_AZIMUTH * Math.PI) / 180, el = (40 * Math.PI) / 180
+  const dir = [Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)]
+  const t = y / dir[1]!
+  return [x - dir[0]! * t, 0, z - dir[2]! * t]
+}
 
 /** Surfaces a GLSL compile failure or a thrown frame as the reason a test failed, rather
  *  than leaving the reader with only a sharpness number. */
@@ -127,6 +212,28 @@ test.describe('3D Studio treatments', () => {
     const { left, right } = await sharpness(page, await snapshot(page))
     console.log(`[plain] left=${left.toFixed(3)} right=${right.toFixed(3)}`)
     expect(Math.abs(left - right)).toBeLessThan(Math.max(left, right) * 0.35)
+  })
+
+  test('a masked treatment keeps the object\'s cast shadow on the floor', async ({ page }) => {
+    const errs = watchConsole(page)
+    await openLab(page, shadowScene())
+    const s = await stats(page)
+    expect(s.frames, `stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    expect(s.groups).toBe(1)
+    const shot = await snapshot(page)
+    const cam = await page.evaluate(() => (window as any).__scene3dCamera())
+    // One probe first, only to learn the image size the projection needs.
+    const size = await patchLuma(page, shot, [{ cx: 0, cy: 0 }], 1, 1)
+    const foot = projectToImage(shadowFootWorld(-1.4, 0.6, 0), cam, 40, size.width, size.height)
+    // Same image ROW, so both patches see the same grid lines and the same floor depth;
+    // only x moves, out to open floor well clear of the (PCF-softened) shadow.
+    const open = { cx: Math.round(size.width * 0.06), cy: Math.round(foot.y) }
+    const w = Math.round(size.width * 0.05), h = Math.round(size.height * 0.035)
+    const { values } = await patchLuma(page, shot, [{ cx: Math.round(foot.x), cy: Math.round(foot.y) }, open], w, h)
+    const [under, openFloor] = values as [number, number]
+    console.log(`[shadow] image=${size.width}x${size.height} under=(${Math.round(foot.x)},${Math.round(foot.y)}) ${under.toFixed(2)} open=(${open.cx},${open.cy}) ${openFloor.toFixed(2)} ratio=${(under / openFloor).toFixed(3)}`)
+    expect(openFloor).toBeGreaterThan(1) // there IS floor to compare against
+    expect(under).toBeLessThan(openFloor * 0.85)
   })
 
   test('tree flow: add a rim light from the row menu, see the breadcrumb, toggle, remove', async ({ page }) => {
