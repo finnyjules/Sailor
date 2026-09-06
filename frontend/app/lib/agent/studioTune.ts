@@ -935,6 +935,11 @@ const scene3dAdapter: PatchAdapter = {
       restore?.()
     }
   },
+  // Simple lighting hides the raw sun/ambient dials behind `lighting.advanced`, so a
+  // patch that flips the switch AND sets `lighting.sunIntensity` in the same turn would
+  // otherwise keep only the switch — the dial keys are validated against the pre-patch
+  // vocabulary, where they are withheld. Same second-pass contract as Shape's layout gate.
+  gateKeys: ['lighting.advanced'],
 }
 
 /** Exposed for tests only — the adapter is otherwise reached via the registry. */

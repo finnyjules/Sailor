@@ -11,8 +11,21 @@ const track = (over: Partial<SceneMotionTrack> = {}): SceneMotionTrack => ({
 })
 
 describe('animatableTargets', () => {
-  it('includes lighting.sunIntensity with its declared slider range', () => {
+  it('includes lighting.brightness (a simple dial) with its declared slider range', () => {
     const doc = defaultDoc()
+    const t = animatableTargets(doc).find((x) => x.path === 'lighting.brightness')
+    expect(t).toBeTruthy()
+    expect(t!.min).toBe(0.25)
+    expect(t!.max).toBe(3)
+    expect(t!.label).toBe('Brightness')
+  })
+
+  it('offers lighting.sunIntensity with its declared slider range only once Advanced lighting is on', () => {
+    // The raw sun/ambient dials sit behind `lighting.advanced` (controls.ts `when`), and
+    // targets are derived from the same visibility gate the inspector uses.
+    const doc = defaultDoc()
+    expect(animatableTargets(doc).find((x) => x.path === 'lighting.sunIntensity')).toBeUndefined()
+    doc.lighting.advanced = true
     const t = animatableTargets(doc).find((x) => x.path === 'lighting.sunIntensity')
     expect(t).toBeTruthy()
     expect(t!.min).toBe(0)
@@ -86,7 +99,7 @@ describe('animatableTargets', () => {
 
   it('a default scene (no objects) still offers the doc-level (Lighting/Camera/Post) targets', () => {
     const paths = animatableTargets(defaultDoc()).map((t) => t.path)
-    expect(paths).toContain('lighting.sunIntensity')
+    expect(paths).toContain('lighting.brightness')
     expect(paths).toContain('camera.fov')
     expect(paths).toContain('post.bloomStrength')
   })
@@ -137,16 +150,28 @@ describe('animatableTargets', () => {
    * a deliberate grant, so it belongs in this list — update it in the same change, do not
    * loosen the assertion.
    */
-  const docTargets = (prefix: string): string[] => {
+  const docTargets = (prefix: string, mutate?: (doc: ReturnType<typeof defaultDoc>) => void): string[] => {
     const doc = defaultDoc()
     doc.objects.push(createPrimitive('box', doc.objects))
+    mutate?.(doc)
     return animatableTargets(doc).map((t) => t.path).filter((p) => p.startsWith(prefix)).sort()
   }
 
-  it('offers exactly these lighting targets', () => {
-    expect(docTargets('lighting.')).toEqual([
-      'lighting.ambient', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.sunIntensity',
-    ])
+  // Lighting has two modes. Simple (the default) offers the three feel dials plus the
+  // light's direction; Advanced lighting reveals the raw sun/ambient dials on top.
+  // Both lists are exact, so growing either vocabulary has to be deliberate.
+  const SIMPLE_LIGHTING = [
+    'lighting.brightness', 'lighting.softness', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.warmth',
+  ]
+
+  it('offers exactly these lighting targets in simple mode (the default)', () => {
+    expect(docTargets('lighting.')).toEqual(SIMPLE_LIGHTING)
+  })
+
+  it('offers exactly these lighting targets once Advanced lighting is on', () => {
+    expect(docTargets('lighting.', (doc) => { doc.lighting.advanced = true })).toEqual([
+      ...SIMPLE_LIGHTING, 'lighting.ambient', 'lighting.sunIntensity',
+    ].sort())
   })
 
   it('offers exactly these camera targets', () => {

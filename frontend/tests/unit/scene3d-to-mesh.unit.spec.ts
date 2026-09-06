@@ -37,6 +37,21 @@ describe('convert to mesh', () => {
     expect(out.parentId).toBe('g1')
   })
 
+  // Per-object treatments are NOT baked into vertices (they are a render-time stage), so
+  // unlike params/modifiers they must survive the rebuild — a Convert to mesh that silently
+  // deleted the object's blur would look like the treatment editor losing the user's work.
+  it('carries the object\'s treatments across unchanged, ids included', async () => {
+    const treatments = [
+      { id: 'trt_a', kind: 'blur', enabled: true, invert: false, amount: 0.4 },
+      { id: 'trt_b', kind: 'fade', enabled: false, invert: false, opacity: 0.5 },
+    ] as PrimitiveObject['treatments']
+    const src: PrimitiveObject = { ...sphere(), treatments }
+    const geo = buildGeometry('sphere', src.params, src.modifiers, 'smooth')
+    const out = await convertToMesh(src, geo)
+    expect(out.treatments?.map((t) => t.id)).toEqual(['trt_a', 'trt_b'])
+    expect(out.treatments).toEqual(treatments)
+  })
+
   it('drops params and modifiers — they are baked into the vertices', async () => {
     const src = sphere()
     const geo = buildGeometry('sphere', src.params, src.modifiers, 'smooth')
