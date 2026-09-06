@@ -56,7 +56,7 @@ const menuPos = ref({ top: 0, left: 0 })
 const addBtn = ref<HTMLButtonElement | null>(null)
 function onOutside(e: PointerEvent): void {
   const t = e.target as HTMLElement | null
-  if (t?.closest('[data-treatment-menu]') || t === addBtn.value) return
+  if (t?.closest('[data-treatment-menu]') || addBtn.value?.contains(t)) return
   closeMenu()
 }
 function openMenu(): void {

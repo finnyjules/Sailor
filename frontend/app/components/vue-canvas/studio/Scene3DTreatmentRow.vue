@@ -42,7 +42,7 @@ const emit = defineEmits<{
     :style="{ paddingLeft: `${8 + depth * 12}px` }"
     draggable="true"
     @click.stop="emit('select', objectId, treatment.id)"
-    @dragstart="emit('dragStart', objectId, treatment.id)"
+    @dragstart="($event.dataTransfer?.setData('text/plain', treatment.id), emit('dragStart', objectId, treatment.id))"
     @dragover.prevent
     @drop.prevent="emit('dropOn', objectId, treatment.id)">
     <span class="w-2 shrink-0" />

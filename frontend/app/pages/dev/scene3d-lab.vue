@@ -9,11 +9,15 @@ import Scene3DStudioSurface from '~/components/vue-canvas/Scene3DStudioSurface.v
 
 const open = ref(true)
 const widgetNames = ['scene_state', 'beauty_image', 'depth_image', 'normal_image', 'glb_url']
-// ?glb=<file in ComfyUI's input dir> seeds the scene with that model (e.g.
-// ?glb=Duck.glb), so the GLB import / material-override path can be smoked
-// without wiring a canvas or clicking through an upload.
-const glbFile = useRoute().query.glb
-const seed = typeof glbFile === 'string' && glbFile
+// ?state=<encoded scene_state JSON> seeds the surface with a whole document (the Playwright
+// treatment specs use this); ?glb=<file in ComfyUI's input dir> seeds a single imported
+// model as before. `state` wins when both are present.
+const route = useRoute()
+const stateParam = route.query.state
+const glbFile = route.query.glb
+const seed = typeof stateParam === 'string' && stateParam
+  ? stateParam
+  : typeof glbFile === 'string' && glbFile
   ? JSON.stringify({
       version: 1,
       objects: [{

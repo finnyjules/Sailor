@@ -14,7 +14,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import * as THREE from 'three'
 import {
   Box, Boxes, Plus, Loader2, Upload, Lightbulb, Sparkles, Shuffle, ClipboardPaste,
-  ChevronUp, Shapes,
+  ChevronUp, ChevronRight, Shapes,
 } from 'lucide-vue-next'
 import {
   parseDoc, serializeDoc, createPrimitive, createGlbObject, createLight, createGroup, createDecal,
@@ -23,7 +23,11 @@ import {
   type SceneDoc, type SceneObject, type PrimitiveObject, type PrimitiveKind, type MaterialType, type GradientStop, type LightKind, type LightObject, type ReliefSpec, type SceneMaterial, type ScreenSpec, type Vec3,
   type DecalObject, type DecalContent,
 } from '~/lib/scene3d/config'
-import { cloneTreatments } from '~/lib/scene3d/treatments'
+import {
+  cloneTreatments, createTreatment, findTreatment, isTreatmentHost, maskedTreatmentPlan, newTreatmentId,
+  treatmentsOf, unrenderedTreatmentIds, TREATMENT_LABELS, type Treatment, type TreatmentKind,
+} from '~/lib/scene3d/treatments'
+import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentControls'
 import { eulerFromNormal } from '~/lib/scene3d/decals'
 import { getLook, resolveLook, resolveDials } from '~/lib/scene3d/lighting'
 import { HARMONY_TYPES, HARMONY_LABELS } from '~/lib/color/harmony'
@@ -170,6 +174,76 @@ const canMerge = computed(() =>
 // The object list renders this tree rather than `doc.objects` directly — the
 // doc itself stays a flat array plus `parentId`; only the render is nested.
 const rootObjectList = computed(() => rootObjects(doc.objects))
+
+// ── Treatments: per-object effects, managed from the tree (design spec §2).
+// A treatment selection is a SEPARATE concept from the object selection: picking a
+// treatment row clears `selectedIds` (which detaches the gizmo through the selection
+// watch) and the inspector shows only that treatment's dials.
+const selectedTreatment = ref<{ objectId: string; treatmentId: string } | null>(null)
+const activeTreatment = computed(() =>
+  selectedTreatment.value ? findTreatment(doc, selectedTreatment.value.objectId, selectedTreatment.value.treatmentId) : null)
+/** Treatment ids this frame's plan will not draw — the tree marks them "Not rendered". */
+const unrenderedTreatments = computed(() => unrenderedTreatmentIds(maskedTreatmentPlan(doc)))
+
+function selectTreatment(objectId: string, treatmentId: string): void {
+  if (sculpting.value) return // same guard as toggleSelected: never re-point a live sculpt session
+  selectedIds.value = []
+  selectedTreatment.value = { objectId, treatmentId }
+}
+function addTreatment(objectId: string, kind: TreatmentKind): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || !isTreatmentHost(o)) return
+  const t = createTreatment(kind)
+  o.treatments = [...treatmentsOf(o), t]
+  selectTreatment(objectId, t.id)
+}
+function removeTreatment(objectId: string, treatmentId: string): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o) return
+  const next = treatmentsOf(o).filter((t) => t.id !== treatmentId)
+  if (next.length) o.treatments = next
+  else delete o.treatments // absent, never [] — keeps the saved doc byte-identical to before
+  if (selectedTreatment.value?.treatmentId === treatmentId) selectedTreatment.value = null
+}
+function duplicateTreatment(objectId: string, treatmentId: string): void {
+  const hit = findTreatment(doc, objectId, treatmentId)
+  if (!hit) return
+  const copy = { ...hit.treatment, id: newTreatmentId() } as Treatment
+  const list = [...treatmentsOf(hit.obj)]
+  list.splice(hit.index + 1, 0, copy)
+  hit.obj.treatments = list
+  selectTreatment(objectId, copy.id)
+}
+function toggleTreatment(objectId: string, treatmentId: string): void {
+  const hit = findTreatment(doc, objectId, treatmentId)
+  if (hit) hit.treatment.enabled = !hit.treatment.enabled
+}
+function reorderTreatment(objectId: string, fromId: string, toId: string): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o) return
+  const list = [...treatmentsOf(o)]
+  const from = list.findIndex((t) => t.id === fromId)
+  const to = list.findIndex((t) => t.id === toId)
+  if (from < 0 || to < 0 || from === to) return
+  const [moved] = list.splice(from, 1)
+  list.splice(to, 0, moved!)
+  o.treatments = list
+}
+
+// The treatment inspector: ONE card from treatmentControls(kind), read/written straight
+// on the selected Treatment. Colour rows arrive as 8-digit #rrggbbaa from StudioColor;
+// stored as-is, stripped by every three consumer (treatmentShells.ts / treatmentStage.ts).
+const treatmentPanelControls = computed(() => activeTreatment.value ? treatmentControls(activeTreatment.value.treatment.kind) : [])
+const treatmentPanelOrder = computed(() => activeTreatment.value ? [TREATMENT_LABELS[activeTreatment.value.treatment.kind]] : [])
+function readTreatmentControl(key: string): string | number | boolean {
+  const t = activeTreatment.value?.treatment as unknown as Record<string, string | number | boolean> | undefined
+  const v = t?.[treatmentField(key)]
+  return v === undefined ? '' : v
+}
+function setTreatmentControl(key: string, value: string | number | boolean): void {
+  const t = activeTreatment.value?.treatment as unknown as Record<string, unknown> | undefined
+  if (t) t[treatmentField(key)] = value
+}
 
 function toggleSelected(id: string, additive: boolean): void {
   // A stray click (viewport or the Objects list) must never re-point the
@@ -1603,8 +1677,13 @@ onMounted(() => {
     const p = engine.camera.position, t = interaction?.orbit.target
     return { x: p.x, y: p.y, z: p.z, tx: t?.x ?? 0, ty: t?.y ?? 0, tz: t?.z ?? 0 }
   }
+  ;(window as any).__scene3dTreatmentStats = () => engine ? { ...engine.treatmentStats } : null
+  ;(window as any).__scene3dSnapshot = () => engine?.snapshot() ?? ''
+  ;(window as any).__scene3dBeauty = async () => engine ? (await renderPasses(engine, doc, 0)).beauty : ''
 })
-onBeforeUnmount(() => { delete (window as any).__scene3dDoc; delete (window as any).__scene3dCamera })
+onBeforeUnmount(() => {
+  for (const k of ['__scene3dDoc', '__scene3dCamera', '__scene3dTreatmentStats', '__scene3dSnapshot', '__scene3dBeauty']) delete (window as any)[k]
+})
 
 onMounted(() => {
   webglOk.value = detectWebGL()
@@ -1825,6 +1904,7 @@ watch(() => [doc.lighting.softness, doc.lighting.warmth, doc.lighting.brightness
 // that only extends the list leaves `selectedId` unchanged but still has to
 // rebuild the gizmo around a pivot.
 watch(selectedIds, (ids) => {
+  if (ids.length) selectedTreatment.value = null // an object selection replaces a treatment selection
   // ANY light in the selection suppresses the scale gizmo, not just the primary:
   // LightObject's scale is never read, so scaling a light in a mixed selection
   // writes a number nothing honours — and a light that resists scaling alone but
@@ -3077,6 +3157,7 @@ function removeObject(id: string) {
   // Remove every doomed id from the selection without going through the replace-setter,
   // which would discard any other selected objects when multi-selection is active.
   selectedIds.value = selectedIds.value.filter((x) => !doomed.has(x))
+  if (selectedTreatment.value && doomed.has(selectedTreatment.value.objectId)) selectedTreatment.value = null
   for (const gone of doomed) delete glbError[gone]
 }
 // C3 fix (final review): `{ ...src.material }` is a SHALLOW copy — `material.relief` (and
@@ -3944,11 +4025,18 @@ async function onClose() {
           </div>
           <Scene3DObjectRow v-for="o in rootObjectList" :key="o.id"
             :object="o" :objects="doc.objects" :selected-ids="selectedIds" :glb-error="glbError" :depth="0"
+            :selected-treatment="selectedTreatment" :not-rendered="unrenderedTreatments"
             @select="toggleSelected"
             @remove="removeObject"
             @duplicate="duplicateObject"
             @retry="retryGlb"
-            @toggle-visible="(id) => { const found = doc.objects.find((x) => x.id === id); if (found) found.visible = !found.visible }" />
+            @toggle-visible="(id) => { const found = doc.objects.find((x) => x.id === id); if (found) found.visible = !found.visible }"
+            @add-treatment="addTreatment"
+            @select-treatment="selectTreatment"
+            @remove-treatment="removeTreatment"
+            @duplicate-treatment="duplicateTreatment"
+            @toggle-treatment="toggleTreatment"
+            @reorder-treatment="reorderTreatment" />
         </div>
         <div v-if="wiredGlbUrl" class="shrink-0 border-t border-white/[0.08] p-2">
           <StudioButton @click="addGlb(wiredGlbUrl)">
@@ -4004,7 +4092,26 @@ async function onClose() {
                 @click="activeTab = 'motion'">Motion</button>
       </div>
 
-      <template v-if="activeTab === 'build'">
+      <!-- Treatment inspector (design spec §2): a treatment row is selected in the tree, so
+           this column shows ONLY that treatment's dials under a breadcrumb naming its object.
+           Selecting a treatment cleared the object selection, so none of the object cards
+           below apply; clicking the object name in the breadcrumb selects the object again. -->
+      <template v-if="activeTab === 'build' && activeTreatment">
+        <div class="mb-2 flex items-center gap-1.5 px-1 text-[11px] text-white/50" data-testid="treatment-breadcrumb">
+          <button type="button" class="truncate hover:text-white/80" @click="selectedIds = [activeTreatment.obj.id]">{{ activeTreatment.obj.name }}</button>
+          <ChevronRight class="h-3 w-3 shrink-0 opacity-60" />
+          <span class="truncate text-white/80">{{ TREATMENT_LABELS[activeTreatment.treatment.kind] }}</span>
+        </div>
+        <div class="flex flex-col gap-2" @pointerdown.capture="onControlsPointerDown">
+          <StudioControlPanel
+            :controls="treatmentPanelControls"
+            :order="treatmentPanelOrder"
+            :value="readTreatmentControl"
+            @set="setTreatmentControl"
+          />
+        </div>
+      </template>
+      <template v-if="activeTab === 'build' && !activeTreatment">
       <!-- Multi-selection indicator. Every row below reads the PRIMARY's value
            but writes to the whole selection, so without this the panel looks
            like an ordinary single-object inspector right up until one edit
