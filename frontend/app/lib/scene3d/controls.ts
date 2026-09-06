@@ -604,6 +604,7 @@ export const SCENE_CONTROLS: SceneControl[] = [
     default: MATERIAL_DEFAULTS.imageFlipY, group: 'Material',
     hint: 'Mirrors the picture top to bottom', when: isImageMaterial,
   } as SceneControl,
+  color('object.material.imageTint', 'Tint', MATERIAL_DEFAULTS.imageTint, 'Material', { when: isImageMaterial }),
 
   // --- Lighting (doc-level; no active object needed) -------------------------------
   // Simple layer: pick a Look, then nudge three dials. Direction stays visible, so it's

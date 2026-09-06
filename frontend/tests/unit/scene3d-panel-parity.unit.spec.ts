@@ -119,6 +119,9 @@ const ROW: Record<string, Row> = {
   [`${M}imageFlipX`]: { label: 'Flip horizontally', kind: 'switch', hint: 'Mirrors the picture left to right' },
   [`${M}imageFlipY`]: { label: 'Flip vertically', kind: 'switch', hint: 'Mirrors the picture top to bottom' },
 
+  // image — look / colour (Task 6 of the image-options plan)
+  [`${M}imageTint`]: { label: 'Tint', kind: 'color' },
+
   // <details> Coat & sheen
   [`${M}clearcoat`]: { label: 'Clearcoat', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Adds a thin glossy varnish layer on top' },
   [`${M}clearcoatRoughness`]: { label: 'Coat roughness', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'How blurred or sharp that varnish coat looks' },
@@ -413,6 +416,9 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
       `${M}imageOffsetX`, `${M}imageOffsetY`, `${M}imageRotation`,
       `${M}imageFlipX`, `${M}imageFlipY`,
     ],
+    'Image look': [
+      `${M}imageTint`,
+    ],
     'Surface relief': RELIEF_OFF,
     Screen: SCREEN_OFF,
   },
@@ -661,6 +667,16 @@ describe('Scene3D panel parity — image placement sub-card', () => {
       `${M}imageFlipX`, `${M}imageFlipY`,
     ])
     expect(scenePanelChrome('image')['Image placement']).toEqual({ open: false })
+  })
+})
+
+describe('Scene3D panel parity — image look sub-card', () => {
+  it('collects the look rows in their own collapsed card', () => {
+    const doc = defaultDoc()
+    const o = createPrimitive('box')
+    o.material.type = 'image'
+    const card = rendered(doc, o, SCENE_PANEL_SECTIONS).find((c) => c.title === 'Image look')
+    expect(card?.keys).toEqual([`${M}imageTint`])
   })
 })
 
@@ -1530,6 +1546,7 @@ describe('Scene3D panel contract', () => {
   it('the four bare <details> sub-blocks stay collapsed, and Transparency opens for glass', () => {
     expect(scenePanelChrome('standard')).toEqual({
       'Image placement': { open: false },
+      'Image look': { open: false },
       'Coat & sheen': { open: false }, Glow: { open: false },
       Transparency: { open: false }, Iridescence: { open: false }, Reflection: { open: false },
       Screen: { open: false },

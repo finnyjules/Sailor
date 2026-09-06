@@ -86,6 +86,7 @@ export const SCENE_PANEL_ORDER = [
   'Decal',
   'Material',
   'Material/Image placement',
+  'Material/Image look',
   'Material/Coat & sheen',
   'Material/Glow',
   'Material/Transparency',
@@ -115,6 +116,7 @@ export const SCENE_PANEL_SECTIONS = [...SCENE_PANEL_ORDER, ...POST_SECTIONS] as 
 export function scenePanelChrome(matType: MaterialType | null): Record<string, { badge?: string; open?: boolean }> {
   return {
     'Image placement': { open: false },
+    'Image look': { open: false },
     'Coat & sheen': { open: false },
     Glow: { open: false },
     Transparency: { open: matType === 'glass' },
@@ -557,6 +559,7 @@ const SUB_CARDS: Record<string, readonly string[]> = {
     'object.material.imageOffsetX', 'object.material.imageOffsetY', 'object.material.imageRotation',
     'object.material.imageFlipX', 'object.material.imageFlipY',
   ],
+  'Material/Image look': ['object.material.imageTint'],
   'Material/Coat & sheen': [
     'object.material.clearcoat', 'object.material.clearcoatRoughness',
     'object.material.sheen', 'object.material.sheenColor',

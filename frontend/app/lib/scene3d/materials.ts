@@ -1254,9 +1254,10 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
     }
     case 'image': {
       const t = new THREE.MeshStandardMaterial({
-        // White base so the picture shows untinted. The doc's `color` is deliberately NOT
-        // read here — see SceneMaterial.imageTint, which is the tint control for this type.
-        color: '#ffffff',
+        // The picture's tint — white leaves it untouched. Deliberately NOT the document's
+        // `color`: this type has never read it, and starting to would retint every image
+        // material already saved with whatever colour its document carried.
+        color: stripAlpha(mat.imageTint ?? MATERIAL_DEFAULTS.imageTint),
         roughness: mat.roughness,
         metalness: mat.metalness,
       })
@@ -1565,6 +1566,7 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
     }
     case 'image': {
       const s = m as THREE.MeshStandardMaterial
+      s.color.set(stripAlpha(mat.imageTint ?? MATERIAL_DEFAULTS.imageTint))
       s.roughness = mat.roughness; s.metalness = mat.metalness
       // Re-stamp before touching the map: the async onLoad reads this, and a file still in
       // flight must settle onto the CURRENT dials, not the ones it was built with.

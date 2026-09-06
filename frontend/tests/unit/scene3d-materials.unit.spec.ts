@@ -547,3 +547,26 @@ describe('image fit', () => {
     expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageFit: 'contain' }))).toBe(true)
   })
 })
+
+describe('image tint', () => {
+  it('defaults to white so an untinted picture is unchanged', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' })) as THREE.MeshStandardMaterial
+    expect(`#${m.color.getHexString()}`).toBe('#ffffff')
+  })
+
+  it('multiplies the picture by the tint, in place', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' })) as THREE.MeshStandardMaterial
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageTint: '#ff8800' }))).toBe(true)
+    expect(`#${m.color.getHexString()}`).toBe('#ff8800')
+  })
+
+  it('accepts the eight-digit hex the studio colour picker emits', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', imageTint: '#ff8800cc' })) as THREE.MeshStandardMaterial
+    expect(`#${m.color.getHexString()}`).toBe('#ff8800')
+  })
+
+  it('ignores the document colour, which this type has never read', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', color: '#00ff00' })) as THREE.MeshStandardMaterial
+    expect(`#${m.color.getHexString()}`).toBe('#ffffff')
+  })
+})
