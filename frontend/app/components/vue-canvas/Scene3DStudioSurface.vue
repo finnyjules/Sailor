@@ -1151,6 +1151,22 @@ function setMod(key: string, v: number): void {
   o.modifiers[key] = v
 }
 const modSpec = (key: string) => MODIFIER_SPECS.find((s) => s.key === key)!
+/** A shared-row `select` spec for an index-valued modifier picker (the Cloner's Mode /
+ *  Around and the Modifiers' axis / jitter pickers). Built from the MODIFIER_SPEC so the
+ *  six option anchors draw as StudioRow rows — the same 28px chrome as the sliders beside
+ *  them — instead of a bare label + segmented. They stay bespoke (not schema controls)
+ *  because they store the option's INDEX in the numeric modifier bag; `optionOf` /
+ *  `setOption` do that word ↔ index mapping. Values are the spec's own words; the row
+ *  shows them sentence-cased. */
+function optionRowSpec(key: string, anchor: string): ControlSpec {
+  const spec = modSpec(key)
+  const options = spec.options ?? []
+  return {
+    key: anchor, label: spec.label, kind: 'select', options,
+    optionLabels: options.map((o) => o[0]!.toUpperCase() + o.slice(1)),
+    default: options[0] ?? '', group: 'Geometry', hint: spec.hint,
+  }
+}
 // Option controls store the option's index; the segmented control speaks labels.
 function optionOf(key: string): string {
   const spec = modSpec(key)
@@ -4118,46 +4134,28 @@ async function onClose() {
              anchor rather than looped over dynamic slot names: a slot that silently
              resolves to nothing renders a bare StudioRow instead, with no error. -->
         <template #control-ui.mod.taperAxis>
-          <div>
-            <label class="mb-1 block text-[11px] text-white/55" :title="modSpec('taperAxis').hint">{{ modSpec('taperAxis').label }}</label>
-            <StudioSegmented :model-value="optionOf('taperAxis')" :options="modSpec('taperAxis').options!"
-              @update:model-value="(v: string) => setOption('taperAxis', v)" />
-          </div>
+          <StudioRow :spec="optionRowSpec('taperAxis', 'ui.mod.taperAxis')" :model-value="optionOf('taperAxis')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('taperAxis', String(v))" />
         </template>
         <template #control-ui.mod.twistAxis>
-          <div>
-            <label class="mb-1 block text-[11px] text-white/55" :title="modSpec('twistAxis').hint">{{ modSpec('twistAxis').label }}</label>
-            <StudioSegmented :model-value="optionOf('twistAxis')" :options="modSpec('twistAxis').options!"
-              @update:model-value="(v: string) => setOption('twistAxis', v)" />
-          </div>
+          <StudioRow :spec="optionRowSpec('twistAxis', 'ui.mod.twistAxis')" :model-value="optionOf('twistAxis')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('twistAxis', String(v))" />
         </template>
         <template #control-ui.mod.bendAxis>
-          <div>
-            <label class="mb-1 block text-[11px] text-white/55" :title="modSpec('bendAxis').hint">{{ modSpec('bendAxis').label }}</label>
-            <StudioSegmented :model-value="optionOf('bendAxis')" :options="modSpec('bendAxis').options!"
-              @update:model-value="(v: string) => setOption('bendAxis', v)" />
-          </div>
+          <StudioRow :spec="optionRowSpec('bendAxis', 'ui.mod.bendAxis')" :model-value="optionOf('bendAxis')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('bendAxis', String(v))" />
         </template>
         <template #control-ui.mod.jitterMode>
-          <div>
-            <label class="mb-1 block text-[11px] text-white/55" :title="modSpec('jitterMode').hint">{{ modSpec('jitterMode').label }}</label>
-            <StudioSegmented :model-value="optionOf('jitterMode')" :options="modSpec('jitterMode').options!"
-              @update:model-value="(v: string) => setOption('jitterMode', v)" />
-          </div>
+          <StudioRow :spec="optionRowSpec('jitterMode', 'ui.mod.jitterMode')" :model-value="optionOf('jitterMode')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('jitterMode', String(v))" />
         </template>
         <template #control-ui.cloner.mode>
-          <div>
-            <label class="mb-1 block text-[11px] text-white/55" :title="modSpec('cloneMode').hint">{{ modSpec('cloneMode').label }}</label>
-            <StudioSegmented :model-value="optionOf('cloneMode')" :options="modSpec('cloneMode').options!"
-              @update:model-value="(v: string) => setOption('cloneMode', v)" />
-          </div>
+          <StudioRow :spec="optionRowSpec('cloneMode', 'ui.cloner.mode')" :model-value="optionOf('cloneMode')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('cloneMode', String(v))" />
         </template>
         <template #control-ui.cloner.axis>
-          <div>
-            <label class="mb-1 block text-[11px] text-white/55" :title="modSpec('cloneAxis').hint">{{ modSpec('cloneAxis').label }}</label>
-            <StudioSegmented :model-value="optionOf('cloneAxis')" :options="modSpec('cloneAxis').options!"
-              @update:model-value="(v: string) => setOption('cloneAxis', v)" />
-          </div>
+          <StudioRow :spec="optionRowSpec('cloneAxis', 'ui.cloner.axis')" :model-value="optionOf('cloneAxis')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('cloneAxis', String(v))" />
         </template>
 
         <!-- Step transforms accumulate across copies in every mode, so they sit under
