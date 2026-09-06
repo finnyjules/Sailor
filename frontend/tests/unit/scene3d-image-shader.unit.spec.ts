@@ -61,7 +61,11 @@ describe('refreshImageBounds — the in-place bbox refresh (Important 2)', () =>
     const u = imageUniforms(img())
     const geo = new THREE.PlaneGeometry(2, 2) // zero extent on Z
     refreshImageBounds(u, geo)
-    expect(u.uImgBoundsSize.value.z).toBeCloseTo(1e-4)
+    // toBe, NOT toBeCloseTo: the floored value is an exact literal, and toBeCloseTo's default
+    // precision of 2 carries a tolerance of 0.005 — which is larger than the floor itself, so
+    // the assertion would pass whether or not the floor exists. This test guards the
+    // divide-by-zero on a flat object; it has to be able to fail.
+    expect(u.uImgBoundsSize.value.z).toBe(1e-4)
   })
 })
 
