@@ -927,6 +927,26 @@ function applyScatterPreset(layer: ScatterLayer, name: string) {
   const next = row.normalize({ ...scatterParams(layer as unknown as { style: string; seed: number }), ...row.presetPatch(name) })
   setLocal(layer.id, { [row.id]: next } as Partial<ScatterLayer>)
 }
+/** The ordered inks the selected scatter is painting with — its style's roles, in the
+ *  order that style's paint reads them (`row.inkLabels` names each one). */
+const scatterInks = computed<string[]>(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'scatter') return []
+  const inks = (scatterDials.value as { inks?: unknown }).inks
+  return Array.isArray(inks) ? (inks as string[]) : []
+})
+/** One ink of the selected scatter's ordered palette, changed by hand. Mirrors
+ *  paneInkPatch: validate, bounds-check, DROP ALPHA (a scatter ink is an opaque print
+ *  colour, and StudioColor emits #RRGGBBAA), then patch through the one-history-step
+ *  dial path — which also drops the Palette select to custom, since presetOf no longer
+ *  matches. */
+function patchScatterInk(layer: ScatterLayer, index: number, hex: string) {
+  if (!/^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/.test(hex)) return
+  const inks = [...scatterInks.value]
+  if (!Number.isInteger(index) || index < 0 || index >= inks.length) return
+  inks[index] = hex.slice(0, 7)
+  patchScatterParam(layer, 'inks', inks)
+}
 /** Switch a Scatter's style, seeding that style's params with its defaults when
  *  absent. The layer, its box and its seed are kept, so placement and variation
  *  survive a style hop. */
@@ -7383,6 +7403,18 @@ onUnmounted(() => {
                   :model-value="scatterOptionLabel(asScatterSelect(c), scatterDials[c.key])"
                   @update:model-value="(v: any) => patchScatterParam(selectedLocal as ScatterLayer, c.key, scatterOptionValue(asScatterSelect(c), v))" />
               </template>
+              <!-- The ordered inks the style paints with, one swatch per role (Chaff: ground /
+                   ink; Strand: ground / plate / fill; Husk: ground / silhouette / fill). Editing
+                   one keeps the rest and drops the Palette select to custom (presetOf → null),
+                   the same way Pane's ink row behaves. -->
+              <div class="panel-label mt-1">Inks</div>
+              <div class="flex flex-wrap items-center gap-2">
+                <div v-for="(ink, i) in scatterInks" :key="i" class="flex items-center gap-1">
+                  <StudioColor :model-value="ink"
+                    @update:model-value="(v: string) => patchScatterInk(selectedLocal as ScatterLayer, i, v)" />
+                  <span class="text-[10px] text-white/45">{{ scatterRow.inkLabels[i] ?? `Ink ${i + 1}` }}</span>
+                </div>
+              </div>
               <StudioSelect label="Palette" :options="scatterRow.presetNames as any"
                 :model-value="scatterPreset" @update:model-value="(v: any) => applyScatterPreset(selectedLocal as ScatterLayer, v)" />
             </div>

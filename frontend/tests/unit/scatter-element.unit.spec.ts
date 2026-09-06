@@ -417,3 +417,17 @@ describe('agent scatter op', () => {
     expect((r as { detail: string }).detail).toMatch(/no mosaic layer/)
   })
 })
+
+// ── Ink roles for the inspector's colour pickers ──────────────────────────────
+describe('every style names each of its ordered inks', () => {
+  it('has exactly one inkLabel per default ink, each a non-empty sentence-cased word', () => {
+    for (const row of SCATTER_STYLES) {
+      const inks = (row.defaults() as { inks: string[] }).inks
+      expect(row.inkLabels.length, `${row.id} inkLabels vs inks`).toBe(inks.length)
+      for (const label of row.inkLabels) {
+        expect(label.length, `${row.id} empty label`).toBeGreaterThan(0)
+        expect(label[0], `${row.id} label "${label}" should be capitalised`).toBe(label[0]!.toUpperCase())
+      }
+    }
+  })
+})

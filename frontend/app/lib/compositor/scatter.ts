@@ -84,6 +84,9 @@ export interface ScatterStyleRow<Id extends string = string, P = Record<string, 
   readonly controls: readonly ScatterControl[]
   /** The style's named palettes (its roles, in order), in table order. */
   readonly presetNames: readonly string[]
+  /** What each ordered ink IS, for the inspector's per-ink colour pickers — one label
+   *  per entry of `params.inks`, in the same order the style's paint reads them. */
+  readonly inkLabels: readonly string[]
   presetPatch(name: string): Partial<P>
   presetOf(params: P): string | null
   /** Paint one sheet at the ctx origin over `boxW × boxH`. Must not write an absolute
@@ -113,6 +116,7 @@ const CHAFF_STYLE: ScatterStyleRow<'chaff', ChaffParams> = {
     { kind: 'slider', key: 'grain', label: 'Grain', min: 0, max: 1, step: 0.01 },
   ],
   presetNames: CHAFF_PRESET_NAMES,
+  inkLabels: ['Ground', 'Ink'],
   presetPatch: name => chaffPresetPatch(name as Parameters<typeof chaffPresetPatch>[0]),
   presetOf: chaffPresetOf,
   paint: paintChaff,
@@ -142,6 +146,7 @@ const STRAND_STYLE: ScatterStyleRow<'strand', StrandParams> = {
     { kind: 'slider', key: 'grain', label: 'Grain', min: 0, max: 1, step: 0.01 },
   ],
   presetNames: STRAND_PRESET_NAMES,
+  inkLabels: ['Ground', 'Plate', 'Fill'],
   presetPatch: name => strandPresetPatch(name as Parameters<typeof strandPresetPatch>[0]),
   presetOf: strandPresetOf,
   paint: paintStrand,
@@ -166,6 +171,7 @@ const HUSK_STYLE: ScatterStyleRow<'husk', HuskParams> = {
     { kind: 'slider', key: 'grain', label: 'Grain', min: 0, max: 1, step: 0.01 },
   ],
   presetNames: HUSK_PRESET_NAMES,
+  inkLabels: ['Ground', 'Silhouette', 'Fill'],
   presetPatch: name => huskPresetPatch(name as Parameters<typeof huskPresetPatch>[0]),
   presetOf: huskPresetOf,
   paint: paintHusk,
