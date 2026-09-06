@@ -195,6 +195,15 @@ function dragHue(e: PointerEvent) {
   <Teleport to="body">
     <div v-if="open" ref="popEl" data-studio-color-pop :style="popStyle"
          class="fixed z-[200] rounded-lg border border-white/10 bg-neutral-900 p-2.5 shadow-xl">
+      <!-- Format first: which notation the value field at the bottom speaks. It sits up
+           here as a header rather than in the action row, so that row keeps to its three
+           actions (eyedropper, Clear, swatch) and nothing is crammed. -->
+      <div class="mb-2 flex rounded-md bg-white/[0.05] p-0.5" role="tablist" aria-label="Colour format">
+        <button v-for="mo in MODES" :key="mo" type="button" role="tab" @click="mode = mo"
+                :aria-selected="mode === mo ? 'true' : 'false'"
+                class="flex-1 rounded px-1 py-1 text-[10px] uppercase transition-colors"
+                :class="mode === mo ? 'bg-white text-neutral-900' : 'text-white/55 hover:text-white/80'">{{ mo }}</button>
+      </div>
       <div class="relative mb-2 h-32 w-full cursor-crosshair rounded-md"
            :style="{ background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), ${hueColor}` }"
            @pointerdown="dragSv">
@@ -227,11 +236,6 @@ function dragHue(e: PointerEvent) {
         <span class="relative h-7 w-7 shrink-0 overflow-hidden rounded-md border border-white/10" :style="CHECKER">
           <span class="absolute inset-0" :style="{ background: model }"></span>
         </span>
-        <div class="flex flex-1 rounded-md bg-white/[0.05] p-0.5">
-          <button v-for="mo in MODES" :key="mo" type="button" @click="mode = mo"
-                  class="flex-1 rounded px-1 py-1 text-[10px] uppercase transition-colors"
-                  :class="mode === mo ? 'bg-white text-neutral-900' : 'text-white/55 hover:text-white/80'">{{ mo }}</button>
-        </div>
       </div>
       <input v-if="mode === 'hex'" :value="hexValue" @input="onHexInput" @blur="commitHex"
              @keydown.enter.prevent="commitHex" spellcheck="false" :class="inputCls" />
