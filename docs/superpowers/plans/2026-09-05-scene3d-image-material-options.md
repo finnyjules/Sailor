@@ -848,7 +848,9 @@ In `frontend/app/lib/scene3d/panelPresentation.ts`, replace the `image` entry of
     Material: [
       `${M}type`, 'ui.material.image',
       `${M}imageWrap`,
-      `${M}imageTiling`, `${M}imageTilingLinked`, `${M}imageTilingY`,
+      `${M}imageTiling`, `${M}imageTilingLinked`,
+      // NB imageTilingY is showIf-hidden while imageTilingLinked is true (its default), so it
+      // does NOT appear in the default rendered list — same as gradient palette rows.
       `${M}roughness`, `${M}metalness`,
     ],
   },
@@ -1059,7 +1061,9 @@ In `frontend/app/lib/scene3d/panelPresentation.ts`, update `MATERIAL_BODY.image`
     Material: [
       `${M}type`, 'ui.material.image',
       `${M}imageFit`, `${M}imageWrap`,
-      `${M}imageTiling`, `${M}imageTilingLinked`, `${M}imageTilingY`,
+      `${M}imageTiling`, `${M}imageTilingLinked`,
+      // NB imageTilingY is showIf-hidden while imageTilingLinked is true (its default), so it
+      // does NOT appear in the default rendered list — same as gradient palette rows.
       `${M}roughness`, `${M}metalness`,
     ],
   },
