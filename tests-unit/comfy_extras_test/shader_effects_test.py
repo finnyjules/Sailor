@@ -337,3 +337,33 @@ def test_flag_anchor_pins_the_anchored_edge(anchor, anchored_band, free_band):
     anchored, free = _flag_edge_diffs(anchor, anchored_band, free_band)
     assert anchored < 0.005, f"anchored edge moved: mean diff {anchored:.5f}"
     assert free > 0.01, f"free edge barely moved: mean diff {free:.5f}"
+
+
+def test_holographic_surface_is_generative_and_declares_its_uniforms():
+    """The generative twin of `holographic`. Its whole reason to exist is that it
+    needs no input, so `generative` being True is load-bearing, not decoration."""
+    cat = load_catalog(refresh=True)
+    eff = cat.effects["holographic_surface"]
+    assert eff.generative is True
+    assert eff.category == "generative"
+    assert eff.source.startswith("#version 300 es")
+    # Every declared param must exist as a uniform in the shader: a param the GLSL
+    # never reads is a dead control the UI still shows.
+    for p in eff.params:
+        assert f"uniform float {p.uniform};" in eff.source or f"uniform vec3  {p.uniform};" in eff.source \
+            or f"uniform vec3 {p.uniform};" in eff.source, \
+            f"{p.uniform} is declared in the manifest but not read by the shader"
+    # ...and the four surfaces the manifest advertises must all be reachable.
+    surface = next(p for p in eff.params if p.uniform == "u_surface")
+    assert [o["value"] for o in surface.options] == [0, 1, 2, 3]
+
+
+def test_holographic_surface_never_samples_the_input_for_its_normal():
+    """The bug this effect exists to fix: `holographic` builds its normal from the
+    input's luminance gradient, so a flat fill renders flat. The only permitted
+    read of u_image0 here is the final optional blend-back."""
+    eff = load_catalog(refresh=True).effects["holographic_surface"]
+    assert eff.source.count("texture(u_image0") == 1
+    tail = eff.source.split("texture(u_image0")[0]
+    assert "u_hasInput > 0.5 && u_mix > 0.0" in tail[-200:], \
+        "the sole u_image0 read is not gated on u_hasInput and u_mix"
