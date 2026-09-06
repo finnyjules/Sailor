@@ -29,4 +29,26 @@ describe('makeConfigParams: nested id-addressed lists', () => {
     p['objects.A.material.roughness'] = 0.9
     expect(cfg.objects[0]!.material.roughness).toBe(0.9)
   })
+  it('an out-of-range numeric nested segment reads undefined and writes nothing — no sparse slot fabricated', () => {
+    const cfg = doc()
+    const p = makeConfigParams(() => cfg, () => 0, 'objects', 'id', 'object')
+    expect(p['objects.A.treatments.5.amount']).toBeUndefined()
+    p['objects.A.treatments.5.amount'] = 1
+    expect(cfg).toEqual(doc())
+    expect(cfg.objects[0]!.treatments).toHaveLength(1)
+  })
+  it('an in-range numeric nested segment still reads and writes', () => {
+    const cfg = doc()
+    const p = makeConfigParams(() => cfg, () => 0, 'objects', 'id', 'object')
+    expect(p['objects.A.treatments.0.amount']).toBe(0.2)
+    p['objects.A.treatments.0.amount'] = 0.6
+    expect(cfg.objects[0]!.treatments[0]!.amount).toBe(0.6)
+  })
+  it('a non-default idKey is honoured for nested lists', () => {
+    const cfg = { layers: [{ layerId: 'L1', stops: [{ layerId: 's1', v: 1 }] }] }
+    const p = makeConfigParams(() => cfg, () => 0, 'layers', 'layerId', 'layer')
+    expect(p['layers.L1.stops.s1.v']).toBe(1)
+    p['layers.L1.stops.s1.v'] = 42
+    expect(cfg.layers[0]!.stops[0]!.v).toBe(42)
+  })
 })

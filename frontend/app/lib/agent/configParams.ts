@@ -158,11 +158,13 @@ export function makeConfigParams(
     let cur: unknown = obj
     for (const p of parts) {
       if (cur == null || typeof cur !== 'object') return undefined
-      // A non-index segment against an ARRAY is an id inside it
-      // (`objects.<id>.treatments.<tid>.amount`) — resolve, refuse if unknown.
-      if (Array.isArray(cur) && !isIndex(p)) {
-        const i = indexInList(cur, p, 'id')
-        if (i === undefined) return undefined
+      // A segment against an ARRAY is either a positional index or an id
+      // inside it (`objects.<id>.treatments.<tid>.amount`) — resolve, refuse
+      // (never fabricate) when the index is unknown OR out of range: a
+      // numeric-but-out-of-range segment is exactly as wrong as an unknown id.
+      if (Array.isArray(cur)) {
+        const i = isIndex(p) ? Number(p) : indexInList(cur, p, idKey)
+        if (i === undefined || i < 0 || i >= cur.length) return undefined
         cur = cur[i]
         continue
       }
@@ -177,10 +179,11 @@ export function makeConfigParams(
     let cur: AnyObj = obj
     for (let i = 0; i < parts.length - 1; i++) {
       const p = parts[i]!
-      if (Array.isArray(cur) && !isIndex(p)) {
-        // Same nested-id rule as `read`: never fabricate a named key on an array.
-        const j = indexInList(cur, p, 'id')
-        if (j === undefined) return
+      if (Array.isArray(cur)) {
+        // Same nested-id rule as `read`: never fabricate a slot on an array,
+        // whether the segment is an unknown id or an out-of-range index.
+        const j = isIndex(p) ? Number(p) : indexInList(cur, p, idKey)
+        if (j === undefined || j < 0 || j >= cur.length) return
         cur = cur[j] as AnyObj
         continue
       }
@@ -189,7 +192,12 @@ export function makeConfigParams(
       cur = next as AnyObj
     }
     const last = parts[parts.length - 1]!
-    if (Array.isArray(cur) && !isIndex(last)) return
+    if (Array.isArray(cur)) {
+      const j = isIndex(last) ? Number(last) : indexInList(cur, last, idKey)
+      if (j === undefined || j < 0 || j >= cur.length) return
+      cur[j] = value
+      return
+    }
     cur[last] = value
   }
 
