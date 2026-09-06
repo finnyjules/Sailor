@@ -1036,6 +1036,14 @@ function applyPhysical(p: THREE.MeshPhysicalMaterial, mat: SceneMaterial): void 
  * three does not manage for us (unlike transmission/clearcoat/sheen, whose setters
  * self-recompile). Bump `needsUpdate` on a crossing and NEVER on a plain slider move
  * inside a range, or every tick recompiles the shader.
+ *
+ * KNOWN LIMITATION (documented, not fixed — Minor 10 of the final review): `imageCutout`'s
+ * `discard` lives entirely inside this material's own `onBeforeCompile` injection
+ * (imageShader.ts's `imageMapFragment`), which three does not carry over to the shadow
+ * DEPTH material it builds for shadow-casting. So a cutout picture under any non-`uv`
+ * projection casts a shadow shaped by the mesh's own UVs (or none), not by the projected
+ * silhouette the viewer actually sees — the cast shadow's outline can disagree with the
+ * cutout's visible edge.
  */
 function applyImageTransparency(m: THREE.Material, mat: SceneMaterial): void {
   const wasTransparent = m.transparent
@@ -1046,7 +1054,13 @@ function applyImageTransparency(m: THREE.Material, mat: SceneMaterial): void {
   m.alphaTest = useAlpha ? (mat.imageCutout ?? MATERIAL_DEFAULTS.imageCutout) : 0
   // A pure cutout is NOT transparent: it discards, writes depth, and sorts like an opaque
   // surface — which is the whole reason to reach for it.
-  m.transparent = opacity < 1 || (useAlpha && m.alphaTest === 0)
+  // A screen with transparent gaps owns `transparent` too (see applyScreen) — the same
+  // precedent applyPhysical already follows for the standard/glass branch. Without this
+  // clause, the FIRST unrelated dial move after construction (identityKey unchanged, so
+  // this runs via updateMaterial rather than a rebuild) clobbers the screen's own
+  // `transparent = true` back to whatever imageAlpha/opacity alone would produce — the
+  // halftone gaps go opaque mid-session even though nothing about the screen changed.
+  m.transparent = opacity < 1 || (useAlpha && m.alphaTest === 0) || m.userData.screenTransparent === true
   if (m.transparent !== wasTransparent || (m.alphaTest > 0) !== wasCutting) m.needsUpdate = true
 }
 
@@ -1107,14 +1121,39 @@ function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture
       const src = loaded.image as { width?: number; height?: number } | undefined
       if (src?.width && src?.height) m.userData.imageNatural = { w: src.width, h: src.height }
       const spec = m.userData.imageSpec as SceneMaterial | undefined
+      // The PRISTINE decoded picture, kept alive in this Texture's own userData for the
+      // whole material's lifetime — so a LATER Seamless change (see imageSetSeamless below)
+      // can re-blend from the untouched source instead of re-blending an already-blended
+      // canvas (which would drift) or re-fetching/re-decoding the file (Important 3, final
+      // review — the fix mirrors the relief C1 fix's `reliefSetContrast`: keep the source,
+      // repaint the SAME texture's canvas in place, never rebuild the material for a slider).
+      const rawSource = loaded.image as CanvasImageSource
+      tex.userData.imageRawSource = rawSource
       // Seamless pre-pass: repaint the decoded picture into a canvas whose opposite edges
       // have been cross-faded, then point the SAME Texture at it. Done here rather than at
       // build time because it needs the decoded pixels, and only when the dial is non-zero
       // so an untouched picture keeps its own bytes and its own memory footprint.
       const width = spec ? seamlessWidth(spec) : 0
       if (width > 0 && src?.width && src?.height) {
-        const blended = seamlessCanvas(loaded.image as CanvasImageSource, src.width, src.height, width)
+        const blended = seamlessCanvas(rawSource, src.width, src.height, width)
         if (blended) { loaded.image = blended; loaded.needsUpdate = true }
+      }
+      m.userData.imageSeamlessApplied = width
+      // C1-style in-place repaint: re-blend from the pristine `imageRawSource` at a NEW
+      // width and repoint this SAME Texture's `.image` at the fresh canvas — no TextureLoader
+      // fetch, no decode, no material rebuild. `updateMaterial`'s in-place block calls this
+      // only when the Seamless dial has actually moved since the last paint (mirrors
+      // `reliefContrastApplied`'s guard), so an unrelated dial edit never re-blends for
+      // nothing. A no-op until the natural size is known (`imageNatural` unset) — the same
+      // guard `applyImageTransform` already relies on elsewhere in this closure.
+      tex.userData.imageSetSeamless = (w: number) => {
+        const natural = m.userData.imageNatural as NaturalSize | undefined
+        if (!natural) return
+        const raw = tex.userData.imageRawSource as CanvasImageSource | undefined
+        if (!raw) return
+        const rebl = w > 0 ? seamlessCanvas(raw, natural.w, natural.h, w) : null
+        tex.image = rebl ?? raw
+        tex.needsUpdate = true
       }
       if (spec) applyImageTransform(loaded, spec, m.userData.imageNatural as NaturalSize | undefined)
       // A projected picture (Fit's cover/contain feeding into uImgMapTx) settles once the
@@ -1133,6 +1172,10 @@ function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture
       if (m.userData.disposed) return
       const s = m as THREE.MeshStandardMaterial
       if (s.map === tex) { s.map = null; s.needsUpdate = true }
+      // applyImageGlow binds the emissive map to this SAME Texture instance (see its doc) —
+      // left pointing at a disposed texture, `emissiveMap` would still read USE_EMISSIVEMAP
+      // against dead GPU data instead of degrading alongside `.map`.
+      if (s.emissiveMap === tex) { s.emissiveMap = null; s.needsUpdate = true }
       tex.dispose()
       errorSubs.forEach((cb) => cb(filename))
     },
@@ -1340,11 +1383,17 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
     //     IMAGE_FRAGMENT_PARS (renamed from IMAGE_ADJUST_GLSL once it grew the whole
     //     projection library), injected unconditionally with identity defaults so no
     //     dial recompiles.
-    //   • Pixels (seamless) — imageMap.ts's seamlessCanvas, run once on decode.
-    // Four things rebuild the material (see identityKey below): the file, `unlit`
-    // (Basic vs Standard class), 'box' projection (its own three-sample triplanar
-    // program), and `seamless` (different pixels, not a uniform). Everything else
-    // updates in place, which is what keeps a slider drag from stalling.
+    //   • Pixels (seamless) — imageMap.ts's seamlessCanvas, run on decode AND repainted in
+    //     place on a later Seamless change (`imageSetSeamless`, Important 3 of the final
+    //     review — see its doc on `ownedImageTexture`'s onLoad).
+    // Three things rebuild the material (see identityKey below): the file, `unlit`
+    // (Basic vs Standard class), and 'box' projection (its own three-sample triplanar
+    // program). Everything else updates in place, which is what keeps a slider drag from
+    // stalling — `seamless` USED to be a fourth (a discrete-decision rebuild, so the
+    // reasoning went), but it shipped as a continuous slider (and an animatable one), so a
+    // drag/keyframe rebuilt the material — fresh TextureLoader fetch, decode, and five
+    // canvases — on every tick. It now repaints its owned Texture's canvas in place instead,
+    // like relief's `contrast` (the C1 fix) — see `imageSetSeamless`.
     // The glow (emissive) splice samples through the SAME projected coordinate as the
     // diffuse map — imageShader.ts's shared `sailorImageUv` helper and, under box
     // projection, the shared `sailorTriplanarSample` blend — so a box-projected glow
@@ -1374,12 +1423,19 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
         applyImageTransform(tex, mat, null)
       }
       t.userData.imageFilename = mat.image ?? ''
+      // The width THIS build's onLoad will paint at (or already has, if the file was
+      // cached and resolved synchronously-ish) — matches `reliefContrastApplied`'s stamp so
+      // the FIRST updateMaterial call, if nothing actually changed, doesn't re-blend for
+      // nothing (see the in-place block's `imageSeamlessApplied` guard below).
+      t.userData.imageSeamlessApplied = seamlessWidth(mat)
       applyImageTransparency(t, mat)
       applyImageGlow(t, mat)
       // Colour adjustments + projection: always injected, identity/UV by default — see
       // imageShader.ts on why this is unconditional rather than gated on a non-neutral value.
-      // Bounds come from the geometry passed in here, at BUILD time only (see imageUniforms'
-      // doc — the gradient material has the same limitation).
+      // Bounds come from the geometry passed in here at BUILD time, then kept fresh by
+      // engine.ts's per-sync `refreshImageBounds` call — the same in-place treatment the
+      // gradient material's uBoxMin/uBoxMax already get (Important 2 of the final review;
+      // see refreshImageBounds's doc in imageShader.ts).
       const isBox = (mat.imageProjection ?? MATERIAL_DEFAULTS.imageProjection) === 'box'
       const iu = imageUniforms(mat, geometry)
       // syncImageMapMatrix must run here too: without it a projected picture ignores
@@ -1510,11 +1566,16 @@ function baseIdentityKey(mat: SceneMaterial): string {
     // property and updates in place.
     case 'image': {
       const box = (mat.imageProjection ?? MATERIAL_DEFAULTS.imageProjection) === 'box' ? 1 : 0
-      // Seamless changes the PIXELS, not a uniform, so it rebuilds — it is a discrete
-      // decision the user makes once, not a value they scrub, so the occasional reload is
-      // the right trade (the same reasoning relief.invert follows).
-      const seam = seamlessWidth(mat)
-      return `image:${mat.image ?? ''}:${mat.unlit === true ? 1 : 0}:${box}:${seam}`
+      // Seamless does NOT belong here (Important 3, final review): it USED to be folded in
+      // on the reasoning that it changes the PIXELS, not a uniform, and is "a discrete
+      // decision the user makes once" — but it shipped as a continuous 0–0.45 slider (and
+      // an animatable one), so that reasoning produced ~45 full material rebuilds — a fresh
+      // TextureLoader fetch + decode + five canvases each — for one drag gesture. The fix
+      // keeps the SAME owned Texture across a Seamless change and repaints its canvas in
+      // place instead, the same C1-fix shape relief.contrast already uses (see
+      // `imageSetSeamless` on `ownedImageTexture`'s onLoad, and the in-place block in
+      // `updateMaterial` below).
+      return `image:${mat.image ?? ''}:${mat.unlit === true ? 1 : 0}:${box}`
     }
     // `unlit` picks the THREE material CLASS (Basic vs Standard) — that boundary needs a
     // rebuild; the effect/params/speed/input inside `shader` are refreshed in place every
@@ -1716,6 +1777,17 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
       // flight must settle onto the CURRENT dials, not the ones it was built with.
       m.userData.imageSpec = mat
       if (s.map) applyImageTransform(s.map, mat, m.userData.imageNatural as NaturalSize | undefined)
+      // Seamless (Important 3, final review): repaint the OWNED texture's canvas in place —
+      // the same C1-fix shape as relief.contrast's `reliefContrastApplied` guard just above
+      // in this file — only when the dial has actually moved since the last paint, so an
+      // unrelated edit (Tint, Brightness, Tiling…) never re-blends for nothing. Tracked on
+      // `m.userData` (not gated on `s.map`) so this stays correct even while the file is
+      // still in flight — see `imageSetSeamless`'s own no-op guard for that case.
+      const seamW = seamlessWidth(mat)
+      if (m.userData.imageSeamlessApplied !== seamW) {
+        m.userData.imageSeamlessApplied = seamW
+        ;(s.map?.userData.imageSetSeamless as ((w: number) => void) | undefined)?.(seamW)
+      }
       applyImageTransparency(m, mat)
       applyImageGlow(m, mat)
       const iu = m.userData.imageUniforms as ImageUniforms | undefined

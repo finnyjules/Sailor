@@ -514,17 +514,11 @@ describe('image material texture ownership', () => {
     expect(m.map.wrapS).toBe(THREE.RepeatWrapping)
   })
 
-  it('disposing one image material leaves another on the same file untouched', () => {
-    const a = materialFor(base({ type: 'image', image: 'shared.png' })) as THREE.MeshStandardMaterial
-    const b = materialFor(base({ type: 'image', image: 'shared.png' })) as THREE.MeshStandardMaterial
-    a.map = new THREE.Texture()
-    b.map = new THREE.Texture()
-    expect(a.map).not.toBe(b.map)
-    const disposed = vi.fn()
-    b.map.addEventListener('dispose', disposed)
-    disposeMaterial(a)
-    expect(disposed).not.toHaveBeenCalled()
-  })
+  // The "disposing one image material leaves another on the same file untouched" case used
+  // to live here as a hand-assigned-Texture test — vacuous, since it hand-built the very fact
+  // it then asserted, regardless of whether ownedImageTexture's per-material ownership exists.
+  // scene3d-image-texture-ownership.unit.spec.ts (happy-dom) covers the property for real, by
+  // taking materialFor's actual TextureLoader path.
 })
 
 describe('image fit', () => {
@@ -821,17 +815,32 @@ describe('image projection', () => {
 })
 
 describe('image seamless edge blend', () => {
-  // Both directions of the rebuild boundary, per the same convention as the box-projection
-  // pair above: a Seamless change must force a rebuild (the pre-pass needs the decoded
-  // pixels re-run, and the simplest correct way to get that is identityKey → updateMaterial
-  // returns false), while an UNRELATED change must still update in place (true).
-  it('rebuilds when the Seamless dial changes — it repaints pixels, not a uniform', () => {
+  // Important 3 (final review): Seamless USED to force a rebuild on every change — a fresh
+  // TextureLoader fetch + decode + five canvases per drag tick, since it shipped as a
+  // continuous 0–0.45 slider rather than the "discrete decision" the old comment assumed.
+  // The fix takes it OUT of identityKey entirely and repaints the owned texture's canvas in
+  // place instead (the C1-fix shape, see `imageSetSeamless`), so BOTH of these now update in
+  // place — no rebuild boundary at all, unlike the box-projection pair above.
+  it('updates in place when the Seamless dial changes — no rebuild, repainted in place instead', () => {
     const m = materialFor(base({ type: 'image', image: 'a.png' }))
-    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageSeamless: 0.15 }))).toBe(false)
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageSeamless: 0.15 }))).toBe(true)
+    // The in-place block tracks the width it last painted at, so a real repaint request
+    // for the new value actually happened rather than being silently skipped.
+    expect(m.userData.imageSeamlessApplied).toBeCloseTo(0.15)
   })
 
   it('does not rebuild for an unrelated change while Seamless stays put', () => {
     const m = materialFor(base({ type: 'image', image: 'a.png', imageSeamless: 0.15 }))
     expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageSeamless: 0.15, imageTiling: 3 }))).toBe(true)
+    // Still 0.15 — the guard must not re-trigger a repaint for a dial that never moved.
+    expect(m.userData.imageSeamlessApplied).toBeCloseTo(0.15)
+  })
+
+  it('two materials on the same identity share the SAME rebuild key regardless of Seamless', () => {
+    // identityKey no longer folds Seamless in — a material built at one width and one built
+    // at another must be considered the SAME identity (in-place update, not a rebuild).
+    const a = materialFor(base({ type: 'image', image: 'a.png', imageSeamless: 0 }))
+    const b = materialFor(base({ type: 'image', image: 'a.png', imageSeamless: 0.3 }))
+    expect(a.userData.identity).toBe(b.userData.identity)
   })
 })

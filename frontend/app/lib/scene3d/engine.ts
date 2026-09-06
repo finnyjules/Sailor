@@ -19,6 +19,7 @@ import { loadGlb, clearGlbCache, ensureUv } from './glb'
 import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/contextRegistry'
 import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/lib/scene3d/outlines'
 import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime } from './materials'
+import { refreshImageBounds, type ImageUniforms } from './imageShader'
 import { applyModifiers } from '~/lib/scene3d/modifiers'
 import { PRIMITIVE_PARAMS, paramValue, MODIFIER_SPECS, modifierValue } from '~/lib/scene3d/primParams'
 import { pathToShapes } from './svgPath'
@@ -397,6 +398,10 @@ function syncGlbMaterials(root: THREE.Object3D, obj: GlbObject, lightView: boole
           ;(gradUniforms.uBoxMax!.value as THREE.Vector3).copy(geo.boundingBox.max)
         }
       }
+      // Important 2 (final review): the image material's projection bounds need the exact
+      // same in-place refresh — see refreshImageBounds's doc.
+      const imgUniforms = ov.userData?.imageUniforms as ImageUniforms | undefined
+      if (imgUniforms) refreshImageBounds(imgUniforms, m.geometry)
       m.userData.realMaterial = ov
     } else {
       const ov = m.userData.overrideMaterial as THREE.Material | undefined
@@ -1010,6 +1015,11 @@ export class SceneEngine {
           ;(gradUniforms.uBoxMax!.value as THREE.Vector3).copy(geo.boundingBox.max)
         }
       }
+      // Important 2 (final review): the image material's projection bounds — stale until
+      // something else forced a rebuild before this fix — get the exact same treatment.
+      const imgUniforms = real.userData
+        ?.imageUniforms as ImageUniforms | undefined
+      if (imgUniforms) refreshImageBounds(imgUniforms, mesh.geometry)
     } else if (obj.kind === 'glb') {
       root.userData.glbObj = obj
       syncGlbMaterials(root, obj, this.lightView, this.clay, this.id)

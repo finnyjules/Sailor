@@ -53,6 +53,14 @@ export function imageTilingXY(mat: SceneMaterial): [number, number] {
  * Returns an identity transform for 'stretch' and for a picture whose pixel size is
  * not known yet — a texture that has not finished decoding has no `image.width`, and
  * the material re-applies this from the loader's onLoad once it does.
+ *
+ * KNOWN LIMITATION (documented, not fixed — Minor 9 of the final review): the maths
+ * above treats the sampling domain as a 1:1 UV square, which is exactly right for a
+ * `uv` (mesh-UV) Wrapping. Under a `planar`/`cylindrical`/`spherical`/`box` projection
+ * the domain the projected coordinate actually spans can be non-square — e.g. a flat
+ * projection onto a 2×4 object has a 1:2 domain — so Cover/Contain crop by the wrong
+ * amount there: this function has no way to know the projected domain's own aspect,
+ * only the picture's.
  */
 export function imageFitTransform(
   mat: SceneMaterial, natural?: NaturalSize | null,

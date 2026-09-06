@@ -167,6 +167,20 @@ describe('screen finish — identity and in-place update', () => {
     disposeMaterial(m)
   })
 
+  // Important 1 (final review): applyPhysical carries the `screenTransparent` precedent
+  // above (`p.transparent = p.opacity < 1 || p.userData.screenTransparent === true`) —
+  // applyImageTransparency did not, so this exact scenario on an `image` material used to
+  // clobber the screen's transparent gaps back to opaque on the FIRST unrelated dial move
+  // after construction (the BUILD path masks it: applyScreen runs LAST in materialFor, after
+  // applyImageTransparency, so construction itself never shows the bug).
+  it('an unrelated in-place update on an image material keeps transparent gaps transparent', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', screen: dots() }))
+    expect(m.transparent).toBe(true) // set by applyScreen at construction
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageBrightness: 0.4, screen: dots() }))).toBe(true)
+    expect(m.transparent).toBe(true) // applyImageTransparency must not reset it
+    disposeMaterial(m)
+  })
+
   it('a material without a screen is byte-identical to before: no uniforms, no flags, same identity key', () => {
     const a = materialFor(base()), b = materialFor(base({ screen: dots({ pattern: 'none' }) }))
     expect(a.userData.identity).toBe(b.userData.identity)

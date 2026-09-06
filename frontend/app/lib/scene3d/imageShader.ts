@@ -36,9 +36,13 @@ export interface ImageUniforms {
    *  step by syncImageMapMatrix. */
   uImgMapTx: { value: THREE.Matrix3 }
   /** Object-space bounds, so a projection spans the object rather than raw world units.
-   *  Read from the geometry at BUILD time — `updateMaterial` gets no geometry, so a
-   *  reshaped mesh picks these up on its next rebuild. The gradient material has read its
-   *  bounds the same way, with the same limitation, since it shipped. */
+   *  Computed from the geometry at BUILD time, then kept FRESH by `refreshImageBounds`
+   *  below — engine.ts calls it every sync, right where it does the same for the gradient
+   *  material's `uBoxMin`/`uBoxMax` (see engine.ts's per-sync bbox refresh). That refresh
+   *  exists precisely because a geometry can swap in place (params, modifiers) without a
+   *  material rebuild — so, despite an EARLIER version of this comment claiming otherwise,
+   *  there is no "reads once, stays stale until the next rebuild" limitation here to match
+   *  the gradient material's: both are refreshed in place, every sync. */
   uImgBoundsMin: { value: THREE.Vector3 }
   uImgBoundsSize: { value: THREE.Vector3 }
   uImgBoxBlend: { value: number }
@@ -69,6 +73,29 @@ export function imageUniforms(mat: SceneMaterial, geometry?: THREE.BufferGeometr
     uImgBoundsSize: { value: size },
     uImgBoxBlend: { value: mat.imageBoxBlend ?? MATERIAL_DEFAULTS.imageBoxBlend },
   }
+}
+
+/** Recompute `uImgBoundsMin`/`uImgBoundsSize` from the CURRENT geometry and write them into
+ *  the uniforms IN PLACE (mutating the existing Vector3 objects, exactly like
+ *  `writeImageUniforms` — the compiled program holds these by reference). Important 2 of the
+ *  final review: without this, a geometry edit (width/height/segments, or a modifier) while
+ *  Wrapping is Flat/Cylinder/Sphere/Box left the projection scaled to the OLD bounds — a
+ *  geometry swaps in place without a material rebuild (see engine.ts), so `imageUniforms`'s
+ *  build-time-only read never saw the change. Call this from the same per-sync spot engine.ts
+ *  already refreshes the gradient material's `uBoxMin`/`uBoxMax` from. Applies the SAME 1e-4
+ *  floor `imageUniforms` uses on each axis, so a flat object (zero extent on one axis) can
+ *  never divide by zero in the shader. */
+export function refreshImageBounds(u: ImageUniforms, geometry: THREE.BufferGeometry): void {
+  if (!geometry.boundingBox) geometry.computeBoundingBox()
+  const bb = geometry.boundingBox
+  if (!bb) return
+  u.uImgBoundsMin.value.copy(bb.min)
+  u.uImgBoundsSize.value.subVectors(bb.max, bb.min)
+  u.uImgBoundsSize.value.set(
+    Math.max(u.uImgBoundsSize.value.x, 1e-4),
+    Math.max(u.uImgBoundsSize.value.y, 1e-4),
+    Math.max(u.uImgBoundsSize.value.z, 1e-4),
+  )
 }
 
 /** Mutate the bucket the compiled program holds BY REFERENCE. Never replace the inner
@@ -254,19 +281,29 @@ export function imageMapFragment(box: boolean): string {
  * `box` shares `sailorTriplanarWeights`/`sailorTriplanarSample` with `imageMapFragment`
  * rather than recomputing the blend, so the emissive map is guaranteed to blend identically
  * to the diffuse map on a box projection — not just sample the same coordinate.
+ *
+ * Important 4 of the final review (the COLOUR half of "the glow must line up with the
+ * picture" — the fix above was the GEOMETRIC half): `imageMapFragment` runs the sampled
+ * pixel through `sailorImageAdjust` (brightness/contrast/saturation) and through the
+ * material's own tint (`diffuseColor *= texture2D(...)`, tint already baked into
+ * `diffuseColor` by the time that runs). This splice used to skip both, so Saturation 0
+ * with Glow > 0 rendered a grey surface under a full-colour glow, and a coloured Tint left
+ * the glow untinted. `diffuse` (the material's own colour uniform — the same one
+ * `imageMapFragment`'s `diffuseColor` is seeded from) is in scope at `emissivemap_fragment`,
+ * so both splices now agree on colour, not just on coordinate.
  */
 export function imageEmissiveMapFragment(box: boolean): string {
   const single = `
 #ifdef USE_EMISSIVEMAP
   vec4 emissiveColor = texture2D( emissiveMap, sailorImageUv( vEmissiveMapUv ) );
-  totalEmissiveRadiance *= emissiveColor.rgb;
+  totalEmissiveRadiance *= sailorImageAdjust( emissiveColor.rgb * diffuse );
 #endif
 `
   const triplanar = `
 #ifdef USE_EMISSIVEMAP
   vec3 sailorEmissiveW = sailorTriplanarWeights( vImgNrm );
   vec4 emissiveColor = sailorTriplanarSample( emissiveMap, vImgPos, sailorEmissiveW );
-  totalEmissiveRadiance *= emissiveColor.rgb;
+  totalEmissiveRadiance *= sailorImageAdjust( emissiveColor.rgb * diffuse );
 #endif
 `
   return box ? triplanar : single

@@ -138,7 +138,9 @@ const ROW: Record<string, Row> = {
   // image — seamless edge blend, a one-off canvas pre-pass (Task 12 of the image-options plan)
   [`${M}imageSeamless`]: {
     label: 'Seamless edges', kind: 'slider', min: 0, max: 0.45, step: 0.01,
-    hint: 'Blends the picture opposite edges into each other so it tiles with no visible join',
+    // Minor 8 (final review): reworded so it doesn't imply the blend does anything under the
+    // default Clamp edges / Tiling 1 — it only matters once the picture actually repeats.
+    hint: 'Blends the picture opposite edges into each other so it tiles with no visible join — only matters once the picture actually repeats, from tiling above one or edges set to tile or mirror',
   },
 
   // image — look / colour (Task 6 of the image-options plan)

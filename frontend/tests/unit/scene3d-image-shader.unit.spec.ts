@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
 import {
-  imageUniforms, writeImageUniforms, IMAGE_FRAGMENT_PARS,
+  imageUniforms, writeImageUniforms, refreshImageBounds, IMAGE_FRAGMENT_PARS,
   imageMapFragment, imageEmissiveMapFragment, IMAGE_PROJECT_VERTEX_GLSL, IMAGE_PROJECT_VERTEX_CALL,
 } from '~/lib/scene3d/imageShader'
 import type { SceneMaterial } from '~/lib/scene3d/config'
@@ -25,6 +25,43 @@ describe('image adjustment uniforms', () => {
     expect(b.value).toBe(0.3)
     expect(u.uImgContrast.value).toBe(1.5)
     expect(u.uImgSaturation.value).toBe(0)
+  })
+})
+
+// Important 2 (final review): imageUniforms reads the bounding box only at BUILD time —
+// a geometry can swap in place (param edit, modifier) without a material rebuild, so the
+// projection needs its own in-place refresh, exactly mirroring the gradient material's
+// uBoxMin/uBoxMax (engine.ts's per-sync bbox refresh). This is the pure function that refresh
+// calls; the engine-level wiring is exercised live, not unit-tested, matching how the
+// gradient material's own equivalent has never had an engine-level unit test either.
+describe('refreshImageBounds — the in-place bbox refresh (Important 2)', () => {
+  it('recomputes min/size from the CURRENT geometry, mutating the same Vector3 objects', () => {
+    const u = imageUniforms(img())
+    const min = u.uImgBoundsMin.value
+    const size = u.uImgBoundsSize.value
+    const geo = new THREE.BoxGeometry(2, 4, 6)
+    refreshImageBounds(u, geo)
+    expect(u.uImgBoundsMin.value).toBe(min)   // same object — the compiled program's reference
+    expect(u.uImgBoundsSize.value).toBe(size)
+    expect(min.x).toBeCloseTo(-1); expect(min.y).toBeCloseTo(-2); expect(min.z).toBeCloseTo(-3)
+    expect(size.x).toBeCloseTo(2); expect(size.y).toBeCloseTo(4); expect(size.z).toBeCloseTo(6)
+  })
+
+  it('picks up a LATER geometry change — a param edit that swaps geometry in place', () => {
+    const u = imageUniforms(img())
+    refreshImageBounds(u, new THREE.BoxGeometry(2, 2, 2))
+    expect(u.uImgBoundsSize.value.x).toBeCloseTo(2)
+    // The object got fatter (width 2 → 8) with no material rebuild — same uniforms object,
+    // a fresh geometry standing in for "the mesh's geometry swapped in place".
+    refreshImageBounds(u, new THREE.BoxGeometry(8, 2, 2))
+    expect(u.uImgBoundsSize.value.x).toBeCloseTo(8)
+  })
+
+  it('floors a flat axis at 1e-4, exactly like the build-time path', () => {
+    const u = imageUniforms(img())
+    const geo = new THREE.PlaneGeometry(2, 2) // zero extent on Z
+    refreshImageBounds(u, geo)
+    expect(u.uImgBoundsSize.value.z).toBeCloseTo(1e-4)
   })
 })
 
@@ -99,12 +136,17 @@ describe('image projection GLSL', () => {
     // No DECODE_VIDEO_TEXTURE_EMISSIVE branch — this material never binds a video texture
     // (mirrors imageMapFragment's own dropped DECODE_VIDEO_TEXTURE branch).
     expect(single).not.toContain('DECODE_VIDEO_TEXTURE')
-    expect(single).toContain('totalEmissiveRadiance *= emissiveColor.rgb;')
+    // Important 4 (final review): the glow must run through the SAME colour adjustments
+    // and tint as the diffuse map (imageMapFragment's `sailorImageAdjust(diffuseColor.rgb)`
+    // over an already-tinted diffuseColor) — not just the same coordinate. Without this, a
+    // Saturation-0 + Glow surface renders a grey body under a full-colour glow, and a
+    // coloured Tint leaves the glow untinted.
+    expect(single).toContain('totalEmissiveRadiance *= sailorImageAdjust( emissiveColor.rgb * diffuse );')
 
     const triplanar = imageEmissiveMapFragment(true)
     expect(triplanar).toContain('sailorTriplanarWeights( vImgNrm )')
     expect(triplanar).toContain('sailorTriplanarSample( emissiveMap,')
-    expect(triplanar).toContain('totalEmissiveRadiance *= emissiveColor.rgb;')
+    expect(triplanar).toContain('totalEmissiveRadiance *= sailorImageAdjust( emissiveColor.rgb * diffuse );')
   })
 })
 

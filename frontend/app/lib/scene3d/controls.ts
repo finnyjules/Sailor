@@ -613,7 +613,7 @@ export const SCENE_CONTROLS: SceneControl[] = [
     'What happens outside the picture: hold the edge pixel, repeat it, or repeat it mirrored so the seam disappears',
     { when: isImageMaterial, optionLabels: ['Clamp', 'Tile', 'Mirror'] }),
   slider('object.material.imageSeamless', 'Seamless edges', 0, 0.45, 0.01, 'Material', MATERIAL_DEFAULTS.imageSeamless,
-    'Blends the picture opposite edges into each other so it tiles with no visible join', {
+    'Blends the picture opposite edges into each other so it tiles with no visible join — only matters once the picture actually repeats, from tiling above one or edges set to tile or mirror', {
       when: isImageMaterial,
     }),
   slider('object.material.imageTiling', 'Tiling', IMAGE_TILING_RANGE.min, IMAGE_TILING_RANGE.max, IMAGE_TILING_RANGE.step,
@@ -625,7 +625,7 @@ export const SCENE_CONTROLS: SceneControl[] = [
     hint: 'One tiling number drives both directions', when: isImageMaterial,
   } as SceneControl,
   slider('object.material.imageTilingY', 'Vertical tiling', IMAGE_TILING_RANGE.min, IMAGE_TILING_RANGE.max,
-    IMAGE_TILING_RANGE.step, 'Material', MATERIAL_DEFAULTS.imageTiling,
+    IMAGE_TILING_RANGE.step, 'Material', MATERIAL_DEFAULTS.imageTilingY,
     'How many times the picture repeats top to bottom', {
       when: isImageMaterial,
       showIf: { key: 'object.material.imageTilingLinked', equals: false },
