@@ -32,7 +32,7 @@ Declaration follows the studio's existing three-seam contract for every control:
 **New files**
 
 - `frontend/app/lib/scene3d/imageMap.ts` — the whole texture-transform layer. Exports `imageTilingXY`, `imageFitTransform`, `applyImageTransform`. Imports `three` (for the wrap constants and `THREE.Texture`) and `./config`. No DOM access, so it is fully unit-testable in the node environment.
-- `frontend/app/lib/scene3d/imageShader.ts` — the GLSL the image material injects: the colour-adjustment chunk and the projection chunk, plus the uniform bucket factory. Exports `imageUniforms`, `IMAGE_ADJUST_GLSL`, `IMAGE_PROJECT_VERTEX_GLSL`, `imageMapFragment`, `writeImageUniforms`. Pure strings and plain objects — no `three` import needed beyond types, no DOM.
+- `frontend/app/lib/scene3d/imageShader.ts` — the GLSL the image material injects: the colour-adjustment chunk and the projection chunk, plus the uniform bucket factory. Exports `imageUniforms`, `IMAGE_FRAGMENT_PARS`, `IMAGE_PROJECT_VERTEX_GLSL`, `imageMapFragment`, `imageEmissiveMapFragment`, `writeImageUniforms`. Pure strings and plain objects — no `three` import needed beyond types, no DOM.
 - `frontend/server/api/scene3d/gen-texture.post.ts` — text → a seamless surface image via fal. Sibling of the existing `gen-image.post.ts`.
 - `frontend/tests/unit/scene3d-image-map.unit.spec.ts`
 - `frontend/tests/unit/scene3d-image-shader.unit.spec.ts`
