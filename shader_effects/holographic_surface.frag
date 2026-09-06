@@ -108,14 +108,31 @@ void main() {
     float ang = radians(u_angle);
     float view = ang + u_time * u_shimmer;
 
-    vec2 q = p * u_scale * 1.1 + vec2(u_seed * 0.137, u_seed * 0.311);
+    // Fold the seed before it ever reaches noise space. The app passes u_seed up
+    // to 9999 (ShaderEffectNode.vue: `p.seed % 10000`), and fbm() multiplies its
+    // input by 2.03 across four octaves — an unfolded seed offset near (1370,
+    // 3110) lands its last octave around 26,000, where hash21's `fract(p *
+    // vec2(123.34, 456.21))` runs past the ~16.7M limit of a highp 24-bit
+    // mantissa and quantises to a flat wash (measured: high-frequency energy
+    // 0.081 at seed 42 collapsing to 0.054 at seed 9999). 97 is prime — a
+    // non-power-of-two, non-multiple-of-10 modulus so the fold doesn't alias
+    // with the seed's own decimal stride or with fbm's octave lattice — and
+    // mod(42.0, 97.0) == 42.0, so the seed-42 goldens Task 3 will bake are
+    // untouched by this fold.
+    float sd = mod(u_seed, 97.0);
+    vec2 q = p * u_scale * 1.1 + vec2(sd * 0.137, sd * 0.311);
 
     float thick, facet;
     vec3 N = surfaceNormal(q, mode, ang, thick, facet);
 
     vec3 V = normalize(vec3(sin(view) * 0.7, cos(view) * 0.7, 1.0));
     float ndv = clamp(dot(N, V), 0.0, 1.0);
-    float fres = clamp(pow(1.0 - ndv, 3.0) * 4.5, 0.0, 1.0);   // glancing-angle sheen
+    // glancing-angle sheen. No specific reference render for `* 4.5` survives from
+    // authorship, so this is reconstructed rather than recalled: pow(1-ndv, 3) alone
+    // only nears 1.0 in a razor-thin rim right at ndv=0, which left the sheen a hairline
+    // on these procedural normals (few facets sit dead-on to V); the *4.5 gain widens
+    // that band so mid-slope facets pick up sheen too, before the clamp caps it at 1.0.
+    float fres = clamp(pow(1.0 - ndv, 3.0) * 4.5, 0.0, 1.0);
 
     // Thin-film phase. Both terms are surface terms: the film's own thickness, and
     // the optical path stretching as the view goes glancing. Neither reads a pixel.
@@ -155,7 +172,7 @@ void main() {
     // the light -- ungated, it dusted speckle evenly over Slick, whose whole point
     // is a broad unbroken sheet.
     if (u_shimmer > 0.0) {
-        float tw = fbm(p * 90.0 + floor(u_time * 6.0) * 1.7 + u_seed);
+        float tw = fbm(p * 90.0 + floor(u_time * 6.0) * 1.7 + sd);
         float spark = smoothstep(0.64, 0.88, tw) * u_shimmer * (0.15 + 1.5 * fres);
         col += spark * mix(vec3(1.0), irid, 0.5) * (0.35 + 0.7 * u_iridescence);
     }

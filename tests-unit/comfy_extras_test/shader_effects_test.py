@@ -347,8 +347,11 @@ def test_holographic_surface_is_generative_and_declares_its_uniforms():
     assert eff.generative is True
     assert eff.category == "generative"
     assert eff.source.startswith("#version 300 es")
-    # Every declared param must exist as a uniform in the shader: a param the GLSL
-    # never reads is a dead control the UI still shows.
+    # Every declared param must exist as a `uniform` declaration in the shader.
+    # This only checks that the declaration is present, not that the shader reads
+    # it — GLSL silently strips an unused uniform, and _shader_effects.py's bind
+    # loop (`if uloc < 0: continue`) skips it just as silently, so a param that is
+    # declared but never referenced in the body would still pass this assertion.
     for p in eff.params:
         assert f"uniform float {p.uniform};" in eff.source or f"uniform vec3  {p.uniform};" in eff.source \
             or f"uniform vec3 {p.uniform};" in eff.source, \
@@ -361,9 +364,57 @@ def test_holographic_surface_is_generative_and_declares_its_uniforms():
 def test_holographic_surface_never_samples_the_input_for_its_normal():
     """The bug this effect exists to fix: `holographic` builds its normal from the
     input's luminance gradient, so a flat fill renders flat. The only permitted
-    read of u_image0 here is the final optional blend-back."""
+    read of u_image0 here is the final optional blend-back. Matched against every
+    GLSL sampling call, not just `texture(` — a bare `.count("texture(u_image0")
+    == 1` guard is evadable by reintroducing a second read via `texelFetch(` or
+    `textureLod(`, which would slip an input-derived normal back in unnoticed."""
+    import re
     eff = load_catalog(refresh=True).effects["holographic_surface"]
-    assert eff.source.count("texture(u_image0") == 1
-    tail = eff.source.split("texture(u_image0")[0]
-    assert "u_hasInput > 0.5 && u_mix > 0.0" in tail[-200:], \
+    reads = list(re.finditer(
+        r"(?:texture|texelFetch|textureLod|textureProj|textureGrad|texelFetchOffset)\s*\(\s*u_image0\b",
+        eff.source))
+    assert len(reads) == 1, f"expected exactly one read of u_image0, found {len(reads)}"
+    # `prefix` (not `tail` — it is everything BEFORE the read, the opposite of a tail).
+    prefix = eff.source[:reads[0].start()]
+    assert "u_hasInput > 0.5 && u_mix > 0.0" in prefix[-200:], \
         "the sole u_image0 read is not gated on u_hasInput and u_mix"
+
+
+def test_holographic_surface_field_survives_the_apps_full_seed_range():
+    """The app supplies `u_seed: p.seed % 10000` (ShaderEffectNode.vue), so u_seed
+    reaches 9999. Before the seed-fold, that fed fbm()'s noise offset unfolded --
+    the last of its four octaves landed near 26,000, past the ~16.7M-ULP limit of
+    a highp 24-bit mantissa, where hash21's fract(p * vec2(123.34, 456.21))
+    quantises and the crease field collapses into axis-aligned banding.
+
+    std() cannot catch this: measured, it stays ~0.254 across the whole seed
+    sweep (the collapse changes FREQUENCY, not amplitude) -- Task 2's variance
+    guard would pass a shader that fails this. So this test checks high-frequency
+    energy (mean |gradient|) instead, which is what actually drops.
+
+    Measured on this repo pre-fix (Crumple, u_shimmer=0, 256px): hf(seed 42) =
+    0.0811, hf(seed 9999) = 0.0540 -- a ~33% drop. Post-fix the two are within
+    rounding of each other (~0.081 each). The 0.75 threshold below sits with
+    headroom under the fixed ratio (~1.0) and well above the broken one (~0.67).
+    """
+    from PIL import Image
+
+    golden_dir = os.path.join(os.path.dirname(__file__), "..", "shaderfx_golden")
+    fixture = np.asarray(
+        Image.open(os.path.join(golden_dir, "fixture_256.png")).convert("RGB"),
+        dtype=np.float32) / 255.0
+    eff = load_catalog(refresh=True).effects["holographic_surface"]
+
+    def hf_energy(seed):
+        from comfy_extras._shader_effects import to_uniforms
+        values = resolve_params(eff, json.dumps({"u_surface": 0, "u_shimmer": 0.0}))
+        uniforms = to_uniforms(eff, values)
+        jobs = [{"image": fixture, "uniforms": {**uniforms, "u_time": 0.7, "u_seed": float(seed), "u_hasInput": 0.0}}]
+        out = render_effect(eff.source, 256, 256, jobs, passes=eff.passes)[0][..., :3]
+        return float(np.abs(np.diff(out, axis=1)).mean() + np.abs(np.diff(out, axis=0)).mean())
+
+    hf_42 = hf_energy(42)
+    hf_9999 = hf_energy(9999)
+    assert hf_9999 > 0.75 * hf_42, (
+        f"Crumple's high-frequency energy collapsed at seed 9999 ({hf_9999:.4f}) "
+        f"relative to seed 42 ({hf_42:.4f}) -- the noise field is banding/washing out at high seeds")
