@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shapeImagePrompt, THREE_D_MODELS, DEFAULT_3D_MODEL, resolve3dModel } from '~~/server/utils/scene3dGen'
+import { shapeImagePrompt, shapeTexturePrompt, THREE_D_MODELS, DEFAULT_3D_MODEL, resolve3dModel } from '~~/server/utils/scene3dGen'
 
 describe('scene3d text-to-3d generation logic', () => {
   it('shapes the image prompt toward a clean single object', () => {
@@ -34,5 +34,22 @@ describe('scene3d text-to-3d generation logic', () => {
       expect(Object.values(input)).toContain('https://x/i.png')
       expect(m.glbUrlFrom({ model_mesh: { url: 'g.glb' } })).toBe('g.glb')
     }
+  })
+})
+
+describe('shapeTexturePrompt', () => {
+  it('asks for a flat, evenly lit, tileable surface', () => {
+    const p = shapeTexturePrompt('brushed copper')
+    expect(p).toContain('brushed copper')
+    expect(p.toLowerCase()).toContain('seamless')
+    expect(p.toLowerCase()).toContain('flat')
+  })
+
+  it('returns an empty string for an empty ask, like its sibling', () => {
+    expect(shapeTexturePrompt('   ')).toBe('')
+  })
+
+  it('does not reuse the single-object shaping', () => {
+    expect(shapeTexturePrompt('wood')).not.toBe(shapeImagePrompt('wood'))
   })
 })

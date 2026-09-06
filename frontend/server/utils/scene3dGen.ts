@@ -10,6 +10,19 @@ export function shapeImagePrompt(prompt: string): string {
   return p ? `${p}${PROMPT_SUFFIX}` : ''
 }
 
+/** The opposite shaping to shapeImagePrompt: not one object on a plain ground, but a flat
+ *  swatch of SURFACE that can be tiled across a mesh. Straight-on, evenly lit and edge-to-
+ *  edge, because anything with perspective, a vignette or a directional highlight bakes a
+ *  fake light direction into the material. */
+const TEXTURE_PROMPT_SUFFIX =
+  ', seamless tileable surface texture, flat straight-on view, even diffuse lighting,'
+  + ' no shadows, no vignette, no perspective, no objects, fills the entire frame edge to edge'
+
+export function shapeTexturePrompt(prompt: string): string {
+  const p = prompt.trim()
+  return p ? `${p}${TEXTURE_PROMPT_SUFFIX}` : ''
+}
+
 export interface ThreeDModel {
   app: string
   buildInput(imageUrl: string, opts: { textured?: boolean, seed?: number }): Record<string, unknown>

@@ -941,6 +941,36 @@ let offTexError: (() => void) | null = null
 onMounted(() => { offTexError = onTextureError((f) => { texLoadError[f] = true }) })
 onBeforeUnmount(() => { offTexError?.() })
 
+// Texture generation: prompt → fal → the ComfyUI input directory → material.image. Scoped
+// to the object it was started FOR, exactly like the upload above — reselecting mid-request
+// must not land the texture on the newly selected object.
+const texGenPrompt = ref('')
+const texGenerating = ref<string | null>(null)
+const texGenError = reactive<Record<string, boolean>>({})
+
+async function generateTexture() {
+  const target = selected.value
+  const prompt = texGenPrompt.value.trim()
+  if (!prompt || !target || target.kind === 'light' || texGenerating.value) return
+  texGenerating.value = target.id
+  delete texGenError[target.id]
+  try {
+    const gen = await $fetch<{ imageUrl: string, seed: number }>('/api/scene3d/gen-texture', { method: 'POST', body: { prompt } })
+    // The fal URL is public but temporary; /api/image-fetch copies the bytes into ComfyUI's
+    // input directory and returns the stored filename, which is what the material holds.
+    const stored = await $fetch<{ name?: string }>('/api/image-fetch', { method: 'POST', body: { url: gen.imageUrl } })
+    const filename = stored?.name
+    if (!filename) throw new Error('no filename')
+    delete texLoadError[filename]
+    target.material.image = filename
+  } catch (err) {
+    console.error('[scene3d-studio] gen-texture failed', err)
+    texGenError[target.id] = true
+  } finally {
+    if (texGenerating.value === target.id) texGenerating.value = null
+  }
+}
+
 // Relief image upload: same object-scoped-spinner / capture-before-await shape as the
 // texture upload above (texUploading/onTexFilePicked). C2 fix (final review): `relief.image`
 // now stores the user's ORIGINAL uploaded bytes, unconverted — the client used to run the SAME
@@ -4354,6 +4384,23 @@ async function onClose() {
               </div>
               <p v-if="texUploadError[selected.id] || (selected.material.image && texLoadError[selected.material.image])"
                 class="text-[11px] text-red-400/90">texture failed</p>
+              <div class="space-y-1.5">
+                <input
+                  v-model="texGenPrompt"
+                  type="text"
+                  placeholder="Describe a surface, such as brushed copper"
+                  class="w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[12px] text-white/85 outline-none placeholder:text-white/30 focus:border-white/25"
+                  @keydown.enter.prevent="generateTexture"
+                />
+                <StudioButton variant="primary" :disabled="!texGenPrompt.trim() || texGenerating === selected.id" @click="generateTexture">
+                  <span class="flex items-center gap-1.5">
+                    <Loader2 v-if="texGenerating === selected.id" class="h-3.5 w-3.5 animate-spin" />
+                    <Sparkles v-else class="h-3.5 w-3.5" />
+                    {{ texGenerating === selected.id ? 'Generating…' : 'Generate a texture' }}
+                  </span>
+                </StudioButton>
+                <p v-if="texGenError[selected.id]" class="text-[11px] text-red-400/90">Texture generation failed — try again.</p>
+              </div>
             </div>
           </template>
 
