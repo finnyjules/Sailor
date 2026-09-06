@@ -90,6 +90,8 @@ import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
+import StudioRow from '~/components/vue-canvas/studio/StudioRow.vue'
+import type { ControlSpec } from '~/lib/spacetype/effect'
 import StudioGradientRamp from '~/components/vue-canvas/studio/StudioGradientRamp.vue'
 import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPanel.vue'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
@@ -543,6 +545,14 @@ const bgShowWorld = computed<boolean>({
     else { doc.background = lastBgColor.value }
   },
 })
+// The Background card's three bespoke rows, drawn through the shared StudioRow so they
+// carry the same 28px row chrome as Floor (they were bare label + switch/colour before).
+// Bespoke — slot-rendered, NOT schema controls — because `background` is a colour-or-
+// sentinel string with a remembered last colour, so these bind to the proxies above
+// rather than to a doc leaf; that also keeps them out of the agent's path-writer.
+const BG_WORLD_SPEC: ControlSpec = { key: 'ui.background.world', label: 'Show world', kind: 'switch', default: false, group: 'Background' }
+const BG_TRANSPARENT_SPEC: ControlSpec = { key: 'ui.background.transparent', label: 'Transparent', kind: 'switch', default: false, group: 'Background' }
+const BG_COLOR_SPEC: ControlSpec = { key: 'ui.background.color', label: 'Color', kind: 'color', default: '#1b1e24', group: 'Background' }
 const bgColorProxy = computed<string>({
   get: () => (isBgSentinel(doc.background) ? lastBgColor.value : doc.background),
   set: (v) => { doc.background = v; lastBgColor.value = v },
@@ -4458,26 +4468,23 @@ async function onClose() {
                restores it instead of landing on black — which is why the colour is a
                stateful proxy and not a plain doc leaf, and therefore not in the schema. -->
           <template #control-ui.background.transparent>
-            <div class="space-y-2">
-              <!-- World backdrop: shows the reflected environment behind the geometry. This
-                   is what makes glass dispersion fan into rainbow — the strips have to be IN
-                   the refraction backdrop, not just the reflection map. -->
-              <div class="flex items-center justify-between">
-                <span class="text-[11px] text-white/55">Show world</span>
-                <StudioSwitch v-model="bgShowWorld" />
-              </div>
-              <div class="flex items-center justify-between">
-                <span class="text-[11px] text-white/55">Transparent</span>
-                <StudioSwitch v-model="bgTransparent" />
-              </div>
+            <!-- Drawn through StudioRow — not bare label + switch — so these two carry the
+                 same 28px row chrome as Floor above them. World backdrop: shows the
+                 reflected environment behind the geometry, which is what makes glass
+                 dispersion fan into rainbow (the strips have to be IN the refraction
+                 backdrop, not just the reflection map). -->
+            <div class="flex flex-col gap-1.5">
+              <StudioRow :spec="BG_WORLD_SPEC" :model-value="bgShowWorld" :bindable="false"
+                @update:model-value="(v: string | number | boolean) => (bgShowWorld = v === true)" />
+              <StudioRow :spec="BG_TRANSPARENT_SPEC" :model-value="bgTransparent" :bindable="false"
+                @update:model-value="(v: string | number | boolean) => (bgTransparent = v === true)" />
             </div>
           </template>
 
           <template #control-ui.background.color>
-            <div class="flex items-center justify-between">
-              <span class="text-[11px] text-white/55">Color</span>
-              <StudioColor v-model="bgColorProxy" />
-            </div>
+            <!-- Same shared row as the two switches above, so the whole card reads as one. -->
+            <StudioRow :spec="BG_COLOR_SPEC" :model-value="bgColorProxy" :bindable="false"
+              @update:model-value="(v: string | number | boolean) => (bgColorProxy = String(v))" />
           </template>
         </StudioControlPanel>
       </div>
