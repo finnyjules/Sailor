@@ -159,3 +159,36 @@ describe('getByIdPath', () => {
     expect(getByIdPath(cfg(), 'appearance.NOPE.opacity')).toBeUndefined()
   })
 })
+
+describe('nested id lists (objects.<id>.treatments.<tid>.<dial>)', () => {
+  const nested = () => ({
+    objects: [
+      { id: 'A', treatments: [{ id: 't1', kind: 'blur', amount: 0.2 }, { id: 't2', kind: 'fade', opacity: 0.5 }] },
+      { id: 'B' },
+    ],
+  })
+  it('resolves an id inside a nested list to its positional index', () => {
+    expect(resolveIdPath(nested(), 'objects.A.treatments.t2.opacity')).toBe('objects.0.treatments.1.opacity')
+  })
+  it('refuses an unknown nested id rather than fabricating a key on the array', () => {
+    expect(resolveIdPath(nested(), 'objects.A.treatments.zzz.opacity')).toBeUndefined()
+    const cfg = nested()
+    expect(setByIdPath(cfg, 'objects.A.treatments.zzz.opacity', 1)).toBe(false)
+    expect(cfg).toEqual(nested())
+  })
+  it('reads and writes through the nested id', () => {
+    const cfg = nested()
+    expect(getByIdPath(cfg, 'objects.A.treatments.t1.amount')).toBe(0.2)
+    expect(setByIdPath(cfg, 'objects.A.treatments.t1.amount', 0.9)).toBe(true)
+    expect(cfg.objects[0]!.treatments![0]!.amount).toBe(0.9)
+  })
+  it('a nested path on an object with no list refuses', () => {
+    expect(resolveIdPath(nested(), 'objects.B.treatments.t1.amount')).toBeUndefined()
+  })
+  it('an out-of-range positional index inside the rest refuses', () => {
+    expect(resolveIdPath(nested(), 'objects.A.treatments.5.amount')).toBeUndefined()
+  })
+  it('a missing plain (non-array) intermediate is still appended as written', () => {
+    expect(resolveIdPath(nested(), 'objects.B.material.roughness')).toBe('objects.1.material.roughness')
+  })
+})

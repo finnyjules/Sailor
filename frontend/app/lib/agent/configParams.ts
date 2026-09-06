@@ -158,6 +158,14 @@ export function makeConfigParams(
     let cur: unknown = obj
     for (const p of parts) {
       if (cur == null || typeof cur !== 'object') return undefined
+      // A non-index segment against an ARRAY is an id inside it
+      // (`objects.<id>.treatments.<tid>.amount`) — resolve, refuse if unknown.
+      if (Array.isArray(cur) && !isIndex(p)) {
+        const i = indexInList(cur, p, 'id')
+        if (i === undefined) return undefined
+        cur = cur[i]
+        continue
+      }
       cur = (cur as AnyObj)[p]
     }
     return cur as ParamValue | undefined
@@ -169,11 +177,20 @@ export function makeConfigParams(
     let cur: AnyObj = obj
     for (let i = 0; i < parts.length - 1; i++) {
       const p = parts[i]!
+      if (Array.isArray(cur) && !isIndex(p)) {
+        // Same nested-id rule as `read`: never fabricate a named key on an array.
+        const j = indexInList(cur, p, 'id')
+        if (j === undefined) return
+        cur = cur[j] as AnyObj
+        continue
+      }
       let next = cur[p]
       if (next == null || typeof next !== 'object') { next = {}; cur[p] = next }
       cur = next as AnyObj
     }
-    cur[parts[parts.length - 1]!] = value
+    const last = parts[parts.length - 1]!
+    if (Array.isArray(cur) && !isIndex(last)) return
+    cur[last] = value
   }
 
   return new Proxy({} as Params, {

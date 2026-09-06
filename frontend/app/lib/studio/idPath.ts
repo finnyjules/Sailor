@@ -91,7 +91,35 @@ export function resolveIdPath(cfg: unknown, path: string, idKey = DEFAULT_ID_KEY
   // An out-of-range positional index is just as wrong as an unknown id: it is a
   // slot that is not there, and `setByPath` would happily create it.
   if (i === undefined || i < 0 || i >= arr.length) return undefined
-  return p.rest ? `${p.list}.${i}.${p.rest}` : `${p.list}.${i}`
+  const out: string[] = [p.list, String(i)]
+  if (!p.rest) return out.join('.')
+  // NESTED lists (`objects.<id>.treatments.<tid>.amount`): keep walking the live config.
+  // Whenever the current container is an array and the next segment is not an index, it
+  // is an id inside that array — resolve it the same way, refuse if unknown. Segments past
+  // the last existing container are appended as written: an optional leaf that has not
+  // been backfilled is a legitimate target (setByIdPath's parent guard decides).
+  let cur: unknown = arr[i]
+  const restSegs = p.rest.split('.')
+  for (let idx = 0; idx < restSegs.length; idx++) {
+    const seg = restSegs[idx]!
+    const isLast = idx === restSegs.length - 1
+    if (Array.isArray(cur)) {
+      const j = isIndex(seg) ? Number(seg) : cur.findIndex((m) => (m as any)?.[idKey] === seg)
+      if (j < 0 || j >= cur.length) return undefined
+      out.push(String(j))
+      cur = cur[j]
+      continue
+    }
+    // A non-last segment against a container that is missing entirely is
+    // ambiguous — it may be an id meant for a nested list that just isn't
+    // there on this member (`objects.B.treatments.t1.amount` when B has no
+    // treatments at all) — refuse rather than guess. The LAST segment is
+    // always the dial itself and is safe to append even when unbackfilled.
+    if (!isLast && (cur == null || typeof cur !== 'object')) return undefined
+    out.push(seg)
+    cur = cur != null && typeof cur === 'object' ? (cur as any)[seg] : undefined
+  }
+  return out.join('.')
 }
 
 /**
