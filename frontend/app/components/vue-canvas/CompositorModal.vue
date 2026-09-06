@@ -935,16 +935,17 @@ const scatterInks = computed<string[]>(() => {
   const inks = (scatterDials.value as { inks?: unknown }).inks
   return Array.isArray(inks) ? (inks as string[]) : []
 })
-/** One ink of the selected scatter's ordered palette, changed by hand. Mirrors
- *  paneInkPatch: validate, bounds-check, DROP ALPHA (a scatter ink is an opaque print
- *  colour, and StudioColor emits #RRGGBBAA), then patch through the one-history-step
- *  dial path — which also drops the Palette select to custom, since presetOf no longer
- *  matches. */
+/** One ink of the selected scatter's ordered palette, changed by hand. Validate,
+ *  bounds-check, then patch through the one-history-step dial path — which also drops
+ *  the Palette select to custom, since presetOf no longer matches. Unlike Pane's inks,
+ *  ALPHA IS KEPT: the styles' printers write each ink's own alpha, so a Cleared or
+ *  translucent ground lets the marks sit over whatever is beneath the layer. A fully
+ *  opaque pick (`…ff`) is stored as the six-digit form so it still matches a preset. */
 function patchScatterInk(layer: ScatterLayer, index: number, hex: string) {
   if (!/^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/.test(hex)) return
   const inks = [...scatterInks.value]
   if (!Number.isInteger(index) || index < 0 || index >= inks.length) return
-  inks[index] = hex.slice(0, 7)
+  inks[index] = hex.length === 9 && /ff$/i.test(hex) ? hex.slice(0, 7) : hex
   patchScatterParam(layer, 'inks', inks)
 }
 /** Switch a Scatter's style, seeding that style's params with its defaults when

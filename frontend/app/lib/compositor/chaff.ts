@@ -267,12 +267,14 @@ function chaffNoise(x: number, y: number, salt: number): number {
   return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v
 }
 
-/** '#rgb' / '#rrggbb' / '#rrggbbaa' → [r, g, b] (alpha dropped: the sheet is opaque). */
-function hexToRgb(hex: string): [number, number, number] {
+/** '#rgb' / '#rrggbb' / '#rrggbbaa' → [r, g, b, a]. Alpha is KEPT: an ink the picker made
+ *  translucent (or Cleared to transparent) paints translucent, so a see-through ground
+ *  lets the blades sit over whatever is beneath the layer. A 3- or 6-digit hex is opaque. */
+function hexToRgb(hex: string): [number, number, number, number] {
   let h = (hex || '#000').replace('#', '')
   if (h.length === 3) h = h[0]! + h[0]! + h[1]! + h[1]! + h[2]! + h[2]!
   const v = (i: number) => parseInt(h.slice(i, i + 2), 16) || 0
-  return [v(0), v(2), v(4)]
+  return [v(0), v(2), v(4), h.length === 8 ? v(6) : 255]
 }
 
 /** Used only when the palette is empty — the tool's own fallback pair [ref 161]. */
@@ -536,7 +538,7 @@ export function chaffPixels(
         r += j; g += j; b += j
       }
       out[q] = r; out[q + 1] = g; out[q + 2] = b
-      out[q + 3] = 255                                           // E6
+      out[q + 3] = col[3]                                           // E6
     }
   }
   return out

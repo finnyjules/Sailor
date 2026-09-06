@@ -248,12 +248,14 @@ function huskFbm(x: number, y: number, salt: number): number {
   return sum / total
 }
 
-/** '#rgb' / '#rrggbb' / '#rrggbbaa' → [r, g, b] (alpha dropped: the sheet is opaque). */
-function hexToRgb(hex: string): [number, number, number] {
+/** '#rgb' / '#rrggbb' / '#rrggbbaa' → [r, g, b, a]. Alpha is KEPT: a translucent or Cleared
+ *  ink paints see-through, so a transparent ground leaves only the husks over whatever
+ *  sits beneath the layer. A 3- or 6-digit hex is opaque. */
+function hexToRgb(hex: string): [number, number, number, number] {
   let h = (hex || '#000').replace('#', '')
   if (h.length === 3) h = h[0]! + h[0]! + h[1]! + h[1]! + h[2]! + h[2]!
   const v = (i: number) => parseInt(h.slice(i, i + 2), 16) || 0
-  return [v(0), v(2), v(4)]
+  return [v(0), v(2), v(4), h.length === 8 ? v(6) : 255]
 }
 
 /** Used only when the palette is empty — the tool's own fallback trio [ref 120]. */
@@ -495,7 +497,7 @@ export function huskPixels(
         r += j; g += j; b += j
       }
       out[q] = r; out[q + 1] = g; out[q + 2] = b
-      out[q + 3] = 255                                                  // C8
+      out[q + 3] = col[3]                                                  // C8
     }
   }
   return out

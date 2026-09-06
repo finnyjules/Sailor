@@ -600,3 +600,25 @@ describe('paintChaff — how it behaves inside a Frame layer', () => {
     }
   })
 })
+
+
+// ── Translucent inks ──────────────────────────────────────────────────────────
+describe('chaffPixels honours each ink\'s alpha', () => {
+  // Coverage lives in the GREEN channel; alpha 255 (mirrors the mask the blade painter leaves).
+  const flat = (mw: number, mh: number, g: number) => {
+    const d = new Uint8ClampedArray(mw * mh * 4)
+    for (let i = 0; i < mw * mh; i++) { d[i * 4 + 1] = g; d[i * 4 + 3] = 255 }
+    return d
+  }
+  it('a Cleared (transparent) ground prints alpha 0 where the ground shows, 255 where the blade ink does', () => {
+    const inks = ['#00000000', '#ffffff']
+    const groundOnly = chaffPixels(flat(24, 24, 0), 24, 24, 24, 24, P({ mottle: 0, grain: 0, inks }), 1)
+    const bladeOnly = chaffPixels(flat(24, 24, 255), 24, 24, 24, 24, P({ mottle: 0, grain: 0, inks }), 1)
+    for (let q = 3; q < groundOnly.length; q += 4) expect(groundOnly[q]).toBe(0)
+    for (let q = 3; q < bladeOnly.length; q += 4) expect(bladeOnly[q]).toBe(255)
+  })
+  it('a translucent ink prints its own alpha; a six-digit ink stays opaque', () => {
+    expect(chaffPixels(flat(8, 8, 0), 8, 8, 8, 8, P({ mottle: 0, grain: 0, inks: ['#ff000080', '#000000'] }), 1)[3]).toBe(0x80)
+    expect(chaffPixels(flat(8, 8, 0), 8, 8, 8, 8, P({ mottle: 0, grain: 0, inks: ['#ff0000', '#000000'] }), 1)[3]).toBe(255)
+  })
+})

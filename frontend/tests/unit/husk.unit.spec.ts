@@ -517,3 +517,15 @@ describe('paintHusk — how it behaves inside a Frame layer', () => {
     expect(() => paintHusk(hostCtx() as never, P({ count: 70 }), 200, 200, 2)).not.toThrow()
   })
 })
+
+// ── Translucent inks ──────────────────────────────────────────────────────────
+describe('huskPixels honours each ink\'s alpha', () => {
+  it('a transparent ground prints alpha 0; a full-depth cell prints the opaque fill at 255', async () => {
+    const { huskPixels } = await import('~/lib/compositor/husk')
+    const inks = ['#00000000', '#888888', '#ffffff'] // ground transparent, silhouette + fill opaque
+    const groundOnly = huskPixels(new Float32Array(16 * 16).fill(0), 16, 16, 16, 16, P({ grain: 0, eat: 0, bite: 'noise' as never, inks }), 1)
+    const fillOnly = huskPixels(new Float32Array(16 * 16).fill(1), 16, 16, 16, 16, P({ grain: 0, eat: 0, bite: 'noise' as never, inks }), 1)
+    for (let q = 3; q < groundOnly.length; q += 4) expect(groundOnly[q]).toBe(0)
+    for (let q = 3; q < fillOnly.length; q += 4) expect(fillOnly[q]).toBe(255)
+  })
+})

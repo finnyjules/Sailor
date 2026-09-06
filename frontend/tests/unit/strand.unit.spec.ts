@@ -720,3 +720,20 @@ describe('paintStrand — how it behaves inside a Frame layer', () => {
     }
   })
 })
+
+// ── Translucent inks ──────────────────────────────────────────────────────────
+describe('strandPixels honours each ink\'s alpha', () => {
+  const flat = (mw: number, mh: number, r: number, g: number) => {
+    const d = new Uint8ClampedArray(mw * mh * 4)
+    for (let i = 0; i < mw * mh; i++) { d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 3] = 255 }
+    return d
+  }
+  it('a transparent ground prints alpha 0; the opaque fill prints 255', async () => {
+    const { strandPixels } = await import('~/lib/compositor/strand')
+    const inks = ['#00000000', '#888888', '#ffffff'] // ground transparent, plate + fill opaque
+    const groundOnly = strandPixels(flat(24, 24, 0, 0), 24, 24, 24, 24, P({ grain: 0, tex: 0, inks }), 1)
+    const fillOnly = strandPixels(flat(24, 24, 0, 255), 24, 24, 24, 24, P({ grain: 0, tex: 0, inks }), 1)
+    for (let q = 3; q < groundOnly.length; q += 4) expect(groundOnly[q]).toBe(0)
+    for (let q = 3; q < fillOnly.length; q += 4) expect(fillOnly[q]).toBe(255)
+  })
+})
