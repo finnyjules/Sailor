@@ -136,14 +136,22 @@ const isShaderFillMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
 const isImageMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
   isEditableMaterial(doc, obj) && materialTypeOf(obj) === 'image'
 
-// roughness/metalness apply to standard, glass and image (all PBR-lit) and to shaderFill
-// only while it isn't unlit (a MeshBasicMaterial has no roughness/metalness slot at all).
-// Mirrors the inspector's per-branch rows for these two keys.
+// The Unlit switch exists on the two types that have a Basic-vs-Standard choice at all:
+// shaderFill (a catalog effect that often wants to glow flat) and image (a photo or logo
+// that usually wants to be shown as it is). Every other type has no such choice.
+const hasUnlitToggle = (doc: SceneDoc, obj?: SceneObject): boolean =>
+  isShaderFillMaterial(doc, obj) || isImageMaterial(doc, obj)
+
+// roughness/metalness apply to standard, glass and opalescent (always) and to image and
+// shaderFill only while they aren't unlit (a MeshBasicMaterial has no roughness/metalness
+// slot at all). Mirrors the inspector's per-branch rows for these two keys.
 const hasPbrSurface = (doc: SceneDoc, obj?: SceneObject): boolean => {
   if (!isEditableMaterial(doc, obj)) return false
   const t = materialTypeOf(obj)
-  if (t === 'standard' || t === 'glass' || t === 'image' || t === 'opalescent') return true
-  if (t === 'shaderFill') return !(obj && obj.kind !== 'light' && obj.material.unlit === true)
+  const unlit = !!obj && obj.kind !== 'light' && obj.material.unlit === true
+  if (t === 'standard' || t === 'glass' || t === 'opalescent') return true
+  // image and shaderFill both build a MeshBasicMaterial when unlit, which has neither slot.
+  if (t === 'image' || t === 'shaderFill') return !unlit
   return false
 }
 
@@ -385,7 +393,7 @@ export const SCENE_CONTROLS: SceneControl[] = [
   {
     key: 'object.material.unlit', label: 'Unlit', kind: 'switch', default: MATERIAL_DEFAULTS.unlit, group: 'Material',
     hint: 'Glows flat instead of being shaded by scene lights',
-    when: isShaderFillMaterial,
+    when: hasUnlitToggle,
   } as SceneControl,
 
   // Physical block — standard + glass only.

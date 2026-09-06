@@ -1253,21 +1253,22 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
       break
     }
     case 'image': {
-      const t = new THREE.MeshStandardMaterial({
-        // The picture's tint — white leaves it untouched. Deliberately NOT the document's
-        // `color`: this type has never read it, and starting to would retint every image
-        // material already saved with whatever colour its document carried.
-        color: stripAlpha(mat.imageTint ?? MATERIAL_DEFAULTS.imageTint),
-        roughness: mat.roughness,
-        metalness: mat.metalness,
-      })
+      // `unlit` picks the CLASS, exactly as it does for shaderFill: Basic shows the
+      // picture's own pixels flat (a photo, a logo, a screenshot), Standard lets the
+      // scene's lights shade it. MeshBasicMaterial has no roughness/metalness slot, so
+      // neither is written on that branch — and applyRelief already skips a material
+      // with no bumpMap slot, so the relief section degrades on its own.
+      const tint = stripAlpha(mat.imageTint ?? MATERIAL_DEFAULTS.imageTint)
+      const t: THREE.Material = mat.unlit === true
+        ? new THREE.MeshBasicMaterial({ color: tint })
+        : new THREE.MeshStandardMaterial({ color: tint, roughness: mat.roughness, metalness: mat.metalness })
       // The live spec, re-stamped by updateMaterial below and read by the loader's onLoad
       // (which fires long after this function returns). Same pattern shaderFill uses with
       // `userData.shaderSpec` for refreshSceneShaderFields.
       t.userData.imageSpec = mat
       const tex = ownedImageTexture(t, mat)
       if (tex) {
-        t.map = tex
+        ;(t as THREE.MeshStandardMaterial).map = tex
         // Natural size is unknown until the file decodes, so Fit is an identity transform
         // on this first pass; onLoad re-applies with the real dimensions.
         applyImageTransform(tex, mat, null)
@@ -1374,7 +1375,9 @@ function baseIdentityKey(mat: SceneMaterial): string {
   switch (mat.type) {
     case 'toon': return `toon:${mat.toonSteps ?? MATERIAL_DEFAULTS.toonSteps}`
     case 'matcap': return `matcap:${mat.matcap ?? MATERIAL_DEFAULTS.matcap}`
-    case 'image': return `image:${mat.image ?? ''}`
+    // `unlit` picks the THREE material CLASS (Basic vs Standard) — that boundary needs a
+    // rebuild, exactly as it does for shaderFill below.
+    case 'image': return `image:${mat.image ?? ''}:${mat.unlit === true ? 1 : 0}`
     // `unlit` picks the THREE material CLASS (Basic vs Standard) — that boundary needs a
     // rebuild; the effect/params/speed/input inside `shader` are refreshed in place every
     // frame by refreshSceneShaderFields, never through this identity (see updateMaterial).
@@ -1567,7 +1570,10 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
     case 'image': {
       const s = m as THREE.MeshStandardMaterial
       s.color.set(stripAlpha(mat.imageTint ?? MATERIAL_DEFAULTS.imageTint))
-      s.roughness = mat.roughness; s.metalness = mat.metalness
+      // roughness/metalness exist only on the Standard (lit) variant. The identity guard
+      // above already rebuilt if `unlit` moved, so this branch is guaranteed to still be
+      // holding the class it was built as.
+      if (mat.unlit !== true) { s.roughness = mat.roughness; s.metalness = mat.metalness }
       // Re-stamp before touching the map: the async onLoad reads this, and a file still in
       // flight must settle onto the CURRENT dials, not the ones it was built with.
       m.userData.imageSpec = mat

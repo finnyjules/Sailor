@@ -405,7 +405,7 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
     // from the default-state row list here even though panelPresentation.ts's MATERIAL_BODY
     // lists it unconditionally (scenePanelVisible/showIfVisible is what hides it at render).
     Material: [
-      `${M}type`, 'ui.material.image',
+      `${M}type`, 'ui.material.image', `${M}unlit`,
       `${M}imageFit`, `${M}imageWrap`,
       `${M}imageTiling`, `${M}imageTilingLinked`,
       // NB imageTilingY is showIf-hidden while imageTilingLinked is true (its default), so it
@@ -572,6 +572,15 @@ describe('Scene3D panel parity — Material, per material type', () => {
     const mat = cards.find((s) => s.title === 'Material')!.keys
     expect(mat).toEqual([`${M}type`, 'ui.material.shader', `${M}unlit`])
     expect(cards.find((s) => s.title === 'Surface relief')!.keys).toEqual(['ui.relief.unavailable'])
+  })
+
+  it('an unlit image drops the two PBR rows', () => {
+    const doc = defaultDoc()
+    const o = prim('image')
+    o.material.unlit = true
+    const rows = designCards(doc, o).find((s) => s.title === 'Material')!.keys
+    expect(rows).not.toContain(`${M}roughness`)
+    expect(rows).not.toContain(`${M}metalness`)
   })
 })
 

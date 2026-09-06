@@ -44,10 +44,11 @@ describe('new switches: object.material.unlit + showFloor', () => {
     expect(sceneBindableControls(doc).map((c) => c.key)).toContain('showFloor')
   })
 
-  it('object.material.unlit is gated to shaderFill (mirrors the surface template)', () => {
+  it('object.material.unlit is gated to shaderFill + image (the two types with a Basic-vs-Standard choice)', () => {
     const doc = defaultDoc()
     const unlitControl = SCENE_CONTROLS.find((c) => c.key === 'object.material.unlit')!
     expect(unlitControl.when!(doc, objWithType('shaderFill'))).toBe(true)
+    expect(unlitControl.when!(doc, objWithType('image'))).toBe(true)
     expect(unlitControl.when!(doc, objWithType('standard'))).toBe(false)
     expect(unlitControl.when!(doc, objWithType('glass'))).toBe(false)
     expect(unlitControl.when!(doc, objWithType('phong'))).toBe(false)
@@ -99,6 +100,22 @@ describe('roughness/metalness showIf composes with their existing `when` gate', 
 
   it('shaderFill with unlit true hides roughness/metalness', () => {
     const obj = objWithType('shaderFill')
+    obj.material.unlit = true
+    expect(visibleAndShown(obj, 'object.material.roughness')).toBe(false)
+    expect(visibleAndShown(obj, 'object.material.metalness')).toBe(false)
+  })
+
+  it('image with unlit absent/false shows roughness/metalness', () => {
+    const obj = objWithType('image')
+    expect(visibleAndShown(obj, 'object.material.roughness')).toBe(true)
+    expect(visibleAndShown(obj, 'object.material.metalness')).toBe(true)
+    obj.material.unlit = false
+    expect(visibleAndShown(obj, 'object.material.roughness')).toBe(true)
+    expect(visibleAndShown(obj, 'object.material.metalness')).toBe(true)
+  })
+
+  it('image with unlit true hides roughness/metalness', () => {
+    const obj = objWithType('image')
     obj.material.unlit = true
     expect(visibleAndShown(obj, 'object.material.roughness')).toBe(false)
     expect(visibleAndShown(obj, 'object.material.metalness')).toBe(false)

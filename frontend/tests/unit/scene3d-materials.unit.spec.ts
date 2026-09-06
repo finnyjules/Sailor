@@ -570,3 +570,30 @@ describe('image tint', () => {
     expect(`#${m.color.getHexString()}`).toBe('#ffffff')
   })
 })
+
+describe('unlit image', () => {
+  it('builds a Basic material so scene lights do not shade the picture', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', unlit: true }))
+    expect(m).toBeInstanceOf(THREE.MeshBasicMaterial)
+    expect(m).not.toBeInstanceOf(THREE.MeshStandardMaterial)
+  })
+
+  it('still applies the tint and the map transform when unlit', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', unlit: true, imageTint: '#ff0000' })) as THREE.MeshBasicMaterial
+    expect(`#${m.color.getHexString()}`).toBe('#ff0000')
+    m.map = new THREE.Texture()
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', unlit: true, imageTiling: 3 }))).toBe(true)
+    expect(m.map.repeat.x).toBe(3)
+  })
+
+  it('rebuilds when the lit/unlit class boundary is crossed', () => {
+    const lit = materialFor(base({ type: 'image', image: 'a.png' }))
+    expect(updateMaterial(lit, base({ type: 'image', image: 'a.png', unlit: true }))).toBe(false)
+  })
+
+  it('skips roughness and metalness on the Basic variant, which has neither', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', unlit: true }))
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', unlit: true, roughness: 0.2 }))).toBe(true)
+    expect((m as unknown as { roughness?: number }).roughness).toBeUndefined()
+  })
+})

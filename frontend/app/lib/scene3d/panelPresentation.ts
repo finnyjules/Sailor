@@ -542,7 +542,7 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
     'object.material.clearcoat', 'object.material.clearcoatRoughness', 'object.material.envMapIntensity',
   ],
   image: [
-    'ui.material.image',
+    'ui.material.image', 'object.material.unlit',
     'object.material.imageFit', 'object.material.imageWrap',
     'object.material.imageTiling', 'object.material.imageTilingLinked', 'object.material.imageTilingY',
     'object.material.roughness', 'object.material.metalness',
