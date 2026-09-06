@@ -24,7 +24,7 @@
  */
 import type { SceneDoc } from '~/lib/scene3d/config'
 import { visibleSceneControls, type SceneControl } from '~/lib/scene3d/controls'
-import { OBJECT_PREFIX, iterateObjectControls } from '~/lib/scene3d/agentControls'
+import { OBJECT_PREFIX, iterateObjectControls, iterateTreatmentControls } from '~/lib/scene3d/agentControls'
 
 export interface SceneAnimatableTarget { path: string; label: string; min: number; max: number }
 
@@ -60,6 +60,17 @@ export function animatableTargets(doc: SceneDoc): SceneAnimatableTarget[] {
     const rest = c.key.slice(OBJECT_PREFIX.length)
     out.push({
       path: `objects.${id}.${rest}`,
+      label: `${obj.name || 'Object'} · ${c.label}`,
+      ...animatableRange(c as any),
+    })
+  })
+
+  // Treatment dials — slider rows only: a track is numeric, so the on/off flag and colour
+  // rows are not targets (key a fade to 0 to switch an effect off over time).
+  iterateTreatmentControls(doc, (c, obj, id) => {
+    if (c.kind !== 'slider') return
+    out.push({
+      path: `objects.${id}.${c.key.slice(OBJECT_PREFIX.length)}`,
       label: `${obj.name || 'Object'} · ${c.label}`,
       ...animatableRange(c as any),
     })

@@ -10,6 +10,7 @@ import {
   type SceneDoc, type PrimitiveKind, type MaterialType, type EnvironmentKind,
 } from '~/lib/scene3d/config'
 import { PRIMITIVE_PARAMS } from '~/lib/scene3d/primParams'
+import { createTreatment } from '~/lib/scene3d/treatments'
 
 /** Every `WORKED EXAMPLE … {…}` block in the guidance, as `[label, parsed JSON]`.
  *  Balanced-brace scan rather than a regex: the examples nest objects (gradient stops),
@@ -309,5 +310,28 @@ describe('texture set vocabulary', () => {
   it('the guide carries the wooden-box example', () => {
     expect(SCENE_GUIDANCE).toContain('"object.material.texture":"wood"')
     expect(SCENE_GUIDANCE).toMatch(/SURFACE TEXTURES/)
+  })
+})
+
+describe('sceneStackControls: treatments', () => {
+  it('names every treatment dial absolutely, by object id and treatment id', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Bottle'
+    const glow = createTreatment('glow')
+    box.treatments = [glow]
+    doc.objects.push(box)
+    const keys = sceneStackControls(doc).map((c) => c.key)
+    expect(keys).toContain(`objects.${box.id}.treatments.${glow.id}.strength`)
+    expect(keys).toContain(`objects.${box.id}.treatments.${glow.id}.tint`)
+    expect(keys).toContain(`objects.${box.id}.treatments.${glow.id}.invert`)
+    const c = sceneStackControls(doc).find((x) => x.key.endsWith(`.${glow.id}.strength`))!
+    expect(c.label).toBe('Bottle · Glow strength')
+    expect((c as any).when).toBeUndefined()
+    expect((c as any).bindable).toBeUndefined()
+  })
+  it('an object without treatments adds no stack controls', () => {
+    const doc = defaultDoc()
+    doc.objects.push(createPrimitive('box', doc.objects))
+    expect(sceneStackControls(doc).some((c) => c.key.includes('.treatments.'))).toBe(false)
   })
 })

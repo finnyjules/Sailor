@@ -4,6 +4,7 @@ import { applyMotionToDoc } from '~/lib/scene3d/motion/apply'
 import { defaultDoc, createPrimitive, type SceneObject } from '~/lib/scene3d/config'
 import { SCENE_CONTROLS } from '~/lib/scene3d/controls'
 import type { SceneMotionTrack } from '~/lib/scene3d/motion/types'
+import { createTreatment } from '~/lib/scene3d/treatments'
 
 const track = (over: Partial<SceneMotionTrack> = {}): SceneMotionTrack => ({
   path: 'lighting.sunIntensity', from: 0, to: 1, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...over,
@@ -299,5 +300,36 @@ describe('applyMotionToDoc — path tracks', () => {
     doc.motion = { duration: 4, fps: 30, loop: true, tracks: [] }
     const out = applyMotionToDoc(doc, 0.5).doc
     expect(out.objects[0]!.position).toEqual([1, 2, 3])
+  })
+})
+
+describe('animatableTargets: treatments', () => {
+  it('emits an id-addressed slider path per treatment dial, labelled with the object and kind', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Bottle'
+    const blur = createTreatment('blur'); const rim = createTreatment('rimLight')
+    box.treatments = [blur, rim]
+    doc.objects.push(box)
+    const targets = animatableTargets(doc)
+    const amount = targets.find((t) => t.path === `objects.${box.id}.treatments.${blur.id}.amount`)
+    expect(amount).toMatchObject({ label: 'Bottle · Blur amount', min: 0, max: 1 })
+    expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${rim.id}.strength`)?.label).toBe('Bottle · Rim light strength')
+    // colour rows and switches are not tracks
+    expect(targets.find((t) => t.path.endsWith(`.${rim.id}.color`))).toBeUndefined()
+    expect(targets.find((t) => t.path.endsWith(`.${blur.id}.invert`))).toBeUndefined()
+    expect(targets.find((t) => t.path.endsWith(`.${blur.id}.enabled`))).toBeUndefined()
+  })
+  it('a track on a treatment dial writes through the id, and survives reordering the stack', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    const a = createTreatment('fade'); const b = createTreatment('blur')
+    box.treatments = [a, b]
+    doc.objects.push(box)
+    doc.motion.tracks = [track({ path: `objects.${box.id}.treatments.${b.id}.amount`, from: 0, to: 0.8 })]
+    // Sampled mid-track (t01 = 0.5) rather than at the end, where a looping track wraps back to `from`.
+    expect((applyMotionToDoc(doc, 0.5).doc.objects[0]!.treatments![1] as any).amount).toBeCloseTo(0.4, 5)
+    box.treatments = [b, a] // reorder: same id, new index
+    expect((applyMotionToDoc(doc, 0.5).doc.objects[0]!.treatments![0] as any).amount).toBeCloseTo(0.4, 5)
+    expect((applyMotionToDoc(doc, 0.5).doc.objects[0]!.treatments![1] as any).opacity).toBe(0.5) // fade untouched (its default)
   })
 })

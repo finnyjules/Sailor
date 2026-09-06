@@ -3,6 +3,8 @@ import { getEffectSync } from '~/lib/shaderfx/catalog'
 import { derivedShaderFillControls, shaderFillControls } from '~/lib/shaderfill/controls'
 import { SCENE_CONTROLS, visibleSceneControls, type SceneControl } from './controls'
 import { MACRO_PRIMITIVE_KINDS, MACRO_NONE, type SceneDoc, type SceneObject, type PrimitiveObject } from './config'
+import { treatmentsOf, TREATMENT_LABELS, type Treatment } from '~/lib/scene3d/treatments'
+import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentControls'
 
 /** Strip the schema-only fields (`when`/`agent`/`animatable`/`summary`/`bindable`/
  *  `entry`/`optionLabels`) a `SceneControl` may carry, and drop anything explicitly
@@ -94,10 +96,47 @@ export function iterateObjectControls(
   }
 }
 
+/** "Blur amount" / "Rim light colour": the kind's human label + the row label lowercased. */
+function treatmentRowLabel(kind: Treatment['kind'], rowLabel: string): string {
+  return `${TREATMENT_LABELS[kind]} ${rowLabel.charAt(0).toLowerCase()}${rowLabel.slice(1)}`
+}
+
+/**
+ * The treatment counterpart of `iterateObjectControls`: one RELATIVE control per
+ * (object, treatment, inspector row), keyed `object.treatments.<treatmentId>.<field>`.
+ * Same id-safety refusal on the OBJECT id; treatment ids are already refused at parse time
+ * (treatments.ts's parseTreatment drops empty/dotted/all-digit ids), so nothing here can
+ * emit a path the nested-id resolvers would misread.
+ */
+export function iterateTreatmentControls(
+  doc: SceneDoc,
+  visit: (control: SceneControl, obj: SceneObject, id: string, treatment: Treatment) => void,
+): void {
+  const objects = Array.isArray(doc?.objects) ? doc.objects : []
+  for (const obj of objects) {
+    const id = obj?.id
+    if (typeof id !== 'string' || id === '' || id.includes('.') || /^\d+$/.test(id)) continue
+    for (const t of treatmentsOf(obj)) {
+      for (const c of treatmentControls(t.kind)) {
+        visit({
+          ...c,
+          key: `${OBJECT_PREFIX}treatments.${t.id}.${treatmentField(c.key)}`,
+          label: treatmentRowLabel(t.kind, c.label),
+        } as SceneControl, obj, id, t)
+      }
+    }
+  }
+}
+
 export function sceneStackControls(doc: SceneDoc): ControlSpec[] {
   const out: ControlSpec[] = []
   iterateObjectControls(doc, (c, obj, id) => {
     if ((c as { agent?: boolean }).agent === false) return
+    const rest = c.key.slice(OBJECT_PREFIX.length)
+    const { when, agent, animatable, summary, bindable, entry, optionLabels, ...spec } = c as any
+    out.push({ ...spec, key: `objects.${id}.${rest}`, label: `${obj.name || 'Object'} · ${c.label}` } as ControlSpec)
+  })
+  iterateTreatmentControls(doc, (c, obj, id) => {
     const rest = c.key.slice(OBJECT_PREFIX.length)
     const { when, agent, animatable, summary, bindable, entry, optionLabels, ...spec } = c as any
     out.push({ ...spec, key: `objects.${id}.${rest}`, label: `${obj.name || 'Object'} · ${c.label}` } as ControlSpec)
