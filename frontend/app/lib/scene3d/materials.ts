@@ -1259,7 +1259,9 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
       // neither is written on that branch — and applyRelief already skips a material
       // with no bumpMap slot, so the relief section degrades on its own.
       const tint = stripAlpha(mat.imageTint ?? MATERIAL_DEFAULTS.imageTint)
-      const t: THREE.Material = mat.unlit === true
+      // Both classes declare `map`, so this stays a real union rather than the
+      // widened-then-cast `THREE.Material` a later PBR write could silently compile onto.
+      const t: THREE.MeshBasicMaterial | THREE.MeshStandardMaterial = mat.unlit === true
         ? new THREE.MeshBasicMaterial({ color: tint })
         : new THREE.MeshStandardMaterial({ color: tint, roughness: mat.roughness, metalness: mat.metalness })
       // The live spec, re-stamped by updateMaterial below and read by the loader's onLoad
@@ -1268,7 +1270,7 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
       t.userData.imageSpec = mat
       const tex = ownedImageTexture(t, mat)
       if (tex) {
-        ;(t as THREE.MeshStandardMaterial).map = tex
+        t.map = tex
         // Natural size is unknown until the file decodes, so Fit is an identity transform
         // on this first pass; onLoad re-applies with the real dimensions.
         applyImageTransform(tex, mat, null)

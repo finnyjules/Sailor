@@ -189,11 +189,12 @@ const hasBaseColor = (doc: SceneDoc, obj?: SceneObject): boolean =>
   isEditableMaterial(doc, obj) && COLOR_TYPES.includes(materialTypeOf(obj))
 
 // Relief sits after the per-type chain and applies to every branch EXCEPT an unlit
-// shaderFill (a MeshBasicMaterial has no bump slot at all — the panel draws a "turn off
-// Unlit to use it" notice in that state instead).
+// shaderFill or image (both build a MeshBasicMaterial with no bump slot at all — the
+// panel draws a "turn off Unlit to use it" notice in that state instead).
 const reliefApplies = (doc: SceneDoc, obj?: SceneObject): boolean => {
   if (!isEditableMaterial(doc, obj)) return false
-  if (materialTypeOf(obj) === 'shaderFill' && obj && obj.kind !== 'light' && obj.material.unlit === true) return false
+  const t = materialTypeOf(obj)
+  if ((t === 'shaderFill' || t === 'image') && obj && obj.kind !== 'light' && obj.material.unlit === true) return false
   return true
 }
 

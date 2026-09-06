@@ -352,10 +352,13 @@ const typeOf = (obj: SceneObject | null | undefined): MaterialType | null =>
 const editable = (obj: SceneObject | null | undefined): boolean =>
   !!obj && (obj.kind === 'primitive' || (obj.kind === 'glb' && obj.materialOverride === true))
 
-/** Whether relief has any lighting to perturb: an unlit shaderFill is a MeshBasicMaterial
- *  with no bump slot at all, so the card shows a notice instead of the dials. */
-const reliefOn = (obj: SceneObject | null | undefined): boolean =>
-  editable(obj) && !(typeOf(obj) === 'shaderFill' && obj!.material.unlit === true)
+/** Whether relief has any lighting to perturb: an unlit shaderFill or image is a
+ *  MeshBasicMaterial with no bump slot at all, so the card shows a notice instead of the
+ *  dials. */
+const reliefOn = (obj: SceneObject | null | undefined): boolean => {
+  const t = typeOf(obj)
+  return editable(obj) && !((t === 'shaderFill' || t === 'image') && obj!.material.unlit === true)
+}
 
 const isType = (obj: SceneObject | null | undefined, ...types: MaterialType[]): boolean =>
   editable(obj) && types.includes(typeOf(obj)!)

@@ -582,6 +582,14 @@ describe('Scene3D panel parity — Material, per material type', () => {
     expect(rows).not.toContain(`${M}roughness`)
     expect(rows).not.toContain(`${M}metalness`)
   })
+
+  it('an unlit image replaces the relief card with its notice, exactly like an unlit shaderFill', () => {
+    const doc = defaultDoc()
+    const o = prim('image')
+    o.material.unlit = true
+    const cards = designCards(doc, o)
+    expect(cards.find((s) => s.title === 'Surface relief')!.keys).toEqual(['ui.relief.unavailable'])
+  })
 })
 
 describe('Scene3D panel parity — Surface relief', () => {

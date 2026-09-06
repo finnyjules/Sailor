@@ -127,6 +127,29 @@ describe('roughness/metalness showIf composes with their existing `when` gate', 
   })
 })
 
+// `showIf` above governs what the PANEL draws; the agent's vocabulary is filtered on
+// `when` alone (sceneAgentControls -> visibleSceneControls), so `hasPbrSurface` excluding
+// an unlit image is the thing that actually keeps roughness/metalness out of what the
+// model may write for a flat picture — pin that directly rather than through the panel path.
+describe('agent vocabulary drops roughness/metalness for an unlit image (hasPbrSurface)', () => {
+  it('an unlit image never offers roughness/metalness to the agent', () => {
+    const doc = defaultDoc()
+    const obj = objWithType('image')
+    obj.material.unlit = true
+    const keys = sceneAgentControls(doc, obj).map((c) => c.key)
+    expect(keys).not.toContain('object.material.roughness')
+    expect(keys).not.toContain('object.material.metalness')
+  })
+
+  it('a lit image still offers both — proves the assertion above is not vacuous', () => {
+    const doc = defaultDoc()
+    const obj = objWithType('image')
+    const keys = sceneAgentControls(doc, obj).map((c) => c.key)
+    expect(keys).toContain('object.material.roughness')
+    expect(keys).toContain('object.material.metalness')
+  })
+})
+
 describe('agent vocabulary never leaks the `bindable` schema-only field', () => {
   it('sceneAgentControls output carries no `bindable` field on any control', () => {
     const doc = defaultDoc()

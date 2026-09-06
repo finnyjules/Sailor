@@ -582,8 +582,9 @@ describe('unlit image', () => {
     const m = materialFor(base({ type: 'image', image: 'a.png', unlit: true, imageTint: '#ff0000' })) as THREE.MeshBasicMaterial
     expect(`#${m.color.getHexString()}`).toBe('#ff0000')
     m.map = new THREE.Texture()
-    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', unlit: true, imageTiling: 3 }))).toBe(true)
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', unlit: true, imageTiling: 3, imageOffsetX: 0.25 }))).toBe(true)
     expect(m.map.repeat.x).toBe(3)
+    expect(m.map.offset.x).toBe(0.25)
   })
 
   it('rebuilds when the lit/unlit class boundary is crossed', () => {
