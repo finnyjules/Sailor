@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
-import { imageTilingXY, imageFitTransform, applyImageTransform, seamlessWidth, seamlessCanvas } from '~/lib/scene3d/imageMap'
+import { imageTilingXY, imageFitTransform, applyImageTransform, seamlessWidth, seamlessCanvas, seamlessStrips } from '~/lib/scene3d/imageMap'
 import type { SceneMaterial } from '~/lib/scene3d/config'
 
 const img = (patch: Partial<SceneMaterial> = {}): SceneMaterial =>
@@ -127,5 +127,66 @@ describe('seamless pre-pass', () => {
 
   it('declines to build a canvas with no DOM rather than throwing', () => {
     expect(seamlessCanvas(null as never, 64, 64, 0.2)).toBeNull()
+  })
+})
+
+describe('seamlessStrips (geometry)', () => {
+  // This is the assertion that would have caught the shipped defect: the old
+  // `seamlessCanvas` positioned each band a full width/height away from the canvas
+  // (`band(-w, 0, …)` / `band(w, 0, …)` / etc.), which has ZERO overlap with `[0, w)` —
+  // shifting a rectangle by exactly its own size moves it entirely off-canvas. Every
+  // strip this function returns must actually land on the canvas.
+  it('guards against the shipped no-op: every destination rectangle overlaps the canvas', () => {
+    for (const [w, h, width] of [[64, 64, 0.1], [64, 64, 0.25], [64, 64, 0.45], [200, 100, 0.2]] as const) {
+      const strips = seamlessStrips(w, h, width)
+      expect(strips.length).toBeGreaterThan(0)
+      for (const s of strips) {
+        expect(s.dx).toBeLessThan(w)
+        expect(s.dx + s.sw).toBeGreaterThan(0)
+        expect(s.dy).toBeLessThan(h)
+        expect(s.dy + s.sh).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  // Reproduce the OLD geometry directly and confirm the overlap guard rejects it — proof
+  // this assertion actually discriminates the broken algorithm from the fixed one.
+  it('the overlap guard fails against the old (broken) band geometry', () => {
+    const w = 64, h = 64
+    const oldBands = [
+      { dx: -w, dy: 0, sw: w, sh: h },
+      { dx: w, dy: 0, sw: w, sh: h },
+      { dx: 0, dy: -h, sw: w, sh: h },
+      { dx: 0, dy: h, sw: w, sh: h },
+    ]
+    for (const b of oldBands) {
+      const overlapsX = b.dx < w && b.dx + b.sw > 0
+      const overlapsY = b.dy < h && b.dy + b.sh > 0
+      expect(overlapsX && overlapsY).toBe(false)
+    }
+  })
+
+  it('clamps strip width to at least 1px and never beyond the dial share of the dimension', () => {
+    expect(seamlessStrips(10, 10, 0.01).every(s => s.sw >= 1 && s.sh >= 1)).toBe(true)
+    const strips = seamlessStrips(200, 100, 0.2)
+    // Horizontal strips: 200 * 0.2 = 40 exactly.
+    expect(strips.filter(s => s.mirror === 'x').every(s => s.sw === 40)).toBe(true)
+    // Vertical strips: 100 * 0.2 = 20 exactly.
+    expect(strips.filter(s => s.mirror === 'y').every(s => s.sh === 20)).toBe(true)
+  })
+
+  it('reads the horizontal strips from the opposite edge', () => {
+    const w = 200, h = 100
+    const strips = seamlessStrips(w, h, 0.2)
+    const bx = 40
+    const leftBorder = strips.find(s => s.mirror === 'x' && s.dx === 0)!
+    expect(leftBorder.sx).toBe(w - bx) // reads the RIGHT edge for the LEFT border
+    const rightBorder = strips.find(s => s.mirror === 'x' && s.dx === w - bx)!
+    expect(rightBorder.sx).toBe(0) // reads the LEFT edge for the RIGHT border
+  })
+
+  it('yields no strips for a zero or negative dial', () => {
+    expect(seamlessStrips(64, 64, 0)).toEqual([])
+    expect(seamlessStrips(64, 64, -1)).toEqual([])
   })
 })

@@ -126,13 +126,56 @@ export function seamlessWidth(mat: SceneMaterial): number {
   return Math.min(w, 0.45)
 }
 
+/** One border strip a seamless blend composites: `sx/sy/sw/sh` is the source rectangle to
+ *  read (from the OPPOSITE edge — the pixels this border will actually sit next to once
+ *  the picture tiles), `dx/dy` is where it lands (always inside the canvas — see the
+ *  overlap contract below), and `mirror` is the axis it is flipped on before compositing
+ *  so the two copies agree at the seam instead of merely being adjacent. */
+export interface SeamlessStrip {
+  sx: number; sy: number; sw: number; sh: number
+  dx: number; dy: number
+  mirror: 'x' | 'y'
+}
+
+/**
+ * The four border strips a seamless blend needs, as pure geometry — no DOM, so this is
+ * unit-testable in node even though `seamlessCanvas` below is not.
+ *
+ * Each border is paired with the strip it will ACTUALLY touch once the picture tiles:
+ * canvas `x=0` sits next to `x=w-1`, so the LEFT border blends against a MIRRORED copy of
+ * the RIGHT edge (and the right border against the left; same reasoning on Y). Mirroring
+ * — rather than a plain offset copy — is what makes the two sides agree at the join: each
+ * strip's OWN border pixel (the one that will genuinely neighbour this border) lands at
+ * the outer edge, and the blend fades from there toward the middle.
+ *
+ * CONTRACT (asserted by the caller's test): every destination rectangle overlaps the
+ * canvas, i.e. `dx < w && dx + sw > 0` (and the Y equivalent). This is the exact property
+ * the previous, broken implementation violated — it shifted each strip by a full
+ * width/height, landing it entirely off-canvas with zero overlap and painting nothing.
+ */
+export function seamlessStrips(w: number, h: number, width: number): SeamlessStrip[] {
+  if (!(w > 0) || !(h > 0) || !(width > 0)) return []
+  const bx = Math.max(1, Math.min(w, Math.round(w * width)))
+  const by = Math.max(1, Math.min(h, Math.round(h * width)))
+  return [
+    // Left border, blended against the mirrored right edge.
+    { sx: w - bx, sy: 0, sw: bx, sh: h, dx: 0, dy: 0, mirror: 'x' },
+    // Right border, blended against the mirrored left edge.
+    { sx: 0, sy: 0, sw: bx, sh: h, dx: w - bx, dy: 0, mirror: 'x' },
+    // Top border, blended against the mirrored bottom edge.
+    { sx: 0, sy: h - by, sw: w, sh: by, dx: 0, dy: 0, mirror: 'y' },
+    // Bottom border, blended against the mirrored top edge.
+    { sx: 0, sy: 0, sw: w, sh: by, dx: 0, dy: h - by, mirror: 'y' },
+  ]
+}
+
 /**
  * Cross-fade a picture's opposite edges into each other so the file tiles without a seam.
  *
- * The classic offset-and-blend: draw the picture, then draw a copy shifted by a full width
- * (and again by a full height, and both) under a gradient alpha that runs from 0 in the
- * middle to 1 at the border. What lands at the left border is therefore a blend of the
- * left edge and the right edge, which is exactly what makes them meet.
+ * For each border strip from `seamlessStrips`, draw a MIRRORED copy of the opposite edge
+ * (so `x=0` is paired with what will actually sit at `x=w-1` once tiled) under a gradient
+ * alpha that runs from 0.5 at the outer edge to 0 toward the middle. At the join both
+ * sides converge on the same average, which is what makes the edges match.
  *
  * Returns null with no DOM (the node unit environment) rather than throwing, matching the
  * degradation the matcap and shader-field paths in materials.ts already use.
@@ -140,7 +183,9 @@ export function seamlessWidth(mat: SceneMaterial): number {
 export function seamlessCanvas(
   src: CanvasImageSource, w: number, h: number, width: number,
 ): HTMLCanvasElement | null {
-  if (!hasDOM || !src || !(w > 0) || !(h > 0) || !(width > 0)) return null
+  if (!hasDOM || !src) return null
+  const strips = seamlessStrips(w, h, width)
+  if (strips.length === 0) return null
   const c = document.createElement('canvas')
   c.width = w
   c.height = h
@@ -148,45 +193,42 @@ export function seamlessCanvas(
   if (!ctx) return null
   ctx.drawImage(src, 0, 0, w, h)
 
-  const bx = Math.max(1, Math.round(w * width))
-  const by = Math.max(1, Math.round(h * width))
-
-  // Horizontal: the copy shifted one full width left brings the RIGHT edge to the left
-  // border, faded in over `bx` pixels. The mirrored shift does the other border.
-  const band = (
-    dx: number, dy: number, grad: CanvasGradient,
-  ) => {
-    ctx.save()
-    ctx.globalCompositeOperation = 'source-over'
+  for (const s of strips) {
     const mask = document.createElement('canvas')
-    mask.width = w
-    mask.height = h
+    mask.width = s.sw
+    mask.height = s.sh
     const mc = mask.getContext('2d')
-    if (!mc) { ctx.restore(); return }
-    mc.drawImage(src, dx, dy, w, h)
+    if (!mc) continue
+
+    // Mirror the opposite-edge strip so ITS border pixel — the one that will actually
+    // neighbour this border once tiled — lands at the outer edge of the mask.
+    if (s.mirror === 'x') {
+      mc.translate(s.sw, 0)
+      mc.scale(-1, 1)
+    } else {
+      mc.translate(0, s.sh)
+      mc.scale(1, -1)
+    }
+    mc.drawImage(src, s.sx, s.sy, s.sw, s.sh, 0, 0, s.sw, s.sh)
+    mc.setTransform(1, 0, 0, 1, 0, 0)
+
+    // Fade from 0.5 at the outer edge (`dx`/`dy` === 0 means this strip sits at the near
+    // edge, so the outer edge is local 0; otherwise it sits at the far edge, local sw/sh)
+    // down to 0 toward the middle.
     mc.globalCompositeOperation = 'destination-in'
+    const grad = s.mirror === 'x'
+      ? (s.dx === 0
+          ? mc.createLinearGradient(0, 0, s.sw, 0)
+          : mc.createLinearGradient(s.sw, 0, 0, 0))
+      : (s.dy === 0
+          ? mc.createLinearGradient(0, 0, 0, s.sh)
+          : mc.createLinearGradient(0, s.sh, 0, 0))
+    grad.addColorStop(0, 'rgba(0,0,0,0.5)')
+    grad.addColorStop(1, 'rgba(0,0,0,0)')
     mc.fillStyle = grad
-    mc.fillRect(0, 0, w, h)
-    ctx.drawImage(mask, 0, 0)
-    ctx.restore()
+    mc.fillRect(0, 0, s.sw, s.sh)
+
+    ctx.drawImage(mask, s.dx, s.dy)
   }
-
-  const left = ctx.createLinearGradient(0, 0, bx, 0)
-  left.addColorStop(0, 'rgba(0,0,0,1)')
-  left.addColorStop(1, 'rgba(0,0,0,0)')
-  const right = ctx.createLinearGradient(w, 0, w - bx, 0)
-  right.addColorStop(0, 'rgba(0,0,0,1)')
-  right.addColorStop(1, 'rgba(0,0,0,0)')
-  const top = ctx.createLinearGradient(0, 0, 0, by)
-  top.addColorStop(0, 'rgba(0,0,0,1)')
-  top.addColorStop(1, 'rgba(0,0,0,0)')
-  const bottom = ctx.createLinearGradient(0, h, 0, h - by)
-  bottom.addColorStop(0, 'rgba(0,0,0,1)')
-  bottom.addColorStop(1, 'rgba(0,0,0,0)')
-
-  band(-w, 0, left)
-  band(w, 0, right)
-  band(0, -h, top)
-  band(0, h, bottom)
   return c
 }
