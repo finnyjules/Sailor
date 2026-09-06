@@ -1329,6 +1329,27 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
       m = hmat
       break
     }
+    // The uploaded-picture material. Its options live in four places, deliberately:
+    //   • Texture properties (wrap, tiling, fit, offset, rotation, flip) — imageMap.ts,
+    //     applied to the Texture THIS material owns (ownedImageTexture below). Free at
+    //     draw time.
+    //   • Material properties (tint, transparency, cutout, opacity, glow, flat) — here
+    //     and in updateMaterial's `case 'image':`, via applyImageTransparency/
+    //     applyImageGlow.
+    //   • Uniforms (brightness, contrast, saturation, projection) — imageShader.ts's
+    //     IMAGE_FRAGMENT_PARS (renamed from IMAGE_ADJUST_GLSL once it grew the whole
+    //     projection library), injected unconditionally with identity defaults so no
+    //     dial recompiles.
+    //   • Pixels (seamless) — imageMap.ts's seamlessCanvas, run once on decode.
+    // Four things rebuild the material (see identityKey below): the file, `unlit`
+    // (Basic vs Standard class), 'box' projection (its own three-sample triplanar
+    // program), and `seamless` (different pixels, not a uniform). Everything else
+    // updates in place, which is what keeps a slider drag from stalling.
+    // The glow (emissive) splice samples through the SAME projected coordinate as the
+    // diffuse map — imageShader.ts's shared `sailorImageUv` helper and, under box
+    // projection, the shared `sailorTriplanarSample` blend — so a box-projected glow
+    // never drifts off the picture it is supposed to be lighting — getting that wrong
+    // was a real bug worth remembering.
     case 'image': {
       // `unlit` picks the CLASS, exactly as it does for shaderFill: Basic shows the
       // picture's own pixels flat (a photo, a logo, a screenshot), Standard lets the

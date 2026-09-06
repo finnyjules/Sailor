@@ -63,7 +63,7 @@ Every field the rest of the plan reads, declared once, defaulted once, and made 
 - Consumes: nothing.
 - Produces: the optional `SceneMaterial` fields `imageWrap`, `imageTiling`, `imageTilingY`, `imageTilingLinked`, `imageOffsetX`, `imageOffsetY`, `imageRotation`, `imageFlipX`, `imageFlipY`, `imageFit`, `imageTint`, `imageAlpha`, `imageCutout`, `imageGlow`, `imageBrightness`, `imageContrast`, `imageSaturation`, `imageProjection`, `imageProjectionAxis`, `imageBoxBlend`, `imageSeamless`; the exported types `ImageWrap`, `ImageFit`, `ImageProjection`, `ImageAxis`; the exported constant arrays `IMAGE_WRAPS`, `IMAGE_FITS`, `IMAGE_PROJECTIONS`, `IMAGE_AXES`; the exported range `IMAGE_TILING_RANGE`; and the matching `MATERIAL_DEFAULTS` keys (same names, no `image` prefix change).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `frontend/tests/unit/scene3d-config.unit.spec.ts`:
 
@@ -146,12 +146,12 @@ describe('image material options', () => {
 
 If `parseDoc` and `createPrimitive` are not already imported at the top of that spec, add them to the existing `from '~/lib/scene3d/config'` import. Check the file's existing imports first — most of them are already there.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-config.unit.spec.ts`
 Expected: FAIL — `IMAGE_WRAPS` is not exported, and `MATERIAL_DEFAULTS.imageWrap` is `undefined`.
 
-- [ ] **Step 3: Add the option lists and the range**
+- [x] **Step 3: Add the option lists and the range**
 
 In `frontend/app/lib/scene3d/config.ts`, immediately after the existing `export const TEXTURE_TILING_RANGE = ...` line:
 
@@ -184,7 +184,7 @@ export const IMAGE_AXES: ImageAxis[] = ['x', 'y', 'z']
 export const IMAGE_TILING_RANGE = { min: 0.25, max: 12, step: 0.25 } as const
 ```
 
-- [ ] **Step 4: Add the fields to `SceneMaterial`**
+- [x] **Step 4: Add the fields to `SceneMaterial`**
 
 In `frontend/app/lib/scene3d/config.ts`, directly below the existing `image?: string` field on `SceneMaterial`:
 
@@ -248,7 +248,7 @@ In `frontend/app/lib/scene3d/config.ts`, directly below the existing `image?: st
 
 Note the `unlit` field already exists on `SceneMaterial` (declared for `shaderFill`) — this plan REUSES it for the image material's Flat toggle rather than adding a second boolean. Do not add a new field for it.
 
-- [ ] **Step 5: Add the defaults**
+- [x] **Step 5: Add the defaults**
 
 In `MATERIAL_DEFAULTS`, immediately after the existing `textureTiling: 1,` line:
 
@@ -275,7 +275,7 @@ In `MATERIAL_DEFAULTS`, immediately after the existing `textureTiling: 1,` line:
   imageSeamless: 0,
 ```
 
-- [ ] **Step 6: Add the parse lines**
+- [x] **Step 6: Add the parse lines**
 
 In `parseMaterial`, directly below the existing `if (typeof m?.image === 'string') out.image = m.image` line:
 
@@ -308,17 +308,17 @@ In `parseMaterial`, directly below the existing `if (typeof m?.image === 'string
     if (typeof m?.imageSeamless === 'number') out.imageSeamless = num(m.imageSeamless, MATERIAL_DEFAULTS.imageSeamless)
 ```
 
-- [ ] **Step 7: Run the test to verify it passes**
+- [x] **Step 7: Run the test to verify it passes**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-config.unit.spec.ts`
 Expected: PASS.
 
-- [ ] **Step 8: Typecheck**
+- [x] **Step 8: Typecheck**
 
 Run: `cd frontend && npx nuxt typecheck`
 Expected: no new errors. Compare against the baseline you captured before starting — this repo has pre-existing errors unrelated to this work, so what matters is that the count does not grow.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/config.ts frontend/tests/unit/scene3d-config.unit.spec.ts
@@ -343,7 +343,7 @@ A pure module that turns a `SceneMaterial` into the four numbers three needs on 
   - `applyImageTransform(tex: THREE.Texture, mat: SceneMaterial, natural?: NaturalSize | null): void`
   - `interface NaturalSize { w: number; h: number }`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `frontend/tests/unit/scene3d-image-map.unit.spec.ts`:
 
@@ -464,12 +464,12 @@ describe('applyImageTransform', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-image-map.unit.spec.ts`
 Expected: FAIL — cannot resolve `~/lib/scene3d/imageMap`.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 Create `frontend/app/lib/scene3d/imageMap.ts`:
 
@@ -583,12 +583,12 @@ export function applyImageTransform(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-image-map.unit.spec.ts`
 Expected: PASS, all fourteen assertions.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/imageMap.ts frontend/tests/unit/scene3d-image-map.unit.spec.ts
@@ -611,7 +611,7 @@ The first visible change. It also fixes a live bug: the image material's `.map` 
 - Consumes: `applyImageTransform`, `NaturalSize` from Task 2; the fields and defaults from Task 1.
 - Produces: `m.userData.imageSpec` (the live `SceneMaterial`, re-stamped by `updateMaterial`, read by the loader's async `onLoad`); `m.userData.imageNatural` (`NaturalSize | undefined`, filled once the file decodes); the `when` predicate `isImageMaterial` in `controls.ts`; the control keys `object.material.imageWrap`, `object.material.imageTiling`, `object.material.imageTilingLinked`, `object.material.imageTilingY`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `frontend/tests/unit/scene3d-materials.unit.spec.ts`:
 
@@ -650,12 +650,12 @@ describe('image material texture ownership', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-materials.unit.spec.ts`
 Expected: FAIL — `m.userData.imageSpec` is `undefined`.
 
-- [ ] **Step 3: Give the image material its own texture**
+- [x] **Step 3: Give the image material its own texture**
 
 In `frontend/app/lib/scene3d/materials.ts`, add the import at the top with the other `./` imports:
 
@@ -786,12 +786,12 @@ In `disposeMaterial`, delete the line that removed the material from the set:
 
 Delete the `I4 fix` comment block above that line, which described the eviction being removed, and leave `userData.imageFilename` in place — Task 14 reads it.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-materials.unit.spec.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Declare the two controls**
+- [x] **Step 5: Declare the two controls**
 
 In `frontend/app/lib/scene3d/controls.ts`, add the predicate next to the other per-type ones (after `isShaderFillMaterial`):
 
@@ -826,7 +826,7 @@ Add `IMAGE_WRAPS`, `IMAGE_TILING_RANGE` to the existing `from './config'` import
     }),
 ```
 
-- [ ] **Step 6: Place the rows**
+- [x] **Step 6: Place the rows**
 
 In `frontend/app/lib/scene3d/panelPresentation.ts`, replace the `image` entry of `MATERIAL_BODY`:
 
@@ -839,7 +839,7 @@ In `frontend/app/lib/scene3d/panelPresentation.ts`, replace the `image` entry of
   ],
 ```
 
-- [ ] **Step 7: Update the panel characterization expectations**
+- [x] **Step 7: Update the panel characterization expectations**
 
 `tests/unit/scene3d-panel-parity.unit.spec.ts` pins the exact row list per material type. Replace the `image` entry (around line 342):
 
@@ -856,12 +856,12 @@ In `frontend/app/lib/scene3d/panelPresentation.ts`, replace the `image` entry of
   },
 ```
 
-- [ ] **Step 8: Run the full scene3d unit suite**
+- [x] **Step 8: Run the full scene3d unit suite**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-`
 Expected: PASS. The controls spec asserts unique keys, that every group is in `SCENE_SECTIONS`, and that every select default is one of its own options — all three hold for the new entries.
 
-- [ ] **Step 9: Verify it live**
+- [x] **Step 9: Verify it live**
 
 Start the frontend (`cd frontend && npm run dev`) and ComfyUI (`cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python main.py --listen 127.0.0.1 --port 8188`). Open a 3D Studio node, add a box, set its material type to Image, upload any picture. Confirm:
 - Tiling at 1 with Edges on Clamp looks exactly as it did before this change.
@@ -872,7 +872,7 @@ Start the frontend (`cd frontend && npm run dev`) and ComfyUI (`cd /Users/julien
 
 Take a screenshot of the two boxes at different tilings for the commit message trailer or the task report.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/materials.ts frontend/app/lib/scene3d/controls.ts \
@@ -896,7 +896,7 @@ Pure additions to the already-tested transform layer, plus five control declarat
 - Consumes: `applyImageTransform` (already handles offset/rotation/flip — Task 2 wrote and tested them); `isImageMaterial` from Task 3.
 - Produces: the control keys `object.material.imageOffsetX`, `object.material.imageOffsetY`, `object.material.imageRotation`, `object.material.imageFlipX`, `object.material.imageFlipY`; the panel card `Material/Image placement`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `frontend/tests/unit/scene3d-panel-parity.unit.spec.ts`:
 
@@ -918,12 +918,12 @@ describe('image placement sub-card', () => {
 
 Match the helper names the spec already uses — it has a `rendered(doc, obj, sections)` helper and an `M` constant for the `object.material.` prefix. If `rendered`'s third argument is named differently in the file, use the file's own convention rather than this one.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-panel-parity.unit.spec.ts`
 Expected: FAIL — no card titled "Image placement".
 
-- [ ] **Step 3: Declare the controls**
+- [x] **Step 3: Declare the controls**
 
 In `frontend/app/lib/scene3d/controls.ts`, below the `imageTilingY` slider from Task 3:
 
@@ -946,7 +946,7 @@ In `frontend/app/lib/scene3d/controls.ts`, below the `imageTilingY` slider from 
   } as SceneControl,
 ```
 
-- [ ] **Step 4: Add the sub-card**
+- [x] **Step 4: Add the sub-card**
 
 In `frontend/app/lib/scene3d/panelPresentation.ts`, add to `SCENE_PANEL_ORDER` directly after `'Material'`:
 
@@ -971,12 +971,12 @@ Add to the record `scenePanelChrome` returns, next to the other collapsed sub-bl
 
 `panelCardOf` routes a key to its sub-card before falling through to `group === 'Material'`, so no other change is needed — and because the five keys are in `SUB_CARDS`, they must NOT also be listed in `MATERIAL_BODY.image`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/controls.ts frontend/app/lib/scene3d/panelPresentation.ts \
@@ -999,7 +999,7 @@ The last of the placement work, and the only piece that depends on data that arr
 - Consumes: `imageFitTransform` (Task 2), `m.userData.imageNatural` (Task 3).
 - Produces: the control key `object.material.imageFit`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `frontend/tests/unit/scene3d-materials.unit.spec.ts`:
 
@@ -1026,12 +1026,12 @@ describe('image fit', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-materials.unit.spec.ts`
 Expected: FAIL on the second assertion of the first test — with no `imageFit` control wired the material builds, but `repeat.x` stays 1 after `imageNatural` is set, because Task 2's `imageFitTransform` is only reached through `applyImageTransform`, which Task 3 wired. If this test passes immediately, that is the correct outcome: Tasks 2 and 3 already carry the behaviour, and this task is control declaration only. Record which it was and continue.
 
-- [ ] **Step 3: Declare the control**
+- [x] **Step 3: Declare the control**
 
 In `frontend/app/lib/scene3d/controls.ts`, add `IMAGE_FITS` to the `./config` import and place the control immediately BEFORE `object.material.imageWrap` (fit decides the crop; edges decide what happens outside it, so fit reads first):
 
@@ -1041,7 +1041,7 @@ In `frontend/app/lib/scene3d/controls.ts`, add `IMAGE_FITS` to the `./config` im
     { when: isImageMaterial, optionLabels: ['Stretch', 'Cover', 'Contain'] }),
 ```
 
-- [ ] **Step 4: Place the row**
+- [x] **Step 4: Place the row**
 
 In `frontend/app/lib/scene3d/panelPresentation.ts`, update `MATERIAL_BODY.image`:
 
@@ -1069,12 +1069,12 @@ In `frontend/app/lib/scene3d/panelPresentation.ts`, update `MATERIAL_BODY.image`
   },
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/controls.ts frontend/app/lib/scene3d/panelPresentation.ts \
@@ -1098,7 +1098,7 @@ The image material hard-codes a white base and hides the colour row, so there is
 - Consumes: `MATERIAL_DEFAULTS.imageTint` (Task 1), `isImageMaterial` (Task 3), `stripAlpha` (already in `materials.ts` — the studio's colour picker emits 8-digit hex, which `THREE.Color.set` cannot parse).
 - Produces: the control key `object.material.imageTint`; the panel card `Material/Image look`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `frontend/tests/unit/scene3d-materials.unit.spec.ts`:
 
@@ -1127,12 +1127,12 @@ describe('image tint', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-materials.unit.spec.ts`
 Expected: FAIL on the second test — the colour stays `#ffffff`.
 
-- [ ] **Step 3: Read the tint at build time**
+- [x] **Step 3: Read the tint at build time**
 
 In `materialFor`'s `case 'image':`, replace the colour argument:
 
@@ -1147,7 +1147,7 @@ In `materialFor`'s `case 'image':`, replace the colour argument:
       })
 ```
 
-- [ ] **Step 4: Update it in place**
+- [x] **Step 4: Update it in place**
 
 In `updateMaterial`'s `case 'image':`, add the colour write above the roughness line:
 
@@ -1162,7 +1162,7 @@ In `updateMaterial`'s `case 'image':`, add the colour write above the roughness 
     }
 ```
 
-- [ ] **Step 5: Declare the control and its card**
+- [x] **Step 5: Declare the control and its card**
 
 In `frontend/app/lib/scene3d/controls.ts`, after the flip switches:
 
@@ -1188,7 +1188,7 @@ Add to `scenePanelChrome`'s record:
     'Image look': { open: false },
 ```
 
-- [ ] **Step 6: Extend the panel characterization**
+- [x] **Step 6: Extend the panel characterization**
 
 Add to `tests/unit/scene3d-panel-parity.unit.spec.ts`, next to the placement test from Task 4:
 
@@ -1202,12 +1202,12 @@ Add to `tests/unit/scene3d-panel-parity.unit.spec.ts`, next to the placement tes
   })
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/materials.ts frontend/app/lib/scene3d/controls.ts \
@@ -1232,7 +1232,7 @@ A photograph, a logo, a UI screenshot on a plane very often wants to be shown as
 - Consumes: the existing `SceneMaterial.unlit` field and the existing `object.material.unlit` control.
 - Produces: `baseIdentityKey` for `image` now reads `image:<file>:<unlit>`; a new `when` predicate `hasUnlitToggle` in `controls.ts`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `frontend/tests/unit/scene3d-materials.unit.spec.ts`:
 
@@ -1265,12 +1265,12 @@ describe('unlit image', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-materials.unit.spec.ts`
 Expected: FAIL — a `MeshStandardMaterial` is built regardless of `unlit`.
 
-- [ ] **Step 3: Build the right class**
+- [x] **Step 3: Build the right class**
 
 Replace the body of `case 'image':` in `materialFor`:
 
@@ -1297,7 +1297,7 @@ Replace the body of `case 'image':` in `materialFor`:
     }
 ```
 
-- [ ] **Step 4: Put the boundary in the identity key**
+- [x] **Step 4: Put the boundary in the identity key**
 
 In `baseIdentityKey`:
 
@@ -1307,7 +1307,7 @@ In `baseIdentityKey`:
     case 'image': return `image:${mat.image ?? ''}:${mat.unlit === true ? 1 : 0}`
 ```
 
-- [ ] **Step 5: Guard the in-place update**
+- [x] **Step 5: Guard the in-place update**
 
 In `updateMaterial`'s `case 'image':`:
 
@@ -1325,7 +1325,7 @@ In `updateMaterial`'s `case 'image':`:
     }
 ```
 
-- [ ] **Step 6: Offer the toggle**
+- [x] **Step 6: Offer the toggle**
 
 In `frontend/app/lib/scene3d/controls.ts`, add the predicate below `isImageMaterial`:
 
@@ -1353,7 +1353,7 @@ const hasPbrSurface = (doc: SceneDoc, obj?: SceneObject): boolean => {
 }
 ```
 
-- [ ] **Step 7: Place the row**
+- [x] **Step 7: Place the row**
 
 In `MATERIAL_BODY.image`, add `'object.material.unlit'` directly after `'ui.material.image'`, and update the parity expectation to match:
 
@@ -1380,12 +1380,12 @@ The parity spec's `image` expectation gains `${M}unlit` in the same position. No
   })
 ```
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [x] **Step 8: Run the tests to verify they pass**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-`
 Expected: PASS. Pay attention to `scene3d-controls-switches.unit.spec.ts` and `scene3d-agent-controls.unit.spec.ts` — widening `unlit`'s `when` changes which material types report it as available.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/materials.ts frontend/app/lib/scene3d/controls.ts \
@@ -1409,7 +1409,7 @@ A PNG with an alpha channel currently renders solid: the image material never se
 - Consumes: `MATERIAL_DEFAULTS.imageAlpha`, `.imageCutout`, `.opacity` (Task 1 and the existing field).
 - Produces: a shared helper `applyImageTransparency(m: THREE.Material, mat: SceneMaterial): void` in `materials.ts`, called from both the build and the update path; the control keys `object.material.imageAlpha`, `object.material.imageCutout`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `frontend/tests/unit/scene3d-materials.unit.spec.ts`:
 
@@ -1456,12 +1456,12 @@ describe('image transparency', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-materials.unit.spec.ts`
 Expected: FAIL — `transparent` stays false with `imageAlpha: true`.
 
-- [ ] **Step 3: Write the shared helper**
+- [x] **Step 3: Write the shared helper**
 
 In `frontend/app/lib/scene3d/materials.ts`, directly above `ownedImageTexture`:
 
@@ -1498,7 +1498,7 @@ function applyImageTransparency(m: THREE.Material, mat: SceneMaterial): void {
 }
 ```
 
-- [ ] **Step 4: Call it from both paths**
+- [x] **Step 4: Call it from both paths**
 
 At the end of `case 'image':` in `materialFor`, before `m = t`:
 
@@ -1512,7 +1512,7 @@ And in `updateMaterial`'s `case 'image':`, after the `imageSpec` stamp:
       applyImageTransparency(m, mat)
 ```
 
-- [ ] **Step 5: Declare the controls**
+- [x] **Step 5: Declare the controls**
 
 In `frontend/app/lib/scene3d/controls.ts`, after the tint:
 
@@ -1542,7 +1542,7 @@ const hasOpacity = (doc: SceneDoc, obj?: SceneObject): boolean =>
 
 …and change the opacity control's `when: isPhysicalMaterial` to `when: hasOpacity`.
 
-- [ ] **Step 6: Place the rows**
+- [x] **Step 6: Place the rows**
 
 In `frontend/app/lib/scene3d/panelPresentation.ts`, prepend the two new keys to the existing `'Material/Transparency'` sub-card so they lead the block for an image material:
 
@@ -1557,12 +1557,12 @@ In `frontend/app/lib/scene3d/panelPresentation.ts`, prepend the two new keys to 
 
 The card is already in `SCENE_PANEL_ORDER` and already has chrome; the `when` gates decide which of its rows an image material actually shows (`imageAlpha`, `imageCutout`, `opacity`).
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-`
 Expected: PASS. Update the transparency-card expectation in `scene3d-panel-parity.unit.spec.ts` if it pins the card's exact contents for standard/glass — the two new keys are gated to `image`, so a standard material's rendered list is unchanged, but a spec that asserts the raw `SUB_CARDS` array will need the two extra entries.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/materials.ts frontend/app/lib/scene3d/controls.ts \
@@ -1586,7 +1586,7 @@ Bind the picture as an emissive map so it lights itself — signage, screens, ne
 - Consumes: `MATERIAL_DEFAULTS.imageGlow`, the owned texture from Task 3.
 - Produces: a helper `applyImageGlow(m: THREE.Material, mat: SceneMaterial): void` in `materials.ts`; the control key `object.material.imageGlow`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `frontend/tests/unit/scene3d-materials.unit.spec.ts`:
 
@@ -1624,12 +1624,12 @@ describe('image glow', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-materials.unit.spec.ts`
 Expected: FAIL — `emissiveMap` is never bound.
 
-- [ ] **Step 3: Write the helper**
+- [x] **Step 3: Write the helper**
 
 In `frontend/app/lib/scene3d/materials.ts`, below `applyImageTransparency`:
 
@@ -1661,7 +1661,7 @@ function applyImageGlow(m: THREE.Material, mat: SceneMaterial): void {
 }
 ```
 
-- [ ] **Step 4: Call it from both paths**
+- [x] **Step 4: Call it from both paths**
 
 In `materialFor`'s `case 'image':`, after `applyImageTransparency(t, mat)`:
 
@@ -1677,7 +1677,7 @@ In `updateMaterial`'s `case 'image':`, after `applyImageTransparency(m, mat)`:
 
 Note the ordering matters in the build path: `applyImageGlow` reads `.map`, so it must run after the texture is bound.
 
-- [ ] **Step 5: Declare the control**
+- [x] **Step 5: Declare the control**
 
 In `frontend/app/lib/scene3d/controls.ts`, after the tint:
 
@@ -1689,7 +1689,7 @@ In `frontend/app/lib/scene3d/controls.ts`, after the tint:
     }),
 ```
 
-- [ ] **Step 6: Place the row**
+- [x] **Step 6: Place the row**
 
 In `SUB_CARDS`, extend the look card:
 
@@ -1699,12 +1699,12 @@ In `SUB_CARDS`, extend the look card:
 
 …and extend the Task 6 parity expectation to `[`${M}imageTint`, `${M}imageGlow`]`.
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/materials.ts frontend/app/lib/scene3d/controls.ts \
@@ -1735,7 +1735,7 @@ The first shader work. Three uniforms and a five-line function injected after th
   - `IMAGE_ADJUST_CALL: string` — the one line spliced in after `<map_fragment>`.
   - `m.userData.imageUniforms` on the built material, mutated in place by `updateMaterial`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `frontend/tests/unit/scene3d-image-shader.unit.spec.ts`:
 
@@ -1784,12 +1784,12 @@ describe('image adjustment GLSL', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-image-shader.unit.spec.ts`
 Expected: FAIL — cannot resolve `~/lib/scene3d/imageShader`.
 
-- [ ] **Step 3: Write the shader module**
+- [x] **Step 3: Write the shader module**
 
 Create `frontend/app/lib/scene3d/imageShader.ts`:
 
@@ -1857,7 +1857,7 @@ export const IMAGE_ADJUST_CALL = `#include <map_fragment>
   diffuseColor.rgb = sailorImageAdjust( diffuseColor.rgb );`
 ```
 
-- [ ] **Step 4: Inject it**
+- [x] **Step 4: Inject it**
 
 In `frontend/app/lib/scene3d/materials.ts`, add the import:
 
@@ -1890,7 +1890,7 @@ In `updateMaterial`'s `case 'image':`, after the `imageSpec` stamp:
       if (iu) writeImageUniforms(iu, mat)
 ```
 
-- [ ] **Step 5: Add a materials-level test**
+- [x] **Step 5: Add a materials-level test**
 
 Add to `frontend/tests/unit/scene3d-materials.unit.spec.ts`:
 
@@ -1916,7 +1916,7 @@ describe('image adjustments', () => {
 })
 ```
 
-- [ ] **Step 6: Declare the controls**
+- [x] **Step 6: Declare the controls**
 
 In `frontend/app/lib/scene3d/controls.ts`, after the glow slider:
 
@@ -1929,7 +1929,7 @@ In `frontend/app/lib/scene3d/controls.ts`, after the glow slider:
     'Drains the picture toward grey, or pushes its colours further', { when: isImageMaterial }),
 ```
 
-- [ ] **Step 7: Place the rows**
+- [x] **Step 7: Place the rows**
 
 In `SUB_CARDS`:
 
@@ -1943,12 +1943,12 @@ In `SUB_CARDS`:
 
 Update the Task 6/9 parity expectation to that exact five-key array.
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [x] **Step 8: Run the tests to verify they pass**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-`
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/imageShader.ts frontend/app/lib/scene3d/materials.ts \
@@ -1979,7 +1979,7 @@ Projection is computed in the FRAGMENT shader, not the vertex shader, because th
   - `IMAGE_PROJECT_VERTEX_GLSL`, `IMAGE_PROJECT_VERTEX_CALL`, `imageMapFragment(box: boolean): string` replace `IMAGE_ADJUST_CALL`.
   - `syncImageMapMatrix(u: ImageUniforms, tex: THREE.Texture | null): void`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `frontend/tests/unit/scene3d-image-shader.unit.spec.ts`:
 
@@ -2023,12 +2023,12 @@ describe('image projection GLSL', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-image-shader.unit.spec.ts`
 Expected: FAIL — `imageMapFragment` is not exported.
 
-- [ ] **Step 3: Extend the shader module**
+- [x] **Step 3: Extend the shader module**
 
 Rewrite the exports of `frontend/app/lib/scene3d/imageShader.ts` as follows. The `ImageUniforms` interface, `imageUniforms`, `writeImageUniforms` and `IMAGE_ADJUST_GLSL` are edited; `IMAGE_ADJUST_CALL` is DELETED and replaced by `imageMapFragment`.
 
@@ -2208,7 +2208,7 @@ export function imageMapFragment(box: boolean): string {
 }
 ```
 
-- [ ] **Step 4: Wire the injection**
+- [x] **Step 4: Wire the injection**
 
 In `frontend/app/lib/scene3d/materials.ts`, update the import and replace the `onBeforeCompile` block written in Task 10:
 
@@ -2256,7 +2256,7 @@ Call `syncImageMapMatrix` in the build path too, immediately after `applyImageTr
       if (u) syncImageMapMatrix(u, loaded)
 ```
 
-- [ ] **Step 5: Add the box boundary to the identity key**
+- [x] **Step 5: Add the box boundary to the identity key**
 
 In `baseIdentityKey`:
 
@@ -2270,7 +2270,7 @@ In `baseIdentityKey`:
     }
 ```
 
-- [ ] **Step 6: Add the materials-level test**
+- [x] **Step 6: Add the materials-level test**
 
 Add to `frontend/tests/unit/scene3d-materials.unit.spec.ts`:
 
@@ -2310,7 +2310,7 @@ describe('image projection', () => {
 })
 ```
 
-- [ ] **Step 7: Declare the controls**
+- [x] **Step 7: Declare the controls**
 
 In `frontend/app/lib/scene3d/controls.ts`, add `IMAGE_PROJECTIONS`, `IMAGE_AXES` to the `./config` import, and place these BEFORE the Fit select (projection decides which coordinate is used; fit and tiling then shape it):
 
@@ -2335,7 +2335,7 @@ In `frontend/app/lib/scene3d/controls.ts`, add `IMAGE_PROJECTIONS`, `IMAGE_AXES`
     }),
 ```
 
-- [ ] **Step 8: Place the rows**
+- [x] **Step 8: Place the rows**
 
 `MATERIAL_BODY.image` becomes:
 
@@ -2351,14 +2351,14 @@ In `frontend/app/lib/scene3d/controls.ts`, add `IMAGE_PROJECTIONS`, `IMAGE_AXES`
 
 Update the parity spec's `image` expectation to the same list, remembering that `imageProjectionAxis` and `imageBoxBlend` are `showIf`-gated and so do NOT appear in the default (Use the model) rendered list — assert the default state's list without them, and add a case that sets `imageProjection = 'planar'` and expects `${M}imageProjectionAxis` to appear.
 
-- [ ] **Step 9: Run the tests and verify live**
+- [x] **Step 9: Run the tests and verify live**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-`
 Expected: PASS.
 
 Then, in the running studio: add a Text primitive (whose extruded sidewall UVs are the worst case), give it an image material with a recognisable picture, and step through Wrapping. On "Use the model" the sidewalls smear; on "Flat" the picture reads cleanly on the face; on "Cylinder" it wraps around; on "Box" every face is covered with no smearing. Confirm Tiling and Rotation still work in each mode — that is what proves `uImgMapTx` is being synced.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/imageShader.ts frontend/app/lib/scene3d/materials.ts \
@@ -2384,7 +2384,7 @@ The pre-pass needs a real canvas, so the pixel work cannot run in the node test 
 - Consumes: `MATERIAL_DEFAULTS.imageSeamless`; `m.userData.imageNatural` (Task 3).
 - Produces: `seamlessWidth(mat: SceneMaterial): number` (0 = off) and `seamlessCanvas(src: CanvasImageSource, w: number, h: number, width: number): HTMLCanvasElement | null` in `imageMap.ts`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `frontend/tests/unit/scene3d-image-map.unit.spec.ts`:
 
@@ -2409,12 +2409,12 @@ describe('seamless pre-pass', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-image-map.unit.spec.ts`
 Expected: FAIL — `seamlessWidth` is not exported.
 
-- [ ] **Step 3: Write the pre-pass**
+- [x] **Step 3: Write the pre-pass**
 
 Append to `frontend/app/lib/scene3d/imageMap.ts`:
 
@@ -2497,7 +2497,7 @@ export function seamlessCanvas(
 
 Add `MATERIAL_DEFAULTS` to the module's existing `./config` import if it is not already there (it is — `imageTilingXY` uses it).
 
-- [ ] **Step 4: Call it once the file has decoded**
+- [x] **Step 4: Call it once the file has decoded**
 
 Add the import to `materials.ts` first — the module already imports `applyImageTransform` from this file:
 
@@ -2539,7 +2539,7 @@ A change to the Seamless dial after the file has loaded needs a re-run of the pr
     }
 ```
 
-- [ ] **Step 5: Declare the control**
+- [x] **Step 5: Declare the control**
 
 In `controls.ts`, after `imageWrap`:
 
@@ -2552,14 +2552,14 @@ In `controls.ts`, after `imageWrap`:
 
 Place it in `SUB_CARDS['Material/Image placement']` as the last entry, and extend the Task 4 parity expectation accordingly.
 
-- [ ] **Step 6: Run the tests and verify live**
+- [x] **Step 6: Run the tests and verify live**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-`
 Expected: PASS.
 
 Live: put a photograph on a box, set Edges to Tile and Tiling to 3 — the seams are obvious. Raise Seamless to about 0.15 and confirm they disappear without the picture being mirrored. Confirm that scrubbing Seamless reloads the picture (a brief flicker is expected and correct — it is a rebuild).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/imageMap.ts frontend/app/lib/scene3d/materials.ts \
@@ -2583,7 +2583,7 @@ The studio already generates a reference image for its image-to-3D flow (`/api/s
 - Consumes: `runFal`, `firstFalImageUrl` (auto-imported from `server/utils/falRun.ts`), `assertRateLimit` from `../../lib/rateLimit`, and the existing `/api/image-fetch` route, which downloads a URL into the ComfyUI input directory and returns `{ name }`.
 - Produces: `shapeTexturePrompt(prompt: string): string` in `server/utils/scene3dGen.ts`; the route `POST /api/scene3d/gen-texture` returning `{ imageUrl, seed }`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `frontend/tests/unit/scene3d-gen.unit.spec.ts`:
 
@@ -2610,12 +2610,12 @@ describe('shapeTexturePrompt', () => {
 
 Add `shapeImagePrompt` to the file's existing import from `~~/server/utils/scene3dGen` if it is not already there.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-gen.unit.spec.ts`
 Expected: FAIL — `shapeTexturePrompt` is not exported.
 
-- [ ] **Step 3: Write the prompt shaper**
+- [x] **Step 3: Write the prompt shaper**
 
 In `frontend/server/utils/scene3dGen.ts`, next to `shapeImagePrompt`:
 
@@ -2634,7 +2634,7 @@ export function shapeTexturePrompt(prompt: string): string {
 }
 ```
 
-- [ ] **Step 4: Write the route**
+- [x] **Step 4: Write the route**
 
 Create `frontend/server/api/scene3d/gen-texture.post.ts`:
 
@@ -2677,7 +2677,7 @@ export default defineEventHandler(async (event) => {
 
 `server/lib/nitroApiPaths.ts` already allowlists the `/api/scene3d` prefix, so no entry is needed — but open that file and confirm the prefix is matched by prefix and not by exact path before moving on.
 
-- [ ] **Step 5: Add the button**
+- [x] **Step 5: Add the button**
 
 In `frontend/app/components/vue-canvas/Scene3DStudioSurface.vue`, add the state next to the existing `texUploading` / `texUploadError` refs:
 
@@ -2737,16 +2737,16 @@ Extend the `#control-ui.material.image` slot, below the existing upload row:
 
 Add `Sparkles` to the existing `lucide-vue-next` import if it is not already there. Use `StudioButton` — never hand-roll a button on this surface.
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 Run: `cd frontend && npx vitest run tests/unit/scene3d-gen.unit.spec.ts && npx nuxt typecheck`
 Expected: PASS, and no new typecheck errors.
 
-- [ ] **Step 7: Verify live**
+- [x] **Step 7: Verify live**
 
 This step spends money — one fal FLUX generation. Confirm with the user before running it, then: select an object, set its material to Image, type "brushed copper" and press Generate a texture. Confirm a texture appears on the object, that the thumbnail shows it, and that reloading the document still shows it (which proves it landed in the input directory rather than being held as a CDN link).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add frontend/server/utils/scene3dGen.ts frontend/server/api/scene3d/gen-texture.post.ts \
@@ -2762,17 +2762,17 @@ git commit -m "feat(scene3d): generate a surface texture from a prompt"
 - Modify: `frontend/app/lib/scene3d/materials.ts` (doc comment only)
 - Modify: `docs/superpowers/plans/2026-09-05-scene3d-image-material-options.md` (tick every box)
 
-- [ ] **Step 1: Run the whole unit suite, not just the scene3d slice**
+- [x] **Step 1: Run the whole unit suite, not just the scene3d slice**
 
 Run: `cd frontend && npm run test:unit`
 Expected: PASS. Vitest counts can be unreliable under parallel load — if something fails, re-run that single file before believing it.
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 Run: `cd frontend && npx nuxt typecheck`
 Expected: no new errors against the baseline.
 
-- [ ] **Step 3: Write the map of the feature**
+- [x] **Step 3: Write the map of the feature**
 
 Add a doc comment above `case 'image':` in `materialFor` summarising where each option lives, so the next reader does not have to reconstruct it:
 
@@ -2794,7 +2794,7 @@ Add a doc comment above `case 'image':` in `materialFor` summarising where each 
 
 With both servers running, build one object that exercises every option: an image material on a torus knot, Wrapping set to Box, Tiling 3, Seamless 0.15, a warm Tint, Saturation down, Glow up, and Use image transparency on with a PNG that has a cut-out. Confirm no console errors, no shader-compile warnings, and that dragging each slider is smooth (a stall means something crossed a program boundary it should not have — check `identityKey`).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/app/lib/scene3d/materials.ts docs/superpowers/plans/2026-09-05-scene3d-image-material-options.md
