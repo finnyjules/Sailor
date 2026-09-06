@@ -17,7 +17,7 @@ import {
 } from './config'
 import { toHeightPixels } from './relief'
 import { isResolvedTexture, textureMapFilename, ensureTextureFetched, type TextureManifest } from './textures'
-import { applyImageTransform, imageWrapMode, type NaturalSize } from './imageMap'
+import { applyImageTransform, imageWrapMode, seamlessWidth, seamlessCanvas, type NaturalSize } from './imageMap'
 import {
   imageUniforms, writeImageUniforms, syncImageMapMatrix,
   IMAGE_FRAGMENT_PARS, IMAGE_PROJECT_VERTEX_GLSL, IMAGE_PROJECT_VERTEX_CALL,
@@ -1107,6 +1107,15 @@ function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture
       const src = loaded.image as { width?: number; height?: number } | undefined
       if (src?.width && src?.height) m.userData.imageNatural = { w: src.width, h: src.height }
       const spec = m.userData.imageSpec as SceneMaterial | undefined
+      // Seamless pre-pass: repaint the decoded picture into a canvas whose opposite edges
+      // have been cross-faded, then point the SAME Texture at it. Done here rather than at
+      // build time because it needs the decoded pixels, and only when the dial is non-zero
+      // so an untouched picture keeps its own bytes and its own memory footprint.
+      const width = spec ? seamlessWidth(spec) : 0
+      if (width > 0 && src?.width && src?.height) {
+        const blended = seamlessCanvas(loaded.image as CanvasImageSource, src.width, src.height, width)
+        if (blended) { loaded.image = blended; loaded.needsUpdate = true }
+      }
       if (spec) applyImageTransform(loaded, spec, m.userData.imageNatural as NaturalSize | undefined)
       // A projected picture (Fit's cover/contain feeding into uImgMapTx) settles once the
       // natural size lands — without this, a projection keeps the identity-transform matrix
@@ -1480,7 +1489,11 @@ function baseIdentityKey(mat: SceneMaterial): string {
     // property and updates in place.
     case 'image': {
       const box = (mat.imageProjection ?? MATERIAL_DEFAULTS.imageProjection) === 'box' ? 1 : 0
-      return `image:${mat.image ?? ''}:${mat.unlit === true ? 1 : 0}:${box}`
+      // Seamless changes the PIXELS, not a uniform, so it rebuilds — it is a discrete
+      // decision the user makes once, not a value they scrub, so the occasional reload is
+      // the right trade (the same reasoning relief.invert follows).
+      const seam = seamlessWidth(mat)
+      return `image:${mat.image ?? ''}:${mat.unlit === true ? 1 : 0}:${box}:${seam}`
     }
     // `unlit` picks the THREE material CLASS (Basic vs Standard) — that boundary needs a
     // rebuild; the effect/params/speed/input inside `shader` are refreshed in place every

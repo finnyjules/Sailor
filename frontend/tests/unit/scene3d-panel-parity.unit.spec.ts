@@ -135,6 +135,11 @@ const ROW: Record<string, Row> = {
   [`${M}imageRotation`]: { label: 'Rotation', kind: 'slider', min: -180, max: 180, step: 1, hint: 'Turns the picture about its own middle' },
   [`${M}imageFlipX`]: { label: 'Flip horizontally', kind: 'switch', hint: 'Mirrors the picture left to right' },
   [`${M}imageFlipY`]: { label: 'Flip vertically', kind: 'switch', hint: 'Mirrors the picture top to bottom' },
+  // image — seamless edge blend, a one-off canvas pre-pass (Task 12 of the image-options plan)
+  [`${M}imageSeamless`]: {
+    label: 'Seamless edges', kind: 'slider', min: 0, max: 0.45, step: 0.01,
+    hint: 'Blends the picture opposite edges into each other so it tiles with no visible join',
+  },
 
   // image — look / colour (Task 6 of the image-options plan)
   [`${M}imageTint`]: { label: 'Tint', kind: 'color' },
@@ -465,7 +470,7 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
     ],
     'Image placement': [
       `${M}imageOffsetX`, `${M}imageOffsetY`, `${M}imageRotation`,
-      `${M}imageFlipX`, `${M}imageFlipY`,
+      `${M}imageFlipX`, `${M}imageFlipY`, `${M}imageSeamless`,
     ],
     'Image look': [
       `${M}imageTint`, `${M}imageBrightness`, `${M}imageContrast`, `${M}imageSaturation`, `${M}imageGlow`,
@@ -774,7 +779,7 @@ describe('Scene3D panel parity — image placement sub-card', () => {
     const card = designCards(doc, o).find((c) => c.title === 'Image placement')
     expect(card?.keys).toEqual([
       `${M}imageOffsetX`, `${M}imageOffsetY`, `${M}imageRotation`,
-      `${M}imageFlipX`, `${M}imageFlipY`,
+      `${M}imageFlipX`, `${M}imageFlipY`, `${M}imageSeamless`,
     ])
     expect(scenePanelChrome('image')['Image placement']).toEqual({ open: false })
   })

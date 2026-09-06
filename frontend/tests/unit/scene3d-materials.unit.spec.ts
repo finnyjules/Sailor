@@ -819,3 +819,19 @@ describe('image projection', () => {
     expect(plain.customProgramCacheKey!()).not.toBe(box.customProgramCacheKey!())
   })
 })
+
+describe('image seamless edge blend', () => {
+  // Both directions of the rebuild boundary, per the same convention as the box-projection
+  // pair above: a Seamless change must force a rebuild (the pre-pass needs the decoded
+  // pixels re-run, and the simplest correct way to get that is identityKey → updateMaterial
+  // returns false), while an UNRELATED change must still update in place (true).
+  it('rebuilds when the Seamless dial changes — it repaints pixels, not a uniform', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' }))
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageSeamless: 0.15 }))).toBe(false)
+  })
+
+  it('does not rebuild for an unrelated change while Seamless stays put', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', imageSeamless: 0.15 }))
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageSeamless: 0.15, imageTiling: 3 }))).toBe(true)
+  })
+})

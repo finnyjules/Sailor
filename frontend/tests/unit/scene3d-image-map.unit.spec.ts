@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
-import { imageTilingXY, imageFitTransform, applyImageTransform } from '~/lib/scene3d/imageMap'
+import { imageTilingXY, imageFitTransform, applyImageTransform, seamlessWidth, seamlessCanvas } from '~/lib/scene3d/imageMap'
 import type { SceneMaterial } from '~/lib/scene3d/config'
 
 const img = (patch: Partial<SceneMaterial> = {}): SceneMaterial =>
@@ -110,5 +110,22 @@ describe('applyImageTransform', () => {
     expect(tex.rotation).toBeCloseTo(Math.PI / 2)
     expect(tex.center.x).toBe(0.5)
     expect(tex.center.y).toBe(0.5)
+  })
+})
+
+describe('seamless pre-pass', () => {
+  it('is off by default and off at zero', () => {
+    expect(seamlessWidth(img())).toBe(0)
+    expect(seamlessWidth(img({ imageSeamless: 0 }))).toBe(0)
+  })
+
+  it('clamps the blend to less than half the picture, where it would overlap itself', () => {
+    expect(seamlessWidth(img({ imageSeamless: 0.2 }))).toBeCloseTo(0.2)
+    expect(seamlessWidth(img({ imageSeamless: 5 }))).toBeCloseTo(0.45)
+    expect(seamlessWidth(img({ imageSeamless: -1 }))).toBe(0)
+  })
+
+  it('declines to build a canvas with no DOM rather than throwing', () => {
+    expect(seamlessCanvas(null as never, 64, 64, 0.2)).toBeNull()
   })
 })

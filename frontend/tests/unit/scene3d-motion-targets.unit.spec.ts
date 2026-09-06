@@ -189,8 +189,11 @@ describe('animatableTargets', () => {
     // `when` alone). imageBrightness/imageContrast/imageSaturation are Task 10's — plain
     // sliders with no showIf gate, always reachable. imageProjection/imageProjectionAxis
     // (Task 11) are selects, so they never reach animatableTargets either; imageBoxBlend is
-    // a slider (its showIf gate is likewise not a factor here) and does.
-    ['image', [...PBR, ...RELIEF, ...SCREEN, 'material.imageBoxBlend', 'material.imageBrightness', 'material.imageContrast', 'material.imageCutout', 'material.imageGlow', 'material.imageOffsetX', 'material.imageOffsetY', 'material.imageRotation', 'material.imageSaturation', 'material.imageTiling', 'material.imageTilingY', 'material.opacity']],
+    // a slider (its showIf gate is likewise not a factor here) and does. imageSeamless is
+    // Task 12's — a plain slider with no showIf gate, always reachable; it changes the
+    // pixels rather than a uniform (identityKey, not updateMaterial), but that only affects
+    // WHETHER a written value takes a rebuild, not whether it is a motion target at all.
+    ['image', [...PBR, ...RELIEF, ...SCREEN, 'material.imageBoxBlend', 'material.imageBrightness', 'material.imageContrast', 'material.imageCutout', 'material.imageGlow', 'material.imageOffsetX', 'material.imageOffsetY', 'material.imageRotation', 'material.imageSaturation', 'material.imageSeamless', 'material.imageTiling', 'material.imageTilingY', 'material.opacity']],
     ['shaderFill', [...PBR, ...RELIEF, ...SCREEN]],
     ['opalescent', [
       ...PBR, ...COAT, ...RELIEF, ...TEXTURE, ...SCREEN,

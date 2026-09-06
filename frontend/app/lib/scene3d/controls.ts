@@ -612,6 +612,10 @@ export const SCENE_CONTROLS: SceneControl[] = [
   select('object.material.imageWrap', 'Edges', [...IMAGE_WRAPS], MATERIAL_DEFAULTS.imageWrap, 'Material',
     'What happens outside the picture: hold the edge pixel, repeat it, or repeat it mirrored so the seam disappears',
     { when: isImageMaterial, optionLabels: ['Clamp', 'Tile', 'Mirror'] }),
+  slider('object.material.imageSeamless', 'Seamless edges', 0, 0.45, 0.01, 'Material', MATERIAL_DEFAULTS.imageSeamless,
+    'Blends the picture opposite edges into each other so it tiles with no visible join', {
+      when: isImageMaterial,
+    }),
   slider('object.material.imageTiling', 'Tiling', IMAGE_TILING_RANGE.min, IMAGE_TILING_RANGE.max, IMAGE_TILING_RANGE.step,
     'Material', MATERIAL_DEFAULTS.imageTiling,
     'How many times the picture repeats across the surface', { when: isImageMaterial }),

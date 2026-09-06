@@ -561,7 +561,7 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
 const SUB_CARDS: Record<string, readonly string[]> = {
   'Material/Image placement': [
     'object.material.imageOffsetX', 'object.material.imageOffsetY', 'object.material.imageRotation',
-    'object.material.imageFlipX', 'object.material.imageFlipY',
+    'object.material.imageFlipX', 'object.material.imageFlipY', 'object.material.imageSeamless',
   ],
   'Material/Image look': [
     'object.material.imageTint',

@@ -115,3 +115,78 @@ export function applyImageTransform(
   tex.center.set(0.5, 0.5)
   tex.rotation = (mat.imageRotation ?? MATERIAL_DEFAULTS.imageRotation) * Math.PI / 180
 }
+
+const hasDOM = typeof document !== 'undefined'
+
+/** The blend width as a fraction of the picture, clamped below half — at half the two
+ *  fades meet in the middle and the picture is replaced by its own average. */
+export function seamlessWidth(mat: SceneMaterial): number {
+  const w = mat.imageSeamless ?? MATERIAL_DEFAULTS.imageSeamless
+  if (!(w > 0)) return 0
+  return Math.min(w, 0.45)
+}
+
+/**
+ * Cross-fade a picture's opposite edges into each other so the file tiles without a seam.
+ *
+ * The classic offset-and-blend: draw the picture, then draw a copy shifted by a full width
+ * (and again by a full height, and both) under a gradient alpha that runs from 0 in the
+ * middle to 1 at the border. What lands at the left border is therefore a blend of the
+ * left edge and the right edge, which is exactly what makes them meet.
+ *
+ * Returns null with no DOM (the node unit environment) rather than throwing, matching the
+ * degradation the matcap and shader-field paths in materials.ts already use.
+ */
+export function seamlessCanvas(
+  src: CanvasImageSource, w: number, h: number, width: number,
+): HTMLCanvasElement | null {
+  if (!hasDOM || !src || !(w > 0) || !(h > 0) || !(width > 0)) return null
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d')
+  if (!ctx) return null
+  ctx.drawImage(src, 0, 0, w, h)
+
+  const bx = Math.max(1, Math.round(w * width))
+  const by = Math.max(1, Math.round(h * width))
+
+  // Horizontal: the copy shifted one full width left brings the RIGHT edge to the left
+  // border, faded in over `bx` pixels. The mirrored shift does the other border.
+  const band = (
+    dx: number, dy: number, grad: CanvasGradient,
+  ) => {
+    ctx.save()
+    ctx.globalCompositeOperation = 'source-over'
+    const mask = document.createElement('canvas')
+    mask.width = w
+    mask.height = h
+    const mc = mask.getContext('2d')
+    if (!mc) { ctx.restore(); return }
+    mc.drawImage(src, dx, dy, w, h)
+    mc.globalCompositeOperation = 'destination-in'
+    mc.fillStyle = grad
+    mc.fillRect(0, 0, w, h)
+    ctx.drawImage(mask, 0, 0)
+    ctx.restore()
+  }
+
+  const left = ctx.createLinearGradient(0, 0, bx, 0)
+  left.addColorStop(0, 'rgba(0,0,0,1)')
+  left.addColorStop(1, 'rgba(0,0,0,0)')
+  const right = ctx.createLinearGradient(w, 0, w - bx, 0)
+  right.addColorStop(0, 'rgba(0,0,0,1)')
+  right.addColorStop(1, 'rgba(0,0,0,0)')
+  const top = ctx.createLinearGradient(0, 0, 0, by)
+  top.addColorStop(0, 'rgba(0,0,0,1)')
+  top.addColorStop(1, 'rgba(0,0,0,0)')
+  const bottom = ctx.createLinearGradient(0, h, 0, h - by)
+  bottom.addColorStop(0, 'rgba(0,0,0,1)')
+  bottom.addColorStop(1, 'rgba(0,0,0,0)')
+
+  band(-w, 0, left)
+  band(w, 0, right)
+  band(0, -h, top)
+  band(0, h, bottom)
+  return c
+}

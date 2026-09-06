@@ -94,6 +94,7 @@ describe('SCENE_CONTROLS integrity', () => {
     'object.material.gradientSpread': 'gradientSpread',
     'object.material.textureTiling': 'textureTiling',
     'object.material.imageBoxBlend': 'imageBoxBlend',
+    'object.material.imageSeamless': 'imageSeamless',
     'object.material.imageTiling': 'imageTiling',
     'object.material.imageTilingY': 'imageTilingY',
     'object.material.imageOffsetX': 'imageOffsetX',
