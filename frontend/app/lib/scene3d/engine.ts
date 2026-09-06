@@ -1245,12 +1245,22 @@ export class SceneEngine {
     try {
       if (stageGroups > 0) {
         if (!this.treatmentStage) this.treatmentStage = new TreatmentStage(this.renderer)
-        this.postChain.setInputTexture(this.treatmentStage.render(scene, camera, plan, { objectRoots: this.objectRoots }))
+        let tex: THREE.Texture | null = null
+        try {
+          tex = this.treatmentStage.render(scene, camera, plan, { objectRoots: this.objectRoots })
+          this.postChain.setInputTexture(tex)
+        } catch (e) {
+          this.postChain.setInputTexture(null)
+          throw e
+        }
         this.treatmentStats.frames++
+        // A null result (zero-sized drawing buffer) never touched the stage's own stats, so
+        // report it exactly like the no-stage branch rather than a stale group count.
+        this.treatmentStats.groups = tex ? this.treatmentStage.stats.groups : 0
       } else {
         this.postChain.setInputTexture(null)
+        this.treatmentStats.groups = 0
       }
-      this.treatmentStats.groups = stageGroups
       this.postChain.render(scene, camera)
     } finally { for (const h of helpers) h.visible = true }
     if (!helpers.length) return

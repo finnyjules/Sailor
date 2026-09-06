@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, stageSamples } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples } from '~/lib/scene3d/treatmentStage'
 
 describe('blurPasses', () => {
   it('scales the radius with amount and image height', () => {
@@ -19,6 +19,14 @@ describe('blurPasses', () => {
   })
   it('a zero amount asks for zero passes', () => {
     expect(blurPasses(0, 1000).passes).toBe(0)
+  })
+})
+
+describe('pixelateCellPx', () => {
+  it('scales cell size with image height, holding the look constant', () => {
+    expect(pixelateCellPx(12, 1000)).toBe(12)
+    expect(pixelateCellPx(12, 2048)).toBeCloseTo(24.58, 1)
+    expect(pixelateCellPx(0.1, 100)).toBe(1)
   })
 })
 

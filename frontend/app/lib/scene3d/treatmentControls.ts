@@ -36,7 +36,7 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
       ]
       break
     case 'pixelate':
-      rows = [slider(g, 'cellSize', 'Cell size', 2, 64, 1, D.pixelate.cellSize, 'Pixels per block')]
+      rows = [slider(g, 'cellSize', 'Cell size', 2, 64, 1, D.pixelate.cellSize, 'Block size, relative to the image height')]
       break
     case 'fade':
       rows = [slider(g, 'opacity', 'Opacity', 0, 1, 0.01, D.fade.opacity)]

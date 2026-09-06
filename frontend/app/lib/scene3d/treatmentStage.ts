@@ -51,6 +51,13 @@ export function blurPasses(amount: number, height: number): { passes: number; st
   return { passes, step: radiusPx / (passes * TAPS), radiusPx }
 }
 
+/** Pixelate cell size in device px on an image `height` px tall, given `cellSize` in "pixels
+ *  per block on a 1000-px-tall image" units: 12 → 12px at 1000px, ~24.6px at 2048px — the
+ *  same LOOK at every resolution, exactly as `blurPasses` scales by height. Pure. */
+export function pixelateCellPx(cellSize: number, height: number): number {
+  return Math.max(1, cellSize * height / 1000)
+}
+
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 // The base copy that seeds `out`: straight alpha in, premultiplied out — every composite
 // after it blends premultiplied-over, so the accumulator must start that way too.
@@ -260,7 +267,7 @@ export class TreatmentStage {
     }
     if (t.kind === 'pixelate') {
       const dst = this.free(src)
-      const cellPx = Math.max(1, t.cellSize * this.renderer.getPixelRatio())
+      const cellPx = pixelateCellPx(t.cellSize, this.height)
       this.pixelateMat.uniforms.tDiffuse!.value = src.texture
       this.pixelateMat.uniforms.uCell!.value = cellPx
       this.pass(this.pixelateMat, dst)
@@ -350,9 +357,10 @@ export class TreatmentStage {
     this.composite(src.texture, layerRt.depthTexture, baseDepth2, opacity, halo)
   }
 
-  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], ctx: StageContext): THREE.Texture {
+  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], ctx: StageContext): THREE.Texture | null {
     const r = this.renderer
     const size = r.getDrawingBufferSize(this.tmpSize)
+    if (size.x <= 0 || size.y <= 0) return null
     this.ensureSize(size.x, size.y)
     const groups = plan.filter((g) => g.rendered && ctx.objectRoots.has(g.objectId))
     const treatedRoots = groups.map((g) => ctx.objectRoots.get(g.objectId)!)
