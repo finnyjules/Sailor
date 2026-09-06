@@ -100,9 +100,10 @@ describe('screen finish — build', () => {
     disposeMaterial(m)
   })
 
-  it('applies to toon, matcap, phong, opalescent, image, shaderFill (unlit too) — and never to glass', () => {
+  it('applies to toon, matcap, phong, opalescent, holographic, image, shaderFill (unlit too) — and never to glass', () => {
     for (const patch of [
       { type: 'toon' as const }, { type: 'matcap' as const }, { type: 'phong' as const }, { type: 'opalescent' as const },
+      { type: 'holographic' as const },
       { type: 'image' as const, image: 'a.png' }, { type: 'shaderFill' as const, unlit: true },
     ]) {
       const m = materialFor(base({ ...patch, screen: dots() }))

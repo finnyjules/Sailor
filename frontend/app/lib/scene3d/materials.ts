@@ -698,6 +698,10 @@ const GRADIENT_FACET_FRAG_BODY = /* glsl */ `#include <color_fragment>
 const FACET_UMODE: Record<string, number> = { faceted: 1, prismatic: 2, scatter: 3, ombre: 4 }
 const facetUMode = (shading: string | undefined): number => FACET_UMODE[shading ?? 'faceted'] ?? 1
 
+/** The holographic foil's roughness from its Gloss dial: brushed (0.55) at 0, mirror (0.04)
+ *  at 1. The only place the foil's roughness is decided — it has no roughness row of its own. */
+export const holoRoughness = (gloss: number): number => 0.55 + (0.04 - 0.55) * Math.min(1, Math.max(0, gloss))
+
 // ── Opalescent: thin-film / holographic spectrum ────────────────────────────
 // A MeshStandardMaterial like fresnel/gradient — the full lit pipeline still runs, so the form
 // reads as a soft 3D body, not a flat decal. Unlike gradient (a SPATIAL ramp along a world
@@ -731,6 +735,71 @@ const OPAL_FRAG_BODY = /* glsl */ `#include <emissivemap_fragment>
   s = fract( s * uFrequency + uHueShift + uOpalTime * uFlow );
   vec3 rainbow = texture2D( uRamp, vec2( s, 0.5 ) ).rgb;
   diffuseColor.rgb = mix( diffuseColor.rgb, rainbow, clamp( uStrength, 0.0, 1.0 ) );
+}`
+
+// ── Holographic foil: diffraction-grating rainbow over a metal ──────────────
+// A sibling of opalescent, not a mode of it. Opal is a thin film steered by the surface
+// normal / fresnel angle; foil is a diffraction GRATING: the rainbow position comes from the
+// half vector between the key light and the view (`H`), projected onto a grating direction
+// (`tang`) that lies in the surface's tangent plane and is turned by the Grating angle dial.
+// `u = dot(tang, H)` is the position across the sweep (−1..1); its magnitude walks the same
+// ramp LUT the opal/gradient materials sample. The Flakes dial jitters the grating angle per
+// object-local cell so the clean streak breaks into glitter — hence the ONE vertex injection:
+// `vHoloPos = transformed` (object space, so the cells stick to the surface as it moves).
+// `holoHash`, not `rand`: three's `<common>` already owns `rand`.
+//
+// Fragment injection at `emissivemap_fragment`, exactly like opal: after `normal` /
+// `vViewPosition` / `totalEmissiveRadiance` exist, before `lights_physical_fragment` turns
+// `diffuseColor` into the specular colour (metalness 1). The rainbow is ADDED as emissive
+// (dispersed light glows) AND tints `diffuseColor` so the metal's reflections take it too.
+// `directionalLights[0]` is the engine's sun (added at construction, so it is index 0); with
+// no directional light at all the sweep is driven from straight ahead.
+const HOLO_VERT_DECL = /* glsl */ `#include <common>
+varying vec3 vHoloPos;`
+const HOLO_VERT_BODY = /* glsl */ `#include <worldpos_vertex>
+vHoloPos = transformed;`
+const HOLO_FRAG_DECL = /* glsl */ `#include <common>
+varying vec3 vHoloPos;
+uniform sampler2D uRamp;
+uniform float uStrength;   // rainbow glow over the metal (0..2)
+uniform float uBands;      // rainbow repeats across one sweep
+uniform float uAngle;      // grating angle, degrees
+uniform float uFlakes;     // 0 = clean linear foil, 1 = every flake a random grating
+uniform float uFlakeSize;  // object-local cell size
+uniform float uHueShift;   // spectrum rotation, pre-normalised to 0..1 (degrees/360)
+float holoHash( vec3 p ) {
+  p = fract( p * 0.3183099 + vec3( 0.1, 0.2, 0.3 ) );
+  p *= 17.0;
+  return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) );
+}`
+const HOLO_FRAG_BODY = /* glsl */ `#include <emissivemap_fragment>
+{
+  vec3 nrm = normalize( normal );
+  vec3 vdir = normalize( vViewPosition );
+  #if NUM_DIR_LIGHTS > 0
+    vec3 ldir = normalize( directionalLights[ 0 ].direction );
+  #else
+    vec3 ldir = vec3( 0.0, 0.0, 1.0 );
+  #endif
+  vec3 h = normalize( ldir + vdir );
+  // Tangent frame from the view-space normal; ref is up unless the normal is near-vertical.
+  vec3 ref = abs( nrm.y ) < 0.95 ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 );
+  vec3 t0 = normalize( cross( ref, nrm ) );
+  vec3 b0 = cross( nrm, t0 );
+  vec3 cell = floor( vHoloPos / max( uFlakeSize, 1e-3 ) );
+  float jitter = ( holoHash( cell ) - 0.5 ) * 6.2831853 * uFlakes;
+  float a = radians( uAngle ) + jitter;
+  vec3 tang = t0 * cos( a ) + b0 * sin( a );
+  float u = dot( tang, h );
+  float au = abs( u );
+  float s = fract( au * uBands + uHueShift );
+  vec3 rainbow = texture2D( uRamp, vec2( s, 0.5 ) ).rgb;
+  // Zero order (plain specular) stays white; the sweep fades out at its edges; and it lives
+  // near the highlight like a real foil.
+  float env = smoothstep( 0.02, 0.12, au ) * ( 1.0 - smoothstep( 0.55, 0.95, au ) );
+  env *= pow( clamp( dot( nrm, h ), 0.0, 1.0 ), 2.0 );
+  totalEmissiveRadiance += rainbow * env * uStrength;
+  diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * ( 0.35 + rainbow ), env * min( uStrength, 1.0 ) * 0.7 );
 }`
 
 // ── Screen finish: print-style dot/line/cross screen ─────────────────────────
@@ -1085,6 +1154,45 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
       m = o
       break
     }
+    case 'holographic': {
+      const stops = opalStopsOf(mat)
+      // Uniform objects live outside the compile closure so updateMaterial can mutate their
+      // `.value` before or after first compile — the opal/gradient/fresnel pattern. Nothing is
+      // time-driven, so no tracking Set and no per-frame refresh.
+      const holoUniforms: Record<string, { value: unknown }> = {
+        uRamp: { value: buildRampTexture(stops) },
+        uStrength: { value: mat.holoStrength ?? MATERIAL_DEFAULTS.holoStrength },
+        uBands: { value: mat.holoBands ?? MATERIAL_DEFAULTS.holoBands },
+        uAngle: { value: mat.holoAngle ?? MATERIAL_DEFAULTS.holoAngle },
+        uFlakes: { value: mat.holoFlakes ?? MATERIAL_DEFAULTS.holoFlakes },
+        uFlakeSize: { value: mat.holoFlakeSize ?? MATERIAL_DEFAULTS.holoFlakeSize },
+        uHueShift: { value: (mat.holoHueShift ?? MATERIAL_DEFAULTS.holoHueShift) / 360 },
+      }
+      // A foil IS metal: metalness is pinned at 1 and roughness comes from the Gloss dial, so
+      // neither shared PBR row is offered (nothing is a dead control). The physical coat +
+      // reflection knobs are shared with opal — a laminated sticker at clearcoat 1.
+      const hmat = new THREE.MeshPhysicalMaterial({
+        color: stripAlpha(mat.color), metalness: 1,
+        roughness: holoRoughness(mat.holoGloss ?? MATERIAL_DEFAULTS.holoGloss),
+      })
+      hmat.clearcoat = mat.clearcoat ?? MATERIAL_DEFAULTS.clearcoat
+      hmat.clearcoatRoughness = mat.clearcoatRoughness ?? MATERIAL_DEFAULTS.clearcoatRoughness
+      hmat.envMapIntensity = mat.envMapIntensity ?? MATERIAL_DEFAULTS.envMapIntensity
+      hmat.onBeforeCompile = (shader) => {
+        Object.assign(shader.uniforms, holoUniforms)
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', HOLO_VERT_DECL)
+          .replace('#include <worldpos_vertex>', HOLO_VERT_BODY)
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', HOLO_FRAG_DECL)
+          .replace('#include <emissivemap_fragment>', HOLO_FRAG_BODY)
+      }
+      hmat.customProgramCacheKey = () => 'scene3d-holographic'
+      hmat.userData.holoUniforms = holoUniforms
+      hmat.userData.rampSig = rampSignature(stops)
+      m = hmat
+      break
+    }
     case 'image': {
       const t = new THREE.MeshStandardMaterial({
         // White base so the texture shows untinted (the doc's colour is ignored
@@ -1358,6 +1466,39 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
       u.uFlow.value = mat.opalFlowSpeed ?? MATERIAL_DEFAULTS.opalFlowSpeed
       return true
     }
+    case 'holographic': {
+      // Same shape as opal: the LUT + steering scalars are injected uniforms shared by
+      // reference with the compiled program, mutated in place; tint/gloss/coat/reflection are
+      // real MeshPhysicalMaterial fields. metalness stays pinned at 1. A clearcoat zero
+      // crossing self-recompiles through three (USE_CLEARCOAT) against the SAME holoUniforms
+      // objects, so the foil survives the coat toggling — no manual needsUpdate.
+      const hmat = m as THREE.MeshPhysicalMaterial
+      hmat.color.set(stripAlpha(mat.color))
+      hmat.metalness = 1
+      hmat.roughness = holoRoughness(mat.holoGloss ?? MATERIAL_DEFAULTS.holoGloss)
+      hmat.clearcoat = mat.clearcoat ?? MATERIAL_DEFAULTS.clearcoat
+      hmat.clearcoatRoughness = mat.clearcoatRoughness ?? MATERIAL_DEFAULTS.clearcoatRoughness
+      hmat.envMapIntensity = mat.envMapIntensity ?? MATERIAL_DEFAULTS.envMapIntensity
+      const u = m.userData.holoUniforms as {
+        uRamp: { value: THREE.DataTexture }
+        uStrength: { value: number }; uBands: { value: number }; uAngle: { value: number }
+        uFlakes: { value: number }; uFlakeSize: { value: number }; uHueShift: { value: number }
+      }
+      // Rebuild the LUT only when the stops actually moved, disposing the one we replace.
+      const sig = rampSignature(opalStopsOf(mat))
+      if (sig !== m.userData.rampSig) {
+        u.uRamp.value?.dispose()
+        u.uRamp.value = buildRampTexture(opalStopsOf(mat))
+        m.userData.rampSig = sig
+      }
+      u.uStrength.value = mat.holoStrength ?? MATERIAL_DEFAULTS.holoStrength
+      u.uBands.value = mat.holoBands ?? MATERIAL_DEFAULTS.holoBands
+      u.uAngle.value = mat.holoAngle ?? MATERIAL_DEFAULTS.holoAngle
+      u.uFlakes.value = mat.holoFlakes ?? MATERIAL_DEFAULTS.holoFlakes
+      u.uFlakeSize.value = mat.holoFlakeSize ?? MATERIAL_DEFAULTS.holoFlakeSize
+      u.uHueShift.value = (mat.holoHueShift ?? MATERIAL_DEFAULTS.holoHueShift) / 360
+      return true
+    }
     case 'image': {
       const s = m as THREE.MeshStandardMaterial
       s.roughness = mat.roughness; s.metalness = mat.metalness
@@ -1388,10 +1529,11 @@ export function disposeMaterial(m: THREE.Material): void {
   if (m.userData.matType === 'opalescent') opalMaterials.delete(m as THREE.MeshStandardMaterial)
   reliefHealPending.delete(m) // a disposed material still awaiting its relief heal must not leak
   m.userData.disposed = true // ...and an in-flight applyTextureSet must not bind onto it (see its .then)
-  // The gradient ramp LUT is owned by exactly one material — as is the opal ramp (its own
-  // uniform bucket), so dispose whichever this material carries.
+  // The gradient ramp LUT is owned by exactly one material — as are the opal and holographic
+  // ramps (each its own uniform bucket), so dispose whichever this material carries.
   const ramp = (m.userData.gradUniforms as { uRamp?: { value?: THREE.Texture } } | undefined)?.uRamp?.value
     ?? (m.userData.opalUniforms as { uRamp?: { value?: THREE.Texture } } | undefined)?.uRamp?.value
+    ?? (m.userData.holoUniforms as { uRamp?: { value?: THREE.Texture } } | undefined)?.uRamp?.value
   if (ramp) ramp.dispose()
   // Bump/height texture: EXCLUSIVELY owned by this material — every relief texture (image OR
   // shader) is a private per-material canvas + Texture (see the C1/C2 redesign doc at the top

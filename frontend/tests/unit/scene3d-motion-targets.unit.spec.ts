@@ -188,6 +188,12 @@ describe('animatableTargets', () => {
       'material.opalAngleMix', 'material.opalFlowSpeed', 'material.opalFrequency',
       'material.opalHueShift', 'material.opalStrength',
     ]],
+    // No PBR pair and no texture tiling: a foil pins metalness and Gloss owns its roughness.
+    ['holographic', [
+      ...COAT, ...RELIEF, ...SCREEN,
+      'material.holoAngle', 'material.holoBands', 'material.holoFlakeSize', 'material.holoFlakes',
+      'material.holoGloss', 'material.holoHueShift', 'material.holoStrength',
+    ]],
   ] as const)('offers exactly these per-object targets for a %s material', (type, expected) => {
     expect(objectTargets(type)).toEqual([...expected].sort())
   })

@@ -147,6 +147,15 @@ const ROW: Record<string, Row> = {
   [`${M}opalStrength`]: { label: 'Rainbow strength', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'How much rainbow shows over the base colour' },
   [`${M}opalFlowSpeed`]: { label: 'Flow speed', kind: 'slider', min: 0, max: 2, step: 0.01, hint: 'Animates the spectrum over time — 0 keeps it still' },
 
+  // holographic
+  [`${M}holoStrength`]: { label: 'Rainbow strength', kind: 'slider', min: 0, max: 2, step: 0.01, hint: 'How bright the rainbow streak glows over the metal' },
+  [`${M}holoBands`]: { label: 'Bands', kind: 'slider', min: 0.5, max: 8, step: 0.05, hint: 'How many rainbow repeats fit in one sweep — fine foil is high' },
+  [`${M}holoAngle`]: { label: 'Grating angle', kind: 'slider', min: 0, max: 180, step: 1, hint: 'Turns the direction the rainbow streak runs in' },
+  [`${M}holoFlakes`]: { label: 'Flakes', kind: 'slider', min: 0, max: 1, step: 0.01, hint: '0 is a clean foil; higher breaks it into randomly turned glitter flakes' },
+  [`${M}holoFlakeSize`]: { label: 'Flake size', kind: 'slider', min: 0.01, max: 0.5, step: 0.005, hint: 'Size of each glitter flake' },
+  [`${M}holoGloss`]: { label: 'Gloss', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Polished mirror foil at high, brushed at low' },
+  [`${M}holoHueShift`]: { label: 'Hue shift', kind: 'slider', min: 0, max: 360, step: 1, hint: 'Rotates the whole rainbow around the colour wheel' },
+
   // shaderFill
   [`${M}unlit`]: { label: 'Unlit', kind: 'switch', hint: 'Glows flat instead of being shaded by scene lights' },
 
@@ -200,6 +209,20 @@ const OPAL_ROW: Record<string, Row> = {
   [`${M}metalness`]: { ...ROW[`${M}metalness`]!, hint: 'Blends between plastic-like and metal reflections — high turns the rainbow into chrome' },
   [`${M}clearcoat`]: { ...ROW[`${M}clearcoat`]!, hint: 'Adds a thin glossy varnish layer on top — the wet look' },
   [`${M}envMapIntensity`]: { ...ROW[`${M}envMapIntensity`]!, label: 'Reflection intensity' },
+}
+
+/** Holographic moves the same coat/reflection rows into its body and re-captions them for a
+ *  metal foil — the clearcoat is the sticker's laminate. No metalness row: a foil IS metal. */
+const HOLO_ROW: Record<string, Row> = {
+  [`${M}color`]: { label: 'Base tint', kind: 'color' },
+  [`${M}clearcoat`]: { ...ROW[`${M}clearcoat`]!, hint: 'Adds a thin glossy laminate on top' },
+  [`${M}envMapIntensity`]: { ...ROW[`${M}envMapIntensity`]!, label: 'Reflection intensity' },
+}
+
+/** The per-type re-caption tables; a type absent here draws every row straight from ROW. */
+const TYPE_ROW: Partial<Record<MaterialType, Record<string, Row>>> = {
+  opalescent: OPAL_ROW,
+  holographic: HOLO_ROW,
 }
 
 /** Bespoke blocks — the rows that are a widget, not a parameter. Each is an anchor with a
@@ -339,6 +362,18 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
     'Surface relief': RELIEF_OFF,
     Screen: SCREEN_OFF,
   },
+  // No roughness / metalness / texture set: a foil is metal (metalness pinned at 1) and its
+  // roughness is the Gloss dial, so the shared PBR rows must not draw.
+  holographic: {
+    Material: [
+      `${M}type`, 'ui.material.opalStops', `${M}color`,
+      `${M}holoStrength`, `${M}holoBands`, `${M}holoAngle`, `${M}holoFlakes`, `${M}holoFlakeSize`,
+      `${M}holoGloss`, `${M}holoHueShift`,
+      `${M}clearcoat`, `${M}clearcoatRoughness`, `${M}envMapIntensity`,
+    ],
+    'Surface relief': RELIEF_OFF,
+    Screen: SCREEN_OFF,
+  },
   image: {
     Material: [`${M}type`, 'ui.material.image', `${M}roughness`, `${M}metalness`],
     'Surface relief': RELIEF_OFF,
@@ -443,7 +478,7 @@ describe('Scene3D panel parity — Material, per material type', () => {
             expect(rows.get(key)!.label, key).toBe(ANCHOR_LABEL[key])
             continue
           }
-          const spec = (type === 'opalescent' ? OPAL_ROW[key] : undefined) ?? ROW[key]
+          const spec = TYPE_ROW[type]?.[key] ?? ROW[key]
           expect(spec, `${key} is transcribed in ROW`).toBeTruthy()
           expectRow(rows.get(key), key, spec!)
         }

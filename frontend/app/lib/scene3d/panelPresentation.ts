@@ -430,7 +430,9 @@ const SCENE_PANEL_ANCHORS: readonly ScenePanelAnchor[] = [
     key: 'ui.material.gradientDirection', label: 'Direction',
     visible: (_d, o) => isType(o, 'gradient') && materialField(o!.material, 'gradientType') === 'linear',
   },
-  { key: 'ui.material.opalStops', label: 'Spectrum', visible: (_d, o) => isType(o, 'opalescent') },
+  // Shared by opalescent and holographic — both read the same spectrum (opalStopsOf), and
+  // the surface's `matOpalStops` binding is type-agnostic.
+  { key: 'ui.material.opalStops', label: 'Spectrum', visible: (_d, o) => isType(o, 'opalescent', 'holographic') },
   { key: 'ui.material.image', label: 'Texture', visible: (_d, o) => isType(o, 'image') },
   { key: 'ui.material.shader', label: 'Effect', visible: (_d, o) => isType(o, 'shaderFill') },
   // Transparency sub-card
@@ -492,8 +494,9 @@ export const SCENE_PANEL_ANCHOR_KEYS: ReadonlySet<string> = new Set(SCENE_PANEL_
 
 /** Rows the shipped Material card drew in its own body, per material type, in order.
  *  Everything above the per-type body is shared; everything below it lives in one of
- *  the sub-cards. Opalescent is the type that MOVES rows: clearcoat / coat roughness /
- *  reflection intensity sat in the main body for it, not in the Coat/Reflection blocks. */
+ *  the sub-cards. Opalescent (and holographic after it) is the type that MOVES rows: clearcoat /
+ *  coat roughness / reflection intensity sat in the main body for it, not in the
+ *  Coat/Reflection blocks. */
 const MATERIAL_HEAD = ['ui.material.override', 'object.material.type']
 
 const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
@@ -524,6 +527,15 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
     'object.material.roughness', 'object.material.metalness',
     'object.material.clearcoat', 'object.material.clearcoatRoughness', 'object.material.envMapIntensity',
     'ui.material.textureSet', 'object.material.textureTiling',
+  ],
+  // No roughness / metalness / texture set: a foil is metal (metalness pinned at 1) and its
+  // roughness is the Gloss dial, so the shared PBR rows would be dead controls.
+  holographic: [
+    'ui.material.opalStops', 'object.material.color',
+    'object.material.holoStrength', 'object.material.holoBands', 'object.material.holoAngle',
+    'object.material.holoFlakes', 'object.material.holoFlakeSize', 'object.material.holoGloss',
+    'object.material.holoHueShift',
+    'object.material.clearcoat', 'object.material.clearcoatRoughness', 'object.material.envMapIntensity',
   ],
   image: ['ui.material.image', 'object.material.roughness', 'object.material.metalness'],
   shaderFill: [
@@ -788,6 +800,20 @@ const OPAL_OVERRIDE: Record<string, RowPatch> = {
   'object.material.envMapIntensity': { label: 'Reflection intensity' },
 }
 
+/** Holographic foil moves the same three coat/reflection rows into its body and re-captions
+ *  them for a metal foil — the coat is the sticker's laminate, the colour is the metal's tint. */
+const HOLO_OVERRIDE: Record<string, RowPatch> = {
+  'object.material.color': { label: 'Base tint' },
+  'object.material.clearcoat': { hint: 'Adds a thin glossy laminate on top' },
+  'object.material.envMapIntensity': { label: 'Reflection intensity' },
+}
+
+/** The per-type re-caption tables, keyed by the material type they apply to. */
+const TYPE_OVERRIDE: Partial<Record<MaterialType, Record<string, RowPatch>>> = {
+  opalescent: OPAL_OVERRIDE,
+  holographic: HOLO_OVERRIDE,
+}
+
 /**
  * Size rows: the schema's scale multiplier bounds, expressed in the world units the
  * row actually shows. Label follows — the shipped inputs said Size, not Scale. The
@@ -879,7 +905,8 @@ function withPresentation(
   delete out.when
   const patches: RowPatch[] = []
   if (OVERRIDE[c.key]) patches.push(OVERRIDE[c.key]!)
-  if (matType === 'opalescent' && OPAL_OVERRIDE[c.key]) patches.push(OPAL_OVERRIDE[c.key]!)
+  const typePatch = matType ? TYPE_OVERRIDE[matType]?.[c.key] : undefined
+  if (typePatch) patches.push(typePatch)
   const dyn = dynamicPatch(c.key, obj)
   if (dyn) patches.push(dyn)
   if (c.key.startsWith('object.scale.')) patches.push(sizeOverride(Number(c.key.slice(-1)) as 0 | 1 | 2, ctx))

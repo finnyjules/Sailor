@@ -146,17 +146,31 @@ const hasPbrSurface = (doc: SceneDoc, obj?: SceneObject): boolean => {
 const isOpalMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
   isEditableMaterial(doc, obj) && materialTypeOf(obj) === 'opalescent'
 
+// Holographic foil — a diffraction-grating rainbow over a metal. Its own dial block; NOT a
+// PBR surface (metalness is pinned at 1 and roughness comes from its Gloss dial, so the shared
+// roughness/metalness rows would be dead controls on it — hasPbrSurface stays untouched).
+const isHoloMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
+  isEditableMaterial(doc, obj) && materialTypeOf(obj) === 'holographic'
+
 // The glossy-coat / reflection knobs (clearcoat, coat roughness, reflection intensity) apply to
-// the physical materials AND to opalescent (now a MeshPhysicalMaterial) — matte soap-bubble at
-// clearcoat 0, wet chrome-holo as it rises. NOT the whole physical block (sheen/transmission/etc
-// stay standard+glass only), just these three.
+// the physical materials AND to opalescent + holographic (both MeshPhysicalMaterial) — matte
+// soap-bubble at clearcoat 0, wet chrome-holo / laminated sticker as it rises. NOT the whole
+// physical block (sheen/transmission/etc stay standard+glass only), just these three.
 const hasReflectiveCoat = (doc: SceneDoc, obj?: SceneObject): boolean =>
+  isPhysicalMaterial(doc, obj) || isOpalMaterial(doc, obj) || isHoloMaterial(doc, obj)
+
+// The ambientCG texture set binds on exactly the types materials.ts's TEXTURE_TYPES names
+// (standard / glass / opalescent). Holographic carries the coat knobs but NOT a texture set —
+// offering `texture` there would store a value nothing reads — so the texture rows gate on
+// this narrower predicate, not on hasReflectiveCoat.
+const hasTextureSet = (doc: SceneDoc, obj?: SceneObject): boolean =>
   isPhysicalMaterial(doc, obj) || isOpalMaterial(doc, obj)
 
 // Base `color` reads on standard/glass/phong/toon/fresnel and as the opalescent lit substrate
-// tint; matcap/gradient/image/shaderFill materials each drive colour a different way (matcap id,
-// gradient ramp, uploaded texture, catalog effect) and never read `.color` in the UI.
-const COLOR_TYPES: MaterialType[] = ['standard', 'glass', 'phong', 'toon', 'fresnel', 'opalescent']
+// tint / the holographic foil's metal tint; matcap/gradient/image/shaderFill materials each
+// drive colour a different way (matcap id, gradient ramp, uploaded texture, catalog effect) and
+// never read `.color` in the UI.
+const COLOR_TYPES: MaterialType[] = ['standard', 'glass', 'phong', 'toon', 'fresnel', 'opalescent', 'holographic']
 const hasBaseColor = (doc: SceneDoc, obj?: SceneObject): boolean =>
   isEditableMaterial(doc, obj) && COLOR_TYPES.includes(materialTypeOf(obj))
 
@@ -413,6 +427,24 @@ export const SCENE_CONTROLS: SceneControl[] = [
   slider('object.material.opalStrength', 'Rainbow strength', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.opalStrength!,
     'How much rainbow shows over the base colour', { when: isOpalMaterial, summary: 1 }),
 
+  // Holographic foil — a diffraction-grating rainbow streak over a metal base (see config.ts's
+  // holo* field doc). Same spectrum ramp as opalescent (the surface's stop editor); these seven
+  // scalars steer the streak and are the agent-/motion-animatable knobs.
+  slider('object.material.holoStrength', 'Rainbow strength', 0, 2, 0.01, 'Material', MATERIAL_DEFAULTS.holoStrength!,
+    'How bright the rainbow streak glows over the metal', { when: isHoloMaterial, summary: 1 }),
+  slider('object.material.holoBands', 'Bands', 0.5, 8, 0.05, 'Material', MATERIAL_DEFAULTS.holoBands!,
+    'How many rainbow repeats fit in one sweep — fine foil is high', { when: isHoloMaterial }),
+  slider('object.material.holoAngle', 'Grating angle', 0, 180, 1, 'Material', MATERIAL_DEFAULTS.holoAngle!,
+    'Turns the direction the rainbow streak runs in', { when: isHoloMaterial }),
+  slider('object.material.holoFlakes', 'Flakes', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.holoFlakes!,
+    '0 is a clean foil; higher breaks it into randomly turned glitter flakes', { when: isHoloMaterial, summary: 2 }),
+  slider('object.material.holoFlakeSize', 'Flake size', 0.01, 0.5, 0.005, 'Material', MATERIAL_DEFAULTS.holoFlakeSize!,
+    'Size of each glitter flake', { when: isHoloMaterial }),
+  slider('object.material.holoGloss', 'Gloss', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.holoGloss!,
+    'Polished mirror foil at high, brushed at low', { when: isHoloMaterial }),
+  slider('object.material.holoHueShift', 'Hue shift', 0, 360, 1, 'Material', MATERIAL_DEFAULTS.holoHueShift!,
+    'Rotates the whole rainbow around the colour wheel', { when: isHoloMaterial }),
+
   // Surface relief — a grayscale height field perturbing the lit normal (see config.ts's
   // ReliefSpec doc). `source` picks the origin; scale/contrast/tiling tune it. Orthogonal
   // to material type, so gated only by reliefApplies (isEditableMaterial + not-unlit-
@@ -524,10 +556,10 @@ export const SCENE_CONTROLS: SceneControl[] = [
     key: 'object.material.texture', label: 'Texture', kind: 'text', default: '', group: 'Material',
     aiEditable: true, animatable: false,
     hint: 'A real-world surface from the ambientCG library. Write a plain material word such as wood, brick, marble, concrete, leather, fabric, metal, tiles, grass, or an exact set id. Needs a standard, glass, or opalescent material type.',
-    when: hasReflectiveCoat,
+    when: hasTextureSet,
   } as SceneControl,
   slider('object.material.textureTiling', 'Texture tiling', TEXTURE_TILING_RANGE.min, TEXTURE_TILING_RANGE.max, TEXTURE_TILING_RANGE.step, 'Material', MATERIAL_DEFAULTS.textureTiling,
-    'How many times the surface pattern repeats across the object', { when: hasReflectiveCoat }),
+    'How many times the surface pattern repeats across the object', { when: hasTextureSet }),
 
   // --- Lighting (doc-level; no active object needed) -------------------------------
   // Simple layer: pick a Look, then nudge three dials. Direction stays visible, so it's

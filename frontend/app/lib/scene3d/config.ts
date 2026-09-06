@@ -44,8 +44,8 @@ export const DEFAULT_FONT_URL = '/fonts/ABCROM-Bold.otf'
 // no amount of roughness tuning on the PBR types (standard/glass) can reproduce — that
 // hard-dot look is a distinct retro-CG aesthetic worth keeping on its own terms. Do not
 // "modernise" it away in favour of Standard.
-export type MaterialType = 'standard' | 'phong' | 'toon' | 'matcap' | 'glass' | 'fresnel' | 'gradient' | 'opalescent' | 'image' | 'shaderFill'
-export const MATERIAL_TYPES: MaterialType[] = ['standard', 'phong', 'toon', 'matcap', 'glass', 'fresnel', 'gradient', 'opalescent', 'image', 'shaderFill']
+export type MaterialType = 'standard' | 'phong' | 'toon' | 'matcap' | 'glass' | 'fresnel' | 'gradient' | 'opalescent' | 'holographic' | 'image' | 'shaderFill'
+export const MATERIAL_TYPES: MaterialType[] = ['standard', 'phong', 'toon', 'matcap', 'glass', 'fresnel', 'gradient', 'opalescent', 'holographic', 'image', 'shaderFill']
 
 /** One stop of the gradient ramp. `pos` is 0..1 along the ramp direction. */
 export interface GradientStop { pos: number; color: string }
@@ -216,6 +216,19 @@ export interface SceneMaterial {
   opalAngleMix?: number         // 0–1, normal-driven ↔ view/fresnel-driven flow
   opalFlowSpeed?: number        // 0–2, time drift; 0 = a still opal (no per-frame cost)
   opalStrength?: number         // 0–1, rainbow vs the soft lit base
+  // Holographic foil — all `holographic` only. A sibling of opalescent, not a mode of it: opal
+  // is a thin film driven by the surface normal / viewing angle; foil is a diffraction GRATING
+  // driven by the half vector between the key light and the view, projected onto a grating
+  // direction on the surface. Same `gradientStops` spectrum (opalStopsOf) so the palette carries
+  // across the two types. metalness is always 1 (a foil IS metal) and roughness comes from
+  // `holoGloss`, so neither shared PBR row is offered. Absent = MATERIAL_DEFAULTS.
+  holoStrength?: number         // 0–2, how bright the rainbow streak glows over the metal
+  holoBands?: number            // 0.5–8, rainbow repeats across one sweep
+  holoAngle?: number            // 0–180 degrees, direction the streak runs in
+  holoFlakes?: number           // 0–1, 0 = clean linear foil, 1 = every flake a random grating
+  holoFlakeSize?: number        // 0.01–0.5, object-local size of each glitter flake
+  holoGloss?: number            // 0–1, polished mirror foil at 1, brushed at 0
+  holoHueShift?: number         // 0–360, rotates the whole rainbow
 }
 
 export interface SceneObjectBase {
@@ -570,6 +583,13 @@ export const MATERIAL_DEFAULTS = {
   opalAngleMix: 0.6,
   opalFlowSpeed: 0,
   opalStrength: 1,
+  holoStrength: 1,
+  holoBands: 3,
+  holoAngle: 0,
+  holoFlakes: 0,
+  holoFlakeSize: 0.08,
+  holoGloss: 0.85,
+  holoHueShift: 0,
   reliefScale: 0.25,
   reliefContrast: 1,
   reliefTiling: 1,
@@ -1121,6 +1141,13 @@ export function parseDoc(json: string): SceneDoc {
     if (typeof m?.opalAngleMix === 'number') out.opalAngleMix = num(m.opalAngleMix, MATERIAL_DEFAULTS.opalAngleMix)
     if (typeof m?.opalFlowSpeed === 'number') out.opalFlowSpeed = num(m.opalFlowSpeed, MATERIAL_DEFAULTS.opalFlowSpeed)
     if (typeof m?.opalStrength === 'number') out.opalStrength = num(m.opalStrength, MATERIAL_DEFAULTS.opalStrength)
+    if (typeof m?.holoStrength === 'number') out.holoStrength = num(m.holoStrength, MATERIAL_DEFAULTS.holoStrength)
+    if (typeof m?.holoBands === 'number') out.holoBands = num(m.holoBands, MATERIAL_DEFAULTS.holoBands)
+    if (typeof m?.holoAngle === 'number') out.holoAngle = num(m.holoAngle, MATERIAL_DEFAULTS.holoAngle)
+    if (typeof m?.holoFlakes === 'number') out.holoFlakes = num(m.holoFlakes, MATERIAL_DEFAULTS.holoFlakes)
+    if (typeof m?.holoFlakeSize === 'number') out.holoFlakeSize = num(m.holoFlakeSize, MATERIAL_DEFAULTS.holoFlakeSize)
+    if (typeof m?.holoGloss === 'number') out.holoGloss = num(m.holoGloss, MATERIAL_DEFAULTS.holoGloss)
+    if (typeof m?.holoHueShift === 'number') out.holoHueShift = num(m.holoHueShift, MATERIAL_DEFAULTS.holoHueShift)
     // normalizeShaderSpec is already tolerant of junk (falls back to DEFAULT_SHADER_SPEC's
     // fields piecewise) — only gate on `m.shader` being present at all, same "copy only when
     // present" rule as every other optional field above.

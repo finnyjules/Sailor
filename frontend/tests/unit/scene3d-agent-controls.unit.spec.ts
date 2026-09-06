@@ -218,8 +218,27 @@ describe('SCENE_GUIDANCE', () => {
   // Detector test, in the shape of geoshape's "guidance names only keys that exist":
   // every identifier the recipe names must be a REAL id in the schema, so a rename
   // or a hallucinated knob fails here rather than at runtime in the vibe call.
+  // The recipe splits the two rainbows: thin-film words go to opalescent, foil words to
+  // holographic. Pin the routing sentence itself so a rewrite that quietly folds "holographic"
+  // back into the opal list fails here rather than in a live vibe call.
+  it('routes iridescent words to opalescent and foil words to holographic', () => {
+    const opalSentence = SCENE_GUIDANCE.match(/GEM \/ IRIDESCENT RECIPE:[^\n]*?'opalescent'/)?.[0] ?? ''
+    for (const word of ['iridescent', 'opalescent', 'opal', 'oil-slick', 'soap bubble', 'rainbow sheen']) {
+      expect(opalSentence, `opal list omits "${word}"`).toContain(`"${word}"`)
+    }
+    expect(opalSentence, 'holographic must not route to opalescent').not.toContain('"holographic"')
+    const holoSentence = SCENE_GUIDANCE.match(/"holographic"[^\n]*?'holographic'/)?.[0] ?? ''
+    for (const word of ['holographic', 'holo', 'holographic foil', 'holographic sticker', 'glitter foil', 'chrome holo']) {
+      expect(holoSentence, `foil list omits "${word}"`).toContain(`"${word}"`)
+    }
+    expect(SCENE_GUIDANCE).toMatch(/HOLOGRAPHIC FOIL/)
+    expect(SCENE_GUIDANCE).toContain('"object.material.type":"holographic"')
+    expect(SCENE_GUIDANCE).toContain('"object.material.holoFlakes":0.8')
+  })
+
   it('the recipe names only real material types, primitive kinds, environments and gem params', () => {
     expect(MATERIAL_TYPES).toContain('opalescent')
+    expect(MATERIAL_TYPES).toContain('holographic')
     expect(PRIMITIVE_KINDS).toContain('gem')
     expect(ENVIRONMENT_KINDS).toContain('darkStrips')
 
