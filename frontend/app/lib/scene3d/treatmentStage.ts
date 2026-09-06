@@ -9,6 +9,10 @@
 // base = the object alone (with background), layer = the rest. The result feeds PostChain
 // through `setInputTexture`, so global post and the export bake see the same frame.
 //
+// The accumulator (`out`) is PREMULTIPLIED from the first blit to the last composite and is
+// un-premultiplied once, into a scratch, on the way out — every downstream consumer
+// (TexturePass, the post stack, toDataURL) reads straight alpha.
+//
 // Never write renderer state you do not restore: this runs inside the live loop AND the
 // output-resolution bake, both of which assume the renderer comes back as they left it.
 import * as THREE from 'three'
@@ -24,9 +28,19 @@ import { STAGE_LAYER } from './treatmentShells'
 export const STAGE_SAMPLES = 4
 const TAPS = 12 // taps per side per separable pass
 const MAX_PAIRS = 4
+/** Above ~2048² (an export bake's output size) the stage's two MSAA HalfFloat + depth
+ *  targets alone would run into hundreds of MB, so drop MSAA there. Pure. */
+const MSAA_PIXEL_CEILING = 4_194_304
 
 export interface StageContext { objectRoots: Map<string, THREE.Object3D> }
 export interface StageStats { frames: number; groups: number; width: number; height: number }
+
+/** MSAA sample count for a stage target of `width` × `height` on a device whose cap is
+ *  `maxSamples`: the normal count, but 0 above the pixel ceiling so a bake at output
+ *  resolution cannot allocate unbounded VRAM. Pure. */
+export function stageSamples(width: number, height: number, maxSamples: number): number {
+  return width * height > MSAA_PIXEL_CEILING ? 0 : Math.min(STAGE_SAMPLES, maxSamples)
+}
 
 /** How to realise a blur of `amount` (0–1) on an image `height` px tall: `radiusPx` of
  *  reach, split into `passes` H+V pairs whose taps sit `step` px apart. Pure. */
@@ -38,7 +52,11 @@ export function blurPasses(amount: number, height: number): { passes: number; st
 }
 
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
-const COPY_FRAG = 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ gl_FragColor = texture2D(tDiffuse, vUv); }'
+// The base copy that seeds `out`: straight alpha in, premultiplied out — every composite
+// after it blends premultiplied-over, so the accumulator must start that way too.
+const PREMUL_FRAG = 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ vec4 s = texture2D(tDiffuse, vUv); gl_FragColor = vec4(s.rgb * s.a, s.a); }'
+// …and the single un-premultiply on the way out, back to the straight alpha every consumer expects.
+const UNPREMUL_FRAG = 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ vec4 s = texture2D(tDiffuse, vUv); gl_FragColor = vec4(s.a > 1e-5 ? s.rgb / s.a : vec3(0.0), s.a); }'
 // Separable Gaussian over PREMULTIPLIED colour so transparent pixels never darken the halo;
 // un-premultiplied on the way out because the layer buffers are straight-alpha.
 const BLUR_FRAG = `
@@ -84,8 +102,15 @@ const GLOW_MERGE_FRAG = `
   }`
 // Depth-tested composite. Halo pixels (blur/glow spill) have no depth of their own, so they
 // borrow the nearest opaque depth within uHaloRadius texels — spec §3 step 2c.
+//
+// TWO base depths: with an "everything else" group in the frame the base holds only the
+// inverted object, so a normal group would win everywhere that object is absent. Its layer
+// depth is bound as tBaseDepth2 and the near of the two decides — a treated object behind a
+// treated-world wall stays behind it. With no invert group both samplers hold the same
+// texture, so min() is a no-op and the plain path is untouched.
 const COMPOSITE_FRAG = `
-  uniform sampler2D tLayer; uniform sampler2D tLayerDepth; uniform sampler2D tBaseDepth;
+  uniform sampler2D tLayer; uniform sampler2D tLayerDepth;
+  uniform sampler2D tBaseDepth; uniform sampler2D tBaseDepth2;
   uniform float uOpacity; uniform vec2 uTexel; uniform float uHaloRadius;
   varying vec2 vUv;
   float nearestDepth(vec2 uv){
@@ -105,7 +130,7 @@ const COMPOSITE_FRAG = `
     float a = s.a * uOpacity;
     if (a <= 0.001) discard;
     float ld = nearestDepth(vUv);
-    float bd = texture2D(tBaseDepth, vUv).r;
+    float bd = min(texture2D(tBaseDepth, vUv).r, texture2D(tBaseDepth2, vUv).r);
     if (ld > bd + 0.00005) discard;
     gl_FragColor = vec4(s.rgb * a, a); // premultiplied — see compositeMat's blend factors
   }`
@@ -120,12 +145,16 @@ export class TreatmentStage {
   readonly stats: StageStats = { frames: 0, groups: 0, width: 0, height: 0 }
   private base!: RT
   private layer!: RT
+  /** The "everything else" layer, allocated only for a frame that has an invert group: it
+   *  must survive the whole frame because every normal group tests against its depth. */
+  private layerInv: RT | null = null
   private out!: RT
   private scratch: RT[] = []
   private width = 0
   private height = 0
   private readonly quad = new FullScreenQuad()
-  private readonly copyMat = shader(COPY_FRAG, { tDiffuse: { value: null } })
+  private readonly premulMat = shader(PREMUL_FRAG, { tDiffuse: { value: null } })
+  private readonly unpremulMat = shader(UNPREMUL_FRAG, { tDiffuse: { value: null } })
   private readonly blurMat = shader(BLUR_FRAG, { tDiffuse: { value: null }, uDir: { value: new THREE.Vector2() } })
   private readonly pixelateMat = shader(PIXELATE_FRAG, { tDiffuse: { value: null }, uResolution: { value: new THREE.Vector2(1, 1) }, uCell: { value: 8 } })
   private readonly brightMat = shader(BRIGHT_FRAG, { tDiffuse: { value: null }, uThreshold: { value: 0.6 } })
@@ -136,7 +165,7 @@ export class TreatmentStage {
 
   constructor(private readonly renderer: THREE.WebGLRenderer) {
     this.compositeMat = shader(COMPOSITE_FRAG, {
-      tLayer: { value: null }, tLayerDepth: { value: null }, tBaseDepth: { value: null },
+      tLayer: { value: null }, tLayerDepth: { value: null }, tBaseDepth: { value: null }, tBaseDepth2: { value: null },
       uOpacity: { value: 1 }, uTexel: { value: new THREE.Vector2() }, uHaloRadius: { value: 2 },
     })
     // Premultiplied "over": the shader multiplies rgb by alpha itself.
@@ -149,7 +178,7 @@ export class TreatmentStage {
   }
 
   private makeTarget(w: number, h: number, withDepth: boolean): RT {
-    const samples = Math.min(STAGE_SAMPLES, this.renderer.capabilities.maxSamples)
+    const samples = stageSamples(w, h, this.renderer.capabilities.maxSamples)
     const rt = new THREE.WebGLRenderTarget(w, h, {
       type: THREE.HalfFloatType, depthBuffer: withDepth, stencilBuffer: false, samples: withDepth ? samples : 0,
     })
@@ -170,13 +199,21 @@ export class TreatmentStage {
     this.stats.width = w; this.stats.height = h
   }
 
+  /** The invert layer, built on first use — most scenes never have an "everything else" group. */
+  private ensureLayerInv(): RT {
+    if (!this.layerInv) this.layerInv = this.makeTarget(this.width, this.height, true)
+    return this.layerInv
+  }
+
   private disposeTargets(): void {
-    for (const rt of [this.base, this.layer, this.out, ...this.scratch]) {
+    for (const rt of [this.base, this.layer, this.layerInv, this.out, ...this.scratch]) {
       if (!rt) continue
       rt.depthTexture?.dispose()
       rt.dispose()
     }
+    this.layerInv = null
     this.scratch = []
+    this.width = 0; this.height = 0 // a disposed stage must re-allocate on next use
   }
 
   /** A scratch target that is none of `used`. Three scratches guarantee one is always free. */
@@ -190,11 +227,6 @@ export class TreatmentStage {
     this.renderer.setRenderTarget(to)
     this.quad.material = mat
     this.quad.render(this.renderer)
-  }
-
-  private blit(tex: THREE.Texture, to: RT): void {
-    this.copyMat.uniforms.tDiffuse!.value = tex
-    this.pass(this.copyMat, to)
   }
 
   /** Separable blur of `src` by `radius` px. Returns the target holding the result (never `src`). */
@@ -228,10 +260,11 @@ export class TreatmentStage {
     }
     if (t.kind === 'pixelate') {
       const dst = this.free(src)
+      const cellPx = Math.max(1, t.cellSize * this.renderer.getPixelRatio())
       this.pixelateMat.uniforms.tDiffuse!.value = src.texture
-      this.pixelateMat.uniforms.uCell!.value = Math.max(1, t.cellSize * this.renderer.getPixelRatio())
+      this.pixelateMat.uniforms.uCell!.value = cellPx
       this.pass(this.pixelateMat, dst)
-      return { rt: dst, haloPx: t.cellSize }
+      return { rt: dst, haloPx: cellPx } // device px, like blur's radiusPx — uHaloRadius is in texels
     }
     if (t.kind === 'glow') {
       const bright = this.free(src)
@@ -253,7 +286,9 @@ export class TreatmentStage {
 
   /** Draw `root`'s subtree alone into `target` via the private layer. Subtrees of OTHER
    *  treated roots are left out (their own group draws them); hidden surfaces (no layer 0)
-   *  and editor helpers stay out. `background` null ⇒ transparent clear. */
+   *  and editor helpers stay out. Lights are skipped: `render()` puts the stage bit on every
+   *  light for the whole frame, so touching one here would strip it in the finally.
+   *  `background` null ⇒ transparent clear. */
   private drawAlone(
     scene: THREE.Scene, camera: THREE.Camera, root: THREE.Object3D, treatedRoots: THREE.Object3D[],
     target: RT, background: THREE.Scene['background'],
@@ -263,7 +298,9 @@ export class TreatmentStage {
     while (stack.length) {
       const o = stack.pop()!
       if (o !== root && treatedRoots.includes(o)) continue
-      if (o.layers.isEnabled(0) && !o.userData.isGizmoHelper) { o.layers.enable(STAGE_LAYER); touched.push(o) }
+      if (o.layers.isEnabled(0) && !o.userData.isGizmoHelper && !(o as THREE.Light).isLight) {
+        o.layers.enable(STAGE_LAYER); touched.push(o)
+      }
       for (const c of o.children) stack.push(c)
     }
     const prevMask = camera.layers.mask
@@ -282,14 +319,35 @@ export class TreatmentStage {
     }
   }
 
-  private composite(layerTex: THREE.Texture, opacity: number, haloPx: number): void {
+  /** Blend one treated layer into the premultiplied accumulator. `layerDepth` is the depth of
+   *  whichever target the group was drawn into; `baseDepth2` a second occluder depth (the
+   *  invert layer) or null when there is none. */
+  private composite(
+    layerTex: THREE.Texture, layerDepth: THREE.Texture | null, baseDepth2: THREE.Texture | null,
+    opacity: number, haloPx: number,
+  ): void {
     const u = this.compositeMat.uniforms
     u.tLayer!.value = layerTex
-    u.tLayerDepth!.value = this.layer.depthTexture
+    u.tLayerDepth!.value = layerDepth
     u.tBaseDepth!.value = this.base.depthTexture
+    u.tBaseDepth2!.value = baseDepth2 ?? this.base.depthTexture
     u.uOpacity!.value = opacity
     u.uHaloRadius!.value = Math.max(2, haloPx)
     this.pass(this.compositeMat, this.out)
+  }
+
+  /** Run `g`'s treatment chain over `layerRt` and blend the result into `out`. */
+  private treatAndComposite(g: MaskedGroup, layerRt: RT, baseDepth2: THREE.Texture | null): void {
+    let src: RT = layerRt
+    let opacity = 1
+    let halo = 0
+    for (const t of g.treatments) {
+      if (t.kind === 'fade') { opacity *= t.opacity; continue }
+      const res = this.applyEffect(src, t)
+      src = res.rt
+      halo = Math.max(halo, res.haloPx)
+    }
+    this.composite(src.texture, layerRt.depthTexture, baseDepth2, opacity, halo)
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], ctx: StageContext): THREE.Texture {
@@ -312,8 +370,13 @@ export class TreatmentStage {
     const prevVis = new Map<THREE.Object3D, boolean>()
     const hide = (o: THREE.Object3D): void => { if (!prevVis.has(o)) prevVis.set(o, o.visible); o.visible = false }
     const unhideAll = (): void => { for (const [o, v] of prevVis) o.visible = v; prevVis.clear() }
+    let result: THREE.Texture = this.out.texture
     try {
-      r.autoClear = true
+      // MUST stay false: every quad pass goes through renderer.render(), which asks
+      // WebGLBackground to clear the bound target whenever autoClear is on — that would wipe
+      // the accumulator before each composite blends into it. The scene draws below clear
+      // explicitly, and a Color/texture scene.background still force-clears on its own.
+      r.autoClear = false
       // 1. Base: everything but the treated objects — or, inverted, the inverted object alone.
       if (invertGroup) {
         this.drawAlone(scene, camera, ctx.objectRoots.get(invertGroup.objectId)!, treatedRoots, this.base, prevBackground)
@@ -325,33 +388,37 @@ export class TreatmentStage {
         r.render(scene, camera)
         unhideAll()
       }
-      this.blit(this.base.texture, this.out)
-      // 2. One layer per group, composited in stack order.
-      for (const g of groups) {
-        const root = ctx.objectRoots.get(g.objectId)!
-        if (g.invert) {
-          for (const o of treatedRoots) hide(o) // this object AND the other treated ones (their own groups draw them)
-          scene.background = null
-          r.setRenderTarget(this.layer)
-          r.setClearColor(0x000000, 0)
-          r.clear()
-          r.render(scene, camera)
-          scene.background = prevBackground
-          unhideAll()
-        } else {
-          this.drawAlone(scene, camera, root, treatedRoots, this.layer, null)
-        }
-        let src: RT = this.layer
-        let opacity = 1
-        let halo = 0
-        for (const t of g.treatments) {
-          if (t.kind === 'fade') { opacity *= t.opacity; continue }
-          const res = this.applyEffect(src, t)
-          src = res.rt
-          halo = Math.max(halo, res.haloPx)
-        }
-        this.composite(src.texture, opacity, halo)
+      this.premulMat.uniforms.tDiffuse!.value = this.base.texture
+      this.pass(this.premulMat, this.out)
+
+      // 2a. The "everything else" group first, so its depth is available as the second
+      //     occluder for every normal group below (its own test is against the base alone).
+      let invDepth: THREE.Texture | null = null
+      if (invertGroup) {
+        const inv = this.ensureLayerInv()
+        for (const o of treatedRoots) hide(o) // this object AND the other treated ones (their own groups draw them)
+        scene.background = null
+        r.setRenderTarget(inv)
+        r.setClearColor(0x000000, 0)
+        r.clear()
+        r.render(scene, camera)
+        scene.background = prevBackground
+        unhideAll()
+        this.treatAndComposite(invertGroup, inv, null)
+        invDepth = inv.depthTexture
       }
+      // 2b. Then every normal group in plan order, each tested against base AND invert depth.
+      for (const g of groups) {
+        if (g.invert) continue
+        this.drawAlone(scene, camera, ctx.objectRoots.get(g.objectId)!, treatedRoots, this.layer, null)
+        this.treatAndComposite(g, this.layer, invDepth)
+      }
+      // 3. One un-premultiply back to straight alpha for the consumers downstream. The
+      //    scratch it lands in is not touched again until the next render().
+      const outStraight = this.free()
+      this.unpremulMat.uniforms.tDiffuse!.value = this.out.texture
+      this.pass(this.unpremulMat, outStraight)
+      result = outStraight.texture
     } finally {
       unhideAll()
       scene.background = prevBackground
@@ -361,12 +428,12 @@ export class TreatmentStage {
     }
     this.stats.frames++
     this.stats.groups = groups.length
-    return this.out.texture
+    return result
   }
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.copyMat, this.blurMat, this.pixelateMat, this.brightMat, this.glowMergeMat, this.compositeMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.brightMat, this.glowMergeMat, this.compositeMat]) m.dispose()
     this.quad.dispose()
   }
 }

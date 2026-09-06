@@ -629,6 +629,10 @@ export class SceneEngine {
     this.postChain?.dispose()
     this.postChain = null
     this.postW = this.postH = 0
+    // Same reason as the PostChain: the treatment stage's render targets died with the
+    // context, so drop it and let the next frame build a fresh one.
+    this.treatmentStage?.dispose()
+    this.treatmentStage = null
     // Cached GLBs live on the lost context and are shared by reference (loadGlb
     // clones the hierarchy but not the geometry) — clear so the re-sync re-parses.
     clearGlbCache()

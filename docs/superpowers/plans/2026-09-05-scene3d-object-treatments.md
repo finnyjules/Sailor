@@ -1914,7 +1914,9 @@ export class TreatmentStage {
     const hide = (o: THREE.Object3D): void => { if (!prevVis.has(o)) prevVis.set(o, o.visible); o.visible = false }
     const unhideAll = (): void => { for (const [o, v] of prevVis) o.visible = v; prevVis.clear() }
     try {
-      r.autoClear = true
+      // MUST stay false: every quad pass goes through renderer.render(), whose WebGLBackground
+      // clears the bound target when autoClear is on — that would wipe the accumulator.
+      r.autoClear = false
       // 1. Base: everything but the treated objects — or, inverted, the inverted object alone.
       if (invertGroup) {
         this.drawAlone(scene, camera, ctx.objectRoots.get(invertGroup.objectId)!, treatedRoots, this.base, prevBackground)
