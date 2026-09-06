@@ -679,3 +679,47 @@ describe('image transparency', () => {
     expect(m.version).toBeGreaterThan(0)
   })
 })
+
+describe('image adjustments', () => {
+  it('carries a live uniform bucket that updates without a rebuild', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' })) as THREE.MeshStandardMaterial & { userData: { imageUniforms: { uImgContrast: { value: number } } } }
+    const u = m.userData.imageUniforms
+    expect(u.uImgContrast.value).toBe(1)
+    expect(updateMaterial(m, base({ type: 'image', image: 'a.png', imageContrast: 1.6 }))).toBe(true)
+    expect(m.userData.imageUniforms).toBe(u)
+    expect(u.uImgContrast.value).toBe(1.6)
+  })
+
+  it('injects the adjustment into the compiled fragment shader', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' }))
+    const shader = { uniforms: {} as Record<string, unknown>, vertexShader: '', fragmentShader: 'void main() {\n#include <map_fragment>\n}' }
+    m.onBeforeCompile!(shader as never, null as never)
+    expect(shader.fragmentShader).toContain('sailorImageAdjust')
+    expect(shader.fragmentShader).toContain('#include <map_fragment>')
+    expect(shader.uniforms.uImgContrast).toBe((m.userData.imageUniforms as { uImgContrast: unknown }).uImgContrast)
+  })
+
+  // The whole design point of Task 10: brightness/contrast/saturation are injected
+  // UNCONDITIONALLY with identity defaults specifically so moving them never crosses a
+  // program-define boundary. Tasks 8/9 each asserted the "bumps on a boundary crossing"
+  // half of this kind of contract but not the "does NOT bump within a range" half — this
+  // is the one property this feature exists for, so it must be asserted directly, not
+  // just implied by the absence of a `needsUpdate` write in the source.
+  it('never recompiles when brightness, contrast or saturation move — that is the entire design point', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' }))
+    m.version = 0
+    updateMaterial(m, base({ type: 'image', image: 'a.png', imageBrightness: 0.4, imageContrast: 1.7, imageSaturation: 0 }))
+    expect(m.version).toBe(0)
+  })
+
+  it('also injects on the unlit (Basic) variant, which has no roughness/metalness slot but still has <map_fragment>', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', unlit: true }))
+    expect(m).toBeInstanceOf(THREE.MeshBasicMaterial)
+    const shader = { uniforms: {} as Record<string, unknown>, vertexShader: '', fragmentShader: 'void main() {\n#include <map_fragment>\n}' }
+    m.onBeforeCompile!(shader as never, null as never)
+    expect(shader.fragmentShader).toContain('sailorImageAdjust')
+    m.version = 0
+    updateMaterial(m, base({ type: 'image', image: 'a.png', unlit: true, imageBrightness: 0.2 }))
+    expect(m.version).toBe(0)
+  })
+})

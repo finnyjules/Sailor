@@ -620,6 +620,12 @@ export const SCENE_CONTROLS: SceneControl[] = [
     hint: 'Mirrors the picture top to bottom', when: isImageMaterial,
   } as SceneControl,
   color('object.material.imageTint', 'Tint', MATERIAL_DEFAULTS.imageTint, 'Material', { when: isImageMaterial }),
+  slider('object.material.imageBrightness', 'Brightness', -1, 1, 0.01, 'Material', MATERIAL_DEFAULTS.imageBrightness,
+    'Lifts or lowers the whole picture', { when: isImageMaterial }),
+  slider('object.material.imageContrast', 'Contrast', 0, 2, 0.01, 'Material', MATERIAL_DEFAULTS.imageContrast,
+    'Pushes the light and dark parts of the picture apart', { when: isImageMaterial }),
+  slider('object.material.imageSaturation', 'Saturation', 0, 2, 0.01, 'Material', MATERIAL_DEFAULTS.imageSaturation,
+    'Drains the picture toward grey, or pushes its colours further', { when: isImageMaterial }),
   slider('object.material.imageGlow', 'Glow', 0, 5, 0.05, 'Material', MATERIAL_DEFAULTS.imageGlow,
     'Makes the picture light itself, like a screen or a sign', {
       when: isImageMaterial,

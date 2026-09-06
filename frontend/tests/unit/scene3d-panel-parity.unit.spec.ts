@@ -121,6 +121,19 @@ const ROW: Record<string, Row> = {
 
   // image — look / colour (Task 6 of the image-options plan)
   [`${M}imageTint`]: { label: 'Tint', kind: 'color' },
+  // image — brightness/contrast/saturation shader adjustments (Task 10 of the image-options plan)
+  [`${M}imageBrightness`]: {
+    label: 'Brightness', kind: 'slider', min: -1, max: 1, step: 0.01,
+    hint: 'Lifts or lowers the whole picture',
+  },
+  [`${M}imageContrast`]: {
+    label: 'Contrast', kind: 'slider', min: 0, max: 2, step: 0.01,
+    hint: 'Pushes the light and dark parts of the picture apart',
+  },
+  [`${M}imageSaturation`]: {
+    label: 'Saturation', kind: 'slider', min: 0, max: 2, step: 0.01,
+    hint: 'Drains the picture toward grey, or pushes its colours further',
+  },
   // image — emissive self-light (Task 9 of the image-options plan)
   [`${M}imageGlow`]: {
     label: 'Glow', kind: 'slider', min: 0, max: 5, step: 0.05,
@@ -430,7 +443,7 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
       `${M}imageFlipX`, `${M}imageFlipY`,
     ],
     'Image look': [
-      `${M}imageTint`, `${M}imageGlow`,
+      `${M}imageTint`, `${M}imageBrightness`, `${M}imageContrast`, `${M}imageSaturation`, `${M}imageGlow`,
     ],
     // imageCutout is showIf-gated on imageAlpha === true; MATERIAL_DEFAULTS has it off, so
     // — same convention as imageTilingY above — it is absent from the default-state row
@@ -710,7 +723,9 @@ describe('Scene3D panel parity — image look sub-card', () => {
     const o = createPrimitive('box')
     o.material.type = 'image'
     const card = rendered(doc, o, SCENE_PANEL_SECTIONS).find((c) => c.title === 'Image look')
-    expect(card?.keys).toEqual([`${M}imageTint`, `${M}imageGlow`])
+    expect(card?.keys).toEqual([
+      `${M}imageTint`, `${M}imageBrightness`, `${M}imageContrast`, `${M}imageSaturation`, `${M}imageGlow`,
+    ])
   })
 })
 

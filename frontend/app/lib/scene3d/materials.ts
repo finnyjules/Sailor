@@ -18,6 +18,7 @@ import {
 import { toHeightPixels } from './relief'
 import { isResolvedTexture, textureMapFilename, ensureTextureFetched, type TextureManifest } from './textures'
 import { applyImageTransform, imageWrapMode, type NaturalSize } from './imageMap'
+import { imageUniforms, writeImageUniforms, IMAGE_ADJUST_GLSL, IMAGE_ADJUST_CALL, type ImageUniforms } from './imageShader'
 // The field module — the ONLY place a ShaderSpec becomes pixels (see its ownership contract).
 // Scene3D is a second, independent consumer alongside Space Type/Shape Studio's
 // ~/lib/spacetype/fills.ts: it never routes through `Fill`/`FILL_TYPES` (SceneMaterial has no
@@ -1335,6 +1336,19 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
       t.userData.imageFilename = mat.image ?? ''
       applyImageTransparency(t, mat)
       applyImageGlow(t, mat)
+      // Colour adjustments: always injected, identity by default — see imageShader.ts on
+      // why this is unconditional rather than gated on a non-neutral value.
+      const iu = imageUniforms(mat)
+      t.onBeforeCompile = (shader) => {
+        Object.assign(shader.uniforms, iu)
+        shader.fragmentShader = shader.fragmentShader
+          .replace('void main() {', `${IMAGE_ADJUST_GLSL}\nvoid main() {`)
+          .replace('#include <map_fragment>', IMAGE_ADJUST_CALL)
+      }
+      // Without this, three pools the compiled program with every OTHER material that has
+      // the same feature defines — including materials with no injection at all.
+      t.customProgramCacheKey = () => 'scene3d-image'
+      t.userData.imageUniforms = iu
       m = t
       break
     }
@@ -1641,6 +1655,8 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
       if (s.map) applyImageTransform(s.map, mat, m.userData.imageNatural as NaturalSize | undefined)
       applyImageTransparency(m, mat)
       applyImageGlow(m, mat)
+      const iu = m.userData.imageUniforms as ImageUniforms | undefined
+      if (iu) writeImageUniforms(iu, mat)
       return true
     }
     case 'shaderFill': {
