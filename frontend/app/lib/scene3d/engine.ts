@@ -25,6 +25,7 @@ import { pathToShapes } from './svgPath'
 import { buildLightWidget, setWidgetSelected, disposeWidget } from '~/lib/scene3d/lightWidgets'
 import { PostChain, postEnabled, DEFAULT_POST, type PostSettings } from '~/lib/spacetype/post'
 import { collectEditorHelpers } from '~/lib/scene3d/passes'
+import { syncTreatmentShells } from './treatmentShells'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry } from './gem'
@@ -906,6 +907,8 @@ export class SceneEngine {
           // placeholder — apply against the LATEST object state (stamped on the
           // root each sync), not the one captured when the load started.
           syncGlbMaterials(root!, (root!.userData.glbObj as GlbObject | undefined) ?? obj, this.lightView, this.clay, this.id)
+          // The interior meshes only exist now — attach any edge treatments to them.
+          syncTreatmentShells(root!, (root!.userData.glbObj as GlbObject | undefined) ?? obj, { lightView: this.lightView })
         }).catch(() => { /* surface shows the error state; the group stays empty */ })
       } else if (obj.kind === 'group') {
         root = new THREE.Group() // an empty transform node — no geometry, no light, no marker
@@ -1093,6 +1096,13 @@ export class SceneEngine {
       // map rather than spinning its rounds out.
       void build.finally(() => { if (this.pendingDecals.get(pendingKey) === build) this.pendingDecals.delete(pendingKey) })
     }
+    // Edge-family treatments ride on the object's own meshes. Runs AFTER the material
+    // work above (which re-mounts `mesh.material = real` every sync) so an x-ray override
+    // is put back on top, and after geometry swaps so a shell never keeps a disposed
+    // geometry (its key includes the geometry uuid).
+    if (obj.kind === 'primitive' || obj.kind === 'glb') {
+      syncTreatmentShells(root, obj, { lightView: this.lightView })
+    }
   }
 
   /** Await every async asset build kicked off by the syncs so far — today, the
@@ -1271,13 +1281,15 @@ export class SceneEngine {
           stack.push(c)
         }
         const mesh = n as THREE.Mesh
+        // Shells carry their own opacity semantics (additive rim, x-ray alpha) — leave them.
+        if (mesh.userData.treatmentShell) continue
         const mat = mesh.material as THREE.Material | THREE.Material[] | undefined
         if (!mat) continue
         const mats = Array.isArray(mat) ? mat : [mat]
         for (const m of mats) {
           const mm = m as THREE.Material & { opacity?: number; transparent?: boolean }
           mm.opacity = o
-          mm.transparent = o < 1
+          mm.transparent = o < 1 || mm.userData?.keepTransparent === true
           mm.needsUpdate = true
         }
       }

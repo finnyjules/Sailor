@@ -11,6 +11,7 @@ import * as THREE from 'three'
 import { stripAlpha } from '~/lib/color/convert'
 import type { SceneDoc } from './config'
 import type { SceneEngine } from './engine'
+import { beginDataPassView } from './treatmentShells'
 
 // Editor-only helpers (TransformControls gizmo, light pick markers) can live
 // nested under an object root (e.g. a light group), not just as direct scene
@@ -99,6 +100,7 @@ export async function renderPasses(
   for (const h of helpers) h.visible = false
   let dmat: THREE.ShaderMaterial | null = null
   let nmat: THREE.MeshNormalMaterial | null = null
+  let restoreDataView: (() => void) | null = null
   try {
     // Beauty — inherit the viewport's exact renderer state (tone mapping, colour
     // space). Transparent background stays transparent.
@@ -120,6 +122,9 @@ export async function renderPasses(
     engine.refreshShaderFields(t, true, width, height)
     engine.renderWithPost(scene, camera, doc.post, t)
     const beauty = canvas.toDataURL('image/png')
+
+    // Rim/outline/wireframe shells are not geometry; a wireframe-hidden surface is.
+    restoreDataView = beginDataPassView(engine.scene)
 
     // Data passes must be raw: tone mapping would corrupt the normal colours and
     // depth ramp, and the shadow catcher would render as a floor in both maps.
@@ -155,6 +160,7 @@ export async function renderPasses(
     engine.grid.visible = prevGrid
     engine.shadowGround.visible = prevGround
     for (const h of helpers) h.visible = true
+    restoreDataView?.()
     // Restore the shared live renderer (do NOT dispose it — the viewport keeps
     // using it). The rAF loop re-renders the viewport at this size next frame.
     renderer.toneMapping = prevToneMapping

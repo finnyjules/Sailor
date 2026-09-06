@@ -23,6 +23,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import type { Vec3 } from './config'
 import type { SceneEngine } from './engine'
+import { SURFACE_HIDDEN_LAYER } from '~/lib/scene3d/treatmentShells'
 
 export interface TransformSnapshot { position: Vec3; rotation: Vec3; scale: Vec3 }
 
@@ -212,6 +213,9 @@ export class SceneInteraction {
       onDecalReposition?: (decalId: string, hit: PlacementHit) => void
     },
   ) {
+    // A surface hidden by a wireframe treatment moves to this layer (treatmentShells.ts):
+    // invisible, but still the thing you click to select the object.
+    this.raycaster.layers.enable(SURFACE_HIDDEN_LAYER)
     this.orbit = new OrbitControls(engine.camera, domElement)
     this.orbit.enableDamping = true
     this.orbit.addEventListener('change', () => callbacks.onCameraChange?.())
