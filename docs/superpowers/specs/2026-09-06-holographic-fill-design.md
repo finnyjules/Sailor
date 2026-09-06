@@ -1,0 +1,206 @@
+# Holographic Fill — Design
+
+**Date:** 2026-09-06
+**Status:** Approved, ready for an implementation plan
+
+## The problem
+
+A designer who wants a holographic surface in the fill system can already reach one — pick
+`shader` as the fill type, choose the **Holographic Foil** effect, and give it a base paint.
+The result is disappointing, and the reason is structural rather than cosmetic.
+
+`shader_effects/holographic.frag` is a **stylize** effect (`generative: false`). It decorates an
+image it is given:
+
+- Its surface normal is derived entirely from the input's luminance gradient
+  (`lx`/`ly` sampled from neighbouring texels). Feed it a flat colour and the gradient is zero,
+  the normal is uniform, and the glancing-angle sheen `fres` becomes a constant across the
+  whole fill — no variation anywhere.
+- Its hue phase is `lum * 2.2 + field * 0.6 + fres * 1.0`. The input's luminance carries the
+  dominant weight; the procedural pattern carries less than a third of it. Remove the image and
+  what remains is a weak, washed-out band.
+- Its metallic branch is `irid * (0.3 + 1.15 * lum)` — brightness scales with input luminance,
+  so a flat input renders uniformly dim.
+
+So the effect is not broken. It is doing its job, which is to lay iridescence over a picture.
+What is missing is holographic as **a surface in its own right** — the thing itself, with
+nothing underneath it.
+
+## What we are building
+
+Two pieces.
+
+**Piece 1 — a generative shader effect.** `shader_effects/holographic_surface.frag` plus a
+manifest entry, following this repo's established "one `.frag` + one manifest entry" pattern.
+`generative: true`, so it needs no input. All of the visual work lives here.
+
+**Piece 2 — a fill-picker entry.** "Holographic" appears in the fill pickers. Choosing it writes
+a shader fill whose spec already names the new effect and carries good defaults, so the user
+reaches convincing foil in one click.
+
+Twenty of the catalog's seventy-four effects are already generative (`aurora`, `plasma`,
+`caustics`, `mesh_gradient`, …), so "produces its own field, needs no input" is an established
+pattern here, not an invention.
+
+## Piece 1 — the shader
+
+### The core
+
+One shared pipeline, with only the first step differing per surface:
+
+1. **Generate a height field** procedurally from `v_texCoord` and `u_seed`.
+2. **Derive a normal** from that height field by central differences — the same shape as the
+   existing effect's `normalize(vec3(-lx, -ly, 0.5))`, but reading the generated field instead
+   of an input texture.
+3. **Compute the view term** — `V` from `u_angle` plus `u_time * u_shimmer`, and a fresnel
+   `fres = pow(1 - dot(N, V), 3)` for the glancing-angle sheen.
+4. **Map phase through the iridescent palette** — the cosine palette
+   `0.5 + 0.5 * cos(TAU * (t + vec3(0, 0.33, 0.66)))`, which the existing effect already uses.
+
+Step 2 is the whole fix: the normal comes from a field we generated rather than from a picture
+we were handed.
+
+### The four surfaces
+
+One `u_surface` enum, mirroring how the existing effect exposes `u_pattern`:
+
+| Value | Label | Height field | Reads as |
+|---|---|---|---|
+| 0 | Crumple | fbm creases at `u_scale` | Mylar balloon, crinkled sticker |
+| 1 | Grating | fine parallel lines along `u_angle` | CD underside, prismatic tape |
+| 2 | Flakes | cellular cells, each with its own random facet normal | Chrome-holo nail polish, glitter vinyl |
+| 3 | Slick | broad low-frequency fbm | Petrol on water, soap bubble |
+
+Flakes differs from the other three in an important way: rather than deriving a normal by
+differencing a continuous height field, each cell gets a **directly assigned random normal**, so
+facets flash discrete colours and edges stay hard. Differencing a cellular field would give soft
+blobs, which is not what glitter looks like.
+
+### Controls
+
+Names reuse the existing effect's wherever they mean the same thing, so the two read as siblings.
+
+| Uniform | Label | Range | Default | Notes |
+|---|---|---|---|---|
+| `u_surface` | Surface | enum (4) | 0 (Crumple) | The table above |
+| `u_scale` | Scale | 0.5–12 | 4 | Crease/line/flake size |
+| `u_iridescence` | Iridescence | 0–1 | 0.85 | Rainbow strength over the base tint |
+| `u_bands` | Bands | 0.5–8 | 3 | Hue cycles across the film |
+| `u_angle` | View angle | 0–360 | 0 | Also the grating direction |
+| `u_shimmer` | Shimmer | 0–1 | 0.25 | Time-driven drift + sparkle |
+| `u_metallic` | Metallic | 0–1 | 0.6 | Translucent film ↔ metal foil |
+| `u_sheen` | Sheen | 0–1 | 0.5 | Matte ↔ wet/polished |
+| `u_tint` | Tint | color | `#8899aa` | The metal underneath the rainbow |
+
+Defaults are deliberately set to land on convincing foil straight from the picker, since Piece 2
+is a one-click entry point. `u_tint` is new relative to the stylize effect, which took its base
+colour from the input it no longer has.
+
+## Piece 2 — the fill-picker entry
+
+### A preset, not a twelfth fill type
+
+`FILL_TYPES` in `app/lib/spacetype/fillTile.ts` is the single source of truth for every fill
+dropdown and currently has eleven members. Adding a twelfth was considered and rejected:
+
+- **Twelve modules import it.** `VectorTypeSurface.vue`, `SpaceTypeSurface.vue`,
+  `FillControl.vue`, `ShaderFillEditor.vue`, `shapefx/controls.ts`, `geoshape/config.ts`,
+  `vectortype/controls.ts`, `texturefx/types.ts`, `scene3d/materials.ts`, `scene3d/config.ts`,
+  `spacetype/fills.ts` and `fillTile.ts` itself. This codebase has already had a `FILL_TYPES`
+  leak reach a place it should not have — a fill type escaping into a 3D texture path and
+  drawing QR codes.
+- **The rendering argues against it more strongly than the blast radius does.** Canvas-painted
+  fill types (`paper`, `noise`, `stripes`, …) go through `fillTexture`, which builds a 2D canvas
+  tile. Per-pixel iridescence there would be slow and markedly worse-looking. Note what
+  `fills.ts` already does at the top of that function: a `shader` fill in the tile path
+  **degrades to its input**. A new type would therefore have to be special-cased into the WebGL
+  field path in every consumer — which is exactly what `type: 'shader'` already is.
+
+As a preset, the fill is a genuine shader fill, so it renders correctly everywhere shader fills
+already render, with no new render paths and no new member in a constant twelve modules read.
+
+### The trade-off, stated plainly
+
+A document saves the fill as `type: 'shader'` with a spec naming `holographic_surface`, not as
+`type: 'holographic'`. Anything that inspects fills by type — an agent patch, a preset browser,
+a future "group by fill type" view — sees a shader fill. If the document must literally say
+holographic, the twelfth type is the way, and this decision reverses.
+
+### Where the entry appears — and where it correctly does not
+
+The four call sites are not uniform, and the entry must respect what each already does. This is
+the part most likely to be got wrong by assuming "add it to every dropdown".
+
+| Call site | Today | Holographic entry |
+|---|---|---|
+| `compositor/FillControl.vue` | all of `FILL_TYPES`, minus `shader` when `nested` (the depth-1 rule) | **Yes.** Also hidden when `nested`, for the same reason — it *is* a shader fill |
+| `SpaceTypeSurface.vue` (slot list, ~line 2011) | full `FILL_TYPES` | **Yes** |
+| `SpaceTypeSurface.vue` (`WORD_FILL_TYPES`, `CARD_FILL_KINDS`) | a deliberate subset — `solid, gradient, ombre, grid, noise` | **No.** These curated subsets already exclude `shader`; Holographic follows the same rule |
+| `VectorTypeSurface.vue` | `FILL_TYPES.filter(paintIsVector)` | **No, and this is correct.** `paintIsVector` → `exportTier`, and a generative shader field cannot be expressed as geometry, so it exports as `raster`. Its absence there is the system working, not a gap to fix |
+
+`ShaderFillEditor.vue` is the shared editor those call sites already mount for a shader fill; it
+needs no change, because the preset produces an ordinary shader fill it already knows how to edit.
+
+Selecting the entry writes a shader fill carrying the defaults from the Controls table above:
+
+```ts
+{
+  type: 'shader',
+  shader: {
+    effectId: 'holographic_surface',
+    params: { surface: 0, scale: 4, iridescence: 0.85, bands: 3, angle: 0,
+              shimmer: 0.25, metallic: 0.6, sheen: 0.5, tint: '#8899aa' },
+    anchor: 'object',
+    speed: 1,
+    seed: 42,
+    input: DEFAULT_SHADER_SPEC.input,
+  },
+}
+```
+
+Two details that are easy to get wrong:
+
+- **Param keys drop the `u_` prefix.** `ShaderSpec.params` is documented as "keyed WITHOUT the
+  `u_` prefix", so it is `surface`, not `u_surface`.
+- **`input` is set but unused.** `ShaderSpec` requires it and the depth-1 rule still applies, so
+  it takes `DEFAULT_SHADER_SPEC.input` rather than being invented or left undefined. The
+  generative effect ignores it, exactly as the other twenty generative effects do inside a
+  shader fill.
+
+## Naming
+
+Two holographic effects will coexist, doing genuinely different jobs. Both should exist.
+
+- **New:** id `holographic_surface`, label **"Holographic"**, category `generative`.
+- **Existing:** id `holographic` keeps its id, label changes from "Holographic Foil" to
+  **"Holographic Overlay"**, category stays `stylize`.
+
+Only the label changes on the existing effect. Ids are what saved documents store, so they stay
+untouched and every existing document keeps resolving.
+
+## Testing
+
+**Golden images.** `tests-unit/shaderfx_golden/` is the established pattern; one golden per
+surface mode.
+
+**The variance guard — the important one.** A shader that compiles, binds and renders a
+completely uniform frame is this feature's version of a silent no-op, and it would pass every
+"does it run" check. Each surface mode gets an explicit assertion that the rendered frame has
+**real variance** — that it is not a constant colour, and that its hue actually spans a range
+rather than sitting on one note. This is the test that fails if the effect silently produces
+nothing.
+
+**Manifest integrity.** The manifest entry's params match the uniforms the `.frag` actually
+declares, and `generative` is `true`. A param declared but not consumed is a dead control.
+
+**Live.** Render it in Texture Studio and as a fill, and confirm the picker entry produces foil
+in one click without further tuning.
+
+## Not in scope
+
+- **The 3D `holographic` material is untouched.** It reads real surface normals and view
+  vectors; this is a flat-field approximation. They are siblings, not duplicates.
+- **The existing stylize effect keeps its behaviour.** Label only.
+- **No animation-system changes.** Shimmer uses the existing `u_time`, as the stylize effect does.
+- **No new fill render path.** If Piece 2 ever needs one, that is the twelfth-type decision
+  above, taken deliberately.
