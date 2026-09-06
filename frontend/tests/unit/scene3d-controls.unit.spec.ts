@@ -97,6 +97,9 @@ describe('SCENE_CONTROLS integrity', () => {
     // Vertical tiling shares the SAME default key as horizontal — see MATERIAL_DEFAULTS'
     // doc and imageTilingXY in imageMap.ts: there is no separate `imageTilingY` default.
     'object.material.imageTilingY': 'imageTiling',
+    'object.material.imageOffsetX': 'imageOffsetX',
+    'object.material.imageOffsetY': 'imageOffsetY',
+    'object.material.imageRotation': 'imageRotation',
     'object.material.screen.density': 'screenDensity',
     'object.material.screen.angle': 'screenAngle',
     'object.material.screen.contrast': 'screenContrast',

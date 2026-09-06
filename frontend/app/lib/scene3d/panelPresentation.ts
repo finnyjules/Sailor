@@ -85,6 +85,7 @@ export const SCENE_PANEL_ORDER = [
   'Light',
   'Decal',
   'Material',
+  'Material/Image placement',
   'Material/Coat & sheen',
   'Material/Glow',
   'Material/Transparency',
@@ -113,6 +114,7 @@ export const SCENE_PANEL_SECTIONS = [...SCENE_PANEL_ORDER, ...POST_SECTIONS] as 
  */
 export function scenePanelChrome(matType: MaterialType | null): Record<string, { badge?: string; open?: boolean }> {
   return {
+    'Image placement': { open: false },
     'Coat & sheen': { open: false },
     Glow: { open: false },
     Transparency: { open: matType === 'glass' },
@@ -542,6 +544,7 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
     'object.material.imageWrap',
     'object.material.imageTiling', 'object.material.imageTilingLinked', 'object.material.imageTilingY',
     'object.material.roughness', 'object.material.metalness',
+    // Note: image offset, rotation, and flip controls are in Material/Image placement sub-card
   ],
   shaderFill: [
     'ui.material.shader', 'object.material.unlit',
@@ -550,6 +553,10 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
 }
 
 const SUB_CARDS: Record<string, readonly string[]> = {
+  'Material/Image placement': [
+    'object.material.imageOffsetX', 'object.material.imageOffsetY', 'object.material.imageRotation',
+    'object.material.imageFlipX', 'object.material.imageFlipY',
+  ],
   'Material/Coat & sheen': [
     'object.material.clearcoat', 'object.material.clearcoatRoughness',
     'object.material.sheen', 'object.material.sheenColor',

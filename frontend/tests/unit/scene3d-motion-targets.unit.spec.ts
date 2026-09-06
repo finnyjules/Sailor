@@ -181,9 +181,9 @@ describe('animatableTargets', () => {
     ['matcap', [...RELIEF, ...SCREEN]],
     ['fresnel', [...RELIEF, ...SCREEN]],
     ['gradient', [...RELIEF, ...SCREEN]],
-    // imageWrap (select) and imageTilingLinked (switch) are not sliders, so they never
-    // reach animatableTargets — only the two tiling sliders do.
-    ['image', [...PBR, ...RELIEF, ...SCREEN, 'material.imageTiling', 'material.imageTilingY']],
+    // imageWrap (select), imageTilingLinked (switch), imageFlipX/Y (switch) are not sliders, so they never
+    // reach animatableTargets — only the tiling and offset/rotation sliders do.
+    ['image', [...PBR, ...RELIEF, ...SCREEN, 'material.imageOffsetX', 'material.imageOffsetY', 'material.imageRotation', 'material.imageTiling', 'material.imageTilingY']],
     ['shaderFill', [...PBR, ...RELIEF, ...SCREEN]],
     ['opalescent', [
       ...PBR, ...COAT, ...RELIEF, ...TEXTURE, ...SCREEN,

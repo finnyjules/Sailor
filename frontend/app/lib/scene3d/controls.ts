@@ -585,6 +585,22 @@ export const SCENE_CONTROLS: SceneControl[] = [
       when: isImageMaterial,
       showIf: { key: 'object.material.imageTilingLinked', equals: false },
     }),
+  slider('object.material.imageOffsetX', 'Horizontal offset', -1, 1, 0.01, 'Material', MATERIAL_DEFAULTS.imageOffsetX,
+    'Slides the picture across the surface, in picture widths', { when: isImageMaterial }),
+  slider('object.material.imageOffsetY', 'Vertical offset', -1, 1, 0.01, 'Material', MATERIAL_DEFAULTS.imageOffsetY,
+    'Slides the picture up and down the surface, in picture heights', { when: isImageMaterial }),
+  slider('object.material.imageRotation', 'Rotation', -180, 180, 1, 'Material', MATERIAL_DEFAULTS.imageRotation,
+    'Turns the picture about its own middle', { when: isImageMaterial }),
+  {
+    key: 'object.material.imageFlipX', label: 'Flip horizontally', kind: 'switch',
+    default: MATERIAL_DEFAULTS.imageFlipX, group: 'Material',
+    hint: 'Mirrors the picture left to right', when: isImageMaterial,
+  } as SceneControl,
+  {
+    key: 'object.material.imageFlipY', label: 'Flip vertically', kind: 'switch',
+    default: MATERIAL_DEFAULTS.imageFlipY, group: 'Material',
+    hint: 'Mirrors the picture top to bottom', when: isImageMaterial,
+  } as SceneControl,
 
   // --- Lighting (doc-level; no active object needed) -------------------------------
   // Simple layer: pick a Look, then nudge three dials. Direction stays visible, so it's

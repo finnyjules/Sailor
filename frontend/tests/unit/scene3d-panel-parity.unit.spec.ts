@@ -107,6 +107,13 @@ const ROW: Record<string, Row> = {
   [`${M}imageTilingLinked`]: { label: 'Link tiling', kind: 'switch', hint: 'One tiling number drives both directions' },
   [`${M}imageTilingY`]: { label: 'Vertical tiling', kind: 'slider', min: 0.25, max: 12, step: 0.25, hint: 'How many times the picture repeats top to bottom' },
 
+  // image — position and orientation (Task 4 of the image-options plan)
+  [`${M}imageOffsetX`]: { label: 'Horizontal offset', kind: 'slider', min: -1, max: 1, step: 0.01, hint: 'Slides the picture across the surface, in picture widths' },
+  [`${M}imageOffsetY`]: { label: 'Vertical offset', kind: 'slider', min: -1, max: 1, step: 0.01, hint: 'Slides the picture up and down the surface, in picture heights' },
+  [`${M}imageRotation`]: { label: 'Rotation', kind: 'slider', min: -180, max: 180, step: 1, hint: 'Turns the picture about its own middle' },
+  [`${M}imageFlipX`]: { label: 'Flip horizontally', kind: 'switch', hint: 'Mirrors the picture left to right' },
+  [`${M}imageFlipY`]: { label: 'Flip vertically', kind: 'switch', hint: 'Mirrors the picture top to bottom' },
+
   // <details> Coat & sheen
   [`${M}clearcoat`]: { label: 'Clearcoat', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Adds a thin glossy varnish layer on top' },
   [`${M}clearcoatRoughness`]: { label: 'Coat roughness', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'How blurred or sharp that varnish coat looks' },
@@ -395,6 +402,10 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
       `${M}imageTiling`, `${M}imageTilingLinked`,
       `${M}roughness`, `${M}metalness`,
     ],
+    'Image placement': [
+      `${M}imageOffsetX`, `${M}imageOffsetY`, `${M}imageRotation`,
+      `${M}imageFlipX`, `${M}imageFlipY`,
+    ],
     'Surface relief': RELIEF_OFF,
     Screen: SCREEN_OFF,
   },
@@ -629,6 +640,20 @@ describe('Scene3D panel parity — Screen', () => {
   })
   it('the Screen card starts collapsed', () => {
     expect(scenePanelChrome('standard').Screen).toEqual({ open: false })
+  })
+})
+
+describe('Scene3D panel parity — image placement sub-card', () => {
+  it('collects the placement rows in its own collapsed card', () => {
+    const doc = defaultDoc()
+    const o = createPrimitive('box')
+    o.material.type = 'image'
+    const card = designCards(doc, o).find((c) => c.title === 'Image placement')
+    expect(card?.keys).toEqual([
+      `${M}imageOffsetX`, `${M}imageOffsetY`, `${M}imageRotation`,
+      `${M}imageFlipX`, `${M}imageFlipY`,
+    ])
+    expect(scenePanelChrome('image')['Image placement']).toEqual({ open: false })
   })
 })
 
@@ -1486,6 +1511,7 @@ describe('Scene3D panel contract', () => {
 
   it('the four bare <details> sub-blocks stay collapsed, and Transparency opens for glass', () => {
     expect(scenePanelChrome('standard')).toEqual({
+      'Image placement': { open: false },
       'Coat & sheen': { open: false }, Glow: { open: false },
       Transparency: { open: false }, Iridescence: { open: false }, Reflection: { open: false },
       Screen: { open: false },
