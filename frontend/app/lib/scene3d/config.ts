@@ -2,6 +2,7 @@
 // the editor mutates a SceneDoc, the engine renders from it, and serializeDoc's
 // output is what the Scene3DStudio node stores in its `scene_state` widget.
 import { sanitizeParams, sanitizeModifiers } from '~/lib/scene3d/primParams'
+import { parseTreatments, type Treatment } from './treatments'
 import type { ObjectMotion, CameraMotion, SceneMotion, SceneMotionTrack, LoopKind, TransitionPreset, Direction, EaseRef, TransitionSpec } from '~/lib/scene3d/motion/types'
 import { DEFAULT_SCENE_MOTION } from '~/lib/scene3d/motion/types'
 import type { TrackEasing } from '~/lib/studio/track'
@@ -231,6 +232,9 @@ export interface SceneObjectBase {
    *  The engine turns this into a real three parent/child edge, so a parent's
    *  transform composes into this object's without any maths of our own. */
   parentId?: string
+  /** Per-object treatments (blur, glow, rim light…), in stack order. Lives HERE, never
+   *  as entries of `doc.objects` — see treatments.ts. Absent means none. */
+  treatments?: Treatment[]
 }
 /** Content for the `text` primitive (the `shape` primitive is params-only —
  *  its geometry is fully parametric, see primParams.ts). Absent `font` falls
@@ -1200,6 +1204,7 @@ export function parseDoc(json: string): SceneDoc {
     ? raw.objects.flatMap((o: any): SceneObject[] => {
         if (!o || typeof o.id !== 'string') return []
         const om = parseObjectMotion(o.motion)
+        const treatments = parseTreatments(o.treatments)
         const common: SceneObjectBase = {
           id: o.id,
           name: typeof o.name === 'string' ? o.name : 'Object',
@@ -1210,6 +1215,7 @@ export function parseDoc(json: string): SceneDoc {
           material: parseMaterial(o.material),
           ...(typeof o.parentId === 'string' ? { parentId: o.parentId } : {}),
           ...(om ? { motion: om } : {}),
+          ...(treatments ? { treatments } : {}),
         }
         if (o.kind === 'glb' && typeof o.url === 'string') {
           return [{ ...common, kind: 'glb', url: o.url, ...(o.materialOverride === true ? { materialOverride: true } : {}) }]

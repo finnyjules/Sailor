@@ -23,6 +23,7 @@ import {
   type SceneDoc, type SceneObject, type PrimitiveObject, type PrimitiveKind, type MaterialType, type GradientStop, type LightKind, type LightObject, type ReliefSpec, type SceneMaterial, type ScreenSpec, type Vec3,
   type DecalObject, type DecalContent,
 } from '~/lib/scene3d/config'
+import { cloneTreatments } from '~/lib/scene3d/treatments'
 import { eulerFromNormal } from '~/lib/scene3d/decals'
 import { getLook, resolveLook, resolveDials } from '~/lib/scene3d/lighting'
 import { HARMONY_TYPES, HARMONY_LABELS } from '~/lib/color/harmony'
@@ -3156,6 +3157,9 @@ function cloneObject(src: SceneObject, existing: SceneObject[] = doc.objects): S
     // cloneMaterial's own treatment of relief.spec/shader for the identical
     // aliasing reason.
     ...(src.motion ? { motion: JSON.parse(JSON.stringify(src.motion)) } : {}),
+    // Treatments travel with the copy under FRESH ids — a shared id would let one motion
+    // track drive both copies (cloneTreatments's own doc).
+    ...(src.treatments ? { treatments: cloneTreatments(src.treatments) } : {}),
     ...(src.kind === 'glb' && src.materialOverride ? { materialOverride: true } : {}),
     // Light fields likewise travel with the copy — same discriminated-union
     // shape as material/params above, just flat on the object instead of nested.

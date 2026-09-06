@@ -1,0 +1,210 @@
+// Per-object treatments: the data model, defaults, parser and the per-frame plan for
+// the masked family. Deliberately three-free and Vue-free so config.ts (whose import
+// graph must never drag in three — see its own header) can import it, and so every
+// rule here unit-tests headless.
+//
+// Treatments live ON the object (`SceneObjectBase.treatments`), never as entries in
+// the flat `doc.objects` array: eight modules iterate that array and the agent/motion
+// path space is built over it, and none of them should have to learn a new kind.
+// Design: docs/superpowers/specs/2026-09-05-scene3d-object-treatments-design.md
+import type { SceneDoc, SceneObject } from './config'
+
+export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade'] as const
+export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe'] as const
+export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS] as const
+export type MaskedTreatmentKind = typeof MASKED_TREATMENT_KINDS[number]
+export type EdgeTreatmentKind = typeof EDGE_TREATMENT_KINDS[number]
+export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind
+
+/** Human names — UI copy for tree rows, inspector card titles and motion target labels.
+ *  Sentence case, never the stored `kind`. */
+export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
+  blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade',
+  rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
+}
+
+interface TreatmentBase {
+  /** Stable id (`trt_<uuid>_<n>`). Motion tracks and agent keys address a treatment by
+   *  this, never by position, so reordering the stack re-points nothing. */
+  id: string
+  /** The eye toggle in the tree. */
+  enabled: boolean
+  /** "Everything else": apply to the rest of the scene instead of this object. Stored
+   *  for every kind for schema simplicity; only the masked family honours it. */
+  invert: boolean
+}
+export interface BlurTreatment extends TreatmentBase { kind: 'blur'; amount: number }
+export interface GlowTreatment extends TreatmentBase { kind: 'glow'; strength: number; threshold: number; tint: string }
+export interface PixelateTreatment extends TreatmentBase { kind: 'pixelate'; cellSize: number }
+export interface FadeTreatment extends TreatmentBase { kind: 'fade'; opacity: number }
+export interface RimLightTreatment extends TreatmentBase { kind: 'rimLight'; color: string; width: number; strength: number }
+export interface OutlineTreatment extends TreatmentBase { kind: 'outline'; color: string; thickness: number }
+export interface XrayTreatment extends TreatmentBase { kind: 'xray'; color: string; opacity: number }
+export interface WireframeTreatment extends TreatmentBase { kind: 'wireframe'; color: string; lineOpacity: number; showSurface: boolean }
+export type Treatment =
+  | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment
+  | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
+
+/** Dial defaults per kind — everything except id/kind/enabled/invert. The ONE source the
+ *  parser, `createTreatment` and the inspector controls all read. */
+export const TREATMENT_DEFAULTS = {
+  blur: { amount: 0.5 },
+  glow: { strength: 1, threshold: 0.6, tint: '#ffffff' },
+  pixelate: { cellSize: 12 },
+  fade: { opacity: 0.5 },
+  rimLight: { color: '#ffffff', width: 0.5, strength: 1 },
+  outline: { color: '#000000', thickness: 0.5 },
+  xray: { color: '#6fd3ff', opacity: 0.35 },
+  wireframe: { color: '#ffffff', lineOpacity: 0.8, showSurface: true },
+} as const
+
+/** How many masked-treatment groups the stage draws per frame. */
+export const TREATED_OBJECT_CAP = 8
+
+export function isMaskedKind(kind: TreatmentKind): kind is MaskedTreatmentKind {
+  return (MASKED_TREATMENT_KINDS as readonly string[]).includes(kind)
+}
+export function isTreatmentKind(v: unknown): v is TreatmentKind {
+  return typeof v === 'string' && (TREATMENT_KINDS as readonly string[]).includes(v)
+}
+/** Only primitives and imported models carry treatments — never lights, groups or decals. */
+export function isTreatmentHost(obj: SceneObject): boolean {
+  return obj.kind === 'primitive' || obj.kind === 'glb'
+}
+
+let idCounter = 0
+export function newTreatmentId(): string {
+  // Same recipe as config.ts's newId(): randomUUID everywhere we run, counter guards a mock.
+  return `trt_${(globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2))}_${++idCounter}`
+}
+
+export function createTreatment(kind: TreatmentKind): Treatment {
+  return { id: newTreatmentId(), kind, enabled: true, invert: false, ...TREATMENT_DEFAULTS[kind] } as Treatment
+}
+
+const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d)
+const str = (v: unknown, d: string): string => (typeof v === 'string' && v ? v : d)
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
+
+/** One stored entry, validated field by field. `undefined` when unusable (no id, an id the
+ *  path resolvers would refuse — empty, dotted, all digits — or an unknown kind). Missing
+ *  dials backfill from TREATMENT_DEFAULTS, so a partially valid entry is kept, not dropped. */
+export function parseTreatment(raw: unknown): Treatment | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  if (typeof r.id !== 'string' || r.id === '' || r.id.includes('.') || /^\d+$/.test(r.id)) return undefined
+  if (!isTreatmentKind(r.kind)) return undefined
+  const base = { id: r.id, enabled: r.enabled !== false, invert: r.invert === true }
+  const D = TREATMENT_DEFAULTS
+  switch (r.kind) {
+    case 'blur': return { ...base, kind: 'blur', amount: clamp01(num(r.amount, D.blur.amount)) }
+    case 'glow': return {
+      ...base, kind: 'glow', strength: Math.max(0, num(r.strength, D.glow.strength)),
+      threshold: clamp01(num(r.threshold, D.glow.threshold)), tint: str(r.tint, D.glow.tint),
+    }
+    case 'pixelate': return { ...base, kind: 'pixelate', cellSize: Math.max(1, Math.round(num(r.cellSize, D.pixelate.cellSize))) }
+    case 'fade': return { ...base, kind: 'fade', opacity: clamp01(num(r.opacity, D.fade.opacity)) }
+    case 'rimLight': return {
+      ...base, kind: 'rimLight', color: str(r.color, D.rimLight.color),
+      width: clamp01(num(r.width, D.rimLight.width)), strength: Math.max(0, num(r.strength, D.rimLight.strength)),
+    }
+    case 'outline': return { ...base, kind: 'outline', color: str(r.color, D.outline.color), thickness: clamp01(num(r.thickness, D.outline.thickness)) }
+    case 'xray': return { ...base, kind: 'xray', color: str(r.color, D.xray.color), opacity: clamp01(num(r.opacity, D.xray.opacity)) }
+    case 'wireframe': return {
+      ...base, kind: 'wireframe', color: str(r.color, D.wireframe.color),
+      lineOpacity: clamp01(num(r.lineOpacity, D.wireframe.lineOpacity)), showSurface: r.showSurface !== false,
+    }
+  }
+  return undefined
+}
+
+/** The stored list. Absent, non-array or empty-after-filtering collapses to `undefined`
+ *  (never `[]`) so a document without treatments round-trips byte-identical — the same
+ *  posture config.ts's parseMotionTracks takes. Duplicate ids keep the first entry. */
+export function parseTreatments(raw: unknown): Treatment[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const seen = new Set<string>()
+  const out: Treatment[] = []
+  for (const entry of raw) {
+    const t = parseTreatment(entry)
+    if (!t || seen.has(t.id)) continue
+    seen.add(t.id)
+    out.push(t)
+  }
+  return out.length ? out : undefined
+}
+
+/** A copy for a duplicated object: same dials, same order, FRESH ids — a shared id would
+ *  make one motion track drive both copies. */
+export function cloneTreatments(list: Treatment[] | undefined): Treatment[] | undefined {
+  if (!list?.length) return undefined
+  return list.map((t) => ({ ...t, id: newTreatmentId() }))
+}
+
+export function treatmentsOf(obj: SceneObject | null | undefined): Treatment[] {
+  return obj?.treatments ?? []
+}
+
+export function findTreatment(
+  doc: SceneDoc, objectId: string, treatmentId: string,
+): { obj: SceneObject; treatment: Treatment; index: number } | null {
+  const obj = doc.objects.find((o) => o.id === objectId)
+  if (!obj) return null
+  const list = treatmentsOf(obj)
+  const index = list.findIndex((t) => t.id === treatmentId)
+  if (index === -1) return null
+  return { obj, treatment: list[index]!, index }
+}
+
+/** Enabled edge-family treatments, in stack order. */
+export function edgeTreatmentsOf(obj: SceneObject): Treatment[] {
+  return treatmentsOf(obj).filter((t) => t.enabled && !isMaskedKind(t.kind))
+}
+
+export interface MaskedGroup {
+  objectId: string
+  invert: boolean
+  /** Stack order — applied one after another to ONE offscreen draw of the object. */
+  treatments: Treatment[]
+  rendered: boolean
+  skipped?: 'cap' | 'invert'
+}
+
+/**
+ * The per-frame plan for the masked family, in doc order (the tree draws `doc.objects`
+ * grouped by parent, each level in array order, so this IS tree order). One group per
+ * (object, invert) pair. Rules:
+ *  - hidden objects, disabled treatments and non-host kinds contribute nothing;
+ *  - at most ONE inverted group renders per frame — two "everything else" blurs stacked
+ *    have no meaning — later ones are `skipped: 'invert'`;
+ *  - at most TREATED_OBJECT_CAP groups render; the rest are `skipped: 'cap'`.
+ * Callers MUST surface skipped groups (the tree does) — a silent skip reads as a bug.
+ */
+export function maskedTreatmentPlan(doc: SceneDoc): MaskedGroup[] {
+  const groups: MaskedGroup[] = []
+  for (const obj of doc.objects) {
+    if (!obj.visible || !isTreatmentHost(obj)) continue
+    const masked = treatmentsOf(obj).filter((t) => t.enabled && isMaskedKind(t.kind))
+    const normal = masked.filter((t) => !t.invert)
+    const inverted = masked.filter((t) => t.invert)
+    if (normal.length) groups.push({ objectId: obj.id, invert: false, treatments: normal, rendered: false })
+    if (inverted.length) groups.push({ objectId: obj.id, invert: true, treatments: inverted, rendered: false })
+  }
+  let rendered = 0
+  let invertUsed = false
+  for (const g of groups) {
+    if (g.invert && invertUsed) { g.skipped = 'invert'; continue }
+    if (rendered >= TREATED_OBJECT_CAP) { g.skipped = 'cap'; continue }
+    g.rendered = true
+    rendered++
+    if (g.invert) invertUsed = true
+  }
+  return groups
+}
+
+/** Ids of every treatment in a group the stage will NOT draw this frame — the tree marks them. */
+export function unrenderedTreatmentIds(plan: MaskedGroup[]): Set<string> {
+  const out = new Set<string>()
+  for (const g of plan) if (!g.rendered) for (const t of g.treatments) out.add(t.id)
+  return out
+}
