@@ -183,7 +183,9 @@ describe('animatableTargets', () => {
     ['gradient', [...RELIEF, ...SCREEN]],
     // imageWrap (select), imageTilingLinked (switch), imageFlipX/Y (switch) are not sliders, so they never
     // reach animatableTargets — only the tiling and offset/rotation sliders do.
-    ['image', [...PBR, ...RELIEF, ...SCREEN, 'material.imageOffsetX', 'material.imageOffsetY', 'material.imageRotation', 'material.imageTiling', 'material.imageTilingY']],
+    // imageAlpha is a switch, not a slider, so it never reaches animatableTargets either —
+    // imageCutout and opacity are the two new sliders Task 8 adds/widens onto image.
+    ['image', [...PBR, ...RELIEF, ...SCREEN, 'material.imageCutout', 'material.imageOffsetX', 'material.imageOffsetY', 'material.imageRotation', 'material.imageTiling', 'material.imageTilingY', 'material.opacity']],
     ['shaderFill', [...PBR, ...RELIEF, ...SCREEN]],
     ['opalescent', [
       ...PBR, ...COAT, ...RELIEF, ...TEXTURE, ...SCREEN,

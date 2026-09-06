@@ -598,3 +598,52 @@ describe('unlit image', () => {
     expect((m as unknown as { roughness?: number }).roughness).toBeUndefined()
   })
 })
+
+describe('image transparency', () => {
+  it('is opaque by default, exactly as before', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' }))
+    expect(m.transparent).toBe(false)
+    expect(m.alphaTest).toBe(0)
+    expect(m.opacity).toBe(1)
+  })
+
+  it('honours the file alpha when asked', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', imageAlpha: true }))
+    expect(m.transparent).toBe(true)
+  })
+
+  it('works identically on the unlit (Basic) variant — transparent/opacity/alphaTest are base Material fields', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', unlit: true, imageAlpha: true, imageCutout: 0.3, opacity: 1 }))
+    expect(m).toBeInstanceOf(THREE.MeshBasicMaterial)
+    expect(m.alphaTest).toBe(0.3)
+    // A pure cutout with opacity at 1 stays non-transparent, exactly as on the Standard branch.
+    expect(m.transparent).toBe(false)
+  })
+
+  it('turns a cutout into alphaTest rather than blending', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', imageAlpha: true, imageCutout: 0.5 }))
+    expect(m.alphaTest).toBe(0.5)
+  })
+
+  it('ignores the cutout while the file alpha is off', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', imageCutout: 0.5 }))
+    expect(m.alphaTest).toBe(0)
+  })
+
+  it('makes the whole surface see-through from opacity', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', opacity: 0.4 }))
+    expect(m.opacity).toBe(0.4)
+    expect(m.transparent).toBe(true)
+  })
+
+  it('recompiles only when a define boundary is actually crossed', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png' }))
+    m.version = 0
+    // A move within the opaque range must not recompile.
+    updateMaterial(m, base({ type: 'image', image: 'a.png', imageTiling: 2 }))
+    expect(m.version).toBe(0)
+    // Crossing into transparency must.
+    updateMaterial(m, base({ type: 'image', image: 'a.png', opacity: 0.5 }))
+    expect(m.version).toBeGreaterThan(0)
+  })
+})

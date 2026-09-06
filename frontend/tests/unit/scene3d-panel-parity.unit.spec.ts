@@ -133,6 +133,14 @@ const ROW: Record<string, Row> = {
   [`${M}emissiveIntensity`]: { label: 'Intensity', kind: 'slider', min: 0, max: 5, step: 0.05, hint: 'How brightly the material glows on its own' },
 
   // <details> Transparency
+  [`${M}imageAlpha`]: {
+    label: 'Use image transparency', kind: 'switch',
+    hint: 'Honours the see-through parts of the file, such as a PNG with a cut-out background',
+  },
+  [`${M}imageCutout`]: {
+    label: 'Cutout', kind: 'slider', min: 0, max: 1, step: 0.01,
+    hint: 'Anything fainter than this is cut away completely, giving a hard edge instead of a soft blend',
+  },
   [`${M}opacity`]: { label: 'Opacity', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'How see-through the whole surface is' },
   [`${M}transmission`]: { label: 'Transmission', kind: 'slider', min: 0, max: 1, step: 0.01, hint: 'Lets light pass through, like glass' },
   [`${M}ior`]: { label: 'IOR', kind: 'slider', min: 1, max: 2.33, step: 0.01, hint: 'How strongly light bends passing through' },
@@ -419,6 +427,10 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
     'Image look': [
       `${M}imageTint`,
     ],
+    // imageCutout is showIf-gated on imageAlpha === true; MATERIAL_DEFAULTS has it off, so
+    // — same convention as imageTilingY above — it is absent from the default-state row
+    // list here even though it is a declared row on this card.
+    Transparency: [`${M}imageAlpha`, `${M}opacity`],
     'Surface relief': RELIEF_OFF,
     Screen: SCREEN_OFF,
   },

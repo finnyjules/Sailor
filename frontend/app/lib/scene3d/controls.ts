@@ -142,6 +142,12 @@ const isImageMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
 const hasUnlitToggle = (doc: SceneDoc, obj?: SceneObject): boolean =>
   isShaderFillMaterial(doc, obj) || isImageMaterial(doc, obj)
 
+// Opacity is a plain Material field every class has, so it reads on the physical types and
+// on image. (transmission/ior/thickness and the rest of the physical block stay
+// standard+glass only — a picture has no volumetric interior.)
+const hasOpacity = (doc: SceneDoc, obj?: SceneObject): boolean =>
+  isPhysicalMaterial(doc, obj) || isImageMaterial(doc, obj)
+
 // roughness/metalness apply to standard, glass and opalescent (always) and to image and
 // shaderFill only while they aren't unlit (a MeshBasicMaterial has no roughness/metalness
 // slot at all). Mirrors the inspector's per-branch rows for these two keys.
@@ -409,7 +415,7 @@ export const SCENE_CONTROLS: SceneControl[] = [
   slider('object.material.emissiveIntensity', 'Emissive intensity', 0, 5, 0.05, 'Material', MATERIAL_DEFAULTS.emissiveIntensity,
     'How brightly the material glows on its own', { when: isPhysicalMaterial }),
   slider('object.material.opacity', 'Opacity', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.opacity,
-    'How see-through the whole surface is', { when: isPhysicalMaterial }),
+    'How see-through the whole surface is', { when: hasOpacity }),
   slider('object.material.iridescence', 'Iridescence', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.iridescence,
     'Strength of the soap-bubble colour shift', { when: isPhysicalMaterial }),
   slider('object.material.iridescenceIOR', 'Iridescence IOR', 1, 2.33, 0.01, 'Material', MATERIAL_DEFAULTS.iridescenceIOR,
@@ -614,6 +620,17 @@ export const SCENE_CONTROLS: SceneControl[] = [
     hint: 'Mirrors the picture top to bottom', when: isImageMaterial,
   } as SceneControl,
   color('object.material.imageTint', 'Tint', MATERIAL_DEFAULTS.imageTint, 'Material', { when: isImageMaterial }),
+  {
+    key: 'object.material.imageAlpha', label: 'Use image transparency', kind: 'switch',
+    default: MATERIAL_DEFAULTS.imageAlpha, group: 'Material',
+    hint: 'Honours the see-through parts of the file, such as a PNG with a cut-out background',
+    when: isImageMaterial,
+  } as SceneControl,
+  slider('object.material.imageCutout', 'Cutout', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.imageCutout,
+    'Anything fainter than this is cut away completely, giving a hard edge instead of a soft blend', {
+      when: isImageMaterial,
+      showIf: { key: 'object.material.imageAlpha', equals: true },
+    }),
 
   // --- Lighting (doc-level; no active object needed) -------------------------------
   // Simple layer: pick a Look, then nudge three dials. Direction stays visible, so it's

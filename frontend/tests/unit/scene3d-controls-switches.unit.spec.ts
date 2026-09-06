@@ -150,6 +150,34 @@ describe('agent vocabulary drops roughness/metalness for an unlit image (hasPbrS
   })
 })
 
+// `object.material.opacity`'s `when` was widened from `isPhysicalMaterial` to `hasOpacity`
+// (Task 8) so an image material offers it too. A panel-level test cannot prove this: opacity
+// carries no `showIf`, so a REVERTED `when` would still pass through the panel's own
+// showIf-composed check — sceneAgentControls filters on `when` alone (see the roughness/
+// metalness describe above for the same trap), so pin the widening directly here.
+describe('agent vocabulary widens opacity to image (hasOpacity)', () => {
+  it('an image material now offers opacity to the agent', () => {
+    const doc = defaultDoc()
+    const obj = objWithType('image')
+    const keys = sceneAgentControls(doc, obj).map((c) => c.key)
+    expect(keys).toContain('object.material.opacity')
+  })
+
+  it('a physical material (standard) still offers it too — the widening only adds, never narrows', () => {
+    const doc = defaultDoc()
+    const obj = objWithType('standard')
+    const keys = sceneAgentControls(doc, obj).map((c) => c.key)
+    expect(keys).toContain('object.material.opacity')
+  })
+
+  it('a material with neither concept (toon) still withholds it — proves the assertions above are not vacuous', () => {
+    const doc = defaultDoc()
+    const obj = objWithType('toon')
+    const keys = sceneAgentControls(doc, obj).map((c) => c.key)
+    expect(keys).not.toContain('object.material.opacity')
+  })
+})
+
 describe('agent vocabulary never leaks the `bindable` schema-only field', () => {
   it('sceneAgentControls output carries no `bindable` field on any control', () => {
     const doc = defaultDoc()

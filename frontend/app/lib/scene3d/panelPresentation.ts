@@ -569,6 +569,7 @@ const SUB_CARDS: Record<string, readonly string[]> = {
   ],
   'Material/Glow': ['object.material.emissive', 'object.material.emissiveIntensity'],
   'Material/Transparency': [
+    'object.material.imageAlpha', 'object.material.imageCutout',
     'ui.material.prism', 'object.material.opacity', 'object.material.transmission',
     'object.material.ior', 'object.material.thickness', 'object.material.dispersion',
     'object.material.attenuationColor', 'object.material.attenuationDistance',

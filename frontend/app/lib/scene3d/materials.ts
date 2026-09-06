@@ -1014,6 +1014,37 @@ function applyPhysical(p: THREE.MeshPhysicalMaterial, mat: SceneMaterial): void 
 }
 
 /**
+ * The image material's transparency, shared by the build and the in-place update so the
+ * two can never disagree.
+ *
+ * Two independent paths, deliberately:
+ *  - `imageAlpha` honours the FILE's own alpha channel. It moves the material into the
+ *    sorted, blended render list, which is why it is off by default rather than always on.
+ *  - `imageCutout` is `alphaTest`: fragments below the threshold leave the shader with
+ *    `discard`, so a sticker or a cut-out leaf gets a hard edge, writes depth, and needs no
+ *    sorting at all. Only meaningful alongside `imageAlpha` — with no alpha channel every
+ *    fragment is 1.0 and the test never fires — so it is gated on it.
+ *  - `opacity` fades the whole surface, and forces `transparent` on its own.
+ *
+ * Both `transparent` and a zero-crossing of `alphaTest` are PROGRAM DEFINE boundaries that
+ * three does not manage for us (unlike transmission/clearcoat/sheen, whose setters
+ * self-recompile). Bump `needsUpdate` on a crossing and NEVER on a plain slider move
+ * inside a range, or every tick recompiles the shader.
+ */
+function applyImageTransparency(m: THREE.Material, mat: SceneMaterial): void {
+  const wasTransparent = m.transparent
+  const wasCutting = m.alphaTest > 0
+  const useAlpha = mat.imageAlpha === true
+  const opacity = mat.opacity ?? MATERIAL_DEFAULTS.opacity
+  m.opacity = opacity
+  m.alphaTest = useAlpha ? (mat.imageCutout ?? MATERIAL_DEFAULTS.imageCutout) : 0
+  // A pure cutout is NOT transparent: it discards, writes depth, and sorts like an opaque
+  // surface — which is the whole reason to reach for it.
+  m.transparent = opacity < 1 || (useAlpha && m.alphaTest === 0)
+  if (m.transparent !== wasTransparent || (m.alphaTest > 0) !== wasCutting) m.needsUpdate = true
+}
+
+/**
  * A Texture the image material owns OUTRIGHT, rather than the shared per-filename
  * `imageCache`.
  *
@@ -1276,6 +1307,7 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
         applyImageTransform(tex, mat, null)
       }
       t.userData.imageFilename = mat.image ?? ''
+      applyImageTransparency(t, mat)
       m = t
       break
     }
@@ -1580,6 +1612,7 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
       // flight must settle onto the CURRENT dials, not the ones it was built with.
       m.userData.imageSpec = mat
       if (s.map) applyImageTransform(s.map, mat, m.userData.imageNatural as NaturalSize | undefined)
+      applyImageTransparency(m, mat)
       return true
     }
     case 'shaderFill': {
