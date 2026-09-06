@@ -102,7 +102,7 @@ const ROW: Record<string, Row> = {
   [`${M}imageProjection`]: {
     label: 'Wrapping', kind: 'select', options: ['uv', 'planar', 'cylindrical', 'spherical', 'box'],
     optionLabels: ['Use the model', 'Flat', 'Cylinder', 'Sphere', 'Box'],
-    hint: 'How the picture is laid onto the shape. Use the model follows the shape own texture coordinates; the others ignore them and project the picture on from outside, which is what you want on text, imported shapes and anything with poor coordinates',
+    hint: 'How the picture is laid onto the shape. Use the model follows the shape\'s own texture coordinates; the others ignore them and project the picture on from outside, which is what you want on text, imported shapes and anything with poor coordinates',
   },
   [`${M}imageProjectionAxis`]: {
     label: 'Facing', kind: 'select', options: ['x', 'y', 'z'],

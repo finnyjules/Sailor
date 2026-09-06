@@ -20,7 +20,8 @@ import { isResolvedTexture, textureMapFilename, ensureTextureFetched, type Textu
 import { applyImageTransform, imageWrapMode, type NaturalSize } from './imageMap'
 import {
   imageUniforms, writeImageUniforms, syncImageMapMatrix,
-  IMAGE_ADJUST_GLSL, IMAGE_PROJECT_VERTEX_GLSL, IMAGE_PROJECT_VERTEX_CALL, imageMapFragment,
+  IMAGE_FRAGMENT_PARS, IMAGE_PROJECT_VERTEX_GLSL, IMAGE_PROJECT_VERTEX_CALL,
+  imageMapFragment, imageEmissiveMapFragment,
   type ImageUniforms,
 } from './imageShader'
 // The field module — the ONLY place a ShaderSpec becomes pixels (see its ownership contract).
@@ -1359,9 +1360,13 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
         shader.vertexShader = shader.vertexShader
           .replace('void main() {', `${IMAGE_PROJECT_VERTEX_GLSL}\nvoid main() {`)
           .replace('#include <begin_vertex>', IMAGE_PROJECT_VERTEX_CALL)
+        // emissivemap_fragment replacement is a no-op on the unlit (Basic) variant's
+        // fragment shader — it has no such include (see applyImageGlow's doc) — so this
+        // splice is safe to run unconditionally on both variants.
         shader.fragmentShader = shader.fragmentShader
-          .replace('void main() {', `${IMAGE_ADJUST_GLSL}\nvoid main() {`)
+          .replace('void main() {', `${IMAGE_FRAGMENT_PARS}\nvoid main() {`)
           .replace('#include <map_fragment>', imageMapFragment(isBox))
+          .replace('#include <emissivemap_fragment>', imageEmissiveMapFragment(isBox))
       }
       // Without this, three pools the compiled program with every OTHER material that has
       // the same feature defines — including materials with no injection at all. 'box' is a

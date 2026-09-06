@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
 import {
-  imageUniforms, writeImageUniforms, IMAGE_ADJUST_GLSL,
-  imageMapFragment, IMAGE_PROJECT_VERTEX_GLSL, IMAGE_PROJECT_VERTEX_CALL,
+  imageUniforms, writeImageUniforms, IMAGE_FRAGMENT_PARS,
+  imageMapFragment, imageEmissiveMapFragment, IMAGE_PROJECT_VERTEX_GLSL, IMAGE_PROJECT_VERTEX_CALL,
 } from '~/lib/scene3d/imageShader'
 import type { SceneMaterial } from '~/lib/scene3d/config'
 
@@ -31,7 +31,7 @@ describe('image adjustment uniforms', () => {
 describe('image adjustment GLSL', () => {
   it('declares each uniform exactly once', () => {
     for (const name of ['uImgBrightness', 'uImgContrast', 'uImgSaturation']) {
-      expect(IMAGE_ADJUST_GLSL.match(new RegExp(`uniform float ${name};`, 'g'))?.length).toBe(1)
+      expect(IMAGE_FRAGMENT_PARS.match(new RegExp(`uniform float ${name};`, 'g'))?.length).toBe(1)
     }
   })
 })
@@ -69,7 +69,12 @@ describe('image projection GLSL', () => {
     expect(frag).not.toContain('#include <map_fragment>')
     expect(frag).toContain('texture2D( map,')
     expect(frag).toContain('sailorImageAdjust')
-    expect(frag).toContain('uImgMapTx')
+    // The projected-coordinate maths (including the uImgMapTx transform) now lives in the
+    // shared `sailorImageUv` helper in IMAGE_FRAGMENT_PARS, not inlined here — see the
+    // review Finding 1 fix, which factored it out so the emissive splice could call the
+    // same helper instead of duplicating the expression.
+    expect(frag).toContain('sailorImageUv( vMapUv )')
+    expect(IMAGE_FRAGMENT_PARS).toContain('uImgMapTx')
   })
 
   it('falls back to the mesh UVs at mode zero', () => {
@@ -78,9 +83,28 @@ describe('image projection GLSL', () => {
 
   it('the box variant triplanar-blends three samples instead of one', () => {
     const frag = imageMapFragment(true)
-    expect(frag.match(/texture2D\( map,/g)?.length).toBe(3)
+    expect(frag.match(/texture2D\( map,/g)).toBeNull() // now inside sailorTriplanarSample
+    expect(frag).toContain('sailorTriplanarWeights( vImgNrm )')
+    expect(frag).toContain('sailorTriplanarSample( map, vImgPos, sailorW )')
     expect(frag).toContain('sailorImageAdjust')
-    expect(frag).toContain('uImgBoxBlend')
+    expect(IMAGE_FRAGMENT_PARS).toContain('uImgBoxBlend')
+    expect(IMAGE_FRAGMENT_PARS.match(/texture2D\( tex,/g)?.length).toBe(3)
+  })
+
+  it('the emissive splice mirrors the diffuse splice: same coordinate, and the box variant shares the same triplanar blend', () => {
+    const single = imageEmissiveMapFragment(false)
+    expect(single).not.toContain('#include <emissivemap_fragment>')
+    expect(single).toContain('texture2D( emissiveMap,')
+    expect(single).toContain('sailorImageUv( vEmissiveMapUv )')
+    // No DECODE_VIDEO_TEXTURE_EMISSIVE branch — this material never binds a video texture
+    // (mirrors imageMapFragment's own dropped DECODE_VIDEO_TEXTURE branch).
+    expect(single).not.toContain('DECODE_VIDEO_TEXTURE')
+    expect(single).toContain('totalEmissiveRadiance *= emissiveColor.rgb;')
+
+    const triplanar = imageEmissiveMapFragment(true)
+    expect(triplanar).toContain('sailorTriplanarWeights( vImgNrm )')
+    expect(triplanar).toContain('sailorTriplanarSample( emissiveMap,')
+    expect(triplanar).toContain('totalEmissiveRadiance *= emissiveColor.rgb;')
   })
 })
 
@@ -105,7 +129,25 @@ describe('three ShaderLib still carries the markers this file splices onto', () 
     expect(THREE.ShaderLib.basic.fragmentShader).toContain('void main() {')
   })
 
-  it('standard vertex shader has the begin_vertex include', () => {
+  // Review Finding 1: the emissive glow splice (imageEmissiveMapFragment) replaces this
+  // include on the standard (lit) fragment shader — the basic (unlit) template has no such
+  // chunk at all (see applyImageGlow's doc), so it is deliberately not asserted here.
+  it('standard fragment shader has the emissivemap_fragment include', () => {
+    expect(THREE.ShaderLib.standard.fragmentShader).toContain('#include <emissivemap_fragment>')
+  })
+
+  // Review Finding 3: the marker guard was asymmetric — it checked `void main() {` and
+  // `#include <begin_vertex>` against the STANDARD vertex shader only, leaving the BASIC
+  // (unlit) vertex shader's own copies of the same two markers — which the same
+  // IMAGE_PROJECT_VERTEX_GLSL/IMAGE_PROJECT_VERTEX_CALL splice depends on for the unlit
+  // variant — completely unguarded.
+  it('standard vertex shader has the begin_vertex include and a main()', () => {
     expect(THREE.ShaderLib.standard.vertexShader).toContain('#include <begin_vertex>')
+    expect(THREE.ShaderLib.standard.vertexShader).toContain('void main() {')
+  })
+
+  it('basic vertex shader has the begin_vertex include and a main()', () => {
+    expect(THREE.ShaderLib.basic.vertexShader).toContain('#include <begin_vertex>')
+    expect(THREE.ShaderLib.basic.vertexShader).toContain('void main() {')
   })
 })

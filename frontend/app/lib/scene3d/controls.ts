@@ -589,7 +589,7 @@ export const SCENE_CONTROLS: SceneControl[] = [
   // mesh's own UV attribute — the real gap on ExtrudeGeometry (text, SVG import) sidewalls
   // and ConvexGeometry (no UV attribute at all).
   select('object.material.imageProjection', 'Wrapping', [...IMAGE_PROJECTIONS], MATERIAL_DEFAULTS.imageProjection, 'Material',
-    'How the picture is laid onto the shape. Use the model follows the shape own texture coordinates; the others ignore them and project the picture on from outside, which is what you want on text, imported shapes and anything with poor coordinates',
+    'How the picture is laid onto the shape. Use the model follows the shape\'s own texture coordinates; the others ignore them and project the picture on from outside, which is what you want on text, imported shapes and anything with poor coordinates',
     {
       when: isImageMaterial,
       optionLabels: ['Use the model', 'Flat', 'Cylinder', 'Sphere', 'Box'],

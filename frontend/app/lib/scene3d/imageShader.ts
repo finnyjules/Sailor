@@ -100,9 +100,20 @@ export const IMAGE_PROJECT_VERTEX_CALL = `#include <begin_vertex>
   vImgPos = position;
   vImgNrm = normal;`
 
-/** Prepended to the fragment shader, ahead of `void main()`. Rec. 709 luma for the
- *  saturation pivot — the same weights the studio's post stack uses. */
-export const IMAGE_ADJUST_GLSL = `
+/**
+ * Prepended to the fragment shader, ahead of `void main()`. Despite the old name
+ * (`IMAGE_ADJUST_GLSL`), this now carries the whole projection library too — nine
+ * uniforms, two varyings and four projection functions, not just the brightness/
+ * contrast/saturation adjustment. Renamed `IMAGE_FRAGMENT_PARS` to say so.
+ *
+ * Rec. 709 luma for the saturation pivot — the same weights the studio's post stack uses.
+ *
+ * `sailorImageUv` and the triplanar helpers below exist so BOTH the diffuse splice
+ * (`imageMapFragment`) and the emissive splice (`imageEmissiveMapFragment`) sample through
+ * the identical projected coordinate / blend weights — see those functions' docs for why
+ * that must hold.
+ */
+export const IMAGE_FRAGMENT_PARS = `
 uniform float uImgBrightness;
 uniform float uImgContrast;
 uniform float uImgSaturation;
@@ -146,7 +157,17 @@ vec2 sailorImageCylindrical( vec3 p, float axis ) {
 }
 
 /** A sphere: longitude across, latitude up. Always Y-up — an axis choice here would only
- *  rotate the picture, which the Rotation control already does. */
+ *  rotate the picture, which the Rotation control already does.
+ *
+ *  DIVERGENCE, KEPT ON PURPOSE (review Finding 4): this puts v = 0 at the north pole and
+ *  winds longitude opposite to three's own SphereGeometry — a net 180° rotation against
+ *  three's convention. It was left exactly this way because it exactly matches this
+ *  repo's own addSphericalUV (roundedGeometry.ts), which every ConvexGeometry/GLB/sculpt
+ *  sphere-ish shape already relies on for "Use the model" wrapping. Matching three's
+ *  SphereGeometry instead would make Sphere wrapping disagree with "Use the model" on
+ *  those shapes — the one case this repo actually cares about — so consistency with our
+ *  own convention wins over consistency with three's. Do not "fix" this without also
+ *  changing addSphericalUV. */
 vec2 sailorImageSpherical( vec3 p ) {
   vec3 d = normalize( sailorImageUnit( p ) - 0.5 );
   return vec2( atan( d.z, d.x ) / 6.2831853 + 0.5, acos( clamp( d.y, -1.0, 1.0 ) ) / 3.1415927 );
@@ -156,6 +177,37 @@ vec2 sailorImageProject( vec3 p, float mode, float axis ) {
   if ( mode < 1.5 ) return sailorImagePlanar( p, axis );
   if ( mode < 2.5 ) return sailorImageCylindrical( p, axis );
   return sailorImageSpherical( p );
+}
+
+/** The single-sample coordinate shared by the diffuse and emissive splices: mesh UVs at
+ *  mode zero, the projected + UV-matrix-transformed coordinate otherwise. \`meshUv\` is
+ *  whichever varying the calling chunk already has in scope (\`vMapUv\`/\`vEmissiveMapUv\`),
+ *  since three computes those per-map from the same shared texture matrix. */
+vec2 sailorImageUv( vec2 meshUv ) {
+  return uImgProjMode < 0.5
+    ? meshUv
+    : ( uImgMapTx * vec3( sailorImageProject( vImgPos, uImgProjMode, uImgProjAxis ), 1.0 ) ).xy;
+}
+
+/** Triplanar blend weights from the face normal — abs + sharpened + renormalised so the
+ *  three axis samples sum to 1. Guarded against a zero-length normal (Finding 5: WebGL
+ *  supplies (0,0,0) when the geometry has no normal attribute, which would otherwise
+ *  divide by zero inside \`normalize\`) by normalising by hand with a floored length. */
+vec3 sailorTriplanarWeights( vec3 n ) {
+  vec3 unit = n / max( length( n ), 1e-6 );
+  vec3 w = abs( unit );
+  w = pow( w, vec3( 1.0 + ( 1.0 - uImgBoxBlend ) * 16.0 ) );
+  return w / max( w.x + w.y + w.z, 1e-4 );
+}
+
+/** Samples \`tex\` along all three planar axes at \`p\` and blends by \`weights\` — the one
+ *  triplanar sample-and-blend shared by the diffuse (map) and emissive (emissiveMap)
+ *  splices, so a box projection's glow blends identically to its picture. */
+vec4 sailorTriplanarSample( sampler2D tex, vec3 p, vec3 weights ) {
+  vec4 sailorX = texture2D( tex, ( uImgMapTx * vec3( sailorImagePlanar( p, 0.0 ), 1.0 ) ).xy );
+  vec4 sailorY = texture2D( tex, ( uImgMapTx * vec3( sailorImagePlanar( p, 1.0 ), 1.0 ) ).xy );
+  vec4 sailorZ = texture2D( tex, ( uImgMapTx * vec3( sailorImagePlanar( p, 2.0 ), 1.0 ) ).xy );
+  return sailorX * weights.x + sailorY * weights.y + sailorZ * weights.z;
 }
 `
 
@@ -171,23 +223,50 @@ vec2 sailorImageProject( vec3 p, float mode, float axis ) {
 export function imageMapFragment(box: boolean): string {
   const single = `
 #ifdef USE_MAP
-  vec2 sailorUv = uImgProjMode < 0.5
-    ? vMapUv
-    : ( uImgMapTx * vec3( sailorImageProject( vImgPos, uImgProjMode, uImgProjAxis ), 1.0 ) ).xy;
+  vec2 sailorUv = sailorImageUv( vMapUv );
   diffuseColor *= texture2D( map, sailorUv );
   diffuseColor.rgb = sailorImageAdjust( diffuseColor.rgb );
 #endif
 `
   const triplanar = `
 #ifdef USE_MAP
-  vec3 sailorN = abs( normalize( vImgNrm ) );
-  sailorN = pow( sailorN, vec3( 1.0 + ( 1.0 - uImgBoxBlend ) * 16.0 ) );
-  sailorN /= max( sailorN.x + sailorN.y + sailorN.z, 1e-4 );
-  vec4 sailorX = texture2D( map, ( uImgMapTx * vec3( sailorImagePlanar( vImgPos, 0.0 ), 1.0 ) ).xy );
-  vec4 sailorY = texture2D( map, ( uImgMapTx * vec3( sailorImagePlanar( vImgPos, 1.0 ), 1.0 ) ).xy );
-  vec4 sailorZ = texture2D( map, ( uImgMapTx * vec3( sailorImagePlanar( vImgPos, 2.0 ), 1.0 ) ).xy );
-  diffuseColor *= sailorX * sailorN.x + sailorY * sailorN.y + sailorZ * sailorN.z;
+  vec3 sailorW = sailorTriplanarWeights( vImgNrm );
+  diffuseColor *= sailorTriplanarSample( map, vImgPos, sailorW );
   diffuseColor.rgb = sailorImageAdjust( diffuseColor.rgb );
+#endif
+`
+  return box ? triplanar : single
+}
+
+/**
+ * REPLACES `#include <emissivemap_fragment>` outright, mirroring `imageMapFragment` — see
+ * that function's doc for why a `#include` replacement rather than an append. Fixes review
+ * Finding 1: without this, `applyImageGlow`'s emissive map sampled through the MESH uv
+ * (`vEmissiveMapUv`) even while the diffuse map sampled through the projected coordinate,
+ * so the glow (a light-box/screen/sign look) stopped lining up with the picture the moment
+ * a non-`uv` projection was chosen — exactly the invariant `applyImageGlow`'s own doc
+ * comment names ("the glow must line up with the picture").
+ *
+ * `DECODE_VIDEO_TEXTURE_EMISSIVE` is dropped deliberately, exactly as `imageMapFragment`
+ * drops `DECODE_VIDEO_TEXTURE`: this material binds still images from the input directory,
+ * never a video texture.
+ *
+ * `box` shares `sailorTriplanarWeights`/`sailorTriplanarSample` with `imageMapFragment`
+ * rather than recomputing the blend, so the emissive map is guaranteed to blend identically
+ * to the diffuse map on a box projection — not just sample the same coordinate.
+ */
+export function imageEmissiveMapFragment(box: boolean): string {
+  const single = `
+#ifdef USE_EMISSIVEMAP
+  vec4 emissiveColor = texture2D( emissiveMap, sailorImageUv( vEmissiveMapUv ) );
+  totalEmissiveRadiance *= emissiveColor.rgb;
+#endif
+`
+  const triplanar = `
+#ifdef USE_EMISSIVEMAP
+  vec3 sailorEmissiveW = sailorTriplanarWeights( vImgNrm );
+  vec4 emissiveColor = sailorTriplanarSample( emissiveMap, vImgPos, sailorEmissiveW );
+  totalEmissiveRadiance *= emissiveColor.rgb;
 #endif
 `
   return box ? triplanar : single

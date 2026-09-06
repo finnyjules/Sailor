@@ -601,6 +601,27 @@ describe('image glow', () => {
     const m = materialFor(base({ type: 'image', image: 'a.png', unlit: true, imageGlow: 2 }))
     expect((m as unknown as { emissiveMap?: unknown }).emissiveMap).toBeUndefined()
   })
+
+  // Review Finding 1: applyImageGlow's own doc comment names the invariant this must hold —
+  // "the glow must line up with the picture". Compiled against THREE's REAL ShaderLib
+  // (not a hand-written fixture): the real `emissivemap_fragment` chunk's literal
+  // `texture2D( emissiveMap, vEmissiveMapUv )` must be gone from the compiled source, and
+  // the shared projected-coordinate helper must appear in its place. Using the real
+  // template means this test actually fails if the emissivemap_fragment replacement in
+  // materials.ts is ever deleted — a hand-written fixture containing only the bare
+  // `#include <emissivemap_fragment>` marker would not catch that regression, since it
+  // never contained the bare sample it is supposed to replace.
+  it('routes the emissive sample through the same projected coordinate as the diffuse sample under a projection', () => {
+    const m = materialFor(base({ type: 'image', image: 'a.png', imageGlow: 2, imageProjection: 'spherical' })) as THREE.MeshStandardMaterial
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader: THREE.ShaderLib.standard.vertexShader,
+      fragmentShader: THREE.ShaderLib.standard.fragmentShader,
+    }
+    m.onBeforeCompile!(shader as never, null as never)
+    expect(shader.fragmentShader).not.toContain('texture2D( emissiveMap, vEmissiveMapUv )')
+    expect(shader.fragmentShader).toContain('sailorImageUv( vEmissiveMapUv )')
+  })
 })
 
 describe('unlit image', () => {
@@ -690,7 +711,7 @@ describe('image adjustments', () => {
     expect(u.uImgContrast.value).toBe(1.6)
   })
 
-  it('injects the adjustment into the compiled fragment shader', () => {
+  it('injects the adjustment into the compiled fragment shader, and the vertex splice that feeds it', () => {
     const m = materialFor(base({ type: 'image', image: 'a.png' }))
     const shader = {
       uniforms: {} as Record<string, unknown>,
@@ -704,6 +725,15 @@ describe('image adjustments', () => {
     // adjustment did — so the literal include tag is gone from the compiled source.
     expect(shader.fragmentShader).not.toContain('#include <map_fragment>')
     expect(shader.uniforms.uImgContrast).toBe((m.userData.imageUniforms as { uImgContrast: unknown }).uImgContrast)
+    // Review Finding 2: `vImgPos`/`vImgNrm` are declared as varyings in the fragment stage
+    // (asserted via sailorImageAdjust's surrounding pars block above) but only ASSIGNED in
+    // the vertex stage — deleting that vertex splice would blank every image material
+    // (fails to link) while every fragment-only assertion above kept passing. Assert the
+    // vertex side directly rather than only its fragment-side consumer.
+    expect(shader.vertexShader).toContain('varying vec3 vImgPos;')
+    expect(shader.vertexShader).toContain('varying vec3 vImgNrm;')
+    expect(shader.vertexShader).toContain('vImgPos = position;')
+    expect(shader.vertexShader).toContain('vImgNrm = normal;')
   })
 
   // The whole design point of Task 10: brightness/contrast/saturation are injected
@@ -722,9 +752,20 @@ describe('image adjustments', () => {
   it('also injects on the unlit (Basic) variant, which has no roughness/metalness slot but still has <map_fragment>', () => {
     const m = materialFor(base({ type: 'image', image: 'a.png', unlit: true }))
     expect(m).toBeInstanceOf(THREE.MeshBasicMaterial)
-    const shader = { uniforms: {} as Record<string, unknown>, vertexShader: '', fragmentShader: 'void main() {\n#include <map_fragment>\n}' }
+    // Review Finding 2: a realistic (non-empty) vertexShader, not '', so the vertex splice
+    // on the unlit path is exercised and asserted exactly like the lit variant above —
+    // the Basic material's onBeforeCompile runs the same vertex splice unconditionally.
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader: 'void main() {\n#include <begin_vertex>\n}',
+      fragmentShader: 'void main() {\n#include <map_fragment>\n}',
+    }
     m.onBeforeCompile!(shader as never, null as never)
     expect(shader.fragmentShader).toContain('sailorImageAdjust')
+    expect(shader.vertexShader).toContain('varying vec3 vImgPos;')
+    expect(shader.vertexShader).toContain('varying vec3 vImgNrm;')
+    expect(shader.vertexShader).toContain('vImgPos = position;')
+    expect(shader.vertexShader).toContain('vImgNrm = normal;')
     m.version = 0
     updateMaterial(m, base({ type: 'image', image: 'a.png', unlit: true, imageBrightness: 0.2 }))
     expect(m.version).toBe(0)
