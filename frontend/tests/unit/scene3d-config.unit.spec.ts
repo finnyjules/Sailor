@@ -6,6 +6,7 @@ import {
   createGroup, sceneHasShaderFill,
   DEFAULT_FONT_URL,
   createSvgPathObject, contentDigest, NOT_PLACEABLE_KINDS, ENVIRONMENT_KINDS,
+  IMAGE_WRAPS, IMAGE_FITS, IMAGE_PROJECTIONS, IMAGE_AXES, IMAGE_TILING_RANGE,
   type GradientStop, type SceneMaterial, type PrimitiveObject,
 } from '~/lib/scene3d/config'
 import { PRIM_GROUPS } from '~/lib/scene3d/primGroups'
@@ -613,5 +614,76 @@ describe('texture set fields', () => {
   })
   it('has a default tiling of 1', () => {
     expect(MATERIAL_DEFAULTS.textureTiling).toBe(1)
+  })
+})
+
+describe('image material options', () => {
+  it('defaults describe a plain, untransformed picture', () => {
+    expect(MATERIAL_DEFAULTS.imageWrap).toBe('clamp')
+    expect(MATERIAL_DEFAULTS.imageTiling).toBe(1)
+    expect(MATERIAL_DEFAULTS.imageTilingLinked).toBe(true)
+    expect(MATERIAL_DEFAULTS.imageOffsetX).toBe(0)
+    expect(MATERIAL_DEFAULTS.imageOffsetY).toBe(0)
+    expect(MATERIAL_DEFAULTS.imageRotation).toBe(0)
+    expect(MATERIAL_DEFAULTS.imageFlipX).toBe(false)
+    expect(MATERIAL_DEFAULTS.imageFlipY).toBe(false)
+    expect(MATERIAL_DEFAULTS.imageFit).toBe('stretch')
+    expect(MATERIAL_DEFAULTS.imageTint).toBe('#ffffff')
+    expect(MATERIAL_DEFAULTS.imageAlpha).toBe(false)
+    expect(MATERIAL_DEFAULTS.imageCutout).toBe(0)
+    expect(MATERIAL_DEFAULTS.imageGlow).toBe(0)
+    expect(MATERIAL_DEFAULTS.imageBrightness).toBe(0)
+    expect(MATERIAL_DEFAULTS.imageContrast).toBe(1)
+    expect(MATERIAL_DEFAULTS.imageSaturation).toBe(1)
+    expect(MATERIAL_DEFAULTS.imageProjection).toBe('uv')
+    expect(MATERIAL_DEFAULTS.imageProjectionAxis).toBe('y')
+    expect(MATERIAL_DEFAULTS.imageBoxBlend).toBe(0.25)
+    expect(MATERIAL_DEFAULTS.imageSeamless).toBe(0)
+  })
+
+  it('every option list contains its own default', () => {
+    expect(IMAGE_WRAPS).toContain(MATERIAL_DEFAULTS.imageWrap)
+    expect(IMAGE_FITS).toContain(MATERIAL_DEFAULTS.imageFit)
+    expect(IMAGE_PROJECTIONS).toContain(MATERIAL_DEFAULTS.imageProjection)
+    expect(IMAGE_AXES).toContain(MATERIAL_DEFAULTS.imageProjectionAxis)
+    expect(IMAGE_TILING_RANGE.min).toBeGreaterThan(0)
+    expect(IMAGE_TILING_RANGE.max).toBeGreaterThan(IMAGE_TILING_RANGE.min)
+  })
+
+  it('round-trips every image option through the document parser', () => {
+    const doc = defaultDoc()
+    const obj = createPrimitive('box', doc.objects)
+    Object.assign(obj.material, {
+      type: 'image', image: 'a.png',
+      imageWrap: 'mirror', imageTiling: 3, imageTilingY: 5, imageTilingLinked: false,
+      imageOffsetX: 0.25, imageOffsetY: -0.25, imageRotation: 45,
+      imageFlipX: true, imageFlipY: true, imageFit: 'cover',
+      imageTint: '#ff8800', imageAlpha: true, imageCutout: 0.4, imageGlow: 2,
+      imageBrightness: 0.2, imageContrast: 1.4, imageSaturation: 0.5,
+      imageProjection: 'cylindrical', imageProjectionAxis: 'z', imageBoxBlend: 0.5,
+      imageSeamless: 0.2,
+    })
+    doc.objects.push(obj)
+    const back = parseDoc(JSON.stringify(doc))
+    expect(back.objects[0]!.material).toMatchObject({
+      imageWrap: 'mirror', imageTiling: 3, imageTilingY: 5, imageTilingLinked: false,
+      imageOffsetX: 0.25, imageOffsetY: -0.25, imageRotation: 45,
+      imageFlipX: true, imageFlipY: true, imageFit: 'cover',
+      imageTint: '#ff8800', imageAlpha: true, imageCutout: 0.4, imageGlow: 2,
+      imageBrightness: 0.2, imageContrast: 1.4, imageSaturation: 0.5,
+      imageProjection: 'cylindrical', imageProjectionAxis: 'z', imageBoxBlend: 0.5,
+      imageSeamless: 0.2,
+    })
+  })
+
+  it('drops junk option values rather than storing them', () => {
+    const doc = defaultDoc()
+    const obj = createPrimitive('box', doc.objects)
+    Object.assign(obj.material, { type: 'image', imageWrap: 'nope', imageFit: 7, imageProjection: null })
+    doc.objects.push(obj)
+    const back = parseDoc(JSON.stringify(doc))
+    expect(back.objects[0]!.material.imageWrap).toBeUndefined()
+    expect(back.objects[0]!.material.imageFit).toBeUndefined()
+    expect(back.objects[0]!.material.imageProjection).toBeUndefined()
   })
 })

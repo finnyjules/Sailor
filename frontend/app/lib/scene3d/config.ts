@@ -166,6 +166,61 @@ export interface SceneMaterial {
   gradientOffset?: number   // -1..1, slides the ramp along the direction
   gradientSpread?: number   // 0.1..3, compresses (<1) / stretches (>1)
   image?: string
+  // ── `image` material only: placement, look, and projection ──────────────────
+  // Read by materials.ts's `case 'image':` and by lib/scene3d/imageMap.ts. Every
+  // field is absent by default and every reader falls back to MATERIAL_DEFAULTS, so
+  // a document written before this block renders identically.
+  /** Sampler behaviour outside 0..1. 'clamp' smears the edge pixel (the historical
+   *  behaviour, and the only sane one at tiling 1); 'tile' repeats; 'mirror' repeats
+   *  every other copy flipped, which is what hides the seam on a photograph. */
+  imageWrap?: ImageWrap
+  /** How many times the picture repeats across the surface. Drives BOTH axes while
+   *  `imageTilingLinked` is not false. */
+  imageTiling?: number
+  /** Vertical repeats. Read ONLY when `imageTilingLinked === false`. */
+  imageTilingY?: number
+  /** Absent or true = one tiling number drives both axes. */
+  imageTilingLinked?: boolean
+  /** Slides the crop, in picture widths/heights. -1..1. */
+  imageOffsetX?: number
+  imageOffsetY?: number
+  /** Degrees, -180..180, about the middle of the picture. */
+  imageRotation?: number
+  imageFlipX?: boolean
+  imageFlipY?: boolean
+  /** How the picture's own aspect ratio is reconciled with the surface. 'stretch'
+   *  is the historical behaviour (squash to fit); 'cover' fills and crops; 'contain'
+   *  fits the whole picture in and leaves the rest to the wrap mode. Needs the file's
+   *  natural pixel size, so it only settles once the image has decoded. */
+  imageFit?: ImageFit
+  /** Multiplies the picture's colour. '#ffffff' (the default) leaves it untouched.
+   *  A SEPARATE field from `color`: the material has always ignored `color` for this
+   *  type, and reading it now would suddenly tint every existing image material with
+   *  whatever colour its document happened to carry. */
+  imageTint?: string
+  /** Honour the file's own alpha channel. Off by default because turning transparency
+   *  on moves the material into the sorted render list. */
+  imageAlpha?: boolean
+  /** alphaTest — fragments below this alpha leave the shader entirely, giving a hard
+   *  cutout with no sorting cost. 0 = off. Only meaningful with `imageAlpha`. */
+  imageCutout?: number
+  /** Binds the picture as an emissive map at this intensity, so it glows on its own.
+   *  0 = off. Ignored while `unlit` is on (a MeshBasicMaterial has no emissive slot). */
+  imageGlow?: number
+  /** Colour adjustments applied in the fragment shader after the map is sampled.
+   *  Brightness -1..1 (0 = off), contrast 0..2 (1 = off), saturation 0..2 (1 = off). */
+  imageBrightness?: number
+  imageContrast?: number
+  imageSaturation?: number
+  /** See ImageProjection. */
+  imageProjection?: ImageProjection
+  /** Which axis 'planar' faces down and 'cylindrical' spins around. */
+  imageProjectionAxis?: ImageAxis
+  /** How softly the three box-projection samples cross-fade at an edge. 0..1. */
+  imageBoxBlend?: number
+  /** Cross-fade width, in picture widths, used to make a photograph tile without a
+   *  visible seam. 0 = off (no pre-pass, the file's own pixels are bound). */
+  imageSeamless?: number
   /** A real-world PBR surface from the ambientCG library (see lib/scene3d/textures.ts).
    *  RESOLVED form is `ambientcg:<AssetId>`; a bare phrase (`wood`) is the agent's
    *  unresolved ask and renders untextured until studioTune resolves it. Only read by
@@ -601,6 +656,26 @@ export const MATERIAL_DEFAULTS = {
   screenGapColor: '#ffffff',
   screenInkColor: '#111111',
   textureTiling: 1,
+  imageWrap: 'clamp' as ImageWrap,
+  imageTiling: 1,
+  imageTilingLinked: true,
+  imageOffsetX: 0,
+  imageOffsetY: 0,
+  imageRotation: 0,
+  imageFlipX: false,
+  imageFlipY: false,
+  imageFit: 'stretch' as ImageFit,
+  imageTint: '#ffffff',
+  imageAlpha: false,
+  imageCutout: 0,
+  imageGlow: 0,
+  imageBrightness: 0,
+  imageContrast: 1,
+  imageSaturation: 1,
+  imageProjection: 'uv' as ImageProjection,
+  imageProjectionAxis: 'y' as ImageAxis,
+  imageBoxBlend: 0.25,
+  imageSeamless: 0,
   shader: DEFAULT_SHADER_SPEC,
   unlit: false,
 }
@@ -624,6 +699,33 @@ export function screenOf(mat: Pick<SceneMaterial, 'screen'>): Required<ScreenSpe
 }
 
 export const TEXTURE_TILING_RANGE = { min: 0.25, max: 12, step: 0.25 } as const
+
+// ── Image material: how the picture lands on the surface ─────────────────────
+// Every one of these is OPTIONAL on SceneMaterial and absent by default, so a
+// document saved before this feature loads and renders exactly as it did.
+export type ImageWrap = 'clamp' | 'tile' | 'mirror'
+export const IMAGE_WRAPS: ImageWrap[] = ['clamp', 'tile', 'mirror']
+
+export type ImageFit = 'stretch' | 'cover' | 'contain'
+export const IMAGE_FITS: ImageFit[] = ['stretch', 'cover', 'contain']
+
+/** How the picture is mapped onto the surface. 'uv' samples the mesh's own UV
+ *  attribute (what the material has always done); the other four IGNORE it and
+ *  derive coordinates from object-space position — the point of the feature, since
+ *  ExtrudeGeometry (text, SVG import) and ConvexGeometry either stretch their UVs
+ *  or have none at all. 'box' is a three-sample triplanar blend and is therefore
+ *  its own shader program (see identityKey in materials.ts); the other four share
+ *  one program and switch on a uniform. */
+export type ImageProjection = 'uv' | 'planar' | 'cylindrical' | 'spherical' | 'box'
+export const IMAGE_PROJECTIONS: ImageProjection[] = ['uv', 'planar', 'cylindrical', 'spherical', 'box']
+
+export type ImageAxis = 'x' | 'y' | 'z'
+export const IMAGE_AXES: ImageAxis[] = ['x', 'y', 'z']
+
+/** Same shape and the same bounds as TEXTURE_TILING_RANGE — deliberately a separate
+ *  constant, because the ambientCG set's tiling and the uploaded picture's tiling are
+ *  independent features that may drift apart. */
+export const IMAGE_TILING_RANGE = { min: 0.25, max: 12, step: 0.25 } as const
 
 // ── Gradient derivations (shared by the material factory and the Selection UI,
 // so the editor and the render can never disagree) ───────────────────────────
@@ -1123,6 +1225,32 @@ export function parseDoc(json: string): SceneDoc {
     if (typeof m?.image === 'string') out.image = m.image
     if (typeof m?.texture === 'string' && m.texture.trim()) out.texture = m.texture.trim()
     if (typeof m?.textureTiling === 'number') out.textureTiling = num(m.textureTiling, MATERIAL_DEFAULTS.textureTiling)
+    // Image options: the same copy-only-when-present rule every optional field above
+    // follows, so an absent field stays absent and the reader's MATERIAL_DEFAULTS
+    // fallback applies. An option-valued field is dropped entirely unless the stored
+    // value is one this build knows — a junk or future value must never reach the
+    // material factory's switch statements.
+    if (typeof m?.imageWrap === 'string' && IMAGE_WRAPS.includes(m.imageWrap)) out.imageWrap = m.imageWrap
+    if (typeof m?.imageFit === 'string' && IMAGE_FITS.includes(m.imageFit)) out.imageFit = m.imageFit
+    if (typeof m?.imageProjection === 'string' && IMAGE_PROJECTIONS.includes(m.imageProjection)) out.imageProjection = m.imageProjection
+    if (typeof m?.imageProjectionAxis === 'string' && IMAGE_AXES.includes(m.imageProjectionAxis)) out.imageProjectionAxis = m.imageProjectionAxis
+    if (typeof m?.imageTiling === 'number') out.imageTiling = num(m.imageTiling, MATERIAL_DEFAULTS.imageTiling)
+    if (typeof m?.imageTilingY === 'number') out.imageTilingY = num(m.imageTilingY, MATERIAL_DEFAULTS.imageTiling)
+    if (typeof m?.imageTilingLinked === 'boolean') out.imageTilingLinked = m.imageTilingLinked
+    if (typeof m?.imageOffsetX === 'number') out.imageOffsetX = num(m.imageOffsetX, MATERIAL_DEFAULTS.imageOffsetX)
+    if (typeof m?.imageOffsetY === 'number') out.imageOffsetY = num(m.imageOffsetY, MATERIAL_DEFAULTS.imageOffsetY)
+    if (typeof m?.imageRotation === 'number') out.imageRotation = num(m.imageRotation, MATERIAL_DEFAULTS.imageRotation)
+    if (typeof m?.imageFlipX === 'boolean') out.imageFlipX = m.imageFlipX
+    if (typeof m?.imageFlipY === 'boolean') out.imageFlipY = m.imageFlipY
+    if (typeof m?.imageTint === 'string') out.imageTint = m.imageTint
+    if (typeof m?.imageAlpha === 'boolean') out.imageAlpha = m.imageAlpha
+    if (typeof m?.imageCutout === 'number') out.imageCutout = num(m.imageCutout, MATERIAL_DEFAULTS.imageCutout)
+    if (typeof m?.imageGlow === 'number') out.imageGlow = num(m.imageGlow, MATERIAL_DEFAULTS.imageGlow)
+    if (typeof m?.imageBrightness === 'number') out.imageBrightness = num(m.imageBrightness, MATERIAL_DEFAULTS.imageBrightness)
+    if (typeof m?.imageContrast === 'number') out.imageContrast = num(m.imageContrast, MATERIAL_DEFAULTS.imageContrast)
+    if (typeof m?.imageSaturation === 'number') out.imageSaturation = num(m.imageSaturation, MATERIAL_DEFAULTS.imageSaturation)
+    if (typeof m?.imageBoxBlend === 'number') out.imageBoxBlend = num(m.imageBoxBlend, MATERIAL_DEFAULTS.imageBoxBlend)
+    if (typeof m?.imageSeamless === 'number') out.imageSeamless = num(m.imageSeamless, MATERIAL_DEFAULTS.imageSeamless)
     if (typeof m?.clearcoat === 'number') out.clearcoat = num(m.clearcoat, MATERIAL_DEFAULTS.clearcoat)
     if (typeof m?.clearcoatRoughness === 'number') out.clearcoatRoughness = num(m.clearcoatRoughness, MATERIAL_DEFAULTS.clearcoatRoughness)
     if (typeof m?.sheen === 'number') out.sheen = num(m.sheen, MATERIAL_DEFAULTS.sheen)
