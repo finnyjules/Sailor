@@ -1387,6 +1387,17 @@ describe('Scene3D panel parity — reading values', () => {
     expect(readSceneControl(doc, o, `${M}relief.invert`)).toBe(false)
   })
 
+  it('imageTilingY reads its own default (1) not horizontal tiling default, even when absent from doc', () => {
+    const doc = defaultDoc()
+    const o = prim('image')
+    // Unlink tiling so imageTilingY becomes visible
+    o.material.imageTilingLinked = false
+    // Do NOT set imageTilingY in the document — it should be absent
+    delete o.material.imageTilingY
+    // Panel should read 1 from MATERIAL_DEFAULTS.imageTilingY, not 0
+    expect(readSceneControl(doc, o, `${M}imageTilingY`)).toBe(1)
+  })
+
   it('the ramp angles read through gradientAngles, so a legacy gradientAxis still shows', () => {
     const doc = defaultDoc()
     const o = prim('gradient')

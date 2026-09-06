@@ -37,7 +37,7 @@ export function imageWrapMode(mat: SceneMaterial): { key: string; wrap: THREE.Wr
  *  value the user last typed into it survives being unlinked and relinked. */
 export function imageTilingXY(mat: SceneMaterial): [number, number] {
   const x = mat.imageTiling ?? MATERIAL_DEFAULTS.imageTiling
-  if (mat.imageTilingLinked === false) return [x, mat.imageTilingY ?? MATERIAL_DEFAULTS.imageTiling]
+  if (mat.imageTilingLinked === false) return [x, mat.imageTilingY ?? MATERIAL_DEFAULTS.imageTilingY]
   return [x, x]
 }
 

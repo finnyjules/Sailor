@@ -659,6 +659,7 @@ export const MATERIAL_DEFAULTS = {
   imageWrap: 'clamp' as ImageWrap,
   imageTiling: 1,
   imageTilingLinked: true,
+  imageTilingY: 1,
   imageOffsetX: 0,
   imageOffsetY: 0,
   imageRotation: 0,
@@ -1235,7 +1236,7 @@ export function parseDoc(json: string): SceneDoc {
     if (typeof m?.imageProjection === 'string' && IMAGE_PROJECTIONS.includes(m.imageProjection)) out.imageProjection = m.imageProjection
     if (typeof m?.imageProjectionAxis === 'string' && IMAGE_AXES.includes(m.imageProjectionAxis)) out.imageProjectionAxis = m.imageProjectionAxis
     if (typeof m?.imageTiling === 'number') out.imageTiling = num(m.imageTiling, MATERIAL_DEFAULTS.imageTiling)
-    if (typeof m?.imageTilingY === 'number') out.imageTilingY = num(m.imageTilingY, MATERIAL_DEFAULTS.imageTiling)
+    if (typeof m?.imageTilingY === 'number') out.imageTilingY = num(m.imageTilingY, MATERIAL_DEFAULTS.imageTilingY)
     if (typeof m?.imageTilingLinked === 'boolean') out.imageTilingLinked = m.imageTilingLinked
     if (typeof m?.imageOffsetX === 'number') out.imageOffsetX = num(m.imageOffsetX, MATERIAL_DEFAULTS.imageOffsetX)
     if (typeof m?.imageOffsetY === 'number') out.imageOffsetY = num(m.imageOffsetY, MATERIAL_DEFAULTS.imageOffsetY)
