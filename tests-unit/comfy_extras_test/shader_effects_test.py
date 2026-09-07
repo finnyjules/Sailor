@@ -210,7 +210,11 @@ def test_server_render_matches_goldens():
             golden_path = os.path.join(golden_dir, f"{eff.id}_{size}.png")
             assert os.path.isfile(golden_path), f"missing golden for {eff.id} at {size} — run generate_goldens.py"
             golden = np.asarray(Image.open(golden_path).convert("RGB"), dtype=np.float32) / 255.0
-            uniforms = resolve_params(eff, "{}")
+            # to_uniforms converts a hex colour param into the vec3 the shader wants;
+            # resolve_params alone leaves it a string and render_effect rejects it. The
+            # generator (generate_goldens.py) has always done this — the test had drifted,
+            # and no colour-param effect was ever reached to expose it.
+            uniforms = to_uniforms(eff, resolve_params(eff, "{}"))
             textures = {}
             for t in eff.textures:
                 from comfy_extras._shader_effects import ASSETS_DIR
