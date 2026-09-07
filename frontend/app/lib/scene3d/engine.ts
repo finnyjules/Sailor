@@ -411,7 +411,7 @@ export function buildGeometry(
     // does not come across, so the Cloner's `varyTint` stamp was silently dropped here
     // and a faceted clone set would render untinted. Latent so far only because
     // `gradient` is the only material that asks for the facet variant and `gradient` is
-    // in NO_BASE_COLOR (materials.ts), so nothing looked at the stamp; both halves of
+    // in NO_BASE_COLOR (config.ts), so nothing looked at the stamp; both halves of
     // that are documented as things a follow-up may change. Carried explicitly rather
     // than by copying the whole bag, so a future userData field has to opt in.
     if (geo.userData.varyTint === true) flat.userData = { ...flat.userData, varyTint: true }

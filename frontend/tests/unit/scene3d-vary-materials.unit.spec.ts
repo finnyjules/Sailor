@@ -36,7 +36,7 @@ const varyUniforms = (m: THREE.Material) =>
 
 /** The material's own base colour, read back from `.color` — not all seven tinted
  *  types carry one (`matcap` never writes it at all; see the comment above
- *  `NO_BASE_COLOR`/`applyVaryTint` in materials.ts), so this can be `undefined`. */
+ *  `NO_BASE_COLOR` in config.ts, `applyVaryTint` in materials.ts), so this can be `undefined`. */
 const baseColorHex = (m: THREE.Material) => (m as Tintable).color?.getHexString()
 
 describe('materialFor with vertex colours', () => {
