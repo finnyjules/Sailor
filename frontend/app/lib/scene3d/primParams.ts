@@ -260,7 +260,7 @@ export const MODIFIER_SPECS: ParamSpec[] = [
   // exactly as Shape Studio keeps its `fills` list beside its numeric schema.
   // Every default is the identity, so an existing scene renders unchanged.
   // Option lists are APPEND-ONLY — the stored value is the option INDEX.
-  { key: 'varyMode', label: 'Vary', hint: 'How a property changes from one copy to the next — evenly along the sequence, randomly, or strongest near a point', min: 0, max: 2, step: 1, default: 0, control: 'options', options: ['sequence', 'random', 'falloff'] },
+  { key: 'varyMode', label: 'Pattern', hint: 'How a property changes from one copy to the next — evenly along the sequence, randomly, or strongest near a point', min: 0, max: 2, step: 1, default: 0, control: 'options', options: ['sequence', 'random', 'falloff'] },
   { key: 'varySeed', label: 'Vary seed', hint: 'Shuffles the random variation into a different arrangement', min: 0, max: 99, step: 1, default: 0 },
   { key: 'varyFalloffCenter', label: 'Centre', hint: 'Where along the copies the variation is strongest', min: 0, max: 1, step: 0.01, default: 0 },
   { key: 'varyFalloffRadius', label: 'Reach', hint: 'How far from the centre the variation still applies', min: 0.01, max: 1, step: 0.01, default: 0.5 },

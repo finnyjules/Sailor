@@ -342,7 +342,7 @@ const ANCHOR_LABEL: Record<string, string> = {
   // Vary. The three pickers borrow MODIFIER_SPECS' own captions (modLabel), so these
   // read exactly as the spec declares them; the caption and the palette are literals.
   'ui.cloner.vary': 'Vary',
-  'ui.cloner.varyMode': 'Vary',
+  'ui.cloner.varyMode': 'Pattern',
   'ui.cloner.varyColor': 'Vary colour',
   'ui.cloner.varyPalette': 'Palette',
   'ui.cloner.varyColorSpread': 'Spread',
