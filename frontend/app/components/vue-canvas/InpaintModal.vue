@@ -424,11 +424,19 @@ async function doSamSelect(nx: number, ny: number) {
   inpaintError.value = ''
   samBusy.value = true
   try {
-    const source = imageToDataUrl(sourceImg.value, out.value.w, out.value.h)
-    const point = { x: Math.round(nx * out.value.w), y: Math.round(ny * out.value.h) }
-    const mask = await inpaint.segment(source, point)
-    const m = await loadImage(mask)
-    samMask.value = imageToDataUrl(m, out.value.w, out.value.h)
+    const w = out.value.w, h = out.value.h
+    const source = imageToDataUrl(sourceImg.value, w, h)
+    const point = { x: Math.round(nx * w), y: Math.round(ny * h) }
+    // segment() runs segment-everything SAM and picks the smallest segment under
+    // the click; it returns a ready white-on-black mask at (w,h), or null when
+    // the click didn't land on a selectable object.
+    const mask = await inpaint.segment(source, point, w, h)
+    if (!mask) {
+      inpaintError.value = "Nothing to select there — click the object's body, or paint the area instead."
+      tool.value = 'paint'
+      return
+    }
+    samMask.value = mask
     brush.clear()
     // Remove intent: the click IS the command — erase immediately.
     if (props.intent === 'remove') await runInpaint(true)

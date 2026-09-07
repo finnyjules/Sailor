@@ -176,6 +176,52 @@ export function pickSamSegments(
   return Array.from(winners).sort((a, b) => a - b)
 }
 
+/** Union the selected SAM candidate masks into ONE white-on-OPAQUE-black RGBA
+ *  buffer sized (w,h) — the format the Inpaint modal's mask consumers expect
+ *  (rebuildSilhouette reads max(RGB)→alpha; FLUX Fill reads white = fill).
+ *  Candidates may be at any resolution; each is nearest-neighbour sampled to
+ *  (w,h). A pixel is white if ANY selected candidate is white there
+ *  (luminance*alpha > 127). An empty selection yields an all-black opaque mask. */
+export function unionSelectedMasks(
+  candidates: MaskCandidate[], idxs: number[], w: number, h: number,
+): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(w * h * 4)
+  for (let p = 0; p < w * h; p++) out[p * 4 + 3] = 255   // opaque black backdrop
+  for (const idx of idxs) {
+    const c = candidates[idx]
+    if (!c) continue
+    for (let y = 0; y < h; y++) {
+      const sy = Math.min(c.h - 1, Math.floor((y / h) * c.h))
+      for (let x = 0; x < w; x++) {
+        const sx = Math.min(c.w - 1, Math.floor((x / w) * c.w))
+        const so = (sy * c.w + sx) * 4
+        const lum = 0.2126 * c.data[so]! + 0.7152 * c.data[so + 1]! + 0.0722 * c.data[so + 2]!
+        const a = c.data[so + 3]! / 255
+        if (lum * a > 127) {
+          const o = (y * w + x) * 4
+          out[o] = 255; out[o + 1] = 255; out[o + 2] = 255
+        }
+      }
+    }
+  }
+  return out
+}
+
+/** Single-click select: choose the smallest segment containing `point`
+ *  (segment-everything SAM returns background/object/part candidates) and return
+ *  a white-on-opaque-black mask buffer sized (imgW,imgH), or null if no segment
+ *  qualifies (caller falls back to manual brushing). This is the single-point
+ *  restriction of the Compositor smart-select flow (pickSamSegments + union) —
+ *  the Inpaint modal's click-to-select consumes it. `point` is in the (imgW,imgH)
+ *  pixel space, i.e. the space of the image sent to SAM. */
+export function pickClickMask(
+  candidates: MaskCandidate[], point: Pt, imgW: number, imgH: number,
+): Uint8ClampedArray | null {
+  const idxs = pickSamSegments(candidates, [point], [], imgW, imgH)
+  if (!idxs.length) return null
+  return unionSelectedMasks(candidates, idxs, imgW, imgH)
+}
+
 /** Layer-model transform for a crop of the source image: where an image-space
  *  bbox lands on the artboard when extracted as its own layer. Keeps the
  *  source rotation; w/h follow the layer convention (width-normalized). */
