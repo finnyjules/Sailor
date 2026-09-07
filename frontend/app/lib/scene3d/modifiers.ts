@@ -11,6 +11,7 @@ import * as THREE from 'three'
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { modifierValue, totalClones } from '~/lib/scene3d/primParams'
 import { varyWeights, varyColorAt, varyStepFactor, type VarySettings } from '~/lib/vary'
+import { stripAlpha } from '~/lib/color/convert'
 
 /** Rough ceiling for the final merged geometry. `totalClones` (the doc value
  *  the panel shows back) is never reduced; subdivision stops early, and
@@ -327,7 +328,6 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
   if (recipes.length === 0) return geo.clone()
   const tinted = recipes.some((r) => r.color !== undefined)
   const copies: THREE.BufferGeometry[] = []
-  const c = new THREE.Color()
   for (const r of recipes) {
     const copy = geo.clone()
     if (tinted) {
@@ -337,7 +337,21 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
       // conversion — the same convention materials.ts documents from the other
       // direction around line 948 ("getHex(SRGBColorSpace) undoes three's
       // sRGB→linear ingest").
-      c.set(r.color ?? '#ffffff')
+      //
+      // The colour picker (StudioColor) emits 8-digit #rrggbbaa hex, and
+      // sanitizeVaryPalette (config.ts) deliberately admits 3/6/8-digit forms
+      // into a saved palette, so an alpha-suffixed swatch genuinely reaches
+      // here. THREE.Color.set only parses 3- and 6-digit hex — anything else
+      // it WARNS and leaves the Color unchanged, it does not throw — so the
+      // alpha must be stripped before handing the string to three. Do not
+      // "simplify" this back out.
+      //
+      // `c` is constructed fresh per recipe (not hoisted above the loop) so
+      // that an unparseable swatch — set() failing silently — falls back to
+      // this Color's default WHITE instead of inheriting the previous
+      // copy's colour left over in a reused instance.
+      const c = new THREE.Color()
+      c.set(stripAlpha(r.color ?? '#ffffff'))
       const n = copy.getAttribute('position').count
       const arr = new Float32Array(n * 3)
       for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b }

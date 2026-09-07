@@ -91,6 +91,57 @@ describe('mergeClones', () => {
     expect(g.getAttribute('position').count).toBe(base.getAttribute('position').count)
     expect(g.getAttribute('position').array).toEqual(base.getAttribute('position').array)
   })
+
+  it('reads an 8-digit #rrggbbaa swatch the same as its 6-digit form — alpha must be stripped, not choke three', () => {
+    // The colour picker emits 8-digit hex, and sanitizeVaryPalette admits it into
+    // a saved palette, so this is exactly what reaches mergeClones from a real
+    // document. Regression guard for THREE.Color.set silently ignoring 8-digit
+    // hex (and leaving the Color at its previous value) unless alpha is stripped.
+    const per = box().getAttribute('position').count
+    const withAlpha = planClones(2, SETTINGS, V({ colorEnabled: true, palette: ['#4c6ef5ff', '#f59f0080'] }))
+    const without = planClones(2, SETTINGS, V({ colorEnabled: true, palette: ['#4c6ef5', '#f59f00'] }))
+    const gA = mergeClones(box(), withAlpha)
+    const gB = mergeClones(box(), without)
+    const colA = gA.getAttribute('color')!
+    const colB = gB.getAttribute('color')!
+    for (const idx of [0, per]) {
+      expect(colA.getX(idx)).toBeCloseTo(colB.getX(idx), 6)
+      expect(colA.getY(idx)).toBeCloseTo(colB.getY(idx), 6)
+      expect(colA.getZ(idx)).toBeCloseTo(colB.getZ(idx), 6)
+    }
+  })
+
+  it('falls back an unparseable swatch to a defined colour instead of bleeding a neighbour\'s colour', () => {
+    // stripAlpha (color/convert.ts) routes non-hex input through clampHex, which is
+    // a TOTAL function: anything it cannot recognise as 3/6/8-digit hex clamps to
+    // opaque black ('#000000'), not left verbatim for three to reject. So the
+    // deterministic fallback this call site actually produces for garbage is
+    // BLACK, not the mergeClones-level `?? '#ffffff'` default (that default only
+    // fires for a nullish recipe.color, never for a non-empty unparseable string).
+    // What matters for THIS regression guard is that the fallback is the SAME
+    // fixed colour regardless of position — proof the swatch did not inherit
+    // whichever colour happened to render immediately before it.
+    const per = box().getAttribute('position').count
+    // Garbage sandwiched between two DIFFERENT valid colours: if the middle copy
+    // bled, it would read as blue (from the previous copy); if a fresh Color's
+    // own default leaked, it would read as white — neither should happen here.
+    const recipes = planClones(3, SETTINGS, V({ colorEnabled: true, palette: ['#4c6ef5', 'not-a-colour', '#f59f00'] }))
+    const g = mergeClones(box(), recipes)
+    const col = g.getAttribute('color')!
+    const black = new THREE.Color('#000000')
+    const blue = new THREE.Color('#4c6ef5')
+    const orange = new THREE.Color('#f59f00')
+    // Copy 1 (the unparseable swatch) lands on stripAlpha's deterministic black fallback...
+    expect(col.getX(per)).toBeCloseTo(black.r, 5)
+    expect(col.getY(per)).toBeCloseTo(black.g, 5)
+    expect(col.getZ(per)).toBeCloseTo(black.b, 5)
+    // ...never on copy 0's blue, which a hoisted-and-reused THREE.Color would bleed forward...
+    expect(col.getX(per)).not.toBeCloseTo(blue.r, 2)
+    // ...and copy 2 (the next valid entry) is unaffected by copy 1's failed parse.
+    expect(col.getX(per * 2)).toBeCloseTo(orange.r, 5)
+    expect(col.getY(per * 2)).toBeCloseTo(orange.g, 5)
+    expect(col.getZ(per * 2)).toBeCloseTo(orange.b, 5)
+  })
 })
 
 describe('applyModifiers regression guard', () => {
