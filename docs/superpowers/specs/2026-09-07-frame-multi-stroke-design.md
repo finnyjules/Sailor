@@ -201,8 +201,8 @@ The stroke is read in more places than the painter, and missing one is how this 
 | --- | --- |
 | `drawLayerContent` (rect, ellipse, polygon, star) | loop the stack instead of one `strokeAligned` |
 | `drawPath`, `drawText` | same |
-| `outsideStrokeReachPx` | reach is now `max(distance + width)` over the stack, not a fixed `outside` test — it is the padding a corner-pin or DOF offscreen needs, so a distant stroke clipped at the offscreen edge is the first bug this prevents |
-| `localLayerBox` | selection box and handles must contain the outermost stroke |
+| `outsideStrokePadPx` | the pad is now `max(0, distance + width)` over the whole stack, not a single `align === 'outside'` test — it is the padding a corner-pin or DOF offscreen needs, so a distant stroke clipped at the offscreen edge is the first bug this prevents |
+| `localLayerBox` | **unchanged, deliberately.** It excludes stroke today (see its own "no stroke padding" note); widening it would move the selection handles on every already-stroked layer in every saved frame — a visible change nobody asked for. A distant stroke therefore paints outside its selection box, exactly as an outside-aligned stroke already does. |
 | `lib/compositor/silhouetteCache.ts` | the torn-edge / feather silhouette reads `strokeAlign` today |
 | `layerToVector` (the SVG export descriptors) | one `<path>` per band stroke; a shapes stroke writes its marks as paths |
 | `lib/agent/surfaces/compositor.ts` | `strokeField` returns a single field name today; the describe pass reports one stroke |
@@ -234,7 +234,7 @@ worse, and the notice is the smallest honest answer.)
    `round(perimeter / spacing)`; `follow: false` leaves every mark at the same angle; the marks
    take the stroke's paint.
 6. **Reach.** A layer with a distant stroke inside a corner-pin: the stroke is not clipped at the
-   offscreen edge. This is the assertion that pins `outsideStrokeReachPx`.
+   offscreen edge. This is the assertion that pins `outsideStrokePadPx`.
 7. **Live, in a real browser.** Add three strokes from the tree, drag to reorder, set a distance,
    switch one to shapes — asserting the canvas pixel hash CHANGES on each edit and RESTORES
    exactly on undo. Dials that only store their value are the recurring failure here; every dial
