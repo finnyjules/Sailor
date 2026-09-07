@@ -30,6 +30,7 @@ import { assertRateLimit } from '../../lib/rateLimit'
 import { preflightMeter } from '../../utils/requestMeter'
 import { deployMode } from '../../utils/deployMode'
 import { recordOwner } from '../../utils/resourceOwners'
+import { DEFAULT_LORA_RANK } from '~~/shared/lora-defaults'
 
 function sanitize(name: string): string {
   return (name || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'my-lora'
@@ -88,7 +89,7 @@ export default defineEventHandler(async (event) => {
       input_images: body.datasetUrl,
       steps: body.steps ?? 500,
       learning_rate: body.learningRate ?? 0.0004,
-      lora_rank: body.loraRank ?? 16,
+      lora_rank: body.loraRank ?? DEFAULT_LORA_RANK,
       batch_size: body.batchSize ?? 1,
       seed: body.seed ?? Math.floor(Math.random() * 1_000_000_000),
       autocaption: false, // we ship our own captions via the zip

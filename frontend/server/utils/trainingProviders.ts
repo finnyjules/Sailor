@@ -13,6 +13,7 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import os from 'node:os'
 import type { TrainingJob } from './trainingQueue'
+import { DEFAULT_LORA_RANK } from '~~/shared/lora-defaults'
 import type { ProviderResult, RunnerProvider } from './trainingRunner'
 import { linkTrainedCharacter } from './characterLink'
 import { MeterRefusalError, preflightMeterFor } from './requestMeter'
@@ -88,7 +89,7 @@ async function startLora(job: TrainingJob, token: string): Promise<ProviderResul
     input_images: job.datasetUrl,
     steps: p.steps ?? 500,
     learning_rate: p.learningRate ?? 0.0004,
-    lora_rank: p.loraRank ?? 16,
+    lora_rank: p.loraRank ?? DEFAULT_LORA_RANK,
     batch_size: p.batchSize ?? 1,
     seed: p.seed ?? Math.floor(Math.random() * 1_000_000_000),
     autocaption: false,

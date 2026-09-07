@@ -16,6 +16,7 @@
 import { ArrowRight, Check, ChevronDown, ChevronRight, Cloud, Cpu, Download, Drama, Loader2, Plus, RefreshCcw, Sparkles, Upload, Wand, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { assembleAesthetic } from '~/lib/lora/aesthetic'
+import { DEFAULT_LORA_RANK } from '~~/shared/lora-defaults'
 import JSZip from 'jszip'
 import {
   CHARACTER_SHOT_SCENES,
@@ -267,7 +268,7 @@ const form = reactive({
   triggerWord: '',
   steps: 1000,
   learningRate: 0.0004,
-  rank: 16,
+  rank: DEFAULT_LORA_RANK,
   // Advanced
   batchSize: 1,
   gradAccumulationSteps: 1,
@@ -285,14 +286,6 @@ const form = reactive({
 })
 
 const advancedOpen = ref(false)
-
-// Character LoRAs must hold face + body + hair in one trigger token, so they
-// need more capacity than a style. Bump rank to 32 for character mode unless the
-// user has already changed it; restore the style default when switching back.
-watch(trainingKind, (kind, prev) => {
-  if (kind === 'character' && form.rank === 16) form.rank = 32
-  else if (kind === 'style' && prev === 'character' && form.rank === 32) form.rank = 16
-})
 
 // Open a fresh workflow with a Flux generator preloaded to use the trained LoRA.
 // FluxLoRARemoteNode resolves the local filename to its CDN url via the sidecar
@@ -2161,8 +2154,8 @@ onBeforeUnmount(() => {
               </label>
               <p class="text-[11px] text-white/45 mb-2 leading-relaxed">
                 Higher = more capacity + bigger file.
-                <span class="text-white/65">16</span> is the sweet spot;
-                <span class="text-white/65">32–64</span> for complex subjects.
+                <span class="text-white/65">32</span> is the sweet spot;
+                <span class="text-white/65">64</span> for complex subjects.
               </p>
               <input
                 v-model.number="form.rank"
