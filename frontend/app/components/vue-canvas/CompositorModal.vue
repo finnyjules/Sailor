@@ -100,7 +100,6 @@ import type { PaletteFamily } from '~/lib/color/seedFamily'
 import type { GradientStop } from '~/lib/color/harmony'
 import { layerPaletteAssignments } from '~/lib/compositor/distribute'
 import PostEffectsControls from '~/components/vue-canvas/PostEffectsControls.vue'
-import { isChainEffect, isGpuEffect } from '~/lib/compositor/postEffects'
 import CompositorEffectRow from '~/components/vue-canvas/compositor/CompositorEffectRow.vue'
 import {
   EFFECT_ORDER, EFFECT_LABELS, isPinnedKind, effectStackOf, writeStackToLayer,
@@ -108,8 +107,6 @@ import {
   type EffectInstance, type EffectKind,
 } from '~/lib/compositor/effectStack'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
-/** Everything the post-effects panel owns: the 2D chain plus the GPU stage. */
-const isPanelEffect = (e: { type: string }) => isChainEffect(e) || isGpuEffect(e)
 import {
   samplePointsFromStroke, layerAffine, invertAffine, applyAffine, wiredImageAffine,
   luminanceToAlpha, alphaBounds, cutoutPlacement, wiredCutoutPlacement, pickSamSegments,
@@ -6998,7 +6995,7 @@ onUnmounted(() => {
            not the first one of its type. -->
       <template v-else-if="activeEffect">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-1.5 text-[11px] text-white/50" data-testid="effect-breadcrumb">
-          <button type="button" class="truncate hover:text-white/80" @click="selectedEffect = null">{{ activeEffectLayer?.name || 'Layer' }}</button>
+          <button type="button" class="truncate hover:text-white/80" @click="selectedEffect = null">{{ activeEffectLayer ? rowLabel({ layer: activeEffectLayer }) : 'Layer' }}</button>
           <ChevronRight class="size-3 shrink-0 opacity-60" />
           <span class="truncate text-white/80">{{ EFFECT_LABELS[activeEffect!.type] }}</span>
         </div>
