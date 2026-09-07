@@ -136,44 +136,160 @@ void main() {
 
     // Thin-film phase. Both terms are surface terms: the film's own thickness, and
     // the optical path stretching as the view goes glancing. Neither reads a pixel.
-    float phase = u_bands * (thick * 0.5 + (1.0 - ndv) * 0.75) + view * 0.16 + u_seed * 0.017;
+    // Slick is petrol on WATER: a far thinner film than a crumpled sheet, so its
+    // fringes sit much closer together. Rendered at the same band count as Crumple it
+    // came out a soft rainbow blur -- 2.4x is where the swells break into readable
+    // oil-slick fringes without turning into Grating.
+    float bandGain = (mode == 3) ? 2.4 : 1.0;
+    float phase = u_bands * bandGain * (thick * 0.5 + (1.0 - ndv) * 0.75) + view * 0.16 + u_seed * 0.017;
     // The raw cosine palette bottoms out at 0.5 in every channel, so on its own it
     // is chalky pastel — candy, not foil. Gamma deepens the troughs and leaves the
     // peaks, which is what turns it saturated.
     vec3 irid = pow(iridPalette(phase), vec3(1.35));
 
-    // Form. A fixed key light, not the view vector, so the surface still has darks
-    // when the view is head-on -- an all-additive build washed out to pastel.
-    float lam = clamp(dot(N, normalize(vec3(0.30, 0.45, 0.90))), 0.0, 1.0);
-    float shade = 0.10 + 1.05 * pow(lam, 1.7);
-    if (mode == 2) shade *= 0.45 + 0.55 * facet;          // hard flake edges
-    vec3 metal = u_tint * shade;                          // the foil with no rainbow
+    // ------------------------------------------------------------------ light rig
+    // A shading normal, re-steepened for the LIGHTING ONLY. `N` itself is untouched,
+    // so the hue phase and the fresnel above behave exactly as before. The generated
+    // normals are deliberately shallow -- they are low-passed over 2e so the hue does
+    // not churn at pixel scale -- and measured median tilt |N.xy| is 0.19 on Crumple
+    // and 0.22 on Slick, about 12 degrees. Against ANY light that puts dot(N, L) in a
+    // band roughly 0.75..0.95 wide, which is why the previous revision had no darks at
+    // all: Crumple's luminance p1..p99 was 0.32..0.83, a topographic map rather than a
+    // metal. Dividing the tilt by 0.30 re-steepens all four modes onto a comparable
+    // cone, so one rig serves them all: 0.60 left Crumple flat again (p1 0.24) and
+    // 0.15 drove Grating to hard black bars with no midtone.
+    vec3 Ns = normalize(vec3(N.xy, 0.30));
+    // The key sits LOW (z 0.34). An overhead key on a near-flat sheet lights every
+    // facet almost equally, which is exactly the stained-glass mosaic Flakes used to
+    // be. Offset 2.30 rad from the view direction so the specular band does not sit
+    // underneath the fresnel rim -- at an offset near 0 the two merged into one
+    // feature and the surface lost its second highlight.
+    float la  = ang + 2.30;
+    vec3  L   = normalize(vec3(cos(la) * 0.94, sin(la) * 0.94, 0.34));
+    float ndl = dot(Ns, L);
+    vec3  Hv  = normalize(L + V);
+    float ndh = clamp(dot(Ns, Hv), 0.0, 1.0);
 
-    // Translucent film -- cellophane, a soap bubble. Light passes THROUGH it, so the
-    // ground is pale and the form is soft; written as `metal` plus rainbow it came
-    // out all but identical to the foil branch below, leaving Metallic a dead slider.
-    vec3 pale = mix(u_tint, vec3(1.0), 0.40);
-    float soft = mix(1.0, shade, 0.62);
-    vec3 filmy = mix(pale * soft, pale * soft * 0.4 + irid * soft * 1.05, u_iridescence);
-    // Metal foil: the rainbow is REFLECTED by the metal, so it MODULATES the tint
-    // rather than replacing it. Replacing it produced saturated RGB primaries that
-    // read as psychedelic marbling; a metal you cannot see is not a foil.
-    vec3 foil = mix(metal, metal * (0.3 + 1.5 * irid), u_iridescence);
+    // Metal has almost no diffuse term: its value structure is a broad reflection of
+    // the environment -- bright above the horizon, dark below it -- not a Lambert
+    // falloff. The ramp is deliberately wider than the tilt range of any one mode so
+    // none of them saturates into a two-tone stencil (at smoothstep(0.0, 0.5, ndl)
+    // Grating became black-and-white bars).
+    float env  = smoothstep(-0.38, 0.74, ndl);
+    // Hemisphere fill, 0.03..0.10. It exists only so the darks read as shadowed metal
+    // rather than as holes punched in the sheet; at a flat 0.0 the unlit Flakes cells
+    // went pure black and the surface read as cut paper.
+    float amb  = 0.02 + 0.07 * (0.5 + 0.5 * Ns.z);
+    float body = amb + 0.92 * env;
+    if (mode == 2) body *= 0.40 + 0.60 * facet;   // hard flake edges stay hard
 
-    float g = 0.55 + u_sheen * 0.75;
-    vec3 col = mix(filmy, foil, u_metallic) * g;
-    // Sheen: a coloured rim at glancing angles plus a white hotspot.
-    col += irid * fres * u_sheen * 0.55 * u_iridescence;
-    col += vec3(pow(fres, 2.2) * u_sheen * mix(0.4, 1.1, u_metallic));
+    // Two lobes. The tight one is the point: on Flakes the facet tilts are random, so
+    // only a minority land near the half-vector -- which is precisely why real glitter
+    // is mostly dark with a few cells blazing, and why a single broad lobe lit every
+    // cell equally and gave back the mosaic. The broad lobe underneath keeps the
+    // smooth modes from having nothing but hairlines.
+    float spec = pow(ndh, mix(9.0, 40.0, u_sheen)) * 0.55
+               + pow(ndh, mix(60.0, 380.0, u_sheen)) * 2.20;
+    spec *= 0.30 + 1.70 * u_sheen;
+
+    // Metal is a MIRROR, and beyond the key's own lobe a foil's brightness is the
+    // environment it reflects: dark ground below, bright sky above, and a hot band at
+    // the horizon between them. Adding this is what finally gave the surface anything
+    // to blow out -- with the Blinn lobe alone, luminance p99 was 0.74 on Grating and
+    // 0.85 on Flakes because a single fixed half-vector only ever lights normals of
+    // one azimuth, and a grating's normals all share one axis. The horizon band draws
+    // the bright line along the top of every crease and along every ridge, and on
+    // Flakes it is the reason a minority of cells go white while the rest stay dark:
+    // catching a band this narrow is a coincidence, which is exactly what glitter is.
+    // Two widths, and both are needed. At exponent 9 alone the band was so narrow it
+    // traced a hard white CONTOUR along every level set -- the surface read as
+    // cel-shaded outlines rather than as a highlight. The wide term (exp 3) is the
+    // gradient the eye reads as sheen; the narrow one (exp 16) is the small hot core
+    // inside it. The 0.10 sky lift is deliberately small: at 0.18 it raised the shadow
+    // floor and Slick's luminance p1 went to 0.18, i.e. nothing was dark any more.
+    vec3  R      = reflect(-V, Ns);
+    float hz     = clamp(1.0 - abs(R.z), 0.0, 1.0);
+    float sky    = smoothstep(-0.10, 0.72, R.z);
+    // Slick is a liquid film on dark water, not a sheet of metal, so it reflects far
+    // less. Left at full strength its broad swells came out ringed with the same white
+    // contours as Crumple, which is not what petrol on a puddle looks like.
+    float mirrorGain = (mode == 3) ? 0.32 : 1.0;
+    // The wide term is gated by the key. Ungated it lit the shadow side as brightly as
+    // the lit side -- luminance p1 rose to 0.19 on Slick and the surface stopped having
+    // anywhere genuinely dark, which is the exact fault this whole pass exists to fix.
+    // The narrow core is left ungated: a mirror-bright glint does occur on a facet
+    // turned away from the key, and it is one pixel wide.
+    float mirror = (0.10 * sky
+                    + 0.60 * pow(hz, 3.0) * (0.12 + 0.88 * env)
+                    + 0.62 * pow(hz, 16.0))
+                   * (0.35 + 1.30 * u_sheen) * mirrorGain;
+
+    // Body chroma. With the palette at full strength the modulation alone measured
+    // mean saturation 0.68 -- the rainbow was still the whole image, only now on
+    // black instead of on grey. Pulling it 60% back toward the palette's own
+    // luminance is what finally lets u_tint read as the metal underneath. The
+    // undiluted palette is kept for the specular edge, the glancing rim and the
+    // sparkle, where it covers little area and reads as an optical effect rather
+    // than as paint.
+    vec3 iridLum  = vec3(dot(irid, vec3(0.2126, 0.7152, 0.0722)));
+    // Slick keeps more of its chroma: an oil slick IS its colour, where a foil is a
+    // metal that happens to be iridescent.
+    vec3 iridSoft = mix(iridLum, irid, (mode == 3) ? 0.72 : 0.55);
+
+    // The rainbow rides ON the light rather than replacing it. A thin film is a
+    // REFLECTION, so it is strongest where the surface is actually reflecting -- the
+    // glancing rim and the specular lobe -- and only faintly present in the body. The
+    // 0.20 floor is what keeps the metal tinted rather than grey away from the
+    // highlights; at 0.0 the body went colourless and the foil read as brushed steel.
+    float irw = u_iridescence * clamp(0.20 + 0.55 * fres + 0.75 * pow(ndh, 6.0)
+                                      + 0.26 * env, 0.0, 1.0);
+
+    // Metal foil: the film colour MULTIPLIES the metal, so a gold tint stays gold
+    // instead of becoming a rainbow that ignores u_tint. 1.75 is the gain at which a
+    // mid-grey tint survives the palette's troughs without going muddy.
+    vec3 metal = u_tint * body;
+    vec3 foil  = metal * mix(vec3(1.0), iridSoft * 1.70, irw);
+
+    // Translucent film -- cellophane, a soap bubble. Light comes THROUGH it, so the
+    // ground is pale, the form is softer, and the colour sits in the whole sheet
+    // rather than only where it reflects. Written as "metal plus rainbow" the two
+    // branches came out all but identical and left Metallic a dead slider.
+    // Paler than the 0.55 first tried: with Metallic swept end to end the two branches
+    // were only 0.07 apart (mean abs diff) against the 0.04 that made this slider dead
+    // in an earlier revision -- too close for comfort on the one control with a history
+    // of dying. Together with the mirror gate below they now separate by 0.08-0.11.
+    vec3  pale  = mix(u_tint, vec3(1.0), 0.64);
+    // 0.24, not the 0.42 first tried: at 0.42 the film branch had so little form that
+    // its own shadow floor (luminance 0.25) held the whole blended surface up and
+    // Slick's p1 stuck at 0.125, above the 0.12 the look pass has to reach. The film is
+    // still four times flatter than the foil, which is the distinction being drawn.
+    float trans = amb + 0.92 * mix(env, 0.52, 0.24);
+    vec3  filmy = pale * trans * mix(vec3(1.0), iridSoft * 1.70, u_iridescence * 0.55);
+
+    vec3 col = mix(filmy, foil, u_metallic);
+    // Specular is white at its core and takes the film's colour at its edges, which is
+    // what a real interference coating does; a fully tinted highlight reads as a
+    // coloured light source rather than as a shiny surface.
+    // The reflected environment is white light; the film tints only its shoulders.
+    // A fully tinted highlight reads as a coloured lamp, not as a shiny surface.
+    // The mirror term is gated hard by Metallic: a translucent film is not a mirror,
+    // it is lit from behind. Gating it at 0.45 left the two branches only 0.07 apart
+    // end-to-end (mean abs diff) -- close to the 0.04 that made Metallic a dead slider
+    // in an earlier revision. At 0.22 they are 0.11-0.16 apart and read as two
+    // materials rather than as two exposures of one.
+    col += (spec + mirror * mix(0.22, 1.0, u_metallic))
+           * mix(vec3(1.0), irid, 0.30 * u_iridescence);
+    // Glancing rim.
+    col += irid * fres * u_sheen * 0.26 * u_iridescence;
+
 
     // Shimmer = holographic glitter: a static sparkle (so the slider responds on a
     // still frame) that re-twinkles over time, on top of the hue drift in `view`.
-    // Weighted by `fres` so it lands on the steep facets that would actually catch
-    // the light -- ungated, it dusted speckle evenly over Slick, whose whole point
-    // is a broad unbroken sheet.
+    // Weighted by the light rather than only by `fres` now that there is a light --
+    // a sparkle sitting on an unlit facet reads as dirt on the lens.
     if (u_shimmer > 0.0) {
         float tw = fbm(p * 90.0 + floor(u_time * 6.0) * 1.7 + sd);
-        float spark = smoothstep(0.64, 0.88, tw) * u_shimmer * (0.15 + 1.5 * fres);
+        float spark = smoothstep(0.70, 0.90, tw) * u_shimmer * (0.10 + 1.1 * fres + 0.9 * env);
         col += spark * mix(vec3(1.0), irid, 0.5) * (0.35 + 0.7 * u_iridescence);
     }
 
