@@ -320,11 +320,19 @@ export function planClones(total: number, s: ClonerSettings, vary?: VarySettings
 
 /** Fold the recipes into ONE geometry. When any recipe carries a colour, a
  *  per-vertex `color` attribute is written first, filled with that copy's colour
- *  across the whole copy — which is how a merged mesh will be able to show N
- *  colours through a single material once a later task turns on
- *  `vertexColors: true` for it (see materials.ts) — until then the attribute
- *  written here is present but silently unused by the renderer. */
-export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): THREE.BufferGeometry {
+ *  across the whole copy — which is how a merged mesh shows N colours through a
+ *  single material: `materialFor` turns on `vertexColors` and mixes toward that
+ *  attribute in the shader (see `applyVaryTint` in materials.ts).
+ *
+ *  The RAW palette colour goes into the attribute; `strength` is NOT baked in. It
+ *  rides on the geometry as `userData.varyStrength` and is applied as a shader
+ *  uniform instead, for two reasons: the material's own base colour (the other end
+ *  of the blend) is not known here, and baking it would put a material colour into
+ *  `geoKeyFor`, re-merging every clone on every colour-picker tick.
+ *
+ *  `userData.varyTint` is the STAMP that tells materials.ts this `color` attribute
+ *  is a Cloner-baked one rather than a model's own `COLOR_0` (see `hasVertexTint`). */
+export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[], strength: number = 1): THREE.BufferGeometry {
   if (recipes.length === 0) return geo.clone()
   const tinted = recipes.some((r) => r.color !== undefined)
   const copies: THREE.BufferGeometry[] = []
@@ -367,7 +375,14 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
   for (const cp of copies) cp.dispose()
   // mergeGeometries returns null if the inputs disagree on attributes; the
   // copies are clones of one geometry, so that cannot happen here.
-  return merged ?? geo.clone()
+  const out = merged ?? geo.clone()
+  // Stamp only when the attribute was actually written — an untinted clone set must
+  // stay indistinguishable from a plain geometry so its material is built unchanged.
+  if (tinted) {
+    out.userData.varyTint = true
+    out.userData.varyStrength = strength
+  }
+  return out
 }
 
 // --- pipeline ----------------------------------------------------------------
@@ -423,7 +438,9 @@ export function applyModifiers(
       stepRot: [m('cloneStepRotX'), m('cloneStepRotY'), m('cloneStepRotZ')],
       stepScale: m('cloneStepScale'),
     }, vary)
-    const cloned = mergeClones(out, recipes)
+    // `vary.strength` rides onto the merged geometry as a stamp, not into the vertex
+    // colours — mergeClones' doc explains why.
+    const cloned = mergeClones(out, recipes, vary?.strength ?? 1)
     out.dispose()
     out = cloned
     out.computeBoundingBox()
