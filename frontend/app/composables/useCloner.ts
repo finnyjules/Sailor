@@ -9,6 +9,11 @@
  * preview and the server-side wired composite never drift. Keep the two in sync.
  */
 
+import {
+  DEFAULT_VARY, varyWeights, varyColorAt, varyStepFactor,
+  type VaryMode, type VarySpread, type VarySettings,
+} from '~/lib/vary'
+
 export interface Cloner {
   enabled: boolean
   mode: 'linear' | 'radial'
@@ -35,6 +40,16 @@ export interface Cloner {
   stepRotation: number // +deg per clone
   stepScale: number    // × per clone (1 = none)
   stepOpacity: number  // × per clone (1 = none)
+  // vary — per-copy variation, shared with the 3D Studio cloner via lib/vary.
+  // Every default is the identity, so an existing layer stamps exactly as before.
+  varyMode: VaryMode
+  varySeed: number
+  varyFalloffCenter: number
+  varyFalloffRadius: number
+  varyColor: boolean
+  varyPalette: string[]
+  varyColorSpread: VarySpread
+  varyColorStrength: number
 }
 
 export interface CloneTransform {
@@ -43,9 +58,16 @@ export interface CloneTransform {
   drot: number      // add to layer rotation (deg)
   dscale: number    // multiply layer scale
   dopacity: number  // multiply layer opacity
+  /** This copy's Vary weight in [0,1]. Exposed so a renderer can drive its own
+   *  per-copy effects without re-deriving the driver. */
+  weight: number
+  /** Resolved per-copy colour, or undefined when colour variation is off. */
+  tint?: string
+  /** How far toward `tint` the copy's pixels move. Meaningless without `tint`. */
+  tintStrength: number
 }
 
-const IDENTITY: CloneTransform = { dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1 }
+const IDENTITY: CloneTransform = { dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1 }
 
 export const DEFAULT_CLONER: Cloner = {
   enabled: false,
@@ -68,9 +90,31 @@ export const DEFAULT_CLONER: Cloner = {
   stepRotation: 0,
   stepScale: 1,
   stepOpacity: 1,
+  varyMode: DEFAULT_VARY.mode,
+  varySeed: DEFAULT_VARY.seed,
+  varyFalloffCenter: DEFAULT_VARY.falloffCenter,
+  varyFalloffRadius: DEFAULT_VARY.falloffRadius,
+  varyColor: false,
+  varyPalette: DEFAULT_VARY.palette,
+  varyColorSpread: DEFAULT_VARY.spread,
+  varyColorStrength: DEFAULT_VARY.strength,
 }
 
 const DEG = Math.PI / 180
+
+/** The cloner's vary settings in the shared module's vocabulary. */
+export function varyOf(cloner: Cloner): VarySettings {
+  return {
+    mode: cloner.varyMode ?? DEFAULT_VARY.mode,
+    seed: cloner.varySeed ?? DEFAULT_VARY.seed,
+    falloffCenter: cloner.varyFalloffCenter ?? DEFAULT_VARY.falloffCenter,
+    falloffRadius: cloner.varyFalloffRadius ?? DEFAULT_VARY.falloffRadius,
+    colorEnabled: !!cloner.varyColor,
+    palette: cloner.varyPalette && cloner.varyPalette.length > 0 ? cloner.varyPalette : DEFAULT_VARY.palette,
+    spread: cloner.varyColorSpread ?? DEFAULT_VARY.spread,
+    strength: cloner.varyColorStrength ?? DEFAULT_VARY.strength,
+  }
+}
 
 /**
  * Expand a cloner config into per-clone transforms.
@@ -87,15 +131,11 @@ export function expandClones(cloner: Cloner | undefined | null, aspect: number):
   const stepRot = cloner.stepRotation || 0
   const stepScl = cloner.stepScale ?? 1
   const stepOp = cloner.stepOpacity ?? 1
-  const out: CloneTransform[] = []
-  const push = (k: number, dx: number, dy: number, extraRot: number) => {
-    out.push({
-      dx, dy,
-      drot: k * stepRot + extraRot,
-      dscale: Math.pow(stepScl, k),
-      dopacity: Math.pow(stepOp, k),
-    })
-  }
+
+  // Pass 1 — placement only. The vary weight needs the FULL step array (its
+  // normaliser is max(k)), so nothing can be finished until every copy is known.
+  const raw: { k: number; dx: number; dy: number; extraRot: number }[] = []
+  const push = (k: number, dx: number, dy: number, extraRot: number) => raw.push({ k, dx, dy, extraRot })
 
   if (cloner.mode === 'radial') {
     const n = Math.max(1, Math.floor(cloner.count))
@@ -139,6 +179,24 @@ export function expandClones(cloner: Cloner | undefined | null, aspect: number):
       }
     }
   }
+
+  // Pass 2 — drivers. Sequence mode has varyStepFactor === 1, so the three step
+  // expressions below reduce to exactly the pre-vary ones.
+  const vary = varyOf(cloner)
+  const weights = varyWeights(raw.map((r) => r.k), vary)
+  const out: CloneTransform[] = raw.map((r, i) => {
+    const w = weights[i] ?? 0
+    const f = varyStepFactor(w, vary)
+    return {
+      dx: r.dx, dy: r.dy,
+      drot: r.k * stepRot * f + r.extraRot,
+      dscale: Math.pow(stepScl, r.k * f),
+      dopacity: Math.pow(stepOp, r.k * f),
+      weight: w,
+      tint: varyColorAt(w, r.k, vary),
+      tintStrength: vary.strength,
+    }
+  })
 
   // Built k-ascending; reverse → original (k=0) ends last = drawn on top.
   out.reverse()

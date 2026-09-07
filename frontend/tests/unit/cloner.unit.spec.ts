@@ -3,16 +3,18 @@ import { expandClones, wiredClonerWidgetEntries, DEFAULT_CLONER, type Cloner } f
 
 const make = (patch: Partial<Cloner>): Cloner => ({ ...DEFAULT_CLONER, enabled: true, ...patch })
 
+// CloneTransform carries the Vary fields since Task 8: `weight` and
+// `tintStrength` are always present, `tint` only when colour variation is on.
 describe('expandClones', () => {
   it('returns a single identity when cloner is absent', () => {
     const out = expandClones(undefined, 1)
-    expect(out).toEqual([{ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1 }])
+    expect(out).toEqual([{ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1 }])
   })
 
   it('returns a single identity when disabled', () => {
     const out = expandClones(make({ enabled: false, countX: 3, countY: 3 }), 1)
     expect(out).toHaveLength(1)
-    expect(out[0]).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1 })
+    expect(out[0]).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1 })
   })
 
   it('linear single row: countX clones along X', () => {
@@ -20,7 +22,7 @@ describe('expandClones', () => {
     expect(out).toHaveLength(3)
     // back-to-front: original (k=0) is LAST
     const last = out[out.length - 1]
-    expect(last).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1 })
+    expect(last).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1 })
     // the set of dx offsets present
     const dxs = out.map(o => o.dx).sort((a, b) => a - b)
     expect(dxs).toEqual([0, 0.2, 0.4])
