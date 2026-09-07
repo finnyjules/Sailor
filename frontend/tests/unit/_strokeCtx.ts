@@ -38,7 +38,18 @@ export type Op =
   // dilation subtracted from another's) is expressed exactly this way.
   | { kind: 'stamp'; from: Recorder; erase: boolean }
 
-export interface Recorder { name: string; ops: Op[] }
+/**
+ * A `fillText` / `strokeText` call, recorded separately from `ops`.
+ *
+ * Text has no geometry in this harness (there are no glyph outlines to model), so a text
+ * draw can't take part in the `inkAt` replay the way a rect or a segment does. What it CAN
+ * answer is the structural question the text stroke band needs: which surface was the run
+ * drawn on, with what `lineWidth`, and was the context erasing at the time. Kept off `ops`
+ * so every existing `rec.ops` assertion is untouched.
+ */
+export type TextOp = { kind: 'fillText' | 'strokeText'; text: string; x: number; y: number; lineWidth: number; erase: boolean }
+
+export interface Recorder { name: string; ops: Op[]; texts: TextOp[] }
 
 /** Signed distance to an axis-aligned rect centred on (0,0): negative inside. */
 export function sdRect(p: Pt, w: number, h: number): number {
@@ -87,7 +98,7 @@ export function inkAt(rec: Recorder, p: Pt): boolean {
 const _byCanvas = new Map<object, Recorder>()
 
 export function makeCtx(name: string, W = 200, H = 200) {
-  const rec: Recorder = { name, ops: [] }
+  const rec: Recorder = { name, ops: [], texts: [] }
   const canvas = { width: W, height: H, getContext: () => ctx }
   _byCanvas.set(canvas, rec)
   // Current path as a predicate pair (fill area / distance to the outline).
@@ -137,7 +148,13 @@ export function makeCtx(name: string, W = 200, H = 200) {
         erase, lineJoin: lj, lineWidth: lw,
       })
     },
-    fillText() {}, strokeText() {}, clearRect() {},
+    fillText(text: string, x: number, y: number) {
+      rec.texts.push({ kind: 'fillText', text, x, y, lineWidth: ctx.lineWidth, erase: ctx.globalCompositeOperation === 'destination-out' })
+    },
+    strokeText(text: string, x: number, y: number) {
+      rec.texts.push({ kind: 'strokeText', text, x, y, lineWidth: ctx.lineWidth, erase: ctx.globalCompositeOperation === 'destination-out' })
+    },
+    clearRect() {},
     fillRect() {},
     drawImage(src: any) {
       const from = _byCanvas.get(src)

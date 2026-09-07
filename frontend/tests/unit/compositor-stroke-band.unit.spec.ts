@@ -256,3 +256,111 @@ describe('paintStrokeBand erosion branch (negative radii)', () => {
     expect(inkAt(rec, { x: 40, y: 0 })).toBe(false)  // 10 inside: past the erosion depth, eroded away
   })
 })
+
+// Task 3b. `region()` used to hardcode its two ink primitives as `fill(path)/fill()` and
+// `stroke(path)/stroke()`, which is why a band needed a Path2D and text — which has none,
+// only `fillText`/`strokeText` — was left at distance 0. `fillText(t,x,y)` plus
+// `strokeText(t,x,y)` at `lineWidth = 2r` IS the dilation of that run's ink by `r`: the
+// same construction with different primitives. So the pair is injectable, and the text
+// paths supply the text one.
+//
+// Every case below injects a DIFFERENT geometry (a square at ±20 or ±40) from the one on
+// the context (±50) so "the injected pair actually ran" is observable as ink in a place
+// the default primitives could not have put it — an ignored option would leave the band
+// around the context path and fail every probe.
+describe('paintStrokeBand — injectable ink primitives', () => {
+  const scratchDoc = installScratchDocument()
+
+  /** A 40×40 square (edge at ±20), deliberately smaller than `rectPath`'s ±50. */
+  function smallPath(c: CanvasRenderingContext2D) {
+    c.beginPath()
+    c.rect(-20, -20, 40, 40)
+  }
+
+  it('bands the INJECTED shape, not the context path', () => {
+    const { ctx, rec } = makeCtx('main')
+    rectPath(ctx)                    // the shape the DEFAULT primitives would band (±50)
+    let fills = 0, strokes = 0
+    paintStrokeBand(ctx, {
+      width: 10, distance: 30, style: () => '#f00',
+      inkFill: (c) => { fills++; smallPath(c); c.fill() },
+      inkStroke: (c) => { strokes++; smallPath(c); c.stroke() },
+    })
+
+    // Once per dilation surface: the outer scratch and the inner (knockout) scratch.
+    expect(fills).toBe(2)
+    expect(strokes).toBe(2)
+
+    // centre ⇒ radii 35 / 25. Around the INJECTED edge (±20) the band is x 45..55;
+    // around the CONTEXT path's edge (±50) it would be x 75..85.
+    expect(inkAt(rec, { x: 50, y: 0 })).toBe(true)
+    expect(inkAt(rec, { x: 30, y: 0 })).toBe(false)   // inside the inner dilation
+    expect(inkAt(rec, { x: 80, y: 0 })).toBe(false)   // where the DEFAULT band would be
+    expect(inkAt(rec, { x: 90, y: 0 })).toBe(false)
+  })
+
+  // A guard, not a red-first case: before the injection existed the defaults were the ONLY
+  // behaviour, so this cannot fail against the old code. It fails if a later change moves
+  // the default off `fill(path)/stroke(path)` — proved by mutation, see the task report.
+  it('with no primitives supplied, bands the context path exactly as it always did', () => {
+    const { ctx: defCtx, rec: defRec } = makeCtx('default')
+    const before = scratchDoc.count()
+    paintStrokeBand(defCtx, { width: 10, distance: 30, style: () => '#f00', build: rectPath })
+    const defScratches = scratchDoc.scratches().slice(before)
+
+    const { ctx: injCtx, rec: injRec } = makeCtx('injected')
+    const before2 = scratchDoc.count()
+    paintStrokeBand(injCtx, {
+      width: 10, distance: 30, style: () => '#f00', build: rectPath,
+      // Literally the default pair, spelled out.
+      inkFill: (c) => c.fill(),
+      inkStroke: (c) => c.stroke(),
+    })
+    const injScratches = scratchDoc.scratches().slice(before2)
+
+    const shape = (ops: typeof defRec.ops) =>
+      ops.map(o => [o.kind, (o as any).erase ?? false, (o as any).lineWidth ?? null, (o as any).lineJoin ?? null])
+    expect(shape(injRec.ops)).toEqual(shape(defRec.ops))
+    expect(injScratches.map(r => shape(r.ops))).toEqual(defScratches.map(r => shape(r.ops)))
+    for (const x of [40, 45, 50, 55, 60, 75, 80, 85, 90]) {
+      expect([x, inkAt(injRec, { x, y: 0 })]).toEqual([x, inkAt(defRec, { x, y: 0 })])
+    }
+    // …and it really is the band the other tests pin: ink 75..85 around the ±50 edge.
+    expect(inkAt(defRec, { x: 80, y: 0 })).toBe(true)
+  })
+
+  it('reaches the EROSION branch through the injected pair too', () => {
+    const { ctx, rec } = makeCtx('main')
+    rectPath(ctx)
+    /** An 80×80 square (edge at ±40) — big enough to survive an erosion by 35. */
+    const bigger = (c: CanvasRenderingContext2D) => { c.beginPath(); c.rect(-40, -40, 80, 80) }
+    const erasingAt: boolean[] = []
+    paintStrokeBand(ctx, {
+      width: 10, distance: -30, style: () => '#f00',
+      inkFill: (c) => { bigger(c); c.fill() },
+      inkStroke: (c) => {
+        erasingAt.push(c.globalCompositeOperation === 'destination-out')
+        bigger(c); c.stroke()
+      },
+    })
+
+    // centre ⇒ outer = -25, inner = -35: BOTH negative, so both surfaces erode. The
+    // injected stroke must therefore run while the context is knocking out.
+    expect(erasingAt).toEqual([true, true])
+    const [outerRec, innerRec] = scratchDoc.scratches()
+    const outerStroke = outerRec!.ops.find(o => o.kind === 'stroke') as any
+    const innerStroke = innerRec!.ops.find(o => o.kind === 'stroke') as any
+    expect(outerStroke.erase).toBe(true)
+    expect(innerStroke.erase).toBe(true)
+    expect(outerStroke.lineWidth).toBe(50)   // 2 * |−25|
+    expect(innerStroke.lineWidth).toBe(70)   // 2 * |−35|
+
+    // Ink: erosion-by-25 minus erosion-by-35 around the INJECTED edge (±40) is a ring
+    // 25..35 units inside it, i.e. x 5..15. Around the CONTEXT path (±50) it would be
+    // x 15..25 — the two windows are disjoint, so a dropped injection cannot pass.
+    expect(inkAt(rec, { x: 10, y: 0 })).toBe(true)
+    expect(inkAt(rec, { x: 20, y: 0 })).toBe(false)
+    expect(inkAt(rec, { x: 0, y: 0 })).toBe(false)
+    expect(inkAt(rec, { x: 45, y: 0 })).toBe(false)
+  })
+})

@@ -91,9 +91,12 @@ export interface SilhouetteInkInput {
   /** The layer's REAL alignment (`strokeAlignOf`), not a guess — the default is 'center'.
    *  Only consulted when `strokeReachPx` is absent. */
   strokeAlign: 'inside' | 'center' | 'outside'
-  /** The WIDEST stroke width in the layer's stack, logical px (already × W, and × the
-   *  path's own scale for a path). A legacy single-stroke layer reads through as one
-   *  entry, so this is that stroke's width. */
+  /** The stack's widest outline, logical px (already × W, and × the path's own scale for a
+   *  path). A legacy single-stroke layer reads through as one entry, so this is that
+   *  stroke's width. For TEXT it is the furthest a stroke REACHES past the glyphs — its
+   *  width plus any positive `distance`, since a distant text stroke is a dilation band
+   *  (`paintTextStrokeBands`) and no width alone describes where it lands. Shape kinds pass
+   *  `strokeReachPx` for that instead and leave this as the plain width. */
   strokePx: number
   /** Shape kinds only: how far the stack's furthest-reaching stroke lands BEYOND the
    *  silhouette edge, logical px — `outsideStrokePadPx`, which already folds in every
@@ -138,7 +141,8 @@ export interface SilhouetteInkInput {
  *    `w × W`, with no cap allowance. Alignment is meaningless for a line (no interior).
  *  - `text`: ink overshoots the measured line block on a tight lineHeight, a descender,
  *    italics or letter-spacing overhang, so text gets a FULL em (`fontPx`, not half) plus
- *    the stroke width — a bigger raster is cheap, a clipped glyph is a visible bug. On
+ *    `strokePx`, which for text is the outline's whole REACH (width plus any positive
+ *    distance) — a bigger raster is cheap, a clipped glyph is a visible bug. On
  *    top of that, `drawText` positions its lines anywhere within ±boxH/2 under `valign`
  *    while `localLayerBox` reports only `lines × lineHeight`, so a short block in a tall
  *    height box sits up to half the slack outside the measured box. And with a fixed

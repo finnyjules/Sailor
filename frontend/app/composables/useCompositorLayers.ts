@@ -1299,8 +1299,21 @@ export function localLayerBox(
  * Every other stroke contributes its real reach: outside-aligned, or centred /
  * inside with a non-zero `distance` — those cases could not exist before the
  * stack did, so no saved frame's warp can move because of them.
- * Still 0 for no stroke, a zero width, a `line`/`text` layer, and any kind
- * without a stack at all.
+ *
+ * TEXT gets the exception in a WIDER form: a text stroke at distance 0 contributes
+ * 0 whatever alignment it claims. `strokeText` has no path, so the text painter
+ * has always drawn a centred outline and ignored `strokeAlign` outright — yet a
+ * saved text layer can perfectly well carry `strokeAlign: 'outside'` from the
+ * shared inspector row. Reading that alignment here would re-warp a saved pinned
+ * frame for ink that has never been anywhere but on the glyph edge. A text stroke
+ * at a DISTANCE is a different thing entirely: it is a real dilation band (see
+ * `paintTextStrokeBands`), it lands `distance + width` past the glyphs, no saved
+ * frame can carry one, and without this pad the corner-pin offscreen clips it.
+ * Text's SILHOUETTE overhang is still not this helper's business — see
+ * `silhouettePadPx`, whose text branch is a full em plus the outline's reach.
+ *
+ * Still 0 for no stroke, a zero width, a `line` layer, and any kind without a
+ * stack at all.
  */
 export function outsideStrokePadPx(
   layer: LocalLayer,
@@ -1312,9 +1325,8 @@ export function outsideStrokePadPx(
    *  saved centre-stroked layer. */
   countCentredOnEdge = false,
 ): number {
-  // `text` is stroked with `strokeText`, which has no offsettable path — its overhang is
-  // the silhouette cache's business (a full em plus the width), not this box pad's.
-  if (!strokeSupportsStack(layer.kind) || layer.kind === 'text') return 0
+  if (!strokeSupportsStack(layer.kind)) return 0
+  const isText = layer.kind === 'text'
   // A path's strokeWidth (and distance) are stored in local units AT scale=1 (see
   // PathLayer), so their px extent also carries the layer's own uniform scale; every
   // other stroked kind stores them already normalized to canvas width.
@@ -1328,6 +1340,9 @@ export function outsideStrokePadPx(
     // keep contributing 0 so the corner-pin quad above stays exactly where it was. See
     // the doc comment's "centre-at-distance-0 exception".
     if (align === 'center' && d === 0 && !countCentredOnEdge) continue
+    // Text on the edge is that same shape whatever its stored alignment says, because the
+    // text painter never honoured the alignment — see the doc comment.
+    if (isText && d === 0) continue
     // How far this stroke's OUTER edge reaches beyond the silhouette.
     const reach = align === 'outside' ? d + st.width : align === 'inside' ? d : d + st.width / 2
     if (reach > pad) pad = reach
@@ -1686,16 +1701,22 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
   let strokeReachPx: number | undefined
   let strokeAlign: StrokeAlign = 'center'
   if (layer.kind === 'text') {
-    // Text's overhang is a full em PLUS the outline's width, so what matters here is the
-    // WIDEST stroke in the stack, not how far one reaches. `width` (the legacy field) is
-    // kept in the max so a raster can never come out smaller than it did before the stack
-    // existed — a bigger raster is cheap, a clipped glyph is a visible bug.
-    let widest = 0
+    // Text's overhang is a full em PLUS how far its outline reaches past the glyphs. For a
+    // stroke on the edge that reach is its width — deliberately the FULL width rather than
+    // the half a centred `strokeText` really paints, because a bigger raster is cheap and
+    // a clipped glyph is a visible bug. A stroke at a positive `distance` is a dilation
+    // band sitting `distance + width` out (`paintTextStrokeBands`), which no width alone
+    // can express; a negative one bands INSIDE the ink and reaches no further than its own
+    // width, so the `max(0, …)` keeps it at today's answer. `width` (the legacy field) is
+    // kept in the max so a raster can never come out smaller than it did before the stack.
+    let furthest = 0
     for (const st of strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])) {
       if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
-      if (st.width > widest) widest = st.width
+      const d = st.distance ?? 0
+      const reach = st.width + (Number.isFinite(d) ? Math.max(0, d) : 0)
+      if (reach > furthest) furthest = reach
     }
-    strokePx = Math.max(width, widest) * W
+    strokePx = Math.max(width, furthest) * W
   } else if (layer.kind === 'line') {
     // drawLayerContent floors a line's lineWidth at 1px, so a hairline still caps. A line
     // always strokes (defaulting to white), so this is deliberately NOT gated on paint.
@@ -2265,6 +2286,14 @@ export function paintStrokeBand(ctx: CanvasRenderingContext2D, o: {
   path?: Path2D | null
   fillRule?: CanvasFillRule
   build?: (c: CanvasRenderingContext2D) => void
+  /** How the shape's INTERIOR is laid down on a dilation surface. Defaults to the path
+   *  primitive — `fill(path)` when a Path2D is supplied, else `fill()` on the surface's
+   *  current path. */
+  inkFill?: (c: CanvasRenderingContext2D) => void
+  /** How the shape's OUTLINE is stroked, at the `lineWidth` this helper has already set.
+   *  Defaults to `stroke(path)` / `stroke()`. Supply BOTH of these together: a dilation is
+   *  the fill plus the stroke of the same ink, so a mismatched pair bands nothing. */
+  inkStroke?: (c: CanvasRenderingContext2D) => void
 }) {
   if (!(o.width > 0)) return
   const d = typeof o.distance === 'number' && Number.isFinite(o.distance) ? o.distance : 0
@@ -2284,19 +2313,27 @@ export function paintStrokeBand(ctx: CanvasRenderingContext2D, o: {
   if (o.build) o.build(s)
   s.lineJoin = o.join === 'round' ? 'round' : 'miter'
   const rule = o.fillRule || 'nonzero'
+  // The two ink primitives. A dilation by `r` is `fill(shape)` plus `stroke(shape)` at
+  // `lineWidth = 2r` — a construction that says nothing about WHICH primitives lay the ink
+  // down. Injecting the pair is what lets TEXT band at a distance with no path at all:
+  // `fillText(t,x,y)` + `strokeText(t,x,y)` at the same lineWidth is the dilation of that
+  // run's ink (see `paintTextStrokeBands`). Absent, these are exactly the path statements
+  // this closure used to hardcode, so every shape kind is untouched.
+  const inkFill = o.inkFill ?? ((c: CanvasRenderingContext2D) => { if (o.path) c.fill(o.path, rule); else c.fill(rule) })
+  const inkStroke = o.inkStroke ?? ((c: CanvasRenderingContext2D) => { if (o.path) c.stroke(o.path); else c.stroke() })
   const region = (c: CanvasRenderingContext2D, r: number) => {
     // r > 0 grows the shape; r < 0 shrinks it; r == 0 is the shape itself.
-    if (o.path) c.fill(o.path, rule); else c.fill(rule)
+    inkFill(c)
     if (r === 0) return
     c.lineWidth = Math.abs(r) * 2
     if (r > 0) {
       c.strokeStyle = '#000'
-      if (o.path) c.stroke(o.path); else c.stroke()
+      inkStroke(c)
     } else {
       const prev = c.globalCompositeOperation
       c.globalCompositeOperation = 'destination-out'
       c.strokeStyle = '#000'
-      if (o.path) c.stroke(o.path); else c.stroke()
+      inkStroke(c)
       c.globalCompositeOperation = prev
     }
   }
@@ -2765,18 +2802,39 @@ function textPathGuide(ctx: CanvasRenderingContext2D, layer: TextLayer, W: numbe
 }
 
 /**
- * One text outline, resolved and ready to draw.
+ * One ON-THE-EDGE text outline, resolved and ready to draw with `strokeText`.
  *
- * A text layer is stroked with `strokeText`, which takes no path — so there is nothing for
- * a stroke's `align` or `distance` to act on and both are ignored here: every text stroke
- * is the centred outline text has always had. (`strokeSupportsShapes` already excludes
- * text for the same reason: the Frame's text layer stores a CSS family name, not glyph
- * outlines.) That is why text does NOT go through `paintStrokeStack`.
+ * A text stroke at DISTANCE 0 is the centred outline text has always had — `strokeText`
+ * takes no path, so `align` has nothing to straddle and is ignored. A stroke at a distance
+ * is a different construction entirely (a dilation band, see `paintTextStrokeBands`) and
+ * never becomes a pass here; `strokeDistancePx` is the single place that split is made.
+ *
+ * Text still does NOT go through `paintStrokeStack`: that helper bands a Path2D or the
+ * context's current path, and a Frame text layer has neither — it stores a CSS family name
+ * and draws with `fillText`/`strokeText`. (`strokeSupportsShapes` excludes text for the
+ * related reason: marching shapes need real glyph outlines to flatten.)
  */
 interface TextStrokePass {
   lineWidth: number
   style: string | CanvasGradient | CanvasPattern
   dash: [number, number] | null
+}
+
+/** One run of text exactly as it gets drawn: the string, the anchor `fillText` is given,
+ *  and — text on a path only — the rotation each glyph is turned by about that anchor. */
+interface TextRun { text: string; x: number; y: number; angle?: number }
+
+/**
+ * A stroke's distance in the units the current transform draws in, or 0 when it has none.
+ *
+ * THE one place a stroke is classified as on-the-edge or distant. Both text paths consult
+ * it — `textStrokePasses` to take the 0s, `paintTextStrokeBands` to take the rest — so a
+ * stroke can never be drawn by both or dropped by both. A non-finite stored value reads as
+ * 0, i.e. the plain centred outline, rather than vanishing.
+ */
+function strokeDistancePx(st: StrokeInstance, scale: number): number {
+  const d = (st.distance ?? 0) * scale
+  return Number.isFinite(d) ? d : 0
 }
 
 /**
@@ -2795,6 +2853,9 @@ function textStrokePasses(
   for (let i = stack.length - 1; i >= 0; i--) {
     const st = stack[i]!
     if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
+    // A stroke at a distance is a dilation band, painted by `paintTextStrokeBands` before
+    // these passes run. Skipping it here is what stops it being drawn twice.
+    if (strokeDistancePx(st, W) !== 0) continue
     out.push({
       lineWidth: st.width * W,
       style: resolvePaint(ctx, st.paint, box, _fieldCtx),
@@ -2820,6 +2881,86 @@ function strokeTextPasses(
     ctx.strokeStyle = p.style
     if (anyDash) ctx.setLineDash(p.dash ? [p.dash[0], p.dash[1]] : [])
     ctx.strokeText(text, x, y)
+  }
+}
+
+/**
+ * Every stroke in a text layer's stack that sits at a DISTANCE, painted as a band around
+ * the layer's whole run of text.
+ *
+ * The construction is the shapes' one with different primitives. `paintStrokeBand` builds
+ * a band as the difference of two dilations, and a dilation by `r` is `fill(shape)` plus
+ * `stroke(shape)` at `lineWidth = 2r` — which for text is `fillText(t, x, y)` plus
+ * `strokeText(t, x, y)`. So the pair is handed in as `inkFill`/`inkStroke` and text needs
+ * no path, no glyph outlines and no font-file resolution. `align` and `distance` then
+ * compose exactly as they do on a rect (the radii are `paintStrokeBand`'s own arithmetic).
+ *
+ * ONE band per stroke for the WHOLE block, not one per line: every run is drawn into the
+ * same two dilation surfaces, so a multi-line block gets a single outline around the lot
+ * (the "sticker" reading of an offset outline) instead of per-line rings that cross each
+ * other. It is also the cheap way round — two scratch canvases per distant stroke rather
+ * than two per line, which matters most for text on a path, where a run is one GLYPH.
+ *
+ * ORDER, stated plainly because it is a real limitation: the bands go down as a group,
+ * beneath the on-edge outlines and the fill, in stack paint order among themselves. Inside
+ * the per-line loop the stack's exact z-order is preserved for the on-edge strokes only —
+ * a whole-block band cannot be interleaved with a per-line draw without giving up one of
+ * the two. Under the glyphs is the useful answer anyway: a band is offset AWAY from the
+ * ink, so the case where the choice is visible is a small distance, where keeping the
+ * letterform legible on top is what a reader wants.
+ *
+ * `scratchLike` copies the transform but not the text state, so `build` restates the font,
+ * alignment and baseline on each dilation surface — the exact hook `paintStrokeBand`
+ * already offers the shape kinds for re-creating their path.
+ */
+function paintTextStrokeBands(
+  ctx: CanvasRenderingContext2D, layer: TextLayer, W: number,
+  box: { w: number; h: number }, runs: TextRun[],
+): void {
+  if (!runs.length) return
+  const stack = strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])
+  if (!stack.length) return
+  const font = ctx.font
+  const textAlign = ctx.textAlign
+  const textBaseline = ctx.textBaseline
+  const spacing = (ctx as unknown as { letterSpacing?: string }).letterSpacing
+  const variations = (ctx as unknown as { fontVariationSettings?: string }).fontVariationSettings
+  const build = (c: CanvasRenderingContext2D) => {
+    c.font = font
+    c.textAlign = textAlign
+    c.textBaseline = textBaseline
+    // Tracking and variable axes are set by `applyFont` and are NOT part of the `font`
+    // shorthand, so a scratch that only copied `font` would measure and place the run
+    // differently from the surface it is stamped onto.
+    if (spacing != null && 'letterSpacing' in c) (c as unknown as { letterSpacing: string }).letterSpacing = spacing
+    if (variations != null && 'fontVariationSettings' in c) (c as unknown as { fontVariationSettings: string }).fontVariationSettings = variations
+  }
+  const eachRun = (c: CanvasRenderingContext2D, draw: (t: string, x: number, y: number) => void) => {
+    for (const r of runs) {
+      if (r.angle) {
+        // Text on a path: each glyph is drawn at the origin of its own turned frame,
+        // exactly as `drawTextOnPath` draws it.
+        c.save(); c.translate(r.x, r.y); c.rotate(r.angle); draw(r.text, 0, 0); c.restore()
+      } else draw(r.text, r.x, r.y)
+    }
+  }
+  // Reverse list order, so the FIRST row lands on top — the layer list's own convention,
+  // and the same order `paintStrokeStack` and `textStrokePasses` use.
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const st = stack[i]!
+    if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
+    const d = strokeDistancePx(st, W)
+    if (d === 0) continue          // on the edge ⇒ the `strokeText` path, byte-identical
+    paintStrokeBand(ctx, {
+      width: st.width * W,
+      distance: d,
+      align: st.align,
+      join: st.join,
+      style: (c) => resolvePaint(c, st.paint, box, _fieldCtx),
+      build,
+      inkFill: (c) => eachRun(c, (t, x, y) => c.fillText(t, x, y)),
+      inkStroke: (c) => eachRun(c, (t, x, y) => c.strokeText(t, x, y)),
+    })
   }
 }
 
@@ -2851,6 +2992,9 @@ function drawTextOnPath(
   const textBox = guide.bounds()
   const passes = textStrokePasses(ctx, layer, W, textBox)
   const anyDash = passes.some(p => p.dash)
+  // A run here is one GLYPH, each in its own turned frame — the band dilates all of them
+  // together, so the outline follows the whole word around the curve.
+  paintTextStrokeBands(ctx, layer, W, textBox, placed.map(g => ({ text: g.ch, x: g.x, y: g.y, angle: g.angle })))
   if (passes.length) ctx.lineJoin = 'round'
   ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
   for (const g of placed) {
@@ -2910,11 +3054,16 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
   // `strokeText` honours setLineDash, so a text outline dashes like a shape's.
   const passes = textStrokePasses(ctx, layer, W, textBox)
   const anyDash = passes.some(p => p.dash)
-  if (passes.length) ctx.lineJoin = 'round'
-  ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
   const fontPx = layer.fontSize * W
   const deco = layer.underline || layer.strikethrough
   const decoThick = Math.max(1, fontPx * 0.06)
+
+  // Every run as it will be drawn, plus each line's decoration span, worked out BEFORE any
+  // ink lands: a stroke at a distance dilates the whole block in one go
+  // (`paintTextStrokeBands`), which needs all the runs in hand. Only `measureText` moved up
+  // here, and it is pure — the draw loop below issues exactly the calls, in exactly the
+  // order, that this loop used to issue inline.
+  const drawn: { runs: TextRun[]; deco: { left: number; y: number; w: number } | null }[] = []
   for (let i = 0; i < lines.length; i++) {
     const y = lineY(i)
     if (justifyH) {
@@ -2925,26 +3074,38 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
       const total = widths.reduce((a, b) => a + b, 0)
       const gap = words.length > 1 ? Math.max(0, (blockW - total) / (words.length - 1)) : 0
       let cx = -blockW / 2
+      const runs: TextRun[] = []
       for (let k = 0; k < words.length; k++) {
-        strokeTextPasses(ctx, passes, anyDash, words[k]!, cx, y)
-        ctx.fillText(words[k]!, cx, y)
+        runs.push({ text: words[k]!, x: cx, y })
         cx += widths[k]! + gap
       }
-      if (deco && words.length) {
-        if (layer.underline) ctx.fillRect(-blockW / 2, y + fontPx * 0.34, blockW, decoThick)
-        if (layer.strikethrough) ctx.fillRect(-blockW / 2, y - decoThick / 2, blockW, decoThick)
-      }
+      drawn.push({ runs, deco: deco && words.length ? { left: -blockW / 2, y, w: blockW } : null })
       continue
     }
-    strokeTextPasses(ctx, passes, anyDash, lines[i]!, anchorX, y)
-    ctx.fillText(lines[i], anchorX, y)
+    const line = lines[i]!
+    let dec: { left: number; y: number; w: number } | null = null
     // Decoration lines span the drawn line, anchored to match the text alignment.
-    // Drawn in the text's own fill so they inherit gradient/pattern fills.
-    if (deco && lines[i]) {
-      const lw = ctx.measureText(lines[i]).width
+    if (deco && line) {
+      const lw = ctx.measureText(line).width
       const left = canvasAlign === 'left' ? anchorX : canvasAlign === 'right' ? anchorX - lw : anchorX - lw / 2
-      if (layer.underline) ctx.fillRect(left, y + fontPx * 0.34, lw, decoThick)
-      if (layer.strikethrough) ctx.fillRect(left, y - decoThick / 2, lw, decoThick)
+      dec = { left, y, w: lw }
+    }
+    drawn.push({ runs: [{ text: line, x: anchorX, y }], deco: dec })
+  }
+
+  paintTextStrokeBands(ctx, layer, W, textBox, drawn.flatMap(d => d.runs))
+
+  if (passes.length) ctx.lineJoin = 'round'
+  ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
+  for (const d of drawn) {
+    for (const r of d.runs) {
+      strokeTextPasses(ctx, passes, anyDash, r.text, r.x, r.y)
+      ctx.fillText(r.text, r.x, r.y)
+    }
+    // Decorations are drawn in the text's own fill so they inherit gradient/pattern fills.
+    if (d.deco) {
+      if (layer.underline) ctx.fillRect(d.deco.left, d.deco.y + fontPx * 0.34, d.deco.w, decoThick)
+      if (layer.strikethrough) ctx.fillRect(d.deco.left, d.deco.y - decoThick / 2, d.deco.w, decoThick)
     }
   }
   if (anyDash) ctx.setLineDash([])   // never leak the pattern to the next layer
@@ -2981,14 +3142,17 @@ function drawExpressiveText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: 
   ctx.textAlign = 'left'
   const passes = textStrokePasses(ctx, layer, W, textBox)
   const anyDash = passes.some(p => p.dash)
+  // One run per placed word (`wd.y` is the line band's top, so + lineH/2 is its centre).
+  const runs: TextRun[] = lay.words.map(wd => ({ text: wd.text, x: originX + wd.x, y: originY + wd.y + lineH / 2 }))
+  paintTextStrokeBands(ctx, layer, W, textBox, runs)
   if (passes.length) ctx.lineJoin = 'round'
   ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
   const fontPx = layer.fontSize * W
   const deco = layer.underline || layer.strikethrough
   const decoThick = Math.max(1, fontPx * 0.06)
-  for (const wd of lay.words) {
-    const x = originX + wd.x
-    const y = originY + wd.y + lineH / 2   // band top → line's vertical center
+  for (let i = 0; i < lay.words.length; i++) {
+    const wd = lay.words[i]!
+    const { x, y } = runs[i]!
     strokeTextPasses(ctx, passes, anyDash, wd.text, x, y)
     ctx.fillText(wd.text, x, y)
     if (deco && wd.text) {
