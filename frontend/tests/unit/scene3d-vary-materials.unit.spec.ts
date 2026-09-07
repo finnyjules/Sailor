@@ -33,20 +33,10 @@ type Tintable = THREE.Material & { vertexColors: boolean; color?: THREE.Color }
 const varyUniforms = (m: THREE.Material) =>
   m.userData.varyUniforms as { uVaryStrength: { value: number } } | undefined
 
-/** "This material renders the palette colour at full strength."
- *
- *  Deliberately accepts EITHER mechanism this feature has been built with: the
- *  shader mix at strength 1 (today), or a neutralised white base (the first
- *  attempt). The point of the assertion is not which one is in force — it is that
- *  whichever one is in force must still be in force after a sync. The first
- *  attempt passed this at build time and failed it one `updateMaterial` later,
- *  because every in-place branch rewrites the base colour from the document. */
-function paletteReadsTrue(m: THREE.Material): boolean {
-  const u = varyUniforms(m)
-  if (u && u.uVaryStrength.value === 1) return true
-  const c = (m as Tintable).color
-  return c !== undefined && c.getHexString() === 'ffffff'
-}
+/** The material's own base colour, read back from `.color` — not all seven tinted
+ *  types carry one (`matcap` never writes it at all; see the comment above
+ *  `NO_BASE_COLOR`/`applyVaryTint` in materials.ts), so this can be `undefined`. */
+const baseColorHex = (m: THREE.Material) => (m as Tintable).color?.getHexString()
 
 describe('materialFor with vertex colours', () => {
   it('leaves an untinted geometry exactly as before', () => {
@@ -95,7 +85,7 @@ describe('the tint SURVIVES a second sync (regression guard for the Critical)', 
       expect((m as Tintable).vertexColors).toBe(true)
       expect(m.userData.vertexTint).toBe(true)
       expect(varyUniforms(m)?.uVaryStrength.value).toBe(1)
-      expect(paletteReadsTrue(m)).toBe(true)
+      const before = baseColorHex(m)
 
       // The same spec, the same geometry — nothing about the tint changed, so this
       // is the in-place path (and this is the call that used to undo everything).
@@ -104,7 +94,15 @@ describe('the tint SURVIVES a second sync (regression guard for the Critical)', 
       expect((m as Tintable).vertexColors).toBe(true)
       expect(m.userData.vertexTint).toBe(true)
       expect(varyUniforms(m)?.uVaryStrength.value).toBe(1)
-      expect(paletteReadsTrue(m)).toBe(true)
+      // The base colour the tint mixes FROM must survive the sync exactly as it was —
+      // this is the property the original Critical destroyed: it neutralised `.color`
+      // to white so the palette read true at build time, and every in-place branch of
+      // `updateMaterial` then rewrote the base colour from the document one sync later,
+      // undoing the neutralisation while the vertex-colour multiply stayed in force.
+      // Asserting the CONCRETE colour (not merely "is the tint still on") is what makes
+      // this able to fail: a helper that also accepted a neutralised-white base passed
+      // on both sides of the bug it existed to catch.
+      expect(baseColorHex(m)).toBe(before)
     })
   }
 })
@@ -191,7 +189,8 @@ function compiledFragment(m: THREE.Material): { src: string; uniforms: Record<st
   return { src: resolveIncludes(shader.fragmentShader), uniforms: shader.uniforms }
 }
 
-const MIX_LINE = 'diffuseColor.rgb = mix( diffuseColor.rgb, vColor.rgb, uVaryStrength );'
+const MIX_LINE = 'diffuseColor.rgb = mix( varyBase, vColor.rgb, uVaryStrength );'
+const VARY_BASE_DECL = 'vec3 varyBase = diffuseColor.rgb;'
 
 describe('the vary mix reaches the fragment shader, in the right place', () => {
   for (const type of TINTED_TYPES) {
@@ -217,10 +216,42 @@ describe('the vary mix reaches the fragment shader, in the right place', () => {
       expect(chunk).toBeLessThan(mix)
 
       // And `diffuseColor` is still live at that point — it is assigned above and
-      // consumed below (lighting), never before.
-      expect(src.indexOf('vec4 diffuseColor = vec4( diffuse, opacity );')).toBeLessThan(mix)
+      // consumed below (lighting), never before. Guarded with toBeGreaterThan(-1) like
+      // the assertions above: without it, an ABSENT needle (indexOf === -1) would still
+      // satisfy toBeLessThan(mix), since -1 < mix is true, and the assertion would pass
+      // vacuously on a declaration that was never found.
+      const diffuseColorDecl = src.indexOf('vec4 diffuseColor = vec4( diffuse, opacity );')
+      expect(diffuseColorDecl, 'diffuseColor declaration missing').toBeGreaterThan(-1)
+      expect(diffuseColorDecl).toBeLessThan(mix)
     })
   }
+
+  it('Finding 1 regression: the mix reads the captured PRE-multiply base, not diffuseColor.rgb', () => {
+    // `<color_fragment>`'s real body is `diffuseColor.rgb *= vColor;`, and it runs
+    // BEFORE our mix (we reissue the chunk, we don't replace it). If the mix's first
+    // argument were `diffuseColor.rgb` instead of a value captured before that multiply,
+    // strength 0 would render `material × palette` instead of the plain material colour
+    // — the same class of wrongness the whole Vary rework existed to remove.
+    const m = materialFor(MAT, tinted())
+    const { src } = compiledFragment(m)
+
+    const decl = src.indexOf(VARY_BASE_DECL)
+    expect(decl, 'varyBase capture missing').toBeGreaterThan(-1)
+
+    const chunk = src.indexOf('diffuseColor.rgb *= vColor;')
+    expect(chunk, 'color_fragment chunk missing').toBeGreaterThan(-1)
+
+    // Capture happens before the multiply, which happens before the mix.
+    expect(decl).toBeLessThan(chunk)
+    expect(chunk).toBeLessThan(src.indexOf(MIX_LINE))
+
+    // Extract the mix call's actual first argument by regex — a semantic check on
+    // WHAT is being mixed FROM, independent of matching the whole literal line, so a
+    // reformatted-but-still-wrong mix (e.g. `mix( diffuseColor.rgb, ... )`) cannot slip
+    // past by accident.
+    const mixCall = src.match(/diffuseColor\.rgb = mix\(\s*([^,]+),/)
+    expect(mixCall?.[1].trim(), 'mix call not found').toBe('varyBase')
+  })
 
   it('fresnel: the rim injection reads the ALREADY-tinted surface', () => {
     const m = materialFor({ ...MAT, type: 'fresnel' } as SceneMaterial, tinted())

@@ -1234,24 +1234,39 @@ export function hasVertexTint(mat: SceneMaterial, geometry?: THREE.BufferGeometr
 
 /** The Vary blend amount stamped alongside the tint: 0 = the plain material colour,
  *  1 = the pure palette colour. Missing/garbage reads as 1, which is what the dial's
- *  own default is. Clamped because it reaches a shader uniform. */
+ *  own default is. Clamped because it reaches a shader uniform.
+ *
+ *  INVARIANT this reads through `geometry.userData.varyStrength` rather than a param
+ *  passed explicitly: it only reaches the material because `varyColorStrength` is a
+ *  `MODIFIER_SPECS` key (primParams.ts) and `geoKeyFor` (engine.ts) hashes every
+ *  modifier, so a strength change forces the re-merge that re-stamps this value.
+ *  Removing `varyColorStrength` from `MODIFIER_SPECS` would silently kill the dial —
+ *  the geometry would stop changing and this would keep reading a stale strength. A
+ *  later task replaces this channel with the strength passed explicitly; until then,
+ *  do not drop `varyColorStrength` from `geoKeyFor`'s inputs. */
 function varyStrengthOf(geometry?: THREE.BufferGeometry): number {
   const s = geometry?.userData.varyStrength
   return typeof s === 'number' && Number.isFinite(s) ? Math.min(1, Math.max(0, s)) : 1
 }
 
-// Mix from whatever the material's own pipeline put in `diffuseColor.rgb` toward this
-// copy's vertex colour. Reissues the real `<color_fragment>` chunk first, so `vColor`
-// is declared (three emits `color_pars_fragment` under USE_COLOR, which `vertexColors`
-// turns on) and the material's own varying setup is untouched. `.rgb` rather than a
-// bare `vColor` so a four-component colour attribute (USE_COLOR_ALPHA → `vColor` is a
-// vec4) still compiles; the Cloner writes three components.
+// Mix from whatever the material's own pipeline put in `diffuseColor.rgb` — captured
+// BEFORE `<color_fragment>` runs — toward this copy's vertex colour. Reissues the real
+// `<color_fragment>` chunk first, so `vColor` is declared (three emits
+// `color_pars_fragment` under USE_COLOR, which `vertexColors` turns on) and the
+// material's own varying setup is untouched. `.rgb` rather than a bare `vColor` so a
+// four-component colour attribute (USE_COLOR_ALPHA → `vColor` is a vec4) still
+// compiles; the Cloner writes three components.
 //
-// NOTE the chunk's own body is `diffuseColor.rgb *= vColor` — that multiply runs first
-// and is then overwritten by this mix, which is the intent: the tint replaces the
-// material colour at strength 1 rather than darkening it.
-const VARY_TINT_FRAG_BODY = /* glsl */ `#include <color_fragment>
-diffuseColor.rgb = mix( diffuseColor.rgb, vColor.rgb, uVaryStrength );`
+// The chunk's own body is `diffuseColor.rgb *= vColor` — that multiply runs SECOND,
+// against `#include <color_fragment>` on its own line (three's include regex only
+// matches at line-start). Mixing from `diffuseColor.rgb` at that point would read the
+// ALREADY-multiplied value — material colour times palette colour — not the material
+// colour, so strength 0 would render a near-black smear instead of the plain material
+// colour. `varyBase` captures the pre-multiply value so the mix's low end is honest at
+// every strength, including 1 (pure palette colour, same as before).
+const VARY_TINT_FRAG_BODY = /* glsl */ `vec3 varyBase = diffuseColor.rgb;
+#include <color_fragment>
+diffuseColor.rgb = mix( varyBase, vColor.rgb, uVaryStrength );`
 
 /** Cloner Vary per-copy colour: chains a `<color_fragment>` mix onto whatever
  *  `onBeforeCompile` the material already carries. Modelled on `applyScreen` above,

@@ -378,9 +378,21 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[], s
   const out = merged ?? geo.clone()
   // Stamp only when the attribute was actually written — an untinted clone set must
   // stay indistinguishable from a plain geometry so its material is built unchanged.
+  //
+  // Assign a FRESH userData object rather than mutating `out.userData` in place: on
+  // the `merged ?? geo.clone()` fallback (unreachable today — mergeGeometries only
+  // returns null when the copies disagree on attributes, and they are clones of one
+  // geometry), `BufferGeometry.copy` assigns `this.userData = source.userData` BY
+  // REFERENCE, so `out.userData` IS the caller's `geo.userData` object and an in-place
+  // stamp would mutate the caller's own geometry too.
+  //
+  // INVARIANT (matches the one at `varyStrengthOf` in materials.ts): `strength` rides
+  // to the material only via this stamp — there is no explicit param path yet. That
+  // works only because `varyColorStrength` is a `MODIFIER_SPECS` key and `geoKeyFor`
+  // hashes every modifier, forcing a re-merge (and re-stamp) on every strength change.
+  // A later task passes the strength explicitly instead.
   if (tinted) {
-    out.userData.varyTint = true
-    out.userData.varyStrength = strength
+    out.userData = { ...out.userData, varyTint: true, varyStrength: strength }
   }
   return out
 }
