@@ -491,7 +491,11 @@ Read `frontend/app/composables/useCompositorLayers.ts` lines 2100–2230 (`scrat
 
 - [ ] **Step 2: Write the failing test**
 
-Create `frontend/tests/unit/compositor-stroke-band.unit.spec.ts`. Copy the recording-context harness from `compositor-stroke-style.unit.spec.ts` (it is file-private there; lift it verbatim rather than exporting it, so neither suite can break the other).
+Create `frontend/tests/unit/compositor-stroke-band.unit.spec.ts`.
+
+**Superseded during execution — do not copy the harness.** The recording context lives file-private in `compositor-stroke-style.unit.spec.ts`. EXTRACT it into a shared `frontend/tests/unit/_strokeCtx.ts` that both suites import; duplicating a logic block is a review defect, and `tests/_helpers.ts` is the existing precedent for shared test utilities. The pre-existing suite must stay green through the move — if it goes red, fix the extraction, never the assertions.
+
+The harness is an ink-replay `Recorder`, NOT the property-recording `calls()`/`scratches()` shape sketched in the test below; that shape does not exist in this repo. Adapt the assertions to the real recorder and keep the algorithm as written.
 
 ```ts
 import { describe, it, expect } from 'vitest'
@@ -785,7 +789,7 @@ Expected: PASS.
 
 - [ ] **Step 4: Write the byte-identity browser test**
 
-Create `frontend/tests/compositor-multi-stroke.spec.ts`. Copy `openCompositor` and `stackPixels` from `tests/compositor-layer-effects.spec.ts` (they are file-private there).
+Create `frontend/tests/compositor-multi-stroke.spec.ts`. `openCompositor` and `stackPixels` are file-private in `tests/compositor-layer-effects.spec.ts` — **extract them into `tests/_helpers.ts`** (which that suite already imports from) and have both suites use them, rather than copying. Same reasoning as Task 2's harness.
 
 ```ts
 /**
