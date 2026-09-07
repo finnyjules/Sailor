@@ -9,7 +9,7 @@ import { parseFills, serializeFills, FILL_TYPES, DEFAULT_FILL, type Fill, type F
 import { parseContent, type ContentItem, type CardFillKind } from '~/lib/spacetype/tile'
 import { loadImageTextures } from '~/lib/spacetype/imageTextures'
 import { fitWithin } from '~/lib/lora/datasetImages'
-import { DEFAULT_SHADER_SPEC, type ShaderSpec } from '~/lib/spacetype/fillTile'
+import { DEFAULT_SHADER_SPEC, HOLOGRAPHIC_FILL_PRESET, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
 import { SpaceTypeEngine } from '~/lib/spacetype/engine'
 import { detectWebGL } from '~/lib/spacetype/webgl'
@@ -287,6 +287,18 @@ function removeFill(i: number) { fills.splice(i, 1); if (!fills.length) addFill(
 function setFillType(f: Fill, t: FillType) {
   if (t === 'shader' && !f.shader) f.shader = structuredClone(DEFAULT_SHADER_SPEC)
   f.type = t
+}
+// The array fillList's picker (not the ring's WORD_FILL_TYPES subset) offers a
+// one-click "Holographic" preset after the eleven real FILL_TYPES. It's a shader
+// fill under the hood (see HOLOGRAPHIC_FILL_PRESET's doc in fillTile.ts), so
+// selecting it assigns the whole preset in one step rather than just a type.
+const ARRAY_FILL_TYPE_OPTIONS: string[] = [...FILL_TYPES, 'holographic']
+function arrayFillSelectValue(f: Fill): string {
+  return (f.type === 'shader' && f.shader?.effectId === 'holographic_surface') ? 'holographic' : f.type
+}
+function setArrayFillType(f: Fill, v: string) {
+  if (v === 'holographic') { Object.assign(f, structuredClone(HOLOGRAPHIC_FILL_PRESET)); return }
+  setFillType(f, v as FillType)
 }
 // Which controls each fill type actually uses (so the editor only shows relevant ones).
 function fillNeedsB(f: Fill): boolean { return f.type !== 'solid' }                                  // second colour
@@ -2008,8 +2020,8 @@ async function exportWebEmbed() {
                         <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="4" r="1" /><circle cx="7.5" cy="4" r="1" /><circle cx="2.5" cy="8" r="1" /><circle cx="7.5" cy="8" r="1" /><circle cx="2.5" cy="12" r="1" /><circle cx="7.5" cy="12" r="1" /></svg>
                       </span>
                       <span class="w-3 shrink-0 text-center text-[10px] tabular-nums text-white/30">{{ i + 1 }}</span>
-                      <StudioSelect class="flex-1" :options="FILL_TYPES" :model-value="f.type"
-                                    @update:model-value="(v: string) => setFillType(f, v as FillType)" />
+                      <StudioSelect class="flex-1" :options="ARRAY_FILL_TYPE_OPTIONS" :model-value="arrayFillSelectValue(f)"
+                                    @update:model-value="(v: string) => setArrayFillType(f, v)" />
                       <button v-if="fills.length > 1" type="button" @click="removeFill(i)" aria-label="Remove fill"
                               class="shrink-0 rounded p-1 text-white/30 hover:bg-white/10 hover:text-rose-300">
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>

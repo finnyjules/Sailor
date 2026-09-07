@@ -13,7 +13,7 @@ import { ChevronDown, Dices } from 'lucide-vue-next'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
-import { type Fill, type FillType, type ShaderSpec, FILL_TYPES, DEFAULT_FILL, DEFAULT_SHADER_SPEC, fillTileCanvas } from '~/lib/spacetype/fillTile'
+import { type Fill, type FillType, type ShaderSpec, FILL_TYPES, DEFAULT_FILL, DEFAULT_SHADER_SPEC, HOLOGRAPHIC_FILL_PRESET, fillTileCanvas } from '~/lib/spacetype/fillTile'
 import { rollPaintItem, gradientFromPaint } from '~/lib/compositor/fillPalette'
 import { type Paint, type Gradient, type ImageFill, isFill, isGradient, isImageFill } from '~/composables/useCompositorLayers'
 import type { BrandKit } from '~~/shared/brand/types'
@@ -79,11 +79,17 @@ const fill = reactive<Fill>(toFill(props.modelValue))
 const grad = ref<Gradient>(toGrad(props.modelValue, fill))
 watch(() => props.modelValue, (v) => { Object.assign(fill, toFill(v)); grad.value = toGrad(v, fill); drawPreview() })
 
-// The type dropdown offers a synthetic 'image' entry on top of the Fill types.
-type UiType = FillType | 'image'
+// The type dropdown offers synthetic 'image' and 'holographic' entries on top of the
+// Fill types. 'holographic' is a PRESET (see HOLOGRAPHIC_FILL_PRESET's doc in fillTile.ts),
+// not a FILL_TYPES member — picking it assigns a whole `shader` fill in one step.
+type UiType = FillType | 'image' | 'holographic'
 const imageFill = ref<ImageFill | null>(isImageFill(props.modelValue) ? { ...props.modelValue } : null)
 const pickerOpen = ref(false)
-const currentType = computed<UiType>(() => isImageFill(props.modelValue) ? 'image' : fill.type)
+const currentType = computed<UiType>(() => {
+  if (isImageFill(props.modelValue)) return 'image'
+  if (fill.type === 'shader' && fill.shader?.effectId === 'holographic_surface') return 'holographic'
+  return fill.type
+})
 
 watch(() => props.modelValue, (v) => {
   if (isImageFill(v)) { imageFill.value = { ...v }; pickerOpen.value = false }
@@ -93,6 +99,14 @@ function setUiType(t: UiType) {
   if (t === 'image') {
     if (!imageFill.value) { imageFill.value = { type: 'image', src: '', fit: 'cover', scale: 1, offset: { x: 0, y: 0 } }; pickerOpen.value = true }
     emit('update:modelValue', { ...imageFill.value })
+    return
+  }
+  if (t === 'holographic') {
+    // One-click preset: assigns the whole shader fill, same pattern as `shuffle` below
+    // (Object.assign onto the reactive `fill`, then emit via paintFromFill).
+    imageFill.value = null
+    Object.assign(fill, structuredClone(HOLOGRAPHIC_FILL_PRESET))
+    push()
     return
   }
   // leaving image → fall back to the normal Fill path
@@ -107,7 +121,12 @@ function pushImage(patch: Partial<ImageFill>) {
 }
 function onPick(src: string) { pickerOpen.value = false; pushImage({ src }) }
 
-const uiTypes = computed<UiType[]>(() => (props.allowImage && !props.nested) ? [...availableTypes.value, 'image'] : availableTypes.value)
+const uiTypes = computed<UiType[]>(() => {
+  // 'holographic' is a shader fill under the hood (see setUiType/currentType), so it
+  // gets the same depth-1 nesting exclusion as 'shader' itself in availableTypes.
+  const types: UiType[] = props.nested ? [...availableTypes.value] : [...availableTypes.value, 'holographic']
+  return (props.allowImage && !props.nested) ? [...types, 'image'] : types
+})
 
 /** Editable Fill → the Paint we emit (solid → hex, patterns → Fill object). Gradient
  *  is emitted from `grad` (the native multi-stop Gradient), not collapsed here.

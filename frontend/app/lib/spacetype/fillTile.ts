@@ -66,6 +66,30 @@ export const DEFAULT_SHADER_SPEC: ShaderSpec = {
   input: { type: 'gradient', a: '#ffffff', b: '#000000', textColor: '#ffffff', angle: 45, density: 8 },
 }
 
+/** The "Holographic" fill-picker entry. Deliberately a PRESET, not a FILL_TYPES member:
+ *  canvas-painted fill types cannot do per-pixel iridescence, and a shader fill in that
+ *  path already degrades to its input (see fills.ts's fillTexture). Twelve modules read
+ *  FILL_TYPES, and one leak from it has already reached a 3D texture path. */
+export const HOLOGRAPHIC_FILL_PRESET: Fill = {
+  ...DEFAULT_FILL,
+  type: 'shader',
+  shader: {
+    effectId: 'holographic_surface',
+    // Keyed WITHOUT the `u_` prefix — see ShaderSpec's doc above.
+    // Verified against shader_effects/manifest.json's current defaults.
+    // `metallic` is the GLSL name; its label is "Silver wash" since the look changed
+    // from diffraction foil to sticker vinyl (see the spec's Controls table).
+    params: { surface: 0, scale: 4, iridescence: 0.78, bands: 3, angle: 0,
+              shimmer: 0.25, metallic: 0.6, sheen: 0.5, glow: 0.5, crinkle: 1.0, tint: '#aab0b8', mix: 0 },
+    anchor: 'object',
+    speed: 1,
+    seed: 42,
+    // Required by ShaderSpec and ignored by a generative effect, exactly as the other
+    // twenty generative effects behave inside a shader fill.
+    input: DEFAULT_SHADER_SPEC.input,
+  },
+}
+
 /** True when `f` is a shader fill actually carrying a spec (vs. `type: 'shader'` with no spec yet). */
 export function fillIsShader(f: Fill): f is Fill & { shader: ShaderSpec } {
   return f.type === 'shader' && !!f.shader
