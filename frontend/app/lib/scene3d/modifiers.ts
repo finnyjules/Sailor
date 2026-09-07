@@ -222,7 +222,7 @@ function applyJitter(geo: THREE.BufferGeometry, amount: number, mode: number, se
   pos.needsUpdate = true
 }
 
-interface ClonerSettings {
+export interface ClonerSettings {
   /** 0 linear, 1 radial, 2 grid. */
   mode: number
   offset: [number, number, number]
@@ -319,17 +319,25 @@ export function planClones(total: number, s: ClonerSettings, vary?: VarySettings
 
 /** Fold the recipes into ONE geometry. When any recipe carries a colour, a
  *  per-vertex `color` attribute is written first, filled with that copy's colour
- *  across the whole copy — which is how a merged mesh can show N colours through
- *  a single material (`vertexColors: true`, see materials.ts). */
+ *  across the whole copy — which is how a merged mesh will be able to show N
+ *  colours through a single material once a later task turns on
+ *  `vertexColors: true` for it (see materials.ts) — until then the attribute
+ *  written here is present but silently unused by the renderer. */
 export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): THREE.BufferGeometry {
+  if (recipes.length === 0) return geo.clone()
   const tinted = recipes.some((r) => r.color !== undefined)
   const copies: THREE.BufferGeometry[] = []
   const c = new THREE.Color()
   for (const r of recipes) {
     const copy = geo.clone()
     if (tinted) {
-      // three reads vertex colours as LINEAR; the palette is sRGB hex.
-      c.set(r.color ?? '#ffffff').convertSRGBToLinear()
+      // Color.set(hexString) already performs three's sRGB→linear ingest
+      // conversion (ColorManagement is enabled by default since r152), so the
+      // sRGB palette hex lands in the linear working space with no further
+      // conversion — the same convention materials.ts documents from the other
+      // direction around line 948 ("getHex(SRGBColorSpace) undoes three's
+      // sRGB→linear ingest").
+      c.set(r.color ?? '#ffffff')
       const n = copy.getAttribute('position').count
       const arr = new Float32Array(n * 3)
       for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b }

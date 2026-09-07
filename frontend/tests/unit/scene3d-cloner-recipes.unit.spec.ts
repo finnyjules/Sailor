@@ -33,8 +33,12 @@ describe('planClones', () => {
     expect(r.map((x) => x.color)).toEqual(['#ff0000', '#00ff00', '#ff0000', '#00ff00'])
   })
 
-  it('leaves sequence-mode step transforms bit-identical to the un-varied plan', () => {
-    const s = { ...SETTINGS, stepScale: 0.9, stepRot: [0, 30, 0] as [number, number, number] }
+  it.each([
+    { name: 'linear', mode: 0, extra: {} },
+    { name: 'radial', mode: 1, extra: { radius: 3, axis: 2 } },
+    { name: 'grid', mode: 2, extra: { gridCount: [3, 2, 1] as [number, number, number], spacing: [2, 1.5, 1] as [number, number, number] } },
+  ])('leaves $name-mode step transforms bit-identical to the un-varied plan', ({ mode, extra }) => {
+    const s = { ...SETTINGS, ...extra, mode, stepScale: 0.9, stepRot: [0, 30, 0] as [number, number, number] }
     const plain = planClones(5, s)
     const varied = planClones(5, s, V())
     for (let i = 0; i < 5; i++) {
@@ -63,15 +67,29 @@ describe('mergeClones', () => {
   it('writes one colour per copy when recipes carry colours', () => {
     const base = box()
     const per = base.getAttribute('position').count
-    const recipes = planClones(2, SETTINGS, V({ colorEnabled: true, palette: ['#ff0000', '#0000ff'] }))
+    // Mid-tone hexes, not 0/1 fixed points of the sRGB transfer function: an
+    // extra (or missing) convertSRGBToLinear() call changes these channels,
+    // so this actually detects a wrong conversion — pure red/blue would not.
+    const recipes = planClones(2, SETTINGS, V({ colorEnabled: true, palette: ['#4c6ef5', '#f59f00'] }))
     const g = mergeClones(base, recipes)
     const col = g.getAttribute('color')!
     expect(col.count).toBe(per * 2)
-    // Copy 0 is pure red, copy 1 pure blue (linear-space, so 1 and 0 stay exact).
-    expect(col.getX(0)).toBeCloseTo(1, 5)
-    expect(col.getZ(0)).toBeCloseTo(0, 5)
-    expect(col.getX(per)).toBeCloseTo(0, 5)
-    expect(col.getZ(per)).toBeCloseTo(1, 5)
+    const expected0 = new THREE.Color('#4c6ef5')
+    const expected1 = new THREE.Color('#f59f00')
+    expect(col.getX(0)).toBeCloseTo(expected0.r, 5)
+    expect(col.getY(0)).toBeCloseTo(expected0.g, 5)
+    expect(col.getZ(0)).toBeCloseTo(expected0.b, 5)
+    expect(col.getX(per)).toBeCloseTo(expected1.r, 5)
+    expect(col.getY(per)).toBeCloseTo(expected1.g, 5)
+    expect(col.getZ(per)).toBeCloseTo(expected1.b, 5)
+  })
+
+  it('returns a clone of the input geometry when the recipe list is empty', () => {
+    const base = box()
+    const g = mergeClones(base, [])
+    expect(g).not.toBe(base)
+    expect(g.getAttribute('position').count).toBe(base.getAttribute('position').count)
+    expect(g.getAttribute('position').array).toEqual(base.getAttribute('position').array)
   })
 })
 
@@ -86,5 +104,17 @@ describe('applyModifiers regression guard', () => {
     const g = new THREE.BoxGeometry(1, 1, 1)
     const out = applyModifiers(g, { cloneCount: 4 }, DEFAULT_VARY)
     expect(out.getAttribute('color')).toBeUndefined()
+  })
+
+  it('leaves merged vertex positions bit-identical with DEFAULT_VARY passed vs absent', () => {
+    const modifiers = { cloneCount: 4, cloneMode: 0, cloneOffsetX: 1 }
+    const withoutVary = applyModifiers(new THREE.BoxGeometry(1, 1, 1), modifiers)
+    const withVary = applyModifiers(new THREE.BoxGeometry(1, 1, 1), modifiers, DEFAULT_VARY)
+    const a = withoutVary.getAttribute('position').array
+    const b = withVary.getAttribute('position').array
+    expect(a.length).toBe(b.length)
+    for (let i = 0; i < a.length; i++) {
+      expect(b[i]).toBe(a[i])
+    }
   })
 })
