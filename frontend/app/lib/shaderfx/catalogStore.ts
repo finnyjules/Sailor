@@ -35,6 +35,17 @@ export function getEffectSync(id: string): EffectDef | null {
   return cached?.effects.find(e => e.id === resolveEffectId(id)) ?? null
 }
 
+/** True when the effect's GLSL `source` samples its input texture (`u_image0`) —
+ *  false for purely generative effects and for unknown ids. Resolves the same
+ *  `filament → thread_contours` alias as getEffectSync, since it looks the
+ *  effect up through that function. */
+const READS_INPUT_RE = /\bu_image0\b/
+export function effectReadsInput(effectId: string): boolean {
+  const def = getEffectSync(effectId)
+  if (!def || typeof def.source !== 'string') return false
+  return READS_INPUT_RE.test(def.source)
+}
+
 /** Effects renamed after documents may have saved their old id. Resolved at every lookup so
  *  a saved layer keeps rendering; rewrite the id on load so the alias can be retired. Lives
  *  here (not catalog.ts) so the network-free embed bundle can resolve aliases too — see the
