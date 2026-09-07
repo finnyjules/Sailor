@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   strokeDashSegments, strokeAlignOf, strokeAligned, outsideStrokePadPx, paintLayerStack,
   createRectLayer, createLineLayer, createPathLayer,
@@ -8,6 +8,22 @@ import {
   type Recorder,
   inkAt, makeCtx, allOps, installScratchDocument,
 } from './_strokeCtx'
+
+// The corner-pin path hands `drawQuadWarp` the QUAD it warps the layer's offscreen onto.
+// That quad is derived from the SAME `pad` that sizes the offscreen, so a pad change moves
+// the warp of every saved corner-pinned frame — a regression the `sizes` assertions below
+// are structurally blind to. Replacing the real warp with a recorder is the only way to see
+// the quad the production call site actually built.
+const warpRec = vi.hoisted(() => ({ quads: [] as { x: number; y: number }[][] }))
+vi.mock('~/lib/compositor/warp', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('~/lib/compositor/warp')>()
+  return {
+    ...actual,
+    drawQuadWarp: (_ctx: unknown, _src: unknown, quad: { x: number; y: number }[]) => {
+      warpRec.quads.push(quad.map(p => ({ x: p.x, y: p.y })))
+    },
+  }
+})
 
 // ── Pure helpers ─────────────────────────────────────────────────────────────
 
@@ -59,18 +75,34 @@ describe('outsideStrokePadPx', () => {
     expect(outsideStrokePadPx(l, 200)).toBe(0)
   })
 
-  // CHANGED when the pad started reading the stroke STACK. A centred stroke straddles
-  // the silhouette edge, so half its width genuinely lands outside the box — the old 0
-  // was simply wrong about where the ink is. Widening a pad only ever makes an offscreen
-  // LARGER, so nothing is clipped that was not clipped before. 'inside' still reaches
-  // nothing beyond the edge and stays 0.
-  it('is half the width for center alignment, and still 0 for inside', () => {
+  // A centred stroke AT DISTANCE 0 stays 0 — not because its ink is inside the box (half
+  // of it is not), but because this pad also scales the corner-pin quad, so any value here
+  // re-warps every saved centred-stroke frame. See outsideStrokePadPx's doc comment and
+  // the quad tests at the bottom of this file.
+  it('is 0 for a centre- or inside-aligned stroke sitting on the edge', () => {
     const center = createRectLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'center' })
     const inside = createRectLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'inside' })
     const absent = createRectLayer({ stroke: '#fff', strokeWidth: 0.1 })
-    expect(outsideStrokePadPx(center, 200)).toBe(10)   // 0.1 * 200 / 2
+    expect(outsideStrokePadPx(center, 200)).toBe(0)
     expect(outsideStrokePadPx(inside, 200)).toBe(0)
-    expect(outsideStrokePadPx(absent, 200)).toBe(10)   // absent ⇒ 'center'
+    expect(outsideStrokePadPx(absent, 200)).toBe(0)   // absent ⇒ 'center'
+  })
+
+  // The silhouette raster asks for the OTHER answer — it only needs to be big enough, and
+  // must not shrink below what the pre-stack rule gave. Same helper, one explicit flag, so
+  // the two callers can never drift apart on what the rest of a stack reaches.
+  it('counts a centred edge stroke when the caller asks for the raster answer', () => {
+    const center = createRectLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'center' })
+    expect(outsideStrokePadPx(center, 200, true)).toBe(10)   // 0.1 * 200 / 2
+    expect(outsideStrokePadPx(center, 200, false)).toBe(0)
+  })
+
+  // The exception is exactly and only distance 0: a stroke the stack pushed away from the
+  // edge has no legacy counterpart, so padding for it cannot move any saved frame.
+  it('DOES pad a centred stroke that a distance pushed off the edge', () => {
+    const l = createRectLayer({ stroke: undefined, strokeWidth: undefined }) as unknown as Record<string, unknown>
+    l.strokes = [{ id: 's1', paint: '#fff', width: 0.1, distance: 0.05, align: 'center' }]
+    expect(outsideStrokePadPx(l as unknown as LocalLayer, 200)).toBe(20)  // (0.05 + 0.05) * 200
   })
 
   it('is the full stroke width in px for an outside-aligned rect/ellipse/polygon/star', () => {
@@ -223,13 +255,12 @@ describe('corner-pin offscreen padding for outside-aligned strokes', () => {
     expect(sizes).toContainEqual({ w: 140, h: 140 })
   })
 
-  // CHANGED alongside `outsideStrokePadPx` above: a centred stroke puts half its width
-  // outside the box, so the warp offscreen must hold it. 100 + 2*10 = 120. The old
-  // expectation of 100 clipped the outer half of every default-aligned outline out of a
-  // corner-pinned layer; a larger offscreen can only ever keep more ink, never less.
-  it('pads a centered stroke by half its width on each side', () => {
+  // A centred stroke on the edge pads NOTHING, so its offscreen is the plain box — the
+  // pre-stack behaviour, preserved because the pad also scales the quad (see below).
+  it('does NOT pad a centered stroke sitting on the edge', () => {
     const { sizes } = paintWithSizes([SQ({ strokeAlign: 'center', cornerPin: PIN })])
-    expect(sizes).toContainEqual({ w: 120, h: 120 })
+    expect(sizes).toContainEqual({ w: 100, h: 100 })
+    expect(sizes.some(s => s.w > 100 || s.h > 100)).toBe(false)
   })
 
   it('does NOT pad an inside-aligned stroke — it never left the box to begin with', () => {
@@ -243,6 +274,47 @@ describe('corner-pin offscreen padding for outside-aligned strokes', () => {
     const { sizes } = paintWithSizes([l])
     expect(sizes).toContainEqual({ w: 100, h: 100 })
     expect(sizes.some(s => s.w > 100 || s.h > 100)).toBe(false)
+  })
+
+  // THE REGRESSION GUARD. `pad` sizes the offscreen AND scales the quad
+  // (`hw = box.w / 2 + pad`, then every corner is pulled by `cp.*.x * hw`), so any pad a
+  // stroke contributes also DEFORMS the pin. A saved frame's warp must not move because
+  // the painter learned to read a stack, and only the quad shows that — the `sizes`
+  // assertions above pass happily while the corners have all shifted.
+  const lastQuad = (layer: LocalLayer) => {
+    warpRec.quads.length = 0
+    paintWithSizes([layer])
+    expect(warpRec.quads.length).toBeGreaterThan(0)   // the warp path really ran
+    return warpRec.quads[warpRec.quads.length - 1]!
+  }
+  const NO_STROKE = () => createRectLayer({ x: 0.5, y: 0.5, w: 0.5, h: 0.5, radius: 0, fill: '#fff', stroke: '', strokeWidth: 0, cornerPin: PIN })
+
+  it('warps a centre-stroked rect onto EXACTLY the quad an unstroked rect gets', () => {
+    const plain = lastQuad(NO_STROKE())
+    const centred = lastQuad(SQ({ strokeAlign: 'center', cornerPin: PIN }))
+    // hw = 50 with pad 0 ⇒ tl.x = -50 + (-0.1 * 50) = -55. A 10px pad would make it -66.
+    expect(plain[0]!.x).toBeCloseTo(-55, 6)
+    expect(centred).toEqual(plain)
+  })
+
+  it('an inside-aligned stroke leaves the quad alone too', () => {
+    expect(lastQuad(SQ({ strokeAlign: 'inside', cornerPin: PIN }))).toEqual(lastQuad(NO_STROKE()))
+  })
+
+  it('an OUTSIDE stroke does move the quad — the pad it needs is real', () => {
+    const out = lastQuad(SQ({ strokeAlign: 'outside', cornerPin: PIN }))
+    // hw = 50 + 20 = 70 ⇒ tl.x = -70 + (-0.1 * 70) = -77.
+    expect(out[0]!.x).toBeCloseTo(-77, 6)
+  })
+
+  it('a centre-aligned stroke pushed OUT by a distance does pad, and does move the quad', () => {
+    const far = lastQuad(SQ({
+      strokeAlign: 'center', cornerPin: PIN,
+      strokes: [{ id: 's1', paint: '#fff', width: 0.1, distance: 0.05, align: 'center' }],
+      stroke: undefined, strokeWidth: undefined,
+    } as unknown as Partial<RectLayer>))
+    // reach = 0.05 + 0.1/2 = 0.1 ⇒ 20px pad ⇒ hw = 70 ⇒ tl.x = -77.
+    expect(far[0]!.x).toBeCloseTo(-77, 6)
   })
 })
 

@@ -5,6 +5,9 @@ import {
   silhouetteInkOverhangPx, SILHOUETTE_RASTER_MAX_DIM, SILHOUETTE_CACHE_MAX_BYTES,
   type SilhouetteInkInput,
 } from '~/lib/compositor/silhouetteCache'
+// The COMPOSABLE's own resolver (a layer ⇒ the pure helper's primitives), aliased so it
+// cannot be confused with the pure `silhouettePadPx` imported above.
+import { silhouettePadPx as silhouettePadPxOfLayer } from '~/composables/useCompositorLayers'
 import { applyTornEdgeToData, DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
 import { applyFeatherToData, DEFAULT_FEATHER } from '~/lib/compositor/feather'
 
@@ -461,5 +464,70 @@ describe('silhouette cache key covers stack order', () => {
     const a = { effects: [{ id: 'a', type: 'torn_edge', visible: true }, { id: 'b', type: 'feather', visible: true }] }
     const b = { effects: [{ id: 'b', type: 'feather', visible: true }, { id: 'a', type: 'torn_edge', visible: true }] }
     expect(silhouetteCacheKey(a, 2, 100, 100, 1000)).not.toBe(silhouetteCacheKey(b, 2, 100, 100, 1000))
+  })
+})
+
+// ── The WIRING, not just the arithmetic ──────────────────────────────────────
+//
+// Everything above hands `silhouetteInkOverhangPx` / `silhouettePadPx` a
+// `strokeReachPx` by hand, so none of it can tell whether the composable actually
+// supplies one. It does, in `silhouettePadPx(layer, W, s, box)` — and for a LEGACY
+// layer the reach it computes and the single-`strokeAlign` fallback agree exactly, so
+// deleting that wiring leaves every test above green. A layer with a real `strokes`
+// array is the only shape that separates them, which is what these cases build.
+describe('silhouettePadPx (the composable) — resolving a LAYER down to a reach', () => {
+  // s = 1 ⇒ rasterMargin is exactly SILHOUETTE_RASTER_PAD_PX, so the overhang is the
+  // only interesting term.
+  const MARGIN = SILHOUETTE_RASTER_PAD_PX
+  const BOX = { w: 100, h: 100 }
+  const W = 200
+
+  it('pads a MULTI-STROKE rect for the widest-reaching stroke, not the first one', () => {
+    const layer = {
+      id: 'l1', kind: 'rect', x: 0.5, y: 0.5, w: 0.5, h: 0.5, radius: 0, fill: '#fff',
+      // Deliberately ordered narrow-then-wide: a reader that stopped at entry 0 (or fell
+      // back to the absent legacy `strokeAlign`, i.e. 'center' with a 0 width) reports 0.
+      strokes: [
+        { id: 'a', paint: '#fff', width: 0.01, align: 'outside' },
+        { id: 'b', paint: '#f0f', width: 0.05, align: 'outside' },
+      ],
+    }
+    // 0.05 * 200 = 10 px of outside-aligned reach.
+    expect(silhouettePadPxOfLayer(layer as never, W, 1, BOX)).toBe(MARGIN + 10)
+  })
+
+  it("counts a stroke's DISTANCE, which no single (align, width) pair can express", () => {
+    const layer = {
+      id: 'l2', kind: 'ellipse', x: 0.5, y: 0.5, w: 0.5, h: 0.5, fill: '#fff',
+      strokes: [{ id: 'a', paint: '#fff', width: 0.02, distance: 0.06, align: 'center' }],
+    }
+    // reach = 0.06 + 0.02/2 = 0.07 ⇒ 14 px.
+    expect(silhouettePadPxOfLayer(layer as never, W, 1, BOX)).toBeCloseTo(MARGIN + 14, 6)
+  })
+
+  it('pads a TEXT layer for the widest stroke in its stack (text uses width, not reach)', () => {
+    const layer = {
+      id: 'l3', kind: 'text', x: 0.5, y: 0.5, text: 'Edge', fontFamily: 'Inter',
+      fontSize: 0.05, color: '#fff', align: 'center', lineHeight: 1.1, boxH: 0,
+      strokes: [
+        { id: 'a', paint: '#fff', width: 0.01 },
+        { id: 'b', paint: '#f00', width: 0.03 },
+      ],
+    }
+    // fontPx 0.05*200 = 10, plus the WIDEST stroke 0.03*200 = 6.
+    expect(silhouettePadPxOfLayer(layer as never, W, 1, BOX)).toBeCloseTo(MARGIN + 16, 6)
+  })
+
+  it('a legacy single-stroke layer is unchanged — the read-through agrees with the old rule', () => {
+    const legacy = {
+      id: 'l4', kind: 'rect', x: 0.5, y: 0.5, w: 0.5, h: 0.5, radius: 0, fill: '#fff',
+      stroke: '#fff', strokeWidth: 0.05, strokeAlign: 'outside',
+    }
+    expect(silhouettePadPxOfLayer(legacy as never, W, 1, BOX)).toBe(MARGIN + 10)
+    const centred = { ...legacy, strokeAlign: 'center' }
+    // Half of 0.05*200 = 5 px — the SAME value the pre-stack `strokeAlign === 'center'`
+    // rule produced. The corner-pin pad drops this stroke (it must, or every saved pinned
+    // frame re-warps); the raster keeps it, or a torn edge would clip the outer half.
+    expect(silhouettePadPxOfLayer(centred as never, W, 1, BOX)).toBe(MARGIN + 5)
   })
 })

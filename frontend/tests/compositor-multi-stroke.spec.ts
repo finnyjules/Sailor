@@ -31,7 +31,11 @@ const FIXTURE = fileURLToPath(new URL('./fixtures/multi-stroke-legacy.txt', impo
  *  - text, whose outline comes from `strokeColor` and is drawn with `strokeText`
  *  - line, which has no interior and keeps a single stroke by design
  *  - two layers whose stroke must draw NOTHING ('none' paint, and a zero width)
- *  - a GRADIENT stroke, so `resolvePaint` is exercised through the new call path too
+ *  - a GRADIENT stroke, so `resolvePaint` is exercised through the new call path too.
+ *    `type` MUST be 'linear' or 'radial' — `isGradient` in lib/compositor/paint.ts accepts
+ *    only those two, and an invented discriminant ('gradient') falls through every branch,
+ *    reaches `strokeStyle` as an object, coerces to an invalid value and paints DEFAULT
+ *    BLACK. The fixture carried exactly that bug and the gradient branch was never run.
  */
 const LEGACY_LAYERS = [
   { kind: 'rect', x: 0.2, y: 0.2, w: 0.2, h: 0.15, fill: '#3b82f6', stroke: '#ff0000', strokeWidth: 0.01, radius: 0.02 },
@@ -47,7 +51,7 @@ const LEGACY_LAYERS = [
   { kind: 'line', x: 0.5, y: 0.95, w: 0.6, stroke: '#fff', strokeWidth: 0.004, strokeDash: { dash: 0.02, gap: 0.01 } },
   { kind: 'rect', x: 0.35, y: 0.35, w: 0.2, h: 0.2, fill: '#111', stroke: 'none', strokeWidth: 0, radius: 0 },
   { kind: 'ellipse', x: 0.6, y: 0.35, w: 0.14, h: 0.14, fill: '#eee', stroke: '#333', strokeWidth: 0 },
-  { kind: 'rect', x: 0.1, y: 0.65, w: 0.1, h: 0.1, fill: 'none', stroke: { type: 'gradient', stops: [{ color: '#f00', offset: 0 }, { color: '#00f', offset: 1 }], angle: 45 }, strokeWidth: 0.014, radius: 0 },
+  { kind: 'rect', x: 0.1, y: 0.65, w: 0.1, h: 0.1, fill: 'none', stroke: { type: 'linear', stops: [{ color: '#f00', offset: 0 }, { color: '#00f', offset: 1 }], angle: 45 }, strokeWidth: 0.014, radius: 0 },
 ]
 
 test('every legacy stroked layer renders identically through the stack painter', async ({ page }) => {

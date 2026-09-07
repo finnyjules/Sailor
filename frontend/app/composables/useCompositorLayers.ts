@@ -1286,13 +1286,32 @@ export function localLayerBox(
  * reaches furthest, and a stroke pushed out by its `distance` is padded for
  * where it actually lands rather than where its shape's edge is.
  *
- * BEHAVIOUR CHANGE: a CENTRE-aligned stroke used to return 0 and now returns
- * half a width — which is where its ink genuinely reaches. This only ever makes
- * an offscreen LARGER, so nothing is clipped that was not clipped before.
+ * THE CENTRE-AT-DISTANCE-0 EXCEPTION. A stroke that is centre-aligned AND sits
+ * at distance 0 contributes 0, even though half its width genuinely lands
+ * outside the box. That is deliberate and load-bearing: this same `pad` also
+ * scales the CORNER-PIN QUAD (`hw = box.w / 2 + pad`, and every corner is then
+ * pulled by `cp.*.x * hw`), so returning a non-zero pad here would silently
+ * re-warp every already-saved corner-pinned frame whose stroke is the default
+ * centred one. Such a stroke being clipped at half its width inside a pinned
+ * offscreen is PRE-EXISTING behaviour, and changing it is not this task's job —
+ * it needs the quad to stop riding the pad first.
+ *
+ * Every other stroke contributes its real reach: outside-aligned, or centred /
+ * inside with a non-zero `distance` — those cases could not exist before the
+ * stack did, so no saved frame's warp can move because of them.
  * Still 0 for no stroke, a zero width, a `line`/`text` layer, and any kind
  * without a stack at all.
  */
-export function outsideStrokePadPx(layer: LocalLayer, W: number): number {
+export function outsideStrokePadPx(
+  layer: LocalLayer,
+  W: number,
+  /** true: a centred stroke on the edge counts its real half-width reach. The corner-pin
+   *  caller MUST leave this false (that is the exception documented above); the silhouette
+   *  raster passes true, because a raster is not geometry — it only needs to be big enough,
+   *  and shrinking it by half a stroke width would clip the torn edge / feather of every
+   *  saved centre-stroked layer. */
+  countCentredOnEdge = false,
+): number {
   // `text` is stroked with `strokeText`, which has no offsettable path — its overhang is
   // the silhouette cache's business (a full em plus the width), not this box pad's.
   if (!strokeSupportsStack(layer.kind) || layer.kind === 'text') return 0
@@ -1305,6 +1324,10 @@ export function outsideStrokePadPx(layer: LocalLayer, W: number): number {
     if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
     const d = st.distance ?? 0
     const align = strokeAlignOf(st.align)
+    // A centred stroke ON the edge is the shape every saved frame already has; it must
+    // keep contributing 0 so the corner-pin quad above stays exactly where it was. See
+    // the doc comment's "centre-at-distance-0 exception".
+    if (align === 'center' && d === 0 && !countCentredOnEdge) continue
     // How far this stroke's OUTER edge reaches beyond the silhouette.
     const reach = align === 'outside' ? d + st.width : align === 'inside' ? d : d + st.width / 2
     if (reach > pad) pad = reach
@@ -1643,10 +1666,20 @@ function silhouetteContentReady(layer: LocalLayer, W: number): boolean {
  *
  *  The SHAPE kinds hand the pure helper `outsideStrokePadPx` (the stack's furthest reach,
  *  alignment + distance + a path's scale already folded in) as `strokeReachPx`, so a
- *  layer with several strokes is padded for the one that actually reaches furthest. Text
+ *  layer with several strokes is padded for the one that actually reaches furthest. It is
+ *  called with `countCentredOnEdge = true`: a raster only has to be BIG ENOUGH, so unlike
+ *  the corner-pin pad it must keep counting the outer half of a plain centred stroke —
+ *  exactly the half-width the pre-stack `strokeAlign` rule counted. Text
  *  and line keep their own rules — see `silhouetteInkOverhangPx`. `strokeWidth` is
- *  guarded (`|| 0`) so a missing/NaN value can never make `bwD` NaN downstream. */
-function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { w: number; h: number }): number {
+ *  guarded (`|| 0`) so a missing/NaN value can never make `bwD` NaN downstream.
+ *
+ *  EXPORTED for its tests. The pure helper it defers to is tested by handing it a
+ *  `strokeReachPx` directly, which cannot see whether anything actually SUPPLIES one —
+ *  delete the `strokeReachPx = …` line below and every such test still passes, because a
+ *  legacy layer's reach and the single-`strokeAlign` fallback agree by construction. Only
+ *  a layer with a real `strokes` array (or a text layer with one) tells them apart, and
+ *  that has to be resolved from a LAYER, i.e. here. */
+export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { w: number; h: number }): number {
   const l = layer as unknown as { strokeWidth?: number; strokeAlign?: unknown; stroke?: Paint; scale?: number; fontSize?: number; boxH?: number }
   const width = Math.max(0, l.strokeWidth || 0)
   let strokePx = 0
@@ -1672,7 +1705,7 @@ function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { w: numb
     // alignment, `distance` and a path's `scale` all already folded in. Reading a single
     // `strokeAlign` here instead would bake the wrong outline for a multi-stroked layer,
     // and do it SILENTLY: a slightly wrong torn edge, not an error.
-    strokeReachPx = outsideStrokePadPx(layer, W)
+    strokeReachPx = outsideStrokePadPx(layer, W, true)
     // A path's strokeWidth is stored in local units AT scale=1 (see PathLayer), so its
     // px extent carries the layer's own uniform scale — same correction outsideStrokePadPx makes.
     if (hasPaint(l.stroke)) strokePx = width * (layer.kind === 'path' ? (l.scale ?? 1) : 1) * W
@@ -1925,12 +1958,14 @@ function paintLayer(
       drawLayerContent(c, layer, W, wiredLive); return
     }
     const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
-    // Outside-aligned strokes paint entirely beyond localLayerBox's plain w×h
-    // (see outsideStrokePadPx) and would be 100% clipped by this offscreen's
-    // edges otherwise. Pad it — and grow the quad it warps into by the same
-    // amount, keeping the shape centered — so the stroke survives the pin. 0
-    // for every other case (no stroke, center, inside) keeps this identical to
-    // before: same bw/bh, same quad. Skipped when DOF already produced the
+    // Outside-aligned strokes (and any stroke pushed out by a `distance`) paint
+    // entirely beyond localLayerBox's plain w×h (see outsideStrokePadPx) and
+    // would be 100% clipped by this offscreen's edges otherwise. Pad it — and
+    // grow the quad it warps into by the same amount, keeping the shape
+    // centered — so the stroke survives the pin. NOTE that `pad` therefore also
+    // SCALES the quad's corner pull below, which is why outsideStrokePadPx
+    // returns 0 for the plain centred stroke every saved frame has: same bw/bh,
+    // same quad, same warp as before the stack existed. Skipped when DOF already produced the
     // source canvas (dofCanvas is used as-is, unpadded — a rarer combination
     // left as a pre-existing gap, not what this fix targets).
     const pad = dofCanvas ? 0 : outsideStrokePadPx(layer, W)
@@ -2389,9 +2424,14 @@ function paintStrokeStack(
     // `hasPaint` is re-checked here (not just in the reader) so the painter keeps the
     // exact gate it always had: a gradient with no stops paints nothing.
     if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
-    // A band at a non-zero distance CONSUMES the current path on `ctx`, so the shape is
-    // rebuilt before every stroke rather than relying on what the previous one left
-    // behind. A path layer hands its Path2D in instead and needs no rebuild.
+    // DEFENSIVE, and deliberately kept as such. No branch below actually destroys `ctx`'s
+    // current path: Canvas2D's `stroke()` / `fill()` / `clip()` do not consume it, and the
+    // non-zero-distance band does all of its dilating and knocking out on SCRATCH contexts,
+    // never touching `ctx`'s path at all. Rebuilding is therefore a no-op today — it is
+    // here so that a future band style which does leave `ctx` mid-path cannot silently
+    // corrupt the stroke after it. It is free of pixel consequences (byte-identity depends
+    // on nothing here), so the safety is worth the redundant call.
+    // A path layer hands its Path2D in instead and needs no rebuild.
     if (o.build && !o.path) o.build(ctx)
     paintStrokeBand(ctx, {
       width: st.width * o.widthScale,

@@ -54,8 +54,14 @@ export interface StrokeInstance {
 }
 
 /** The kinds whose stroke can become a list. A line has no interior to offset from, so it
- *  keeps its single stroke — it still READS through this module, so the painter has no
- *  special case, but the tree offers it no plus-menu. */
+ *  keeps its single stroke and is deliberately NOT a member.
+ *
+ *  Being honest about the consequence: the painter's line arm is a genuine special case —
+ *  it reads `layer.strokeWidth` / `layer.stroke` directly and never calls `strokeStackOf`.
+ *  That is not an oversight to tidy up later. Its `Math.max(1, width * W)` hairline floor
+ *  and its `'#ffffff'` default-when-unpainted have no expression in a stack (which drops a
+ *  zero-width or unpainted stroke outright), so routing it through here would change what
+ *  a saved line renders. The tree offers a line no plus-menu for the same reason. */
 const STACKABLE = new Set(['rect', 'ellipse', 'polygon', 'star', 'path', 'text'])
 export function strokeSupportsStack(kind: string): boolean { return STACKABLE.has(kind) }
 
