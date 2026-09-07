@@ -82,4 +82,23 @@ describe('applyEffectChain keeps canonical order regardless of array order', () 
     expect(log.indexOf('draw:source-over')).toBeLessThan(log.indexOf('draw:overlay'))
     vi.unstubAllGlobals()
   })
+  it('selects the first VISIBLE entry per type, not the first entry regardless of visibility', () => {
+    vi.stubGlobal('document', { createElement: () => stubCanvas().canvas })
+    const { canvas, log } = stubCanvas()
+    // Two duotone effects: first is hidden, second is visible. Chain should apply the second one.
+    applyEffectChain(canvas, [
+      duotone({ visible: false }),
+      duotone({ visible: true }),
+    ] as any, { W: 100, scale: 1 })
+    expect(log.filter(l => l === 'putImageData')).toHaveLength(1)
+    vi.unstubAllGlobals()
+  })
+  it('applies nothing when the only entry of a type is invisible', () => {
+    vi.stubGlobal('document', { createElement: () => stubCanvas().canvas })
+    const { canvas, log } = stubCanvas()
+    // Single duotone that is invisible should apply nothing.
+    applyEffectChain(canvas, [duotone({ visible: false })] as any, { W: 100, scale: 1 })
+    expect(log.filter(l => l === 'putImageData')).toHaveLength(0)
+    vi.unstubAllGlobals()
+  })
 })

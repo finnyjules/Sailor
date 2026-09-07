@@ -400,10 +400,11 @@ export function applyPasses(
 const CHAIN_ORDER = ['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain']
 
 /**
- * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type, applied in
- * the canonical chain order whatever the array says. `applyStackPost` (the document-level
- * post stack) uses this, and that stack's stored array order is arbitrary — sorting here is
- * what keeps every existing document rendering exactly as it did.
+ * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type (the first VISIBLE
+ * entry of each type), applied in the canonical chain order whatever the array says.
+ * `applyStackPost` (the document-level post stack) uses this, and that stack's stored array
+ * order is arbitrary — sorting here is what keeps every existing document rendering exactly
+ * as it did.
  */
 export function applyEffectChain(
   off: HTMLCanvasElement,
@@ -411,7 +412,7 @@ export function applyEffectChain(
   opts: PassOpts,
 ): void {
   const first = new Map<string, PostEffect>()
-  for (const e of effects) if (!first.has(e.type)) first.set(e.type, e)
+  for (const e of effects) if (e.visible && !first.has(e.type)) first.set(e.type, e)
   applyPasses(off, CHAIN_ORDER.map(t => first.get(t)).filter((e): e is PostEffect => !!e), opts)
 }
 
