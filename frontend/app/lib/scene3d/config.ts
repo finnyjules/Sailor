@@ -48,6 +48,19 @@ export const DEFAULT_FONT_URL = '/fonts/ABCROM-Bold.otf'
 export type MaterialType = 'standard' | 'phong' | 'toon' | 'matcap' | 'glass' | 'fresnel' | 'gradient' | 'opalescent' | 'holographic' | 'image' | 'shaderFill'
 export const MATERIAL_TYPES: MaterialType[] = ['standard', 'phong', 'toon', 'matcap', 'glass', 'fresnel', 'gradient', 'opalescent', 'holographic', 'image', 'shaderFill']
 
+/** Display text per material type — the panel must never show a raw id ("shaderFill" would
+ *  title-case to "ShaderFill"). Keyed, not a positional array: a Record over MaterialType
+ *  makes the compiler demand a name the moment a type is added, where a parallel list would
+ *  silently slide every label one place along. Read via MATERIAL_TYPE_LABELS_ORDERED. */
+export const MATERIAL_TYPE_LABELS: Record<MaterialType, string> = {
+  standard: 'Standard', phong: 'Phong', toon: 'Toon', matcap: 'Matcap', glass: 'Glass',
+  fresnel: 'Fresnel', gradient: 'Gradient', opalescent: 'Opalescent',
+  holographic: 'Holographic', image: 'Image', shaderFill: 'Shader fill',
+}
+/** The same labels in MATERIAL_TYPES order, which is what a `select` row's `optionLabels`
+ *  contract requires (index i labels options[i]). Derived, so the two cannot drift. */
+export const MATERIAL_TYPE_LABELS_ORDERED: string[] = MATERIAL_TYPES.map((t) => MATERIAL_TYPE_LABELS[t])
+
 /** One stop of the gradient ramp. `pos` is 0..1 along the ramp direction. */
 export interface GradientStop { pos: number; color: string }
 
@@ -582,6 +595,7 @@ export const MACRO_NONE = '(none)'
 
 export const LIGHTING_PRESETS: LightingPreset[] = ['studio', 'soft', 'dramatic', 'flat']
 export const ENVIRONMENT_KINDS: EnvironmentKind[] = ['room', 'darkStrips', 'softbox', 'colorGels']
+
 
 const LOOP_KINDS: LoopKind[] = ['none', 'spin', 'bob', 'pulse', 'orbit', 'sway', 'tumble']
 const TRANSITION_PRESETS: TransitionPreset[] = ['move', 'rise', 'scale', 'fade', 'pop']

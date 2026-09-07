@@ -5,8 +5,7 @@ import {
   PRIMITIVE_KINDS, LIGHT_DEFAULTS, DECAL_DEFAULTS, DECAL_BLENDS, lightIntensityMax, TEXTURE_TILING_RANGE,
   SCREEN_PATTERNS, SCREEN_GAPS, SCREEN_INKS, IMAGE_WRAPS, IMAGE_TILING_RANGE, IMAGE_FITS,
   IMAGE_PROJECTIONS, IMAGE_AXES,
-  type SceneDoc, type SceneObject, type MaterialType,
-} from './config'
+  type SceneDoc, type SceneObject, type MaterialType, MATERIAL_TYPE_LABELS_ORDERED } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, type ParamSpec } from './primParams'
 
 /**
@@ -396,8 +395,11 @@ export const SCENE_CONTROLS: SceneControl[] = [
       when: hasPbrSurface,
       showIf: { key: 'object.material.unlit', notEquals: true },
     }),
+  // Without optionLabels the row title-cases the stored id and shows "ShaderFill". The labels
+  // are derived from MATERIAL_TYPE_LABELS (config.ts) in MATERIAL_TYPES order, so adding a
+  // material is a compile error until it is named rather than a silently shifted list.
   select('object.material.type', 'Material type', [...MATERIAL_TYPES], DEFAULT_MATERIAL.type, 'Material', undefined,
-    { when: isEditableMaterial, summary: 1 }),
+    { when: isEditableMaterial, summary: 1, optionLabels: MATERIAL_TYPE_LABELS_ORDERED }),
   {
     key: 'object.material.unlit', label: 'Unlit', kind: 'switch', default: MATERIAL_DEFAULTS.unlit, group: 'Material',
     hint: 'Glows flat instead of being shaded by scene lights',

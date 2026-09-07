@@ -18,8 +18,7 @@ import { SCENE_CONTROLS, type SceneControl } from '~/lib/scene3d/controls'
 import {
   createDecal, createGlbObject, createLight, createPrimitive, defaultDoc,
   LIGHTING_PRESETS, MATERIAL_TYPES, PRIMITIVE_KINDS,
-  type LightKind, type MaterialType, type PrimitiveKind, type SceneDoc, type SceneObject,
-} from '~/lib/scene3d/config'
+  type LightKind, type MaterialType, type PrimitiveKind, type SceneDoc, type SceneObject, MATERIAL_TYPE_LABELS_ORDERED } from '~/lib/scene3d/config'
 
 /**
  * CHARACTERIZATION of the 3D Studio inspector's Transform / Material / Camera / Lighting /
@@ -88,7 +87,10 @@ const ROW: Record<string, Row> = {
   'object.scale.2': { label: 'Size Z', kind: 'slider', min: 0.05, max: 10, step: 0.01, entry: 'unclamped' },
 
   // Material — shared head
-  [`${M}type`]: { label: 'Material', kind: 'select', options: MATERIAL_TYPES },
+  [`${M}type`]: {
+    label: 'Material', kind: 'select', options: MATERIAL_TYPES,
+    optionLabels: MATERIAL_TYPE_LABELS_ORDERED,
+  },
 
   // standard + glass "Surface" block
   [`${M}color`]: { label: 'Color', kind: 'color' },
