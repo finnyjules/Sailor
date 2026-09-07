@@ -123,6 +123,8 @@ describe('scene3d modifier specs', () => {
       'cloneCountX', 'cloneCountY', 'cloneCountZ',
       'cloneSpacingX', 'cloneSpacingY', 'cloneSpacingZ',
       'cloneStepRotX', 'cloneStepRotY', 'cloneStepRotZ', 'cloneStepScale',
+      'varyMode', 'varySeed', 'varyFalloffCenter', 'varyFalloffRadius',
+      'varyColor', 'varyColorSpread', 'varyColorStrength',
     ])
   })
 

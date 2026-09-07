@@ -21,7 +21,8 @@ import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/
 import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime } from './materials'
 import { refreshImageBounds, type ImageUniforms } from './imageShader'
 import { applyModifiers } from '~/lib/scene3d/modifiers'
-import { PRIMITIVE_PARAMS, paramValue, MODIFIER_SPECS, modifierValue } from '~/lib/scene3d/primParams'
+import { PRIMITIVE_PARAMS, paramValue, MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
+import type { VarySettings } from '~/lib/vary'
 import { pathToShapes } from './svgPath'
 import { buildLightWidget, setWidgetSelected, disposeWidget } from '~/lib/scene3d/lightWidgets'
 import { PostChain, postEnabled, DEFAULT_POST, type PostSettings } from '~/lib/spacetype/post'
@@ -238,15 +239,23 @@ export function lightFor(obj: LightObject): THREE.Light {
  *  `content` carries `text`'s font reference; a resolved font (already in the
  *  sync cache) measures the real glyph geometry, a miss falls back to the
  *  0.3 placeholder cube exactly like the engine's own render path — transient
- *  and acceptable since the async load re-syncs shortly after. */
+ *  and acceptable since the async load re-syncs shortly after.
+ *
+ *  `vary` matters here even though this measures no colour: in random and falloff
+ *  modes `varyStepFactor` damps each copy's step rotate/scale, which MOVES the copies
+ *  and so changes the clone set's extent. Without it the Size row would quietly
+ *  disagree with the object on screen. Colour is forced off before the build — it
+ *  cannot affect a bounding box, and resolving a palette and writing a colour
+ *  attribute per copy is pure cost on a readout that recomputes per parameter change. */
 export function baseSizeFor(
   kind: PrimitiveKind,
   params?: Record<string, number>,
   modifiers?: Record<string, number>,
   content?: PrimitiveContent,
+  vary?: VarySettings,
 ): [number, number, number] {
   const font = kind === 'text' ? fontCacheGet(content?.font ?? DEFAULT_FONT_URL) : null
-  const geo = buildGeometry(kind, params, modifiers, 'smooth', content, font)
+  const geo = buildGeometry(kind, params, modifiers, 'smooth', content, font, vary ? { ...vary, colorEnabled: false } : undefined)
   geo.computeBoundingBox()
   const b = geo.boundingBox!
   const size: [number, number, number] = [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z]
@@ -267,7 +276,14 @@ export function baseSizeFor(
  *
  *  Same `content`/font-cache peek as `baseSizeFor` — without it a `text`
  *  object's clone-cost warning was counting the 0.3 placeholder cube's
- *  vertices instead of the real glyph geometry. */
+ *  vertices instead of the real glyph geometry.
+ *
+ *  Deliberately passes NO `vary` to buildGeometry, and must keep not doing so. Vary
+ *  changes nothing about a single copy's vertex COUNT — it only varies placement and
+ *  colour ACROSS copies — so threading it here would buy nothing and cost the palette
+ *  resolution and the merge this function forces off, on a path that runs per slider
+ *  tick. (With the clone counts pinned to 1, `applyModifiers` skips `planClones`/
+ *  `mergeClones` entirely, so no colour work happens today either way.) */
 export function baseVertexCountFor(
   kind: PrimitiveKind,
   params?: Record<string, number>,
@@ -283,13 +299,26 @@ export function baseVertexCountFor(
 }
 
 /** Stable geometry signature: kind + every declared param in table order +
- *  every modifier in spec order + the non-geometric content bag (text/font,
- *  `text`-only — always absent for every other kind) + the shading variant.
- *  Changing any of them swaps mesh.geometry in place. Exported so it's unit
- *  testable directly, independent of a live SceneEngine/GL context. */
+ *  every modifier in spec order (bar one, below) + the non-geometric content bag
+ *  (text/font, `text`-only — always absent for every other kind) + the shading
+ *  variant + the Cloner Vary palette. Changing any of them swaps mesh.geometry in
+ *  place. Exported so it's unit testable directly, independent of a live
+ *  SceneEngine/GL context. */
 export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): string {
   const vals = PRIMITIVE_PARAMS[obj.primitive].map((s) => paramValue(obj.primitive, obj.params, s.key))
-  const mods = MODIFIER_SPECS.map((s) => modifierValue(obj.modifiers, s.key))
+  const mods: number[] = []
+  for (const s of MODIFIER_SPECS) {
+    // `varyColorStrength` is the ONE modifier deliberately left out of this key, and
+    // the exclusion is by name so it stays a decision rather than an accident. Every
+    // other modifier changes VERTEX DATA; the strength does not — the merged geometry
+    // carries the raw palette colour and the strength is applied as a shader uniform
+    // (`materialFor`/`updateMaterial` take it as a parameter). Including it meant
+    // disposing the geometry and re-merging all N clone copies on every tick of the
+    // Colour strength slider to produce byte-identical vertices. Safe precisely
+    // because the strength is not baked in: if that ever changes, it belongs back here.
+    if (s.key === 'varyColorStrength') continue
+    mods.push(modifierValue(obj.modifiers, s.key))
+  }
   // Neither an svgPath's `d` (several KB) nor a mesh's vertex buffer (tens of
   // KB) may reach this key: it is rebuilt on EVERY sync for EVERY object, and
   // stringifying either would put tens of KB of string work on the drag path.
@@ -298,7 +327,22 @@ export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): st
   const content = c
     ? JSON.stringify({ ...c, ...(c.pathKey ? { path: undefined } : {}), ...(c.meshKey ? { mesh: undefined } : {}) })
     : ''
-  return `${obj.primitive}|${vals.join(',')}|${mods.join(',')}|${variant}|${content}`
+  // The Vary PALETTE is a string[], so unlike the seven numeric vary dials it is not in
+  // the MODIFIER_SPECS sweep above — without it, editing a swatch would leave the old
+  // clone colours on screen. Joined rather than digested, against the bulky-string rule
+  // two comments up, because a palette is BOUNDED at VARY_PALETTE_MAX (8) short hex
+  // strings — about 60 characters, versus the kilobytes `pathKey`/`meshKey` stand in
+  // for. That bound is the whole justification: anything unbounded added to this key
+  // must be a digest instead.
+  //
+  // Deliberately the RAW field, not `varySettingsFor(obj).palette`: the resolved
+  // settings substitute DEFAULT_VARY.palette for an absent one, so an object that
+  // happens to store a copy of the defaults would key differently from one that stores
+  // nothing while rendering the same — one extra rebuild, in a state the palette editor
+  // cannot actually produce. Completeness is what this key owes; reading seven more
+  // modifier values per object per sync to buy that last bit of precision is not worth it.
+  const vary = obj.varyPalette?.join(',') ?? ''
+  return `${obj.primitive}|${vals.join(',')}|${mods.join(',')}|${variant}|${content}|${vary}`
 }
 
 /** Bake each triangle's own bounding extent into per-vertex attributes
@@ -338,7 +382,13 @@ function addFaceExtentAttributes(geo: THREE.BufferGeometry): void {
 
 /** Geometry for a kind + params at a shading variant: the smooth factory output,
  *  or its flat-shaded form (non-indexed, per-face normals, per-face extents) for
- *  the faceted gradients. The single build step used by every geometry rebuild. */
+ *  the faceted gradients. The single build step used by every geometry rebuild.
+ *
+ *  `vary` is the object's Cloner Vary settings (`varySettingsFor`). Optional, and
+ *  omitting it is exactly the pre-Vary behaviour: the cloner then plans copies with
+ *  no per-copy variation and writes no colour attribute. Callers with a
+ *  `PrimitiveObject` in scope pass it; the standalone measuring helpers above do
+ *  not, since they have only the loose kind/params/modifiers triple. */
 export function buildGeometry(
   kind: PrimitiveKind,
   params: Record<string, number> | undefined,
@@ -346,15 +396,28 @@ export function buildGeometry(
   variant: 'smooth' | 'facet',
   content?: PrimitiveContent,
   font?: Font | null,
+  vary?: VarySettings,
 ): THREE.BufferGeometry {
   const base = geometryFor(kind, params, content, font)
   // applyModifiers returns the SAME object when nothing is set (and never
   // disposes its input), so only free the base when it produced a new one.
-  const shaped = applyModifiers(base, modifiers)
+  const shaped = applyModifiers(base, modifiers, vary)
   if (shaped !== base) base.dispose()
   if (variant !== 'facet') return shaped
   let geo = shaped
-  if (geo.index) { const flat = geo.toNonIndexed(); geo.dispose(); geo = flat }
+  if (geo.index) {
+    const flat = geo.toNonIndexed()
+    // `toNonIndexed()` builds a BARE geometry and copies attributes only — `userData`
+    // does not come across, so the Cloner's `varyTint` stamp was silently dropped here
+    // and a faceted clone set would render untinted. Latent so far only because
+    // `gradient` is the only material that asks for the facet variant and `gradient` is
+    // in NO_BASE_COLOR (materials.ts), so nothing looked at the stamp; both halves of
+    // that are documented as things a follow-up may change. Carried explicitly rather
+    // than by copying the whole bag, so a future userData field has to opt in.
+    if (geo.userData.varyTint === true) flat.userData = { ...flat.userData, varyTint: true }
+    geo.dispose()
+    geo = flat
+  }
   geo.computeVertexNormals()
   addFaceExtentAttributes(geo)
   return geo
@@ -382,7 +445,10 @@ function syncGlbMaterials(root: THREE.Object3D, obj: GlbObject, lightView: boole
     if (m.userData.origMaterial === undefined) m.userData.origMaterial = m.material
     if (override) {
       let ov = m.userData.overrideMaterial as THREE.Material | undefined
-      if (!ov || !updateMaterial(ov, mat)) {
+      // No Vary strength: `GlbObject` has no `modifiers` bag and no cloner, so an
+      // imported mesh's geometry never carries the `varyTint` stamp and there is
+      // nothing for a strength to blend. Omitting it is the whole story here.
+      if (!ov || !updateMaterial(ov, mat, m.geometry)) {
         if (ov) disposeMaterial(ov)
         ov = materialFor(mat, m.geometry, ownerId)
         m.userData.overrideMaterial = ov
@@ -823,7 +889,11 @@ export class SceneEngine {
         this.meshTokens.delete(obj.id)
       }
     }
-    return buildGeometry(obj.primitive, obj.params, obj.modifiers, variant, obj.content, font)
+    // The ONE build path with the whole object in scope, so the one that can resolve
+    // the Vary settings — the numeric dials from `obj.modifiers`, the swatches from
+    // `obj.varyPalette` (which is not in the modifier bag, and so is folded into
+    // `geoKeyFor` separately). Everything gating this call on the key is above.
+    return buildGeometry(obj.primitive, obj.params, obj.modifiers, variant, obj.content, font, varySettingsFor(obj))
   }
 
   /** While a sculpt session is live, this object's geometry comes from the
@@ -900,7 +970,7 @@ export class SceneEngine {
     if (!root) {
       if (obj.kind === 'primitive') {
         const geo = this.geometryForObject(obj, 'smooth')
-        const mat = materialFor(obj.material, geo, this.id)
+        const mat = materialFor(obj.material, geo, this.id, modifierValue(obj.modifiers, 'varyColorStrength'))
         // Flat shapes must be visible from both sides (plane was previously
         // invisible from below; ring inherits the fix) — for every material type.
         if (obj.primitive === 'plane' || obj.primitive === 'ring') mat.side = THREE.DoubleSide
@@ -986,6 +1056,14 @@ export class SceneEngine {
       // in-place update path) and the transform untouched.
       // NB: while deferred, geoKey is intentionally NOT stamped — leaving it
       // stale is what makes the deferred rebuild happen on release.
+      //
+      // Cloner Vary rides this gate like every other geometry-affecting control, which
+      // means the six vary dials that DO change vertex data (and the palette) appear to
+      // do nothing while `deferGeometry` is raised — during a live sculpt session, and
+      // for the duration of a heavy drag — and catch up in one rebuild on release. That
+      // is the deliberate, uniform behaviour here, not a Vary-specific gap. The seventh
+      // dial, Colour strength, is the exception in the other direction: it is a material
+      // uniform, so it keeps updating live even while geometry is deferred.
       if (mesh.userData.geoKey !== geoKey && !this.deferGeometry) {
         mesh.geometry.dispose()
         mesh.geometry = this.geometryForObject(obj, variant)
@@ -996,10 +1074,16 @@ export class SceneEngine {
       // still gets built/updated underneath so exiting Light View restores it.
       const current = (mesh.userData.realMaterial as THREE.Material | undefined) ?? (mesh.material as THREE.Material)
       let real = current
-      if (!updateMaterial(current, obj.material)) {
+      // The Cloner Vary colour STRENGTH is handed to the material here, explicitly,
+      // rather than riding on the geometry: it blends the material's own base colour
+      // toward the per-copy palette colour, so it is a material property and nothing
+      // about it belongs in vertex data. That is also what lets `geoKeyFor` leave
+      // `varyColorStrength` out and the slider drag update a uniform in place.
+      const varyStrength = modifierValue(obj.modifiers, 'varyColorStrength')
+      if (!updateMaterial(current, obj.material, mesh.geometry, varyStrength)) {
         // Type or texture identity changed — rebuild, preserving double-siding.
         disposeMaterial(current)
-        const fresh = materialFor(obj.material, mesh.geometry, this.id)
+        const fresh = materialFor(obj.material, mesh.geometry, this.id, varyStrength)
         if (obj.primitive === 'plane' || obj.primitive === 'ring') fresh.side = THREE.DoubleSide
         real = fresh
       }

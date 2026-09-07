@@ -1098,6 +1098,13 @@ const MODIFIERS_ROWS = [
   'ui.mod.group.bend', `${MOD}bend`, 'ui.mod.bendAxis',
   'ui.mod.group.noise', `${MOD}noise`, `${MOD}noiseScale`, `${MOD}noiseSeed`,
   'ui.mod.group.jitter', `${MOD}jitter`, 'ui.mod.jitterMode', `${MOD}jitterSeed`,
+  // Cloner Vary's numeric dials fall through `panelCardOf`'s permissive tail (see its
+  // own doc comment): they are real MODIFIER_SPECS entries with no curated group yet,
+  // so they land here, in schema-declaration order, until a later task gives them a
+  // captioned Vary group of their own. `varyMode`/`varyColor`/`varyColorSpread` are
+  // `control: 'options'` and stay OUT of the schema entirely (same as taperAxis etc.)
+  // until that task adds their bespoke anchors.
+  `${MOD}varySeed`, `${MOD}varyFalloffCenter`, `${MOD}varyFalloffRadius`, `${MOD}varyColorStrength`,
 ] as const
 
 /** The Cloner card, per mode. CLONER_KEYS swapped the placement controls by mode and

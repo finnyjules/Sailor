@@ -2,6 +2,7 @@
 // the editor mutates a SceneDoc, the engine renders from it, and serializeDoc's
 // output is what the Scene3DStudio node stores in its `scene_state` widget.
 import { sanitizeParams, sanitizeModifiers } from '~/lib/scene3d/primParams'
+import { VARY_PALETTE_MAX } from '~/lib/vary'
 import { parseTreatments, type Treatment } from './treatments'
 import type { ObjectMotion, CameraMotion, SceneMotion, SceneMotionTrack, LoopKind, TransitionPreset, Direction, EaseRef, TransitionSpec } from '~/lib/scene3d/motion/types'
 import { DEFAULT_SCENE_MOTION } from '~/lib/scene3d/motion/types'
@@ -342,6 +343,18 @@ export interface PrimitiveContent {
   meshKey?: string
 }
 
+const VARY_PALETTE_HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+
+/** Keep only genuine hex swatches, capped at the editor's ceiling. Returns
+ *  undefined for anything unusable so the field stays absent rather than empty. */
+export function sanitizeVaryPalette(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out = raw.filter((s): s is string => typeof s === 'string' && VARY_PALETTE_HEX_RE.test(s.trim()))
+    .map((s) => s.trim())
+    .slice(0, VARY_PALETTE_MAX)
+  return out.length > 0 ? out : undefined
+}
+
 export interface PrimitiveObject extends SceneObjectBase {
   kind: 'primitive'
   primitive: PrimitiveKind
@@ -351,6 +364,11 @@ export interface PrimitiveObject extends SceneObjectBase {
   /** Deformations applied on top of the built geometry, keyed by
    *  MODIFIER_SPECS.key (primParams.ts). Absent means undeformed. */
   modifiers?: Record<string, number>
+  /** Cloner Vary palette — 1..8 hex swatches the copies are coloured from. A
+   *  string[] rather than a `MODIFIER_SPECS` key because that bag is numbers
+   *  only; the numeric vary dials DO live there. Absent means the shared default
+   *  palette (which only matters once `varyColor` is switched on). */
+  varyPalette?: string[]
   /** Non-geometric source content — currently only the `text` primitive's
    *  string + font. Absent for every other kind. */
   content?: PrimitiveContent
@@ -1393,11 +1411,13 @@ export function parseDoc(json: string): SceneDoc {
         if (o.kind === 'primitive' && PRIMITIVE_KINDS.includes(o.primitive)) {
           const params = sanitizeParams(o.primitive, o.params)
           const modifiers = sanitizeModifiers(o.modifiers)
+          const varyPalette = sanitizeVaryPalette(o.varyPalette)
           const content = parseContent(o.content)
           return [{
             ...common, kind: 'primitive', primitive: o.primitive,
             ...(params ? { params } : {}),
             ...(modifiers ? { modifiers } : {}),
+            ...(varyPalette ? { varyPalette } : {}),
             ...(content ? { content } : {}),
           }]
         }

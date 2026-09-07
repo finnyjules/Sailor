@@ -904,9 +904,10 @@ export function applyScreen(m: THREE.Material, mat: SceneMaterial): void {
   // customProgramCacheKey returns `this.onBeforeCompile.toString()` at call time, so a
   // lazily-bound `prevKey()` would hash the screen wrapper below — one identical source
   // string for every screened material — rather than whatever the base material's own
-  // injection contributed. Safe to snapshot: applyScreen is the LAST step of buildMaterial
-  // and every key it can sit on top of (three's default, and the fresnel/gradient/opal
-  // constants) is already settled by this point.
+  // injection contributed. Safe to snapshot: every key applyScreen can sit on top of
+  // (three's default, and the fresnel/gradient/opal constants) is already settled by this
+  // point. The one step that follows — applyVaryTint — snapshots eagerly for the same
+  // reason, and so composes with this key rather than racing it.
   const baseKey = String(m.customProgramCacheKey())
   const prev = m.onBeforeCompile
   m.onBeforeCompile = (shader, renderer) => {
@@ -1194,12 +1195,132 @@ function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture
   return tex
 }
 
+/** Material types with no base colour for a per-copy tint to act on. The tint is a
+ *  mix from `diffuseColor.rgb` toward the copy colour, injected at
+ *  `<color_fragment>` — so a type that has no meaningful `diffuseColor` there, or
+ *  that overwrites it immediately afterwards, gets no per-copy colour at all:
+ *
+ *  - `image` samples a texture and `shaderFill` renders a field: there is no base
+ *    albedo for the mix to start from.
+ *  - `gradient` REPLACES `diffuseColor.rgb` with its ramp sample in the very block
+ *    that reissues `<color_fragment>` (see GRADIENT_SMOOTH_FRAG_BODY /
+ *    GRADIENT_FACET_FRAG_BODY). The ramp IS its colour; a mix one line earlier is
+ *    discarded outright.
+ *  - `opalescent` mixes `diffuseColor.rgb` toward its rainbow at `uStrength`, whose
+ *    DEFAULT (`opalStrength`) is 1 — full replacement. DELIBERATE LIMITATION: the
+ *    per-copy tint would be completely dead at the default and only partly alive
+ *    below it, and a control that works only while a different dial is off its
+ *    default is worse than an absent one. A later task could compose the two
+ *    explicitly (tint the substrate before the rainbow blend, or feed the copy
+ *    colour into the opal's own mix) and drop `opalescent` from this set.
+ *
+ *  This is the RENDER-side rule. The matching inspector gate — hiding the Cloner's
+ *  colour control for these types in panelPresentation — does not exist yet; it
+ *  lands in a later task. */
+const NO_BASE_COLOR: ReadonlySet<string> = new Set(['image', 'shaderFill', 'gradient', 'opalescent'])
+
+/** True when this geometry is a Cloner-merged clone set carrying the Vary per-copy
+ *  colour attribute, AND this material type has a base colour to mix it against.
+ *
+ *  Gated on the `varyTint` STAMP `mergeClones` writes, never on the presence of a
+ *  `color` attribute: `GLTFLoader` maps a glTF `COLOR_0` to an attribute of exactly
+ *  that name and vertex-coloured GLBs are common, so testing for the attribute would
+ *  mistake every such model for a clone set and silently change how an existing scene
+ *  renders the moment a material override is on. */
+export function hasVertexTint(mat: SceneMaterial, geometry?: THREE.BufferGeometry): boolean {
+  if (!geometry || NO_BASE_COLOR.has(mat.type)) return false
+  return geometry.userData.varyTint === true
+}
+
+/** The Vary blend amount: 0 = the plain material colour, 1 = the pure palette colour.
+ *  Missing/garbage reads as 1, which is what the dial's own default is. Clamped
+ *  because it reaches a shader uniform.
+ *
+ *  Passed EXPLICITLY by the caller (`materialFor`/`updateMaterial` take it beside the
+ *  geometry) rather than read off `geometry.userData`. It used to ride on the merged
+ *  geometry as a stamp, which worked only because `varyColorStrength` was a
+ *  `MODIFIER_SPECS` key that `geoKeyFor` hashed — so every tick of the Colour strength
+ *  slider disposed the geometry and re-merged all N clone copies to produce
+ *  byte-identical vertex data, and any future edit that (correctly) noticed the
+ *  strength is not baked into vertices and dropped it from the key would have killed
+ *  the dial silently. The strength is a MATERIAL property; this is the parameter that
+ *  says so. */
+function varyStrengthOf(strength?: number): number {
+  return typeof strength === 'number' && Number.isFinite(strength) ? Math.min(1, Math.max(0, strength)) : 1
+}
+
+// Mix from whatever the material's own pipeline put in `diffuseColor.rgb` — captured
+// BEFORE `<color_fragment>` runs — toward this copy's vertex colour. Reissues the real
+// `<color_fragment>` chunk first, so `vColor` is declared (three emits
+// `color_pars_fragment` under USE_COLOR, which `vertexColors` turns on) and the
+// material's own varying setup is untouched. `.rgb` rather than a bare `vColor` so a
+// four-component colour attribute (USE_COLOR_ALPHA → `vColor` is a vec4) still
+// compiles; the Cloner writes three components.
+//
+// The chunk's own body is `diffuseColor.rgb *= vColor` — that multiply runs SECOND,
+// against `#include <color_fragment>` on its own line (three's include regex only
+// matches at line-start). Mixing from `diffuseColor.rgb` at that point would read the
+// ALREADY-multiplied value — material colour times palette colour — not the material
+// colour, so strength 0 would render a near-black smear instead of the plain material
+// colour. `varyBase` captures the pre-multiply value so the mix's low end is honest at
+// every strength, including 1 (pure palette colour, same as before).
+const VARY_TINT_FRAG_BODY = /* glsl */ `vec3 varyBase = diffuseColor.rgb;
+#include <color_fragment>
+diffuseColor.rgb = mix( varyBase, vColor.rgb, uVaryStrength );`
+
+/** Cloner Vary per-copy colour: chains a `<color_fragment>` mix onto whatever
+ *  `onBeforeCompile` the material already carries. Modelled on `applyScreen` above,
+ *  including the eager cache-key snapshot — read that function's comment.
+ *
+ *  Deliberately does NOT touch the base colour. The first version of this feature set
+ *  `.color` to white so the palette read true; every in-place branch of `updateMaterial`
+ *  rewrites the base colour from the doc, so the neutralisation lasted exactly one sync.
+ *  Mixing in the shader cannot be clobbered that way, and it gives `varyColorStrength`
+ *  something to mean. */
+export function applyVaryTint(m: THREE.Material, varyStrength?: number): void {
+  const c = m as THREE.Material & { vertexColors?: boolean }
+  c.vertexColors = true
+  // Held OUTSIDE the compile closure (as applyScreen holds its uniform bag) so
+  // updateMaterial can write the strength in place, with no rebuild, per dial tick.
+  const u: Record<string, { value: unknown }> = { uVaryStrength: { value: varyStrengthOf(varyStrength) } }
+  // Read EAGERLY, before onBeforeCompile is reassigned — same hazard applyScreen
+  // documents at length: three's default customProgramCacheKey returns
+  // `this.onBeforeCompile.toString()` at CALL time, so a lazily-bound `prevKey()` would
+  // hash the wrapper installed below — one identical source string for every tinted
+  // material — instead of whatever the base material's own injection contributed, and
+  // a tinted fresnel would then share a compiled program with a tinted toon.
+  const baseKey = String(m.customProgramCacheKey())
+  const prev = m.onBeforeCompile
+  m.onBeforeCompile = (shader, renderer) => {
+    // The material's own injection runs FIRST: fresnel/holographic replace `<common>`
+    // and `<emissivemap_fragment>`, and applyScreen replaces `<uv_*>`/`<opaque_fragment>`
+    // — none of them consume `<color_fragment>`, so the token is still there for us, and
+    // both of those blocks read `diffuseColor` AFTER this mix has written it.
+    prev.call(m, shader, renderer)
+    Object.assign(shader.uniforms, u)
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <color_fragment>', VARY_TINT_FRAG_BODY)
+  }
+  m.customProgramCacheKey = () => `${baseKey}|varyTint`
+  m.userData.vertexTint = true
+  m.userData.varyUniforms = u
+}
+
 // ── Factory ──────────────────────────────────────────────────────────────────
 /** `ownerId` scopes a `shaderFill` material's live field to the calling engine (see
  *  `shaderFillMaterials`'s doc) — SceneEngine always passes its own stable `id`; callers with
  *  no engine in scope (unit tests) fall back to a shared UNOWNED bucket. Ignored by every other
- *  material type. */
-export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry, ownerId: string = UNOWNED_SCENE3D): THREE.Material {
+ *  material type.
+ *
+ *  `varyStrength` is the Cloner Vary blend amount — only meaningful when `geometry` carries
+ *  the `varyTint` stamp. Omitted means 1 (the dial's own default), so every existing caller
+ *  keeps its behaviour exactly. */
+export function materialFor(
+  mat: SceneMaterial,
+  geometry?: THREE.BufferGeometry,
+  ownerId: string = UNOWNED_SCENE3D,
+  varyStrength?: number,
+): THREE.Material {
   let m: THREE.Material
   switch (mat.type) {
     case 'toon': {
@@ -1516,6 +1637,10 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
   applyRelief(m, mat, ownerId)
   applyTextureSet(m, mat)
   applyScreen(m, mat)
+  // Cloner Vary: the merged clone geometry carries one colour per copy, and a SINGLE
+  // material shows all of them through vertexColors plus a shader mix (applyVaryTint).
+  // Last, so it chains on top of every injection above — including applyScreen's.
+  if (hasVertexTint(mat, geometry)) applyVaryTint(m, varyStrength)
   return m
 }
 
@@ -1589,8 +1714,26 @@ function baseIdentityKey(mat: SceneMaterial): string {
   }
 }
 
-export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
+export function updateMaterial(
+  m: THREE.Material,
+  mat: SceneMaterial,
+  geometry?: THREE.BufferGeometry,
+  varyStrength?: number,
+): boolean {
   if (m.userData.matType !== mat.type || m.userData.identity !== identityKey(mat)) return false
+  // Vertex-colour state is a property of the GEOMETRY, not of `mat`, so it
+  // cannot ride in identityKey. Crossing this boundary needs a rebuild: three
+  // bakes vertexColors into the compiled program. Callers that pass no geometry
+  // (unit tests, and any path with no mesh in hand) keep the old behaviour.
+  if (geometry && (m.userData.vertexTint === true) !== hasVertexTint(mat, geometry)) return false
+  // Vary colour STRENGTH is a uniform, not a program boundary — write it in place, like
+  // the screen dials below, so dragging the Colour strength slider never rebuilds. Only
+  // the tint on/off crossing (the guard above) forces a rebuild. Gated on the parameter
+  // being SUPPLIED (not on `geometry`): a caller that passes no strength has no opinion
+  // about it, and must leave whatever the material already holds alone rather than
+  // silently resetting the uniform to the default 1.
+  const vu = m.userData.varyUniforms as Record<string, { value: unknown }> | undefined
+  if (vu && varyStrength !== undefined) vu.uVaryStrength!.value = varyStrengthOf(varyStrength)
   // Screen dials update in place (the identity guard above already forced a rebuild for the
   // two boundaries that need one).
   const su = m.userData.screenUniforms as Record<string, { value: unknown }> | undefined

@@ -17,8 +17,9 @@
 - **Seeded hash is specified, not language-native.** `hash32(i, seed)` below is the single definition; TypeScript and Python must both implement exactly it. No `Math.random`, no `random.Random`, no float accumulation.
 - **`MODIFIER_SPECS` option lists are append-only.** Stored values are option INDEXES; inserting or reordering silently remaps every saved scene.
 - **UI copy rule (standing project rule):** sentence case everywhere; never surface an internal identifier in a label, blurb or hint; every picker whose stored values are internal (`sequence`, `falloff`, `cycle`, `blend`) needs readable option labels.
-- **Test commands:** `cd frontend && npx vitest run tests/unit/<file>` for one unit file; `cd frontend && npm run test:unit` for all; `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python -m pytest tests-unit/comfy_extras_test/<file> -v` for Python.
-- **Do not run `npx vue-tsc`** — it is not installed in this repo. Use `cd frontend && npx nuxt typecheck` if a type check is needed.
+- **Workspace:** this runs in the git worktree `.claude/worktrees/cloner-vary` on branch `worktree-cloner-vary`, NOT the main checkout. Run every command from the worktree. `frontend/node_modules` is a symlink to the main checkout's, and `nuxt prepare` has already been run there (a fresh worktree has no `.nuxt/`, and vitest dies resolving `tsconfig` extends without it). The worktree is yours alone, so ordinary `git add <path>` + `git commit` is safe — no private-index dance needed.
+- **Test commands:** from `frontend/`, `node_modules/.bin/vitest run tests/unit/<file>` for one unit file and `node_modules/.bin/vitest run tests/unit` for all; from the worktree root, `/Users/julien/Documents/GitHub/Sailor/.venv/bin/python -m pytest tests-unit/comfy_extras_test/<file> -v` for Python.
+- **Do not run `npx vue-tsc`** — it is not installed in this repo. Use `cd frontend && node_modules/.bin/nuxt typecheck` if a type check is needed.
 
 ## Storage decision (refines the spec)
 
@@ -211,7 +212,7 @@ describe('mixHex', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && npx vitest run tests/unit/vary.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/vary.unit.spec.ts`
 Expected: FAIL — `Failed to resolve import "~/lib/vary"`.
 
 - [ ] **Step 3: Write the implementation**
@@ -399,20 +400,19 @@ export function mixHex(a: string, b: string, t: number): string {
 Run this to print the real values, then paste them into `REFERENCE_HASHES` in the spec file:
 
 ```bash
-cd frontend && npx vitest run tests/unit/vary.unit.spec.ts 2>&1 | head -40
+cd frontend && node_modules/.bin/vitest run tests/unit/vary.unit.spec.ts 2>&1 | head -40
 ```
 
 The pinned-values test will fail first with the actual array in its diff. Copy those four numbers into `const REFERENCE_HASHES: number[] = [...]`. They are the contract the Python mirror is held to in Task 9 — once pinned, never edit them.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd frontend && npx vitest run tests/unit/vary.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/vary.unit.spec.ts`
 Expected: PASS, all tests green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add frontend/app/lib/vary/index.ts frontend/tests/unit/vary.unit.spec.ts
 git commit -m "feat(vary): shared per-copy variation model for both cloners"
 ```
@@ -504,7 +504,7 @@ describe('varySettingsFor', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && npx vitest run tests/unit/scene3d-vary-storage.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/scene3d-vary-storage.unit.spec.ts`
 Expected: FAIL — `varySettingsFor` and `sanitizeVaryPalette` are not exported.
 
 - [ ] **Step 3: Append the schema keys**
@@ -602,18 +602,17 @@ For every hit that builds a new object by listing fields, add `varyPalette` alon
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `cd frontend && npx vitest run tests/unit/scene3d-vary-storage.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/scene3d-vary-storage.unit.spec.ts`
 Expected: PASS.
 
 Then confirm nothing else broke:
 
-Run: `cd frontend && npm run test:unit`
-Expected: no NEW failures versus the pre-task baseline. Capture the baseline first with `git stash && npm run test:unit; git stash pop` if you are unsure — this repo has pre-existing failures and counts drift under load.
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit`
+Expected: no NEW failures versus the pre-task baseline. Capture the baseline first with `git stash && node_modules/.bin/vitest run tests/unit; git stash pop` if you are unsure — this repo has pre-existing failures and counts drift under load.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add frontend/app/lib/scene3d/primParams.ts frontend/app/lib/scene3d/config.ts frontend/tests/unit/scene3d-vary-storage.unit.spec.ts
 git commit -m "feat(scene3d): vary schema keys and palette storage"
 ```
@@ -733,7 +732,7 @@ describe('applyModifiers regression guard', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && npx vitest run tests/unit/scene3d-cloner-recipes.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/scene3d-cloner-recipes.unit.spec.ts`
 Expected: FAIL — `planClones` and `mergeClones` are not exported.
 
 - [ ] **Step 3: Split `applyCloner` into the recipe seam**
@@ -889,18 +888,17 @@ The rest of that block (`out.dispose()`, `out = cloned`, the bounding recomputes
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd frontend && npx vitest run tests/unit/scene3d-cloner-recipes.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/scene3d-cloner-recipes.unit.spec.ts`
 Expected: PASS.
 
 Also re-run the existing scene3d suites, which exercise `applyModifiers` heavily:
 
-Run: `cd frontend && npx vitest run tests/unit --reporter=dot 2>&1 | tail -20`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit --reporter=dot 2>&1 | tail -20`
 Expected: no NEW failures against the baseline.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add frontend/app/lib/scene3d/modifiers.ts frontend/tests/unit/scene3d-cloner-recipes.unit.spec.ts
 git commit -m "feat(scene3d): clone recipe seam and per-copy vertex colours"
 ```
@@ -985,7 +983,7 @@ describe('updateMaterial vertex-colour boundary', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && npx vitest run tests/unit/scene3d-vary-materials.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/scene3d-vary-materials.unit.spec.ts`
 Expected: FAIL — `vertexColors` is false for the tinted geometry; `updateMaterial` returns true across the boundary.
 
 - [ ] **Step 3: Apply vertex colours in `materialFor`**
@@ -1048,13 +1046,12 @@ At L999 the geometry rebuild above it already ran, so `mesh.geometry` reflects t
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `cd frontend && npx vitest run tests/unit/scene3d-vary-materials.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/scene3d-vary-materials.unit.spec.ts`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add frontend/app/lib/scene3d/materials.ts frontend/app/lib/scene3d/engine.ts frontend/tests/unit/scene3d-vary-materials.unit.spec.ts
 git commit -m "feat(scene3d): materials render per-copy clone colours"
 ```
@@ -1116,7 +1113,7 @@ describe('geoKeyFor and vary', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && npx vitest run tests/unit/scene3d-vary-geokey.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/scene3d-vary-geokey.unit.spec.ts`
 Expected: FAIL on the palette cases — the key ignores `varyPalette`.
 
 - [ ] **Step 3: Fold the palette into the key**
@@ -1167,16 +1164,15 @@ Every call site that has the `PrimitiveObject` in scope passes `varySettingsFor(
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd frontend && npx vitest run tests/unit/scene3d-vary-geokey.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/scene3d-vary-geokey.unit.spec.ts`
 Expected: PASS.
 
-Run: `cd frontend && npx nuxt typecheck 2>&1 | tail -30`
+Run: `cd frontend && node_modules/.bin/nuxt typecheck 2>&1 | tail -30`
 Expected: no NEW type errors versus the baseline (this repo carries pre-existing ones — capture the baseline before the task if unsure).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add frontend/app/lib/scene3d/engine.ts frontend/tests/unit/scene3d-vary-geokey.unit.spec.ts
 git commit -m "feat(scene3d): vary palette invalidates the geometry cache"
 ```
@@ -1244,7 +1240,7 @@ describe('VaryPalette', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && npx vitest run tests/unit/vary-palette.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/vary-palette.unit.spec.ts`
 Expected: FAIL — the component does not exist.
 
 - [ ] **Step 3: Write the component**
@@ -1317,13 +1313,12 @@ function removeAt(i: number) {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd frontend && npx vitest run tests/unit/vary-palette.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/vary-palette.unit.spec.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add frontend/app/components/vue-canvas/VaryPalette.vue frontend/tests/unit/vary-palette.unit.spec.ts
 git commit -m "feat(vary): shared palette editor used by both cloner panels"
 ```
@@ -1333,15 +1328,26 @@ git commit -m "feat(vary): shared palette editor used by both cloner panels"
 ### Task 7: 3D inspector — the Vary rows
 
 **Files:**
-- Modify: `frontend/app/lib/scene3d/panelPresentation.ts` (card routing ~L684; row list ~L630; anchors ~L421)
-- Modify: `frontend/app/components/vue-canvas/Scene3DStudioSurface.vue` (render the palette anchor)
+- Modify: `frontend/app/lib/scene3d/controls.ts` (`modifierControls` ~L348; the gate map above it ~L340)
+- Modify: `frontend/app/lib/scene3d/panelPresentation.ts` (`OPTION_ANCHOR` L414; `SCENE_PANEL_ANCHORS` ~L478; `geometryCardOrder` L629; `panelCardOf` L686)
+- Modify: `frontend/app/components/vue-canvas/Scene3DStudioSurface.vue` (anchor templates ~L4295)
 - Test: `frontend/tests/unit/scene3d-vary-panel.unit.spec.ts` (create)
 
 **Interfaces:**
 - Consumes: the seven schema keys (Task 2), `VaryPalette.vue` (Task 6).
-- Produces: a `ui.cloner.varyPalette` panel anchor; `vary*` rows on the Cloner card.
+- Produces: four panel anchors — `ui.cloner.vary` (caption), `ui.cloner.varyMode`, `ui.cloner.varyColor`, `ui.cloner.varyColorSpread`, `ui.cloner.varyPalette`.
 
-**The trap this task exists to avoid.** `panelPresentation.ts` L686 routes a modifier key to the Cloner card only when it `startsWith('clone')`. Without a change, every `vary*` row silently lands on the Modifiers card instead.
+**Read this before writing any code — the panel does not gate rows the way you might assume.**
+
+Three mechanisms are in play, and using the wrong one produces a row that is visible when it should be hidden:
+
+1. **`geometryCardOrder` (panelPresentation L616-632) is ORDER ONLY, never a gate.** Its own doc at `panelCardOf` says so: a key absent from the list still draws, appended at the end. Omitting a vary key from the Cloner card's list will NOT hide it.
+2. **Numeric schema rows are gated by their `when` predicate**, attached in `controls.ts`'s `modifierControls()`. `CLONE_MODE_GATE` (controls.ts L340-347) is the existing example: a map from key to the clone modes that show it. Vary needs its own gate map of predicates.
+3. **`control: 'options'` specs get NO schema row at all** — `modifierControls()` skips them outright (they store an index in the number bag). They are drawn as bespoke ANCHORS: registered in `OPTION_ANCHOR` (L414), listed in `SCENE_PANEL_ANCHORS` with a `visible` predicate that does the gating, and rendered in the surface through `optionRowSpec` / `optionOf` / `setOption`.
+
+Three of the seven vary keys are `control: 'options'` (`varyMode`, `varyColor`, `varyColorSpread`), so they take path 3. The other four (`varySeed`, `varyFalloffCenter`, `varyFalloffRadius`, `varyColorStrength`) take path 2.
+
+`optionRowSpec` sentence-cases each option word for display, which is what satisfies the UI copy rule for these three pickers — do not hand-write labels.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1349,173 +1355,280 @@ Create `frontend/tests/unit/scene3d-vary-panel.unit.spec.ts`:
 
 ```ts
 import { describe, it, expect } from 'vitest'
-import { panelSectionFor, panelRowKeys } from '~/lib/scene3d/panelPresentation'
-import type { PrimitiveObject } from '~/lib/scene3d/config'
+import { scenePanelControls } from '~/lib/scene3d/panelPresentation'
+import type { SceneDoc, SceneObject } from '~/lib/scene3d/config'
 
-const obj = (modifiers: Record<string, number> = {}, material = 'standard'): PrimitiveObject => ({
+const DOC = {
+  objects: [], background: '#000000', showFloor: false,
+  camera: { fov: 45 }, lighting: {},
+} as unknown as SceneDoc
+
+const obj = (modifiers: Record<string, number> = {}, matType = 'standard'): SceneObject => ({
   id: 'o', kind: 'primitive', primitive: 'box',
   position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
-  material: { type: material, color: '#ffffff' }, modifiers,
-} as PrimitiveObject)
+  material: { type: matType, color: '#ffffff' }, modifiers,
+} as unknown as SceneObject)
 
-describe('vary rows live on the Cloner card', () => {
-  it('routes every vary key to Cloner, not Modifiers', () => {
-    for (const k of ['varyMode', 'varySeed', 'varyColor', 'varyColorStrength']) {
-      expect(panelSectionFor(`object.modifiers.${k}`), k).toBe('Geometry/Cloner')
-    }
+/** The row keys the inspector would draw for this selection. */
+const keys = (o: SceneObject) => scenePanelControls(DOC, o).map((r) => r.key)
+/** The card a given row landed in. */
+const cardOf = (o: SceneObject, key: string) =>
+  scenePanelControls(DOC, o).find((r) => r.key === key)?.group
+
+const CLONED = { cloneCount: 6 }
+
+describe('vary rows land on the Cloner card', () => {
+  it('routes the numeric vary rows to Cloner, not Modifiers', () => {
+    const o = obj({ ...CLONED, varyMode: 1 })
+    expect(cardOf(o, 'object.modifiers.varySeed')).toBe('Geometry/Cloner')
   })
 
-  it('keeps the deformation keys on Modifiers', () => {
-    expect(panelSectionFor('object.modifiers.twist')).toBe('Geometry/Modifiers')
+  it('routes the vary anchors to Cloner', () => {
+    const o = obj(CLONED)
+    expect(cardOf(o, 'ui.cloner.varyMode')).toBe('Geometry/Cloner')
+  })
+
+  it('leaves the deformation rows on Modifiers', () => {
+    expect(cardOf(obj(CLONED), 'object.modifiers.twist')).toBe('Geometry/Modifiers')
   })
 })
 
 describe('vary row gating', () => {
-  const keys = (o: PrimitiveObject) => panelRowKeys(o)
+  it('hides the whole block while the cloner makes a single copy', () => {
+    const k = keys(obj({ cloneCount: 1 }))
+    expect(k).not.toContain('ui.cloner.vary')
+    expect(k).not.toContain('ui.cloner.varyMode')
+    expect(k).not.toContain('ui.cloner.varyColor')
+  })
+
+  it('shows the caption and driver picker once there is more than one copy', () => {
+    const k = keys(obj(CLONED))
+    expect(k).toContain('ui.cloner.vary')
+    expect(k).toContain('ui.cloner.varyMode')
+  })
 
   it('shows the seed only in random mode', () => {
-    expect(keys(obj({ cloneCount: 4 }))).not.toContain('object.modifiers.varySeed')
-    expect(keys(obj({ cloneCount: 4, varyMode: 1 }))).toContain('object.modifiers.varySeed')
+    expect(keys(obj(CLONED))).not.toContain('object.modifiers.varySeed')
+    expect(keys(obj({ ...CLONED, varyMode: 1 }))).toContain('object.modifiers.varySeed')
+    expect(keys(obj({ ...CLONED, varyMode: 2 }))).not.toContain('object.modifiers.varySeed')
   })
 
   it('shows centre and reach only in falloff mode', () => {
-    const k = keys(obj({ cloneCount: 4, varyMode: 2 }))
+    const k = keys(obj({ ...CLONED, varyMode: 2 }))
     expect(k).toContain('object.modifiers.varyFalloffCenter')
     expect(k).toContain('object.modifiers.varyFalloffRadius')
-    expect(keys(obj({ cloneCount: 4, varyMode: 1 }))).not.toContain('object.modifiers.varyFalloffCenter')
+    const r = keys(obj({ ...CLONED, varyMode: 1 }))
+    expect(r).not.toContain('object.modifiers.varyFalloffCenter')
+    expect(r).not.toContain('object.modifiers.varyFalloffRadius')
   })
 
   it('reveals the palette, spread and strength only when colour is on', () => {
-    expect(keys(obj({ cloneCount: 4 }))).not.toContain('ui.cloner.varyPalette')
-    const on = keys(obj({ cloneCount: 4, varyColor: 1 }))
+    const off = keys(obj(CLONED))
+    expect(off).not.toContain('ui.cloner.varyPalette')
+    expect(off).not.toContain('ui.cloner.varyColorSpread')
+    expect(off).not.toContain('object.modifiers.varyColorStrength')
+    const on = keys(obj({ ...CLONED, varyColor: 1 }))
     expect(on).toContain('ui.cloner.varyPalette')
-    expect(on).toContain('object.modifiers.varyColorSpread')
+    expect(on).toContain('ui.cloner.varyColorSpread')
     expect(on).toContain('object.modifiers.varyColorStrength')
   })
 
-  it('hides the colour switch for image and shaderFill materials', () => {
-    for (const type of ['image', 'shaderFill']) {
-      const k = keys(obj({ cloneCount: 4, varyColor: 1 }, type))
-      expect(k, type).not.toContain('object.modifiers.varyColor')
-      expect(k, type).not.toContain('ui.cloner.varyPalette')
+  it('hides the colour half for image and shaderFill, which have no base colour', () => {
+    for (const t of ['image', 'shaderFill']) {
+      const k = keys(obj({ ...CLONED, varyColor: 1 }, t))
+      expect(k, t).not.toContain('ui.cloner.varyColor')
+      expect(k, t).not.toContain('ui.cloner.varyPalette')
+      expect(k, t).not.toContain('object.modifiers.varyColorStrength')
+      // the driver half still applies — it varies the step transforms too
+      expect(k, t).toContain('ui.cloner.varyMode')
     }
   })
+})
 
-  it('hides the whole vary block when the cloner makes a single copy', () => {
-    expect(keys(obj({ cloneCount: 1 }))).not.toContain('object.modifiers.varyMode')
+describe('vary picker presentation', () => {
+  it('gives every option picker readable labels, never the stored words', () => {
+    const rows = scenePanelControls(DOC, obj({ ...CLONED, varyColor: 1 }))
+    for (const key of ['ui.cloner.varyMode', 'ui.cloner.varyColorSpread', 'ui.cloner.varyColor']) {
+      const row = rows.find((r) => r.key === key)
+      expect(row, key).toBeTruthy()
+    }
   })
 })
 ```
 
-If `panelSectionFor` / `panelRowKeys` are not the exported names in this file, read the file and use the real ones — do not invent them. Adapt the test to the actual exports before implementing.
+The last block only asserts the anchors exist, because `scenePanelControls` renders an anchor as a bare `anchorRow` (kind `text`) — the select spec with its labels is built in the SURFACE by `optionRowSpec`, which the surface test cannot reach from here. Do not weaken the other assertions to compensate.
+
+If `scenePanelControls`'s `SceneDoc` shape above is not accepted, read `config.ts` for the real minimum and fix the fixture — do not change what the tests assert.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && npx vitest run tests/unit/scene3d-vary-panel.unit.spec.ts`
-Expected: FAIL — vary keys route to `Geometry/Modifiers`.
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/scene3d-vary-panel.unit.spec.ts`
+Expected: FAIL — no vary anchors exist, and the numeric rows land on `Geometry/Modifiers`.
 
-- [ ] **Step 3: Route vary keys to the Cloner card**
+- [ ] **Step 3: Gate the numeric rows in `controls.ts`**
 
-In `frontend/app/lib/scene3d/panelPresentation.ts`, at the card-routing branch (~L684-686), change:
+In `frontend/app/lib/scene3d/controls.ts`, add below `CLONE_MODE_GATE` (~L347):
 
 ```ts
-  if (key.startsWith('ui.cloner.')) return 'Geometry/Cloner'
+/** Vary's own gating, the same shape as CLONE_MODE_GATE above but predicate-valued
+ *  because these rows depend on more than the clone mode. Every vary row needs MORE
+ *  THAN ONE COPY — there is nothing to vary across a single object, and an
+ *  always-present block would clutter the card for the common case. */
+const varyOn = (obj?: SceneObject): boolean =>
+  isPrimitiveObj(obj) && totalClones(obj.modifiers) > 1
+const varyModeOf = (obj?: SceneObject): number =>
+  isPrimitiveObj(obj) ? Math.round(modifierValue(obj.modifiers, 'varyMode')) : 0
+/** `image` samples a texture and `shaderFill` renders a field — neither has a base
+ *  colour for a per-copy tint to reach, so the colour half of Vary disappears for them.
+ *  The render side agrees: see NO_BASE_COLOR in materials.ts. */
+const varyColorable = (obj?: SceneObject): boolean =>
+  varyOn(obj) && isPrimitiveObj(obj)
+  && obj.material.type !== 'image' && obj.material.type !== 'shaderFill'
+const varyColorOn = (obj?: SceneObject): boolean =>
+  varyColorable(obj) && isPrimitiveObj(obj) && Math.round(modifierValue(obj.modifiers, 'varyColor')) === 1
+
+const VARY_GATE: Record<string, (obj?: SceneObject) => boolean> = {
+  varySeed: (o) => varyOn(o) && varyModeOf(o) === 1,
+  varyFalloffCenter: (o) => varyOn(o) && varyModeOf(o) === 2,
+  varyFalloffRadius: (o) => varyOn(o) && varyModeOf(o) === 2,
+  varyColorStrength: (o) => varyColorOn(o),
+}
+```
+
+Export the four predicates so `panelPresentation.ts` can gate its anchors with the SAME functions rather than a second copy:
+
+```ts
+export { varyOn, varyModeOf, varyColorable, varyColorOn }
+```
+
+Then extend `modifierControls()`'s `when` selection:
+
+```ts
+    const modes = CLONE_MODE_GATE[spec.key]
+    const varyGate = VARY_GATE[spec.key]
+    const when = varyGate
+      ? (_doc: SceneDoc, obj?: SceneObject) => varyGate(obj)
+      : modes
+        ? (_doc: SceneDoc, obj?: SceneObject) => isPrimitiveObj(obj) && modes.includes(cloneModeOf(obj))
+        : (_doc: SceneDoc, obj?: SceneObject) => isPrimitiveObj(obj)
+```
+
+`totalClones` and `modifierValue` are already imported by this file; check the import line and add `totalClones` if it is missing.
+
+- [ ] **Step 4: Register the anchors in `panelPresentation.ts`**
+
+Import the shared predicates:
+
+```ts
+import { varyOn, varyColorable, varyColorOn } from './controls'
+```
+
+If that import direction creates a cycle (controls.ts already imports from panelPresentation.ts), do NOT duplicate the predicates — move the four of them into `primParams.ts` beside `totalClones`, which both files already import, and import them from there in both places. Say in your report which of the two you did and why.
+
+Add to `OPTION_ANCHOR` (L414-416):
+
+```ts
+  varyMode: 'ui.cloner.varyMode', varyColor: 'ui.cloner.varyColor',
+  varyColorSpread: 'ui.cloner.varyColorSpread',
+```
+
+Add to `SCENE_PANEL_ANCHORS`, immediately after the `ui.cloner.step` entry:
+
+```ts
+  // Vary — per-copy variation across the cloner's copies. The whole block needs more
+  // than one copy; the colour half additionally needs a material with a base colour.
+  { key: 'ui.cloner.vary', label: 'Vary', visible: (_d, o) => varyOn(o ?? undefined) },
+  { key: 'ui.cloner.varyMode', label: modLabel('varyMode'), visible: (_d, o) => varyOn(o ?? undefined) },
+  { key: 'ui.cloner.varyColor', label: modLabel('varyColor'), visible: (_d, o) => varyColorable(o ?? undefined) },
+  { key: 'ui.cloner.varyPalette', label: 'Palette', visible: (_d, o) => varyColorOn(o ?? undefined) },
+  { key: 'ui.cloner.varyColorSpread', label: modLabel('varyColorSpread'), visible: (_d, o) => varyColorOn(o ?? undefined) },
+```
+
+Route the keys to the Cloner card in `panelCardOf` (L686):
+
+```ts
   if (key.startsWith(MODIFIER_PREFIX)) {
-    // `vary*` joins `clone*` on the Cloner card: it varies the CLONER's copies and
-    // is meaningless without them. Without this it would land on Modifiers, which
-    // is where every non-clone modifier key goes.
+    // `vary*` joins `clone*` on the Cloner card: it varies the CLONER's copies and is
+    // meaningless without them. Without this it would land on Modifiers, which is where
+    // every non-clone modifier key goes.
     const sub = key.slice(MODIFIER_PREFIX.length)
     return sub.startsWith('clone') || sub.startsWith('vary') ? 'Geometry/Cloner' : 'Geometry/Modifiers'
   }
 ```
 
-- [ ] **Step 4: Add the vary rows and their gating**
-
-Add beside `CLONER_STEP_KEYS` (~L408):
+Order the rows in `geometryCardOrder`'s Cloner branch (L629-631) — ORDER only, the gates above decide visibility:
 
 ```ts
-/** The Vary block's rows, gated by mode and by the colour switch. Returns an
- *  EMPTY list when the cloner makes a single copy — there is nothing to vary
- *  across, and an always-present block would clutter the card for the common case.
- *  `image` and `shaderFill` have no base colour for a per-copy tint to reach, so
- *  the colour half disappears for them (the render side agrees — see
- *  materials.ts's NO_BASE_COLOR). */
-function varyKeys(obj: PrimitiveObject | undefined, total: number): string[] {
-  if (total <= 1) return []
-  const m = (k: string) => modifierValue(obj?.modifiers, k)
-  const mode = Math.round(m('varyMode'))
-  const out = ['ui.cloner.vary', `${MODIFIER_PREFIX}varyMode`]
-  if (mode === 1) out.push(`${MODIFIER_PREFIX}varySeed`)
-  if (mode === 2) out.push(`${MODIFIER_PREFIX}varyFalloffCenter`, `${MODIFIER_PREFIX}varyFalloffRadius`)
-  const colourable = !!obj && obj.kind === 'primitive'
-    && obj.material.type !== 'image' && obj.material.type !== 'shaderFill'
-  if (colourable) {
-    out.push(`${MODIFIER_PREFIX}varyColor`)
-    if (Math.round(m('varyColor')) === 1) {
-      out.push('ui.cloner.varyPalette', `${MODIFIER_PREFIX}varyColorSpread`, `${MODIFIER_PREFIX}varyColorStrength`)
-    }
-  }
-  return out
-}
-```
-
-Then extend the Cloner card's row list (~L630-631) so the vary rows follow the step block, before the cost readout:
-
-```ts
+  return [
     ...clonerKeys(cloneModeOf(obj)).map(modRowKey),
     'ui.cloner.step', ...CLONER_STEP_KEYS.map((k) => `${MODIFIER_PREFIX}${k}`),
-    ...varyKeys(obj, totalClones(obj?.modifiers)),
+    'ui.cloner.vary', 'ui.cloner.varyMode',
+    `${MODIFIER_PREFIX}varySeed`,
+    `${MODIFIER_PREFIX}varyFalloffCenter`, `${MODIFIER_PREFIX}varyFalloffRadius`,
+    'ui.cloner.varyColor', 'ui.cloner.varyPalette', 'ui.cloner.varyColorSpread',
+    `${MODIFIER_PREFIX}varyColorStrength`,
     'ui.cloner.cost',
+  ]
 ```
 
-Register the two new anchors in `SCENE_PANEL_ANCHORS`:
+- [ ] **Step 5: Render the anchors in the surface**
 
-```ts
-  { key: 'ui.cloner.vary', label: 'Vary', visible: () => true },
-  { key: 'ui.cloner.varyPalette', label: 'Palette', visible: () => true },
-```
-
-Also add the gradient hint. In the same anchor list or wherever row hints are resolved, the `varyColor` row on a `gradient` material appends: `On a gradient material the copy colour tints the ramp rather than replacing it.` Read how neighbouring rows attach a conditional hint and follow that pattern rather than inventing a new one.
-
-- [ ] **Step 5: Render the palette anchor in the surface**
-
-In `frontend/app/components/vue-canvas/Scene3DStudioSurface.vue`, find where the other `ui.cloner.*` anchors are rendered (search for `ui.cloner.step`) and add a branch for `ui.cloner.varyPalette` that mounts the shared editor:
+In `frontend/app/components/vue-canvas/Scene3DStudioSurface.vue`, beside the existing `#control-ui.cloner.mode` template (~L4295), add the three option pickers — identical in shape, so they get the same 28px StudioRow chrome — plus the caption and the palette:
 
 ```vue
-        <VaryPalette
-          v-else-if="row.key === 'ui.cloner.varyPalette'"
-          :model-value="selectedPrimitive?.varyPalette"
-          @update:model-value="setVaryPalette"
-        />
+        <!-- Vary — how a property changes from one copy to the next. -->
+        <template #control-ui.cloner.vary><div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Vary</div></template>
+        <template #control-ui.cloner.varyMode>
+          <StudioRow :spec="optionRowSpec('varyMode', 'ui.cloner.varyMode')" :model-value="optionOf('varyMode')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('varyMode', String(v))" />
+        </template>
+        <template #control-ui.cloner.varyColor>
+          <StudioRow :spec="optionRowSpec('varyColor', 'ui.cloner.varyColor')" :model-value="optionOf('varyColor')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('varyColor', String(v))" />
+        </template>
+        <template #control-ui.cloner.varyColorSpread>
+          <StudioRow :spec="optionRowSpec('varyColorSpread', 'ui.cloner.varyColorSpread')" :model-value="optionOf('varyColorSpread')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('varyColorSpread', String(v))" />
+        </template>
+        <template #control-ui.cloner.varyPalette>
+          <VaryPalette :model-value="varyPaletteOf" @update:model-value="setVaryPalette" />
+        </template>
 ```
 
-with, in the script block:
+and in the script block:
 
 ```ts
 import VaryPalette from '~/components/vue-canvas/VaryPalette.vue'
 
-/** The palette is a string[] on the object, so it does NOT go through
- *  setModifier (a number-bag writer). It writes the field directly, the same way
- *  any other non-numeric object field is edited on this surface. */
-function setVaryPalette(palette: string[]) {
-  const obj = selectedPrimitive.value
-  if (!obj) return
-  updateObject(obj.id, { varyPalette: palette })
+const varyPaletteOf = computed<string[] | undefined>(() => {
+  const o = selected.value
+  return o && o.kind === 'primitive' ? o.varyPalette : undefined
+})
+
+/** The palette is a string[] on the object, so it does NOT go through `setMod` — that
+ *  writes the numeric modifier bag. It writes the object field directly, through the
+ *  same commit path any other non-numeric object field on this surface uses. */
+function setVaryPalette(palette: string[]): void {
+  const o = selected.value
+  if (!o || o.kind !== 'primitive') return
+  // …use this file's existing object-field commit helper here…
 }
 ```
 
-Use the surface's real object-update helper and its real selected-object ref — read the file and match them. `updateObject` / `selectedPrimitive` are placeholders for whatever this file already calls them.
+`selected` is this file's existing selected-object ref (it is used by `cloneCost` at ~L1292). For the commit helper, find how another non-numeric object field is written on this surface — search for a writer near `setMod` (~L1250) — and use that. Do not invent a new mutation path, and do not mutate the object in place if the surface commits through a store action.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `cd frontend && npx vitest run tests/unit/scene3d-vary-panel.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/scene3d-vary-panel.unit.spec.ts`
 Expected: PASS.
+
+Run: `cd frontend && node_modules/.bin/nuxt typecheck 2>&1 | tail -30`
+Expected: no NEW type errors versus the baseline you captured before starting.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
-git add frontend/app/lib/scene3d/panelPresentation.ts frontend/app/components/vue-canvas/Scene3DStudioSurface.vue frontend/tests/unit/scene3d-vary-panel.unit.spec.ts
+git add frontend/app/lib/scene3d/controls.ts frontend/app/lib/scene3d/panelPresentation.ts frontend/app/components/vue-canvas/Scene3DStudioSurface.vue frontend/tests/unit/scene3d-vary-panel.unit.spec.ts
 git commit -m "feat(scene3d): Vary controls on the Cloner card"
 ```
 
@@ -1615,7 +1728,7 @@ describe('varyOf', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && npx vitest run tests/unit/frame-cloner-vary.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/frame-cloner-vary.unit.spec.ts`
 Expected: FAIL — `varyOf` is not exported and `tint` is not a field.
 
 - [ ] **Step 3: Extend the types and defaults**
@@ -1734,18 +1847,17 @@ Note `varyColorAt(w, r.k, vary)` passes the STEP `k`, not the array position —
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd frontend && npx vitest run tests/unit/frame-cloner-vary.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/frame-cloner-vary.unit.spec.ts`
 Expected: PASS.
 
 Run the existing cloner suites too:
 
-Run: `cd frontend && npx vitest run tests/unit --reporter=dot 2>&1 | tail -20`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit --reporter=dot 2>&1 | tail -20`
 Expected: no NEW failures.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add frontend/app/composables/useCloner.ts frontend/tests/unit/frame-cloner-vary.unit.spec.ts
 git commit -m "feat(frame): per-copy vary weights and tints in expandClones"
 ```
@@ -1822,7 +1934,7 @@ describe('tintScratch', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && npx vitest run tests/unit/frame-cloner-tint.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/frame-cloner-tint.unit.spec.ts`
 Expected: FAIL — `tintScratch` is not exported.
 
 - [ ] **Step 3: Write the tint helper**
@@ -1917,13 +2029,12 @@ In the loop at ~L3042, replace the single `ctx.drawImage(src, ...)` with:
 
 - [ ] **Step 7: Run tests to verify they pass**
 
-Run: `cd frontend && npx vitest run tests/unit/frame-cloner-tint.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/frame-cloner-tint.unit.spec.ts`
 Expected: PASS.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add frontend/app/composables/useCompositorLayers.ts frontend/tests/unit/frame-cloner-tint.unit.spec.ts
 git commit -m "feat(frame): tint each cloned copy from the vary palette"
 ```
@@ -1995,7 +2106,7 @@ describe('Vary block', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && npx vitest run tests/unit/frame-cloner-panel.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/frame-cloner-panel.unit.spec.ts`
 Expected: FAIL — no vary markup exists.
 
 - [ ] **Step 3: Add the Vary block**
@@ -2094,13 +2205,12 @@ If `v-scrubnum` is not registered in the unit-test environment the mount will wa
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd frontend && npx vitest run tests/unit/frame-cloner-panel.unit.spec.ts`
+Run: `cd frontend && node_modules/.bin/vitest run tests/unit/frame-cloner-panel.unit.spec.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add frontend/app/components/vue-canvas/compositor/CompositorClonerPanel.vue frontend/tests/unit/frame-cloner-panel.unit.spec.ts
 git commit -m "feat(frame): Vary controls on the cloner panel"
 ```
@@ -2230,7 +2340,7 @@ def test_vary_colour_tints_each_clone():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python -m pytest tests-unit/comfy_extras_test/cloner_vary_test.py -v`
+Run: `/Users/julien/Documents/GitHub/Sailor/.venv/bin/python -m pytest tests-unit/comfy_extras_test/cloner_vary_test.py -v`
 Expected: FAIL — `ImportError: cannot import name '_hash32'`.
 
 - [ ] **Step 3: Write the Python mirror**
@@ -2394,18 +2504,17 @@ Use the real local variable names from that function — read it first.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python -m pytest tests-unit/comfy_extras_test/cloner_vary_test.py -v`
+Run: `/Users/julien/Documents/GitHub/Sailor/.venv/bin/python -m pytest tests-unit/comfy_extras_test/cloner_vary_test.py -v`
 Expected: PASS, all tests green — including the reference-hash assertion read from the TypeScript spec file.
 
 Run the existing compositor suite too:
 
-Run: `cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python -m pytest tests-unit/comfy_extras_test/ -q`
+Run: `/Users/julien/Documents/GitHub/Sailor/.venv/bin/python -m pytest tests-unit/comfy_extras_test/ -q`
 Expected: no NEW failures.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add comfy_extras/nodes_compositor.py tests-unit/comfy_extras_test/cloner_vary_test.py
 git commit -m "feat(compositor): mirror cloner vary in the server composite"
 ```
@@ -2468,7 +2577,6 @@ Write up what you actually saw. If a step did not behave as described, that is a
 - [ ] **Step 6: Commit any fixes**
 
 ```bash
-cd /Users/julien/Documents/GitHub/Sailor
 git add -A
 git commit -m "fix(vary): live verification findings"
 ```

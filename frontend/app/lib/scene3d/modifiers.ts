@@ -10,6 +10,8 @@
 import * as THREE from 'three'
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { modifierValue, totalClones } from '~/lib/scene3d/primParams'
+import { varyWeights, varyColorAt, varyStepFactor, type VarySettings } from '~/lib/vary'
+import { stripAlpha } from '~/lib/color/convert'
 
 /** Rough ceiling for the final merged geometry. `totalClones` (the doc value
  *  the panel shows back) is never reduced; subdivision stops early, and
@@ -221,7 +223,7 @@ function applyJitter(geo: THREE.BufferGeometry, amount: number, mode: number, se
   pos.needsUpdate = true
 }
 
-interface ClonerSettings {
+export interface ClonerSettings {
   /** 0 linear, 1 radial, 2 grid. */
   mode: number
   offset: [number, number, number]
@@ -235,29 +237,49 @@ interface ClonerSettings {
   stepScale: number
 }
 
+/** One copy's placement, plus whatever the Vary drivers resolved for it.
+ *
+ *  THIS IS THE REUSABLE UNIT. Today one consumer (`mergeClones`) folds recipes
+ *  into a single merged geometry, which is what keeps a cloned object ONE mesh
+ *  and leaves treatments, outlines, sculpt, decals, picking and GLB export
+ *  untouched. A future InstancedMesh renderer (for thousands of copies, or
+ *  per-copy motion) consumes the SAME list without touching the drivers, the
+ *  palette logic or the UI. */
+export interface CloneRecipe {
+  index: number
+  matrix: THREE.Matrix4
+  weight: number
+  color?: string
+}
+
 /** Copy `i` gets `place(i) . rotationStep(i) . scaleStep(i)`, so each copy spins
  *  and shrinks about its own origin and is only then placed. With the default
  *  step values both step matrices are exactly the identity, which makes the
- *  product bit-identical to the pre-step placement matrix. */
-function applyCloner(geo: THREE.BufferGeometry, total: number, s: ClonerSettings): THREE.BufferGeometry {
-  const copies: THREE.BufferGeometry[] = []
-  const m = new THREE.Matrix4()
-  const spin = new THREE.Matrix4()
-  const rot = new THREE.Matrix4()
-  const scl = new THREE.Matrix4()
-  const euler = new THREE.Euler()
+ *  product bit-identical to the pre-step placement matrix.
+ *
+ *  Vary scales the STEP transforms by each copy's weight. In sequence mode
+ *  `varyStepFactor` returns 1, so the accumulate-by-index maths below runs
+ *  verbatim and every scene saved before Vary existed renders bit-identically —
+ *  that identity is asserted by the unit tests and must not regress. */
+export function planClones(total: number, s: ClonerSettings, vary?: VarySettings): CloneRecipe[] {
+  const steps: number[] = []
+  for (let i = 0; i < total; i++) steps.push(i)
+  const weights = vary ? varyWeights(steps, vary) : steps.map(() => 0)
+
+  const out: CloneRecipe[] = []
   const axisVec = new THREE.Vector3(s.axis === 0 ? 1 : 0, s.axis === 1 ? 1 : 0, s.axis === 2 ? 1 : 0)
   const radialDir = (s.axis + 1) % 3
   const [nx, ny] = s.gridCount
   const rad = (deg: number) => (deg * Math.PI) / 180
+
   for (let i = 0; i < total; i++) {
-    const copy = geo.clone()
+    const m = new THREE.Matrix4()
     if (s.mode === 1) {
       const ang = (i / total) * Math.PI * 2
-      const out = new THREE.Vector3()
-      out.setComponent(radialDir, s.radius)
-      m.makeTranslation(out.x, out.y, out.z)
-      spin.makeRotationAxis(axisVec, ang)
+      const outv = new THREE.Vector3()
+      outv.setComponent(radialDir, s.radius)
+      m.makeTranslation(outv.x, outv.y, outv.z)
+      const spin = new THREE.Matrix4().makeRotationAxis(axisVec, ang)
       m.copy(spin.multiply(m))
     } else if (s.mode === 2) {
       // The grid is centred on the origin rather than growing away from it, so
@@ -273,18 +295,101 @@ function applyCloner(geo: THREE.BufferGeometry, total: number, s: ClonerSettings
     } else {
       m.makeTranslation(s.offset[0] * i, s.offset[1] * i, s.offset[2] * i)
     }
-    euler.set(rad(s.stepRot[0]) * i, rad(s.stepRot[1]) * i, rad(s.stepRot[2]) * i)
-    rot.makeRotationFromEuler(euler)
-    const k = s.stepScale ** i
-    scl.makeScale(k, k, k)
-    copy.applyMatrix4(m.multiply(rot).multiply(scl))
+
+    const w = weights[i] ?? 0
+    // 1 in sequence mode — the existing maths, untouched.
+    const f = vary ? varyStepFactor(w, vary) : 1
+    const euler = new THREE.Euler(
+      rad(s.stepRot[0]) * i * f, rad(s.stepRot[1]) * i * f, rad(s.stepRot[2]) * i * f,
+    )
+    const rot = new THREE.Matrix4().makeRotationFromEuler(euler)
+    // Damping a geometric accumulation means damping the EXPONENT, so f=0 lands
+    // on exactly 1 (no scaling) rather than on stepScale^i.
+    const k = s.stepScale ** (i * f)
+    const scl = new THREE.Matrix4().makeScale(k, k, k)
+
+    out.push({
+      index: i,
+      matrix: m.multiply(rot).multiply(scl),
+      weight: w,
+      color: vary ? varyColorAt(w, i, vary) : undefined,
+    })
+  }
+  return out
+}
+
+/** Fold the recipes into ONE geometry. When any recipe carries a colour, a
+ *  per-vertex `color` attribute is written first, filled with that copy's colour
+ *  across the whole copy — which is how a merged mesh shows N colours through a
+ *  single material: `materialFor` turns on `vertexColors` and mixes toward that
+ *  attribute in the shader (see `applyVaryTint` in materials.ts).
+ *
+ *  The RAW palette colour goes into the attribute; `vary.strength` is NOT baked in and
+ *  is not this function's business at all. The material's own base colour — the other
+ *  end of the blend — is not known here, and baking the strength would put a material
+ *  property into the vertex data, re-merging every clone on every slider tick. The
+ *  engine passes the strength straight to `materialFor`/`updateMaterial`, which apply
+ *  it as a shader uniform.
+ *
+ *  `userData.varyTint` is the STAMP that tells materials.ts this `color` attribute
+ *  is a Cloner-baked one rather than a model's own `COLOR_0` (see `hasVertexTint`). */
+export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): THREE.BufferGeometry {
+  if (recipes.length === 0) return geo.clone()
+  const tinted = recipes.some((r) => r.color !== undefined)
+  const copies: THREE.BufferGeometry[] = []
+  for (const r of recipes) {
+    const copy = geo.clone()
+    if (tinted) {
+      // Color.set(hexString) already performs three's sRGB→linear ingest
+      // conversion (ColorManagement is enabled by default since r152), so the
+      // sRGB palette hex lands in the linear working space with no further
+      // conversion — the same convention materials.ts documents from the other
+      // direction around line 948 ("getHex(SRGBColorSpace) undoes three's
+      // sRGB→linear ingest").
+      //
+      // The colour picker (StudioColor) emits 8-digit #rrggbbaa hex, and
+      // sanitizeVaryPalette (config.ts) deliberately admits 3/6/8-digit forms
+      // into a saved palette, so an alpha-suffixed swatch genuinely reaches
+      // here. THREE.Color.set only parses 3- and 6-digit hex — anything else
+      // it WARNS and leaves the Color unchanged, it does not throw — so the
+      // alpha must be stripped before handing the string to three. Do not
+      // "simplify" this back out.
+      //
+      // `c` is constructed fresh per recipe (not hoisted above the loop) so
+      // that an unparseable swatch — set() failing silently — cannot inherit
+      // the previous copy's colour out of a reused instance. In practice a
+      // garbage swatch never reaches set(): stripAlpha is total and clamps
+      // anything it cannot parse to black, so black is the fallback you will
+      // actually observe. The fresh instance is defence for any future caller
+      // that skips the strip.
+      const c = new THREE.Color()
+      c.set(stripAlpha(r.color ?? '#ffffff'))
+      const n = copy.getAttribute('position').count
+      const arr = new Float32Array(n * 3)
+      for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b }
+      copy.setAttribute('color', new THREE.BufferAttribute(arr, 3))
+    }
+    copy.applyMatrix4(r.matrix)
     copies.push(copy)
   }
   const merged = mergeGeometries(copies)
-  for (const c of copies) c.dispose()
+  for (const cp of copies) cp.dispose()
   // mergeGeometries returns null if the inputs disagree on attributes; the
   // copies are clones of one geometry, so that cannot happen here.
-  return merged ?? geo.clone()
+  const out = merged ?? geo.clone()
+  // Stamp only when the attribute was actually written — an untinted clone set must
+  // stay indistinguishable from a plain geometry so its material is built unchanged.
+  //
+  // Assign a FRESH userData object rather than mutating `out.userData` in place: on
+  // the `merged ?? geo.clone()` fallback (unreachable today — mergeGeometries only
+  // returns null when the copies disagree on attributes, and they are clones of one
+  // geometry), `BufferGeometry.copy` assigns `this.userData = source.userData` BY
+  // REFERENCE, so `out.userData` IS the caller's `geo.userData` object and an in-place
+  // stamp would mutate the caller's own geometry too.
+  if (tinted) {
+    out.userData = { ...out.userData, varyTint: true }
+  }
+  return out
 }
 
 // --- pipeline ----------------------------------------------------------------
@@ -292,6 +397,7 @@ function applyCloner(geo: THREE.BufferGeometry, total: number, s: ClonerSettings
 export function applyModifiers(
   geo: THREE.BufferGeometry,
   modifiers: Record<string, number> | undefined,
+  vary?: VarySettings,
 ): THREE.BufferGeometry {
   if (!hasModifiers(modifiers)) return geo
   const m = (k: string) => modifierValue(modifiers, k)
@@ -329,7 +435,7 @@ export function applyModifiers(
 
   const { count } = clampedClones(modifiers, out.getAttribute('position').count)
   if (count > 1) {
-    const cloned = applyCloner(out, count, {
+    const recipes = planClones(count, {
       mode: Math.round(m('cloneMode')),
       offset: [m('cloneOffsetX'), m('cloneOffsetY'), m('cloneOffsetZ')],
       radius: m('cloneRadius'),
@@ -338,7 +444,11 @@ export function applyModifiers(
       spacing: [m('cloneSpacingX'), m('cloneSpacingY'), m('cloneSpacingZ')],
       stepRot: [m('cloneStepRotX'), m('cloneStepRotY'), m('cloneStepRotZ')],
       stepScale: m('cloneStepScale'),
-    })
+    }, vary)
+    // `vary.strength` is deliberately NOT passed down: it is a material uniform, not
+    // vertex data — mergeClones' doc explains why, and engine.ts hands it to the
+    // material directly.
+    const cloned = mergeClones(out, recipes)
     out.dispose()
     out = cloned
     out.computeBoundingBox()
