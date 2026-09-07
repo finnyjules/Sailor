@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { applyPasses, applyEffectChain } from '~/lib/compositor/postEffects'
+import { applyPasses, applyEffectChain, applyBlurPass } from '~/lib/compositor/postEffects'
 
 /** A canvas stub that records the order of operations we can observe. `filter` writes and
  *  `putImageData` calls are enough to tell adjust (a filter draw) from duotone/gradientMap
@@ -100,5 +100,25 @@ describe('applyEffectChain keeps canonical order regardless of array order', () 
     applyEffectChain(canvas, [duotone({ visible: false })] as any, { W: 100, scale: 1 })
     expect(log.filter(l => l === 'putImageData')).toHaveLength(0)
     vi.unstubAllGlobals()
+  })
+})
+
+describe('applyBlurPass', () => {
+  it('redraws the offscreen through a blur filter at the given device radius', () => {
+    const inner = stubCanvas()
+    vi.stubGlobal('document', { createElement: () => inner.canvas })
+    const { canvas, ctx, log } = stubCanvas()
+    const seen: string[] = []
+    Object.defineProperty(ctx, 'filter', { set: (v: string) => seen.push(v), get: () => 'none' })
+    applyBlurPass(canvas, 12)
+    expect(seen).toContain('blur(12px)')
+    expect(log).toContain('draw:source-over')
+    vi.unstubAllGlobals()
+  })
+  it('is a no-op at radius 0 or below', () => {
+    const { canvas, log } = stubCanvas()
+    applyBlurPass(canvas, 0)
+    applyBlurPass(canvas, -3)
+    expect(log).toEqual([])
   })
 })

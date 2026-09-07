@@ -430,3 +430,11 @@ describe('silhouetteRasterFits', () => {
     expect(silhouetteRasterFits(SILHOUETTE_RASTER_MAX_DIM + 1, 500)).toBe(false)
   })
 })
+
+describe('silhouette cache key covers stack order', () => {
+  it('two stacks differing only in order produce different keys', () => {
+    const a = { effects: [{ id: 'a', type: 'torn_edge', visible: true }, { id: 'b', type: 'feather', visible: true }] }
+    const b = { effects: [{ id: 'b', type: 'feather', visible: true }, { id: 'a', type: 'torn_edge', visible: true }] }
+    expect(silhouetteCacheKey(a, 2, 100, 100, 1000)).not.toBe(silhouetteCacheKey(b, 2, 100, 100, 1000))
+  })
+})

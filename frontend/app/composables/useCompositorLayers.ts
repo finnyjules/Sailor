@@ -39,15 +39,15 @@ import { resolveGroupCascade, type LayerGroup } from '~/lib/compositor/layerGrou
 import { layoutExpressive, type ExpressiveParams } from '~~/shared/text-layout/expressive'
 import { type PaintStroke, stampStrokes, strokeBounds } from '~/lib/compositor/brushStamp'
 import {
-  applyEffectChain, applyStackPost, chainActive, isChainEffect,
+  applyBlurPass, applyPasses, applyStackPost, chainActive,
   type AdjustEffect, type BloomEffect, type DofEffect, type DuotoneEffect,
   type GradientMapEffect, type GrainEffect, type PostEffect, type VignetteEffect,
 } from '~/lib/compositor/postEffects'
 import { applyDof, dofAvailable, dofShouldRun } from '~/lib/compositor/dofPass'
 import { depthImageFor, requestDepth, depthSourceFromViewUrl, type DepthRef } from '~/lib/compositor/depthRegistry'
 import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
-import { applyTornEdge, tornEdgeActive } from '~/lib/compositor/tornEdge'
-import { applyFeather, featherActive } from '~/lib/compositor/feather'
+import { applyTornEdge, type TornEdgeSpec } from '~/lib/compositor/tornEdge'
+import { applyFeather, type FeatherSpec } from '~/lib/compositor/feather'
 import {
   LruCache, SILHOUETTE_CACHE_CAP, SILHOUETTE_CACHE_MAX_BYTES, silhouetteCacheKey,
   silhouettePadPx as silhouettePadPxPure, silhouetteContentReady as silhouetteContentReadyPure,
@@ -1661,13 +1661,23 @@ function paintLayer(
   // misfit warp. `wiredLive` stays `undefined` for non-wired layers, so the callees'
   // own-resolve fallback (used by callers outside paintLayer) never triggers here.
   const wiredLive: WiredLive | null | undefined = layer.kind === 'wired' ? wiredContent(layer as WiredLayer) : undefined
-  const fx = (layer.effects ?? []).filter(e => e.visible)
-  const shadow = fx.find((e): e is DropShadowEffect => e.type === 'drop_shadow')
-  const blur = fx.find((e): e is LayerBlurEffect => e.type === 'layer_blur')
-  const inner = fx.find((e): e is InnerShadowEffect => e.type === 'inner_shadow')
-  const chain = fx.filter(isChainEffect)
-  const tornEdge = tornEdgeActive(layer.tornEdge) ? layer.tornEdge : undefined
-  const feather = featherActive(layer.feather) ? layer.feather : undefined
+  // The layer's ordered stack, old shape or new — see lib/compositor/effectStack.ts. For an
+  // unedited (old-shape) layer this is the legacy canonical order, so the pass sequence below
+  // is exactly what the fixed lookups used to produce.
+  const stack = effectStackOf(layer).filter(e => e.visible)
+  const shadow = pinnedEffect(stack, 'drop_shadow') as DropShadowEffect | undefined
+  // Everything between the pinned three, in the user's order. inner shadow / the six chain
+  // kinds / torn edge / feather / layer blur all run here.
+  const passes = orderablePasses(stack)
+  // The silhouette raster bakes torn edge + feather into the layer's own box. Layer blur may
+  // ride along ONLY when every blur comes after every edge pass, which is the legacy order —
+  // otherwise the raster would apply them the wrong way round.
+  const lastEdgePass = passes.reduce((m, e, i) => (e.type === 'torn_edge' || e.type === 'feather' ? i : m), -1)
+  const firstBlurPass = passes.findIndex(e => e.type === 'layer_blur')
+  const rasterablePasses = passes.length > 0
+    && passes.every(e => e.type === 'torn_edge' || e.type === 'feather' || e.type === 'layer_blur')
+    && lastEdgePass >= 0
+    && (firstBlurPass === -1 || firstBlurPass > lastEdgePass)
   // Content layers with a depth map only — nothing else has one to drive the blur.
   // An uploaded image keys depth by its `filename`; a WIRED layer keys it by the
   // host-supplied `depthKey` (the upstream `/view` URL). Both resolve through the
@@ -1677,7 +1687,7 @@ function paintLayer(
   const dofRef: DepthRef | null | undefined = layer.kind === 'image'
     ? (layer as ImageLayer).filename
     : layer.kind === 'wired' ? depthSourceFromViewUrl((layer as WiredLayer).depthKey) : undefined
-  const dof = dofRef ? fx.find((e): e is DofEffect => e.type === 'dof') : undefined
+  const dof = dofRef ? (pinnedEffect(stack, 'dof') as DofEffect | undefined) : undefined
   // (background_blur is a stack-level effect — paintLayerStack applies it
   // against the backdrop before this layer paints.)
 
@@ -1692,10 +1702,9 @@ function paintLayer(
   // Silhouette raster cache (see `_silhouetteCache`): only cases whose LOCAL BOX is a
   // faithful, self-contained render of the layer qualify — everything else keeps the
   // old full-canvas path, byte-identical.
-  const silhouetteCacheable = !!(tornEdge || feather)
+  const silhouetteCacheable = rasterablePasses
     && layer.kind !== 'wired'                                       // graph pixels change under us — no content signature
     && !cp && !dof                                                  // corner-pin / DOF have their own offscreen flows
-    && !inner && !chain.length                                      // inner shadow + chain effects (bloom!) spread past the box
     && !(layer.kind === 'text' && layer.expressive)                 // expressive layout places words outside localLayerBox
     && !layerPaints(layer).some(p => isFill(p) && fillIsShader(p))  // shader fills are live / frame-anchored
     && silhouetteContentReady(layer, W)
@@ -1729,8 +1738,12 @@ function paintLayer(
     if (!cctx) return silhouetteMemo   // no raster ⇒ the caller takes the uncached path
     cctx.setTransform(s, 0, 0, s, bwD / 2, bhD / 2)   // centred, at device scale — the geometry drawLayerContent expects
     drawLayerContent(cctx, layer, W, wiredLive)
-    if (tornEdge) applyTornEdge(cc, tornEdge, { scale: s })
-    if (feather) applyFeather(cc, feather)
+    // In list order: a feather before a tear and a tear before a feather are different
+    // pictures, and the raster has to agree with the uncached path below.
+    for (const e of passes) {
+      if (e.type === 'torn_edge') applyTornEdge(cc, e as unknown as TornEdgeSpec, { scale: s })
+      else if (e.type === 'feather') applyFeather(cc, e as unknown as FeatherSpec)
+    }
     _silhouetteCache.set(key, cc)
     silhouetteMemo = { canvas: cc, w: bwLx, h: bhLx }
     return silhouetteMemo
@@ -1836,7 +1849,7 @@ function paintLayer(
     // composite it with inner shadow / drop shadow / blur. Works identically for
     // text, shapes, vectors and images, and because bakeOverlay() renders through
     // here the effects are baked into generation exactly as previewed.
-    if (shadow || blur || inner || chain.length || tornEdge || feather) {
+    if (shadow || passes.length) {
       // Size the offscreen to the DEVICE canvas and render it through the current
       // transform `t`, exactly like the mask path (drawLocalLayer) and the brush
       // path do. Sizing to logical W×H instead would rasterize the layer at preview
@@ -1876,32 +1889,48 @@ function paintLayer(
           // resample by up to half a pixel in position; that is the same subpixel
           // placement the uncached draw does, not an extra softening from the cache.
           octx.drawImage(raster.canvas, -raster.w / 2, -raster.h / 2, raster.w, raster.h)
+          // Torn edge / feather are already baked into the raster; a trailing layer blur is
+          // not, so apply it here (rasterablePasses guarantees blur comes last).
+          for (const e of passes) {
+            if (e.type === 'layer_blur') applyBlurPass(off, Math.max(0, (e as LayerBlurEffect).radius * W * s))
+          }
         } else {
           applyXform(octx, lx, ly, lrot, ls)
           drawContent(octx)
-          if (inner) compositeInnerShadow(off, inner, W, s)
-          // scale = device px per logical px, so bloom radius / grain size land at the
-          // right physical size on a device-resolution buffer (mirrors applyStackPost).
-          if (chain.length) applyEffectChain(off, chain, { W, scale: s })
-          // Torn edge carves the offscreen's alpha + paints the lip, in device px,
-          // so preview and export tear identically. Runs after content + 2D effects
-          // so grain/adjust sit inside the tear, and before the stamp so drop-shadow
-          // and blur (applied below) follow the torn silhouette.
-          if (tornEdge) applyTornEdge(off, tornEdge, { scale: s })
-          // Feather softens whatever silhouette exists (including a torn one) by
-          // fading alpha inward. Runs before the drop-shadow/blur stamp below so
-          // those follow the feathered edge. amount is element-relative (derived
-          // from the rendered silhouette's own bbox), so no canvas/scale is passed.
-          if (feather) applyFeather(off, feather)
+          // The layer's passes, in the user's order. For an unedited layer that order is the
+          // legacy one (inner shadow, then the six chain kinds, then torn edge, feather, blur),
+          // so this produces the same canvas operations the fixed sequence did.
+          //
+          // scale = device px per logical px, so bloom radius / grain size / blur radius land
+          // at the right physical size on a device-resolution buffer (mirrors applyStackPost).
+          for (const e of passes) {
+            switch (e.type) {
+              case 'inner_shadow':
+                compositeInnerShadow(off, e as unknown as InnerShadowEffect, W, s); break
+              // Torn edge carves the offscreen's alpha + paints the lip, in device px, so
+              // preview and export tear identically.
+              case 'torn_edge':
+                applyTornEdge(off, e as unknown as TornEdgeSpec, { scale: s }); break
+              // Feather softens whatever silhouette exists (including a torn one) by fading
+              // alpha inward. amount is element-relative (derived from the rendered
+              // silhouette's own bbox), so no canvas/scale is passed.
+              case 'feather':
+                applyFeather(off, e as unknown as FeatherSpec); break
+              case 'layer_blur':
+                applyBlurPass(off, Math.max(0, (e as LayerBlurEffect).radius * W * s)); break
+              default:
+                applyPasses(off, [e], { W, scale: s })
+            }
+          }
         }
         ctx.save()
         // `off` already holds device pixels — stamp it 1:1 in device space, not under
-        // `t` (which would upscale it a second time). Shadow/blur are specified in
-        // device px here, so their logical W-normalized params scale by `s`.
+        // `t` (which would upscale it a second time). The drop shadow is specified in
+        // device px here, so its logical W-normalized params scale by `s`. (Layer blur is
+        // already in `off` as a pass, so the shadow still follows the blurred silhouette.)
         ctx.setTransform(1, 0, 0, 1, 0, 0)
         ctx.globalAlpha = lop
         ctx.globalCompositeOperation = blendOp
-        if (blur) ctx.filter = `blur(${Math.max(0, blur.radius * W * s)}px)`
         if (shadow) {
           ctx.shadowColor = shadow.color
           ctx.shadowBlur = Math.max(0, shadow.blur * W * s)

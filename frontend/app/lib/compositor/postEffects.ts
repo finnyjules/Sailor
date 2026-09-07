@@ -397,6 +397,30 @@ export function applyPasses(
   }
 }
 
+/**
+ * Gaussian blur of the whole offscreen — the per-layer `layer_blur` effect as a pass.
+ * It used to be a CSS filter set on the stamp's `drawImage`; the canvas applies filter,
+ * then shadow, then composite, so the drop shadow followed the blurred silhouette. Running
+ * the blur here, before the stamp, preserves that exactly.
+ *
+ * `radiusPx` is already in DEVICE pixels (the caller multiplies by `W * scale`), and takes a
+ * number rather than the effect so this module keeps its one-way independence from
+ * effectStack.ts.
+ */
+export function applyBlurPass(off: HTMLCanvasElement, radiusPx: number): void {
+  if (!(radiusPx > 0)) return
+  const ctx = off.getContext('2d')
+  if (!ctx) return
+  const src = cloneCanvas(off)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, off.width, off.height)
+  ctx.filter = `blur(${radiusPx}px)`
+  ctx.drawImage(src, 0, 0)
+  ctx.filter = 'none'
+  ctx.restore()
+}
+
 const CHAIN_ORDER = ['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain']
 
 /**
