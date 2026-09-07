@@ -261,128 +261,158 @@ export function grainTile(): HTMLCanvasElement {
   return c
 }
 
+type PassOpts = { W: number; scale?: number }
+
+function passAdjust(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: AdjustEffect, _opts: PassOpts): void {
+  const f = adjustFilterString(e)
+  if (!f) return
+  const src = cloneCanvas(off)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, off.width, off.height)
+  ctx.filter = f
+  ctx.drawImage(src, 0, 0)
+  ctx.restore()
+}
+
+function passDuotone(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: DuotoneEffect, _opts: PassOpts): void {
+  if (!(e.mix > 0)) return
+  const img = ctx.getImageData(0, 0, off.width, off.height)
+  duotoneInPlace(img.data, hexToRgb(e.shadows), hexToRgb(e.highlights), e.mix)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.putImageData(img, 0, 0)
+  ctx.restore()
+}
+
+function passGradientMap(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: GradientMapEffect, _opts: PassOpts): void {
+  if (!(e.mix > 0 && e.stops.length)) return
+  const img = ctx.getImageData(0, 0, off.width, off.height)
+  gradientMapInPlace(img.data, e.stops, e.contrast, e.mix)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.putImageData(img, 0, 0)
+  ctx.restore()
+}
+
+function passBloom(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: BloomEffect, opts: PassOpts): void {
+  if (!(e.intensity > 0 && e.radius > 0)) return
+  const scale = opts.scale ?? 1
+  const bp = cloneCanvas(off)
+  const bctx = bp.getContext('2d')
+  if (bctx) {
+    const img = bctx.getImageData(0, 0, bp.width, bp.height)
+    brightPassInPlace(img.data, e.threshold)
+    bctx.putImageData(img, 0, 0)
+    const blurred = mkCanvas(off.width, off.height)
+    const blctx = blurred.getContext('2d')
+    if (blctx) {
+      blctx.filter = `blur(${Math.max(0, e.radius * opts.W * scale)}px)`
+      blctx.drawImage(bp, 0, 0)
+      blctx.filter = 'none'
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.globalCompositeOperation = 'lighter'
+      const k = Math.min(2, Math.max(0, e.intensity))
+      ctx.globalAlpha = Math.min(1, k)
+      ctx.drawImage(blurred, 0, 0)
+      if (k > 1) { ctx.globalAlpha = k - 1; ctx.drawImage(blurred, 0, 0) }
+      ctx.restore()
+    }
+  }
+}
+
+function passVignette(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: VignetteEffect, _opts: PassOpts): void {
+  if (!(e.amount > 0)) return
+  const w = off.width, h = off.height
+  const R = Math.hypot(w, h) / 2
+  const { inner, outer } = vignetteStops(e.size, e.softness)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  // source-atop = clip to existing alpha, so a per-layer vignette never
+  // halos beyond the silhouette (doc snapshots are opaque where content is).
+  ctx.globalCompositeOperation = 'source-atop'
+  const g = ctx.createRadialGradient(w / 2, h / 2, inner * R, w / 2, h / 2, outer * R)
+  g.addColorStop(0, 'rgba(0,0,0,0)')
+  g.addColorStop(1, `rgba(0,0,0,${Math.min(1, Math.max(0, e.amount))})`)
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, w, h)
+  ctx.restore()
+}
+
+function passGrain(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: GrainEffect, opts: PassOpts): void {
+  if (!(e.amount > 0)) return
+  const scale = opts.scale ?? 1
+  const gc = mkCanvas(off.width, off.height)
+  const gctx = gc.getContext('2d')
+  if (gctx) {
+    const pat = gctx.createPattern(grainTile(), 'repeat')
+    if (pat) {
+      const s = Math.max(1, e.size) * scale
+      gctx.save()
+      gctx.scale(s, s)
+      gctx.fillStyle = pat
+      gctx.fillRect(0, 0, gc.width / s, gc.height / s)
+      gctx.restore()
+      gctx.globalCompositeOperation = 'destination-in'
+      gctx.drawImage(off, 0, 0) // clip noise to the layer/content alpha
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.globalCompositeOperation = 'overlay'
+      ctx.globalAlpha = Math.min(1, Math.max(0, e.amount))
+      ctx.drawImage(gc, 0, 0)
+      ctx.restore()
+    }
+  }
+}
+
+/** The kinds this module owns as 2D passes over a layer/document offscreen. Everything
+ *  else in a layer's stack (inner shadow, torn edge, feather, layer blur, drop shadow,
+ *  background blur, dof) is applied by the caller at its own structural position. */
+const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain'])
+
 /**
- * Apply the visible chain effects to an offscreen canvas, in the fixed order
- * adjust → duotone → gradientMap → bloom → vignette → grain. Mutates `off` in place; every
- * op runs in identity transform space (the caller's ctx transform is preserved).
- * `opts.W` = logical canvas width (normalized params scale by it);
- * `opts.scale` = device px per logical px (default 1 — pass the ctx transform's
- * `.a` when `off` is a device-resolution snapshot).
+ * Apply passes in ARRAY ORDER — the per-layer entry point. Order is the caller's, so the
+ * same two effects in two orders produce two different images, and a kind may repeat.
+ * Entries this module does not own, and invisible entries, are skipped.
+ */
+export function applyPasses(
+  off: HTMLCanvasElement,
+  passes: readonly { type: string; visible: boolean }[],
+  opts: PassOpts,
+): void {
+  if (!passes.length) return
+  const ctx = off.getContext('2d')
+  if (!ctx) return
+  for (const e of passes) {
+    if (!e.visible || !PASS_TYPES.has(e.type)) continue
+    switch (e.type) {
+      case 'adjust': passAdjust(ctx, off, e as unknown as AdjustEffect, opts); break
+      case 'duotone': passDuotone(ctx, off, e as unknown as DuotoneEffect, opts); break
+      case 'gradientMap': passGradientMap(ctx, off, e as unknown as GradientMapEffect, opts); break
+      case 'bloom': passBloom(ctx, off, e as unknown as BloomEffect, opts); break
+      case 'vignette': passVignette(ctx, off, e as unknown as VignetteEffect, opts); break
+      case 'grain': passGrain(ctx, off, e as unknown as GrainEffect, opts); break
+    }
+  }
+}
+
+const CHAIN_ORDER = ['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain']
+
+/**
+ * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type, applied in
+ * the canonical chain order whatever the array says. `applyStackPost` (the document-level
+ * post stack) uses this, and that stack's stored array order is arbitrary — sorting here is
+ * what keeps every existing document rendering exactly as it did.
  */
 export function applyEffectChain(
   off: HTMLCanvasElement,
   effects: PostEffect[],
-  opts: { W: number; scale?: number },
+  opts: PassOpts,
 ): void {
-  const fx = effects.filter(e => e.visible)
-  if (!fx.length) return
-  const ctx = off.getContext('2d')
-  if (!ctx) return
-  const scale = opts.scale ?? 1
-  const find = <T extends PostEffect>(t: T['type']) => fx.find((e): e is T => e.type === t)
-
-  const adjust = find<AdjustEffect>('adjust')
-  if (adjust) {
-    const f = adjustFilterString(adjust)
-    if (f) {
-      const src = cloneCanvas(off)
-      ctx.save()
-      ctx.setTransform(1, 0, 0, 1, 0, 0)
-      ctx.clearRect(0, 0, off.width, off.height)
-      ctx.filter = f
-      ctx.drawImage(src, 0, 0)
-      ctx.restore()
-    }
-  }
-
-  const duotone = find<DuotoneEffect>('duotone')
-  if (duotone && duotone.mix > 0) {
-    const img = ctx.getImageData(0, 0, off.width, off.height)
-    duotoneInPlace(img.data, hexToRgb(duotone.shadows), hexToRgb(duotone.highlights), duotone.mix)
-    ctx.save()
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.putImageData(img, 0, 0)
-    ctx.restore()
-  }
-
-  const gradientMap = find<GradientMapEffect>('gradientMap')
-  if (gradientMap && gradientMap.mix > 0 && gradientMap.stops.length) {
-    const img = ctx.getImageData(0, 0, off.width, off.height)
-    gradientMapInPlace(img.data, gradientMap.stops, gradientMap.contrast, gradientMap.mix)
-    ctx.save()
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.putImageData(img, 0, 0)
-    ctx.restore()
-  }
-
-  const bloom = find<BloomEffect>('bloom')
-  if (bloom && bloom.intensity > 0 && bloom.radius > 0) {
-    const bp = cloneCanvas(off)
-    const bctx = bp.getContext('2d')
-    if (bctx) {
-      const img = bctx.getImageData(0, 0, bp.width, bp.height)
-      brightPassInPlace(img.data, bloom.threshold)
-      bctx.putImageData(img, 0, 0)
-      const blurred = mkCanvas(off.width, off.height)
-      const blctx = blurred.getContext('2d')
-      if (blctx) {
-        blctx.filter = `blur(${Math.max(0, bloom.radius * opts.W * scale)}px)`
-        blctx.drawImage(bp, 0, 0)
-        blctx.filter = 'none'
-        ctx.save()
-        ctx.setTransform(1, 0, 0, 1, 0, 0)
-        ctx.globalCompositeOperation = 'lighter'
-        const k = Math.min(2, Math.max(0, bloom.intensity))
-        ctx.globalAlpha = Math.min(1, k)
-        ctx.drawImage(blurred, 0, 0)
-        if (k > 1) { ctx.globalAlpha = k - 1; ctx.drawImage(blurred, 0, 0) }
-        ctx.restore()
-      }
-    }
-  }
-
-  const vignette = find<VignetteEffect>('vignette')
-  if (vignette && vignette.amount > 0) {
-    const w = off.width, h = off.height
-    const R = Math.hypot(w, h) / 2
-    const { inner, outer } = vignetteStops(vignette.size, vignette.softness)
-    ctx.save()
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    // source-atop = clip to existing alpha, so a per-layer vignette never
-    // halos beyond the silhouette (doc snapshots are opaque where content is).
-    ctx.globalCompositeOperation = 'source-atop'
-    const g = ctx.createRadialGradient(w / 2, h / 2, inner * R, w / 2, h / 2, outer * R)
-    g.addColorStop(0, 'rgba(0,0,0,0)')
-    g.addColorStop(1, `rgba(0,0,0,${Math.min(1, Math.max(0, vignette.amount))})`)
-    ctx.fillStyle = g
-    ctx.fillRect(0, 0, w, h)
-    ctx.restore()
-  }
-
-  const grain = find<GrainEffect>('grain')
-  if (grain && grain.amount > 0) {
-    const gc = mkCanvas(off.width, off.height)
-    const gctx = gc.getContext('2d')
-    if (gctx) {
-      const pat = gctx.createPattern(grainTile(), 'repeat')
-      if (pat) {
-        const s = Math.max(1, grain.size) * scale
-        gctx.save()
-        gctx.scale(s, s)
-        gctx.fillStyle = pat
-        gctx.fillRect(0, 0, gc.width / s, gc.height / s)
-        gctx.restore()
-        gctx.globalCompositeOperation = 'destination-in'
-        gctx.drawImage(off, 0, 0) // clip noise to the layer/content alpha
-        ctx.save()
-        ctx.setTransform(1, 0, 0, 1, 0, 0)
-        ctx.globalCompositeOperation = 'overlay'
-        ctx.globalAlpha = Math.min(1, Math.max(0, grain.amount))
-        ctx.drawImage(gc, 0, 0)
-        ctx.restore()
-      }
-    }
-  }
+  const first = new Map<string, PostEffect>()
+  for (const e of effects) if (!first.has(e.type)) first.set(e.type, e)
+  applyPasses(off, CHAIN_ORDER.map(t => first.get(t)).filter((e): e is PostEffect => !!e), opts)
 }
 
 /**
