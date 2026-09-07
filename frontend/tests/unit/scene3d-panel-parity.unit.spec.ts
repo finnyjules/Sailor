@@ -339,6 +339,13 @@ const ANCHOR_LABEL: Record<string, string> = {
   'ui.cloner.mode': 'Mode',
   'ui.cloner.axis': 'Around',
   'ui.cloner.step': 'Step',
+  // Vary. The three pickers borrow MODIFIER_SPECS' own captions (modLabel), so these
+  // read exactly as the spec declares them; the caption and the palette are literals.
+  'ui.cloner.vary': 'Vary',
+  'ui.cloner.varyMode': 'Vary',
+  'ui.cloner.varyColor': 'Vary colour',
+  'ui.cloner.varyPalette': 'Palette',
+  'ui.cloner.varyColorSpread': 'Spread',
   'ui.cloner.cost': 'Clone cost',
   // Decal
   'ui.decal.text': 'Label',
@@ -1100,13 +1107,12 @@ const MODIFIERS_ROWS = [
   'ui.mod.group.bend', `${MOD}bend`, 'ui.mod.bendAxis',
   'ui.mod.group.noise', `${MOD}noise`, `${MOD}noiseScale`, `${MOD}noiseSeed`,
   'ui.mod.group.jitter', `${MOD}jitter`, 'ui.mod.jitterMode', `${MOD}jitterSeed`,
-  // Cloner Vary's numeric dials fall through `panelCardOf`'s permissive tail (see its
-  // own doc comment): they are real MODIFIER_SPECS entries with no curated group yet,
-  // so they land here, in schema-declaration order, until a later task gives them a
-  // captioned Vary group of their own. `varyMode`/`varyColor`/`varyColorSpread` are
-  // `control: 'options'` and stay OUT of the schema entirely (same as taperAxis etc.)
-  // until that task adds their bespoke anchors.
-  `${MOD}varySeed`, `${MOD}varyFalloffCenter`, `${MOD}varyFalloffRadius`, `${MOD}varyColorStrength`,
+  // NO vary row belongs here. The four numeric ones (varySeed, the two falloff dials,
+  // varyColorStrength) briefly fell through `panelCardOf`'s permissive tail into this
+  // card, ungated, because they are real MODIFIER_SPECS entries; `panelCardOf` now routes
+  // every `vary*` key to Cloner beside the `clone*` keys it varies, and each carries a
+  // VARY_GATE predicate. The three `control: 'options'` ones were never schema rows at
+  // all — they are Cloner anchors now (same as taperAxis and friends).
 ] as const
 
 /** The Cloner card, per mode. CLONER_KEYS swapped the placement controls by mode and
@@ -1126,11 +1132,18 @@ const CLONER_TAIL = [
   `${MOD}cloneStepRotX`, `${MOD}cloneStepRotY`, `${MOD}cloneStepRotZ`, `${MOD}cloneStepScale`,
 ] as const
 
-/** …plus the cost readout, which the template gated on `cloneCost` — null at one copy.
- *  Grid mode's own defaults are 3 × 1 × 3, so picking it shows nine copies straight away
- *  and the readout with them. */
-const clonerRows = (mode: number) =>
-  [...CLONER_ROWS[mode]!, ...CLONER_TAIL, ...(mode === 2 ? ['ui.cloner.cost'] : [])]
+/** …plus the Vary block and the cost readout, both of which need MORE THAN ONE COPY —
+ *  the readout was gated on `cloneCost` (null at one copy) and Vary has nothing to vary
+ *  across a single object. Grid mode's own defaults are 3 × 1 × 3, so picking it shows
+ *  nine copies straight away and both of them with it.
+ *
+ *  Only three Vary rows show in the default state: the caption, the driver picker, and
+ *  the colour switch. The seed is random-mode only, centre/reach falloff-mode only, and
+ *  the palette / spread / strength appear only once the colour switch is on — those
+ *  states are covered by tests/unit/scene3d-vary-panel.unit.spec.ts. */
+const VARY_ROWS = ['ui.cloner.vary', 'ui.cloner.varyMode', 'ui.cloner.varyColor'] as const
+const clonerRows = (mode: number, manyCopies = mode === 2) =>
+  [...CLONER_ROWS[mode]!, ...CLONER_TAIL, ...(manyCopies ? [...VARY_ROWS, 'ui.cloner.cost'] : [])]
 
 describe('Scene3D panel parity — Geometry', () => {
   it('draws the Geometry card, then Modifiers and Cloner, for every primitive kind', () => {
@@ -1275,7 +1288,7 @@ describe('Scene3D panel parity — Geometry', () => {
     const many = primOf('box') as { modifiers?: Record<string, number> }
     many.modifiers = { cloneCount: 4 }
     expect(geometryCards(doc, many as unknown as SceneObject).find((s) => s.title === 'Cloner')!.keys)
-      .toEqual([...clonerRows(0), 'ui.cloner.cost'])
+      .toEqual(clonerRows(0, true))
   })
 
   it('Modifiers and Cloner start collapsed, exactly as the bare <details> did', () => {

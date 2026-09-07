@@ -4,9 +4,9 @@ import {
   MATERIAL_TYPES, MATERIAL_DEFAULTS, DEFAULT_MATERIAL, LIGHTING_PRESETS, ENVIRONMENT_KINDS, defaultDoc,
   PRIMITIVE_KINDS, LIGHT_DEFAULTS, DECAL_DEFAULTS, DECAL_BLENDS, lightIntensityMax, TEXTURE_TILING_RANGE,
   SCREEN_PATTERNS, SCREEN_GAPS, SCREEN_INKS, IMAGE_WRAPS, IMAGE_TILING_RANGE, IMAGE_FITS,
-  IMAGE_PROJECTIONS, IMAGE_AXES,
+  IMAGE_PROJECTIONS, IMAGE_AXES, NO_BASE_COLOR,
   type SceneDoc, type SceneObject, type MaterialType, MATERIAL_TYPE_LABELS_ORDERED } from './config'
-import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, type ParamSpec } from './primParams'
+import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, totalClones, type ParamSpec } from './primParams'
 
 /**
  * The single declarative description of Scene3D (3D Studio)'s parameters.
@@ -344,14 +344,51 @@ const CLONE_MODE_GATE: Record<string, number[]> = {
   cloneSpacingX: [2], cloneSpacingY: [2], cloneSpacingZ: [2],
 }
 
+/** Vary's own gating — the same job as CLONE_MODE_GATE above, but predicate-valued
+ *  because these rows depend on more than the clone mode.
+ *
+ *  Every vary row needs MORE THAN ONE COPY: there is nothing to vary across a single
+ *  object, and an always-present block would clutter the Cloner card for the common case.
+ *  `panelPresentation.ts` gates its three bespoke option ANCHORS (varyMode / varyColour /
+ *  Spread, which store an index and so get no schema row at all) with these very
+ *  functions rather than a second copy — hence the export below. */
+export const varyOn = (obj?: SceneObject): boolean =>
+  isPrimitiveObj(obj) && totalClones(obj.modifiers) > 1
+
+/** The driver, as a stored index: 0 sequence, 1 random, 2 falloff. */
+export const varyModeOf = (obj?: SceneObject): number =>
+  isPrimitiveObj(obj) ? Math.round(modifierValue(obj.modifiers, 'varyMode')) : 0
+
+/** Whether the colour HALF of Vary applies at all. Some materials have no base colour
+ *  for a per-copy tint to mix against, so offering the control would be offering a dead
+ *  one; the render side already refuses them. Read straight off config.ts's
+ *  `NO_BASE_COLOR` — the same set `materials.ts`'s `hasVertexTint` consults — so the two
+ *  cannot disagree about which types those are. */
+export const varyColorable = (obj?: SceneObject): boolean =>
+  varyOn(obj) && isPrimitiveObj(obj) && !NO_BASE_COLOR.has(obj.material.type)
+
+/** …and whether the user has actually turned it on. */
+export const varyColorOn = (obj?: SceneObject): boolean =>
+  varyColorable(obj) && isPrimitiveObj(obj) && Math.round(modifierValue(obj.modifiers, 'varyColor')) === 1
+
+const VARY_GATE: Record<string, (obj?: SceneObject) => boolean> = {
+  varySeed: (o) => varyOn(o) && varyModeOf(o) === 1,
+  varyFalloffCenter: (o) => varyOn(o) && varyModeOf(o) === 2,
+  varyFalloffRadius: (o) => varyOn(o) && varyModeOf(o) === 2,
+  varyColorStrength: (o) => varyColorOn(o),
+}
+
 function modifierControls(): SceneControl[] {
   const out: SceneControl[] = []
   for (const spec of MODIFIER_SPECS) {
     if (spec.control === 'options') continue
     const modes = CLONE_MODE_GATE[spec.key]
-    const when = modes
-      ? (_doc: SceneDoc, obj?: SceneObject) => isPrimitiveObj(obj) && modes.includes(cloneModeOf(obj))
-      : (_doc: SceneDoc, obj?: SceneObject) => isPrimitiveObj(obj)
+    const varyGate = VARY_GATE[spec.key]
+    const when = varyGate
+      ? (_doc: SceneDoc, obj?: SceneObject) => varyGate(obj)
+      : modes
+        ? (_doc: SceneDoc, obj?: SceneObject) => isPrimitiveObj(obj) && modes.includes(cloneModeOf(obj))
+        : (_doc: SceneDoc, obj?: SceneObject) => isPrimitiveObj(obj)
     out.push(slider(
       `${MODIFIER_PREFIX}${spec.key}`, spec.label, spec.min, spec.max, spec.step,
       'Geometry', spec.default, spec.hint, { when, ...INSPECTOR_ONLY },

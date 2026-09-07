@@ -61,6 +61,35 @@ export const MATERIAL_TYPE_LABELS: Record<MaterialType, string> = {
  *  contract requires (index i labels options[i]). Derived, so the two cannot drift. */
 export const MATERIAL_TYPE_LABELS_ORDERED: string[] = MATERIAL_TYPES.map((t) => MATERIAL_TYPE_LABELS[t])
 
+/** Material types with no base colour for a per-copy Vary tint to act on. The tint is a
+ *  mix from `diffuseColor.rgb` toward the copy colour, injected at `<color_fragment>` —
+ *  so a type that has no meaningful `diffuseColor` there, or that overwrites it
+ *  immediately afterwards, gets no per-copy colour at all:
+ *
+ *  - `image` samples a texture and `shaderFill` renders a field: there is no base
+ *    albedo for the mix to start from.
+ *  - `gradient` REPLACES `diffuseColor.rgb` with its ramp sample in the very block
+ *    that reissues `<color_fragment>` (see materials.ts's GRADIENT_SMOOTH_FRAG_BODY /
+ *    GRADIENT_FACET_FRAG_BODY). The ramp IS its colour; a mix one line earlier is
+ *    discarded outright.
+ *  - `opalescent` mixes `diffuseColor.rgb` toward its rainbow at `uStrength`, whose
+ *    DEFAULT (`opalStrength`) is 1 — full replacement. DELIBERATE LIMITATION: the
+ *    per-copy tint would be completely dead at the default and only partly alive
+ *    below it, and a control that works only while a different dial is off its
+ *    default is worse than an absent one. A later task could compose the two
+ *    explicitly (tint the substrate before the rainbow blend, or feed the copy
+ *    colour into the opal's own mix) and drop `opalescent` from this set.
+ *
+ *  It lives HERE, not beside the shader code that enforces it, because both sides of
+ *  the feature must read the same list: `materials.ts` (`hasVertexTint`) decides whether
+ *  the tint renders, and `controls.ts` (`varyColorable`) decides whether the Cloner's
+ *  Colour control is offered at all. config.ts is the only module both can import — it
+ *  is deliberately three-free (see the DEFAULT_POST note above), and materials.ts pulls
+ *  three in. A second hand-written copy in the inspector would drift and leave a dead
+ *  control behind the first time a material was added here. */
+export const NO_BASE_COLOR: ReadonlySet<MaterialType> =
+  new Set<MaterialType>(['image', 'shaderFill', 'gradient', 'opalescent'])
+
 /** One stop of the gradient ramp. `pos` is 0..1 along the ramp direction. */
 export interface GradientStop { pos: number; color: string }
 

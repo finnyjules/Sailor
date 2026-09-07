@@ -98,6 +98,8 @@ import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioRow from '~/components/vue-canvas/studio/StudioRow.vue'
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import StudioGradientRamp from '~/components/vue-canvas/studio/StudioGradientRamp.vue'
+// The ONE Vary swatch-list editor, shared with the Frame cloner panel.
+import VaryPalette from '~/components/vue-canvas/VaryPalette.vue'
 import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPanel.vue'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
 import Scene3DMotionTimeline from '~/components/vue-canvas/Scene3DMotionTimeline.vue'
@@ -1286,6 +1288,23 @@ function optionOf(key: string): string {
 function setOption(key: string, label: string): void {
   const i = modSpec(key).options!.indexOf(label)
   if (i >= 0) setMod(key, i)
+}
+
+/** Vary's palette is a `string[]` on the OBJECT (`PrimitiveObject.varyPalette`), not a
+ *  number in the modifier bag, so it never goes through `setMod`. `undefined` here means
+ *  "untouched" and VaryPalette falls back to the shared DEFAULT_VARY swatches — writing
+ *  those defaults in on first render would put a palette on every scene that never asked
+ *  for one. */
+const varyPaletteOf = computed<string[] | undefined>(() => {
+  const o = selected.value
+  return o && o.kind === 'primitive' ? o.varyPalette : undefined
+})
+function setVaryPalette(palette: string[]): void {
+  const o = selected.value
+  if (!o || o.kind !== 'primitive') return
+  // Direct assignment onto the reactive doc, the same commit path `setParam` / the text
+  // `content` writer use on this surface — there is no store action in between.
+  o.varyPalette = palette
 }
 // Cost readout. The philosophy here is disclose, don't clamp: detail and counts
 // are user-visible slider values, so silently reducing them would make the
@@ -4342,6 +4361,28 @@ async function onClose() {
         <!-- Step transforms accumulate across copies in every mode, so they sit under
              their own caption below the mode-specific placement rows. -->
         <template #control-ui.cloner.step><div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Step</div></template>
+
+        <!-- Vary — how a property changes from one copy to the next. The three pickers are
+             index-valued exactly like Mode and Around above, so they take the same
+             optionRowSpec / optionOf / setOption path and draw with the same 28px chrome.
+             Every row here is gated by its anchor in panelPresentation; the surface just
+             supplies the slot. -->
+        <template #control-ui.cloner.vary><div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Vary</div></template>
+        <template #control-ui.cloner.varyMode>
+          <StudioRow :spec="optionRowSpec('varyMode', 'ui.cloner.varyMode')" :model-value="optionOf('varyMode')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('varyMode', String(v))" />
+        </template>
+        <template #control-ui.cloner.varyColor>
+          <StudioRow :spec="optionRowSpec('varyColor', 'ui.cloner.varyColor')" :model-value="optionOf('varyColor')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('varyColor', String(v))" />
+        </template>
+        <template #control-ui.cloner.varyColorSpread>
+          <StudioRow :spec="optionRowSpec('varyColorSpread', 'ui.cloner.varyColorSpread')" :model-value="optionOf('varyColorSpread')" :bindable="false"
+            @update:model-value="(v: string | number | boolean) => setOption('varyColorSpread', String(v))" />
+        </template>
+        <template #control-ui.cloner.varyPalette>
+          <VaryPalette :model-value="varyPaletteOf" @update:model-value="setVaryPalette" />
+        </template>
 
         <!-- Cost disclosure: what this clone set actually costs, live while dragging.
              Amber past the point where rebuilds start to hitch. -->

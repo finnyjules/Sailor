@@ -13,6 +13,7 @@ import * as THREE from 'three'
 import { stripAlpha } from '~/lib/color/convert'
 import {
   MATERIAL_DEFAULTS, gradientAngles, gradientDirection, gradientStopsOf, rampStopsOf, opalStopsOf, screenOf,
+  NO_BASE_COLOR,
   type GradientStop, type ReliefSpec, type SceneMaterial,
 } from './config'
 import { toHeightPixels } from './relief'
@@ -1195,32 +1196,14 @@ function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture
   return tex
 }
 
-/** Material types with no base colour for a per-copy tint to act on. The tint is a
- *  mix from `diffuseColor.rgb` toward the copy colour, injected at
- *  `<color_fragment>` — so a type that has no meaningful `diffuseColor` there, or
- *  that overwrites it immediately afterwards, gets no per-copy colour at all:
- *
- *  - `image` samples a texture and `shaderFill` renders a field: there is no base
- *    albedo for the mix to start from.
- *  - `gradient` REPLACES `diffuseColor.rgb` with its ramp sample in the very block
- *    that reissues `<color_fragment>` (see GRADIENT_SMOOTH_FRAG_BODY /
- *    GRADIENT_FACET_FRAG_BODY). The ramp IS its colour; a mix one line earlier is
- *    discarded outright.
- *  - `opalescent` mixes `diffuseColor.rgb` toward its rainbow at `uStrength`, whose
- *    DEFAULT (`opalStrength`) is 1 — full replacement. DELIBERATE LIMITATION: the
- *    per-copy tint would be completely dead at the default and only partly alive
- *    below it, and a control that works only while a different dial is off its
- *    default is worse than an absent one. A later task could compose the two
- *    explicitly (tint the substrate before the rainbow blend, or feed the copy
- *    colour into the opal's own mix) and drop `opalescent` from this set.
- *
- *  This is the RENDER-side rule. The matching inspector gate — hiding the Cloner's
- *  colour control for these types in panelPresentation — does not exist yet; it
- *  lands in a later task. */
-const NO_BASE_COLOR: ReadonlySet<string> = new Set(['image', 'shaderFill', 'gradient', 'opalescent'])
-
 /** True when this geometry is a Cloner-merged clone set carrying the Vary per-copy
  *  colour attribute, AND this material type has a base colour to mix it against.
+ *
+ *  `NO_BASE_COLOR` — the set naming those types, with the reasoning for each entry —
+ *  lives in config.ts rather than here, so this RENDER-side rule and the inspector's own
+ *  gate (`varyColorable` in controls.ts, which hides the Cloner's Colour control for
+ *  exactly these types) read ONE list and cannot drift apart. controls.ts must stay
+ *  three-free, so it cannot import this module.
  *
  *  Gated on the `varyTint` STAMP `mergeClones` writes, never on the presence of a
  *  `color` attribute: `GLTFLoader` maps a glTF `COLOR_0` to an attribute of exactly

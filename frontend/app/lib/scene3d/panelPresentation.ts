@@ -9,7 +9,13 @@ import {
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, resolveParam, totalClones } from './primParams'
 import {
-  SCENE_CONTROLS, GEOMETRY_PARAM_PREFIX, MODIFIER_PREFIX, type SceneControl,
+  SCENE_CONTROLS, GEOMETRY_PARAM_PREFIX, MODIFIER_PREFIX,
+  // The Vary gates come from controls.ts rather than being restated here: the schema rows
+  // (`varySeed`, the two falloff dials, `varyColorStrength`) and the bespoke option
+  // ANCHORS below must appear and disappear together, and two copies of "more than one
+  // copy, and this material has a base colour" would eventually disagree.
+  varyOn, varyColorable, varyColorOn,
+  type SceneControl,
 } from './controls'
 
 /**
@@ -413,6 +419,8 @@ const CLONER_STEP_KEYS = ['cloneStepRotX', 'cloneStepRotY', 'cloneStepRotZ', 'cl
 const OPTION_ANCHOR: Record<string, string> = {
   taperAxis: 'ui.mod.taperAxis', twistAxis: 'ui.mod.twistAxis', bendAxis: 'ui.mod.bendAxis',
   jitterMode: 'ui.mod.jitterMode', cloneMode: 'ui.cloner.mode', cloneAxis: 'ui.cloner.axis',
+  varyMode: 'ui.cloner.varyMode', varyColor: 'ui.cloner.varyColor',
+  varyColorSpread: 'ui.cloner.varyColorSpread',
 }
 
 /** A modifier key's row: the index-valued ones are anchors (a bespoke segmented control),
@@ -478,6 +486,16 @@ const SCENE_PANEL_ANCHORS: readonly ScenePanelAnchor[] = [
   { key: 'ui.cloner.mode', label: modLabel('cloneMode'), visible: (_d, o) => isPrim(o) },
   { key: 'ui.cloner.axis', label: modLabel('cloneAxis'), visible: (_d, o) => isPrim(o) && cloneModeOf(o) === 1 },
   { key: 'ui.cloner.step', label: 'Step', visible: (_d, o) => isPrim(o) },
+  // Vary — per-copy variation across the cloner's copies. The whole block needs more than
+  // one copy; the colour half additionally needs a material with a base colour for the
+  // per-copy tint to mix against. Note these predicates are the GATE: the card's key list
+  // in `geometryCardOrder` is order only and would happily draw an un-listed row at the
+  // end of the card (see `panelCardOf`'s doc).
+  { key: 'ui.cloner.vary', label: 'Vary', visible: (_d, o) => varyOn(o ?? undefined) },
+  { key: 'ui.cloner.varyMode', label: modLabel('varyMode'), visible: (_d, o) => varyOn(o ?? undefined) },
+  { key: 'ui.cloner.varyColor', label: modLabel('varyColor'), visible: (_d, o) => varyColorable(o ?? undefined) },
+  { key: 'ui.cloner.varyPalette', label: 'Palette', visible: (_d, o) => varyColorOn(o ?? undefined) },
+  { key: 'ui.cloner.varyColorSpread', label: modLabel('varyColorSpread'), visible: (_d, o) => varyColorOn(o ?? undefined) },
   // …and the cost readout only once there is more than one copy — `cloneCost` was null
   // below that and the whole block was `v-if`'d away. An always-present anchor would leave
   // an empty row (and its 12px of `space-y`) at the foot of every Cloner card.
@@ -628,7 +646,15 @@ function geometryCardOrder(card: string, obj: SceneObject | null | undefined): r
   }
   return [
     ...clonerKeys(cloneModeOf(obj)).map(modRowKey),
-    'ui.cloner.step', ...CLONER_STEP_KEYS.map((k) => `${MODIFIER_PREFIX}${k}`), 'ui.cloner.cost',
+    'ui.cloner.step', ...CLONER_STEP_KEYS.map((k) => `${MODIFIER_PREFIX}${k}`),
+    // Vary sits below the Step block and above the cost readout. ORDER ONLY — every row
+    // here is gated by its anchor's `visible` or its schema `when`, not by this list.
+    'ui.cloner.vary', 'ui.cloner.varyMode',
+    `${MODIFIER_PREFIX}varySeed`,
+    `${MODIFIER_PREFIX}varyFalloffCenter`, `${MODIFIER_PREFIX}varyFalloffRadius`,
+    'ui.cloner.varyColor', 'ui.cloner.varyPalette', 'ui.cloner.varyColorSpread',
+    `${MODIFIER_PREFIX}varyColorStrength`,
+    'ui.cloner.cost',
   ]
 }
 
@@ -683,7 +709,11 @@ function panelCardOf(key: string, matType: MaterialType | null, group?: string):
   if (key.startsWith('ui.mod.')) return 'Geometry/Modifiers'
   if (key.startsWith('ui.cloner.')) return 'Geometry/Cloner'
   if (key.startsWith(MODIFIER_PREFIX)) {
-    return key.slice(MODIFIER_PREFIX.length).startsWith('clone') ? 'Geometry/Cloner' : 'Geometry/Modifiers'
+    // `vary*` joins `clone*` on the Cloner card: it varies the CLONER's copies and means
+    // nothing without them. Without this line it would fall through to Modifiers, which is
+    // where every non-clone modifier key goes.
+    const sub = key.slice(MODIFIER_PREFIX.length)
+    return sub.startsWith('clone') || sub.startsWith('vary') ? 'Geometry/Cloner' : 'Geometry/Modifiers'
   }
   for (const [card, keys] of Object.entries(KIND_CARDS)) if (keys.includes(key)) return card
   for (const [card, keys] of Object.entries(DOC_CARDS)) if (keys.includes(key)) return card
