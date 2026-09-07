@@ -459,27 +459,99 @@ test.describe('3D Studio treatments', () => {
       .toMatchObject({ kind: 'blur', progressive: true, rampSpace: 'object', rampAngle: 90 })
   })
 
-  test('a progressive glow builds toward the ramp end, not evenly', async ({ page }) => {
-    const a = await rampAttenuation(page, {
-      id: 't-glow', kind: 'glow', enabled: true, invert: false,
-      strength: 3, threshold: 0.2, tint: '#ffffff',
-      progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
-    })
-    console.log(`[ramp glow] control=${JSON.stringify(a.control)} test=${JSON.stringify(a.test)} `
-      + `atten top=${a.top.toFixed(3)} bottom=${a.bottom.toFixed(3)}`)
-    // angle 90 ramps top (sharp, r=0 → no glow) to bottom (r=1 → full glow); glow ADDS light,
-    // so the bottom band departs from its control far more than the top does.
-    expect(Math.abs(a.bottom - 1)).toBeGreaterThan(Math.abs(a.top - 1) * 2)
+  /**
+   * Glow and pixelate need DIFFERENT measurements from blur and fade, and the reason is worth
+   * keeping: gradient energy measures sharpness, which is what blur and fade change. Glow ADDS
+   * LIGHT and pixelate FLATTENS BLOCKS while adding hard edges — neither moves gradient energy
+   * in a way that discriminates. Measured on this exact scene, a fully-ramped pixelate moved
+   * gradient energy only 11.0 → 12.9 (ambiguous) while blockiness moved 0.889 → 0.986 (decisive).
+   */
+  async function bandMetrics(page: Page): Promise<{
+    top: { mean: number; blocky: number }; bottom: { mean: number; blocky: number }
+  }> {
+    return page.evaluate(async (url) => {
+      const img = new Image(); img.src = url; await img.decode()
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+      const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height)
+      const lum = (i: number) => 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
+      const band = (fy0: number, fy1: number) => {
+        let m = 0, same = 0, n = 0
+        for (let y = Math.floor(height * fy0); y < height * fy1; y++)
+          for (let x = Math.floor(width * 0.25); x < width * 0.45 - 1; x++) {
+            const i = (y * width + x) * 4
+            m += lum(i)
+            // "Blocky" = this pixel is identical to its right-hand neighbour. Inside a pixelate
+            // block every pair matches; on a smoothly shaded sphere almost none do.
+            if (Math.abs(lum(i) - lum(i + 4)) < 0.5) same++
+            n++
+          }
+        return { mean: m / n, blocky: same / n }
+      }
+      return { top: band(0.34, 0.44), bottom: band(0.56, 0.66) }
+    }, await snapshot(page))
+  }
+
+  /**
+   * Glow only appears where the object is already BRIGHT — that is what a threshold means — and
+   * this sphere is lit from above, so its bottom band is too dark to glow at any ramp value.
+   * Measuring "more glow at the ramp's far end" therefore cannot work at angle 90: the far end
+   * is the dark half. The discriminating test is the SAME band under two opposite ramps, so the
+   * only thing that differs is whether the ramp's full end lands on the lit part.
+   *
+   * Measured: top-band mean luminance is 44.17 with the ramp off (no glow at all), 47.58 at
+   * angle 90 (the sharp end sits on the highlight), and 62.64 at angle 270 (the full end does)
+   * — against 63.52 for an un-ramped glow. So 270 recovers essentially all of the glow and 90
+   * almost none.
+   */
+  test('a progressive glow follows the ramp, not the object', async ({ page }) => {
+    const errs = watchConsole(page)
+    const glow = { id: 't-glow', kind: 'glow', enabled: true, invert: false, strength: 3, threshold: 0.2, tint: '#ffffff' }
+    const at = async (extra: Record<string, unknown>) => {
+      await openLab(page, twoSpheres([{ ...glow, ...extra }]))
+      const s = await stats(page)
+      expect(s.frames, `stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+      expect(s.groups).toBe(1)
+      return (await bandMetrics(page)).top.mean
+    }
+    const off = await at({ progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 1, rampEnd: 1 })
+    const a90 = await at({ progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1 })
+    const a270 = await at({ progressive: true, rampSpace: 'object', rampAngle: 270, rampStart: 0, rampEnd: 1 })
+    const gain90 = a90 - off, gain270 = a270 - off
+    console.log(`[ramp glow] off=${off.toFixed(2)} a90=${a90.toFixed(2)} a270=${a270.toFixed(2)} `
+      + `gain90=${gain90.toFixed(2)} gain270=${gain270.toFixed(2)}`)
+    // There IS glow to measure when the ramp's full end lands on the lit part…
+    expect(gain270).toBeGreaterThan(5)
+    // …and turning the ramp around all but removes it from the same band.
+    expect(gain270).toBeGreaterThan(gain90 * 3)
   })
 
-  test('a progressive pixelate blocks the ramp end and leaves the other sharp', async ({ page }) => {
-    const a = await rampAttenuation(page, {
-      id: 't-pix', kind: 'pixelate', enabled: true, invert: false, cellSize: 48,
-      progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
-    })
-    console.log(`[ramp pixelate] control=${JSON.stringify(a.control)} test=${JSON.stringify(a.test)} `
-      + `atten top=${a.top.toFixed(3)} bottom=${a.bottom.toFixed(3)}`)
-    expect(a.bottom).toBeLessThan(a.top * 0.65)
+  /**
+   * Pixelate is measured by BLOCKINESS, not sharpness — see bandMetrics. At angle 90 the ramp's
+   * full end is the bottom band, which should end up almost entirely flat runs, while the top
+   * band stays close to the un-ramped control.
+   */
+  test('a progressive pixelate blocks the ramp end and leaves the other alone', async ({ page }) => {
+    const errs = watchConsole(page)
+    const pix = { id: 't-pix', kind: 'pixelate', enabled: true, invert: false, cellSize: 48 }
+    const at = async (extra: Record<string, unknown>) => {
+      await openLab(page, twoSpheres([{ ...pix, ...extra }]))
+      const s = await stats(page)
+      expect(s.frames, `stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+      return bandMetrics(page)
+    }
+    const off = await at({ progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 1, rampEnd: 1 })
+    const on = await at({ progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1 })
+    const dBottom = on.bottom.blocky - off.bottom.blocky
+    const dTop = on.top.blocky - off.top.blocky
+    console.log(`[ramp pixelate] off top=${off.top.blocky.toFixed(3)} bottom=${off.bottom.blocky.toFixed(3)} | `
+      + `on top=${on.top.blocky.toFixed(3)} bottom=${on.bottom.blocky.toFixed(3)} | `
+      + `dTop=${dTop.toFixed(3)} dBottom=${dBottom.toFixed(3)}`)
+    // The far end really does block up…
+    expect(on.bottom.blocky).toBeGreaterThan(0.95)
+    expect(dBottom).toBeGreaterThan(0.05)
+    // …and it blocks up far more than the sharp end does.
+    expect(dBottom).toBeGreaterThan(dTop * 2)
   })
 
   test('a progressive fade sweeps from solid to faded', async ({ page }) => {
