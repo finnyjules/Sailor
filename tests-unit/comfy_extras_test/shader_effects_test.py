@@ -433,8 +433,10 @@ def test_holographic_surface_renders_varied_foil_in_every_mode():
         uniforms = to_uniforms(eff, resolve_params(eff, json.dumps({"u_surface": mode})))
         jobs = [{"image": flat, "uniforms": {**uniforms, "u_time": 0.7, "u_seed": 42.0, "u_hasInput": 1.0}}]
         out = render_effect(eff.source, 64, 64, jobs, passes=eff.passes)[0][..., :3]
-        # 1. Not a constant frame.
-        assert out.std() > 0.02, f"{name}: frame is essentially flat (std {out.std():.4f})"
+        # 1. Not a constant frame. Std across PIXELS, per channel — a whole-array std would
+        #    count R/G/B differences within one flat tint colour as "variation".
+        spatial = out.reshape(-1, 3).std(axis=0).max()
+        assert spatial > 0.02, f"{name}: frame is essentially flat (spatial std {spatial:.4f})"
         # 2. Actually iridescent — the channels must diverge somewhere, or it is a
         #    greyscale bump map wearing a rainbow's name.
         spread = np.abs(out[..., 0] - out[..., 2])
