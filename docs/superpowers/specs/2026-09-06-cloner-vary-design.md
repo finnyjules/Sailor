@@ -83,9 +83,11 @@ numbers are applied.
   mode the index is `i % palette.length` (the Shape Studio per-clone look). In random and
   falloff modes it is `min(palette.length - 1, floor(w * palette.length))`, so the driver
   still chooses which swatch each copy gets.
-- **Colour, `spread: 'blend'`** — interpolate through the palette by weight in OKLCH in
-  every mode, reusing the existing hue-walk ramp helpers so it matches the rest of the
-  app's colour interpolation.
+- **Colour, `spread: 'blend'`** — interpolate through the palette by weight in every mode.
+  **Linear sRGB, not OKLCH.** The same interpolation has to run identically in Python (PIL)
+  for the wired compositor, and a perceptual space would need the whole conversion chain
+  mirrored there for a difference only visible between distant hues. The palette editor
+  lets the user place intermediate swatches, which is the better lever anyway.
 - **Strength** — blends the resolved palette colour toward the copy's own base colour;
   `1` is the full palette colour, `0` is no change.
 - **Scale / rotation / opacity** — the stored step value is the far end of the range;
