@@ -59,12 +59,14 @@
 import { mulberry32, hashSeed } from '~/lib/spacetype/rng'
 
 /** Which corner the polar origin hangs off. 'auto' lets the seed pick one of four. */
-export const BLUEPRINT_CORNERS = ['auto', 'bl', 'br', 'tr', 'tl'] as const
+export const BLUEPRINT_CORNERS = ['auto', 'bl', 'br', 'tr', 'tl', 'center'] as const
 export type BlueprintCorner = typeof BLUEPRINT_CORNERS[number]
 /** The four real corners, in anticlockwise order from the bottom-left — the order that
  *  makes the fan base a clean multiple of 90° (blueprintFanBase). */
 const CORNER_ORDER = ['bl', 'br', 'tr', 'tl'] as const
 type RealCorner = typeof CORNER_ORDER[number]
+/** A resolved origin: one of the four corners, or the box centre (concentric mode). */
+type OriginKind = RealCorner | 'center'
 
 /** The dials. Names are the inspector's own labels. */
 export interface BlueprintParams {
@@ -72,7 +74,7 @@ export interface BlueprintParams {
   major: number          // every Nth minor line is a major line
   minorAlpha: number     // 0..1 opacity of the minor grid
   majorWidth: number     // major line width as a multiple of the minor width
-  corner: BlueprintCorner // which corner the origin hangs off ('auto' = seed picks)
+  corner: BlueprintCorner // origin: a corner ('auto' = seed picks) or 'center' — from the centre, Spread 360 gives full concentric circles
   originX: number        // -0.5..0.5 hand nudge of the origin, box fractions
   originY: number        // -0.5..0.5
   angleStart: number     // 0..90 first spoke's angle within the fan (degrees)
@@ -173,15 +175,16 @@ export function normalizeBlueprint(partial: unknown, base: BlueprintParams = def
 // ── The origin and the fan ───────────────────────────────────────────────────
 
 /** Each corner's fractional position and its OUTWARD direction (away from centre). */
-const CORNER_POS: Record<RealCorner, { x: number; y: number }> = {
-  bl: { x: 0, y: 1 }, br: { x: 1, y: 1 }, tr: { x: 1, y: 0 }, tl: { x: 0, y: 0 },
+const CORNER_POS: Record<OriginKind, { x: number; y: number }> = {
+  bl: { x: 0, y: 1 }, br: { x: 1, y: 1 }, tr: { x: 1, y: 0 }, tl: { x: 0, y: 0 }, center: { x: 0.5, y: 0.5 },
 }
-const CORNER_OUT: Record<RealCorner, { x: number; y: number }> = {
-  bl: { x: -1, y: 1 }, br: { x: 1, y: 1 }, tr: { x: 1, y: -1 }, tl: { x: -1, y: -1 },
+const CORNER_OUT: Record<OriginKind, { x: number; y: number }> = {
+  bl: { x: -1, y: 1 }, br: { x: 1, y: 1 }, tr: { x: 1, y: -1 }, tl: { x: -1, y: -1 }, center: { x: 0, y: 0 },
 }
 
 /** The corner the origin hangs off — the dial, or a seed pick for 'auto'. */
-function resolveCorner(seed: number, params: BlueprintParams): RealCorner {
+function resolveCorner(seed: number, params: BlueprintParams): OriginKind {
+  if (params.corner === 'center') return 'center'
   if (params.corner !== 'auto') return params.corner
   const r = mulberry32(hashSeed(`${Math.trunc(seed)}:blueprint-corner`))
   return CORNER_ORDER[Math.min(CORNER_ORDER.length - 1, Math.floor(r() * CORNER_ORDER.length))]!
@@ -203,8 +206,8 @@ export function blueprintOrigin(seed: number, params: BlueprintParams): { x: num
 
 /** Rule 3b — the corner's base SCREEN angle (degrees), so the fan opens into the box.
  *  Anticlockwise, 90° per corner from the bottom-left. */
-export function blueprintFanBase(corner: RealCorner): number {
-  return CORNER_ORDER.indexOf(corner) * 90
+export function blueprintFanBase(corner: OriginKind): number {
+  return corner === 'center' ? 0 : CORNER_ORDER.indexOf(corner) * 90
 }
 
 /** One radial spoke: its local angle (what the label reads), its screen angle, and a

@@ -57,7 +57,7 @@ describe('params and palettes', () => {
     expect(normalizeBlueprint(null)).toEqual(defaultBlueprint())
     // A valid corner survives.
     expect(normalizeBlueprint({ corner: 'tr' }).corner).toBe('tr')
-    expect((BLUEPRINT_CORNERS as readonly string[])).toEqual(['auto', 'bl', 'br', 'tr', 'tl'])
+    expect((BLUEPRINT_CORNERS as readonly string[])).toEqual(['auto', 'bl', 'br', 'tr', 'tl', 'center'])
   })
 
   it('offers named palettes of paper + ink (+ inkDim), and every one round-trips', () => {
@@ -350,5 +350,29 @@ describe('blueprint plugs into the mosaic op and the vocab gate', () => {
     expect(desc.blueprint.palettePreset).toBe('Blueprint')
     expect(desc.blueprint).not.toHaveProperty('paper')
     expect(desc.blueprint.arcs).toBe(defaultBlueprint().arcs)
+  })
+})
+
+describe('centre origin — concentric circles from the middle', () => {
+  const P = (over = {}) => ({ ...defaultBlueprint(), ...over })
+  it('sits at the box centre plus the hand nudge, with NO seeded outward offset', () => {
+    // out=(0,0) at centre, so the seeded offset multiplies to zero: the origin is exactly
+    // the centre, and identical across seeds (a diagram, not a re-rollable scatter).
+    expect(blueprintOrigin(3, P({ corner: 'center' }))).toEqual({ x: 0.5, y: 0.5 })
+    expect(blueprintOrigin(999, P({ corner: 'center' }))).toEqual({ x: 0.5, y: 0.5 })
+    expect(blueprintOrigin(3, P({ corner: 'center', originX: 0.2, originY: -0.1 }))).toEqual({ x: 0.7, y: 0.4 })
+  })
+  it('the fan base is 0 (first spoke east), so angleStart is the only rotation', () => {
+    expect(blueprintFanBase('center')).toBe(0)
+    const s = blueprintSpokes(3, P({ corner: 'center', angleStart: 0 }))[0]!
+    expect(s.dir.x).toBeCloseTo(1, 6); expect(s.dir.y).toBeCloseTo(0, 6)
+  })
+  it('Spread 360 rings the whole circle: 360/step spokes evenly around the centre', () => {
+    const spokes = blueprintSpokes(3, P({ corner: 'center', angleSpread: 360, angleStep: 15 }))
+    expect(spokes).toHaveLength(24)
+    // the fan closes without a duplicate at 360, and the concentric arcs are still even.
+    const radii = blueprintArcs(P({ corner: 'center', arcs: 4, arcGap: 0.2 }))
+    expect(radii).toHaveLength(4)
+    radii.forEach((r, i) => expect(r).toBeCloseTo(0.2 * (i + 1), 6))
   })
 })
