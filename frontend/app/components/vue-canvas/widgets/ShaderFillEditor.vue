@@ -21,7 +21,7 @@
  * Type's fill list, Shape Studio's surface fill, and the Compositor's
  * `FillControl` itself (mounted internally there when `fill.type === 'shader'`).
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ChevronRight, RefreshCw, Sparkles } from 'lucide-vue-next'
 import CatalogModal from '~/components/CatalogModal.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
@@ -33,6 +33,7 @@ import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import { type ShaderSpec, DEFAULT_SHADER_SPEC } from '~/lib/spacetype/fillTile'
 import { type Paint, isFill } from '~/composables/useCompositorLayers'
 import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
+import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
 import type { EffectDef, GradientStop, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/types'
 import { cleanStops } from '~/lib/shaderfx/params'
 import { derivedShaderFillControls } from '~/lib/shaderfill/controls'
@@ -63,7 +64,16 @@ const props = withDefaults(defineProps<{
   /** Hide the nested Input fill: a generative effect (Oddgrid / Static) mostly ignores
    *  its input, and a Mosaic has no reason to expose it. Default shown. */
   showInput?: boolean
-}>(), { showAnchor: true, lockEffect: false, showSpeed: true, showSeed: true, showInput: true })
+  /** Other layers in the host's stack, already excluding this one — feeds the "A specific
+   *  layer" Reads picker below (label + the key to write into `readsLayerKey`, e.g. `'l:<id>'`
+   *  — the same cross-source StackKey format CompositorModal's mask-source picker uses, since
+   *  `resolveGlassSource` (useCompositorLayers.ts) resolves it through the identical `byKey`
+   *  map as a mask ref). No current caller passes this: FillControl.vue would need a
+   *  pass-through prop and CompositorModal.vue a `maskCandidates`-style list to supply it, and
+   *  neither is in scope here. Left `[]` until wired — the picker below is fully functional but
+   *  renders empty (with its own hint) rather than fabricating a list. */
+  otherLayers?: { key: string; label: string }[]
+}>(), { showAnchor: true, lockEffect: false, showSpeed: true, showSeed: true, showInput: true, otherLayers: () => [] })
 const emit = defineEmits<{ 'update:modelValue': [ShaderSpec] }>()
 
 /** Spread, never a listed-field rebuild — a `ShaderSpec` (or `Fill`) rebuilt by
@@ -257,10 +267,99 @@ function rerollSeed() {
 function onInputChange(p: Paint) {
   patch({ input: isFill(p) && p.type === 'shader' ? { ...p, type: 'gradient' } : p })
 }
+
+// ── Reads (glass lens): self-fill vs. reading the backdrop / one bound layer ──
+// Eligibility mirrors `effectDef`'s own load state: before the catalog resolves
+// (or for an unknown id) `effectDef` is null and we genuinely don't know yet
+// whether this effect samples its input at all — treated as eligible rather than
+// flashing the backdrop options disabled for an effect that turns out to read
+// input once the catalog lands. `catalog.value` is read as a dependency (not
+// just `modelValue.effectId`) purely so this recomputes once `loadCatalog`'s
+// fetch resolves, exactly like `effectDef` above.
+const eligible = computed<boolean>(() => {
+  void catalog.value
+  return !effectDef.value || effectReadsInput(props.modelValue.effectId)
+})
+
+type ReadsMode = 'self' | 'behind' | 'specific'
+// Set the instant the person clicks "A specific layer", cleared by any other
+// click — kept separate from the derived value below so the picker stays open
+// (mode 'specific') the moment it's revealed, before a layer has been chosen,
+// rather than `readsLayerKey` being unset deriving straight back to "Layers
+// behind" and closing the picker that was just opened.
+const pendingSpecific = ref(false)
+
+const readsMode = computed<ReadsMode>(() => {
+  if (!props.modelValue.readsBackdrop) return 'self'
+  if (props.modelValue.readsLayerKey) return 'specific'
+  return pendingSpecific.value ? 'specific' : 'behind'
+})
+
+function setReadsMode(mode: ReadsMode) {
+  pendingSpecific.value = mode === 'specific'
+  if (mode === 'self') { patch({ readsBackdrop: false, readsLayerKey: undefined }); return }
+  // 'behind' and the initial click into 'specific' both start from the same
+  // patch (no layer chosen yet) — `pendingSpecific` is what keeps the picker
+  // showing for the latter until `pickReadsLayer` below sets a real key.
+  patch({ readsBackdrop: true, readsLayerKey: undefined })
+}
+
+function pickReadsLayer(key: string) {
+  patch({ readsLayerKey: key || undefined })
+}
+
+// If the effect changes (via `pickEffect` above) — or the catalog resolves —
+// to/as something that can't read input at all, a lingering backdrop mode would
+// be a dead setting the paint path silently ignores (`isGlassLayer` checks the
+// effect too). Force it back to the plain self-fill default instead.
+watch(eligible, (ok) => {
+  if (!ok && props.modelValue.readsBackdrop) {
+    pendingSpecific.value = false
+    patch({ readsBackdrop: false, readsLayerKey: undefined })
+  }
+})
 </script>
 
 <template>
   <div class="space-y-2.5 rounded-lg border border-white/10 bg-white/[0.02] p-2.5">
+    <!-- Reads: self-fill (today's behaviour) vs. a glass lens onto the backdrop or one
+         bound layer. Gated by `effectReadsInput` — a purely generative effect (Oddgrid,
+         Static, …) has nothing behind its own fill to read. -->
+    <div>
+      <label class="mb-1 block text-[9px] uppercase tracking-[0.1em] text-white/35">Reads</label>
+      <div class="flex gap-1.5">
+        <StudioButton
+          class="flex-1 text-center"
+          :variant="readsMode === 'self' ? 'primary' : 'secondary'"
+          @click="setReadsMode('self')"
+        >Its own fill</StudioButton>
+        <StudioButton
+          class="flex-1 text-center"
+          :variant="readsMode === 'behind' ? 'primary' : 'secondary'"
+          :disabled="!eligible"
+          @click="setReadsMode('behind')"
+        >Layers behind</StudioButton>
+        <StudioButton
+          class="flex-1 text-center"
+          :variant="readsMode === 'specific' ? 'primary' : 'secondary'"
+          :disabled="!eligible"
+          @click="setReadsMode('specific')"
+        >A specific layer</StudioButton>
+      </div>
+      <p v-if="!eligible" class="mt-1 text-[10px] leading-snug text-white/40">This shader has nothing to read behind it.</p>
+      <div v-if="readsMode === 'specific'" class="mt-1.5">
+        <select
+          class="w-full cursor-pointer rounded bg-white/10 px-2 py-1.5 text-xs text-white/90 outline-none"
+          :value="modelValue.readsLayerKey ?? ''"
+          @change="pickReadsLayer(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="" disabled>Pick a layer…</option>
+          <option v-for="o in otherLayers" :key="o.key" :value="o.key" class="bg-neutral-900">{{ o.label }}</option>
+        </select>
+        <p v-if="!otherLayers.length" class="mt-1 text-[10px] leading-snug text-white/40">No other layers in this frame yet.</p>
+      </div>
+    </div>
+
     <!-- Effect picker (hidden when the host fixes the effect — see `lockEffect`) -->
     <div v-if="!lockEffect">
       <div class="mb-1 flex items-center justify-between gap-2">
@@ -346,8 +445,10 @@ function onInputChange(p: Paint) {
       </div>
     </div>
 
-    <!-- Nested input fill: the recursive half, depth-limited to 1 via `nested`. -->
-    <div v-if="showInput" class="border-t border-white/10 pt-2.5">
+    <!-- Nested input fill: the recursive half, depth-limited to 1 via `nested`. Hidden
+         whenever Reads is in a backdrop mode — the effect samples the backdrop/bound layer
+         instead, so this control would otherwise sit there configuring a paint nobody sees. -->
+    <div v-if="showInput && !modelValue.readsBackdrop" class="border-t border-white/10 pt-2.5">
       <label class="mb-1.5 block text-[9px] uppercase tracking-[0.1em] text-white/35">Input fill</label>
       <FillControl nested :model-value="modelValue.input" @update:model-value="onInputChange" />
     </div>
