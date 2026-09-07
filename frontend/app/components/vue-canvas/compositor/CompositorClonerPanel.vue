@@ -232,10 +232,10 @@ const total = computed(() => {
         </div>
 
         <label v-if="c.varyMode === 'random'" data-test="vary-seed" class="block mb-3">
-          <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 block mb-1">Seed</span>
+          <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 block mb-1">Vary seed</span>
           <input v-scrubnum type="number" min="0" max="99" step="1" :value="c.varySeed"
             class="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-            @input="up({ varySeed: num($event) })" />
+            @input="up({ varySeed: Math.max(0, Math.min(99, Math.round(num($event)))) })" />
         </label>
 
         <div v-if="c.varyMode === 'falloff'" class="grid grid-cols-2 gap-3 mb-3">
@@ -243,18 +243,18 @@ const total = computed(() => {
             <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 block mb-1">Centre</span>
             <input v-scrubnum type="number" min="0" max="1" step="0.01" :value="c.varyFalloffCenter"
               class="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-              @input="up({ varyFalloffCenter: num($event) })" />
+              @input="up({ varyFalloffCenter: Math.max(0, Math.min(1, num($event))) })" />
           </label>
           <label data-test="vary-reach" class="block">
             <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 block mb-1">Reach</span>
             <input v-scrubnum type="number" min="0.01" max="1" step="0.01" :value="c.varyFalloffRadius"
               class="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-              @input="up({ varyFalloffRadius: num($event) })" />
+              @input="up({ varyFalloffRadius: Math.max(0.01, Math.min(1, num($event))) })" />
           </label>
         </div>
 
         <div class="flex items-center justify-between mb-2">
-          <span class="text-[11px] text-white/70">Colour</span>
+          <span class="text-[11px] text-white/70">Vary colour</span>
           <button
             data-test="vary-color"
             class="relative w-8 h-[18px] rounded-full transition-colors cursor-pointer"
@@ -285,7 +285,7 @@ const total = computed(() => {
             <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 block mb-1">Colour strength</span>
             <input v-scrubnum type="number" min="0" max="1" step="0.01" :value="c.varyColorStrength"
               class="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-              @input="up({ varyColorStrength: num($event) })" />
+              @input="up({ varyColorStrength: Math.max(0, Math.min(1, num($event))) })" />
           </label>
         </template>
       </div>
