@@ -101,6 +101,12 @@ import type { GradientStop } from '~/lib/color/harmony'
 import { layerPaletteAssignments } from '~/lib/compositor/distribute'
 import PostEffectsControls from '~/components/vue-canvas/PostEffectsControls.vue'
 import { isChainEffect, isGpuEffect } from '~/lib/compositor/postEffects'
+import CompositorEffectRow from '~/components/vue-canvas/compositor/CompositorEffectRow.vue'
+import {
+  EFFECT_ORDER, EFFECT_LABELS, isPinnedKind, effectStackOf, writeStackToLayer,
+  addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder,
+  type EffectInstance, type EffectKind,
+} from '~/lib/compositor/effectStack'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 /** Everything the post-effects panel owns: the 2D chain plus the GPU stage. */
 const isPanelEffect = (e: { type: string }) => isChainEffect(e) || isGpuEffect(e)
@@ -1773,6 +1779,95 @@ function groupSortIndex(gid: string): number {
 }
 
 const expandedGroups = ref<Set<string>>(new Set())
+
+// ── Per-layer effect stack: tree state and mutations ──────────────────────────
+// Which layers show their effect rows. Local UI state on purpose — persisting it would dirty
+// the document on a disclosure click, exactly as expandedGroups already avoids.
+const expandedLayers = ref<Set<string>>(new Set())
+const layerStack = (layer: any): EffectInstance[] => effectStackOf(layer)
+const setLayerStack = (layerId: string, stack: EffectInstance[]) =>
+  setLocal(layerId, writeStackToLayer(stack) as any)
+const layerById = (layerId: string): any => localLayers.value.find((l: any) => l.id === layerId)
+
+// The selection a Task 6 inspector reads. Kept here so the tree is usable on its own.
+const selectedEffect = ref<{ layerId: string; effectId: string } | null>(null)
+const selectEffect = (layerId: string, effectId: string) => { selectedEffect.value = { layerId, effectId } }
+
+function addLayerEffect(layerId: string, kind: EffectKind) {
+  const l = layerById(layerId); if (!l) return
+  // Read the BEFORE stack once: after setLayerStack the layer is the new stack, so diffing
+  // against a re-read would find nothing and fall back to the last entry — wrong for a pinned
+  // kind, which lands at its canonical position rather than at the end.
+  const before = layerStack(l)
+  const beforeIds = new Set(before.map(e => e.id))
+  const next = addEffect(before, kind)
+  setLayerStack(layerId, next)
+  expandedLayers.value = new Set(expandedLayers.value).add(layerId)
+  // Select what was just added so its dials are on screen straight away.
+  const fresh = next.find(e => !beforeIds.has(e.id)) ?? next[next.length - 1]
+  if (fresh) selectEffect(layerId, fresh.id)
+}
+function removeLayerEffect(layerId: string, effectId: string) {
+  const l = layerById(layerId); if (!l) return
+  setLayerStack(layerId, removeEffect(layerStack(l), effectId))
+  if (selectedEffect.value?.effectId === effectId) selectedEffect.value = null
+}
+function duplicateLayerEffect(layerId: string, effectId: string) {
+  const l = layerById(layerId); if (!l) return
+  setLayerStack(layerId, duplicateEffect(layerStack(l), effectId))
+}
+function toggleLayerEffect(layerId: string, effectId: string) {
+  const l = layerById(layerId); if (!l) return
+  setLayerStack(layerId, layerStack(l).map(e => (e.id === effectId ? { ...e, visible: !e.visible } : e)))
+}
+function reorderLayerEffect(layerId: string, fromId: string, toId: string) {
+  const l = layerById(layerId); if (!l) return
+  const stack = layerStack(l)
+  if (!canReorder(stack, fromId, toId)) return
+  setLayerStack(layerId, reorderEffect(stack, fromId, toId))
+}
+
+// ── the add-effect menu, anchored to the clicked layer row ─────────────────────────────
+const fxMenuLayerId = ref<string | null>(null)
+const fxMenuPos = ref({ top: 0, left: 0 })
+function onFxMenuOutside(ev: PointerEvent) {
+  const t = ev.target as HTMLElement | null
+  if (t?.closest('[data-fx-menu]')) return
+  // A plus button closes/reopens through its own click handler. Closing here first would
+  // make a second click on the SAME plus reopen the menu instead of dismissing it.
+  if (t?.closest('[data-testid="add-effect"]')) return
+  closeFxMenu()
+}
+function openFxMenu(layerId: string, ev: MouseEvent) {
+  const r = (ev.currentTarget as HTMLElement).getBoundingClientRect()
+  fxMenuPos.value = { top: r.bottom + 4, left: r.left }
+  fxMenuLayerId.value = layerId
+  document.addEventListener('pointerdown', onFxMenuOutside, true)
+}
+function closeFxMenu() {
+  fxMenuLayerId.value = null
+  document.removeEventListener('pointerdown', onFxMenuOutside, true)
+}
+function pickFxKind(kind: EffectKind) {
+  if (fxMenuLayerId.value) addLayerEffect(fxMenuLayerId.value, kind)
+  closeFxMenu()
+}
+/** A pinned kind already on the layer cannot be added twice; orderable kinds always can. */
+function fxKindDisabled(kind: EffectKind): boolean {
+  const l = fxMenuLayerId.value ? layerById(fxMenuLayerId.value) : null
+  return !!l && isPinnedKind(kind) && layerStack(l).some(e => e.type === kind)
+}
+onBeforeUnmount(closeFxMenu)
+
+// Drag state for effect reordering, scoped to one layer.
+const fxDragFrom = ref<{ layerId: string; effectId: string } | null>(null)
+const onEffectDragStart = (layerId: string, effectId: string) => { fxDragFrom.value = { layerId, effectId } }
+function onEffectDrop(layerId: string, effectId: string) {
+  const from = fxDragFrom.value
+  fxDragFrom.value = null
+  if (from && from.layerId === layerId) reorderLayerEffect(layerId, from.effectId, effectId)
+}
+
 function toggleGroup(gid: string) {
   const s = new Set(expandedGroups.value)
   s.has(gid) ? s.delete(gid) : s.add(gid)
@@ -1799,8 +1894,18 @@ type FlatRow =
   | { rk: string; kind: 'group'; groupId: string; depth: number; count: number }
   | { rk: string; kind: 'child' | 'local'; key: StackKey; layerId: string; groupId?: string; depth: number; layer: any }
   | { rk: string; kind: 'wired'; key: StackKey; slot: number; depth: number; layer: any }
+  | { rk: string; kind: 'effect'; layerId: string; effectId: string; depth: number; effect: EffectInstance; pinned: boolean }
 const flatRows = computed<FlatRow[]>(() => {
   const rows: FlatRow[] = []
+  const pushEffectRows = (layer: any, depth: number) => {
+    if (!layer?.id || !expandedLayers.value.has(layer.id)) return
+    for (const e of effectStackOf(layer)) {
+      rows.push({
+        rk: `fx:${layer.id}:${e.id}`, kind: 'effect', layerId: layer.id, effectId: e.id,
+        depth, effect: e, pinned: isPinnedKind(e.type),
+      })
+    }
+  }
   const groups = localGroups.value
   const si = stackIndexByKey.value
   type Sortable = { kind: 'group'; id: string; sort: number } | { kind: 'item'; item: any; sort: number }
@@ -1816,7 +1921,10 @@ const flatRows = computed<FlatRow[]>(() => {
     kids.sort((a, b) => a.sort - b.sort)
     for (const k of kids) {
       if (k.kind === 'group') emitGroup(k.id, depth + 1)
-      else rows.push({ rk: k.item.key, kind: 'child', key: k.item.key, layerId: k.item.layer.id, groupId: gid, depth: depth + 1, layer: k.item.layer })
+      else {
+        rows.push({ rk: k.item.key, kind: 'child', key: k.item.key, layerId: k.item.layer.id, groupId: gid, depth: depth + 1, layer: k.item.layer })
+        pushEffectRows(k.item.layer, depth + 2)
+      }
     }
   }
 
@@ -1834,8 +1942,14 @@ const flatRows = computed<FlatRow[]>(() => {
   tops.sort((a, b) => a.sort - b.sort)
   for (const t of tops) {
     if (t.kind === 'group') emitGroup(t.id, 0)
-    else if (t.item.type === 'local') rows.push({ rk: t.item.key, kind: 'local', key: t.item.key, layerId: t.item.layer.id, depth: 0, layer: t.item.layer })
-    else rows.push({ rk: t.item.key, kind: 'wired', key: t.item.key, slot: t.item.layer.slot, depth: 0, layer: t.item.layer })
+    else if (t.item.type === 'local') {
+      rows.push({ rk: t.item.key, kind: 'local', key: t.item.key, layerId: t.item.layer.id, depth: 0, layer: t.item.layer })
+      pushEffectRows(t.item.layer, 1)
+    }
+    else {
+      rows.push({ rk: t.item.key, kind: 'wired', key: t.item.key, slot: t.item.layer.slot, depth: 0, layer: t.item.layer })
+      pushEffectRows(t.item.layer, 1)
+    }
   }
   return rows
 })
@@ -1935,7 +2049,13 @@ function dropTargetGroup(above: any): string | undefined {
 }
 
 function applyReorder(rk: string, dropFi: number) {
-  const rows = flatRows.value
+  // Effect rows are pseudo-children with NO stack key. The z-order arithmetic below maps
+  // every non-group row to `row.key`, so leaving them in would splice `undefined` into the
+  // stack order and shift every insertion index once a layer's effects are expanded.
+  // Drop the effect rows and rebase the drop index onto the filtered list.
+  const all = flatRows.value
+  const rows = all.filter(r => r.kind !== 'effect')
+  dropFi = all.slice(0, dropFi).filter(r => r.kind !== 'effect').length
   const start = rows.findIndex(r => r.rk === rk)
   if (start < 0) return
   const dragRow: any = rows[start]
@@ -3085,13 +3205,23 @@ watch(
     JSON.stringify(localGroups.value),
   ] as const,
   async () => {
+    // TEMP open-cost probe: split the wall time between font/image prep and the
+    // actual render, both measured from the Edit click (window.__openT).
+    const w = typeof window !== 'undefined' ? (window as any) : null
+    const t0 = w?.__openT
     for (const l of localLayers.value) if (l.kind === 'text') {
       ensureGoogleFont((l as TextLayer).fontFamily)
       ensureLibraryFont((l as TextLayer).fontFamily)
     }
     await ensureLayerFonts(localLayers.value, canvasDisplay.w)
     await ensureLayerImages(localLayers.value)
+    const afterAssets = performance.now()
     renderStack()
+    if (w && t0 != null && !w.__openLogged) {
+      w.__openLogged = true
+      setTimeout(() => { w.__openLogged = false }, 1000)
+      console.warn(`[OPEN-PROBE] click→assets-ready ${(afterAssets - t0).toFixed(0)}ms · render ${(performance.now() - afterAssets).toFixed(0)}ms · click→painted ${(performance.now() - t0).toFixed(0)}ms`)
+    }
   },
   { immediate: true },
 )
@@ -5270,7 +5400,22 @@ onUnmounted(() => {
         <div @drop="onListDrop" @dragover.prevent>
           <template v-for="(row, idx) in flatRows" :key="row.rk">
             <div v-if="dropIndex === idx" class="h-0.5 bg-white/70 rounded mx-1.5 my-0.5" />
+            <CompositorEffectRow
+              v-if="row.kind === 'effect'"
+              :effect="row.effect"
+              :layer-id="row.layerId"
+              :depth="row.depth"
+              :pinned="row.pinned"
+              :selected="selectedEffect?.layerId === row.layerId && selectedEffect?.effectId === row.effectId"
+              @select="selectEffect"
+              @remove="removeLayerEffect"
+              @duplicate="duplicateLayerEffect"
+              @toggle-visible="toggleLayerEffect"
+              @drag-start="onEffectDragStart"
+              @drop-on="onEffectDrop"
+            />
             <div
+              v-else
               class="group/row flex items-center gap-1.5 pr-2 py-1.5 rounded transition-colors"
               :style="{ paddingLeft: ((row as any).depth * 14 + 4) + 'px' }"
               :class="[
@@ -5297,6 +5442,16 @@ onUnmounted(() => {
                 title="Expand/collapse" @click.stop="toggleGroup(row.groupId)">
                 <component :is="expandedGroups.has(row.groupId) ? ChevronDown : ChevronRight" class="size-3.5" />
               </button>
+              <!-- Layer effect disclosure — only on a layer that actually has effects. -->
+              <button
+                v-if="(row.kind === 'local' || row.kind === 'child' || row.kind === 'wired') && effectStackOf(row.layer).length"
+                type="button" data-testid="layer-fx-toggle"
+                title="Show/hide effects"
+                class="-ml-1 shrink-0 text-white/40 hover:text-white/80 cursor-pointer"
+                @click.stop="expandedLayers = expandedLayers.has(row.layer.id)
+                  ? new Set([...expandedLayers].filter(x => x !== row.layer.id))
+                  : new Set(expandedLayers).add(row.layer.id)"
+              ><component :is="expandedLayers.has(row.layer.id) ? ChevronDown : ChevronRight" class="size-3" /></button>
               <!-- Icon / thumbnail -->
               <!-- Group: its first child's live thumb, else the group icon. -->
               <template v-if="row.kind === 'group'">
@@ -5425,6 +5580,17 @@ onUnmounted(() => {
                 title="Ungroup" @click.stop="ungroupGroup(row.groupId)">
                 <Ungroup class="size-3.5" />
               </button>
+              <!-- Add effect: opens the kind menu anchored under this row. Group rows never
+                   get one; a legacy unmigrated wired slot has no layer id to write an effect to.
+                   Sits BEFORE the Delete block so the group/local delete v-if chain stays
+                   contiguous — a v-if wedged between them would orphan the local delete. -->
+              <button
+                v-if="(row.kind === 'local' || row.kind === 'child' || row.kind === 'wired') && row.layer?.id"
+                type="button" data-testid="add-effect" aria-label="Add effect"
+                class="shrink-0 opacity-0 group-hover/row:opacity-100 text-white/40 hover:text-white/80 cursor-pointer"
+                :class="fxMenuLayerId === row.layer.id ? '!opacity-100' : ''"
+                @click.stop="fxMenuLayerId === row.layer.id ? closeFxMenu() : openFxMenu(row.layer.id, $event)"
+              ><Plus class="size-3.5" /></button>
               <!-- Delete -->
               <button v-if="row.kind === 'group'" class="opacity-0 group-hover/row:opacity-100 text-white/40 hover:text-red-400 transition cursor-pointer"
                 title="Delete group" @click.stop="deleteGroup(row.groupId)">
@@ -8004,6 +8170,19 @@ onUnmounted(() => {
       </div>
     </div>
     </div>
+
+    <!-- Add-effect menu. Teleported because the layer panel scrolls and would clip an
+         absolutely positioned popover. -->
+    <Teleport to="body">
+      <div v-if="fxMenuLayerId" data-fx-menu
+        class="fixed z-[200] w-48 rounded-lg border border-white/10 bg-[#161616] p-1 shadow-2xl"
+        :style="{ top: `${fxMenuPos.top}px`, left: `${fxMenuPos.left}px` }" @pointerdown.stop>
+        <button v-for="kind in EFFECT_ORDER" :key="kind" type="button"
+          data-testid="add-effect-item" :data-kind="kind" :disabled="fxKindDisabled(kind)"
+          class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+          @click.stop="pickFxKind(kind)">{{ EFFECT_LABELS[kind] }}</button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
