@@ -153,9 +153,15 @@ const BLUR_FRAG = `uniform sampler2D tDiffuse; uniform vec2 uDir; varying vec2 v
   }`
 const PIXELATE_FRAG = `
   uniform sampler2D tDiffuse; uniform vec2 uResolution; uniform float uCell;
-  varying vec2 vUv;
+  varying vec2 vUv;` + RAMP_GLSL + `
+  // Pixelate cannot scale its cell per pixel: neighbours would snap to different grids, which
+  // reads as noise, not a gradient. The ramp is quantised into bands instead, so every pixel in
+  // a band shares one grid and the change steps at the boundary — a deliberate graphic edge.
+  // Band 0 gives a 1px cell, i.e. the sharp end is untouched. GLSL twin of pixelateBand().
+  const float PIXELATE_BANDS = 5.0;
   void main(){
-    vec2 cell = vec2(uCell) / uResolution;
+    float band = min(floor(rampAt(vUv) * PIXELATE_BANDS), PIXELATE_BANDS - 1.0) / (PIXELATE_BANDS - 1.0);
+    vec2 cell = vec2(mix(1.0, uCell, band)) / uResolution;
     vec2 uv = (floor(vUv / cell) + 0.5) * cell;
     gl_FragColor = texture2D(tDiffuse, uv);
   }`
@@ -170,12 +176,14 @@ const BRIGHT_FRAG = `
   }`
 const GLOW_MERGE_FRAG = `
   uniform sampler2D tBase; uniform sampler2D tGlow; uniform vec3 uTint; uniform float uStrength;
-  varying vec2 vUv;
+  varying vec2 vUv;` + RAMP_GLSL + `
   void main(){
     vec4 b = texture2D(tBase, vUv);
     vec4 g = texture2D(tGlow, vUv);
-    vec3 add = g.rgb * g.a * uTint * uStrength;
-    float a = max(b.a, g.a * clamp(uStrength, 0.0, 1.0));
+    // Glow is additive, so the ramp scales the ADDED light exactly — no cross-fade needed.
+    float r = rampAt(vUv);
+    vec3 add = g.rgb * g.a * uTint * uStrength * r;
+    float a = max(b.a, g.a * clamp(uStrength * r, 0.0, 1.0));
     vec3 rgb = (b.rgb * b.a + add) / max(a, 1e-5);
     gl_FragColor = vec4(rgb, a);
   }`
@@ -193,7 +201,7 @@ const COMPOSITE_FRAG = `
   uniform sampler2D tDst;
   uniform float uOpacity; uniform vec2 uTexel; uniform float uHaloRadius;
   uniform float uDisplayBlend; uniform float uExposure;
-  varying vec2 vUv;
+  varying vec2 vUv;` + RAMP_GLSL + `
   // three's ACESFilmicToneMapping, and its inverse. The forward half is copied from
   // three's tonemapping_pars_fragment (including the /0.6 that scales exposure) so the
   // curve here IS the curve OutputPass applies; the two inverse matrices were solved from
@@ -284,7 +292,9 @@ const COMPOSITE_FRAG = `
   void main(){
     vec4 d = texture2D(tDst, vUv); // the accumulator so far, premultiplied
     vec4 s = texture2D(tLayer, vUv);
-    float a = s.a * uOpacity;
+    // Fade's opacity is per-pixel once ramped: r = 0 leaves the object solid, r = 1 applies the
+    // dialled opacity, so the object sweeps from solid to faded rather than dimming evenly.
+    float a = s.a * mix(1.0, uOpacity, rampAt(vUv));
     // Both early-outs pass the destination through untouched: this writes into the OTHER
     // half of the ping-pong, so there is nothing to leave alone.
     if (a <= 0.001) { gl_FragColor = d; return; }
@@ -343,9 +353,17 @@ export class TreatmentStage {
     uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
     uRampMin: { value: 0 }, uRampSpan: { value: 1 }, uRampStart: { value: 0 }, uRampEnd: { value: 1 },
   })
-  private readonly pixelateMat = shader(PIXELATE_FRAG, { tDiffuse: { value: null }, uResolution: { value: new THREE.Vector2(1, 1) }, uCell: { value: 8 } })
+  private readonly pixelateMat = shader(PIXELATE_FRAG, {
+    tDiffuse: { value: null }, uResolution: { value: new THREE.Vector2(1, 1) }, uCell: { value: 8 },
+    uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
+    uRampMin: { value: 0 }, uRampSpan: { value: 1 }, uRampStart: { value: 0 }, uRampEnd: { value: 1 },
+  })
   private readonly brightMat = shader(BRIGHT_FRAG, { tDiffuse: { value: null }, uThreshold: { value: 0.6 } })
-  private readonly glowMergeMat = shader(GLOW_MERGE_FRAG, { tBase: { value: null }, tGlow: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uStrength: { value: 1 } })
+  private readonly glowMergeMat = shader(GLOW_MERGE_FRAG, {
+    tBase: { value: null }, tGlow: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uStrength: { value: 1 },
+    uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
+    uRampMin: { value: 0 }, uRampSpan: { value: 1 }, uRampStart: { value: 0 }, uRampEnd: { value: 1 },
+  })
   private readonly compositeMat: THREE.ShaderMaterial
   private readonly tmpSize = new THREE.Vector2()
   private readonly prevClearColor = new THREE.Color()
@@ -359,6 +377,8 @@ export class TreatmentStage {
       tLayer: { value: null }, tLayerDepth: { value: null }, tBaseDepth: { value: null }, tBaseDepth2: { value: null },
       tDst: { value: null }, uOpacity: { value: 1 }, uTexel: { value: new THREE.Vector2() }, uHaloRadius: { value: 2 },
       uDisplayBlend: { value: 0 }, uExposure: { value: 1 },
+      uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
+      uRampMin: { value: 0 }, uRampSpan: { value: 1 }, uRampStart: { value: 0 }, uRampEnd: { value: 1 },
     })
     // The shader reads the destination and does the "over" itself (it has to, to blend a
     // fade on tone-mapped values), so the hardware blender must stay out of the way — with
@@ -509,7 +529,7 @@ export class TreatmentStage {
   private resolveRamp(
     t: RampFields, root: THREE.Object3D | null, camera: THREE.Camera,
   ): Ramp | null {
-    if (!t.progressive) return null
+    if (!t || t.progressive !== true) return null
     const dir = rampDirection(t.rampAngle)
     const common = { dirX: dir.x, dirY: dir.y, start: t.rampStart, end: t.rampEnd }
     if (t.rampSpace === 'object' && root) {
@@ -550,6 +570,7 @@ export class TreatmentStage {
       const cellPx = pixelateCellPx(t.cellSize, this.height)
       this.pixelateMat.uniforms.tDiffuse!.value = src.texture
       this.pixelateMat.uniforms.uCell!.value = cellPx
+      this.setRampUniforms(this.pixelateMat, ramp)
       this.pass(this.pixelateMat, dst)
       return { rt: dst, haloPx: cellPx } // device px, like blur's radiusPx — uHaloRadius is in texels
     }
@@ -565,6 +586,7 @@ export class TreatmentStage {
       this.glowMergeMat.uniforms.tGlow!.value = glow.texture
       ;(this.glowMergeMat.uniforms.uTint!.value as THREE.Color).set(stripAlpha(t.tint))
       this.glowMergeMat.uniforms.uStrength!.value = t.strength
+      this.setRampUniforms(this.glowMergeMat, ramp)
       this.pass(this.glowMergeMat, dst)
       return { rt: dst, haloPx: radiusPx }
     }
@@ -611,7 +633,7 @@ export class TreatmentStage {
    *  invert layer) or null when there is none. */
   private composite(
     layerTex: THREE.Texture, layerDepth: THREE.Texture | null, baseDepth2: THREE.Texture | null,
-    opacity: number, haloPx: number,
+    opacity: number, haloPx: number, fadeRamp: Ramp | null,
   ): void {
     const u = this.compositeMat.uniforms
     u.tLayer!.value = layerTex
@@ -621,11 +643,12 @@ export class TreatmentStage {
     u.uOpacity!.value = opacity
     u.uHaloRadius!.value = Math.max(2, haloPx)
     u.tDst!.value = this.accum[this.accumIdx]!.texture
-    // Only a fade (opacity < 1) needs the tone-mapped blend, and only ACES is invertible
-    // here — on any other tone mapping the shader's inverse would not mirror what
-    // OutputPass does, so fall back to the linear blend rather than shift the colour.
+    this.setRampUniforms(this.compositeMat, fadeRamp)
+    // Only a fade needs the tone-mapped blend, and only ACES is invertible here. A RAMPED fade
+    // qualifies even at opacity 1, because its opacity varies per pixel — testing `opacity < 1`
+    // alone would send a ramped fade down the linear path and lose the perceptual curve.
     u.uDisplayBlend!.value =
-      opacity < 1 && this.renderer.toneMapping === THREE.ACESFilmicToneMapping ? 1 : 0
+      (fadeRamp !== null || opacity < 1) && this.renderer.toneMapping === THREE.ACESFilmicToneMapping ? 1 : 0
     // toLinear() divides by uExposure; guard on the CPU side so an exposure dial that ever
     // reaches 0 can't emit Inf into the HalfFloat accumulator.
     u.uExposure!.value = Math.max(this.renderer.toneMappingExposure, MIN_EXPOSURE)
@@ -641,16 +664,17 @@ export class TreatmentStage {
     let src: RT = layerRt
     let opacity = 1
     let halo = 0
+    let fadeRamp: Ramp | null = null
     for (const t of g.treatments) {
-      if (t.kind === 'fade') { opacity *= t.opacity; continue }
-      // An inverted group's treated area is the rest of the scene, so "the object's own
-      // extent" is meaningless there — pass no root and resolveRamp uses frame space.
-      const ramp = t.kind === 'blur' ? this.resolveRamp(t, g.invert ? null : root, camera) : null
+      // An inverted group's treated area is the rest of the scene, so "the object's own extent"
+      // is meaningless there — pass no root and resolveRamp uses frame space.
+      const ramp = this.resolveRamp(t as unknown as RampFields, g.invert ? null : root, camera)
+      if (t.kind === 'fade') { opacity *= t.opacity; fadeRamp = ramp; continue }
       const res = this.applyEffect(src, t, ramp)
       src = res.rt
       halo = Math.max(halo, res.haloPx)
     }
-    this.composite(src.texture, layerRt.depthTexture, baseDepth2, opacity, halo)
+    this.composite(src.texture, layerRt.depthTexture, baseDepth2, opacity, halo, fadeRamp)
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], ctx: StageContext): THREE.Texture | null {
