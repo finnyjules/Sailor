@@ -62,6 +62,9 @@ import {
   type VtCurveTable,
 } from '~/lib/vectortype/curve'
 import type { TextLayer } from '~/composables/useCompositorLayers'
+import { longestSubpath, type FlatPoint } from '~/lib/compositor/pathFlatten'
+import { shapeById } from '~/lib/shapes/catalog'
+import { shapeGeometry } from '~/lib/shapes/pathLayer'
 
 const DEG = Math.PI / 180
 
@@ -212,12 +215,24 @@ export function guideFromSpec(
       }
       break
     }
-    // Outline-backed guides land with `pathFlatten.ts`; until then the caller
-    // falls back to flat text, which is the correct thing to see for a spec
-    // whose geometry has not been built yet.
-    case 'shape':
-    case 'custom':
-      return null
+    // Outline-backed guides: the shape library and a drawn path both arrive as
+    // an SVG `d`, so they share one route — flatten, then wrap the polyline in
+    // the same Guide contract the parametric curves satisfy.
+    case 'shape': {
+      const shape = spec.shapeId ? shapeById(spec.shapeId) : undefined
+      if (!shape) return null
+      const size = Math.abs(fin(spec.size, 0))
+      if (!(size > 0)) return null
+      // shapeGeometry works in the same local units the rest of the spec uses,
+      // and returns a `d` already centred on its own bbox midpoint.
+      return guideFromPathD(shapeGeometry(shape, size).d, W)
+    }
+    case 'custom': {
+      if (!spec.d) return null
+      const size = Math.abs(fin(spec.size, 0))
+      // A drawn path carries its own scale; `size`, when set, refits it.
+      return guideFromPathD(spec.d, W, size > 0 ? size * W : 0)
+    }
     default:
       return null
   }
@@ -288,6 +303,160 @@ export function guideFromTable(table: VtCurveTable, rotation = 0, closed = false
         const p = raw(L)
         const d = sc - L
         return { x: p.x + Math.cos(p.angle) * d, y: p.y + Math.sin(p.angle) * d, angle: p.angle }
+      }
+      return raw(sc)
+    },
+    bounds: () => ({ w, h }),
+  }
+}
+
+/**
+ * A guide from an SVG path `d` in LOCAL units — the shape library and the pen
+ * both speak this.
+ *
+ * Only the LONGEST subpath is used. A library shape may carry interior detail
+ * (a face inside a circle, spokes inside a sun); type follows its outline, which
+ * is the subpath a reader would trace with a finger, and running the glyphs onto
+ * an interior fragment would look like a bug.
+ *
+ * `targetWidthPx > 0` refits the outline to that width, preserving aspect.
+ */
+export function guideFromPathD(d: string, W: number, targetWidthPx = 0): Guide | null {
+  const sub = longestSubpath(d)
+  if (!sub || sub.pts.length < 2) return null
+  const k = Number.isFinite(W) && W > 0 ? W : 1
+  let pts = sub.pts.map(p => ({ x: p.x * k, y: p.y * k }))
+  if (targetWidthPx > 0) {
+    let lo = Infinity, hi = -Infinity
+    for (const p of pts) { if (p.x < lo) lo = p.x; if (p.x > hi) hi = p.x }
+    const w = hi - lo
+    if (w > 0) {
+      const f = targetWidthPx / w
+      pts = pts.map(p => ({ x: p.x * f, y: p.y * f }))
+    }
+  }
+  return guideFromPolyline(pts, sub.closed)
+}
+
+/**
+ * Put a closed outline into the orientation type expects: running clockwise on
+ * screen, starting at its topmost point.
+ *
+ * Where a closed path "starts", and which way it winds, are artefacts of how the
+ * shape was authored — one library shape begins at its left edge, the next at a
+ * petal tip, and an imported outline may be wound either way. Left alone, the
+ * same dial settings put type up the side of one shape and upside down around
+ * another, which reads as a bug rather than as a property of the artwork.
+ *
+ * Normalising here means a closed outline behaves exactly like the parametric
+ * circle: `start: 0.5` with centred alignment sits the run over the top, upright,
+ * for every shape in the library.
+ *
+ * Open paths are left alone — a drawn curve's direction and start are the
+ * author's intent, not an artefact.
+ */
+function normaliseClosedOutline(pts: FlatPoint[]): FlatPoint[] {
+  const n = pts.length
+  if (n < 3) return pts
+  const topIndex = (list: FlatPoint[]): number => {
+    let ti = 0
+    for (let i = 1; i < list.length; i++) {
+      // A flat top has several topmost vertices; take the LEFTMOST. Travel is
+      // clockwise, so that is where the top edge begins — starting at its right
+      // end would send `s` straight down the side instead of along the top.
+      const a = list[i]!, b = list[ti]!
+      if (a.y < b.y || (a.y === b.y && a.x < b.x)) ti = i
+    }
+    return ti
+  }
+  let ti = topIndex(pts)
+  // Test the property directly rather than reasoning about shoelace signs in a
+  // y-down space: at the top of the outline, travel must head RIGHT.
+  const prev = pts[(ti - 1 + n) % n]!
+  const next = pts[(ti + 1) % n]!
+  if (next.x - prev.x < 0) {
+    pts = [...pts].reverse()
+    ti = topIndex(pts)
+  }
+  return ti === 0 ? pts : [...pts.slice(ti), ...pts.slice(0, ti)]
+}
+
+/**
+ * Wrap a polyline as a `Guide`, matching `guideFromTable` exactly: centred on
+ * the origin, extrapolating off the ends when open and wrapping when closed.
+ *
+ * A closed subpath's final chord back to the first point is IMPLIED by
+ * `pathFlatten` rather than repeated, so it is added here — without it a ring
+ * would be short by one segment and every glyph past the gap would sit wrong.
+ */
+export function guideFromPolyline(input: readonly FlatPoint[], closed: boolean): Guide | null {
+  const src = input.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+  if (src.length < 2) return null
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const p of src) {
+    if (p.x < minX) minX = p.x
+    if (p.x > maxX) maxX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.y > maxY) maxY = p.y
+  }
+  const ox = -(minX + maxX) / 2
+  const oy = -(minY + maxY) / 2
+  let pts: FlatPoint[] = src.map(p => ({ x: p.x + ox, y: p.y + oy }))
+  if (closed) {
+    pts = normaliseClosedOutline(pts)
+    pts.push({ x: pts[0]!.x, y: pts[0]!.y })   // the implied closing chord
+  }
+
+  const n = pts.length
+  const cum = new Float64Array(n)
+  for (let i = 1; i < n; i++) {
+    cum[i] = cum[i - 1]! + Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y)
+  }
+  const L = cum[n - 1]!
+  if (!Number.isFinite(L) || !(L > 0)) return null
+
+  const w = Math.max(1, maxX - minX)
+  const h = Math.max(1, maxY - minY)
+
+  /** Point + tangent at arc length `s`, `s` clamped to the polyline's own ends. */
+  const raw = (s: number) => {
+    const sc = s <= 0 ? 0 : s >= L ? L : s
+    // Binary search the cumulative table — monotone by construction, exactly as
+    // curve.ts's own inversion relies on.
+    let lo = 0, hi = n - 1
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1
+      if (cum[mid]! <= sc) lo = mid
+      else hi = mid
+    }
+    const a = pts[lo]!, b = pts[hi]!
+    const span = cum[hi]! - cum[lo]!
+    const f = span > 0 ? (sc - cum[lo]!) / span : 0
+    const dx = b.x - a.x, dy = b.y - a.y
+    return {
+      x: a.x + dx * f,
+      y: a.y + dy * f,
+      // A zero-length segment cannot give a direction; the previous segment's is
+      // the only defined answer, and 0 is the fallback at the very start.
+      angle: dx === 0 && dy === 0 ? 0 : Math.atan2(dy, dx),
+    }
+  }
+
+  return {
+    length: L,
+    closed,
+    at(s: number) {
+      const sc = fin(s, 0)
+      if (closed) return raw(((sc % L) + L) % L)
+      if (sc < 0) {
+        const p = raw(0)
+        return { x: p.x + Math.cos(p.angle) * sc, y: p.y + Math.sin(p.angle) * sc, angle: p.angle }
+      }
+      if (sc > L) {
+        const p = raw(L)
+        const dd = sc - L
+        return { x: p.x + Math.cos(p.angle) * dd, y: p.y + Math.sin(p.angle) * dd, angle: p.angle }
       }
       return raw(sc)
     },

@@ -1801,6 +1801,44 @@ const layerById = (layerId: string): any => localLayers.value.find((l: any) => l
 const selectedEffect = ref<{ layerId: string; effectId: string } | null>(null)
 const selectEffect = (layerId: string, effectId: string) => { selectedEffect.value = { layerId, effectId } }
 
+// ── The selected effect, as the inspector reads and writes it ─────────────────
+// A separate concept from the layer selection: picking an effect row leaves the layer
+// selected (the breadcrumb needs its name), but the inspector then shows only the effect.
+// Picking a layer row clears the effect (see `onRowClick`).
+const activeEffect = computed<EffectInstance | null>(() => {
+  const sel = selectedEffect.value
+  if (!sel) return null
+  const l = layerById(sel.layerId)
+  return l ? (layerStack(l).find(e => e.id === sel.effectId) ?? null) : null
+})
+const activeEffectLayer = computed<any>(() => (selectedEffect.value ? layerById(selectedEffect.value.layerId) : null))
+/** Write a patch onto the selected instance, BY ID, keeping the stack's order. */
+function updateActiveEffect(patch: Record<string, unknown>) {
+  const sel = selectedEffect.value
+  const l = sel ? layerById(sel.layerId) : null
+  if (!sel || !l) return
+  setLayerStack(sel.layerId, layerStack(l).map(e => (e.id === sel.effectId ? { ...e, ...patch } : e)))
+}
+/** The seven kinds `PostEffectsControls` already renders. */
+const isPanelKind = (k: EffectKind) =>
+  (['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'dof'] as string[]).includes(k)
+// The selection is by id, so a vanished effect — its layer deleted, or an undo that
+// rolled the stack back — must not leave the inspector pointing at nothing. One watcher
+// covers every removal path (`deleteLocal`, `deleteLayers`, undo/redo), none of which
+// live in this file.
+watch(activeEffect, v => { if (!v) selectedEffect.value = null })
+// The selected instance's rgba colour, split for the hex + alpha inputs the two shadow
+// cards share.
+const activeFxHex = computed(() => parseRgba((activeEffect.value as any)?.color || '').hex)
+const activeFxAlpha = computed(() => parseRgba((activeEffect.value as any)?.color || '').a)
+function setActiveFxHex(raw: string) {
+  let h = '#' + (raw || '').trim().replace(/^#/, '')
+  const m3 = /^#([0-9a-fA-F]{3})$/.exec(h)
+  if (m3) h = '#' + m3[1]!.split('').map(c => c + c).join('')
+  if (!/^#[0-9a-fA-F]{6}$/.test(h)) return // ignore partial/invalid input
+  updateActiveEffect({ color: composeRgba(h, activeFxAlpha.value) })
+}
+
 function addLayerEffect(layerId: string, kind: EffectKind) {
   const l = layerById(layerId); if (!l) return
   // Read the BEFORE stack once: after setLayerStack the layer is the new stack, so diffing
@@ -1988,6 +2026,8 @@ function rowSelected(row: any) {
   return selectedIds.value.has(row.layerId)
 }
 function onRowClick(row: any) {
+  // Selecting anything that is not an effect row hands the inspector back to the layer.
+  if (row.kind !== 'effect') selectedEffect.value = null
   // Save-as-template sheet open: tapping a real layer marks/unmarks it as a
   // slot instead of selecting it (kind/label are edited in the sheet).
   if (savingTemplate.value && (row.kind === 'local' || row.kind === 'child')) { toggleSlotPick(row.layerId); return }
@@ -3508,9 +3548,14 @@ const textPath = computed<TextPathSpec | undefined>(() => (selectedLocal.value a
  *  controls that visibly do nothing. */
 function textPathDefaults(follow: TextPathFollow): TextPathSpec {
   switch (follow) {
-    case 'circle': return { follow, radius: 0.22, startAngle: 0 }
+    // start 0.5 puts the run over the TOP of the ring reading upright — the badge
+    // everyone means by "type on a circle". start 0 would centre it at 6 o'clock,
+    // upside down (verified against the placement engine in a real browser).
+    case 'circle': return { follow, radius: 0.22, startAngle: 0, start: 0.5 }
     case 'wave': return { follow, amplitude: 0.04, frequency: 2 }
-    case 'shape': return { follow, shapeId: 'circle', size: 0.5 }
+    // Closed outlines are normalised to start at their top (see textPath.ts), so
+    // the same 0.5 that centres type over a ring centres it over any shape.
+    case 'shape': return { follow, shapeId: 'circle', size: 0.5, start: 0.5 }
     case 'custom': return { follow, size: 0.5 }
     default: return { follow: 'curve', bend: 0.35 }
   }
@@ -3537,14 +3582,26 @@ function setTextFollow(l: any, follow: TextPathFollow | 'off') {
  * depending on Side, which reads as a bug. Mirroring the value here keeps the
  * gesture consistent and leaves the engine (and its tests) untouched.
  */
+const mirrorStart = (v: number) => (1 - v) % 1   // involution; fixes 0, reverses direction
 const textPathStartUi = computed(() => {
   const p = textPath.value
   const v = p?.start ?? 0
-  return p?.side === 'inside' ? 1 - v : v
+  return p?.side === 'inside' ? mirrorStart(v) : v
 })
 function setTextPathStartUi(l: any, ui: number) {
   const inside = (l?.path as TextPathSpec | undefined)?.side === 'inside'
-  setTextPath(l, { start: inside ? 1 - ui : ui })
+  setTextPath(l, { start: inside ? mirrorStart(ui) : ui })
+}
+/**
+ * Flipping Side moves the run half way round the guide as well as turning it
+ * over. Without that, top-of-ring type flipped to the inside stays at the top
+ * and reads upside down; with it, it lands under the ring the right way up —
+ * the two halves of a badge, which is what the control is for.
+ */
+function setTextPathSide(l: any, side: 'outside' | 'inside') {
+  const cur = l?.path as TextPathSpec | undefined
+  if (!cur || (cur.side ?? 'outside') === side) return
+  setTextPath(l, { side, start: ((cur.start ?? 0) + 0.5) % 1 })
 }
 const TEXT_FOLLOW_OPTIONS: { v: TextPathFollow | 'off'; label: string }[] = [
   { v: 'off', label: 'Off' },
@@ -6935,7 +6992,131 @@ onUnmounted(() => {
       </template>
 
       <!-- Local-layer properties -->
-      <template v-else-if="selectedLocal">
+      <!-- One effect, tuned on its own. Reached by selecting an effect row in the layer
+           tree; the effect cards are gone from the layer view below, so the inspector
+           shows the dials of exactly one INSTANCE — a second inner shadow edits itself,
+           not the first one of its type. -->
+      <template v-else-if="activeEffect">
+        <div class="px-4 py-3 border-b border-white/10 flex items-center gap-1.5 text-[11px] text-white/50" data-testid="effect-breadcrumb">
+          <button type="button" class="truncate hover:text-white/80" @click="selectedEffect = null">{{ activeEffectLayer?.name || 'Layer' }}</button>
+          <ChevronRight class="size-3 shrink-0 opacity-60" />
+          <span class="truncate text-white/80">{{ EFFECT_LABELS[activeEffect!.type] }}</span>
+        </div>
+        <div class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
+          <!-- The seven kinds PostEffectsControls already draws. `only` narrows it to the
+               selected kind, and `effects` is the one instance, so its patch comes back as
+               a single-entry array we write straight onto that id. -->
+          <PostEffectsControls
+            v-if="isPanelKind(activeEffect!.type)"
+            :effects="([activeEffect] as any)"
+            :only="([activeEffect!.type] as any)"
+            :depth-source="activeEffectLayer ? localDepthSource(activeEffectLayer) : undefined"
+            @update="(fx: any[]) => { const n = fx[0]; if (n) updateActiveEffect(n) }" />
+
+          <!-- Drop shadow -->
+          <div v-else-if="activeEffect!.type === 'drop_shadow'" class="space-y-1.5">
+            <div class="flex items-center gap-1.5">
+              <input type="color" :value="activeFxHex" title="Shadow color"
+                class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
+                @input="updateActiveEffect({ color: composeRgba(($event.target as HTMLInputElement).value, activeFxAlpha) })" />
+              <input type="text" spellcheck="false" maxlength="7" :value="activeFxHex" title="Hex color"
+                class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs font-mono uppercase text-white/90 outline-none"
+                @change="setActiveFxHex(($event.target as HTMLInputElement).value)" />
+              <div class="flex items-center gap-0.5 shrink-0 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-1.5" title="Shadow opacity (alpha)">
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(activeFxAlpha * 100)"
+                  class="w-7 bg-transparent text-xs text-white/90 outline-none text-right"
+                  @input="updateActiveEffect({ color: composeRgba(activeFxHex, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+                <span class="text-[10px] text-white/35 select-none">%</span>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">X</div>
+                <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).x || 0) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ x: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Y</div>
+                <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).y || 0) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ y: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Blur</div>
+                <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).blur || 0) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ blur: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Inner shadow -->
+          <div v-else-if="activeEffect!.type === 'inner_shadow'" class="space-y-1.5">
+            <div class="flex items-center gap-1.5">
+              <input type="color" :value="activeFxHex" title="Shadow color"
+                class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
+                @input="updateActiveEffect({ color: composeRgba(($event.target as HTMLInputElement).value, activeFxAlpha) })" />
+              <div class="flex items-center gap-0.5 shrink-0 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-1.5" title="Shadow opacity (alpha)">
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(activeFxAlpha * 100)"
+                  class="w-7 bg-transparent text-xs text-white/90 outline-none text-right"
+                  @input="updateActiveEffect({ color: composeRgba(activeFxHex, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+                <span class="text-[10px] text-white/35 select-none">%</span>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">X</div>
+                <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).x || 0) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ x: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Y</div>
+                <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).y || 0) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ y: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Blur</div>
+                <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).blur || 0) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ blur: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Layer blur -->
+          <div v-else-if="activeEffect!.type === 'layer_blur'" class="flex items-center gap-2">
+            <div class="panel-sublabel shrink-0">Radius</div>
+            <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).radius || 0) * 1000) / 10"
+              class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+              @input="updateActiveEffect({ radius: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+          </div>
+
+          <!-- Background blur (blurs what's behind the layer, inside its shape) -->
+          <div v-else-if="activeEffect!.type === 'background_blur'" class="flex items-center gap-2">
+            <div class="panel-sublabel shrink-0">Radius</div>
+            <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).radius || 0) * 1000) / 10"
+              class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+              @input="updateActiveEffect({ radius: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+          </div>
+
+          <!-- Torn paper edge and feather: the panels take the whole spec as `value`, and the
+               instance IS the spec (plus type/visible/id), so it can be handed over as-is.
+               No @toggle — the tree row's eye owns visibility and its trash owns removal. -->
+          <CompositorTornEdgePanel
+            v-else-if="activeEffect!.type === 'torn_edge'"
+            :value="(activeEffect as any)"
+            @update="(patch: any) => updateActiveEffect(patch)" />
+          <CompositorFeatherPanel
+            v-else-if="activeEffect!.type === 'feather'"
+            :value="(activeEffect as any)"
+            @update="(patch: any) => updateActiveEffect(patch)" />
+        </div>
+      </template>
+
+      <template v-else-if="selectedLocal && !activeEffect">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <component :is="kindIcon(selectedLocal.kind)" class="size-3.5 text-white/60" />
           <span class="text-sm font-medium capitalize">{{ selectedLocal.kind === 'deal' ? 'Mosaic' : selectedLocal.kind }}</span>
@@ -7124,7 +7305,7 @@ onUnmounted(() => {
                       <button v-for="sd in (['outside','inside'] as const)" :key="sd"
                         class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-[10px] cursor-pointer"
                         :class="(textPath.side ?? 'outside') === sd ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50'"
-                        @click="setTextPath(selectedLocal, { side: sd })">{{ sd === 'outside' ? 'Outside' : 'Inside' }}</button>
+                        @click="setTextPathSide(selectedLocal, sd)">{{ sd === 'outside' ? 'Outside' : 'Inside' }}</button>
                     </div>
                   </div>
                   <div>
@@ -7945,123 +8126,6 @@ onUnmounted(() => {
             </select>
           </div>
 
-          <!-- Drop shadow effect -->
-          <div class="mt-3">
-            <div class="flex items-center justify-between mb-1.5">
-              <div class="panel-label">Drop shadow</div>
-              <button class="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-white/60 hover:text-white/90"
-                @click="toggleLocalShadow(selectedLocal!)">{{ localShadow(selectedLocal) ? 'Remove' : 'Add' }}</button>
-            </div>
-            <div v-if="localShadow(selectedLocal)" class="space-y-1.5">
-              <div class="flex items-center gap-1.5">
-                <input type="color" :value="shadowHex(selectedLocal)" title="Shadow color"
-                  class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
-                  @input="setLocalShadow(selectedLocal!, { color: composeRgba(($event.target as HTMLInputElement).value, shadowAlpha(selectedLocal)) })" />
-                <input type="text" spellcheck="false" maxlength="7" :value="shadowHex(selectedLocal)" title="Hex color"
-                  class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs font-mono uppercase text-white/90 outline-none"
-                  @change="setShadowHex(selectedLocal!, ($event.target as HTMLInputElement).value)" />
-                <div class="flex items-center gap-0.5 shrink-0 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-1.5" title="Shadow opacity (alpha)">
-                  <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(shadowAlpha(selectedLocal) * 100)"
-                    class="w-7 bg-transparent text-xs text-white/90 outline-none text-right"
-                    @input="setLocalShadow(selectedLocal!, { color: composeRgba(shadowHex(selectedLocal), (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
-                  <span class="text-[10px] text-white/35 select-none">%</span>
-                </div>
-              </div>
-              <div class="grid grid-cols-3 gap-1.5">
-                <div>
-                  <div class="panel-sublabel mb-1">X</div>
-                  <input v-scrubnum type="number" step="0.5" :value="Math.round((localShadow(selectedLocal)?.x || 0) * 1000) / 10"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setLocalShadow(selectedLocal!, { x: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
-                </div>
-                <div>
-                  <div class="panel-sublabel mb-1">Y</div>
-                  <input v-scrubnum type="number" step="0.5" :value="Math.round((localShadow(selectedLocal)?.y || 0) * 1000) / 10"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setLocalShadow(selectedLocal!, { y: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
-                </div>
-                <div>
-                  <div class="panel-sublabel mb-1">Blur</div>
-                  <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round((localShadow(selectedLocal)?.blur || 0) * 1000) / 10"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setLocalShadow(selectedLocal!, { blur: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Inner shadow -->
-          <div class="mt-3">
-            <div class="flex items-center justify-between mb-1.5">
-              <div class="panel-label">Inner shadow</div>
-              <button class="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-white/60 hover:text-white/90"
-                @click="toggleInnerShadow(selectedLocal!)">{{ innerShadow(selectedLocal) ? 'Remove' : 'Add' }}</button>
-            </div>
-            <div v-if="innerShadow(selectedLocal)" class="space-y-1.5">
-              <div class="flex items-center gap-1.5">
-                <input type="color" :value="innerShadowHex(selectedLocal)" title="Shadow color"
-                  class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
-                  @input="setInnerShadow(selectedLocal!, { color: composeRgba(($event.target as HTMLInputElement).value, innerShadowAlpha(selectedLocal)) })" />
-                <div class="flex items-center gap-0.5 shrink-0 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-1.5" title="Shadow opacity (alpha)">
-                  <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(innerShadowAlpha(selectedLocal) * 100)"
-                    class="w-7 bg-transparent text-xs text-white/90 outline-none text-right"
-                    @input="setInnerShadow(selectedLocal!, { color: composeRgba(innerShadowHex(selectedLocal), (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
-                  <span class="text-[10px] text-white/35 select-none">%</span>
-                </div>
-              </div>
-              <div class="grid grid-cols-3 gap-1.5">
-                <div>
-                  <div class="panel-sublabel mb-1">X</div>
-                  <input v-scrubnum type="number" step="0.5" :value="Math.round((innerShadow(selectedLocal)?.x || 0) * 1000) / 10"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setInnerShadow(selectedLocal!, { x: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
-                </div>
-                <div>
-                  <div class="panel-sublabel mb-1">Y</div>
-                  <input v-scrubnum type="number" step="0.5" :value="Math.round((innerShadow(selectedLocal)?.y || 0) * 1000) / 10"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setInnerShadow(selectedLocal!, { y: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
-                </div>
-                <div>
-                  <div class="panel-sublabel mb-1">Blur</div>
-                  <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round((innerShadow(selectedLocal)?.blur || 0) * 1000) / 10"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setInnerShadow(selectedLocal!, { blur: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Layer blur -->
-          <div class="mt-3">
-            <div class="flex items-center justify-between mb-1.5">
-              <div class="panel-label">Layer blur</div>
-              <button class="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-white/60 hover:text-white/90"
-                @click="toggleLayerBlur(selectedLocal!)">{{ layerBlur(selectedLocal) ? 'Remove' : 'Add' }}</button>
-            </div>
-            <div v-if="layerBlur(selectedLocal)" class="flex items-center gap-2">
-              <div class="panel-sublabel shrink-0">Radius</div>
-              <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round((layerBlur(selectedLocal)?.radius || 0) * 1000) / 10"
-                class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                @input="setLayerBlur(selectedLocal!, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100))" />
-            </div>
-          </div>
-
-          <!-- Background blur (blurs what's behind the layer, inside its shape) -->
-          <div class="mt-3">
-            <div class="flex items-center justify-between mb-1.5">
-              <div class="panel-label">Background blur</div>
-              <button class="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-white/60 hover:text-white/90"
-                @click="toggleBgBlur(selectedLocal!)">{{ bgBlur(selectedLocal) ? 'Remove' : 'Add' }}</button>
-            </div>
-            <div v-if="bgBlur(selectedLocal)" class="flex items-center gap-2">
-              <div class="panel-sublabel shrink-0">Radius</div>
-              <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round((bgBlur(selectedLocal)?.radius || 0) * 1000) / 10"
-                class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                @input="setBgBlur(selectedLocal!, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100))" />
-            </div>
-          </div>
-
           <!-- Displacement map: turn this image into a lens that warps everything below it -->
           <div v-if="selectedLocal?.kind === 'image'" class="mt-3">
             <div class="flex items-center justify-between">
@@ -8103,14 +8167,6 @@ onUnmounted(() => {
               </label>
             </div>
           </div>
-
-          <!-- Post-processing (adjust / bloom / grain / vignette / duotone / dof).
-               Both the 2D chain and the GPU stage are edited here, so the filter has to
-               admit both — passing only isChainEffect would silently drop dof. -->
-          <PostEffectsControls class="mt-3"
-            :effects="(((selectedLocal as any).effects || []).filter(isPanelEffect) as any)"
-            :depth-source="localDepthSource(selectedLocal)"
-            @update="(fx: any[]) => setLocal(selectedLocal!.id, { effects: [...((selectedLocal as any).effects || []).filter((e: any) => !isPanelEffect(e)), ...fx] } as any)" />
 
           <!-- Layer mask: clip this layer to another layer's silhouette (cross-source) -->
           <div class="mt-3">
@@ -8169,20 +8225,6 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
-          </div>
-
-          <!-- Torn paper edge: raggedy, grain-dissolved silhouette boundary -->
-          <div class="mt-3">
-            <CompositorTornEdgePanel
-              :value="(selectedLocal as any).tornEdge"
-              @update="(patch) => setTornEdge(selectedLocal!, patch)"
-              @toggle="(on) => toggleTornEdge(selectedLocal!, on)"
-            />
-            <CompositorFeatherPanel
-              :value="(selectedLocal as any).feather"
-              @update="(patch) => setFeather(selectedLocal!, patch)"
-              @toggle="(on) => toggleFeather(selectedLocal!, on)"
-            />
           </div>
 
           <!-- Cloner: repeat this layer (linear/grid/radial) with falloff -->

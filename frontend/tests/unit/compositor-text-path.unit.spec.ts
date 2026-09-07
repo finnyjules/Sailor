@@ -21,6 +21,8 @@ import {
   guideFromSpec,
   measureRunPx,
   placeGlyphs,
+  guideFromPathD,
+  guideFromPolyline,
   type PathTextLayer,
   type TextPathSpec,
 } from '~/lib/compositor/textPath'
@@ -122,8 +124,15 @@ describe('guideFromSpec', () => {
   it('returns null (⇒ caller renders flat) for everything it cannot build', () => {
     expect(guideFromSpec(null, W, 100)).toBeNull()
     expect(guideFromSpec({ follow: 'nope' as never }, W, 100)).toBeNull()
-    expect(guideFromSpec({ follow: 'shape', shapeId: 'star' }, W, 100)).toBeNull()   // task 3
-    expect(guideFromSpec({ follow: 'custom', d: 'M0 0L1 0' }, W, 100)).toBeNull()    // task 5
+    // Outline guides build now (see the 'outline guides' block); these are the
+    // cases that still cannot produce geometry.
+    expect(guideFromSpec({ follow: 'shape' }, W, 100)).toBeNull()                    // no shape
+    expect(guideFromSpec({ follow: 'shape', shapeId: 'no-such-shape', size: 0.5 }, W, 100)).toBeNull()
+    expect(guideFromSpec({ follow: 'shape', shapeId: 'circle' }, W, 100)).toBeNull() // no size
+    expect(guideFromSpec({ follow: 'shape', shapeId: 'circle', size: 0 }, W, 100)).toBeNull()
+    expect(guideFromSpec({ follow: 'custom' }, W, 100)).toBeNull()                   // no geometry
+    expect(guideFromSpec({ follow: 'custom', d: 'not a path' }, W, 100)).toBeNull()
+    expect(guideFromSpec({ follow: 'custom', d: 'M5 5' }, W, 100)).toBeNull()        // single point
     expect(guideFromSpec({ follow: 'circle' }, W, 100)).toBeNull()                   // no radius
     expect(guideFromSpec({ follow: 'circle', radius: 0 }, W, 100)).toBeNull()
     expect(guideFromSpec({ follow: 'circle', radius: Number.NaN }, W, 100)).toBeNull()
@@ -475,6 +484,155 @@ describe('degenerate input never produces NaN', () => {
 
 // ── purity ──────────────────────────────────────────────────────────────────
 
+// ── outline guides (shape library + a drawn path) ───────────────────────────
+//
+// These share one route with the parametric curves: whatever the source, a
+// Guide answers the same question. So the properties asserted for a circle
+// above must hold for an outline too, or "one engine" is a claim and not a fact.
+
+describe('outline guides', () => {
+  /** A unit square, drawn clockwise, centred on the origin: perimeter 4. */
+  const SQUARE = 'M-0.5 -0.5 L0.5 -0.5 L0.5 0.5 L-0.5 0.5 Z'
+
+  it('walks a closed outline at its true perimeter', () => {
+    const g = guideFromPathD(SQUARE, 100)!
+    // 4 sides of 100px. The closing chord is IMPLIED by pathFlatten and added by
+    // the guide — without it this would come back 300, not 400.
+    expect(g.length).toBeCloseTo(400, 6)
+    expect(g.closed).toBe(true)
+    expect(g.bounds()).toEqual({ w: 100, h: 100 })
+  })
+
+  it('is centred on the origin, exactly like a parametric guide', () => {
+    // Deliberately OFF-centre input: the guide must recentre it, or a shape whose
+    // path data is not centred would drag its type away from the layer origin.
+    const g = guideFromPolyline([{ x: 10, y: 10 }, { x: 30, y: 10 }, { x: 30, y: 20 }, { x: 10, y: 20 }], true)!
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    for (let s = 0; s <= g.length; s += g.length / 400) {
+      const p = g.at(s)
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x)
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y)
+    }
+    expect((minX + maxX) / 2).toBeCloseTo(0, 6)
+    expect((minY + maxY) / 2).toBeCloseTo(0, 6)
+  })
+
+  it('advances by arc length, not by point index', () => {
+    // The square has 4 points but 4 sides of 100px. A guide that interpolated by
+    // point INDEX would put s=100 a quarter of the way along the first side;
+    // by arc length it lands exactly on the second corner. Walking the corners
+    // is the assertion that separates the two.
+    const g = guideFromPathD(SQUARE, 100)!
+    const corners = [g.at(0), g.at(100), g.at(200), g.at(300)]
+    const expected = [{ x: -50, y: -50 }, { x: 50, y: -50 }, { x: 50, y: 50 }, { x: -50, y: 50 }]
+    corners.forEach((c, i) => {
+      expect(c.x).toBeCloseTo(expected[i]!.x, 6)
+      expect(c.y).toBeCloseTo(expected[i]!.y, 6)
+    })
+    // And WITHIN a side (no corner between the samples) equal steps in `s` are
+    // equal steps in space.
+    for (const step of [7, 33] as const) {
+      expect(dist(g.at(step), g.at(step * 2))).toBeCloseTo(step, 6)
+    }
+  })
+
+  it('wraps a closed outline instead of extrapolating', () => {
+    const g = guideFromPathD(SQUARE, 100)!
+    const at10 = g.at(10)
+    expect(g.at(10 + g.length).x).toBeCloseTo(at10.x, 6)
+    expect(g.at(10 + g.length).y).toBeCloseTo(at10.y, 6)
+    expect(g.at(10 - g.length).x).toBeCloseTo(at10.x, 6)   // negative s too
+  })
+
+  it('extrapolates off an OPEN outline', () => {
+    const g = guideFromPolyline([{ x: 0, y: 0 }, { x: 100, y: 0 }], false)!
+    expect(g.closed).toBe(false)
+    expect(dist(g.at(g.length), g.at(g.length + 40))).toBeCloseTo(40, 6)
+    expect(dist(g.at(0), g.at(-40))).toBeCloseTo(40, 6)
+  })
+
+  it('refits a drawn path to the requested width', () => {
+    const g = guideFromPathD(SQUARE, 100, 250)!
+    expect(g.bounds().w).toBeCloseTo(250, 6)
+    expect(g.bounds().h).toBeCloseTo(250, 6)   // aspect preserved
+  })
+
+  it('follows a real library shape, and places every glyph on it', () => {
+    const spec: TextPathSpec = { follow: 'shape', shapeId: 'circle', size: 0.4 }
+    const g = guideFromSpec(spec, W, 100)!
+    // The library circle, fitted to 0.4 of canvas width.
+    expect(g.bounds().w).toBeCloseTo(0.4 * W, 0)
+    expect(g.closed).toBe(true)
+    const ctx = stubCtx()
+    const layer = { text: 'AROUND THE SHAPE', align: 'center', fontSize: 0.05 } as unknown as PathTextLayer
+    const placed = placeGlyphs(ctx, layer, g, W, spec)
+    expect(placed.length).toBeGreaterThan(10)
+    // Every glyph sits on the outline: its distance from the origin matches the
+    // guide's own radius at that point, within the flattener's tolerance.
+    const r = g.bounds().w / 2
+    for (const p of placed) {
+      expect(Math.hypot(p.x, p.y)).toBeGreaterThan(r - 2)
+      expect(Math.hypot(p.x, p.y)).toBeLessThan(r + 2)
+      expect(Number.isFinite(p.angle)).toBe(true)
+    }
+  })
+
+  it('fit fills an outline exactly, as it does a curve', () => {
+    const spec: TextPathSpec = { follow: 'shape', shapeId: 'circle', size: 0.4, fit: true, start: 0 }
+    const g = guideFromSpec(spec, W, 100)!
+    const ctx = stubCtx()
+    const layer = { text: 'FILL ME', align: 'left', fontSize: 0.05 } as unknown as PathTextLayer
+    const placed = placeGlyphs(ctx, layer, g, W, spec)
+    const spanned = placed.reduce((a, p) => a + p.advance, 0)
+    // Every advance but the last was stretched; the run now spans the outline.
+    expect(spanned).toBeGreaterThan(g.length - 40)
+  })
+
+  it('normalises a closed outline to start at the top, running clockwise', () => {
+    // Same square, authored four different ways: a different starting corner and
+    // the opposite winding. All four must behave identically, or the same dials
+    // would place type differently on shapes that merely LOOK the same.
+    const variants = [
+      'M-0.5 -0.5 L0.5 -0.5 L0.5 0.5 L-0.5 0.5 Z',   // from top-left, clockwise
+      'M0.5 0.5 L-0.5 0.5 L-0.5 -0.5 L0.5 -0.5 Z',   // from bottom-right, clockwise
+      'M-0.5 -0.5 L-0.5 0.5 L0.5 0.5 L0.5 -0.5 Z',   // from top-left, ANTIclockwise
+      'M0.5 -0.5 L-0.5 -0.5 L-0.5 0.5 L0.5 0.5 Z',   // from top-right, anticlockwise
+    ]
+    for (const d of variants) {
+      const g = guideFromPathD(d, 100)!
+      const start = g.at(0)
+      expect(start.y).toBeCloseTo(-50, 6)                 // on the TOP edge
+      expect(Math.cos(start.angle)).toBeGreaterThan(0.5)  // heading RIGHT
+      // A quarter of the way round is the right-hand edge, every time.
+      expect(g.at(g.length / 4).x).toBeCloseTo(50, 6)
+    }
+  })
+
+  it('centres type over the top of any shape at start 0.5, like a ring', () => {
+    const ctx = stubCtx()
+    const layer = { text: 'TOP', align: 'center', fontSize: 0.05 } as unknown as PathTextLayer
+    for (const shapeId of ['circle', 'badge', 'clover-x', 'cloud']) {
+      const spec: TextPathSpec = { follow: 'shape', shapeId, size: 0.5, start: 0.5 }
+      const g = guideFromSpec(spec, W, 100)
+      expect(g, shapeId).not.toBeNull()
+      const placed = placeGlyphs(ctx, layer, g!, W, spec)
+      const mid = placed[Math.floor(placed.length / 2)]!
+      // Above the origin, and upright rather than turned on its side.
+      expect(mid.y, shapeId).toBeLessThan(0)
+      expect(Math.abs(Math.sin(mid.angle)), shapeId).toBeLessThan(0.5)
+    }
+  })
+
+  it('returns null rather than NaN for degenerate outlines', () => {
+    expect(guideFromPolyline([], false)).toBeNull()
+    expect(guideFromPolyline([{ x: 1, y: 1 }], true)).toBeNull()
+    expect(guideFromPolyline([{ x: 1, y: 1 }, { x: 1, y: 1 }], false)).toBeNull()  // zero length
+    expect(guideFromPolyline([{ x: Number.NaN, y: 0 }, { x: 1, y: 0 }], false)).toBeNull()
+    expect(guideFromPathD('', 100)).toBeNull()
+    expect(guideFromPathD(SQUARE, 0)).not.toBeNull()   // W falls back to 1, still a guide
+  })
+})
+
 describe('the module is pure', () => {
   it('imports nothing but the curve sampler (and a type)', () => {
     const src = readFileSync(
@@ -482,7 +640,16 @@ describe('the module is pure', () => {
       'utf8',
     )
     const imports = [...src.matchAll(/\bfrom\s+'([^']+)'/g)].map(m => m[1])
-    expect(imports.sort()).toEqual(['~/composables/useCompositorLayers', '~/lib/vectortype/curve'])
+    // Every dependency is a pure module: the arc-length sampler, the SVG
+    // flattener, and the shape library's data + geometry. Nothing Vue, nothing
+    // that touches a document — this module runs inside the draw loop.
+    expect(imports.sort()).toEqual([
+      '~/composables/useCompositorLayers',
+      '~/lib/compositor/pathFlatten',
+      '~/lib/shapes/catalog',
+      '~/lib/shapes/pathLayer',
+      '~/lib/vectortype/curve',
+    ])
     // The type-only one is erased at runtime, so nothing Vue-shaped is ever loaded.
     expect(src).toMatch(/import type \{ TextLayer \} from '~\/composables\/useCompositorLayers'/)
     expect(src).not.toMatch(/\bdocument\b|\bwindow\b|createElement/)
