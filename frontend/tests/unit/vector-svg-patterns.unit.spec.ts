@@ -460,11 +460,27 @@ describe('vectorTypeSVG — the procedural fills export as real vector', () => {
   })
 
   it('holds a run-anchored lattice STILL while the type moves over it', () => {
+    // A flat `motion.tracks` array is the pre-Task-4 shape and is ONLY read by
+    // `mergeConfig` when `motion.moves` is absent (`hasNewShape`/`hasOldShape`
+    // in `~/lib/vectortype/config`). `DEFAULT_CONFIG.motion.moves` is already
+    // `[]` (an array), so spreading it in here makes `hasNewShape` true and the
+    // `tracks` key below would be silently ignored. Since the 2026-09-04 moves
+    // redesign a hand-authored track travels as a `kind: 'tracks'` move — see
+    // `vectortype-preset-motion.unit.spec.ts`'s `trackMove` for the same shape.
     const moving = mergeConfig({
       ...cfg({ fill: fill('checkerboard'), fillAnchor: 'word' }),
       motion: {
         ...DEFAULT_CONFIG.motion,
-        tracks: [{ path: 'glyph.dx', from: -40, to: 40, easing: 'linear' }],
+        moves: [{
+          id: 'move-drift',
+          kind: 'tracks',
+          presetId: 'custom',
+          at: 0,
+          duration: DEFAULT_CONFIG.motion.duration,
+          loop: true,
+          ease: { kind: 'named', name: 'none' },
+          tracks: [{ path: 'glyph.dx', from: -40, to: 40, hold: 0, cycleOffset: 0, delay: 0 }],
+        }],
         stagger: { delay: 0.12, order: 'first-to-last', seed: 0 },
       },
     } as never)

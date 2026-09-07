@@ -62,13 +62,36 @@ function cfg(patch: Partial<VectorTypeConfig> = {}): VectorTypeConfig {
   return mergeConfig({ ...DEFAULT_CONFIG, text: WORD, size: 100, ...patch })
 }
 
-/** A preset in one slot, easing replaced by `none` so progress is linear and
- *  every expected number below is exact. */
+/**
+ * A preset in one slot, easing replaced by `none` so progress is linear and
+ * every expected number below is exact.
+ *
+ * `motion.in`/`motion.out` (the pre-Task-4 preset slots) are ONLY read by
+ * `mergeConfig` when `motion.moves` is absent — see `hasNewShape`/`hasOldShape`
+ * in `~/lib/vectortype/config`. `cfg()` already round-trips through
+ * `mergeConfig`, so `c.motion` always carries a (possibly empty) `moves`
+ * array, and spreading `{ ...c.motion, [slot]: {...} }` on top of that array
+ * silently drops the slot — `hasNewShape` wins and the old-shape key is never
+ * looked at. Since the 2026-09-04 moves redesign (181d8e11a, building on
+ * fb08289e7) the one working way to add a preset to an already-merged config
+ * is to push a `moves` entry, exactly as `vectortype-preset-motion.unit.spec.ts`
+ * (`presetMove`) and `movesAdapter.ts` do.
+ */
 function withPreset(slot: 'in' | 'out', presetId: string, patch: Partial<VectorTypeConfig> = {}) {
   const c = cfg(patch)
+  const duration = 1
+  const placement = slot === 'in'
+    ? { at: 0, loop: false }
+    : { at: Math.max(0, c.motion.duration - duration), loop: false }
   return mergeConfig({
     ...c,
-    motion: { ...c.motion, [slot]: { presetId, duration: 1, ease: 'none' } },
+    motion: {
+      ...c.motion,
+      moves: [
+        ...c.motion.moves,
+        { id: `move-${slot}`, kind: 'preset', presetId, duration, ease: { kind: 'named', name: 'none' }, ...placement },
+      ],
+    },
   })
 }
 
@@ -367,10 +390,10 @@ describe('vectorTypeSVG — blur exports as a filter the canvas agrees with', ()
   })
 
   it('keeps ONE filter per distinct radius under a stagger, not one per glyph', () => {
-    const c = withPreset('in', 'blur-in', { motion: { ...cfg().motion, stagger: { delay: 0.15, order: 'forward' } } as any })
+    const c = withPreset('in', 'blur-in')
     const staggered = mergeConfig({
       ...c,
-      motion: { ...c.motion, in: { presetId: 'blur-in', duration: 1, ease: 'none' }, stagger: { delay: 0.15, order: 'forward' } },
+      motion: { ...c.motion, stagger: { delay: 0.15, order: 'forward' } },
     })
     const { svg } = vectorTypeSVG(font, staggered, 0.5, BOX)
     const filters = count(svg, FILTERS)

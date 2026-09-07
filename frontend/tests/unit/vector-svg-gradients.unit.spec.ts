@@ -77,9 +77,28 @@ function cfg(patch: Partial<VectorTypeConfig> & Record<string, unknown> = {}): V
   })
 }
 
+/**
+ * `motion.in` (the pre-Task-4 preset slot) is ONLY read by `mergeConfig` when
+ * `motion.moves` is absent (`hasNewShape`/`hasOldShape` in
+ * `~/lib/vectortype/config`). `cfg()` already round-trips through
+ * `mergeConfig`, so `c.motion.moves` is always a (possibly empty) array, and
+ * `{ ...c.motion, in: {...} }` on top of it is silently dropped — `hasNewShape`
+ * wins. Since the 2026-09-04 moves redesign the preset has to be pushed as a
+ * `moves` entry instead — see `vectortype-preset-motion.unit.spec.ts`'s
+ * `presetMove` for the same construction.
+ */
 function withPreset(presetId: string, patch: Partial<VectorTypeConfig> = {}) {
   const c = cfg(patch)
-  return mergeConfig({ ...c, motion: { ...c.motion, in: { presetId, duration: 1, ease: 'none' } } })
+  return mergeConfig({
+    ...c,
+    motion: {
+      ...c.motion,
+      moves: [
+        ...c.motion.moves,
+        { id: 'move-in', kind: 'preset', presetId, at: 0, duration: 1, loop: false, ease: { kind: 'named', name: 'none' } },
+      ],
+    },
+  })
 }
 
 function square(x: number, y: number, s = 10): VectorShape['commands'] {
