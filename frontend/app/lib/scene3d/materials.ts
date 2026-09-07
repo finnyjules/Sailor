@@ -1194,6 +1194,18 @@ function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture
   return tex
 }
 
+/** Material types with no base colour to tint: `image` samples a texture and
+ *  `shaderFill` renders a field, so vertex colours would either do nothing or
+ *  multiply the wrong thing. The Cloner's colour control is hidden for both (see
+ *  panelPresentation), and this is the render-side half of that same rule. */
+const NO_BASE_COLOR: ReadonlySet<string> = new Set(['image', 'shaderFill'])
+
+/** True when this geometry carries the Cloner Vary per-copy colour attribute. */
+export function hasVertexTint(mat: SceneMaterial, geometry?: THREE.BufferGeometry): boolean {
+  if (!geometry || NO_BASE_COLOR.has(mat.type)) return false
+  return geometry.getAttribute('color') !== undefined
+}
+
 // ── Factory ──────────────────────────────────────────────────────────────────
 /** `ownerId` scopes a `shaderFill` material's live field to the calling engine (see
  *  `shaderFillMaterials`'s doc) — SceneEngine always passes its own stable `id`; callers with
@@ -1516,6 +1528,18 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
   applyRelief(m, mat, ownerId)
   applyTextureSet(m, mat)
   applyScreen(m, mat)
+  // Cloner Vary: the merged clone geometry carries one colour per copy. Turning
+  // on vertexColors is what lets a SINGLE material show all of them; the base
+  // colour goes white so the palette reads as the user picked it, rather than
+  // being multiplied by the material's own colour. `gradient` is deliberately
+  // included — its ramp IS the colour, so the copy colour multiplies it as a
+  // tint, and the control carries a hint saying so.
+  if (hasVertexTint(mat, geometry)) {
+    const c = m as THREE.Material & { vertexColors?: boolean; color?: THREE.Color }
+    c.vertexColors = true
+    if (c.color) c.color.set('#ffffff')
+    m.userData.vertexTint = true
+  }
   return m
 }
 
@@ -1589,8 +1613,13 @@ function baseIdentityKey(mat: SceneMaterial): string {
   }
 }
 
-export function updateMaterial(m: THREE.Material, mat: SceneMaterial): boolean {
+export function updateMaterial(m: THREE.Material, mat: SceneMaterial, geometry?: THREE.BufferGeometry): boolean {
   if (m.userData.matType !== mat.type || m.userData.identity !== identityKey(mat)) return false
+  // Vertex-colour state is a property of the GEOMETRY, not of `mat`, so it
+  // cannot ride in identityKey. Crossing this boundary needs a rebuild: three
+  // bakes vertexColors into the compiled program. Callers that pass no geometry
+  // (unit tests, and any path with no mesh in hand) keep the old behaviour.
+  if (geometry && (m.userData.vertexTint === true) !== hasVertexTint(mat, geometry)) return false
   // Screen dials update in place (the identity guard above already forced a rebuild for the
   // two boundaries that need one).
   const su = m.userData.screenUniforms as Record<string, { value: unknown }> | undefined

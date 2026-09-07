@@ -382,7 +382,7 @@ function syncGlbMaterials(root: THREE.Object3D, obj: GlbObject, lightView: boole
     if (m.userData.origMaterial === undefined) m.userData.origMaterial = m.material
     if (override) {
       let ov = m.userData.overrideMaterial as THREE.Material | undefined
-      if (!ov || !updateMaterial(ov, mat)) {
+      if (!ov || !updateMaterial(ov, mat, m.geometry)) {
         if (ov) disposeMaterial(ov)
         ov = materialFor(mat, m.geometry, ownerId)
         m.userData.overrideMaterial = ov
@@ -996,7 +996,7 @@ export class SceneEngine {
       // still gets built/updated underneath so exiting Light View restores it.
       const current = (mesh.userData.realMaterial as THREE.Material | undefined) ?? (mesh.material as THREE.Material)
       let real = current
-      if (!updateMaterial(current, obj.material)) {
+      if (!updateMaterial(current, obj.material, mesh.geometry)) {
         // Type or texture identity changed — rebuild, preserving double-siding.
         disposeMaterial(current)
         const fresh = materialFor(obj.material, mesh.geometry, this.id)
