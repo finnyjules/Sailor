@@ -17,20 +17,26 @@ const EMBED_DIR = path.join(ROOT, 'public', 'embed')
 // than a fixed list, so a bundle nobody remembered to add a test for can never
 // silently skip the network-ref gate below.
 //
-// Per-surface size ceiling, not a shared one: gradient.js measures ~66KB
-// (vs. shader.js's ~18.6KB) purely because GradientFxRenderer statically
-// imports its whole monolithic fragment shader (GRADIENT_FS + BLUR_FS,
-// ~700 lines of GLSL in shaders.ts) as JS template literals that esbuild
-// cannot minify away. Shader Studio instead resolves each effect's GLSL from
-// a config/catalog supplied at runtime, so its bundle never inlines shader
-// source at all — that's a structural difference between the two surfaces,
-// not gradient accidentally growing a dependency. Confirmed by inspecting
-// public/embed/gradient.js directly: no Vue markers, no import statements —
-// see the two tests below, which still run against gradient.js and still
-// pass. 90,000 keeps that Vue guard meaningful (Vue's minified runtime alone
-// is on the order of 100KB) while giving gradient's real, larger footprint
-// room to exist. Do not raise it further to hide an actual new dependency —
-// re-derive the number from what's really in the bundle, as this comment does.
+// Per-surface size ceiling, not a shared one: gradient.js measured 117,150
+// bytes on 2026-08-18, from two structural facts. First (the original ~66KB):
+// GradientFxRenderer statically imports its whole monolithic fragment shader
+// (GRADIENT_FS + BLUR_FS, ~700 lines of GLSL in shaders.ts) as JS template
+// literals that esbuild cannot minify away, where Shader Studio resolves its
+// GLSL from a runtime catalog and inlines none. Second (the ~51KB the shared
+// post stack added when the gradient renderer adopted it): exported gradients
+// must render their post effects offline, so the embed intentionally ships
+// the chain runner (studio/post/chain.ts) plus exactly the 12 catalog frags
+// POST_EFFECTS maps (~14.6KB of GLSL source, via chain.ts's narrowed brace
+// glob — a '*' glob once dragged all 68 catalog frags in here and tripled
+// this bundle) and the shader_effects/manifest.json catalog records pruned to
+// those same 12 effects (~5.2KB minified vs ~38.7KB for the full catalog —
+// see pruneShaderCatalogPlugin in vite.embed.config.ts). 140,000 gives that
+// measured footprint ~23KB of drift room while still tripping on any real
+// heavy dependency: Vue's minified runtime (~100KB), the full frag catalog
+// creeping back (~130KB of source), or the unpruned manifest (~33KB) each
+// blow well past it. Do not raise it further to hide an actual new
+// dependency — re-derive the number from what's really in the bundle, as
+// this comment does.
 //
 // spacetype.js — the monolith that used to bundle the entire three.js runtime
 // PLUS all 25 Space Type effect modules in one file (~1.85MB) — is no longer
@@ -66,7 +72,7 @@ const EMBED_DIR = path.join(ROOT, 'public', 'embed')
 // dragged in was a handful of functions and a couple of URL string tables, not
 // meaningful code size, so removing them barely moves any of the numbers above.
 const SHADER_CEILING_BYTES = 60_000
-const GRADIENT_CEILING_BYTES = 90_000
+const GRADIENT_CEILING_BYTES = 140_000
 const SPACETYPE_EFFECT_CEILING_BYTES = 1_750_000
 
 /** Classifies a built bundle's filename into one of the three size buckets
@@ -173,6 +179,20 @@ describe.each(builtFiles.map(f => [f] as const))('prebuilt %s embed bundle', (fi
     const js = fs.readFileSync(OUT, 'utf8')
     expect(js).not.toMatch(/^\s*import\s/m)
     expect(js).not.toMatch(/\bfrom\s+["'][./]/)
+  })
+
+  // chain.ts (the shared post chain, which the gradient renderer imports)
+  // reads shader_effects/manifest.json for catalog uniform defaults and pass
+  // counts. That file describes all 68 catalog effects (~70KB of JSON), of
+  // which the post chain can only ever use the 12 POST_EFFECTS maps —
+  // vite.embed.config.ts's pruneShaderCatalogPlugin filters the JSON down to
+  // those before it is inlined. 'ascii_dither' is a catalog effect no post
+  // effect maps (and nothing else in the gradient graph references), so its id
+  // surviving into the bundle means the pruning stopped working and the full
+  // catalog is being inlined again.
+  it.runIf(fileName === 'gradient.js')('does not inline unmapped shader-catalog records', () => {
+    const js = fs.readFileSync(OUT, 'utf8')
+    expect(js).not.toContain('ascii_dither')
   })
 
   // The export gate (export.ts) runs externalRefs() on the FINAL HTML, which

@@ -12,6 +12,7 @@
 // promoting it to a direct dependency for no functional benefit.
 import type { Plugin, UserConfig } from 'vite'
 import { fileURLToPath } from 'node:url'
+import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { getSpaceTypeEffectEntries } from './scripts/spacetype-effect-list.mjs'
 
@@ -95,6 +96,62 @@ function spacetypeEffectEntryPlugin(id: string | null): Plugin {
   }
 }
 
+
+// chain.ts (the shared post chain) statically imports shader_effects/
+// manifest.json for catalog uniform defaults and pass counts. That JSON
+// describes the whole 68-effect catalog (~70KB), but the chain can only ever
+// look up the effects POST_EFFECTS maps — every other record is dead weight
+// that would be inlined verbatim into any embed bundle whose surface imports
+// the chain (gradient.js today; JSON does not tree-shake). This plugin prunes
+// the manifest, at embed-build time only, down to the records chain.ts's own
+// narrowed frag glob names. The keep-list is parsed out of chain.ts's source
+// rather than restated here (same no-second-list posture as
+// spacetype-effect-list.mjs), and chain.ts's brace list is itself pinned to
+// POST_EFFECTS by tests/unit/studio-post-chain.unit.spec.ts — so a post
+// effect added there flows through to this prune with no third declaration.
+// Dev/Nuxt builds are untouched: only this config runs the plugin, and the
+// main app ships the full catalog for Shader Studio anyway.
+// tests/unit/embed-build-output.unit.spec.ts asserts an unmapped record's id
+// ('ascii_dither') never reaches the built gradient.js, so this prune failing
+// open would not go unnoticed.
+const CHAIN_PATH = fileURLToPath(new URL('./app/lib/studio/post/chain.ts', import.meta.url))
+
+function postChainFragIds(): Set<string> {
+  const src = fs.readFileSync(CHAIN_PATH, 'utf8')
+  const m = /shader_effects\/\{([^}]+)\}\.frag/.exec(src)
+  if (!m) {
+    throw new Error(
+      'sailor-embed: could not find the braced frag list in app/lib/studio/post/chain.ts — '
+      + 'if FRAG_MODULES\'s glob pattern changed shape, update postChainFragIds() in vite.embed.config.ts to match',
+    )
+  }
+  const ids = m[1]!.split(',').map(id => id.trim()).filter(Boolean)
+  if (ids.length === 0) throw new Error('sailor-embed: chain.ts\'s braced frag list parsed to zero ids')
+  return new Set(ids)
+}
+
+function pruneShaderCatalogPlugin(): Plugin {
+  return {
+    name: 'sailor-embed-prune-shader-catalog',
+    // 'pre' so this sees the raw JSON text before Vite's built-in JSON plugin
+    // turns it into a JS module.
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.replace(/\\/g, '/').endsWith('shader_effects/manifest.json')) return undefined
+      const keep = postChainFragIds()
+      const parsed = JSON.parse(code) as { effects: { id: string }[] }
+      const effects = parsed.effects.filter(e => keep.has(e.id))
+      const missing = [...keep].filter(k => !effects.some(e => e.id === k))
+      if (missing.length > 0) {
+        throw new Error(
+          `sailor-embed: chain.ts's frag glob names catalog effects the manifest has no record for: ${missing.join(', ')}`,
+        )
+      }
+      return { code: JSON.stringify({ ...parsed, effects }), map: null }
+    },
+  }
+}
+
 const config: UserConfig = {
   resolve: {
     alias: {
@@ -102,7 +159,7 @@ const config: UserConfig = {
       '~': fileURLToPath(new URL('./app', import.meta.url)),
     },
   },
-  plugins: effectId ? [spacetypeEffectEntryPlugin(effectId)] : [],
+  plugins: [...(effectId ? [spacetypeEffectEntryPlugin(effectId)] : []), pruneShaderCatalogPlugin()],
   build: {
     outDir: 'public/embed',
     // false, not true: each invocation of this config builds ONE surface's

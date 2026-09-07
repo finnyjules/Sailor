@@ -66,11 +66,32 @@ import shaderCatalogJson from '../../../../../shader_effects/manifest.json'
 // static import, not a fetch — the post chain never depends on the backend
 // catalog endpoint at render time. shader_effects/ sits outside frontend/, so
 // nuxt.config.ts's vite.server.fs.allow grants Vite's dev server read access.
-const FRAG_MODULES = import.meta.glob('../../../../../shader_effects/*.frag', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+//
+// The brace list names ONLY the frags POST_EFFECTS maps (see manifest.ts) —
+// never '*.frag'. A wildcard here eagerly inlines the whole 68-frag catalog
+// (~130KB of GLSL source) into every bundle that transitively imports this
+// module — including the network-free embed bundles, which is how
+// public/embed/gradient.js tripled past its size ceiling (see
+// tests/unit/embed-build-output.unit.spec.ts). The chain can only ever render
+// frags POST_EFFECTS names, so everything else is dead weight. import.meta.glob
+// patterns must be static string literals, so this list cannot be derived from
+// POST_EFFECTS — instead bundledFragIds() plus the drift-guard test in
+// tests/unit/studio-post-chain.unit.spec.ts fails the suite if POST_EFFECTS
+// maps a frag this pattern doesn't name (or vice versa).
+const FRAG_MODULES = import.meta.glob(
+  '../../../../../shader_effects/{bloom,post_adjust,duotone,chromatic_aberration,gaussian_blur,distort,crt_scanlines,halftone,dot_screen,rgb_glitch,post_grain,vignette}.frag',
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>
 const FRAG_SOURCES: Record<string, string> = {}
 for (const [path, source] of Object.entries(FRAG_MODULES)) {
   const id = path.slice(path.lastIndexOf('/') + 1, -'.frag'.length)
   FRAG_SOURCES[id] = source
+}
+
+/** Frag ids the narrowed glob above actually bundled. Exported solely for the
+ *  drift-guard test that pins the glob's hardcoded brace list to POST_EFFECTS. */
+export function bundledFragIds(): string[] {
+  return Object.keys(FRAG_SOURCES)
 }
 
 function fragSource(id: string): string {

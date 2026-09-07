@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { activePasses, passCountFor } from '~/lib/studio/post/chain'
+import { activePasses, bundledFragIds, passCountFor } from '~/lib/studio/post/chain'
 import { DEFAULT_POST } from '~/lib/studio/post/settings'
 import { POST_CHAIN_ORDER, POST_EFFECTS } from '~/lib/studio/post/manifest'
 import shaderCatalog from '../../../shader_effects/manifest.json'
@@ -89,5 +89,18 @@ describe('fixed uniforms', () => {
     expect(defaults.u_curvature).toBeGreaterThan(0)
     expect(defaults.u_vignette).toBeGreaterThan(0)
     expect(film.fixed).toEqual({ u_curvature: 0, u_vignette: 0 })
+  })
+})
+
+// chain.ts's import.meta.glob names its frags one by one in a brace pattern (a
+// '*' glob would inline all 68 catalog frags into the embed bundles — see the
+// FRAG_MODULES comment there). That hardcoded list can drift from POST_EFFECTS
+// in either direction; strict set equality catches both: a newly mapped effect
+// whose frag was never added to the glob (would throw at render time), and a
+// frag left in the glob after its effect was retired (dead bundle weight).
+describe('bundled frag sources', () => {
+  it('bundles exactly the frags POST_EFFECTS maps, nothing more or less', () => {
+    const mapped = [...new Set(POST_EFFECTS.flatMap(e => (e.frag ? [e.frag] : [])))].sort()
+    expect(bundledFragIds().sort()).toEqual(mapped)
   })
 })
