@@ -34,8 +34,16 @@ const cloned = (variant: 'smooth' | 'facet', vary = VARY_ON) =>
   buildGeometry('box', undefined, { cloneCount: 3, cloneOffsetX: 2 }, variant, undefined, undefined, vary)
 
 describe('geoKeyFor and vary', () => {
-  it('is unchanged for an object with no vary settings', () => {
-    expect(geoKeyFor(obj(), 'smooth')).toBe(geoKeyFor(obj({ varyPalette: undefined }), 'smooth'))
+  it('is unchanged for an object with no vary settings — pinned against the pre-Vary key format', () => {
+    // Was `geoKeyFor(obj())` vs `geoKeyFor(obj({ varyPalette: undefined }))` — the same
+    // object literal compared to itself (both are `varyPalette: undefined`), so the
+    // assertion held for any deterministic implementation, including a broken one.
+    // Pinned to a literal instead: this IS what a plain box with no vary settings has
+    // always keyed to, ending in the empty vary suffix (`|smooth||`) rather than
+    // tacking anything vary-specific onto an object that carries none.
+    expect(geoKeyFor(obj(), 'smooth')).toBe(
+      'box|0,2|0,0,1,0,1,0,2,0,2,0,0,0,0,1,0,1.2,0,0,1.5,1,3,1,3,1.2,1.2,1.2,0,0,0,1,0,0,0,0.5,0,0|smooth||',
+    )
   })
 
   it('changes when a palette swatch is edited', () => {

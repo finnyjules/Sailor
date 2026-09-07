@@ -2189,7 +2189,13 @@ async function convertSelectionToMesh() {
   // of keeping vertexColors on over an attribute that is no longer there. A converted
   // object also loses `params`/`modifiers` by design (see convertToMesh), so there is
   // no cloner left to re-derive the colours from either.
-  const geo = buildGeometry(src.primitive, src.params, src.modifiers, 'smooth', src.content, font, varySettingsFor(src))
+  //
+  // colorEnabled: false, same precedent as baseSizeFor in engine.ts — colour is
+  // discarded one line below by meshDataFromGeometry regardless, so building it here
+  // would only pay for a Float32Array of per-vertex colour plus a THREE.Color per
+  // copy that nothing ever reads. Positions are untouched by colour, so no behaviour
+  // changes.
+  const geo = buildGeometry(src.primitive, src.params, src.modifiers, 'smooth', src.content, font, { ...varySettingsFor(src), colorEnabled: false })
   try {
     // Counted here rather than left to encodeMesh's throw so the message can
     // name the real figures in plain words; encodeMesh still guards the library
@@ -2351,7 +2357,13 @@ async function localMeshDataFor(obj: PrimitiveObject): Promise<MeshData | null> 
   // that goes into the boolean is the one on screen, and per-copy colour does not
   // survive `meshDataFromGeometry` (positions and indices only) — a merge result is a
   // plain mesh in the material's own colour, stamp and all dropped together.
-  const geo = buildGeometry(obj.primitive, obj.params, obj.modifiers, 'smooth', obj.content, font, varySettingsFor(obj))
+  //
+  // colorEnabled: false, same precedent as baseSizeFor in engine.ts — colour is
+  // discarded two lines below by meshDataFromGeometry regardless, so building it here
+  // would only pay for a Float32Array of per-vertex colour plus a THREE.Color per
+  // copy that nothing ever reads. Positions are untouched by colour, so no behaviour
+  // changes.
+  const geo = buildGeometry(obj.primitive, obj.params, obj.modifiers, 'smooth', obj.content, font, { ...varySettingsFor(obj), colorEnabled: false })
   const data = meshDataFromGeometry(geo)
   geo.dispose()
   return data

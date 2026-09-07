@@ -383,6 +383,66 @@ describe('scene3d engine deferred geometry', () => {
   })
 })
 
+// Finding 1 (Task 5 review): every existing Vary test calls buildGeometry /
+// materialFor / updateMaterial DIRECTLY with an explicit vary argument, and none
+// constructs anything through syncObject — so deleting `varySettingsFor(obj)` from
+// the real `geometryForObject` call, or the strength argument from the real
+// `materialFor`/`updateMaterial` calls, would go completely unnoticed by the suite
+// while killing the feature in the running app. This closes that gap by driving the
+// actual prototype methods (the same stand-in `this` trick as the deferred-geometry
+// block above — syncObject only touches objectRoots/scene/tokens, no WebGL needed).
+describe('scene3d engine Cloner Vary integration', () => {
+  const makeHost = () => ({
+    objectRoots: new Map<string, THREE.Object3D>(),
+    glbTokens: new Map<string, number>(),
+    fontTokens: new Map<string, number>(),
+    decalTokens: new Map<string, number>(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    geometryForObject: (SceneEngine.prototype as any).geometryForObject,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    syncObject: (SceneEngine.prototype as any).syncObject,
+    token: 0,
+    deferGeometry: false,
+    scene: { add() {}, remove() {} },
+  })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sync = (host: any, obj: PrimitiveObject) => (SceneEngine.prototype as any).syncObject.call(host, obj)
+
+  const varyObj = (modifiers: Record<string, number>): PrimitiveObject => ({
+    ...createPrimitive('box', []),
+    modifiers,
+    varyPalette: ['#ff0000', '#00ff00'],
+  })
+
+  it('reaches the built mesh: varySettingsFor(obj) threads through geometryForObject into buildGeometry', () => {
+    const host = makeHost()
+    const obj = varyObj({ cloneCount: 3, varyColor: 1 })
+    sync(host, obj)
+    const mesh = host.objectRoots.get(obj.id) as THREE.Mesh
+    expect(mesh.geometry.getAttribute('color')).toBeDefined()
+    expect(mesh.geometry.userData.varyTint).toBe(true)
+  })
+
+  it('reaches the built material: colour strength updates the uniform without rebuilding geometry', () => {
+    const host = makeHost()
+    const obj = varyObj({ cloneCount: 3, varyColor: 1, varyColorStrength: 0.4 })
+    sync(host, obj)
+    const mesh = host.objectRoots.get(obj.id) as THREE.Mesh
+    const geoBefore = mesh.geometry
+    const matBefore = mesh.userData.realMaterial as THREE.Material
+    const uniformOf = (m: THREE.Material) =>
+      (m.userData.varyUniforms as { uVaryStrength: { value: number } } | undefined)?.uVaryStrength.value
+    expect(uniformOf(matBefore)).toBeCloseTo(0.4)
+
+    // Only varyColorStrength moves — geoKeyFor deliberately excludes it, so the
+    // geometry object identity must not change; the material updates in place.
+    sync(host, { ...obj, modifiers: { ...obj.modifiers, varyColorStrength: 0.9 } })
+    expect(mesh.geometry).toBe(geoBefore)
+    const matAfter = mesh.userData.realMaterial as THREE.Material
+    expect(uniformOf(matAfter)).toBeCloseTo(0.9)
+  })
+})
+
 describe('scene3d engine light view clay mode', () => {
   const makeHost = () => ({
     objectRoots: new Map<string, THREE.Object3D>(),
