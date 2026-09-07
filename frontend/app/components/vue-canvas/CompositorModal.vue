@@ -3859,6 +3859,14 @@ function layerLabelByKey(key: StackKey): string {
 function maskCandidates(selfKey: StackKey): { key: StackKey; label: string }[] {
   return maskCandidateKeys(presentKeys.value, selfKey).map(k => ({ key: k, label: layerLabelByKey(k) }))
 }
+// Candidate layers for a glass fill's "A specific layer" Reads picker — same cross-source
+// list as the mask picker (maskCandidates), keyed off the selected local layer the way the
+// Mask <select> below (`maskCandidates(localKey(selectedLocal!.id))`) already does. Guarded
+// to `[]` with no selection since this is read outside any v-if="selectedLocal" block.
+const glassCandidates = computed<{ key: StackKey; label: string }[]>(() => {
+  if (!selectedLocal.value) return []
+  return maskCandidates(localKey(selectedLocal.value.id))
+})
 // Current mask ref for any selected key (local → layerMaskRef; wired → treatments).
 function currentMaskRef(key: StackKey): string {
   const r = resolveStackKey(key)
@@ -7446,7 +7454,7 @@ onUnmounted(() => {
             <div class="space-y-3">
               <div>
                 <div class="panel-label mb-1.5">Color</div>
-                <FillControl :model-value="(selectedLocal as any).color"
+                <FillControl :model-value="(selectedLocal as any).color" allow-reads-backdrop :other-layers="glassCandidates"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { color: v })" />
               </div>
               <div>
@@ -7468,7 +7476,7 @@ onUnmounted(() => {
           <template v-if="selectedLocal.kind === 'rect' || selectedLocal.kind === 'ellipse'">
             <div>
               <div class="panel-label mb-1.5">Fill</div>
-              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill"
+              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
             </div>
             <div>
@@ -7514,7 +7522,7 @@ onUnmounted(() => {
           <template v-if="selectedLocal.kind === 'polygon'">
             <div>
               <div class="panel-label mb-1.5">Fill</div>
-              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill"
+              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
             </div>
             <div>
@@ -7547,7 +7555,7 @@ onUnmounted(() => {
           <template v-if="selectedLocal.kind === 'star'">
             <div>
               <div class="panel-label mb-1.5">Fill</div>
-              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill"
+              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
             </div>
             <div>
@@ -7627,7 +7635,7 @@ onUnmounted(() => {
             </div>
             <div>
               <div class="panel-label mb-1.5">Fill</div>
-              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill"
+              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
             </div>
             <div>
@@ -7645,7 +7653,7 @@ onUnmounted(() => {
           <template v-if="selectedLocal.kind === 'brush'">
             <div>
               <div class="panel-label mb-1.5">Fill</div>
-              <FillControl allow-image :model-value="(selectedLocal as any).fill"
+              <FillControl allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
               <button
                 class="mt-2 w-full flex items-center justify-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/70 hover:text-white/90 cursor-pointer transition-colors"

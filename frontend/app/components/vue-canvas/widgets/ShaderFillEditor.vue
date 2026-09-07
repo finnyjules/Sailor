@@ -73,7 +73,14 @@ const props = withDefaults(defineProps<{
    *  neither is in scope here. Left `[]` until wired — the picker below is fully functional but
    *  renders empty (with its own hint) rather than fabricating a list. */
   otherLayers?: { key: string; label: string }[]
-}>(), { showAnchor: true, lockEffect: false, showSpeed: true, showSeed: true, showInput: true, otherLayers: () => [] })
+  /** Glass paint (reading the backdrop or another layer instead of this fill's own pixels)
+   *  only exists in the Compositor's per-layer paint path — `isGlassLayer`/`primaryFillOf`
+   *  resolve against the local layer stack that only the Compositor builds. Every other host
+   *  (Scene3D materials, Vector Type, Space Type, the Compositor's own Mosaic element) has no
+   *  backdrop or layer stack for this to read, so "Layers behind" / "A specific layer" would be
+   *  dead controls there. Default off; the Compositor opts in explicitly per fill slot. */
+  allowReadsBackdrop?: boolean
+}>(), { showAnchor: true, lockEffect: false, showSpeed: true, showSeed: true, showInput: true, otherLayers: () => [], allowReadsBackdrop: false })
 const emit = defineEmits<{ 'update:modelValue': [ShaderSpec] }>()
 
 /** Spread, never a listed-field rebuild — a `ShaderSpec` (or `Fill`) rebuilt by
@@ -325,7 +332,7 @@ watch(eligible, (ok) => {
     <!-- Reads: self-fill (today's behaviour) vs. a glass lens onto the backdrop or one
          bound layer. Gated by `effectReadsInput` — a purely generative effect (Oddgrid,
          Static, …) has nothing behind its own fill to read. -->
-    <div>
+    <div v-if="allowReadsBackdrop">
       <label class="mb-1 block text-[9px] uppercase tracking-[0.1em] text-white/35">Reads</label>
       <div class="flex gap-1.5">
         <StudioButton

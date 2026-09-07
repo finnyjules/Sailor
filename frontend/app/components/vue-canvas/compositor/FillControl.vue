@@ -35,7 +35,15 @@ const props = withDefaults(defineProps<{
    *  child and its own `showAnchor: true` default still applies untouched. Only hosts without
    *  a frame to anchor to (Shape Studio) pass `false`. */
   showAnchor?: boolean
-}>(), { allowNone: false, nested: false, allowImage: false })
+  /** Pass-through to ShaderFillEditor's own `allowReadsBackdrop` (see its doc) — the
+   *  Compositor is the only host with a real layer stack for glass to read, so it's the
+   *  only caller that should ever pass `true` here, and only on primary-fill slots
+   *  (`fill`/`color`), never stroke/tint/background. Default off. */
+  allowReadsBackdrop?: boolean
+  /** Pass-through to ShaderFillEditor's own `otherLayers` (see its doc) — the candidate
+   *  list for its "A specific layer" picker. Only meaningful alongside `allowReadsBackdrop`. */
+  otherLayers?: { key: string; label: string }[]
+}>(), { allowNone: false, nested: false, allowImage: false, allowReadsBackdrop: false, otherLayers: () => [] })
 const emit = defineEmits<{ 'update:modelValue': [Paint] }>()
 
 /** The type list this instance offers. `nested` is set on the fill editor that
@@ -351,7 +359,7 @@ watch(imageFill, drawPreview, { deep: true })
 
       <GradientEditor v-else-if="fill.type === 'gradient'" :model-value="grad" @update:model-value="onGrad" />
 
-      <ShaderFillEditor v-else-if="fill.type === 'shader'" :model-value="fill.shader ?? DEFAULT_SHADER_SPEC" :show-anchor="showAnchor" @update:model-value="onShaderSpec" />
+      <ShaderFillEditor v-else-if="fill.type === 'shader'" :model-value="fill.shader ?? DEFAULT_SHADER_SPEC" :show-anchor="showAnchor" :allow-reads-backdrop="allowReadsBackdrop" :other-layers="otherLayers" @update:model-value="onShaderSpec" />
 
       <div v-else class="space-y-2.5">
         <div v-if="fill.type === 'shapes'" class="mb-1">
