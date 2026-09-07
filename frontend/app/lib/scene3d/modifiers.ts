@@ -10,6 +10,7 @@
 import * as THREE from 'three'
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { modifierValue, totalClones } from '~/lib/scene3d/primParams'
+import { varyWeights, varyColorAt, varyStepFactor, type VarySettings } from '~/lib/vary'
 
 /** Rough ceiling for the final merged geometry. `totalClones` (the doc value
  *  the panel shows back) is never reduced; subdivision stops early, and
@@ -235,29 +236,49 @@ interface ClonerSettings {
   stepScale: number
 }
 
+/** One copy's placement, plus whatever the Vary drivers resolved for it.
+ *
+ *  THIS IS THE REUSABLE UNIT. Today one consumer (`mergeClones`) folds recipes
+ *  into a single merged geometry, which is what keeps a cloned object ONE mesh
+ *  and leaves treatments, outlines, sculpt, decals, picking and GLB export
+ *  untouched. A future InstancedMesh renderer (for thousands of copies, or
+ *  per-copy motion) consumes the SAME list without touching the drivers, the
+ *  palette logic or the UI. */
+export interface CloneRecipe {
+  index: number
+  matrix: THREE.Matrix4
+  weight: number
+  color?: string
+}
+
 /** Copy `i` gets `place(i) . rotationStep(i) . scaleStep(i)`, so each copy spins
  *  and shrinks about its own origin and is only then placed. With the default
  *  step values both step matrices are exactly the identity, which makes the
- *  product bit-identical to the pre-step placement matrix. */
-function applyCloner(geo: THREE.BufferGeometry, total: number, s: ClonerSettings): THREE.BufferGeometry {
-  const copies: THREE.BufferGeometry[] = []
-  const m = new THREE.Matrix4()
-  const spin = new THREE.Matrix4()
-  const rot = new THREE.Matrix4()
-  const scl = new THREE.Matrix4()
-  const euler = new THREE.Euler()
+ *  product bit-identical to the pre-step placement matrix.
+ *
+ *  Vary scales the STEP transforms by each copy's weight. In sequence mode
+ *  `varyStepFactor` returns 1, so the accumulate-by-index maths below runs
+ *  verbatim and every scene saved before Vary existed renders bit-identically —
+ *  that identity is asserted by the unit tests and must not regress. */
+export function planClones(total: number, s: ClonerSettings, vary?: VarySettings): CloneRecipe[] {
+  const steps: number[] = []
+  for (let i = 0; i < total; i++) steps.push(i)
+  const weights = vary ? varyWeights(steps, vary) : steps.map(() => 0)
+
+  const out: CloneRecipe[] = []
   const axisVec = new THREE.Vector3(s.axis === 0 ? 1 : 0, s.axis === 1 ? 1 : 0, s.axis === 2 ? 1 : 0)
   const radialDir = (s.axis + 1) % 3
   const [nx, ny] = s.gridCount
   const rad = (deg: number) => (deg * Math.PI) / 180
+
   for (let i = 0; i < total; i++) {
-    const copy = geo.clone()
+    const m = new THREE.Matrix4()
     if (s.mode === 1) {
       const ang = (i / total) * Math.PI * 2
-      const out = new THREE.Vector3()
-      out.setComponent(radialDir, s.radius)
-      m.makeTranslation(out.x, out.y, out.z)
-      spin.makeRotationAxis(axisVec, ang)
+      const outv = new THREE.Vector3()
+      outv.setComponent(radialDir, s.radius)
+      m.makeTranslation(outv.x, outv.y, outv.z)
+      const spin = new THREE.Matrix4().makeRotationAxis(axisVec, ang)
       m.copy(spin.multiply(m))
     } else if (s.mode === 2) {
       // The grid is centred on the origin rather than growing away from it, so
@@ -273,15 +294,52 @@ function applyCloner(geo: THREE.BufferGeometry, total: number, s: ClonerSettings
     } else {
       m.makeTranslation(s.offset[0] * i, s.offset[1] * i, s.offset[2] * i)
     }
-    euler.set(rad(s.stepRot[0]) * i, rad(s.stepRot[1]) * i, rad(s.stepRot[2]) * i)
-    rot.makeRotationFromEuler(euler)
-    const k = s.stepScale ** i
-    scl.makeScale(k, k, k)
-    copy.applyMatrix4(m.multiply(rot).multiply(scl))
+
+    const w = weights[i] ?? 0
+    // 1 in sequence mode — the existing maths, untouched.
+    const f = vary ? varyStepFactor(w, vary) : 1
+    const euler = new THREE.Euler(
+      rad(s.stepRot[0]) * i * f, rad(s.stepRot[1]) * i * f, rad(s.stepRot[2]) * i * f,
+    )
+    const rot = new THREE.Matrix4().makeRotationFromEuler(euler)
+    // Damping a geometric accumulation means damping the EXPONENT, so f=0 lands
+    // on exactly 1 (no scaling) rather than on stepScale^i.
+    const k = s.stepScale ** (i * f)
+    const scl = new THREE.Matrix4().makeScale(k, k, k)
+
+    out.push({
+      index: i,
+      matrix: m.multiply(rot).multiply(scl),
+      weight: w,
+      color: vary ? varyColorAt(w, i, vary) : undefined,
+    })
+  }
+  return out
+}
+
+/** Fold the recipes into ONE geometry. When any recipe carries a colour, a
+ *  per-vertex `color` attribute is written first, filled with that copy's colour
+ *  across the whole copy — which is how a merged mesh can show N colours through
+ *  a single material (`vertexColors: true`, see materials.ts). */
+export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): THREE.BufferGeometry {
+  const tinted = recipes.some((r) => r.color !== undefined)
+  const copies: THREE.BufferGeometry[] = []
+  const c = new THREE.Color()
+  for (const r of recipes) {
+    const copy = geo.clone()
+    if (tinted) {
+      // three reads vertex colours as LINEAR; the palette is sRGB hex.
+      c.set(r.color ?? '#ffffff').convertSRGBToLinear()
+      const n = copy.getAttribute('position').count
+      const arr = new Float32Array(n * 3)
+      for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b }
+      copy.setAttribute('color', new THREE.BufferAttribute(arr, 3))
+    }
+    copy.applyMatrix4(r.matrix)
     copies.push(copy)
   }
   const merged = mergeGeometries(copies)
-  for (const c of copies) c.dispose()
+  for (const cp of copies) cp.dispose()
   // mergeGeometries returns null if the inputs disagree on attributes; the
   // copies are clones of one geometry, so that cannot happen here.
   return merged ?? geo.clone()
@@ -292,6 +350,7 @@ function applyCloner(geo: THREE.BufferGeometry, total: number, s: ClonerSettings
 export function applyModifiers(
   geo: THREE.BufferGeometry,
   modifiers: Record<string, number> | undefined,
+  vary?: VarySettings,
 ): THREE.BufferGeometry {
   if (!hasModifiers(modifiers)) return geo
   const m = (k: string) => modifierValue(modifiers, k)
@@ -329,7 +388,7 @@ export function applyModifiers(
 
   const { count } = clampedClones(modifiers, out.getAttribute('position').count)
   if (count > 1) {
-    const cloned = applyCloner(out, count, {
+    const recipes = planClones(count, {
       mode: Math.round(m('cloneMode')),
       offset: [m('cloneOffsetX'), m('cloneOffsetY'), m('cloneOffsetZ')],
       radius: m('cloneRadius'),
@@ -338,7 +397,8 @@ export function applyModifiers(
       spacing: [m('cloneSpacingX'), m('cloneSpacingY'), m('cloneSpacingZ')],
       stepRot: [m('cloneStepRotX'), m('cloneStepRotY'), m('cloneStepRotZ')],
       stepScale: m('cloneStepScale'),
-    })
+    }, vary)
+    const cloned = mergeClones(out, recipes)
     out.dispose()
     out = cloned
     out.computeBoundingBox()
