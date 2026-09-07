@@ -40,7 +40,11 @@ const components = (d: MeshData): number => {
 
 const SPHERE_VOL = (4 / 3) * Math.PI * 0.5 ** 3
 
-describe('merge', () => {
+// Every merge at RES 56 costs seconds of lattice + SDF work, and the ladder test walks
+// ~8 shrink steps — all well past the 5s default once the machine is under any load.
+// The suite passes in ~26s run alone; it only ever fails in a full parallel run. One
+// suite-level ceiling instead of per-test ones.
+describe('merge', { timeout: 20_000 }, () => {
   it('union of two overlapping spheres is ONE connected body', () => {
     // Two components would mean the fields were never combined — the single
     // most likely way to get a merge that "looks fine" but did nothing.
@@ -114,5 +118,5 @@ describe('merge', () => {
       return s / (d.positions.length / 3)
     }
     expect(meanX(ca)).toBeLessThan(meanX(cb))
-  }, 20000) // 4 merges at res 56 in one test — comfortably over the 5s default
+  })
 })

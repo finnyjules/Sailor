@@ -25,7 +25,9 @@ const signedVolumeOf = (data: any) => {
 }
 const volumeOf = (data: any) => Math.abs(signedVolumeOf(data))
 
-describe('remesh', () => {
+// Each remesh runs a real surface-nets pass over a 3D grid; the suite takes ~8s alone and
+// overruns the 5s default only under full-suite parallel load.
+describe('remesh', { timeout: 20_000 }, () => {
   it('preserves a sphere\'s volume within grid tolerance', () => {
     const src = meshDataFromGeometry(new THREE.SphereGeometry(0.5, 64, 48))
     const { data, open } = remesh(src, 64)

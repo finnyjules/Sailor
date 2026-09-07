@@ -1208,6 +1208,7 @@ describe('the wdth cascade seam (Archivo fixture)', () => {
     expect(archivo.axes.some(a => a.tag === 'wdth' && a.min < a.default && a.max > a.default)).toBe(true)
   })
 
+  // Sweeps the entire wdth dial and re-shapes text at each step — the one heavy case here.
   it('run width is monotone and jump-free across the whole dial, through the axis→remap handoff', () => {
     const natural = widthAt(1)
     let prev = widthAt(0.5)
@@ -1220,7 +1221,7 @@ describe('the wdth cascade seam (Archivo fixture)', () => {
     }
     // one 0.01 dial step never moves the run by more than 1.5% of its natural width
     expect(maxStep).toBeLessThan(0.015)
-  })
+  }, 20_000)
 
   it('spends the real axis first: at the axis extremes the residual is 1 and beyond them it grows', () => {
     const wdth = archivo.axes.find(a => a.tag === 'wdth')!

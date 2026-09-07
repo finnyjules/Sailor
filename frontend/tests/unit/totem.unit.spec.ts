@@ -501,6 +501,7 @@ describe('paintTotem', () => {
     expect(JSON.stringify(a.rects)).not.toBe(JSON.stringify(b.rects))
   })
 
+  // Walks every awkward-corner combination through a full paint; ~3s alone, over 5s under load.
   it('survives the awkward corners: one region, no rings, thin palettes, either way up', () => {
     for (const over of [
       { regions: 1 }, { regions: 30 }, { core: 0 }, { core: 0.6, coreRings: 8 },
@@ -516,7 +517,7 @@ describe('paintTotem', () => {
         for (const r of rec.rects) { expect(Number.isFinite(r.x)).toBe(true); expect(r.w).toBeGreaterThanOrEqual(0) }
       }
     }
-  })
+  }, 20_000)
 
   it('keeps a tiny box under a sane number of marks even at the finest detail', () => {
     const rec = recorder()
