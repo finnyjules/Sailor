@@ -327,3 +327,66 @@ describe('frame template commands', () => {
     expect(applyCompositorCommand(state(), { op: 'freezeTemplate', target: 'nope' }).ok).toBe(false)
   })
 })
+
+describe('setLayerEffect writes through the effect stack', () => {
+  // This file's harness has no makeDoc/run helper (unlike the brief's sketch) — it
+  // builds a CompositorState literal and calls applyCompositorCommand(state, cmd)
+  // directly, reading the result back off r.template.layers. rectState() below is
+  // that same pattern, reused from baseState() in agent-torn-edge/agent-feather specs.
+  const rectState = (extra: Record<string, unknown> = {}): CompositorState => ({
+    layers: [{ id: 'L1', kind: 'rect', x: 0.5, y: 0.5, rotation: 0, opacity: 1, w: 0.4, h: 0.3, fill: '#fff', stroke: '', strokeWidth: 0, radius: 0, ...extra } as any],
+  })
+
+  it('adds an effect to a layer that has none, storing an id-stamped list', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'bloom', intensity: 1.5 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = (r.template.layers[0] as any).effects
+    expect(fx.map((e: any) => e.type)).toEqual(['bloom'])
+    expect(typeof fx[0].id).toBe('string')
+    expect(fx[0].intensity).toBe(1.5)
+  })
+
+  it('reaches torn edge and feather through the same op', () => {
+    const s1 = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'torn_edge', amount: 14 } } })
+    expect(s1.ok).toBe(true); if (!s1.ok) return
+    const s2 = applyCompositorCommand(s1.template, { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'feather', amount: 0.3 } } })
+    expect(s2.ok).toBe(true); if (!s2.ok) return
+    const layer = s2.template.layers[0] as any
+    expect(layer.effects.map((e: any) => e.type)).toEqual(['torn_edge', 'feather'])
+    expect(layer.tornEdge).toBeUndefined()
+    expect(layer.feather).toBeUndefined()
+  })
+
+  it('edits an existing instance in place and keeps the stack order', () => {
+    const before = rectState({
+      effects: [
+        { id: 'x', type: 'grain', amount: 0.2, size: 2, visible: true },
+        { id: 'y', type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
+      ],
+    })
+    const r = applyCompositorCommand(before, { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'adjust', brightness: 1.4 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = (r.template.layers[0] as any).effects
+    expect(fx.map((e: any) => e.type)).toEqual(['grain', 'adjust'])   // order preserved
+    expect(fx[1].brightness).toBe(1.4)
+    expect(fx[1].id).toBe('y')                                       // same instance
+  })
+
+  it('removes by type', () => {
+    const before = rectState({ effects: [{ id: 'x', type: 'grain', amount: 0.2, size: 2, visible: true }] })
+    const r = applyCompositorCommand(before, { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'grain' }, remove: true } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect((r.template.layers[0] as any).effects).toEqual([])
+  })
+
+  it('migrates a legacy tornEdge field on the first effect edit of that layer', () => {
+    const before = rectState({ tornEdge: { style: 'ragged', amount: 10, roughness: 0.5, grain: 0, grainTexture: 0, lipWidth: 0, lipVariation: 0, lipColor: '#fff', seed: 1 } })
+    const r = applyCompositorCommand(before, { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'bloom', intensity: 1 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const layer = r.template.layers[0] as any
+    // The legacy torn edge folds in at its own pipeline position first; the newly added
+    // bloom lands at the end of the orderable region — where the plus menu adds one too.
+    expect(layer.effects.map((e: any) => e.type)).toEqual(['torn_edge', 'bloom'])
+    expect(layer.tornEdge).toBeUndefined()
+  })
+})

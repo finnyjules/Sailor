@@ -13,8 +13,9 @@ import type { Command, CommandResult, CommandSpec, SurfaceSnapshot } from '~/lib
 import { contrastRatio, parseColor, type LayoutIssue } from '~/lib/agent/verify'
 import { SWISS_LIMITS } from '~/lib/agent/designPrinciples'
 import { defaultPostEffect, POST_EFFECT_DEFAULTS, POST_FX_PARAM_CLAMP, type PostEffect } from '~/lib/compositor/postEffects'
-import { sanitizeTornEdge, tornEdgeActive } from '~/lib/compositor/tornEdge'
-import { sanitizeFeather, featherActive } from '~/lib/compositor/feather'
+import { sanitizeTornEdge } from '~/lib/compositor/tornEdge'
+import { sanitizeFeather } from '~/lib/compositor/feather'
+import { effectStackOf, writeStackToLayer, addEffect, EFFECT_LABELS, EFFECT_ORDER, isEffectKind, type EffectInstance } from '~/lib/compositor/effectStack'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { readGrid } from '~/lib/frame/gridConfig'
@@ -454,9 +455,8 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
     const cur: Record<string, unknown> = { x: l.x, y: l.y, opacity: l.opacity }
     if (l.rotation) cur.rotation = l.rotation
     if (l.blend && l.blend !== 'normal') cur.blend = l.blend
-    if (l.effects?.length) cur.effects = l.effects.filter(e => e.visible).map(e => e.type).join(', ')
-    if (tornEdgeActive(l.tornEdge)) cur.tornEdge = `${l.tornEdge.style} (amount ${l.tornEdge.amount}, lip ${l.tornEdge.lipWidth})`
-    if (featherActive(l.feather)) cur.feather = `${l.feather.curve} (amount ${l.feather.amount})`
+    const st = effectStackOf(l)
+    if (st.length) cur.effects = st.filter(e => e.visible).map(e => EFFECT_LABELS[e.type]).join(', ')
     if (l.maskBreak) cur.maskBreak = maskBreakEdgeLabel(l.maskBreak)
     if (l.kind === 'text') {
       cur.text = l.text; cur.fontFamily = l.fontFamily; cur.fontWeight = l.fontWeight
@@ -831,30 +831,43 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
       const raw = cmd.args?.effect as Record<string, unknown> | undefined
       const type = raw?.type as string | undefined
-      if (!type || !(type in POST_EFFECT_DEFAULTS)) return { ok: false, reason: 'invalid', detail: `effect.type must be one of ${Object.keys(POST_EFFECT_DEFAULTS).join('|')}` }
-      const others = (layer.effects ?? []).filter(e => e.type !== type)
-      if (cmd.args?.remove === true) { layer.effects = others; return { ok: true, template: state, inverse: snapshot() } }
-      const cur = (layer.effects ?? []).find(e => e.type === type) as PostEffect | undefined
-      const next = sanitizePostEffect(raw, cur)
-      if (!next) return { ok: false, reason: 'invalid', detail: 'invalid effect' }
-      layer.effects = [...others, next]
+      if (!type || !isEffectKind(type)) return { ok: false, reason: 'invalid', detail: `effect.type must be one of ${EFFECT_ORDER.join('|')}` }
+      const stack = effectStackOf(layer)
+      if (cmd.args?.remove === true) {
+        Object.assign(layer, writeStackToLayer(stack.filter(e => e.type !== type)))
+        return { ok: true, template: state, inverse: snapshot() }
+      }
+      const cur = stack.find(e => e.type === type)
+      // Torn edge / feather validate through their own sanitizers (same clamps the
+      // old setLayerTornEdge/setLayerFeather handlers used); every other kind goes
+      // through the shared post-effect sanitizer, same as before.
+      const sanitized =
+        type === 'torn_edge' ? sanitizeTornEdge(raw, cur as any)
+        : type === 'feather' ? sanitizeFeather(raw, cur as any)
+        : sanitizePostEffect(raw, cur as PostEffect | undefined)
+      if (!sanitized) return { ok: false, reason: 'invalid', detail: 'invalid effect' }
+      const next: Record<string, unknown> = { ...sanitized, type, visible: true }
+      const withEffect = cur
+        ? stack.map(e => (e.id === cur.id ? ({ ...next, id: cur.id } as unknown as EffectInstance) : e))     // edit in place, order kept
+        : addEffect(stack, type)
+      const applied: EffectInstance[] = cur
+        ? withEffect
+        : withEffect.map(e => (e.type === type && !stack.some(s => s.id === e.id) ? ({ ...e, ...next } as unknown as EffectInstance) : e))
+      Object.assign(layer, writeStackToLayer(applied))
       return { ok: true, template: state, inverse: snapshot() }
     }
+    // Thin aliases: torn edge and feather are now just two more entries in the
+    // stack, reachable through setLayerEffect — kept as named ops so an existing
+    // agent recipe (and the command hints) keep working unchanged.
     case 'setLayerTornEdge': {
-      const layer = findLayer(state, cmd.target)
-      if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
-      if (cmd.args?.remove === true) { delete layer.tornEdge; return { ok: true, template: state, inverse: snapshot() } }
-      const patch = (cmd.args?.patch ?? {}) as Record<string, unknown>
-      layer.tornEdge = sanitizeTornEdge(patch, layer.tornEdge)
-      return { ok: true, template: state, inverse: snapshot() }
+      const a = cmd.args ?? {}
+      const patch = (a.patch ?? {}) as Record<string, unknown>
+      return applyCompositorCommand(state, { ...cmd, op: 'setLayerEffect', args: { effect: { ...patch, type: 'torn_edge' }, remove: a.remove } })
     }
     case 'setLayerFeather': {
-      const layer = findLayer(state, cmd.target)
-      if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
-      if (cmd.args?.remove === true) { delete layer.feather; return { ok: true, template: state, inverse: snapshot() } }
-      const patch = (cmd.args?.patch ?? {}) as Record<string, unknown>
-      layer.feather = sanitizeFeather(patch, layer.feather)
-      return { ok: true, template: state, inverse: snapshot() }
+      const a = cmd.args ?? {}
+      const patch = (a.patch ?? {}) as Record<string, unknown>
+      return applyCompositorCommand(state, { ...cmd, op: 'setLayerEffect', args: { effect: { ...patch, type: 'feather' }, remove: a.remove } })
     }
     case 'setLayerMaskBreak': {
       const layer = findLayer(state, cmd.target)
@@ -1001,7 +1014,7 @@ export function summarizeCompositorChange(state: CompositorState, cmd: Command):
     case 'editImage': return { label: name, before: '', after: String(a.instruction ?? 'edited') }
     case 'setLayerEffect': {
       const type = String((a.effect as Record<string, unknown> | undefined)?.type ?? '')
-      const had = !!layer?.effects?.some(e => e.type === type)
+      const had = effectStackOf(layer).some(e => e.type === type)
       return { label: `${type} effect (layer ${name || String(cmd.target ?? '')})`, before: had ? type : 'none', after: a.remove === true ? 'removed' : 'updated' }
     }
     case 'setPostEffect': {
