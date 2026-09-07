@@ -7,6 +7,12 @@
  * `expandClones` is the SINGLE SOURCE OF TRUTH, mirrored byte-for-byte by
  * `_expand_clones` in comfy_extras/nodes_compositor.py so the live client
  * preview and the server-side wired composite never drift. Keep the two in sync.
+ *
+ * TEMPORARILY OUT OF SYNC: the Vary fields below (weight, tint, tintStrength, and
+ * the damping of the step transforms by `varyStepFactor`) are NOT yet mirrored in
+ * Python. Until they are, a wired render ignores Vary entirely — it does not render
+ * it wrongly, it renders the un-varied array. Everything that existed before Vary
+ * is still mirrored exactly.
  */
 
 import {
