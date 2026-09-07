@@ -1,0 +1,945 @@
+{
+  "note": "Generated from expandClones() by tests/unit/cloner-vary-parity.unit.spec.ts. Read by the Python mirror in tests-unit/comfy_extras_test/cloner_vary_test.py. Regenerate with UPDATE_CLONER_VARY_FIXTURE=1.",
+  "cases": [
+    {
+      "name": "linear, no vary",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 3,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 10,
+        "stepScale": 0.5,
+        "stepOpacity": 0.9,
+        "varyMode": "sequence",
+        "varySeed": 0,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": false,
+        "varyPalette": [
+          "#4c6ef5",
+          "#f59f00"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.4,
+          "dy": 0,
+          "drot": 20,
+          "dscale": 0.25,
+          "dopacity": 0.81,
+          "weight": 1,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 10,
+          "dscale": 0.5,
+          "dopacity": 0.9,
+          "weight": 0.5,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "sequence, colour cycle",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 4,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 0.8,
+        "stepOpacity": 1,
+        "varyMode": "sequence",
+        "varySeed": 0,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": true,
+        "varyPalette": [
+          "#ff0000",
+          "#00ff00",
+          "#0000ff"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.6000000000000001,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.5120000000000001,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": "#ff0000",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.4,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.6400000000000001,
+          "dopacity": 1,
+          "weight": 0.6666666666666666,
+          "tint": "#0000ff",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.8,
+          "dopacity": 1,
+          "weight": 0.3333333333333333,
+          "tint": "#00ff00",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": "#ff0000",
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "random seed 7, colour cycle",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 4,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 12,
+        "stepScale": 0.8,
+        "stepOpacity": 0.9,
+        "varyMode": "random",
+        "varySeed": 7,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": true,
+        "varyPalette": [
+          "#ff0000",
+          "#00ff00",
+          "#0000ff"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.6000000000000001,
+          "dy": 0,
+          "drot": 33.26899840962142,
+          "dscale": 0.5386728384322967,
+          "dopacity": 0.7466914468138355,
+          "weight": 0.924138844711706,
+          "tint": "#0000ff",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.4,
+          "dy": 0,
+          "drot": 17.446299148723483,
+          "dscale": 0.7229471947642333,
+          "dopacity": 0.8579759105081212,
+          "weight": 0.7269291311968118,
+          "tint": "#0000ff",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 3.4648535884916782,
+          "dscale": 0.9376017648299556,
+          "dopacity": 0.9700365154525016,
+          "weight": 0.2887377990409732,
+          "tint": "#ff0000",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0.471620294963941,
+          "tint": "#00ff00",
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "random seed 3, colour blend, strength 0.4",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 5,
+        "countY": 1,
+        "spacingX": 0.15,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 0.7,
+        "stepOpacity": 0.8,
+        "varyMode": "random",
+        "varySeed": 3,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": true,
+        "varyPalette": [
+          "#123456",
+          "#abcdef"
+        ],
+        "varyColorSpread": "blend",
+        "varyColorStrength": 0.4
+      },
+      "expected": [
+        {
+          "dx": 0.6,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.8952264077493459,
+          "dopacity": 0.9330999671162445,
+          "weight": 0.07757667382247746,
+          "tint": "#1e4062",
+          "tintStrength": 0.4
+        },
+        {
+          "dx": 0.44999999999999996,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.5727120786449686,
+          "dopacity": 0.7056019069645876,
+          "weight": 0.5208964806515723,
+          "tint": "#6284a6",
+          "tintStrength": 0.4
+        },
+        {
+          "dx": 0.3,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.6098063387507091,
+          "dopacity": 0.7338569861718105,
+          "weight": 0.6933678102213889,
+          "tint": "#7c9ec0",
+          "tintStrength": 0.4
+        },
+        {
+          "dx": 0.15,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.9437128731454695,
+          "dopacity": 0.964404625899603,
+          "weight": 0.16242609662003815,
+          "tint": "#2b4d6f",
+          "tintStrength": 0.4
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0.10578142385929823,
+          "tint": "#224466",
+          "tintStrength": 0.4
+        }
+      ]
+    },
+    {
+      "name": "falloff centred mid-array, colour blend",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 5,
+        "countY": 1,
+        "spacingX": 0.15,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 10,
+        "stepScale": 0.5,
+        "stepOpacity": 1,
+        "varyMode": "falloff",
+        "varySeed": 0,
+        "varyFalloffCenter": 0.5,
+        "varyFalloffRadius": 0.4,
+        "varyColor": true,
+        "varyPalette": [
+          "#ff0000",
+          "#00ff00",
+          "#0000ff"
+        ],
+        "varyColorSpread": "blend",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.6,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": "#ff0000",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.44999999999999996,
+          "dy": 0,
+          "drot": 9.4921875,
+          "dscale": 0.5179128468009786,
+          "dopacity": 1,
+          "weight": 0.31640625,
+          "tint": "#5ea100",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.3,
+          "dy": 0,
+          "drot": 20,
+          "dscale": 0.25,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": "#0000ff",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.15,
+          "dy": 0,
+          "drot": 3.1640625,
+          "dscale": 0.8030678282083855,
+          "dopacity": 1,
+          "weight": 0.31640625,
+          "tint": "#5ea100",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": "#ff0000",
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "grid 3x2 mirrorX, random seed 5",
+      "aspect": 1.5,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 3,
+        "countY": 2,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": true,
+        "mirrorY": false,
+        "nudgeX": 0.01,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0.5,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 0.9,
+        "stepOpacity": 0.95,
+        "varyMode": "random",
+        "varySeed": 5,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": true,
+        "varyPalette": [
+          "#ff0000",
+          "#00ff00",
+          "#0000ff",
+          "#ffff00"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": -0.35000000000000003,
+          "dy": 0.25,
+          "drot": 0,
+          "dscale": 0.877882817196999,
+          "dopacity": 0.9385618002577497,
+          "weight": 0.24723143968731165,
+          "tint": "#ff0000",
+          "tintStrength": 1
+        },
+        {
+          "dx": -0.16,
+          "dy": 0.375,
+          "drot": 0,
+          "dscale": 0.9897608377526322,
+          "dopacity": 0.9950020429321252,
+          "weight": 0.02442077803425491,
+          "tint": "#ff0000",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.45,
+          "dy": 0.25,
+          "drot": 0,
+          "dscale": 0.690262538748267,
+          "dopacity": 0.8348844346426517,
+          "weight": 0.7036473967600614,
+          "tint": "#0000ff",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.24000000000000002,
+          "dy": 0.375,
+          "drot": 0,
+          "dscale": 0.7311381641319942,
+          "dopacity": 0.8585983213674623,
+          "weight": 0.7430507247336209,
+          "tint": "#0000ff",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.03,
+          "dy": 0.25,
+          "drot": 0,
+          "dscale": 0.8266371456305277,
+          "dopacity": 0.9114774380196259,
+          "weight": 0.602342787431553,
+          "tint": "#0000ff",
+          "tintStrength": 1
+        },
+        {
+          "dx": -0.38,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.8807221582990442,
+          "dopacity": 0.9400384130709653,
+          "weight": 0.6027546126861125,
+          "tint": "#0000ff",
+          "tintStrength": 1
+        },
+        {
+          "dx": -0.19,
+          "dy": 0.125,
+          "drot": 0,
+          "dscale": 0.963989238885468,
+          "dopacity": 0.9823036692934113,
+          "weight": 0.34809195064008236,
+          "tint": "#00ff00",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.42000000000000004,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.8855852270589155,
+          "dopacity": 0.9425618111865156,
+          "weight": 0.5766229324508458,
+          "tint": "#0000ff",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.21000000000000002,
+          "dy": 0.125,
+          "drot": 0,
+          "dscale": 0.9931427482942524,
+          "dopacity": 0.9966557487865623,
+          "weight": 0.0653078684117645,
+          "tint": "#ff0000",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0.2831040422897786,
+          "tint": "#00ff00",
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "radial partial sweep, faceCenter, falloff",
+      "aspect": 1.7777777777777777,
+      "cloner": {
+        "enabled": true,
+        "mode": "radial",
+        "countX": 3,
+        "countY": 1,
+        "spacingX": 0.25,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 15,
+        "sweepAngle": 240,
+        "faceCenter": true,
+        "stepRotation": 0,
+        "stepScale": 0.85,
+        "stepOpacity": 0.9,
+        "varyMode": "falloff",
+        "varySeed": 0,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.6,
+        "varyColor": true,
+        "varyPalette": [
+          "#4c6ef5",
+          "#f59f00"
+        ],
+        "varyColorSpread": "blend",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": -0.07764571353075618,
+          "dy": -0.5151604406875031,
+          "drot": 255,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": "#4c6ef5",
+          "tintStrength": 1
+        },
+        {
+          "dx": -0.26730195725651035,
+          "dy": -0.24212826652775823,
+          "drot": 207,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": "#4c6ef5",
+          "tintStrength": 1
+        },
+        {
+          "dx": -0.28007412794916053,
+          "dy": 0.1911295730908268,
+          "drot": 159,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": "#4c6ef5",
+          "tintStrength": 1
+        },
+        {
+          "dx": -0.10751038486359007,
+          "dy": 0.49790956079850757,
+          "drot": 111,
+          "dscale": 0.9191838938205271,
+          "dopacity": 0.9468341070515949,
+          "weight": 0.2592592592592592,
+          "tint": "#787bb5",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.13619714992186405,
+          "dy": 0.4752034795671295,
+          "drot": 63,
+          "dscale": 0.8865795769171401,
+          "dopacity": 0.9249229646352567,
+          "weight": 0.7407407407407407,
+          "tint": "#c99240",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2897777478867205,
+          "dy": 0.13803682405467774,
+          "drot": 15,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": "#f59f00",
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "emptied palette disables colour",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 3,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 1,
+        "stepOpacity": 1,
+        "varyMode": "sequence",
+        "varySeed": 0,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": true,
+        "varyPalette": [],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.4,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0.5,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "single-swatch palette",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 3,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 1,
+        "stepOpacity": 1,
+        "varyMode": "random",
+        "varySeed": 11,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": true,
+        "varyPalette": [
+          "#0abab5"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.4,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0.3468351063784212,
+          "tint": "#0abab5",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0.7386755011975765,
+          "tint": "#0abab5",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0.568240862339735,
+          "tint": "#0abab5",
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "negative stepScale in sequence mode",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 4,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": -0.5,
+        "stepOpacity": 1,
+        "varyMode": "sequence",
+        "varySeed": 0,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": false,
+        "varyPalette": [
+          "#4c6ef5",
+          "#f59f00"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.6000000000000001,
+          "dy": 0,
+          "drot": 0,
+          "dscale": -0.125,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.4,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.25,
+          "dopacity": 1,
+          "weight": 0.6666666666666666,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 0,
+          "dscale": -0.5,
+          "dopacity": 1,
+          "weight": 0.3333333333333333,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "negative stepScale under a fractional exponent",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 4,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": -0.5,
+        "stepOpacity": 1,
+        "varyMode": "falloff",
+        "varySeed": 0,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.7,
+        "varyColor": false,
+        "varyPalette": [
+          "#4c6ef5",
+          "#f59f00"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.6000000000000001,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.4,
+          "dy": 0,
+          "drot": 0,
+          "dscale": "NaN",
+          "dopacity": 1,
+          "weight": 0.00658676168880249,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 0,
+          "dscale": "NaN",
+          "dopacity": 1,
+          "weight": 0.5356872907893314,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
+    }
+  ]
+}

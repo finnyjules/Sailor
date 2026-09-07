@@ -4,15 +4,17 @@
  * (linear/grid or radial) with optional per-clone falloff. Clones do NOT count
  * against the 16-layer cap; the layer stays a single selectable object.
  *
- * `expandClones` is the SINGLE SOURCE OF TRUTH, mirrored byte-for-byte by
- * `_expand_clones` in comfy_extras/nodes_compositor.py so the live client
- * preview and the server-side wired composite never drift. Keep the two in sync.
+ * `expandClones` is the SINGLE SOURCE OF TRUTH, mirrored by `_expand_clones` in
+ * comfy_extras/nodes_compositor.py so the live client preview and the server-side
+ * wired composite never drift. Keep the two in sync — Vary included: weight, tint,
+ * tintStrength and the damping of the step transforms by `varyStepFactor` are all
+ * mirrored there now.
  *
- * TEMPORARILY OUT OF SYNC: the Vary fields below (weight, tint, tintStrength, and
- * the damping of the step transforms by `varyStepFactor`) are NOT yet mirrored in
- * Python. Until they are, a wired render ignores Vary entirely — it does not render
- * it wrongly, it renders the un-varied array. Everything that existed before Vary
- * is still mirrored exactly.
+ * The mirror is held in place from both ends. `tests/unit/cloner-vary-parity.unit.spec.ts`
+ * pins this function's output into `tests/fixtures/cloner-vary-parity.json`, and
+ * `tests-unit/comfy_extras_test/cloner_vary_test.py` measures the Python against
+ * that same file. Change the maths here and the fixture spec fails until you
+ * regenerate it; regenerate it and Python fails until it is mirrored.
  */
 
 import {

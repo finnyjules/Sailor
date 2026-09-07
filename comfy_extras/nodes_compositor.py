@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 from fractions import Fraction
 
 import numpy as np
@@ -174,6 +175,14 @@ def _prep_layer(layer: dict, canvas_h: int, canvas_w: int):
     t = _fit_to_canvas(t, canvas_h, canvas_w)  # no-op when already canvas-sized
     out, geo = _transform(t, layer["x"], layer["y"], layer["rot"], layer["scl"])
     rgb = out[:, :3, :, :]
+    # Cloner Vary colour. Absent on every layer that has no cloner, and None on
+    # every clone whose cloner has colour off, so the untinted path is untouched.
+    tint = layer.get("_tint")
+    if tint:
+        strength = layer.get("_tint_strength", 1.0)
+        if isinstance(strength, bool) or not isinstance(strength, (int, float)):
+            strength = 1.0
+        rgb = _tint_rgb(rgb, tint, strength)
     a = (geo * layer["op"]).clamp(0.0, 1.0)
     if out.shape[1] >= 4:  # fold the image's own alpha into coverage
         a = (a * out[:, 3:4, :, :].clamp(0.0, 1.0)).clamp(0.0, 1.0)
@@ -203,15 +212,303 @@ def _parse_cloner(raw) -> dict | None:
     return obj if isinstance(obj, dict) else None
 
 
+# ── Cloner Vary ───────────────────────────────────────────────────────────────
+#
+# A line-comparable mirror of frontend/app/lib/vary/index.ts (the shared per-copy
+# variation model) plus `varyOf` from frontend/app/composables/useCloner.ts. That
+# module is deliberately import-free so this mirror can stay small and literal;
+# read the two side by side and keep them that way.
+#
+# The contract is asserted from BOTH sides:
+#   * frontend/tests/unit/vary.unit.spec.ts pins REFERENCE_HASHES;
+#   * frontend/tests/unit/cloner-vary-parity.unit.spec.ts pins whole-cloner output
+#     into frontend/tests/fixtures/cloner-vary-parity.json;
+#   * tests-unit/comfy_extras_test/cloner_vary_test.py reads both of those and
+#     measures this file against them.
+
+_DEFAULT_VARY = {
+    "mode": "sequence",
+    "seed": 0,
+    "falloffCenter": 0.0,
+    "falloffRadius": 0.5,
+    "colorEnabled": False,
+    "palette": ["#4c6ef5", "#f59f00"],
+    "spread": "cycle",
+    "strength": 1.0,
+}
+
+
+def _clamp01(n: float) -> float:
+    """clamp01 from lib/vary. NaN fails both comparisons and passes straight
+    through, exactly as it does there — `_finite` is the guard, not this."""
+    return 0.0 if n < 0 else (1.0 if n > 1 else n)
+
+
+def _hash32(i: int, seed: int) -> float:
+    """Mirror of hash32() in frontend/app/lib/vary/index.ts.
+
+    SPECIFIED, not borrowed: written in explicit 32-bit integer operations with
+    no language-native RNG and no float accumulation, so the client preview and
+    this server composite draw the SAME random values. `Math.trunc(x) | 0` is
+    `int(x)` (truncation toward zero) masked into two's complement; `>>>` is a
+    plain `>>` once the value is held unsigned, which it is throughout. The
+    signedness of the `Math.imul` operands does not matter — the low 32 bits of a
+    product are the same either way, and that is all we keep.
+
+    Do not "improve" it without changing lib/vary and re-pinning REFERENCE_HASHES
+    in frontend/tests/unit/vary.unit.spec.ts, which this is asserted against.
+    """
+    M = 0xFFFFFFFF
+    h = (int(i) & M) ^ ((int(seed) * 0x9E3779B9) & M)
+    h = ((h ^ (h >> 16)) * 0x85EBCA6B) & M
+    h = ((h ^ (h >> 13)) * 0xC2B2AE35) & M
+    h = (h ^ (h >> 16)) & M
+    return h / 4294967296.0
+
+
+def _smooth(t: float) -> float:
+    """Smoothstep on an already-normalised t."""
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _vary_weights(steps: list[int], v: dict) -> list[float]:
+    """Mirror of varyWeights(). One weight in [0,1] per copy.
+
+    `steps` are the per-copy STEP INDEXES (k), not positions in the list — Frame's
+    grid cloner indexes by `k = |iy|*nx + |ix|`, which repeats across mirrored
+    twins so a mirrored copy gets its positive twin's falloff. A single copy is
+    weight 0 in every mode, the value that leaves the step maths at identity.
+    """
+    n = len(steps)
+    if n == 0:
+        return []
+    max_step = 0
+    for s in steps:
+        if s > max_step:
+            max_step = s
+    if max_step <= 0:
+        return [0.0 for _ in steps]
+
+    if v["mode"] == "random":
+        # Hashed by ARRAY POSITION, not by step value — deliberately unlike the two
+        # ordered drivers below. Sequence and falloff read `s` so that mirrored twins,
+        # which share a step, share a weight; random wants the opposite. Two mirrored
+        # copies drawing the same swatch would read as a deliberate pattern and defeat
+        # the point of the mode, so every copy gets its own uncorrelated draw. That
+        # makes the ENUMERATION ORDER of `specs` part of the cross-language contract:
+        # it is pinned by the grid/mirror case in cloner-vary-parity.json.
+        return [_hash32(i, v["seed"]) for i in range(n)]
+
+    if v["mode"] == "falloff":
+        r = max(1e-6, v["falloffRadius"])
+        c = _clamp01(v["falloffCenter"])
+        return [_smooth(_clamp01(1.0 - _clamp01(abs(s / max_step - c) / r))) for s in steps]
+
+    # sequence
+    return [_clamp01(s / max_step) for s in steps]
+
+
+def _vary_step_factor(w: float, v: dict) -> float:
+    """Mirror of varyStepFactor(). How much of the accumulated step transform a
+    copy gets.
+
+    Sequence returns exactly 1 — the pre-Vary accumulate-by-index maths is then
+    used verbatim, and THAT is the mechanism by which every saved workflow still
+    composites byte-identically. Random and falloff scale it by the weight.
+    """
+    return 1.0 if v["mode"] == "sequence" else _clamp01(w)
+
+
+# ── hex helpers ───────────────────────────────────────────────────────────────
+
+_HEX6 = re.compile(r"^[0-9a-fA-F]{6}$")
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    """`#rgb` / `#rrggbb` / `#rrggbbaa` → (r, g, b) 0..255. Alpha is dropped.
+
+    Mirror of hexToRgb() in lib/vary — which keeps its own copy rather than
+    reusing lib/color/convert.ts precisely because that one has no 8-digit
+    branch, and StudioColor emits 8-digit alpha hex into palette swatches.
+    """
+    h = (hex_color or "").strip().lstrip("#")
+    if len(h) == 3:
+        h = h[0] * 2 + h[1] * 2 + h[2] * 2
+    if len(h) == 8:
+        h = h[:6]
+    if len(h) != 6 or not _HEX6.match(h):
+        return (0, 0, 0)
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def _rgb_to_hex(r: float, g: float, b: float) -> str:
+    # `math.floor(n + 0.5)` is JS `Math.round` (half away from zero, upward);
+    # Python's own round() is half-to-EVEN and would give a different swatch on
+    # every .5 channel, which a blended palette hits routinely.
+    def c(n: float) -> str:
+        return "%02x" % max(0, min(255, math.floor(n + 0.5)))
+    return "#" + c(r) + c(g) + c(b)
+
+
+def _mix_hex(a: str, b: str, t: float) -> str:
+    """Mirror of mixHex(). A straight per-channel lerp in sRGB.
+
+    Deliberately NOT perceptual: this same interpolation has to run identically
+    here and in the browser, and a perceptual space would need the whole
+    conversion chain mirrored for a difference only visible between distant hues.
+    """
+    k = _clamp01(t)
+    if k == 0:
+        return a
+    if k == 1:
+        return b
+    r1, g1, b1 = _hex_to_rgb(a)
+    r2, g2, b2 = _hex_to_rgb(b)
+    return _rgb_to_hex(r1 + (r2 - r1) * k, g1 + (g2 - g1) * k, b1 + (b2 - b1) * k)
+
+
+def _vary_color_at(w: float, index: int, v: dict) -> str | None:
+    """Mirror of varyColorAt(). The copy's colour, or None when colour variation
+    is off. `strength` is NOT applied here — the caller blends toward whatever
+    base it has, which this function cannot see.
+    """
+    if not v["colorEnabled"]:
+        return None
+    pal = v["palette"]
+    if not pal:
+        return None
+    if len(pal) == 1:
+        return pal[0]
+
+    if v["spread"] == "cycle":
+        # Sequence walks the palette in order. The other two drivers have no
+        # meaningful order, so the weight chooses.
+        if v["mode"] == "sequence":
+            return pal[((index % len(pal)) + len(pal)) % len(pal)]
+        return pal[min(len(pal) - 1, math.floor(_clamp01(w) * len(pal)))]
+
+    # blend: walk the palette as an even ramp, ends hit exactly.
+    t = _clamp01(w) * (len(pal) - 1)
+    i0 = min(len(pal) - 1, math.floor(t))
+    i1 = min(len(pal) - 1, i0 + 1)
+    return _mix_hex(pal[i0], pal[i1], t - i0)
+
+
+def _finite(n, fallback: float) -> float:
+    """Mirror of useCloner's `finite`. A CLEARED number field in the panel is
+    `Number('')` → NaN, and `_clamp01` lets NaN straight through, so a NaN would
+    reach the step exponent and make the copy vanish. This is the one chokepoint.
+    """
+    if isinstance(n, bool) or not isinstance(n, (int, float)):
+        return fallback
+    return n if math.isfinite(n) else fallback
+
+
+def _coalesce(v, fallback):
+    """JavaScript `??` — substitutes for a MISSING value only, never a falsy one."""
+    return fallback if v is None else v
+
+
+def _vary_of(cloner: dict) -> dict:
+    """Mirror of varyOf(). The cloner's vary fields in lib/vary's vocabulary."""
+    return {
+        "mode": _coalesce(cloner.get("varyMode"), _DEFAULT_VARY["mode"]),
+        "seed": _finite(cloner.get("varySeed"), _DEFAULT_VARY["seed"]),
+        "falloffCenter": _finite(cloner.get("varyFalloffCenter"), _DEFAULT_VARY["falloffCenter"]),
+        "falloffRadius": _finite(cloner.get("varyFalloffRadius"), _DEFAULT_VARY["falloffRadius"]),
+        "colorEnabled": bool(cloner.get("varyColor")),
+        # Substituted only for a MISSING field, never for an EMPTY one: lib/vary's
+        # contract is that an empty palette disables colour, so a palette the user
+        # deliberately cleared must survive as []. An old saved cloner with no
+        # varyPalette at all still gets the default.
+        "palette": _coalesce(cloner.get("varyPalette"), _DEFAULT_VARY["palette"]),
+        "spread": _coalesce(cloner.get("varyColorSpread"), _DEFAULT_VARY["spread"]),
+        "strength": _finite(cloner.get("varyColorStrength"), _DEFAULT_VARY["strength"]),
+    }
+
+
+def _js_pow(base: float, exp: float) -> float:
+    """`Math.pow` semantics for the one case where the two languages diverge.
+
+    The step exponent is `k * varyStepFactor`, which is FRACTIONAL in random and
+    falloff modes. A negative base under a fractional exponent is NaN in
+    JavaScript but a COMPLEX number in Python (or an exception), so `**` alone
+    would either crash the render or poison the tensor. `stepScale` is clamped to
+    0.5..1.5 by the panel, but a hand-edited `layer{i}_cloner` widget JSON is not.
+
+    Returning the NaN keeps the mirror honest; `_drawable` then drops that one
+    copy, which is the same thing the viewer sees on the client (a NaN scale
+    reaches drawImage and nothing is painted).
+    """
+    try:
+        if base < 0.0 and exp != math.floor(exp):
+            return math.nan
+        return float(base ** exp)
+    except (OverflowError, ValueError, ZeroDivisionError):
+        # A render must not die on a hand-edited widget value.
+        return math.nan
+
+
+def _tint_rgb(rgb, hex_color: str | None, strength: float):
+    """Wash one clone's RGB toward its palette colour, leaving alpha alone.
+
+    The tensor equivalent of the client's `tintScratch` (useCompositorLayers.ts),
+    which fills the copy's isolated scratch surface with `source-atop` at
+    `globalAlpha = strength`. Unfolding the canvas compositing formula, that is
+    exactly, and only:
+
+        out.rgb = strength * tint + (1 - strength) * src.rgb
+        out.a   = src.a
+
+    — a straight lerp in sRGB that preserves alpha. `source-atop` confines the
+    fill to existing ink, which is why the client needs the scratch detour at all;
+    here the layer already IS isolated, so the lerp is the whole of it.
+
+    Returns `rgb` unchanged for a missing colour, and for a strength of 0 or NaN
+    (`not (a > 0)` mirrors tintScratch's own early return).
+    """
+    if not hex_color:
+        return rgb
+    a = _clamp01(strength)
+    if not (a > 0.0):
+        return rgb
+    r, g, b = _hex_to_rgb(hex_color)
+    tint = torch.tensor([r / 255.0, g / 255.0, b / 255.0],
+                        dtype=rgb.dtype, device=rgb.device).view(1, 3, 1, 1)
+    return rgb * (1.0 - a) + tint * a
+
+
+def _drawable(layer: dict) -> bool:
+    """Whether a (clone) layer has a transform that can be rasterised at all.
+
+    Only ever False through `_js_pow`'s NaN, i.e. a hand-edited negative
+    `stepScale` under a fractional vary exponent. The client drops exactly that
+    copy and draws the rest; skipping it here matters MORE than it does there,
+    because one NaN reaching `affine_grid` blanks the entire composite rather
+    than one copy.
+    """
+    for k in ("x", "y", "rot", "scl", "op"):
+        v = layer.get(k, 0.0)
+        if not isinstance(v, (int, float)) or not math.isfinite(v):
+            return False
+    return True
+
+
 def _expand_clones(layer: dict, cloner: dict | None, aspect: float) -> list[dict]:
     """Expand a layer into clone instances per its cloner config.
 
     Mirror of expandClones() in frontend/app/composables/useCloner.ts — keep the
-    two in sync. Returns layer dicts (shallow copies) in BACK-TO-FRONT order
-    (the original, k=0, LAST) so the full-opacity original composites on top
-    within its z slot, exactly like the client preview. Offsets add to x/y;
-    falloff steps rotation/scale/opacity by clone index k. `aspect = W/H` keeps
-    the radial ring circular on screen (x maps to W, y maps to H).
+    two in sync, and keep them readable side by side. Returns layer dicts
+    (shallow copies) in BACK-TO-FRONT order (the original, k=0, LAST) so the
+    full-opacity original composites on top within its z slot, exactly like the
+    client preview. Offsets add to x/y; falloff steps rotation/scale/opacity by
+    clone index k. `aspect = W/H` keeps the radial ring circular on screen (x
+    maps to W, y maps to H).
+
+    Two passes, the same two the TypeScript has: placement first, because a Vary
+    weight normalises by max(k) and so cannot be resolved until every copy's step
+    is known; then the drivers. `_weight`, `_tint` and `_tint_strength` are added
+    as layer keys for `_prep_layer` to pick up at the paste site.
     """
     if not cloner or not cloner.get("enabled"):
         return [layer]
@@ -262,14 +559,25 @@ def _expand_clones(layer: dict, cloner: dict | None, aspect: float) -> list[dict
                     dy += (abs(ix) % 2) * stag_y * sy
                 specs.append((k, dx, dy, 0.0))
 
+    # Pass 2 — drivers. Sequence mode has _vary_step_factor == 1, so the three
+    # step expressions below reduce to EXACTLY the pre-Vary ones and an existing
+    # workflow composites byte-identically.
+    vary = _vary_of(cloner)
+    weights = _vary_weights([k for (k, _dx, _dy, _r) in specs], vary)
+
     out = []
-    for (k, dx, dy, extra_rot) in specs:
+    for i, (k, dx, dy, extra_rot) in enumerate(specs):
+        w = weights[i] if i < len(weights) else 0.0
+        f = _vary_step_factor(w, vary)
         c = dict(layer)
         c["x"] = layer["x"] + dx
         c["y"] = layer["y"] + dy
-        c["rot"] = layer["rot"] + k * step_rot + extra_rot
-        c["scl"] = layer["scl"] * (step_scl ** k)
-        c["op"] = layer["op"] * (step_op ** k)
+        c["rot"] = layer["rot"] + k * step_rot * f + extra_rot
+        c["scl"] = layer["scl"] * _js_pow(step_scl, k * f)
+        c["op"] = layer["op"] * _js_pow(step_op, k * f)
+        c["_weight"] = w
+        c["_tint"] = _vary_color_at(w, k, vary)
+        c["_tint_strength"] = vary["strength"]
         out.append(c)
     out.reverse()  # original (k=0) last → composites on top
     return out
@@ -287,6 +595,8 @@ def _composite_layers(layers: list[dict], canvas_h: int, canvas_w: int) -> torch
     ordered = sorted(layers, key=lambda l: l["z"])
     result = None
     for layer in ordered:
+        if not _drawable(layer):
+            continue  # a NaN transform draws nothing rather than blanking the canvas
         rgb, a = _prep_layer(layer, canvas_h, canvas_w)
         if result is None:
             result = rgb * a
@@ -308,7 +618,7 @@ def _protect_coverage(layers: list[dict], canvas_h: int, canvas_w: int):
     """
     cov = None
     for layer in layers:
-        if not layer.get("protect"):
+        if not layer.get("protect") or not _drawable(layer):
             continue
         _rgb, a = _prep_layer(layer, canvas_h, canvas_w)
         cov = a if cov is None else torch.maximum(cov, a)
