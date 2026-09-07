@@ -54,6 +54,7 @@ import {
   silhouetteRasterFits,
 } from '~/lib/compositor/silhouetteCache'
 import { paintMaskRelease } from '~/lib/compositor/maskBreak'
+import { guideFromSpec, measureRunPx, placeGlyphs, type TextPathSpec } from '~/lib/compositor/textPath'
 // Runtime import is safe: wiredLayer.ts only imports the WiredLayer TYPE back from
 // this file, and type imports are erased — so this is not a module cycle.
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
@@ -358,6 +359,11 @@ export interface TextLayer extends LayerCommon {
    *  count and each is placed by a seeded rule (overriding flow `align`).
    *  Absent ⇒ normal line-based rendering (byte-identical to before). */
   expressive?: ExpressiveParams
+  /** Follow a curve instead of flat baselines. Absent ⇒ the layer renders exactly
+   *  as it always has. When present, the guide is owned by this layer (it adds no
+   *  entry to the layer list) and the box/wrap/valign/justify/expressive controls
+   *  no longer apply — see lib/compositor/textPath.ts. */
+  path?: TextPathSpec
 }
 
 /**
@@ -1192,6 +1198,19 @@ export function localLayerBox(
   wiredLive?: WiredLive | null,
 ): { w: number; h: number } {
   if (layer.kind === 'text') {
+    // Curved text's extent is the guide's, not a line block's. Without this the
+    // selection box, drag hit-test, rotation pivot, mask fit and every effect's
+    // offscreen would all size themselves to a line of text that isn't drawn.
+    // Inflated by the font size so ascenders/descenders either side of the
+    // baseline stay inside the box.
+    if (layer.path && ctx) {
+      const guide = textPathGuide(ctx, layer, W)
+      if (guide) {
+        const b = guide.bounds()
+        const pad = layer.fontSize * W
+        return { w: Math.max(b.w + pad, 4), h: Math.max(b.h + pad, 4) }
+      }
+    }
     const lines = wrappedTextLines(ctx, layer, W)
     const lineH = layer.fontSize * W * layer.lineHeight
     // With a text box, the box width IS the layer width (selection/handles
@@ -2372,8 +2391,75 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
   }
 }
 
+/**
+ * Build this layer's guide, with the font already applied so the natural run
+ * width that sizes a `curve`/`wave` is measured under the real font.
+ *
+ * Returns null whenever the spec can't produce a curve; every caller treats that
+ * as "render flat", never as "render nothing".
+ */
+function textPathGuide(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
+  if (!layer.path) return null
+  applyFont(ctx, layer, W)
+  return guideFromSpec(layer.path, W, measureRunPx(ctx, layer))
+}
+
+/**
+ * Text along a guide: one glyph at a time, each centred on its own half-advance
+ * and turned to the tangent there. Advances come from `placeGlyphs`, which
+ * measures cumulative prefixes so kerning pairs survive.
+ *
+ * Fills resolve against the GUIDE's box rather than a line box, so a gradient or
+ * pattern fill spans the ring the type sits on — which is what "fit the text"
+ * means once the text is a circle.
+ *
+ * Underline/strikethrough are deliberately not drawn here: on a curve they stop
+ * being rectangles and become stroked path segments (see the design spec).
+ */
+function drawTextOnPath(
+  ctx: CanvasRenderingContext2D,
+  layer: TextLayer,
+  W: number,
+  guide: NonNullable<ReturnType<typeof textPathGuide>>,
+) {
+  applyFont(ctx, layer, W)
+  const placed = placeGlyphs(ctx, layer, guide, W)
+  if (!placed.length) return
+  // Each glyph is drawn centred on its own placement, so the anchor is the glyph
+  // centre in both axes — not the run's left edge.
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  const textBox = guide.bounds()
+  const stroke = hasPaint(layer.strokeColor) && layer.strokeWidth > 0
+  const dash = stroke ? strokeDashSegments(layer.strokeDash, W) : null
+  if (stroke) {
+    ctx.lineJoin = 'round'
+    ctx.lineWidth = layer.strokeWidth * W
+    ctx.strokeStyle = resolvePaint(ctx, layer.strokeColor, textBox, _fieldCtx)
+    if (dash) ctx.setLineDash([dash[0], dash[1]])
+  }
+  ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
+  for (const g of placed) {
+    ctx.save()
+    ctx.translate(g.x, g.y)
+    ctx.rotate(g.angle)
+    if (stroke) ctx.strokeText(g.ch, 0, 0)
+    ctx.fillText(g.ch, 0, 0)
+    ctx.restore()
+  }
+  if (dash) ctx.setLineDash([])   // never leak the pattern to the next layer
+}
+
 function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
   const lineH = layer.fontSize * W * layer.lineHeight
+  // A path takes over the whole layout: one run along a curve, so box wrapping,
+  // valign, justify and expressive placement have nothing to act on. `null` from
+  // textPathGuide means the spec couldn't make a curve (missing dial, zero
+  // radius) — fall through to flat text rather than drawing nothing.
+  if (layer.path) {
+    const guide = textPathGuide(ctx, layer, W)
+    if (guide) { drawTextOnPath(ctx, layer, W, guide); return }
+  }
   if (layer.expressive) { drawExpressiveText(ctx, layer, W, lineH); return }
   const lines = wrappedTextLines(ctx, layer, W)
   applyFont(ctx, layer, W)

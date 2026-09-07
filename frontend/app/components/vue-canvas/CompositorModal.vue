@@ -131,6 +131,7 @@ import {
   type ToolbarShapeId, type ToolbarAiId, type ToolbarInsertId,
 } from '~/lib/compositor/toolbarMenus'
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
+import type { TextPathSpec, TextPathFollow } from '~/lib/compositor/textPath'
 import { shapeById } from '~/lib/shapes/catalog'
 import { createShapeLayer, swapShapeLayer } from '~/lib/shapes/pathLayer'
 import { SHAPE_PICKER_WIDTH, anchorAbove } from '~/lib/shapes/pickerLayout'
@@ -1785,6 +1786,13 @@ const expandedGroups = ref<Set<string>>(new Set())
 // the document on a disclosure click, exactly as expandedGroups already avoids.
 const expandedLayers = ref<Set<string>>(new Set())
 const layerStack = (layer: any): EffectInstance[] => effectStackOf(layer)
+// How many effects each layer carries, so the row template can decide whether to draw the
+// disclosure chevron without rebuilding a stack array for every layer on every render.
+const layerFxCount = computed(() => {
+  const m = new Map<string, number>()
+  for (const l of localLayers.value as any[]) if (l?.id) m.set(l.id, effectStackOf(l).length)
+  return m
+})
 const setLayerStack = (layerId: string, stack: EffectInstance[]) =>
   setLocal(layerId, writeStackToLayer(stack) as any)
 const layerById = (layerId: string): any => localLayers.value.find((l: any) => l.id === layerId)
@@ -1801,6 +1809,9 @@ function addLayerEffect(layerId: string, kind: EffectKind) {
   const before = layerStack(l)
   const beforeIds = new Set(before.map(e => e.id))
   const next = addEffect(before, kind)
+  // A pinned kind already on the layer is refused by returning the same array. Nothing was
+  // added, so write nothing and move the selection nowhere.
+  if (next === before) return
   setLayerStack(layerId, next)
   expandedLayers.value = new Set(expandedLayers.value).add(layerId)
   // Select what was just added so its dials are on screen straight away.
@@ -1838,15 +1849,28 @@ function onFxMenuOutside(ev: PointerEvent) {
   if (t?.closest('[data-testid="add-effect"]')) return
   closeFxMenu()
 }
+/** One menu item's height, and the menu's own width (`w-48`), for the viewport clamp. */
+const FX_MENU_ITEM_H = 30
+const FX_MENU_W = 192
 function openFxMenu(layerId: string, ev: MouseEvent) {
   const r = (ev.currentTarget as HTMLElement).getBoundingClientRect()
-  fxMenuPos.value = { top: r.bottom + 4, left: r.left }
+  // Keep the whole menu on screen: flip it above the button when the full list would run off
+  // the bottom (a layer near the end of a long panel), and pull it left off the right edge.
+  const h = EFFECT_ORDER.length * FX_MENU_ITEM_H + 8
+  let top = r.bottom + 4
+  if (top + h > window.innerHeight) top = Math.max(8, r.top - 4 - h)
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - 8 - FX_MENU_W))
+  fxMenuPos.value = { top, left }
   fxMenuLayerId.value = layerId
   document.addEventListener('pointerdown', onFxMenuOutside, true)
+  // The menu is teleported and fixed, so it would hang in place while the layer panel scrolls
+  // out from under its anchor. Dismiss instead of tracking.
+  document.addEventListener('scroll', closeFxMenu, true)
 }
 function closeFxMenu() {
   fxMenuLayerId.value = null
   document.removeEventListener('pointerdown', onFxMenuOutside, true)
+  document.removeEventListener('scroll', closeFxMenu, true)
 }
 function pickFxKind(kind: EffectKind) {
   if (fxMenuLayerId.value) addLayerEffect(fxMenuLayerId.value, kind)
@@ -3475,6 +3499,78 @@ function toggleExpressive(l: any) {
   if (!l) return
   setLocal(l.id, { expressive: l.expressive ? undefined : defaultExpressiveParams() } as any)
 }
+// ── Type on a path ──────────────────────────────────────────────────────────
+// The guide is OWNED by the text layer: no entry in the layer list, no separate
+// object to keep in sync, and it dies with the layer. See lib/compositor/textPath.ts.
+const textPath = computed<TextPathSpec | undefined>(() => (selectedLocal.value as any)?.path)
+/** Dials that must be PRESENT for a mode to produce a curve at all. Switching
+ *  mode without seeding these would leave the type flat with a full panel of
+ *  controls that visibly do nothing. */
+function textPathDefaults(follow: TextPathFollow): TextPathSpec {
+  switch (follow) {
+    case 'circle': return { follow, radius: 0.22, startAngle: 0 }
+    case 'wave': return { follow, amplitude: 0.04, frequency: 2 }
+    case 'shape': return { follow, shapeId: 'circle', size: 0.5 }
+    case 'custom': return { follow, size: 0.5 }
+    default: return { follow: 'curve', bend: 0.35 }
+  }
+}
+function setTextPath(l: any, patch: Partial<TextPathSpec>) {
+  if (!l) return
+  const cur: TextPathSpec = l.path ?? textPathDefaults('curve')
+  setLocal(l.id, { path: { ...cur, ...patch } } as any)
+}
+/** Switching mode keeps every dial already set (so going circle → curve → circle
+ *  comes back to the ring you had) and seeds only what the new mode needs. */
+function setTextFollow(l: any, follow: TextPathFollow | 'off') {
+  if (!l) return
+  if (follow === 'off') { setLocal(l.id, { path: undefined } as any); return }
+  const cur = l.path as TextPathSpec | undefined
+  setLocal(l.id, { path: { ...textPathDefaults(follow), ...(cur ?? {}), follow } } as any)
+}
+/**
+ * `Start` as the SLIDER sees it.
+ *
+ * An inside run walks the guide backwards (`s' = length − s`), so raising the
+ * stored `start` slides the type anticlockwise while an outside run slides
+ * clockwise. Dragging the same slider right would move the type opposite ways
+ * depending on Side, which reads as a bug. Mirroring the value here keeps the
+ * gesture consistent and leaves the engine (and its tests) untouched.
+ */
+const textPathStartUi = computed(() => {
+  const p = textPath.value
+  const v = p?.start ?? 0
+  return p?.side === 'inside' ? 1 - v : v
+})
+function setTextPathStartUi(l: any, ui: number) {
+  const inside = (l?.path as TextPathSpec | undefined)?.side === 'inside'
+  setTextPath(l, { start: inside ? 1 - ui : ui })
+}
+const TEXT_FOLLOW_OPTIONS: { v: TextPathFollow | 'off'; label: string }[] = [
+  { v: 'off', label: 'Off' },
+  { v: 'curve', label: 'Curve' },
+  { v: 'circle', label: 'Circle' },
+  { v: 'wave', label: 'Wave' },
+  { v: 'shape', label: 'Shape' },
+  { v: 'custom', label: 'Drawn path' },
+]
+const textPathShape = computed(() => {
+  const id = textPath.value?.shapeId
+  return id ? shapeById(id) : undefined
+})
+function openTextPathShapePicker() {
+  if (textPathShapePickerOpen.value) { textPathShapePickerOpen.value = false; return }
+  const r = textPathShapeButtonRef.value?.getBoundingClientRect()
+  textPathShapeAnchor.value = r ? { x: r.right - SHAPE_PICKER_WIDTH, y: r.bottom + 4 } : { x: 16, y: 16 }
+  textPathShapePickerOpen.value = true
+}
+const textPathShapePickerOpen = ref(false)
+const textPathShapeAnchor = ref({ x: 0, y: 0 })
+const textPathShapeButtonRef = ref<HTMLElement | null>(null)
+// Anchored to the layer it opened on — switching selection would otherwise
+// re-point some OTHER layer's guide on pick.
+watch(() => selectedLocal.value?.id, () => { textPathShapePickerOpen.value = false })
+
 function rerollExpressive(l: any) {
   if (!l?.expressive) return
   setExpressive(l, { seed: ((l.expressive.seed | 0) + 1) })
@@ -5148,6 +5244,7 @@ function handleKeydown(e: KeyboardEvent) {
     if (aiMenuOpen.value) { aiMenuOpen.value = false; return }
     if (insertMenuOpen.value) { insertMenuOpen.value = false; return }
     if (pickerDialogOpen.value) { pickerDialogOpen.value = false; return }
+    if (fxMenuLayerId.value) { closeFxMenu(); return }
     if (editingId.value) { endEdit(); return }
     if (typing) return
     // The busy guard now lives inside exitSmartMode itself.
@@ -5413,6 +5510,7 @@ onUnmounted(() => {
               @toggle-visible="toggleLayerEffect"
               @drag-start="onEffectDragStart"
               @drop-on="onEffectDrop"
+              @drag-end="fxDragFrom = null"
             />
             <div
               v-else
@@ -5444,7 +5542,8 @@ onUnmounted(() => {
               </button>
               <!-- Layer effect disclosure — only on a layer that actually has effects. -->
               <button
-                v-if="(row.kind === 'local' || row.kind === 'child' || row.kind === 'wired') && effectStackOf(row.layer).length"
+                v-if="(row.kind === 'local' || row.kind === 'child' || row.kind === 'wired')
+                  && row.layer?.id && (layerFxCount.get(row.layer.id) ?? 0) > 0"
                 type="button" data-testid="layer-fx-toggle"
                 title="Show/hide effects"
                 class="-ml-1 shrink-0 text-white/40 hover:text-white/80 cursor-pointer"
@@ -6895,7 +6994,7 @@ onUnmounted(() => {
                   </button>
                 </div>
               </div>
-              <div>
+              <div v-if="!textPath">
                 <div class="panel-label mb-1.5">V-align</div>
                 <div class="flex gap-1">
                   <button v-for="v in (['top','middle','bottom','justify'] as const)" :key="v" :title="(selectedLocal as any).boxH ? v : 'Set box H to enable'"
@@ -6905,7 +7004,7 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div v-if="!textPath" class="grid grid-cols-2 gap-3">
               <div>
                 <div class="panel-label mb-1.5" title="Set a width to auto-wrap words; clear for free-flowing text">Text box W</div>
                 <input v-scrubnum type="number" min="0" placeholder="auto"
@@ -6921,6 +7020,124 @@ onUnmounted(() => {
                   @input="(e: Event) => { const v = parseFloat((e.target as HTMLInputElement).value); setLocal(selectedLocal!.id, { boxH: v > 0 ? v / outWidth : undefined } as any) }" />
               </div>
             </div>
+            <!-- Type on a path. The guide belongs to this layer: it shows only
+                 while the layer is selected and never appears in the layer list. -->
+            <div>
+              <div class="panel-label mb-1.5" title="Run the type along a curve instead of flat lines">Follow a path</div>
+              <select :value="textPath?.follow ?? 'off'"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
+                @change="setTextFollow(selectedLocal, ($event.target as HTMLSelectElement).value as any)">
+                <option v-for="o in TEXT_FOLLOW_OPTIONS" :key="o.v" :value="o.v">{{ o.label }}</option>
+              </select>
+
+              <div v-if="textPath" class="mt-2.5 space-y-2.5">
+                <!-- Curve: one dial from flat, through an arch, to a closed ring. -->
+                <div v-if="textPath.follow === 'curve'">
+                  <div class="panel-label mb-1">Bend · {{ Math.round((textPath.bend ?? 0) * 100) }}%</div>
+                  <input type="range" min="-1" max="1" step="0.01" :value="textPath.bend ?? 0"
+                    class="w-full accent-white cursor-pointer"
+                    @input="setTextPath(selectedLocal, { bend: parseFloat(($event.target as HTMLInputElement).value) })" />
+                </div>
+
+                <div v-if="textPath.follow === 'circle'" class="grid grid-cols-2 gap-3">
+                  <div>
+                    <div class="panel-label mb-1">Radius</div>
+                    <input v-scrubnum type="number" min="1" :value="pxW(textPath.radius ?? 0)"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                      @input="setTextPath(selectedLocal, { radius: Math.max(1, parseFloat(($event.target as HTMLInputElement).value) || 1) / outWidth })" />
+                  </div>
+                  <div>
+                    <div class="panel-label mb-1" title="Degrees clockwise from the top of the ring">Start angle</div>
+                    <input v-scrubnum type="number" step="1" :value="Math.round(textPath.startAngle ?? 0)"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                      @input="setTextPath(selectedLocal, { startAngle: parseFloat(($event.target as HTMLInputElement).value) || 0 })" />
+                  </div>
+                </div>
+
+                <div v-if="textPath.follow === 'wave'" class="grid grid-cols-2 gap-3">
+                  <div>
+                    <div class="panel-label mb-1">Height</div>
+                    <input v-scrubnum type="number" min="0" :value="pxW(textPath.amplitude ?? 0)"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                      @input="setTextPath(selectedLocal, { amplitude: Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0) / outWidth })" />
+                  </div>
+                  <div>
+                    <div class="panel-label mb-1" title="How many full waves the run crosses">Waves</div>
+                    <input v-scrubnum type="number" min="0" step="0.25" :value="textPath.frequency ?? 0"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                      @input="setTextPath(selectedLocal, { frequency: Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
+                  </div>
+                </div>
+
+                <!-- Shape: the outline of any library shape becomes the guide. -->
+                <div v-if="textPath.follow === 'shape'">
+                  <div class="panel-label mb-1">Shape</div>
+                  <button
+                    ref="textPathShapeButtonRef"
+                    type="button"
+                    class="w-full flex items-center gap-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 cursor-pointer transition-colors"
+                    title="Pick the shape the type runs around"
+                    @click="openTextPathShapePicker"
+                  >
+                    <svg v-if="textPathShape" viewBox="0 0 96 96" class="size-4 shrink-0" fill="currentColor" aria-hidden="true"><path :d="textPathShape.d" :fill-rule="textPathShape.fillRule" /></svg>
+                    <span class="flex-1 text-left">{{ textPathShape?.name ?? 'Pick a shape' }}</span>
+                  </button>
+                  <ShapePicker
+                    v-if="textPathShapePickerOpen"
+                    :model-value="textPath.shapeId ?? ''"
+                    :allow-none="false"
+                    :anchor="textPathShapeAnchor"
+                    :ignore="textPathShapeButtonRef"
+                    @update:model-value="(id: string) => { setTextPath(selectedLocal, { shapeId: id }); textPathShapePickerOpen = false }"
+                    @close="textPathShapePickerOpen = false"
+                  />
+                </div>
+
+                <div v-if="textPath.follow === 'custom' && !textPath.d" class="text-[11px] text-white/45 leading-snug">
+                  Draw a path with the pen, then choose <span class="text-white/70">Use as type path</span> from its menu.
+                </div>
+
+                <div v-if="textPath.follow === 'shape' || textPath.follow === 'custom'">
+                  <div class="panel-label mb-1">Size</div>
+                  <input v-scrubnum type="number" min="1" :value="pxW(textPath.size ?? 0)"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                    @input="setTextPath(selectedLocal, { size: Math.max(1, parseFloat(($event.target as HTMLInputElement).value) || 1) / outWidth })" />
+                </div>
+
+                <!-- Shared dials, meaningful on every guide. -->
+                <div>
+                  <div class="panel-label mb-1" title="Slide the type along the path">Start · {{ Math.round(textPathStartUi * 100) }}%</div>
+                  <input type="range" min="0" max="1" step="0.005" :value="textPathStartUi"
+                    class="w-full accent-white cursor-pointer"
+                    @input="setTextPathStartUi(selectedLocal, parseFloat(($event.target as HTMLInputElement).value))" />
+                </div>
+                <div>
+                  <div class="panel-label mb-1" title="Lift the type off the path, or drop it below">Baseline shift</div>
+                  <input v-scrubnum type="number" step="1" :value="pxW(textPath.shift ?? 0)"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                    @input="setTextPath(selectedLocal, { shift: (parseFloat(($event.target as HTMLInputElement).value) || 0) / outWidth })" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <div class="panel-label mb-1" title="Which side of the path the type sits on">Side</div>
+                    <div class="flex gap-1">
+                      <button v-for="sd in (['outside','inside'] as const)" :key="sd"
+                        class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-[10px] cursor-pointer"
+                        :class="(textPath.side ?? 'outside') === sd ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50'"
+                        @click="setTextPath(selectedLocal, { side: sd })">{{ sd === 'outside' ? 'Outside' : 'Inside' }}</button>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="panel-label mb-1" title="Space the letters so they fill the whole path">Fit to path</div>
+                    <button
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-[10px] cursor-pointer"
+                      :class="textPath.fit ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50'"
+                      @click="setTextPath(selectedLocal, { fit: !textPath!.fit })">{{ textPath.fit ? 'On' : 'Off' }}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <div class="panel-label mb-1.5" title="Line height as a multiple of the font size">Line height</div>
@@ -6959,7 +7176,7 @@ onUnmounted(() => {
                 </button>
               </div>
             </div>
-            <div>
+            <div v-if="!textPath">
               <div class="flex items-center justify-between mb-1.5">
                 <div class="panel-label" title="Place words individually — overrides Align">Expressive layout</div>
                 <button
