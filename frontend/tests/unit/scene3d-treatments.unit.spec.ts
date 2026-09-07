@@ -154,3 +154,48 @@ describe('treatments: masked plan', () => {
     expect(maskedTreatmentPlan(doc)).toEqual([])
   })
 })
+
+describe('blur ramp fields', () => {
+  it('backfills every ramp field on a blur with none of them', () => {
+    const t = parseTreatment({ id: 'b1', kind: 'blur', amount: 0.4 })
+    expect(t).toMatchObject({
+      kind: 'blur', amount: 0.4,
+      progressive: false, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
+    })
+  })
+
+  it('keeps stored ramp values', () => {
+    const t = parseTreatment({
+      id: 'b2', kind: 'blur', amount: 1,
+      progressive: true, rampSpace: 'frame', rampAngle: 30, rampStart: 0.2, rampEnd: 0.8,
+    })
+    expect(t).toMatchObject({
+      progressive: true, rampSpace: 'frame', rampAngle: 30, rampStart: 0.2, rampEnd: 0.8,
+    })
+  })
+
+  it('wraps the angle into 0-360 and clamps the stops', () => {
+    const t = parseTreatment({
+      id: 'b3', kind: 'blur', rampAngle: -90, rampStart: -2, rampEnd: 5,
+    }) as { rampAngle: number; rampStart: number; rampEnd: number }
+    expect(t.rampAngle).toBe(270)
+    expect(t.rampStart).toBe(0)
+    expect(t.rampEnd).toBe(1)
+  })
+
+  it('falls back to object space on an unknown ramp space', () => {
+    const t = parseTreatment({ id: 'b4', kind: 'blur', rampSpace: 'sideways' })
+    expect(t).toMatchObject({ rampSpace: 'object' })
+  })
+
+  it('treats a non-boolean progressive as off', () => {
+    const t = parseTreatment({ id: 'b5', kind: 'blur', progressive: 'yes' })
+    expect(t).toMatchObject({ progressive: false })
+  })
+
+  it('createTreatment seeds a blur with the ramp defaults', () => {
+    expect(createTreatment('blur')).toMatchObject({
+      kind: 'blur', progressive: false, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
+    })
+  })
+})

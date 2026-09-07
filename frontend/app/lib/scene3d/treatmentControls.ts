@@ -3,7 +3,7 @@
 // keys to `object.treatments.<id>.<field>`; the surface reads/writes `<field>` directly
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, type TreatmentKind } from './treatments'
+import { BLUR_RAMP_SPACES, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, type TreatmentKind } from './treatments'
 
 export const TREATMENT_KEY_PREFIX = 'treatment.'
 
@@ -18,6 +18,14 @@ const color = (group: string, field: string, label: string, def: string): Row =>
   ({ key: TREATMENT_KEY_PREFIX + field, label, kind: 'color', default: def, group, bindable: false })
 const toggle = (group: string, field: string, label: string, def: boolean, hint?: string): Row =>
   ({ key: TREATMENT_KEY_PREFIX + field, label, kind: 'switch', default: def, group, bindable: false, ...(hint ? { hint } : {}) })
+// `optionLabels` is mandatory here, not optional: every select in this file stores an
+// internal value, and showing those raw would break the studio's copy rule.
+const select = (group: string, field: string, label: string, options: string[], optionLabels: string[], def: string, hint?: string): Row =>
+  ({ key: TREATMENT_KEY_PREFIX + field, label, kind: 'select', options, optionLabels, default: def, group, bindable: false, ...(hint ? { hint } : {}) })
+
+/** Show this row only while Progressive is on. */
+const whenProgressive = (row: Row): Row =>
+  ({ ...row, showIf: { key: TREATMENT_KEY_PREFIX + 'progressive', equals: true } })
 
 /** Rows for one kind, in display order. Group = the kind's human label, so the panel draws
  *  a single card titled e.g. "Rim light". Masked kinds end with the "Everything else" switch. */
@@ -26,7 +34,14 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
   let rows: Row[]
   switch (kind) {
     case 'blur':
-      rows = [slider(g, 'amount', 'Amount', 0, 1, 0.01, D.blur.amount, 'How soft the object goes')]
+      rows = [
+        slider(g, 'amount', 'Amount', 0, 1, 0.01, D.blur.amount, 'How soft the object goes'),
+        toggle(g, 'progressive', 'Progressive', D.blur.progressive, 'Ramp the blur across the object instead of covering it evenly'),
+        whenProgressive(select(g, 'rampSpace', 'Measured across', [...BLUR_RAMP_SPACES], ['The object', 'The whole frame'], D.blur.rampSpace)),
+        whenProgressive(slider(g, 'rampAngle', 'Angle', 0, 360, 1, D.blur.rampAngle, '0° ramps left to right, 90° top to bottom')),
+        whenProgressive(slider(g, 'rampStart', 'Start', 0, 1, 0.01, D.blur.rampStart, 'Stays sharp up to here')),
+        whenProgressive(slider(g, 'rampEnd', 'End', 0, 1, 0.01, D.blur.rampEnd, 'Fully blurred from here on')),
+      ]
       break
     case 'glow':
       rows = [

@@ -140,6 +140,13 @@ export function sceneStackControls(doc: SceneDoc): ControlSpec[] {
     const { when, agent, animatable, summary, bindable, entry, optionLabels, ...spec } = c as any
     out.push({ ...spec, key: `objects.${id}.${rest}`, label: `${obj.name || 'Object'} · ${c.label}` } as ControlSpec)
   })
+  // Deliberately NOT gated on `showIf` (unlike motion/targets.ts's animatableTargets,
+  // which now evaluates it against the live treatment): the progressive-blur ramp rows
+  // (rampSpace/rampAngle/rampStart/rampEnd) must stay in the agent's vocabulary even
+  // while `progressive` is false, so a single patch can turn Progressive on AND set the
+  // ramp in one turn. A vocabulary that appeared/disappeared with document state would
+  // make that impossible — the model would have to write `progressive: true` first,
+  // read back the (now-changed) control list, then write the ramp in a second turn.
   iterateTreatmentControls(doc, (c, obj, id) => {
     if ((c as { agent?: boolean }).agent === false) return
     const rest = c.key.slice(OBJECT_PREFIX.length)

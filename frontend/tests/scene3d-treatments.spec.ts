@@ -236,6 +236,190 @@ test.describe('3D Studio treatments', () => {
     expect(under).toBeLessThan(openFloor * 0.85)
   })
 
+  /**
+   * The Fade dial must read PROPORTIONALLY on screen: at 0.5 the object should look half
+   * way between fully there and fully gone. The stage composites in linear HDR and the
+   * composer's OutputPass applies the ACES filmic curve afterwards, so a plain linear
+   * alpha blend lands far too bright — ACES compresses highlights, and half the light is
+   * nearly all the brightness. Measured before the display-space composite landed: the
+   * 0.5 frame sat at 0.64 of the way from gone to solid (and the brightest pixel at 0.90),
+   * i.e. half the slider bought a tenth of the change. `compositeFade` in treatmentStage.ts
+   * is what holds this.
+   *
+   * Metric: mean luminance over the left sphere's screen box. Each pixel is display-
+   * referred, so the mean of a per-pixel mix IS the mix of the means — the box may include
+   * background without biasing the fraction. Compared only WITHIN this trio of frames, so
+   * the composer path's darker background cancels (see the header note).
+   */
+  test('a fade at 0.5 reads half way between solid and gone', async ({ page }) => {
+    const errs = watchConsole(page)
+    const box = async () => page.evaluate(async (url) => {
+      const img = new Image(); img.src = url; await img.decode()
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+      const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height)
+      const lum = (i: number) => 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
+      let s = 0, n = 0, mx = 0
+      for (let y = Math.floor(height * 0.35); y < height * 0.65; y++)
+        for (let x = Math.floor(width * 0.25); x < width * 0.45; x++) {
+          const l = lum((y * width + x) * 4); s += l; n++; if (l > mx) mx = l
+        }
+      return { mean: s / n, max: mx }
+    }, await snapshot(page))
+
+    const read = async (opacity: number) => {
+      await openLab(page, twoSpheres([{ ...FADE, opacity }]))
+      const s = await stats(page)
+      expect(s.frames, `stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+      expect(s.groups).toBe(1)
+      return box()
+    }
+    const solid = await read(1)
+    const half = await read(0.5)
+    const gone = await read(0)
+
+    // There IS a range to sit inside — otherwise "half way" is vacuously true.
+    expect(solid.mean).toBeGreaterThan(gone.mean + 8)
+    const fraction = (half.mean - gone.mean) / (solid.mean - gone.mean)
+    const peakFraction = (half.max - gone.max) / (solid.max - gone.max)
+    console.log(`[fade] solid=${solid.mean.toFixed(1)} half=${half.mean.toFixed(1)} gone=${gone.mean.toFixed(1)} `
+      + `fraction=${fraction.toFixed(3)} peakFraction=${peakFraction.toFixed(3)}`)
+    expect(fraction).toBeGreaterThan(0.42)
+    expect(fraction).toBeLessThan(0.58)
+    // The highlight is where a linear-light blend goes worst wrong (0.90 before the fix).
+    expect(peakFraction).toBeLessThan(0.65)
+  })
+
+  /**
+   * A progressive blur must actually RAMP: at angle 90 (sharp top, blurred bottom) the
+   * bottom of the sphere has to be measurably softer than its top -- but the sphere's own
+   * specular highlight sits near the top, so the two bands have very different NATURAL
+   * detail (measured unblurred: top ~67.05, bottom ~5.17, a 13x gap). A shared absolute
+   * floor is therefore the wrong instrument: at angle 270 the bottom band IS the sharp end
+   * yet still only scores ~4.2 -- under the floor the top band clears by miles at angle 90
+   * -- purely because it started with almost no headroom, not because the ramp is wrong.
+   *
+   * The fix: score each band's ATTENUATION relative to a control frame that goes through
+   * the exact same render path (composer + progressive-blur stage) but ramps to nothing
+   * everywhere, via rampStart === rampEnd (a hard edge at ramp=1, so effectively every
+   * pixel gets ramp 0 and stays unblurred). That cancels each band's own baseline detail.
+   * A plain untreated render would also cancel it, but takes the direct render path
+   * instead of the composer path (see the file header on why absolute numbers across
+   * paths don't compare) -- so the control has to be a treatment, not an absence of one.
+   */
+  const CONTROL_BLUR = {
+    id: 't-pblur-control', kind: 'blur', enabled: true, invert: false, amount: 1,
+    progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 1, rampEnd: 1,
+  }
+
+  /** Gradient energy (same measure as `sharpness`) inside a TOP and BOTTOM horizontal
+   *  band of the left sphere -- the two bands the progressive-blur tests compare. */
+  async function bandEnergy(page: Page, dataUrl: string): Promise<{ top: number; bottom: number }> {
+    return page.evaluate(async (url) => {
+      const img = new Image(); img.src = url; await img.decode()
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+      const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height)
+      const lum = (i: number) => 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
+      const score = (fy0: number, fy1: number) => {
+        let s = 0, n = 0
+        for (let y = Math.floor(height * fy0); y < height * fy1; y++)
+          for (let x = Math.floor(width * 0.25); x < width * 0.45 - 1; x++) {
+            const i = (y * width + x) * 4; const d = lum(i) - lum(i + 4); s += d * d; n++
+          }
+        return s / n
+      }
+      return { top: score(0.34, 0.44), bottom: score(0.56, 0.66) }
+    }, dataUrl)
+  }
+
+  test('a progressive blur softens the bottom of the object, not the top', async ({ page }) => {
+    const errs = watchConsole(page)
+    await openLab(page, twoSpheres([CONTROL_BLUR]))
+    expect((await stats(page)).frames, `control stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    const control = await bandEnergy(page, await snapshot(page))
+
+    await openLab(page, twoSpheres([{
+      id: 't-pblur', kind: 'blur', enabled: true, invert: false, amount: 1,
+      progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
+    }]))
+    const s = await stats(page)
+    expect(s.frames, `stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    expect(s.groups).toBe(1)
+    const testFrame = await bandEnergy(page, await snapshot(page))
+
+    const attenuation = { top: testFrame.top / control.top, bottom: testFrame.bottom / control.bottom }
+    console.log(`[progressive 90] control top=${control.top.toFixed(3)} bottom=${control.bottom.toFixed(3)} | `
+      + `test top=${testFrame.top.toFixed(3)} bottom=${testFrame.bottom.toFixed(3)} | `
+      + `attenuation top=${attenuation.top.toFixed(3)} bottom=${attenuation.bottom.toFixed(3)}`)
+    // The control frame must actually HAVE detail in both bands to attenuate -- scaled per
+    // band since they legitimately differ ~13x (top ~67, bottom ~5.2 unblurred).
+    expect(control.top).toBeGreaterThan(20)
+    expect(control.bottom).toBeGreaterThan(1.5)
+    // Angle 90: bottom is the blurred end, top stays sharp. (Measured: bottom=0.040,
+    // top=0.294 -- a 0.65 factor still leaves a ~78% margin below the observed ratio.)
+    expect(attenuation.bottom).toBeLessThan(attenuation.top * 0.65)
+  })
+
+  test('angle 270 flips which end of the object is sharp', async ({ page }) => {
+    const errs = watchConsole(page)
+    await openLab(page, twoSpheres([CONTROL_BLUR]))
+    expect((await stats(page)).frames, `control stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    const control = await bandEnergy(page, await snapshot(page))
+
+    await openLab(page, twoSpheres([{
+      id: 't-pblur', kind: 'blur', enabled: true, invert: false, amount: 1,
+      progressive: true, rampSpace: 'object', rampAngle: 270, rampStart: 0, rampEnd: 1,
+    }]))
+    const s = await stats(page)
+    expect(s.frames, `stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    expect(s.groups).toBe(1)
+    const testFrame = await bandEnergy(page, await snapshot(page))
+
+    const attenuation = { top: testFrame.top / control.top, bottom: testFrame.bottom / control.bottom }
+    console.log(`[progressive 270] control top=${control.top.toFixed(3)} bottom=${control.bottom.toFixed(3)} | `
+      + `test top=${testFrame.top.toFixed(3)} bottom=${testFrame.bottom.toFixed(3)} | `
+      + `attenuation top=${attenuation.top.toFixed(3)} bottom=${attenuation.bottom.toFixed(3)}`)
+    expect(control.top).toBeGreaterThan(20)
+    expect(control.bottom).toBeGreaterThan(1.5)
+    // Angle 270: top is the blurred end, bottom stays sharp -- the reverse of angle 90.
+    // (Measured: top=0.046, bottom=0.106 -- a 0.65 factor leaves a ~33% margin, the
+    // tightest of the two directions since the ramp's separation is smaller here.)
+    expect(attenuation.top).toBeLessThan(attenuation.bottom * 0.65)
+  })
+
+  /**
+   * The Progressive rows must actually REACH the panel. Everything else about this feature can
+   * pass while the switch is invisible: the rows are declared in treatmentControls.ts, the
+   * shader reads the uniforms, and the browser tests drive the ramp through a URL state that
+   * never opens the inspector. `showIf` in particular is inert unless the panel is handed a
+   * `visible` predicate, and a row declared with a gate that nobody evaluates looks correct in
+   * every unit test while being permanently hidden — or permanently shown.
+   */
+  test('the Progressive switch is in the inspector and gates the ramp rows', async ({ page }) => {
+    await openLab(page, twoSpheres())
+    const row = page.locator('[data-testid="object-row"][data-object-name="Left"]')
+    await row.hover()
+    await row.locator('[data-testid="add-treatment"]').click()
+    await page.locator('[data-testid="add-treatment-item"][data-kind="blur"]').click()
+    await expect(page.getByTestId('treatment-breadcrumb')).toHaveText(/Left.*Blur/)
+
+    const RAMP_ROWS = ['Measured across', 'Angle', 'Start', 'End']
+    await expect(page.getByLabel('Amount')).toBeVisible()
+    await expect(page.getByLabel('Progressive')).toBeVisible()
+    for (const label of RAMP_ROWS) {
+      await expect(page.getByLabel(label), `${label} must be hidden while Progressive is off`).toHaveCount(0)
+    }
+
+    await page.getByLabel('Progressive').click()
+    for (const label of RAMP_ROWS) {
+      await expect(page.getByLabel(label), `${label} must appear once Progressive is on`).toBeVisible()
+    }
+    // The switch wrote through to the document, not just to the panel.
+    expect(await page.evaluate(() => (window as any).__scene3dDoc().objects[0].treatments[0]))
+      .toMatchObject({ kind: 'blur', progressive: true, rampSpace: 'object', rampAngle: 90 })
+  })
+
   test('tree flow: add a rim light from the row menu, see the breadcrumb, toggle, remove', async ({ page }) => {
     await openLab(page, twoSpheres())
     const row = page.locator('[data-testid="object-row"][data-object-name="Left"]')

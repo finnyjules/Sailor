@@ -107,6 +107,7 @@ import {
   readSceneControl, scenePanelChrome, scenePanelControls, writeMaterialField, isNoOpTransformCommit,
 } from '~/lib/scene3d/panelPresentation'
 import { setByPath } from '~/lib/studio/path'
+import { showIfVisible } from '~/lib/studio/sections'
 import type { PostSettings } from '~/lib/spacetype/post'
 
 const props = withDefaults(defineProps<{ nodeId: string; nodes?: any[]; edges?: any[] }>(), {
@@ -243,6 +244,12 @@ function readTreatmentControl(key: string): string | number | boolean {
 function setTreatmentControl(key: string, value: string | number | boolean): void {
   const t = activeTreatment.value?.treatment as unknown as Record<string, unknown> | undefined
   if (t) t[treatmentField(key)] = value
+}
+// `showIf` on a treatment row does nothing unless the panel is handed a predicate —
+// StudioControlPanel's `visible` prop is that seam. Without this the ramp rows would
+// show even with Progressive off, which is the classic silently-inert gate.
+function treatmentControlVisible(c: ControlSpec): boolean {
+  return showIfVisible(c, (key) => readTreatmentControl(key))
 }
 
 function toggleSelected(id: string, additive: boolean): void {
@@ -4143,6 +4150,7 @@ async function onClose() {
             :controls="treatmentPanelControls"
             :order="treatmentPanelOrder"
             :value="readTreatmentControl"
+            :visible="treatmentControlVisible"
             @set="setTreatmentControl"
           />
         </div>

@@ -44,3 +44,35 @@ describe('treatmentControls', () => {
     for (const kind of TREATMENT_KINDS) for (const row of treatmentControls(kind)) expect((row as any).bindable, row.key).toBe(false)
   })
 })
+
+describe('progressive blur rows', () => {
+  const rows = () => treatmentControls('blur')
+
+  it('offers the ramp controls after Amount', () => {
+    const keys = rows().map((r) => r.key)
+    expect(keys).toEqual([
+      'treatment.amount', 'treatment.progressive', 'treatment.rampSpace',
+      'treatment.rampAngle', 'treatment.rampStart', 'treatment.rampEnd', 'treatment.invert',
+    ])
+  })
+
+  it('hides every ramp row behind the Progressive switch', () => {
+    const gated = rows().filter((r) => r.showIf?.key === 'treatment.progressive')
+    expect(gated.map((r) => r.key)).toEqual([
+      'treatment.rampSpace', 'treatment.rampAngle', 'treatment.rampStart', 'treatment.rampEnd',
+    ])
+    for (const r of gated) expect(r.showIf).toMatchObject({ equals: true })
+  })
+
+  it('labels the ramp space options instead of showing the stored values', () => {
+    const row = rows().find((r) => r.key === 'treatment.rampSpace')
+    expect(row).toMatchObject({ kind: 'select', options: ['object', 'frame'] })
+    expect((row as { optionLabels?: string[] }).optionLabels).toEqual(['The object', 'The whole frame'])
+  })
+
+  it('sweeps the angle over a full turn', () => {
+    expect(rows().find((r) => r.key === 'treatment.rampAngle')).toMatchObject({
+      kind: 'slider', min: 0, max: 360, default: 90,
+    })
+  })
+})

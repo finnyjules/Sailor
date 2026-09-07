@@ -23,6 +23,12 @@ export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
 }
 
+/** What a progressive blur's ramp is measured across. `object` = the object's own
+ *  on-screen extent (self-contained, moves with it); `frame` = the whole viewport
+ *  (lens-like). An inverted group always behaves as `frame` — see treatmentStage.ts. */
+export const BLUR_RAMP_SPACES = ['object', 'frame'] as const
+export type BlurRampSpace = typeof BLUR_RAMP_SPACES[number]
+
 interface TreatmentBase {
   /** Stable id (`trt_<uuid>_<n>`). Motion tracks and agent keys address a treatment by
    *  this, never by position, so reordering the stack re-points nothing. */
@@ -33,7 +39,19 @@ interface TreatmentBase {
    *  for every kind for schema simplicity; only the masked family honours it. */
   invert: boolean
 }
-export interface BlurTreatment extends TreatmentBase { kind: 'blur'; amount: number }
+export interface BlurTreatment extends TreatmentBase {
+  kind: 'blur'
+  amount: number
+  /** Off ⇒ the blur covers the object evenly, exactly as it always has. */
+  progressive: boolean
+  rampSpace: BlurRampSpace
+  /** Degrees. 0 ramps left→right, 90 ramps top→bottom (sharp top, blurred bottom). */
+  rampAngle: number
+  /** Normalised along the ramp direction: sharp up to `rampStart`, full blur from
+   *  `rampEnd`. `rampEnd <= rampStart` is a hard edge at `rampStart`. */
+  rampStart: number
+  rampEnd: number
+}
 export interface GlowTreatment extends TreatmentBase { kind: 'glow'; strength: number; threshold: number; tint: string }
 export interface PixelateTreatment extends TreatmentBase { kind: 'pixelate'; cellSize: number }
 export interface FadeTreatment extends TreatmentBase { kind: 'fade'; opacity: number }
@@ -48,7 +66,7 @@ export type Treatment =
 /** Dial defaults per kind — everything except id/kind/enabled/invert. The ONE source the
  *  parser, `createTreatment` and the inspector controls all read. */
 export const TREATMENT_DEFAULTS = {
-  blur: { amount: 0.5 },
+  blur: { amount: 0.5, progressive: false, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1 },
   glow: { strength: 1, threshold: 0.6, tint: '#ffffff' },
   pixelate: { cellSize: 12 },
   fade: { opacity: 0.5 },
@@ -85,6 +103,8 @@ export function createTreatment(kind: TreatmentKind): Treatment {
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d)
 const str = (v: unknown, d: string): string => (typeof v === 'string' && v ? v : d)
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
+/** Any finite degree value folded into [0, 360). */
+const wrapDeg = (v: number): number => ((v % 360) + 360) % 360
 
 /** One stored entry, validated field by field. `undefined` when unusable (no id, an id the
  *  path resolvers would refuse — empty, dotted, all digits — or an unknown kind). Missing
@@ -97,7 +117,17 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
   const base = { id: r.id, enabled: r.enabled !== false, invert: r.invert === true }
   const D = TREATMENT_DEFAULTS
   switch (r.kind) {
-    case 'blur': return { ...base, kind: 'blur', amount: clamp01(num(r.amount, D.blur.amount)) }
+    case 'blur': return {
+      ...base, kind: 'blur',
+      amount: clamp01(num(r.amount, D.blur.amount)),
+      progressive: r.progressive === true,
+      rampSpace: (BLUR_RAMP_SPACES as readonly string[]).includes(r.rampSpace as string)
+        ? r.rampSpace as BlurRampSpace
+        : D.blur.rampSpace,
+      rampAngle: wrapDeg(num(r.rampAngle, D.blur.rampAngle)),
+      rampStart: clamp01(num(r.rampStart, D.blur.rampStart)),
+      rampEnd: clamp01(num(r.rampEnd, D.blur.rampEnd)),
+    }
     case 'glow': return {
       ...base, kind: 'glow', strength: Math.max(0, num(r.strength, D.glow.strength)),
       threshold: clamp01(num(r.threshold, D.glow.threshold)), tint: str(r.tint, D.glow.tint),

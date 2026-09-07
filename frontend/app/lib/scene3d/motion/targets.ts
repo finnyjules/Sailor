@@ -25,6 +25,8 @@
 import type { SceneDoc } from '~/lib/scene3d/config'
 import { visibleSceneControls, type SceneControl } from '~/lib/scene3d/controls'
 import { OBJECT_PREFIX, iterateObjectControls, iterateTreatmentControls } from '~/lib/scene3d/agentControls'
+import { treatmentField } from '~/lib/scene3d/treatmentControls'
+import { showIfVisible } from '~/lib/studio/sections'
 
 export interface SceneAnimatableTarget { path: string; label: string; min: number; max: number }
 
@@ -66,9 +68,16 @@ export function animatableTargets(doc: SceneDoc): SceneAnimatableTarget[] {
   })
 
   // Treatment dials — slider rows only: a track is numeric, so the on/off flag and colour
-  // rows are not targets (key a fade to 0 to switch an effect off over time).
-  iterateTreatmentControls(doc, (c, obj, id) => {
+  // rows are not targets (key a fade to 0 to switch an effect off over time). A row also
+  // carrying `showIf` (the progressive-blur ramp) must clear that gate against the actual
+  // treatment object, not just be a slider — otherwise rampAngle/rampStart/rampEnd would
+  // list themselves as targets even while Progressive is off and the rows are off-screen
+  // (the exact failure mode controls.ts documents next to its own `showIf` rows, around
+  // line 216 — but unlike that precedent this stays `animatable` rather than opting out,
+  // since animating the ramp is the point of the feature).
+  iterateTreatmentControls(doc, (c, obj, id, treatment) => {
     if (c.kind !== 'slider') return
+    if (!showIfVisible(c, (key) => (treatment as unknown as Record<string, unknown>)[treatmentField(key)] as any)) return
     out.push({
       path: `objects.${id}.${c.key.slice(OBJECT_PREFIX.length)}`,
       label: `${obj.name || 'Object'} · ${c.label}`,

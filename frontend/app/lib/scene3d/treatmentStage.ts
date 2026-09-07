@@ -9,17 +9,33 @@
 // base = the object alone (with background), layer = the rest. The result feeds PostChain
 // through `setInputTexture`, so global post and the export bake see the same frame.
 //
-// The accumulator (`out`) is PREMULTIPLIED from the first blit to the last composite and is
+// The accumulator is PREMULTIPLIED from the first blit to the last composite and is
 // un-premultiplied once, into a scratch, on the way out — every downstream consumer
-// (TexturePass, the post stack, toDataURL) reads straight alpha.
+// (TexturePass, the post stack, toDataURL) reads straight alpha. It is a PING-PONG pair
+// (`accum`), not one target: the composite blends in the shader rather than through the
+// hardware blender, so it has to read what is already underneath. That also means the
+// composite writes EVERY pixel — where it used to `discard` and leave the accumulator
+// alone, it now copies the destination through, or the other buffer's stale frame shows.
+//
+// Fade composites in DISPLAY space, the rest in linear light. The stage works in linear
+// HDR and the composer's OutputPass applies the ACES filmic curve at the very end, so a
+// linear alpha blend makes a Fade read almost nothing: ACES compresses highlights, and
+// half an object's light is nearly all of its brightness (measured: opacity 0.5 moved the
+// brightest pixel 235 → 214, and half the slider bought a tenth of the change). So when a
+// group carries a Fade, the composite puts both sides through the SAME tone curve and sRGB
+// encode OutputPass will apply, mixes there, and inverts back — the frame stays linear-HDR for
+// everything downstream, and 0.5 looks half faded. Without a Fade (`uOpacity` 1) the
+// linear path runs, doing the same arithmetic the hardware blender did, so blur/glow/
+// pixelate composite as before. The inverse is only valid for the curve it mirrors, so the
+// display path is gated on the renderer actually being on ACESFilmic.
 //
 // Never write renderer state you do not restore: this runs inside the live loop AND the
 // output-resolution bake, both of which assume the renderer comes back as they left it.
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { stripAlpha } from '~/lib/color/convert'
-import type { MaskedGroup, Treatment } from './treatments'
-import { STAGE_LAYER } from './treatmentShells'
+import type { BlurTreatment, MaskedGroup, Treatment } from './treatments'
+import { ownMeshes, STAGE_LAYER } from './treatmentShells'
 
 /** MSAA samples on the base/layer targets. three ≥ r165 resolves a multisampled target's
  *  depth into its `depthTexture` (`resolveDepthBuffer`, default true), which the composite
@@ -31,6 +47,13 @@ const MAX_PAIRS = 4
 /** Above ~2048² (an export bake's output size) the stage's two MSAA HalfFloat + depth
  *  targets alone would run into hundreds of MB, so drop MSAA there. Pure. */
 const MSAA_PIXEL_CEILING = 4_194_304
+/** `toLinear()` divides by `uExposure`; nothing on the live dial reaches 0 today
+ *  (`toneMappingExposure` is a hardcoded 1.1), but a future exposure control could, and 0
+ *  would emit Inf into the HalfFloat accumulator that every later composite reads back. */
+const MIN_EXPOSURE = 1e-4
+/** A camera type without a `.near` (i.e. not Perspective/Orthographic) has no real near
+ *  plane to clamp against; this keeps the clamp in `objectRampSpan` well-defined anyway. */
+const FALLBACK_NEAR = 0.01
 
 export interface StageContext { objectRoots: Map<string, THREE.Object3D> }
 export interface StageStats { frames: number; groups: number; width: number; height: number }
@@ -58,22 +81,61 @@ export function pixelateCellPx(cellSize: number, height: number): number {
   return Math.max(1, cellSize * height / 1000)
 }
 
+/** Ramp value at normalised position `t` along the ramp direction: 0 up to `start`,
+ *  1 from `end`, linear between. `end <= start` is a hard edge at `start` — defined
+ *  rather than left to divide-by-zero. Pure. */
+export function blurRampAt(t: number, start: number, end: number): number {
+  if (end <= start) return t < start ? 0 : 1
+  return Math.min(1, Math.max(0, (t - start) / (end - start)))
+}
+
+/** Screen-space ramp direction for `angleDeg`: 0 runs left→right, 90 runs top→bottom.
+ *  Y is negated because texture v = 1 is the visual TOP, so "down the screen" is -v. Pure. */
+export function rampDirection(angleDeg: number): { x: number; y: number } {
+  const a = angleDeg * Math.PI / 180
+  return { x: Math.cos(a), y: -Math.sin(a) }
+}
+
+/** Support width of a `w` × `h` rectangle along `angleDeg` — how far the rectangle
+ *  spans in that direction, so a diagonal ramp reaches corner to corner instead of
+ *  running out early. Pure. */
+export function rampSupport(w: number, h: number, angleDeg: number): number {
+  const a = angleDeg * Math.PI / 180
+  return Math.abs(w * Math.cos(a)) + Math.abs(h * Math.sin(a))
+}
+
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
-// The base copy that seeds `out`: straight alpha in, premultiplied out — every composite
+// The base copy that seeds the accumulator: straight alpha in, premultiplied out — every composite
 // after it blends premultiplied-over, so the accumulator must start that way too.
 const PREMUL_FRAG = 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ vec4 s = texture2D(tDiffuse, vUv); gl_FragColor = vec4(s.rgb * s.a, s.a); }'
 // …and the single un-premultiply on the way out, back to the straight alpha every consumer expects.
 const UNPREMUL_FRAG = 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ vec4 s = texture2D(tDiffuse, vUv); gl_FragColor = vec4(s.a > 1e-5 ? s.rgb / s.a : vec3(0.0), s.a); }'
 // Separable Gaussian over PREMULTIPLIED colour so transparent pixels never darken the halo;
 // un-premultiplied on the way out because the layer buffers are straight-alpha.
+//
+// PROGRESSIVE: each pixel's tap step is scaled by its ramp value. At r = 1 the step is
+// exactly the uniform blur's, so a fully-ramped region is byte-for-byte the old blur; at
+// r = 0 every tap lands on the same texel and the pixel comes back untouched. `uProgressive`
+// 0 skips the ramp entirely, which is also what glow's internal blur uses.
 const BLUR_FRAG = `
   uniform sampler2D tDiffuse; uniform vec2 uDir;
+  uniform float uProgressive; uniform vec2 uRampDir;
+  uniform float uRampMin; uniform float uRampSpan; uniform float uRampStart; uniform float uRampEnd;
   varying vec2 vUv;
+  // GLSL twin of blurRampAt() — keep the two in step.
+  float rampAt(vec2 uv){
+    if (uProgressive < 0.5) return 1.0;
+    float t = (dot(uv, uRampDir) - uRampMin) / uRampSpan;
+    float d = uRampEnd - uRampStart;
+    if (d <= 0.0) return t < uRampStart ? 0.0 : 1.0;
+    return clamp((t - uRampStart) / d, 0.0, 1.0);
+  }
   void main(){
+    vec2 dir = uDir * rampAt(vUv);
     vec4 acc = vec4(0.0); float wsum = 0.0;
     for (int i = -${TAPS}; i <= ${TAPS}; i++) {
       float w = exp(-float(i * i) / 72.0);
-      vec4 s = texture2D(tDiffuse, vUv + uDir * float(i));
+      vec4 s = texture2D(tDiffuse, vUv + dir * float(i));
       acc += vec4(s.rgb * s.a, s.a) * w; wsum += w;
     }
     acc /= wsum;
@@ -118,8 +180,85 @@ const GLOW_MERGE_FRAG = `
 const COMPOSITE_FRAG = `
   uniform sampler2D tLayer; uniform sampler2D tLayerDepth;
   uniform sampler2D tBaseDepth; uniform sampler2D tBaseDepth2;
+  uniform sampler2D tDst;
   uniform float uOpacity; uniform vec2 uTexel; uniform float uHaloRadius;
+  uniform float uDisplayBlend; uniform float uExposure;
   varying vec2 vUv;
+  // three's ACESFilmicToneMapping, and its inverse. The forward half is copied from
+  // three's tonemapping_pars_fragment (including the /0.6 that scales exposure) so the
+  // curve here IS the curve OutputPass applies; the two inverse matrices were solved from
+  // the forward pair. Keep all four in step with three on upgrade — a mismatched inverse
+  // shifts every faded pixel's colour rather than failing loudly.
+  const mat3 ACES_IN = mat3(
+    vec3(0.59719, 0.07600, 0.02840),
+    vec3(0.35458, 0.90834, 0.13383),
+    vec3(0.04823, 0.01566, 0.83777));
+  const mat3 ACES_OUT = mat3(
+    vec3( 1.60475, -0.10208, -0.00327),
+    vec3(-0.53108,  1.10813, -0.07276),
+    vec3(-0.07367, -0.00605,  1.07602));
+  const mat3 ACES_IN_INV = mat3(
+    vec3( 1.76474097, -0.14702785, -0.03633683),
+    vec3(-0.67577768,  1.16025151, -0.16243644),
+    vec3(-0.08896329, -0.01322366,  1.19877327));
+  const mat3 ACES_OUT_INV = mat3(
+    vec3(0.64303825, 0.05926869, 0.00596190),
+    vec3(0.31118675, 0.93143649, 0.06392902),
+    vec3(0.04577546, 0.00929492, 0.93011838));
+  vec3 rrtFit(vec3 v){
+    vec3 a = v * (v + 0.0245786) - 0.000090537;
+    vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+    return a / b;
+  }
+  // rrtFit is a rational quadratic, so inverting it is the quadratic formula per channel.
+  // Its output tops out at 1/0.983729 as v grows, which is where the leading coefficient
+  // A goes to zero — clamping y just under that keeps the division finite.
+  vec3 rrtFitInv(vec3 y){
+    y = clamp(y, 0.0, 1.0164);
+    vec3 A = 1.0 - 0.983729 * y;
+    vec3 B = 0.0245786 - 0.4329510 * y;
+    vec3 C = -0.000090537 - 0.238081 * y;
+    vec3 disc = max(B * B - 4.0 * A * C, 0.0);
+    return max((-B + sqrt(disc)) / (2.0 * A), 0.0);
+  }
+  // OutputPass tone-maps AND encodes to sRGB, and BOTH have to be mirrored here: the sRGB
+  // transfer curve is itself steeply concave (a linear 0.5 encodes to 0.73), so mixing after
+  // tone mapping alone still leaves a fade reading three quarters solid at the halfway mark.
+  // "Display space" for this shader therefore means sRGB-encoded, which is also the space
+  // every other opacity control in the app blends in.
+  vec3 srgbOETF(vec3 c){
+    return mix(pow(c, vec3(0.41666)) * 1.055 - 0.055, c * 12.92, vec3(lessThanEqual(c, vec3(0.0031308))));
+  }
+  vec3 srgbEOTF(vec3 c){
+    return mix(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, vec3(lessThanEqual(c, vec3(0.04045))));
+  }
+  vec3 toDisplay(vec3 c){
+    c *= uExposure / 0.6;
+    return srgbOETF(clamp(ACES_OUT * rrtFit(ACES_IN * c), 0.0, 1.0));
+  }
+  vec3 toLinear(vec3 c){
+    vec3 tm = srgbEOTF(clamp(c, 0.0, 1.0));
+    return max(ACES_IN_INV * rrtFitInv(ACES_OUT_INV * tm), 0.0) * (0.6 / uExposure);
+  }
+  float maxComponent(vec3 c){ return max(c.r, max(c.g, c.b)); }
+  // toDisplay()'s clamp(...,0,1) before toLinear() inverts throws away any headroom above
+  // what ACES+sRGB can represent — a pixel whose ACES output saturates (roughly 14 after
+  // exposure) comes back clamped to the same finite value regardless of how bright it
+  // really was. That would land on the DESTINATION too, everywhere the layer's alpha is
+  // nonzero, and a blur spreads that alpha well past the object's silhouette — so a bloom-
+  // worthy sun or emissive sitting under a soft fade edge would bloom less than the same pixel
+  // just outside it, leaving a halo-shaped seam. A pixel already blown out to white is exactly
+  // where the perceptual fade curve buys the least (the eye reads 20 vs 40 as "the same
+  // bright", the way it can't tell 0.3 from 0.6 in the mid-tones) — so below FADE_HDR_LO use
+  // the full display-space blend, above FADE_HDR_HI fall back to the linear blend that
+  // preserves HDR headroom, and cross-fade between the two so there is no visible seam at the
+  // boundary.
+  // In POST-exposure units, because that is where ACES saturates: the curve does not care what
+  // the scene radiance was, only what reaches it after uExposure. Comparing a pre-exposure value
+  // against fixed constants would silently mis-calibrate the moment anything drives exposure off
+  // its current 1.1 — so the comparison scales the colour instead of the thresholds.
+  const float FADE_HDR_LO = 3.3;
+  const float FADE_HDR_HI = 8.8;
   float nearestDepth(vec2 uv){
     float d = texture2D(tLayerDepth, uv).r;
     if (d < 1.0) return d;
@@ -133,16 +272,40 @@ const COMPOSITE_FRAG = `
     return best;
   }
   void main(){
+    vec4 d = texture2D(tDst, vUv); // the accumulator so far, premultiplied
     vec4 s = texture2D(tLayer, vUv);
     float a = s.a * uOpacity;
-    if (a <= 0.001) discard;
+    // Both early-outs pass the destination through untouched: this writes into the OTHER
+    // half of the ping-pong, so there is nothing to leave alone.
+    if (a <= 0.001) { gl_FragColor = d; return; }
     float ld = nearestDepth(vUv);
     float bd = min(texture2D(tBaseDepth, vUv).r, texture2D(tBaseDepth2, vUv).r);
-    if (ld > bd + 0.00005) discard;
-    gl_FragColor = vec4(s.rgb * a, a); // premultiplied — see compositeMat's blend factors
+    if (ld > bd + 0.00005) { gl_FragColor = d; return; }
+    float outA = a + d.a * (1.0 - a);
+    if (uDisplayBlend < 0.5) {
+      // Linear "over", premultiplied — the exact arithmetic the hardware blender did.
+      gl_FragColor = vec4(s.rgb * a + d.rgb * (1.0 - a), outA);
+      return;
+    }
+    // Same "over", carried out on tone-mapped values. An empty destination (alpha 0)
+    // falls through to the layer's own colour at that alpha, so a fade over a transparent
+    // background still fades the frame's alpha rather than painting itself opaque.
+    vec3 dStraight = d.a > 1e-5 ? d.rgb / d.a : vec3(0.0);
+    vec3 mixed = toDisplay(s.rgb) * a + toDisplay(dStraight) * d.a * (1.0 - a);
+    vec3 displayResult = toLinear(mixed / max(outA, 1e-5)) * outA;
+    // The exact linear "over" from the branch above, computed here too so HDR pixels can
+    // cross-fade into it without a seam at the headroom threshold.
+    vec3 linearResult = s.rgb * a + d.rgb * (1.0 - a);
+    float hdr = max(maxComponent(s.rgb), maxComponent(dStraight)) * uExposure;
+    float k = 1.0 - smoothstep(FADE_HDR_LO, FADE_HDR_HI, hdr);
+    gl_FragColor = vec4(mix(linearResult, displayResult, k), outA);
   }`
 
 type RT = THREE.WebGLRenderTarget
+
+/** A resolved progressive ramp in UV space: direction, where t = 0 sits along it
+ *  (`min`), how far t = 1 is (`span`), and the two stops. */
+interface BlurRamp { dirX: number; dirY: number; min: number; span: number; start: number; end: number }
 
 function shader(frag: string, uniforms: Record<string, THREE.IUniform>): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({ uniforms, vertexShader: VERT, fragmentShader: frag, depthTest: false, depthWrite: false })
@@ -155,33 +318,42 @@ export class TreatmentStage {
   /** The "everything else" layer, allocated only for a frame that has an invert group: it
    *  must survive the whole frame because every normal group tests against its depth. */
   private layerInv: RT | null = null
-  private out!: RT
+  /** Ping-pong accumulator: `accum[accumIdx]` is what has been composited so far, the other
+   *  half is where the next composite writes. Swapped after every composite. */
+  private accum: RT[] = []
+  private accumIdx = 0
   private scratch: RT[] = []
   private width = 0
   private height = 0
   private readonly quad = new FullScreenQuad()
   private readonly premulMat = shader(PREMUL_FRAG, { tDiffuse: { value: null } })
   private readonly unpremulMat = shader(UNPREMUL_FRAG, { tDiffuse: { value: null } })
-  private readonly blurMat = shader(BLUR_FRAG, { tDiffuse: { value: null }, uDir: { value: new THREE.Vector2() } })
+  private readonly blurMat = shader(BLUR_FRAG, {
+    tDiffuse: { value: null }, uDir: { value: new THREE.Vector2() },
+    uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
+    uRampMin: { value: 0 }, uRampSpan: { value: 1 }, uRampStart: { value: 0 }, uRampEnd: { value: 1 },
+  })
   private readonly pixelateMat = shader(PIXELATE_FRAG, { tDiffuse: { value: null }, uResolution: { value: new THREE.Vector2(1, 1) }, uCell: { value: 8 } })
   private readonly brightMat = shader(BRIGHT_FRAG, { tDiffuse: { value: null }, uThreshold: { value: 0.6 } })
   private readonly glowMergeMat = shader(GLOW_MERGE_FRAG, { tBase: { value: null }, tGlow: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uStrength: { value: 1 } })
   private readonly compositeMat: THREE.ShaderMaterial
   private readonly tmpSize = new THREE.Vector2()
   private readonly prevClearColor = new THREE.Color()
+  private readonly rampBox = new THREE.Box3()
+  private readonly rampMeshBox = new THREE.Box3()
+  private readonly rampCorner = new THREE.Vector3()
+  private readonly rampView = new THREE.Vector3()
 
   constructor(private readonly renderer: THREE.WebGLRenderer) {
     this.compositeMat = shader(COMPOSITE_FRAG, {
       tLayer: { value: null }, tLayerDepth: { value: null }, tBaseDepth: { value: null }, tBaseDepth2: { value: null },
-      uOpacity: { value: 1 }, uTexel: { value: new THREE.Vector2() }, uHaloRadius: { value: 2 },
+      tDst: { value: null }, uOpacity: { value: 1 }, uTexel: { value: new THREE.Vector2() }, uHaloRadius: { value: 2 },
+      uDisplayBlend: { value: 0 }, uExposure: { value: 1 },
     })
-    // Premultiplied "over": the shader multiplies rgb by alpha itself.
-    this.compositeMat.transparent = true
-    this.compositeMat.blending = THREE.CustomBlending
-    this.compositeMat.blendSrc = THREE.OneFactor
-    this.compositeMat.blendDst = THREE.OneMinusSrcAlphaFactor
-    this.compositeMat.blendSrcAlpha = THREE.OneFactor
-    this.compositeMat.blendDstAlpha = THREE.OneMinusSrcAlphaFactor
+    // The shader reads the destination and does the "over" itself (it has to, to blend a
+    // fade on tone-mapped values), so the hardware blender must stay out of the way — with
+    // it on, every composite would be applied twice.
+    this.compositeMat.blending = THREE.NoBlending
   }
 
   private makeTarget(w: number, h: number, withDepth: boolean): RT {
@@ -199,7 +371,7 @@ export class TreatmentStage {
     this.width = w; this.height = h
     this.base = this.makeTarget(w, h, true)
     this.layer = this.makeTarget(w, h, true)
-    this.out = this.makeTarget(w, h, false)
+    this.accum = [0, 1].map(() => this.makeTarget(w, h, false))
     this.scratch = [0, 1, 2].map(() => this.makeTarget(w, h, false))
     this.pixelateMat.uniforms.uResolution!.value.set(w, h)
     this.compositeMat.uniforms.uTexel!.value.set(1 / w, 1 / h)
@@ -213,12 +385,13 @@ export class TreatmentStage {
   }
 
   private disposeTargets(): void {
-    for (const rt of [this.base, this.layer, this.layerInv, this.out, ...this.scratch]) {
+    for (const rt of [this.base, this.layer, this.layerInv, ...this.accum, ...this.scratch]) {
       if (!rt) continue
       rt.depthTexture?.dispose()
       rt.dispose()
     }
     this.layerInv = null
+    this.accum = []
     this.scratch = []
     this.width = 0; this.height = 0 // a disposed stage must re-allocate on next use
   }
@@ -236,10 +409,22 @@ export class TreatmentStage {
     this.quad.render(this.renderer)
   }
 
-  /** Separable blur of `src` by `radius` px. Returns the target holding the result (never `src`). */
-  private blur(src: RT, amount: number, ...reserve: RT[]): { rt: RT; radiusPx: number } {
+  /** Separable blur of `src` by `radius` px, optionally ramped. Returns the target holding
+   *  the result (never `src`). `ramp` null ⇒ an even blur, which is what glow's spread uses. */
+  private blur(src: RT, amount: number, ramp: BlurRamp | null, ...reserve: RT[]): { rt: RT; radiusPx: number } {
     const { passes, step, radiusPx } = blurPasses(amount, this.height)
     if (passes === 0) return { rt: src, radiusPx: 0 }
+    const u = this.blurMat.uniforms
+    u.uProgressive!.value = ramp ? 1 : 0
+    if (ramp) {
+      ;(u.uRampDir!.value as THREE.Vector2).set(ramp.dirX, ramp.dirY)
+      u.uRampMin!.value = ramp.min
+      // A zero span would divide by zero in the shader; a degenerate ramp is caught
+      // upstream in resolveRamp, so this is belt and braces rather than a real case.
+      u.uRampSpan!.value = Math.abs(ramp.span) < 1e-6 ? 1 : ramp.span
+      u.uRampStart!.value = ramp.start
+      u.uRampEnd!.value = ramp.end
+    }
     const a = this.free(src, ...reserve)
     // When `src` is itself a scratch (a previous effect's output, or glow's bright pass) it
     // is free to be overwritten once the first horizontal pass has read it — reusing it as
@@ -258,11 +443,92 @@ export class TreatmentStage {
     return { rt: cur, radiusPx }
   }
 
+  /** UV-space min and max of `root`'s world AABB — over the meshes its OWN layer draws
+   *  (see `ownMeshes`; a child object's root sits inside its parent's subtree since
+   *  parenting landed, and `drawAlone` excludes it, so the box must too) — projected
+   *  through `camera` and measured along `dir`. A corner at or behind the near plane is
+   *  clamped to it rather than bailing out (see below); null only for a genuinely
+   *  degenerate box — empty, or no measurable spread — so the caller can fall through to
+   *  the frame ramp. */
+  private objectRampSpan(
+    root: THREE.Object3D, camera: THREE.Camera, dir: { x: number; y: number },
+  ): { min: number; max: number } | null {
+    // Box3.expandByObject always recurses into children, which would walk right back into
+    // a nested treated object's root — so each own mesh's box is built from its OWN
+    // geometry only (no recursion), mirroring the non-precise branch of expandByObject.
+    this.rampBox.makeEmpty()
+    for (const mesh of ownMeshes(root)) {
+      // Match drawAlone's draw rule as closely as practical: it only enables a node for the
+      // isolated draw when it is on layer 0, and the renderer skips anything invisible
+      // before it ever recurses into it — so a hidden sub-mesh must not enlarge the box, or
+      // the ramp runs short of the object's actual visible extent. NOT walked here: an
+      // ancestor's own visible=false also hides this subtree in drawAlone (the renderer's
+      // traversal stops at the invisible node), which this per-mesh check can't see — a
+      // rare case, since hiding a container without hiding its meshes is unusual.
+      if (!mesh.visible || !mesh.layers.isEnabled(0)) continue
+      const geometry = mesh.geometry
+      if (!geometry.boundingBox) geometry.computeBoundingBox()
+      if (!geometry.boundingBox) continue
+      mesh.updateWorldMatrix(false, false)
+      this.rampMeshBox.copy(geometry.boundingBox).applyMatrix4(mesh.matrixWorld)
+      this.rampBox.union(this.rampMeshBox)
+    }
+    if (this.rampBox.isEmpty()) return null
+    // Read the camera's own near plane so the clamp below sits exactly on it; fall back to
+    // a small positive constant for a camera type that doesn't expose one.
+    const nearCam = camera as unknown as { near?: number }
+    const near = typeof nearCam.near === 'number' && nearCam.near > 0 ? nearCam.near : FALLBACK_NEAR
+    let min = Infinity, max = -Infinity
+    for (let i = 0; i < 8; i++) {
+      this.rampCorner.set(
+        i & 1 ? this.rampBox.max.x : this.rampBox.min.x,
+        i & 2 ? this.rampBox.max.y : this.rampBox.min.y,
+        i & 4 ? this.rampBox.max.z : this.rampBox.min.z,
+      )
+      // View space first. A corner at or behind the near plane is clamped to just in front
+      // of it, rather than bailing the whole box out to the frame ramp (its previous
+      // behaviour): bailing tests the AABB, not the visible mesh, so a dolly-in, a large
+      // object, or an orbit that swings one corner behind the eye would flip object→frame
+      // ramp between two consecutive frames — a different min/span popping in mid-motion.
+      // Clamping keeps the span continuous instead. Vector3.applyMatrix4 performs the
+      // perspective divide itself (the same thing project() does internally), so this
+      // replaces project() rather than composing with it — calling both would divide twice.
+      this.rampView.copy(this.rampCorner).applyMatrix4(camera.matrixWorldInverse)
+      if (this.rampView.z > -near) this.rampView.z = -near
+      this.rampCorner.copy(this.rampView).applyMatrix4(camera.projectionMatrix)
+      const s = (this.rampCorner.x * 0.5 + 0.5) * dir.x + (this.rampCorner.y * 0.5 + 0.5) * dir.y
+      if (s < min) min = s
+      if (s > max) max = s
+    }
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max - min < 1e-4) return null
+    return { min, max }
+  }
+
+  /** The ramp for one blur treatment, or null for an even blur. `root` null (or an
+   *  inverted group, whose treated area IS the frame) forces frame space. */
+  private resolveRamp(
+    t: BlurTreatment, root: THREE.Object3D | null, camera: THREE.Camera,
+  ): BlurRamp | null {
+    if (!t.progressive) return null
+    const dir = rampDirection(t.rampAngle)
+    const common = { dirX: dir.x, dirY: dir.y, start: t.rampStart, end: t.rampEnd }
+    if (t.rampSpace === 'object' && root) {
+      const span = this.objectRampSpan(root, camera, dir)
+      if (span) return { ...common, min: span.min, span: span.max - span.min }
+      // Degenerate box: fall through to the frame ramp rather than dropping the effect.
+    }
+    // UV space is the unit square, so its support width along `dir` is |x| + |y|, and the
+    // smallest projection of its four corners is where the ramp starts.
+    const min = Math.min(0, dir.x) + Math.min(0, dir.y)
+    return { ...common, min, span: rampSupport(1, 1, t.rampAngle) }
+  }
+
   /** Apply one masked treatment to `src`; returns the target with the result and the halo
-   *  reach it introduced (px). Fade is handled by the caller as a composite opacity. */
-  private applyEffect(src: RT, t: Treatment): { rt: RT; haloPx: number } {
+   *  reach it introduced (px). Fade is handled by the caller as a composite opacity.
+   *  `ramp` applies to a progressive blur only — glow's internal spread never ramps. */
+  private applyEffect(src: RT, t: Treatment, ramp: BlurRamp | null): { rt: RT; haloPx: number } {
     if (t.kind === 'blur') {
-      const { rt, radiusPx } = this.blur(src, t.amount)
+      const { rt, radiusPx } = this.blur(src, t.amount, ramp)
       return { rt, haloPx: radiusPx }
     }
     if (t.kind === 'pixelate') {
@@ -279,7 +545,7 @@ export class TreatmentStage {
       this.brightMat.uniforms.uThreshold!.value = t.threshold
       this.pass(this.brightMat, bright)
       const spread = 0.5 * (0.5 + 0.5 * Math.min(2, t.strength)) // 0.25–0.75 of the blur scale
-      const { rt: glow, radiusPx } = this.blur(bright, spread, src)
+      const { rt: glow, radiusPx } = this.blur(bright, spread, null, src)
       const dst = this.free(src, glow)
       this.glowMergeMat.uniforms.tBase!.value = src.texture
       this.glowMergeMat.uniforms.tGlow!.value = glow.texture
@@ -340,17 +606,33 @@ export class TreatmentStage {
     u.tBaseDepth2!.value = baseDepth2 ?? this.base.depthTexture
     u.uOpacity!.value = opacity
     u.uHaloRadius!.value = Math.max(2, haloPx)
-    this.pass(this.compositeMat, this.out)
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    // Only a fade (opacity < 1) needs the tone-mapped blend, and only ACES is invertible
+    // here — on any other tone mapping the shader's inverse would not mirror what
+    // OutputPass does, so fall back to the linear blend rather than shift the colour.
+    u.uDisplayBlend!.value =
+      opacity < 1 && this.renderer.toneMapping === THREE.ACESFilmicToneMapping ? 1 : 0
+    // toLinear() divides by uExposure; guard on the CPU side so an exposure dial that ever
+    // reaches 0 can't emit Inf into the HalfFloat accumulator.
+    u.uExposure!.value = Math.max(this.renderer.toneMappingExposure, MIN_EXPOSURE)
+    this.pass(this.compositeMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
   }
 
-  /** Run `g`'s treatment chain over `layerRt` and blend the result into `out`. */
-  private treatAndComposite(g: MaskedGroup, layerRt: RT, baseDepth2: THREE.Texture | null): void {
+  /** Run `g`'s treatment chain over `layerRt` and blend the result into the accumulator. */
+  private treatAndComposite(
+    g: MaskedGroup, layerRt: RT, baseDepth2: THREE.Texture | null,
+    root: THREE.Object3D | null, camera: THREE.Camera,
+  ): void {
     let src: RT = layerRt
     let opacity = 1
     let halo = 0
     for (const t of g.treatments) {
       if (t.kind === 'fade') { opacity *= t.opacity; continue }
-      const res = this.applyEffect(src, t)
+      // An inverted group's treated area is the rest of the scene, so "the object's own
+      // extent" is meaningless there — pass no root and resolveRamp uses frame space.
+      const ramp = t.kind === 'blur' ? this.resolveRamp(t, g.invert ? null : root, camera) : null
+      const res = this.applyEffect(src, t, ramp)
       src = res.rt
       halo = Math.max(halo, res.haloPx)
     }
@@ -379,7 +661,7 @@ export class TreatmentStage {
     const prevVis = new Map<THREE.Object3D, boolean>()
     const hide = (o: THREE.Object3D): void => { if (!prevVis.has(o)) prevVis.set(o, o.visible); o.visible = false }
     const unhideAll = (): void => { for (const [o, v] of prevVis) o.visible = v; prevVis.clear() }
-    let result: THREE.Texture = this.out.texture
+    let result: THREE.Texture = this.accum[0]!.texture
     try {
       // MUST stay false: every quad pass goes through renderer.render(), which asks
       // WebGLBackground to clear the bound target whenever autoClear is on — that would wipe
@@ -414,7 +696,8 @@ export class TreatmentStage {
         unhideAll()
       }
       this.premulMat.uniforms.tDiffuse!.value = this.base.texture
-      this.pass(this.premulMat, this.out)
+      this.accumIdx = 0
+      this.pass(this.premulMat, this.accum[0]!)
 
       // 2a. The "everything else" group first, so its depth is available as the second
       //     occluder for every normal group below (its own test is against the base alone).
@@ -429,19 +712,20 @@ export class TreatmentStage {
         r.render(scene, camera)
         scene.background = prevBackground
         unhideAll()
-        this.treatAndComposite(invertGroup, inv, null)
+        this.treatAndComposite(invertGroup, inv, null, null, camera)
         invDepth = inv.depthTexture
       }
       // 2b. Then every normal group in plan order, each tested against base AND invert depth.
       for (const g of groups) {
         if (g.invert) continue
-        this.drawAlone(scene, camera, ctx.objectRoots.get(g.objectId)!, treatedRoots, this.layer, null)
-        this.treatAndComposite(g, this.layer, invDepth)
+        const root = ctx.objectRoots.get(g.objectId)!
+        this.drawAlone(scene, camera, root, treatedRoots, this.layer, null)
+        this.treatAndComposite(g, this.layer, invDepth, root, camera)
       }
       // 3. One un-premultiply back to straight alpha for the consumers downstream. The
       //    scratch it lands in is not touched again until the next render().
       const outStraight = this.free()
-      this.unpremulMat.uniforms.tDiffuse!.value = this.out.texture
+      this.unpremulMat.uniforms.tDiffuse!.value = this.accum[this.accumIdx]!.texture
       this.pass(this.unpremulMat, outStraight)
       result = outStraight.texture
     } finally {

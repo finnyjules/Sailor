@@ -362,6 +362,24 @@ describe('animatableTargets: treatments', () => {
     expect(targets.find((t) => t.path.endsWith(`.${blur.id}.invert`))).toBeUndefined()
     expect(targets.find((t) => t.path.endsWith(`.${blur.id}.enabled`))).toBeUndefined()
   })
+  it('withholds the progressive-blur ramp targets while Progressive is off, and offers all three once it is on', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Bottle'
+    const blur = createTreatment('blur')
+    box.treatments = [blur]
+    doc.objects.push(box)
+
+    const rampPaths = ['rampAngle', 'rampStart', 'rampEnd'].map((f) => `objects.${box.id}.treatments.${blur.id}.${f}`)
+
+    expect((blur as any).progressive).toBe(false) // precondition
+    const offPaths = animatableTargets(doc).map((t) => t.path)
+    for (const p of rampPaths) expect(offPaths, p).not.toContain(p)
+
+    ;(blur as any).progressive = true
+    const onPaths = animatableTargets(doc).map((t) => t.path)
+    for (const p of rampPaths) expect(onPaths, p).toContain(p)
+  })
+
   it('a track on a treatment dial writes through the id, and survives reordering the stack', () => {
     const doc = defaultDoc()
     const box = createPrimitive('box', doc.objects)

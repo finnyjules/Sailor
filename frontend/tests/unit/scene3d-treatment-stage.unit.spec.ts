@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, pixelateCellPx, stageSamples } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples, blurRampAt, rampDirection, rampSupport } from '~/lib/scene3d/treatmentStage'
 
 describe('blurPasses', () => {
   it('scales the radius with amount and image height', () => {
@@ -38,5 +38,64 @@ describe('stageSamples', () => {
   })
   it('never asks for more samples than the device supports', () => {
     expect(stageSamples(1920, 1080, 2)).toBe(2)
+  })
+})
+
+describe('blurRampAt', () => {
+  it('is 0 before the start and 1 after the end', () => {
+    expect(blurRampAt(0, 0.2, 0.8)).toBe(0)
+    expect(blurRampAt(0.2, 0.2, 0.8)).toBe(0)
+    expect(blurRampAt(0.8, 0.2, 0.8)).toBe(1)
+    expect(blurRampAt(1, 0.2, 0.8)).toBe(1)
+  })
+
+  it('interpolates linearly between them', () => {
+    expect(blurRampAt(0.5, 0, 1)).toBeCloseTo(0.5, 6)
+    expect(blurRampAt(0.5, 0.2, 0.8)).toBeCloseTo(0.5, 6)
+    expect(blurRampAt(0.35, 0.2, 0.8)).toBeCloseTo(0.25, 6)
+  })
+
+  it('is a hard edge when the end is at or below the start', () => {
+    expect(blurRampAt(0.49, 0.5, 0.5)).toBe(0)
+    expect(blurRampAt(0.5, 0.5, 0.5)).toBe(1)
+    expect(blurRampAt(0.3, 0.5, 0.1)).toBe(0)
+    expect(blurRampAt(0.7, 0.5, 0.1)).toBe(1)
+  })
+})
+
+describe('rampDirection', () => {
+  it('0 degrees runs left to right', () => {
+    const d = rampDirection(0)
+    expect(d.x).toBeCloseTo(1, 6)
+    expect(d.y).toBeCloseTo(0, 6)
+  })
+
+  it('90 degrees runs top to bottom, so its y is negative', () => {
+    // Texture v = 1 is the visual TOP, so "downwards" is -y.
+    const d = rampDirection(90)
+    expect(d.x).toBeCloseTo(0, 6)
+    expect(d.y).toBeCloseTo(-1, 6)
+  })
+
+  it('270 degrees runs bottom to top', () => {
+    const d = rampDirection(270)
+    expect(d.y).toBeCloseTo(1, 6)
+  })
+})
+
+describe('rampSupport', () => {
+  it('is the width along 0 degrees and the height along 90', () => {
+    expect(rampSupport(4, 2, 0)).toBeCloseTo(4, 6)
+    expect(rampSupport(4, 2, 90)).toBeCloseTo(2, 6)
+  })
+
+  it('spans corner to corner on the diagonal', () => {
+    expect(rampSupport(1, 1, 45)).toBeCloseTo(Math.SQRT2, 6)
+  })
+
+  it('is never negative, whatever the angle', () => {
+    for (const a of [0, 45, 90, 135, 180, 225, 270, 315]) {
+      expect(rampSupport(3, 2, a)).toBeGreaterThan(0)
+    }
   })
 })
