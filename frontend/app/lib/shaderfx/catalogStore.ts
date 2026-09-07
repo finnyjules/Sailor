@@ -38,8 +38,15 @@ export function getEffectSync(id: string): EffectDef | null {
 /** True when the effect's GLSL `source` samples its input texture (`u_image0`) —
  *  false for purely generative effects and for unknown ids. Resolves the same
  *  `filament → thread_contours` alias as getEffectSync, since it looks the
- *  effect up through that function. */
-const READS_INPUT_RE = /\bu_image0\b/
+ *  effect up through that function.
+ *
+ *  A bare mention of `u_image0` is NOT enough: every real shader — generative
+ *  ones included — declares `uniform sampler2D u_image0;` in its GLSL
+ *  preamble even when it never reads from it, so a mention-only regex matches
+ *  all 75 effects and this gate goes inert. The effect must actually SAMPLE
+ *  the uniform (`texture(u_image0, …)`, `texture2D`/`textureProj`/`textureLod`,
+ *  or `texelFetch`) with it as the first argument for this to be true. */
+const READS_INPUT_RE = /texture(2D|Proj|Lod)?\s*\(\s*u_image0|texelFetch\s*\(\s*u_image0/
 export function effectReadsInput(effectId: string): boolean {
   const def = getEffectSync(effectId)
   if (!def || typeof def.source !== 'string') return false
