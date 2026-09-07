@@ -435,36 +435,45 @@ test.describe('3D Studio treatments', () => {
    * `visible` predicate, and a row declared with a gate that nobody evaluates looks correct in
    * every unit test while being permanently hidden — or permanently shown.
    */
-  test('the Progressive switch is in the inspector and gates the ramp rows', async ({ page }) => {
-    await openLab(page, twoSpheres())
-    const row = page.locator('[data-testid="object-row"][data-object-name="Left"]')
-    await row.hover()
-    await row.locator('[data-testid="add-treatment"]').click()
-    await page.locator('[data-testid="add-treatment-item"][data-kind="blur"]').click()
-    await expect(page.getByTestId('treatment-breadcrumb')).toHaveText(/Left.*Blur/)
+  /**
+   * The Progressive rows must actually REACH the panel, on EVERY masked kind. Everything else
+   * about this feature can pass while a switch is invisible: the rows are declared in
+   * treatmentControls.ts, the shaders read the uniforms, and every other browser case drives the
+   * ramp through a URL state that never opens the inspector. `showIf` in particular is inert
+   * unless the panel is handed a `visible` predicate, and a row declared with a gate nobody
+   * evaluates looks correct in every unit test while being permanently hidden — or shown.
+   */
+  for (const kind of ['blur', 'glow', 'pixelate', 'fade'] as const) {
+    test(`Progressive is in the inspector and gates the ramp rows — ${kind}`, async ({ page }) => {
+      await openLab(page, twoSpheres())
+      const row = page.locator('[data-testid="object-row"][data-object-name="Left"]')
+      await row.hover()
+      await row.locator('[data-testid="add-treatment"]').click()
+      await page.locator(`[data-testid="add-treatment-item"][data-kind="${kind}"]`).click()
+      await expect(page.getByTestId('treatment-breadcrumb')).toBeVisible()
 
-    const RAMP_ROWS = ['Measured across', 'Angle', 'Start', 'End']
-    await expect(page.getByLabel('Amount')).toBeVisible()
-    await expect(page.getByLabel('Progressive')).toBeVisible()
-    for (const label of RAMP_ROWS) {
-      await expect(page.getByLabel(label), `${label} must be hidden while Progressive is off`).toHaveCount(0)
-    }
+      const RAMP_ROWS = ['Measured across', 'Angle', 'Start', 'End']
+      await expect(page.getByLabel('Progressive')).toBeVisible()
+      for (const label of RAMP_ROWS) {
+        await expect(page.getByLabel(label), `${label} must be hidden while Progressive is off on ${kind}`).toHaveCount(0)
+      }
 
-    await page.getByLabel('Progressive').click()
-    for (const label of RAMP_ROWS) {
-      await expect(page.getByLabel(label), `${label} must appear once Progressive is on`).toBeVisible()
-    }
-    // The switch wrote through to the document, not just to the panel.
-    expect(await page.evaluate(() => (window as any).__scene3dDoc().objects[0].treatments[0]))
-      .toMatchObject({ kind: 'blur', progressive: true, rampSpace: 'object', rampAngle: 90 })
-  })
+      await page.getByLabel('Progressive').click()
+      for (const label of RAMP_ROWS) {
+        await expect(page.getByLabel(label), `${label} must appear once Progressive is on for ${kind}`).toBeVisible()
+      }
+      // The switch wrote through to the document, not just to the panel.
+      expect(await page.evaluate(() => (window as any).__scene3dDoc().objects[0].treatments[0]))
+        .toMatchObject({ kind, progressive: true, rampSpace: 'object', rampAngle: 90 })
+    })
+  }
 
   /**
-   * Glow and pixelate need DIFFERENT measurements from blur and fade, and the reason is worth
-   * keeping: gradient energy measures sharpness, which is what blur and fade change. Glow ADDS
-   * LIGHT and pixelate FLATTENS BLOCKS while adding hard edges — neither moves gradient energy
-   * in a way that discriminates. Measured on this exact scene, a fully-ramped pixelate moved
-   * gradient energy only 11.0 → 12.9 (ambiguous) while blockiness moved 0.889 → 0.986 (decisive).
+   * Glow and pixelate need DIFFERENT measurements from blur and fade. Gradient energy measures
+   * SHARPNESS, which is what blur and fade change. Glow ADDS LIGHT and pixelate FLATTENS BLOCKS
+   * while adding hard edges — neither moves gradient energy in a way that discriminates.
+   * Measured on this exact scene, a fully-ramped pixelate moved gradient energy only
+   * 11.0 → 12.9 (ambiguous) while blockiness moved 0.889 → 0.986 (decisive).
    */
   async function bandMetrics(page: Page): Promise<{
     top: { mean: number; blocky: number }; bottom: { mean: number; blocky: number }
@@ -481,8 +490,8 @@ test.describe('3D Studio treatments', () => {
           for (let x = Math.floor(width * 0.25); x < width * 0.45 - 1; x++) {
             const i = (y * width + x) * 4
             m += lum(i)
-            // "Blocky" = this pixel is identical to its right-hand neighbour. Inside a pixelate
-            // block every pair matches; on a smoothly shaded sphere almost none do.
+            // "Blocky" = identical to the right-hand neighbour. Inside a pixelate block every
+            // pair matches; on a smoothly shaded sphere almost none do.
             if (Math.abs(lum(i) - lum(i + 4)) < 0.5) same++
             n++
           }
@@ -492,18 +501,6 @@ test.describe('3D Studio treatments', () => {
     }, await snapshot(page))
   }
 
-  /**
-   * Glow only appears where the object is already BRIGHT — that is what a threshold means — and
-   * this sphere is lit from above, so its bottom band is too dark to glow at any ramp value.
-   * Measuring "more glow at the ramp's far end" therefore cannot work at angle 90: the far end
-   * is the dark half. The discriminating test is the SAME band under two opposite ramps, so the
-   * only thing that differs is whether the ramp's full end lands on the lit part.
-   *
-   * Measured: top-band mean luminance is 44.17 with the ramp off (no glow at all), 47.58 at
-   * angle 90 (the sharp end sits on the highlight), and 62.64 at angle 270 (the full end does)
-   * — against 63.52 for an un-ramped glow. So 270 recovers essentially all of the glow and 90
-   * almost none.
-   */
   test('a progressive glow follows the ramp, not the object', async ({ page }) => {
     const errs = watchConsole(page)
     const glow = { id: 't-glow', kind: 'glow', enabled: true, invert: false, strength: 3, threshold: 0.2, tint: '#ffffff' }
