@@ -3274,6 +3274,9 @@ function cloneObject(src: SceneObject, existing: SceneObject[] = doc.objects): S
     // would make both objects' shapes move together on any later edit.
     ...(src.kind === 'primitive' && src.params ? { params: { ...src.params } } : {}),
     ...(src.kind === 'primitive' && src.modifiers ? { modifiers: { ...src.modifiers } } : {}),
+    // Vary palette travels with the copy the same defensive way as params/modifiers —
+    // a shared array would let editing one copy's swatches mutate the other's.
+    ...(src.kind === 'primitive' && src.varyPalette ? { varyPalette: [...src.varyPalette] } : {}),
     // Deep-copied: a shallow `{ ...src.content }` is safe today (both fields
     // are strings) but this is the same nested-bag shape as params/modifiers
     // above, so it's cloned the same defensive way rather than relying on

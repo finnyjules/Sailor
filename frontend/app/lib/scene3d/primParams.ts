@@ -5,6 +5,7 @@
 // Every default reproduces the geometry the studio shipped before parameters
 // existed — see the per-kind comments for the original three.js call.
 import type { PrimitiveKind } from '~/lib/scene3d/config'
+import { DEFAULT_VARY, VARY_MODES, VARY_SPREADS, type VarySettings } from '~/lib/vary'
 
 export interface ParamSpec {
   key: string
@@ -253,6 +254,19 @@ export const MODIFIER_SPECS: ParamSpec[] = [
   { key: 'cloneStepRotY', label: 'Step rotate Y', hint: 'Extra Y rotation added to each successive copy', min: -180, max: 180, step: 1, default: 0 },
   { key: 'cloneStepRotZ', label: 'Step rotate Z', hint: 'Extra Z rotation added to each successive copy', min: -180, max: 180, step: 1, default: 0 },
   { key: 'cloneStepScale', label: 'Step scale', hint: 'Each copy is scaled by this much again — below 1 shrinks away, above 1 grows', min: 0.5, max: 1.5, step: 0.01, default: 1 },
+
+  // Vary keys — per-copy variation across the cloner's copies. Numeric dials only;
+  // the PALETTE is a string[] and lives on the object as `varyPalette` (see config.ts),
+  // exactly as Shape Studio keeps its `fills` list beside its numeric schema.
+  // Every default is the identity, so an existing scene renders unchanged.
+  // Option lists are APPEND-ONLY — the stored value is the option INDEX.
+  { key: 'varyMode', label: 'Vary', hint: 'How a property changes from one copy to the next — evenly along the sequence, randomly, or strongest near a point', min: 0, max: 2, step: 1, default: 0, control: 'options', options: ['sequence', 'random', 'falloff'] },
+  { key: 'varySeed', label: 'Vary seed', hint: 'Shuffles the random variation into a different arrangement', min: 0, max: 99, step: 1, default: 0 },
+  { key: 'varyFalloffCenter', label: 'Centre', hint: 'Where along the copies the variation is strongest', min: 0, max: 1, step: 0.01, default: 0 },
+  { key: 'varyFalloffRadius', label: 'Reach', hint: 'How far from the centre the variation still applies', min: 0.01, max: 1, step: 0.01, default: 0.5 },
+  { key: 'varyColor', label: 'Vary colour', hint: 'Give each copy its own colour from a palette', min: 0, max: 1, step: 1, default: 0, control: 'options', options: ['off', 'on'] },
+  { key: 'varyColorSpread', label: 'Spread', hint: 'Cycle gives each copy one whole palette colour; Blend fades between them', min: 0, max: 1, step: 1, default: 0, control: 'options', options: ['cycle', 'blend'] },
+  { key: 'varyColorStrength', label: 'Colour strength', hint: 'How far each copy moves from the material colour toward its palette colour', min: 0, max: 1, step: 0.01, default: 1 },
 ]
 
 export function modifierValue(modifiers: Record<string, number> | undefined, key: string): number {
@@ -297,4 +311,22 @@ export function sanitizeModifiers(raw: unknown): Record<string, number> | undefi
     }
   }
   return sanitizeBag(MODIFIER_SPECS, raw)
+}
+
+/** The object's vary settings in the shared module's vocabulary: the numeric bag
+ *  supplies the dials, `varyPalette` the swatches. Falls back to the shared
+ *  defaults so an untouched object reads as "no variation". */
+export function varySettingsFor(obj: { modifiers?: Record<string, number>; varyPalette?: string[] }): VarySettings {
+  const m = (k: string) => modifierValue(obj.modifiers, k)
+  const pal = obj.varyPalette && obj.varyPalette.length > 0 ? obj.varyPalette : DEFAULT_VARY.palette
+  return {
+    mode: VARY_MODES[Math.round(m('varyMode'))] ?? 'sequence',
+    seed: Math.round(m('varySeed')),
+    falloffCenter: m('varyFalloffCenter'),
+    falloffRadius: m('varyFalloffRadius'),
+    colorEnabled: Math.round(m('varyColor')) === 1,
+    palette: pal,
+    spread: VARY_SPREADS[Math.round(m('varyColorSpread'))] ?? 'cycle',
+    strength: m('varyColorStrength'),
+  }
 }
