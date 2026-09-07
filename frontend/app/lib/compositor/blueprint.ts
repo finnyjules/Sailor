@@ -60,6 +60,9 @@ import { mulberry32, hashSeed } from '~/lib/spacetype/rng'
 
 /** Which corner the polar origin hangs off. 'auto' lets the seed pick one of four. */
 export const BLUEPRINT_CORNERS = ['auto', 'bl', 'br', 'tr', 'tl', 'center'] as const
+/** A stroke's line style: a continuous line or an evenly dashed one. */
+export const BLUEPRINT_DASH = ['solid', 'dashed'] as const
+export type BlueprintDash = typeof BLUEPRINT_DASH[number]
 export type BlueprintCorner = typeof BLUEPRINT_CORNERS[number]
 /** The four real corners, in anticlockwise order from the bottom-left — the order that
  *  makes the fan base a clean multiple of 90° (blueprintFanBase). */
@@ -84,6 +87,17 @@ export interface BlueprintParams {
   arcGap: number         // even radial step between arcs, short-side fractions
   tickStep: number       // degrees between arc hatch ticks
   labels: number         // 0..1 angle-label opacity (0 = hidden)
+  // Per-type stroke width (a multiple of the minor grid line) and line style. The
+  // minor grid is the base width; `majorWidth` sets the major grid. Defaults keep the
+  // original look: solid grid, dashed spokes, solid arcs and ticks.
+  spokeWidth: number     // radial spokes, × the minor line
+  arcWidth: number       // concentric arcs, × the minor line
+  tickWidth: number      // arc hatch ticks, × the minor line
+  gridDash: BlueprintDash
+  spokeDash: BlueprintDash
+  arcDash: BlueprintDash
+  tickDash: BlueprintDash
+  dashScale: number      // 0.3..3, scales the dash pattern of every dashed stroke
   paper: string          // the dark ground
   ink: string            // lines / arcs / ticks / labels
   inkDim: string         // the minor grid
@@ -108,6 +122,7 @@ export const BLUEPRINT_LIMITS = {
   cells: [6, 64], major: [2, 12], minorAlpha: [0, 1], majorWidth: [1, 3],
   originX: [-0.5, 0.5], originY: [-0.5, 0.5], angleStart: [0, 90], angleStep: [5, 45],
   angleSpread: [15, 360], arcs: [0, 10], arcGap: [0.05, 0.6], tickStep: [1, 30], labels: [0, 1],
+  spokeWidth: [0.25, 4], arcWidth: [0.25, 4], tickWidth: [0.25, 4], dashScale: [0.3, 3],
 } as const
 
 /** The opening picture — the reference blueprint green, a quarter fan of four arcs. */
@@ -116,6 +131,8 @@ export function defaultBlueprint(): BlueprintParams {
     cells: 32, major: 5, minorAlpha: 0.5, majorWidth: 1.6, corner: 'bl',
     originX: 0, originY: 0, angleStart: 0, angleStep: 15, angleSpread: 90,
     arcs: 4, arcGap: 0.22, tickStep: 5, labels: 1,
+    spokeWidth: 1, arcWidth: 1.6, tickWidth: 1,
+    gridDash: 'solid', spokeDash: 'dashed', arcDash: 'solid', tickDash: 'solid', dashScale: 1,
     ...BLUEPRINT_PALETTE_PRESETS.Blueprint,
   }
 }
@@ -149,6 +166,8 @@ export function normalizeBlueprint(partial: unknown, base: BlueprintParams = def
   const whole = (v: unknown, lo: number, hi: number, fb: number) => Math.round(num(v, lo, hi, fb))
   // A drafting ink is opaque: the picker's #rrggbbaa is cut to #rrggbb here, once.
   const ink = (v: unknown, fb: string) => (isHex(v) ? (v as string).slice(0, 7) : fb)
+  const dash = (v: unknown, fb: BlueprintDash): BlueprintDash =>
+    (BLUEPRINT_DASH as readonly string[]).includes(v as string) ? (v as BlueprintDash) : fb
   const corner = (BLUEPRINT_CORNERS as readonly string[]).includes(p.corner as string)
     ? (p.corner as BlueprintCorner) : base.corner
   return {
@@ -166,6 +185,14 @@ export function normalizeBlueprint(partial: unknown, base: BlueprintParams = def
     arcGap: num(p.arcGap, L.arcGap[0], L.arcGap[1], base.arcGap),
     tickStep: whole(p.tickStep, L.tickStep[0], L.tickStep[1], base.tickStep),
     labels: num(p.labels, L.labels[0], L.labels[1], base.labels),
+    spokeWidth: num(p.spokeWidth, L.spokeWidth[0], L.spokeWidth[1], base.spokeWidth),
+    arcWidth: num(p.arcWidth, L.arcWidth[0], L.arcWidth[1], base.arcWidth),
+    tickWidth: num(p.tickWidth, L.tickWidth[0], L.tickWidth[1], base.tickWidth),
+    gridDash: dash(p.gridDash, base.gridDash),
+    spokeDash: dash(p.spokeDash, base.spokeDash),
+    arcDash: dash(p.arcDash, base.arcDash),
+    tickDash: dash(p.tickDash, base.tickDash),
+    dashScale: num(p.dashScale, L.dashScale[0], L.dashScale[1], base.dashScale),
     paper: ink(p.paper, base.paper),
     ink: ink(p.ink, base.ink),
     inkDim: ink(p.inkDim, base.inkDim),
@@ -324,20 +351,22 @@ export function paintBlueprint(ctx: BlueprintCtx, params: BlueprintParams, boxW:
 
   // 3b — dashed spokes, each long enough to cross the box.
   const reach = Math.hypot(W, H) * 1.6
-  ctx.setLineDash([short * 0.018, short * 0.012])
+  const dashPat = (kind: BlueprintDash): number[] =>
+    kind === 'dashed' ? [short * 0.018 * p.dashScale, short * 0.012 * p.dashScale] : []
+  ctx.setLineDash(dashPat(p.spokeDash))
   ctx.strokeStyle = rgba(p.ink, SPOKE_ALPHA)
-  ctx.lineWidth = minor
+  ctx.lineWidth = minor * p.spokeWidth
   ctx.beginPath()
   for (const s of spokes) {
     ctx.moveTo(Ox, Oy)
     ctx.lineTo(Ox + s.dir.x * reach, Oy + s.dir.y * reach)
   }
   ctx.stroke()
-  ctx.setLineDash([])                       // reset — the grid and arcs are solid
 
-  // 3c — concentric arcs across the fan.
+  // 3c — concentric arcs across the fan (own width + line style).
+  ctx.setLineDash(dashPat(p.arcDash))
   ctx.strokeStyle = rgba(p.ink, ARC_ALPHA)
-  ctx.lineWidth = major
+  ctx.lineWidth = minor * p.arcWidth
   const a0 = -(blueprintFanBase(resolveCorner(seed, p)) + p.angleStart) * Math.PI / 180
   const a1 = a0 - p.angleSpread * Math.PI / 180   // sweep by the spread, into the box
   for (const r of arcRadii) {
@@ -352,8 +381,9 @@ export function paintBlueprint(ctx: BlueprintCtx, params: BlueprintParams, boxW:
     const base = blueprintFanBase(resolveCorner(seed, p))
     const ticks = blueprintTicks(p)
     const half = short * 0.008
+    ctx.setLineDash(dashPat(p.tickDash))
     ctx.strokeStyle = rgba(p.ink, TICK_ALPHA)
-    ctx.lineWidth = minor
+    ctx.lineWidth = minor * p.tickWidth
     for (const r of arcRadii) {
       if (r <= 0) continue
       ctx.beginPath()
@@ -367,6 +397,8 @@ export function paintBlueprint(ctx: BlueprintCtx, params: BlueprintParams, boxW:
       ctx.stroke()
     }
   }
+
+  ctx.setLineDash([])                          // reset — no dash leaks past the polar overlay
 
   // 3e — angle labels near the rim of the fan.
   if (p.labels > 0.001) {
@@ -390,6 +422,8 @@ function paintGrid(ctx: BlueprintCtx, p: BlueprintParams, W: number, H: number, 
   const nx = Math.floor(W / cell), ny = Math.floor(H / cell)
   const majN = Math.max(1, Math.round(p.major))
 
+  const gridPat = p.gridDash === 'dashed' ? [short * 0.018 * p.dashScale, short * 0.012 * p.dashScale] : []
+  ctx.setLineDash(gridPat)
   // 2a — minor lines (skip the ones a major covers).
   ctx.strokeStyle = rgba(p.inkDim, p.minorAlpha)
   ctx.lineWidth = minor
@@ -405,4 +439,5 @@ function paintGrid(ctx: BlueprintCtx, p: BlueprintParams, W: number, H: number, 
   for (let i = 0; i <= nx; i += majN) { const x = i * cell; ctx.moveTo(x, 0); ctx.lineTo(x, H) }
   for (let j = 0; j <= ny; j += majN) { const y = j * cell; ctx.moveTo(0, y); ctx.lineTo(W, y) }
   ctx.stroke()
+  ctx.setLineDash([])                          // reset — the polar overlay sets its own
 }

@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
-  BLUEPRINT_LIMITS, BLUEPRINT_PALETTE_PRESETS, BLUEPRINT_PRESET_NAMES, BLUEPRINT_CORNERS,
+  BLUEPRINT_LIMITS, BLUEPRINT_PALETTE_PRESETS, BLUEPRINT_PRESET_NAMES, BLUEPRINT_CORNERS, BLUEPRINT_DASH,
   defaultBlueprint, normalizeBlueprint, blueprintPresetPatch, blueprintPresetOf,
   blueprintFanBase, blueprintOrigin, blueprintSpokes, blueprintArcs, blueprintTicks,
   blueprintWeights, paintBlueprint,
@@ -25,6 +25,7 @@ describe('params and palettes', () => {
       cells: [6, 64], major: [2, 12], minorAlpha: [0, 1], majorWidth: [1, 3],
       originX: [-0.5, 0.5], originY: [-0.5, 0.5], angleStart: [0, 90], angleStep: [5, 45],
       angleSpread: [15, 360], arcs: [0, 10], arcGap: [0.05, 0.6], tickStep: [1, 30], labels: [0, 1],
+      spokeWidth: [0.25, 4], arcWidth: [0.25, 4], tickWidth: [0.25, 4], dashScale: [0.3, 3],
     })
     const d = defaultBlueprint()
     expect(d).toMatchObject({
@@ -190,7 +191,7 @@ describe('blueprintWeights — a thin minor, a heavier major', () => {
 type Op =
   | { op: 'fillRect'; x: number; y: number; w: number; h: number; style: string }
   | { op: 'stroke'; style: string; width: number; dash: number[]; segs: number }
-  | { op: 'arc'; cx: number; cy: number; r: number; style: string; width: number }
+  | { op: 'arc'; cx: number; cy: number; r: number; style: string; width: number; dash: number[] }
   | { op: 'text'; text: string; x: number; y: number; style: string }
 
 function recorder() {
@@ -208,7 +209,7 @@ function recorder() {
       ops.push({ op: 'fillRect', x, y, w, h, style: String(ctx.fillStyle) })
     },
     arc(cx: number, cy: number, r: number) {
-      ops.push({ op: 'arc', cx, cy, r, style: String(ctx.strokeStyle), width: ctx.lineWidth })
+      ops.push({ op: 'arc', cx, cy, r, style: String(ctx.strokeStyle), width: ctx.lineWidth, dash: [...dash] })
     },
     stroke() {
       if (pending > 0) ops.push({ op: 'stroke', style: String(ctx.strokeStyle), width: ctx.lineWidth, dash: [...dash], segs: pending })
@@ -376,3 +377,71 @@ describe('centre origin — concentric circles from the middle', () => {
     radii.forEach((r, i) => expect(r).toBeCloseTo(0.2 * (i + 1), 6))
   })
 })
+
+describe('per-type stroke width and line style', () => {
+  const W = 900, H = 900
+  const minorBase = Math.max(1, Math.min(W, H) / 2400)   // the paint floors the minor line at 1px
+  const P = (over = {}) => ({ ...defaultBlueprint(), ...over })
+  const alpha = (rgba: string) => Number(rgba.split(',')[3]?.replace(')', '') ?? '1')
+
+  it('exposes solid | dashed and keeps the original look by default', () => {
+    expect((BLUEPRINT_DASH as readonly string[])).toEqual(['solid', 'dashed'])
+    expect(defaultBlueprint()).toMatchObject({
+      spokeWidth: 1, arcWidth: 1.6, tickWidth: 1, dashScale: 1,
+      gridDash: 'solid', spokeDash: 'dashed', arcDash: 'solid', tickDash: 'solid',
+    })
+  })
+
+  it('clamps widths and rejects an unknown line style back to the base', () => {
+    const n = normalizeBlueprint({ spokeWidth: 99, arcWidth: -1, tickWidth: 0, dashScale: 9, spokeDash: 'wavy', arcDash: 'dashed' })
+    expect(n.spokeWidth).toBe(4); expect(n.arcWidth).toBe(0.25); expect(n.tickWidth).toBe(0.25); expect(n.dashScale).toBe(3)
+    expect(n.spokeDash).toBe('dashed')   // unknown 'wavy' falls back to the default (dashed)
+    expect(n.arcDash).toBe('dashed')     // a valid override is kept
+  })
+
+  it('paints each type at its own width', () => {
+    const rec = recorder()
+    paintBlueprint(rec.ctx, P({ spokeWidth: 3, arcWidth: 2, arcs: 3 }), W, H, 12)
+    const strokes = rec.ops.filter(o => o.op === 'stroke') as Extract<Op, { op: 'stroke' }>[]
+    const spoke = strokes.find(s => Math.abs(alpha(s.style) - 0.7) < 0.02)!   // spokes are the 0.7-alpha stroke
+    expect(spoke.width).toBeCloseTo(minorBase * 3, 6)
+    const arcs = rec.ops.filter(o => o.op === 'arc') as Extract<Op, { op: 'arc' }>[]
+    expect(arcs[0]!.width).toBeCloseTo(minorBase * 2, 6)
+  })
+
+  it('switches each type between solid and dashed independently', () => {
+    // Default: spokes dashed, arcs solid.
+    let rec = recorder()
+    paintBlueprint(rec.ctx, P({ arcs: 3 }), W, H, 12)
+    let spoke = (rec.ops.filter(o => o.op === 'stroke') as any[]).find(s => Math.abs(alpha(s.style) - 0.7) < 0.02)!
+    let arc = (rec.ops.filter(o => o.op === 'arc') as any[])[0]!
+    expect(spoke.dash.length).toBeGreaterThan(0); expect(arc.dash.length).toBe(0)
+    // Flip them: solid spokes, dashed arcs.
+    rec = recorder()
+    paintBlueprint(rec.ctx, P({ arcs: 3, spokeDash: 'solid', arcDash: 'dashed' }), W, H, 12)
+    spoke = (rec.ops.filter(o => o.op === 'stroke') as any[]).find(s => Math.abs(alpha(s.style) - 0.7) < 0.02)!
+    arc = (rec.ops.filter(o => o.op === 'arc') as any[])[0]!
+    expect(spoke.dash.length).toBe(0); expect(arc.dash.length).toBeGreaterThan(0)
+  })
+
+  it('dash scale lengthens the dash pattern of every dashed stroke', () => {
+    const at = (scale: number) => {
+      const rec = recorder()
+      paintBlueprint(rec.ctx, P({ dashScale: scale }), W, H, 12)
+      return (rec.ops.filter(o => o.op === 'stroke') as any[]).find(s => Math.abs(alpha(s.style) - 0.7) < 0.02)!.dash
+    }
+    const a = at(1), b = at(2)
+    expect(b[0]).toBeCloseTo(a[0] * 2, 6); expect(b[1]).toBeCloseTo(a[1] * 2, 6)
+  })
+
+  it('never leaves a dash set after the paint (host rule)', () => {
+    // The last setLineDash the paint issues must be empty, so a solid grid never
+    // inherits the polar overlay's dash on the next layer.
+    let lastDash: number[] = [1]
+    const rec = recorder()
+    ;(rec.ctx as any).setLineDash = (d: number[]) => { lastDash = [...d] }
+    paintBlueprint(rec.ctx, P({ arcs: 3, gridDash: 'dashed', arcDash: 'dashed', tickDash: 'dashed' }), W, H, 12)
+    expect(lastDash).toEqual([])
+  })
+})
+

@@ -23,7 +23,7 @@ import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, p
 import { defaultMosh, MOSH_LIMITS, MOSH_PRESET_NAMES, moshPresetPatch, moshPresetOf, type MoshParams, type MoshPresetName } from '~/lib/compositor/mosh'
 import { defaultCarve, CARVE_LIMITS, CARVE_PRESET_NAMES, carvePresetPatch, carvePresetOf, type CarveParams, type CarvePresetName } from '~/lib/compositor/carve'
 import { defaultTotem, normalizeTotem, TOTEM_LIMITS, TOTEM_PRESET_NAMES, totemPresetPatch, totemPresetOf, totemInkPatch, type TotemParams, type TotemPresetName } from '~/lib/compositor/totem'
-import { defaultBlueprint, normalizeBlueprint, BLUEPRINT_LIMITS, BLUEPRINT_CORNERS, BLUEPRINT_PRESET_NAMES, blueprintPresetPatch, blueprintPresetOf, type BlueprintParams, type BlueprintPresetName } from '~/lib/compositor/blueprint'
+import { defaultBlueprint, normalizeBlueprint, BLUEPRINT_LIMITS, BLUEPRINT_CORNERS, BLUEPRINT_DASH, BLUEPRINT_PRESET_NAMES, blueprintPresetPatch, blueprintPresetOf, type BlueprintParams, type BlueprintPresetName } from '~/lib/compositor/blueprint'
 import {
   SCATTER_STYLE_LABELS, scatterStyleRow, scatterLabelOf, scatterStyleOfLabel, scatterParams,
   scatterStylePatch, scatterSeedPatch, freshScatterSeed, DEFAULT_SCATTER_SEED,
@@ -7298,6 +7298,30 @@ onUnmounted(() => {
               <StudioSlider label="Labels" :min="BLUEPRINT_LIMITS.labels[0]" :max="BLUEPRINT_LIMITS.labels[1]" :step="0.01" :bindable="false"
                 :model-value="blueprintParams.labels"
                 @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { labels: v })" />
+              <!-- Per-type stroke width (× the minor grid line) and the dash pattern scale. -->
+              <div class="panel-label mt-1">Line widths</div>
+              <StudioSlider label="Spoke weight" :min="BLUEPRINT_LIMITS.spokeWidth[0]" :max="BLUEPRINT_LIMITS.spokeWidth[1]" :step="0.05" :bindable="false"
+                :model-value="blueprintParams.spokeWidth"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { spokeWidth: v })" />
+              <StudioSlider label="Arc weight" :min="BLUEPRINT_LIMITS.arcWidth[0]" :max="BLUEPRINT_LIMITS.arcWidth[1]" :step="0.05" :bindable="false"
+                :model-value="blueprintParams.arcWidth"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { arcWidth: v })" />
+              <StudioSlider label="Tick weight" :min="BLUEPRINT_LIMITS.tickWidth[0]" :max="BLUEPRINT_LIMITS.tickWidth[1]" :step="0.05" :bindable="false"
+                :model-value="blueprintParams.tickWidth"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { tickWidth: v })" />
+              <StudioSlider label="Dash scale" :min="BLUEPRINT_LIMITS.dashScale[0]" :max="BLUEPRINT_LIMITS.dashScale[1]" :step="0.1" :bindable="false"
+                :model-value="blueprintParams.dashScale"
+                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { dashScale: v })" />
+              <!-- Line style per type: a continuous line or a dashed one. -->
+              <div class="panel-label mt-1">Line style</div>
+              <StudioSelect label="Grid" :options="BLUEPRINT_DASH as any"
+                :model-value="blueprintParams.gridDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { gridDash: v })" />
+              <StudioSelect label="Spokes" :options="BLUEPRINT_DASH as any"
+                :model-value="blueprintParams.spokeDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { spokeDash: v })" />
+              <StudioSelect label="Arcs" :options="BLUEPRINT_DASH as any"
+                :model-value="blueprintParams.arcDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { arcDash: v })" />
+              <StudioSelect label="Ticks" :options="BLUEPRINT_DASH as any"
+                :model-value="blueprintParams.tickDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { tickDash: v })" />
               <!-- Three role inks: paper (ground), ink (lines/labels), inkDim (minor grid). -->
               <div class="panel-label mt-1">Inks</div>
               <div class="flex flex-wrap items-center gap-1.5">
