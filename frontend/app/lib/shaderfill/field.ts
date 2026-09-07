@@ -9,7 +9,7 @@
  */
 import { effectiveTilePaint, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { paintTileBox } from '~/lib/compositor/paint'
-import { shaderFx, expandPasses, type Uniforms } from '~/lib/shaderfx/renderer'
+import { shaderFx, expandPasses, type Uniforms, type ShaderPass } from '~/lib/shaderfx/renderer'
 // Deliberately from catalogStore, NOT ~/lib/shaderfx/catalog: this module (via
 // ~/lib/spacetype/fills.ts) is on the Space Type embed's render path, and
 // catalog.ts is where `$fetch('/sailor/shader_effects')` lives. Importing it
@@ -491,6 +491,73 @@ export function withFieldFrame<T>(requests: FieldRequest[], fn: (frozenCount: nu
  * open at all, there is no "currently installed" owner for a stale token to have been
  * reassigned out from under.
  */
+/**
+ * Shared by `resolveField` (below) and `renderFieldWithBase` (the external-backdrop
+ * entry point for the glass-lens feature): given an already-resolved `effect`/`spec`
+ * pair (see `resolve()` above — both callers already have one, for different reasons:
+ * `resolveField` needs it for `fieldKey` before it even knows whether this is a cache
+ * hit, `renderFieldWithBase` resolves it fresh since it has no cache to have already
+ * done that for), reapplies the `u_` prefix to `spec.params` and runs them through the
+ * SAME `toUniforms` expansion the studio uses, then expands that into ping-pong
+ * `passes` via `expandPasses`. Kept as ONE function so the two render paths can never
+ * drift on how a `ShaderSpec` becomes uniforms/passes — see `resolveField`'s inline
+ * version of this before the Task 3 extraction for the duplicated shape this replaces.
+ *
+ * Pure: does not touch `tileCache`/`cache`/`stats`, and does not itself call
+ * `shaderFx.render` — callers own their own caching (or, for `renderFieldWithBase`,
+ * deliberately have none) and their own base texture.
+ */
+function buildPasses(effect: EffectDef, spec: ShaderSpec, t: number): ShaderPass[] {
+  const uniforms: Uniforms = { u_time: t, u_seed: spec.seed, u_hasInput: 1 }
+  const byUniform: Record<string, ParamValue> = {}
+  for (const [k, v] of Object.entries(spec.params)) byUniform[`u_${k}`] = v
+  Object.assign(uniforms, toUniforms(effect, byUniform))
+  return expandPasses(effect.id, effect.source, uniforms, undefined, effect.passes ?? 1)
+}
+
+/**
+ * Renders `spec`'s shader field with an EXTERNALLY supplied `base` bound as `u_image0`
+ * instead of `spec.input` — the entry point the glass-lens feature (a later task) uses
+ * to feed a live snapshot of the compositor backdrop through a shader field, rather
+ * than the field's own rasterised input Paint.
+ *
+ * Deliberately bypasses BOTH `field.ts` caches: `tileCache` (keyed on `spec.input`,
+ * which is irrelevant here — `base` is the caller's own canvas, not derived from
+ * `spec.input` at all) and the field-output `cache` (keyed on a `t`/anchor-aware
+ * descriptor this call has no equivalent of, and whose whole point — reusing a render
+ * across frames — doesn't hold when the caller passes a fresh live backdrop every
+ * frame). Every call is a fresh `shaderFx.render`, same as a `cache` miss in
+ * `resolveField` below.
+ *
+ * Renders at a fixed `t = 0` — this entry point's signature (spec, base, w, h) has no
+ * time/fps input to quantize, unlike `FieldRequest`. A caller that needs the field to
+ * animate over a live backdrop supplies that via `spec` itself (e.g. baking the phase
+ * into `spec.params`); extending this signature with a time input is for whichever
+ * later task's paint-loop caller actually needs it, not this one.
+ *
+ * Unlike `resolveField`, this does NOT swallow a missing-effect/context-loss failure
+ * into a `null` return — the declared return type is a plain `HTMLCanvasElement`, and
+ * the brief's own sketch of this function has no such fallback. A caller (the glass
+ * paint-loop task) is expected to hold this precondition the same way every one-shot
+ * bake call site already does elsewhere in this module: don't call this before the
+ * shaderfx catalog has loaded (`await fetchShaderFxCatalog()` / `onFieldCatalogReady`).
+ */
+export function renderFieldWithBase(
+  spec: ShaderSpec,
+  base: HTMLCanvasElement | OffscreenCanvas,
+  w: number,
+  h: number,
+): HTMLCanvasElement {
+  const { effect, spec: resolvedSpec } = resolve(spec)
+  if (!effect) {
+    throw new Error(`renderFieldWithBase: effect "${spec.effectId}" is not in the loaded shaderfx catalog`)
+  }
+  const passes = buildPasses(effect, resolvedSpec, 0)
+  // render() RETURNS the canvas, valid only until the next render call — same
+  // ownership contract as resolveField's `rendered` below.
+  return shaderFx.render(passes, base, w, h)
+}
+
 export function resolveField(req: FieldRequest, token?: number): HTMLCanvasElement | null {
   if (token !== undefined && token !== 0 && _frameOpen && token !== _liveKeysToken) {
     stats.tokenMismatches++
@@ -530,20 +597,17 @@ export function resolveField(req: FieldRequest, token?: number): HTMLCanvasEleme
   const base = getInputTile(spec.input, w, h)
   const t = spec.speed === 0 ? 0 : tq * spec.speed
   // spec.params is already the full resolved set (defaults + valid overrides, unknown
-  // keys dropped) from `resolve()` above — reapply the `u_` prefix and run it through
-  // the SAME `toUniforms` expansion the studio uses, so a colour becomes a vec3 and a
-  // gradient becomes its indexed arrays here exactly as it does there. A hand-rolled
-  // copy of that expansion is how the two paths would drift.
-  const uniforms: Uniforms = { u_time: t, u_seed: spec.seed, u_hasInput: 1 }
-  const byUniform: Record<string, ParamValue> = {}
-  for (const [k, v] of Object.entries(spec.params)) byUniform[`u_${k}`] = v
-  Object.assign(uniforms, toUniforms(effect, byUniform))
+  // keys dropped) from `resolve()` above — `buildPasses` reapplies the `u_` prefix and
+  // runs it through the SAME `toUniforms` expansion the studio uses, so a colour
+  // becomes a vec3 and a gradient becomes its indexed arrays here exactly as it does
+  // there. A hand-rolled copy of that expansion is how the two paths would drift.
+  const passes = buildPasses(effect, spec, t)
 
   let rendered: HTMLCanvasElement
   try {
     // render() RETURNS the canvas, valid only until the next render call.
     stats.renders++
-    rendered = shaderFx.render(expandPasses(effect.id, effect.source, uniforms, undefined, effect.passes ?? 1), base, w, h)
+    rendered = shaderFx.render(passes, base, w, h)
   } catch {
     return null                                    // context loss -> input fill
   }
