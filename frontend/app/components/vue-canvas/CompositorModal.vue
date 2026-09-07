@@ -2079,7 +2079,7 @@ function applyReorder(rk: string, dropFi: number) {
   // Drop the effect rows and rebase the drop index onto the filtered list.
   const all = flatRows.value
   const rows = all.filter(r => r.kind !== 'effect')
-  dropFi = all.slice(0, dropFi).filter(r => r.kind !== 'effect').length
+  const dropAt = all.slice(0, dropFi).filter(r => r.kind !== 'effect').length
   const start = rows.findIndex(r => r.rk === rk)
   if (start < 0) return
   const dragRow: any = rows[start]
@@ -2093,7 +2093,7 @@ function applyReorder(rk: string, dropFi: number) {
     const blockKeys = block.filter((r: any) => r.kind !== 'group').map((r: any) => r.key as string)
     const blockRks = new Set(block.map(r => r.rk))
     // Target parent from the first row above the gap that isn't part of the block.
-    let ai = dropFi - 1
+    let ai = dropAt - 1
     while (ai >= 0 && blockRks.has(rows[ai]!.rk)) ai--
     const newParent = dropTargetGroup(rows[ai])
     if (newParent && isDescendantOrSelf(newParent, gid, localGroups.value)) return // no cycles
@@ -2104,7 +2104,7 @@ function applyReorder(rk: string, dropFi: number) {
     const blockSet = new Set(blockKeys)
     const remaining = allKeys.filter(k => !blockSet.has(k))
     let ki = 0
-    for (let i = 0; i < dropFi && i < rows.length; i++) {
+    for (let i = 0; i < dropAt && i < rows.length; i++) {
       const r: any = rows[i]
       if (r.kind !== 'group' && !blockSet.has(r.key)) ki++
     }
@@ -2117,11 +2117,11 @@ function applyReorder(rk: string, dropFi: number) {
   // ── Single layer / image drag → move one key + (re)assign group membership ──
   const dragKey = dragRow.key as string
   const isWired = dragRow.kind === 'wired'
-  const targetGroup = isWired ? undefined : dropTargetGroup(rows[dropFi - 1])
+  const targetGroup = isWired ? undefined : dropTargetGroup(rows[dropAt - 1])
   recordHistory()
   const curKeys = rows.filter(r => r.kind !== 'group').map((r: any) => r.key as string)
   let ki = 0
-  for (let i = 0; i < dropFi && i < rows.length; i++) if (rows[i].kind !== 'group') ki++
+  for (let i = 0; i < dropAt && i < rows.length; i++) if (rows[i].kind !== 'group') ki++
   const curPos = curKeys.indexOf(dragKey)
   const without = curKeys.filter(k => k !== dragKey)
   let insertAt = (curPos > -1 && curPos < ki) ? ki - 1 : ki

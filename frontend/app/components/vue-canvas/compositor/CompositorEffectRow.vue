@@ -2,7 +2,9 @@
 // One effect row under its layer in the Compositor's layer tree. A pseudo-child: it is not a
 // layer, so every event is routed to the modal's effect handlers, never the layer ones.
 // Drag reorders within the layer's own orderable region — the modal decides whether a drop
-// is legal (a pinned row refuses).
+// is legal (a pinned row refuses). The drop stops propagating so it never also reaches the
+// layer list's own drop handler, and `dragEnd` fires even on an aborted drag so the modal
+// can clear its drag state instead of leaving it armed for the next, unrelated drop.
 import { Eye, EyeOff, Copy, Trash2, Pin } from 'lucide-vue-next'
 import { EFFECT_LABELS, type EffectInstance } from '~/lib/compositor/effectStack'
 
@@ -21,6 +23,8 @@ const emit = defineEmits<{
   toggleVisible: [layerId: string, effectId: string]
   dragStart: [layerId: string, effectId: string]
   dropOn: [layerId: string, effectId: string]
+  /** The drag finished — dropped anywhere, or aborted with Escape / outside the list. */
+  dragEnd: []
 }>()
 
 function onDragStart(ev: DragEvent, layerId: string, effectId: string) {
@@ -46,8 +50,9 @@ function onDragStart(ev: DragEvent, layerId: string, effectId: string) {
     :draggable="!pinned"
     @click.stop="emit('select', layerId, effect.id)"
     @dragstart="onDragStart($event, layerId, effect.id)"
+    @dragend="emit('dragEnd')"
     @dragover.prevent
-    @drop.prevent="emit('dropOn', layerId, effect.id)"
+    @drop.prevent.stop="emit('dropOn', layerId, effect.id)"
   >
     <span class="w-3 shrink-0" />
     <Pin v-if="pinned" class="size-3 text-white/30 shrink-0" title="Fixed position in the pipeline" />
