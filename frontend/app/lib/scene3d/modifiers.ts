@@ -347,9 +347,12 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
       // "simplify" this back out.
       //
       // `c` is constructed fresh per recipe (not hoisted above the loop) so
-      // that an unparseable swatch — set() failing silently — falls back to
-      // this Color's default WHITE instead of inheriting the previous
-      // copy's colour left over in a reused instance.
+      // that an unparseable swatch — set() failing silently — cannot inherit
+      // the previous copy's colour out of a reused instance. In practice a
+      // garbage swatch never reaches set(): stripAlpha is total and clamps
+      // anything it cannot parse to black, so black is the fallback you will
+      // actually observe. The fresh instance is defence for any future caller
+      // that skips the strip.
       const c = new THREE.Color()
       c.set(stripAlpha(r.color ?? '#ffffff'))
       const n = copy.getAttribute('position').count
