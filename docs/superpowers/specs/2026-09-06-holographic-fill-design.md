@@ -62,19 +62,46 @@ we were handed.
 
 ### The four surfaces
 
-One `u_surface` enum, mirroring how the existing effect exposes `u_pattern`:
+**REVISED 2026-09-06 after the user supplied reference photographs.** The original four
+(Crumple / Grating / Flakes / Slick) targeted rainbow *diffraction foil* — CD undersides, glitter
+vinyl, chrome-holo polish. They were built, rendered and rejected: "none of it looks like what
+I'm looking for."
 
-| Value | Label | Height field | Reads as |
+The actual target is **holographic sticker vinyl**: the pale iridescent sheet stock that
+die-cut stickers and laminates are printed on. Three reference photographs — a stack of
+holographic sticker discs, a roll of security-hologram labels, and a fan of blank holographic
+sheet stock — share three qualities the first attempt inverted:
+
+- **High key.** A pale silver-white base carries the image. Very little dark anywhere.
+  The first attempt measured luminance p1 at 0.087 after a "make it read as metal" pass —
+  the pass moved *away* from the target.
+- **Low saturation.** Pastel blooms, roughly 0.15–0.35 mean saturation, not 0.56–0.68.
+  The rainbow **tints** the silver; it does not replace it.
+- **Broad and smooth.** Few, large features. Essentially no high-frequency detail, except
+  the fine prismatic glitter on the security-label variant.
+
+Two further qualities were identified by probing against the references, and both were missing
+from the first probe round:
+
+- **Silver wash-out zones.** The reference is not tinted edge to edge — the rainbow retreats in
+  places and leaves neutral foil. Without this it reads as a printed rainbow gradient rather
+  than as foil catching a rainbow. NB the mask window must be tight around the noise's actual
+  mid-range; a wide `smoothstep` never reaches zero and delivers no silver at all.
+- **A sheen band.** Broad luminance variation across the sheet, so it reads as a physical
+  surface under a light. The first probe round spanned only 0.64→0.82 and looked printed.
+
+The four surfaces, all of which the user asked to keep as options:
+
+| Value | Label | Field | Reads as |
 |---|---|---|---|
-| 0 | Crumple | fbm creases at `u_scale` | Mylar balloon, crinkled sticker |
-| 1 | Grating | fine parallel lines along `u_angle` | CD underside, prismatic tape |
-| 2 | Flakes | cellular cells, each with its own random facet normal | Chrome-holo nail polish, glitter vinyl |
-| 3 | Slick | broad low-frequency fbm | Petrol on water, soap bubble |
+| 0 | Soft sweep | one broad rainbow band, gently bent by low-frequency noise | The pale vinyl sheet stock |
+| 1 | Watercolour bloom | two slow noise fields, no direction | The dreamier mint-and-pink areas of the sheet stock |
+| 2 | Sweep and sparkle | soft sweep plus fine, sparse, tinted glitter | The security-hologram label roll |
+| 3 | Defined bands | the sweep at tighter repeats, distinct colour runs | The banding across the sticker discs |
 
-Flakes differs from the other three in an important way: rather than deriving a normal by
-differencing a continuous height field, each cell gets a **directly assigned random normal**, so
-facets flash discrete colours and edges stay hard. Differencing a cellular field would give soft
-blobs, which is not what glitter looks like.
+Unlike the rejected set, none of these derives its colour from a *surface normal* — they are
+smooth colour fields over a silver base. The normal-and-fresnel machinery that suited diffraction
+foil is not what this look needs.
 
 ### Controls
 
