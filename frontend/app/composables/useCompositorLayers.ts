@@ -35,6 +35,10 @@ import {
   hasPaint, resolvePaint, OBJECT_SHADER_FIELD_PX, type ShaderFieldFrameCtx,
 } from '~/lib/paint/resolve'
 import { drawQuadWarp, type Quad } from '~/lib/compositor/warp'
+// Task 1's pure stroke-stack data model — only the join type is consumed here;
+// `StrokeAlign` already exists as a local type in this file (see below), so it
+// is NOT re-imported from there to avoid a second import path for the same idea.
+import type { StrokeJoin } from '~/lib/compositor/strokeStack'
 // The repo's one hex-alpha stripper — the same helper the 3D vary path uses before
 // handing a swatch to THREE.Color (see `tintScratch` below).
 import { stripAlpha } from '~/lib/color/convert'
@@ -2156,6 +2160,96 @@ export function tintScratch(octx: CanvasRenderingContext2D, tint: string, streng
   octx.fillStyle = stripAlpha(tint)
   octx.fillRect(0, 0, octx.canvas.width, octx.canvas.height)
   octx.restore()
+}
+
+/**
+ * THE single place any outline is painted, at any distance from the shape's edge.
+ *
+ * `distance` moves the band's REFERENCE EDGE out (positive) or in (negative) from the
+ * shape's own edge; `align` then says how the band of `width` straddles that reference,
+ * exactly as it always has. So `distance = 0` reduces to the statements `strokeAligned`
+ * ran before this existed, and an untouched frame is byte-identical.
+ *
+ * At a non-zero distance the band is the difference of two canvas DILATIONS. Canvas gives
+ * a dilation directly: `fill(path)` together with `stroke(path, 2r)` is the shape grown by
+ * `r`, with `lineJoin` deciding the corners. So:
+ *
+ *     band = dilate(shape, outer) minus dilate(shape, inner)
+ *
+ * A negative radius is an EROSION, which is the same construction reflected: fill the
+ * shape, then knock out a centred stroke at `2|r|`.
+ *
+ * The knockout MUST happen on a scratch canvas. A `destination-out` on `ctx` would eat the
+ * layer's own fill and every backdrop pixel under the shape — the Critical this feature can
+ * cause, and the reason there is a test asserting the shared context never sees one.
+ *
+ * `dash` is ignored once `distance !== 0`: a dashed offset band would have to run its dash
+ * pattern along the OFFSET curve, which does not exist as a path here (only the two dilation
+ * radii do) — so a dashed distance stroke draws as a solid band. The inspector hides the Dash
+ * row for a stroke with a distance (Task 9).
+ */
+export function paintStrokeBand(ctx: CanvasRenderingContext2D, o: {
+  width: number
+  distance?: number
+  style: (c: CanvasRenderingContext2D) => string | CanvasGradient | CanvasPattern
+  align?: StrokeAlign
+  join?: StrokeJoin
+  dash?: [number, number] | null
+  path?: Path2D | null
+  fillRule?: CanvasFillRule
+  build?: (c: CanvasRenderingContext2D) => void
+}) {
+  if (!(o.width > 0)) return
+  const d = typeof o.distance === 'number' && Number.isFinite(o.distance) ? o.distance : 0
+  if (d === 0) { strokeAligned(ctx, o); return }
+
+  const align = strokeAlignOf(o.align)
+  // The band's two radii, measured from the shape's own edge.
+  const outer = align === 'outside' ? d + o.width : align === 'inside' ? d : d + o.width / 2
+  const inner = align === 'outside' ? d : align === 'inside' ? d - o.width : d - o.width / 2
+  if (outer <= inner) return
+
+  const s = scratchLike(ctx)
+  if (!s) { strokeAligned(ctx, o); return }   // no knockout on the shared ctx, ever
+  if (o.build) o.build(s)
+  s.lineJoin = o.join === 'round' ? 'round' : 'miter'
+  const rule = o.fillRule || 'nonzero'
+  const region = (c: CanvasRenderingContext2D, r: number) => {
+    // r > 0 grows the shape; r < 0 shrinks it; r == 0 is the shape itself.
+    if (o.path) c.fill(o.path, rule); else c.fill(rule)
+    if (r === 0) return
+    c.lineWidth = Math.abs(r) * 2
+    if (r > 0) {
+      c.strokeStyle = '#000'
+      if (o.path) c.stroke(o.path); else c.stroke()
+    } else {
+      const prev = c.globalCompositeOperation
+      c.globalCompositeOperation = 'destination-out'
+      c.strokeStyle = '#000'
+      if (o.path) c.stroke(o.path); else c.stroke()
+      c.globalCompositeOperation = prev
+    }
+  }
+  region(s, outer)
+  const knock = scratchLike(ctx)
+  if (knock) {
+    if (o.build) o.build(knock)
+    knock.lineJoin = s.lineJoin
+    region(knock, inner)
+    s.globalCompositeOperation = 'destination-out'
+    s.setTransform(1, 0, 0, 1, 0, 0)
+    s.drawImage(knock.canvas, 0, 0)
+    s.setTransform(ctx.getTransform())
+    s.globalCompositeOperation = 'source-over'
+  }
+  // Paint the band's colour through the mask we just built.
+  s.globalCompositeOperation = 'source-in'
+  s.fillStyle = o.style(s)
+  s.setTransform(1, 0, 0, 1, 0, 0)
+  s.fillRect(0, 0, s.canvas.width, s.canvas.height)
+  s.setTransform(ctx.getTransform())
+  s.globalCompositeOperation = 'source-over'
+  stampScratch(ctx, s)
 }
 
 /**
