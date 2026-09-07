@@ -179,7 +179,7 @@ describe('what the shader tuner hands the model', () => {
     fetchMock.mockResolvedValueOnce({ changes: [], rationale: '' })
     await tuneShaderNode(shaderNode(), 'anything', KEY)
     const g = String(vibeBody().guidance)
-    expect(g).toContain('EFFECTS YOU MAY PICK')
+    expect(g).toContain('set "effect" to an id')
     for (const id of CATALOG.map(e => e.id)) expect(g, `${id} missing from the derived index`).toContain(id)
     expect(g).toMatch(/approximat/i)
     expect(g).toMatch(/never present/i)

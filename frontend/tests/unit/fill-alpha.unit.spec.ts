@@ -162,7 +162,13 @@ function isSafeColorArg(arg: string, locals: { tainted: Set<string>; safe: Set<s
   if (!a) return true                                            // new THREE.Color() — no colour
   if (COLOR_SAFE.test(a)) return true                            // stripAlpha/fillPrimary/fillTextColor
   if (/^0x[0-9a-fA-F]+$/.test(a)) return true                    // numeric literal, no alpha possible
-  if (/^[0-9.]+\s*,\s*[0-9.]+\s*,\s*[0-9.]+$/.test(a)) return true  // r, g, b triple
+  // r, g, b triple. Any 3-argument `new THREE.Color(r, g, b)` is the numeric RGB constructor —
+  // an unstripped 8-digit hex is a single quoted string and can never appear as three channels,
+  // so each channel may be a simple numeric-arithmetic expression (numbers, identifiers, + - * /,
+  // parens, spaces). Quotes and `#` stay out of the channel class, and a single arg (no top-level
+  // comma) still can't satisfy the three-part shape, so identifiers/hex aren't matched here.
+  const CH = String.raw`[\w.$\s*/+()\-]+`
+  if (new RegExp(`^${CH},${CH},${CH}$`).test(a)) return true
   if (/^['"`]#[0-9a-fA-F]{3,6}['"`]$/.test(a)) return true       // 6-digit hex literal
   if ([...locals.safe].some(s => refsIdent(a, s))) return true
   return false
@@ -220,10 +226,22 @@ describe('THREE.Color alpha safety (static scan)', () => {
       // shader uniform's `.value`, a value already narrowed `as THREE.Color`/`as three.Color`, or
       // a material's `.color`. Deliberately NOT a bare `.set(` — that also matches Vector2/3,
       // Euler and Map (position.set(x,y,z), cache.set(key, val)), which would make this vacuous.
-      const re = /(?:\.value|value\s+as\s+(?:THREE|three)\.Color\)|\.color)\.set(?:Style)?\(\s*([^)]*)\)/g
+      const re = /(?:\.value|value\s+as\s+(?:THREE|three)\.Color\)|\.color)\.set(?:Style)?\(/g
       let m: RegExpExecArray | null
       while ((m = re.exec(src))) {
-        const arg = m[1]!
+        // Balanced scan for the real argument list. A `([^)]*)` capture stops at the FIRST
+        // `)`, so a nested call like `.set(Math.max(a, 1e-4), b)` came back as the single
+        // pseudo-argument `Math.max(a, 1e-4` — no top-level comma left in it, so it read as
+        // single-arg and was flagged as a Color mutation when it is a Vector2.set(x, y).
+        const argStart = m.index + m[0].length
+        let depth = 1, i = argStart
+        for (; i < src.length && depth > 0; i++) {
+          const ch = src[i]
+          if (ch === '(') depth++
+          else if (ch === ')') depth--
+        }
+        if (depth !== 0) continue // unterminated call — not parseable, not a colour site
+        const arg = src.slice(argStart, i - 1)
         // A multi-argument `.set(...)` on this receiver shape is a Vector2/3/Euler `.set(x,y[,z])`
         // or a `Map.set(key, val)`, never `THREE.Color.prototype.set` (single-argument only) — see
         // isSingleArgCall's doc. Not a Color-mutation site at all, so it isn't counted or checked.

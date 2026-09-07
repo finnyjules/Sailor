@@ -5,6 +5,7 @@ import { layoutChars } from '../charLayout'
 import { normalizeFill, fillIsTextured, fillShaderTexture, fillTiling, fillPrimary, fillAlpha, type Fill } from '../fills'
 import { fillIsShader } from '../fillTile'
 import { defaultFillsFor } from '../palette'
+import { stripAlpha } from '~/lib/color/convert'
 import { resolveFontFamily, fontHasWeightAxis } from '~/lib/font/resolveFamily'
 
 const controls: ControlSpec[] = [
@@ -212,7 +213,10 @@ export const slotEffect: SpaceTypeEffect = {
     // own colour alpha for translucent/transparent slots.
     const slotFills = resolveFills(params.slotFill, DARK_SLOT_FILL)
     const frameW = n(params, 'frameWidth')
-    const frameCol = new three.Color(str(params, 'frameColor'))
+    // stripAlpha first: StudioColor emits 8-digit #rrggbbaa, and THREE.Color parses that as
+    // white — the frame would silently lose its colour the moment the picker set any alpha.
+    // Same guard every sibling effect uses (see echo.ts).
+    const frameCol = new three.Color(stripAlpha(str(params, 'frameColor')))
     const wfTextured = fillIsTextured(wf)
     let wordFillMap: THREE.Texture | null = null
     if (wfTextured) {

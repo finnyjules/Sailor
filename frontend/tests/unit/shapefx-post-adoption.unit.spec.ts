@@ -49,8 +49,10 @@ describe('shape post adoption', () => {
   })
 
   it('the post sections land in SHAPE_SECTIONS so the schema-driven inspector renders them', () => {
-    expect(SHAPE_SECTIONS).toContain('Bloom')
-    expect(SHAPE_SECTIONS).toContain('Vignette')
+    // Nested paths under the "Effects" parent (sectionFor → `${POST_SECTION}/${label}`),
+    // not bare labels — these qualified strings are what groupIntoSections keys on.
+    expect(SHAPE_SECTIONS).toContain('Effects/Bloom')
+    expect(SHAPE_SECTIONS).toContain('Effects/Vignette')
   })
 })
 
