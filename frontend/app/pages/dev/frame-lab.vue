@@ -33,6 +33,32 @@ const struck = createTextLayer({ text: 'Strikethrough', x: 0.5, y: 0.48, fontSiz
 const upper = createTextLayer({ text: 'uppercased', x: 0.5, y: 0.60, fontSize: 0.06, textTransform: 'uppercase', color: '#0e6bff' })
 const combo = createTextLayer({ text: 'all at once', x: 0.5, y: 0.72, fontSize: 0.06, textTransform: 'capitalize', underline: true, letterSpacing: 0.12, color: '#f2ff5a' })
 
+// Type on a path — one layer per follow mode, so the harness shows at a glance
+// whether the guide engine and the inspector agree. See lib/compositor/textPath.ts.
+const onRing = createTextLayer({ text: 'BADGE OF HONOUR', x: 0.25, y: 0.3, fontSize: 0.035, color: '#ffffff' })
+;(onRing as any).align = 'center'
+;(onRing as any).path = { follow: 'circle', radius: 0.12, start: 0.5 }
+
+const underRing = createTextLayer({ text: 'EST MMXXVI', x: 0.25, y: 0.3, fontSize: 0.035, color: '#54f4cf' })
+;(underRing as any).align = 'center'
+;(underRing as any).path = { follow: 'circle', radius: 0.12, start: 0, side: 'inside' }
+
+const arched = createTextLayer({ text: 'GENTLE ARCH', x: 0.7, y: 0.22, fontSize: 0.04, color: '#ffb984' })
+;(arched as any).align = 'center'
+;(arched as any).path = { follow: 'curve', bend: 0.45 }
+
+const waved = createTextLayer({ text: 'WAVY LETTERS', x: 0.7, y: 0.45, fontSize: 0.04, color: '#ff99f7' })
+;(waved as any).align = 'center'
+;(waved as any).path = { follow: 'wave', amplitude: 0.025, frequency: 1.5 }
+
+const roundShape = createTextLayer({ text: 'AROUND A CLOVER', x: 0.72, y: 0.72, fontSize: 0.028, color: '#f2ff5a' })
+;(roundShape as any).align = 'center'
+;(roundShape as any).path = { follow: 'shape', shapeId: 'clover-x', size: 0.24, start: 0.5 }
+
+const drawnGuide = createTextLayer({ text: 'A DRAWN PATH', x: 0.25, y: 0.7, fontSize: 0.032, color: '#0e6bff' })
+;(drawnGuide as any).align = 'center'
+;(drawnGuide as any).path = { follow: 'custom', d: 'M-0.15 0 C -0.15 -0.18, 0.15 0.18, 0.15 0', size: 0.3 }
+
 // A local image layer — exercises the layer-list thumbnail (its own pixels) and
 // double-click rename. `filename` points at a real ComfyUI input image so the
 // /view thumbnail actually loads.
@@ -129,7 +155,8 @@ const node = reactive({
     properties: {
       // NOTE: no `sailor_frameSchema` — this frame has never been migrated.
       sailor_localLayers: [pic, plain, tracked, underlined, struck, upper, combo, a1, a2, b1, maskRect, caption,
-        strokePlate, strokeCenter, strokeInside, strokeOutside, strokeDashedRect, strokeDashedLine],
+        strokePlate, strokeCenter, strokeInside, strokeOutside, strokeDashedRect, strokeDashedLine,
+        onRing, underRing, arched, waved, roundShape, drawnGuide],
       sailor_localGroups: [
         { id: 'A', parentId: 'C', name: 'Row' },
         { id: 'B', parentId: 'C', name: 'Side' },

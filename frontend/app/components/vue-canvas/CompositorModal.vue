@@ -1406,13 +1406,46 @@ function finishPen() {
     pen.anchors.value, pen.draftClosed.value,
     { w: canvasDisplay.w, h: canvasDisplay.h }, PEN_STYLE,
   )
+  const guideFor = penGuideTargetId.value
+  penGuideTargetId.value = null
   pen.setActive(false)
-  if (layer) addPathLayers([layer])
+  penJustFinished = true
+  if (!layer) return
+  // Drawing FOR a text layer: the path becomes that layer's guide and never
+  // becomes a layer of its own. Same ownership rule as every other follow mode —
+  // nothing extra in the layer list, and it dies with the text.
+  if (guideFor) {
+    const target = localLayers.value.find(l => l.id === guideFor && l.kind === 'text')
+    if (target) {
+      setLocal(guideFor, {
+        path: {
+          ...((target as any).path ?? {}),
+          follow: 'custom',
+          d: layer.d,
+          size: layer.bbox.w * (layer.scale ?? 1),
+        },
+      } as any)
+      selectLocal(guideFor)
+      return
+    }
+  }
+  addPathLayers([layer])
 }
-function togglePen() { if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }; pen.setActive(!pen.active.value); if (pen.active.value) { selectLocal(null); exitNodeEdit(); brush.setActive(false) } }
+/** One-shot: swallow the click that closed a pen path (see onCanvasClick). */
+let penJustFinished = false
+/** The text layer waiting for a drawn guide, if any. Cleared when the pen is
+ *  cancelled, so leaving the tool never silently rewires a layer later. */
+const penGuideTargetId = ref<string | null>(null)
+function drawGuideForSelectedText() {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'text') return
+  penGuideTargetId.value = l.id
+  if (!pen.active.value) togglePen()
+}
+function togglePen() { if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }; pen.setActive(!pen.active.value); if (pen.active.value) { selectLocal(null); exitNodeEdit(); brush.setActive(false) } else { penGuideTargetId.value = null } }
 // Return to the default Select tool: leave pen/node-edit/generate modes.
 function selectTool() {
-  if (pen.active.value) pen.setActive(false)
+  if (pen.active.value) { pen.setActive(false); penGuideTargetId.value = null }
   if (nodeEdit.active.value) exitNodeEdit()
   if (genActive.value) exitGenMode()
 }
@@ -2357,6 +2390,11 @@ function onCanvasClick(e: MouseEvent) {
   if (smartActive.value) return // smart select owns the canvas
   if (genActive.value && genTool.value !== 'shape') return // region-paint owns the canvas
   if (lastDownHitLayer) { lastDownHitLayer = false; return }
+  // The click that CLOSED a pen path arrives here after the pen has already
+  // switched itself off, so without this one-shot it would deselect the layer
+  // finishPen just selected — you would finish drawing a type guide and land on
+  // nothing. Same idiom as `lastDownHitLayer` above.
+  if (penJustFinished) { penJustFinished = false; return }
   if (e.target === canvasRef.value) selectLocal(null)
 }
 // Click in the empty stage gutter (outside the artboard) → deselect. A pan that
@@ -3572,11 +3610,22 @@ function setTextPath(l: any, patch: Partial<TextPathSpec>) {
 }
 /** Switching mode keeps every dial already set (so going circle → curve → circle
  *  comes back to the ring you had) and seeds only what the new mode needs. */
+/** Dials remembered across an Off, keyed by layer. Turning a path off stores no
+ *  spec on the layer (absent `path` is what "flat text" means, and saved
+ *  documents should not carry a disabled one), but wiping a tuned ring because
+ *  someone glanced at Off would be its own bug — so the last spec is held here
+ *  for the session and handed back on the way in. */
+const textPathMemo = new Map<string, TextPathSpec>()
 function setTextFollow(l: any, follow: TextPathFollow | 'off') {
   if (!l) return
-  if (follow === 'off') { setLocal(l.id, { path: undefined } as any); return }
   const cur = l.path as TextPathSpec | undefined
-  setLocal(l.id, { path: { ...textPathDefaults(follow), ...(cur ?? {}), follow } } as any)
+  if (follow === 'off') {
+    if (cur) textPathMemo.set(l.id, cur)
+    setLocal(l.id, { path: undefined } as any)
+    return
+  }
+  const remembered = cur ?? textPathMemo.get(l.id)
+  setLocal(l.id, { path: { ...textPathDefaults(follow), ...(remembered ?? {}), follow } } as any)
 }
 /**
  * `Start` as the SLIDER sees it.
@@ -3607,6 +3656,20 @@ function setTextPathSide(l: any, side: 'outside' | 'inside') {
   const cur = l?.path as TextPathSpec | undefined
   if (!cur || (cur.side ?? 'outside') === side) return
   setTextPath(l, { side, start: ((cur.start ?? 0) + 0.5) % 1 })
+}
+/** Paths already on this frame, offered as ready-made guides. Copying the `d`
+ *  (rather than pointing at the layer) keeps the guide owned by the text: the
+ *  original path can be moved, restyled or deleted without breaking the type. */
+const framePathLayers = computed(() =>
+  (localLayers.value as any[])
+    .filter(l => l.kind === 'path' && typeof l.d === 'string' && l.d.length > 0)
+    .map((l, i) => ({ id: l.id, label: l.name || (l.shapeId ? `Shape · ${l.shapeId}` : `Path ${i + 1}`) })),
+)
+function useFramePathAsGuide(l: any, pathLayerId: string) {
+  if (!l || !pathLayerId) return
+  const src = (localLayers.value as any[]).find(x => x.id === pathLayerId)
+  if (!src?.d) return
+  setTextPath(l, { follow: 'custom', d: src.d, size: (src.bbox?.w ?? 0.3) * (src.scale ?? 1) })
 }
 const TEXT_FOLLOW_OPTIONS: { v: TextPathFollow | 'off'; label: string }[] = [
   { v: 'off', label: 'Off' },
@@ -7279,12 +7342,32 @@ onUnmounted(() => {
                   />
                 </div>
 
-                <div v-if="textPath.follow === 'custom' && !textPath.d" class="text-[11px] text-white/45 leading-snug">
-                  Draw a path with the pen, then choose <span class="text-white/70">Use as type path</span> from its menu.
+                <div v-if="textPath.follow === 'custom'" class="space-y-2">
+                  <button
+                    class="w-full flex items-center justify-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded py-1.5 text-xs text-white/80 hover:text-white cursor-pointer transition-colors"
+                    :title="textPath.d ? 'Draw a new path for this type to follow' : 'Draw the path this type will follow'"
+                    @click="drawGuideForSelectedText"
+                  >
+                    <PenTool class="size-3.5" /> {{ textPath.d ? 'Redraw the path' : 'Draw a path' }}
+                  </button>
+                  <div v-if="framePathLayers.length" class="flex items-center gap-2">
+                    <span class="text-[10px] text-white/40 shrink-0">Or use</span>
+                    <select
+                      class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
+                      title="Follow a path already on this frame"
+                      @change="useFramePathAsGuide(selectedLocal, ($event.target as HTMLSelectElement).value)"
+                    >
+                      <option value="">A path on the frame…</option>
+                      <option v-for="pl in framePathLayers" :key="pl.id" :value="pl.id">{{ pl.label }}</option>
+                    </select>
+                  </div>
+                  <p v-if="!textPath.d" class="text-[11px] text-white/45 leading-snug">
+                    Click to place points, drag to curve them. The path guides the type and isn't drawn.
+                  </p>
                 </div>
 
                 <div v-if="textPath.follow === 'shape' || textPath.follow === 'custom'">
-                  <div class="panel-label mb-1">Size</div>
+                  <div class="panel-label mb-1" title="How big the path is — the type's own size is set above">Path size</div>
                   <input v-scrubnum type="number" min="1" :value="pxW(textPath.size ?? 0)"
                     class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                     @input="setTextPath(selectedLocal, { size: Math.max(1, parseFloat(($event.target as HTMLInputElement).value) || 1) / outWidth })" />
@@ -7325,7 +7408,7 @@ onUnmounted(() => {
             </div>
 
             <div class="grid grid-cols-2 gap-3">
-              <div>
+              <div v-if="!textPath">
                 <div class="panel-label mb-1.5" title="Line height as a multiple of the font size">Line height</div>
                 <input v-scrubnum type="number" min="0.5" max="4" step="0.05" :value="(selectedLocal as any).lineHeight ?? 1.2"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -7341,19 +7424,19 @@ onUnmounted(() => {
             <div>
               <div class="panel-label mb-1.5">Style</div>
               <div class="flex gap-1">
-                <button title="Underline"
+                <button v-if="!textPath" title="Underline"
                   class="flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 px-2.5"
                   :class="(selectedLocal as any).underline ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
                   @click="setLocal(selectedLocal!.id, { underline: !(selectedLocal as any).underline })">
                   <Underline class="size-3.5" />
                 </button>
-                <button title="Strikethrough"
+                <button v-if="!textPath" title="Strikethrough"
                   class="flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 px-2.5"
                   :class="(selectedLocal as any).strikethrough ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
                   @click="setLocal(selectedLocal!.id, { strikethrough: !(selectedLocal as any).strikethrough })">
                   <Strikethrough class="size-3.5" />
                 </button>
-                <div class="w-px bg-white/[0.08] mx-0.5"></div>
+                <div v-if="!textPath" class="w-px bg-white/[0.08] mx-0.5"></div>
                 <button v-for="c in (['uppercase','lowercase','capitalize'] as const)" :key="c" :title="c"
                   class="flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 px-2.5"
                   :class="(selectedLocal as any).textTransform === c ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
