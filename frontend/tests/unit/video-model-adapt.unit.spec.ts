@@ -38,7 +38,8 @@ describe('videoModelAdapt', () => {
   })
 
   it('allowedDurations returns the model durations as strings; unknown → null', () => {
-    expect(allowedDurations('veo-3.1')).toEqual(['8'])
+    expect(allowedDurations('veo-3.1'))
+      .toEqual(VIDEO_MODELS_BY_ID['veo-3.1']!.durations.map(String))
     expect(allowedDurations('kling-v2.5-turbo-pro'))
       .toEqual(VIDEO_MODELS_BY_ID['kling-v2.5-turbo-pro']!.durations.map(String))
     expect(allowedDurations('does-not-exist')).toBeNull()

@@ -106,7 +106,7 @@ describe('scene3d config', () => {
     boxFor({
       type: 'shaderFill', unlit: true,
       shader: {
-        effectId: 'crystal_prism', params: { amount: 0.5 }, anchor: 'object', speed: 2,
+        effectId: 'crystal_prism', params: { amount: 0.5 }, anchor: 'object', speed: 2, seed: 42,
         input: { type: 'gradient', a: '#ff0000', b: '#00ff00', textColor: '#ffffff', angle: 10, density: 4 },
       },
     })

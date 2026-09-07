@@ -141,8 +141,8 @@ const READ_SURFACE_FILES: Record<string, ReadFileEntry> = {
     note: 'plus two get_input_directory schema listings (3d subdir) and one get_output_directory write (Preview3D, guard B / write-exempt).',
   },
   'comfy_extras/nodes_timeline.py': {
-    count: 17, annotated: 1, readers: [],
-    note: 'encode_spacetype_video is an HTTP-route helper (POST /sailor/spacetype_encode), not a graph node. The Timeline GRAPH node reads image clips via os.path.join(get_input_directory(), path) — modeled in GRAPH_FILE_READERS as a timeline-clips JSON reader (NON_ANNOTATED_READERS). The remaining get_input_directory / get_output_directory hits are all aiohttp route handlers (/sailor/render_timeline*, /sailor/output_file, …) gated in engineGate.ts.',
+    count: 18, annotated: 1, readers: [],
+    note: 'encode_spacetype_video is an HTTP-route helper (POST /sailor/spacetype_encode), not a graph node. The Timeline GRAPH node reads image clips via os.path.join(get_input_directory(), path) — modeled in GRAPH_FILE_READERS as a timeline-clips JSON reader (NON_ANNOTATED_READERS). ebffd64ae added a second such join in _prepare_render_clips (bare video/image clip filenames now resolve under input/ the same way the spacetype/motion bake paths already did) — same modeled read, one more call site. The remaining get_input_directory / get_output_directory hits are all aiohttp route handlers (/sailor/render_timeline*, /sailor/output_file, …) gated in engineGate.ts.',
   },
   // Task 7b Critical — the three per-FOLDER readers. NOT annotated per-file
   // refs, so they never appear in the annotated subset; each reads a whole

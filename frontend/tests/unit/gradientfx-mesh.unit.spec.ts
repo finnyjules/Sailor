@@ -77,8 +77,10 @@ describe('gradientfx mesh integration', () => {
   })
   it('shader declares the mesh branch + uniforms', () => {
     expect(GRADIENT_FS).toContain('u_meshCount')
-    expect(GRADIENT_FS).toContain('u_layout > 4.5')
-    expect(GRADIENT_FS).toContain('u_flowOffset')
+    expect(GRADIENT_FS).toContain('u_layout[i] > 4.5')
+    // u_flowOffset (rigid drift) was retired for u_flowAnimAmt (in-place churn) — see
+    // ace982eb6 "agent tune-up presets + gradient studio eval harness".
+    expect(GRADIENT_FS).toContain('u_flowAnimAmt')
     expect(GRADIENT_FS).toContain('u_meshBlur')
     expect(GRADIENT_FS).toContain('vec3 meshColorAt')
   })

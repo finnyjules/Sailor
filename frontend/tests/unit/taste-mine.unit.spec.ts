@@ -117,7 +117,10 @@ function legacyWorkflowVersion(uCount: number): unknown {
             version: 1,
             source: { kind: 'none' },
             resolution: 1536,
-            effect: { id: 'blinds', params: { u_count: uCount, u_depth: 0.34 }, enabled: true },
+            // u_chromatic survives the v1->v4 Textured Glass migration untouched
+            // (only u_depth/u_shadeWidth are retired — see migrate.ts's
+            // migrateTexturedGlass), so it's a stable non-retired param to probe.
+            effect: { id: 'blinds', params: { u_count: uCount, u_chromatic: 0.34 }, enabled: true },
             duotone: { enabled: true, ink: '#1a1a2e', paper: '#f5f5f5' },
           },
         },
@@ -172,7 +175,7 @@ describe('taste miner (fixtures)', () => {
       // effects[<id>] path. A broken migrateShaderConfig call turns this red.
       const shader = observed.studios.shader
       expect(shader.params['effects[blinds].params.u_count']).toMatchObject({ n: 1, median: 39 })
-      expect(shader.params['effects[blinds].params.u_depth']).toMatchObject({ n: 1, median: 0.34 })
+      expect(shader.params['effects[blinds].params.u_chromatic']).toMatchObject({ n: 1, median: 0.34 })
       expect(Object.keys(shader.params).some(p => p.startsWith('effect.'))).toBe(false)
       // Latest-only: the older b_1000 value (u_count 5) must not appear.
       expect(shader.params['effects[blinds].params.u_count']!.min).toBe(39)

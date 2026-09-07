@@ -87,9 +87,13 @@ describe('animatableTargets', () => {
   // removes a motion target fails loudly here instead of shipping unnoticed.
   it('pins the default config\'s animatable target set', () => {
     const paths = animatableTargets(cfg()).map((t) => t.path)
-    // 50 = 51 (see the previous count, from Task 5's post-stack adoption) minus 1:
-    // Task 8 retired relief.grain (its rendering moved into the shared post stack;
-    // post.grainAmount — already counted among the 19 post.* sliders below — is its
+    // 51 = 50 (see the previous count, after Task 8 retired relief.grain) plus 1:
+    // 8fadea551 added screen-space Distort as a shared POST_EFFECTS catalog entry
+    // (post.distortAmount, uniform: 'u_amount'), which animatableTargets picks up
+    // automatically like every other post slider. Was: 50 = 51 (see the previous
+    // count, from Task 5's post-stack adoption) minus 1: Task 8 retired
+    // relief.grain (its rendering moved into the shared post stack;
+    // post.grainAmount — already counted among the post.* sliders below — is its
     // animatable successor). Was: 32 (relief.light.azimuth/elevation moved from the
     // liquid layout, where the shader ignores them, to the banded layouts, where
     // they aim the relief light — so the default linear config can animate the
@@ -98,7 +102,7 @@ describe('animatableTargets', () => {
     // params (duotoneShadow/Highlight — motion only animates sliders) and gtao's
     // three (withheld from a 2D host by postControls({ threeD: false })) and
     // halftoneScatter (uniform: null).
-    expect(paths.length).toBe(50)
+    expect(paths.length).toBe(51)
     expect(paths).toMatchSnapshot()
   })
 })

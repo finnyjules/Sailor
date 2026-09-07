@@ -43,6 +43,7 @@ exports[`animatableTargets > pins the default config's animatable target set 1`]
   "post.duotoneMix",
   "post.chromaAmount",
   "post.blurAmount",
+  "post.distortAmount",
   "post.filmIntensity",
   "post.halftoneRadius",
   "post.dotScreenScale",
