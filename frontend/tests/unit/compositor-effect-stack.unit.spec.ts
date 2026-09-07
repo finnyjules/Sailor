@@ -1,0 +1,165 @@
+import { describe, it, expect } from 'vitest'
+import {
+  EFFECT_ORDER, EFFECT_LABELS, PINNED_KINDS, ORDERABLE_KINDS,
+  effectStackOf, writeStackToLayer, createEffect, newEffectId, isPinnedKind,
+  addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder,
+  orderablePasses, pinnedEffect, type EffectInstance,
+} from '~/lib/compositor/effectStack'
+import { DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
+import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
+
+describe('effect kinds', () => {
+  it('has 13 kinds, 3 pinned and 10 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(13)
+    expect(PINNED_KINDS).toEqual(['background_blur', 'dof', 'drop_shadow'])
+    expect(ORDERABLE_KINDS).toHaveLength(10)
+    expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
+    for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
+    expect(EFFECT_LABELS.gradientMap).toBe('Gradient map')
+    expect(EFFECT_LABELS.dof).toBe('Depth of field')
+  })
+  it('orders background blur first and drop shadow last', () => {
+    expect(EFFECT_ORDER[0]).toBe('background_blur')
+    expect(EFFECT_ORDER[EFFECT_ORDER.length - 1]).toBe('drop_shadow')
+    expect(isPinnedKind('dof')).toBe(true)
+    expect(isPinnedKind('bloom')).toBe(false)
+  })
+  it('createEffect fills the kind defaults, visible, with a fresh random id', () => {
+    const a = createEffect('bloom'), b = createEffect('bloom')
+    expect(a.type).toBe('bloom')
+    expect(a.visible).toBe(true)
+    expect(a.id).toMatch(/^fx_/)
+    expect(a.id).not.toBe(b.id)
+    expect(newEffectId()).not.toBe(newEffectId())
+    expect(createEffect('torn_edge')).toMatchObject({ type: 'torn_edge', style: DEFAULT_TORN_EDGE.style })
+    expect(createEffect('feather')).toMatchObject({ type: 'feather', curve: DEFAULT_FEATHER.curve })
+  })
+})
+
+describe('effectStackOf: old shape', () => {
+  it('stamps deterministic ids, folds tornEdge and feather in, and sorts into canonical order', () => {
+    const layer = {
+      effects: [
+        { type: 'grain', amount: 0.2, size: 2, visible: true },
+        { type: 'drop_shadow', color: '#000', x: 0, y: 0, blur: 0.01, visible: true },
+        { type: 'adjust', brightness: 1.2, contrast: 1, saturation: 1, hue: 0, visible: true },
+      ],
+      tornEdge: { ...DEFAULT_TORN_EDGE, amount: 12 },
+      feather: { ...DEFAULT_FEATHER, amount: 0.2 },
+    }
+    const stack = effectStackOf(layer)
+    expect(stack.map(e => e.type)).toEqual(['adjust', 'grain', 'torn_edge', 'feather', 'drop_shadow'])
+    expect(stack.every(e => typeof e.id === 'string' && e.id.length > 0)).toBe(true)
+    // deterministic: two reads of the same layer agree, so a selection survives a re-read
+    expect(effectStackOf(layer).map(e => e.id)).toEqual(stack.map(e => e.id))
+    expect(stack.find(e => e.type === 'torn_edge')).toMatchObject({ amount: 12, visible: true })
+    expect(stack.find(e => e.type === 'feather')).toMatchObject({ amount: 0.2, visible: true })
+  })
+  it('gives same-type duplicates distinct deterministic ids and keeps their relative order', () => {
+    const layer = { effects: [
+      { type: 'bloom', threshold: 0.1, radius: 0.01, intensity: 1, visible: true },
+      { type: 'bloom', threshold: 0.9, radius: 0.02, intensity: 2, visible: true },
+    ] }
+    const stack = effectStackOf(layer)
+    expect(stack).toHaveLength(2)
+    expect(stack[0]!.id).not.toBe(stack[1]!.id)
+    expect((stack[0] as any).threshold).toBe(0.1)
+  })
+  it('skips an inactive tornEdge or feather, and unknown kinds', () => {
+    const layer = {
+      effects: [{ type: 'nope', visible: true }, { type: 'grain', amount: 0.1, size: 2, visible: true }],
+      tornEdge: { ...DEFAULT_TORN_EDGE, amount: 0, grain: 0, lipWidth: 0 },
+      feather: { ...DEFAULT_FEATHER, amount: 0 },
+    }
+    expect(effectStackOf(layer).map(e => e.type)).toEqual(['grain'])
+  })
+  it('a layer with nothing yields an empty stack', () => {
+    expect(effectStackOf({})).toEqual([])
+    expect(effectStackOf({ effects: [] })).toEqual([])
+  })
+})
+
+describe('effectStackOf: new shape', () => {
+  it('returns the stored order untouched when every entry already has an id', () => {
+    const stored: EffectInstance[] = [
+      { id: 'a', type: 'grain', amount: 0.2, size: 2, visible: true } as any,
+      { id: 'b', type: 'adjust', brightness: 1.2, contrast: 1, saturation: 1, hue: 0, visible: true } as any,
+    ]
+    const stack = effectStackOf({ effects: stored })
+    expect(stack.map(e => e.type)).toEqual(['grain', 'adjust'])
+    expect(stack.map(e => e.id)).toEqual(['a', 'b'])
+  })
+  it('treats a partially id-stamped list as old shape and re-sorts it', () => {
+    const stack = effectStackOf({ effects: [
+      { id: 'a', type: 'grain', amount: 0.2, size: 2, visible: true },
+      { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
+    ] })
+    expect(stack.map(e => e.type)).toEqual(['adjust', 'grain'])
+  })
+})
+
+describe('writeStackToLayer', () => {
+  it('returns a patch that stores the stack and clears the legacy fields', () => {
+    const stack = effectStackOf({ tornEdge: { ...DEFAULT_TORN_EDGE, amount: 8 } })
+    expect(writeStackToLayer(stack)).toEqual({ effects: stack, tornEdge: undefined, feather: undefined })
+  })
+})
+
+describe('list operations', () => {
+  const base = (): EffectInstance[] => effectStackOf({ effects: [
+    { type: 'background_blur', radius: 0.01, visible: true },
+    { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
+    { type: 'drop_shadow', color: '#000', x: 0, y: 0, blur: 0.01, visible: true },
+  ] })
+
+  it('adds an orderable kind at the end of the orderable region, before drop shadow', () => {
+    const next = addEffect(base(), 'bloom')
+    expect(next.map(e => e.type)).toEqual(['background_blur', 'adjust', 'bloom', 'drop_shadow'])
+  })
+  it('adds background blur first, dof after it, drop shadow last', () => {
+    const s0 = effectStackOf({ effects: [{ type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true }] })
+    expect(addEffect(s0, 'background_blur').map(e => e.type)).toEqual(['background_blur', 'adjust'])
+    expect(addEffect(addEffect(s0, 'background_blur'), 'dof').map(e => e.type))
+      .toEqual(['background_blur', 'dof', 'adjust'])
+    expect(addEffect(s0, 'drop_shadow').map(e => e.type)).toEqual(['adjust', 'drop_shadow'])
+  })
+  it('refuses to add a second instance of a pinned kind, and allows a second orderable one', () => {
+    const s = base()
+    expect(addEffect(s, 'background_blur')).toEqual(s)
+    expect(addEffect(s, 'drop_shadow')).toEqual(s)
+    expect(addEffect(s, 'adjust').filter(e => e.type === 'adjust')).toHaveLength(2)
+  })
+  it('removes by id and leaves the rest in order', () => {
+    const s = base()
+    const id = s.find(e => e.type === 'adjust')!.id
+    expect(removeEffect(s, id).map(e => e.type)).toEqual(['background_blur', 'drop_shadow'])
+    expect(removeEffect(s, 'missing')).toEqual(s)
+  })
+  it('duplicates after the original with a fresh id', () => {
+    const s = base()
+    const id = s.find(e => e.type === 'adjust')!.id
+    const next = duplicateEffect(s, id)
+    expect(next.map(e => e.type)).toEqual(['background_blur', 'adjust', 'adjust', 'drop_shadow'])
+    expect(next[2]!.id).not.toBe(next[1]!.id)
+    expect(duplicateEffect(s, s.find(e => e.type === 'background_blur')!.id)).toEqual(s)
+  })
+  it('reorders within the orderable region and refuses anything touching a pinned row', () => {
+    const s = addEffect(base(), 'bloom')            // bg, adjust, bloom, shadow
+    const adjust = s.find(e => e.type === 'adjust')!.id
+    const bloom = s.find(e => e.type === 'bloom')!.id
+    const bg = s.find(e => e.type === 'background_blur')!.id
+    expect(canReorder(s, adjust, bloom)).toBe(true)
+    expect(reorderEffect(s, adjust, bloom).map(e => e.type))
+      .toEqual(['background_blur', 'bloom', 'adjust', 'drop_shadow'])
+    expect(canReorder(s, bg, adjust)).toBe(false)
+    expect(canReorder(s, adjust, bg)).toBe(false)
+    expect(reorderEffect(s, adjust, bg)).toEqual(s)
+    expect(canReorder(s, adjust, adjust)).toBe(false)
+  })
+  it('orderablePasses and pinnedEffect split the stack', () => {
+    const s = addEffect(base(), 'bloom')
+    expect(orderablePasses(s).map(e => e.type)).toEqual(['adjust', 'bloom'])
+    expect(pinnedEffect(s, 'background_blur')?.type).toBe('background_blur')
+    expect(pinnedEffect(s, 'dof')).toBeUndefined()
+  })
+})

@@ -210,47 +210,24 @@ export {
 } from '~/lib/compositor/paint'
 import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/paint'
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
+import { effectStackOf, orderablePasses, pinnedEffect } from '~/lib/compositor/effectStack'
 
-// Layer effects (Figma-style). All distances normalized to canvas width, like
-// every other dimension here, so they survive resize/export unchanged.
-export interface DropShadowEffect {
-  type: 'drop_shadow'
-  color: string   // rgba/hex (alpha allowed)
-  x: number       // offset X, normalized to canvas width
-  y: number       // offset Y, normalized to canvas width
-  blur: number    // blur radius, normalized to canvas width
-  visible: boolean
-}
-export interface LayerBlurEffect {
-  type: 'layer_blur'
-  radius: number  // blur radius, normalized to canvas width
-  visible: boolean
-}
-// Shadow cast inward from the layer's silhouette edge (Figma inner shadow).
-export interface InnerShadowEffect {
-  type: 'inner_shadow'
-  color: string
-  x: number       // offset X, normalized to canvas width
-  y: number       // offset Y, normalized to canvas width
-  blur: number    // blur radius, normalized to canvas width
-  visible: boolean
-}
-// Blur what's BEHIND the layer, within its silhouette (Figma background blur).
-// Previews correctly wherever the full stack is painted (paintLayerStack); a
-// bake of locals alone can only blur the local backdrop below it — wired
-// pixels behind it composite server-side, so they can't be pre-blurred.
-export interface BackgroundBlurEffect {
-  type: 'background_blur'
-  radius: number  // blur radius, normalized to canvas width
-  visible: boolean
+// Layer effects (Figma-style) live in ~/lib/compositor/effectStack, which owns the whole
+// vocabulary (kinds, canonical order, the read-through that turns any layer into an ordered
+// stack). Imported for this file's own use AND re-exported, so every existing consumer of
+// these names is unaffected.
+//
+// Both lines are needed: `export type { X } from '…'` re-exports X without binding it in this
+// module's scope, and this file references these names in its own signatures.
+import type {
+  DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
+  TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
+} from '~/lib/compositor/effectStack'
+export type {
+  DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
+  TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
 }
 export type { AdjustEffect, BloomEffect, DofEffect, DuotoneEffect, GradientMapEffect, GrainEffect, PostEffect, VignetteEffect }
-export type LayerEffect =
-  | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
-  | AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect
-  // GPU-stage. Lives in the same per-layer effects array as the rest, but is routed by
-  // GPU_TYPES rather than CHAIN_TYPES so applyEffectChain never sees it.
-  | DofEffect
 
 // Clip mask: the layer is clipped to a rect/ellipse region in CANVAS space
 // (axis-aligned, normalized like everything else). For local layers this is
