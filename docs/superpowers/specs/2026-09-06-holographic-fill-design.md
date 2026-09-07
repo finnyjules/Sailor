@@ -107,17 +107,24 @@ foil is not what this look needs.
 
 Names reuse the existing effect's wherever they mean the same thing, so the two read as siblings.
 
+**REVISED 2026-09-06 with the surfaces.** Two entries changed meaning when the look changed.
+`u_metallic`'s translucent-film ↔ metal-foil axis is meaningless for pale vinyl, so the uniform
+is **repurposed** — the GLSL name is kept, because `ShaderSpec.params` keys off it and the
+preset below writes `metallic` — and now drives *how much neutral silver washes through*, which
+is the control this look actually needs. `u_tint`'s default was a mid slate that pulled the whole
+sheet dark; it is now a pale foil.
+
 | Uniform | Label | Range | Default | Notes |
 |---|---|---|---|---|
-| `u_surface` | Surface | enum (4) | 0 (Crumple) | The table above |
-| `u_scale` | Scale | 0.5–12 | 4 | Crease/line/flake size |
-| `u_iridescence` | Iridescence | 0–1 | 0.85 | Rainbow strength over the base tint |
-| `u_bands` | Bands | 0.5–8 | 3 | Hue cycles across the film |
-| `u_angle` | View angle | 0–360 | 0 | Also the grating direction |
-| `u_shimmer` | Shimmer | 0–1 | 0.25 | Time-driven drift + sparkle |
-| `u_metallic` | Metallic | 0–1 | 0.6 | Translucent film ↔ metal foil |
-| `u_sheen` | Sheen | 0–1 | 0.5 | Matte ↔ wet/polished |
-| `u_tint` | Tint | color | `#8899aa` | The metal underneath the rainbow |
+| `u_surface` | Surface | enum (4) | 0 (Soft sweep) | The table above |
+| `u_scale` | Scale | 0.5–12 | 4 | Size of the bend / bloom / sparkle field |
+| `u_iridescence` | Iridescence | 0–1 | 0.85 | How strongly the rainbow tints the silver |
+| `u_bands` | Bands | 0.5–8 | 3 | Hue cycles across the sheet |
+| `u_angle` | View angle | 0–360 | 0 | Rotates sweep, bands and sheen together |
+| `u_shimmer` | Shimmer | 0–1 | 0.25 | Time drift of the hue + a fine twinkle |
+| `u_metallic` | Silver wash | 0–1 | 0.6 | **Repurposed.** How much neutral foil breaks through the rainbow |
+| `u_sheen` | Sheen | 0–1 | 0.5 | Matte ↔ polished: strength of the broad light band |
+| `u_tint` | Foil tint | color | `#d8dee6` | The pale foil under the rainbow |
 
 Defaults are deliberately set to land on convincing foil straight from the picker, since Piece 2
 is a one-click entry point. `u_tint` is new relative to the stylize effect, which took its base
@@ -176,7 +183,7 @@ Selecting the entry writes a shader fill carrying the defaults from the Controls
   shader: {
     effectId: 'holographic_surface',
     params: { surface: 0, scale: 4, iridescence: 0.85, bands: 3, angle: 0,
-              shimmer: 0.25, metallic: 0.6, sheen: 0.5, tint: '#8899aa' },
+              shimmer: 0.25, metallic: 0.6, sheen: 0.5, tint: '#d8dee6' },
     anchor: 'object',
     speed: 1,
     seed: 42,
