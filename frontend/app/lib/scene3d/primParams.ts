@@ -318,7 +318,11 @@ export function sanitizeModifiers(raw: unknown): Record<string, number> | undefi
  *  defaults so an untouched object reads as "no variation". */
 export function varySettingsFor(obj: { modifiers?: Record<string, number>; varyPalette?: string[] }): VarySettings {
   const m = (k: string) => modifierValue(obj.modifiers, k)
-  const pal = obj.varyPalette && obj.varyPalette.length > 0 ? obj.varyPalette : DEFAULT_VARY.palette
+  // Missing ⇒ the default; EMPTY ⇒ empty. `lib/vary` treats an empty palette as
+  // "colour off" (varyColorAt returns undefined), so substituting the default for a
+  // cleared palette would tint every clone with the two default swatches. Same rule
+  // as `varyOf` in composables/useCloner.ts.
+  const pal = obj.varyPalette ?? DEFAULT_VARY.palette
   return {
     mode: VARY_MODES[Math.round(m('varyMode'))] ?? 'sequence',
     seed: Math.round(m('varySeed')),

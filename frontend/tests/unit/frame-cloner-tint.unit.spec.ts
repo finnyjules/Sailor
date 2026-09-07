@@ -77,10 +77,19 @@ function makeCtx(width = 100, height = 100) {
     roundRect(x: number, y: number, w: number, h: number) { ops.push(`roundRect ${num(x)},${num(y)},${num(w)},${num(h)}`) },
     ellipse() { ops.push('ellipse') },
     clip() { ops.push('clip') },
+    clearRect(x: number, y: number, w: number, h: number) { ops.push(`clearRect ${num(x)},${num(y)},${num(w)},${num(h)}`) },
+    // Real (zeroed) pixel buffer, so the CPU passes that read one — torn edge, feather,
+    // gradient map — run their actual arithmetic instead of throwing. Logged because
+    // `getImageData` is the FIRST thing a pixel pass does to the offscreen, which is what
+    // makes "the tint precedes the effect chain" an observable ordering rather than a claim.
+    getImageData(_x: number, _y: number, w: number, h: number) {
+      ops.push(`getImageData ${num(w)}x${num(h)}`)
+      return { data: new Uint8ClampedArray(Math.max(4, w * h * 4)), width: w, height: h }
+    },
+    putImageData() { ops.push('putImageData') },
     fill() { ops.push(`fill ${mat()} ${st()}`) },
     stroke() { ops.push(`stroke ${mat()} ${st()}`) },
     fillRect(x: number, y: number, w: number, h: number) { ops.push(`fillRect ${num(x)},${num(y)},${num(w)},${num(h)} ${mat()} ${st()}`) },
-    clearRect() {},
     drawImage(_src: unknown, ...a: number[]) { ops.push(`drawImage ${a.map(num).join(',')} ${mat()} ${st()}`) },
     measureText() { return { width: 0, actualBoundingBoxAscent: 0, actualBoundingBoxDescent: 0, actualBoundingBoxLeft: 0, actualBoundingBoxRight: 0 } },
     createLinearGradient() { return { addColorStop() {} } },
@@ -135,6 +144,25 @@ const rect = (cloner: Cloner = CLONER, extra: Record<string, unknown> = {}): Loc
 } as unknown as LocalLayer)
 
 const SHADOW = { type: 'drop_shadow', visible: true, color: '#000000', blur: 0.02, x: 0.01, y: 0.01 }
+
+/** A real ORDERABLE pass, unlike the drop shadow above. The shadow is PINNED — applied at
+ *  the stamp, never in `bodyPasses` — so a fixture carrying only a shadow has an empty
+ *  chain and cannot tell "before the chain" from "after" it at all. This one can. */
+const GRADIENT_MAP = {
+  type: 'gradientMap', visible: true, contrast: 0, mix: 0.85,
+  stops: [{ pos: 0, color: '#1a1a40' }, { pos: 1, color: '#ffe8d6' }],
+}
+
+/** A torn edge is one of the two passes the silhouette RASTER bakes, so a fixture carrying
+ *  it is the only way into the cached branch — and the lip it paints is the pixel that
+ *  proves the tint has to land before it, not after. */
+const TORN = {
+  type: 'torn_edge', visible: true, style: 'shredded', amount: 37, roughness: 0.18,
+  grain: 7, grainTexture: 0.6, lipWidth: 10, lipVariation: 0.73, lipColor: '#fbf6ee', seed: 12,
+}
+
+/** Every copy at scale 1, so ALL of them clear the raster branch's `ls === 1` gate. */
+const TINTED_FLAT: Cloner = { ...TINTED, stepScale: 1 }
 
 const paint = (layer: LocalLayer, ctx: CanvasRenderingContext2D) =>
   paintLayerStack(ctx, 100, 100, [{ type: 'local', key: `l:${(layer as any).id}`, layer } as any], [layer])
@@ -329,28 +357,55 @@ describe('zero-change: a copy with no tint draws exactly as it did before Vary',
   })
 })
 
-describe('fast path: a tinted copy detours through a scratch canvas', () => {
-  it('tints each copy on its own scratch and never washes the shared ctx', () => {
+describe('fast path: a tinted copy detours through ONE pooled scratch canvas', () => {
+  /** The pooled scratch's log, split into one segment per copy. `varyScratchFor` clears
+   *  the surface before handing it out, so a clearRect starts every copy's segment. */
+  const segments = (ops: string[]) => {
+    const out: string[][] = []
+    for (const o of ops) {
+      if (o.startsWith('clearRect')) out.push([])
+      else if (out.length) out[out.length - 1]!.push(o)
+    }
+    return out
+  }
+
+  it('allocates ONE scratch for the whole array, not one per copy', () => {
+    const made = installDoc()
+    const { ctx } = makeCtx()
+    paint(rect(TINTED), ctx)
+    // Three copies, one canvas. Sizing the scratch to the device buffer is what makes
+    // this the headline cost: at 1600x1200 each one is 7.7 MB, so a 100-copy grid was
+    // ~770 MB of allocation per frame before it was pooled.
+    expect(made).toHaveLength(1)
+    expect(made[0]!.canvas.width).toBe(100)
+    expect(made[0]!.canvas.height).toBe(100)
+    // …and it is reused three times, cleared each time.
+    expect(segments(made[0]!.ops)).toHaveLength(3)
+  })
+
+  it('tints each copy on the cleared scratch and never washes the shared ctx', () => {
     const made = installDoc()
     const { ctx, ops } = makeCtx()
     paint(rect(TINTED), ctx)
 
-    // One scratch per copy — and nothing else allocated.
-    expect(made).toHaveLength(3)
     // Back-to-front, original last: cycle walks the palette by step index k=2,1,0.
-    expect(made.map(c => c.ops.find(o => o.startsWith('fillRect'))))
+    const segs = segments(made[0]!.ops)
+    expect(segs.map(seg => seg.find(o => o.startsWith('fillRect'))))
       .toEqual([
         expect.stringContaining('op=source-atop fill=#0000ff'),
         expect.stringContaining('op=source-atop fill=#00ff00'),
         expect.stringContaining('op=source-atop fill=#ff0000'),
       ])
 
-    // The wash happens AFTER the copy's own content is drawn on that scratch.
-    for (const c of made) {
-      const drew = c.ops.findIndex(o => o.startsWith('fill ['))
-      const washed = c.ops.findIndex(o => o.startsWith('fillRect'))
-      expect(drew).toBeGreaterThanOrEqual(0)
-      expect(washed).toBeGreaterThan(drew)
+    // Each segment holds exactly ONE copy's ink and ONE wash, in that order — the proof
+    // that the pooled surface is reset between copies. Without the clear, copy 2's wash
+    // would land on copy 1's pixels too and stamp them a second time.
+    for (const seg of segs) {
+      const drew = seg.filter(o => o.startsWith('fill ['))
+      const washed = seg.filter(o => o.startsWith('fillRect'))
+      expect(drew).toHaveLength(1)
+      expect(washed).toHaveLength(1)
+      expect(seg.indexOf(washed[0]!)).toBeGreaterThan(seg.indexOf(drew[0]!))
     }
 
     // The shared ctx never sees source-atop; it only stamps, carrying the copy's
@@ -363,18 +418,20 @@ describe('fast path: a tinted copy detours through a scratch canvas', () => {
     ])
   })
 
-  it('draws the copy onto the scratch at exactly the geometry the inline draw used', () => {
+  it('draws each copy onto the scratch at exactly the geometry the inline draw used', () => {
     const made = installDoc()
     const { ctx } = makeCtx()
     paint(rect(TINTED), ctx)
-    // Everything before the wash is the copy's own content, at the copy's own
-    // transform — byte-for-byte the sequence the offscreen path already produced
-    // for these same three copies (see GOLDEN_EFFECTED_OFFSCREENS), which was
-    // itself captured before Vary existed.
-    const content = made.map(c => c.ops.slice(0, c.ops.findIndex(o => o === 'save')))
+    // Everything in a segment before the wash's save() is that copy's own content, at the
+    // copy's own transform — byte-for-byte the sequence the offscreen path already produced
+    // for these same three copies (see GOLDEN_EFFECTED_OFFSCREENS), which was itself
+    // captured before Vary existed. Pooling must not shift a copy by a pixel.
+    const content = segments(made[0]!.ops).map(seg => seg.slice(0, seg.indexOf('save')))
     expect(content).toEqual(GOLDEN_EFFECTED_OFFSCREENS)
     // …and the wash covers the whole device-sized scratch.
-    for (const c of made) expect(c.ops.some(o => o.startsWith('fillRect 0,0,100,100'))).toBe(true)
+    for (const seg of segments(made[0]!.ops)) {
+      expect(seg.some(o => o.startsWith('fillRect 0,0,100,100'))).toBe(true)
+    }
   })
 })
 
@@ -426,5 +483,145 @@ describe('wired image path: a tinted copy is stamped from a tinted scratch', () 
     }
     // Geometry, opacity and blend of each stamp are the untinted golden's.
     expect(ops).toEqual(GOLDEN_WIRED)
+  })
+})
+
+describe('effected path: the tint precedes a REAL orderable pass', () => {
+  // Regression guard for a hole the committed suite had: its only effected fixture was a
+  // drop shadow, which is pinned and applied at the stamp, so `bodyPasses` was empty and
+  // moving the tint call to AFTER the `for (const e of bodyPasses)` loop changed nothing
+  // any test could see. A gradient map is orderable, so it runs inside that loop.
+  it('washes the offscreen before the gradient map reads it', () => {
+    const made = installDoc()
+    const { ctx } = makeCtx()
+    paint(rect(TINTED, { effects: [GRADIENT_MAP] }), ctx)
+
+    expect(made).toHaveLength(3)
+    for (const c of made) {
+      const drew = c.ops.findIndex(o => o.startsWith('fill ['))
+      const washed = c.ops.findIndex(o => o.includes('op=source-atop'))
+      // `getImageData` is passGradientMap's first act on the offscreen.
+      const mapped = c.ops.findIndex(o => o.startsWith('getImageData'))
+      expect(drew).toBeGreaterThanOrEqual(0)
+      expect(mapped).toBeGreaterThanOrEqual(0)
+      expect(washed).toBeGreaterThan(drew)
+      expect(washed).toBeLessThan(mapped)
+    }
+    expect(made.map(c => c.ops.find(o => o.includes('source-atop'))))
+      .toEqual([
+        expect.stringContaining('fill=#0000ff'),
+        expect.stringContaining('fill=#00ff00'),
+        expect.stringContaining('fill=#ff0000'),
+      ])
+  })
+})
+
+describe('effected path, CACHED-RASTER branch: the tint is baked into the raster', () => {
+  // The other hole: no committed fixture carried a torn edge or a feather, so
+  // `silhouetteCacheable` was never true, the raster branch was never entered, and its
+  // tint call could be deleted outright with all 14 tests still green.
+  //
+  // Rasters are 24x14 here (a 20x10 box + 2px pad on each side at device scale 1); the
+  // per-copy offscreens are the 100x100 device canvas, and `measureCtx`'s throwaway is
+  // 1x1 — so width alone identifies them, whatever else a run allocates.
+  const rasters = (made: { canvas: any; ops: string[] }[]) => made.filter(c => c.canvas.width === 24)
+
+  it('bakes the copy colour into the raster BEFORE the tear, one raster per swatch', () => {
+    const made = installDoc()
+    const { ctx } = makeCtx()
+    paint(rect(TINTED_FLAT, { effects: [TORN], fill: '#a10001' }), ctx)
+
+    // Three swatches ⇒ three rasters. Not one shared raster tinted in place, which would
+    // have bled the first copy's colour into all of them.
+    const rs = rasters(made)
+    expect(rs).toHaveLength(3)
+    expect(rs.map(c => c.ops.find(o => o.includes('source-atop'))))
+      .toEqual([
+        expect.stringContaining('fill=#0000ff'),
+        expect.stringContaining('fill=#00ff00'),
+        expect.stringContaining('fill=#ff0000'),
+      ])
+
+    for (const c of rs) {
+      const drew = c.ops.findIndex(o => o.startsWith('fill ['))
+      const washed = c.ops.findIndex(o => o.includes('op=source-atop'))
+      // applyTornEdge's first act on the raster. The tear paints an OPAQUE lip in
+      // `lipColor`; a wash after this point would recolour that lip.
+      const tore = c.ops.findIndex(o => o.startsWith('getImageData'))
+      expect(drew).toBeGreaterThanOrEqual(0)
+      expect(tore).toBeGreaterThanOrEqual(0)
+      expect(washed).toBeGreaterThan(drew)
+      expect(washed).toBeLessThan(tore)
+    }
+
+    // The copy's own offscreen is NOT washed a second time — the raster it stamped is
+    // already tinted, and a second `source-atop` there would wash the lip after all.
+    for (const c of made.filter(x => x.canvas.width === 100)) {
+      expect(c.ops.some(o => o.includes('source-atop'))).toBe(false)
+    }
+  })
+
+  it('tints identically on both branches when an array straddles the cache gate', () => {
+    // The reviewer's case: `stepScale: 0.95` puts copy k=0 (scale exactly 1) on the cached
+    // branch and k=1,2 on the uncached one. Both must wash BEFORE the tear, or one array
+    // shows two different lip colours depending on which copies happened to be cacheable.
+    const made = installDoc()
+    const { ctx } = makeCtx()
+    paint(rect(TINTED, { effects: [TORN], fill: '#a10002' }), ctx)
+
+    const tinted = made.filter(c => c.ops.some(o => o.includes('source-atop')))
+    expect(tinted).toHaveLength(3)              // one per copy, wherever it was applied
+    expect(made.filter(c => c.canvas.width === 24)).toHaveLength(1)   // only k=0 is cacheable
+    for (const c of tinted) {
+      const washed = c.ops.findIndex(o => o.includes('op=source-atop'))
+      const tore = c.ops.findIndex(o => o.startsWith('getImageData'))
+      expect(tore).toBeGreaterThanOrEqual(0)
+      expect(washed).toBeLessThan(tore)
+    }
+  })
+
+  it('an untinted array still bakes exactly one raster, shared by every copy', () => {
+    const made = installDoc()
+    const { ctx } = makeCtx()
+    paint(rect(CLONER, { effects: [TORN], fill: '#a10003' }), ctx)
+    expect(made.filter(c => c.canvas.width === 24)).toHaveLength(1)
+    expect(made.some(c => c.ops.some(o => o.includes('source-atop')))).toBe(false)
+  })
+})
+
+describe('wired image path: the tinted source is memoised by swatch', () => {
+  it('allocates one scratch per COLOUR, not per copy', () => {
+    const made = installDoc()
+    const { ctx, ops } = makeCtx()
+    const img = { width: 200, height: 100 } as unknown as HTMLCanvasElement
+    // Six copies over a three-swatch palette in `cycle` spread: three distinct colours.
+    drawWiredImageLayer(ctx, img, wired({ ...TINTED, countX: 6 }) as any, 100, 100)
+
+    expect(ops.filter(o => o.startsWith('drawImage'))).toHaveLength(6)
+    expect(made).toHaveLength(3)
+    for (const c of made) {
+      expect(c.canvas.width).toBe(200)
+      expect(c.canvas.height).toBe(100)
+    }
+    // Each scratch carries its own swatch, and the source is copied in before the wash.
+    for (const c of made) {
+      expect(c.ops.findIndex(o => o.includes('source-atop')))
+        .toBeGreaterThan(c.ops.findIndex(o => o.startsWith('drawImage')))
+    }
+    expect(new Set(made.map(c => (c.ops.find(o => o.includes('source-atop')) || '').split('fill=')[1])).size).toBe(3)
+  })
+
+  it('a source too large to tint renders the WHOLE array untinted, not half of it', () => {
+    // 20000 x 20000 is past both raster ceilings. Some engines hand back a context over a
+    // blank backing store rather than null there, so trusting `getContext` would have let
+    // one copy stamp blank/untinted beside tinted siblings with no signal. The check is on
+    // the source dimensions, which every copy shares, so the outcome is all-or-nothing.
+    const made = installDoc()
+    const { ctx, ops } = makeCtx()
+    const img = { width: 20000, height: 20000 } as unknown as HTMLCanvasElement
+    drawWiredImageLayer(ctx, img, wired(TINTED) as any, 100, 100)
+    expect(made).toHaveLength(0)
+    expect(ops.filter(o => o.startsWith('drawImage'))).toHaveLength(3)
+    expect(ops.some(o => o.includes('source-atop'))).toBe(false)
   })
 })

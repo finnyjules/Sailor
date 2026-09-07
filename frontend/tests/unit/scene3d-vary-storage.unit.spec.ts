@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
 import { sanitizeVaryPalette } from '~/lib/scene3d/config'
-import { DEFAULT_VARY } from '~/lib/vary'
+import { DEFAULT_VARY, varyColorAt } from '~/lib/vary'
 
 const KEYS = ['varyMode', 'varySeed', 'varyFalloffCenter', 'varyFalloffRadius',
   'varyColor', 'varyColorSpread', 'varyColorStrength']
@@ -57,5 +57,13 @@ describe('varySettingsFor', () => {
     expect(v.spread).toBe('blend')
     expect(v.colorEnabled).toBe(true)
     expect(v.palette).toEqual(['#abcdef'])
+  })
+
+  it('honours a deliberately EMPTIED palette rather than substituting the default', () => {
+    // Same rule as `varyOf` in composables/useCloner.ts: MISSING gets the default (above),
+    // EMPTY stays empty, because `lib/vary` treats an empty palette as "colour off".
+    const v = varySettingsFor(obj({ varyColor: 1 }, []))
+    expect(v.palette).toEqual([])
+    expect(varyColorAt(0.5, 0, v)).toBeUndefined()
   })
 })

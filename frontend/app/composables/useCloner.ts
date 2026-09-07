@@ -116,7 +116,13 @@ export function varyOf(cloner: Cloner): VarySettings {
     falloffCenter: cloner.varyFalloffCenter ?? DEFAULT_VARY.falloffCenter,
     falloffRadius: cloner.varyFalloffRadius ?? DEFAULT_VARY.falloffRadius,
     colorEnabled: !!cloner.varyColor,
-    palette: cloner.varyPalette && cloner.varyPalette.length > 0 ? cloner.varyPalette : DEFAULT_VARY.palette,
+    // Substituted only for a MISSING field, never for an EMPTY one: `lib/vary`'s
+    // contract is that an empty palette disables colour (`varyColorAt` returns
+    // undefined for it), so a palette the user deliberately cleared must survive as
+    // []. Substituting the default here would have tinted a cleared palette with
+    // blue/orange the moment the panel grows a remove-swatch control. An old saved
+    // cloner with no `varyPalette` at all still gets the default.
+    palette: cloner.varyPalette ?? DEFAULT_VARY.palette,
     spread: cloner.varyColorSpread ?? DEFAULT_VARY.spread,
     strength: cloner.varyColorStrength ?? DEFAULT_VARY.strength,
   }

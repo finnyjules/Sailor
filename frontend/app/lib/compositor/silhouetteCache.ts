@@ -51,11 +51,23 @@ function canonicalize(value: unknown): unknown {
 
 /** Cache key for a layer's baked local box: everything that changes the box's pixels,
  *  plus the raster size (device px), the device scale `s` and the logical frame width W
- *  (drawLayerContent sizes fonts/strokes off W). */
-export function silhouetteCacheKey(layer: Record<string, unknown>, s: number, bwDev: number, bhDev: number, W: number): string {
+ *  (drawLayerContent sizes fonts/strokes off W).
+ *
+ *  `tint`/`tintStrength` are Cloner Vary's per-copy colour, which the raster bakes IN —
+ *  before the edge passes, so the torn edge's opaque lip keeps `lipColor` instead of
+ *  being washed by a tint applied afterwards. Two copies of one layer in different
+ *  swatches are therefore different pictures and must be different entries. The suffix
+ *  is appended ONLY when a tint is present, so every untinted key is byte-identical to
+ *  the ones this function returned before Vary existed (a cold cache on upgrade would
+ *  be harmless but pointless). */
+export function silhouetteCacheKey(
+  layer: Record<string, unknown>, s: number, bwDev: number, bhDev: number, W: number,
+  tint?: string | null, tintStrength?: number,
+): string {
   const o: Record<string, unknown> = {}
   for (const k of Object.keys(layer).sort()) if (!(SILHOUETTE_KEY_STRIP as readonly string[]).includes(k)) o[k] = canonicalize(layer[k])
-  return `${JSON.stringify(o)}|W${W}|s${s}|${bwDev}x${bhDev}`
+  const vary = tint ? `|tint${tint}@${tintStrength ?? 0}` : ''
+  return `${JSON.stringify(o)}|W${W}|s${s}|${bwDev}x${bhDev}${vary}`
 }
 
 /**

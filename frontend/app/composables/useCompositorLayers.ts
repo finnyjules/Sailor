@@ -53,6 +53,7 @@ import {
   silhouettePadPx as silhouettePadPxPure, silhouetteContentReady as silhouetteContentReadyPure,
   silhouetteRasterFits,
 } from '~/lib/compositor/silhouetteCache'
+import { VARY_PALETTE_MAX } from '~/lib/vary'
 import { paintMaskRelease } from '~/lib/compositor/maskBreak'
 import { guideFromSpec, measureRunPx, placeGlyphs, type TextPathSpec } from '~/lib/compositor/textPath'
 // Runtime import is safe: wiredLayer.ts only imports the WiredLayer TYPE back from
@@ -1729,13 +1730,25 @@ function paintLayer(
     && !(layer.kind === 'text' && layer.expressive)                 // expressive layout places words outside localLayerBox
     && !layerPaints(layer).some(p => isFill(p) && fillIsShader(p))  // shader fills are live / frame-anchored
     && silhouetteContentReady(layer, W)
-  // Memoized like `dofContent` below: identical for every clone, and the key is a
-  // stringify of the layer, so it must not be rebuilt once per stamp.
-  let silhouetteMemo: { canvas: HTMLCanvasElement; w: number; h: number } | null | undefined
-  const silhouetteRaster = (s: number): { canvas: HTMLCanvasElement; w: number; h: number } | null => {
-    if (silhouetteMemo !== undefined) return silhouetteMemo
-    silhouetteMemo = null
-    if (!silhouetteCacheable) return silhouetteMemo
+  // Memoized like `dofContent` below: identical for every clone of the SAME tint, and the
+  // key is a stringify of the layer, so it must not be rebuilt once per stamp.
+  //
+  // Keyed by tint, not a single slot: Cloner Vary bakes the copy's colour INTO the raster
+  // (see below), so copies in different swatches are different bitmaps. A single shared
+  // slot tinted in place would bleed the first copy's colour into every other copy. In
+  // `cycle` spread the palette is capped at VARY_PALETTE_MAX (8), so a whole array costs at
+  // most 8 rasters; `blend` interpolates and can reach one per copy, which is why only the
+  // first few reach the module-global LRU (see `tintedBaked` below).
+  const silhouetteMemo = new Map<string, { canvas: HTMLCanvasElement; w: number; h: number } | null>()
+  let tintedBaked = 0
+  const silhouetteRaster = (
+    s: number, tint: string | null, tintStrength: number,
+  ): { canvas: HTMLCanvasElement; w: number; h: number } | null => {
+    const memoKey = tint ? `${tint}@${tintStrength}` : ''
+    const memoed = silhouetteMemo.get(memoKey)
+    if (memoed !== undefined) return memoed
+    const miss = (v: { canvas: HTMLCanvasElement; w: number; h: number } | null) => { silhouetteMemo.set(memoKey, v); return v }
+    if (!silhouetteCacheable) return miss(null)
     const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
     const pad = silhouettePadPx(layer, W, s, box)
     const bwL = box.w + pad * 2, bhL = box.h + pad * 2                                     // logical px
@@ -1750,24 +1763,36 @@ function paintLayer(
     // oversized canvas (some engines hand back a context over a blank backing
     // store instead), so an unbounded bwD/bhD could silently cache emptiness for
     // a huge layer. Bail to the uncached path — same as a null context below.
-    if (!silhouetteRasterFits(bwD, bhD)) return silhouetteMemo
-    const key = silhouetteCacheKey(layer as unknown as Record<string, unknown>, s, bwD, bhD, W)
+    if (!silhouetteRasterFits(bwD, bhD)) return miss(null)
+    const key = silhouetteCacheKey(layer as unknown as Record<string, unknown>, s, bwD, bhD, W, tint, tintStrength)
     const hit = _silhouetteCache.get(key)
-    if (hit) { silhouetteMemo = { canvas: hit, w: bwLx, h: bhLx }; return silhouetteMemo }
+    if (hit) return miss({ canvas: hit, w: bwLx, h: bhLx })
     const cc = document.createElement('canvas'); cc.width = bwD; cc.height = bhD
     const cctx = cc.getContext('2d')
-    if (!cctx) return silhouetteMemo   // no raster ⇒ the caller takes the uncached path
+    if (!cctx) return miss(null)   // no raster ⇒ the caller takes the uncached path
     cctx.setTransform(s, 0, 0, s, bwD / 2, bhD / 2)   // centred, at device scale — the geometry drawLayerContent expects
     drawLayerContent(cctx, layer, W, wiredLive)
+    // Cloner Vary colour, baked in BEFORE the edge passes below — which is the only place
+    // it can go and stay consistent. `applyTornEdgeToData` paints an OPAQUE lip in
+    // `spec.lipColor`; a tint applied to the finished raster would wash that lip, while a
+    // sibling copy at cloner scale != 1 (which falls through to the uncached path, where the
+    // tint precedes the whole chain) would keep its lip's own colour. One array, two lip
+    // colours, decided by cache eligibility. Tinting here makes both branches agree.
+    if (tint) tintScratch(cctx, tint, tintStrength)
     // In list order: a feather before a tear and a tear before a feather are different
     // pictures, and the raster has to agree with the uncached path below.
     for (const e of passes) {
       if (e.type === 'torn_edge') applyTornEdge(cc, e as unknown as TornEdgeSpec, { scale: s })
       else if (e.type === 'feather') applyFeather(cc, e as unknown as FeatherSpec)
     }
-    _silhouetteCache.set(key, cc)
-    silhouetteMemo = { canvas: cc, w: bwLx, h: bhLx }
-    return silhouetteMemo
+    // A `blend` spread gives every copy its own interpolated colour, so a 100-copy array
+    // would push 100 one-frame entries through a 24-entry LRU — no hits for itself and every
+    // OTHER layer's raster evicted. Only the first VARY_PALETTE_MAX tinted rasters of a paint
+    // call are published globally; beyond that the per-call memo above still dedupes within
+    // the frame, which is all a blend spread could ever have got anyway. Untinted rasters are
+    // published exactly as before.
+    if (!tint || ++tintedBaked <= VARY_PALETTE_MAX) _silhouetteCache.set(key, cc)
+    return miss({ canvas: cc, w: bwLx, h: bhLx })
   }
   const applyXform = (c: CanvasRenderingContext2D, lx2: number, ly2: number, lrot2: number, ls2: number) => {
     c.translate(lx2 * W, ly2 * H)
@@ -1775,6 +1800,35 @@ function paintLayer(
     if (hasSkew) c.transform(1, shearA, shearC, 1, 0, 0)
     if (ls2 !== 1) c.scale(ls2, ls2)
   }
+  // ONE scratch surface for the whole array, not one per copy. A tinted copy has to be
+  // composited in isolation (see the fast path below), and allocating a device-sized canvas
+  // per copy per frame is what made a 100-copy tinted grid ~770 MB of allocation on a
+  // 1600x1200 buffer. `undefined` = not tried yet, `null` = no DOM (SSR / node unit tests),
+  // in which case every copy falls through to the untinted inline draw.
+  //
+  // Scoped to this paint call rather than the module: a module-global pool would have to
+  // survive `document` swaps and re-entrant paints, and the effected path above already
+  // allocates one device-sized offscreen per copy, so per-call is squarely inside this
+  // file's existing cost profile. Reused surfaces MUST be reset — transform, alpha, blend,
+  // filter, shadow and pixels — or copy 2 would tint copy 1's ink still sitting there.
+  let varyScratchMemo: CanvasRenderingContext2D | null | undefined
+  const varyScratchFor = (host: CanvasRenderingContext2D): CanvasRenderingContext2D | null => {
+    if (varyScratchMemo === undefined) varyScratchMemo = scratchLike(host)
+    const o = varyScratchMemo
+    if (!o) return null
+    o.setTransform(1, 0, 0, 1, 0, 0)
+    o.clearRect(0, 0, o.canvas.width, o.canvas.height)
+    o.globalAlpha = 1
+    o.globalCompositeOperation = 'source-over'
+    o.filter = 'none'
+    o.shadowColor = 'transparent'
+    o.shadowBlur = 0
+    o.shadowOffsetX = 0
+    o.shadowOffsetY = 0
+    o.setTransform(host.getTransform())
+    return o
+  }
+
   // No corner-pin ⇒ draw content directly. With it: render content to a box-sized
   // offscreen (centered, like the normal draw), then projectively warp that box onto
   // the corner-pin quad in local space.
@@ -1906,7 +1960,7 @@ function paintLayer(
         // Only at clone scale 1: the raster is baked at device scale `s` alone, so a
         // cloner falloff with `ls !== 1` would stamp a resampled (soft/aliased) copy —
         // that clone falls through to the uncached path instead.
-        const raster = ls === 1 ? silhouetteRaster(s) : null
+        const raster = ls === 1 ? silhouetteRaster(s, tint, c.tintStrength) : null
         if (raster) {
           applyXform(octx, lx, ly, lrot, ls)
           // `raster.w/h` are the rounded DEVICE size divided back by `s`, so under `t`
@@ -1917,16 +1971,24 @@ function paintLayer(
           octx.drawImage(raster.canvas, -raster.w / 2, -raster.h / 2, raster.w, raster.h)
           // Torn edge / feather are already baked into the raster; `rasterablePasses` guarantees
           // any layer blur here is trailing, so it lands on the stamp's `ctx.filter` below.
-          // Vary tint: `off` holds THIS copy alone, so the wash is safe here — and it lands
-          // before the stamp, where the trailing blur and drop shadow are applied, so both see
-          // the varied colour. The raster cache is shared between copies and is never tinted.
-          if (tint) tintScratch(octx, tint, c.tintStrength)
+          // The Vary tint is baked into the raster too — BEFORE those edge passes, and keyed
+          // into both the per-call memo and the module cache — so it must NOT be re-applied to
+          // `octx` here. Washing after the fact would recolour the torn edge's opaque lip on
+          // this branch only, while a sibling copy on the uncached branch below kept its own.
         } else {
           applyXform(octx, lx, ly, lrot, ls)
           drawContent(octx)
           // Vary tint, on the copy's own offscreen and BEFORE its effect chain, so every pass
-          // below (inner shadow, gradient map, torn edge, feather, blur…) and the drop shadow
-          // at the stamp consume the varied colour rather than the layer's base colour.
+          // below (inner shadow, gradient map, torn edge, feather, a non-trailing blur…)
+          // consumes the varied colour rather than the layer's base colour. That ordering is
+          // load-bearing for the passes that ADD their own ink — the torn edge's opaque lip
+          // most of all, which a later wash would recolour.
+          //
+          // It is NOT load-bearing for the drop shadow at the stamp, contrary to what this
+          // comment used to claim: `source-atop` preserves destination alpha exactly, and a
+          // canvas drop shadow is derived from source alpha and `shadowColor` alone, so the
+          // shadow is bit-identical tinted or not. Same for feather, which only scales alpha.
+          // The trailing blur is the one stamp-time consumer that really does see the colour.
           if (tint) tintScratch(octx, tint, c.tintStrength)
           // The layer's passes, in the user's order, minus any TRAILING layer blur (that one is
           // the stamp's `ctx.filter`, below). For an unedited layer the order is the legacy one
@@ -1986,13 +2048,24 @@ function paintLayer(
     //
     // A TINTED copy cannot draw inline: `source-atop` on the shared ctx would wash
     // every layer already composited beneath this one, not just this copy. It takes a
-    // scratch detour instead — the copy alone on a device-sized surface, tinted there,
-    // then stamped under the same alpha/blend the inline draw would have used.
-    // `scratchLike` returns null with no DOM (SSR / node unit tests), which falls
-    // through to the untinted draw — the safe fallback its own doc describes.
-    const scratch = tint ? scratchLike(ctx) : null
+    // scratch detour instead — the copy alone on a shared, per-call surface, tinted
+    // there, then stamped under the same alpha/blend the inline draw would have used.
+    // A clip is NOT a substitute: `source-atop` inside a clip still washes whatever was
+    // already composited within it. `varyScratchFor` returns null with no DOM (SSR /
+    // node unit tests), which falls through to the untinted draw.
+    //
+    // KNOWN, INHERENT to the detour: this changes the compositing MODEL for a tinted
+    // copy. Drawn inline, every operation inside `drawContent` blends against the
+    // backdrop individually at `lop` under `blendOp`. Through the scratch, the copy
+    // composites flat first and stamps ONCE — group opacity. For a `multiply` layer at
+    // 50% with a stroke overlapping its fill, the overlap multiplies twice inline and
+    // once here, so moving the strength dial off 0 is a visible discontinuity, larger
+    // than the colour shift itself. It is not a bug to be fixed at this site: isolation
+    // is what makes `source-atop` safe at all. Strength 0 stays on the inline path
+    // precisely so an untinted array never pays it.
+    const scratch = tint ? varyScratchFor(ctx) : null
     if (scratch) {
-      _fieldCtx = { ..._fieldCtx, base: scratch.getTransform() } // == ctx's, scratchLike copies it
+      _fieldCtx = { ..._fieldCtx, base: scratch.getTransform() } // == ctx's, varyScratchFor re-sets it per copy
       applyXform(scratch, lx, ly, lrot, ls)
       drawContent(scratch)
       tintScratch(scratch, tint!, c.tintStrength)
@@ -3195,6 +3268,42 @@ export function drawWiredImageLayer(
   }
 
   const op = WIRED_BLEND_OP[layer.blend] ?? 'source-over'
+
+  // Cloner Vary colour, memoised by swatch. The tinted scratch is a copy of `src` at the
+  // SOURCE's own resolution, so it is by far the most expensive surface in this file — a
+  // 4000x3000 upstream image is 48 MB a piece, and one per copy put a 100-copy array at
+  // ~4.8 GB of allocation per frame. Every copy drawing the same swatch wants the same
+  // bitmap, so `cycle` spread collapses a whole array to at most VARY_PALETTE_MAX (8);
+  // `blend` interpolates per copy and still pays per distinct colour, which is the floor.
+  //
+  // `silhouetteRasterFits` rather than trusting `getContext('2d')`: past the engine's canvas
+  // limits some engines hand back a context over a BLANK backing store instead of null, and
+  // the copy would then stamp an empty (or, on a real null, an untinted) image beside tinted
+  // siblings with no signal. The check is on iw/ih, which are the same for every copy, so the
+  // outcome is all-or-nothing for the layer — a source too large to tint renders the array in
+  // its own colours rather than half-varied.
+  const tintFits = typeof document !== 'undefined' && silhouetteRasterFits(iw, ih)
+  const tintedBySwatch = new Map<string, HTMLCanvasElement | null>()
+  const tintedSrc = (tint: string, strength: number): HTMLCanvasElement | null => {
+    const key = `${tint}@${strength}`
+    const memo = tintedBySwatch.get(key)
+    if (memo !== undefined) return memo
+    let out: HTMLCanvasElement | null = null
+    if (tintFits) {
+      const sc = document.createElement('canvas')
+      sc.width = iw
+      sc.height = ih
+      const sctx = sc.getContext('2d')
+      if (sctx) {
+        sctx.drawImage(src, 0, 0, iw, ih)
+        tintScratch(sctx, tint, strength)
+        out = sc
+      }
+    }
+    tintedBySwatch.set(key, out)
+    return out
+  }
+
   // Linked cloner: stamp the layer once per clone (back-to-front; original last).
   // No cloner ⇒ a single identity transform ⇒ exactly one draw as before.
   for (const c of expandClones(layer.cloner, W / H)) {
@@ -3206,24 +3315,13 @@ export function drawWiredImageLayer(
     if (rot) ctx.rotate((rot * Math.PI) / 180)
     ctx.scale(layer.scale * c.dscale, layer.scale * c.dscale)
     // Cloner Vary colour. The mask and the defocus above are shared by every copy and
-    // already folded into `src`; the tint is per-copy, so it needs its own surface —
+    // already folded into `src`; the tint is per-COLOUR, so it needs its own surface —
     // and it MUST have one, because `source-atop` on `ctx` would wash the whole frame
     // beneath this layer. Tinted at the source's own resolution, so the stamp below
     // resamples exactly once, as it did before. Strength 0 = identity ⇒ untinted path.
     const tint = c.tint && c.tintStrength > 0 ? c.tint : null
-    let tinted: HTMLCanvasElement | null = null
-    if (tint && typeof document !== 'undefined') {
-      const sc = document.createElement('canvas')
-      sc.width = iw
-      sc.height = ih
-      const sctx = sc.getContext('2d')
-      if (sctx) {
-        sctx.drawImage(src, 0, 0, iw, ih)
-        tintScratch(sctx, tint, c.tintStrength)
-        tinted = sc
-      }
-    }
-    // No tint (or no DOM to tint on) ⇒ the original single draw, unchanged.
+    // No tint (or no surface to tint on) ⇒ the original single draw, unchanged.
+    const tinted = tint ? tintedSrc(tint, c.tintStrength) : null
     ctx.drawImage(tinted ?? src, -fitW / 2, -fitH / 2, fitW, fitH)
     ctx.restore()
   }

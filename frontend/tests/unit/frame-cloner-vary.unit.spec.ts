@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { DEFAULT_CLONER, expandClones, varyOf, type Cloner } from '~/composables/useCloner'
+import { DEFAULT_VARY, varyColorAt } from '~/lib/vary'
 
 const C = (over: Partial<Cloner> = {}): Cloner => ({ ...DEFAULT_CLONER, enabled: true, ...over })
 
@@ -66,5 +67,20 @@ describe('varyOf', () => {
   it('reads the cloner into the shared settings shape', () => {
     const v = varyOf(C({ varyMode: 'random', varySeed: 5, varyColor: true, varyPalette: ['#abc'] }))
     expect(v).toMatchObject({ mode: 'random', seed: 5, colorEnabled: true, palette: ['#abc'] })
+  })
+
+  it('substitutes the default palette only for a MISSING field', () => {
+    // An old saved cloner has no varyPalette at all and must still get the defaults.
+    const v = varyOf(C({ varyPalette: undefined as unknown as string[] }))
+    expect(v.palette).toEqual(DEFAULT_VARY.palette)
+  })
+
+  it('honours a deliberately EMPTIED palette, which disables colour', () => {
+    // `lib/vary`'s contract: an empty palette disables colour regardless of the flag
+    // (varyColorAt returns undefined for it). Substituting the defaults here would tint
+    // every copy blue/orange the moment the panel grows a remove-swatch control.
+    const v = varyOf(C({ varyColor: true, varyPalette: [] }))
+    expect(v.palette).toEqual([])
+    expect(varyColorAt(0.5, 0, v)).toBeUndefined()
   })
 })
