@@ -177,6 +177,80 @@ git commit -m "feat(shaderfx): generative holographic surface effect"
 
 ---
 
+### Task 1b: The look — make it read as metal, not as a rainbow
+
+Added after Task 1 shipped and its four surfaces were rendered and shown to the user. The
+mechanism is right — creases, hard-edged facets and grating lines are all genuinely present, and
+the field is correctly independent of any input. **The look is not right.** At picker defaults
+all four modes read as high-chroma rainbow noise rather than foil.
+
+The diagnosis is one thing: **there is no light/dark structure.** Real foil is a *metal* — bright
+specular hits and genuinely dark regions — with iridescence riding on top of that structure.
+Here the rainbow is the whole image at near-maximum chroma, so the eye reads "rainbow", not
+"metal". Measured at defaults: mean saturation 0.56–0.68 in a narrow luminance band
+(Crumple's p1–p99 is only 0.365–0.759).
+
+This lives in the shader's **composition** step — how tint, iridescence, key light and specular
+combine — not in field generation. Do not touch the height fields, the normals, or the seed fold.
+
+**This task must land before Tasks 2, 3 and 5**, or goldens and picker defaults bake in a look
+we have already agreed to change.
+
+**Files:** Modify `shader_effects/holographic_surface.frag`.
+
+- [ ] **Step 1: Render the current state and look at it**
+
+Render all four modes at 320px on a flat 0.5 grey input, defaults, seed 42, and view them.
+Record for each: mean saturation, luminance p1/p50/p99, and the fraction of pixels above 0.9 and
+below 0.1. These are your before-numbers.
+
+- [ ] **Step 2: Give the surface a luminance structure**
+
+Direction, not prescription — you are tuning by eye against the targets in Step 3:
+
+- Establish a dominant light/dark term (a key-light `dot(N, L)` plus a tight specular lobe) and
+  let the iridescence *modulate* it rather than replace it.
+- Drop baseline chroma. Iridescence should be strongest near highlights and glancing angles, and
+  fall away in the body of the surface, rather than sitting at full strength everywhere.
+- Let `u_tint` genuinely read as the metal underneath — at `u_iridescence = 0` the surface should
+  look like tinted metal, not flat grey.
+- **Flakes specifically:** most facets should sit dark, with a minority catching the light
+  brilliantly. That distribution is what makes glitter read as glitter; equal-brightness cells
+  read as a mosaic. Currently measured luminance min is 0.163 — nothing is actually dark.
+- **Slick specifically:** thinner, higher-contrast banding. Petrol-on-water is not a soft blur.
+
+- [ ] **Step 3: Hit these targets, then confirm by eye**
+
+Numeric guardrails, at defaults on flat grey — necessary but NOT sufficient:
+
+| Measure | Now | Target |
+|---|---|---|
+| Luminance p1 | 0.365 (Crumple) | ≤ 0.12 in every mode |
+| Luminance p99 | 0.759 (Crumple) | ≥ 0.90 in every mode |
+| Mean saturation | 0.56–0.68 | 0.25–0.50 |
+| Flakes: fraction of pixels below 0.25 luminance | ~0 | ≥ 0.30 |
+
+**The existing acceptance thresholds must still hold** — `std() > 0.02`, `max|R−B| > 0.10`, and
+bit-identical output with a black input, in all four modes.
+
+Then render the 2×2 contact sheet again and look. The numbers can be met by an ugly image; they
+are a floor, not the goal. It should read as foil.
+
+- [ ] **Step 4: Confirm the dials still all do something**
+
+Sweep each of the ten params min→max in every mode and confirm each visibly changes the output.
+An earlier revision of this shader had a dead `Metallic` because the film and metal branches came
+out near-identical; a composition rewrite is exactly where that recurs.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add shader_effects/holographic_surface.frag
+git commit -m "feat(shaderfx): holographic surface reads as metal, not as a rainbow"
+```
+
+---
+
 ### Task 2: The variance guard
 
 The gate that catches the flat-frame no-op. Written as its own task because it is the acceptance criterion Task 1 iterates against, and because a reviewer should be able to reject it independently.
@@ -197,7 +271,10 @@ def test_holographic_surface_renders_varied_foil_in_every_mode():
     eff = cat.effects["holographic_surface"]
     flat = np.full((64, 64, 3), 0.5, dtype=np.float32)  # a deliberately featureless input
     for mode, name in enumerate(["crumple", "grating", "flakes", "slick"]):
-        uniforms = resolve_params(eff, json.dumps({"u_surface": mode}))
+        # to_uniforms is REQUIRED: u_tint is a colour param, and resolve_params leaves it a
+        # hex string that render_effect rejects with
+        # "ValueError: could not convert string to float". Import it alongside resolve_params.
+        uniforms = to_uniforms(eff, resolve_params(eff, json.dumps({"u_surface": mode})))
         jobs = [{"image": flat, "uniforms": {**uniforms, "u_time": 0.7, "u_seed": 42.0, "u_hasInput": 1.0}}]
         out = render_effect(eff.source, 64, 64, jobs, passes=eff.passes)[0][..., :3]
         # 1. Not a constant frame.
