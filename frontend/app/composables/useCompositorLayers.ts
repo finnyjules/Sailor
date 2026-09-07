@@ -30,7 +30,7 @@ import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
 import { dealShaderFill } from '~/lib/compositor/mosaic'
 import { paintScatter, SCATTER_STYLES, DEFAULT_SCATTER_STYLE, DEFAULT_SCATTER_SEED, type ScatterStyle } from '~/lib/compositor/scatter'
-import { withFieldFrame, type FieldRequest } from '~/lib/shaderfill/field'
+import { withFieldFrame, renderFieldWithBase, type FieldRequest } from '~/lib/shaderfill/field'
 import {
   hasPaint, resolvePaint, OBJECT_SHADER_FIELD_PX, type ShaderFieldFrameCtx,
 } from '~/lib/paint/resolve'
@@ -2846,6 +2846,84 @@ function applyBackdropBlur(
   ctx.restore()
 }
 
+// Glass lens ("Layers behind"): the layer's own FILL is a backdrop-reading shader
+// (see isGlassLayer). Instead of painting that fill flat, we snapshot everything
+// already painted below this layer and run it through the shader as the input
+// texture, then clip the refracted result to this layer's own shape and stamp it
+// back. Modelled directly on applyBackdropBlur above — same device-space snapshot,
+// silhouette/ghost-fill clip, destination-in, and identity-transform stamp — so it
+// stays correct under the dpr transform renderers apply to the stack canvas.
+//
+// Returns true when it handled the layer (fill refracted; the caller then paints the
+// stroke on top). Returns false — WITHOUT touching `ctx` — when the layer isn't a
+// well-formed glass layer or an offscreen context is unavailable, so the caller can
+// fall back to the normal paint path. renderFieldWithBase THROWS on a catalog miss;
+// the caller wraps this call in try/catch and treats a throw the same as `false`.
+function applyGlassFromLayer(
+  ctx: CanvasRenderingContext2D,
+  layer: LocalLayer,
+  localLayers: LocalLayer[],
+  W: number,
+  H: number,
+  opacityMul = 1,
+): boolean {
+  const fill = primaryFillOf(layer)
+  // Narrow exactly as isGlassLayer does — the dispatch already checked isGlassLayer,
+  // but this keeps `spec` well-typed and guards the should-be-unreachable case.
+  if (!isFill(fill) || !fillIsShader(fill)) return false
+  const spec = fill.shader
+  const t = ctx.getTransform()
+  const dev = ctx.canvas
+  const w = dev.width, h = dev.height          // device pixels — snapshot + field at full res
+  if (w < 1 || h < 1) return false
+  const mk = () => {
+    const c = document.createElement('canvas')
+    c.width = w; c.height = h
+    return c
+  }
+
+  // 1. Snapshot the backdrop below this layer (device pixels; drawn in device space so
+  //    the snapshot matches the field's own device-sized output pixel-for-pixel).
+  const snap = mk()
+  const snctx = snap.getContext('2d')
+  if (!snctx) return false
+  snctx.drawImage(dev, 0, 0)
+
+  // 2. Refract: run the snapshot through the shader as its input texture. render()'s
+  //    canvas is valid only until the next render call, so copy it out immediately.
+  const lens = renderFieldWithBase(spec, snap, w, h)
+  const clipped = mk()
+  const cctx = clipped.getContext('2d')
+  if (!cctx) return false
+  cctx.drawImage(lens, 0, 0)
+
+  // 3. Clip the refracted result to this layer's own silhouette (+ its own mask ref,
+  //    mirroring applyBackdropBlur). The ghost uses an opaque solid fill so the clip is
+  //    the pane's SHAPE alpha, not the shader's (possibly transparent) output alpha.
+  const sil = mk()
+  const silctx = sil.getContext('2d')
+  if (!silctx) return false
+  silctx.setTransform(t)
+  const ghost = { ...layer, fill: '#ffffff', opacity: 1, effects: undefined, blend: undefined } as LocalLayer
+  const maskRef = layerMaskRef(layer)
+  const maskLayer = maskRef?.startsWith('l:')
+    ? localLayers.find(l => l.id === maskRef.slice(2)) ?? null
+    : null
+  drawLocalLayer(silctx, ghost, W, H, maskLayer)
+  cctx.globalCompositeOperation = 'destination-in'
+  cctx.drawImage(sil, 0, 0)
+
+  // 4. Stamp back in device space, honouring the layer's opacity (and group cascade)
+  //    and its blend op — exactly the stamp drawLocalLayer uses for a masked layer.
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity * opacityMul))
+  ctx.globalCompositeOperation = localBlendOp(layer)
+  ctx.drawImage(clipped, 0, 0)
+  ctx.restore()
+  return true
+}
+
 // Displacement map: the layer's pixels are NOT drawn — instead they warp the backdrop
 // already painted below this layer. Called from paintLayerStack's item loop. `ghost` draws
 // a faint preview of the map in the editor so the layer doesn't appear to vanish (never in bake).
@@ -3144,6 +3222,31 @@ export function paintLayerStack(
         (e): e is BackgroundBlurEffect => e.type === 'background_blur' && e.visible,
       )
       if (bgBlur) applyBackdropBlur(ctx, layer, localLayers, W, H, bgBlur.radius)
+
+      // Glass lens ("Layers behind"): the layer's fill is a backdrop-reading shader.
+      // Refract everything painted below, clipped to this pane, then paint the stroke
+      // (only) on top — the fill itself never paints. A throw from the shader path
+      // (e.g. an unloaded catalog) must NOT abort the frame: on catch we fall through
+      // to the normal fill+stroke paint below, so the layer still renders.
+      if (isGlassLayer(layer)) {
+        let refracted = false
+        try {
+          refracted = applyGlassFromLayer(ctx, layer, localLayers, W, H, opacityMul)
+        } catch (err) {
+          if (import.meta.dev) console.warn('[paintLayerStack] glass refraction failed; painting the layer normally', err)
+        }
+        if (refracted) {
+          // Fill was replaced by the refraction; the stroke still paints on top. A
+          // stroke-only ghost (fill set to the non-painting 'none' Paint, so
+          // hasPaint(fill) is false and only the stroke draws) reuses the normal
+          // masked/blended paint path, so the stroke honours this layer's mask,
+          // opacity and blend as usual.
+          const strokeGhost = { ...layer, fill: 'none' } as LocalLayer
+          drawLocalLayer(ctx, strokeGhost, W, H, maskItem?.type === 'local' ? maskItem.layer : null, opacityMul)
+          continue
+        }
+        // else: refraction unavailable → fall through and paint the layer normally.
+      }
 
       if (maskItem && maskItem.type !== 'local') {
         // Wired silhouette masking a local layer → generic cross-source path.
