@@ -471,7 +471,7 @@ export const HOLOGRAPHIC_FILL_PRESET: Fill = {
     // `metallic` is the GLSL name; its label is "Silver wash" since the look changed
     // from diffraction foil to sticker vinyl (see the spec's Controls table).
     params: { surface: 0, scale: 4, iridescence: 0.78, bands: 3, angle: 0,
-              shimmer: 0.25, metallic: 0.6, sheen: 0.5, glow: 0.5, tint: '#aab0b8', mix: 0 },
+              shimmer: 0.25, metallic: 0.6, sheen: 0.5, glow: 0.5, crinkle: 1.0, tint: '#aab0b8', mix: 0 },
     anchor: 'object',
     speed: 1,
     seed: 42,

@@ -126,10 +126,18 @@ sheet dark; it is now a pale foil.
 | `u_sheen` | Sheen | 0–1 | 0.5 | Matte ↔ polished: strength of the broad light band |
 | `u_glow` | Glow | 0–1 | 0.5 | Blends the tinted colour from a matte "paint" mix toward a pearlescent "light" mix that pushes each hue to high value at full chroma, plus a broad soft sheen along the sweep — the only way to read as bright *and* saturated at once without clipping to white |
 | `u_tint` | Foil tint | color | `#aab0b8` | The pale foil under the rainbow — grey silver, not pale white (a white base read as paper) |
+| `u_crinkle` | Crinkle | 0–1 | 1.0 | Crumpled-foil facet texture: small flat cells with thin bright/dark crease lines, plus a faint per-facet hue shift. Cellular, not noise — a noise grid at this density reads as pixels. Full dial = internal strength 0.4; anything above that read as wet stone, so the dial is capped there |
 
 Defaults are deliberately set to land on convincing foil straight from the picker, since Piece 2
 is a one-click entry point. `u_tint` and `u_glow` are new relative to the stylize effect, which
 took its base colour from the input it no longer has.
+
+Three look decisions settled against the reference photos are **constants, not dials** (each was
+tried as a dial and the reference sat at one value): `OVERLAP = 0.7` — two further offset
+rainbows screen-blended over the first, so colours overlap translucently instead of each owning
+a zone; `BAND_SHAPE = 0.8` — the sweep bends along long wavy parallel bands, not rounded blooms;
+and the silver always carries a pale (30 % whitened) version of the local hue, because the
+reference has no neutral grey anywhere.
 
 ## Piece 2 — the fill-picker entry
 

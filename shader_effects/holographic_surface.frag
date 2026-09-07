@@ -17,8 +17,15 @@ uniform float u_shimmer;     // time drift of the hue + a fine twinkle
 uniform float u_metallic;    // REPURPOSED -> "Silver wash": how much neutral foil breaks through
 uniform float u_sheen;       // matte -> polished: strength of the broad light band
 uniform vec3  u_tint;        // the pale foil under the rainbow
+uniform float u_crinkle;     // crumpled-foil facet texture (0 = smooth sheet)
 uniform float u_mix;         // blend the input back in (0 = pure foil)
 uniform float u_glow;        // paint look (0) <-> pearlescent light look (1): bright AND saturated
+
+// Look constants settled against the reference photos. Not dials: each was tried as one
+// and the reference sat at a single value.
+const float OVERLAP = 0.7;      // how much the second and third rainbows show through the first
+const float BAND_SHAPE = 0.8;   // 0 = rounded blooms, 1 = long wavy parallel bands
+const float CRINKLE_MAX = 0.4;  // full dial = this much facet texture; more reads as wet stone
 
 // TARGET, from the user's reference photographs of holographic STICKER VINYL --
 // the pale iridescent sheet stock that die-cut stickers and laminates are printed
@@ -53,6 +60,20 @@ float vnoise(vec2 p) {
 // grain is what made the first attempt look like static rather than like vinyl.
 float softfbm(vec2 p) { return 0.72 * vnoise(p) + 0.28 * vnoise(p * 2.03 + 5.2); }
 
+// Cellular facets. Returns (distance to nearest site, border distance F2-F1, cell hash).
+vec3 facets(vec2 x) {
+    vec2 n = floor(x), f = fract(x);
+    float d1 = 8.0, d2 = 8.0, id = 0.0;
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+        vec2 g = vec2(float(i), float(j));
+        vec2 o = vec2(hash21(n + g), hash21(n + g + 19.1));
+        vec2 r = g + o - f;
+        float d = dot(r, r);
+        if (d < d1) { d2 = d1; d1 = d; id = hash21(n + g + 3.3); }
+        else if (d < d2) { d2 = d; }
+    }
+    return vec3(sqrt(d1), sqrt(d2) - sqrt(d1), id);
+}
 vec3 iridPalette(float t) { return 0.5 + 0.5 * cos(TAU * (t + vec3(0.0, 0.33, 0.66))); }
 
 // The core move of the whole look. The rainbow TINTS a pale foil; it does not
@@ -65,6 +86,13 @@ vec3 iridPalette(float t) { return 0.5 + 0.5 * cos(TAU * (t + vec3(0.0, 0.33, 0.
 // the note the user rejected.
 vec3 vinyl(vec3 hue, float tintAmount, float shade, vec3 silverBase) {
     vec3 silver = silverBase * shade;
+    // The reference has no neutral grey anywhere: the calmest areas carry a pale cyan or
+    // lavender, and a truly neutral silver reads as a dead zone against that. So the silver
+    // takes on a PALE version of the local hue -- normalised to full value so the tint is
+    // colour and not darkening, then whitened hard. Still silver; silver that remembers
+    // which rainbow is passing over it.
+    vec3 hueN = hue / max(max(hue.r, hue.g), max(hue.b, 1e-3));
+    silver *= mix(vec3(1.0), hueN, 0.30);
     // "Paint" look (u_glow = 0): pastel mixed toward white, moderate value,
     // desaturated. Reads matte.
     vec3 pastel = mix(vec3(1.0), hue, 0.58);
@@ -184,9 +212,37 @@ void main() {
     } else {
         // SOFT SWEEP (0) and SWEEP AND SPARKLE (2) share the field: one broad rainbow
         // band running across the sheet, bent gently by the slow noise.
-        float t = (r.x * 1.05 + r.y * 0.30) + (f - 0.5) * 0.55;
+        // The reference colour comes in LONG, soft, roughly parallel bands with a gentle
+        // waver -- a stretched diagonal spectrum -- not rounded blooms. Blooms come from an
+        // isotropic fbm bend that pushes the sweep equally in every direction. Bands need
+        // the displacement small ACROSS the band and long ALONG it: sample the bend field
+        // stretched along the band axis so the waver is slow and elongated.
+        vec2 band = vec2(r.x * 1.05 + r.y * 0.30, -r.x * 0.30 + r.y * 1.05);  // across, along
+        float wav = softfbm(vec2(band.y * 0.9, band.x * 3.4) * (u_scale * 0.52) + sd * 0.2) - 0.5;
+        float bend = mix((f - 0.5) * 0.55, wav * 0.42, BAND_SHAPE);
+        float t = band.x + bend;
         float phase = t * cycles + 0.15 + drift;
         vec3 hue = iridPalette(phase);
+        // A single hue ramp gives every colour its own zone -- a perfect gradient, which
+        // the reference is not. Real holographic film reads as two or three OFFSET rainbows
+        // laid over each other semi-transparently: a pink bloom sits over a cyan one and
+        // both are visible. So: two more rainbow layers, each bent by its OWN slow field so
+        // it does not track the first, screen-blended in -- screen keeps both colours where
+        // they overlap and pales the mix instead of averaging them to mud. The glow path
+        // re-normalises brightness afterwards, so screen raising the value cannot blow out.
+        {
+            float f2 = softfbm(q * 0.50 + 17.3);
+            float wav2 = softfbm(vec2(band.y * 0.8, band.x * 3.0) * (u_scale * 0.52) + 17.3) - 0.5;
+            float t2 = (r.x * 0.95 + r.y * 0.42) + mix((f2 - 0.5) * 0.55, wav2 * 0.40, BAND_SHAPE);
+            vec3 hue2 = iridPalette(t2 * cycles * 0.85 + 0.42 + drift);
+            float f3 = softfbm(q * 0.62 - 9.1);
+            float wav3 = softfbm(vec2(band.y * 1.1, band.x * 3.8) * (u_scale * 0.52) - 9.1) - 0.5;
+            float t3 = (r.x * 1.12 - r.y * 0.18) + mix((f3 - 0.5) * 0.50, wav3 * 0.36, BAND_SHAPE);
+            vec3 hue3 = iridPalette(t3 * cycles * 1.10 + 0.71 + drift);
+            vec3 layered = 1.0 - (1.0 - hue) * (1.0 - hue2 * 0.85);
+            layered = 1.0 - (1.0 - layered) * (1.0 - hue3 * 0.55);
+            hue = mix(hue, layered, OVERLAP);
+        }
         col = vinyl(hue, tintAmount, shade, silverBase);
         if (mode == 2) {
             // SWEEP AND SPARKLE -- the security-hologram label roll. Fine, SPARSE and
@@ -238,6 +294,26 @@ void main() {
         vec2 sdir = vec2(cos(radians(u_angle + 90.0)), sin(radians(u_angle + 90.0)));
         float ts = dot(p, sdir) + (f - 0.5) * 0.6;
         col *= 1.0 + u_glow * 0.18 * exp(-ts * ts * 1.4);
+    }
+    // Crinkle: the dense fine texture of crumpled foil. Foil is FACETED -- small flat planes,
+    // each catching the light a bit differently, with thin bright/dark crease lines where they
+    // meet -- so this is cellular, not noise (a noise grid at this density reads as pixels).
+    // Two facet scales: the small folds, and the finer crease network inside them. The colour
+    // field underneath is untouched; facets modulate brightness plus a faint per-facet hue
+    // shift, which is what a tilted facet does to a thin film. Isotropic by construction.
+    float crinkle = u_crinkle * CRINKLE_MAX;
+    if (crinkle > 0.0) {
+        vec3 fa = facets(p * 22.0 + sd * 3.0);
+        vec3 fb = facets(p * 58.0 + sd * 5.0 + 11.0);
+        float tiltA = fa.z - 0.5, tiltB = fb.z - 0.5;                 // per-facet flat tilt, +-0.5
+        float tilt = tiltA * 0.55 + tiltB * 0.45;
+        float crease = smoothstep(0.10, 0.0, fb.y) * 0.6 + smoothstep(0.07, 0.0, fa.y) * 0.4;
+        float catching = smoothstep(0.20, 0.40, tilt);                // facets that catch the light
+        col *= 1.0 + crinkle * (0.30 * tilt + 0.14 * catching);       // pits darken, facets brighten
+        col += crinkle * crease * (0.24 * tiltB + 0.06);                     // creases: some bright, some dark
+        // a tilted facet shifts the film's hue slightly: nudge toward the neighbouring colour
+        vec3 shifted = 1.0 - (1.0 - col) * (1.0 - iridPalette(tilt * 1.6 + 0.4) * 0.35);
+        col = mix(col, shifted, crinkle * catching * 0.6);
     }
     col = clamp(col, 0.0, 1.0);
     if (u_hasInput > 0.5 && u_mix > 0.0) {
