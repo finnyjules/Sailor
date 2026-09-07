@@ -210,7 +210,7 @@ export {
 } from '~/lib/compositor/paint'
 import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/paint'
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
-import { effectStackOf, orderablePasses, pinnedEffect } from '~/lib/compositor/effectStack'
+import { effectStackOf, orderablePasses, pinnedEffect, splitTrailingBlurs } from '~/lib/compositor/effectStack'
 
 // Layer effects (Figma-style) live in ~/lib/compositor/effectStack, which owns the whole
 // vocabulary (kinds, canonical order, the read-through that turns any layer into an ordered
@@ -1669,13 +1669,19 @@ function paintLayer(
   // Everything between the pinned three, in the user's order. inner shadow / the six chain
   // kinds / torn edge / feather / layer blur all run here.
   const passes = orderablePasses(stack)
+  // A blur with nothing orderable after it stays on the stamp's `ctx.filter`, exactly where the
+  // legacy code put its one blur — that is what keeps an unedited layer byte-identical (a blur
+  // baked into the offscreen re-quantizes once more, and clips the bleed the drop shadow used to
+  // see past a frame edge). Only a blur FOLLOWED by another pass — reachable solely by a user
+  // reorder — has to run on the offscreen, since the stamp filter is last by construction.
+  const { body: bodyPasses, trailing: trailingBlurs } = splitTrailingBlurs(passes)
   // The silhouette raster bakes torn edge + feather into the layer's own box. Layer blur may
   // ride along ONLY when every blur comes after every edge pass, which is the legacy order —
-  // otherwise the raster would apply them the wrong way round.
+  // otherwise the raster would apply them the wrong way round. Such a blur is trailing, so it is
+  // applied at the stamp, not on the raster.
   const lastEdgePass = passes.reduce((m, e, i) => (e.type === 'torn_edge' || e.type === 'feather' ? i : m), -1)
   const firstBlurPass = passes.findIndex(e => e.type === 'layer_blur')
-  const rasterablePasses = passes.length > 0
-    && passes.every(e => e.type === 'torn_edge' || e.type === 'feather' || e.type === 'layer_blur')
+  const rasterablePasses = passes.every(e => e.type === 'torn_edge' || e.type === 'feather' || e.type === 'layer_blur')
     && lastEdgePass >= 0
     && (firstBlurPass === -1 || firstBlurPass > lastEdgePass)
   // Content layers with a depth map only — nothing else has one to drive the blur.
@@ -1889,21 +1895,19 @@ function paintLayer(
           // resample by up to half a pixel in position; that is the same subpixel
           // placement the uncached draw does, not an extra softening from the cache.
           octx.drawImage(raster.canvas, -raster.w / 2, -raster.h / 2, raster.w, raster.h)
-          // Torn edge / feather are already baked into the raster; a trailing layer blur is
-          // not, so apply it here (rasterablePasses guarantees blur comes last).
-          for (const e of passes) {
-            if (e.type === 'layer_blur') applyBlurPass(off, Math.max(0, (e as LayerBlurEffect).radius * W * s))
-          }
+          // Torn edge / feather are already baked into the raster; `rasterablePasses` guarantees
+          // any layer blur here is trailing, so it lands on the stamp's `ctx.filter` below.
         } else {
           applyXform(octx, lx, ly, lrot, ls)
           drawContent(octx)
-          // The layer's passes, in the user's order. For an unedited layer that order is the
-          // legacy one (inner shadow, then the six chain kinds, then torn edge, feather, blur),
-          // so this produces the same canvas operations the fixed sequence did.
+          // The layer's passes, in the user's order, minus any TRAILING layer blur (that one is
+          // the stamp's `ctx.filter`, below). For an unedited layer the order is the legacy one
+          // (inner shadow, then the six chain kinds, then torn edge, feather), so this produces
+          // the same canvas operations the fixed sequence did.
           //
           // scale = device px per logical px, so bloom radius / grain size / blur radius land
           // at the right physical size on a device-resolution buffer (mirrors applyStackPost).
-          for (const e of passes) {
+          for (const e of bodyPasses) {
             switch (e.type) {
               case 'inner_shadow':
                 compositeInnerShadow(off, e as unknown as InnerShadowEffect, W, s); break
@@ -1925,12 +1929,19 @@ function paintLayer(
         }
         ctx.save()
         // `off` already holds device pixels — stamp it 1:1 in device space, not under
-        // `t` (which would upscale it a second time). The drop shadow is specified in
-        // device px here, so its logical W-normalized params scale by `s`. (Layer blur is
-        // already in `off` as a pass, so the shadow still follows the blurred silhouette.)
+        // `t` (which would upscale it a second time). Shadow/blur are specified in device px
+        // here, so their logical W-normalized params scale by `s`. The canvas applies
+        // filter → shadow → composite, so the drop shadow still follows the blurred
+        // silhouette — and, exactly as before this stack rewrite, it sees the blur's bleed
+        // past the offscreen's bounds. Several trailing blurs compose into one filter list.
         ctx.setTransform(1, 0, 0, 1, 0, 0)
         ctx.globalAlpha = lop
         ctx.globalCompositeOperation = blendOp
+        if (trailingBlurs.length) {
+          ctx.filter = trailingBlurs
+            .map(b => `blur(${Math.max(0, (b as unknown as LayerBlurEffect).radius * W * s)}px)`)
+            .join(' ')
+        }
         if (shadow) {
           ctx.shadowColor = shadow.color
           ctx.shadowBlur = Math.max(0, shadow.blur * W * s)

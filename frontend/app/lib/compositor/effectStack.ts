@@ -196,6 +196,20 @@ export const pinnedEffect = (stack: EffectInstance[], kind: EffectKind): EffectI
 export const orderablePasses = (stack: EffectInstance[]): EffectInstance[] =>
   stack.filter(e => !isPinnedKind(e.type))
 
+/** Split a pass list into the passes that run on the offscreen and the TRAILING layer blurs.
+ *  A blur with nothing orderable after it is applied as the stamp's `ctx.filter` — exactly where
+ *  the legacy code applied its one blur, which is what keeps an unedited layer byte-identical:
+ *  a blur pass into the offscreen re-quantizes once more and clips the bleed the drop shadow
+ *  used to see at the frame edge. A blur FOLLOWED by another pass (only possible after a user
+ *  reorder) must be a real pass, since the stamp filter runs last by construction. */
+export function splitTrailingBlurs<T extends { type: string }>(
+  passes: readonly T[],
+): { body: T[]; trailing: T[] } {
+  let i = passes.length
+  while (i > 0 && passes[i - 1]!.type === 'layer_blur') i--
+  return { body: passes.slice(0, i), trailing: passes.slice(i) }
+}
+
 /** Insert a new effect. A pinned kind lands at its canonical position and is refused if
  *  already present; an orderable kind is appended after the last orderable entry, which
  *  keeps it before drop shadow. */

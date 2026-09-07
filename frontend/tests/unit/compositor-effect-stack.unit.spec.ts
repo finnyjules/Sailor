@@ -3,7 +3,7 @@ import {
   EFFECT_ORDER, EFFECT_LABELS, PINNED_KINDS, ORDERABLE_KINDS,
   effectStackOf, writeStackToLayer, createEffect, newEffectId, isPinnedKind,
   addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder,
-  orderablePasses, pinnedEffect, type EffectInstance,
+  orderablePasses, pinnedEffect, splitTrailingBlurs, type EffectInstance,
 } from '~/lib/compositor/effectStack'
 import { DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
 import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
@@ -161,5 +161,26 @@ describe('list operations', () => {
     expect(orderablePasses(s).map(e => e.type)).toEqual(['adjust', 'bloom'])
     expect(pinnedEffect(s, 'background_blur')?.type).toBe('background_blur')
     expect(pinnedEffect(s, 'dof')).toBeUndefined()
+  })
+})
+
+describe('splitTrailingBlurs', () => {
+  const t = (types: string[]) => types.map(type => ({ type }))
+  it('splits nothing out of an empty list', () => {
+    expect(splitTrailingBlurs([])).toEqual({ body: [], trailing: [] })
+  })
+  it('treats a lone blur as trailing — it belongs on the stamp filter', () => {
+    const passes = t(['layer_blur'])
+    expect(splitTrailingBlurs(passes)).toEqual({ body: [], trailing: passes })
+  })
+  it('keeps a blur followed by another pass in the body — the stamp filter runs last', () => {
+    const passes = t(['layer_blur', 'grain'])
+    expect(splitTrailingBlurs(passes)).toEqual({ body: passes, trailing: [] })
+  })
+  it('takes the maximal trailing run of blurs, in order', () => {
+    const passes = t(['grain', 'layer_blur', 'layer_blur'])
+    const { body, trailing } = splitTrailingBlurs(passes)
+    expect(body).toEqual([passes[0]])
+    expect(trailing).toEqual([passes[1], passes[2]])
   })
 })

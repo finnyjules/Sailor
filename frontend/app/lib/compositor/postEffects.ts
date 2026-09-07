@@ -399,9 +399,15 @@ export function applyPasses(
 
 /**
  * Gaussian blur of the whole offscreen — the per-layer `layer_blur` effect as a pass.
- * It used to be a CSS filter set on the stamp's `drawImage`; the canvas applies filter,
- * then shadow, then composite, so the drop shadow followed the blurred silhouette. Running
- * the blur here, before the stamp, preserves that exactly.
+ *
+ * Used ONLY for a blur that is followed by another pass, which is reachable only after a user
+ * reorders the stack. A TRAILING blur stays where the legacy code put it: a CSS filter on the
+ * stamp's `drawImage` (the canvas applies filter → shadow → composite, so the drop shadow
+ * follows the blurred silhouette). That is not the same picture as this pass, so the two are
+ * not interchangeable: blurring into the offscreen re-quantizes to 8 bits once more, and it
+ * clips the blur's bleed at the offscreen's bounds, where a stamp-time filter lets the bleed
+ * past them — visible as a band along a frame edge when the blurred layer also casts a drop
+ * shadow. The stamp keeps the trailing case so an unedited layer renders byte-identically.
  *
  * `radiusPx` is already in DEVICE pixels (the caller multiplies by `W * scale`), and takes a
  * number rather than the effect so this module keeps its one-way independence from
