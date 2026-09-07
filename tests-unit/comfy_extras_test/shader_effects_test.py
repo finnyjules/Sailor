@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from comfy_extras._shader_effects import frame_plan, load_catalog, resolve_params
+from comfy_extras._shader_effects import frame_plan, load_catalog, resolve_params, to_uniforms
 
 
 def test_catalog_loads_and_has_spike_effects():
@@ -418,3 +418,29 @@ def test_holographic_surface_field_survives_the_apps_full_seed_range():
     assert hf_9999 > 0.75 * hf_42, (
         f"Crumple's high-frequency energy collapsed at seed 9999 ({hf_9999:.4f}) "
         f"relative to seed 42 ({hf_42:.4f}) -- the noise field is banding/washing out at high seeds")
+
+
+def test_holographic_surface_renders_varied_foil_in_every_mode():
+    """A shader that compiles, binds and renders a FLAT frame passes every 'does it
+    run' check. These assertions are what fail in that case — per surface mode."""
+    cat = load_catalog(refresh=True)
+    eff = cat.effects["holographic_surface"]
+    flat = np.full((64, 64, 3), 0.5, dtype=np.float32)  # a deliberately featureless input
+    for mode, name in enumerate(["Soft sweep", "Watercolour bloom", "Sweep and sparkle", "Defined bands"]):
+        # to_uniforms is REQUIRED: u_tint is a colour param, and resolve_params leaves it a
+        # hex string that render_effect rejects with
+        # "ValueError: could not convert string to float". Import it alongside resolve_params.
+        uniforms = to_uniforms(eff, resolve_params(eff, json.dumps({"u_surface": mode})))
+        jobs = [{"image": flat, "uniforms": {**uniforms, "u_time": 0.7, "u_seed": 42.0, "u_hasInput": 1.0}}]
+        out = render_effect(eff.source, 64, 64, jobs, passes=eff.passes)[0][..., :3]
+        # 1. Not a constant frame.
+        assert out.std() > 0.02, f"{name}: frame is essentially flat (std {out.std():.4f})"
+        # 2. Actually iridescent — the channels must diverge somewhere, or it is a
+        #    greyscale bump map wearing a rainbow's name.
+        spread = np.abs(out[..., 0] - out[..., 2])
+        assert spread.max() > 0.10, f"{name}: no hue separation (max R-B {spread.max():.4f})"
+        # 3. Independent of the input, which is the whole point of a generative effect.
+        dark = [{"image": np.zeros_like(flat), "uniforms": jobs[0]["uniforms"]}]
+        out_dark = render_effect(eff.source, 64, 64, dark, passes=eff.passes)[0][..., :3]
+        assert np.abs(out - out_dark).max() < 2.0 / 255.0, \
+            f"{name}: output changed with the input — u_mix defaults to 0, so it must not"
