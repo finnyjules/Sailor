@@ -561,7 +561,7 @@ Name every failing test file and compare by name against what fails before this 
 
 Start the app (`cd frontend && pnpm exec nuxt dev --port 3000 --host 127.0.0.1` — NOT `npm run dev`, whose `predev` shells out to a `vite` that is not on PATH). Then:
 - In the compositor's fill picker, choose **Holographic** and confirm convincing foil appears with no further tuning — the one-click promise.
-- Step through all four Surfaces and confirm each reads as its referent: Crumple as crinkled sticker, Grating as CD/prismatic, Flakes as glitter with hard-edged facets, Slick as broad oil-slick.
+- Step through all four Surfaces — Soft sweep, Watercolour bloom, Sweep and sparkle, Defined bands — and confirm each reads as a different holographic vinyl finish, and that the default reads as foil with no tuning.
 - Confirm the entry is absent from Vector Type's picker, and that this is understood as correct.
 - Screenshot each surface mode.
 

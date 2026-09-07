@@ -69,7 +69,10 @@ export const DEFAULT_SHADER_SPEC: ShaderSpec = {
 /** The "Holographic" fill-picker entry. Deliberately a PRESET, not a FILL_TYPES member:
  *  canvas-painted fill types cannot do per-pixel iridescence, and a shader fill in that
  *  path already degrades to its input (see fills.ts's fillTexture). Twelve modules read
- *  FILL_TYPES, and one leak from it has already reached a 3D texture path. */
+ *  FILL_TYPES, and one leak from it has already reached a 3D texture path.
+ *  Shares `DEFAULT_SHADER_SPEC.input` by reference (see below) — consumers must
+ *  `structuredClone` this preset before assigning it onto a fill (both pickers do);
+ *  never mutate it in place. */
 export const HOLOGRAPHIC_FILL_PRESET: Fill = {
   ...DEFAULT_FILL,
   type: 'shader',
@@ -93,6 +96,14 @@ export const HOLOGRAPHIC_FILL_PRESET: Fill = {
 /** True when `f` is a shader fill actually carrying a spec (vs. `type: 'shader'` with no spec yet). */
 export function fillIsShader(f: Fill): f is Fill & { shader: ShaderSpec } {
   return f.type === 'shader' && !!f.shader
+}
+
+/** What the fill-picker's type dropdown should show as selected for `fill`: a plain
+ *  `FillType`, or the synthetic `'holographic'` entry when `fill` is a shader fill
+ *  wrapping the `holographic_surface` effect. Shared by FillControl.vue's `currentType`
+ *  and SpaceTypeSurface.vue's `arrayFillSelectValue` so the two pickers can't drift. */
+export function fillPickerType(fill: Fill): FillType | 'holographic' {
+  return (fill.type === 'shader' && fill.shader?.effectId === 'holographic_surface') ? 'holographic' : fill.type
 }
 
 /** Paint equivalent of `effectiveTileFill` below — unwraps a shader-typed `Fill` exactly

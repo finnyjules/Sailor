@@ -127,6 +127,7 @@ sheet dark; it is now a pale foil.
 | `u_glow` | Glow | 0–1 | 0.5 | Blends the tinted colour from a matte "paint" mix toward a pearlescent "light" mix that pushes each hue to high value at full chroma, plus a broad soft sheen along the sweep — the only way to read as bright *and* saturated at once without clipping to white |
 | `u_tint` | Foil tint | color | `#aab0b8` | The pale foil under the rainbow — grey silver, not pale white (a white base read as paper) |
 | `u_crinkle` | Crinkle | 0–1 | 1.0 | Crumpled-foil facet texture: small flat cells with thin bright/dark crease lines, plus a faint per-facet hue shift. Cellular, not noise — a noise grid at this density reads as pixels. Full dial = internal strength 0.4; anything above that read as wet stone, so the dial is capped there |
+| `u_mix` | Blend input | 0–1 | 0 | Mixes the connected input back over the foil; 0 = pure foil (the fill-picker preset never has an input, so it stays 0) |
 
 Defaults are deliberately set to land on convincing foil straight from the picker, since Piece 2
 is a one-click entry point. `u_tint` and `u_glow` are new relative to the stylize effect, which
@@ -188,11 +189,13 @@ Selecting the entry writes a shader fill carrying the defaults from the Controls
 
 ```ts
 {
+  ...DEFAULT_FILL,
   type: 'shader',
   shader: {
     effectId: 'holographic_surface',
-    params: { surface: 0, scale: 4, iridescence: 0.85, bands: 3, angle: 0,
-              shimmer: 0.25, metallic: 0.6, sheen: 0.5, tint: '#d8dee6' },
+    params: { surface: 0, scale: 4, iridescence: 0.78, bands: 3, angle: 0,
+              shimmer: 0.25, metallic: 0.6, sheen: 0.5, glow: 0.5, crinkle: 1.0,
+              tint: '#aab0b8', mix: 0 },
     anchor: 'object',
     speed: 1,
     seed: 42,
@@ -224,7 +227,10 @@ untouched and every existing document keeps resolving.
 ## Testing
 
 **Golden images.** `tests-unit/shaderfx_golden/` is the established pattern; one golden per
-surface mode.
+surface mode. **Deviation:** the golden harness renders manifest defaults only, so in practice
+just two goldens exist (`holographic_surface_128.png`, `holographic_surface_256.png`, both
+mode 0). The other three modes are covered instead by the variance guard below
+(`test_holographic_surface_renders_varied_foil_in_every_mode`), not by their own goldens.
 
 **The variance guard — the important one.** A shader that compiles, binds and renders a
 completely uniform frame is this feature's version of a silent no-op, and it would pass every

@@ -9,7 +9,7 @@ import { parseFills, serializeFills, FILL_TYPES, DEFAULT_FILL, type Fill, type F
 import { parseContent, type ContentItem, type CardFillKind } from '~/lib/spacetype/tile'
 import { loadImageTextures } from '~/lib/spacetype/imageTextures'
 import { fitWithin } from '~/lib/lora/datasetImages'
-import { DEFAULT_SHADER_SPEC, HOLOGRAPHIC_FILL_PRESET, type ShaderSpec } from '~/lib/spacetype/fillTile'
+import { DEFAULT_SHADER_SPEC, HOLOGRAPHIC_FILL_PRESET, fillPickerType, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
 import { SpaceTypeEngine } from '~/lib/spacetype/engine'
 import { detectWebGL } from '~/lib/spacetype/webgl'
@@ -294,10 +294,15 @@ function setFillType(f: Fill, t: FillType) {
 // selecting it assigns the whole preset in one step rather than just a type.
 const ARRAY_FILL_TYPE_OPTIONS: string[] = [...FILL_TYPES, 'holographic']
 function arrayFillSelectValue(f: Fill): string {
-  return (f.type === 'shader' && f.shader?.effectId === 'holographic_surface') ? 'holographic' : f.type
+  return fillPickerType(f)
 }
 function setArrayFillType(f: Fill, v: string) {
   if (v === 'holographic') { Object.assign(f, structuredClone(HOLOGRAPHIC_FILL_PRESET)); return }
+  // Leaving 'holographic' via the plain 'shader' option: f.shader is already set (to
+  // the holographic_surface spec), so setFillType's `!f.shader` guard would never
+  // reseed it and the picker would appear stuck on Holographic. Reseed here so the
+  // select actually lands on a plain shader fill.
+  if (v === 'shader' && f.shader?.effectId === 'holographic_surface') f.shader = structuredClone(DEFAULT_SHADER_SPEC)
   setFillType(f, v as FillType)
 }
 // Which controls each fill type actually uses (so the editor only shows relevant ones).

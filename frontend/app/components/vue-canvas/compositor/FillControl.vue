@@ -13,7 +13,7 @@ import { ChevronDown, Dices } from 'lucide-vue-next'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
-import { type Fill, type FillType, type ShaderSpec, FILL_TYPES, DEFAULT_FILL, DEFAULT_SHADER_SPEC, HOLOGRAPHIC_FILL_PRESET, fillTileCanvas } from '~/lib/spacetype/fillTile'
+import { type Fill, type FillType, type ShaderSpec, FILL_TYPES, DEFAULT_FILL, DEFAULT_SHADER_SPEC, HOLOGRAPHIC_FILL_PRESET, fillPickerType, fillTileCanvas } from '~/lib/spacetype/fillTile'
 import { rollPaintItem, gradientFromPaint } from '~/lib/compositor/fillPalette'
 import { type Paint, type Gradient, type ImageFill, isFill, isGradient, isImageFill } from '~/composables/useCompositorLayers'
 import type { BrandKit } from '~~/shared/brand/types'
@@ -87,8 +87,7 @@ const imageFill = ref<ImageFill | null>(isImageFill(props.modelValue) ? { ...pro
 const pickerOpen = ref(false)
 const currentType = computed<UiType>(() => {
   if (isImageFill(props.modelValue)) return 'image'
-  if (fill.type === 'shader' && fill.shader?.effectId === 'holographic_surface') return 'holographic'
-  return fill.type
+  return fillPickerType(fill)
 })
 
 watch(() => props.modelValue, (v) => {
@@ -111,6 +110,11 @@ function setUiType(t: UiType) {
   }
   // leaving image → fall back to the normal Fill path
   imageFill.value = null
+  // Leaving 'holographic' via the plain 'shader' option: fill.shader is already set
+  // (to the holographic_surface spec), so setType's `!fill.shader` guard below would
+  // never reseed it and the picker would appear stuck on Holographic. Reseed here so
+  // the select actually lands on a plain shader fill.
+  if (t === 'shader' && fill.shader?.effectId === 'holographic_surface') fill.shader = structuredClone(DEFAULT_SHADER_SPEC)
   setType(t as FillType)
 }
 
