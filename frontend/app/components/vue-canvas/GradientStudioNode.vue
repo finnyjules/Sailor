@@ -27,6 +27,10 @@ const props = defineProps<{
 }>()
 
 const PREVIEW_W = 220
+// Backing-store ceiling. The card animates via rAF when flow speed > 0, so the
+// buffer we render every frame is capped here — 2× the 220px card covers retina
+// (dpr 2) with headroom, without letting an unexpectedly wide card blow up cost.
+const PREVIEW_MAX_W = 640
 
 const config = computed<GradientConfig>(
   () => (props.data?.properties?.sailor_gradientStudio as GradientConfig) ?? defaultConfig('#default0'),
@@ -46,10 +50,23 @@ const animated = computed(() => {
 // IntersectionObserver + hover listeners for the shared gated/throttled preview loop.
 const rootEl = ref<HTMLElement | null>(null)
 
+// Size the backing store to the card's on-screen box × the display's pixel
+// density (dpr), so 1 render pixel maps to 1 physical pixel — crisp at any card
+// width and on retina, instead of upscaling a fixed 220px buffer. CSS size stays
+// driven by layout (canvas is w-full); we only set the backing store here.
+function previewDims() {
+  const ar = aspectRatio(config.value.canvas.aspect) || 1
+  const dpr = Math.min((typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1, 2)
+  const cssW = Math.max(1, Math.round(canvasEl.value?.clientWidth || PREVIEW_W))
+  const w = Math.min(Math.round(cssW * dpr), PREVIEW_MAX_W)
+  const h = Math.max(1, Math.round(w / ar))
+  return { w, h }
+}
+
 function renderFrame(t: number) {
   const canvas = canvasEl.value
   if (!canvas) return
-  const w = PREVIEW_W, h = previewH.value
+  const { w, h } = previewDims()
   if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h }
   try {
     const out = gradientFx.render(config.value, w, h, t)
