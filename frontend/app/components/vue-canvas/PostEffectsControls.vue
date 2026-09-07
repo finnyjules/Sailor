@@ -32,13 +32,13 @@ const SECTIONS: SectionSpec[] = [
   { type: 'duotone', label: 'Duotone', colors: [['shadows', 'Shadows'], ['highlights', 'Highlights']], params: [
     { key: 'mix', label: 'Mix', min: 0, max: 1, step: 0.01 },
   ] },
-  { type: 'gradientMap', label: 'Gradient Map', ramp: true, params: [
+  { type: 'gradientMap', label: 'Gradient map', ramp: true, params: [
     { key: 'mix', label: 'Mix', min: 0, max: 1, step: 0.01 },
     { key: 'contrast', label: 'Contrast', min: -1, max: 1, step: 0.01 },
   ] },
   // Blades < 3 renders a circular iris; 6 gives hexagonal bokeh. Highlight boost is
   // what turns bright defocused points into discs rather than grey mush.
-  { type: 'dof', label: 'Depth of Field', params: [
+  { type: 'dof', label: 'Depth of field', params: [
     { key: 'focus', label: 'Focus', min: 0, max: 1, step: 0.01 },
     { key: 'range', label: 'Sharp band', min: 0, max: 1, step: 0.01 },
     { key: 'aperture', label: 'Aperture', min: 0, max: 1, step: 0.005 },

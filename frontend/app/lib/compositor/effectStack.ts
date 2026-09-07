@@ -125,7 +125,9 @@ function defaultsFor(kind: EffectKind): Record<string, unknown> {
   const local = LOCAL_DEFAULTS[kind]
   if (local) return { ...local }
   const post = POST_EFFECT_DEFAULTS[kind as PostEffect['type']]
-  return post ? { ...(post as unknown as Record<string, unknown>) } : { visible: true }
+  // Deep clone, matching `defaultPostEffect`: a shallow spread would hand every new
+  // gradient map the SAME `stops` array, so editing one layer's stops would edit them all.
+  return post ? (JSON.parse(JSON.stringify(post)) as Record<string, unknown>) : { visible: true }
 }
 
 let idCounter = 0
@@ -162,16 +164,23 @@ export function effectStackOf(layer: StackHost | null | undefined): EffectInstan
       !!e && typeof e === 'object' && isEffectKind((e as { type?: unknown }).type),
   )
   const allIded = known.length > 0 && known.every(e => typeof e.id === 'string' && e.id !== '')
+  // A new-shape layer that ALSO still carries a live legacy `tornEdge`/`feather` field can only
+  // come from an older build editing a new document; it has no trustworthy order for the legacy
+  // pass, so it falls through to the old-shape branch and is re-sorted into EFFECT_ORDER — the
+  // safe answer there, since that is exactly where those two fields used to run.
   if (allIded && !tornEdgeActive(layer?.tornEdge) && !featherActive(layer?.feather)) {
-    return known as unknown as EffectInstance[]
+    // `visible` is normalised the same way as in the old-shape branch, so a stored entry with
+    // the field missing reads as visible in BOTH shapes.
+    return known.map(e => ({ ...e, visible: e.visible !== false })) as unknown as EffectInstance[]
   }
   const seen = new Map<string, number>()
   const stamp = (e: Record<string, unknown>): EffectInstance => {
     const type = e.type as EffectKind
     const n = seen.get(type) ?? 0
     seen.set(type, n + 1)
-    const id = typeof e.id === 'string' && e.id !== '' ? e.id : `fx:${type}:${n}`
-    return { ...e, id, visible: e.visible !== false } as EffectInstance
+    // Always MINT the id here, never keep a stored one: a partially id-stamped list would
+    // otherwise let a kept id collide with a freshly minted `fx:<type>:<ordinal>`.
+    return { ...e, id: `fx:${type}:${n}`, visible: e.visible !== false } as EffectInstance
   }
   const out: EffectInstance[] = known.map(stamp)
   if (tornEdgeActive(layer?.tornEdge)) out.push(stamp({ ...layer!.tornEdge, type: 'torn_edge' }))
@@ -210,6 +219,27 @@ export function splitTrailingBlurs<T extends { type: string }>(
   return { body: passes.slice(0, i), trailing: passes.slice(i) }
 }
 
+/**
+ * True when the whole pass list can be baked into the layer's own silhouette raster.
+ *
+ * The raster bakes torn edge + feather into the layer's box, so it may only be used when
+ * EVERY pass is one the raster knows (torn edge / feather / layer blur), at least one edge
+ * pass is actually present (nothing to bake otherwise), and every layer blur comes AFTER
+ * the last edge pass — the legacy order. A blur before an edge pass would come out the wrong
+ * way round, since the raster applies the edges first by construction.
+ */
+export function rasterablePasses(passes: readonly { type: string }[]): boolean {
+  let lastEdge = -1
+  for (let i = 0; i < passes.length; i++) {
+    const t = passes[i]!.type
+    if (t === 'torn_edge' || t === 'feather') lastEdge = i
+    else if (t !== 'layer_blur') return false
+  }
+  if (lastEdge < 0) return false
+  const firstBlur = passes.findIndex(e => e.type === 'layer_blur')
+  return firstBlur === -1 || firstBlur > lastEdge
+}
+
 /** Insert a new effect. A pinned kind lands at its canonical position and is refused if
  *  already present; an orderable kind is appended after the last orderable entry, which
  *  keeps it before drop shadow. */
@@ -242,7 +272,9 @@ export function removeEffect(stack: EffectInstance[], id: string): EffectInstanc
 export function duplicateEffect(stack: EffectInstance[], id: string): EffectInstance[] {
   const i = stack.findIndex(e => e.id === id)
   if (i === -1 || isPinnedKind(stack[i]!.type)) return stack
-  const copy = { ...stack[i]!, id: newEffectId() }
+  // Deep clone for the same reason `defaultsFor` does: a shallow copy would share the
+  // original's nested dials (a gradient map's `stops`) with its duplicate.
+  const copy = { ...(JSON.parse(JSON.stringify(stack[i]!)) as EffectInstance), id: newEffectId() }
   return [...stack.slice(0, i + 1), copy, ...stack.slice(i + 1)]
 }
 

@@ -211,7 +211,7 @@ export {
 } from '~/lib/compositor/paint'
 import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/paint'
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
-import { effectStackOf, orderablePasses, pinnedEffect, splitTrailingBlurs } from '~/lib/compositor/effectStack'
+import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTrailingBlurs } from '~/lib/compositor/effectStack'
 
 // Layer effects (Figma-style) live in ~/lib/compositor/effectStack, which owns the whole
 // vocabulary (kinds, canonical order, the read-through that turns any layer into an ordered
@@ -1698,11 +1698,7 @@ function paintLayer(
   // ride along ONLY when every blur comes after every edge pass, which is the legacy order —
   // otherwise the raster would apply them the wrong way round. Such a blur is trailing, so it is
   // applied at the stamp, not on the raster.
-  const lastEdgePass = passes.reduce((m, e, i) => (e.type === 'torn_edge' || e.type === 'feather' ? i : m), -1)
-  const firstBlurPass = passes.findIndex(e => e.type === 'layer_blur')
-  const rasterablePasses = passes.every(e => e.type === 'torn_edge' || e.type === 'feather' || e.type === 'layer_blur')
-    && lastEdgePass >= 0
-    && (firstBlurPass === -1 || firstBlurPass > lastEdgePass)
+  const rasterable = rasterablePasses(passes)
   // Content layers with a depth map only — nothing else has one to drive the blur.
   // An uploaded image keys depth by its `filename`; a WIRED layer keys it by the
   // host-supplied `depthKey` (the upstream `/view` URL). Both resolve through the
@@ -1727,7 +1723,7 @@ function paintLayer(
   // Silhouette raster cache (see `_silhouetteCache`): only cases whose LOCAL BOX is a
   // faithful, self-contained render of the layer qualify — everything else keeps the
   // old full-canvas path, byte-identical.
-  const silhouetteCacheable = rasterablePasses
+  const silhouetteCacheable = rasterable
     && layer.kind !== 'wired'                                       // graph pixels change under us — no content signature
     && !cp && !dof                                                  // corner-pin / DOF have their own offscreen flows
     && !(layer.kind === 'text' && layer.expressive)                 // expressive layout places words outside localLayerBox

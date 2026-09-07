@@ -3,7 +3,7 @@ import {
   EFFECT_ORDER, EFFECT_LABELS, PINNED_KINDS, ORDERABLE_KINDS,
   effectStackOf, writeStackToLayer, createEffect, newEffectId, isPinnedKind,
   addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder,
-  orderablePasses, pinnedEffect, splitTrailingBlurs, type EffectInstance,
+  orderablePasses, pinnedEffect, splitTrailingBlurs, rasterablePasses, type EffectInstance,
 } from '~/lib/compositor/effectStack'
 import { DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
 import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
@@ -95,6 +95,31 @@ describe('effectStackOf: new shape', () => {
       { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
     ] })
     expect(stack.map(e => e.type)).toEqual(['adjust', 'grain'])
+    // Every id is MINTED here, including the one that arrived already stamped: keeping 'a'
+    // would let it collide with a minted `fx:<type>:<ordinal>` elsewhere in the same list.
+    expect(stack.map(e => e.id)).toEqual(['fx:adjust:0', 'fx:grain:0'])
+  })
+  it('reads a missing `visible` as visible in BOTH shapes', () => {
+    const newShape = effectStackOf({ effects: [{ id: 'a', type: 'grain', amount: 0.2, size: 2 }] })
+    const oldShape = effectStackOf({ effects: [{ type: 'grain', amount: 0.2, size: 2 }] })
+    expect(newShape[0]!.visible).toBe(true)
+    expect(oldShape[0]!.visible).toBe(true)
+  })
+})
+
+describe('nested defaults are never shared between instances', () => {
+  it('two gradient maps get their own stops array, and so does a duplicate', () => {
+    const a = createEffect('gradientMap') as any
+    const b = createEffect('gradientMap') as any
+    expect(a.stops).not.toBe(b.stops)
+    a.stops[0].color = '#ff0000'
+    expect(b.stops[0].color).not.toBe('#ff0000')
+
+    const stack = [a as EffectInstance]
+    const dup = duplicateEffect(stack, a.id)
+    expect((dup[1] as any).stops).not.toBe(a.stops)
+    ;(dup[1] as any).stops[1].color = '#00ff00'
+    expect(a.stops[1].color).not.toBe('#00ff00')
   })
 })
 
@@ -182,5 +207,27 @@ describe('splitTrailingBlurs', () => {
     const { body, trailing } = splitTrailingBlurs(passes)
     expect(body).toEqual([passes[0]])
     expect(trailing).toEqual([passes[1], passes[2]])
+  })
+})
+
+describe('rasterablePasses', () => {
+  const t = (types: string[]) => types.map(type => ({ type }))
+  it('refuses an empty list — there is no edge to bake', () => {
+    expect(rasterablePasses([])).toBe(false)
+  })
+  it('accepts a lone torn edge', () => {
+    expect(rasterablePasses(t(['torn_edge']))).toBe(true)
+  })
+  it('accepts blurs that come after every edge pass — the legacy order', () => {
+    expect(rasterablePasses(t(['torn_edge', 'feather', 'layer_blur']))).toBe(true)
+  })
+  it('refuses a blur BEFORE an edge pass — the raster would apply them the wrong way round', () => {
+    expect(rasterablePasses(t(['layer_blur', 'torn_edge']))).toBe(false)
+  })
+  it('refuses any pass the raster does not know', () => {
+    expect(rasterablePasses(t(['torn_edge', 'grain']))).toBe(false)
+  })
+  it('refuses a blur with no edge pass at all', () => {
+    expect(rasterablePasses(t(['layer_blur']))).toBe(false)
   })
 })

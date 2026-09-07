@@ -78,7 +78,7 @@ test.describe('Frame per-layer effect stack', () => {
       ls[0].effects = [
         { id: 'e1', type: 'adjust', brightness: 1.4, contrast: 1, saturation: 1, hue: 0, visible: true },
         { id: 'e2', type: 'grain', amount: 0.5, size: 3, visible: true },
-        { id: 'e3', type: 'torn_edge', style: 'ragged', amount: 14, roughness: 0.5, grain: 2, grainTexture: 0.3, lipWidth: 3, lipVariation: 0.4, lipColor: '#f7f3ea', seed: 7, visible: true },
+        { id: 'e3', type: 'torn_edge', style: 'ripped', amount: 14, roughness: 0.5, grain: 2, grainTexture: 0.3, lipWidth: 3, lipVariation: 0.4, lipColor: '#f7f3ea', seed: 7, visible: true },
         { id: 'e4', type: 'feather', amount: 0.18, curve: 'smooth', visible: true },
         { id: 'e5', type: 'drop_shadow', color: 'rgba(0,0,0,0.4)', x: 0.01, y: 0.01, blur: 0.02, visible: true },
       ]
@@ -97,7 +97,7 @@ test.describe('Frame per-layer effect stack', () => {
         { type: 'grain', amount: 0.5, size: 3, visible: true },
         { type: 'adjust', brightness: 1.4, contrast: 1, saturation: 1, hue: 0, visible: true },
       ]
-      ls[0].tornEdge = { style: 'ragged', amount: 14, roughness: 0.5, grain: 2, grainTexture: 0.3, lipWidth: 3, lipVariation: 0.4, lipColor: '#f7f3ea', seed: 7 }
+      ls[0].tornEdge = { style: 'ripped', amount: 14, roughness: 0.5, grain: 2, grainTexture: 0.3, lipWidth: 3, lipVariation: 0.4, lipColor: '#f7f3ea', seed: 7 }
       ls[0].feather = { amount: 0.18, curve: 'smooth' }
       ;(window as any).__compositorSetLayers(ls)
     })
@@ -180,6 +180,31 @@ test.describe('Frame per-layer effect stack', () => {
     await bloomRow.getByRole('button', { name: 'Remove effect' }).click()
     await expect(bloomRow).toHaveCount(0)
     expect(await kindsOf(page)).toEqual(['grain'])
+  })
+
+  // Delete used to fall straight through to the layer handler, so pressing it while tuning an
+  // effect threw away the whole layer. The layer must survive, and only the effect go.
+  test('Backspace with an effect row selected removes the effect, not its layer', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [
+        { id: 'a', type: 'adjust', brightness: 1.2, contrast: 1, saturation: 1, hue: 0, visible: true },
+        { id: 'g', type: 'grain', amount: 0.2, size: 2, visible: true },
+      ]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    await expandLayerEffects(page)
+    const layerCount = () => page.evaluate(() => (window as any).__compositorLayers().length)
+    expect(await layerCount()).toBe(1)
+
+    await page.locator('[data-testid="effect-row"][data-effect-kind="grain"]').click()
+    await expect(page.getByTestId('effect-breadcrumb')).toBeVisible()
+    await page.keyboard.press('Backspace')
+
+    await expect.poll(() => kindsOf(page)).toEqual(['adjust'])
+    expect(await layerCount()).toBe(1)
   })
 
   test('a pinned effect cannot be dragged out of position', async ({ page }) => {

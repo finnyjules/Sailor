@@ -5,6 +5,9 @@
 // is legal (a pinned row refuses). The drop stops propagating so it never also reaches the
 // layer list's own drop handler, and `dragEnd` fires even on an aborted drag so the modal
 // can clear its drag state instead of leaving it armed for the next, unrelated drop.
+// The row is keyboard-reachable (role/tabindex, Enter and Space select), and the hover-only
+// buttons reveal on `group-focus-within` too — otherwise a keyboard user could focus a row
+// whose actions stay invisible.
 import { Eye, EyeOff, Copy, Trash2, Pin } from 'lucide-vue-next'
 import { EFFECT_LABELS, type EffectInstance } from '~/lib/compositor/effectStack'
 
@@ -48,7 +51,12 @@ function onDragStart(ev: DragEvent, layerId: string, effectId: string) {
       'border-l border-white/10',
     ]"
     :draggable="!pinned"
+    role="button"
+    tabindex="0"
+    :aria-label="EFFECT_LABELS[effect.type]"
     @click.stop="emit('select', layerId, effect.id)"
+    @keydown.enter.prevent="emit('select', layerId, effect.id)"
+    @keydown.space.prevent="emit('select', layerId, effect.id)"
     @dragstart="onDragStart($event, layerId, effect.id)"
     @dragend="emit('dragEnd')"
     @dragover.prevent
@@ -59,16 +67,16 @@ function onDragStart(ev: DragEvent, layerId: string, effectId: string) {
     <span v-else class="w-3 shrink-0" />
     <span class="text-xs truncate flex-1 text-white/70">{{ EFFECT_LABELS[effect.type] }}</span>
     <button type="button" class="shrink-0 text-white/40 hover:text-white/80"
-      :class="effect.visible ? 'opacity-0 group-hover/fx:opacity-100' : 'opacity-100'"
+      :class="effect.visible ? 'opacity-0 group-hover/fx:opacity-100 group-focus-within/fx:opacity-100' : 'opacity-100'"
       :aria-label="effect.visible ? 'Hide effect' : 'Show effect'"
       @click.stop="emit('toggleVisible', layerId, effect.id)">
       <component :is="effect.visible ? Eye : EyeOff" class="size-3.5" />
     </button>
-    <button v-if="!pinned" type="button" class="shrink-0 opacity-0 group-hover/fx:opacity-100 text-white/40 hover:text-white/80"
+    <button v-if="!pinned" type="button" class="shrink-0 opacity-0 group-hover/fx:opacity-100 group-focus-within/fx:opacity-100 text-white/40 hover:text-white/80"
       aria-label="Duplicate effect" @click.stop="emit('duplicate', layerId, effect.id)">
       <Copy class="size-3.5" />
     </button>
-    <button type="button" class="shrink-0 opacity-0 group-hover/fx:opacity-100 text-white/40 hover:text-white/80"
+    <button type="button" class="shrink-0 opacity-0 group-hover/fx:opacity-100 group-focus-within/fx:opacity-100 text-white/40 hover:text-white/80"
       aria-label="Remove effect" @click.stop="emit('remove', layerId, effect.id)">
       <Trash2 class="size-3.5" />
     </button>

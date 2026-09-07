@@ -1709,16 +1709,20 @@ onMounted(() => {
   // document's layers, so a spec can seed a legacy-shaped layer without a save/reload cycle.
   // `commit` is the editor's own whole-array writer, so the normal write-through and
   // reactivity paths run exactly as they do for a user edit.
-  ;(window as any).__compositorLayers = () => JSON.parse(JSON.stringify(localLayers.value))
-  ;(window as any).__compositorSetLayers = (next: any[]) => { commit(next as any) }
+  if (import.meta.dev) {
+    ;(window as any).__compositorLayers = () => JSON.parse(JSON.stringify(localLayers.value))
+    ;(window as any).__compositorSetLayers = (next: any[]) => { commit(next as any) }
+  }
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true)
   window.removeEventListener('keyup', onKeyup, true)
   window.removeEventListener('blur', clearPan)
   document.removeEventListener('visibilitychange', onVisibility)
-  delete (window as any).__compositorLayers
-  delete (window as any).__compositorSetLayers
+  if (import.meta.dev) {
+    delete (window as any).__compositorLayers
+    delete (window as any).__compositorSetLayers
+  }
 })
 
 // ── Selection ───────────────────────────────────────────────────────────────
@@ -1953,10 +1957,21 @@ function pickFxKind(kind: EffectKind) {
   if (fxMenuLayerId.value) addLayerEffect(fxMenuLayerId.value, kind)
   closeFxMenu()
 }
-/** A pinned kind already on the layer cannot be added twice; orderable kinds always can. */
+/** A pinned kind already on the layer cannot be added twice; orderable kinds always can.
+ *  Depth of field is the one kind the LAYER can refuse: without a depth map it has nothing
+ *  to defocus against, so offering it would add a dead effect. */
 function fxKindDisabled(kind: EffectKind): boolean {
   const l = fxMenuLayerId.value ? layerById(fxMenuLayerId.value) : null
-  return !!l && isPinnedKind(kind) && layerStack(l).some(e => e.type === kind)
+  if (!l) return false
+  if (kind === 'dof' && !localDepthSource(l)) return true
+  return isPinnedKind(kind) && layerStack(l).some(e => e.type === kind)
+}
+/** Why a greyed menu entry is greyed — only depth of field has a reason worth spelling out. */
+function fxKindDisabledTitle(kind: EffectKind): string | undefined {
+  const l = fxMenuLayerId.value ? layerById(fxMenuLayerId.value) : null
+  return kind === 'dof' && l && !localDepthSource(l)
+    ? 'Depth of field needs an image with a depth map'
+    : undefined
 }
 onBeforeUnmount(closeFxMenu)
 
@@ -5293,10 +5308,21 @@ function handleKeydown(e: KeyboardEvent) {
     emit('close')
     return
   }
-  // Don't delete the target layer while painting a generative-fill region.
-  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedLocalId.value && !typing && !genActive.value && !smartActive.value && !brush.active.value) {
-    e.preventDefault()
-    deleteLocal(selectedLocalId.value)
+  if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !genActive.value && !smartActive.value && !brush.active.value) {
+    // An effect row is a pseudo-child of its layer, so while one is selected Delete must
+    // remove THAT EFFECT and stop — reaching `deleteLocal` below would throw away the whole
+    // layer the user was tuning.
+    const sel = selectedEffect.value
+    if (sel) {
+      e.preventDefault()
+      removeLayerEffect(sel.layerId, sel.effectId)
+      return
+    }
+    // Don't delete the target layer while painting a generative-fill region.
+    if (selectedLocalId.value) {
+      e.preventDefault()
+      deleteLocal(selectedLocalId.value)
+    }
   }
 }
 // ── Paste an image into the frame ───────────────────────────────────────────
@@ -8449,7 +8475,8 @@ onUnmounted(() => {
         :style="{ top: `${fxMenuPos.top}px`, left: `${fxMenuPos.left}px` }" @pointerdown.stop>
         <button v-for="kind in EFFECT_ORDER" :key="kind" type="button"
           data-testid="add-effect-item" :data-kind="kind" :disabled="fxKindDisabled(kind)"
-          class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+          :title="fxKindDisabledTitle(kind)"
+          class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-white/80 cursor-pointer"
           @click.stop="pickFxKind(kind)">{{ EFFECT_LABELS[kind] }}</button>
       </div>
     </Teleport>
