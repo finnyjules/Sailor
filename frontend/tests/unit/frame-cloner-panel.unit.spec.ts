@@ -134,6 +134,45 @@ describe('Vary copy', () => {
   })
 })
 
+describe('each numeric vary field clamps to its own declared range', () => {
+  // A review found the clamps were correct but had ZERO regression protection —
+  // every existing test value sits comfortably in range, so widening or dropping
+  // a bound passed silently. Each case here drives a value past both ends and
+  // reads the bound off the input's OWN min/max attributes, so the clamp and the
+  // DOM constraint cannot drift apart.
+  const CASES = [
+    { name: 'Seed', hook: 'vary-seed', key: 'varySeed', extra: { varyMode: 'random' as const }, whole: true },
+    { name: 'Centre', hook: 'vary-center', key: 'varyFalloffCenter', extra: {}, whole: false },
+    { name: 'Reach', hook: 'vary-reach', key: 'varyFalloffRadius', extra: {}, whole: false },
+    { name: 'Colour strength', hook: 'vary-strength', key: 'varyColorStrength', extra: { varyColor: true }, whole: false },
+  ]
+
+  for (const c of CASES) {
+    it(`${c.name} clamps to its input's own min and max`, async () => {
+      const w = mountWith({ varyMode: 'falloff', ...c.extra })
+      const input = w.find(`[data-test="${c.hook}"] input`)
+      const el = input.element as HTMLInputElement
+      const min = Number(el.min)
+      const max = Number(el.max)
+      expect(Number.isFinite(min) && Number.isFinite(max)).toBe(true)
+
+      el.value = String(max + 1000)
+      await input.trigger('input')
+      expect((lastEmit(w) as Record<string, number>)[c.key]).toBe(max)
+
+      el.value = String(min - 1000)
+      await input.trigger('input')
+      expect((lastEmit(w) as Record<string, number>)[c.key]).toBe(min)
+
+      // A whole-number field must round; a fractional one must not.
+      el.value = String(min + (max - min) / 3)
+      await input.trigger('input')
+      const got = (lastEmit(w) as Record<string, number>)[c.key]!
+      expect(Number.isInteger(got)).toBe(c.whole)
+    })
+  }
+})
+
 describe('each numeric vary field writes to its own key', () => {
   // Two review rounds have already found a copy-paste swap in this block once
   // (the reviewer made the Centre input write varyFalloffRadius, and the Colour
