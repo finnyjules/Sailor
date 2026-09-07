@@ -243,6 +243,7 @@ export function characterStatus(c: Pick<CharacterRecord, 'name' | 'loraName'>, j
 const jobs = ref<TrainingJobLike[]>([])
 const pollingEnabled = ref(false)
 let pollHandle: ReturnType<typeof setInterval> | null = null
+let jobsFetchedOnce = false
 
 async function refreshJobs(): Promise<void> {
   try {
@@ -269,7 +270,12 @@ function stopPolling(): void {
  * set `pollingEnabled.value = true` (e.g. the character panel while open).
  */
 export function useTrainingJobs() {
-  if (typeof window !== 'undefined') void refreshJobs()
+  // Guard set before the fetch: callers invoke this per-render (sheetCostLabel),
+  // and an unguarded eager fetch loops render → jobs.value → render.
+  if (!jobsFetchedOnce && typeof window !== 'undefined') {
+    jobsFetchedOnce = true
+    void refreshJobs()
+  }
 
   function setPolling(enabled: boolean): void {
     pollingEnabled.value = enabled

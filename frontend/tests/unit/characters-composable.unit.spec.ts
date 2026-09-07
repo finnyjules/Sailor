@@ -312,6 +312,21 @@ describe('useTrainingJobs', () => {
     expect(jobs.value[0]?.displayName).toBe('Vera')
   })
 
+  it('eager fetch fires once across repeated calls — per-render callers must not loop', async () => {
+    // sheetCostLabel() calls useTrainingJobs() from templates: every render
+    // invokes it again. An unguarded eager fetch mutates jobs.value → re-render
+    // → fetch again, flooding /api/training-queue.
+    vi.stubGlobal('window', {})
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ jobs: [] }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const { useTrainingJobs } = await import('~/composables/useCharacters')
+    useTrainingJobs()
+    useTrainingJobs()
+    useTrainingJobs()
+    await Promise.resolve()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('refreshJobs is offline-safe', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
     const { useTrainingJobs } = await import('~/composables/useCharacters')
