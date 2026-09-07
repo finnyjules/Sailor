@@ -298,3 +298,97 @@ describe('the vary mix reaches the fragment shader, in the right place', () => {
     expect(String(a.customProgramCacheKey())).not.toContain('varyTint')
   })
 })
+
+// ── Every identifier the injection USES is DECLARED ──────────────────────────
+// The Critical this guard exists for: `applyVaryTint` injected the mix BODY but no
+// PARS block, so `uVaryStrength` was used and never declared. Every assertion above
+// passed — the mix line was present, in the right order, with the right operands —
+// because they all check the ORDER of source text and nothing ever compiled it. The
+// browser did: `ERROR: 0:1581: 'uVaryStrength' : undeclared identifier`, and the object
+// vanished for all seven tinted types.
+//
+// So: diff the tinted material's resolved fragment source against the SAME material
+// built untinted, take the lines the injection added, and require every identifier
+// they reference to be declared somewhere in the resolved source (or be a GLSL
+// builtin). Static, cheap, and it fails on exactly this defect — including for any
+// FUTURE uniform or varying a later edit adds to the injected body.
+
+/** GLSL keywords, types and builtin functions the injected lines may reference
+ *  without a declaration of their own. Deliberately short: it only has to cover
+ *  what our own injection uses, so an unexpected name fails loudly. */
+const GLSL_BUILTINS = new Set([
+  'void', 'bool', 'int', 'uint', 'float', 'true', 'false',
+  'vec2', 'vec3', 'vec4', 'ivec2', 'ivec3', 'ivec4', 'bvec2', 'bvec3', 'bvec4',
+  'mat2', 'mat3', 'mat4', 'sampler2D', 'samplerCube',
+  'uniform', 'varying', 'attribute', 'in', 'out', 'inout', 'const', 'flat',
+  'lowp', 'mediump', 'highp', 'precision', 'struct', 'return', 'if', 'else',
+  'for', 'while', 'break', 'continue', 'discard', 'define', 'include',
+  'abs', 'clamp', 'cos', 'sin', 'tan', 'dot', 'cross', 'floor', 'fract', 'exp',
+  'log', 'log2', 'exp2', 'length', 'max', 'min', 'mix', 'mod', 'normalize',
+  'pow', 'radians', 'degrees', 'sign', 'smoothstep', 'sqrt', 'step', 'fwidth',
+  'texture2D', 'texture', 'textureCube', 'gl_FragColor', 'gl_FragCoord', 'gl_Position',
+])
+
+const GLSL_TYPE = '(?:void|bool|int|uint|float|vec[234]|ivec[234]|bvec[234]|mat[234]|sampler2D|samplerCube)'
+
+/** Names the source declares: qualified globals, local/parameter declarations,
+ *  function names, struct names and preprocessor defines. */
+function declaredNames(src: string): Set<string> {
+  const names = new Set<string>()
+  const add = (re: RegExp) => { for (const m of src.matchAll(re)) if (m[1]) names.add(m[1]) }
+  // uniform / varying / attribute / in / out / const  <type>  <name>
+  add(new RegExp(`\\b(?:uniform|varying|attribute|in|out|const)\\s+(?:lowp|mediump|highp)?\\s*(?:${GLSL_TYPE}|\\w+)\\s+(\\w+)`, 'g'))
+  // locals, parameters and function declarations: <type> <name>
+  add(new RegExp(`\\b${GLSL_TYPE}\\s+(\\w+)`, 'g'))
+  add(/\bstruct\s+(\w+)/g)
+  add(/#define\s+(\w+)/g)
+  // struct-typed declarations three emits, e.g. `IncidentLight directLight;`
+  add(/\b([A-Z]\w+)\s+\w+\s*[;=(]/g)
+  return names
+}
+
+/** Identifiers a line references — field/swizzle accesses (`.rgb`) excluded. */
+function usedNames(line: string): string[] {
+  return [...line.matchAll(/(^|[^\w.])([A-Za-z_]\w*)/g)].map(m => m[2]!)
+}
+
+describe('the injected GLSL declares everything it uses (the shader-compile Critical)', () => {
+  for (const type of TINTED_TYPES) {
+    it(`${type}: no undeclared identifier in the lines applyVaryTint adds`, () => {
+      const base = materialFor({ ...MAT, type } as SceneMaterial, plain())
+      const tint = materialFor({ ...MAT, type } as SceneMaterial, tinted())
+      const baseLines = new Set(compiledFragment(base).src.split('\n').map(l => l.trim()))
+      const src = compiledFragment(tint).src
+      const added = src.split('\n').map(l => l.trim()).filter(l => l && !baseLines.has(l))
+
+      // The diff must actually contain our injection, or this test would pass vacuously
+      // on a material where the tint never landed at all.
+      expect(added.join('\n'), 'the tint injected nothing').toContain(MIX_LINE)
+
+      const declared = declaredNames(src)
+      const undeclared = [...new Set(added.flatMap(usedNames))]
+        .filter(n => !GLSL_BUILTINS.has(n) && !declared.has(n))
+      expect(undeclared, `undeclared in ${type}: ${undeclared.join(', ')}`).toEqual([])
+    })
+  }
+
+  it('the strength uniform is declared at GLOBAL scope, above the mix that reads it', () => {
+    const src = compiledFragment(materialFor(MAT, tinted())).src
+    const decl = src.indexOf('uniform float uVaryStrength;')
+    expect(decl, 'uVaryStrength never declared').toBeGreaterThan(-1)
+    expect(decl).toBeLessThan(src.indexOf(MIX_LINE))
+    // Not swallowed inside main() — a uniform declaration there would not compile.
+    expect(decl).toBeLessThan(src.indexOf('void main()'))
+  })
+
+  it('the declaration survives applyScreen, which consumes the pars anchors first', () => {
+    // applyScreen replaces `#include <uv_pars_fragment>` before applyVaryTint runs, and
+    // fresnel/holographic replace `#include <common>`. A declaration anchored on either
+    // would silently vanish (`String.replace` with a missing needle is a no-op) — the
+    // exact failure mode this fix avoids by prepending.
+    const mat = { ...MAT, type: 'fresnel', screen: { pattern: 'dots' } } as SceneMaterial
+    const src = compiledFragment(materialFor(mat, tinted())).src
+    expect(src).toContain('uniform float uVaryStrength;')
+    expect(src.indexOf('uniform float uVaryStrength;')).toBeLessThan(src.indexOf(MIX_LINE))
+  })
+})

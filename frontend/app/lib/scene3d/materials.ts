@@ -1251,6 +1251,23 @@ const VARY_TINT_FRAG_BODY = /* glsl */ `vec3 varyBase = diffuseColor.rgb;
 #include <color_fragment>
 diffuseColor.rgb = mix( varyBase, vColor.rgb, uVaryStrength );`
 
+// The declaration for the uniform the body above reads. PREPENDED to the fragment source
+// rather than injected at a chunk anchor, because by the time this runs every anchor a
+// declaration could reasonably use has already been consumed by an injection that ran
+// earlier in the chain: `applyVaryTint` calls `prev` FIRST, so fresnel and holographic have
+// already taken `#include <common>`, and `applyScreen` has already taken
+// `#include <uv_pars_fragment>` (its own PARS site). A `.replace` whose needle is gone is a
+// SILENT no-op — that is exactly how the missing declaration shipped green — so the safe
+// site is the one no injection can consume: the top of the string. Three builds its
+// `#version` / precision / `#define` prefix separately in WebGLProgram and concatenates it
+// ahead of `shader.fragmentShader`, so a bare global declaration here still lands after the
+// version directive, and it sits above the `#define STANDARD` / `#define TOON` / … first
+// line of every ShaderLib fragment without disturbing it (a uniform declaration depends on
+// no define). Valid for all seven tinted types — standard, glass, phong, toon, matcap,
+// fresnel, holographic — because it depends on nothing in their sources at all.
+const VARY_TINT_FRAG_PARS = /* glsl */ `uniform float uVaryStrength;
+`
+
 /** Cloner Vary per-copy colour: chains a `<color_fragment>` mix onto whatever
  *  `onBeforeCompile` the material already carries. Modelled on `applyScreen` above,
  *  including the eager cache-key snapshot — read that function's comment.
@@ -1281,7 +1298,7 @@ export function applyVaryTint(m: THREE.Material, varyStrength?: number): void {
     // both of those blocks read `diffuseColor` AFTER this mix has written it.
     prev.call(m, shader, renderer)
     Object.assign(shader.uniforms, u)
-    shader.fragmentShader = shader.fragmentShader
+    shader.fragmentShader = VARY_TINT_FRAG_PARS + shader.fragmentShader
       .replace('#include <color_fragment>', VARY_TINT_FRAG_BODY)
   }
   m.customProgramCacheKey = () => `${baseKey}|varyTint`
