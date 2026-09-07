@@ -7268,7 +7268,8 @@ onUnmounted(() => {
                 :model-value="blueprintParams.majorWidth"
                 @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { majorWidth: v })" />
               <div class="panel-label mt-1">Origin &amp; fan</div>
-              <StudioSelect label="Corner" :options="BLUEPRINT_CORNERS as any"
+              <StudioSelect label="Origin" :options="BLUEPRINT_CORNERS as any"
+                :option-labels="['Auto', 'Bottom left', 'Bottom right', 'Top right', 'Top left', 'Center']"
                 :model-value="blueprintParams.corner" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { corner: v })" />
               <StudioSlider label="Origin X" :min="BLUEPRINT_LIMITS.originX[0]" :max="BLUEPRINT_LIMITS.originX[1]" :step="0.01" :bindable="false"
                 :model-value="blueprintParams.originX"
@@ -7314,13 +7315,13 @@ onUnmounted(() => {
                 @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { dashScale: v })" />
               <!-- Line style per type: a continuous line or a dashed one. -->
               <div class="panel-label mt-1">Line style</div>
-              <StudioSelect label="Grid" :options="BLUEPRINT_DASH as any"
+              <StudioSelect label="Grid" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
                 :model-value="blueprintParams.gridDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { gridDash: v })" />
-              <StudioSelect label="Spokes" :options="BLUEPRINT_DASH as any"
+              <StudioSelect label="Spokes" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
                 :model-value="blueprintParams.spokeDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { spokeDash: v })" />
-              <StudioSelect label="Arcs" :options="BLUEPRINT_DASH as any"
+              <StudioSelect label="Arcs" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
                 :model-value="blueprintParams.arcDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { arcDash: v })" />
-              <StudioSelect label="Ticks" :options="BLUEPRINT_DASH as any"
+              <StudioSelect label="Ticks" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
                 :model-value="blueprintParams.tickDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { tickDash: v })" />
               <!-- Three role inks: paper (ground), ink (lines/labels), inkDim (minor grid). -->
               <div class="panel-label mt-1">Inks</div>
