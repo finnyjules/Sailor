@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { setShaderFxCatalog } from '~/lib/shaderfx/catalogStore'
 import { isGlassLayer } from '~/composables/useCompositorLayers'
-import type { RectLayer } from '~/composables/useCompositorLayers'
+import type { RectLayer, TextLayer } from '~/composables/useCompositorLayers'
 import type { Fill } from '~/lib/spacetype/fillTile'
 
 const CATALOG = { effects: [
@@ -28,6 +28,13 @@ function rect(fill: Fill | string): RectLayer {
   } as unknown as RectLayer
 }
 
+function text(color: Fill | string): TextLayer {
+  return {
+    id: 't1', kind: 'text', x: 0, y: 0, w: 10, h: 10, opacity: 1,
+    text: 'Hi', color, strokeColor: 'none',
+  } as unknown as TextLayer
+}
+
 describe('isGlassLayer', () => {
   beforeAll(() => setShaderFxCatalog(CATALOG))
 
@@ -45,5 +52,9 @@ describe('isGlassLayer', () => {
 
   it('false for a non-shader fill', () => {
     expect(isGlassLayer(rect('#ff0000'))).toBe(false)
+  })
+
+  it('false for a text layer whose .color is a backdrop-reading shader fill — text has no .fill slot', () => {
+    expect(isGlassLayer(text(shaderFill('liquify', { readsBackdrop: true })))).toBe(false)
   })
 })

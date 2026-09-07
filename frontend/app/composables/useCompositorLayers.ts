@@ -3054,14 +3054,20 @@ function primaryFillOf(layer: LocalLayer): Paint | undefined {
   return layerPaints(layer)[0]
 }
 
-/** True iff `layer`'s primary fill is a shader that both DECLARES it reads the
- *  compositor backdrop (`readsBackdrop === true`) and whose GLSL actually samples an
- *  input texture (`effectReadsInput`) — a purely generative effect can set
- *  `readsBackdrop` without it meaning anything, so both must hold. Backs the "glass
- *  lens" treatment: only a layer meeting this counts as one for render-order/caching
- *  purposes elsewhere. */
+/** True iff `layer`'s `.fill` slot SPECIFICALLY — not `primaryFillOf`, not `.color`/
+ *  `.stroke`/`.tint` — carries a shader that both DECLARES it reads the compositor
+ *  backdrop (`readsBackdrop === true`) and whose GLSL actually samples an input
+ *  texture (`effectReadsInput`) — a purely generative effect can set `readsBackdrop`
+ *  without it meaning anything, so both must hold. Backs the "glass lens" treatment:
+ *  `applyGlassFromLayer` builds its silhouette/stroke ghosts by overriding `.fill`
+ *  (`{...layer, fill:'#fff'}` / `{...layer, fill:'none'}`), which only makes sense
+ *  for kinds whose primary paint IS `.fill` (shapes, brush). Text's primary paint is
+ *  `.color`, so a text layer must never read as glass here even though it can carry
+ *  a backdrop-reading shader in `.color` — that would re-run `applyGlassFromLayer`'s
+ *  `.fill`-based ghosts and double-paint the glyphs on top of the refraction. */
 export function isGlassLayer(layer: LocalLayer): boolean {
-  const fill = primaryFillOf(layer)
+  if (!('fill' in layer)) return false
+  const fill = (layer as { fill?: Paint }).fill
   if (!fill || !isFill(fill) || !fillIsShader(fill)) return false
   const spec = fill.shader
   return !!spec.readsBackdrop && effectReadsInput(spec.effectId)

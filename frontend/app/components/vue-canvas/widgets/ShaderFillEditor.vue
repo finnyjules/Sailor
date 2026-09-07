@@ -68,10 +68,10 @@ const props = withDefaults(defineProps<{
    *  layer" Reads picker below (label + the key to write into `readsLayerKey`, e.g. `'l:<id>'`
    *  — the same cross-source StackKey format CompositorModal's mask-source picker uses, since
    *  `resolveGlassSource` (useCompositorLayers.ts) resolves it through the identical `byKey`
-   *  map as a mask ref). No current caller passes this: FillControl.vue would need a
-   *  pass-through prop and CompositorModal.vue a `maskCandidates`-style list to supply it, and
-   *  neither is in scope here. Left `[]` until wired — the picker below is fully functional but
-   *  renders empty (with its own hint) rather than fabricating a list. */
+   *  map as a mask ref). Wired end-to-end for the Compositor: FillControl.vue passes this prop
+   *  through, and CompositorModal.vue feeds it `glassCandidates` on each glass-capable `.fill`
+   *  slot. Every other host leaves it at the `[]` default — the picker below is fully
+   *  functional but renders empty (with its own hint) rather than fabricating a list. */
   otherLayers?: { key: string; label: string }[]
   /** Glass paint (reading the backdrop or another layer instead of this fill's own pixels)
    *  only exists in the Compositor's per-layer paint path — `isGlassLayer`/`primaryFillOf`

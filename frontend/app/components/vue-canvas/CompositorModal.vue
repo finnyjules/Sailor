@@ -7454,7 +7454,7 @@ onUnmounted(() => {
             <div class="space-y-3">
               <div>
                 <div class="panel-label mb-1.5">Color</div>
-                <FillControl :model-value="(selectedLocal as any).color" allow-reads-backdrop :other-layers="glassCandidates"
+                <FillControl :model-value="(selectedLocal as any).color"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { color: v })" />
               </div>
               <div>
