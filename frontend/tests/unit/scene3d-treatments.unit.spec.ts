@@ -219,3 +219,54 @@ describe('blur ramp fields', () => {
     })
   })
 })
+
+describe('the shared ramp', () => {
+  const KINDS = ['blur', 'glow', 'pixelate', 'fade'] as const
+
+  it('every masked kind backfills all five ramp fields', () => {
+    for (const kind of KINDS) {
+      expect(parseTreatment({ id: `t-${kind}`, kind }), kind).toMatchObject({
+        progressive: false, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
+      })
+    }
+  })
+
+  it('every masked kind keeps stored ramp values', () => {
+    for (const kind of KINDS) {
+      expect(parseTreatment({
+        id: `t-${kind}`, kind,
+        progressive: true, rampSpace: 'frame', rampAngle: 30, rampStart: 0.2, rampEnd: 0.8,
+      }), kind).toMatchObject({
+        progressive: true, rampSpace: 'frame', rampAngle: 30, rampStart: 0.2, rampEnd: 0.8,
+      })
+    }
+  })
+
+  it('validates the ramp the same way for every kind', () => {
+    for (const kind of KINDS) {
+      const t = parseTreatment({
+        id: `t-${kind}`, kind, rampAngle: -90, rampStart: -2, rampEnd: 5,
+        rampSpace: 'sideways', progressive: 'yes',
+      }) as unknown as Record<string, unknown>
+      expect(t.rampAngle, kind).toBe(270)
+      expect(t.rampStart, kind).toBe(0)
+      expect(t.rampEnd, kind).toBe(1)
+      expect(t.rampSpace, kind).toBe('object')
+      expect(t.progressive, kind).toBe(false)
+    }
+  })
+
+  it('createTreatment seeds every masked kind with the ramp defaults', () => {
+    for (const kind of KINDS) {
+      expect(createTreatment(kind), kind).toMatchObject({
+        progressive: false, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
+      })
+    }
+  })
+
+  it('leaves the edge kinds alone', () => {
+    for (const kind of ['rimLight', 'outline', 'xray', 'wireframe'] as const) {
+      expect(parseTreatment({ id: `t-${kind}`, kind }), kind).not.toHaveProperty('progressive')
+    }
+  })
+})
