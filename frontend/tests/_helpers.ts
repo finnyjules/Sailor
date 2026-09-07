@@ -77,3 +77,44 @@ export async function waitForBackend(page: Page) {
     return r?.status() ?? 0
   }, { timeout: 60_000, intervals: [1000, 2000, 3000] }).toBe(200)
 }
+
+/**
+ * A settled data-URL snapshot of the Compositor's stack canvas.
+ *
+ * The stack redraws off a watcher and headless Chromium paints Canvas 2D in software, so a
+ * single fixed delay is a guess. Read until two reads a beat apart agree instead: that is a
+ * longer wait, never a looser assertion.
+ *
+ * Shared, not copied: the effect-stack suite and the stroke-stack suite both compare a
+ * legacy-shaped layer against the new shape pixel for pixel, and two copies of a settle
+ * loop is two places for "settled" to quietly come to mean different things.
+ */
+export async function stackPixels(page: Page): Promise<string> {
+  const read = () => page.evaluate(() => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    return cv ? cv.toDataURL() : ''
+  })
+  let prev = await read()
+  for (let i = 0; i < 24; i++) {
+    await page.waitForTimeout(250)
+    const cur = await read()
+    if (cur && cur === prev) return cur
+    prev = cur
+  }
+  return prev
+}
+
+/** Open a blank project, drop a Compositor node and open its modal, then wait until the
+ *  stack canvas AND the `__compositorSetLayers` seeding hook are both live. */
+export async function openCompositor(page: Page): Promise<void> {
+  await openBlankWorkflow(page)
+  await waitForBackend(page)
+  await dropNode(page, 'Compositor')
+  const nodeId = await page.locator('.vue-flow__node').first().getAttribute('data-id')
+  expect(nodeId).toBeTruthy()
+  await page.evaluate((id) =>
+    window.dispatchEvent(new CustomEvent('sailor:openCompositor', { detail: { nodeId: id } })), nodeId)
+  await page.locator('[data-testid="compositor-stack-canvas"]').waitFor({ state: 'visible', timeout: 10_000 })
+  await expect.poll(() => page.evaluate(() => typeof (window as any).__compositorSetLayers === 'function'),
+    { timeout: 10_000 }).toBe(true)
+}

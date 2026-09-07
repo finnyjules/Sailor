@@ -271,6 +271,31 @@ describe('silhouetteInkOverhangPx', () => {
     expect(silhouetteInkOverhangPx(ink({ strokeAlign: 'inside', strokePx: 20 }))).toBe(0)
   })
 
+  // A layer's strokes are a LIST. `strokeAlign`/`strokePx` describe one stroke and
+  // cannot express "a hairline on the edge plus a fat band pushed 20px out", so the
+  // composable resolves the stack's furthest reach (outsideStrokePadPx) and hands it
+  // over. Getting this wrong bakes a slightly wrong SILHOUETTE for the torn-edge and
+  // feather effects — a wrong shape, never an error, which is why it needs a test.
+  it('uses the stack\'s furthest reach when the caller supplies one', () => {
+    // Widest reach wins outright over the single (align, width) pair, in both directions.
+    expect(silhouetteInkOverhangPx(ink({ strokeAlign: 'center', strokePx: 20, strokeReachPx: 42 }))).toBe(42)
+    expect(silhouetteInkOverhangPx(ink({ strokeAlign: 'outside', strokePx: 20, strokeReachPx: 3 }))).toBe(3)
+    // A stack with nothing reaching past the edge (all inside-aligned) pads by nothing.
+    expect(silhouetteInkOverhangPx(ink({ strokeAlign: 'center', strokePx: 20, strokeReachPx: 0 }))).toBe(0)
+  })
+
+  it('ignores a non-finite or negative reach rather than poisoning the raster size', () => {
+    expect(silhouetteInkOverhangPx(ink({ strokeAlign: 'center', strokePx: 20, strokeReachPx: NaN }))).toBe(10)
+    expect(silhouetteInkOverhangPx(ink({ strokeAlign: 'outside', strokePx: 20, strokeReachPx: Infinity }))).toBe(20)
+    expect(silhouetteInkOverhangPx(ink({ strokeAlign: 'center', strokePx: 20, strokeReachPx: -5 }))).toBe(0)
+  })
+
+  it('does not let a reach change TEXT or LINE, which have overhang rules of their own', () => {
+    // Text is stroked with strokeText — no path to offset, so a reach means nothing here.
+    expect(silhouetteInkOverhangPx(ink({ kind: 'text', fontPx: 40, strokePx: 6, strokeReachPx: 500 }))).toBe(46)
+    expect(silhouetteInkOverhangPx(ink({ kind: 'line', strokePx: 20, strokeReachPx: 500 }))).toBe(10)
+  })
+
   // drawLayerContent strokes a line with lineCap 'round', so the cap bulges half a
   // stroke width past each endpoint — and localLayerBox gives a line only `w * W`.
   it('a line overhangs by half its width for the round caps, whatever the alignment', () => {

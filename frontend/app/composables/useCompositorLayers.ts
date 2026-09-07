@@ -35,10 +35,10 @@ import {
   hasPaint, resolvePaint, OBJECT_SHADER_FIELD_PX, type ShaderFieldFrameCtx,
 } from '~/lib/paint/resolve'
 import { drawQuadWarp, type Quad } from '~/lib/compositor/warp'
-// Task 1's pure stroke-stack data model — only the join type is consumed here;
-// `StrokeAlign` already exists as a local type in this file (see below), so it
-// is NOT re-imported from there to avoid a second import path for the same idea.
-import type { StrokeJoin } from '~/lib/compositor/strokeStack'
+// Task 1's pure stroke-stack data model. `StrokeAlign` already exists as a local type in
+// this file (see below), so it is NOT re-imported from there to avoid a second import
+// path for the same idea.
+import { strokeStackOf, strokeSupportsStack, type StrokeJoin, type StrokeInstance } from '~/lib/compositor/strokeStack'
 // The repo's one hex-alpha stripper — the same helper the 3D vary path uses before
 // handing a swatch to THREE.Color (see `tintScratch` below).
 import { stripAlpha } from '~/lib/color/convert'
@@ -1275,26 +1275,41 @@ export function localLayerBox(
 }
 
 /**
- * How far an OUTSIDE-aligned stroke reaches beyond `localLayerBox`, in px — the
- * padding a corner-pin (or any other box-sized) offscreen needs so that stroke
- * survives instead of landing entirely off-canvas and getting clipped away (see
- * `strokeAligned`'s 'outside' knockout, which paints the whole 2×width ring
- * starting AT the silhouette edge — none of it is inside the box).
+ * How far the WIDEST-reaching stroke in a layer's stack lands beyond
+ * `localLayerBox`, in px — the padding a corner-pin (or any other box-sized)
+ * offscreen needs so that stroke survives instead of landing off-canvas and
+ * getting clipped away (see `strokeAligned`'s 'outside' knockout, which paints
+ * the whole 2×width ring starting AT the silhouette edge — none of it is inside
+ * the box).
  *
- * 0 for every other case (no stroke, center, inside, or a kind without
- * `strokeAlign` at all) — callers that add this unconditionally to a box's
- * half-extent stay byte-identical to before when it's 0.
+ * Reads the stack, so a layer with several strokes is padded for the one that
+ * reaches furthest, and a stroke pushed out by its `distance` is padded for
+ * where it actually lands rather than where its shape's edge is.
+ *
+ * BEHAVIOUR CHANGE: a CENTRE-aligned stroke used to return 0 and now returns
+ * half a width — which is where its ink genuinely reaches. This only ever makes
+ * an offscreen LARGER, so nothing is clipped that was not clipped before.
+ * Still 0 for no stroke, a zero width, a `line`/`text` layer, and any kind
+ * without a stack at all.
  */
 export function outsideStrokePadPx(layer: LocalLayer, W: number): number {
-  if (layer.kind !== 'rect' && layer.kind !== 'ellipse' && layer.kind !== 'polygon' && layer.kind !== 'star' && layer.kind !== 'path') return 0
-  const l = layer
-  if (!hasPaint(l.stroke) || !(l.strokeWidth > 0)) return 0
-  if (strokeAlignOf(l.strokeAlign) !== 'outside') return 0
-  // A path's strokeWidth is stored in local units AT scale=1 (see PathLayer),
-  // so its px extent also carries the layer's own uniform scale; every other
-  // stroked kind stores strokeWidth already normalized to canvas width.
-  const scale = l.kind === 'path' ? (l.scale ?? 1) : 1
-  return l.strokeWidth * scale * W
+  // `text` is stroked with `strokeText`, which has no offsettable path — its overhang is
+  // the silhouette cache's business (a full em plus the width), not this box pad's.
+  if (!strokeSupportsStack(layer.kind) || layer.kind === 'text') return 0
+  // A path's strokeWidth (and distance) are stored in local units AT scale=1 (see
+  // PathLayer), so their px extent also carries the layer's own uniform scale; every
+  // other stroked kind stores them already normalized to canvas width.
+  const scale = layer.kind === 'path' ? ((layer as PathLayer).scale ?? 1) : 1
+  let pad = 0
+  for (const st of strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])) {
+    if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
+    const d = st.distance ?? 0
+    const align = strokeAlignOf(st.align)
+    // How far this stroke's OUTER edge reaches beyond the silhouette.
+    const reach = align === 'outside' ? d + st.width : align === 'inside' ? d : d + st.width / 2
+    if (reach > pad) pad = reach
+  }
+  return Math.max(0, pad) * scale * W
 }
 
 /**
@@ -1626,22 +1641,38 @@ function silhouetteContentReady(layer: LocalLayer, W: number): boolean {
  *  actually measured, then defers to the pure `silhouettePadPxPure` in silhouetteCache.ts
  *  for the arithmetic (raster margin + ink overhang).
  *
- *  NOT `outsideStrokePadPx`: that answers a narrower question for the corner-pin
- *  offscreen and is 0 for the DEFAULT 'center' alignment, whose ink still reaches half a
- *  stroke width past the box — padding by it alone clipped the outer half of every
- *  default stroke out of the cached raster. `strokeWidth` is guarded (`|| 0`) so a
- *  missing/NaN value can never make `bwD` NaN downstream. */
+ *  The SHAPE kinds hand the pure helper `outsideStrokePadPx` (the stack's furthest reach,
+ *  alignment + distance + a path's scale already folded in) as `strokeReachPx`, so a
+ *  layer with several strokes is padded for the one that actually reaches furthest. Text
+ *  and line keep their own rules — see `silhouetteInkOverhangPx`. `strokeWidth` is
+ *  guarded (`|| 0`) so a missing/NaN value can never make `bwD` NaN downstream. */
 function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { w: number; h: number }): number {
   const l = layer as unknown as { strokeWidth?: number; strokeAlign?: unknown; stroke?: Paint; scale?: number; fontSize?: number; boxH?: number }
   const width = Math.max(0, l.strokeWidth || 0)
   let strokePx = 0
+  let strokeReachPx: number | undefined
   let strokeAlign: StrokeAlign = 'center'
   if (layer.kind === 'text') {
-    strokePx = width * W
+    // Text's overhang is a full em PLUS the outline's width, so what matters here is the
+    // WIDEST stroke in the stack, not how far one reaches. `width` (the legacy field) is
+    // kept in the max so a raster can never come out smaller than it did before the stack
+    // existed — a bigger raster is cheap, a clipped glyph is a visible bug.
+    let widest = 0
+    for (const st of strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])) {
+      if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
+      if (st.width > widest) widest = st.width
+    }
+    strokePx = Math.max(width, widest) * W
   } else if (layer.kind === 'line') {
-    // drawLayerContent floors a line's lineWidth at 1px, so a hairline still caps.
+    // drawLayerContent floors a line's lineWidth at 1px, so a hairline still caps. A line
+    // always strokes (defaulting to white), so this is deliberately NOT gated on paint.
     strokePx = Math.max(1, width * W)
   } else if (layer.kind === 'rect' || layer.kind === 'ellipse' || layer.kind === 'polygon' || layer.kind === 'star' || layer.kind === 'path') {
+    // The stack's own answer for how far its furthest stroke reaches past the silhouette —
+    // alignment, `distance` and a path's `scale` all already folded in. Reading a single
+    // `strokeAlign` here instead would bake the wrong outline for a multi-stroked layer,
+    // and do it SILENTLY: a slightly wrong torn edge, not an error.
+    strokeReachPx = outsideStrokePadPx(layer, W)
     // A path's strokeWidth is stored in local units AT scale=1 (see PathLayer), so its
     // px extent carries the layer's own uniform scale — same correction outsideStrokePadPx makes.
     if (hasPaint(l.stroke)) strokePx = width * (layer.kind === 'path' ? (l.scale ?? 1) : 1) * W
@@ -1663,6 +1694,7 @@ function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { w: numb
     kind: layer.kind,
     strokeAlign,
     strokePx,
+    strokeReachPx,
     fontPx: isText ? Math.max(0, l.fontSize || 0) * W : 0,
     boxHPx: isText ? Math.max(0, l.boxH || 0) * W : 0,
     boxHeightPx: box.h,
@@ -2322,6 +2354,59 @@ export function strokeAligned(ctx: CanvasRenderingContext2D, o: {
   strokeOn(ctx, o.width)
 }
 
+/**
+ * Paint a layer's WHOLE stroke stack over a shape that is already on `ctx` (or handed in
+ * as a `path`). THE single place a stroked kind's outlines are drawn, so rect, ellipse,
+ * polygon, star and path can't drift apart on ordering, visibility or units.
+ *
+ * `widthScale` converts a stored stroke width (and distance) into the units the CURRENT
+ * transform draws in: `W` for the kinds that store width normalized to canvas width, and
+ * 1 for a path, whose ctx is already scaled by `scale * W` and whose widths are stored in
+ * those same local units.
+ *
+ * A stack read through from the legacy single-stroke fields is exactly one entry at
+ * distance 0, and `paintStrokeBand` delegates distance 0 straight to `strokeAligned` — so
+ * for every frame saved before this existed, this loop runs the same statements the single
+ * call it replaced ran, and the pixels are identical.
+ */
+function paintStrokeStack(
+  ctx: CanvasRenderingContext2D,
+  layer: unknown,
+  paintBox: { w: number; h: number },
+  o: {
+    widthScale: number
+    build?: (c: CanvasRenderingContext2D) => void
+    path?: Path2D | null
+    fillRule?: CanvasFillRule
+  },
+): void {
+  const stack: StrokeInstance[] = strokeStackOf(layer as Parameters<typeof strokeStackOf>[0])
+  if (!stack.length) return
+  // Painted in REVERSE list order so the FIRST row lands on top — the layer list's own
+  // convention, and the one the tree shows.
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const st = stack[i]!
+    // `hasPaint` is re-checked here (not just in the reader) so the painter keeps the
+    // exact gate it always had: a gradient with no stops paints nothing.
+    if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
+    // A band at a non-zero distance CONSUMES the current path on `ctx`, so the shape is
+    // rebuilt before every stroke rather than relying on what the previous one left
+    // behind. A path layer hands its Path2D in instead and needs no rebuild.
+    if (o.build && !o.path) o.build(ctx)
+    paintStrokeBand(ctx, {
+      width: st.width * o.widthScale,
+      distance: (st.distance ?? 0) * o.widthScale,
+      style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx),
+      align: st.align,
+      join: st.join,
+      dash: strokeDashSegments(st.dash, o.widthScale),
+      path: o.path,
+      fillRule: o.fillRule,
+      build: o.build,
+    })
+  }
+}
+
 // Per-kind shape rendering. Caller has already applied opacity + the layer's
 // translate/rotate to `ctx`; here we just paint the geometry at the origin.
 // `wiredLive`: same pre-resolved-content seam as `localLayerBox` above — paintLayer
@@ -2339,25 +2424,13 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.roundRect(-w / 2, -h / 2, w, h, radii) }
     build(ctx)
     if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
-    if (hasPaint(layer.stroke) && layer.strokeWidth > 0) {
-      strokeAligned(ctx, {
-        width: layer.strokeWidth * W,
-        style: (c) => resolvePaint(c, layer.stroke, { w, h }, _fieldCtx),
-        align: layer.strokeAlign, dash: strokeDashSegments(layer.strokeDash, W), build,
-      })
-    }
+    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build })
   } else if (layer.kind === 'ellipse') {
     const w = layer.w * W, h = layer.h * W
     const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2) }
     build(ctx)
     if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
-    if (hasPaint(layer.stroke) && layer.strokeWidth > 0) {
-      strokeAligned(ctx, {
-        width: layer.strokeWidth * W,
-        style: (c) => resolvePaint(c, layer.stroke, { w, h }, _fieldCtx),
-        align: layer.strokeAlign, dash: strokeDashSegments(layer.strokeDash, W), build,
-      })
-    }
+    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build })
   } else if (layer.kind === 'path') {
     drawPath(ctx, layer, W)
   } else if (layer.kind === 'polygon' || layer.kind === 'star') {
@@ -2371,6 +2444,10 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
         // Alignment + dashes ride along: at scale 1 a polygon/star's local units
         // ARE width-normalized, so both mean the same thing on either side.
         strokeAlign: layer.strokeAlign, strokeDash: layer.strokeDash,
+        // …and so does the stroke STACK, for the same reason, so `drawPath`'s own
+        // `strokeStackOf` sees the identical list. Named explicitly rather than left to
+        // the spread above so a future rename of the field can't silently drop it here.
+        strokes: (layer as unknown as { strokes?: unknown }).strokes,
       } as any, W)
     }
   } else if (layer.kind === 'line') {
@@ -2648,6 +2725,65 @@ function textPathGuide(ctx: CanvasRenderingContext2D, layer: TextLayer, W: numbe
 }
 
 /**
+ * One text outline, resolved and ready to draw.
+ *
+ * A text layer is stroked with `strokeText`, which takes no path — so there is nothing for
+ * a stroke's `align` or `distance` to act on and both are ignored here: every text stroke
+ * is the centred outline text has always had. (`strokeSupportsShapes` already excludes
+ * text for the same reason: the Frame's text layer stores a CSS family name, not glyph
+ * outlines.) That is why text does NOT go through `paintStrokeStack`.
+ */
+interface TextStrokePass {
+  lineWidth: number
+  style: string | CanvasGradient | CanvasPattern
+  dash: [number, number] | null
+}
+
+/**
+ * A text layer's stroke stack, resolved once, in PAINT order (reverse list order, so the
+ * first row lands on top — the layer list's own convention).
+ *
+ * Resolved up front rather than inside the per-line/per-glyph draw loop so `resolvePaint`
+ * runs exactly once per stroke, as it did when a text layer had only one: a paint that
+ * builds a gradient or a pattern should not be rebuilt per line.
+ */
+function textStrokePasses(
+  ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, box: { w: number; h: number },
+): TextStrokePass[] {
+  const stack = strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])
+  const out: TextStrokePass[] = []
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const st = stack[i]!
+    if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
+    out.push({
+      lineWidth: st.width * W,
+      style: resolvePaint(ctx, st.paint, box, _fieldCtx),
+      dash: strokeDashSegments(st.dash, W),
+    })
+  }
+  return out
+}
+
+/**
+ * Draw one run of text once per stroke in the stack.
+ *
+ * `setLineDash` is only touched when at least ONE pass is dashed: an all-solid stack
+ * leaves the context's dash state exactly as untouched as the single-stroke code did,
+ * while a mixed stack still can't leak one stroke's pattern onto the next.
+ */
+function strokeTextPasses(
+  ctx: CanvasRenderingContext2D, passes: TextStrokePass[], anyDash: boolean,
+  text: string, x: number, y: number,
+): void {
+  for (const p of passes) {
+    ctx.lineWidth = p.lineWidth
+    ctx.strokeStyle = p.style
+    if (anyDash) ctx.setLineDash(p.dash ? [p.dash[0], p.dash[1]] : [])
+    ctx.strokeText(text, x, y)
+  }
+}
+
+/**
  * Text along a guide: one glyph at a time, each centred on its own half-advance
  * and turned to the tangent there. Advances come from `placeGlyphs`, which
  * measures cumulative prefixes so kerning pairs survive.
@@ -2673,24 +2809,19 @@ function drawTextOnPath(
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   const textBox = guide.bounds()
-  const stroke = hasPaint(layer.strokeColor) && layer.strokeWidth > 0
-  const dash = stroke ? strokeDashSegments(layer.strokeDash, W) : null
-  if (stroke) {
-    ctx.lineJoin = 'round'
-    ctx.lineWidth = layer.strokeWidth * W
-    ctx.strokeStyle = resolvePaint(ctx, layer.strokeColor, textBox, _fieldCtx)
-    if (dash) ctx.setLineDash([dash[0], dash[1]])
-  }
+  const passes = textStrokePasses(ctx, layer, W, textBox)
+  const anyDash = passes.some(p => p.dash)
+  if (passes.length) ctx.lineJoin = 'round'
   ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
   for (const g of placed) {
     ctx.save()
     ctx.translate(g.x, g.y)
     ctx.rotate(g.angle)
-    if (stroke) ctx.strokeText(g.ch, 0, 0)
+    strokeTextPasses(ctx, passes, anyDash, g.ch, 0, 0)
     ctx.fillText(g.ch, 0, 0)
     ctx.restore()
   }
-  if (dash) ctx.setLineDash([])   // never leak the pattern to the next layer
+  if (anyDash) ctx.setLineDash([])   // never leak the pattern to the next layer
 }
 
 function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
@@ -2736,15 +2867,10 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
     return s + i * lineH
   }
   const textBox = { w: Math.max(blockW, 1), h: Math.max(H, 1) }
-  const stroke = hasPaint(layer.strokeColor) && layer.strokeWidth > 0
   // `strokeText` honours setLineDash, so a text outline dashes like a shape's.
-  const dash = stroke ? strokeDashSegments(layer.strokeDash, W) : null
-  if (stroke) {
-    ctx.lineJoin = 'round'
-    ctx.lineWidth = layer.strokeWidth * W
-    ctx.strokeStyle = resolvePaint(ctx, layer.strokeColor, textBox, _fieldCtx)
-    if (dash) ctx.setLineDash([dash[0], dash[1]])
-  }
+  const passes = textStrokePasses(ctx, layer, W, textBox)
+  const anyDash = passes.some(p => p.dash)
+  if (passes.length) ctx.lineJoin = 'round'
   ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
   const fontPx = layer.fontSize * W
   const deco = layer.underline || layer.strikethrough
@@ -2760,7 +2886,7 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
       const gap = words.length > 1 ? Math.max(0, (blockW - total) / (words.length - 1)) : 0
       let cx = -blockW / 2
       for (let k = 0; k < words.length; k++) {
-        if (stroke) ctx.strokeText(words[k]!, cx, y)
+        strokeTextPasses(ctx, passes, anyDash, words[k]!, cx, y)
         ctx.fillText(words[k]!, cx, y)
         cx += widths[k]! + gap
       }
@@ -2770,7 +2896,7 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
       }
       continue
     }
-    if (stroke) ctx.strokeText(lines[i], anchorX, y)
+    strokeTextPasses(ctx, passes, anyDash, lines[i]!, anchorX, y)
     ctx.fillText(lines[i], anchorX, y)
     // Decoration lines span the drawn line, anchored to match the text alignment.
     // Drawn in the text's own fill so they inherit gradient/pattern fills.
@@ -2781,7 +2907,7 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
       if (layer.strikethrough) ctx.fillRect(left, y - decoThick / 2, lw, decoThick)
     }
   }
-  if (dash) ctx.setLineDash([])   // never leak the pattern to the next layer
+  if (anyDash) ctx.setLineDash([])   // never leak the pattern to the next layer
 }
 
 /**
@@ -2813,14 +2939,9 @@ function drawExpressiveText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: 
   const textBox = { w: Math.max(boxWidth, 1), h: Math.max(lay.height, 1) }
   ctx.textBaseline = 'middle'
   ctx.textAlign = 'left'
-  const stroke = hasPaint(layer.strokeColor) && layer.strokeWidth > 0
-  const dash = stroke ? strokeDashSegments(layer.strokeDash, W) : null
-  if (stroke) {
-    ctx.lineJoin = 'round'
-    ctx.lineWidth = layer.strokeWidth * W
-    ctx.strokeStyle = resolvePaint(ctx, layer.strokeColor, textBox, _fieldCtx)
-    if (dash) ctx.setLineDash([dash[0], dash[1]])
-  }
+  const passes = textStrokePasses(ctx, layer, W, textBox)
+  const anyDash = passes.some(p => p.dash)
+  if (passes.length) ctx.lineJoin = 'round'
   ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
   const fontPx = layer.fontSize * W
   const deco = layer.underline || layer.strikethrough
@@ -2828,14 +2949,14 @@ function drawExpressiveText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: 
   for (const wd of lay.words) {
     const x = originX + wd.x
     const y = originY + wd.y + lineH / 2   // band top → line's vertical center
-    if (stroke) ctx.strokeText(wd.text, x, y)
+    strokeTextPasses(ctx, passes, anyDash, wd.text, x, y)
     ctx.fillText(wd.text, x, y)
     if (deco && wd.text) {
       if (layer.underline) ctx.fillRect(x, y + fontPx * 0.34, wd.w, decoThick)
       if (layer.strikethrough) ctx.fillRect(x, y - decoThick / 2, wd.w, decoThick)
     }
   }
-  if (dash) ctx.setLineDash([])   // never leak the pattern to the next layer
+  if (anyDash) ctx.setLineDash([])   // never leak the pattern to the next layer
 }
 
 /**
@@ -2870,22 +2991,19 @@ function drawPath(ctx: CanvasRenderingContext2D, layer: PathLayer, W: number) {
     ctx.fillStyle = resolvePaint(ctx, layer.fill, layer.bbox, _fieldCtx)
     ctx.fill(p, layer.fillRule || 'nonzero')
   }
-  if (hasPaint(layer.stroke) && layer.strokeWidth > 0) {
-    ctx.lineJoin = 'round'
-    ctx.lineCap = 'round'
-    // Width, dash and alignment all live in the path's LOCAL units (the ctx is
-    // already scaled by `s`), so an outline scales with the shape.
-    strokeAligned(ctx, {
-      width: layer.strokeWidth,
-      style: (c) => resolvePaint(c, layer.stroke, layer.bbox, _fieldCtx),
-      align: layer.strokeAlign,
-      dash: strokeDashSegments(layer.strokeDash),
-      path: p,
-      fillRule: layer.fillRule || 'nonzero',
-      // The scratch canvas inherits this ctx's transform but not its line joins.
-      build: (c) => { c.lineJoin = 'round'; c.lineCap = 'round' },
-    })
-  }
+  // Set unconditionally: `ctx` is inside this function's own save/restore and nothing
+  // between here and the restore reads either, so a path with no stroke is unaffected.
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  // Width, dash and distance all live in the path's LOCAL units (the ctx is already
+  // scaled by `s`), so `widthScale` is 1 here and an outline scales with the shape.
+  paintStrokeStack(ctx, layer, layer.bbox, {
+    widthScale: 1,
+    path: p,
+    fillRule: layer.fillRule || 'nonzero',
+    // The scratch canvas inherits this ctx's transform but not its line joins.
+    build: (c) => { c.lineJoin = 'round'; c.lineCap = 'round' },
+  })
   ctx.restore()
 }
 

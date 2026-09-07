@@ -59,13 +59,18 @@ describe('outsideStrokePadPx', () => {
     expect(outsideStrokePadPx(l, 200)).toBe(0)
   })
 
-  it('is 0 for center and inside alignment — those stay exactly as before', () => {
+  // CHANGED when the pad started reading the stroke STACK. A centred stroke straddles
+  // the silhouette edge, so half its width genuinely lands outside the box — the old 0
+  // was simply wrong about where the ink is. Widening a pad only ever makes an offscreen
+  // LARGER, so nothing is clipped that was not clipped before. 'inside' still reaches
+  // nothing beyond the edge and stays 0.
+  it('is half the width for center alignment, and still 0 for inside', () => {
     const center = createRectLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'center' })
     const inside = createRectLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'inside' })
     const absent = createRectLayer({ stroke: '#fff', strokeWidth: 0.1 })
-    expect(outsideStrokePadPx(center, 200)).toBe(0)
+    expect(outsideStrokePadPx(center, 200)).toBe(10)   // 0.1 * 200 / 2
     expect(outsideStrokePadPx(inside, 200)).toBe(0)
-    expect(outsideStrokePadPx(absent, 200)).toBe(0)
+    expect(outsideStrokePadPx(absent, 200)).toBe(10)   // absent ⇒ 'center'
   })
 
   it('is the full stroke width in px for an outside-aligned rect/ellipse/polygon/star', () => {
@@ -218,10 +223,13 @@ describe('corner-pin offscreen padding for outside-aligned strokes', () => {
     expect(sizes).toContainEqual({ w: 140, h: 140 })
   })
 
-  it('does NOT pad a centered stroke — the box stays exactly what it was', () => {
+  // CHANGED alongside `outsideStrokePadPx` above: a centred stroke puts half its width
+  // outside the box, so the warp offscreen must hold it. 100 + 2*10 = 120. The old
+  // expectation of 100 clipped the outer half of every default-aligned outline out of a
+  // corner-pinned layer; a larger offscreen can only ever keep more ink, never less.
+  it('pads a centered stroke by half its width on each side', () => {
     const { sizes } = paintWithSizes([SQ({ strokeAlign: 'center', cornerPin: PIN })])
-    expect(sizes).toContainEqual({ w: 100, h: 100 })
-    expect(sizes.some(s => s.w > 100 || s.h > 100)).toBe(false)
+    expect(sizes).toContainEqual({ w: 120, h: 120 })
   })
 
   it('does NOT pad an inside-aligned stroke — it never left the box to begin with', () => {

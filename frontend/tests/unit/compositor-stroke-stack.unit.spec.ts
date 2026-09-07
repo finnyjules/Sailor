@@ -70,6 +70,50 @@ describe('strokeStackOf — read-through', () => {
     // branch, and the legacy fields are empty ⇒ no strokes.
     expect(stack).toEqual([])
   })
+
+  // A BRUSH layer's `strokes` is a PaintStroke[] — freehand path data, a completely
+  // different meaning of the same field name. Today's PaintStroke happens to carry
+  // neither an `id` nor a `paint`, so the filter would drop it anyway; that is a
+  // coincidence of the brush format, not a guarantee, and the painter calls this for
+  // every layer it draws. The kind guard is what actually protects it.
+  it('never reads a BRUSH layer\'s `strokes` as a stroke stack', () => {
+    // Real brush data: points, no id, no paint. Must be ignored on its own merits.
+    expect(strokeStackOf({
+      kind: 'brush', stroke: '', strokeWidth: 0,
+      strokes: [{ points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], size: 0.02, color: '#fff' }],
+    } as any)).toEqual([])
+
+    // And still ignored when the paint-stroke format grows fields that LOOK like a
+    // stroke instance. Without the kind guard this returns two bogus outlines.
+    expect(strokeStackOf({
+      kind: 'brush', stroke: '', strokeWidth: 0,
+      strokes: [
+        { id: 'ps1', paint: '#fff', width: 0.02, points: [] },
+        { id: 'ps2', paint: '#000', width: 0.03, points: [] },
+      ],
+    } as any)).toEqual([])
+
+    // The same array on a rect IS a stack — proving the case above is the kind guard
+    // doing the work, not the entries being unusable.
+    expect(strokeStackOf({
+      kind: 'rect', stroke: '', strokeWidth: 0,
+      strokes: [
+        { id: 'ps1', paint: '#fff', width: 0.02, points: [] },
+        { id: 'ps2', paint: '#000', width: 0.03, points: [] },
+      ],
+    } as any)).toHaveLength(2)
+  })
+
+  it('still reads a brush layer\'s own legacy outline fields', () => {
+    // Only the ARRAY is refused; `stroke`/`strokeWidth` on a brush are an ordinary
+    // legacy outline and keep their meaning.
+    const stack = strokeStackOf({
+      kind: 'brush', stroke: '#f00', strokeWidth: 0.01,
+      strokes: [{ points: [], size: 0.02 }],
+    } as any)
+    expect(stack).toHaveLength(1)
+    expect(stack[0]!.paint).toBe('#f00')
+  })
 })
 
 describe('writeStrokeStackToLayer', () => {

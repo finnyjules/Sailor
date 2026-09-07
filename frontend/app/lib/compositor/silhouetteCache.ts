@@ -88,10 +88,24 @@ export const SILHOUETTE_RASTER_PAD_PX = 2
 export interface SilhouetteInkInput {
   /** Layer kind ('rect' | 'text' | 'line' | 'brush' | …). */
   kind: string
-  /** The layer's REAL alignment (`strokeAlignOf`), not a guess — the default is 'center'. */
+  /** The layer's REAL alignment (`strokeAlignOf`), not a guess — the default is 'center'.
+   *  Only consulted when `strokeReachPx` is absent. */
   strokeAlign: 'inside' | 'center' | 'outside'
-  /** Stroke width in logical px (already × W, and × the path's own scale for a path). */
+  /** The WIDEST stroke width in the layer's stack, logical px (already × W, and × the
+   *  path's own scale for a path). A legacy single-stroke layer reads through as one
+   *  entry, so this is that stroke's width. */
   strokePx: number
+  /** Shape kinds only: how far the stack's furthest-reaching stroke lands BEYOND the
+   *  silhouette edge, logical px — `outsideStrokePadPx`, which already folds in every
+   *  stroke's alignment, its `distance`, and a path's own scale.
+   *
+   *  Supplied because `strokeAlign`/`strokePx` describe ONE stroke and cannot express a
+   *  list: a layer with a hairline outside stroke and a fat one pushed 20 px out has no
+   *  single (align, width) pair, and picking either one bakes the wrong silhouette for
+   *  the torn-edge and feather effects — silently, as a slightly wrong SHAPE rather than
+   *  an error. Absent ⇒ fall back to the single-stroke alignment rules below, which is
+   *  what every caller predating the stack passes. */
+  strokeReachPx?: number
   /** Text only: font size in logical px. */
   fontPx: number
   /** Text only: the layer's height box (`boxH` × W), 0 when it has none. */
@@ -108,14 +122,17 @@ export interface SilhouetteInkInput {
 /**
  * How far a layer's ink reaches beyond `localLayerBox`, in logical px.
  *
- * This is NOT `outsideStrokePadPx` (which answers a narrower question for the
- * corner-pin offscreen and returns 0 for every alignment but 'outside'). The DEFAULT
- * alignment is 'center', whose ink straddles the silhouette edge and so reaches
- * `strokePx / 2` past the box — pad by the outside-only amount and the cached raster
- * clips the outer half of every default stroke, in preview and in export alike.
+ * Broader than the shape pad `outsideStrokePadPx` computes: text and line have overhang
+ * rules of their own that no stroke geometry describes. For the SHAPE kinds the caller
+ * passes that pad in as `strokeReachPx` and it is used verbatim, so the two can't disagree
+ * about how far an outline reaches.
  *
- *  - shape strokes: 'outside' paints the whole ring beyond the edge (`strokePx`),
- *    'center' straddles it (`strokePx / 2`), 'inside' stays within it (0).
+ *  - shape strokes: `strokeReachPx` when the caller supplies it (the stack's furthest
+ *    reach: alignment, `distance` and a path's own scale all folded in). Without it, the
+ *    single-stroke rules — 'outside' paints the whole ring beyond the edge (`strokePx`),
+ *    'center' straddles it (`strokePx / 2`), 'inside' stays within it (0). The DEFAULT
+ *    alignment is 'center', so padding by an outside-only amount would clip the outer half
+ *    of every default stroke out of the cached raster, in preview and in export alike.
  *  - `line`: `drawLayerContent` strokes it with `lineCap = 'round'`, so each cap bulges
  *    half a stroke width past the endpoint — and `localLayerBox` gives a line exactly
  *    `w × W`, with no cap allowance. Alignment is meaningless for a line (no interior).
@@ -143,6 +160,12 @@ export function silhouetteInkOverhangPx(input: SilhouetteInkInput): number {
     return fin(input.fontPx) + strokePx + valignSlack + lineOverflowSlack
   }
   if (input.kind === 'line') return strokePx / 2
+  // A shape kind's stack knows its own reach exactly (alignment + distance, over every
+  // stroke); prefer it over re-deriving one from a single alignment. Non-finite values
+  // fall through to the rules below rather than poisoning the raster size.
+  if (typeof input.strokeReachPx === 'number' && Number.isFinite(input.strokeReachPx)) {
+    return Math.max(0, input.strokeReachPx)
+  }
   if (input.strokeAlign === 'outside') return strokePx
   if (input.strokeAlign === 'inside') return 0
   return strokePx / 2

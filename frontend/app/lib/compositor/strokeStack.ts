@@ -93,7 +93,15 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
  *  strokes are. */
 export function strokeStackOf(layer: StrokeHost | null | undefined): StrokeInstance[] {
   if (!layer) return []
-  const raw = Array.isArray(layer.strokes) ? layer.strokes : []
+  // A BRUSH layer's `strokes` is a `PaintStroke[]` — freehand paint-stroke PATH data, a
+  // completely different meaning of the same field name (see `BrushLayer` in
+  // useCompositorLayers.ts). Today a PaintStroke happens to carry neither an `id` nor a
+  // `paint`, so the filter below would drop it — but that is a coincidence of the brush
+  // format, not a guarantee, and the painter now calls this for every layer it draws.
+  // Refuse the array outright for a brush so a brush stroke can never be mistaken for an
+  // outline; the legacy `stroke`/`strokeWidth` fields a brush also declares still read
+  // through normally below.
+  const raw = layer.kind === 'brush' || !Array.isArray(layer.strokes) ? [] : layer.strokes
   const known = raw.filter(
     (s): s is Record<string, unknown> =>
       !!s && typeof s === 'object' && typeof (s as { id?: unknown }).id === 'string'
