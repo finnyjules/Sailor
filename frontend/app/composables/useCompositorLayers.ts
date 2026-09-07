@@ -1730,8 +1730,16 @@ function paintLayer(
     && !(layer.kind === 'text' && layer.expressive)                 // expressive layout places words outside localLayerBox
     && !layerPaints(layer).some(p => isFill(p) && fillIsShader(p))  // shader fills are live / frame-anchored
     && silhouetteContentReady(layer, W)
-  // Memoized like `dofContent` below: identical for every clone of the SAME tint, and the
-  // key is a stringify of the layer, so it must not be rebuilt once per stamp.
+  // Memoized like `dofContent` below: identical for every clone of the SAME tint.
+  //
+  // COST NOTE, read before raising the swatch ceiling: `silhouetteCacheKey` deep-canonicalizes
+  // and stringifies the layer, and `strokes` is NOT stripped from it. Before Vary this ran
+  // once per paint call. Keying by tint means it now runs once per DISTINCT tint, so a
+  // feathered or torn-edge brush layer in `blend` spread — where every copy is its own colour —
+  // pays a full stroke-array stringify per stamp. Reach is narrow today (it needs an edge pass
+  // AND vary colour AND blend spread AND a high count), and `cycle` spread is capped at 8
+  // swatches. If that combination becomes common, hoist the layer half of the key out of this
+  // function and vary only the tint suffix.
   //
   // Keyed by tint, not a single slot: Cloner Vary bakes the copy's colour INTO the raster
   // (see below), so copies in different swatches are different bitmaps. A single shared
