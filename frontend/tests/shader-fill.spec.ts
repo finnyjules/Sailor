@@ -335,25 +335,17 @@ test.describe('Shader as fill — golden coverage per surface', () => {
     // while I do nothing" isn't meaningful here the way it is for the other three
     // surfaces.
     //
-    // KNOWN GAP, documented rather than papered over (see the Task 10 report — the
-    // same class of finding as Scene3D, below): the fill is already 'shader' at the
-    // FIRST paintLayerStack call (mount time), racing the async
-    // fetchShaderFxCatalog() fetch. Unlike Shape Studio (which recovers once
-    // nudged), this surface was tried with BOTH a plain click-to-select AND a real
-    // layer drag (guaranteed to mutate `layer.x/y` and force a genuine
-    // paintLayerStack() re-run) after waiting out the fetch, and the canvas still
-    // renders the static, anchor-blind input-fill fallback every time — a flat
-    // linear gradient, not the fbm-warped field. Not diagnosed further within this
-    // task's time budget; see the Scene3D test below for the fuller writeup of the
-    // suspected cause (a resolveField/catalog scoping issue below materialFor-style
-    // per-surface build code, plausibly the "module-instance mismatch" class of bug
-    // the Task 10 brief names).
+    // The fill is already 'shader' at the FIRST paintLayerStack call (mount time),
+    // racing the async fetchShaderFxCatalog() fetch, so the first paint necessarily
+    // falls back to the input fill. Recovery is `resolve()`'s self-kicked catalog
+    // fetch (kickCatalogFetch in ~/lib/shaderfill/field.ts): once it lands, the next
+    // paintLayerStack() resolves the field for real. A layer drag forces that repaint.
     //
-    // What IS verifiable and asserted here: the config plumbing (Task 6's job)
-    // correctly carries the shader fill through to the inspector — the Fill row
-    // shows "Shader", not silently reset to a default — and the canvas paints
-    // something non-blank (the fallback gradient itself, which is real content,
-    // just not the field).
+    // Task 10 recorded this as an unfixed bug (the canvas was said to stay on the flat
+    // fallback gradient forever, through both a click and a drag). It is fixed as of
+    // 7a176a282 + d987aa349 and re-verified here; the liveness assertion below is the
+    // regression guard that was missing. See the "renders the field, not the fallback"
+    // test below for the load-bearing proof.
     await page.waitForTimeout(1_500)
     await clickThrough(page, canvas)
     await nudgeThrough(page, canvas)
@@ -361,6 +353,70 @@ test.describe('Shader as fill — golden coverage per surface', () => {
 
     const objShot = await shootPng(page, canvas)
     expect(spread(objShot)).toBeGreaterThan(8) // an object is rendering at all (not a blank canvas)
+  })
+
+  /**
+   * The load-bearing Compositor assertion. This surface pins shader-fill time to t=0 in
+   * the static edit view (see the note above), so "does it change over time" — the
+   * liveness proof every other surface uses — is not available here. Instead, contrast
+   * against a DELIBERATELY unresolvable effect id, which is pinned to the graceful
+   * input-fill fallback forever by construction. Same layer, same input fill, same
+   * geometry: the only difference is whether the field renderer ran. Identical pixels
+   * would mean the fbm_warp layer never actually rendered a field — exactly the false
+   * pass this file's verification philosophy exists to catch.
+   */
+  // Split across two tests (rather than two boots inside one) because a single test
+  // doing openBlankWorkflow twice exceeds the 60s per-test budget. `workers: 1` +
+  // `fullyParallel: false` (see playwright.config.ts) means these run in order in the
+  // same process, so a module-scope handoff is safe.
+  let compositorFieldShot: PNG | null = null
+
+  async function shootCompositorFill(page: Page, effectId: string): Promise<PNG> {
+    await waitForBackend(page)
+    await openBlankWorkflow(page)
+    await page.setViewportSize({ width: 1600, height: 2000 })
+    const base = shaderFill('object')
+    await addNode(page, 'Compositor', {
+      propertyOverrides: {
+        sailor_localLayers: [{
+          id: 'll-shaderfill-contrast', kind: 'rect', x: 0.5, y: 0.5, rotation: 0, opacity: 1,
+          w: 0.7, h: 0.7, radius: 0,
+          fill: { ...base, shader: { ...base.shader, effectId } },
+          stroke: '', strokeWidth: 0,
+        }],
+      },
+    })
+    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+    const canvas = '[data-testid="compositor-stack-canvas"]'
+    await expect(page.locator(canvas)).toBeVisible({ timeout: 10_000 })
+    await page.waitForTimeout(1_500)
+    await nudgeThrough(page, canvas)   // force a paintLayerStack() after the catalog lands
+    await page.waitForTimeout(800)
+    return shootPng(page, canvas)
+  }
+
+  test('Frame (Compositor) — field render (captured for the contrast below)', async ({ page }) => {
+    compositorFieldShot = await shootCompositorFill(page, 'fbm_warp')
+    expect(spread(compositorFieldShot)).toBeGreaterThan(8)
+  })
+
+  /**
+   * The load-bearing Compositor assertion. This surface pins shader-fill time to t=0 in
+   * the static edit view (see the note above), so "does it change over time" — the
+   * liveness proof every other surface uses — is not available here. Instead, contrast
+   * against a DELIBERATELY unresolvable effect id, which is pinned to the graceful
+   * input-fill fallback forever by construction. Same layer, same input fill, same
+   * geometry: the only difference is whether the field renderer ran. Identical pixels
+   * would mean the fbm_warp layer never actually rendered a field — exactly the false
+   * pass this file's verification philosophy exists to catch.
+   */
+  test('Frame (Compositor) — renders the field, not the fallback', async ({ page }) => {
+    const fallback = await shootCompositorFill(page, '__no_such_effect__')
+    expect(compositorFieldShot, 'the field-render test above must run first').not.toBeNull()
+    // Sparse sample (every 23rd pixel) — a turbulent fbm field vs a smooth linear
+    // gradient differs across a large fraction of the layer, not a handful of pixels.
+    // Measured at 2176 when the field renders; 0 is what the Task 10 bug produced.
+    expect(diffCount(compositorFieldShot!, fallback)).toBeGreaterThan(200)
   })
 
   test('Scene3D — object anchor (the only anchor this surface supports)', async ({ page }) => {
@@ -398,36 +454,33 @@ test.describe('Shader as fill — golden coverage per surface', () => {
     const canvas = '[role="dialog"] canvas.h-full.w-full'
     await expect(page.locator(canvas)).toBeVisible({ timeout: 10_000 })
 
-    // KNOWN GAP, documented rather than papered over (see the Task 10 report):
     // materialFor()'s shaderFill branch resolves `tex2 = canvas ? new
-    // THREE.CanvasTexture(canvas) : null` ONCE at build time. Scene3D's material
-    // is built at mount (engine.syncFromDoc(doc) in onMounted), which races the
-    // async fetchShaderFxCatalog() fetch the same way Shape Studio's first
-    // setConfig() does. Shape Studio recovers once nudged (Re-roll, above)
-    // because a full rebuild re-runs shaderFieldTexture() from scratch. Scene3D
-    // was expected to self-heal too (refreshSceneShaderFields calls resolveField
-    // fresh every frame) — but empirically it does NOT: neither a camera/lighting
-    // doc mutation (an in-place updateMaterial(), which only re-stamps
-    // userData.shaderSpec) NOR an identity-changing rebuild (toggling `unlit`,
-    // which DOES call materialFor() fresh, confirmed via the Material panel) ever
-    // produces a textured render — the object stays flat white regardless of how
-    // long you wait afterward (checked up to 5s). This was verified directly,
-    // not assumed: `.map` starts null and this task could not find a path back
-    // to non-null. That points at something below `materialFor()` itself —
-    // plausibly the module-instance mismatch class of bug the Task 10 brief
-    // warns about ("a module-instance mismatch reporting fallback values with
-    // zero renders") — not diagnosed further within this task's time budget.
+    // THREE.CanvasTexture(canvas) : null` ONCE at build time, and Scene3D's material is
+    // built at mount (engine.syncFromDoc(doc) in onMounted), which races the async
+    // fetchShaderFxCatalog() fetch — so `.map` legitimately starts null here. The
+    // recovery is refreshSceneShaderFields's `else` branch, which CREATES the texture
+    // materialFor couldn't once a canvas becomes available (it used to be `if (tex &&
+    // ...)`, which silently no-op'd on a null map and left `.map` null forever).
     //
-    // What IS verifiable and asserted here: the config plumbing (Task 7's job)
-    // correctly carries `material.type: 'shaderFill'` through parseDoc into the
-    // Material inspector — the panel shows "shaderFill" / "fbm_warp", not a
-    // silently-dropped/reset default. Pixel-level liveness for Scene3D is left
-    // as an open finding rather than asserted falsely.
+    // Task 10 recorded this as unfixed and left liveness unasserted. It is fixed as of
+    // 7a176a282 + d987aa349 and re-verified here (instrumented run: 111 shader renders
+    // within 3.5s of opening the modal, where the bug produced zero). The temporal diff
+    // below is the regression guard that was missing — a null `.map` renders a flat
+    // white mesh, and a static fallback cannot change frame to frame either way.
     await page.getByText('Box', { exact: true }).click()
     await expect(page.locator('select:has(option[value="shaderFill"])')).toHaveValue('shaderFill', { timeout: 10_000 })
     await expect(page.locator('select:has(option[value="fbm_warp"])')).toHaveValue('fbm_warp')
 
     const g0 = await shootPng(page, canvas)
     expect(spread(g0)).toBeGreaterThan(8) // an object is rendering at all (not a blank canvas)
+
+    // Liveness: the field must ANIMATE on the mesh (speed:1, u_time advancing). Polled
+    // rather than a single fixed gap, for the same reason as Shape Studio above — the
+    // motion is subtle at this scale and one sampled window can land between two
+    // quantized time buckets.
+    await expect.poll(async () => {
+      const g1 = await shootPng(page, canvas)
+      return diffCount(g0, g1)
+    }, { timeout: 8_000, intervals: [500, 800, 1200] }).toBeGreaterThan(3)
   })
 })
