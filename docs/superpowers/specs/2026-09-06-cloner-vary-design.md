@@ -124,16 +124,43 @@ The vertex budget guard (`clampedClones`) runs before planning, unchanged.
 
 ### Materials
 
-When the merged geometry carries vertex colours, the material factory sets
-`vertexColors: true` and forces the base colour to white so the palette reads as chosen.
-The material cache key gains a vertex-colours flag so a toggle cannot reuse a stale
-program.
+**Superseded during implementation.** The original design forced the material's base colour
+to white so the palette would read as chosen. That is undone by the very next
+`updateMaterial`: every in-place branch rewrites the base colour from the document, so
+per-copy colour was correct for exactly one sync and wrong from the second onward — on an
+animated scene, wrong from frame two. Only `matcap`, which has no in-place colour write,
+escaped.
 
-- **Works as-is:** standard, phong, toon, glass, matcap, fresnel, opalescent, holographic.
-- **gradient** — the ramp *is* the colour, so vertex colour multiplies it (a tint). The
-  control carries a hint saying so. Accepted, not a defect.
-- **image, shaderFill** — no base colour is read. The colour control is hidden entirely for
-  these two types.
+The shipped design mixes in the shader instead. `applyVaryTint` chains onto whatever
+`onBeforeCompile` the material already carries, following `applyScreen`'s established
+pattern, and injects:
+
+```glsl
+vec3 varyBase = diffuseColor.rgb;
+#include <color_fragment>
+diffuseColor.rgb = mix( varyBase, vColor.rgb, uVaryStrength );
+```
+
+The capture is load-bearing. Three's `<color_fragment>` chunk body is
+`diffuseColor.rgb *= vColor`, so reading `diffuseColor.rgb` as the mix's low endpoint would
+read the material colour *already multiplied by the palette* — the same wrongness the
+redesign exists to remove, reintroduced at the low end of the dial.
+
+This buys four things the white base could not: nothing to clobber, so the Critical
+disappears; the Colour strength dial finally has a consumer; strength 0 genuinely gives the
+plain material colour; and the excluded material types get an explicit place to say why.
+
+The material cache key gains a vertex-colours flag so a toggle cannot reuse a stale program.
+Gating is on an explicit `geometry.userData.varyTint` stamp rather than on the presence of a
+`color` attribute, because `GLTFLoader` maps a model's own `COLOR_0` to that same attribute
+name and vertex-coloured GLBs would otherwise be mistaken for cloned meshes.
+
+- **Carries per-copy colour:** standard, glass, phong, toon, matcap, fresnel, holographic.
+- **Excluded, control hidden:** image and shaderFill have no base colour at all; `gradient`
+  assigns its ramp over the top of the tint, so its ramp *is* its colour; `opalescent`
+  replaces the base entirely at its default strength of 1 and is only partly alive below it.
+  A control that works only when a different dial is off its default is worse than an absent
+  one. Revisiting the last two is a documented follow-up, not a defect.
 
 ### Untouched
 
