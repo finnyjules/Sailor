@@ -2846,13 +2846,45 @@ function applyBackdropBlur(
   ctx.restore()
 }
 
-// Glass lens ("Layers behind"): the layer's own FILL is a backdrop-reading shader
-// (see isGlassLayer). Instead of painting that fill flat, we snapshot everything
-// already painted below this layer and run it through the shader as the input
-// texture, then clip the refracted result to this layer's own shape and stamp it
-// back. Modelled directly on applyBackdropBlur above — same device-space snapshot,
-// silhouette/ghost-fill clip, destination-in, and identity-transform stamp — so it
-// stays correct under the dpr transform renderers apply to the stack canvas.
+/**
+ * Pure resolution of a glass shader's input source — mirrors mask resolution
+ * (`byKey.get(ref)`) rather than reinventing it. `spec.readsLayerKey` set AND
+ * present in `byKey` → render just that bound layer via `renderLayer`
+ * ("bound-layer mode": glass refracts ONE specific layer, not everything behind
+ * it). No key, or a dangling key (target removed/renamed since the fill was set
+ * up), → `snap`, the full backdrop snapshot ("Layers behind", Task 4's behavior).
+ * Kept free of canvas/DOM so it's unit-testable with plain mocks — `renderLayer`
+ * is the only side-effecting piece, injected by the caller.
+ */
+export function resolveGlassSource<TSource, TItem>(
+  spec: { readsLayerKey?: string },
+  byKey: Map<string, TItem> | undefined,
+  snap: TSource,
+  renderLayer: (item: TItem) => TSource,
+): TSource {
+  const key = spec.readsLayerKey
+  if (key && byKey) {
+    const target = byKey.get(key)
+    if (target) return renderLayer(target)
+  }
+  return snap
+}
+
+// Glass lens ("Layers behind" / bound-layer mode): the layer's own FILL is a
+// backdrop-reading shader (see isGlassLayer). Instead of painting that fill flat,
+// we build a source texture — either everything already painted below this layer
+// (default), or, when `spec.readsLayerKey` names a live stack item, ONLY that
+// layer's own pixels (see resolveGlassSource) — and run it through the shader as
+// the input texture, then clip the refracted result to this layer's own shape and
+// stamp it back. Modelled directly on applyBackdropBlur above — same device-space
+// snapshot, silhouette/ghost-fill clip, destination-in, and identity-transform
+// stamp — so it stays correct under the dpr transform renderers apply to the
+// stack canvas.
+//
+// `byKey` is the SAME map paintLayerStack builds for mask resolution — passed
+// through so bound-layer mode resolves a key exactly the way a mask ref does.
+// The bound layer still paints normally in the stack (it is not suppressed);
+// this only takes an extra copy of its pixels for the shader to sample.
 //
 // Returns true when it handled the layer (fill refracted; the caller then paints the
 // stroke on top). Returns false — WITHOUT touching `ctx` — when the layer isn't a
@@ -2866,6 +2898,7 @@ function applyGlassFromLayer(
   W: number,
   H: number,
   opacityMul = 1,
+  byKey?: Map<string, StackItem>,
 ): boolean {
   const fill = primaryFillOf(layer)
   // Narrow exactly as isGlassLayer does — the dispatch already checked isGlassLayer,
@@ -2883,15 +2916,31 @@ function applyGlassFromLayer(
   }
 
   // 1. Snapshot the backdrop below this layer (device pixels; drawn in device space so
-  //    the snapshot matches the field's own device-sized output pixel-for-pixel).
+  //    the snapshot matches the field's own device-sized output pixel-for-pixel). This
+  //    is both the "Layers behind" source and the fallback for a dangling bound-layer key.
   const snap = mk()
   const snctx = snap.getContext('2d')
   if (!snctx) return false
   snctx.drawImage(dev, 0, 0)
 
-  // 2. Refract: run the snapshot through the shader as its input texture. render()'s
+  // 1b. Bound-layer mode: if spec.readsLayerKey names a live stack item, render ONLY
+  //    that layer (via the same drawItemContent path drawItemMasked uses for mask
+  //    content) onto its own device-sized offscreen and sample that instead of the
+  //    full backdrop. Resolution is pure (resolveGlassSource) and mask-style —
+  //    byKey.get(key) — so a dangling key transparently falls back to `snap`.
+  const source = resolveGlassSource(spec, byKey, snap, (item: StackItem) => {
+    const c = mk()
+    const ictx = c.getContext('2d')
+    if (ictx) {
+      ictx.setTransform(t)
+      drawItemContent(ictx, item, W, H)
+    }
+    return c
+  })
+
+  // 2. Refract: run the source through the shader as its input texture. render()'s
   //    canvas is valid only until the next render call, so copy it out immediately.
-  const lens = renderFieldWithBase(spec, snap, w, h)
+  const lens = renderFieldWithBase(spec, source, w, h)
   const clipped = mk()
   const cctx = clipped.getContext('2d')
   if (!cctx) return false
@@ -3231,7 +3280,7 @@ export function paintLayerStack(
       if (isGlassLayer(layer)) {
         let refracted = false
         try {
-          refracted = applyGlassFromLayer(ctx, layer, localLayers, W, H, opacityMul)
+          refracted = applyGlassFromLayer(ctx, layer, localLayers, W, H, opacityMul, byKey)
         } catch (err) {
           if (import.meta.dev) console.warn('[paintLayerStack] glass refraction failed; painting the layer normally', err)
         }
