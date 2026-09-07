@@ -34,7 +34,7 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { stripAlpha } from '~/lib/color/convert'
-import type { BlurTreatment, MaskedGroup, Treatment } from './treatments'
+import type { MaskedGroup, RampFields, Treatment } from './treatments'
 import { ownMeshes, STAGE_LAYER } from './treatmentShells'
 
 /** MSAA samples on the base/layer targets. three ≥ r165 resolves a multisampled target's
@@ -84,9 +84,18 @@ export function pixelateCellPx(cellSize: number, height: number): number {
 /** Ramp value at normalised position `t` along the ramp direction: 0 up to `start`,
  *  1 from `end`, linear between. `end <= start` is a hard edge at `start` — defined
  *  rather than left to divide-by-zero. Pure. */
-export function blurRampAt(t: number, start: number, end: number): number {
+export function rampValueAt(t: number, start: number, end: number): number {
   if (end <= start) return t < start ? 0 : 1
   return Math.min(1, Math.max(0, (t - start) / (end - start)))
+}
+
+/** Which band a ramp value falls in, as a 0–1 multiplier. Pixelate cannot scale its cell size
+ *  per pixel — neighbouring pixels would snap to DIFFERENT grids, which is noise rather than a
+ *  gradient — so the ramp is quantised and every pixel in a band shares one grid. Band 0 is 0,
+ *  so the sharp end is left untouched. Pure; the GLSL in RAMP_GLSL mirrors it. */
+export function pixelateBand(r: number, bands: number): number {
+  const b = Math.min(Math.floor(r * bands), bands - 1)
+  return b / (bands - 1)
 }
 
 /** Screen-space ramp direction for `angleDeg`: 0 runs left→right, 90 runs top→bottom.
@@ -110,6 +119,19 @@ const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionM
 const PREMUL_FRAG = 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ vec4 s = texture2D(tDiffuse, vUv); gl_FragColor = vec4(s.rgb * s.a, s.a); }'
 // …and the single un-premultiply on the way out, back to the straight alpha every consumer expects.
 const UNPREMUL_FRAG = 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ vec4 s = texture2D(tDiffuse, vUv); gl_FragColor = vec4(s.a > 1e-5 ? s.rgb / s.a : vec3(0.0), s.a); }'
+/** The Progressive ramp, shared by every fragment shader that can vary across the object.
+ *  `uProgressive` 0 short-circuits to 1.0, so a material with no ramp behaves exactly as it
+ *  did before this existed. GLSL twin of rampValueAt() — keep the two in step. */
+const RAMP_GLSL = `
+  uniform float uProgressive; uniform vec2 uRampDir;
+  uniform float uRampMin; uniform float uRampSpan; uniform float uRampStart; uniform float uRampEnd;
+  float rampAt(vec2 uv){
+    if (uProgressive < 0.5) return 1.0;
+    float t = (dot(uv, uRampDir) - uRampMin) / uRampSpan;
+    float d = uRampEnd - uRampStart;
+    if (d <= 0.0) return t < uRampStart ? 0.0 : 1.0;
+    return clamp((t - uRampStart) / d, 0.0, 1.0);
+  }`
 // Separable Gaussian over PREMULTIPLIED colour so transparent pixels never darken the halo;
 // un-premultiplied on the way out because the layer buffers are straight-alpha.
 //
@@ -117,19 +139,7 @@ const UNPREMUL_FRAG = 'uniform sampler2D tDiffuse; varying vec2 vUv; void main()
 // exactly the uniform blur's, so a fully-ramped region is byte-for-byte the old blur; at
 // r = 0 every tap lands on the same texel and the pixel comes back untouched. `uProgressive`
 // 0 skips the ramp entirely, which is also what glow's internal blur uses.
-const BLUR_FRAG = `
-  uniform sampler2D tDiffuse; uniform vec2 uDir;
-  uniform float uProgressive; uniform vec2 uRampDir;
-  uniform float uRampMin; uniform float uRampSpan; uniform float uRampStart; uniform float uRampEnd;
-  varying vec2 vUv;
-  // GLSL twin of blurRampAt() — keep the two in step.
-  float rampAt(vec2 uv){
-    if (uProgressive < 0.5) return 1.0;
-    float t = (dot(uv, uRampDir) - uRampMin) / uRampSpan;
-    float d = uRampEnd - uRampStart;
-    if (d <= 0.0) return t < uRampStart ? 0.0 : 1.0;
-    return clamp((t - uRampStart) / d, 0.0, 1.0);
-  }
+const BLUR_FRAG = `uniform sampler2D tDiffuse; uniform vec2 uDir; varying vec2 vUv;` + RAMP_GLSL + `
   void main(){
     vec2 dir = uDir * rampAt(vUv);
     vec4 acc = vec4(0.0); float wsum = 0.0;
@@ -305,7 +315,7 @@ type RT = THREE.WebGLRenderTarget
 
 /** A resolved progressive ramp in UV space: direction, where t = 0 sits along it
  *  (`min`), how far t = 1 is (`span`), and the two stops. */
-interface BlurRamp { dirX: number; dirY: number; min: number; span: number; start: number; end: number }
+interface Ramp { dirX: number; dirY: number; min: number; span: number; start: number; end: number }
 
 function shader(frag: string, uniforms: Record<string, THREE.IUniform>): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({ uniforms, vertexShader: VERT, fragmentShader: frag, depthTest: false, depthWrite: false })
@@ -411,20 +421,10 @@ export class TreatmentStage {
 
   /** Separable blur of `src` by `radius` px, optionally ramped. Returns the target holding
    *  the result (never `src`). `ramp` null ⇒ an even blur, which is what glow's spread uses. */
-  private blur(src: RT, amount: number, ramp: BlurRamp | null, ...reserve: RT[]): { rt: RT; radiusPx: number } {
+  private blur(src: RT, amount: number, ramp: Ramp | null, ...reserve: RT[]): { rt: RT; radiusPx: number } {
     const { passes, step, radiusPx } = blurPasses(amount, this.height)
     if (passes === 0) return { rt: src, radiusPx: 0 }
-    const u = this.blurMat.uniforms
-    u.uProgressive!.value = ramp ? 1 : 0
-    if (ramp) {
-      ;(u.uRampDir!.value as THREE.Vector2).set(ramp.dirX, ramp.dirY)
-      u.uRampMin!.value = ramp.min
-      // A zero span would divide by zero in the shader; a degenerate ramp is caught
-      // upstream in resolveRamp, so this is belt and braces rather than a real case.
-      u.uRampSpan!.value = Math.abs(ramp.span) < 1e-6 ? 1 : ramp.span
-      u.uRampStart!.value = ramp.start
-      u.uRampEnd!.value = ramp.end
-    }
+    this.setRampUniforms(this.blurMat, ramp)
     const a = this.free(src, ...reserve)
     // When `src` is itself a scratch (a previous effect's output, or glow's bright pass) it
     // is free to be overwritten once the first horizontal pass has read it — reusing it as
@@ -504,11 +504,11 @@ export class TreatmentStage {
     return { min, max }
   }
 
-  /** The ramp for one blur treatment, or null for an even blur. `root` null (or an
+  /** The ramp for one treatment, or null for an even effect. `root` null (or an
    *  inverted group, whose treated area IS the frame) forces frame space. */
   private resolveRamp(
-    t: BlurTreatment, root: THREE.Object3D | null, camera: THREE.Camera,
-  ): BlurRamp | null {
+    t: RampFields, root: THREE.Object3D | null, camera: THREE.Camera,
+  ): Ramp | null {
     if (!t.progressive) return null
     const dir = rampDirection(t.rampAngle)
     const common = { dirX: dir.x, dirY: dir.y, start: t.rampStart, end: t.rampEnd }
@@ -523,10 +523,24 @@ export class TreatmentStage {
     return { ...common, min, span: rampSupport(1, 1, t.rampAngle) }
   }
 
+  /** Write a ramp onto any material carrying RAMP_GLSL's uniforms. `null` sets uProgressive 0,
+   *  so a material cannot inherit the previous object's ramp within a frame. */
+  private setRampUniforms(mat: THREE.ShaderMaterial, ramp: Ramp | null): void {
+    const u = mat.uniforms
+    u.uProgressive!.value = ramp ? 1 : 0
+    if (!ramp) return
+    ;(u.uRampDir!.value as THREE.Vector2).set(ramp.dirX, ramp.dirY)
+    u.uRampMin!.value = ramp.min
+    // A zero span would divide by zero; resolveRamp rules it out, so this is belt and braces.
+    u.uRampSpan!.value = Math.abs(ramp.span) < 1e-6 ? 1 : ramp.span
+    u.uRampStart!.value = ramp.start
+    u.uRampEnd!.value = ramp.end
+  }
+
   /** Apply one masked treatment to `src`; returns the target with the result and the halo
    *  reach it introduced (px). Fade is handled by the caller as a composite opacity.
    *  `ramp` applies to a progressive blur only — glow's internal spread never ramps. */
-  private applyEffect(src: RT, t: Treatment, ramp: BlurRamp | null): { rt: RT; haloPx: number } {
+  private applyEffect(src: RT, t: Treatment, ramp: Ramp | null): { rt: RT; haloPx: number } {
     if (t.kind === 'blur') {
       const { rt, radiusPx } = this.blur(src, t.amount, ramp)
       return { rt, haloPx: radiusPx }

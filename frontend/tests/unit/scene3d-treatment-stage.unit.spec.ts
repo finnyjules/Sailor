@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, pixelateCellPx, stageSamples, blurRampAt, rampDirection, rampSupport } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport } from '~/lib/scene3d/treatmentStage'
 
 describe('blurPasses', () => {
   it('scales the radius with amount and image height', () => {
@@ -41,25 +41,25 @@ describe('stageSamples', () => {
   })
 })
 
-describe('blurRampAt', () => {
+describe('rampValueAt', () => {
   it('is 0 before the start and 1 after the end', () => {
-    expect(blurRampAt(0, 0.2, 0.8)).toBe(0)
-    expect(blurRampAt(0.2, 0.2, 0.8)).toBe(0)
-    expect(blurRampAt(0.8, 0.2, 0.8)).toBe(1)
-    expect(blurRampAt(1, 0.2, 0.8)).toBe(1)
+    expect(rampValueAt(0, 0.2, 0.8)).toBe(0)
+    expect(rampValueAt(0.2, 0.2, 0.8)).toBe(0)
+    expect(rampValueAt(0.8, 0.2, 0.8)).toBe(1)
+    expect(rampValueAt(1, 0.2, 0.8)).toBe(1)
   })
 
   it('interpolates linearly between them', () => {
-    expect(blurRampAt(0.5, 0, 1)).toBeCloseTo(0.5, 6)
-    expect(blurRampAt(0.5, 0.2, 0.8)).toBeCloseTo(0.5, 6)
-    expect(blurRampAt(0.35, 0.2, 0.8)).toBeCloseTo(0.25, 6)
+    expect(rampValueAt(0.5, 0, 1)).toBeCloseTo(0.5, 6)
+    expect(rampValueAt(0.5, 0.2, 0.8)).toBeCloseTo(0.5, 6)
+    expect(rampValueAt(0.35, 0.2, 0.8)).toBeCloseTo(0.25, 6)
   })
 
   it('is a hard edge when the end is at or below the start', () => {
-    expect(blurRampAt(0.49, 0.5, 0.5)).toBe(0)
-    expect(blurRampAt(0.5, 0.5, 0.5)).toBe(1)
-    expect(blurRampAt(0.3, 0.5, 0.1)).toBe(0)
-    expect(blurRampAt(0.7, 0.5, 0.1)).toBe(1)
+    expect(rampValueAt(0.49, 0.5, 0.5)).toBe(0)
+    expect(rampValueAt(0.5, 0.5, 0.5)).toBe(1)
+    expect(rampValueAt(0.3, 0.5, 0.1)).toBe(0)
+    expect(rampValueAt(0.7, 0.5, 0.1)).toBe(1)
   })
 })
 
@@ -96,6 +96,34 @@ describe('rampSupport', () => {
   it('is never negative, whatever the angle', () => {
     for (const a of [0, 45, 90, 135, 180, 225, 270, 315]) {
       expect(rampSupport(3, 2, a)).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('pixelateBand', () => {
+  it('band 0 at the sharp end, so the region is untouched', () => {
+    expect(pixelateBand(0, 5)).toBe(0)
+    expect(pixelateBand(0.19, 5)).toBe(0)
+  })
+
+  it('reaches the top band at the far end', () => {
+    expect(pixelateBand(1, 5)).toBe(1)
+    expect(pixelateBand(0.999, 5)).toBe(1)
+  })
+
+  it('produces exactly `bands` distinct values across the range', () => {
+    const seen = new Set<number>()
+    for (let i = 0; i <= 100; i++) seen.add(pixelateBand(i / 100, 5))
+    expect(seen.size).toBe(5)
+    expect([...seen].sort((a, b) => a - b)).toEqual([0, 0.25, 0.5, 0.75, 1])
+  })
+
+  it('never decreases as the ramp rises', () => {
+    let prev = -1
+    for (let i = 0; i <= 200; i++) {
+      const v = pixelateBand(i / 200, 5)
+      expect(v).toBeGreaterThanOrEqual(prev)
+      prev = v
     }
   })
 })
