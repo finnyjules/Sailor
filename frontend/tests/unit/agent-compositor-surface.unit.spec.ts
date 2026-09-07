@@ -389,4 +389,54 @@ describe('setLayerEffect writes through the effect stack', () => {
     expect(layer.effects.map((e: any) => e.type)).toEqual(['torn_edge', 'bloom'])
     expect(layer.tornEdge).toBeUndefined()
   })
+
+  it('adds a drop shadow, clamping y and keeping the other fields as given', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'drop_shadow', x: 0.02, y: 5, blur: 0.03, color: 'rgba(0,0,0,0.5)' } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = (r.template.layers[0] as any).effects
+    expect(fx.map((e: any) => e.type)).toEqual(['drop_shadow'])
+    expect(fx[0].x).toBe(0.02)
+    expect(fx[0].y).toBe(1)   // clamped to [-1, 1]
+    expect(fx[0].blur).toBe(0.03)
+    expect(fx[0].color).toBe('rgba(0,0,0,0.5)')
+    expect(fx[0].visible).toBe(true)
+    expect(typeof fx[0].id).toBe('string')
+  })
+
+  it('clamps a negative layer_blur radius to 0', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'layer_blur', radius: -1 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = (r.template.layers[0] as any).effects
+    expect(fx.map((e: any) => e.type)).toEqual(['layer_blur'])
+    expect(fx[0].radius).toBe(0)
+  })
+
+  it('edits an existing inner_shadow in place, keeping its id and position', () => {
+    const before = rectState({
+      effects: [{ id: 'shadow-1', type: 'inner_shadow', color: 'rgba(0,0,0,0.35)', x: 0.1, y: 0.02, blur: 0.02, visible: true }],
+    })
+    const r = applyCompositorCommand(before, { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'inner_shadow', blur: 0.08 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = (r.template.layers[0] as any).effects
+    expect(fx.map((e: any) => e.type)).toEqual(['inner_shadow'])
+    expect(fx[0].id).toBe('shadow-1')     // same instance
+    expect(fx[0].x).toBe(0.1)             // position kept
+    expect(fx[0].y).toBe(0.02)
+    expect(fx[0].blur).toBe(0.08)         // patch applied
+  })
+
+  it('accepts background_blur and edits the pinned instance in place on a second add rather than duplicating it', () => {
+    const s1 = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'background_blur', radius: 0.05 } } })
+    expect(s1.ok).toBe(true); if (!s1.ok) return
+    const fx1 = (s1.template.layers[0] as any).effects
+    expect(fx1.map((e: any) => e.type)).toEqual(['background_blur'])
+    expect(fx1[0].radius).toBe(0.05)
+
+    const s2 = applyCompositorCommand(s1.template, { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'background_blur', radius: 0.2 } } })
+    expect(s2.ok).toBe(true); if (!s2.ok) return
+    const fx2 = (s2.template.layers[0] as any).effects
+    expect(fx2.map((e: any) => e.type)).toEqual(['background_blur'])   // still one instance, not two
+    expect(fx2[0].id).toBe(fx1[0].id)                                   // same pinned instance
+    expect(fx2[0].radius).toBe(0.2)
+  })
 })

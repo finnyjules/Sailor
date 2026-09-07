@@ -15,7 +15,7 @@ import { SWISS_LIMITS } from '~/lib/agent/designPrinciples'
 import { defaultPostEffect, POST_EFFECT_DEFAULTS, POST_FX_PARAM_CLAMP, type PostEffect } from '~/lib/compositor/postEffects'
 import { sanitizeTornEdge } from '~/lib/compositor/tornEdge'
 import { sanitizeFeather } from '~/lib/compositor/feather'
-import { effectStackOf, writeStackToLayer, addEffect, EFFECT_LABELS, EFFECT_ORDER, isEffectKind, type EffectInstance } from '~/lib/compositor/effectStack'
+import { effectStackOf, writeStackToLayer, addEffect, createEffect, EFFECT_LABELS, EFFECT_ORDER, isEffectKind, type EffectInstance } from '~/lib/compositor/effectStack'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { readGrid } from '~/lib/frame/gridConfig'
@@ -387,6 +387,31 @@ function sanitizePostEffect(raw: unknown, cur?: PostEffect): PostEffect | null {
   return base as unknown as PostEffect
 }
 
+type LocalEffectKind = 'drop_shadow' | 'inner_shadow' | 'layer_blur' | 'background_blur'
+
+/** Merge model-provided params for the four layer-local effect kinds (shadows bound to
+ *  the layer's own silhouette, and the two blurs) over current/defaults with clamps —
+ *  mirrors sanitizeTornEdge/sanitizeFeather's shape. These kinds have no
+ *  POST_EFFECT_DEFAULTS entry, so sanitizePostEffect can't validate them; their
+ *  canonical defaults instead come from effectStack's `createEffect`. */
+function sanitizeLocalEffect(type: LocalEffectKind, raw: unknown, cur?: EffectInstance): Record<string, unknown> {
+  const base = (cur ?? createEffect(type)) as unknown as Record<string, unknown>
+  const r = (raw ?? {}) as Record<string, unknown>
+  if (type === 'drop_shadow' || type === 'inner_shadow') {
+    return {
+      color: typeof r.color === 'string' ? r.color : (base.color as string),
+      x: clamp(r.x, -1, 1, base.x as number),
+      y: clamp(r.y, -1, 1, base.y as number),
+      blur: clamp(r.blur, 0, 1, base.blur as number),
+      visible: true,
+    }
+  }
+  return {
+    radius: clamp(r.radius, 0, 1, base.radius as number),
+    visible: true,
+  }
+}
+
 /** Which field carries the FILL paint for each layer kind (null = no fill). */
 function fillField(kind: LocalLayerKind): string | null {
   if (kind === 'text') return 'color'
@@ -419,7 +444,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setLayerProps', hint: 'Move/transform a layer. target = layer id; args: { patch }. Keys: x, y (0..1 of canvas, layer CENTER), rotation (deg), opacity (0..1, so "50%"=0.5), blend ("normal"|"multiply"|"screen"|…), visible (bool), skewX/skewY (deg), radius (0..1, rectangle corner rounding). Positional presets (account for the layer\'s own size): centre 0.5,0.5; top-left ~0.15,0.12; top-centre 0.5,0.12; top-right ~0.85,0.12; bottom-left ~0.15,0.88; bottom-centre 0.5,0.88; bottom-right ~0.85,0.88. Relative moves ("up a bit") = adjust the CURRENT x/y shown.' },
   { op: 'setText', hint: 'Change a TEXT layer\'s copy. target = layer id; args: { text }. You may write/rewrite the copy yourself.' },
   { op: 'setTextStyle', hint: 'Style a TEXT layer. target = layer id; args: { patch }. Keys: fontFamily (ANY Google Font by name — for an Impact-style / bold condensed poster headline use "Anton" (also good: "Oswald", "Archivo Black", "Bebas Neue"); for body use "Inter"), fontWeight (100..900), fontSize (fraction of canvas WIDTH: body ~0.03, a normal heading ~0.08, a big headline ~0.15, a HUGE poster headline that fills the frame 0.25–0.45), align ("left"|"center"|"right"), lineHeight (multiplier), boxW (0..1 wrap width). For "huge headline" set fontSize ≥ 0.25 and usually fontWeight 700–900.' },
-  { op: 'setFill', hint: 'Set a layer\'s FILL — text colour, shape fill, or image tint. target = layer id; args: { paint }. paint is a "#RRGGBB" colour OR a gradient object {type:"linear",angle,stops:[{offset,color}]} / {type:"radial",stops}. "none"/"" = no fill. A SHAPE PATTERN is {type:"shapes", shapeId (a library shape id like "sparkle"), a (shape colour), b (background "#RRGGBB" or "none" for transparent), angle, shapeSize, shapeGap}. shapeSize and shapeGap are 0..1 fractions of the tile — bigger shapeSize = larger shapes, bigger shapeGap = more space between them; count is automatic. This is what "make it blue", "give it a sunset gradient", "fill it with sparkles" mean.' },
+  { op: 'setFill', hint: 'Set a layer\'s FILL — text colour, shape fill, or image tint. target = layer id; args: { paint }. paint is a "#RRGGBB" colour OR a gradient object {type:"linear",angle,stops:[{offset,color}]} / {type:"radial",stops}. "none"/"" = no fill. A SHAPE PATTERN is {type:"shapes", shapeId (a library shape id like "sparkle"), a (shape colour), b (background "#RRGGBB" or "none" for transparent), angle, shapeSize, shapeGap, shapeFit}. shapeFit is "tile" (default — repeat the shape on a grid), "fill" (ONE shape scaled to cover the box, overflow cropped) or "contain" (ONE shape fitted wholly inside). shapeSize and shapeGap only apply when tiling: they are 0..1 fractions of the tile — bigger shapeSize = larger shapes, bigger shapeGap = more space between them (0 = shapes touching); count is automatic. This is what "make it blue", "give it a sunset gradient", "fill it with sparkles" mean.' },
   { op: 'setStroke', hint: 'Set a layer\'s STROKE/outline. target = layer id; args: { paint, width? }. paint as in setFill (or "none"); width is 0..1 of canvas width.' },
   { op: 'setSize', hint: 'Resize a SHAPE/image/line layer. target = layer id; args: { w?, h?, scale? } (0..1 of canvas width; line uses w as length; path uses scale). TEXT size is NOT here — use setTextStyle fontSize.' },
   { op: 'addLayer', hint: 'Add a NEW layer. args: { layer }. layer needs: kind ("text"|"rect"|"ellipse"|"line"), x, y (0..1, center). text also: text + you may set fontFamily/fontWeight/fontSize/color inline (a HUGE headline = fontSize 0.25–0.45, fontWeight 800; Impact-style font = "Anton"). Give the layer an id you choose so you can target it next. New layers land ON TOP by default — to put one BEHIND the image/other layers, follow with setLayerDepth …"back". (For images use generateImage.)' },
@@ -433,7 +458,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'generateImage', hint: 'Generate a PHOTOGRAPHIC/illustrative AI image and add it as a layer — "generate a picture of a dog", "add a city photo". Not for gradients/colours (use setBackground/setFill). args: { prompt (vivid), aspectRatio? }.' },
   { op: 'removeImageBackground', hint: 'Cut out the subject of an existing IMAGE layer (transparent background). target = image layer id.' },
   { op: 'editImage', hint: 'Edit an existing IMAGE layer from an instruction (Flux Kontext) — "make it brighter", "change the sky". target = image layer id; args: { instruction }.' },
-  { op: 'setLayerEffect', hint: 'Add/update/remove a post-processing effect ON ONE LAYER. target = layer id; args: { effect: { type: "adjust"|"bloom"|"grain"|"vignette"|"duotone"|"dof", ...params }, remove? }. adjust (colour grade): brightness/contrast/saturation 0..2 (1 = neutral), hue -180..180. bloom (glow from bright areas): threshold 0..1, radius ~0.02, intensity 0..2. grain (film noise): amount 0..1, size 1..8. vignette (darkened edges): amount/size/softness 0..1. duotone (two-colour map): shadows "#RRGGBB", highlights "#RRGGBB", mix 0..1. dof (depth of field, IMAGE LAYERS ONLY — uses an estimated depth map where BRIGHT = NEAR, so focus 1 is the closest thing and focus 0 the furthest): focus 0..1 picks the plane that stays sharp, range 0..1 widens the sharp band, aperture 0..1 sets blur strength (~0.02-0.05 is a normal lens, 0.1+ is extreme), bladeCount 0..12 shapes the bokeh (6 = hexagonal, under 3 = circular), bladeRotation 0..360, bloomThreshold 0..1 and bloomStrength 0..4 control how much bright defocused points bloom into discs. This is what "blur the background", "shallow depth of field", "make the subject pop" mean. Omitted params keep their current value. remove:true deletes that effect type. This is also what "make the logo glow", "desaturate the photo" mean.' },
+  { op: 'setLayerEffect', hint: 'Add/update/remove an effect ON ONE LAYER — a post-processing look or a layer-local effect bound to the layer\'s own silhouette. target = layer id; args: { effect: { type: "adjust"|"bloom"|"grain"|"vignette"|"duotone"|"gradientMap"|"dof"|"background_blur"|"inner_shadow"|"layer_blur"|"drop_shadow"|"torn_edge"|"feather", ...params }, remove? }. adjust (colour grade): brightness/contrast/saturation 0..2 (1 = neutral), hue -180..180. bloom (glow from bright areas): threshold 0..1, radius ~0.02, intensity 0..2. grain (film noise): amount 0..1, size 1..8. vignette (darkened edges): amount/size/softness 0..1. duotone (two-colour map): shadows "#RRGGBB", highlights "#RRGGBB", mix 0..1. gradientMap (map luminance through a colour ramp): stops [{pos,color}], contrast -1..1, mix 0..1. dof (depth of field, IMAGE LAYERS ONLY — uses an estimated depth map where BRIGHT = NEAR, so focus 1 is the closest thing and focus 0 the furthest): focus 0..1 picks the plane that stays sharp, range 0..1 widens the sharp band, aperture 0..1 sets blur strength (~0.02-0.05 is a normal lens, 0.1+ is extreme), bladeCount 0..12 shapes the bokeh (6 = hexagonal, under 3 = circular), bladeRotation 0..360, bloomThreshold 0..1 and bloomStrength 0..4 control how much bright defocused points bloom into discs. drop_shadow / inner_shadow (a shadow cast from the layer\'s own silhouette, outward or inward): color "rgba(...)"/"#RRGGBB", x/y -1..1 offset (fraction of canvas width), blur 0..1. layer_blur (blur the layer itself): radius 0..1. background_blur (blur what shows through behind the layer, within its silhouette): radius 0..1. torn_edge and feather take the same patch keys as setLayerTornEdge/setLayerFeather. Omitted params keep their current value. remove:true deletes that effect kind. This is what "blur the background", "shallow depth of field", "make the subject pop", "make the logo glow", "desaturate the photo", "add a drop shadow", "blur this layer", "add an inner shadow" mean.' },
   { op: 'setPostEffect', hint: 'Add/update/remove a post-processing effect on the WHOLE FRAME — applied after all layers composite. Same args and effect vocabulary as setLayerEffect (no target), EXCEPT dof, which is per-image-layer only because it needs that image\'s depth map. This is what "make the whole thing warmer", "add film grain", "give it a vignette", "cinematic colour grade" mean.' },
   { op: 'setLayerTornEdge', hint: 'Give a layer a TORN-PAPER edge (ragged, grain-dissolved boundary with an optional white "lip"). target = layer id; args: { patch: {...}, remove? }. patch keys: style ("ripped"=organic meandering tear | "deckle"=soft handmade-paper edge | "shredded"=aggressive spiky rip), amount (tear depth in px, ~10 subtle … 60 deep), roughness (0..1 fray detail), grain (px, edge crumble/dissolve; 0 = crisp), grainTexture (0..1 paper-fibre texture on the lip only), lipWidth (px white underside band; 0 = no lip), lipVariation (0..1 how uneven the lip width is), lipColor ("#RRGGBB", warm white default), seed (integer; change it for a different random tear). Omitted keys keep their current value. remove:true removes the torn edge. This is what "torn paper edge", "ripped edges", "rough deckle border" mean.' },
   { op: 'setLayerFeather', hint: 'Feather (soften) a layer\'s edges so they fade smoothly to transparent — a soft edge-mask, uniform on all sides. target = layer id; args: { patch: {...}, remove? }. patch keys: amount (0..1, feather depth relative to the element\'s OWN size; ~0.1 subtle … 0.4 strong … 1 fades the edge in to the element\'s center), curve ("linear" = even fade | "smooth" = eased fade). Omitted keys keep their current value. remove:true removes the feather. This is what "feather the edges", "soften the edges", "fade the edges" mean.' },
@@ -839,11 +864,14 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       }
       const cur = stack.find(e => e.type === type)
       // Torn edge / feather validate through their own sanitizers (same clamps the
-      // old setLayerTornEdge/setLayerFeather handlers used); every other kind goes
-      // through the shared post-effect sanitizer, same as before.
+      // old setLayerTornEdge/setLayerFeather handlers used); the four layer-local
+      // kinds (shadows + blurs) go through sanitizeLocalEffect; every other kind
+      // goes through the shared post-effect sanitizer, same as before.
       const sanitized =
         type === 'torn_edge' ? sanitizeTornEdge(raw, cur as any)
         : type === 'feather' ? sanitizeFeather(raw, cur as any)
+        : type === 'drop_shadow' || type === 'inner_shadow' || type === 'layer_blur' || type === 'background_blur'
+          ? sanitizeLocalEffect(type, raw, cur)
         : sanitizePostEffect(raw, cur as PostEffect | undefined)
       if (!sanitized) return { ok: false, reason: 'invalid', detail: 'invalid effect' }
       const next: Record<string, unknown> = { ...sanitized, type, visible: true }
