@@ -118,17 +118,18 @@ sheet dark; it is now a pale foil.
 |---|---|---|---|---|
 | `u_surface` | Surface | enum (4) | 0 (Soft sweep) | The table above |
 | `u_scale` | Scale | 0.5–12 | 4 | Size of the bend / bloom / sparkle field |
-| `u_iridescence` | Iridescence | 0–1 | 0.85 | How strongly the rainbow tints the silver |
+| `u_iridescence` | Iridescence | 0–1 | 0.78 | How strongly the rainbow tints the silver |
 | `u_bands` | Bands | 0.5–8 | 3 | Hue cycles across the sheet |
 | `u_angle` | View angle | 0–360 | 0 | Rotates sweep, bands and sheen together |
 | `u_shimmer` | Shimmer | 0–1 | 0.25 | Time drift of the hue + a fine twinkle |
 | `u_metallic` | Silver wash | 0–1 | 0.6 | **Repurposed.** How much neutral foil breaks through the rainbow |
 | `u_sheen` | Sheen | 0–1 | 0.5 | Matte ↔ polished: strength of the broad light band |
-| `u_tint` | Foil tint | color | `#d8dee6` | The pale foil under the rainbow |
+| `u_glow` | Glow | 0–1 | 0.5 | Blends the tinted colour from a matte "paint" mix toward a pearlescent "light" mix that pushes each hue to high value at full chroma, plus a broad soft sheen along the sweep — the only way to read as bright *and* saturated at once without clipping to white |
+| `u_tint` | Foil tint | color | `#aab0b8` | The pale foil under the rainbow — grey silver, not pale white (a white base read as paper) |
 
 Defaults are deliberately set to land on convincing foil straight from the picker, since Piece 2
-is a one-click entry point. `u_tint` is new relative to the stylize effect, which took its base
-colour from the input it no longer has.
+is a one-click entry point. `u_tint` and `u_glow` are new relative to the stylize effect, which
+took its base colour from the input it no longer has.
 
 ## Piece 2 — the fill-picker entry
 

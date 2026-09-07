@@ -1969,7 +1969,7 @@
           "type": "float",
           "min": 0.0,
           "max": 1.0,
-          "default": 0.85,
+          "default": 0.78,
           "step": 0.01
         },
         {
@@ -2018,10 +2018,19 @@
           "step": 0.01
         },
         {
+          "uniform": "u_glow",
+          "label": "Glow",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
           "uniform": "u_tint",
           "label": "Foil tint",
           "type": "color",
-          "default": "#d8dee6"
+          "default": "#aab0b8"
         },
         {
           "uniform": "u_mix",

@@ -18,6 +18,7 @@ uniform float u_metallic;    // REPURPOSED -> "Silver wash": how much neutral fo
 uniform float u_sheen;       // matte -> polished: strength of the broad light band
 uniform vec3  u_tint;        // the pale foil under the rainbow
 uniform float u_mix;         // blend the input back in (0 = pure foil)
+uniform float u_glow;        // paint look (0) <-> pearlescent light look (1): bright AND saturated
 
 // TARGET, from the user's reference photographs of holographic STICKER VINYL --
 // the pale iridescent sheet stock that die-cut stickers and laminates are printed
@@ -64,8 +65,26 @@ vec3 iridPalette(float t) { return 0.5 + 0.5 * cos(TAU * (t + vec3(0.0, 0.33, 0.
 // the note the user rejected.
 vec3 vinyl(vec3 hue, float tintAmount, float shade, vec3 silverBase) {
     vec3 silver = silverBase * shade;
+    // "Paint" look (u_glow = 0): pastel mixed toward white, moderate value,
+    // desaturated. Reads matte.
     vec3 pastel = mix(vec3(1.0), hue, 0.58);
-    return mix(silver, pastel * shade, tintAmount);
+    vec3 paintLook = mix(silver, pastel * shade, tintAmount);
+    // "Light" look (u_glow = 1): the rainbow is LIGHT added onto the silver, at full
+    // chroma. This is how a pearlescent film actually works (interference adds
+    // light), and it is the only way colour can be bright AND saturated at once.
+    // The silver stays grey underneath; the colour rises above it instead of
+    // diluting it. Two alternatives were tried and rejected first: linear-additive
+    // light on the silver base clipped every channel to white and DESATURATED
+    // (measured: sat 0.26 -> 0.08 as glow rose); a plain lerp toward the raw hue
+    // just diluted the silver the same way the paint look already does. Bright-and-
+    // saturated has to be built the other way: push the palette colour to high
+    // VALUE while keeping its chroma ratios -- normalise to its max channel, then
+    // scale to 0.96 -- and mix the silver toward THAT. No channel ever exceeds
+    // 0.96, so nothing clips and the hue stays fully saturated.
+    float mx = max(hue.r, max(hue.g, hue.b));
+    vec3 bright = hue / max(mx, 1e-3) * 0.96;
+    vec3 lightLook = mix(silver, bright * shade, tintAmount);
+    return mix(paintLook, lightLook, u_glow);
 }
 
 // SILVER WASH-OUT. The reference is not tinted edge to edge: the rainbow retreats
@@ -211,6 +230,15 @@ void main() {
         col += glint * mix(vec3(1.0), iridPalette(f * 2.0 + drift), 0.45);
     }
 
+    // Broad soft sheen: a gentle lift that follows the sweep direction, never a
+    // hotspot. Exponent 1.4 spans most of the frame (broad); a tight streak at
+    // exponent 90 was tried and rejected for looking like a hotspot rather than
+    // the sheet catching light.
+    if (u_glow > 0.0) {
+        vec2 sdir = vec2(cos(radians(u_angle + 90.0)), sin(radians(u_angle + 90.0)));
+        float ts = dot(p, sdir) + (f - 0.5) * 0.6;
+        col *= 1.0 + u_glow * 0.18 * exp(-ts * ts * 1.4);
+    }
     col = clamp(col, 0.0, 1.0);
     if (u_hasInput > 0.5 && u_mix > 0.0) {
         col = mix(col, texture(u_image0, v_texCoord).rgb, u_mix);
