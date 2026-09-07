@@ -223,13 +223,11 @@ const total = computed(() => {
            a different meaning of "Vary" than the one the 3D Studio teaches. `total`
            is the same count the header chip shows, so the block appears exactly when
            that chip reads 2x or more.
-           NOT YET MATCHED IN THE RENDERER: 3D skips vary entirely below two copies
-           (`count > 1` in modifiers.ts's applyModifiers), while `expandClones` still
-           resolves a tint for a lone copy — so a layer taken from three copies down to
-           one keeps its first-swatch tint with the control now hidden. Closing that
-           means changing `expandClones` AND its Python mirror plus the pinned parity
-           fixture, which is a cross-language change this UI fix deliberately does not
-           make. Flagged for follow-up. -->
+           MATCHED IN THE RENDERER: `expandClones` (composables/useCloner.ts) and its
+           Python mirror `_expand_clones` both skip vary once the expansion comes out
+           at a single copy, the way 3D's `count > 1` does — so taking a layer from
+           three copies down to one drops the tint instead of stranding it behind this
+           hidden block. -->
       <div v-if="total > 1" data-test="vary-block" class="mt-3 pt-3 border-t border-white/[0.07]">
         <div class="text-[9px] uppercase tracking-[0.1em] text-white/35 mb-2">Vary</div>
 

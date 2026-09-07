@@ -224,6 +224,33 @@ const CASES: Case[] = [
       stepScale: 0.85,
     }),
   },
+  // ── One copy: vary is skipped ────────────────────────────────────────────────
+  // Both routes to a single copy, each with colour ON and every step dial set, so
+  // the fixture pins the SKIP from both ends: no tint, weight 0, strength back at 1
+  // and the steps at identity. Mirroring is on in the linear case to show it adds
+  // nothing to a count of 1, and faceCenter in the radial one because that rotation
+  // is placement, not a step, and must survive the skip.
+  {
+    name: 'single copy, linear (both counts 1) — vary skipped',
+    aspect: 1,
+    cloner: C({
+      countX: 1, countY: 1, spacingX: 0.2, spacingY: 0.25, mirrorX: true, mirrorY: true,
+      nudgeX: 0.01, nudgeY: 0.02, stepScale: 0.5, stepRotation: 10, stepOpacity: 0.9,
+      varyMode: 'random', varySeed: 7,
+      varyColor: true, varyPalette: ['#ff0000', '#00ff00', '#0000ff'],
+      varyColorSpread: 'cycle', varyColorStrength: 0.4,
+    }),
+  },
+  {
+    name: 'single copy, radial (count 1) — vary skipped, ring offset kept',
+    aspect: 1.7777777777777777,
+    cloner: C({
+      mode: 'radial', count: 1, radius: 0.3, startAngle: 30, sweepAngle: 240, faceCenter: true,
+      stepScale: 0.85, stepRotation: 12, stepOpacity: 0.9,
+      varyMode: 'falloff', varyFalloffCenter: 0, varyFalloffRadius: 0.6,
+      varyColor: true, varyPalette: ['#4c6ef5', '#f59f00'], varyColorSpread: 'blend',
+    }),
+  },
 ]
 
 const run = (c: Case) =>
@@ -265,6 +292,22 @@ describe('cloner vary cross-language fixture', () => {
       .toEqual(['varyColor', 'varyMode'])
     // …and the defaults really do reach the output, so a changed default moves numbers.
     expect(bare[1]!.expected.some((t) => t.tint !== null)).toBe(true)
+  })
+
+  it('pins the single-copy skip on both routes to one copy', () => {
+    // Vary is "across copies", so one copy gets none of it. Both cases must come out
+    // as ONE plain copy: no tint, weight 0, strength 1, steps at identity.
+    const singles = actual.cases.filter((c) => c.name.startsWith('single copy'))
+    expect(singles).toHaveLength(2)
+    for (const c of singles) {
+      expect(c.cloner.varyColor).toBe(true)
+      expect(c.expected).toHaveLength(1)
+      expect(c.expected[0]).toMatchObject({ tint: null, weight: 0, tintStrength: 1, dscale: 1, dopacity: 1 })
+    }
+    // The radial one keeps its ring placement and its faceCenter rotation.
+    const radial = singles.find((c) => c.name.includes('radial'))!
+    expect(radial.expected[0]!.drot).toBe(30)
+    expect(radial.expected[0]!.dx).not.toBe(0)
   })
 
   it('covers a case with no vary at all, so the fixture also pins the zero-change path', () => {

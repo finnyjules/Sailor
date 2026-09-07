@@ -1621,6 +1621,105 @@
           "tintStrength": 1
         }
       ]
+    },
+    {
+      "name": "single copy, linear (both counts 1) — vary skipped",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 1,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": true,
+        "mirrorY": true,
+        "nudgeX": 0.01,
+        "nudgeY": 0.02,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 10,
+        "stepScale": 0.5,
+        "stepOpacity": 0.9,
+        "varyMode": "random",
+        "varySeed": 7,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": true,
+        "varyPalette": [
+          "#ff0000",
+          "#00ff00",
+          "#0000ff"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 0.4
+      },
+      "expected": [
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "single copy, radial (count 1) — vary skipped, ring offset kept",
+      "aspect": 1.7777777777777777,
+      "cloner": {
+        "enabled": true,
+        "mode": "radial",
+        "countX": 3,
+        "countY": 1,
+        "spacingX": 0.25,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 1,
+        "radius": 0.3,
+        "startAngle": 30,
+        "sweepAngle": 240,
+        "faceCenter": true,
+        "stepRotation": 12,
+        "stepScale": 0.85,
+        "stepOpacity": 0.9,
+        "varyMode": "falloff",
+        "varySeed": 0,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.6,
+        "varyColor": true,
+        "varyPalette": [
+          "#4c6ef5",
+          "#f59f00"
+        ],
+        "varyColorSpread": "blend",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.2598076211353316,
+          "dy": 0.2666666666666666,
+          "drot": 30,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
     }
   ]
 }

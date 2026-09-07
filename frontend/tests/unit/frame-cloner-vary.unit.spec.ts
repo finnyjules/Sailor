@@ -63,6 +63,61 @@ describe('expandClones with vary colour', () => {
   })
 })
 
+describe('expandClones with a single copy', () => {
+  // "Vary" means vary ACROSS copies, and one copy has no across — the 3D renderer
+  // already skips its cloner below two copies and the Frame panel hides the Vary
+  // block there. Both routes to one copy are exercised, because the guard is on the
+  // EXPANDED copies rather than on any one count field.
+  const VARIED: Partial<Cloner> = {
+    stepScale: 0.5, stepRotation: 10, stepOpacity: 0.9,
+    varyMode: 'random', varySeed: 7,
+    varyColor: true, varyPalette: ['#ff0000', '#00ff00', '#0000ff'], varyColorStrength: 0.4,
+  }
+
+  it('route 1 — linear with both counts at 1: no tint, no damping', () => {
+    const out = expandClones(C({ ...VARIED, countX: 1, countY: 1, spacingX: 0.2, spacingY: 0.25 }), 1)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1 })
+  })
+
+  it('route 1 still holds with mirroring on — a count of 1 has nothing to mirror', () => {
+    const out = expandClones(C({ ...VARIED, countX: 1, countY: 1, mirrorX: true, mirrorY: true }), 1)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.tint).toBeUndefined()
+  })
+
+  it('route 2 — radial with count 1: no tint, but the ring placement survives', () => {
+    const out = expandClones(C({
+      ...VARIED, mode: 'radial', count: 1, radius: 0.3, startAngle: 30, sweepAngle: 240, faceCenter: true,
+    }), 1)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.tint).toBeUndefined()
+    expect(out[0]!.tintStrength).toBe(1)
+    expect(out[0]!.weight).toBe(0)
+    // Placement is not variation: the offset and the faceCenter rotation stay.
+    expect(out[0]!.dx).toBeCloseTo(0.3 * Math.cos(30 * Math.PI / 180), 12)
+    expect(out[0]!.drot).toBe(30)
+    expect(out[0]!.dscale).toBe(1)
+  })
+
+  it('the same config tints again as soon as there are two copies', () => {
+    // The guard has to be about the copy count and nothing else.
+    const two = expandClones(C({ ...VARIED, countX: 2, spacingX: 0.2 }), 1)
+    expect(two).toHaveLength(2)
+    expect(two.some((t) => t.tint !== undefined)).toBe(true)
+  })
+
+  it('taking a tinted layer from three copies down to one clears the tint', () => {
+    // The reported stuck state: the Vary block is hidden at one copy, so the tint
+    // could not be turned off from the panel once it was stuck.
+    const tinted = C({ ...VARIED, varyMode: 'sequence', countX: 3, spacingX: 0.2 })
+    expect(expandClones(tinted, 1).every((t) => t.tint !== undefined)).toBe(true)
+    const one = expandClones({ ...tinted, countX: 1 }, 1)
+    expect(one).toHaveLength(1)
+    expect(one[0]!.tint).toBeUndefined()
+  })
+})
+
 describe('varyOf', () => {
   it('reads the cloner into the shared settings shape', () => {
     const v = varyOf(C({ varyMode: 'random', varySeed: 5, varyColor: true, varyPalette: ['#abc'] }))

@@ -206,6 +206,21 @@ export function expandClones(cloner: Cloner | undefined | null, aspect: number):
     }
   }
 
+  // Vary means "vary ACROSS copies", and one copy has no across. The 3D cloner
+  // already reads it that way — its renderer skips the whole modifier below two
+  // copies (`count > 1` in lib/scene3d/modifiers.ts) — and the Frame panel hides the
+  // Vary block at one copy, so a lone copy has to leave here as the plain identity it
+  // was before Vary shipped: no tint, no damped steps. Without this, a layer taken
+  // from three copies back down to one kept the first swatch's tint, with the control
+  // that would clear it now hidden.
+  //
+  // The test is on the EXPANDED copies rather than on a count field, because one copy
+  // arrives by more than one route: linear with countX and countY both 1 (mirroring
+  // adds nothing to a count of 1), and radial with count 1. k is 0 for the sole copy,
+  // so every step term is already at identity (`0 * stepRot`, `stepScl ** 0`) — only
+  // its placement and a faceCenter rotation survive.
+  if (raw.length < 2) return raw.map((r) => ({ ...IDENTITY, dx: r.dx, dy: r.dy, drot: r.extraRot }))
+
   // Pass 2 — drivers. Sequence mode has varyStepFactor === 1, so the three step
   // expressions below reduce to exactly the pre-vary ones.
   const vary = varyOf(cloner)

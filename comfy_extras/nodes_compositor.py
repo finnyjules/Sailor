@@ -573,6 +573,29 @@ def _expand_clones(layer: dict, cloner: dict | None, aspect: float) -> list[dict
                     dy += (abs(ix) % 2) * stag_y * sy
                 specs.append((k, dx, dy, 0.0))
 
+    # Vary means "vary ACROSS copies", and one copy has no across. Mirror of the
+    # same guard in expandClones (frontend/app/composables/useCloner.ts), which in
+    # turn matches the 3D cloner skipping its modifier below two copies: a lone copy
+    # composites as the plain pre-Vary layer — no tint, no damped steps.
+    #
+    # The test is on the EXPANDED copies rather than on a count field, because one
+    # copy arrives by more than one route: linear with countX and countY both 1
+    # (mirroring adds nothing to a count of 1), and radial with count 1. k is 0 for
+    # the sole copy, so every step term is already at identity (0 * step_rot,
+    # step_scl ** 0) — only its placement and a faceCenter rotation survive.
+    if len(specs) < 2:
+        singles = []
+        for (_k, dx, dy, extra_rot) in specs:
+            c = dict(layer)
+            c["x"] = layer["x"] + dx
+            c["y"] = layer["y"] + dy
+            c["rot"] = layer["rot"] + extra_rot
+            c["_weight"] = 0.0
+            c["_tint"] = None
+            c["_tint_strength"] = 1.0
+            singles.append(c)
+        return singles
+
     # Pass 2 — drivers. Sequence mode has _vary_step_factor == 1, so the three
     # step expressions below reduce to EXACTLY the pre-Vary ones and an existing
     # workflow composites byte-identically.
