@@ -13,8 +13,9 @@
  * Why steps rather than a count: Frame's grid cloner indexes copies by
  * `k = |iy|*nx + |ix|`, which is sparse and deliberately repeats across mirrored
  * twins (a mirrored clone gets the same falloff as its positive twin). Passing
- * the real step array preserves that, and normalising by `max(steps)` keeps
- * 3D's dense `0..n-1` working unchanged.
+ * the real step array preserves that for the two ORDERED drivers, and normalising
+ * by `max(steps)` keeps 3D's dense `0..n-1` working unchanged. Random is the
+ * deliberate exception — see its branch in `varyWeights`.
  */
 
 export type VaryMode = 'sequence' | 'random' | 'falloff'
@@ -86,6 +87,11 @@ export function varyWeights(steps: number[], v: VarySettings): number[] {
   if (maxStep <= 0) return steps.map(() => 0)
 
   if (v.mode === 'random') {
+    // Hashed by ARRAY POSITION, not by step value — deliberately unlike the two
+    // ordered drivers below. Sequence and falloff read `s` so that mirrored twins,
+    // which share a step, share a weight; random wants the opposite. Two mirrored
+    // copies drawing the same swatch would read as a deliberate pattern and defeat
+    // the point of the mode, so every copy gets its own uncorrelated draw.
     return steps.map((_, i) => hash32(i, v.seed))
   }
 
@@ -142,7 +148,13 @@ export function varyStepFactor(w: number, v: VarySettings): number {
 
 // ── hex helpers ───────────────────────────────────────────────────────────────
 
-/** `#rgb` / `#rrggbb` / `#rrggbbaa` → [r,g,b] 0..255. Alpha is dropped. */
+/** `#rgb` / `#rrggbb` / `#rrggbbaa` → [r,g,b] 0..255. Alpha is dropped.
+ *
+ *  Deliberately NOT `lib/color/convert.ts`'s same-named helper, which calls the app's
+ *  colour picker "canonical": that one has no 8-digit branch, so an `#rrggbbaa` swatch
+ *  parses there as black. StudioColor emits 8-digit alpha hex, and a palette swatch can
+ *  come straight from it. This module also has to stay import-free so the Python
+ *  compositor mirror has one small, self-contained routine to reproduce. */
 export function hexToRgb(hex: string): [number, number, number] {
   let h = (hex || '').trim().replace(/^#/, '')
   if (h.length === 3) h = h[0]! + h[0]! + h[1]! + h[1]! + h[2]! + h[2]!
