@@ -121,6 +121,22 @@ exports[`shader fills enter the agent vocabulary > is a characterization snapsho
     ],
   },
   {
+    "default": "off",
+    "group": "Layout",
+    "hint": "The pattern the letters sit in, up and down the baseline. Random gives every letter its own height; Wave rolls them smoothly up and down across the word; Ramp climbs steadily from the first letter to the last; Arch lifts the middle and drops the two ends; Zigzag puts every other letter up and the rest down. Off keeps the whole run on one baseline.",
+    "key": "riseShape",
+    "kind": "select",
+    "label": "Baseline shape",
+    "options": [
+      "off",
+      "random",
+      "wave",
+      "ramp",
+      "arch",
+      "zigzag",
+    ],
+  },
+  {
     "default": "solid",
     "group": "Paint",
     "hint": "How this layer is painted: a flat colour, a gradient, or one of the procedural patterns.",
@@ -490,6 +506,22 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
     ],
   },
   {
+    "default": "off",
+    "group": "Layout",
+    "hint": "The pattern the letters sit in, up and down the baseline. Random gives every letter its own height; Wave rolls them smoothly up and down across the word; Ramp climbs steadily from the first letter to the last; Arch lifts the middle and drops the two ends; Zigzag puts every other letter up and the rest down. Off keeps the whole run on one baseline.",
+    "key": "riseShape",
+    "kind": "select",
+    "label": "Baseline shape",
+    "options": [
+      "off",
+      "random",
+      "wave",
+      "ramp",
+      "arch",
+      "zigzag",
+    ],
+  },
+  {
     "default": "solid",
     "group": "Paint",
     "hint": "How this layer is painted: a flat colour, a gradient, or one of the procedural patterns.",
@@ -796,6 +828,22 @@ exports[`vtAgentControls > is a characterization snapshot, with and without a fo
     "options": [
       "off",
       "width",
+    ],
+  },
+  {
+    "default": "off",
+    "group": "Layout",
+    "hint": "The pattern the letters sit in, up and down the baseline. Random gives every letter its own height; Wave rolls them smoothly up and down across the word; Ramp climbs steadily from the first letter to the last; Arch lifts the middle and drops the two ends; Zigzag puts every other letter up and the rest down. Off keeps the whole run on one baseline.",
+    "key": "riseShape",
+    "kind": "select",
+    "label": "Baseline shape",
+    "options": [
+      "off",
+      "random",
+      "wave",
+      "ramp",
+      "arch",
+      "zigzag",
     ],
   },
   {

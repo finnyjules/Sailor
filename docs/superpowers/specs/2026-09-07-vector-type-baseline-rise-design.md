@@ -58,8 +58,16 @@ is `rise`. Every shape returns a value in −A … A, in em, POSITIVE MEANING UP
 A single glyph (`n = 1`) has no span to walk, so `u = 0` for the four
 mathematical shapes; Random still varies (it is keyed on the index, not on `u`).
 
-Each shape is centred on zero across the word, so switching one on does not
-shift the word's visual centre.
+Ramp, Zigzag and a whole-cycle Wave are centred on zero across the word, so
+switching one on does not shift the word's visual centre.
+
+**Arch is the exception, and deliberately.** The parabola is range-symmetric —
+both ends at −A, the middle at +A — but its mean sits at +A/3, so an arched word
+does ride slightly higher than a flat one. That is what an arch IS: more letters
+above the baseline than below. The alternative that is zero-mean as well,
+`−A·cos(2πu)`, is exactly the Wave at one cycle and 270° of phase, so taking it
+would spend a preset on a picture the Wave already reaches. Kept as the
+parabola, and the claim narrowed to the one that is true.
 
 ## Where it plugs in
 
@@ -152,7 +160,11 @@ per-letter jitter, decided explicitly.
    and two different seeds give different arrangements at the same spread.
 4. **Channel independence**: Random rise against blink and against scatter over
    the same glyphs correlates at |r| < 0.2 — measured in the test, not assumed.
-5. **Zero-centred**: the mean offset over a word is ~0 for Ramp, Arch and Wave.
+5. **Zero-centred**: the mean offset over a word is ~0 for Ramp and Zigzag. For
+   Arch, assert what actually holds instead — mirror symmetry about the word's
+   centre, ends at −A, peak at +A — and pin the analytic mean. For Wave, the
+   endpoints are both sampled so a mean is phase-dependent; assert the two
+   properties a user sees instead: 360° of phase is the identity, 180° negates.
 6. **Edge cases**: `n = 1`, `n = 0`, non-finite `rise`, and a `rise` past the
    slider bound all return finite numbers.
 7. **Merge**: an unknown `riseShape` falls back to Off; absent keys take the

@@ -546,6 +546,82 @@ export interface VectorTypeConfig {
    *  margin); the dial shows the solved value and goes read-only. */
   fit: VtFit
   /**
+   * PER-GLYPH vertical position — each letter lifted off or dropped below the
+   * run's baseline, either at random or along a curve walked across the word.
+   * `riseShape: 'off'` is the shipped default and the run this studio has always
+   * drawn, to the bit.
+   *
+   * ## `rise` is a FRACTION OF THE EM, not a pixel count
+   *
+   * 0.25 means "a quarter of the type size", at every type size. Stored in
+   * pixels it would be a number that silently means something different the
+   * moment Size moves: a 30px lift that reads as a bold jump on 120pt type is
+   * invisible on 400pt, and a saved design would change its own proportions
+   * when it is re-used bigger. The em is the unit the rest of the studio already
+   * measures glyph-relative distances in (`tracking` is 1/1000 em for the same
+   * reason), so a design scales as one piece. `rise.ts` multiplies by the
+   * resolved em once, at the point it hands back pixels.
+   *
+   * ## The control reads UP-POSITIVE and `dy` is y-DOWN
+   *
+   * These are opposite and both are right. A user dragging Rise upward means the
+   * letter goes UP, and every shape in the table below is written that way —
+   * Arch peaks at `+A` in the middle because an arch peaks in the middle, which
+   * is the reading you can check by eye. Canvas y grows DOWNWARD, so the `dy`
+   * these feed is negative for the same picture. The single negation between the
+   * two lives in `rise.ts`, at the boundary where em becomes pixels, and NOT
+   * here: a sign flip written into the stored value would mean the saved config,
+   * the motion track's `from`/`to`, the control's label and the golden test each
+   * carry their own convention, and the first person to add a sixth shape would
+   * have to guess which. One negation in one function is a thing a reader can
+   * find; a convention spread over five files is a thing they get wrong.
+   *
+   * ## Per-glyph here where `skewX`/`skewY` are deliberately whole-run
+   *
+   * The skew note above explains why a shear must NOT be per-glyph: applied
+   * about each letter's own origin it leans every letter while the word stays
+   * upright, which is the wrong-looking one. That reasoning does not carry over,
+   * because this is a different operation. A shear DEFORMS the letterform, and a
+   * deformation the whole run does not share reads as an accident. This MOVES
+   * the letter — a rigid translation along its own baseline normal — and moving
+   * one letter relative to its neighbours is the entire point of the feature.
+   * There is no whole-run version of it worth having: lifting every glyph by the
+   * same amount is just the run drawn higher up, which the frame's own position
+   * already does. So the two controls disagree about granularity because they
+   * disagree about what they do to a glyph, not because one of them is wrong.
+   *
+   * ## Every shape is ZERO-CENTRED across the word
+   *
+   * Each returns a value in `−rise … +rise` whose mean over the run is ~0, so
+   * switching a shape on rearranges the letters WITHOUT sliding the word's
+   * visual centre off the frame. Ramp runs `−A` to `+A` rather than `0` to `A`;
+   * Arch dips to `−A` at both ends so its peak is paid for; Zigzag alternates
+   * about zero. Without that, every shape would double as an unasked-for
+   * vertical nudge and Rise would be two controls in one — the user would reach
+   * for it to arrange letters and have to correct the position afterwards.
+   *
+   * ## The five shapes
+   *
+   * `u` is the glyph's position across the word — `i / (n − 1)`, running 0 → 1,
+   * and `0` for a single glyph that has no span to walk. `A` is `rise`.
+   *
+   *  - `off` — `0`, returned before any arithmetic runs
+   *  - `random` — `A · (2r − 1)`, `r = glyphRandom(i, riseSeed, 'rise')`
+   *  - `wave` — `A · sin(2π · (u · riseCycles + risePhase/360))`
+   *  - `ramp` — `A · (2u − 1)`, first letter at `−A` and last at `+A`
+   *  - `arch` — `A · (1 − 2·(2u − 1)²)`, ends at `−A` and middle at `+A`
+   *  - `zigzag` — `A · (i even ? 1 : −1)`
+   *
+   * `random` reads its own named channel rather than sharing one with blink or
+   * scatter, so the letter that rises highest is not also the letter that blinks
+   * off on every word. See `rise.ts`.
+   */
+  riseShape: VtRiseShape
+  rise: number
+  riseCycles: number
+  risePhase: number
+  riseSeed: number
+  /**
    * The appearance stack — multiple fills, multiple strokes, extrudes, painted
    * BACK TO FRONT. Illustrator's Appearance panel, in a config.
    *
@@ -820,6 +896,17 @@ export const DEFAULT_CONFIG: VectorTypeConfig = {
   stretch: 1,
   stretchY: 1,
   fit: 'off',
+  // Every letter on the baseline. `vtRiseDy` returns 0 before it hashes or
+  // multiplies anything at this shape, and 0 added to `dy` changes no pixel, so
+  // a config saved before this block existed renders byte-identically.
+  riseShape: 'off',
+  rise: 0,
+  // 1 is the readable default the moment Wave is switched on — one full period
+  // across the word, a single up and a single down. `riseCycles: 0` would be a
+  // shape that does nothing, which is why VT_RISE_CYCLES_MIN is 0.25.
+  riseCycles: 1,
+  risePhase: 0,
+  riseSeed: 0,
   // One white fill and nothing else — the same picture the legacy
   // `fill: '#ffffff'` + `strokeWidth: 0` default painted, said in the stack's
   // vocabulary. The default config's PIXELS are unchanged by this task.
@@ -877,6 +964,18 @@ export { VT_STRETCH_MIN, VT_STRETCH_MAX, VT_HEIGHT_MIN, VT_HEIGHT_MAX }
 export const VT_FITS = ['off', 'width'] as const
 export type VtFit = (typeof VT_FITS)[number]
 /**
+ * The per-glyph baseline shapes. `'off'` is first because it is the default and
+ * the only member that costs nothing: `rise.ts` returns before it hashes or
+ * multiplies anything, so a config that never touched this block renders the
+ * pixels it always rendered.
+ *
+ * The identifiers are internal and the panel must never show them raw — the
+ * select carries `optionLabels` so it reads Off / Random / Wave / Ramp / Arch /
+ * Zigzag. See the doc comment on `riseShape` for what each one draws.
+ */
+export const VT_RISE_SHAPES = ['off', 'random', 'wave', 'ramp', 'arch', 'zigzag'] as const
+export type VtRiseShape = (typeof VT_RISE_SHAPES)[number]
+/**
  * The bound on `arc`, in degrees of total sweep.
  *
  * A full turn is the natural end of the range rather than a taste call: at
@@ -888,6 +987,37 @@ export type VtFit = (typeof VT_FITS)[number]
  * only the merge honours is not a bound.
  */
 export const VT_ARC_MAX = 360
+/**
+ * The bound on `rise`, as a fraction of the em, per direction.
+ *
+ * `1` is a whole type size of lift — a letter clear of the one beside it, its
+ * baseline sitting where the next letter's cap line is. That is already past the
+ * point where the word reads as a word, so it is the end of the useful range
+ * rather than an arbitrary stop, and it keeps the slider's travel spent on the
+ * 0…0.3 region where the effect is a designed bounce instead of a scatter.
+ *
+ * Like `VT_SKEW_MAX` and `VT_ARC_MAX`, the clamp lives at the RENDER choke point
+ * (`vtRiseDy`) and not only in `mergeConfig` — a motion track's `from`/`to` are
+ * arbitrary numbers that never pass through the merge.
+ */
+export const VT_RISE_MAX = 1
+/**
+ * The Wave shape's cycle range — how many full sine periods are walked across
+ * the word.
+ *
+ * The floor is a QUARTER cycle rather than zero because zero is not a wave: at
+ * `0` every glyph samples the same phase and the shape collapses into a flat
+ * offset, which is a dead control wearing a live one's clothes. A quarter is the
+ * smallest arrangement that still moves the letters relative to each other — one
+ * rise across the whole word. The ceiling is where a period stops spanning
+ * enough letters to be seen as a curve at all and the run reads as noise; past
+ * `8` the Random shape is the honest way to ask for that.
+ */
+export const VT_RISE_CYCLES_MIN = 0.25
+export const VT_RISE_CYCLES_MAX = 8
+/** Seeds are small integers so re-rolling the arrangement is a short drag,
+ *  matching `VT_STAGGER_SEED_MAX` rather than inventing a second range. */
+export const VT_RISE_SEED_MAX = 999
 /** Export heights the motion block accepts, matching gradientfx's. */
 export const VT_MOTION_SIZES = [1080, 1440, 2160] as const
 
@@ -1844,6 +1974,19 @@ export function mergeConfig(raw: unknown): VectorTypeConfig {
     stretch: clamp(num(o.stretch, d.stretch), VT_STRETCH_MIN, VT_STRETCH_MAX),
     stretchY: clamp(num(o.stretchY, d.stretchY), VT_HEIGHT_MIN, VT_HEIGHT_MAX),
     fit: oneOf(o.fit, VT_FITS, d.fit),
+    // An unrecognised shape falls back to `'off'` rather than to the nearest
+    // guess, so a config written by a newer build opens as the run it was set
+    // on rather than as a shape this build picked for it.
+    riseShape: oneOf(o.riseShape, VT_RISE_SHAPES, d.riseShape),
+    // `rise` is NOT clamped here, for exactly the reason given at `skewX`
+    // a dozen lines above: a motion track's `from`/`to` are arbitrary numbers
+    // that never pass through this merge, so a bound only this entrance honours is
+    // not a bound. `vtRiseDy` clamps at the render choke point, which the merge
+    // path and the motion path both go through. Same for `riseCycles`.
+    rise: num(o.rise, d.rise),
+    riseCycles: num(o.riseCycles, d.riseCycles),
+    risePhase: num(o.risePhase, d.risePhase),
+    riseSeed: num(o.riseSeed, d.riseSeed),
     appearance,
     motion: moves === motion.moves ? motion : { ...motion, moves },
   }

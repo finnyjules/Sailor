@@ -35,6 +35,11 @@ import {
   VT_FITS,
   VT_HEIGHT_MAX,
   VT_HEIGHT_MIN,
+  VT_RISE_CYCLES_MAX,
+  VT_RISE_CYCLES_MIN,
+  VT_RISE_MAX,
+  VT_RISE_SEED_MAX,
+  VT_RISE_SHAPES,
   VT_SKEW_MAX,
   VT_STAGGER_DELAY_MAX,
   VT_STAGGER_ORDERS,
@@ -256,6 +261,26 @@ const scatterSettles = (c: VectorTypeConfig) =>
 const scatterWanders = (c: VectorTypeConfig) =>
   scattersAtAll(c) && (c.motion?.scatter?.mode ?? 'settle') === 'wander'
 
+/** A baseline shape has been picked. `riseShape: 'off'` is the shipped default
+ *  AND the off switch — the same arrangement blink's `amount: 0` and scatter's
+ *  `spread: 0` have — so this is one question, not two. Optional-chained for the
+ *  same reason as `blinksAtAll`: a control list can be asked for from a raw
+ *  stored blob, before `mergeConfig` has filled the key in. */
+const riseShapeChosen = (c: VectorTypeConfig) => (c?.riseShape ?? 'off') !== 'off'
+
+/** A shape is picked AND it is moving something. The gate the shape-specific
+ *  knobs take, never the one the Rise slider takes — see the asymmetry note at
+ *  the controls below. */
+const risesAtAll = (c: VectorTypeConfig) => riseShapeChosen(c) && (c?.rise ?? 0) !== 0
+
+/** The two shape-specific knobs. Cycles and Phase describe a wave and nothing
+ *  else; a seed only re-rolls a random arrangement. Shown on any other shape
+ *  they would sit RIGHT NEXT to the select that makes them dead, which reads as
+ *  the select being broken — the same trade `scatterSettles`/`scatterWanders`
+ *  make one section down. */
+const riseIsWave = (c: VectorTypeConfig) => risesAtAll(c) && c?.riseShape === 'wave'
+const riseIsRandom = (c: VectorTypeConfig) => risesAtAll(c) && c?.riseShape === 'random'
+
 const slider = (
   key: string, label: string, min: number, max: number, step: number, group: string,
   def: number, hint?: string, extra: Partial<VtControl> = {},
@@ -352,6 +377,51 @@ export const VT_CONTROLS: VtControl[] = [
   select('fit', 'Fit', [...VT_FITS], DEFAULT_CONFIG.fit, 'Layout',
     'Width: solves Stretch so the run fills the output width (minus a small margin) — the Stretch dial shows the solved value and follows the text. Off: Stretch is yours.',
     { animatable: false }),
+
+  // ── BASELINE — one letter at its own height, which skew cannot do ─────────
+  // Skew shears the WHOLE RUN by design (see its hint above), so between "the
+  // word tilts as one piece" and "every letter sits exactly on the baseline"
+  // there was nothing. This is the missing middle: a rigid per-glyph shift along
+  // the glyph's own baseline normal, which is why on an arc'd run a raised
+  // letter leaves ITS baseline rather than sliding down the screen.
+  //
+  // THE GATES ARE DELIBERATELY ASYMMETRIC, and it is worth saying why, because
+  // the obvious arrangement is a trap. `risesAtAll` asks for a shape AND a
+  // non-zero Rise. Hanging the Rise slider off it would hide the only control
+  // that can make `rise` non-zero: from the shipped default a user picks a
+  // shape, sees nothing happen, and has no dial to reach for. So Rise is gated
+  // on the SHAPE ALONE (`riseShapeChosen`) — it is the shape's companion, the
+  // one knob that must appear the instant a shape is picked — and only the
+  // shape-SPECIFIC knobs (Cycles, Phase, Baseline seed) take the stricter
+  // `risesAtAll`, since with the amount at 0 they describe a pattern that is
+  // provably invisible and the fix is sitting immediately above them.
+  //
+  // Every control is therefore reachable from the default state by picking a
+  // shape and then raising Rise; nothing is reachable only by editing the file.
+  select('riseShape', 'Baseline shape', [...VT_RISE_SHAPES], DEFAULT_CONFIG.riseShape, 'Layout',
+    'The pattern the letters sit in, up and down the baseline. Random gives every letter its own height; Wave rolls them smoothly up and down across the word; Ramp climbs steadily from the first letter to the last; Arch lifts the middle and drops the two ends; Zigzag puts every other letter up and the rest down. Off keeps the whole run on one baseline.',
+    // A pattern, not a point on a scale — the same reason every other select
+    // here opts out. Tweening 'arch' towards 'zigzag' interpolates nothing.
+    {
+      animatable: false,
+      // Positional, paired to `VT_RISE_SHAPES` — the row reads `optionLabels[i]`
+      // for `options[i]`. Sentence case, never the raw stored identifiers.
+      optionLabels: ['Off', 'Random', 'Wave', 'Ramp', 'Arch', 'Zigzag'],
+    }),
+  slider('rise', 'Rise', -VT_RISE_MAX, VT_RISE_MAX, 0.01, 'Layout', DEFAULT_CONFIG.rise,
+    'How far the letters move off the baseline, as a fraction of the type size rather than a pixel count — so the pattern keeps its proportion when Size changes, and 0.25 is a quarter of the type size at every size. Positive lifts the pattern; negative flips it, so an arch becomes a bowl and a climb becomes a fall. At 0 nothing moves, whichever shape is picked.',
+    { when: riseShapeChosen }),
+  slider('riseCycles', 'Cycles', VT_RISE_CYCLES_MIN, VT_RISE_CYCLES_MAX, 0.25, 'Layout', DEFAULT_CONFIG.riseCycles,
+    'How many full ups-and-downs the wave makes across the word: 1 is a single rise and fall, 2 is two, and a quarter of a cycle is one plain climb. Higher values ripple the word rather than rolling it.',
+    { when: riseIsWave }),
+  slider('risePhase', 'Phase', 0, 360, 1, 'Layout', DEFAULT_CONFIG.risePhase,
+    'Slides the wave along the word, in degrees, so different letters sit at the crests — the shape does not change, only which letter is at the top. 180 puts the dips where the peaks were; 360 is back where it started.',
+    { when: riseIsWave }),
+  slider('riseSeed', 'Baseline seed', 0, VT_RISE_SEED_MAX, 1, 'Layout', DEFAULT_CONFIG.riseSeed,
+    'Re-rolls which letter gets which height, without changing how far apart they sit. The same seed always gives the same arrangement, which is what makes the export match the preview.',
+    // Interpolating a seed is nonsense: it would sweep the word through every
+    // arrangement between two pictures rather than moving between them.
+    { animatable: false, when: riseIsRandom }),
 
   // --- Paint ----------------------------------------------------------------
   // The ACTIVE APPEARANCE LAYER's own keys, declared once under the `layer.`
@@ -741,6 +811,8 @@ SKEW LEANS THE WHOLE RUN, and it is the CRUDER way to slant type. \`skewX\` shea
 ARC BENDS THE BASELINE. \`arc\` is the total sweep in DEGREES, not a radius: 0 is a straight line, positive arches the word upward like a rainbow, negative bowls it downward, and ±360 closes the run into a full ring. Reach for it whenever the user asks for curved, arched, bowed, circular or badge-style type. Only the BASELINE bends — every letter is moved onto the curve and turned to follow it, so the letterforms and the letter spacing are exactly what they were on the straight run, and there is no separate radius to set: the word keeps its own length, so a longer word on the same sweep simply describes a bigger circle. A gentle headline arch is roughly 20 to 60; a half-circle is 180; a seal or a badge is at or near 360. Combine it with \`skewX\` freely — the run bends first and the whole bent composition then leans.
 
 STRETCH IS TYPOGRAPHIC, NOT A SCALE. \`stretch\` (width) and \`stretchY\` (height) redraw the word the way a designer draws a wider, narrower, taller or squatter cut: counters and spacing take the change, stems and crossbars keep their weight, rounds flatten their sides, every letter keeps the same x-height. For "make the letters wider" reach for \`stretch\`; for cartoon squash-and-stretch use the scaleX/scaleY motion instead. Move ONE dial at a time — the engine is proven at single-axis extremes (Stretch 0.6–1.8, Height 0.6–2.0) and the studio eases the second dial when both are pushed. \`fit\` set to "width" makes the run fill the box; then \`stretch\` follows the text and is not yours to set.
+
+BASELINE PUTS EVERY LETTER AT ITS OWN HEIGHT, and it is the answer whenever \`skewY\` looks like one. \`riseShape\` is the pattern and the switch: "off" is the default, and picking a shape gives each letter its own position up or down the baseline — reach for it whenever the user asks for letters at different heights, bouncing or jumping letters, a ransom-note or hand-lettered look, letters off the baseline, letters that do not line up, or a wavy word. \`skewY\` is the WRONG answer to every one of those: it tilts the whole run as one piece, so the composition leans while every letter stays exactly on the one baseline it shares with its neighbours. The five shapes are "random" (each letter its own height), "wave" (a smooth roll up and down across the word), "ramp" (a steady climb from the first letter to the last), "arch" (the middle lifted, both ends dropped) and "zigzag" (every other letter up, the rest down). \`rise\` is HOW FAR, as a fraction of the type size rather than a pixel count, so a design holds its proportions at any \`size\` — 0 moves nothing whatever the shape is, positive lifts the pattern and negative flips it, turning an arch into a bowl and a climb into a fall; 0.05 is a subtle unevenness and 0.3 is letters visibly bouncing. \`riseCycles\` is how many full ups-and-downs a wave makes across the word and \`risePhase\` slides that wave along in degrees; both apply to "wave" only. \`riseSeed\` re-rolls the random arrangement without changing how far the letters spread, and applies to "random" only. Only the letters move — the spacing, the letterforms and the run's measured width are untouched, so this is a baseline shift and not a layout change — and on an arc'd run a raised letter leaves ITS OWN baseline, outward from the curve, rather than sliding down the screen. Combine it with \`arc\`, \`stretch\` or a scatter freely; they each act on something different.
 
 STAGGER MAKES IT KINETIC. \`motion.stagger.delay\` is the gap in seconds between one glyph and the next; at 0 the whole word animates as one, and raising it turns any animated axis into a wave that travels across the word. \`motion.stagger.order\` picks which glyph leads — forward, reverse, center (middle outwards), edges (outermost inwards) or random — and \`motion.stagger.seed\` re-rolls the random one. Reach for these when the user asks for letters to cascade, ripple, or come in one at a time.
 

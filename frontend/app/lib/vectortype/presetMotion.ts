@@ -123,6 +123,10 @@ import {
   vtScatterDelta,
   vtScatterStillTime,
 } from './scatter'
+// The FIFTH source, and the only STATIC one — an arrangement rather than a
+// movement. Pure arithmetic over `./random`, takes no clock, and its `Active`
+// gate is false for every config saved before the feature existed.
+import { vtRiseActive, vtRiseDy } from './rise'
 
 /** A one-sided reveal of the glyph's own box: `amount` is the fraction hidden
  *  from `side`. Structurally `UnitState['clip']`, restated as a named type
@@ -143,7 +147,7 @@ export interface VtGlyphClip {
  *
  * | field            | unit                              | rest  |
  * |------------------|-----------------------------------|-------|
- * | `dx`, `dy`       | OUTPUT PIXELS (y-DOWN, like canvas), along the GLYPH'S OWN axes — `dy` is a baseline shift, so on an arc'd run it moves the letter off its own baseline rather than down the screen (`vtGlyphOffset`). Identical on a straight run. | 0   |
+ * | `dx`, `dy`       | OUTPUT PIXELS (y-DOWN, like canvas), along the GLYPH'S OWN axes — `dy` is a baseline shift, so on an arc'd run it moves the letter off its own baseline rather than down the screen (`vtGlyphOffset`). Identical on a straight run. `dy` also carries a STATIC term (see below). | 0 (`dy`: 0 ONLY while the baseline block is off) |
  * | `scale`          | multiplier, uniform               | 1     |
  * | `scaleX`,`scaleY`| extra per-axis multipliers (flips) | 1     |
  * | `rotate`         | degrees, clockwise                | 0     |
@@ -155,6 +159,28 @@ export interface VtGlyphClip {
  * `blur`, `clip`, `scaleX/scaleY` and `axes` are PRODUCED here and consumed by
  * the canvas/SVG renderers in later tasks. They are always present (0 / null /
  * `{}` at rest) so a consumer never has to distinguish "absent" from "neutral".
+ *
+ * ## `dy` IS NO LONGER MOTION ALONE — and it can be non-zero at rest
+ *
+ * Every other field in that table is motion: at `t = 0` with nothing animated it
+ * sits at its rest value. `dy` no longer does. It now also carries the per-glyph
+ * BASELINE RISE from `./rise.ts` — a STATIC arrangement, not a movement, read
+ * from `cfg.riseShape` / `cfg.rise` with no clock at all — so a run with a
+ * baseline shape switched on emits a non-zero, time-INVARIANT `dy` on a frame
+ * with no motion in it whatsoever.
+ *
+ * The consequence, stated because it invalidates an assumption this file used to
+ * license: **anything that inferred "this frame is at rest / unanimated" from
+ * `dy === 0` is now wrong.** A still frame's `dy` is only 0 while the baseline
+ * block is off — which is the shipped default, so every config saved before the
+ * feature is byte-identical, but a new one need not be. Ask `vtIsAnimated` (or
+ * `vtRiseActive`) whether something moves; do not read it off `dy`.
+ *
+ * The identity checks in `canvas.ts` (`still = !tr.dx && !tr.dy && …`) are the
+ * RIGHT shape for this: they ask "is this transform the identity", which a risen
+ * glyph's is not, and a non-zero `dy` correctly sends it down the transforming
+ * path. It is a check keyed on "does this frame ANIMATE" that would now be
+ * reading the wrong number.
  */
 export interface VtGlyphMotion extends VtGlyphTransform {
   scaleX: number
@@ -830,6 +856,19 @@ export function presetTransform(
  * the letters find their weight one after another is exactly what the stagger is
  * for.
  *
+ * ## The BASELINE RISE is the fifth source, and it has no clock at all
+ *
+ * `./rise.ts` returns a per-glyph `dy` in output pixels from `cfg.riseShape` /
+ * `cfg.rise` alone — where the letter SITS, not what it does. It is summed into
+ * `dy` with the tracks' and the presets' offsets, by the same rule that already
+ * governs every spatial channel here: offsets ADD, both operands are 0 at rest,
+ * so a run with only one of them is bit-identical to what that one produced
+ * alone. That is also why it does not need a clock: an arrangement evaluated at
+ * every `t` to the same number is the same picture whether or not anything moves.
+ *
+ * It is the one thing in this function that can be non-zero on a completely
+ * unanimated frame — see the note on `dy` in `VtGlyphMotion`'s doc above.
+ *
  * This is the function every renderer should call. `glyphTransform` (tracks only)
  * and `presetTransform` (presets only) remain exported for tests and for callers
  * that genuinely want one source.
@@ -843,7 +882,14 @@ export function vtGlyphMotion(
   env?: VtGlyphEnv | null,
 ): VtGlyphMotion {
   const tr = glyphTransform(cfg, t, index, count)
-  const pr = presetTransform(cfg, t, index, count, em ?? vtEmSize(cfg, t), env)
+  // Hoisted, because TWO consumers now need it and `vtEmSize` is not free — it
+  // walks every move's tracks looking for `size`, once per glyph per frame. The
+  // header's own rule about not resolving `size` twice applies to resolving it
+  // twice in one call just as much as to resolving it per-glyph: two resolutions
+  // are also two chances to disagree, and the offsets must be scaled by the same
+  // em the geometry was.
+  const emPx = em ?? vtEmSize(cfg, t)
+  const pr = presetTransform(cfg, t, index, count, emPx, env)
   const blink = vtResolveBlink(cfg, t)
   // `vtBlinkActive` is the cheap gate: with blink off (the shipped default) the
   // per-glyph hashing below never runs, so every config written before this
@@ -860,9 +906,31 @@ export function vtGlyphMotion(
     const resting = env?.resting ?? (cfg?.axes as Record<string, number> | undefined) ?? null
     axes = addAxes(pr.axes, vtScatterDelta(scatter, isNum(gt) ? gt : 0, index, env?.axes, resting))
   }
+  // THE BASELINE RISE — the fifth source, and the only one that takes no clock.
+  //
+  // HERE rather than in the renderers because this is the one function all five
+  // outputs go through: the canvas preview, the PNG bake, the video bake, the
+  // SVG export and the node thumbnail all read `dy` off the same frame, so one
+  // line moves the letters in all five and there is nowhere for the arithmetic
+  // to drift apart. A per-renderer offset would be five copies of it.
+  //
+  // Into `dy` rather than a new channel because `dy` is measured along the
+  // GLYPH'S OWN axes (`vtGlyphOffset`): on an arc'd run a risen letter leaves
+  // ITS baseline — outward from the ring — instead of sliding straight down the
+  // screen, which is what "raise this letter" means typographically. A separate
+  // screen-space channel would have to relearn that, and would have to be
+  // plumbed through all five renderers to be seen at all.
+  //
+  // `vtRiseActive` is the cheap gate, exactly as blink's and the scatter's are:
+  // shape `off` is the shipped default, so a config written before this feature
+  // pays no hashing and adds a literal 0 — byte-identical output.
+  const riseDy = vtRiseActive(cfg) ? vtRiseDy(cfg, index, count, emPx) : 0
   return {
     dx: tr.dx + pr.dx,
-    dy: tr.dy + pr.dy,
+    // ADDS, like every other spatial channel here: the rise is where the letter
+    // sits, the motion is what it does from there, and a letter that both rises
+    // and slides must do both. See the header on `dy` no longer resting at 0.
+    dy: tr.dy + pr.dy + riseDy,
     scale: tr.scale * pr.scale,
     scaleX: pr.scaleX,
     scaleY: pr.scaleY,

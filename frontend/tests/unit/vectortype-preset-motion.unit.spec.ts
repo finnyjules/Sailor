@@ -907,3 +907,93 @@ describe('at-model parity — a 2026-09-03 (phase/play) document merges to the s
     expect(m.opacity).not.toBeCloseTo(aAlone.opacity, 5)
   })
 })
+
+/**
+ * THE BASELINE RISE, where it meets this file — `./rise.ts`'s own spec pins the
+ * shapes; these four pin the WIRING, which is a different question and the one
+ * with the silent failure modes.
+ *
+ * The rise is unlike every other source `vtGlyphMotion` composes: it takes no
+ * clock. It is where a letter SITS, not what it does. That makes it the one
+ * thing here that can put a non-zero number on a frame with no motion in it at
+ * all — so the guarantee that matters most is the second test, that a config
+ * saved before the feature existed still emits EXACTLY the `dy` it always did.
+ */
+describe('vtGlyphMotion — baseline rise', () => {
+  /** `cfg()` plus the five baseline keys, through the real merge. */
+  const risen = (patch: Partial<VectorTypeConfig>): VectorTypeConfig => cfg({ size: 100, ...patch })
+
+  it('a ramp spreads dy across the run, at the right size for the em', () => {
+    const c = risen({ riseShape: 'ramp', rise: 0.5 })
+    const n = WORD.length // 6
+    const dys = Array.from({ length: n }, (_, i) => vtGlyphMotion(c, 0, i, n).dy)
+
+    // Ramp is `A · (2u − 1)` up-positive, u = i/(n−1); `dy` is y-DOWN, so the
+    // FIRST letter (at −A, the bottom) has the LARGEST positive dy. Written as
+    // exact arithmetic rather than "roughly descending" — a sign flip or an
+    // off-by-one in `u` would still descend.
+    for (let i = 0; i < n; i += 1) {
+      expect(dys[i]!).toBeCloseTo(-(2 * (i / (n - 1)) - 1) * 0.5 * 100, 9)
+    }
+    // Genuinely spread, not six copies of one number.
+    expect(new Set(dys.map(v => v.toFixed(6))).size).toBe(n)
+    expect(dys[0]!).toBeCloseTo(50, 9)
+    expect(dys[n - 1]!).toBeCloseTo(-50, 9)
+
+    // TRAP 1, one level up: `rise` is a fraction of the EM, so doubling Size
+    // doubles every offset. A single-size assertion cannot tell 0.5 from 0.5·em.
+    const big = risen({ riseShape: 'ramp', rise: 0.5, size: 200 })
+    for (let i = 0; i < n; i += 1) {
+      expect(vtGlyphMotion(big, 0, i, n).dy).toBeCloseTo(dys[i]! * 2, 9)
+    }
+  })
+
+  it('the DEFAULT config emits dy EXACTLY 0 — every design saved before this feature is untouched', () => {
+    const c = cfg({ size: 100 })
+    expect(c.riseShape).toBe('off')
+    expect(c.rise).toBe(0)
+    // `toBe`, not `toBeCloseTo`: the promise is byte-identical output, and the
+    // way to break it is to route an off config through arithmetic that returns
+    // a −0 or a 1e−17 instead of returning before touching it.
+    for (const i of [0, 1, 2, 3, 4, 5]) {
+      expect(vtGlyphMotion(c, 0, i, WORD.length).dy).toBe(0)
+    }
+    // And at a non-zero time too, so this is not just "nothing has started yet".
+    expect(vtGlyphMotion(c, 1.7, 2, WORD.length).dy).toBe(0)
+  })
+
+  it('COMPOSES with motion rather than replacing it — dy is the sum of the two measured alone', () => {
+    const T = 1
+    const I = 2
+    const N = WORD.length
+    // A preset that actually writes `dy`. Its own numbers do not matter here;
+    // what matters is that neither source loses when both are live.
+    const moving = preset('in', { presetId: 'slide-up', duration: 2 }, { size: 100 })
+    const still = risen({ riseShape: 'ramp', rise: 0.5 })
+    const both = preset('in', { presetId: 'slide-up', duration: 2 }, { size: 100, riseShape: 'ramp', rise: 0.5 })
+
+    const motionDy = vtGlyphMotion(moving, T, I, N).dy
+    const riseDy = vtGlyphMotion(still, T, I, N).dy
+    // Neither operand is 0, or the sum would hold for a source that silently won.
+    expect(motionDy).not.toBe(0)
+    expect(riseDy).not.toBe(0)
+    expect(vtGlyphMotion(both, T, I, N).dy).toBeCloseTo(motionDy + riseDy, 9)
+
+    // The rise is STATIC: the same glyph gets the same rise term at a different
+    // instant, while the motion term has moved on.
+    const T2 = 1.5
+    expect(vtGlyphMotion(both, T2, I, N).dy - vtGlyphMotion(moving, T2, I, N).dy).toBeCloseTo(riseDy, 9)
+    expect(vtGlyphMotion(moving, T2, I, N).dy).not.toBeCloseTo(motionDy, 6)
+  })
+
+  it('shape Off is the switch — a big rise with no shape still emits nothing', () => {
+    const c = risen({ riseShape: 'off', rise: 0.8 })
+    for (const i of [0, 1, 2, 3, 4, 5]) {
+      expect(vtGlyphMotion(c, 0, i, WORD.length).dy).toBe(0)
+    }
+    // The same rise WITH a shape does move — proof the previous assertion is
+    // the shape gating and not the rise having been dropped by the merge.
+    expect(c.rise).toBe(0.8)
+    expect(vtGlyphMotion(risen({ riseShape: 'ramp', rise: 0.8 }), 0, 0, WORD.length).dy).not.toBe(0)
+  })
+})
