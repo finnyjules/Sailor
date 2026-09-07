@@ -1189,6 +1189,301 @@
       ]
     },
     {
+      "name": "no vary keys at all — both sides fall back to their own defaults",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 4,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 12,
+        "stepScale": 0.8,
+        "stepOpacity": 0.9
+      },
+      "expected": [
+        {
+          "dx": 0.6000000000000001,
+          "dy": 0,
+          "drot": 36,
+          "dscale": 0.5120000000000001,
+          "dopacity": 0.7290000000000001,
+          "weight": 1,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.4,
+          "dy": 0,
+          "drot": 24,
+          "dscale": 0.6400000000000001,
+          "dopacity": 0.81,
+          "weight": 0.6666666666666666,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 12,
+          "dscale": 0.8,
+          "dopacity": 0.9,
+          "weight": 0.3333333333333333,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "colour on with no palette, spread or strength — default palette and spread",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 4,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 0.9,
+        "stepOpacity": 1,
+        "varyColor": true
+      },
+      "expected": [
+        {
+          "dx": 0.6000000000000001,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.7290000000000001,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": "#f59f00",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.4,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.81,
+          "dopacity": 1,
+          "weight": 0.6666666666666666,
+          "tint": "#4c6ef5",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.9,
+          "dopacity": 1,
+          "weight": 0.3333333333333333,
+          "tint": "#f59f00",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": "#4c6ef5",
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "falloff with no centre or reach — default falloff dials",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 5,
+        "countY": 1,
+        "spacingX": 0.15,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 0.7,
+        "stepOpacity": 1,
+        "varyMode": "falloff"
+      },
+      "expected": [
+        {
+          "dx": 0.6,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.44999999999999996,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.3,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.15,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.8366600265340756,
+          "dopacity": 1,
+          "weight": 0.5,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "random with no seed — default seed",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 5,
+        "countY": 1,
+        "spacingX": 0.15,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 0.7,
+        "stepOpacity": 1,
+        "varyMode": "random"
+      },
+      "expected": [
+        {
+          "dx": 0.6,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.815429009833686,
+          "dopacity": 1,
+          "weight": 0.14301601168699563,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.44999999999999996,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.57129967838212,
+          "dopacity": 1,
+          "weight": 0.5232040972914547,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.3,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.87247847045526,
+          "dopacity": 1,
+          "weight": 0.19123476883396506,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.15,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.8929010090120372,
+          "dopacity": 1,
+          "weight": 0.3175988623406738,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
       "name": "grid mirrorY",
       "aspect": 1,
       "cloner": {

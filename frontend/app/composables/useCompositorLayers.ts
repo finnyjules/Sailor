@@ -34,6 +34,9 @@ import {
   hasPaint, resolvePaint, OBJECT_SHADER_FIELD_PX, type ShaderFieldFrameCtx,
 } from '~/lib/paint/resolve'
 import { drawQuadWarp, type Quad } from '~/lib/compositor/warp'
+// The repo's one hex-alpha stripper — the same helper the 3D vary path uses before
+// handing a swatch to THREE.Color (see `tintScratch` below).
+import { stripAlpha } from '~/lib/color/convert'
 import { polygonPathData, starPathData } from '~/lib/compositor/polygonGeometry'
 import { resolveGroupCascade, type LayerGroup } from '~/lib/compositor/layerGroups'
 import { layoutExpressive, type ExpressiveParams } from '~~/shared/text-layout/expressive'
@@ -2143,7 +2146,13 @@ export function tintScratch(octx: CanvasRenderingContext2D, tint: string, streng
   octx.setTransform(1, 0, 0, 1, 0, 0)
   octx.globalCompositeOperation = 'source-atop'
   octx.globalAlpha = a
-  octx.fillStyle = tint
+  // STRIP THE SWATCH'S OWN ALPHA. `sanitizeVaryPalette` admits 8-digit `#rrggbbaa`,
+  // and canvas honours it — so an `#ff000080` swatch would multiply its 0.5 into
+  // `globalAlpha` and tint at HALF the strength the user dialled. Neither of the other
+  // two paths does that: the Python mirror's hex parser reads six digits, and the 3D
+  // path calls this same `stripAlpha` before `THREE.Color.set` (materials.ts). The
+  // strength dial is the ONE place tint amount is expressed, on all three.
+  octx.fillStyle = stripAlpha(tint)
   octx.fillRect(0, 0, octx.canvas.width, octx.canvas.height)
   octx.restore()
 }

@@ -297,6 +297,20 @@ describe('tintScratch', () => {
     expect(ops[2]).toContain('a=1 op=source-atop fill=#ff0000')
   })
 
+  it('drops an 8-digit swatch\'s own alpha — same wash as the 6-digit colour', () => {
+    // `sanitizeVaryPalette` admits `#rrggbbaa` and canvas honours it, so an
+    // unstripped swatch would fold its own alpha into globalAlpha and tint at less
+    // than the dialled strength — while the Python mirror (six-digit hex parser)
+    // and the 3D path (stripAlpha before THREE.Color.set) both ignore it. Three
+    // renderings of one palette must not disagree about how strong a tint is.
+    const eight = makeCtx(8, 8)
+    tintScratch(eight.ctx, '#ff000080', 0.5)
+    const six = makeCtx(8, 8)
+    tintScratch(six.ctx, '#ff0000', 0.5)
+    expect(eight.ops).toEqual(six.ops)
+    expect(eight.ops[2]).toContain('a=0.5 op=source-atop fill=#ff0000')
+  })
+
   it('restores the transform, composite mode and alpha it found', () => {
     const { ctx } = makeCtx()
     ctx.translate(2, 3)

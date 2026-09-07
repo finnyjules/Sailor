@@ -28,6 +28,29 @@ const FIXTURE = fileURLToPath(new URL('../fixtures/cloner-vary-parity.json', imp
 
 const C = (over: Partial<Cloner>): Cloner => ({ ...DEFAULT_CLONER, enabled: true, ...over })
 
+/** Every vary key a saved cloner may carry. */
+const VARY_KEYS = [
+  'varyMode', 'varySeed', 'varyFalloffCenter', 'varyFalloffRadius',
+  'varyColor', 'varyPalette', 'varyColorSpread', 'varyColorStrength',
+] as const
+
+/**
+ * A cloner with its vary keys REMOVED — anything `over` names is kept.
+ *
+ * This is what a cloner saved before Vary shipped actually looks like, and it is the
+ * only shape that makes each side's own fallback defaults observable: `varyOf`
+ * (composables/useCloner.ts) and `_vary_of` (comfy_extras/nodes_compositor.py) each
+ * substitute their own constants, and Python's `_DEFAULT_VARY` was a hand-copy that
+ * nothing cross-checked. Change a default on the JavaScript side and regenerate, and
+ * the Python mirror now goes red until it is changed too — same contract the pinned
+ * hash values and the whole-cloner cases already have.
+ */
+const noVary = (over: Partial<Cloner>): Cloner => {
+  const c = { ...C(over) } as Record<string, unknown>
+  for (const k of VARY_KEYS) if (!(k in over)) delete c[k]
+  return c as Cloner
+}
+
 /** JSON has no NaN/Infinity. A negative `stepScale` under a fractional exponent
  *  produces NaN in JS, and that IS part of the contract (see the Python guard),
  *  so encode it rather than losing it to `null`. */
@@ -162,6 +185,36 @@ const CASES: Case[] = [
       stepScale: 0.9,
     }),
   },
+  // ── Fallback defaults ────────────────────────────────────────────────────────
+  // Four cases whose cloners omit vary keys, so BOTH sides' defaults are what the
+  // fixture pins. Between them every field of `DEFAULT_VARY` / `_DEFAULT_VARY` reaches
+  // the output: mode and strength from the first (a bare pre-Vary cloner), palette and
+  // spread from the second, the two falloff dials from the third, seed from the fourth.
+  {
+    // A cloner saved before Vary existed: not one vary key on it.
+    name: 'no vary keys at all — both sides fall back to their own defaults',
+    aspect: 1,
+    cloner: noVary({ countX: 4, spacingX: 0.2, stepScale: 0.8, stepRotation: 12, stepOpacity: 0.9 }),
+  },
+  {
+    // Colour on, nothing else said: the DEFAULT palette and the DEFAULT spread are
+    // what draw the tints, and the default strength is what `tintStrength` reports.
+    name: 'colour on with no palette, spread or strength — default palette and spread',
+    aspect: 1,
+    cloner: noVary({ countX: 4, spacingX: 0.2, stepScale: 0.9, varyColor: true }),
+  },
+  {
+    // Falloff with neither dial set: the default centre and reach shape the weights.
+    name: 'falloff with no centre or reach — default falloff dials',
+    aspect: 1,
+    cloner: noVary({ countX: 5, spacingX: 0.15, stepScale: 0.7, varyMode: 'falloff' }),
+  },
+  {
+    // Random with no seed: the default seed is what the hash is drawn against.
+    name: 'random with no seed — default seed',
+    aspect: 1,
+    cloner: noVary({ countX: 5, spacingX: 0.15, stepScale: 0.7, varyMode: 'random' }),
+  },
   {
     // mirrorY: the grid fixture elsewhere only covers mirrorX.
     name: 'grid mirrorY',
@@ -195,6 +248,23 @@ describe('cloner vary cross-language fixture', () => {
   it('still matches the pinned fixture the Python mirror is measured against', () => {
     const pinned = JSON.parse(readFileSync(FIXTURE, 'utf8'))
     expect(actual).toEqual(pinned)
+  })
+
+  it('pins the fallback defaults through a cloner that carries no vary keys', () => {
+    // The guard on the guard: if `noVary` ever stopped deleting, these cases would carry
+    // the TypeScript defaults explicitly and Python would read them off the fixture
+    // instead of falling back — which is exactly the blind spot they exist to close.
+    const bare = actual.cases.filter((c) => c.name.startsWith('no vary keys')
+      || c.name.startsWith('colour on with no')
+      || c.name.startsWith('falloff with no')
+      || c.name.startsWith('random with no'))
+    expect(bare).toHaveLength(4)
+    const declared = new Set(bare.flatMap((c) => Object.keys(c.cloner)))
+    // Only the keys each case names on purpose survive; every other vary key is gone.
+    expect([...declared].filter((k) => k.startsWith('vary')).sort())
+      .toEqual(['varyColor', 'varyMode'])
+    // …and the defaults really do reach the output, so a changed default moves numbers.
+    expect(bare[1]!.expected.some((t) => t.tint !== null)).toBe(true)
   })
 
   it('covers a case with no vary at all, so the fixture also pins the zero-change path', () => {

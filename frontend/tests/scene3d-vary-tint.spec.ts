@@ -15,8 +15,30 @@ import { test, expect, type Page } from '@playwright/test'
 
 const SETTLE_MS = 3000
 
+const STANDARD = { type: 'standard', color: '#9aa3af', roughness: 0.45, metalness: 0 }
+
+/**
+ * Holographic foil — the DEEPEST injection chain of the seven tinted material types, and
+ * the reason this case exists. It injects into the vertex shader as well as the fragment
+ * one, and it consumes `#include <common>` in both — the very anchor `applyVaryTint`'s
+ * uniform declaration cannot use, which is why that declaration is prepended to the source
+ * instead (materials.ts, VARY_TINT_FRAG_PARS). Nothing static can tell you the two
+ * injections compose; only a compiler can.
+ *
+ * `holoStrength: 0` mutes the rainbow streak so the census reads the PALETTE rather than
+ * the foil's own spectrum. The streak's code is still in the compiled shader either way —
+ * a uniform at 0 is not a shader that was never built — so this costs the test nothing.
+ * A foil is metal (metalness pinned at 1), so the palette colour arrives as tinted
+ * specular; `holoGloss: 0` roughens it to 0.55 so it spreads over the face instead of
+ * collapsing into a highlight.
+ */
+const HOLOGRAPHIC = {
+  type: 'holographic', color: '#9aa3af',
+  holoStrength: 0, holoGloss: 0, holoFlakes: 0, holoBands: 3,
+}
+
 /** Six boxes in a row, cycling a four-colour palette: red, orange, green, blue, red, orange. */
-const cloneSet = (varyColor: 0 | 1) => ({
+const cloneSet = (varyColor: 0 | 1, material: Record<string, unknown> = STANDARD) => ({
   version: 1,
   background: '#202020',
   showFloor: false,
@@ -27,7 +49,7 @@ const cloneSet = (varyColor: 0 | 1) => ({
     params: { width: 0.7, height: 0.7, depth: 0.7 },
     modifiers: { cloneCount: 6, cloneMode: 0, cloneOffsetX: 1.0, varyColor, varyColorStrength: 1 },
     varyPalette: ['#e03131', '#f59f00', '#2f9e44', '#1971c2'],
-    material: { type: 'standard', color: '#9aa3af', roughness: 0.45, metalness: 0 },
+    material,
   }],
 })
 
@@ -107,4 +129,21 @@ test('an UNTINTED clone set is unaffected: clean console, the material own grey'
   // #9aa3af is a desaturated grey: essentially no strongly-hued pixels anywhere.
   expect(census.saturated, `unexpected colour in an untinted render: ${JSON.stringify(census)}`)
     .toBeLessThan(census.total * 0.005)
+})
+
+test('a tinted HOLOGRAPHIC clone set compiles and renders all four palette colours', async ({ page }) => {
+  // Seven material types advertise per-copy colour and, until this case, exactly one had
+  // ever been compiled. The shipped Critical (a mix reading an undeclared uniform) was
+  // type-INDEPENDENT and so is its fix — which is the argument for covering the hardest
+  // chain rather than all seven: see HOLOGRAPHIC above for why this is the hardest one.
+  const bad = watchConsole(page)
+  await openLab(page, cloneSet(1, HOLOGRAPHIC))
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+
+  const census = await paletteCensus(page, await snapshot(page))
+  expect(census.lit, 'nothing was drawn').toBeGreaterThan(census.total * 0.01)
+  for (const hue of ['red', 'orange', 'green', 'blue'] as const) {
+    expect(census[hue], `${hue} missing from the render (census: ${JSON.stringify(census)})`).toBeGreaterThan(200)
+  }
 })

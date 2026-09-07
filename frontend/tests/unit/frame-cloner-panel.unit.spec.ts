@@ -4,6 +4,52 @@ import { mount } from '@vue/test-utils'
 import Panel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
 import VaryPalette from '~/components/vue-canvas/VaryPalette.vue'
 import { DEFAULT_CLONER, expandClones, type Cloner } from '~/composables/useCloner'
+// THE 3D SCHEMA. The Studio inspector's Cloner card draws its Vary rows from
+// `MODIFIER_SPECS` through `scenePanelControls`, so reading them here is what keeps the
+// two surfaces speaking one language — see the "Vary copy is the 3D Studio schema" block.
+import { MODIFIER_SPECS } from '~/lib/scene3d/primParams'
+import { scenePanelControls } from '~/lib/scene3d/panelPresentation'
+import type { SceneDoc, SceneObject } from '~/lib/scene3d/config'
+
+const DOC = {
+  objects: [], background: '#000000', showFloor: false, camera: { fov: 45 }, lighting: {},
+} as unknown as SceneDoc
+
+/** A cloned primitive with the colour half on. `varyMode` 1 = random (reveals the seed),
+ *  2 = falloff (reveals centre + reach) — no single mode shows all three dials. */
+const scene3dObj = (varyMode: number): SceneObject => ({
+  id: 'o', kind: 'primitive', primitive: 'box',
+  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+  material: { type: 'standard', color: '#ffffff' },
+  modifiers: { cloneCount: 6, varyMode, varyColor: 1 },
+} as unknown as SceneObject)
+
+/** Every Vary row the 3D inspector actually draws, row key -> the label it shows. */
+const SCENE3D_VARY_LABELS: Record<string, string> = Object.fromEntries(
+  [1, 2].flatMap((m) => scenePanelControls(DOC, scene3dObj(m)))
+    .filter((r) => r.key.toLowerCase().includes('vary'))
+    .map((r) => [r.key, r.label]),
+)
+
+/** The 3D label for one row. Throws rather than comparing against `undefined`, so a row
+ *  renamed or gated away on that side fails loudly here instead of passing vacuously. */
+const label3d = (key: string): string => {
+  const l = SCENE3D_VARY_LABELS[key]
+  if (!l) throw new Error(`the 3D inspector draws no '${key}' row — its Vary schema moved under this test`)
+  return l
+}
+
+/** The stored option ids behind an index-valued vary modifier… */
+const optionIds = (key: string): string[] => {
+  const spec = MODIFIER_SPECS.find((sp) => sp.key === key)
+  if (!spec?.options?.length) throw new Error(`'${key}' is not an option row in MODIFIER_SPECS`)
+  return [...spec.options]
+}
+/** …and the words the user sees, derived exactly as `optionRowSpec` in
+ *  Scene3DStudioSurface.vue derives the 3D segmented buttons from those same ids. */
+const optionWords = (key: string): string[] =>
+  optionIds(key).map((o) => o[0]!.toUpperCase() + o.slice(1))
+const SPREAD_WORDS = optionWords('varyColorSpread')
 
 // `v-scrubnum` (drag-to-scrub on a number field) is registered by a Nuxt CLIENT
 // plugin — app/plugins/scrub-input.client.ts — which never runs under vitest, so
@@ -42,7 +88,7 @@ describe('Vary block', () => {
   it('offers all three drivers', () => {
     const w = mountWith()
     const labels = w.findAll('[data-test="vary-mode"] button').map((b) => b.text())
-    expect(labels).toEqual(['Sequence', 'Random', 'Falloff'])
+    expect(labels).toEqual(optionWords('varyMode'))
   })
 
   it('shows the seed only in random mode', () => {
@@ -89,39 +135,85 @@ describe('Vary block', () => {
   it('offers both colour spreads', () => {
     const w = mountWith({ varyColor: true })
     const labels = w.findAll('[data-test="vary-spread"] button').map((b) => b.text())
-    expect(labels).toEqual(['Cycle', 'Blend'])
+    expect(labels).toEqual(SPREAD_WORDS)
+  })
+
+  it('is absent at a single copy and present above it', () => {
+    // The 3D Studio gates the WHOLE Vary block on more than one copy (`varyOn`,
+    // lib/scene3d/controls.ts). Frame used to gate only on the cloner being enabled,
+    // so a 1x1 grid with colour on repainted its lone copy the first swatch — a user
+    // who learns "Vary varies across copies" in 3D met something else here.
+    const one = mountWith({ countX: 1, countY: 1, varyColor: true })
+    expect(one.find('[data-test="vary-block"]').exists()).toBe(false)
+    expect(one.text()).not.toContain('Vary')
+    expect(mountWith({ countX: 2, countY: 1 }).find('[data-test="vary-block"]').exists()).toBe(true)
+    expect(mountWith({ countX: 1, countY: 2 }).find('[data-test="vary-block"]').exists()).toBe(true)
+    // Radial counts the same way…
+    expect(mountWith({ mode: 'radial', count: 1 }).find('[data-test="vary-block"]').exists()).toBe(false)
+    expect(mountWith({ mode: 'radial', count: 3 }).find('[data-test="vary-block"]').exists()).toBe(true)
+    // …and the gate is the panel's OWN copy count, not countX*countY: a mirrored
+    // single column is still 2*1-1 = 1 copy, while a mirrored pair is 3.
+    expect(mountWith({ countX: 1, countY: 1, mirrorX: true }).find('[data-test="vary-block"]').exists()).toBe(false)
+    expect(mountWith({ countX: 2, countY: 1, mirrorX: true }).find('[data-test="vary-block"]').exists()).toBe(true)
   })
 })
 
-describe('Vary copy', () => {
-  // The vocabulary the 3D Studio inspector already ships, kept identical here.
-  it('captions the block Vary and the driver picker Pattern', () => {
-    const t = varyText(mountWith())
-    expect(t).toContain('Vary')
-    expect(t).toContain('Pattern')
-    // "Vary colour" — same vocabulary as the 3D Studio inspector's varyColor entry
-    // (frontend/app/lib/scene3d/primParams.ts), not the bare "Colour" this panel
-    // used to ship.
-    expect(t).toContain('Vary colour')
+describe('Vary copy is the 3D Studio schema, not a hand-copy of it', () => {
+  // A whole review round went into making these two surfaces read identically, and
+  // NOTHING held them together: this file used to assert the same string literals the
+  // panel hard-codes, with a comment claiming they matched the 3D Studio. Renaming
+  // `varySeed` in primParams.ts to anything at all left 245 tests green while the two
+  // surfaces silently diverged.
+  //
+  // So every expectation below is READ FROM THE SCHEMA. The panel stays hand-rolled on
+  // purpose (a Frame panel should not import a 3D module at runtime) — this test is the
+  // coupling, and it fails the moment either side is edited alone.
+
+  // Every Vary label Frame shows, paired with the mount state that reveals it here and
+  // the 3D row key it must agree with word for word.
+  const LABELS: { row: string; over: Partial<Cloner> }[] = [
+    { row: 'ui.cloner.vary', over: {} },                                          // Vary
+    { row: 'ui.cloner.varyMode', over: {} },                                      // Pattern
+    { row: 'object.modifiers.varySeed', over: { varyMode: 'random' } },           // Vary seed
+    { row: 'object.modifiers.varyFalloffCenter', over: { varyMode: 'falloff' } }, // Centre
+    { row: 'object.modifiers.varyFalloffRadius', over: { varyMode: 'falloff' } }, // Reach
+    { row: 'ui.cloner.varyColor', over: {} },                                     // Vary colour
+    { row: 'ui.cloner.varyPalette', over: { varyColor: true } },                  // Palette
+    { row: 'ui.cloner.varyColorSpread', over: { varyColor: true } },              // Spread
+    { row: 'object.modifiers.varyColorStrength', over: { varyColor: true } },     // Colour strength
+  ]
+
+  it('shows the 3D Studio label, word for word, for every Vary row', () => {
+    for (const c of LABELS) {
+      const label = label3d(c.row)
+      expect(varyText(mountWith(c.over)), `${c.row} -> "${label}"`).toContain(label)
+    }
   })
 
-  it('labels the seed, centre, reach, palette, spread and strength', () => {
-    // "Vary seed" — same vocabulary as the 3D Studio inspector's varySeed entry.
-    expect(varyText(mountWith({ varyMode: 'random' }))).toContain('Vary seed')
-    const f = varyText(mountWith({ varyMode: 'falloff' }))
-    expect(f).toContain('Centre')
-    expect(f).toContain('Reach')
-    const c = varyText(mountWith({ varyColor: true }))
-    expect(c).toContain('Palette')
-    expect(c).toContain('Spread')
-    expect(c).toContain('Colour strength')
+  it('covers EVERY Vary row the 3D inspector draws — a new one there fails here', () => {
+    // Without this the list above could quietly fall behind: add a vary row to the 3D
+    // Studio, forget Frame, and every assertion here would still pass.
+    expect(LABELS.map((c) => c.row).sort()).toEqual(Object.keys(SCENE3D_VARY_LABELS).sort())
+  })
+
+  it('spells the driver and spread options exactly as the 3D Studio segmented rows do', () => {
+    // The 3D inspector builds those buttons in `optionRowSpec` (Scene3DStudioSurface.vue)
+    // by capitalising the schema's stored option ids. Same derivation here, so adding or
+    // renaming an option on either side breaks this.
+    expect(mountWith().findAll('[data-test="vary-mode"] button').map((b) => b.text()))
+      .toEqual(optionWords('varyMode'))
+    expect(mountWith({ varyColor: true }).findAll('[data-test="vary-spread"] button').map((b) => b.text()))
+      .toEqual(SPREAD_WORDS)
   })
 
   it('never surfaces a stored internal value as copy', () => {
+    // The flip side of the above: the WORDS must be shown, never the ids behind them.
+    const ids = [...optionIds('varyMode'), ...optionIds('varyColorSpread')]
+    const idRe = new RegExp(`\\b(${ids.join('|')})\\b`)
     for (const over of [{}, { varyMode: 'random' as const }, { varyMode: 'falloff' as const },
       { varyColor: true }, { varyColor: true, varyColorSpread: 'blend' as const }]) {
       const t = varyText(mountWith(over))
-      expect(t, JSON.stringify(over)).not.toMatch(/\b(sequence|random|falloff|cycle|blend)\b/)
+      expect(t, JSON.stringify(over)).not.toMatch(idRe)
     }
   })
 
