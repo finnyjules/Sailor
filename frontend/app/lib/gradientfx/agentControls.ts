@@ -84,6 +84,7 @@ LOOK → KNOBS (recognise synonyms, not just these exact words):
 - grain — "grainy", "gritty", "filmic", "film", "noisy", "textured", "analog", "rough", "sandy" → post.grain true + post.grainAmount (0.15–0.5).
 - depth/3D — "3D", "embossed", "raised", "relief", "folds", "liquid depth", "glossy", "wet", "shiny" → flow.depth (40–80, also refracts the colours over the folds) + flow.gloss; flow.foldScale = fold size (higher = finer/tighter).
 - veins — "marbled", "veiny", "streaky", "tendrils", "wispy" → flow.veins (40–80). swirl — "swirly", "turbulent", "chaotic", "wavy" → flow.swirl / flow.distortion.
+- orientation — "horizontal bands/stripes/banding", "rows" → layer.shape.direction "right"; "vertical bands", "columns" → layer.shape.direction "up" (offered on the linear layout). The colour ramp's own axis is layer.color.gradientDir: "vertical" (top→bottom) or "horizontal" (left→right) — it runs independently of the band axis. On liquid surfaces orientation is flow.angle in degrees instead (0 = ramp runs left→right, 90 = bottom→top).
 - motion — "animated", "flowing", "living", "moving", "drifting", "looping" → flow.speed (30–70; churns for video export).
 - intensity — "high contrast", "punchy", "bold", "vivid", "saturated" → stronger colours + flow.depth. "muted", "pastel", "soft", "calm", "subtle", "washed out" → softer stop colours + lower flow.depth/intensity.
 
@@ -97,6 +98,7 @@ EXAMPLES — the exact changes to return (preset first, then minimal overrides):
 - "soft dreamy pastel aurora, out of focus" → {"preset":"aurora","focus.blur":52,"layer.color.stops.0.color":"#bfe3ff","layer.color.stops.1.color":"#e5c9ff","layer.color.stops.2.color":"#c9f6e4"}
 - "warm radial sunset, subtle grain" → {"preset":"sunset","post.grain":true,"post.grainAmount":0.22}
 - "high-contrast ink, sharp" → {"preset":"ink"}
+- "horizontal pastel bands" → {"layer.shape.direction":"right","layer.color.stops.0.color":"#ffd9e8","layer.color.stops.1.color":"#d9e8ff","layer.color.stops.2.color":"#d9ffe8"}
 - "make it more molten and glossy" (adjusting → no preset) → {"flow.depth":72,"flow.highlights":80,"flow.gloss":55}`
 
 /** Examples for the preset-less vocabulary: every change names a knob that IS

@@ -173,10 +173,35 @@ describe('GRADIENT_CONTROLS schema integrity', () => {
     }
   })
 
-  it('declares Shape controls that are withheld from the agent', () => {
+  it('withholds Shape controls from the agent, except the deliberately exposed direction', () => {
+    // direction was promoted to the agent vocabulary on 2026-08-05 (taste-wall
+    // spike: "horizontal banding" was unexpressible). The rest of the Shape
+    // block stays agent: false pending its own deliberate step.
     const shape = GRADIENT_CONTROLS.filter((c) => c.group === 'Shape')
     expect(shape.length).toBeGreaterThan(0)
-    for (const c of shape) expect((c as any).agent, `${c.key}`).toBe(false)
+    const exposed = shape.filter((c) => (c as any).agent !== false).map((c) => c.key)
+    expect(exposed).toEqual(['layer.shape.direction'])
+  })
+})
+
+describe('orientation is offered where the shader actually reads it', () => {
+  // Ground truth is the shader: u_dir is read only in the linear branches
+  // (computeLayer + bandHeight); u_gradHoriz in the linear and radial/orbit
+  // branches. Stack ignores both (rings run the ramp along their local
+  // vertical) and liquid orients via flow.angle.
+  it('offers band direction on linear only', () => {
+    for (const layout of LAYOUTS_UNDER_TEST) {
+      const keys = gradientAgentControls(cfgWithLayout(layout)).map((c) => c.key)
+      expect(keys.includes('layer.shape.direction'), layout).toBe(layout === 'linear')
+    }
+  })
+
+  it('offers gradient direction on linear/radial/orbit only', () => {
+    for (const layout of LAYOUTS_UNDER_TEST) {
+      const keys = gradientAgentControls(cfgWithLayout(layout)).map((c) => c.key)
+      const expected = layout === 'linear' || layout === 'radial' || layout === 'orbit'
+      expect(keys.includes('layer.color.gradientDir'), layout).toBe(expected)
+    }
   })
 })
 

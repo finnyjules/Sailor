@@ -158,6 +158,20 @@ exports[`gradientAgentControls characterization > emits stable full specs for la
     "step": 1,
   },
   {
+    "default": "up",
+    "group": "Shape",
+    "hint": "Band orientation: up/down = VERTICAL bands (columns), right/left = HORIZONTAL bands (rows); down/left also reverse the colour ramp. Set "right" for horizontal bands/stripes.",
+    "key": "layer.shape.direction",
+    "kind": "select",
+    "label": "Band direction",
+    "options": [
+      "up",
+      "right",
+      "down",
+      "left",
+    ],
+  },
+  {
     "default": 0,
     "group": "Relief",
     "key": "relief.light.azimuth",
@@ -225,6 +239,18 @@ exports[`gradientAgentControls characterization > emits stable full specs for la
     "max": 1,
     "min": 0,
     "step": 0.01,
+  },
+  {
+    "default": "vertical",
+    "group": "Layer",
+    "hint": "Axis the colour ramp runs along: vertical (top→bottom) or horizontal (left→right). Independent of the band axis, so a horizontal ramp can run ACROSS vertical bands.",
+    "key": "layer.color.gradientDir",
+    "kind": "select",
+    "label": "Gradient direction",
+    "options": [
+      "vertical",
+      "horizontal",
+    ],
   },
   {
     "default": 0,
@@ -2311,6 +2337,18 @@ exports[`gradientAgentControls characterization > emits stable full specs for la
     "step": 0.01,
   },
   {
+    "default": "vertical",
+    "group": "Layer",
+    "hint": "Axis the colour ramp runs along: vertical (top→bottom) or horizontal (left→right). Independent of the band axis, so a horizontal ramp can run ACROSS vertical bands.",
+    "key": "layer.color.gradientDir",
+    "kind": "select",
+    "label": "Gradient direction",
+    "options": [
+      "vertical",
+      "horizontal",
+    ],
+  },
+  {
     "default": 0,
     "group": "Layer",
     "hint": "0 = smooth; higher = banded",
@@ -3001,6 +3039,18 @@ exports[`gradientAgentControls characterization > emits stable full specs for la
     "step": 0.01,
   },
   {
+    "default": "vertical",
+    "group": "Layer",
+    "hint": "Axis the colour ramp runs along: vertical (top→bottom) or horizontal (left→right). Independent of the band axis, so a horizontal ramp can run ACROSS vertical bands.",
+    "key": "layer.color.gradientDir",
+    "kind": "select",
+    "label": "Gradient direction",
+    "options": [
+      "vertical",
+      "horizontal",
+    ],
+  },
+  {
     "default": 0,
     "group": "Layer",
     "hint": "0 = smooth; higher = banded",
@@ -3618,6 +3668,20 @@ exports[`gradientAgentControls characterization > emits stable specs with includ
     "step": 1,
   },
   {
+    "default": "up",
+    "group": "Shape",
+    "hint": "Band orientation: up/down = VERTICAL bands (columns), right/left = HORIZONTAL bands (rows); down/left also reverse the colour ramp. Set "right" for horizontal bands/stripes.",
+    "key": "layer.shape.direction",
+    "kind": "select",
+    "label": "Band direction",
+    "options": [
+      "up",
+      "right",
+      "down",
+      "left",
+    ],
+  },
+  {
     "default": 0,
     "group": "Relief",
     "key": "relief.light.azimuth",
@@ -3685,6 +3749,18 @@ exports[`gradientAgentControls characterization > emits stable specs with includ
     "max": 1,
     "min": 0,
     "step": 0.01,
+  },
+  {
+    "default": "vertical",
+    "group": "Layer",
+    "hint": "Axis the colour ramp runs along: vertical (top→bottom) or horizontal (left→right). Independent of the band axis, so a horizontal ramp can run ACROSS vertical bands.",
+    "key": "layer.color.gradientDir",
+    "kind": "select",
+    "label": "Gradient direction",
+    "options": [
+      "vertical",
+      "horizontal",
+    ],
   },
   {
     "default": 0,

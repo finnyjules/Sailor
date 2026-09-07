@@ -54,6 +54,12 @@ const usesCenter = (c: GradientConfig) => isRadial(c) || c.canvas.layout === 'ra
 // gradientPanelVisible — so the agent keeps the grant it has always had.
 const usesInnerRadius = (c: GradientConfig) => isRadial(c) || c.canvas.layout === 'radialRamp'
 const isRampLinear = (c: GradientConfig) => c.canvas.layout === 'ramp' || c.canvas.layout === 'conic'
+const isLinear = (c: GradientConfig) => c.canvas.layout === 'linear'
+/** Layouts whose shader actually reads u_gradHoriz (linear + radial/orbit).
+ *  Stack ignores it (rings run the ramp along their local vertical) and liquid
+ *  orients via flow.angle — same ground-truth-is-the-shader posture as the
+ *  relief light gating below. */
+const hasGradientDir = (c: GradientConfig) => isBanded(c) && c.canvas.layout !== 'stack'
 
 /** Mirrors agentControls.ts's helper exactly, including the inert `default: 0`. */
 function slider(
@@ -149,7 +155,17 @@ export const GRADIENT_CONTROLS: GradientControl[] = [
   // --- Shape: previously ORPHANED. Present in the surface, but never in the
   //     agent vocabulary. Declared here with `agent: false` so motion can
   //     derive from them without changing the agent's snapshot. Exposing them
-  //     to the agent is a deliberate later step.
+  //     to the agent is a deliberate later step — taken for `direction` below
+  //     (2026-08-05, taste-wall spike: "horizontal banding" was unexpressible),
+  //     deferred for the rest.
+  //
+  //     `direction` is agent-VISIBLE and gated to linear only: that is the one
+  //     layout whose shader reads u_dir (band axis + ramp reversal). The surface
+  //     also shows the buttons for stack, where the shader ignores them — the
+  //     narrower gate here keeps the agent off a knob that renders nothing.
+  { key: 'layer.shape.direction', label: 'Band direction', kind: 'select', options: ['up', 'right', 'down', 'left'], default: 'up', group: 'Shape',
+    hint: 'Band orientation: up/down = VERTICAL bands (columns), right/left = HORIZONTAL bands (rows); down/left also reverse the colour ramp. Set "right" for horizontal bands/stripes.',
+    when: isLinear },
   //     Ranges mirror the surface's Shape sliders, except `sweep`, whose
   //     animation range intentionally exceeds the UI slider bound (see the
   //     `animatable` override below), and `count`, which the surface caps
@@ -206,6 +222,9 @@ export const GRADIENT_CONTROLS: GradientControl[] = [
   // Both carry PANEL-ONLY layout gates (steps: non-mesh; hueDrift: non-mesh,
   // non-stack, non-liquid — the branches that never read u_hueDrift). See
   // gradientPanelVisible; the agent/motion grants are unchanged.
+  { key: 'layer.color.gradientDir', label: 'Gradient direction', kind: 'select', options: ['vertical', 'horizontal'], default: 'vertical', group: 'Layer',
+    hint: 'Axis the colour ramp runs along: vertical (top→bottom) or horizontal (left→right). Independent of the band axis, so a horizontal ramp can run ACROSS vertical bands.',
+    when: hasGradientDir },
   slider('layer.color.steps', 'Posterize steps', 0, 24, 1, 'Layer', '0 = smooth; higher = banded'),
   slider('layer.color.hueDrift', 'Hue drift', -180, 180, 1, 'Layer'),
   slider('layer.color.hueRotate', 'Hue rotate', 0, 360, 1, 'Layer'),
@@ -313,7 +332,13 @@ export function gradientPanelVisible(c: ControlSpec, cfg: GradientConfig, active
   // Rows the shipped panel never drew as inspector rows at all.
   // layer.layout IS the Canvas layout button grid (setLayout writes the selected
   // layer); layer.curve.handles is the CurveHandleEditor drawn over the preview.
-  if (c.key === 'layer.layout' || c.key === 'layer.curve.handles') return false
+  // `layer.shape.direction` and `layer.color.gradientDir` join them: the surface has
+  // always drawn both as its own button rows (GradientStudioSurface, the Shape and
+  // Layer cards). They are declared here for the AGENT, which could not express
+  // "horizontal banding" without them — declaring them must not put a second,
+  // duplicate row in the panel beside the buttons the user already has.
+  if (c.key === 'layer.layout' || c.key === 'layer.curve.handles'
+    || c.key === 'layer.shape.direction' || c.key === 'layer.color.gradientDir') return false
 
   // Blend/Opacity belonged to the active NON-base layer (template 1504-1521).
   if (c.key === 'layer.blend' || c.key === 'layer.opacity') return activeLayer > 0
