@@ -513,6 +513,20 @@ def _expand_clones(layer: dict, cloner: dict | None, aspect: float) -> list[dict
     if not cloner or not cloner.get("enabled"):
         return [layer]
 
+    # KNOWN DIVERGENCE, left deliberately unfixed: `or` treats a stored 0 the
+    # same as "missing" and substitutes the fallback, where the TypeScript
+    # (`cloner.stepScale ?? 1`, `cloner.stepOpacity ?? 1`) keeps an explicit 0.
+    # So a hand-edited widget JSON with stepScale/stepOpacity == 0 renders
+    # differently here than in the client preview: stepScale 0 collapses every
+    # copy after the original to zero size on the client but leaves them full
+    # size here, and stepOpacity 0 — the more plausible edit, meant to fade the
+    # trail out — makes every copy after the first invisible on the client while
+    # this still paints them at full opacity. `stepRotation` is unaffected: the
+    # TypeScript uses `cloner.stepRotation || 0`, which already agrees with `or`.
+    # NOT fixed here: this feature's whole promise is zero behaviour change for
+    # existing workflows, and `?? ` here would change what an already-saved
+    # stepScale/stepOpacity: 0 workflow renders. A fix belongs on its own commit,
+    # with its own fixture cases pinning the new 0-stays-0 behaviour both ways.
     step_rot = float(cloner.get("stepRotation", 0.0) or 0.0)
     step_scl = float(cloner.get("stepScale", 1.0) or 1.0)
     step_op = float(cloner.get("stepOpacity", 1.0) or 1.0)

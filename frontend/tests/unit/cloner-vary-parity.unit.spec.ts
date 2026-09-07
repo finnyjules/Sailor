@@ -127,6 +127,50 @@ const CASES: Case[] = [
       varyMode: 'falloff', varyFalloffCenter: 0, varyFalloffRadius: 0.7,
     }),
   },
+  {
+    // `#000000` blended toward `#010101` at weight 0.5 (the middle of 3 sequence
+    // copies) lands each channel on EXACTLY 0.5 — the one value where JS
+    // `Math.round` (half away from zero → 1) and Python's `round()` (half-to-even
+    // → 0) disagree. `_rgb_to_hex` uses `math.floor(n + 0.5)` specifically to
+    // match JS here; this case is what pins that choice.
+    name: 'blend hits an exact channel midpoint (half-up vs half-to-even rounding)',
+    aspect: 1,
+    cloner: C({
+      countX: 3, spacingX: 0.2,
+      varyColor: true, varyPalette: ['#000000', '#010101'], varyColorSpread: 'blend',
+    }),
+  },
+  {
+    // The panel clamps falloffCenter to 0..1, but a hand-edited widget JSON is
+    // not — `varyWeights` clamps it itself. Out-of-range on purpose, so the
+    // clamp (not just its usual in-range values 0 and 0.5 elsewhere in this
+    // fixture) is what this case pins.
+    name: 'falloff centre clamped from an out-of-range value',
+    aspect: 1,
+    cloner: C({
+      countX: 5, spacingX: 0.15, stepScale: 0.6, stepOpacity: 0.85,
+      varyMode: 'falloff', varyFalloffCenter: 1.5, varyFalloffRadius: 0.4,
+    }),
+  },
+  {
+    // Full ring: sweepAngle >= 359.999 takes the `full ? n : n - 1` denominator
+    // branch, untouched by the other radial fixture case (a 240° partial sweep).
+    name: 'radial full ring (sweepAngle 360)',
+    aspect: 1,
+    cloner: C({
+      mode: 'radial', count: 5, radius: 0.25, startAngle: 0, sweepAngle: 360,
+      stepScale: 0.9,
+    }),
+  },
+  {
+    // mirrorY: the grid fixture elsewhere only covers mirrorX.
+    name: 'grid mirrorY',
+    aspect: 1,
+    cloner: C({
+      countX: 2, countY: 3, spacingX: 0.2, spacingY: 0.15, mirrorY: true,
+      stepScale: 0.85,
+    }),
+  },
 ]
 
 const run = (c: Case) =>

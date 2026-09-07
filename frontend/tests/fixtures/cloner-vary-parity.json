@@ -940,6 +940,392 @@
           "tintStrength": 1
         }
       ]
+    },
+    {
+      "name": "blend hits an exact channel midpoint (half-up vs half-to-even rounding)",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 3,
+        "countY": 1,
+        "spacingX": 0.2,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 1,
+        "stepOpacity": 1,
+        "varyMode": "sequence",
+        "varySeed": 0,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": true,
+        "varyPalette": [
+          "#000000",
+          "#010101"
+        ],
+        "varyColorSpread": "blend",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.4,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": "#010101",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0.5,
+          "tint": "#010101",
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": "#000000",
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "falloff centre clamped from an out-of-range value",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 5,
+        "countY": 1,
+        "spacingX": 0.15,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 0.6,
+        "stepOpacity": 0.85,
+        "varyMode": "falloff",
+        "varySeed": 0,
+        "varyFalloffCenter": 1.5,
+        "varyFalloffRadius": 0.4,
+        "varyColor": false,
+        "varyPalette": [
+          "#4c6ef5",
+          "#f59f00"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.6,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.1296,
+          "dopacity": 0.5220062499999999,
+          "weight": 1,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.44999999999999996,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.6157678458772994,
+          "dopacity": 0.8570440040304859,
+          "weight": 0.31640625,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.3,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.15,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "radial full ring (sweepAngle 360)",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "radial",
+        "countX": 3,
+        "countY": 1,
+        "spacingX": 0.25,
+        "spacingY": 0.25,
+        "mirrorX": false,
+        "mirrorY": false,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 5,
+        "radius": 0.25,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 0.9,
+        "stepOpacity": 1,
+        "varyMode": "sequence",
+        "varySeed": 0,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": false,
+        "varyPalette": [
+          "#4c6ef5",
+          "#f59f00"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.07725424859373681,
+          "dy": -0.2377641290737884,
+          "drot": 0,
+          "dscale": 0.6561,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": -0.20225424859373686,
+          "dy": -0.14694631307311826,
+          "drot": 0,
+          "dscale": 0.7290000000000001,
+          "dopacity": 1,
+          "weight": 0.75,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": -0.20225424859373684,
+          "dy": 0.1469463130731183,
+          "drot": 0,
+          "dscale": 0.81,
+          "dopacity": 1,
+          "weight": 0.5,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.07725424859373686,
+          "dy": 0.23776412907378838,
+          "drot": 0,
+          "dscale": 0.9,
+          "dopacity": 1,
+          "weight": 0.25,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.25,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
+    },
+    {
+      "name": "grid mirrorY",
+      "aspect": 1,
+      "cloner": {
+        "enabled": true,
+        "mode": "linear",
+        "countX": 2,
+        "countY": 3,
+        "spacingX": 0.2,
+        "spacingY": 0.15,
+        "mirrorX": false,
+        "mirrorY": true,
+        "nudgeX": 0,
+        "nudgeY": 0,
+        "staggerX": 0,
+        "staggerY": 0,
+        "count": 6,
+        "radius": 0.3,
+        "startAngle": 0,
+        "sweepAngle": 360,
+        "faceCenter": false,
+        "stepRotation": 0,
+        "stepScale": 0.85,
+        "stepOpacity": 1,
+        "varyMode": "sequence",
+        "varySeed": 0,
+        "varyFalloffCenter": 0,
+        "varyFalloffRadius": 0.5,
+        "varyColor": false,
+        "varyPalette": [
+          "#4c6ef5",
+          "#f59f00"
+        ],
+        "varyColorSpread": "cycle",
+        "varyColorStrength": 1
+      },
+      "expected": [
+        {
+          "dx": 0.2,
+          "dy": -0.3,
+          "drot": 0,
+          "dscale": 0.44370531249999995,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": -0.3,
+          "drot": 0,
+          "dscale": 0.5220062499999999,
+          "dopacity": 1,
+          "weight": 0.8,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": -0.15,
+          "drot": 0,
+          "dscale": 0.6141249999999999,
+          "dopacity": 1,
+          "weight": 0.6,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": -0.15,
+          "drot": 0,
+          "dscale": 0.7224999999999999,
+          "dopacity": 1,
+          "weight": 0.4,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0.3,
+          "drot": 0,
+          "dscale": 0.44370531249999995,
+          "dopacity": 1,
+          "weight": 1,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0.3,
+          "drot": 0,
+          "dscale": 0.5220062499999999,
+          "dopacity": 1,
+          "weight": 0.8,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0.15,
+          "drot": 0,
+          "dscale": 0.6141249999999999,
+          "dopacity": 1,
+          "weight": 0.6,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0.15,
+          "drot": 0,
+          "dscale": 0.7224999999999999,
+          "dopacity": 1,
+          "weight": 0.4,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0.2,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 0.85,
+          "dopacity": 1,
+          "weight": 0.2,
+          "tint": null,
+          "tintStrength": 1
+        },
+        {
+          "dx": 0,
+          "dy": 0,
+          "drot": 0,
+          "dscale": 1,
+          "dopacity": 1,
+          "weight": 0,
+          "tint": null,
+          "tintStrength": 1
+        }
+      ]
     }
   ]
 }
