@@ -1869,6 +1869,11 @@ function paintLayer(
     const lrot = layer.rotation + c.drot
     const lop = baseOpacity * c.dopacity
     const ls = c.dscale
+    // Cloner Vary colour. A strength of 0 is the identity wash, so it is treated
+    // as "no tint" here rather than inside tintScratch — that keeps such a copy on
+    // the untinted code path instead of paying for a scratch detour that paints
+    // nothing. No vary ⇒ null ⇒ every branch below is exactly what it always was.
+    const tint = c.tint && c.tintStrength > 0 ? c.tint : null
 
     // Effected path: render the layer to an offscreen at canvas size, then
     // composite it with inner shadow / drop shadow / blur. Works identically for
@@ -1916,9 +1921,17 @@ function paintLayer(
           octx.drawImage(raster.canvas, -raster.w / 2, -raster.h / 2, raster.w, raster.h)
           // Torn edge / feather are already baked into the raster; `rasterablePasses` guarantees
           // any layer blur here is trailing, so it lands on the stamp's `ctx.filter` below.
+          // Vary tint: `off` holds THIS copy alone, so the wash is safe here — and it lands
+          // before the stamp, where the trailing blur and drop shadow are applied, so both see
+          // the varied colour. The raster cache is shared between copies and is never tinted.
+          if (tint) tintScratch(octx, tint, c.tintStrength)
         } else {
           applyXform(octx, lx, ly, lrot, ls)
           drawContent(octx)
+          // Vary tint, on the copy's own offscreen and BEFORE its effect chain, so every pass
+          // below (inner shadow, gradient map, torn edge, feather, blur…) and the drop shadow
+          // at the stamp consume the varied colour rather than the layer's base colour.
+          if (tint) tintScratch(octx, tint, c.tintStrength)
           // The layer's passes, in the user's order, minus any TRAILING layer blur (that one is
           // the stamp's `ctx.filter`, below). For an unedited layer the order is the legacy one
           // (inner shadow, then the six chain kinds, then torn edge, feather), so this produces
@@ -1974,6 +1987,26 @@ function paintLayer(
     }
 
     // Fast path (no effects): draw inline. No skew/cornerPin ⇒ identical to before.
+    //
+    // A TINTED copy cannot draw inline: `source-atop` on the shared ctx would wash
+    // every layer already composited beneath this one, not just this copy. It takes a
+    // scratch detour instead — the copy alone on a device-sized surface, tinted there,
+    // then stamped under the same alpha/blend the inline draw would have used.
+    // `scratchLike` returns null with no DOM (SSR / node unit tests), which falls
+    // through to the untinted draw — the safe fallback its own doc describes.
+    const scratch = tint ? scratchLike(ctx) : null
+    if (scratch) {
+      _fieldCtx = { ..._fieldCtx, base: scratch.getTransform() } // == ctx's, scratchLike copies it
+      applyXform(scratch, lx, ly, lrot, ls)
+      drawContent(scratch)
+      tintScratch(scratch, tint!, c.tintStrength)
+      ctx.save()
+      ctx.globalAlpha = lop
+      ctx.globalCompositeOperation = blendOp
+      stampScratch(ctx, scratch)
+      ctx.restore()
+      continue
+    }
     ctx.save()
     ctx.globalAlpha = lop
     ctx.globalCompositeOperation = blendOp
@@ -2010,6 +2043,32 @@ function stampScratch(ctx: CanvasRenderingContext2D, scratch: CanvasRenderingCon
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.drawImage(scratch.canvas, 0, 0)
   ctx.restore()
+}
+
+/**
+ * Cloner Vary: wash ONE clone's already-drawn pixels toward its palette colour.
+ *
+ * `source-atop` confines the fill to existing ink, so the copy's silhouette,
+ * anti-aliased edges and any transparency survive untouched — which is also why
+ * this may only ever run on a surface holding that ONE copy. On a shared canvas
+ * it would wash every layer already composited beneath it; the callers take a
+ * scratch detour precisely to avoid that.
+ *
+ * Runs in DEVICE space so the fill covers the whole surface regardless of the
+ * caller's current transform, and restores everything it touched.
+ *
+ * Exported so the wash itself can be unit-tested without a rasterizer.
+ */
+export function tintScratch(octx: CanvasRenderingContext2D, tint: string, strength: number): void {
+  const a = Math.max(0, Math.min(1, strength))
+  if (!(a > 0)) return   // 0, negative and NaN all mean "leave the pixels alone"
+  octx.save()
+  octx.setTransform(1, 0, 0, 1, 0, 0)
+  octx.globalCompositeOperation = 'source-atop'
+  octx.globalAlpha = a
+  octx.fillStyle = tint
+  octx.fillRect(0, 0, octx.canvas.width, octx.canvas.height)
+  octx.restore()
 }
 
 /**
@@ -3150,7 +3209,26 @@ export function drawWiredImageLayer(
     const rot = layer.rotation + c.drot
     if (rot) ctx.rotate((rot * Math.PI) / 180)
     ctx.scale(layer.scale * c.dscale, layer.scale * c.dscale)
-    ctx.drawImage(src, -fitW / 2, -fitH / 2, fitW, fitH)
+    // Cloner Vary colour. The mask and the defocus above are shared by every copy and
+    // already folded into `src`; the tint is per-copy, so it needs its own surface —
+    // and it MUST have one, because `source-atop` on `ctx` would wash the whole frame
+    // beneath this layer. Tinted at the source's own resolution, so the stamp below
+    // resamples exactly once, as it did before. Strength 0 = identity ⇒ untinted path.
+    const tint = c.tint && c.tintStrength > 0 ? c.tint : null
+    let tinted: HTMLCanvasElement | null = null
+    if (tint && typeof document !== 'undefined') {
+      const sc = document.createElement('canvas')
+      sc.width = iw
+      sc.height = ih
+      const sctx = sc.getContext('2d')
+      if (sctx) {
+        sctx.drawImage(src, 0, 0, iw, ih)
+        tintScratch(sctx, tint, c.tintStrength)
+        tinted = sc
+      }
+    }
+    // No tint (or no DOM to tint on) ⇒ the original single draw, unchanged.
+    ctx.drawImage(tinted ?? src, -fitW / 2, -fitH / 2, fitW, fitH)
     ctx.restore()
   }
 }
