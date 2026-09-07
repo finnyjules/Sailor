@@ -159,15 +159,11 @@ void main() {
     float ca = cos(ang), sa = sin(ang);
     vec2 r = vec2(p.x * ca + p.y * sa, -p.x * sa + p.y * ca);
 
-    // Fold the seed before it ever reaches noise space. The app passes u_seed up to
-    // 9999 (ShaderEffectNode.vue: `p.seed % 10000`); unfolded, an offset near (1370,
-    // 3110) pushes the second octave past the ~16.7M limit of a highp 24-bit
-    // mantissa, where hash21's `fract(p * vec2(123.34, 456.21))` quantises and the
-    // field flattens into axis-aligned banding. 97 is prime -- a non-power-of-two,
-    // non-multiple-of-10 modulus, so the fold aliases neither with the seed's own
-    // decimal stride nor with the octave lattice -- and mod(42.0, 97.0) == 42.0, so
-    // the seed-42 goldens are untouched by it.
-    float sd = mod(u_seed, 97.0);
+    // Two-part fold: the residue keeps the field inputs small (hash21 quantises once its
+    // inputs pass ~2^24 -- the app sends seed % 10000, and seeds above ~5000 used to collapse
+    // the field to a flat plane), and the quotient, scaled by an irrational-ish step, keeps
+    // every seed in 0..9999 distinct instead of repeating every 97. Seed 42 folds to 42.0.
+    float sd = mod(u_seed, 97.0) + floor(u_seed / 97.0) * 0.3711;
     vec2 q = r * (u_scale * 0.52) + vec2(sd * 0.137, sd * 0.311);
 
     // One slow undulation, used only to bend the sweep and to shade very slightly.
@@ -263,7 +259,8 @@ void main() {
             float grain = hash21(cell + sd * 13.0);
             // Jittered off the cell centre, or the flakes sit on a visible lattice.
             vec2 jit = (vec2(hash21(cell + 5.1), hash21(cell + 9.3)) - 0.5) * 0.70;
-            float flake = smoothstep(0.55, 0.0, length(fract(gp) - 0.5 - jit));
+            // descending smoothstep is undefined in GLSL ES; written as 1 - ascending
+            float flake = (1.0 - smoothstep(0.0, 0.55, length(fract(gp) - 0.5 - jit)));
             float spark = smoothstep(0.90, 0.998, grain) * flake;
             col += spark * mix(vec3(1.0), iridPalette(phase + 0.35), 0.72)
                          * (0.18 + 0.22 * u_sheen);
@@ -280,7 +277,10 @@ void main() {
     // any still frame. Pitched at ~2.5px; at 5px it read as dust lying on the sheet,
     // and the reference has essentially no small detail outside the sparkle surface.
     if (u_shimmer > 0.0) {
-        float tw = vnoise(p * (u_resolution.y / 2.6) + floor(u_time * 6.0) * 1.7 + sd * 7.0);
+        // Fold the same way as the seed above: hash21 quantises once its inputs pass
+        // ~2^24, and a wall-clock driver like Shape Studio can run for hours, so the
+        // raw unfolded index would eventually overflow float precision and flatten.
+        float tw = vnoise(p * (u_resolution.y / 2.6) + mod(floor(u_time * 6.0) * 1.7, 97.0) + sd * 7.0);
         float glint = smoothstep(mix(0.95, 0.60, u_shimmer), 0.995, tw)
                     * u_shimmer * (0.05 + 0.09 * u_sheen);
         col += glint * mix(vec3(1.0), iridPalette(f * 2.0 + drift), 0.45);
@@ -307,7 +307,7 @@ void main() {
         vec3 fb = facets(p * 58.0 + sd * 5.0 + 11.0);
         float tiltA = fa.z - 0.5, tiltB = fb.z - 0.5;                 // per-facet flat tilt, +-0.5
         float tilt = tiltA * 0.55 + tiltB * 0.45;
-        float crease = smoothstep(0.10, 0.0, fb.y) * 0.6 + smoothstep(0.07, 0.0, fa.y) * 0.4;
+        float crease = (1.0 - smoothstep(0.0, 0.10, fb.y)) * 0.6 + (1.0 - smoothstep(0.0, 0.07, fa.y)) * 0.4;
         float catching = smoothstep(0.20, 0.40, tilt);                // facets that catch the light
         col *= 1.0 + crinkle * (0.30 * tilt + 0.14 * catching);       // pits darken, facets brighten
         col += crinkle * crease * (0.24 * tiltB + 0.06);                     // creases: some bright, some dark

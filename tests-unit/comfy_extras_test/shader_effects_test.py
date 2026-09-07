@@ -356,9 +356,9 @@ def test_holographic_surface_is_generative_and_declares_its_uniforms():
     # it — GLSL silently strips an unused uniform, and _shader_effects.py's bind
     # loop (`if uloc < 0: continue`) skips it just as silently, so a param that is
     # declared but never referenced in the body would still pass this assertion.
+    import re
     for p in eff.params:
-        assert f"uniform float {p.uniform};" in eff.source or f"uniform vec3  {p.uniform};" in eff.source \
-            or f"uniform vec3 {p.uniform};" in eff.source, \
+        assert re.search(rf"\buniform\s+\w+\s+{re.escape(p.uniform)}\s*;", eff.source), \
             f"{p.uniform} is declared in the manifest but not read by the shader"
     # ...and the four surfaces the manifest advertises must all be reachable.
     surface = next(p for p in eff.params if p.uniform == "u_surface")
@@ -386,20 +386,23 @@ def test_holographic_surface_never_samples_the_input_for_its_normal():
 
 def test_holographic_surface_field_survives_the_apps_full_seed_range():
     """The app supplies `u_seed: p.seed % 10000` (ShaderEffectNode.vue), so u_seed
-    reaches 9999. Before the seed-fold, that fed fbm()'s noise offset unfolded --
-    the last of its four octaves landed near 26,000, past the ~16.7M-ULP limit of
-    a highp 24-bit mantissa, where hash21's fract(p * vec2(123.34, 456.21))
-    quantises and the crease field collapses into axis-aligned banding.
+    reaches 9999. Before the seed-fold, that fed softfbm's noise offset unfolded --
+    its second octave (sampled at `q * 2.03`) pushes far enough out that hash21's
+    fract(p * vec2(123.34, 456.21)) quantises and the Soft sweep field (u_surface
+    0) loses high-frequency detail and washes toward a flatter field.
 
-    std() cannot catch this: measured, it stays ~0.254 across the whole seed
+    std() cannot catch this: measured, it stays roughly flat across the whole seed
     sweep (the collapse changes FREQUENCY, not amplitude) -- Task 2's variance
     guard would pass a shader that fails this. So this test checks high-frequency
     energy (mean |gradient|) instead, which is what actually drops.
 
-    Measured on this repo pre-fix (Crumple, u_shimmer=0, 256px): hf(seed 42) =
-    0.0811, hf(seed 9999) = 0.0540 -- a ~33% drop. Post-fix the two are within
-    rounding of each other (~0.081 each). The 0.75 threshold below sits with
-    headroom under the fixed ratio (~1.0) and well above the broken one (~0.67).
+    Measured on this repo (Soft sweep, u_shimmer=0, 256px), with the seed fold
+    temporarily removed in an in-memory copy of the source (`float sd = u_seed;`):
+    hf(seed 42) = 0.0217, hf(seed 9999) = 0.0116 -- a ~46% drop (ratio ~0.535).
+    With the shipped fold (`mod(u_seed, 97.0) + floor(u_seed / 97.0) * 0.3711`):
+    hf(seed 42) = 0.0217, hf(seed 9999) = 0.0236 -- same order of magnitude
+    (ratio ~1.09). The 0.75 threshold below sits with headroom under the fixed
+    ratio and well above the broken one.
     """
     from PIL import Image
 
