@@ -3,7 +3,7 @@
 // keys to `object.treatments.<id>.<field>`; the surface reads/writes `<field>` directly
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { BLUR_RAMP_SPACES, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, type TreatmentKind } from './treatments'
+import { BLUR_RAMP_SPACES, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, type TreatmentKind } from './treatments'
 
 export const TREATMENT_KEY_PREFIX = 'treatment.'
 
@@ -35,7 +35,7 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
   switch (kind) {
     case 'blur':
       rows = [
-        slider(g, 'amount', 'Amount', 0, 1, 0.01, D.blur.amount, 'How soft the object goes'),
+        slider(g, 'amount', 'Amount', 0, BLUR_AMOUNT_MAX, 0.01, D.blur.amount, 'How soft the object goes'),
         toggle(g, 'progressive', 'Progressive', D.blur.progressive, 'Ramp the blur across the object instead of covering it evenly'),
         whenProgressive(select(g, 'rampSpace', 'Measured across', [...BLUR_RAMP_SPACES], ['The object', 'The whole frame'], D.blur.rampSpace)),
         whenProgressive(slider(g, 'rampAngle', 'Angle', 0, 360, 1, D.blur.rampAngle, '0° ramps left to right, 90° top to bottom')),

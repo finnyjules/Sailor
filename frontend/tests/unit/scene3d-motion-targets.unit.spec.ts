@@ -355,7 +355,7 @@ describe('animatableTargets: treatments', () => {
     doc.objects.push(box)
     const targets = animatableTargets(doc)
     const amount = targets.find((t) => t.path === `objects.${box.id}.treatments.${blur.id}.amount`)
-    expect(amount).toMatchObject({ label: 'Bottle · Blur amount', min: 0, max: 1 })
+    expect(amount).toMatchObject({ label: 'Bottle · Blur amount', min: 0, max: 3 })
     expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${rim.id}.strength`)?.label).toBe('Bottle · Rim light strength')
     // colour rows and switches are not tracks
     expect(targets.find((t) => t.path.endsWith(`.${rim.id}.color`))).toBeUndefined()

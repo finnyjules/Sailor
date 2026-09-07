@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { defaultDoc, createPrimitive, createLight, serializeDoc, parseDoc } from '~/lib/scene3d/config'
 import {
   TREATMENT_KINDS, TREATMENT_LABELS, TREATED_OBJECT_CAP, createTreatment, parseTreatment, parseTreatments,
-  cloneTreatments, maskedTreatmentPlan, unrenderedTreatmentIds, findTreatment, edgeTreatmentsOf, isMaskedKind,
+  cloneTreatments, maskedTreatmentPlan, unrenderedTreatmentIds, findTreatment, edgeTreatmentsOf, isMaskedKind, BLUR_AMOUNT_MAX,
 } from '~/lib/scene3d/treatments'
+import { treatmentControls } from '~/lib/scene3d/treatmentControls'
+import { blurPasses } from '~/lib/scene3d/treatmentStage'
 
 describe('treatments: model', () => {
   it('createTreatment fills every dial from TREATMENT_DEFAULTS with a fresh trt_ id, enabled and not inverted', () => {
@@ -56,7 +58,11 @@ describe('treatments: parse', () => {
   })
   it('backfills missing dials, clamps ranges and treats absent flags as enabled / not inverted', () => {
     const t = parseTreatment({ id: 'x', kind: 'blur', amount: 4 })!
-    expect(t).toMatchObject({ kind: 'blur', amount: 1, enabled: true, invert: false })
+    expect(t).toMatchObject({ kind: 'blur', amount: BLUR_AMOUNT_MAX, enabled: true, invert: false })
+    const mid = parseTreatment({ id: 'x2', kind: 'blur', amount: 2.5 })!
+    expect(mid).toMatchObject({ kind: 'blur', amount: 2.5 })
+    const neg = parseTreatment({ id: 'x3', kind: 'blur', amount: -1 })!
+    expect(neg).toMatchObject({ kind: 'blur', amount: 0 })
     const w = parseTreatment({ id: 'y', kind: 'wireframe', enabled: false, showSurface: false })!
     expect(w).toMatchObject({ kind: 'wireframe', enabled: false, showSurface: false, color: '#ffffff', lineOpacity: 0.8 })
   })
@@ -152,6 +158,20 @@ describe('treatments: masked plan', () => {
     const light = createLight('point', doc.objects); (light as any).treatments = [createTreatment('blur')]
     doc.objects.push(hidden, light)
     expect(maskedTreatmentPlan(doc)).toEqual([])
+  })
+})
+
+describe('treatments: blur Amount control', () => {
+  it('blur Amount control row has max === BLUR_AMOUNT_MAX', () => {
+    const rows = treatmentControls('blur')
+    const amountRow = rows.find((r) => r.key === 'treatment.amount')
+    expect(amountRow).toBeDefined()
+    expect(amountRow?.max).toBe(BLUR_AMOUNT_MAX)
+  })
+  it('blurPasses(3, 1000) yields radiusPx 180 and passes capped at 4', () => {
+    const { passes, radiusPx } = blurPasses(3, 1000)
+    expect(radiusPx).toBe(180)
+    expect(passes).toBe(4)
   })
 })
 

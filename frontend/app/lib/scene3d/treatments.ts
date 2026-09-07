@@ -79,6 +79,10 @@ export const TREATMENT_DEFAULTS = {
 /** How many masked-treatment groups the stage draws per frame. */
 export const TREATED_OBJECT_CAP = 8
 
+/** Blur amount ceiling for the inspector dial and parser. Amount 1 = 6% of image height
+ *  (see `blurPasses` in treatmentStage.ts); 3 = 18%. Shared across the dial, parser and agent. */
+export const BLUR_AMOUNT_MAX = 3
+
 export function isMaskedKind(kind: TreatmentKind): kind is MaskedTreatmentKind {
   return (MASKED_TREATMENT_KINDS as readonly string[]).includes(kind)
 }
@@ -103,6 +107,8 @@ export function createTreatment(kind: TreatmentKind): Treatment {
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d)
 const str = (v: unknown, d: string): string => (typeof v === 'string' && v ? v : d)
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
+/** Clamp value to [0, max]. */
+const clampTo = (v: number, max: number): number => Math.min(max, Math.max(0, v))
 /** Any finite degree value folded into [0, 360). */
 const wrapDeg = (v: number): number => ((v % 360) + 360) % 360
 
@@ -119,7 +125,7 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
   switch (r.kind) {
     case 'blur': return {
       ...base, kind: 'blur',
-      amount: clamp01(num(r.amount, D.blur.amount)),
+      amount: clampTo(num(r.amount, D.blur.amount), BLUR_AMOUNT_MAX),
       progressive: r.progressive === true,
       rampSpace: (BLUR_RAMP_SPACES as readonly string[]).includes(r.rampSpace as string)
         ? r.rampSpace as BlurRampSpace
