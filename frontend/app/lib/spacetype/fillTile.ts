@@ -55,6 +55,13 @@ export interface ShaderSpec {
   /** varies the generative field; 42 is the historical default. */
   seed: number
   input: Paint
+  /** True when this effect should sample what's already painted behind the layer (the
+   *  compositor backdrop) rather than — or in addition to — its own `input`. Drives
+   *  `isGlassLayer` in useCompositorLayers.ts; absent/false for every existing shader fill. */
+  readsBackdrop?: boolean
+  /** Which backdrop layer this effect reads, when more than the immediate one behind it
+   *  is addressable. Optional — most glass effects just want "whatever is directly behind". */
+  readsLayerKey?: string
 }
 
 /** All fill types, in picker order. SINGLE SOURCE OF TRUTH — imported by every fill dropdown. */

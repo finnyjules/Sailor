@@ -27,6 +27,7 @@ import type { FrameMotion } from '~/lib/motion/types'
 import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
 import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
+import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
 import { dealShaderFill } from '~/lib/compositor/mosaic'
 import { paintScatter, SCATTER_STYLES, DEFAULT_SCATTER_STYLE, DEFAULT_SCATTER_SEED, type ScatterStyle } from '~/lib/compositor/scatter'
 import { withFieldFrame, type FieldRequest } from '~/lib/shaderfill/field'
@@ -2916,6 +2917,27 @@ export function layerPaints(layer: LocalLayer): Paint[] {
     case 'scatter': return []
     default: return [layer.fill, layer.stroke] // rect / ellipse / polygon / star / path
   }
+}
+
+/** A layer's primary fill — the slot `layerPaints` lists first for its kind (`fill` for
+ *  every paintable kind that has one; none for `wired`/`scatter`/`line`, which don't
+ *  carry a `fill` Paint at all). No dedicated "main fill" accessor existed before
+ *  `isGlassLayer` needed one. */
+function primaryFillOf(layer: LocalLayer): Paint | undefined {
+  return layerPaints(layer)[0]
+}
+
+/** True iff `layer`'s primary fill is a shader that both DECLARES it reads the
+ *  compositor backdrop (`readsBackdrop === true`) and whose GLSL actually samples an
+ *  input texture (`effectReadsInput`) — a purely generative effect can set
+ *  `readsBackdrop` without it meaning anything, so both must hold. Backs the "glass
+ *  lens" treatment: only a layer meeting this counts as one for render-order/caching
+ *  purposes elsewhere. */
+export function isGlassLayer(layer: LocalLayer): boolean {
+  const fill = primaryFillOf(layer)
+  if (!fill || !isFill(fill) || !fillIsShader(fill)) return false
+  const spec = fill.shader
+  return !!spec.readsBackdrop && effectReadsInput(spec.effectId)
 }
 
 /** Whether `items`/`background` currently carry a LIVE shader fill — one whose
