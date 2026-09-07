@@ -75,6 +75,45 @@ async function sharpness(page: Page, dataUrl: string): Promise<{ left: number; r
 const stats = (page: Page) => page.evaluate(() => (window as any).__scene3dTreatmentStats() as { frames: number; groups: number })
 const snapshot = (page: Page) => page.evaluate(() => (window as any).__scene3dSnapshot() as string)
 
+/** Gradient energy in a top band and a bottom band of the left sphere. */
+async function bandEnergy(page: Page, dataUrl: string): Promise<{ top: number; bottom: number }> {
+  return page.evaluate(async (url) => {
+    const img = new Image(); img.src = url; await img.decode()
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+    const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+    const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height)
+    const lum = (i: number) => 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
+    const score = (fy0: number, fy1: number) => {
+      let s = 0, n = 0
+      for (let y = Math.floor(height * fy0); y < height * fy1; y++)
+        for (let x = Math.floor(width * 0.25); x < width * 0.45 - 1; x++) {
+          const i = (y * width + x) * 4; const d = lum(i) - lum(i + 4); s += d * d; n++
+        }
+      return s / n
+    }
+    return { top: score(0.34, 0.44), bottom: score(0.56, 0.66) }
+  }, dataUrl)
+}
+
+/** Run one treatment twice — ramped, and with the ramp ramping to nothing (start = end = 1,
+ *  a hard edge at the far end, so every pixel sits in the untouched region) — and return each
+ *  band's energy as a fraction of the control. Same composer path both times, so the path's own
+ *  background shift cancels. */
+async function rampAttenuation(page: Page, treatment: Record<string, unknown>) {
+  await openLab(page, twoSpheres([{ ...treatment, rampStart: 1, rampEnd: 1 }]))
+  const control = await bandEnergy(page, await snapshot(page))
+  await openLab(page, twoSpheres([treatment]))
+  const s = await stats(page)
+  expect(s.frames).toBeGreaterThan(0)
+  expect(s.groups).toBe(1)
+  const test = await bandEnergy(page, await snapshot(page))
+  return {
+    control, test,
+    top: test.top / control.top,
+    bottom: test.bottom / control.bottom,
+  }
+}
+
 /**
  * The shadow probe (C1). A masked treatment hides its object for the BASE pass; three
  * rebuilds the shadow map on every `renderer.render`, and `WebGLShadowMap` skips invisible
@@ -418,6 +457,54 @@ test.describe('3D Studio treatments', () => {
     // The switch wrote through to the document, not just to the panel.
     expect(await page.evaluate(() => (window as any).__scene3dDoc().objects[0].treatments[0]))
       .toMatchObject({ kind: 'blur', progressive: true, rampSpace: 'object', rampAngle: 90 })
+  })
+
+  test('a progressive glow builds toward the ramp end, not evenly', async ({ page }) => {
+    const a = await rampAttenuation(page, {
+      id: 't-glow', kind: 'glow', enabled: true, invert: false,
+      strength: 3, threshold: 0.2, tint: '#ffffff',
+      progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
+    })
+    console.log(`[ramp glow] control=${JSON.stringify(a.control)} test=${JSON.stringify(a.test)} `
+      + `atten top=${a.top.toFixed(3)} bottom=${a.bottom.toFixed(3)}`)
+    // angle 90 ramps top (sharp, r=0 → no glow) to bottom (r=1 → full glow); glow ADDS light,
+    // so the bottom band departs from its control far more than the top does.
+    expect(Math.abs(a.bottom - 1)).toBeGreaterThan(Math.abs(a.top - 1) * 2)
+  })
+
+  test('a progressive pixelate blocks the ramp end and leaves the other sharp', async ({ page }) => {
+    const a = await rampAttenuation(page, {
+      id: 't-pix', kind: 'pixelate', enabled: true, invert: false, cellSize: 48,
+      progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
+    })
+    console.log(`[ramp pixelate] control=${JSON.stringify(a.control)} test=${JSON.stringify(a.test)} `
+      + `atten top=${a.top.toFixed(3)} bottom=${a.bottom.toFixed(3)}`)
+    expect(a.bottom).toBeLessThan(a.top * 0.65)
+  })
+
+  test('a progressive fade sweeps from solid to faded', async ({ page }) => {
+    const a = await rampAttenuation(page, {
+      id: 't-fade-ramp', kind: 'fade', enabled: true, invert: false, opacity: 0.05,
+      progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
+    })
+    console.log(`[ramp fade] control=${JSON.stringify(a.control)} test=${JSON.stringify(a.test)} `
+      + `atten top=${a.top.toFixed(3)} bottom=${a.bottom.toFixed(3)}`)
+    expect(a.bottom).toBeLessThan(a.top * 0.65)
+  })
+
+  /** The display-blend gate used to read `opacity < 1`. A ramped fade at opacity 1 still varies
+   *  per pixel and must take the tone-mapped path; this is the case that would catch it
+   *  silently falling back to the linear blend. */
+  test('a ramped fade at opacity 1 still ramps', async ({ page }) => {
+    const a = await rampAttenuation(page, {
+      id: 't-fade-one', kind: 'fade', enabled: true, invert: false, opacity: 1,
+      progressive: true, rampSpace: 'object', rampAngle: 90, rampStart: 0, rampEnd: 1,
+    })
+    console.log(`[ramp fade@1] atten top=${a.top.toFixed(3)} bottom=${a.bottom.toFixed(3)}`)
+    // opacity 1 means "fully solid" at every ramp value, so nothing should change — the point is
+    // that it does not CRASH or blank, and that both bands stay near their control.
+    expect(a.top).toBeGreaterThan(0.8)
+    expect(a.bottom).toBeGreaterThan(0.8)
   })
 
   test('tree flow: add a rim light from the row menu, see the breadcrumb, toggle, remove', async ({ page }) => {
