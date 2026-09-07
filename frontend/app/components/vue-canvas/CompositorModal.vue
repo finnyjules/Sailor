@@ -89,9 +89,7 @@ import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEdi
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
 import CompositorTornEdgePanel from '~/components/vue-canvas/compositor/CompositorTornEdgePanel.vue'
-import { DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
 import CompositorFeatherPanel from '~/components/vue-canvas/compositor/CompositorFeatherPanel.vue'
-import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import StrokeStyleRow from '~/components/vue-canvas/compositor/StrokeStyleRow.vue'
 import FillSwatch from '~/components/vue-canvas/compositor/FillSwatch.vue'
@@ -99,7 +97,7 @@ import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import type { PaletteFamily } from '~/lib/color/seedFamily'
 import type { GradientStop } from '~/lib/color/harmony'
 import { layerPaletteAssignments } from '~/lib/compositor/distribute'
-import PostEffectsControls from '~/components/vue-canvas/PostEffectsControls.vue'
+import PostEffectsControls, { PANEL_EFFECT_KINDS } from '~/components/vue-canvas/PostEffectsControls.vue'
 import CompositorEffectRow from '~/components/vue-canvas/compositor/CompositorEffectRow.vue'
 import {
   EFFECT_ORDER, EFFECT_LABELS, isPinnedKind, effectStackOf, writeStackToLayer,
@@ -1850,6 +1848,9 @@ const activeEffect = computed<EffectInstance | null>(() => {
   return l ? (layerStack(l).find(e => e.id === sel.effectId) ?? null) : null
 })
 const activeEffectLayer = computed<any>(() => (selectedEffect.value ? layerById(selectedEffect.value.layerId) : null))
+// Depth of field is the one panel kind with a precondition: no depth map, no dials. The
+// inspector says so rather than showing a breadcrumb over an empty body.
+const activeEffectDepth = computed(() => (activeEffectLayer.value ? localDepthSource(activeEffectLayer.value) : undefined))
 /** Write a patch onto the selected instance, BY ID, keeping the stack's order. */
 function updateActiveEffect(patch: Record<string, unknown>) {
   const sel = selectedEffect.value
@@ -1857,9 +1858,9 @@ function updateActiveEffect(patch: Record<string, unknown>) {
   if (!sel || !l) return
   setLayerStack(sel.layerId, layerStack(l).map(e => (e.id === sel.effectId ? { ...e, ...patch } : e)))
 }
-/** The seven kinds `PostEffectsControls` already renders. */
-const isPanelKind = (k: EffectKind) =>
-  (['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'dof'] as string[]).includes(k)
+/** The kinds `PostEffectsControls` draws — read from that component's own section list,
+ *  so adding a section there cannot leave an effect row selecting into an empty panel. */
+const isPanelKind = (k: EffectKind) => (PANEL_EFFECT_KINDS as string[]).includes(k)
 // The selection is by id, so a vanished effect — its layer deleted, or an undo that
 // rolled the stack back — must not leave the inspector pointing at nothing. One watcher
 // covers every removal path (`deleteLocal`, `deleteLayers`, undo/redo), none of which
@@ -3771,9 +3772,8 @@ const soleSelectedGroup = computed<string | null>(() => {
 const soleSelectedGroupExpr = computed<ExpressiveBoxParams | undefined>(() =>
   soleSelectedGroup.value ? localGroups.value.find(g => g.id === soleSelectedGroup.value)?.expressive : undefined)
 
-// ── Drop-shadow layer effect ────────────────────────────────────────────────
-// Stored on layer.effects as a single drop_shadow; rendered by drawLocalLayer
-// (and baked identically). color is an rgba string (hex picker + opacity).
+// ── rgba colour, split for a hex picker + an opacity field ──────────────────
+// Shared by the two shadow effects, whose stored `color` is an rgba string.
 function parseRgba(s: string): { hex: string, a: number } {
   const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(s || '')
   if (m) {
@@ -3786,27 +3786,6 @@ function composeRgba(hex: string, a: number): string {
   const h = hex.replace('#', '')
   const r = parseInt(h.slice(0, 2), 16) || 0, g = parseInt(h.slice(2, 4), 16) || 0, b = parseInt(h.slice(4, 6), 16) || 0
   return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, a))})`
-}
-function localShadow(l: any): any | undefined { return l?.effects?.find((e: any) => e.type === 'drop_shadow') }
-function shadowHex(l: any): string { return parseRgba(localShadow(l)?.color || '').hex }
-function shadowAlpha(l: any): number { return parseRgba(localShadow(l)?.color || '').a }
-function setLocalShadow(l: any, patch: Record<string, any>) {
-  if (!l) return
-  const cur = localShadow(l) || { type: 'drop_shadow', color: 'rgba(0, 0, 0, 0.35)', x: 0, y: 0.012, blur: 0.03, visible: true }
-  const next = { ...cur, ...patch }
-  setLocal(l.id, { effects: [...((l.effects || []).filter((e: any) => e.type !== 'drop_shadow')), next] })
-}
-function toggleLocalShadow(l: any) {
-  if (!l) return
-  if (localShadow(l)) setLocal(l.id, { effects: (l.effects || []).filter((e: any) => e.type !== 'drop_shadow') })
-  else setLocalShadow(l, {})
-}
-function setShadowHex(l: any, raw: string) {
-  let h = '#' + (raw || '').trim().replace(/^#/, '')
-  const m3 = /^#([0-9a-fA-F]{3})$/.exec(h)
-  if (m3) h = '#' + m3[1].split('').map(c => c + c).join('')
-  if (!/^#[0-9a-fA-F]{6}$/.test(h)) return // ignore partial/invalid input
-  setLocalShadow(l, { color: composeRgba(h, shadowAlpha(l)) })
 }
 
 // ── Clip mask ───────────────────────────────────────────────────────────────
@@ -3824,70 +3803,6 @@ function toggleLayerMask(l: any) {
   if (!l) return
   if (l.mask) setLocal(l.id, { mask: undefined })
   else setLayerMask(l, {})
-}
-
-// ── Layer blur effect ───────────────────────────────────────────────────────
-function layerBlur(l: any): any | undefined { return l?.effects?.find((e: any) => e.type === 'layer_blur') }
-function setLayerBlur(l: any, radius: number) {
-  if (!l) return
-  const others = (l.effects || []).filter((e: any) => e.type !== 'layer_blur')
-  setLocal(l.id, { effects: radius > 0 ? [...others, { type: 'layer_blur', radius, visible: true }] : others })
-}
-function toggleLayerBlur(l: any) {
-  if (!l) return
-  if (layerBlur(l)) setLocal(l.id, { effects: (l.effects || []).filter((e: any) => e.type !== 'layer_blur') })
-  else setLayerBlur(l, 0.02)
-}
-
-// ── Inner shadow (cast inward from the silhouette edge) ──────────────────────
-function innerShadow(l: any): any | undefined { return l?.effects?.find((e: any) => e.type === 'inner_shadow') }
-function innerShadowHex(l: any): string { return parseRgba(innerShadow(l)?.color || '').hex }
-function innerShadowAlpha(l: any): number { return parseRgba(innerShadow(l)?.color || '').a }
-function setInnerShadow(l: any, patch: Record<string, any>) {
-  if (!l) return
-  const cur = innerShadow(l) || { type: 'inner_shadow', color: 'rgba(0, 0, 0, 0.45)', x: 0, y: 0.008, blur: 0.02, visible: true }
-  const next = { ...cur, ...patch }
-  setLocal(l.id, { effects: [...((l.effects || []).filter((e: any) => e.type !== 'inner_shadow')), next] })
-}
-function toggleInnerShadow(l: any) {
-  if (!l) return
-  if (innerShadow(l)) setLocal(l.id, { effects: (l.effects || []).filter((e: any) => e.type !== 'inner_shadow') })
-  else setInnerShadow(l, {})
-}
-
-// ── Background blur (blur what's behind the layer, within its silhouette) ───
-function bgBlur(l: any): any | undefined { return l?.effects?.find((e: any) => e.type === 'background_blur') }
-function setBgBlur(l: any, radius: number) {
-  if (!l) return
-  const others = (l.effects || []).filter((e: any) => e.type !== 'background_blur')
-  setLocal(l.id, { effects: radius > 0 ? [...others, { type: 'background_blur', radius, visible: true }] : others })
-}
-function toggleBgBlur(l: any) {
-  if (!l) return
-  if (bgBlur(l)) setLocal(l.id, { effects: (l.effects || []).filter((e: any) => e.type !== 'background_blur') })
-  else setBgBlur(l, 0.02)
-}
-
-// ── Feather (soften layer edges to transparent) ──────────────────────────────
-function setFeather(l: any, patch: Record<string, any>) {
-  if (!l) return
-  const cur = l.feather || { ...DEFAULT_FEATHER }
-  setLocal(l.id, { feather: { ...cur, ...patch } })
-}
-function toggleFeather(l: any, on: boolean) {
-  if (!l) return
-  setLocal(l.id, { feather: on ? { ...DEFAULT_FEATHER } : undefined })
-}
-
-// ── Torn paper edge ─────────────────────────────────────────────────────────
-function setTornEdge(l: any, patch: Record<string, any>) {
-  if (!l) return
-  const cur = l.tornEdge || { ...DEFAULT_TORN_EDGE }
-  setLocal(l.id, { tornEdge: { ...cur, ...patch } })
-}
-function toggleTornEdge(l: any, on: boolean) {
-  if (!l) return
-  setLocal(l.id, { tornEdge: on ? { ...DEFAULT_TORN_EDGE } : undefined })
 }
 
 // ── Displacement map (this image layer warps everything below it) ───────────
@@ -7022,7 +6937,7 @@ onUnmounted(() => {
       <!-- Placed template copy: slot-fill panel + Freeze. Takes over whenever the
            selection touches a placed instance's layers (a single slot layer or
            the whole copy selected as a group both resolve here). -->
-      <template v-else-if="activeTemplateInstance && activeTemplateInstanceTemplate">
+      <template v-else-if="activeTemplateInstance && activeTemplateInstanceTemplate && !activeEffect">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <LayoutTemplate class="size-3.5 text-white/70" />
           <span class="text-sm font-medium truncate" :title="activeTemplateInstanceTemplate!.name">{{ activeTemplateInstanceTemplate!.name }}</span>
@@ -7066,7 +6981,7 @@ onUnmounted(() => {
            not the first one of its type. -->
       <template v-else-if="activeEffect">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-1.5 text-[11px] text-white/50" data-testid="effect-breadcrumb">
-          <button type="button" class="truncate hover:text-white/80" @click="selectedEffect = null">{{ activeEffectLayer ? rowLabel({ layer: activeEffectLayer }) : 'Layer' }}</button>
+          <button type="button" class="truncate capitalize hover:text-white/80" @click="selectedEffect = null">{{ activeEffectLayer ? rowLabel({ layer: activeEffectLayer }) : 'Layer' }}</button>
           <ChevronRight class="size-3 shrink-0 opacity-60" />
           <span class="truncate text-white/80">{{ EFFECT_LABELS[activeEffect!.type] }}</span>
         </div>
@@ -7074,11 +6989,17 @@ onUnmounted(() => {
           <!-- The seven kinds PostEffectsControls already draws. `only` narrows it to the
                selected kind, and `effects` is the one instance, so its patch comes back as
                a single-entry array we write straight onto that id. -->
+          <p v-if="activeEffect!.type === 'dof' && !activeEffectDepth" class="text-xs text-white/50"
+            data-testid="effect-dof-no-depth">
+            Depth of field needs an image with a depth map. Add it to an image layer, or
+            generate depth for this one first.
+          </p>
           <PostEffectsControls
-            v-if="isPanelKind(activeEffect!.type)"
+            v-else-if="isPanelKind(activeEffect!.type)"
             :effects="([activeEffect] as any)"
             :only="([activeEffect!.type] as any)"
-            :depth-source="activeEffectLayer ? localDepthSource(activeEffectLayer) : undefined"
+            :depth-source="activeEffectDepth"
+            :hide-toggle="true"
             @update="(fx: any[]) => { const n = fx[0]; if (n) updateActiveEffect(n) }" />
 
           <!-- Drop shadow -->
@@ -7176,10 +7097,12 @@ onUnmounted(() => {
           <CompositorTornEdgePanel
             v-else-if="activeEffect!.type === 'torn_edge'"
             :value="(activeEffect as any)"
+            :hide-toggle="true"
             @update="(patch: any) => updateActiveEffect(patch)" />
           <CompositorFeatherPanel
             v-else-if="activeEffect!.type === 'feather'"
             :value="(activeEffect as any)"
+            :hide-toggle="true"
             @update="(patch: any) => updateActiveEffect(patch)" />
         </div>
       </template>

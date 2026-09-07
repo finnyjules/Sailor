@@ -1,9 +1,18 @@
 <!-- frontend/app/components/vue-canvas/compositor/CompositorTornEdgePanel.vue -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import { DEFAULT_TORN_EDGE, TORN_EDGE_STYLES, type TornEdgeSpec } from '~/lib/compositor/tornEdge'
+import { DEFAULT_TORN_EDGE, TORN_EDGE_STYLES, type TornEdgeSpec, type TornEdgeStyle } from '~/lib/compositor/tornEdge'
 
-const props = defineProps<{ value?: TornEdgeSpec }>()
+// The stored value stays the slug; only the option text is human.
+const STYLE_LABELS: Record<TornEdgeStyle, string> = {
+  ripped: 'Ripped',
+  deckle: 'Deckle',
+  shredded: 'Shredded',
+}
+
+// `hideToggle` drops the header's Add/Remove. The Compositor's effect inspector shows one
+// existing instance and owns add/remove from the layer tree, so the button would be inert.
+const props = defineProps<{ value?: TornEdgeSpec, hideToggle?: boolean }>()
 const emit = defineEmits<{
   (e: 'update', patch: Partial<TornEdgeSpec>): void
   (e: 'toggle', on: boolean): void
@@ -17,7 +26,7 @@ const reseed = () => emit('update', { seed: Math.floor(Math.abs(Math.sin(v.value
 
 <template>
   <div>
-    <div class="flex items-center justify-between mb-1.5">
+    <div v-if="!hideToggle" class="flex items-center justify-between mb-1.5">
       <div class="panel-label">Torn edge</div>
       <button type="button" class="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-white/60 hover:text-white/90"
         @click="emit('toggle', !on)">{{ on ? 'Remove' : 'Add' }}</button>
@@ -30,7 +39,7 @@ const reseed = () => emit('update', { seed: Math.floor(Math.abs(Math.sin(v.value
           <select :value="v.style"
             class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
             @change="set({ style: ($event.target as HTMLSelectElement).value as TornEdgeSpec['style'] })">
-            <option v-for="st in TORN_EDGE_STYLES" :key="st" :value="st">{{ st }}</option>
+            <option v-for="st in TORN_EDGE_STYLES" :key="st" :value="st">{{ STYLE_LABELS[st] ?? st }}</option>
           </select>
         </div>
 

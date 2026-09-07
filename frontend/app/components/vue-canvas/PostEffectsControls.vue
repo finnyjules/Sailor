@@ -1,51 +1,10 @@
 <!-- frontend/app/components/vue-canvas/PostEffectsControls.vue -->
-<script setup lang="ts">
-// Post-processing effect sections (adjust/bloom/grain/vignette/duotone/dof).
-// Emits the FULL replacement chain array — the owner decides where it lives
-// (layer.effects for a layer, sailor_localFx for the document).
-//
-// `depthSource` gates the Depth of Field section: it runs on the GPU against a depth
-// map, so it is only offered where one can exist. A bare filename means input/ (an
-// uploaded layer); a wired layer passes its full source.
-//
-// `only` restricts which sections are offered. Wired layers pass ['dof'] because the 2D
-// chain is not applied on their draw path yet — offering Vignette there would write a
-// setting that silently never renders.
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { defaultPostEffect, type PostEffect, type GradientMapStop } from '~/lib/compositor/postEffects'
-import { dofAvailable, dofUnavailableReason } from '~/lib/compositor/dofPass'
-import {
-  depthMessageFor, depthStatusFor, onDepthChange, requestDepth, type DepthRef,
-} from '~/lib/compositor/depthRegistry'
-import StudioGradientRamp from '~/components/vue-canvas/studio/StudioGradientRamp.vue'
-import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
-import type { GradientStop } from '~/lib/color/harmony'
-
-const props = defineProps<{
-  effects: PostEffect[]
-  depthSource?: DepthRef
-  only?: PostEffect['type'][]
-}>()
-const emit = defineEmits<{ (e: 'update', effects: PostEffect[]): void }>()
-
-// The registry is a plain module, not reactive — bump a counter on change so the
-// status line re-renders when depth arrives or fails.
-const depthTick = ref(0)
-let stopDepthWatch: (() => void) | null = null
-onMounted(() => { stopDepthWatch = onDepthChange(() => { depthTick.value++ }) })
-onBeforeUnmount(() => { stopDepthWatch?.(); stopDepthWatch = null })
-
-const glOk = computed(() => dofAvailable())
-const glReason = computed(() => dofUnavailableReason())
-const depthStatus = computed(() => {
-  void depthTick.value
-  return props.depthSource ? depthStatusFor(props.depthSource) : 'idle'
-})
-const depthMessage = computed(() => {
-  void depthTick.value
-  return props.depthSource ? depthMessageFor(props.depthSource) : ''
-})
-function retryDepth() { if (props.depthSource) requestDepth(props.depthSource) }
+<script lang="ts">
+// The sections this panel draws, and the kinds they cover. Declared in a plain script
+// block, not in `<script setup>`, so the list can be EXPORTED: the Compositor's effect
+// inspector asks "is there a panel for this kind?" and must not keep a second copy that
+// drifts when a section is added here.
+import type { PostEffect } from '~/lib/compositor/postEffects'
 
 interface ParamSpec { key: string; label: string; min: number; max: number; step: number }
 interface SectionSpec { type: PostEffect['type']; label: string; params: ParamSpec[]; colors?: [string, string][]; ramp?: boolean }
@@ -90,6 +49,71 @@ const SECTIONS: SectionSpec[] = [
   ] },
 ]
 
+/** The effect kinds this component has a section for. */
+export const PANEL_EFFECT_KINDS: PostEffect['type'][] = SECTIONS.map(s => s.type)
+</script>
+
+<script setup lang="ts">
+// Post-processing effect sections (adjust/bloom/grain/vignette/duotone/dof).
+// Emits the FULL replacement chain array — the owner decides where it lives
+// (layer.effects for a layer, sailor_localFx for the document).
+//
+// `depthSource` gates the Depth of Field section: it runs on the GPU against a depth
+// map, so it is only offered where one can exist. A bare filename means input/ (an
+// uploaded layer); a wired layer passes its full source.
+//
+// `only` restricts which sections are offered. Wired layers pass ['dof'] because the 2D
+// chain is not applied on their draw path yet — offering Vignette there would write a
+// setting that silently never renders.
+//
+// `hideToggle` drops the per-section Add/Remove button. The Compositor's effect inspector
+// shows ONE existing instance, where adding is the layer tree's plus menu and removing is
+// the row's trash icon — the button there would emit a chain this owner ignores, i.e. read
+// as a button that does nothing.
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+// `PostEffect` is imported by the plain script block above — the two blocks share one
+// module scope, so importing it twice is a duplicate identifier.
+import { defaultPostEffect, type GradientMapStop } from '~/lib/compositor/postEffects'
+import { dofAvailable, dofUnavailableReason } from '~/lib/compositor/dofPass'
+import {
+  depthMessageFor, depthStatusFor, onDepthChange, requestDepth, type DepthRef,
+} from '~/lib/compositor/depthRegistry'
+import StudioGradientRamp from '~/components/vue-canvas/studio/StudioGradientRamp.vue'
+import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
+import type { GradientStop } from '~/lib/color/harmony'
+
+const props = defineProps<{
+  effects: PostEffect[]
+  depthSource?: DepthRef
+  only?: PostEffect['type'][]
+  hideToggle?: boolean
+}>()
+const emit = defineEmits<{ (e: 'update', effects: PostEffect[]): void }>()
+
+// The registry is a plain module, not reactive — bump a counter on change so the
+// status line re-renders when depth arrives or fails.
+const depthTick = ref(0)
+let stopDepthWatch: (() => void) | null = null
+onMounted(() => { stopDepthWatch = onDepthChange(() => { depthTick.value++ }) })
+onBeforeUnmount(() => { stopDepthWatch?.(); stopDepthWatch = null })
+
+const glOk = computed(() => dofAvailable())
+const glReason = computed(() => dofUnavailableReason())
+const depthStatus = computed(() => {
+  void depthTick.value
+  return props.depthSource ? depthStatusFor(props.depthSource) : 'idle'
+})
+const depthMessage = computed(() => {
+  void depthTick.value
+  return props.depthSource ? depthMessageFor(props.depthSource) : ''
+})
+function retryDepth() { if (props.depthSource) requestDepth(props.depthSource) }
+
+// With the toggle hidden and exactly one section offered, the owner has already named the
+// effect (the inspector's breadcrumb does), so a section title would just repeat it.
+const showSectionTitle = computed(() => !(props.hideToggle && props.only?.length === 1))
+
+
 // Depth of field needs a depth map, so it is offered only where one can exist.
 const sections = computed(() => SECTIONS.filter(s =>
   (!props.only || props.only.includes(s.type))
@@ -118,9 +142,9 @@ function fmt(v: unknown, step: number): string {
 <template>
   <div>
     <div v-for="s in sections" :key="s.type" class="mt-3 first:mt-0">
-      <div class="flex items-center justify-between mb-1.5">
-        <div class="panel-label">{{ s.label }}</div>
-        <button class="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-white/60 hover:text-white/90"
+      <div v-if="showSectionTitle || !hideToggle" class="flex items-center justify-between mb-1.5">
+        <div v-if="showSectionTitle" class="panel-label">{{ s.label }}</div>
+        <button v-if="!hideToggle" class="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-white/60 hover:text-white/90"
           :data-testid="`postfx-add-${s.type}`"
           @click="toggle(s.type)">{{ fx(s.type) ? 'Remove' : 'Add' }}</button>
       </div>

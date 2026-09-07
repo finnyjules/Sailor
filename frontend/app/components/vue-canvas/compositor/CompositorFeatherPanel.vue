@@ -3,7 +3,9 @@
 import { computed } from 'vue'
 import { DEFAULT_FEATHER, type FeatherSpec } from '~/lib/compositor/feather'
 
-const props = defineProps<{ value?: FeatherSpec }>()
+// `hideToggle` drops the header's Add/Remove. The Compositor's effect inspector shows one
+// existing instance and owns add/remove from the layer tree, so the button would be inert.
+const props = defineProps<{ value?: FeatherSpec, hideToggle?: boolean }>()
 const emit = defineEmits<{
   (e: 'update', patch: Partial<FeatherSpec>): void
   (e: 'toggle', on: boolean): void
@@ -18,7 +20,7 @@ const amountLabel = computed(() => v.value.amount.toFixed(2))
 
 <template>
   <div>
-    <div class="flex items-center justify-between mb-1.5">
+    <div v-if="!hideToggle" class="flex items-center justify-between mb-1.5">
       <div class="panel-label">Feather</div>
       <button type="button" class="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-white/60 hover:text-white/90"
         @click="emit('toggle', !on)">{{ on ? 'Remove' : 'Add' }}</button>
