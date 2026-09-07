@@ -76,3 +76,43 @@ describe('progressive blur rows', () => {
     })
   })
 })
+
+describe('the shared ramp rows', () => {
+  const RAMP_KEYS = [
+    'treatment.progressive', 'treatment.rampSpace',
+    'treatment.rampAngle', 'treatment.rampStart', 'treatment.rampEnd',
+  ]
+
+  it('every masked kind offers the ramp rows, in the same order', () => {
+    for (const kind of ['blur', 'glow', 'pixelate', 'fade'] as const) {
+      const keys = treatmentControls(kind).map((r) => r.key)
+      const ramp = keys.filter((k) => RAMP_KEYS.includes(k))
+      expect(ramp, kind).toEqual(RAMP_KEYS)
+      // the ramp sits after the effect's own dials and before "Everything else"
+      expect(keys.indexOf('treatment.invert'), kind).toBeGreaterThan(keys.indexOf('treatment.rampEnd'))
+    }
+  })
+
+  it('gates the four ramp rows behind Progressive on every kind', () => {
+    for (const kind of ['blur', 'glow', 'pixelate', 'fade'] as const) {
+      const gated = treatmentControls(kind).filter((r) => r.showIf?.key === 'treatment.progressive')
+      expect(gated.map((r) => r.key), kind).toEqual(RAMP_KEYS.slice(1))
+      for (const r of gated) expect(r.showIf, kind).toMatchObject({ equals: true })
+    }
+  })
+
+  it('labels the ramp space options on every kind', () => {
+    for (const kind of ['blur', 'glow', 'pixelate', 'fade'] as const) {
+      const row = treatmentControls(kind).find((r) => r.key === 'treatment.rampSpace')
+      expect(row, kind).toMatchObject({ kind: 'select', options: ['object', 'frame'] })
+      expect((row as { optionLabels?: string[] }).optionLabels, kind).toEqual(['The object', 'The whole frame'])
+    }
+  })
+
+  it('the edge kinds have no ramp rows', () => {
+    for (const kind of ['rimLight', 'outline', 'xray', 'wireframe'] as const) {
+      const keys = treatmentControls(kind).map((r) => r.key)
+      expect(keys.filter((k) => RAMP_KEYS.includes(k)), kind).toEqual([])
+    }
+  })
+})

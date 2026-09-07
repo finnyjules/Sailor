@@ -3,7 +3,7 @@
 // keys to `object.treatments.<id>.<field>`; the surface reads/writes `<field>` directly
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { BLUR_RAMP_SPACES, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, type TreatmentKind } from './treatments'
+import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, type TreatmentKind } from './treatments'
 
 export const TREATMENT_KEY_PREFIX = 'treatment.'
 
@@ -27,6 +27,21 @@ const select = (group: string, field: string, label: string, options: string[], 
 const whenProgressive = (row: Row): Row =>
   ({ ...row, showIf: { key: TREATMENT_KEY_PREFIX + 'progressive', equals: true } })
 
+/** The Progressive ramp rows, identical on every masked kind. The hint is effect-neutral
+ *  because the same five rows now sit under blur, glow, pixelate and fade. */
+const rampRows = (g: string): Row[] => [
+  toggle(g, 'progressive', 'Progressive', RAMP_DEFAULTS.progressive,
+    'Ramp the effect across the object instead of covering it evenly'),
+  whenProgressive(select(g, 'rampSpace', 'Measured across', [...RAMP_SPACES],
+    ['The object', 'The whole frame'], RAMP_DEFAULTS.rampSpace)),
+  whenProgressive(slider(g, 'rampAngle', 'Angle', 0, 360, 1, RAMP_DEFAULTS.rampAngle,
+    '0° ramps left to right, 90° top to bottom')),
+  whenProgressive(slider(g, 'rampStart', 'Start', 0, 1, 0.01, RAMP_DEFAULTS.rampStart,
+    'The effect begins here')),
+  whenProgressive(slider(g, 'rampEnd', 'End', 0, 1, 0.01, RAMP_DEFAULTS.rampEnd,
+    'The effect is at full strength from here on')),
+]
+
 /** Rows for one kind, in display order. Group = the kind's human label, so the panel draws
  *  a single card titled e.g. "Rim light". Masked kinds end with the "Everything else" switch. */
 export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
@@ -36,11 +51,7 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
     case 'blur':
       rows = [
         slider(g, 'amount', 'Amount', 0, BLUR_AMOUNT_MAX, 0.01, D.blur.amount, 'How soft the object goes'),
-        toggle(g, 'progressive', 'Progressive', D.blur.progressive, 'Ramp the blur across the object instead of covering it evenly'),
-        whenProgressive(select(g, 'rampSpace', 'Measured across', [...BLUR_RAMP_SPACES], ['The object', 'The whole frame'], D.blur.rampSpace)),
-        whenProgressive(slider(g, 'rampAngle', 'Angle', 0, 360, 1, D.blur.rampAngle, '0° ramps left to right, 90° top to bottom')),
-        whenProgressive(slider(g, 'rampStart', 'Start', 0, 1, 0.01, D.blur.rampStart, 'Stays sharp up to here')),
-        whenProgressive(slider(g, 'rampEnd', 'End', 0, 1, 0.01, D.blur.rampEnd, 'Fully blurred from here on')),
+        ...rampRows(g),
       ]
       break
     case 'glow':
@@ -48,13 +59,20 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         slider(g, 'strength', 'Strength', 0, 3, 0.01, D.glow.strength),
         slider(g, 'threshold', 'Threshold', 0, 1, 0.01, D.glow.threshold, 'Only parts brighter than this glow'),
         color(g, 'tint', 'Tint', D.glow.tint),
+        ...rampRows(g),
       ]
       break
     case 'pixelate':
-      rows = [slider(g, 'cellSize', 'Cell size', 2, 64, 1, D.pixelate.cellSize, 'Block size, relative to the image height')]
+      rows = [
+        slider(g, 'cellSize', 'Cell size', 2, 64, 1, D.pixelate.cellSize, 'Block size, relative to the image height'),
+        ...rampRows(g),
+      ]
       break
     case 'fade':
-      rows = [slider(g, 'opacity', 'Opacity', 0, 1, 0.01, D.fade.opacity)]
+      rows = [
+        slider(g, 'opacity', 'Opacity', 0, 1, 0.01, D.fade.opacity),
+        ...rampRows(g),
+      ]
       break
     case 'rimLight':
       rows = [
