@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import type { ControlSpec, Params, SpaceTypeEffect } from '../effect'
-import { parseFills, fillAtlasTexture, serializeFills, DEFAULT_FILL, SRGB_TO_LINEAR_GLSL, fillAnchor, fillScreenVec } from '../fills'
+import { parseFills, fillAtlasTexture, SRGB_TO_LINEAR_GLSL, fillAnchor, fillScreenVec } from '../fills'
 import { hash11, parseEase, holdFraction, sceneBlend } from '../motion'
 import { stripAlpha } from '~/lib/color/convert'
+import { defaultFillsFor } from '../palette'
 
 /**
  * Shutter — geometric "speed lines" sliced typography.
@@ -30,7 +31,8 @@ const MX = 1.5
 const MY = 1.15
 
 // One fill per copy (bottom of pile → top). Each can be a solid colour or a studio pattern.
-const FILL_DEFAULT = serializeFills(['#ff4d2e', '#f4a300', '#10b981', '#0a0a0a'].map(c => ({ ...DEFAULT_FILL, a: c })))
+// Seeded from the canonical Vessell palette (see palette.ts), like every other fill-list effect.
+const FILL_DEFAULT = defaultFillsFor(4, 'shutter')
 
 const controls: ControlSpec[] = [
   // TYPE.

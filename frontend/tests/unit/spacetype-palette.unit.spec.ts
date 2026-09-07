@@ -32,10 +32,24 @@ describe('vessell palette', () => {
   })
 })
 
+// Effects whose `fillList` control reuses the editor widget for something OTHER than a per-slot
+// palette, so the seeded-prefix invariant below doesn't apply to them:
+//   - loft: the control holds the TWO gradient STOPS its surface blends between (must be distinct
+//     SOLID colours — see spacetype-loft-effect.unit.spec.ts), so it can't be a grid/qr palette
+//     prefix. Its stop colours ARE seeded from the palette (vessellColorsFor), just not as an array.
+// ring is excluded structurally instead: its `wordFill` is a single Fill stored as a bare object.
+const NON_PALETTE_FILLLIST = new Set(['loft'])
+
 describe('effect fill defaults all come from the palette', () => {
   for (const e of SPACE_TYPE_EFFECTS) {
     const fillControl = e.controls.find(c => c.kind === 'fillList')
     if (!fillControl) continue
+    if (NON_PALETTE_FILLLIST.has(e.id)) continue
+    // A `fillList` control holds EITHER a per-slot palette array (the common case — seeded from the
+    // Vessell palette) OR a single global Fill stored as a bare object (e.g. ring's `wordFill`, which
+    // reuses the fillList editor widget but is one fill, parsed by resolveWordFill not parseFills).
+    // The palette invariant only governs the per-slot arrays; skip the single-fill controls.
+    if (!Array.isArray(JSON.parse((fillControl as any).default))) continue
     it(`${e.id} fillList default is a seeded palette prefix`, () => {
       const n = JSON.parse((fillControl as any).default).length
       expect((fillControl as any).default).toBe(defaultFillsFor(n, e.id))

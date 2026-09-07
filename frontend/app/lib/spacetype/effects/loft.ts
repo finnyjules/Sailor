@@ -8,6 +8,17 @@ import {
   type Vec2, type LoftShape,
 } from '../loftGeometry'
 import { textOutline, fontCacheGet, fontSourceUrl, type Font } from '~/lib/scene3d/outlines'
+import { vessellColorsFor } from '../palette'
+
+// Loft's fill list is NOT a per-slot palette — it's the TWO gradient STOPS its surface blends
+// between (1 fill = uniform; 2 = a blend). So it can't take a seeded palette prefix (grid/qr tiles
+// aren't blendable stops). Instead we source the two SOLID stop colours from the Vessell palette,
+// seeded for loft — on-brand, but keeping the distinct-solid-stops shape loft needs.
+const [LOFT_STOP_A, LOFT_STOP_B] = vessellColorsFor(2, 'loft')
+const LOFT_FILLS_DEFAULT = JSON.stringify([
+  { type: 'solid', a: LOFT_STOP_A, b: LOFT_STOP_A, textColor: '#ffffff', angle: 90, density: 8 },
+  { type: 'solid', a: LOFT_STOP_B, b: LOFT_STOP_B, textColor: '#ffffff', angle: 90, density: 8 },
+])
 
 /**
  * LOFT — sweep a keyframed cross-section (a parametric shape or, in word mode, a word's glyph
@@ -53,7 +64,7 @@ const controls: ControlSpec[] = [
   // so a fresh loft shows a blue→pink blend AND matches the "each fill = one colour" model
   // (1 fill = uniform, 2 = endpoints blend, N = spread). Gradient/ombre fills are still accepted —
   // they contribute their a→b as two stops (see rampFromFill).
-  { key: 'fills', label: 'Fill', kind: 'fillList', default: JSON.stringify([{ type: 'solid', a: '#3b5bff', b: '#3b5bff', textColor: '#ffffff', angle: 90, density: 8 }, { type: 'solid', a: '#ff2ea6', b: '#ff2ea6', textColor: '#ffffff', angle: 90, density: 8 }]), group: 'Color', showIf: { key: 'colorSource', equals: 'fill' } },
+  { key: 'fills', label: 'Fill', kind: 'fillList', default: LOFT_FILLS_DEFAULT, group: 'Color', showIf: { key: 'colorSource', equals: 'fill' } },
   { key: 'fillMode', label: 'Fill mode', kind: 'select', options: ['blend', 'steps'], default: 'blend', group: 'Color', showIf: { key: 'colorSource', equals: 'fill' } },
   { key: 'flow', label: 'Flow', kind: 'slider', min: 0, max: 4, step: 1, default: 0, group: 'Motion' },
   { key: 'spin', label: 'Spin', kind: 'slider', min: 0, max: 4, step: 1, default: 0, group: 'Motion' },

@@ -1,13 +1,12 @@
 import * as THREE from 'three'
 import type { ControlSpec, Params, SpaceTypeEffect } from '../effect'
-import { parseFills, serializeFills, fillShaderTexture, fillTiling, fillTextColor, SRGB_TO_LINEAR_GLSL, fillAnchor, fillScreenVec, type Fill } from '../fills'
+import { parseFills, fillShaderTexture, fillTiling, fillTextColor, SRGB_TO_LINEAR_GLSL, fillAnchor, fillScreenVec, type Fill } from '../fills'
+import { defaultFillsFor } from '../palette'
 
-// Default per-band fills: the signature dark/cream 2-tone (band 0 dark+cream text, band 1 inverted),
-// cycled across however many bands. Each entry can be changed to ombre/grid/gradient/etc. in the panel.
-const DEFAULT_FILLS = serializeFills([
-  { type: 'solid', a: '#15171b', b: '#15171b', textColor: '#f4f1ea', angle: 45, density: 8 },
-  { type: 'solid', a: '#f4f1ea', b: '#f4f1ea', textColor: '#15171b', angle: 45, density: 8 },
-])
+// Default per-band fills: the first two of Corner Pin's seeded shuffle of the canonical Vessell
+// palette (see palette.ts), cycled across however many bands. Each entry can be changed to
+// ombre/grid/gradient/etc. in the panel.
+const DEFAULT_FILLS = defaultFillsFor(2, 'cornerpin')
 
 /**
  * Corner Pin — a fluid 4-point perspective warp across a shared boundary.
