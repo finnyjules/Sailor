@@ -27,12 +27,20 @@ test.describe('Compositor post-processing effects', () => {
     await page.getByTitle('Add rectangle').click()
     const baseline = await stackPixels(page)
 
-    // Per-layer Adjust: brightness up must change pixels; Remove must restore them.
-    await page.locator('[data-testid="postfx-add-adjust"]').click()
+    // Per-layer Adjust: brightness up must change pixels; removing it must restore them.
+    // A layer's effects are no longer Add/Remove sections in the inspector — they are rows in
+    // the layer tree, added from the row's plus menu and tuned in the effect view.
+    const addFx = page.locator('[data-testid="add-effect"]').first()
+    await addFx.hover()
+    await addFx.click()
+    await page.locator('[data-testid="add-effect-item"][data-kind="adjust"]').click()
     await page.locator('[data-testid="postfx-adjust-brightness"]').fill('1.8')
     const brightened = await stackPixels(page)
     expect(brightened).not.toBe(baseline)
-    await page.locator('[data-testid="postfx-add-adjust"]').click() // now reads "Remove"
+    const adjustRow = page.locator('[data-testid="effect-row"][data-effect-kind="adjust"]')
+    await adjustRow.hover()
+    await adjustRow.getByRole('button', { name: 'Remove effect' }).click()
+    await expect(adjustRow).toHaveCount(0)
     expect(await stackPixels(page)).toBe(baseline)
 
     // Deselect by clicking an empty artboard corner → doc panel appears.

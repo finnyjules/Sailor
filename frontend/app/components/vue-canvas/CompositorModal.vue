@@ -1674,12 +1674,20 @@ onMounted(() => {
   window.addEventListener('keyup', onKeyup, true)
   window.addEventListener('blur', clearPan)
   document.addEventListener('visibilitychange', onVisibility)
+  // Test hooks (mirrors Scene3DStudioSurface's __scene3dDoc): read and replace the open
+  // document's layers, so a spec can seed a legacy-shaped layer without a save/reload cycle.
+  // `commit` is the editor's own whole-array writer, so the normal write-through and
+  // reactivity paths run exactly as they do for a user edit.
+  ;(window as any).__compositorLayers = () => JSON.parse(JSON.stringify(localLayers.value))
+  ;(window as any).__compositorSetLayers = (next: any[]) => { commit(next as any) }
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true)
   window.removeEventListener('keyup', onKeyup, true)
   window.removeEventListener('blur', clearPan)
   document.removeEventListener('visibilitychange', onVisibility)
+  delete (window as any).__compositorLayers
+  delete (window as any).__compositorSetLayers
 })
 
 // ── Selection ───────────────────────────────────────────────────────────────
