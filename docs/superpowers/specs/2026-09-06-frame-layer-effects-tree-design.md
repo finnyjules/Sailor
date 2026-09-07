@@ -73,7 +73,9 @@ today, which is what pins them to one position. They become entries with `type: 
 `type: 'feather'` carrying the existing `TornEdgeSpec` / `FeatherSpec` fields. This is the change
 that makes them orderable, and it is the largest single piece of the migration.
 
-**Migration, on load, per layer:**
+**Migration** runs where the document is read into the editor, in the same place other layer
+sanitization happens, so every consumer downstream of the read sees only the new shape. It persists
+on the next save of that frame. Per layer:
 
 1. Stamp a fresh id on every effect that lacks one.
 2. Fold `layer.tornEdge` into the list as a `torn_edge` entry, and `layer.feather` as a `feather`
@@ -138,7 +140,10 @@ not follow-ups:
 - **Drag reorders** within the layer's own orderable region. A drop onto or across a pinned row is
   refused. Dragging an effect to a different layer is out of scope for this pass.
 - A layer with effects gets a disclosure chevron, like a group.
-- Layer kinds that cannot carry effects (if any) get no plus button.
+- Every layer row carries the plus button, wired layers included (`effects` lives on the shared
+  layer base, and `paintLayer` runs the same offscreen path for a wired layer's pixels). **Group
+  rows do not** — a group is a container with its own opacity, not a layer with pixels of its own.
+  Effects on a group are a separate question and are out of scope here.
 
 ## Section 4: Right panel
 
