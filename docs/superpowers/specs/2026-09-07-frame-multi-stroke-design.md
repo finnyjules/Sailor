@@ -55,8 +55,9 @@ export interface StrokeInstance {
   visible?: boolean             // absent ⇒ true, same convention as EffectInstance
   paint: Paint                  // colour | Gradient | Fill | ImageFill — the existing Paint union
   width: number                 // normalized to canvas width (path layers: local units, as today)
-  /** How far the outline sits from the shape's edge, in the same units as `width`.
-   *  0 = on the edge (today). Positive = outside, negative = inside. */
+  /** How far the band's REFERENCE EDGE sits from the shape's own edge, in the same units as
+   *  `width` — `align` then straddles that reference, see "Distance and alignment compose".
+   *  0 = the shape's edge, i.e. today. Positive = outside, negative = inside. */
   distance?: number
   align?: StrokeAlign           // 'center' | 'inside' | 'outside', as today
   dash?: StrokeDash
@@ -108,8 +109,12 @@ shape. That is wrong on every rect, and visibly wrong on text. The correct regio
 distance `d` with width `w` is:
 
 ```
-dilate(shape, d + w)  minus  dilate(shape, d)
+dilate(shape, outer)  minus  dilate(shape, inner)
 ```
+
+where `outer` and `inner` come from the distance and the alignment together — for `align: 'center'`
+they are `d + w/2` and `d − w/2`; for `'outside'`, `d + w` and `d`; for `'inside'`, `d` and `d − w`.
+A negative radius is an erosion rather than a dilation, which the next paragraph covers.
 
 Canvas gives a dilation directly: `fill(path)` together with `stroke(path, lineWidth = 2r)` is
 exactly the shape dilated by `r`, with `lineJoin` deciding the corner behaviour. So the band is
