@@ -21,11 +21,12 @@ const withColorAttribute = (g: THREE.BufferGeometry) => {
 }
 
 /** A geometry as `mergeClones` leaves it: the per-copy `color` attribute AND the
- *  `varyTint`/`varyStrength` stamp that identifies it as Cloner-baked. */
-const tinted = (strength = 1) => {
+ *  `varyTint` stamp that identifies it as Cloner-baked. The blend STRENGTH is
+ *  deliberately not here — it is a material property, passed to
+ *  `materialFor`/`updateMaterial` explicitly, never stamped on the geometry. */
+const tinted = () => {
   const g = withColorAttribute(plain())
   g.userData.varyTint = true
-  g.userData.varyStrength = strength
   return g
 }
 
@@ -108,29 +109,38 @@ describe('the tint SURVIVES a second sync (regression guard for the Critical)', 
 })
 
 describe('vary colour strength', () => {
-  it('round-trips the stamped strength into the uniform', () => {
-    const m = materialFor(MAT, tinted(0.4))
+  it('round-trips the EXPLICIT strength into the uniform', () => {
+    const m = materialFor(MAT, tinted(), undefined, 0.4)
     expect(varyUniforms(m)?.uVaryStrength.value).toBe(0.4)
   })
 
   it('updates IN PLACE — a strength change must never rebuild the material', () => {
-    const g = tinted(0.4)
-    const m = materialFor(MAT, g)
+    const g = tinted()
+    const m = materialFor(MAT, g, undefined, 0.4)
     expect(varyUniforms(m)?.uVaryStrength.value).toBe(0.4)
-    g.userData.varyStrength = 0.9
-    expect(updateMaterial(m, MAT, g)).toBe(true)
+    // The SAME geometry object: a strength change no longer rebuilds the geometry
+    // either, which is the whole point of taking it as a parameter.
+    expect(updateMaterial(m, MAT, g, 0.9)).toBe(true)
     expect(varyUniforms(m)?.uVaryStrength.value).toBe(0.9)
   })
 
-  it('defaults to 1 when the stamp carries no usable strength', () => {
+  it('defaults to 1 when no strength is supplied', () => {
     const g = plain()
     g.userData.varyTint = true
     expect(varyUniforms(materialFor(MAT, g))?.uVaryStrength.value).toBe(1)
   })
 
+  it('leaves the uniform ALONE when updateMaterial is given no strength', () => {
+    // A caller with no opinion must not silently reset a tuned strength to the default.
+    const g = tinted()
+    const m = materialFor(MAT, g, undefined, 0.4)
+    expect(updateMaterial(m, MAT, g)).toBe(true)
+    expect(varyUniforms(m)?.uVaryStrength.value).toBe(0.4)
+  })
+
   it('clamps to 0..1', () => {
-    expect(varyUniforms(materialFor(MAT, tinted(-3)))?.uVaryStrength.value).toBe(0)
-    expect(varyUniforms(materialFor(MAT, tinted(7)))?.uVaryStrength.value).toBe(1)
+    expect(varyUniforms(materialFor(MAT, tinted(), undefined, -3))?.uVaryStrength.value).toBe(0)
+    expect(varyUniforms(materialFor(MAT, tinted(), undefined, 7))?.uVaryStrength.value).toBe(1)
   })
 })
 

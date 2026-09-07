@@ -1232,21 +1232,21 @@ export function hasVertexTint(mat: SceneMaterial, geometry?: THREE.BufferGeometr
   return geometry.userData.varyTint === true
 }
 
-/** The Vary blend amount stamped alongside the tint: 0 = the plain material colour,
- *  1 = the pure palette colour. Missing/garbage reads as 1, which is what the dial's
- *  own default is. Clamped because it reaches a shader uniform.
+/** The Vary blend amount: 0 = the plain material colour, 1 = the pure palette colour.
+ *  Missing/garbage reads as 1, which is what the dial's own default is. Clamped
+ *  because it reaches a shader uniform.
  *
- *  INVARIANT this reads through `geometry.userData.varyStrength` rather than a param
- *  passed explicitly: it only reaches the material because `varyColorStrength` is a
- *  `MODIFIER_SPECS` key (primParams.ts) and `geoKeyFor` (engine.ts) hashes every
- *  modifier, so a strength change forces the re-merge that re-stamps this value.
- *  Removing `varyColorStrength` from `MODIFIER_SPECS` would silently kill the dial —
- *  the geometry would stop changing and this would keep reading a stale strength. A
- *  later task replaces this channel with the strength passed explicitly; until then,
- *  do not drop `varyColorStrength` from `geoKeyFor`'s inputs. */
-function varyStrengthOf(geometry?: THREE.BufferGeometry): number {
-  const s = geometry?.userData.varyStrength
-  return typeof s === 'number' && Number.isFinite(s) ? Math.min(1, Math.max(0, s)) : 1
+ *  Passed EXPLICITLY by the caller (`materialFor`/`updateMaterial` take it beside the
+ *  geometry) rather than read off `geometry.userData`. It used to ride on the merged
+ *  geometry as a stamp, which worked only because `varyColorStrength` was a
+ *  `MODIFIER_SPECS` key that `geoKeyFor` hashed — so every tick of the Colour strength
+ *  slider disposed the geometry and re-merged all N clone copies to produce
+ *  byte-identical vertex data, and any future edit that (correctly) noticed the
+ *  strength is not baked into vertices and dropped it from the key would have killed
+ *  the dial silently. The strength is a MATERIAL property; this is the parameter that
+ *  says so. */
+function varyStrengthOf(strength?: number): number {
+  return typeof strength === 'number' && Number.isFinite(strength) ? Math.min(1, Math.max(0, strength)) : 1
 }
 
 // Mix from whatever the material's own pipeline put in `diffuseColor.rgb` — captured
@@ -1277,12 +1277,12 @@ diffuseColor.rgb = mix( varyBase, vColor.rgb, uVaryStrength );`
  *  rewrites the base colour from the doc, so the neutralisation lasted exactly one sync.
  *  Mixing in the shader cannot be clobbered that way, and it gives `varyColorStrength`
  *  something to mean. */
-export function applyVaryTint(m: THREE.Material, geometry?: THREE.BufferGeometry): void {
+export function applyVaryTint(m: THREE.Material, varyStrength?: number): void {
   const c = m as THREE.Material & { vertexColors?: boolean }
   c.vertexColors = true
   // Held OUTSIDE the compile closure (as applyScreen holds its uniform bag) so
   // updateMaterial can write the strength in place, with no rebuild, per dial tick.
-  const u: Record<string, { value: unknown }> = { uVaryStrength: { value: varyStrengthOf(geometry) } }
+  const u: Record<string, { value: unknown }> = { uVaryStrength: { value: varyStrengthOf(varyStrength) } }
   // Read EAGERLY, before onBeforeCompile is reassigned — same hazard applyScreen
   // documents at length: three's default customProgramCacheKey returns
   // `this.onBeforeCompile.toString()` at CALL time, so a lazily-bound `prevKey()` would
@@ -1310,8 +1310,17 @@ export function applyVaryTint(m: THREE.Material, geometry?: THREE.BufferGeometry
 /** `ownerId` scopes a `shaderFill` material's live field to the calling engine (see
  *  `shaderFillMaterials`'s doc) — SceneEngine always passes its own stable `id`; callers with
  *  no engine in scope (unit tests) fall back to a shared UNOWNED bucket. Ignored by every other
- *  material type. */
-export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry, ownerId: string = UNOWNED_SCENE3D): THREE.Material {
+ *  material type.
+ *
+ *  `varyStrength` is the Cloner Vary blend amount — only meaningful when `geometry` carries
+ *  the `varyTint` stamp. Omitted means 1 (the dial's own default), so every existing caller
+ *  keeps its behaviour exactly. */
+export function materialFor(
+  mat: SceneMaterial,
+  geometry?: THREE.BufferGeometry,
+  ownerId: string = UNOWNED_SCENE3D,
+  varyStrength?: number,
+): THREE.Material {
   let m: THREE.Material
   switch (mat.type) {
     case 'toon': {
@@ -1631,7 +1640,7 @@ export function materialFor(mat: SceneMaterial, geometry?: THREE.BufferGeometry,
   // Cloner Vary: the merged clone geometry carries one colour per copy, and a SINGLE
   // material shows all of them through vertexColors plus a shader mix (applyVaryTint).
   // Last, so it chains on top of every injection above — including applyScreen's.
-  if (hasVertexTint(mat, geometry)) applyVaryTint(m, geometry)
+  if (hasVertexTint(mat, geometry)) applyVaryTint(m, varyStrength)
   return m
 }
 
@@ -1705,7 +1714,12 @@ function baseIdentityKey(mat: SceneMaterial): string {
   }
 }
 
-export function updateMaterial(m: THREE.Material, mat: SceneMaterial, geometry?: THREE.BufferGeometry): boolean {
+export function updateMaterial(
+  m: THREE.Material,
+  mat: SceneMaterial,
+  geometry?: THREE.BufferGeometry,
+  varyStrength?: number,
+): boolean {
   if (m.userData.matType !== mat.type || m.userData.identity !== identityKey(mat)) return false
   // Vertex-colour state is a property of the GEOMETRY, not of `mat`, so it
   // cannot ride in identityKey. Crossing this boundary needs a rebuild: three
@@ -1714,11 +1728,12 @@ export function updateMaterial(m: THREE.Material, mat: SceneMaterial, geometry?:
   if (geometry && (m.userData.vertexTint === true) !== hasVertexTint(mat, geometry)) return false
   // Vary colour STRENGTH is a uniform, not a program boundary — write it in place, like
   // the screen dials below, so dragging the Colour strength slider never rebuilds. Only
-  // the tint on/off crossing (the guard above) forces a rebuild. Gated on `geometry`
-  // because that is where the strength is stamped, and because a caller passing none
-  // must keep its old behaviour exactly.
+  // the tint on/off crossing (the guard above) forces a rebuild. Gated on the parameter
+  // being SUPPLIED (not on `geometry`): a caller that passes no strength has no opinion
+  // about it, and must leave whatever the material already holds alone rather than
+  // silently resetting the uniform to the default 1.
   const vu = m.userData.varyUniforms as Record<string, { value: unknown }> | undefined
-  if (vu && geometry) vu.uVaryStrength!.value = varyStrengthOf(geometry)
+  if (vu && varyStrength !== undefined) vu.uVaryStrength!.value = varyStrengthOf(varyStrength)
   // Screen dials update in place (the identity guard above already forced a rebuild for the
   // two boundaries that need one).
   const su = m.userData.screenUniforms as Record<string, { value: unknown }> | undefined

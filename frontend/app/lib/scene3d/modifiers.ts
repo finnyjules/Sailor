@@ -324,15 +324,16 @@ export function planClones(total: number, s: ClonerSettings, vary?: VarySettings
  *  single material: `materialFor` turns on `vertexColors` and mixes toward that
  *  attribute in the shader (see `applyVaryTint` in materials.ts).
  *
- *  The RAW palette colour goes into the attribute; `strength` is NOT baked in. It
- *  rides on the geometry as `userData.varyStrength` and is applied as a shader
- *  uniform instead, for two reasons: the material's own base colour (the other end
- *  of the blend) is not known here, and baking it would put a material colour into
- *  `geoKeyFor`, re-merging every clone on every colour-picker tick.
+ *  The RAW palette colour goes into the attribute; `vary.strength` is NOT baked in and
+ *  is not this function's business at all. The material's own base colour — the other
+ *  end of the blend — is not known here, and baking the strength would put a material
+ *  property into the vertex data, re-merging every clone on every slider tick. The
+ *  engine passes the strength straight to `materialFor`/`updateMaterial`, which apply
+ *  it as a shader uniform.
  *
  *  `userData.varyTint` is the STAMP that tells materials.ts this `color` attribute
  *  is a Cloner-baked one rather than a model's own `COLOR_0` (see `hasVertexTint`). */
-export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[], strength: number = 1): THREE.BufferGeometry {
+export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): THREE.BufferGeometry {
   if (recipes.length === 0) return geo.clone()
   const tinted = recipes.some((r) => r.color !== undefined)
   const copies: THREE.BufferGeometry[] = []
@@ -385,14 +386,8 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[], s
   // geometry), `BufferGeometry.copy` assigns `this.userData = source.userData` BY
   // REFERENCE, so `out.userData` IS the caller's `geo.userData` object and an in-place
   // stamp would mutate the caller's own geometry too.
-  //
-  // INVARIANT (matches the one at `varyStrengthOf` in materials.ts): `strength` rides
-  // to the material only via this stamp — there is no explicit param path yet. That
-  // works only because `varyColorStrength` is a `MODIFIER_SPECS` key and `geoKeyFor`
-  // hashes every modifier, forcing a re-merge (and re-stamp) on every strength change.
-  // A later task passes the strength explicitly instead.
   if (tinted) {
-    out.userData = { ...out.userData, varyTint: true, varyStrength: strength }
+    out.userData = { ...out.userData, varyTint: true }
   }
   return out
 }
@@ -450,9 +445,10 @@ export function applyModifiers(
       stepRot: [m('cloneStepRotX'), m('cloneStepRotY'), m('cloneStepRotZ')],
       stepScale: m('cloneStepScale'),
     }, vary)
-    // `vary.strength` rides onto the merged geometry as a stamp, not into the vertex
-    // colours — mergeClones' doc explains why.
-    const cloned = mergeClones(out, recipes, vary?.strength ?? 1)
+    // `vary.strength` is deliberately NOT passed down: it is a material uniform, not
+    // vertex data — mergeClones' doc explains why, and engine.ts hands it to the
+    // material directly.
+    const cloned = mergeClones(out, recipes)
     out.dispose()
     out = cloned
     out.computeBoundingBox()

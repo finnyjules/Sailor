@@ -68,7 +68,7 @@ import { remesh, boundsOf } from '~/lib/scene3d/voxel'
 import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
 import Scene3DObjectRow from './studio/Scene3DObjectRow.vue'
 import { totalClones, clampedClones } from '~/lib/scene3d/modifiers'
-import { MODIFIER_SPECS, modifierValue } from '~/lib/scene3d/primParams'
+import { MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
 import { SceneInteraction, type PlacementHit } from '~/lib/scene3d/interaction'
 import { loadGlb, GLB_SIZE_CAP_BYTES } from '~/lib/scene3d/glb'
 import { fitGlbGroup } from '~/lib/scene3d/fitGlb'
@@ -1346,7 +1346,7 @@ const baseSize = computed<[number, number, number]>(() => {
   if (!o) return [1, 1, 1]
   if (deferringGeometry.value) return lastBaseSize
   lastBaseSize = o.kind === 'primitive'
-    ? baseSizeFor(o.primitive, o.params, o.modifiers, o.content)
+    ? baseSizeFor(o.primitive, o.params, o.modifiers, o.content, varySettingsFor(o))
     : engine?.baseSizeOf(o.id) ?? [1, 1, 1]
   return lastBaseSize
 })
@@ -2171,7 +2171,18 @@ async function convertSelectionToMesh() {
   }
   converting.value = true
   const font = src.primitive === 'text' ? fontCacheGet(src.content?.font ?? DEFAULT_FONT_URL) : null
-  const geo = buildGeometry(src.primitive, src.params, src.modifiers, 'smooth', src.content, font)
+  // Vary is passed so the frozen mesh matches what is on screen — in random and
+  // falloff modes it damps each copy's step rotate/scale, so omitting it would bake
+  // clone placements the user never saw.
+  //
+  // Per-copy COLOUR does not survive this bake: `meshDataFromGeometry` carries
+  // positions and indices only, so the `color` attribute AND the `varyTint` stamp are
+  // both dropped. That degrades safely rather than lying — with no stamp, materials.ts
+  // builds a plain material and the mesh renders in the material's own colour, instead
+  // of keeping vertexColors on over an attribute that is no longer there. A converted
+  // object also loses `params`/`modifiers` by design (see convertToMesh), so there is
+  // no cloner left to re-derive the colours from either.
+  const geo = buildGeometry(src.primitive, src.params, src.modifiers, 'smooth', src.content, font, varySettingsFor(src))
   try {
     // Counted here rather than left to encodeMesh's throw so the message can
     // name the real figures in plain words; encodeMesh still guards the library
@@ -2329,7 +2340,11 @@ async function localMeshDataFor(obj: PrimitiveObject): Promise<MeshData | null> 
   }
   if (obj.primitive === 'text' && !fontCacheGet(obj.content?.font ?? DEFAULT_FONT_URL)) return null
   const font = obj.primitive === 'text' ? fontCacheGet(obj.content?.font ?? DEFAULT_FONT_URL) : null
-  const geo = buildGeometry(obj.primitive, obj.params, obj.modifiers, 'smooth', obj.content, font)
+  // Same two notes as convertSelectionToMesh above: vary is passed so the geometry
+  // that goes into the boolean is the one on screen, and per-copy colour does not
+  // survive `meshDataFromGeometry` (positions and indices only) — a merge result is a
+  // plain mesh in the material's own colour, stamp and all dropped together.
+  const geo = buildGeometry(obj.primitive, obj.params, obj.modifiers, 'smooth', obj.content, font, varySettingsFor(obj))
   const data = meshDataFromGeometry(geo)
   geo.dispose()
   return data
