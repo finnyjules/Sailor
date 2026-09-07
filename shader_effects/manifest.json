@@ -1937,19 +1937,19 @@
           "default": 0,
           "options": [
             {
-              "label": "Crumple",
+              "label": "Soft sweep",
               "value": 0
             },
             {
-              "label": "Grating",
+              "label": "Watercolour bloom",
               "value": 1
             },
             {
-              "label": "Flakes",
+              "label": "Sweep and sparkle",
               "value": 2
             },
             {
-              "label": "Slick",
+              "label": "Defined bands",
               "value": 3
             }
           ]
@@ -2001,7 +2001,7 @@
         },
         {
           "uniform": "u_metallic",
-          "label": "Metallic",
+          "label": "Silver wash",
           "type": "float",
           "min": 0.0,
           "max": 1.0,
@@ -2019,9 +2019,9 @@
         },
         {
           "uniform": "u_tint",
-          "label": "Tint",
+          "label": "Foil tint",
           "type": "color",
-          "default": "#8899aa"
+          "default": "#d8dee6"
         },
         {
           "uniform": "u_mix",
