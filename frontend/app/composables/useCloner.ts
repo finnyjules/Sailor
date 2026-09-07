@@ -108,13 +108,25 @@ export const DEFAULT_CLONER: Cloner = {
 
 const DEG = Math.PI / 180
 
+/**
+ * A number that survived a text field. `??` catches undefined and null but NOT
+ * `NaN`, and `lib/vary`'s clamp01 is `n < 0 ? 0 : n > 1 ? 1 : n`, which fails
+ * both comparisons for NaN and lets it straight through. The panel binds these
+ * four fields to `<input type="number">`, and a CLEARED field is `Number('')`
+ * → NaN → in falloff mode `d / r` → weight NaN → `Math.pow(stepScale, NaN)` →
+ * both `dscale` and `dopacity` NaN → the layer silently vanishes from the
+ * composite. `varyOf` is the one chokepoint every consumer goes through.
+ */
+const finite = (n: number | undefined | null, fallback: number) =>
+  typeof n === 'number' && Number.isFinite(n) ? n : fallback
+
 /** The cloner's vary settings in the shared module's vocabulary. */
 export function varyOf(cloner: Cloner): VarySettings {
   return {
     mode: cloner.varyMode ?? DEFAULT_VARY.mode,
-    seed: cloner.varySeed ?? DEFAULT_VARY.seed,
-    falloffCenter: cloner.varyFalloffCenter ?? DEFAULT_VARY.falloffCenter,
-    falloffRadius: cloner.varyFalloffRadius ?? DEFAULT_VARY.falloffRadius,
+    seed: finite(cloner.varySeed, DEFAULT_VARY.seed),
+    falloffCenter: finite(cloner.varyFalloffCenter, DEFAULT_VARY.falloffCenter),
+    falloffRadius: finite(cloner.varyFalloffRadius, DEFAULT_VARY.falloffRadius),
     colorEnabled: !!cloner.varyColor,
     // Substituted only for a MISSING field, never for an EMPTY one: `lib/vary`'s
     // contract is that an empty palette disables colour (`varyColorAt` returns
@@ -124,7 +136,7 @@ export function varyOf(cloner: Cloner): VarySettings {
     // cloner with no `varyPalette` at all still gets the default.
     palette: cloner.varyPalette ?? DEFAULT_VARY.palette,
     spread: cloner.varyColorSpread ?? DEFAULT_VARY.spread,
-    strength: cloner.varyColorStrength ?? DEFAULT_VARY.strength,
+    strength: finite(cloner.varyColorStrength, DEFAULT_VARY.strength),
   }
 }
 
