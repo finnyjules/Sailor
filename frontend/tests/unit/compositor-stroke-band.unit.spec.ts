@@ -165,3 +165,94 @@ describe('paintStrokeBand at a distance', () => {
     expect(stroke.lineWidth).toBe(10)
   })
 })
+
+// The `region(c, r)` closure inside paintStrokeBand takes an EROSION branch
+// (fill, then a destination-out stroke at 2|r|, centred on the edge) whenever
+// r < 0. Every test above uses `distance: 30, width: 10`, which keeps both
+// `outer`/`inner` radii positive in all three alignments (35/25, 40/30,
+// 30/20) — the erosion branch never runs. It IS reachable in real use:
+// `align: 'inside'` with `distance < width` puts `inner` negative, and a
+// negative `distance` puts BOTH radii negative (the `align: 'center'`,
+// `distance: -0.05` case a later task's browser test exercises).
+describe('paintStrokeBand erosion branch (negative radii)', () => {
+  const scratchDoc = installScratchDocument()
+  const build = (c: CanvasRenderingContext2D) => rectPath(c)
+
+  it('both radii negative (negative distance, center align): erodes twice and bands the interior ring', () => {
+    // center ⇒ outer = d + width/2, inner = d - width/2.
+    // d = -30, width = 10 ⇒ outer = -25, inner = -35. Both negative ⇒ both
+    // scratches take the erosion branch.
+    const { ctx, rec } = makeCtx('main')
+    paintStrokeBand(ctx, { width: 10, distance: -30, style: () => '#f00', build })
+
+    // Shared ctx: still just the one non-erasing stamp, same as the dilation case.
+    expect(rec.ops.map(o => o.kind)).toEqual(['save', 'stamp', 'restore'])
+    expect(rec.ops.some(o => (o as any).erase)).toBe(false)
+
+    expect(scratchDoc.count()).toBe(2)
+    const [outerRec, innerRec] = scratchDoc.scratches()
+
+    // Erosion is fill() + a DESTINATION-OUT stroke at 2|r| — on the scratch,
+    // never on the shared ctx (asserted above). This is the line this test
+    // exists to cover: without it, a sign error collapsing erosion into
+    // dilation would slip through the whole suite unnoticed.
+    const outerFill = outerRec!.ops.find(o => o.kind === 'fill') as any
+    const outerStroke = outerRec!.ops.find(o => o.kind === 'stroke') as any
+    expect(outerFill.erase).toBe(false)
+    expect(outerStroke.erase).toBe(true)
+    expect(outerStroke.lineWidth).toBe(50) // 2 * |−25|
+
+    const innerFill = innerRec!.ops.find(o => o.kind === 'fill') as any
+    const innerStroke = innerRec!.ops.find(o => o.kind === 'stroke') as any
+    expect(innerFill.erase).toBe(false)
+    expect(innerStroke.erase).toBe(true)
+    expect(innerStroke.lineWidth).toBe(70) // 2 * |−35|
+
+    // The outer scratch then knocks the inner scratch's shape out of itself.
+    expect(outerRec!.ops.some(o => o.kind === 'stamp' && (o as any).erase)).toBe(true)
+
+    // Ink check: erosion-by-25 keeps points farther than 25 from the ORIGINAL
+    // edge; erosion-by-35 keeps points farther than 35. The band is their
+    // difference: a ring 25..35 units INSIDE the original edge (x = ±50).
+    // A broken "erosion == dilation" implementation would instead put ink
+    // 25..35 units OUTSIDE the shape — the two are checked at the same
+    // distances so a sign flip cannot pass both.
+    expect(inkAt(rec, { x: 20, y: 0 })).toBe(true)   // 30 from the edge: inside the ring
+    expect(inkAt(rec, { x: 10, y: 0 })).toBe(false)  // 40 from the edge: eroded away by both
+    expect(inkAt(rec, { x: 30, y: 0 })).toBe(false)  // 20 from the edge: not yet eroded into the ring
+    expect(inkAt(rec, { x: 0, y: 0 })).toBe(false)   // dead centre: nowhere near either erosion depth
+    expect(inkAt(rec, { x: 60, y: 0 })).toBe(false)  // outside the shape entirely — erosion never goes here
+  })
+
+  it('mixed radii (inside align, distance < width): outer dilates, inner erodes', () => {
+    // inside ⇒ outer = d, inner = d - width.
+    // d = 3, width = 10 ⇒ outer = 3 (positive, dilation), inner = -7 (negative, erosion).
+    const { ctx, rec } = makeCtx('main')
+    paintStrokeBand(ctx, { width: 10, distance: 3, align: 'inside', style: () => '#f00', build })
+
+    expect(rec.ops.map(o => o.kind)).toEqual(['save', 'stamp', 'restore'])
+    expect(scratchDoc.count()).toBe(2)
+    const [outerRec, innerRec] = scratchDoc.scratches()
+
+    // Outer (r = 3 > 0): the ordinary dilation branch — a plain, non-erasing stroke.
+    const outerStroke = outerRec!.ops.find(o => o.kind === 'stroke') as any
+    expect(outerStroke.erase).toBe(false)
+    expect(outerStroke.lineWidth).toBe(6) // 2 * 3
+
+    // Inner (r = -7 < 0): the erosion branch under test — destination-out, on the scratch.
+    const innerStroke = innerRec!.ops.find(o => o.kind === 'stroke') as any
+    expect(innerStroke.erase).toBe(true)
+    expect(innerStroke.lineWidth).toBe(14) // 2 * |−7|
+
+    // Never on the shared ctx.
+    expect(rec.ops.some(o => (o as any).erase)).toBe(false)
+
+    // Ink check (edge at x = ±50): the band is dilation-by-3 minus erosion-by-7,
+    // i.e. everywhere from 7 inside the edge to 3 outside it.
+    expect(inkAt(rec, { x: 50, y: 0 })).toBe(true)   // on the edge: within both radii
+    expect(inkAt(rec, { x: 45, y: 0 })).toBe(true)   // 5 inside: within the 7px erosion depth
+    expect(inkAt(rec, { x: 52, y: 0 })).toBe(true)   // 2 outside: within the 3px dilation
+    expect(inkAt(rec, { x: 54, y: 0 })).toBe(false)  // 4 outside: past the dilation
+    expect(inkAt(rec, { x: 40, y: 0 })).toBe(false)  // 10 inside: past the erosion depth, eroded away
+  })
+})

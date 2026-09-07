@@ -2205,9 +2205,12 @@ export function paintStrokeBand(ctx: CanvasRenderingContext2D, o: {
 
   const align = strokeAlignOf(o.align)
   // The band's two radii, measured from the shape's own edge.
+  // `outer - inner === o.width` for all three alignments, and `o.width > 0` is
+  // already guaranteed above, so `outer > inner` always holds here — no
+  // `outer <= inner` guard is reachable (checked algebraically for all three
+  // branches and confirmed no other case reaches this point).
   const outer = align === 'outside' ? d + o.width : align === 'inside' ? d : d + o.width / 2
   const inner = align === 'outside' ? d : align === 'inside' ? d - o.width : d - o.width / 2
-  if (outer <= inner) return
 
   const s = scratchLike(ctx)
   if (!s) { strokeAligned(ctx, o); return }   // no knockout on the shared ctx, ever
