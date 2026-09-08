@@ -21,7 +21,9 @@ import {
   applyCompositorCommand, describeCompositor, COMPOSITOR_HINT_CEILING,
   type CompositorState,
 } from '~/lib/agent/surfaces/compositor'
-import { strokeStackOf } from '~/lib/compositor/strokeStack'
+import {
+  strokeStackOf, writeStrokeStackToLayer, addStroke as appendStroke, LEGACY_STROKE_ID,
+} from '~/lib/compositor/strokeStack'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 
 const rect = (extra: Record<string, unknown> = {}) => ({
@@ -228,5 +230,123 @@ describe('the command-menu hint budget', () => {
       // falls to the default arm, which reports 'unknown', never 'invalid'.
       if (!r.ok) expect(r.reason, c.op).not.toBe('unknown')
     }
+  })
+})
+
+/**
+ * FIX WAVE 1 — the folded legacy entry.
+ *
+ * `strokeStackOf` stamps the ONE entry it synthesises from a legacy layer with the sentinel
+ * id `'legacy'`, meaning "I made this up while reading". `addStroke` folds that entry into
+ * the new array and `writeStrokeStackToLayer` stored it — sentinel and all. `setStroke` then
+ * asked "does this layer store a stack?" by looking at `stack[0].id`, saw the sentinel, took
+ * the legacy branch, wrote `stroke`/`strokeWidth` back onto a layer that had an array — and
+ * that makes `legacyLive` true inside `strokeStackOf`, which sends the WHOLE array down the
+ * legacy fold. The outline the user had just added was gone.
+ *
+ * Two independent fixes, so either one alone would have closed it and both together make it
+ * unreachable: the predicate now asks the LAYER (does it carry a well-formed `strokes`
+ * array?), and the sentinel is stamped with a real id at the single boundary where a
+ * read-through stack becomes a stored one.
+ */
+describe('a legacy layer that gains a second outline', () => {
+  /**
+   * The inspector's own append, statement for statement — `pickStrokeAdd`
+   * (CompositorModal.vue:2095-2098) reads through `strokeStackOf`, appends with `addStroke`,
+   * and writes it with `setLayerStrokes` → `writeStrokeStackToLayer` (CompositorModal.vue:2035).
+   * The agent's `addStroke` op is the same three calls; this is here because the modal is the
+   * path a user actually clicks, and it must not depend on the agent being the one to add.
+   */
+  const inspectorAddStroke = (layer: Record<string, unknown>): Record<string, unknown> => ({
+    ...layer,
+    ...writeStrokeStackToLayer(appendStroke(strokeStackOf(layer as never))),
+  })
+
+  it('keeps BOTH outlines when the AGENT adds one and then recolours the top one', () => {
+    const added = layerAfter(run(
+      st(rect({ stroke: '#ff0000', strokeWidth: 0.01 })), 'addStroke', 'r1',
+      { patch: { paint: '#0000ff', width: 0.02 } },
+    ))
+    expect(strokeStackOf(added as never)).toHaveLength(2)
+
+    const after = layerAfter(run(st(added), 'setStroke', 'r1', { paint: '#00ff00', width: 0.03 }))
+    const stack = strokeStackOf(after as never)
+    // The whole finding in one assertion: the outline the user just added is still there.
+    expect(stack).toHaveLength(2)
+    expect(stack[0]!.paint).toBe('#00ff00')
+    expect(stack[1]!.paint).toBe('#0000ff')
+    // And the legacy pair was NOT written back over the stack.
+    expect(after.stroke).toBeUndefined()
+    expect(after.strokeWidth).toBeUndefined()
+  })
+
+  it('keeps BOTH outlines when the INSPECTOR adds one and the agent then recolours it', () => {
+    const added = inspectorAddStroke(rect({ stroke: '#ff0000', strokeWidth: 0.01 }))
+    expect(strokeStackOf(added as never)).toHaveLength(2)
+
+    const stack = strokeStackOf(layerAfter(run(st(added), 'setStroke', 'r1', { paint: '#00ff00', width: 0.03 })) as never)
+    expect(stack).toHaveLength(2)
+    expect(stack[0]!.paint).toBe('#00ff00')
+  })
+
+  it('stores no sentinel id — the folded entry is a real stroke and gets a real id', () => {
+    for (const added of [
+      layerAfter(run(st(rect({ stroke: '#ff0000', strokeWidth: 0.01 })), 'addStroke', 'r1', {})),
+      inspectorAddStroke(rect({ stroke: '#ff0000', strokeWidth: 0.01 })),
+      inspectorAddStroke(text({ strokeColor: '#ff0000', strokeWidth: 0.01 })),
+    ]) {
+      const ids = (added.strokes as { id: string }[]).map(s => s.id)
+      expect(ids).not.toContain(LEGACY_STROKE_ID)
+      expect(new Set(ids).size).toBe(ids.length)
+    }
+  })
+
+  it('heals a document ALREADY written by the buggy build — a stored stack led by the sentinel', () => {
+    // What is on disk after adding an outline in a build without this fix. The array is
+    // well-formed; only its first id is the sentinel. It is a STACK, and editing it must
+    // not flatten it.
+    const s = st(rect({
+      stroke: undefined, strokeWidth: undefined,
+      strokes: [
+        { id: LEGACY_STROKE_ID, paint: '#ff0000', width: 0.01, distance: 0, style: 'band' },
+        { id: 'b', paint: '#0000ff', width: 0.02, distance: 0, style: 'band' },
+      ],
+    }))
+    const after = layerAfter(run(s, 'setStroke', 'r1', { paint: '#00ff00', width: 0.03 }))
+    const stack = strokeStackOf(after as never)
+    expect(stack).toHaveLength(2)
+    expect(stack[1]!.paint).toBe('#0000ff')
+    // …and the write mints a real id for it, so the next reader sees no sentinel either.
+    expect(stack[0]!.id).not.toBe(LEGACY_STROKE_ID)
+    expect(stack[0]!.paint).toBe('#00ff00')
+  })
+
+  it('a stored stack whose first entry carries an ordinary id is still edited through the stack', () => {
+    const s = st(rect({
+      stroke: undefined, strokeWidth: undefined,
+      strokes: [
+        { id: 'zz9', paint: '#ff0000', width: 0.01, distance: 0, style: 'band' },
+        { id: 'b', paint: '#0000ff', width: 0.02, distance: 0.04, style: 'band' },
+      ],
+    }))
+    const after = layerAfter(run(s, 'setStroke', 'r1', { paint: '#00ff00', width: 0.03 }))
+    const stack = strokeStackOf(after as never)
+    expect(stack).toHaveLength(2)
+    // The id is UNTOUCHED: only the sentinel is restamped, so a real id keeps pointing at
+    // the row the inspector has selected and the model has been told about.
+    expect(stack[0]).toMatchObject({ id: 'zz9', paint: '#00ff00', width: 0.03 })
+    expect(stack[1]).toMatchObject({ id: 'b', paint: '#0000ff', width: 0.02, distance: 0.04 })
+  })
+
+  it('a still-unedited legacy layer keeps writing the legacy pair, exactly as before', () => {
+    const l = layerAfter(run(st(rect({ stroke: '#ff0000', strokeWidth: 0.01 })), 'setStroke', 'r1', { paint: '#00ff00', width: 0.02 }))
+    expect(l.stroke).toBe('#00ff00')
+    expect(l.strokeWidth).toBe(0.02)
+    expect(l.strokes).toBeUndefined()
+    // …and it still reads back as the one-entry synthesised stack, sentinel and all: the
+    // sentinel is a READING artefact and this layer has not been written.
+    const stack = strokeStackOf(l as never)
+    expect(stack).toHaveLength(1)
+    expect(stack[0]!.id).toBe(LEGACY_STROKE_ID)
   })
 })

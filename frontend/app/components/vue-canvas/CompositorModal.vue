@@ -109,6 +109,7 @@ import {
 import {
   strokeStackOf, writeStrokeStackToLayer, addStroke, removeStroke, duplicateStroke,
   reorderStroke, canReorderStroke, strokeSupportsStack, strokeSupportsShapes, strokeRowLabel,
+  LEGACY_STROKE_ID,
   type StrokeInstance,
 } from '~/lib/compositor/strokeStack'
 import {
@@ -2028,13 +2029,26 @@ const layerStrokeCount = computed(() => {
   }
   return m
 })
+const selectedStroke = ref<{ layerId: string; strokeId: string } | null>(null)
 /** THE write. `writeStrokeStackToLayer` clears every legacy single-stroke field in the SAME
  *  patch that stores the list, so one edit is one undo step and a layer can never carry both
- *  shapes at once (which would send the next read down the legacy branch). */
-const setLayerStrokes = (layerId: string, stack: StrokeInstance[]) =>
-  setLocal(layerId, writeStrokeStackToLayer(stack) as any)
+ *  shapes at once (which would send the next read down the legacy branch).
+ *
+ *  It also mints a real id for the entry `strokeStackOf` SYNTHESISED from a legacy layer —
+ *  the sentinel is a reading artefact and must not be stored. That entry is the row the user
+ *  has selected when they edit a legacy layer's only outline, so the selection follows it to
+ *  its new id; the patch is index-for-index with the stack, which is what makes that exact. */
+const setLayerStrokes = (layerId: string, stack: StrokeInstance[]) => {
+  const patch = writeStrokeStackToLayer(stack)
+  const sel = selectedStroke.value
+  if (sel && sel.layerId === layerId && sel.strokeId === LEGACY_STROKE_ID) {
+    const i = stack.findIndex(st => st.id === LEGACY_STROKE_ID)
+    // Not found ⇒ that row was the one just removed, and the watcher below clears it.
+    if (i >= 0) selectedStroke.value = { layerId, strokeId: patch.strokes[i]!.id }
+  }
+  setLocal(layerId, patch as any)
+}
 
-const selectedStroke = ref<{ layerId: string; strokeId: string } | null>(null)
 /** The selected stroke's id, for the tree row's `selected` prop. */
 const selectedStrokeId = computed(() => selectedStroke.value?.strokeId ?? null)
 const activeStroke = computed<StrokeInstance | null>(() => {

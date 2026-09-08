@@ -598,7 +598,10 @@ export function pathLayersToSvgDoc(layers: PathLayer[], aspect = 1): SvgDocument
       // write but the shape's own outline at the stroke's stored width. Said out loud.
       const d = st.distance ?? 0
       if (d !== 0) {
-        say(`an outline set ${n6(Math.abs(d) * s)} px ${d > 0 ? 'outside' : 'inside'} the edge is drawn ON the edge`)
+        // `d * s` is in the file's own viewBox units, not device pixels: the viewBox is
+        // 1000 wide whatever the frame renders at, so the same distance reads as a
+        // different number of screen pixels in every consumer. Say which units they are.
+        say(`an outline set ${n6(Math.abs(d) * s)} viewBox units ${d > 0 ? 'outside' : 'inside'} the edge is drawn ON the edge`)
       }
       // SVG strokes are centred, always; `inside`/`outside` would need a clip or a mask
       // per stroke. Reported for the same reason as the distance.
@@ -624,7 +627,11 @@ export function pathLayersToSvgDoc(layers: PathLayer[], aspect = 1): SvgDocument
 
 /**
  * The document as a bare string, for a caller that has nowhere to show a note.
- * Used for save/round-trip and "copy as SVG".
+ *
+ * There is no such caller yet — this function and `pathLayersToSvgDoc` are both unwired, and
+ * a "Copy as SVG" affordance is the slice that would use them. Anything that CAN show a note
+ * should call `pathLayersToSvgDoc` instead: the notes are the whole point of it, and dropping
+ * them is how this writer degraded silently before.
  */
 export function pathLayersToSvg(layers: PathLayer[], aspect = 1): string {
   return pathLayersToSvgDoc(layers, aspect).svg

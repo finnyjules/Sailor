@@ -3,6 +3,7 @@ import {
   strokeStackOf, writeStrokeStackToLayer, createStroke,
   addStroke, removeStroke, duplicateStroke, reorderStroke, canReorderStroke,
   strokeRowLabel, strokeSupportsStack, strokeSupportsShapes,
+  layerStoresStrokeStack, LEGACY_STROKE_ID,
   type StrokeInstance,
 } from '~/lib/compositor/strokeStack'
 
@@ -294,5 +295,125 @@ describe('strokeRowLabel', () => {
       { id: 'a', paint: '#fff', width: 0.01, style: 'shapes', shapes: { shapeId: 'star', size: 0.02, spacing: 0.03 } },
       600,
     )).toBe('Star')
+  })
+})
+
+/**
+ * FIX WAVE 1 — the sentinel is a READING artefact, and the two questions it was answering.
+ *
+ * `id: 'legacy'` means "I synthesised this entry while reading a layer that stores the old
+ * single-stroke fields". It answers nothing about the layer once a list has been written, so
+ * two things are now true by construction:
+ *
+ *  - **whether a layer stores a stack is a question about the LAYER** — `layerStoresStrokeStack`
+ *    asks whether it carries a well-formed `strokes` array, not what the first entry's id is;
+ *  - **the sentinel never reaches storage** — `writeStrokeStackToLayer` is the one boundary
+ *    where a read-through stack becomes a stored one, and it stamps a real id on the way past.
+ */
+describe('layerStoresStrokeStack — the question is about the layer', () => {
+  const stored = (strokes: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ kind: 'rect', strokes, stroke: '', strokeWidth: 0, ...extra }) as never
+
+  it('is false for a layer with no strokes at all, and for a legacy one', () => {
+    expect(layerStoresStrokeStack({ kind: 'rect' } as never)).toBe(false)
+    expect(layerStoresStrokeStack({ kind: 'rect', stroke: '#ff0000', strokeWidth: 0.01 } as never)).toBe(false)
+    expect(layerStoresStrokeStack(null)).toBe(false)
+  })
+
+  it('is true for a well-formed array WHATEVER ids it carries — the sentinel included', () => {
+    expect(layerStoresStrokeStack(stored([{ id: 'a', paint: '#fff', width: 0.01 }]))).toBe(true)
+    // A document written by the build this fix repairs. It is a stack; its first id is just wrong.
+    expect(layerStoresStrokeStack(stored([
+      { id: LEGACY_STROKE_ID, paint: '#f00', width: 0.01 },
+      { id: 'b', paint: '#00f', width: 0.02 },
+    ]))).toBe(true)
+    // An inkless entry is a well-formed stroke that paints nothing — still a stack.
+    expect(layerStoresStrokeStack(stored([{ id: 'a', paint: 'none', width: 0.01 }]))).toBe(true)
+  })
+
+  it('is false for exactly what `strokeStackOf` refuses to read as an array', () => {
+    // Not every entry has an id — the array is not one WE wrote.
+    expect(layerStoresStrokeStack(stored([{ id: 'a', paint: '#fff', width: 0.01 }, { paint: '#fff', width: 0.01 }]))).toBe(false)
+    // Empty.
+    expect(layerStoresStrokeStack(stored([]))).toBe(false)
+    // A live legacy field wins over the array (an older build editing a newer document).
+    expect(layerStoresStrokeStack(stored([{ id: 'a', paint: '#fff', width: 0.01 }], { stroke: '#f00', strokeWidth: 0.02 }))).toBe(false)
+    // A BRUSH layer's `strokes` is PaintStroke[] — a different meaning of the same name.
+    expect(layerStoresStrokeStack({ kind: 'brush', strokes: [{ id: 'a', paint: '#fff', width: 0.01 }] } as never)).toBe(false)
+  })
+
+  it('agrees with `strokeStackOf` on every one of those, so the two cannot drift', () => {
+    const cases: unknown[] = [
+      { kind: 'rect' },
+      { kind: 'rect', stroke: '#f00', strokeWidth: 0.01 },
+      stored([{ id: 'a', paint: '#fff', width: 0.01 }]),
+      stored([{ id: LEGACY_STROKE_ID, paint: '#f00', width: 0.01 }]),
+      stored([{ id: 'a', paint: '#fff', width: 0.01 }, { paint: '#fff', width: 0.01 }]),
+      stored([], { stroke: '#f00', strokeWidth: 0.01 }),
+      stored([{ id: 'a', paint: '#fff', width: 0.01 }], { stroke: '#f00', strokeWidth: 0.02 }),
+      { kind: 'brush', strokes: [{ id: 'a', paint: '#fff', width: 0.01 }] },
+    ]
+    for (const c of cases) {
+      // The oracle is deliberately NOT "no entry carries the sentinel" — that is the broken
+      // inference this fix removes, and it gets the healed-document case wrong. What "came
+      // from the array" means is that the entries returned ARE the ones stored, in order.
+      const ids = strokeStackOf(c as never).map(s => s.id)
+      const storedIds = ((c as { strokes?: unknown }).strokes as { id?: unknown }[] | undefined ?? [])
+        .map(s => s?.id)
+      const fromArray = ids.length > 0 && ids.length === storedIds.length
+        && ids.every((id, i) => id === storedIds[i])
+      expect(layerStoresStrokeStack(c as never), JSON.stringify(c)).toBe(fromArray)
+    }
+  })
+})
+
+describe('writeStrokeStackToLayer — the sentinel never reaches storage', () => {
+  it('mints a real id for a folded legacy entry and leaves every other id alone', () => {
+    const legacyRead = strokeStackOf({ kind: 'rect', stroke: '#ff0000', strokeWidth: 0.01 })
+    expect(legacyRead[0]!.id).toBe(LEGACY_STROKE_ID)
+
+    const appended = addStroke(legacyRead)
+    const { strokes } = writeStrokeStackToLayer(appended)
+    expect(strokes).toHaveLength(2)
+    expect(strokes[0]!.id).not.toBe(LEGACY_STROKE_ID)
+    expect(strokes[0]!.id).toBeTruthy()
+    // Everything else about the entry is untouched — this stamps an id, it does not migrate.
+    expect(strokes[0]).toMatchObject({ paint: '#ff0000', width: 0.01, distance: 0, style: 'band' })
+    // The appended stroke is passed through as the SAME object: a caller that already noted
+    // its id (the inspector selects the row it just added) must still find it.
+    expect(strokes[1]).toBe(appended[1])
+    expect(new Set(strokes.map(s => s.id)).size).toBe(2)
+  })
+
+  it('leaves a stack of real ids byte-for-byte alone — same entry objects, same order', () => {
+    const stack: StrokeInstance[] = [
+      { id: 'a', paint: '#f00', width: 0.01 },
+      { id: 'b', paint: '#00f', width: 0.02 },
+    ]
+    const { strokes } = writeStrokeStackToLayer(stack)
+    expect(strokes).toEqual(stack)
+    expect(strokes[0]).toBe(stack[0])
+    expect(strokes[1]).toBe(stack[1])
+  })
+
+  it('stamps an empty or missing id too — a stored entry with no id takes its whole stack down', () => {
+    // `strokeStackOf` drops the WHOLE array when one entry has no usable id (that is what
+    // `allIded` means), so storing one is the same class of loss as storing the sentinel.
+    const { strokes } = writeStrokeStackToLayer([
+      { id: '', paint: '#f00', width: 0.01 },
+      { id: 'b', paint: '#00f', width: 0.02 },
+    ])
+    expect(strokes[0]!.id).toBeTruthy()
+    expect(strokes[1]!.id).toBe('b')
+    expect(strokeStackOf({ kind: 'rect', strokes } as never)).toHaveLength(2)
+  })
+
+  it('still clears every legacy field in the same patch', () => {
+    const patch = writeStrokeStackToLayer([{ id: 'a', paint: '#f00', width: 0.01 }])
+    expect(patch.stroke).toBeUndefined()
+    expect(patch.strokeColor).toBeUndefined()
+    expect(patch.strokeWidth).toBeUndefined()
+    expect(patch.strokeAlign).toBeUndefined()
+    expect(patch.strokeDash).toBeUndefined()
   })
 })

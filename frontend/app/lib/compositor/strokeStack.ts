@@ -73,6 +73,21 @@ export function strokeSupportsShapes(kind: string): boolean { return SHAPEABLE.h
 let _seq = 0
 export function newStrokeId(): string { return `st${Date.now().toString(36)}${(_seq++).toString(36)}` }
 
+/**
+ * The id on the ONE entry `strokeStackOf` SYNTHESISES from a layer that still stores the
+ * legacy single-stroke fields.
+ *
+ * It is a READING artefact — "there is no stored list, so I made this entry up" — and it is
+ * the only id in the system that is not unique to one stroke. It must never reach storage,
+ * because a stored entry is a real stroke that consumers address by id, and two of them
+ * would collide. `writeStrokeStackToLayer` stamps a real id over it at the single boundary
+ * where a read-through stack becomes a stored one.
+ *
+ * Nothing may ask "does this layer store a list?" by comparing an entry's id to this — that
+ * is a question about the LAYER, and `layerStoresStrokeStack` is the answer.
+ */
+export const LEGACY_STROKE_ID = 'legacy'
+
 /** A fresh stroke: on the edge, centred, 6 px on a 1200-wide frame. */
 export function createStroke(): StrokeInstance {
   return { id: newStrokeId(), paint: '#ffffff', width: 0.005, distance: 0, align: 'center', join: 'sharp', style: 'band' }
@@ -110,11 +125,25 @@ const normalizeShapeSpec = (v: unknown): ShapeStrokeSpec => {
   return spec
 }
 
-/** THE reader. Every consumer goes through this — the painter, the pad helper, the SVG
- *  writer, the agent and the inspector — so they cannot disagree about what a layer's
- *  strokes are. */
-export function strokeStackOf(layer: StrokeHost | null | undefined): StrokeInstance[] {
-  if (!layer) return []
+/** Whether the layer's own legacy single-stroke fields say anything. A live legacy field is
+ *  what makes the whole array fall through to the fold below — see the call sites. */
+function legacyStrokeIsLive(layer: StrokeHost): boolean {
+  return hasInk(layer.kind === 'text' ? layer.strokeColor : layer.stroke) && num(layer.strokeWidth) > 0
+}
+
+/**
+ * THE decision: the stored entries this layer's strokes come from, or `null` when they come
+ * from the legacy fields instead.
+ *
+ * Split out of `strokeStackOf` so that "does this layer store a list?" has ONE answer, asked
+ * of the layer. It used to be inferred from the first returned entry's id (`!== 'legacy'`),
+ * which is a different question with a different answer: fold a legacy entry into a new list
+ * and the stored list is led by an entry still carrying the sentinel, so the inference said
+ * "no list" about a layer that had one — and the caller then wrote the legacy pair back over
+ * it, which sends the WHOLE array down the fold and deletes every other outline.
+ */
+function storedStrokeEntries(layer: StrokeHost | null | undefined): Record<string, unknown>[] | null {
+  if (!layer) return null
   // A BRUSH layer's `strokes` is a `PaintStroke[]` — freehand paint-stroke PATH data, a
   // completely different meaning of the same field name (see `BrushLayer` in
   // useCompositorLayers.ts). Today a PaintStroke happens to carry neither an `id` nor a
@@ -146,9 +175,26 @@ export function strokeStackOf(layer: StrokeHost | null | undefined): StrokeInsta
   // A new-shape layer that ALSO carries a live legacy stroke can only come from an older
   // build editing a newer document; the legacy field is the one with a trustworthy meaning,
   // so it falls through. Same decision effectStackOf makes for tornEdge/feather.
-  const legacyPaint = layer.kind === 'text' ? layer.strokeColor : layer.stroke
-  const legacyLive = hasInk(legacyPaint) && num(layer.strokeWidth) > 0
-  if (allIded && !legacyLive) {
+  return allIded && !legacyStrokeIsLive(layer) ? known : null
+}
+
+/**
+ * True when this layer STORES its strokes as a list — the question `setStroke` and every
+ * other write has to answer before it decides which shape to write back.
+ *
+ * Asked of the layer, never of an entry's id: an id says which stroke it is, not where the
+ * layer keeps its strokes. Same source of truth as `strokeStackOf`, so the two cannot drift.
+ */
+export function layerStoresStrokeStack(layer: StrokeHost | null | undefined): boolean {
+  return storedStrokeEntries(layer) !== null
+}
+
+/** THE reader. Every consumer goes through this — the painter, the pad helper, the SVG
+ *  writer, the agent and the inspector — so they cannot disagree about what a layer's
+ *  strokes are. */
+export function strokeStackOf(layer: StrokeHost | null | undefined): StrokeInstance[] {
+  const known = storedStrokeEntries(layer)
+  if (known) {
     return known.map(s => {
       const visible = s.visible !== false
       // FINDING 1 (Task 6 review): `style: 'shapes'` with a missing or malformed `shapes`
@@ -165,11 +211,12 @@ export function strokeStackOf(layer: StrokeHost | null | undefined): StrokeInsta
       return { ...s, visible }
     }) as unknown as StrokeInstance[]
   }
-  if (!legacyLive) return []
+  if (!layer || !legacyStrokeIsLive(layer)) return []
   const one: StrokeInstance = {
-    id: 'legacy',
+    // SYNTHESISED, not stored — see `LEGACY_STROKE_ID`.
+    id: LEGACY_STROKE_ID,
     visible: true,
-    paint: legacyPaint as Paint,
+    paint: (layer.kind === 'text' ? layer.strokeColor : layer.stroke) as Paint,
     width: num(layer.strokeWidth),
     distance: 0,
     style: 'band',
@@ -180,15 +227,31 @@ export function strokeStackOf(layer: StrokeHost | null | undefined): StrokeInsta
   return [one]
 }
 
-/** The patch that stores a stack. Every legacy field is cleared in the SAME patch, so a
- *  layer can never carry both shapes and fall into the legacy branch on the next read. */
+/** An entry on its way INTO storage, with an id that addresses exactly it. Returns the same
+ *  object when its id is already real, so a write that changes nothing changes nothing. */
+const stampStoredStrokeId = (s: StrokeInstance): StrokeInstance => {
+  const id = (s as { id?: unknown }).id
+  return typeof id === 'string' && id !== '' && id !== LEGACY_STROKE_ID ? s : { ...s, id: newStrokeId() }
+}
+
+/**
+ * The patch that stores a stack. Every legacy field is cleared in the SAME patch, so a layer
+ * can never carry both shapes and fall into the legacy branch on the next read.
+ *
+ * It is also where a READ-THROUGH stack becomes a STORED one, which makes it the one place
+ * that can guarantee the reading-time sentinel (and an entry with no id at all — `allIded`
+ * drops the whole array over one of those) never lands on disk. Every write path in the app
+ * goes through here — the inspector's `setLayerStrokes`, the shape-stroke row, and all four
+ * of the agent's stroke ops — so the guarantee is structural rather than a rule each caller
+ * has to remember.
+ */
 export function writeStrokeStackToLayer(stack: StrokeInstance[]): {
   strokes: StrokeInstance[]
   stroke: undefined; strokeColor: undefined; strokeWidth: undefined
   strokeAlign: undefined; strokeDash: undefined
 } {
   return {
-    strokes: stack,
+    strokes: stack.map(stampStoredStrokeId),
     stroke: undefined, strokeColor: undefined, strokeWidth: undefined,
     strokeAlign: undefined, strokeDash: undefined,
   }

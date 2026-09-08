@@ -18,7 +18,8 @@ import { sanitizeFeather } from '~/lib/compositor/feather'
 import { effectStackOf, writeStackToLayer, addEffect, createEffect, EFFECT_LABELS, EFFECT_ORDER, isEffectKind, type EffectInstance } from '~/lib/compositor/effectStack'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import {
-  strokeStackOf, writeStrokeStackToLayer, addStroke as appendStroke, removeStroke as dropStroke,
+  strokeStackOf, layerStoresStrokeStack, writeStrokeStackToLayer,
+  addStroke as appendStroke, removeStroke as dropStroke,
   strokeSupportsStack, strokeSupportsShapes, STROKE_JOINS, STROKE_STYLES,
   type StrokeInstance, type StrokeAlign,
 } from '~/lib/compositor/strokeStack'
@@ -456,11 +457,17 @@ const legacyStrokeField = (kind: LocalLayerKind): string => (kind === 'text' ? '
  * in one direction only, and badly: writing `stroke`/`strokeWidth` onto a layer that has a
  * stack makes `legacyLive` true inside `strokeStackOf`, which sends the whole array down
  * the legacy branch — every other outline gone, from one unrelated recolour.
+ *
+ * This used to read `stack[0].id !== 'legacy'`, which asks a DIFFERENT question — what the
+ * first entry is called — and got the answer wrong for the one layer it most had to get
+ * right. `addStroke` folds a legacy layer's synthesised entry into the new list, so the
+ * stored list was led by an entry still carrying the reading sentinel; the predicate said
+ * "no stack", `setStroke` wrote the legacy pair back over the array, and the outline the
+ * user had just added disappeared. Whether a layer stores a list is a fact about the LAYER,
+ * so it is asked of the layer — and `writeStrokeStackToLayer` no longer lets the sentinel
+ * reach storage in the first place, so either fix alone would close it.
  */
-function storesStrokeStack(layer: LocalLayer): boolean {
-  const stack = strokeStackOf(layer as never)
-  return stack.length > 0 && stack[0]!.id !== 'legacy'
-}
+const storesStrokeStack = (layer: LocalLayer): boolean => layerStoresStrokeStack(layer as never)
 
 /** Every key `setStrokeProps` (and `addStroke`'s optional patch) accepts. */
 const STROKE_PROPS = new Set(['paint', 'width', 'distance', 'align', 'dash', 'join', 'style', 'shapes', 'visible'])
