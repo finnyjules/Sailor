@@ -236,3 +236,60 @@ Placement `ops` are stored resolved (pixel boxes on the layers, as today) **and*
 ## Provenance
 
 The whole moves library, the contract, the input filter, the three-face model, the letter swaps, the shape family mode, and the grid free-vs-region split were gamed out live in the v1→v7 prototype against 64 posters pulled from typographicposters.com. That prototype is the reference for behaviour; this doc is the plan.
+
+---
+
+## Appendix — Profiles roadmap
+
+The engine is a mechanism: elements you place → moves that arrange them → a Read that checks them → a seed that re-rolls. A **profile** binds that mechanism to one *kind* of graphic (see *Profiles — the graphic kind, not the format*). Once the mechanism exists, a profile is cheap — a moves list, a Read rubric, a shelf filter, and format defaults — so profiles are how Sailor widens surface area without new machinery (the technology-factory thesis). This appendix maps the whole space so the seam is designed against it, not just against posters. It is a roadmap, not a commitment; poster is the only profile in sub-project 1.
+
+### Three axes that separate profiles
+
+- **Register:** expressive (drama, type-as-image) → editorial (hierarchy, readable) → functional (clarity, brand-locked).
+- **Cardinality:** a single artifact, or a **set** that must stay consistent across many artifacts.
+- **Content load:** one idea (word/phrase) → structured (a list where size = importance) → body (paragraphs).
+
+### The five clusters
+
+**Cluster A — Expressive single.** The poster's own family: ~80% shared moves, cheapest to add, strongest re-roll payoff. No new capability needed.
+- Poster (built), album/playlist cover, book/magazine cover, film/gig poster, zine page, **video hook graphic** (see below), quote/testimonial card, merch/apparel graphic, sticker/emblem.
+
+**Cluster B — Editorial.** Hierarchy + readability, image as a block, moderate content; ~50% move overlap with poster (less edge-crop drama, more grid discipline).
+- Magazine spread/article opener, pull-quote page, newsletter/email header, packaging front, invitation/save-the-date, greeting card.
+
+**Cluster C — Structured listing.** The content *is* a set of items, size = importance. The Index / Spaced-lines family already built is the seed; distinct moves are ruled lists, dot leaders, size-ranked lineups.
+- Menu, festival lineup, conference agenda, sports fixture, price list, film/credits cards, awards list.
+
+**Cluster D — Set-based.** Consistency across many artifacts is the point. Needs the cross-artifact **consistency layer** — the one genuinely new capability, shared by every profile here at once, overlapping sub-project 5 (reflow). Heaviest.
+- Slide deck, social carousel, story sequence, ad campaign matrix (one design × N formats), a poster series / daily practice.
+
+**Cluster E — Functional and brand-locked.** Clarity + compliance, conservative moves, brand kit locks face/colour; Read checks legibility, CTA presence, and safe areas.
+- Display ad/banner, business card, certificate, badge/credential, coupon, letterhead.
+
+### Out of scope (say so, and why)
+
+UI screens, long documents, dashboards/infographics, forms, diagrams/flowcharts are function- or data-driven; re-roll adds little and they belong to other tools (product layout, or the dataviz path). Forcing them dilutes the engine's identity — the same mistake as Smart Layout trying to be all layouts at once.
+
+### The video hook graphic (recommended second profile)
+
+"Video thumbnail," understood as a **family**, not one platform:
+- **Landscape 16:9** for YouTube (the flagship) and any video platform / course / embed.
+- **Portrait 9:16** covers for Reels, Shorts, TikTok — same hook craft, different format.
+- **Square** podcast episode art.
+
+Why it is the right second profile: it is Cluster A (near-free on the poster moves), it has very large demand, it proves the profile seam **without** needing the set layer, and it points at the motion wedge (thumbnails belong to video creators). Crucially its Read rubric **inverts** the poster's — a poster is made for a wall, a thumbnail for a postage stamp — so it is a genuine test of the per-profile rubric: legibility at ~5% scale, contrast, and one clear hook replace drama and scale-craft. Its moves add a subject-cutout element and a hook-phrase treatment; it drops the fine-print details a poster carries.
+
+### Build order
+
+1. **Poster** (sub-project 1). Proves the mechanism.
+2. **Cluster A cousins**, starting with the **video hook graphic**. Reuse the moves; no new capability. Proves the profile seam and the inverted Read rubric.
+3. **Cluster C (structured listing).** Extends the Index family with list/lineup moves.
+4. **Cluster B (editorial).** Grid-disciplined variants.
+5. **Build the set / consistency layer** (with sub-project 5, reflow) — the one new capability — which then unlocks **Cluster D** wholesale.
+6. **Cluster E (functional)** alongside, as a conservative move-list + brand locking.
+
+### What the seam must guarantee now (so none of the above is a retrofit)
+
+- The **moves registry**, the **Read rubric**, and the **shelf filter** are keyed by profile from the start (poster is the only key today).
+- The **format control is fully independent** of the profile control (a poster can be square; a thumbnail can be portrait).
+- A profile may declare a **set relationship** (this artifact is one of a consistent series); the poster profile leaves it null, and Cluster D profiles populate it once the consistency layer exists.
