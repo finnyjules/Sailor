@@ -937,7 +937,7 @@ test('Tab reaches a stroke row and Enter selects it', async ({ page }) => {
  *
  * A corner-pinned layer is drawn into its OWN offscreen canvas, sized from `localLayerBox`
  * — which is the shape's plain w×h and knows nothing about strokes. A stroke pushed out by
- * a `distance` lands entirely beyond that box, so without `outsideStrokePadPx` growing the
+ * a `distance` lands entirely beyond that box, so without `cornerPinPadPx` growing the
  * offscreen (and the quad it warps into) the band is 100% clipped and simply is not there.
  *
  * The layer is stroke-only (`fill: 'none'`), so every red pixel on the canvas IS the band:

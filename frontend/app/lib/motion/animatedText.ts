@@ -8,6 +8,7 @@
 import type { TextLayer } from '~/composables/useCompositorLayers'
 import { wrappedTextLines, applyFont, localBlendOp } from '~/composables/useCompositorLayers'
 import { paintPrimaryColor } from '~/lib/spacetype/fillTile'
+import { strokeStackOf, type StrokeInstance } from '~/lib/compositor/strokeStack'
 import type { UnitState } from './evaluate'
 
 export interface CharCell {
@@ -59,6 +60,42 @@ export function layoutTextUnits(
 }
 
 /**
+ * The ONE outline a per-character motion frame can draw, read through `strokeStackOf` —
+ * never off `layer.strokeColor` / `layer.strokeWidth` directly. A text layer that stores a
+ * stroke STACK has both of those legacy fields cleared (`writeStrokeStackToLayer` clears
+ * them in the same patch that stores the array), so reading them meant a stacked layer's
+ * outline vanished outright: from every per-character clip preview and from the baked video
+ * (`lib/motion/paint.ts`, `lib/engine/motionClipRenderer.ts`).
+ *
+ * WHAT THIS RENDERER CANNOT DO, said plainly rather than faked. It draws per CHARACTER with
+ * `strokeText`, which can only put ink on the glyph edge. A band at a non-zero `distance` is
+ * a DILATION of the whole text block (`paintTextStrokeBands` in useCompositorLayers), and a
+ * `shapes` stroke needs an outline to march along — a Frame text layer has neither a path
+ * nor, therefore, either of those here. So only an on-edge band is drawable, and only one of
+ * them: a second `strokeText` pass per character would paint over the first at the same
+ * place, since nothing here can offset it. The FIRST such entry wins, which is the topmost
+ * row — the stack's own "first row lands on top" convention (`paintStrokeStack` paints the
+ * list in reverse for exactly that reason). Any further outlines, and any distant band, are
+ * dropped: a motion clip shows fewer outlines than the still frame, and that is a known
+ * limitation of the per-character path, not a silent disagreement about what a layer stores.
+ *
+ * `'transparent'` is excluded on top of the reader's own ink test, so a legacy layer carrying
+ * it keeps painting nothing exactly as it did before this read went through the stack.
+ */
+function motionTextStroke(layer: TextLayer): StrokeInstance | null {
+  for (const st of strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])) {
+    if (st.visible === false) continue
+    if (!(st.width > 0)) continue
+    if ((st.style ?? 'band') !== 'band') continue
+    if (st.distance) continue
+    if (typeof st.paint === 'string' && (st.paint === 'transparent' || st.paint === 'none' || st.paint === '')) continue
+    if (!st.paint) continue
+    return st
+  }
+  return null
+}
+
+/**
  * Draw a text layer with per-unit motion states. The context must already be
  * in canvas space (NOT pre-translated): this function applies the layer's own
  * translate/rotate exactly like paintLayer's fast path, then draws each char
@@ -84,12 +121,11 @@ export function drawAnimatedTextLayer(
   applyFont(ctx, layer, W)
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  const strokeOn = !!layer.strokeColor && layer.strokeColor !== 'none'
-    && layer.strokeColor !== 'transparent' && layer.strokeWidth > 0
-  if (strokeOn) {
+  const outline = motionTextStroke(layer)
+  if (outline) {
     ctx.lineJoin = 'round'
-    ctx.lineWidth = layer.strokeWidth * W
-    ctx.strokeStyle = paintPrimaryColor(layer.strokeColor, '#000000')
+    ctx.lineWidth = outline.width * W
+    ctx.strokeStyle = paintPrimaryColor(outline.paint, '#000000')
   }
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i]
@@ -120,7 +156,7 @@ export function drawAnimatedTextLayer(
       )
     }
     ctx.fillStyle = paintPrimaryColor(layer.color, '#ffffff')
-    if (strokeOn) ctx.strokeText(cell.char, 0, 0)
+    if (outline) ctx.strokeText(cell.char, 0, 0)
     ctx.fillText(cell.char, 0, 0)
     ctx.restore()
   }

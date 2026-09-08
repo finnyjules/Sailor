@@ -4,6 +4,7 @@
 // (screen-space, above the selection). Full/precise controls live in the modal.
 import { AlignLeft, AlignCenter, AlignRight, ArrowUp, ArrowDown, Trash2, Ban, Shield } from 'lucide-vue-next'
 import { TEMPLATE_FONTS } from '~~/shared/template-fonts'
+import { layerStoresStrokeStack } from '~/lib/compositor/strokeStack'
 
 const props = defineProps<{
   layer: any       // the selected LocalLayer
@@ -21,6 +22,15 @@ function setPx(key: string, v: string) { emit('set', { [key]: Math.max(0, parseF
 // re-links all four). Per-corner editing lives in the modal inspector.
 function radiusPx(r: unknown) { return px(Array.isArray(r) ? Math.max(...r.map(v => Number(v) || 0)) : (r as number)) }
 const hasFill = computed(() => props.layer.fill && props.layer.fill !== 'none')
+// THE STACK GATE. These two fields write the LEGACY `stroke`/`strokeWidth` pair straight
+// onto the layer, and `strokeStackOf` treats a live legacy field as authoritative — it then
+// IGNORES the stored array entirely. So on a layer that stores a stroke stack, one nudge of
+// either field would collapse every outline but the folded legacy one, and the next "Add
+// outline" would write over the survivors. Same predicate, same reason, as the modal
+// inspector's `showsLegacyStrokeSection`; this is the surface that fix did not reach.
+// A LINE is deliberately unaffected: it is not stackable (see `strokeSupportsStack`), its
+// single stroke IS the legacy pair, and its Thickness field is the only place to edit it.
+const showsLegacyStroke = computed(() => !layerStoresStrokeStack(props.layer))
 // A path's fill may be a gradient object; show a neutral swatch for the color
 // input (which, if used, replaces the gradient with a solid color).
 const pathFillColor = computed(() =>
@@ -64,13 +74,15 @@ const pathFillColor = computed(() =>
         @input="emit('set', { fill: ($event.target as HTMLInputElement).value })" />
       <button class="ll-btn" :class="!hasFill ? 'is-on' : ''" title="No fill"
         @click="emit('set', { fill: hasFill ? 'none' : '#3b82f6' })"><Ban class="size-3.5" /></button>
-      <span class="ll-sep" />
-      <input type="color" :value="layer.stroke || '#ffffff'" title="Stroke"
-        class="size-6 shrink-0 rounded cursor-pointer bg-transparent border border-white/10 p-0"
-        @input="emit('set', { stroke: ($event.target as HTMLInputElement).value })" />
-      <input type="number" min="0" :value="px(layer.strokeWidth)" title="Stroke width"
-        class="w-11 h-6 bg-white/[0.06] rounded text-[11px] text-center text-white/85 outline-none"
-        @input="setPx('strokeWidth', ($event.target as HTMLInputElement).value)" />
+      <template v-if="showsLegacyStroke">
+        <span class="ll-sep" />
+        <input type="color" :value="layer.stroke || '#ffffff'" title="Stroke"
+          class="size-6 shrink-0 rounded cursor-pointer bg-transparent border border-white/10 p-0"
+          @input="emit('set', { stroke: ($event.target as HTMLInputElement).value })" />
+        <input type="number" min="0" :value="px(layer.strokeWidth)" title="Stroke width" data-testid="toolbar-stroke-width"
+          class="w-11 h-6 bg-white/[0.06] rounded text-[11px] text-center text-white/85 outline-none"
+          @input="setPx('strokeWidth', ($event.target as HTMLInputElement).value)" />
+      </template>
       <input v-if="layer.kind === 'rect'" type="number" min="0" :value="radiusPx(layer.radius)" title="Corner radius (sets all four)"
         class="w-11 h-6 bg-white/[0.06] rounded text-[11px] text-center text-white/85 outline-none"
         @input="setPx('radius', ($event.target as HTMLInputElement).value)" />
@@ -83,13 +95,15 @@ const pathFillColor = computed(() =>
         @input="emit('set', { fill: ($event.target as HTMLInputElement).value })" />
       <button class="ll-btn" :class="!hasFill ? 'is-on' : ''" title="No fill"
         @click="emit('set', { fill: hasFill ? 'none' : '#3b82f6' })"><Ban class="size-3.5" /></button>
-      <span class="ll-sep" />
-      <input type="color" :value="layer.stroke || '#ffffff'" title="Stroke"
-        class="size-6 shrink-0 rounded cursor-pointer bg-transparent border border-white/10 p-0"
-        @input="emit('set', { stroke: ($event.target as HTMLInputElement).value })" />
-      <input type="number" min="0" :value="px(layer.strokeWidth)" title="Stroke width"
-        class="w-11 h-6 bg-white/[0.06] rounded text-[11px] text-center text-white/85 outline-none"
-        @input="setPx('strokeWidth', ($event.target as HTMLInputElement).value)" />
+      <template v-if="showsLegacyStroke">
+        <span class="ll-sep" />
+        <input type="color" :value="layer.stroke || '#ffffff'" title="Stroke"
+          class="size-6 shrink-0 rounded cursor-pointer bg-transparent border border-white/10 p-0"
+          @input="emit('set', { stroke: ($event.target as HTMLInputElement).value })" />
+        <input type="number" min="0" :value="px(layer.strokeWidth)" title="Stroke width" data-testid="toolbar-stroke-width"
+          class="w-11 h-6 bg-white/[0.06] rounded text-[11px] text-center text-white/85 outline-none"
+          @input="setPx('strokeWidth', ($event.target as HTMLInputElement).value)" />
+      </template>
     </template>
 
     <!-- LINE -->

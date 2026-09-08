@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
-  strokeDashSegments, strokeAlignOf, strokeAligned, outsideStrokePadPx, paintLayerStack,
+  strokeDashSegments, strokeAlignOf, strokeAligned, strokeReachPx, cornerPinPadPx, silhouettePadPx, paintLayerStack,
   createRectLayer, createLineLayer, createPathLayer,
   type LocalLayer, type RectLayer, type LineLayer, type CornerPin,
 } from '~/composables/useCompositorLayers'
@@ -64,28 +64,28 @@ describe('strokeAlignOf', () => {
 // the box's own "no stroke padding" comment) — the corner-pin offscreen has to be
 // padded by exactly this much, and only in this one case, or it clips the stroke
 // away (center/inside) or shrinks a byte-identical no-stroke box (everything else).
-describe('outsideStrokePadPx', () => {
+describe('strokeReachPx / cornerPinPadPx', () => {
   it('is 0 for a rect with no stroke at all', () => {
     const l = createRectLayer({ stroke: '', strokeWidth: 0.1, strokeAlign: 'outside' })
-    expect(outsideStrokePadPx(l, 200)).toBe(0)
+    expect(cornerPinPadPx(l, 200)).toBe(0)
   })
 
   it('is 0 for a rect with a zero-width stroke', () => {
     const l = createRectLayer({ stroke: '#fff', strokeWidth: 0, strokeAlign: 'outside' })
-    expect(outsideStrokePadPx(l, 200)).toBe(0)
+    expect(cornerPinPadPx(l, 200)).toBe(0)
   })
 
   // A centred stroke AT DISTANCE 0 stays 0 — not because its ink is inside the box (half
   // of it is not), but because this pad also scales the corner-pin quad, so any value here
-  // re-warps every saved centred-stroke frame. See outsideStrokePadPx's doc comment and
+  // re-warps every saved centred-stroke frame. See cornerPinPadPx's doc comment and
   // the quad tests at the bottom of this file.
   it('is 0 for a centre- or inside-aligned stroke sitting on the edge', () => {
     const center = createRectLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'center' })
     const inside = createRectLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'inside' })
     const absent = createRectLayer({ stroke: '#fff', strokeWidth: 0.1 })
-    expect(outsideStrokePadPx(center, 200)).toBe(0)
-    expect(outsideStrokePadPx(inside, 200)).toBe(0)
-    expect(outsideStrokePadPx(absent, 200)).toBe(0)   // absent ⇒ 'center'
+    expect(cornerPinPadPx(center, 200)).toBe(0)
+    expect(cornerPinPadPx(inside, 200)).toBe(0)
+    expect(cornerPinPadPx(absent, 200)).toBe(0)   // absent ⇒ 'center'
   })
 
   // The silhouette raster asks for the OTHER answer — it only needs to be big enough, and
@@ -93,8 +93,8 @@ describe('outsideStrokePadPx', () => {
   // the two callers can never drift apart on what the rest of a stack reaches.
   it('counts a centred edge stroke when the caller asks for the raster answer', () => {
     const center = createRectLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'center' })
-    expect(outsideStrokePadPx(center, 200, true)).toBe(10)   // 0.1 * 200 / 2
-    expect(outsideStrokePadPx(center, 200, false)).toBe(0)
+    expect(strokeReachPx(center, 200)).toBe(10)   // 0.1 * 200 / 2
+    expect(cornerPinPadPx(center, 200)).toBe(0)
   })
 
   // The exception is exactly and only distance 0: a stroke the stack pushed away from the
@@ -102,7 +102,7 @@ describe('outsideStrokePadPx', () => {
   it('DOES pad a centred stroke that a distance pushed off the edge', () => {
     const l = createRectLayer({ stroke: undefined, strokeWidth: undefined }) as unknown as Record<string, unknown>
     l.strokes = [{ id: 's1', paint: '#fff', width: 0.1, distance: 0.05, align: 'center' }]
-    expect(outsideStrokePadPx(l as unknown as LocalLayer, 200)).toBe(20)  // (0.05 + 0.05) * 200
+    expect(cornerPinPadPx(l as unknown as LocalLayer, 200)).toBe(20)  // (0.05 + 0.05) * 200
   })
 
   // Task 3b item 4 (Minor, fix wave 1): a non-finite stored `distance` must read as 0,
@@ -112,32 +112,131 @@ describe('outsideStrokePadPx', () => {
   it('treats a non-finite stored distance as 0, not Infinity/NaN', () => {
     const inf = createRectLayer({ stroke: undefined, strokeWidth: undefined }) as unknown as Record<string, unknown>
     inf.strokes = [{ id: 's1', paint: '#fff', width: 0.1, distance: Infinity, align: 'center' }]
-    expect(outsideStrokePadPx(inf as unknown as LocalLayer, 200)).toBe(0)
+    expect(cornerPinPadPx(inf as unknown as LocalLayer, 200)).toBe(0)
 
     // A NaN distance with an outside-aligned stroke: the reach must fall back to the
     // width alone (0 + width), not silently drop the stroke's reach to 0 via a NaN
     // comparison that is always false.
     const nan = createRectLayer({ stroke: undefined, strokeWidth: undefined }) as unknown as Record<string, unknown>
     nan.strokes = [{ id: 's1', paint: '#fff', width: 0.1, distance: NaN, align: 'outside' }]
-    expect(outsideStrokePadPx(nan as unknown as LocalLayer, 200)).toBe(20)
+    expect(cornerPinPadPx(nan as unknown as LocalLayer, 200)).toBe(20)
   })
 
   it('is the full stroke width in px for an outside-aligned rect/ellipse/polygon/star', () => {
     // strokeWidth is normalized to canvas width for these kinds — 0.1 * 200 = 20px.
     const l = createRectLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'outside' })
-    expect(outsideStrokePadPx(l, 200)).toBe(20)
+    expect(cornerPinPadPx(l, 200)).toBe(20)
   })
 
   it('scales a path\'s pad by its own `scale`, not just canvas width', () => {
     // strokeWidth is LOCAL units at scale=1 for a path — the rendered ctx is
     // pre-scaled by (scale*W), so the outward px extent must fold scale in too.
     const l = createPathLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'outside', scale: 2 })
-    expect(outsideStrokePadPx(l, 200)).toBe(40) // 0.1 * 2 * 200
+    expect(cornerPinPadPx(l, 200)).toBe(40) // 0.1 * 2 * 200
   })
 
   it('is 0 for a line — alignment does not apply (no interior)', () => {
     const l = createLineLayer({ stroke: '#fff', strokeWidth: 0.1 })
-    expect(outsideStrokePadPx(l, 200)).toBe(0)
+    expect(cornerPinPadPx(l, 200)).toBe(0)
+  })
+})
+
+/**
+ * A MARCHING-SHAPES STROKE'S REACH.
+ *
+ * Both pad helpers used to size every stroke from `st.width` and skip it on `!(st.width > 0)`.
+ * A `style: 'shapes'` stroke is sized by `shapes.size` instead, and since Task 7 hid the width
+ * row for one, the `width` such an entry carries is a stale leftover — usually 0 on a stroke
+ * created as shapes, and usually WRONG on one switched over. So the marks were padded for the
+ * wrong number, or the whole entry was skipped: clipped at the corner-pin / DOF offscreen edge
+ * and cut by the torn-edge silhouette. Silently — a slightly wrong box, not an error.
+ *
+ * The numbers come from `shapeStrokeMarkMatrices`' own placement maths, not from a rule of
+ * thumb: a mark is the library shape's ink box fitted into `size` (`min(size/bw, size/bh)`, so
+ * the larger fitted side is exactly `size`) and CENTRED on the guide point. 'badge' has a
+ * square 88×88 ink box, so its fitted mark is `size × size`: upright it reaches `size/2`,
+ * following the tangent it turns about that centre and a corner swings to half the diagonal,
+ * `size·√2/2`. 'beak' is 44×88, so its fitted mark is `size/2 × size` and the diagonal is
+ * shorter — which is what makes these two shapes tell an exact answer apart from `size/2`.
+ */
+describe('strokeReachPx / cornerPinPadPx — a shapes stroke is sized by its marks', () => {
+  const W = 200
+  /** A rect carrying ONE shapes stroke. `width` is deliberately the stale leftover the
+   *  inspector no longer shows — every expectation below must be blind to it. */
+  const shapesRect = (spec: Record<string, unknown>, over: Record<string, unknown> = {}) => {
+    const l = createRectLayer({ stroke: undefined, strokeWidth: undefined }) as unknown as Record<string, unknown>
+    l.strokes = [{ id: 's1', paint: '#fff', width: 0, distance: 0, style: 'shapes', shapes: spec, ...over }]
+    return l as unknown as LocalLayer
+  }
+
+  it('reaches half a following mark\'s DIAGONAL, not half its size', () => {
+    const l = shapesRect({ shapeId: 'badge', size: 0.2, spacing: 0.05 })
+    // 0.2 · √2 / 2 · 200 — a square mark turned to the tangent, not 0.1 · 200.
+    expect(cornerPinPadPx(l, W)).toBeCloseTo(0.2 * Math.SQRT2 / 2 * W, 6)
+    expect(strokeReachPx(l, W)).toBeCloseTo(0.2 * Math.SQRT2 / 2 * W, 6)
+  })
+
+  it('reaches exactly half the size when the marks stay upright', () => {
+    const l = shapesRect({ shapeId: 'badge', size: 0.2, spacing: 0.05, follow: false })
+    expect(cornerPinPadPx(l, W)).toBeCloseTo(0.1 * W, 6)
+  })
+
+  it("follows the shape's own ink box — an oblong mark reaches less than a square one", () => {
+    // 'beak' is 44 × 88: fitted to size 0.2 that is 0.1 × 0.2, half-diagonal √(0.01+0.04)/2.
+    const l = shapesRect({ shapeId: 'beak', size: 0.2, spacing: 0.05 })
+    expect(cornerPinPadPx(l, W)).toBeCloseTo(Math.hypot(0.1, 0.2) / 2 * W, 6)
+    expect(cornerPinPadPx(l, W)).toBeLessThan(0.2 * Math.SQRT2 / 2 * W)
+  })
+
+  it('adds the distance the marks march at', () => {
+    const l = shapesRect({ shapeId: 'badge', size: 0.2, spacing: 0.05, follow: false }, { distance: 0.05 })
+    expect(cornerPinPadPx(l, W)).toBeCloseTo((0.05 + 0.1) * W, 6)
+  })
+
+  it('is NOT excused by the centre-on-edge exception — a shapes stroke has no alignment', () => {
+    // The corner-pin exception exists to keep SAVED frames' quads still; no saved frame can
+    // carry a shapes stroke, so both callers get the same honest answer.
+    const l = shapesRect({ shapeId: 'badge', size: 0.2, spacing: 0.05, follow: false }, { align: 'center' })
+    expect(cornerPinPadPx(l, W)).toBeCloseTo(0.1 * W, 6)
+    expect(strokeReachPx(l, W)).toBeCloseTo(0.1 * W, 6)
+  })
+
+  it("scales a path's shapes stroke by its own `scale`, like every other stroke number", () => {
+    const l = createPathLayer({ stroke: undefined, strokeWidth: undefined, scale: 2 }) as unknown as Record<string, unknown>
+    l.strokes = [{ id: 's1', paint: '#fff', width: 0, distance: 0, style: 'shapes', shapes: { shapeId: 'badge', size: 0.2, spacing: 0.05, follow: false } }]
+    expect(cornerPinPadPx(l as unknown as LocalLayer, W)).toBeCloseTo(0.1 * 2 * W, 6)
+  })
+
+  it('pads 0 for every entry `paintShapeStroke` itself draws nothing for', () => {
+    // Each of these no-ops in the painter, so padding for them would grow a raster around ink
+    // that never appears.
+    expect(cornerPinPadPx(shapesRect({ shapeId: 'no-such-shape', size: 0.2, spacing: 0.05 }), W)).toBe(0)
+    expect(cornerPinPadPx(shapesRect({ shapeId: 'badge', size: 0, spacing: 0.05 }), W)).toBe(0)
+    expect(cornerPinPadPx(shapesRect({ shapeId: 'badge', size: 0.2, spacing: 0 }), W)).toBe(0)
+    expect(cornerPinPadPx(shapesRect({ shapeId: '', size: 0.2, spacing: 0.05 }), W)).toBe(0)
+    // …and a hidden or inkless one, the same gates the painter re-checks.
+    expect(cornerPinPadPx(shapesRect({ shapeId: 'badge', size: 0.2, spacing: 0.05 }, { visible: false }), W)).toBe(0)
+    expect(cornerPinPadPx(shapesRect({ shapeId: 'badge', size: 0.2, spacing: 0.05 }, { paint: 'none' }), W)).toBe(0)
+  })
+
+  it('takes the furthest of a mixed stack — band, marks, and back to a band', () => {
+    const l = createRectLayer({ stroke: undefined, strokeWidth: undefined }) as unknown as Record<string, unknown>
+    l.strokes = [
+      { id: 'a', paint: '#fff', width: 0.02, distance: 0, align: 'outside' },                                  // 0.02
+      { id: 'b', paint: '#fff', width: 0, distance: 0.01, style: 'shapes', shapes: { shapeId: 'badge', size: 0.2, spacing: 0.05, follow: false } }, // 0.11
+      { id: 'c', paint: '#fff', width: 0.01, distance: 0.03, align: 'outside' },                               // 0.04
+    ]
+    expect(cornerPinPadPx(l as unknown as LocalLayer, W)).toBeCloseTo(0.11 * W, 6)
+  })
+
+  // The OTHER helper the same blind spot sat in: the torn-edge / feather silhouette raster.
+  // It defers to `strokeReachPx`, so the fix reaches it — but only a test that goes through
+  // `silhouettePadPx` with a real LAYER proves the deferral actually happens for this style.
+  it('grows the silhouette raster by the marks\' reach', () => {
+    const box = { w: 100, h: 100 }
+    const bare = createRectLayer({ stroke: undefined, strokeWidth: undefined }) as unknown as LocalLayer
+    const marked = shapesRect({ shapeId: 'badge', size: 0.2, spacing: 0.05, follow: false })
+    expect(silhouettePadPx(marked, W, 1, box) - silhouettePadPx(bare, W, 1, box)).toBeCloseTo(0.1 * W, 6)
   })
 })
 
@@ -229,7 +328,7 @@ describe('stroke alignment — where the ink lands', () => {
 // canvas the paint makes and records what its width/height end up being SET to
 // (production code always creates-then-sizes: `document.createElement('canvas');
 // cc.width = …; cc.height = …`), so these tests observe the real offscreen size the
-// warp path builds — not just the pure `outsideStrokePadPx` calculation.
+// warp path builds — not just the pure `cornerPinPadPx` calculation.
 function paintWithSizes(layers: LocalLayer[], W = 200, H = 200) {
   const sizes: { w: number; h: number }[] = []
   const { ctx, rec } = makeCtx('main', W, H)

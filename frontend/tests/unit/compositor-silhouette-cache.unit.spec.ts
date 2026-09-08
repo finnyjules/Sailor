@@ -256,7 +256,7 @@ const ink = (o: Partial<SilhouetteInkInput> = {}): SilhouetteInkInput => ({
   maxLineWPx: 0, boxWidthPx: 0, ...o,
 })
 
-// The finding this covers: the raster used to be padded by `outsideStrokePadPx`,
+// The finding this covers: the raster used to be padded by `strokeReachPx`,
 // which is 0 for anything but an OUTSIDE-aligned stroke — while the DEFAULT
 // alignment is 'center', whose ink reaches half the stroke width past the box. So
 // every default-aligned stroke wider than a couple of px had its outer half clipped
@@ -276,7 +276,7 @@ describe('silhouetteInkOverhangPx', () => {
 
   // A layer's strokes are a LIST. `strokeAlign`/`strokePx` describe one stroke and
   // cannot express "a hairline on the edge plus a fat band pushed 20px out", so the
-  // composable resolves the stack's furthest reach (outsideStrokePadPx) and hands it
+  // composable resolves the stack's furthest reach (strokeReachPx) and hands it
   // over. Getting this wrong bakes a slightly wrong SILHOUETTE for the torn-edge and
   // feather effects — a wrong shape, never an error, which is why it needs a test.
   it('uses the stack\'s furthest reach when the caller supplies one', () => {

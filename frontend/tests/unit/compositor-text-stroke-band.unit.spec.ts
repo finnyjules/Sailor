@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  paintLayerStack, createTextLayer, outsideStrokePadPx, silhouettePadPx, applyFont,
+  paintLayerStack, createTextLayer, strokeReachPx, cornerPinPadPx, silhouettePadPx, applyFont,
   type LocalLayer,
 } from '~/composables/useCompositorLayers'
 import { SILHOUETTE_RASTER_PAD_PX } from '~/lib/compositor/silhouetteCache'
@@ -284,7 +284,7 @@ describe('expressive text distant band — per-word anchors (finding 1)', () => 
  * Two helpers answer that, for two different consumers, and only one of them ever saw a
  * text layer before this task:
  *
- *  - `outsideStrokePadPx` sizes the CORNER-PIN offscreen and, load-bearingly, SCALES the
+ *  - `cornerPinPadPx` sizes the CORNER-PIN offscreen and, load-bearingly, SCALES the
  *    quad that offscreen is warped onto (`hw = box.w / 2 + pad`). It returned a flat 0 for
  *    text. With the outline welded to the glyph edge that was defensible; a band pushed 20
  *    px out is simply clipped away by the offscreen's edge, which is the bug this pad
@@ -310,22 +310,22 @@ describe('a text layer\'s stroke reach (item 4)', () => {
     color: '#fff', align: 'center', lineHeight: 1.1, boxH: 0, ...extra,
   }) as unknown as LocalLayer
 
-  describe('outsideStrokePadPx — the corner-pin pad', () => {
+  describe('cornerPinPadPx — the corner-pin pad', () => {
     it('is still 0 for the legacy on-the-edge outline every saved frame carries', () => {
-      expect(outsideStrokePadPx(textLayer({ strokeColor: '#f00', strokeWidth: 0.1 }), W)).toBe(0)
+      expect(cornerPinPadPx(textLayer({ strokeColor: '#f00', strokeWidth: 0.1 }), W)).toBe(0)
       // …including one that stored an alignment `strokeText` has always ignored. Padding
       // for it would move the corner-pin quad of a frame whose pixels never change.
-      expect(outsideStrokePadPx(textLayer({ strokeColor: '#f00', strokeWidth: 0.1, strokeAlign: 'outside' }), W)).toBe(0)
+      expect(cornerPinPadPx(textLayer({ strokeColor: '#f00', strokeWidth: 0.1, strokeAlign: 'outside' }), W)).toBe(0)
       // Same for the flag the silhouette raster passes: text's raster overhang comes from
       // its own font-size rule (see silhouettePadPx below), never from this helper.
-      expect(outsideStrokePadPx(textLayer({ strokeColor: '#f00', strokeWidth: 0.1 }), W, true)).toBe(0)
+      expect(strokeReachPx(textLayer({ strokeColor: '#f00', strokeWidth: 0.1 }), W)).toBe(0)
     })
 
     it('DOES pad for a stroke a distance pushed off the glyph edge', () => {
       const l = textLayer({ strokes: [{ id: 'a', paint: '#f00', width: 0.01, distance: 0.05, align: 'center' }] })
-      expect(outsideStrokePadPx(l, W)).toBeCloseTo((0.05 + 0.005) * W, 6)   // 11 px
+      expect(cornerPinPadPx(l, W)).toBeCloseTo((0.05 + 0.005) * W, 6)   // 11 px
       const out = textLayer({ strokes: [{ id: 'a', paint: '#f00', width: 0.01, distance: 0.05, align: 'outside' }] })
-      expect(outsideStrokePadPx(out, W)).toBeCloseTo((0.05 + 0.01) * W, 6)  // 12 px
+      expect(cornerPinPadPx(out, W)).toBeCloseTo((0.05 + 0.01) * W, 6)  // 12 px
     })
 
     it('pads for the furthest-reaching stroke in the stack, and ignores an invisible one', () => {
@@ -336,7 +336,7 @@ describe('a text layer\'s stroke reach (item 4)', () => {
           { id: 'c', paint: '#00f', width: 0.02, distance: 0.04 },
         ],
       })
-      expect(outsideStrokePadPx(l, W)).toBeCloseTo((0.04 + 0.01) * W, 6)    // 10 px, from 'c'
+      expect(cornerPinPadPx(l, W)).toBeCloseTo((0.04 + 0.01) * W, 6)    // 10 px, from 'c'
     })
   })
 

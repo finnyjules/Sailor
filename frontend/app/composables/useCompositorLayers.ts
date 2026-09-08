@@ -1309,55 +1309,96 @@ export function localLayerBox(
 }
 
 /**
- * How far the WIDEST-reaching stroke in a layer's stack lands beyond
- * `localLayerBox`, in px — the padding a corner-pin (or any other box-sized)
- * offscreen needs so that stroke survives instead of landing off-canvas and
- * getting clipped away (see `strokeAligned`'s 'outside' knockout, which paints
- * the whole 2×width ring starting AT the silhouette edge — none of it is inside
- * the box).
+ * Half the ink extent of ONE mark of a `style: 'shapes'` stroke, in the stroke's own stored
+ * units — how far past its centre a mark can put ink, which is what such a stroke adds to its
+ * `distance` to reach.
  *
- * Reads the stack, so a layer with several strokes is padded for the one that
- * reaches furthest, and a stroke pushed out by its `distance` is padded for
- * where it actually lands rather than where its shape's edge is.
+ * Read off `shapeStrokeMarkMatrices`' placement maths rather than guessed at. A mark is the
+ * library shape's ink box fitted into `size` (`s = min(size/bw, size/bh)`, so the fitted box
+ * is `s·bw × s·bh` and its LARGER side is exactly `size`), CENTRED on its guide point. Upright
+ * (`follow: false`) the furthest ink therefore sits half the larger side away — exactly
+ * `size / 2`. Following the tangent, that same box turns about that same centre, so a corner
+ * swings out to half the DIAGONAL: a square mark really reaches `size · √2 / 2`, 41% further
+ * than `size / 2`, and padding for `size / 2` alone would clip it.
  *
- * THE CENTRE-AT-DISTANCE-0 EXCEPTION. A stroke that is centre-aligned AND sits
- * at distance 0 contributes 0, even though half its width genuinely lands
- * outside the box. That is deliberate and load-bearing: this same `pad` also
- * scales the CORNER-PIN QUAD (`hw = box.w / 2 + pad`, and every corner is then
- * pulled by `cp.*.x * hw`), so returning a non-zero pad here would silently
- * re-warp every already-saved corner-pinned frame whose stroke is the default
- * centred one. Such a stroke being clipped at half its width inside a pinned
- * offscreen is PRE-EXISTING behaviour, and changing it is not this task's job —
- * it needs the quad to stop riding the pad first.
- *
- * Every other stroke contributes its real reach: outside-aligned, or centred /
- * inside with a non-zero `distance` — those cases could not exist before the
- * stack did, so no saved frame's warp can move because of them.
- *
- * TEXT gets the exception in a WIDER form: a text stroke at distance 0 contributes
- * 0 whatever alignment it claims. `strokeText` has no path, so the text painter
- * has always drawn a centred outline and ignored `strokeAlign` outright — yet a
- * saved text layer can perfectly well carry `strokeAlign: 'outside'` from the
- * shared inspector row. Reading that alignment here would re-warp a saved pinned
- * frame for ink that has never been anywhere but on the glyph edge. A text stroke
- * at a DISTANCE is a different thing entirely: it is a real dilation band (see
- * `paintTextStrokeBands`), it lands `distance + width` past the glyphs, no saved
- * frame can carry one, and without this pad the corner-pin offscreen clips it.
- * Text's SILHOUETTE overhang is still not this helper's business — see
- * `silhouettePadPx`, whose text branch is a full em plus the outline's reach.
- *
- * Still 0 for no stroke, a zero width, a `line` layer, and any kind without a
- * stack at all.
+ * 0 for every case `paintShapeStroke` itself no-ops on — no payload, an unknown `shapeId`, a
+ * non-positive `size`/`spacing`, a degenerate ink box — so an inert entry pads nothing.
  */
-export function outsideStrokePadPx(
+function shapeStrokeMarkHalfExtent(spec: ShapeStrokeSpec | undefined): number {
+  if (!spec || !(spec.size > 0) || !(spec.spacing > 0)) return 0
+  const shape = shapeById(spec.shapeId)
+  if (!shape) return 0
+  const [, , bw, bh] = shape.box
+  if (!(bw > 0) || !(bh > 0)) return 0
+  const s = Math.min(spec.size / bw, spec.size / bh)
+  return (spec.follow === false ? Math.max(s * bw, s * bh) : Math.hypot(s * bw, s * bh)) / 2
+}
+
+/**
+ * How far the WIDEST-reaching stroke in a layer's stack lands beyond `localLayerBox`, in px —
+ * the layer's HONEST reach, with nothing excused.
+ *
+ * Reads the stack, so a layer with several strokes answers for the one that reaches furthest:
+ * a band by its alignment and `width`, a stroke pushed out by its `distance` by where it
+ * actually lands, and a marching-shapes stroke by its mark size (see
+ * `shapeStrokeMarkHalfExtent` — its `width` is a stale leftover the inspector no longer even
+ * shows). A path's `scale` is folded in, because a path stores its stroke numbers in local
+ * units at scale 1.
+ *
+ * This is the number a RASTER wants: the torn-edge / feather silhouette only has to be big
+ * enough, and anything smaller cuts ink off. A caller sizing GEOMETRY wants `cornerPinPadPx`
+ * below instead — read its comment before reaching for either.
+ *
+ * Still 0 for no stroke, a zero width, a `line` layer, and any kind without a stack at all.
+ */
+export function strokeReachPx(layer: LocalLayer, W: number): number {
+  return strokeStackReachPx(layer, W, true)
+}
+
+/**
+ * The pad a CORNER-PIN (or any other box-sized) offscreen needs so a stroke survives instead
+ * of landing off-canvas and getting clipped away (see `strokeAligned`'s 'outside' knockout,
+ * which paints the whole 2×width ring starting AT the silhouette edge — none of it inside the
+ * box).
+ *
+ * `strokeReachPx` MINUS ONE DELIBERATE EXCEPTION, which is why it is its own named export
+ * rather than a boolean argument: a stroke that is centre-aligned AND sits at distance 0
+ * contributes 0 here, even though half its width genuinely lands outside the box. That is
+ * load-bearing. This same pad also SCALES THE CORNER-PIN QUAD (`hw = box.w / 2 + pad`, and
+ * every corner is then pulled by `cp.*.x * hw`), so counting the default centred stroke would
+ * silently re-warp every already-saved corner-pinned frame. Such a stroke being clipped at
+ * half its width inside a pinned offscreen is PRE-EXISTING behaviour; changing it needs the
+ * quad to stop riding the pad first.
+ *
+ * Every other stroke contributes its real reach: outside-aligned, centred / inside with a
+ * non-zero `distance`, or marching shapes — none of those cases could exist before the stack
+ * did, so no saved frame's warp can move because of them.
+ *
+ * TEXT gets the exception in a WIDER form: a text stroke at distance 0 contributes 0 whatever
+ * alignment it claims. `strokeText` has no path, so the text painter has always drawn a
+ * centred outline and ignored `strokeAlign` outright — yet a saved text layer can perfectly
+ * well carry `strokeAlign: 'outside'` from the shared inspector row. Reading that alignment
+ * here would re-warp a saved pinned frame for ink that has never been anywhere but on the
+ * glyph edge. A text stroke at a DISTANCE is a different thing entirely: it is a real dilation
+ * band (see `paintTextStrokeBands`), it lands `distance + width` past the glyphs, no saved
+ * frame can carry one, and without this pad the corner-pin offscreen clips it. Text's
+ * SILHOUETTE overhang is still not this helper's business — see `silhouettePadPx`, whose text
+ * branch is a full em plus the outline's reach.
+ */
+export function cornerPinPadPx(layer: LocalLayer, W: number): number {
+  return strokeStackReachPx(layer, W, false)
+}
+
+/** The shared body of the two exports above. Private ON PURPOSE: `countCentredOnEdge` used to
+ *  be a defaulted positional boolean on one exported function, so the corner-pin call site
+ *  (which passes nothing) READ as if it wanted the honest reach, and a future third caller
+ *  would silently have inherited the exception. Callers now name which answer they want. */
+function strokeStackReachPx(
   layer: LocalLayer,
   W: number,
-  /** true: a centred stroke on the edge counts its real half-width reach. The corner-pin
-   *  caller MUST leave this false (that is the exception documented above); the silhouette
-   *  raster passes true, because a raster is not geometry — it only needs to be big enough,
-   *  and shrinking it by half a stroke width would clip the torn edge / feather of every
-   *  saved centre-stroked layer. */
-  countCentredOnEdge = false,
+  /** true: a centred stroke on the edge counts its real half-width reach (`strokeReachPx`).
+   *  false: it counts 0 — the corner-pin exception documented on `cornerPinPadPx`. */
+  countCentredOnEdge: boolean,
 ): number {
   if (!strokeSupportsStack(layer.kind)) return 0
   const isText = layer.kind === 'text'
@@ -1367,19 +1408,36 @@ export function outsideStrokePadPx(
   const scale = layer.kind === 'path' ? ((layer as PathLayer).scale ?? 1) : 1
   let pad = 0
   for (const st of strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])) {
-    if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
+    if (st.visible === false || !hasPaint(st.paint)) continue
     // Non-finite reads as 0, matching `strokeDistancePx` (the painter) and
     // `silhouettePadPx` — this pad also SCALES the corner-pin quad, so an unguarded
     // Infinity here would not just mis-size a raster but re-warp the quad itself.
     const dRaw = st.distance ?? 0
     const d = Number.isFinite(dRaw) ? dRaw : 0
+    // A MARCHING-SHAPES stroke is sized by `shapes.size`, never by the `width` its row still
+    // carries — Task 7 hid that width row, so the number left there is a stale leftover, and
+    // the `width > 0` gate below would skip the entry outright: a mark bigger than that stale
+    // width got clipped at the corner-pin / DOF offscreen edge and cut by the torn-edge
+    // silhouette, silently — a slightly wrong box, not an error. Dispatched on STYLE before
+    // that gate, exactly as the painter and the SVG writer both do.
+    //
+    // Neither exception above applies to it. It has no alignment (the painter never reads
+    // one), it cannot exist on a text layer (`outlinePathData` is null there, so
+    // `paintStrokeStack` is never reached at all), and no frame saved before the stack could
+    // carry one — so there is no saved corner-pin quad for its reach to move.
+    if ((st.style ?? 'band') === 'shapes') {
+      const half = shapeStrokeMarkHalfExtent(st.shapes)
+      if (half > 0 && d + half > pad) pad = d + half
+      continue
+    }
+    if (!(st.width > 0)) continue
     const align = strokeAlignOf(st.align)
     // A centred stroke ON the edge is the shape every saved frame already has; it must
     // keep contributing 0 so the corner-pin quad above stays exactly where it was. See
-    // the doc comment's "centre-at-distance-0 exception".
+    // `cornerPinPadPx`'s "centre-at-distance-0 exception".
     if (align === 'center' && d === 0 && !countCentredOnEdge) continue
     // Text on the edge is that same shape whatever its stored alignment says, because the
-    // text painter never honoured the alignment — see the doc comment.
+    // text painter never honoured the alignment — see `cornerPinPadPx`.
     if (isText && d === 0) continue
     // How far this stroke's OUTER edge reaches beyond the silhouette.
     const reach = align === 'outside' ? d + st.width : align === 'inside' ? d : d + st.width / 2
@@ -1717,18 +1775,19 @@ function silhouetteContentReady(layer: LocalLayer, W: number): boolean {
  *  actually measured, then defers to the pure `silhouettePadPxPure` in silhouetteCache.ts
  *  for the arithmetic (raster margin + ink overhang).
  *
- *  The SHAPE kinds hand the pure helper `outsideStrokePadPx` (the stack's furthest reach,
- *  alignment + distance + a path's scale already folded in) as `strokeReachPx`, so a
- *  layer with several strokes is padded for the one that actually reaches furthest. It is
- *  called with `countCentredOnEdge = true`: a raster only has to be BIG ENOUGH, so unlike
- *  the corner-pin pad it must keep counting the outer half of a plain centred stroke —
- *  exactly the half-width the pre-stack `strokeAlign` rule counted. Text
+ *  The SHAPE kinds hand the pure helper `strokeReachPx` (the stack's furthest reach —
+ *  alignment, distance, marching-shape mark size and a path's scale already folded in) to
+ *  `silhouettePadPxPure` as its `strokeReachPx` input, so a layer with several strokes is
+ *  padded for the one that actually reaches furthest. It is the HONEST reach, not
+ *  `cornerPinPadPx`: a raster only has to be BIG ENOUGH, so unlike the corner-pin pad it must
+ *  keep counting the outer half of a plain centred stroke — exactly the half-width the
+ *  pre-stack `strokeAlign` rule counted. Text
  *  and line keep their own rules — see `silhouetteInkOverhangPx`. `strokeWidth` is
  *  guarded (`|| 0`) so a missing/NaN value can never make `bwD` NaN downstream.
  *
  *  EXPORTED for its tests. The pure helper it defers to is tested by handing it a
  *  `strokeReachPx` directly, which cannot see whether anything actually SUPPLIES one —
- *  delete the `strokeReachPx = …` line below and every such test still passes, because a
+ *  delete the `reachPx = …` line below and every such test still passes, because a
  *  legacy layer's reach and the single-`strokeAlign` fallback agree by construction. Only
  *  a layer with a real `strokes` array (or a text layer with one) tells them apart, and
  *  that has to be resolved from a LAYER, i.e. here. */
@@ -1736,7 +1795,9 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
   const l = layer as unknown as { strokeWidth?: number; strokeAlign?: unknown; stroke?: Paint; scale?: number; fontSize?: number; boxH?: number }
   const width = Math.max(0, l.strokeWidth || 0)
   let strokePx = 0
-  let strokeReachPx: number | undefined
+  // Named `reachPx`, not `strokeReachPx`: that is the module-level helper it is assigned FROM
+  // (a local of the same name would shadow it inside this function).
+  let reachPx: number | undefined
   let strokeAlign: StrokeAlign = 'center'
   if (layer.kind === 'text') {
     // Text's overhang is a full em PLUS how far its outline reaches past the glyphs. For a
@@ -1761,12 +1822,12 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
     strokePx = Math.max(1, width * W)
   } else if (layer.kind === 'rect' || layer.kind === 'ellipse' || layer.kind === 'polygon' || layer.kind === 'star' || layer.kind === 'path') {
     // The stack's own answer for how far its furthest stroke reaches past the silhouette —
-    // alignment, `distance` and a path's `scale` all already folded in. Reading a single
+    // alignment, `distance`, a marching-shape's mark size and a path's `scale` all folded in. Reading a single
     // `strokeAlign` here instead would bake the wrong outline for a multi-stroked layer,
     // and do it SILENTLY: a slightly wrong torn edge, not an error.
-    strokeReachPx = outsideStrokePadPx(layer, W, true)
+    reachPx = strokeReachPx(layer, W)
     // A path's strokeWidth is stored in local units AT scale=1 (see PathLayer), so its
-    // px extent carries the layer's own uniform scale — same correction outsideStrokePadPx makes.
+    // px extent carries the layer's own uniform scale — same correction strokeReachPx makes.
     if (hasPaint(l.stroke)) strokePx = width * (layer.kind === 'path' ? (l.scale ?? 1) : 1) * W
     strokeAlign = strokeAlignOf(l.strokeAlign)
   }
@@ -1786,7 +1847,7 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
     kind: layer.kind,
     strokeAlign,
     strokePx,
-    strokeReachPx,
+    strokeReachPx: reachPx,
     fontPx: isText ? Math.max(0, l.fontSize || 0) * W : 0,
     boxHPx: isText ? Math.max(0, l.boxH || 0) * W : 0,
     boxHeightPx: box.h,
@@ -2018,16 +2079,16 @@ function paintLayer(
     }
     const box = localLayerBox(measureCtx(), layer, W, H, wiredLive)
     // Outside-aligned strokes (and any stroke pushed out by a `distance`) paint
-    // entirely beyond localLayerBox's plain w×h (see outsideStrokePadPx) and
+    // entirely beyond localLayerBox's plain w×h (see cornerPinPadPx) and
     // would be 100% clipped by this offscreen's edges otherwise. Pad it — and
     // grow the quad it warps into by the same amount, keeping the shape
     // centered — so the stroke survives the pin. NOTE that `pad` therefore also
-    // SCALES the quad's corner pull below, which is why outsideStrokePadPx
+    // SCALES the quad's corner pull below, which is why cornerPinPadPx
     // returns 0 for the plain centred stroke every saved frame has: same bw/bh,
     // same quad, same warp as before the stack existed. Skipped when DOF already produced the
     // source canvas (dofCanvas is used as-is, unpadded — a rarer combination
     // left as a pre-existing gap, not what this fix targets).
-    const pad = dofCanvas ? 0 : outsideStrokePadPx(layer, W)
+    const pad = dofCanvas ? 0 : cornerPinPadPx(layer, W)
     const bw = Math.max(1, Math.round(box.w + pad * 2)), bh = Math.max(1, Math.round(box.h + pad * 2))
     // Corner-pin warps whatever the content is — including the defocused version, so
     // the two effects compose instead of one silently winning.
@@ -2599,8 +2660,14 @@ function paintStrokeStack(
     /** The layer's outline as path data IN THIS CONTEXT'S UNITS (see `outlinePathData`).
      *  A shapes stroke needs a path to flatten and march; absent, a stroke asking for that
      *  style simply paints nothing rather than falling back to a band that was not asked
-     *  for. */
-    outline?: string | null
+     *  for.
+     *
+     *  MAY BE A THUNK, and should be whenever producing the data costs anything: only a
+     *  `style: 'shapes'` entry reads it, and most layers have none — a rect or an ellipse
+     *  built its (round-rect / four-bézier) path-data string on EVERY paint, on every frame
+     *  of a live loop, for a stroke stack that never asks for it. Resolved at most once per
+     *  call below, so several shapes strokes still cost one build. */
+    outline?: string | null | (() => string | null)
     /** Flatten tolerance for `outline`, in `outline`'s OWN units — see
      *  `pathOutlineFlattenTolerance`'s header for why a path layer cannot reuse
      *  `widthScale` for this the way rect/ellipse do. Omitted ⇒
@@ -2612,6 +2679,12 @@ function paintStrokeStack(
 ): void {
   const stack: StrokeInstance[] = strokeStackOf(layer as Parameters<typeof strokeStackOf>[0])
   if (!stack.length) return
+  // `undefined` = not asked for yet; `null` = asked for, and there is none.
+  let outlineMemo: string | null | undefined
+  const outlineData = (): string | null => {
+    if (outlineMemo === undefined) outlineMemo = (typeof o.outline === 'function' ? o.outline() : o.outline) ?? null
+    return outlineMemo
+  }
   // Painted in REVERSE list order so the FIRST row lands on top — the layer list's own
   // convention, and the one the tree shows.
   for (let i = stack.length - 1; i >= 0; i--) {
@@ -2631,9 +2704,10 @@ function paintStrokeStack(
       // carries — so the zero-width gate below is the wrong question to ask of it.
       // `paintShapeStroke` does its own `size > 0` / `spacing > 0` check, and a zero/empty
       // `shapeId` (the normalised "no payload" case) resolves to no shape and no-ops too.
-      if (o.outline && st.shapes) {
+      const outline = outlineData()
+      if (outline && st.shapes) {
         paintShapeStroke(ctx, {
-          pathData: o.outline,
+          pathData: outline,
           distance: (st.distance ?? 0) * o.widthScale,
           spec: st.shapes,
           style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx),
@@ -2684,13 +2758,13 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.roundRect(-w / 2, -h / 2, w, h, radii) }
     build(ctx)
     if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
-    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: outlinePathData(layer, W) })
+    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: () => outlinePathData(layer, W) })
   } else if (layer.kind === 'ellipse') {
     const w = layer.w * W, h = layer.h * W
     const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2) }
     build(ctx)
     if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
-    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: outlinePathData(layer, W) })
+    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: () => outlinePathData(layer, W) })
   } else if (layer.kind === 'path') {
     drawPath(ctx, layer, W)
   } else if (layer.kind === 'polygon' || layer.kind === 'star') {

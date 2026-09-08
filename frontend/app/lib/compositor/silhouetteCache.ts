@@ -99,7 +99,7 @@ export interface SilhouetteInkInput {
    *  `strokeReachPx` for that instead and leave this as the plain width. */
   strokePx: number
   /** Shape kinds only: how far the stack's furthest-reaching stroke lands BEYOND the
-   *  silhouette edge, logical px — `outsideStrokePadPx`, which already folds in every
+   *  silhouette edge, logical px — `strokeReachPx`, which already folds in every
    *  stroke's alignment, its `distance`, and a path's own scale.
    *
    *  Supplied because `strokeAlign`/`strokePx` describe ONE stroke and cannot express a
@@ -125,7 +125,7 @@ export interface SilhouetteInkInput {
 /**
  * How far a layer's ink reaches beyond `localLayerBox`, in logical px.
  *
- * Broader than the shape pad `outsideStrokePadPx` computes: text and line have overhang
+ * Broader than the shape pad `strokeReachPx` computes: text and line have overhang
  * rules of their own that no stroke geometry describes. For the SHAPE kinds the caller
  * passes that pad in as `strokeReachPx` and it is used verbatim, so the two can't disagree
  * about how far an outline reaches.
