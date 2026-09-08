@@ -55,6 +55,29 @@ This is too big for one spec. Six sub-projects, each its own spec/plan/build. Or
 
 **Smart Layout's fate:** its generation (4) and reflow (5) move to the Frame. Its brand kit and campaign-matrix concepts return as inputs to (4)/(5). The template-grid/Satori pipeline is not extended.
 
+### Profiles — the graphic kind, not the format
+
+The engine is not poster-specific; only its *content* is. A **profile** is the seam that lets the same machine make a different kind of graphic. Poster is the only profile built in slice 1, but the seam is designed now so a second one slots in without a rewrite.
+
+A profile carries four things, and nothing else:
+
+- **Its moves** — which patterns exist and their weights. This is most of a profile; the moves barely overlap between kinds (see the deck case).
+- **What the Read voice checks** — the taste rubric for that kind. A poster is judged on drama and scale contrast; a slide on legibility and one-idea-per-slide.
+- **Its shelf defaults** — the face filter, and whether the brand kit locks the face and colours.
+- **Its suggested formats** — a *convenience list only*, never a constraint (below).
+
+**The profile is not the format. They are independent axes.** The graphic *kind* (poster, slide, ad, editorial page) is a separate choice from the *canvas dimensions* (A2 portrait, 16:9, 1:1, 1200×628). Any profile works at any format: a poster can be square, a slide can be portrait (phone-first, story-format decks are common), a social tile can be pure poster idiom. **Choosing a format never sets the profile, and choosing a profile never forces a format** — a profile may *offer* its common formats as a starting convenience, but the user can pick any format and the profile stays put. Coupling the two would be too restrictive: it would deny the poster-in-a-square and the portrait-slide that people actually want.
+
+**How the system knows the profile:** the user sets it, explicitly, as its own control on the Frame (default: poster). It is not inferred from format, content, or anything else — inference here is exactly the kind of cleverness that would take control away (cf. the "frame is the brief" decision). One low-friction control, changeable at any time; switching it re-fits the sheet to that profile's moves and re-points the Read voice.
+
+**Why a second profile is real work, not a toggle — the deck case.** A slide deck is the ideal second profile precisely because it stresses the abstraction in three ways, and if the seam survives it, the seam is real:
+
+1. **The moves barely overlap.** The overlap, edge-cropping, and off-edge drama that make a poster sing are wrong for a slide, which wants clear hierarchy, safe margins, and alignment. That is a mostly-new moves library, not a re-weighting of the poster one — which is the point: a profile owns its moves.
+2. **The Read checks invert.** "Is this dramatic enough" becomes "is this legible from the back of the room, and is there one idea here." The rubric is per-profile, not global.
+3. **A deck adds a dimension a poster lacks: consistency across many artifacts.** Twelve slides must feel like one set. That cross-artifact consistency layer is closer to Templates (sub-project 1's Template cousin) and reflow (sub-project 5) than to the moves library, and it is the part the poster profile never exercises. A profile therefore may declare a **set relationship** (this artifact is one of a consistent series) that the poster profile leaves null.
+
+So profiles stay deferred, but the moves registry, the Read rubric, and the shelf filter must all be **keyed by profile from the start** (poster being the only key today), and the format control must be **fully independent of the profile control**. Those two constraints are what keep a deck (or an ad, or an editorial page) from being a retrofit.
+
 ### Typography's UX model — defaults over controls (sub-project 2 principle)
 
 Typography features are necessary for quality but ruinous as an interface: tracking, optical size, `ss01`, `smcp`, `onum`/`tnum` require inside-baseball knowledge most users don't have, and a wall of sliders overwhelms them. The resolution is that **most typography quality is defaults, not controls** — if the shelf carries the knowledge, the user needs none of it. Three tiers of who-decides, plus a teaching voice:
@@ -205,7 +228,7 @@ Placement `ops` are stored resolved (pixel boxes on the layers, as today) **and*
 ## Open questions (decided / to spike)
 
 - **Model tilt (sub-project 4), spike first.** Before building it, a throwaway script sends ~20 briefs to a cheap model for weighted hints over qualities (weight/air/distortion/…) and checks: different words → different hints; same word → stable hints across runs; the hints agree with human judgement. If they collapse or flip, ship the pure engine and drop the tilt. *Decided: engine-first regardless; tilt is an experiment gated on this spike.*
-- **Profiles (ad/social/editorial).** The engine is not poster-specific; a `profile` (allowed moves + weights, what "read" checks, format presets, shelf filter) generalises it. Deferred; poster is the only profile in slice 1. Format preset can *suggest* the profile later.
+- **Profiles.** Generalising beyond posters is a first-class architecture concern with its own section below (*Profiles — the graphic kind, not the format*). Deferred to build; poster is the only profile in slice 1, but the seam is designed now so a second profile is not a retrofit.
 - **Grid margin default when `off`.** Slice 1 uses a fixed default (~3.5%) when no grid; revisit if it disagrees with the overlay once a grid is turned on mid-edit.
 
 ---
