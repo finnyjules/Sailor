@@ -164,13 +164,17 @@ const comparing = ref(false)
 
 const samSelect = computed(() => tool.value === 'select')
 const samMask = ref<string | null>(null)
+// Accumulated SAM 3 point prompts for the current selection, in source-image
+// pixel space. Plain click replaces; Shift-click adds a foreground point;
+// Alt-click adds a background (subtract) point. The model re-runs on each.
+const samPoints = ref<{ x: number; y: number; label: 0 | 1 }[]>([])
 const samMaskImgEl = ref<HTMLImageElement | null>(null)
 watch(samMask, async (url) => {
   if (!url) { samMaskImgEl.value = null; rebuildSilhouette(); renderOverlay(); return }
   try { samMaskImgEl.value = await loadImage(url) } catch { samMaskImgEl.value = null }
   rebuildSilhouette(); renderOverlay()
 })
-function clearSamMask() { samMask.value = null }
+function clearSamMask() { samMask.value = null; samPoints.value = [] }
 function clearMask() { brush.clear(); clearSamMask(); boxRect.value = null }
 watch(mode, (m) => { if (m === 'describe') { clearMask(); tool.value = 'paint'; maskOnly.value = false } })
 
@@ -223,7 +227,7 @@ function onPointerDown(e: PointerEvent) {
   }
   const p = clientToNorm(e); if (!p) return
   e.preventDefault()
-  if (tool.value === 'select') { doSamSelect(p.nx, p.ny); return }
+  if (tool.value === 'select') { doSamSelect(p.nx, p.ny, { add: e.shiftKey, subtract: e.altKey }); return }
   ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
   if (tool.value === 'box') {
     clearSamMask()
@@ -413,36 +417,40 @@ async function acceptInpaint(dataUrl: string) {
   }
 }
 
-// ── SAM click-to-select (beta; falls back to brushing on any error) ──────────
+// ── SAM 3 click-to-select (promptable; falls back to brushing on any error) ──
 const samBusy = ref(false)
-async function doSamSelect(nx: number, ny: number) {
-  // Busy guards: segment() doesn't set inpaint.busy, so we use a local samBusy
-  // to prevent stacking SAM requests; we also check inpaint.busy for the paid
+/** A click on the stage in Select mode. `mods.add` (Shift) appends a foreground
+ *  point that grows the selection; `mods.subtract` (Alt/Option) appends a
+ *  background point that carves it back; a plain click replaces the selection.
+ *  SAM 3 re-runs with the full accumulated point set and returns THE object's
+ *  mask — no client-side segment guessing. */
+async function doSamSelect(nx: number, ny: number, mods: { add?: boolean; subtract?: boolean } = {}) {
+  // Busy guards: segmentPoints() doesn't set inpaint.busy, so a local samBusy
+  // prevents stacking SAM requests; we also check inpaint.busy for the paid
   // phase (fluxFill inside runInpaint when intent === 'remove').
   if (samBusy.value || inpaint.busy.value) return
   if (!sourceImg.value) { inpaintError.value = 'Load an image first.'; return }
   inpaintError.value = ''
+  const w = out.value.w, h = out.value.h
+  const point = { x: Math.round(nx * w), y: Math.round(ny * h), label: (mods.subtract ? 0 : 1) as 0 | 1 }
+  // Refine only when there's already a selection to refine; otherwise a lone
+  // Shift/Alt click starts a fresh foreground selection.
+  const refining = (mods.add || mods.subtract) && samPoints.value.length > 0
+  samPoints.value = refining ? [...samPoints.value, point] : [{ ...point, label: 1 }]
   samBusy.value = true
   try {
-    const w = out.value.w, h = out.value.h
     const source = imageToDataUrl(sourceImg.value, w, h)
-    const point = { x: Math.round(nx * w), y: Math.round(ny * h) }
-    // segment() runs segment-everything SAM and picks the smallest segment under
-    // the click; it returns a ready white-on-black mask at (w,h), or null when
-    // the click didn't land on a selectable object.
-    const mask = await inpaint.segment(source, point, w, h)
-    if (!mask) {
-      inpaintError.value = "Nothing to select there — click the object's body, or paint the area instead."
-      tool.value = 'paint'
-      return
-    }
+    const mask = await inpaint.segmentPoints(source, samPoints.value)
     samMask.value = mask
     brush.clear()
-    // Remove intent: the click IS the command — erase immediately.
-    if (props.intent === 'remove') await runInpaint(true)
+    // Remove intent: a fresh plain click IS the command — erase immediately.
+    // While refining (Shift/Alt), hold off so the user can adjust first.
+    if (props.intent === 'remove' && !refining) await runInpaint(true)
   } catch {
+    // Roll back the point we optimistically added so a retry starts clean.
+    samPoints.value = refining ? samPoints.value.slice(0, -1) : []
     inpaintError.value = 'Click-select unavailable (check SAM model); paint the area instead.'
-    tool.value = 'paint'
+    if (!refining) tool.value = 'paint'
   } finally {
     samBusy.value = false
   }
@@ -645,7 +653,7 @@ onBeforeUnmount(() => {
               <button class="flex-1 h-8 rounded flex items-center justify-center cursor-pointer transition-colors" :class="tool === 'paint' ? 'bg-white text-neutral-900' : 'text-white/70 hover:bg-white/10'" title="Paint (X)" @click="tool = 'paint'"><Brush class="size-3.5" /></button>
               <button class="flex-1 h-8 rounded flex items-center justify-center cursor-pointer transition-colors" :class="tool === 'erase' ? 'bg-rose-400/90 text-neutral-900' : 'text-white/70 hover:bg-white/10'" title="Erase (X)" @click="tool = 'erase'"><Eraser class="size-3.5" /></button>
               <button class="flex-1 h-8 rounded flex items-center justify-center cursor-pointer transition-colors" :class="tool === 'box' ? 'bg-white text-neutral-900' : 'text-white/70 hover:bg-white/10'" title="Box — drag a rectangular region" @click="tool = 'box'"><BoxSelect class="size-3.5" /></button>
-              <button class="flex-1 h-8 rounded flex items-center justify-center cursor-pointer transition-colors" :class="tool === 'select' ? 'bg-white text-neutral-900' : 'text-white/70 hover:bg-white/10'" title="Click-select an object (SAM · beta, falls back to brushing)" @click="tool = 'select'"><Wand2 class="size-3.5" /></button>
+              <button class="flex-1 h-8 rounded flex items-center justify-center cursor-pointer transition-colors" :class="tool === 'select' ? 'bg-white text-neutral-900' : 'text-white/70 hover:bg-white/10'" title="Click-select an object — Shift-click adds, Alt-click subtracts" @click="tool = 'select'"><Wand2 class="size-3.5" /></button>
             </div>
 
             <div v-if="tool === 'paint' || tool === 'erase'" class="flex items-center gap-2 mt-3.5">
@@ -654,7 +662,10 @@ onBeforeUnmount(() => {
               <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ brush.sizePx.value }}</span>
             </div>
             <p v-else-if="tool === 'box'" class="text-[10px] text-white/35 mt-3.5">Drag a box over the image.</p>
-            <p v-else class="text-[10px] text-white/35 mt-3.5">Click an object to auto-select it.</p>
+            <p v-else class="text-[10px] text-white/35 mt-3.5">
+              <span v-if="samBusy" class="inline-flex items-center gap-1 text-white/55"><Loader2 class="size-3 animate-spin" /> Selecting…</span>
+              <span v-else>Click an object to select it. Shift-click adds, Alt-click subtracts.</span>
+            </p>
 
             <div class="flex items-center gap-1.5 mt-3.5">
               <button class="h-7 px-2 rounded flex items-center gap-1 text-[11px] cursor-pointer transition-colors" :class="brush.inverted.value ? 'bg-amber-400/90 text-neutral-900' : 'bg-white/[0.06] text-white/70 hover:bg-white/12'" title="Invert: keep the painted area, change everything else" @click="brush.toggleInvert()"><FlipHorizontal2 class="size-3.5" /> Invert</button>

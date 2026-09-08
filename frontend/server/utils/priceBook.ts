@@ -418,8 +418,9 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'black-forest-labs/flux-kontext-dev': { usd: 0.025, credits: 5, confidence: 'estimate', note: 'assumed flux-dev rate' },
   'black-forest-labs/flux-fill-dev': { usd: 0.04, credits: 8, confidence: 'estimate' },
   'fal-ai/flux-pro/v1/fill': { usd: 0.05, credits: 10, confidence: 'verified', note: '$0.05/MP, rounded up' },
-  // — segmentation / utility (NOT sub-cent: SAM-2 is $0.022/run) —
-  'meta/sam-2': { usd: 0.022, credits: 4, confidence: 'verified', note: 'L40S ~23s/run — Smart Select fires several' },
+  // — segmentation / utility —
+  'fal-ai/sam-3/image': { usd: 0.005, credits: 1, confidence: 'verified', note: 'promptable SAM 3 — $0.005/request flat; click-to-select fires one per refine' },
+  'meta/sam-2': { usd: 0.022, credits: 4, confidence: 'verified', note: 'RETIRED from inpaint (segment-everything, ignored points); kept for pricing history' },
   '851-labs/background-remover': { usd: 0.0004, credits: 1, confidence: 'verified' },
   // — vector —
   'recraft-ai/recraft-v3-svg': { usd: 0.08, credits: 16, confidence: 'verified', note: 'vector = 2× Recraft raster rate' },

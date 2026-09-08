@@ -7,8 +7,6 @@
  * owns the layer transforms; this composable stays transform-agnostic.
  */
 
-import { pickClickMask, type MaskCandidate } from '~/lib/compositor/smartSelect'
-
 export interface FluxFillOpts {
   tier?: 'dev' | 'pro'
   count?: number
@@ -144,28 +142,6 @@ export async function cleanCutoutAlpha(dataUrl: string): Promise<{ url: string; 
   } catch {
     return { url: dataUrl, aspect: 1 }
   }
-}
-
-/** Decode SAM candidate mask URLs into raw RGBA buffers for pickSamSegments. */
-async function decodeMaskCandidates(urls: string[]): Promise<MaskCandidate[]> {
-  const imgs = await Promise.all(urls.slice(0, 12).map(u => loadImage(u)))
-  return imgs.map((img) => {
-    const w = img.naturalWidth || 1, h = img.naturalHeight || 1
-    const cv = document.createElement('canvas'); cv.width = w; cv.height = h
-    const ctx = cv.getContext('2d')!
-    ctx.drawImage(img, 0, 0)
-    return { data: ctx.getImageData(0, 0, w, h).data, w, h }
-  })
-}
-
-/** RGBA buffer → PNG data URL (w*h*4 bytes). */
-function maskBufferToDataUrl(buf: Uint8ClampedArray, w: number, h: number): string {
-  const cv = document.createElement('canvas'); cv.width = w; cv.height = h
-  const ctx = cv.getContext('2d')!
-  const id = ctx.createImageData(w, h)
-  id.data.set(buf)
-  ctx.putImageData(id, 0, 0)
-  return cv.toDataURL('image/png')
 }
 
 /** Convert a data URL to a File for FormData upload. */
@@ -324,36 +300,33 @@ export function useInpaint() {
     }
   }
 
-  /** Click-to-select a region (v3 click-to-select). Returns a white-on-opaque-
-   *  black mask data URL sized (imgW,imgH), or null when no segment qualifies
-   *  (caller should fall back to manual brushing).
-   *
-   *  The deployed SAM (meta/sam-2) is segment-everything: point prompts are
-   *  ignored and the route returns EVERY segment as `masks` candidates. So we
-   *  request the candidates (segmentPoints) and pick the smallest one containing
-   *  the click CLIENT-side (pickClickMask) — the single-point restriction of the
-   *  Compositor smart-select flow. `pointPx` is in the source image's pixel
-   *  space, i.e. the (imgW,imgH) space of the `image` sent. */
+  /** Click-to-select a region. Returns SAM 3's white-on-black mask data URL for
+   *  the clicked object (sized to the image sent), or null on failure (caller
+   *  should fall back to manual brushing). `imgW`/`imgH` are unused now that SAM
+   *  is promptable — the model returns THE object's mask directly, no client-side
+   *  picking — but kept in the signature for call-site compatibility. `pointPx`
+   *  is in the source image's pixel space. */
   async function segment(
-    image: string, pointPx: { x: number; y: number }, imgW: number, imgH: number,
+    image: string, pointPx: { x: number; y: number }, _imgW?: number, _imgH?: number,
   ): Promise<string | null> {
-    const urls = await segmentPoints(image, [{ x: pointPx.x, y: pointPx.y, label: 1 }])
-    const cands = await decodeMaskCandidates(urls)
-    const buf = pickClickMask(cands, pointPx, imgW, imgH)
-    return buf ? maskBufferToDataUrl(buf, imgW, imgH) : null
+    try {
+      return await segmentPoints(image, [{ x: pointPx.x, y: pointPx.y, label: 1 }])
+    } catch {
+      return null
+    }
   }
 
-  /** Multi-point SAM prompt (smart select): points are in the source image's
-   *  pixel space; label 1 = foreground, 0 = background/subtract. Returns SAM's
-   *  candidate mask data URLs (white = selected) — every segment in the image;
-   *  the caller assigns each point to its own segment and unions the winners
-   *  (see pickSamSegments). */
-  async function segmentPoints(image: string, points: { x: number; y: number; label: 0 | 1 }[]): Promise<string[]> {
-    const res = await $fetch<{ mask: string; masks?: string[] }>('/api/inpaint/segment', {
+  /** Point-prompt SAM 3 (smart select): points are in the source image's pixel
+   *  space; label 1 = foreground, 0 = background/subtract. Returns the single
+   *  white-on-black mask the model produced for those points (white = selected).
+   *  Unlike the old segment-everything path, the mask already reflects the
+   *  points — the caller uses it as-is. */
+  async function segmentPoints(image: string, points: { x: number; y: number; label: 0 | 1 }[]): Promise<string> {
+    const res = await $fetch<{ mask: string }>('/api/inpaint/segment', {
       method: 'POST',
       body: { image, points },
     })
-    return res.masks?.length ? res.masks : [res.mask]
+    return res.mask
   }
 
   /** Upload a data-URL image into ComfyUI's input dir; returns its filename.

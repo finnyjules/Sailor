@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   samplePointsFromStroke, layerAffine, invertAffine, applyAffine,
-  luminanceToAlpha, alphaBounds, cutoutPlacement, pickSamSegments, wiredImageAffine, wiredCutoutPlacement,
-  unionSelectedMasks, pickClickMask,
-  type Pt, type MaskCandidate, type WiredXform,
+  luminanceToAlpha, alphaBounds, cutoutPlacement, wiredImageAffine, wiredCutoutPlacement,
+  type Pt, type WiredXform,
 } from '~/lib/compositor/smartSelect'
 
 describe('samplePointsFromStroke', () => {
@@ -100,78 +99,6 @@ describe('cutoutPlacement', () => {
   })
 })
 
-describe('pickSamSegments', () => {
-  /** Build a tiny opaque RGBA mask; `isWhite(x,y)` decides white vs black per pixel. */
-  function mkMask(w: number, h: number, whitePixels: Array<[number, number]> | ((x: number, y: number) => boolean)): MaskCandidate {
-    const data = new Uint8ClampedArray(w * h * 4)
-    const isWhite = typeof whitePixels === 'function'
-      ? whitePixels
-      : (x: number, y: number) => whitePixels.some(([wx, wy]) => wx === x && wy === y)
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const o = (y * w + x) * 4
-      const white = isWhite(x, y)
-      data[o] = white ? 255 : 0
-      data[o + 1] = white ? 255 : 0
-      data[o + 2] = white ? 255 : 0
-      data[o + 3] = 255
-    }
-    return { data, w, h }
-  }
-
-  // Probe trio: mask_0 = background (~84% white, with a black hole where the
-  // object sits), mask_1 = the object (~16% white), mask_2 = a tiny subpart
-  // inside the object (1 pixel).
-  const w = 10, h = 10
-  function probeTrio() {
-    const object = mkMask(w, h, (x, y) => x >= 3 && x <= 6 && y >= 3 && y <= 6)
-    const background = mkMask(w, h, (x, y) => !(x >= 3 && x <= 6 && y >= 3 && y <= 6))
-    const subpart = mkMask(w, h, [[5, 5]])
-    return [background, object, subpart]
-  }
-
-  it('assigns a fg point on the object body (outside the subpart) to the object segment', () => {
-    const idxs = pickSamSegments(probeTrio(), [{ x: 3, y: 3 }], [], w, h)
-    expect(idxs).toEqual([1])
-  })
-
-  it('a fg point landing inside the subpart too unions both (smallest wins per point)', () => {
-    const idxs = pickSamSegments(probeTrio(), [{ x: 3, y: 3 }, { x: 5, y: 5 }], [], w, h)
-    expect(idxs).toEqual([1, 2])
-  })
-
-  it('a stray fg point only the (oversized) background contains contributes nothing', () => {
-    // (9,9) is white only in the background segment, which exceeds maxWhiteFrac
-    // and is never assignable — the point is simply ignored.
-    const idxs = pickSamSegments(probeTrio(), [{ x: 3, y: 3 }, { x: 9, y: 9 }], [], w, h)
-    expect(idxs).toEqual([1])
-  })
-
-  it('a bg point removes the segment it claims from the fg-selected set', () => {
-    const idxs = pickSamSegments(probeTrio(), [{ x: 3, y: 3 }], [{ x: 4, y: 4 }], w, h)
-    expect(idxs).toEqual([])
-  })
-
-  it('unions two disjoint object segments hit by different fg points', () => {
-    const segA = mkMask(w, h, (x, y) => x >= 0 && x <= 1 && y >= 0 && y <= 1)
-    const segB = mkMask(w, h, (x, y) => x >= 8 && x <= 9 && y >= 8 && y <= 9)
-    const idxs = pickSamSegments([segA, segB], [{ x: 0, y: 0 }, { x: 9, y: 9 }], [], w, h)
-    expect(idxs).toEqual([0, 1])
-  })
-
-  it('returns [] for empty fgPoints', () => {
-    const idxs = pickSamSegments(probeTrio(), [], [], w, h)
-    expect(idxs).toEqual([])
-  })
-
-  it('maps points fractionally when a candidate has a different resolution than the prompt image', () => {
-    // Prompt image is 10x10; point (5,5) is the exact center (fraction 0.5,0.5).
-    // Candidate is 20x20 — the same fractional center is pixel (10,10).
-    const cand = mkMask(20, 20, (x, y) => x >= 6 && x <= 14 && y >= 6 && y <= 14)
-    const idxs = pickSamSegments([cand], [{ x: 5, y: 5 }], [], 10, 10)
-    expect(idxs).toEqual([0])
-  })
-})
-
 describe('wiredImageAffine', () => {
   // 1000×800 artboard, image 1600×1200 (iAspect 1.333 > cAspect 1.25 → fitW=1000, fitH=750),
   // centered (x=0,y=0), scale 1, no rotation, capped to 1024×768.
@@ -215,73 +142,5 @@ describe('wiredCutoutPlacement', () => {
     expect(p.w).toBeCloseTo(1000 * layer.scale / 1000, 6) // fitW=1000
     expect(p.h).toBeCloseTo(750 * layer.scale / 1000, 6)  // fitH=750
     expect(p.rotation).toBe(15)
-  })
-})
-
-describe('unionSelectedMasks', () => {
-  /** Opaque white-on-black mask; `whitePixels(x,y)` decides white per pixel. */
-  function mkMask(w: number, h: number, whitePixels: (x: number, y: number) => boolean): MaskCandidate {
-    const data = new Uint8ClampedArray(w * h * 4)
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const o = (y * w + x) * 4
-      const v = whitePixels(x, y) ? 255 : 0
-      data[o] = v; data[o + 1] = v; data[o + 2] = v; data[o + 3] = 255
-    }
-    return { data, w, h }
-  }
-  const white = (buf: Uint8ClampedArray, w: number, x: number, y: number) => buf[(y * w + x) * 4]! > 127
-
-  it('unions selected segments as white and leaves the rest opaque black', () => {
-    const segA = mkMask(4, 4, (x, y) => x <= 1 && y <= 1) // top-left quadrant
-    const segB = mkMask(4, 4, (x, y) => x >= 2 && y >= 2) // bottom-right quadrant
-    const buf = unionSelectedMasks([segA, segB], [0, 1], 4, 4)
-    expect(white(buf, 4, 0, 0)).toBe(true)   // from segA
-    expect(white(buf, 4, 3, 3)).toBe(true)   // from segB
-    expect(white(buf, 4, 3, 0)).toBe(false)  // neither
-    // Background stays opaque (max(RGB)→alpha consumers need alpha 255 black).
-    for (let p = 0; p < 16; p++) expect(buf[p * 4 + 3]).toBe(255)
-  })
-
-  it('resamples a higher-res candidate down to the requested (w,h)', () => {
-    // 20x20 candidate white in the central 6..14 block → at 10x10 output the
-    // center is white, the corner is black.
-    const cand = mkMask(20, 20, (x, y) => x >= 6 && x <= 14 && y >= 6 && y <= 14)
-    const buf = unionSelectedMasks([cand], [0], 10, 10)
-    expect(white(buf, 10, 5, 5)).toBe(true)
-    expect(white(buf, 10, 0, 0)).toBe(false)
-  })
-
-  it('an empty selection produces an all-black opaque mask', () => {
-    const seg = mkMask(4, 4, () => true)
-    const buf = unionSelectedMasks([seg], [], 4, 4)
-    for (let p = 0; p < 16; p++) { expect(buf[p * 4]).toBe(0); expect(buf[p * 4 + 3]).toBe(255) }
-  })
-})
-
-describe('pickClickMask', () => {
-  function mkMask(w: number, h: number, isWhite: (x: number, y: number) => boolean): MaskCandidate {
-    const data = new Uint8ClampedArray(w * h * 4)
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const o = (y * w + x) * 4
-      const v = isWhite(x, y) ? 255 : 0
-      data[o] = v; data[o + 1] = v; data[o + 2] = v; data[o + 3] = 255
-    }
-    return { data, w, h }
-  }
-  const w = 10, h = 10
-  const object = (x: number, y: number) => x >= 3 && x <= 6 && y >= 3 && y <= 6
-  const trio = () => [mkMask(w, h, (x, y) => !object(x, y)), mkMask(w, h, object), mkMask(w, h, (x, y) => x === 5 && y === 5)]
-
-  it('a click on the object body yields a white-on-black mask over that segment', () => {
-    const buf = pickClickMask(trio(), { x: 3, y: 3 }, w, h)!
-    expect(buf).not.toBeNull()
-    expect(buf[(3 * w + 3) * 4]).toBe(255)         // inside object → white
-    expect(buf[(3 * w + 3) * 4 + 3]).toBe(255)     // opaque
-    expect(buf[(0 * w + 0) * 4]).toBe(0)           // background → black
-  })
-
-  it('returns null when only the oversized background segment contains the click', () => {
-    // (9,9) is white only in the background segment (>maxWhiteFrac) → unassignable.
-    expect(pickClickMask(trio(), { x: 9, y: 9 }, w, h)).toBeNull()
   })
 })

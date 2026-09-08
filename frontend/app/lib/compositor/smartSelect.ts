@@ -1,10 +1,11 @@
 /**
  * Smart select — pure geometry and mask math (no DOM, unit-tested in node).
  *
- * The Compositor's smart-select mode scribbles in ARTBOARD px, but SAM-2 runs
- * on the target layer's own pixels (capped by capDims). Everything that maps
- * between those two spaces, or crunches raw RGBA arrays, lives here; canvas
- * plumbing stays in CompositorModal.vue.
+ * The Compositor's smart-select mode scribbles in ARTBOARD px, but SAM runs on
+ * the target layer's own pixels (capped by capDims). Everything that maps
+ * between those two spaces lives here; canvas plumbing stays in
+ * CompositorModal.vue. (Segment picking is gone — SAM 3 is promptable and
+ * returns the object's mask directly; see useSmartSelect / segment.post.ts.)
  *
  * The affine convention matches runRegionFill's inline math (artboard→image):
  *   xi = a*xa + c*ya + e ;  yi = b*xa + d*ya + f
@@ -101,125 +102,6 @@ export function alphaBounds(data: Uint8ClampedArray, w: number, h: number, thres
     }
   }
   return maxX < minX ? null : { minX, minY, maxX, maxY }
-}
-
-export interface MaskCandidate { data: Uint8ClampedArray; w: number; h: number }
-
-/** Assign each foreground point to the SMALLEST segment that contains it
- *  (segment-everything returns background/object/part segments — smallest
- *  containing = most specific), union the winners, and subtract the segments
- *  claimed the same way by background (label-0) points. Segments covering
- *  more than maxWhiteFrac of the image (default 0.5) are never assignable —
- *  that excludes background sheets, so a stray point off the object is simply
- *  ignored rather than selecting the whole background. Points are in the
- *  space of the image SENT to SAM; candidates may differ in resolution, so
- *  containment samples at the point's fractional position. Returns the sorted
- *  candidate indices to UNION, empty if nothing qualifies. */
-export function pickSamSegments(
-  candidates: MaskCandidate[],
-  fgPoints: Pt[],
-  bgPoints: Pt[],
-  imgW: number,
-  imgH: number,
-  opts: { maxWhiteFrac?: number } = {},
-): number[] {
-  const maxWhiteFrac = opts.maxWhiteFrac ?? 0.5
-
-  const whiteFracs: number[] = []
-  const isWhiteByCand: Uint8Array[] = []
-  for (let i = 0; i < candidates.length; i++) {
-    const { data, w, h } = candidates[i]!
-    const total = w * h
-    const isWhite = new Uint8Array(total)
-    let whiteCount = 0
-    for (let p = 0; p < total; p++) {
-      const o = p * 4
-      const lum = 0.2126 * data[o]! + 0.7152 * data[o + 1]! + 0.0722 * data[o + 2]!
-      const a = data[o + 3]! / 255
-      if (lum * a > 127) { isWhite[p] = 1; whiteCount++ }
-    }
-    whiteFracs.push(total > 0 ? whiteCount / total : 0)
-    isWhiteByCand.push(isWhite)
-  }
-
-  const hits = (pt: Pt, i: number): boolean => {
-    const { w, h } = candidates[i]!
-    let px = Math.round((pt.x / imgW) * w)
-    let py = Math.round((pt.y / imgH) * h)
-    if (px < 0) px = 0; if (px >= w) px = w - 1
-    if (py < 0) py = 0; if (py >= h) py = h - 1
-    return isWhiteByCand[i]![py * w + px] === 1
-  }
-
-  // Smallest qualifying (whiteFrac ≤ max) candidate that contains the point;
-  // lower index wins ties (strict-less comparison, scanned in index order).
-  const smallestFor = (pt: Pt): number => {
-    let best = -1
-    let bestFrac = Infinity
-    for (let i = 0; i < candidates.length; i++) {
-      if (whiteFracs[i]! > maxWhiteFrac) continue
-      if (!hits(pt, i)) continue
-      if (whiteFracs[i]! < bestFrac) { bestFrac = whiteFracs[i]!; best = i }
-    }
-    return best
-  }
-
-  const winners = new Set<number>()
-  for (const pt of fgPoints) {
-    const idx = smallestFor(pt)
-    if (idx >= 0) winners.add(idx)
-  }
-  for (const pt of bgPoints) {
-    const idx = smallestFor(pt)
-    if (idx >= 0) winners.delete(idx)
-  }
-  return Array.from(winners).sort((a, b) => a - b)
-}
-
-/** Union the selected SAM candidate masks into ONE white-on-OPAQUE-black RGBA
- *  buffer sized (w,h) — the format the Inpaint modal's mask consumers expect
- *  (rebuildSilhouette reads max(RGB)→alpha; FLUX Fill reads white = fill).
- *  Candidates may be at any resolution; each is nearest-neighbour sampled to
- *  (w,h). A pixel is white if ANY selected candidate is white there
- *  (luminance*alpha > 127). An empty selection yields an all-black opaque mask. */
-export function unionSelectedMasks(
-  candidates: MaskCandidate[], idxs: number[], w: number, h: number,
-): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(w * h * 4)
-  for (let p = 0; p < w * h; p++) out[p * 4 + 3] = 255   // opaque black backdrop
-  for (const idx of idxs) {
-    const c = candidates[idx]
-    if (!c) continue
-    for (let y = 0; y < h; y++) {
-      const sy = Math.min(c.h - 1, Math.floor((y / h) * c.h))
-      for (let x = 0; x < w; x++) {
-        const sx = Math.min(c.w - 1, Math.floor((x / w) * c.w))
-        const so = (sy * c.w + sx) * 4
-        const lum = 0.2126 * c.data[so]! + 0.7152 * c.data[so + 1]! + 0.0722 * c.data[so + 2]!
-        const a = c.data[so + 3]! / 255
-        if (lum * a > 127) {
-          const o = (y * w + x) * 4
-          out[o] = 255; out[o + 1] = 255; out[o + 2] = 255
-        }
-      }
-    }
-  }
-  return out
-}
-
-/** Single-click select: choose the smallest segment containing `point`
- *  (segment-everything SAM returns background/object/part candidates) and return
- *  a white-on-opaque-black mask buffer sized (imgW,imgH), or null if no segment
- *  qualifies (caller falls back to manual brushing). This is the single-point
- *  restriction of the Compositor smart-select flow (pickSamSegments + union) —
- *  the Inpaint modal's click-to-select consumes it. `point` is in the (imgW,imgH)
- *  pixel space, i.e. the space of the image sent to SAM. */
-export function pickClickMask(
-  candidates: MaskCandidate[], point: Pt, imgW: number, imgH: number,
-): Uint8ClampedArray | null {
-  const idxs = pickSamSegments(candidates, [point], [], imgW, imgH)
-  if (!idxs.length) return null
-  return unionSelectedMasks(candidates, idxs, imgW, imgH)
 }
 
 /** Layer-model transform for a crop of the source image: where an image-space
