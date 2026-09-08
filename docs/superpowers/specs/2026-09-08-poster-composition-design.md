@@ -55,6 +55,17 @@ This is too big for one spec. Six sub-projects, each its own spec/plan/build. Or
 
 **Smart Layout's fate:** its generation (4) and reflow (5) move to the Frame. Its brand kit and campaign-matrix concepts return as inputs to (4)/(5). The template-grid/Satori pipeline is not extended.
 
+### Typography's UX model — defaults over controls (sub-project 2 principle)
+
+Typography features are necessary for quality but ruinous as an interface: tracking, optical size, `ss01`, `smcp`, `onum`/`tnum` require inside-baseball knowledge most users don't have, and a wall of sliders overwhelms them. The resolution is that **most typography quality is defaults, not controls** — if the shelf carries the knowledge, the user needs none of it. Three tiers of who-decides, plus a teaching voice:
+
+- **Tier 1 — automatic and invisible. No UI.** The face's own knowledge, spent for the user: optical size driven by the size (the single biggest "looks set" lever, zero dial), kerning on, standard ligatures on, **figure style following the role** (tabular on dates/ruled lists, oldstyle in running text — decided by what the layer *is*), tracking that tightens with size on a per-face curve. Touch nothing and you already get ~90% of the craft. **Build this first and almost only** — posters get dramatically better with no new controls at all.
+- **Tier 2 — plain-language and visual choices. No jargon.** Never "tracking −0.03em" → **Tighter / Looser**. Never "ss01/salt" → **pick a letterform by eye** from 2–3 specimens, like picking a layout tile. Never "smcp" → a **Small caps** look shown as a preview toggle. Every choice named by outcome or shown as a picture. Same contract as the poster sheet: you choose by looking, the machine owns the vocabulary. Add these one at a time, only where a real choice exists.
+- **Tier 3 — the exact dials, folded away.** Raw tracking numbers, specific feature tags, under an Advanced fold. Control preserved for experts, hidden from everyone else. Nobody blocked, nobody overwhelmed.
+- **The teaching layer — the Read voice** (from sub-project 4's critique): brings Tier-3 knowledge down to Tier-2 language, in context, one click ("the date would read cleaner with aligned figures — apply?"). The user learns the inside-baseball only when relevant, phrased plainly.
+
+Through-line: **the user makes plain or visual choices; the machine handles the vocabulary.** You never need the word *kerning* to get kerned type — the elements-are-yours contract applied to setting. OpenType features that are per-glyph (a stylistic alternate on one title letter) enter as *composition moves* the same way letter swaps do (§Faces): you pick the feature, the seed picks the letter. **Render constraint:** any feature must survive preview + PNG bake + video + SVG export (the baseline-rise lesson); canvas does `fontFeatureSettings`, but the headless bake and any Satori path need checking — a sub-project-2 gate.
+
 ---
 
 ## Sub-project 1 — the moves library and the sheet
