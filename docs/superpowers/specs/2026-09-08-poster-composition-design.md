@@ -91,6 +91,31 @@ Typography features are necessary for quality but ruinous as an interface: track
 
 Through-line: **the user makes plain or visual choices; the machine handles the vocabulary.** You never need the word *kerning* to get kerned type — the elements-are-yours contract applied to setting. OpenType features that are per-glyph (a stylistic alternate on one title letter) enter as *composition moves* the same way letter swaps do (§Faces): you pick the feature, the seed picks the letter. **Render constraint:** any feature must survive preview + PNG bake + video + SVG export (the baseline-rise lesson); canvas does `fontFeatureSettings`, but the headless bake and any Satori path need checking — a sub-project-2 gate.
 
+### Optical placement & leading — measured from the ink, not the font box
+
+Validated in the optical-alignment spike (2026-09-08, `optical-alignment.html`). The unifying rule: **the box the layout positions is not the box the eye reads.** A font's line box carries uneven empty space (more below the baseline than above the cap, a built-in line gap that varies per face), so aligning, centering, and leading by that box looks mechanical. Doing them by the **ink** (measured cap-height, ascent, descent) looks set. This splits across two owners:
+
+**Owned by the moves engine (placement) — new, and cheap:**
+- **Optical vertical centering.** Centring a text op in a region by the font's line box leaves caps floating high. Centre by measured cap-height instead. This is the highest-value optical rule — it makes every centred lockup (badge, stamp, centred title) look placed rather than slightly off, and it is high-frequency.
+- **Cap-height / first-baseline alignment.** Two text ops meant to share a top do not, when aligned by box-top, because each face hides a different gap above its caps. Align by measured cap-top (or a shared baseline) so the row reads as top-aligned. Fires whenever a pattern sets a headline with a kicker, or side-by-side blocks.
+- **Optical leading between display lines.** For a multi-line title, measure line spacing from the ink (baseline-to-baseline sized against cap-height + descender), not the font's default line box, so tight display stacks nest without colliding.
+- **Engine implication for plan 1a:** the injected `Measure` oracle is currently width-only; it must also return **vertical ink metrics** (cap-height, ascent, descent per face+size) so the apply/placement code can centre and lead optically. Cheap (canvas `TextMetrics.actualBoundingBoxAscent/…`, measured once per op), but it extends the `Measure` type — fold into 1a's placement work, and note it connects to the known local-layer-box gotcha (local frame vs baked image space).
+
+**Owned by the shelf (setting):**
+- **Hanging punctuation & edge overshoot.** Quotes, dashes, and the round side of O/C hang past a flush edge so the ink edge reads straight. The real connoisseur's tell, but subtle at moderate sizes; its value climbs with big flush display and justified blocks.
+
+### Line-height best practices (the leading curve — Tier-1, per-face)
+
+Leading is **not a fixed multiplier**; it is a function the shelf computes, and getting it wrong is a loud amateur tell. Reason in ratios, store absolute values. The curve, all invisible defaults:
+
+- **Leading tightens as size grows.** Body ~1.4–1.5; subheads ~1.2–1.3; display ~1.0–1.1; large display often **< 1.0** (0.85–0.95); a tight compressed stack tighter still (~0.8, seen in the ultra-condensed spike). Big type needs less relative leading — the word shapes already dominate and the eye tracks less vertical distance.
+- **Leading opens as the measure lengthens.** Long lines need more leading so the eye finds the next line's start; a narrow column can be tighter. So the *same size* wants different leading at different line lengths.
+- **Leading opens for large-x-height faces.** Big-x-height grotesques (Inter, most sans) read tighter and want a touch more; small-x-height faces want less. A per-face factor.
+- **All-caps and no-descender lines tighten.** The visual band is just cap-height, so lines nest closer (again the ultra-condensed stack).
+- **Measure it optically, not from the em box** (see above) — the CSS/font default line box embeds a per-face line gap that makes "the same" line-height inconsistent across faces.
+
+So the leading default is `ratio = f(sizePx, measure, faceXHeight, isCaps)`, computed by the shelf, exposed to the user only as Tier-2 "Tighter / Looser" if they want to override — never as a raw number up front. It pairs with the per-face, per-register **tracking** curve the register spike established: horizontal and vertical spacing are both per-face curves the shelf owns, not global constants.
+
 ---
 
 ## Sub-project 1 — the moves library and the sheet
