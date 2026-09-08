@@ -174,6 +174,64 @@ test.describe('stroke inspector — the rows that actually reach the screen', ()
     await expect(page.locator('[data-testid="add-stroke"]')).toHaveCount(0)
   })
 
+  /**
+   * WHICH stroke the panel is showing (Task 9).
+   *
+   * Every case above seeds a layer with exactly ONE stroke, so an inspector hardwired to
+   * `stack[0]` — ignoring the row that was clicked — passes all of them. The gap the Task 7
+   * review flagged and left for the live pass.
+   *
+   * Nothing here reconstructs the px arithmetic. The tree row renders
+   * `strokeRowLabel(row.stroke)` from its own prop and the breadcrumb renders
+   * `strokeRowLabel(activeStroke)` from the selection, so the two agreeing IS the claim
+   * "the panel resolved the stroke this row stands for" — and the Width field, which is
+   * `strokePxW(activeStroke.width)`, must carry the same px the label already printed.
+   * The three strokes differ in width AND distance so all three readings are distinguishable.
+   */
+  test('selecting a NON-FIRST stroke shows THAT stroke — and edits THAT stroke', async ({ page }) => {
+    await page.evaluate(l => (window as any).__compositorSetLayers([l]), RECT('multi', [
+      { id: 'a', paint: '#ff0000', width: 0.01, distance: 0, align: 'center', join: 'sharp', style: 'band' },
+      { id: 'b', paint: '#00ff00', width: 0.04, distance: 0.06, align: 'center', join: 'sharp', style: 'band' },
+      { id: 'c', paint: '#0000ff', width: 0.02, distance: 0.12, align: 'center', join: 'sharp', style: 'band' },
+    ]))
+    await page.locator('[data-testid="layer-fx-toggle"]').first().click()
+    const rows = page.locator('[data-testid="stroke-row"]')
+    await expect(rows).toHaveCount(3)
+
+    const seen: string[] = []
+    for (let i = 0; i < 3; i++) {
+      await rows.nth(i).click()
+      await expect(page.locator('[data-testid="stroke-inspector"]')).toBeVisible()
+      const label = (await rows.nth(i).innerText()).trim()
+      // `${w} px` on the edge, `${w} px, ${d} px out` at a distance.
+      const m = /^(\d+) px(?:, (\d+) px out)?$/.exec(label)
+      expect(m, `row ${i} label: ${label}`).toBeTruthy()
+      await expect(page.locator('[data-testid="stroke-breadcrumb"]')).toContainText(label)
+      await expect(page.locator('[data-stroke-width]')).toHaveValue(m![1]!)
+      await expect(page.locator('[data-stroke-distance]')).toHaveValue(m![2] ?? '0')
+      seen.push(label)
+    }
+    // Three DISTINCT readings: a panel showing stack[0] three times would repeat one.
+    expect(new Set(seen).size, `distinct readings, got ${JSON.stringify(seen)}`).toBe(3)
+    // …in the stored order — widths 0.01 < 0.04 > 0.02, distances 0 < 0.06 < 0.12.
+    const wPx = seen.map(l => Number(/^(\d+)/.exec(l)![1]))
+    expect(wPx[1]!).toBeGreaterThan(wPx[2]!)
+    expect(wPx[2]!).toBeGreaterThan(wPx[0]!)
+
+    // …and a write from the panel lands on the stroke that is on screen, not on stack[0].
+    await rows.nth(1).click()
+    await page.locator('[data-stroke-width]').fill(String(wPx[1]! + 20))
+    await expect.poll(async () => {
+      const l = await page.evaluate(() => (window as any).__compositorLayers()[0])
+      return l.strokes.map((s: any) => s.width)
+    }, { timeout: 10_000 }).not.toEqual([0.01, 0.04, 0.02])
+    const after = await page.evaluate(() => (window as any).__compositorLayers()[0])
+    expect(after.strokes.map((s: any) => s.id)).toEqual(['a', 'b', 'c'])
+    expect(after.strokes[0].width, 'the first stroke is untouched').toBe(0.01)
+    expect(after.strokes[2].width, 'and so is the third').toBe(0.02)
+    expect(after.strokes[1].width).toBeGreaterThan(0.04)
+  })
+
   test('one breadcrumb at a time: an effect row closes the stroke inspector, and back', async ({ page }) => {
     await pickFirstStroke(page, RECT('r5', [
       { id: 's1', paint: '#ffffff', width: 0.01, distance: 0, align: 'center', join: 'sharp', style: 'band' },

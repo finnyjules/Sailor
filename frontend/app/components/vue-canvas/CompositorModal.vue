@@ -109,7 +109,7 @@ import {
 import {
   strokeStackOf, writeStrokeStackToLayer, addStroke, removeStroke, duplicateStroke,
   reorderStroke, canReorderStroke, strokeSupportsStack, strokeSupportsShapes, strokeRowLabel,
-  LEGACY_STROKE_ID,
+  layerStoresStrokeStack, LEGACY_STROKE_ID,
   type StrokeInstance,
 } from '~/lib/compositor/strokeStack'
 import {
@@ -2029,6 +2029,24 @@ const layerStrokeCount = computed(() => {
   }
   return m
 })
+/**
+ * Whether the LAYER inspector still offers its pre-stack "Stroke" / "Outline" section.
+ *
+ * That section writes the legacy `stroke` / `strokeWidth` pair straight onto the layer, and
+ * on a layer that already stores a stack that pair is not an edit — it is a takeover:
+ * `strokeStackOf` treats a live legacy field as the trustworthy one and ignores the WHOLE
+ * array (see `storedStrokeEntries`). One click on its Add took a rect from three outlines to
+ * one — three rows gone from the tree, three bands gone from the canvas — with the array
+ * still in the document and one stroke-row edit away from being written over for good. The
+ * third instance of this feature's "the stack silently collapses to one entry", and the one
+ * no unit test could see, because it lives in a different panel entirely.
+ *
+ * Kept for a layer with NO stored stack: there it is still the front door for a first
+ * outline, `strokeStackOf` reads it through exactly as it always did, and nothing can
+ * conflict with it. A LINE is unaffected either way — it is not stackable, and its own
+ * Color / Thickness rows are a different section.
+ */
+const showsLegacyStrokeSection = (l: any) => !!l && !layerStoresStrokeStack(l)
 const selectedStroke = ref<{ layerId: string; strokeId: string } | null>(null)
 /** THE write. `writeStrokeStackToLayer` clears every legacy single-stroke field in the SAME
  *  patch that stores the list, so one edit is one undo step and a layer can never carry both
@@ -5503,6 +5521,18 @@ function handleKeydown(e: KeyboardEvent) {
       removeLayerEffect(sel.layerId, sel.effectId)
       return
     }
+    // A STROKE row is the same kind of pseudo-child, and needs the same claim on the key.
+    // Without it Backspace fell straight through to `deleteLocal` below and threw away the
+    // whole layer the user was outlining — the two selections are mutually exclusive (see
+    // `selectEffect` / `onStrokeSelect`), so this can only ever fire when a stroke row, and
+    // no effect row, is the thing on screen. Found by driving the tree in a real browser;
+    // the stack's unit suite cannot see a window key handler.
+    const selStroke = selectedStroke.value
+    if (selStroke) {
+      e.preventDefault()
+      onStrokeRemove(selStroke.layerId, selStroke.strokeId)
+      return
+    }
     // Don't delete the target layer while painting a generative-fill region.
     if (selectedLocalId.value) {
       e.preventDefault()
@@ -7699,7 +7729,7 @@ onUnmounted(() => {
                 <FillControl :model-value="(selectedLocal as any).color"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { color: v })" />
               </div>
-              <div>
+              <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Outline</div>
                 <FillControl allow-none :model-value="(selectedLocal as any).strokeColor"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { strokeColor: v })" />
@@ -7721,7 +7751,7 @@ onUnmounted(() => {
               <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
             </div>
-            <div>
+            <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
               <div class="panel-label mb-1.5">Stroke</div>
               <FillControl allow-none :model-value="(selectedLocal as any).stroke"
                 @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
@@ -7767,7 +7797,7 @@ onUnmounted(() => {
               <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
             </div>
-            <div>
+            <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
               <div class="panel-label mb-1.5">Stroke</div>
               <FillControl allow-none :model-value="(selectedLocal as any).stroke"
                 @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
@@ -7800,7 +7830,7 @@ onUnmounted(() => {
               <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
             </div>
-            <div>
+            <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
               <div class="panel-label mb-1.5">Stroke</div>
               <FillControl allow-none :model-value="(selectedLocal as any).stroke"
                 @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
@@ -7880,7 +7910,7 @@ onUnmounted(() => {
               <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
             </div>
-            <div>
+            <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
               <div class="panel-label mb-1.5">Stroke</div>
               <FillControl allow-none :model-value="(selectedLocal as any).stroke"
                 @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
