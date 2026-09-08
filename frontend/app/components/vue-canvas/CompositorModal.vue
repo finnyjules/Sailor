@@ -99,11 +99,22 @@ import type { GradientStop } from '~/lib/color/harmony'
 import { layerPaletteAssignments } from '~/lib/compositor/distribute'
 import PostEffectsControls, { PANEL_EFFECT_KINDS } from '~/components/vue-canvas/PostEffectsControls.vue'
 import CompositorEffectRow from '~/components/vue-canvas/compositor/CompositorEffectRow.vue'
+import CompositorStrokeRow from '~/components/vue-canvas/compositor/CompositorStrokeRow.vue'
+import ShapeStrokeRow from '~/components/vue-canvas/compositor/ShapeStrokeRow.vue'
 import {
   EFFECT_ORDER, EFFECT_LABELS, isPinnedKind, effectStackOf, writeStackToLayer,
   addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder,
   type EffectInstance, type EffectKind,
 } from '~/lib/compositor/effectStack'
+import {
+  strokeStackOf, writeStrokeStackToLayer, addStroke, removeStroke, duplicateStroke,
+  reorderStroke, canReorderStroke, strokeSupportsStack, strokeSupportsShapes, strokeRowLabel,
+  type StrokeInstance,
+} from '~/lib/compositor/strokeStack'
+import {
+  strokeInspectorRows, strokeStylePatch, strokeDistanceOf, strokeStyleOf,
+  showsTextDistantNote, TEXT_DISTANT_STROKE_NOTE,
+} from '~/lib/compositor/strokeInspector'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import {
   samplePointsFromStroke, layerAffine, invertAffine, applyAffine, wiredImageAffine,
@@ -1839,7 +1850,13 @@ const layerById = (layerId: string): any => localLayers.value.find((l: any) => l
 
 // The selection a Task 6 inspector reads. Kept here so the tree is usable on its own.
 const selectedEffect = ref<{ layerId: string; effectId: string } | null>(null)
-const selectEffect = (layerId: string, effectId: string) => { selectedEffect.value = { layerId, effectId } }
+// Clears the stroke selection: the inspector shows ONE breadcrumb, and `onStrokeSelect`
+// does the mirror of this. Written as a plain assignment rather than a watcher so the two
+// selections can never both be live for a tick.
+const selectEffect = (layerId: string, effectId: string) => {
+  selectedStroke.value = null
+  selectedEffect.value = { layerId, effectId }
+}
 
 // ── The selected effect, as the inspector reads and writes it ─────────────────
 // A separate concept from the layer selection: picking an effect row leaves the layer
@@ -1937,7 +1954,10 @@ function openFxMenu(layerId: string, ev: MouseEvent) {
   const r = (ev.currentTarget as HTMLElement).getBoundingClientRect()
   // Keep the whole menu on screen: flip it above the button when the full list would run off
   // the bottom (a layer near the end of a long panel), and pull it left off the right edge.
-  const h = EFFECT_ORDER.length * FX_MENU_ITEM_H + 8
+  // The stroked kinds get an extra "Add outline" entry plus its separating rule.
+  const l = layerById(layerId)
+  const extra = l && strokeSupportsStack(l.kind) ? FX_MENU_ITEM_H + 9 : 0
+  const h = EFFECT_ORDER.length * FX_MENU_ITEM_H + extra + 8
   let top = r.bottom + 4
   if (top + h > window.innerHeight) top = Math.max(8, r.top - 4 - h)
   const left = Math.max(8, Math.min(r.left, window.innerWidth - 8 - FX_MENU_W))
@@ -1957,6 +1977,14 @@ function pickFxKind(kind: EffectKind) {
   if (fxMenuLayerId.value) addLayerEffect(fxMenuLayerId.value, kind)
   closeFxMenu()
 }
+/** Whether the open plus menu's layer can take another outline. A line has no interior to
+ *  offset a band from and keeps its single stroke by design; an image, a brush layer and
+ *  wired content have no outline at all — `strokeSupportsStack` is the one place that list
+ *  lives, so the menu asks it rather than restating it. */
+const fxMenuOffersStroke = computed(() => {
+  const l = fxMenuLayerId.value ? layerById(fxMenuLayerId.value) : null
+  return !!l && strokeSupportsStack(l.kind)
+})
 /** A pinned kind already on the layer cannot be added twice; orderable kinds always can.
  *  Depth of field is the one kind the LAYER can refuse: without a depth map it has nothing
  *  to defocus against, so offering it would add a dead effect. */
@@ -1982,6 +2010,122 @@ function onEffectDrop(layerId: string, effectId: string) {
   const from = fxDragFrom.value
   fxDragFrom.value = null
   if (from && from.layerId === layerId) reorderLayerEffect(layerId, from.effectId, effectId)
+}
+
+// ── Per-layer stroke stack: tree state and mutations ─────────────────────────
+// The sibling of the effect stack above, statement for statement, with one difference:
+// nothing here is pinned, so every stroke can be dragged.
+const strokeStackFor = (layer: any): StrokeInstance[] => strokeStackOf(layer)
+// How many strokes each layer carries, so the row template can decide whether to draw the
+// disclosure chevron without rebuilding a stack array per layer per render.
+const layerStrokeCount = computed(() => {
+  const m = new Map<string, number>()
+  // Gated on `strokeSupportsStack` for the same reason the rows are: a LINE reads through
+  // to a one-entry stack but gets no rows, and counting it would draw a disclosure chevron
+  // that expands to nothing.
+  for (const l of localLayers.value as any[]) {
+    if (l?.id) m.set(l.id, strokeSupportsStack(l.kind) ? strokeStackOf(l).length : 0)
+  }
+  return m
+})
+/** THE write. `writeStrokeStackToLayer` clears every legacy single-stroke field in the SAME
+ *  patch that stores the list, so one edit is one undo step and a layer can never carry both
+ *  shapes at once (which would send the next read down the legacy branch). */
+const setLayerStrokes = (layerId: string, stack: StrokeInstance[]) =>
+  setLocal(layerId, writeStrokeStackToLayer(stack) as any)
+
+const selectedStroke = ref<{ layerId: string; strokeId: string } | null>(null)
+/** The selected stroke's id, for the tree row's `selected` prop. */
+const selectedStrokeId = computed(() => selectedStroke.value?.strokeId ?? null)
+const activeStroke = computed<StrokeInstance | null>(() => {
+  const sel = selectedStroke.value
+  if (!sel) return null
+  const l = layerById(sel.layerId)
+  return l ? (strokeStackFor(l).find(st => st.id === sel.strokeId) ?? null) : null
+})
+const activeStrokeLayer = computed<any>(() => (selectedStroke.value ? layerById(selectedStroke.value.layerId) : null))
+const activeStrokeKind = computed<string>(() => (activeStrokeLayer.value?.kind as string) || '')
+/** Which rows the selected stroke gets — every one gated on something the PAINTER reads.
+ *  See lib/compositor/strokeInspector.ts for the gate-by-gate derivation. */
+const activeStrokeRows = computed<string[]>(() =>
+  activeStroke.value ? strokeInspectorRows(activeStrokeKind.value, activeStroke.value) : [])
+const hasStrokeRow = (id: string) => activeStrokeRows.value.includes(id)
+/** A path layer stores its stroke width, distance, dash, mark size and spacing in LOCAL
+ *  units at scale 1 — the same conversion StrokeStyleRow documents. */
+const activeStrokeScale = computed(() =>
+  activeStrokeKind.value === 'path' ? ((activeStrokeLayer.value?.scale as number) || 1) : 1)
+const strokePxW = (norm: number) => Math.round(norm * outWidth.value * activeStrokeScale.value)
+const strokeNormW = (px: number) => px / (outWidth.value * activeStrokeScale.value)
+/** Distance is the ONE size field here that is signed: negative pulls the band inside the
+ *  shape, so it must not be clamped at 0 the way a width is. */
+const strokeNormSigned = (px: number) => px / (outWidth.value * activeStrokeScale.value)
+
+/** Write a patch onto ONE stroke, by id, keeping the stack's order. */
+function setStrokeField(layerId: string, strokeId: string, patch: Partial<StrokeInstance>) {
+  const l = layerById(layerId); if (!l) return
+  setLayerStrokes(layerId, strokeStackFor(l).map(st => (st.id === strokeId ? { ...st, ...patch } : st)))
+}
+function updateActiveStroke(patch: Partial<StrokeInstance>) {
+  const sel = selectedStroke.value
+  if (sel) setStrokeField(sel.layerId, sel.strokeId, patch)
+}
+/** Style and its payload in ONE patch: a `style: 'shapes'` stroke must never exist without
+ *  a usable `shapes`, and two writes leave exactly that state between them. */
+function setActiveStrokeStyle(style: string) {
+  const st = activeStroke.value
+  if (st) updateActiveStroke(strokeStylePatch(st, style === 'shapes' ? 'shapes' : 'band'))
+}
+function updateActiveStrokeShapes(patch: Record<string, unknown>) {
+  const st = activeStroke.value
+  if (st?.shapes) updateActiveStroke({ shapes: { ...st.shapes, ...patch } })
+}
+// The selection is by id, so a vanished stroke — its layer deleted, the stroke removed, or
+// an undo that rolled the stack back — must not leave the inspector pointing at nothing.
+watch(activeStroke, v => { if (!v) selectedStroke.value = null })
+
+/** One breadcrumb at a time: picking a stroke row hands the inspector to the stroke and
+ *  drops any effect selection (and `onRowClick` does the reverse). */
+function onStrokeSelect(layerId: string, strokeId: string) {
+  selectedEffect.value = null
+  selectedStroke.value = { layerId, strokeId }
+}
+/** Add-stroke, from the layer row's plus menu. Appended, so a new stroke paints UNDER the
+ *  existing ones — adding one never changes what you already see. */
+function pickStrokeAdd(layerId: string) {
+  const l = layerById(layerId); if (!l || !strokeSupportsStack(l.kind)) { closeFxMenu(); return }
+  const before = strokeStackFor(l)
+  const beforeIds = new Set(before.map(st => st.id))
+  const next = addStroke(before)
+  setLayerStrokes(layerId, next)
+  expandedLayers.value = new Set(expandedLayers.value).add(layerId)
+  const fresh = next.find(st => !beforeIds.has(st.id)) ?? next[next.length - 1]
+  if (fresh) onStrokeSelect(layerId, fresh.id)
+  closeFxMenu()
+}
+function onStrokeRemove(layerId: string, strokeId: string) {
+  const l = layerById(layerId); if (!l) return
+  setLayerStrokes(layerId, removeStroke(strokeStackFor(l), strokeId))
+  if (selectedStroke.value?.strokeId === strokeId) selectedStroke.value = null
+}
+function onStrokeDuplicate(layerId: string, strokeId: string) {
+  const l = layerById(layerId); if (!l) return
+  setLayerStrokes(layerId, duplicateStroke(strokeStackFor(l), strokeId))
+}
+function onStrokeToggleVisible(layerId: string, strokeId: string) {
+  const l = layerById(layerId); if (!l) return
+  setLayerStrokes(layerId, strokeStackFor(l).map(st => (st.id === strokeId ? { ...st, visible: st.visible === false } : st)))
+}
+const strokeDragFrom = ref<{ layerId: string; strokeId: string } | null>(null)
+const onStrokeDragStart = (layerId: string, strokeId: string) => { strokeDragFrom.value = { layerId, strokeId } }
+const onStrokeDragEnd = () => { strokeDragFrom.value = null }
+function onStrokeDropOn(layerId: string, strokeId: string) {
+  const from = strokeDragFrom.value
+  strokeDragFrom.value = null
+  if (!from || from.layerId !== layerId) return
+  const l = layerById(layerId); if (!l) return
+  const stack = strokeStackFor(l)
+  if (!canReorderStroke(stack, from.strokeId, strokeId)) return
+  setLayerStrokes(layerId, reorderStroke(stack, from.strokeId, strokeId))
 }
 
 function toggleGroup(gid: string) {
@@ -2011,8 +2155,13 @@ type FlatRow =
   | { rk: string; kind: 'child' | 'local'; key: StackKey; layerId: string; groupId?: string; depth: number; layer: any }
   | { rk: string; kind: 'wired'; key: StackKey; slot: number; depth: number; layer: any }
   | { rk: string; kind: 'effect'; layerId: string; effectId: string; depth: number; effect: EffectInstance; pinned: boolean }
+  | { rk: string; kind: 'stroke'; layerId: string; strokeId: string; depth: number; stroke: StrokeInstance }
 const flatRows = computed<FlatRow[]>(() => {
   const rows: FlatRow[] = []
+  // Effects first, then the strokes, so a layer's pseudo-children read in the order the
+  // inspector groups them. A LINE deliberately gets no stroke rows: `strokeSupportsStack`
+  // excludes it (the painter's line arm reads `layer.stroke`/`strokeWidth` directly and
+  // never calls `strokeStackOf`), so listing one would offer an outline that edits nothing.
   const pushEffectRows = (layer: any, depth: number) => {
     if (!layer?.id || !expandedLayers.value.has(layer.id)) return
     for (const e of effectStackOf(layer)) {
@@ -2020,6 +2169,10 @@ const flatRows = computed<FlatRow[]>(() => {
         rk: `fx:${layer.id}:${e.id}`, kind: 'effect', layerId: layer.id, effectId: e.id,
         depth, effect: e, pinned: isPinnedKind(e.type),
       })
+    }
+    if (!strokeSupportsStack(layer.kind)) return
+    for (const st of strokeStackOf(layer)) {
+      rows.push({ rk: `st:${layer.id}:${st.id}`, kind: 'stroke', layerId: layer.id, strokeId: st.id, depth, stroke: st })
     }
   }
   const groups = localGroups.value
@@ -2082,6 +2235,8 @@ function rowSelected(row: any) {
 function onRowClick(row: any) {
   // Selecting anything that is not an effect row hands the inspector back to the layer.
   if (row.kind !== 'effect') selectedEffect.value = null
+  // …and the same for a stroke row: one breadcrumb at a time.
+  if (row.kind !== 'stroke') selectedStroke.value = null
   // Save-as-template sheet open: tapping a real layer marks/unmarks it as a
   // slot instead of selecting it (kind/label are edited in the sheet).
   if (savingTemplate.value && (row.kind === 'local' || row.kind === 'child')) { toggleSlotPick(row.layerId); return }
@@ -5586,6 +5741,21 @@ onUnmounted(() => {
               @drop-on="onEffectDrop"
               @drag-end="fxDragFrom = null"
             />
+            <CompositorStrokeRow
+              v-else-if="row.kind === 'stroke'"
+              :stroke="row.stroke"
+              :layer-id="row.layerId"
+              :depth="row.depth"
+              :out-width="outWidth"
+              :selected="selectedStroke?.layerId === row.layerId && selectedStrokeId === row.strokeId"
+              @select="onStrokeSelect"
+              @remove="onStrokeRemove"
+              @duplicate="onStrokeDuplicate"
+              @toggle-visible="onStrokeToggleVisible"
+              @drag-start="onStrokeDragStart"
+              @drop-on="onStrokeDropOn"
+              @drag-end="onStrokeDragEnd"
+            />
             <div
               v-else
               class="group/row flex items-center gap-1.5 pr-2 py-1.5 rounded transition-colors"
@@ -5617,9 +5787,9 @@ onUnmounted(() => {
               <!-- Layer effect disclosure — only on a layer that actually has effects. -->
               <button
                 v-if="(row.kind === 'local' || row.kind === 'child' || row.kind === 'wired')
-                  && row.layer?.id && (layerFxCount.get(row.layer.id) ?? 0) > 0"
+                  && row.layer?.id && ((layerFxCount.get(row.layer.id) ?? 0) + (layerStrokeCount.get(row.layer.id) ?? 0)) > 0"
                 type="button" data-testid="layer-fx-toggle"
-                title="Show/hide effects"
+                title="Show/hide effects and outlines"
                 class="-ml-1 shrink-0 text-white/40 hover:text-white/80 cursor-pointer"
                 @click.stop="expandedLayers = expandedLayers.has(row.layer.id)
                   ? new Set([...expandedLayers].filter(x => x !== row.layer.id))
@@ -5759,7 +5929,7 @@ onUnmounted(() => {
                    contiguous — a v-if wedged between them would orphan the local delete. -->
               <button
                 v-if="(row.kind === 'local' || row.kind === 'child' || row.kind === 'wired') && row.layer?.id"
-                type="button" data-testid="add-effect" aria-label="Add effect"
+                type="button" data-testid="add-effect" aria-label="Add effect or outline"
                 class="shrink-0 opacity-0 group-hover/row:opacity-100 text-white/40 hover:text-white/80 cursor-pointer"
                 :class="fxMenuLayerId === row.layer.id ? '!opacity-100' : ''"
                 @click.stop="fxMenuLayerId === row.layer.id ? closeFxMenu() : openFxMenu(row.layer.id, $event)"
@@ -6971,7 +7141,7 @@ onUnmounted(() => {
       <!-- Placed template copy: slot-fill panel + Freeze. Takes over whenever the
            selection touches a placed instance's layers (a single slot layer or
            the whole copy selected as a group both resolve here). -->
-      <template v-else-if="activeTemplateInstance && activeTemplateInstanceTemplate && !activeEffect">
+      <template v-else-if="activeTemplateInstance && activeTemplateInstanceTemplate && !activeEffect && !activeStroke">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <LayoutTemplate class="size-3.5 text-white/70" />
           <span class="text-sm font-medium truncate" :title="activeTemplateInstanceTemplate!.name">{{ activeTemplateInstanceTemplate!.name }}</span>
@@ -7141,7 +7311,57 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <template v-else-if="selectedLocal && !activeEffect">
+
+      <!-- One outline, tuned on its own. Reached by selecting a stroke row in the layer tree.
+           Every row here is gated by `strokeInspectorRows` on something the PAINTER reads —
+           a control that only stores its value is a dead control, and this repo hides an
+           inapplicable row rather than greying it. -->
+      <template v-else-if="activeStroke">
+        <div class="px-4 py-3 border-b border-white/10 flex items-center gap-1.5 text-[11px] text-white/50" data-testid="stroke-breadcrumb">
+          <button type="button" class="truncate capitalize hover:text-white/80" @click="selectedStroke = null">{{ activeStrokeLayer ? rowLabel({ layer: activeStrokeLayer }) : 'Layer' }}</button>
+          <ChevronRight class="size-3 shrink-0 opacity-60" />
+          <span class="truncate text-white/80">{{ strokeRowLabel(activeStroke!, outWidth) }}</span>
+        </div>
+        <div class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto" data-testid="stroke-inspector">
+          <div>
+            <div class="panel-label mb-1.5">Colour</div>
+            <FillControl allow-none :model-value="activeStroke!.paint"
+              @update:model-value="(v: any) => updateActiveStroke({ paint: v })" />
+            <div v-if="hasStrokeRow('width')" class="mt-1.5">
+              <div class="panel-label mb-1">Width</div>
+              <input v-scrubnum type="number" min="0" step="1" :value="strokePxW(activeStroke!.width)" data-stroke-width
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveStroke({ width: Math.max(0, strokeNormW(parseFloat(($event.target as HTMLInputElement).value) || 0)) })" />
+            </div>
+            <div class="mt-1.5">
+              <div class="panel-label mb-1">Distance from the edge</div>
+              <!-- Signed on purpose: positive pushes the band out, negative pulls it in. -->
+              <input v-scrubnum type="number" step="1" :value="strokePxW(strokeDistanceOf(activeStroke!))" data-stroke-distance
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveStroke({ distance: strokeNormSigned(parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
+            </div>
+            <StrokeStyleRow class="mt-1.5"
+              :align="activeStroke!.align" :dash="activeStroke!.dash"
+              :join="activeStroke!.join" :stroke-style="strokeStyleOf(activeStroke!)"
+              :show-align="hasStrokeRow('align')"
+              :show-join="hasStrokeRow('join')"
+              :show-dash="hasStrokeRow('dash')"
+              :show-style="hasStrokeRow('style')"
+              :out-width="outWidth" :scale="activeStrokeScale"
+              @update:align="(v: any) => updateActiveStroke({ align: v })"
+              @update:dash="(v: any) => updateActiveStroke({ dash: v })"
+              @update:join="(v: any) => updateActiveStroke({ join: v })"
+              @update:style="(v: any) => setActiveStrokeStyle(v)" />
+            <ShapeStrokeRow v-if="hasStrokeRow('shapes') && activeStroke!.shapes" class="mt-1.5"
+              :spec="activeStroke!.shapes!" :out-width="outWidth" :scale="activeStrokeScale"
+              @update="(patch: any) => updateActiveStrokeShapes(patch)" />
+            <p v-if="showsTextDistantNote(activeStrokeKind, activeStroke!)" class="mt-2 text-[10.5px] leading-snug text-white/40"
+              data-testid="stroke-text-distance-note">{{ TEXT_DISTANT_STROKE_NOTE }}</p>
+          </div>
+        </div>
+      </template>
+
+      <template v-else-if="selectedLocal && !activeEffect && !activeStroke">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <component :is="kindIcon(selectedLocal.kind)" class="size-3.5 text-white/60" />
           <span class="text-sm font-medium capitalize">{{ selectedLocal.kind === 'deal' ? 'Mosaic' : selectedLocal.kind }}</span>
@@ -8481,6 +8701,14 @@ onUnmounted(() => {
       <div v-if="fxMenuLayerId" data-fx-menu
         class="fixed z-[200] w-48 rounded-lg border border-white/10 bg-[#161616] p-1 shadow-2xl"
         :style="{ top: `${fxMenuPos.top}px`, left: `${fxMenuPos.left}px` }" @pointerdown.stop>
+        <!-- Outlines come first: on a stroked layer it is the entry most often wanted, and
+             the rule keeps it from reading as one more effect kind. -->
+        <template v-if="fxMenuOffersStroke">
+          <button type="button" data-testid="add-stroke"
+            class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 transition-colors hover:bg-white/10 hover:text-white cursor-pointer"
+            @click.stop="pickStrokeAdd(fxMenuLayerId!)">Add outline</button>
+          <div class="my-1 h-px bg-white/10" />
+        </template>
         <button v-for="kind in EFFECT_ORDER" :key="kind" type="button"
           data-testid="add-effect-item" :data-kind="kind" :disabled="fxKindDisabled(kind)"
           :title="fxKindDisabledTitle(kind)"

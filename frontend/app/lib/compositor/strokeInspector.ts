@@ -1,0 +1,117 @@
+/**
+ * WHICH inspector rows a selected stroke gets, and the human words its selects show.
+ *
+ * Pure, and deliberately NOT inside the modal: every row here is gated on something the
+ * PAINTER actually reads, and those gates are the whole difference between a live dial and
+ * a control that stores a value nothing consumes. Keeping them in a module means the tests
+ * can state each rule outright instead of mounting an 8,500-line component to infer it.
+ *
+ * Every gate below was read out of `useCompositorLayers.ts` rather than taken on trust:
+ *
+ *  - `width` is read by `paintStrokeBand` only. `paintStrokeStack` dispatches on STYLE
+ *    first and `continue`s inside the shapes arm, BEFORE its `if (!(st.width > 0))` gate —
+ *    so a shapes stroke is sized by `shapes.size` and its `width` is dead.
+ *  - `join` reaches the canvas at exactly one statement: `s.lineJoin = o.join === 'round'
+ *    ? 'round' : 'miter'` in `paintStrokeBand`'s NON-ZERO-distance branch. `strokeAligned`
+ *    (the distance-0 path) never touches `lineJoin`, and `paintShapeStroke` has no join at
+ *    all. So: band style, non-zero distance.
+ *    (A path layer's `build` DOES set `c.lineJoin = 'round'` on the dilation scratch — but
+ *    `paintStrokeBand` runs `o.build(s)` and THEN assigns `s.lineJoin` from `o.join`, so the
+ *    stroke's own join wins on a path too. Corners is live there, not overridden.)
+ *  - `align` is read by `strokeAligned` (distance 0, shapes only) and by `paintStrokeBand`
+ *    (any distance). TEXT is the exception: at distance 0 a text stroke is drawn by
+ *    `strokeText`, which takes no path and is always centred, so `align` is inert — but a
+ *    text stroke AT A DISTANCE goes through `paintTextStrokeBands` → `paintStrokeBand`
+ *    WITH `align: st.align`, so alignment is live there. Hiding it on all text would hide a
+ *    working control.
+ *  - `dash` is read by `strokeAligned` and by `textStrokePasses`, both of which are the
+ *    distance-0 paths. `paintStrokeBand`'s band construction never looks at it (a dash
+ *    would have to run along an offset curve that does not exist here), and
+ *    `paintShapeStroke` has none. So: band style, distance 0.
+ *  - `shapes` needs a real outline to flatten; `strokeSupportsShapes` already says which
+ *    kinds have one.
+ *
+ * The repo's rule is to HIDE an inapplicable row, never to grey it.
+ */
+import {
+  strokeSupportsShapes,
+  type ShapeStrokeSpec, type StrokeInstance, type StrokeJoin, type StrokeStyle,
+} from '~/lib/compositor/strokeStack'
+
+/** One row of the stroke inspector, in the order the panel draws them. */
+export const STROKE_ROW_ORDER = ['paint', 'width', 'distance', 'join', 'align', 'dash', 'style', 'shapes'] as const
+export type StrokeRowId = typeof STROKE_ROW_ORDER[number]
+
+/** The distance the PAINTER would use — `strokeDistancePx`'s own coercion, so a stored
+ *  `NaN` gates as the on-the-edge stroke it actually renders as. */
+export function strokeDistanceOf(stroke: Pick<StrokeInstance, 'distance'>): number {
+  const d = stroke.distance
+  return typeof d === 'number' && Number.isFinite(d) ? d : 0
+}
+
+export function strokeStyleOf(stroke: Pick<StrokeInstance, 'style'>): StrokeStyle {
+  return stroke.style === 'shapes' ? 'shapes' : 'band'
+}
+
+/** THE gate. Every row the modal draws asks this list whether it belongs. */
+export function strokeInspectorRows(kind: string, stroke: StrokeInstance): StrokeRowId[] {
+  const band = strokeStyleOf(stroke) === 'band'
+  const d = strokeDistanceOf(stroke)
+  const shapeable = strokeSupportsShapes(kind)
+  const rows: StrokeRowId[] = ['paint']
+  if (band) rows.push('width')
+  rows.push('distance')
+  if (band && d !== 0) rows.push('join')
+  // Text at distance 0 is `strokeText`, which is always centred.
+  if (band && (kind !== 'text' || d !== 0)) rows.push('align')
+  if (band && d === 0) rows.push('dash')
+  if (shapeable) rows.push('style')
+  if (shapeable && !band) rows.push('shapes')
+  return rows
+}
+
+/** Sentence-case words for the two enums the inspector exposes. House rule: an internal
+ *  identifier must never reach the DOM. */
+export const STROKE_JOIN_OPTIONS: { value: StrokeJoin; label: string }[] = [
+  { value: 'sharp', label: 'Sharp' },
+  { value: 'round', label: 'Rounded' },
+]
+export const STROKE_STYLE_OPTIONS: { value: StrokeStyle; label: string }[] = [
+  { value: 'band', label: 'Band' },
+  { value: 'shapes', label: 'Shapes' },
+]
+
+/** The seed a stroke gets the first time it is switched to Shapes: marks at 2× the band's
+ *  width, spaced 4×, turning with the edge — so the very first render shows something
+ *  rather than an empty stroke the user has to guess their way out of. A zero-width stroke
+ *  would seed a zero-size mark (`paintShapeStroke` no-ops on `size > 0`), so fall back to
+ *  the same 0.005 `createStroke` starts a band at. */
+export function seedShapeSpec(width: number): ShapeStrokeSpec {
+  const w = typeof width === 'number' && Number.isFinite(width) && width > 0 ? width : 0.005
+  return { shapeId: 'sparkle', size: w * 2, spacing: w * 4, follow: true }
+}
+
+/**
+ * The patch that changes a stroke's style — ONE object, never two writes.
+ *
+ * A `style: 'shapes'` entry must always carry a usable `shapes`. Writing `style` first and
+ * `shapes` second leaves an instant where the layer says "shapes" with no payload, which is
+ * exactly the state that used to flash a full band at whatever stale `width` the row still
+ * carried (Finding 1 of the Task 6 review). `strokeStackOf` now normalises that away, but
+ * the inspector still has no business producing it.
+ */
+export function strokeStylePatch(stroke: StrokeInstance, style: StrokeStyle): Partial<StrokeInstance> {
+  if (style !== 'shapes') return { style: 'band' }
+  return { style: 'shapes', shapes: stroke.shapes ?? seedShapeSpec(stroke.width) }
+}
+
+/** Why a distant stroke on TEXT cannot be reordered above an on-edge one. Stated in the
+ *  inspector rather than left for the user to discover: `paintTextStrokeBands` lays every
+ *  distant band down as a group beneath the per-line stroke/fill loop, because a
+ *  whole-block band cannot be interleaved into a per-line draw. */
+export const TEXT_DISTANT_STROKE_NOTE =
+  'On text, a stroke set at a distance is drawn as one band around the whole block, always beneath the strokes that sit on the edge.'
+
+export function showsTextDistantNote(kind: string, stroke: StrokeInstance): boolean {
+  return kind === 'text' && strokeDistanceOf(stroke) !== 0
+}
