@@ -2235,8 +2235,16 @@ function rowSelected(row: any) {
 function onRowClick(row: any) {
   // Selecting anything that is not an effect row hands the inspector back to the layer.
   if (row.kind !== 'effect') selectedEffect.value = null
-  // …and the same for a stroke row: one breadcrumb at a time.
-  if (row.kind !== 'stroke') selectedStroke.value = null
+  // …and the same for a stroke row: one breadcrumb at a time. UNCONDITIONAL on purpose:
+  // this handler is bound only on the `v-else` branch of the row list, and an effect row
+  // and a stroke row each render through their own component whose `@click.stop` never
+  // lets the event reach here — so `row.kind` is never 'stroke' at this line and a guard
+  // for it only reads as though the case were possible. (The `!== 'effect'` guard above
+  // is dead for exactly the same reason; it belongs to the effect stack and is left as it
+  // stands rather than swept into this fix.) The CLEAR itself is load-bearing: it is what
+  // hands the panel back when a layer row is clicked while a stroke is selected, which
+  // `one breadcrumb at a time` in tests/compositor-stroke-inspector-wiring.spec.ts covers.
+  selectedStroke.value = null
   // Save-as-template sheet open: tapping a real layer marks/unmarks it as a
   // slot instead of selecting it (kind/label are edited in the sheet).
   if (savingTemplate.value && (row.kind === 'local' || row.kind === 'child')) { toggleSlotPick(row.layerId); return }

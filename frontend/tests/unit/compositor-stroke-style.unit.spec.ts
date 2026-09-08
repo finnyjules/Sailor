@@ -398,3 +398,42 @@ describe('dashed strokes', () => {
     expect(rec.ops.filter(o => o.kind === 'clip')).toHaveLength(1)
   })
 })
+
+// ── An inkless stroke in a stack (fix wave 1, Finding 1) ─────────────────────
+//
+// `paint: 'none'` is one click away in the inspector's Colour row (`<FillControl allow-none>`).
+// Two separate claims, and the bug conflated them: (a) the OTHER strokes must still paint —
+// an inkless entry must not take the stack down with it; (b) the inkless one itself must
+// paint nothing, which is the painter's own `hasPaint(st.paint)` gate, not the reader's job.
+describe('a stroke whose colour was removed', () => {
+  // Half-extent 50. Outer stroke: 40px wide, centred on the edge ⇒ 30..70.
+  // Inner stroke: 10px wide, centred on the edge ⇒ 45..55.
+  const twoStrokes = (outerPaint: string) => createRectLayer({
+    x: 0.5, y: 0.5, w: 0.5, h: 0.5, radius: 0, fill: '',
+    stroke: undefined, strokeWidth: undefined,
+    strokes: [
+      { id: 'outer', paint: outerPaint, width: 0.2 },
+      { id: 'inner', paint: '#00ff00', width: 0.05 },
+    ],
+  } as unknown as Partial<RectLayer>)
+
+  it('CONTROL: with both painted, both bands land where the probes expect', () => {
+    const { ink } = paint([twoStrokes('#ffffff')])
+    expect(ink(65, 0)).toBe(true)    // outer band only
+    expect(ink(50, 0)).toBe(true)    // both
+    expect(ink(35, 0)).toBe(true)    // outer band only
+    expect(ink(75, 0)).toBe(false)   // beyond both
+  })
+
+  it('still paints the OTHER stroke in the stack', () => {
+    const { ink } = paint([twoStrokes('none')])
+    expect(ink(50, 0)).toBe(true)    // the green 10px band survives
+    expect(ink(48, 0)).toBe(true)
+  })
+
+  it('paints nothing at all for the inkless one', () => {
+    const { ink } = paint([twoStrokes('none')])
+    expect(ink(65, 0)).toBe(false)   // where the 40px band would have been
+    expect(ink(35, 0)).toBe(false)
+  })
+})

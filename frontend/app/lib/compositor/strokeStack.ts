@@ -124,10 +124,23 @@ export function strokeStackOf(layer: StrokeHost | null | undefined): StrokeInsta
   // outline; the legacy `stroke`/`strokeWidth` fields a brush also declares still read
   // through normally below.
   const raw = layer.kind === 'brush' || !Array.isArray(layer.strokes) ? [] : layer.strokes
+  //
+  // WHAT MAKES THE ARRAY TRUSTWORTHY IS ITS SHAPE, NOT ITS INK. An entry carrying a
+  // well-formed id is one WE wrote, whatever its paint says; an inkless entry
+  // (`paint: 'none'`, or none stored) is a perfectly well-formed stroke that simply paints
+  // nothing, and every painter loop re-checks `hasPaint(st.paint)` itself before drawing
+  // (useCompositorLayers.ts:1346, :1728, :2607, :3024, :3120), as does the SVG writer.
+  //
+  // These two questions used to be one filter, and the cost was silent DATA LOSS: the
+  // inspector's Colour row is `<FillControl allow-none>`, so one click on Remove made one
+  // entry inkless, which dropped it from `known`, which made `allIded` false, which sent
+  // the WHOLE array down the legacy branch. Every stroke row then vanished from the tree,
+  // the disclosure chevron with them, the inspector closed, the painter drew no outline at
+  // all — and the next "Add outline" wrote `strokes: [new]` over the survivors.
   const known = raw.filter(
     (s): s is Record<string, unknown> =>
       !!s && typeof s === 'object' && typeof (s as { id?: unknown }).id === 'string'
-      && (s as { id: string }).id !== '' && hasInk((s as { paint?: unknown }).paint),
+      && (s as { id: string }).id !== '',
   )
   const allIded = known.length > 0 && known.length === raw.length
   // A new-shape layer that ALSO carries a live legacy stroke can only come from an older

@@ -66,9 +66,78 @@ describe('strokeStackOf — read-through', () => {
       strokes: [null, { id: 's1', paint: '#fff', width: 0.01 }, { paint: '#000', width: 1 }, 7],
       stroke: '', strokeWidth: 0,
     } as any)
-    // The un-ided entry means "not all ided" ⇒ the whole thing falls to the legacy
-    // branch, and the legacy fields are empty ⇒ no strokes.
+    // FIX WAVE 1 — re-examined, and the assertion deliberately KEPT at `[]`.
+    // The trust guard no longer asks about ink, only about shape, so it is worth being
+    // explicit about which entry above actually decides this case. It is `{ paint, width }`
+    // with NO id: `null` and `7` are not objects, that one is an object without an id, so
+    // `known.length` (1) !== `raw.length` (4) ⇒ "not all ided" ⇒ the whole array falls to
+    // the legacy branch, whose fields are empty ⇒ no strokes. Nothing here turns on ink —
+    // every entry that survives the shape test also happens to have some — so the answer is
+    // unchanged by the fix, and the case now pins the ID half of the guard alone. The ink
+    // half is covered by the three cases above, which assert the opposite outcome.
     expect(stack).toEqual([])
+  })
+
+  it('keeps an entry whose colour was REMOVED, rather than destroying the whole stack', () => {
+    // FIX WAVE 1, FINDING 1. The inspector's Colour row is `<FillControl allow-none>`, so
+    // `paint: 'none'` is a value the USER can produce with one click on a two-stroke stack.
+    // The guard used to require ink of every entry before it would trust the stored array,
+    // so that one click dropped the entry from `known`, made `allIded` false, and sent the
+    // WHOLE array to the legacy branch — every stroke row vanished from the tree, the
+    // painter drew no outline, and the next "Add outline" overwrote the survivors.
+    // Whether an entry has INK is not a trust question about the array's SHAPE: an inkless
+    // entry is a well-formed stroke that simply paints nothing (every painter loop
+    // re-checks `hasPaint(st.paint)` itself — useCompositorLayers.ts:1346, :1728, :2607,
+    // :3024, :3120).
+    const stack = strokeStackOf({
+      kind: 'rect',
+      strokes: [
+        { id: 's1', paint: 'none', width: 0.02 },
+        { id: 's2', paint: '#00ff00', width: 0.01 },
+      ],
+      stroke: '', strokeWidth: 0,
+    })
+    expect(stack.map(s => s.id)).toEqual(['s1', 's2'])
+    expect(stack[0]!.paint).toBe('none')
+    expect(stack[1]!.paint).toBe('#00ff00')
+    expect(stack[1]!.width).toBe(0.01)
+  })
+
+  it('keeps an entry with no paint field at all for the same reason', () => {
+    const stack = strokeStackOf({
+      kind: 'rect',
+      strokes: [{ id: 's1', width: 0.02 }, { id: 's2', paint: '#fff', width: 0.01 }],
+      stroke: '', strokeWidth: 0,
+    } as any)
+    expect(stack.map(s => s.id)).toEqual(['s1', 's2'])
+  })
+
+  it('still refuses the array when an entry is MALFORMED, ink or no ink', () => {
+    // The id-based half of the guard is untouched: an entry that is not an object, or
+    // carries no id, still means "this array was not written by us" for the whole array.
+    expect(strokeStackOf({
+      kind: 'rect',
+      strokes: [{ id: 's1', paint: 'none', width: 0.02 }, { paint: '#fff', width: 0.01 }],
+      stroke: '', strokeWidth: 0,
+    } as any)).toEqual([])
+    expect(strokeStackOf({
+      kind: 'rect',
+      strokes: [{ id: 's1', paint: 'none', width: 0.02 }, { id: '', paint: '#fff', width: 0.01 }],
+      stroke: '', strokeWidth: 0,
+    } as any)).toEqual([])
+  })
+
+  it('an inkless stored stack does NOT reopen the legacy branch', () => {
+    // The "new shape AND a live legacy field ⇒ trust the legacy branch" rule is unchanged,
+    // and it is the ONLY thing that can send a well-formed array to the legacy fold.
+    const stack = strokeStackOf({
+      kind: 'rect',
+      strokes: [{ id: 's1', paint: 'none', width: 0.02 }],
+      stroke: '#ff0000', strokeWidth: 0.05,
+    })
+    expect(stack).toHaveLength(1)
+    expect(stack[0]!.id).toBe('legacy')
+    expect(stack[0]!.paint).toBe('#ff0000')
   })
 
   it('guarantees a style:"shapes" entry a usable `shapes` object, even with none stored — so it can never fall through to a band', () => {
