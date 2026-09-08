@@ -60,12 +60,18 @@ float bandOffset(float c, float laneId, float tick) {
     return o;
 }
 
-// Optional attenuation of the shift by position.
+// Optional attenuation of the shift by position. Directional ramps read
+// "<clean end> to <full end>": intensity rises from the clean end to the torn end.
+// (uv.y = 1 is the visual TOP.) Existing values 1..3 are kept stable; new
+// directions are appended so saved presets never remap.
 float falloff(vec2 uv) {
     int r = int(u_ramp + 0.5);
-    if (r == 1) return 1.0 - uv.y;                                   // top clean -> bottom full
-    if (r == 2) return max(abs(uv.x - 0.5), abs(uv.y - 0.5)) * 2.0;  // edges full -> center clean
-    if (r == 3) return clamp(length(uv - 0.5) * 2.0, 0.0, 1.0);      // radial
+    if (r == 1) return 1.0 - uv.y;                                   // Top to bottom
+    if (r == 2) return max(abs(uv.x - 0.5), abs(uv.y - 0.5)) * 2.0;  // Edges to center (center clean)
+    if (r == 3) return clamp(length(uv - 0.5) * 2.0, 0.0, 1.0);      // Radial (center clean)
+    if (r == 4) return uv.y;                                         // Bottom to top
+    if (r == 5) return uv.x;                                         // Left to right
+    if (r == 6) return 1.0 - uv.x;                                   // Right to left
     return 1.0;                                                       // None
 }
 

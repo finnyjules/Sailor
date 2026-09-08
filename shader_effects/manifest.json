@@ -930,8 +930,11 @@
           "options": [
             { "label": "None", "value": 0 },
             { "label": "Top to bottom", "value": 1 },
-            { "label": "Edges to center", "value": 2 },
-            { "label": "Radial", "value": 3 }
+            { "label": "Bottom to top", "value": 4 },
+            { "label": "Left to right", "value": 5 },
+            { "label": "Right to left", "value": 6 },
+            { "label": "Radial", "value": 3 },
+            { "label": "Edges to center", "value": 2 }
           ]
         },
         {
