@@ -128,6 +128,31 @@ describe('pathLayersToSvgDoc — what it cannot export exactly', () => {
     expect(notes.some(n => /centred|centered|alignment/i.test(n))).toBe(true)
   })
 
+  // FINDING 6b (final review): a wobbled BAND is written as the layer's own straight `d` —
+  // the wave exists on canvas only as a displaced, resampled polyline — and it used to go out
+  // with no note at all, while the same arm already reports the distance and the alignment.
+  // Marching shapes DO export wobbled, which makes a silently straight band the easier one to
+  // miss. (Exporting the geometry itself is out of scope; saying so is not.)
+  it('a wobbled band is written straight AND reported, like the distance and the alignment', () => {
+    for (const [shape, word] of [['wave', /wavy/i], ['zigzag', /zigzag/i]] as const) {
+      const l = rectWithStrokes([{
+        id: 'a', paint: '#ff0000', width: 0.01, distance: 0, align: 'center', style: 'band',
+        wobble: shape, wobbleAmount: 0.02, wobbleLength: 0.08, wobblePhase: 0,
+      }])
+      const { svg, notes } = pathLayersToSvgDoc([l], 1)
+      // Still the shape's own outline, unchanged — this note is about honesty, not geometry.
+      const outline = paths(svg).find(p => attr(p, 'stroke'))!
+      expect(attr(outline, 'd')).toBe(attr(paths(svg)[0]!, 'd'))
+      expect(notes.some(n => n.includes(l.id) && word.test(n)), `${shape} is reported`).toBe(true)
+    }
+    // A wobble the painter reads as off exports a genuinely straight band: no note.
+    const off = rectWithStrokes([{
+      id: 'a', paint: '#ff0000', width: 0.01, distance: 0, align: 'center', style: 'band',
+      wobble: 'wave', wobbleAmount: 0, wobbleLength: 0.08,
+    }])
+    expect(pathLayersToSvgDoc([off], 1).notes).toEqual([])
+  })
+
   it('a centred band at distance 0 is exact — no note at all', () => {
     const l = rectWithStrokes([{ id: 'a', paint: '#ff0000', width: 0.01, distance: 0, align: 'center', style: 'band' }])
     expect(pathLayersToSvgDoc([l], 1).notes).toEqual([])

@@ -1511,6 +1511,17 @@ test('a wobble that is off renders byte-identically to a stroke with no wobble f
       { wobble: 'wave', wobbleAmount: WOB.amount, wobbleLength: 0 }],
     ['an amount that is not a number',
       { wobble: 'wave', wobbleAmount: null, wobbleLength: WOB.length }],
+    // FINDING 2 (final review). AMOUNT 0. The case this list did not have: `wobbleAmount`
+    // was `null` above, which `resolveWobble` refused for being the wrong TYPE — while a
+    // perfectly ordinary 0, the value the Amount scrub field reaches with one drag, was
+    // accepted as live. `offsetPolyline` displaces nothing without a positive amount, so the
+    // band came out visually straight while being BUILT by `paintWobbledBand` instead of the
+    // dilation pair: an ellipse facets, the join and cap change, and a dash appears at a
+    // distance where the straight route drops it. Reader and maths now agree.
+    ['an amount of exactly 0 — a live-looking spelling of a still line',
+      { wobble: 'wave', wobbleAmount: 0, wobbleLength: WOB.length }],
+    ['a negative amount, which offsetPolyline does not read as a phase flip',
+      { wobble: 'zigzag', wobbleAmount: -WOB.amount, wobbleLength: WOB.length }],
   ]
   for (const [why, fields] of offSpellings) {
     await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), wobbleRect({ ...base, ...fields }))

@@ -83,6 +83,34 @@ export function wobbleValue(shape: StrokeWobble, u: number): number {
 export const WOBBLE_MAX_POINTS = 4000
 
 /**
+ * The step `resamplePolyline` ACTUALLY walks at: the requested `step`, or — when that would
+ * ask for more than `WOBBLE_MAX_POINTS` samples — a coarser one that still spreads exactly
+ * `WOBBLE_MAX_POINTS` samples over the WHOLE `total`.
+ *
+ * The cap used to be applied to the sample COUNT alone while the walk kept advancing by the
+ * requested `step`, which meant a capped walk stopped part-way round the outline and left
+ * every consumer to close it with a straight chord slashed across the shape (`Every` is a
+ * scrub field with `min="0"`: 5 px on a 0.4 x 0.4 rect at 1200 px covered 65% of the
+ * perimeter, 1 px covered 13%). Coarsening instead is the same choice `shapePlacements`
+ * already makes when a spacing does not divide a closed guide — re-spread over the whole
+ * length rather than stop short — and it costs a too-small `Every` fidelity (a
+ * lower-resolution wave, which is honest) instead of the shape.
+ *
+ * Exported so `offsetPolyline` can walk arc length with the SAME step the resampler used;
+ * computing the wobble's phase from the requested step while the points sat at the coarsened
+ * one would put every crest in the wrong place.
+ */
+export function resampleStep(total: number, closed: boolean, step: number): number {
+  if (!Number.isFinite(step) || step <= 0) return step
+  if (!(total > 1e-9)) return step
+  const wanted = Math.max(1, closed ? Math.floor(total / step + 1e-9) : Math.floor(total / step + 1e-9) + 1)
+  if (wanted <= WOBBLE_MAX_POINTS) return step
+  // A CLOSED walk's last sample sits one step short of wrapping, so N samples span N steps;
+  // an OPEN walk ends ON the final vertex, so N samples span N-1.
+  return closed ? total / WOBBLE_MAX_POINTS : total / (WOBBLE_MAX_POINTS - 1)
+}
+
+/**
  * Resample a flattened outline at even arc length, `step` apart.
  *
  * THE TRAP: the flattener only emits a point where a curve needs one, so a rectangle's edge
@@ -98,7 +126,9 @@ export const WOBBLE_MAX_POINTS = 4000
  * it at arc length `count * step`, the same convention `shapePlacements`' guide already uses.
  * An OPEN walk includes the final vertex even when the last interval is a partial step.
  *
- * Returns the (deduped) input unchanged for a non-finite or non-positive `step`.
+ * Returns the (deduped) input unchanged for a non-finite or non-positive `step`. A `step`
+ * fine enough to ask for more than `WOBBLE_MAX_POINTS` samples is COARSENED — see
+ * `resampleStep` — so the walk always covers the whole outline.
  */
 export function resamplePolyline(pts: readonly FlatPoint[], closed: boolean, step: number): FlatPoint[] {
   const src = dedupe(pts)
@@ -117,17 +147,19 @@ export function resamplePolyline(pts: readonly FlatPoint[], closed: boolean, ste
   }
   if (!(total > 1e-9)) return src
 
-  // `total / step` can land a hair under the true integer (6 / 0.1 === 59.999999999999993
+  // `total / walk` can land a hair under the true integer (6 / 0.1 === 59.999999999999993
   // in IEEE754) — the epsilon keeps an exact division from losing its last sample.
   const EPS = 1e-9
-  const rawCount = Math.floor(total / step + EPS)
+  // The CAP COARSENS THE STEP, it does not cut the walk short — see `resampleStep`.
+  const walk = resampleStep(total, closed, step)
+  const rawCount = Math.floor(total / walk + EPS)
   const count = Math.min(WOBBLE_MAX_POINTS, Math.max(1, closed ? rawCount : rawCount + 1))
 
   const out: FlatPoint[] = []
   let segIdx = 0, segStart = 0
   let a = src[0]!, b = src[1 % n]!, segLen = segLens[0]!
   for (let i = 0; i < count; i++) {
-    const s = closed ? i * step : Math.min(i * step, total)
+    const s = closed ? i * walk : Math.min(i * walk, total)
     while (s > segStart + segLen + EPS && segIdx < segCount - 1) {
       segIdx++
       segStart += segLen
@@ -271,8 +303,13 @@ export function offsetPolyline(
   const base = Number.isFinite(distance) ? distance : 0
   const phaseFrac = wobble!.phase / 360
   const { amount, shape } = wobble!
+  // The arc length of sample `i` must be measured with the step the RESAMPLER used, which is
+  // coarsened when the requested one would blow the point cap — reading `step` here while
+  // the points sat at `resampleStep`'s coarser spacing would wind the phase far too fast and
+  // scatter the crests. One call, one answer, both sides.
+  const walk = step > 0 && Number.isFinite(step) ? resampleStep(total, closed, step) : step
   return offsetVertices(resampled, closed, (i) => {
-    const s = i * step
+    const s = i * walk
     return base + amount * wobbleValue(shape, s / lambdaEff + phaseFrac)
   })
 }
@@ -351,8 +388,15 @@ export function shapeStrokeGuideFit(
  *
  *  Note the guide is in `guideFromPolyline`'s re-centred space; a caller that has to place
  *  a mark on the DRAWN edge wants `shapeStrokeGuideFit` above instead. */
-export function shapeStrokeGuide(d: string, distance: number, tolerance?: number): Guide | null {
-  return shapeStrokeGuideFit(d, distance, tolerance)?.guide ?? null
+export function shapeStrokeGuide(
+  d: string, distance: number, tolerance?: number, wobble?: WobbleSpec | null,
+): Guide | null {
+  // The 4th argument is forwarded even though nothing in the app calls this today: a DROPPED
+  // positional argument at an intermediate seam is exactly how marching shapes silently never
+  // wobbled once already (`paintShapeStroke` called `shapeStrokeGuideFit` with three
+  // positional arguments and the wobble went nowhere). A wrapper that quietly narrows what it
+  // wraps is the shape of that bug, so it does not get to keep it.
+  return shapeStrokeGuideFit(d, distance, tolerance, wobble)?.guide ?? null
 }
 
 /**

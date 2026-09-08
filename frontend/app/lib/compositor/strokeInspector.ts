@@ -27,7 +27,10 @@
  *  - `dash` is read by `strokeAligned` and by `textStrokePasses`, both of which are the
  *    distance-0 paths. `paintStrokeBand`'s band construction never looks at it (a dash
  *    would have to run along an offset curve that does not exist here), and
- *    `paintShapeStroke` has none. So: band style, distance 0.
+ *    `paintShapeStroke` has none. So: band style, distance 0 — OR a live wobble at any
+ *    distance: `paintWobbledBand` builds the offset curve as a real `Path2D` and calls
+ *    `ctx.setLineDash`, so the pattern has something to run along there. Hiding the row on a
+ *    wobbled band at a distance hid a capability that already worked.
  *  - `shapes` needs a real outline to flatten; `strokeSupportsShapes` already says which
  *    kinds have one.
  *  - `wobble` is a property of the LINE, not the style — `shapeStrokeGuideFit` and the band's
@@ -41,10 +44,18 @@
  *    honour `lineJoin`. So Corners must show at distance 0 too when a wobble is live, or a
  *    zigzag's points are governed by a hidden control.
  *
+ * "LIVE" IS ASKED OF `wobbleSpecOf`, NOT OF THE SHAPE NAME. The two widened gates above are
+ * both claims about what the PAINTER does, and the painter takes its wobbled route only when
+ * `wobbleSpecOf` returns a spec — which needs a positive Amount and a positive Every, not
+ * merely a shape. Gating them on the name alone brought a dead Corners row back at Every 0.
+ * The wobble's OWN three dials still follow the select instead, so a user who scrubs Amount
+ * or Every down to 0 can still see the row and scrub it back up; hiding those would leave the
+ * stroke in a state only the Off option could escape.
+ *
  * The repo's rule is to HIDE an inapplicable row, never to grey it.
  */
 import {
-  strokeSupportsShapes, STROKE_WOBBLES,
+  strokeSupportsShapes, STROKE_WOBBLES, wobbleSpecOf,
   type ShapeStrokeSpec, type StrokeInstance, type StrokeJoin, type StrokeStyle, type StrokeWobble,
 } from '~/lib/compositor/strokeStack'
 
@@ -70,11 +81,21 @@ export function strokeStyleOf(stroke: Pick<StrokeInstance, 'style'>): StrokeStyl
   return stroke.style === 'shapes' ? 'shapes' : 'band'
 }
 
-/** The wobble the PAINTER would use, as the select's own value space: `'off'` when the
- *  stored `wobble` isn't one of `STROKE_WOBBLES` — matching `resolveWobble`'s off rule in
- *  `strokeStack.ts` for the one bit that gates rows: an unrecognised shape reads as off. */
+/** WHAT THE SELECT SHOWS: `'off'` when the stored `wobble` isn't one of `STROKE_WOBBLES`,
+ *  the shape's own name otherwise. Deliberately a question about the NAME alone — the select
+ *  must keep reading "Wave" while its Amount sits at 0, or the row that zeroed it disappears
+ *  along with the way back. "Is the wobble LIVE" is a different question with a different
+ *  answer: `strokeWobbleIsLive` below. */
 export function strokeWobbleOf(stroke: Pick<StrokeInstance, 'wobble'>): StrokeWobbleChoice {
   return (STROKE_WOBBLES as readonly string[]).includes(stroke.wobble ?? '') ? (stroke.wobble as StrokeWobble) : 'off'
+}
+
+/** WHETHER THE PAINTER WOBBLES: the same question `paintStrokeStack` asks before it takes
+ *  the `paintWobbledBand` route, put to the same function, so a row gated on "the painter
+ *  does this" cannot disagree with the painter. `unit: 1` because only nullness is read —
+ *  scaling `amount`/`length` cannot change whether they are positive. */
+export function strokeWobbleIsLive(stroke: StrokeInstance): boolean {
+  return wobbleSpecOf(stroke, 1) !== null
 }
 
 /** THE gate. Every row the modal draws asks this list whether it belongs. */
@@ -85,19 +106,26 @@ export function strokeInspectorRows(kind: string, stroke: StrokeInstance): Strok
   // Wobble needs a real outline to flatten, same requirement `shapes` has — and it applies
   // regardless of style, since it displaces the LINE both a band and marching shapes walk.
   const wobbling = shapeable && strokeWobbleOf(stroke) !== 'off'
+  // What the PAINTER does, not what the select says — a Wave with Amount 0 or Every 0 draws
+  // as a straight band, so every row that exists because of the wobbled route must go with it.
+  const wobbleLive = shapeable && strokeWobbleIsLive(stroke)
   const rows: StrokeRowId[] = ['paint']
   if (band) rows.push('width')
   rows.push('distance')
   if (shapeable) {
     rows.push('wobble')
+    // Follows the SELECT, not liveness: these three are how a zeroed Amount or Every gets
+    // raised again, so they must not vanish the moment one of them reaches 0.
     if (wobbling) rows.push('wobbleAmount', 'wobbleLength', 'wobblePhase')
   }
   // Widened for wobble: a wobbled band strokes a real path and DOES honour `lineJoin`, unlike
   // `strokeAligned`'s distance-0 dilation-diff band — see the header comment.
-  if (band && (d !== 0 || wobbling)) rows.push('join')
+  if (band && (d !== 0 || wobbleLive)) rows.push('join')
   // Text at distance 0 is `strokeText`, which is always centred.
   if (band && (kind !== 'text' || d !== 0)) rows.push('align')
-  if (band && d === 0) rows.push('dash')
+  // Widened for wobble as well: `paintWobbledBand` has a real path to run a dash along, so
+  // Dash is live at ANY distance there — the distance-0 limit belongs to the dilation route.
+  if (band && (d === 0 || wobbleLive)) rows.push('dash')
   if (shapeable) rows.push('style')
   if (shapeable && !band) rows.push('shapes')
   return rows

@@ -612,6 +612,14 @@ export function pathLayersToSvgDoc(layers: PathLayer[], aspect = 1): SvgDocument
       // per stroke. Reported for the same reason as the distance.
       const align = st.align ?? 'center'
       if (align !== 'center') say(`an ${align}-aligned outline is centred on the edge`)
+      // THE THIRD SILENT ONE. A wobbled band exists on canvas as a displaced, resampled
+      // polyline (`paintWobbledBand`), and this arm writes the layer's own `d` — so the file
+      // gets the straight line the wave rides on. Marching shapes above DO export wobbled
+      // (they are placed from `shapeStrokeMarkMatrices`, which takes the wobble), which is
+      // exactly why a band going out straight with no note is the one a reader would miss.
+      // Said out loud, like the distance and the alignment either side of it.
+      const wob = wobbleSpecOf(st, 1)
+      if (wob) say(`a ${wob.shape === 'wave' ? 'wavy' : 'zigzag'} outline is written as the straight line it wobbles around`)
       const dash = strokeDashSegments(st.dash, 1)
       children.push(
         `<path d="${esc(l.d)}" fill="none" stroke="${paint.color}" stroke-width="${n6(st.width)}"` +

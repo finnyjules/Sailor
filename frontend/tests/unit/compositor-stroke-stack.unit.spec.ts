@@ -489,13 +489,34 @@ describe('strokeStackOf — wobble normalisation', () => {
 })
 
 describe('wobbleSpecOf', () => {
-  it('returns null when off: unrecognised shape, non-positive/non-finite length, non-finite amount', () => {
+  it('returns null when off: unrecognised shape, non-positive/non-finite length, non-positive/non-finite amount', () => {
     const base: StrokeInstance = { id: 's1', paint: '#fff', width: 0.01 }
     expect(wobbleSpecOf(base, 1)).toBeNull()
     expect(wobbleSpecOf({ ...base, wobble: 'square' as never, wobbleAmount: 1, wobbleLength: 1 }, 1)).toBeNull()
     expect(wobbleSpecOf({ ...base, wobble: 'wave', wobbleAmount: 1, wobbleLength: 0 }, 1)).toBeNull()
     expect(wobbleSpecOf({ ...base, wobble: 'wave', wobbleAmount: 1, wobbleLength: NaN }, 1)).toBeNull()
     expect(wobbleSpecOf({ ...base, wobble: 'wave', wobbleAmount: NaN, wobbleLength: 1 }, 1)).toBeNull()
+  })
+
+  // FINDING 2 (final review): AMOUNT 0 IS OFF, and it has to be off HERE.
+  // `offsetPolyline` displaces nothing without a positive `amount`, but this used to accept
+  // any finite one — so Wave with Amount 0 read as live, `paintStrokeStack` took the
+  // `paintWobbledBand` route, and the band was rebuilt as a stroked flattened polyline
+  // instead of the dilation pair: an ellipse facets, joins and caps change, and a dash at a
+  // non-zero distance appears where the straight route drops it. The reader and the maths
+  // now agree. (A negative amount is off too: it is not a phase flip to `offsetPolyline`.)
+  it('reads Amount 0 as off, so the painter cannot take the wobbled route for a still line', () => {
+    const base: StrokeInstance = { id: 's1', paint: '#fff', width: 0.01 }
+    expect(wobbleSpecOf({ ...base, wobble: 'wave', wobbleAmount: 0, wobbleLength: 0.05 }, 1200)).toBeNull()
+    expect(wobbleSpecOf({ ...base, wobble: 'zigzag', wobbleAmount: 0, wobbleLength: 0.05 }, 1200)).toBeNull()
+    expect(wobbleSpecOf({ ...base, wobble: 'wave', wobbleAmount: -0.02, wobbleLength: 0.05 }, 1200)).toBeNull()
+    // The read-through normalisation says the same thing about the same fields.
+    const stack = strokeStackOf({
+      kind: 'rect',
+      strokes: [{ id: 's1', paint: '#fff', width: 0.01, wobble: 'wave', wobbleAmount: 0, wobbleLength: 0.05 }],
+    })
+    expect(stack[0]!.wobble).toBeUndefined()
+    expect(stack[0]!.wobbleAmount).toBeUndefined()
   })
 
   it('a legacy layer (no wobble fields at all) is unaffected — reads as off', () => {

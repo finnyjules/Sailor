@@ -7,7 +7,7 @@ import CompositorStrokeRow from '~/components/vue-canvas/compositor/CompositorSt
 import {
   strokeInspectorRows, strokeStylePatch, seedShapeSpec, strokeDistanceOf,
   STROKE_JOIN_OPTIONS, STROKE_STYLE_OPTIONS, STROKE_WOBBLE_OPTIONS, showsTextDistantNote,
-  strokeWobbleOf, strokeWobblePatch, seedWobbleFields,
+  strokeWobbleOf, strokeWobbleIsLive, strokeWobblePatch, seedWobbleFields,
 } from '~/lib/compositor/strokeInspector'
 import { createStroke, type StrokeInstance } from '~/lib/compositor/strokeStack'
 
@@ -79,6 +79,46 @@ describe('strokeInspectorRows — the row set per kind', () => {
     // Text has no outline to wobble at all — the row never appears, so it cannot widen Corners.
     expect(strokeInspectorRows('text', stroke({ distance: 0, wobble: 'wave' as any, wobbleAmount: 0.01, wobbleLength: 0.05 })))
       .not.toContain('join')
+  })
+
+  // FINDING 5 (final review): the widened gates used to ask `strokeWobbleOf(stroke) !== 'off'`
+  // — the SHAPE NAME alone — while the painter asks `wobbleSpecOf`, which also needs a
+  // positive Amount and a positive Every. With Every scrubbed to 0 (its input is `min="0"`)
+  // Corners came back on a distance-0 band that `strokeAligned` still draws, i.e. a dead
+  // control returned. The two must agree.
+  it('does not widen Corners for a wobble the painter reads as off (Amount 0 or Every 0)', () => {
+    const zeroEvery = stroke({ distance: 0, wobble: 'wave', wobbleAmount: 0.01, wobbleLength: 0 })
+    const zeroAmount = stroke({ distance: 0, wobble: 'zigzag', wobbleAmount: 0, wobbleLength: 0.05 })
+    expect(strokeInspectorRows('rect', zeroEvery)).not.toContain('join')
+    expect(strokeInspectorRows('rect', zeroAmount)).not.toContain('join')
+    // But the three dials themselves STAY, or the zeroed one could never be raised again.
+    for (const st of [zeroEvery, zeroAmount]) {
+      expect(strokeInspectorRows('rect', st)).toEqual(
+        expect.arrayContaining(['wobble', 'wobbleAmount', 'wobbleLength', 'wobblePhase']),
+      )
+    }
+    expect(strokeWobbleIsLive(zeroEvery)).toBe(false)
+    expect(strokeWobbleIsLive(zeroAmount)).toBe(false)
+    expect(strokeWobbleIsLive(stroke({ wobble: 'wave', wobbleAmount: 0.01, wobbleLength: 0.05 }))).toBe(true)
+  })
+
+  // FINDING 6a (final review): the Dash row's distance-0 limit belongs to the DILATION band,
+  // which has no offset curve to run a pattern along. `paintWobbledBand` builds that curve as
+  // a real Path2D and calls `ctx.setLineDash` at any distance — a live capability with the
+  // control hidden.
+  it('shows Dash on a wobbled band at a distance, where the wobbled route really does dash', () => {
+    expect(strokeInspectorRows('rect', stroke({
+      distance: 0.02, wobble: 'wave', wobbleAmount: 0.01, wobbleLength: 0.05,
+    }))).toContain('dash')
+    // Off, or a wobble the painter reads as off, is back to the dilation route: no dash.
+    expect(strokeInspectorRows('rect', stroke({ distance: 0.02 }))).not.toContain('dash')
+    expect(strokeInspectorRows('rect', stroke({
+      distance: 0.02, wobble: 'wave', wobbleAmount: 0.01, wobbleLength: 0,
+    }))).not.toContain('dash')
+    // Text has no outline to wobble, so nothing widens there.
+    expect(strokeInspectorRows('text', stroke({
+      distance: 0.02, wobble: 'wave' as never, wobbleAmount: 0.01, wobbleLength: 0.05,
+    }))).not.toContain('dash')
   })
 
   it('hides Wobble-dependent rows until a shape is picked, on any shapeable kind', () => {

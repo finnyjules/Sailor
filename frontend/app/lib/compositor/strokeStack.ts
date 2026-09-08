@@ -144,9 +144,17 @@ const normalizeShapeSpec = (v: unknown): ShapeStrokeSpec => {
  * `strokeStackOf`'s read-through normalisation and `wobbleSpecOf` so "is it on" and "what
  * are its clean values" can never disagree about the same raw fields.
  *
- * Off: an unrecognised `shape`, a non-positive or non-finite `length`, or a non-finite
- * `amount`. A non-finite `phase` is not a reason to turn off — it just reads as 0, matching
- * `strokeDistancePx` / `strokeReachPx`'s convention for a bad number.
+ * Off: an unrecognised `shape`, a non-positive or non-finite `length`, or a non-positive or
+ * non-finite `amount`. A non-finite `phase` is not a reason to turn off — it just reads as 0,
+ * matching `strokeDistancePx` / `strokeReachPx`'s convention for a bad number.
+ *
+ * BOTH numbers must be POSITIVE, not merely present, because that is the rule
+ * `offsetPolyline` enforces on the other side (`amount > 0 && length > 0`). This used to
+ * demand only a finite `amount`, so Wobble = Wave with Amount 0 read as LIVE here and as OFF
+ * there: `paintStrokeStack` took the `paintWobbledBand` route and drew the band as a stroked
+ * flattened polyline instead of the dilation pair, so an ellipse faceted, joins and caps
+ * changed, and a dash at a non-zero distance appeared where the straight route drops it —
+ * all from a dial the user had turned down to nothing.
  */
 function resolveWobble(
   shape: unknown, lengthRaw: unknown, amountRaw: unknown, phaseRaw: unknown,
@@ -154,8 +162,9 @@ function resolveWobble(
   if (shape !== 'wave' && shape !== 'zigzag') return null
   const length = num(lengthRaw)
   if (!(length > 0)) return null
-  if (typeof amountRaw !== 'number' || !Number.isFinite(amountRaw)) return null
-  return { shape, amount: amountRaw, length, phase: num(phaseRaw) }
+  const amount = num(amountRaw)
+  if (!(amount > 0)) return null
+  return { shape, amount, length, phase: num(phaseRaw) }
 }
 
 /** Whether the layer's own legacy single-stroke fields say anything. A live legacy field is

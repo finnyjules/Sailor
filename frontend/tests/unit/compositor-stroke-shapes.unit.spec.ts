@@ -173,6 +173,23 @@ describe('shapeStrokeGuide', () => {
     expect(shapeStrokeGuide('', 0)).toBeNull()
     expect(shapeStrokeGuide('not a path', 0)).toBeNull()
   })
+
+  // FINDING 4 (final review): this wrapper used to take three arguments and hand three on,
+  // silently narrowing what it wraps. A dropped positional argument at an intermediate seam
+  // is precisely how marching shapes never wobbled the first time round, so the forwarding
+  // is asserted rather than assumed — a wavy guide is measurably longer than a straight one.
+  it('forwards the wobble to shapeStrokeGuideFit, rather than quietly dropping it', () => {
+    const d = 'M -2 -1 L 2 -1 L 2 1 L -2 1 Z'
+    const straight = shapeStrokeGuide(d, 0.2)!
+    const wavy = shapeStrokeGuide(d, 0.2, undefined, { shape: 'wave', amount: 0.2, length: 2, phase: 0 })!
+    expect(straight).toBeTruthy()
+    expect(wavy).toBeTruthy()
+    expect(wavy.length).toBeGreaterThan(straight.length * 1.05)
+    // The same guide `shapeStrokeGuideFit` builds from the same four arguments.
+    expect(wavy.length).toBeCloseTo(
+      shapeStrokeGuideFit(d, 0.2, undefined, { shape: 'wave', amount: 0.2, length: 2, phase: 0 })!.guide.length, 9,
+    )
+  })
 })
 
 /**
