@@ -94,6 +94,22 @@ const hasInk = (p: unknown): boolean => {
 }
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 
+/** A style:'shapes' entry's `shapes`, coerced into something the painter (and every other
+ *  consumer) can never mistake for "no payload". Defaults absent/malformed fields to the
+ *  zero value `paintShapeStroke` already treats as "draw nothing" (`shapeById('')` finds
+ *  nothing; `size`/`spacing` of 0 fail its own `> 0` gates) — so an entry normalised this
+ *  way is inert, never wrong. See the call site's comment for why this lives HERE. */
+const normalizeShapeSpec = (v: unknown): ShapeStrokeSpec => {
+  const o = v && typeof v === 'object' ? v as Record<string, unknown> : {}
+  const spec: ShapeStrokeSpec = {
+    shapeId: typeof o.shapeId === 'string' ? o.shapeId : '',
+    size: num(o.size),
+    spacing: num(o.spacing),
+  }
+  if (typeof o.follow === 'boolean') spec.follow = o.follow
+  return spec
+}
+
 /** THE reader. Every consumer goes through this — the painter, the pad helper, the SVG
  *  writer, the agent and the inspector — so they cannot disagree about what a layer's
  *  strokes are. */
@@ -120,7 +136,21 @@ export function strokeStackOf(layer: StrokeHost | null | undefined): StrokeInsta
   const legacyPaint = layer.kind === 'text' ? layer.strokeColor : layer.stroke
   const legacyLive = hasInk(legacyPaint) && num(layer.strokeWidth) > 0
   if (allIded && !legacyLive) {
-    return known.map(s => ({ ...s, visible: s.visible !== false })) as unknown as StrokeInstance[]
+    return known.map(s => {
+      const visible = s.visible !== false
+      // FINDING 1 (Task 6 review): `style: 'shapes'` with a missing or malformed `shapes`
+      // used to fall straight through the painter's `if (shapes)` check and paint a full
+      // BAND with whatever stale `width` the row still carried — the shape an inspector
+      // writing `style` and `shapes` in two patches (or any older writer) can produce.
+      // Guaranteed HERE, not in the painter: `strokeStackOf` is the one place the painter,
+      // the SVG writer and the agent all read a layer's strokes through, so a style:'shapes'
+      // entry ALWAYS carrying a real (if inert) `shapes` object here means none of those
+      // consumers can independently get the "missing payload" case wrong.
+      if ((s as { style?: unknown }).style === 'shapes') {
+        return { ...s, visible, shapes: normalizeShapeSpec((s as { shapes?: unknown }).shapes) }
+      }
+      return { ...s, visible }
+    }) as unknown as StrokeInstance[]
   }
   if (!legacyLive) return []
   const one: StrokeInstance = {

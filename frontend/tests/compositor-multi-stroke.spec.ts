@@ -736,3 +736,25 @@ test("a polygon's shapes stroke marches the edge as DRAWN, not its bounding-box 
   expect(isRed(await pixelAt(page, 0.5, 0.15)), 'a mark sits ON the drawn apex').toBe(true)
   expect(isRed(await pixelAt(page, 0.5, 0.19)), 'and not 18 px below it').toBe(false)
 })
+
+/**
+ * FINDING 1 (Task 6 review) — a shapes stroke with no `shapes` payload must paint NOTHING,
+ * never a band.
+ *
+ * `style: 'shapes'` with a missing `shapes` object is exactly what an inspector writing
+ * `style` and `shapes` in two separate patches (or any older writer) can produce for one
+ * frame. `width` is left at a real, non-zero value on purpose — a leftover band width the
+ * row still carries from before it became a shapes stroke — because the bug this guards
+ * against is that leftover `width` reaching `paintStrokeBand` and painting a full band
+ * around the rect once `shapes` falls through as falsy.
+ */
+test('a shapes stroke with no shapes payload paints nothing, not a band', async ({ page }) => {
+  await openCompositor(page)
+  await page.evaluate(() => (window as any).__compositorSetLayers([{
+    id: 'r', kind: 'rect', x: 0.5, y: 0.5, w: 0.3, h: 0.3, rotation: 0, opacity: 1, visible: true,
+    fill: 'none', radius: 0,
+    strokes: [{ id: 's1', paint: '#ff0000', width: 0.05, style: 'shapes' }],
+  }]))
+  await stackPixels(page)
+  expect(await inkBlobs(page, 'red', 1), 'no red ink anywhere — no band, no marks').toBe(0)
+})

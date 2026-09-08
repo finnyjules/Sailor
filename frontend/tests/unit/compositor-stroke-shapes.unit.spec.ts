@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { offsetPolyline, shapePlacements, shapeStrokeGuide, shapeStrokeGuideFit } from '~/lib/compositor/strokeShapes'
+import {
+  offsetPolyline, shapePlacements, shapeStrokeGuide, shapeStrokeGuideFit,
+  pathOutlineFlattenTolerance,
+} from '~/lib/compositor/strokeShapes'
 import { polygonPathData } from '~/lib/compositor/polygonGeometry'
 import { guideFromPolyline } from '~/lib/compositor/textPath'
+import { DEFAULT_FLATTEN_TOLERANCE } from '~/lib/compositor/pathFlatten'
 
 describe('offsetPolyline', () => {
   it('returns the points unchanged at distance 0', () => {
@@ -215,5 +219,51 @@ describe('shapeStrokeGuideFit', () => {
   it('is null on the same inputs `shapeStrokeGuide` refuses', () => {
     expect(shapeStrokeGuideFit('', 0)).toBeNull()
     expect(shapeStrokeGuideFit('not a path', 0)).toBeNull()
+  })
+})
+
+/**
+ * FINDING 2 (Task 6 review) — the flatten tolerance for a shapes stroke on a PATH layer
+ * must account for the layer's `scale`, not just its (fixed at 1) `widthScale`.
+ *
+ * A path layer's `d` is flattened in its own LOCAL units, but drawn under a ctx already
+ * scaled by `layer.scale * W` (see `drawPath`). `DEFAULT_FLATTEN_TOLERANCE` targets
+ * `DEFAULT_FLATTEN_TOLERANCE * W` canvas PIXELS (pathFlatten.ts's own header). So the
+ * tolerance handed to the flattener — which works in `d`'s local units — must be divided
+ * by however many device pixels one local unit renders as (`pixelPerUnit`), or a scaled
+ * path gets the wrong on-canvas chord accuracy: at `scale: 3` on a 1200-wide frame the old
+ * `DEFAULT_FLATTEN_TOLERANCE * 1` (unit was always 1 for a path) let the chord error grow
+ * to `0.0015 * 3 * 1200` = 5.4 px, not the ~1.8 px the old comment claimed.
+ */
+describe('pathOutlineFlattenTolerance', () => {
+  it('is unchanged for a rect/ellipse outline (already in pixels, pixelPerUnit 1)', () => {
+    const W = 1200
+    expect(pathOutlineFlattenTolerance(1, W)).toBeCloseTo(DEFAULT_FLATTEN_TOLERANCE * W, 10)
+  })
+
+  it('gives a path layer the SAME on-canvas chord accuracy at scale 1 and scale 3', () => {
+    const W = 1200
+    const tolAtScale1 = pathOutlineFlattenTolerance(1 * W, W)
+    const tolAtScale3 = pathOutlineFlattenTolerance(3 * W, W)
+    // At scale 1 this is unchanged from the old (unscaled) behaviour.
+    expect(tolAtScale1).toBeCloseTo(DEFAULT_FLATTEN_TOLERANCE, 12)
+    // At scale 3 the LOCAL-unit tolerance must shrink by 3× so the on-canvas pixel error
+    // — local tolerance × pixelPerUnit — comes out the same at both scales.
+    expect(tolAtScale3).toBeCloseTo(DEFAULT_FLATTEN_TOLERANCE / 3, 12)
+    expect(tolAtScale1 * (1 * W)).toBeCloseTo(tolAtScale3 * (3 * W), 6)
+  })
+
+  it('reproduces, then fixes, the exact 5.4 px the brief measured (not the claimed 1.8 px)', () => {
+    const W = 1200
+    const scale = 3
+    // The OLD formula: `DEFAULT_FLATTEN_TOLERANCE * o.unit`, with `o.unit` fixed at 1 for
+    // a path regardless of `scale` — i.e. it never divided by pixelPerUnit at all.
+    const oldToleranceInLocalUnits = DEFAULT_FLATTEN_TOLERANCE * 1
+    const oldPixelError = oldToleranceInLocalUnits * (scale * W)
+    expect(oldPixelError).toBeCloseTo(5.4, 6)
+
+    const fixedTolerance = pathOutlineFlattenTolerance(scale * W, W)
+    const fixedPixelError = fixedTolerance * (scale * W)
+    expect(fixedPixelError).toBeCloseTo(DEFAULT_FLATTEN_TOLERANCE * W, 6)   // back to ~1.8 px
   })
 })

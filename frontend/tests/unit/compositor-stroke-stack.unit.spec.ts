@@ -71,6 +71,39 @@ describe('strokeStackOf — read-through', () => {
     expect(stack).toEqual([])
   })
 
+  it('guarantees a style:"shapes" entry a usable `shapes` object, even with none stored — so it can never fall through to a band', () => {
+    // No `shapes` at all — the exact shape Task 7's inspector (or any older writer) can
+    // produce mid-edit, per Finding 1: a stroke asking for `style: 'shapes'` but carrying
+    // no payload. `width` is deliberately left non-zero (a leftover band value the row
+    // still carries) — that must NOT reach a band paint.
+    const stack = strokeStackOf({
+      kind: 'rect',
+      strokes: [{ id: 's1', paint: '#ff0000', width: 0.05, style: 'shapes' }],
+      stroke: '', strokeWidth: 0,
+    })
+    expect(stack).toHaveLength(1)
+    expect(stack[0]!.style).toBe('shapes')
+    // The structural guarantee: `shapes` is always a real object here, so the painter's
+    // `if (shapes) { …; continue }` branch is always taken for a shapes-style entry and
+    // the band arm beneath it can never run, no matter what `width` says.
+    expect(stack[0]!.shapes).toBeTruthy()
+    expect(typeof stack[0]!.shapes?.shapeId).toBe('string')
+    expect(typeof stack[0]!.shapes?.size).toBe('number')
+    expect(typeof stack[0]!.shapes?.spacing).toBe('number')
+  })
+
+  it('leaves a usable `shapes` payload alone', () => {
+    const stack = strokeStackOf({
+      kind: 'rect',
+      strokes: [{
+        id: 's1', paint: '#ff0000', width: 0.05, style: 'shapes',
+        shapes: { shapeId: 'star', size: 0.02, spacing: 0.03, follow: false },
+      }],
+      stroke: '', strokeWidth: 0,
+    })
+    expect(stack[0]!.shapes).toEqual({ shapeId: 'star', size: 0.02, spacing: 0.03, follow: false })
+  })
+
   // A BRUSH layer's `strokes` is a PaintStroke[] — freehand path data, a completely
   // different meaning of the same field name. Today's PaintStroke happens to carry
   // neither an `id` nor a `paint`, so the filter would drop it anyway; that is a

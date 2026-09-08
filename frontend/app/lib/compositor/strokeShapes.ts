@@ -9,12 +9,36 @@
  *
  * Nothing here draws. The painter decides what a mark looks like.
  */
-import { type FlatPoint, longestSubpath } from '~/lib/compositor/pathFlatten'
+import { type FlatPoint, longestSubpath, DEFAULT_FLATTEN_TOLERANCE } from '~/lib/compositor/pathFlatten'
 import { type Guide, guideFromPolyline } from '~/lib/compositor/textPath'
 
 /** A hard ceiling on marks per stroke. A spacing near zero would otherwise ask for
  *  millions and hang the draw loop; the cap turns a bad dial into a dense ring. */
 export const SHAPE_STROKE_MAX_MARKS = 2000
+
+/**
+ * The flatten tolerance for a shapes stroke's outline, converted into that outline's OWN
+ * units from a target expressed in on-canvas PIXELS.
+ *
+ * `DEFAULT_FLATTEN_TOLERANCE` (pathFlatten.ts) is a fraction of canvas width — its header
+ * targets `DEFAULT_FLATTEN_TOLERANCE * W` canvas pixels of chord error. A rect or ellipse's
+ * outline (`outlinePathData`) is already emitted in device PIXELS, so one outline unit IS
+ * one canvas pixel (`pixelPerUnit: 1`) and this returns `DEFAULT_FLATTEN_TOLERANCE * W`
+ * unchanged.
+ *
+ * A path layer is different: its `d` is flattened in its own LOCAL units, but drawn under a
+ * ctx already scaled by `layer.scale * W` (see `drawPath`), so ONE local unit renders as
+ * `layer.scale * W` canvas pixels — that is `pixelPerUnit` for a path. Dividing the pixel
+ * target by it converts back down to `DEFAULT_FLATTEN_TOLERANCE / layer.scale` in `d`'s own
+ * units (`W` cancels), which is what keeps a SCALED path layer's on-canvas chord accuracy
+ * the same as an unscaled one. The bug this fixes: using a path's `widthScale` (always 1,
+ * since its ctx is pre-scaled instead of its stored widths) as a stand-in for `pixelPerUnit`
+ * left the chord error growing linearly with `scale` — 5.4 px at `scale: 3` on a 1200-wide
+ * frame, not the ~1.8 px the un-scale-aware formula's own comment claimed.
+ */
+export function pathOutlineFlattenTolerance(pixelPerUnit: number, W: number): number {
+  return (DEFAULT_FLATTEN_TOLERANCE * W) / (pixelPerUnit || 1)
+}
 
 const dedupe = (pts: readonly FlatPoint[]): FlatPoint[] => {
   const out: FlatPoint[] = []

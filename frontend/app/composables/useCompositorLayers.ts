@@ -49,7 +49,7 @@ import {
   polygonPathData, starPathData, roundedRectPathData, ellipsePathData,
 } from '~/lib/compositor/polygonGeometry'
 // Task 5's pure geometry for a SHAPES stroke, and the shape library it marches.
-import { shapePlacements, shapeStrokeGuideFit } from '~/lib/compositor/strokeShapes'
+import { shapePlacements, shapeStrokeGuideFit, pathOutlineFlattenTolerance } from '~/lib/compositor/strokeShapes'
 import { DEFAULT_FLATTEN_TOLERANCE } from '~/lib/compositor/pathFlatten'
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapePath2D } from '~/lib/shapes/path2d'
@@ -2505,6 +2505,15 @@ function paintShapeStroke(ctx: CanvasRenderingContext2D, o: {
   spec: ShapeStrokeSpec
   style: (c: CanvasRenderingContext2D) => string | CanvasGradient | CanvasPattern
   unit: number
+  /** Flatten tolerance for `pathData`, in `pathData`'s OWN units — see
+   *  `pathOutlineFlattenTolerance`'s header. NOT simply `DEFAULT_FLATTEN_TOLERANCE * unit`:
+   *  `unit` converts `size`/`spacing`/`distance`, which for a path layer is 1 regardless of
+   *  the layer's `scale` (its ctx is pre-scaled instead) — using it for tolerance too left a
+   *  scaled path's chord error growing with `scale` uncorrected (Finding 2, Task 6 review:
+   *  5.4 px at `scale: 3` on a 1200-wide frame, not the ~1.8 px a fixed `unit`-based
+   *  tolerance implies). The caller computes this because only it knows the outline's
+   *  actual pixels-per-unit (1 for rect/ellipse, `scale * W` for a path). */
+  tolerance: number
 }): void {
   const shape = shapeById(o.spec.shapeId)
   if (!shape) return
@@ -2513,13 +2522,7 @@ function paintShapeStroke(ctx: CanvasRenderingContext2D, o: {
   if (!(size > 0) || !(spacing > 0)) return
   const [bx, by, bw, bh] = shape.box
   if (!(bw > 0) || !(bh > 0)) return
-  // The flatten tolerance is a DISTANCE in the path's own units, and the default is
-  // calibrated for local units (1 = the canvas width). A rect/ellipse outline arrives in
-  // PIXELS, where that default asks for chords accurate to a seven-hundredth of a pixel
-  // and spends the flattener's whole 60k-point budget on one ring. Scaling it by `unit`
-  // keeps the accuracy the default intends — and leaves a path layer, whose `unit` is 1,
-  // on precisely the default.
-  const fit = shapeStrokeGuideFit(o.pathData, o.distance, DEFAULT_FLATTEN_TOLERANCE * o.unit)
+  const fit = shapeStrokeGuideFit(o.pathData, o.distance, o.tolerance)
   if (!fit) return
   const marks = shapePlacements(fit.guide, spacing)
   if (!marks.length) return
@@ -2584,6 +2587,13 @@ function paintStrokeStack(
      *  style simply paints nothing rather than falling back to a band that was not asked
      *  for. */
     outline?: string | null
+    /** Flatten tolerance for `outline`, in `outline`'s OWN units — see
+     *  `pathOutlineFlattenTolerance`'s header for why a path layer cannot reuse
+     *  `widthScale` for this the way rect/ellipse do. Omitted ⇒
+     *  `DEFAULT_FLATTEN_TOLERANCE * widthScale`, which is correct for rect/ellipse (whose
+     *  outline is already in pixels) and is the fallback a future stroked kind gets if it
+     *  forgets to pass one. */
+    outlineTolerance?: number
   },
 ): void {
   const stack: StrokeInstance[] = strokeStackOf(layer as Parameters<typeof strokeStackOf>[0])
@@ -2595,18 +2605,26 @@ function paintStrokeStack(
     // `hasPaint` is re-checked here (not just in the reader) so the painter keeps the
     // exact gate it always had: a gradient with no stops paints nothing.
     if (st.visible === false || !hasPaint(st.paint)) continue
-    const shapes = (st.style ?? 'band') === 'shapes' ? st.shapes : null
-    if (shapes) {
+    // Dispatch on STYLE first, and `continue` unconditionally inside — not on whether
+    // `st.shapes` happens to be truthy. `strokeStackOf` guarantees a style:'shapes' entry
+    // always carries a real (if inert) `shapes` object, so `st.shapes` IS always truthy
+    // here today; branching on style anyway means this loop cannot fall into the band arm
+    // below for a shapes-style entry even if that upstream guarantee were ever weakened —
+    // the missing/malformed-payload case (Finding 1, Task 6 review) used to fall through
+    // to a full band paint here, using whatever stale `width` the row still carried.
+    if ((st.style ?? 'band') === 'shapes') {
       // A shapes stroke is sized by its own `size`, not by the band `width` the row still
       // carries — so the zero-width gate below is the wrong question to ask of it.
-      // `paintShapeStroke` does its own `size > 0` / `spacing > 0` check.
-      if (o.outline) {
+      // `paintShapeStroke` does its own `size > 0` / `spacing > 0` check, and a zero/empty
+      // `shapeId` (the normalised "no payload" case) resolves to no shape and no-ops too.
+      if (o.outline && st.shapes) {
         paintShapeStroke(ctx, {
           pathData: o.outline,
           distance: (st.distance ?? 0) * o.widthScale,
-          spec: shapes,
+          spec: st.shapes,
           style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx),
           unit: o.widthScale,
+          tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
         })
       }
       continue
@@ -3360,6 +3378,10 @@ function drawPath(ctx: CanvasRenderingContext2D, layer: PathLayer, W: number) {
     // why a polygon/star, rewritten into a path layer by `drawLayerContent`, gets a shapes
     // stroke for free.
     outline: layer.d,
+    // `s` (= `layer.scale * W`) is how many canvas pixels ONE unit of `d` renders as under
+    // this ctx's own `ctx.scale(s, s)` above — the `pixelPerUnit` a scaled path needs so
+    // its shapes-stroke chord accuracy doesn't grow with `scale` (Finding 2, Task 6 review).
+    outlineTolerance: pathOutlineFlattenTolerance(s, W),
     // The scratch canvas inherits this ctx's transform but not its line joins.
     build: (c) => { c.lineJoin = 'round'; c.lineCap = 'round' },
   })
