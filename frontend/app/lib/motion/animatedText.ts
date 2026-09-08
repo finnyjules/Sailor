@@ -87,7 +87,11 @@ function motionTextStroke(layer: TextLayer): StrokeInstance | null {
     if (st.visible === false) continue
     if (!(st.width > 0)) continue
     if ((st.style ?? 'band') !== 'band') continue
-    if (st.distance) continue
+    // Non-finite reads as 0 (on-edge), matching `strokeDistancePx` on the still frame —
+    // otherwise a NaN/Infinity distance was truthy here and the stroke vanished from every
+    // motion clip and baked video while the still frame kept drawing it on the edge.
+    const distance = Number.isFinite(st.distance) ? st.distance : 0
+    if (distance) continue
     if (typeof st.paint === 'string' && (st.paint === 'transparent' || st.paint === 'none' || st.paint === '')) continue
     if (!st.paint) continue
     return st

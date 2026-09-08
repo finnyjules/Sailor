@@ -115,4 +115,21 @@ describe('drawAnimatedTextLayer reads the stroke STACK', () => {
     expect(log.some(l => l.startsWith('lineWidth='))).toBe(false)
     expect(log.filter(l => l.startsWith('fillText('))).toHaveLength(2)   // not a vacuous pass
   })
+
+  /**
+   * A MALFORMED `distance` must read as 0 here exactly as it does on the still frame's
+   * `strokeDistancePx` (useCompositorLayers.ts) — on-edge, not "distant". Before this fix,
+   * `if (st.distance) continue` treated `NaN` and `Infinity` as truthy and silently dropped
+   * the stroke, so a text layer with a malformed distance showed its outline on the still
+   * frame and NO outline in a motion clip or baked video — the two renderers disagreeing
+   * about a value neither of them can call "distant".
+   */
+  it('a non-finite distance draws on the edge, agreeing with the still frame', () => {
+    for (const distance of [NaN, Infinity, undefined]) {
+      const log = record(textLayer({ strokes: [band('a', 0.01, '#ff0000', { distance })] }))
+      expect(strokes(log)).toHaveLength(2)
+      expect(lastBefore(log, 'lineWidth=')).toBe(`lineWidth=${0.01 * W}`)
+      expect(lastBefore(log, 'strokeStyle=')).toBe('strokeStyle=#ff0000')
+    }
+  })
 })
