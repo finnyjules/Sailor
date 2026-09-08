@@ -3347,6 +3347,9 @@ function applyGlassFromLayer(
   //    content) onto its own device-sized offscreen and sample that instead of the
   //    full backdrop. Resolution is pure (resolveGlassSource) and mask-style —
   //    byKey.get(key) — so a dangling key transparently falls back to `snap`.
+  // Bound-layer mode is active only when the key resolves to a real live item; a dangling
+  // key falls back to `snap` (opaque) and needs none of the alpha recovery below.
+  const boundTarget = spec.readsLayerKey && byKey ? byKey.get(spec.readsLayerKey) : undefined
   const source = resolveGlassSource(spec, byKey, snap, (item: StackItem) => {
     const c = mk()
     const ictx = c.getContext('2d')
@@ -3364,6 +3367,42 @@ function applyGlassFromLayer(
   const cctx = clipped.getContext('2d')
   if (!cctx) return false
   cctx.drawImage(lens, 0, 0)
+
+  // 2b. Bound-layer mode is alpha-aware. The bound layer is transparent outside its own
+  //     shape, but the shader returns OPAQUE black there (it samples transparent-black and
+  //     forces alpha = 1), which would fill the pane with black instead of letting the
+  //     backdrop show through. Recover a per-pixel alpha by refracting the layer's COVERAGE
+  //     (its silhouette as white-on-opaque-black) through the SAME shader — so the empty
+  //     areas AND the reeded spread past the shape's edges get the exact same displacement —
+  //     then multiply that luminance into the lens alpha. "Layers behind" samples an opaque
+  //     snapshot, so boundTarget is undefined and this branch never runs — it is unchanged.
+  if (boundTarget) {
+    const cov = mk()
+    const kctx = cov.getContext('2d')
+    if (kctx) {
+      kctx.drawImage(source, 0, 0)                            // colour + real transparency
+      kctx.globalCompositeOperation = 'source-in'
+      kctx.fillStyle = '#ffffff'; kctx.fillRect(0, 0, w, h)   // white where the layer is
+      kctx.globalCompositeOperation = 'destination-over'
+      kctx.fillStyle = '#000000'; kctx.fillRect(0, 0, w, h)   // opaque black behind
+      // render()'s canvas is reused per call — this invalidates `lens`, but it is already
+      // copied into `clipped`; copy covLens out at once, before any further render.
+      const covLens = renderFieldWithBase(spec, cov, w, h)
+      const cl = mk()
+      const clc = cl.getContext('2d')
+      if (clc) {
+        clc.drawImage(covLens, 0, 0)
+        const lum = clc.getImageData(0, 0, w, h).data
+        const img = cctx.getImageData(0, 0, w, h)
+        const a = img.data
+        for (let i = 0; i < a.length; i += 4) {
+          const L = (lum[i] ?? 0) * 0.299 + (lum[i + 1] ?? 0) * 0.587 + (lum[i + 2] ?? 0) * 0.114
+          a[i + 3] = Math.round((a[i + 3] ?? 0) * L / 255)
+        }
+        cctx.putImageData(img, 0, 0)
+      }
+    }
+  }
 
   // 3. Clip the refracted result to this layer's own silhouette (+ its own mask ref,
   //    mirroring applyBackdropBlur). The ghost uses an opaque solid fill so the clip is
