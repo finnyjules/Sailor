@@ -113,8 +113,9 @@ import {
   type StrokeInstance,
 } from '~/lib/compositor/strokeStack'
 import {
-  strokeInspectorRows, strokeStylePatch, strokeDistanceOf, strokeStyleOf,
+  strokeInspectorRows, strokeStylePatch, strokeWobblePatch, strokeDistanceOf, strokeStyleOf,
   showsTextDistantNote, TEXT_DISTANT_STROKE_NOTE,
+  type StrokeWobbleChoice,
 } from '~/lib/compositor/strokeInspector'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import {
@@ -2106,6 +2107,13 @@ function updateActiveStroke(patch: Partial<StrokeInstance>) {
 function setActiveStrokeStyle(style: string) {
   const st = activeStroke.value
   if (st) updateActiveStroke(strokeStylePatch(st, style === 'shapes' ? 'shapes' : 'band'))
+}
+/** Wobble and its seed in ONE patch: turning it on from Off must seed `wobbleAmount` and
+ *  `wobbleLength` in the same write, or the first render is a wobble at nothing — the exact
+ *  half-applied-edit shape `setActiveStrokeStyle` already guards against for Style. */
+function setActiveStrokeWobble(next: string) {
+  const st = activeStroke.value
+  if (st) updateActiveStroke(strokeWobblePatch(st, (next === 'wave' || next === 'zigzag' ? next : 'off') as StrokeWobbleChoice))
 }
 function updateActiveStrokeShapes(patch: Record<string, unknown>) {
   const st = activeStroke.value
@@ -7395,15 +7403,25 @@ onUnmounted(() => {
             <StrokeStyleRow class="mt-1.5"
               :align="activeStroke!.align" :dash="activeStroke!.dash"
               :join="activeStroke!.join" :stroke-style="strokeStyleOf(activeStroke!)"
+              :wobble="activeStroke!.wobble" :wobble-amount="activeStroke!.wobbleAmount"
+              :wobble-length="activeStroke!.wobbleLength" :wobble-phase="activeStroke!.wobblePhase"
               :show-align="hasStrokeRow('align')"
               :show-join="hasStrokeRow('join')"
               :show-dash="hasStrokeRow('dash')"
               :show-style="hasStrokeRow('style')"
+              :show-wobble="hasStrokeRow('wobble')"
+              :show-wobble-amount="hasStrokeRow('wobbleAmount')"
+              :show-wobble-length="hasStrokeRow('wobbleLength')"
+              :show-wobble-phase="hasStrokeRow('wobblePhase')"
               :out-width="outWidth" :scale="activeStrokeScale"
               @update:align="(v: any) => updateActiveStroke({ align: v })"
               @update:dash="(v: any) => updateActiveStroke({ dash: v })"
               @update:join="(v: any) => updateActiveStroke({ join: v })"
-              @update:style="(v: any) => setActiveStrokeStyle(v)" />
+              @update:style="(v: any) => setActiveStrokeStyle(v)"
+              @update:wobble="(v: any) => setActiveStrokeWobble(v)"
+              @update:wobbleAmount="(v: number) => updateActiveStroke({ wobbleAmount: v })"
+              @update:wobbleLength="(v: number) => updateActiveStroke({ wobbleLength: v })"
+              @update:wobblePhase="(v: number) => updateActiveStroke({ wobblePhase: v })" />
             <ShapeStrokeRow v-if="hasStrokeRow('shapes') && activeStroke!.shapes" class="mt-1.5"
               :spec="activeStroke!.shapes!" :out-width="outWidth" :scale="activeStrokeScale"
               @update="(patch: any) => updateActiveStrokeShapes(patch)" />

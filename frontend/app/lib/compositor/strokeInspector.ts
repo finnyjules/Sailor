@@ -30,17 +30,34 @@
  *    `paintShapeStroke` has none. So: band style, distance 0.
  *  - `shapes` needs a real outline to flatten; `strokeSupportsShapes` already says which
  *    kinds have one.
+ *  - `wobble` is a property of the LINE, not the style — `shapeStrokeGuideFit` and the band's
+ *    displaced-path route both take it, so it shows for band AND shapes, on any kind with a
+ *    real outline to flatten. Same requirement as `shapes`, so the same gate: `strokeSupportsShapes`.
+ *    A Frame text layer stores a CSS family name, not glyph outlines, so it gets neither.
+ *  - `wobbleAmount` / `wobbleLength` / `wobblePhase` only mean anything once `wobble` is set,
+ *    so they follow it.
+ *  - `join` WIDENS for wobble: a wobbled band flattens the outline and strokes a real Path2D
+ *    (see `strokeShapes.ts`), which — unlike `strokeAligned`'s dilation-diff band — DOES
+ *    honour `lineJoin`. So Corners must show at distance 0 too when a wobble is live, or a
+ *    zigzag's points are governed by a hidden control.
  *
  * The repo's rule is to HIDE an inapplicable row, never to grey it.
  */
 import {
-  strokeSupportsShapes,
-  type ShapeStrokeSpec, type StrokeInstance, type StrokeJoin, type StrokeStyle,
+  strokeSupportsShapes, STROKE_WOBBLES,
+  type ShapeStrokeSpec, type StrokeInstance, type StrokeJoin, type StrokeStyle, type StrokeWobble,
 } from '~/lib/compositor/strokeStack'
 
 /** One row of the stroke inspector, in the order the panel draws them. */
-export const STROKE_ROW_ORDER = ['paint', 'width', 'distance', 'join', 'align', 'dash', 'style', 'shapes'] as const
+export const STROKE_ROW_ORDER = [
+  'paint', 'width', 'distance', 'wobble', 'wobbleAmount', 'wobbleLength', 'wobblePhase',
+  'join', 'align', 'dash', 'style', 'shapes',
+] as const
 export type StrokeRowId = typeof STROKE_ROW_ORDER[number]
+
+/** The select's value type: the two real shapes plus the sentinel that means "not wobbling",
+ *  which is not `StrokeWobble` itself — `undefined` has no HTML `<option value>`. */
+export type StrokeWobbleChoice = StrokeWobble | 'off'
 
 /** The distance the PAINTER would use — `strokeDistancePx`'s own coercion, so a stored
  *  `NaN` gates as the on-the-edge stroke it actually renders as. */
@@ -53,15 +70,31 @@ export function strokeStyleOf(stroke: Pick<StrokeInstance, 'style'>): StrokeStyl
   return stroke.style === 'shapes' ? 'shapes' : 'band'
 }
 
+/** The wobble the PAINTER would use, as the select's own value space: `'off'` when the
+ *  stored `wobble` isn't one of `STROKE_WOBBLES` — matching `resolveWobble`'s off rule in
+ *  `strokeStack.ts` for the one bit that gates rows: an unrecognised shape reads as off. */
+export function strokeWobbleOf(stroke: Pick<StrokeInstance, 'wobble'>): StrokeWobbleChoice {
+  return (STROKE_WOBBLES as readonly string[]).includes(stroke.wobble ?? '') ? (stroke.wobble as StrokeWobble) : 'off'
+}
+
 /** THE gate. Every row the modal draws asks this list whether it belongs. */
 export function strokeInspectorRows(kind: string, stroke: StrokeInstance): StrokeRowId[] {
   const band = strokeStyleOf(stroke) === 'band'
   const d = strokeDistanceOf(stroke)
   const shapeable = strokeSupportsShapes(kind)
+  // Wobble needs a real outline to flatten, same requirement `shapes` has — and it applies
+  // regardless of style, since it displaces the LINE both a band and marching shapes walk.
+  const wobbling = shapeable && strokeWobbleOf(stroke) !== 'off'
   const rows: StrokeRowId[] = ['paint']
   if (band) rows.push('width')
   rows.push('distance')
-  if (band && d !== 0) rows.push('join')
+  if (shapeable) {
+    rows.push('wobble')
+    if (wobbling) rows.push('wobbleAmount', 'wobbleLength', 'wobblePhase')
+  }
+  // Widened for wobble: a wobbled band strokes a real path and DOES honour `lineJoin`, unlike
+  // `strokeAligned`'s distance-0 dilation-diff band — see the header comment.
+  if (band && (d !== 0 || wobbling)) rows.push('join')
   // Text at distance 0 is `strokeText`, which is always centred.
   if (band && (kind !== 'text' || d !== 0)) rows.push('align')
   if (band && d === 0) rows.push('dash')
@@ -80,6 +113,35 @@ export const STROKE_STYLE_OPTIONS: { value: StrokeStyle; label: string }[] = [
   { value: 'band', label: 'Band' },
   { value: 'shapes', label: 'Shapes' },
 ]
+export const STROKE_WOBBLE_OPTIONS: { value: StrokeWobbleChoice; label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'wave', label: 'Wave' },
+  { value: 'zigzag', label: 'Zigzag' },
+]
+
+/** The seed a stroke's Amount/Every get the first time Wobble is switched on from Off — the
+ *  same reasoning as `seedShapeSpec`: a first render that shows nothing sends the user
+ *  hunting for a dial to raise from zero. 12px of deviation once every 60px on a 1200-wide
+ *  frame — clearly visible, not a full redesign of the line. */
+export function seedWobbleFields(): { wobbleAmount: number; wobbleLength: number } {
+  return { wobbleAmount: 0.01, wobbleLength: 0.05 }
+}
+
+/**
+ * The patch that changes a stroke's wobble — ONE object, never two writes.
+ *
+ * Turning it ON from Off seeds `wobbleAmount` and `wobbleLength` in the SAME patch, so the
+ * first render shows something rather than a wobble at whatever stale (or absent) amount the
+ * stroke still carried — the exact half-applied-edit shape `strokeStylePatch` already guards
+ * against for Style. Switching between Wave and Zigzag, or back to Off, leaves Amount/Every/
+ * Phase exactly as they were: a user who dials in a look and flips the shape should not lose
+ * it, and switching back to a shape they already tuned should not reseed over their edit.
+ */
+export function strokeWobblePatch(stroke: StrokeInstance, next: StrokeWobbleChoice): Partial<StrokeInstance> {
+  if (next === 'off') return { wobble: undefined }
+  const wasOff = strokeWobbleOf(stroke) === 'off'
+  return { wobble: next, ...(wasOff ? seedWobbleFields() : {}) }
+}
 
 /** The seed a stroke gets the first time it is switched to Shapes: marks at 2× the band's
  *  width, spaced 4×, turning with the edge — so the very first render shows something

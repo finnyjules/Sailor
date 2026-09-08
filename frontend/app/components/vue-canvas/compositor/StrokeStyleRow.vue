@@ -3,9 +3,18 @@
 /**
  * The outline-style rows every stroked layer shares in the Frame inspector:
  *
+ *  - Wobble (`showWobble`): Off, Wave or Zigzag — a displacement of the LINE itself, so it
+ *    reaches both a Band and marching Shapes. Needs a real outline to flatten, so it is
+ *    hidden on text — same requirement `showStyle` already has (`strokeSupportsShapes`).
+ *  - Amount / Every / Phase (`showWobbleAmount` / `showWobbleLength` / `showWobblePhase`):
+ *    only mean anything once Wobble is on, so each is its own gate from the same host rule
+ *    rather than a local `wobble !== 'off'` check here — the wiring test needs a real prop
+ *    per row to be able to catch one wired to the wrong gate.
  *  - Corners (`showJoin`): how a stroke set at a DISTANCE turns a corner — Sharp (miter)
- *    or Rounded. Only reached at a non-zero distance, because `strokeAligned` — the
- *    distance-0 path — never touches `lineJoin`; see `strokeInspectorRows`.
+ *    or Rounded. Reached at a non-zero distance, because `strokeAligned` — the distance-0
+ *    path — never touches `lineJoin`; ALSO reached with Wobble on, because a wobbled band
+ *    flattens the outline and strokes a real path, which does honour the join. See
+ *    `strokeInspectorRows`.
  *  - Align (closed shapes only): where the outline sits relative to the edge —
  *    Center (what shapes always did), Inside, Outside.
  *  - Solid / Dashed (`showDash`, on by default): picking Dashed reveals the dash and gap
@@ -16,16 +25,20 @@
  *
  * Emits patches for the layer's own `strokeAlign` / `strokeDash` fields (or, in the stroke
  * stack, for one instance's); the host writes them with its usual setLocal, so undo and
- * persistence are unchanged. `showJoin` / `showStyle` are off by default, so the six
- * single-stroke call sites that predate the stack are untouched.
+ * persistence are unchanged. `showJoin` / `showStyle` / `showWobble*` are off by default, so
+ * the six single-stroke call sites that predate the stack (and the wobble feature) are
+ * untouched.
  *
  * Every select over an internal value carries human words — house rule: a raw slug must
  * never reach the DOM.
  */
 import { computed } from 'vue'
 import type { StrokeAlign, StrokeDash } from '~/composables/useCompositorLayers'
-import { STROKE_JOIN_OPTIONS, STROKE_STYLE_OPTIONS } from '~/lib/compositor/strokeInspector'
-import type { StrokeJoin, StrokeStyle } from '~/lib/compositor/strokeStack'
+import {
+  STROKE_JOIN_OPTIONS, STROKE_STYLE_OPTIONS, STROKE_WOBBLE_OPTIONS, strokeWobbleOf,
+  type StrokeWobbleChoice,
+} from '~/lib/compositor/strokeInspector'
+import type { StrokeJoin, StrokeStyle, StrokeWobble } from '~/lib/compositor/strokeStack'
 
 const props = withDefaults(defineProps<{
   align?: StrokeAlign
@@ -34,7 +47,7 @@ const props = withDefaults(defineProps<{
   showAlign?: boolean
   /** How a distance band turns a corner. Only meaningful with `showJoin`. */
   join?: StrokeJoin
-  /** Corners row — a stroke at a non-zero distance only (see the header). */
+  /** Corners row — a stroke at a non-zero distance, OR any wobble on (see the header). */
   showJoin?: boolean
   /** Dash row. Default ON, so every pre-stack call site is unchanged; the stroke stack
    *  turns it off for a stroke at a distance, which the painter ignores a dash on. */
@@ -45,6 +58,23 @@ const props = withDefaults(defineProps<{
   strokeStyle?: StrokeStyle
   /** Style row — kinds with a real outline to march shapes along (`strokeSupportsShapes`). */
   showStyle?: boolean
+  /** Off / Wave / Zigzag. Only meaningful with `showWobble`. Absent ⇒ off, same convention
+   *  as the stored field. */
+  wobble?: StrokeWobble
+  /** Wobble row — kinds with a real outline to flatten (`strokeSupportsShapes`); hidden on text. */
+  showWobble?: boolean
+  /** Peak deviation, same units as `width`/`dash`. Only meaningful with `showWobbleAmount`. */
+  wobbleAmount?: number
+  /** Amount row — only once Wobble is on. */
+  showWobbleAmount?: boolean
+  /** One full cycle, same units as `wobbleAmount`. Only meaningful with `showWobbleLength`. */
+  wobbleLength?: number
+  /** Every row — only once Wobble is on. */
+  showWobbleLength?: boolean
+  /** Degrees, where the cycle starts. Only meaningful with `showWobblePhase`. */
+  wobblePhase?: number
+  /** Phase row — only once Wobble is on. */
+  showWobblePhase?: boolean
   /** Output width in px — the same scale the inspector's other size fields use. */
   outWidth: number
   /**
@@ -60,7 +90,10 @@ const props = withDefaults(defineProps<{
   scale?: number
   // `showDash` defaults TRUE here and nowhere else: Vue casts an ABSENT Boolean prop to
   // `false`, not `undefined`, so a `showDash !== false` template guard would have silently
-  // removed the Dash row from all six single-stroke call sites that never pass it.
+  // removed the Dash row from all six single-stroke call sites that never pass it. Every
+  // OTHER `show*` prop here — including the four wobble ones — wants that same absent-⇒-false
+  // behaviour (none of those rows exist before this feature), so only `showDash` gets a
+  // `withDefaults` entry.
 }>(), { showDash: true })
 const scale = computed(() => {
   const s = props.scale
@@ -71,11 +104,17 @@ const emit = defineEmits<{
   (e: 'update:dash', v: StrokeDash | undefined): void
   (e: 'update:join', v: StrokeJoin): void
   (e: 'update:style', v: StrokeStyle): void
+  (e: 'update:wobble', v: StrokeWobbleChoice): void
+  (e: 'update:wobbleAmount', v: number): void
+  (e: 'update:wobbleLength', v: number): void
+  (e: 'update:wobblePhase', v: number): void
 }>()
 const join = computed<StrokeJoin>(() => (props.join === 'round' ? 'round' : 'sharp'))
 const styleValue = computed<StrokeStyle>(() => (props.strokeStyle === 'shapes' ? 'shapes' : 'band'))
+const wobbleValue = computed<StrokeWobbleChoice>(() => strokeWobbleOf({ wobble: props.wobble }))
 const JOIN_OPTIONS = STROKE_JOIN_OPTIONS
 const STYLE_OPTIONS = STROKE_STYLE_OPTIONS
+const WOBBLE_OPTIONS = STROKE_WOBBLE_OPTIONS
 
 const align = computed<StrokeAlign>(() => (props.align === 'inside' || props.align === 'outside' ? props.align : 'center'))
 const dashed = computed(() => !!props.dash)
@@ -96,6 +135,28 @@ const selClass = numClass + ' cursor-pointer'
 
 <template>
   <div class="space-y-1.5">
+    <div v-if="showWobble">
+      <div class="panel-label mb-1.5">Wobble</div>
+      <select :value="wobbleValue" :class="selClass" data-stroke-wobble
+        @change="emit('update:wobble', ($event.target as HTMLSelectElement).value as StrokeWobbleChoice)">
+        <option v-for="o in WOBBLE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+      </select>
+    </div>
+    <div v-if="showWobbleAmount">
+      <div class="panel-label mb-1">Amount</div>
+      <input v-scrubnum type="number" min="0" step="1" :value="px(props.wobbleAmount ?? 0)" :class="numClass" data-stroke-wobble-amount
+        @input="emit('update:wobbleAmount', Math.max(0, norm(parseFloat(($event.target as HTMLInputElement).value) || 0)))">
+    </div>
+    <div v-if="showWobbleLength">
+      <div class="panel-label mb-1">Every</div>
+      <input v-scrubnum type="number" min="0" step="1" :value="px(props.wobbleLength ?? 0)" :class="numClass" data-stroke-wobble-length
+        @input="emit('update:wobbleLength', Math.max(0, norm(parseFloat(($event.target as HTMLInputElement).value) || 0)))">
+    </div>
+    <div v-if="showWobblePhase">
+      <div class="panel-label mb-1">Phase</div>
+      <input v-scrubnum type="number" step="1" :value="Math.round(props.wobblePhase ?? 0)" :class="numClass" data-stroke-wobble-phase
+        @input="emit('update:wobblePhase', parseFloat(($event.target as HTMLInputElement).value) || 0)">
+    </div>
     <div v-if="showJoin">
       <div class="panel-label mb-1.5">Corners</div>
       <select :value="join" :class="selClass" data-stroke-join

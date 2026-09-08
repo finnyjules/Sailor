@@ -42,6 +42,10 @@ async function rows(page: Page) {
       dash: q('[data-stroke-dashed]'),
       style: q('[data-stroke-style]'),
       shapes: q('[data-testid="stroke-shapes-rows"]'),
+      wobble: q('[data-stroke-wobble]'),
+      wobbleAmount: q('[data-stroke-wobble-amount]'),
+      wobbleLength: q('[data-stroke-wobble-length]'),
+      wobblePhase: q('[data-stroke-wobble-phase]'),
     }
   })
 }
@@ -71,6 +75,8 @@ test.describe('stroke inspector — the rows that actually reach the screen', ()
       // is live. The two disagree here, which is what makes this case able to catch a
       // `:show-join` wired to `hasStrokeRow('dash')`.
       join: false, align: true, dash: true, style: true, shapes: false,
+      // Wobble itself shows (rect has an outline to flatten); off, so Amount/Every/Phase don't.
+      wobble: true, wobbleAmount: false, wobbleLength: false, wobblePhase: false,
     })
   })
 
@@ -81,10 +87,11 @@ test.describe('stroke inspector — the rows that actually reach the screen', ()
     expect(await rows(page)).toEqual({
       inspector: true, width: true, distance: true,
       join: true, align: true, dash: false, style: true, shapes: false,
+      wobble: true, wobbleAmount: false, wobbleLength: false, wobblePhase: false,
     })
   })
 
-  test('a SHAPES stroke hides every band-only row, Width included', async ({ page }) => {
+  test('a SHAPES stroke hides every band-only row, Width included — but keeps Wobble', async ({ page }) => {
     await pickFirstStroke(page, RECT('r2', [
       {
         id: 's1', paint: '#ffffff', width: 0.01, distance: 0, style: 'shapes',
@@ -97,11 +104,31 @@ test.describe('stroke inspector — the rows that actually reach the screen', ()
       // shapes stroke — this is the case that catches a deleted `v-if` on the Width row.
       width: false, distance: true, join: false, align: false, dash: false,
       style: true, shapes: true,
+      // Wobble is a property of the LINE, not the style — marching shapes walk the same
+      // wobbled guide a band would stroke, so it stays even though every band-only row left.
+      wobble: true, wobbleAmount: false, wobbleLength: false, wobblePhase: false,
     })
     await expect(page.locator('[data-stroke-shape]')).toBeVisible()
   })
 
-  test('a TEXT stroke on the edge: no Style row, and no Alignment either', async ({ page }) => {
+  test('a WOBBLED rect on the edge: Corners appears even at distance 0, and Amount/Every/Phase show', async ({ page }) => {
+    await pickFirstStroke(page, RECT('r2w', [
+      {
+        id: 's1', paint: '#ffffff', width: 0.01, distance: 0, align: 'center', join: 'sharp', style: 'band',
+        wobble: 'zigzag', wobbleAmount: 0.01, wobbleLength: 0.05, wobblePhase: 0,
+      },
+    ]))
+    expect(await rows(page)).toEqual({
+      inspector: true, width: true, distance: true,
+      // WIDENED gate: a wobbled band strokes a real path and DOES honour `lineJoin`, unlike
+      // the distance-0 dilation-diff band — this is the case that catches a `:show-join`
+      // left at the old `hasStrokeRow('join')` semantics if that gate were not widened.
+      join: true, align: true, dash: true, style: true, shapes: false,
+      wobble: true, wobbleAmount: true, wobbleLength: true, wobblePhase: true,
+    })
+  })
+
+  test('a TEXT stroke on the edge: no Style row, and no Alignment either — no Wobble either', async ({ page }) => {
     await pickFirstStroke(page, L({
       id: 't0', kind: 'text', x: 0.5, y: 0.5, text: 'Edge', fontFamily: 'Inter', fontWeight: 700,
       fontSize: 0.12, color: '#ffffff', align: 'center', lineHeight: 1.1,
@@ -110,8 +137,9 @@ test.describe('stroke inspector — the rows that actually reach the screen', ()
     expect(await rows(page)).toEqual({
       inspector: true, width: true, distance: true,
       // `textStrokePasses` reads neither align nor join at distance 0, and text has no
-      // outline to march shapes along.
+      // outline to march shapes along — nor one to wobble along.
       join: false, align: false, dash: true, style: false, shapes: false,
+      wobble: false, wobbleAmount: false, wobbleLength: false, wobblePhase: false,
     })
   })
 
@@ -124,6 +152,7 @@ test.describe('stroke inspector — the rows that actually reach the screen', ()
     expect(await rows(page)).toEqual({
       inspector: true, width: true, distance: true,
       join: true, align: true, dash: false, style: false, shapes: false,
+      wobble: false, wobbleAmount: false, wobbleLength: false, wobblePhase: false,
     })
     // …and the panel says out loud where a distant text stroke sits in the paint order.
     await expect(page.locator('[data-testid="stroke-text-distance-note"]')).toBeVisible()
@@ -147,6 +176,30 @@ test.describe('stroke inspector — the rows that actually reach the screen', ()
     })
     expect(stored.style).toBe('shapes')
     expect(stored.shapes).toBeTruthy()
+  })
+
+  test('picking Wave seeds Amount and Every in the SAME write — the rows appear at once', async ({ page }) => {
+    await pickFirstStroke(page, RECT('r3w', [
+      { id: 's1', paint: '#ffffff', width: 0.01, distance: 0, align: 'center', join: 'sharp', style: 'band' },
+    ]))
+    await expect(page.locator('[data-stroke-wobble-amount]')).toHaveCount(0)
+    await expect(page.locator('[data-stroke-join]')).toHaveCount(0)
+    await page.locator('[data-stroke-wobble]').selectOption('wave')
+    // A two-patch writer (wobble now, amount/length later) leaves the seed missing for a
+    // tick and the row would flash a zero — the wiring half of the unit spec's
+    // `strokeWobblePatch` claim. Corners also has to appear NOW: the widened gate.
+    await expect(page.locator('[data-stroke-wobble-amount]')).toBeVisible()
+    await expect(page.locator('[data-stroke-wobble-length]')).toBeVisible()
+    await expect(page.locator('[data-stroke-wobble-phase]')).toBeVisible()
+    await expect(page.locator('[data-stroke-join]')).toBeVisible()
+    // It really landed on the stored layer, in one write, not just in the panel.
+    const stored = await page.evaluate(() => {
+      const l = (window as any).__compositorLayers?.().find((x: any) => x.id === 'r3w')
+      return { wobble: l?.strokes?.[0]?.wobble, amount: l?.strokes?.[0]?.wobbleAmount, length: l?.strokes?.[0]?.wobbleLength }
+    })
+    expect(stored.wobble).toBe('wave')
+    expect(stored.amount).toBeGreaterThan(0)
+    expect(stored.length).toBeGreaterThan(0)
   })
 
   test('the plus menu offers Add outline on a rect and never on a line', async ({ page }) => {
