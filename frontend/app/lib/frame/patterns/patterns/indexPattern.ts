@@ -22,8 +22,11 @@ export const indexPattern: Pattern = {
     // details ruled on the right; left edge snapped to a grid line when present
     if (elements.details) {
       const rawX = frame.w * 0.58
-      const colX = snapX(rawX, grid)
-      const colW = (frame.w - margin * frame.w) - colX
+      const rightEdge = frame.w - margin * frame.w
+      const minColW = 0.15 * mb.w
+      let colX = snapX(rawX, grid)
+      if (rightEdge - colX < minColW) colX = rightEdge - minColW
+      const colW = rightEdge - colX
       const dSize = frame.w * 0.024
       const dc = toNorm({ x: colX, y: mb.y, w: colW, h: dSize }, frame)
       ops.push({ target: 'details', kind: 'text', x: dc.x, y: dc.y, w: colW / frame.w, fontSize: dSize / frame.w, align: 'left', colorRole: 'ink' })

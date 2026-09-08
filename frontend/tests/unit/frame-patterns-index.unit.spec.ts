@@ -26,4 +26,12 @@ describe('indexPattern', () => {
     const onLine = grid.xs.some(e => Math.abs(e - leftPx) < 1.5)
     expect(onLine).toBe(true)
   })
+  it('keeps a non-zero details column when the grid has no line near 0.58w', () => {
+    // only a left margin line and the right margin line itself: snapping naively to
+    // the nearest xs (the right margin) collapses the details column to zero width.
+    const grid: ResolvedGrid = { xs: [40, 760], ys: [40, 500, 960], regions: [] }
+    const { ops } = indexPattern.place(ctxFor({ grid }))
+    const details = ops.find(o => o.target === 'details')!
+    expect(details.w!).toBeGreaterThan(0)
+  })
 })

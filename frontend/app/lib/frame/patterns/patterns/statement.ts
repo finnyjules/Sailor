@@ -13,7 +13,9 @@ export const statement: Pattern = {
     const words = elements.title?.words ?? ['WORD']
     // fit the widest word to the margin width
     const widest = words.reduce((a, b) => (measure(b) > measure(a) ? b : a), words[0]!)
-    const sizePx = fitSize(widest, mb.w, measure)
+    const widthFit = fitSize(widest, mb.w, measure)
+    const heightFit = mb.h / (0.86 * words.length)
+    const sizePx = Math.min(widthFit, heightFit)
     const capH = sizePx * 0.86
     const blockH = capH * words.length
     const top = r.chance(0.5)

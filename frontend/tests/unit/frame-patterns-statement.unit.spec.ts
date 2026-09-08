@@ -23,4 +23,18 @@ describe('statement', () => {
     const widthEm = stubMeasure('NOISE') / 100        // width per unit font size
     expect(title.fontSize! * widthEm).toBeLessThanOrEqual(marginW + 1e-6)
   })
+  it('bounds the stacked title block to the page height for a multi-word short title', () => {
+    // 5 short words: fitting to the widest word's WIDTH alone would blow the size way up
+    // (widest word is only 3 chars), and capH*wordCount would overrun the margin box.
+    const elements = inferElements([
+      { id: 't', kind: 'text', text: 'A DAY IN THE SUN', fontSize: 0.2 },
+    ])
+    const title = statement.place(ctxFor({ elements })).ops.find(o => o.target === 'title')!
+    const lineCount = title.lineBreak!.split('\n').length
+    expect(lineCount).toBe(5)
+    // frame.h/frame.w = 1.25; margin-box height normalized to width = 920/800 = 1.15
+    const marginBoxHNorm = 1.15
+    const blockHNorm = title.fontSize! * 0.86 * lineCount
+    expect(blockHNorm).toBeLessThanOrEqual(marginBoxHNorm + 1e-6)
+  })
 })
