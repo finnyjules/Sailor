@@ -17,6 +17,11 @@ import { sanitizeTornEdge } from '~/lib/compositor/tornEdge'
 import { sanitizeFeather } from '~/lib/compositor/feather'
 import { effectStackOf, writeStackToLayer, addEffect, createEffect, EFFECT_LABELS, EFFECT_ORDER, isEffectKind, type EffectInstance } from '~/lib/compositor/effectStack'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
+import {
+  strokeStackOf, writeStrokeStackToLayer, addStroke as appendStroke, removeStroke as dropStroke,
+  strokeSupportsStack, strokeSupportsShapes, STROKE_JOINS, STROKE_STYLES,
+  type StrokeInstance, type StrokeAlign,
+} from '~/lib/compositor/strokeStack'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { readGrid } from '~/lib/frame/gridConfig'
 import type { FrameGrid } from '~/lib/frame/grid'
@@ -420,11 +425,146 @@ function fillField(kind: LocalLayerKind): string | null {
   return null // line has stroke only
 }
 
-/** Which field carries the STROKE paint for each kind (null = no stroke). */
-function strokeField(kind: LocalLayerKind): string | null {
-  if (kind === 'text') return 'strokeColor'
-  if (kind === 'image') return null
-  return 'stroke' // rect/ellipse/path/line
+/**
+ * Where a kind keeps its outline(s).
+ *
+ * This replaced `strokeField(kind)`, which answered "which ONE field carries this kind's
+ * stroke paint" and could therefore only ever describe or set one outline. A stroked kind
+ * now keeps an ordered LIST, read through `strokeStackOf` — the same reader the painter,
+ * the inspector and the SVG writer use, so none of them can disagree about what a layer's
+ * strokes are.
+ *
+ * `'line'` is its own answer rather than a member of the stack: a line has no interior to
+ * offset a band from, and its painter arm reads `layer.stroke` / `layer.strokeWidth`
+ * directly (see `strokeSupportsStack`'s note on why that is deliberate). `null` is every
+ * kind with no outline at all — an image, a mosaic, a scatter, a brush, a wired layer.
+ * `strokeField` answered `'stroke'` for all of those, so `setStroke` used to write a field
+ * nothing would ever read.
+ */
+function strokeHome(kind: LocalLayerKind): 'stack' | 'line' | null {
+  if (strokeSupportsStack(kind)) return 'stack'
+  return kind === 'line' ? 'line' : null
+}
+
+/** The legacy paint field a stackable kind reads through — see `strokeStackOf`. */
+const legacyStrokeField = (kind: LocalLayerKind): string => (kind === 'text' ? 'strokeColor' : 'stroke')
+
+/**
+ * True when this layer's strokes come from the ARRAY, not from the legacy pair.
+ *
+ * The distinction decides whether `setStroke` may keep writing the old fields. It matters
+ * in one direction only, and badly: writing `stroke`/`strokeWidth` onto a layer that has a
+ * stack makes `legacyLive` true inside `strokeStackOf`, which sends the whole array down
+ * the legacy branch — every other outline gone, from one unrelated recolour.
+ */
+function storesStrokeStack(layer: LocalLayer): boolean {
+  const stack = strokeStackOf(layer as never)
+  return stack.length > 0 && stack[0]!.id !== 'legacy'
+}
+
+/** Every key `setStrokeProps` (and `addStroke`'s optional patch) accepts. */
+const STROKE_PROPS = new Set(['paint', 'width', 'distance', 'align', 'dash', 'join', 'style', 'shapes', 'visible'])
+
+/**
+ * One stroke with a model's patch applied, or the reason to refuse the whole command.
+ *
+ * Refusing rather than dropping a bad key is the same choice `setTextStyle` makes: a
+ * silently ignored key teaches a model that the key works. The two REFUSALS that are about
+ * this feature rather than about typing are worth naming — a shapes outline on a kind that
+ * has no exact outline to march along (text), and a `shapeId` that is not in the library.
+ * Both would otherwise store a well-formed stroke that paints nothing.
+ */
+function strokePatch(
+  kind: LocalLayerKind, cur: StrokeInstance, raw: unknown,
+): { ok: true; stroke: StrokeInstance } | { ok: false; detail: string } {
+  if (!raw || typeof raw !== 'object') return { ok: false, detail: 'missing args.patch' }
+  const p = raw as Record<string, unknown>
+  const bad = Object.keys(p).filter(k => !STROKE_PROPS.has(k))
+  if (bad.length) return { ok: false, detail: `stroke key(s) not valid: ${bad.join(', ')}` }
+  const next: StrokeInstance = clone(cur)
+
+  if ('paint' in p) {
+    if (!isValidPaint(p.paint)) return { ok: false, detail: 'paint must be a colour, a gradient object, or "none"' }
+    next.paint = clone(p.paint) as Paint
+  }
+  if ('width' in p) next.width = clamp(p.width, 0, 1, next.width)
+  // Both signs are real: positive is outside the edge, negative inside it.
+  if ('distance' in p) next.distance = clamp(p.distance, -1, 1, next.distance ?? 0)
+  if ('visible' in p) next.visible = p.visible !== false
+  if ('align' in p) {
+    if (p.align !== 'center' && p.align !== 'inside' && p.align !== 'outside') {
+      return { ok: false, detail: 'align must be "center", "inside" or "outside"' }
+    }
+    next.align = p.align as StrokeAlign
+  }
+  if ('join' in p) {
+    if (!STROKE_JOINS.includes(p.join as never)) return { ok: false, detail: `join must be ${STROKE_JOINS.map(j => `"${j}"`).join(' or ')}` }
+    next.join = p.join as StrokeInstance['join']
+  }
+  if ('dash' in p) {
+    // `null` is how a model turns a dash back off; anything else must be the real pair.
+    if (p.dash == null) delete next.dash
+    else {
+      const d = p.dash as Record<string, unknown>
+      if (typeof d !== 'object' || !Number.isFinite(Number(d.dash))) return { ok: false, detail: 'dash must be { dash, gap } or null' }
+      next.dash = { dash: clamp(d.dash, 0, 1, 0), gap: clamp(d.gap, 0, 1, 0) }
+    }
+  }
+  if ('style' in p) {
+    if (!STROKE_STYLES.includes(p.style as never)) return { ok: false, detail: `style must be ${STROKE_STYLES.map(x => `"${x}"`).join(' or ')}` }
+    next.style = p.style as StrokeInstance['style']
+  }
+  if ('shapes' in p) {
+    const raws = p.shapes as Record<string, unknown> | null | undefined
+    if (!raws || typeof raws !== 'object') return { ok: false, detail: 'shapes must be { shapeId, size, spacing, follow? }' }
+    if (typeof raws.shapeId !== 'string' || !shapeById(raws.shapeId)) {
+      return { ok: false, detail: `unknown shape id '${String(raws.shapeId)}' — use one from document.shapeLibrary` }
+    }
+    next.shapes = {
+      shapeId: raws.shapeId,
+      size: clamp(raws.size, 0, 1, next.shapes?.size ?? 0),
+      spacing: clamp(raws.spacing, 0, 1, next.shapes?.spacing ?? 0),
+      ...(typeof raws.follow === 'boolean' ? { follow: raws.follow } : {}),
+    }
+  }
+  if ((next.style ?? 'band') === 'shapes') {
+    if (!strokeSupportsShapes(kind)) {
+      return { ok: false, detail: `a ${kind} layer cannot take a shapes outline — it has no exact outline for the marks to march along; use style "band"` }
+    }
+    if (!next.shapes?.shapeId) return { ok: false, detail: 'a shapes outline needs shapes: { shapeId, size, spacing }' }
+  }
+  return { ok: true, stroke: next }
+}
+
+/**
+ * A layer's outlines as short lines the model can read AND target: each one starts with the
+ * `strokeId` that `setStrokeProps` / `removeStroke` take, so "make the outer one thinner" is
+ * answerable without a second round trip.
+ *
+ * A shapes outline is described by its SHAPE, never by the band `width` its row still
+ * carries — that number is stale for a shapes stroke, and reading it back would teach the
+ * model to tune the wrong dial.
+ */
+function describeStrokes(l: LocalLayer): string[] | undefined {
+  if (strokeHome(l.kind) !== 'stack') return undefined
+  const stack = strokeStackOf(l as never)
+  if (!stack.length) return undefined
+  return stack.map((s) => {
+    const bits: string[] = []
+    if ((s.style ?? 'band') === 'shapes' && s.shapes) {
+      bits.push(`${s.shapes.shapeId || 'no shape'} marks`, `size ${s.shapes.size}`, `every ${s.shapes.spacing}`)
+      if (s.shapes.follow === false) bits.push('upright')
+    } else {
+      bits.push(paintLabel(s.paint), `width ${s.width}`)
+    }
+    const d = s.distance ?? 0
+    if (d) bits.push(`${Math.abs(d)} ${d > 0 ? 'out' : 'in'}`)
+    if (s.align && s.align !== 'center') bits.push(s.align)
+    if (s.dash) bits.push(`dashed ${s.dash.dash}/${s.dash.gap}`)
+    if (s.join === 'round') bits.push('round join')
+    if (s.visible === false) bits.push('hidden')
+    return `${s.id}: ${bits.join(', ')}`
+  })
 }
 
 /** Whitelisted common (transform) props every layer accepts. */
@@ -437,6 +577,32 @@ const COMMON_PROPS = new Set(['x', 'y', 'rotation', 'opacity', 'blend', 'visible
 // can never half-write a corner tuple).
 const PROP_CLAMP: Record<string, [number, number]> = { x: [-1, 2], y: [-1, 2], opacity: [0, 1], rotation: [-360, 360], radius: [0, 1] }
 
+/**
+ * Stated ceiling for the WHOLE Compositor command menu (characters of `hint`, summed).
+ * Pinned by a test in `tests/unit/compositor-stroke-agent.unit.spec.ts`.
+ *
+ * **This is the first pin, and it is a debt, not a clean bill.** The multi-stroke plan asked
+ * for the stroke ops to be paid for by compressing an existing hint against a ceiling of
+ * 21,500 with 21,399 spent. Neither number was real: no such constant had ever existed in
+ * this repo (it appears only in the plan document), and the menu measured **25,462** the day
+ * the stroke ops were written — the `mosaic` hint alone is 11 KB of it.
+ *
+ * What was actually paid: the `mosaic` hint's per-style boilerplate — seven copies of
+ * "sending X implies style X" and seven of "explicit X override it" — was hoisted into one
+ * sentence beside the style-resolution rules it belongs with, and the four stroke hints were
+ * written as tight as they go. That is 520 chars recovered against 1,274 spent, so the menu
+ * grew by 754 and this ceiling is set above the old usage rather than at it.
+ *
+ * Closing the remaining 754 means deleting mosaic PRODUCT content — the ~60 `, default X`
+ * values, or a style's prose — and that is a decision for whoever owns the mosaic surface,
+ * not a side effect of a stroke feature. The next op to run this out should make it, rather
+ * than move this number again: a ceiling that only ever goes up is not a budget.
+ *
+ * 26,250 is the measured 26,216 rounded up to the next 50, matching
+ * `SHADER_GUIDANCE_CEILING`'s convention.
+ */
+export const COMPOSITOR_HINT_CEILING = 26250
+
 /** The agent-facing command menu. Media ops (generateImage/editImage/
  *  removeImageBackground) are listed so the model can emit them; the composable
  *  resolves them async (they call the canvas tools). `restore` is internal. */
@@ -445,7 +611,10 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setText', hint: 'Change a TEXT layer\'s copy. target = layer id; args: { text }. You may write/rewrite the copy yourself.' },
   { op: 'setTextStyle', hint: 'Style a TEXT layer. target = layer id; args: { patch }. Keys: fontFamily (ANY Google Font by name — for an Impact-style / bold condensed poster headline use "Anton" (also good: "Oswald", "Archivo Black", "Bebas Neue"); for body use "Inter"), fontWeight (100..900), fontSize (fraction of canvas WIDTH: body ~0.03, a normal heading ~0.08, a big headline ~0.15, a HUGE poster headline that fills the frame 0.25–0.45), align ("left"|"center"|"right"), lineHeight (multiplier), boxW (0..1 wrap width). For "huge headline" set fontSize ≥ 0.25 and usually fontWeight 700–900.' },
   { op: 'setFill', hint: 'Set a layer\'s FILL — text colour, shape fill, or image tint. target = layer id; args: { paint }. paint is a "#RRGGBB" colour OR a gradient object {type:"linear",angle,stops:[{offset,color}]} / {type:"radial",stops}. "none"/"" = no fill. A SHAPE PATTERN is {type:"shapes", shapeId (a library shape id like "sparkle"), a (shape colour), b (background "#RRGGBB" or "none" for transparent), angle, shapeSize, shapeGap, shapeFit}. shapeFit is "tile" (default — repeat the shape on a grid), "fill" (ONE shape scaled to cover the box, overflow cropped) or "contain" (ONE shape fitted wholly inside). shapeSize and shapeGap only apply when tiling: they are 0..1 fractions of the tile — bigger shapeSize = larger shapes, bigger shapeGap = more space between them (0 = shapes touching); count is automatic. This is what "make it blue", "give it a sunset gradient", "fill it with sparkles" mean.' },
-  { op: 'setStroke', hint: 'Set a layer\'s STROKE/outline. target = layer id; args: { paint, width? }. paint as in setFill (or "none"); width is 0..1 of canvas width.' },
+  { op: 'setStroke', hint: 'Set a layer\'s main OUTLINE. target = layer id; args: { paint, width? }. paint as in setFill (or "none"); width is 0..1 of canvas width. Changes the topmost outline only; addStroke/setStrokeProps reach the rest of its strokes list.' },
+  { op: 'addStroke', hint: 'Give a layer ANOTHER outline — "a second thin outline", "a dotted ring outside it". target = layer id (rect/ellipse/polygon/star/path/text; a line keeps one). args: { patch? }, the setStrokeProps keys. It lands UNDER the existing ones.' },
+  { op: 'removeStroke', hint: 'Delete one of a layer\'s outlines. target = layer id; args: { strokeId } — an id from that layer\'s strokes list.' },
+  { op: 'setStrokeProps', hint: 'Change ONE outline — "thicker outer ring", "push it further out", "dot the edge with sparkles". target = layer id; args: { strokeId (from its strokes list), patch }. patch keys: paint (as setFill; "none" keeps the row and paints nothing), width (0..1 of canvas width), distance (0..1 OUT from the edge, negative = in, 0 = on it), align ("center"|"inside"|"outside"; on text it bites only at a distance), dash ({dash,gap} same units, null = solid), join ("sharp" keeps a star\'s spikes | "round" holds every point exactly `distance` away), style ("band" = continuous | "shapes" = library shapes marching the edge; text is band-only), shapes ({ shapeId from document.shapeLibrary, size, spacing (centre-to-centre), both 0..1 of canvas width; follow (default true: marks turn to the edge) }), visible (bool). Omitted keys keep their value.' },
   { op: 'setSize', hint: 'Resize a SHAPE/image/line layer. target = layer id; args: { w?, h?, scale? } (0..1 of canvas width; line uses w as length; path uses scale). TEXT size is NOT here — use setTextStyle fontSize.' },
   { op: 'addLayer', hint: 'Add a NEW layer. args: { layer }. layer needs: kind ("text"|"rect"|"ellipse"|"line"), x, y (0..1, center). text also: text + you may set fontFamily/fontWeight/fontSize/color inline (a HUGE headline = fontSize 0.25–0.45, fontWeight 800; Impact-style font = "Anton"). Give the layer an id you choose so you can target it next. New layers land ON TOP by default — to put one BEHIND the image/other layers, follow with setLayerDepth …"back". (For images use generateImage.)' },
   { op: 'addShape', hint: 'Add a SHAPE from the shape library (sparkle, sun-rays, leaf, heart, plus, stairs, hexagon, swirl…) as a vector layer. args: { shape (an id from document.shapeLibrary), x?, y? (0..1, centre; default 0.5,0.5), w? (ink width as a fraction of the canvas width, 0.02..2 — 1 = the full width; default 0.3), fill? ("#RRGGBB" or a gradient object), id? (choose one so you can target it next) }. This is what "add a sparkle", "put a sun top-right", "drop in a heart" mean. Recolour later with setFill, resize with setSize scale, rotate with setLayerProps.' },
@@ -453,7 +622,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setLayerDepth', hint: 'Change a layer\'s stacking depth (z-order). target = layer id; args: { to: "back" | "front" }. "back" puts it BEHIND every other layer including the connected/wired image — use this for "put the headline BEHIND the image". "front" brings it to the top.' },
   { op: 'setBackground', hint: 'Set the FRAME background that sits behind every layer. args: { paint } — a "#RRGGBB" colour, a gradient object, or "none". Use for "make the background blue / a sunset gradient".' },
   { op: 'setGrid', hint: 'Set the layout grid on a Frame — a Swiss-style guide layers can snap to (editor-only, never baked/exported). args: { patch: {...}, generate? }. patch keys: mode ("off" | "explicit" | "generated"), baseModule (0..1 of canvas width, the alignment unit), gutter (0..1), margin (0..1), columns/rows (explicit mode counts), gen: { colRange/rowRange ([min,max] column/row counts, generated mode), regularity (0..1: 0 = loose/free spacing, 1 = strict/equal), merge (bool, merge adjacent cells into larger regions), mergeMaxSpan (max cells a merged region spans), symmetry ("none" | "mirror"), seed (integer) }, overlay (bool, show the guide lines). Omitted keys keep their current value. generate:true (or reroll:true) re-rolls a fresh random seed for a new generated-grid variation; switching mode to "generated" without giving gen.seed also rolls a fresh seed. This is what "add a layout grid", "give it a 6-column grid", "generate a new grid variation", "re-roll the grid" mean.' },
-  { op: 'mosaic', hint: `Add a MOSAIC — a generative composition element (playgrnd-style: a whole dense pattern as ONE self-painting layer that BAKES into the render) — or restyle one. This is what "make a colourful mosaic", "add a modular grid", "a glitchy texture", "deal a warm grid", "re-roll the pattern", "sparser tiles" mean. To CREATE a new mosaic, omit target (it fills the whole frame: w 1, h = the frame aspect; default style modular); to restyle or reconfigure an existing one, target = the mosaic layer's id (its box is left alone). style (the plain word for which composition it is): "tiles" (the seeded grid itself: every kept cell one flat fill from a palette — vocab, density and cellInset apply only here) | "pane" (rows of flush panes, each a two-colour ramp running corner to corner or edge to edge, inks drawn by distance along the palette) | "modular" (a flush grid of modules, some merged 2×2 / 2-wide / 2-tall, over a background colour — each module empty, solid, a block field, a corner dot cluster, a fine line grid or a two-colour ramp — with faint hairlines over the whole grid) | "parcel" (a coarse two-tone field of chunky ink blocks on a ground colour — every cell one or the other, hard edges, no gutter — with a few ragged rectangular clusters of fine hairline lattices, "survey grids", floating on top and darkening what they cross) | "mosh" (a corrupted signal / datamosh / glitch texture — the frame stacked as uneven horizontal bands, each a different failure: confetti runs, coarse mosaic blocks cut by hard diagonal tears that go dark, long thin smears, full-width scan rows some cut by a short bright segment, a chevron herringbone — every mark a hard-edged rect snapped to a column grid, in full-strength colour-cube inks with near-black dead patches) | "carve" (a panel collage / report cover — ONE rectangle carved into panels by repeated splits, each cut taken across the long side of one of the biggest panels, and every panel given a printed treatment in two inks: flat, hard stripes that change pitch partway across (the dropped signal), stacked chevron arrows, a grainy photographic ramp, or a single fine hairline grid with dots) | "totem" (a screenprinted totem / emblem poster — a wide mat with a speckled border band around a dark rectangular plate; inside the plate the left half is chopped into rectangles, each one flat or filled with a hard two-colour cell pattern — checks, stripes either way, diagonals, brickwork, dashes, lattices, concentric bands, scatter — and then reflected onto the right half so the whole thing reads symmetrical, with a small nested rectangle of alternating rings at the dead centre; everything snaps to one coarse pixel grid) | "blueprint" (a technical drafting grid — bright lines on a dark ground: a cartesian minor/major square lattice, plus a POLAR overlay struck from an origin that hangs off one corner (may sit just outside the box) — dashed radial spokes fanning across a quarter by default, concentric arcs with little perpendicular hatch ticks, and small angle labels like "15°"/"30°" at each spoke; still, seeded — the seed moves the origin) | "oddgrid" (a SHADER: an uneven patchwork of coloured cells on a paper ground — some cells blocky clusters, some grainy, with optional small marks — dots, rings, squares, wedges — scattered in; still, seeded) | "static" (a SHADER: riso-print static — one ink on one paper colour, coarse noise cells in a few horizontal bands with glitch tears; still, seeded). cellFill is accepted as an alias of style. An explicit style always wins; without one, the first tunables object in the order pane → modular → parcel → mosh → carve → totem → blueprint implies the style, then a palettePreset name does; a create with none of those is modular. palettePreset is checked against the FINAL style's table only — a name from another style's table is an error, not a silent recolour; tiles has no presets (it uses vocab). For the two shader styles the palette is a LOOK: send look (or palettePreset — same thing) with one of oddgrid: "Patchwork" | "Bloom" | "Quilt" | "Scatter" | "Drift", static: "Wine on Periwinkle" | "Pink on Straw" | "Maroon on Orange" | "Blue on Cream" | "Green on Yellow" | "Blue on Pink" | "Black on Lime" | "Purple on Gold"; fine-tune with shader: { params: { … } } — oddgrid params: cols (cells across 8..96), scale (feature size 2..30), density (coverage 0..1), block (blockiness 0..1), bsize (block size 2..12), speck (0..0.5), grain (0..1), variety (0..1), balance (spread -1.5..1.5), motif (mark: 0 none, 1 dot, 2 ring, 3 square, 4 wedge, 5 mixed), motifAmt (marks 0..1), bg (paper hex), ramp (inks: [{pos,color}] up to 8); static params: ink (hex), bg (paper hex), res (cells across 24..160), regions (bands 1..6), glitch (0..1), mix (0..1). args: { style (see above), vocab ("brand" | "mono" | "warm" | "cool" — the palette tiles draws from; also what pane / modular draw from when they have no inks of their own), density (0..1, fraction of tiles filled; the rest are transparent; default 1), cellInset (0..0.4, gap inset per tile), pane ({ rows (1..8, default 3), cells (nominal cells per row, 1..12, default 6; each row varies it), vary (0..1 how uneven rows/cells are, default 0.55), diag (0..1 share of corner-to-corner ramps vs flat ones, default 0.45), soft (0..1 how much of each pane is the blend; 0 = hard line, default 0.85), spread (0..1 how far apart in the palette the two inks are; 0 = neighbours, default 0.55), inks (ordered hex list the spread walks — the ORDER is the look; omitted = the tool's first palette; fewer than 2 = the vocab palette) } — sending pane implies style "pane"; palettePreset also takes a Pane palette by name: "Hot pink" | "Electric" | "Deep" | "Sorbet" | "Candy" — five ordered 8-ink lists; explicit pane.inks override it), modular ({ gcols (module columns 2..12, default 6; rows follow the frame aspect), unit (sub-cells per module side 2..8, default 4), merge (0..1 how often modules merge, default 0.45), w ({ empty, solid, blocks, dots, lines, grad } relative weights 0..50, defaults 34/20/24/14/12/10 — empty is most common on purpose), blockFill (0..1 coverage of block/dot fields, default 0.5), dot (0..1 dot diameter within its sub-cell, default 0.62), rules (0..1 hairline opacity over the whole grid, default 0.22; 0 = none), ruleW (1..3 line width, default 1), bg (hex background), rule (hex hairline colour), inks (ordered hex list; omitted = the vocab palette) } — sending modular implies style "modular"; palettePreset: "Digital" | "Riso" | "Bloom" | "Heat" | "Mono" — background + hairline colour + 4 inks; explicit modular.bg/rule/inks override it), parcel ({ cells (grid width in cells 8..40, default 16; rows follow the frame aspect), cover (0..1 how much of the field is ink, default 0.5), chunk (0.5..3 block scale — bigger = bigger blobs, default 1), grids (0..8 how many survey grids float on top, default 4), blend ("multiply" | "normal"; multiply = the hairlines darken ink and ground alike, default), ground (hex ground colour), ink (hex block colour), hairline (hex survey-line colour) } — sending parcel implies style "parcel"; palettePreset: "Lime on grey" | "Blue on cream" | "Acid on black" | "Orange on cream" | "Cyan on stone" | "Blue on olive" — ground + ink + hairline; explicit parcel colours override it), mosh ({ bands (1..8 horizontal bands, default 6), cols (24..300 cells across — everything snaps to these columns, default 150), mix (0..1 how much of the palette each band draws from, default 0.62), tears (0..1 how many diagonal tears cut the mosaic bands, default 0.55; 0 = none), runs (0..1 how long the smear bands hold a value, default 0.5), bright (0..1 how often the bright ink cuts in, default 0.3), inks (ordered hex list of 8 full-strength inks; inks[1] is the bright one; omitted = the pure colour cube) } — sending mosh implies style "mosh"; palettePreset: "Pure cube" | "Soft cube" | "Print cube" | "Warm cube" | "Cool cube" — 8 inks; explicit mosh.inks override it), carve ({ cuts (1..16 how many times the frame is cut; panels = cuts + 1, default 7), uneven (0..1 how far off centre a cut may fall, default 0.55; 0 = every cut dead centre), gap (0..1 space between panels, default 0), mix (0..1 fraction of panels that are patterned rather than flat, default 0.7), stripePitch (0..1 band width on the striped panels, default 0.4), grain (0..1 noise on the photographic panels, default 0.5), gridDetail (0..1 how fine the one hairline grid panel is, default 0.5), inks (ordered hex list — two neutrals, inks[0] being the ground, then four loud inks) } — sending carve implies style "carve"; palettePreset: "Report" | "Signal" | "Playbill" | "Almanac" | "Broadsheet" — 6 ordered inks; explicit carve.inks override it), totem ({ border (0..0.4 how wide the mat band around the plate is, as a share of the short side, default 0.15), mat (0..0.7 how much of that band is speckled, default 0.36; 0 = a clean band), matGrain (1..6 how chunky the speckles are, default 2), keyline (0..10 how far the artwork sits in from the plate edge, in grid steps, default 3), regions (1..30 how many rectangles the half is chopped into, default 14), grain (16..220 how fine the pixel grid is — higher = finer, default 110), mirror (0..1 how often the reflected side repeats its partner's pattern rather than being given its own, default 1 = a true mirror), variety (0..1 how many of the eleven cell patterns are in play, default 0.7), core (0..0.6 the centre emblem's width as a share of the short side, default 0.22; 0 = no emblem), coreRings (0..8 rings nested around it, default 3), inks (ordered hex list of five — the ORDER hands out the jobs: whichever is darkest prints the plate and the rules, the first of the others is the mat, the second from the end is the speckle, and all of them fill the rectangles) } — sending totem implies style "totem"; palettePreset: "Arcade" | "Lagoon" | "Carnival" | "Kiosk" | "Neon" | "Harbour" — 5 ordered inks; explicit totem.inks override it), blueprint ({ cells (6..64 minor cells across the SHORT side, default 24), major (2..12 every Nth line is a heavy major line, default 5), minorAlpha (0..1 the minor grid's opacity, default 0.35), majorWidth (1..3 the major line width as a multiple of the minor, default 1.6), corner ("auto" | "bl" | "br" | "tr" | "tl" which corner the polar origin hangs off; "auto" lets the seed pick, default "bl" = bottom-left), originX / originY (-0.5..0.5 hand-nudge the origin, box fractions, default 0), angleStart (0..90 the first spoke's angle within the fan, default 0), angleStep (5..45 degrees between spokes, default 15), angleSpread (15..360 total fan span, default 90 = a quarter), arcs (0..10 concentric arcs, default 4), arcGap (0.05..0.6 even radial step between arcs as a short-side fraction, default 0.22), tickStep (1..30 degrees between the arc hatch ticks, default 5), labels (0..1 angle-label opacity, 0 = hidden, default 1), paper (hex dark ground), ink (hex line/arc/label colour), inkDim (hex minor-grid colour) } — sending blueprint implies style "blueprint"; palettePreset: "Blueprint" | "Cyan on navy" | "Black on cream" | "Amber on charcoal" | "White on slate" — paper + ink + inkDim; explicit blueprint colours override it), grid ({ colRange:[min,max], rowRange:[min,max], regularity (0..1), merge (bool), symmetry ("none"|"mirror") } — the tiles layout; omitted keeps the current/frame grid), seed (integer, the variation — every style reads it), generate (bool — re-roll a fresh seed for a new variation; the style, box and dials are kept), id? (choose one to target it later) }.` },
+  { op: 'mosaic', hint: `Add a MOSAIC — a generative composition element (playgrnd-style: a whole dense pattern as ONE self-painting layer that BAKES into the render) — or restyle one. This is what "make a colourful mosaic", "add a modular grid", "a glitchy texture", "deal a warm grid", "re-roll the pattern", "sparser tiles" mean. To CREATE a new mosaic, omit target (it fills the whole frame: w 1, h = the frame aspect; default style modular); to restyle or reconfigure an existing one, target = the mosaic layer's id (its box is left alone). style (the plain word for which composition it is): "tiles" (the seeded grid itself: every kept cell one flat fill from a palette — vocab, density and cellInset apply only here) | "pane" (rows of flush panes, each a two-colour ramp running corner to corner or edge to edge, inks drawn by distance along the palette) | "modular" (a flush grid of modules, some merged 2×2 / 2-wide / 2-tall, over a background colour — each module empty, solid, a block field, a corner dot cluster, a fine line grid or a two-colour ramp — with faint hairlines over the whole grid) | "parcel" (a coarse two-tone field of chunky ink blocks on a ground colour — every cell one or the other, hard edges, no gutter — with a few ragged rectangular clusters of fine hairline lattices, "survey grids", floating on top and darkening what they cross) | "mosh" (a corrupted signal / datamosh / glitch texture — the frame stacked as uneven horizontal bands, each a different failure: confetti runs, coarse mosaic blocks cut by hard diagonal tears that go dark, long thin smears, full-width scan rows some cut by a short bright segment, a chevron herringbone — every mark a hard-edged rect snapped to a column grid, in full-strength colour-cube inks with near-black dead patches) | "carve" (a panel collage / report cover — ONE rectangle carved into panels by repeated splits, each cut taken across the long side of one of the biggest panels, and every panel given a printed treatment in two inks: flat, hard stripes that change pitch partway across (the dropped signal), stacked chevron arrows, a grainy photographic ramp, or a single fine hairline grid with dots) | "totem" (a screenprinted totem / emblem poster — a wide mat with a speckled border band around a dark rectangular plate; inside the plate the left half is chopped into rectangles, each one flat or filled with a hard two-colour cell pattern — checks, stripes either way, diagonals, brickwork, dashes, lattices, concentric bands, scatter — and then reflected onto the right half so the whole thing reads symmetrical, with a small nested rectangle of alternating rings at the dead centre; everything snaps to one coarse pixel grid) | "blueprint" (a technical drafting grid — bright lines on a dark ground: a cartesian minor/major square lattice, plus a POLAR overlay struck from an origin that hangs off one corner (may sit just outside the box) — dashed radial spokes fanning across a quarter by default, concentric arcs with little perpendicular hatch ticks, and small angle labels like "15°"/"30°" at each spoke; still, seeded — the seed moves the origin) | "oddgrid" (a SHADER: an uneven patchwork of coloured cells on a paper ground — some cells blocky clusters, some grainy, with optional small marks — dots, rings, squares, wedges — scattered in; still, seeded) | "static" (a SHADER: riso-print static — one ink on one paper colour, coarse noise cells in a few horizontal bands with glitch tears; still, seeded). cellFill is accepted as an alias of style. Each style's own dials and its palettePreset names are listed with it below; sending a style's tunables object implies that style, and any colour or ink list inside that object overrides the preset. An explicit style always wins; without one, the first tunables object in the order pane → modular → parcel → mosh → carve → totem → blueprint implies the style, then a palettePreset name does; a create with none of those is modular. palettePreset is checked against the FINAL style's table only — a name from another style's table is an error, not a silent recolour; tiles has no presets (it uses vocab). For the two shader styles the palette is a LOOK: send look (or palettePreset — same thing) with one of oddgrid: "Patchwork" | "Bloom" | "Quilt" | "Scatter" | "Drift", static: "Wine on Periwinkle" | "Pink on Straw" | "Maroon on Orange" | "Blue on Cream" | "Green on Yellow" | "Blue on Pink" | "Black on Lime" | "Purple on Gold"; fine-tune with shader: { params: { … } } — oddgrid params: cols (cells across 8..96), scale (feature size 2..30), density (coverage 0..1), block (blockiness 0..1), bsize (block size 2..12), speck (0..0.5), grain (0..1), variety (0..1), balance (spread -1.5..1.5), motif (mark: 0 none, 1 dot, 2 ring, 3 square, 4 wedge, 5 mixed), motifAmt (marks 0..1), bg (paper hex), ramp (inks: [{pos,color}] up to 8); static params: ink (hex), bg (paper hex), res (cells across 24..160), regions (bands 1..6), glitch (0..1), mix (0..1). args: { style (see above), vocab ("brand" | "mono" | "warm" | "cool" — the palette tiles draws from; also what pane / modular draw from when they have no inks of their own), density (0..1, fraction of tiles filled; the rest are transparent; default 1), cellInset (0..0.4, gap inset per tile), pane ({ rows (1..8, default 3), cells (nominal cells per row, 1..12, default 6; each row varies it), vary (0..1 how uneven rows/cells are, default 0.55), diag (0..1 share of corner-to-corner ramps vs flat ones, default 0.45), soft (0..1 how much of each pane is the blend; 0 = hard line, default 0.85), spread (0..1 how far apart in the palette the two inks are; 0 = neighbours, default 0.55), inks (ordered hex list the spread walks — the ORDER is the look; omitted = the tool's first palette; fewer than 2 = the vocab palette) }; palettePreset: "Hot pink" | "Electric" | "Deep" | "Sorbet" | "Candy"), modular ({ gcols (module columns 2..12, default 6; rows follow the frame aspect), unit (sub-cells per module side 2..8, default 4), merge (0..1 how often modules merge, default 0.45), w ({ empty, solid, blocks, dots, lines, grad } relative weights 0..50, defaults 34/20/24/14/12/10 — empty is most common on purpose), blockFill (0..1 coverage of block/dot fields, default 0.5), dot (0..1 dot diameter within its sub-cell, default 0.62), rules (0..1 hairline opacity over the whole grid, default 0.22; 0 = none), ruleW (1..3 line width, default 1), bg (hex background), rule (hex hairline colour), inks (ordered hex list; omitted = the vocab palette) }; palettePreset: "Digital" | "Riso" | "Bloom" | "Heat" | "Mono"), parcel ({ cells (grid width in cells 8..40, default 16; rows follow the frame aspect), cover (0..1 how much of the field is ink, default 0.5), chunk (0.5..3 block scale — bigger = bigger blobs, default 1), grids (0..8 how many survey grids float on top, default 4), blend ("multiply" | "normal"; multiply = the hairlines darken ink and ground alike, default), ground (hex ground colour), ink (hex block colour), hairline (hex survey-line colour) }; palettePreset: "Lime on grey" | "Blue on cream" | "Acid on black" | "Orange on cream" | "Cyan on stone" | "Blue on olive"), mosh ({ bands (1..8 horizontal bands, default 6), cols (24..300 cells across — everything snaps to these columns, default 150), mix (0..1 how much of the palette each band draws from, default 0.62), tears (0..1 how many diagonal tears cut the mosaic bands, default 0.55; 0 = none), runs (0..1 how long the smear bands hold a value, default 0.5), bright (0..1 how often the bright ink cuts in, default 0.3), inks (ordered hex list of 8 full-strength inks; inks[1] is the bright one; omitted = the pure colour cube) }; palettePreset: "Pure cube" | "Soft cube" | "Print cube" | "Warm cube" | "Cool cube"), carve ({ cuts (1..16 how many times the frame is cut; panels = cuts + 1, default 7), uneven (0..1 how far off centre a cut may fall, default 0.55; 0 = every cut dead centre), gap (0..1 space between panels, default 0), mix (0..1 fraction of panels that are patterned rather than flat, default 0.7), stripePitch (0..1 band width on the striped panels, default 0.4), grain (0..1 noise on the photographic panels, default 0.5), gridDetail (0..1 how fine the one hairline grid panel is, default 0.5), inks (ordered hex list — two neutrals, inks[0] being the ground, then four loud inks) }; palettePreset: "Report" | "Signal" | "Playbill" | "Almanac" | "Broadsheet"), totem ({ border (0..0.4 how wide the mat band around the plate is, as a share of the short side, default 0.15), mat (0..0.7 how much of that band is speckled, default 0.36; 0 = a clean band), matGrain (1..6 how chunky the speckles are, default 2), keyline (0..10 how far the artwork sits in from the plate edge, in grid steps, default 3), regions (1..30 how many rectangles the half is chopped into, default 14), grain (16..220 how fine the pixel grid is — higher = finer, default 110), mirror (0..1 how often the reflected side repeats its partner's pattern rather than being given its own, default 1 = a true mirror), variety (0..1 how many of the eleven cell patterns are in play, default 0.7), core (0..0.6 the centre emblem's width as a share of the short side, default 0.22; 0 = no emblem), coreRings (0..8 rings nested around it, default 3), inks (ordered hex list of five — the ORDER hands out the jobs: whichever is darkest prints the plate and the rules, the first of the others is the mat, the second from the end is the speckle, and all of them fill the rectangles) }; palettePreset: "Arcade" | "Lagoon" | "Carnival" | "Kiosk" | "Neon" | "Harbour"), blueprint ({ cells (6..64 minor cells across the SHORT side, default 24), major (2..12 every Nth line is a heavy major line, default 5), minorAlpha (0..1 the minor grid's opacity, default 0.35), majorWidth (1..3 the major line width as a multiple of the minor, default 1.6), corner ("auto" | "bl" | "br" | "tr" | "tl" which corner the polar origin hangs off; "auto" lets the seed pick, default "bl" = bottom-left), originX / originY (-0.5..0.5 hand-nudge the origin, box fractions, default 0), angleStart (0..90 the first spoke's angle within the fan, default 0), angleStep (5..45 degrees between spokes, default 15), angleSpread (15..360 total fan span, default 90 = a quarter), arcs (0..10 concentric arcs, default 4), arcGap (0.05..0.6 even radial step between arcs as a short-side fraction, default 0.22), tickStep (1..30 degrees between the arc hatch ticks, default 5), labels (0..1 angle-label opacity, 0 = hidden, default 1), paper (hex dark ground), ink (hex line/arc/label colour), inkDim (hex minor-grid colour) }; palettePreset: "Blueprint" | "Cyan on navy" | "Black on cream" | "Amber on charcoal" | "White on slate"), grid ({ colRange:[min,max], rowRange:[min,max], regularity (0..1), merge (bool), symmetry ("none"|"mirror") } — the tiles layout; omitted keeps the current/frame grid), seed (integer, the variation — every style reads it), generate (bool — re-roll a fresh seed for a new variation; the style, box and dials are kept), id? (choose one to target it later) }.` },
   { op: 'scatter', hint: SCATTER_HINT },
   { op: 'generateImage', hint: 'Generate a PHOTOGRAPHIC/illustrative AI image and add it as a layer — "generate a picture of a dog", "add a city photo". Not for gradients/colours (use setBackground/setFill). args: { prompt (vivid), aspectRatio? }.' },
   { op: 'removeImageBackground', hint: 'Cut out the subject of an existing IMAGE layer (transparent background). target = image layer id.' },
@@ -487,13 +656,12 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
       cur.text = l.text; cur.fontFamily = l.fontFamily; cur.fontWeight = l.fontWeight
       cur.fontSize = l.fontSize; cur.color = paintLabel(l.color); cur.align = l.align; cur.lineHeight = l.lineHeight
       if (l.boxW != null) cur.boxW = l.boxW
-      if (l.strokeColor && l.strokeWidth) { cur.outline = paintLabel(l.strokeColor); cur.outlineWidth = l.strokeWidth }
     } else if (l.kind === 'image') { cur.image = l.filename; cur.w = l.w; cur.h = l.h; if (l.tint) cur.tint = paintLabel(l.tint) }
     // `radius` may be per-corner ([tl, tr, br, bl]); describe it as one readable
     // value so the model never learns to emit an array (setLayerProps takes a
     // number only — see PROP_CLAMP).
-    else if (l.kind === 'rect') { cur.w = l.w; cur.h = l.h; cur.fill = paintLabel(l.fill); if (l.radius) cur.radius = Array.isArray(l.radius) ? l.radius.join(' / ') : l.radius; if (l.stroke) { cur.stroke = paintLabel(l.stroke); cur.strokeWidth = l.strokeWidth } }
-    else if (l.kind === 'ellipse') { cur.w = l.w; cur.h = l.h; cur.fill = paintLabel(l.fill); if (l.stroke) { cur.stroke = paintLabel(l.stroke); cur.strokeWidth = l.strokeWidth } }
+    else if (l.kind === 'rect') { cur.w = l.w; cur.h = l.h; cur.fill = paintLabel(l.fill); if (l.radius) cur.radius = Array.isArray(l.radius) ? l.radius.join(' / ') : l.radius }
+    else if (l.kind === 'ellipse') { cur.w = l.w; cur.h = l.h; cur.fill = paintLabel(l.fill) }
     else if (l.kind === 'line') { cur.length = l.w; cur.stroke = paintLabel(l.stroke); cur.strokeWidth = l.strokeWidth }
     else if (l.kind === 'path') { cur.fill = paintLabel(l.fill); if (l.shapeId && shapeById(l.shapeId)) cur.shape = l.shapeId }
     // A Mosaic (kind 'deal' internally) reads back as its style word + that
@@ -518,6 +686,12 @@ export function describeCompositor(state: CompositorState): SurfaceSnapshot {
       cur.seed = l.seed
       cur[style] = describeScatter(l)
     }
+    // Outlines, for EVERY stackable kind — rect, ellipse, polygon, star, path and text
+    // all answer through one reader, so the describe pass cannot report a text layer's
+    // outline in a different shape from a rect's (it used to: `outline`/`outlineWidth`
+    // against `stroke`/`strokeWidth`, and neither could show a second one).
+    const strokes = describeStrokes(l)
+    if (strokes) cur.strokes = strokes
     if (l.visible === false) cur.hidden = true
     // The agent never sees the internal kind 'deal': that layer is a "mosaic".
     const type = l.kind === 'deal' ? 'mosaic' : l.kind
@@ -632,10 +806,74 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       if (paint == null) return { ok: false, reason: 'invalid', detail: 'missing args.paint' }
       const layer = findLayer(state, cmd.target)
       if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
-      const field = strokeField(layer.kind)
-      if (!field) return { ok: false, reason: 'invalid', detail: `${layer.kind} layers have no stroke` }
-      ;(layer as unknown as Record<string, unknown>)[field] = clone(paint)
-      if (typeof cmd.args?.width === 'number') (layer as unknown as Record<string, unknown>).strokeWidth = cmd.args.width
+      const home = strokeHome(layer.kind)
+      if (!home) return { ok: false, reason: 'invalid', detail: `${layer.kind} layers have no stroke` }
+      const L = layer as unknown as Record<string, unknown>
+      const width = typeof cmd.args?.width === 'number' ? cmd.args.width : null
+      // A layer that ALREADY stores a stack is edited through the stack, and only its top
+      // (first-painted) outline is touched. Writing the legacy pair here instead would make
+      // `legacyLive` true and send the whole array down `strokeStackOf`'s legacy branch —
+      // every other outline deleted by a recolour that never mentioned them.
+      if (home === 'stack' && storesStrokeStack(layer)) {
+        const stack = strokeStackOf(layer as never)
+        const top: StrokeInstance = { ...stack[0]!, paint: clone(paint) }
+        if (width != null) top.width = clamp(width, 0, 1, top.width)
+        Object.assign(L, writeStrokeStackToLayer([top, ...stack.slice(1)]))
+        return { ok: true, template: state, inverse: snapshot() }
+      }
+      // Legacy (or unstroked) layer: keep writing the legacy pair. `strokeStackOf` reads it
+      // back as a one-entry stack, so nothing downstream can tell — and migrating a saved
+      // layer on an edit that did not need it is exactly what `strokeStack.ts` refuses to do.
+      L[legacyStrokeField(layer.kind)] = clone(paint)
+      if (width != null) L.strokeWidth = width
+      return { ok: true, template: state, inverse: snapshot() }
+    }
+    case 'addStroke': {
+      const layer = findLayer(state, cmd.target)
+      if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
+      if (strokeHome(layer.kind) !== 'stack') {
+        return { ok: false, reason: 'invalid', detail: `a ${layer.kind} layer keeps a single outline — use setStroke` }
+      }
+      // Appended, so the new outline paints UNDER the existing ones: adding one never
+      // changes what is already visible.
+      const stack = appendStroke(strokeStackOf(layer as never))
+      if (cmd.args?.patch != null) {
+        const patched = strokePatch(layer.kind, stack[stack.length - 1]!, cmd.args.patch)
+        if (!patched.ok) return { ok: false, reason: 'invalid', detail: patched.detail }
+        stack[stack.length - 1] = patched.stroke
+      }
+      Object.assign(layer, writeStrokeStackToLayer(stack))
+      return { ok: true, template: state, inverse: snapshot() }
+    }
+    case 'removeStroke': {
+      const layer = findLayer(state, cmd.target)
+      if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
+      if (strokeHome(layer.kind) !== 'stack') {
+        return { ok: false, reason: 'invalid', detail: `a ${layer.kind} layer keeps a single outline — setStroke "none" clears it` }
+      }
+      const id = String(cmd.args?.strokeId ?? '')
+      const stack = strokeStackOf(layer as never)
+      const next = dropStroke(stack, id)
+      // `removeStroke` returns the SAME array when nothing matched — say so rather than
+      // reporting a successful edit that changed nothing.
+      if (next === stack) return { ok: false, reason: 'invalid', detail: `no outline '${id}' on layer '${String(cmd.target)}'` }
+      Object.assign(layer, writeStrokeStackToLayer(next))
+      return { ok: true, template: state, inverse: snapshot() }
+    }
+    case 'setStrokeProps': {
+      const layer = findLayer(state, cmd.target)
+      if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
+      if (strokeHome(layer.kind) !== 'stack') {
+        return { ok: false, reason: 'invalid', detail: `a ${layer.kind} layer keeps a single outline — use setStroke` }
+      }
+      const id = String(cmd.args?.strokeId ?? '')
+      const stack = strokeStackOf(layer as never)
+      const i = stack.findIndex(s => s.id === id)
+      if (i < 0) return { ok: false, reason: 'invalid', detail: `no outline '${id}' on layer '${String(cmd.target)}' — the ids are in its strokes list` }
+      const patched = strokePatch(layer.kind, stack[i]!, cmd.args?.patch)
+      if (!patched.ok) return { ok: false, reason: 'invalid', detail: patched.detail }
+      stack[i] = patched.stroke
+      Object.assign(layer, writeStrokeStackToLayer(stack))
       return { ok: true, template: state, inverse: snapshot() }
     }
     case 'setSize': {
@@ -1029,6 +1267,9 @@ export function summarizeCompositorChange(state: CompositorState, cmd: Command):
     case 'setText': return { label: name || 'Text', before: layer && layer.kind === 'text' ? layer.text : '', after: String(a.text ?? '') }
     case 'setFill': return { label: `${name} fill`, before: layer ? paintLabel((layer as unknown as Record<string, Paint>)[fillField(layer.kind) ?? ''] as Paint) : '', after: paintLabel(a.paint as Paint) }
     case 'setStroke': return { label: `${name} stroke`, before: '', after: paintLabel(a.paint as Paint) }
+    case 'addStroke': return { label: `${name} outline`, before: '', after: 'added' }
+    case 'removeStroke': return { label: `${name} outline`, before: String(a.strokeId ?? ''), after: 'removed' }
+    case 'setStrokeProps': { const p = (a.patch ?? {}) as Record<string, unknown>; return { label: `${name} outline ${String(a.strokeId ?? '')}`, before: '', after: Object.keys(p).map(k => `${k}: ${typeof p[k] === 'object' ? JSON.stringify(p[k]) : String(p[k])}`).join(', ') } }
     case 'setTextStyle': { const p = (a.patch ?? {}) as Record<string, unknown>; return { label: `${name} type`, before: '', after: Object.keys(p).map(k => `${k}: ${String(p[k])}`).join(', ') } }
     case 'setLayerProps': { const p = (a.patch ?? {}) as Record<string, unknown>; return { label: name || 'Layer', before: '', after: Object.keys(p).map(k => `${k}: ${String(p[k])}`).join(', ') } }
     case 'setSize': return { label: `${name} size`, before: '', after: ['w', 'h', 'scale'].filter(k => k in a).map(k => `${k}: ${String((a as Record<string, unknown>)[k])}`).join(', ') }

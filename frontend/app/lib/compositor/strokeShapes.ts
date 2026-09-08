@@ -181,3 +181,63 @@ export function shapeStrokeGuideFit(d: string, distance: number, tolerance?: num
 export function shapeStrokeGuide(d: string, distance: number, tolerance?: number): Guide | null {
   return shapeStrokeGuideFit(d, distance, tolerance)?.guide ?? null
 }
+
+/**
+ * One mark's placement as a plain affine `[a, b, c, d, e, f]` (x' = a·x + c·y + e).
+ *
+ * The SAME tuple the SVG `matrix(...)` attribute takes and the SAME tuple `new DOMMatrix()`
+ * takes, deliberately: the canvas painter and the SVG writer both place a mark from this
+ * one function, so they cannot disagree about where a mark sits. Two consumers, one
+ * geometry — the alternative is a parity test between two copies of the arithmetic, and a
+ * parity test can only ever prove the two copies agree, never that either is right.
+ */
+export type MarkMatrix = readonly [number, number, number, number, number, number]
+
+/**
+ * Where every mark of a shapes stroke goes, in the SAME units `pathData` is written in.
+ *
+ * `distance`, `size` and `spacing` must ALREADY be in those units (the caller multiplies
+ * by its own `widthScale`: `W` for a rect/ellipse whose outline is in pixels, 1 for a path
+ * layer whose ctx is pre-scaled). `box` is the library shape's own ink box `[bx, by, bw, bh]`
+ * — passed in rather than looked up so this module stays free of the shape catalog.
+ *
+ * The composed transform is `T(mark) · R(tangent) · S(fit) · T(-ink centre)`, which is
+ * `drawShape`'s fit arithmetic (`min(size/bw, size/bh)` onto the ink box) with the ink box
+ * CENTRED on the mark rather than corner-placed — so `spacing` means centre-to-centre, as
+ * `ShapeStrokeSpec` says. `fit.cx`/`cy` undoes `guideFromPolyline`'s re-centring so a mark
+ * lands on the edge as DRAWN (0 for a rect or a bbox-centred path; 0.0955 of the radius
+ * for a pentagon).
+ *
+ * Empty for every "draw nothing" case the painter already treated as a no-op: a
+ * non-positive size or spacing, a degenerate ink box, or an outline that will not flatten.
+ */
+export function shapeStrokeMarkMatrices(o: {
+  pathData: string
+  distance: number
+  size: number
+  spacing: number
+  box: readonly [number, number, number, number]
+  /** Absent or true: each mark rotates to the tangent. */
+  follow?: boolean
+  /** In `pathData`'s own units — see `pathOutlineFlattenTolerance`. */
+  tolerance?: number
+}): MarkMatrix[] {
+  const [bx, by, bw, bh] = o.box
+  if (!(o.size > 0) || !(o.spacing > 0)) return []
+  if (!(bw > 0) || !(bh > 0)) return []
+  const fit = shapeStrokeGuideFit(o.pathData, o.distance, o.tolerance)
+  if (!fit) return []
+  const marks = shapePlacements(fit.guide, o.spacing)
+  if (!marks.length) return []
+  const s = Math.min(o.size / bw, o.size / bh)
+  const follow = o.follow !== false
+  // The ink box's own centre, in the shape's units — the point the mark sits on.
+  const tx = -bx - bw / 2, ty = -by - bh / 2
+  return marks.map((m) => {
+    const cos = follow ? Math.cos(m.angle) : 1
+    const sin = follow ? Math.sin(m.angle) : 0
+    const a = s * cos, b = s * sin, c = -s * sin, d = s * cos
+    const mx = m.x + fit.cx, my = m.y + fit.cy
+    return [a, b, c, d, mx + a * tx + c * ty, my + b * tx + d * ty] as const
+  })
+}

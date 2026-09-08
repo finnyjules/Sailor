@@ -49,7 +49,7 @@ import {
   polygonPathData, starPathData, roundedRectPathData, ellipsePathData,
 } from '~/lib/compositor/polygonGeometry'
 // Task 5's pure geometry for a SHAPES stroke, and the shape library it marches.
-import { shapePlacements, shapeStrokeGuideFit, pathOutlineFlattenTolerance } from '~/lib/compositor/strokeShapes'
+import { shapeStrokeMarkMatrices, pathOutlineFlattenTolerance } from '~/lib/compositor/strokeShapes'
 import { DEFAULT_FLATTEN_TOLERANCE } from '~/lib/compositor/pathFlatten'
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapePath2D } from '~/lib/shapes/path2d'
@@ -940,6 +940,30 @@ export function createPathLayer(partial: Partial<PathLayer> = {}): PathLayer {
 }
 
 /**
+ * The stroke STACK, carried through the shape→path conversion.
+ *
+ * This function copied only the legacy `stroke`/`strokeWidth`/`strokeAlign`/`strokeDash`
+ * pair, which a stacked layer does not have: `writeStrokeStackToLayer` clears every one of
+ * them in the same patch that stores `strokes`. So converting a multi-stroke rect for a
+ * boolean op or the node editor produced a path with NO outline at all — every stroke
+ * silently dropped, not merely the second one.
+ *
+ * Both shapes are copied, and the legacy pair is left exactly as it was: `strokeStackOf`
+ * prefers a LIVE legacy field over the array (see its own note on an older build editing a
+ * newer document), so carrying both means the converted layer reads back through the same
+ * branch the source layer did. Units need no conversion — the conversion always emits
+ * `scale: 1`, where a path layer's local units ARE width-normalized units, the same ones a
+ * rect stores its widths and distances in.
+ *
+ * Omitted rather than written as `undefined` when there is no stack, so a legacy layer's
+ * converted path is byte-identical to what it was before this existed.
+ */
+function strokeStackCarry(layer: LocalLayer): Record<string, unknown> {
+  const s = (layer as unknown as { strokes?: unknown }).strokes
+  return Array.isArray(s) && s.length ? { strokes: s } : {}
+}
+
+/**
  * Convert a primitive shape (rect / ellipse / line) to an equivalent PathLayer
  * so it can take part in boolean ops, node editing, etc. Geometry is expressed
  * in the path local frame (centered on origin, units = canvas width), matching
@@ -968,7 +992,7 @@ export function shapeToPathLayer(layer: LocalLayer): PathLayer | null {
     return createPathLayer({
       d, bbox: { w, h }, scale: 1, x: layer.x, y: layer.y, rotation: layer.rotation,
       opacity: layer.opacity, fill: layer.fill, stroke: layer.stroke, strokeWidth: layer.strokeWidth,
-      strokeAlign: layer.strokeAlign, strokeDash: layer.strokeDash,
+      strokeAlign: layer.strokeAlign, strokeDash: layer.strokeDash, ...strokeStackCarry(layer),
     })
   }
   if (layer.kind === 'ellipse') {
@@ -981,7 +1005,7 @@ export function shapeToPathLayer(layer: LocalLayer): PathLayer | null {
     return createPathLayer({
       d, bbox: { w: layer.w, h: layer.h }, scale: 1, x: layer.x, y: layer.y, rotation: layer.rotation,
       opacity: layer.opacity, fill: layer.fill, stroke: layer.stroke, strokeWidth: layer.strokeWidth,
-      strokeAlign: layer.strokeAlign, strokeDash: layer.strokeDash,
+      strokeAlign: layer.strokeAlign, strokeDash: layer.strokeDash, ...strokeStackCarry(layer),
     })
   }
   if (layer.kind === 'line') {
@@ -999,7 +1023,7 @@ export function shapeToPathLayer(layer: LocalLayer): PathLayer | null {
       d, bbox: { w: layer.w, h: layer.h }, scale: 1,
       x: layer.x, y: layer.y, rotation: layer.rotation, opacity: layer.opacity,
       fill: layer.fill, stroke: layer.stroke, strokeWidth: layer.strokeWidth,
-      strokeAlign: layer.strokeAlign, strokeDash: layer.strokeDash,
+      strokeAlign: layer.strokeAlign, strokeDash: layer.strokeDash, ...strokeStackCarry(layer),
     })
   }
   if (layer.kind === 'star') {
@@ -1009,7 +1033,7 @@ export function shapeToPathLayer(layer: LocalLayer): PathLayer | null {
       d, bbox: { w: layer.w, h: layer.h }, scale: 1,
       x: layer.x, y: layer.y, rotation: layer.rotation, opacity: layer.opacity,
       fill: layer.fill, stroke: layer.stroke, strokeWidth: layer.strokeWidth,
-      strokeAlign: layer.strokeAlign, strokeDash: layer.strokeDash,
+      strokeAlign: layer.strokeAlign, strokeDash: layer.strokeDash, ...strokeStackCarry(layer),
     })
   }
   return null
@@ -2517,19 +2541,21 @@ function paintShapeStroke(ctx: CanvasRenderingContext2D, o: {
 }): void {
   const shape = shapeById(o.spec.shapeId)
   if (!shape) return
-  const size = o.spec.size * o.unit
-  const spacing = o.spec.spacing * o.unit
-  if (!(size > 0) || !(spacing > 0)) return
-  const [bx, by, bw, bh] = shape.box
-  if (!(bw > 0) || !(bh > 0)) return
-  const fit = shapeStrokeGuideFit(o.pathData, o.distance, o.tolerance)
-  if (!fit) return
-  const marks = shapePlacements(fit.guide, spacing)
+  // WHERE each mark goes is `shapeStrokeMarkMatrices`' job, not this function's — the SVG
+  // writer (`pathLayersToSvgDoc`) places its marks from the same call, so the exported file
+  // and the canvas cannot drift. Everything left here is the CANVAS half: which Path2D,
+  // which paint, one fill.
+  const marks = shapeStrokeMarkMatrices({
+    pathData: o.pathData,
+    distance: o.distance,
+    size: o.spec.size * o.unit,
+    spacing: o.spec.spacing * o.unit,
+    box: shape.box,
+    follow: o.spec.follow,
+    tolerance: o.tolerance,
+  })
   if (!marks.length) return
-
-  const s = Math.min(size / bw, size / bh)
   const src = shapePath2D(shape)
-  const follow = o.spec.follow !== false
   // ONE path for the whole stroke, not one fill per mark. A CanvasGradient's coordinates
   // are read against the transform live at FILL time, so filling each mark under its own
   // translate/rotate/scale would squeeze a gradient stroke into every individual mark
@@ -2539,19 +2565,7 @@ function paintShapeStroke(ctx: CanvasRenderingContext2D, o: {
   // (Every library shape is `nonzero` today; a future `evenodd` one whose marks OVERLAP —
   // which needs `spacing` below `size` — would hole itself where two marks meet.)
   const all = new Path2D()
-  for (const m of marks) {
-    const t = new DOMMatrix()
-    // `fit.cx`/`cy` undoes the re-centring `guideFromPolyline` applies, putting the mark
-    // back on the edge as DRAWN. Zero for a rect, an ellipse and any bbox-centred path;
-    // 0.0955 of the radius for a pentagon, which is ~4px on a default-sized layer.
-    t.translateSelf(m.x + fit.cx, m.y + fit.cy)
-    if (follow) t.rotateSelf((m.angle * 180) / Math.PI)
-    t.scaleSelf(s, s)
-    // Centre the ink box on the mark rather than its top-left, so spacing means
-    // centre-to-centre as `ShapeStrokeSpec` says it does.
-    t.translateSelf(-bx - bw / 2, -by - bh / 2)
-    all.addPath(src, t)
-  }
+  for (const m of marks) all.addPath(src, new DOMMatrix([m[0], m[1], m[2], m[3], m[4], m[5]]))
   ctx.save()
   ctx.fillStyle = o.style(ctx)
   ctx.fill(all, shape.fillRule)

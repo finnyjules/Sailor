@@ -11,7 +11,11 @@
  * a multi-color icon re-assembles exactly with each sub-shape's position carried
  * inside its own `d`. No artboard aspect is needed at import time.
  */
-import { createPathLayer, type PathLayer, type Paint } from '~/composables/useCompositorLayers'
+import { createPathLayer, strokeDashSegments, type PathLayer, type Paint } from '~/composables/useCompositorLayers'
+import { strokeStackOf } from '~/lib/compositor/strokeStack'
+import { shapeStrokeMarkMatrices, pathOutlineFlattenTolerance } from '~/lib/compositor/strokeShapes'
+import { shapeById } from '~/lib/shapes/catalog'
+import { hasPaint } from '~/lib/paint/resolve'
 import { paintPrimaryColor } from '~/lib/spacetype/fillTile'
 import type Paper from 'paper'
 
@@ -467,38 +471,163 @@ export async function pathLayerBoolean(
 }
 
 /**
- * Export PathLayers back to a standalone SVG string. `aspect` (w/h) of the
- * artboard maps the layers' shared local frame into a square-agnostic viewBox.
- * Used for save/round-trip and "copy as SVG".
+ * One thing the exported file cannot say exactly, named so the product can repeat it.
+ *
+ * There was no such channel before this: the writer flattened a gradient to a representative
+ * colour and dropped stroke alignment on the floor, both in silence, which is the carried
+ * debt the multi-stroke spec calls "Compositor's SVG writer degrades silently". A note names
+ * the LAYER, because "this export contains an approximation" is not something anyone can act
+ * on, and "layer r1's outline is drawn on the shape's edge" sends them to the row.
+ *
+ * The tone matches the studio's other notes (see `vtRasterNote`): it says what you GET,
+ * never what you did wrong.
  */
-export function pathLayersToSvg(layers: PathLayer[], aspect = 1): string {
+export interface SvgDocument {
+  svg: string
+  /** Empty when every layer exported exactly. */
+  notes: string[]
+}
+
+/** Local-unit numbers (widths, dashes, matrices) — enough digits that a 0.006 stroke
+ *  survives, with the trailing zeros trimmed by the unary plus. */
+const n6 = (v: number): string => String(+v.toFixed(6))
+
+/**
+ * A `Paint` as an SVG paint value, plus whether saying it cost fidelity.
+ *
+ * Tier 1/2 paints (gradients, procedural patterns) have real `<defs>` forms — see
+ * `lib/paint/toVector.ts` — and emitting them here is a separate job. Until then a
+ * non-string paint is flattened to its representative colour AND reported, rather than
+ * flattened quietly.
+ */
+function svgPaint(p: Paint | undefined): { color: string; flattened: boolean } {
+  if (!p || p === 'none' || p === 'transparent') return { color: 'none', flattened: false }
+  if (typeof p === 'string') return { color: esc(p), flattened: false }
+  return { color: esc(paintPrimaryColor(p, '#000000')), flattened: true }
+}
+
+/**
+ * Export PathLayers to a standalone SVG document, with the notes for whatever could not be
+ * written exactly. `aspect` (w/h) of the artboard maps the layers' shared local frame into
+ * a square-agnostic viewBox.
+ *
+ * ## One `<g>` per layer, children in LOCAL units
+ *
+ * A layer used to be one `<path>` carrying both its fill and its stroke. A layer now emits
+ * a fill path plus one element per painting stroke (a band) or per mark (a shapes stroke),
+ * so the layer's transform and opacity are hoisted onto a wrapping `<g>`: layer opacity is
+ * applied to the composited layer on canvas (`globalAlpha`), and repeating it on every
+ * child would darken the overlaps instead.
+ *
+ * That hoist is also what makes the widths right. `d`, `strokeWidth`, `distance` and a
+ * shapes stroke's `size`/`spacing` are ALL in the layer's local units — the painter's
+ * `widthScale` for a path layer is 1 precisely because its ctx is pre-scaled — and an SVG
+ * `transform` scales an element's stroke with its geometry. So `stroke-width` is the stored
+ * number, written unchanged. (The previous writer multiplied it by the transform's own
+ * scale as well, which on a 1000-unit viewBox drew every outline a thousand times too
+ * thick. Nothing consumed the output yet, so nothing showed it.)
+ *
+ * ## Order
+ *
+ * `strokeStackOf` is THE reader — the painter, the inspector, the agent and this writer all
+ * go through it, so they cannot disagree about what a layer's strokes are. The painter walks
+ * it BACKWARDS so the first row lands on top; SVG paints in document order, so the elements
+ * come out in that same backwards order and the first row is the last element.
+ */
+export function pathLayersToSvgDoc(layers: PathLayer[], aspect = 1): SvgDocument {
   const VB = 1000
   const W = VB, H = Math.round(VB / (aspect || 1))
   const parts: string[] = []
+  const notes: string[] = []
   for (const l of layers) {
     if (l.kind !== 'path' || !l.d) continue
     const s = (l.scale || 1) * W
-    // Local (width-fraction, centered) → viewBox px: scale by W, place at center.
-    const tx = l.x * W
-    const ty = l.y * H
-    const fill = paintToSvg(l.fill)
-    const strokeCol = paintToSvg(l.stroke).color
-    const strokeAttr = strokeCol !== 'none' && l.strokeWidth > 0
-      ? ` stroke="${strokeCol}" stroke-width="${(l.strokeWidth * s).toFixed(3)}"` : ''
-    const transform = `translate(${tx.toFixed(2)} ${ty.toFixed(2)}) rotate(${l.rotation || 0}) scale(${s.toFixed(4)})`
-    parts.push(
-      `<path d="${esc(l.d)}" transform="${transform}" fill="${fill.color}" fill-rule="${l.fillRule || 'nonzero'}"` +
-      `${fill.opacityAttr}${strokeAttr} opacity="${l.opacity ?? 1}"/>`,
+    const children: string[] = []
+    const say = (what: string) => { notes.push(`Layer ${l.id}: ${what}`) }
+
+    const fill = svgPaint(l.fill)
+    if (fill.flattened) say('its fill exports as one flat colour')
+    children.push(
+      `<path d="${esc(l.d)}" fill="${fill.color}" fill-rule="${l.fillRule || 'nonzero'}"/>`,
     )
+
+    // Painted last-row-first, exactly as `paintStrokeStack` does — see the header.
+    const stack = strokeStackOf(l)
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const st = stack[i]!
+      // An inkless entry (`paint: 'none'`) is a real, well-formed stroke that paints
+      // nothing — the inspector's Colour row offers exactly that. It has a row; it has no
+      // element. The painter re-checks `hasPaint` for the same reason.
+      if (st.visible === false || !hasPaint(st.paint)) continue
+      const paint = svgPaint(st.paint)
+      if (paint.flattened) say('an outline exports as one flat colour')
+
+      if ((st.style ?? 'band') === 'shapes') {
+        // Dispatch on STYLE and never fall through to the band arm, the same rule the
+        // painter follows: a shapes entry's `width` is stale, not its size.
+        const shape = st.shapes ? shapeById(st.shapes.shapeId) : undefined
+        if (!shape || !st.shapes) continue
+        // Every number here is already in `d`'s own units (a path layer's `widthScale` is
+        // 1), and the tolerance is `d`'s units too — `W` cancels out of
+        // `pathOutlineFlattenTolerance`, so the chord accuracy matches the canvas at any
+        // `scale`, exactly as `drawPath` computes it.
+        const marks = shapeStrokeMarkMatrices({
+          pathData: l.d,
+          distance: st.distance ?? 0,
+          size: st.shapes.size,
+          spacing: st.shapes.spacing,
+          box: shape.box,
+          follow: st.shapes.follow,
+          tolerance: pathOutlineFlattenTolerance(s, W),
+        })
+        for (const m of marks) {
+          // The SAME six numbers the canvas painter hands to `DOMMatrix` — one geometry,
+          // two consumers, so a mark cannot land in one place on screen and another in the
+          // file. A mark is FILLED, never stroked: it is a copy of the library shape.
+          children.push(
+            `<path d="${esc(shape.d)}" transform="matrix(${m.map(n6).join(' ')})"` +
+            ` fill="${paint.color}" fill-rule="${shape.fillRule}"/>`,
+          )
+        }
+        continue
+      }
+
+      if (!(st.width > 0)) continue
+      // THE inexact case. A band at a non-zero distance is painted as the difference of two
+      // canvas dilations — it exists as pixels, never as a path — so there is nothing to
+      // write but the shape's own outline at the stroke's stored width. Said out loud.
+      const d = st.distance ?? 0
+      if (d !== 0) {
+        say(`an outline set ${n6(Math.abs(d) * s)} px ${d > 0 ? 'outside' : 'inside'} the edge is drawn ON the edge`)
+      }
+      // SVG strokes are centred, always; `inside`/`outside` would need a clip or a mask
+      // per stroke. Reported for the same reason as the distance.
+      const align = st.align ?? 'center'
+      if (align !== 'center') say(`an ${align}-aligned outline is centred on the edge`)
+      const dash = strokeDashSegments(st.dash, 1)
+      children.push(
+        `<path d="${esc(l.d)}" fill="none" stroke="${paint.color}" stroke-width="${n6(st.width)}"` +
+        `${dash ? ` stroke-dasharray="${n6(dash[0])} ${n6(dash[1])}"` : ''}/>`,
+      )
+    }
+
+    // Local (width-fraction, centered) → viewBox px: scale by W, place at center.
+    const transform = `translate(${(l.x * W).toFixed(2)} ${(l.y * H).toFixed(2)}) rotate(${l.rotation || 0}) scale(${s.toFixed(4)})`
+    parts.push(`<g transform="${transform}" opacity="${l.opacity ?? 1}">${children.join('')}</g>`)
   }
   const defs = '' // gradient <defs> can be emitted here in a later pass
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${defs}${parts.join('')}</svg>`
+  return {
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${defs}${parts.join('')}</svg>`,
+    notes,
+  }
 }
 
-function paintToSvg(p: Paint | undefined): { color: string; opacityAttr: string } {
-  if (!p || p === 'none' || p === 'transparent') return { color: 'none', opacityAttr: '' }
-  // Gradient/Fill fall back to a representative colour for v1 export (defs/patterns TBD).
-  return { color: esc(paintPrimaryColor(p, '#000000')), opacityAttr: '' }
+/**
+ * The document as a bare string, for a caller that has nowhere to show a note.
+ * Used for save/round-trip and "copy as SVG".
+ */
+export function pathLayersToSvg(layers: PathLayer[], aspect = 1): string {
+  return pathLayersToSvgDoc(layers, aspect).svg
 }
 
 function esc(s: string): string {
