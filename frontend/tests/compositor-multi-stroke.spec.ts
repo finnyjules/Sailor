@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { openCompositor, stackPixels } from './_helpers'
 
 /**
@@ -186,4 +186,206 @@ test('a text stroke at a distance puts ink that far from the glyphs, with clean 
   //    and where the on-edge outline was.
   const gap = Math.round((outerFar + wPx + outerNear) / 2)
   expect(hasRedFar(gap, halo), `clear space at x=${gap}, between the band and the glyph`).toBe(false)
+})
+
+/**
+ * DISTANCE AND ORDER, MEASURED IN A REAL BROWSER (Task 4).
+ *
+ * Tasks 1-3 wired the distance dial and the ordered stroke stack; the byte-identity test
+ * above proves neither broke a single already-saved frame. Nothing until now proves the
+ * NEW behaviour reaches a pixel: that `distance` moves a band the right number of pixels
+ * in EITHER direction, on every side of a shape; that the list's first entry paints on
+ * top; and that a hidden stroke paints nothing. A dial that stores its value without
+ * reaching a pixel is this codebase's most common defect, so only pixels disprove it.
+ *
+ * GEOMETRY: `w`/`h` and a stroke's `width`/`distance` are ALWAYS normalized to the canvas
+ * WIDTH (see `parseSeedreamLayers`'s doc and `applyStrokeMask`'s own
+ * `(layer.x ?? 0.5) * W, (layer.y ?? 0.5) * H`), while `pixelAt` below reads its `y`
+ * argument as a fraction of the canvas HEIGHT. Those two units only coincide when the
+ * canvas is square. `openCompositor` opens a brand-new, image-less document, and a fresh
+ * document's artboard defaults to a 1:1 aspect (`baseAspect` with no background image) —
+ * confirmed empirically before writing any assertion below (a throwaway probe read
+ * `cv.width === cv.height === 542` for exactly this seeding path). So every probe here is
+ * safe to state as one plain fraction — but the arithmetic is spelled out at each one
+ * regardless, so a future non-square default doesn't silently invalidate it.
+ *
+ * ORDER + SKIP is implemented in TWO places that must never drift apart: `paintStrokeStack`
+ * (rect/ellipse/polygon/star/path) and `textStrokePasses` (text's on-edge strokes — see
+ * `paintTextStrokeBands`'s own doc for why a DISTANT text stroke is a different, and
+ * strictly lower, construction). Every order/hidden assertion below is therefore written
+ * twice: once against a shape, once against text.
+ */
+
+/** The colour of the pixel at (x, y) in the settled stack canvas, as [r,g,b,a]. `x` is a
+ *  fraction of the canvas's own WIDTH, `y` a fraction of its HEIGHT — see the geometry
+ *  note above for why those coincide here. */
+async function pixelAt(page: Page, x: number, y: number): Promise<number[]> {
+  return page.evaluate(({ x, y }) => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const d = cv.getContext('2d')!.getImageData(Math.round(x * cv.width), Math.round(y * cv.height), 1, 1).data
+    return [d[0]!, d[1]!, d[2]!, d[3]!]
+  }, { x, y })
+}
+
+/** The colour at a literal DEVICE pixel (x, y) — used once the probe point comes from a
+ *  measured run rather than from stated geometry (the two text tests below). */
+async function pixelAtDevice(page: Page, x: number, y: number): Promise<number[]> {
+  return page.evaluate(({ x, y }) => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const d = cv.getContext('2d')!.getImageData(x, y, 1, 1).data
+    return [d[0]!, d[1]!, d[2]!, d[3]!]
+  }, { x, y })
+}
+
+test('a stroke at a distance sits that far from the edge, on every side', async ({ page }) => {
+  await openCompositor(page)
+  // A black square, 0.4 wide, centred. One red stroke, 0.01 wide, 0.05 out.
+  await page.evaluate(() => (window as any).__compositorSetLayers([{
+    id: 'r', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, visible: true,
+    fill: '#000000', radius: 0,
+    strokes: [{ id: 's1', paint: '#ff0000', width: 0.01, distance: 0.05, align: 'center', join: 'sharp' }],
+  }]))
+  await stackPixels(page)
+  const isRed = (p: number[]) => p[0]! > 200 && p[1]! < 60 && p[3]! > 200
+  // The square's right edge is at 0.5 + 0.4/2 = 0.7 (all width-normalized, no axis
+  // conversion needed here). The band's centre must be at 0.7 + 0.05 = 0.75, and there
+  // must be clean air between the shape and the band.
+  expect(isRed(await pixelAt(page, 0.75, 0.5))).toBe(true)
+  expect(isRed(await pixelAt(page, 0.72, 0.5))).toBe(false)   // the gap
+  expect(isRed(await pixelAt(page, 0.79, 0.5))).toBe(false)   // beyond the band
+  // Same distance on the TOP edge. The half-height and the distance are both stored in
+  // WIDTH units: (0.4/2 + 0.05) * W px up from centre. `pixelAt`'s y is a fraction of
+  // canvas HEIGHT, so that offset is (0.25 * W) / H in canvas-height fractions — which is
+  // exactly 0.25 on the square canvas this suite runs against (W === H), and would need
+  // the W/H ratio folded in on a non-square one.
+  expect(isRed(await pixelAt(page, 0.5, 0.25))).toBe(true)
+})
+
+test('the distance is uniform on a NON-square shape — an offset, not a scale', async ({ page }) => {
+  await openCompositor(page)
+  // 0.6 wide, 0.2 tall. A scale-based fake would put the horizontal gap 3x the vertical one.
+  await page.evaluate(() => (window as any).__compositorSetLayers([{
+    id: 'r', kind: 'rect', x: 0.5, y: 0.5, w: 0.6, h: 0.2, rotation: 0, opacity: 1, visible: true,
+    fill: '#000000', radius: 0,
+    strokes: [{ id: 's1', paint: '#ff0000', width: 0.01, distance: 0.05, align: 'center', join: 'sharp' }],
+  }]))
+  await stackPixels(page)
+  const isRed = (p: number[]) => p[0]! > 200 && p[1]! < 60 && p[3]! > 200
+  // Right edge: 0.5 + 0.6/2 = 0.8, band centre 0.8 + 0.05 = 0.85. Purely horizontal, so no
+  // W/H conversion applies regardless of canvas aspect.
+  expect(isRed(await pixelAt(page, 0.85, 0.5))).toBe(true)
+  expect(isRed(await pixelAt(page, 0.82, 0.5))).toBe(false)
+  // Bottom edge: half-height is 0.2/2 = 0.1 in WIDTH units, so (0.1 + 0.05) * W px down
+  // from centre — a canvas-height fraction of (0.15 * W) / H, which is 0.15 on this
+  // suite's square canvas (W === H), landing the band centre at 0.5 + 0.15 = 0.65.
+  expect(isRed(await pixelAt(page, 0.5, 0.65))).toBe(true)
+  expect(isRed(await pixelAt(page, 0.5, 0.62))).toBe(false)
+})
+
+test('a negative distance puts the stroke inside the shape', async ({ page }) => {
+  await openCompositor(page)
+  await page.evaluate(() => (window as any).__compositorSetLayers([{
+    id: 'r', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, visible: true,
+    fill: '#000000', radius: 0,
+    strokes: [{ id: 's1', paint: '#ff0000', width: 0.01, distance: -0.05, align: 'center', join: 'sharp' }],
+  }]))
+  await stackPixels(page)
+  const isRed = (p: number[]) => p[0]! > 200 && p[1]! < 60 && p[3]! > 200
+  // Edge 0.7 minus 0.05 = 0.65. Purely horizontal.
+  expect(isRed(await pixelAt(page, 0.65, 0.5))).toBe(true)
+  expect(isRed(await pixelAt(page, 0.69, 0.5))).toBe(false)
+})
+
+test('the first stroke in the list paints on top — SHAPE', async ({ page }) => {
+  await openCompositor(page)
+  await page.evaluate(() => (window as any).__compositorSetLayers([{
+    id: 'r', kind: 'rect', x: 0.5, y: 0.5, w: 0.3, h: 0.3, rotation: 0, opacity: 1, visible: true,
+    fill: 'none', radius: 0,
+    strokes: [
+      { id: 'top', paint: '#ff0000', width: 0.01, distance: 0, align: 'center' },
+      { id: 'under', paint: '#0000ff', width: 0.04, distance: 0, align: 'center' },
+    ],
+  }]))
+  await stackPixels(page)
+  const p = await pixelAt(page, 0.65, 0.5)   // on the shared edge: 0.5 + 0.3/2 = 0.65
+  expect(p[0]!).toBeGreaterThan(200)          // red, not blue
+  expect(p[2]!).toBeLessThan(60)
+})
+
+test('a hidden stroke paints nothing — SHAPE', async ({ page }) => {
+  await openCompositor(page)
+  // Same shape and stroke geometry as the first distance test, but `visible: false` — if
+  // the stroke painted anyway, the band would sit exactly at these two probes.
+  await page.evaluate(() => (window as any).__compositorSetLayers([{
+    id: 'r', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, visible: true,
+    fill: '#000000', radius: 0,
+    strokes: [{ id: 's1', paint: '#ff0000', width: 0.01, distance: 0.05, align: 'center', join: 'sharp', visible: false }],
+  }]))
+  await stackPixels(page)
+  const isRed = (p: number[]) => p[0]! > 200 && p[1]! < 60 && p[3]! > 200
+  expect(isRed(await pixelAt(page, 0.75, 0.5))).toBe(false)
+  expect(isRed(await pixelAt(page, 0.5, 0.25))).toBe(false)
+})
+
+/**
+ * The text equivalents of the two SHAPE tests above. `paintTextStrokeBands`'s own doc
+ * states the limitation plainly: a stroke at a distance is painted as a group BENEATH the
+ * on-edge strokes and the fill, in stack order among themselves — so an order test on
+ * text must compare two strokes that are BOTH on-edge (distance 0), never one of each,
+ * or the "which is on top" question would really be answered by distance, not by list
+ * order. Both tests below therefore use distance-0 strokes only, which is exactly the
+ * code path `textStrokePasses` owns (as opposed to `paintTextStrokeBands`, which owns
+ * distant strokes and is already covered by the "text stroke at a distance" test above).
+ *
+ * Font metrics vary by platform, so — same discipline as the "text stroke at a distance"
+ * test above — the probe pixel is MEASURED from a real render, never guessed.
+ */
+test('the first stroke in the list paints on top — TEXT, both on the edge', async ({ page }) => {
+  await openCompositor(page)
+  const STROKE_W = 0.02
+  // A green fill keeps the glyph body unambiguous against both the red and the blue
+  // strokes probed below (low overlap with either detector on any channel).
+  const layerWith = (strokes: unknown[]) => [{
+    id: 'txt', kind: 'text', x: 0.5, y: 0.5, opacity: 1, rotation: 0, visible: true,
+    text: 'HI', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.25,
+    color: '#00ff00', align: 'center', lineHeight: 1, strokes,
+  }]
+
+  // Render the 'top' stroke ALONE first, purely to measure a real ink pixel to probe.
+  const solo = await redPixels(page, layerWith([
+    { id: 'top', paint: '#ff0000', width: STROKE_W, distance: 0, align: 'center', join: 'round' },
+  ]))
+  let probeY = -1, best = 0
+  for (let y = 0; y < solo.h; y++) if (solo.rows[y]!.length > best) { best = solo.rows[y]!.length; probeY = y }
+  expect(probeY, 'the solo on-edge stroke must actually draw red ink').toBeGreaterThan(-1)
+  const run = firstRun(solo.rows[probeY]!)
+  expect(run, 'a red run on the probe row').not.toBeNull()
+  const probeX = run!.start + Math.floor(run!.len / 2)
+
+  // Now stack a SECOND stroke of the identical width and distance UNDER it in the list.
+  // Same width + same distance + `align` ignored for text (no path to straddle) means the
+  // two bands land on EXACTLY the same pixels, so whichever one is drawn LAST is the only
+  // colour visible at the probe — a clean read on list order with no partial-overlap
+  // ambiguity.
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), layerWith([
+    { id: 'top', paint: '#ff0000', width: STROKE_W, distance: 0, align: 'center', join: 'round' },
+    { id: 'under', paint: '#0000ff', width: STROKE_W, distance: 0, align: 'center', join: 'round' },
+  ]))
+  await stackPixels(page)
+  const p = await pixelAtDevice(page, probeX, probeY)
+  expect(p[0]!, `pixel at device (${probeX},${probeY}) should be red (list's first entry), not blue`).toBeGreaterThan(150)
+  expect(p[2]!).toBeLessThan(90)
+})
+
+test('a hidden stroke paints nothing — TEXT, on the edge', async ({ page }) => {
+  await openCompositor(page)
+  const layers = [{
+    id: 'txt', kind: 'text', x: 0.5, y: 0.5, opacity: 1, rotation: 0, visible: true,
+    text: 'HI', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.25,
+    color: '#00ff00', align: 'center', lineHeight: 1,
+    strokes: [{ id: 's1', paint: '#ff0000', width: 0.02, distance: 0, align: 'center', join: 'round', visible: false }],
+  }]
+  const result = await redPixels(page, layers)
+  const anyRed = result.rows.some(r => r.length > 0)
+  expect(anyRed, 'a stroke with visible: false must paint no red ink anywhere').toBe(false)
 })
