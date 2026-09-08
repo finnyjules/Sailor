@@ -35,15 +35,19 @@ uniform float u_step;     // jitter steps/sec (snap-in-time vs. slide)
 // no-op — so this shader has none. Speed 0 on the fill = a static poster.
 
 // Per-band signed offset in [-1, 1]. `c` is the perpendicular coord, `laneId`
-// separates the X-band set from the Y-band set when both axes are active, `tq`
-// is the quantized time.
-float bandOffset(float c, float laneId, float tq) {
+// separates the X-band set from the Y-band set when both axes are active, `tick`
+// is an INTEGER time-step counter (u_step steps per unit u_time).
+float bandOffset(float c, float laneId, float tick) {
     float band = max(u_band, 1e-4);
     float bi = floor(c / band);
     int pat = int(u_pattern + 0.5);
     float o;
     if (pat == 0) {                       // Random per band
-        o = hash2(vec2(bi, laneId) + tq, u_seed) * 2.0 - 1.0;
+        // hash2 casts its vec2 arg through ivec2, so a fractional time added there
+        // would be truncated away (the band would only reshuffle at whole u_time).
+        // Feed the integer step counter through the SEED channel instead, so every
+        // step decorrelates cleanly at the Step rate.
+        o = hash2(vec2(bi, laneId), u_seed + tick) * 2.0 - 1.0;
     } else if (pat == 1) {                // Wave
         o = sin(bi * 0.6 + u_time);
     } else if (pat == 2) {                // Stair: monotone ramp -> shear / faux-italic
@@ -69,16 +73,16 @@ void main() {
     vec2 uv = v_texCoord;
     int axis = int(u_axis + 0.5);
     float jstep = max(1.0, u_step);
-    float tq = floor(u_time * jstep) / jstep;
+    float tick = floor(u_time * jstep);           // integer step counter -> Step snaps/sec
     float f = falloff(uv);
 
     vec2 offVec = vec2(0.0);
     if (axis == 0 || axis == 2) {                 // Horizontal: bands on Y (yDown), shift X
-        float o = bandOffset(1.0 - uv.y, 0.0, tq);
+        float o = bandOffset(1.0 - uv.y, 0.0, tick);
         offVec.x += o * u_amount * f;
     }
     if (axis == 1 || axis == 2) {                 // Vertical: bands on X, shift Y
-        float o = bandOffset(uv.x, 1.0, tq);
+        float o = bandOffset(uv.x, 1.0, tick);
         offVec.y += o * u_amount * f;
     }
 
