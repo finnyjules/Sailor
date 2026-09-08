@@ -35,10 +35,17 @@ describe('effectWantsClock', () => {
     expect(effectWantsClock(def('mist'), {})).toBe(true)                  // default 1.0
   })
 
-  it('an effect with no time dial never asks for a clock', () => {
+  it('a STATIC effect (animated:false) with no time dial never asks for a clock', () => {
     expect(effectWantsClock(def('oddgrid'), {})).toBe(false)
     expect(effectWantsClock(def('halftone'), {})).toBe(false)
     expect(effectWantsClock(null, {})).toBe(false)
+  })
+
+  it('an ANIMATED effect with no rate dial animates unconditionally off u_time', () => {
+    // slice_shift drives itself off u_time directly (no u_speed/u_shimmer dial to
+    // gate or scale it), so the studio must still run a clock or it renders one
+    // frozen frame — the exact bug where Speed/Step "did nothing" in the studio.
+    expect(effectWantsClock(def('slice_shift'), {})).toBe(true)
   })
 
   it('reads u_shimmer too — the only other dial any frag multiplies u_time by', () => {
