@@ -124,6 +124,8 @@ So the leading default is `ratio = f(sizePx, measure, faceXHeight, isCaps)`, com
 
 A Frame gains a **layout sheet**: with nothing selected, a frame-panel action **Options** renders a contact sheet of tiles, each one **pattern** arranging the frame's current elements, varied by a **seed**. Hovering a tile previews it on the frame (reusing the card hover-to-play gate); clicking **applies** it — the pattern's computed boxes are written onto the existing layers. **Another** re-rolls the seed; **More like this** fills the sheet with variants of one pattern. Patterns are pure functions; the sheet is the only new UI.
 
+**Success metric — the fix-vs-choice bar.** The sheet is *not* meant to output a finished poster; by design you refine every result by hand (the elements are yours, non-destructively). So "the first posters aren't perfect" is the tool working, not failing. The bar is therefore **not** "is the output perfect" but: **of the adjustments the user then makes, how many are *choices* vs *fixes*.** A *choice* (nudge, resize, recrop, swap the accent word) is creative refinement and must never go away — it is the point. A *fix* (spindly type, jittery figures, cramped caps, off-centre lockup, illegible ink on field) means the craft **floor** failed and handed the user cleanup — exactly what Tier-1 defaults, optical placement, and ink auto-contrast exist to eliminate. Two secondary bars: **hit rate** (most tiles are credible starts, not that every one is), and **net time saved** (the start must beat designing from scratch — the real "one poster end-to-end" test). The starting point should be **craft-correct but creatively unfinished.**
+
 ### `PatternFn` — the pluggable unit
 
 New module `app/lib/frame/patterns/` (one file per family + an index), pure and unit-tested. The shape follows `ShowcaseLayout` and the shape-library's "manifest + one module" precedent.
@@ -217,6 +219,18 @@ Shapes are already Frame layers, so a placed shape is an ordinary element the sh
 - **A family** — the seed picks a shape within it per tile, the label naming which.
 
 The family mode is the one new persistent idea: a shape layer whose identity is "one of {family}", rerolled by the seed until pinned. Cheap to represent (`shapeMode: {id} | {family}`), worth keeping. Shape moves render via the manifest `d`/`box`/`fillRule` (SVG path), support fill / accent / **stroke-only outline** / **photo-filled** (SVG pattern), matching the prototype.
+
+### Colour — your palette from the seed engine, projected to roles
+
+The prototype used six hard-coded `{field, ink, accent}` palettes. The real system replaces that with the **existing seed→palette engine** (`app/lib/color/`), reused, not rebuilt. Same seed-and-shelf model as the layout sheet and the shape family: it is the third thing that turns a seed into a shelf you pick from.
+
+- **What we reuse (all of it upstream).** `assembleShelf(corpus, { seedA, seedB, char }, size=12)` returns 12 `PaletteFamily` objects (`hexes[]` + `anchorIdxs`, curated from nice-color-palettes + Sanzo, OKLCH, character-filtered, paged, de-duped). `anchorOne`/`anchorTwo` hard-anchor a seed (a brand colour) into every family; `distribute(hexes, n)` fits a family to n slots. Good work already; the poster consumes it.
+- **The one new seam — role projection.** The engine yields *families* (arrays of hexes); the poster needs *roles*. A small pure `rolesFromFamily(family) → { field, ink, accent }` (a candidate module `app/lib/frame/patterns/paletteRoles.ts`, or in `lib/color/`): **field** = a colour that works as a large ground (an extreme lightness / low chroma, or a saturated field when wanted); **ink** = **auto-contrast** to the field (the backpocket "Text = Auto"); **accent** = the highest useful chroma distinct from field and ink. One family may yield a few role triples (paper-field vs black-field), which become adjacent tiles on the palette shelf.
+- **The palette is yours (contract).** It is a **picker**, like the faces and the shape; the layout sheet never rolls it, and it holds across every tile. Re-roll the palette shelf on its own (like faces/shapes), pinned while layouts vary.
+- **Character → a Tier-2 mood choice.** The engine's `Character` (`muted`/`vivid`/`dark`/`light`/`warm`/`cool`) is surfaced as a plain-language **mood**, not raw params — the plain-choices-not-jargon rule.
+- **Brand anchor, for free.** `seedA`/`seedB` anchor a brand colour into every palette — the brand-kit hook and the functional-profile "lock colour," already built.
+
+**Two load-bearing notes.** (1) **Ink auto-contrast is the quality piece:** a low-contrast ink fails legibility, so `rolesFromFamily` needs a real contrast rule (OKLCH lightness delta + a WCAG check) wired to the **Read voice's legibility check** — it is where colour and the taste rubric meet. (2) **Poster palettes are NOT Sailor's UI colour conventions** ([[sailor-colour-conventions]]: action-blue-only, no purple) — those govern the app's own chrome, never user content; the corpus is deliberately unconstrained. The fix-vs-choice bar applies: the shelf gives strong starts you refine, and the projection must be craft-correct (legible) even when the exact hues are a choice.
 
 ### Images — stand-in first, overlap is the point
 
