@@ -38,11 +38,21 @@ import { drawQuadWarp, type Quad } from '~/lib/compositor/warp'
 // Task 1's pure stroke-stack data model. `StrokeAlign` already exists as a local type in
 // this file (see below), so it is NOT re-imported from there to avoid a second import
 // path for the same idea.
-import { strokeStackOf, strokeSupportsStack, type StrokeJoin, type StrokeInstance } from '~/lib/compositor/strokeStack'
+import {
+  strokeStackOf, strokeSupportsStack,
+  type StrokeJoin, type StrokeInstance, type ShapeStrokeSpec,
+} from '~/lib/compositor/strokeStack'
 // The repo's one hex-alpha stripper — the same helper the 3D vary path uses before
 // handing a swatch to THREE.Color (see `tintScratch` below).
 import { stripAlpha } from '~/lib/color/convert'
-import { polygonPathData, starPathData } from '~/lib/compositor/polygonGeometry'
+import {
+  polygonPathData, starPathData, roundedRectPathData, ellipsePathData,
+} from '~/lib/compositor/polygonGeometry'
+// Task 5's pure geometry for a SHAPES stroke, and the shape library it marches.
+import { shapePlacements, shapeStrokeGuideFit } from '~/lib/compositor/strokeShapes'
+import { DEFAULT_FLATTEN_TOLERANCE } from '~/lib/compositor/pathFlatten'
+import { shapeById } from '~/lib/shapes/catalog'
+import { shapePath2D } from '~/lib/shapes/path2d'
 import { resolveGroupCascade, type LayerGroup } from '~/lib/compositor/layerGroups'
 import { layoutExpressive, type ExpressiveParams } from '~~/shared/text-layout/expressive'
 import { type PaintStroke, stampStrokes, strokeBounds } from '~/lib/compositor/brushStamp'
@@ -2445,6 +2455,107 @@ export function strokeAligned(ctx: CanvasRenderingContext2D, o: {
 }
 
 /**
+ * A closed layer's outline as SVG path data, in the SAME units the context that draws the
+ * layer is currently in: PIXELS for a rect/ellipse (their ctx is unscaled and `W` px per
+ * stored unit), LOCAL units for a path (its ctx is already scaled by `scale * W`, and `d`
+ * is stored in exactly those units). That invariant is what lets `paintStrokeStack` use
+ * its own `widthScale` — `W` and 1 respectively — as the single unit conversion a shapes
+ * stroke needs, the same number it already scales a band's width and distance by.
+ *
+ * Null for a kind with no outline, which is what makes a shapes stroke unreachable on TEXT
+ * by construction rather than by a check somewhere in the UI (`strokeSupportsShapes` says
+ * the same thing to the inspector). Text is doubly safe: it never reaches
+ * `paintStrokeStack` at all — see `paintTextStrokeBands`.
+ *
+ * Polygon and star are absent ON PURPOSE. `drawLayerContent` rewrites both into a path
+ * layer carrying `polygonPathData` / `starPathData` output before a stroke is painted, so
+ * they arrive here as `kind: 'path'` with their outline already in `d` — in local units at
+ * `scale: 1`, which for those two kinds ARE width-normalized units.
+ */
+function outlinePathData(layer: unknown, W: number): string | null {
+  const l = layer as LocalLayer | null | undefined
+  if (!l) return null
+  if (l.kind === 'rect') {
+    const w = l.w * W, h = l.h * W
+    const [tl, tr, br, bl] = cornerRadii(l.radius, w, h, W)
+    return roundedRectPathData(-w / 2, -h / 2, w, h, tl, tr, br, bl)
+  }
+  if (l.kind === 'ellipse') return ellipsePathData((l.w * W) / 2, (l.h * W) / 2)
+  if (l.kind === 'path') return l.d
+  return null
+}
+
+/**
+ * A stroke drawn as LIBRARY SHAPES marching along the (offset) outline, rather than as a
+ * continuous band.
+ *
+ * Marks take the STROKE'S OWN paint, so a shapes stroke can be a gradient or a pattern
+ * like any other. `drawShape` from lib/shapes/path2d is deliberately not used: its `fill`
+ * is a colour STRING, and a resolved `Paint` here can be a `CanvasGradient` or a
+ * `CanvasPattern`. Its fit arithmetic is reproduced instead (`Math.min(size/bw, size/bh)`
+ * onto the ink box, origin at `bx`/`by`), so a mark is sized the way the same shape is
+ * sized everywhere else in the app.
+ *
+ * `unit` is px per stored unit — `paintStrokeStack`'s own `widthScale`, so `size` and
+ * `spacing` land in the same units as a band's `width`, exactly as `ShapeStrokeSpec` says.
+ */
+function paintShapeStroke(ctx: CanvasRenderingContext2D, o: {
+  pathData: string
+  distance: number
+  spec: ShapeStrokeSpec
+  style: (c: CanvasRenderingContext2D) => string | CanvasGradient | CanvasPattern
+  unit: number
+}): void {
+  const shape = shapeById(o.spec.shapeId)
+  if (!shape) return
+  const size = o.spec.size * o.unit
+  const spacing = o.spec.spacing * o.unit
+  if (!(size > 0) || !(spacing > 0)) return
+  const [bx, by, bw, bh] = shape.box
+  if (!(bw > 0) || !(bh > 0)) return
+  // The flatten tolerance is a DISTANCE in the path's own units, and the default is
+  // calibrated for local units (1 = the canvas width). A rect/ellipse outline arrives in
+  // PIXELS, where that default asks for chords accurate to a seven-hundredth of a pixel
+  // and spends the flattener's whole 60k-point budget on one ring. Scaling it by `unit`
+  // keeps the accuracy the default intends — and leaves a path layer, whose `unit` is 1,
+  // on precisely the default.
+  const fit = shapeStrokeGuideFit(o.pathData, o.distance, DEFAULT_FLATTEN_TOLERANCE * o.unit)
+  if (!fit) return
+  const marks = shapePlacements(fit.guide, spacing)
+  if (!marks.length) return
+
+  const s = Math.min(size / bw, size / bh)
+  const src = shapePath2D(shape)
+  const follow = o.spec.follow !== false
+  // ONE path for the whole stroke, not one fill per mark. A CanvasGradient's coordinates
+  // are read against the transform live at FILL time, so filling each mark under its own
+  // translate/rotate/scale would squeeze a gradient stroke into every individual mark
+  // instead of running it across the shape. Assembling the marks in the LAYER's space and
+  // filling once keeps a gradient (or a pattern) meaning what it means on a band — and it
+  // is a single canvas call instead of up to SHAPE_STROKE_MAX_MARKS of them.
+  // (Every library shape is `nonzero` today; a future `evenodd` one whose marks OVERLAP —
+  // which needs `spacing` below `size` — would hole itself where two marks meet.)
+  const all = new Path2D()
+  for (const m of marks) {
+    const t = new DOMMatrix()
+    // `fit.cx`/`cy` undoes the re-centring `guideFromPolyline` applies, putting the mark
+    // back on the edge as DRAWN. Zero for a rect, an ellipse and any bbox-centred path;
+    // 0.0955 of the radius for a pentagon, which is ~4px on a default-sized layer.
+    t.translateSelf(m.x + fit.cx, m.y + fit.cy)
+    if (follow) t.rotateSelf((m.angle * 180) / Math.PI)
+    t.scaleSelf(s, s)
+    // Centre the ink box on the mark rather than its top-left, so spacing means
+    // centre-to-centre as `ShapeStrokeSpec` says it does.
+    t.translateSelf(-bx - bw / 2, -by - bh / 2)
+    all.addPath(src, t)
+  }
+  ctx.save()
+  ctx.fillStyle = o.style(ctx)
+  ctx.fill(all, shape.fillRule)
+  ctx.restore()
+}
+
+/**
  * Paint a layer's WHOLE stroke stack over a shape that is already on `ctx` (or handed in
  * as a `path`). THE single place a stroked kind's outlines are drawn, so rect, ellipse,
  * polygon, star and path can't drift apart on ordering, visibility or units.
@@ -2468,6 +2579,11 @@ function paintStrokeStack(
     build?: (c: CanvasRenderingContext2D) => void
     path?: Path2D | null
     fillRule?: CanvasFillRule
+    /** The layer's outline as path data IN THIS CONTEXT'S UNITS (see `outlinePathData`).
+     *  A shapes stroke needs a path to flatten and march; absent, a stroke asking for that
+     *  style simply paints nothing rather than falling back to a band that was not asked
+     *  for. */
+    outline?: string | null
   },
 ): void {
   const stack: StrokeInstance[] = strokeStackOf(layer as Parameters<typeof strokeStackOf>[0])
@@ -2478,7 +2594,24 @@ function paintStrokeStack(
     const st = stack[i]!
     // `hasPaint` is re-checked here (not just in the reader) so the painter keeps the
     // exact gate it always had: a gradient with no stops paints nothing.
-    if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
+    if (st.visible === false || !hasPaint(st.paint)) continue
+    const shapes = (st.style ?? 'band') === 'shapes' ? st.shapes : null
+    if (shapes) {
+      // A shapes stroke is sized by its own `size`, not by the band `width` the row still
+      // carries — so the zero-width gate below is the wrong question to ask of it.
+      // `paintShapeStroke` does its own `size > 0` / `spacing > 0` check.
+      if (o.outline) {
+        paintShapeStroke(ctx, {
+          pathData: o.outline,
+          distance: (st.distance ?? 0) * o.widthScale,
+          spec: shapes,
+          style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx),
+          unit: o.widthScale,
+        })
+      }
+      continue
+    }
+    if (!(st.width > 0)) continue
     // DEFENSIVE, and deliberately kept as such. No branch below actually destroys `ctx`'s
     // current path: Canvas2D's `stroke()` / `fill()` / `clip()` do not consume it, and the
     // non-zero-distance band does all of its dilating and knocking out on SCRATCH contexts,
@@ -2519,13 +2652,13 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.roundRect(-w / 2, -h / 2, w, h, radii) }
     build(ctx)
     if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
-    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build })
+    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: outlinePathData(layer, W) })
   } else if (layer.kind === 'ellipse') {
     const w = layer.w * W, h = layer.h * W
     const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2) }
     build(ctx)
     if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
-    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build })
+    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: outlinePathData(layer, W) })
   } else if (layer.kind === 'path') {
     drawPath(ctx, layer, W)
   } else if (layer.kind === 'polygon' || layer.kind === 'star') {
@@ -3223,6 +3356,10 @@ function drawPath(ctx: CanvasRenderingContext2D, layer: PathLayer, W: number) {
     widthScale: 1,
     path: p,
     fillRule: layer.fillRule || 'nonzero',
+    // `d` IS the outline, already in the local units this ctx now draws in — which is also
+    // why a polygon/star, rewritten into a path layer by `drawLayerContent`, gets a shapes
+    // stroke for free.
+    outline: layer.d,
     // The scratch canvas inherits this ctx's transform but not its line joins.
     build: (c) => { c.lineJoin = 'round'; c.lineCap = 'round' },
   })

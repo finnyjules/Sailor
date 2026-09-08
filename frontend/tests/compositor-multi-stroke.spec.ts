@@ -389,3 +389,350 @@ test('a hidden stroke paints nothing — TEXT, on the edge', async ({ page }) =>
   const anyRed = result.rows.some(r => r.length > 0)
   expect(anyRed, 'a stroke with visible: false must paint no red ink anywhere').toBe(false)
 })
+
+/**
+ * A STROKE MADE OF LIBRARY SHAPES (Task 6).
+ *
+ * Tasks 1-4 made a stroke a list and gave it a distance; Task 5 built the pure geometry for
+ * the other STYLE — library marks marching along the (offset) outline, turning to follow
+ * it. Nothing until now proves that geometry reaches a pixel. These tests are the proof,
+ * and each is written so that the obvious wrong implementation fails it:
+ *
+ *  - the count test fails if the marks are not actually walked by arc length;
+ *  - the follow test uses an ASYMMETRIC mark (a triangle) and reads a quantity that is
+ *    OPPOSITE for the two settings, so an implementation that always rotates and one that
+ *    never rotates each fail one half;
+ *  - the paint test asserts the stroke's own colour AND the absence of black, because the
+ *    failure this feature has already hit once is a paint that silently renders black
+ *    (`isGradient` accepts only 'linear'/'radial' — see the fixture's own note above).
+ */
+
+/** Red-ish, green-ish, blue-ish, and "opaque and dark" — the last one is what a paint that
+ *  fell through to a default black looks like. */
+const CH = {
+  red: (d: number[]) => d[0]! > 170 && d[1]! < 90 && d[2]! < 90 && d[3]! > 150,
+  green: (d: number[]) => d[1]! > 170 && d[0]! < 90 && d[2]! < 90 && d[3]! > 150,
+  blue: (d: number[]) => d[2]! > 170 && d[0]! < 90 && d[1]! < 90 && d[3]! > 150,
+  black: (d: number[]) => d[0]! < 70 && d[1]! < 70 && d[2]! < 70 && d[3]! > 150,
+}
+
+/** One shapes-stroke layer: a fill-less circle carrying a single marching stroke. */
+const shapesCircle = (o: {
+  paint: unknown; shapeId: string; size: number; spacing: number; follow?: boolean; distance?: number
+}) => [{
+  id: 'e', kind: 'ellipse', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, visible: true,
+  fill: 'none',
+  strokes: [{
+    id: 's1', paint: o.paint, width: 0.004, distance: o.distance ?? 0, style: 'shapes',
+    shapes: { shapeId: o.shapeId, size: o.size, spacing: o.spacing, follow: o.follow ?? true },
+  }],
+}]
+
+/**
+ * THE PATH HELPERS AGREE WITH THE CANVAS PRIMITIVES.
+ *
+ * A shapes stroke marches along `outlinePathData`'s string, but a rect and an ellipse are
+ * DRAWN by `ctx.roundRect` / `ctx.ellipse`. If the two disagree, every mark sits slightly
+ * off the real edge and nothing in the app reports it — so the agreement is asserted where
+ * it actually matters: on the raster. Both are filled solid on identically-sized canvases
+ * and the two images compared pixel by pixel.
+ */
+test('roundedRectPathData and ellipsePathData rasterise exactly as roundRect and ellipse do', async ({ page }) => {
+  await openCompositor(page)
+  const diffs = await page.evaluate(async () => {
+    const mod: any = await import(/* @vite-ignore */ '/_nuxt/lib/compositor/polygonGeometry.ts')
+    const W = 400, H = 300
+    const surface = () => {
+      const c = document.createElement('canvas'); c.width = W; c.height = H
+      const g = c.getContext('2d')!
+      g.translate(W / 2, H / 2)
+      g.fillStyle = '#000000'
+      return g
+    }
+    const compare = (a: CanvasRenderingContext2D, b: CanvasRenderingContext2D) => {
+      const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data
+      let over8 = 0, worst = 0
+      for (let i = 3; i < da.length; i += 4) {   // alpha channel: the silhouette itself
+        const d = Math.abs(da[i]! - db[i]!)
+        if (d > worst) worst = d
+        if (d > 8) over8++
+      }
+      return { over8, worst }
+    }
+    const out: Record<string, { over8: number; worst: number }> = {}
+
+    // Rounded rect, four different radii — the general case, not the uniform one.
+    const radii: [number, number, number, number] = [30, 8, 0, 55]
+    const rw = 240, rh = 160
+    const prim = surface()
+    prim.beginPath(); prim.roundRect(-rw / 2, -rh / 2, rw, rh, radii); prim.fill()
+    const viaPath = surface()
+    viaPath.fill(new Path2D(mod.roundedRectPathData(-rw / 2, -rh / 2, rw, rh, ...radii)))
+    out.roundedRect = compare(prim, viaPath)
+
+    // Ellipse.
+    const ex = 150, ey = 90
+    const eprim = surface()
+    eprim.beginPath(); eprim.ellipse(0, 0, ex, ey, 0, 0, Math.PI * 2); eprim.fill()
+    const evia = surface()
+    evia.fill(new Path2D(mod.ellipsePathData(ex, ey)))
+    out.ellipse = compare(eprim, evia)
+
+    // A CONTROL: the same rect one pixel wider must NOT compare clean, so a comparison
+    // that cannot fail (both canvases blank, say) is caught here rather than believed.
+    const off = surface()
+    off.beginPath(); off.roundRect(-rw / 2, -rh / 2, rw + 1, rh, radii); off.fill()
+    out.control = compare(prim, off)
+    return out
+  })
+  // The control proves the comparison can see a one-pixel difference at all.
+  expect(diffs.control.over8, `control: a 1px-wider rect must differ (got ${JSON.stringify(diffs.control)})`)
+    .toBeGreaterThan(100)
+  // Same geometry, same rasteriser, same primitive (`A` in the path data IS an elliptical
+  // arc): the two silhouettes must be identical, not merely close.
+  expect(diffs.roundedRect, 'rounded rect path vs ctx.roundRect').toEqual({ over8: 0, worst: 0 })
+  expect(diffs.ellipse, 'ellipse path vs ctx.ellipse').toEqual({ over8: 0, worst: 0 })
+})
+
+/**
+ * Count the separate blobs of `channel`-coloured ink on the stack canvas — one per MARK.
+ *
+ * Not a ring walk: a library mark is generally concave (a `sparkle` is four arms round a
+ * hub), so a circle drawn through the marks crosses a single one two or three times.
+ * Measured on a real render before this was written — the ring walk read 25 for a stroke
+ * that a connected-component count showed to be exactly 10 marks of 66-76 px each, plus
+ * ten 1-px antialiasing specks off the arm tips. `minArea` drops those specks; every real
+ * mark here is an order of magnitude bigger.
+ */
+async function inkBlobs(page: Page, channel: keyof typeof CH, minArea = 20): Promise<number> {
+  return page.evaluate(({ channel, minArea }) => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const W = cv.width, H = cv.height
+    const d = cv.getContext('2d')!.getImageData(0, 0, W, H).data
+    const test = ({
+      red: (r: number, g: number, b: number, a: number) => r > 170 && g < 90 && b < 90 && a > 150,
+      green: (r: number, g: number, b: number, a: number) => g > 170 && r < 90 && b < 90 && a > 150,
+      blue: (r: number, g: number, b: number, a: number) => b > 170 && r < 90 && g < 90 && a > 150,
+      black: (r: number, g: number, b: number, a: number) => r < 70 && g < 70 && b < 70 && a > 150,
+    } as Record<string, (r: number, g: number, b: number, a: number) => boolean>)[channel]!
+    const on = new Uint8Array(W * H)
+    for (let p = 0, i = 0; p < W * H; p++, i += 4) {
+      if (test(d[i]!, d[i + 1]!, d[i + 2]!, d[i + 3]!)) on[p] = 1
+    }
+    const seen = new Uint8Array(W * H)
+    const stack: number[] = []
+    let blobs = 0
+    for (let p0 = 0; p0 < W * H; p0++) {
+      if (!on[p0] || seen[p0]) continue
+      let area = 0
+      stack.length = 0; stack.push(p0); seen[p0] = 1
+      while (stack.length) {
+        const q = stack.pop()!
+        area++
+        const x = q % W, y = (q / W) | 0
+        if (x > 0 && on[q - 1] && !seen[q - 1]) { seen[q - 1] = 1; stack.push(q - 1) }
+        if (x < W - 1 && on[q + 1] && !seen[q + 1]) { seen[q + 1] = 1; stack.push(q + 1) }
+        if (y > 0 && on[q - W] && !seen[q - W]) { seen[q - W] = 1; stack.push(q - W) }
+        if (y < H - 1 && on[q + W] && !seen[q + W]) { seen[q + W] = 1; stack.push(q + W) }
+      }
+      if (area >= minArea) blobs++
+    }
+    return blobs
+  }, { channel, minArea })
+}
+
+test('a shapes stroke puts the expected number of marks around a circle', async ({ page }) => {
+  await openCompositor(page)
+  // A circle of radius 0.2 has a circumference of 2π·0.2 ≈ 1.2566 (width-normalized), so a
+  // spacing of 0.12 asks for 10.47 marks. `shapePlacements` rounds a CLOSED guide to
+  // round(10.47) = 10 and then spreads them evenly, so there is no seam gap.
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls),
+    shapesCircle({ paint: '#ff0000', shapeId: 'sparkle', size: 0.04, spacing: 0.12 }))
+  await stackPixels(page)
+  expect(await inkBlobs(page, 'red')).toBe(10)
+
+  // Halving the spacing must double the marks — the claim that the walk is by ARC LENGTH,
+  // not by a fixed count. round(1.2566/0.06) = 21.
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls),
+    shapesCircle({ paint: '#ff0000', shapeId: 'sparkle', size: 0.04, spacing: 0.06 }))
+  await stackPixels(page)
+  expect(await inkBlobs(page, 'red')).toBe(21)
+})
+
+/** Centroid of the red ink, in canvas-width / canvas-height fractions, plus its pixel count. */
+async function redCentroid(page: Page): Promise<{ x: number; y: number; n: number; w: number }> {
+  return page.evaluate(() => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const g = cv.getContext('2d')!
+    const d = g.getImageData(0, 0, cv.width, cv.height).data
+    let sx = 0, sy = 0, n = 0
+    for (let y = 0; y < cv.height; y++) {
+      for (let x = 0; x < cv.width; x++) {
+        const i = (y * cv.width + x) * 4
+        if (d[i]! > 170 && d[i + 1]! < 90 && d[i + 2]! < 90 && d[i + 3]! > 150) { sx += x; sy += y; n++ }
+      }
+    }
+    return { x: n ? sx / n / cv.width : 0, y: n ? sy / n / cv.height : 0, n, w: cv.width }
+  })
+}
+
+/**
+ * FOLLOW ON vs FOLLOW OFF, read from a quantity that is OPPOSITE for the two.
+ *
+ * The mark is `triangle` — apex at the top of its ink box, flat base at the bottom — so its
+ * ink centroid sits BELOW its own centre by a third of its height. On a circle:
+ *
+ *   follow OFF  every mark is upright, so every one of those offsets points DOWN and they
+ *               sum: the ink centroid of the whole stroke sits below the circle's centre.
+ *   follow ON   a mark's local up-axis rotates to the outward radial direction (rotating
+ *               (0,-1) by the tangent angle θ+90° gives (cos θ, sin θ)), so each offset
+ *               points INWARD along its own radius — and over evenly spaced marks those
+ *               cancel: the ink centroid lands back on the circle's centre.
+ *
+ * Neither half can be passed by the other implementation: one that always rotates fails the
+ * "sits below" claim, one that never rotates fails the "lands on centre" claim. A symmetric
+ * mark would make both readings zero, which is why the shape has to be asymmetric.
+ */
+test('follow off leaves every mark upright; follow on turns each one to the edge', async ({ page }) => {
+  await openCompositor(page)
+  const SIZE = 0.08
+  const cfg = { paint: '#ff0000', shapeId: 'triangle', size: SIZE, spacing: 0.12 }
+
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), shapesCircle({ ...cfg, follow: true }))
+  await stackPixels(page)
+  const on = await redCentroid(page)
+
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), shapesCircle({ ...cfg, follow: false }))
+  await stackPixels(page)
+  const off = await redCentroid(page)
+
+  expect(on.n, 'the follow:true render must actually draw marks').toBeGreaterThan(500)
+  expect(off.n, 'the follow:false render must actually draw marks').toBeGreaterThan(500)
+
+  // `triangle`'s ink box is 88 × 76 in manifest units and `drawShape`'s fit scales by the
+  // SMALLER ratio, so a mark is 76·size/88 tall. A triangle's centroid is a third of the
+  // height up from its base, i.e. a SIXTH of the height below the box centre:
+  // 76/(6·88) = 0.1439 of `size`. In canvas-HEIGHT fractions (the canvas is square here —
+  // see the geometry note above) that is the same number. Measured at 0.0103 against a
+  // predicted 0.0115 for size 0.08: the strict red predicate drops the antialiased edge
+  // pixels, which a triangle has proportionally more of near its tip, hence the ±40% band
+  // rather than an equality.
+  const expected = (76 / (6 * 88)) * SIZE
+
+  // Upright: the whole stroke's ink hangs below centre by that amount.
+  expect(off.y - 0.5, `follow:false ink centroid should sit ~${expected.toFixed(4)} below centre`)
+    .toBeGreaterThan(expected * 0.6)
+  expect(off.y - 0.5).toBeLessThan(expected * 1.4)
+  expect(Math.abs(off.x - 0.5), 'and dead centre horizontally').toBeLessThan(expected * 0.25)
+
+  // Turned to the edge: the per-mark offsets are radial and cancel.
+  expect(Math.abs(on.y - 0.5), 'follow:true offsets are radial and must cancel').toBeLessThan(expected * 0.25)
+  expect(Math.abs(on.x - 0.5)).toBeLessThan(expected * 0.25)
+})
+
+/**
+ * THE STROKE'S OWN PAINT — the trap this feature has already sprung once.
+ *
+ * A `Paint` of `{ type: 'gradient', … }` is NOT a gradient: `isGradient` in
+ * lib/compositor/paint.ts accepts only 'linear' and 'radial', so an invented discriminant
+ * falls through every branch, reaches `fillStyle` as an object and paints DEFAULT BLACK —
+ * silently, and looking plausible. So both halves below assert the colour that was asked
+ * for AND that no black ink exists anywhere on the canvas.
+ */
+test("a shapes stroke takes the stroke's paint, not a hardcoded colour", async ({ page }) => {
+  await openCompositor(page)
+  const noBlack = () => page.evaluate(() => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
+    let n = 0
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i]! < 70 && d[i + 1]! < 70 && d[i + 2]! < 70 && d[i + 3]! > 150) n++
+    }
+    return n
+  })
+
+  // 1. A solid colour: green marks, no red, no black.
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls),
+    shapesCircle({ paint: '#00ff00', shapeId: 'sparkle', size: 0.04, spacing: 0.12 }))
+  await stackPixels(page)
+  expect(await inkBlobs(page, 'green')).toBe(10)
+  expect(await inkBlobs(page, 'red', 1), 'nothing red — the paint is green').toBe(0)
+  expect(await noBlack(), 'no default-black ink anywhere').toBe(0)
+
+  // 2. A real GRADIENT (`type: 'linear'`, the tag `isGradient` actually accepts). The marks
+  //    are filled as ONE path in the layer's space, so the gradient runs across the whole
+  //    stroke — red marks on one side, blue on the other — rather than being squeezed into
+  //    each individual mark.
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), shapesCircle({
+    paint: { type: 'linear', angle: 0, stops: [{ color: '#ff0000', offset: 0 }, { color: '#0000ff', offset: 1 }] },
+    shapeId: 'sparkle', size: 0.05, spacing: 0.12,
+  }))
+  await stackPixels(page)
+  expect(await noBlack(), 'a valid linear gradient must not fall through to black').toBe(0)
+  //    Probing a fixed point would be a guess about where a mark happens to land (with 10
+  //    marks starting at the top of the ring, none sits at 3 or 9 o'clock), so the reading
+  //    is taken over ALL the ink: the mean x of the red-leaning pixels against the mean x
+  //    of the blue-leaning ones.
+  const ends = await page.evaluate(() => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
+    let rx = 0, rn = 0, bx = 0, bn = 0
+    for (let y = 0; y < cv.height; y++) {
+      for (let x = 0; x < cv.width; x++) {
+        const i = (y * cv.width + x) * 4
+        if (d[i + 3]! < 150) continue
+        if (d[i]! - d[i + 2]! > 40) { rx += x; rn++ }
+        else if (d[i + 2]! - d[i]! > 40) { bx += x; bn++ }
+      }
+    }
+    return { redX: rn ? rx / rn / cv.width : -1, redN: rn, blueX: bn ? bx / bn / cv.width : -1, blueN: bn }
+  })
+  expect(ends.redN, 'the red end of the gradient must reach ink').toBeGreaterThan(200)
+  expect(ends.blueN, 'and so must the blue end').toBeGreaterThan(200)
+  //    A separation of more than half the ring's diameter (0.4) can only come from ONE
+  //    gradient laid across the whole stroke; a gradient re-created inside each 0.05-wide
+  //    mark would separate the two centroids by a fraction of a mark, not by this.
+  expect(ends.blueX - ends.redX, 'the gradient must run across the STROKE, not inside each mark')
+    .toBeGreaterThan(0.2)
+})
+
+/**
+ * A POLYGON'S MARKS SIT ON THE EDGE AS DRAWN — the pixel guard for the one real defect the
+ * brief's design would have shipped.
+ *
+ * `shapeStrokeGuide` builds its guide through `guideFromPolyline`, which RE-CENTRES its
+ * input on the polyline's own bounding-box midpoint. That is a no-op for a rect, an ellipse
+ * and any bbox-centred path — so every test above would pass either way — but it is NOT a
+ * no-op for `polygonPathData`'s output: a pentagon of radius r spans y ∈ [-r, 0.809r], so
+ * its bbox midpoint is 0.0955·r above the origin it is drawn around. `shapeStrokeGuideFit`
+ * hands that midpoint back and the painter adds it in again.
+ *
+ * The two probes flip under the bug, which is what makes them assertions:
+ *   at the apex        marks: 0.15 ± 0.02 → INK.       without the fix the mark has moved
+ *                                                       down to 0.1834 ± 0.02 → no ink.
+ *   0.04 below it      marks: outside the apex mark → NO ink.  without the fix 0.19 is
+ *                                                       3.6 px from that mark's centre → ink.
+ * This test also covers the whole polygon/star/path arm, which reaches `paintStrokeStack`
+ * through `drawPath` with `widthScale: 1` and its outline already in `d`.
+ */
+test("a polygon's shapes stroke marches the edge as DRAWN, not its bounding-box centre", async ({ page }) => {
+  await openCompositor(page)
+  // r = 0.35, so the apex is at y = 0.5 − 0.35 = 0.15 and the bbox shift would be 0.0334
+  // (18 px on this 542 px canvas) — far larger than either probe's own tolerance.
+  // `follow: false` keeps each mark upright so its vertical extent is exactly ±size/2.
+  // A perimeter of 5·2·0.35·sin 36° = 2.057 at spacing 0.2 gives 10 marks, the next one
+  // half an edge away from the apex — nowhere near either probe.
+  await page.evaluate(() => (window as any).__compositorSetLayers([{
+    id: 'p', kind: 'polygon', x: 0.5, y: 0.5, w: 0.7, h: 0.7, sides: 5, cornerRadius: 0,
+    rotation: 0, opacity: 1, visible: true, fill: 'none',
+    strokes: [{
+      id: 's1', paint: '#ff0000', width: 0.004, distance: 0, style: 'shapes',
+      shapes: { shapeId: 'sparkle', size: 0.04, spacing: 0.2, follow: false },
+    }],
+  }]))
+  await stackPixels(page)
+  const isRed = (p: number[]) => p[0]! > 170 && p[1]! < 90 && p[2]! < 90 && p[3]! > 150
+  expect(await inkBlobs(page, 'red'), 'ten marks round the pentagon').toBe(10)
+  expect(isRed(await pixelAt(page, 0.5, 0.15)), 'a mark sits ON the drawn apex').toBe(true)
+  expect(isRed(await pixelAt(page, 0.5, 0.19)), 'and not 18 px below it').toBe(false)
+})

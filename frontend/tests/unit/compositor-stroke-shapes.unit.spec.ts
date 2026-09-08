@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { offsetPolyline, shapePlacements, shapeStrokeGuide } from '~/lib/compositor/strokeShapes'
+import { offsetPolyline, shapePlacements, shapeStrokeGuide, shapeStrokeGuideFit } from '~/lib/compositor/strokeShapes'
+import { polygonPathData } from '~/lib/compositor/polygonGeometry'
 import { guideFromPolyline } from '~/lib/compositor/textPath'
 
 describe('offsetPolyline', () => {
@@ -157,5 +158,62 @@ describe('shapeStrokeGuide', () => {
   it('is null for an empty or unparseable path rather than throwing', () => {
     expect(shapeStrokeGuide('', 0)).toBeNull()
     expect(shapeStrokeGuide('not a path', 0)).toBeNull()
+  })
+})
+
+/**
+ * WHERE THE GUIDE SITS (Task 6).
+ *
+ * `guideFromPolyline` re-centres its input on the polyline's own bounding-box midpoint —
+ * it is shared with type-on-a-path, whose callers want exactly that, and a `PathLayer`'s
+ * `d` is already bbox-centred so the shift is zero for one. It is NOT zero for a shape
+ * whose outline is not bbox-centred, and `polygonPathData` produces exactly such an
+ * outline for any odd-symmetry polygon or star: a pentagon of radius 1 spans y ∈ [-1,
+ * 0.809], so its bbox midpoint is 0.0955 ABOVE the origin the painter draws it around.
+ *
+ * Measured before this was written: a pentagon's guide reported its topmost mark at
+ * y = -0.9045 while the painter draws the apex at y = -1. Every mark would have marched
+ * round a ring floating ~4px off the real edge on a default-sized layer, with nothing in
+ * the app to say so. `shapeStrokeGuideFit` hands back the centre that was removed so the
+ * painter can put it straight back.
+ */
+describe('shapeStrokeGuideFit', () => {
+  it('reports the centre `guideFromPolyline` removed, so marks land back on the drawn edge', () => {
+    // A pentagon's outline, exactly as `polygonPathData(5, 2, 2, 0)` writes it.
+    const d = polygonPathData(5, 2, 2, 0)
+    const fit = shapeStrokeGuideFit(d, 0, 0.001)!
+    expect(fit).toBeTruthy()
+    expect(fit.cx).toBeCloseTo(0, 3)
+    expect(fit.cy).toBeCloseTo(-0.0955, 3)
+
+    // The claim that matters: guide point + centre = a point on the DRAWN outline. The
+    // apex is at (0, -1) and the two base corners at y = +0.809.
+    const marks = shapePlacements(fit.guide, fit.guide.length / 60)
+    const ys = marks.map(m => m.y + fit.cy)
+    expect(Math.min(...ys)).toBeCloseTo(-1, 2)
+    expect(Math.max(...ys)).toBeCloseTo(0.809, 2)
+    // …and without the correction it is wrong by exactly the centre, which is what makes
+    // this an assertion rather than a restatement.
+    expect(Math.min(...marks.map(m => m.y))).toBeCloseTo(-1 - fit.cy, 2)
+  })
+
+  it('is a no-op centre for an already-centred outline, so a rect/ellipse is untouched', () => {
+    const fit = shapeStrokeGuideFit('M -1 -1 L 1 -1 L 1 1 L -1 1 Z', 0.5)!
+    expect(fit.cx).toBeCloseTo(0, 9)
+    expect(fit.cy).toBeCloseTo(0, 9)
+  })
+
+  it('carries the same guide `shapeStrokeGuide` returns, so the two cannot drift', () => {
+    const d = polygonPathData(5, 2, 2, 0)
+    const a = shapeStrokeGuideFit(d, 0.2, 0.001)!
+    const b = shapeStrokeGuide(d, 0.2, 0.001)!
+    expect(a.guide.length).toBeCloseTo(b.length, 9)
+    expect(a.guide.closed).toBe(b.closed)
+    expect(a.guide.at(1.3)).toEqual(b.at(1.3))
+  })
+
+  it('is null on the same inputs `shapeStrokeGuide` refuses', () => {
+    expect(shapeStrokeGuideFit('', 0)).toBeNull()
+    expect(shapeStrokeGuideFit('not a path', 0)).toBeNull()
   })
 })

@@ -107,13 +107,53 @@ export function shapePlacements(guide: Guide, spacing: number): ShapePlacement[]
   return out
 }
 
-/** The guide a shapes stroke marches along: the layer's own outline, offset by `distance`.
- *  Only the LONGEST subpath is followed, so a shape with interior detail still runs its
- *  marks round the outline — the same rule type-on-a-path settled on. */
-export function shapeStrokeGuide(d: string, distance: number, tolerance?: number): Guide | null {
+/**
+ * A guide plus the translation that puts it back where the shape is drawn.
+ *
+ * `guideFromPolyline` RE-CENTRES its input on the polyline's own bounding-box midpoint.
+ * That is what type-on-a-path wants (and it is a no-op for a `PathLayer`, whose `d` is
+ * stored bbox-centred already), but it is NOT a no-op for every outline a layer can have:
+ * `polygonPathData` writes a pentagon spanning y ∈ [-1, 0.809] around the origin the
+ * painter draws it at, so its bbox midpoint is 0.0955 off. Measured, not assumed — a
+ * pentagon's guide put its topmost mark at y = -0.9045 while the apex is drawn at y = -1.
+ *
+ * `cx`/`cy` is the midpoint that was removed. A mark at guide point `p` belongs at
+ * `(p.x + cx, p.y + cy)` in the space `d` was written in. Handing it back here, rather
+ * than changing the shared `guideFromPolyline`, keeps type-on-a-path's geometry untouched.
+ */
+export interface StrokeGuideFit {
+  guide: Guide
+  /** The bbox midpoint of the OFFSET outline, in `d`'s own coordinates. */
+  cx: number
+  cy: number
+}
+
+export function shapeStrokeGuideFit(d: string, distance: number, tolerance?: number): StrokeGuideFit | null {
   const sub = longestSubpath(d, tolerance ? { tolerance } : undefined)
   if (!sub) return null
   const pts = offsetPolyline(sub.pts, sub.closed, distance)
   if (pts.length < 2) return null
-  return guideFromPolyline(pts, sub.closed)
+  const guide = guideFromPolyline(pts, sub.closed)
+  if (!guide) return null
+  // The same bbox `guideFromPolyline` measures, over the same points it measures it over
+  // (it drops non-finite points first, so this does too).
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const p of pts) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue
+    if (p.x < minX) minX = p.x
+    if (p.x > maxX) maxX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.y > maxY) maxY = p.y
+  }
+  return { guide, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 }
+}
+
+/** The guide a shapes stroke marches along: the layer's own outline, offset by `distance`.
+ *  Only the LONGEST subpath is followed, so a shape with interior detail still runs its
+ *  marks round the outline — the same rule type-on-a-path settled on.
+ *
+ *  Note the guide is in `guideFromPolyline`'s re-centred space; a caller that has to place
+ *  a mark on the DRAWN edge wants `shapeStrokeGuideFit` above instead. */
+export function shapeStrokeGuide(d: string, distance: number, tolerance?: number): Guide | null {
+  return shapeStrokeGuideFit(d, distance, tolerance)?.guide ?? null
 }

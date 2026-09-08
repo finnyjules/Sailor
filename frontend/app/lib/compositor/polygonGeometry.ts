@@ -74,3 +74,54 @@ export function starPathData(points: number, innerRatio: number, w: number, h: n
   if (w <= 1e-6 || h <= 1e-6) return ''
   return roundedPolygonPath(starVertices(points, innerRatio, w, h), cornerRadius)
 }
+
+/**
+ * A rounded rect as SVG path data, tracing EXACTLY the outline
+ * `ctx.roundRect(x, y, w, h, [tl, tr, br, bl])` draws.
+ *
+ * Why it exists: a shapes stroke (library marks marching along the edge) needs the layer's
+ * outline as a path string to flatten, and a rect had none — it was only ever a canvas
+ * primitive. A disagreement here is invisible: the marks would simply sit a little off the
+ * real edge with nothing to flag it, so `tests/compositor-multi-stroke.spec.ts` rasterises
+ * this path and `ctx.roundRect` side by side and compares the pixels.
+ *
+ * The radii are clamped exactly as `cornerRadii` clamps them (0 … half the shorter side),
+ * so the two can never disagree about an over-large radius. That clamp also guarantees no
+ * pair of adjacent radii can overrun their shared side, which is why the SVG arcs need no
+ * scale-down pass of their own.
+ *
+ * Corners are traced clockwise (sweep flag 1 on a y-down canvas) from the top edge, and an
+ * arc is emitted only for a corner with a radius — so an all-square rect is a plain
+ * four-line ring rather than four degenerate arcs.
+ */
+export function roundedRectPathData(
+  x: number, y: number, w: number, h: number,
+  tl: number, tr: number, br: number, bl: number,
+): string {
+  if (!(w > 1e-6) || !(h > 1e-6)) return ''
+  const max = Math.min(w, h) / 2
+  const r = (v: number) => (typeof v === 'number' && Number.isFinite(v) ? clamp(v, 0, max) : 0)
+  const a = r(tl), b = r(tr), c = r(br), e = r(bl)
+  if (a === 0 && b === 0 && c === 0 && e === 0) {
+    return `M ${f(x)} ${f(y)} L ${f(x + w)} ${f(y)} L ${f(x + w)} ${f(y + h)} L ${f(x)} ${f(y + h)} Z`
+  }
+  const arc = (rad: number, px: number, py: number) =>
+    rad > 0 ? ` A ${f(rad)} ${f(rad)} 0 0 1 ${f(px)} ${f(py)}` : ''
+  let d = `M ${f(x + a)} ${f(y)}`
+  d += ` L ${f(x + w - b)} ${f(y)}` + arc(b, x + w, y + b)
+  d += ` L ${f(x + w)} ${f(y + h - c)}` + arc(c, x + w - c, y + h)
+  d += ` L ${f(x + e)} ${f(y + h)}` + arc(e, x, y + h - e)
+  d += ` L ${f(x)} ${f(y + a)}` + arc(a, x + a, y)
+  return d + ' Z'
+}
+
+/**
+ * An origin-centred ellipse as SVG path data, tracing exactly what
+ * `ctx.ellipse(0, 0, rx, ry, 0, 0, 2π)` draws — two half-arcs from the right-hand vertex,
+ * sweeping clockwise on a y-down canvas (which is what the canvas primitive's default
+ * `anticlockwise = false` means there). Same purpose as `roundedRectPathData` above.
+ */
+export function ellipsePathData(rx: number, ry: number): string {
+  if (!(rx > 1e-6) || !(ry > 1e-6)) return ''
+  return `M ${f(rx)} 0 A ${f(rx)} ${f(ry)} 0 0 1 ${f(-rx)} 0 A ${f(rx)} ${f(ry)} 0 0 1 ${f(rx)} 0 Z`
+}
