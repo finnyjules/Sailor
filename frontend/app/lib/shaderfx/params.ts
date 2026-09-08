@@ -89,7 +89,10 @@ export function resolveValues(eff: EffectDef, overrides: Record<string, ParamVal
       out[p.uniform] = cleanStops(raw, p.maxStops ?? 8, p.default as GradientStop[])
     } else if (p.type === 'enum') {
       const values = (p.options ?? []).map(o => o.value)
-      out[p.uniform] = typeof raw === 'number' && values.includes(raw) ? raw : (p.default as number)
+      // A generic select writes the option value as a STRING; coerce so "1" is
+      // accepted as 1 rather than silently defaulting (mirrors resolveEffectParams).
+      const n = typeof raw === 'string' ? Number(raw) : raw
+      out[p.uniform] = typeof n === 'number' && Number.isFinite(n) && values.includes(n) ? n : (p.default as number)
     } else {
       const v = typeof raw === 'number' && Number.isFinite(raw) ? raw : (p.default as number)
       out[p.uniform] = Math.min(Math.max(v, p.min ?? -Infinity), p.max ?? Infinity)

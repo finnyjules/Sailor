@@ -52,6 +52,11 @@ describe('shaderfx params — enum', () => {
   it('falls back to default on invalid enum value', () => {
     expect(resolveUniforms(enumEff, { u_pattern: 99 }).u_pattern).toBe(1)
   })
+  it('coerces a stringified enum override — generic selects store "2", not 2', () => {
+    expect(resolveUniforms(enumEff, { u_pattern: '2' }).u_pattern).toBe(2)
+    expect(resolveUniforms(enumEff, { u_pattern: '0' }).u_pattern).toBe(0)
+    expect(resolveUniforms(enumEff, { u_pattern: 'nope' }).u_pattern).toBe(1) // default
+  })
 })
 
 describe('shaderfx params — serializeParams enum round-trip', () => {

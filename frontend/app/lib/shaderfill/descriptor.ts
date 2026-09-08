@@ -152,7 +152,12 @@ export function resolveEffectParams(effect: EffectDef, params: Record<string, Pa
       out[key] = cleanStops(raw, p.maxStops ?? 8, p.default as GradientStop[])
     } else if (p.type === 'enum') {
       const values = (p.options ?? []).map(o => o.value)
-      out[key] = typeof raw === 'number' && values.includes(raw) ? raw : (p.default as number)
+      // Generic select writers (RowSelect/StudioRow, agent patches, collection
+      // bindings) store the option value as a STRING; coerce so "1" is accepted as
+      // 1 rather than silently falling back to the default (the enum-does-nothing
+      // bug). A non-numeric or out-of-range value still falls back to the default.
+      const n = typeof raw === 'string' ? Number(raw) : raw
+      out[key] = typeof n === 'number' && Number.isFinite(n) && values.includes(n) ? n : (p.default as number)
     } else {
       const v = typeof raw === 'number' && Number.isFinite(raw) ? raw : (p.default as number)
       out[key] = Math.min(Math.max(v, p.min ?? -Infinity), p.max ?? Infinity)

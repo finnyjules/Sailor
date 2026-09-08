@@ -152,6 +152,17 @@ describe('resolveEffectParams', () => {
     expect(resolveEffectParams(fakeEffect(), { mode: 1 }).mode).toBe(1)
   })
 
+  it('coerces a STRINGIFIED enum override to its number — generic selects store "1", not 1', () => {
+    // RowSelect/StudioRow, agent patches and collection bindings all write the
+    // option value as a string; the gate must accept it or every enum control is
+    // silently pinned to its default (the Falloff-does-nothing bug).
+    expect(resolveEffectParams(fakeEffect(), { mode: '1' }).mode).toBe(1)
+    expect(resolveEffectParams(fakeEffect(), { mode: '0' }).mode).toBe(0)
+    // a string that is not a declared option still falls back to the default
+    expect(resolveEffectParams(fakeEffect(), { mode: '7' }).mode).toBe(0)
+    expect(resolveEffectParams(fakeEffect(), { mode: 'nope' }).mode).toBe(0)
+  })
+
   it('falls back to default for a non-finite override — Infinity is not clamped, it is rejected', () => {
     expect(resolveEffectParams(fakeEffect(), { amount: NaN }).amount).toBe(0.12)
     expect(resolveEffectParams(fakeEffect(), { amount: Infinity }).amount).toBe(0.12)
