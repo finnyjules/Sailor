@@ -1195,3 +1195,467 @@ test('the layer panel cannot clobber a stored stack with the legacy stroke field
   expect(await storedStrokeIds(page, rectId)).toEqual(ids)
   expect(await stackPixels(page), 'and still on the canvas').toBe(three)
 })
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WOBBLE — A WAVY OR ZIGZAG OUTLINE, MEASURED IN A REAL BROWSER (Task 4 of the
+// wavy/zigzag feature; spec docs/superpowers/specs/2026-09-07-frame-stroke-wobble-design.md).
+//
+// THE FIXTURE IS A RECTANGLE, AND THAT IS THE WHOLE POINT. The flattener only emits a point
+// where a curve needs one, so a rect's outline arrives as its FOUR corners and its edge as
+// two points — you cannot put a wave in the middle of a two-point edge. A wobble applied
+// without resampling first looks perfectly correct on a circle (hundreds of flatten points
+// already) and does NOTHING on every rect, polygon and star. A test written with a circle
+// would therefore pass over a completely broken feature. Every case below uses a rect.
+//
+// GEOMETRY, derived once and reused (every number is recomputed from `cv.width`/`cv.height`
+// at run time — the values quoted are what this suite's 542x542 canvas makes of them):
+//
+//   * A rect layer's outline is `roundedRectPathData(-w/2, -h/2, w, h, 0,0,0,0)`, i.e.
+//     `M -w/2 -h/2 L w/2 -h/2 L w/2 h/2 L -w/2 h/2 Z`. So arc length s = 0 sits at the
+//     TOP-LEFT corner and runs CLOCKWISE: the top edge first, then right, bottom, left.
+//     On the top edge, s is simply `x - leftEdge`.
+//   * That winding has a positive shoelace, so `offsetPolyline`'s `sign` is +1 and a
+//     POSITIVE displacement is OUTWARD — which on the top edge means UP (smaller y).
+//   * On a straight run the angle bisector IS the edge normal and the miter `scale` is
+//     exactly 1 (the two segment normals are identical, so `cos` = 1), so the displacement
+//     is purely VERTICAL and the profile is exactly
+//         y(x) = topEdge - (distance + amount * f((x - leftEdge) / lambda)) * W
+//     with `f` = `sin` for a wave and the 0 -> 1 -> 0 -> -1 triangle for a zigzag.
+//   * CLOSED-CYCLE SNAP: perimeter = 2*(w+h)*W = 1.6*W for a 0.4 x 0.4 rect. With
+//     `wobbleLength` 0.1 that is `round(1.6 / 0.1)` = 16 cycles and an effective wavelength
+//     of 1.6*W/16 = 0.1*W — the snap is a no-op here ON PURPOSE, so the requested
+//     wavelength IS the painted one and no probe below has to model the snap as well.
+//   * RESAMPLE STEP = `min(lambdaEff/16, perimeter/segCount)` = min(0.00625, 0.4)*W, so the
+//     rect's four points become 256 (well under `WOBBLE_MAX_POINTS` = 4000).
+//
+// PROBE SPAN: s in [0.05, 0.35] of the top edge — EXACTLY THREE whole cycles at lambda 0.1,
+// and 0.05*542 = 27 px clear of either corner, so no miter join is inside any reading.
+// Within it the extremes are fixed by the arithmetic, not chosen:
+//     peaks (max outward)  s = 0.025 + k*0.1  ->  0.125, 0.225, 0.325
+//     troughs (max inward) s = 0.075 + k*0.1  ->  0.075, 0.175, 0.275
+//
+// RED-FIRST for every wobble case here was `offsetPolyline`'s amplitude forced to 0 — see
+// the task report for the quoted output.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** The stack canvas's own device dimensions. Nothing below assumes it is square: `w`/`h`
+ *  and every stroke number are normalized to WIDTH, while a y coordinate is a device row,
+ *  so the two are converted explicitly at each use. */
+async function canvasDims(page: Page): Promise<{ W: number; H: number }> {
+  return page.evaluate(() => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    return { W: cv.width, H: cv.height }
+  })
+}
+
+/**
+ * The band running along the shape's TOP edge, as one y per device COLUMN: the mean row of
+ * the red ink in that column above `yLimit`. A vertical slice through a stroked band is
+ * centred on the band's centre LINE whatever the band's slope, so the mean is the
+ * centreline — which is the quantity `offsetPolyline` actually computes.
+ *
+ * `yLimit` is the shape's own top edge, so the left- and right-edge bands (and anything
+ * inside the shape) cannot leak into a reading; the column range keeps the corners out.
+ */
+async function topEdgeBandProfile(page: Page, x0: number, x1: number, yLimit: number): Promise<(number | null)[]> {
+  return page.evaluate(({ x0, x1, yLimit }) => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const W = cv.width, H = cv.height
+    const d = cv.getContext('2d')!.getImageData(0, 0, W, H).data
+    const lim = Math.max(0, Math.min(H, Math.ceil(yLimit)))
+    const ys: (number | null)[] = []
+    for (let x = Math.max(0, Math.round(x0)); x < Math.min(W, Math.round(x1)); x++) {
+      let sy = 0, n = 0
+      for (let y = 0; y < lim; y++) {
+        const i = (y * W + x) * 4
+        if (d[i]! > 170 && d[i + 1]! < 90 && d[i + 2]! < 90 && d[i + 3]! > 150) { sy += y; n++ }
+      }
+      ys.push(n ? sy / n : null)
+    }
+    return ys
+  }, { x0, x1, yLimit })
+}
+
+/** Every blob of red ink as a centroid plus its area — `inkBlobs` above, but keeping WHERE
+ *  each blob is. A symmetric library mark (`circle`) puts its ink centroid exactly on the
+ *  point the placement maths chose, so a centroid IS a mark position. */
+async function redBlobCentroids(page: Page, minArea = 20): Promise<{ x: number; y: number; n: number }[]> {
+  return page.evaluate(({ minArea }) => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const W = cv.width, H = cv.height
+    const d = cv.getContext('2d')!.getImageData(0, 0, W, H).data
+    const on = new Uint8Array(W * H)
+    for (let p = 0, i = 0; p < W * H; p++, i += 4) {
+      if (d[i]! > 170 && d[i + 1]! < 90 && d[i + 2]! < 90 && d[i + 3]! > 150) on[p] = 1
+    }
+    const seen = new Uint8Array(W * H)
+    const st: number[] = []
+    const out: { x: number; y: number; n: number }[] = []
+    for (let p0 = 0; p0 < W * H; p0++) {
+      if (!on[p0] || seen[p0]) continue
+      let sx = 0, sy = 0, n = 0
+      st.length = 0; st.push(p0); seen[p0] = 1
+      while (st.length) {
+        const q = st.pop()!
+        const x = q % W, y = (q / W) | 0
+        sx += x; sy += y; n++
+        if (x > 0 && on[q - 1] && !seen[q - 1]) { seen[q - 1] = 1; st.push(q - 1) }
+        if (x < W - 1 && on[q + 1] && !seen[q + 1]) { seen[q + 1] = 1; st.push(q + 1) }
+        if (y > 0 && on[q - W] && !seen[q - W]) { seen[q - W] = 1; st.push(q - W) }
+        if (y < H - 1 && on[q + W] && !seen[q + W]) { seen[q + W] = 1; st.push(q + W) }
+      }
+      if (n >= minArea) out.push({ x: sx / n, y: sy / n, n })
+    }
+    return out
+  }, { minArea })
+}
+
+/** A 0.4 x 0.4 fill-less rect carrying exactly one stroke — so every red pixel on the
+ *  canvas IS that stroke, and radius 0 keeps the outline the four-point rect the resampling
+ *  trap is about. */
+const wobbleRect = (stroke: Record<string, unknown>) => [{
+  id: 'wr', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, radius: 0,
+  rotation: 0, opacity: 1, visible: true, fill: 'none',
+  strokes: [{ id: 's1', paint: '#ff0000', ...stroke }],
+}]
+
+/** The four dials, shared by the wave and the zigzag cases so the two are compared on
+ *  identical geometry and differ only in `f`. */
+const WOB = { width: 0.006, distance: 0.06, amount: 0.04, length: 0.1 } as const
+
+/** The rect's geometry in device pixels, plus the probe span, all derived from the canvas. */
+function wobbleGeometry(W: number, H: number) {
+  const leftEdge = (0.5 - 0.4 / 2) * W            // 0.3 * W = 162.6 px
+  const topEdge = 0.5 * H - (0.4 / 2) * W         // 0.5*H - 0.2*W = 162.6 px on a square canvas
+  return {
+    leftEdge, topEdge,
+    ampPx: WOB.amount * W,                        // 21.68 px
+    distPx: WOB.distance * W,                     // 32.52 px
+    // Three whole cycles, 0.05*W = 27 px clear of both corners.
+    x0: leftEdge + 0.05 * W,
+    x1: leftEdge + 0.35 * W,
+    /** The device column at arc length `s` (width-normalized) along the top edge. */
+    colAt: (s: number) => Math.round(leftEdge + s * W) - Math.round(leftEdge + 0.05 * W),
+  }
+}
+
+test('a WAVY band on a rect leaves the straight line by the amount, at the wavelength asked for', async ({ page }) => {
+  await openCompositor(page)
+  const { W, H } = await canvasDims(page)
+  const g = wobbleGeometry(W, H)
+
+  // (a) The SAME stroke with no wobble fields at all — the line the wobble is measured
+  //     against, measured rather than assumed.
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls),
+    wobbleRect({ width: WOB.width, distance: WOB.distance, align: 'center', join: 'round' }))
+  await stackPixels(page)
+  const straight = (await topEdgeBandProfile(page, g.x0, g.x1, g.topEdge)).filter(v => v !== null) as number[]
+  expect(straight.length, 'the straight band must actually ink every column of the span')
+    .toBe(Math.round(g.x1) - Math.round(g.x0))
+  const straightY = straight.reduce((a, b) => a + b, 0) / straight.length
+  expect(Math.max(...straight) - Math.min(...straight), 'a straight band is FLAT along the top edge')
+    .toBeLessThan(1.5)
+  expect(straightY, `and sits ${g.distPx.toFixed(1)} px above the edge at y=${g.topEdge.toFixed(1)}`)
+    .toBeCloseTo(g.topEdge - g.distPx, 0)
+
+  // (b) Now the wave. Same everything, plus the three dials.
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), wobbleRect({
+    width: WOB.width, distance: WOB.distance, align: 'center', join: 'round',
+    wobble: 'wave', wobbleAmount: WOB.amount, wobbleLength: WOB.length, wobblePhase: 0,
+  }))
+  await stackPixels(page)
+  const wavy = await topEdgeBandProfile(page, g.x0, g.x1, g.topEdge)
+  expect(wavy.filter(v => v === null).length, 'the wavy band inks every column too — nothing is missing')
+    .toBe(0)
+  // Outward is UP, so a positive deviation is the straight line's y minus the wavy one's.
+  const dev = wavy.map(y => straightY - y!)
+
+  // (c) At every computed PEAK the line is a full `amount` further out, and at every
+  //     computed TROUGH a full `amount` further in. Six probe points, none of them chosen:
+  //     s = 0.025 + k*0.1 and s = 0.075 + k*0.1 are where sin is +1 and -1.
+  for (const s of [0.125, 0.225, 0.325]) {
+    expect(dev[g.colAt(s)]! / g.ampPx, `peak at s=${s} reaches +amount`).toBeGreaterThan(0.85)
+    expect(dev[g.colAt(s)]! / g.ampPx).toBeLessThan(1.15)
+  }
+  for (const s of [0.075, 0.175, 0.275]) {
+    expect(dev[g.colAt(s)]! / g.ampPx, `trough at s=${s} reaches -amount`).toBeLessThan(-0.85)
+    expect(dev[g.colAt(s)]! / g.ampPx).toBeGreaterThan(-1.15)
+  }
+  // …so the peak-to-trough swing is twice the amount, which is what the dial promises.
+  expect((Math.max(...dev) - Math.min(...dev)) / g.ampPx, 'peak to trough is 2 x amount')
+    .toBeGreaterThan(1.8)
+  expect((Math.max(...dev) - Math.min(...dev)) / g.ampPx).toBeLessThan(2.2)
+
+  // (d) THE FREQUENCY, counted rather than sampled: walk the span and count how many times
+  //     the line crosses the straight one, with a half-amplitude hysteresis so a noisy
+  //     zero-crossing cannot be counted twice. Three whole cycles starting at a descending
+  //     zero give trough, peak, trough, peak, trough, peak — SIX extremes, FIVE crossings.
+  //     A wobble at the wrong wavelength, or one whose closed-cycle snap moved it, lands on
+  //     a different integer here.
+  let flips = 0, side = 0
+  for (const v of dev) {
+    const s = v > g.ampPx / 2 ? 1 : v < -g.ampPx / 2 ? -1 : 0
+    if (s && s !== side) { if (side) flips++; side = s }
+  }
+  expect(flips, 'exactly three cycles of the requested 0.1 wavelength across the probe span').toBe(5)
+})
+
+test('a ZIGZAG reads as straight runs and points — a shape no sine can make', async ({ page }) => {
+  await openCompositor(page)
+  const { W, H } = await canvasDims(page)
+  const g = wobbleGeometry(W, H)
+
+  // Both shapes are measured through the SAME code on the SAME geometry, so the wave is
+  // this test's positive control: if the readings below could not tell a sine from a
+  // triangle they would come out equal, and the assertions would have nothing to say.
+  const read = async (shape: 'wave' | 'zigzag') => {
+    await page.evaluate((ls) => (window as any).__compositorSetLayers(ls),
+      wobbleRect({ width: WOB.width, distance: WOB.distance, align: 'center', join: 'round' }))
+    await stackPixels(page)
+    const flat = (await topEdgeBandProfile(page, g.x0, g.x1, g.topEdge)).filter(v => v !== null) as number[]
+    const baseY = flat.reduce((a, b) => a + b, 0) / flat.length
+
+    await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), wobbleRect({
+      width: WOB.width, distance: WOB.distance, align: 'center', join: 'round',
+      wobble: shape, wobbleAmount: WOB.amount, wobbleLength: WOB.length, wobblePhase: 0,
+    }))
+    await stackPixels(page)
+    const prof = await topEdgeBandProfile(page, g.x0, g.x1, g.topEdge)
+    expect(prof.filter(v => v === null).length, `${shape}: every column inked`).toBe(0)
+    const dev = prof.map(y => (baseY - y!) / g.ampPx)
+
+    // 1. MEAN |deviation| over exactly three whole cycles. Fixed by the shape alone:
+    //    a sine's is 2/pi = 0.6366 of its amplitude, a triangle's is exactly 0.5.
+    const meanAbs = dev.reduce((a, b) => a + Math.abs(b), 0) / dev.length
+    // 2. RMS over the same span: 1/sqrt(2) = 0.7071 for a sine, 1/sqrt(3) = 0.5774 for a
+    //    triangle. A second, independent moment of the same profile.
+    const rms = Math.sqrt(dev.reduce((a, b) => a + b * b, 0) / dev.length)
+    // 3. THE EIGHTH-PHASE PROBE — the sharpest of the three, and a single number a sine
+    //    cannot produce. Halfway (in arc length) between a zero crossing and the next
+    //    extreme, a triangle is at exactly HALF its amplitude, because its run is straight;
+    //    a sine is at sin(pi/4) = 0.7071, because it is not. The span starts at s = 0.05,
+    //    which is a zero crossing, so those points are s = 0.05 + (k/4 + 1/8) * lambda —
+    //    twelve of them across three cycles, averaged to kill per-column noise.
+    const eighths: number[] = []
+    for (let k = 0; k < 12; k++) {
+      const v = dev[g.colAt(0.05 + (k * 0.25 + 0.125) * WOB.length)]
+      if (typeof v === 'number') eighths.push(Math.abs(v))
+    }
+    expect(eighths.length, 'all twelve eighth-phase probes are inside the span').toBe(12)
+    const eighthMean = eighths.reduce((a, b) => a + b, 0) / eighths.length
+    return { meanAbs, rms, eighthMean, peak: Math.max(...dev), trough: Math.min(...dev) }
+  }
+
+  const wave = await read('wave')
+  const zig = await read('zigzag')
+
+  // Both reach the same amplitude — so every difference below is SHAPE, not size.
+  for (const [name, m] of [['wave', wave], ['zigzag', zig]] as const) {
+    expect(m.peak, `${name} reaches +amount`).toBeGreaterThan(0.85)
+    expect(m.trough, `${name} reaches -amount`).toBeLessThan(-0.85)
+  }
+
+  // The wave measures as a sine on all three readings…
+  expect(wave.meanAbs, 'wave mean|dev| is a sine 2/pi = 0.6366').toBeGreaterThan(0.58)
+  expect(wave.meanAbs).toBeLessThan(0.70)
+  expect(wave.rms, 'wave RMS is a sine 1/sqrt(2) = 0.7071').toBeGreaterThan(0.64)
+  expect(wave.rms).toBeLessThan(0.77)
+  expect(wave.eighthMean, 'wave at the eighth phase is sin(pi/4) = 0.7071').toBeGreaterThan(0.63)
+  expect(wave.eighthMean).toBeLessThan(0.78)
+
+  // …and the zigzag measures as a triangle on all three, OUTSIDE every sine band above.
+  expect(zig.meanAbs, 'zigzag mean|dev| is a triangle 0.5, not a sine 0.6366').toBeGreaterThan(0.44)
+  expect(zig.meanAbs).toBeLessThan(0.56)
+  expect(zig.rms, 'zigzag RMS is a triangle 1/sqrt(3) = 0.5774, not a sine 0.7071').toBeGreaterThan(0.52)
+  expect(zig.rms).toBeLessThan(0.63)
+  expect(zig.eighthMean, 'zigzag at the eighth phase is exactly 0.5 — a straight run').toBeGreaterThan(0.43)
+  expect(zig.eighthMean).toBeLessThan(0.58)
+
+  // And the separations, so a render that somehow satisfied both bands at once cannot pass.
+  expect(wave.meanAbs - zig.meanAbs, 'the two shapes are told apart, not merely bounded')
+    .toBeGreaterThan(0.08)
+  expect(wave.eighthMean - zig.eighthMean).toBeGreaterThan(0.10)
+})
+
+/**
+ * WOBBLE OFF RENDERS EXACTLY WHAT NO WOBBLE FIELDS RENDER.
+ *
+ * A wobbled band is built by a different function from a straight one (`paintWobbledBand`
+ * strokes a displaced `Path2D`; `paintStrokeBand` differences two raster dilations), so
+ * "off" has to mean the straight construction runs — not a wobbled one with a zero
+ * amplitude, which would move a band's ink by the flattening error alone.
+ *
+ * The four spellings below are the ones `resolveWobble` calls off, and the FIRST is the one
+ * the inspector actually writes: `setStrokeWobble('off')` returns `{ wobble: undefined }`
+ * and deliberately leaves `wobbleAmount` / `wobbleLength` / `wobblePhase` behind, so a
+ * stroke that has ever been wavy carries live-looking numbers for ever after.
+ *
+ * The comparison is the settled data-URL of the real stack canvas — byte for byte. The last
+ * assertion is the one that stops the test being vacuous: a LIVE wobble on the same stroke
+ * must NOT match, or every comparison above would be comparing two blank canvases.
+ */
+test('a wobble that is off renders byte-identically to a stroke with no wobble fields', async ({ page }) => {
+  await openCompositor(page)
+  const base = { width: WOB.width, distance: WOB.distance, align: 'center', join: 'round' }
+
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), wobbleRect(base))
+  const noFields = await stackPixels(page)
+  expect(noFields).toBeTruthy()
+
+  const offSpellings: [string, Record<string, unknown>][] = [
+    ['the Off row: `wobble` cleared, the three numbers left behind',
+      { wobbleAmount: WOB.amount, wobbleLength: WOB.length, wobblePhase: 90 }],
+    ['a shape name that is not one of STROKE_WOBBLES',
+      { wobble: 'none', wobbleAmount: WOB.amount, wobbleLength: WOB.length }],
+    ['a non-positive wavelength',
+      { wobble: 'wave', wobbleAmount: WOB.amount, wobbleLength: 0 }],
+    ['an amount that is not a number',
+      { wobble: 'wave', wobbleAmount: null, wobbleLength: WOB.length }],
+  ]
+  for (const [why, fields] of offSpellings) {
+    await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), wobbleRect({ ...base, ...fields }))
+    expect(await stackPixels(page), why).toBe(noFields)
+  }
+
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), wobbleRect({
+    ...base, wobble: 'wave', wobbleAmount: WOB.amount, wobbleLength: WOB.length,
+  }))
+  expect(await stackPixels(page), 'CONTROL: a live wobble must move pixels, or every comparison above is vacuous')
+    .not.toBe(noFields)
+})
+
+/**
+ * STEP 2 — REACH: A WOBBLED STROKE INSIDE A CORNER PIN IS NOT CLIPPED.
+ *
+ * Modelled on 'a distant stroke survives a corner pin' above: a corner-pinned layer is
+ * drawn into its OWN offscreen, sized from `localLayerBox` plus `cornerPinPadPx`, and
+ * `localLayerBox` is the shape's plain w x h and knows nothing about strokes. A wave
+ * reaches `amount` further out than the straight band it rides on, so without the amplitude
+ * term in `strokeStackReachPx` the outer half of every crest is simply cut off — a slightly
+ * wrong shape, never an error. This is the third consumer in this feature family to need a
+ * new term, which is why it gets a pixel test and not only a unit one.
+ *
+ * ARITHMETIC (all width-normalized; the shape is 0.3 x 0.3 centred, so its right edge is at
+ * 0.5 + 0.15 = 0.65):
+ *   straight band's outer edge   0.65 + distance 0.02 + width/2 0.005     = 0.675
+ *   wobbled band's outer edge    0.675 + amount 0.10                      = 0.775
+ * The pad without the amplitude term is 0.025 — a fortieth of what the crest needs — so the
+ * crests land outside the offscreen entirely. The probe at 0.74 is past the straight band's
+ * own 0.675 by more than a band width, so only a real, unclipped crest can reach it.
+ *
+ * Perimeter 1.2 with `wobbleLength` 0.06 snaps to round(1.2/0.06) = 20 cycles, i.e. exactly
+ * the wavelength asked for; the right edge is s in [0.3, 0.6], five whole cycles, so five
+ * crests sit on the side being probed. Only the top-left corner is pulled, so the right-hand
+ * side of the quad is unwarped and the geometry above is the geometry drawn.
+ */
+test('a WOBBLED stroke survives a corner pin — the offscreen grows by the amplitude too', async ({ page }) => {
+  await openCompositor(page)
+  await page.evaluate(() => (window as any).__compositorSetLayers([{
+    id: 'cpw', kind: 'rect', x: 0.5, y: 0.5, w: 0.3, h: 0.3, radius: 0,
+    rotation: 0, opacity: 1, visible: true, fill: 'none',
+    cornerPin: { tl: { x: 0.06, y: 0.06 }, tr: { x: 0, y: 0 }, br: { x: 0, y: 0 }, bl: { x: 0, y: 0 } },
+    strokes: [{
+      id: 's1', paint: '#ff0000', width: 0.01, distance: 0.02, align: 'center', join: 'round',
+      wobble: 'wave', wobbleAmount: 0.1, wobbleLength: 0.06, wobblePhase: 0,
+    }],
+  }]))
+  await stackPixels(page)
+  const b = await redBounds(page)
+  expect(b.count, 'the whole wobbled outline is on the canvas, not clipped away').toBeGreaterThan(4000)
+  expect(b.maxX, "a crest reaches 0.775 — well past the straight band's own outer edge at 0.675")
+    .toBeGreaterThan(0.74)
+  // …and symmetrically on the left, which the corner pin's pulled corner does not touch
+  // horizontally at the vertical mid-height where the crests are.
+  expect(b.minX, 'and a crest reaches out on the left too').toBeLessThan(0.26)
+})
+
+/**
+ * MARCHING SHAPES ON A WOBBLED LINE — CURRENTLY BROKEN. `test.fail` ON PURPOSE.
+ *
+ * ── THE FINDING (Task 4; reported, deliberately NOT fixed here — this file is tests only) ──
+ * The spec says marching shapes get the wobble "free": "`shapeStrokeGuideFit` already does
+ * flatten -> offset -> guide. It gains the wobble arguments and passes them to
+ * `offsetPolyline`. Nothing in `paintShapeStroke` changes." Task 1 duly widened
+ * `shapeStrokeGuideFit(d, distance, tolerance?, wobble?)` — but `paintShapeStroke` does not
+ * call it. `shapeStrokeMarkMatrices` does, and that function's options object has NO wobble
+ * field and calls `shapeStrokeGuideFit(o.pathData, o.distance, o.tolerance)` positionally
+ * with three arguments. It is the ONLY seam both consumers use — the canvas painter
+ * (useCompositorLayers.ts) and the SVG writer (useVectorSvg.ts) — so a marching-shapes
+ * stroke never wobbles anywhere, on screen or in an exported file.
+ *
+ * Measured, not inferred: with `wobbleAmount` 0.04 (21.7 px) the marks came out at
+ * y = 129.63, 129.62, 129.57, 129.70 … against an unwobbled 129.58, 129.57, 129.56, 129.55 —
+ * the SAME ink, to a twentieth of a pixel — and the blob count was 82 either way, though a
+ * wobbled guide is longer and at a fixed spacing must carry more marks.
+ *
+ * The Wobble rows ARE offered on a shapes stroke (`strokeInspector.ts` gates them on the
+ * layer having an outline, not on the style), and `strokeStackReachPx`'s shapes arm already
+ * pads the corner-pin quad by the amplitude — so today the dial stores its value, the raster
+ * grows for it, and nothing moves. A dead control.
+ *
+ * The test below is written for the CORRECT behaviour and marked `test.fail()` so it stays
+ * red until the plumbing lands and then, by failing to fail, tells whoever fixes it that the
+ * annotation can come off. Do not "fix" it by asserting today's pixels.
+ *
+ * ARITHMETIC. Same rect, `wobbleLength` 0.2: perimeter 1.6 snaps to round(1.6/0.2) = 8
+ * cycles, so the effective wavelength is exactly 0.2 and the top edge (s in [0, 0.4]) holds
+ * two whole cycles — peaks at s = 0.05, 0.25 and troughs at s = 0.15, 0.35, all inside the
+ * probe span. A `circle` mark is symmetric, so its ink centroid IS the point the placement
+ * maths chose, and on a straight edge the displacement is purely vertical — so a mark whose
+ * centroid is at device x sits at exactly
+ *     y = topEdge - (0.06 + 0.04 * sin(2*pi*(x - leftEdge)/(0.2*W))) * W
+ * `size` 0.018 (9.8 px) under `spacing` 0.025 (13.6 px) keeps every mark a separate blob.
+ */
+const SHAPE_WOB = { distance: 0.06, amount: 0.04, length: 0.2, size: 0.018, spacing: 0.025 } as const
+
+const shapesWobbleRect = (wobbled: boolean) => wobbleRect({
+  width: 0.004, distance: SHAPE_WOB.distance, style: 'shapes',
+  shapes: { shapeId: 'circle', size: SHAPE_WOB.size, spacing: SHAPE_WOB.spacing, follow: false },
+  ...(wobbled
+    ? { wobble: 'wave', wobbleAmount: SHAPE_WOB.amount, wobbleLength: SHAPE_WOB.length, wobblePhase: 0 }
+    : {}),
+})
+
+test('marching shapes ride the wobbled line, sitting off the straight one by the amount', async ({ page }) => {
+  test.fail(true, 'shapeStrokeMarkMatrices never passes the wobble to shapeStrokeGuideFit — see the block comment above')
+  await openCompositor(page)
+  const { W, H } = await canvasDims(page)
+  const g = wobbleGeometry(W, H)
+  const inSpan = (b: { x: number; y: number }) =>
+    b.x > g.leftEdge + 0.04 * W && b.x < g.leftEdge + 0.36 * W && b.y < g.topEdge
+
+  // (a) The straight control: every mark on one horizontal line, `distance` above the edge.
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), shapesWobbleRect(false))
+  await stackPixels(page)
+  const flat = (await redBlobCentroids(page)).filter(inSpan)
+  expect(flat.length, 'the straight shapes stroke puts marks along the top edge').toBeGreaterThan(8)
+  const flatYs = flat.map(b => b.y)
+  expect(Math.max(...flatYs) - Math.min(...flatYs), 'unwobbled, they are all on one line').toBeLessThan(2)
+  // The measured centroid of a `circle` mark sits a fraction of a pixel off its geometric
+  // centre (the strict red predicate drops the antialiased rim); that offset is the same for
+  // every mark, so it is measured here and carried into the wobbled comparison below.
+  const biasPx = flatYs.reduce((a, b) => a + b, 0) / flatYs.length - (g.topEdge - SHAPE_WOB.distance * W)
+  expect(Math.abs(biasPx), 'and within a pixel of `distance` above the edge').toBeLessThan(1.5)
+
+  // (b) The same stroke, wobbled. Every mark must land on the sine that the band traces —
+  //     not merely "somewhere off the line", which a random displacement would satisfy too.
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), shapesWobbleRect(true))
+  await stackPixels(page)
+  const wob = (await redBlobCentroids(page)).filter(inSpan)
+  expect(wob.length, 'the wobbled stroke still puts marks along the top edge').toBeGreaterThan(8)
+
+  const errs = wob.map((b) => {
+    const s = (b.x - g.leftEdge) / W
+    const predicted = g.topEdge
+      - (SHAPE_WOB.distance + SHAPE_WOB.amount * Math.sin((2 * Math.PI * s) / SHAPE_WOB.length)) * W
+    return b.y - (predicted + biasPx)
+  })
+  expect(Math.max(...errs.map(Math.abs)), 'every mark sits on the wobbled guide, to within 3 px')
+    .toBeLessThan(3)
+
+  // …and the spread proves the marks really moved by the AMOUNT, so a guide that happened to
+  // fit the sine while barely deviating cannot pass.
+  const ys = wob.map(b => b.y)
+  expect(Math.max(...ys) - Math.min(...ys), 'top to bottom, the marks span nearly 2 x amount')
+    .toBeGreaterThan(1.6 * SHAPE_WOB.amount * W)
+})
