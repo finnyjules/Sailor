@@ -394,11 +394,19 @@ export function shapeStrokeMarkMatrices(o: {
   follow?: boolean
   /** In `pathData`'s own units — see `pathOutlineFlattenTolerance`. */
   tolerance?: number
+  /** The stroke's wobble, already resolved and already in `pathData`'s own units —
+   *  `wobbleSpecOf(stroke, unit)`, the SAME call a band makes. Absent/null: the guide is the
+   *  plain constant-distance offset, byte-for-byte what it always was.
+   *
+   *  It lives on THIS options object rather than being re-derived inside, because this is the
+   *  one seam both consumers (the canvas painter and the SVG writer) place marks through — a
+   *  wobble reaching only one of them is exactly the drift this function exists to prevent. */
+  wobble?: WobbleSpec | null
 }): MarkMatrix[] {
   const [bx, by, bw, bh] = o.box
   if (!(o.size > 0) || !(o.spacing > 0)) return []
   if (!(bw > 0) || !(bh > 0)) return []
-  const fit = shapeStrokeGuideFit(o.pathData, o.distance, o.tolerance)
+  const fit = shapeStrokeGuideFit(o.pathData, o.distance, o.tolerance, o.wobble)
   if (!fit) return []
   const marks = shapePlacements(fit.guide, o.spacing)
   if (!marks.length) return []

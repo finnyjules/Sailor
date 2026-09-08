@@ -1570,18 +1570,19 @@ test('a WOBBLED stroke survives a corner pin — the offscreen grows by the ampl
 })
 
 /**
- * MARCHING SHAPES ON A WOBBLED LINE — CURRENTLY BROKEN. `test.fail` ON PURPOSE.
+ * MARCHING SHAPES ON A WOBBLED LINE. Was `test.fail`; the plumbing landed, so it is a plain
+ * test now.
  *
- * ── THE FINDING (Task 4; reported, deliberately NOT fixed here — this file is tests only) ──
+ * ── THE FINDING (Task 4), AND THE FIX ──
  * The spec says marching shapes get the wobble "free": "`shapeStrokeGuideFit` already does
  * flatten -> offset -> guide. It gains the wobble arguments and passes them to
  * `offsetPolyline`. Nothing in `paintShapeStroke` changes." Task 1 duly widened
  * `shapeStrokeGuideFit(d, distance, tolerance?, wobble?)` — but `paintShapeStroke` does not
- * call it. `shapeStrokeMarkMatrices` does, and that function's options object has NO wobble
- * field and calls `shapeStrokeGuideFit(o.pathData, o.distance, o.tolerance)` positionally
+ * call it. `shapeStrokeMarkMatrices` does, and that function's options object had NO wobble
+ * field and called `shapeStrokeGuideFit(o.pathData, o.distance, o.tolerance)` positionally
  * with three arguments. It is the ONLY seam both consumers use — the canvas painter
  * (useCompositorLayers.ts) and the SVG writer (useVectorSvg.ts) — so a marching-shapes
- * stroke never wobbles anywhere, on screen or in an exported file.
+ * stroke wobbled nowhere, on screen or in an exported file.
  *
  * Measured, not inferred: with `wobbleAmount` 0.04 (21.7 px) the marks came out at
  * y = 129.63, 129.62, 129.57, 129.70 … against an unwobbled 129.58, 129.57, 129.56, 129.55 —
@@ -1590,12 +1591,14 @@ test('a WOBBLED stroke survives a corner pin — the offscreen grows by the ampl
  *
  * The Wobble rows ARE offered on a shapes stroke (`strokeInspector.ts` gates them on the
  * layer having an outline, not on the style), and `strokeStackReachPx`'s shapes arm already
- * pads the corner-pin quad by the amplitude — so today the dial stores its value, the raster
- * grows for it, and nothing moves. A dead control.
+ * padded the corner-pin quad by the amplitude — so the dial stored its value, the raster grew
+ * for it, and nothing moved. A dead control plus a wrong box.
  *
- * The test below is written for the CORRECT behaviour and marked `test.fail()` so it stays
- * red until the plumbing lands and then, by failing to fail, tells whoever fixes it that the
- * annotation can come off. Do not "fix" it by asserting today's pixels.
+ * `shapeStrokeMarkMatrices` now takes a `wobble` option and both call sites fill it from
+ * `wobbleSpecOf` — the same function the band route uses, at each consumer's own unit
+ * (`widthScale` on canvas, 1 in the SVG writer, where a path's numbers are already `d`'s).
+ * The assertions below are the CORRECT behaviour and were written before the fix; do not
+ * relax them to today's pixels.
  *
  * ARITHMETIC. Same rect, `wobbleLength` 0.2: perimeter 1.6 snaps to round(1.6/0.2) = 8
  * cycles, so the effective wavelength is exactly 0.2 and the top edge (s in [0, 0.4]) holds
@@ -1617,7 +1620,6 @@ const shapesWobbleRect = (wobbled: boolean) => wobbleRect({
 })
 
 test('marching shapes ride the wobbled line, sitting off the straight one by the amount', async ({ page }) => {
-  test.fail(true, 'shapeStrokeMarkMatrices never passes the wobble to shapeStrokeGuideFit — see the block comment above')
   await openCompositor(page)
   const { W, H } = await canvasDims(page)
   const g = wobbleGeometry(W, H)

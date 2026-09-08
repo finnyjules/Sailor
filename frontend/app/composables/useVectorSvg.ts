@@ -12,7 +12,7 @@
  * inside its own `d`. No artboard aspect is needed at import time.
  */
 import { createPathLayer, strokeDashSegments, type PathLayer, type Paint } from '~/composables/useCompositorLayers'
-import { strokeStackOf } from '~/lib/compositor/strokeStack'
+import { strokeStackOf, wobbleSpecOf } from '~/lib/compositor/strokeStack'
 import { shapeStrokeMarkMatrices, pathOutlineFlattenTolerance } from '~/lib/compositor/strokeShapes'
 import { shapeById } from '~/lib/shapes/catalog'
 import { hasPaint } from '~/lib/paint/resolve'
@@ -579,6 +579,11 @@ export function pathLayersToSvgDoc(layers: PathLayer[], aspect = 1): SvgDocument
           box: shape.box,
           follow: st.shapes.follow,
           tolerance: pathOutlineFlattenTolerance(s, W),
+          // A path layer's numbers are already in `d`'s own units (its `widthScale` is 1),
+          // so the wobble is resolved at `unit: 1` — the same `wobbleSpecOf` the canvas
+          // painter calls, at that consumer's own unit. One question, one answer, so an
+          // exported mark cannot sit somewhere the on-screen mark does not.
+          wobble: wobbleSpecOf(st, 1),
         })
         for (const m of marks) {
           // The SAME six numbers the canvas painter hands to `DOMMatrix` — one geometry,

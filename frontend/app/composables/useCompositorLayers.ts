@@ -2633,6 +2633,10 @@ function paintShapeStroke(ctx: CanvasRenderingContext2D, o: {
    *  tolerance implies). The caller computes this because only it knows the outline's
    *  actual pixels-per-unit (1 for rect/ellipse, `scale * W` for a path). */
   tolerance: number
+  /** The stroke's wobble, already in this ctx's units (`wobbleSpecOf(st, widthScale)`) — the
+   *  SAME resolved spec `paintWobbledBand` takes, so a band and marching shapes on the same
+   *  stroke ride one line. `null`/absent: today's constant-distance guide, unchanged. */
+  wobble?: WobbleSpec | null
 }): void {
   const shape = shapeById(o.spec.shapeId)
   if (!shape) return
@@ -2648,6 +2652,7 @@ function paintShapeStroke(ctx: CanvasRenderingContext2D, o: {
     box: shape.box,
     follow: o.spec.follow,
     tolerance: o.tolerance,
+    wobble: o.wobble,
   })
   if (!marks.length) return
   const src = shapePath2D(shape)
@@ -2825,6 +2830,11 @@ function paintStrokeStack(
           style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx),
           unit: o.widthScale,
           tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
+          // Wobble is a property of the LINE, so both consumers of a stroke's line inherit
+          // it: the band below reaches `paintWobbledBand` through this very same call, and
+          // marching shapes ride the same displaced guide. Asked of `wobbleSpecOf` (not the
+          // four raw fields) so "is it on" has one answer for both.
+          wobble: wobbleSpecOf(st, o.widthScale),
         })
       }
       continue
