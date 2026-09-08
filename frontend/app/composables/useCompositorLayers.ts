@@ -39,7 +39,7 @@ import { drawQuadWarp, type Quad } from '~/lib/compositor/warp'
 // this file (see below), so it is NOT re-imported from there to avoid a second import
 // path for the same idea.
 import {
-  strokeStackOf, strokeSupportsStack,
+  strokeStackOf, strokeSupportsStack, wobbleSpecOf,
   type StrokeJoin, type StrokeInstance, type ShapeStrokeSpec,
 } from '~/lib/compositor/strokeStack'
 // The repo's one hex-alpha stripper — the same helper the 3D vary path uses before
@@ -49,8 +49,8 @@ import {
   polygonPathData, starPathData, roundedRectPathData, ellipsePathData,
 } from '~/lib/compositor/polygonGeometry'
 // Task 5's pure geometry for a SHAPES stroke, and the shape library it marches.
-import { shapeStrokeMarkMatrices, pathOutlineFlattenTolerance } from '~/lib/compositor/strokeShapes'
-import { DEFAULT_FLATTEN_TOLERANCE } from '~/lib/compositor/pathFlatten'
+import { shapeStrokeMarkMatrices, pathOutlineFlattenTolerance, offsetPolyline, type WobbleSpec } from '~/lib/compositor/strokeShapes'
+import { DEFAULT_FLATTEN_TOLERANCE, longestSubpath } from '~/lib/compositor/pathFlatten'
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapePath2D } from '~/lib/shapes/path2d'
 import { resolveGroupCascade, type LayerGroup } from '~/lib/compositor/layerGroups'
@@ -1389,6 +1389,26 @@ export function cornerPinPadPx(layer: LocalLayer, W: number): number {
   return strokeStackReachPx(layer, W, false)
 }
 
+/**
+ * How far a WOBBLED stroke deviates beyond where the same stroke running straight would
+ * reach, in the stroke's own STORED units (`wobbleSpecOf` with `unit: 1` — the caller below
+ * applies `scale * W` to the whole pad exactly once, as it already does for every other term).
+ *
+ * Asked of `wobbleSpecOf`, never read off `st.wobbleAmount`: "is this wobble live" has one
+ * answer, and an unrecognised shape or a non-positive `wobbleLength` reads as off here for
+ * the same reason it paints nothing.
+ *
+ * This term exists because THIS consumer fails silently. A wobbled stroke padded for its
+ * straight reach alone has its wave clipped at the corner-pin or DOF offscreen edge and cut
+ * by the torn-edge silhouette — a slightly wrong shape, never an error. It is the third time
+ * this pair of helpers has needed a new term in this feature family, so both arms of the loop
+ * below take it and each has a test that goes red without it.
+ */
+const strokeWobbleAmplitude = (st: StrokeInstance): number => {
+  const w = wobbleSpecOf(st, 1)
+  return w && w.amount > 0 ? w.amount : 0
+}
+
 /** The shared body of the two exports above. Private ON PURPOSE: `countCentredOnEdge` used to
  *  be a defaulted positional boolean on one exported function, so the corner-pin call site
  *  (which passes nothing) READ as if it wanted the honest reach, and a future third caller
@@ -1414,6 +1434,11 @@ function strokeStackReachPx(
     // Infinity here would not just mis-size a raster but re-warp the quad itself.
     const dRaw = st.distance ?? 0
     const d = Number.isFinite(dRaw) ? dRaw : 0
+    // TEXT never paints a wobble whatever its stored fields say: it does not reach
+    // `paintStrokeStack` at all (`paintTextStrokeBands` calls `paintStrokeBand` directly, and
+    // that has no wobble route), and `outlinePathData` is null for it besides. Padding for a
+    // wave that never appears would grow a raster — and the corner-pin quad — around nothing.
+    const amp = isText ? 0 : strokeWobbleAmplitude(st)
     // A MARCHING-SHAPES stroke is sized by `shapes.size`, never by the `width` its row still
     // carries — Task 7 hid that width row, so the number left there is a stale leftover, and
     // the `width > 0` gate below would skip the entry outright: a mark bigger than that stale
@@ -1427,7 +1452,10 @@ function strokeStackReachPx(
     // carry one — so there is no saved corner-pin quad for its reach to move.
     if ((st.style ?? 'band') === 'shapes') {
       const half = shapeStrokeMarkHalfExtent(st.shapes)
-      if (half > 0 && d + half > pad) pad = d + half
+      // The wobble displaces the GUIDE the marks march along (`shapeStrokeGuideFit` passes it
+      // straight to `offsetPolyline`), so a mark can sit a full `amount` further out than the
+      // straight line would have put it, and still reaches `half` past that.
+      if (half > 0 && d + half + amp > pad) pad = d + half + amp
       continue
     }
     if (!(st.width > 0)) continue
@@ -1435,12 +1463,18 @@ function strokeStackReachPx(
     // A centred stroke ON the edge is the shape every saved frame already has; it must
     // keep contributing 0 so the corner-pin quad above stays exactly where it was. See
     // `cornerPinPadPx`'s "centre-at-distance-0 exception".
-    if (align === 'center' && d === 0 && !countCentredOnEdge) continue
+    // A WOBBLED stroke is excused from the exception, on the same grounds marching shapes
+    // are: no frame saved before this feature can carry a wobble, so counting its reach can
+    // move no saved corner-pin quad — and leaving it out would clip the wave, which is the
+    // exact silent failure this term is here to prevent.
+    if (align === 'center' && d === 0 && amp <= 0 && !countCentredOnEdge) continue
     // Text on the edge is that same shape whatever its stored alignment says, because the
     // text painter never honoured the alignment — see `cornerPinPadPx`.
     if (isText && d === 0) continue
     // How far this stroke's OUTER edge reaches beyond the silhouette.
-    const reach = align === 'outside' ? d + st.width : align === 'inside' ? d : d + st.width / 2
+    // The wobble rides on top of wherever the band's outer edge already landed: the line is
+    // displaced by up to `amount` either side, carrying the whole band width with it.
+    const reach = (align === 'outside' ? d + st.width : align === 'inside' ? d : d + st.width / 2) + amp
     if (reach > pad) pad = reach
   }
   return Math.max(0, pad) * scale * W
@@ -2634,6 +2668,84 @@ function paintShapeStroke(ctx: CanvasRenderingContext2D, o: {
 }
 
 /**
+ * A band whose line WOBBLES — a different construction from `paintStrokeBand`'s, and
+ * deliberately a separate function rather than a branch inside it.
+ *
+ * `paintStrokeBand` builds a band at a distance as the difference of two raster DILATIONS,
+ * and a dilation has exactly ONE radius: it cannot express a line whose distance from the
+ * edge varies with arc length. A wobbled band is therefore built the other way round —
+ * flatten the outline, displace it through `offsetPolyline` (which does the wobbling), build
+ * a `Path2D` from the result and STROKE it at `width`. Simpler, and it gets real joins and
+ * caps for free, which is why the inspector shows Corners whenever a wobble is on.
+ *
+ * The consequence, and the reason for the separation: a straight band and a wobbled one are
+ * now built by different code, so the straight one must stay PROVABLY untouched.
+ * `paintStrokeStack` reaches this only when `wobbleSpecOf` says a wobble is live, so with no
+ * wobble not one statement of the dilation path changes — which is what
+ * `tests/fixtures/multi-stroke-legacy.txt` staying byte-identical proves.
+ *
+ * `align` moves the LINE, not the construction. The band an alignment describes spans
+ * `[d, d + width]` (outside), `[d - width, d]` (inside) or `[d - width/2, d + width/2]`
+ * (centre), so stroking at `width` about that span's MIDPOINT lays the ink exactly where the
+ * dilation pair would have laid it — an amplitude approaching 0 lands on the straight band's
+ * own place rather than half a width away from it.
+ *
+ * `dash` is honoured even at a non-zero distance, unlike `paintStrokeBand` (which drops it
+ * there because the offset curve exists only as two dilation radii, never as a path). Here
+ * the offset curve IS a path, so the pattern has something to run along.
+ *
+ * Only the LONGEST subpath wobbles — the same seam, and the same limit, marching shapes
+ * already accept (see `shapeStrokeGuide`). `offsetPolyline` grows every ring by its OWN
+ * winding, so displacing a hole ring alongside its outer ring would push the hole the wrong
+ * way; taking one ring is honest about that limit instead of wrong about the geometry.
+ *
+ * Exported for the reason `paintStrokeBand` and `strokeAligned` are: it is the only way a
+ * unit test can watch this route actually RUN, rather than infer it from pixels.
+ */
+export function paintWobbledBand(ctx: CanvasRenderingContext2D, o: {
+  /** The layer's outline as path data, in the units this ctx currently draws in — exactly
+   *  what `paintStrokeStack`'s `outline` supplies (see `outlinePathData`). */
+  pathData: string
+  width: number
+  distance?: number
+  /** Already resolved and already in this ctx's units — `wobbleSpecOf(st, widthScale)`. */
+  wobble: WobbleSpec
+  align?: StrokeAlign
+  join?: StrokeJoin
+  dash?: [number, number] | null
+  style: (c: CanvasRenderingContext2D) => string | CanvasGradient | CanvasPattern
+  /** Flatten tolerance for `pathData`, in `pathData`'s OWN units — see
+   *  `pathOutlineFlattenTolerance`'s header for why a path layer cannot reuse `widthScale`. */
+  tolerance?: number
+}): void {
+  if (!(o.width > 0)) return
+  const d = typeof o.distance === 'number' && Number.isFinite(o.distance) ? o.distance : 0
+  const align = strokeAlignOf(o.align)
+  const centre = align === 'outside' ? d + o.width / 2 : align === 'inside' ? d - o.width / 2 : d
+  const sub = longestSubpath(o.pathData, o.tolerance ? { tolerance: o.tolerance } : undefined)
+  if (!sub) return
+  const pts = offsetPolyline(sub.pts, sub.closed, centre, o.wobble)
+  if (pts.length < 2) return
+  const path = new Path2D()
+  path.moveTo(pts[0]!.x, pts[0]!.y)
+  for (let i = 1; i < pts.length; i++) path.lineTo(pts[i]!.x, pts[i]!.y)
+  if (sub.closed) path.closePath()
+  // Wrapped in its own save/restore: `lineJoin`, `lineCap` and the dash list are all part of
+  // the canvas state, so the shared ctx cannot leak any of them into the next stroke or the
+  // next layer — the failure `strokeAligned`'s explicit dash reset exists to prevent.
+  ctx.save()
+  ctx.lineWidth = o.width
+  ctx.lineJoin = o.join === 'round' ? 'round' : 'miter'
+  // Caps only show on an OPEN outline, and they are the same corner question the join asks,
+  // so one control governs both — a rounded zigzag with square ends would read as a bug.
+  ctx.lineCap = o.join === 'round' ? 'round' : 'butt'
+  ctx.strokeStyle = o.style(ctx)
+  if (o.dash) ctx.setLineDash([o.dash[0], o.dash[1]])
+  ctx.stroke(path)
+  ctx.restore()
+}
+
+/**
  * Paint a layer's WHOLE stroke stack over a shape that is already on `ctx` (or handed in
  * as a `path`). THE single place a stroked kind's outlines are drawn, so rect, ellipse,
  * polygon, star and path can't drift apart on ordering, visibility or units.
@@ -2718,6 +2830,31 @@ function paintStrokeStack(
       continue
     }
     if (!(st.width > 0)) continue
+    // A WOBBLED band takes a different route entirely — see `paintWobbledBand`. The question
+    // is put to `wobbleSpecOf` rather than re-derived from the four raw fields, and it is put
+    // BEFORE `outlineData()` so an ordinary band still never pays to build the outline data
+    // it does not read. `null` here ⇒ every statement below runs exactly as it always has.
+    const wobble = wobbleSpecOf(st, o.widthScale)
+    if (wobble) {
+      const outline = outlineData()
+      if (outline) {
+        paintWobbledBand(ctx, {
+          pathData: outline,
+          width: st.width * o.widthScale,
+          distance: (st.distance ?? 0) * o.widthScale,
+          wobble,
+          align: st.align,
+          join: st.join,
+          dash: strokeDashSegments(st.dash, o.widthScale),
+          style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx),
+          tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
+        })
+        continue
+      }
+      // No outline to wobble (a kind that has none). Falling through paints the straight band
+      // this stroke would have painted before wobble existed — a wobble the geometry cannot
+      // express must not cost the stroke its ink.
+    }
     // DEFENSIVE, and deliberately kept as such. No branch below actually destroys `ctx`'s
     // current path: Canvas2D's `stroke()` / `fill()` / `clip()` do not consume it, and the
     // non-zero-distance band does all of its dilating and knocking out on SCRATCH contexts,

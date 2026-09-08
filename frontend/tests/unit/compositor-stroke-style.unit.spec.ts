@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   strokeDashSegments, strokeAlignOf, strokeAligned, strokeReachPx, cornerPinPadPx, silhouettePadPx, paintLayerStack,
-  createRectLayer, createLineLayer, createPathLayer,
+  createRectLayer, createLineLayer, createPathLayer, createTextLayer,
   type LocalLayer, type RectLayer, type LineLayer, type CornerPin,
 } from '~/composables/useCompositorLayers'
 import {
@@ -534,5 +534,202 @@ describe('a stroke whose colour was removed', () => {
     const { ink } = paint([twoStrokes('none')])
     expect(ink(65, 0)).toBe(false)   // where the 40px band would have been
     expect(ink(35, 0)).toBe(false)
+  })
+})
+
+/**
+ * A WOBBLED STROKE'S REACH — the consumer that fails silently.
+ *
+ * A wobble displaces the stroke's line by up to `wobbleAmount` either side of where it would
+ * have run straight, so both pad helpers have to grow by that amplitude. Without the term the
+ * wave is clipped at the corner-pin / DOF offscreen edge and cut by the torn-edge silhouette —
+ * a slightly wrong shape, never an error. This is the THIRD time this exact pair of helpers has
+ * needed a new term in this feature family (outside alignment, then marching shapes, now the
+ * wobble), which is why each arm gets a case here that goes red when the term is removed.
+ *
+ * The numbers are the helpers' own arithmetic plus one addition, so an expectation cannot pass
+ * by accident: a centred 0.1-wide band pushed to distance 0.05 reaches 0.05 + 0.05 = 0.1
+ * straight, and 0.13 with a 0.03 amplitude — the difference is the whole claim.
+ */
+describe('strokeReachPx / cornerPinPadPx — a wobble reaches by its amplitude too', () => {
+  const W = 200
+  const WOBBLE = { wobble: 'wave', wobbleAmount: 0.03, wobbleLength: 0.2, wobblePhase: 0 }
+
+  /** A rect carrying ONE stroke, described entirely by the stack (no legacy fields). */
+  const withStroke = (st: Record<string, unknown>) => {
+    const l = createRectLayer({ stroke: undefined, strokeWidth: undefined }) as unknown as Record<string, unknown>
+    l.strokes = [{ id: 's1', paint: '#fff', width: 0.1, distance: 0, align: 'center', ...st }]
+    return l as unknown as LocalLayer
+  }
+
+  it('adds the amplitude to a BAND\'s reach, for both callers', () => {
+    const straight = withStroke({ distance: 0.05 })
+    const wavy = withStroke({ distance: 0.05, ...WOBBLE })
+    // Straight: 0.05 + 0.1/2 = 0.1. Wavy: + 0.03 amplitude = 0.13.
+    expect(strokeReachPx(straight, W)).toBeCloseTo(0.1 * W, 6)
+    expect(cornerPinPadPx(straight, W)).toBeCloseTo(0.1 * W, 6)
+    expect(strokeReachPx(wavy, W)).toBeCloseTo(0.13 * W, 6)
+    expect(cornerPinPadPx(wavy, W)).toBeCloseTo(0.13 * W, 6)
+  })
+
+  it('adds it for every alignment, on top of wherever the band already reached', () => {
+    expect(strokeReachPx(withStroke({ align: 'outside', ...WOBBLE }), W)).toBeCloseTo((0.1 + 0.03) * W, 6)
+    expect(strokeReachPx(withStroke({ align: 'inside', distance: 0.05, ...WOBBLE }), W)).toBeCloseTo((0.05 + 0.03) * W, 6)
+  })
+
+  // The corner-pin exception (a centred stroke sitting ON the edge contributes 0, so the quad
+  // of every already-saved frame stays put) does NOT apply to a wobbled one: no frame saved
+  // before this feature can carry a wobble, so counting it moves nothing — and excusing it
+  // would clip the wave, which is the whole failure this term prevents.
+  it('is NOT excused by the centre-on-edge exception once it wobbles', () => {
+    const still = withStroke({})
+    const wavy = withStroke({ ...WOBBLE })
+    expect(cornerPinPadPx(still, W)).toBe(0)
+    expect(cornerPinPadPx(wavy, W)).toBeCloseTo((0.05 + 0.03) * W, 6)
+    expect(strokeReachPx(wavy, W)).toBeCloseTo((0.05 + 0.03) * W, 6)
+  })
+
+  it('adds the amplitude to a SHAPES stroke\'s reach too — the marks ride the wobbled guide', () => {
+    const marks = { width: 0, distance: 0.05, style: 'shapes', shapes: { shapeId: 'badge', size: 0.2, spacing: 0.05, follow: false } }
+    // badge fitted to size 0.2 upright reaches 0.1 past its guide point; the guide itself is
+    // displaced by up to 0.03.
+    expect(strokeReachPx(withStroke(marks), W)).toBeCloseTo((0.05 + 0.1) * W, 6)
+    expect(strokeReachPx(withStroke({ ...marks, ...WOBBLE }), W)).toBeCloseTo((0.05 + 0.1 + 0.03) * W, 6)
+    expect(cornerPinPadPx(withStroke({ ...marks, ...WOBBLE }), W)).toBeCloseTo((0.05 + 0.1 + 0.03) * W, 6)
+  })
+
+  // `wobbleSpecOf` is the ONE place "is this wobble live" is answered — the pad must not
+  // re-derive it from the raw fields, or a wobble that paints nothing would still pad.
+  it('adds nothing for a wobble that is off, however it is off', () => {
+    const base = 0.05 * W  // centred 0.1 band on the edge, raster answer
+    expect(strokeReachPx(withStroke({ ...WOBBLE, wobble: 'squiggle' }), W)).toBeCloseTo(base, 6)
+    expect(strokeReachPx(withStroke({ ...WOBBLE, wobbleLength: 0 }), W)).toBeCloseTo(base, 6)
+    expect(strokeReachPx(withStroke({ ...WOBBLE, wobbleLength: NaN }), W)).toBeCloseTo(base, 6)
+    expect(strokeReachPx(withStroke({ ...WOBBLE, wobbleAmount: NaN }), W)).toBeCloseTo(base, 6)
+    expect(strokeReachPx(withStroke({ ...WOBBLE, wobbleAmount: 0 }), W)).toBeCloseTo(base, 6)
+    expect(strokeReachPx(withStroke({ wobble: undefined }), W)).toBeCloseTo(base, 6)
+  })
+
+  it('scales a path\'s amplitude by its own `scale`, like every other stroke number', () => {
+    const l = createPathLayer({ stroke: undefined, strokeWidth: undefined, scale: 2 }) as unknown as Record<string, unknown>
+    l.strokes = [{ id: 's1', paint: '#fff', width: 0.1, distance: 0, align: 'outside', ...WOBBLE }]
+    expect(strokeReachPx(l as unknown as LocalLayer, W)).toBeCloseTo((0.1 + 0.03) * 2 * W, 6)
+  })
+
+  // TEXT never paints a wobble: it does not reach `paintStrokeStack` at all (its bands go
+  // through `paintTextStrokeBands` → `paintStrokeBand`, which has no wobble route) and it has
+  // no outline to displace. Padding for a wave that never appears would grow the raster — and
+  // the corner-pin quad — around nothing.
+  it('adds nothing for TEXT, which has no route that paints a wobble', () => {
+    const t = createTextLayer({ text: 'hi' }) as unknown as Record<string, unknown>
+    t.strokes = [{ id: 's1', paint: '#fff', width: 0.1, distance: 0.05, align: 'center', ...WOBBLE }]
+    expect(strokeReachPx(t as unknown as LocalLayer, W)).toBeCloseTo(0.1 * W, 6)
+  })
+})
+
+/**
+ * THE WOBBLED BAND'S CONSTRUCTION.
+ *
+ * A band at a distance is normally the difference of two raster DILATIONS, and a dilation has
+ * one radius — it cannot express a line whose distance from the edge varies. A wobbled band is
+ * built the other way round: flatten the outline, displace it through `offsetPolyline`, build a
+ * `Path2D` and stroke it. These tests watch that route actually RUN (the repo's own lesson: a
+ * graceful fallback hides an integration failure, so assert the path ran) rather than infer it.
+ *
+ * `Path2D` does not exist in this suite's node environment, so it is stubbed with a recorder —
+ * which is also what makes the DISPLACED GEOMETRY itself assertable, point by point, without a
+ * rasterizer.
+ */
+describe('a wobbled band strokes a displaced path, not a pair of dilations', () => {
+  type StubPath = { pts: { x: number; y: number }[]; closed: boolean }
+  const built: StubPath[] = []
+  beforeEach(() => {
+    built.length = 0
+    ;(globalThis as any).Path2D = class {
+      pts: { x: number; y: number }[] = []
+      closed = false
+      constructor() { built.push(this as unknown as StubPath) }
+      moveTo(x: number, y: number) { this.pts.push({ x, y }) }
+      lineTo(x: number, y: number) { this.pts.push({ x, y }) }
+      closePath() { this.closed = true }
+    }
+  })
+  afterEach(() => { delete (globalThis as any).Path2D })
+
+  // A 100×100 px square on a 200px artboard, one 10px band, a 6px wobble every 40px. The
+  // perimeter is 400, so `effectiveWavelength` snaps to exactly 40 and the phase closes.
+  const wavyRect = (st: Record<string, unknown> = {}) => {
+    const l = createRectLayer({
+      x: 0.5, y: 0.5, w: 0.5, h: 0.5, radius: 0, fill: '',
+      stroke: undefined, strokeWidth: undefined,
+    } as unknown as Partial<RectLayer>) as unknown as Record<string, unknown>
+    l.strokes = [{
+      id: 's1', paint: '#ffffff', width: 0.05, distance: 0, align: 'center', join: 'sharp', style: 'band',
+      wobble: 'wave', wobbleAmount: 0.03, wobbleLength: 0.2, wobblePhase: 0, ...st,
+    }]
+    return l as unknown as LocalLayer
+  }
+
+  /** Signed deviation from the square's own edge, for the points that sit on the TOP or BOTTOM
+   *  edge well away from a corner (the corner vertex carries a miter scale of its own, which is
+   *  the band meeting itself, not the wobble). Positive = outside the silhouette. */
+  const edgeDeviations = (p: StubPath) =>
+    p.pts.filter(q => Math.abs(q.x) <= 40).map(q => Math.abs(q.y) - 50)
+
+  it('strokes ONE path on the shared context and builds no dilation pair at all', () => {
+    const { rec } = paint([wavyRect()])
+    expect(scratchDoc.count()).toBe(0)                       // no scratch ⇒ no dilation, no knockout
+    expect(built).toHaveLength(1)
+    expect(built[0]!.closed).toBe(true)                      // a closed outline closes
+    const strokes = allOps(rec).filter(o => o.kind === 'stroke') as any[]
+    expect(strokes).toHaveLength(1)
+    expect(strokes[0]!.lineWidth).toBeCloseTo(10, 6)         // 0.05 * 200, stroked at width
+    expect(strokes[0]!.lineJoin).toBe('miter')               // 'sharp' honours the join
+    expect(allOps(rec).some(o => (o as any).erase)).toBe(false)
+    expect(rec.ops.some(o => o.kind === 'stamp')).toBe(false)  // nothing stamped back
+  })
+
+  it('honours the Corners control the straight distance-0 band cannot', () => {
+    const { rec } = paint([wavyRect({ join: 'round' })])
+    const stroke = allOps(rec).find(o => o.kind === 'stroke') as any
+    expect(stroke.lineJoin).toBe('round')
+  })
+
+  it('resamples the outline and displaces it by exactly the amplitude', () => {
+    paint([wavyRect()])
+    const p = built[0]!
+    // 400px of perimeter at a step of 40/16 = 2.5 ⇒ ~160 points, not the rect's 4 corners.
+    expect(p.pts.length).toBeGreaterThan(100)
+    const dev = edgeDeviations(p)
+    expect(Math.max(...dev)).toBeCloseTo(6, 0)    // 0.03 * 200, outward
+    expect(Math.min(...dev)).toBeCloseTo(-6, 0)   // …and the same inward
+  })
+
+  // The alignment moves the LINE, not the construction: the band an alignment describes spans
+  // [d, d+width] outside, so its midpoint — the line this route strokes — is half a width out.
+  it('puts an outside-aligned band\'s line half a width out, where the dilation pair put it', () => {
+    paint([wavyRect({ align: 'outside' })])
+    const dev = edgeDeviations(built[0]!)
+    const mean = dev.reduce((a, b) => a + b, 0) / dev.length
+    expect(mean).toBeCloseTo(5, 0)                // 10px band centred on +5 ⇒ spans 0..10
+    expect(Math.max(...dev)).toBeCloseTo(11, 0)   // 5 + 6
+  })
+
+  // CONTROL: with no wobble the straight construction runs untouched — no Path2D is built and
+  // the distance band still makes its two dilation scratches. This is the unit-level shadow of
+  // the byte-identity fixture.
+  it('CONTROL: an unwobbled band builds no path and still uses the dilation pair', () => {
+    const { rec } = paint([wavyRect({ wobble: undefined, distance: 0.05 })])
+    expect(built).toHaveLength(0)
+    expect(scratchDoc.count()).toBeGreaterThan(0)
+    // The dilation pair is stamped back onto the shared ctx from its scratch — the op the
+    // wobbled route above never makes. (`allOps` flattens a stamp into the ops it carries, so
+    // the stamp itself is only visible on the un-flattened recorder.)
+    expect(rec.ops.some(o => o.kind === 'stamp')).toBe(true)
+  })
+
+  it('CONTROL: a wobble that is off takes the straight route as well', () => {
+    paint([wavyRect({ wobbleLength: 0, distance: 0.05 })])
+    expect(built).toHaveLength(0)
   })
 })
