@@ -43,6 +43,9 @@ export default defineEventHandler(async (event) => {
   if (!body?.image) throw createError({ statusCode: 400, message: 'image is required' })
 
   const input = buildSamInput(body)
+  if (!input.point_prompts && !input.box_prompts) {
+    throw createError({ statusCode: 400, message: 'a point or box prompt is required' })
+  }
   const out = await runFal<SamOutput>(SAM_MODEL, input, { pollDeadlineMs: 90_000 })
 
   // sync_mode:true returns data URIs; prefer masks[0] (the binary mask), fall

@@ -46,9 +46,16 @@ describe('buildSamInput (SAM 3)', () => {
     })
   })
 
-  it('a box body emits a box_prompt (integer corners)', () => {
+  it('a box-only body emits a box_prompt and NO fabricated point', () => {
     const out = buildSamInput({ image: 'data:x', box: { xMin: 4.6, yMin: 8.2, xMax: 40.4, yMax: 80.9 } })
     expect(out.box_prompts).toEqual([{ x_min: 5, y_min: 8, x_max: 40, y_max: 81 }])
+    expect('point_prompts' in out).toBe(false) // a stray (0,0) point would corrupt the box
+  })
+
+  it('points + box can be combined', () => {
+    const out = buildSamInput({ image: 'data:x', points: [{ x: 5, y: 6, label: 1 }], box: { xMin: 0, yMin: 0, xMax: 10, yMax: 10 } })
+    expect(out.point_prompts).toEqual([{ x: 5, y: 6, label: 1 }])
+    expect(out.box_prompts).toEqual([{ x_min: 0, y_min: 0, x_max: 10, y_max: 10 }])
   })
 
   it('no box → box_prompts is omitted (never emits undefined)', () => {

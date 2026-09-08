@@ -11,7 +11,7 @@
  * Image artifact. Generation runs in-modal via /api/inpaint/* (your Replicate
  * token) for instant variations/compare — not at graph-execution time.
  */
-import { X, Brush, Eraser, Eye, EyeOff, Wand2, BoxSelect, ImagePlus, Loader2, FlipHorizontal2, Undo2, Redo2, ZoomIn, ZoomOut, Maximize } from 'lucide-vue-next'
+import { X, Brush, Eye, EyeOff, Wand2, ImagePlus, Loader2, FlipHorizontal2, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Sparkles } from 'lucide-vue-next'
 import { useBrushMask, type MaskTarget } from '~/composables/useBrushMask'
 import { useInpaint, loadImage, imageToDataUrl, capDims } from '~/composables/useInpaint'
 import { useStageView } from '~/composables/useStageView'
@@ -118,18 +118,15 @@ const expand = ref(0)
 const mode = ref<'mask' | 'describe'>('mask')
 const maskOnly = ref(false) // hide the photo, show only the painted region (inspection)
 
-// ── Region tool (mirrors the Frame modal's Box/Brush row) ────────────────────
-// 'paint'/'erase' drive the brush; 'select' is SAM click-to-select; 'box' drags
-// a rectangular region that composites with the brush mask.
-type Tool = 'paint' | 'erase' | 'select' | 'box'
-const tool = ref<Tool>('paint')
-watch(tool, (t) => {
-  if (t === 'paint') brush.mode.value = 'add'
-  else if (t === 'erase') brush.mode.value = 'erase'
-})
-// Intent flows (Remove object / Recolor) start on click-select: one click on
-// the object is the whole gesture.
+// ── Region tool — two tools, intent over mechanism ───────────────────────────
+// 'select' (default): SAM 3 click-to-select — click an object, Shift/Alt-click
+//   refine, or DRAG a box to segment within it. 'paint': freehand brush; hold
+//   Alt/Option to erase (the old separate Erase/Box tools are gone).
+type Tool = 'select' | 'paint'
+const tool = ref<Tool>('select')
+// Intent flows (Remove object / Recolor) also start on click-select.
 if (props.intent) tool.value = 'select'
+const clampBrushMode = (alt: boolean) => { brush.mode.value = alt ? 'erase' : 'add' }
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
 const boxRect = ref<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
 const boxDragging = ref(false)
@@ -206,6 +203,39 @@ function rebuildSilhouette() {
   regionFx.rebuild()
 }
 watch([() => disp.w, () => disp.h, () => brush.strokes.value, () => brush.inverted.value, boxRect], rebuildSilhouette, { deep: true })
+
+// ── Floating prompt bar anchor: selection bbox (display px) → stage screen pt ─
+const selBBox = ref<{ l: number; t: number; r: number; b: number } | null>(null)
+function recomputeSelBBox() {
+  const cv = regionSilhouette.value
+  if (!cv || !cv.width || !cv.height) { selBBox.value = null; return }
+  const SW = 100, SH = Math.max(1, Math.round(SW * cv.height / cv.width))
+  const t = document.createElement('canvas'); t.width = SW; t.height = SH
+  const tc = t.getContext('2d'); if (!tc) { selBBox.value = null; return }
+  tc.drawImage(cv, 0, 0, SW, SH)
+  const d = tc.getImageData(0, 0, SW, SH).data
+  let minX = SW, minY = SH, maxX = -1, maxY = -1
+  for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
+    if (d[(y * SW + x) * 4 + 3]! > 20) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y }
+  }
+  if (maxX < minX) { selBBox.value = null; return }
+  const sx = disp.w / SW, sy = disp.h / SH
+  selBBox.value = { l: minX * sx, t: minY * sy, r: (maxX + 1) * sx, b: (maxY + 1) * sy }
+}
+watch(regionSilhouette, recomputeSelBBox)
+// Bar sits just below the selection in stage screen space (follows zoom/pan via
+// view.toScreen), clamped so it never leaves the stage.
+const promptBar = computed(() => {
+  const bb = selBBox.value; if (!bb) return null
+  const p = view.toScreen((bb.l + bb.r) / 2, bb.b, disp.w, disp.h)
+  // Sit just below the selection, but keep a comfortable margin from the stage
+  // edges — a selection that fills the stage keeps the bar floating inside it
+  // near the bottom rather than clipping off the edge.
+  return {
+    x: Math.max(155, Math.min(disp.w - 155, p.sx)),
+    y: Math.max(52, Math.min(disp.h - 60, p.sy + 14)),
+  }
+})
 // Mask-only is a pre-generation inspection aid; drop it once a result lands so
 // the stage doesn't sit on a blank black backdrop (renderOverlay shows results,
 // not the mask, once history exists).
@@ -219,6 +249,10 @@ function clientToNorm(e: PointerEvent) {
 }
 const panning = ref(false)
 let panLast: { x: number; y: number } | null = null
+// Select-tool click-vs-drag: a plain click point-selects; dragging past the
+// threshold turns into a box that SAM segments within (Box folded into Select).
+let selectStart: { nx: number; ny: number; add: boolean; subtract: boolean } | null = null
+const DRAG_THRESH = 0.012
 function onPointerDown(e: PointerEvent) {
   if (spaceDown.value || e.button === 1) {
     e.preventDefault(); panning.value = true; panLast = { x: e.clientX, y: e.clientY }
@@ -227,15 +261,14 @@ function onPointerDown(e: PointerEvent) {
   }
   const p = clientToNorm(e); if (!p) return
   e.preventDefault()
-  if (tool.value === 'select') { doSamSelect(p.nx, p.ny, { add: e.shiftKey, subtract: e.altKey }); return }
   ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
-  if (tool.value === 'box') {
-    clearSamMask()
-    boxDragging.value = true
-    boxRect.value = { x0: p.nx, y0: p.ny, x1: p.nx, y1: p.ny }
+  if (tool.value === 'select') {
+    // Defer the action to pointerup: we don't yet know click vs drag-box.
+    selectStart = { nx: p.nx, ny: p.ny, add: e.shiftKey, subtract: e.altKey }
     return
   }
   clearSamMask()
+  clampBrushMode(e.altKey)   // Alt/Option paints in erase mode
   brush.down(p.nx, p.ny, disp.w)
 }
 function onPointerMove(e: PointerEvent) {
@@ -249,11 +282,30 @@ function onPointerMove(e: PointerEvent) {
     boxRect.value = { ...boxRect.value, x1: clamp01(p.nx), y1: clamp01(p.ny) }
     return
   }
-  if (tool.value === 'paint' || tool.value === 'erase') brush.move(p.nx, p.ny)
+  // Select drag past the threshold promotes the gesture to a box.
+  if (selectStart) {
+    if (Math.hypot(p.nx - selectStart.nx, p.ny - selectStart.ny) > DRAG_THRESH) {
+      clearSamMask()
+      boxDragging.value = true
+      boxRect.value = { x0: selectStart.nx, y0: selectStart.ny, x1: clamp01(p.nx), y1: clamp01(p.ny) }
+    }
+    return
+  }
+  if (tool.value === 'paint') brush.move(p.nx, p.ny)
 }
 function onPointerUp() {
   if (panning.value) { panning.value = false; panLast = null }
-  else if (boxDragging.value) { boxDragging.value = false; if (!hasBox.value) boxRect.value = null; rebuildSilhouette() }
+  else if (boxDragging.value) {
+    boxDragging.value = false
+    const b = boxRect.value
+    boxRect.value = null   // the box is a SAM prompt, not a raw-rect mask
+    selectStart = null
+    if (b) { const n = boxNorm(b); if ((n.r - n.l) > DRAG_THRESH && (n.bo - n.t) > DRAG_THRESH) void doSamBox(n) }
+  }
+  else if (selectStart) {
+    const s = selectStart; selectStart = null
+    doSamSelect(s.nx, s.ny, { add: s.add, subtract: s.subtract })   // it was a click
+  }
   else brush.up()
 }
 function onWheel(e: WheelEvent) {
@@ -456,6 +508,30 @@ async function doSamSelect(nx: number, ny: number, mods: { add?: boolean; subtra
   }
 }
 
+/** Select-tool drag-box: SAM 3 segments the object(s) within the box. `n` is the
+ *  normalized box {l,t,r,bo}; it replaces any point selection. */
+async function doSamBox(n: { l: number; t: number; r: number; bo: number }) {
+  if (samBusy.value || inpaint.busy.value) return
+  if (!sourceImg.value) { inpaintError.value = 'Load an image first.'; return }
+  inpaintError.value = ''
+  samPoints.value = []
+  const w = out.value.w, h = out.value.h
+  const box = { xMin: Math.round(n.l * w), yMin: Math.round(n.t * h), xMax: Math.round(n.r * w), yMax: Math.round(n.bo * h) }
+  samBusy.value = true
+  try {
+    const source = imageToDataUrl(sourceImg.value, w, h)
+    const mask = await inpaint.segmentBox(source, box)
+    samMask.value = mask
+    brush.clear()
+    if (props.intent === 'remove') await runInpaint(true)
+  } catch {
+    inpaintError.value = 'Box-select unavailable (check SAM model); paint the area instead.'
+    tool.value = 'paint'
+  } finally {
+    samBusy.value = false
+  }
+}
+
 // ── Recolor intent: brand-kit swatches + free picker ─────────────────────────
 const projectBrand = inject<{ activeKitId: ComputedRef<string | null>; setBrandKit: (id: string | null) => void } | null>('sailor:brand', null)
 const brandLib = useBrandLibrary(projectBrand?.activeKitId)
@@ -519,7 +595,7 @@ function onKeydown(e: KeyboardEvent) {
   if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) brush.redo(); else brush.undo(); return }
   if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); brush.redo(); return }
   if (e.key === '[' || e.key === ']') { e.preventDefault(); brush.sizePx.value = Math.max(4, Math.min(400, brush.sizePx.value + (e.key === ']' ? 8 : -8))) }
-  else if ((e.key === 'x' || e.key === 'X') && (tool.value === 'paint' || tool.value === 'erase')) { e.preventDefault(); tool.value = tool.value === 'paint' ? 'erase' : 'paint' }
+  else if ((e.key === 'x' || e.key === 'X') && mode.value === 'mask') { e.preventDefault(); tool.value = tool.value === 'select' ? 'paint' : 'select' }
 }
 function onKeyup(e: KeyboardEvent) { if (e.code === 'Space') spaceDown.value = false }
 // Releasing focus (alt-tab, Spotlight, system dialog) can swallow the Space keyup
@@ -564,7 +640,7 @@ onBeforeUnmount(() => {
           v-else
           ref="stageRef"
           class="relative rounded-md overflow-hidden ring-1 ring-white/10"
-          :class="panning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : (samSelect || tool === 'box') ? 'cursor-crosshair' : 'cursor-none'"
+          :class="panning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : samSelect ? 'cursor-crosshair' : 'cursor-none'"
           :style="{ width: disp.w + 'px', height: disp.h + 'px' }"
           @pointerdown="onPointerDown"
           @pointermove="onPointerMove"
@@ -600,7 +676,7 @@ onBeforeUnmount(() => {
             />
             <!-- Live box-drag outline (crisp dashed rect while dragging the Box tool). -->
             <div
-              v-if="tool === 'box' && boxRect"
+              v-if="boxRect"
               class="absolute pointer-events-none border border-white/90 bg-white/5"
               :style="{
                 left: boxNorm(boxRect).l * disp.w + 'px',
@@ -612,11 +688,39 @@ onBeforeUnmount(() => {
           </div>
           <!-- brush cursor ring (screen space; scales with zoom) -->
           <div
-            v-if="(tool === 'paint' || tool === 'erase') && !spaceDown && !panning && cursorScreen"
+            v-if="tool === 'paint' && !spaceDown && !panning && cursorScreen"
             class="absolute pointer-events-none rounded-full border-2"
             :class="brush.mode.value === 'erase' ? 'border-rose-400/90' : 'border-white/90'"
             :style="{ left: cursorScreen.sx + 'px', top: cursorScreen.sy + 'px', width: brush.sizePx.value * view.scale.value + 'px', height: brush.sizePx.value * view.scale.value + 'px', transform: 'translate(-50%, -50%)', boxShadow: '0 0 0 1px rgba(0,0,0,0.55)' }"
           />
+          <!-- Floating prompt bar — anchored under the selection (screen space). -->
+          <div
+            v-if="mode === 'mask' && promptBar && !maskOnly"
+            class="absolute z-30 flex items-center gap-1 rounded-lg border border-white/15 bg-[#141416]/95 p-1 pl-2.5 shadow-xl backdrop-blur"
+            :style="{ left: promptBar.x + 'px', top: promptBar.y + 'px', transform: 'translate(-50%, 0)', width: '300px' }"
+            @pointerdown.stop
+            @pointerup.stop
+            @wheel.stop
+          >
+            <input
+              v-model="prompt"
+              type="text"
+              :placeholder="samBusy ? 'Selecting…' : 'Describe the fill — or leave empty to remove'"
+              class="min-w-0 flex-1 bg-transparent px-1 text-[12px] text-white/90 outline-none placeholder:text-white/30"
+              @keydown.enter.prevent="runInpaint(false)"
+            />
+            <button
+              class="flex h-7 shrink-0 items-center gap-1 rounded-md px-2.5 text-[11px] font-medium cursor-pointer transition-colors disabled:cursor-default disabled:opacity-50"
+              :class="prompt.trim() ? 'bg-white text-neutral-900 hover:bg-white/90' : 'bg-white/10 text-white/80 hover:bg-white/15'"
+              :disabled="inpaint.busy.value || samBusy"
+              :title="prompt.trim() ? 'Generate the fill (Enter)' : 'Remove — fill from the surroundings (Enter)'"
+              @click="runInpaint(false)"
+            >
+              <Loader2 v-if="inpaint.busy.value" class="size-3.5 animate-spin" />
+              <Sparkles v-else class="size-3.5" />
+              {{ prompt.trim() ? 'Generate' : 'Remove' }}
+            </button>
+          </div>
           <div v-if="loadingSrc" class="absolute inset-0 flex items-center justify-center bg-black/30"><Loader2 class="size-6 animate-spin text-white/60" /></div>
         </div>
         <div v-if="sourceUrl" class="absolute bottom-4 left-4 z-10 flex items-center gap-1 bg-black/40 border border-white/10 rounded-md p-0.5 text-white/70">
@@ -650,21 +754,18 @@ onBeforeUnmount(() => {
           <div v-if="mode === 'mask'">
             <div class="text-[10px] uppercase tracking-[0.12em] text-white/40 mb-2.5">Tool</div>
             <div class="flex items-center gap-1 p-0.5 rounded-md bg-white/[0.05]">
-              <button class="flex-1 h-8 rounded flex items-center justify-center cursor-pointer transition-colors" :class="tool === 'paint' ? 'bg-white text-neutral-900' : 'text-white/70 hover:bg-white/10'" title="Paint (X)" @click="tool = 'paint'"><Brush class="size-3.5" /></button>
-              <button class="flex-1 h-8 rounded flex items-center justify-center cursor-pointer transition-colors" :class="tool === 'erase' ? 'bg-rose-400/90 text-neutral-900' : 'text-white/70 hover:bg-white/10'" title="Erase (X)" @click="tool = 'erase'"><Eraser class="size-3.5" /></button>
-              <button class="flex-1 h-8 rounded flex items-center justify-center cursor-pointer transition-colors" :class="tool === 'box' ? 'bg-white text-neutral-900' : 'text-white/70 hover:bg-white/10'" title="Box — drag a rectangular region" @click="tool = 'box'"><BoxSelect class="size-3.5" /></button>
-              <button class="flex-1 h-8 rounded flex items-center justify-center cursor-pointer transition-colors" :class="tool === 'select' ? 'bg-white text-neutral-900' : 'text-white/70 hover:bg-white/10'" title="Click-select an object — Shift-click adds, Alt-click subtracts" @click="tool = 'select'"><Wand2 class="size-3.5" /></button>
+              <button class="flex-1 h-8 rounded flex items-center justify-center gap-1.5 text-[11px] cursor-pointer transition-colors" :class="tool === 'select' ? 'bg-white text-neutral-900 font-medium' : 'text-white/70 hover:bg-white/10'" title="Click an object to select it — Shift-click adds, Alt-click subtracts, drag a box to frame one (X)" @click="tool = 'select'"><Wand2 class="size-3.5" /> Select</button>
+              <button class="flex-1 h-8 rounded flex items-center justify-center gap-1.5 text-[11px] cursor-pointer transition-colors" :class="tool === 'paint' ? 'bg-white text-neutral-900 font-medium' : 'text-white/70 hover:bg-white/10'" title="Brush the area — hold Alt/Option to erase (X)" @click="tool = 'paint'"><Brush class="size-3.5" /> Brush</button>
             </div>
 
-            <div v-if="tool === 'paint' || tool === 'erase'" class="flex items-center gap-2 mt-3.5">
+            <div v-if="tool === 'paint'" class="flex items-center gap-2 mt-3.5">
               <span class="text-[10px] text-white/40 w-12 shrink-0">Size</span>
               <input type="range" min="4" max="200" :value="brush.sizePx.value" class="flex-1 accent-white cursor-pointer" title="Brush size ([ / ])" @input="brush.sizePx.value = +($event.target as HTMLInputElement).value" />
               <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ brush.sizePx.value }}</span>
             </div>
-            <p v-else-if="tool === 'box'" class="text-[10px] text-white/35 mt-3.5">Drag a box over the image.</p>
-            <p v-else class="text-[10px] text-white/35 mt-3.5">
+            <p v-else class="text-[10px] text-white/35 mt-3.5 leading-relaxed">
               <span v-if="samBusy" class="inline-flex items-center gap-1 text-white/55"><Loader2 class="size-3 animate-spin" /> Selecting…</span>
-              <span v-else>Click an object to select it. Shift-click adds, Alt-click subtracts.</span>
+              <span v-else>Click an object to select it. Shift-click adds, Alt-click subtracts, or drag a box to frame one.</span>
             </p>
 
             <div class="flex items-center gap-1.5 mt-3.5">
@@ -674,12 +775,13 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Prompt -->
-          <div>
+          <!-- Prompt — mask mode types in the floating bar on the selection; the
+               side field stays only for Describe (no selection to anchor to). -->
+          <div v-if="mode === 'describe'">
             <div class="text-[10px] uppercase tracking-[0.12em] text-white/40 mb-2.5">Prompt</div>
             <textarea
               v-model="prompt" rows="3"
-              :placeholder="mode === 'describe' ? 'describe the edit, e.g. make the sky a sunset' : 'what goes in the marked area…'"
+              placeholder="describe the edit, e.g. make the sky a sunset"
               class="pastel-hairline block w-full rounded-md text-[12px] px-2 py-1.5 outline-none resize-none placeholder:text-white/25"
               style="--pastel-hairline-bg: #141416;"
               @keydown.enter.exact.prevent="runInpaint(false)"

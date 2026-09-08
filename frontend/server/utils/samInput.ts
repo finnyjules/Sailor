@@ -32,18 +32,25 @@ export interface SamRequestBody {
 }
 
 export function buildSamInput(body: SamRequestBody): Record<string, unknown> {
-  const pts = (body.points?.length)
-    ? body.points
-    : [{ x: body.xPx ?? 0, y: body.yPx ?? 0, label: 1 as const }]
   const input: Record<string, unknown> = {
     image_url: body.image,
     prompt: '',
-    point_prompts: pts.map(p => ({ x: Math.round(p.x), y: Math.round(p.y), label: p.label === 0 ? 0 : 1 })),
     apply_mask: false,
     sync_mode: true,
     output_format: 'png',
     return_multiple_masks: false,
     max_masks: 1,
+  }
+  // Points: explicit list wins; else the legacy single xPx/yPx click. A box-only
+  // request emits NO points — fabricating a (0,0) fallback point would drop a
+  // stray foreground marker in the corner and corrupt the box segmentation.
+  const pts = body.points?.length
+    ? body.points
+    : (body.xPx != null || body.yPx != null)
+      ? [{ x: body.xPx ?? 0, y: body.yPx ?? 0, label: 1 as const }]
+      : []
+  if (pts.length) {
+    input.point_prompts = pts.map(p => ({ x: Math.round(p.x), y: Math.round(p.y), label: p.label === 0 ? 0 : 1 }))
   }
   if (body.box) {
     input.box_prompts = [{

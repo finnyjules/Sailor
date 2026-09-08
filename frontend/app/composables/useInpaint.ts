@@ -329,6 +329,17 @@ export function useInpaint() {
     return res.mask
   }
 
+  /** Box-prompt SAM 3: `box` is in the source image's pixel space. SAM segments
+   *  the object(s) inside the box and returns one white-on-black mask. Used by
+   *  the Select tool's drag-box gesture (tight framing in cluttered scenes). */
+  async function segmentBox(image: string, box: { xMin: number; yMin: number; xMax: number; yMax: number }): Promise<string> {
+    const res = await $fetch<{ mask: string }>('/api/inpaint/segment', {
+      method: 'POST',
+      body: { image, box },
+    })
+    return res.mask
+  }
+
   /** Upload a data-URL image into ComfyUI's input dir; returns its filename.
    *  Mirrors useLocalLayerEditor.addImageFromFile's upload path. */
   async function uploadDataUrl(dataUrl: string, nameHint = 'inpaint'): Promise<string> {
@@ -341,5 +352,5 @@ export function useInpaint() {
     return (await res.json())?.name || safe
   }
 
-  return { busy, error, results, fluxFill, kontext, segment, segmentPoints, text2img, loraGen, nanoGen, pose, removeBackground, uploadDataUrl }
+  return { busy, error, results, fluxFill, kontext, segment, segmentPoints, segmentBox, text2img, loraGen, nanoGen, pose, removeBackground, uploadDataUrl }
 }
