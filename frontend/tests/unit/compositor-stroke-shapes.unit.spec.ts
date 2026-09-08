@@ -73,6 +73,16 @@ describe('offsetPolyline', () => {
     const dist = Math.hypot(outCur!.x - cur.x, outCur!.y - cur.y)
     expect(dist).toBeCloseTo(10, 3)
   })
+
+  // Task: wavy/zigzag strokes. `offsetPolyline` widened to take an optional wobble — the
+  // full wobble maths lives in compositor-stroke-wobble.unit.spec.ts; this just guards that
+  // the widened signature leaves every EXISTING call site's result untouched.
+  it('an absent, undefined or null wobble argument does not change a single existing result', () => {
+    const sq = [{ x: -1, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 1 }, { x: -1, y: 1 }]
+    const noArg = offsetPolyline(sq, true, 0.5)
+    expect(offsetPolyline(sq, true, 0.5, undefined)).toEqual(noArg)
+    expect(offsetPolyline(sq, true, 0.5, null)).toEqual(noArg)
+  })
 })
 
 describe('shapePlacements', () => {

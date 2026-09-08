@@ -3,7 +3,7 @@ import {
   strokeStackOf, writeStrokeStackToLayer, createStroke,
   addStroke, removeStroke, duplicateStroke, reorderStroke, canReorderStroke,
   strokeRowLabel, strokeSupportsStack, strokeSupportsShapes,
-  layerStoresStrokeStack, LEGACY_STROKE_ID,
+  layerStoresStrokeStack, LEGACY_STROKE_ID, wobbleSpecOf,
   type StrokeInstance,
 } from '~/lib/compositor/strokeStack'
 
@@ -415,5 +415,102 @@ describe('writeStrokeStackToLayer — the sentinel never reaches storage', () =>
     expect(patch.strokeWidth).toBeUndefined()
     expect(patch.strokeAlign).toBeUndefined()
     expect(patch.strokeDash).toBeUndefined()
+  })
+})
+
+describe('strokeStackOf — wobble normalisation', () => {
+  it('carries a well-formed wobble through untouched', () => {
+    const stack = strokeStackOf({
+      kind: 'rect',
+      strokes: [{ id: 's1', paint: '#fff', width: 0.01, wobble: 'wave', wobbleAmount: 0.02, wobbleLength: 0.1, wobblePhase: 90 }],
+    })
+    expect(stack[0]!.wobble).toBe('wave')
+    expect(stack[0]!.wobbleAmount).toBe(0.02)
+    expect(stack[0]!.wobbleLength).toBe(0.1)
+    expect(stack[0]!.wobblePhase).toBe(90)
+  })
+
+  it('an unrecognised wobble shape reads as off', () => {
+    const stack = strokeStackOf({
+      kind: 'rect',
+      strokes: [{ id: 's1', paint: '#fff', width: 0.01, wobble: 'square', wobbleAmount: 0.02, wobbleLength: 0.1 }],
+    })
+    expect(stack[0]!.wobble).toBeUndefined()
+    expect(stack[0]!.wobbleAmount).toBeUndefined()
+    expect(stack[0]!.wobbleLength).toBeUndefined()
+  })
+
+  it('a non-positive or non-finite wobbleLength reads as off', () => {
+    for (const length of [0, -1, NaN, Infinity]) {
+      const stack = strokeStackOf({
+        kind: 'rect',
+        strokes: [{ id: 's1', paint: '#fff', width: 0.01, wobble: 'wave', wobbleAmount: 0.02, wobbleLength: length }],
+      })
+      expect(stack[0]!.wobble).toBeUndefined()
+    }
+  })
+
+  it('a non-finite wobbleAmount reads as off', () => {
+    for (const amount of [NaN, Infinity, -Infinity, 'nope' as unknown as number, undefined]) {
+      const stack = strokeStackOf({
+        kind: 'rect',
+        strokes: [{ id: 's1', paint: '#fff', width: 0.01, wobble: 'wave', wobbleAmount: amount, wobbleLength: 0.1 }],
+      })
+      expect(stack[0]!.wobble).toBeUndefined()
+    }
+  })
+
+  it('a non-finite wobblePhase reads as 0, not off', () => {
+    const stack = strokeStackOf({
+      kind: 'rect',
+      strokes: [{ id: 's1', paint: '#fff', width: 0.01, wobble: 'wave', wobbleAmount: 0.02, wobbleLength: 0.1, wobblePhase: NaN }],
+    })
+    expect(stack[0]!.wobble).toBe('wave')
+    expect(stack[0]!.wobblePhase).toBe(0)
+  })
+
+  it('a legacy (read-through) layer is unaffected — no wobble fields exist to normalise', () => {
+    const stack = strokeStackOf({ kind: 'rect', stroke: '#ff0000', strokeWidth: 0.01 })
+    expect(stack[0]!.wobble).toBeUndefined()
+  })
+
+  it('wobble applies to a "shapes"-style entry too — it is a property of the line, not the style', () => {
+    const stack = strokeStackOf({
+      kind: 'rect',
+      strokes: [{
+        id: 's1', paint: '#fff', width: 0.01, style: 'shapes',
+        shapes: { shapeId: 'circle', size: 0.02, spacing: 0.03 },
+        wobble: 'zigzag', wobbleAmount: 0.01, wobbleLength: 0.05,
+      }],
+    })
+    expect(stack[0]!.wobble).toBe('zigzag')
+    expect(stack[0]!.shapes!.shapeId).toBe('circle')
+  })
+})
+
+describe('wobbleSpecOf', () => {
+  it('returns null when off: unrecognised shape, non-positive/non-finite length, non-finite amount', () => {
+    const base: StrokeInstance = { id: 's1', paint: '#fff', width: 0.01 }
+    expect(wobbleSpecOf(base, 1)).toBeNull()
+    expect(wobbleSpecOf({ ...base, wobble: 'square' as never, wobbleAmount: 1, wobbleLength: 1 }, 1)).toBeNull()
+    expect(wobbleSpecOf({ ...base, wobble: 'wave', wobbleAmount: 1, wobbleLength: 0 }, 1)).toBeNull()
+    expect(wobbleSpecOf({ ...base, wobble: 'wave', wobbleAmount: 1, wobbleLength: NaN }, 1)).toBeNull()
+    expect(wobbleSpecOf({ ...base, wobble: 'wave', wobbleAmount: NaN, wobbleLength: 1 }, 1)).toBeNull()
+  })
+
+  it('a legacy layer (no wobble fields at all) is unaffected — reads as off', () => {
+    const stack = strokeStackOf({ kind: 'rect', stroke: '#ff0000', strokeWidth: 0.01 })
+    expect(wobbleSpecOf(stack[0]!, 1200)).toBeNull()
+  })
+
+  it('scales amount and length by unit; leaves phase (degrees) alone', () => {
+    const stroke: StrokeInstance = {
+      id: 's1', paint: '#fff', width: 0.01, wobble: 'wave', wobbleAmount: 0.02, wobbleLength: 0.1, wobblePhase: 45,
+    }
+    const spec = wobbleSpecOf(stroke, 1200)!
+    expect(spec.shape).toBe('wave')
+    expect(spec.amount).toBeCloseTo(0.02 * 1200, 9)
+    expect(spec.length).toBeCloseTo(0.1 * 1200, 9)
+    expect(spec.phase).toBe(45)
   })
 })

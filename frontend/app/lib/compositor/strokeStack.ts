@@ -10,6 +10,7 @@
  * decides only what strokes a layer has and in what order.
  */
 import type { Paint } from '~/lib/compositor/paint'
+import type { WobbleSpec } from '~/lib/compositor/strokeShapes'
 
 /** Where a band sits relative to its reference edge. Mirrors the composable's type; declared
  *  here rather than imported because the composable imports THIS module (cycle). */
@@ -24,6 +25,11 @@ export type StrokeJoin = typeof STROKE_JOINS[number]
 /** A continuous band, or library shapes marching along the edge. */
 export const STROKE_STYLES = ['band', 'shapes'] as const
 export type StrokeStyle = typeof STROKE_STYLES[number]
+
+/** Wobble is a property of the LINE, not the style — a band strokes the wavy line, and
+ *  marching shapes walk a guide built from it, so both inherit the same four dials. */
+export const STROKE_WOBBLES = ['wave', 'zigzag'] as const
+export type StrokeWobble = typeof STROKE_WOBBLES[number]
 
 export interface ShapeStrokeSpec {
   /** An id from lib/shapes/catalog. */
@@ -51,6 +57,14 @@ export interface StrokeInstance {
   join?: StrokeJoin
   style?: StrokeStyle
   shapes?: ShapeStrokeSpec
+  /** Absent ⇒ the line runs straight, exactly as it does today. */
+  wobble?: StrokeWobble
+  /** Peak deviation either side of the line, same units as `width`. */
+  wobbleAmount?: number
+  /** One full cycle, same units as `width`. Non-positive or non-finite ⇒ treated as off. */
+  wobbleLength?: number
+  /** Degrees — where the cycle starts around the outline. */
+  wobblePhase?: number
 }
 
 /** The kinds whose stroke can become a list. A line has no interior to offset from, so it
@@ -123,6 +137,25 @@ const normalizeShapeSpec = (v: unknown): ShapeStrokeSpec => {
   }
   if (typeof o.follow === 'boolean') spec.follow = o.follow
   return spec
+}
+
+/**
+ * The wobble fields resolved to a clean shape, or `null` when off — shared by
+ * `strokeStackOf`'s read-through normalisation and `wobbleSpecOf` so "is it on" and "what
+ * are its clean values" can never disagree about the same raw fields.
+ *
+ * Off: an unrecognised `shape`, a non-positive or non-finite `length`, or a non-finite
+ * `amount`. A non-finite `phase` is not a reason to turn off — it just reads as 0, matching
+ * `strokeDistancePx` / `strokeReachPx`'s convention for a bad number.
+ */
+function resolveWobble(
+  shape: unknown, lengthRaw: unknown, amountRaw: unknown, phaseRaw: unknown,
+): { shape: StrokeWobble; amount: number; length: number; phase: number } | null {
+  if (shape !== 'wave' && shape !== 'zigzag') return null
+  const length = num(lengthRaw)
+  if (!(length > 0)) return null
+  if (typeof amountRaw !== 'number' || !Number.isFinite(amountRaw)) return null
+  return { shape, amount: amountRaw, length, phase: num(phaseRaw) }
 }
 
 /** Whether the layer's own legacy single-stroke fields say anything. A live legacy field is
@@ -205,10 +238,24 @@ export function strokeStackOf(layer: StrokeHost | null | undefined): StrokeInsta
       // the SVG writer and the agent all read a layer's strokes through, so a style:'shapes'
       // entry ALWAYS carrying a real (if inert) `shapes` object here means none of those
       // consumers can independently get the "missing payload" case wrong.
+      // Wobble is a property of the LINE, not the style, so it is normalised for every
+      // entry here — the same guarantee `normalizeShapeSpec` gives a style:'shapes' payload,
+      // now given to the four wobble fields regardless of style.
+      const w = resolveWobble(
+        (s as { wobble?: unknown }).wobble,
+        (s as { wobbleLength?: unknown }).wobbleLength,
+        (s as { wobbleAmount?: unknown }).wobbleAmount,
+        (s as { wobblePhase?: unknown }).wobblePhase,
+      )
+      const wobbleFields = w
+        ? { wobble: w.shape, wobbleAmount: w.amount, wobbleLength: w.length, wobblePhase: w.phase }
+        : { wobble: undefined, wobbleAmount: undefined, wobbleLength: undefined, wobblePhase: undefined }
       if ((s as { style?: unknown }).style === 'shapes') {
-        return { ...s, visible, shapes: normalizeShapeSpec((s as { shapes?: unknown }).shapes) }
+        return {
+          ...s, visible, shapes: normalizeShapeSpec((s as { shapes?: unknown }).shapes), ...wobbleFields,
+        }
       }
-      return { ...s, visible }
+      return { ...s, visible, ...wobbleFields }
     }) as unknown as StrokeInstance[]
   }
   if (!layer || !legacyStrokeIsLive(layer)) return []
@@ -225,6 +272,26 @@ export function strokeStackOf(layer: StrokeHost | null | undefined): StrokeInsta
   const d = layer.strokeDash as StrokeDash | undefined
   if (d && typeof d === 'object' && num(d.dash) > 0) one.dash = { dash: num(d.dash), gap: num(d.gap) }
   return [one]
+}
+
+/**
+ * A stroke's wobble as a `WobbleSpec`, or `null` when it is off — the ONE question every
+ * consumer (a band's painter, marching shapes) asks instead of re-deriving "is it on" from
+ * the four raw fields.
+ *
+ * `unit` scales `amount` and `length` into the caller's own units (canvas pixels for a
+ * rect/ellipse, local units for a path) the same way callers already scale `width` and
+ * `distance` — `phase` is degrees and is never scaled.
+ *
+ * Self-contained rather than trusting a caller to have gone through `strokeStackOf` first:
+ * `resolveWobble` re-derives the same off rule `strokeStackOf` normalises with, so a raw,
+ * freshly-created, or hand-built `StrokeInstance` reads exactly the same way a stored one
+ * does after a read-through.
+ */
+export function wobbleSpecOf(stroke: StrokeInstance, unit: number): WobbleSpec | null {
+  const w = resolveWobble(stroke.wobble, stroke.wobbleLength, stroke.wobbleAmount, stroke.wobblePhase)
+  if (!w) return null
+  return { shape: w.shape, amount: w.amount * unit, length: w.length * unit, phase: w.phase }
 }
 
 /** An entry on its way INTO storage, with an id that addresses exactly it. Returns the same

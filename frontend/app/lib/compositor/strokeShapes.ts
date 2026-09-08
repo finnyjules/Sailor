@@ -11,6 +11,7 @@
  */
 import { type FlatPoint, longestSubpath, DEFAULT_FLATTEN_TOLERANCE } from '~/lib/compositor/pathFlatten'
 import { type Guide, guideFromPolyline } from '~/lib/compositor/textPath'
+import type { StrokeWobble } from '~/lib/compositor/strokeStack'
 
 /** A hard ceiling on marks per stroke. A spacing near zero would otherwise ask for
  *  millions and hang the draw loop; the cap turns a bad dial into a dense ring. */
@@ -62,20 +63,121 @@ function shoelace(pts: readonly FlatPoint[]): number {
 }
 
 /**
- * Move every vertex along its angle bisector by `distance`, outward for a positive value.
+ * One full cycle of a wobble shape, at phase-normalised arc-length position `u` (any real
+ * number; only its fractional part matters), in `[-1, 1]`.
  *
- * OUTWARD is defined by the polygon's own winding for a closed ring, so a shape authored
- * clockwise and the same shape authored counter-clockwise both GROW — otherwise the same
- * dial would grow one library shape and shrink the next, which is exactly the class of bug
- * the type-on-a-path work hit with path direction.
- *
- * Concave corners can self-cross at a large distance; that is a known and accepted limit
- * (the spec says to measure where it starts rather than pre-build a cleanup pass).
+ * Both shapes start at 0 and rise, so switching between them keeps what `phase` means: the
+ * point 0 on the dial is always the same point on the outline for either shape.
  */
-export function offsetPolyline(pts: readonly FlatPoint[], closed: boolean, distance: number): FlatPoint[] {
+export function wobbleValue(shape: StrokeWobble, u: number): number {
+  const f = u - Math.floor(u)
+  if (shape === 'wave') return Math.sin(f * Math.PI * 2)
+  // Triangle: 0 → 1 → 0 → −1 → 0, matching sin's shape so Phase means the same thing.
+  if (f < 0.25) return 4 * f
+  if (f < 0.75) return 2 - 4 * f
+  return 4 * f - 4
+}
+
+/** A hard ceiling on resampled points. A near-zero `step` would otherwise ask for millions
+ *  and hang the draw loop; the cap turns a bad dial into a dense-but-bounded outline. */
+export const WOBBLE_MAX_POINTS = 4000
+
+/**
+ * Resample a flattened outline at even arc length, `step` apart.
+ *
+ * THE TRAP: the flattener only emits a point where a curve needs one, so a rectangle's edge
+ * arrives as its two endpoints. A displacement applied to those raw points can only move the
+ * two endpoints — it cannot put a wave in the middle of a straight edge. Everything that
+ * wobbles a line depends on resampling it first; a circle's already-dense flatten output
+ * hides that this step does anything at all, which is why it is tested on a rectangle.
+ *
+ * Walks the polyline as ONE continuous curve (adding the implied closing chord when
+ * `closed`) and emits a sample every `step`, starting at the first vertex. A CLOSED walk
+ * never re-emits the start point at the far end — the last sample is one `step` short of
+ * wrapping, not on top of the first — so a caller that also wants the wrap point can ask for
+ * it at arc length `count * step`, the same convention `shapePlacements`' guide already uses.
+ * An OPEN walk includes the final vertex even when the last interval is a partial step.
+ *
+ * Returns the (deduped) input unchanged for a non-finite or non-positive `step`.
+ */
+export function resamplePolyline(pts: readonly FlatPoint[], closed: boolean, step: number): FlatPoint[] {
   const src = dedupe(pts)
-  if (src.length < 2) return []
-  if (!Number.isFinite(distance) || distance === 0) return src
+  if (src.length < 2) return src
+  if (!Number.isFinite(step) || step <= 0) return src
+
+  const n = src.length
+  const segCount = closed ? n : n - 1
+  const segLens: number[] = new Array(segCount)
+  let total = 0
+  for (let i = 0; i < segCount; i++) {
+    const a = src[i]!, b = src[(i + 1) % n]!
+    const d = Math.hypot(b.x - a.x, b.y - a.y)
+    segLens[i] = d
+    total += d
+  }
+  if (!(total > 1e-9)) return src
+
+  // `total / step` can land a hair under the true integer (6 / 0.1 === 59.999999999999993
+  // in IEEE754) — the epsilon keeps an exact division from losing its last sample.
+  const EPS = 1e-9
+  const rawCount = Math.floor(total / step + EPS)
+  const count = Math.min(WOBBLE_MAX_POINTS, Math.max(1, closed ? rawCount : rawCount + 1))
+
+  const out: FlatPoint[] = []
+  let segIdx = 0, segStart = 0
+  let a = src[0]!, b = src[1 % n]!, segLen = segLens[0]!
+  for (let i = 0; i < count; i++) {
+    const s = closed ? i * step : Math.min(i * step, total)
+    while (s > segStart + segLen + EPS && segIdx < segCount - 1) {
+      segIdx++
+      segStart += segLen
+      a = src[segIdx]!
+      b = src[(segIdx + 1) % n]!
+      segLen = segLens[segIdx]!
+    }
+    const t = segLen > EPS ? Math.max(0, Math.min(1, (s - segStart) / segLen)) : 0
+    out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
+  }
+  return out
+}
+
+/** A wobble's four dials, already resolved to "on" (a caller with an off wobble passes
+ *  `undefined`/`null` instead of constructing one of these — see `wobbleSpecOf`). */
+export interface WobbleSpec {
+  shape: StrokeWobble
+  /** Peak deviation either side of the line, same units as `offsetPolyline`'s `distance`. */
+  amount: number
+  /** One full cycle, same units as `amount`. */
+  length: number
+  /** Degrees. */
+  phase: number
+}
+
+/**
+ * The wavelength `offsetPolyline` actually uses, once the closed-outline seam is accounted
+ * for.
+ *
+ * A CLOSED outline whose perimeter is not a whole number of the requested `length` meets
+ * itself out of step at the seam and leaves a visible kink — the same problem
+ * `shapePlacements` (strokeShapes.ts) solves for mark spacing, and the same fix: snap the
+ * cycle count to `round(total / length)` (minimum 1, so a `length` bigger than the whole
+ * perimeter still closes as exactly one cycle) and spread that many cycles evenly. An OPEN
+ * outline has no seam to protect, so it keeps the requested `length` exactly — the same call
+ * `shapePlacements` makes for an open guide's spacing.
+ */
+export function effectiveWavelength(total: number, length: number, closed: boolean): number {
+  if (!closed || !(total > 0) || !(length > 0)) return length
+  const count = Math.max(1, Math.round(total / length))
+  return total / count
+}
+
+/**
+ * The shared per-vertex geometry `offsetPolyline` uses for both the constant-distance path
+ * and the wobbled one — identical arithmetic either way, so a caller with no wobble gets
+ * exactly today's floating-point result. `distanceAt(i)` is the (possibly wobbling)
+ * displacement for vertex `i` of `src`.
+ */
+function offsetVertices(src: readonly FlatPoint[], closed: boolean, distanceAt: (i: number) => number): FlatPoint[] {
   const n = src.length
   const sign = closed && shoelace(src) < 0 ? -1 : 1
   const out: FlatPoint[] = []
@@ -103,10 +205,76 @@ export function offsetPolyline(pts: readonly FlatPoint[], closed: boolean, dista
       const cos = Math.max(-1, Math.min(1, a.x * b.x + a.y * b.y))
       scale = Math.min(10, 1 / Math.max(0.1, Math.sqrt((1 + cos) / 2)))
     }
-    const step = distance * sign * scale
+    const step = distanceAt(i) * sign * scale
     out.push({ x: cur.x + nx * step, y: cur.y + ny * step })
   }
   return out
+}
+
+/**
+ * Move every vertex along its angle bisector by `distance`, outward for a positive value.
+ *
+ * OUTWARD is defined by the polygon's own winding for a closed ring, so a shape authored
+ * clockwise and the same shape authored counter-clockwise both GROW — otherwise the same
+ * dial would grow one library shape and shrink the next, which is exactly the class of bug
+ * the type-on-a-path work hit with path direction.
+ *
+ * Concave corners can self-cross at a large distance; that is a known and accepted limit
+ * (the spec says to measure where it starts rather than pre-build a cleanup pass).
+ *
+ * `wobble`, when its `amount` and `length` are both positive, makes `distance` vary with
+ * arc length instead of staying constant: the outline is RESAMPLED first (step =
+ * `effectiveWavelength / 16`, never coarser than the incoming average spacing — see
+ * `resamplePolyline`'s header for why this is not optional), then each point is displaced by
+ * `distance + amount · wobbleValue(shape, s/λeff + phase/360)`. Absent or degenerate wobble
+ * (missing, non-finite/non-positive `amount` or `length`) runs the EXACT code path this
+ * function has always run — same points, same arithmetic, byte-identical output.
+ */
+export function offsetPolyline(
+  pts: readonly FlatPoint[],
+  closed: boolean,
+  distance: number,
+  wobble?: WobbleSpec | null,
+): FlatPoint[] {
+  const dedup = dedupe(pts)
+  if (dedup.length < 2) return []
+
+  const wobbleOn = !!wobble
+    && Number.isFinite(wobble.amount) && wobble.amount > 0
+    && Number.isFinite(wobble.length) && wobble.length > 0
+
+  if (!wobbleOn) {
+    if (!Number.isFinite(distance) || distance === 0) return dedup
+    return offsetVertices(dedup, closed, () => distance)
+  }
+
+  const n0 = dedup.length
+  const segCount = closed ? n0 : n0 - 1
+  let total = 0
+  for (let i = 0; i < segCount; i++) {
+    const a = dedup[i]!, b = dedup[(i + 1) % n0]!
+    total += Math.hypot(b.x - a.x, b.y - a.y)
+  }
+  // A degenerate (zero-length) polyline has no arc length to wobble along — fall back to
+  // the plain, unwobbled offset rather than dividing by zero.
+  if (!(total > 1e-9)) {
+    if (!Number.isFinite(distance) || distance === 0) return dedup
+    return offsetVertices(dedup, closed, () => distance)
+  }
+
+  const lambdaEff = effectiveWavelength(total, wobble!.length, closed)
+  const avgSpacing = total / segCount
+  const step = Math.min(lambdaEff / 16, avgSpacing)
+  const resampled = step > 0 && Number.isFinite(step) ? resamplePolyline(dedup, closed, step) : dedup
+  if (resampled.length < 2) return []
+
+  const base = Number.isFinite(distance) ? distance : 0
+  const phaseFrac = wobble!.phase / 360
+  const { amount, shape } = wobble!
+  return offsetVertices(resampled, closed, (i) => {
+    const s = i * step
+    return base + amount * wobbleValue(shape, s / lambdaEff + phaseFrac)
+  })
 }
 
 export interface ShapePlacement { x: number; y: number; angle: number }
@@ -152,10 +320,15 @@ export interface StrokeGuideFit {
   cy: number
 }
 
-export function shapeStrokeGuideFit(d: string, distance: number, tolerance?: number): StrokeGuideFit | null {
+export function shapeStrokeGuideFit(
+  d: string,
+  distance: number,
+  tolerance?: number,
+  wobble?: WobbleSpec | null,
+): StrokeGuideFit | null {
   const sub = longestSubpath(d, tolerance ? { tolerance } : undefined)
   if (!sub) return null
-  const pts = offsetPolyline(sub.pts, sub.closed, distance)
+  const pts = offsetPolyline(sub.pts, sub.closed, distance, wobble)
   if (pts.length < 2) return null
   const guide = guideFromPolyline(pts, sub.closed)
   if (!guide) return null
