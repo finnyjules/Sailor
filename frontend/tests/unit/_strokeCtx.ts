@@ -37,6 +37,13 @@ export type Op =
   // at the moment of `drawImage`: paintStrokeBand's own knockout (one scratch's
   // dilation subtracted from another's) is expressed exactly this way.
   | { kind: 'stamp'; from: Recorder; erase: boolean }
+  // `translate`/`rotate` have no geometric effect in this harness (text has no
+  // glyph outline to move), so they exist purely to make `eachRun`'s per-glyph
+  // `save/translate/rotate/…/restore` frame (paintTextStrokeBands, text-on-a-path)
+  // OBSERVABLE — a dropped `rotate()` or an offset `translate()` shows up here
+  // even though it changes no pixel this fake context can model.
+  | { kind: 'translate'; x: number; y: number }
+  | { kind: 'rotate'; angle: number }
 
 /**
  * A `fillText` / `strokeText` call, recorded separately from `ops`.
@@ -114,7 +121,10 @@ export function makeCtx(name: string, W = 200, H = 200) {
     font: '', textAlign: 'left', textBaseline: 'alphabetic',
     save() { state.push({ dash }); rec.ops.push({ kind: 'save' }) },
     restore() { dash = state.pop()?.dash ?? null; rec.ops.push({ kind: 'restore' }) },
-    translate() {}, scale() {}, rotate() {}, transform() {}, setTransform() {},
+    translate(x: number, y: number) { rec.ops.push({ kind: 'translate', x, y }) },
+    scale() {},
+    rotate(angle: number) { rec.ops.push({ kind: 'rotate', angle }) },
+    transform() {}, setTransform() {},
     getTransform() { return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 } },
     setLineDash(d: number[]) { dash = d.length ? [d[0]!, d[1] ?? 0] : null },
     getLineDash() { return dash ? [dash[0], dash[1]] : [] },

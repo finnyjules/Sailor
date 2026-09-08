@@ -1334,7 +1334,11 @@ export function outsideStrokePadPx(
   let pad = 0
   for (const st of strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])) {
     if (st.visible === false || !hasPaint(st.paint) || !(st.width > 0)) continue
-    const d = st.distance ?? 0
+    // Non-finite reads as 0, matching `strokeDistancePx` (the painter) and
+    // `silhouettePadPx` — this pad also SCALES the corner-pin quad, so an unguarded
+    // Infinity here would not just mis-size a raster but re-warp the quad itself.
+    const dRaw = st.distance ?? 0
+    const d = Number.isFinite(dRaw) ? dRaw : 0
     const align = strokeAlignOf(st.align)
     // A centred stroke ON the edge is the shape every saved frame already has; it must
     // keep contributing 0 so the corner-pin quad above stays exactly where it was. See
@@ -2309,7 +2313,21 @@ export function paintStrokeBand(ctx: CanvasRenderingContext2D, o: {
   const inner = align === 'outside' ? d : align === 'inside' ? d - o.width : d - o.width / 2
 
   const s = scratchLike(ctx)
-  if (!s) { strokeAligned(ctx, o); return }   // no knockout on the shared ctx, ever
+  if (!s) {
+    // `strokeAligned`'s no-scratch fallback strokes `o.path` or ctx's CURRENT path — a
+    // text band has neither (text draws with `fillText`/`strokeText`, never a path), so
+    // that fallback's bare `ctx.stroke()` would draw nothing (or worse, whatever path a
+    // previous layer happened to leave on `ctx`). Only text supplies `inkStroke`, so its
+    // presence is what tells the two apart: fall back to it centred, honest ink rather
+    // than a stroke with nothing to stroke.
+    if (o.inkStroke) {
+      ctx.lineWidth = o.width
+      ctx.strokeStyle = o.style(ctx)
+      o.inkStroke(ctx)
+      return
+    }
+    strokeAligned(ctx, o); return   // no knockout on the shared ctx, ever
+  }
   if (o.build) o.build(s)
   s.lineJoin = o.join === 'round' ? 'round' : 'miter'
   const rule = o.fillRule || 'nonzero'

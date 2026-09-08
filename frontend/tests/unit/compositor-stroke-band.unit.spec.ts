@@ -164,6 +164,28 @@ describe('paintStrokeBand at a distance', () => {
     const stroke = rec.ops.find(o => o.kind === 'stroke') as any
     expect(stroke.lineWidth).toBe(10)
   })
+
+  // Task 3b item 5 (Minor, fix wave 1): TEXT has no `o.path` and no current path on
+  // `ctx` — the fake harness models this exactly like a real canvas would, since
+  // `fillText`/`strokeText` never touch the current-path state `beginPath`/`rect`
+  // build. Before the fix, the no-document branch called `strokeAligned(ctx, o)`,
+  // which — knowing nothing about `inkStroke`/`inkFill` — falls all the way down to
+  // a bare `ctx.stroke()` with no path to stroke: silence, not a visible bug. A
+  // shape in the same situation at least gets a centred stroke (the test above).
+  it('falls back to the INJECTED ink, centred, when no scratch exists and there is no path at all', () => {
+    const { ctx, rec } = makeCtxWithoutDocument('main')
+    // No rectPath(ctx) call — no current path, no `o.path`, exactly a text band's shape.
+    paintStrokeBand(ctx, {
+      width: 10, distance: 30, style: () => '#f00',
+      inkFill: () => {},
+      inkStroke: (c) => { c.strokeText('Hi', 5, 7) },
+    })
+    expect(rec.texts).toEqual([{ kind: 'strokeText', text: 'Hi', x: 5, y: 7, lineWidth: 10, erase: false }])
+    // Never falls through to `strokeAligned`'s bare `ctx.stroke()` — there is nothing
+    // for it to stroke, and a leftover path from an earlier layer would be a silent
+    // wrong-shape bug rather than the honest centred outline this asserts instead.
+    expect(rec.ops.some(o => o.kind === 'stroke')).toBe(false)
+  })
 })
 
 // The `region(c, r)` closure inside paintStrokeBand takes an EROSION branch

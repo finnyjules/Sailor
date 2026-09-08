@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
-  paintLayerStack, createTextLayer, outsideStrokePadPx, silhouettePadPx,
+  paintLayerStack, createTextLayer, outsideStrokePadPx, silhouettePadPx, applyFont,
   type LocalLayer,
 } from '~/composables/useCompositorLayers'
 import { SILHOUETTE_RASTER_PAD_PX } from '~/lib/compositor/silhouetteCache'
+import { guideFromSpec, placeGlyphs, measureRunPx } from '~/lib/compositor/textPath'
+import { layoutExpressive } from '~~/shared/text-layout/expressive'
 import { makeCtx, installScratchDocument, type Recorder } from './_strokeCtx'
 
 /**
@@ -97,6 +99,182 @@ describe('a text stroke at a DISTANCE — dilated, once for the whole block', ()
     expect(radii('center')).toEqual([22, 18])
     expect(radii('outside')).toEqual([24, 20])  // 10 + 2, 10
     expect(radii('inside')).toEqual([20, 16])   // 10, 10 − 2
+  })
+})
+
+/**
+ * Task 3b finding 2 (fix wave 1): a NEGATIVE text distance.
+ *
+ * `strokeDistancePx` is the ONE place a text stroke is classified on-edge vs distant
+ * (§1.4 of the report) — `textStrokePasses` skips a stroke whose distance is non-zero,
+ * `paintTextStrokeBands` skips one whose distance IS zero, so a stroke can never be
+ * claimed by both or dropped by both — PROVIDED both sides read the same sign. A gate
+ * mutated from `!== 0` to `> 0` still treats a negative distance as "non-zero" only in
+ * `paintTextStrokeBands`, not in `textStrokePasses` — so it slips back onto the on-edge
+ * `strokeText` list AND still gets a band: drawn twice. Wrapping the read in `Math.abs`
+ * keeps both gates agreeing on "non-zero", but hands `paintStrokeBand` a positive
+ * distance for a stroke that should erode INWARD — it dilates outward instead, same
+ * `lineWidth`s, wrong side of the ink. Every existing suite only ever stores a positive
+ * distance, so neither mistake shows up without a case like this one.
+ */
+describe('a text stroke at a NEGATIVE distance — bands inward, never doubles up', () => {
+  const scratchDoc = installScratchDocument()
+
+  const inward = () => createTextLayer({
+    id: 't4', text: 'A', fontSize: 0.1,
+    strokeColor: undefined, strokeWidth: undefined,
+    strokes: [{ id: 'in', paint: '#f00', width: 0.01, distance: -0.05 }],
+  } as never)
+
+  it('is never drawn as a second centred strokeText — only the band', () => {
+    const { rec, inked } = paintText(inward(), scratchDoc)
+    // The entire outline for this one stroke must come from the band: no on-edge
+    // strokeText pass at all on the shared context (a `> 0` gate would add one back).
+    expect(rec.texts.some(t => t.kind === 'strokeText')).toBe(false)
+    expect(rec.texts.some(t => t.kind === 'fillText')).toBe(true)   // the glyph fill still lands
+    expect(inked.length).toBe(2)                                    // outer + inner dilation surfaces
+    expect(rec.ops.filter(o => o.kind === 'stamp').length).toBe(1)
+  })
+
+  it('bands on the correct side: an inward distance ERODES, it does not dilate', () => {
+    // width 0.01 ⇒ 2px, distance -0.05 ⇒ -10px. Center align: outer = d + w/2 = -9,
+    // inner = d - w/2 = -11 — BOTH negative, so BOTH dilation surfaces take the EROSION
+    // branch (fill, then a DESTINATION-OUT strokeText at 2|r|), never the plain dilation
+    // one (fill, then a non-erasing strokeText). An `Math.abs`-wrapped distance would
+    // flip the sign to +10, taking the dilation branch at the SAME two lineWidths (22,
+    // 18) but with `erase: false` — the numbers alone would not catch it.
+    const { inked } = paintText(inward(), scratchDoc)
+    expect(inked.length).toBe(2)
+    for (const s of inked) {
+      const strokeTextCalls = s.texts.filter(t => t.kind === 'strokeText')
+      expect(strokeTextCalls.length).toBeGreaterThan(0)
+      expect(strokeTextCalls.every(t => t.erase)).toBe(true)
+    }
+    const lineWidths = inked.map(s => s.texts.find(t => t.kind === 'strokeText')!.lineWidth).sort((a, b) => a - b)
+    expect(lineWidths).toEqual([18, 22])   // 2×9, 2×11
+  })
+})
+
+/**
+ * Task 3b finding 1 (fix wave 1): the ROTATED-RUN branch of `eachRun` — one glyph on a
+ * path, `save(); translate(r.x, r.y); rotate(r.angle); draw(0, 0); restore()` — had zero
+ * band coverage. Every existing case (this file's plain `'A\nB'`, the browser byte-identity
+ * fixture) draws through the OTHER branch (`draw(r.text, r.x, r.y)`, no rotation at all).
+ *
+ * `_strokeCtx.ts`'s fake context has no glyph geometry, so the only way to see a dropped
+ * `rotate()` or an offset `translate()` is to record the calls themselves — which is what
+ * the harness's `translate`/`rotate` ops (added for this fix) do. The "expected" placements
+ * come from calling `guideFromSpec` + `placeGlyphs` directly, in the SAME order and against
+ * the SAME (constant-width) fake `measureText` `drawTextOnPath` itself uses — so this checks
+ * that `eachRun` actually replays those placements frame-for-frame, not that the placement
+ * MATH is right (that is `lib/vectortype/curve.ts` / `textPath.ts`'s own suite).
+ */
+describe('text-on-a-path distant band — the rotated run frame (finding 1)', () => {
+  const scratchDoc = installScratchDocument()
+
+  const pathLayer = () => createTextLayer({
+    id: 't6', text: 'AB', fontSize: 0.1, align: 'left',
+    strokeColor: undefined, strokeWidth: undefined,
+    path: { follow: 'circle', radius: 0.3 },
+    strokes: [{ id: 'far', paint: '#f00', width: 0.01, distance: 0.05 }],
+  } as never)
+
+  /** The same placements `drawTextOnPath` computes, via the same (fake) measurement. */
+  function referencePlacements(l: ReturnType<typeof pathLayer>) {
+    const { ctx: refCtx } = makeCtx('ref', W, H)
+    applyFont(refCtx, l, W)
+    const guide = guideFromSpec(l.path, W, measureRunPx(refCtx, l))
+    return placeGlyphs(refCtx, l, guide, W)
+  }
+
+  it('rotates each glyph band frame to the guide tangent — not a flat anchor', () => {
+    const l = pathLayer()
+    const placed = referencePlacements(l)
+    expect(placed.length).toBe(2)
+    // Sanity: the guide actually turns, so this exercises the ROTATED branch, not the flat one.
+    expect(placed.every(g => g.angle !== 0)).toBe(true)
+
+    const { inked } = paintText(l, scratchDoc)
+    expect(inked.length).toBe(2)   // outer + inner dilation surfaces
+    // `region()` runs `eachRun` TWICE per scratch — once via `inkFill` (all glyphs),
+    // once via `inkStroke` (all glyphs again) — exactly like the fillText/fillText/
+    // strokeText/strokeText pattern the distance-0 test above already pins. So the
+    // rotate/translate sequence is the placements, twice: fill pass then stroke pass.
+    const expectedSeq = [...placed, ...placed]
+    for (const s of inked) {
+      const rotates = s.ops.filter(o => o.kind === 'rotate') as { kind: 'rotate'; angle: number }[]
+      const translates = s.ops.filter(o => o.kind === 'translate') as { kind: 'translate'; x: number; y: number }[]
+      expect(rotates.length).toBe(expectedSeq.length)
+      expect(translates.length).toBe(expectedSeq.length)
+      expectedSeq.forEach((g, i) => {
+        expect(translates[i]!.x).toBeCloseTo(g.x, 6)
+        expect(translates[i]!.y).toBeCloseTo(g.y, 6)
+        expect(rotates[i]!.angle).toBeCloseTo(g.angle, 6)
+      })
+      // Each glyph's ink is drawn at the LOCAL origin of its own translated+rotated
+      // frame (0, 0), never at its world (x, y) directly — that is what save/translate/
+      // rotate buys, and what a dropped `rotate()` (still translating to the right spot)
+      // would NOT change, which is why the rotate/translate op assertions above exist too.
+      const fillCalls = s.texts.filter(t => t.kind === 'fillText')
+      expect(fillCalls.length).toBe(placed.length)
+      for (const t of fillCalls) { expect(t.x).toBe(0); expect(t.y).toBe(0) }
+    }
+  })
+})
+
+/**
+ * Task 3b finding 1 (fix wave 1), the other half: an EXPRESSIVE text layer's distant band.
+ * `layoutExpressive` never rotates a word (no field for it), so this exercises `eachRun`'s
+ * OTHER leg (`draw(r.text, r.x, r.y)`) — but with real per-word anchors instead of the
+ * per-LINE ones the existing `'A\nB'` case already covers, closing the gap the finding
+ * flagged for `drawExpressiveText` (~line 3147) specifically.
+ */
+describe('expressive text distant band — per-word anchors (finding 1)', () => {
+  const scratchDoc = installScratchDocument()
+
+  const expressiveLayer = () => createTextLayer({
+    id: 't7', text: 'One Two Three', fontSize: 0.05, lineHeight: 1.2,
+    boxW: 0.6, align: 'left',
+    strokeColor: undefined, strokeWidth: undefined,
+    expressive: { wordsPerLine: 1, placement: 'random', jitterX: 0.4, jitterY: 0, seed: 7 },
+    strokes: [{ id: 'far', paint: '#f00', width: 0.01, distance: 0.05 }],
+  } as never)
+
+  /** The same per-word placements `drawExpressiveText` computes. */
+  function referenceRuns(l: ReturnType<typeof expressiveLayer>) {
+    const { ctx: refCtx } = makeCtx('ref', W, H)
+    applyFont(refCtx, l, W)
+    const lineH = l.fontSize * W * l.lineHeight
+    const boxWidth = l.boxW! * W
+    const lay = layoutExpressive({
+      text: l.text!, boxWidth, lineHeight: lineH,
+      measure: (word) => refCtx.measureText(word).width,
+      params: l.expressive!,
+      justifyX: l.align === 'justify',
+      justifyY: l.valign === 'justify',
+    })
+    const originX = -boxWidth / 2
+    const originY = -lay.height / 2
+    return lay.words.map(wd => ({ x: originX + wd.x, y: originY + wd.y + lineH / 2 }))
+  }
+
+  it('bands each word at its OWN placed anchor, not a per-line one', () => {
+    const l = expressiveLayer()
+    const runs = referenceRuns(l)
+    expect(runs.length).toBe(3)   // 'One', 'Two', 'Three' — one word per line
+
+    const { inked } = paintText(l, scratchDoc)
+    expect(inked.length).toBe(2)
+    for (const s of inked) {
+      const fillCalls = s.texts.filter(t => t.kind === 'fillText')
+      expect(fillCalls.length).toBe(runs.length)
+      runs.forEach((r, i) => {
+        expect(fillCalls[i]!.x).toBeCloseTo(r.x, 6)
+        expect(fillCalls[i]!.y).toBeCloseTo(r.y, 6)
+      })
+      // Never routed through the rotated frame: expressive words carry no angle.
+      expect(s.ops.some(o => o.kind === 'rotate')).toBe(false)
+    }
   })
 })
 

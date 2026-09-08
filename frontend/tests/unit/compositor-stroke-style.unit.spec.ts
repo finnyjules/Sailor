@@ -105,6 +105,23 @@ describe('outsideStrokePadPx', () => {
     expect(outsideStrokePadPx(l as unknown as LocalLayer, 200)).toBe(20)  // (0.05 + 0.05) * 200
   })
 
+  // Task 3b item 4 (Minor, fix wave 1): a non-finite stored `distance` must read as 0,
+  // exactly like the painter's own `strokeDistancePx` and `silhouettePadPx` already do —
+  // this pad also SCALES the corner-pin quad (`hw = box.w/2 + pad`), so an unguarded
+  // Infinity here would re-warp the quad to an infinite size, not just mis-size a raster.
+  it('treats a non-finite stored distance as 0, not Infinity/NaN', () => {
+    const inf = createRectLayer({ stroke: undefined, strokeWidth: undefined }) as unknown as Record<string, unknown>
+    inf.strokes = [{ id: 's1', paint: '#fff', width: 0.1, distance: Infinity, align: 'center' }]
+    expect(outsideStrokePadPx(inf as unknown as LocalLayer, 200)).toBe(0)
+
+    // A NaN distance with an outside-aligned stroke: the reach must fall back to the
+    // width alone (0 + width), not silently drop the stroke's reach to 0 via a NaN
+    // comparison that is always false.
+    const nan = createRectLayer({ stroke: undefined, strokeWidth: undefined }) as unknown as Record<string, unknown>
+    nan.strokes = [{ id: 's1', paint: '#fff', width: 0.1, distance: NaN, align: 'outside' }]
+    expect(outsideStrokePadPx(nan as unknown as LocalLayer, 200)).toBe(20)
+  })
+
   it('is the full stroke width in px for an outside-aligned rect/ellipse/polygon/star', () => {
     // strokeWidth is normalized to canvas width for these kinds — 0.1 * 200 = 20px.
     const l = createRectLayer({ stroke: '#fff', strokeWidth: 0.1, strokeAlign: 'outside' })
