@@ -935,15 +935,6 @@
           ]
         },
         {
-          "uniform": "u_speed",
-          "label": "Speed",
-          "type": "float",
-          "min": 0.0,
-          "max": 4.0,
-          "default": 0.0,
-          "step": 0.05
-        },
-        {
           "uniform": "u_step",
           "label": "Step",
           "type": "float",

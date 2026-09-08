@@ -27,8 +27,12 @@ uniform float u_pattern;  // 0 random, 1 wave, 2 stair, 3 ping-pong
 uniform float u_snap;     // 0 continuous, else quantize offset onto N stops
 uniform float u_wrap;     // 0 transparent gaps, 1 wrap/clamp edge
 uniform float u_ramp;     // 0 none, 1 top->bottom, 2 edges->center, 3 radial
-uniform float u_speed;    // 0 static poster; >0 churns
 uniform float u_step;     // jitter steps/sec (snap-in-time vs. slide)
+
+// Animation is driven by the fill's own clock (u_time, already scaled by the
+// fill/studio "Speed"). A separate per-effect speed would be a second control on
+// the same clock — and, defaulting to 0, would silently pin that global Speed to
+// no-op — so this shader has none. Speed 0 on the fill = a static poster.
 
 // Per-band signed offset in [-1, 1]. `c` is the perpendicular coord, `laneId`
 // separates the X-band set from the Y-band set when both axes are active, `tq`
@@ -41,7 +45,7 @@ float bandOffset(float c, float laneId, float tq) {
     if (pat == 0) {                       // Random per band
         o = hash2(vec2(bi, laneId) + tq, u_seed) * 2.0 - 1.0;
     } else if (pat == 1) {                // Wave
-        o = sin(bi * 0.6 + u_time * u_speed);
+        o = sin(bi * 0.6 + u_time);
     } else if (pat == 2) {                // Stair: monotone ramp -> shear / faux-italic
         float total = max(1.0, floor(1.0 / band));
         o = (bi / total) * 2.0 - 1.0;
@@ -65,7 +69,7 @@ void main() {
     vec2 uv = v_texCoord;
     int axis = int(u_axis + 0.5);
     float jstep = max(1.0, u_step);
-    float tq = floor(u_time * u_speed * jstep) / jstep;
+    float tq = floor(u_time * jstep) / jstep;
     float f = falloff(uv);
 
     vec2 offVec = vec2(0.0);
