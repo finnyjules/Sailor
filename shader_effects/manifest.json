@@ -853,6 +853,108 @@
       ]
     },
     {
+      "id": "slice_shift",
+      "name": "Slice Shift",
+      "category": "distortion",
+      "animated": true,
+      "passes": 1,
+      "centerParam": null,
+      "textures": [],
+      "generative": false,
+      "params": [
+        {
+          "uniform": "u_axis",
+          "label": "Axis",
+          "type": "enum",
+          "default": 0,
+          "options": [
+            { "label": "Horizontal", "value": 0 },
+            { "label": "Vertical", "value": 1 },
+            { "label": "Both", "value": 2 }
+          ]
+        },
+        {
+          "uniform": "u_band",
+          "label": "Band size",
+          "type": "float",
+          "min": 0.004,
+          "max": 0.3,
+          "default": 0.06,
+          "step": 0.002
+        },
+        {
+          "uniform": "u_amount",
+          "label": "Amount",
+          "type": "float",
+          "min": 0.0,
+          "max": 0.5,
+          "default": 0.12,
+          "step": 0.005
+        },
+        {
+          "uniform": "u_pattern",
+          "label": "Pattern",
+          "type": "enum",
+          "default": 0,
+          "options": [
+            { "label": "Random", "value": 0 },
+            { "label": "Wave", "value": 1 },
+            { "label": "Stair", "value": 2 },
+            { "label": "Ping-pong", "value": 3 }
+          ]
+        },
+        {
+          "uniform": "u_snap",
+          "label": "Snap",
+          "type": "float",
+          "min": 0.0,
+          "max": 24.0,
+          "default": 0.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_wrap",
+          "label": "Edge",
+          "type": "enum",
+          "default": 0,
+          "options": [
+            { "label": "Transparent", "value": 0 },
+            { "label": "Wrap", "value": 1 }
+          ]
+        },
+        {
+          "uniform": "u_ramp",
+          "label": "Falloff",
+          "type": "enum",
+          "default": 0,
+          "options": [
+            { "label": "None", "value": 0 },
+            { "label": "Top to bottom", "value": 1 },
+            { "label": "Edges to center", "value": 2 },
+            { "label": "Radial", "value": 3 }
+          ]
+        },
+        {
+          "uniform": "u_speed",
+          "label": "Speed",
+          "type": "float",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 0.0,
+          "step": 0.05
+        },
+        {
+          "uniform": "u_step",
+          "label": "Step",
+          "type": "float",
+          "min": 1.0,
+          "max": 30.0,
+          "default": 8.0,
+          "step": 1.0
+        }
+      ]
+    },
+    {
       "id": "mondrian",
       "name": "Mondrian",
       "category": "stylize",
