@@ -863,8 +863,19 @@
       "generative": false,
       "params": [
         {
-          "uniform": "u_axis",
-          "label": "Axis",
+          "uniform": "u_slices",
+          "label": "Slices",
+          "type": "enum",
+          "default": 0,
+          "options": [
+            { "label": "Rows", "value": 0 },
+            { "label": "Columns", "value": 1 },
+            { "label": "Grid", "value": 2 }
+          ]
+        },
+        {
+          "uniform": "u_shift",
+          "label": "Shift",
           "type": "enum",
           "default": 0,
           "options": [

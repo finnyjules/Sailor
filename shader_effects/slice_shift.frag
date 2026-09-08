@@ -20,7 +20,8 @@ float hash2(vec2 ip, float seed) {
     return float(h) * (1.0 / 4294967295.0);
 }
 
-uniform float u_axis;     // 0 horizontal, 1 vertical, 2 both
+uniform float u_slices;   // which way the cuts run: 0 rows, 1 columns, 2 grid
+uniform float u_shift;    // which way they move:    0 horizontal, 1 vertical, 2 both
 uniform float u_band;     // band size (fraction of the perpendicular dim)
 uniform float u_amount;   // how far each band shifts (fraction of dim)
 uniform float u_pattern;  // 0 random, 1 wave, 2 stair, 3 ping-pong
@@ -77,19 +78,29 @@ float falloff(vec2 uv) {
 
 void main() {
     vec2 uv = v_texCoord;
-    int axis = int(u_axis + 0.5);
+    // Slices (which way the cuts run) and Shift (which way they move) are
+    // INDEPENDENT: a Columns slice can move Horizontally, etc. Each active slice
+    // set's per-band offset is applied to each active shift axis.
+    int sl = int(u_slices + 0.5);                 // 0 rows, 1 columns, 2 grid
+    int sh = int(u_shift + 0.5);                  // 0 horizontal, 1 vertical, 2 both
+    bool rows   = (sl == 0 || sl == 2);
+    bool cols   = (sl == 1 || sl == 2);
+    bool shiftX = (sh == 0 || sh == 2);
+    bool shiftY = (sh == 1 || sh == 2);
     float jstep = max(1.0, u_step);
     float tick = floor(u_time * jstep);           // integer step counter -> Step snaps/sec
     float f = falloff(uv);
 
     vec2 offVec = vec2(0.0);
-    if (axis == 0 || axis == 2) {                 // Horizontal: bands on Y (yDown), shift X
-        float o = bandOffset(1.0 - uv.y, 0.0, tick);
-        offVec.x += o * u_amount * f;
+    if (rows) {                                   // row-bands indexed down Y (lane 0)
+        float o = bandOffset(1.0 - uv.y, 0.0, tick) * u_amount * f;
+        if (shiftX) offVec.x += o;
+        if (shiftY) offVec.y += o;
     }
-    if (axis == 1 || axis == 2) {                 // Vertical: bands on X, shift Y
-        float o = bandOffset(uv.x, 1.0, tick);
-        offVec.y += o * u_amount * f;
+    if (cols) {                                   // column-bands indexed across X (lane 1)
+        float o = bandOffset(uv.x, 1.0, tick) * u_amount * f;
+        if (shiftX) offVec.x += o;
+        if (shiftY) offVec.y += o;
     }
 
     vec2 suv = uv + offVec;
