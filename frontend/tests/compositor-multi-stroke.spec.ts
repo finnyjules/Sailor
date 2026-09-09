@@ -1672,3 +1672,93 @@ test('marching shapes ride the wobbled line, sitting off the straight one by the
   expect(Math.max(...ys) - Math.min(...ys), 'top to bottom, the marks span nearly 2 x amount')
     .toBeGreaterThan(1.6 * SHAPE_WOB.amount * W)
 })
+
+/**
+ * A TRANSFORM-DEPENDENT PAINT ON A BAND AT A DISTANCE.
+ *
+ * A stroke's paint is resolved by `resolvePaint`, which builds a `CanvasGradient` or a
+ * `CanvasPattern` CENTRED ON THE ORIGIN in the caller's own drawing units. Canvas2D
+ * resolves both of those objects in the transform current at FILL time, not at creation
+ * time — so the fill that pushes the paint through the band's mask has to run under the
+ * SAME transform the paint was built against. A colour STRING is transform-independent,
+ * which is exactly why only these two paints can show the defect and every solid-colour
+ * stroke in this file renders correctly either way.
+ *
+ * The two tests below are the pixel proof, one per paint kind:
+ *  - a GRADIENT must still be a ramp around the ring (the reported second symptom was a
+ *    band of near-flat colour);
+ *  - a `Fill` (the fill picker's Ombre, which resolves to a `CanvasPattern`) must ink the
+ *    ring as fully as the same stroke painted a flat colour (the reported symptom was a
+ *    small patch near the canvas corner — the pattern tile dropped at the DEVICE origin).
+ *
+ * Both use `distance !== 0`, which is the only branch of `paintStrokeBand` that leaves
+ * the shape transform to lay its colour down; a distance-0 stroke delegates to
+ * `strokeAligned`, which strokes under the shape transform and was never affected.
+ */
+
+/** A rect layer, 0.4 x 0.4 and centred, whose ONLY ink is one band stroke. */
+const bandOnlyRect = (paint: unknown, width: number, distance: number) => [{
+  id: 'r', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, visible: true,
+  fill: 'none', radius: 0,
+  strokes: [{ id: 's1', paint, width, distance, align: 'center', join: 'sharp' }],
+}]
+
+test('a GRADIENT stroke at a distance ramps around the band, ends on opposite sides', async ({ page }) => {
+  await openCompositor(page)
+  // Geometry, all width-normalized (see this file's geometry note):
+  //   the rect spans 0.5 ± 0.4/2, so its left edge is at 0.3 and its right edge at 0.7;
+  //   the band's CENTRELINE is `distance` beyond each of those — 0.25 and 0.75.
+  // Both probes sit on the horizontal centre row, so no W/H conversion applies to either.
+  const D = 0.05
+  const leftBand = 0.5 - 0.4 / 2 - D          // 0.25
+  const rightBand = 0.5 + 0.4 / 2 + D         // 0.75
+  // angle 0 is the left-to-right axis (`gradientUnitAxis`), so offset 0 is the box's LEFT
+  // edge and offset 1 its RIGHT. The band lies outside the box on both sides, where a real
+  // CanvasGradient pads with its end stops — so the left probe must be the offset-0 colour
+  // and the right probe the offset-1 colour, which is the strongest form of "the ramp runs
+  // around the band" this geometry can state.
+  await page.evaluate((ls) => (window as any).__compositorSetLayers(ls), bandOnlyRect(
+    { type: 'linear', angle: 0, stops: [{ color: '#ff0000', offset: 0 }, { color: '#0000ff', offset: 1 }] },
+    0.03, D,
+  ))
+  await stackPixels(page)
+
+  const left = await pixelAt(page, leftBand, 0.5)
+  const right = await pixelAt(page, rightBand, 0.5)
+  // The band is painted at all — otherwise "not blue" below would pass on empty pixels.
+  expect(left[3], `band inked at x=${leftBand}`).toBeGreaterThan(200)
+  expect(right[3], `band inked at x=${rightBand}`).toBeGreaterThan(200)
+  expect(left[0]! - left[2]!, `left side of the band is the ramp's RED end (got rgba ${left})`)
+    .toBeGreaterThan(100)
+  expect(right[2]! - right[0]!, `right side of the band is the ramp's BLUE end (got rgba ${right})`)
+    .toBeGreaterThan(100)
+})
+
+test('a Fill (Ombre) stroke at a distance inks the whole band, like a flat colour does', async ({ page }) => {
+  await openCompositor(page)
+  // A `Fill` resolves to a box-sized `no-repeat` pattern tile (`resolveFill`, spread 'box'),
+  // so its paint exists only INSIDE the layer's paint box — the rect's own 0.4 x 0.4. A
+  // NEGATIVE distance keeps the whole band inside that box, which is what makes the flat
+  // colour a fair control: the two renders differ in the paint's MECHANISM (a string versus
+  // a CanvasPattern) and in nothing else. (Reaching past the box is a separate, documented
+  // `PaintSpread` question that this stroke path does not ask.)
+  //   band centreline: 0.4/2 - 0.06 = 0.14 from the shape's centre, i.e. 0.06 inside the
+  //   edge, and its half-width 0.015 keeps it clear of both the edge and the box's middle.
+  const W = 0.03, D = -0.06
+  // Both colours of the ombre are REDS, so every dithered pixel of it answers the same
+  // `redPixels` predicate the flat-colour control does and the two counts are comparable
+  // pixel for pixel.
+  const ombre = { type: 'ombre', a: '#ff0000', b: '#e00000', textColor: '#ffffff', angle: 0, density: 8 }
+
+  const solid = await redPixels(page, bandOnlyRect('#ff0000', W, D))
+  const filled = await redPixels(page, bandOnlyRect(ombre, W, D))
+  const count = (r: { rows: number[][] }) => r.rows.reduce((n, xs) => n + xs.length, 0)
+  const solidN = count(solid), fillN = count(filled)
+
+  expect(solidN, 'the flat-colour control inks a real band').toBeGreaterThan(500)
+  // A ratio, not a count: the ring's absolute pixel area depends on the canvas size and on
+  // how the antialiased rim answers the predicate, and both are identical between the two
+  // renders. Anything below 0.9 means the pattern failed to reach part of the ring.
+  expect(fillN / solidN, `Ombre band inked ${fillN}px vs the flat control's ${solidN}px`)
+    .toBeGreaterThan(0.9)
+})

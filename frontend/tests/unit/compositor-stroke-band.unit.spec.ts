@@ -386,3 +386,137 @@ describe('paintStrokeBand — injectable ink primitives', () => {
     expect(inkAt(rec, { x: 45, y: 0 })).toBe(false)
   })
 })
+
+/**
+ * WHICH TRANSFORM THE BAND'S COLOUR IS LAID DOWN UNDER.
+ *
+ * `o.style(s)` may hand back a `CanvasPattern` or a `CanvasGradient`, and Canvas2D
+ * resolves both of those in the transform current at FILL time, not at creation time —
+ * `resolvePaint` builds them centred on the origin in the CALLER'S units, so a fill made
+ * under identity drops the tile at the device origin at the wrong scale (the reported
+ * "small patch in the corner") and flattens a gradient to its padded end colour. A colour
+ * STRING is transform-independent, which is why only the paint objects ever showed it.
+ *
+ * The claim, stated so both halves of the fix are pinned: the fill that applies the paint
+ * runs under the SAME transform the paint was resolved against, AND the region it covers
+ * still maps onto every pixel of the device canvas (the band's mask lives there, and
+ * `source-in` erases whatever the fill misses).
+ *
+ * The shared harness reports an identity transform and swallows `fillRect`, so this test
+ * brings its own instrumentation rather than changing semantics every other test in this
+ * file and its sibling depend on: a real (non-identity) matrix on the main context, and a
+ * `document` whose scratch contexts log each covering draw with the transform in force.
+ */
+describe('paintStrokeBand — the paint is applied under the shape transform', () => {
+  type Mat = { a: number; b: number; c: number; d: number; e: number; f: number; inverse: () => Mat }
+  /** A 2D matrix with the `inverse()` a real `DOMMatrix` carries (all-NaN when singular,
+   *  which is what a browser returns rather than throwing). */
+  const mat = (a: number, b: number, c: number, d: number, e: number, f: number): Mat => ({
+    a, b, c, d, e, f,
+    inverse() {
+      const det = a * d - b * c
+      if (!det) return mat(NaN, NaN, NaN, NaN, NaN, NaN)
+      return mat(d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det)
+    },
+  })
+  const apply = (m: Mat, p: { x: number; y: number }) =>
+    ({ x: Math.round((m.a * p.x + m.c * p.y + m.e) * 1e6) / 1e6, y: Math.round((m.b * p.x + m.d * p.y + m.f) * 1e6) / 1e6 })
+
+  type Step = { kind: 'fill' | 'fillRect'; gco: string; t: Mat | null; pts: { x: number; y: number }[] }
+
+  /** Log every covering draw a scratch context makes, with the transform in force. */
+  function instrument(c: any, steps: Step[]) {
+    let cur: Mat | null = null
+    let pts: { x: number; y: number }[] = []
+    c.setTransform = (m: any, b?: number, cc?: number, d?: number, e?: number, f?: number) => {
+      cur = typeof m === 'number' ? mat(m, b!, cc!, d!, e!, f!) : m
+    }
+    c.getTransform = () => cur
+    const beginPath = c.beginPath.bind(c), moveTo = c.moveTo.bind(c), lineTo = c.lineTo.bind(c), fill = c.fill.bind(c)
+    c.beginPath = () => { pts = []; beginPath() }
+    c.moveTo = (x: number, y: number) => { pts.push({ x, y }); moveTo(x, y) }
+    c.lineTo = (x: number, y: number) => { pts.push({ x, y }); lineTo(x, y) }
+    c.fill = (...a: any[]) => { steps.push({ kind: 'fill', gco: c.globalCompositeOperation, t: cur, pts: pts.slice() }); fill(...a) }
+    c.fillRect = (x: number, y: number, w: number, h: number) => {
+      steps.push({ kind: 'fillRect', gco: c.globalCompositeOperation, t: cur, pts: [{ x, y }, { x: x + w, y: y + h }] })
+    }
+  }
+
+  it('fills the whole device canvas from USER space, never resetting to identity to do it', () => {
+    const W = 200, H = 200
+    // A transform a real layer actually has: a devicePixelRatio of 2 with the origin moved
+    // to the layer's own centre. Nothing about the band's construction is axis-dependent,
+    // so a scale + translate is enough to separate "user space" from "device space".
+    const M = mat(2, 0, 0, 2, 60, 40)
+    const steps: Step[] = []
+    const { ctx } = makeCtx('main', W, H)
+    ;(ctx as any).getTransform = () => M
+    ;(globalThis as any).document = {
+      createElement(tag: string) {
+        if (tag !== 'canvas') return {}
+        const { ctx: scratch } = makeCtx('scratch', W, H)
+        instrument(scratch as any, steps)
+        return (scratch as any).canvas
+      },
+    }
+    try {
+      ctx.beginPath()
+      ctx.rect(-50, -50, 100, 100)
+      const resolvedUnder: (Mat | null)[] = []
+      paintStrokeBand(ctx, {
+        width: 10,
+        distance: 20,
+        // Stands for a CanvasPattern/CanvasGradient: an OBJECT, whose geometry is fixed by
+        // whatever transform is current when it is finally filled through.
+        style: (c) => { resolvedUnder.push((c as any).getTransform()); return {} as unknown as CanvasPattern },
+      })
+
+      // The paint is resolved once, under the shape transform — the premise the fix rests on.
+      expect(resolvedUnder).toEqual([M])
+
+      // Exactly one draw applies it: the `source-in` cover.
+      const cover = steps.filter(s => s.gco === 'source-in')
+      expect(cover.length, 'one covering draw applies the paint').toBe(1)
+      const c0 = cover[0]!
+      expect(c0.kind, 'the cover is a path fill in user space, not a device-space fillRect').toBe('fill')
+      expect(c0.t, 'and it runs under the shape transform the paint was built against').toBe(M)
+
+      // …and it still covers every device pixel: its corners map onto the canvas's corners.
+      expect(c0.pts.map(p => apply(M, p)))
+        .toEqual([{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }])
+    } finally {
+      delete (globalThis as any).document
+    }
+  })
+
+  it('falls back to the device-space fill when the transform cannot be inverted', () => {
+    const W = 120, H = 90
+    const steps: Step[] = []
+    const { ctx } = makeCtx('main', W, H)
+    // A collapsed (zero-scale) transform: `inverse()` on a real DOMMatrix gives all-NaN
+    // rather than throwing, and there is no user-space quad to fill.
+    const SINGULAR = mat(0, 0, 0, 0, 0, 0)
+    ;(ctx as any).getTransform = () => SINGULAR
+    ;(globalThis as any).document = {
+      createElement(tag: string) {
+        if (tag !== 'canvas') return {}
+        const { ctx: scratch } = makeCtx('scratch', W, H)
+        instrument(scratch as any, steps)
+        return (scratch as any).canvas
+      },
+    }
+    try {
+      ctx.beginPath()
+      ctx.rect(-50, -50, 100, 100)
+      expect(() => paintStrokeBand(ctx, {
+        width: 10, distance: 20, style: () => ({} as unknown as CanvasPattern),
+      })).not.toThrow()
+      const cover = steps.filter(s => s.gco === 'source-in')
+      expect(cover.length).toBe(1)
+      expect(cover[0]!.kind, 'degrades to the device-space fill rather than throwing').toBe('fillRect')
+      expect(cover[0]!.pts).toEqual([{ x: 0, y: 0 }, { x: W, y: H }])
+    } finally {
+      delete (globalThis as any).document
+    }
+  })
+})

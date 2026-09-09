@@ -2352,6 +2352,33 @@ function stampScratch(ctx: CanvasRenderingContext2D, scratch: CanvasRenderingCon
 }
 
 /**
+ * The four corners of `s`'s DEVICE canvas, expressed in `s`'s CURRENT user units.
+ *
+ * Filling that quad covers every pixel of the surface WITHOUT leaving the transform the
+ * drawing is happening under — which is what a `CanvasPattern`/`CanvasGradient` needs,
+ * since Canvas2D resolves those at fill time (see `paintStrokeBand`'s colour pass, the
+ * one caller). Returned in device order — top-left, top-right, bottom-right, bottom-left
+ * — so the quad is traced without self-intersecting under any affine transform.
+ *
+ * `null` means the current transform cannot be inverted (a singular matrix inverts to
+ * all-NaN in the browser rather than throwing) or this runtime's matrix has no `inverse`
+ * at all; the caller falls back to a device-space fill rather than painting nothing.
+ */
+function deviceCoverQuad(s: CanvasRenderingContext2D): { x: number; y: number }[] | null {
+  try {
+    const m = typeof s.getTransform === 'function' ? s.getTransform() : null
+    if (!m || typeof (m as DOMMatrix).inverse !== 'function') return null
+    const i = (m as DOMMatrix).inverse()
+    if (![i.a, i.b, i.c, i.d, i.e, i.f].every(v => Number.isFinite(v))) return null
+    const w = s.canvas.width, h = s.canvas.height
+    return ([[0, 0], [w, 0], [w, h], [0, h]] as [number, number][])
+      .map(([x, y]) => ({ x: i.a * x + i.c * y + i.e, y: i.b * x + i.d * y + i.f }))
+  } catch {
+    return null   // not expected: `inverse()` returns NaNs, it does not throw
+  }
+}
+
+/**
  * Cloner Vary: wash ONE clone's already-drawn pixels toward its palette colour.
  *
  * `source-atop` confines the fill to existing ink, so the copy's silhouette,
@@ -2497,11 +2524,38 @@ export function paintStrokeBand(ctx: CanvasRenderingContext2D, o: {
     s.globalCompositeOperation = 'source-over'
   }
   // Paint the band's colour through the mask we just built.
+  //
+  // The fill MUST run under the transform the paint was RESOLVED against. `o.style(s)`
+  // can hand back a `CanvasPattern` or a `CanvasGradient`, and Canvas2D resolves both of
+  // those in the transform current at FILL time, not at creation time — `resolvePaint`
+  // builds them centred on the origin in the caller's own units, so filling under identity
+  // drops the tile at the DEVICE origin at the wrong scale (a small patch in the canvas
+  // corner) and flattens a gradient to its padded end colour. A colour STRING is
+  // transform-independent, which is exactly why only these two ever showed it, and why
+  // every solid-colour stroke rendered correctly throughout.
+  //
+  // The mask still has to be covered completely, and the mask lives in DEVICE pixels — so
+  // the region filled is the device canvas's four corners carried BACK through the inverse
+  // of the current transform. That is exact under scale, rotation and shear alike, and it
+  // never leaves user space, so the pattern's geometry stays where the shape put it.
   s.globalCompositeOperation = 'source-in'
   s.fillStyle = o.style(s)
-  s.setTransform(1, 0, 0, 1, 0, 0)
-  s.fillRect(0, 0, s.canvas.width, s.canvas.height)
-  s.setTransform(ctx.getTransform())
+  const cover = deviceCoverQuad(s)
+  if (cover) {
+    s.beginPath()
+    s.moveTo(cover[0]!.x, cover[0]!.y)
+    for (let i = 1; i < cover.length; i++) s.lineTo(cover[i]!.x, cover[i]!.y)
+    s.closePath()
+    s.fill()
+  } else {
+    // Nothing to map through: the transform is singular, or this runtime's matrix has no
+    // `inverse`. Degrade to the device-space fill rather than throwing — a colour string
+    // still lands exactly as it always did, and a collapsed transform has no recognisable
+    // picture to get right either way.
+    s.setTransform(1, 0, 0, 1, 0, 0)
+    s.fillRect(0, 0, s.canvas.width, s.canvas.height)
+    s.setTransform(ctx.getTransform())
+  }
   s.globalCompositeOperation = 'source-over'
   stampScratch(ctx, s)
 }
