@@ -2881,7 +2881,9 @@ function paintStrokeStack(
           pathData: outline,
           distance: (st.distance ?? 0) * o.widthScale,
           spec: st.shapes,
-          style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx),
+          // REACH — `'extend'`, for the reason the straight band below spells out in full:
+          // marks march at their own distance and size, landing clear of the paint box.
+          style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx, 'extend'),
           unit: o.widthScale,
           tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
           // Wobble is a property of the LINE, so both consumers of a stroke's line inherit
@@ -2910,7 +2912,9 @@ function paintStrokeStack(
           align: st.align,
           join: st.join,
           dash: strokeDashSegments(st.dash, o.widthScale),
-          style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx),
+          // REACH — `'extend'`, for the reason the straight band below spells out in full: a
+          // wobbled band is displaced off the paint box as well as offset from it.
+          style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx, 'extend'),
           tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
         })
         continue
@@ -2931,7 +2935,19 @@ function paintStrokeStack(
     paintStrokeBand(ctx, {
       width: st.width * o.widthScale,
       distance: (st.distance ?? 0) * o.widthScale,
-      style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx),
+      // REACH — `spread: 'extend'`. A band at a positive distance sits wholly outside the
+      // shape's box, and even a distance-0 stroke puts its OUTER HALF beyond it.
+      // The paint is anchored to the LAYER's box; ink beyond that box has no tile to sample
+      // under the default `'box'` spread, so a `Fill` (Ombre, Grid, Stripes, Shapes, Paper…)
+      // came out EMPTY there while a `Gradient` — which pads itself — did not. Measured before
+      // the fix, red pixels against a flat-colour control on identical geometry: a band at
+      // distance +0.06 inked 0 of 18,048; a wobbled one 0 of 14,022; marching shapes 138 of
+      // 1,433; and a stroke ON THE EDGE 5,852 of 13,020, having lost its whole outer half.
+      // `'extend'` cannot move a pixel INSIDE the box — the pad arm reuses `resolvePaint`'s own
+      // ramp arithmetic and the repeat arm the same tile under the same transform — so no
+      // already-correct pixel changes; see `PaintSpread` in ~/lib/paint/resolve.ts. A layer FILL
+      // stays on `'box'`: its ink IS its box, and reach there would only be cost.
+      style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx, 'extend'),
       align: st.align,
       join: st.join,
       dash: strokeDashSegments(st.dash, o.widthScale),
@@ -3316,7 +3332,9 @@ function textStrokePasses(
     if (strokeDistancePx(st, W) !== 0) continue
     out.push({
       lineWidth: st.width * W,
-      style: resolvePaint(ctx, st.paint, box, _fieldCtx),
+      // REACH — `'extend'`, for the reason `paintStrokeStack`'s band arm spells out in full:
+      // a glyph outline's outer half falls outside the text box its paint is anchored to.
+      style: resolvePaint(ctx, st.paint, box, _fieldCtx, 'extend'),
       dash: strokeDashSegments(st.dash, W),
     })
   }
@@ -3414,7 +3432,9 @@ function paintTextStrokeBands(
       distance: d,
       align: st.align,
       join: st.join,
-      style: (c) => resolvePaint(c, st.paint, box, _fieldCtx),
+      // REACH — `'extend'`, for the reason `paintStrokeStack`'s band arm spells out in full:
+      // a text band pushed off the glyphs sits entirely outside the text box.
+      style: (c) => resolvePaint(c, st.paint, box, _fieldCtx, 'extend'),
       build,
       inkFill: (c) => eachRun(c, (t, x, y) => c.fillText(t, x, y)),
       inkStroke: (c) => eachRun(c, (t, x, y) => c.strokeText(t, x, y)),

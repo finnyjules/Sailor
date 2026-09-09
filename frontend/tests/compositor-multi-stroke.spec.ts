@@ -1762,3 +1762,121 @@ test('a Fill (Ombre) stroke at a distance inks the whole band, like a flat colou
   expect(fillN / solidN, `Ombre band inked ${fillN}px vs the flat control's ${solidN}px`)
     .toBeGreaterThan(0.9)
 })
+
+/**
+ * FIX WAVE 2 — A `Fill` PAINT ON A STROKE THAT REACHES OUTSIDE ITS OWN PAINT BOX.
+ *
+ * Wave 1 (`3c89289d9`) fixed the TRANSFORM the band's paint was anchored under, which is why
+ * the gradient tests above pass and why the negative-distance ombre test above passes. It did
+ * not touch REACH. A stroke's paint is anchored to the layer's own box — a rect's `{w, h}` —
+ * and `resolvePaint`'s default `spread: 'box'` builds a `no-repeat` pattern tile that exists
+ * ONLY inside that box (see `PaintSpread` in ~/lib/paint/resolve.ts). A band pushed to a
+ * POSITIVE distance lies entirely outside the box, so there is no paint there to sample and
+ * the band comes out empty. A `Gradient` is immune because a real `CanvasGradient` pads
+ * itself, which is exactly why every gradient case above passed while the `Fill` arm did not.
+ *
+ * Measured on one rect with one ombre stroke before the fix — inked pixels in the band:
+ *   distance  0     3616      distance +0.04   0      distance -0.04   4420
+ *
+ * Every assertion below is a RATIO against a flat-colour control rendered on IDENTICAL
+ * geometry, so the only difference between the two renders is the paint's mechanism (a
+ * string versus a CanvasPattern). An absolute count would depend on the canvas size and on
+ * how the antialiased rim answers the predicate.
+ */
+
+/** Total red-ish pixels of the settled canvas for `layers` — both ombre colours below are
+ *  reds, so a dithered fill answers the same predicate the flat control does. */
+async function redInk(page: Page, layers: unknown[]): Promise<number> {
+  const r = await redPixels(page, layers)
+  return r.rows.reduce((n, xs) => n + xs.length, 0)
+}
+
+/** The two colours are both strong reds, so `redPixels` counts every dithered pixel. */
+const OMBRE_RED = { type: 'ombre', a: '#ff0000', b: '#e00000', textColor: '#ffffff', angle: 0, density: 8 }
+
+test('a Fill stroke pushed OUTSIDE the shape inks the band, like a flat colour does', async ({ page }) => {
+  await openCompositor(page)
+  const W = 0.03, D = 0.06        // band centreline 0.06 CLEAR of the rect's own edge
+
+  const solidOut = await redInk(page, bandOnlyRect('#ff0000', W, D))
+  const fillOut = await redInk(page, bandOnlyRect(OMBRE_RED, W, D))
+  const fillOn = await redInk(page, bandOnlyRect(OMBRE_RED, W, 0))
+
+  expect(solidOut, 'the flat-colour control inks a real band outside the shape').toBeGreaterThan(500)
+  expect(fillOut / solidOut, `Ombre band OUTSIDE inked ${fillOut}px vs the flat control's ${solidOut}px`)
+    .toBeGreaterThan(0.9)
+  // …and comparably to the SAME stroke sitting on the edge, which is where the bug report
+  // measured 3616 against 0. The outside band's ring is the longer of the two, so this is a
+  // floor, not an equality.
+  expect(fillOn, 'the on-the-edge case still inks — the control for the comparison').toBeGreaterThan(500)
+  expect(fillOut / fillOn, `Ombre band OUTSIDE inked ${fillOut}px vs ${fillOn}px on the edge`)
+    .toBeGreaterThan(0.7)
+})
+
+/** The same rect, one WOBBLED stroke — `paintWobbledBand` resolves its paint at its own
+ *  call site, so it is a separate route and gets its own proof. */
+const wobbleBandRect = (paint: unknown, distance: number) => [{
+  id: 'wr', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, radius: 0,
+  rotation: 0, opacity: 1, visible: true, fill: 'none',
+  strokes: [{
+    id: 's1', paint, width: 0.02, distance, align: 'center', join: 'round',
+    wobble: 'wave', wobbleAmount: 0.02, wobbleLength: 0.1,
+  }],
+}]
+
+test('a Fill on a WOBBLED band outside the shape inks it, like a flat colour does', async ({ page }) => {
+  await openCompositor(page)
+  const solid = await redInk(page, wobbleBandRect('#ff0000', 0.06))
+  const filled = await redInk(page, wobbleBandRect(OMBRE_RED, 0.06))
+  expect(solid, 'the flat-colour control inks a real wobbled band').toBeGreaterThan(500)
+  expect(filled / solid, `Ombre wobbled band inked ${filled}px vs the flat control's ${solid}px`)
+    .toBeGreaterThan(0.9)
+})
+
+test('a Fill on MARCHING SHAPES outside the shape inks them, like a flat colour does', async ({ page }) => {
+  await openCompositor(page)
+  // The ellipse's box is 0.4 across; marks marched 0.06 out sit wholly beyond it.
+  const cfg = { shapeId: 'sparkle', size: 0.05, spacing: 0.12, distance: 0.06 }
+  const solid = await redInk(page, shapesCircle({ paint: '#ff0000', ...cfg }))
+  const filled = await redInk(page, shapesCircle({ paint: OMBRE_RED, ...cfg }))
+  expect(solid, 'the flat-colour control inks real marks outside the shape').toBeGreaterThan(500)
+  expect(filled / solid, `Ombre marks inked ${filled}px vs the flat control's ${solid}px`)
+    .toBeGreaterThan(0.9)
+})
+
+/**
+ * THE OTHER HALF OF THE CLAIM: nothing that was already correct moves.
+ *
+ * The load-bearing guard for that is the byte-identity test at the top of this file, which
+ * re-renders fourteen saved-shape layers and compares the canvas byte for byte. This test
+ * adds the two cases a `Fill` paint reaches that the fixture (solids + one gradient) does
+ * not exercise: a layer FILL must keep painting exactly its own shape and nothing beyond
+ * it, and a stroke ON THE EDGE must keep inking.
+ */
+test('a layer FILL stays inside its shape, and an on-the-edge stroke still inks', async ({ page }) => {
+  await openCompositor(page)
+  // A rect 0.4 x 0.4 centred, ombre FILL, no stroke. Its ink must be the box and nothing
+  // outside it — a fill resolved with reach would tile the lattice past the edge.
+  const r = await redPixels(page, [{
+    id: 'f', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, radius: 0,
+    rotation: 0, opacity: 1, visible: true, fill: OMBRE_RED,
+  }])
+  const inked = r.rows.reduce((n, xs) => n + xs.length, 0)
+  expect(inked, 'the ombre fill inks the rect').toBeGreaterThan(5000)
+  // Bounds of the ink, as canvas fractions. 0.4 wide centred ⇒ [0.3, 0.7] on both axes,
+  // ±2px of antialiasing. (`redPixels`'s canvas is square — see this file's geometry note.)
+  let minX = r.w, maxX = -1, minY = r.h, maxY = -1
+  r.rows.forEach((xs, y) => {
+    if (!xs.length) return
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+    minX = Math.min(minX, xs[0]!); maxX = Math.max(maxX, xs[xs.length - 1]!)
+  })
+  expect(minX / r.w, `fill ink starts at the rect's left edge (got ${minX}/${r.w})`).toBeGreaterThan(0.29)
+  expect(maxX / r.w, `fill ink ends at the rect's right edge (got ${maxX}/${r.w})`).toBeLessThan(0.71)
+  expect(minY / r.h, 'fill ink starts at the rect\'s top edge').toBeGreaterThan(0.29)
+  expect(maxY / r.h, 'fill ink ends at the rect\'s bottom edge').toBeLessThan(0.71)
+
+  // And a stroke on the edge still paints — the `strokeAligned` route.
+  const onEdge = await redInk(page, bandOnlyRect(OMBRE_RED, 0.03, 0))
+  expect(onEdge, 'a distance-0 Fill stroke still inks').toBeGreaterThan(500)
+})
