@@ -219,6 +219,16 @@ const paramRows = computed<ParamRow[]>(() => {
   })
 })
 
+/** Colour params (the inks, a background) answer "what is it made of"; sliders and
+ *  enums answer "how is it shaped". Rule the two apart wherever they meet, rather
+ *  than reordering — the effect author's order is kept, we just let it breathe. */
+const isColourParam = (r: ParamRow) => r.kind === 'color' || r.kind === 'gradientStops'
+function dividesAbove(i: number): boolean {
+  const rows = paramRows.value
+  const prev = rows[i - 1]
+  return i > 0 && !!prev && isColourParam(rows[i]!) !== isColourParam(prev)
+}
+
 function paramValue(row: ParamRow): number {
   const raw = props.modelValue.params[row.key]
   return typeof raw === 'number' && Number.isFinite(raw) ? raw : (row.default as number)
@@ -424,8 +434,12 @@ watch(eligible, (ok) => {
       </button>
     </div>
 
-    <!-- Effect params (derived per catalog effect) -->
-    <div v-for="row in paramRows" :key="row.key">
+    <!-- Effect params (derived per catalog effect). A hairline rules the colour
+         params off from the shape/number ones wherever the two meet. -->
+    <div
+      v-for="(row, i) in paramRows" :key="row.key"
+      :class="dividesAbove(i) ? 'border-t border-white/[0.06] pt-2.5' : ''"
+    >
       <!-- Every param is the same 28px studio row — label left, control right — so a
            colour or an enum sits flush with the sliders instead of a bare swatch /
            full-width select floating under its own header. -->
