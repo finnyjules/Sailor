@@ -12,6 +12,7 @@
  * token) for instant variations/compare — not at graph-execution time.
  */
 import { X, Brush, Eye, EyeOff, Wand2, ImagePlus, Loader2, FlipHorizontal2, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Sparkles } from 'lucide-vue-next'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import { useBrushMask, type MaskTarget } from '~/composables/useBrushMask'
 import { useInpaint, loadImage, imageToDataUrl, capDims } from '~/composables/useInpaint'
 import { useStageView } from '~/composables/useStageView'
@@ -764,10 +765,8 @@ onBeforeUnmount(() => {
               <button class="flex-1 h-8 rounded flex items-center justify-center gap-1.5 text-[11px] cursor-pointer transition-colors" :class="tool === 'paint' ? 'bg-white text-neutral-900 font-medium' : 'text-white/70 hover:bg-white/10'" title="Brush the area — hold Alt/Option to erase (X)" @click="tool = 'paint'"><Brush class="size-3.5" /> Brush</button>
             </div>
 
-            <div v-if="tool === 'paint'" class="flex items-center gap-2 mt-3.5">
-              <span class="text-[10px] text-white/40 w-12 shrink-0">Size</span>
-              <input type="range" min="4" max="200" :value="brush.sizePx.value" class="flex-1 accent-white cursor-pointer" title="Brush size ([ / ])" @input="brush.sizePx.value = +($event.target as HTMLInputElement).value" />
-              <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ brush.sizePx.value }}</span>
+            <div v-if="tool === 'paint'" class="mt-3.5">
+              <StudioSlider v-model="brush.sizePx.value" label="Size" :min="4" :max="200" :default="48" :bindable="false" />
             </div>
             <p v-else class="text-[10px] text-white/35 mt-3.5 leading-relaxed">
               <span v-if="samBusy" class="inline-flex items-center gap-1 text-white/55"><Loader2 class="size-3 animate-spin" /> Selecting…</span>
@@ -778,17 +777,9 @@ onBeforeUnmount(() => {
           <!-- Refine the selection edge (mask mode) -->
           <div v-if="mode === 'mask'">
             <div class="text-[10px] uppercase tracking-[0.12em] text-white/40 mb-2.5">Refine edge</div>
-            <div class="flex flex-col gap-3">
-              <div class="flex items-center gap-2">
-                <span class="text-[10px] text-white/40 w-12 shrink-0">Feather</span>
-                <input type="range" min="0" max="40" v-model.number="feather" class="flex-1 accent-white cursor-pointer" />
-                <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ feather }}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="text-[10px] text-white/40 w-12 shrink-0">Expand</span>
-                <input type="range" min="0" max="40" v-model.number="expand" class="flex-1 accent-white cursor-pointer" />
-                <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ expand }}</span>
-              </div>
+            <div class="flex flex-col">
+              <StudioSlider v-model="feather" label="Feather" :min="0" :max="40" :default="3" :bindable="false" />
+              <StudioSlider v-model="expand" label="Expand" :min="0" :max="40" :default="0" :bindable="false" />
             </div>
             <div class="flex items-center gap-1.5 mt-3.5">
               <button class="h-7 px-2 rounded flex items-center gap-1 text-[11px] cursor-pointer transition-colors" :class="brush.inverted.value ? 'bg-amber-400/90 text-neutral-900' : 'bg-white/[0.06] text-white/70 hover:bg-white/12'" title="Invert: keep the marked area, change everything else" @click="brush.toggleInvert()"><FlipHorizontal2 class="size-3.5" /> Invert</button>
