@@ -253,6 +253,13 @@ function removeRowStop(row: ParamRow, i: number) {
   const s = stopsValue(row)
   if (s.length > 2) applyRowStops(row, s.filter((_, j) => j !== i))
 }
+// The palette generator is a TOOL, not the content. Folded away by default so the
+// inks block reads as one thing (bar → inks → add) instead of being buried under a
+// 12-tile shelf — same disclosure the node gradient editor uses. Keyed per row.
+const openPickers = ref<Record<string, boolean>>({})
+function togglePicker(key: string) {
+  openPickers.value = { ...openPickers.value, [key]: !openPickers.value[key] }
+}
 function addRowStop(row: ParamRow) {
   const s = [...stopsValue(row)].sort((a, b) => a.pos - b.pos)
   // Drop the new stop into the widest gap so it doesn't stack on an existing one.
@@ -449,13 +456,23 @@ watch(eligible, (ok) => {
           <button class="mt-0.5 flex items-center justify-center gap-1 rounded border border-dashed border-white/15 py-1 text-[11px] text-white/50 hover:border-white/30 hover:text-white/80 disabled:opacity-30"
             :disabled="stopsValue(row).length >= (row.maxStops ?? 8)" @click="addRowStop(row)"><Plus :size="12" /> Add ink</button>
         </div>
-        <PalettePicker
-          mode="stops" manual-stops
-          :stop-count="stopsValue(row).length || 3"
-          :seed="stopsValue(row)[0]?.color ?? '#4f8ad9'"
-          @apply-stops="(v: GradientStop[]) => applyRowStops(row, v)"
-          @apply-literal-stops="(v: GradientStop[]) => applyRowStops(row, v)"
-        />
+        <!-- Generator, folded: the inks above are the content; this is the shortcut. -->
+        <button
+          class="flex w-full items-center gap-1 text-left text-[11px] text-white/45 transition hover:text-white/75"
+          @click="togglePicker(row.key)"
+        >
+          <span class="inline-block transition-transform" :class="openPickers[row.key] ? 'rotate-90' : ''">›</span>
+          Generate a palette
+        </button>
+        <div v-if="openPickers[row.key]" class="mt-1.5 rounded border border-white/10 bg-white/[0.02] p-2">
+          <PalettePicker
+            mode="stops" manual-stops
+            :stop-count="stopsValue(row).length || 3"
+            :seed="stopsValue(row)[0]?.color ?? '#4f8ad9'"
+            @apply-stops="(v: GradientStop[]) => applyRowStops(row, v)"
+            @apply-literal-stops="(v: GradientStop[]) => applyRowStops(row, v)"
+          />
+        </div>
       </template>
       <StudioSlider
         v-else
