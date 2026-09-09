@@ -140,6 +140,7 @@ import {
 } from '~/lib/compositor/toolbarMenus'
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
 import type { TextPathSpec, TextPathFollow } from '~/lib/compositor/textPath'
+import { genGestureDefaults, genBoxIsValid, genBarPlacement } from '~/lib/compositor/genGesture'
 import { shapeById } from '~/lib/shapes/catalog'
 import { createShapeLayer, swapShapeLayer } from '~/lib/shapes/pathLayer'
 import { SHAPE_PICKER_WIDTH, anchorAbove } from '~/lib/shapes/pickerLayout'
@@ -4181,6 +4182,44 @@ const showStylePicker = computed(() => genModel.value === 'flux' && genMode.valu
 type GenBounds = { minX: number; minY: number; maxX: number; maxY: number }
 const genResult = ref<{ layerId: string; mask: HTMLCanvasElement; bnd: GenBounds } | null>(null)
 
+// ── Streamlined drag-to-generate gesture ─────────────────────────────────────
+// The Generate-in-region engine (genActive + box tool) re-surfaced as a direct
+// canvas gesture: a top-level Generate tool + hold-Option drag, a minimal on-box
+// bar, and fixed defaults hiding the Style/Scene · Flux/Nano · brush/shape panel.
+const genGesture = ref(false)   // armed via the streamlined tool (button or Option)
+const genSpring = ref(false)    // this arm came from a held Option (spring-loaded)
+const optDown = ref(false)      // Option/Alt currently held
+const lastGenStyle = ref<import('~/composables/useStyleList').StyleItem | null>(null)
+const genBarBnd = ref<GenBounds | null>(null)   // box bounds (artboard px) the on-box bar anchors to
+
+function armGenGesture(spring = false) {
+  if (!exitOtherToolsFor('region')) return
+  const d = genGestureDefaults()
+  genActive.value = true
+  genGesture.value = true
+  genSpring.value = spring
+  genTool.value = d.tool          // 'box'
+  genMode.value = d.mode          // 'style'
+  genModel.value = d.model        // 'flux'
+  genTargetId.value = null        // always a NEW layer
+  genStyle.value = lastGenStyle.value   // persistence: keep the last style
+  genPrompt.value = ''            // fresh prompt each arm
+  stylePickerOpen.value = false
+  genBarBnd.value = null
+  styleList.refresh()
+  clearGenMask()
+}
+function disarmGenGesture() {
+  genGesture.value = false
+  genSpring.value = false
+  genBarBnd.value = null
+  exitGenMode()                   // genActive=false, cursor off, clearGenMask, genResult=null
+}
+function toggleGenGesture() {
+  if (genActive.value && genGesture.value) disarmGenGesture()
+  else armGenGesture(false)
+}
+
 type GenTool = 'box' | 'brush' | 'shape'
 const GEN_TOOLS: GenTool[] = ['box', 'brush', 'shape']
 const genActive = ref(false)
@@ -4203,6 +4242,7 @@ function clearGenMask() {
   const ctx = genMaskCtx()
   if (ctx && genMaskCanvas) ctx.clearRect(0, 0, genMaskCanvas.width, genMaskCanvas.height)
   genHasMask.value = false; genVersion.value++
+  genBarBnd.value = null
 }
 
 // Target image layer: locked at enter to the SELECTED image, if any. No
@@ -6600,6 +6640,16 @@ onUnmounted(() => {
             @close="libraryPickerOpen = false"
           />
         </div>
+        <!-- Generate: a top-level tool (a mode, not a stamp) — arms the drag-to-
+             generate gesture; hold Option/Alt + drag does the same without the click. -->
+        <button
+          class="flex items-center justify-center size-8 rounded cursor-pointer"
+          :class="genActive && genGesture ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
+          data-testid="generate-tool-toggle"
+          title="Generate an element (drag a box, or hold Option and drag)"
+          @click="toggleGenGesture">
+          <Wand2 class="size-4" />
+        </button>
         <button
           class="flex items-center justify-center size-8 rounded cursor-pointer"
           :class="pen.active.value ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
@@ -6899,7 +6949,7 @@ onUnmounted(() => {
       </template>
 
       <!-- Generate-in-region controls (mode owns the inspector) -->
-      <template v-else-if="genActive">
+      <template v-else-if="genActive && !genGesture">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <Wand2 class="size-3.5 text-white/70" />
           <span class="text-sm font-medium">Generate in region</span>
