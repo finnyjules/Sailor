@@ -27,6 +27,7 @@ import CatalogModal from '~/components/CatalogModal.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
+import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
@@ -302,6 +303,12 @@ const readsMode = computed<ReadsMode>(() => {
   return pendingSpecific.value ? 'specific' : 'behind'
 })
 
+// The Reads control is a dropdown (three long labels overflow a segmented row).
+// When the shader can't read anything behind it, only "Its own fill" is offered
+// (the note below the control explains why).
+const readsOptions = computed<ReadsMode[]>(() => (eligible.value ? ['self', 'behind', 'specific'] : ['self']))
+const readsOptionLabels = computed(() => (eligible.value ? ['Its own fill', 'Layers behind', 'A specific layer'] : ['Its own fill']))
+
 function setReadsMode(mode: ReadsMode) {
   pendingSpecific.value = mode === 'specific'
   if (mode === 'self') { patch({ readsBackdrop: false, readsLayerKey: undefined }); return }
@@ -334,25 +341,12 @@ watch(eligible, (ok) => {
          Static, …) has nothing behind its own fill to read. -->
     <div v-if="allowReadsBackdrop">
       <label class="mb-1 block text-[9px] uppercase tracking-[0.1em] text-white/35">Reads</label>
-      <div class="flex gap-1.5">
-        <StudioButton
-          class="flex-1 text-center"
-          :variant="readsMode === 'self' ? 'primary' : 'secondary'"
-          @click="setReadsMode('self')"
-        >Its own fill</StudioButton>
-        <StudioButton
-          class="flex-1 text-center"
-          :variant="readsMode === 'behind' ? 'primary' : 'secondary'"
-          :disabled="!eligible"
-          @click="setReadsMode('behind')"
-        >Layers behind</StudioButton>
-        <StudioButton
-          class="flex-1 text-center"
-          :variant="readsMode === 'specific' ? 'primary' : 'secondary'"
-          :disabled="!eligible"
-          @click="setReadsMode('specific')"
-        >A specific layer</StudioButton>
-      </div>
+      <StudioSelect
+        :model-value="readsMode"
+        @update:model-value="(v) => setReadsMode(v as ReadsMode)"
+        :options="readsOptions"
+        :option-labels="readsOptionLabels"
+      />
       <p v-if="!eligible" class="mt-1 text-[10px] leading-snug text-white/40">This shader has nothing to read behind it.</p>
       <div v-if="readsMode === 'specific'" class="mt-1.5">
         <select
