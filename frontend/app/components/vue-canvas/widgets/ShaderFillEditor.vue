@@ -439,11 +439,11 @@ watch(eligible, (ok) => {
         <div class="mb-2 flex flex-col gap-1">
           <div v-for="(s, i) in stopsValue(row)" :key="i" class="flex items-center gap-2">
             <StudioColor :model-value="s.color" @update:model-value="(c: string) => editRowStopColor(row, i, c)" />
-            <input type="range" min="0" max="1" step="0.01" :value="s.pos"
-              class="studio-range h-1 min-w-0 flex-1"
-              @input="(e: any) => editRowStopPos(row, i, Number(e.target.value))" />
-            <span class="w-7 shrink-0 text-right font-mono text-[10px] tabular-nums text-white/40">{{ Math.round(s.pos * 100) }}</span>
-            <button class="rounded p-0.5 text-white/30 hover:bg-white/10 hover:text-white/70 disabled:opacity-20"
+            <div class="min-w-0 flex-1">
+              <StudioSlider :model-value="Math.round(s.pos * 100)" @update:model-value="(v: number) => editRowStopPos(row, i, v / 100)"
+                :min="0" :max="100" :step="1" :bindable="false" />
+            </div>
+            <button class="shrink-0 rounded p-0.5 text-white/30 hover:bg-white/10 hover:text-white/70 disabled:opacity-20"
               :disabled="stopsValue(row).length <= 2" title="Remove ink" @click="removeRowStop(row, i)"><Trash2 :size="12" /></button>
           </div>
           <button class="mt-0.5 flex items-center justify-center gap-1 rounded border border-dashed border-white/15 py-1 text-[11px] text-white/50 hover:border-white/30 hover:text-white/80 disabled:opacity-30"
