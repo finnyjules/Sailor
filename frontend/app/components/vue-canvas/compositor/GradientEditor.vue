@@ -163,10 +163,15 @@ function onHandleDown(i: number, e: PointerEvent) {
 
     <!-- Interpolation: sRGB (Direct) vs a hue walk round the wheel. A select, not a
          3-up segmented — "Hue (short)" / "Hue (long)" wrap onto two lines in a panel
-         this narrow, and as a labelled row it lines up with Angle and the stops. -->
+         this narrow, and as a labelled row it lines up with Type and Angle. -->
     <StudioSelect v-model="interpLabel" label="Interpolation" :options="[...INTERP_OPTIONS]" />
 
-    <!-- preview bar + draggable stop handles -->
+    <!-- angle (linear only) — a gradient-level setting like Type / Interpolation, so
+         it sits with them above the bar, not orphaned between the bar and the stops. -->
+    <StudioSlider v-if="!isRadial" :model-value="angle" @update:model-value="(v) => setAngle(v)"
+      label="Angle" :min="0" :max="360" :step="5" :bindable="false" />
+
+    <!-- preview bar + draggable stop handles: the content the settings above act on. -->
     <div ref="barRef" class="relative h-6 rounded border border-white/10 overflow-visible"
       :style="{ background: cssGradient }">
       <div v-for="(s, i) in stops" :key="'h' + i"
@@ -174,10 +179,6 @@ function onHandleDown(i: number, e: PointerEvent) {
         :style="{ left: (s.offset * 100) + '%', background: s.color }"
         @pointerdown="onHandleDown(i, $event)" />
     </div>
-
-    <!-- angle (linear only) -->
-    <StudioSlider v-if="!isRadial" :model-value="angle" @update:model-value="(v) => setAngle(v)"
-      label="Angle" :min="0" :max="360" :step="5" :bindable="false" />
 
     <!-- per-stop rows -->
     <div class="space-y-1.5">
