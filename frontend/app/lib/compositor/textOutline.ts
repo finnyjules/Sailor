@@ -19,6 +19,8 @@ import { loadVectorFont, type VtFont } from '~/lib/vectortype/font'
 import { formatVtFontToken } from '~/lib/vectortype/fontToken'
 import { VARIABLE_FONTS } from '~/data/variable-fonts'
 import { libraryFamily } from '~/data/library-fonts-lookup'
+import { textOutlines } from '~/lib/vectortype/outline'
+import { transformCommands, type VectorCommand } from '~/lib/vector/svg'
 
 export type { VtFont }
 
@@ -138,4 +140,105 @@ export function getCompositorFont(layer: CompositorFontLayerLike): VtFont | null
 export function __resetCompositorFontCacheForTest(): void {
   cache.clear()
   readySubs.clear()
+}
+
+/** One drawn text run — the same three numbers `ctx.fillText(text, x, y)` takes.
+ *  `x`/`y` are in the ctx's local px (the layer's own transform is already on the
+ *  context when `drawText` calls fillText). */
+export interface CompositorTextRun {
+  text: string
+  x: number
+  y: number
+}
+
+/** The ctx state that governs where fillText lays the run down — mirrored so the
+ *  outlines land on the very same pixels. */
+export interface CompositorRunStyle {
+  /** `ctx.font` size in px (already device-scaled by the caller). */
+  fontPx: number
+  /** `ctx.letterSpacing` in px — canvas adds it as trailing space after each glyph. */
+  letterSpacingPx: number
+  align: CanvasTextAlign
+  baseline: CanvasTextBaseline
+}
+
+/**
+ * How far the alphabetic baseline sits ABOVE `run.y` (font units, y-up) for a
+ * given `textBaseline`. Canvas anchors `run.y` to one of the font's alignment
+ * lines; we shape on the alphabetic baseline, so we shift by the gap between it
+ * and the requested line. `descent` arrives negative (below the baseline), so
+ * `bottom`/`ideographic` naturally push the baseline UP by |descent|.
+ */
+function baselineShiftUnits(baseline: CanvasTextBaseline, ascent: number, descent: number): number {
+  switch (baseline) {
+    case 'top':
+    case 'hanging':
+      return ascent
+    case 'middle':
+      return (ascent + descent) / 2
+    case 'bottom':
+    case 'ideographic':
+      return descent
+    case 'alphabetic':
+    default:
+      return 0
+  }
+}
+
+/**
+ * A single text run's glyph outlines, in the ctx's local px, positioned exactly
+ * where `ctx.fillText(run.text, run.x, run.y)` would draw them under `ctx.font`
+ * of `style.fontPx`, that `textAlign`, that `textBaseline`, and that
+ * `letterSpacing`.
+ *
+ * The run is shaped once by `textOutlines` (fontkit's own GSUB/GPOS, so kerning
+ * and ligatures are the font's). Each glyph is then placed:
+ *  - font units → px by `fontPx / unitsPerEm`, y-flipped (font y-up → canvas
+ *    y-down) — carried by `transformCommands`, the one placement choke point the
+ *    SVG writer shares, so the exported `d` and this path stay identical geometry;
+ *  - x offset for `align` from the shaped run width (kerned advances + a trailing
+ *    letter-spacing per glyph, matching `ctx.measureText` with `letterSpacing`
+ *    set), with `justify` treated as `left` (the layer layout spaces justify
+ *    upstream);
+ *  - y offset for `baseline` from the font's ascent/descent;
+ *  - `letterSpacingPx` accumulated before glyph `i` (canvas adds it after each
+ *    glyph), so glyph positions and run width match the canvas.
+ *
+ * Pure and deterministic: same inputs → identical commands. Returns `[]` for an
+ * empty run.
+ */
+export function runToCommands(
+  font: VtFont,
+  run: CompositorTextRun,
+  style: CompositorRunStyle,
+): VectorCommand[] {
+  const unitsPerEm = Number(font?.unitsPerEm) || 1000
+  const scale = style.fontPx / unitsPerEm
+  const ls = Number.isFinite(style.letterSpacingPx) ? style.letterSpacingPx : 0
+
+  const { glyphs, width: advanceUnits, metrics } = textOutlines(font, run.text)
+  const n = glyphs.length
+  if (n === 0) return []
+
+  // Shaped run width in px: kerned advances plus one trailing letter-spacing per
+  // glyph — the width canvas uses to centre/right-anchor the run on run.x.
+  const runWidthPx = advanceUnits * scale + n * ls
+  const alignOffsetPx =
+    style.align === 'center' ? -runWidthPx / 2 :
+    style.align === 'right' || style.align === 'end' ? -runWidthPx :
+    0 // left | start | justify → left-anchored
+
+  // Canvas baseline (font y = 0 line) in the output space, per textBaseline.
+  const baseY = run.y + baselineShiftUnits(style.baseline, metrics.ascent, metrics.descent) * scale
+
+  const out: VectorCommand[] = []
+  for (let i = 0; i < n; i++) {
+    const g = glyphs[i]!
+    const originX = run.x + alignOffsetPx + g.x * scale + i * ls
+    // g.y is the glyph's pen y on the line (font y-up); flip it into output space.
+    const originY = baseY - g.y * scale
+    const placed = transformCommands(g.commands, { scale, flipY: true, x: originX, y: originY })
+    for (const c of placed) out.push(c)
+  }
+  return out
 }
