@@ -6,13 +6,12 @@
 // shelf of corpus-backed PaletteFamily results applied LITERALLY — see
 // paletteEmit.ts — because those hexes were chosen for their own lightness.
 import { ref, computed, watch } from 'vue'
-import { Palette, Sparkles, Dices, RefreshCw, Minus, Plus } from 'lucide-vue-next'
+import { Palette, Library, RefreshCw, Minus, Plus } from 'lucide-vue-next'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import {
   HARMONY_TYPES, HARMONY_LABELS, harmonize, toDuotone, toStops,
-  type HarmonyType, type GradientStop,
+  type GradientStop,
 } from '~/lib/color/harmony'
-import { CURATED_PALETTES, palettesByType } from '~/lib/color/palettes'
 import { hexToOklch } from '~/lib/color/convert'
 import { seedShelf } from '~/lib/color/seedEngine'
 import type { PaletteFamily, Character } from '~/lib/color/seedFamily'
@@ -33,9 +32,8 @@ const emit = defineEmits<{
   (e: 'apply-family', v: PaletteFamily): void
 }>()
 
-const pane = ref<'gallery' | 'harmony' | 'seed'>('gallery')
+const pane = ref<'harmony' | 'seed'>('harmony')
 const seed = ref(props.seed)
-const activeType = ref<HarmonyType>('complementary')
 const count = ref(Math.max(2, Math.min(8, props.stopCount)))
 
 // --- Seed-engine pane: a shelf of PaletteFamily results from the corpus-backed
@@ -78,8 +76,16 @@ function applyFamily(fam: PaletteFamily) {
   emit('apply-family', fam)
 }
 
-// The colors generated from the seed for the currently-selected harmony.
-const seedColors = computed(() => harmonize(seed.value, activeType.value, activeType.value === 'monochromatic' ? Math.max(3, count.value) : undefined))
+// Every harmony type generated from the base colour — the "Harmony" grid folds
+// the old curated gallery + "from color" pane into one live-from-your-colour set.
+const harmonyGrid = computed(() => HARMONY_TYPES.map(t => ({
+  type: t,
+  label: HARMONY_LABELS[t],
+  colors: harmonize(seed.value, t, t === 'monochromatic' ? Math.max(3, count.value) : undefined),
+})))
+const paneHint = computed(() => (pane.value === 'harmony'
+  ? 'A gradient built from one colour, using colour theory.'
+  : 'Ready-made palettes from a library, filtered by mood.'))
 
 /** The swatches shown for a candidate palette — the exact result that applying it yields. */
 function preview(colors: string[]): string[] {
@@ -92,81 +98,55 @@ function apply(colors: string[]) {
   else emit('apply-stops', toStops(colors, count.value))
 }
 
-const galleryRows = computed(() =>
-  HARMONY_TYPES.map(type => ({ type, label: HARMONY_LABELS[type], palettes: palettesByType(type) }))
-    .filter(r => r.palettes.length > 0),
-)
-
 const swatchGrad = (colors: string[]) => `linear-gradient(to right, ${colors.join(', ')})`
 </script>
 
 <template>
   <div class="flex flex-col gap-2 text-white/80">
-    <!-- pane toggle + (stops-only) count stepper -->
-    <div class="flex items-center gap-1">
-      <button
-        class="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition"
-        :class="pane === 'gallery' ? 'bg-white/[0.1] text-white' : 'text-white/50 hover:text-white/80'"
-        @click="pane = 'gallery'"
-      ><Palette :size="12" /> Palettes</button>
-      <button
-        class="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition"
-        :class="pane === 'harmony' ? 'bg-white/[0.1] text-white' : 'text-white/50 hover:text-white/80'"
-        @click="pane = 'harmony'"
-      ><Sparkles :size="12" /> From color</button>
-      <button
-        class="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition"
-        :class="pane === 'seed' ? 'bg-white/[0.1] text-white' : 'text-white/50 hover:text-white/80'"
-        @click="pane = 'seed'"
-      ><Dices :size="12" /> Seed engine</button>
-      <div v-if="mode === 'stops'" class="ml-auto flex items-center gap-1 text-[11px] text-white/50">
+    <!-- Stops count (first) + the two generators. Wraps rather than clipping. -->
+    <div class="flex flex-wrap items-center gap-1">
+      <div v-if="mode === 'stops'" class="flex items-center gap-1 rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-white/50">
         <span>Stops</span>
         <button class="rounded border border-white/10 p-0.5 hover:bg-white/10 disabled:opacity-30" :disabled="count <= 2" @click="count = Math.max(2, count - 1)"><Minus :size="11" /></button>
         <span class="w-4 text-center tabular-nums text-white/80">{{ count }}</span>
         <button class="rounded border border-white/10 p-0.5 hover:bg-white/10 disabled:opacity-30" :disabled="count >= 8" @click="count = Math.min(8, count + 1)"><Plus :size="11" /></button>
       </div>
+      <button
+        class="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition"
+        :class="pane === 'harmony' ? 'bg-white/[0.1] text-white' : 'text-white/50 hover:text-white/80'"
+        @click="pane = 'harmony'"
+      ><Palette :size="12" /> Harmony</button>
+      <button
+        class="flex items-center gap-1 rounded px-2 py-1 text-[11px] transition"
+        :class="pane === 'seed' ? 'bg-white/[0.1] text-white' : 'text-white/50 hover:text-white/80'"
+        @click="pane = 'seed'"
+      ><Library :size="12" /> Library</button>
     </div>
+    <p class="-mt-1 text-[10px] leading-snug text-white/35">{{ paneHint }}</p>
 
-    <!-- Gallery: curated palettes grouped by harmony -->
-    <div v-if="pane === 'gallery'" class="flex max-h-56 flex-col gap-2 overflow-y-auto pr-1">
-      <div v-for="row in galleryRows" :key="row.type">
-        <div class="mb-1 text-[10px] uppercase tracking-wide text-white/30">{{ row.label }}</div>
-        <div class="grid grid-cols-3 gap-1">
-          <button
-            v-for="p in row.palettes" :key="p.name" :title="p.name"
-            class="h-7 overflow-hidden rounded border border-white/10 transition hover:border-white/30"
-            :style="{ background: swatchGrad(preview(p.colors)) }"
-            @click="apply(p.colors)"
-          />
-        </div>
-      </div>
-    </div>
-
-    <!-- Harmony mode: pick a base color, choose a harmony, apply (cooked toStops/toDuotone) -->
-    <div v-else-if="pane === 'harmony'" class="flex flex-col gap-2">
+    <!-- Harmony: a base colour → a grid of colour-theory harmonies generated from it
+         (folds the old curated gallery + "from color" panes into one). -->
+    <div v-if="pane === 'harmony'" class="flex flex-col gap-2">
       <div class="flex items-center gap-2">
         <span class="text-[11px] text-white/60">Base</span>
         <StudioColor v-model="seed" />
-        <div class="ml-auto h-7 flex-1 overflow-hidden rounded border border-white/10" :style="{ background: swatchGrad(preview(seedColors)) }" />
       </div>
-      <div class="flex flex-wrap gap-1">
+      <div class="grid grid-cols-2 gap-1">
         <button
-          v-for="t in HARMONY_TYPES" :key="t"
-          class="rounded px-2 py-1 text-[11px] transition"
-          :class="activeType === t ? 'bg-white/[0.12] text-white' : 'text-white/50 hover:bg-white/[0.06] hover:text-white/80'"
-          @click="activeType = t"
-        >{{ HARMONY_LABELS[t] }}</button>
+          v-for="h in harmonyGrid" :key="h.type" :title="h.label"
+          class="relative h-9 overflow-hidden rounded border border-white/10 transition hover:border-white/30"
+          :style="{ background: swatchGrad(preview(h.colors)) }"
+          @click="apply(h.colors)"
+        >
+          <span class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-0.5 pt-2 text-left text-[9px] font-medium text-white/90">{{ h.label }}</span>
+        </button>
       </div>
-      <button
-        class="rounded-md border border-white/10 bg-white/[0.04] py-1.5 text-[11px] text-white/80 transition hover:bg-white/[0.08]"
-        @click="apply(seedColors)"
-      >Apply {{ HARMONY_LABELS[activeType].toLowerCase() }} harmony</button>
     </div>
 
-    <!-- Seed-engine mode: shelf of corpus-backed families, applied LITERALLY (never toStops) -->
+    <!-- Library: shelf of corpus-backed families, applied LITERALLY (never toStops) -->
     <div v-else class="flex flex-col gap-2">
       <div class="flex items-center gap-2">
-        <span class="text-[11px] text-white/60">Seed</span>
+        <span class="text-[11px] text-white/60">Near</span>
         <StudioColor v-model="seedA" />
         <template v-if="seedB !== null">
           <span class="text-[11px] text-white/30">+</span>
