@@ -2231,13 +2231,8 @@ async function exportWebEmbed() {
                   <option v-for="f in FPS_OPTIONS" :key="f" :value="Number(f)">{{ f }}</option>
                 </select>
               </div>
-              <div data-control class="text-xs">
-                <label class="mb-1 flex justify-between text-white/60">
-                  <span>Duration</span>
-                  <span class="text-white/80">{{ loopDuration }}s · {{ Math.round(fps * loopDuration) }} frames</span>
-                </label>
-                <input type="range" min="1" max="15" step="0.5" v-studio-reset v-model.number="loopDuration" class="studio-range w-full" />
-              </div>
+              <StudioSlider v-model="loopDuration" label="Duration" :min="1" :max="15" :step="0.5" :bindable="false" />
+
               <label data-control class="flex items-center justify-between text-xs text-white/60">
                 <span>Seamless loop <span class="ml-1 text-white/40 tabular-nums">· {{ loopLengthLabel }}</span></span><StudioSwitch v-model="seamlessLoop" />
               </label>

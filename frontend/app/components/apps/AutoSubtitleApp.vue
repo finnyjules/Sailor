@@ -6,6 +6,7 @@
  */
 import { ArrowRight, Download, Loader2, RefreshCcw } from 'lucide-vue-next'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 interface UploadedFile { file: File; filename: string; previewUrl: string }
 
@@ -239,18 +240,7 @@ function download() {
           </div>
 
           <div>
-            <label class="text-[12px] font-medium text-white/85 mb-2 flex justify-between">
-              <span>Font size</span>
-              <span class="text-white/55 tabular-nums">{{ fontSize }}px</span>
-            </label>
-            <input
-              v-model.number="fontSize"
-              type="range"
-              min="20"
-              max="96"
-              step="2"
-              class="w-full accent-action"
-            />
+            <StudioSlider v-model="fontSize" label="Font size" :min="20" :max="96" :step="2" :bindable="false" />
           </div>
         </div>
       </div>

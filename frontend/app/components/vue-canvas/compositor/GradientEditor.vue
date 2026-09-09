@@ -9,6 +9,7 @@
 import { ref, computed } from 'vue'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import { hueWalk } from '~/lib/color/hueWalk'
 import type { Gradient, GradientStop } from '~/composables/useCompositorLayers'
 
@@ -166,13 +167,8 @@ function onHandleDown(i: number, e: PointerEvent) {
     </div>
 
     <!-- angle (linear only) -->
-    <div v-if="!isRadial">
-      <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-        <span>Angle</span><span class="tabular-nums normal-case">{{ Math.round(angle) }}°</span>
-      </div>
-      <input type="range" min="0" max="360" step="5" :value="angle" class="w-full accent-white cursor-pointer"
-        @input="setAngle(Number(($event.target as HTMLInputElement).value))" />
-    </div>
+    <StudioSlider v-if="!isRadial" :model-value="angle" @update:model-value="(v) => setAngle(v)"
+      label="Angle" :min="0" :max="360" :step="5" :bindable="false" />
 
     <!-- per-stop rows -->
     <div class="space-y-1.5">

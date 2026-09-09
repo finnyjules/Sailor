@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { DEFAULT_TORN_EDGE, TORN_EDGE_STYLES, type TornEdgeSpec, type TornEdgeStyle } from '~/lib/compositor/tornEdge'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 // The stored value stays the slug; only the option text is human.
 const STYLE_LABELS: Record<TornEdgeStyle, string> = {
@@ -43,11 +44,8 @@ const reseed = () => emit('update', { seed: Math.floor(Math.abs(Math.sin(v.value
           </select>
         </div>
 
-        <div>
-          <div class="flex items-center justify-between panel-sublabel mb-1"><span>Tear depth</span><span class="tabular-nums normal-case">{{ v.amount }}</span></div>
-          <input type="range" min="0" max="70" step="1" :value="v.amount" class="w-full accent-white cursor-pointer"
-            @input="set({ amount: +($event.target as HTMLInputElement).value })">
-        </div>
+        <StudioSlider :model-value="v.amount" @update:model-value="(val) => set({ amount: val })"
+          label="Tear depth" :min="0" :max="70" :step="1" :bindable="false" />
 
         <div>
           <div class="flex items-center justify-between panel-sublabel mb-1"><span>Roughness</span><span class="tabular-nums normal-case">{{ Math.round(v.roughness * 100) }}</span></div>
@@ -55,11 +53,8 @@ const reseed = () => emit('update', { seed: Math.floor(Math.abs(Math.sin(v.value
             @input="set({ roughness: +($event.target as HTMLInputElement).value / 100 })">
         </div>
 
-        <div>
-          <div class="flex items-center justify-between panel-sublabel mb-1"><span>Grain</span><span class="tabular-nums normal-case">{{ v.grain }}</span></div>
-          <input type="range" min="0" max="18" step="1" :value="v.grain" class="w-full accent-white cursor-pointer"
-            @input="set({ grain: +($event.target as HTMLInputElement).value })">
-        </div>
+        <StudioSlider :model-value="v.grain" @update:model-value="(val) => set({ grain: val })"
+          label="Grain" :min="0" :max="18" :step="1" :bindable="false" />
 
         <div>
           <div class="flex items-center justify-between panel-sublabel mb-1"><span>Grain texture</span><span class="tabular-nums normal-case">{{ Math.round(v.grainTexture * 100) }}</span></div>
@@ -67,11 +62,8 @@ const reseed = () => emit('update', { seed: Math.floor(Math.abs(Math.sin(v.value
             @input="set({ grainTexture: +($event.target as HTMLInputElement).value / 100 })">
         </div>
 
-        <div>
-          <div class="flex items-center justify-between panel-sublabel mb-1"><span>Lip width</span><span class="tabular-nums normal-case">{{ v.lipWidth }}</span></div>
-          <input type="range" min="0" max="20" step="1" :value="v.lipWidth" class="w-full accent-white cursor-pointer"
-            @input="set({ lipWidth: +($event.target as HTMLInputElement).value })">
-        </div>
+        <StudioSlider :model-value="v.lipWidth" @update:model-value="(val) => set({ lipWidth: val })"
+          label="Lip width" :min="0" :max="20" :step="1" :bindable="false" />
 
         <div>
           <div class="flex items-center justify-between panel-sublabel mb-1"><span>Lip width var</span><span class="tabular-nums normal-case">{{ Math.round(v.lipVariation * 100) }}</span></div>

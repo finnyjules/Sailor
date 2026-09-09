@@ -7005,11 +7005,7 @@ onUnmounted(() => {
                 :class="genTool === t ? 'bg-white text-neutral-900 font-medium' : 'text-white/70 hover:bg-white/10'"
                 @click="genTool = t">{{ t }}</button>
             </div>
-            <div v-if="genTool === 'brush'" class="flex items-center gap-2 mt-2">
-              <span class="text-[10px] text-white/40 w-12 shrink-0">Brush</span>
-              <input type="range" min="8" max="240" step="2" v-model.number="genBrush" class="flex-1 accent-white cursor-pointer" />
-              <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ genBrush }}</span>
-            </div>
+            <StudioSlider v-if="genTool === 'brush'" class="mt-2" v-model="genBrush" label="Brush" :min="8" :max="240" :step="2" :bindable="false" />
             <button v-else-if="genTool === 'shape'"
               class="w-full h-7 mt-2 rounded bg-white/10 hover:bg-white/15 text-[12px] cursor-pointer disabled:opacity-40 disabled:cursor-default"
               :disabled="!genShapeCandidate" @click="genUseShape"
@@ -7089,11 +7085,7 @@ onUnmounted(() => {
             Scribble roughly over an object on <span class="text-white/70">{{ smartTargetRef ? 'the selected image' : 'an image layer' }}</span> —
             the selection snaps to it. Hold <kbd class="px-1 rounded bg-white/10">Alt</kbd> to subtract.
           </p>
-          <div class="flex items-center gap-2">
-            <span class="text-[10px] text-white/40 w-12 shrink-0">Brush</span>
-            <input type="range" min="8" max="240" step="2" v-model.number="smartBrush" class="flex-1 accent-white cursor-pointer" />
-            <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ smartBrush }}</span>
-          </div>
+          <StudioSlider v-model="smartBrush" label="Brush" :min="8" :max="240" :step="2" :bindable="false" />
           <div class="text-[11px]" :class="smart.failed.value ? 'text-amber-400' : 'text-white/40'">
             <template v-if="smart.busy.value">Refining selection…</template>
             <template v-else-if="smart.failed.value">Smart refine unavailable — using your scribble.</template>
@@ -7138,16 +7130,8 @@ onUnmounted(() => {
             <span class="text-[10px] text-white/40 w-12 shrink-0">Color</span>
             <StudioColor :model-value="brush.color.value" @update:model-value="(v: string) => brush.color.value = v" />
           </div>
-          <div class="flex items-center gap-2 mb-2">
-            <span class="text-[10px] text-white/40 w-12 shrink-0">Size</span>
-            <input type="range" min="2" max="240" step="1" v-model.number="brush.sizePx.value" class="flex-1 accent-white cursor-pointer" />
-            <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ brush.sizePx.value }}</span>
-          </div>
-          <div class="flex items-center gap-2 mb-2">
-            <span class="text-[10px] text-white/40 w-12 shrink-0">Flow</span>
-            <input type="range" min="0.05" max="1" step="0.05" v-model.number="brush.opacity.value" class="flex-1 accent-white cursor-pointer" />
-            <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ Math.round(brush.opacity.value * 100) }}</span>
-          </div>
+          <StudioSlider class="mb-2" v-model="brush.sizePx.value" label="Size" :min="2" :max="240" :step="1" :bindable="false" />
+          <StudioSlider class="mb-2" v-model="brush.opacity.value" label="Flow" :min="0.05" :max="1" :step="0.05" :bindable="false" />
           <div class="flex items-center gap-2 mb-2">
             <span class="text-[10px] text-white/40 w-12 shrink-0">Soft</span>
             <input type="range" min="0" max="1" step="0.05" :value="1 - brush.hardness.value"
@@ -7490,12 +7474,9 @@ onUnmounted(() => {
 
               <div v-if="textPath" class="mt-2.5 space-y-2.5">
                 <!-- Curve: one dial from flat, through an arch, to a closed ring. -->
-                <div v-if="textPath.follow === 'curve'">
-                  <div class="panel-label mb-1">Bend · {{ Math.round((textPath.bend ?? 0) * 100) }}%</div>
-                  <input type="range" min="-1" max="1" step="0.01" :value="textPath.bend ?? 0"
-                    class="w-full accent-white cursor-pointer"
-                    @input="setTextPath(selectedLocal, { bend: parseFloat(($event.target as HTMLInputElement).value) })" />
-                </div>
+                <StudioSlider v-if="textPath.follow === 'curve'" label="Bend"
+                  :model-value="textPath.bend ?? 0" :min="-1" :max="1" :step="0.01" :bindable="false"
+                  @update:model-value="(v) => setTextPath(selectedLocal, { bend: v })" />
 
                 <div v-if="textPath.follow === 'circle'" class="grid grid-cols-2 gap-3">
                   <div>
@@ -7685,16 +7666,12 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
-                  <div>
-                    <div class="panel-label mb-1">Jitter X · {{ Math.round((selectedLocal as any).expressive.jitterX * 100) }}%</div>
-                    <input type="range" min="0" max="1" step="0.05" :value="(selectedLocal as any).expressive.jitterX"
-                      class="w-full" @input="setExpressive(selectedLocal, { jitterX: parseFloat(($event.target as HTMLInputElement).value) })" />
-                  </div>
-                  <div>
-                    <div class="panel-label mb-1">Jitter Y · {{ Math.round((selectedLocal as any).expressive.jitterY * 100) }}%</div>
-                    <input type="range" min="0" max="1" step="0.05" :value="(selectedLocal as any).expressive.jitterY"
-                      class="w-full" @input="setExpressive(selectedLocal, { jitterY: parseFloat(($event.target as HTMLInputElement).value) })" />
-                  </div>
+                  <StudioSlider label="Jitter X" :model-value="(selectedLocal as any).expressive.jitterX"
+                    :min="0" :max="1" :step="0.05" :bindable="false"
+                    @update:model-value="(v) => setExpressive(selectedLocal, { jitterX: v })" />
+                  <StudioSlider label="Jitter Y" :model-value="(selectedLocal as any).expressive.jitterY"
+                    :min="0" :max="1" :step="0.05" :bindable="false"
+                    @update:model-value="(v) => setExpressive(selectedLocal, { jitterY: v })" />
                 </div>
                 <button
                   class="w-full flex items-center justify-center gap-1.5 bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-xs text-white/80 hover:text-white"
@@ -7795,12 +7772,9 @@ onUnmounted(() => {
                 class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                 @input="setLocal(selectedLocal!.id, { sides: Math.max(3, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 3)) })" />
             </div>
-            <div>
-              <div class="panel-label mb-1.5">Corner radius</div>
-              <input type="range" min="0" max="1" step="0.01" :value="(selectedLocal as any).cornerRadius"
-                class="w-full accent-white cursor-pointer"
-                @input="setLocal(selectedLocal!.id, { cornerRadius: parseFloat(($event.target as HTMLInputElement).value) || 0 })" />
-            </div>
+            <StudioSlider label="Corner radius" :model-value="(selectedLocal as any).cornerRadius"
+              :min="0" :max="1" :step="0.01" :bindable="false"
+              @update:model-value="(v) => setLocal(selectedLocal!.id, { cornerRadius: v })" />
           </template>
 
           <!-- Star controls -->
@@ -7828,18 +7802,12 @@ onUnmounted(() => {
                 class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                 @input="setLocal(selectedLocal!.id, { points: Math.max(3, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 3)) })" />
             </div>
-            <div>
-              <div class="panel-label mb-1.5">Inner radius</div>
-              <input type="range" min="0.01" max="0.99" step="0.01" :value="(selectedLocal as any).innerRatio"
-                class="w-full accent-white cursor-pointer"
-                @input="setLocal(selectedLocal!.id, { innerRatio: parseFloat(($event.target as HTMLInputElement).value) || 0.5 })" />
-            </div>
-            <div>
-              <div class="panel-label mb-1.5">Corner radius</div>
-              <input type="range" min="0" max="1" step="0.01" :value="(selectedLocal as any).cornerRadius"
-                class="w-full accent-white cursor-pointer"
-                @input="setLocal(selectedLocal!.id, { cornerRadius: parseFloat(($event.target as HTMLInputElement).value) || 0 })" />
-            </div>
+            <StudioSlider label="Inner radius" :model-value="(selectedLocal as any).innerRatio"
+              :min="0.01" :max="0.99" :step="0.01" :bindable="false"
+              @update:model-value="(v) => setLocal(selectedLocal!.id, { innerRatio: v })" />
+            <StudioSlider label="Corner radius" :model-value="(selectedLocal as any).cornerRadius"
+              :min="0" :max="1" :step="0.01" :bindable="false"
+              @update:model-value="(v) => setLocal(selectedLocal!.id, { cornerRadius: v })" />
           </template>
 
           <!-- Line controls -->
@@ -8391,16 +8359,12 @@ onUnmounted(() => {
           <div>
             <div class="panel-label mb-1.5">Distort</div>
             <div class="grid grid-cols-2 gap-3 mb-2">
-              <div>
-                <div class="flex items-center justify-between panel-sublabel mb-1"><span>Slant X</span><span class="tabular-nums normal-case">{{ Math.round((selectedLocal as any).skewX || 0) }}°</span></div>
-                <input type="range" min="-60" max="60" step="1" :value="(selectedLocal as any).skewX || 0" class="w-full accent-white cursor-pointer"
-                  @input="setLocal(selectedLocal!.id, { skewX: parseFloat(($event.target as HTMLInputElement).value) || 0 } as any)" />
-              </div>
-              <div>
-                <div class="flex items-center justify-between panel-sublabel mb-1"><span>Slant Y</span><span class="tabular-nums normal-case">{{ Math.round((selectedLocal as any).skewY || 0) }}°</span></div>
-                <input type="range" min="-60" max="60" step="1" :value="(selectedLocal as any).skewY || 0" class="w-full accent-white cursor-pointer"
-                  @input="setLocal(selectedLocal!.id, { skewY: parseFloat(($event.target as HTMLInputElement).value) || 0 } as any)" />
-              </div>
+              <StudioSlider label="Slant X" :model-value="(selectedLocal as any).skewX || 0"
+                :min="-60" :max="60" :step="1" :bindable="false"
+                @update:model-value="(v) => setLocal(selectedLocal!.id, { skewX: v } as any)" />
+              <StudioSlider label="Slant Y" :model-value="(selectedLocal as any).skewY || 0"
+                :min="-60" :max="60" :step="1" :bindable="false"
+                @update:model-value="(v) => setLocal(selectedLocal!.id, { skewY: v } as any)" />
             </div>
             <div class="mb-2">
               <div class="flex items-center justify-between panel-sublabel mb-1"><span>Perspective</span><span class="tabular-nums normal-case">{{ Math.round(perspectiveAmount(selectedLocal) * 100) }}</span></div>
@@ -8487,12 +8451,9 @@ onUnmounted(() => {
               <div v-if="selectedBreak()" class="mt-1.5 space-y-1.5">
                 <StudioSegmented :options="['top','bottom','left','right']" :model-value="breakEdge()"
                   @update:model-value="(e: string) => setBreakEdge(e as any)" />
-                <div>
-                  <div class="panel-sublabel mb-1">Offset</div>
-                  <input type="range" min="0" max="1" step="0.01" :value="breakOffset()"
-                    class="w-full accent-white cursor-pointer"
-                    @input="setBreakOffset(parseFloat(($event.target as HTMLInputElement).value) || 0)" />
-                </div>
+                <StudioSlider label="Offset" :model-value="breakOffset()"
+                  :min="0" :max="1" :step="0.01" :bindable="false"
+                  @update:model-value="(v) => setBreakOffset(v)" />
               </div>
             </div>
           </div>
@@ -8668,16 +8629,12 @@ onUnmounted(() => {
                     @click="setGroupExpressive(soleSelectedGroup!, { placement: p })">{{ p }}</button>
                 </div>
               </div>
-              <div>
-                <div class="panel-label mb-1">Jitter · {{ Math.round(soleSelectedGroupExpr.jitter * 100) }}%</div>
-                <input type="range" min="0" max="1" step="0.05" :value="soleSelectedGroupExpr.jitter" class="w-full"
-                  @input="setGroupExpressive(soleSelectedGroup!, { jitter: parseFloat(($event.target as HTMLInputElement).value) })">
-              </div>
-              <div>
-                <div class="panel-label mb-1">Rotation · {{ Math.round(soleSelectedGroupExpr.rotation * 100) }}%</div>
-                <input type="range" min="0" max="1" step="0.05" :value="soleSelectedGroupExpr.rotation" class="w-full"
-                  @input="setGroupExpressive(soleSelectedGroup!, { rotation: parseFloat(($event.target as HTMLInputElement).value) })">
-              </div>
+              <StudioSlider label="Jitter" :model-value="soleSelectedGroupExpr.jitter"
+                :min="0" :max="1" :step="0.05" :bindable="false"
+                @update:model-value="(v) => setGroupExpressive(soleSelectedGroup!, { jitter: v })" />
+              <StudioSlider label="Rotation" :model-value="soleSelectedGroupExpr.rotation"
+                :min="0" :max="1" :step="0.05" :bindable="false"
+                @update:model-value="(v) => setGroupExpressive(soleSelectedGroup!, { rotation: v })" />
               <div>
                 <div class="panel-label mb-1">Justify (spread to edges)</div>
                 <div class="flex gap-1">

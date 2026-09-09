@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { DEFAULT_CLONER, type Cloner } from '~/composables/useCloner'
 // The ONE Vary swatch-list editor, shared with the 3D Studio inspector.
 import VaryPalette from '~/components/vue-canvas/VaryPalette.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import type { VaryMode, VarySpread } from '~/lib/vary'
 
 const props = defineProps<{ cloner: Cloner | undefined }>()
@@ -84,20 +85,10 @@ const total = computed(() => {
               @input="up({ countY: Math.max(1, Math.round(num($event))) })" />
           </label>
         </div>
-        <div class="mb-3">
-          <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-            <span>Spacing X</span><span class="tabular-nums normal-case">{{ c.spacingX.toFixed(2) }}</span>
-          </div>
-          <input type="range" min="-1" max="1" step="0.01" :value="c.spacingX"
-            class="w-full accent-white cursor-pointer" @input="up({ spacingX: num($event) })" />
-        </div>
-        <div class="mb-3">
-          <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-            <span>Spacing Y</span><span class="tabular-nums normal-case">{{ c.spacingY.toFixed(2) }}</span>
-          </div>
-          <input type="range" min="-1" max="1" step="0.01" :value="c.spacingY"
-            class="w-full accent-white cursor-pointer" @input="up({ spacingY: num($event) })" />
-        </div>
+        <StudioSlider :model-value="c.spacingX" @update:model-value="(v) => up({ spacingX: v })"
+          label="Spacing X" :min="-1" :max="1" :step="0.01" :bindable="false" />
+        <StudioSlider :model-value="c.spacingY" @update:model-value="(v) => up({ spacingY: v })"
+          label="Spacing Y" :min="-1" :max="1" :step="0.01" :bindable="false" />
         <!-- Mirror: also clone in the opposite direction (original stays centered) -->
         <div class="mb-1">
           <div class="text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">Mirror</div>
@@ -119,20 +110,10 @@ const total = computed(() => {
         <!-- Stagger: brick-style offset of alternating rows/cols (fraction of spacing) -->
         <div class="mt-3">
           <div class="text-[9px] uppercase tracking-[0.1em] text-white/35 mb-2">Stagger</div>
-          <div class="mb-3">
-            <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-              <span>X (rows)</span><span class="tabular-nums normal-case">{{ c.staggerX.toFixed(2) }}</span>
-            </div>
-            <input type="range" min="0" max="1" step="0.01" :value="c.staggerX"
-              class="w-full accent-white cursor-pointer" @input="up({ staggerX: num($event) })" />
-          </div>
-          <div>
-            <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-              <span>Y (cols)</span><span class="tabular-nums normal-case">{{ c.staggerY.toFixed(2) }}</span>
-            </div>
-            <input type="range" min="0" max="1" step="0.01" :value="c.staggerY"
-              class="w-full accent-white cursor-pointer" @input="up({ staggerY: num($event) })" />
-          </div>
+          <StudioSlider :model-value="c.staggerX" @update:model-value="(v) => up({ staggerX: v })"
+            label="X (rows)" :min="0" :max="1" :step="0.01" :bindable="false" />
+          <StudioSlider :model-value="c.staggerY" @update:model-value="(v) => up({ staggerY: v })"
+            label="Y (cols)" :min="0" :max="1" :step="0.01" :bindable="false" />
         </div>
       </template>
 
@@ -152,20 +133,10 @@ const total = computed(() => {
               @input="up({ radius: Math.max(0, num($event)) })" />
           </label>
         </div>
-        <div class="mb-3">
-          <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-            <span>Start angle</span><span class="tabular-nums normal-case">{{ Math.round(c.startAngle) }}°</span>
-          </div>
-          <input type="range" min="-180" max="180" step="1" :value="c.startAngle"
-            class="w-full accent-white cursor-pointer" @input="up({ startAngle: num($event) })" />
-        </div>
-        <div class="mb-3">
-          <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-            <span>Sweep</span><span class="tabular-nums normal-case">{{ Math.round(c.sweepAngle) }}°</span>
-          </div>
-          <input type="range" min="0" max="360" step="1" :value="c.sweepAngle"
-            class="w-full accent-white cursor-pointer" @input="up({ sweepAngle: num($event) })" />
-        </div>
+        <StudioSlider :model-value="c.startAngle" @update:model-value="(v) => up({ startAngle: v })"
+          label="Start angle" :min="-180" :max="180" :step="1" :bindable="false" />
+        <StudioSlider :model-value="c.sweepAngle" @update:model-value="(v) => up({ sweepAngle: v })"
+          label="Sweep" :min="0" :max="360" :step="1" :bindable="false" />
         <label class="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none mb-1">
           <input type="checkbox" :checked="c.faceCenter" @change="up({ faceCenter: (($event.target as HTMLInputElement).checked) })" />
           Face center
@@ -175,44 +146,19 @@ const total = computed(() => {
       <!-- Falloff (shared) -->
       <div class="mt-3 pt-3 border-t border-white/[0.07]">
         <div class="text-[9px] uppercase tracking-[0.1em] text-white/35 mb-2">Falloff</div>
-        <div class="mb-3">
-          <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-            <span>Rotation</span><span class="tabular-nums normal-case">{{ Math.round(c.stepRotation) }}°</span>
-          </div>
-          <input type="range" min="-90" max="90" step="1" :value="c.stepRotation"
-            class="w-full accent-white cursor-pointer" @input="up({ stepRotation: num($event) })" />
-        </div>
+        <StudioSlider :model-value="c.stepRotation" @update:model-value="(v) => up({ stepRotation: v })"
+          label="Rotation" :min="-90" :max="90" :step="1" :bindable="false" />
         <!-- Nudge: progressive drift per clone (linear/grid only) -->
         <template v-if="c.mode === 'linear'">
-          <div class="mb-3">
-            <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-              <span>Nudge X</span><span class="tabular-nums normal-case">{{ c.nudgeX.toFixed(2) }}</span>
-            </div>
-            <input type="range" min="-0.5" max="0.5" step="0.01" :value="c.nudgeX"
-              class="w-full accent-white cursor-pointer" @input="up({ nudgeX: num($event) })" />
-          </div>
-          <div class="mb-3">
-            <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-              <span>Nudge Y</span><span class="tabular-nums normal-case">{{ c.nudgeY.toFixed(2) }}</span>
-            </div>
-            <input type="range" min="-0.5" max="0.5" step="0.01" :value="c.nudgeY"
-              class="w-full accent-white cursor-pointer" @input="up({ nudgeY: num($event) })" />
-          </div>
+          <StudioSlider :model-value="c.nudgeX" @update:model-value="(v) => up({ nudgeX: v })"
+            label="Nudge X" :min="-0.5" :max="0.5" :step="0.01" :bindable="false" />
+          <StudioSlider :model-value="c.nudgeY" @update:model-value="(v) => up({ nudgeY: v })"
+            label="Nudge Y" :min="-0.5" :max="0.5" :step="0.01" :bindable="false" />
         </template>
-        <div class="mb-3">
-          <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-            <span>Scale</span><span class="tabular-nums normal-case">{{ c.stepScale.toFixed(2) }}×</span>
-          </div>
-          <input type="range" min="0.5" max="1.5" step="0.01" :value="c.stepScale"
-            class="w-full accent-white cursor-pointer" @input="up({ stepScale: num($event) })" />
-        </div>
-        <div>
-          <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-            <span>Opacity</span><span class="tabular-nums normal-case">{{ c.stepOpacity.toFixed(2) }}×</span>
-          </div>
-          <input type="range" min="0.3" max="1" step="0.01" :value="c.stepOpacity"
-            class="w-full accent-white cursor-pointer" @input="up({ stepOpacity: num($event) })" />
-        </div>
+        <StudioSlider :model-value="c.stepScale" @update:model-value="(v) => up({ stepScale: v })"
+          label="Scale" :min="0.5" :max="1.5" :step="0.01" :bindable="false" />
+        <StudioSlider :model-value="c.stepOpacity" @update:model-value="(v) => up({ stepOpacity: v })"
+          label="Opacity" :min="0.3" :max="1" :step="0.01" :bindable="false" />
       </div>
 
       <!-- Vary — how a property changes from one copy to the next. Same three

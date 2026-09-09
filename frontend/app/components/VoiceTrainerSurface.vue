@@ -11,6 +11,7 @@
  */
 import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import { Mic, Upload, Check, Loader2, AlertCircle, ChevronDown } from 'lucide-vue-next'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import { validateVoiceSample } from '~/lib/voiceSample'
 
 const name = ref('')
@@ -300,9 +301,8 @@ onBeforeUnmount(revokePreview)
           <input type="checkbox" v-model="advanced.volumeNormalization" class="size-3.5 rounded border-white/20 bg-white/[0.04] cursor-pointer accent-white" />
           <span class="text-[12px] text-white/70">Volume normalization</span>
         </label>
-        <div class="flex items-center gap-3 pt-1">
-          <span class="text-[12px] text-white/70 w-[120px]">Accuracy <span class="text-white/40 tabular-nums">{{ advanced.accuracy.toFixed(2) }}</span></span>
-          <input type="range" min="0" max="1" step="0.05" v-model.number="advanced.accuracy" class="flex-1 accent-white cursor-pointer" />
+        <div class="pt-1">
+          <StudioSlider v-model="advanced.accuracy" label="Accuracy" :min="0" :max="1" :step="0.05" :bindable="false" />
         </div>
       </div>
     </section>

@@ -9,6 +9,7 @@
 import { Frame } from 'lucide-vue-next'
 
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import type { GridEditorContext } from '~/composables/useGridEditor'
 
 const ctx = inject<GridEditorContext>('gridEditor')!
@@ -37,12 +38,12 @@ const strokeHex = computed(() => (/^#[0-9a-f]{6}$/i.test(st.value.stroke ?? '') 
 function patch(p: Partial<NonNullable<typeof st.value>>) { if (section.value) setSectionStyle(section.value.id, p) }
 
 const paddingVal = computed(() => section.value?.layout?.padding?.top ?? 0)
-function clamp12(raw: string) { return Math.max(0, Math.min(12, Number(raw))) }
-function onGap(e: Event) { if (section.value) updateStackLayout(section.value.id, { gap: clamp12((e.target as HTMLInputElement).value) }) }
-function onPadding(e: Event) {
+function clamp12(raw: number) { return Math.max(0, Math.min(12, Number(raw))) }
+function onGap(v: number) { if (section.value) updateStackLayout(section.value.id, { gap: clamp12(v) }) }
+function onPadding(v: number) {
   if (!section.value) return
-  const v = clamp12((e.target as HTMLInputElement).value)
-  updateStackLayout(section.value.id, { padding: { top: v, right: v, bottom: v, left: v } })
+  const p = clamp12(v)
+  updateStackLayout(section.value.id, { padding: { top: p, right: p, bottom: p, left: p } })
 }
 </script>
 
@@ -105,17 +106,10 @@ function onPadding(e: Event) {
       </div>
 
       <!-- Corner radius -->
-      <div>
-        <p :class="labelCls" class="mb-1">Corner radius</p>
-        <div class="flex items-center gap-2">
-          <input
-            type="range" min="0" max="80" step="1" :value="st.radius ?? 0"
-            class="flex-1"
-            @input="(e: any) => patch({ radius: Math.max(0, Number(e.target.value)) })"
-          >
-          <span class="text-[11px] text-white/50 tabular-nums w-6 text-right">{{ st.radius ?? 0 }}</span>
-        </div>
-      </div>
+      <StudioSlider
+        label="Corner radius" :min="0" :max="80" :step="1" :bindable="false"
+        :model-value="st.radius ?? 0" @update:model-value="(v) => patch({ radius: Math.max(0, v) })"
+      />
 
       <!-- Clip content -->
       <button
@@ -161,21 +155,15 @@ function onPadding(e: Event) {
           </div>
         </div>
 
-        <div>
-          <p :class="labelCls" class="mb-1">Gap</p>
-          <div class="flex items-center gap-2">
-            <input type="range" min="0" max="12" step="1" :value="section.layout?.gap ?? 0" class="flex-1" @input="onGap">
-            <span class="text-[11px] text-white/50 tabular-nums w-4">{{ section.layout?.gap ?? 0 }}</span>
-          </div>
-        </div>
+        <StudioSlider
+          label="Gap" :min="0" :max="12" :step="1" :bindable="false"
+          :model-value="section.layout?.gap ?? 0" @update:model-value="onGap"
+        />
 
-        <div>
-          <p :class="labelCls" class="mb-1">Padding</p>
-          <div class="flex items-center gap-2">
-            <input type="range" min="0" max="12" step="1" :value="paddingVal" class="flex-1" @input="onPadding">
-            <span class="text-[11px] text-white/50 tabular-nums w-4">{{ paddingVal }}</span>
-          </div>
-        </div>
+        <StudioSlider
+          label="Padding" :min="0" :max="12" :step="1" :bindable="false"
+          :model-value="paddingVal" @update:model-value="onPadding"
+        />
 
         <div>
           <p :class="labelCls" class="mb-1.5">Main align</p>
@@ -226,16 +214,10 @@ function onPadding(e: Event) {
             <span class="text-[11px] text-white/50 tabular-nums w-8">{{ expr.columns || 'auto' }}</span>
           </div>
         </div>
-        <div>
-          <p :class="labelCls" class="mb-1">Jitter · {{ Math.round(expr.jitter * 100) }}%</p>
-          <input type="range" min="0" max="1" step="0.05" :value="expr.jitter" class="w-full"
-            @input="(e: any) => setExpr({ jitter: Number(e.target.value) })">
-        </div>
-        <div>
-          <p :class="labelCls" class="mb-1">Rotation · {{ Math.round(expr.rotation * 100) }}%</p>
-          <input type="range" min="0" max="1" step="0.05" :value="expr.rotation" class="w-full"
-            @input="(e: any) => setExpr({ rotation: Number(e.target.value) })">
-        </div>
+        <StudioSlider label="Jitter" :min="0" :max="1" :step="0.05" :bindable="false"
+          :model-value="expr.jitter" @update:model-value="(v) => setExpr({ jitter: v })" />
+        <StudioSlider label="Rotation" :min="0" :max="1" :step="0.05" :bindable="false"
+          :model-value="expr.rotation" @update:model-value="(v) => setExpr({ rotation: v })" />
         <div>
           <p :class="labelCls" class="mb-1">Justify (spread to edges)</p>
           <div class="flex gap-1">

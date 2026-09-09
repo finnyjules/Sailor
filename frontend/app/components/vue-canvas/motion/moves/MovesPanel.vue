@@ -63,6 +63,7 @@
 import { computed } from 'vue'
 import { Plus, Trash2 } from 'lucide-vue-next'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import type { MovesAdapter } from '~/lib/studio/moves/adapter'
 import type { Move, MotionClip, MoveTrack } from '~/lib/studio/moves/types'
 import { EASE_LABELS, easeGlyphPath } from '~/lib/studio/moves/ease'
@@ -174,8 +175,7 @@ function patchTrackNumber(index: number, field: 'from' | 'to', raw: string) {
 
 const FPS_OPTIONS = [24, 30, 60] as const
 
-function setClipDuration(raw: string) {
-  const n = Number(raw)
+function setClipDuration(n: number) {
   if (!Number.isFinite(n)) return
   emit('patch-clip', { duration: Math.max(0.5, Math.min(30, n)) })
 }
@@ -325,18 +325,10 @@ function setClipFps(raw: string) {
     <!-- Nothing selected: clip settings -->
     <template v-else>
       <StudioSection title="Clip">
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-[11px] text-white/60">Length</span>
-          <span class="flex items-center gap-2">
-            <input
-              type="range" min="0.5" max="30" step="0.1"
-              class="w-28 accent-white/70"
-              :value="clip.duration"
-              @input="setClipDuration(($event.target as HTMLInputElement).value)"
-            />
-            <span class="w-10 text-right text-[11px] text-white/75">{{ clip.duration.toFixed(1) }}s</span>
-          </span>
-        </div>
+        <StudioSlider
+          :model-value="clip.duration" @update:model-value="(v) => setClipDuration(v)"
+          label="Length" :min="0.5" :max="30" :step="0.1" :bindable="false"
+        />
         <div class="flex items-center justify-between gap-2">
           <span class="text-[11px] text-white/60">Frame rate</span>
           <select

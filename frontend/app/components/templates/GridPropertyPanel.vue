@@ -7,6 +7,7 @@
 import { ChevronLeft, ChevronRight, Layers, Trash2, Type as TypeIcon, Image as ImageIcon, Square, Sparkles, Loader2, Expand, ArrowUp } from 'lucide-vue-next'
 
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import VariableGlyph from '~/components/vue-canvas/studio/VariableGlyph.vue'
 import { useGoogleFontPreview } from '~/composables/useTemplateFonts'
 import { useCopyAssist } from '~/composables/useCopyAssist'
@@ -905,16 +906,10 @@ const btnRowCls = 'flex-1 h-7 rounded text-[11px] transition-colors cursor-point
             </div>
           </div>
           <div class="grid grid-cols-2 gap-2 mb-2">
-            <div>
-              <p :class="labelCls" class="mb-1">Jitter X · {{ Math.round(expressive.jitterX * 100) }}%</p>
-              <input type="range" min="0" max="1" step="0.05" :value="expressive.jitterX" class="w-full"
-                @input="(e: any) => setExpressive({ jitterX: Number(e.target.value) })">
-            </div>
-            <div>
-              <p :class="labelCls" class="mb-1">Jitter Y · {{ Math.round(expressive.jitterY * 100) }}%</p>
-              <input type="range" min="0" max="1" step="0.05" :value="expressive.jitterY" class="w-full"
-                @input="(e: any) => setExpressive({ jitterY: Number(e.target.value) })">
-            </div>
+            <StudioSlider label="Jitter X" :min="0" :max="1" :step="0.05" :bindable="false"
+              :model-value="expressive.jitterX" @update:model-value="(v) => setExpressive({ jitterX: v })" />
+            <StudioSlider label="Jitter Y" :min="0" :max="1" :step="0.05" :bindable="false"
+              :model-value="expressive.jitterY" @update:model-value="(v) => setExpressive({ jitterY: v })" />
           </div>
           <button :class="[btnRowCls, 'w-full bg-white/[0.04] text-white/70 hover:bg-white/[0.08]']"
             @click="rerollExpressive()">⟳ Reroll</button>
@@ -1005,17 +1000,10 @@ const btnRowCls = 'flex-1 h-7 rounded text-[11px] transition-colors cursor-point
             </button>
           </div>
           <div class="grid grid-cols-2 gap-2 mt-2">
-            <div>
-              <p :class="labelCls" class="mb-1">Opacity</p>
-              <div class="flex items-center gap-2">
-                <input
-                  type="range" min="0" max="1" step="0.05" :value="panel.opacity ?? 0.5"
-                  class="flex-1"
-                  @input="(e: any) => setPanel({ opacity: Number(e.target.value) })"
-                >
-                <span class="text-[11px] text-white/50 tabular-nums w-8">{{ Math.round((panel.opacity ?? 0.5) * 100) }}%</span>
-              </div>
-            </div>
+            <StudioSlider
+              label="Opacity" :min="0" :max="1" :step="0.05" :bindable="false"
+              :model-value="panel.opacity ?? 0.5" @update:model-value="(v) => setPanel({ opacity: v })"
+            />
             <div>
               <p :class="labelCls" class="mb-1">Radius</p>
               <input
@@ -1139,15 +1127,10 @@ const btnRowCls = 'flex-1 h-7 rounded text-[11px] transition-colors cursor-point
           </select>
         </div>
         <div v-if="imageTreatment.kind && imageTreatment.kind !== 'none'">
-          <p :class="labelCls" class="mb-1">Intensity</p>
-          <div class="flex items-center gap-2">
-            <input
-              type="range" min="0" max="1" step="0.05" :value="imageTreatment.intensity ?? 1"
-              class="flex-1"
-              @input="(e: any) => setTreatmentIntensity(Number(e.target.value))"
-            >
-            <span class="text-[11px] text-white/50 tabular-nums w-8">{{ Math.round((imageTreatment.intensity ?? 1) * 100) }}%</span>
-          </div>
+          <StudioSlider
+            label="Intensity" :min="0" :max="1" :step="0.05" :bindable="false"
+            :model-value="imageTreatment.intensity ?? 1" @update:model-value="(v) => setTreatmentIntensity(v)"
+          />
           <p v-if="imageTreatment.kind === 'duotone' || imageTreatment.kind === 'grain'" class="mt-1 text-[11px] text-white/35">
             Preview approximates; the final render bakes the true {{ imageTreatment.kind }}.
           </p>

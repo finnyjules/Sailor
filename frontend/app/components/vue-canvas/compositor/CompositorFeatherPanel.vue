@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { DEFAULT_FEATHER, type FeatherSpec } from '~/lib/compositor/feather'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 // `hideToggle` drops the header's Add/Remove. The Compositor's effect inspector shows one
 // existing instance and owns add/remove from the layer tree, so the button would be inert.
@@ -14,8 +15,6 @@ const emit = defineEmits<{
 const on = computed(() => !!props.value)
 const v = computed<FeatherSpec>(() => props.value ?? DEFAULT_FEATHER)
 const set = (patch: Partial<FeatherSpec>) => emit('update', patch)
-// Slider works in whole percent-of-canvas-width; store as a 0..0.5 fraction.
-const amountLabel = computed(() => v.value.amount.toFixed(2))
 </script>
 
 <template>
@@ -28,11 +27,8 @@ const amountLabel = computed(() => v.value.amount.toFixed(2))
 
     <template v-if="on">
       <div class="space-y-2">
-        <div>
-          <div class="flex items-center justify-between panel-sublabel mb-1"><span>Amount</span><span class="tabular-nums normal-case">{{ amountLabel }}</span></div>
-          <input type="range" min="0" max="1" step="0.01" :value="v.amount" class="w-full accent-white cursor-pointer"
-            @input="set({ amount: +($event.target as HTMLInputElement).value })">
-        </div>
+        <StudioSlider :model-value="v.amount" @update:model-value="(val) => set({ amount: val })"
+          label="Amount" :min="0" :max="1" :step="0.01" :bindable="false" />
 
         <div>
           <div class="panel-sublabel mb-1">Falloff</div>

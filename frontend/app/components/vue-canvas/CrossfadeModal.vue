@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { X, Play, Pause, RotateCw } from 'lucide-vue-next'
 import { resolveClipSource, type ClipSource } from '~~/shared/timeline/resolveClipSource'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 const props = defineProps<{
   nodeId: string
@@ -693,10 +694,10 @@ const hasBothSources = computed(() => !!clipA.value && !!clipB.value)
               frames<br>≈ {{ (duration / FPS).toFixed(2) }}s
             </span>
           </div>
-          <input
-            type="range" min="1" max="120" step="1" :value="duration"
-            class="accent-white mt-1"
-            @input="duration = parseInt(($event.target as HTMLInputElement).value) || 1"
+          <!-- label blank: the "Duration" section header above already names it. -->
+          <StudioSlider
+            label="" :min="1" :max="120" :step="1" :bindable="false"
+            :model-value="duration" @update:model-value="(v) => duration = Math.max(1, Math.round(v))"
           />
         </div>
 

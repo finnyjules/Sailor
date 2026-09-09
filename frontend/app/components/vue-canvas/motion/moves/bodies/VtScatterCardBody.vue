@@ -17,6 +17,7 @@
  * what this font actually declares.
  */
 import { computed } from 'vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import {
   VT_SCATTER_MODES,
   VT_SCATTER_RATE_MAX,
@@ -36,23 +37,14 @@ const scatter = computed(() => props.cfg?.motion?.scatter ?? DEFAULT_SCATTER)
 function patch(field: string, value: number | string) {
   emit('patch-cfg', { motion: { scatter: { [field]: value } } })
 }
-function setNum(field: string, raw: string) {
-  const n = Number(raw)
-  if (Number.isFinite(n)) patch(field, n)
-}
 </script>
 
 <template>
   <div class="flex flex-col gap-1.5">
-    <label class="flex items-center gap-2 text-[11px] text-white/60">
-      <span class="w-16 shrink-0">Spread</span>
-      <input
-        type="range" min="0" max="1" step="0.05" :value="scatter.spread"
-        class="studio-range flex-1"
-        @input="setNum('spread', ($event.target as HTMLInputElement).value)"
-      />
-      <span class="w-9 shrink-0 text-right tabular-nums text-white/70">{{ scatter.spread.toFixed(2) }}</span>
-    </label>
+    <StudioSlider
+      :model-value="scatter.spread" @update:model-value="(v) => patch('spread', v)"
+      label="Spread" :min="0" :max="1" :step="0.05" :bindable="false"
+    />
     <label class="flex items-center gap-2 text-[11px] text-white/60">
       <span class="w-16 shrink-0">Axis</span>
       <input
@@ -72,32 +64,19 @@ function setNum(field: string, raw: string) {
         <option v-for="m in VT_SCATTER_MODES" :key="m" :value="m">{{ m }}</option>
       </select>
     </label>
-    <label v-if="scatter.mode === 'settle'" class="flex items-center gap-2 text-[11px] text-white/60">
-      <span class="w-16 shrink-0">Settle time</span>
-      <input
-        type="range" min="0" :max="VT_SCATTER_SETTLE_MAX" step="0.05" :value="scatter.settle"
-        class="studio-range flex-1"
-        @input="setNum('settle', ($event.target as HTMLInputElement).value)"
-      />
-      <span class="w-9 shrink-0 text-right tabular-nums text-white/70">{{ scatter.settle.toFixed(2) }}</span>
-    </label>
-    <label v-else class="flex items-center gap-2 text-[11px] text-white/60">
-      <span class="w-16 shrink-0">Drift rate</span>
-      <input
-        type="range" min="0" :max="VT_SCATTER_RATE_MAX" step="0.05" :value="scatter.rate"
-        class="studio-range flex-1"
-        @input="setNum('rate', ($event.target as HTMLInputElement).value)"
-      />
-      <span class="w-9 shrink-0 text-right tabular-nums text-white/70">{{ scatter.rate.toFixed(2) }}</span>
-    </label>
-    <label class="flex items-center gap-2 text-[11px] text-white/60">
-      <span class="w-16 shrink-0">Seed</span>
-      <input
-        type="range" min="0" :max="VT_SCATTER_SEED_MAX" step="1" :value="scatter.seed"
-        class="studio-range flex-1"
-        @input="setNum('seed', ($event.target as HTMLInputElement).value)"
-      />
-      <span class="w-9 shrink-0 text-right tabular-nums text-white/70">{{ scatter.seed }}</span>
-    </label>
+    <StudioSlider
+      v-if="scatter.mode === 'settle'"
+      :model-value="scatter.settle" @update:model-value="(v) => patch('settle', v)"
+      label="Settle time" :min="0" :max="VT_SCATTER_SETTLE_MAX" :step="0.05" :bindable="false"
+    />
+    <StudioSlider
+      v-else
+      :model-value="scatter.rate" @update:model-value="(v) => patch('rate', v)"
+      label="Drift rate" :min="0" :max="VT_SCATTER_RATE_MAX" :step="0.05" :bindable="false"
+    />
+    <StudioSlider
+      :model-value="scatter.seed" @update:model-value="(v) => patch('seed', v)"
+      label="Seed" :min="0" :max="VT_SCATTER_SEED_MAX" :step="1" :bindable="false"
+    />
   </div>
 </template>

@@ -1063,10 +1063,7 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
           <select v-model="activeEffectCfg.blend" class="mb-2 w-full rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-xs capitalize">
             <option v-for="b in BLEND_MODES" :key="b" :value="b">{{ b }}</option>
           </select>
-          <label class="mb-0.5 flex justify-between text-[11px] text-white/60">
-            <span>Opacity</span><span class="text-white/40">{{ activeEffectCfg.opacity.toFixed(2) }}</span>
-          </label>
-          <input v-model.number="activeEffectCfg.opacity" type="range" min="0" max="1" step="0.01" v-studio-reset class="studio-range w-full" />
+          <StudioSlider v-model="activeEffectCfg.opacity" label="Opacity" :min="0" :max="1" :step="0.01" :bindable="false" />
         </template>
 
         <!-- Mask — confine this effect to a region (radius / band / linear falloff).

@@ -15,6 +15,7 @@
  */
 import { ArrowRight, Bookmark, Check, Copy, Download, Image as ImageIcon, Loader2, RefreshCcw, Sparkles, Upload, X } from 'lucide-vue-next'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 type Step = 1 | 2 | 3
 const step = ref<Step>(1)
@@ -786,21 +787,13 @@ function deleteLook(id: string) {
                by regenerating the whole scene, which moves the product. -->
           <div v-if="blendModel === 'Flux Kontext Pro'" class="space-y-4">
             <div>
-              <div class="flex items-center justify-between mb-1.5">
-                <label class="text-[12px] text-white/70">Preserve product</label>
-                <span class="text-[11px] text-white/45 tabular-nums">{{ Math.round(preserve * 100) }}%</span>
-              </div>
-              <input v-model.number="preserve" type="range" min="0" max="1" step="0.05" class="w-full accent-[#ffb55c] cursor-pointer" />
+              <StudioSlider v-model="preserve" label="Preserve product" :min="0" :max="1" :step="0.05" :bindable="false" />
               <p class="text-[10.5px] text-white/35 mt-1 leading-snug">
                 Higher keeps it pixel-exact (crisp labels, can look pasted). Lower lets it relight into the scene.
               </p>
             </div>
             <div>
-              <div class="flex items-center justify-between mb-1.5">
-                <label class="text-[12px] text-white/70">Edge blend</label>
-                <span class="text-[11px] text-white/45 tabular-nums">{{ edgeBlend }}px</span>
-              </div>
-              <input v-model.number="edgeBlend" type="range" min="0" max="20" step="1" class="w-full accent-[#ffb55c] cursor-pointer" />
+              <StudioSlider v-model="edgeBlend" label="Edge blend" :min="0" :max="20" :step="1" :bindable="false" />
               <p class="text-[10.5px] text-white/35 mt-1 leading-snug">How softly the product’s edges melt into the scene.</p>
             </div>
           </div>
