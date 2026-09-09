@@ -450,7 +450,7 @@ watch(eligible, (ok) => {
             :disabled="stopsValue(row).length >= (row.maxStops ?? 8)" @click="addRowStop(row)"><Plus :size="12" /> Add ink</button>
         </div>
         <PalettePicker
-          mode="stops"
+          mode="stops" manual-stops
           :stop-count="stopsValue(row).length || 3"
           :seed="stopsValue(row)[0]?.color ?? '#4f8ad9'"
           @apply-stops="(v: GradientStop[]) => applyRowStops(row, v)"

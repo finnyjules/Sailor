@@ -23,7 +23,10 @@ const props = withDefaults(defineProps<{
   stopCount?: number
   /** Initial seed for the "from color" pane. */
   seed?: string
-}>(), { stopCount: 4, seed: '#4f8ad9' })
+  /** Hide the Stops count stepper: the host edits stops manually (add/remove), so
+   *  the generators just match the current stop count instead of a separate dial. */
+  manualStops?: boolean
+}>(), { stopCount: 4, seed: '#4f8ad9', manualStops: false })
 
 const emit = defineEmits<{
   (e: 'apply-duotone', v: { shadow: string; highlight: string }): void
@@ -35,6 +38,9 @@ const emit = defineEmits<{
 const pane = ref<'harmony' | 'seed'>('harmony')
 const seed = ref(props.seed)
 const count = ref(Math.max(2, Math.min(8, props.stopCount)))
+// When the host manages stops manually, follow its live stop count so a generated
+// palette matches what's already there (there's no stepper to set it here).
+watch(() => props.stopCount, (n) => { if (props.manualStops) count.value = Math.max(2, Math.min(8, n)) })
 
 // --- Seed-engine pane: a shelf of PaletteFamily results from the corpus-backed
 // seed engine, applied LITERALLY (see paletteEmit.ts) rather than through the
@@ -105,7 +111,7 @@ const swatchGrad = (colors: string[]) => `linear-gradient(to right, ${colors.joi
   <div class="flex flex-col gap-2 text-white/80">
     <!-- Stops count (first) + the two generators. Wraps rather than clipping. -->
     <div class="flex flex-wrap items-center gap-1">
-      <div v-if="mode === 'stops'" class="flex items-center gap-1 rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-white/50">
+      <div v-if="mode === 'stops' && !manualStops" class="flex items-center gap-1 rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-white/50">
         <span>Stops</span>
         <button class="rounded border border-white/10 p-0.5 hover:bg-white/10 disabled:opacity-30" :disabled="count <= 2" @click="count = Math.max(2, count - 1)"><Minus :size="11" /></button>
         <span class="w-4 text-center tabular-nums text-white/80">{{ count }}</span>
