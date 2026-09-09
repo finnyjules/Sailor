@@ -1047,6 +1047,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     onCanvasPointerDown, onCanvasDblClick,
     addText, addRect, addEllipse, addLine, addPolygon, addStar, addImageFromFile, addImageFromName, addImageFromCanvasSrc,
     addPathLayers, addPathFromSvg, deleteLayers, commit, recordHistory,
+    writeOrder,
     background, setBackground,
     postEffects, setPostEffects,
     grid, setGrid,

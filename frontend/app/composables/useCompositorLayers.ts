@@ -1152,7 +1152,7 @@ function drawTintedImage(
 }
 
 /** Apply a layer's display-only case transform to a string. */
-function transformCase(s: string, t: TextLayer['textTransform']): string {
+export function transformCase(s: string, t: TextLayer['textTransform']): string {
   if (t === 'uppercase') return s.toUpperCase()
   if (t === 'lowercase') return s.toLowerCase()
   if (t === 'capitalize') return s.replace(/\b\p{L}/gu, c => c.toUpperCase())
@@ -1215,7 +1215,7 @@ export function applyFont(ctx: CanvasRenderingContext2D, layer: TextLayer, W: nu
   }
 }
 
-function cssFontStack(family: string): string {
+export function cssFontStack(family: string): string {
   // Quote families with spaces; keep a generic fallback so canvas always draws.
   const quoted = /\s/.test(family) ? `"${family}"` : family
   return `${quoted}, sans-serif`
