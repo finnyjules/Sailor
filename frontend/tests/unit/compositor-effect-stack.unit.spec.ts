@@ -64,7 +64,7 @@ describe('effect kinds', () => {
   })
   it('createEffect fills each geometry kind default with a fresh id', () => {
     expect(createEffect('trim')).toMatchObject({ type: 'trim', start: 0, end: 1, offset: 0, visible: true })
-    expect(createEffect('offset')).toMatchObject({ type: 'offset', distance: 0.01, join: 'round', visible: true })
+    expect(createEffect('offset')).toMatchObject({ type: 'offset', distance: 0.01, visible: true })
     expect(createEffect('round_corners')).toMatchObject({ type: 'round_corners', radius: 0.02, visible: true })
     expect(createEffect('roughen')).toMatchObject({ type: 'roughen', amount: 0.02, detail: 8, seed: 1, visible: true })
     const a = createEffect('trim'), b = createEffect('trim')

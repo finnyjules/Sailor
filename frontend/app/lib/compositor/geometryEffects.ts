@@ -259,16 +259,11 @@ function applyRoughen(d: string, e: GeometryEffectInput, ctx: GeometryContext): 
 // subpath's own shoelace), so a shape authored clockwise and the same shape authored
 // counter-clockwise both grow on a positive distance — the authored direction never matters.
 //
-// JOIN, honestly: offsetPolyline has exactly ONE corner treatment — an angle-bisector vertex
-// offset with a capped miter scale (a MITER-style join). It exposes no round/bevel variant.
-// So `join` (`'round' | 'miter' | 'bevel'`, default `'round'`) is read but ALL values map to
-// that single miter-style bisector; we do not fake a round or bevel corner offsetPolyline
-// cannot render. The dial is preserved for forward compatibility and for the add-menu/agent
-// surface; when offsetPolyline grows a genuine round/bevel option this maps straight through.
+// Offset has no join concept. offsetPolyline has exactly ONE corner treatment — an
+// angle-bisector vertex offset with a capped miter scale.
 function applyOffset(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
   const distance = num(e.distance, 0)
   if (distance === 0) return d // distance 0 is an exact no-op (identity), not a reserialised round-trip
-  void e.join // see header: every join maps to offsetPolyline's single miter-style bisector
   const dpx = distance * ctx.W
   const subs = flatten(d)
   const out: Polyline[] = subs.map((sub) => {

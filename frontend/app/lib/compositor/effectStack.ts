@@ -58,7 +58,7 @@ export interface FeatherEffect extends FeatherSpec { type: 'feather'; visible: b
 // rasterises. Dial fields here are the minimal defaults `createEffect` needs; the full
 // per-kind controls (join behaviour, fillet math, noise shaping) land in Tasks 3/4.
 export interface TrimEffect { type: 'trim'; start: number; end: number; offset: number; visible: boolean }
-export interface OffsetEffect { type: 'offset'; distance: number; join: 'round' | 'miter' | 'bevel'; visible: boolean }
+export interface OffsetEffect { type: 'offset'; distance: number; visible: boolean }
 export interface RoundCornersEffect { type: 'round_corners'; radius: number; visible: boolean }
 export interface RoughenEffect { type: 'roughen'; amount: number; detail: number; seed: number; visible: boolean }
 
@@ -153,7 +153,7 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   torn_edge: { ...DEFAULT_TORN_EDGE, visible: true },
   feather: { ...DEFAULT_FEATHER, visible: true },
   trim: { start: 0, end: 1, offset: 0, visible: true },
-  offset: { distance: 0.01, join: 'round', visible: true },
+  offset: { distance: 0.01, visible: true },
   round_corners: { radius: 0.02, visible: true },
   roughen: { amount: 0.02, detail: 8, seed: 1, visible: true },
 }

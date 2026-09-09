@@ -134,8 +134,8 @@ describe('geometryEffects: roughen', () => {
 })
 
 describe('geometryEffects: offset', () => {
-  const offset = (distance: number, d = SQUARE_D, join = 'round') =>
-    applyGeometry(d, [{ type: 'offset', distance, join, visible: true }], { W })
+  const offset = (distance: number, d = SQUARE_D) =>
+    applyGeometry(d, [{ type: 'offset', distance, visible: true }], { W })
 
   it('distance 0 is identity (same reference string)', () => {
     expect(offset(0)).toBe(SQUARE_D)
@@ -161,15 +161,6 @@ describe('geometryEffects: offset', () => {
     expect(bccw.maxX - bccw.minX).toBeGreaterThan(100)
     expect(bcw.maxX - bcw.minX).toBeGreaterThan(100)
     expect(bccw.maxX - bccw.minX).toBeCloseTo(bcw.maxX - bcw.minX, 1)
-  })
-  it('every join value renders (maps to the one miter-style bisector offsetPolyline has)', () => {
-    // Honest coverage: round/miter/bevel are accepted and all produce the same offset —
-    // no join is silently dropped or crashes, and none is faked.
-    const r = bboxOf(offset(0.05, SQUARE_D, 'round'))
-    const m = bboxOf(offset(0.05, SQUARE_D, 'miter'))
-    const b = bboxOf(offset(0.05, SQUARE_D, 'bevel'))
-    expect(m).toEqual(r)
-    expect(b).toEqual(r)
   })
   it('actually transforms — the offset stub is replaced', () => {
     expect(offset(0.05)).not.toBe(SQUARE_D)
@@ -227,7 +218,7 @@ describe('geometryEffects: round corners', () => {
 
 describe('geometryEffects: multi-subpath', () => {
   it('offset keeps BOTH subpaths of a rect-with-hole', () => {
-    const d = applyGeometry(RECT_WITH_HOLE, [{ type: 'offset', distance: 0.03, join: 'round', visible: true }], { W })
+    const d = applyGeometry(RECT_WITH_HOLE, [{ type: 'offset', distance: 0.03, visible: true }], { W })
     expect(flat(d).length).toBe(2)
     expect(flat(d)[0]!.closed).toBe(true)
     expect(flat(d)[1]!.closed).toBe(true)
