@@ -40,8 +40,9 @@ right-panel generator.* This design honors it:
 
 ### Two entry points, one gesture
 
-1. **Toolbar** — a **Generate** item in the toolbar cluster. Click to **arm** (sticky
-   mode, like the Brush tool). Cursor indicates generate mode.
+1. **Toolbar** — a **Generate** button as its own top-level item in the toolbar (a
+   mode, not a stamp, so it stands alone rather than living in Shapes/Insert). Click
+   to **arm** (sticky mode, like the Brush tool). Cursor indicates generate mode.
 2. **Hold Option/Alt + drag** — spring-loaded, like holding `Space` to pan. While
    Option is held, an empty-space drag is a generate-box instead of a marquee-select.
 
@@ -132,12 +133,11 @@ The on-box bar exposes only prompt + style + Generate. Everything else is a defa
 - No pricing/cost-gate change: these routes are metered by rate-limit + provider
   billing, as today.
 
-## Open questions for review
+## Resolved decisions
 
-1. **Toolbar home:** Generate in the **Shapes ▾** cluster, the **Insert ▾** cluster,
-   or its own top-level toolbar button? (Leaning: its own button, since it's a mode,
-   not a stamp.)
-2. **Style picker contents:** trained styles from `useStyleList` only, or also a few
-   built-in non-LoRA looks? (Leaning: `useStyleList` only, matching today.)
-3. **Persist last style/prompt** between generations while the tool stays armed?
-   (Leaning: yes — keep the last style, clear the prompt.)
+1. **Toolbar home:** its **own top-level toolbar button** — it's a mode, not a stamp,
+   so it stands alone rather than nesting in Shapes/Insert.
+2. **Style picker contents:** trained styles from `useStyleList` only (plus the
+   "No style" default), matching today. No separate built-in non-LoRA look set.
+3. **Persistence while armed:** keep the **last-selected style** between generations;
+   **clear the prompt** each time so the next box starts fresh.
