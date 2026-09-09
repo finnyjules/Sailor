@@ -1733,9 +1733,15 @@ function onKeyup(e: KeyboardEvent) {
 // If focus leaves the window while Space is held (alt/⌘-tab, clicking into the
 // cross-origin ComfyUI iframe, tab switch), the keyup lands elsewhere and
 // spaceDown would stay stuck true — freezing layer select/move behind pan mode.
-// Reset the whole pan gesture on blur / visibility loss.
+// Reset the whole pan gesture on blur / visibility loss. Option/Alt has the same
+// hazard for the drag-to-generate spring arm, so drop it here too (same keep-alive
+// predicate as the Alt keyup): a spring arm the user never committed to disarms,
+// rather than stranding optDown + the crosshair with the next click drawing a box.
 function clearPan() {
   spaceDown.value = false; panning.value = false; panFrom = null
+  optDown.value = false
+  if (genSpring.value && !genDraw.value && !genHasMask.value && !genResult.value) disarmGenGesture()
+  else genSpring.value = false
   if (viewMoveTimer) { clearTimeout(viewMoveTimer); viewMoveTimer = null }
   viewMoving.value = false
 }
