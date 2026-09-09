@@ -22,6 +22,11 @@ import {
 import type { VtFont } from '~/lib/vectortype/font'
 import type { VectorCommand } from '~/lib/vector/svg'
 import {
+  glyphOutlineCommands,
+  placedGlyphsToCommands,
+  type PlacedGlyph,
+} from '~/lib/compositor/textPath'
+import {
   outlinePathData,
   textLayerOutline,
   createTextLayer,
@@ -338,5 +343,114 @@ describe('outlinePathData', () => {
   it('returns null for a kind with no outline (line)', () => {
     // A line has no closed outline; unchanged from before this slice.
     expect(outlinePathData({ kind: 'line', w: 0.5, strokeWidth: 0.01 } as any, 1000)).toBeNull()
+  })
+})
+
+// ── on-path glyph outlines (Task 4) ──────────────────────────────────────────
+//
+// `glyphOutlineCommands` / `placedGlyphsToCommands` place a glyph's OUTLINE at a
+// `PlacedGlyph`'s (x, y, angle) — the same positions `placeGlyphs` hands
+// `drawTextOnPath`. The stub font (600×1000 full-advance box, unitsPerEm 1000)
+// makes every placement exact. fontPx 100 ⇒ scale 0.1 ⇒ a flat glyph is 60px
+// wide (x 0→600) and 100px tall (y −200→800).
+describe('placedGlyphsToCommands / glyphOutlineCommands', () => {
+  const fontPx = 100
+  // Glyph placed at (50, 200) with no rotation, as a straight guide would.
+  const straight: PlacedGlyph = { ch: 'A', x: 50, y: 200, angle: 0, advance: 60 }
+
+  it('a glyph on a STRAIGHT guide (angle 0) equals the flat centred placement', () => {
+    const onPath = glyphOutlineCommands(stubFont(), straight, fontPx)
+    // `drawTextOnPath` draws each glyph with textAlign 'center', textBaseline
+    // 'middle' at (x, y); that is exactly this flat run.
+    const flat = runToCommands(
+      stubFont(),
+      { text: 'A', x: 50, y: 200 },
+      { fontPx, letterSpacingPx: 0, align: 'center', baseline: 'middle' },
+    )
+    expect(onPath.length).toBe(flat.length)
+    expect(onPath.length).toBeGreaterThan(0)
+    for (let i = 0; i < onPath.length; i++) {
+      expect(onPath[i]!.command).toBe(flat[i]!.command)
+      for (let j = 0; j < onPath[i]!.args.length; j++) {
+        expect(onPath[i]!.args[j]!).toBeCloseTo(flat[i]!.args[j]!, 6)
+      }
+    }
+  })
+
+  it('the straight glyph sits centred on (x, y): a 60×100px box', () => {
+    const b = bbox(glyphOutlineCommands(stubFont(), straight, fontPx))
+    expect(b.cx).toBeCloseTo(50, 5)
+    expect(b.cy).toBeCloseTo(200, 5)
+    expect(b.w).toBeCloseTo(60, 5)
+    expect(b.h).toBeCloseTo(100, 5)
+  })
+
+  it('a glyph on a CURVE is rotated — its bbox tilts (both w and h change)', () => {
+    const flat = bbox(glyphOutlineCommands(stubFont(), straight, fontPx))
+    const turned = bbox(glyphOutlineCommands(
+      stubFont(), { ...straight, angle: Math.PI / 2 }, fontPx,
+    ))
+    // A quarter turn swaps the 60×100 box to 100×60 — width AND height change.
+    expect(turned.w).toBeCloseTo(flat.h, 4)
+    expect(turned.h).toBeCloseTo(flat.w, 4)
+    expect(Math.abs(turned.w - flat.w)).toBeGreaterThan(1)
+    expect(Math.abs(turned.h - flat.h)).toBeGreaterThan(1)
+    // Still centred on the placement — rotation is about the glyph centre.
+    expect(turned.cx).toBeCloseTo(50, 4)
+    expect(turned.cy).toBeCloseTo(200, 4)
+  })
+
+  it('a 45° glyph grows its bbox on the diagonal (both axes tilt)', () => {
+    const flat = bbox(glyphOutlineCommands(stubFont(), straight, fontPx))
+    const turned = bbox(glyphOutlineCommands(
+      stubFont(), { ...straight, angle: Math.PI / 4 }, fontPx,
+    ))
+    // 60×100 turned 45°: extent = (60+100)/√2 ≈ 113.14 on both axes.
+    const diag = (60 + 100) / Math.SQRT2
+    expect(turned.w).toBeCloseTo(diag, 3)
+    expect(turned.h).toBeCloseTo(diag, 3)
+    expect(turned.w).toBeGreaterThan(flat.w)
+  })
+
+  it('concatenates placed glyphs in order and is deterministic', () => {
+    const placed: PlacedGlyph[] = [
+      { ch: 'A', x: 30, y: 200, angle: 0, advance: 60 },
+      { ch: 'B', x: 90, y: 200, angle: 0.2, advance: 60 },
+    ]
+    const a = placedGlyphsToCommands(stubFont(), placed, fontPx)
+    const b = placedGlyphsToCommands(stubFont(), placed, fontPx)
+    expect(a).toEqual(b)
+    // Two 5-command glyphs → 10 commands, first five are glyph A (angle 0),
+    // centred on x=30.
+    expect(a.length).toBe(10)
+    expect(bbox(a.slice(0, 5)).cx).toBeCloseTo(30, 5)
+  })
+
+  it('returns [] for an empty placement', () => {
+    expect(placedGlyphsToCommands(stubFont(), [], fontPx)).toEqual([])
+  })
+})
+
+// ── textLayerOutline on a PATH layer (Task 4 integration) ────────────────────
+describe('textLayerOutline with layer.path', () => {
+  it('returns a non-empty d for a text layer on a circle guide', async () => {
+    await primeInter()
+    const layer = createTextLayer({ text: 'AB', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.1 })
+    ;(layer as unknown as { path: unknown }).path = { follow: 'circle', radius: 0.3 }
+    const d = textLayerOutline(layer, 1000, fakeMeasureCtx())
+    expect(d).toBeTruthy()
+    expect(d).toMatch(/M/)
+    expect(d).toMatch(/[Zz]/)
+  })
+
+  it('differs from the flat outline of the same text (the path took over)', async () => {
+    await primeInter()
+    const flatLayer = createTextLayer({ text: 'AB', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.1 })
+    const flatD = textLayerOutline(flatLayer, 1000, fakeMeasureCtx())
+    const pathLayer = createTextLayer({ text: 'AB', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.1 })
+    ;(pathLayer as unknown as { path: unknown }).path = { follow: 'circle', radius: 0.3 }
+    const pathD = textLayerOutline(pathLayer, 1000, fakeMeasureCtx())
+    expect(pathD).toBeTruthy()
+    expect(pathD).not.toBe(flatD)
   })
 })

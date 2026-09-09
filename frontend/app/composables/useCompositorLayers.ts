@@ -79,7 +79,7 @@ import {
 } from '~/lib/compositor/silhouetteCache'
 import { VARY_PALETTE_MAX } from '~/lib/vary'
 import { paintMaskRelease } from '~/lib/compositor/maskBreak'
-import { guideFromSpec, measureRunPx, placeGlyphs, type TextPathSpec } from '~/lib/compositor/textPath'
+import { guideFromSpec, measureRunPx, placeGlyphs, placedGlyphsToCommands, type TextPathSpec } from '~/lib/compositor/textPath'
 // Runtime import is safe: wiredLayer.ts only imports the WiredLayer TYPE back from
 // this file, and type imports are erased — so this is not a module cycle.
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
@@ -3526,6 +3526,33 @@ function drawTextOnPath(
 }
 
 /**
+ * The on-path counterpart of `drawText`'s flat collect sink (Frame slice F1,
+ * Task 4): place each glyph's OUTLINE along the guide instead of inking it.
+ *
+ * Positions are `placeGlyphs`' own — the exact `{x, y, angle}` `drawTextOnPath`
+ * inks at — so the outlined render matches the fillText path render glyph for
+ * glyph. `placeGlyphs` measures under the layer's font, so `applyFont` runs first
+ * exactly as `drawTextOnPath` does. The guide's own box is the outline's box, the
+ * same box `drawTextOnPath` resolves its fill against. Empty placement pushes
+ * nothing, so `collectTextOutline` returns null and the caller degrades to
+ * fillText.
+ */
+function collectTextOnPathOutline(
+  ctx: CanvasRenderingContext2D,
+  layer: TextLayer,
+  W: number,
+  guide: NonNullable<ReturnType<typeof textPathGuide>>,
+  collect: TextOutlineCollect,
+): void {
+  applyFont(ctx, layer, W)
+  const placed = placeGlyphs(ctx, layer, guide, W)
+  if (!placed.length) return
+  const cmds = placedGlyphsToCommands(collect.font, placed, layer.fontSize * W)
+  for (const c of cmds) collect.out.push(c)
+  collect.box = guide.bounds()
+}
+
+/**
  * The collect sink `drawText` writes to instead of inking, when asked to emit
  * glyph OUTLINES rather than draw (Frame slice F1). `drawText`'s layout is reused
  * unchanged — the same `text/x/y/align/baseline` fillText would use — and each run
@@ -3547,11 +3574,14 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
   // textPathGuide means the spec couldn't make a curve (missing dial, zero
   // radius) — fall through to flat text rather than drawing nothing.
   if (layer.path) {
-    // On-path outline collection is Task 4; for F1 the collect sink handles only
-    // the flat layout, so a path layer emits nothing (caller degrades to fillText).
-    if (collect) return
     const guide = textPathGuide(ctx, layer, W)
-    if (guide) { drawTextOnPath(ctx, layer, W, guide); return }
+    if (guide) {
+      // Collect mode places each glyph's OUTLINE along the same guide instead of
+      // inking it; draw mode inks as before. A null guide (broken/zero dial) falls
+      // through to the flat layout in both modes.
+      if (collect) { collectTextOnPathOutline(ctx, layer, W, guide, collect); return }
+      drawTextOnPath(ctx, layer, W, guide); return
+    }
   }
   // Expressive per-word layout has its own draw loop; outlining it is out of F1
   // scope, so collect mode emits nothing and the caller falls back to fillText.

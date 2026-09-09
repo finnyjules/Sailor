@@ -65,8 +65,11 @@ import type { TextLayer } from '~/composables/useCompositorLayers'
 import { longestSubpath, type FlatPoint } from '~/lib/compositor/pathFlatten'
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapeGeometry } from '~/lib/shapes/pathLayer'
+import { runToCommands, type VtFont } from '~/lib/compositor/textOutline'
+import { transformCommands, type VectorCommand } from '~/lib/vector/svg'
 
 const DEG = Math.PI / 180
+const RAD_TO_DEG = 180 / Math.PI
 
 // ── The stored spec ─────────────────────────────────────────────────────────
 
@@ -614,6 +617,67 @@ export function placeGlyphs(
     // canvas, so a glyph that cannot be placed is dropped instead of drawn.
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(angle) || !Number.isFinite(adv)) continue
     out.push({ ch, x, y, angle, advance: adv })
+  }
+  return out
+}
+
+// ── On-path glyph OUTLINES (Frame slice F1, Task 4) ──────────────────────────
+
+/**
+ * One placed glyph's OUTLINE commands, in the layer's local px, landing on the
+ * very pixels `drawTextOnPath` inks for that glyph.
+ *
+ * `drawTextOnPath` draws each glyph in its own turned frame: `textAlign 'center'`,
+ * `textBaseline 'middle'`, `translate(g.x, g.y)`, `rotate(g.angle)`, then
+ * `fillText(g.ch, 0, 0)`. So the outline is built the same way, in two steps that
+ * mirror that exactly:
+ *
+ *  1. shape THIS character alone, centred on the origin with a middle baseline —
+ *     `runToCommands` with `align:'center', baseline:'middle'` is the identical
+ *     placement math the flat sink uses, so a glyph and its flat twin share one
+ *     outline choke point (this is also why a STRAIGHT guide, `angle 0`, yields
+ *     commands equal to the flat centred placement of the same glyph);
+ *  2. turn it to the tangent (`g.angle`) and slide it to `(g.x, g.y)` — the same
+ *     `rotate` then `translate` the canvas applies. `runToCommands` has already
+ *     flipped font space into px, so this pass is `scale 1`, `flipY false`.
+ *
+ * Per-CHARACTER shaping (not the run's ligature shaping) is deliberate: the path
+ * renderer draws each `g.ch` independently, so matching its pixels means shaping
+ * each character independently too — the kerned ADVANCES that space the glyphs are
+ * already carried in `g.x` by `placeGlyphs`.
+ */
+export function glyphOutlineCommands(
+  font: VtFont,
+  glyph: PlacedGlyph,
+  fontPx: number,
+): VectorCommand[] {
+  const centred = runToCommands(font, { text: glyph.ch, x: 0, y: 0 }, {
+    fontPx, letterSpacingPx: 0, align: 'center', baseline: 'middle',
+  })
+  if (!centred.length) return []
+  return transformCommands(centred, {
+    scale: 1,
+    flipY: false,                 // runToCommands already produced flipped px
+    rotate: glyph.angle * RAD_TO_DEG,
+    x: glyph.x,
+    y: glyph.y,
+  })
+}
+
+/**
+ * Every placed glyph's outline commands, in draw order, concatenated into one
+ * list ready for `commandsToPathData`. Pure and deterministic. Returns `[]` for
+ * an empty placement.
+ */
+export function placedGlyphsToCommands(
+  font: VtFont,
+  placed: readonly PlacedGlyph[],
+  fontPx: number,
+): VectorCommand[] {
+  const out: VectorCommand[] = []
+  for (const g of placed) {
+    const cmds = glyphOutlineCommands(font, g, fontPx)
+    for (const c of cmds) out.push(c)
   }
   return out
 }

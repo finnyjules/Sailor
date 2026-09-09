@@ -145,6 +145,29 @@ test.describe('Compositor text → outline parity', () => {
     expect(r.withinPct).toBeGreaterThanOrEqual(0.99)
   })
 
+  test('a badge (circle path) outlines identically to the fillText path render', async ({ page }) => {
+    await openCompositor(page)
+    // Type on a ring: each glyph is placed and turned by `placeGlyphs`, then drawn
+    // — as `fillText` in its own rotated frame (flag off) or as its OUTLINE placed
+    // on the same guide (flag on). The two must land on the same pixels.
+    const patch = { text: 'BADGE', fontSize: 0.06, align: 'center', path: { follow: 'circle', radius: 0.12 } }
+
+    await seed(page, [textLayer({ ...patch, renderAsOutline: false })])
+    await waitFontReady(page)
+    await assertNonBlank(page)
+    await stash(page, '__fillTextBadge')
+
+    await seed(page, [textLayer({ ...patch, renderAsOutline: true })])
+    await outlineResolved(page)          // the ON-PATH outline `d` resolved, not a fillText fallback
+    await stackPixels(page)
+    await assertNonBlank(page)
+
+    const r = await compareToStash(page, '__fillTextBadge')
+    expect(r.mismatchSize).toBe(false)
+    console.log(`[parity badge/circle] within Δ2: ${(r.withinPct * 100).toFixed(3)}% (${r.within2}/${r.total})`)
+    expect(r.withinPct).toBeGreaterThanOrEqual(0.99)
+  })
+
   test('the histogram is sensitive: two visibly different renders differ', async ({ page }) => {
     await openCompositor(page)
 
