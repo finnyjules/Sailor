@@ -4191,6 +4191,14 @@ const genSpring = ref(false)    // this arm came from a held Option (spring-load
 const optDown = ref(false)      // Option/Alt currently held
 const lastGenStyle = ref<import('~/composables/useStyleList').StyleItem | null>(null)
 const genBarBnd = ref<GenBounds | null>(null)   // box bounds (artboard px) the on-box bar anchors to
+const genPromptRef = ref<HTMLInputElement | null>(null)
+const genBarStyle = computed(() => {
+  if (!genBarBnd.value) return {}
+  const p = genBarPlacement(genBarBnd.value, canvasDisplay.w, canvasDisplay.h)
+  return { left: p.left + 'px', top: p.top + 'px' }
+})
+// Autofocus the prompt when the bar appears.
+watch(genBarBnd, (b) => { if (b) nextTick(() => genPromptRef.value?.focus()) })
 
 function armGenGesture(spring = false) {
   if (!exitOtherToolsFor('region')) return
@@ -4544,6 +4552,13 @@ function onGenPointerUp(e: PointerEvent) {
   if (!genDraw.value) return
   e.preventDefault(); e.stopPropagation()
   genDraw.value = null
+  // Streamlined gesture: reject click-sized boxes so a stray click never pops the
+  // bar, and snapshot the box bounds the on-box bar anchors to.
+  if (genGesture.value) {
+    const bnd = genMaskBounds()
+    if (bnd && genBoxIsValid(bnd, canvasDisplay.w, canvasDisplay.h)) genBarBnd.value = bnd
+    else { clearGenMask() }
+  }
 }
 
 // Fill a shape/path silhouette (the current fillStyle) — mirrors the renderer's
@@ -6159,6 +6174,60 @@ onUnmounted(() => {
           class="absolute pointer-events-none rounded-full border border-white/90 bg-white/10"
           :style="{ left: (brush.cursor.value.x * canvasDisplay.w - brush.sizePx.value / 2) + 'px', top: (brush.cursor.value.y * canvasDisplay.h - brush.sizePx.value / 2) + 'px', width: brush.sizePx.value + 'px', height: brush.sizePx.value + 'px', zIndex: 30 }"
         />
+
+        <!-- Drag-to-generate on-box bar: prompt + style + Generate. Shown after a
+             valid box is dragged, before generation; the mini toolbar below replaces
+             it once a result exists. -->
+        <div
+          v-if="genGesture && genBarBnd && !genResult && !inpaint.busy.value"
+          data-gen-bar
+          data-testid="gen-onbox-bar"
+          class="absolute z-40 -translate-x-1/2 flex items-center gap-1 bg-[#1a1a1a]/95 backdrop-blur-sm rounded-[10px] p-1 border border-[#2a2a2a] shadow-lg"
+          :style="genBarStyle"
+          @pointerdown.stop @click.stop
+        >
+          <input
+            ref="genPromptRef"
+            v-model="genPrompt"
+            type="text"
+            data-testid="gen-onbox-prompt"
+            placeholder="Describe the element…"
+            class="h-8 w-44 rounded-[8px] bg-white/5 px-2 text-[12px] text-white/90 placeholder-white/35 outline-none focus:bg-white/10"
+            @keydown.enter="genPrompt.trim() && runRegionFill()"
+          />
+          <div class="relative">
+            <button
+              type="button"
+              class="flex items-center gap-1.5 h-8 px-2 rounded-[8px] hover:bg-white/10 text-white/80 text-[11px] cursor-pointer whitespace-nowrap"
+              title="Style"
+              @click="stylePickerOpen = !stylePickerOpen"
+            >
+              <img v-if="genStyle?.coverUrl" :src="genStyle.coverUrl" class="size-4 rounded object-cover ring-1 ring-white/10" />
+              <span class="max-w-24 truncate">{{ genStyle ? genStyle.name : 'No style' }}</span>
+              <ChevronDown class="size-3 text-white/40" :class="stylePickerOpen ? 'rotate-180' : ''" />
+            </button>
+            <div v-if="stylePickerOpen" class="absolute bottom-full left-0 mb-1.5 z-50 w-52 max-h-56 overflow-y-auto rounded-md bg-neutral-900 border border-white/10 shadow-xl flex flex-col">
+              <button class="px-3 py-2 text-left text-[12px] hover:bg-white/10 cursor-pointer"
+                @click="genStyle = null; stylePickerOpen = false">No style</button>
+              <button v-for="s in styleList.styles.value" :key="s.filename"
+                class="px-3 py-2 text-left text-[12px] hover:bg-white/10 cursor-pointer flex items-center gap-2.5"
+                @click="genStyle = s; stylePickerOpen = false">
+                <img v-if="s.coverUrl" :src="s.coverUrl" class="size-6 rounded object-cover ring-1 ring-white/10" />
+                <span class="truncate">{{ s.name }}</span>
+              </button>
+              <p v-if="!styleList.styles.value.length" class="px-3 py-2 text-[11px] text-white/30">
+                {{ styleList.loading.value ? 'Loading…' : 'No trained styles yet.' }}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid="gen-onbox-generate"
+            class="flex items-center justify-center h-8 px-3 rounded-[8px] bg-white text-neutral-900 hover:bg-white/90 text-[12px] font-medium cursor-pointer disabled:opacity-40 disabled:cursor-default"
+            :disabled="!genPrompt.trim() || inpaint.busy.value"
+            @click="runRegionFill"
+          >Generate</button>
+        </div>
 
         <!-- Generated-object mini toolbar: cancel / re-roll / confirm -->
         <div
