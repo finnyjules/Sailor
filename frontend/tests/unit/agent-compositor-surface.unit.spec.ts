@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { describeCompositor, applyCompositorCommand, summarizeCompositorChange, verifyCompositor, type CompositorState } from '~/lib/agent/surfaces/compositor'
+import { effectStackOf, regionOf } from '~/lib/compositor/effectStack'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
 
 function state(): CompositorState {
@@ -438,5 +439,34 @@ describe('setLayerEffect writes through the effect stack', () => {
     expect(fx2.map((e: any) => e.type)).toEqual(['background_blur'])   // still one instance, not two
     expect(fx2[0].id).toBe(fx1[0].id)                                   // same pinned instance
     expect(fx2[0].radius).toBe(0.2)
+  })
+
+  it('adds a geometry (trim) effect through setLayerEffect, landing in the geometry region with merged params', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'trim', start: 0.1, end: 0.8 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const stack = effectStackOf(r.template.layers[0] as any)
+    const trim = stack.find(e => e.type === 'trim') as any
+    expect(trim).toBeTruthy()
+    expect(regionOf(trim.type)).toBe('geometry')
+    expect(trim.start).toBe(0.1)
+    expect(trim.end).toBe(0.8)
+    expect(typeof trim.id).toBe('string')
+    expect(trim.visible).toBe(true)
+    // A re-read off the same stored layer is stable (deterministic ids, same params).
+    const again = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'trim') as any
+    expect(again).toEqual(trim)
+  })
+
+  it('clamps and rounds geometry params (roughen amount to 1, seed to an integer)', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'roughen', amount: 5, seed: 3.7 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'roughen') as any
+    expect(fx.amount).toBe(1)   // clamped to [0, 1]
+    expect(fx.seed).toBe(4)     // rounded to an integer
+  })
+
+  it('still rejects an unknown effect type (no geometry allowlist regression)', () => {
+    expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'warp' } } }).ok).toBe(false)
+    expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'sparkle' } } }).ok).toBe(false)
   })
 })
