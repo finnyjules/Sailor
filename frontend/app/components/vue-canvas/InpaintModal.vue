@@ -227,13 +227,19 @@ watch(regionSilhouette, recomputeSelBBox)
 // view.toScreen), clamped so it never leaves the stage.
 const promptBar = computed(() => {
   const bb = selBBox.value; if (!bb) return null
-  const p = view.toScreen((bb.l + bb.r) / 2, bb.b, disp.w, disp.h)
-  // Sit just below the selection, but keep a comfortable margin from the stage
-  // edges — a selection that fills the stage keeps the bar floating inside it
-  // near the bottom rather than clipping off the edge.
+  const cx = (bb.l + bb.r) / 2
+  const below = view.toScreen(cx, bb.b, disp.w, disp.h)
+  const above = view.toScreen(cx, bb.t, disp.w, disp.h)
+  const MARGIN = 56
+  // Prefer just below the selection; flip above when below would crowd the
+  // bottom edge (e.g. a selection that fills the stage), else pin inside.
+  let y: number
+  if (below.sy + 14 <= disp.h - MARGIN) y = below.sy + 14
+  else if (above.sy - 14 >= MARGIN) y = above.sy - 14
+  else y = disp.h - MARGIN
   return {
-    x: Math.max(155, Math.min(disp.w - 155, p.sx)),
-    y: Math.max(52, Math.min(disp.h - 60, p.sy + 14)),
+    x: Math.max(155, Math.min(disp.w - 155, below.sx)),
+    y: Math.max(MARGIN, Math.min(disp.h - MARGIN, y)),
   }
 })
 // Mask-only is a pre-generation inspection aid; drop it once a result lands so
@@ -695,7 +701,7 @@ onBeforeUnmount(() => {
           />
           <!-- Floating prompt bar — anchored under the selection (screen space). -->
           <div
-            v-if="mode === 'mask' && promptBar && !maskOnly"
+            v-if="mode === 'mask' && promptBar && !maskOnly && intent !== 'recolor'"
             class="absolute z-30 flex items-center gap-1 rounded-lg border border-white/15 bg-[#141416]/95 p-1 pl-2.5 shadow-xl backdrop-blur"
             :style="{ left: promptBar.x + 'px', top: promptBar.y + 'px', transform: 'translate(-50%, 0)', width: '300px' }"
             @pointerdown.stop
@@ -767,11 +773,27 @@ onBeforeUnmount(() => {
               <span v-if="samBusy" class="inline-flex items-center gap-1 text-white/55"><Loader2 class="size-3 animate-spin" /> Selecting…</span>
               <span v-else>Click an object to select it. Shift-click adds, Alt-click subtracts, or drag a box to frame one.</span>
             </p>
+          </div>
 
+          <!-- Refine the selection edge (mask mode) -->
+          <div v-if="mode === 'mask'">
+            <div class="text-[10px] uppercase tracking-[0.12em] text-white/40 mb-2.5">Refine edge</div>
+            <div class="flex flex-col gap-3">
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-white/40 w-12 shrink-0">Feather</span>
+                <input type="range" min="0" max="40" v-model.number="feather" class="flex-1 accent-white cursor-pointer" />
+                <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ feather }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-white/40 w-12 shrink-0">Expand</span>
+                <input type="range" min="0" max="40" v-model.number="expand" class="flex-1 accent-white cursor-pointer" />
+                <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ expand }}</span>
+              </div>
+            </div>
             <div class="flex items-center gap-1.5 mt-3.5">
-              <button class="h-7 px-2 rounded flex items-center gap-1 text-[11px] cursor-pointer transition-colors" :class="brush.inverted.value ? 'bg-amber-400/90 text-neutral-900' : 'bg-white/[0.06] text-white/70 hover:bg-white/12'" title="Invert: keep the painted area, change everything else" @click="brush.toggleInvert()"><FlipHorizontal2 class="size-3.5" /> Invert</button>
-              <button class="h-7 px-2 rounded flex items-center gap-1 text-[11px] cursor-pointer transition-colors" :class="maskOnly ? 'bg-white/20 text-white' : 'bg-white/[0.06] text-white/70 hover:bg-white/12'" title="Show only the mask (hide the photo)" @click="maskOnly = !maskOnly"><component :is="maskOnly ? EyeOff : Eye" class="size-3.5" /> Mask</button>
-              <button class="ml-auto h-7 px-2 rounded bg-white/[0.06] text-white/70 hover:bg-white/12 text-[11px] cursor-pointer transition-colors" title="Clear region" @click="clearMask()">Clear</button>
+              <button class="h-7 px-2 rounded flex items-center gap-1 text-[11px] cursor-pointer transition-colors" :class="brush.inverted.value ? 'bg-amber-400/90 text-neutral-900' : 'bg-white/[0.06] text-white/70 hover:bg-white/12'" title="Invert: keep the marked area, change everything else" @click="brush.toggleInvert()"><FlipHorizontal2 class="size-3.5" /> Invert</button>
+              <button class="h-7 px-2 rounded flex items-center gap-1 text-[11px] cursor-pointer transition-colors" :class="maskOnly ? 'bg-white/20 text-white' : 'bg-white/[0.06] text-white/70 hover:bg-white/12'" title="Show only the mask (hide the photo)" @click="maskOnly = !maskOnly"><component :is="maskOnly ? EyeOff : Eye" class="size-3.5" /> Show mask</button>
+              <button class="ml-auto h-7 px-2 rounded bg-white/[0.06] text-white/70 hover:bg-white/12 text-[11px] cursor-pointer transition-colors" title="Clear the current selection" @click="clearMask()">Clear</button>
             </div>
           </div>
 
@@ -788,13 +810,13 @@ onBeforeUnmount(() => {
             />
           </div>
 
-          <!-- Options -->
+          <!-- Output -->
           <div>
-            <div class="text-[10px] uppercase tracking-[0.12em] text-white/40 mb-2.5">Options</div>
+            <div class="text-[10px] uppercase tracking-[0.12em] text-white/40 mb-2.5">Output</div>
             <div class="grid grid-cols-2 gap-2.5">
               <label class="flex items-center gap-1.5 text-[11px] text-white/50">Model
                 <select v-model="tier" class="flex-1 h-8 bg-white/[0.06] rounded text-[11px] px-1 outline-none cursor-pointer">
-                  <option value="dev">Dev · cheap</option>
+                  <option value="dev">Fast · cheaper</option>
                   <option value="pro">Pro · best</option>
                 </select>
               </label>
@@ -804,22 +826,11 @@ onBeforeUnmount(() => {
                 </select>
               </label>
             </div>
-            <div v-if="mode === 'mask'" class="mt-3.5 flex flex-col gap-3">
-              <div class="flex items-center gap-2">
-                <span class="text-[10px] text-white/40 w-12 shrink-0">Feather</span>
-                <input type="range" min="0" max="40" v-model.number="feather" class="flex-1 accent-white cursor-pointer" />
-                <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ feather }}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="text-[10px] text-white/40 w-12 shrink-0">Expand</span>
-                <input type="range" min="0" max="40" v-model.number="expand" class="flex-1 accent-white cursor-pointer" />
-                <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ expand }}</span>
-              </div>
-            </div>
           </div>
 
-          <!-- Actions -->
-          <div>
+          <!-- Actions — mask mode acts from the floating bar on the selection, so
+               this holds only the recolor swatches, Describe's Generate, and Apply. -->
+          <div v-if="(intent === 'recolor' && hasRegion) || mode === 'describe' || lastResult">
             <div v-if="intent === 'recolor' && hasRegion" class="flex items-center gap-1.5 flex-wrap mb-2.5">
               <span class="text-[10px] text-white/40 select-none">Recolor to</span>
               <button v-for="s in recolorSwatches" :key="s.hex"
@@ -833,17 +844,15 @@ onBeforeUnmount(() => {
                 <span class="absolute inset-0 grid place-items-center text-[10px] text-white/50">+</span>
               </label>
             </div>
-            <div class="flex items-center gap-1.5">
-              <button v-if="mode === 'mask'" class="h-8 px-2.5 rounded bg-white/[0.06] hover:bg-white/12 text-[11px] cursor-pointer disabled:opacity-30 disabled:cursor-default" :disabled="inpaint.busy.value || !sourceImg || !hasRegion" title="Remove what's under the mask" @click="runInpaint(true)">Remove</button>
-              <button class="gen-pastel flex-1 h-8 rounded text-neutral-900 text-[12px] font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-default" :disabled="inpaint.busy.value || !sourceImg || (mode === 'mask' && !hasRegion)" @click="runInpaint(false)">
-                {{ inpaint.busy.value ? 'Generating…' : (history.length ? 'Regenerate' : 'Generate') }}
-              </button>
-            </div>
-            <p v-if="mode === 'mask' && !hasRegion" class="text-[10px] text-white/30 mt-1.5">Mark a region on the image to enable Generate.</p>
-            <!-- Apply the result showing on the canvas back onto the node. Appears
-                 once a result exists so the save action isn't buried in History. -->
+            <button v-if="mode === 'describe'"
+              class="gen-pastel w-full h-9 rounded text-neutral-900 text-[12px] font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-default"
+              :disabled="inpaint.busy.value || !sourceImg"
+              @click="runInpaint(false)">
+              {{ inpaint.busy.value ? 'Generating…' : (history.length ? 'Regenerate' : 'Generate') }}
+            </button>
+            <!-- Apply the result showing on the canvas back onto the node. -->
             <button v-if="lastResult"
-              class="mt-1.5 w-full h-8 rounded bg-action hover:bg-action/85 text-white text-[12px] font-semibold cursor-pointer transition-colors"
+              class="mt-2 w-full h-9 rounded bg-action hover:bg-action/85 text-white text-[12px] font-semibold cursor-pointer transition-colors"
               title="Apply the result shown on the canvas to the node"
               @click="applyResult">
               Apply to canvas
