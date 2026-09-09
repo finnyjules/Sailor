@@ -7,11 +7,12 @@
  * Gradient so it drops straight into resolvePaint (no 2-stop collapse).
  */
 import { ref, computed } from 'vue'
-import { Trash2 } from 'lucide-vue-next'
+import { Trash2, Palette, ChevronRight } from 'lucide-vue-next'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
-import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
+import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
+import type { GradientStop as PaletteStop } from '~/lib/color/harmony'
 import { hueWalk } from '~/lib/color/hueWalk'
 import type { Gradient, GradientStop } from '~/composables/useCompositorLayers'
 
@@ -93,6 +94,15 @@ function emitWith(patch: { type?: 'linear' | 'radial'; angle?: number; stops?: G
 }
 
 function setMode(m: 'linear' | 'radial') { emitWith({ type: m }) }
+
+// ── Palette generator ─────────────────────────────────────────────────────────
+// Same "Generate a palette" disclosure the shader-fill inks panel has: folded by
+// default so the stops above stay the content. The picker speaks harmony stops
+// ({pos,color}); a compositor Gradient wants {offset,color}, so map on the way in.
+const showPicker = ref(false)
+function applyPaletteStops(v: PaletteStop[]) {
+  emitWith({ stops: v.map((s) => ({ offset: s.pos, color: s.color })) })
+}
 function setInterp(mode: Interp) { emitWith({ interp: mode }) }
 const interpLabel = computed<string>({
   get: () => LABEL_BY_INTERP[interp.value],
@@ -143,10 +153,12 @@ function onHandleDown(i: number, e: PointerEvent) {
 
 <template>
   <div class="space-y-2">
-    <!-- linear / radial — the shared segmented, not hand-rolled buttons -->
-    <StudioSegmented
-      :model-value="isRadial ? 'Radial' : 'Linear'" :options="['Linear', 'Radial']"
-      @update:model-value="(v: string) => setMode(v === 'Radial' ? 'radial' : 'linear')"
+    <!-- Type: a labelled row like Interpolation and Angle below it. A segmented pill
+         was the one loud control in a panel of quiet rows. -->
+    <StudioSelect
+      label="Type"
+      :model-value="isRadial ? 'radial' : 'linear'" :options="['linear', 'radial']" :option-labels="['Linear', 'Radial']"
+      @update:model-value="(v: string) => setMode(v === 'radial' ? 'radial' : 'linear')"
     />
 
     <!-- Interpolation: sRGB (Direct) vs a hue walk round the wheel. A select, not a
@@ -184,5 +196,23 @@ function onHandleDown(i: number, e: PointerEvent) {
 
     <button type="button" class="w-full h-6 rounded border border-dashed border-white/15 text-[11px] text-white/55 hover:text-white/85 hover:border-white/30 cursor-pointer"
       @click="addStop">+ Add stop</button>
+
+    <!-- Generator, folded: the stops above are the content; this is the shortcut. -->
+    <button type="button"
+      class="flex w-full items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-[11px] text-white/70 transition hover:bg-white/[0.08] hover:text-white/90 cursor-pointer"
+      @click="showPicker = !showPicker">
+      <Palette :size="12" class="shrink-0 opacity-70" />
+      <span>Generate a palette</span>
+      <ChevronRight :size="12" class="ml-auto shrink-0 opacity-60 transition-transform" :class="showPicker ? 'rotate-90' : ''" />
+    </button>
+    <div v-if="showPicker" class="rounded border border-white/10 bg-white/[0.02] p-2">
+      <PalettePicker
+        mode="stops" manual-stops
+        :stop-count="stops.length"
+        :seed="stops[0]?.color ?? '#4f8ad9'"
+        @apply-stops="applyPaletteStops"
+        @apply-literal-stops="applyPaletteStops"
+      />
+    </div>
   </div>
 </template>
