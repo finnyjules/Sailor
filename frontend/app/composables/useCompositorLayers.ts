@@ -3547,9 +3547,21 @@ function collectTextOnPathOutline(
   applyFont(ctx, layer, W)
   const placed = placeGlyphs(ctx, layer, guide, W)
   if (!placed.length) return
-  const cmds = placedGlyphsToCommands(collect.font, placed, layer.fontSize * W)
+  const cmds = placedGlyphsToCommands(collect.font, placed, layer.fontSize * W, outlineAxesForLayer(layer))
   for (const c of cmds) collect.out.push(c)
   collect.box = guide.bounds()
+}
+
+/**
+ * The variable-font coords the OUTLINE must be shaped at so it matches what
+ * `applyFont` renders: the layer's weight as the `wght` axis, overlaid by any
+ * explicit `layer.axes` (whose own `wght` wins, mirroring `applyFont`'s
+ * `axes.wght ?? fontWeight`). `textOutlines` clamps to the font's real axis
+ * ranges and drops tags it lacks, so a static per-weight cut (no axes) ignores
+ * this — its weight is already baked into the fetched bytes.
+ */
+function outlineAxesForLayer(layer: TextLayer): Record<string, number> {
+  return { wght: layer.fontWeight, ...(layer.axes || {}) }
 }
 
 /**
@@ -3558,8 +3570,9 @@ function collectTextOnPathOutline(
  * unchanged — the same `text/x/y/align/baseline` fillText would use — and each run
  * is turned into positioned commands by `runToCommands`, so the outline lands on
  * the very pixels fillText would. `box` is the layer's measured text box, captured
- * for the caller (fill paint anchoring). Only the flat, non-expressive, non-path
- * layout collects; the two special layouts return without emitting (F1 scope).
+ * for the caller (fill paint anchoring). Both the flat layout and the on-path
+ * layout collect; only expressive per-word layout returns without emitting (out
+ * of F1 scope).
  */
 interface TextOutlineCollect {
   font: VtFont
@@ -3695,7 +3708,7 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
     if (collect) {
       const cmds = runToCommands(collect.font, { text, x, y: y + baselineToAlphabeticPx }, {
         fontPx, letterSpacingPx, align: ctx.textAlign, baseline: 'alphabetic',
-      })
+      }, outlineAxesForLayer(layer))
       for (const c of cmds) collect.out.push(c)
       return
     }

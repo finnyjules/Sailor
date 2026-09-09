@@ -5,11 +5,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // deterministic timing. `vi.hoisted` so the spy exists before `vi.mock`'s hoist.
 const { loadVectorFont } = vi.hoisted(() => ({ loadVectorFont: vi.fn() }))
 // `outline.ts` (used by runToCommands) also imports clampCoords/defaultCoords from
-// this same module. The stub font below carries no axes, so both can be inert.
+// this same module. They are the real coord-resolution logic (mirroring font.ts):
+// default every declared axis, overlay caller values clamped to range, drop tags
+// the font lacks. A stub with `axes: []` therefore still resolves to `{}` (so the
+// static tests are unchanged), while a stub WITH a `wght` axis resolves the weight
+// coord — which is what lets the weight-threading tests below observe 700 ≠ 400.
 vi.mock('~/lib/vectortype/font', () => ({
   loadVectorFont,
-  clampCoords: () => ({}),
-  defaultCoords: () => ({}),
+  defaultCoords: (font: any) =>
+    Object.fromEntries((font?.axes ?? []).map((a: any) => [a.tag, a.default])),
+  clampCoords: (font: any, coords: Record<string, number> = {}) => {
+    const byTag = new Map((font?.axes ?? []).map((a: any) => [a.tag, a]))
+    const out: Record<string, number> = {}
+    for (const [tag, raw] of Object.entries(coords ?? {})) {
+      const axis: any = byTag.get(tag)
+      if (!axis) continue
+      const v = Number(raw)
+      if (!Number.isFinite(v)) continue
+      out[tag] = Math.min(axis.max, Math.max(axis.min, v))
+    }
+    return out
+  },
 }))
 
 import {
@@ -452,5 +468,174 @@ describe('textLayerOutline with layer.path', () => {
     const pathD = textLayerOutline(pathLayer, 1000, fakeMeasureCtx())
     expect(pathD).toBeTruthy()
     expect(pathD).not.toBe(flatD)
+  })
+})
+
+// ── weight threading into the outline (Task 6) ───────────────────────────────
+//
+// The correctness gap Task 6 closes: a curated VARIABLE family is one file for
+// every weight (`compositorFontToken` returns the bare catalog id), so before
+// this task the outline was always shaped at the file default (400) while
+// `fillText` rendered the layer's real weight — a visible mismatch. The fix
+// threads `{ wght: fontWeight, ...axes }` into `textOutlines`.
+//
+// A VARIATION-AWARE stub: `getVariation(coords)` returns glyphs whose HOLE
+// shrinks as `wght` grows, so the filled area rises with weight while the
+// command count stays fixed — exactly a real variable font's behaviour (gvar
+// moves points, never adds them). The metric is filled area, not command count.
+const heavyGlyph = (ch: string, wght: number) => {
+  const inset = ((Math.max(100, Math.min(900, wght)) - 100) / 800) * 200 // 400→75, 700→150
+  return {
+    id: ch.charCodeAt(0),
+    advanceWidth: 600,
+    codePoints: [ch.charCodeAt(0)],
+    path: {
+      commands: [
+        // Outer contour — the full 600×1000 box, identical at every weight.
+        { command: 'moveTo', args: [0, -200] },
+        { command: 'lineTo', args: [600, -200] },
+        { command: 'lineTo', args: [600, 800] },
+        { command: 'lineTo', args: [0, 800] },
+        { command: 'closePath', args: [] },
+        // Inner hole — shrinks as weight grows, so filled area grows. SAME count.
+        { command: 'moveTo', args: [inset, -200 + inset] },
+        { command: 'lineTo', args: [inset, 800 - inset] },
+        { command: 'lineTo', args: [600 - inset, 800 - inset] },
+        { command: 'lineTo', args: [600 - inset, -200 + inset] },
+        { command: 'closePath', args: [] },
+      ],
+      bbox: { minX: 0, minY: -200, maxX: 600, maxY: 800 },
+    },
+  }
+}
+
+const variableStubFont = (): VtFont => ({
+  id: 'inter',
+  axes: [{ tag: 'wght', name: 'Weight', min: 100, default: 400, max: 900 }],
+  unitsPerEm: 1000,
+  raw: {
+    unitsPerEm: 1000,
+    ascent: 800,
+    descent: -200,
+    xHeight: 500,
+    capHeight: 700,
+    // A variable font shapes off an interpolated instance; a static one shapes
+    // off `raw` directly (never reached here, since axes.length > 0).
+    getVariation(coords: Record<string, number>) {
+      const wght = Number(coords?.wght) || 400
+      return {
+        layout: (text: string) => {
+          const glyphs = [...text].map((ch) => heavyGlyph(ch, wght))
+          return {
+            glyphs,
+            positions: glyphs.map((g) => ({ xAdvance: g.advanceWidth, yAdvance: 0, xOffset: 0, yOffset: 0 })),
+          }
+        },
+      }
+    },
+  } as any,
+})
+
+// Filled area of a command list = |largest subpath| − Σ|holes|. Split subpaths on
+// moveTo; each is a polygon whose |shoelace| is its area. Winding-agnostic.
+function subpathAreas(cmds: VectorCommand[]): number[] {
+  const areas: number[] = []
+  let pts: Array<[number, number]> = []
+  const flush = () => {
+    if (pts.length >= 3) {
+      let a = 0
+      for (let i = 0; i < pts.length; i++) {
+        const [x1, y1] = pts[i]!
+        const [x2, y2] = pts[(i + 1) % pts.length]!
+        a += x1 * y2 - x2 * y1
+      }
+      areas.push(Math.abs(a) / 2)
+    }
+    pts = []
+  }
+  for (const c of cmds) {
+    if (c.command === 'moveTo') { flush(); pts.push([c.args[0]!, c.args[1]!]) }
+    else if (c.command === 'lineTo') { pts.push([c.args[0]!, c.args[1]!]) }
+    else if (c.command === 'closePath') { flush() }
+  }
+  flush()
+  return areas
+}
+function filledArea(cmds: VectorCommand[]): number {
+  const a = subpathAreas(cmds).sort((x, y) => y - x)
+  if (!a.length) return 0
+  return a[0]! - a.slice(1).reduce((s, v) => s + v, 0)
+}
+
+describe('runToCommands weight threading (variable font)', () => {
+  const run = { text: 'A', x: 0, y: 0 }
+  const style = { fontPx: 100, letterSpacingPx: 0, align: 'left' as const, baseline: 'alphabetic' as const }
+
+  it('a heavier wght shapes a measurably larger filled area, at the SAME command count', () => {
+    const at400 = runToCommands(variableStubFont(), run, style, { wght: 400 })
+    const at700 = runToCommands(variableStubFont(), run, style, { wght: 700 })
+    // Topology is fixed across the axis — the animation-safety invariant.
+    expect(at700.length).toBe(at400.length)
+    const a400 = filledArea(at400)
+    const a700 = filledArea(at700)
+    // 400 hole inset 75 → filled 217500 units → 2175px²; 700 inset 150 → 3900px².
+    expect(a400).toBeCloseTo(2175, 3)
+    expect(a700).toBeCloseTo(3900, 3)
+    expect(a700).toBeGreaterThan(a400 * 1.5)
+  })
+
+  it('no axes / wght:400 both shape the font default (400)', () => {
+    expect(runToCommands(variableStubFont(), run, style)).toEqual(
+      runToCommands(variableStubFont(), run, style, { wght: 400 }),
+    )
+  })
+
+  it('is deterministic at a fixed weight', () => {
+    expect(runToCommands(variableStubFont(), run, style, { wght: 700 })).toEqual(
+      runToCommands(variableStubFont(), run, style, { wght: 700 }),
+    )
+  })
+})
+
+describe('textLayerOutline threads layer.fontWeight into the shaped outline', () => {
+  async function primeVariableInter() {
+    loadVectorFont.mockResolvedValue(variableStubFont())
+    getCompositorFont({ fontFamily: 'Inter', fontWeight: 400 })
+    await flush()
+  }
+
+  it('a 700 layer outlines heavier than a 400 layer on the same variable family', async () => {
+    await primeVariableInter()
+    const l400 = createTextLayer({ text: 'A', fontFamily: 'Inter', fontWeight: 400, fontSize: 0.1 })
+    const l700 = createTextLayer({ text: 'A', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.1 })
+    const d400 = textLayerOutline(l400, 1000, fakeMeasureCtx())
+    const d700 = textLayerOutline(l700, 1000, fakeMeasureCtx())
+    expect(d400).toBeTruthy()
+    expect(d700).toBeTruthy()
+    // Both layers share ONE cached font object (same token 'inter'); the only
+    // difference is the threaded wght axis. Without threading both = 400 → equal.
+    expect(d700).not.toBe(d400)
+  })
+})
+
+describe('a rejected font load degrades the outline to fillText (Task 6)', () => {
+  it('leaves textLayerOutline / outlinePathData null, steadily, with no refetch or console spam', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // A system family mis-taken as Google resolves to a google token whose fetch 404s.
+    loadVectorFont.mockRejectedValue(new Error('Font google:Definitely Not Real@700: HTTP 404'))
+    const layer = createTextLayer({ text: 'AB', fontFamily: 'Definitely Not Real', fontWeight: 700, fontSize: 0.1 })
+
+    // First frame: kicks the (doomed) load, degrades to fillText (null outline).
+    expect(textLayerOutline(layer, 1000, fakeMeasureCtx())).toBeNull()
+    await flush()
+    // After the rejection settles: steady null, no refetch, caller keeps fillText.
+    expect(textLayerOutline(layer, 1000, fakeMeasureCtx())).toBeNull()
+    expect(outlinePathData(layer, 1000, fakeMeasureCtx())).toBeNull()
+    expect(loadVectorFont).toHaveBeenCalledTimes(1)
+    expect(errSpy).not.toHaveBeenCalled()
+    expect(warnSpy).not.toHaveBeenCalled()
+    errSpy.mockRestore()
+    warnSpy.mockRestore()
   })
 })

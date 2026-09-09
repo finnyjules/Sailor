@@ -192,7 +192,10 @@ function baselineShiftUnits(baseline: CanvasTextBaseline, ascent: number, descen
  * `letterSpacing`.
  *
  * The run is shaped once by `textOutlines` (fontkit's own GSUB/GPOS, so kerning
- * and ligatures are the font's). Each glyph is then placed:
+ * and ligatures are the font's) at the optional `axes` position — pass
+ * `{ wght: … }` (plus any variable coords) so the OUTLINE is shaped at the same
+ * weight `ctx.font`/`fontVariationSettings` render, not always the file default.
+ * Each glyph is then placed:
  *  - font units → px by `fontPx / unitsPerEm`, y-flipped (font y-up → canvas
  *    y-down) — carried by `transformCommands`, the one placement choke point the
  *    SVG writer shares, so the exported `d` and this path stay identical geometry;
@@ -211,12 +214,16 @@ export function runToCommands(
   font: VtFont,
   run: CompositorTextRun,
   style: CompositorRunStyle,
+  axes?: Record<string, number>,
 ): VectorCommand[] {
   const unitsPerEm = Number(font?.unitsPerEm) || 1000
   const scale = style.fontPx / unitsPerEm
   const ls = Number.isFinite(style.letterSpacingPx) ? style.letterSpacingPx : 0
 
-  const { glyphs, width: advanceUnits, metrics } = textOutlines(font, run.text)
+  // Shape at the caller's axis position (variable weight etc.). `textOutlines`
+  // clamps to the font's real axis ranges and drops tags the font lacks, so a
+  // static cut (empty `axes`) ignores this and shapes off its shipped bytes.
+  const { glyphs, width: advanceUnits, metrics } = textOutlines(font, run.text, axes)
   const n = glyphs.length
   if (n === 0) return []
 

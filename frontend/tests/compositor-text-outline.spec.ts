@@ -15,8 +15,9 @@ import { openCompositor, stackPixels } from './_helpers'
  * `fillText` path load the SAME bytes at the SAME (default) axis position — the
  * only way glyph geometry is guaranteed identical, so any pixel gap is a LAYOUT
  * gap (the thing under test), not a font-file or weight-axis difference. (Weight
- * axis threading into the outline is Task 6; a `google:Family@700` static cut
- * fetches DIFFERENT bytes than css2's Google file and drifts a few percent.)
+ * axis threading into the outline landed in Task 6 — proven by the separate
+ * variable-weight-700 parity test below; a `google:Family@700` static cut still
+ * fetches DIFFERENT bytes than css2's Google file and would drift a few percent.)
  * `__compositorTextOutline(0)` returning a non-null `d` confirms the outline path
  * actually ran rather than silently falling back to `fillText`.
  */
@@ -120,6 +121,35 @@ test.describe('Compositor text → outline parity', () => {
     const r = await compareToStash(page, '__fillText')
     expect(r.mismatchSize).toBe(false)
     console.log(`[parity single-line] within Δ2: ${(r.withinPct * 100).toFixed(3)}% (${r.within2}/${r.total})`)
+    expect(r.withinPct).toBeGreaterThanOrEqual(0.99)
+  })
+
+  test('a NON-400 weight on a variable family outlines identically to fillText (Task 6)', async ({ page }) => {
+    await openCompositor(page)
+    // The Task 6 gap: Inter is a curated VARIABLE file, one token for every
+    // weight. Before this task the outline shaped at the file default (400) while
+    // `fillText` rendered 700 — a real weight mismatch. Threading `wght` into
+    // `textOutlines` closes it, so a 700 layer's outline must now land on the
+    // same pixels `fillText` inks at 700.
+    const patch = { text: 'Heavy', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.16, align: 'center' }
+
+    await seed(page, [textLayer({ ...patch, renderAsOutline: false })])
+    // Wait for the 700 CSS face specifically (not the 400 the shared helper checks).
+    await expect.poll(async () => page.evaluate(
+      () => (document as any).fonts.check('700 100px "Inter"'),
+    ), { timeout: 15_000 }).toBe(true)
+    await stackPixels(page)
+    await assertNonBlank(page)
+    await stash(page, '__fillText700')
+
+    await seed(page, [textLayer({ ...patch, renderAsOutline: true })])
+    await outlineResolved(page)
+    await stackPixels(page)
+    await assertNonBlank(page)
+
+    const r = await compareToStash(page, '__fillText700')
+    expect(r.mismatchSize).toBe(false)
+    console.log(`[parity variable weight 700] within Δ2: ${(r.withinPct * 100).toFixed(3)}% (${r.within2}/${r.total})`)
     expect(r.withinPct).toBeGreaterThanOrEqual(0.99)
   })
 

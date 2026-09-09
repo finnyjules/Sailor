@@ -650,10 +650,11 @@ export function glyphOutlineCommands(
   font: VtFont,
   glyph: PlacedGlyph,
   fontPx: number,
+  axes?: Record<string, number>,
 ): VectorCommand[] {
   const centred = runToCommands(font, { text: glyph.ch, x: 0, y: 0 }, {
     fontPx, letterSpacingPx: 0, align: 'center', baseline: 'middle',
-  })
+  }, axes)
   if (!centred.length) return []
   return transformCommands(centred, {
     scale: 1,
@@ -673,10 +674,11 @@ export function placedGlyphsToCommands(
   font: VtFont,
   placed: readonly PlacedGlyph[],
   fontPx: number,
+  axes?: Record<string, number>,
 ): VectorCommand[] {
   const out: VectorCommand[] = []
   for (const g of placed) {
-    const cmds = glyphOutlineCommands(font, g, fontPx)
+    const cmds = glyphOutlineCommands(font, g, fontPx, axes)
     for (const c of cmds) out.push(c)
   }
   return out
