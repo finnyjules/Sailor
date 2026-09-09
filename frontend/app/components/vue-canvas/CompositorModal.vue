@@ -1658,6 +1658,15 @@ function onKeydown(e: KeyboardEvent) {
   const shapePickerOpen = libraryPickerOpen.value || inspectorShapePickerOpen.value
   if (shapePickerOpen) return
   if (!typing && !editingId.value && handleEditorKey(e)) return
+  // Escape disarms the drag-to-generate gesture — checked before the pen's own
+  // Escape and BEFORE handleKeydown's bubble-phase Escape (which closes the whole
+  // modal) can see the event, so stopPropagation here wins while armed.
+  if (e.key === 'Escape' && genGesture.value) {
+    e.stopPropagation()
+    if (genResult.value) cancelObject()
+    else disarmGenGesture()
+    return
+  }
   if (e.key === 'Escape' && pen.active.value) { e.stopPropagation(); pen.setActive(false); return }
   if (e.key === 'Enter' && pen.active.value && pen.anchors.value.length >= 2) { e.preventDefault(); finishPen(); return }
   // V → Select tool (when not typing in a field).
@@ -1679,6 +1688,14 @@ function onKeydown(e: KeyboardEvent) {
   }
   const tag = (e.target as HTMLElement)?.tagName
   const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!editingId.value
+  // Option/Alt spring-loads the drag-to-generate gesture (like holding Space to pan).
+  // Only from a clean Select state, and never while typing (the on-box prompt is a field).
+  if (e.key === 'Alt' && !inField && !optDown.value && !genActive.value
+      && !smartActive.value && isSelectTool.value && !editingId.value) {
+    optDown.value = true
+    armGenGesture(true)
+    return
+  }
   // Space → hold-to-pan. Prevent the default page scroll while held.
   if (e.code === 'Space' && !inField) { e.preventDefault(); spaceDown.value = true }
   // ⌘\ hides/shows both glass panels. Unlike the zoom combos it is allowed while
@@ -1703,7 +1720,16 @@ function onKeydown(e: KeyboardEvent) {
     if (e.shiftKey) ungroupSelected(); else groupSelected()
   }
 }
-function onKeyup(e: KeyboardEvent) { if (e.code === 'Space') spaceDown.value = false }
+function onKeyup(e: KeyboardEvent) {
+  if (e.code === 'Space') spaceDown.value = false
+  if (e.key === 'Alt') {
+    optDown.value = false
+    // Keep-alive: releasing Option MID-GESTURE (a box is being/has been drawn, or a
+    // result awaits) does NOT disarm — matches Space-pan. Otherwise, drop the arm.
+    if (genSpring.value && !genDraw.value && !genHasMask.value && !genResult.value) disarmGenGesture()
+    else genSpring.value = false   // committed to a box → becomes a sticky arm
+  }
+}
 // If focus leaves the window while Space is held (alt/⌘-tab, clicking into the
 // cross-origin ComfyUI iframe, tab switch), the keyup lands elsewhere and
 // spaceDown would stay stuck true — freezing layer select/move behind pan mode.
@@ -4723,10 +4749,13 @@ function cancelObject() {
   deleteLocal(r.layerId)
   genResult.value = null
   clearGenMask()                 // discarded → drop the drawn area too
+  if (genGesture.value) disarmGenGesture()   // gesture: back to Select
 }
 function confirmObject() {
+  if (genGesture.value) lastGenStyle.value = genStyle.value   // remember the style
   genResult.value = null
   clearGenMask()                 // validated → the drawn area has served its purpose
+  if (genGesture.value) disarmGenGesture()   // gesture: back to Select
 }
 
 async function runRegionFill() {
