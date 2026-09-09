@@ -641,13 +641,17 @@ describe('the module is pure', () => {
     )
     const imports = [...src.matchAll(/\bfrom\s+'([^']+)'/g)].map(m => m[1])
     // Every dependency is a pure module: the arc-length sampler, the SVG
-    // flattener, and the shape library's data + geometry. Nothing Vue, nothing
-    // that touches a document — this module runs inside the draw loop.
+    // flattener, the shape library's data + geometry, and pure glyph-outline
+    // helpers (textOutline and vector/svg) added for text-on-path outlining.
+    // Nothing Vue, nothing that touches a document — this module runs inside
+    // the draw loop.
     expect(imports.sort()).toEqual([
       '~/composables/useCompositorLayers',
       '~/lib/compositor/pathFlatten',
+      '~/lib/compositor/textOutline',
       '~/lib/shapes/catalog',
       '~/lib/shapes/pathLayer',
+      '~/lib/vector/svg',
       '~/lib/vectortype/curve',
     ])
     // The type-only one is erased at runtime, so nothing Vue-shaped is ever loaded.
