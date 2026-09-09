@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { applyPlacement } from '~/lib/frame/patterns/apply'
+import { shapeCounter } from '~/lib/frame/patterns/patterns/shapeCounter'
+import { inferElements } from '~/lib/frame/patterns/hierarchy'
+import { ctxFor } from './_poster-fixtures'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { PatternPlacement, FrameElements } from '~/lib/frame/patterns/types'
 
@@ -44,6 +47,62 @@ describe('applyPlacement', () => {
       { target: 'details', kind: 'text', x: 0.1, y: 0.1, fontSize: 0.02, colorRole: 'ink' },
     ] }
     const next = applyPlacement(layers, placement, elements, palette)
-    expect(next[0]).toEqual(layers[0])            // unchanged (no details element)
+    expect(next[0]).toBe(layers[0])                // pass-through BY REFERENCE (the contract)
+  })
+  it('applies a shape op\'s geometry and colour role to the real shape layer', () => {
+    const layers: LocalLayer[] = [
+      textLayer('t'),
+      { id: 's', kind: 'rect', x: 0.5, y: 0.5, w: 0.2, h: 0.2, fill: '#000000', rotation: 0, opacity: 1 } as any,
+    ]
+    const els = {
+      title: { role: 'title', id: 't', text: 'NOISE', words: ['NOISE'] },
+      images: [], shapes: [{ id: 's', shapeId: 'circle' }], shapeMode: null,
+    } as unknown as FrameElements
+    const placement: PatternPlacement = { did: 'x', ops: [
+      { target: 's', kind: 'shape', x: 0.3, y: 0.4, w: 0.6, h: 0.6, colorRole: 'accent', fill: 'solid', z: 0 },
+      { target: 'title', kind: 'text', x: 0.5, y: 0.5, fontSize: 0.2, colorRole: 'ink' },
+    ] }
+    const next = applyPlacement(layers, placement, els, palette)
+    const s = next.find(l => l.id === 's') as any
+    expect([s.x, s.y, s.w, s.h]).toEqual([0.3, 0.4, 0.6, 0.6])
+    expect(s.fill).toBe(palette.accent)
+  })
+  it('shapeCounter targets the real shape layer id, not the sentinel \'shape\'', () => {
+    const els = inferElements([
+      { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 },
+      { id: 'sh', kind: 'shape', shapeId: 'circle' },
+    ])
+    const { ops } = shapeCounter.place(ctxFor({ elements: els }))
+    const shapeOp = ops.find(o => o.kind === 'shape')!
+    expect(shapeOp.target).toBe(els.shapes[0]!.id)
+    expect(shapeOp.target).not.toBe('shape')
+  })
+  it('last op for an id wins', () => {
+    const layers: LocalLayer[] = [textLayer('t')]
+    const placement: PatternPlacement = { did: 'x', ops: [
+      { target: 'title', kind: 'text', x: 0.1, y: 0.1, fontSize: 0.1 },
+      { target: 'title', kind: 'text', x: 0.9, y: 0.15, fontSize: 0.12 },
+    ] }
+    const t = applyPlacement(layers, placement, elements, palette)[0] as any
+    expect(t.x).toBe(0.9)
+  })
+  it('an op with no colorRole leaves the layer colour untouched', () => {
+    const layers: LocalLayer[] = [textLayer('t', { color: '#abcdef' })]
+    const placement: PatternPlacement = { did: 'x', ops: [
+      { target: 'title', kind: 'text', x: 0.2, y: 0.2, fontSize: 0.1 },
+    ] }
+    const t = applyPlacement(layers, placement, elements, palette)[0] as any
+    expect(t.color).toBe('#abcdef')
+  })
+  it('never mutates the input', () => {
+    const layer = Object.freeze(textLayer('t'))
+    const layers: LocalLayer[] = Object.freeze([layer]) as any
+    const placement: PatternPlacement = { did: 'x', ops: [
+      { target: 'title', kind: 'text', x: 0.2, y: 0.3, fontSize: 0.15, colorRole: 'accent' },
+    ] }
+    expect(() => applyPlacement(layers, placement, elements, palette)).not.toThrow()
+    expect(layer.x).toBe(0.5)
+    expect(layer.y).toBe(0.5)
+    expect((layer as any).color).toBe('#000000')
   })
 })

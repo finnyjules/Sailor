@@ -18,6 +18,8 @@ describe('applyPatternToFrame', () => {
     const committed = editor.commit.mock.calls[0][0]
     expect(committed[0].id).toBe('t')
     expect(committed[0].fontFamily).toBe('Inter')       // face untouched
+    expect(committed[0].x !== 0.5 || committed[0].y !== 0.5).toBe(true)  // runOff moves it off-centre
+    expect(committed[0].fontSize).not.toBe(0.2)          // runOff re-sizes to fit
     expect(out.posterState).toEqual({ patternId: 'runoff', seed: 7 })
   })
   it('is a no-op for an unknown pattern id', () => {

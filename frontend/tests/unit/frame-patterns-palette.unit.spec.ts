@@ -18,6 +18,9 @@ describe('autoInk', () => {
     const naive = contrastRatio('#6d1fb0', '#b0308a')
     expect(autoInk('#6d1fb0', ['#b0308a']).ratio).toBeGreaterThan(naive)
   })
+  it('guarantees >= 4.5:1 even on a stubborn mid-grey field', () => {
+    expect(autoInk('#787878', []).ratio).toBeGreaterThanOrEqual(4.5)
+  })
 })
 
 describe('rolesFromFamily', () => {

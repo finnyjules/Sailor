@@ -22,7 +22,7 @@ export function contrastRatio(a: string, b: string): number {
 }
 /** Best-contrast ink on `field` from candidates + black/white/paper fallbacks (guarantees a legible pick). */
 export function autoInk(field: string, candidates: string[]): { ink: string; ratio: number } {
-  const pool = [...candidates, '#ffffff', '#0e0e0e', '#f2f0ef']
+  const pool = [...candidates, '#ffffff', '#0e0e0e', '#f2f0ef', '#000000']
   let ink = pool[0]!, ratio = 0
   for (const c of pool) { const r = contrastRatio(field, c); if (r > ratio) { ratio = r; ink = c } }
   return { ink, ratio }

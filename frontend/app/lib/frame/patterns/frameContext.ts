@@ -14,7 +14,7 @@ export function posterLayerViews(props: Record<string, unknown> | undefined): Po
   for (const l of layers) {
     if (l.kind === 'text') out.push({ id: l.id, kind: 'text', text: (l as any).text, fontSize: (l as any).fontSize })
     else if (l.kind === 'image') out.push({ id: l.id, kind: 'image' })
-    else if (SHAPE_KINDS.has(l.kind)) out.push({ id: l.id, kind: 'shape', shapeId: (l as any).shape ?? 'circle' })
+    else if (SHAPE_KINDS.has(l.kind)) out.push({ id: l.id, kind: 'shape', shapeId: (l as any).shapeId ?? 'circle' })
   }
   return out
 }
@@ -31,5 +31,6 @@ export function buildFrameContext(
   const grid = g.mode !== 'off' ? resolveGrid(g, frameW, frameH) : null
   const elements = inferElements(posterLayerViews(props))
   const seed = (props?.sailor_posterState as { seed?: number } | undefined)?.seed ?? 1
-  return { frame: { w: frameW, h: frameH }, grid, margin: g.margin, elements, seed, measure }
+  const margin = Math.min(Math.max(g.margin, 0), 0.45)
+  return { frame: { w: frameW, h: frameH }, grid, margin, elements, seed, measure }
 }

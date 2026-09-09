@@ -20,7 +20,7 @@ export const shapeCounter: Pattern = {
       const xLeft = mb.x + (mb.w - wpx) * r.f()
       const yTop = mb.y + (mb.h - hpx) * r.f()
       const c = toNorm({ x: xLeft, y: yTop, w: wpx, h: hpx }, frame)
-      ops.push({ target: 'shape', kind: 'shape', shapeId: sh.id, x: c.x, y: c.y, w: wpx / frame.w, h: hpx / frame.w, colorRole: 'accent', fill: 'solid', z: 0 })
+      ops.push({ target: elements.shapes[0]?.id ?? 'shape', kind: 'shape', shapeId: sh.id, x: c.x, y: c.y, w: wpx / frame.w, h: hpx / frame.w, colorRole: 'accent', fill: 'solid', z: 0 })
     }
     const text = elements.title?.text ?? 'WORD'
     const size = fitSize(text, mb.w * r.range(0.95, 1.25), measure)

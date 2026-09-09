@@ -8,7 +8,7 @@ const props = {
     { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2, x: 0.5, y: 0.5 },
     { id: 'd', kind: 'text', text: '12–14 October 2026', fontSize: 0.03, x: 0.5, y: 0.9 },
     { id: 'b', kind: 'brush', x: 0.5, y: 0.5 },                 // dropped
-    { id: 'r', kind: 'rect', x: 0.5, y: 0.5, shape: 'circle' },  // → shape
+    { id: 'r', kind: 'path', x: 0.5, y: 0.5, shapeId: 'sun-rays' },  // → shape
     { id: 'i', kind: 'image', filename: 'x.png', x: 0.5, y: 0.5 },
   ],
 }
@@ -17,7 +17,7 @@ describe('posterLayerViews', () => {
   it('maps text/image/shape and drops non-poster kinds', () => {
     const v = posterLayerViews(props)
     expect(v.map(x => x.id)).toEqual(['t', 'd', 'r', 'i'])   // brush dropped
-    expect(v.find(x => x.id === 'r')).toMatchObject({ kind: 'shape', shapeId: 'circle' })
+    expect(v.find(x => x.id === 'r')).toMatchObject({ kind: 'shape', shapeId: 'sun-rays' })
     expect(v.find(x => x.id === 'i')).toMatchObject({ kind: 'image' })
   })
   it('defaults to empty on a bare node', () => {
@@ -49,5 +49,10 @@ describe('buildFrameContext', () => {
     expect(ctx.grid).not.toBeNull()
     expect(ctx.grid!.xs.length).toBeGreaterThan(0)
     expect(ctx.margin).toBeCloseTo(0.05, 5)
+  })
+  it('clamps an extreme margin like resolveGrid does', () => {
+    const withMargin = { ...props, sailor_localGrid: { mode: 'off', margin: 0.6 } }
+    const ctx = buildFrameContext(withMargin, 800, 1000, stubMeasure)
+    expect(ctx.margin).toBe(0.45)
   })
 })
