@@ -7,8 +7,10 @@
  * Gradient so it drops straight into resolvePaint (no 2-stop collapse).
  */
 import { ref, computed } from 'vue'
+import { Trash2 } from 'lucide-vue-next'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import { hueWalk } from '~/lib/color/hueWalk'
 import type { Gradient, GradientStop } from '~/composables/useCompositorLayers'
@@ -141,21 +143,16 @@ function onHandleDown(i: number, e: PointerEvent) {
 
 <template>
   <div class="space-y-2">
-    <!-- linear / radial -->
-    <div class="flex items-center gap-1">
-      <button type="button" class="flex-1 h-6 rounded text-[11px] cursor-pointer transition-colors"
-        :class="!isRadial ? 'bg-white text-neutral-900 font-medium' : 'bg-white/[0.06] text-white/65 hover:bg-white/10'"
-        @click="setMode('linear')">Linear</button>
-      <button type="button" class="flex-1 h-6 rounded text-[11px] cursor-pointer transition-colors"
-        :class="isRadial ? 'bg-white text-neutral-900 font-medium' : 'bg-white/[0.06] text-white/65 hover:bg-white/10'"
-        @click="setMode('radial')">Radial</button>
-    </div>
+    <!-- linear / radial — the shared segmented, not hand-rolled buttons -->
+    <StudioSegmented
+      :model-value="isRadial ? 'Radial' : 'Linear'" :options="['Linear', 'Radial']"
+      @update:model-value="(v: string) => setMode(v === 'Radial' ? 'radial' : 'linear')"
+    />
 
-    <!-- interpolation: sRGB (Direct) vs a hue walk round the wheel -->
-    <div>
-      <div class="text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">Interpolation</div>
-      <StudioSegmented v-model="interpLabel" :options="[...INTERP_OPTIONS]" />
-    </div>
+    <!-- Interpolation: sRGB (Direct) vs a hue walk round the wheel. A select, not a
+         3-up segmented — "Hue (short)" / "Hue (long)" wrap onto two lines in a panel
+         this narrow, and as a labelled row it lines up with Angle and the stops. -->
+    <StudioSelect v-model="interpLabel" label="Interpolation" :options="[...INTERP_OPTIONS]" />
 
     <!-- preview bar + draggable stop handles -->
     <div ref="barRef" class="relative h-6 rounded border border-white/10 overflow-visible"
@@ -172,14 +169,16 @@ function onHandleDown(i: number, e: PointerEvent) {
 
     <!-- per-stop rows -->
     <div class="space-y-1.5">
-      <div v-for="(s, i) in stops" :key="'r' + i" class="flex items-center gap-1.5">
+      <!-- One studio row per stop — colour, position, remove — matching Angle above
+           (and the ink rows in ShaderFillEditor) instead of a bare number + "%". -->
+      <div v-for="(s, i) in stops" :key="'r' + i" class="flex items-center gap-2">
         <StudioColor :model-value="s.color" @update:model-value="(v: string) => setStopColor(i, v)" />
-        <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(s.offset * 100)"
-          class="w-12 bg-white/10 rounded px-1.5 py-1 text-[11px] text-white/85 tabular-nums outline-none"
-          @input="setStopOffset(i, Number(($event.target as HTMLInputElement).value) / 100)" />
-        <span class="text-[9px] text-white/30">%</span>
-        <button type="button" class="ml-auto h-5 w-5 rounded text-white/40 hover:text-white/80 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
-          :disabled="stops.length <= 2" title="Remove stop" @click="removeStop(i)">✕</button>
+        <div class="min-w-0 flex-1">
+          <StudioSlider :model-value="Math.round(s.offset * 100)" @update:model-value="(v: number) => setStopOffset(i, v / 100)"
+            :min="0" :max="100" :step="1" :bindable="false" />
+        </div>
+        <button type="button" class="shrink-0 rounded p-0.5 text-white/30 hover:bg-white/10 hover:text-white/70 disabled:opacity-20 disabled:hover:bg-transparent cursor-pointer"
+          :disabled="stops.length <= 2" title="Remove stop" @click="removeStop(i)"><Trash2 :size="12" /></button>
       </div>
     </div>
 
