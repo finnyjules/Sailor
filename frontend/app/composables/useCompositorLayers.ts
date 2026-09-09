@@ -2706,7 +2706,8 @@ export function layerGeometryEffects(layer: unknown): EffectInstance[] {
 function textHasDecoration(layer: TextLayer): boolean {
   if (layer.underline || layer.strikethrough) return true
   return strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])
-    .some(st => st.visible !== false && (st.distance ?? 0) !== 0)
+    .some(st => st.visible !== false && (st.distance ?? 0) !== 0
+      && hasPaint(st.paint) && (st.width ?? 0) > 0)
 }
 
 /**
@@ -2719,12 +2720,24 @@ function textHasDecoration(layer: TextLayer): boolean {
  * geometry effect on it is silently a no-op rather than dropping the decoration.
  */
 export function needsComputedOutline(layer: LocalLayer): boolean {
+  if (!canTakeGeometry(layer)) return false
+  return needsTextOutline(layer) || layerGeometryEffects(layer).length > 0
+}
+
+/**
+ * True when a layer is ELIGIBLE for a geometry effect — i.e. it can produce an outline the
+ * transform can act on: a vector kind (rect / ellipse / path / polygon / star / text) that is
+ * NOT decorated text. This is the vector half of `needsComputedOutline` without requiring an
+ * effect to be present yet, so the add menu and the renderer share one answer: the menu greys
+ * a geometry kind for exactly the layers on which the renderer would silently drop it.
+ */
+export function canTakeGeometry(layer: LocalLayer): boolean {
   const k = layer.kind
   const vector = k === 'rect' || k === 'ellipse' || k === 'path'
     || k === 'polygon' || k === 'star' || k === 'text'
   if (!vector) return false
   if (k === 'text' && textHasDecoration(layer as TextLayer)) return false
-  return needsTextOutline(layer) || layerGeometryEffects(layer).length > 0
+  return true
 }
 
 /**
@@ -3061,7 +3074,12 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // path's strokeText+fillText (strokes under the fill). When the font is still
     // loading `collectTextOutline` returns null: fall back to fillText this frame;
     // the host's `onCompositorFontReady` → renderStack wire repaints when it lands.
-    const oc = needsTextOutline(layer) ? collectTextOutline(layer, W) : null
+    // F2: a geometry effect must force the outline path even when `renderAsOutline` is unset,
+    // or the effect is silently dropped. A decorated text layer is excluded (it inks with
+    // fillText); a system font makes `collectTextOutline` return null → safe fillText fallback.
+    const oc = (needsTextOutline(layer) || layerGeometryEffects(layer).length > 0)
+      && !textHasDecoration(layer as TextLayer)
+      ? collectTextOutline(layer, W) : null
     if (oc) {
       // F2: transform the outline by any geometry effect first. `needsComputedOutline`
       // is false for a decorated text layer, so a decorated one keeps its exact F1 `d`;

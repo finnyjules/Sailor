@@ -293,3 +293,128 @@ test.describe('Frame geometry effects (F2)', () => {
     expect(after).toBe(before)               // and in fact byte-identical
   })
 })
+
+/**
+ * F2 Task 6 — add-menu gating and inspector dials for the four geometry effects.
+ *
+ * Gating: geometry kinds are greyed for a layer with no outline (image) and for decorated
+ * text, and enabled for a plain vector (rect). Inspector: selecting a geometry effect shows
+ * its dials, a dial write reaches the stored param and moves the pixels — no dead control.
+ * Render fix A: a geometry effect on a text layer whose `renderAsOutline` is unset still
+ * forces the outline path (Inter) and safely falls back to fillText on a system font (Arial).
+ */
+const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen'] as const
+// A 1×1 transparent PNG so an image layer has a valid, instantly-decoding source.
+const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+
+/** Open the plus menu for the (single seeded) layer and wait for its items. */
+async function openFxMenuFirst(page: Page): Promise<void> {
+  const btn = page.locator('[data-testid="add-effect"]').first()
+  await btn.hover()
+  await btn.click()
+  await expect(page.locator('[data-testid="add-effect-item"][data-kind="trim"]')).toBeVisible()
+}
+
+async function seedOne(page: Page, layer: Record<string, unknown>): Promise<void> {
+  await page.evaluate((l) => (window as any).__compositorSetLayers([l]), layer)
+}
+
+test.describe('Frame geometry effects — menu gating + inspector dials (F2 Task 6)', () => {
+  test('greyed on an image layer, with a "needs a vector shape" reason', async ({ page }) => {
+    await openCompositor(page)
+    await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
+    await openFxMenuFirst(page)
+    for (const k of GEOMETRY_KINDS)
+      await expect(page.locator(`[data-testid="add-effect-item"][data-kind="${k}"]`)).toBeDisabled()
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="trim"]'))
+      .toHaveAttribute('title', /vector shape/)
+    // A pixel effect stays offered — only geometry is gated on the outline.
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="grain"]')).toBeEnabled()
+  })
+
+  test('enabled on a rect', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await openFxMenuFirst(page)
+    for (const k of GEOMETRY_KINDS)
+      await expect(page.locator(`[data-testid="add-effect-item"][data-kind="${k}"]`)).toBeEnabled()
+  })
+
+  test('greyed on underlined text, with a decoration reason', async ({ page }) => {
+    await openCompositor(page)
+    await seedOne(page, {
+      id: 't1', kind: 'text', x: 0.5, y: 0.5, rotation: 0, opacity: 1, text: 'Hi',
+      fontFamily: 'Inter', fontWeight: 700, fontSize: 0.1, color: '#ffffff', align: 'center', lineHeight: 1.1,
+      underline: true,
+    })
+    await openFxMenuFirst(page)
+    const trim = page.locator('[data-testid="add-effect-item"][data-kind="trim"]')
+    await expect(trim).toBeDisabled()
+    await expect(trim).toHaveAttribute('title', /Underlined or struck-through/)
+  })
+
+  test('selecting Trim path shows a dial that moves the stored param and the pixels', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page)
+    const before = await stackPixels(page)
+
+    await openFxMenuFirst(page)
+    await page.locator('[data-testid="add-effect-item"][data-kind="trim"]').click()
+
+    // The inspector shows this instance's trim card (breadcrumb + a start/end control).
+    await expect(page.getByTestId('effect-breadcrumb')).toBeVisible()
+    const end = page.locator('[data-testid="geo-trim-end"]')
+    await expect(end).toBeVisible()
+
+    // A dial write reaches the stored effect param …
+    await end.fill('50')
+    await end.blur()
+    await expect.poll(() => page.evaluate(() =>
+      ((window as any).__compositorLayers()[0].effects || []).find((e: any) => e.type === 'trim')?.end))
+      .toBeCloseTo(0.5, 5)
+    // … and moves the pixels (a half-trimmed, auto-closed fill is a different shape).
+    const after = await stackPixels(page)
+    expect(after).not.toBe(before)
+  })
+
+  test('Trim on an Inter text layer changes pixels; on an Arial system font it still renders', async ({ page }) => {
+    await openCompositor(page)
+
+    // Inter — outline-able. Render fix A: geometry forces the outline path even with
+    // renderAsOutline unset.
+    await seedOne(page, {
+      id: 't1', kind: 'text', x: 0.5, y: 0.5, rotation: 0, opacity: 1, text: 'Trim',
+      fontFamily: 'Inter', fontWeight: 700, fontSize: 0.2, color: '#ffffff', align: 'center', lineHeight: 1.1,
+    })
+    await expect.poll(() => page.evaluate(() => {
+      const d = (window as any).__compositorTextOutline?.(0)
+      return typeof d === 'string' && d.length > 10
+    }), { timeout: 15_000 }).toBe(true)
+    const interBefore = await stackPixels(page)
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'tr', type: 'trim', start: 0, end: 0.5, offset: 0, visible: true }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    const interAfter = await stackPixels(page)
+    expect(interAfter).not.toBe(interBefore)
+
+    // Arial — a system font with no byte source. collectTextOutline returns null → safe
+    // fillText fallback: no crash, still inks.
+    await seedOne(page, {
+      id: 't2', kind: 'text', x: 0.5, y: 0.5, rotation: 0, opacity: 1, text: 'Trim',
+      fontFamily: 'Arial', fontWeight: 700, fontSize: 0.2, color: '#ffffff', align: 'center', lineHeight: 1.1,
+      effects: [{ id: 'tr', type: 'trim', start: 0, end: 0.5, offset: 0, visible: true }],
+    })
+    await stackPixels(page)
+    const distinct = await page.evaluate(() => {
+      const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+      const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
+      const seen = new Set<number>()
+      for (let i = 0; i < d.length; i += 4) { seen.add((d[i]! << 16) | (d[i + 1]! << 8) | d[i + 2]!); if (seen.size > 3) break }
+      return seen.size
+    })
+    expect(distinct).toBeGreaterThan(1)
+  })
+})

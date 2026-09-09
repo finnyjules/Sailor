@@ -12,7 +12,7 @@ import {
   cornerRadii, drawLocalLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, layerMaskRef, localLayerBox, createBrushLayer, newMosaicLayer,
   newScatterLayer,
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
-  outlinePathData,
+  outlinePathData, canTakeGeometry,
 } from '~/composables/useCompositorLayers'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
 import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf, mosaicStylePatch, mosaicSeedPatch, freshMosaicSeed, isMosaicShaderFill, mosaicShaderSpec, mosaicLookNames, mosaicLookOf, applyMosaicLook } from '~/lib/compositor/mosaic'
@@ -104,7 +104,7 @@ import CompositorEffectRow from '~/components/vue-canvas/compositor/CompositorEf
 import CompositorStrokeRow from '~/components/vue-canvas/compositor/CompositorStrokeRow.vue'
 import ShapeStrokeRow from '~/components/vue-canvas/compositor/ShapeStrokeRow.vue'
 import {
-  EFFECT_ORDER, EFFECT_LABELS, isPinnedKind, effectStackOf, writeStackToLayer,
+  EFFECT_ORDER, EFFECT_LABELS, isPinnedKind, isGeometryKind, effectStackOf, writeStackToLayer,
   addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder,
   type EffectInstance, type EffectKind,
 } from '~/lib/compositor/effectStack'
@@ -2035,14 +2035,23 @@ function fxKindDisabled(kind: EffectKind): boolean {
   const l = fxMenuLayerId.value ? layerById(fxMenuLayerId.value) : null
   if (!l) return false
   if (kind === 'dof' && !localDepthSource(l)) return true
+  // Geometry effects transform a vector outline before it rasterises: a layer with no outline
+  // (image / wired / brush / line / deal / scatter / mosaic) or decorated text can't take one.
+  if (isGeometryKind(kind) && !canTakeGeometry(l as LocalLayer)) return true
   return isPinnedKind(kind) && layerStack(l).some(e => e.type === kind)
 }
-/** Why a greyed menu entry is greyed — only depth of field has a reason worth spelling out. */
+/** Why a greyed menu entry is greyed — depth of field and the geometry kinds each have a
+ *  human reason worth spelling out. */
 function fxKindDisabledTitle(kind: EffectKind): string | undefined {
   const l = fxMenuLayerId.value ? layerById(fxMenuLayerId.value) : null
-  return kind === 'dof' && l && !localDepthSource(l)
-    ? 'Depth of field needs an image with a depth map'
-    : undefined
+  if (!l) return undefined
+  if (kind === 'dof' && !localDepthSource(l)) return 'Depth of field needs an image with a depth map'
+  if (isGeometryKind(kind) && !canTakeGeometry(l as LocalLayer)) {
+    return l.kind === 'text'
+      ? 'Underlined or struck-through text can\'t take geometry effects'
+      : 'Geometry effects need a vector shape'
+  }
+  return undefined
 }
 onBeforeUnmount(closeFxMenu)
 
@@ -7483,6 +7492,74 @@ onUnmounted(() => {
             :value="(activeEffect as any)"
             :hide-toggle="true"
             @update="(patch: any) => updateActiveEffect(patch)" />
+
+          <!-- Geometry effects (F2): each dial writes a param `applyGeometry` reads, so none
+               are dead. Start/End/Offset are fractions of the outline's length (shown as %);
+               Distance/Radius/Amount are normalized to canvas width (shown ×100 like the
+               shadow offsets). -->
+          <!-- Trim path -->
+          <div v-else-if="activeEffect!.type === 'trim'" class="space-y-1.5">
+            <div class="grid grid-cols-3 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">Start</div>
+                <input v-scrubnum data-testid="geo-trim-start" type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).start || 0) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ start: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">End</div>
+                <input v-scrubnum data-testid="geo-trim-end" type="number" min="0" max="100" step="1" :value="Math.round((((activeEffect as any).end ?? 1)) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ end: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Offset</div>
+                <input v-scrubnum data-testid="geo-trim-offset" type="number" step="1" :value="Math.round(((activeEffect as any).offset || 0) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ offset: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Offset path (grow positive / shrink negative, normalized to width) -->
+          <div v-else-if="activeEffect!.type === 'offset'" class="flex items-center gap-2">
+            <div class="panel-sublabel shrink-0">Distance</div>
+            <input v-scrubnum data-testid="geo-offset-distance" type="number" step="0.5" :value="Math.round(((activeEffect as any).distance || 0) * 1000) / 10"
+              class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+              @input="updateActiveEffect({ distance: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
+          </div>
+
+          <!-- Round corners -->
+          <div v-else-if="activeEffect!.type === 'round_corners'" class="flex items-center gap-2">
+            <div class="panel-sublabel shrink-0">Radius</div>
+            <input v-scrubnum data-testid="geo-round-radius" type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).radius || 0) * 1000) / 10"
+              class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+              @input="updateActiveEffect({ radius: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+          </div>
+
+          <!-- Roughen -->
+          <div v-else-if="activeEffect!.type === 'roughen'" class="space-y-1.5">
+            <div class="grid grid-cols-3 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">Amount</div>
+                <input v-scrubnum data-testid="geo-roughen-amount" type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).amount || 0) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ amount: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Detail</div>
+                <input v-scrubnum data-testid="geo-roughen-detail" type="number" min="1" step="1" :value="Math.round((activeEffect as any).detail ?? 8)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ detail: Math.max(1, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 8)) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Seed</div>
+                <input v-scrubnum data-testid="geo-roughen-seed" type="number" step="1" :value="Math.round((activeEffect as any).seed ?? 1)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ seed: Math.round(parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
+              </div>
+            </div>
+          </div>
         </div>
       </template>
 

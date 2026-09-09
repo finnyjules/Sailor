@@ -8,6 +8,7 @@ import {
 } from '~/lib/compositor/effectStack'
 import { DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
 import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
+import { canTakeGeometry } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
   it('has 17 kinds, 3 pinned and 14 orderable, all labelled in sentence case', () => {
@@ -315,5 +316,49 @@ describe('rasterablePasses', () => {
   })
   it('refuses a blur with no edge pass at all', () => {
     expect(rasterablePasses(t(['layer_blur']))).toBe(false)
+  })
+})
+
+describe('canTakeGeometry (add-menu gating predicate)', () => {
+  // Imported from the composable, not the pure stack, because the decorated-text branch
+  // reads a text layer's stroke stack (textHasDecoration). It is the vector half of
+  // needsComputedOutline — the same answer the renderer uses — so the menu greys geometry on
+  // exactly the layers the renderer would silently drop it on.
+  const vec = (kind: string, extra: Record<string, unknown> = {}) =>
+    ({ id: 'l', kind, ...extra }) as unknown as Parameters<typeof canTakeGeometry>[0]
+
+  it('accepts every vector kind that can produce an outline', () => {
+    for (const k of ['rect', 'ellipse', 'path', 'polygon', 'star', 'text']) {
+      expect(canTakeGeometry(vec(k)), k).toBe(true)
+    }
+  })
+  it('rejects kinds with no outline to transform', () => {
+    for (const k of ['image', 'wired', 'brush', 'line', 'deal', 'scatter', 'mosaic']) {
+      expect(canTakeGeometry(vec(k)), k).toBe(false)
+    }
+  })
+  it('rejects underlined or struck-through text (it inks with fillText)', () => {
+    expect(canTakeGeometry(vec('text', { underline: true }))).toBe(false)
+    expect(canTakeGeometry(vec('text', { strikethrough: true }))).toBe(false)
+  })
+  it('accepts plain text with no decoration', () => {
+    expect(canTakeGeometry(vec('text', { text: 'hi' }))).toBe(true)
+  })
+  it('rejects text carrying a painting distance-band stroke, accepts an inert one', () => {
+    // A band that actually paints (has paint + width + distance) is a dilation with no outline.
+    const painting = vec('text', {
+      strokes: [{ id: 's1', paint: '#000', width: 0.01, distance: 0.02, visible: true }],
+    })
+    expect(canTakeGeometry(painting)).toBe(false)
+    // An inert band (zero width) must NOT suppress geometry (Minor 2 tightening).
+    const inert = vec('text', {
+      strokes: [{ id: 's1', paint: '#000', width: 0, distance: 0.02, visible: true }],
+    })
+    expect(canTakeGeometry(inert)).toBe(true)
+    // A band with distance but no paint must not suppress it either.
+    const unpainted = vec('text', {
+      strokes: [{ id: 's1', paint: 'none', width: 0.01, distance: 0.02, visible: true }],
+    })
+    expect(canTakeGeometry(unpainted)).toBe(true)
   })
 })
