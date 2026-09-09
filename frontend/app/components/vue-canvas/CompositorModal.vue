@@ -8289,9 +8289,9 @@ onUnmounted(() => {
               <div class="panel-label mb-1.5">Tint</div>
               <FillControl allow-none :model-value="(selectedLocal as any).tint"
                 @update:model-value="(v: any) => setLocal(selectedLocal!.id, { tint: v })" />
-              <div v-if="hasTint(selectedLocal)" class="mt-1.5 grid grid-cols-2 gap-2">
+              <div v-if="hasTint(selectedLocal)" class="mt-1.5 flex flex-col gap-1.5">
                 <select :value="(selectedLocal as any).tintBlend || 'normal'"
-                  class="bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer capitalize"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer capitalize"
                   @change="setLocal(selectedLocal!.id, { tintBlend: ($event.target as HTMLSelectElement).value } as any)">
                   <option v-for="m in LOCAL_BLEND_MODES" :key="m" :value="m">{{ m.replace('_', ' ') }}</option>
                 </select>

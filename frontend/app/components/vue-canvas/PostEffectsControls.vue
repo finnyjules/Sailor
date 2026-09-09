@@ -79,6 +79,7 @@ import {
   depthMessageFor, depthStatusFor, onDepthChange, requestDepth, type DepthRef,
 } from '~/lib/compositor/depthRegistry'
 import StudioGradientRamp from '~/components/vue-canvas/studio/StudioGradientRamp.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import type { GradientStop } from '~/lib/color/harmony'
 
@@ -187,14 +188,11 @@ function fmt(v: unknown, step: number): string {
           @apply-stops="(v: GradientStop[]) => patch(s.type, 'stops', v)"
           @apply-literal-stops="(v: GradientStop[]) => patch(s.type, 'stops', v)"
         />
-        <div v-for="p in s.params" :key="p.key" class="flex items-center gap-2">
-          <div class="panel-sublabel w-16 shrink-0">{{ p.label }}</div>
-          <input type="range" :min="p.min" :max="p.max" :step="p.step" :value="fx(s.type)![p.key]"
-            class="flex-1 min-w-0 accent-white/80 cursor-pointer"
-            :data-testid="`postfx-${s.type}-${p.key}`"
-            @input="patch(s.type, p.key, parseFloat(($event.target as HTMLInputElement).value))" />
-          <div class="w-9 shrink-0 text-right text-[10px] text-white/50 tabular-nums">{{ fmt(fx(s.type)![p.key], p.step) }}</div>
-        </div>
+        <StudioSlider v-for="p in s.params" :key="p.key"
+          :model-value="fx(s.type)![p.key]"
+          @update:model-value="(v) => patch(s.type, p.key, v)"
+          :label="p.label" :min="p.min" :max="p.max" :step="p.step" :bindable="false"
+          :data-testid="`postfx-${s.type}-${p.key}`" />
       </div>
     </div>
   </div>

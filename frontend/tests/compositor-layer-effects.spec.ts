@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { openCompositor, stackPixels } from './_helpers'
+import { openCompositor, stackPixels, setStudioRow } from './_helpers'
 
 /**
  * Per-layer effects as an ordered stack — end to end.
@@ -124,7 +124,7 @@ test.describe('Frame per-layer effect stack', () => {
     // The inspector shows this instance's dials, and a dial write reaches the stored effect.
     const intensity = page.locator('[data-testid="postfx-bloom-intensity"]')
     await expect(intensity).toBeVisible()
-    await intensity.fill('1.4')
+    await setStudioRow(page, 'postfx-bloom-intensity', 1.4)
     await expect.poll(() => page.evaluate(() =>
       ((window as any).__compositorLayers()[0].effects || [])
         .find((e: any) => e.type === 'bloom')?.intensity)).toBe(1.4)

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { openBlankWorkflow, dropNode, waitForBackend } from './_helpers'
+import { openBlankWorkflow, dropNode, waitForBackend, setStudioRow } from './_helpers'
 
 /** Data-URL snapshot of the compositor's unified stack canvas. */
 async function stackPixels(page: Page): Promise<string> {
@@ -34,7 +34,7 @@ test.describe('Compositor post-processing effects', () => {
     await addFx.hover()
     await addFx.click()
     await page.locator('[data-testid="add-effect-item"][data-kind="adjust"]').click()
-    await page.locator('[data-testid="postfx-adjust-brightness"]').fill('1.8')
+    await setStudioRow(page, 'postfx-adjust-brightness', 1.8)
     const brightened = await stackPixels(page)
     expect(brightened).not.toBe(baseline)
     const adjustRow = page.locator('[data-testid="effect-row"][data-effect-kind="adjust"]')
@@ -52,13 +52,13 @@ test.describe('Compositor post-processing effects', () => {
     // Whole-frame grain changes the composite.
     const preGrain = await stackPixels(page)
     await page.locator('[data-testid="postfx-add-grain"]').click()
-    await page.locator('[data-testid="postfx-grain-amount"]').fill('0.9')
+    await setStudioRow(page, 'postfx-grain-amount', 0.9)
     expect(await stackPixels(page)).not.toBe(preGrain)
 
     // Persistence: reopen the modal — the doc chain survives (node properties).
-    // The grain slider still holds focus from .fill() above; the modal's Escape
-    // handler ignores Escape while an <input> is focused (so Esc-to-exit-editing
-    // doesn't fight Esc-to-close), so blur it first.
+    // setStudioRow committed with Enter, so the typed-entry input has unmounted
+    // and focus is on the studio row's track; blur it so Escape closes the modal
+    // rather than being swallowed by a focused control.
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     await page.keyboard.press('Escape')
     await canvas.waitFor({ state: 'hidden', timeout: 5_000 })

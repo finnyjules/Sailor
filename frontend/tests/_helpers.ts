@@ -1,6 +1,20 @@
 import { Page, expect } from '@playwright/test'
 
 /**
+ * Set a StudioSlider (the shared studio-row control) to an exact value by its
+ * data-testid. The row is not a native `<input type=range>`, so `.fill()` does
+ * not work: clicking the value readout (`[data-row-value]`) opens a typed-entry
+ * `<input>`; we fill it and commit with Enter.
+ */
+export async function setStudioRow(page: Page, testid: string, value: number | string) {
+  const row = page.locator(`[data-testid="${testid}"]`)
+  await row.locator('[data-row-value]').click()
+  const input = row.locator('input')
+  await input.fill(String(value))
+  await input.press('Enter')
+}
+
+/**
  * Open the home page and switch to a blank workflow so VueNodeCanvas is mounted.
  * The canvas listens for `sailor:openTimeline` and `sailor:openSmartLayout`
  * custom events to launch the respective full-screen editors.
