@@ -1,28 +1,56 @@
 import { describe, it, expect } from 'vitest'
 import {
-  EFFECT_ORDER, EFFECT_LABELS, PINNED_KINDS, ORDERABLE_KINDS,
-  effectStackOf, writeStackToLayer, createEffect, newEffectId, isPinnedKind,
-  addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder,
+  EFFECT_ORDER, EFFECT_LABELS, PINNED_KINDS, ORDERABLE_KINDS, GEOMETRY_KINDS,
+  effectStackOf, writeStackToLayer, createEffect, newEffectId, isPinnedKind, isGeometryKind,
+  addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder, regionOf,
   orderablePasses, pinnedEffect, splitTrailingBlurs, rasterablePasses, type EffectInstance,
+  type EffectKind,
 } from '~/lib/compositor/effectStack'
 import { DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
 import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 
 describe('effect kinds', () => {
-  it('has 13 kinds, 3 pinned and 10 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(13)
+  it('has 17 kinds, 3 pinned and 14 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(17)
     expect(PINNED_KINDS).toEqual(['background_blur', 'dof', 'drop_shadow'])
-    expect(ORDERABLE_KINDS).toHaveLength(10)
+    expect(ORDERABLE_KINDS).toHaveLength(14)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
     expect(EFFECT_LABELS.gradientMap).toBe('Gradient map')
     expect(EFFECT_LABELS.dof).toBe('Depth of field')
+    expect(EFFECT_LABELS.trim).toBe('Trim path')
+    expect(EFFECT_LABELS.offset).toBe('Offset path')
+    expect(EFFECT_LABELS.round_corners).toBe('Round corners')
+    expect(EFFECT_LABELS.roughen).toBe('Roughen')
   })
   it('orders background blur first and drop shadow last', () => {
     expect(EFFECT_ORDER[0]).toBe('background_blur')
     expect(EFFECT_ORDER[EFFECT_ORDER.length - 1]).toBe('drop_shadow')
     expect(isPinnedKind('dof')).toBe(true)
     expect(isPinnedKind('bloom')).toBe(false)
+  })
+  it('the four geometry kinds are contiguous in EFFECT_ORDER and precede every pixel kind', () => {
+    expect(GEOMETRY_KINDS).toEqual(['trim', 'offset', 'round_corners', 'roughen'])
+    const indices = GEOMETRY_KINDS.map(k => EFFECT_ORDER.indexOf(k))
+    for (let i = 1; i < indices.length; i++) expect(indices[i]).toBe(indices[i - 1]! + 1)
+    const lastGeometry = Math.max(...indices)
+    for (const k of EFFECT_ORDER) {
+      if (isGeometryKind(k) || k === 'background_blur' || k === 'dof') continue
+      expect(EFFECT_ORDER.indexOf(k), k).toBeGreaterThan(lastGeometry)
+    }
+    for (const k of GEOMETRY_KINDS) expect(isGeometryKind(k)).toBe(true)
+    expect(isGeometryKind('bloom')).toBe(false)
+  })
+  it('regionOf assigns every kind to the right region', () => {
+    const expected: Record<EffectKind, string> = {
+      background_blur: 'backdrop', dof: 'backdrop',
+      trim: 'geometry', offset: 'geometry', round_corners: 'geometry', roughen: 'geometry',
+      inner_shadow: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
+      bloom: 'pixel', vignette: 'pixel', grain: 'pixel', torn_edge: 'pixel',
+      feather: 'pixel', layer_blur: 'pixel',
+      drop_shadow: 'stamp',
+    }
+    for (const k of EFFECT_ORDER) expect(regionOf(k), k).toBe(expected[k])
   })
   it('createEffect fills the kind defaults, visible, with a fresh random id', () => {
     const a = createEffect('bloom'), b = createEffect('bloom')
@@ -33,6 +61,14 @@ describe('effect kinds', () => {
     expect(newEffectId()).not.toBe(newEffectId())
     expect(createEffect('torn_edge')).toMatchObject({ type: 'torn_edge', style: DEFAULT_TORN_EDGE.style })
     expect(createEffect('feather')).toMatchObject({ type: 'feather', curve: DEFAULT_FEATHER.curve })
+  })
+  it('createEffect fills each geometry kind default with a fresh id', () => {
+    expect(createEffect('trim')).toMatchObject({ type: 'trim', start: 0, end: 1, offset: 0, visible: true })
+    expect(createEffect('offset')).toMatchObject({ type: 'offset', distance: 0.01, join: 'round', visible: true })
+    expect(createEffect('round_corners')).toMatchObject({ type: 'round_corners', radius: 0.02, visible: true })
+    expect(createEffect('roughen')).toMatchObject({ type: 'roughen', amount: 0.02, detail: 8, seed: 1, visible: true })
+    const a = createEffect('trim'), b = createEffect('trim')
+    expect(a.id).not.toBe(b.id)
   })
 })
 
@@ -186,6 +222,56 @@ describe('list operations', () => {
     expect(orderablePasses(s).map(e => e.type)).toEqual(['adjust', 'bloom'])
     expect(pinnedEffect(s, 'background_blur')?.type).toBe('background_blur')
     expect(pinnedEffect(s, 'dof')).toBeUndefined()
+  })
+})
+
+describe('geometry region', () => {
+  const base = (): EffectInstance[] => effectStackOf({ effects: [
+    { type: 'background_blur', radius: 0.01, visible: true },
+    { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
+    { type: 'drop_shadow', color: '#000', x: 0, y: 0, blur: 0.01, visible: true },
+  ] })
+
+  it('adding a geometry kind lands it BEFORE every pixel kind, never after one', () => {
+    const s = addEffect(base(), 'bloom')                        // bg, adjust, bloom, shadow
+    const next = addEffect(s, 'trim')
+    expect(next.map(e => e.type)).toEqual(['background_blur', 'trim', 'adjust', 'bloom', 'drop_shadow'])
+  })
+  it('a second geometry kind lands at the end of the geometry region, not after a pixel kind', () => {
+    const s = addEffect(addEffect(base(), 'bloom'), 'trim')      // bg, trim, adjust, bloom, shadow
+    const next = addEffect(s, 'roughen')
+    expect(next.map(e => e.type)).toEqual(['background_blur', 'trim', 'roughen', 'adjust', 'bloom', 'drop_shadow'])
+  })
+  it('a geometry kind on an otherwise-empty stack still sits after the backdrop pins and before drop shadow', () => {
+    const s0 = effectStackOf({ effects: [{ type: 'background_blur', radius: 0.01, visible: true }] })
+    expect(addEffect(s0, 'trim').map(e => e.type)).toEqual(['background_blur', 'trim'])
+    const s1 = effectStackOf({ effects: [
+      { type: 'background_blur', radius: 0.01, visible: true },
+      { type: 'drop_shadow', color: '#000', x: 0, y: 0, blur: 0.01, visible: true },
+    ] })
+    expect(addEffect(s1, 'trim').map(e => e.type)).toEqual(['background_blur', 'trim', 'drop_shadow'])
+  })
+  it('canReorder allows two geometry kinds to swap and refuses a geometry <-> pixel swap', () => {
+    const s = addEffect(addEffect(base(), 'bloom'), 'trim')      // bg, trim, adjust, bloom, shadow
+    const withRoughen = addEffect(s, 'roughen')                  // bg, trim, roughen, adjust, bloom, shadow
+    const trim = withRoughen.find(e => e.type === 'trim')!.id
+    const roughen = withRoughen.find(e => e.type === 'roughen')!.id
+    const adjust = withRoughen.find(e => e.type === 'adjust')!.id
+    const bloom = withRoughen.find(e => e.type === 'bloom')!.id
+    expect(canReorder(withRoughen, trim, roughen)).toBe(true)
+    expect(reorderEffect(withRoughen, trim, roughen).map(e => e.type))
+      .toEqual(['background_blur', 'roughen', 'trim', 'adjust', 'bloom', 'drop_shadow'])
+    expect(canReorder(withRoughen, trim, adjust)).toBe(false)
+    expect(canReorder(withRoughen, bloom, trim)).toBe(false)
+    expect(reorderEffect(withRoughen, trim, adjust)).toEqual(withRoughen)
+    // a pixel <-> pixel swap is unaffected by the region check
+    expect(canReorder(withRoughen, adjust, bloom)).toBe(true)
+  })
+  it('orderablePasses excludes geometry kinds, feeding a pixel-only pass list to paintLayer', () => {
+    const s = addEffect(addEffect(base(), 'bloom'), 'trim')      // bg, trim, adjust, bloom, shadow
+    const passes = orderablePasses(s)
+    expect(passes.map(e => e.type)).toEqual(['adjust', 'bloom'])
+    expect(passes.some(e => isGeometryKind(e.type))).toBe(false)
   })
 })
 

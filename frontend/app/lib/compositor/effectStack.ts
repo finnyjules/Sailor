@@ -54,9 +54,18 @@ export interface BackgroundBlurEffect {
 export interface TornEdgeEffect extends TornEdgeSpec { type: 'torn_edge'; visible: boolean }
 export interface FeatherEffect extends FeatherSpec { type: 'feather'; visible: boolean }
 
+// ── the four geometry effects (F2): transform a vector layer's outline BEFORE it
+// rasterises. Dial fields here are the minimal defaults `createEffect` needs; the full
+// per-kind controls (join behaviour, fillet math, noise shaping) land in Tasks 3/4.
+export interface TrimEffect { type: 'trim'; start: number; end: number; offset: number; visible: boolean }
+export interface OffsetEffect { type: 'offset'; distance: number; join: 'round' | 'miter' | 'bevel'; visible: boolean }
+export interface RoundCornersEffect { type: 'round_corners'; radius: number; visible: boolean }
+export interface RoughenEffect { type: 'roughen'; amount: number; detail: number; seed: number; visible: boolean }
+
 export type LayerEffect =
   | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
   | TornEdgeEffect | FeatherEffect
+  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect
   | PostEffect
 
 /** A stored effect, addressed by a stable id. */
@@ -70,7 +79,8 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'dof', 'inner_shadow', 'adjust', 'duotone', 'gradientMap',
+  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'inner_shadow',
+  'adjust', 'duotone', 'gradientMap',
   'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'layer_blur', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
 
@@ -86,10 +96,33 @@ export const ORDERABLE_KINDS = EFFECT_ORDER.filter(
   (k): k is Exclude<EffectKind, typeof PINNED_KINDS[number]> => !(PINNED_KINDS as readonly string[]).includes(k),
 )
 
+/** The four geometry kinds: they transform a vector layer's outline BEFORE rasterise,
+ *  so they sit in their own region — after the backdrop pins, before every pixel kind —
+ *  and reorder only among themselves (`regionOf`, `canReorder`). Contiguous in EFFECT_ORDER. */
+export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen'] as const satisfies readonly EffectKind[]
+export const isGeometryKind = (k: EffectKind): boolean =>
+  (GEOMETRY_KINDS as readonly string[]).includes(k)
+
+/** Where a kind sits in the pipeline, coarser than `EFFECT_ORDER`: `backdrop` samples/depth-maps
+ *  before the layer paints, `geometry` transforms the outline before rasterise, `pixel` runs as
+ *  a canvas pass over the rasterised layer, `stamp` is derived from the finished silhouette.
+ *  Reorder and add both respect regions: an effect only ever moves within its own region. */
+export type EffectRegion = 'backdrop' | 'geometry' | 'pixel' | 'stamp'
+export function regionOf(kind: EffectKind): EffectRegion {
+  if (kind === 'background_blur' || kind === 'dof') return 'backdrop'
+  if (kind === 'drop_shadow') return 'stamp'
+  if (isGeometryKind(kind)) return 'geometry'
+  return 'pixel'
+}
+
 /** UI copy: sentence case, human names, never the stored `type`. */
 export const EFFECT_LABELS: Record<EffectKind, string> = {
   background_blur: 'Background blur',
   dof: 'Depth of field',
+  trim: 'Trim path',
+  offset: 'Offset path',
+  round_corners: 'Round corners',
+  roughen: 'Roughen',
   inner_shadow: 'Inner shadow',
   adjust: 'Adjust',
   duotone: 'Duotone',
@@ -119,6 +152,10 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   background_blur: { radius: 0.02, visible: true },
   torn_edge: { ...DEFAULT_TORN_EDGE, visible: true },
   feather: { ...DEFAULT_FEATHER, visible: true },
+  trim: { start: 0, end: 1, offset: 0, visible: true },
+  offset: { distance: 0.01, join: 'round', visible: true },
+  round_corners: { radius: 0.02, visible: true },
+  roughen: { amount: 0.02, detail: 8, seed: 1, visible: true },
 }
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {
@@ -201,9 +238,13 @@ export function writeStackToLayer(stack: EffectInstance[]): {
 export const pinnedEffect = (stack: EffectInstance[], kind: EffectKind): EffectInstance | undefined =>
   stack.find(e => e.type === kind)
 
-/** The freely orderable entries, in list order — what `paintLayer` runs as passes. */
+/** The freely orderable PIXEL entries, in list order — what `paintLayer` runs as canvas
+ *  passes, feeding `splitTrailingBlurs`/`rasterablePasses`/`applyPasses`. Geometry kinds are
+ *  excluded here (not just from the pinned set): they transform the outline before rasterise
+ *  and must never reach a 2D canvas pass — `useCompositorLayers.ts` reads them separately via
+ *  `isGeometryKind` to build the computed outline `d` before this list is even assembled. */
 export const orderablePasses = (stack: EffectInstance[]): EffectInstance[] =>
-  stack.filter(e => !isPinnedKind(e.type))
+  stack.filter(e => !isPinnedKind(e.type) && !isGeometryKind(e.type))
 
 /** Split a pass list into the passes that run on the offscreen and the TRAILING layer blurs.
  *  A blur with nothing orderable after it is applied as the stamp's `ctx.filter` — exactly where
@@ -241,8 +282,9 @@ export function rasterablePasses(passes: readonly { type: string }[]): boolean {
 }
 
 /** Insert a new effect. A pinned kind lands at its canonical position and is refused if
- *  already present; an orderable kind is appended after the last orderable entry, which
- *  keeps it before drop shadow. */
+ *  already present; an orderable kind is appended after the last entry IN THE SAME REGION
+ *  (`regionOf`) — e.g. a second `trim` lands at the end of the geometry region, never after
+ *  a pixel kind, and a pixel kind still lands at the end of the pixel region as before. */
 export function addEffect(stack: EffectInstance[], kind: EffectKind): EffectInstance[] {
   if (isPinnedKind(kind) && stack.some(e => e.type === kind)) return stack
   const fresh = createEffect(kind)
@@ -251,14 +293,16 @@ export function addEffect(stack: EffectInstance[], kind: EffectKind): EffectInst
     const at = stack.findIndex(e => (ORDER_INDEX.get(e.type) ?? 0) > target)
     return at === -1 ? [...stack, fresh] : [...stack.slice(0, at), fresh, ...stack.slice(at)]
   }
-  // An orderable kind goes to the END of the orderable region: right after the last orderable
-  // entry, which keeps it before a drop shadow and after a background blur / dof.
-  const lastOrderable = stack.reduce((acc, e, i) => (isPinnedKind(e.type) ? acc : i), -1)
-  if (lastOrderable >= 0) {
-    const at = lastOrderable + 1
+  // An orderable kind goes to the END of its own region: right after the last entry sharing
+  // `regionOf(kind)`, which keeps it before a drop shadow and after a background blur / dof,
+  // and keeps geometry kinds bunched together ahead of every pixel kind.
+  const region = regionOf(kind)
+  const lastSameRegion = stack.reduce((acc, e, i) => (regionOf(e.type) === region ? i : acc), -1)
+  if (lastSameRegion >= 0) {
+    const at = lastSameRegion + 1
     return [...stack.slice(0, at), fresh, ...stack.slice(at)]
   }
-  // Nothing orderable yet: sit before the first pinned entry that sorts after this kind.
+  // Nothing in this region yet: sit before the first entry of a later-sorting kind.
   const at = stack.findIndex(e => (ORDER_INDEX.get(e.type) ?? 0) > target)
   return at === -1 ? [...stack, fresh] : [...stack.slice(0, at), fresh, ...stack.slice(at)]
 }
@@ -278,12 +322,15 @@ export function duplicateEffect(stack: EffectInstance[], id: string): EffectInst
   return [...stack.slice(0, i + 1), copy, ...stack.slice(i + 1)]
 }
 
-/** True when `fromId` may be dropped onto `toId`: both exist, both orderable, not the same. */
+/** True when `fromId` may be dropped onto `toId`: both exist, both orderable, not the same,
+ *  and in the SAME REGION — a geometry kind reorders only against another geometry kind,
+ *  never against a pixel kind (they never cross into each other's region). */
 export function canReorder(stack: EffectInstance[], fromId: string, toId: string): boolean {
   if (fromId === toId) return false
   const from = stack.find(e => e.id === fromId)
   const to = stack.find(e => e.id === toId)
   return !!from && !!to && !isPinnedKind(from.type) && !isPinnedKind(to.type)
+    && regionOf(from.type) === regionOf(to.type)
 }
 
 /** Move `fromId` to `toId`'s position. A move touching a pinned row is a no-op. */
