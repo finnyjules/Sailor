@@ -35,7 +35,6 @@ import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import CurveEditor from '~/components/vue-canvas/CurveEditor.vue'
 import ProfileStopsEditor from '~/components/vue-canvas/ProfileStopsEditor.vue'
-import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import StudioRow from '~/components/vue-canvas/studio/StudioRow.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
@@ -1922,10 +1921,11 @@ async function exportWebEmbed() {
               :class="{ 'rounded-md ring-1 ring-amber-400/30 px-1 -mx-1': vibeMoved.has(c.key) }"
               data-control class="text-xs"
               @contextmenu.prevent="openVarMenu($event, c)">
-              <!-- No external caption for slider / font / single text: each self-labels inside
-                   its own row (StudioSlider, FontPicker's row mode, StudioRow), carrying the
-                   variable glyph there. textList still shows it — a list needs a header. -->
-              <label v-if="!['slider', 'font', 'text', 'shape'].includes(c.kind)" class="mb-1 flex items-center gap-1.5 text-white/60 group">
+              <!-- No external caption for slider / font / single text / colour: each self-labels
+                   inside its own row (StudioSlider, FontPicker's row mode, StudioColorField,
+                   StudioRow), carrying the variable glyph there. textList still shows it — a
+                   list needs a header. -->
+              <label v-if="!['slider', 'font', 'text', 'shape', 'color'].includes(c.kind)" class="mb-1 flex items-center gap-1.5 text-white/60 group">
                 <span>{{ c.label }}</span>
                 <VariableGlyph
                   v-if="controlKindToVariableType(c.kind) !== null"
@@ -2162,14 +2162,25 @@ async function exportWebEmbed() {
               </template>
               <!-- Font is excluded here: its bound state now lives inside FontPicker's row
                    (like a bound colour), so it does not need this shared pink block. -->
-              <div v-else-if="(c.kind === 'color' || c.kind === 'select') && boundColumnFor(c.key)"
+              <div v-else-if="c.kind === 'select' && boundColumnFor(c.key)"
                    class="flex items-center justify-between gap-2 rounded bg-white/[0.04] px-2 py-1.5">
                 <span class="truncate text-[12px]" style="color: var(--var-accent-text)">{{ boundColumnFor(c.key) }}</span>
                 <button type="button" @click="goToCollection"
                         class="shrink-0 rounded px-2 py-1 text-[11px] text-white/60 hover:bg-white/10 hover:text-white">Edit in table</button>
               </div>
-              <StudioColor v-else-if="c.kind === 'color'" :model-value="String(params[c.key])"
-                           @update:model-value="(val: string) => { params[c.key] = val; rebuild(); onEdit(c.key, val) }" />
+              <!-- Colour is a studio row like the sliders around it, and carries its OWN bound
+                   state + variable glyph — which is why it drops out of both the caption above
+                   and the shared bound block (StudioRow renders the bound row and the
+                   jump-to-Collection that block's "Edit in table" button used to provide). -->
+              <StudioColorField v-else-if="c.kind === 'color'"
+                                :label="c.label"
+                                :model-value="String(params[c.key])"
+                                :bound="boundColumnFor(c.key)"
+                                :bindable="controlKindToVariableType(c.kind) !== null"
+                                @promote="promote(controlDesc(c), params[c.key] as string | number)"
+                                @menu="(e: MouseEvent) => openVarMenu(e, c)"
+                                @go-to-collection="goToCollection"
+                                @update:model-value="(val: string) => { params[c.key] = val; rebuild(); onEdit(c.key, val) }" />
               <StudioSegmented v-else-if="c.kind === 'select' && (c.options?.length ?? 0) <= 3"
                                :options="c.options ?? []" :model-value="String(params[c.key] ?? c.default)"
                                @update:model-value="(v: string) => { params[c.key] = v; rebuild(); onEdit(c.key, v) }" />
