@@ -187,4 +187,49 @@ test.describe('Compositor text → outline parity', () => {
     // If the harness could not tell renders apart, this would be ~100%.
     expect(r.withinPct).toBeLessThan(0.99)
   })
+
+  // ── Task 5 — byte-identity guard ───────────────────────────────────────────
+  //
+  // The claim under test: a text layer with NO geometry effect and
+  // `renderAsOutline` off is untouched by this slice — it still renders through
+  // the pre-slice `fillText` sink, deterministically. Two captures of the SAME
+  // flag-off layer, taken across a reseed (with a real repaint of a DIFFERENT
+  // layer forced in between, so the second capture can't just be re-reading an
+  // untouched canvas), must be byte-identical `toDataURL` strings.
+  //
+  // That assertion is only meaningful if the guard can actually tell renders
+  // apart — so the second half flips `renderAsOutline` on for a Google-font
+  // family (exercising the `google:Family@weight` token path, not the curated
+  // variable family above) and confirms the outline capture DIFFERS from the
+  // flag-off one, proving this isn't vacuously comparing two identical
+  // fallbacks.
+  test('flag off renders byte-identically across a reseed; a real outline (flag on) differs', async ({ page }) => {
+    await openCompositor(page)
+
+    const offLayer = textLayer({ renderAsOutline: false })
+    await seed(page, [offLayer])
+    await waitFontReady(page)
+    await assertNonBlank(page)
+    const off1 = await stackPixels(page)
+
+    // Force a real repaint of something else, then reseed the ORIGINAL layer
+    // config as a fresh object (never the same reference) before recapturing.
+    await seed(page, [textLayer({ text: 'Different', renderAsOutline: false })])
+    const interim = await stackPixels(page)
+    expect(interim).not.toBe(off1) // sanity: the canvas did repaint in between
+
+    await seed(page, [textLayer({ renderAsOutline: false })])
+    await waitFontReady(page)
+    await assertNonBlank(page)
+    const off2 = await stackPixels(page)
+
+    expect(off2).toBe(off1)
+
+    // Sensitivity: flag ON with a REAL outline, on a Google font, must differ.
+    await seed(page, [textLayer({ fontFamily: 'Roboto', fontWeight: 400, renderAsOutline: true })])
+    await outlineResolved(page)
+    const on = await stackPixels(page)
+
+    expect(on).not.toBe(off1)
+  })
 })
