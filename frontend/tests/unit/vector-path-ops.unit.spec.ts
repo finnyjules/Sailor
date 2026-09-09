@@ -49,7 +49,11 @@ describe('pathOps: cumulativeLengths', () => {
     const total = pathLength(subs[0]!.pts, subs[0]!.closed)
     // closed: last point is one segment short of the full perimeter (the
     // closing chord has no point of its own); open: last point IS the end.
-    expect(cum[cum.length - 1]!).toBeLessThanOrEqual(total + 1e-6)
+    // Trim relies on this exact contract, so pin the value rather than bound it:
+    // a 100×100 square (perimeter 400) has its last cumulative at 300 — the three
+    // measured edges, with the closing chord omitted.
+    expect(cum[cum.length - 1]!).toBeCloseTo(300, 6)
+    expect(cum[cum.length - 1]!).toBeLessThan(total)
   })
 
   it('open path cumulative ends exactly at pathLength', () => {
