@@ -1,4 +1,4 @@
-import type { PatternContext, PosterLayerView, Measure } from './types'
+import type { PatternContext, PosterLayerView, Measure, FrameElements } from './types'
 import { inferElements } from './hierarchy'
 import { readGrid } from '~/lib/frame/gridConfig'
 import { resolveGrid } from '~/lib/frame/grid'
@@ -26,11 +26,12 @@ export function buildFrameContext(
   frameW: number,
   frameH: number,
   measure: Measure,
+  elements?: FrameElements,
 ): PatternContext {
   const g = readGrid(props)
   const grid = g.mode !== 'off' ? resolveGrid(g, frameW, frameH) : null
-  const elements = inferElements(posterLayerViews(props))
+  const els = elements ?? inferElements(posterLayerViews(props))
   const seed = (props?.sailor_posterState as { seed?: number } | undefined)?.seed ?? 1
   const margin = Math.min(Math.max(g.margin, 0), 0.45)
-  return { frame: { w: frameW, h: frameH }, grid, margin, elements, seed, measure }
+  return { frame: { w: frameW, h: frameH }, grid, margin, elements: els, seed, measure }
 }

@@ -22,7 +22,7 @@ describe('applyPatternToFrame', () => {
     editor.recordHistory.mockImplementation(() => calls.push('history'))
     editor.commit.mockImplementation(() => calls.push('commit'))
     editor.writeOrder.mockImplementation(() => calls.push('order'))
-    const out = applyPatternToFrame({ props: frameProps(), frameW: 800, frameH: 1000, patternId: 'runoff', seed: 7, palette, editor })
+    const out = applyPatternToFrame({ props: frameProps(), frameW: 800, frameH: 1000, patternId: 'runoff', seed: 7, palette, editor, connectedSlots: [] })
     expect(out.ok).toBe(true)
     expect(calls).toEqual(['history', 'commit', 'order'])
     const committed = editor.commit.mock.calls[0][0]
@@ -32,23 +32,33 @@ describe('applyPatternToFrame', () => {
   })
   it('photoBehind writes an order with the image behind the title, even if saved on top', () => {
     const editor = mk()
-    applyPatternToFrame({ props: frameProps({ sailor_stackOrder: ['l:t', 'l:img'] }), frameW: 800, frameH: 1000, patternId: 'photoBehind', seed: 3, palette, editor })
+    applyPatternToFrame({ props: frameProps({ sailor_stackOrder: ['l:t', 'l:img'] }), frameW: 800, frameH: 1000, patternId: 'photoBehind', seed: 3, palette, editor, connectedSlots: [] })
     const order = editor.writeOrder.mock.calls[0][0] as string[]
     expect(order.indexOf('l:img')).toBeLessThan(order.indexOf('l:t'))
+    const committed = editor.commit.mock.calls[0][0] as any[]
+    expect(new Set(order)).toEqual(new Set(committed.map(l => 'l:' + l.id)))
   })
   it('shapeCounter with no shape layer inserts one and orders it behind the title', () => {
     const editor = mk()
-    const out = applyPatternToFrame({ props: frameProps(), frameW: 800, frameH: 1000, patternId: 'shapeCounter', seed: 5, palette, editor, shapeMode: { id: 'circle' } })
+    const out = applyPatternToFrame({ props: frameProps(), frameW: 800, frameH: 1000, patternId: 'shapeCounter', seed: 5, palette, editor, shapeMode: { id: 'circle' }, connectedSlots: [] })
     expect(out.ok).toBe(true)
     const committed = editor.commit.mock.calls[0][0] as any[]
     const added = committed.find(l => l.kind === 'path')
     expect(added?.shapeId).toBe('circle')
     const order = editor.writeOrder.mock.calls[0][0] as string[]
     expect(order.indexOf(`l:${added.id}`)).toBeLessThan(order.indexOf('l:t'))
+    expect(new Set(order)).toEqual(new Set(committed.map(l => 'l:' + l.id)))
+  })
+  it('keeps a connected wired slot in the order where the user left it', () => {
+    const editor = mk()
+    applyPatternToFrame({ props: frameProps({ sailor_stackOrder: ['w:1', 'l:t', 'l:img'] }), frameW: 800, frameH: 1000, patternId: 'runoff', seed: 7, palette, editor, connectedSlots: [0] })
+    const order = editor.writeOrder.mock.calls[0][0] as string[]
+    expect(order[0]).toBe('w:1')                                   // still at the bottom
+    expect(new Set(order)).toEqual(new Set(['w:1', 'l:t', 'l:img'])) // nothing dropped, nothing invented
   })
   it('is a no-op for an unknown pattern id', () => {
     const editor = mk()
-    const out = applyPatternToFrame({ props: frameProps(), frameW: 800, frameH: 1000, patternId: 'nope', seed: 1, palette, editor })
+    const out = applyPatternToFrame({ props: frameProps(), frameW: 800, frameH: 1000, patternId: 'nope', seed: 1, palette, editor, connectedSlots: [] })
     expect(out.ok).toBe(false)
     expect(editor.recordHistory).not.toHaveBeenCalled(); expect(editor.commit).not.toHaveBeenCalled(); expect(editor.writeOrder).not.toHaveBeenCalled()
   })
@@ -59,7 +69,7 @@ describe('applyPatternToFrame', () => {
       { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2, x: 0.5, y: 0.5, rotation: 0, opacity: 1, fontFamily: 'Inter', fontWeight: 900, textTransform: 'uppercase', color: '#000', align: 'center', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 },
     ] }
     vi.mocked(makeFrameMeasure).mockClear()
-    const out = applyPatternToFrame({ props, frameW: 800, frameH: 1000, patternId: 'runoff', seed: 7, palette, editor })
+    const out = applyPatternToFrame({ props, frameW: 800, frameH: 1000, patternId: 'runoff', seed: 7, palette, editor, connectedSlots: [] })
     expect(out.ok).toBe(true)
     const [family, weight, , transform] = vi.mocked(makeFrameMeasure).mock.calls.at(-1)!
     expect(family).toBe('Inter')

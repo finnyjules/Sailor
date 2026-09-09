@@ -21,8 +21,8 @@ export interface ApplyArgs {
   palette: ResolvedPalette
   /** A library shape to use when the frame has no shape layer (the picker's family/id choice). */
   shapeMode?: FrameElements['shapeMode']
-  /** Wired image slots connected on the node (for the present-keys reconcile). Default none. */
-  connectedSlots?: number[]
+  /** Wired image slots connected on the node (for the present-keys reconcile). */
+  connectedSlots: number[]
   editor: { recordHistory(): void; commit(next: LocalLayer[]): void; writeOrder(order: string[]): void }
 }
 
@@ -34,11 +34,12 @@ export function applyPatternToFrame(args: ApplyArgs): { ok: boolean; posterState
   // measure with what the title layer really renders with — the same layer the
   // engine's hierarchy inference picks as the title (largest fontSize), not
   // just the first text layer in array order.
-  const titleId = inferElements(posterLayerViews(args.props)).title?.id
+  const elements = inferElements(posterLayerViews(args.props))
+  const titleId = elements.title?.id
   const titleLayer = layers.find(l => l.id === titleId && l.kind === 'text') as TextLayer | undefined
   const tm = titleLayer ? titleMeasureFrom(titleLayer) : { family: 'Inter', weight: 700, transform: (t: string) => t }
   const measure = makeFrameMeasure(tm.family, tm.weight, undefined, tm.transform)
-  const ctx = buildFrameContext(args.props, args.frameW, args.frameH, measure)
+  const ctx = buildFrameContext(args.props, args.frameW, args.frameH, measure, elements)
   ctx.seed = args.seed
   if (args.shapeMode !== undefined) ctx.elements.shapeMode = args.shapeMode
   const placement = pattern.place(ctx)
@@ -47,7 +48,7 @@ export function applyPatternToFrame(args: ApplyArgs): { ok: boolean; posterState
   const next = applyPlacement(ins.layers, { ...placement, ops: ins.ops }, ctx.elements, args.palette)
   // draw order: reconcile the saved order against what is present, then honour z
   const saved = (args.props?.sailor_stackOrder as string[] | undefined) ?? []
-  const present = framePresentKeys(args.connectedSlots ?? [], next)
+  const present = framePresentKeys(args.connectedSlots, next)
   const order = nextOrderFor(saved, present, ins.ops, ctx.elements, ins.inserted)
   args.editor.recordHistory()
   args.editor.commit(next)

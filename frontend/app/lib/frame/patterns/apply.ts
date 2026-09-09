@@ -43,6 +43,11 @@ export function applyPlacement(
       if (op.w != null) next.boxW = op.w
       if (op.align) next.align = op.align
       if (op.lineBreak != null) next.text = op.lineBreak
+    } else if (layer.kind === 'path' && typeof op.w === 'number' && op.w > 0 && (layer as any).bbox?.w > 0) {
+      // A path layer has no `w`: it sizes from `bbox × scale` (both in the same
+      // normalized-frame-width units as op.w — see useCompositorLayers' layerBoxPx).
+      // Writing `w` here would add a dead field and leave the shape at its old size.
+      next.scale = op.w / (layer as any).bbox.w
     } else {
       if (op.w != null) next.w = op.w
       if (op.h != null) next.h = op.h

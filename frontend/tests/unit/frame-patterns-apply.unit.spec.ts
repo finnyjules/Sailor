@@ -67,6 +67,13 @@ describe('applyPlacement', () => {
     expect([s.x, s.y, s.w, s.h]).toEqual([0.3, 0.4, 0.6, 0.6])
     expect(s.fill).toBe(palette.accent)
   })
+  it('sizes an existing path layer by scale from op.w (a path has no w)', () => {
+    const path: any = { id: 's1', kind: 'path', x: .5, y: .5, rotation: 0, opacity: 1, d: 'M0 0h1v1z', bbox: { x: 0, y: 0, w: 0.3, h: 0.3 }, scale: 1, fill: '#000', fillRule: 'nonzero', stroke: '', strokeWidth: 0, shapeId: 'circle' }
+    const out = applyPlacement([path], { did: 'x', ops: [{ target: 's1', kind: 'shape', x: .4, y: .6, w: .6, shapeId: 'circle', colorRole: 'accent' } as any] }, elements, palette)
+    const s = out[0] as any
+    expect(s.scale).toBeCloseTo(2)
+    expect(s.w).toBeUndefined()
+  })
   it('shapeCounter targets the real shape layer id, not the sentinel \'shape\'', () => {
     const els = inferElements([
       { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 },
