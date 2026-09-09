@@ -21,6 +21,14 @@ import {
 } from '~/lib/compositor/textOutline'
 import type { VtFont } from '~/lib/vectortype/font'
 import type { VectorCommand } from '~/lib/vector/svg'
+import {
+  outlinePathData,
+  textLayerOutline,
+  createTextLayer,
+  createRectLayer,
+  createEllipseLayer,
+  createPathLayer,
+} from '~/composables/useCompositorLayers'
 
 const fakeFont = (id: string): VtFont => ({ id, axes: [], unitsPerEm: 1000, raw: {} })
 const flush = () => new Promise<void>((r) => setTimeout(r, 0))
@@ -241,5 +249,94 @@ describe('runToCommands', () => {
 
   it('returns [] for an empty run', () => {
     expect(runToCommands(stubFont(), { text: '', x: 0, y: 0 }, style)).toEqual([])
+  })
+})
+
+// ── textLayerOutline / outlinePathData (Task 3) ──────────────────────────────
+//
+// These reach into `useCompositorLayers`, which has no real 2D canvas in the node
+// test env, so the layout/collect pass is driven over a minimal measuring ctx
+// (measureText + the text-state props `applyFont` sets). The `~/lib/vectortype/font`
+// mock at file scope means `getCompositorFont` loads the stub font, so a text layer
+// on a resolvable family (Inter → 'inter') outlines and a system family (Arial) does
+// not — the exact degrade F2 gates on.
+function fakeMeasureCtx(): CanvasRenderingContext2D {
+  return {
+    font: '', textAlign: 'left', textBaseline: 'alphabetic', letterSpacing: '0px',
+    fontVariationSettings: 'normal', lineJoin: 'miter', lineWidth: 1,
+    measureText: (t: string) => ({ width: (t ? t.length : 0) * 10 }),
+  } as unknown as CanvasRenderingContext2D
+}
+
+/** Prime the bridge cache so `getCompositorFont` returns the stub synchronously. */
+async function primeInter() {
+  loadVectorFont.mockResolvedValue(stubFont())
+  // Kick the background load for the token 'inter', then let it settle.
+  getCompositorFont({ fontFamily: 'Inter', fontWeight: 700 })
+  await flush()
+}
+
+describe('textLayerOutline', () => {
+  it('returns a non-empty d for a text layer on a resolvable (loaded) font', async () => {
+    await primeInter()
+    const layer = createTextLayer({ text: 'AB', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.1 })
+    const d = textLayerOutline(layer, 1000, fakeMeasureCtx())
+    expect(d).toBeTruthy()
+    expect(typeof d).toBe('string')
+    // Real path data: at least one moveto and one closepath from the stub glyphs.
+    expect(d).toMatch(/M/)
+    expect(d).toMatch(/[Zz]/)
+    expect((d as string).length).toBeGreaterThan(10)
+  })
+
+  it('returns null for a system-font layer (no byte source)', async () => {
+    await primeInter() // font IS loaded, but Arial resolves to a null token
+    const layer = createTextLayer({ text: 'AB', fontFamily: 'Arial', fontWeight: 400 })
+    expect(textLayerOutline(layer, 1000, fakeMeasureCtx())).toBeNull()
+  })
+
+  it('returns null while the font is not yet loaded (kicks a background load)', () => {
+    loadVectorFont.mockResolvedValue(stubFont())
+    const layer = createTextLayer({ text: 'AB', fontFamily: 'Inter', fontWeight: 700 })
+    // First call: font not in cache yet → null, and the caller degrades to fillText.
+    expect(textLayerOutline(layer, 1000, fakeMeasureCtx())).toBeNull()
+  })
+})
+
+describe('outlinePathData', () => {
+  it('returns the text outline for a kind:text layer with a loaded font', async () => {
+    await primeInter()
+    const layer = createTextLayer({ text: 'AB', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.1 })
+    const d = outlinePathData(layer, 1000, fakeMeasureCtx())
+    expect(d).toBeTruthy()
+    expect(d).toBe(textLayerOutline(layer, 1000, fakeMeasureCtx()))
+  })
+
+  it('returns null for a kind:text layer on a system font', async () => {
+    await primeInter()
+    const layer = createTextLayer({ text: 'AB', fontFamily: 'Helvetica', fontWeight: 400 })
+    expect(outlinePathData(layer, 1000, fakeMeasureCtx())).toBeNull()
+  })
+
+  it('leaves rect / ellipse / path outputs unchanged', () => {
+    const rect = createRectLayer({ w: 0.3, h: 0.2, radius: 0 })
+    const rd = outlinePathData(rect, 1000)
+    expect(rd).toBeTruthy()
+    expect(rd).toMatch(/^M/)
+
+    const ell = createEllipseLayer({ w: 0.4, h: 0.2 })
+    const ed = outlinePathData(ell, 1000)
+    expect(ed).toBeTruthy()
+    expect(ed).toMatch(/A/) // an ellipse path uses arc segments
+
+    const path = createPathLayer({ d: 'M0 0 L10 0 L10 10 Z' })
+    // A path layer returns its own stored `d`, verbatim and unaffected by W.
+    expect(outlinePathData(path, 1000)).toBe('M0 0 L10 0 L10 10 Z')
+    expect(outlinePathData(path, 7)).toBe('M0 0 L10 0 L10 10 Z')
+  })
+
+  it('returns null for a kind with no outline (line)', () => {
+    // A line has no closed outline; unchanged from before this slice.
+    expect(outlinePathData({ kind: 'line', w: 0.5, strokeWidth: 0.01 } as any, 1000)).toBeNull()
   })
 })

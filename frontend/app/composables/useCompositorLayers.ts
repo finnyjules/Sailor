@@ -48,6 +48,12 @@ import { stripAlpha } from '~/lib/color/convert'
 import {
   polygonPathData, starPathData, roundedRectPathData, ellipsePathData,
 } from '~/lib/compositor/polygonGeometry'
+// Text-outline bridge (Frame slice F1): the CSS family → fontkit bytes, and one
+// drawn run → positioned glyph outlines. Used by `drawText`'s collect sink and
+// `textLayerOutline` below.
+import { getCompositorFont, runToCommands } from '~/lib/compositor/textOutline'
+import type { VtFont } from '~/lib/compositor/textOutline'
+import { commandsToPathData, type VectorCommand } from '~/lib/vector/svg'
 // Task 5's pure geometry for a SHAPES stroke, and the shape library it marches.
 import { shapeStrokeMarkMatrices, pathOutlineFlattenTolerance, offsetPolyline, type WobbleSpec } from '~/lib/compositor/strokeShapes'
 import { DEFAULT_FLATTEN_TOLERANCE, longestSubpath } from '~/lib/compositor/pathFlatten'
@@ -383,6 +389,12 @@ export interface TextLayer extends LayerCommon {
    *  entry to the layer list) and the box/wrap/valign/justify/expressive controls
    *  no longer apply — see lib/compositor/textPath.ts. */
   path?: TextPathSpec
+  /** Frame slice F1: render this layer from real glyph OUTLINES (a single SVG
+   *  `d` path) instead of `fillText`, so a geometry effect (slice F2) can
+   *  transform the letterforms. Absent/false ⇒ `fillText`, byte-identical to
+   *  today. Only takes effect for a layer whose font has a fetchable byte source
+   *  (see `getCompositorFont`); a system font falls back to `fillText` forever. */
+  renderAsOutline?: boolean
 }
 
 /**
@@ -2645,7 +2657,7 @@ export function strokeAligned(ctx: CanvasRenderingContext2D, o: {
  * they arrive here as `kind: 'path'` with their outline already in `d` — in local units at
  * `scale: 1`, which for those two kinds ARE width-normalized units.
  */
-function outlinePathData(layer: unknown, W: number): string | null {
+export function outlinePathData(layer: unknown, W: number, ctxOverride?: CanvasRenderingContext2D | null): string | null {
   const l = layer as LocalLayer | null | undefined
   if (!l) return null
   if (l.kind === 'rect') {
@@ -2655,6 +2667,10 @@ function outlinePathData(layer: unknown, W: number): string | null {
   }
   if (l.kind === 'ellipse') return ellipsePathData((l.w * W) / 2, (l.h * W) / 2)
   if (l.kind === 'path') return l.d
+  // Text (Frame slice F1): glyph outlines in the same LOCAL px a rect/ellipse use
+  // (the text ctx is unscaled, `W` px per stored unit). `null` when the font can't
+  // be outlined, so F2 can gate a geometry effect cleanly.
+  if (l.kind === 'text') return textLayerOutline(l as unknown as TextLayer, W, ctxOverride)
   return null
 }
 
@@ -2965,7 +2981,30 @@ function paintStrokeStack(
 // offscreen was sized from is the exact same content it then draws.
 function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, wiredLive?: WiredLive | null) {
   if (layer.kind === 'text') {
-    drawText(ctx, layer, W)
+    // Frame slice F1: render from glyph outlines when the layer asks (and the font
+    // can be outlined). Fill the outline `d` with the layer's text paint, then the
+    // on-edge stroke passes over the SAME `d` — the byte-equivalent of the fillText
+    // path's strokeText+fillText (strokes under the fill). When the font is still
+    // loading `collectTextOutline` returns null: fall back to fillText this frame;
+    // the host's `onCompositorFontReady` → renderStack wire repaints when it lands.
+    const oc = needsTextOutline(layer) ? collectTextOutline(layer, W) : null
+    if (oc) {
+      const path = new Path2D(oc.d)
+      const passes = textStrokePasses(ctx, layer, W, oc.box)
+      const anyDash = passes.some(p => p.dash)
+      if (passes.length) ctx.lineJoin = 'round'
+      for (const p of passes) {
+        ctx.lineWidth = p.lineWidth
+        ctx.strokeStyle = p.style
+        if (anyDash) ctx.setLineDash(p.dash ? [p.dash[0], p.dash[1]] : [])
+        ctx.stroke(path)
+      }
+      if (anyDash) ctx.setLineDash([])
+      ctx.fillStyle = resolvePaint(ctx, layer.color, oc.box, _fieldCtx)
+      ctx.fill(path)
+    } else {
+      drawText(ctx, layer, W)
+    }
   } else if (layer.kind === 'rect') {
     const w = layer.w * W, h = layer.h * W
     // One rounded path for every corner shape: a plain `radius` yields four
@@ -3486,17 +3525,37 @@ function drawTextOnPath(
   if (anyDash) ctx.setLineDash([])   // never leak the pattern to the next layer
 }
 
-function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
+/**
+ * The collect sink `drawText` writes to instead of inking, when asked to emit
+ * glyph OUTLINES rather than draw (Frame slice F1). `drawText`'s layout is reused
+ * unchanged — the same `text/x/y/align/baseline` fillText would use — and each run
+ * is turned into positioned commands by `runToCommands`, so the outline lands on
+ * the very pixels fillText would. `box` is the layer's measured text box, captured
+ * for the caller (fill paint anchoring). Only the flat, non-expressive, non-path
+ * layout collects; the two special layouts return without emitting (F1 scope).
+ */
+interface TextOutlineCollect {
+  font: VtFont
+  out: VectorCommand[]
+  box: { w: number; h: number }
+}
+
+function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, collect?: TextOutlineCollect) {
   const lineH = layer.fontSize * W * layer.lineHeight
   // A path takes over the whole layout: one run along a curve, so box wrapping,
   // valign, justify and expressive placement have nothing to act on. `null` from
   // textPathGuide means the spec couldn't make a curve (missing dial, zero
   // radius) — fall through to flat text rather than drawing nothing.
   if (layer.path) {
+    // On-path outline collection is Task 4; for F1 the collect sink handles only
+    // the flat layout, so a path layer emits nothing (caller degrades to fillText).
+    if (collect) return
     const guide = textPathGuide(ctx, layer, W)
     if (guide) { drawTextOnPath(ctx, layer, W, guide); return }
   }
-  if (layer.expressive) { drawExpressiveText(ctx, layer, W, lineH); return }
+  // Expressive per-word layout has its own draw loop; outlining it is out of F1
+  // scope, so collect mode emits nothing and the caller falls back to fillText.
+  if (layer.expressive) { if (collect) return; drawExpressiveText(ctx, layer, W, lineH); return }
   const lines = wrappedTextLines(ctx, layer, W)
   applyFont(ctx, layer, W)
   ctx.textBaseline = 'middle'
@@ -3571,22 +3630,105 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
     drawn.push({ runs: [{ text: line, x: anchorX, y }], deco: dec })
   }
 
-  paintTextStrokeBands(ctx, layer, W, textBox, drawn.flatMap(d => d.runs))
+  // Emit one run at (x, y): draw it as today (default), or — in collect mode —
+  // convert it to positioned glyph outlines with the SAME font px / letter
+  // spacing / align the ctx carries, so the outline matches fillText.
+  // `ctx.letterSpacing` is the exact (rounded) px `applyFont` set, read back so
+  // the outline's spacing equals the canvas's to the pixel.
+  const lsStr = (ctx as unknown as { letterSpacing?: string }).letterSpacing
+  const letterSpacingPx = lsStr != null && lsStr !== ''
+    ? (parseFloat(lsStr) || 0)
+    : (layer.letterSpacing || 0) * fontPx
+  // Vertical anchor: `drawText` sets `textBaseline` (always 'middle' here), and
+  // canvas positions a run's baseline from the FONT's own ascent/descent, read
+  // however Chromium reads them. Rather than re-derive that from `font.raw` (which
+  // drifted a few px on real fonts), ask the real ctx: with the CSS font applied,
+  // `fontBoundingBoxAscent` is measured from the CURRENT baseline, so the gap to
+  // the 'alphabetic' reading is exactly how far the alphabetic baseline sits below
+  // this anchor. We then emit at 'alphabetic' with y shifted by that gap — the
+  // canvas's own metric, so the outline lands on fillText's pixels for any font.
+  let baselineToAlphabeticPx = 0
+  if (collect) {
+    const anchor = ctx.textBaseline
+    if (anchor !== 'alphabetic' && typeof ctx.measureText === 'function') {
+      const asc = (b: CanvasTextBaseline): number => {
+        ctx.textBaseline = b
+        return Number((ctx.measureText('M') as { fontBoundingBoxAscent?: number }).fontBoundingBoxAscent) || 0
+      }
+      const alphaAsc = asc('alphabetic')
+      const anchorAsc = asc(anchor)
+      baselineToAlphabeticPx = alphaAsc - anchorAsc
+      ctx.textBaseline = anchor // restore (harmless in collect mode, but keep state honest)
+    }
+  }
+  const emitRun = (text: string, x: number, y: number) => {
+    if (collect) {
+      const cmds = runToCommands(collect.font, { text, x, y: y + baselineToAlphabeticPx }, {
+        fontPx, letterSpacingPx, align: ctx.textAlign, baseline: 'alphabetic',
+      })
+      for (const c of cmds) collect.out.push(c)
+      return
+    }
+    strokeTextPasses(ctx, passes, anyDash, text, x, y)
+    ctx.fillText(text, x, y)
+  }
+
+  if (collect) collect.box = textBox
+  // Distance-band strokes are painted by dilating fillText/strokeText and have no
+  // counterpart in the collected outline (F1 renders the outline's own on-edge
+  // stroke only); skip them in collect mode rather than inking the measuring ctx.
+  if (!collect) paintTextStrokeBands(ctx, layer, W, textBox, drawn.flatMap(d => d.runs))
 
   if (passes.length) ctx.lineJoin = 'round'
   ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
   for (const d of drawn) {
-    for (const r of d.runs) {
-      strokeTextPasses(ctx, passes, anyDash, r.text, r.x, r.y)
-      ctx.fillText(r.text, r.x, r.y)
-    }
+    for (const r of d.runs) emitRun(r.text, r.x, r.y)
     // Decorations are drawn in the text's own fill so they inherit gradient/pattern fills.
-    if (d.deco) {
+    // In collect mode they are rectangles, not glyph outlines, so they are not part of
+    // the emitted `d` (an outlined layer with underline/strikethrough is not an F1 case).
+    if (d.deco && !collect) {
       if (layer.underline) ctx.fillRect(d.deco.left, d.deco.y + fontPx * 0.34, d.deco.w, decoThick)
       if (layer.strikethrough) ctx.fillRect(d.deco.left, d.deco.y - decoThick / 2, d.deco.w, decoThick)
     }
   }
   if (anyDash) ctx.setLineDash([])   // never leak the pattern to the next layer
+}
+
+/**
+ * A text layer's glyph outlines as one SVG `d`, plus its measured text box — or
+ * `null` when the font has no fetchable byte source or its bytes are not loaded
+ * yet. Runs `drawText`'s own layout through the collect sink (over a measuring
+ * ctx), so the outline's wrapping/alignment/spacing/valign are fillText's, not a
+ * reimplementation. `ctxOverride` exists for unit tests (node has no 2D canvas).
+ */
+function collectTextOutline(
+  layer: TextLayer, W: number, ctxOverride?: CanvasRenderingContext2D | null,
+): { d: string; box: { w: number; h: number } } | null {
+  const font = getCompositorFont(layer)
+  if (!font) return null
+  const ctx = ctxOverride ?? measureCtx()
+  if (!ctx) return null
+  const collect: TextOutlineCollect = { font, out: [], box: { w: 1, h: 1 } }
+  drawText(ctx, layer, W, collect)
+  if (!collect.out.length) return null
+  return { d: commandsToPathData(collect.out), box: collect.box }
+}
+
+/**
+ * A text layer's outline path data (`d`) in the ctx's local px — the glyph
+ * geometry `fillText` would ink — or `null` when unavailable (system/unresolved
+ * font, or bytes still loading). See `collectTextOutline`.
+ */
+export function textLayerOutline(
+  layer: TextLayer, W: number, ctxOverride?: CanvasRenderingContext2D | null,
+): string | null {
+  return collectTextOutline(layer, W, ctxOverride)?.d ?? null
+}
+
+/** F1: render a text layer from outlines when the layer asks for it. F2 will
+ *  OR-in "a geometry effect is present" here. */
+function needsTextOutline(layer: LocalLayer): boolean {
+  return layer.kind === 'text' && (layer as TextLayer).renderAsOutline === true
 }
 
 /**

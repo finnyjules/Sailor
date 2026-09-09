@@ -12,11 +12,13 @@ import {
   cornerRadii, drawLocalLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, layerMaskRef, localLayerBox, createBrushLayer, newMosaicLayer,
   newScatterLayer,
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
+  outlinePathData,
 } from '~/composables/useCompositorLayers'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
 import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf, mosaicStylePatch, mosaicSeedPatch, freshMosaicSeed, isMosaicShaderFill, mosaicShaderSpec, mosaicLookNames, mosaicLookOf, applyMosaicLook } from '~/lib/compositor/mosaic'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
 import { onFieldCatalogReady } from '~/lib/shaderfill/field'
+import { onCompositorFontReady } from '~/lib/compositor/textOutline'
 import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, panePalette, paneInkPatch, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
@@ -1758,6 +1760,11 @@ onMounted(() => {
   if (import.meta.dev) {
     ;(window as any).__compositorLayers = () => JSON.parse(JSON.stringify(localLayers.value))
     ;(window as any).__compositorSetLayers = (next: any[]) => { commit(next as any) }
+    // Frame slice F1 proof hook: the outline `d` a text layer resolves to (null
+    // while its font is loading / for a system font). Lets the parity spec confirm
+    // the outline path actually ran rather than silently falling back to fillText.
+    ;(window as any).__compositorTextOutline = (i: number) =>
+      outlinePathData(localLayers.value[i], canvasDisplay.w)
   }
 })
 onBeforeUnmount(() => {
@@ -1768,6 +1775,7 @@ onBeforeUnmount(() => {
   if (import.meta.dev) {
     delete (window as any).__compositorLayers
     delete (window as any).__compositorSetLayers
+    delete (window as any).__compositorTextOutline
   }
 })
 
@@ -3548,6 +3556,13 @@ onMounted(() => { stopDepthWatch = onDepthChange(() => renderStack()) })
 let stopFieldCatalog: (() => void) | null = null
 onMounted(() => { stopFieldCatalog = onFieldCatalogReady(() => renderStack()) })
 onBeforeUnmount(() => { stopFieldCatalog?.(); stopFieldCatalog = null })
+// A text layer rendered from glyph OUTLINES (renderAsOutline / a geometry effect)
+// falls back to fillText while its font bytes are in flight; this repaints once
+// they land, so the outline replaces the fallback with no user interaction. Same
+// nudge shape as the depth / field-catalog watchers above.
+let stopFontOutline: (() => void) | null = null
+onMounted(() => { stopFontOutline = onCompositorFontReady(() => renderStack()) })
+onBeforeUnmount(() => { stopFontOutline?.(); stopFontOutline = null })
 onBeforeUnmount(() => { stopDepthWatch?.(); stopDepthWatch = null })
 
 watch(
