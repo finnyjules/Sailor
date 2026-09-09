@@ -33,6 +33,20 @@ function distToOutline(p: Pt2, pts: Pt2[]): number {
 const hasPointNear = (pts: Pt2[], q: Pt2, tol = 0.5) =>
   pts.some(p => Math.hypot(p.x - q.x, p.y - q.y) <= tol)
 
+// Bounding box over every subpath's points.
+function bboxOf(d: string) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const s of flatten(d)) for (const p of s.pts) {
+    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y)
+    maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y)
+  }
+  return { minX, minY, maxX, maxY }
+}
+// Two closed subpaths: an outer 100×100 rect with an inner 40×40 hole.
+const RECT_WITH_HOLE = 'M0 0 L100 0 L100 100 L0 100 Z M30 30 L70 30 L70 70 L30 70 Z'
+// Same outer square wound the other way (CW vs CCW) — offset outward must still grow it.
+const SQUARE_CW_D = 'M0 0 L0 100 L100 100 L100 0 Z'
+
 describe('geometryEffects: labels single-source', () => {
   it('exposes sentence-case labels for the four geometry kinds', () => {
     expect(GEOMETRY_EFFECT_LABELS.trim).toBe('Trim path')
@@ -116,5 +130,114 @@ describe('geometryEffects: roughen', () => {
     expect(maxD).toBeLessThanOrEqual(amount * W + 1e-6)
     // and it actually roughened (non-zero displacement somewhere)
     expect(maxD).toBeGreaterThan(0)
+  })
+})
+
+describe('geometryEffects: offset', () => {
+  const offset = (distance: number, d = SQUARE_D, join = 'round') =>
+    applyGeometry(d, [{ type: 'offset', distance, join, visible: true }], { W })
+
+  it('distance 0 is identity (same reference string)', () => {
+    expect(offset(0)).toBe(SQUARE_D)
+  })
+  it('positive distance grows the bbox by ≈2·distance·W on each axis', () => {
+    const b = bboxOf(offset(0.05)) // 0.05·100 = 5 px outward
+    expect(b.minX).toBeCloseTo(-5, 1)
+    expect(b.minY).toBeCloseTo(-5, 1)
+    expect(b.maxX).toBeCloseTo(105, 1)
+    expect(b.maxY).toBeCloseTo(105, 1)
+  })
+  it('negative distance shrinks the bbox inward', () => {
+    const b = bboxOf(offset(-0.05))
+    expect(b.minX).toBeCloseTo(5, 1)
+    expect(b.minY).toBeCloseTo(5, 1)
+    expect(b.maxX).toBeCloseTo(95, 1)
+    expect(b.maxY).toBeCloseTo(95, 1)
+  })
+  it('is winding-aware: a CW and a CCW square both GROW when offset outward', () => {
+    const bccw = bboxOf(offset(0.05, SQUARE_D))
+    const bcw = bboxOf(offset(0.05, SQUARE_CW_D))
+    // both wider than the original 100×100 (neither shrank)
+    expect(bccw.maxX - bccw.minX).toBeGreaterThan(100)
+    expect(bcw.maxX - bcw.minX).toBeGreaterThan(100)
+    expect(bccw.maxX - bccw.minX).toBeCloseTo(bcw.maxX - bcw.minX, 1)
+  })
+  it('every join value renders (maps to the one miter-style bisector offsetPolyline has)', () => {
+    // Honest coverage: round/miter/bevel are accepted and all produce the same offset —
+    // no join is silently dropped or crashes, and none is faked.
+    const r = bboxOf(offset(0.05, SQUARE_D, 'round'))
+    const m = bboxOf(offset(0.05, SQUARE_D, 'miter'))
+    const b = bboxOf(offset(0.05, SQUARE_D, 'bevel'))
+    expect(m).toEqual(r)
+    expect(b).toEqual(r)
+  })
+  it('actually transforms — the offset stub is replaced', () => {
+    expect(offset(0.05)).not.toBe(SQUARE_D)
+    expect(lenOf(offset(0.05))).toBeGreaterThan(400)
+  })
+})
+
+describe('geometryEffects: round corners', () => {
+  const round = (radius: number, d = SQUARE_D) =>
+    applyGeometry(d, [{ type: 'round_corners', radius, visible: true }], { W })
+
+  it('radius 0 is identity (same reference string)', () => {
+    expect(round(0)).toBe(SQUARE_D)
+  })
+  it('replaces the 4 sharp corners with Q curves; corner points gone', () => {
+    const d = round(0.1) // 10 px fillet
+    expect(d).toContain('Q')
+    const pts = flat(d)[0]!.pts
+    // the sharp corner vertices no longer sit on the outline
+    for (const c of [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }]) {
+      expect(hasPointNear(pts, c, 0.5)).toBe(false)
+    }
+    expect(flat(d)[0]!.closed).toBe(true)
+  })
+  it('keeps the bbox (rounding stays inside the original corner)', () => {
+    const b = bboxOf(round(0.1))
+    expect(b.minX).toBeCloseTo(0, 1)
+    expect(b.minY).toBeCloseTo(0, 1)
+    expect(b.maxX).toBeCloseTo(100, 1)
+    expect(b.maxY).toBeCloseTo(100, 1)
+  })
+  it('clamps a huge radius so the shape does not invert', () => {
+    const b = bboxOf(round(5)) // 500 px requested, clamped to 0.5·edge = 50
+    expect(b.minX).toBeCloseTo(0, 1)
+    expect(b.minY).toBeCloseTo(0, 1)
+    expect(b.maxX).toBeCloseTo(100, 1)
+    expect(b.maxY).toBeCloseTo(100, 1)
+    expect(flat(round(5))[0]!.closed).toBe(true)
+    expect(lenOf(round(5))).toBeGreaterThan(0)
+  })
+  it('actually transforms — the round-corners stub is replaced', () => {
+    expect(round(0.1)).not.toBe(SQUARE_D)
+  })
+  it('leaves open-path endpoints sharp', () => {
+    // An open V: only the middle vertex can be rounded.
+    const open = 'M0 0 L50 50 L100 0'
+    const d = applyGeometry(open, [{ type: 'round_corners', radius: 0.05, visible: true }], { W })
+    const pts = flat(d)[0]!.pts
+    expect(flat(d)[0]!.closed).toBe(false)
+    expect(hasPointNear(pts, { x: 0, y: 0 })).toBe(true)   // endpoint kept
+    expect(hasPointNear(pts, { x: 100, y: 0 })).toBe(true) // endpoint kept
+    expect(hasPointNear(pts, { x: 50, y: 50 })).toBe(false) // middle rounded away
+  })
+})
+
+describe('geometryEffects: multi-subpath', () => {
+  it('offset keeps BOTH subpaths of a rect-with-hole', () => {
+    const d = applyGeometry(RECT_WITH_HOLE, [{ type: 'offset', distance: 0.03, join: 'round', visible: true }], { W })
+    expect(flat(d).length).toBe(2)
+    expect(flat(d)[0]!.closed).toBe(true)
+    expect(flat(d)[1]!.closed).toBe(true)
+  })
+  it('round corners keeps BOTH subpaths of a rect-with-hole', () => {
+    const d = applyGeometry(RECT_WITH_HOLE, [{ type: 'round_corners', radius: 0.03, visible: true }], { W })
+    const subs = flat(d)
+    expect(subs.length).toBe(2)
+    expect(d).toContain('Q')
+    expect(subs[0]!.closed).toBe(true)
+    expect(subs[1]!.closed).toBe(true)
   })
 })

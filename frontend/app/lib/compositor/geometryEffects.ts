@@ -28,6 +28,7 @@ import {
   type Pt2,
   type Polyline,
 } from '~/lib/vector/pathOps'
+import { offsetPolyline } from '~/lib/compositor/strokeShapes'
 
 // The per-kind interfaces live in effectStack (it owns the whole effect vocabulary and the
 // LayerEffect union). Re-export them here so a consumer can `import type { TrimEffect } from
@@ -249,14 +250,122 @@ function applyRoughen(d: string, e: GeometryEffectInput, ctx: GeometryContext): 
   return toPathD(out)
 }
 
+// ── offset ─────────────────────────────────────────────────────────────────
+//
+// Grow (positive `distance`) or shrink (negative) each subpath by moving every vertex along
+// its angle-bisector normal, reusing `strokeShapes.offsetPolyline` — the SAME normal/miter
+// machinery the Frame's stroke tool already ships. `distance` is normalized-to-W, so the pixel
+// displacement is `distance·W`. offsetPolyline is winding-aware (it flips the sign by the
+// subpath's own shoelace), so a shape authored clockwise and the same shape authored
+// counter-clockwise both grow on a positive distance — the authored direction never matters.
+//
+// JOIN, honestly: offsetPolyline has exactly ONE corner treatment — an angle-bisector vertex
+// offset with a capped miter scale (a MITER-style join). It exposes no round/bevel variant.
+// So `join` (`'round' | 'miter' | 'bevel'`, default `'round'`) is read but ALL values map to
+// that single miter-style bisector; we do not fake a round or bevel corner offsetPolyline
+// cannot render. The dial is preserved for forward compatibility and for the add-menu/agent
+// surface; when offsetPolyline grows a genuine round/bevel option this maps straight through.
+function applyOffset(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
+  const distance = num(e.distance, 0)
+  if (distance === 0) return d // distance 0 is an exact no-op (identity), not a reserialised round-trip
+  void e.join // see header: every join maps to offsetPolyline's single miter-style bisector
+  const dpx = distance * ctx.W
+  const subs = flatten(d)
+  const out: Polyline[] = subs.map((sub) => {
+    if (sub.pts.length < 2) return sub
+    const moved = offsetPolyline(sub.pts, sub.closed, dpx)
+    if (moved.length < 2) return sub // degenerate collapse — keep the original subpath rather than drop it
+    return { pts: moved.map(p => ({ x: p.x, y: p.y })), closed: sub.closed }
+  })
+  return toPathD(out)
+}
+
+// ── round corners ────────────────────────────────────────────────────────────
+//
+// Replace every sharp vertex with a fillet: trim back along both adjacent edges by
+//   r = min(radius·W, 0.5·len(prev edge), 0.5·len(next edge))
+// and connect the two trim points with ONE quadratic Bézier whose control point is the
+// original corner (a circular-arc approximation — good enough per the brief, and it emits a
+// COMPACT `d` with `Q` commands rather than a dense polyline). The 0.5·edge clamp guarantees
+// two neighbouring fillets can never overshoot past the edge midpoint, so a huge radius folds
+// the shape toward a rounded blob instead of inverting it; and because each `Q` stays inside
+// the triangle (trimIn, corner, trimOut) — all within the original outline — the bbox never
+// grows. On an OPEN subpath the two endpoints are left sharp (they have only one edge).
+// radius ≤ 0 short-circuits to identity.
+function unit(from: Pt2, to: Pt2): { x: number; y: number; len: number } {
+  const dx = to.x - from.x, dy = to.y - from.y
+  const len = Math.hypot(dx, dy)
+  return len > 1e-9 ? { x: dx / len, y: dy / len, len } : { x: 0, y: 0, len: 0 }
+}
+
+const fmt3 = (v: number): string => String(Number((Number.isFinite(v) ? v : 0).toFixed(3)))
+const M = (p: Pt2) => `M${fmt3(p.x)} ${fmt3(p.y)}`
+const L = (p: Pt2) => `L${fmt3(p.x)} ${fmt3(p.y)}`
+const Q = (c: Pt2, p: Pt2) => `Q${fmt3(c.x)} ${fmt3(c.y)} ${fmt3(p.x)} ${fmt3(p.y)}`
+
+function roundSubpathD(poly: Polyline, radiusPx: number): string {
+  const pts = dedupeConsecutive(poly.pts)
+  const n = pts.length
+  if (n < 3) return toPathD([{ pts, closed: poly.closed }]) // nothing to fillet
+  const closed = poly.closed
+
+  // Per-vertex trim points; a vertex that is not rounded (open endpoint, or degenerate edge)
+  // carries in === out === the vertex itself so the walk below still threads through it.
+  interface Corner { inP: Pt2; corner: Pt2; outP: Pt2; rounded: boolean }
+  const corners: Corner[] = pts.map((cur, i) => {
+    const isEndpoint = !closed && (i === 0 || i === n - 1)
+    if (isEndpoint) return { inP: cur, corner: cur, outP: cur, rounded: false }
+    const prev = pts[(i - 1 + n) % n]!, next = pts[(i + 1) % n]!
+    const toPrev = unit(cur, prev), toNext = unit(cur, next)
+    const r = Math.min(radiusPx, 0.5 * toPrev.len, 0.5 * toNext.len)
+    if (!(r > 1e-9)) return { inP: cur, corner: cur, outP: cur, rounded: false }
+    return {
+      inP: { x: cur.x + toPrev.x * r, y: cur.y + toPrev.y * r },
+      corner: cur,
+      outP: { x: cur.x + toNext.x * r, y: cur.y + toNext.y * r },
+      rounded: true,
+    }
+  })
+
+  const parts: string[] = []
+  if (closed) {
+    parts.push(M(corners[0]!.inP))
+    for (let i = 0; i < n; i++) {
+      const c = corners[i]!
+      if (c.rounded) parts.push(Q(c.corner, c.outP))
+      else parts.push(L(c.corner))
+      const next = corners[(i + 1) % n]!
+      if (i < n - 1) parts.push(L(next.inP)) // straight run to the next fillet's entry
+    }
+    parts.push('Z') // Z draws the final straight run back to corners[0].inP
+  } else {
+    parts.push(M(pts[0]!))
+    for (let i = 1; i < n - 1; i++) {
+      const c = corners[i]!
+      parts.push(L(c.inP))
+      if (c.rounded) parts.push(Q(c.corner, c.outP))
+      else parts.push(L(c.corner))
+    }
+    parts.push(L(pts[n - 1]!))
+  }
+  return parts.join(' ')
+}
+
+function applyRoundCorners(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
+  const radius = num(e.radius, 0)
+  if (radius <= 0) return d // identity
+  const radiusPx = radius * ctx.W
+  const subs = flatten(d)
+  return subs.map(sub => roundSubpathD(sub, radiusPx)).filter(Boolean).join(' ')
+}
+
 // ── dispatch ──────────────────────────────────────────────────────────────────
 function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
   switch (e.type) {
     case 'trim': return applyTrim(d, e)
     case 'roughen': return applyRoughen(d, e, ctx)
-    // Task 4 — deliberate pass-through stubs so the union compiles and the stack is a no-op.
-    case 'offset': return d
-    case 'round_corners': return d
+    case 'offset': return applyOffset(d, e, ctx)
+    case 'round_corners': return applyRoundCorners(d, e, ctx)
     default: return d
   }
 }
