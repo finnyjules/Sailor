@@ -1,11 +1,9 @@
 import type { Measure } from './types'
+import { cssFontStack, transformCase } from '~/composables/useCompositorLayers'
+import type { TextLayer } from '~/composables/useCompositorLayers'
 
-/** A CSS font stack with a generic fallback; multi-word families are quoted.
- *  (Rebuilt here — useCompositorLayers.cssFontStack is not exported.) */
-export function fontStack(family: string): string {
-  const quoted = /\s/.test(family) ? `"${family}"` : family
-  return `${quoted}, system-ui, sans-serif`
-}
+/** The renderer's own font stack — measured and painted with the same string. */
+export function fontStack(family: string): string { return cssFontStack(family) }
 
 let _fallbackCtx: CanvasRenderingContext2D | null | undefined
 function defaultCtx(): CanvasRenderingContext2D | null {
@@ -15,11 +13,21 @@ function defaultCtx(): CanvasRenderingContext2D | null {
   return _fallbackCtx
 }
 
-/** width(text) in px at font-size 100, for the engine's linear scaling. No DOM ⇒ length*60. */
-export function makeFrameMeasure(family: string, weight: number, ctx?: CanvasRenderingContext2D | null): Measure {
+/** What a text layer really renders with: weight from a live wght axis when
+ *  present, and the display case transform. */
+export function titleMeasureFrom(layer: { fontFamily: string; fontWeight: number; axes?: Record<string, number>; textTransform?: TextLayer['textTransform'] }): { family: string; weight: number; transform: (t: string) => string } {
+  const w = layer.axes?.wght
+  const weight = (w != null && Number.isFinite(w)) ? Math.round(w) : layer.fontWeight
+  const transform = (t: string) => transformCase(t, layer.textTransform)
+  return { family: layer.fontFamily, weight, transform }
+}
+
+/** width(text) in px at font-size 100, measured on the TRANSFORMED string with
+ *  the renderer's font stack. No DOM ⇒ length*60. */
+export function makeFrameMeasure(family: string, weight: number, ctx?: CanvasRenderingContext2D | null, transform: (t: string) => string = t => t): Measure {
   const c = ctx === undefined ? defaultCtx() : ctx
-  if (!c) return (t: string) => t.length * 60
-  return (t: string) => { c.font = `${weight} 100px ${fontStack(family)}`; return c.measureText(t).width }
+  if (!c) return (t: string) => transform(t).length * 60
+  return (t: string) => { c.font = `${weight} 100px ${fontStack(family)}`; return c.measureText(transform(t)).width }
 }
 
 /** Cap-height / ascent / descent in px at `sizePx`, from TextMetrics, with
