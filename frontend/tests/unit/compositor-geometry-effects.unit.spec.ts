@@ -232,3 +232,102 @@ describe('geometryEffects: multi-subpath', () => {
     expect(subs[1]!.closed).toBe(true)
   })
 })
+
+// ── Task 5: the render-facing seam in useCompositorLayers (computedOutlineD /
+// needsComputedOutline / layerGeometryEffects). These transform a layer's OWN
+// outline before it rasterises; the pure transform above is exercised through them.
+import {
+  computedOutlineD,
+  needsComputedOutline,
+  layerGeometryEffects,
+  outlinePathData,
+  createRectLayer,
+  createEllipseLayer,
+  createPolygonLayer,
+  createStarLayer,
+  createTextLayer,
+  createImageLayer,
+} from '~/composables/useCompositorLayers'
+
+const geo = (type: string, extra: Record<string, unknown> = {}) =>
+  ({ id: `fx_${type}`, type, visible: true, ...extra })
+
+describe('useCompositorLayers: layerGeometryEffects', () => {
+  it('returns only the visible geometry entries', () => {
+    const layer = createRectLayer({
+      effects: [
+        geo('round_corners', { radius: 0.02 }),
+        geo('bloom') as any,                       // pixel kind — excluded
+        geo('trim', { start: 0, end: 0.5, offset: 0, visible: false }), // hidden — excluded
+      ] as any,
+    })
+    const g = layerGeometryEffects(layer)
+    expect(g.map(e => e.type)).toEqual(['round_corners'])
+  })
+  it('is empty for a layer with no effects', () => {
+    expect(layerGeometryEffects(createRectLayer())).toEqual([])
+  })
+})
+
+describe('useCompositorLayers: computedOutlineD', () => {
+  const W = 300
+  it('returns the base outline unchanged for a rect with no geometry effect', () => {
+    const rect = createRectLayer({ w: 0.4, h: 0.2, radius: 0 })
+    expect(computedOutlineD(rect, W)).toBe(outlinePathData(rect, W))
+  })
+  it('returns a TRIMMED outline for a rect with a trim effect', () => {
+    const rect = createRectLayer({ w: 0.4, h: 0.2, radius: 0 })
+    const base = outlinePathData(rect, W)!
+    const trimmed = createRectLayer({
+      w: 0.4, h: 0.2, radius: 0,
+      effects: [geo('trim', { start: 0, end: 0.5, offset: 0 })] as any,
+    })
+    const d = computedOutlineD(trimmed, W)!
+    expect(d).not.toBe(base)
+    // ~half the perimeter survives; the base rect perimeter is 2·(0.4+0.2)·W.
+    const perim = 2 * (0.4 + 0.2) * W
+    expect(lenOf(d)).toBeCloseTo(perim / 2, -1)
+  })
+  it('round_corners on a rect emits Q curves and stays inside the box', () => {
+    const rect = createRectLayer({
+      w: 0.4, h: 0.2, radius: 0,
+      effects: [geo('round_corners', { radius: 0.03 })] as any,
+    })
+    expect(computedOutlineD(rect, W)).toContain('Q')
+  })
+  it('returns null when there is no base outline (image)', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('trim', { start: 0, end: 0.5 })] as any })
+    expect(computedOutlineD(img, W)).toBeNull()
+  })
+})
+
+describe('useCompositorLayers: needsComputedOutline', () => {
+  it('is TRUE for a rect with a geometry effect', () => {
+    expect(needsComputedOutline(createRectLayer({ effects: [geo('round_corners', { radius: 0.02 })] as any }))).toBe(true)
+  })
+  it('is TRUE for an ellipse / polygon / star with a geometry effect', () => {
+    expect(needsComputedOutline(createEllipseLayer({ effects: [geo('offset', { distance: 0.01 })] as any }))).toBe(true)
+    expect(needsComputedOutline(createPolygonLayer({ effects: [geo('trim', { start: 0, end: 0.5 })] as any }))).toBe(true)
+    expect(needsComputedOutline(createStarLayer({ effects: [geo('roughen', { amount: 0.02 })] as any }))).toBe(true)
+  })
+  it('is FALSE for a rect with only a pixel effect', () => {
+    expect(needsComputedOutline(createRectLayer({ effects: [geo('bloom') as any] as any }))).toBe(false)
+  })
+  it('is FALSE for a rect with no effects', () => {
+    expect(needsComputedOutline(createRectLayer())).toBe(false)
+  })
+  it('is FALSE for an image layer even with a geometry effect', () => {
+    expect(needsComputedOutline(createImageLayer('x.png', 1, { effects: [geo('trim', { start: 0, end: 0.5 })] as any }))).toBe(false)
+  })
+  it('is FALSE for a DECORATED text layer (underline) that carries a geometry effect', () => {
+    const t = createTextLayer({ underline: true, effects: [geo('round_corners', { radius: 0.02 })] as any })
+    expect(needsComputedOutline(t)).toBe(false)
+  })
+  it('is FALSE for a text layer with a distance-band stroke plus a geometry effect', () => {
+    const t = createTextLayer({
+      effects: [geo('round_corners', { radius: 0.02 })] as any,
+      strokes: [{ id: 's1', paint: '#000', width: 0.01, distance: 0.02, align: 'center', visible: true }] as any,
+    })
+    expect(needsComputedOutline(t)).toBe(false)
+  })
+})

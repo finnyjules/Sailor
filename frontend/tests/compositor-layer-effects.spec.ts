@@ -192,3 +192,104 @@ test.describe('Frame per-layer effect stack', () => {
     expect(await kindsOf(page)).toEqual(['background_blur', 'adjust'])
   })
 })
+
+/**
+ * F2 Task 5 — geometry effects render through a computed outline `d`.
+ *
+ * The rect is drawn through its shared, geometry-transformed Path2D only when a geometry
+ * effect is present; with none it keeps the imperative round-rect fast path, so a no-effect
+ * rect stays byte-identical to the pre-F2 render. These prove both halves.
+ */
+async function seedRectFill(page: Page): Promise<void> {
+  // A big, opaque, sharp-cornered rect so a corner change moves a lot of pixels.
+  await page.evaluate(() => {
+    const ls = (window as any).__compositorLayers()
+    ls[0].w = 0.6; ls[0].h = 0.6; ls[0].radius = 0; ls[0].fill = '#ffffff'
+    ls[0].effects = []
+    ;(window as any).__compositorSetLayers(ls)
+  })
+}
+
+/** Max & mean per-channel delta between two toDataURL PNGs, decoded in the page. */
+async function pixelDelta(page: Page, a: string, b: string) {
+  return page.evaluate(async ([da, db]) => {
+    const load = (url: string) => new Promise<ImageData>((res, rej) => {
+      const img = new Image()
+      img.onload = () => {
+        const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+        const cx = c.getContext('2d')!; cx.drawImage(img, 0, 0)
+        res(cx.getImageData(0, 0, img.width, img.height))
+      }
+      img.onerror = rej; img.src = url
+    })
+    const [ia, ib] = [await load(da), await load(db)]
+    if (ia.width !== ib.width || ia.height !== ib.height) return { sizeMismatch: true, max: 255, mean: 255, changed: -1 }
+    let max = 0, sum = 0, changed = 0
+    for (let i = 0; i < ia.data.length; i++) {
+      const d = Math.abs(ia.data[i] - ib.data[i])
+      if (d > max) max = d
+      sum += d
+      if (i % 4 !== 3 && d > 2) changed++
+    }
+    return { sizeMismatch: false, max, mean: sum / ia.data.length, changed }
+  }, [a, b] as const)
+}
+
+test.describe('Frame geometry effects (F2)', () => {
+  test('round_corners changes the rendered pixels; an invisible one does not', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page)
+    const sharp = await stackPixels(page)
+
+    // A real, visible round-corners effect must move pixels (the corners are eaten in).
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'rc', type: 'round_corners', radius: 0.12, visible: true }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    const rounded = await stackPixels(page)
+    expect(rounded).not.toBe(sharp)
+    const sens = await pixelDelta(page, sharp, rounded)
+    expect(sens.sizeMismatch).toBe(false)
+    expect(sens.changed).toBeGreaterThan(200) // corners actually carved
+
+    // An INVISIBLE geometry effect is filtered out → the imperative fast path → identical bytes.
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'rc', type: 'round_corners', radius: 0.12, visible: false }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    const hidden = await stackPixels(page)
+    expect(hidden).toBe(sharp)
+  })
+
+  test('byte-identity A/B: a no-geometry rect renders identically before/after the F2 seam', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page)
+    const before = await stackPixels(page)
+
+    // Toggle a visible geometry effect ON then back to none: the return-to-none render must be
+    // the same imperative round-rect pixels as before it was ever touched.
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'off', type: 'offset', distance: 0.05, visible: true }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    await stackPixels(page)
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = []
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    const after = await stackPixels(page)
+
+    const delta = await pixelDelta(page, before, after)
+    // eslint-disable-next-line no-console
+    console.log('[F2 byte-identity A/B] max=%d mean=%s changed=%d', delta.max, delta.mean.toFixed(4), delta.changed)
+    expect(delta.sizeMismatch).toBe(false)
+    expect(delta.max).toBeLessThanOrEqual(2) // Δ2 threshold
+    expect(after).toBe(before)               // and in fact byte-identical
+  })
+})

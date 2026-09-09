@@ -241,8 +241,8 @@ export const pinnedEffect = (stack: EffectInstance[], kind: EffectKind): EffectI
 /** The freely orderable PIXEL entries, in list order — what `paintLayer` runs as canvas
  *  passes, feeding `splitTrailingBlurs`/`rasterablePasses`/`applyPasses`. Geometry kinds are
  *  excluded here (not just from the pinned set): they transform the outline before rasterise
- *  and must never reach a 2D canvas pass — `useCompositorLayers.ts` reads them separately via
- *  `isGeometryKind` to build the computed outline `d` before this list is even assembled. */
+ *  and must never reach a 2D canvas pass — `useCompositorLayers.ts`'s `layerGeometryEffects`
+ *  reads them separately (via `isGeometryKind`) to build the computed outline `d`. */
 export const orderablePasses = (stack: EffectInstance[]): EffectInstance[] =>
   stack.filter(e => !isPinnedKind(e.type) && !isGeometryKind(e.type))
 

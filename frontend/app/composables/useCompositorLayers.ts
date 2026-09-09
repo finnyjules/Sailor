@@ -236,7 +236,11 @@ export {
 } from '~/lib/compositor/paint'
 import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/paint'
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
-import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTrailingBlurs } from '~/lib/compositor/effectStack'
+import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTrailingBlurs, isGeometryKind } from '~/lib/compositor/effectStack'
+// Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
+// `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
+// is enabled, so the no-effect draw stays byte-identical below.
+import { applyGeometry } from '~/lib/compositor/geometryEffects'
 
 // Layer effects (Figma-style) live in ~/lib/compositor/effectStack, which owns the whole
 // vocabulary (kinds, canonical order, the read-through that turns any layer into an ordered
@@ -2652,10 +2656,10 @@ export function strokeAligned(ctx: CanvasRenderingContext2D, o: {
  * the same thing to the inspector). Text is doubly safe: it never reaches
  * `paintStrokeStack` at all — see `paintTextStrokeBands`.
  *
- * Polygon and star are absent ON PURPOSE. `drawLayerContent` rewrites both into a path
- * layer carrying `polygonPathData` / `starPathData` output before a stroke is painted, so
- * they arrive here as `kind: 'path'` with their outline already in `d` — in local units at
- * `scale: 1`, which for those two kinds ARE width-normalized units.
+ * Polygon and star return their `polygonPathData` / `starPathData` outline in LOCAL units
+ * at `scale: 1` (F2 needs a base `d` for the geometry seam). `drawLayerContent` still
+ * rewrites both into a `kind: 'path'` layer to paint, so a shapes stroke marches the same
+ * curve either way — the units match by construction.
  */
 export function outlinePathData(layer: unknown, W: number, ctxOverride?: CanvasRenderingContext2D | null): string | null {
   const l = layer as LocalLayer | null | undefined
@@ -2667,11 +2671,81 @@ export function outlinePathData(layer: unknown, W: number, ctxOverride?: CanvasR
   }
   if (l.kind === 'ellipse') return ellipsePathData((l.w * W) / 2, (l.h * W) / 2)
   if (l.kind === 'path') return l.d
+  // Polygon / star: their `d` in the SAME LOCAL units a path uses (1 unit = canvas width,
+  // ctx scaled by `scale`·W = W since these are drawn at scale 1). `drawLayerContent`
+  // rewrites both into a path layer to paint, so returning their outline here lets the
+  // geometry seam (`computedOutlineD`) and a shapes stroke march the identical curve.
+  if (l.kind === 'polygon') {
+    const pl = l as unknown as PolygonLayer
+    return polygonPathData(pl.sides, pl.w, pl.h, pl.cornerRadius) || null
+  }
+  if (l.kind === 'star') {
+    const sl = l as unknown as StarLayer
+    return starPathData(sl.points, sl.innerRatio, sl.w, sl.h, sl.cornerRadius) || null
+  }
   // Text (Frame slice F1): glyph outlines in the same LOCAL px a rect/ellipse use
   // (the text ctx is unscaled, `W` px per stored unit). `null` when the font can't
   // be outlined, so F2 can gate a geometry effect cleanly.
   if (l.kind === 'text') return textLayerOutline(l as unknown as TextLayer, W, ctxOverride)
   return null
+}
+
+// ── Frame slice F2: geometry effects on a layer's outline ─────────────────────
+// The visible geometry effects (trim / offset / round corners / roughen) on a layer, in
+// list order — the ones that transform the outline BEFORE it rasterises. Read straight
+// through `effectStackOf`, so an old- or new-shape layer answers the same.
+export function layerGeometryEffects(layer: unknown): EffectInstance[] {
+  return effectStackOf(layer as Parameters<typeof effectStackOf>[0])
+    .filter(e => e.visible && isGeometryKind(e.type))
+}
+
+/** A text layer that fillText must ink rather than outline: underline / strikethrough are
+ *  drawn as rectangles, and a distance-band stroke is a dilation — neither has an outline
+ *  counterpart (see `collectTextOutline`, which drops both). Such a layer skips the
+ *  computed-outline path (and therefore geometry) silently. */
+function textHasDecoration(layer: TextLayer): boolean {
+  if (layer.underline || layer.strikethrough) return true
+  return strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])
+    .some(st => st.visible !== false && (st.distance ?? 0) !== 0)
+}
+
+/**
+ * True when a layer must be drawn from a computed outline `d` rather than its imperative
+ * fast path: a text layer asking for outlines (F1) OR any vector layer carrying a geometry
+ * effect (F2). Only the vector kinds that can PRODUCE an outline qualify (rect, ellipse,
+ * path, polygon, star, text); image / wired / brush / deal / scatter / line never do.
+ *
+ * A DECORATED text layer is excluded (see `textHasDecoration`): it inks with fillText, so a
+ * geometry effect on it is silently a no-op rather than dropping the decoration.
+ */
+export function needsComputedOutline(layer: LocalLayer): boolean {
+  const k = layer.kind
+  const vector = k === 'rect' || k === 'ellipse' || k === 'path'
+    || k === 'polygon' || k === 'star' || k === 'text'
+  if (!vector) return false
+  if (k === 'text' && textHasDecoration(layer as TextLayer)) return false
+  return needsTextOutline(layer) || layerGeometryEffects(layer).length > 0
+}
+
+/**
+ * A layer's outline `d` with its geometry effects applied, in the SAME units
+ * `outlinePathData` returns for that kind — PIXELS for rect / ellipse / text (drawn on an
+ * unscaled ctx), LOCAL units for path / polygon / star (drawn on a ctx scaled by
+ * `scale`·W). Null when the layer has no base outline (e.g. an image).
+ *
+ * Geometry dials are normalized to canvas width. For a pixel-unit outline the transform
+ * scales them by W; for a local-unit one the same pixel size is `distance/scale` in local
+ * units, so the ctx's own `scale`·W multiply lands it back on `distance`·W px. With no
+ * geometry effect present `applyGeometry` returns the input by reference — so this equals
+ * the untouched outline and the no-effect draw stays byte-identical.
+ */
+export function computedOutlineD(layer: unknown, W: number): string | null {
+  const base = outlinePathData(layer, W)
+  if (base == null) return null
+  const l = layer as LocalLayer
+  const local = l.kind === 'path' || l.kind === 'polygon' || l.kind === 'star'
+  const gW = local ? 1 / ((l as unknown as { scale?: number }).scale || 1) : W
+  return applyGeometry(base, layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1], { W: gW })
 }
 
 /**
@@ -2989,7 +3063,13 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // the host's `onCompositorFontReady` → renderStack wire repaints when it lands.
     const oc = needsTextOutline(layer) ? collectTextOutline(layer, W) : null
     if (oc) {
-      const path = new Path2D(oc.d)
+      // F2: transform the outline by any geometry effect first. `needsComputedOutline`
+      // is false for a decorated text layer, so a decorated one keeps its exact F1 `d`;
+      // with no geometry effect `applyGeometry` returns `oc.d` by reference (byte-identical).
+      const gd = needsComputedOutline(layer)
+        ? applyGeometry(oc.d, layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1], { W })
+        : oc.d
+      const path = new Path2D(gd)
       const passes = textStrokePasses(ctx, layer, W, oc.box)
       const anyDash = passes.some(p => p.dash)
       if (passes.length) ctx.lineJoin = 'round'
@@ -3007,26 +3087,54 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     }
   } else if (layer.kind === 'rect') {
     const w = layer.w * W, h = layer.h * W
-    // One rounded path for every corner shape: a plain `radius` yields four
-    // equal radii, so uniform rects draw exactly as before. `build` re-creates
-    // the same path on the outside-align scratch canvas.
-    const radii = cornerRadii(layer.radius, w, h, W)
-    const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.roundRect(-w / 2, -h / 2, w, h, radii) }
-    build(ctx)
-    if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
-    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: () => outlinePathData(layer, W) })
+    const gd = needsComputedOutline(layer) ? computedOutlineD(layer, W) : null
+    if (gd != null) {
+      // F2 geometry present: fill + stroke a SINGLE shared path (in pixels, unscaled ctx).
+      const path = new Path2D(gd)
+      if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill(path) }
+      paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, path, outline: gd })
+    } else {
+      // One rounded path for every corner shape: a plain `radius` yields four
+      // equal radii, so uniform rects draw exactly as before. `build` re-creates
+      // the same path on the outside-align scratch canvas.
+      const radii = cornerRadii(layer.radius, w, h, W)
+      const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.roundRect(-w / 2, -h / 2, w, h, radii) }
+      build(ctx)
+      if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
+      paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: () => outlinePathData(layer, W) })
+    }
   } else if (layer.kind === 'ellipse') {
     const w = layer.w * W, h = layer.h * W
-    const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2) }
-    build(ctx)
-    if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
-    paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: () => outlinePathData(layer, W) })
+    const gd = needsComputedOutline(layer) ? computedOutlineD(layer, W) : null
+    if (gd != null) {
+      const path = new Path2D(gd)
+      if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill(path) }
+      paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, path, outline: gd })
+    } else {
+      const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2) }
+      build(ctx)
+      if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
+      paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: () => outlinePathData(layer, W) })
+    }
   } else if (layer.kind === 'path') {
-    drawPath(ctx, layer, W)
+    // F2: a geometry effect transforms `d` in the path's own local units (its ctx is
+    // scaled by `scale`·W), so the pixel size of a width-normalized dial is preserved.
+    // `drawPath` never reads `effects`, so handing it the transformed `d` cannot double-apply.
+    if (needsComputedOutline(layer)) {
+      const gd = computedOutlineD(layer, W)
+      if (gd != null) drawPath(ctx, { ...layer, d: gd }, W)
+    } else {
+      drawPath(ctx, layer, W)
+    }
   } else if (layer.kind === 'polygon' || layer.kind === 'star') {
-    const d = layer.kind === 'polygon'
+    const base = layer.kind === 'polygon'
       ? polygonPathData(layer.sides, layer.w, layer.h, layer.cornerRadius)
       : starPathData(layer.points, layer.innerRatio, layer.w, layer.h, layer.cornerRadius)
+    // Geometry runs in LOCAL units (scale 1 ⇒ ctx scaled by W below); no effect ⇒ `base`
+    // unchanged, so the rewrite-to-path draw stays byte-identical.
+    const d = needsComputedOutline(layer)
+      ? applyGeometry(base, layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1], { W: 1 })
+      : base
     if (d) {
       drawPath(ctx, {
         ...layer, kind: 'path', d, bbox: { w: layer.w, h: layer.h }, scale: 1, fillRule: 'nonzero',
