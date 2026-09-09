@@ -10,7 +10,7 @@
 import { ref, reactive, computed, inject, watch, onMounted } from 'vue'
 import type { ComputedRef } from 'vue'
 import { ChevronDown, Dices } from 'lucide-vue-next'
-import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
+import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
 import { type Fill, type FillType, type ShaderSpec, FILL_TYPES, DEFAULT_FILL, DEFAULT_SHADER_SPEC, HOLOGRAPHIC_FILL_PRESET, fillPickerType, fillTileCanvas } from '~/lib/spacetype/fillTile'
@@ -379,14 +379,12 @@ watch(imageFill, drawPreview, { deep: true })
           </label>
         </div>
 
-        <div class="flex items-center gap-1.5">
-          <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 shrink-0">{{ needsB ? 'A' : 'Color' }}</span>
-          <StudioColor :model-value="fill.a" @update:model-value="(v: string) => setColor('a', v)" />
-          <template v-if="needsB && !bgTransparent">
-            <span class="text-[9px] uppercase tracking-[0.1em] text-white/35 shrink-0 pl-1">B</span>
-            <StudioColor :model-value="fill.b" @update:model-value="(v: string) => setColor('b', v)" />
-          </template>
-        </div>
+        <!-- Colour(s) as labelled 28px rows, so they line up with the Angle / Size /
+             Spacing sliders instead of reading as a separate bare-swatch control. -->
+        <StudioColorField :label="needsB ? 'A' : 'Color'" :model-value="fill.a"
+          @update:model-value="(v: string) => setColor('a', v)" />
+        <StudioColorField v-if="needsB && !bgTransparent" label="B" :model-value="fill.b"
+          @update:model-value="(v: string) => setColor('b', v)" />
       </div>
 
       <div v-if="needsAngle">
