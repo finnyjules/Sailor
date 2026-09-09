@@ -22,7 +22,7 @@
  * `FillControl` itself (mounted internally there when `fill.type === 'shader'`).
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { ChevronRight, RefreshCw, Sparkles, Plus, Trash2 } from 'lucide-vue-next'
+import { ChevronRight, RefreshCw, Sparkles, Plus, Trash2, Palette } from 'lucide-vue-next'
 import CatalogModal from '~/components/CatalogModal.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
@@ -370,7 +370,7 @@ watch(eligible, (ok) => {
          bound layer. Gated by `effectReadsInput` — a purely generative effect (Oddgrid,
          Static, …) has nothing behind its own fill to read. -->
     <div v-if="allowReadsBackdrop">
-      <label class="mb-1 block text-[9px] uppercase tracking-[0.1em] text-white/35">Reads</label>
+      <label class="mb-1 block panel-label">Reads</label>
       <StudioSelect
         :model-value="readsMode"
         @update:model-value="(v) => setReadsMode(v as ReadsMode)"
@@ -394,7 +394,7 @@ watch(eligible, (ok) => {
     <!-- Effect picker (hidden when the host fixes the effect — see `lockEffect`) -->
     <div v-if="!lockEffect">
       <div class="mb-1 flex items-center justify-between gap-2">
-        <label class="block text-[9px] uppercase tracking-[0.1em] text-white/35">Effect</label>
+        <label class="block panel-label">Effect</label>
         <!-- Item 4 fix (final review): manual escape hatch for CATALOG_RETRY_MAX give-up —
              shown only once the catalog HAS loaded but this fill's own effect isn't in it
              (unresolved id / a backend that was still down at mount), the same signal the
@@ -403,7 +403,7 @@ watch(eligible, (ok) => {
           v-if="catalog && !effectDef"
           type="button"
           title="Retry loading this effect"
-          class="nopan nodrag flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-[0.06em] text-white/40 transition-colors hover:bg-white/10 hover:text-white/70"
+          class="nopan nodrag flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-white/40 transition-colors hover:bg-white/10 hover:text-white/70"
           @click="loadCatalog"
         >
           <RefreshCw class="size-2.5" :stroke-width="2" /> Retry
@@ -417,7 +417,7 @@ watch(eligible, (ok) => {
         <Sparkles class="size-3.5 shrink-0 text-white/60" :stroke-width="1.75" />
         <span class="min-w-0 flex-1">
           <span class="block truncate text-[11px] font-medium leading-tight text-white/90">{{ effectDef?.name ?? modelValue.effectId }}</span>
-          <span v-if="effectDef" class="block truncate text-[9px] uppercase leading-tight tracking-[0.06em] text-white/40">{{ titleCase(effectDef.category) }}</span>
+          <span v-if="effectDef" class="block truncate text-[10px] leading-tight text-white/40">{{ titleCase(effectDef.category) }}</span>
         </span>
         <ChevronRight class="size-3.5 shrink-0 text-white/30" />
       </button>
@@ -426,7 +426,7 @@ watch(eligible, (ok) => {
     <!-- Effect params (derived per catalog effect) -->
     <div v-for="row in paramRows" :key="row.key">
       <template v-if="row.kind === 'select'">
-        <label class="mb-1 block text-[9px] uppercase tracking-[0.1em] text-white/35">{{ row.label }}</label>
+        <label class="mb-1 block panel-label">{{ row.label }}</label>
         <select
           class="w-full cursor-pointer rounded bg-white/10 px-2 py-1.5 text-xs text-white/90 outline-none"
           :value="String(paramValue(row))"
@@ -436,11 +436,11 @@ watch(eligible, (ok) => {
         </select>
       </template>
       <template v-else-if="row.kind === 'color'">
-        <label class="mb-1 block text-[9px] uppercase tracking-[0.1em] text-white/35">{{ row.label }}</label>
+        <label class="mb-1 block panel-label">{{ row.label }}</label>
         <StudioColor :model-value="colorValue(row)" @update:model-value="(v: string) => setParam(row.key, v)" />
       </template>
       <template v-else-if="row.kind === 'gradientStops'">
-        <label class="mb-1 block text-[9px] uppercase tracking-[0.1em] text-white/35">{{ row.label }}</label>
+        <label class="mb-1 block panel-label">{{ row.label }}</label>
         <div class="mb-1.5 h-5 overflow-hidden rounded border border-white/10" :style="{ background: rampCss(stopsValue(row)) }" />
         <!-- Manual per-stop editor: edit each ink's colour + position, add / remove. -->
         <div class="mb-2 flex flex-col gap-1">
@@ -458,11 +458,12 @@ watch(eligible, (ok) => {
         </div>
         <!-- Generator, folded: the inks above are the content; this is the shortcut. -->
         <button
-          class="flex w-full items-center gap-1 text-left text-[11px] text-white/45 transition hover:text-white/75"
+          class="flex w-full items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-[11px] text-white/70 transition hover:bg-white/[0.08] hover:text-white/90"
           @click="togglePicker(row.key)"
         >
-          <span class="inline-block transition-transform" :class="openPickers[row.key] ? 'rotate-90' : ''">›</span>
-          Generate a palette
+          <Palette :size="12" class="shrink-0 opacity-70" />
+          <span>Generate a palette</span>
+          <ChevronRight :size="12" class="ml-auto shrink-0 opacity-60 transition-transform" :class="openPickers[row.key] ? 'rotate-90' : ''" />
         </button>
         <div v-if="openPickers[row.key]" class="mt-1.5 rounded border border-white/10 bg-white/[0.02] p-2">
           <PalettePicker
@@ -485,7 +486,7 @@ watch(eligible, (ok) => {
     <!-- Anchor: hidden entirely (not disabled) when the host has no frame to anchor to —
          see `showAnchor` doc above. -->
     <div v-if="showAnchor">
-      <label class="mb-1 block text-[9px] uppercase tracking-[0.1em] text-white/35">Anchor</label>
+      <label class="mb-1 block panel-label">Anchor</label>
       <StudioSegmented v-model="anchor" :options="['object', 'frame']" />
     </div>
 
@@ -504,7 +505,7 @@ watch(eligible, (ok) => {
          whenever Reads is in a backdrop mode — the effect samples the backdrop/bound layer
          instead, so this control would otherwise sit there configuring a paint nobody sees. -->
     <div v-if="showInput && !modelValue.readsBackdrop" class="border-t border-white/10 pt-2.5">
-      <label class="mb-1.5 block text-[9px] uppercase tracking-[0.1em] text-white/35">Input fill</label>
+      <label class="mb-1.5 block panel-label">Input fill</label>
       <FillControl nested :model-value="modelValue.input" @update:model-value="onInputChange" />
     </div>
 
