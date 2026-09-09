@@ -79,6 +79,13 @@ byte-identically (no geometry effects present → the region is skipped); two or
 render differently (Playwright); each effect on rect, path, library shape and outlined text.
 Depends on: the stack (landed); F1 for text.
 
+**Gate decided in F1's review:** once F2 forces the outline on when a geometry effect is
+present, a text layer with underline/strikethrough or a distance-band stroke would silently lose
+those extras (a full fillText fallback is no longer possible). F2 MUST resolve this — either
+`collectTextOutline` returns null for decorated/banded text (the layer keeps fillText and the
+geometry effect is skipped, matching how expressive text already fully falls back), or the add
+menu greys geometry effects for such layers with a reason. Pick one in F2's task plan.
+
 ### F3 · Geometry effects that reference another layer or need new engines
 - **Boolean with a sibling layer** (unite, subtract, intersect, exclude) — paper.js; the sibling is
   referenced the way masks reference a layer; the effect greys out when the reference is not a vector
