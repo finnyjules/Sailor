@@ -47,29 +47,20 @@ const reseed = () => emit('update', { seed: Math.floor(Math.abs(Math.sin(v.value
         <StudioSlider :model-value="v.amount" @update:model-value="(val) => set({ amount: val })"
           label="Tear depth" :min="0" :max="70" :step="1" :bindable="false" />
 
-        <div>
-          <div class="flex items-center justify-between panel-sublabel mb-1"><span>Roughness</span><span class="tabular-nums normal-case">{{ Math.round(v.roughness * 100) }}</span></div>
-          <input type="range" min="0" max="100" step="1" :value="Math.round(v.roughness * 100)" class="w-full accent-white cursor-pointer"
-            @input="set({ roughness: +($event.target as HTMLInputElement).value / 100 })">
-        </div>
+        <StudioSlider :model-value="Math.round(v.roughness * 100)" @update:model-value="(n) => set({ roughness: n / 100 })"
+          label="Roughness" :min="0" :max="100" :step="1" :bindable="false" />
 
         <StudioSlider :model-value="v.grain" @update:model-value="(val) => set({ grain: val })"
           label="Grain" :min="0" :max="18" :step="1" :bindable="false" />
 
-        <div>
-          <div class="flex items-center justify-between panel-sublabel mb-1"><span>Grain texture</span><span class="tabular-nums normal-case">{{ Math.round(v.grainTexture * 100) }}</span></div>
-          <input type="range" min="0" max="100" step="1" :value="Math.round(v.grainTexture * 100)" class="w-full accent-white cursor-pointer"
-            @input="set({ grainTexture: +($event.target as HTMLInputElement).value / 100 })">
-        </div>
+        <StudioSlider :model-value="Math.round(v.grainTexture * 100)" @update:model-value="(n) => set({ grainTexture: n / 100 })"
+          label="Grain texture" :min="0" :max="100" :step="1" :bindable="false" />
 
         <StudioSlider :model-value="v.lipWidth" @update:model-value="(val) => set({ lipWidth: val })"
           label="Lip width" :min="0" :max="20" :step="1" :bindable="false" />
 
-        <div>
-          <div class="flex items-center justify-between panel-sublabel mb-1"><span>Lip width var</span><span class="tabular-nums normal-case">{{ Math.round(v.lipVariation * 100) }}</span></div>
-          <input type="range" min="0" max="100" step="1" :value="Math.round(v.lipVariation * 100)" class="w-full accent-white cursor-pointer"
-            @input="set({ lipVariation: +($event.target as HTMLInputElement).value / 100 })">
-        </div>
+        <StudioSlider :model-value="Math.round(v.lipVariation * 100)" @update:model-value="(n) => set({ lipVariation: n / 100 })"
+          label="Lip width var" :min="0" :max="100" :step="1" :bindable="false" />
 
         <div class="flex items-center justify-between">
           <div class="panel-label">Lip color</div>

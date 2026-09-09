@@ -3,6 +3,7 @@ import type { MotionClip, MotionTextLayer } from '~~/shared/timeline/types'
 import { presetIdsFor } from '~/lib/motion/evaluate'
 import { VARIABLE_FONTS } from '~/data/variable-fonts'
 import { normalizeAxisKeyframes } from '~/lib/timeline/convertPresetToKeyframes'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 const props = defineProps<{ clip: MotionClip }>()
 const emit = defineEmits<{ update: [patch: Partial<MotionClip>] }>()
@@ -86,19 +87,15 @@ const slotIds = (key: 'in' | 'out' | 'loop') => presetIdsFor(key)
     <div v-if="fontDef()" class="space-y-1.5 pt-2 border-t border-white/5">
       <div class="text-[10px] uppercase tracking-[0.12em] text-white/40">Axes</div>
       <div v-for="ax in fontDef()!.axes" :key="ax.tag" class="space-y-1">
-        <label class="flex items-center gap-2">
-          <span class="w-20 shrink-0 text-white/60">{{ ax.label }}</span>
-          <input
-            type="range"
-            class="flex-1 accent-white"
-            :min="ax.min"
-            :max="ax.max"
-            :step="ax.step ?? 1"
-            :value="clip.layer.axes?.[ax.tag] ?? ax.default"
-            @input="patchAxis(ax.tag, Number(($event.target as HTMLInputElement).value))"
-          />
-          <span class="w-10 text-right tabular-nums text-white/50">{{ clip.layer.axes?.[ax.tag] ?? ax.default }}</span>
-        </label>
+        <StudioSlider
+          :model-value="clip.layer.axes?.[ax.tag] ?? ax.default"
+          @update:model-value="(v) => patchAxis(ax.tag, v)"
+          :label="ax.label"
+          :min="ax.min"
+          :max="ax.max"
+          :step="ax.step ?? 1"
+          :bindable="false"
+        />
       </div>
       <button
         type="button"

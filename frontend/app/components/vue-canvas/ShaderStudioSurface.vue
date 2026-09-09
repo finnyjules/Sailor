@@ -1139,10 +1139,10 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
           <div class="mb-2 h-6 overflow-hidden rounded border border-white/10" :style="{ background: gradientMapRampCss }" />
           <PalettePicker mode="stops" :stop-count="config.gradientMap.stops.length" :seed="config.gradientMap.stops[0]?.color ?? '#4f8ad9'" @apply-stops="applyGradientStops" @apply-literal-stops="applyGradientStops" />
           <div class="mt-3">
-            <label class="mb-1 block text-[11px] text-white/60">Mix</label>
-            <input
-              v-model.number="config.gradientMap.mix" type="range" min="0" max="1" step="0.01"
-              v-studio-reset class="studio-range w-full" @input="onEdit('gradientMap.mix', config.gradientMap.mix)"
+            <StudioSlider
+              :model-value="config.gradientMap.mix"
+              @update:model-value="(v) => { config.gradientMap.mix = v; onEdit('gradientMap.mix', config.gradientMap.mix) }"
+              label="Mix" :min="0" :max="1" :step="0.01" :bindable="false"
             />
           </div>
         </template>
@@ -1157,8 +1157,7 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
           </select>
           <template v-for="f in ([['exposure','Exposure',-2,2],['brightness','Brightness',-1,1],['contrast','Contrast',-1,1],['saturation','Saturation',-1,1],['hue','Hue',-180,180],['temperature','Temperature',-1,1],['tint','Tint',-1,1]] as const)" :key="f[0]">
             <BindableRow :control-key="`adjust.${f[0]}`" :label="f[1]" kind="slider" :min="f[2]" :max="f[3]" :step="0.01" :bound="boundColumnFor(`adjust.${f[0]}`)" @menu="openVarMenu" @promote="(control) => promote(control, agentParams[control.key] as string | number)">
-              <label class="mb-0.5 flex justify-between text-[11px] text-white/60"><span>{{ f[1] }}</span><span class="text-white/40">{{ (config.adjust as any)[f[0]].toFixed(2) }}</span></label>
-              <input v-model.number="(config.adjust as any)[f[0]]" type="range" :min="f[2]" :max="f[3]" step="0.01" v-studio-reset class="studio-range mb-2 w-full" @input="onEdit(`adjust.${f[0]}`, (config.adjust as any)[f[0]])" />
+              <StudioSlider :model-value="(config.adjust as any)[f[0]]" @update:model-value="(v) => { (config.adjust as any)[f[0]] = v; onEdit(`adjust.${f[0]}`, (config.adjust as any)[f[0]]) }" :label="f[1]" :min="f[2]" :max="f[3]" :step="0.01" :bindable="false" />
             </BindableRow>
           </template>
         </template>
@@ -1169,39 +1168,32 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
         <div class="mb-1 flex items-center justify-between"><span class="text-xs text-white/70">Lens Blur</span><StudioSwitch v-model="config.post.blur.enabled" /></div>
         <template v-if="config.post.blur.enabled">
           <BindableRow control-key="post.blur.range" label="Focus range" kind="slider" :min="0" :max="1" :step="0.01" :bound="boundColumnFor('post.blur.range')" @menu="openVarMenu" @promote="(control) => promote(control, agentParams[control.key] as string | number)">
-            <label class="mb-0.5 flex justify-between text-[11px] text-white/60"><span>Focus range</span><span class="text-white/40">{{ config.post.blur.range.toFixed(2) }}</span></label>
-            <input v-model.number="config.post.blur.range" type="range" min="0" max="1" step="0.01" v-studio-reset class="studio-range mb-2 w-full" @input="onEdit('post.blur.range', config.post.blur.range)" />
+            <StudioSlider :model-value="config.post.blur.range" @update:model-value="(v) => { config.post.blur.range = v; onEdit('post.blur.range', config.post.blur.range) }" label="Focus range" :min="0" :max="1" :step="0.01" :bindable="false" />
           </BindableRow>
           <BindableRow control-key="post.blur.aperture" label="Aperture" kind="slider" :min="0" :max="1" :step="0.01" :bound="boundColumnFor('post.blur.aperture')" @menu="openVarMenu" @promote="(control) => promote(control, agentParams[control.key] as string | number)">
-            <label class="mb-0.5 flex justify-between text-[11px] text-white/60"><span>Aperture</span><span class="text-white/40">{{ config.post.blur.aperture.toFixed(2) }}</span></label>
-            <input v-model.number="config.post.blur.aperture" type="range" min="0" max="1" step="0.01" v-studio-reset class="studio-range mb-2 w-full" @input="onEdit('post.blur.aperture', config.post.blur.aperture)" />
+            <StudioSlider :model-value="config.post.blur.aperture" @update:model-value="(v) => { config.post.blur.aperture = v; onEdit('post.blur.aperture', config.post.blur.aperture) }" label="Aperture" :min="0" :max="1" :step="0.01" :bindable="false" />
           </BindableRow>
           <BindableRow control-key="post.blur.maxBlur" label="Max blur" kind="slider" :min="0" :max="40" :step="1" :bound="boundColumnFor('post.blur.maxBlur')" @menu="openVarMenu" @promote="(control) => promote(control, agentParams[control.key] as string | number)">
-            <label class="mb-0.5 flex justify-between text-[11px] text-white/60"><span>Max blur</span><span class="text-white/40">{{ config.post.blur.maxBlur.toFixed(0) }}</span></label>
-            <input v-model.number="config.post.blur.maxBlur" type="range" min="0" max="40" step="1" v-studio-reset class="studio-range mb-2 w-full" @input="onEdit('post.blur.maxBlur', config.post.blur.maxBlur)" />
+            <StudioSlider :model-value="config.post.blur.maxBlur" @update:model-value="(v) => { config.post.blur.maxBlur = v; onEdit('post.blur.maxBlur', config.post.blur.maxBlur) }" label="Max blur" :min="0" :max="40" :step="1" :bindable="false" />
           </BindableRow>
         </template>
         <div class="mb-1 mt-2 flex items-center justify-between"><span class="text-xs text-white/70">Chromatic</span><StudioSwitch v-model="config.post.chromatic.enabled" /></div>
         <template v-if="config.post.chromatic.enabled">
           <BindableRow control-key="post.chromatic.amount" label="Chromatic amount" kind="slider" :min="0" :max="1" :step="0.01" :bound="boundColumnFor('post.chromatic.amount')" @menu="openVarMenu" @promote="(control) => promote(control, agentParams[control.key] as string | number)">
-            <label class="mb-0.5 flex justify-between text-[11px] text-white/60"><span>Amount</span><span class="text-white/40">{{ config.post.chromatic.amount.toFixed(2) }}</span></label>
-            <input v-model.number="config.post.chromatic.amount" type="range" min="0" max="1" step="0.01" v-studio-reset class="studio-range w-full" @input="onEdit('post.chromatic.amount', config.post.chromatic.amount)" />
+            <StudioSlider :model-value="config.post.chromatic.amount" @update:model-value="(v) => { config.post.chromatic.amount = v; onEdit('post.chromatic.amount', config.post.chromatic.amount) }" label="Amount" :min="0" :max="1" :step="0.01" :bindable="false" />
           </BindableRow>
         </template>
 
         <div class="mb-1 mt-2 flex items-center justify-between"><span class="text-xs text-white/70">Bloom</span><StudioSwitch v-model="config.post.bloom.enabled" /></div>
         <template v-if="config.post.bloom.enabled">
           <BindableRow control-key="post.bloom.threshold" label="Bloom threshold" kind="slider" :min="0" :max="1" :step="0.01" :bound="boundColumnFor('post.bloom.threshold')" @menu="openVarMenu" @promote="(control) => promote(control, agentParams[control.key] as string | number)">
-            <label class="mb-0.5 flex justify-between text-[11px] text-white/60"><span>Threshold</span><span class="text-white/40">{{ config.post.bloom.threshold.toFixed(2) }}</span></label>
-            <input v-model.number="config.post.bloom.threshold" type="range" min="0" max="1" step="0.01" v-studio-reset class="studio-range mb-2 w-full" @input="onEdit('post.bloom.threshold', config.post.bloom.threshold)" />
+            <StudioSlider :model-value="config.post.bloom.threshold" @update:model-value="(v) => { config.post.bloom.threshold = v; onEdit('post.bloom.threshold', config.post.bloom.threshold) }" label="Threshold" :min="0" :max="1" :step="0.01" :bindable="false" />
           </BindableRow>
           <BindableRow control-key="post.bloom.intensity" label="Bloom intensity" kind="slider" :min="0" :max="3" :step="0.01" :bound="boundColumnFor('post.bloom.intensity')" @menu="openVarMenu" @promote="(control) => promote(control, agentParams[control.key] as string | number)">
-            <label class="mb-0.5 flex justify-between text-[11px] text-white/60"><span>Intensity</span><span class="text-white/40">{{ config.post.bloom.intensity.toFixed(2) }}</span></label>
-            <input v-model.number="config.post.bloom.intensity" type="range" min="0" max="3" step="0.01" v-studio-reset class="studio-range mb-2 w-full" @input="onEdit('post.bloom.intensity', config.post.bloom.intensity)" />
+            <StudioSlider :model-value="config.post.bloom.intensity" @update:model-value="(v) => { config.post.bloom.intensity = v; onEdit('post.bloom.intensity', config.post.bloom.intensity) }" label="Intensity" :min="0" :max="3" :step="0.01" :bindable="false" />
           </BindableRow>
           <BindableRow control-key="post.bloom.radius" label="Bloom radius" kind="slider" :min="4" :max="200" :step="2" :bound="boundColumnFor('post.bloom.radius')" @menu="openVarMenu" @promote="(control) => promote(control, agentParams[control.key] as string | number)">
-            <label class="mb-0.5 flex justify-between text-[11px] text-white/60"><span>Radius</span><span class="text-white/40">{{ config.post.bloom.radius.toFixed(0) }}</span></label>
-            <input v-model.number="config.post.bloom.radius" type="range" min="4" max="200" step="2" v-studio-reset class="studio-range w-full" @input="onEdit('post.bloom.radius', config.post.bloom.radius)" />
+            <StudioSlider :model-value="config.post.bloom.radius" @update:model-value="(v) => { config.post.bloom.radius = v; onEdit('post.bloom.radius', config.post.bloom.radius) }" label="Radius" :min="4" :max="200" :step="2" :bindable="false" />
           </BindableRow>
         </template>
       </StudioSection>

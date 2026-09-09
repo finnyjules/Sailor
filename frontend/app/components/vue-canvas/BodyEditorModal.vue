@@ -26,6 +26,7 @@ import { bodyPhrase } from '~/lib/characters/bodyPhrase'
 import { loadGlb } from '~/lib/scene3d/glb'
 import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/contextRegistry'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 const props = defineProps<{ slug: string }>()
 const emit = defineEmits<{ close: [] }>()
@@ -246,15 +247,15 @@ onBeforeUnmount(() => {
 
             <div class="flex flex-col gap-2.5">
               <div v-for="id in BODY_SLIDERS" :key="id">
-                <div class="mb-0.5 flex items-center justify-between text-[11px] text-white/60">
-                  <span>{{ SLIDER_LABEL[id] }}</span>
-                  <span class="tabular-nums text-white/30">{{ local[id].toFixed(2) }}</span>
-                </div>
-                <input
-                  v-model.number="local[id]"
-                  type="range" min="0" max="1" step="0.01"
-                  class="w-full accent-action"
-                >
+                <StudioSlider
+                  :model-value="local[id]"
+                  @update:model-value="(v) => (local[id] = v)"
+                  :label="SLIDER_LABEL[id]"
+                  :min="0"
+                  :max="1"
+                  :step="0.01"
+                  :bindable="false"
+                />
               </div>
             </div>
 

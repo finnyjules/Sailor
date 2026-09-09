@@ -8,6 +8,7 @@ import { KINETIC_PRESETS_BY_ID, presetParamDefault } from '~/data/kinetic-preset
 import MotionPresetPicker from '~/components/vue-canvas/motion/MotionPresetPicker.vue'
 import PresetThumb from '~/components/vue-canvas/motion/PresetThumb.vue'
 import { X } from 'lucide-vue-next'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 const props = defineProps<{ animation: LayerAnimation | undefined; frameDuration: number; layerKind?: string }>()
 const emit = defineEmits<{ update: [anim: LayerAnimation | undefined] }>()
@@ -110,13 +111,16 @@ const paramValue = (spec: LayerAnimSpec, key: string) => spec.params?.[key] ?? p
               @change="patchSpecNum(slot, 'stagger', Math.max(0, Number(($event.target as HTMLInputElement).value) || 0))">
           </label>
         </div>
-        <label v-for="ps in paramSchema(animation[slot]!.presetId)" :key="ps.key" class="flex items-center gap-2 text-white/55">
-          <span class="w-16 truncate">{{ ps.label }}</span>
-          <input type="range" :min="ps.min" :max="ps.max" :step="ps.step" :value="paramValue(animation[slot]!, ps.key)"
-            class="flex-1 accent-white/80"
-            @input="patchParam(slot, ps.key, Number(($event.target as HTMLInputElement).value))">
-          <span class="w-9 text-right tabular-nums text-white/70">{{ paramValue(animation[slot]!, ps.key) }}</span>
-        </label>
+        <StudioSlider
+          v-for="ps in paramSchema(animation[slot]!.presetId)" :key="ps.key"
+          :model-value="paramValue(animation[slot]!, ps.key)"
+          @update:model-value="(v) => patchParam(slot, ps.key, v)"
+          :label="ps.label"
+          :min="ps.min"
+          :max="ps.max"
+          :step="ps.step"
+          :bindable="false"
+        />
       </div>
     </div>
 

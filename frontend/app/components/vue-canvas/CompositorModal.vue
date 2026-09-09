@@ -8295,11 +8295,9 @@ onUnmounted(() => {
                   @change="setLocal(selectedLocal!.id, { tintBlend: ($event.target as HTMLSelectElement).value } as any)">
                   <option v-for="m in LOCAL_BLEND_MODES" :key="m" :value="m">{{ m.replace('_', ' ') }}</option>
                 </select>
-                <div class="flex items-center gap-1.5 bg-white/[0.04] border border-white/[0.06] rounded px-2">
-                  <input type="range" min="0" max="100" step="1" :value="Math.round(((selectedLocal as any).tintOpacity ?? 1) * 100)" class="w-full accent-white cursor-pointer"
-                    @input="setLocal(selectedLocal!.id, { tintOpacity: Math.max(0, Math.min(1, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) } as any)" />
-                  <span class="text-[10px] text-white/40 tabular-nums w-7 text-right">{{ Math.round(((selectedLocal as any).tintOpacity ?? 1) * 100) }}</span>
-                </div>
+                <StudioSlider :model-value="Math.round(((selectedLocal as any).tintOpacity ?? 1) * 100)"
+                  @update:model-value="(n) => setLocal(selectedLocal!.id, { tintOpacity: Math.max(0, Math.min(1, (n || 0) / 100)) } as any)"
+                  label="Opacity" :min="0" :max="100" :step="1" :bindable="false" />
               </div>
             </div>
           </template>
@@ -8367,9 +8365,8 @@ onUnmounted(() => {
                 @update:model-value="(v) => setLocal(selectedLocal!.id, { skewY: v } as any)" />
             </div>
             <div class="mb-2">
-              <div class="flex items-center justify-between panel-sublabel mb-1"><span>Perspective</span><span class="tabular-nums normal-case">{{ Math.round(perspectiveAmount(selectedLocal) * 100) }}</span></div>
-              <input type="range" min="-80" max="80" step="1" :value="Math.round(perspectiveAmount(selectedLocal) * 100)" class="w-full accent-white cursor-pointer"
-                @input="setPerspective(selectedLocal!.id, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)" />
+              <StudioSlider :model-value="Math.round(perspectiveAmount(selectedLocal) * 100)" @update:model-value="(n) => setPerspective(selectedLocal!.id, (n || 0) / 100)"
+                label="Perspective" :min="-80" :max="80" :step="1" :bindable="false" />
             </div>
             <div class="flex items-center gap-1.5">
               <button class="flex-1 h-7 rounded text-[11px] cursor-pointer transition-colors" :class="distortTool ? 'bg-white text-neutral-900 font-medium' : 'bg-white/[0.05] text-white/70 hover:bg-white/10'" title="Drag the 4 corners on the canvas" @click="toggleDistort">Corner pin</button>

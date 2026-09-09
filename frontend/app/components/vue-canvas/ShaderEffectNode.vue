@@ -8,6 +8,7 @@ import { walkShaderChain } from '~/lib/shaderfx/chain'
 import { parseParams, resolveUniforms, serializeParams } from '~/lib/shaderfx/params'
 import { expandPasses, shaderFx } from '~/lib/shaderfx/renderer'
 import type { EffectDef, ShaderFxCatalog } from '~/lib/shaderfx/types'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 // ShaderEffect artifact node: live WebGL preview (shared singleton renderer)
 // + manifest-driven param sliders. Only selected/hovered nodes animate; the
@@ -424,14 +425,16 @@ onBeforeUnmount(() => {
           <option v-for="o in p.options" :key="o.value" :value="o.value">{{ o.label }}</option>
         </select>
         <template v-else>
-          <div class="flex items-center justify-between mb-0.5">
-            <span class="text-[9px] text-white/45 tabular-nums">{{ (uniforms[p.uniform] ?? 0).toFixed(2) }}</span>
+          <div class="nodrag nopan nowheel">
+            <StudioSlider
+              :model-value="uniforms[p.uniform] ?? 0"
+              @update:model-value="(v) => setParam(p.uniform, v)"
+              :min="p.min"
+              :max="p.max"
+              :step="p.step"
+              :bindable="false"
+            />
           </div>
-          <input
-            type="range" class="nopan nodrag w-full accent-white" :min="p.min" :max="p.max" :step="p.step"
-            :value="uniforms[p.uniform]"
-            @input="setParam(p.uniform, Number(($event.target as HTMLInputElement).value))"
-          />
         </template>
       </div>
     </div>

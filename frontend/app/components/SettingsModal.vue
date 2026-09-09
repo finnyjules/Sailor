@@ -3,6 +3,7 @@ import {
   X, Monitor, Paintbrush, MousePointer2, Zap, FolderOpen, ChevronDown, Sparkles, HardDriveDownload,
 } from 'lucide-vue-next'
 import { hostedModeEnabled } from '~/lib/hostedMode'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 const { settingsOpen, closeSettings } = useSettingsModal()
 const { getLocalSetting, setLocalSetting } = useLocalSettings()
@@ -388,19 +389,15 @@ function handleSelectChange(setting: SettingDef, rawValue: string) {
                 </div>
 
                 <!-- Slider -->
-                <div v-else-if="setting.type === 'slider'" class="flex items-center gap-2 shrink-0">
-                  <input
-                    type="range"
-                    class="w-24 h-1 accent-white cursor-pointer"
-                    :value="getSettingValue(setting.id, setting.min ?? 0)"
+                <div v-else-if="setting.type === 'slider'" class="shrink-0 w-44">
+                  <StudioSlider
+                    :model-value="Number(getSettingValue(setting.id, setting.min ?? 0))"
+                    @update:model-value="(v) => saveSetting(setting.id, v)"
                     :min="setting.min"
                     :max="setting.max"
                     :step="setting.step ?? 0.1"
-                    @input="saveSetting(setting.id, Number(($event.target as HTMLInputElement).value))"
+                    :bindable="false"
                   />
-                  <span class="text-[11px] text-white/50 w-8 text-right tabular-nums">
-                    {{ Number(getSettingValue(setting.id, setting.min ?? 0)).toFixed(1) }}
-                  </span>
                 </div>
 
                 <!-- Secret (server-held token) -->
