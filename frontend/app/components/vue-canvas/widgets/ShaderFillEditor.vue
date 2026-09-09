@@ -30,6 +30,7 @@ import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
+import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import { type ShaderSpec, DEFAULT_SHADER_SPEC } from '~/lib/spacetype/fillTile'
 import { type Paint, isFill } from '~/composables/useCompositorLayers'
@@ -425,19 +426,24 @@ watch(eligible, (ok) => {
 
     <!-- Effect params (derived per catalog effect) -->
     <div v-for="row in paramRows" :key="row.key">
+      <!-- Every param is the same 28px studio row — label left, control right — so a
+           colour or an enum sits flush with the sliders instead of a bare swatch /
+           full-width select floating under its own header. -->
       <template v-if="row.kind === 'select'">
-        <label class="mb-1 block panel-label">{{ row.label }}</label>
-        <select
-          class="w-full cursor-pointer rounded bg-white/10 px-2 py-1.5 text-xs text-white/90 outline-none"
-          :value="String(paramValue(row))"
-          @change="setParam(row.key, Number(($event.target as HTMLSelectElement).value))"
-        >
-          <option v-for="o in row.options" :key="o.value" :value="o.value" class="bg-neutral-900">{{ o.label }}</option>
-        </select>
+        <StudioSelect
+          :label="row.label"
+          :options="(row.options ?? []).map((o) => String(o.value))"
+          :option-labels="(row.options ?? []).map((o) => o.label)"
+          :model-value="String(paramValue(row))"
+          @update:model-value="(v: string) => setParam(row.key, Number(v))"
+        />
       </template>
       <template v-else-if="row.kind === 'color'">
-        <label class="mb-1 block panel-label">{{ row.label }}</label>
-        <StudioColor :model-value="colorValue(row)" @update:model-value="(v: string) => setParam(row.key, v)" />
+        <StudioColorField
+          :label="row.label"
+          :model-value="colorValue(row)"
+          @update:model-value="(v: string) => setParam(row.key, v)"
+        />
       </template>
       <template v-else-if="row.kind === 'gradientStops'">
         <label class="mb-1 block panel-label">{{ row.label }}</label>
