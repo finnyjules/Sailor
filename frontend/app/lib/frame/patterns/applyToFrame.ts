@@ -1,7 +1,8 @@
 import type { LocalLayer, TextLayer } from '~/composables/useCompositorLayers'
 import type { ResolvedPalette } from './palette'
 import type { FrameElements } from './types'
-import { buildFrameContext } from './frameContext'
+import { buildFrameContext, posterLayerViews } from './frameContext'
+import { inferElements } from './hierarchy'
 import { makeFrameMeasure, titleMeasureFrom } from './frameMeasure'
 import { PATTERNS } from './catalog'
 import { applyPlacement } from './apply'
@@ -30,8 +31,11 @@ export function applyPatternToFrame(args: ApplyArgs): { ok: boolean; posterState
   const pattern = PATTERNS.find(p => p.id === args.patternId)
   if (!pattern) return { ok: false }
   const layers = ((args.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
-  // measure with what the title layer really renders with
-  const titleLayer = layers.find(l => l.kind === 'text') as TextLayer | undefined
+  // measure with what the title layer really renders with — the same layer the
+  // engine's hierarchy inference picks as the title (largest fontSize), not
+  // just the first text layer in array order.
+  const titleId = inferElements(posterLayerViews(args.props)).title?.id
+  const titleLayer = layers.find(l => l.id === titleId && l.kind === 'text') as TextLayer | undefined
   const tm = titleLayer ? titleMeasureFrom(titleLayer) : { family: 'Inter', weight: 700, transform: (t: string) => t }
   const measure = makeFrameMeasure(tm.family, tm.weight, undefined, tm.transform)
   const ctx = buildFrameContext(args.props, args.frameW, args.frameH, measure)

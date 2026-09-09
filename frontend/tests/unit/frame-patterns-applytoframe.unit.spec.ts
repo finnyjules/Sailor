@@ -1,6 +1,11 @@
 // frontend/tests/unit/frame-patterns-applytoframe.unit.spec.ts
 import { describe, it, expect, vi } from 'vitest'
+vi.mock('~/lib/frame/patterns/frameMeasure', async (importOriginal) => {
+  const m = await importOriginal<typeof import('~/lib/frame/patterns/frameMeasure')>()
+  return { ...m, makeFrameMeasure: vi.fn(m.makeFrameMeasure) }
+})
 import { applyPatternToFrame } from '~/lib/frame/patterns/applyToFrame'
+import { makeFrameMeasure } from '~/lib/frame/patterns/frameMeasure'
 
 function frameProps(extra: Record<string, unknown> = {}) {
   return { sailor_localLayers: [
@@ -46,5 +51,19 @@ describe('applyPatternToFrame', () => {
     const out = applyPatternToFrame({ props: frameProps(), frameW: 800, frameH: 1000, patternId: 'nope', seed: 1, palette, editor })
     expect(out.ok).toBe(false)
     expect(editor.recordHistory).not.toHaveBeenCalled(); expect(editor.commit).not.toHaveBeenCalled(); expect(editor.writeOrder).not.toHaveBeenCalled()
+  })
+  it('measures with the inferred title layer, not the first text layer', () => {
+    const editor = mk()
+    const props = { sailor_localLayers: [
+      { id: 'cap', kind: 'text', text: 'a small caption', fontSize: 0.03, x: 0.5, y: 0.9, rotation: 0, opacity: 1, fontFamily: 'Caption Face', fontWeight: 400, color: '#000', align: 'left', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 },
+      { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2, x: 0.5, y: 0.5, rotation: 0, opacity: 1, fontFamily: 'Inter', fontWeight: 900, textTransform: 'uppercase', color: '#000', align: 'center', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 },
+    ] }
+    vi.mocked(makeFrameMeasure).mockClear()
+    const out = applyPatternToFrame({ props, frameW: 800, frameH: 1000, patternId: 'runoff', seed: 7, palette, editor })
+    expect(out.ok).toBe(true)
+    const [family, weight, , transform] = vi.mocked(makeFrameMeasure).mock.calls.at(-1)!
+    expect(family).toBe('Inter')
+    expect(weight).toBe(900)
+    expect(transform!('noise')).toBe('NOISE')
   })
 })
