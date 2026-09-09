@@ -22,7 +22,7 @@
  * `FillControl` itself (mounted internally there when `fill.type === 'shader'`).
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { ChevronRight, RefreshCw, Sparkles } from 'lucide-vue-next'
+import { ChevronRight, RefreshCw, Sparkles, Plus, Trash2 } from 'lucide-vue-next'
 import CatalogModal from '~/components/CatalogModal.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
@@ -240,6 +240,29 @@ function rampCss(stops: GradientStop[]): string {
 function applyRowStops(row: ParamRow, v: GradientStop[]) {
   setParam(row.key, v.slice(0, row.maxStops ?? 8).map(s => ({ pos: s.pos, color: s.color })))
 }
+// Manual per-stop editing — edit a stop's colour/position, add or remove one.
+// The generated PalettePicker below is a shortcut, not the only way in.
+const clampUnit = (n: number) => Math.max(0, Math.min(1, n))
+function editRowStopColor(row: ParamRow, i: number, color: string) {
+  applyRowStops(row, stopsValue(row).map((s, j) => (j === i ? { ...s, color } : s)))
+}
+function editRowStopPos(row: ParamRow, i: number, pos: number) {
+  applyRowStops(row, stopsValue(row).map((s, j) => (j === i ? { ...s, pos: clampUnit(pos) } : s)))
+}
+function removeRowStop(row: ParamRow, i: number) {
+  const s = stopsValue(row)
+  if (s.length > 2) applyRowStops(row, s.filter((_, j) => j !== i))
+}
+function addRowStop(row: ParamRow) {
+  const s = [...stopsValue(row)].sort((a, b) => a.pos - b.pos)
+  // Drop the new stop into the widest gap so it doesn't stack on an existing one.
+  let gap = -1, at = 0.5
+  for (let i = 0; i < s.length - 1; i++) {
+    const g = s[i + 1]!.pos - s[i]!.pos
+    if (g > gap) { gap = g; at = (s[i]!.pos + s[i + 1]!.pos) / 2 }
+  }
+  applyRowStops(row, [...stopsValue(row), { pos: at, color: s[Math.floor(s.length / 2)]?.color ?? '#888888' }])
+}
 function setParam(key: string, v: ParamValue) {
   patch({ params: { ...props.modelValue.params, [key]: v } })
 }
@@ -412,6 +435,20 @@ watch(eligible, (ok) => {
       <template v-else-if="row.kind === 'gradientStops'">
         <label class="mb-1 block text-[9px] uppercase tracking-[0.1em] text-white/35">{{ row.label }}</label>
         <div class="mb-1.5 h-5 overflow-hidden rounded border border-white/10" :style="{ background: rampCss(stopsValue(row)) }" />
+        <!-- Manual per-stop editor: edit each ink's colour + position, add / remove. -->
+        <div class="mb-2 flex flex-col gap-1">
+          <div v-for="(s, i) in stopsValue(row)" :key="i" class="flex items-center gap-2">
+            <StudioColor :model-value="s.color" @update:model-value="(c: string) => editRowStopColor(row, i, c)" />
+            <input type="range" min="0" max="1" step="0.01" :value="s.pos"
+              class="studio-range h-1 min-w-0 flex-1"
+              @input="(e: any) => editRowStopPos(row, i, Number(e.target.value))" />
+            <span class="w-7 shrink-0 text-right font-mono text-[10px] tabular-nums text-white/40">{{ Math.round(s.pos * 100) }}</span>
+            <button class="rounded p-0.5 text-white/30 hover:bg-white/10 hover:text-white/70 disabled:opacity-20"
+              :disabled="stopsValue(row).length <= 2" title="Remove ink" @click="removeRowStop(row, i)"><Trash2 :size="12" /></button>
+          </div>
+          <button class="mt-0.5 flex items-center justify-center gap-1 rounded border border-dashed border-white/15 py-1 text-[11px] text-white/50 hover:border-white/30 hover:text-white/80 disabled:opacity-30"
+            :disabled="stopsValue(row).length >= (row.maxStops ?? 8)" @click="addRowStop(row)"><Plus :size="12" /> Add ink</button>
+        </div>
         <PalettePicker
           mode="stops"
           :stop-count="stopsValue(row).length || 3"
