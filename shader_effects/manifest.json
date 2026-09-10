@@ -2266,6 +2266,169 @@
       ]
     },
     {
+      "id": "glass_lens",
+      "name": "Glass lens",
+      "category": "lens",
+      "animated": false,
+      "passes": 1,
+      "centerParam": [
+        "u_centerX",
+        "u_centerY"
+      ],
+      "textures": [],
+      "generative": false,
+      "params": [
+        {
+          "uniform": "u_centerX",
+          "label": "Center X",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_centerY",
+          "label": "Center Y",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_radius",
+          "label": "Radius",
+          "type": "float",
+          "min": 0.05,
+          "max": 1.5,
+          "default": 0.35,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_refraction",
+          "label": "Refraction",
+          "type": "float",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_thickness",
+          "label": "Thickness",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.2,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_aberration",
+          "label": "Aberration",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_innerZoom",
+          "label": "Inner zoom",
+          "type": "float",
+          "min": 0.5,
+          "max": 3.0,
+          "default": 1.0,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_edgeSoftness",
+          "label": "Edge softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.1,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_blur",
+          "label": "Blur",
+          "type": "float",
+          "min": 0.0,
+          "max": 20.0,
+          "default": 0.0,
+          "step": 0.1
+        },
+        {
+          "uniform": "u_lightAngle",
+          "label": "Light angle",
+          "type": "float",
+          "min": 0.0,
+          "max": 360.0,
+          "default": 300.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_highlight",
+          "label": "Highlight",
+          "type": "float",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 0.05,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_highlightSoftness",
+          "label": "Highlight softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_highlightColor",
+          "label": "Highlight colour",
+          "type": "color",
+          "default": "#ffffff"
+        },
+        {
+          "uniform": "u_fresnel",
+          "label": "Fresnel",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.1,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_fresnelSoftness",
+          "label": "Fresnel softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.1,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_fresnelColor",
+          "label": "Fresnel colour",
+          "type": "color",
+          "default": "#ffffff"
+        },
+        {
+          "uniform": "u_cutout",
+          "label": "Outside the glass",
+          "type": "enum",
+          "default": 0,
+          "options": [
+            { "label": "Keep the picture", "value": 0 },
+            { "label": "Transparent", "value": 1 }
+          ]
+        }
+      ]
+    },
+    {
       "id": "crt_scanlines",
       "name": "CRT",
       "category": "stylize",
