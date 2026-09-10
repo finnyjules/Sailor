@@ -77,7 +77,7 @@ describe('expandClones with a single copy', () => {
   it('route 1 — linear with both counts at 1: no tint, no damping', () => {
     const out = expandClones(C({ ...VARIED, countX: 1, countY: 1, spacingX: 0.2, spacingY: 0.25 }), 1)
     expect(out).toHaveLength(1)
-    expect(out[0]).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1 })
+    expect(out[0]).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1, k: 0, n: 1 })
   })
 
   it('route 1 still holds with mirroring on — a count of 1 has nothing to mirror', () => {
