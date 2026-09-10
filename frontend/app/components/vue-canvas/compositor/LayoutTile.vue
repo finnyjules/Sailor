@@ -77,7 +77,7 @@ function onKey(e: KeyboardEvent) { if (e.key === 'Enter' || e.key === ' ') { e.p
       <button
         type="button" data-testid="layout-tile-more" title="More like this"
         class="absolute right-1 bottom-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white/80 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-black/80"
-        @click.stop="emit('more')"
+        @click.stop="emit('more')" @keydown.stop
       >More</button>
     </div>
     <div class="text-[11px] text-white/55 truncate max-w-[116px]" :title="label">{{ label }}</div>
