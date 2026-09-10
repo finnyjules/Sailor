@@ -45,6 +45,9 @@ export function useLayoutSheet(src: LayoutSheetSource): {
     return buildFrameContext(props, src.frameW(), src.frameH(), makeFrameMeasure(tm.family, tm.weight, undefined, tm.transform), elements)
   }
 
+  // The sheet always plans from the frame AS IT IS NOW, so after an apply the
+  // next sheet branches from the applied layout rather than the original —
+  // by design (Cmd+Z returns to the original and the sheet follows).
   const tiles = computed<SheetTile[]>(() => {
     const ctx = context()
     if (!ctx.elements.title) return []
