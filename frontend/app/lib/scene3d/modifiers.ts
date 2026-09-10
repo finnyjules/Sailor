@@ -948,7 +948,7 @@ function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance, ctx?: 
     case 'smooth': applySmooth(geo, m('smoothStrength'), Math.round(m('smoothIterations'))); return geo
     case 'melt': applyMelt(geo, m('melt'), Math.round(m('meltAxis'))); return geo
     case 'lattice': applyLattice(geo, m('latticeBulge'), Math.round(m('latticeAxis')), m('latticeBias')); return geo
-    case 'array': return applyRadialArray(geo, m('arrayCount'), Math.round(m('arrayAxis')), m('arrayRadius'))
+    case 'array': return applyRadialArray(geo, m('radialCount'), Math.round(m('radialAxis')), m('radialRadius'))
     case 'shatter': return applyShatter(geo, m('shatter'), Math.round(m('shatterSeed')))
     case 'mirror': return applyMirror(geo, Math.round(m('mirrorAxis')), m('mirrorOffset'))
     case 'decimate': return applyDecimate(geo, m('decimate'))

@@ -257,10 +257,10 @@ export const MODIFIER_SPECS: ParamSpec[] = [
 
   // Radial array — a geometry PRODUCER: it repeats the shape in a ring of evenly-rotated copies
   // about an axis, folded into one geometry. All three dials are read by `applyRadialArray`; the
-  // count is budget-clamped exactly as the cloner clamps. arrayAxis' option is stored as an index.
-  { key: 'arrayCount', label: 'Copies', hint: 'How many copies to arrange evenly around the ring', min: 2, max: 24, step: 1, default: 6 },
-  axisSpec('arrayAxis', 'Array axis', 'The axis the copies are arranged around', 1),
-  { key: 'arrayRadius', label: 'Array radius', hint: 'How far each copy sits from the axis — 0 rotates every copy in place', min: 0, max: 3, step: 0.05, default: 0 },
+  // count is budget-clamped exactly as the cloner clamps. radialAxis' option is stored as an index.
+  { key: 'radialCount', label: 'Copies', hint: 'How many copies to arrange evenly around the ring', min: 2, max: 24, step: 1, default: 6 },
+  axisSpec('radialAxis', 'Array axis', 'The axis the copies are arranged around', 1),
+  { key: 'radialRadius', label: 'Array radius', hint: 'How far each copy sits from the axis — 0 rotates every copy in place', min: 0, max: 3, step: 0.05, default: 0 },
 
   // Shatter — a geometry PRODUCER: it splits every face apart and pushes each outward along its
   // own normal by a seeded amount, for an exploded-faces look. Both dials are read by

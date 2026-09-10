@@ -53,7 +53,7 @@ export const MODIFIER_KIND_PARAMS: Record<ModifierKind, string[]> = {
   smooth: ['smoothStrength', 'smoothIterations'],
   melt: ['melt', 'meltAxis'],
   lattice: ['latticeBulge', 'latticeAxis', 'latticeBias'],
-  array: ['arrayCount', 'arrayAxis', 'arrayRadius'],
+  array: ['radialCount', 'radialAxis', 'radialRadius'],
   shatter: ['shatter', 'shatterSeed'],
   mirror: ['mirrorAxis', 'mirrorOffset'],
   decimate: ['decimate'],

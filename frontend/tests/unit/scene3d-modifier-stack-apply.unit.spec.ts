@@ -780,7 +780,7 @@ describe('the new deformers each no-op when disabled', () => {
 // geometry with a changed vertex buffer, budget-clamped like mirror/the cloner.
 // ---------------------------------------------------------------------------
 const arrayRow = (count = 6, axis = 1, radius = 0): ModifierInstance => {
-  const r = createModifier('array'); r.arrayCount = count; r.arrayAxis = axis; r.arrayRadius = radius; return r
+  const r = createModifier('array'); r.radialCount = count; r.radialAxis = axis; r.radialRadius = radius; return r
 }
 const shatterRow = (amount = 0, seed = 0): ModifierInstance => {
   const r = createModifier('shatter'); r.shatter = amount; r.shatterSeed = seed; return r

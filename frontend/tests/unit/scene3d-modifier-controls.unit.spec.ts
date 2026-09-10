@@ -41,7 +41,7 @@ describe('modifierControls', () => {
     // axis selects; boolean adds the operation select — its sibling picker is a dynamic scene-
     // sourced select in the surface, NOT a MODIFIER_SPECS control, so it is not counted here).
     expect(new Set(selects.map((r) => modifierField(r.key)))).toEqual(
-      new Set(['taperAxis', 'twistAxis', 'bendAxis', 'cloneAxis', 'jitterMode', 'cloneMode', 'mirrorAxis', 'shearAxis', 'meltAxis', 'latticeAxis', 'arrayAxis', 'booleanOp']),
+      new Set(['taperAxis', 'twistAxis', 'bendAxis', 'cloneAxis', 'jitterMode', 'cloneMode', 'mirrorAxis', 'shearAxis', 'meltAxis', 'latticeAxis', 'radialAxis', 'booleanOp']),
     )
     for (const row of selects) {
       const spec = specOf(modifierField(row.key))
