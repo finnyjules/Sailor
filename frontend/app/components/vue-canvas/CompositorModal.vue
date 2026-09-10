@@ -131,7 +131,7 @@ import { VARIABLE_FONTS } from '~/data/variable-fonts'
 import type { GoogleFont } from '~/data/google-fonts'
 import { libraryFamily } from '~/data/library-fonts'
 import { defaultExpressiveParams, type ExpressiveParams } from '~~/shared/text-layout/expressive'
-import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid, LayoutTemplate, Snowflake, Wheat } from 'lucide-vue-next'
+import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid, LayoutTemplate, Snowflake, Wheat, SquareDashedMousePointer } from 'lucide-vue-next'
 import {
   TOOLBAR_SHAPES, TOOLBAR_INSERT,
   DEFAULT_SHAPE_FACE, DEFAULT_INSERT_FACE,
@@ -140,6 +140,7 @@ import {
   type ToolbarShapeId, type ToolbarInsertId,
 } from '~/lib/compositor/toolbarMenus'
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
+import CanvasContextMenu, { type MenuItem } from '~/components/vue-canvas/CanvasContextMenu.vue'
 import type { TextPathSpec, TextPathFollow } from '~/lib/compositor/textPath'
 import { genGestureDefaults, genBoxIsValid, genBarPlacement } from '~/lib/compositor/genGesture'
 import { shapeById } from '~/lib/shapes/catalog'
@@ -2566,6 +2567,28 @@ function onCanvasPointerDownCapture(e: PointerEvent) {
     if (p) startMarquee(p.nx, p.ny)
   }
 }
+const imageCtxMenu = ref<{ x: number; y: number; layerId: string; items: MenuItem[] } | null>(null)
+function onCanvasContextMenu(e: MouseEvent) {
+  const key = hitTopStackKey(e.clientX, e.clientY)
+  const res = key ? resolveStackKey(key) : null
+  if (res?.type !== 'local' || res.layer.kind !== 'image') return // native menu for non-images
+  e.preventDefault()
+  selectLocal(res.layer.id)
+  const id = res.layer.id
+  imageCtxMenu.value = {
+    x: e.clientX, y: e.clientY, layerId: id,
+    items: [
+      { id: 'edit-image', label: 'Edit image…', icon: Wand2, action: () => { imageCtxMenu.value = null; editImageStart(id) } },
+      { id: 'edit-region', label: 'Edit a region…', icon: SquareDashedMousePointer, action: () => { imageCtxMenu.value = null; editRegionStart(id) } },
+      { divider: true },
+      { id: 'select-object', label: 'Select an object…', icon: Lasso, action: () => { imageCtxMenu.value = null; selectObjectStart(id) } },
+    ],
+  }
+}
+// Task 3/4 replace these bodies:
+function editImageStart(_id: string) { /* Task 3 */ }
+function editRegionStart(_id: string) { /* Task 4 */ }
+function selectObjectStart(_id: string) { /* Task 4: toggleSmartMode after selecting the layer */ }
 function onCanvasPointerMoveCapture(e: PointerEvent) {
   if (smartActive.value) { onSmartPointerMove(e); return }
   if (genActive.value) {
@@ -6028,6 +6051,7 @@ onUnmounted(() => {
         @pointerup="onCanvasPointerUpCapture"
         @pointerleave="genCursor.on = false; smartCursor.on = false; brush.cursor.value = null"
         @dblclick.capture="onCanvasDblClickCapture"
+        @contextmenu="onCanvasContextMenu"
       >
         <!-- Unified stack canvas: wired + local layers in z-order (WYSIWYG) -->
         <canvas
@@ -8600,6 +8624,13 @@ onUnmounted(() => {
           class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-white/80 cursor-pointer"
           @click.stop="pickFxKind(kind)">{{ EFFECT_LABELS[kind] }}</button>
       </div>
+    </Teleport>
+
+    <!-- Right-click menu for an image layer. Teleported (like the add-effect menu
+         above) because it's `fixed`-positioned from clientX/clientY, and a
+         transformed ancestor (the pan/zoom stage) would otherwise re-anchor it. -->
+    <Teleport to="body">
+      <CanvasContextMenu v-if="imageCtxMenu" :x="imageCtxMenu.x" :y="imageCtxMenu.y" :items="imageCtxMenu.items" @close="imageCtxMenu = null" />
     </Teleport>
   </div>
 </template>
