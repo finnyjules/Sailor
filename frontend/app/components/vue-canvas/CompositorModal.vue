@@ -101,6 +101,11 @@ import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import type { PaletteFamily } from '~/lib/color/seedFamily'
 import type { GradientStop } from '~/lib/color/harmony'
 import { layerPaletteAssignments } from '~/lib/compositor/distribute'
+import ColourSlots from '~/components/vue-canvas/compositor/ColourSlots.vue'
+import { colourSites } from '~/lib/compositor/recolour/sites'
+import { slotsOf, inkOf } from '~/lib/compositor/recolour/slots'
+import { mapFamily } from '~/lib/compositor/recolour/map'
+import { recolourFrame, recolourSlot } from '~/lib/compositor/recolour/apply'
 import PostEffectsControls, { PANEL_EFFECT_KINDS } from '~/components/vue-canvas/PostEffectsControls.vue'
 import CompositorEffectRow from '~/components/vue-canvas/compositor/CompositorEffectRow.vue'
 import CompositorStrokeRow from '~/components/vue-canvas/compositor/CompositorStrokeRow.vue'
@@ -1332,6 +1337,29 @@ function distributePaletteToSelection(hexes: string[]) {
 }
 function applyPaletteToSelection(fam: PaletteFamily) {
   distributePaletteToSelection(fam.hexes)
+}
+// ── Recolour the whole frame from a palette family (Design tab, no selection) ──
+const frameColourSlots = computed(() => slotsOf(colourSites(localLayers.value as LocalLayer[], background.value, canvasDisplay.h / Math.max(1, canvasDisplay.w))))
+const recolourMemory = computed<{ hexes: string[]; applied: Record<string, string> } | null>(() => ((compositor.value?.data?.properties as any)?.sailor_recolour ?? null))
+const recolourSeed = computed(() => inkOf(frameColourSlots.value)?.hex ?? '#4f8ad9')
+function writeRecolourMemory(m: { hexes: string[]; applied: Record<string, string> }) {
+  const n = compositor.value; if (!n) return
+  const p = (n.data.properties ||= {}); (p as any).sailor_recolour = m
+}
+function recolourWith(hexes: string[]) {
+  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  const mapping = mapFamily(frameColourSlots.value, hexes)
+  const next = recolourFrame(localLayers.value as LocalLayer[], background.value, mapping, aspect)
+  recordHistory(); commit(next.layers); editor.writeBackground(next.background)
+  writeRecolourMemory({ hexes: hexes.map(h => h.toLowerCase()), applied: mapping })
+}
+function applyFamilyToFrame(fam: PaletteFamily) { recolourWith(fam.hexes) }
+function applyStopsToFrame(stops: GradientStop[]) { recolourWith(stops.map(s => s.color)) }
+function reassignSlot(slotHex: string, toHex: string) {
+  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  const next = recolourSlot(localLayers.value as LocalLayer[], background.value, slotHex, toHex, aspect)
+  recordHistory(); commit(next.layers); editor.writeBackground(next.background)
+  const m = recolourMemory.value; if (m) writeRecolourMemory({ ...m, applied: { ...m.applied, [toHex.toLowerCase()]: toHex.toLowerCase() } })
 }
 // Box layers (rect/ellipse/image) get full Figma-style resize (corners + edges,
 // anchored opposite side); text/line/path keep uniform corner scale (no 2D box).
@@ -8811,6 +8839,16 @@ onUnmounted(() => {
             <FillControl allow-none :model-value="background"
               @update:model-value="(v: any) => setBackground(v)" />
             <p class="mt-1.5 text-[10px] text-white/30 leading-snug">Fills behind every layer and bakes into the frame. An opaque generated image will sit on top of it.</p>
+          </div>
+          <!-- Colours: the frame's palette as slots, and a palette family to swap it for -->
+          <div data-testid="frame-colours">
+            <div class="panel-label mb-1.5">Colours</div>
+            <p v-if="!frameColourSlots.length" class="text-[11px] text-white/40 italic">Add a background, text or a shape to see the frame's colours.</p>
+            <template v-else>
+              <ColourSlots :slots="frameColourSlots" :family="recolourMemory?.hexes ?? null" @reassign="reassignSlot" />
+              <p class="mt-2 mb-1.5 text-[11px] text-white/45">Pick a palette to recolour the frame. Things that share a colour keep sharing one; the darkest stays darkest.</p>
+              <PalettePicker :key="'frame-recolour'" mode="stops" :seed="recolourSeed" @apply-family="applyFamilyToFrame" @apply-stops="applyStopsToFrame" />
+            </template>
           </div>
           <!-- Whole-frame post-processing (after all layers composite) -->
           <div class="border-t border-white/[0.06] pt-3">
