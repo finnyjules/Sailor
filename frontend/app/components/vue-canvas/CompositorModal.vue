@@ -4967,8 +4967,13 @@ async function onRegionSelectPointerUp(e: PointerEvent) {
       await paintSamMaskToGenMask(mask, layer)
     }
   } catch (err) {
+    // Surface the failure instead of swallowing it (the whole point of this feature),
+    // and drop to Brush so the user can still mark the region — mirrors the
+    // InpaintModal's doSamSelect fallback.
     console.error('[compositor region select]', err)
+    inpaint.error.value = 'Click-select unavailable (check the SAM model); paint the area instead.'
     regionSamPoints = []
+    regionSelectTool.value = 'brush'
   } finally {
     regionSamBusy.value = false
   }
