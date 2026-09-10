@@ -240,7 +240,13 @@ import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTr
 // Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
 // `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
 // is enabled, so the no-effect draw stays byte-identical below.
-import { applyGeometry } from '~/lib/compositor/geometryEffects'
+import { applyGeometry, type ResolvedSibling } from '~/lib/compositor/geometryEffects'
+// Frame slice F3: the sibling-reference rail. `makeSiblingOutlineResolver` turns a geometry
+// effect's `refLayerId` (a StackKey) into the referenced layer's outline, transformed into the
+// referencing layer's frame. PRESENT-BUT-UNCONSUMED until F3 Task 2 (boolean) — no current
+// geometry kind carries a `refLayerId`, so the resolver is never invoked and every render stays
+// byte-identical. See `~/lib/compositor/siblingRef.ts`.
+import { makeSiblingOutlineResolver, type SiblingResolver } from '~/lib/compositor/siblingRef'
 
 // Layer effects (Figma-style) live in ~/lib/compositor/effectStack, which owns the whole
 // vocabulary (kinds, canonical order, the read-through that turns any layer into an ordered
@@ -1144,6 +1150,42 @@ export async function ensureLayerImages(layers: LocalLayer[]): Promise<void> {
 // capture points are here (before every `applyXform`, and before the background's own
 // center translate).
 let _fieldCtx: ShaderFieldFrameCtx = { frameW: 1, frameH: 1, t: 0, fps: 30, base: null, bake: false, token: 0 }
+
+// Frame slice F3: the current stack's sibling-outline resolver, bound to the live layer list at
+// paintLayerStack time (module-global like `_fieldCtx`, for the same reason: `drawLayerContent`
+// and `computedOutlineD` are reached through several closures that never carried the layer list).
+// `_siblingResolveFor(self)` yields the `(key) => ResolvedSibling | null` closure a geometry
+// effect's `refLayerId` resolves through. `null` outside a paint (thumbnails, hit tests) — the
+// seam is then simply absent, which is byte-identical because no current kind consumes it.
+// paintLayerStack sets it around its draw loop and clears it in the finally.
+let _siblingResolveFor: ((self: LocalLayer) => (key: string) => ResolvedSibling | null) | null = null
+
+/** How many canvas PIXELS one unit of a layer's OUTLINE `d` renders as — the isotropic content
+ *  scale `drawLayerContent` applies: `1` for rect/ellipse/text (their `d` is already px),
+ *  `scale·W` for a path (its ctx is scaled by `scale·W`), and `W` for a polygon/star (drawn as a
+ *  `scale: 1` path). Fed to `layerAffine` so a sibling outline lands in the referencing layer's
+ *  own units. */
+function outlineUnitPx(layer: LocalLayer, W: number): number {
+  if (layer.kind === 'path') return ((layer as unknown as { scale?: number }).scale || 1) * W
+  if (layer.kind === 'polygon' || layer.kind === 'star') return W
+  return 1
+}
+
+/** Build the sibling-outline resolver for one stack render. The sibling's own outline is
+ *  computed with sibling-resolution DISABLED (`computedOutlineD(sibling, W)` with no resolver) —
+ *  the S2 "sibling built with no ctx" cycle guard, so a partner's own boolean/morph can never
+ *  recurse through here. */
+function buildSiblingResolver(localLayers: LocalLayer[], W: number, H: number): SiblingResolver<LocalLayer> {
+  return makeSiblingOutlineResolver<LocalLayer>({
+    W, H, layers: localLayers,
+    keyOf: l => `l:${l.id}`,
+    eligible: l => canTakeGeometry(l),
+    outlineOf: (l) => { const d = computedOutlineD(l, W); return d != null ? { d } : null },
+    placementOf: l => ({
+      x: l.x, y: l.y, rotation: l.rotation, skewX: l.skewX, skewY: l.skewY, unitPx: outlineUnitPx(l, W),
+    }),
+  })
+}
 
 /** Draw an image with a fill (`tint`) blended over it, clipped to the image's
  *  alpha. Three passes in a centered offscreen: image → blend-fill tint → keep
@@ -2803,13 +2845,24 @@ export function canTakeGeometry(layer: LocalLayer): boolean {
  * geometry effect present `applyGeometry` returns the input by reference — so this equals
  * the untouched outline and the no-effect draw stays byte-identical.
  */
-export function computedOutlineD(layer: unknown, W: number): string | null {
+export function computedOutlineD(
+  layer: unknown,
+  W: number,
+  resolveSibling?: (key: string) => ResolvedSibling | null,
+): string | null {
   const base = outlinePathData(layer, W)
   if (base == null) return null
   const l = layer as LocalLayer
   const local = l.kind === 'path' || l.kind === 'polygon' || l.kind === 'star'
   const gW = local ? 1 / ((l as unknown as { scale?: number }).scale || 1) : W
-  return applyGeometry(base, layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1], { W: gW })
+  // F3 seam: `resolveSibling` is passed through to `applyGeometry` so a future boolean/morph
+  // kind carrying a `refLayerId` can reach its partner's outline. Inert today (no current kind
+  // reads it), and `undefined` for the sibling's own outline — the cycle guard.
+  return applyGeometry(
+    base,
+    layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1],
+    { W: gW, resolveSibling },
+  )
 }
 
 /**
@@ -3118,6 +3171,11 @@ function paintStrokeStack(
 // threads its once-per-call resolve through here too so the box a corner-pin/DOF
 // offscreen was sized from is the exact same content it then draws.
 function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, wiredLive?: WiredLive | null) {
+  // F3 seam: the sibling-outline resolver for THIS layer, bound to the live stack (or undefined
+  // outside a paint). Threaded into every geometry `applyGeometry`/`computedOutlineD` call below.
+  // Inert until a geometry kind carries a `refLayerId` (F3 Task 2) — no current kind does, so the
+  // resolver is never invoked and the rendered `d` is byte-identical with or without it.
+  const rs = _siblingResolveFor ? _siblingResolveFor(layer) : undefined
   if (layer.kind === 'text') {
     // Frame slice F1: render from glyph outlines when the layer asks (and the font
     // can be outlined). Fill the outline `d` with the layer's text paint, then the
@@ -3136,7 +3194,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // is false for a decorated text layer, so a decorated one keeps its exact F1 `d`;
       // with no geometry effect `applyGeometry` returns `oc.d` by reference (byte-identical).
       const gd = needsComputedOutline(layer)
-        ? applyGeometry(oc.d, layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1], { W })
+        ? applyGeometry(oc.d, layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1], { W, resolveSibling: rs })
         : oc.d
       const path = new Path2D(gd)
       const passes = textStrokePasses(ctx, layer, W, oc.box)
@@ -3156,7 +3214,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     }
   } else if (layer.kind === 'rect') {
     const w = layer.w * W, h = layer.h * W
-    const gd = needsComputedOutline(layer) ? computedOutlineD(layer, W) : null
+    const gd = needsComputedOutline(layer) ? computedOutlineD(layer, W, rs) : null
     if (gd != null) {
       // F2 geometry present: fill + stroke a SINGLE shared path (in pixels, unscaled ctx).
       const path = new Path2D(gd)
@@ -3174,7 +3232,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     }
   } else if (layer.kind === 'ellipse') {
     const w = layer.w * W, h = layer.h * W
-    const gd = needsComputedOutline(layer) ? computedOutlineD(layer, W) : null
+    const gd = needsComputedOutline(layer) ? computedOutlineD(layer, W, rs) : null
     if (gd != null) {
       const path = new Path2D(gd)
       if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill(path) }
@@ -3190,7 +3248,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // scaled by `scale`·W), so the pixel size of a width-normalized dial is preserved.
     // `drawPath` never reads `effects`, so handing it the transformed `d` cannot double-apply.
     if (needsComputedOutline(layer)) {
-      const gd = computedOutlineD(layer, W)
+      const gd = computedOutlineD(layer, W, rs)
       if (gd != null) drawPath(ctx, { ...layer, d: gd }, W)
     } else {
       drawPath(ctx, layer, W)
@@ -3202,7 +3260,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // Geometry runs in LOCAL units (scale 1 ⇒ ctx scaled by W below); no effect ⇒ `base`
     // unchanged, so the rewrite-to-path draw stays byte-identical.
     const d = needsComputedOutline(layer)
-      ? applyGeometry(base, layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1], { W: 1 })
+      ? applyGeometry(base, layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1], { W: 1, resolveSibling: rs })
       : base
     if (d) {
       drawPath(ctx, {
@@ -4598,6 +4656,12 @@ export function paintLayerStack(
   // now-stale nonzero token against whatever `_liveKeysToken` a completely unrelated host's
   // rAF loop had since advanced to, logging a HOST-ISOLATION violation on every click that
   // never actually happened.
+  // F3: bind the sibling-outline resolver to THIS stack for the whole draw loop (nested
+  // silhouette/offscreen renders below run inside it and see the same live layers), then clear
+  // it in the finally so a later thumbnail/hit-test render never reads a stale factory. Inert
+  // today — no geometry kind carries a `refLayerId` — so this changes no pixels.
+  const siblingResolver = buildSiblingResolver(localLayers, W, H)
+  _siblingResolveFor = (self: LocalLayer) => (key: string) => siblingResolver(key, self)
   try {
     return withFieldFrame(shaderRequests, (frozenCount, token) => {
       _fieldCtx.token = token   // resolveShaderFill reads this to pass into every resolveField call
@@ -4730,6 +4794,7 @@ export function paintLayerStack(
     })
   } finally {
     _fieldCtx.token = 0
+    _siblingResolveFor = null // F3: unbind so a later out-of-paint render sees no stale resolver
   }
 }
 

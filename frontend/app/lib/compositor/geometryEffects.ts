@@ -57,8 +57,28 @@ export const GEOMETRY_EFFECT_DEFAULTS = Object.fromEntries(
 ) as Record<(typeof GEOMETRY_KINDS)[number], Record<string, unknown>>
 
 // ── input shape ──────────────────────────────────────────────────────────────
-export interface GeometryContext { W: number }
-type GeometryEffectInput = { type: string; visible?: boolean; [k: string]: unknown }
+/** A sibling outline delivered into the transform, in THIS layer's own outline units — the
+ *  return of `makeSiblingOutlineResolver` in `siblingRef.ts`. `subKey` is a stable signature
+ *  the cache folds in so moving either layer (or the sibling's own geometry changing)
+ *  re-renders. */
+export interface ResolvedSibling { d: string; W: number; subKey: string }
+/**
+ * `applyGeometry`'s options.
+ *
+ * `resolveSibling` is the F3 sibling-reference SEAM: a geometry effect that carries a
+ * `refLayerId` (a `StackKey` mirroring `maskedByKey`) resolves its partner's outline through
+ * this closure, which the `drawLayerContent` boundary builds bound to the current layer. It is
+ * CONSUMED STARTING F3 TASK 2 (boolean) — the current four kinds ignore it, so passing it is
+ * inert and output is byte-identical whether or not it is supplied. Its only effect today is
+ * on the CACHE KEY: an effect carrying a `refLayerId` folds that key (and, when resolvable, the
+ * resolved sibling's `subKey`) into the cache key, so Task 2 does not have to re-touch the
+ * cache. With no such effect present the key is exactly as before.
+ */
+export interface GeometryContext {
+  W: number
+  resolveSibling?: (key: string) => ResolvedSibling | null
+}
+type GeometryEffectInput = { type: string; visible?: boolean; refLayerId?: string; [k: string]: unknown }
 
 const num = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback
@@ -386,7 +406,20 @@ export function applyGeometry(
   const enabled = effects.filter(e => isGeometryKind(e.type as EffectKind) && e.visible !== false)
   if (enabled.length === 0) return d // identity — same reference
 
-  const key = `${ctx.W}${d}${JSON.stringify(enabled)}`
+  // F3 seam: fold each sibling reference into the cache key SHAPE now, so Task 2's boolean does
+  // not restructure the cache. An effect's `refLayerId` (+ the resolved sibling's `subKey`, when
+  // a resolver is supplied and the reference is live) enters the key; a dangling ref contributes
+  // only its raw key. NONE of the current four kinds carry a `refLayerId`, so `refSuffix` is ''
+  // and the key — and therefore every cache hit and the returned string — is exactly as before:
+  // the seam is provably inert (see the byte-identity unit test).
+  let refSuffix = ''
+  for (const e of enabled) {
+    const ref = typeof e.refLayerId === 'string' ? e.refLayerId : ''
+    if (!ref) continue
+    const resolved = ctx.resolveSibling?.(ref)
+    refSuffix += `ref:${e.type}:${ref}:${resolved ? resolved.subKey : '∅'}`
+  }
+  const key = `${ctx.W}${d}${JSON.stringify(enabled)}${refSuffix}`
   const hit = cache.get(key)
   if (hit !== undefined) {
     cache.delete(key)
