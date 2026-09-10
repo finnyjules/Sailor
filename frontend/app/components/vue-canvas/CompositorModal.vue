@@ -2611,6 +2611,51 @@ function editImageStart(id: string) {
   selectLocal(id)
 }
 function editImageCancel() { editImage.value = null; editImagePrompt.value = '' }
+
+// The edit models (Kontext / Nano / FLUX Fill) return OPAQUE images — they fill in any
+// transparency. So editing a transparent element (a cutout, an alpha shape) would come back
+// as a solid rectangle. These re-apply the ORIGINAL alpha to the result before it's saved,
+// so transparency is respected. Skipped (a no-op) when the source is already opaque.
+function srcHasTransparency(srcImg: HTMLImageElement, w: number, h: number): boolean {
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+  const ctx = cv.getContext('2d')!; ctx.drawImage(srcImg, 0, 0, w, h)
+  const d = ctx.getImageData(0, 0, w, h).data
+  for (let i = 3; i < d.length; i += 4 * 37) if (d[i]! < 250) return true
+  return false
+}
+/** Whole-image edit: keep the RESULT's colours but the ORIGINAL's alpha shape, so a
+ *  recoloured/restyled cutout stays a cutout instead of gaining an opaque background. */
+async function reapplyAlpha(resultUrl: string, srcImg: HTMLImageElement, w: number, h: number): Promise<string> {
+  if (!srcHasTransparency(srcImg, w, h)) return resultUrl
+  const res = await loadImage(resultUrl)
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+  const ctx = cv.getContext('2d')!
+  ctx.drawImage(res, 0, 0, w, h)
+  ctx.globalCompositeOperation = 'destination-in'
+  ctx.drawImage(srcImg, 0, 0, w, h)   // keep result only where the source was opaque, with its alpha
+  return cv.toDataURL('image/png')
+}
+/** Region inpaint: keep the ORIGINAL (with its alpha) outside the mask, take the (opaque)
+ *  inpaint result only inside it — so transparency outside the edited region survives.
+ *  `maskCanvas` is white=inpaint / black=keep in srcImg's px space. */
+async function compositeInpaintAlpha(resultUrl: string, srcImg: HTMLImageElement, maskCanvas: HTMLCanvasElement, w: number, h: number): Promise<string> {
+  if (!srcHasTransparency(srcImg, w, h)) return resultUrl
+  const res = await loadImage(resultUrl)
+  const ma = document.createElement('canvas'); ma.width = w; ma.height = h
+  const mactx = ma.getContext('2d')!; mactx.drawImage(maskCanvas, 0, 0, w, h)
+  const mid = mactx.getImageData(0, 0, w, h); luminanceToAlpha(mid.data); mactx.putImageData(mid, 0, 0)
+  const clip = document.createElement('canvas'); clip.width = w; clip.height = h
+  const cctx = clip.getContext('2d')!
+  cctx.drawImage(res, 0, 0, w, h)
+  cctx.globalCompositeOperation = 'destination-in'
+  cctx.drawImage(ma, 0, 0)             // result clipped to the inpaint region
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+  const ctx = cv.getContext('2d')!
+  ctx.drawImage(srcImg, 0, 0, w, h)    // original, alpha kept
+  ctx.drawImage(clip, 0, 0)            // inpaint result over it, inside the mask only
+  return cv.toDataURL('image/png')
+}
+
 async function runImageEdit() {
   const e = editImage.value; if (!e || !editImagePrompt.value.trim() || inpaint.busy.value) return
   const layer = localLayers.value.find((l: any) => l.id === e.layerId && l.kind === 'image') as any
@@ -2624,7 +2669,7 @@ async function runImageEdit() {
       ? await inpaint.nanoGen(prompt, src)
       : await inpaint.kontext(src, prompt)
     const first = out[0]; if (!first) { inpaint.error.value = 'The edit returned no image — try again.'; return }
-    const name = await inpaint.uploadDataUrl(first, 'compedit')
+    const name = await inpaint.uploadDataUrl(await reapplyAlpha(first, img, w, h), 'compedit')
     setLocal(layer.id, { filename: name })
   } catch (err) { console.error('[compositor edit image]', err) /* inpaint.error is shown in the panel */ }
 }
@@ -4997,7 +5042,7 @@ async function runRegionFill() {
       mctx.setTransform(1, 0, 0, 1, 0, 0)
       const results = await inpaint.fluxFill(imageData, mc.toDataURL('image/png'), genPrompt.value.trim())
       if (!results.length) { inpaint.error.value = 'The edit returned no image — try again.'; return }
-      const newName = await inpaint.uploadDataUrl(results[0], 'compinpaint')
+      const newName = await inpaint.uploadDataUrl(await compositeInpaintAlpha(results[0], img, mc, capW, capH), 'compinpaint')
       setLocal(layer.id, { filename: newName })
     } else {
       // No target image → generate a brand-new object, then keep the region
