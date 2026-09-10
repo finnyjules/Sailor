@@ -34,6 +34,8 @@ const OPTION_LABELS: Record<string, string[]> = {
   meltAxis: ['X', 'Y', 'Z'],
   arrayAxis: ['X', 'Y', 'Z'],
   cloneMode: ['Linear', 'Radial', 'Grid'],
+  // Positionally paired with booleanOp's options ['union','subtract','intersect'].
+  booleanOp: ['Union', 'Subtract', 'Intersect'],
 }
 
 const capitalize = (s: string): string => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)

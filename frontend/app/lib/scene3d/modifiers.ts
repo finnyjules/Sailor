@@ -15,8 +15,9 @@
 import * as THREE from 'three'
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { SimplifyModifier } from 'three/examples/jsm/modifiers/SimplifyModifier.js'
-import { meshDataFromGeometry, geometryFromMeshData } from '~/lib/scene3d/mesh'
-import { remesh } from '~/lib/scene3d/voxel'
+import { meshDataFromGeometry, geometryFromMeshData, type MeshData } from '~/lib/scene3d/mesh'
+import { remesh, boundsOf } from '~/lib/scene3d/voxel'
+import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
 import { modifierValue, totalClones } from '~/lib/scene3d/primParams'
 import { modifierStackOf, type ModifierInstance, type ModifierKind } from '~/lib/scene3d/modifierStack'
 import { varyWeights, varyColorAt, varyStepFactor, type VarySettings } from '~/lib/vary'
@@ -673,6 +674,73 @@ function applyVoxelise(geo: THREE.BufferGeometry, resolution: number): THREE.Buf
   return geometryFromMeshData(out)
 }
 
+/** The three boolean ops, indexed to match `booleanOp`'s spec options ['union','subtract',
+ *  'intersect']. Anything out of range falls back to union. */
+const BOOLEAN_OPS: readonly MergeOp[] = ['union', 'subtract', 'intersect']
+function booleanOpOf(index: number): MergeOp {
+  return BOOLEAN_OPS[index] ?? 'union'
+}
+
+/** The same 64-cell ceiling voxelise uses: a merge lattice covering the COMBINED bounds has at
+ *  most ~resolution³ nodes (the cell size is combinedLongest/resolution, so a cubic union hits the
+ *  worst case), and 64³ = 262,144 < VERTEX_BUDGET. The param spec's max is the same 64. */
+const BOOLEAN_RESOLUTION_MAX = 64
+
+/** Cap the merge resolution against the COMBINED bounds of both meshes, so a small object merged
+ *  into a big one still samples finely enough while the lattice allocation stays bounded. The
+ *  merge lattice's cell size is `combinedLongest / resolution`, so the node count is estimated per
+ *  axis as `combinedDim / cell + padding`; shrink the resolution until that product is within the
+ *  vertex budget. `mergeMeshes`' own retry ladder is the final guarantee on the OUTPUT size, but
+ *  this keeps the up-front lattice from ballooning for a lopsided union. */
+function cappedBooleanResolution(a: MeshData, b: MeshData, requested: number): number {
+  let res = Math.max(1, Math.min(BOOLEAN_RESOLUTION_MAX, Math.round(requested)))
+  const ba = boundsOf(a)
+  const bb = boundsOf(b)
+  const dims = [0, 1, 2].map((k) => Math.max(ba.hi[k]!, bb.hi[k]!) - Math.min(ba.lo[k]!, bb.lo[k]!))
+  const longest = Math.max(dims[0]!, dims[1]!, dims[2]!, 1e-6)
+  while (res > 1) {
+    const cell = longest / res
+    const nodes = dims.reduce((n, d) => n * (Math.ceil(d / cell) + 5), 1)
+    if (nodes <= VERTEX_BUDGET) break
+    res -= 1
+  }
+  return res
+}
+
+/** Boolean PRODUCER: combine `geo` with `siblingGeo` (already transformed into THIS object's local
+ *  space by the engine) through the voxel distance field. `op` is union/subtract/intersect;
+ *  `blend` rounds the join with a smooth-min fillet; `resolution` is the cells along the combined
+ *  longest axis. Steps: `meshDataFromGeometry` both → cap resolution to the vertex budget using the
+ *  combined bounds → `mergeMeshes` → `geometryFromMeshData`.
+ *
+ *  FALLBACK — `mergeMeshes` reports `open: true` when either input is not a closed surface (the SDF
+ *  is meaningless) and `failed: true` when the retry ladder hit the resolution floor and the
+ *  combined field is still over the vertex cap. In BOTH cases we return `geo` UNCHANGED rather than
+ *  shipping a mangled or oversized mesh — a documented no-op, never a throw. Returns a NEW geometry
+ *  only when it actually merges. */
+function applyBoolean(
+  geo: THREE.BufferGeometry, siblingGeo: THREE.BufferGeometry, op: MergeOp, blend: number, resolution: number,
+): THREE.BufferGeometry {
+  const self = meshDataFromGeometry(geo)
+  const sibling = meshDataFromGeometry(siblingGeo)
+  const res = cappedBooleanResolution(self, sibling, resolution)
+  const { data, open, failed } = mergeMeshes([self, sibling], op, Math.max(0, blend), res)
+  if (open || failed) return geo // open surface, or too dense to keep → leave the shape untouched
+  return geometryFromMeshData(data)
+}
+
+/** The per-boolean-row context the ENGINE supplies to `applyModifierStack`: the sibling geometry a
+ *  boolean row combines with, already resolved from `refObjectId` and baked into THIS object's
+ *  local space (and with the sibling's OWN boolean rows treated as no-ops — the cycle guard). Only
+ *  `boolean` rows read it; every other kind ignores `ctx`. A ctx-less call (the measuring helpers,
+ *  unit tests without a sibling) makes every boolean a no-op, which is what keeps the S1 legacy
+ *  byte-identity oracle green — a legacy bag never contains a boolean row. */
+export interface ModifierApplyCtx {
+  /** The sibling geometry for `row`, or null when it cannot be resolved (missing / self-reference /
+   *  non-primitive / not yet loaded) — in which case the boolean is a no-op. */
+  siblingGeoFor(row: ModifierInstance): THREE.BufferGeometry | null
+}
+
 export interface ClonerSettings {
   /** 0 linear, 1 radial, 2 grid. */
   mode: number
@@ -854,7 +922,7 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
  *  middle rows are EXACTLY the deforms, so "any middle row" and "any deform" coincide and the
  *  byte-identity oracle is untouched. */
 const DEFORM_KINDS: readonly ModifierKind[] = ['taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice']
-const PRODUCER_KINDS: readonly ModifierKind[] = ['array', 'shatter', 'mirror', 'decimate', 'voxelise']
+const PRODUCER_KINDS: readonly ModifierKind[] = ['array', 'shatter', 'mirror', 'decimate', 'voxelise', 'boolean']
 const isDeformKind = (k: ModifierKind): boolean => (DEFORM_KINDS as readonly string[]).includes(k)
 const isProducerKind = (k: ModifierKind): boolean => (PRODUCER_KINDS as readonly string[]).includes(k)
 /** An enabled middle row is either a deformer or a producer — the reorderable region between the
@@ -863,8 +931,11 @@ const isMiddleKind = (k: ModifierKind): boolean => isDeformKind(k) || isProducer
 
 /** Run one enabled middle row against `geo`. A DEFORMER mutates `geo` and returns the SAME
  *  object; a PRODUCER returns a NEW geometry (the caller disposes the old one on identity
- *  change). This is the single dispatch that generalizes the old deform-only switch. */
-function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance): THREE.BufferGeometry {
+ *  change). This is the single dispatch that generalizes the old deform-only switch.
+ *
+ *  `ctx` carries the resolved sibling geometry a `boolean` row needs (see `ModifierApplyCtx`).
+ *  EVERY case except `boolean` ignores it, so a ctx-less call leaves a boolean a no-op. */
+function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance, ctx?: ModifierApplyCtx): THREE.BufferGeometry {
   const m = (k: string) => modifierValue(row, k)
   switch (row.kind) {
     case 'taper': applyTaper(geo, m('taper'), Math.round(m('taperAxis'))); return geo
@@ -882,6 +953,13 @@ function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance): THREE
     case 'mirror': return applyMirror(geo, Math.round(m('mirrorAxis')), m('mirrorOffset'))
     case 'decimate': return applyDecimate(geo, m('decimate'))
     case 'voxelise': return applyVoxelise(geo, Math.round(m('voxelResolution')))
+    case 'boolean': {
+      // The engine resolves `refObjectId` → the sibling geometry (baked into this object's local
+      // space, cycle-guarded). A ctx-less call or an unresolved sibling → the boolean is a no-op.
+      const sibling = ctx?.siblingGeoFor(row) ?? null
+      if (!sibling) return geo
+      return applyBoolean(geo, sibling, booleanOpOf(Math.round(m('booleanOp'))), m('booleanBlend'), Math.round(m('booleanResolution')))
+    }
     default: return geo
   }
 }
@@ -900,9 +978,10 @@ function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance): THREE
 export function applyModifierStack(
   geo: THREE.BufferGeometry,
   stack: ModifierInstance[],
-  opts: { vary?: VarySettings } = {},
+  opts: { vary?: VarySettings; ctx?: ModifierApplyCtx } = {},
 ): THREE.BufferGeometry {
   const vary = opts.vary
+  const ctx = opts.ctx
   const enabled = stack.filter((mo) => mo.enabled !== false)
   // The orderable middle: every enabled deformer OR producer, in the stack's list order. For a
   // LEGACY bag these are EXACTLY the 5 deforms (mirror never folds from a flat bag), so this set
@@ -944,7 +1023,7 @@ export function applyModifierStack(
   // geometry, which we swap in and dispose the old one. A folded legacy bag lists only deforms in
   // canonical order — exactly the old fixed sequence — so the buffer stays identical.
   for (const row of middleRows) {
-    const next = applyMiddleRow(out, row)
+    const next = applyMiddleRow(out, row, ctx)
     if (next !== out) {
       out.dispose()
       out = next

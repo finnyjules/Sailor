@@ -37,9 +37,11 @@ describe('modifierControls', () => {
 
   it('axis/mode params become selects with optionLabels, defaulting to the option at the spec index', () => {
     const selects = MODIFIER_KINDS.flatMap((k) => modifierControls(k)).filter((r) => r.kind === 'select')
-    // Exactly the index-valued modifier pickers, no more (shear + melt + lattice + radial array add axis selects).
+    // Exactly the index-valued modifier pickers, no more (shear + melt + lattice + radial array add
+    // axis selects; boolean adds the operation select — its sibling picker is a dynamic scene-
+    // sourced select in the surface, NOT a MODIFIER_SPECS control, so it is not counted here).
     expect(new Set(selects.map((r) => modifierField(r.key)))).toEqual(
-      new Set(['taperAxis', 'twistAxis', 'bendAxis', 'cloneAxis', 'jitterMode', 'cloneMode', 'mirrorAxis', 'shearAxis', 'meltAxis', 'latticeAxis', 'arrayAxis']),
+      new Set(['taperAxis', 'twistAxis', 'bendAxis', 'cloneAxis', 'jitterMode', 'cloneMode', 'mirrorAxis', 'shearAxis', 'meltAxis', 'latticeAxis', 'arrayAxis', 'booleanOp']),
     )
     for (const row of selects) {
       const spec = specOf(modifierField(row.key))

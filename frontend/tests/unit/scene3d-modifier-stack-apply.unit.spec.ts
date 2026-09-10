@@ -1000,3 +1000,94 @@ describe('voxelise producer', () => {
     expect(applyModifierStack(g, [disabled])).toBe(g)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Boolean producer — combines the shape with a SIBLING geometry supplied through
+// `opts.ctx` (the engine resolves refObjectId → sibling geo, baked into local space).
+// Every merge here works in a SHARED coordinate frame: the sibling is translated
+// directly, standing in for the engine's local-space bake. A ctx-less call, or a ctx
+// that resolves nothing, leaves the boolean a no-op.
+// ---------------------------------------------------------------------------
+const booleanRow = (op = 0, resolution = 24, blend = 0): ModifierInstance => {
+  const r = createModifier('boolean')
+  r.booleanOp = op; r.booleanResolution = resolution; r.booleanBlend = blend
+  return r
+}
+const ctxOf = (sibling: THREE.BufferGeometry | null) => ({ siblingGeoFor: () => sibling })
+const boundsOfGeo = (g: THREE.BufferGeometry) => { g.computeBoundingBox(); return g.boundingBox! }
+
+describe('boolean producer', () => {
+  it('a ctx-less call leaves the boolean a no-op (positions unchanged)', () => {
+    const g = new THREE.BoxGeometry(1, 1, 1)
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [booleanRow(0)]) // no opts.ctx
+    expect(comparePositions(out, g).diffs).toBe(0)
+  })
+
+  it('a disabled boolean row is skipped entirely (same geometry object)', () => {
+    const disabled = booleanRow(0); disabled.enabled = false
+    const g = new THREE.BoxGeometry(1, 1, 1)
+    expect(applyModifierStack(g, [disabled], { ctx: ctxOf(new THREE.BoxGeometry(1, 1, 1)) })).toBe(g)
+  })
+
+  it('a ctx that resolves no sibling (null) is a no-op (positions unchanged)', () => {
+    const g = new THREE.BoxGeometry(1, 1, 1)
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [booleanRow(0)], { ctx: ctxOf(null) })
+    expect(comparePositions(out, g).diffs).toBe(0)
+  })
+
+  it('union grows the bounds to cover BOTH meshes in the shared frame', () => {
+    const self = new THREE.BoxGeometry(1, 1, 1) // bounds [-0.5, 0.5]
+    const sibling = new THREE.BoxGeometry(1, 1, 1).translate(0.6, 0, 0) // bounds [0.1, 1.1]
+    const out = applyModifierStack(self, [booleanRow(0, 28)], { ctx: ctxOf(sibling) })
+    expect(out).not.toBe(self)
+    expect(out.getAttribute('position').count).toBeGreaterThan(0)
+    const b = boundsOfGeo(out)
+    // The union spans from the left box's min to the right box's max on X (fillet/grid softening
+    // keeps this within a cell or so of the exact extents).
+    expect(b.min.x).toBeLessThan(-0.3)
+    expect(b.max.x).toBeGreaterThan(0.9)
+    expect(Math.abs(b.min.y + 0.5)).toBeLessThan(0.2)
+    expect(Math.abs(b.max.y - 0.5)).toBeLessThan(0.2)
+  })
+
+  it('subtract carves the sibling out of the base (the FIRST input), shrinking its extent', () => {
+    const self = new THREE.BoxGeometry(1, 1, 1) // [-0.5, 0.5]
+    const sibling = new THREE.BoxGeometry(1, 1, 1).translate(0.6, 0, 0) // removes the right side
+    const out = applyModifierStack(self, [booleanRow(1, 28)], { ctx: ctxOf(sibling) })
+    expect(out.getAttribute('position').count).toBeGreaterThan(0)
+    const b = boundsOfGeo(out)
+    // The right half is gone, so the max X pulls in well short of the original 0.5.
+    expect(b.max.x).toBeLessThan(0.35)
+    expect(b.min.x).toBeLessThan(-0.3) // the left side survives
+  })
+
+  it('intersect keeps only the overlap region', () => {
+    const self = new THREE.BoxGeometry(1, 1, 1) // [-0.5, 0.5]
+    const sibling = new THREE.BoxGeometry(1, 1, 1).translate(0.6, 0, 0) // overlap X ~[0.1, 0.5]
+    const out = applyModifierStack(self, [booleanRow(2, 28)], { ctx: ctxOf(sibling) })
+    expect(out.getAttribute('position').count).toBeGreaterThan(0)
+    const b = boundsOfGeo(out)
+    // Only the thin overlap slab remains: it sits on the positive-X side, well inside both boxes.
+    expect(b.min.x).toBeGreaterThan(-0.2)
+    expect(b.max.x).toBeLessThan(0.7)
+  })
+
+  it('an open (non-watertight) input falls back to the base unchanged', () => {
+    // A single-quad plane has no interior, so the SDF is meaningless: mergeMeshes reports open and
+    // applyBoolean returns the base untouched.
+    const sibling = new THREE.BoxGeometry(1, 1, 1)
+    const out = applyModifierStack(new THREE.PlaneGeometry(1, 1), [booleanRow(0, 24)], { ctx: ctxOf(sibling) })
+    expect(comparePositions(out, new THREE.PlaneGeometry(1, 1)).diffs).toBe(0)
+  })
+
+  it('caps the merge against the COMBINED bounds so the output stays within budget', () => {
+    // Two overlapping boxes whose union spans ~3 units — a combined bounds larger than either mesh
+    // — merged at the maximum resolution. The cap (using the union bounds) must keep the output
+    // within the vertex budget.
+    const self = new THREE.BoxGeometry(2, 2, 2)
+    const sibling = new THREE.BoxGeometry(2, 2, 2).translate(1, 0, 0)
+    const out = applyModifierStack(self, [booleanRow(0, 64)], { ctx: ctxOf(sibling) })
+    expect(out.getAttribute('position').count).toBeGreaterThan(0)
+    expect(out.getAttribute('position').count).toBeLessThanOrEqual(VERTEX_BUDGET)
+  }, 15000)
+})

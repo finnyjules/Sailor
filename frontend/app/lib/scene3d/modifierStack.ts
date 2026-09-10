@@ -23,7 +23,7 @@ import { MODIFIER_SPECS, modifierValue, totalClones } from '~/lib/scene3d/primPa
  *  `array`/`shatter`/`mirror` are geometry PRODUCERS (they change the vertex buffer — array folds N
  *  rotated copies, shatter splits every face, mirror duplicates + welds), living in the orderable
  *  middle between the deforms and the pinned cloner. */
-export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'cloner'] as const
+export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'boolean', 'cloner'] as const
 export type ModifierKind = typeof MODIFIER_KINDS[number]
 
 /** The order the pipeline applies these in — and therefore the order an old-shape bag is folded
@@ -58,6 +58,12 @@ export const MODIFIER_KIND_PARAMS: Record<ModifierKind, string[]> = {
   mirror: ['mirrorAxis', 'mirrorOffset'],
   decimate: ['decimate'],
   voxelise: ['voxelResolution'],
+  // boolean owns ONLY its numeric dials here. `refObjectId` (the sibling to combine with) is a
+  // STRING id, not a numeric spec, so it lives on the instance outside MODIFIER_KIND_PARAMS —
+  // set by the inspector's dynamic "Combine with" picker, carried by duplicate, and preserved by
+  // sanitizeModifierStack below. Keeping it out of this list is what lets `createModifier` and the
+  // generic inspector/agent/motion surfaces stay purely numeric.
+  boolean: ['booleanOp', 'booleanBlend', 'booleanResolution'],
   cloner: [
     'cloneCount', 'cloneMode', 'cloneOffsetX', 'cloneOffsetY', 'cloneOffsetZ', 'cloneRadius', 'cloneAxis',
     'cloneCountX', 'cloneCountY', 'cloneCountZ', 'cloneSpacingX', 'cloneSpacingY', 'cloneSpacingZ',
@@ -83,13 +89,14 @@ export const MODIFIER_LABELS: Record<ModifierKind, string> = {
   mirror: 'Mirror',
   decimate: 'Decimate',
   voxelise: 'Voxelise',
+  boolean: 'Boolean',
   cloner: 'Cloner',
 }
 
 /** A stored modifier row: a stable id, its kind, the eye toggle, and its params flattened onto
  *  the instance (e.g. a twist carries `twist` and `twistAxis`). The flat-number shape matches the
  *  legacy bag exactly, so Task 2's `applyModifierStack` can read each instance like a mini-bag. */
-export type ModifierInstance = { id: string; kind: ModifierKind; enabled: boolean } & Record<string, number>
+export type ModifierInstance = { id: string; kind: ModifierKind; enabled: boolean; refObjectId?: string } & Record<string, number>
 
 const ORDER_INDEX = new Map<string, number>(MODIFIER_ORDER.map((k, i) => [k, i]))
 
@@ -191,6 +198,11 @@ export function modifierStackOf(obj: StackHost | null | undefined): ModifierInst
     array: false,
     shatter: false,
     mirror: false,
+    // decimate/voxelise/boolean never lived in the legacy flat bag either — an old scene has no
+    // such keys and no refObjectId, so they never fold active.
+    decimate: false,
+    voxelise: false,
+    boolean: false,
     cloner: totalClones(bag) > 1,
   }
 
@@ -237,6 +249,13 @@ export function sanitizeModifierStack(raw: unknown): ModifierInstance[] | undefi
     for (const key of MODIFIER_KIND_PARAMS[kind]) {
       const v = e[key]
       inst[key] = typeof v === 'number' && Number.isFinite(v) ? v : specDefault(key)
+    }
+    // `refObjectId` is a STRING id, not one of MODIFIER_KIND_PARAMS' numeric fields, so the loop
+    // above would drop it. A boolean row carries it (the sibling to combine with); keep it through
+    // the round-trip so a persisted boolean re-loads pointing at the same object. Ignored on every
+    // other kind (they never write it), and an empty/absent value leaves the boolean a no-op.
+    if (kind === 'boolean' && typeof e.refObjectId === 'string' && e.refObjectId !== '') {
+      inst.refObjectId = e.refObjectId
     }
     out.push(inst)
   }

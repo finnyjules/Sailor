@@ -366,6 +366,44 @@ function setModifierControl(key: string, value: string | number | boolean): void
   const next = modifierStackOf(o).map((m) => (m.id === sel.modifierId ? { ...m, [field]: stored } as ModifierInstance : m))
   Object.assign(o, writeModifierStack(next))
 }
+// The Boolean modifier's "Combine with" picker: a DYNAMIC select sourced from the LIVE scene, so
+// it cannot live in static MODIFIER_SPECS (those are numeric dials only). It lists every OTHER
+// primitive object by name — groups, lights and decals are excluded because a boolean can only
+// combine solid geometry, and self is excluded — and writes the chosen object's id into the
+// selected boolean instance's `refObjectId` (a STRING field the engine reads to resolve the sibling
+// geometry) through the SAME read-through every other dial uses. An empty pick clears it, and the
+// boolean then no-ops. NOT a dead control: booleanOp/blend/resolution come from the panel above,
+// the sibling comes from here, and applyBoolean reads all four.
+const BOOLEAN_NONE = ''
+const booleanSiblings = computed<PrimitiveObject[]>(() => {
+  const am = activeModifier.value
+  if (!am || am.modifier.kind !== 'boolean') return []
+  return doc.objects.filter((o): o is PrimitiveObject => o.kind === 'primitive' && o.id !== am.obj.id)
+})
+const booleanSiblingOptions = computed<string[]>(() => [BOOLEAN_NONE, ...booleanSiblings.value.map((o) => o.id)])
+const booleanSiblingLabels = computed<string[]>(() => ['None', ...booleanSiblings.value.map((o) => o.name)])
+const booleanRefId = computed<string>({
+  get() {
+    const am = activeModifier.value
+    const ref = am?.modifier.kind === 'boolean' ? am.modifier.refObjectId : undefined
+    // Only surface a ref that still points at a listable sibling; a stale or self id reads as None.
+    return ref && booleanSiblings.value.some((o) => o.id === ref) ? ref : BOOLEAN_NONE
+  },
+  set(value: string) {
+    const sel = selectedModifier.value
+    if (!sel) return
+    const o = doc.objects.find((x) => x.id === sel.objectId)
+    if (!o || o.kind !== 'primitive') return
+    const next = modifierStackOf(o).map((m) => {
+      if (m.id !== sel.modifierId) return m
+      const patched = { ...m } as ModifierInstance
+      if (value) patched.refObjectId = value
+      else delete patched.refObjectId
+      return patched
+    })
+    Object.assign(o, writeModifierStack(next))
+  },
+})
 // The Cloner's placement rows swap with its mode exactly as the shipped Cloner card did (grid
 // drops the linear/radial rows for its per-axis counts), so a row that does nothing in the
 // current mode is hidden rather than left as a dead control. Mode/step rows show in every mode.
@@ -4397,6 +4435,20 @@ async function onClose() {
           <span class="truncate text-white/80">{{ MODIFIER_LABELS[activeModifier.modifier.kind] }}</span>
         </div>
         <div class="flex flex-col gap-2" @pointerdown.capture="onControlsPointerDown">
+          <!-- Boolean — the "Combine with" object picker, sourced from the live scene (a dynamic
+               select can't live in static MODIFIER_SPECS). Sits above the operation/blend/resolution
+               dials so you choose the sibling first. Writes the object's id into refObjectId. -->
+          <div v-if="activeModifier.modifier.kind === 'boolean'" data-testid="boolean-combine-with">
+            <label class="mb-1 block text-[11px] text-white/55">Combine with</label>
+            <StudioSelect
+              v-model="booleanRefId"
+              :options="booleanSiblingOptions"
+              :option-labels="booleanSiblingLabels"
+            />
+            <p v-if="booleanSiblingOptions.length <= 1" class="mt-1 text-[11px] text-white/45">
+              Add another object to combine this one with.
+            </p>
+          </div>
           <StudioControlPanel
             :controls="modifierPanelControls"
             :order="modifierPanelOrder"

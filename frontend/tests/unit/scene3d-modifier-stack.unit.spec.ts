@@ -4,14 +4,14 @@ import {
   isModifierKind, isPinnedModifier, newModifierId, createModifier,
   modifierStackOf, writeModifierStack,
   addModifier, removeModifier, duplicateModifier, reorderModifier, canReorderModifier,
-  orderableModifiers, pinnedModifier, cloneModifierStack,
+  orderableModifiers, pinnedModifier, cloneModifierStack, sanitizeModifierStack,
   type ModifierInstance,
 } from '~/lib/scene3d/modifierStack'
 import { MODIFIER_SPECS } from '~/lib/scene3d/primParams'
 
 describe('modifier stack: constants', () => {
   it('kinds and order are the fixed pipeline sequence, pinning subdivide first and cloner last', () => {
-    expect([...MODIFIER_KINDS]).toEqual(['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'cloner'])
+    expect([...MODIFIER_KINDS]).toEqual(['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'boolean', 'cloner'])
     expect([...MODIFIER_ORDER]).toEqual([...MODIFIER_KINDS])
     expect([...PINNED_MODIFIERS]).toEqual(['subdivide', 'cloner'])
   })
@@ -283,5 +283,36 @@ describe('helpers', () => {
     for (let i = 0; i < out.length; i++) expect(out[i]!.id).not.toBe(s[i]!.id)
     expect(cloneModifierStack(undefined)).toBeUndefined()
     expect(cloneModifierStack([])).toBeUndefined()
+  })
+})
+
+describe('boolean modifier: refObjectId (string field outside MODIFIER_KIND_PARAMS)', () => {
+  it('createModifier makes a boolean at numeric defaults with NO refObjectId (a no-op until picked)', () => {
+    const b = createModifier('boolean')
+    expect(b.kind).toBe('boolean')
+    expect(b.booleanOp).toBe(0)
+    expect(b.booleanResolution).toBe(32)
+    expect(b.refObjectId).toBeUndefined()
+  })
+
+  it('cloneModifierStack carries refObjectId to the duplicate (F: a duplicate keeps its sibling)', () => {
+    const b = createModifier('boolean'); b.refObjectId = 'obj_sibling'
+    const out = cloneModifierStack([b])!
+    expect(out[0]!.refObjectId).toBe('obj_sibling')
+    expect(out[0]!.id).not.toBe(b.id) // fresh id, same ref
+  })
+
+  it('sanitizeModifierStack preserves a boolean row refObjectId across the persistence round-trip', () => {
+    const b = createModifier('boolean'); b.refObjectId = 'obj_sibling'; b.booleanBlend = 0.4
+    const [round] = sanitizeModifierStack([b])!
+    expect(round!.refObjectId).toBe('obj_sibling')
+    expect(round!.booleanBlend).toBe(0.4)
+  })
+
+  it('sanitizeModifierStack drops an empty/non-string refObjectId and never carries it on other kinds', () => {
+    const empty = { ...createModifier('boolean'), refObjectId: '' } as ModifierInstance
+    expect(sanitizeModifierStack([empty])![0]!.refObjectId).toBeUndefined()
+    const twist = { ...createModifier('twist'), refObjectId: 'obj_sibling' } as ModifierInstance
+    expect(sanitizeModifierStack([twist])![0]!.refObjectId).toBeUndefined()
   })
 })

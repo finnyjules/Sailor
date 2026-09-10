@@ -14,13 +14,13 @@ import type { SceneDoc, SceneObject, SceneMaterial, Vec3, LightingPreset, Primit
 import { LIGHT_DEFAULTS, DEFAULT_FONT_URL } from './config'
 import { buildDecalMesh, decalTextureFor, decalKeyFor, decalContentKey, releaseDecalTexture } from './decals'
 import { buildEnvironmentScene, type GelEnvOptions } from './environments'
-import { orderParentsFirst } from './hierarchy'
+import { orderParentsFirst, worldMatrixOf } from './hierarchy'
 import { loadGlb, clearGlbCache, ensureUv } from './glb'
 import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/contextRegistry'
 import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/lib/scene3d/outlines'
 import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime } from './materials'
 import { refreshImageBounds, type ImageUniforms } from './imageShader'
-import { applyModifiers, applyModifierStack } from '~/lib/scene3d/modifiers'
+import { applyModifiers, applyModifierStack, type ModifierApplyCtx } from '~/lib/scene3d/modifiers'
 import { PRIMITIVE_PARAMS, paramValue, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
 import { modifierStackOf, MODIFIER_KIND_PARAMS, type ModifierInstance } from '~/lib/scene3d/modifierStack'
 import type { VarySettings } from '~/lib/vary'
@@ -368,6 +368,30 @@ export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): st
   return `${obj.primitive}|${vals.join(',')}|${mods}|${variant}|${content}|${varyDials}|${vary}`
 }
 
+/** The boolean-sibling segment appended to `geoKeyFor(obj)` at the engine call site (where the doc
+ *  is reachable, unlike the pure `geoKeyFor`). A boolean combines `obj` with a SIBLING, so editing
+ *  OR moving the sibling must rebuild this object — neither shows up in `obj`'s own fields. Each
+ *  enabled boolean row contributes its sibling's `geoKeyFor` (so the sibling's params/modifiers
+ *  changing rebuilds this object) AND the relative transform `inverse(thisWorld) · siblingWorld`
+ *  (so moving either object rebuilds it, since that matrix is baked into the merged geometry). A
+ *  missing / self / non-primitive sibling folds to a stable "none" token. Empty when `obj` has no
+ *  enabled boolean rows, so a non-boolean object's key is byte-identical to before. */
+export function booleanRefKeys(obj: PrimitiveObject, doc: SceneDoc | null): string {
+  const rows = modifierStackOf(obj).filter((r) => r.kind === 'boolean' && r.enabled !== false)
+  if (rows.length === 0) return ''
+  const parts = rows.map((r) => {
+    const refId = r.refObjectId
+    if (!refId || refId === obj.id || !doc) return `${r.id}:none`
+    const sib = doc.objects.find((o) => o.id === refId)
+    if (!sib || sib.kind !== 'primitive') return `${r.id}:none`
+    const selfInv = worldMatrixOf(doc.objects, obj.id).invert()
+    const rel = new THREE.Matrix4().multiplyMatrices(selfInv, worldMatrixOf(doc.objects, sib.id))
+    const relKey = rel.elements.map((n) => n.toFixed(3)).join(',')
+    return `${r.id}:${geoKeyFor(sib, 'smooth')}@${relKey}`
+  })
+  return `|bool:${parts.join(';')}`
+}
+
 /** Bake each triangle's own bounding extent into per-vertex attributes
  *  (aFaceMin/aFaceMax, same value on all 3 verts of a face). The facet
  *  gradient program reads them to run the full ramp across each face
@@ -428,12 +452,15 @@ export function buildGeometry(
   font?: Font | null,
   vary?: VarySettings,
   stack?: ModifierInstance[],
+  ctx?: ModifierApplyCtx,
 ): THREE.BufferGeometry {
   const base = geometryFor(kind, params, content, font)
   // applyModifiers/applyModifierStack return the SAME object when nothing is set (and
   // never dispose their input), so only free the base when it produced a new one. When a
-  // stack is supplied it is authoritative; otherwise fold the legacy bag as before.
-  const shaped = stack ? applyModifierStack(base, stack, { vary }) : applyModifiers(base, modifiers, vary)
+  // stack is supplied it is authoritative; otherwise fold the legacy bag as before. `ctx` carries
+  // a boolean row's resolved sibling geometry — only relevant on the stack path (a legacy bag
+  // never holds a boolean), so it rides alongside `vary` there.
+  const shaped = stack ? applyModifierStack(base, stack, { vary, ctx }) : applyModifiers(base, modifiers, vary)
   if (shaped !== base) base.dispose()
   if (variant !== 'facet') return shaped
   let geo = shaped
@@ -925,7 +952,83 @@ export class SceneEngine {
     // the Vary settings — the numeric dials from `obj.modifiers`, the swatches from
     // `obj.varyPalette` (which is not in the modifier bag, and so is folded into
     // `geoKeyFor` separately). Everything gating this call on the key is above.
-    return buildGeometry(obj.primitive, obj.params, obj.modifiers, variant, obj.content, font, varySettingsFor(obj), modifierStackOf(obj))
+    //
+    // Boolean rows also need the whole object AND the doc in scope, since a boolean combines this
+    // object with a SIBLING. Resolve each enabled boolean row's sibling into this object's local
+    // space here, hand them to buildGeometry via `ctx`, and dispose them after the build (the
+    // merge only reads their vertex buffers — the merged result is a fresh geometry).
+    // Only objects with a live doc AND an enabled boolean row need the sibling resolution; every
+    // other object skips it entirely (and the method call), so the common path is untouched.
+    const hasBoolean = !!this.lastDoc && modifierStackOf(obj).some((r) => r.kind === 'boolean' && r.enabled !== false)
+    const { ctx, siblingGeos } = hasBoolean
+      ? this.booleanCtxFor(obj, variant)
+      : { ctx: undefined as ModifierApplyCtx | undefined, siblingGeos: [] as THREE.BufferGeometry[] }
+    try {
+      return buildGeometry(obj.primitive, obj.params, obj.modifiers, variant, obj.content, font, varySettingsFor(obj), modifierStackOf(obj), ctx)
+    } finally {
+      for (const g of siblingGeos) g.dispose()
+    }
+  }
+
+  /** Resolve every enabled `boolean` row on `obj` to its sibling geometry, baked into `obj`'s LOCAL
+   *  space, for `applyModifierStack` to combine with. Returns the ctx handed to buildGeometry plus
+   *  the geometries to dispose once the build is done.
+   *
+   *  LOCAL SPACE: both meshes must share a coordinate frame for the SDF merge to mean anything, so
+   *  the sibling geometry (in the sibling's own local space) is transformed by
+   *  `inverse(thisWorld) · siblingWorld` — the sibling's world transform expressed relative to this
+   *  object — and that matrix is baked into the geometry.
+   *
+   *  CYCLE GUARD: the sibling is built through `siblingGeometryFor`, which calls `buildGeometry`
+   *  with NO ctx, so the sibling's OWN boolean rows resolve to no-ops. A→B→A can therefore never
+   *  recurse. A missing sibling, a self-reference, or a non-primitive object resolves to null → the
+   *  boolean is a no-op (never throws). */
+  private booleanCtxFor(
+    obj: PrimitiveObject, variant: 'smooth' | 'facet',
+  ): { ctx: ModifierApplyCtx | undefined; siblingGeos: THREE.BufferGeometry[] } {
+    const doc = this.lastDoc
+    const rows = modifierStackOf(obj).filter((r) => r.kind === 'boolean' && r.enabled !== false)
+    if (!doc || rows.length === 0) return { ctx: undefined, siblingGeos: [] }
+    const byRef = new Map<string, THREE.BufferGeometry | null>()
+    const resolve = (refId: string | undefined): THREE.BufferGeometry | null => {
+      if (!refId || refId === obj.id) return null // missing / self-reference → no-op
+      if (byRef.has(refId)) return byRef.get(refId) ?? null
+      let geo: THREE.BufferGeometry | null = null
+      const sibling = doc.objects.find((o) => o.id === refId)
+      if (sibling && sibling.kind === 'primitive') {
+        const built = this.siblingGeometryFor(sibling, variant)
+        if (built) {
+          const selfWorldInv = worldMatrixOf(doc.objects, obj.id).invert()
+          const rel = new THREE.Matrix4().multiplyMatrices(selfWorldInv, worldMatrixOf(doc.objects, sibling.id))
+          built.applyMatrix4(rel)
+          geo = built
+        }
+      }
+      byRef.set(refId, geo)
+      return geo
+    }
+    for (const r of rows) resolve(r.refObjectId)
+    const siblingGeos = [...byRef.values()].filter((g): g is THREE.BufferGeometry => g !== null)
+    const ctx: ModifierApplyCtx = { siblingGeoFor: (row) => (row.refObjectId ? byRef.get(row.refObjectId) ?? null : null) }
+    return { ctx, siblingGeos }
+  }
+
+  /** Build a boolean sibling's geometry synchronously, WITHOUT a ctx (so its own boolean rows
+   *  no-op — the cycle guard). Returns null when an async dependency is not yet cached (a text
+   *  font, or a mesh primitive's decoded buffer) — the boolean then no-ops until the next sync
+   *  after the load completes, exactly like the placeholder-then-resync path the object's own
+   *  geometry uses. */
+  private siblingGeometryFor(sib: PrimitiveObject, variant: 'smooth' | 'facet'): THREE.BufferGeometry | null {
+    let font: Font | null = null
+    if (sib.primitive === 'text') {
+      font = fontCacheGet(sib.content?.font ?? DEFAULT_FONT_URL)
+      if (!font) return null // font not loaded yet
+    }
+    if (sib.primitive === 'mesh') {
+      const key = sib.content?.meshKey
+      if (key && !meshCacheGet(key)) return null // mesh buffer not decoded yet
+    }
+    return buildGeometry(sib.primitive, sib.params, sib.modifiers, variant, sib.content, font, varySettingsFor(sib), modifierStackOf(sib))
   }
 
   /** While a sculpt session is live, this object's geometry comes from the
@@ -1008,7 +1111,7 @@ export class SceneEngine {
         if (obj.primitive === 'plane' || obj.primitive === 'ring') mat.side = THREE.DoubleSide
         const mesh = new THREE.Mesh(geo, this.lightView ? this.clay : mat)
         mesh.userData.realMaterial = mat
-        mesh.userData.geoKey = geoKeyFor(obj, 'smooth') // facet variant applied by the sync below
+        mesh.userData.geoKey = geoKeyFor(obj, 'smooth') + booleanRefKeys(obj, this.lastDoc) // facet variant applied by the sync below
         mesh.castShadow = mesh.receiveShadow = true
         root = mesh
       } else if (obj.kind === 'glb') {
@@ -1082,7 +1185,7 @@ export class SceneEngine {
       const wantFacet = obj.material.type === 'gradient' &&
         (obj.material.gradientShading ?? 'smooth') !== 'smooth'
       const variant = wantFacet ? 'facet' : 'smooth'
-      const geoKey = geoKeyFor(obj, variant)
+      const geoKey = geoKeyFor(obj, variant) + booleanRefKeys(obj, this.lastDoc)
       // Geometry params and the shading variant share one key: either change
       // swaps the geometry in place, leaving the material instance (and its
       // in-place update path) and the transform untouched.

@@ -284,6 +284,15 @@ export const MODIFIER_SPECS: ParamSpec[] = [
   // (64³ < the 300k budget), and an open surface is left untouched (the remesh refuses it).
   { key: 'voxelResolution', label: 'Voxelise', hint: 'Rebuilds the shape from cubes — higher keeps finer detail, 0 leaves it alone', min: 0, max: 64, step: 1, default: 0 },
 
+  // Boolean — a geometry PRODUCER: it combines the shape with ANOTHER scene object through the
+  // voxel distance field (union / subtract / intersect). The sibling to combine with is the
+  // `refObjectId` STRING carried on the instance (set by the inspector's "Combine with" picker,
+  // NOT a numeric spec), resolved and transformed into this object's local space at the engine
+  // call site. These three numeric dials are read by `applyBoolean`; the op is stored as an index.
+  { key: 'booleanOp', label: 'Operation', hint: 'Union fuses the shapes, Subtract carves the other out, Intersect keeps only the overlap', min: 0, max: 2, step: 1, default: 0, control: 'options', options: ['union', 'subtract', 'intersect'] },
+  { key: 'booleanBlend', label: 'Blend', hint: 'Rounds the join with a smooth fillet — 0 keeps the seam sharp', min: 0, max: 1, step: 0.01, default: 0 },
+  { key: 'booleanResolution', label: 'Resolution', hint: 'How finely the combined shape is rebuilt — higher keeps more detail', min: 8, max: 64, step: 1, default: 32 },
+
   // Cloner keys. Named clone* rather than array* because this is its own panel
   // section now and is meant to accumulate more clone options — an arrayCount
   // sitting beside a future cloneMode/cloneStep* would be inconsistent from day one.

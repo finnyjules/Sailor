@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 // @ts-expect-error — three vendors this lib without type declarations.
 import opentype from 'three/examples/jsm/libs/opentype.module.js'
-import { sunDirection, geometryFor, geoKeyFor, baseSizeFor, baseVertexCountFor, buildGeometry, lightFor, SceneEngine } from '~/lib/scene3d/engine'
+import { sunDirection, geometryFor, geoKeyFor, booleanRefKeys, baseSizeFor, baseVertexCountFor, buildGeometry, lightFor, SceneEngine } from '~/lib/scene3d/engine'
 import { PRIMITIVE_KINDS, createPrimitive, createLight, createGlbObject, createSvgPathObject, contentDigest, type PrimitiveKind, type PrimitiveObject, type GlbObject } from '~/lib/scene3d/config'
 import { PRIMITIVE_PARAMS, varySettingsFor } from '~/lib/scene3d/primParams'
-import { modifierStackOf, writeModifierStack, type ModifierInstance } from '~/lib/scene3d/modifierStack'
+import { modifierStackOf, writeModifierStack, createModifier, type ModifierInstance } from '~/lib/scene3d/modifierStack'
 import { loadFont, type Font } from '~/lib/scene3d/outlines'
 import { encodeMesh, meshDataFromGeometry } from '~/lib/scene3d/mesh'
 import { loadMesh, meshCacheClear } from '~/lib/scene3d/meshCache'
@@ -886,6 +886,51 @@ describe('scene3d buildGeometry renders the modifier stack', () => {
     // The bag is kept, so every vary field — mode/seed/colour/spread/falloff/strength — plus the
     // palette read identically after the write; Vary is not stripped on the first stack edit.
     expect(varySettingsFor(written)).toEqual(varySettingsFor(legacy))
+  })
+})
+
+// Task 6 (boolean): geoKeyFor is pure and cannot reach the doc, so the sibling contribution to
+// the cache key is folded in at the engine call site via `booleanRefKeys(obj, doc)`. A boolean
+// object must rebuild when its sibling is EDITED or MOVED — neither shows up in the object's own
+// fields — and a missing / self sibling must fold to a stable token, never throw.
+describe('scene3d booleanRefKeys folds the sibling into the geo cache key', () => {
+  const boolObj = (refObjectId?: string): PrimitiveObject => {
+    const row = createModifier('boolean')
+    if (refObjectId) row.refObjectId = refObjectId
+    return { ...createPrimitive('box', []), id: 'A', ...writeModifierStack([row]) }
+  }
+  const sibling = (over: Partial<PrimitiveObject> = {}): PrimitiveObject => ({ ...createPrimitive('sphere', []), id: 'B', ...over })
+
+  it('is empty for an object with no boolean rows (non-boolean keys stay byte-identical)', () => {
+    expect(booleanRefKeys(createPrimitive('box', []), { objects: [] } as any)).toBe('')
+  })
+
+  it('folds a stable "none" token for a missing / self / null-doc sibling (never throws)', () => {
+    expect(booleanRefKeys(boolObj(), null)).toContain('none') // no refObjectId set
+    expect(booleanRefKeys(boolObj('nope'), { objects: [] } as any)).toContain('none') // ref not in doc
+    expect(booleanRefKeys(boolObj('A'), { objects: [boolObj('A')] } as any)).toContain('none') // self-ref
+  })
+
+  it('changes when the sibling is EDITED (its params feed the key)', () => {
+    const a = boolObj('B')
+    const before = booleanRefKeys(a, { objects: [a, sibling()] } as any)
+    const after = booleanRefKeys(a, { objects: [a, sibling({ params: { ...createPrimitive('sphere', []).params, sweep: 90 } })] } as any)
+    expect(after).not.toBe(before)
+  })
+
+  it('changes when the sibling MOVES (the relative transform feeds the key)', () => {
+    const a = boolObj('B')
+    const before = booleanRefKeys(a, { objects: [a, sibling()] } as any)
+    const after = booleanRefKeys(a, { objects: [a, sibling({ position: [1, 2, 3] })] } as any)
+    expect(after).not.toBe(before)
+  })
+
+  it('changes when THIS object moves too (the relative transform is inverse(self)·sibling)', () => {
+    const a = boolObj('B')
+    const before = booleanRefKeys(a, { objects: [a, sibling()] } as any)
+    const moved = { ...a, position: [2, 0, 0] as [number, number, number] }
+    const after = booleanRefKeys(moved, { objects: [moved, sibling()] } as any)
+    expect(after).not.toBe(before)
   })
 })
 
