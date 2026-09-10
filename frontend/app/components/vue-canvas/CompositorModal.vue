@@ -1351,6 +1351,17 @@ function writeRecolourMemory(m: RecolourMemory) {
   const n = compositor.value; if (!n) return
   const p = (n.data.properties ||= {}); (p as any).sailor_recolour = m
 }
+// Persist the switch position on its own, so flipping it (without re-picking a palette)
+// survives a reload. Guarded twice: never MINT a memory object for an untouched frame
+// from the ref's false→false init, and never fight `watch(recolourMemory, …)` above —
+// that mirror already syncs this ref FROM memory, so only write back when this ref is
+// the side that actually changed.
+watch(recolourImages, (v) => {
+  const m = recolourMemory.value
+  if (!m && !v) return
+  if (m?.images === v) return
+  writeRecolourMemory({ hexes: m?.hexes ?? [], applied: m?.applied ?? {}, images: v, imageEffects: m?.imageEffects ?? {} })
+})
 function recolourWith(hexes: string[]) {
   const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
   const mapping = mapFamily(frameColourSlots.value, hexes)
@@ -1360,8 +1371,11 @@ function recolourWith(hexes: string[]) {
   let layers = next.layers, imageEffects: OwnedMaps = prior
   if (recolourImages.value) { const r = applyImageMaps(layers, hexes, prior); layers = r.layers; imageEffects = r.owned }
   else if (Object.keys(prior).length) { const r = removeImageMaps(layers, prior); layers = r.layers; imageEffects = r.owned }
-  const mapsChanged = recolourImages.value || Object.keys(prior).length > 0
-  if (identity && !mapsChanged) return
+  // A real comparison, not `recolourImages.value || prior non-empty`: that flag was true
+  // on every click while the switch was on, even when the map refresh produced byte-identical
+  // output (same hexes re-applied) — recording an empty undo step each time.
+  const changed = !identity || JSON.stringify(layers) !== JSON.stringify(localLayers.value)
+  if (!changed) return
   recordHistory(); commit(layers); editor.writeBackground(next.background)
   writeRecolourMemory({ hexes: hexes.map(h => h.toLowerCase()), applied: mapping, images: recolourImages.value, imageEffects })
 }
@@ -8933,10 +8947,10 @@ onUnmounted(() => {
             <p v-if="!frameColourSlots.length" class="text-[11px] text-white/40 italic">Add a background, text or a shape to see the frame's colours.</p>
             <template v-else>
               <ColourSlots :slots="frameColourSlots" :family="recolourMemory?.hexes ?? null" @reassign="reassignSlot" />
-              <div data-testid="recolour-images" class="mt-2">
+              <p class="mt-2 mb-1.5 text-[11px] text-white/45">Pick a palette to recolour the frame. Things that share a colour keep sharing one; the darkest stays darkest.</p>
+              <div data-testid="recolour-images" class="mb-1.5">
                 <StudioSwitch v-model="recolourImages" label="Images too" hint="Photos take the palette as a gradient map." />
               </div>
-              <p class="mt-2 mb-1.5 text-[11px] text-white/45">Pick a palette to recolour the frame. Things that share a colour keep sharing one; the darkest stays darkest.</p>
               <PalettePicker :key="compositor?.id ?? 'frame-recolour'" mode="stops" :seed="recolourSeed" @apply-family="applyFamilyToFrame" @apply-stops="applyStopsToFrame" />
             </template>
           </div>
