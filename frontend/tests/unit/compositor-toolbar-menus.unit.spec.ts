@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
-  TOOLBAR_SHAPES, TOOLBAR_AI, TOOLBAR_INSERT,
-  DEFAULT_SHAPE_FACE, DEFAULT_AI_FACE, DEFAULT_INSERT_FACE,
-  resolveShapeFace, shapeFaceLabel, smartSelectRowState,
-  resolveAiFace, aiFaceLabel, resolveInsertFace, insertFaceLabel,
+  TOOLBAR_SHAPES, TOOLBAR_INSERT,
+  DEFAULT_SHAPE_FACE, DEFAULT_INSERT_FACE,
+  resolveShapeFace, shapeFaceLabel,
+  resolveInsertFace, insertFaceLabel,
 } from '~/lib/compositor/toolbarMenus'
 
 describe('compositor toolbar menus', () => {
@@ -35,32 +35,6 @@ describe('compositor toolbar menus', () => {
     expect(shapeFaceLabel('library')).toBe('Rectangle')
   })
 
-  it('pins the AI menu contents and order', () => {
-    expect(TOOLBAR_AI.map(r => r.id)).toEqual(['vector', 'region', 'smart'])
-    expect(TOOLBAR_AI.map(r => r.label)).toEqual(['AI vector', 'Generate in region', 'Smart select'])
-  })
-
-  // The hints ARE the old buttons' tooltips, verbatim — the spec asks for them
-  // to survive the regroup, so pin the strings and not just their length.
-  it('pins the AI hint strings verbatim', () => {
-    expect(TOOLBAR_AI.map(r => r.hint)).toEqual([
-      'Generate from text or vectorize a selected image',
-      'Mark an area (box, brush, or shape) and regenerate just that part of an image',
-      'Scribble over an object, AI refines the selection',
-    ])
-  })
-
-  it('defaults the AI face to AI vector and keeps the last-used one', () => {
-    expect(DEFAULT_AI_FACE).toBe('vector')
-    expect(resolveAiFace(null)).toBe('vector')
-    expect(resolveAiFace(undefined)).toBe('vector')
-    expect(resolveAiFace('nope')).toBe('vector')
-    expect(aiFaceLabel(null)).toBe('AI vector')
-    for (const r of TOOLBAR_AI) expect(resolveAiFace(r.id)).toBe(r.id)
-    expect(aiFaceLabel('region')).toBe('Generate in region')
-    expect(aiFaceLabel('smart')).toBe('Smart select')
-  })
-
   it('pins the Insert menu contents and order', () => {
     expect(TOOLBAR_INSERT.map(r => r.id)).toEqual(['upload', 'canvas', 'svg'])
     expect(TOOLBAR_INSERT.map(r => r.label)).toEqual(['Upload image', 'Pick from canvas…', 'Import SVG'])
@@ -77,17 +51,5 @@ describe('compositor toolbar menus', () => {
     for (const r of TOOLBAR_INSERT) expect(resolveInsertFace(r.id)).toBe(r.id)
     expect(insertFaceLabel('canvas')).toBe('Pick from canvas…')
     expect(insertFaceLabel('svg')).toBe('Import SVG')
-  })
-
-  it('disables the Smart select row without an image selection', () => {
-    const off = smartSelectRowState(false, false)
-    expect(off.disabled).toBe(true)
-    expect(off.hint).toBe('Select an image layer first')
-
-    // With an image selected, or while smart select is already running (so it
-    // can be switched off from the same row), it stays live.
-    expect(smartSelectRowState(true, false).disabled).toBe(false)
-    expect(smartSelectRowState(false, true).disabled).toBe(false)
-    expect(smartSelectRowState(true, false).hint).toBe(TOOLBAR_AI[2]!.hint)
   })
 })

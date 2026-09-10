@@ -65,7 +65,6 @@ import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
-import { generateVectorFromText, vectorizeImage, urlToDataUrl } from '~/composables/useVectorAi'
 import { imageLayerUrl } from '~/composables/useCompositorLayers'
 import { useInpaint, loadImage, capDims, imageToDataUrl, cleanCutoutAlpha } from '~/composables/useInpaint'
 import { useLayerImageEdit } from '~/composables/useLayerImageEdit'
@@ -134,11 +133,11 @@ import { libraryFamily } from '~/data/library-fonts'
 import { defaultExpressiveParams, type ExpressiveParams } from '~~/shared/text-layout/expressive'
 import { PenTool, Brush, Sparkles, Wand2, Lasso, Undo2, Redo2, ChevronRight, ChevronDown, ChevronUp, GripVertical, Play, Palette, Check, RefreshCw, ImagePlus, FileUp, LayoutGrid, LayoutTemplate, Snowflake, Wheat } from 'lucide-vue-next'
 import {
-  TOOLBAR_SHAPES, TOOLBAR_AI, TOOLBAR_INSERT,
-  DEFAULT_SHAPE_FACE, DEFAULT_AI_FACE, DEFAULT_INSERT_FACE,
-  resolveShapeFace, shapeFaceLabel, smartSelectRowState,
-  resolveAiFace, aiFaceLabel, resolveInsertFace, insertFaceLabel,
-  type ToolbarShapeId, type ToolbarAiId, type ToolbarInsertId,
+  TOOLBAR_SHAPES, TOOLBAR_INSERT,
+  DEFAULT_SHAPE_FACE, DEFAULT_INSERT_FACE,
+  resolveShapeFace, shapeFaceLabel,
+  resolveInsertFace, insertFaceLabel,
+  type ToolbarShapeId, type ToolbarInsertId,
 } from '~/lib/compositor/toolbarMenus'
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
 import type { TextPathSpec, TextPathFollow } from '~/lib/compositor/textPath'
@@ -1599,53 +1598,6 @@ async function onCanvasDrop(e: DragEvent) {
       else if (file.type.startsWith('image/')) await addImageFromFile(file)
     } catch (err) { console.error('[Compositor] drop import failed:', err) }
   }
-}
-
-// ── AI vector: text→SVG generate + raster→SVG vectorize ─────────────────────
-const aiOpen = ref(false)
-const aiPrompt = ref('')
-const aiStyle = ref<'any' | 'line_art' | 'engraving' | 'linocut'>('any')
-const aiBusy = ref(false)
-const aiError = ref('')
-
-// URL of the currently-selected image to vectorize (local image layer or wired).
-const vectorizableUrl = computed<string | null>(() => {
-  const l = selectedLocal.value
-  if (l && l.kind === 'image') return imageLayerUrl(l.filename)
-  // A wired layer is an ordinary selection now; its pixels still come from the
-  // slot, so resolve the URL through this modal's 1-based slot numbering.
-  if (l && l.kind === 'wired') {
-    const w = layers.value.find((x: any) => x.slot === (l as any).slot + 1)
-    if (w?.url) return w.url as string
-  }
-  return null
-})
-
-async function runGenerate() {
-  const prompt = aiPrompt.value.trim()
-  if (!prompt || aiBusy.value) return
-  aiBusy.value = true; aiError.value = ''
-  try {
-    const svg = await generateVectorFromText(prompt, { style: aiStyle.value })
-    await addPathFromSvg(svg, { targetWidth: 0.7 })
-    aiPrompt.value = ''
-  } catch (err: any) {
-    aiError.value = err?.data?.message || err?.message || 'Generation failed'
-  } finally { aiBusy.value = false }
-}
-
-async function runVectorize(backend: 'local' | 'recraft') {
-  const url = vectorizableUrl.value
-  if (!url || aiBusy.value) return
-  aiBusy.value = true; aiError.value = ''
-  try {
-    // Recraft needs a data URL it can ingest; local can fetch the URL itself.
-    const image = backend === 'recraft' ? await urlToDataUrl(url) : url
-    const svg = await vectorizeImage(image, { backend })
-    await addPathFromSvg(svg, { targetWidth: 0.8 })
-  } catch (err: any) {
-    aiError.value = err?.data?.message || err?.message || 'Vectorize failed'
-  } finally { aiBusy.value = false }
 }
 
 // Esc cancels an in-progress pen draft (before it bubbles to modal-close).
@@ -5333,13 +5285,11 @@ async function onPickCanvasImage(src: string) {
 // click-away), Escape closes the open one. Opening one closes the others so two
 // flyouts can never overlap.
 const shapesMenuOpen = ref(false)
-const aiMenuOpen = ref(false)
 const insertMenuOpen = ref(false)
 /** Last-used shape, worn by the Shapes button. Component state on purpose —
- *  the spec asks for no persistence beyond the open modal. Same for the AI and
- *  Insert faces below: plain refs, so every session starts on the default. */
+ *  the spec asks for no persistence beyond the open modal. Same for the
+ *  Insert face below: a plain ref, so every session starts on the default. */
 const shapeFace = ref<ToolbarShapeId>(DEFAULT_SHAPE_FACE)
-const aiFace = ref<ToolbarAiId>(DEFAULT_AI_FACE)
 const insertFace = ref<ToolbarInsertId>(DEFAULT_INSERT_FACE)
 /** The library shape the face wears once one has been picked; null on a fresh
  *  modal (component state on purpose — no persistence, like shapeFace). */
@@ -5401,16 +5351,12 @@ function onLibraryPick(id: string) {
   shapeFace.value = 'library'
   addLocal(createShapeLayer(s))
 }
-const AI_ICONS: Record<ToolbarAiId, Component> = {
-  vector: Sparkles, region: Wand2, smart: Lasso,
-}
 const INSERT_ICONS: Record<ToolbarInsertId, Component> = {
   upload: ImagePlus, canvas: LayoutGrid, svg: FileUp,
 }
 function closeToolbarMenus() {
   zoomMenuOpen.value = false
   shapesMenuOpen.value = false
-  aiMenuOpen.value = false
   insertMenuOpen.value = false
   libraryPickerOpen.value = false
   inspectorShapePickerOpen.value = false
@@ -5418,7 +5364,6 @@ function closeToolbarMenus() {
 function toggleInsertMenu() { const next = !insertMenuOpen.value; closeToolbarMenus(); insertMenuOpen.value = next }
 function toggleZoomMenu() { const next = !zoomMenuOpen.value; closeToolbarMenus(); zoomMenuOpen.value = next }
 function toggleShapesMenu() { const next = !shapesMenuOpen.value; closeToolbarMenus(); shapesMenuOpen.value = next }
-function toggleAiMenu() { const next = !aiMenuOpen.value; closeToolbarMenus(); aiMenuOpen.value = next }
 /** Menu row → stamp it now AND wear it, so repeat stamping is one click.
  *  The library row opens the picker instead; the pick both stamps and wears. */
 function pickShape(id: ToolbarShapeId) {
@@ -5449,22 +5394,18 @@ function onInspectorShapePick(id: string) {
 // layer it opened on — switching selection out from under it would swap some
 // OTHER layer's shape on pick, so close it the moment selection changes.
 watch(() => selectedLocal.value?.id, () => { inspectorShapePickerOpen.value = false })
-/** Called during render (not a computed): `selectedWiredImage()` reads the DOM,
- *  so it must be re-evaluated with the rest of the template, exactly as the old
- *  Smart-select button's :disabled/:title bindings did. */
-function smartRowState() {
-  return smartSelectRowState(selectedLocal.value?.kind === 'image' || !!selectedWiredImage(), smartActive.value)
-}
-/** Shared gate for entering any of the three AI flows (and, via selectTool,
- *  node-edit): exits pen, brush, and any OTHER running AI flow first, so the
- *  three can never collide — mirrors what enterGenMode/enterSmartMode already
- *  did ad hoc, factored so the trio can't drift apart again. `flow` is the one
- *  about to become active; its own state is left untouched here, the caller
- *  flips it on right after. Returns false when a smart-select action is
- *  mid-flight, in which case the caller must abort rather than start
- *  something new on top of it (same guard togglePen/toggleBrush/toggleDistort
- *  already use). */
-function exitOtherToolsFor(flow: ToolbarAiId): boolean {
+/** Shared gate for entering the region-generate or smart-select flow (and, via
+ *  selectTool, node-edit): exits pen, brush, and whichever OTHER flow is
+ *  running first, so the two can never collide — mirrors what
+ *  enterGenMode/enterSmartMode already did ad hoc, factored so they can't
+ *  drift apart again. `flow` is the one about to become active; its own state
+ *  is left untouched here, the caller flips it on right after. Returns false
+ *  when a smart-select action is mid-flight, in which case the caller must
+ *  abort rather than start something new on top of it (same guard
+ *  togglePen/toggleBrush/toggleDistort already use). Kept for later tasks'
+ *  right-click edit flows, which enter these same two modes without the
+ *  retired AI ✦ menu. */
+function exitOtherToolsFor(flow: 'region' | 'smart'): boolean {
   if (flow !== 'smart' && smartActive.value) {
     if (smartActionBusy.value) return false
     exitSmartMode()
@@ -5472,45 +5413,9 @@ function exitOtherToolsFor(flow: ToolbarAiId): boolean {
   selectTool(); exitNodeEdit()
   if (pen.active.value) pen.setActive(false)
   brush.setActive(false)
-  if (flow !== 'vector') aiOpen.value = false
   if (flow !== 'region' && genActive.value) exitGenMode()
   return true
 }
-/** Run a flow WITHOUT touching the face (the face button's own path). */
-function runAiFlow(id: ToolbarAiId) {
-  if (id === 'vector') {
-    if (aiOpen.value) { aiOpen.value = false; return }
-    if (!exitOtherToolsFor('vector')) return
-    aiOpen.value = true
-    return
-  }
-  if (id === 'region') { toggleGenMode(); return }
-  toggleSmartMode()
-}
-/** Menu row → run it now AND wear it, so re-entering is one click. */
-function runAiRow(id: ToolbarAiId) {
-  aiFace.value = id
-  aiMenuOpen.value = false
-  runAiFlow(id)
-}
-/** The face button: re-enter the last-used flow without opening anything. */
-function runAiFace() {
-  const face = resolveAiFace(aiFace.value)
-  closeToolbarMenus()
-  runAiFlow(face)
-}
-/** The face mirrors its row's disabled+hint state (Smart select needs an image
- *  layer). The caret is never disabled — the other two flows stay reachable. */
-function aiFaceState() {
-  return resolveAiFace(aiFace.value) === 'smart'
-    ? smartRowState()
-    : { disabled: false, hint: TOOLBAR_AI.find(r => r.id === resolveAiFace(aiFace.value))!.hint }
-}
-/** True when ANY of the three AI flows is running, regardless of which one is
- *  currently faced — drives the face+caret cluster's "AI is running" highlight
- *  (the old single button OR'd all three the same way; a caret-entered flow
- *  must read as active even while a different flow sits on the face). */
-const aiToolActive = computed(() => aiOpen.value || genActive.value || smartActive.value)
 
 // ── Insert ▾ ────────────────────────────────────────────────────────────────
 // Anchored flyout (same idiom/styling as Shapes). Upload and Import SVG act
@@ -5583,7 +5488,6 @@ function handleKeydown(e: KeyboardEvent) {
     if (e.defaultPrevented) return
     if (zoomMenuOpen.value) { zoomMenuOpen.value = false; return }
     if (shapesMenuOpen.value) { shapesMenuOpen.value = false; return }
-    if (aiMenuOpen.value) { aiMenuOpen.value = false; return }
     if (insertMenuOpen.value) { insertMenuOpen.value = false; return }
     if (pickerDialogOpen.value) { pickerDialogOpen.value = false; return }
     if (fxMenuLayerId.value) { closeFxMenu(); return }
@@ -6558,65 +6462,6 @@ onUnmounted(() => {
         <button class="underline hover:text-white cursor-pointer" @click="exitNodeEdit">Done (Esc)</button>
       </div>
 
-      <!-- AI vector panel (floats above the toolbar) -->
-      <Transition
-        enter-active-class="transition-all duration-150 ease-out"
-        leave-active-class="transition-all duration-100 ease-in"
-        enter-from-class="opacity-0 translate-y-1"
-        leave-to-class="opacity-0 translate-y-1"
-      >
-      <div
-        v-if="aiOpen"
-        class="absolute bottom-[84px] w-[340px] bg-[#1a1a1a]/97 rounded-[12px] p-3 border border-[#2a2a2a] shadow-xl text-white/85"
-        @pointerdown.stop
-      >
-        <div class="flex items-center gap-1.5 mb-2 text-[11px] uppercase tracking-wide text-white/40">
-          <Sparkles class="size-3.5" /> Generate vector
-        </div>
-        <textarea
-          v-model="aiPrompt"
-          rows="2"
-          placeholder="a minimalist mountain logo, flat vector…"
-          class="w-full bg-white/[0.06] rounded-md text-[12px] px-2 py-1.5 outline-none resize-none placeholder:text-white/25"
-          @keydown.enter.exact.prevent="runGenerate"
-        />
-        <div class="flex items-center gap-1.5 mt-2">
-          <select v-model="aiStyle" class="h-7 bg-white/[0.06] rounded text-[11px] px-1 outline-none cursor-pointer">
-            <option value="any">Any</option>
-            <option value="line_art">Line art</option>
-            <option value="engraving">Engraving</option>
-            <option value="linocut">Linocut</option>
-          </select>
-          <button
-            class="flex-1 h-7 rounded bg-white hover:bg-white/90 text-neutral-900 text-[12px] font-medium cursor-pointer disabled:opacity-40 disabled:cursor-default"
-            :disabled="aiBusy || !aiPrompt.trim()"
-            @click="runGenerate"
-          >{{ aiBusy ? 'Generating…' : 'Generate' }}</button>
-        </div>
-
-        <div class="mt-3 pt-2.5 border-t border-white/10">
-          <div class="flex items-center gap-1.5 mb-2 text-[11px] uppercase tracking-wide text-white/40">
-            <Wand2 class="size-3.5" /> Vectorize selected image
-          </div>
-          <div v-if="vectorizableUrl" class="flex items-center gap-1.5">
-            <button
-              class="flex-1 h-7 rounded bg-white/10 hover:bg-white/15 text-[12px] cursor-pointer disabled:opacity-40"
-              :disabled="aiBusy" title="Free local VTracer"
-              @click="runVectorize('local')"
-            >{{ aiBusy ? '…' : 'Trace (free)' }}</button>
-            <button
-              class="flex-1 h-7 rounded bg-white/10 hover:bg-white/15 text-[12px] cursor-pointer disabled:opacity-40"
-              :disabled="aiBusy" title="Recraft — higher fidelity, paid"
-              @click="runVectorize('recraft')"
-            >Recraft</button>
-          </div>
-          <div v-else class="text-[11px] text-white/30">Select an image layer to vectorize.</div>
-        </div>
-
-        <div v-if="aiError" class="mt-2 text-[11px] text-rose-400">{{ aiError }}</div>
-      </div>
-      </Transition>
-
       <!-- Bottom cluster: agent command bar + toolbar. The column is bottom-anchored
            and shrink-wraps to the toolbar's width (its widest child), so the bare
            prompt above stretches to exactly match the toolbar. -->
@@ -6835,54 +6680,6 @@ onUnmounted(() => {
           <AddImageSourcePopover :open="pickerDialogOpen" picker-only
             @pick="onPickCanvasImage" @close="pickerDialogOpen = false" />
         </div>
-        <!-- AI: the three generative flows, one button. Rows keep their old
-             tooltips as subtitles; Smart select greys out without an image. -->
-        <div class="relative flex items-center" @click.stop>
-          <button
-            class="flex items-center justify-center h-8 w-7 rounded-l cursor-pointer disabled:opacity-30 disabled:cursor-default"
-            :class="aiToolActive ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
-            data-testid="ai-face" :title="aiFaceLabel(aiFace) + ' — ' + aiFaceState().hint"
-            :disabled="aiFaceState().disabled"
-            @click="runAiFace()">
-            <component :is="AI_ICONS[aiFace]" class="size-4" />
-          </button>
-          <button
-            class="flex items-center justify-center h-8 w-4 rounded-r cursor-pointer"
-            :class="aiMenuOpen ? 'bg-white text-neutral-900' : aiToolActive ? 'hover:bg-white/10 text-white/80' : 'hover:bg-white/10 text-white/50'"
-            data-testid="ai-menu-toggle" title="AI — vector, generate in region, smart select"
-            @click="toggleAiMenu()">
-            <ChevronUp class="size-3" />
-          </button>
-          <Transition
-            enter-active-class="transition-all duration-150 ease-out"
-            leave-active-class="transition-all duration-100 ease-in"
-            enter-from-class="opacity-0 translate-y-1"
-            leave-to-class="opacity-0 translate-y-1"
-          >
-            <div v-if="aiMenuOpen"
-              data-testid="ai-menu"
-              class="absolute bottom-full right-0 mb-2 w-[268px] rounded-[10px] border border-[#2a2a2a] bg-[#1a1a1a]/97 p-1 shadow-xl"
-              @pointerdown.stop>
-              <button v-for="row in TOOLBAR_AI" :key="row.id"
-                class="flex w-full items-start gap-2 rounded px-2 py-1.5 text-[12px] cursor-pointer disabled:opacity-30 disabled:cursor-default hover:bg-white/10 text-white/85"
-                :class="{
-                  'bg-white/10': (row.id === 'vector' && aiOpen) || (row.id === 'region' && genActive) || (row.id === 'smart' && smartActive),
-                }"
-                :data-testid="'ai-menu-' + row.id"
-                :disabled="row.id === 'smart' && smartRowState().disabled"
-                @click="runAiRow(row.id)">
-                <Sparkles v-if="row.id === 'vector'" class="mt-0.5 size-3.5 text-white/60" />
-                <Wand2 v-else-if="row.id === 'region'" class="mt-0.5 size-3.5 text-white/60" />
-                <Lasso v-else class="mt-0.5 size-3.5 text-white/60" />
-                <span class="flex-1 text-left">
-                  {{ row.label }}
-                  <span class="mt-0.5 block text-[10.5px] leading-snug text-white/40"
-                    :data-testid="'ai-menu-hint-' + row.id">{{ row.id === 'smart' ? smartRowState().hint : row.hint }}</span>
-                </span>
-              </button>
-            </div>
-          </Transition>
-        </div>
         <BrandImagePicker @add="(name, aspect) => addImageFromName(name, aspect)" />
         <button
           class="flex items-center justify-center size-8 rounded cursor-pointer"
@@ -7073,150 +6870,6 @@ onUnmounted(() => {
               </div>
             </div>
           </template>
-        </div>
-      </template>
-
-      <!-- Generate-in-region controls (mode owns the inspector) -->
-      <template v-else-if="genActive && !genGesture">
-        <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
-          <Wand2 class="size-3.5 text-white/70" />
-          <span class="text-sm font-medium">Generate in region</span>
-          <button class="ml-auto text-white/40 hover:text-white/80 p-1" title="Done (Esc)" @click="exitGenMode"><X class="size-3.5" /></button>
-        </div>
-        <div class="p-5 flex flex-col gap-6 flex-1 min-h-0 overflow-y-auto">
-          <!-- Target -->
-          <div class="flex items-center justify-between text-[11px]">
-            <span class="text-white/40">Target</span>
-            <span class="text-white/70">{{ genTargetLabel }}</span>
-          </div>
-
-          <!-- Mode + model + style (new-object generation only) -->
-          <template v-if="!genTarget">
-            <div>
-              <div class="panel-label mb-2">Mode</div>
-              <div class="flex items-center gap-1 p-0.5 rounded-md bg-white/[0.05]">
-                <button
-                  class="flex-1 h-8 rounded text-[11px] cursor-pointer transition-colors"
-                  :class="genMode === 'style' ? 'bg-white text-neutral-900 font-medium' : 'text-white/70 hover:bg-white/10'"
-                  @click="genMode = 'style'">Style</button>
-                <button
-                  class="flex-1 h-8 rounded text-[11px] cursor-pointer transition-colors"
-                  :class="genMode === 'scene' ? 'bg-white text-neutral-900 font-medium' : 'text-white/70 hover:bg-white/10'"
-                  @click="genMode = 'scene'">Scene</button>
-              </div>
-              <p class="text-[10px] text-white/35 mt-2 text-pretty leading-relaxed">
-                {{ genMode === 'style' ? 'Generate from your prompt (optionally a trained style).' : 'Fit the new object to the existing frame.' }}
-              </p>
-            </div>
-
-            <!-- Model picker -->
-            <div>
-              <div class="panel-label mb-2">Model</div>
-              <div class="relative">
-                <button
-                  class="w-full h-9 px-3 rounded bg-white/[0.06] hover:bg-white/12 text-[12px] flex items-center justify-between gap-2 cursor-pointer"
-                  @click="modelPickerOpen = !modelPickerOpen">
-                  <span class="truncate text-left">{{ currentModel.name }}</span>
-                  <ChevronDown class="size-3.5 text-white/40 shrink-0 transition-transform" :class="modelPickerOpen ? 'rotate-180' : ''" />
-                </button>
-                <Transition
-                  enter-active-class="transition-all duration-150 ease-out"
-                  leave-active-class="transition-all duration-100 ease-in"
-                  enter-from-class="opacity-0 -translate-y-1"
-                  leave-to-class="opacity-0 -translate-y-1"
-                >
-                <div v-if="modelPickerOpen" class="absolute top-full left-0 right-0 mt-1.5 z-30 rounded-md bg-neutral-900 border border-white/10 overflow-hidden shadow-xl">
-                  <button v-for="m in GEN_MODELS" :key="m.id"
-                    class="w-full px-3 py-2.5 text-left hover:bg-white/10 cursor-pointer flex flex-col gap-0.5"
-                    :class="m.id === genModel ? 'bg-white/[0.06]' : ''"
-                    @click="genModel = m.id; modelPickerOpen = false">
-                    <span class="text-[12px]">{{ m.name }}</span>
-                    <span class="text-[10px] text-white/40 leading-relaxed">{{ m.hint }}</span>
-                  </button>
-                </div>
-                </Transition>
-              </div>
-            </div>
-
-            <!-- Style picker (Flux + Style mode only) -->
-            <div v-if="showStylePicker">
-              <div class="panel-label mb-2">Style</div>
-              <div class="relative">
-                <button
-                  class="w-full h-9 px-3 rounded bg-white/[0.06] hover:bg-white/12 text-[12px] flex items-center gap-2 cursor-pointer"
-                  @click="stylePickerOpen = !stylePickerOpen">
-                  <img v-if="genStyle?.coverUrl" :src="genStyle.coverUrl" class="size-5 rounded object-cover ring-1 ring-white/10" />
-                  <span class="truncate text-left flex-1">{{ genStyle ? genStyle.name : 'None' }}</span>
-                  <span v-if="genStyle" role="button" tabindex="0" class="text-white/40 hover:text-white/80" title="Clear" @click.stop="genStyle = null"><X class="size-3" /></span>
-                  <ChevronDown v-else class="size-3.5 text-white/40 shrink-0 transition-transform" :class="stylePickerOpen ? 'rotate-180' : ''" />
-                </button>
-                <Transition
-                  enter-active-class="transition-all duration-150 ease-out"
-                  leave-active-class="transition-all duration-100 ease-in"
-                  enter-from-class="opacity-0 -translate-y-1"
-                  leave-to-class="opacity-0 -translate-y-1"
-                >
-                <div v-if="stylePickerOpen" class="absolute top-full left-0 right-0 mt-1.5 z-30 max-h-48 overflow-y-auto rounded-md bg-neutral-900 border border-white/10 shadow-xl flex flex-col">
-                  <button class="px-3 py-2.5 text-left text-[12px] hover:bg-white/10 cursor-pointer"
-                    @click="genStyle = null; stylePickerOpen = false">None</button>
-                  <button v-for="s in styleList.styles.value" :key="s.filename"
-                    class="px-3 py-2.5 text-left text-[12px] hover:bg-white/10 cursor-pointer flex items-center gap-2.5"
-                    @click="genStyle = s; stylePickerOpen = false">
-                    <img v-if="s.coverUrl" :src="s.coverUrl" class="size-6 rounded object-cover ring-1 ring-white/10" />
-                    <span class="truncate">{{ s.name }}</span>
-                  </button>
-                  <p v-if="!styleList.styles.value.length" class="px-3 py-2.5 text-[11px] text-white/30">
-                    {{ styleList.loading.value ? 'Loading…' : 'No trained styles yet.' }}
-                  </p>
-                </div>
-                </Transition>
-              </div>
-            </div>
-          </template>
-
-          <!-- Region tool -->
-          <div>
-            <div class="panel-label mb-1.5">Region</div>
-            <div class="flex items-center gap-1 p-0.5 rounded-md bg-white/[0.05]">
-              <button v-for="t in GEN_TOOLS" :key="t"
-                class="flex-1 h-7 rounded text-[11px] capitalize cursor-pointer transition-colors"
-                :class="genTool === t ? 'bg-white text-neutral-900 font-medium' : 'text-white/70 hover:bg-white/10'"
-                @click="genTool = t">{{ t }}</button>
-            </div>
-            <StudioSlider v-if="genTool === 'brush'" class="mt-2" v-model="genBrush" label="Brush" :min="8" :max="240" :step="2" :bindable="false" />
-            <button v-else-if="genTool === 'shape'"
-              class="w-full h-7 mt-2 rounded bg-white/10 hover:bg-white/15 text-[12px] cursor-pointer disabled:opacity-40 disabled:cursor-default"
-              :disabled="!genShapeCandidate" @click="genUseShape"
-            >{{ genShapeCandidate ? 'Use selected shape →' : 'Select a shape/path first' }}</button>
-            <p v-else class="text-[10px] text-white/35 mt-2">Drag a box over the canvas.</p>
-          </div>
-
-          <!-- Prompt -->
-          <div>
-            <div class="panel-label mb-1.5">Prompt</div>
-            <textarea
-              v-model="genPrompt"
-              rows="3"
-              placeholder="what object to generate…"
-              class="pastel-hairline block w-full rounded-md text-[12px] px-2 py-1.5 outline-none resize-none placeholder:text-white/25"
-              style="--pastel-hairline-bg: #16161b;"
-              @keydown.enter.exact.prevent="runRegionFill"
-            />
-          </div>
-
-          <div class="flex items-center gap-1.5">
-            <button
-              class="h-8 px-2.5 rounded bg-white/[0.06] hover:bg-white/12 text-[11px] cursor-pointer disabled:opacity-30 disabled:cursor-default"
-              :disabled="!genHasMask" title="Clear region" @click="clearGenMask"
-            >Clear</button>
-            <button
-              class="gen-pastel flex-1 h-8 rounded text-neutral-900 text-[12px] font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-default"
-              :disabled="inpaint.busy.value || !genHasMask"
-              @click="runRegionFill"
-            >{{ inpaint.busy.value ? 'Generating…' : 'Generate' }}</button>
-          </div>
-          <p v-if="!genHasMask" class="text-[10px] text-white/30 -mt-1">Mark a region on the canvas to enable Generate.</p>
-          <div v-if="inpaint.error.value" class="text-[11px] text-rose-400">{{ inpaint.error.value }}</div>
         </div>
       </template>
 
