@@ -303,7 +303,7 @@ test.describe('Frame geometry effects (F2)', () => {
  * Render fix A: a geometry effect on a text layer whose `renderAsOutline` is unset still
  * forces the outline path (Inter) and safely falls back to fillText on a system font (Arial).
  */
-const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph'] as const
+const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp'] as const
 // A 1×1 transparent PNG so an image layer has a valid, instantly-decoding source.
 const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
@@ -537,6 +537,56 @@ test.describe('Frame geometry effects — offscreen pad for outward growth (F2 T
       .toBe(24)
     const after = await stackPixels(page)
     expect(after).not.toBe(before)
+  })
+
+  test('selecting Warp shows a field + amount dial that moves the stored param and the pixels', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page)
+    const before = await stackPixels(page)
+
+    await openFxMenuFirst(page)
+    await page.locator('[data-testid="add-effect-item"][data-kind="warp"]').click()
+    await expect(page.getByTestId('effect-breadcrumb')).toBeVisible()
+
+    // A default warp (bulge, amount 0.3) already displaces the outline → pixels differ.
+    const afterAdd = await stackPixels(page)
+    expect(afterAdd).not.toBe(before)
+
+    // The field picker is a live control; frequency is hidden until the field is wave.
+    await expect(page.locator('[data-testid="geo-warp-field"]')).toBeVisible()
+    await expect(page.locator('[data-testid="geo-warp-frequency"]')).toHaveCount(0)
+
+    // The amount dial reaches the stored param …
+    const amount = page.locator('[data-testid="geo-warp-amount"]')
+    await amount.fill('60'); await amount.blur()
+    await expect.poll(() => page.evaluate(() =>
+      ((window as any).__compositorLayers()[0].effects || []).find((e: any) => e.type === 'warp')?.amount))
+      .toBeCloseTo(0.6, 5)
+    // … and moves the pixels again (a stronger bulge is a different shape).
+    const afterAmount = await stackPixels(page)
+    expect(afterAmount).not.toBe(afterAdd)
+
+    // Switching to wave reveals the frequency dial (only the wave field reads it).
+    await page.locator('[data-testid="geo-warp-field"]').selectOption('wave')
+    await expect.poll(() => page.evaluate(() =>
+      ((window as any).__compositorLayers()[0].effects || []).find((e: any) => e.type === 'warp')?.field))
+      .toBe('wave')
+    await expect(page.locator('[data-testid="geo-warp-frequency"]')).toBeVisible()
+  })
+
+  test('amount 0 leaves the warp a no-op (byte-identical to no warp)', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page)
+    const plain = await stackPixels(page)
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'wp', type: 'warp', field: 'bulge', amount: 0, frequency: 3, visible: true }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    const warpedZero = await stackPixels(page)
+    expect(warpedZero).toBe(plain)
   })
 })
 

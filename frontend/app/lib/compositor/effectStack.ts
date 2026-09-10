@@ -76,11 +76,17 @@ export interface BooleanEffect { type: 'boolean'; op: BooleanOp; refLayerId?: st
  *  synchronous — no paper.js). A missing/dangling/self/non-vector ref, or `amount ≈ 0`, makes
  *  the effect a no-op. */
 export interface MorphEffect { type: 'morph'; amount: number; refLayerId?: string; visible: boolean }
+/** Displace this vector layer's outline through one of four mesh-warp FIELDS (F3), relative
+ *  to the layer's own bounding box: `bulge`/`pinch` push the outline out/in radially, `wave`
+ *  shears it sinusoidally, `twist` rotates it about the centre. SELF-ONLY — no sibling rail.
+ *  The field maths live in `app/lib/compositor/meshWarp.ts` (pure). `amount ≈ 0` is a no-op.
+ *  `frequency` is read only by the `wave` field. */
+export interface WarpEffect { type: 'warp'; field: 'bulge' | 'pinch' | 'wave' | 'twist'; amount: number; frequency: number; visible: boolean }
 
 export type LayerEffect =
   | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
   | TornEdgeEffect | FeatherEffect
-  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect
+  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect | WarpEffect
   | PostEffect
 
 /** A stored effect, addressed by a stable id. */
@@ -94,7 +100,7 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'inner_shadow',
+  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'inner_shadow',
   'adjust', 'duotone', 'gradientMap',
   'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'layer_blur', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
@@ -116,7 +122,7 @@ export const ORDERABLE_KINDS = EFFECT_ORDER.filter(
  *  and reorder only among themselves (`regionOf`, `canReorder`). Contiguous in EFFECT_ORDER.
  *  `boolean` (F3) combines the outline with a sibling layer's outline via paper.js; `morph` (F3)
  *  blends the outline toward a sibling layer's outline. */
-export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph'] as const satisfies readonly EffectKind[]
+export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp'] as const satisfies readonly EffectKind[]
 export const isGeometryKind = (k: EffectKind): boolean =>
   (GEOMETRY_KINDS as readonly string[]).includes(k)
 
@@ -142,6 +148,7 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   roughen: 'Roughen',
   boolean: 'Combine shapes',
   morph: 'Morph to shape',
+  warp: 'Warp',
   inner_shadow: 'Inner shadow',
   adjust: 'Adjust',
   duotone: 'Duotone',
@@ -181,6 +188,9 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   // Like boolean, no `refLayerId` default — a fresh morph is a no-op until the picker sets a
   // sibling. `amount: 0.5` so it visibly blends halfway once a sibling is chosen.
   morph: { amount: 0.5, visible: true },
+  // A fresh warp visibly bulges: a positive amount on the radial field, a wave frequency
+  // ready for when the user switches the field to `wave`.
+  warp: { field: 'bulge', amount: 0.3, frequency: 3, visible: true },
 }
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {

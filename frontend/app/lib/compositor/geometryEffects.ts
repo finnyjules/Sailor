@@ -31,6 +31,7 @@ import {
 import { offsetPolyline } from '~/lib/compositor/strokeShapes'
 import { pathBoolean, isPaperWarm, booleanOpOf } from '~/lib/compositor/booleanGeometry'
 import { blendPath } from '~/lib/vector/morph'
+import { warpPathD, type WarpField } from '~/lib/compositor/meshWarp'
 
 // The per-kind interfaces live in effectStack (it owns the whole effect vocabulary and the
 // LayerEffect union). Re-export them here so a consumer can `import type { TrimEffect } from
@@ -43,6 +44,7 @@ export type {
   BooleanEffect,
   BooleanOp,
   MorphEffect,
+  WarpEffect,
 } from './effectStack'
 export { GEOMETRY_KINDS, isGeometryKind } from './effectStack'
 
@@ -427,6 +429,24 @@ function applyMorph(d: string, e: GeometryEffectInput, ctx: GeometryContext): st
   return blendPath(d, sib.d, amount)
 }
 
+// ── warp (F3) ──────────────────────────────────────────────────────────────────
+//
+// Displace this layer's outline through one of four mesh-warp FIELDS (bulge / pinch / wave /
+// twist), relative to the layer's OWN bounding box — the maths live in `meshWarp.ts` (pure).
+// SELF-ONLY: no sibling rail, so `ctx` is unused. Because the field normalises to bbox-relative
+// coordinates, the warp is bbox-relative and needs no `W` (unlike offset/roughen/round). The
+// `amount ≈ 0` short-circuit returns `d` BY REFERENCE — `warpPathD` would otherwise reserialise
+// the flattened outline (curves become polylines), so the no-op must not reach it.
+const WARP_EPS = 1e-4
+const WARP_FIELDS: readonly WarpField[] = ['bulge', 'pinch', 'wave', 'twist']
+function applyWarp(d: string, e: GeometryEffectInput): string {
+  const amount = num(e.amount, 0)
+  if (Math.abs(amount) <= WARP_EPS) return d // effectively off — exact no-op, no reserialise
+  const field: WarpField = WARP_FIELDS.includes(e.field as WarpField) ? (e.field as WarpField) : 'bulge'
+  const frequency = num(e.frequency, 3)
+  return warpPathD(d, field, { amount, frequency })
+}
+
 // ── dispatch ──────────────────────────────────────────────────────────────────
 function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
   switch (e.type) {
@@ -436,6 +456,7 @@ function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): stri
     case 'round_corners': return applyRoundCorners(d, e, ctx)
     case 'boolean': return applyBoolean(d, e, ctx)
     case 'morph': return applyMorph(d, e, ctx)
+    case 'warp': return applyWarp(d, e)
     default: return d
   }
 }

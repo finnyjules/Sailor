@@ -1973,6 +1973,10 @@ function setActiveFxHex(raw: string) {
 const BOOLEAN_OP_LABELS: Record<string, string> = {
   unite: 'Unite', subtract: 'Subtract', intersect: 'Intersect', exclude: 'Exclude',
 }
+// Human names for the four warp fields — sentence case, never the stored value (UI-copy rule).
+const WARP_FIELD_LABELS: Record<string, string> = {
+  bulge: 'Bulge', pinch: 'Pinch', wave: 'Wave', twist: 'Twist',
+}
 /** Eligible sibling partners for the selected geometry effect: every OTHER local layer that can
  *  take a geometry outline (`canTakeGeometry`), minus any carrying a corner pin or a cloner —
  *  the sibling resolver models affine placement only, so a pinned/cloned partner would combine
@@ -7823,6 +7827,35 @@ onUnmounted(() => {
                 <option v-for="c in geometrySiblingCandidates" :key="c.key" :value="c.key">{{ c.label }}</option>
               </select>
               <p v-if="geometrySiblingReason" class="mt-1 text-[11px] text-white/50" data-testid="geo-morph-reason">{{ geometrySiblingReason }}</p>
+            </div>
+          </div>
+
+          <!-- Warp (F3): a field picker + an amount dial; the wave field adds a frequency. Every
+               control shown here is read by `applyGeometry`'s warp case (bbox-relative outline
+               displacement in `meshWarp.ts`) — the frequency row appears ONLY for the wave field,
+               which is the only field that reads it, so there is no dead control. Self-only: no
+               sibling picker. Amount is shown ×100 like the other width-normalized geometry dials. -->
+          <div v-else-if="activeEffect!.type === 'warp'" class="space-y-1.5">
+            <div>
+              <div class="panel-sublabel mb-1">Style</div>
+              <select data-testid="geo-warp-field"
+                :value="(activeEffect as any).field || 'bulge'"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @change="updateActiveEffect({ field: ($event.target as HTMLSelectElement).value })">
+                <option v-for="f in ['bulge', 'pinch', 'wave', 'twist']" :key="f" :value="f">{{ WARP_FIELD_LABELS[f] }}</option>
+              </select>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="panel-sublabel shrink-0">Amount</div>
+              <input v-scrubnum data-testid="geo-warp-amount" type="number" step="0.5" :value="Math.round(((activeEffect as any).amount ?? 0.3) * 1000) / 10"
+                class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ amount: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
+            </div>
+            <div v-if="(activeEffect as any).field === 'wave'" class="flex items-center gap-2">
+              <div class="panel-sublabel shrink-0">Frequency</div>
+              <input v-scrubnum data-testid="geo-warp-frequency" type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).frequency ?? 3) * 10) / 10"
+                class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ frequency: Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
             </div>
           </div>
         </div>
