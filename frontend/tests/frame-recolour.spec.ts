@@ -74,6 +74,11 @@ test.describe('Frame recolour', () => {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
     const undone = await frame(page)
     expect(undone.layers).toEqual(before.layers)                       // ONE undo took the maps with the colours
+    // re-apply with the switch still ON, so the maps exist again before we test removing them
+    await tile.click()
+    const reapplied = await frame(page)
+    const reappliedPhotos = reapplied.layers.filter((l: any) => l.kind === 'image' || l.kind === 'wired')
+    expect(reappliedPhotos.some((p: any) => (p.effects ?? []).some((e: any) => e.type === 'gradientMap'))).toBe(true)
     // turn it off and re-apply: the owned maps go away
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-checked', 'false')

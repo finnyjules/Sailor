@@ -1,6 +1,6 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { GradientMapStop } from '~/lib/compositor/postEffects'
-import { createEffect, EFFECT_ORDER, effectStackOf } from '~/lib/compositor/effectStack'
+import { createEffect, EFFECT_ORDER, effectStackOf, writeStackToLayer } from '~/lib/compositor/effectStack'
 import type { EffectInstance } from '~/lib/compositor/effectStack'
 import { lightnessOf } from './map'
 
@@ -48,7 +48,7 @@ export function applyImageMaps(layers: LocalLayer[], familyHexes: string[], owne
       stack = at === -1 ? [...stack, fresh] : [...stack.slice(0, at), fresh, ...stack.slice(at)]
       nextOwned[l.id] = fresh.id
     }
-    l.effects = stack
+    Object.assign(l, writeStackToLayer(stack))
   }
   return { layers: next, owned: nextOwned }
 }
@@ -60,7 +60,7 @@ export function removeImageMaps(layers: LocalLayer[], owned: OwnedMaps): { layer
     const ownedId = owned[l.id]
     if (!ownedId) continue
     const stack = effectStackOf(l).filter(e => e.id !== ownedId)
-    l.effects = stack
+    Object.assign(l, writeStackToLayer(stack))
   }
   return { layers: next, owned: {} }
 }

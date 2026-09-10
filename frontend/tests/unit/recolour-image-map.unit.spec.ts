@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { gradientMapStopsFor, applyImageMaps, removeImageMaps } from '~/lib/compositor/recolour/imageMap'
 import { effectStackOf, createEffect } from '~/lib/compositor/effectStack'
+import { DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
 import { lightnessOf } from '~/lib/compositor/recolour/map'
 
 const img = (id: string, extra: any = {}) => ({ id, kind: 'image', filename: 'x.png', x: .5, y: .5, w: .5, h: .5, rotation: 0, opacity: 1, ...extra })
@@ -29,7 +30,7 @@ describe('applyImageMaps', () => {
       expect(fx?.type).toBe('gradientMap'); expect(fx.mix).toBe(1); expect(fx.visible).toBe(true)
       expect(fx.stops.map((s: any) => s.color)).toEqual(gradientMapStopsFor(fam).map(s => s.color))
     }
-    expect((out.layers[2] as any).effects ?? []).toEqual([])
+    expect((out.layers[2] as any).effects).toBeUndefined()
     expect((layers[0] as any).effects).toBeUndefined()                        // input untouched
   })
   it('updates the owned map in place on re-apply (same id, same position) and leaves a user map alone', () => {
@@ -66,6 +67,19 @@ describe('applyImageMaps', () => {
     expect(stack.map(e => e.type)).toEqual(['gradientMap', 'grain'])
     expect(stack.find(e => e.type === 'grain')).toMatchObject({ amount: 0.3, visible: true })
     expect(stack.find(e => e.id === out.owned.i)?.type).toBe('gradientMap')
+  })
+  it('writes the stack through the house helper: an active legacy tornEdge is retired, not just shadowed, so re-applying never orphans the owned map', () => {
+    const layers: any[] = [img('i', { effects: [], tornEdge: { ...DEFAULT_TORN_EDGE } })]
+    const out = applyImageMaps(layers as any, fam, {})
+    const l = out.layers[0] as any
+    expect(l.tornEdge).toBeUndefined()
+    const stack = effectStackOf(l)
+    expect(stack.map(e => e.type).sort()).toEqual(['gradientMap', 'torn_edge'])
+    expect(stack.find(e => e.id === out.owned.i)?.type).toBe('gradientMap')
+    // a second apply, with the returned `owned`, must keep the SAME map id — no orphan
+    const second = applyImageMaps(out.layers, fam, out.owned)
+    expect(second.owned.i).toBe(out.owned.i)
+    expect(effectStackOf(second.layers[0] as any)).toHaveLength(stack.length)
   })
 })
 
