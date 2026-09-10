@@ -2430,6 +2430,173 @@
       ]
     },
     {
+      "id": "crystal",
+      "name": "Crystal",
+      "category": "lens",
+      "animated": false,
+      "passes": 1,
+      "centerParam": [
+        "u_centerX",
+        "u_centerY"
+      ],
+      "textures": [],
+      "generative": false,
+      "followsShape": true,
+      "params": [
+        {
+          "uniform": "u_centerX",
+          "label": "Center X",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_centerY",
+          "label": "Center Y",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_radius",
+          "label": "Radius",
+          "type": "float",
+          "min": 0.05,
+          "max": 1.5,
+          "default": 0.35,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_sides",
+          "label": "Sides",
+          "type": "float",
+          "min": 3.0,
+          "max": 24.0,
+          "default": 10.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_facets",
+          "label": "Facets",
+          "type": "float",
+          "min": 3.0,
+          "max": 24.0,
+          "default": 11.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_refraction",
+          "label": "Refraction",
+          "type": "float",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 1.14,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_dispersion",
+          "label": "Dispersion",
+          "type": "float",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 0.99,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_innerZoom",
+          "label": "Inner zoom",
+          "type": "float",
+          "min": 0.5,
+          "max": 3.0,
+          "default": 1.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_edgeSoftness",
+          "label": "Edge softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_lightAngle",
+          "label": "Light angle",
+          "type": "float",
+          "min": 0.0,
+          "max": 360.0,
+          "default": 270.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_highlights",
+          "label": "Highlights",
+          "type": "float",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_shadows",
+          "label": "Shadows",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.3,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_brightness",
+          "label": "Brightness",
+          "type": "float",
+          "min": 0.5,
+          "max": 3.0,
+          "default": 1.2,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_fresnel",
+          "label": "Fresnel",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.05,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_fresnelSoftness",
+          "label": "Fresnel softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_fresnelColor",
+          "label": "Fresnel colour",
+          "type": "color",
+          "default": "#ffffff"
+        },
+        {
+          "uniform": "u_cutout",
+          "label": "Outside the gem",
+          "type": "enum",
+          "default": 0,
+          "options": [
+            { "label": "Keep the picture", "value": 0 },
+            { "label": "Transparent", "value": 1 }
+          ]
+        }
+      ]
+    },
+    {
       "id": "crt_scanlines",
       "name": "CRT",
       "category": "stylize",
