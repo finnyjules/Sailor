@@ -1,11 +1,12 @@
 <script lang="ts">
 import type { Component } from 'vue'
-import { Droplets, Sparkles, Grid3x3, Ghost, Sun, Square, Scan, Hexagon } from 'lucide-vue-next'
+import { Droplets, Sparkles, Grid3x3, Ghost, Sun, Square, Scan, Hexagon, Spline } from 'lucide-vue-next'
 import type { TreatmentKind } from '~/lib/scene3d/treatments'
 /** Shared with the object row's add menu so a kind has ONE icon everywhere. */
 export const TREATMENT_ICONS: Record<TreatmentKind, Component> = {
   blur: Droplets, glow: Sparkles, pixelate: Grid3x3, fade: Ghost,
   rimLight: Sun, outline: Square, xray: Scan, wireframe: Hexagon,
+  edgeLines: Spline,
 }
 </script>
 

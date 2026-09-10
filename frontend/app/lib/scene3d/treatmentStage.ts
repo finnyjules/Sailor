@@ -34,7 +34,7 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { stripAlpha } from '~/lib/color/convert'
-import type { MaskedGroup, RampFields, Treatment } from './treatments'
+import type { BufferGroup, EdgeLinesTreatment, MaskedGroup, RampFields, Treatment } from './treatments'
 import { ownMeshes, STAGE_LAYER } from './treatmentShells'
 
 /** MSAA samples on the base/layer targets. three ≥ r165 resolves a multisampled target's
@@ -321,6 +321,66 @@ const COMPOSITE_FRAG = `
     gl_FragColor = vec4(mix(linearResult, displayResult, k), outA);
   }`
 
+// Edge lines — a toon crease line drawn from the shared G-buffer (view-space normals in
+// tNormal, window depth in tDepth). A 3×3 Sobel over the normals catches a box's INTERIOR
+// creases (two faces meeting at an angle change the normal abruptly while depth stays
+// continuous — exactly what the inverted-hull `outline` treatment cannot see); a Sobel over
+// linearised depth catches the silhouette and any depth step. `tMaskDepth` is the object drawn
+// ALONE, so the line only lands on THIS object (its coverage) and only where the full scene
+// (`tBaseDepth`) does not occlude it. Writes into the premultiplied accumulator like the
+// composite: every pixel is written (line pixels blend the colour over, the rest pass the
+// destination through), because this targets the OTHER half of the ping-pong.
+const EDGE_LINES_FRAG = `
+  uniform sampler2D tDst; uniform sampler2D tNormal; uniform sampler2D tDepth;
+  uniform sampler2D tMaskDepth; uniform sampler2D tBaseDepth;
+  uniform vec3 uColor; uniform float uWidthPx; uniform float uThreshold;
+  uniform vec2 uTexel; uniform float uNear; uniform float uFar; uniform float uOrtho;
+  varying vec2 vUv;
+  // Window depth (0..1, non-linear under perspective) → a linear 0-at-near, 1-at-far metric,
+  // so a Sobel over it means the same thing at every distance. Ortho depth is already linear.
+  float linearDepth(float z){
+    if (uOrtho > 0.5) return clamp(z, 0.0, 1.0);
+    float ndc = z * 2.0 - 1.0;
+    float eye = (2.0 * uNear * uFar) / (uFar + uNear - ndc * (uFar - uNear));
+    return clamp((eye - uNear) / (uFar - uNear), 0.0, 1.0);
+  }
+  vec3 nAt(vec2 uv){ return texture2D(tNormal, uv).rgb * 2.0 - 1.0; }
+  float dAt(vec2 uv){ return linearDepth(texture2D(tDepth, uv).r); }
+  void main(){
+    vec4 dst = texture2D(tDst, vUv);
+    float md = texture2D(tMaskDepth, vUv).r;
+    // Not this object's pixel (isolated draw left the background at the far plane), or the
+    // full scene occludes it here — pass the accumulator through untouched.
+    if (md >= 0.9999) { gl_FragColor = dst; return; }
+    float bd = texture2D(tBaseDepth, vUv).r;
+    if (md > bd + 0.0005) { gl_FragColor = dst; return; }
+
+    vec2 o = uTexel * uWidthPx;
+    vec3 ntl = nAt(vUv + vec2(-o.x,  o.y)), nt = nAt(vUv + vec2(0.0,  o.y)), ntr = nAt(vUv + vec2(o.x,  o.y));
+    vec3 nl  = nAt(vUv + vec2(-o.x, 0.0)),                                    nr  = nAt(vUv + vec2(o.x, 0.0));
+    vec3 nbl = nAt(vUv + vec2(-o.x, -o.y)), nb = nAt(vUv + vec2(0.0, -o.y)), nbr = nAt(vUv + vec2(o.x, -o.y));
+    vec3 gxN = (ntr + 2.0 * nr + nbr) - (ntl + 2.0 * nl + nbl);
+    vec3 gyN = (ntl + 2.0 * nt + ntr) - (nbl + 2.0 * nb + nbr);
+    float nMag = length(gxN) + length(gyN);
+
+    float dtl = dAt(vUv + vec2(-o.x,  o.y)), dt = dAt(vUv + vec2(0.0,  o.y)), dtr = dAt(vUv + vec2(o.x,  o.y));
+    float dl  = dAt(vUv + vec2(-o.x, 0.0)),                                    dr  = dAt(vUv + vec2(o.x, 0.0));
+    float dbl = dAt(vUv + vec2(-o.x, -o.y)), db = dAt(vUv + vec2(0.0, -o.y)), dbr = dAt(vUv + vec2(o.x, -o.y));
+    float gxD = (dtr + 2.0 * dr + dbr) - (dtl + 2.0 * dl + dbl);
+    float gyD = (dtl + 2.0 * dt + dtr) - (dbl + 2.0 * db + dbr);
+    float dMag = abs(gxD) + abs(gyD);
+
+    // Threshold raises the bar for both cues together. A 90° box crease drives nMag to ~4-5;
+    // a silhouette drives dMag well past 0.1. Higher threshold ⇒ only sharper creases draw.
+    float loN = mix(0.45, 2.2, uThreshold);
+    float loD = mix(0.025, 0.20, uThreshold);
+    float cov = max(smoothstep(loN, loN + 0.4, nMag), smoothstep(loD, loD + 0.03, dMag));
+    // Premultiplied "over": colour * cov laid over the accumulator. Black (the default) drives
+    // the object toward 0 along the crease; a tint paints that colour there instead.
+    vec3 lineP = uColor * cov;
+    gl_FragColor = vec4(lineP + dst.rgb * (1.0 - cov), cov + dst.a * (1.0 - cov));
+  }`
+
 type RT = THREE.WebGLRenderTarget
 
 /** A resolved progressive ramp in UV space: direction, where t = 0 sits along it
@@ -343,6 +403,11 @@ export class TreatmentStage {
   private accum: RT[] = []
   private accumIdx = 0
   private scratch: RT[] = []
+  /** The shared G-buffer: view-space normals (colour) + window depth (depthTexture) of the
+   *  buffer-treated objects, built ONCE per frame and read by every buffer treatment. Null
+   *  until a frame needs it, and disposed on the first frame that has no buffer treatment —
+   *  so most scenes, which never use one, pay nothing. */
+  private gbuf: RT | null = null
   private width = 0
   private height = 0
   private readonly quad = new FullScreenQuad()
@@ -365,6 +430,11 @@ export class TreatmentStage {
     uRampMin: { value: 0 }, uRampSpan: { value: 1 }, uRampStart: { value: 0 }, uRampEnd: { value: 1 },
   })
   private readonly compositeMat: THREE.ShaderMaterial
+  /** View-space normal override for the G-buffer pass — the live twin of passes.ts's export
+   *  bake. flatShading forces per-face normals, so an interior crease steps sharply even on
+   *  smooth-shaded geometry (a GLB), which is what a toon crease line needs. */
+  private readonly normalMat = new THREE.MeshNormalMaterial({ flatShading: true })
+  private readonly edgeLinesMat: THREE.ShaderMaterial
   private readonly tmpSize = new THREE.Vector2()
   private readonly prevClearColor = new THREE.Color()
   private readonly rampBox = new THREE.Box3()
@@ -384,6 +454,13 @@ export class TreatmentStage {
     // fade on tone-mapped values), so the hardware blender must stay out of the way — with
     // it on, every composite would be applied twice.
     this.compositeMat.blending = THREE.NoBlending
+    this.edgeLinesMat = shader(EDGE_LINES_FRAG, {
+      tDst: { value: null }, tNormal: { value: null }, tDepth: { value: null },
+      tMaskDepth: { value: null }, tBaseDepth: { value: null },
+      uColor: { value: new THREE.Color(0, 0, 0) }, uWidthPx: { value: 1 }, uThreshold: { value: 0.5 },
+      uTexel: { value: new THREE.Vector2() }, uNear: { value: FALLBACK_NEAR }, uFar: { value: 100 }, uOrtho: { value: 0 },
+    })
+    this.edgeLinesMat.blending = THREE.NoBlending
   }
 
   private makeTarget(w: number, h: number, withDepth: boolean): RT {
@@ -405,7 +482,28 @@ export class TreatmentStage {
     this.scratch = [0, 1, 2].map(() => this.makeTarget(w, h, false))
     this.pixelateMat.uniforms.uResolution!.value.set(w, h)
     this.compositeMat.uniforms.uTexel!.value.set(1 / w, 1 / h)
+    ;(this.edgeLinesMat.uniforms.uTexel!.value as THREE.Vector2).set(1 / w, 1 / h)
     this.stats.width = w; this.stats.height = h
+  }
+
+  /** The shared G-buffer, built on first use. NON-MSAA so the Sobel reads crisp normals
+   *  rather than a resolved average that would soften every crease it should catch. */
+  private ensureGbuffer(): RT {
+    if (!this.gbuf) {
+      this.gbuf = new THREE.WebGLRenderTarget(this.width, this.height, {
+        type: THREE.UnsignedByteType, depthBuffer: true, stencilBuffer: false, samples: 0,
+      })
+      this.gbuf.depthTexture = new THREE.DepthTexture(this.width, this.height, THREE.UnsignedIntType)
+    }
+    return this.gbuf
+  }
+
+  /** Free the G-buffer between frames that do not need it (mirrors the layerInv lifecycle). */
+  private releaseGbuffer(): void {
+    if (!this.gbuf) return
+    this.gbuf.depthTexture?.dispose()
+    this.gbuf.dispose()
+    this.gbuf = null
   }
 
   /** The invert layer, built on first use — most scenes never have an "everything else" group. */
@@ -415,12 +513,13 @@ export class TreatmentStage {
   }
 
   private disposeTargets(): void {
-    for (const rt of [this.base, this.layer, this.layerInv, ...this.accum, ...this.scratch]) {
+    for (const rt of [this.base, this.layer, this.layerInv, this.gbuf, ...this.accum, ...this.scratch]) {
       if (!rt) continue
       rt.depthTexture?.dispose()
       rt.dispose()
     }
     this.layerInv = null
+    this.gbuf = null
     this.accum = []
     this.scratch = []
     this.width = 0; this.height = 0 // a disposed stage must re-allocate on next use
@@ -677,7 +776,65 @@ export class TreatmentStage {
     this.composite(src.texture, layerRt.depthTexture, baseDepth2, opacity, halo, fadeRamp)
   }
 
-  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], ctx: StageContext): THREE.Texture | null {
+  /** Build the shared G-buffer: the buffer-treated objects alone, view-space normals in
+   *  colour and window depth in the depth texture. ONE geometry pass for all of them, via
+   *  the private stage layer + a normal-material override (the live twin of passes.ts's bake).
+   *  Only own meshes are enabled, so a nested treated object is not double-drawn; lights,
+   *  shells and gizmos are excluded. Never leaves renderer/scene/camera state changed. */
+  private renderGbuffer(scene: THREE.Scene, camera: THREE.Camera, roots: THREE.Object3D[]): void {
+    const gbuf = this.ensureGbuffer()
+    const touched: THREE.Mesh[] = []
+    for (const root of roots) {
+      for (const mesh of ownMeshes(root)) {
+        if (mesh.visible && mesh.layers.isEnabled(0)) { mesh.layers.enable(STAGE_LAYER); touched.push(mesh) }
+      }
+    }
+    const prevMask = camera.layers.mask
+    const prevOverride = scene.overrideMaterial
+    const prevBg = scene.background
+    try {
+      camera.layers.set(STAGE_LAYER)
+      scene.overrideMaterial = this.normalMat
+      scene.background = null
+      this.renderer.setRenderTarget(gbuf)
+      // Encode the camera-facing normal (0,0,1) → 0x8080ff in the cleared background, and
+      // clear depth to the far plane, so the silhouette reads as a depth step. The mask
+      // discards the background anyway; this only keeps it from faking an interior crease.
+      this.renderer.setClearColor(0x8080ff, 1)
+      this.renderer.clear()
+      this.renderer.render(scene, camera)
+    } finally {
+      camera.layers.mask = prevMask
+      scene.overrideMaterial = prevOverride
+      scene.background = prevBg
+      for (const m of touched) m.layers.disable(STAGE_LAYER)
+    }
+  }
+
+  /** Draw one edge-lines treatment over the accumulator: a Sobel crease line from the shared
+   *  G-buffer, masked to `maskDepth` (the object drawn alone) and occlusion-tested against the
+   *  base scene. Advances the ping-pong like `composite`. */
+  private edgeComposite(t: EdgeLinesTreatment, maskDepth: THREE.Texture, camera: THREE.Camera): void {
+    const u = this.edgeLinesMat.uniforms
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    u.tNormal!.value = this.gbuf!.texture
+    u.tDepth!.value = this.gbuf!.depthTexture
+    u.tMaskDepth!.value = maskDepth
+    u.tBaseDepth!.value = this.base.depthTexture
+    ;(u.uColor!.value as THREE.Color).set(stripAlpha(t.color))
+    // Width 0→1 maps to a 0.75–3.5 px Sobel reach: a wider tap spacing detects the crease
+    // over a wider band, i.e. a thicker line. Threshold passes straight through.
+    u.uWidthPx!.value = 0.75 + t.width * 2.75
+    u.uThreshold!.value = t.threshold
+    const cam = camera as unknown as { near?: number; far?: number; isOrthographicCamera?: boolean }
+    u.uNear!.value = typeof cam.near === 'number' && cam.near > 0 ? cam.near : FALLBACK_NEAR
+    u.uFar!.value = typeof cam.far === 'number' && cam.far > 0 ? cam.far : 100
+    u.uOrtho!.value = cam.isOrthographicCamera ? 1 : 0
+    this.pass(this.edgeLinesMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
+  }
+
+  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], ctx: StageContext): THREE.Texture | null {
     const r = this.renderer
     const size = r.getDrawingBufferSize(this.tmpSize)
     if (size.x <= 0 || size.y <= 0) return null
@@ -685,6 +842,7 @@ export class TreatmentStage {
     const groups = plan.filter((g) => g.rendered && ctx.objectRoots.has(g.objectId))
     const treatedRoots = groups.map((g) => ctx.objectRoots.get(g.objectId)!)
     const invertGroup = groups.find((g) => g.invert)
+    const bufGroups = bufferPlan.filter((g) => ctx.objectRoots.has(g.objectId))
 
     // Lights must be on the stage layer to light an isolated draw; layers.test is any-overlap
     // so leaving the bit set is harmless for the normal layer-0 render.
@@ -760,6 +918,25 @@ export class TreatmentStage {
         this.drawAlone(scene, camera, root, treatedRoots, this.layer, null)
         this.treatAndComposite(g, this.layer, invDepth, root, camera)
       }
+      // 2c. Buffer treatments (edge lines). Build the shared G-buffer ONCE from the treated
+      //     objects, then draw each object alone for its coverage/occlusion mask and lay its
+      //     crease lines over the accumulator. Released the moment a frame has none, so a
+      //     masked-only scene reclaims it (the byte-identical no-treatment frame never even
+      //     calls render(), so it never allocates one).
+      if (bufGroups.length) {
+        const bufRoots = bufGroups.map((g) => ctx.objectRoots.get(g.objectId)!)
+        this.renderGbuffer(scene, camera, bufRoots)
+        const exclude = [...treatedRoots, ...bufRoots]
+        for (const g of bufGroups) {
+          const root = ctx.objectRoots.get(g.objectId)!
+          this.drawAlone(scene, camera, root, exclude, this.layer, null)
+          for (const t of g.treatments) {
+            if (t.kind === 'edgeLines') this.edgeComposite(t, this.layer.depthTexture!, camera)
+          }
+        }
+      } else {
+        this.releaseGbuffer()
+      }
       // 3. One un-premultiply back to straight alpha for the consumers downstream. The
       //    scratch it lands in is not touched again until the next render().
       const outStraight = this.free()
@@ -775,13 +952,13 @@ export class TreatmentStage {
       r.setRenderTarget(prevTarget)
     }
     this.stats.frames++
-    this.stats.groups = groups.length
+    this.stats.groups = groups.length + bufGroups.length
     return result
   }
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.brightMat, this.glowMergeMat, this.compositeMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }

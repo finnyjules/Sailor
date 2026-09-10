@@ -30,7 +30,7 @@ import { PostChain, postEnabled, DEFAULT_POST, type PostSettings } from '~/lib/s
 import { collectEditorHelpers } from '~/lib/scene3d/passes'
 import { syncTreatmentShells } from './treatmentShells'
 import { TreatmentStage } from './treatmentStage'
-import { maskedTreatmentPlan } from './treatments'
+import { maskedTreatmentPlan, bufferTreatmentPlan } from './treatments'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry } from './gem'
@@ -1456,7 +1456,12 @@ export class SceneEngine {
     // composer's OutputPass tone-maps a texture to the canvas.
     const plan = this.lastDoc ? maskedTreatmentPlan(this.lastDoc) : []
     const stageGroups = plan.filter((g) => g.rendered).length
-    if (!postEnabled(post) && stageGroups === 0) { this.renderer.render(scene, camera); return }
+    // The live G-buffer pass runs ONLY when a consuming treatment (edge lines today; depth
+    // fog / curvature wear next) is present — its absence is the byte-identity gate: no buffer
+    // plan ⇒ no G-buffer, no extra render, the same frame as before S3.
+    const bufferPlan = this.lastDoc ? bufferTreatmentPlan(this.lastDoc) : []
+    const runStage = stageGroups > 0 || bufferPlan.length > 0
+    if (!postEnabled(post) && !runStage) { this.renderer.render(scene, camera); return }
     const s = this.renderer.getSize(new THREE.Vector2())
     if (!this.postChain) { this.postChain = new PostChain(this.renderer, scene, camera, s.x, s.y); this.postW = s.x; this.postH = s.y }
     else if (this.postW !== s.x || this.postH !== s.y) { this.postChain.setSize(s.x, s.y); this.postW = s.x; this.postH = s.y }
@@ -1472,11 +1477,11 @@ export class SceneEngine {
     const helpers = collectEditorHelpers(scene)
     for (const h of helpers) h.visible = false
     try {
-      if (stageGroups > 0) {
+      if (runStage) {
         if (!this.treatmentStage) this.treatmentStage = new TreatmentStage(this.renderer)
         let tex: THREE.Texture | null = null
         try {
-          tex = this.treatmentStage.render(scene, camera, plan, { objectRoots: this.objectRoots })
+          tex = this.treatmentStage.render(scene, camera, plan, bufferPlan, { objectRoots: this.objectRoots })
           this.postChain.setInputTexture(tex)
         } catch (e) {
           this.postChain.setInputTexture(null)

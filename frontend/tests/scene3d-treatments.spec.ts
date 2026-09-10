@@ -600,3 +600,133 @@ test.describe('3D Studio treatments', () => {
     await expect(page.getByTestId('treatment-breadcrumb')).toHaveCount(0)
   })
 })
+
+/**
+ * S3 Task 1 — the live G-buffer pass and the edge-lines treatment.
+ *
+ * A single cube turned 45° about Y so the near vertical edge (where its two front faces meet)
+ * sits dead centre. That edge is an INTERIOR crease: the inverted-hull `outline` treatment can
+ * only ink the silhouette, so it leaves this centre line bare, whereas edge lines — a Sobel over
+ * the G-buffer's normals + depth — draws it. The probe is horizontal-gradient energy in a
+ * narrow central strip that is well inside the silhouette, so a black crease line spikes it while
+ * a smoothly shaded face barely registers.
+ *
+ * Byte-identity is the non-negotiable: with no edge-lines treatment present the G-buffer pass
+ * must not run and the frame must be pixel-for-pixel what it was before S3. Proven by an A/B of
+ * a bare cube against the same cube carrying a DISABLED edge-lines treatment — both take the
+ * plain render path (stage frames 0) and must differ by zero pixels.
+ */
+test.describe('3D Studio edge lines (S3 G-buffer)', () => {
+  const cube = (id: string, treatments?: unknown[]) => ({
+    id, kind: 'primitive', primitive: 'box', name: 'Cube', visible: true,
+    position: [0, 0, 0], rotation: [0, 0.785398, 0], scale: [1.4, 1.4, 1.4],
+    material: { type: 'standard', color: '#cccccc', roughness: 0.5, metalness: 0 },
+    ...(treatments ? { treatments } : {}),
+  })
+  const cubeScene = (treatments?: unknown[]) => ({
+    version: 1, background: '#202020', showFloor: false,
+    camera: { position: [0, 0.4, 5], target: [0, 0, 0], fov: 40 },
+    objects: [cube('cube', treatments)],
+  })
+  const EDGE = { id: 't-edge', kind: 'edgeLines', enabled: true, invert: false, color: '#000000', width: 0.6, threshold: 0.4 }
+
+  async function openCube(page: Page, state: unknown): Promise<void> {
+    await page.goto(`/dev/scene3d-lab?state=${encodeURIComponent(JSON.stringify(state))}`)
+    await expect.poll(() => page.evaluate(() => typeof (window as any).__scene3dSnapshot === 'function'), { timeout: 30_000 }).toBe(true)
+    await expect.poll(() => page.evaluate(() => (window as any).__scene3dDoc().objects.length), { timeout: 10_000 }).toBe(1)
+    await page.waitForTimeout(SETTLE_MS)
+  }
+
+  /** Horizontal-gradient energy in a central vertical strip (the interior crease), and in a
+   *  same-height strip off to the left that only ever holds a flat face — the control band. */
+  async function creaseEnergy(page: Page, dataUrl: string): Promise<{ centre: number; face: number }> {
+    return page.evaluate(async (url) => {
+      const img = new Image(); img.src = url; await img.decode()
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+      const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height)
+      const lum = (i: number) => 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
+      const strip = (fx0: number, fx1: number) => {
+        let s = 0, n = 0
+        for (let y = Math.floor(height * 0.42); y < height * 0.58; y++)
+          for (let x = Math.floor(width * fx0); x < width * fx1 - 1; x++) {
+            const i = (y * width + x) * 4; const d = lum(i) - lum(i + 4); s += d * d; n++
+          }
+        return s / n
+      }
+      // `face` is a flat interior band of the right-hand face — between the centre crease
+      // (~0.50) and the right silhouette (~0.64), so no crease line ever falls in it.
+      return { centre: strip(0.47, 0.53), face: strip(0.55, 0.60) }
+    }, dataUrl)
+  }
+
+  test('edge lines draw a line on the box interior crease, and the G-buffer pass ran', async ({ page }) => {
+    const errs = watchConsole(page)
+    await openCube(page, cubeScene())
+    expect((await stats(page)).frames, 'plain cube must take the direct path').toBe(0)
+    const plain = await creaseEnergy(page, await snapshot(page))
+
+    await openCube(page, cubeScene([EDGE]))
+    const s = await stats(page)
+    expect(s.frames, `stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    expect(s.groups).toBeGreaterThanOrEqual(1)
+    const lined = await creaseEnergy(page, await snapshot(page))
+    console.log(`[edge lines] plain centre=${plain.centre.toFixed(3)} face=${plain.face.toFixed(3)} | `
+      + `lined centre=${lined.centre.toFixed(3)} face=${lined.face.toFixed(3)}`)
+    // The crease line spikes the centre strip well past the bare cube…
+    expect(lined.centre).toBeGreaterThan(plain.centre * 3)
+    // …and past its OWN flat-face band (the line is a local feature, not a global brightening).
+    expect(lined.centre).toBeGreaterThan(lined.face * 3)
+  })
+
+  test('edge lines catch the interior crease the hull outline misses', async ({ page }) => {
+    const errs = watchConsole(page)
+    const OUTLINE = { id: 't-out', kind: 'outline', enabled: true, invert: false, color: '#000000', thickness: 0.6 }
+    await openCube(page, cubeScene([OUTLINE]))
+    expect((await stats(page)).frames, `outline is a shell, not a stage group; console: ${errs.join(' | ')}`).toBe(0)
+    const outline = await creaseEnergy(page, await snapshot(page))
+
+    await openCube(page, cubeScene([EDGE]))
+    expect((await stats(page)).frames, `stage never ran; console: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    const edge = await creaseEnergy(page, await snapshot(page))
+    console.log(`[edge vs outline] outline centre=${outline.centre.toFixed(3)} | edge centre=${edge.centre.toFixed(3)}`)
+    // The inverted-hull outline leaves the interior crease bare; edge lines ink it.
+    expect(edge.centre).toBeGreaterThan(outline.centre * 3)
+  })
+
+  test('BYTE-IDENTITY: with no edge-lines treatment the pass never runs and the frame is unchanged', async ({ page }) => {
+    // The render harness is deterministic across reloads of the same scene (proven first), so a
+    // zero-pixel A/B is a real claim, not a coincidence of timing.
+    await openCube(page, cubeScene())
+    expect((await stats(page)).frames).toBe(0)
+    const a = await snapshot(page)
+    await openCube(page, cubeScene())
+    const b = await snapshot(page)
+
+    // Same cube, but now carrying a DISABLED edge-lines treatment — must be absent for rendering.
+    await openCube(page, cubeScene([{ ...EDGE, enabled: false }]))
+    expect((await stats(page)).frames, 'a disabled edge-lines treatment must not run the pass').toBe(0)
+    const disabled = await snapshot(page)
+
+    const diff = (x: string, y: string) => page.evaluate(async ([u1, u2]) => {
+      const load = async (u: string) => {
+        const img = new Image(); img.src = u; await img.decode()
+        const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+        c.getContext('2d')!.drawImage(img, 0, 0)
+        return c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data
+      }
+      const d1 = await load(u1), d2 = await load(u2)
+      let changed = 0
+      for (let i = 0; i < d1.length; i += 4) {
+        if (d1[i] !== d2[i] || d1[i + 1] !== d2[i + 1] || d1[i + 2] !== d2[i + 2] || d1[i + 3] !== d2[i + 3]) changed++
+      }
+      return changed
+    }, [x, y] as [string, string])
+
+    const determinism = await diff(a, b)
+    const absent = await diff(a, disabled)
+    console.log(`[byte-identity] reload-determinism changed=${determinism} | disabled-vs-absent changed=${absent}`)
+    expect(determinism, 'the harness must render the same scene identically across reloads').toBe(0)
+    expect(absent, 'a disabled S3 treatment must leave the frame byte-identical').toBe(0)
+  })
+})

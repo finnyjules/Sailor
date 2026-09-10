@@ -100,6 +100,13 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         toggle(g, 'showSurface', 'Show surface', D.wireframe.showSurface, 'Keep the solid surface under the lines'),
       ]
       break
+    case 'edgeLines':
+      rows = [
+        color(g, 'color', 'Colour', D.edgeLines.color),
+        slider(g, 'width', 'Width', 0, 1, 0.01, D.edgeLines.width, 'How thick the crease lines draw'),
+        slider(g, 'threshold', 'Threshold', 0, 1, 0.01, D.edgeLines.threshold, 'How sharp a crease has to be before a line appears'),
+      ]
+      break
     default:
       rows = []
   }

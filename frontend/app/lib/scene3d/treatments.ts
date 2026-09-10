@@ -11,16 +11,23 @@ import type { SceneDoc, SceneObject } from './config'
 
 export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade'] as const
 export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe'] as const
-export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS] as const
+/** Stage-rendered treatments that consume the per-frame G-buffer (view-space normals +
+ *  depth). Their presence — and ONLY their presence — makes `TreatmentStage` build the
+ *  GBufferPass; with none enabled the pass never runs and the frame is byte-identical to
+ *  before S3. `depthFog` and `curvatureWear` join this list in S3 Tasks 2/3. */
+export const BUFFER_TREATMENT_KINDS = ['edgeLines'] as const
+export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS] as const
 export type MaskedTreatmentKind = typeof MASKED_TREATMENT_KINDS[number]
 export type EdgeTreatmentKind = typeof EDGE_TREATMENT_KINDS[number]
-export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind
+export type BufferTreatmentKind = typeof BUFFER_TREATMENT_KINDS[number]
+export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTreatmentKind
 
 /** Human names — UI copy for tree rows, inspector card titles and motion target labels.
  *  Sentence case, never the stored `kind`. */
 export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
   blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade',
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
+  edgeLines: 'Edge lines',
 }
 
 /** What a Progressive ramp is measured across. `object` = the object's own on-screen extent
@@ -68,9 +75,15 @@ export interface RimLightTreatment extends TreatmentBase { kind: 'rimLight'; col
 export interface OutlineTreatment extends TreatmentBase { kind: 'outline'; color: string; thickness: number }
 export interface XrayTreatment extends TreatmentBase { kind: 'xray'; color: string; opacity: number }
 export interface WireframeTreatment extends TreatmentBase { kind: 'wireframe'; color: string; lineOpacity: number; showSurface: boolean }
+/** Toon crease line drawn from the G-buffer: a Sobel over view-space normals AND depth, so
+ *  it catches a box's INTERIOR creases (two faces meeting at an angle) where the inverted-
+ *  hull `outline` treatment can only trace the silhouette. `width` is line reach in screen
+ *  px, `threshold` how sharp a crease must be to draw. */
+export interface EdgeLinesTreatment extends TreatmentBase { kind: 'edgeLines'; color: string; width: number; threshold: number }
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment
   | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
+  | EdgeLinesTreatment
 
 /** Dial defaults per kind — everything except id/kind/enabled/invert. The ONE source the
  *  parser, `createTreatment` and the inspector controls all read. */
@@ -83,6 +96,7 @@ export const TREATMENT_DEFAULTS = {
   outline: { color: '#000000', thickness: 0.5 },
   xray: { color: '#6fd3ff', opacity: 0.35 },
   wireframe: { color: '#ffffff', lineOpacity: 0.8, showSurface: true },
+  edgeLines: { color: '#000000', width: 0.5, threshold: 0.5 },
 } as const
 
 /** How many masked-treatment groups the stage draws per frame. */
@@ -94,6 +108,13 @@ export const BLUR_AMOUNT_MAX = 3
 
 export function isMaskedKind(kind: TreatmentKind): kind is MaskedTreatmentKind {
   return (MASKED_TREATMENT_KINDS as readonly string[]).includes(kind)
+}
+export function isEdgeKind(kind: TreatmentKind): kind is EdgeTreatmentKind {
+  return (EDGE_TREATMENT_KINDS as readonly string[]).includes(kind)
+}
+/** A G-buffer consumer (edge lines today; depth fog / curvature wear in Tasks 2/3). */
+export function isBufferKind(kind: TreatmentKind): kind is BufferTreatmentKind {
+  return (BUFFER_TREATMENT_KINDS as readonly string[]).includes(kind)
 }
 export function isTreatmentKind(v: unknown): v is TreatmentKind {
   return typeof v === 'string' && (TREATMENT_KINDS as readonly string[]).includes(v)
@@ -164,6 +185,10 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
       ...base, kind: 'wireframe', color: str(r.color, D.wireframe.color),
       lineOpacity: clamp01(num(r.lineOpacity, D.wireframe.lineOpacity)), showSurface: r.showSurface !== false,
     }
+    case 'edgeLines': return {
+      ...base, kind: 'edgeLines', color: str(r.color, D.edgeLines.color),
+      width: clamp01(num(r.width, D.edgeLines.width)), threshold: clamp01(num(r.threshold, D.edgeLines.threshold)),
+    }
   }
   return undefined
 }
@@ -206,9 +231,38 @@ export function findTreatment(
   return { obj, treatment: list[index]!, index }
 }
 
-/** Enabled edge-family treatments, in stack order. */
+/** Enabled edge-family (shell) treatments, in stack order. Buffer kinds (edge lines) are
+ *  NOT shells — they render in the stage from the G-buffer, so they are excluded here even
+ *  though, like the shell kinds, they are not masked. */
 export function edgeTreatmentsOf(obj: SceneObject): Treatment[] {
-  return treatmentsOf(obj).filter((t) => t.enabled && !isMaskedKind(t.kind))
+  return treatmentsOf(obj).filter((t) => t.enabled && isEdgeKind(t.kind))
+}
+
+/** One object's enabled G-buffer treatments (edge lines today), in stack order — the stage
+ *  draws these from the shared normals+depth buffer. */
+export interface BufferGroup { objectId: string; treatments: Treatment[] }
+
+/**
+ * The per-frame plan for the buffer family, in doc (tree) order — one group per host object
+ * that carries an enabled buffer treatment. Capped at TREATED_OBJECT_CAP like the masked
+ * plan. EMPTY when nothing consumes the G-buffer, which is exactly the gate the stage reads:
+ * an empty plan ⇒ the GBufferPass never runs ⇒ the frame is byte-identical to before S3.
+ */
+export function bufferTreatmentPlan(doc: SceneDoc): BufferGroup[] {
+  const groups: BufferGroup[] = []
+  for (const obj of doc.objects) {
+    if (!obj.visible || !isTreatmentHost(obj)) continue
+    const buf = treatmentsOf(obj).filter((t) => t.enabled && isBufferKind(t.kind))
+    if (buf.length) groups.push({ objectId: obj.id, treatments: buf })
+    if (groups.length >= TREATED_OBJECT_CAP) break
+  }
+  return groups
+}
+
+/** Does any visible host object carry an enabled buffer treatment? The one gate the live
+ *  G-buffer pass is built on — false ⇒ no pass, no extra render, byte-identical frame. */
+export function docHasGBufferTreatment(doc: SceneDoc): boolean {
+  return bufferTreatmentPlan(doc).length > 0
 }
 
 export interface MaskedGroup {
