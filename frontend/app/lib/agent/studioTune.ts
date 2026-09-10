@@ -62,11 +62,8 @@ import {
 } from '~/lib/scene3d/config'
 import {
   SCENE_GUIDANCE, sceneBindableControls, sceneAgentControls,
-  scenePrimitiveMacro, SCENE_PRIMITIVE_MACRO_KEY,
+  scenePrimitiveMacro, SCENE_PRIMITIVE_MACRO_KEY, sceneModifierAwareParams,
 } from '~/lib/scene3d/agentControls'
-import {
-  isModifierStackPath, materializeModifierStackForPath, modifierOptionsFor,
-} from '~/lib/scene3d/modifierStack'
 
 const MEDIA_OPS = new Set(['generateImage', 'editImage', 'removeImageBackground'])
 
@@ -851,54 +848,6 @@ function scene3dWidgetIndex(node: any): number {
  * is the one moment they mean something: the model has just asked for a shape
  * that did not exist when it wrote the patch, so it cannot name the new id.
  */
-/**
- * Scene3D's modifier-stack write seam, wrapping the flat `Params` proxy the way
- * `vtMoveEaseAwareParams` wraps Vector Type's — so `configParams.ts` stays generic and every
- * scene-specific rule lives here.
- *
- * Two jobs, both ONLY on `objects.<id>.modifierStack.<mid>.<field>` keys; every other key passes
- * straight through:
- *  1. MATERIALIZE ON EDIT. A legacy object mints modifier controls through the read-through
- *     `modifierStackOf` (deterministic `mod:<kind>:0` ids) but has no `modifierStack` array yet, so
- *     the underlying `write` would fabricate a bogus `{ '<mid>': { … } }` OBJECT on it. Folding the
- *     bag into the id-stamped stack first (Vary bag kept) makes the following write land on the
- *     right row — the agent counterpart of motion/apply.ts's own materialize call.
- *  2. OPTION ↔ INDEX. `modifierControls` surfaces the axis/mode modifiers as SELECTS (with human
- *     option labels), but the flat bag stores the option's INDEX (`applyModifierStack` reads
- *     `Math.round(m('twistAxis'))`). `validatePatch` keeps the raw option string, so a WRITE coerces
- *     it back to its index (else the select is a dead control — the exact numeric-field corruption
- *     controls.ts's note calls out), and a READ renders the stored index back to its option string
- *     so `describeControls`'s "current" matches what the model was offered.
- */
-function sceneModifierAwareParams(base: Params, config: () => unknown): Params {
-  const fieldOf = (key: string): string => key.slice(key.lastIndexOf('.') + 1)
-  return new Proxy(base, {
-    get: (target, key) => {
-      if (typeof key !== 'string' || !isModifierStackPath(key)) return (target as any)[key]
-      const v = (target as any)[key]
-      const options = modifierOptionsFor(fieldOf(key))
-      // Stored index → option string, so a select's "current" reads back as it was offered.
-      return options && typeof v === 'number' && v >= 0 && v < options.length ? options[v] : v
-    },
-    set: (target, key, value) => {
-      if (typeof key === 'string' && isModifierStackPath(key)) {
-        materializeModifierStackForPath(config(), key)
-        const options = modifierOptionsFor(fieldOf(key))
-        if (options && typeof value === 'string') {
-          const i = options.indexOf(value)
-          // An unknown option is dropped, not guessed — validatePatch already snaps selects to
-          // their options, so this only ever fires with a real member.
-          if (i >= 0) { (target as any)[key] = i; return true }
-          return true
-        }
-      }
-      ;(target as any)[key] = value
-      return true
-    },
-    has: (target, key) => key in target,
-  })
-}
-
 const scene3dAdapter: PatchAdapter = {
   read: (n: any) => {
     const i = scene3dWidgetIndex(n)

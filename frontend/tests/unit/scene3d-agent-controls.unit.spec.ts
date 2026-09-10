@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   sceneStackControls, sceneAgentControls, sceneBindableControls, SCENE_GUIDANCE,
-  SCENE_PRIMITIVE_MACRO_KEY, iterateModifierControls,
+  SCENE_PRIMITIVE_MACRO_KEY, iterateModifierControls, sceneModifierAwareParams,
 } from '~/lib/scene3d/agentControls'
 import { SCENE_CONTROLS } from '~/lib/scene3d/controls'
 import {
@@ -14,6 +14,7 @@ import { createTreatment } from '~/lib/scene3d/treatments'
 import {
   createModifier, addModifier, writeModifierStack, modifierStackOf,
 } from '~/lib/scene3d/modifierStack'
+import { makeConfigParams } from '~/lib/agent/configParams'
 
 /** Every `WORKED EXAMPLE … {…}` block in the guidance, as `[label, parsed JSON]`.
  *  Balanced-brace scan rather than a regex: the examples nest objects (gradient stops),
@@ -475,5 +476,62 @@ describe('sceneStackControls / iterateModifierControls: modifiers', () => {
     iterateModifierControls(doc, (_c, _obj, _id, mod) => { if (mod.id === modId) seen.push(mod.kind) })
     expect(seen.length).toBeGreaterThan(0)
     expect(new Set(seen)).toEqual(new Set(['twist']))
+  })
+})
+
+describe('agent apply: modifier writes (materialize on edit + option/index coercion)', () => {
+  // The SAME params proxy the scene adapter wires (studioTune.ts): absolute id paths, no live
+  // selection (relative prefix resolves to -1, unused here).
+  const paramsFor = (config: SceneDoc) =>
+    sceneModifierAwareParams(makeConfigParams(() => config, () => -1, 'objects', 'id', 'object'), () => config)
+
+  it('materializes a LEGACY bag on write, lands the twist row, and keeps the Vary bag', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.modifiers = { twist: 90, varyColorStrength: 0.7 }
+    doc.objects.push(box)
+    const params = paramsFor(doc)
+    params[`objects.${box.id}.modifierStack.mod:twist:0.twist`] = 45
+    const out = doc.objects[0] as any
+    expect(Array.isArray(out.modifierStack)).toBe(true)
+    expect(out.modifierStack.find((r: any) => r.id === 'mod:twist:0').twist).toBe(45)
+    // materialize KEEPS the legacy bag, so the Vary material uniform survives the first edit.
+    expect(out.modifiers.varyColorStrength).toBe(0.7)
+  })
+
+  it('lands on a NEW-shape object without re-folding — the row id is untouched', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.modifierStack = [{ ...createModifier('twist'), id: 'mod_t', twist: 0 }]
+    doc.objects.push(box)
+    const params = paramsFor(doc)
+    params[`objects.${box.id}.modifierStack.mod_t.twist`] = 30
+    const out = doc.objects[0] as any
+    expect(out.modifierStack).toHaveLength(1)
+    expect(out.modifierStack[0].id).toBe('mod_t')
+    expect(out.modifierStack[0].twist).toBe(30)
+  })
+
+  it('coerces an axis SELECT option back to its stored INDEX, and reads the index back as the option', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.modifierStack = [{ ...createModifier('twist'), id: 'mod_t', twist: 10, twistAxis: 1 }]
+    doc.objects.push(box)
+    const params = paramsFor(doc)
+    const key = `objects.${box.id}.modifierStack.mod_t.twistAxis`
+    params[key] = 'z' // the option string the model was offered
+    expect((doc.objects[0] as any).modifierStack[0].twistAxis).toBe(2) // stored as the numeric index
+    expect(params[key]).toBe('z') // read renders the stored index back to its option
+  })
+
+  it('leaves a non-modifier path alone (no materialize, plain write-through)', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.modifiers = { twist: 90 }
+    doc.objects.push(box)
+    const params = paramsFor(doc)
+    params[`objects.${box.id}.material.roughness`] = 0.5
+    expect((doc.objects[0] as any).modifierStack).toBeUndefined()
+    expect((doc.objects[0] as any).material.roughness).toBe(0.5)
   })
 })

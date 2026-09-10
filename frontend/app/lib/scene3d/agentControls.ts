@@ -1,11 +1,14 @@
-import type { ControlSpec } from '~/lib/spacetype/effect'
+import type { ControlSpec, Params } from '~/lib/spacetype/effect'
 import { getEffectSync } from '~/lib/shaderfx/catalog'
 import { derivedShaderFillControls, shaderFillControls } from '~/lib/shaderfill/controls'
 import { SCENE_CONTROLS, visibleSceneControls, type SceneControl } from './controls'
 import { MACRO_PRIMITIVE_KINDS, MACRO_NONE, type SceneDoc, type SceneObject, type PrimitiveObject } from './config'
 import { isTreatmentHost, treatmentsOf, TREATMENT_LABELS, type Treatment } from '~/lib/scene3d/treatments'
 import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentControls'
-import { modifierStackOf, MODIFIER_LABELS, type ModifierInstance } from '~/lib/scene3d/modifierStack'
+import {
+  modifierStackOf, MODIFIER_LABELS, isModifierStackPath, materializeModifierStackForPath,
+  modifierOptionsFor, type ModifierInstance,
+} from '~/lib/scene3d/modifierStack'
 import { modifierControls, modifierField } from '~/lib/scene3d/modifierControls'
 
 /** Strip the schema-only fields (`when`/`agent`/`animatable`/`summary`/`bindable`/
@@ -330,6 +333,54 @@ export function sceneBindableControls(doc: SceneDoc): ControlSpec[] {
     // the bind would resolve to nothing on every unedited object — another reason to withhold it.
     ...sceneStackControls(doc).filter((c) => !c.key.includes('.treatments.') && !c.key.includes('.modifierStack.')),
   ]
+}
+
+/**
+ * Scene3D's modifier-stack write seam, wrapping the flat `Params` proxy `makeConfigParams` returns
+ * the way `vtMoveEaseAwareParams` wraps Vector Type's — so `agent/configParams.ts` stays generic and
+ * every scene-specific rule lives here. `studioTune.ts`'s scene adapter wires it around the proxy.
+ *
+ * Two jobs, both ONLY on `objects.<id>.modifierStack.<mid>.<field>` keys; every other key passes
+ * straight through:
+ *  1. MATERIALIZE ON EDIT. A legacy object mints modifier controls through the read-through
+ *     `modifierStackOf` (deterministic `mod:<kind>:0` ids) but has no `modifierStack` array yet, so
+ *     the underlying `write` would fabricate a bogus `{ '<mid>': { … } }` OBJECT on it. Folding the
+ *     bag into the id-stamped stack first (Vary bag kept) makes the following write land on the
+ *     right row — the agent counterpart of motion/apply.ts's own materialize call.
+ *  2. OPTION ↔ INDEX. `modifierControls` surfaces the axis/mode modifiers as SELECTS (with human
+ *     option labels), but the flat bag stores the option's INDEX (`applyModifierStack` reads
+ *     `Math.round(m('twistAxis'))`). `validatePatch` keeps the raw option string, so a WRITE coerces
+ *     it back to its index (else the select is a dead control — the exact numeric-field corruption
+ *     controls.ts's note calls out), and a READ renders the stored index back to its option string
+ *     so `describeControls`'s "current" matches what the model was offered.
+ */
+export function sceneModifierAwareParams(base: Params, config: () => unknown): Params {
+  const fieldOf = (key: string): string => key.slice(key.lastIndexOf('.') + 1)
+  return new Proxy(base, {
+    get: (target, key) => {
+      if (typeof key !== 'string' || !isModifierStackPath(key)) return (target as any)[key]
+      const v = (target as any)[key]
+      const options = modifierOptionsFor(fieldOf(key))
+      // Stored index → option string, so a select's "current" reads back as it was offered.
+      return options && typeof v === 'number' && v >= 0 && v < options.length ? options[v] : v
+    },
+    set: (target, key, value) => {
+      if (typeof key === 'string' && isModifierStackPath(key)) {
+        materializeModifierStackForPath(config(), key)
+        const options = modifierOptionsFor(fieldOf(key))
+        if (options && typeof value === 'string') {
+          const i = options.indexOf(value)
+          // An unknown option is dropped, not guessed — validatePatch already snaps selects to
+          // their options, so this only ever fires with a real member.
+          if (i >= 0) (target as any)[key] = i
+          return true
+        }
+      }
+      ;(target as any)[key] = value
+      return true
+    },
+    has: (target, key) => key in target,
+  })
 }
 
 /**
