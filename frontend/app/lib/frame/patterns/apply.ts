@@ -17,13 +17,20 @@ function targetId(op: LayerOp, elements: FrameElements): string | undefined {
 
 /** Apply a placement's ops onto a copy of `layers`. Pure: returns a new array of
  *  new layer objects; never mutates the input. Geometry/colour-role/blend/line-
- *  breaks only — face, weight and content are never touched. */
+ *  breaks only — face, weight and content are never touched.
+ *
+ *  `opts.recolour` gates whether a role paints an EXISTING layer's `color`/
+ *  `fill`: omitted or `true` keeps today's behaviour; `false` leaves every
+ *  existing layer's colour untouched (a newly inserted shape still gets its
+ *  fill — that happens at creation in insert.ts, not here). */
 export function applyPlacement(
   layers: LocalLayer[],
   placement: PatternPlacement,
   elements: FrameElements,
   palette: ResolvedPalette,
+  opts: { recolour?: boolean } = {},
 ): LocalLayer[] {
+  const recolour = opts.recolour !== false
   // index ops by resolved layer id (last op for an id wins — patterns emit one per element)
   const byId = new Map<string, LayerOp>()
   for (const op of placement.ops) { const id = targetId(op, elements); if (id) byId.set(id, op) }
@@ -33,7 +40,7 @@ export function applyPlacement(
     const next: any = { ...layer, x: op.x, y: op.y }
     if (op.rotation != null) next.rotation = op.rotation
     if (op.blend) next.blend = op.blend
-    if (op.colorRole) {
+    if (recolour && op.colorRole) {
       const paint = roleToPaint(op.colorRole, palette)
       if (layer.kind === 'text') next.color = paint
       else if ('fill' in layer) next.fill = paint

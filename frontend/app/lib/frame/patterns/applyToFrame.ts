@@ -23,6 +23,9 @@ export interface PlanArgs {
   shapeMode?: FrameElements['shapeMode']
   /** Wired image slots connected on the node (for the present-keys reconcile). */
   connectedSlots: number[]
+  /** Write colours from the role palette. Off by default: a layout changes no
+   *  colour; the palette picker turns it on. */
+  recolour?: boolean
 }
 
 export interface ApplyArgs extends PlanArgs {
@@ -51,7 +54,7 @@ export function planPattern(args: PlanArgs): PatternPlan | null {
   const placement = pattern.place(ctx)
   // insert any library shape the pattern wanted but the frame lacks, then patch
   const ins = insertFromOps(layers, placement.ops, args.palette)
-  const next = applyPlacement(ins.layers, { ...placement, ops: ins.ops }, ctx.elements, args.palette)
+  const next = applyPlacement(ins.layers, { ...placement, ops: ins.ops }, ctx.elements, args.palette, { recolour: args.recolour ?? false })
   // draw order: reconcile the saved order against what is present, then honour z
   const saved = (args.props?.sailor_stackOrder as string[] | undefined) ?? []
   const present = framePresentKeys(args.connectedSlots, next)

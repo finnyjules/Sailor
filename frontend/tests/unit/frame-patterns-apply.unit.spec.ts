@@ -101,6 +101,28 @@ describe('applyPlacement', () => {
     const t = applyPlacement(layers, placement, elements, palette)[0] as any
     expect(t.color).toBe('#abcdef')
   })
+  it('with { recolour: false }, an existing layer keeps its colour even when the op carries a role', () => {
+    const layers: LocalLayer[] = [
+      textLayer('t', { color: '#abcdef' }),
+      { id: 's', kind: 'rect', x: 0.5, y: 0.5, w: 0.2, h: 0.2, fill: '#334455', rotation: 0, opacity: 1 } as any,
+    ]
+    const els = {
+      title: { role: 'title', id: 't', text: 'NOISE', words: ['NOISE'] },
+      images: [], shapes: [{ id: 's', shapeId: 'circle' }], shapeMode: null,
+    } as unknown as FrameElements
+    const placement: PatternPlacement = { did: 'x', ops: [
+      { target: 'title', kind: 'text', x: 0.2, y: 0.3, fontSize: 0.25, colorRole: 'ink' },
+      { target: 's', kind: 'shape', x: 0.3, y: 0.4, w: 0.6, h: 0.6, colorRole: 'accent', fill: 'solid', z: 0 },
+    ] }
+    const next = applyPlacement(layers, placement, els, palette, { recolour: false })
+    const t = next.find(l => l.id === 't') as any
+    const s = next.find(l => l.id === 's') as any
+    expect(t.color).toBe('#abcdef')                // untouched
+    expect(s.fill).toBe('#334455')                  // untouched
+    expect([t.x, t.y]).toEqual([0.2, 0.3])          // geometry still applied
+    expect(t.fontSize).toBe(0.25)
+    expect([s.x, s.y, s.w, s.h]).toEqual([0.3, 0.4, 0.6, 0.6])
+  })
   it('never mutates the input', () => {
     const layer = Object.freeze(textLayer('t'))
     const layers: LocalLayer[] = Object.freeze([layer]) as any

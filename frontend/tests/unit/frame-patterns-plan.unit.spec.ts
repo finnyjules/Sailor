@@ -1,6 +1,7 @@
 // frontend/tests/unit/frame-patterns-plan.unit.spec.ts
 import { describe, it, expect, vi } from 'vitest'
 import { planPattern, applyPatternToFrame } from '~/lib/frame/patterns/applyToFrame'
+import { paletteFromFrame } from '~/lib/frame/patterns/framePalette'
 
 const title = { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2, x: 0.5, y: 0.5, rotation: 0, opacity: 1, fontFamily: 'Inter', fontWeight: 700, color: '#112233', align: 'center', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 }
 const img = { id: 'img', kind: 'image', filename: 'x.png', x: 0.5, y: 0.5, w: 0.5, h: 0.5, rotation: 0, opacity: 1 }
@@ -34,5 +35,22 @@ describe('planPattern', () => {
     const t = plan.layers.find(l => l.id === 't') as any
     expect(t.color).toBe('#112233'); expect(t.fontFamily).toBe('Inter'); expect(t.fontWeight).toBe(700); expect(t.text).toBe('NOISE')
     expect(t.x !== 0.5 || t.y !== 0.5 || t.fontSize !== 0.2).toBe(true)   // but it did move
+  })
+  it('a caption with its own colour keeps it by default; recolour: true repaints it to the palette ink', () => {
+    const captionText = { id: 'cap', kind: 'text', text: 'a small caption', fontSize: 0.03, x: 0.5, y: 0.9, rotation: 0, opacity: 1, fontFamily: 'Inter', fontWeight: 400, color: '#54f4cf', align: 'left', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 }
+    const titleText = { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2, x: 0.5, y: 0.5, rotation: 0, opacity: 1, fontFamily: 'Inter', fontWeight: 700, color: '#112233', align: 'center', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 }
+    // caption stored BEFORE the title in the array
+    const props = { sailor_localLayers: [captionText, titleText] }
+    const palette = paletteFromFrame(props)
+
+    const off = planPattern({ props, frameW: 800, frameH: 1000, patternId: 'runoff', seed: 7, palette, connectedSlots: [] })!
+    const capOff = off.layers.find(l => l.id === 'cap') as any
+    const titleOff = off.layers.find(l => l.id === 't') as any
+    expect(capOff.color).toBe('#54f4cf')            // untouched — the bug this guards
+    expect(titleOff.color).toBe('#112233')          // untouched
+
+    const on = planPattern({ props, frameW: 800, frameH: 1000, patternId: 'runoff', seed: 7, palette, connectedSlots: [], recolour: true })!
+    const capOn = on.layers.find(l => l.id === 'cap') as any
+    expect(capOn.color).toBe(palette.ink)
   })
 })
