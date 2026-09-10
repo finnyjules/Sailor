@@ -7514,9 +7514,9 @@ onUnmounted(() => {
               </div>
               <div>
                 <div class="panel-sublabel mb-1">Offset</div>
-                <input v-scrubnum data-testid="geo-trim-offset" type="number" step="1" :value="Math.round(((activeEffect as any).offset || 0) * 1000) / 10"
+                <input v-scrubnum data-testid="geo-trim-offset" type="number" min="-100" max="100" step="1" :value="Math.round(((activeEffect as any).offset || 0) * 1000) / 10"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                  @input="updateActiveEffect({ offset: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
+                  @input="updateActiveEffect({ offset: Math.min(1, Math.max(-1, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
               </div>
             </div>
           </div>
@@ -7548,9 +7548,9 @@ onUnmounted(() => {
               </div>
               <div>
                 <div class="panel-sublabel mb-1">Detail</div>
-                <input v-scrubnum data-testid="geo-roughen-detail" type="number" min="1" step="1" :value="Math.round((activeEffect as any).detail ?? 8)"
+                <input v-scrubnum data-testid="geo-roughen-detail" type="number" min="1" max="32" step="1" :value="Math.round((activeEffect as any).detail ?? 8)"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                  @input="updateActiveEffect({ detail: Math.max(1, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 8)) })" />
+                  @input="updateActiveEffect({ detail: Math.min(32, Math.max(1, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 8))) })" />
               </div>
               <div>
                 <div class="panel-sublabel mb-1">Seed</div>

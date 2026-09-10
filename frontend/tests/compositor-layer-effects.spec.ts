@@ -418,3 +418,165 @@ test.describe('Frame geometry effects — menu gating + inspector dials (F2 Task
     expect(distinct).toBeGreaterThan(1)
   })
 })
+
+/**
+ * F2 Task 8 (Minor 1) — offscreen rasters pad for OUTWARD geometry growth.
+ *
+ * A box-sized silhouette raster (torn edge / feather) is sized from the layer's box, which
+ * knows nothing about a geometry transform. Before the fix, a positive `offset` pushed the
+ * fill PAST the box edge and the feather raster clipped it back to the box. `geometryOutwardPx`
+ * grows the pad by the geometry's outward reach, so the grown ink survives.
+ *
+ * The two Task-6 dial tests below also cover the two params the inspector was missing until
+ * Task 7's engine/agent added them: trim `offset` and roughen `detail`.
+ */
+
+/** Normalized [0,1] bounding box of ink (alpha > 40) on the stack canvas. */
+async function inkExtent(page: Page) {
+  return page.evaluate(() => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
+    let minX = 1, maxX = 0, minY = 1, maxY = 0, any = false
+    for (let y = 0; y < cv.height; y++) {
+      for (let x = 0; x < cv.width; x++) {
+        if (d[(y * cv.width + x) * 4 + 3]! > 40) {
+          any = true
+          const nx = x / cv.width, ny = y / cv.height
+          if (nx < minX) minX = nx; if (nx > maxX) maxX = nx
+          if (ny < minY) minY = ny; if (ny > maxY) maxY = ny
+        }
+      }
+    }
+    return { any, minX, maxX, minY, maxY }
+  })
+}
+
+test.describe('Frame geometry effects — offscreen pad for outward growth (F2 Task 8)', () => {
+  test('a big positive offset + feather is NOT clipped at the box edge', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    // A 0.6-wide, sharp white rect centred at 0.5 ⇒ original box edges at x∈{0.2,0.8}.
+    await seedRectFill(page)
+
+    // Reference: offset ONLY. It never touches the silhouette raster, so its grown extent is
+    // never clipped — grown edge ≈ 0.8 + 0.1 = 0.9.
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'off', type: 'offset', distance: 0.1, visible: true }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    await stackPixels(page)
+    const offsetOnly = await inkExtent(page)
+    expect(offsetOnly.any).toBe(true)
+    expect(offsetOnly.maxX).toBeGreaterThan(0.85) // grown well past the 0.8 box edge
+
+    // Now the same offset PLUS a feather. Before the pad fix the feather raster was box-sized
+    // and clipped the grown fill back to ~0.8; with the fix it holds the grown ink.
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [
+        { id: 'off', type: 'offset', distance: 0.1, visible: true },
+        { id: 'ft', type: 'feather', amount: 0.06, curve: 'smooth', visible: true },
+      ]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    await stackPixels(page)
+    const withFeather = await inkExtent(page)
+
+    // eslint-disable-next-line no-console
+    console.log('[F2 clip] offsetOnly.maxX=%s withFeather.maxX=%s', offsetOnly.maxX.toFixed(3), withFeather.maxX.toFixed(3))
+    // The grown ink still reaches well past the original box edge (0.8) — not clipped back.
+    expect(withFeather.maxX).toBeGreaterThan(0.83)
+    // And it tracks the unclipped reference within the feather's own soft falloff.
+    expect(withFeather.maxX).toBeGreaterThan(offsetOnly.maxX - 0.06)
+  })
+
+  test('the trim Offset dial reaches the stack and moves the pixels', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page)
+
+    await openFxMenuFirst(page)
+    await page.locator('[data-testid="add-effect-item"][data-kind="trim"]').click()
+    await expect(page.getByTestId('effect-breadcrumb')).toBeVisible()
+
+    // Trim to half so the window has somewhere to rotate to (a full 0..1 loop would be a no-op).
+    const end = page.locator('[data-testid="geo-trim-end"]')
+    await end.fill('50'); await end.blur()
+    await expect.poll(() => page.evaluate(() =>
+      ((window as any).__compositorLayers()[0].effects || []).find((e: any) => e.type === 'trim')?.end))
+      .toBeCloseTo(0.5, 5)
+    const before = await stackPixels(page)
+
+    // The Offset dial (shown as a percentage) must reach the stored fraction and rotate the window.
+    const off = page.locator('[data-testid="geo-trim-offset"]')
+    await expect(off).toBeVisible()
+    await off.fill('25'); await off.blur()
+    await expect.poll(() => page.evaluate(() =>
+      ((window as any).__compositorLayers()[0].effects || []).find((e: any) => e.type === 'trim')?.offset))
+      .toBeCloseTo(0.25, 5)
+    const after = await stackPixels(page)
+    expect(after).not.toBe(before)
+  })
+
+  test('the roughen Detail dial reaches the stack and changes the pixels', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page)
+
+    await openFxMenuFirst(page)
+    await page.locator('[data-testid="add-effect-item"][data-kind="roughen"]').click()
+    await expect(page.getByTestId('effect-breadcrumb')).toBeVisible()
+    const before = await stackPixels(page)
+
+    const detail = page.locator('[data-testid="geo-roughen-detail"]')
+    await expect(detail).toBeVisible()
+    await detail.fill('24'); await detail.blur()
+    await expect.poll(() => page.evaluate(() =>
+      ((window as any).__compositorLayers()[0].effects || []).find((e: any) => e.type === 'roughen')?.detail))
+      .toBe(24)
+    const after = await stackPixels(page)
+    expect(after).not.toBe(before)
+  })
+})
+
+test.describe('Frame geometry effects — silhouette-raster byte-identity (F2 Task 8)', () => {
+  test('a torn-edge rect with NO geometry is byte-identical after a geometry round-trip', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page)
+
+    // A torn edge routes the layer through the box-sized silhouette raster — the pad path this
+    // fix touches. With no geometry effect `geometryOutwardPx` returns 0, so the pad (and the
+    // baked raster) must be byte-identical to before the fix existed.
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'te', type: 'torn_edge', style: 'ripped', amount: 16, roughness: 0.5, grain: 2, grainTexture: 0.3, lipWidth: 3, lipVariation: 0.4, lipColor: '#f7f3ea', seed: 7, visible: true }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    const tornOnly = await stackPixels(page)
+
+    // Add a geometry effect (grows the pad), then remove it — back to the torn-edge-only render.
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [
+        { id: 'off', type: 'offset', distance: 0.08, visible: true },
+        { id: 'te', type: 'torn_edge', style: 'ripped', amount: 16, roughness: 0.5, grain: 2, grainTexture: 0.3, lipWidth: 3, lipVariation: 0.4, lipColor: '#f7f3ea', seed: 7, visible: true },
+      ]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    await stackPixels(page)
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'te', type: 'torn_edge', style: 'ripped', amount: 16, roughness: 0.5, grain: 2, grainTexture: 0.3, lipWidth: 3, lipVariation: 0.4, lipColor: '#f7f3ea', seed: 7, visible: true }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    const tornAgain = await stackPixels(page)
+
+    const delta = await pixelDelta(page, tornOnly, tornAgain)
+    // eslint-disable-next-line no-console
+    console.log('[F2 torn byte-identity] max=%d mean=%s changed=%d', delta.max, delta.mean.toFixed(4), delta.changed)
+    expect(delta.sizeMismatch).toBe(false)
+    expect(tornAgain).toBe(tornOnly)
+  })
+})

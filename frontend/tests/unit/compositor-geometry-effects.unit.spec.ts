@@ -240,6 +240,7 @@ import {
   computedOutlineD,
   needsComputedOutline,
   layerGeometryEffects,
+  geometryOutwardPx,
   outlinePathData,
   createRectLayer,
   createEllipseLayer,
@@ -329,5 +330,62 @@ describe('useCompositorLayers: needsComputedOutline', () => {
       strokes: [{ id: 's1', paint: '#000', width: 0.01, distance: 0.02, align: 'center', visible: true }] as any,
     })
     expect(needsComputedOutline(t)).toBe(false)
+  })
+})
+
+// ── Task 8 (Minor 1): offscreen rasters pad for outward geometry growth. The pure
+// helper reports how far a layer's enabled geometry effects push its outline PAST the
+// box edge, so the silhouette / corner-pin / DOF rasters grow to hold the grown ink.
+describe('useCompositorLayers: geometryOutwardPx', () => {
+  const W = 300
+  it('is 0 for a layer with no geometry effect (byte-identity pad preserved)', () => {
+    expect(geometryOutwardPx(createRectLayer(), W)).toBe(0)
+  })
+  it('is 0 for trim-only (trim removes, never grows outward)', () => {
+    const r = createRectLayer({ effects: [geo('trim', { start: 0, end: 0.5, offset: 0.3 })] as any })
+    expect(geometryOutwardPx(r, W)).toBe(0)
+  })
+  it('is 0 for round_corners-only (fillets only cut inward)', () => {
+    const r = createRectLayer({ effects: [geo('round_corners', { radius: 0.05 })] as any })
+    expect(geometryOutwardPx(r, W)).toBe(0)
+  })
+  it('is distance·W for a positive offset', () => {
+    const r = createRectLayer({ effects: [geo('offset', { distance: 0.02 })] as any })
+    expect(geometryOutwardPx(r, W)).toBeCloseTo(0.02 * W, 6)
+  })
+  it('is 0 for a NEGATIVE offset (inward shrink grows nothing)', () => {
+    const r = createRectLayer({ effects: [geo('offset', { distance: -0.02 })] as any })
+    expect(geometryOutwardPx(r, W)).toBe(0)
+  })
+  it('is amount·W for a roughen', () => {
+    const r = createRectLayer({ effects: [geo('roughen', { amount: 0.03 })] as any })
+    expect(geometryOutwardPx(r, W)).toBeCloseTo(0.03 * W, 6)
+  })
+  it('is the MAX across several geometry effects', () => {
+    const r = createRectLayer({
+      effects: [
+        geo('offset', { distance: 0.01 }),
+        geo('roughen', { amount: 0.04 }),
+        geo('trim', { start: 0, end: 0.9, offset: 0.2 }),
+        geo('round_corners', { radius: 0.5 }),
+      ] as any,
+    })
+    expect(geometryOutwardPx(r, W)).toBeCloseTo(0.04 * W, 6)
+  })
+  it('ignores a hidden geometry effect', () => {
+    const r = createRectLayer({ effects: [geo('offset', { distance: 0.05, visible: false })] as any })
+    expect(geometryOutwardPx(r, W)).toBe(0)
+  })
+  it('is 0 for an image layer (cannot take geometry) even with an offset', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('offset', { distance: 0.05 })] as any })
+    expect(geometryOutwardPx(img, W)).toBe(0)
+  })
+  it('is 0 for a DECORATED text layer (underline) that carries an offset', () => {
+    const t = createTextLayer({ underline: true, effects: [geo('offset', { distance: 0.05 })] as any })
+    expect(geometryOutwardPx(t, W)).toBe(0)
+  })
+  it('is distance·W for a non-decorated (outlined) text layer with a positive offset', () => {
+    const t = createTextLayer({ effects: [geo('offset', { distance: 0.02 })] as any })
+    expect(geometryOutwardPx(t, W)).toBeCloseTo(0.02 * W, 6)
   })
 })

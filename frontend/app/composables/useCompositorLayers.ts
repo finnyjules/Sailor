@@ -1402,7 +1402,48 @@ export function strokeReachPx(layer: LocalLayer, W: number): number {
  * branch is a full em plus the outline's reach.
  */
 export function cornerPinPadPx(layer: LocalLayer, W: number): number {
-  return strokeStackReachPx(layer, W, false)
+  return strokeStackReachPx(layer, W, false) + geometryOutwardPx(layer, W)
+}
+
+/**
+ * How far a layer's ENABLED geometry effects (F2) grow its outline OUTWARD, logical px.
+ * A box-sized offscreen (corner-pin quad, DOF, torn-edge / feather silhouette) is sized
+ * from `localLayerBox`, which knows nothing about the geometry transform — so a positive
+ * `offset` or a `roughen` displaces ink PAST the box edge and the raster clips it. This
+ * term grows the pad to contain the transformed outline.
+ *
+ * Per kind (matching `geometryEffects.ts`'s pixel math): offset grows by `max(0, distance)·W`
+ * (a negative distance shrinks — 0 outward growth); roughen displaces by up to `amount·W`
+ * along the outward normal; trim only removes and round_corners only cuts corners inward, so
+ * both grow 0. The MAX across the layer's effects, not a sum — the single furthest-pushing
+ * effect bounds the answer this helper reports (see the whole-slice note about a big offset
+ * AND a big roughen together, a rarer combination left slightly under-padded on purpose).
+ *
+ * This term is ADDED to the stroke reach at both call sites, never max'd with it: the
+ * geometry transform grows the OUTLINE first and the stroke is then drawn on that grown
+ * outline, so the stroke reaches beyond the geometry growth — the two extents stack.
+ *
+ * 0 when the layer can't take geometry (`canTakeGeometry`: non-vector kinds, decorated
+ * text) OR carries no enabled geometry effect — so a layer with none gets the byte-identical
+ * pad it had before this fix, and the corner-pin quad it rides never re-warps a saved frame.
+ */
+export function geometryOutwardPx(layer: LocalLayer, W: number): number {
+  if (!canTakeGeometry(layer)) return 0
+  let out = 0
+  for (const e of layerGeometryEffects(layer)) {
+    const r = e as unknown as { type: string; distance?: number; amount?: number }
+    let grow = 0
+    if (r.type === 'offset') {
+      const d = typeof r.distance === 'number' && Number.isFinite(r.distance) ? r.distance : 0
+      grow = Math.max(0, d) * W
+    } else if (r.type === 'roughen') {
+      const a = typeof r.amount === 'number' && Number.isFinite(r.amount) ? r.amount : 0
+      grow = Math.max(0, a) * W
+    }
+    // trim (removes) and round_corners (cuts inward) never grow the outline outward → 0.
+    if (grow > out) out = grow
+  }
+  return out
 }
 
 /**
@@ -1844,6 +1885,11 @@ function silhouetteContentReady(layer: LocalLayer, W: number): boolean {
 export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { w: number; h: number }): number {
   const l = layer as unknown as { strokeWidth?: number; strokeAlign?: unknown; stroke?: Paint; scale?: number; fontSize?: number; boxH?: number }
   const width = Math.max(0, l.strokeWidth || 0)
+  // How far a geometry effect (F2) grows this layer's outline outward, so the baked
+  // silhouette raster contains the transformed ink. 0 for a layer with none, keeping the
+  // raster (and the identity A/B) byte-identical. Added to — never max'd with — the stroke
+  // reach below: the stroke is drawn on the GROWN outline, so the two extents stack.
+  const geoPx = geometryOutwardPx(layer, W)
   let strokePx = 0
   // Named `reachPx`, not `strokeReachPx`: that is the module-level helper it is assigned FROM
   // (a local of the same name would shadow it inside this function).
@@ -1865,7 +1911,9 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
       const reach = st.width + (Number.isFinite(d) ? Math.max(0, d) : 0)
       if (reach > furthest) furthest = reach
     }
-    strokePx = Math.max(width, furthest) * W
+    // Outlined (non-decorated) text can carry a geometry effect too — add its outward growth
+    // so an offset/roughen glyph outline is not clipped at the raster edge.
+    strokePx = Math.max(width, furthest) * W + geoPx
   } else if (layer.kind === 'line') {
     // drawLayerContent floors a line's lineWidth at 1px, so a hairline still caps. A line
     // always strokes (defaulting to white), so this is deliberately NOT gated on paint.
@@ -1875,7 +1923,10 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
     // alignment, `distance`, a marching-shape's mark size and a path's `scale` all folded in. Reading a single
     // `strokeAlign` here instead would bake the wrong outline for a multi-stroked layer,
     // and do it SILENTLY: a slightly wrong torn edge, not an error.
-    reachPx = strokeReachPx(layer, W)
+    // Add the geometry outward growth to the stroke reach: applyGeometry grows the outline
+    // and the stroke is drawn on that grown edge, so the raster must hold both (a sum, not a
+    // max). 0 with no geometry effect ⇒ identical reachPx ⇒ byte-identical raster.
+    reachPx = strokeReachPx(layer, W) + geoPx
     // A path's strokeWidth is stored in local units AT scale=1 (see PathLayer), so its
     // px extent carries the layer's own uniform scale — same correction strokeReachPx makes.
     if (hasPaint(l.stroke)) strokePx = width * (layer.kind === 'path' ? (l.scale ?? 1) : 1) * W
