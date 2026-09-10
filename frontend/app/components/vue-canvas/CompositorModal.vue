@@ -2642,8 +2642,9 @@ function editImageCancel() { editImage.value = null; editImagePrompt.value = '' 
 
 // The edit models (Kontext / Nano / FLUX Fill) return OPAQUE images — they fill in any
 // transparency. So editing a transparent element (a cutout, an alpha shape) would come back
-// as a solid rectangle. These re-apply the ORIGINAL alpha to the result before it's saved,
-// so transparency is respected. Skipped (a no-op) when the source is already opaque.
+// as a solid rectangle. These restore alpha before the result is saved, and are skipped (a
+// no-op) when the source is already opaque. Whole-image edits re-cut the result (its new
+// silhouette is honoured); region edits keep the original outside the mask.
 function srcHasTransparency(srcImg: HTMLImageElement, w: number, h: number): boolean {
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h
   const ctx = cv.getContext('2d')!; ctx.drawImage(srcImg, 0, 0, w, h)
@@ -2651,17 +2652,18 @@ function srcHasTransparency(srcImg: HTMLImageElement, w: number, h: number): boo
   for (let i = 3; i < d.length; i += 4 * 37) if (d[i]! < 250) return true
   return false
 }
-/** Whole-image edit: keep the RESULT's colours but the ORIGINAL's alpha shape, so a
- *  recoloured/restyled cutout stays a cutout instead of gaining an opaque background. */
+/** Whole-image edit of a cutout: re-cut the RESULT through background removal for a fresh
+ *  alpha, so the edited thing keeps ITS OWN outline — a shape-growing edit like "add a hat"
+ *  is not cropped back to the original silhouette. If the re-cut fails, the (opaque) edit is
+ *  kept and the failure is surfaced, not silently dropped. */
 async function reapplyAlpha(resultUrl: string, srcImg: HTMLImageElement, w: number, h: number): Promise<string> {
   if (!srcHasTransparency(srcImg, w, h)) return resultUrl
-  const res = await loadImage(resultUrl)
-  const cv = document.createElement('canvas'); cv.width = w; cv.height = h
-  const ctx = cv.getContext('2d')!
-  ctx.drawImage(res, 0, 0, w, h)
-  ctx.globalCompositeOperation = 'destination-in'
-  ctx.drawImage(srcImg, 0, 0, w, h)   // keep result only where the source was opaque, with its alpha
-  return cv.toDataURL('image/png')
+  try {
+    return await inpaint.removeBackground(resultUrl)
+  } catch {
+    inpaint.error.value = 'Edited, but the transparency could not be re-cut — the result is opaque.'
+    return resultUrl
+  }
 }
 /** Region inpaint: keep the ORIGINAL (with its alpha) outside the mask, take the (opaque)
  *  inpaint result only inside it — so transparency outside the edited region survives.
@@ -5069,8 +5071,8 @@ async function runRegionFill() {
       mctx.drawImage(genMaskCanvas, 0, 0)                        // WHITE region = inpaint
       mctx.setTransform(1, 0, 0, 1, 0, 0)
       const results = await inpaint.fluxFill(imageData, mc.toDataURL('image/png'), genPrompt.value.trim())
-      if (!results.length) { inpaint.error.value = 'The edit returned no image — try again.'; return }
-      const newName = await inpaint.uploadDataUrl(await compositeInpaintAlpha(results[0], img, mc, capW, capH), 'compinpaint')
+      const r0 = results[0]; if (!r0) { inpaint.error.value = 'The edit returned no image — try again.'; return }
+      const newName = await inpaint.uploadDataUrl(await compositeInpaintAlpha(r0, img, mc, capW, capH), 'compinpaint')
       setLocal(layer.id, { filename: newName })
     } else {
       // No target image → generate a brand-new object, then keep the region
