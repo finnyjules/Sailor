@@ -780,3 +780,107 @@ describe('shatter producer', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// S2 Task 4 — geometry producers via engines: decimate (three SimplifyModifier,
+// welded + floored reduction) and voxelise (meshData → voxel remesh → geometry,
+// resolution capped to the vertex budget, open input falls back to the input).
+// ---------------------------------------------------------------------------
+const decimateRow = (fraction = 0): ModifierInstance => {
+  const r = createModifier('decimate'); r.decimate = fraction; return r
+}
+const voxeliseRow = (resolution = 0): ModifierInstance => {
+  const r = createModifier('voxelise'); r.voxelResolution = resolution; return r
+}
+const triCount = (geo: THREE.BufferGeometry): number =>
+  (geo.index ? geo.index.count : geo.getAttribute('position').count) / 3
+
+describe('decimate producer', () => {
+  it('drops the triangle and vertex count on a subdivided box, bounds ~preserved', () => {
+    const makeGeo = () => new THREE.BoxGeometry(1, 1, 1, 8, 8, 8)
+    const base = makeGeo(); base.computeBoundingBox()
+    const bb = base.boundingBox!
+    const out = applyModifierStack(makeGeo(), [decimateRow(0.5)])
+    expect(triCount(out)).toBeLessThan(triCount(base))
+    expect(out.getAttribute('position').count).toBeLessThan(base.getAttribute('position').count)
+    out.computeBoundingBox()
+    const ob = out.boundingBox!
+    // Simplification pulls the surface in a touch but the overall box is preserved.
+    expect(ob.min.distanceTo(bb.min)).toBeLessThan(0.25)
+    expect(ob.max.distanceTo(bb.max)).toBeLessThan(0.25)
+  })
+
+  it('carries UVs through the collapse and yields recomputed normals', () => {
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1, 8, 8, 8), [decimateRow(0.5)])
+    const uv = out.getAttribute('uv') as THREE.BufferAttribute | undefined
+    const nrm = out.getAttribute('normal') as THREE.BufferAttribute | undefined
+    expect(nrm).toBeTruthy() // the pipeline recomputes normals after every producer
+    expect(nrm!.count).toBe(out.getAttribute('position').count)
+    if (uv) expect(uv.count).toBe(out.getAttribute('position').count) // no broken attribute shipped
+  })
+
+  it('floors the reduction so an over-decimate never collapses to nothing', () => {
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1, 4, 4, 4), [decimateRow(0.95)])
+    expect(out.getAttribute('position').count).toBeGreaterThanOrEqual(12) // DECIMATE_MIN_VERTS
+    expect(triCount(out)).toBeGreaterThanOrEqual(4)
+  })
+
+  it('fraction 0 leaves the geometry unchanged (positions identical to the base)', () => {
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1, 4, 4, 4), [decimateRow(0)])
+    expect(comparePositions(out, new THREE.BoxGeometry(1, 1, 1, 4, 4, 4)).diffs).toBe(0)
+  })
+
+  it('is deterministic — the same fraction gives the same mesh', () => {
+    const a = applyModifierStack(new THREE.BoxGeometry(1, 1, 1, 6, 6, 6), [decimateRow(0.4)])
+    const b = applyModifierStack(new THREE.BoxGeometry(1, 1, 1, 6, 6, 6), [decimateRow(0.4)])
+    const cmp = comparePositions(a, b)
+    expect(cmp.lenEqual).toBe(true)
+    expect(cmp.diffs).toBe(0)
+  })
+
+  it('a disabled decimate row is skipped (no-op returns the same geometry)', () => {
+    const disabled = decimateRow(0.5); disabled.enabled = false
+    const g = new THREE.BoxGeometry(1, 1, 1, 4, 4, 4)
+    expect(applyModifierStack(g, [disabled])).toBe(g)
+  })
+})
+
+describe('voxelise producer', () => {
+  it('remeshes a closed box into a new geometry, bounds ~preserved', () => {
+    const makeGeo = () => new THREE.BoxGeometry(1, 1, 1)
+    const base = makeGeo(); base.computeBoundingBox()
+    const bb = base.boundingBox!
+    const out = applyModifierStack(makeGeo(), [voxeliseRow(16)])
+    // A remesh is a genuinely different vertex buffer, not the base returned back.
+    expect(out.getAttribute('position').count).not.toBe(base.getAttribute('position').count)
+    expect(out.getAttribute('position').count).toBeGreaterThan(0)
+    out.computeBoundingBox()
+    const ob = out.boundingBox!
+    expect(ob.min.distanceTo(bb.min)).toBeLessThan(0.3)
+    expect(ob.max.distanceTo(bb.max)).toBeLessThan(0.3)
+  })
+
+  it('resolution 0 leaves the geometry unchanged', () => {
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [voxeliseRow(0)])
+    expect(comparePositions(out, new THREE.BoxGeometry(1, 1, 1)).diffs).toBe(0)
+  })
+
+  it('returns the input for an open (non-watertight) surface — the remesh refuses it', () => {
+    // A single-quad plane is not a closed surface, so the SDF is meaningless: voxelise falls back.
+    const out = applyModifierStack(new THREE.PlaneGeometry(1, 1), [voxeliseRow(16)])
+    expect(comparePositions(out, new THREE.PlaneGeometry(1, 1)).diffs).toBe(0)
+  })
+
+  it('caps the resolution so the remesh output stays under the vertex budget', () => {
+    // At the maximum resolution (64, so 64³ < VERTEX_BUDGET) the surface-nets output must still fit.
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [voxeliseRow(64)])
+    expect(out.getAttribute('position').count).toBeGreaterThan(0)
+    expect(out.getAttribute('position').count).toBeLessThanOrEqual(VERTEX_BUDGET)
+  })
+
+  it('a disabled voxelise row is skipped (no-op returns the same geometry)', () => {
+    const disabled = voxeliseRow(16); disabled.enabled = false
+    const g = new THREE.BoxGeometry(1, 1, 1)
+    expect(applyModifierStack(g, [disabled])).toBe(g)
+  })
+})

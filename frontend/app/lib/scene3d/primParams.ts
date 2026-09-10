@@ -264,6 +264,17 @@ export const MODIFIER_SPECS: ParamSpec[] = [
   axisSpec('mirrorAxis', 'Mirror axis', 'The plane the copy is reflected across', 0),
   { key: 'mirrorOffset', label: 'Mirror offset', hint: 'Slides the mirror plane along its axis — 0 mirrors through the centre', min: -1, max: 1, step: 0.01, default: 0 },
 
+  // Decimate — a geometry PRODUCER: it reduces the triangle count with three's SimplifyModifier.
+  // The dial is the FRACTION of vertices to remove, read by `applyDecimate`; the reduction is
+  // floored so the shape never collapses, and 0 is a no-op.
+  { key: 'decimate', label: 'Decimate', hint: 'Reduces the shape to fewer triangles — higher removes more detail', min: 0, max: 0.95, step: 0.01, default: 0 },
+
+  // Voxelise — a geometry PRODUCER: it remeshes the shape through the voxel field into uniform,
+  // chunky faces. The dial is the resolution (cells along the longest axis), read by
+  // `applyVoxelise`; 0 is a no-op. The max is 64 so the remesh stays inside the vertex budget
+  // (64³ < the 300k budget), and an open surface is left untouched (the remesh refuses it).
+  { key: 'voxelResolution', label: 'Voxelise', hint: 'Rebuilds the shape from cubes — higher keeps finer detail, 0 leaves it alone', min: 0, max: 64, step: 1, default: 0 },
+
   // Cloner keys. Named clone* rather than array* because this is its own panel
   // section now and is meant to accumulate more clone options — an arrayCount
   // sitting beside a future cloneMode/cloneStep* would be inconsistent from day one.

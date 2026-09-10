@@ -23,7 +23,7 @@ import { MODIFIER_SPECS, modifierValue, totalClones } from '~/lib/scene3d/primPa
  *  `array`/`shatter`/`mirror` are geometry PRODUCERS (they change the vertex buffer — array folds N
  *  rotated copies, shatter splits every face, mirror duplicates + welds), living in the orderable
  *  middle between the deforms and the pinned cloner. */
-export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'array', 'shatter', 'mirror', 'cloner'] as const
+export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'cloner'] as const
 export type ModifierKind = typeof MODIFIER_KINDS[number]
 
 /** The order the pipeline applies these in — and therefore the order an old-shape bag is folded
@@ -55,6 +55,8 @@ export const MODIFIER_KIND_PARAMS: Record<ModifierKind, string[]> = {
   array: ['arrayCount', 'arrayAxis', 'arrayRadius'],
   shatter: ['shatter', 'shatterSeed'],
   mirror: ['mirrorAxis', 'mirrorOffset'],
+  decimate: ['decimate'],
+  voxelise: ['voxelResolution'],
   cloner: [
     'cloneCount', 'cloneMode', 'cloneOffsetX', 'cloneOffsetY', 'cloneOffsetZ', 'cloneRadius', 'cloneAxis',
     'cloneCountX', 'cloneCountY', 'cloneCountZ', 'cloneSpacingX', 'cloneSpacingY', 'cloneSpacingZ',
@@ -77,6 +79,8 @@ export const MODIFIER_LABELS: Record<ModifierKind, string> = {
   array: 'Radial array',
   shatter: 'Shatter',
   mirror: 'Mirror',
+  decimate: 'Decimate',
+  voxelise: 'Voxelise',
   cloner: 'Cloner',
 }
 

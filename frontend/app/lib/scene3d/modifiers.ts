@@ -14,6 +14,9 @@
 // this exact fixed sequence — that is what keeps `applyModifiers` byte-identical.
 import * as THREE from 'three'
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { SimplifyModifier } from 'three/examples/jsm/modifiers/SimplifyModifier.js'
+import { meshDataFromGeometry, geometryFromMeshData } from '~/lib/scene3d/mesh'
+import { remesh } from '~/lib/scene3d/voxel'
 import { modifierValue, totalClones } from '~/lib/scene3d/primParams'
 import { modifierStackOf, type ModifierInstance, type ModifierKind } from '~/lib/scene3d/modifierStack'
 import { varyWeights, varyColorAt, varyStepFactor, type VarySettings } from '~/lib/vary'
@@ -514,6 +517,62 @@ function applyShatter(geo: THREE.BufferGeometry, amount: number, seed: number): 
   return src
 }
 
+/** Decimate PRODUCER: reduce the triangle count with three's `SimplifyModifier` (quadric edge
+ *  collapse). `fraction` is the share of vertices to REMOVE (0 = no-op, capped at 0.95). The
+ *  geometry is welded first (`mergeVertices`) because the simplifier needs shared topology — a
+ *  box's 24 split corners would otherwise collapse nothing. Normals are dropped before welding so
+ *  coincident corners actually merge (the pipeline recomputes normals after every producer);
+ *  UVs are kept and this build of SimplifyModifier carries them through the collapse.
+ *
+ *  FLOORED so it never collapses the shape to nothing: `removeCount` keeps at least MIN_VERTS
+ *  (12 verts ≈ 4 faces) alive. A fraction that resolves to `removeCount ≤ 0` (or the mesh is
+ *  already at the floor) is a no-op returning `geo`. It only reduces, so there is no budget
+ *  concern. Returns a NEW geometry when it fires. */
+const DECIMATE_MIN_VERTS = 12
+function applyDecimate(geo: THREE.BufferGeometry, fraction: number): THREE.BufferGeometry {
+  const f = Math.max(0, Math.min(0.95, fraction))
+  if (f <= 0) return geo
+
+  const src = geo.clone()
+  src.deleteAttribute('normal') // recomputed by the pipeline; lets coincident corners weld
+  const welded = mergeVertices(src)
+  src.dispose()
+
+  const count = welded.getAttribute('position').count
+  const removeCount = Math.min(Math.floor(count * f), count - DECIMATE_MIN_VERTS)
+  if (removeCount <= 0) { welded.dispose(); return geo } // nothing usable to remove → leave it
+
+  const simplified = new SimplifyModifier().modify(welded, removeCount)
+  welded.dispose()
+  return simplified
+}
+
+/** Voxelise PRODUCER: remesh the shape through the voxel SDF at `resolution` cells along its
+ *  longest axis, giving a uniform, chunky, watertight remesh (the same engine the Remesh action
+ *  and Merge use). `resolution` 0 = no-op. Steps: `meshDataFromGeometry` → `remesh(data, res)` →
+ *  `geometryFromMeshData`.
+ *
+ *  BUDGET — the resolution is capped BEFORE remeshing. Surface nets allocates an SDF lattice of
+ *  ~resolution³ cells, so the cap uses the conservative res³ output estimate: VOXEL_RESOLUTION_MAX
+ *  = 64 because 64³ = 262,144 < VERTEX_BUDGET (300,000). The actual surface-nets output scales with
+ *  surface area (~resolution²) and is far lower, so this is a safe ceiling with headroom. The param
+ *  spec's max is the same 64, so the slider has no dead range; this internal clamp is the true
+ *  guarantee regardless of a stored value.
+ *
+ *  FALLBACK — an open / non-watertight input (a plane, a shell) makes the SDF meaningless, so
+ *  `remesh` reports `open: true` and returns the data UNCHANGED; we return `geo` untouched rather
+ *  than shipping a mangled mesh. Returns a NEW geometry only when it actually remeshes. */
+const VOXEL_RESOLUTION_MAX = 64
+function applyVoxelise(geo: THREE.BufferGeometry, resolution: number): THREE.BufferGeometry {
+  const res = Math.min(VOXEL_RESOLUTION_MAX, Math.round(resolution))
+  if (res < 1) return geo // 0 = no-op
+
+  const data = meshDataFromGeometry(geo)
+  const { data: out, open } = remesh(data, res)
+  if (open) return geo // non-watertight input: remesh bailed → leave the shape untouched
+  return geometryFromMeshData(out)
+}
+
 export interface ClonerSettings {
   /** 0 linear, 1 radial, 2 grid. */
   mode: number
@@ -695,7 +754,7 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
  *  middle rows are EXACTLY the deforms, so "any middle row" and "any deform" coincide and the
  *  byte-identity oracle is untouched. */
 const DEFORM_KINDS: readonly ModifierKind[] = ['taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt']
-const PRODUCER_KINDS: readonly ModifierKind[] = ['array', 'shatter', 'mirror']
+const PRODUCER_KINDS: readonly ModifierKind[] = ['array', 'shatter', 'mirror', 'decimate', 'voxelise']
 const isDeformKind = (k: ModifierKind): boolean => (DEFORM_KINDS as readonly string[]).includes(k)
 const isProducerKind = (k: ModifierKind): boolean => (PRODUCER_KINDS as readonly string[]).includes(k)
 /** An enabled middle row is either a deformer or a producer — the reorderable region between the
@@ -720,6 +779,8 @@ function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance): THREE
     case 'array': return applyRadialArray(geo, m('arrayCount'), Math.round(m('arrayAxis')), m('arrayRadius'))
     case 'shatter': return applyShatter(geo, m('shatter'), Math.round(m('shatterSeed')))
     case 'mirror': return applyMirror(geo, Math.round(m('mirrorAxis')), m('mirrorOffset'))
+    case 'decimate': return applyDecimate(geo, m('decimate'))
+    case 'voxelise': return applyVoxelise(geo, Math.round(m('voxelResolution')))
     default: return geo
   }
 }
