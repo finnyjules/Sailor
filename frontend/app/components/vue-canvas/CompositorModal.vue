@@ -106,6 +106,8 @@ import { colourSites } from '~/lib/compositor/recolour/sites'
 import { slotsOf, inkOf } from '~/lib/compositor/recolour/slots'
 import { mapFamily } from '~/lib/compositor/recolour/map'
 import { recolourFrame, recolourSlot } from '~/lib/compositor/recolour/apply'
+import { applyImageMaps, removeImageMaps } from '~/lib/compositor/recolour/imageMap'
+import type { OwnedMaps } from '~/lib/compositor/recolour/imageMap'
 import PostEffectsControls, { PANEL_EFFECT_KINDS } from '~/components/vue-canvas/PostEffectsControls.vue'
 import CompositorEffectRow from '~/components/vue-canvas/compositor/CompositorEffectRow.vue'
 import CompositorStrokeRow from '~/components/vue-canvas/compositor/CompositorStrokeRow.vue'
@@ -1340,19 +1342,28 @@ function applyPaletteToSelection(fam: PaletteFamily) {
 }
 // ── Recolour the whole frame from a palette family (Design tab, no selection) ──
 const frameColourSlots = computed(() => slotsOf(colourSites(localLayers.value as LocalLayer[], background.value, canvasDisplay.h / Math.max(1, canvasDisplay.w))))
-const recolourMemory = computed<{ hexes: string[]; applied: Record<string, string> } | null>(() => ((compositor.value?.data?.properties as any)?.sailor_recolour ?? null))
+type RecolourMemory = { hexes: string[]; applied: Record<string, string>; images?: boolean; imageEffects?: OwnedMaps }
+const recolourMemory = computed<RecolourMemory | null>(() => ((compositor.value?.data?.properties as any)?.sailor_recolour ?? null))
 const recolourSeed = computed(() => inkOf(frameColourSlots.value)?.hex ?? '#4f8ad9')
-function writeRecolourMemory(m: { hexes: string[]; applied: Record<string, string> }) {
+const recolourImages = ref<boolean>(!!recolourMemory.value?.images)
+watch(recolourMemory, m => { recolourImages.value = !!m?.images })
+function writeRecolourMemory(m: RecolourMemory) {
   const n = compositor.value; if (!n) return
   const p = (n.data.properties ||= {}); (p as any).sailor_recolour = m
 }
 function recolourWith(hexes: string[]) {
   const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
   const mapping = mapFamily(frameColourSlots.value, hexes)
-  if (Object.entries(mapping).every(([hex, to]) => to === hex)) return
   const next = recolourFrame(localLayers.value as LocalLayer[], background.value, mapping, aspect)
-  recordHistory(); commit(next.layers); editor.writeBackground(next.background)
-  writeRecolourMemory({ hexes: hexes.map(h => h.toLowerCase()), applied: mapping })
+  const prior = recolourMemory.value?.imageEffects ?? {}
+  const identity = Object.entries(mapping).every(([from, to]) => from === to)
+  let layers = next.layers, imageEffects: OwnedMaps = prior
+  if (recolourImages.value) { const r = applyImageMaps(layers, hexes, prior); layers = r.layers; imageEffects = r.owned }
+  else if (Object.keys(prior).length) { const r = removeImageMaps(layers, prior); layers = r.layers; imageEffects = r.owned }
+  const mapsChanged = recolourImages.value || Object.keys(prior).length > 0
+  if (identity && !mapsChanged) return
+  recordHistory(); commit(layers); editor.writeBackground(next.background)
+  writeRecolourMemory({ hexes: hexes.map(h => h.toLowerCase()), applied: mapping, images: recolourImages.value, imageEffects })
 }
 function applyFamilyToFrame(fam: PaletteFamily) { recolourWith(fam.hexes) }
 function applyStopsToFrame(stops: GradientStop[]) { recolourWith(stops.map(s => s.color)) }
@@ -8850,6 +8861,9 @@ onUnmounted(() => {
             <p v-if="!frameColourSlots.length" class="text-[11px] text-white/40 italic">Add a background, text or a shape to see the frame's colours.</p>
             <template v-else>
               <ColourSlots :slots="frameColourSlots" :family="recolourMemory?.hexes ?? null" @reassign="reassignSlot" />
+              <div data-testid="recolour-images" class="mt-2">
+                <StudioSwitch v-model="recolourImages" label="Images too" hint="Photos take the palette as a gradient map." />
+              </div>
               <p class="mt-2 mb-1.5 text-[11px] text-white/45">Pick a palette to recolour the frame. Things that share a colour keep sharing one; the darkest stays darkest.</p>
               <PalettePicker :key="compositor?.id ?? 'frame-recolour'" mode="stops" :seed="recolourSeed" @apply-family="applyFamilyToFrame" @apply-stops="applyStopsToFrame" />
             </template>

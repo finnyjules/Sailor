@@ -54,4 +54,32 @@ test.describe('Frame recolour', () => {
     const all = [...solidColours(layers), typeof bg === 'string' ? bg : null].filter(Boolean).map(h => (h as string).toLowerCase())
     expect(all).not.toContain(slotHex); expect(all).toContain(toHex)
   })
+
+  test('Images too puts a family gradient map on the photos, in the same undo step, and clears it when turned off', async ({ page }) => {
+    const before = await frame(page)
+    const toggle = page.locator('[data-testid="recolour-images"] [role="switch"]')
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
+    await page.getByRole('button', { name: /library/i }).first().click()
+    const tile = page.locator('[data-testid="frame-colours"] [data-testid="palette-family"]').first()
+    await tile.waitFor({ timeout: 10000 }); await tile.click()
+    const after = await frame(page)
+    const photos = after.layers.filter((l: any) => l.kind === 'image' || l.kind === 'wired')
+    expect(photos.length).toBeGreaterThan(0)
+    for (const p of photos) {
+      const maps = (p.effects ?? []).filter((e: any) => e.type === 'gradientMap')
+      expect(maps).toHaveLength(1); expect(maps[0].stops.length).toBeGreaterThanOrEqual(2); expect(maps[0].mix).toBe(1)
+      expect(after.memory.imageEffects[p.id]).toBe(maps[0].id)
+    }
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
+    const undone = await frame(page)
+    expect(undone.layers).toEqual(before.layers)                       // ONE undo took the maps with the colours
+    // turn it off and re-apply: the owned maps go away
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
+    await tile.click()
+    const cleared = await frame(page)
+    for (const p of cleared.layers.filter((l: any) => l.kind === 'image' || l.kind === 'wired')) expect((p.effects ?? []).filter((e: any) => e.type === 'gradientMap')).toHaveLength(0)
+    expect(cleared.memory.imageEffects).toEqual({})
+  })
 })
