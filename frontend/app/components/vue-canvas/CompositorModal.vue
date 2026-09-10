@@ -12,8 +12,9 @@ import {
   cornerRadii, drawLocalLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, layerMaskRef, localLayerBox, createBrushLayer, newMosaicLayer,
   newScatterLayer,
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
-  outlinePathData, canTakeGeometry,
+  outlinePathData, canTakeGeometry, cornerPinActive,
 } from '~/composables/useCompositorLayers'
+import { onPaperBooleanReady, warmPaperBoolean } from '~/lib/compositor/booleanGeometry'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
 import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf, mosaicStylePatch, mosaicSeedPatch, freshMosaicSeed, isMosaicShaderFill, mosaicShaderSpec, mosaicLookNames, mosaicLookOf, applyMosaicLook } from '~/lib/compositor/mosaic'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
@@ -1963,6 +1964,38 @@ function setActiveFxHex(raw: string) {
   updateActiveEffect({ color: composeRgba(h, activeFxAlpha.value) })
 }
 
+// ── Combine shapes (boolean, F3): the sibling picker ─────────────────────────
+// Human labels for the four boolean ops — sentence case, never the stored value (UI-copy rule).
+const BOOLEAN_OP_LABELS: Record<string, string> = {
+  unite: 'Unite', subtract: 'Subtract', intersect: 'Intersect', exclude: 'Exclude',
+}
+/** Eligible partners for the selected boolean effect: every OTHER local layer that can take a
+ *  geometry outline (`canTakeGeometry`), minus any carrying a corner pin or a cloner — the
+ *  sibling resolver models affine placement only, so a pinned/cloned partner would combine
+ *  against the WRONG outline. Excluding them keeps the picker honest rather than silently wrong. */
+const booleanCandidates = computed<{ key: string; label: string }[]>(() => {
+  const self = activeEffectLayer.value
+  if (!self) return []
+  return (localLayers.value as LocalLayer[])
+    .filter(l => l.id !== self.id
+      && canTakeGeometry(l)
+      && !cornerPinActive((l as any).cornerPin)
+      && !(l as any).cloner)
+    .map(l => ({ key: localKey(l.id), label: layerLabelByKey(localKey(l.id)) }))
+})
+/** The referenced layer, if the current ref points at a live, still-eligible vector partner. */
+function booleanRefResolvable(ref: string): boolean {
+  if (!ref) return false
+  return booleanCandidates.value.some(c => c.key === ref)
+}
+/** Why the picker is greyed / warns, or '' when it is usable. */
+const booleanPickerReason = computed<string>(() => {
+  if (booleanCandidates.value.length === 0) return 'Add another shape layer to combine with'
+  const ref = (activeEffect.value as any)?.refLayerId as string | undefined
+  if (ref && !booleanRefResolvable(ref)) return 'The chosen layer is no longer a shape — pick another'
+  return ''
+})
+
 function addLayerEffect(layerId: string, kind: EffectKind) {
   const l = layerById(layerId); if (!l) return
   // Read the BEFORE stack once: after setLayerStack the layer is the new stack, so diffing
@@ -1976,6 +2009,9 @@ function addLayerEffect(layerId: string, kind: EffectKind) {
   if (next === before) return
   setLayerStack(layerId, next)
   expandedLayers.value = new Set(expandedLayers.value).add(layerId)
+  // A boolean needs paper.js; warm it now so its result appears as soon as the user picks a
+  // sibling (the render path also kicks the warm, but pre-warming avoids a first-frame no-op).
+  if (kind === 'boolean') void warmPaperBoolean()
   // Select what was just added so its dials are on screen straight away.
   const fresh = next.find(e => !beforeIds.has(e.id)) ?? next[next.length - 1]
   if (fresh) selectEffect(layerId, fresh.id)
@@ -3716,6 +3752,12 @@ onBeforeUnmount(() => { stopFieldCatalog?.(); stopFieldCatalog = null })
 let stopFontOutline: (() => void) | null = null
 onMounted(() => { stopFontOutline = onCompositorFontReady(() => renderStack()) })
 onBeforeUnmount(() => { stopFontOutline?.(); stopFontOutline = null })
+// A Combine-shapes (boolean) effect no-ops on its cold first frame while paper.js loads (it is
+// out of the no-boolean bundle for byte-identity); this repaints once paper is warm so the
+// boolean result replaces the pass-through with no user interaction. Same nudge shape as above.
+let stopPaperBoolean: (() => void) | null = null
+onMounted(() => { stopPaperBoolean = onPaperBooleanReady(() => renderStack()) })
+onBeforeUnmount(() => { stopPaperBoolean?.(); stopPaperBoolean = null })
 onBeforeUnmount(() => { stopDepthWatch?.(); stopDepthWatch = null })
 
 watch(
@@ -7724,6 +7766,33 @@ onUnmounted(() => {
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ seed: Math.round(parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
               </div>
+            </div>
+          </div>
+
+          <!-- Combine shapes (boolean, F3): the op select + a dynamic sibling picker. Both feed
+               `applyGeometry`'s boolean case — the op runs the paper.js boolean, the picker
+               writes `refLayerId` (the sibling rail). Neither is a dead control. -->
+          <div v-else-if="activeEffect!.type === 'boolean'" class="space-y-1.5">
+            <div>
+              <div class="panel-sublabel mb-1">Operation</div>
+              <select data-testid="geo-boolean-op"
+                :value="(activeEffect as any).op || 'unite'"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @change="updateActiveEffect({ op: ($event.target as HTMLSelectElement).value })">
+                <option v-for="op in ['unite', 'subtract', 'intersect', 'exclude']" :key="op" :value="op">{{ BOOLEAN_OP_LABELS[op] }}</option>
+              </select>
+            </div>
+            <div>
+              <div class="panel-sublabel mb-1">Combine with</div>
+              <select data-testid="geo-boolean-ref"
+                :value="(activeEffect as any).refLayerId || ''"
+                :disabled="booleanCandidates.length === 0"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none disabled:opacity-40 disabled:cursor-not-allowed"
+                @change="updateActiveEffect({ refLayerId: ($event.target as HTMLSelectElement).value || undefined })">
+                <option value="">None</option>
+                <option v-for="c in booleanCandidates" :key="c.key" :value="c.key">{{ c.label }}</option>
+              </select>
+              <p v-if="booleanPickerReason" class="mt-1 text-[11px] text-white/50" data-testid="geo-boolean-reason">{{ booleanPickerReason }}</p>
             </div>
           </div>
         </div>

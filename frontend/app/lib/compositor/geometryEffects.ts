@@ -29,6 +29,7 @@ import {
   type Polyline,
 } from '~/lib/vector/pathOps'
 import { offsetPolyline } from '~/lib/compositor/strokeShapes'
+import { pathBoolean, isPaperWarm, booleanOpOf } from '~/lib/compositor/booleanGeometry'
 
 // The per-kind interfaces live in effectStack (it owns the whole effect vocabulary and the
 // LayerEffect union). Re-export them here so a consumer can `import type { TrimEffect } from
@@ -38,6 +39,8 @@ export type {
   OffsetEffect,
   RoundCornersEffect,
   RoughenEffect,
+  BooleanEffect,
+  BooleanOp,
 } from './effectStack'
 export { GEOMETRY_KINDS, isGeometryKind } from './effectStack'
 
@@ -374,6 +377,28 @@ function applyRoundCorners(d: string, e: GeometryEffectInput, ctx: GeometryConte
   return subs.map(sub => roundSubpathD(sub, radiusPx)).filter(Boolean).join(' ')
 }
 
+// ── boolean (F3) ───────────────────────────────────────────────────────────────
+//
+// Combine this layer's outline with a SIBLING layer's outline via a paper.js boolean op
+// (unite / subtract / intersect / exclude). The partner outline arrives through the F3 sibling
+// rail: `e.refLayerId` (a `StackKey`) is resolved by `ctx.resolveSibling` into the sibling's
+// `d` ALREADY in this layer's own outline units (see `siblingRef.ts`), so no transform happens
+// here. A missing / dangling / self / non-vector / cyclic ref makes `resolveSibling` return
+// `null`, and the effect is a NO-OP (returns `d` unchanged) — it never throws.
+//
+// paper is loaded lazily (`booleanGeometry.ts`): on the first boolean of a session it is not
+// yet warm, so `pathBoolean` returns `d` unchanged for one frame and kicks the warm; the
+// compositor's `onPaperBooleanReady` → `renderStack` nudge repaints with the real result. The
+// cache key folds `isPaperWarm()` (see `applyGeometry`) so that cold no-op frame is never
+// served after paper loads.
+function applyBoolean(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
+  const ref = typeof e.refLayerId === 'string' ? e.refLayerId : ''
+  if (!ref) return d // no sibling chosen yet
+  const sib = ctx.resolveSibling?.(ref)
+  if (!sib || !sib.d) return d // dangling / self / non-vector / cycle → no-op
+  return pathBoolean(d, sib.d, booleanOpOf(e.op))
+}
+
 // ── dispatch ──────────────────────────────────────────────────────────────────
 function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
   switch (e.type) {
@@ -381,6 +406,7 @@ function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): stri
     case 'roughen': return applyRoughen(d, e, ctx)
     case 'offset': return applyOffset(d, e, ctx)
     case 'round_corners': return applyRoundCorners(d, e, ctx)
+    case 'boolean': return applyBoolean(d, e, ctx)
     default: return d
   }
 }
@@ -416,6 +442,11 @@ export function applyGeometry(
   for (const e of enabled) {
     const ref = typeof e.refLayerId === 'string' ? e.refLayerId : ''
     if (!ref) continue
+    // A boolean only runs its paper op once paper is WARM; before that `applyBoolean` returns
+    // `d` unchanged. Fold the warm flag into the key so the cold no-op frame's cached `d` is
+    // never returned after paper loads — the key flips false→true, forcing a real recompute.
+    // (No boolean effect ⇒ no `refLayerId` ⇒ this whole loop no-ops ⇒ key identical to HEAD.)
+    if (e.type === 'boolean') refSuffix += `bwarm:${isPaperWarm() ? 1 : 0}`
     const resolved = ctx.resolveSibling?.(ref)
     refSuffix += `ref:${e.type}:${ref}:${resolved ? resolved.subKey : '∅'}`
   }

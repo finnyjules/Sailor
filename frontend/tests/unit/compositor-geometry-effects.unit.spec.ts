@@ -48,11 +48,12 @@ const RECT_WITH_HOLE = 'M0 0 L100 0 L100 100 L0 100 Z M30 30 L70 30 L70 70 L30 7
 const SQUARE_CW_D = 'M0 0 L0 100 L100 100 L100 0 Z'
 
 describe('geometryEffects: labels single-source', () => {
-  it('exposes sentence-case labels for the four geometry kinds', () => {
+  it('exposes sentence-case labels for the geometry kinds', () => {
     expect(GEOMETRY_EFFECT_LABELS.trim).toBe('Trim path')
     expect(GEOMETRY_EFFECT_LABELS.roughen).toBe('Roughen')
     expect(GEOMETRY_EFFECT_LABELS.offset).toBe('Offset path')
     expect(GEOMETRY_EFFECT_LABELS.round_corners).toBe('Round corners')
+    expect(GEOMETRY_EFFECT_LABELS.boolean).toBe('Combine shapes')
   })
 })
 

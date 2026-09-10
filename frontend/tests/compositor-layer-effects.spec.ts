@@ -303,7 +303,7 @@ test.describe('Frame geometry effects (F2)', () => {
  * Render fix A: a geometry effect on a text layer whose `renderAsOutline` is unset still
  * forces the outline path (Inter) and safely falls back to fillText on a system font (Arial).
  */
-const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen'] as const
+const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean'] as const
 // A 1×1 transparent PNG so an image layer has a valid, instantly-decoding source.
 const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
@@ -578,5 +578,78 @@ test.describe('Frame geometry effects — silhouette-raster byte-identity (F2 Ta
     console.log('[F2 torn byte-identity] max=%d mean=%s changed=%d', delta.max, delta.mean.toFixed(4), delta.changed)
     expect(delta.sizeMismatch).toBe(false)
     expect(tornAgain).toBe(tornOnly)
+  })
+})
+
+/**
+ * F3 Task 2 — the `boolean` (Combine shapes) geometry effect.
+ *
+ * Two overlapping vector layers; a `boolean` effect on the first referencing the second via the
+ * sibling rail (`refLayerId`) combines their outlines with a paper.js op. paper is lazy-loaded
+ * (out of the no-boolean bundle for byte-identity), so the boolean is a one-frame no-op until it
+ * warms — the test polls until the pixels settle. subtract removes the overlap, so the first
+ * layer's ink shrinks; unite grows it to cover the sibling.
+ */
+test.describe('Frame geometry effects — boolean / combine shapes (F3 Task 2)', () => {
+  // Two opaque rects: A centred-left, B centred-right, overlapping in the middle.
+  async function seedTwoOverlappingRects(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const mk = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.4, h: 0.4, radius: 0, rotation: 0, opacity: 1, fill,
+      })
+      ;(window as any).__compositorSetLayers([mk('A', 0.42, '#ffffff'), mk('B', 0.58, '#ff8800')])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(2)
+  }
+  const setBoolean = (page: Page, op: string) => page.evaluate((o) => {
+    const ls = (window as any).__compositorLayers()
+    ls[0].effects = [{ id: 'bool', type: 'boolean', op: o, refLayerId: 'l:B', visible: true }]
+    ;(window as any).__compositorSetLayers(ls)
+  }, op)
+
+  test('subtract referencing the sibling changes the rendered pixels (paper warms in)', async ({ page }) => {
+    await openCompositor(page)
+    await seedTwoOverlappingRects(page)
+    const before = await stackPixels(page)
+
+    await setBoolean(page, 'subtract')
+    // paper.js warms asynchronously; the onPaperBooleanReady nudge repaints once it lands. Poll
+    // until the boolean result has replaced the cold one-frame pass-through.
+    await expect.poll(async () => await stackPixels(page) !== before, { timeout: 20_000 }).toBe(true)
+    const after = await stackPixels(page)
+    const d = await pixelDelta(page, before, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(200) // the overlap bite is a real change
+  })
+
+  test('a dangling ref is a no-op (byte-identical to no boolean)', async ({ page }) => {
+    await openCompositor(page)
+    await seedTwoOverlappingRects(page)
+    const before = await stackPixels(page)
+    // Reference a layer that does not exist → resolver returns null → the effect no-ops.
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'bool', type: 'boolean', op: 'subtract', refLayerId: 'l:ghost', visible: true }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    // Give the render (and any warm) a beat, then confirm nothing moved.
+    await stackPixels(page)
+    const after = await stackPixels(page)
+    expect(after).toBe(before)
+  })
+
+  test('the add menu offers boolean on a rect', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await openFxMenuFirst(page)
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="boolean"]')).toBeEnabled()
+  })
+
+  test('the add menu greys boolean on an image (no outline)', async ({ page }) => {
+    await openCompositor(page)
+    await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
+    await openFxMenuFirst(page)
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="boolean"]')).toBeDisabled()
   })
 })

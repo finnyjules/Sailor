@@ -62,10 +62,19 @@ export interface OffsetEffect { type: 'offset'; distance: number; visible: boole
 export interface RoundCornersEffect { type: 'round_corners'; radius: number; visible: boolean }
 export interface RoughenEffect { type: 'roughen'; amount: number; detail: number; seed: number; visible: boolean }
 
+/** The four paper.js boolean ops the F3 `boolean` effect exposes. Defined here — the effect
+ *  stack owns the whole effect vocabulary — and re-used by `booleanGeometry.ts` (the paper
+ *  bridge) via a type-only import, so the two never drift. */
+export type BooleanOp = 'unite' | 'subtract' | 'intersect' | 'exclude'
+/** Combine this vector layer's outline with a SIBLING layer's outline (via the F3 sibling
+ *  rail, `refLayerId`) using a paper.js boolean op. `refLayerId` is a `StackKey` (`l:<id>`)
+ *  mirroring `maskedByKey`; a missing/dangling/self/non-vector ref makes the effect a no-op. */
+export interface BooleanEffect { type: 'boolean'; op: BooleanOp; refLayerId?: string; visible: boolean }
+
 export type LayerEffect =
   | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
   | TornEdgeEffect | FeatherEffect
-  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect
+  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect
   | PostEffect
 
 /** A stored effect, addressed by a stable id. */
@@ -79,7 +88,7 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'inner_shadow',
+  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'inner_shadow',
   'adjust', 'duotone', 'gradientMap',
   'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'layer_blur', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
@@ -96,10 +105,11 @@ export const ORDERABLE_KINDS = EFFECT_ORDER.filter(
   (k): k is Exclude<EffectKind, typeof PINNED_KINDS[number]> => !(PINNED_KINDS as readonly string[]).includes(k),
 )
 
-/** The four geometry kinds: they transform a vector layer's outline BEFORE rasterise,
+/** The geometry kinds: they transform a vector layer's outline BEFORE rasterise,
  *  so they sit in their own region — after the backdrop pins, before every pixel kind —
- *  and reorder only among themselves (`regionOf`, `canReorder`). Contiguous in EFFECT_ORDER. */
-export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen'] as const satisfies readonly EffectKind[]
+ *  and reorder only among themselves (`regionOf`, `canReorder`). Contiguous in EFFECT_ORDER.
+ *  `boolean` (F3) combines the outline with a sibling layer's outline via paper.js. */
+export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean'] as const satisfies readonly EffectKind[]
 export const isGeometryKind = (k: EffectKind): boolean =>
   (GEOMETRY_KINDS as readonly string[]).includes(k)
 
@@ -123,6 +133,7 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   offset: 'Offset path',
   round_corners: 'Round corners',
   roughen: 'Roughen',
+  boolean: 'Combine shapes',
   inner_shadow: 'Inner shadow',
   adjust: 'Adjust',
   duotone: 'Duotone',
@@ -156,6 +167,9 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   offset: { distance: 0.01, visible: true },
   round_corners: { radius: 0.02, visible: true },
   roughen: { amount: 0.02, detail: 8, seed: 1, visible: true },
+  // No `refLayerId` default: a fresh boolean points at nothing (no-op) until the picker
+  // sets a sibling. `unite` is the least-surprising default op.
+  boolean: { op: 'unite', visible: true },
 }
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {

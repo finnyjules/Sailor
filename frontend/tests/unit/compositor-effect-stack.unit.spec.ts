@@ -11,10 +11,10 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import { canTakeGeometry } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 17 kinds, 3 pinned and 14 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(17)
+  it('has 18 kinds, 3 pinned and 15 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(18)
     expect(PINNED_KINDS).toEqual(['background_blur', 'dof', 'drop_shadow'])
-    expect(ORDERABLE_KINDS).toHaveLength(14)
+    expect(ORDERABLE_KINDS).toHaveLength(15)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
     expect(EFFECT_LABELS.gradientMap).toBe('Gradient map')
@@ -23,6 +23,7 @@ describe('effect kinds', () => {
     expect(EFFECT_LABELS.offset).toBe('Offset path')
     expect(EFFECT_LABELS.round_corners).toBe('Round corners')
     expect(EFFECT_LABELS.roughen).toBe('Roughen')
+    expect(EFFECT_LABELS.boolean).toBe('Combine shapes')
   })
   it('orders background blur first and drop shadow last', () => {
     expect(EFFECT_ORDER[0]).toBe('background_blur')
@@ -30,8 +31,8 @@ describe('effect kinds', () => {
     expect(isPinnedKind('dof')).toBe(true)
     expect(isPinnedKind('bloom')).toBe(false)
   })
-  it('the four geometry kinds are contiguous in EFFECT_ORDER and precede every pixel kind', () => {
-    expect(GEOMETRY_KINDS).toEqual(['trim', 'offset', 'round_corners', 'roughen'])
+  it('the five geometry kinds are contiguous in EFFECT_ORDER and precede every pixel kind', () => {
+    expect(GEOMETRY_KINDS).toEqual(['trim', 'offset', 'round_corners', 'roughen', 'boolean'])
     const indices = GEOMETRY_KINDS.map(k => EFFECT_ORDER.indexOf(k))
     for (let i = 1; i < indices.length; i++) expect(indices[i]).toBe(indices[i - 1]! + 1)
     const lastGeometry = Math.max(...indices)
@@ -46,6 +47,7 @@ describe('effect kinds', () => {
     const expected: Record<EffectKind, string> = {
       background_blur: 'backdrop', dof: 'backdrop',
       trim: 'geometry', offset: 'geometry', round_corners: 'geometry', roughen: 'geometry',
+      boolean: 'geometry',
       inner_shadow: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
       bloom: 'pixel', vignette: 'pixel', grain: 'pixel', torn_edge: 'pixel',
       feather: 'pixel', layer_blur: 'pixel',
@@ -68,6 +70,9 @@ describe('effect kinds', () => {
     expect(createEffect('offset')).toMatchObject({ type: 'offset', distance: 0.01, visible: true })
     expect(createEffect('round_corners')).toMatchObject({ type: 'round_corners', radius: 0.02, visible: true })
     expect(createEffect('roughen')).toMatchObject({ type: 'roughen', amount: 0.02, detail: 8, seed: 1, visible: true })
+    // boolean defaults to unite with no ref (a no-op until the picker sets a sibling).
+    expect(createEffect('boolean')).toMatchObject({ type: 'boolean', op: 'unite', visible: true })
+    expect((createEffect('boolean') as any).refLayerId).toBeUndefined()
     const a = createEffect('trim'), b = createEffect('trim')
     expect(a.id).not.toBe(b.id)
   })
