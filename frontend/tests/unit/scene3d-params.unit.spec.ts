@@ -119,6 +119,7 @@ describe('scene3d modifier specs', () => {
       'bend', 'bendAxis',
       'noise', 'noiseScale', 'noiseSeed',
       'jitter', 'jitterMode', 'jitterSeed',
+      'mirrorAxis', 'mirrorOffset',
       'cloneCount', 'cloneMode', 'cloneOffsetX', 'cloneOffsetY', 'cloneOffsetZ', 'cloneRadius', 'cloneAxis',
       'cloneCountX', 'cloneCountY', 'cloneCountZ',
       'cloneSpacingX', 'cloneSpacingY', 'cloneSpacingZ',

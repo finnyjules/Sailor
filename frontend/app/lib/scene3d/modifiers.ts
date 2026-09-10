@@ -229,6 +229,60 @@ function applyJitter(geo: THREE.BufferGeometry, amount: number, mode: number, se
   pos.needsUpdate = true
 }
 
+// --- geometry producers ------------------------------------------------------
+
+/** Reverse the winding of every triangle in a NON-INDEXED geometry by swapping the first and
+ *  third vertex of each triple across every attribute. A reflection is orientation-reversing,
+ *  so the reflected copy's faces would point inward; flipping the winding back makes
+ *  `computeVertexNormals` derive OUTWARD normals again for it. */
+function reverseWinding(geo: THREE.BufferGeometry): void {
+  for (const name of Object.keys(geo.attributes)) {
+    const attr = geo.getAttribute(name) as THREE.BufferAttribute
+    const size = attr.itemSize
+    const arr = attr.array as ArrayLike<number> & { [i: number]: number }
+    for (let t = 0; t + 3 <= attr.count; t += 3) {
+      for (let k = 0; k < size; k++) {
+        const i0 = t * size + k
+        const i2 = (t + 2) * size + k
+        const tmp = arr[i0]!
+        arr[i0] = arr[i2]!
+        arr[i2] = tmp
+      }
+    }
+    attr.needsUpdate = true
+  }
+}
+
+/** Mirror PRODUCER: duplicate the geometry, reflect the copy across the plane `coord = offset`
+ *  on `axis` (c' = 2·offset − c), flip that copy's winding so its faces stay outward, merge the
+ *  two halves and weld the shared seam with `mergeVertices`. Returns a NEW geometry (pre-weld it
+ *  is double the vertex count); normals are dropped so the seam welds on position/uv alone and
+ *  are recomputed once by the pipeline. Over the vertex budget it is a no-op (returns `geo`),
+ *  exactly as the cloner clamps rather than freezing the tab. */
+function applyMirror(geo: THREE.BufferGeometry, axis: number, offset: number): THREE.BufferGeometry {
+  const ax = ((Math.round(axis) % 3) + 3) % 3
+  if (geo.getAttribute('position').count * 2 > VERTEX_BUDGET) return geo
+
+  const original = geo.index ? geo.toNonIndexed() : geo.clone()
+  const flipped = geo.index ? geo.toNonIndexed() : geo.clone()
+  const fp = flipped.getAttribute('position') as THREE.BufferAttribute
+  for (let i = 0; i < fp.count; i++) fp.setComponent(i, ax, 2 * offset - fp.getComponent(i, ax))
+  fp.needsUpdate = true
+  reverseWinding(flipped)
+
+  // Weld on position (+uv) alone — stale/flipped normals would keep coincident seam vertices
+  // apart. The pipeline runs computeVertexNormals after any producer, so fresh normals return.
+  original.deleteAttribute('normal')
+  flipped.deleteAttribute('normal')
+  const merged = mergeGeometries([original, flipped], false)
+  original.dispose()
+  flipped.dispose()
+  if (!merged) return geo
+  const welded = mergeVertices(merged)
+  if (welded !== merged) merged.dispose()
+  return welded
+}
+
 export interface ClonerSettings {
   /** 0 linear, 1 radial, 2 grid. */
   mode: number
@@ -400,10 +454,38 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
 
 // --- pipeline ----------------------------------------------------------------
 
-/** The deform kinds — the orderable middle of the stack. subdivide (pinned first) and
- *  cloner (pinned last) are handled structurally around them. */
+/** The orderable middle of the stack splits two ways. subdivide (pinned first) and cloner
+ *  (pinned last) are handled structurally around them.
+ *  - DEFORMERS mutate positions in place, leaving the vertex count untouched (the 5 legacy rows).
+ *  - PRODUCERS return a NEW geometry with a changed vertex buffer (mirror; later array/voxelise/…).
+ *  The subdivide + normals/bounds gate keys off "any enabled middle row" (deformer OR producer),
+ *  NOT deformers alone — a producer like mirror wants to duplicate the already-subdivided geometry,
+ *  and any producer that changed the count still needs fresh normals/bounds. For a LEGACY bag the
+ *  middle rows are EXACTLY the deforms, so "any middle row" and "any deform" coincide and the
+ *  byte-identity oracle is untouched. */
 const DEFORM_KINDS: readonly ModifierKind[] = ['taper', 'twist', 'bend', 'noise', 'jitter']
+const PRODUCER_KINDS: readonly ModifierKind[] = ['mirror']
 const isDeformKind = (k: ModifierKind): boolean => (DEFORM_KINDS as readonly string[]).includes(k)
+const isProducerKind = (k: ModifierKind): boolean => (PRODUCER_KINDS as readonly string[]).includes(k)
+/** An enabled middle row is either a deformer or a producer — the reorderable region between the
+ *  pinned subdivide and cloner. This is the set the loop walks and the subdivide gate counts. */
+const isMiddleKind = (k: ModifierKind): boolean => isDeformKind(k) || isProducerKind(k)
+
+/** Run one enabled middle row against `geo`. A DEFORMER mutates `geo` and returns the SAME
+ *  object; a PRODUCER returns a NEW geometry (the caller disposes the old one on identity
+ *  change). This is the single dispatch that generalizes the old deform-only switch. */
+function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance): THREE.BufferGeometry {
+  const m = (k: string) => modifierValue(row, k)
+  switch (row.kind) {
+    case 'taper': applyTaper(geo, m('taper'), Math.round(m('taperAxis'))); return geo
+    case 'twist': applyTwist(geo, m('twist'), Math.round(m('twistAxis'))); return geo
+    case 'bend': applyBend(geo, m('bend'), Math.round(m('bendAxis'))); return geo
+    case 'noise': applyNoise(geo, m('noise'), m('noiseScale'), Math.round(m('noiseSeed'))); return geo
+    case 'jitter': applyJitter(geo, m('jitter'), Math.round(m('jitterMode')), Math.round(m('jitterSeed'))); return geo
+    case 'mirror': return applyMirror(geo, Math.round(m('mirrorAxis')), m('mirrorOffset'))
+    default: return geo
+  }
+}
 
 /** Apply an ORDERED modifier stack to `geo`, returning new geometry (or the SAME `geo`
  *  when nothing enabled would change it — the byte-identity no-op).
@@ -423,8 +505,11 @@ export function applyModifierStack(
 ): THREE.BufferGeometry {
   const vary = opts.vary
   const enabled = stack.filter((mo) => mo.enabled !== false)
-  const deformRows = enabled.filter((mo) => isDeformKind(mo.kind))
-  const deforms = deformRows.length > 0
+  // The orderable middle: every enabled deformer OR producer, in the stack's list order. For a
+  // LEGACY bag these are EXACTLY the 5 deforms (mirror never folds from a flat bag), so this set
+  // and the old `deforms` set are identical — the byte-identity oracle is untouched.
+  const middleRows = enabled.filter((mo) => isMiddleKind(mo.kind))
+  const anyMiddle = middleRows.length > 0
   // At most one of each pinned kind is meaningful; take the first enabled.
   const subdivideRow = enabled.find((mo) => mo.kind === 'subdivide')
   const clonerRow = enabled.find((mo) => mo.kind === 'cloner')
@@ -434,16 +519,17 @@ export function applyModifierStack(
   // enabled cloner row (which carries the clone* keys), or 1 when there is none.
   const requested = clonerRow ? totalClones(clonerRow) : 1
 
-  // No-op — mirror `hasModifiers`: nothing deforms and the cloner makes at most one copy.
+  // No-op — mirror `hasModifiers`: no middle row runs and the cloner makes at most one copy.
   // Returning the SAME object (no clone) is the byte-identity contract.
-  if (!deforms && requested <= 1) return geo
+  if (!anyMiddle && requested <= 1) return geo
 
   let out = geo.clone()
 
-  // Subdivision only earns its vertices when something deforms them, and it yields to the
-  // budget so a dense shape in a big clone set cannot freeze the app. Iterations come from
-  // the subdivide row (absent ⇒ 0, exactly as a subdivide-of-0 folded to no row).
-  if (deforms) {
+  // Subdivision only earns its vertices when a middle row will use them, and it yields to the
+  // budget so a dense shape in a big clone set cannot freeze the app. It runs BEFORE the middle
+  // rows so a producer like mirror duplicates the already-subdivided geometry. Iterations come
+  // from the subdivide row (absent ⇒ 0, exactly as a subdivide-of-0 folded to no row).
+  if (anyMiddle) {
     const iterations = subdivideRow ? Math.round(modifierValue(subdivideRow, 'subdivide')) : 0
     const ceiling = VERTEX_BUDGET / Math.max(1, requested)
     for (let i = 0; i < iterations; i++) {
@@ -454,20 +540,19 @@ export function applyModifierStack(
     }
   }
 
-  // Deform rows IN LIST ORDER — the heart of the stack. A folded legacy bag lists these in
-  // canonical order, which is exactly the old fixed sequence, so the buffer stays identical.
-  for (const row of deformRows) {
-    const m = (k: string) => modifierValue(row, k)
-    switch (row.kind) {
-      case 'taper': applyTaper(out, m('taper'), Math.round(m('taperAxis'))); break
-      case 'twist': applyTwist(out, m('twist'), Math.round(m('twistAxis'))); break
-      case 'bend': applyBend(out, m('bend'), Math.round(m('bendAxis'))); break
-      case 'noise': applyNoise(out, m('noise'), m('noiseScale'), Math.round(m('noiseSeed'))); break
-      case 'jitter': applyJitter(out, m('jitter'), Math.round(m('jitterMode')), Math.round(m('jitterSeed'))); break
+  // Middle rows IN LIST ORDER — the heart of the stack. Each dispatches through `applyMiddleRow`:
+  // a deformer mutates `out` in place (returns the same object) while a producer returns a NEW
+  // geometry, which we swap in and dispose the old one. A folded legacy bag lists only deforms in
+  // canonical order — exactly the old fixed sequence — so the buffer stays identical.
+  for (const row of middleRows) {
+    const next = applyMiddleRow(out, row)
+    if (next !== out) {
+      out.dispose()
+      out = next
     }
   }
 
-  if (deforms) {
+  if (anyMiddle) {
     out.computeVertexNormals()
     out.computeBoundingBox()
     out.computeBoundingSphere()

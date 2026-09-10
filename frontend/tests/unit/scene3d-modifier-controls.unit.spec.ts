@@ -37,9 +37,9 @@ describe('modifierControls', () => {
 
   it('axis/mode params become selects with optionLabels, defaulting to the option at the spec index', () => {
     const selects = MODIFIER_KINDS.flatMap((k) => modifierControls(k)).filter((r) => r.kind === 'select')
-    // Exactly the six index-valued modifier pickers, no more.
+    // Exactly the index-valued modifier pickers, no more (mirror adds its axis select).
     expect(new Set(selects.map((r) => modifierField(r.key)))).toEqual(
-      new Set(['taperAxis', 'twistAxis', 'bendAxis', 'cloneAxis', 'jitterMode', 'cloneMode']),
+      new Set(['taperAxis', 'twistAxis', 'bendAxis', 'cloneAxis', 'jitterMode', 'cloneMode', 'mirrorAxis']),
     )
     for (const row of selects) {
       const spec = specOf(modifierField(row.key))

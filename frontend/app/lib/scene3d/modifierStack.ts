@@ -18,9 +18,11 @@
 // `applyModifiers` reads.
 import { MODIFIER_SPECS, modifierValue, totalClones } from '~/lib/scene3d/primParams'
 
-/** The seven modifier rows. NOT the geometry `params` bag, NOT the Vary settings — Vary
- *  (varyMode/varySeed/…/varyColorStrength) is a material uniform, never a modifier row. */
-export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'cloner'] as const
+/** The modifier rows. NOT the geometry `params` bag, NOT the Vary settings — Vary
+ *  (varyMode/varySeed/…/varyColorStrength) is a material uniform, never a modifier row.
+ *  `mirror` is a geometry PRODUCER (it duplicates + welds, changing the vertex buffer),
+ *  living in the orderable middle between the deforms and the pinned cloner. */
+export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'mirror', 'cloner'] as const
 export type ModifierKind = typeof MODIFIER_KINDS[number]
 
 /** The order the pipeline applies these in — and therefore the order an old-shape bag is folded
@@ -45,6 +47,7 @@ export const MODIFIER_KIND_PARAMS: Record<ModifierKind, string[]> = {
   bend: ['bend', 'bendAxis'],
   noise: ['noise', 'noiseScale', 'noiseSeed'],
   jitter: ['jitter', 'jitterMode', 'jitterSeed'],
+  mirror: ['mirrorAxis', 'mirrorOffset'],
   cloner: [
     'cloneCount', 'cloneMode', 'cloneOffsetX', 'cloneOffsetY', 'cloneOffsetZ', 'cloneRadius', 'cloneAxis',
     'cloneCountX', 'cloneCountY', 'cloneCountZ', 'cloneSpacingX', 'cloneSpacingY', 'cloneSpacingZ',
@@ -60,6 +63,7 @@ export const MODIFIER_LABELS: Record<ModifierKind, string> = {
   bend: 'Bend',
   noise: 'Noise',
   jitter: 'Jitter',
+  mirror: 'Mirror',
   cloner: 'Cloner',
 }
 
@@ -156,6 +160,8 @@ export function modifierStackOf(obj: StackHost | null | undefined): ModifierInst
     bend: bend !== 0,
     noise: noise !== 0,
     jitter: jitter !== 0,
+    // A geometry producer never lived in the legacy flat bag, so it never folds active.
+    mirror: false,
     cloner: totalClones(bag) > 1,
   }
 

@@ -225,6 +225,11 @@ export const MODIFIER_SPECS: ParamSpec[] = [
   { key: 'jitterMode', label: 'Jitter mode', hint: 'Random scatters vertices into chaotic gems; Along normal pushes them in and out for spikes', min: 0, max: 1, step: 1, default: 0, control: 'options', options: ['random', 'normal'] },
   { key: 'jitterSeed', label: 'Jitter seed', hint: 'Shuffles the jitter into a different arrangement', min: 0, max: 99, step: 1, default: 0 },
 
+  // Mirror — a geometry PRODUCER: it duplicates the shape, reflects the copy across a plane and
+  // welds the seam. Both dials are read by `applyMirror`; options are stored as an index.
+  axisSpec('mirrorAxis', 'Mirror axis', 'The plane the copy is reflected across', 0),
+  { key: 'mirrorOffset', label: 'Mirror offset', hint: 'Slides the mirror plane along its axis — 0 mirrors through the centre', min: -1, max: 1, step: 0.01, default: 0 },
+
   // Cloner keys. Named clone* rather than array* because this is its own panel
   // section now and is meant to accumulate more clone options — an arrayCount
   // sitting beside a future cloneMode/cloneStep* would be inconsistent from day one.

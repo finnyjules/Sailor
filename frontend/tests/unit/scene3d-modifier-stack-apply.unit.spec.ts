@@ -411,3 +411,102 @@ describe('disabled rows are skipped', () => {
     expect(out.getAttribute('position').count).toBe(base * 3)
   })
 })
+
+// ---------------------------------------------------------------------------
+// mirror — the first geometry PRODUCER. It duplicates the shape, reflects the
+// copy across a plane, flips winding so faces stay outward, and welds the seam.
+// These prove it duplicates (vertex count), reflects (symmetric bounds), keeps
+// faces outward (sampled face normals), compounds across axes, is skipped when
+// disabled, and that a producer still leaves the pipeline's bounds recomputed.
+// ---------------------------------------------------------------------------
+const mirrorRow = (axis = 0, offset = 0): ModifierInstance => {
+  const r = createModifier('mirror'); r.mirrorAxis = axis; r.mirrorOffset = offset; return r
+}
+/** Every indexed triangle as [aPos, bPos, cPos]. */
+function triangles(geo: THREE.BufferGeometry): [THREE.Vector3, THREE.Vector3, THREE.Vector3][] {
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  const idx = geo.index
+  const out: [THREE.Vector3, THREE.Vector3, THREE.Vector3][] = []
+  const n = idx ? idx.count : pos.count
+  for (let i = 0; i + 3 <= n; i += 3) {
+    const g = (o: number) => idx ? idx.getX(i + o) : i + o
+    out.push([
+      new THREE.Vector3().fromBufferAttribute(pos, g(0)),
+      new THREE.Vector3().fromBufferAttribute(pos, g(1)),
+      new THREE.Vector3().fromBufferAttribute(pos, g(2)),
+    ])
+  }
+  return out
+}
+
+describe('mirror producer', () => {
+  it('doubles the vertex count when the halves do not overlap (across X, offset far)', () => {
+    // offset 1 pushes the copy to [1.5,2.5]: the two welded halves share no seam, so the result
+    // is exactly 2× a single welded half. `applyMirror` welds each half on position+uv (normals
+    // dropped), so the expected half count is mergeVertices of a normal-stripped non-indexed box.
+    const oneHalf = (() => { const g = new THREE.BoxGeometry(1, 1, 1).toNonIndexed(); g.deleteAttribute('normal'); return mergeVertices(g) })()
+    const expected = oneHalf.getAttribute('position').count * 2
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [mirrorRow(0, 1)])
+    expect(out.getAttribute('position').count).toBe(expected)
+  })
+
+  it('yields bounds symmetric about x = offset', () => {
+    for (const offset of [0, 0.3, -0.4]) {
+      const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [mirrorRow(0, offset)])
+      out.computeBoundingBox()
+      const b = out.boundingBox!
+      const mid = (b.min.x + b.max.x) / 2
+      expect(Math.abs(mid - offset)).toBeLessThan(1e-5)
+    }
+  })
+
+  it('recomputes bounds after a producer runs (boundingBox present)', () => {
+    const out = applyModifierStack(new THREE.SphereGeometry(0.8, 12, 8), [mirrorRow(1, 0.5)])
+    expect(out.boundingBox).not.toBeNull()
+    expect(out.boundingSphere).not.toBeNull()
+  })
+
+  it('keeps winding outward — every reflected face normal points away from its cube', () => {
+    // Two separate unit cubes at centres (0,0,0) and (2,0,0) (offset 1 across X). For every
+    // triangle the geometric (winding-derived) normal must point OUT of the cube it belongs to.
+    // If the reflected half's winding were NOT flipped its faces would point inward (dot < 0).
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [mirrorRow(0, 1)])
+    const c1 = new THREE.Vector3(0, 0, 0), c2 = new THREE.Vector3(2, 0, 0)
+    let checked = 0
+    for (const [a, b, c] of triangles(out)) {
+      const normal = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).normalize()
+      const centroid = new THREE.Vector3().add(a).add(b).add(c).multiplyScalar(1 / 3)
+      const centre = centroid.x < 1 ? c1 : c2
+      const outward = new THREE.Vector3().subVectors(centroid, centre)
+      expect(normal.dot(outward)).toBeGreaterThan(0)
+      checked++
+    }
+    expect(checked).toBeGreaterThan(0)
+  })
+
+  it('two mirror rows on different axes compound', () => {
+    const oneAxis = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [mirrorRow(0, 1)])
+    const twoAxes = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [mirrorRow(0, 1), mirrorRow(1, 1)])
+    // The second mirror duplicates the already-mirrored geometry, so the count grows again.
+    expect(twoAxes.getAttribute('position').count).toBe(oneAxis.getAttribute('position').count * 2)
+    twoAxes.computeBoundingBox()
+    const b = twoAxes.boundingBox!
+    expect(Math.abs((b.min.x + b.max.x) / 2 - 1)).toBeLessThan(1e-5) // symmetric about x = 1
+    expect(Math.abs((b.min.y + b.max.y) / 2 - 1)).toBeLessThan(1e-5) // and about y = 1
+  })
+
+  it('a disabled mirror row is skipped (no-op returns the same geometry)', () => {
+    const disabled = mirrorRow(0, 1); disabled.enabled = false
+    const g = new THREE.BoxGeometry(1, 1, 1)
+    expect(applyModifierStack(g, [disabled])).toBe(g)
+  })
+
+  it('subdivide runs before a mirror-only stack, so the copy inherits the finer mesh', () => {
+    // A producer counts as a middle row, so subdivide (pinned first) runs: the pre-subdivide box
+    // is 24 verts; one subdivide quadruples faces, and mirror (offset far) then doubles it.
+    const sub = createModifier('subdivide'); sub.subdivide = 1
+    const plain = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [mirrorRow(0, 1)])
+    const subdivided = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [sub, mirrorRow(0, 1)])
+    expect(subdivided.getAttribute('position').count).toBeGreaterThan(plain.getAttribute('position').count)
+  })
+})
