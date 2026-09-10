@@ -1,11 +1,15 @@
 <script lang="ts">
 import type { Component } from 'vue'
-import { Grid2x2, Triangle, Tornado, Spline, Waves, Vibrate, Boxes } from 'lucide-vue-next'
+import { Grid2x2, Triangle, Tornado, Spline, Waves, Vibrate, Boxes,
+  Move, Circle, Blend, Droplet, Grid3x3, Orbit, Slice, FlipHorizontal2, Minimize2, Box, Combine } from 'lucide-vue-next'
 import type { ModifierKind } from '~/lib/scene3d/modifierStack'
 /** Shared with the object row's add menu so a kind has ONE icon everywhere. */
 export const MODIFIER_ICONS: Record<ModifierKind, Component> = {
   subdivide: Grid2x2, taper: Triangle, twist: Tornado, bend: Spline,
   noise: Waves, jitter: Vibrate, cloner: Boxes,
+  shear: Move, spherify: Circle, smooth: Blend, melt: Droplet, lattice: Grid3x3,
+  array: Orbit, shatter: Slice, mirror: FlipHorizontal2, decimate: Minimize2,
+  voxelise: Box, boolean: Combine,
 }
 </script>
 

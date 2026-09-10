@@ -1533,6 +1533,40 @@ const cloneCost = computed(() => {
   const clamp = clampedClones(clonerBag, base)
   return { copies, verts, heavy: verts > AMBER_VERTS, clamp }
 })
+// A boolean row with a RESOLVED sibling, or an enabled voxelise row, is heavy
+// even when the object has no clones (cloneCost returns null at ≤1 copy). Both
+// rebuild through the synchronous SDF/voxel merge — ~9s per tick at res 32³ —
+// so a bare Resolution-slider drag on such an object would freeze the tab. This
+// mirrors booleanRefKeys' resolution rule (ref set, not self, resolves to a
+// sibling primitive) so the "heavy" verdict matches what actually rebuilds.
+function objectHasHeavyProducer(o: PrimitiveObject): boolean {
+  return modifierStackOf(o).some((r) => {
+    if (r.enabled === false) return false
+    if (r.kind === 'voxelise') return true
+    if (r.kind !== 'boolean') return false
+    const refId = r.refObjectId
+    if (!refId || refId === o.id) return false
+    const sib = doc.objects.find((x) => x.id === refId)
+    return !!sib && sib.kind === 'primitive'
+  })
+}
+// The pointerdown-sampled "is this drag heavy?" verdict: a heavy clone set OR a
+// boolean/voxelise producer on the selected object. Any of these makes a
+// per-tick geometry rebuild block the main thread long enough that the slider
+// stops tracking the pointer.
+const heavyGeometry = computed(() => {
+  if (cloneCost.value?.heavy) return true
+  const o = selected.value
+  return !!o && o.kind === 'primitive' && objectHasHeavyProducer(o)
+})
+// True when SOME object in the scene booleans against another: moving any object
+// then changes a booleaning sibling's relative transform every frame → its
+// booleanRefKeys (hence geoKey) churns → a synchronous merge per drag frame.
+// Booleans are rare, so "any boolean dependency anywhere" is a cheap, safe gate
+// to defer geometry for the whole transform drag and catch up once on release.
+const sceneHasBooleanDependency = computed(() =>
+  doc.objects.some((o) => o.kind === 'primitive' && objectHasHeavyProducer(o) &&
+    modifierStackOf(o).some((r) => r.kind === 'boolean' && r.enabled !== false && !!r.refObjectId && r.refObjectId !== o.id)))
 // Heavy-drag deferral. A rebuild at 300k+ verts blocks the main thread long
 // enough that the slider itself stops tracking the pointer, so for the duration
 // of a drag on a heavy object the engine skips geometry rebuilds and catches up
@@ -1540,9 +1574,30 @@ const cloneCost = computed(() => {
 // Heaviness is sampled once at pointerdown so a drag never changes mode midway.
 const deferringGeometry = ref(false)
 function onControlsPointerDown() {
-  if (!engine || deferringGeometry.value || !cloneCost.value?.heavy) return
+  if (!engine || deferringGeometry.value || !heavyGeometry.value) return
   deferringGeometry.value = true
   engine.deferGeometry = true
+}
+// A gizmo/pivot transform drag on ANY object churns a booleaning sibling's
+// geometry per frame when a boolean dependency exists in the scene. Raise
+// deferGeometry for the whole drag (sampled at drag start) and catch up on
+// release — the same defer-then-rebuild-once contract as the dial-drag path.
+const deferringForGizmo = ref(false)
+function onGizmoDragChange(dragging: boolean) {
+  if (!engine) return
+  if (dragging) {
+    if (deferringForGizmo.value || !sceneHasBooleanDependency.value) return
+    deferringForGizmo.value = true
+    engine.deferGeometry = true
+  } else {
+    if (!deferringForGizmo.value) return
+    deferringForGizmo.value = false
+    engine.deferGeometry = false
+    // The catch-up sync runs from the drag-end release hooks (onPivotDragEnd for
+    // a pivot drag; the doc watcher for a single-object drag once this flag is
+    // down), so the geometry rebuilds once at the final transform.
+    engine.syncFromDoc(doc)
+  }
 }
 // On window, not the panel: the pointer routinely leaves the controls column
 // mid-drag, and a missed release would leave the viewport permanently stale.
@@ -1994,6 +2049,7 @@ onMounted(() => {
     // run the one that was owed now that the roots are back in the scene, so
     // they land under their real parents again.
     onPivotDragEnd: () => { engine?.syncFromDoc(doc) },
+    onGizmoDragChange,
     // A right-click in the viewport dropped the armed placement — clear the
     // surface's half of that mode (crosshair, hint banner, "Click a surface…").
     onPlacementCancelled: () => { placingDecal.value = null },

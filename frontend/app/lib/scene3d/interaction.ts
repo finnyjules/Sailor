@@ -194,6 +194,13 @@ export class SceneInteraction {
        *  for the duration of such a drag (see `pivotDragActive`), so this is its
        *  cue to run the sync that re-parents the roots to their doc parents. */
       onPivotDragEnd?: () => void
+      /** Fired at the start (true) and end (false) of EVERY gizmo drag — single
+       *  or multi. The surface uses it to defer geometry for the whole transform
+       *  when a boolean dependency exists in the scene (moving one object churns
+       *  a booleaning sibling's geometry per frame), catching up once on release.
+       *  Fires before onPivotDragEnd so the deferral is already lowered when the
+       *  pivot's own catch-up sync runs. */
+      onGizmoDragChange?: (dragging: boolean) => void
       /** Fired when the INTERACTION layer drops an armed placement on its own
        *  (a right-click in the viewport) rather than the surface calling
        *  `cancelPlacement`. The surface's own `placingDecal` state — crosshair
@@ -254,6 +261,10 @@ export class SceneInteraction {
         this.updateOrbitEnabled()
         if (e.value) {
           this.gizmoDragged = true
+          // Defer geometry for the whole transform when a boolean dependency
+          // exists (a no-op otherwise) — moving one object churns a booleaning
+          // sibling's geometry per frame. Fired for single AND multi drags.
+          this.callbacks.onGizmoDragChange?.(true)
           // The multi-selection roots join the pivot HERE, at the grab, and
           // never mid-drag: three captured the pivot's own start transform in
           // its pointerdown handler (which runs BEFORE this listener) and
@@ -282,6 +293,10 @@ export class SceneInteraction {
           this.reseatPivot()
           this.dragOwner = null
           this.updateGizmosEnabled()
+          // Lower the boolean deferral (and run its catch-up sync) now the roots
+          // are back in the scene — BEFORE onPivotDragEnd, so its own sync sees
+          // deferGeometry already down and rebuilds the churned geometry once.
+          this.callbacks.onGizmoDragChange?.(false)
           if (wasPivotDrag) this.callbacks.onPivotDragEnd?.()
         }
       })

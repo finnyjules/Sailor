@@ -519,7 +519,10 @@ function reverseWinding(geo: THREE.BufferGeometry): void {
  *  exactly as the cloner clamps rather than freezing the tab. */
 function applyMirror(geo: THREE.BufferGeometry, axis: number, offset: number): THREE.BufferGeometry {
   const ax = ((Math.round(axis) % 3) + 3) % 3
-  if (geo.getAttribute('position').count * 2 > VERTEX_BUDGET) return geo
+  // The merge runs on toNonIndexed() copies (~6× the unique count for a manifold),
+  // so measure the real pre-weld output — the non-indexed count, doubled — like
+  // radial/shatter/voxelise gate on their true output, not the indexed vertex count.
+  if ((geo.index?.count ?? geo.getAttribute('position').count) * 2 > VERTEX_BUDGET) return geo
 
   const original = geo.index ? geo.toNonIndexed() : geo.clone()
   const flipped = geo.index ? geo.toNonIndexed() : geo.clone()
