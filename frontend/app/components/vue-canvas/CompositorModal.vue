@@ -7196,6 +7196,7 @@ onUnmounted(() => {
                 v-for="t in layoutSheet.tiles.value" :key="t.patternId + ':' + t.seed"
                 :plan="t.plan" :frame-w="canvasDisplay.w" :frame-h="canvasDisplay.h"
                 :background="background" :groups="localGroups" :label="t.name"
+                :wired-content="wiredContentForSlot"
                 :selected="(compositor?.data?.properties as any)?.sailor_posterState?.patternId === t.patternId && (compositor?.data?.properties as any)?.sailor_posterState?.seed === t.seed"
                 @pick="layoutSheet.apply(t)" @more="layoutSheet.moreLikeThis(t)"
               />
