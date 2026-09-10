@@ -386,6 +386,106 @@ function applyMelt(geo: THREE.BufferGeometry, amount: number, axis: number): voi
   pos.needsUpdate = true
 }
 
+/** Lattice / cage DEFORMER: a real 3×3×3 trilinear control cage spanning the geometry's own
+ *  bounding box. Each vertex is expressed as normalized (u,v,w) ∈ [0,1]³ within that box and
+ *  replaced by the TRILINEAR blend of the 8 corner control points of the 2×2×2 cell it falls in
+ *  — the exact interpolation that reproduces the input when the cage is undisplaced (identity).
+ *
+ *  The 27 control points are displaced PROCEDURALLY from three dials (an 81-slider hand-cage is
+ *  unusable): `bulge` pushes the MIDDLE ring perpendicular to `axis` outward (+, barrel) or inward
+ *  (−, pincushion); `bias` lifts one end layer's ring so the fattest cross-section shifts toward
+ *  that end (asymmetric bulge). At bias 0 the two end caps along the axis stay put.
+ *
+ *  FOLLOW-UP: interactive on-canvas 3×3×3 cage handles (dragging the 27 control points directly)
+ *  reuse this SAME trilinear engine — this task ships the engine plus the procedural dials.
+ *
+ *  DEFORMER: mutates positions in place, vertex count unchanged. Computes its OWN bbox at entry
+ *  because the pipeline's bbox recompute runs AFTER the middle loop (so geo.boundingBox may be
+ *  stale/null here). bulge 0 returns early so the identity stays byte-identical. */
+function applyLattice(geo: THREE.BufferGeometry, bulge: number, axis: number, bias: number): void {
+  if (bulge === 0) return // undisplaced cage is the identity — keep positions byte-identical
+  const ax = ((Math.round(axis) % 3) + 3) % 3
+  const p1 = (ax + 1) % 3
+  const p2 = (ax + 2) % 3
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  geo.computeBoundingBox()
+  const b = geo.boundingBox!
+  const min = [b.min.x, b.min.y, b.min.z]
+  const size = [
+    Math.max(b.max.x - b.min.x, 1e-6),
+    Math.max(b.max.y - b.min.y, 1e-6),
+    Math.max(b.max.z - b.min.z, 1e-6),
+  ]
+
+  // Radial gain: at bulge 1 the peak ring's outer control points move out by a quarter of the
+  // shape's width — a strong but bounded barrel.
+  const K = 0.5
+  // How strongly each of the 3 layers ALONG the axis bulges. `bias` slides the peak of a tent
+  // profile from the middle (bias 0) toward an end (bias ±1): peak position runs 0..2 along the
+  // axis, and each layer's weight falls off linearly with its distance from that peak. At bias 0
+  // the peak is the middle layer and BOTH end caps have zero weight (a symmetric barrel/pincushion
+  // that leaves the caps put); a nonzero bias lifts one end layer's ring so the fattest
+  // cross-section shifts toward that end (asymmetric bulge).
+  const peak = 1 + Math.max(-1, Math.min(1, bias)) // 0 = bottom layer, 1 = middle, 2 = top
+  const layerWeight = (lay: number): number => Math.max(0, 1 - Math.abs(lay - peak))
+
+  // 27 control points, cp[i][j][k] (each 0..2) → [x,y,z], starting on the undisplaced grid and
+  // displaced radially in the perpendicular plane by the dials.
+  const cp: number[][][][] = []
+  for (let i = 0; i < 3; i++) {
+    cp[i] = []
+    for (let j = 0; j < 3; j++) {
+      cp[i]![j] = []
+      for (let k = 0; k < 3; k++) {
+        const grid = [i, j, k]
+        const base = [
+          min[0]! + (i / 2) * size[0]!,
+          min[1]! + (j / 2) * size[1]!,
+          min[2]! + (k / 2) * size[2]!,
+        ]
+        const lay = grid[ax]!        // 0..2 position along the bulge axis
+        const d1 = grid[p1]! - 1     // -1,0,1 radial offset in the perpendicular plane
+        const d2 = grid[p2]! - 1
+        const w = bulge * layerWeight(lay) * K
+        base[p1]! += d1 * (size[p1]! / 2) * w
+        base[p2]! += d2 * (size[p2]! / 2) * w
+        cp[i]![j]![k] = base
+      }
+    }
+  }
+
+  // Trilinear deform: for each vertex find its (u,v,w) within the box and the 2×2×2 cell it lands
+  // in, then blend the 8 corner control points. With the undisplaced cage this is exactly the
+  // input — the identity guaranteed by the early return above.
+  const cellOf = (t: number): [number, number] => {
+    const s = Math.min(Math.max(t, 0), 1) * 2 // 0..2, clamped so out-of-box verts stay in a cell
+    const c = Math.min(Math.floor(s), 1)      // cell 0 or 1
+    return [c, s - c]                          // [cellIndex, fraction 0..1]
+  }
+  for (let v = 0; v < pos.count; v++) {
+    const [ci, fi] = cellOf((pos.getX(v) - min[0]!) / size[0]!)
+    const [cj, fj] = cellOf((pos.getY(v) - min[1]!) / size[1]!)
+    const [ck, fk] = cellOf((pos.getZ(v) - min[2]!) / size[2]!)
+    let ox = 0, oy = 0, oz = 0
+    for (let di = 0; di < 2; di++) {
+      const wi = di === 0 ? 1 - fi : fi
+      for (let dj = 0; dj < 2; dj++) {
+        const wj = dj === 0 ? 1 - fj : fj
+        for (let dk = 0; dk < 2; dk++) {
+          const wk = dk === 0 ? 1 - fk : fk
+          const wgt = wi * wj * wk
+          const P = cp[ci + di]![cj + dj]![ck + dk]!
+          ox += P[0]! * wgt
+          oy += P[1]! * wgt
+          oz += P[2]! * wgt
+        }
+      }
+    }
+    pos.setXYZ(v, ox, oy, oz)
+  }
+  pos.needsUpdate = true
+}
+
 // --- geometry producers ------------------------------------------------------
 
 /** Reverse the winding of every triangle in a NON-INDEXED geometry by swapping the first and
@@ -753,7 +853,7 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
  *  and any producer that changed the count still needs fresh normals/bounds. For a LEGACY bag the
  *  middle rows are EXACTLY the deforms, so "any middle row" and "any deform" coincide and the
  *  byte-identity oracle is untouched. */
-const DEFORM_KINDS: readonly ModifierKind[] = ['taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt']
+const DEFORM_KINDS: readonly ModifierKind[] = ['taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice']
 const PRODUCER_KINDS: readonly ModifierKind[] = ['array', 'shatter', 'mirror', 'decimate', 'voxelise']
 const isDeformKind = (k: ModifierKind): boolean => (DEFORM_KINDS as readonly string[]).includes(k)
 const isProducerKind = (k: ModifierKind): boolean => (PRODUCER_KINDS as readonly string[]).includes(k)
@@ -776,6 +876,7 @@ function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance): THREE
     case 'spherify': applySpherify(geo, m('spherify')); return geo
     case 'smooth': applySmooth(geo, m('smoothStrength'), Math.round(m('smoothIterations'))); return geo
     case 'melt': applyMelt(geo, m('melt'), Math.round(m('meltAxis'))); return geo
+    case 'lattice': applyLattice(geo, m('latticeBulge'), Math.round(m('latticeAxis')), m('latticeBias')); return geo
     case 'array': return applyRadialArray(geo, m('arrayCount'), Math.round(m('arrayAxis')), m('arrayRadius'))
     case 'shatter': return applyShatter(geo, m('shatter'), Math.round(m('shatterSeed')))
     case 'mirror': return applyMirror(geo, Math.round(m('mirrorAxis')), m('mirrorOffset'))

@@ -529,6 +529,9 @@ const smoothRow = (strength = 0, iterations = 1): ModifierInstance => {
 const meltRow = (amount = 0, axis = 1): ModifierInstance => {
   const r = createModifier('melt'); r.melt = amount; r.meltAxis = axis; return r
 }
+const latticeRow = (bulge = 0, axis = 1, bias = 0): ModifierInstance => {
+  const r = createModifier('lattice'); r.latticeBulge = bulge; r.latticeAxis = axis; r.latticeBias = bias; return r
+}
 /** Distinct vertex positions, rounded to 4 decimals — the same tolerance `applySmooth` welds on. */
 function countDistinct(geo: THREE.BufferGeometry): number {
   const p = geo.getAttribute('position') as THREE.BufferAttribute
@@ -645,6 +648,119 @@ describe('melt deformer', () => {
     const ob = out.boundingBox!
     expect(ob.max.x).toBeCloseTo(bb.min.x, 5)         // collapsed along X
     expect(ob.max.y - ob.min.y).toBeGreaterThan(bb.max.y - bb.min.y) // spread along Y
+  })
+})
+
+// ---------------------------------------------------------------------------
+// S2 Task 5 — lattice cage deformer: a real 3×3×3 trilinear control cage driven
+// by Bulge / Axis / Bias. A DEFORMER — vertex count unchanged, mutates in place.
+// ---------------------------------------------------------------------------
+describe('lattice cage deformer', () => {
+  // A plain box has only 8 corner vertices at the cell boundaries — a segmented box carries
+  // vertices across the whole cage, including the equator the bulge acts on.
+  const segBox = () => new THREE.BoxGeometry(1, 2, 1, 4, 6, 4)
+  // Radial distance from the bulge axis (Y) in the perpendicular (X,Z) plane.
+  const radiusXZ = (p: THREE.BufferAttribute, i: number) => Math.hypot(p.getX(i), p.getZ(i))
+
+  it('all dials zero → positions byte-identical to the input (identity)', () => {
+    const base = segBox()
+    const out = applyModifierStack(segBox(), [latticeRow(0, 1, 0)])
+    const cmp = comparePositions(base, out)
+    expect(cmp.lenEqual).toBe(true)
+    expect(cmp.diffs).toBe(0)
+  })
+
+  it('bulge > 0 bows the equator outward while the end caps stay put (barrel); count unchanged', () => {
+    const base = segBox().getAttribute('position') as THREE.BufferAttribute
+    const out = applyModifierStack(segBox(), [latticeRow(0.8, 1, 0)]) // bulge about Y
+    const p = out.getAttribute('position') as THREE.BufferAttribute
+    expect(p.count).toBe(base.count)
+    // Equator vertices (Y ≈ 0, the middle layer) move OUTWARD in the X/Z plane …
+    let equatorTested = 0
+    for (let i = 0; i < base.count; i++) {
+      if (Math.abs(base.getY(i)) < 1e-6 && radiusXZ(base, i) > 1e-6) {
+        expect(radiusXZ(p, i)).toBeGreaterThan(radiusXZ(base, i) + 1e-4)
+        equatorTested++
+      }
+    }
+    expect(equatorTested).toBeGreaterThan(0)
+    // … while cap vertices (Y = ±1, the end layers along the axis) are unmoved.
+    let capsTested = 0
+    for (let i = 0; i < base.count; i++) {
+      if (Math.abs(Math.abs(base.getY(i)) - 1) < 1e-6) {
+        expect(p.getX(i)).toBeCloseTo(base.getX(i), 5)
+        expect(p.getY(i)).toBeCloseTo(base.getY(i), 5)
+        expect(p.getZ(i)).toBeCloseTo(base.getZ(i), 5)
+        capsTested++
+      }
+    }
+    expect(capsTested).toBeGreaterThan(0)
+  })
+
+  it('bulge < 0 pinches the equator inward (pincushion); count unchanged', () => {
+    const base = segBox().getAttribute('position') as THREE.BufferAttribute
+    const out = applyModifierStack(segBox(), [latticeRow(-0.8, 1, 0)])
+    const p = out.getAttribute('position') as THREE.BufferAttribute
+    expect(p.count).toBe(base.count)
+    let tested = 0
+    for (let i = 0; i < base.count; i++) {
+      if (Math.abs(base.getY(i)) < 1e-6 && radiusXZ(base, i) > 1e-6) {
+        expect(radiusXZ(p, i)).toBeLessThan(radiusXZ(base, i) - 1e-4)
+        tested++
+      }
+    }
+    expect(tested).toBeGreaterThan(0)
+  })
+
+  it('bias shifts the fattest cross-section toward one end of the axis', () => {
+    // Widest radius per Y-layer: with no bias the peak sits at the middle; a positive bias lifts
+    // the fattest ring toward the +Y end.
+    const widestAt = (bias: number): number => {
+      const out = applyModifierStack(segBox(), [latticeRow(0.8, 1, bias)])
+      const p = out.getAttribute('position') as THREE.BufferAttribute
+      let bestY = 0, bestR = -1
+      for (let i = 0; i < p.count; i++) {
+        const r = radiusXZ(p, i)
+        if (r > bestR) { bestR = r; bestY = p.getY(i) }
+      }
+      return bestY
+    }
+    const centred = widestAt(0)
+    const biasedUp = widestAt(0.9)
+    const biasedDown = widestAt(-0.9)
+    expect(Math.abs(centred)).toBeLessThan(0.25)   // symmetric bulge peaks near the equator
+    expect(biasedUp).toBeGreaterThan(centred + 0.2) // fattest ring moves toward +Y
+    expect(biasedDown).toBeLessThan(centred - 0.2)  // and toward −Y for a negative bias
+  })
+
+  it('respects latticeAxis — bulging about X leaves the X caps put and swells the middle', () => {
+    const base = new THREE.BoxGeometry(2, 1, 1, 6, 4, 4).getAttribute('position') as THREE.BufferAttribute
+    const out = applyModifierStack(new THREE.BoxGeometry(2, 1, 1, 6, 4, 4), [latticeRow(0.8, 0, 0)]) // axis X
+    const p = out.getAttribute('position') as THREE.BufferAttribute
+    // The X end caps (X = ±1) stay put …
+    let caps = 0
+    for (let i = 0; i < base.count; i++) {
+      if (Math.abs(Math.abs(base.getX(i)) - 1) < 1e-6) {
+        expect(p.getX(i)).toBeCloseTo(base.getX(i), 5)
+        caps++
+      }
+    }
+    expect(caps).toBeGreaterThan(0)
+    // … while the mid-slice (X ≈ 0) bows outward in the Y/Z plane.
+    let mids = 0
+    for (let i = 0; i < base.count; i++) {
+      if (Math.abs(base.getX(i)) < 1e-6 && Math.hypot(base.getY(i), base.getZ(i)) > 1e-6) {
+        expect(Math.hypot(p.getY(i), p.getZ(i))).toBeGreaterThan(Math.hypot(base.getY(i), base.getZ(i)) + 1e-4)
+        mids++
+      }
+    }
+    expect(mids).toBeGreaterThan(0)
+  })
+
+  it('a disabled lattice row is skipped (no-op returns the same geometry object)', () => {
+    const disabled = latticeRow(0.8, 1, 0); disabled.enabled = false
+    const g = new THREE.BoxGeometry(1, 1, 1)
+    expect(applyModifierStack(g, [disabled])).toBe(g)
   })
 })
 

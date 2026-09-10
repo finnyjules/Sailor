@@ -23,7 +23,7 @@ import { MODIFIER_SPECS, modifierValue, totalClones } from '~/lib/scene3d/primPa
  *  `array`/`shatter`/`mirror` are geometry PRODUCERS (they change the vertex buffer — array folds N
  *  rotated copies, shatter splits every face, mirror duplicates + welds), living in the orderable
  *  middle between the deforms and the pinned cloner. */
-export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'cloner'] as const
+export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'cloner'] as const
 export type ModifierKind = typeof MODIFIER_KINDS[number]
 
 /** The order the pipeline applies these in — and therefore the order an old-shape bag is folded
@@ -52,6 +52,7 @@ export const MODIFIER_KIND_PARAMS: Record<ModifierKind, string[]> = {
   spherify: ['spherify'],
   smooth: ['smoothStrength', 'smoothIterations'],
   melt: ['melt', 'meltAxis'],
+  lattice: ['latticeBulge', 'latticeAxis', 'latticeBias'],
   array: ['arrayCount', 'arrayAxis', 'arrayRadius'],
   shatter: ['shatter', 'shatterSeed'],
   mirror: ['mirrorAxis', 'mirrorOffset'],
@@ -76,6 +77,7 @@ export const MODIFIER_LABELS: Record<ModifierKind, string> = {
   spherify: 'Spherify',
   smooth: 'Smooth',
   melt: 'Melt',
+  lattice: 'Lattice',
   array: 'Radial array',
   shatter: 'Shatter',
   mirror: 'Mirror',
@@ -183,6 +185,8 @@ export function modifierStackOf(obj: StackHost | null | undefined): ModifierInst
     spherify: false,
     smooth: false,
     melt: false,
+    // The lattice cage deformer never lived in the legacy flat bag either, so it never folds active.
+    lattice: false,
     // Geometry producers never lived in the legacy flat bag, so they never fold active.
     array: false,
     shatter: false,

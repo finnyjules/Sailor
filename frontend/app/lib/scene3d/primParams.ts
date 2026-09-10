@@ -246,6 +246,15 @@ export const MODIFIER_SPECS: ParamSpec[] = [
   { key: 'melt', label: 'Melt', hint: 'Slumps the shape downward into a spreading puddle', min: 0, max: 1, step: 0.01, default: 0 },
   axisSpec('meltAxis', 'Melt axis', 'The "down" direction gravity pulls the shape toward', 1),
 
+  // Lattice — a DEFORMER (vertex count unchanged): a real 3×3×3 trilinear control cage spanning
+  // the shape's own bounding box, driven procedurally by three dials rather than 81 sliders.
+  // `latticeBulge` pushes the cage's middle ring outward (barrel) or inward (pincushion)
+  // perpendicular to `latticeAxis`; `latticeBias` shifts where that bulge peaks along the axis.
+  // All read by `applyLattice`; bulge 0 is the identity. latticeAxis' option is stored as an index.
+  { key: 'latticeBulge', label: 'Lattice bulge', hint: 'Bows the sides out into a barrel, or pinches them in for a pincushion', min: -1, max: 1, step: 0.01, default: 0 },
+  axisSpec('latticeAxis', 'Lattice axis', 'The axis the bulge runs along — its middle swells', 1),
+  { key: 'latticeBias', label: 'Lattice bias', hint: 'Shifts the bulge toward one end, so the shape is fatter at the top or bottom', min: -1, max: 1, step: 0.01, default: 0 },
+
   // Radial array — a geometry PRODUCER: it repeats the shape in a ring of evenly-rotated copies
   // about an axis, folded into one geometry. All three dials are read by `applyRadialArray`; the
   // count is budget-clamped exactly as the cloner clamps. arrayAxis' option is stored as an index.
