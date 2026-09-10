@@ -2623,7 +2623,7 @@ async function runImageEdit() {
     const out = wholeEditModel.value === 'nano'
       ? await inpaint.nanoGen(prompt, src)
       : await inpaint.kontext(src, prompt)
-    const first = out[0]; if (!first) return
+    const first = out[0]; if (!first) { inpaint.error.value = 'The edit returned no image — try again.'; return }
     const name = await inpaint.uploadDataUrl(first, 'compedit')
     setLocal(layer.id, { filename: name })
   } catch (err) { console.error('[compositor edit image]', err) /* inpaint.error is shown in the panel */ }
@@ -2653,7 +2653,7 @@ async function runRegionEdit() {
   genPrompt.value = regionPrompt.value
   await runRegionFill()
 }
-function selectObjectStart(id: string) { selectLocal(id); toggleSmartMode() }
+function selectObjectStart(id: string) { editImageCancel(); editRegionCancel(); selectLocal(id); toggleSmartMode() }
 function onCanvasPointerMoveCapture(e: PointerEvent) {
   if (smartActive.value) { onSmartPointerMove(e); return }
   if (regionSelectActive.value) { onRegionSelectPointerMove(e); return }
@@ -4996,7 +4996,7 @@ async function runRegionFill() {
       mctx.drawImage(genMaskCanvas, 0, 0)                        // WHITE region = inpaint
       mctx.setTransform(1, 0, 0, 1, 0, 0)
       const results = await inpaint.fluxFill(imageData, mc.toDataURL('image/png'), genPrompt.value.trim())
-      if (!results.length) return
+      if (!results.length) { inpaint.error.value = 'The edit returned no image — try again.'; return }
       const newName = await inpaint.uploadDataUrl(results[0], 'compinpaint')
       setLocal(layer.id, { filename: newName })
     } else {
@@ -7134,6 +7134,7 @@ onUnmounted(() => {
           <div>
             <div class="panel-label mb-1.5">Prompt</div>
             <textarea v-model="editImagePrompt" rows="3" data-testid="edit-image-prompt"
+              @keydown.esc.stop.prevent="editImageCancel"
               placeholder="Describe the change… (e.g. make it night)"
               class="w-full rounded bg-white/[0.06] px-2 py-1.5 text-[12px] text-white/90 placeholder-white/35 outline-none resize-none"></textarea>
           </div>
@@ -7166,6 +7167,7 @@ onUnmounted(() => {
           <div>
             <div class="panel-label mb-1.5">Prompt</div>
             <textarea v-model="regionPrompt" rows="3" data-testid="edit-region-prompt"
+              @keydown.esc.stop.prevent="editRegionCancel"
               placeholder="Describe what should appear there…"
               class="w-full rounded bg-white/[0.06] px-2 py-1.5 text-[12px] text-white/90 placeholder-white/35 outline-none resize-none"></textarea>
           </div>

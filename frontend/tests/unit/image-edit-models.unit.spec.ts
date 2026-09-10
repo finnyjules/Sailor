@@ -5,8 +5,8 @@ describe('image edit models', () => {
     expect(WHOLE_IMAGE_MODELS[0]).toEqual({ value: 'kontext', label: 'Kontext' })
     expect(WHOLE_IMAGE_MODELS.map(m => m.value)).toEqual(['kontext', 'nano'])
   })
-  it('region models: flux fill default first', () => {
+  it('region models: flux fill only (nano region not wired yet)', () => {
     expect(REGION_MODELS[0]).toEqual({ value: 'flux', label: 'FLUX Fill' })
-    expect(REGION_MODELS.map(m => m.value)).toEqual(['flux', 'nano'])
+    expect(REGION_MODELS.map(m => m.value)).toEqual(['flux'])
   })
 })
