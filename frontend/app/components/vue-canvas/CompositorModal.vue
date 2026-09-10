@@ -4392,21 +4392,6 @@ const editToolbarLayer = computed<LocalLayer | null>(() => {
 })
 const showEditToolbar = computed(() =>
   !!editToolbarLayer.value && (editMode.value !== 'none' || isSelectTool.value))
-// Where the floating prompt bar sits (artboard px): over the painted/selected
-// region once one exists, otherwise centred under the image being edited.
-const editPromptAnchor = computed<{ left: number; top: number } | null>(() => {
-  if (editRegion.value && genHasMask.value) {
-    const b = genMaskBounds()
-    if (b) return { left: clamp((b.minX + b.maxX) / 2, 130, canvasDisplay.w - 130), top: clamp(b.maxY + 14, 44, canvasDisplay.h - 44) }
-  }
-  if (editImage.value || editRegion.value) {
-    const b = selectionBoundsPx()
-    if (b) return { left: clamp(b.cx, 130, canvasDisplay.w - 130), top: clamp(b.cy + b.h / 2 + 14, 44, canvasDisplay.h - 44) }
-    // No handles yet (rare) — keep the prompt reachable, low-centre over the stage.
-    return { left: canvasDisplay.w / 2, top: clamp(canvasDisplay.h - 96, 44, canvasDisplay.h - 44) }
-  }
-  return null
-})
 const wholeModelLabel = computed(() =>
   (WHOLE_IMAGE_MODELS.find(m => m.value === wholeEditModel.value) ?? WHOLE_IMAGE_MODELS[0]!).label)
 function pickWholeModel(v: string) { wholeEditModel.value = v; modelMenuOpen.value = false }
@@ -6616,34 +6601,6 @@ onUnmounted(() => {
             data-testid="smart-action-delete" @click="smartDelete">Delete</button>
         </div>
 
-        <!-- Edit prompt bar: the prompt for Edit image / Edit a region happens
-             here, floating over the area. Modes + model live on the fixed toolbar. -->
-        <div v-if="editPromptAnchor"
-          data-testid="edit-prompt-bar"
-          class="absolute z-40 -translate-x-1/2 flex items-center gap-1 bg-[#1a1a1a]/95 backdrop-blur-sm rounded-[10px] p-1 border border-[#2a2a2a] shadow-lg"
-          :style="{ left: editPromptAnchor.left + 'px', top: editPromptAnchor.top + 'px' }"
-          @pointerdown.stop @click.stop>
-          <input ref="editPromptRef" type="text"
-            :value="editImage ? editImagePrompt : regionPrompt"
-            :data-testid="editImage ? 'edit-image-prompt' : 'edit-region-prompt'"
-            :placeholder="editImage ? 'Describe the change…' : 'Describe what should appear there…'"
-            class="h-8 w-56 rounded-[8px] bg-white/5 px-2 text-[12px] text-white/90 placeholder-white/35 outline-none focus:bg-white/10"
-            @input="(e) => { const v = (e.target as HTMLInputElement).value; if (editImage) editImagePrompt = v; else regionPrompt = v }"
-            @keydown.enter="editImage ? (editImagePrompt.trim() && !inpaint.busy.value && runImageEdit()) : (genHasMask && regionPrompt.trim() && !inpaint.busy.value && runRegionEdit())"
-            @keydown.esc.stop.prevent="editImage ? editImageCancel() : editRegionCancel()" />
-          <button type="button"
-            :data-testid="editImage ? 'edit-image-run' : 'edit-region-run'"
-            class="flex items-center justify-center h-8 px-3 rounded-[8px] bg-white text-neutral-900 hover:bg-white/90 text-[12px] font-medium cursor-pointer disabled:opacity-40 disabled:cursor-default whitespace-nowrap"
-            :disabled="inpaint.busy.value || (editImage ? !editImagePrompt.trim() : (!genHasMask || !regionPrompt.trim()))"
-            @click="editImage ? runImageEdit() : runRegionEdit()">
-            {{ inpaint.busy.value ? (editImage ? 'Editing…' : 'Generating…') : (editImage ? 'Edit' : 'Generate') }}</button>
-        </div>
-        <!-- Edit error, tucked just under the prompt bar. -->
-        <div v-if="editPromptAnchor && inpaint.error.value && editMode !== 'none'"
-          data-testid="edit-error"
-          class="absolute z-40 -translate-x-1/2 max-w-[280px] rounded bg-rose-950/95 border border-rose-500/30 px-2 py-1 text-[11px] text-rose-200 shadow-lg"
-          :style="{ left: editPromptAnchor.left + 'px', top: (editPromptAnchor.top + 40) + 'px' }">{{ inpaint.error.value }}</div>
-
         <!-- Multi-select outlines (when 2+ layers selected) -->
         <template v-if="selectedCount > 1 && !nodeEdit.active.value && !genActive">
           <div v-for="l in selectedLayers" :key="'ms-' + l.id"
@@ -6875,64 +6832,93 @@ onUnmounted(() => {
         <button class="underline hover:text-white cursor-pointer" @click="exitNodeEdit">Done (Esc)</button>
       </div>
 
-      <!-- Fixed edit toolbar: the modes (Edit image / Edit a region / Select an
-           object) and the model live here, docked above the main toolbar, while
-           the prompt itself happens on the floating bar over the area (below). -->
+      <!-- Edit surface: a docked panel above the agent bar. The prompt sits on its
+           own row (reachable, doesn't move with the image), the modes + model +
+           region tools on the row below. Never overlaps the agent/main toolbar. -->
       <div v-if="showEditToolbar" data-testid="edit-toolbar"
-        class="pointer-events-auto absolute bottom-[92px] left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 bg-[#1a1a1a]/95 backdrop-blur-sm rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg"
+        class="pointer-events-auto absolute bottom-[152px] left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2"
         @pointerdown.stop @click.stop>
-        <button type="button" data-testid="edit-mode-image"
-          class="h-8 px-2.5 rounded-[8px] text-[12px] cursor-pointer whitespace-nowrap"
-          :class="editImage ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
-          @click="editImageStart(editToolbarLayer!.id)">Edit image</button>
-        <button type="button" data-testid="edit-mode-region"
-          class="h-8 px-2.5 rounded-[8px] text-[12px] cursor-pointer whitespace-nowrap"
-          :class="editRegion ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
-          @click="editRegionStart(editToolbarLayer!.id)">Edit a region</button>
-        <button type="button" data-testid="edit-mode-select"
-          class="h-8 px-2.5 rounded-[8px] text-[12px] cursor-pointer whitespace-nowrap"
-          :class="smartActive ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
-          @click="selectObjectStart(editToolbarLayer!.id)">Select an object</button>
+        <!-- Prompt row (only while a prompting mode is active). -->
+        <div v-if="editMode !== 'none'"
+          class="flex items-center gap-1 bg-[#1a1a1a]/95 backdrop-blur-sm rounded-[10px] p-1 border border-[#2a2a2a] shadow-lg">
+          <input ref="editPromptRef" type="text"
+            :value="editImage ? editImagePrompt : regionPrompt"
+            :data-testid="editImage ? 'edit-image-prompt' : 'edit-region-prompt'"
+            :placeholder="editImage ? 'Describe the change…' : 'Describe what should appear there…'"
+            class="h-8 w-72 rounded-[8px] bg-white/5 px-2 text-[12px] text-white/90 placeholder-white/35 outline-none focus:bg-white/10"
+            @input="(e) => { const v = (e.target as HTMLInputElement).value; if (editImage) editImagePrompt = v; else regionPrompt = v }"
+            @keydown.enter="editImage ? (editImagePrompt.trim() && !inpaint.busy.value && runImageEdit()) : (genHasMask && regionPrompt.trim() && !inpaint.busy.value && runRegionEdit())"
+            @keydown.esc.stop.prevent="editImage ? editImageCancel() : editRegionCancel()" />
+          <button type="button"
+            :data-testid="editImage ? 'edit-image-run' : 'edit-region-run'"
+            class="flex items-center justify-center h-8 px-3 rounded-[8px] bg-white text-neutral-900 hover:bg-white/90 text-[12px] font-medium cursor-pointer disabled:opacity-40 disabled:cursor-default whitespace-nowrap"
+            :disabled="inpaint.busy.value || (editImage ? !editImagePrompt.trim() : (!genHasMask || !regionPrompt.trim()))"
+            @click="editImage ? runImageEdit() : runRegionEdit()">
+            {{ inpaint.busy.value ? (editImage ? 'Editing…' : 'Generating…') : (editImage ? 'Edit' : 'Generate') }}</button>
+        </div>
+        <!-- Region hint: what the current sub-tool does. -->
+        <p v-if="editRegion && !genHasMask" class="text-[11px] text-white/55 bg-black/50 rounded px-2 py-0.5">
+          {{ regionSelectTool === 'select' ? 'Click an object on the image to select it, or drag a box.' : 'Paint over the area to change.' }}
+        </p>
+        <!-- Error, if any. -->
+        <div v-if="inpaint.error.value && editMode !== 'none'" data-testid="edit-error"
+          class="max-w-[360px] rounded bg-rose-950/95 border border-rose-500/30 px-2 py-1 text-[11px] text-rose-200 text-center shadow-lg">{{ inpaint.error.value }}</div>
 
-        <!-- Region sub-tools: how you pick the area. -->
-        <template v-if="editRegion">
-          <div class="w-px h-5 bg-white/10 mx-0.5" />
-          <button type="button" class="h-8 px-2 rounded-[8px] text-[11px] cursor-pointer whitespace-nowrap"
-            :class="regionSelectTool === 'select' ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/70'"
-            @click="setRegionSelectTool('select')">Select</button>
-          <button type="button" class="h-8 px-2 rounded-[8px] text-[11px] cursor-pointer whitespace-nowrap"
-            :class="regionSelectTool === 'brush' ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/70'"
-            @click="setRegionSelectTool('brush')">Brush</button>
-          <div v-if="regionSelectTool === 'brush'" class="flex items-center gap-1.5 px-1">
-            <span class="text-[10px] text-white/40">Size</span>
-            <input type="range" min="8" max="240" step="2" v-model.number="genBrush" class="w-24 accent-white cursor-pointer" />
-          </div>
-        </template>
+        <!-- Modes + model + region sub-tools. -->
+        <div class="flex items-center gap-1 bg-[#1a1a1a]/95 backdrop-blur-sm rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
+          <button type="button" data-testid="edit-mode-image"
+            class="h-8 px-2.5 rounded-[8px] text-[12px] cursor-pointer whitespace-nowrap"
+            :class="editImage ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
+            @click="editImageStart(editToolbarLayer!.id)">Edit image</button>
+          <button type="button" data-testid="edit-mode-region"
+            class="h-8 px-2.5 rounded-[8px] text-[12px] cursor-pointer whitespace-nowrap"
+            :class="editRegion ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
+            @click="editRegionStart(editToolbarLayer!.id)">Edit a region</button>
+          <button type="button" data-testid="edit-mode-select"
+            class="h-8 px-2.5 rounded-[8px] text-[12px] cursor-pointer whitespace-nowrap"
+            :class="smartActive ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
+            @click="selectObjectStart(editToolbarLayer!.id)">Select an object</button>
 
-        <!-- Model (whole-image only; region inpaint is FLUX Fill for now). -->
-        <template v-if="editMode !== 'region'">
-          <div class="w-px h-5 bg-white/10 mx-0.5" />
-          <div class="relative">
-            <button type="button" data-testid="edit-model-menu"
-              class="flex items-center gap-1.5 h-8 px-2 rounded-[8px] hover:bg-white/10 text-white/80 text-[11px] cursor-pointer whitespace-nowrap"
-              title="Model" @click="modelMenuOpen = !modelMenuOpen">
-              <span>{{ wholeModelLabel }}</span>
-              <ChevronDown class="size-3 text-white/40" :class="modelMenuOpen ? 'rotate-180' : ''" />
-            </button>
-            <div v-if="modelMenuOpen" class="absolute bottom-full right-0 mb-1.5 z-50 w-40 rounded-md bg-neutral-900 border border-white/10 shadow-xl flex flex-col overflow-hidden">
-              <button v-for="m in WHOLE_IMAGE_MODELS" :key="m.value" type="button"
-                class="px-3 py-2 text-left text-[12px] hover:bg-white/10 cursor-pointer"
-                :class="m.value === wholeEditModel ? 'text-white' : 'text-white/70'"
-                @click="pickWholeModel(m.value)">{{ m.label }}</button>
+          <!-- Region sub-tools: how you pick the area. -->
+          <template v-if="editRegion">
+            <div class="w-px h-5 bg-white/10 mx-0.5" />
+            <button type="button" class="h-8 px-2 rounded-[8px] text-[11px] cursor-pointer whitespace-nowrap"
+              :class="regionSelectTool === 'select' ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/70'"
+              @click="setRegionSelectTool('select')">Select</button>
+            <button type="button" class="h-8 px-2 rounded-[8px] text-[11px] cursor-pointer whitespace-nowrap"
+              :class="regionSelectTool === 'brush' ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/70'"
+              @click="setRegionSelectTool('brush')">Brush</button>
+            <div v-if="regionSelectTool === 'brush'" class="flex items-center gap-1.5 px-1">
+              <span class="text-[10px] text-white/40">Size</span>
+              <input type="range" min="8" max="240" step="2" v-model.number="genBrush" class="w-24 accent-white cursor-pointer" />
             </div>
-          </div>
-        </template>
+          </template>
 
-        <template v-if="editMode !== 'none'">
-          <div class="w-px h-5 bg-white/10 mx-0.5" />
-          <button type="button" class="flex items-center justify-center size-8 rounded-[8px] hover:bg-white/10 text-white/60 cursor-pointer"
-            title="Done (Esc)" @click="editImageCancel(); editRegionCancel()"><X class="size-4" /></button>
-        </template>
+          <!-- Model (whole-image only; region inpaint is FLUX Fill for now). -->
+          <template v-if="editMode !== 'region'">
+            <div class="w-px h-5 bg-white/10 mx-0.5" />
+            <div class="relative">
+              <button type="button" data-testid="edit-model-menu"
+                class="flex items-center gap-1.5 h-8 px-2 rounded-[8px] hover:bg-white/10 text-white/80 text-[11px] cursor-pointer whitespace-nowrap"
+                title="Model" @click="modelMenuOpen = !modelMenuOpen">
+                <span>{{ wholeModelLabel }}</span>
+                <ChevronDown class="size-3 text-white/40" :class="modelMenuOpen ? 'rotate-180' : ''" />
+              </button>
+              <div v-if="modelMenuOpen" class="absolute bottom-full right-0 mb-1.5 z-50 w-40 rounded-md bg-neutral-900 border border-white/10 shadow-xl flex flex-col overflow-hidden">
+                <button v-for="m in WHOLE_IMAGE_MODELS" :key="m.value" type="button"
+                  class="px-3 py-2 text-left text-[12px] hover:bg-white/10 cursor-pointer"
+                  :class="m.value === wholeEditModel ? 'text-white' : 'text-white/70'"
+                  @click="pickWholeModel(m.value)">{{ m.label }}</button>
+              </div>
+            </div>
+          </template>
+
+          <template v-if="editMode !== 'none'">
+            <div class="w-px h-5 bg-white/10 mx-0.5" />
+            <button type="button" class="flex items-center justify-center size-8 rounded-[8px] hover:bg-white/10 text-white/60 cursor-pointer"
+              title="Done (Esc)" @click="editImageCancel(); editRegionCancel()"><X class="size-4" /></button>
+          </template>
+        </div>
       </div>
 
       <!-- Bottom cluster: agent command bar + toolbar. The column is bottom-anchored
