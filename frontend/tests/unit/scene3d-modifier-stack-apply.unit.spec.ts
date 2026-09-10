@@ -657,3 +657,126 @@ describe('the new deformers each no-op when disabled', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// S2 Task 3 — geometry producers: radial array (N rotated copies about an axis)
+// and shatter (per-face split + seeded outward offset). Each returns a NEW
+// geometry with a changed vertex buffer, budget-clamped like mirror/the cloner.
+// ---------------------------------------------------------------------------
+const arrayRow = (count = 6, axis = 1, radius = 0): ModifierInstance => {
+  const r = createModifier('array'); r.arrayCount = count; r.arrayAxis = axis; r.arrayRadius = radius; return r
+}
+const shatterRow = (amount = 0, seed = 0): ModifierInstance => {
+  const r = createModifier('shatter'); r.shatter = amount; r.shatterSeed = seed; return r
+}
+
+describe('radial array producer', () => {
+  it('folds N copies into one geometry — vertex count is exactly N × base', () => {
+    const base = new THREE.BoxGeometry(1, 1, 1).getAttribute('position').count
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [arrayRow(4, 1, 1)])
+    expect(out.getAttribute('position').count).toBe(base * 4)
+  })
+
+  it('has the array axis N-fold rotational symmetry — every vertex maps onto another under a 1/N turn', () => {
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 0.6, 0.4), [arrayRow(4, 1, 1)]) // 4 copies about Y, offset out
+    const pos = out.getAttribute('position') as THREE.BufferAttribute
+    const pts: THREE.Vector3[] = []
+    for (let i = 0; i < pos.count; i++) pts.push(new THREE.Vector3().fromBufferAttribute(pos, i))
+    // Rotating the whole point set by 90° about Y must land every vertex on an existing vertex:
+    // copy i's placement becomes copy (i+1)'s, and each copy is a clone of the same base.
+    const axisVec = new THREE.Vector3(0, 1, 0)
+    const turn = (Math.PI * 2) / 4
+    for (const p of pts) {
+      const r = p.clone().applyAxisAngle(axisVec, turn)
+      const hit = pts.some((q) => q.distanceTo(r) < 1e-4)
+      expect(hit).toBe(true)
+    }
+    // The offset ring is genuinely off-axis (else the symmetry test is vacuous): some vertex sits
+    // more than half a unit out from the Y axis.
+    expect(pts.some((p) => Math.hypot(p.x, p.z) > 0.5)).toBe(true)
+    // 4 copies at 0/90/180/270° cancel: the centroid lies on the Y axis.
+    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length
+    const cz = pts.reduce((s, p) => s + p.z, 0) / pts.length
+    expect(Math.abs(cx)).toBeLessThan(1e-4)
+    expect(Math.abs(cz)).toBeLessThan(1e-4)
+  })
+
+  it('a disabled array row is skipped (no-op returns the same geometry)', () => {
+    const disabled = arrayRow(6, 1, 1); disabled.enabled = false
+    const g = new THREE.BoxGeometry(1, 1, 1)
+    expect(applyModifierStack(g, [disabled])).toBe(g)
+  })
+
+  it('clamps the copy count to the vertex budget rather than blowing past it', () => {
+    // A dense sphere whose base count makes 24 copies exceed VERTEX_BUDGET: the count is clamped to
+    // the largest N with N × base ≤ budget, so the result is exactly that many copies of the base.
+    const makeGeo = () => new THREE.SphereGeometry(1, 200, 120)
+    const base = makeGeo().getAttribute('position').count
+    const affordable = Math.floor(VERTEX_BUDGET / base)
+    expect(affordable).toBeGreaterThan(1)
+    expect(affordable).toBeLessThan(24) // the budget really does bite before the max count
+    const out = applyModifierStack(makeGeo(), [arrayRow(24, 1, 1)])
+    expect(out.getAttribute('position').count).toBe(base * affordable)
+    expect(out.getAttribute('position').count).toBeLessThanOrEqual(VERTEX_BUDGET)
+  })
+})
+
+describe('shatter producer', () => {
+  it('makes the geometry non-indexed with 3 × triangleCount vertices and pushes faces outward', () => {
+    const src = new THREE.BoxGeometry(1, 1, 1)
+    const triCount = src.index!.count / 3
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [shatterRow(0.5, 3)])
+    expect(out.index).toBeNull()
+    expect(out.getAttribute('position').count).toBe(triCount * 3)
+    // Faces move OUTWARD: the mean vertex distance from the centre grows versus the base.
+    const meanDist = (geo: THREE.BufferGeometry): number => {
+      const p = geo.getAttribute('position') as THREE.BufferAttribute
+      geo.computeBoundingBox()
+      const b = geo.boundingBox!
+      const cx = (b.min.x + b.max.x) / 2, cy = (b.min.y + b.max.y) / 2, cz = (b.min.z + b.max.z) / 2
+      let s = 0
+      for (let i = 0; i < p.count; i++) s += Math.hypot(p.getX(i) - cx, p.getY(i) - cy, p.getZ(i) - cz)
+      return s / p.count
+    }
+    expect(meanDist(out)).toBeGreaterThan(meanDist(new THREE.BoxGeometry(1, 1, 1)))
+  })
+
+  it('is deterministic — same seed identical, different seed differs', () => {
+    const a = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [shatterRow(0.5, 7)])
+    const b = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [shatterRow(0.5, 7)])
+    const cmp = comparePositions(a, b)
+    expect(cmp.lenEqual).toBe(true)
+    expect(cmp.diffs).toBe(0)
+    const c = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [shatterRow(0.5, 8)])
+    expect(comparePositions(a, c).diffs).toBeGreaterThan(0)
+  })
+
+  it('amount 0 leaves the geometry unchanged — never even converts to non-indexed', () => {
+    // An enabled row is still a middle row, so the stack works on a clone; but applyShatter returns
+    // early at amount 0, so the geometry stays indexed and its positions match the base exactly.
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [shatterRow(0, 5)])
+    expect(out.index).not.toBeNull()
+    expect(comparePositions(out, new THREE.BoxGeometry(1, 1, 1)).diffs).toBe(0)
+  })
+
+  it('a disabled shatter row is skipped (no-op returns the same geometry)', () => {
+    const disabled = shatterRow(0.5, 3); disabled.enabled = false
+    const g = new THREE.BoxGeometry(1, 1, 1)
+    expect(applyModifierStack(g, [disabled])).toBe(g)
+  })
+
+  it('yields flat per-face normals — each triangle carries one constant normal after the pipeline recompute', () => {
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [shatterRow(0.4, 2)])
+    const nrm = out.getAttribute('normal') as THREE.BufferAttribute
+    expect(nrm).toBeTruthy()
+    // Non-indexed + no shared vertices ⇒ computeVertexNormals gives all three of a triangle's
+    // vertices the SAME normal (flat shading), the faceted look a shatter wants.
+    for (let t = 0; t + 3 <= nrm.count; t += 3) {
+      const n0 = new THREE.Vector3().fromBufferAttribute(nrm, t)
+      const n1 = new THREE.Vector3().fromBufferAttribute(nrm, t + 1)
+      const n2 = new THREE.Vector3().fromBufferAttribute(nrm, t + 2)
+      expect(n0.distanceTo(n1)).toBeLessThan(1e-5)
+      expect(n0.distanceTo(n2)).toBeLessThan(1e-5)
+    }
+  })
+})

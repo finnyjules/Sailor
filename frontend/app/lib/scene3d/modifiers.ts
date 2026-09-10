@@ -437,6 +437,83 @@ function applyMirror(geo: THREE.BufferGeometry, axis: number, offset: number): T
   return welded
 }
 
+/** Radial array PRODUCER: repeat the geometry `count` times evenly rotated about `axis` through
+ *  the origin, each copy first pushed `radius` outward from that axis (0 = rotate in place). It
+ *  reuses `planClones`' radial recipe (mode 1: translate outward on (axis+1)%3, then spin by
+ *  i/count·2π about the axis) and `mergeClones` to fold the copies into ONE geometry — the same
+ *  path the pinned cloner's radial mode takes, but run here in the orderable middle so later
+ *  rows (and the cloner itself) see the arrayed result. Copies rarely share vertices, so it does
+ *  not weld — a plain merge, whose position count is exactly count × the base.
+ *
+ *  BUDGET: like the cloner, the copy count is clamped so count × baseVertexCount never exceeds
+ *  VERTEX_BUDGET; if the budget cannot even afford two copies it is a no-op (returns `geo`),
+ *  exactly as mirror yields rather than freezing the tab. Returns a NEW geometry. */
+function applyRadialArray(geo: THREE.BufferGeometry, count: number, axis: number, radius: number): THREE.BufferGeometry {
+  const requested = Math.max(2, Math.min(24, Math.round(count)))
+  const base = geo.getAttribute('position').count
+  if (base <= 0) return geo
+  const affordable = Math.max(1, Math.floor(VERTEX_BUDGET / base))
+  const n = Math.min(requested, affordable)
+  if (n < 2) return geo // budget cannot afford even two copies → leave the geometry untouched
+  const recipes = planClones(n, {
+    mode: 1,
+    offset: [0, 0, 0],
+    radius,
+    axis: ((Math.round(axis) % 3) + 3) % 3,
+    gridCount: [1, 1, 1],
+    spacing: [0, 0, 0],
+    stepRot: [0, 0, 0],
+    stepScale: 1,
+  })
+  // mergeClones clones `geo` per recipe and merges; it never disposes `geo` (the caller does).
+  return mergeClones(geo, recipes)
+}
+
+/** Shatter / explode PRODUCER: split every triangle into an independent face and push it OUTWARD
+ *  along its own face normal by a seeded amount, for an exploded-faces look. The geometry is made
+ *  non-indexed (`toNonIndexed`) so each face owns its three vertices and can move alone; the
+ *  offset per face is `amount × jitter` where `jitter ∈ [0.5, 1]` from a deterministic hash of the
+ *  face index and `seed`, so every face separates (never a zero offset) yet the result is stable
+ *  across runs. Faces are NOT welded — the vertex count is exactly 3 × triangleCount.
+ *
+ *  NORMALS: left to the pipeline's `computeVertexNormals`. Because the output is non-indexed and
+ *  no vertices are shared, that recompute assigns each vertex its own triangle's face normal —
+ *  i.e. FLAT per-face shading, which is exactly the faceted look a shatter wants, so no separate
+ *  flat-normal pass is needed.
+ *
+ *  BUDGET: the non-indexed count is known before converting (index.count, or the existing position
+ *  count when already non-indexed); over VERTEX_BUDGET it is a no-op (returns `geo`). `amount ≤ 0`
+ *  is also a no-op returning `geo` unchanged. Returns a NEW geometry when it fires. */
+function applyShatter(geo: THREE.BufferGeometry, amount: number, seed: number): THREE.BufferGeometry {
+  if (amount <= 0) return geo
+  const nonIndexedCount = geo.index ? geo.index.count : geo.getAttribute('position').count
+  if (nonIndexedCount > VERTEX_BUDGET) return geo
+
+  // `src` is a new geometry when `geo` was indexed; when already non-indexed toNonIndexed returns
+  // `geo` itself, so clone to avoid mutating the caller's geometry in place.
+  const src = geo.index ? geo.toNonIndexed() : geo.clone()
+  const pos = src.getAttribute('position') as THREE.BufferAttribute
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
+  const ab = new THREE.Vector3(), ac = new THREE.Vector3(), nrm = new THREE.Vector3()
+  for (let t = 0; t + 3 <= pos.count; t += 3) {
+    a.fromBufferAttribute(pos, t)
+    b.fromBufferAttribute(pos, t + 1)
+    c.fromBufferAttribute(pos, t + 2)
+    ab.subVectors(b, a)
+    ac.subVectors(c, a)
+    nrm.crossVectors(ab, ac)
+    if (nrm.lengthSq() < 1e-20) continue // degenerate triangle: no direction to explode along
+    nrm.normalize()
+    // Seeded per-face displacement in [0.5, 1]·amount so every face separates, deterministically.
+    const d = amount * (0.5 + 0.5 * hash3(t / 3, 0, 0, Math.round(seed)))
+    for (let k = 0; k < 3; k++) {
+      pos.setXYZ(t + k, pos.getX(t + k) + nrm.x * d, pos.getY(t + k) + nrm.y * d, pos.getZ(t + k) + nrm.z * d)
+    }
+  }
+  pos.needsUpdate = true
+  return src
+}
+
 export interface ClonerSettings {
   /** 0 linear, 1 radial, 2 grid. */
   mode: number
@@ -618,7 +695,7 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
  *  middle rows are EXACTLY the deforms, so "any middle row" and "any deform" coincide and the
  *  byte-identity oracle is untouched. */
 const DEFORM_KINDS: readonly ModifierKind[] = ['taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt']
-const PRODUCER_KINDS: readonly ModifierKind[] = ['mirror']
+const PRODUCER_KINDS: readonly ModifierKind[] = ['array', 'shatter', 'mirror']
 const isDeformKind = (k: ModifierKind): boolean => (DEFORM_KINDS as readonly string[]).includes(k)
 const isProducerKind = (k: ModifierKind): boolean => (PRODUCER_KINDS as readonly string[]).includes(k)
 /** An enabled middle row is either a deformer or a producer — the reorderable region between the
@@ -640,6 +717,8 @@ function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance): THREE
     case 'spherify': applySpherify(geo, m('spherify')); return geo
     case 'smooth': applySmooth(geo, m('smoothStrength'), Math.round(m('smoothIterations'))); return geo
     case 'melt': applyMelt(geo, m('melt'), Math.round(m('meltAxis'))); return geo
+    case 'array': return applyRadialArray(geo, m('arrayCount'), Math.round(m('arrayAxis')), m('arrayRadius'))
+    case 'shatter': return applyShatter(geo, m('shatter'), Math.round(m('shatterSeed')))
     case 'mirror': return applyMirror(geo, Math.round(m('mirrorAxis')), m('mirrorOffset'))
     default: return geo
   }

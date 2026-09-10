@@ -20,9 +20,10 @@ import { MODIFIER_SPECS, modifierValue, totalClones } from '~/lib/scene3d/primPa
 
 /** The modifier rows. NOT the geometry `params` bag, NOT the Vary settings — Vary
  *  (varyMode/varySeed/…/varyColorStrength) is a material uniform, never a modifier row.
- *  `mirror` is a geometry PRODUCER (it duplicates + welds, changing the vertex buffer),
- *  living in the orderable middle between the deforms and the pinned cloner. */
-export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'mirror', 'cloner'] as const
+ *  `array`/`shatter`/`mirror` are geometry PRODUCERS (they change the vertex buffer — array folds N
+ *  rotated copies, shatter splits every face, mirror duplicates + welds), living in the orderable
+ *  middle between the deforms and the pinned cloner. */
+export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'array', 'shatter', 'mirror', 'cloner'] as const
 export type ModifierKind = typeof MODIFIER_KINDS[number]
 
 /** The order the pipeline applies these in — and therefore the order an old-shape bag is folded
@@ -51,6 +52,8 @@ export const MODIFIER_KIND_PARAMS: Record<ModifierKind, string[]> = {
   spherify: ['spherify'],
   smooth: ['smoothStrength', 'smoothIterations'],
   melt: ['melt', 'meltAxis'],
+  array: ['arrayCount', 'arrayAxis', 'arrayRadius'],
+  shatter: ['shatter', 'shatterSeed'],
   mirror: ['mirrorAxis', 'mirrorOffset'],
   cloner: [
     'cloneCount', 'cloneMode', 'cloneOffsetX', 'cloneOffsetY', 'cloneOffsetZ', 'cloneRadius', 'cloneAxis',
@@ -71,6 +74,8 @@ export const MODIFIER_LABELS: Record<ModifierKind, string> = {
   spherify: 'Spherify',
   smooth: 'Smooth',
   melt: 'Melt',
+  array: 'Radial array',
+  shatter: 'Shatter',
   mirror: 'Mirror',
   cloner: 'Cloner',
 }
@@ -174,7 +179,9 @@ export function modifierStackOf(obj: StackHost | null | undefined): ModifierInst
     spherify: false,
     smooth: false,
     melt: false,
-    // A geometry producer never lived in the legacy flat bag, so it never folds active.
+    // Geometry producers never lived in the legacy flat bag, so they never fold active.
+    array: false,
+    shatter: false,
     mirror: false,
     cloner: totalClones(bag) > 1,
   }

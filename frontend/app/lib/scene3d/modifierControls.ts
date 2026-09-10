@@ -32,6 +32,7 @@ const OPTION_LABELS: Record<string, string[]> = {
   // axis slides proportional to the second.
   shearAxis: ['X by Y', 'X by Z', 'Y by X', 'Y by Z', 'Z by X', 'Z by Y'],
   meltAxis: ['X', 'Y', 'Z'],
+  arrayAxis: ['X', 'Y', 'Z'],
   cloneMode: ['Linear', 'Radial', 'Grid'],
 }
 

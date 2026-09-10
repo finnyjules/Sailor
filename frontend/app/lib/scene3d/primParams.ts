@@ -246,6 +246,19 @@ export const MODIFIER_SPECS: ParamSpec[] = [
   { key: 'melt', label: 'Melt', hint: 'Slumps the shape downward into a spreading puddle', min: 0, max: 1, step: 0.01, default: 0 },
   axisSpec('meltAxis', 'Melt axis', 'The "down" direction gravity pulls the shape toward', 1),
 
+  // Radial array — a geometry PRODUCER: it repeats the shape in a ring of evenly-rotated copies
+  // about an axis, folded into one geometry. All three dials are read by `applyRadialArray`; the
+  // count is budget-clamped exactly as the cloner clamps. arrayAxis' option is stored as an index.
+  { key: 'arrayCount', label: 'Copies', hint: 'How many copies to arrange evenly around the ring', min: 2, max: 24, step: 1, default: 6 },
+  axisSpec('arrayAxis', 'Array axis', 'The axis the copies are arranged around', 1),
+  { key: 'arrayRadius', label: 'Array radius', hint: 'How far each copy sits from the axis — 0 rotates every copy in place', min: 0, max: 3, step: 0.05, default: 0 },
+
+  // Shatter — a geometry PRODUCER: it splits every face apart and pushes each outward along its
+  // own normal by a seeded amount, for an exploded-faces look. Both dials are read by
+  // `applyShatter`; the seed shuffles which faces fly furthest, deterministically.
+  { key: 'shatter', label: 'Shatter', hint: 'Explodes the shape into its faces, pushing each outward', min: 0, max: 1, step: 0.01, default: 0 },
+  { key: 'shatterSeed', label: 'Shatter seed', hint: 'Shuffles how far each face flies out into a different arrangement', min: 0, max: 99, step: 1, default: 0 },
+
   // Mirror — a geometry PRODUCER: it duplicates the shape, reflects the copy across a plane and
   // welds the seam. Both dials are read by `applyMirror`; options are stored as an index.
   axisSpec('mirrorAxis', 'Mirror axis', 'The plane the copy is reflected across', 0),
