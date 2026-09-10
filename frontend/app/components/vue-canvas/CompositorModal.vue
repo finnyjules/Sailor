@@ -8626,12 +8626,10 @@ onUnmounted(() => {
       </div>
     </Teleport>
 
-    <!-- Right-click menu for an image layer. Teleported (like the add-effect menu
-         above) because it's `fixed`-positioned from clientX/clientY, and a
-         transformed ancestor (the pan/zoom stage) would otherwise re-anchor it. -->
-    <Teleport to="body">
-      <CanvasContextMenu v-if="imageCtxMenu" :x="imageCtxMenu.x" :y="imageCtxMenu.y" :items="imageCtxMenu.items" @close="imageCtxMenu = null" />
-    </Teleport>
+    <!-- Right-click menu for an image layer. CanvasContextMenu self-teleports to
+         body (its own root is a Teleport), so it's already immune to the pan/zoom
+         stage's transform — no wrapper needed here. -->
+    <CanvasContextMenu v-if="imageCtxMenu" :x="imageCtxMenu.x" :y="imageCtxMenu.y" :items="imageCtxMenu.items" @close="imageCtxMenu = null" />
   </div>
 </template>
 
