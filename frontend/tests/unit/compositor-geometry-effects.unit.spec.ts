@@ -54,6 +54,7 @@ describe('geometryEffects: labels single-source', () => {
     expect(GEOMETRY_EFFECT_LABELS.offset).toBe('Offset path')
     expect(GEOMETRY_EFFECT_LABELS.round_corners).toBe('Round corners')
     expect(GEOMETRY_EFFECT_LABELS.boolean).toBe('Combine shapes')
+    expect(GEOMETRY_EFFECT_LABELS.morph).toBe('Morph to shape')
   })
 })
 

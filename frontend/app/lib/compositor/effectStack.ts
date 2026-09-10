@@ -70,11 +70,17 @@ export type BooleanOp = 'unite' | 'subtract' | 'intersect' | 'exclude'
  *  rail, `refLayerId`) using a paper.js boolean op. `refLayerId` is a `StackKey` (`l:<id>`)
  *  mirroring `maskedByKey`; a missing/dangling/self/non-vector ref makes the effect a no-op. */
 export interface BooleanEffect { type: 'boolean'; op: BooleanOp; refLayerId?: string; visible: boolean }
+/** Blend this vector layer's outline TOWARD a SIBLING layer's outline (via the same F3 sibling
+ *  rail, `refLayerId`) by `amount` — 0 keeps the layer's own shape, 1 becomes the sibling's
+ *  shape (in this layer's frame). The blend maths live in `app/lib/vector/morph.ts` (pure,
+ *  synchronous — no paper.js). A missing/dangling/self/non-vector ref, or `amount ≈ 0`, makes
+ *  the effect a no-op. */
+export interface MorphEffect { type: 'morph'; amount: number; refLayerId?: string; visible: boolean }
 
 export type LayerEffect =
   | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
   | TornEdgeEffect | FeatherEffect
-  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect
+  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect
   | PostEffect
 
 /** A stored effect, addressed by a stable id. */
@@ -88,7 +94,7 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'inner_shadow',
+  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'inner_shadow',
   'adjust', 'duotone', 'gradientMap',
   'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'layer_blur', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
@@ -108,8 +114,9 @@ export const ORDERABLE_KINDS = EFFECT_ORDER.filter(
 /** The geometry kinds: they transform a vector layer's outline BEFORE rasterise,
  *  so they sit in their own region — after the backdrop pins, before every pixel kind —
  *  and reorder only among themselves (`regionOf`, `canReorder`). Contiguous in EFFECT_ORDER.
- *  `boolean` (F3) combines the outline with a sibling layer's outline via paper.js. */
-export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean'] as const satisfies readonly EffectKind[]
+ *  `boolean` (F3) combines the outline with a sibling layer's outline via paper.js; `morph` (F3)
+ *  blends the outline toward a sibling layer's outline. */
+export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph'] as const satisfies readonly EffectKind[]
 export const isGeometryKind = (k: EffectKind): boolean =>
   (GEOMETRY_KINDS as readonly string[]).includes(k)
 
@@ -134,6 +141,7 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   round_corners: 'Round corners',
   roughen: 'Roughen',
   boolean: 'Combine shapes',
+  morph: 'Morph to shape',
   inner_shadow: 'Inner shadow',
   adjust: 'Adjust',
   duotone: 'Duotone',
@@ -170,6 +178,9 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   // No `refLayerId` default: a fresh boolean points at nothing (no-op) until the picker
   // sets a sibling. `unite` is the least-surprising default op.
   boolean: { op: 'unite', visible: true },
+  // Like boolean, no `refLayerId` default — a fresh morph is a no-op until the picker sets a
+  // sibling. `amount: 0.5` so it visibly blends halfway once a sibling is chosen.
+  morph: { amount: 0.5, visible: true },
 }
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {

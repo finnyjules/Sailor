@@ -1964,16 +1964,20 @@ function setActiveFxHex(raw: string) {
   updateActiveEffect({ color: composeRgba(h, activeFxAlpha.value) })
 }
 
-// ── Combine shapes (boolean, F3): the sibling picker ─────────────────────────
+// ── The F3 sibling picker, SHARED by every geometry effect that rides the sibling rail ───────
+// Combine shapes (boolean) and Morph to shape (morph) both pick a partner outline via
+// `refLayerId`, with the IDENTICAL eligibility rule. One definition here, both cards below use
+// it — no drift between the two.
+//
 // Human labels for the four boolean ops — sentence case, never the stored value (UI-copy rule).
 const BOOLEAN_OP_LABELS: Record<string, string> = {
   unite: 'Unite', subtract: 'Subtract', intersect: 'Intersect', exclude: 'Exclude',
 }
-/** Eligible partners for the selected boolean effect: every OTHER local layer that can take a
- *  geometry outline (`canTakeGeometry`), minus any carrying a corner pin or a cloner — the
- *  sibling resolver models affine placement only, so a pinned/cloned partner would combine
+/** Eligible sibling partners for the selected geometry effect: every OTHER local layer that can
+ *  take a geometry outline (`canTakeGeometry`), minus any carrying a corner pin or a cloner —
+ *  the sibling resolver models affine placement only, so a pinned/cloned partner would combine
  *  against the WRONG outline. Excluding them keeps the picker honest rather than silently wrong. */
-const booleanCandidates = computed<{ key: string; label: string }[]>(() => {
+const geometrySiblingCandidates = computed<{ key: string; label: string }[]>(() => {
   const self = activeEffectLayer.value
   if (!self) return []
   return (localLayers.value as LocalLayer[])
@@ -1984,15 +1988,16 @@ const booleanCandidates = computed<{ key: string; label: string }[]>(() => {
     .map(l => ({ key: localKey(l.id), label: layerLabelByKey(localKey(l.id)) }))
 })
 /** The referenced layer, if the current ref points at a live, still-eligible vector partner. */
-function booleanRefResolvable(ref: string): boolean {
+function geometrySiblingRefResolvable(ref: string): boolean {
   if (!ref) return false
-  return booleanCandidates.value.some(c => c.key === ref)
+  return geometrySiblingCandidates.value.some(c => c.key === ref)
 }
-/** Why the picker is greyed / warns, or '' when it is usable. */
-const booleanPickerReason = computed<string>(() => {
-  if (booleanCandidates.value.length === 0) return 'Add another shape layer to combine with'
+/** Why the picker is greyed / warns, or '' when it is usable. Shared copy — neutral enough to
+ *  sit under either the boolean "Combine with" picker or the morph "Morph to shape" picker. */
+const geometrySiblingReason = computed<string>(() => {
+  if (geometrySiblingCandidates.value.length === 0) return 'Add another shape layer to reference'
   const ref = (activeEffect.value as any)?.refLayerId as string | undefined
-  if (ref && !booleanRefResolvable(ref)) return 'The chosen layer is no longer a shape — pick another'
+  if (ref && !geometrySiblingRefResolvable(ref)) return 'The chosen layer is no longer a shape — pick another'
   return ''
 })
 
@@ -7786,13 +7791,38 @@ onUnmounted(() => {
               <div class="panel-sublabel mb-1">Combine with</div>
               <select data-testid="geo-boolean-ref"
                 :value="(activeEffect as any).refLayerId || ''"
-                :disabled="booleanCandidates.length === 0"
+                :disabled="geometrySiblingCandidates.length === 0"
                 class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none disabled:opacity-40 disabled:cursor-not-allowed"
                 @change="updateActiveEffect({ refLayerId: ($event.target as HTMLSelectElement).value || undefined })">
                 <option value="">None</option>
-                <option v-for="c in booleanCandidates" :key="c.key" :value="c.key">{{ c.label }}</option>
+                <option v-for="c in geometrySiblingCandidates" :key="c.key" :value="c.key">{{ c.label }}</option>
               </select>
-              <p v-if="booleanPickerReason" class="mt-1 text-[11px] text-white/50" data-testid="geo-boolean-reason">{{ booleanPickerReason }}</p>
+              <p v-if="geometrySiblingReason" class="mt-1 text-[11px] text-white/50" data-testid="geo-boolean-reason">{{ geometrySiblingReason }}</p>
+            </div>
+          </div>
+
+          <!-- Morph to shape (F3): an amount slider + the same dynamic sibling picker. Amount
+               feeds `applyGeometry`'s morph case (blend toward the sibling), the picker writes
+               `refLayerId` (the shared sibling rail). Neither is a dead control; there is no
+               twist dial — the plan is amount-only. -->
+          <div v-else-if="activeEffect!.type === 'morph'" class="space-y-1.5">
+            <div class="flex items-center gap-2">
+              <div class="panel-sublabel shrink-0">Amount</div>
+              <input v-scrubnum data-testid="geo-morph-amount" type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).amount ?? 0.5) * 100)"
+                class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ amount: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+            </div>
+            <div>
+              <div class="panel-sublabel mb-1">Morph to shape</div>
+              <select data-testid="geo-morph-ref"
+                :value="(activeEffect as any).refLayerId || ''"
+                :disabled="geometrySiblingCandidates.length === 0"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none disabled:opacity-40 disabled:cursor-not-allowed"
+                @change="updateActiveEffect({ refLayerId: ($event.target as HTMLSelectElement).value || undefined })">
+                <option value="">None</option>
+                <option v-for="c in geometrySiblingCandidates" :key="c.key" :value="c.key">{{ c.label }}</option>
+              </select>
+              <p v-if="geometrySiblingReason" class="mt-1 text-[11px] text-white/50" data-testid="geo-morph-reason">{{ geometrySiblingReason }}</p>
             </div>
           </div>
         </div>

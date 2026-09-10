@@ -30,6 +30,7 @@ import {
 } from '~/lib/vector/pathOps'
 import { offsetPolyline } from '~/lib/compositor/strokeShapes'
 import { pathBoolean, isPaperWarm, booleanOpOf } from '~/lib/compositor/booleanGeometry'
+import { blendPath } from '~/lib/vector/morph'
 
 // The per-kind interfaces live in effectStack (it owns the whole effect vocabulary and the
 // LayerEffect union). Re-export them here so a consumer can `import type { TrimEffect } from
@@ -41,6 +42,7 @@ export type {
   RoughenEffect,
   BooleanEffect,
   BooleanOp,
+  MorphEffect,
 } from './effectStack'
 export { GEOMETRY_KINDS, isGeometryKind } from './effectStack'
 
@@ -399,6 +401,32 @@ function applyBoolean(d: string, e: GeometryEffectInput, ctx: GeometryContext): 
   return pathBoolean(d, sib.d, booleanOpOf(e.op))
 }
 
+// ── morph (F3) ───────────────────────────────────────────────────────────────
+//
+// Blend this layer's outline TOWARD a SIBLING layer's outline by `amount` — 0 keeps the
+// layer's own shape, 1 becomes the sibling's shape (in this layer's own frame). The partner
+// outline arrives through the same F3 sibling rail as boolean: `e.refLayerId` (a `StackKey`)
+// is resolved by `ctx.resolveSibling` into the sibling's `d` ALREADY in this layer's outline
+// units (see `siblingRef.ts`), so no transform happens here. A missing / dangling / self /
+// non-vector / cyclic ref makes `resolveSibling` return `null`, and the effect is a NO-OP.
+//
+// The blend engine (`app/lib/vector/morph.ts`, pure + synchronous — no paper.js warm needed)
+// only byte-preserves the self `d` at t=0 when both outlines share a command skeleton; the
+// resampled branch returns a RESAMPLED (visually-identical, not byte-identical) `d` even at
+// t=0. So we SHORT-CIRCUIT `amount ≤ MORPH_EPS → return d`: a cheap exact no-op that also
+// spares a just-added morph (amount default 0.5, but 0 before the user dials it up on some
+// paths) the pointless resample drift when it is effectively off.
+const MORPH_EPS = 1e-4
+function applyMorph(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
+  const amount = num(e.amount, 0)
+  if (amount <= MORPH_EPS) return d // effectively self — exact no-op, avoids resample drift
+  const ref = typeof e.refLayerId === 'string' ? e.refLayerId : ''
+  if (!ref) return d // no sibling chosen yet
+  const sib = ctx.resolveSibling?.(ref)
+  if (!sib || !sib.d) return d // dangling / self / non-vector / cycle → no-op
+  return blendPath(d, sib.d, amount)
+}
+
 // ── dispatch ──────────────────────────────────────────────────────────────────
 function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
   switch (e.type) {
@@ -407,6 +435,7 @@ function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): stri
     case 'offset': return applyOffset(d, e, ctx)
     case 'round_corners': return applyRoundCorners(d, e, ctx)
     case 'boolean': return applyBoolean(d, e, ctx)
+    case 'morph': return applyMorph(d, e, ctx)
     default: return d
   }
 }

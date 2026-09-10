@@ -303,7 +303,7 @@ test.describe('Frame geometry effects (F2)', () => {
  * Render fix A: a geometry effect on a text layer whose `renderAsOutline` is unset still
  * forces the outline path (Inter) and safely falls back to fillText on a system font (Arial).
  */
-const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean'] as const
+const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph'] as const
 // A 1×1 transparent PNG so an image layer has a valid, instantly-decoding source.
 const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
@@ -651,5 +651,81 @@ test.describe('Frame geometry effects — boolean / combine shapes (F3 Task 2)',
     await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
     await openFxMenuFirst(page)
     await expect(page.locator('[data-testid="add-effect-item"][data-kind="boolean"]')).toBeDisabled()
+  })
+})
+
+/**
+ * F3 Task 3 — the `morph` (Morph to shape) geometry effect.
+ *
+ * Two vector layers of different sizes; a `morph` effect on the first references the second via
+ * the sibling rail (`refLayerId`) and blends the first's outline toward the second's by `amount`
+ * (0 = self, 1 = sibling). The blend maths are pure + synchronous (no paper.js), so unlike
+ * boolean there is no warm to poll — a real amount changes the pixels on the next render, and
+ * amount 0 (or a dangling ref) is a byte-identical no-op.
+ */
+test.describe('Frame geometry effects — morph / morph to shape (F3 Task 3)', () => {
+  // A small sibling rect (bottom) and a much larger rect ON TOP that morphs toward it. Morphing
+  // the TOP layer toward the SMALLER sibling shrinks its silhouette, revealing the background —
+  // a visible change, where morphing a fully-occluded bottom layer would move no composited pixel.
+  async function seedTwoRects(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const mk = (id: string, w: number, h: number, fill: string) => ({
+        id, kind: 'rect', x: 0.5, y: 0.5, w, h, radius: 0, rotation: 0, opacity: 1, fill,
+      })
+      ;(window as any).__compositorSetLayers([mk('sib', 0.2, 0.2, '#3355ff'), mk('main', 0.6, 0.6, '#ffffff')])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(2)
+  }
+  // The morph sits on the TOP layer (index 1) so its own silhouette is the one that changes.
+  const setMorph = (page: Page, amount: number, ref: string) => page.evaluate(({ amount, ref }) => {
+    const ls = (window as any).__compositorLayers()
+    ls[1].effects = [{ id: 'mph', type: 'morph', amount, refLayerId: ref, visible: true }]
+    ;(window as any).__compositorSetLayers(ls)
+  }, { amount, ref })
+
+  test('a real amount toward the sibling changes the rendered pixels', async ({ page }) => {
+    await openCompositor(page)
+    await seedTwoRects(page)
+    const before = await stackPixels(page)
+    await setMorph(page, 0.5, 'l:sib')
+    const after = await stackPixels(page)
+    const d = await pixelDelta(page, before, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(200) // the outline blends outward — a real change
+  })
+
+  test('amount 0 is a no-op (byte-identical to no morph)', async ({ page }) => {
+    await openCompositor(page)
+    await seedTwoRects(page)
+    const before = await stackPixels(page)
+    await setMorph(page, 0, 'l:sib') // short-circuit: amount ≤ epsilon returns self d unchanged
+    await stackPixels(page)
+    const after = await stackPixels(page)
+    expect(after).toBe(before)
+  })
+
+  test('a dangling ref is a no-op (byte-identical to no morph)', async ({ page }) => {
+    await openCompositor(page)
+    await seedTwoRects(page)
+    const before = await stackPixels(page)
+    await setMorph(page, 0.5, 'l:ghost') // resolver returns null → the effect no-ops
+    await stackPixels(page)
+    const after = await stackPixels(page)
+    expect(after).toBe(before)
+  })
+
+  test('the add menu offers morph on a rect', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await openFxMenuFirst(page)
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="morph"]')).toBeEnabled()
+  })
+
+  test('the add menu greys morph on an image (no outline)', async ({ page }) => {
+    await openCompositor(page)
+    await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
+    await openFxMenuFirst(page)
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="morph"]')).toBeDisabled()
   })
 })
