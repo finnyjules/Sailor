@@ -52,7 +52,7 @@ voxelise (voxel module); boolean with a sibling (SDF union/subtract/intersect vi
 `refObjectId` like decals' `targetId`). One task each (grouped where trivial), each with a
 known-geometry unit test and the export override-material path checked.
 
-## Slice S3 · Live G-buffer + edge lines, depth fog, curvature wear  (≈7 tasks)
+## Slice S3 · Live G-buffer + edge lines, depth fog, curvature wear  (≈7 tasks) — ✅ LANDED 2026-09-10 (base e45630a5a → fef808715; edgeLines/depthFog/curvatureWear; whole-slice review Approved-with-minors; see 2026-09-09-scene3d-S3-gbuffer.md + memory scene3d-gbuffer-treatments-s3-landed)
 1. `GBufferPass` in the stage: normals via `MeshNormalMaterial` override into an RT, depth from the
    base target; runs only when a consuming treatment exists; byte-identity A/B otherwise.
 2. Edge lines (Sobel over normal+depth; width, threshold, colour) as a masked treatment.
