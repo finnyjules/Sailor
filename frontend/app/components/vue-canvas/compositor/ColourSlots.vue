@@ -13,10 +13,10 @@ function pick(slotHex: string, toHex: string) { open.value = null; if (toHex !==
 
 <template>
   <div class="flex flex-col gap-2">
-    <div class="flex flex-wrap gap-1.5" role="list" aria-label="Frame colours">
+    <div class="flex flex-wrap gap-1.5" aria-label="Frame colours">
       <button
-        v-for="(s, i) in slots" :key="s.hex" type="button" role="listitem" data-testid="colour-slot" :data-hex="s.hex"
-        :title="family ? `${s.hex} — send to another colour` : s.hex" :aria-label="`Colour ${s.hex}`"
+        v-for="(s, i) in slots" :key="s.hex" type="button" data-testid="colour-slot" :data-hex="s.hex"
+        :title="family ? `Colour ${s.hex} — send to another colour` : `Colour ${s.hex}`" :aria-label="`Colour ${s.hex}`"
         class="h-7 rounded-md ring-1 ring-white/15 transition-[box-shadow] hover:ring-white/50 focus-visible:ring-white"
         :class="[i === 0 ? 'w-14' : 'w-7', family ? 'cursor-pointer' : 'cursor-default', open === s.hex ? 'ring-2 ring-white' : '']"
         :style="{ background: s.hex }" :disabled="!family"

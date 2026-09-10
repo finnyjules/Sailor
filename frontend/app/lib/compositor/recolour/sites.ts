@@ -139,6 +139,16 @@ const DEAL_INKS: Record<string, { arr?: string[]; obj?: { path: string[]; keys: 
 }
 const SCATTER_INKS: Record<string, string[]> = { chaff: ['chaff', 'inks'], strand: ['strand', 'inks'], husk: ['husk', 'inks'] }
 
+/** A text layer's glyph-coverage proxy, frame-aspect-normalised exactly as `area()` is (both
+ *  are frame-width-unit quantities, and a taller/narrower frame packs the same glyph run into
+ *  a bigger or smaller true-area fraction) — shared by the fill-site weight below and
+ *  `strokeWeightBase`'s text branch so a stroke's weight and its own fill's weight are always
+ *  computed the same way for the same layer. */
+function textWeightProxy(l: any, frameAspect: number): number {
+  const w = Math.max(0.002, (l.fontSize ?? 0.05) * String(l.text ?? '').length * 0.55 * (l.fontSize ?? 0.05))
+  return w * (frameAspect > 0 ? 1 / frameAspect : 1)
+}
+
 /** A stroke site's weight, ONE formula shared by both the legacy single site and the stack
  *  (the stack then splits it further, per entry, in the caller). Kept a function rather than
  *  inlined twice — legacy and stack must agree on a layer's base weight or two reads of the
@@ -147,11 +157,8 @@ const SCATTER_INKS: Record<string, string[]> = { chaff: ['chaff', 'inks'], stran
  *  stackable kind and brush share the shape-area proxy the `path`/`brush` fill site already
  *  uses (a `bbox`-derived area for a freeform outline, the frame-normalised `area(l)`
  *  otherwise). */
-function strokeWeightBase(l: any, area: (l: any) => number): number {
-  if (l.kind === 'text') {
-    const w = Math.max(0.002, (l.fontSize ?? 0.05) * String(l.text ?? '').length * 0.55 * (l.fontSize ?? 0.05))
-    return w * STROKE_WEIGHT_FACTOR
-  }
+function strokeWeightBase(l: any, area: (l: any) => number, frameAspect: number): number {
+  if (l.kind === 'text') return textWeightProxy(l, frameAspect) * STROKE_WEIGHT_FACTOR
   const a = Math.max(0.001, l.kind === 'path' || l.kind === 'brush' ? ((l.bbox?.w ?? 0.2) * (l.bbox?.h ?? 0.2) * (l.scale ?? 1) ** 2) : area(l))
   return a * STROKE_WEIGHT_FACTOR
 }
@@ -169,7 +176,7 @@ export function colourSites(layers: LocalLayer[], background: Paint | undefined,
     const l = raw as any
     switch (l.kind) {
       case 'text': {
-        const w = Math.max(0.002, (l.fontSize ?? 0.05) * String(l.text ?? '').length * 0.55 * (l.fontSize ?? 0.05))
+        const w = textWeightProxy(l, frameAspect)
         paintSites(out, l.id, 'color', 'text', w, r => r.color, (r, p) => { r.color = p }, l)
         break
       }
@@ -179,7 +186,7 @@ export function colourSites(layers: LocalLayer[], background: Paint | undefined,
         break
       }
       case 'line': {
-        paintSites(out, l.id, 'stroke', 'stroke', 0.005, r => r.stroke, (r, p) => { r.stroke = p }, l)
+        if ((l.strokeWidth ?? 0) > 0) paintSites(out, l.id, 'stroke', 'stroke', 0.005, r => r.stroke, (r, p) => { r.stroke = p }, l)
         break
       }
       case 'image': {
@@ -218,7 +225,7 @@ export function colourSites(layers: LocalLayer[], background: Paint | undefined,
     // still read through normally, same as `strokeStackOf`'s own comment for a brush notes.
     if (l.kind === 'brush') {
       if ((l.strokeWidth ?? 0) > 0) {
-        const base = strokeWeightBase(l, area)
+        const base = strokeWeightBase(l, area, frameAspect)
         paintSites(out, l.id, 'stroke', 'stroke', base, r => r.stroke, (r, p) => { r.stroke = p }, l)
       }
     } else if (strokeSupportsStack(l.kind)) {
@@ -230,7 +237,7 @@ export function colourSites(layers: LocalLayer[], background: Paint | undefined,
         // this branch would not be taken), so `strokeStackOf(l)` is index-aligned with
         // `l.strokes` here — safe to key the write by index rather than by entry id.
         const entries = strokeStackOf(l)
-        const base = strokeWeightBase(l, area)
+        const base = strokeWeightBase(l, area, frameAspect)
         entries.forEach((_e: any, i: number) => {
           if (!l.strokes[i]) return
           paintSites(
@@ -243,7 +250,7 @@ export function colourSites(layers: LocalLayer[], background: Paint | undefined,
         // layer (the mixed case above) — writing the legacy field is exactly what
         // `strokeStackOf` reads in that case, so the stale array is correctly left
         // untouched by `set`.
-        const base = strokeWeightBase(l, area)
+        const base = strokeWeightBase(l, area, frameAspect)
         paintSites(out, l.id, strokeField, 'stroke', base, r => r[strokeField], (r, p) => { r[strokeField] = p }, l)
       }
     }

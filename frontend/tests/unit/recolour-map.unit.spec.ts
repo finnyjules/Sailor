@@ -34,10 +34,36 @@ describe('mapFamily', () => {
     expect(new Set(Object.values(m)).size).toBe(2)
     expect(m['#000000']).toBe('#000000'); expect(m['#ffffff']).toBe('#ffffff')
   })
-  it('contrast guard: the ink is re-picked when the lightness mapping leaves it unreadable on the ground', () => {
-    const slots = slotsOf([site('bg', '#ffffff', 1, 'bg'), site('t', '#dddddd', 0.1, 'text')])   // frame's own ink is faint
-    const m = mapFamily(slots, ['#e8e8e8', '#f0f0f0', '#101010'])
-    expect(contrastRatio(m['#ffffff']!, m['#dddddd']!)).toBeGreaterThanOrEqual(4.5)
+  it('contrast guard: the re-picked ink stays inside the family and is readable on the ground', () => {
+    // Light-heavy family (3 light + 1 dark): the plain lightness-quantile mapping puts the
+    // text slot on a light family member (next to an equally light ground), so the guard
+    // MUST fire — and when it does, it must pick the family's own darkest colour rather
+    // than reaching outside the family (autoInk's white/black/paper pool) for contrast.
+    const family = ['#e8e8e8', '#f0f0f0', '#fbfbfb', '#1a1a2e']
+    const slots = slotsOf([
+      site('bg', '#ffffff', 1, 'bg'),
+      site('t', '#e0e0e0', 0.15, 'text'),
+      site('s', '#888888', 0.05, 'shape'),
+    ])
+    const m = mapFamily(slots, family)
+    expect(m['#e0e0e0']).toBe('#1a1a2e')
+    expect(family).toContain(m['#e0e0e0'])
+    expect(contrastRatio(m['#ffffff']!, m['#e0e0e0']!)).toBeGreaterThanOrEqual(4.5)
+  })
+  it('a purely graphic frame (no text) keeps lightness order — the guard never fires', () => {
+    // Both slots are 'shape', so there is no text slot at all. The family is deliberately
+    // low-contrast between its own two dark members: if the guard mistakenly ran off a
+    // non-text fallback ink, it would blow the darker slot out to something outside the
+    // family (autoInk reaching for white). It must not run at all here.
+    const slots = slotsOf([site('a', '#ffffff', 1, 'shape'), site('b', '#101010', 0.5, 'shape')])
+    const m = mapFamily(slots, ['#101010', '#1a1a2e'])
+    expect(m['#101010']).toBe('#101010')
+    expect(m['#ffffff']).toBe('#1a1a2e')
+  })
+  it('a single slot maps to the family colour of nearest lightness rank, not always the lightest', () => {
+    const slots = slotsOf([site('a', '#101010', 1, 'shape')])
+    const m = mapFamily(slots, fam)
+    expect(m['#101010']).toBe('#0b132b')   // fam's own darkest — nearest to #101010, not #f5f5f5
   })
   it('is deterministic and every slot is mapped', () => {
     const slots = slotsOf([site('bg', '#ffffff', 1, 'bg'), site('t', '#000000', 0.1, 'text'), site('a', '#888888', 0.2)])

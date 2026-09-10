@@ -99,6 +99,21 @@ describe('colourSites', () => {
     expect(sites.filter(s => s.owner === 'd').map(s => s.hex)).toEqual(['#111111', '#eeeeee'])   // pane ignored
     expect(sites.filter(s => s.owner === 'p').map(s => s.path).sort()).toEqual(['fill.a', 'fill.b', 'fill.textColor'])
   })
+  it('a line with no stroke width emits no stroke site (gated like every other stroke path)', () => {
+    const layers: any[] = [{ id: 'ln', kind: 'line', x: .5, y: .5, w: .3, rotation: 0, opacity: 1, stroke: '#334455', strokeWidth: 0 }]
+    expect(colourSites(layers, undefined, 1)).toEqual([])
+  })
+  it('a line with a stroke width emits its stroke site', () => {
+    const layers: any[] = [{ id: 'ln', kind: 'line', x: .5, y: .5, w: .3, rotation: 0, opacity: 1, stroke: '#334455', strokeWidth: 0.01 }]
+    const sites = colourSites(layers, undefined, 1)
+    expect(sites.map(s => s.hex)).toEqual(['#334455'])
+  })
+  it('text weight is frame-aspect-normalised, sharing a scale with shape weight', () => {
+    const layers: any[] = [text('t', '#000000', { fontSize: 0.1 })]
+    const wide = colourSites(layers, undefined, 1)[0]!.weight
+    const tall = colourSites(layers, undefined, 2)[0]!.weight
+    expect(tall).toBeCloseTo(wide / 2)
+  })
   it('text weight scales with size and length; a stroke is light', () => {
     const layers: any[] = [text('big', '#000000', { fontSize: 0.2 }), text('small', '#000001', { fontSize: 0.05 }), rect('r', '#ffffff', { stroke: '#222222', strokeWidth: 0.01 })]
     const sites = colourSites(layers, undefined, 1)
