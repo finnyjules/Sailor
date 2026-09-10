@@ -70,7 +70,7 @@ import Scene3DObjectRow from './studio/Scene3DObjectRow.vue'
 import { totalClones, clampedClones } from '~/lib/scene3d/modifiers'
 import { MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
 import {
-  modifierStackOf, writeModifierStack, canReorderModifier, MODIFIER_LABELS,
+  modifierStackOf, writeModifierStack, canReorderModifier, cloneModifierStack, MODIFIER_LABELS,
   addModifier as addModifierOp, removeModifier as removeModifierOp,
   duplicateModifier as duplicateModifierOp, reorderModifier as reorderModifierOp,
   type ModifierKind, type ModifierInstance,
@@ -3495,6 +3495,11 @@ function cloneObject(src: SceneObject, existing: SceneObject[] = doc.objects): S
     // would make both objects' shapes move together on any later edit.
     ...(src.kind === 'primitive' && src.params ? { params: { ...src.params } } : {}),
     ...(src.kind === 'primitive' && src.modifiers ? { modifiers: { ...src.modifiers } } : {}),
+    // The modifier stack travels with the copy under FRESH ids — a shared id would let one
+    // motion track drive both copies' geometry (the same hazard cloneTreatments guards, and
+    // cloneModifierStack mints new ids for exactly this). Absent ⇒ omitted, so a legacy-bag
+    // object (no stored stack) still duplicates byte-identically.
+    ...(src.kind === 'primitive' && src.modifierStack?.length ? { modifierStack: cloneModifierStack(src.modifierStack) } : {}),
     // Vary palette travels with the copy the same defensive way as params/modifiers —
     // a shared array would let editing one copy's swatches mutate the other's.
     ...(src.kind === 'primitive' && src.varyPalette ? { varyPalette: [...src.varyPalette] } : {}),
