@@ -81,6 +81,10 @@ void main() {
     vec2 c, rel;
     float R, cover, depth;
     if (u_hasShape > 0.5) {
+        // Shape mode: the Frame blurs the silhouette across the whole shape (no
+        // thickness dial here), so the height field reads as depth from the edge —
+        // 0.5 on the outline, rising toward the middle — and the rings below follow
+        // the outline rather than a circle.
         c = vec2(u_shapeCX, u_shapeCY) * asp;
         R = max(u_shapeSize, 0.001);
         rel = p - c;
@@ -105,7 +109,9 @@ void main() {
     // triangular faces. A face's normal is seeded, then turned back into the world
     // by the sector it sits in, so the light falls on one side of the gem.
     float r = length(rel);
-    float rn = clamp(r / R, 0.0, 1.0);
+    // How far out this pixel sits, 0 at the middle and 1 on the outline: the
+    // circle's own radius stand-alone, the silhouette's depth when following a shape.
+    float rn = u_hasShape > 0.5 ? clamp(1.0 - depth, 0.0, 1.0) : clamp(r / R, 0.0, 1.0);
     float ang = atan(rel.y, rel.x);
     float n = max(floor(u_facets + 0.5), 3.0);
     float seg = TAU / n;

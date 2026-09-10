@@ -4180,7 +4180,10 @@ function lensShapeFromSilhouette(sil: HTMLCanvasElement, spec: ShaderSpec, w: nu
   const sx = w / T, sy = h / T
   const cx = ((x0 + x1 + 1) / 2) * sx, cy = ((y0 + y1 + 1) / 2) * sy
   const halfShort = Math.max(Math.min((x1 - x0 + 1) * sx, (y1 - y0 + 1) * sy) / 2, 1)
-  const thickness = Number(spec.params.thickness ?? 0.2)
+  // The field's reach is the effect's Thickness when it has one (Glass lens: the bend
+  // lives in a rim band); an effect without one (Crystal) gets the whole shape, so its
+  // field reads as depth from the outline and its facet rings follow the outline.
+  const thickness = Number(spec.params.thickness ?? 1)
   // A gaussian reaches ~1 about two sigmas in, so sigma = half the thickness in pixels.
   const sigma = Math.max(Math.min(thickness, 1) * halfShort * 0.5, 0.75)
   const hf = document.createElement('canvas')
