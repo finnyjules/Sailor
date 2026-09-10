@@ -225,6 +225,27 @@ export const MODIFIER_SPECS: ParamSpec[] = [
   { key: 'jitterMode', label: 'Jitter mode', hint: 'Random scatters vertices into chaotic gems; Along normal pushes them in and out for spikes', min: 0, max: 1, step: 1, default: 0, control: 'options', options: ['random', 'normal'] },
   { key: 'jitterSeed', label: 'Jitter seed', hint: 'Shuffles the jitter into a different arrangement', min: 0, max: 99, step: 1, default: 0 },
 
+  // Shear — slants the shape: one axis is displaced proportionally to another (a linear
+  // skew, unlike taper which scales). Both dials read by `applyShear`; the pair is stored
+  // as an option index — the first letter is moved along, proportional to the second.
+  { key: 'shear', label: 'Shear', hint: 'Slants the shape, sliding one side past the other', min: -1, max: 1, step: 0.01, default: 0 },
+  // options are stored as an index — append only, never reorder.
+  { key: 'shearAxis', label: 'Shear axis', hint: 'Which axis slides, and the axis it slides along', min: 0, max: 5, step: 1, default: 0, control: 'options', options: ['xy', 'xz', 'yx', 'yz', 'zx', 'zy'] },
+
+  // Spherify — pushes every vertex toward the object's bounding sphere, so a box bulges into
+  // a ball at 1. Radius is the MEAN vertex distance from the bbox centre (see `applySpherify`).
+  { key: 'spherify', label: 'Spherify', hint: 'Rounds the shape out toward a ball', min: 0, max: 1, step: 0.01, default: 0 },
+
+  // Smooth — Laplacian relaxation: each vertex eases toward the average of its edge-neighbours.
+  // Both dials read by `applySmooth`; more iterations relax further and shrink the shape more.
+  { key: 'smoothStrength', label: 'Smooth', hint: 'Relaxes the surface toward its neighbours, softening sharp detail', min: 0, max: 1, step: 0.01, default: 0 },
+  { key: 'smoothIterations', label: 'Iterations', hint: 'How many relaxing passes to run — more means smoother and smaller', min: 1, max: 10, step: 1, default: 1 },
+
+  // Melt — a gravity sag along the "down" axis: the higher a vertex, the more it sinks toward
+  // the floor and spreads outward in the other two axes, slumping a tall shape into a puddle.
+  { key: 'melt', label: 'Melt', hint: 'Slumps the shape downward into a spreading puddle', min: 0, max: 1, step: 0.01, default: 0 },
+  axisSpec('meltAxis', 'Melt axis', 'The "down" direction gravity pulls the shape toward', 1),
+
   // Mirror — a geometry PRODUCER: it duplicates the shape, reflects the copy across a plane and
   // welds the seam. Both dials are read by `applyMirror`; options are stored as an index.
   axisSpec('mirrorAxis', 'Mirror axis', 'The plane the copy is reflected across', 0),

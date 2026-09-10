@@ -510,3 +510,150 @@ describe('mirror producer', () => {
     expect(subdivided.getAttribute('position').count).toBeGreaterThan(plain.getAttribute('position').count)
   })
 })
+
+// ---------------------------------------------------------------------------
+// S2 Task 2 — in-place deformers: shear, spherify, smooth (Laplacian), melt.
+// Each mutates positions and MUST leave the vertex count unchanged. A deform-only
+// stack never welds, so positions stay in the base geometry's order and can be
+// compared index-for-index against a fresh copy of the same primitive.
+// ---------------------------------------------------------------------------
+const shearRow = (pair = 0, amount = 0): ModifierInstance => {
+  const r = createModifier('shear'); r.shearAxis = pair; r.shear = amount; return r
+}
+const spherifyRow = (amount = 0): ModifierInstance => {
+  const r = createModifier('spherify'); r.spherify = amount; return r
+}
+const smoothRow = (strength = 0, iterations = 1): ModifierInstance => {
+  const r = createModifier('smooth'); r.smoothStrength = strength; r.smoothIterations = iterations; return r
+}
+const meltRow = (amount = 0, axis = 1): ModifierInstance => {
+  const r = createModifier('melt'); r.melt = amount; r.meltAxis = axis; return r
+}
+/** Distinct vertex positions, rounded to 4 decimals — the same tolerance `applySmooth` welds on. */
+function countDistinct(geo: THREE.BufferGeometry): number {
+  const p = geo.getAttribute('position') as THREE.BufferAttribute
+  const s = new Set<string>()
+  for (let i = 0; i < p.count; i++) {
+    s.add(`${Math.round(p.getX(i) * 1e4)},${Math.round(p.getY(i) * 1e4)},${Math.round(p.getZ(i) * 1e4)}`)
+  }
+  return s.size
+}
+
+describe('shear deformer', () => {
+  it('displaces the moved axis proportional to the drive axis (floor unmoved), count unchanged', () => {
+    const base = new THREE.BoxGeometry(1, 1, 1)
+    const bp = base.getAttribute('position') as THREE.BufferAttribute
+    // shearAxis 0 = 'xy': X moves proportional to Y, measured from the Y minimum (-0.5).
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [shearRow(0, 0.5)])
+    const op = out.getAttribute('position') as THREE.BufferAttribute
+    expect(op.count).toBe(bp.count)
+    const minY = -0.5
+    for (let i = 0; i < bp.count; i++) {
+      expect(op.getX(i)).toBeCloseTo(bp.getX(i) + 0.5 * (bp.getY(i) - minY), 5)
+      expect(op.getY(i)).toBeCloseTo(bp.getY(i), 5) // drive + third axes untouched
+      expect(op.getZ(i)).toBeCloseTo(bp.getZ(i), 5)
+    }
+    // A bottom-face vertex (Y = min) is unmoved in X; a top-face one is displaced by amount·extent.
+    const topX: number[] = [], botX: number[] = []
+    for (let i = 0; i < bp.count; i++) {
+      if (Math.abs(bp.getY(i) - 0.5) < 1e-6) topX.push(op.getX(i) - bp.getX(i))
+      if (Math.abs(bp.getY(i) + 0.5) < 1e-6) botX.push(op.getX(i) - bp.getX(i))
+    }
+    expect(botX.length).toBeGreaterThan(0)
+    for (const d of botX) expect(d).toBeCloseTo(0, 6)
+    for (const d of topX) expect(d).toBeCloseTo(0.5, 6)
+  })
+})
+
+describe('spherify deformer', () => {
+  // A plain cube has ONLY corner vertices, all already equidistant from the centre, so it
+  // would spherify to itself. A segmented box carries face-centre, edge and corner vertices
+  // at DIFFERENT radii — the honest input for a bulge-toward-a-ball test.
+  const segBox = () => new THREE.BoxGeometry(1, 1, 1, 3, 3, 3)
+
+  it('at 1 puts every vertex the same distance from the centre, count unchanged', () => {
+    const base = segBox().getAttribute('position') as THREE.BufferAttribute
+    const out = applyModifierStack(segBox(), [spherifyRow(1)])
+    const p = out.getAttribute('position') as THREE.BufferAttribute
+    expect(p.count).toBe(base.count)
+    // The input genuinely spans several radii (else the assertion is vacuous).
+    const rawDists: number[] = []
+    for (let i = 0; i < base.count; i++) rawDists.push(Math.hypot(base.getX(i), base.getY(i), base.getZ(i)))
+    expect(Math.max(...rawDists) - Math.min(...rawDists)).toBeGreaterThan(0.1)
+    const dists: number[] = []
+    for (let i = 0; i < p.count; i++) dists.push(Math.hypot(p.getX(i), p.getY(i), p.getZ(i)))
+    const mean = dists.reduce((a, b) => a + b, 0) / dists.length
+    expect(mean).toBeGreaterThan(0)
+    for (const d of dists) expect(d).toBeCloseTo(mean, 4) // all on one sphere
+  })
+
+  it('at 0.5 lands partway — differs from both the box and the full sphere', () => {
+    const box = segBox()
+    const half = applyModifierStack(segBox(), [spherifyRow(0.5)])
+    const full = applyModifierStack(segBox(), [spherifyRow(1)])
+    expect(comparePositions(box, half).diffs).toBeGreaterThan(0) // moved off the box
+    expect(comparePositions(half, full).diffs).toBeGreaterThan(0) // but not all the way
+  })
+})
+
+describe('smooth (Laplacian) deformer', () => {
+  it('shrinks the bounding box, and more iterations shrink it further; count unchanged', () => {
+    const base = new THREE.BoxGeometry(1, 1, 1); base.computeBoundingBox()
+    const baseSize = base.boundingBox!.getSize(new THREE.Vector3())
+    const one = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [smoothRow(0.5, 1)])
+    const five = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [smoothRow(0.5, 5)])
+    expect(one.getAttribute('position').count).toBe(base.getAttribute('position').count)
+    one.computeBoundingBox(); five.computeBoundingBox()
+    const s1 = one.boundingBox!.getSize(new THREE.Vector3())
+    const s5 = five.boundingBox!.getSize(new THREE.Vector3())
+    expect(s1.x).toBeLessThan(baseSize.x)
+    expect(s5.x).toBeLessThan(s1.x)
+    expect(comparePositions(one, five).diffs).toBeGreaterThan(0) // iterations>1 differs from 1
+  })
+
+  it('welds coincident corners so a NON-INDEXED geometry stays watertight (no seam splitting)', () => {
+    const g = new THREE.BoxGeometry(1, 1, 1).toNonIndexed()
+    const distinctBefore = countDistinct(g)
+    expect(g.index).toBeNull()
+    const out = applyModifierStack(g, [smoothRow(0.5, 3)])
+    // Same number of position entries (deformer, count unchanged) …
+    expect(out.getAttribute('position').count).toBe(g.getAttribute('position').count)
+    // … and the same number of DISTINCT corners: coincident vertices moved together.
+    expect(countDistinct(out)).toBe(distinctBefore)
+  })
+})
+
+describe('melt deformer', () => {
+  it('at 1 drops the top to the floor and spreads the footprint wider; count unchanged', () => {
+    const base = new THREE.BoxGeometry(1, 3, 1); base.computeBoundingBox()
+    const bb = base.boundingBox!
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 3, 1), [meltRow(1, 1)]) // down = Y
+    expect(out.getAttribute('position').count).toBe(base.getAttribute('position').count)
+    out.computeBoundingBox()
+    const ob = out.boundingBox!
+    expect(ob.max.y).toBeLessThan(bb.max.y)          // top lowered
+    expect(ob.max.y).toBeCloseTo(bb.min.y, 5)        // everything collapses to the floor at 1
+    expect(ob.max.x - ob.min.x).toBeGreaterThan(bb.max.x - bb.min.x) // footprint spread wider …
+    expect(ob.max.z - ob.min.z).toBeGreaterThan(bb.max.z - bb.min.z) // … in both cross axes
+  })
+
+  it('respects meltAxis — melting down X collapses the X extent, not Y', () => {
+    const base = new THREE.BoxGeometry(3, 1, 1); base.computeBoundingBox()
+    const bb = base.boundingBox!
+    const out = applyModifierStack(new THREE.BoxGeometry(3, 1, 1), [meltRow(1, 0)]) // down = X
+    out.computeBoundingBox()
+    const ob = out.boundingBox!
+    expect(ob.max.x).toBeCloseTo(bb.min.x, 5)         // collapsed along X
+    expect(ob.max.y - ob.min.y).toBeGreaterThan(bb.max.y - bb.min.y) // spread along Y
+  })
+})
+
+describe('the new deformers each no-op when disabled', () => {
+  it('a disabled shear / spherify / smooth / melt row returns the SAME geometry object', () => {
+    for (const make of [() => shearRow(0, 0.5), () => spherifyRow(1), () => smoothRow(0.5, 3), () => meltRow(1, 1)]) {
+      const row = make(); row.enabled = false
+      const g = new THREE.BoxGeometry(1, 1, 1)
+      expect(applyModifierStack(g, [row])).toBe(g)
+    }
+  })
+})

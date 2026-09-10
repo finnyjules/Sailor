@@ -28,6 +28,10 @@ const OPTION_LABELS: Record<string, string[]> = {
   bendAxis: ['X', 'Y', 'Z'],
   cloneAxis: ['X', 'Y', 'Z'],
   jitterMode: ['Random', 'Along normal'],
+  // Positionally paired with shearAxis' options ['xy','xz','yx','yz','zx','zy'] — the first
+  // axis slides proportional to the second.
+  shearAxis: ['X by Y', 'X by Z', 'Y by X', 'Y by Z', 'Z by X', 'Z by Y'],
+  meltAxis: ['X', 'Y', 'Z'],
   cloneMode: ['Linear', 'Radial', 'Grid'],
 }
 

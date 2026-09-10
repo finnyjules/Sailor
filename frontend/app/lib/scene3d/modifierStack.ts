@@ -22,7 +22,7 @@ import { MODIFIER_SPECS, modifierValue, totalClones } from '~/lib/scene3d/primPa
  *  (varyMode/varySeed/…/varyColorStrength) is a material uniform, never a modifier row.
  *  `mirror` is a geometry PRODUCER (it duplicates + welds, changing the vertex buffer),
  *  living in the orderable middle between the deforms and the pinned cloner. */
-export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'mirror', 'cloner'] as const
+export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'mirror', 'cloner'] as const
 export type ModifierKind = typeof MODIFIER_KINDS[number]
 
 /** The order the pipeline applies these in — and therefore the order an old-shape bag is folded
@@ -47,6 +47,10 @@ export const MODIFIER_KIND_PARAMS: Record<ModifierKind, string[]> = {
   bend: ['bend', 'bendAxis'],
   noise: ['noise', 'noiseScale', 'noiseSeed'],
   jitter: ['jitter', 'jitterMode', 'jitterSeed'],
+  shear: ['shear', 'shearAxis'],
+  spherify: ['spherify'],
+  smooth: ['smoothStrength', 'smoothIterations'],
+  melt: ['melt', 'meltAxis'],
   mirror: ['mirrorAxis', 'mirrorOffset'],
   cloner: [
     'cloneCount', 'cloneMode', 'cloneOffsetX', 'cloneOffsetY', 'cloneOffsetZ', 'cloneRadius', 'cloneAxis',
@@ -63,6 +67,10 @@ export const MODIFIER_LABELS: Record<ModifierKind, string> = {
   bend: 'Bend',
   noise: 'Noise',
   jitter: 'Jitter',
+  shear: 'Shear',
+  spherify: 'Spherify',
+  smooth: 'Smooth',
+  melt: 'Melt',
   mirror: 'Mirror',
   cloner: 'Cloner',
 }
@@ -160,6 +168,12 @@ export function modifierStackOf(obj: StackHost | null | undefined): ModifierInst
     bend: bend !== 0,
     noise: noise !== 0,
     jitter: jitter !== 0,
+    // These deformers were never part of the legacy flat bag, so they never fold active —
+    // an old scene had no shear/spherify/smooth/melt keys, exactly as with the producer below.
+    shear: false,
+    spherify: false,
+    smooth: false,
+    melt: false,
     // A geometry producer never lived in the legacy flat bag, so it never folds active.
     mirror: false,
     cloner: totalClones(bag) > 1,

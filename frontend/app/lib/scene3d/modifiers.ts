@@ -229,6 +229,160 @@ function applyJitter(geo: THREE.BufferGeometry, amount: number, mode: number, se
   pos.needsUpdate = true
 }
 
+/** Linear shear: displace `movedAxis` proportionally to how far the vertex sits along
+ *  `driveAxis` (measured from that axis' minimum, so the bottom face is unmoved and the
+ *  top slides by `amount · extent`). Unlike taper, which SCALES the cross-section, this
+ *  is a pure skew — parallel faces stay parallel and the vertex count is untouched.
+ *  `pair` indexes shearAxis' options ['xy','xz','yx','yz','zx','zy']: the first letter is
+ *  the moved axis, the second the axis it slides along. */
+const SHEAR_MOVED = [0, 0, 1, 1, 2, 2] // x x y y z z
+const SHEAR_DRIVE = [1, 2, 0, 2, 0, 1] // y z x z x y
+function applyShear(geo: THREE.BufferGeometry, amount: number, pair: number): void {
+  if (amount === 0) return
+  const p = ((Math.round(pair) % 6) + 6) % 6
+  const moved = SHEAR_MOVED[p]!, drive = SHEAR_DRIVE[p]!
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  const [min] = extentOf(geo, drive)
+  for (let i = 0; i < pos.count; i++) {
+    const d = pos.getComponent(i, drive) - min
+    pos.setComponent(i, moved, pos.getComponent(i, moved) + amount * d)
+  }
+  pos.needsUpdate = true
+}
+
+/** Spherify: lerp each vertex toward its projection on the object's bounding sphere by
+ *  `amount` (0..1). Centre is the bbox centre; the RADIUS is the MEAN vertex distance from
+ *  that centre — so at 1 every vertex lands on one sphere (a box bulges to a ball) and the
+ *  result keeps roughly the original overall size rather than snapping to the single
+ *  furthest corner (as a max-distance radius would). A vertex exactly at the centre has no
+ *  direction to project and is left where it is. Vertex count unchanged. */
+function applySpherify(geo: THREE.BufferGeometry, amount: number): void {
+  if (amount === 0) return
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  geo.computeBoundingBox()
+  const b = geo.boundingBox!
+  const cx = (b.min.x + b.max.x) / 2, cy = (b.min.y + b.max.y) / 2, cz = (b.min.z + b.max.z) / 2
+  let sum = 0
+  for (let i = 0; i < pos.count; i++) {
+    const dx = pos.getX(i) - cx, dy = pos.getY(i) - cy, dz = pos.getZ(i) - cz
+    sum += Math.sqrt(dx * dx + dy * dy + dz * dz)
+  }
+  const radius = pos.count > 0 ? sum / pos.count : 0
+  for (let i = 0; i < pos.count; i++) {
+    const dx = pos.getX(i) - cx, dy = pos.getY(i) - cy, dz = pos.getZ(i) - cz
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz)
+    if (len < 1e-9) continue
+    const s = radius / len
+    // Target on the sphere: centre + dir·radius. Lerp from the current position by amount.
+    pos.setXYZ(
+      i,
+      cx + dx * (1 + amount * (s - 1)),
+      cy + dy * (1 + amount * (s - 1)),
+      cz + dz * (1 + amount * (s - 1)),
+    )
+  }
+  pos.needsUpdate = true
+}
+
+/** Laplacian smoothing: each vertex eases toward the average of its edge-neighbours,
+ *  `strength` (0..1) per pass, `iterations` passes.
+ *
+ *  Adjacency is welded on a QUANTISED position key (4 decimals) so the many coincident
+ *  corner vertices a BufferGeometry carries (a box has 24 positions for 8 real corners)
+ *  collapse into one graph node and move together — smoothing on the raw attribute would
+ *  treat those duplicates as isolated and never relax the seams. Edges come from the index
+ *  when present; for a NON-INDEXED geometry every consecutive position triple is one
+ *  triangle, so its three corners are pairwise neighbours. The relaxed node positions are
+ *  written back to EVERY original vertex sharing that node, so the vertex count and the
+ *  geometry's structure are untouched. */
+function applySmooth(geo: THREE.BufferGeometry, strength: number, iterations: number): void {
+  if (strength === 0 || iterations < 1) return
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  const n = pos.count
+  if (n === 0) return
+  const Q = 1e4
+  const keyOf = (i: number): string =>
+    `${Math.round(pos.getX(i) * Q)},${Math.round(pos.getY(i) * Q)},${Math.round(pos.getZ(i) * Q)}`
+
+  // Map each original vertex to a graph node (first index seen for its key is the node id).
+  const nodeOf = new Map<string, number>()
+  const vertNode = new Int32Array(n)
+  const nodePos: number[] = [] // flat xyz per node
+  for (let i = 0; i < n; i++) {
+    const k = keyOf(i)
+    let id = nodeOf.get(k)
+    if (id === undefined) {
+      id = nodePos.length / 3
+      nodeOf.set(k, id)
+      nodePos.push(pos.getX(i), pos.getY(i), pos.getZ(i))
+    }
+    vertNode[i] = id
+  }
+  const nodeCount = nodePos.length / 3
+
+  // Neighbour node sets, from index triples (or consecutive triples when non-indexed).
+  const neighbours: Set<number>[] = Array.from({ length: nodeCount }, () => new Set<number>())
+  const idx = geo.index
+  const triCount = idx ? idx.count : n
+  const corner = (t: number): number => (idx ? idx.getX(t) : t)
+  for (let t = 0; t + 3 <= triCount; t += 3) {
+    const a = vertNode[corner(t)]!, b = vertNode[corner(t + 1)]!, c = vertNode[corner(t + 2)]!
+    if (a !== b) { neighbours[a]!.add(b); neighbours[b]!.add(a) }
+    if (b !== c) { neighbours[b]!.add(c); neighbours[c]!.add(b) }
+    if (a !== c) { neighbours[a]!.add(c); neighbours[c]!.add(a) }
+  }
+
+  // Relax the node positions in place, iteration by iteration (Jacobi: read the previous
+  // pass, write the next), then push each node back onto every vertex that shares it.
+  let cur = nodePos
+  for (let it = 0; it < iterations; it++) {
+    const next = cur.slice()
+    for (let nd = 0; nd < nodeCount; nd++) {
+      const nb = neighbours[nd]!
+      if (nb.size === 0) continue
+      let ax = 0, ay = 0, az = 0
+      for (const m of nb) { ax += cur[m * 3]!; ay += cur[m * 3 + 1]!; az += cur[m * 3 + 2]! }
+      const inv = 1 / nb.size
+      const cx = cur[nd * 3]!, cy = cur[nd * 3 + 1]!, cz = cur[nd * 3 + 2]!
+      next[nd * 3] = cx + strength * (ax * inv - cx)
+      next[nd * 3 + 1] = cy + strength * (ay * inv - cy)
+      next[nd * 3 + 2] = cz + strength * (az * inv - cz)
+    }
+    cur = next
+  }
+
+  for (let i = 0; i < n; i++) {
+    const nd = vertNode[i]!
+    pos.setXYZ(i, cur[nd * 3]!, cur[nd * 3 + 1]!, cur[nd * 3 + 2]!)
+  }
+  pos.needsUpdate = true
+}
+
+/** Melt: a gravity-weighted sag along `axis` (the "down" direction). The higher a vertex
+ *  sits above the floor (that axis' minimum), the more it sinks toward the floor AND the
+ *  more it spreads outward in the other two axes about their centre — so a tall shape
+ *  slumps into a wide puddle. At `amount` 1 every vertex drops to the floor and the
+ *  originally-tall material spreads to twice its width. Vertex count unchanged. */
+function applyMelt(geo: THREE.BufferGeometry, amount: number, axis: number): void {
+  if (amount === 0) return
+  const ax = ((Math.round(axis) % 3) + 3) % 3
+  const a1 = (ax + 1) % 3, a2 = (ax + 2) % 3
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  const [min, size] = extentOf(geo, ax)
+  const b = geo.boundingBox! // extentOf just computed it
+  const c1 = (b.min.getComponent(a1) + b.max.getComponent(a1)) / 2
+  const c2 = (b.min.getComponent(a2) + b.max.getComponent(a2)) / 2
+  for (let i = 0; i < pos.count; i++) {
+    const h = pos.getComponent(i, ax) - min       // height above the floor, 0..size
+    const sink = amount * h                        // higher vertices sink further
+    pos.setComponent(i, ax, pos.getComponent(i, ax) - sink)
+    const spread = 1 + sink / size                 // 1 (base) .. 1+amount (top) → wider puddle
+    pos.setComponent(i, a1, c1 + (pos.getComponent(i, a1) - c1) * spread)
+    pos.setComponent(i, a2, c2 + (pos.getComponent(i, a2) - c2) * spread)
+  }
+  pos.needsUpdate = true
+}
+
 // --- geometry producers ------------------------------------------------------
 
 /** Reverse the winding of every triangle in a NON-INDEXED geometry by swapping the first and
@@ -463,7 +617,7 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
  *  and any producer that changed the count still needs fresh normals/bounds. For a LEGACY bag the
  *  middle rows are EXACTLY the deforms, so "any middle row" and "any deform" coincide and the
  *  byte-identity oracle is untouched. */
-const DEFORM_KINDS: readonly ModifierKind[] = ['taper', 'twist', 'bend', 'noise', 'jitter']
+const DEFORM_KINDS: readonly ModifierKind[] = ['taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt']
 const PRODUCER_KINDS: readonly ModifierKind[] = ['mirror']
 const isDeformKind = (k: ModifierKind): boolean => (DEFORM_KINDS as readonly string[]).includes(k)
 const isProducerKind = (k: ModifierKind): boolean => (PRODUCER_KINDS as readonly string[]).includes(k)
@@ -482,6 +636,10 @@ function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance): THREE
     case 'bend': applyBend(geo, m('bend'), Math.round(m('bendAxis'))); return geo
     case 'noise': applyNoise(geo, m('noise'), m('noiseScale'), Math.round(m('noiseSeed'))); return geo
     case 'jitter': applyJitter(geo, m('jitter'), Math.round(m('jitterMode')), Math.round(m('jitterSeed'))); return geo
+    case 'shear': applyShear(geo, m('shear'), Math.round(m('shearAxis'))); return geo
+    case 'spherify': applySpherify(geo, m('spherify')); return geo
+    case 'smooth': applySmooth(geo, m('smoothStrength'), Math.round(m('smoothIterations'))); return geo
+    case 'melt': applyMelt(geo, m('melt'), Math.round(m('meltAxis'))); return geo
     case 'mirror': return applyMirror(geo, Math.round(m('mirrorAxis')), m('mirrorOffset'))
     default: return geo
   }
