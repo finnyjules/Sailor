@@ -34,8 +34,9 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { stripAlpha } from '~/lib/color/convert'
-import type { BufferGroup, EdgeLinesTreatment, MaskedGroup, RampFields, Treatment } from './treatments'
+import type { BufferGroup, CurvatureWearTreatment, DepthFogTreatment, EdgeLinesTreatment, MaskedGroup, RampFields, Treatment } from './treatments'
 import { ownMeshes, STAGE_LAYER } from './treatmentShells'
+import { fitNearFar } from './passes'
 
 /** MSAA samples on the base/layer targets. three ≥ r165 resolves a multisampled target's
  *  depth into its `depthTexture` (`resolveDepthBuffer`, default true), which the composite
@@ -321,6 +322,19 @@ const COMPOSITE_FRAG = `
     gl_FragColor = vec4(mix(linearResult, displayResult, k), outA);
   }`
 
+// Window depth (0..1, non-linear under perspective) → a linear 0-at-near, 1-at-far metric,
+// so a Sobel over it means the same thing at every distance and depth fog's start/end read
+// as real fractions of the near→far span. Ortho depth is already linear. Needs `uNear`,
+// `uFar` and `uOrtho` in scope — every shader that imports this declares them. Shared so edge
+// lines and depth fog cannot drift apart (Task 1 flagged the duplication).
+const LINEAR_DEPTH_GLSL = `
+  float linearDepth(float z){
+    if (uOrtho > 0.5) return clamp(z, 0.0, 1.0);
+    float ndc = z * 2.0 - 1.0;
+    float eye = (2.0 * uNear * uFar) / (uFar + uNear - ndc * (uFar - uNear));
+    return clamp((eye - uNear) / (uFar - uNear), 0.0, 1.0);
+  }`
+
 // Edge lines — a toon crease line drawn from the shared G-buffer (view-space normals in
 // tNormal, window depth in tDepth). A 3×3 Sobel over the normals catches a box's INTERIOR
 // creases (two faces meeting at an angle change the normal abruptly while depth stays
@@ -336,14 +350,7 @@ const EDGE_LINES_FRAG = `
   uniform vec3 uColor; uniform float uWidthPx; uniform float uThreshold;
   uniform vec2 uTexel; uniform float uNear; uniform float uFar; uniform float uOrtho;
   varying vec2 vUv;
-  // Window depth (0..1, non-linear under perspective) → a linear 0-at-near, 1-at-far metric,
-  // so a Sobel over it means the same thing at every distance. Ortho depth is already linear.
-  float linearDepth(float z){
-    if (uOrtho > 0.5) return clamp(z, 0.0, 1.0);
-    float ndc = z * 2.0 - 1.0;
-    float eye = (2.0 * uNear * uFar) / (uFar + uNear - ndc * (uFar - uNear));
-    return clamp((eye - uNear) / (uFar - uNear), 0.0, 1.0);
-  }
+  ${LINEAR_DEPTH_GLSL}
   vec3 nAt(vec2 uv){ return texture2D(tNormal, uv).rgb * 2.0 - 1.0; }
   float dAt(vec2 uv){ return linearDepth(texture2D(tDepth, uv).r); }
   void main(){
@@ -379,6 +386,73 @@ const EDGE_LINES_FRAG = `
     // the object toward 0 along the crease; a tint paints that colour there instead.
     vec3 lineP = uColor * cov;
     gl_FragColor = vec4(lineP + dst.rgb * (1.0 - cov), cov + dst.a * (1.0 - cov));
+  }`
+
+// Depth fog — aerial perspective. The object's own colour (already in the premultiplied
+// accumulator) is mixed toward `uColor` by the smoothstep of its depth between `uStart` and
+// `uEnd`, so the far end of a deep object washes into the tint while the near end stays clear.
+// `linearDepth` (the shared snippet, fed the REAL camera near/far in `uNear`/`uFar`) inverts
+// the projection to a 0-at-near..1-at-far value; that is then remapped across THIS object's
+// FITTED depth span [uDepthLo, uDepthHi] (fitNearFar in eye space, converted to the same
+// 0..1 units on the CPU) so start/end read as fractions of the object rather than of the whole
+// 0.1–200 camera range — otherwise a compact scene would sit near 0 and never fog. `tMaskDepth`
+// (the object drawn alone) gates coverage and `tBaseDepth` occlusion, exactly like edge lines.
+// Alpha is untouched: fog tints, it does not dissolve; premultiplied, so the tint is × dst.a.
+const DEPTH_FOG_FRAG = `
+  uniform sampler2D tDst; uniform sampler2D tDepth;
+  uniform sampler2D tMaskDepth; uniform sampler2D tBaseDepth;
+  uniform vec3 uColor; uniform float uStart; uniform float uEnd;
+  uniform float uDepthLo; uniform float uDepthHi;
+  uniform float uNear; uniform float uFar; uniform float uOrtho;
+  varying vec2 vUv;
+  ${LINEAR_DEPTH_GLSL}
+  void main(){
+    vec4 dst = texture2D(tDst, vUv);
+    float md = texture2D(tMaskDepth, vUv).r;
+    if (md >= 0.9999) { gl_FragColor = dst; return; }
+    float bd = texture2D(tBaseDepth, vUv).r;
+    if (md > bd + 0.0005) { gl_FragColor = dst; return; }
+    float ld = linearDepth(texture2D(tDepth, vUv).r);
+    float dn = clamp((ld - uDepthLo) / max(uDepthHi - uDepthLo, 1e-6), 0.0, 1.0);
+    float t = smoothstep(uStart, uEnd, dn);
+    // Straight colour mixes toward uColor by t; premultiply the tint by dst.a, keep alpha.
+    gl_FragColor = vec4(mix(dst.rgb, uColor * dst.a, t), dst.a);
+  }`
+
+// Curvature wear — a soft worn/beveled edge shade, NOT an ink line. A 3×3 Sobel over the
+// G-buffer normals gives the local curvature magnitude (same normal gradient edge lines
+// reads), but here it modulates the object's OWN colour rather than painting `uColor`: a
+// feathered coverage scales brightness up (uAmount > 0, wear/AO-inverse) or down
+// (uAmount < 0, grime in the creases). No depth Sobel, so — unlike edge lines — it never
+// draws the silhouette, only interior curvature; and the ramp is wide/soft, so the band
+// fades in gently instead of snapping to a hard line. Alpha untouched; premultiplied, so
+// scaling rgb scales the straight colour by the same factor.
+const CURVATURE_WEAR_FRAG = `
+  uniform sampler2D tDst; uniform sampler2D tNormal;
+  uniform sampler2D tMaskDepth; uniform sampler2D tBaseDepth;
+  uniform float uAmount; uniform float uWidthPx; uniform vec2 uTexel;
+  varying vec2 vUv;
+  vec3 nAt(vec2 uv){ return texture2D(tNormal, uv).rgb * 2.0 - 1.0; }
+  void main(){
+    vec4 dst = texture2D(tDst, vUv);
+    float md = texture2D(tMaskDepth, vUv).r;
+    if (md >= 0.9999) { gl_FragColor = dst; return; }
+    float bd = texture2D(tBaseDepth, vUv).r;
+    if (md > bd + 0.0005) { gl_FragColor = dst; return; }
+
+    vec2 o = uTexel * uWidthPx;
+    vec3 ntl = nAt(vUv + vec2(-o.x,  o.y)), nt = nAt(vUv + vec2(0.0,  o.y)), ntr = nAt(vUv + vec2(o.x,  o.y));
+    vec3 nl  = nAt(vUv + vec2(-o.x, 0.0)),                                    nr  = nAt(vUv + vec2(o.x, 0.0));
+    vec3 nbl = nAt(vUv + vec2(-o.x, -o.y)), nb = nAt(vUv + vec2(0.0, -o.y)), nbr = nAt(vUv + vec2(o.x, -o.y));
+    vec3 gxN = (ntr + 2.0 * nr + nbr) - (ntl + 2.0 * nl + nbl);
+    vec3 gyN = (ntl + 2.0 * nt + ntr) - (nbl + 2.0 * nb + nbr);
+    float nMag = length(gxN) + length(gyN);
+    // Feathered over the whole 0.3–2.6 curvature range (edge lines uses a hard 0.4-wide step
+    // at a threshold-driven floor) so the shade is a soft band, not a crisp line.
+    float cov = smoothstep(0.3, 2.6, nMag);
+    // Scale the object's own colour; +amount lightens the edge, -amount darkens the crease.
+    float factor = clamp(1.0 + uAmount * cov, 0.0, 4.0);
+    gl_FragColor = vec4(dst.rgb * factor, dst.a);
   }`
 
 type RT = THREE.WebGLRenderTarget
@@ -435,10 +509,14 @@ export class TreatmentStage {
    *  smooth-shaded geometry (a GLB), which is what a toon crease line needs. */
   private readonly normalMat = new THREE.MeshNormalMaterial({ flatShading: true })
   private readonly edgeLinesMat: THREE.ShaderMaterial
+  private readonly depthFogMat: THREE.ShaderMaterial
+  private readonly curvatureWearMat: THREE.ShaderMaterial
   private readonly tmpSize = new THREE.Vector2()
   private readonly prevClearColor = new THREE.Color()
   private readonly rampBox = new THREE.Box3()
   private readonly rampMeshBox = new THREE.Box3()
+  /** Scratch for depth fog's per-object bounds (fitNearFar). */
+  private readonly fogBox = new THREE.Box3()
   private readonly rampCorner = new THREE.Vector3()
   private readonly rampView = new THREE.Vector3()
 
@@ -461,6 +539,18 @@ export class TreatmentStage {
       uTexel: { value: new THREE.Vector2() }, uNear: { value: FALLBACK_NEAR }, uFar: { value: 100 }, uOrtho: { value: 0 },
     })
     this.edgeLinesMat.blending = THREE.NoBlending
+    this.depthFogMat = shader(DEPTH_FOG_FRAG, {
+      tDst: { value: null }, tDepth: { value: null }, tMaskDepth: { value: null }, tBaseDepth: { value: null },
+      uColor: { value: new THREE.Color(0.56, 0.65, 0.75) }, uStart: { value: 0.3 }, uEnd: { value: 1 },
+      uDepthLo: { value: 0 }, uDepthHi: { value: 1 },
+      uNear: { value: FALLBACK_NEAR }, uFar: { value: 100 }, uOrtho: { value: 0 },
+    })
+    this.depthFogMat.blending = THREE.NoBlending
+    this.curvatureWearMat = shader(CURVATURE_WEAR_FRAG, {
+      tDst: { value: null }, tNormal: { value: null }, tMaskDepth: { value: null }, tBaseDepth: { value: null },
+      uAmount: { value: 0.5 }, uWidthPx: { value: 1 }, uTexel: { value: new THREE.Vector2() },
+    })
+    this.curvatureWearMat.blending = THREE.NoBlending
   }
 
   private makeTarget(w: number, h: number, withDepth: boolean): RT {
@@ -483,6 +573,7 @@ export class TreatmentStage {
     this.pixelateMat.uniforms.uResolution!.value.set(w, h)
     this.compositeMat.uniforms.uTexel!.value.set(1 / w, 1 / h)
     ;(this.edgeLinesMat.uniforms.uTexel!.value as THREE.Vector2).set(1 / w, 1 / h)
+    ;(this.curvatureWearMat.uniforms.uTexel!.value as THREE.Vector2).set(1 / w, 1 / h)
     this.stats.width = w; this.stats.height = h
   }
 
@@ -826,11 +917,62 @@ export class TreatmentStage {
     // over a wider band, i.e. a thicker line. Threshold passes straight through.
     u.uWidthPx!.value = 0.75 + t.width * 2.75
     u.uThreshold!.value = t.threshold
+    this.setCameraDepth(u, camera)
+    this.pass(this.edgeLinesMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
+  }
+
+  /** Feed a shader's `linearDepth` uniforms (uNear/uFar/uOrtho) from the live camera, with
+   *  the same fallbacks edge lines and depth fog share. */
+  private setCameraDepth(u: Record<string, THREE.IUniform>, camera: THREE.Camera): void {
     const cam = camera as unknown as { near?: number; far?: number; isOrthographicCamera?: boolean }
     u.uNear!.value = typeof cam.near === 'number' && cam.near > 0 ? cam.near : FALLBACK_NEAR
     u.uFar!.value = typeof cam.far === 'number' && cam.far > 0 ? cam.far : 100
     u.uOrtho!.value = cam.isOrthographicCamera ? 1 : 0
-    this.pass(this.edgeLinesMat, this.accum[1 - this.accumIdx]!)
+  }
+
+  /** Draw one depth-fog treatment over the accumulator: each of the object's covered pixels
+   *  is mixed toward the tint by the smoothstep of its depth between `start` and `end`. Depth
+   *  comes from the shared gbuf, linearised with the REAL camera near/far, then remapped over
+   *  THIS object's fitted depth span (fitNearFar) so 0..1 spans the object. Masked and
+   *  occlusion-tested like edge lines; alpha is left alone. Advances the ping-pong. */
+  private fogComposite(t: DepthFogTreatment, maskDepth: THREE.Texture, root: THREE.Object3D, camera: THREE.Camera): void {
+    const u = this.depthFogMat.uniforms
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    u.tDepth!.value = this.gbuf!.depthTexture
+    u.tMaskDepth!.value = maskDepth
+    u.tBaseDepth!.value = this.base.depthTexture
+    ;(u.uColor!.value as THREE.Color).set(stripAlpha(t.color))
+    u.uStart!.value = t.start
+    // end <= start would make smoothstep a hard step; nudge end up so the fade stays a ramp.
+    u.uEnd!.value = t.end > t.start ? t.end : t.start + 1e-4
+    this.setCameraDepth(u, camera)
+    // Fit the object's eye-space depth span, then express it in the same 0..1 units linearDepth
+    // returns ((eye − camNear) / (camFar − camNear)) so the shader can remap into it.
+    const camNear = u.uNear!.value as number
+    const camFar = u.uFar!.value as number
+    const span = Math.max(camFar - camNear, 1e-6)
+    const { near, far } = fitNearFar(this.fogBox.setFromObject(root), camera.position)
+    u.uDepthLo!.value = (near - camNear) / span
+    u.uDepthHi!.value = (far - camNear) / span
+    this.pass(this.depthFogMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
+  }
+
+  /** Draw one curvature-wear treatment over the accumulator: a Sobel over the gbuf normals
+   *  gives the curvature magnitude, and the object's OWN colour is scaled up or down within
+   *  `width` px of high-curvature edges. No depth Sobel (no silhouette) and a soft ramp — a
+   *  shade, not a line. Masked and occlusion-tested like edge lines. Advances the ping-pong. */
+  private wearComposite(t: CurvatureWearTreatment, maskDepth: THREE.Texture): void {
+    const u = this.curvatureWearMat.uniforms
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    u.tNormal!.value = this.gbuf!.texture
+    u.tMaskDepth!.value = maskDepth
+    u.tBaseDepth!.value = this.base.depthTexture
+    u.uAmount!.value = t.amount
+    // Width 0→1 maps to the same 0.75–3.5 px Sobel reach edge lines uses, for a wider band.
+    u.uWidthPx!.value = 0.75 + t.width * 2.75
+    this.pass(this.curvatureWearMat, this.accum[1 - this.accumIdx]!)
     this.accumIdx = 1 - this.accumIdx
   }
 
@@ -932,6 +1074,8 @@ export class TreatmentStage {
           this.drawAlone(scene, camera, root, exclude, this.layer, null)
           for (const t of g.treatments) {
             if (t.kind === 'edgeLines') this.edgeComposite(t, this.layer.depthTexture!, camera)
+            else if (t.kind === 'depthFog') this.fogComposite(t, this.layer.depthTexture!, root, camera)
+            else if (t.kind === 'curvatureWear') this.wearComposite(t, this.layer.depthTexture!)
           }
         }
       } else {
@@ -958,7 +1102,7 @@ export class TreatmentStage {
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.normalMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }

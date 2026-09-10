@@ -730,3 +730,169 @@ test.describe('3D Studio edge lines (S3 G-buffer)', () => {
     expect(absent, 'a disabled S3 treatment must leave the frame byte-identical').toBe(0)
   })
 })
+
+test.describe('3D Studio depth fog + curvature wear (S3 G-buffer)', () => {
+  async function openScene(page: Page, state: unknown): Promise<void> {
+    await page.goto(`/dev/scene3d-lab?state=${encodeURIComponent(JSON.stringify(state))}`)
+    await expect.poll(() => page.evaluate(() => typeof (window as any).__scene3dSnapshot === 'function'), { timeout: 30_000 }).toBe(true)
+    await expect.poll(() => page.evaluate(() => (window as any).__scene3dDoc().objects.length), { timeout: 10_000 }).toBe(1)
+    await page.waitForTimeout(SETTLE_MS)
+  }
+
+  // --- Depth fog: a long box rotated ~+0.9 rad around Y recedes from near-right to far-left,
+  //     so the LEFT of the image is the object's far end and the RIGHT is its near end. Fog
+  //     tints the far end toward a saturated blue; the near end keeps its grey.
+  const deepBox = (treatments?: unknown[]) => ({
+    id: 'plank', kind: 'primitive', primitive: 'box', name: 'Plank', visible: true,
+    position: [0, 0, 0], rotation: [0, 0.9, 0], scale: [1, 1, 5],
+    material: { type: 'standard', color: '#cccccc', roughness: 0.6, metalness: 0 },
+    ...(treatments ? { treatments } : {}),
+  })
+  const deepScene = (treatments?: unknown[]) => ({
+    version: 1, background: '#202020', showFloor: false,
+    camera: { position: [0, 0.6, 5], target: [0, 0, 0], fov: 40 },
+    objects: [deepBox(treatments)],
+  })
+  const FOG = { id: 't-fog', kind: 'depthFog', enabled: true, invert: false, color: '#2a5cff', start: 0.25, end: 1 }
+
+  /** Mean (blue − red) in a left band (the object's far end) and a right band (its near end),
+   *  across the vertical middle. Grey object and grey background both read ~0; a blue fog tint
+   *  drives its band positive. */
+  async function blueBias(page: Page, dataUrl: string): Promise<{ left: number; right: number }> {
+    return page.evaluate(async (url) => {
+      const img = new Image(); img.src = url; await img.decode()
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+      const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height)
+      const band = (fx0: number, fx1: number) => {
+        let s = 0, n = 0
+        for (let y = Math.floor(height * 0.40); y < height * 0.60; y++)
+          for (let x = Math.floor(width * fx0); x < width * fx1; x++) {
+            const i = (y * width + x) * 4; s += data[i + 2]! - data[i]!; n++
+          }
+        return s / n
+      }
+      return { left: band(0.30, 0.44), right: band(0.56, 0.70) }
+    }, dataUrl)
+  }
+
+  test('depth fog tints the object\'s far end more than its near end, and the pass ran', async ({ page }) => {
+    const errs = watchConsole(page)
+    await openScene(page, deepScene())
+    expect((await stats(page)).frames, 'plain plank must take the direct path').toBe(0)
+    const plain = await blueBias(page, await snapshot(page))
+
+    await openScene(page, deepScene([FOG]))
+    const s = await stats(page)
+    expect(s.frames, `stage never ran; console: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    expect(s.groups).toBeGreaterThanOrEqual(1)
+    const fogged = await blueBias(page, await snapshot(page))
+    console.log(`[depth fog] plain L=${plain.left.toFixed(2)} R=${plain.right.toFixed(2)} | `
+      + `fogged L=${fogged.left.toFixed(2)} R=${fogged.right.toFixed(2)}`)
+    // Plain grey plank: neither band is blue.
+    expect(Math.abs(plain.left - plain.right)).toBeLessThan(6)
+    // Fogged: the far (left) end is markedly bluer than the near (right) end…
+    expect(fogged.left).toBeGreaterThan(fogged.right + 12)
+    // …and bluer than the same band was without fog (the tint really landed).
+    expect(fogged.left).toBeGreaterThan(plain.left + 12)
+  })
+
+  // --- Curvature wear: the rotated cube from the edge-lines suite. Positive amount lightens
+  //     the high-curvature interior crease; the flat face between crease and silhouette has no
+  //     curvature and stays put — a soft shade, not a hard ink line.
+  const cube = (treatments?: unknown[]) => ({
+    id: 'cube', kind: 'primitive', primitive: 'box', name: 'Cube', visible: true,
+    position: [0, 0, 0], rotation: [0, 0.785398, 0], scale: [1.4, 1.4, 1.4],
+    material: { type: 'standard', color: '#8a8a8a', roughness: 0.5, metalness: 0 },
+    ...(treatments ? { treatments } : {}),
+  })
+  const cubeScene = (treatments?: unknown[]) => ({
+    version: 1, background: '#202020', showFloor: false,
+    camera: { position: [0, 0.4, 5], target: [0, 0, 0], fov: 40 },
+    objects: [cube(treatments)],
+  })
+  const WEAR = { id: 't-wear', kind: 'curvatureWear', enabled: true, invert: false, amount: 1, width: 1 }
+
+  /** Mean absolute per-pixel luminance change between two frames, in the high-curvature crease
+   *  band and in the flat interior face band. Wear is a thin, localised brightness shade, so a
+   *  direct frame-to-frame diff is the honest metric: it lights up the curved crease and reads
+   *  ~0 on the flat face, whatever the crease's own tone. */
+  async function diffBands(page: Page, plainUrl: string, wornUrl: string): Promise<{ crease: number; face: number }> {
+    return page.evaluate(async ([u1, u2]) => {
+      const load = async (u: string) => {
+        const img = new Image(); img.src = u; await img.decode()
+        const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height
+        cv.getContext('2d')!.drawImage(img, 0, 0)
+        return cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height)
+      }
+      const a = await load(u1), b = await load(u2)
+      const { width, height } = a
+      const lum = (d: Uint8ClampedArray, i: number) => 0.2126 * d[i]! + 0.7152 * d[i + 1]! + 0.0722 * d[i + 2]!
+      const band = (fx0: number, fx1: number) => {
+        let s = 0, n = 0
+        for (let y = Math.floor(height * 0.42); y < height * 0.58; y++)
+          for (let x = Math.floor(width * fx0); x < width * fx1; x++) {
+            const i = (y * width + x) * 4; s += Math.abs(lum(a.data, i) - lum(b.data, i)); n++
+          }
+        return s / n
+      }
+      // `crease` straddles the interior crease (high curvature); `face` is a flat interior band
+      // of the right face, between the crease (~0.50) and the silhouette (~0.64) — zero curvature.
+      return { crease: band(0.47, 0.53), face: band(0.55, 0.60) }
+    }, [plainUrl, wornUrl] as [string, string])
+  }
+
+  test('curvature wear shades the interior crease and leaves the flat face alone, and the pass ran', async ({ page }) => {
+    const errs = watchConsole(page)
+    await openScene(page, cubeScene())
+    expect((await stats(page)).frames, 'plain cube must take the direct path').toBe(0)
+    const plain = await snapshot(page)
+
+    await openScene(page, cubeScene([WEAR]))
+    const s = await stats(page)
+    expect(s.frames, `stage never ran; console: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    expect(s.groups).toBeGreaterThanOrEqual(1)
+    const worn = await snapshot(page)
+    const d = await diffBands(page, plain, worn)
+    console.log(`[curvature wear] crease diff=${d.crease.toFixed(2)} | flat-face diff=${d.face.toFixed(2)}`)
+    // The high-curvature crease band is visibly shaded…
+    expect(d.crease).toBeGreaterThan(3)
+    // …while the flat interior face (no curvature) is left essentially untouched — a local edge
+    // shade, not a wash. (The flat band moved ~0; the crease band is far higher.)
+    expect(d.face).toBeLessThan(0.5)
+    expect(d.crease).toBeGreaterThan(d.face * 5)
+  })
+
+  test('BYTE-IDENTITY: a disabled depth-fog or curvature-wear treatment leaves the frame unchanged', async ({ page }) => {
+    await openScene(page, cubeScene())
+    expect((await stats(page)).frames).toBe(0)
+    const a = await snapshot(page)
+    await openScene(page, cubeScene())
+    const b = await snapshot(page)
+
+    await openScene(page, cubeScene([{ ...FOG, enabled: false }, { ...WEAR, enabled: false }]))
+    expect((await stats(page)).frames, 'disabled buffer treatments must not run the pass').toBe(0)
+    const disabled = await snapshot(page)
+
+    const diff = (x: string, y: string) => page.evaluate(async ([u1, u2]) => {
+      const load = async (u: string) => {
+        const img = new Image(); img.src = u; await img.decode()
+        const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height
+        cv.getContext('2d')!.drawImage(img, 0, 0)
+        return cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
+      }
+      const d1 = await load(u1), d2 = await load(u2)
+      let changed = 0
+      for (let i = 0; i < d1.length; i += 4) {
+        if (d1[i] !== d2[i] || d1[i + 1] !== d2[i + 1] || d1[i + 2] !== d2[i + 2] || d1[i + 3] !== d2[i + 3]) changed++
+      }
+      return changed
+    }, [x, y] as [string, string])
+
+    const determinism = await diff(a, b)
+    const absent = await diff(a, disabled)
+    console.log(`[byte-identity fog/wear] reload-determinism changed=${determinism} | disabled-vs-absent changed=${absent}`)
+    expect(determinism, 'the harness must render the same scene identically across reloads').toBe(0)
+    expect(absent, 'disabled depth-fog and curvature-wear treatments must leave the frame byte-identical').toBe(0)
+  })
+})

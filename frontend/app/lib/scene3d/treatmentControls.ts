@@ -107,6 +107,19 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         slider(g, 'threshold', 'Threshold', 0, 1, 0.01, D.edgeLines.threshold, 'How sharp a crease has to be before a line appears'),
       ]
       break
+    case 'depthFog':
+      rows = [
+        color(g, 'color', 'Colour', D.depthFog.color),
+        slider(g, 'start', 'Start', 0, 1, 0.01, D.depthFog.start, 'How far away the fog begins, near to far'),
+        slider(g, 'end', 'End', 0, 1, 0.01, D.depthFog.end, 'How far away the object is fully hidden in the fog'),
+      ]
+      break
+    case 'curvatureWear':
+      rows = [
+        slider(g, 'amount', 'Amount', -1, 1, 0.01, D.curvatureWear.amount, 'Below zero darkens the creases like grime, above zero lightens the edges like wear'),
+        slider(g, 'width', 'Width', 0, 1, 0.01, D.curvatureWear.width, 'How wide a band the edge shading covers'),
+      ]
+      break
     default:
       rows = []
   }

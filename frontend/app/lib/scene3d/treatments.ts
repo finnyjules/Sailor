@@ -14,8 +14,9 @@ export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe']
 /** Stage-rendered treatments that consume the per-frame G-buffer (view-space normals +
  *  depth). Their presence — and ONLY their presence — makes `TreatmentStage` build the
  *  GBufferPass; with none enabled the pass never runs and the frame is byte-identical to
- *  before S3. `depthFog` and `curvatureWear` join this list in S3 Tasks 2/3. */
-export const BUFFER_TREATMENT_KINDS = ['edgeLines'] as const
+ *  before S3. All three share the gate, the shared `gbuf` and the per-object `drawAlone`
+ *  mask; each adds only its own composite shader. */
+export const BUFFER_TREATMENT_KINDS = ['edgeLines', 'depthFog', 'curvatureWear'] as const
 export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS] as const
 export type MaskedTreatmentKind = typeof MASKED_TREATMENT_KINDS[number]
 export type EdgeTreatmentKind = typeof EDGE_TREATMENT_KINDS[number]
@@ -27,7 +28,7 @@ export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTrea
 export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
   blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade',
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
-  edgeLines: 'Edge lines',
+  edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear',
 }
 
 /** What a Progressive ramp is measured across. `object` = the object's own on-screen extent
@@ -80,10 +81,21 @@ export interface WireframeTreatment extends TreatmentBase { kind: 'wireframe'; c
  *  hull `outline` treatment can only trace the silhouette. `width` is line reach in screen
  *  px, `threshold` how sharp a crease must be to draw. */
 export interface EdgeLinesTreatment extends TreatmentBase { kind: 'edgeLines'; color: string; width: number; threshold: number }
+/** Aerial-perspective fade drawn from the G-buffer depth: each covered pixel is mixed toward
+ *  `color` by the smoothstep of its LINEAR depth between `start` and `end` (both normalised
+ *  0-at-camera-near .. 1-at-camera-far). Reuses the shared `linearDepth()` snippet and the
+ *  stage camera's near/far, so the fade means the same thing at every distance. */
+export interface DepthFogTreatment extends TreatmentBase { kind: 'depthFog'; color: string; start: number; end: number }
+/** Worn/beveled-edge shade from the curvature (normal-change) in the G-buffer: a Sobel over
+ *  the view normals gives a curvature magnitude, and the object's OWN colour is scaled up
+ *  (positive `amount`, a wear/AO-inverse highlight) or down (negative, grime in the creases)
+ *  within `width` screen px of high-curvature edges. Distinct from edge lines' hard ink line:
+ *  it modulates brightness, never paints a fixed colour, and ignores the depth silhouette. */
+export interface CurvatureWearTreatment extends TreatmentBase { kind: 'curvatureWear'; amount: number; width: number }
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment
   | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
-  | EdgeLinesTreatment
+  | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment
 
 /** Dial defaults per kind — everything except id/kind/enabled/invert. The ONE source the
  *  parser, `createTreatment` and the inspector controls all read. */
@@ -97,6 +109,8 @@ export const TREATMENT_DEFAULTS = {
   xray: { color: '#6fd3ff', opacity: 0.35 },
   wireframe: { color: '#ffffff', lineOpacity: 0.8, showSurface: true },
   edgeLines: { color: '#000000', width: 0.5, threshold: 0.5 },
+  depthFog: { color: '#8fa6bf', start: 0.3, end: 1 },
+  curvatureWear: { amount: 0.5, width: 0.5 },
 } as const
 
 /** How many masked-treatment groups the stage draws per frame. */
@@ -188,6 +202,15 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
     case 'edgeLines': return {
       ...base, kind: 'edgeLines', color: str(r.color, D.edgeLines.color),
       width: clamp01(num(r.width, D.edgeLines.width)), threshold: clamp01(num(r.threshold, D.edgeLines.threshold)),
+    }
+    case 'depthFog': return {
+      ...base, kind: 'depthFog', color: str(r.color, D.depthFog.color),
+      start: clamp01(num(r.start, D.depthFog.start)), end: clamp01(num(r.end, D.depthFog.end)),
+    }
+    case 'curvatureWear': return {
+      ...base, kind: 'curvatureWear',
+      amount: Math.min(1, Math.max(-1, num(r.amount, D.curvatureWear.amount))),
+      width: clamp01(num(r.width, D.curvatureWear.width)),
     }
   }
   return undefined

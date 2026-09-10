@@ -3,6 +3,7 @@ import { defaultDoc, createPrimitive, createLight, serializeDoc, parseDoc } from
 import {
   TREATMENT_KINDS, TREATMENT_LABELS, TREATED_OBJECT_CAP, createTreatment, parseTreatment, parseTreatments,
   cloneTreatments, maskedTreatmentPlan, unrenderedTreatmentIds, findTreatment, edgeTreatmentsOf, isMaskedKind, BLUR_AMOUNT_MAX,
+  docHasGBufferTreatment, bufferTreatmentPlan,
 } from '~/lib/scene3d/treatments'
 import { treatmentControls } from '~/lib/scene3d/treatmentControls'
 import { blurPasses } from '~/lib/scene3d/treatmentStage'
@@ -158,6 +159,52 @@ describe('treatments: masked plan', () => {
     const light = createLight('point', doc.objects); (light as any).treatments = [createTreatment('blur')]
     doc.objects.push(hidden, light)
     expect(maskedTreatmentPlan(doc)).toEqual([])
+  })
+})
+
+describe('treatments: G-buffer family (edge lines, depth fog, curvature wear)', () => {
+  it('createTreatment seeds depth fog and curvature wear from their defaults', () => {
+    expect(createTreatment('depthFog')).toMatchObject({ kind: 'depthFog', enabled: true, invert: false, color: '#8fa6bf', start: 0.3, end: 1 })
+    expect(createTreatment('curvatureWear')).toMatchObject({ kind: 'curvatureWear', enabled: true, invert: false, amount: 0.5, width: 0.5 })
+  })
+  it('parses depth fog, clamping start/end to 0..1 and backfilling from defaults', () => {
+    const t = parseTreatment({ id: 't-fog', kind: 'depthFog', color: '#123456', start: -1, end: 5 })
+    expect(t).toMatchObject({ id: 't-fog', kind: 'depthFog', color: '#123456', start: 0, end: 1 })
+    const partial = parseTreatment({ id: 't-fog2', kind: 'depthFog' })
+    expect(partial).toMatchObject({ color: '#8fa6bf', start: 0.3, end: 1 })
+  })
+  it('parses curvature wear, clamping amount to -1..1 and width to 0..1', () => {
+    expect(parseTreatment({ id: 't-w', kind: 'curvatureWear', amount: 4, width: 9 })).toMatchObject({ amount: 1, width: 1 })
+    expect(parseTreatment({ id: 't-w2', kind: 'curvatureWear', amount: -4 })).toMatchObject({ amount: -1, width: 0.5 })
+  })
+  it('a stored fog/wear entry round-trips through the document', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.treatments = [createTreatment('depthFog'), createTreatment('curvatureWear')]
+    doc.objects.push(box)
+    const back = parseDoc(serializeDoc(doc))
+    expect(back.objects.at(-1)!.treatments!.map((t) => t.kind)).toEqual(['depthFog', 'curvatureWear'])
+    expect(back).toEqual(doc)
+  })
+  it('the gate is true iff a visible host carries an ENABLED buffer treatment (any of the three)', () => {
+    const bufferKinds = ['edgeLines', 'depthFog', 'curvatureWear'] as const
+    // No buffer treatment ⇒ gated off (a masked treatment must not trip it).
+    const bare = defaultDoc()
+    const b0 = createPrimitive('box', bare.objects); b0.treatments = [createTreatment('blur')]; bare.objects.push(b0)
+    expect(docHasGBufferTreatment(bare)).toBe(false)
+    expect(bufferTreatmentPlan(bare)).toEqual([])
+    for (const kind of bufferKinds) {
+      const doc = defaultDoc()
+      const box = createPrimitive('box', doc.objects); box.treatments = [createTreatment(kind)]; doc.objects.push(box)
+      expect(docHasGBufferTreatment(doc), kind).toBe(true)
+      expect(bufferTreatmentPlan(doc).map((g) => g.objectId), kind).toEqual([box.id])
+      // Disabled ⇒ no plan, no gate — the byte-identity guarantee.
+      box.treatments = [{ ...createTreatment(kind), enabled: false }]
+      expect(docHasGBufferTreatment(doc), `${kind} disabled`).toBe(false)
+      // Hidden host ⇒ excluded even when enabled.
+      box.treatments = [createTreatment(kind)]; box.visible = false
+      expect(docHasGBufferTreatment(doc), `${kind} hidden`).toBe(false)
+    }
   })
 })
 
