@@ -6,10 +6,16 @@
 // gizmo), bounding boxes, shadows and the gradient bbox uniforms all read real
 // geometry too.
 //
-// Stage order is fixed: subdivide → taper → twist → bend → noise → jitter → cloner.
+// Stage order: subdivide is pinned first and the cloner pinned last (structural —
+// subdivide splits faces before anything deforms them, the cloner folds the finished
+// geometry into copies). The deform stages between them (taper/twist/bend/noise/jitter)
+// run in the STACK's list order, so twist-then-bend ≠ bend-then-twist and two twists
+// both apply. A legacy flat bag folds to canonical order (`modifierStackOf`), which is
+// this exact fixed sequence — that is what keeps `applyModifiers` byte-identical.
 import * as THREE from 'three'
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { modifierValue, totalClones } from '~/lib/scene3d/primParams'
+import { modifierStackOf, type ModifierInstance, type ModifierKind } from '~/lib/scene3d/modifierStack'
 import { varyWeights, varyColorAt, varyStepFactor, type VarySettings } from '~/lib/vary'
 import { stripAlpha } from '~/lib/color/convert'
 
@@ -394,24 +400,51 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
 
 // --- pipeline ----------------------------------------------------------------
 
-export function applyModifiers(
-  geo: THREE.BufferGeometry,
-  modifiers: Record<string, number> | undefined,
-  vary?: VarySettings,
-): THREE.BufferGeometry {
-  if (!hasModifiers(modifiers)) return geo
-  const m = (k: string) => modifierValue(modifiers, k)
+/** The deform kinds — the orderable middle of the stack. subdivide (pinned first) and
+ *  cloner (pinned last) are handled structurally around them. */
+const DEFORM_KINDS: readonly ModifierKind[] = ['taper', 'twist', 'bend', 'noise', 'jitter']
+const isDeformKind = (k: ModifierKind): boolean => (DEFORM_KINDS as readonly string[]).includes(k)
 
-  const taper = m('taper'), twist = m('twist'), bend = m('bend'), noise = m('noise'), jitter = m('jitter')
-  const requested = totalClones(modifiers)
-  const deforms = taper !== 0 || twist !== 0 || bend !== 0 || noise !== 0 || jitter !== 0
+/** Apply an ORDERED modifier stack to `geo`, returning new geometry (or the SAME `geo`
+ *  when nothing enabled would change it — the byte-identity no-op).
+ *
+ *  The stack is walked in LIST order for the deform rows: subdivide runs first (pinned),
+ *  then every enabled deform in the order they appear (so twist-then-bend ≠ bend-then-twist
+ *  and two twists both apply), then the cloner runs last (pinned). A row read like a
+ *  mini-bag via `modifierValue` — its params are flattened onto the instance.
+ *
+ *  Each instance carries flat number params; `enabled === false` rows are skipped entirely,
+ *  exactly as the Frame effect stack skips a hidden effect. `vary` stays a MATERIAL uniform
+ *  and is only threaded to `planClones`; `vary.strength` never becomes vertex data. */
+export function applyModifierStack(
+  geo: THREE.BufferGeometry,
+  stack: ModifierInstance[],
+  opts: { vary?: VarySettings } = {},
+): THREE.BufferGeometry {
+  const vary = opts.vary
+  const enabled = stack.filter((mo) => mo.enabled !== false)
+  const deformRows = enabled.filter((mo) => isDeformKind(mo.kind))
+  const deforms = deformRows.length > 0
+  // At most one of each pinned kind is meaningful; take the first enabled.
+  const subdivideRow = enabled.find((mo) => mo.kind === 'subdivide')
+  const clonerRow = enabled.find((mo) => mo.kind === 'cloner')
+
+  // `requested` couples the cloner count to the subdivision budget, exactly as before:
+  // a dense shape in a big clone set must not blow the vertex budget. Read it from the
+  // enabled cloner row (which carries the clone* keys), or 1 when there is none.
+  const requested = clonerRow ? totalClones(clonerRow) : 1
+
+  // No-op — mirror `hasModifiers`: nothing deforms and the cloner makes at most one copy.
+  // Returning the SAME object (no clone) is the byte-identity contract.
+  if (!deforms && requested <= 1) return geo
 
   let out = geo.clone()
 
-  // Subdivision only earns its vertices when something deforms them, and it
-  // yields to the budget so a dense shape in a big clone set cannot freeze the app.
+  // Subdivision only earns its vertices when something deforms them, and it yields to the
+  // budget so a dense shape in a big clone set cannot freeze the app. Iterations come from
+  // the subdivide row (absent ⇒ 0, exactly as a subdivide-of-0 folded to no row).
   if (deforms) {
-    const iterations = Math.round(m('subdivide'))
+    const iterations = subdivideRow ? Math.round(modifierValue(subdivideRow, 'subdivide')) : 0
     const ceiling = VERTEX_BUDGET / Math.max(1, requested)
     for (let i = 0; i < iterations; i++) {
       if (out.getAttribute('position').count * 4 > ceiling) break
@@ -421,11 +454,18 @@ export function applyModifiers(
     }
   }
 
-  if (taper !== 0) applyTaper(out, taper, Math.round(m('taperAxis')))
-  if (twist !== 0) applyTwist(out, twist, Math.round(m('twistAxis')))
-  if (bend !== 0) applyBend(out, bend, Math.round(m('bendAxis')))
-  if (noise !== 0) applyNoise(out, noise, m('noiseScale'), Math.round(m('noiseSeed')))
-  if (jitter !== 0) applyJitter(out, jitter, Math.round(m('jitterMode')), Math.round(m('jitterSeed')))
+  // Deform rows IN LIST ORDER — the heart of the stack. A folded legacy bag lists these in
+  // canonical order, which is exactly the old fixed sequence, so the buffer stays identical.
+  for (const row of deformRows) {
+    const m = (k: string) => modifierValue(row, k)
+    switch (row.kind) {
+      case 'taper': applyTaper(out, m('taper'), Math.round(m('taperAxis'))); break
+      case 'twist': applyTwist(out, m('twist'), Math.round(m('twistAxis'))); break
+      case 'bend': applyBend(out, m('bend'), Math.round(m('bendAxis'))); break
+      case 'noise': applyNoise(out, m('noise'), m('noiseScale'), Math.round(m('noiseSeed'))); break
+      case 'jitter': applyJitter(out, m('jitter'), Math.round(m('jitterMode')), Math.round(m('jitterSeed'))); break
+    }
+  }
 
   if (deforms) {
     out.computeVertexNormals()
@@ -433,27 +473,44 @@ export function applyModifiers(
     out.computeBoundingSphere()
   }
 
-  const { count } = clampedClones(modifiers, out.getAttribute('position').count)
-  if (count > 1) {
-    const recipes = planClones(count, {
-      mode: Math.round(m('cloneMode')),
-      offset: [m('cloneOffsetX'), m('cloneOffsetY'), m('cloneOffsetZ')],
-      radius: m('cloneRadius'),
-      axis: Math.round(m('cloneAxis')),
-      gridCount: [Math.round(m('cloneCountX')), Math.round(m('cloneCountY')), Math.round(m('cloneCountZ'))],
-      spacing: [m('cloneSpacingX'), m('cloneSpacingY'), m('cloneSpacingZ')],
-      stepRot: [m('cloneStepRotX'), m('cloneStepRotY'), m('cloneStepRotZ')],
-      stepScale: m('cloneStepScale'),
-    }, vary)
-    // `vary.strength` is deliberately NOT passed down: it is a material uniform, not
-    // vertex data — mergeClones' doc explains why, and engine.ts hands it to the
-    // material directly.
-    const cloned = mergeClones(out, recipes)
-    out.dispose()
-    out = cloned
-    out.computeBoundingBox()
-    out.computeBoundingSphere()
+  if (clonerRow) {
+    const m = (k: string) => modifierValue(clonerRow, k)
+    const { count } = clampedClones(clonerRow, out.getAttribute('position').count)
+    if (count > 1) {
+      const recipes = planClones(count, {
+        mode: Math.round(m('cloneMode')),
+        offset: [m('cloneOffsetX'), m('cloneOffsetY'), m('cloneOffsetZ')],
+        radius: m('cloneRadius'),
+        axis: Math.round(m('cloneAxis')),
+        gridCount: [Math.round(m('cloneCountX')), Math.round(m('cloneCountY')), Math.round(m('cloneCountZ'))],
+        spacing: [m('cloneSpacingX'), m('cloneSpacingY'), m('cloneSpacingZ')],
+        stepRot: [m('cloneStepRotX'), m('cloneStepRotY'), m('cloneStepRotZ')],
+        stepScale: m('cloneStepScale'),
+      }, vary)
+      // `vary.strength` is deliberately NOT passed down: it is a material uniform, not
+      // vertex data — mergeClones' doc explains why, and engine.ts hands it to the
+      // material directly.
+      const cloned = mergeClones(out, recipes)
+      out.dispose()
+      out = cloned
+      out.computeBoundingBox()
+      out.computeBoundingSphere()
+    }
   }
 
   return out
+}
+
+/** Thin wrapper: fold the legacy flat bag into its canonical-order stack and apply it.
+ *  `modifierStackOf` emits exactly the rows `applyModifiers` used to run, in the fixed
+ *  order it ran them, so this is byte-identical to the pre-stack pipeline for every bag —
+ *  including the all-zero / subdivide-only cases, which fold to an empty stack and return
+ *  the SAME `geo`. Every existing caller (engine.ts buildGeometry, estimateVertexCount)
+ *  is unaffected. */
+export function applyModifiers(
+  geo: THREE.BufferGeometry,
+  modifiers: Record<string, number> | undefined,
+  vary?: VarySettings,
+): THREE.BufferGeometry {
+  return applyModifierStack(geo, modifierStackOf({ modifiers }), { vary })
 }
