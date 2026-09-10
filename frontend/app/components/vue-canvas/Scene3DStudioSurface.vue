@@ -69,6 +69,7 @@ import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
 import Scene3DObjectRow from './studio/Scene3DObjectRow.vue'
 import { totalClones, clampedClones } from '~/lib/scene3d/modifiers'
 import { MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
+import { modifierStackOf } from '~/lib/scene3d/modifierStack'
 import { SceneInteraction, type PlacementHit } from '~/lib/scene3d/interaction'
 import { loadGlb, GLB_SIZE_CAP_BYTES } from '~/lib/scene3d/glb'
 import { fitGlbGroup } from '~/lib/scene3d/fitGlb'
@@ -1372,7 +1373,7 @@ const baseSize = computed<[number, number, number]>(() => {
   if (!o) return [1, 1, 1]
   if (deferringGeometry.value) return lastBaseSize
   lastBaseSize = o.kind === 'primitive'
-    ? baseSizeFor(o.primitive, o.params, o.modifiers, o.content, varySettingsFor(o))
+    ? baseSizeFor(o.primitive, o.params, o.modifiers, o.content, varySettingsFor(o), modifierStackOf(o))
     : engine?.baseSizeOf(o.id) ?? [1, 1, 1]
   return lastBaseSize
 })
@@ -2214,7 +2215,7 @@ async function convertSelectionToMesh() {
   // would only pay for a Float32Array of per-vertex colour plus a THREE.Color per
   // copy that nothing ever reads. Positions are untouched by colour, so no behaviour
   // changes.
-  const geo = buildGeometry(src.primitive, src.params, src.modifiers, 'smooth', src.content, font, { ...varySettingsFor(src), colorEnabled: false })
+  const geo = buildGeometry(src.primitive, src.params, src.modifiers, 'smooth', src.content, font, { ...varySettingsFor(src), colorEnabled: false }, modifierStackOf(src))
   try {
     // Counted here rather than left to encodeMesh's throw so the message can
     // name the real figures in plain words; encodeMesh still guards the library
@@ -2382,7 +2383,7 @@ async function localMeshDataFor(obj: PrimitiveObject): Promise<MeshData | null> 
   // would only pay for a Float32Array of per-vertex colour plus a THREE.Color per
   // copy that nothing ever reads. Positions are untouched by colour, so no behaviour
   // changes.
-  const geo = buildGeometry(obj.primitive, obj.params, obj.modifiers, 'smooth', obj.content, font, { ...varySettingsFor(obj), colorEnabled: false })
+  const geo = buildGeometry(obj.primitive, obj.params, obj.modifiers, 'smooth', obj.content, font, { ...varySettingsFor(obj), colorEnabled: false }, modifierStackOf(obj))
   const data = meshDataFromGeometry(geo)
   geo.dispose()
   return data

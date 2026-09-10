@@ -169,10 +169,15 @@ export function modifierStackOf(obj: StackHost | null | undefined): ModifierInst
   return out
 }
 
-/** The patch that stores a stack on an object and retires the legacy flat bag. Mirrors the
- *  Frame's `writeStackToLayer`: the new shape and the old field must never both be live. */
-export function writeModifierStack(stack: ModifierInstance[]): { modifierStack: ModifierInstance[]; modifiers: undefined } {
-  return { modifierStack: stack, modifiers: undefined }
+/** The patch that stores a stack on an object. It KEEPS the legacy `modifiers` bag rather than
+ *  clearing it: the bag also holds the Cloner Vary settings (varyMode/varySeed/…/varyColorStrength)
+ *  and the palette lookup, which are a MATERIAL uniform, NOT a geometry modifier row, and are read
+ *  straight from `obj.modifiers` by `varySettingsFor`/`materialFor`. Clearing the bag would strip
+ *  Vary on the first stack edit. This is safe because `modifierStackOf` PREFERS a present
+ *  `modifierStack`, so the bag's GEOMETRY keys become dead-but-harmless — never read for geometry
+ *  once a stack is stored — while its Vary keys stay live for the material. */
+export function writeModifierStack(stack: ModifierInstance[]): { modifierStack: ModifierInstance[] } {
+  return { modifierStack: stack }
 }
 
 /** The freely orderable middle rows (every deform), in list order — Task 2 iterates the whole

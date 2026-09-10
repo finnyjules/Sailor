@@ -20,9 +20,9 @@ import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/conte
 import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/lib/scene3d/outlines'
 import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime } from './materials'
 import { refreshImageBounds, type ImageUniforms } from './imageShader'
-import { applyModifiers } from '~/lib/scene3d/modifiers'
+import { applyModifiers, applyModifierStack } from '~/lib/scene3d/modifiers'
 import { PRIMITIVE_PARAMS, paramValue, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
-import { modifierStackOf, MODIFIER_KIND_PARAMS } from '~/lib/scene3d/modifierStack'
+import { modifierStackOf, MODIFIER_KIND_PARAMS, type ModifierInstance } from '~/lib/scene3d/modifierStack'
 import type { VarySettings } from '~/lib/vary'
 import { pathToShapes } from './svgPath'
 import { buildLightWidget, setWidgetSelected, disposeWidget } from '~/lib/scene3d/lightWidgets'
@@ -254,9 +254,13 @@ export function baseSizeFor(
   modifiers?: Record<string, number>,
   content?: PrimitiveContent,
   vary?: VarySettings,
+  stack?: ModifierInstance[],
 ): [number, number, number] {
   const font = kind === 'text' ? fontCacheGet(content?.font ?? DEFAULT_FONT_URL) : null
-  const geo = buildGeometry(kind, params, modifiers, 'smooth', content, font, vary ? { ...vary, colorEnabled: false } : undefined)
+  // `stack` threaded because the size row's caller has the whole object and the bounding
+  // extent depends on deform ORDER (twist-then-bend ≠ bend-then-twist); on the bag path a
+  // reordered stack would read the wrong size. Legacy objects fold identically (byte-identity).
+  const geo = buildGeometry(kind, params, modifiers, 'smooth', content, font, vary ? { ...vary, colorEnabled: false } : undefined, stack)
   geo.computeBoundingBox()
   const b = geo.boundingBox!
   const size: [number, number, number] = [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z]
@@ -284,7 +288,13 @@ export function baseSizeFor(
  *  colour ACROSS copies — so threading it here would buy nothing and cost the palette
  *  resolution and the merge this function forces off, on a path that runs per slider
  *  tick. (With the clone counts pinned to 1, `applyModifiers` skips `planClones`/
- *  `mergeClones` entirely, so no colour work happens today either way.) */
+ *  `mergeClones` entirely, so no colour work happens today either way.)
+ *
+ *  No `stack` param, unlike `baseSizeFor`: this counts vertices of ONE copy, and a single
+ *  copy's vertex COUNT is invariant to deform ORDER — taper/twist/bend/noise/jitter move
+ *  vertices but never add or remove them, and subdivision's iteration count folds identically
+ *  from the bag. So the folded-bag estimate equals the stack estimate for any equivalent state;
+ *  threading the stack would buy nothing on a per-tick cost readout. */
 export function baseVertexCountFor(
   kind: PrimitiveKind,
   params?: Record<string, number>,
@@ -332,22 +342,30 @@ export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): st
   const content = c
     ? JSON.stringify({ ...c, ...(c.pathKey ? { path: undefined } : {}), ...(c.meshKey ? { mesh: undefined } : {}) })
     : ''
-  // The Vary PALETTE is a string[], so unlike the seven numeric vary dials it is not carried
-  // by the modifier-stack segment above — without it, editing a swatch would leave the old
-  // clone colours on screen. Joined rather than digested, against the bulky-string rule
-  // two comments up, because a palette is BOUNDED at VARY_PALETTE_MAX (8) short hex
-  // strings — about 60 characters, versus the kilobytes `pathKey`/`meshKey` stand in
-  // for. That bound is the whole justification: anything unbounded added to this key
-  // must be a digest instead.
+  // Cloner Vary bakes into GEOMETRY, so its numeric dials MUST be in the key: in random and
+  // falloff modes `varyStepFactor` damps each copy's step rotate/scale (moving the copies), and
+  // colour-on writes a per-copy colour ATTRIBUTE into the merged buffer. Change any of these and
+  // the clone geometry is stale until it is rebuilt. They live in the `modifiers` bag, NOT the
+  // modifier stack (Vary is a material/cloner feature, never a modifier row — see modifierStack),
+  // so they are read here directly rather than through the stack segment above. `varyColorStrength`
+  // is the ONE dial deliberately excluded (see the modifier-stack comment above): it is a pure
+  // shader uniform that `materialFor`/`updateMaterial` set in place with no geometry rebuild.
+  const varyDials = ['varyMode', 'varySeed', 'varyColor', 'varyColorSpread', 'varyFalloffCenter', 'varyFalloffRadius']
+    .map((k) => modifierValue(obj.modifiers, k))
+    .join(',')
+  // The Vary PALETTE is a string[], so unlike the numeric dials above it can't ride the joined
+  // number segment — without it, editing a swatch would leave the old clone colours on screen.
+  // Joined rather than digested, against the bulky-string rule two comments up, because a palette
+  // is BOUNDED at VARY_PALETTE_MAX (8) short hex strings — about 60 characters, versus the
+  // kilobytes `pathKey`/`meshKey` stand in for. That bound is the whole justification: anything
+  // unbounded added to this key must be a digest instead.
   //
-  // Deliberately the RAW field, not `varySettingsFor(obj).palette`: the resolved
-  // settings substitute DEFAULT_VARY.palette for an absent one, so an object that
-  // happens to store a copy of the defaults would key differently from one that stores
-  // nothing while rendering the same — one extra rebuild, in a state the palette editor
-  // cannot actually produce. Completeness is what this key owes; reading seven more
-  // modifier values per object per sync to buy that last bit of precision is not worth it.
+  // Deliberately the RAW field, not `varySettingsFor(obj).palette`: the resolved settings
+  // substitute DEFAULT_VARY.palette for an absent one, so an object that happens to store a copy
+  // of the defaults would key differently from one that stores nothing while rendering the same —
+  // one extra rebuild, in a state the palette editor cannot actually produce.
   const vary = obj.varyPalette?.join(',') ?? ''
-  return `${obj.primitive}|${vals.join(',')}|${mods}|${variant}|${content}|${vary}`
+  return `${obj.primitive}|${vals.join(',')}|${mods}|${variant}|${content}|${varyDials}|${vary}`
 }
 
 /** Bake each triangle's own bounding extent into per-vertex attributes
@@ -393,7 +411,14 @@ function addFaceExtentAttributes(geo: THREE.BufferGeometry): void {
  *  omitting it is exactly the pre-Vary behaviour: the cloner then plans copies with
  *  no per-copy variation and writes no colour attribute. Callers with a
  *  `PrimitiveObject` in scope pass it; the standalone measuring helpers above do
- *  not, since they have only the loose kind/params/modifiers triple. */
+ *  not, since they have only the loose kind/params/modifiers triple.
+ *
+ *  `stack` is the object's ordered modifier stack (`modifierStackOf(obj)`). When
+ *  given, it — not the flat `modifiers` bag — decides the geometry, so a written
+ *  stack (reordered / duplicated rows) actually renders. For a LEGACY object it is
+ *  the folded bag, so `applyModifierStack(base, that)` is byte-identical to the bag
+ *  path (Task 2). Omit it (measuring helpers) and the legacy `modifiers` bag path
+ *  runs unchanged. */
 export function buildGeometry(
   kind: PrimitiveKind,
   params: Record<string, number> | undefined,
@@ -402,11 +427,13 @@ export function buildGeometry(
   content?: PrimitiveContent,
   font?: Font | null,
   vary?: VarySettings,
+  stack?: ModifierInstance[],
 ): THREE.BufferGeometry {
   const base = geometryFor(kind, params, content, font)
-  // applyModifiers returns the SAME object when nothing is set (and never
-  // disposes its input), so only free the base when it produced a new one.
-  const shaped = applyModifiers(base, modifiers, vary)
+  // applyModifiers/applyModifierStack return the SAME object when nothing is set (and
+  // never dispose their input), so only free the base when it produced a new one. When a
+  // stack is supplied it is authoritative; otherwise fold the legacy bag as before.
+  const shaped = stack ? applyModifierStack(base, stack, { vary }) : applyModifiers(base, modifiers, vary)
   if (shaped !== base) base.dispose()
   if (variant !== 'facet') return shaped
   let geo = shaped
@@ -898,7 +925,7 @@ export class SceneEngine {
     // the Vary settings — the numeric dials from `obj.modifiers`, the swatches from
     // `obj.varyPalette` (which is not in the modifier bag, and so is folded into
     // `geoKeyFor` separately). Everything gating this call on the key is above.
-    return buildGeometry(obj.primitive, obj.params, obj.modifiers, variant, obj.content, font, varySettingsFor(obj))
+    return buildGeometry(obj.primitive, obj.params, obj.modifiers, variant, obj.content, font, varySettingsFor(obj), modifierStackOf(obj))
   }
 
   /** While a sculpt session is live, this object's geometry comes from the

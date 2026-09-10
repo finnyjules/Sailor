@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import opentype from 'three/examples/jsm/libs/opentype.module.js'
 import { sunDirection, geometryFor, geoKeyFor, baseSizeFor, baseVertexCountFor, buildGeometry, lightFor, SceneEngine } from '~/lib/scene3d/engine'
 import { PRIMITIVE_KINDS, createPrimitive, createLight, createGlbObject, createSvgPathObject, contentDigest, type PrimitiveKind, type PrimitiveObject, type GlbObject } from '~/lib/scene3d/config'
-import { PRIMITIVE_PARAMS } from '~/lib/scene3d/primParams'
+import { PRIMITIVE_PARAMS, varySettingsFor } from '~/lib/scene3d/primParams'
 import { modifierStackOf, writeModifierStack, type ModifierInstance } from '~/lib/scene3d/modifierStack'
 import { loadFont, type Font } from '~/lib/scene3d/outlines'
 import { encodeMesh, meshDataFromGeometry } from '~/lib/scene3d/mesh'
@@ -760,9 +760,11 @@ describe('scene3d geoKeyFor keys on the modifier stack', () => {
 
   it('hashes a stored modifierStack identically to its equivalent folded legacy bag (no rebuild on persist)', () => {
     const legacy = bagObj()
-    // Exactly what writeModifierStack persists on the first edit: the folded stack replaces the bag.
+    // Exactly what writeModifierStack persists on the first edit: the folded stack is stored and
+    // the bag is KEPT (Vary lives in it). modifierStackOf prefers the stack, so the bag's geometry
+    // keys are dead-but-harmless; the key must be identical so persisting rebuilds no geometry.
     const persisted: PrimitiveObject = { ...legacy, ...writeModifierStack(modifierStackOf(legacy)) }
-    expect(persisted.modifiers).toBeUndefined()
+    expect(persisted.modifiers).toEqual(legacy.modifiers)
     expect(persisted.modifierStack!.length).toBeGreaterThan(0)
     expect(geoKeyFor(persisted, 'smooth')).toBe(geoKeyFor(legacy, 'smooth'))
   })
@@ -804,6 +806,24 @@ describe('scene3d geoKeyFor keys on the modifier stack', () => {
     expect(b).toBe(a)
   })
 
+  // Vary bakes into GEOMETRY (per-clone colour attribute + varyStepFactor positions), so the
+  // numeric vary dials must be back in the key — Task 3 dropped them, Task 3b restores them.
+  it('changes when a vary numeric dial changes (they bake into clone geometry)', () => {
+    const base = geoKeyFor(bagObj(), 'smooth')
+    for (const dial of ['varyColor', 'varySeed', 'varyFalloffCenter', 'varyMode', 'varyColorSpread', 'varyFalloffRadius'] as const) {
+      const changed = geoKeyFor({ ...createPrimitive('box', []), modifiers: { ...bag(), [dial]: 0.7 } }, 'smooth')
+      expect(changed, `${dial} must change the geometry key`).not.toBe(base)
+    }
+  })
+
+  it('bag↔stack parity holds for vary: a written-stack object (bag kept) keys identically', () => {
+    // Fix 1 keeps the bag on write, so the vary dials (read from the bag, not the stack) are the
+    // same for a legacy object and its persisted-stack equivalent — the key stays identical.
+    const legacy: PrimitiveObject = { ...createPrimitive('box', []), modifiers: { ...bag(), varyColor: 1, varySeed: 7, varyFalloffCenter: 0.3 }, varyPalette: ['#ff0000', '#00ff00'] }
+    const persisted: PrimitiveObject = { ...legacy, ...writeModifierStack(modifierStackOf(legacy)) }
+    expect(geoKeyFor(persisted, 'smooth')).toBe(geoKeyFor(legacy, 'smooth'))
+  })
+
   it('an all-zero bag and an empty stack produce the same modifier-empty key', () => {
     const zeroBag = geoKeyFor({ ...createPrimitive('box', []), modifiers: { twist: 0, bend: 0, cloneCount: 1 } }, 'smooth')
     const emptyStack = geoKeyFor({ ...createPrimitive('box', []), modifierStack: [] }, 'smooth')
@@ -815,6 +835,57 @@ describe('scene3d geoKeyFor keys on the modifier stack', () => {
   it('a legacy object key is stable across two calls', () => {
     const obj = bagObj()
     expect(geoKeyFor(obj, 'smooth')).toBe(geoKeyFor(obj, 'smooth'))
+  })
+})
+
+// Task 3b Fix 2: the render path now threads the ordered stack into buildGeometry, so a WRITTEN
+// stack actually renders (not the base, not the stale bag), while a legacy object stays byte-
+// identical (its stack is the folded bag). These drive buildGeometry directly, the same as
+// geometryForObject does at the real render site.
+describe('scene3d buildGeometry renders the modifier stack', () => {
+  const posOf = (g: THREE.BufferGeometry) => g.getAttribute('position').array as Float32Array
+  // A bag with two DIFFERENT deforms whose order matters, so a reorder is observable.
+  const bag = () => ({ twist: 60, bend: 40 })
+  const bagObj = (): PrimitiveObject => ({ ...createPrimitive('box', []), modifiers: bag() })
+
+  it('a written-stack object renders the SAME geometry as its legacy bag (not the empty base)', () => {
+    const legacy = bagObj()
+    const written: PrimitiveObject = { ...legacy, ...writeModifierStack(modifierStackOf(legacy)) }
+
+    const fromStack = buildGeometry('box', legacy.params, undefined, 'smooth', undefined, null, undefined, modifierStackOf(written))
+    const fromBag = buildGeometry('box', legacy.params, legacy.modifiers, 'smooth', undefined, null, undefined, modifierStackOf(legacy))
+    const base = buildGeometry('box', legacy.params, undefined, 'smooth')
+
+    // Renders its stack: byte-identical to the legacy bag geometry…
+    expect(posOf(fromStack)).toEqual(posOf(fromBag))
+    // …and NOT the unmodified base (twist+bend actually applied).
+    expect(posOf(fromStack).length === posOf(base).length && posOf(fromStack).every((v, i) => v === posOf(base)[i])).toBe(false)
+  })
+
+  it('a REORDERED written stack renders differently than the folded-bag order', () => {
+    const legacy = bagObj()
+    const canonical = modifierStackOf(legacy) // twist before bend (MODIFIER_ORDER)
+    const ti = canonical.findIndex((r) => r.kind === 'twist')
+    const bi = canonical.findIndex((r) => r.kind === 'bend')
+    const reordered = [...canonical]
+    ;[reordered[ti], reordered[bi]] = [reordered[bi]!, reordered[ti]!]
+
+    const inOrder = buildGeometry('box', legacy.params, undefined, 'smooth', undefined, null, undefined, canonical)
+    const swapped = buildGeometry('box', legacy.params, undefined, 'smooth', undefined, null, undefined, reordered)
+    const a = posOf(inOrder), b = posOf(swapped)
+    expect(a.length === b.length && a.every((v, i) => v === b[i])).toBe(false)
+  })
+
+  it('Vary survives a write: varySettingsFor reads the SAME settings before and after writeModifierStack', () => {
+    const legacy: PrimitiveObject = {
+      ...createPrimitive('box', []),
+      modifiers: { twist: 30, cloneCount: 3, varyMode: 1, varySeed: 5, varyColor: 1, varyColorSpread: 1, varyFalloffCenter: 0.3, varyFalloffRadius: 0.7, varyColorStrength: 0.4 },
+      varyPalette: ['#ff0000', '#00ff00'],
+    }
+    const written: PrimitiveObject = { ...legacy, ...writeModifierStack(modifierStackOf(legacy)) }
+    // The bag is kept, so every vary field — mode/seed/colour/spread/falloff/strength — plus the
+    // palette read identically after the write; Vary is not stripped on the first stack edit.
+    expect(varySettingsFor(written)).toEqual(varySettingsFor(legacy))
   })
 })
 

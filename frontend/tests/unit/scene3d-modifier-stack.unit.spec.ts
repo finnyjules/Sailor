@@ -152,9 +152,23 @@ describe('modifierStackOf: new-shape passthrough', () => {
 })
 
 describe('writeModifierStack', () => {
-  it('stores the stack and clears the legacy bag', () => {
+  it('stores the stack and KEEPS the legacy bag (Vary lives there)', () => {
     const stack = [createModifier('twist')]
-    expect(writeModifierStack(stack)).toEqual({ modifierStack: stack, modifiers: undefined })
+    // The bag must NOT be cleared: varyMode/varySeed/…/varyColorStrength + the palette lookup
+    // are read straight from `obj.modifiers` by varySettingsFor/materialFor, so clearing it
+    // would strip Cloner Vary on the first stack edit.
+    expect(writeModifierStack(stack)).toEqual({ modifierStack: stack })
+    expect('modifiers' in writeModifierStack(stack)).toBe(false)
+  })
+
+  it('modifierStackOf a written object returns the stored stack, not the folded bag', () => {
+    // The bag survives the write but is dead-but-harmless for geometry: modifierStackOf prefers
+    // a present modifierStack, so the bag's geometry keys are never read once a stack is stored.
+    const bagObj = { modifiers: { twist: 90, varyColor: 1 } }
+    const stack = modifierStackOf(bagObj)
+    const written = { ...bagObj, ...writeModifierStack(stack) }
+    expect(written.modifiers).toEqual({ twist: 90, varyColor: 1 })
+    expect(modifierStackOf(written)).toBe(stack)
   })
 })
 
