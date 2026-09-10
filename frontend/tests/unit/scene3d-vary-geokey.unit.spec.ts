@@ -34,15 +34,16 @@ const cloned = (variant: 'smooth' | 'facet', vary = VARY_ON) =>
   buildGeometry('box', undefined, { cloneCount: 3, cloneOffsetX: 2 }, variant, undefined, undefined, vary)
 
 describe('geoKeyFor and vary', () => {
-  it('is unchanged for an object with no vary settings — pinned against the pre-Vary key format', () => {
-    // Was `geoKeyFor(obj())` vs `geoKeyFor(obj({ varyPalette: undefined }))` — the same
-    // object literal compared to itself (both are `varyPalette: undefined`), so the
-    // assertion held for any deterministic implementation, including a broken one.
-    // Pinned to a literal instead: this IS what a plain box with no vary settings has
-    // always keyed to, ending in the empty vary suffix (`|smooth||`) rather than
-    // tacking anything vary-specific onto an object that carries none.
+  it('is stable for an object with no vary settings — pinned against the modifier-stack key format', () => {
+    // Pinned to a literal so an accidental key-format change (which would force a needless
+    // geometry rebuild on every object) fails the suite. The format changed deliberately in
+    // the S1 modifier-stack slice: the middle segment is now the ACTIVE modifier stack
+    // (empty for a plain box, `` — not the old full MODIFIER_SPECS sweep), and the trailing
+    // segment is the six vary NUMERIC dials read from the bag (defaults here:
+    // mode/seed/color/spread/falloffCenter=0, falloffRadius=0.5), then the empty vary palette.
+    // A no-modifier box therefore keys as `box|<params>||smooth||<vary dials>|`.
     expect(geoKeyFor(obj(), 'smooth')).toBe(
-      'box|0,2|0,0,1,0,1,0,2,0,2,0,0,0,0,1,0,1.2,0,0,1.5,1,3,1,3,1.2,1.2,1.2,0,0,0,1,0,0,0,0.5,0,0|smooth||',
+      'box|0,2||smooth||0,0,0,0,0,0.5|',
     )
   })
 
