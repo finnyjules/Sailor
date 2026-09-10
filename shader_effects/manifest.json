@@ -2146,6 +2146,126 @@
       ]
     },
     {
+      "id": "prism",
+      "name": "Prism",
+      "category": "generative",
+      "animated": true,
+      "passes": 1,
+      "centerParam": [
+        "u_sourceX",
+        "u_sourceY"
+      ],
+      "textures": [],
+      "generative": true,
+      "params": [
+        {
+          "uniform": "u_sourceX",
+          "label": "Source X",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.18,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_sourceY",
+          "label": "Source Y",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.82,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_splitX",
+          "label": "Split X",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_splitY",
+          "label": "Split Y",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.58,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_beamWidth",
+          "label": "Beam width",
+          "type": "float",
+          "min": 0.002,
+          "max": 0.3,
+          "default": 0.04,
+          "step": 0.002
+        },
+        {
+          "uniform": "u_intensity",
+          "label": "Intensity",
+          "type": "float",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 1.6,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_beamColor",
+          "label": "Beam colour",
+          "type": "color",
+          "default": "#ffffff"
+        },
+        {
+          "uniform": "u_startFalloff",
+          "label": "Start falloff",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.15,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_endFalloff",
+          "label": "End falloff",
+          "type": "float",
+          "min": 0.02,
+          "max": 2.0,
+          "default": 0.6,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_spread",
+          "label": "Spread",
+          "type": "float",
+          "min": 0.0,
+          "max": 3.0,
+          "default": 0.7,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_softness",
+          "label": "Softness",
+          "type": "float",
+          "min": 0.001,
+          "max": 1.0,
+          "default": 0.12,
+          "step": 0.005
+        },
+        {
+          "uniform": "u_saturation",
+          "label": "Saturation",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.95,
+          "step": 0.01
+        }
+      ]
+    },
+    {
       "id": "crt_scanlines",
       "name": "CRT",
       "category": "stylize",
