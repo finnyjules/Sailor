@@ -18,7 +18,7 @@ bits 29–31 reserved; one dev server; verification through `/dev/scene3d-lab?st
 
 ---
 
-## Slice S1 · The modifier stack  (≈9 tasks)
+## Slice S1 · The modifier stack  (≈9 tasks) — ✅ LANDED 2026-09-10 (base 7483f7853 → 627a19d14; whole-slice review Approved-with-minors; see 2026-09-09-scene3d-S1-modifier-stack.md + memory scene3d-modifier-stack-landed)
 
 **Interfaces produced**
 - `lib/scene3d/modifierStack.ts` (pure): `MODIFIER_KINDS` (`subdivide, taper, twist, bend, noise,
