@@ -1049,6 +1049,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     addPathLayers, addPathFromSvg, deleteLayers, commit, recordHistory,
     writeOrder,
     background, setBackground,
+    writeBackground: writeBg, // non-recording: for callers that batch a layers write + background write under ONE recordHistory()
     postEffects, setPostEffects,
     grid, setGrid,
     undo, redo, canUndo, canRedo,
