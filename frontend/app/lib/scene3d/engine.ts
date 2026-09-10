@@ -21,7 +21,8 @@ import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/
 import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime } from './materials'
 import { refreshImageBounds, type ImageUniforms } from './imageShader'
 import { applyModifiers } from '~/lib/scene3d/modifiers'
-import { PRIMITIVE_PARAMS, paramValue, MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
+import { PRIMITIVE_PARAMS, paramValue, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
+import { modifierStackOf, MODIFIER_KIND_PARAMS } from '~/lib/scene3d/modifierStack'
 import type { VarySettings } from '~/lib/vary'
 import { pathToShapes } from './svgPath'
 import { buildLightWidget, setWidgetSelected, disposeWidget } from '~/lib/scene3d/lightWidgets'
@@ -306,19 +307,23 @@ export function baseVertexCountFor(
  *  SceneEngine/GL context. */
 export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): string {
   const vals = PRIMITIVE_PARAMS[obj.primitive].map((s) => paramValue(obj.primitive, obj.params, s.key))
-  const mods: number[] = []
-  for (const s of MODIFIER_SPECS) {
-    // `varyColorStrength` is the ONE modifier deliberately left out of this key, and
-    // the exclusion is by name so it stays a decision rather than an accident. Every
-    // other modifier changes VERTEX DATA; the strength does not — the merged geometry
-    // carries the raw palette colour and the strength is applied as a shader uniform
-    // (`materialFor`/`updateMaterial` take it as a parameter). Including it meant
-    // disposing the geometry and re-merging all N clone copies on every tick of the
-    // Colour strength slider to produce byte-identical vertices. Safe precisely
-    // because the strength is not baked in: if that ever changes, it belongs back here.
-    if (s.key === 'varyColorStrength') continue
-    mods.push(modifierValue(obj.modifiers, s.key))
-  }
+  // The modifier segment keys on the ORDERED stack, not a fixed spec sweep: reorder and
+  // duplicate both change the geometry `applyModifierStack` produces, so both must change the
+  // key — order is part of the string, rows are not a set. Routing through `modifierStackOf`
+  // (the same read-through the renderer uses) also makes a stored `modifierStack` hash IDENTICALLY
+  // to its equivalent folded legacy bag, so persisting the stack on first edit (writeModifierStack)
+  // rebuilds no geometry. Each row is `kind:enabled:params`, rows joined by ';'; bounded and small.
+  //
+  // `varyColorStrength` stays OUT, by construction: it belongs to no modifier kind, so it is
+  // naturally absent from every row's params (MODIFIER_KIND_PARAMS) — do NOT add it back. It
+  // changes no VERTEX DATA; the merged geometry carries the raw palette colour and the strength
+  // is a shader uniform (`materialFor`/`updateMaterial` take it as a parameter). Baking it here
+  // meant disposing the geometry and re-merging all N clone copies on every tick of the Colour
+  // strength slider to produce byte-identical vertices. If the strength ever gets baked in, it
+  // belongs back in this key.
+  const mods = modifierStackOf(obj)
+    .map((row) => `${row.kind}:${row.enabled === false ? 0 : 1}:${MODIFIER_KIND_PARAMS[row.kind].map((k) => modifierValue(row, k)).join(',')}`)
+    .join(';')
   // Neither an svgPath's `d` (several KB) nor a mesh's vertex buffer (tens of
   // KB) may reach this key: it is rebuilt on EVERY sync for EVERY object, and
   // stringifying either would put tens of KB of string work on the drag path.
@@ -327,8 +332,8 @@ export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): st
   const content = c
     ? JSON.stringify({ ...c, ...(c.pathKey ? { path: undefined } : {}), ...(c.meshKey ? { mesh: undefined } : {}) })
     : ''
-  // The Vary PALETTE is a string[], so unlike the seven numeric vary dials it is not in
-  // the MODIFIER_SPECS sweep above — without it, editing a swatch would leave the old
+  // The Vary PALETTE is a string[], so unlike the seven numeric vary dials it is not carried
+  // by the modifier-stack segment above — without it, editing a swatch would leave the old
   // clone colours on screen. Joined rather than digested, against the bulky-string rule
   // two comments up, because a palette is BOUNDED at VARY_PALETTE_MAX (8) short hex
   // strings — about 60 characters, versus the kilobytes `pathKey`/`meshKey` stand in
@@ -342,7 +347,7 @@ export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): st
   // cannot actually produce. Completeness is what this key owes; reading seven more
   // modifier values per object per sync to buy that last bit of precision is not worth it.
   const vary = obj.varyPalette?.join(',') ?? ''
-  return `${obj.primitive}|${vals.join(',')}|${mods.join(',')}|${variant}|${content}|${vary}`
+  return `${obj.primitive}|${vals.join(',')}|${mods}|${variant}|${content}|${vary}`
 }
 
 /** Bake each triangle's own bounding extent into per-vertex attributes

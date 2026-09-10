@@ -7,6 +7,7 @@ import opentype from 'three/examples/jsm/libs/opentype.module.js'
 import { sunDirection, geometryFor, geoKeyFor, baseSizeFor, baseVertexCountFor, buildGeometry, lightFor, SceneEngine } from '~/lib/scene3d/engine'
 import { PRIMITIVE_KINDS, createPrimitive, createLight, createGlbObject, createSvgPathObject, contentDigest, type PrimitiveKind, type PrimitiveObject, type GlbObject } from '~/lib/scene3d/config'
 import { PRIMITIVE_PARAMS } from '~/lib/scene3d/primParams'
+import { modifierStackOf, writeModifierStack, type ModifierInstance } from '~/lib/scene3d/modifierStack'
 import { loadFont, type Font } from '~/lib/scene3d/outlines'
 import { encodeMesh, meshDataFromGeometry } from '~/lib/scene3d/mesh'
 import { loadMesh, meshCacheClear } from '~/lib/scene3d/meshCache'
@@ -748,6 +749,72 @@ describe('scene3d geoKeyFor', () => {
       // 'nonzero' is stored as ABSENCE, so it must key identically to no rule.
       expect(nz).toBe(geoKeyFor(createSvgPathObject(D_A, []), 'smooth'))
     })
+  })
+})
+
+describe('scene3d geoKeyFor keys on the modifier stack', () => {
+  // A legacy bag whose fold spans a deform, subdivide's guard, and a cloner — enough kinds
+  // that order and presence both matter.
+  const bag = () => ({ subdivide: 2, twist: 45, bend: 30, cloneCount: 3, varyColorStrength: 0.4 })
+  const bagObj = (): PrimitiveObject => ({ ...createPrimitive('box', []), modifiers: bag() })
+
+  it('hashes a stored modifierStack identically to its equivalent folded legacy bag (no rebuild on persist)', () => {
+    const legacy = bagObj()
+    // Exactly what writeModifierStack persists on the first edit: the folded stack replaces the bag.
+    const persisted: PrimitiveObject = { ...legacy, ...writeModifierStack(modifierStackOf(legacy)) }
+    expect(persisted.modifiers).toBeUndefined()
+    expect(persisted.modifierStack!.length).toBeGreaterThan(0)
+    expect(geoKeyFor(persisted, 'smooth')).toBe(geoKeyFor(legacy, 'smooth'))
+  })
+
+  it('changes when two modifiers are reordered (order is part of the key, not a set)', () => {
+    const stack = modifierStackOf(bagObj())
+    const twist = stack.findIndex((r) => r.kind === 'twist')
+    const bend = stack.findIndex((r) => r.kind === 'bend')
+    expect(twist).toBeGreaterThanOrEqual(0)
+    expect(bend).toBeGreaterThanOrEqual(0)
+    const swapped = [...stack]
+    ;[swapped[twist], swapped[bend]] = [swapped[bend]!, swapped[twist]!]
+    const a = geoKeyFor({ ...createPrimitive('box', []), modifierStack: stack }, 'smooth')
+    const b = geoKeyFor({ ...createPrimitive('box', []), modifierStack: swapped }, 'smooth')
+    expect(b).not.toBe(a)
+  })
+
+  it('changes when a modifier is duplicated (two twists both apply)', () => {
+    const stack = modifierStackOf(bagObj())
+    const twist = stack.find((r) => r.kind === 'twist')!
+    const dup: ModifierInstance = { ...twist, id: 'mod:twist:dup' }
+    const withDup = [...stack, dup]
+    const a = geoKeyFor({ ...createPrimitive('box', []), modifierStack: stack }, 'smooth')
+    const b = geoKeyFor({ ...createPrimitive('box', []), modifierStack: withDup }, 'smooth')
+    expect(b).not.toBe(a)
+  })
+
+  it("changes when a row's enabled toggles", () => {
+    const stack = modifierStackOf(bagObj())
+    const toggled = stack.map((r) => (r.kind === 'twist' ? { ...r, enabled: false } : r))
+    const a = geoKeyFor({ ...createPrimitive('box', []), modifierStack: stack }, 'smooth')
+    const b = geoKeyFor({ ...createPrimitive('box', []), modifierStack: toggled }, 'smooth')
+    expect(b).not.toBe(a)
+  })
+
+  it('does NOT change when varyColorStrength changes (still a material uniform, excluded)', () => {
+    const a = geoKeyFor(bagObj(), 'smooth')
+    const b = geoKeyFor({ ...createPrimitive('box', []), modifiers: { ...bag(), varyColorStrength: 0.9 } }, 'smooth')
+    expect(b).toBe(a)
+  })
+
+  it('an all-zero bag and an empty stack produce the same modifier-empty key', () => {
+    const zeroBag = geoKeyFor({ ...createPrimitive('box', []), modifiers: { twist: 0, bend: 0, cloneCount: 1 } }, 'smooth')
+    const emptyStack = geoKeyFor({ ...createPrimitive('box', []), modifierStack: [] }, 'smooth')
+    const noMods = geoKeyFor(createPrimitive('box', []), 'smooth')
+    expect(zeroBag).toBe(emptyStack)
+    expect(zeroBag).toBe(noMods)
+  })
+
+  it('a legacy object key is stable across two calls', () => {
+    const obj = bagObj()
+    expect(geoKeyFor(obj, 'smooth')).toBe(geoKeyFor(obj, 'smooth'))
   })
 })
 
