@@ -148,6 +148,8 @@ const total = computed(() => {
         <div class="text-[9px] uppercase tracking-[0.1em] text-white/35 mb-2">Falloff</div>
         <StudioSlider :model-value="c.stepRotation" @update:model-value="(v) => up({ stepRotation: v })"
           label="Rotation" :min="-90" :max="90" :step="1" :bindable="false" />
+        <StudioSlider :model-value="c.phase ?? 1" @update:model-value="(v) => up({ phase: Math.max(0, Math.min(1, v)) })"
+          label="Phase" :min="0" :max="1" :step="0.05" :bindable="false" />
         <!-- Nudge: progressive drift per clone (linear/grid only) -->
         <template v-if="c.mode === 'linear'">
           <StudioSlider :model-value="c.nudgeX" @update:model-value="(v) => up({ nudgeX: v })"

@@ -48,6 +48,9 @@ export interface Cloner {
   stepRotation: number // +deg per clone
   stepScale: number    // × per clone (1 = none)
   stepOpacity: number  // × per clone (1 = none)
+  /** Living-image clips only: how far apart the copies start in the clip, 0..1.
+   *  1 spreads them evenly around the loop, 0 plays every copy in unison. */
+  phase?: number
   // vary — per-copy variation, shared with the 3D Studio cloner via lib/vary.
   // Every default is the identity, so an existing layer stamps exactly as before.
   varyMode: VaryMode
@@ -73,9 +76,13 @@ export interface CloneTransform {
   tint?: string
   /** How far toward `tint` the copy's pixels move. Meaningless without `tint`. */
   tintStrength: number
+  /** This copy's index in the expansion (0 = the original) and the copy count. A
+   *  living-image layer offsets its clip by `k / n` of a loop (see lib/compositor/clip). */
+  k: number
+  n: number
 }
 
-const IDENTITY: CloneTransform = { dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1 }
+const IDENTITY: CloneTransform = { dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1, k: 0, n: 1 }
 
 export const DEFAULT_CLONER: Cloner = {
   enabled: false,
@@ -98,6 +105,7 @@ export const DEFAULT_CLONER: Cloner = {
   stepRotation: 0,
   stepScale: 1,
   stepOpacity: 1,
+  phase: 1,
   varyMode: DEFAULT_VARY.mode,
   varySeed: DEFAULT_VARY.seed,
   varyFalloffCenter: DEFAULT_VARY.falloffCenter,
@@ -236,6 +244,8 @@ export function expandClones(cloner: Cloner | undefined | null, aspect: number):
       weight: w,
       tint: varyColorAt(w, r.k, vary),
       tintStrength: vary.strength,
+      k: r.k,
+      n: raw.length,
     }
   })
 

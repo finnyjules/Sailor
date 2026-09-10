@@ -8,13 +8,13 @@ const make = (patch: Partial<Cloner>): Cloner => ({ ...DEFAULT_CLONER, enabled: 
 describe('expandClones', () => {
   it('returns a single identity when cloner is absent', () => {
     const out = expandClones(undefined, 1)
-    expect(out).toEqual([{ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1 }])
+    expect(out).toEqual([{ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1, k: 0, n: 1 }])
   })
 
   it('returns a single identity when disabled', () => {
     const out = expandClones(make({ enabled: false, countX: 3, countY: 3 }), 1)
     expect(out).toHaveLength(1)
-    expect(out[0]).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1 })
+    expect(out[0]).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1, k: 0, n: 1 })
   })
 
   it('linear single row: countX clones along X', () => {
@@ -22,7 +22,7 @@ describe('expandClones', () => {
     expect(out).toHaveLength(3)
     // back-to-front: original (k=0) is LAST
     const last = out[out.length - 1]
-    expect(last).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1 })
+    expect(last).toEqual({ dx: 0, dy: 0, drot: 0, dscale: 1, dopacity: 1, weight: 0, tintStrength: 1, k: 0, n: 3 })
     // the set of dx offsets present
     const dxs = out.map(o => o.dx).sort((a, b) => a - b)
     expect(dxs).toEqual([0, 0.2, 0.4])
@@ -165,5 +165,21 @@ describe('wiredClonerWidgetEntries', () => {
     // value round-trips as JSON of the enabled cloner
     const e1 = out.find(e => e.name === 'layer1_cloner')!
     expect(JSON.parse(e1.json)).toMatchObject({ enabled: true, mode: 'linear', countX: 3 })
+  })
+})
+
+describe('clone index and count', () => {
+  it('no cloner → one copy, k 0 of n 1', () => {
+    const [only] = expandClones(undefined, 1)
+    expect(only.k).toBe(0)
+    expect(only.n).toBe(1)
+  })
+  it('a 2×2 grid numbers its copies 0..3 and reports n 4 on each', () => {
+    const out = expandClones({ ...DEFAULT_CLONER, enabled: true, countX: 2, countY: 2 }, 1)
+    expect(out.map(c => c.k).sort((a, b) => a - b)).toEqual([0, 1, 2, 3])
+    expect(out.every(c => c.n === 4)).toBe(true)
+  })
+  it('phase defaults to 1', () => {
+    expect(DEFAULT_CLONER.phase).toBe(1)
   })
 })

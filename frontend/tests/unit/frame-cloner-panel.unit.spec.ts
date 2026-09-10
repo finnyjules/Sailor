@@ -368,3 +368,14 @@ describe('a cleared number field', () => {
     expect(finite(lastEmit(w))).toBe(true)
   })
 })
+
+describe('Phase row', () => {
+  it('shows a Phase slider and writes phase back', async () => {
+    const w = mount(Panel, { props: { cloner: { ...DEFAULT_CLONER, enabled: true } } })
+    const row = w.findAllComponents({ name: 'StudioSlider' }).find(s => s.props('label') === 'Phase')
+    expect(row).toBeTruthy()
+    row!.vm.$emit('update:modelValue', 0.5)
+    const last = w.emitted('update')!.at(-1)![0] as Cloner
+    expect(last.phase).toBe(0.5)
+  })
+})
