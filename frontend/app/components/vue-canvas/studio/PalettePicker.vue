@@ -181,6 +181,7 @@ const swatchGrad = (colors: string[]) => `linear-gradient(to right, ${colors.joi
       <div class="grid max-h-56 grid-cols-3 gap-1 overflow-y-auto pr-1">
         <button
           v-for="(fam, i) in shelf" :key="i"
+          data-testid="palette-family"
           class="h-7 overflow-hidden rounded border border-white/10 transition hover:border-white/30"
           :style="{ background: swatchGrad(familyPreview(fam)) }"
           @click="applyFamily(fam)"
