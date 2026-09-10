@@ -14,7 +14,7 @@
  */
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Paint } from '~/lib/compositor/paint'
-import { strokeStackOf } from '~/lib/compositor/strokeStack'
+import { layerStoresStrokeStack, strokeStackOf, strokeSupportsStack } from '~/lib/compositor/strokeStack'
 import { isHex, isHexA } from '~/lib/color/convert'
 
 export interface ColourSite {
@@ -44,7 +44,20 @@ const join = (hex: string, alpha?: string) => alpha ? hex + alpha : hex
 
 /** A stroke is a thin band, not a fill — its coverage is a small fraction of the shape it
  *  outlines, so every stroke weight (legacy single-stroke fields AND a stored stroke stack)
- *  scales the shape's own weight down by this factor rather than sharing the fill's weight. */
+ *  scales the shape's own weight down by this factor rather than sharing the fill's weight.
+ *
+ *  The honest proxy for a band's coverage is its own area — perimeter × width — not a flat
+ *  fraction of the shape's area. For this module's own test fixture (a 0.4×0.2 rect, frame-
+ *  width-normalised, with a typical 0.01-wide stroke): perimeter = 2×(0.4+0.2) = 1.2, so
+ *  perimeter × width ≈ 1.2 × 0.01 = 0.012 — about 15% of the shape's own area (0.08), which
+ *  is roughly where this constant (0.08 × 0.03 = 0.0024, ~3%) undershoots on a squarish
+ *  shape. Computing perimeter × width directly was tried and rejected: it swings with a
+ *  layer's aspect ratio in a way a flat fraction of area doesn't (a long thin rect's
+ *  perimeter dwarfs its area, so its stroke would outweigh its own fill), and for this exact
+ *  suite's "a stroke is light" fixture it comes out heavier than a "small" text label,
+ *  failing the assertion the constant is tuned to keep. So this stays a flat fraction of the
+ *  shape's own area/weight — small enough that a stroke never outweighs the fill or text it
+ *  sits next to. */
 const STROKE_WEIGHT_FACTOR = 0.03
 
 /** Walk one Paint at `getP()`/`setP()` on a root, emitting a site per solid / stop / Fill colour. */
@@ -71,6 +84,12 @@ function paintSites(out: ColourSite[], owner: string, path: string, kind: Colour
     return
   }
   // A Type-Studio `Fill` (fillTile.ts) — its own colour fields, not a gradient's stops.
+  // A shader Fill's `a`/`b`/`textColor` are vestigial (fillTile.ts's `effectiveTileFill`
+  // degrades a shader fill to its `shader.input`, never to these fields), so recolouring
+  // them would touch dead data while leaving what actually renders untouched. Recursing
+  // into `shader.input` instead is out of scope here — the walker only follows the fields
+  // this Fill itself owns.
+  if ((p as any).type === 'shader') return
   for (const key of ['a', 'b', 'textColor'] as const) {
     const h = splitHex((p as any)[key]); if (!h) continue
     out.push({
@@ -120,6 +139,23 @@ const DEAL_INKS: Record<string, { arr?: string[]; obj?: { path: string[]; keys: 
 }
 const SCATTER_INKS: Record<string, string[]> = { chaff: ['chaff', 'inks'], strand: ['strand', 'inks'], husk: ['husk', 'inks'] }
 
+/** A stroke site's weight, ONE formula shared by both the legacy single site and the stack
+ *  (the stack then splits it further, per entry, in the caller). Kept a function rather than
+ *  inlined twice — legacy and stack must agree on a layer's base weight or two reads of the
+ *  same layer under different stroke states would jump discontinuously. Text scales with its
+ *  own glyph-coverage proxy (matching its fill-site weight in the switch above); every other
+ *  stackable kind and brush share the shape-area proxy the `path`/`brush` fill site already
+ *  uses (a `bbox`-derived area for a freeform outline, the frame-normalised `area(l)`
+ *  otherwise). */
+function strokeWeightBase(l: any, area: (l: any) => number): number {
+  if (l.kind === 'text') {
+    const w = Math.max(0.002, (l.fontSize ?? 0.05) * String(l.text ?? '').length * 0.55 * (l.fontSize ?? 0.05))
+    return w * STROKE_WEIGHT_FACTOR
+  }
+  const a = Math.max(0.001, l.kind === 'path' || l.kind === 'brush' ? ((l.bbox?.w ?? 0.2) * (l.bbox?.h ?? 0.2) * (l.scale ?? 1) ** 2) : area(l))
+  return a * STROKE_WEIGHT_FACTOR
+}
+
 /** Every colour the frame holds, as read/write accessors with a coverage weight (bg = 1). */
 export function colourSites(layers: LocalLayer[], background: Paint | undefined, frameAspect: number): ColourSite[] {
   const out: ColourSite[] = []
@@ -135,13 +171,11 @@ export function colourSites(layers: LocalLayer[], background: Paint | undefined,
       case 'text': {
         const w = Math.max(0.002, (l.fontSize ?? 0.05) * String(l.text ?? '').length * 0.55 * (l.fontSize ?? 0.05))
         paintSites(out, l.id, 'color', 'text', w, r => r.color, (r, p) => { r.color = p }, l)
-        if ((l.strokeWidth ?? 0) > 0 && !Array.isArray(l.strokes)) paintSites(out, l.id, 'strokeColor', 'stroke', w * STROKE_WEIGHT_FACTOR, r => r.strokeColor, (r, p) => { r.strokeColor = p }, l)
         break
       }
       case 'rect': case 'ellipse': case 'path': case 'polygon': case 'star': case 'brush': {
         const a = Math.max(0.001, l.kind === 'path' || l.kind === 'brush' ? ((l.bbox?.w ?? 0.2) * (l.bbox?.h ?? 0.2) * (l.scale ?? 1) ** 2) : area(l))
         paintSites(out, l.id, 'fill', 'shape', a, r => r.fill, (r, p) => { r.fill = p }, l)
-        if (!Array.isArray(l.strokes) && (l.strokeWidth ?? 0) > 0) paintSites(out, l.id, 'stroke', 'stroke', a * STROKE_WEIGHT_FACTOR, r => r.stroke, (r, p) => { r.stroke = p }, l)
         break
       }
       case 'line': {
@@ -167,22 +201,51 @@ export function colourSites(layers: LocalLayer[], background: Paint | undefined,
       }
       default: break // wired: no paint of its own
     }
-    // Stroke STACK (rect/ellipse/path/polygon/star/text): read through strokeStackOf, write
-    // ONLY the stored `strokes` array — never the legacy `stroke`/`strokeColor` field, which
-    // the multi-stroke rule (strokeStack.ts) forbids once a layer stores a real stack.
-    // `storedStrokeEntries` (the array strokeStackOf reads through) returns `layer.strokes`
-    // itself when it is an array, so `strokeStackOf(l)` is index-aligned with `l.strokes` —
-    // safe to key the write by index rather than by entry id.
-    if (Array.isArray(l.strokes) && l.kind !== 'brush') {
-      const entries = strokeStackOf(l)
-      const base = Math.max(0.001, area(l)) * STROKE_WEIGHT_FACTOR
-      entries.forEach((_e: any, i: number) => {
-        if (!l.strokes[i]) return
-        paintSites(
-          out, l.id, `strokes[${i}].paint`, 'stroke', base / Math.max(1, entries.length),
-          r => r.strokes?.[i]?.paint, (r, p) => { if (r.strokes?.[i]) r.strokes[i].paint = p }, l,
-        )
-      })
+    // Stroke sites: follow `strokeStackOf`'s OWN precedence exactly, never re-derive it from
+    // `Array.isArray(l.strokes)` alone — that flag says a `strokes` field exists, not which
+    // one the reader actually uses. A layer can carry BOTH a live legacy `stroke`/
+    // `strokeColor` (non-empty ink, `strokeWidth > 0`) AND a fully-id'd stored `strokes`
+    // array; `storedStrokeEntries` (strokeStack.ts:187) treats that combination as an older
+    // build editing a newer document and returns `null` — the array is stale, the legacy
+    // field is what the painter draws. `layerStoresStrokeStack` is the same question asked
+    // the way every other consumer asks it, so the walker can never offer a site the reader
+    // ignores, nor hide the one it renders.
+    //
+    // Brush is excluded outright, kind by kind rather than through the stack question at
+    // all: a `BrushLayer`'s `strokes` is its freehand `PaintStroke[]` path data — unrelated
+    // to the outline stack, and not a member of `STACKABLE` (strokeStack.ts:79) — so it must
+    // never be read as one, in either direction. Its legacy `stroke`/`strokeWidth` fields
+    // still read through normally, same as `strokeStackOf`'s own comment for a brush notes.
+    if (l.kind === 'brush') {
+      if ((l.strokeWidth ?? 0) > 0) {
+        const base = strokeWeightBase(l, area)
+        paintSites(out, l.id, 'stroke', 'stroke', base, r => r.stroke, (r, p) => { r.stroke = p }, l)
+      }
+    } else if (strokeSupportsStack(l.kind)) {
+      const strokeField = l.kind === 'text' ? 'strokeColor' : 'stroke'
+      if (layerStoresStrokeStack(l)) {
+        // `storedStrokeEntries` (the array `strokeStackOf` reads through) returns
+        // `layer.strokes` unchanged — same length, same order — whenever it returns
+        // non-null (every entry already carries a real id, or `allIded` would be false and
+        // this branch would not be taken), so `strokeStackOf(l)` is index-aligned with
+        // `l.strokes` here — safe to key the write by index rather than by entry id.
+        const entries = strokeStackOf(l)
+        const base = strokeWeightBase(l, area)
+        entries.forEach((_e: any, i: number) => {
+          if (!l.strokes[i]) return
+          paintSites(
+            out, l.id, `strokes[${i}].paint`, 'stroke', base / Math.max(1, entries.length),
+            r => r.strokes?.[i]?.paint, (r, p) => { if (r.strokes?.[i]) r.strokes[i].paint = p }, l,
+          )
+        })
+      } else if ((l.strokeWidth ?? 0) > 0) {
+        // Exactly ONE legacy site, even when a stale `strokes` array also sits on the
+        // layer (the mixed case above) — writing the legacy field is exactly what
+        // `strokeStackOf` reads in that case, so the stale array is correctly left
+        // untouched by `set`.
+        const base = strokeWeightBase(l, area)
+        paintSites(out, l.id, strokeField, 'stroke', base, r => r[strokeField], (r, p) => { r[strokeField] = p }, l)
+      }
     }
   }
   return out

@@ -45,6 +45,51 @@ describe('colourSites', () => {
     strokeSites[0]!.set(clone, '#abcdef')
     expect(clone.strokes[0].paint).toBe('#abcdef'); expect(clone.strokes).toHaveLength(2); expect(clone.stroke).toBe('#000000')
   })
+  it('when a live legacy stroke sits alongside a stale stored array, follows the reader: ONE legacy site, array untouched', () => {
+    // strokeWidth: 0.01 (> 0) makes the legacy `stroke` field LIVE, so strokeStackOf's
+    // storedStrokeEntries (strokeStack.ts:220, `allIded && !legacyStrokeIsLive(layer)`)
+    // refuses the stored array outright and strokeStackOf synthesises ONE entry from the
+    // legacy fields instead — the black legacy stroke is what the painter actually draws;
+    // the blue/cyan array is stale. The walker must offer exactly the site the reader
+    // renders, not the stale array underneath it.
+    const layers: any[] = [rect('r', '#ffffff', { stroke: '#000000', strokeWidth: 0.01, strokes: [{ id: 'a', paint: '#0000ff', width: 0.01, distance: 0 }, { id: 'b', paint: '#00ffff', width: 0.005, distance: 0.02 }] })]
+    const sites = colourSites(layers, undefined, 1)
+    const strokeSites = sites.filter(s => s.kind === 'stroke')
+    expect(strokeSites).toHaveLength(1)
+    expect(strokeSites[0]!.hex).toBe('#000000')
+    const clone = JSON.parse(JSON.stringify(layers[0]))
+    strokeSites[0]!.set(clone, '#abcdef')
+    expect(clone.stroke).toBe('#abcdef')
+    expect(clone.strokes).toEqual(layers[0].strokes)   // byte-identical, untouched
+  })
+  it('a brush outline surfaces as a legacy stroke site; its freehand strokes never do', () => {
+    // BrushLayer.strokes is freehand PaintStroke[] path data — unrelated to the stroke
+    // stack, and brush is deliberately excluded from STACKABLE (strokeStack.ts:79). The
+    // walker's legacy gate used to treat ANY `strokes` array (freehand or stored stack)
+    // as "this layer has a stack," which hid the brush's real outline colour entirely.
+    const layers: any[] = [{
+      id: 'b', kind: 'brush', x: .5, y: .5, w: .5, h: .5, rotation: 0, opacity: 1,
+      fill: '#ffffff', stroke: '#112233', strokeWidth: 0.01,
+      strokes: [{ points: [[0, 0], [0.1, 0.1], [0.2, 0]] }, { points: [[0.3, 0.3], [0.4, 0.4]] }],
+    }]
+    const sites = colourSites(layers, undefined, 1)
+    const strokeSites = sites.filter(s => s.kind === 'stroke')
+    expect(strokeSites).toHaveLength(1)
+    expect(strokeSites[0]!.hex).toBe('#112233')
+    expect(strokeSites[0]!.path).toBe('stroke')
+    const clone = JSON.parse(JSON.stringify(layers[0]))
+    strokeSites[0]!.set(clone, '#abcdef')
+    expect(clone.stroke).toBe('#abcdef')
+    expect(clone.strokes).toEqual(layers[0].strokes)   // freehand data untouched
+  })
+  it('never emits sites for a shader Fill\'s vestigial a/b/textColor', () => {
+    const layers: any[] = [rect('r', {
+      type: 'shader', a: '#111111', b: '#222222', textColor: '#333333', angle: 0, density: 1,
+      shader: { effectId: 'holographic_surface', params: {}, input: '#444444' },
+    })]
+    const sites = colourSites(layers, undefined, 1)
+    expect(sites.filter(s => s.owner === 'r')).toEqual([])
+  })
   it('reads only the ACTIVE deal style inks and a Fill\'s a/b/textColor', () => {
     const layers: any[] = [
       { id: 'd', kind: 'deal', x: .5, y: .5, w: .5, h: .5, rotation: 0, opacity: 1, cellFill: 'mosh', mosh: { inks: ['#111111', '#eeeeee'] }, pane: { inks: ['#999999'] } },
