@@ -1,0 +1,38 @@
+// frontend/tests/unit/frame-patterns-plan.unit.spec.ts
+import { describe, it, expect, vi } from 'vitest'
+import { planPattern, applyPatternToFrame } from '~/lib/frame/patterns/applyToFrame'
+
+const title = { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2, x: 0.5, y: 0.5, rotation: 0, opacity: 1, fontFamily: 'Inter', fontWeight: 700, color: '#112233', align: 'center', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 }
+const img = { id: 'img', kind: 'image', filename: 'x.png', x: 0.5, y: 0.5, w: 0.5, h: 0.5, rotation: 0, opacity: 1 }
+const props = { sailor_localLayers: [title, img], sailor_stackOrder: ['l:t', 'l:img'] }
+const palette = { field: '#f2f0ef', ink: '#112233', accent: '#dd2200' }
+const base = { props, frameW: 800, frameH: 1000, seed: 7, palette, connectedSlots: [] as number[] }
+
+describe('planPattern', () => {
+  it('returns the layers and order apply would commit, without touching an editor', () => {
+    const plan = planPattern({ ...base, patternId: 'photoBehind' })!
+    expect(plan).not.toBeNull()
+    expect(plan.layers).toHaveLength(2)
+    expect(plan.order.indexOf('l:img')).toBeLessThan(plan.order.indexOf('l:t'))
+    expect(plan.posterState).toEqual({ patternId: 'photoBehind', seed: 7, shapeMode: undefined })
+    expect(plan.did.length).toBeGreaterThan(0)
+    expect(props.sailor_localLayers[0]).toBe(title)                 // input untouched
+  })
+  it('is null for an unknown pattern', () => {
+    expect(planPattern({ ...base, patternId: 'nope' })).toBeNull()
+  })
+  it('applyPatternToFrame commits exactly the plan', () => {
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn() }
+    const plan = planPattern({ ...base, patternId: 'runoff' })!
+    const out = applyPatternToFrame({ ...base, patternId: 'runoff', editor })
+    expect(out.ok).toBe(true)
+    expect(editor.commit.mock.calls[0][0]).toEqual(plan.layers)
+    expect(editor.writeOrder.mock.calls[0][0]).toEqual(plan.order)
+  })
+  it('with the frame\'s own colours as the palette, no colour, face, weight or text changes', () => {
+    const plan = planPattern({ ...base, patternId: 'runoff', palette: { field: '#f2f0ef', ink: '#112233', accent: '#112233' } })!
+    const t = plan.layers.find(l => l.id === 't') as any
+    expect(t.color).toBe('#112233'); expect(t.fontFamily).toBe('Inter'); expect(t.fontWeight).toBe(700); expect(t.text).toBe('NOISE')
+    expect(t.x !== 0.5 || t.y !== 0.5 || t.fontSize !== 0.2).toBe(true)   // but it did move
+  })
+})

@@ -12,7 +12,7 @@ import { framePresentKeys } from '~/lib/compositor/frameStack'
 
 export interface PosterState { patternId: string; seed: number; shapeMode?: FrameElements['shapeMode'] }
 
-export interface ApplyArgs {
+export interface PlanArgs {
   props: Record<string, unknown> | undefined
   frameW: number
   frameH: number
@@ -23,13 +23,19 @@ export interface ApplyArgs {
   shapeMode?: FrameElements['shapeMode']
   /** Wired image slots connected on the node (for the present-keys reconcile). */
   connectedSlots: number[]
+}
+
+export interface ApplyArgs extends PlanArgs {
   editor: { recordHistory(): void; commit(next: LocalLayer[]): void; writeOrder(order: string[]): void }
 }
 
-/** Run a pattern on a frame and apply it as ONE undo step: history → layers → order. */
-export function applyPatternToFrame(args: ApplyArgs): { ok: boolean; posterState?: PosterState } {
+/** What an apply would commit: the next layers, the next draw order, and the state to remember. */
+export interface PatternPlan { layers: LocalLayer[]; order: string[]; posterState: PosterState; did: string }
+
+/** Run a pattern on a frame and return the plan. Pure: nothing is written. */
+export function planPattern(args: PlanArgs): PatternPlan | null {
   const pattern = PATTERNS.find(p => p.id === args.patternId)
-  if (!pattern) return { ok: false }
+  if (!pattern) return null
   const layers = ((args.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
   // measure with what the title layer really renders with — the same layer the
   // engine's hierarchy inference picks as the title (largest fontSize), not
@@ -50,8 +56,15 @@ export function applyPatternToFrame(args: ApplyArgs): { ok: boolean; posterState
   const saved = (args.props?.sailor_stackOrder as string[] | undefined) ?? []
   const present = framePresentKeys(args.connectedSlots, next)
   const order = nextOrderFor(saved, present, ins.ops, ctx.elements, ins.inserted)
+  return { layers: next, order, did: placement.did, posterState: { patternId: args.patternId, seed: args.seed, shapeMode: args.shapeMode } }
+}
+
+/** Apply a pattern as ONE undo step: history → layers → order. */
+export function applyPatternToFrame(args: ApplyArgs): { ok: boolean; posterState?: PosterState } {
+  const plan = planPattern(args)
+  if (!plan) return { ok: false }
   args.editor.recordHistory()
-  args.editor.commit(next)
-  args.editor.writeOrder(order)
-  return { ok: true, posterState: { patternId: args.patternId, seed: args.seed, shapeMode: args.shapeMode } }
+  args.editor.commit(plan.layers)
+  args.editor.writeOrder(plan.order)
+  return { ok: true, posterState: plan.posterState }
 }
