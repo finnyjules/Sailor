@@ -180,6 +180,80 @@ export function writeModifierStack(stack: ModifierInstance[]): { modifierStack: 
   return { modifierStack: stack }
 }
 
+/** Tolerant parse for a persisted stack: keep only entries with a string id and a known kind
+ *  (deduped by id, lowest wins), rebuild each instance's params from MODIFIER_SPECS defaults so
+ *  junk/extra fields are dropped and the flat-number shape is guaranteed. Returns undefined only
+ *  when `raw` is not an array — an explicit EMPTY stack survives as `[]`, because a valid empty
+ *  stack is authoritative (modifierStackOf must NOT fall back to the legacy bag once the user has
+ *  cleared every row). Mirrors sanitizeBag/parseTreatments; used by config.ts's parseDoc so a
+ *  stored new-shape object round-trips instead of silently reverting to its dead legacy bag. */
+export function sanitizeModifierStack(raw: unknown): ModifierInstance[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const seen = new Set<string>()
+  const out: ModifierInstance[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const e = entry as Record<string, unknown>
+    const id = e.id
+    const kind = e.kind
+    if (typeof id !== 'string' || id === '' || !isModifierKind(kind) || seen.has(id)) continue
+    seen.add(id)
+    const inst = { id, kind, enabled: e.enabled !== false } as ModifierInstance
+    for (const key of MODIFIER_KIND_PARAMS[kind]) {
+      const v = e[key]
+      inst[key] = typeof v === 'number' && Number.isFinite(v) ? v : specDefault(key)
+    }
+    out.push(inst)
+  }
+  return out
+}
+
+/** The option strings for an index-valued modifier field (axis/mode), or undefined for a plain
+ *  numeric field. The single source the agent write path uses to coerce a chosen option back to
+ *  the INDEX the flat bag actually stores (modifierControls.ts surfaces these as selects). */
+export function modifierOptionsFor(field: string): string[] | undefined {
+  const spec = MODIFIER_SPECS.find((s) => s.key === field)
+  return spec && spec.control === 'options' ? spec.options : undefined
+}
+
+/** Matches a motion/agent path addressing one modifier-row field: `objects.<id>.modifierStack.<mid>.<field>`. */
+const MODIFIER_STACK_PATH = /^objects\.([^.]+)\.modifierStack\.[^.]+\.[^.]+/
+
+/** True when `path` addresses a modifier-row field (objects.<id>.modifierStack.<mid>.<field>). */
+export function isModifierStackPath(path: string): boolean {
+  return typeof path === 'string' && MODIFIER_STACK_PATH.test(path)
+}
+
+interface MaterializeObject extends StackHost {
+  id?: unknown
+  kind?: unknown
+}
+interface MaterializeDoc {
+  objects?: MaterializeObject[]
+}
+
+/**
+ * Materialize-on-write: a motion/agent SET of `objects.<id>.modifierStack.<mid>.<field>` is an
+ * EDIT, and the write refuses a legacy object because it has no `modifierStack` ARRAY yet — it
+ * mints its modifier targets purely through the read-through `modifierStackOf`, which fabricates
+ * nothing. So fold the bag into the deterministic-id stack (`mod:<kind>:0`, the SAME ids the minted
+ * targets carry) and store it on the object BEFORE the write, so the following set lands on the
+ * right row. The legacy `modifiers` bag is deliberately KEPT (it also holds the Cloner Vary
+ * uniform), exactly as writeModifierStack does. A no-op unless `path` is a modifier path AND the
+ * resolved object exists, hosts modifiers (a primitive) and lacks the array — never materialize
+ * for another path, another object kind, or an object that already has a stack (that would discard
+ * the user's row order and mint fresh ids).
+ */
+export function materializeModifierStackForPath(doc: unknown, path: string): void {
+  if (!isModifierStackPath(path)) return
+  const id = MODIFIER_STACK_PATH.exec(path)?.[1]
+  const objects = (doc as MaterializeDoc | null | undefined)?.objects
+  if (!Array.isArray(objects)) return
+  const obj = objects.find((o) => o?.id === id)
+  if (!obj || obj.kind !== 'primitive' || Array.isArray(obj.modifierStack)) return
+  obj.modifierStack = modifierStackOf(obj)
+}
+
 /** The freely orderable middle rows (every deform), in list order — Task 2 iterates the whole
  *  stack, this is for the inspector's reorderable section. */
 export const orderableModifiers = (stack: ModifierInstance[]): ModifierInstance[] =>

@@ -5,6 +5,7 @@ import { defaultDoc, createPrimitive, type SceneObject } from '~/lib/scene3d/con
 import { SCENE_CONTROLS } from '~/lib/scene3d/controls'
 import type { SceneMotionTrack } from '~/lib/scene3d/motion/types'
 import { createTreatment } from '~/lib/scene3d/treatments'
+import { createModifier, writeModifierStack, MODIFIER_KIND_PARAMS } from '~/lib/scene3d/modifierStack'
 
 const track = (over: Partial<SceneMotionTrack> = {}): SceneMotionTrack => ({
   path: 'lighting.sunIntensity', from: 0, to: 1, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0, ...over,
@@ -392,5 +393,92 @@ describe('animatableTargets: treatments', () => {
     box.treatments = [b, a] // reorder: same id, new index
     expect((applyMotionToDoc(doc, 0.5).doc.objects[0]!.treatments![0] as any).amount).toBeCloseTo(0.4, 5)
     expect((applyMotionToDoc(doc, 0.5).doc.objects[0]!.treatments![1] as any).opacity).toBe(0.5) // fade untouched (its default)
+  })
+})
+
+describe('animatableTargets: modifiers', () => {
+  it('a new-shape twist object mints a numeric twist target, id-addressed and named', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Bottle'
+    const twist = { ...createModifier('twist'), id: 'mod_t', twist: 10 }
+    box.modifierStack = writeModifierStack([twist]).modifierStack
+    doc.objects.push(box)
+
+    const path = `objects.${box.id}.modifierStack.mod_t.twist`
+    const t = animatableTargets(doc).find((x) => x.path === path)
+    expect(t, path).toBeTruthy()
+    expect(t!.label).toBe('Bottle · Twist')
+    expect(t!.min).toBe(-360)
+    expect(t!.max).toBe(360)
+  })
+
+  it('a legacy bag folds to a deterministic-id twist target', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.modifiers = { twist: 90 }
+    doc.objects.push(box)
+    const paths = animatableTargets(doc).map((t) => t.path)
+    expect(paths).toContain(`objects.${box.id}.modifierStack.mod:twist:0.twist`)
+  })
+
+  it('axis/mode SELECTS are never motion targets', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.modifierStack = [
+      { ...createModifier('twist'), id: 'mT', twist: 10 },
+      { ...createModifier('jitter'), id: 'mJ', jitter: 0.1 },
+    ]
+    doc.objects.push(box)
+    const paths = animatableTargets(doc).map((t) => t.path)
+    expect(paths).toContain(`objects.${box.id}.modifierStack.mT.twist`)
+    expect(paths).not.toContain(`objects.${box.id}.modifierStack.mT.twistAxis`)
+    expect(paths).not.toContain(`objects.${box.id}.modifierStack.mJ.jitterMode`)
+  })
+})
+
+describe('applyMotionToDoc: modifier writes (materialize on edit)', () => {
+  it('writes a twist track onto the right row of a NEW-shape object (already has the array)', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.modifierStack = [{ ...createModifier('twist'), id: 'mod_t', twist: 0 }]
+    doc.objects.push(box)
+    doc.motion.tracks = [track({ path: `objects.${box.id}.modifierStack.mod_t.twist`, from: 0, to: 90 })]
+
+    const out = applyMotionToDoc(doc, 0.5).doc.objects[0] as any
+    // The stack round-tripped through the deep clone (parseDoc), keeping its id.
+    expect(out.modifierStack).toHaveLength(1)
+    expect(out.modifierStack[0].id).toBe('mod_t')
+    expect(out.modifierStack[0].twist).toBeCloseTo(45, 5)
+  })
+
+  it('MATERIALIZES a legacy bag, writes the twist row, and keeps the Vary bag', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    // Legacy: geometry keys in the flat bag, plus a Vary uniform (a material field, not a row).
+    box.modifiers = { twist: 90, varyColorStrength: 0.7 }
+    doc.objects.push(box)
+    doc.motion.tracks = [track({ path: `objects.${box.id}.modifierStack.mod:twist:0.twist`, from: 0, to: 90 })]
+
+    const out = applyMotionToDoc(doc, 0.5).doc.objects[0] as any
+    // The stack was fabricated on write with the deterministic id the target used.
+    expect(Array.isArray(out.modifierStack)).toBe(true)
+    const twistRow = out.modifierStack.find((r: any) => r.id === 'mod:twist:0')
+    expect(twistRow.twist).toBeCloseTo(45, 5)
+    // The Vary uniform survived — materialize keeps the legacy bag, never clears it.
+    expect(out.modifiers.varyColorStrength).toBe(0.7)
+  })
+
+  it('never materializes for a non-modifier path', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.modifiers = { twist: 90 }
+    doc.objects.push(box)
+    doc.motion.tracks = [track({ path: `objects.${box.id}.material.roughness`, from: 0, to: 1 })]
+    const out = applyMotionToDoc(doc, 0.5).doc.objects[0] as any
+    expect(out.modifierStack).toBeUndefined()
+  })
+
+  it('MODIFIER_KIND_PARAMS is the vocabulary — sanity that twist owns twist+twistAxis', () => {
+    expect(MODIFIER_KIND_PARAMS.twist).toEqual(['twist', 'twistAxis'])
   })
 })
