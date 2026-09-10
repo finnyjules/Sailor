@@ -68,6 +68,7 @@ import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
 import { imageLayerUrl } from '~/composables/useCompositorLayers'
 import { useInpaint, loadImage, capDims, imageToDataUrl, cleanCutoutAlpha } from '~/composables/useInpaint'
 import { useLayerImageEdit } from '~/composables/useLayerImageEdit'
+import { WHOLE_IMAGE_MODELS } from '~/lib/compositor/imageEditModels'
 import { useRegionFx } from '~/composables/useRegionFx'
 import type { Cloner } from '~/composables/useCloner'
 import { resolveWiredSourceKind } from '~/lib/studio/frameResolve'
@@ -2586,7 +2587,30 @@ function onCanvasContextMenu(e: MouseEvent) {
   }
 }
 // Task 3/4 replace these bodies:
-function editImageStart(_id: string) { /* Task 3 */ }
+function editImageStart(id: string) {
+  exitOtherToolsFor('region')      // leave any other tool; reuse the mutual-exclusion reducer
+  editImage.value = { layerId: id }
+  editImagePrompt.value = ''
+  selectLocal(id)
+}
+function editImageCancel() { editImage.value = null; editImagePrompt.value = '' }
+async function runImageEdit() {
+  const e = editImage.value; if (!e || !editImagePrompt.value.trim() || inpaint.busy.value) return
+  const layer = localLayers.value.find((l: any) => l.id === e.layerId && l.kind === 'image') as any
+  if (!layer) return
+  try {
+    const img = await loadImage(imageLayerUrl(layer.filename))
+    const { w, h } = capDims(img.naturalWidth || 1024, img.naturalHeight || 1024)
+    const src = imageToDataUrl(img, w, h)
+    const prompt = editImagePrompt.value.trim()
+    const out = wholeEditModel.value === 'nano'
+      ? await inpaint.nanoGen(prompt, src)
+      : await inpaint.kontext(src, prompt)
+    const first = out[0]; if (!first) return
+    const name = await inpaint.uploadDataUrl(first, 'compedit')
+    setLocal(layer.id, { filename: name })
+  } catch (err) { console.error('[compositor edit image]', err) /* inpaint.error is shown in the panel */ }
+}
 function editRegionStart(_id: string) { /* Task 4 */ }
 function selectObjectStart(_id: string) { /* Task 4: toggleSmartMode after selecting the layer */ }
 function onCanvasPointerMoveCapture(e: PointerEvent) {
@@ -4186,6 +4210,13 @@ function setBreakOffset(v: number) {
 const inpaint = useInpaint()
 const genPrompt = ref('')
 
+// Edit image: whole-image instruction edit (right-click → Edit image…). A
+// modal-like inspector takeover, same tier as Brand kits / Templates above —
+// see the `editImage` branch in the inspector template.
+const editImage = ref<{ layerId: string } | null>(null)
+const editImagePrompt = ref('')
+const wholeEditModel = ref<string>(WHOLE_IMAGE_MODELS[0]!.value)   // 'kontext'
+
 // Generate Object: new-layer generation has two modes — Style (prompt, optional
 // trained LoRA) and Scene (fit the existing frame). Both output a transparent
 // cutout. Only shown when there's no target image (i.e. making a NEW layer).
@@ -5519,6 +5550,7 @@ function handleKeydown(e: KeyboardEvent) {
     // The busy guard now lives inside exitSmartMode itself.
     if (smartActive.value) { exitSmartMode(); return }
     if (genActive.value) { exitGenMode(); return }
+    if (editImage.value) { editImageCancel(); return }
     emit('close')
     return
   }
@@ -6894,6 +6926,32 @@ onUnmounted(() => {
               </div>
             </div>
           </template>
+        </div>
+      </template>
+
+      <!-- Edit image (whole-image instruction edit, from the right-click menu): a
+           modal-like inspector takeover, same tier as Assistant / Brand kits /
+           Templates above — it must win over the Design/Motion tabs and the
+           normal per-kind selection inspector below. -->
+      <template v-else-if="editImage">
+        <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+          <Wand2 class="size-3.5 text-white/70" /><span class="text-sm font-medium">Edit image</span>
+          <button class="ml-auto text-white/40 hover:text-white/80 p-1" title="Done (Esc)" @click="editImageCancel"><X class="size-3.5" /></button>
+        </div>
+        <div class="p-5 flex flex-col gap-4">
+          <StudioSelect label="Model" v-model="wholeEditModel"
+            :options="WHOLE_IMAGE_MODELS.map(m => m.value)" :option-labels="WHOLE_IMAGE_MODELS.map(m => m.label)" />
+          <div>
+            <div class="panel-label mb-1.5">Prompt</div>
+            <textarea v-model="editImagePrompt" rows="3" data-testid="edit-image-prompt"
+              placeholder="Describe the change… (e.g. make it night)"
+              class="w-full rounded bg-white/[0.06] px-2 py-1.5 text-[12px] text-white/90 placeholder-white/35 outline-none resize-none"></textarea>
+          </div>
+          <button type="button" data-testid="edit-image-run"
+            class="h-8 rounded bg-white text-neutral-900 text-[12px] font-medium hover:bg-white/90 cursor-pointer disabled:opacity-40 disabled:cursor-default"
+            :disabled="!editImagePrompt.trim() || inpaint.busy.value" @click="runImageEdit">
+            {{ inpaint.busy.value ? 'Editing…' : 'Edit' }}</button>
+          <p v-if="inpaint.error.value" class="text-[11px] text-rose-300/90">{{ inpaint.error.value }}</p>
         </div>
       </template>
 
