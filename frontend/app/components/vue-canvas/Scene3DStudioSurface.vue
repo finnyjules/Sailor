@@ -69,7 +69,12 @@ import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
 import Scene3DObjectRow from './studio/Scene3DObjectRow.vue'
 import { totalClones, clampedClones } from '~/lib/scene3d/modifiers'
 import { MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
-import { modifierStackOf } from '~/lib/scene3d/modifierStack'
+import {
+  modifierStackOf, writeModifierStack, canReorderModifier,
+  addModifier as addModifierOp, removeModifier as removeModifierOp,
+  duplicateModifier as duplicateModifierOp, reorderModifier as reorderModifierOp,
+  type ModifierKind, type ModifierInstance,
+} from '~/lib/scene3d/modifierStack'
 import { SceneInteraction, type PlacementHit } from '~/lib/scene3d/interaction'
 import { loadGlb, GLB_SIZE_CAP_BYTES } from '~/lib/scene3d/glb'
 import { fitGlbGroup } from '~/lib/scene3d/fitGlb'
@@ -192,6 +197,7 @@ const unrenderedTreatments = computed(() => unrenderedTreatmentIds(maskedTreatme
 function selectTreatment(objectId: string, treatmentId: string): void {
   if (sculpting.value) return // same guard as toggleSelected: never re-point a live sculpt session
   selectedIds.value = []
+  selectedModifier.value = null // treatment / modifier / object selection are mutually exclusive
   selectedTreatment.value = { objectId, treatmentId }
 }
 function addTreatment(objectId: string, kind: TreatmentKind): void {
@@ -232,6 +238,68 @@ function reorderTreatment(objectId: string, fromId: string, toId: string): void 
   const [moved] = list.splice(from, 1)
   list.splice(to, 0, moved!)
   o.treatments = list
+}
+
+// ── Modifiers: per-primitive geometry stack, managed from the tree the same way treatments
+// are (S1 Task 5). A modifier selection is a SEPARATE concept from the object / treatment
+// selection: picking a modifier row clears both. EVERY mutation runs through the read-through —
+// modifierStackOf(o) → list op → Object.assign(o, writeModifierStack(next)) — never a raw write
+// to o.modifierStack. writeModifierStack KEEPS the legacy `modifiers` bag, which still holds the
+// Cloner Vary uniform (varyMode/…/varyColorStrength), so a stack edit never strips Vary.
+const selectedModifier = ref<{ objectId: string; modifierId: string } | null>(null)
+const activeModifier = computed(() => {
+  const sel = selectedModifier.value
+  if (!sel) return null
+  const o = doc.objects.find((x) => x.id === sel.objectId)
+  if (!o || o.kind !== 'primitive') return null
+  const mo = modifierStackOf(o).find((m) => m.id === sel.modifierId)
+  return mo ? { obj: o, modifier: mo } : null
+})
+
+function selectModifier(objectId: string, modifierId: string): void {
+  if (sculpting.value) return // same guard as selectTreatment: never re-point a live sculpt session
+  selectedIds.value = []
+  selectedTreatment.value = null
+  selectedModifier.value = { objectId, modifierId }
+}
+function addModifier(objectId: string, kind: ModifierKind): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || o.kind !== 'primitive') return
+  const before = modifierStackOf(o)
+  const next = addModifierOp(before, kind)
+  if (next === before) return // a second pinned kind (subdivide / cloner) is refused
+  Object.assign(o, writeModifierStack(next))
+  const added = next.find((m) => !before.some((b) => b.id === m.id))
+  if (added) selectModifier(objectId, added.id)
+}
+function removeModifier(objectId: string, modifierId: string): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || o.kind !== 'primitive') return
+  Object.assign(o, writeModifierStack(removeModifierOp(modifierStackOf(o), modifierId)))
+  if (selectedModifier.value?.modifierId === modifierId) selectedModifier.value = null
+}
+function duplicateModifier(objectId: string, modifierId: string): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || o.kind !== 'primitive') return
+  const before = modifierStackOf(o)
+  const next = duplicateModifierOp(before, modifierId)
+  if (next === before) return
+  Object.assign(o, writeModifierStack(next))
+  const copy = next.find((m) => !before.some((b) => b.id === m.id))
+  if (copy) selectModifier(objectId, copy.id)
+}
+function toggleModifier(objectId: string, modifierId: string): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || o.kind !== 'primitive') return
+  const next = modifierStackOf(o).map((m) => (m.id === modifierId ? { ...m, enabled: !m.enabled } as ModifierInstance : m))
+  Object.assign(o, writeModifierStack(next))
+}
+function reorderModifier(objectId: string, fromId: string, toId: string): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || o.kind !== 'primitive') return
+  const stack = modifierStackOf(o)
+  if (!canReorderModifier(stack, fromId, toId)) return // pinned rows can't move, nothing crosses a pin
+  Object.assign(o, writeModifierStack(reorderModifierOp(stack, fromId, toId)))
 }
 
 // The treatment inspector: ONE card from treatmentControls(kind), read/written straight
@@ -1961,7 +2029,7 @@ watch(() => [doc.lighting.softness, doc.lighting.warmth, doc.lighting.brightness
 // that only extends the list leaves `selectedId` unchanged but still has to
 // rebuild the gizmo around a pivot.
 watch(selectedIds, (ids) => {
-  if (ids.length) selectedTreatment.value = null // an object selection replaces a treatment selection
+  if (ids.length) { selectedTreatment.value = null; selectedModifier.value = null } // an object selection replaces a treatment/modifier selection
   // ANY light in the selection suppresses the scale gizmo, not just the primary:
   // LightObject's scale is never read, so scaling a light in a mixed selection
   // writes a number nothing honours — and a light that resists scaling alone but
@@ -3242,6 +3310,7 @@ function removeObject(id: string) {
   // which would discard any other selected objects when multi-selection is active.
   selectedIds.value = selectedIds.value.filter((x) => !doomed.has(x))
   if (selectedTreatment.value && doomed.has(selectedTreatment.value.objectId)) selectedTreatment.value = null
+  if (selectedModifier.value && doomed.has(selectedModifier.value.objectId)) selectedModifier.value = null
   for (const gone of doomed) delete glbError[gone]
 }
 // C3 fix (final review): `{ ...src.material }` is a SHALLOW copy — `material.relief` (and
@@ -4118,7 +4187,7 @@ async function onClose() {
           </div>
           <Scene3DObjectRow v-for="o in rootObjectList" :key="o.id"
             :object="o" :objects="doc.objects" :selected-ids="selectedIds" :glb-error="glbError" :depth="0"
-            :selected-treatment="selectedTreatment" :not-rendered="unrenderedTreatments"
+            :selected-treatment="selectedTreatment" :not-rendered="unrenderedTreatments" :selected-modifier="selectedModifier"
             @select="toggleSelected"
             @remove="removeObject"
             @duplicate="duplicateObject"
@@ -4129,7 +4198,13 @@ async function onClose() {
             @remove-treatment="removeTreatment"
             @duplicate-treatment="duplicateTreatment"
             @toggle-treatment="toggleTreatment"
-            @reorder-treatment="reorderTreatment" />
+            @reorder-treatment="reorderTreatment"
+            @add-modifier="addModifier"
+            @select-modifier="selectModifier"
+            @remove-modifier="removeModifier"
+            @duplicate-modifier="duplicateModifier"
+            @toggle-modifier="toggleModifier"
+            @reorder-modifier="reorderModifier" />
         </div>
         <div v-if="wiredGlbUrl" class="shrink-0 border-t border-white/[0.08] p-2">
           <StudioButton @click="addGlb(wiredGlbUrl)">
