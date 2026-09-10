@@ -45,7 +45,7 @@ bits 29–31 reserved; one dev server; verification through `/dev/scene3d-lab?st
 8. Playwright on the lab page: twist-then-bend ≠ bend-then-twist; two twists; legacy doc identical.
 9. Copy + dashboard.
 
-## Slice S2 · New modifiers  (≈10 tasks)
+## Slice S2 · New modifiers  (≈10 tasks) — ✅ LANDED 2026-09-10 (base fd58c4b3a → 7ad94f0b8; 11 kinds; whole-slice review Approved-with-minors; see 2026-09-09-scene3d-S2-new-modifiers.md + memory scene3d-modifiers-s2-landed)
 Shear; spherify/inflate; mirror; radial array; displace by noise/texture; smooth (Laplacian);
 decimate (SimplifyModifier); lattice deform (3×3×3, trilinear); melt; shatter/explode;
 voxelise (voxel module); boolean with a sibling (SDF union/subtract/intersect via the voxel module,
