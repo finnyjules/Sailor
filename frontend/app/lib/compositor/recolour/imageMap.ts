@@ -1,6 +1,6 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { GradientMapStop } from '~/lib/compositor/postEffects'
-import { createEffect, effectStackOf } from '~/lib/compositor/effectStack'
+import { createEffect, EFFECT_ORDER, effectStackOf } from '~/lib/compositor/effectStack'
 import type { EffectInstance } from '~/lib/compositor/effectStack'
 import { lightnessOf } from './map'
 
@@ -23,16 +23,30 @@ export function applyImageMaps(layers: LocalLayer[], familyHexes: string[], owne
   const next: LocalLayer[] = JSON.parse(JSON.stringify(layers))
   for (const l of next as any[]) {
     if (!isTarget(l)) continue
-    const stack = effectStackOf(l)
+    let stack = effectStackOf(l)
     const ownedId = owned[l.id]
     const idx = ownedId ? stack.findIndex(e => e.id === ownedId && e.type === 'gradientMap') : -1
     if (idx >= 0) {
       stack[idx] = { ...(stack[idx] as any), stops: stops.map(s => ({ ...s })) } as EffectInstance
       nextOwned[l.id] = ownedId!
     } else {
-      const fx = { ...(createEffect('gradientMap') as any), stops: stops.map(s => ({ ...s })), mix: 1, visible: true } as EffectInstance
-      stack.push(fx)
-      nextOwned[l.id] = fx.id
+      // Insert at the canonical pipeline position (after duotone, before bloom), not appended:
+      // a pushed map would land AFTER any existing bloom / vignette / grain / torn_edge /
+      // feather / layer_blur on this image and render in the wrong order forever, since a
+      // new-shape (id-stamped) stack is never re-sorted.
+      //
+      // NOT `addEffect(stack, 'gradientMap')`: addEffect appends an orderable kind after the
+      // LAST entry sharing its region (effectStack.ts:296-304, by design — see
+      // compositor-effect-stack.unit.spec.ts:177-186), and gradientMap/bloom/vignette/grain/
+      // torn_edge/feather/layer_blur are all the same 'pixel' region. So on a stack that
+      // already has a bloom (regionOf('bloom') === regionOf('gradientMap')), addEffect would
+      // insert the map AFTER the bloom — reproducing this exact bug. Sort by EFFECT_ORDER
+      // directly instead: insert before the first entry that sorts later than 'gradientMap'.
+      const fresh = { ...(createEffect('gradientMap') as any), stops: stops.map(s => ({ ...s })), mix: 1, visible: true } as EffectInstance
+      const target = EFFECT_ORDER.indexOf('gradientMap')
+      const at = stack.findIndex(e => EFFECT_ORDER.indexOf(e.type) > target)
+      stack = at === -1 ? [...stack, fresh] : [...stack.slice(0, at), fresh, ...stack.slice(at)]
+      nextOwned[l.id] = fresh.id
     }
     l.effects = stack
   }

@@ -38,12 +38,13 @@ describe('applyImageMaps', () => {
     const layers: any[] = [img('i', { effects: [userMap, drop] })]
     const first = applyImageMaps(layers as any, fam, {})
     const stackA = effectStackOf(first.layers[0] as any)
-    expect(stackA.map(e => e.id)).toEqual([userMap.id, drop.id, first.owned.i])   // appended after
+    // canonical position: after the existing (user) gradient map, before drop_shadow — not appended after it
+    expect(stackA.map(e => e.id)).toEqual([userMap.id, first.owned.i, drop.id])
     const second = applyImageMaps(first.layers, ['#101010', '#eeeeee'], first.owned)
     const stackB = effectStackOf(second.layers[0] as any)
     expect(second.owned.i).toBe(first.owned.i)
     expect(stackB.map(e => e.id)).toEqual(stackA.map(e => e.id))                    // position kept
-    expect((stackB[2] as any).stops.map((s: any) => s.color)).toEqual(['#101010', '#eeeeee'])
+    expect((stackB[1] as any).stops.map((s: any) => s.color)).toEqual(['#101010', '#eeeeee'])
     expect((stackB[0] as any).stops[0].color).toBe('#000000')                       // user map untouched
   })
   it('forgets an owned map the user deleted', () => {
@@ -51,6 +52,20 @@ describe('applyImageMaps', () => {
     const out = applyImageMaps(layers as any, fam, { i: 'fx_gone' })
     expect(out.owned.i).not.toBe('fx_gone')
     expect(effectStackOf(out.layers[0] as any)).toHaveLength(1)
+  })
+  it('lands at its canonical position, BEFORE an existing bloom, not appended after it', () => {
+    const layers: any[] = [img('i', { effects: [createEffect('bloom')] })]
+    const out = applyImageMaps(layers as any, fam, {})
+    expect(effectStackOf(out.layers[0] as any).map(e => e.type)).toEqual(['gradientMap', 'bloom'])
+  })
+  it('id-stamps a legacy-shape stack, keeps the existing effect, and inserts the map before it', () => {
+    const layers: any[] = [img('i', { effects: [{ type: 'grain', amount: 0.3, visible: true }] })]
+    const out = applyImageMaps(layers as any, fam, {})
+    const stack = effectStackOf(out.layers[0] as any)
+    expect(stack.every(e => typeof e.id === 'string' && e.id.length > 0)).toBe(true)
+    expect(stack.map(e => e.type)).toEqual(['gradientMap', 'grain'])
+    expect(stack.find(e => e.type === 'grain')).toMatchObject({ amount: 0.3, visible: true })
+    expect(stack.find(e => e.id === out.owned.i)?.type).toBe('gradientMap')
   })
 })
 
