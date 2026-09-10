@@ -1349,6 +1349,7 @@ function writeRecolourMemory(m: { hexes: string[]; applied: Record<string, strin
 function recolourWith(hexes: string[]) {
   const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
   const mapping = mapFamily(frameColourSlots.value, hexes)
+  if (Object.entries(mapping).every(([hex, to]) => to === hex)) return
   const next = recolourFrame(localLayers.value as LocalLayer[], background.value, mapping, aspect)
   recordHistory(); commit(next.layers); editor.writeBackground(next.background)
   writeRecolourMemory({ hexes: hexes.map(h => h.toLowerCase()), applied: mapping })
@@ -1356,10 +1357,11 @@ function recolourWith(hexes: string[]) {
 function applyFamilyToFrame(fam: PaletteFamily) { recolourWith(fam.hexes) }
 function applyStopsToFrame(stops: GradientStop[]) { recolourWith(stops.map(s => s.color)) }
 function reassignSlot(slotHex: string, toHex: string) {
+  if (toHex.toLowerCase() === slotHex.toLowerCase()) return
   const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
   const next = recolourSlot(localLayers.value as LocalLayer[], background.value, slotHex, toHex, aspect)
   recordHistory(); commit(next.layers); editor.writeBackground(next.background)
-  const m = recolourMemory.value; if (m) writeRecolourMemory({ ...m, applied: { ...m.applied, [toHex.toLowerCase()]: toHex.toLowerCase() } })
+  const m = recolourMemory.value; if (m) writeRecolourMemory({ ...m, applied: { ...m.applied, [slotHex.toLowerCase()]: toHex.toLowerCase() } })
 }
 // Box layers (rect/ellipse/image) get full Figma-style resize (corners + edges,
 // anchored opposite side); text/line/path keep uniform corner scale (no 2D box).
@@ -8849,7 +8851,7 @@ onUnmounted(() => {
             <template v-else>
               <ColourSlots :slots="frameColourSlots" :family="recolourMemory?.hexes ?? null" @reassign="reassignSlot" />
               <p class="mt-2 mb-1.5 text-[11px] text-white/45">Pick a palette to recolour the frame. Things that share a colour keep sharing one; the darkest stays darkest.</p>
-              <PalettePicker :key="'frame-recolour'" mode="stops" :seed="recolourSeed" @apply-family="applyFamilyToFrame" @apply-stops="applyStopsToFrame" />
+              <PalettePicker :key="compositor?.id ?? 'frame-recolour'" mode="stops" :seed="recolourSeed" @apply-family="applyFamilyToFrame" @apply-stops="applyStopsToFrame" />
             </template>
           </div>
           <!-- Whole-frame post-processing (after all layers composite) -->
