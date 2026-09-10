@@ -68,6 +68,10 @@ Design tab, nothing selected, a new **Colours** section immediately after **Back
 
 On a frame with a ground, a headline, two accents and a gradient, any of the shelf's twelve families lands in one click with the headline still readable and every pair of elements that matched before still matching. The taste call left to Julien: whether the ground should stay in the family's *lightest* colour (paper-first) or follow the frame's current ground lightness (a dark frame stays dark). v1 follows the frame's current lightness order, so a dark frame stays dark; a "flip" is a one-click reassign of the ground slot.
 
+## Images too (added 2026-09-10, on Julien's "i would love an option to recolor the images too, applying a gradient map")
+
+A checkbox in the Colours section, **Images too**, off by default and remembered per frame. When on, applying a family also gives every image and wired-image layer a **gradient map** effect (the per-layer effect that already exists) whose stops are the family's colours in lightness order at even positions, mix 1. It rides in the same undo step. The recolour owns only the maps it added (their ids are remembered as `sailor_recolour.imageEffects`); re-applying updates them in place, turning the option off and re-applying removes them, and a gradient map the user added by hand is never touched. Reassigning a slot does not touch image maps. Photos are not slots: their map is derived from the family, so the walker still ignores effect colours. Taste call left open: whether the map should use every family colour (a tonal ramp through the palette, shipped) or only its two extremes (a duotone).
+
 ## Out of scope, named
 
 Hover-preview (no preview-without-commit infrastructure exists); locks; recolouring effects and shader parameters; a per-layer "exclude from recolour" flag; the agent verb ("recolour this in blues") — one line once the pure functions exist, deferred to keep this slice small.
