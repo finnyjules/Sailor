@@ -37,6 +37,8 @@ import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import { useLocalLayerEditor, resizableKind, cornerResizableKind } from '~/composables/useLocalLayerEditor'
+import { useLayoutSheet } from '~/composables/useLayoutSheet'
+import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
@@ -645,6 +647,16 @@ const {
   fillGridWithSections, resnapSelected,
   drawSectionActive, setDrawSectionActive, finishDrawSection,
 } = editor
+
+// Layout tab — the poster engine's sheet over this frame's own elements.
+const layoutSheet = useLayoutSheet({
+  props: () => compositor.value?.data?.properties as Record<string, unknown> | undefined,
+  frameW: () => canvasDisplay.w,
+  frameH: () => canvasDisplay.h,
+  connectedSlots: () => connectedSlots0.value,
+  editor: () => editor,
+  remember: (s) => { const n = compositor.value; if (!n) return; const p = (n.data.properties ||= {}); (p as any).sailor_posterState = s },
+})
 
 // Region-count cap for "Fill grid with sections": a dense generated/explicit
 // grid (say 12×8) can resolve to dozens of cells — stamping a rect per cell past
@@ -3136,7 +3148,7 @@ function exitMotionPreview() {
 // ── Design | Motion inspector tabs (3D Studio Build|Motion idiom) ───────────
 // Motion active ⇔ motion mode: the docked timeline replaces the bottom
 // toolbar cluster and the inspector shows animation controls.
-const inspectorTab = ref<'design' | 'motion'>('design')
+const inspectorTab = ref<'design' | 'motion' | 'layout'>('design')
 watch(inspectorTab, (tab) => {
   if (tab === 'motion') { if (previewT.value == null) scrubTo(0) }
   else exitMotionPreview()
@@ -6990,6 +7002,9 @@ onUnmounted(() => {
           <button type="button" class="flex-1 rounded px-2 py-1 cursor-pointer"
                   :class="inspectorTab === 'motion' ? 'bg-white/15 text-white' : 'text-white/55 hover:text-white/80'"
                   @click="inspectorTab = 'motion'">Motion</button>
+          <button type="button" class="flex-1 rounded px-2 py-1 cursor-pointer" data-testid="layout-tab"
+                  :class="inspectorTab === 'layout' ? 'bg-white/15 text-white' : 'text-white/55 hover:text-white/80'"
+                  @click="inspectorTab = 'layout'">Layout</button>
         </div>
       </div>
       <!-- Assistant: the agent's progress / proposed changes take over the inspector. -->
@@ -7154,6 +7169,35 @@ onUnmounted(() => {
             :disabled="!genHasMask || !regionPrompt.trim() || inpaint.busy.value" @click="runRegionEdit">
             {{ inpaint.busy.value ? 'Generating…' : 'Generate' }}</button>
           <p v-if="inpaint.error.value" class="text-[11px] text-rose-300/90">{{ inpaint.error.value }}</p>
+        </div>
+      </template>
+
+      <!-- Layout tab: the poster engine's sheet. Every tile arranges THIS frame's
+           own elements (face, weight, colour, content untouched); click applies it
+           as one undo step; Another re-rolls the seed; More narrows to one pattern. -->
+      <template v-else-if="inspectorTab === 'layout'">
+        <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+          <LayoutGrid class="size-3.5 text-white/70" />
+          <span class="text-sm font-medium">{{ layoutSheet.focus.value ? 'More like this' : 'Frame layout' }}</span>
+        </div>
+        <div data-testid="layout-sheet" class="p-4 flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
+          <p v-if="!layoutSheet.tiles.value.length" class="text-xs text-white/40 italic">Add a text layer to get layout options. The largest text is read as the title.</p>
+          <template v-else>
+            <p class="text-[11px] text-white/45">Your elements, arranged. Faces, weights and colours stay as you set them.</p>
+            <div class="grid grid-cols-2 gap-3 justify-items-center">
+              <LayoutTile
+                v-for="t in layoutSheet.tiles.value" :key="t.patternId + ':' + t.seed"
+                :plan="t.plan" :frame-w="canvasDisplay.w" :frame-h="canvasDisplay.h"
+                :background="background" :groups="localGroups" :label="t.name"
+                :selected="(compositor?.data?.properties as any)?.sailor_posterState?.patternId === t.patternId && (compositor?.data?.properties as any)?.sailor_posterState?.seed === t.seed"
+                @pick="layoutSheet.apply(t)" @more="layoutSheet.moreLikeThis(t)"
+              />
+            </div>
+            <div class="flex gap-2 pt-1">
+              <StudioButton v-if="layoutSheet.focus.value" variant="secondary" class="flex-1" data-testid="layout-back" @click="layoutSheet.back()">All layouts</StudioButton>
+              <StudioButton variant="secondary" class="flex-1" data-testid="layout-another" @click="layoutSheet.another()">Another</StudioButton>
+            </div>
+          </template>
         </div>
       </template>
 
