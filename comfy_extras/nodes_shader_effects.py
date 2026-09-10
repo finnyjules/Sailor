@@ -207,6 +207,7 @@ def catalog_payload() -> dict:
             "animated": eff.animated,
             "passes": eff.passes,
             "generative": eff.generative,
+            "followsShape": eff.follows_shape,
             "centerParam": eff.center_param,
             "textures": [{**t, "v": _texture_version(t["file"])} for t in eff.textures],
             "params": [_param_payload(p) for p in eff.params],

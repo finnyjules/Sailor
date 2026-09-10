@@ -13,8 +13,10 @@ layout(location = 0) out vec4 fragColor0;
 // A port of the Shaders.com "Glass" component (circle shape); its default preset
 // is the "Fluid Chrome" design.
 //
-// Used as a Frame lens, the whole backdrop is the input and the layer's own shape
-// clips the result afterwards, so Center and Radius describe where the glass sits.
+// Used as a Frame lens, the whole backdrop is the input and the Frame also hands
+// over the layer's silhouette as a soft height field (u_shape), so the rim, bend and
+// highlight follow the real shape; Center and Radius then describe only the
+// stand-alone circle (u_hasShape = 0).
 
 uniform float u_centerX;         // lens centre
 uniform float u_centerY;
@@ -33,6 +35,16 @@ uniform float u_fresnel;         // even glow around the rim
 uniform float u_fresnelSoftness; // how far the glow reaches inward
 uniform vec3  u_fresnelColor;
 uniform float u_cutout;          // 0 keep the input outside the glass, 1 make it transparent
+
+// Supplied by the Frame when the effect follows a layer's shape (manifest followsShape):
+// a blurred silhouette (0 outside, 1 deep inside, 0.5 on the edge), plus the shape's
+// centre (texture space, y up) and its half short side as a fraction of the shorter
+// canvas side, which stands in for Radius.
+uniform sampler2D u_shape;
+uniform float u_hasShape;
+uniform float u_shapeCX;
+uniform float u_shapeCY;
+uniform float u_shapeSize;
 
 vec3 sampleLens(vec2 uv, float px) {
     // A small disc blur for frosting; a single tap when clear.
@@ -56,20 +68,38 @@ void main() {
     float shortSide = min(u_resolution.x, u_resolution.y);
     vec2 asp = u_resolution / shortSide;
     vec2 p = v_texCoord * asp;
-    vec2 c = vec2(u_centerX, u_centerY) * asp;
-    float R = max(u_radius, 0.001);
+    vec2 c, n, rel;
+    float R, cover, depth;
+    if (u_hasShape > 0.5) {
+        // Shape mode: the height field carries the edge. Its blur radius is the glass
+        // thickness, so 0.5 is the rim and 1.0 is one thickness inside.
+        c = vec2(u_shapeCX, u_shapeCY) * asp;
+        R = max(u_shapeSize, 0.001);
+        rel = p - c;
+        float h = texture(u_shape, v_texCoord).r;
+        vec2 px = 1.5 / u_resolution;
+        float gx = texture(u_shape, v_texCoord + vec2(px.x, 0.0)).r - texture(u_shape, v_texCoord - vec2(px.x, 0.0)).r;
+        float gy = texture(u_shape, v_texCoord + vec2(0.0, px.y)).r - texture(u_shape, v_texCoord - vec2(0.0, px.y)).r;
+        vec2 g = vec2(gx, gy) / asp;        // gradient in the round space; points inward
+        float gl = length(g);
+        n = gl > 1e-6 ? -g / gl : vec2(0.0, 1.0);
+        depth = clamp((h - 0.5) * 2.0, 0.0, 1.0);
+        cover = smoothstep(0.5 - 0.25 * max(u_edgeSoftness, 0.004), 0.5, h);
+    } else {
+        c = vec2(u_centerX, u_centerY) * asp;
+        R = max(u_radius, 0.001);
+        rel = p - c;
+        float r = length(rel);
+        n = r > 1e-5 ? rel / r : vec2(0.0, 1.0);
+        float d = r - R;                      // signed distance to the rim, negative inside
 
-    vec2 rel = p - c;
-    float r = length(rel);
-    vec2 n = r > 1e-5 ? rel / r : vec2(0.0, 1.0);
-    float d = r - R;                          // signed distance to the rim, negative inside
+        // Coverage: solid inside, fading over the edge softness.
+        float soft = max(u_edgeSoftness, 0.001) * R;
+        cover = 1.0 - smoothstep(0.0, soft, d);
 
-    // Coverage: solid inside, fading over the edge softness.
-    float soft = max(u_edgeSoftness, 0.001) * R;
-    float cover = 1.0 - smoothstep(0.0, soft, d);
-
-    // Bend: zero at the centre, strongest at the rim, over the glass thickness.
-    float depth = clamp(-d / (max(u_thickness, 0.001) * R), 0.0, 1.0);
+        // Bend: zero at the centre, strongest at the rim, over the glass thickness.
+        depth = clamp(-d / (max(u_thickness, 0.001) * R), 0.0, 1.0);
+    }
     float bend = 1.0 - depth;
     bend = bend * bend;
 

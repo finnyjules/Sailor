@@ -37,6 +37,9 @@ function harnessSupplied(eff: any): Set<string> {
   }
   // Multi-pass effects read the previous pass through u_source.
   if ((eff.passes ?? 1) > 1) out.add('u_source')
+  // A shape-following lens is handed the Frame layer's silhouette and its bounds
+  // (see lensShapeFromSilhouette in useCompositorLayers).
+  if (eff.followsShape) for (const u of ['u_shape', 'u_hasShape', 'u_shapeCX', 'u_shapeCY', 'u_shapeSize']) out.add(u)
   // A `gradient` param binds as three uniforms: the stop colours, their
   // positions, and the count (see cleanStops in app/lib/shaderfx/params.ts).
   for (const p of eff.params ?? []) {

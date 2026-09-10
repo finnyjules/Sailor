@@ -158,6 +158,10 @@ export class ShaderFxRenderer {
   // Bounded so a misbehaving caller leaks at most MAX_EXTRA_TEXTURES GL textures.
   private extraTexCache = new Map<TexImageSource, WebGLTexture>()
   private static readonly MAX_EXTRA_TEXTURES = 32
+  // Live textures (render()'s 5th argument) are the opposite contract: a caller-owned
+  // canvas that changes every call (the Frame's layer silhouette for a shape-following
+  // lens). One GL texture per uniform NAME, re-uploaded every render, LINEAR filtered.
+  private liveTex = new Map<string, WebGLTexture>()
 
   private ensure(width: number, height: number): WebGL2RenderingContext {
     if (!this.gl) {
@@ -281,8 +285,16 @@ export class ShaderFxRenderer {
    */
   get outputCanvas(): HTMLCanvasElement | null { return this.canvas }
 
-  render(passes: ShaderPass[], base: TexImageSource, width: number, height: number): HTMLCanvasElement {
+  render(passes: ShaderPass[], base: TexImageSource, width: number, height: number, live?: Record<string, TexImageSource>): HTMLCanvasElement {
     const gl = this.ensure(width, height)
+    // Upload the live textures once per render (not per pass); bound below by name.
+    const liveUnits: Array<[string, WebGLTexture]> = []
+    for (const [name, src] of Object.entries(live ?? {})) {
+      let tex = this.liveTex.get(name)
+      if (!tex) { tex = gl.createTexture()!; this.liveTex.set(name, tex) }
+      this.uploadTexture(tex, src, true, false)
+      liveUnits.push([name, tex])
+    }
 
     if (!this.baseTex) this.baseTex = gl.createTexture()
     const bw = (base as any).width ?? 0
@@ -427,6 +439,13 @@ export class ShaderFxRenderer {
         if (loc) gl.uniform1i(loc, unit)
         unit++
       }
+      for (const [name, tex] of liveUnits) {
+        gl.activeTexture(gl.TEXTURE0 + unit)
+        gl.bindTexture(gl.TEXTURE_2D, tex)
+        const loc = gl.getUniformLocation(prog, name)
+        if (loc) gl.uniform1i(loc, unit)
+        unit++
+      }
 
       const resLoc = gl.getUniformLocation(prog, 'u_resolution')
       if (resLoc) gl.uniform2f(resLoc, width, height)
@@ -467,6 +486,8 @@ export class ShaderFxRenderer {
     const gl = this.gl
     if (!gl) return
 
+    for (const tex of this.liveTex.values()) gl.deleteTexture(tex)
+    this.liveTex.clear()
     for (const prog of this.programs.values()) gl.deleteProgram(prog.prog)
     this.programs.clear()
     if (this.blit) gl.deleteProgram(this.blit)

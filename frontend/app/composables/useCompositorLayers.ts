@@ -30,7 +30,7 @@ import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
 import { dealShaderFill } from '~/lib/compositor/mosaic'
 import { paintScatter, SCATTER_STYLES, DEFAULT_SCATTER_STYLE, DEFAULT_SCATTER_SEED, type ScatterStyle } from '~/lib/compositor/scatter'
-import { withFieldFrame, renderFieldWithBase, type FieldRequest } from '~/lib/shaderfill/field'
+import { withFieldFrame, renderFieldWithBase, effectFollowsShape, type FieldRequest, type LensShape } from '~/lib/shaderfill/field'
 import {
   hasPaint, resolvePaint, OBJECT_SHADER_FIELD_PX, type ShaderFieldFrameCtx,
 } from '~/lib/paint/resolve'
@@ -4156,6 +4156,52 @@ export function resolveGlassSource<TSource, TItem>(
 // Returns true when it handled the layer (fill refracted; the caller then paints the
 // stroke on top). Returns false — WITHOUT touching `ctx` — when the layer isn't a
 // well-formed glass layer or an offscreen context is unavailable, so the caller can
+/**
+ * The silhouette as what a shape-following lens wants: its bounds (read off a 64 px
+ * thumbnail, so any shape, rotation or mask works and the scan is ~0.2 ms), then a
+ * height field made by blurring the white-on-black silhouette by the glass thickness
+ * — so 0.5 lands on the edge and 1.0 one thickness inside — and the uniforms that
+ * replace the effect's own Center/Radius: the bounds' centre in texture space (y up)
+ * and its half short side as a fraction of the shorter canvas side.
+ */
+function lensShapeFromSilhouette(sil: HTMLCanvasElement, spec: ShaderSpec, w: number, h: number): LensShape | undefined {
+  const T = 64
+  const thumb = document.createElement('canvas')
+  thumb.width = T; thumb.height = T
+  const tctx = thumb.getContext('2d', { willReadFrequently: true })
+  if (!tctx) return undefined
+  tctx.drawImage(sil, 0, 0, T, T)
+  const a = tctx.getImageData(0, 0, T, T).data
+  let x0 = T, y0 = T, x1 = -1, y1 = -1
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    if ((a[(y * T + x) * 4 + 3] ?? 0) > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
+  }
+  if (x1 < 0) return undefined                                    // nothing drawn
+  const sx = w / T, sy = h / T
+  const cx = ((x0 + x1 + 1) / 2) * sx, cy = ((y0 + y1 + 1) / 2) * sy
+  const halfShort = Math.max(Math.min((x1 - x0 + 1) * sx, (y1 - y0 + 1) * sy) / 2, 1)
+  const thickness = Number(spec.params.thickness ?? 0.2)
+  // A gaussian reaches ~1 about two sigmas in, so sigma = half the thickness in pixels.
+  const sigma = Math.max(Math.min(thickness, 1) * halfShort * 0.5, 0.75)
+  const hf = document.createElement('canvas')
+  hf.width = w; hf.height = h
+  const hctx = hf.getContext('2d')
+  if (!hctx) return undefined
+  hctx.fillStyle = '#000000'; hctx.fillRect(0, 0, w, h)
+  hctx.filter = `blur(${sigma}px)`
+  hctx.drawImage(sil, 0, 0)
+  hctx.filter = 'none'
+  return {
+    texture: hf,
+    uniforms: {
+      u_hasShape: 1,
+      u_shapeCX: cx / w,
+      u_shapeCY: 1 - cy / h,
+      u_shapeSize: halfShort / Math.min(w, h),
+    },
+  }
+}
+
 // fall back to the normal paint path. renderFieldWithBase THROWS on a catalog miss;
 // the caller wraps this call in try/catch and treats a throw the same as `false`.
 function applyGlassFromLayer(
@@ -4208,9 +4254,27 @@ function applyGlassFromLayer(
     return c
   })
 
-  // 2. Refract: run the source through the shader as its input texture. render()'s
+  // 2. The layer's own silhouette (+ its own mask ref, mirroring applyBackdropBlur).
+  //    The ghost uses an opaque solid fill so this is the pane's SHAPE alpha, not the
+  //    shader's (possibly transparent) output alpha. Built before the render because a
+  //    shape-following lens (manifest `followsShape`, e.g. Glass lens) is handed it as a
+  //    soft height field, so its rim, bend and highlight run along the real edge —
+  //    a rectangle stays a rectangle — instead of the effect's own stand-alone circle.
+  const sil = mk()
+  const silctx = sil.getContext('2d')
+  if (!silctx) return false
+  silctx.setTransform(t)
+  const ghost = { ...layer, fill: '#ffffff', opacity: 1, effects: undefined, blend: undefined } as LocalLayer
+  const maskRef = layerMaskRef(layer)
+  const maskLayer = maskRef?.startsWith('l:')
+    ? localLayers.find(l => l.id === maskRef.slice(2)) ?? null
+    : null
+  drawLocalLayer(silctx, ghost, W, H, maskLayer)
+  const shape = effectFollowsShape(spec) ? lensShapeFromSilhouette(sil, spec, w, h) : undefined
+
+  // 3. Refract: run the source through the shader as its input texture. render()'s
   //    canvas is valid only until the next render call, so copy it out immediately.
-  const lens = renderFieldWithBase(spec, source, w, h)
+  const lens = renderFieldWithBase(spec, source, w, h, shape)
   const clipped = mk()
   const cctx = clipped.getContext('2d')
   if (!cctx) return false
@@ -4235,7 +4299,7 @@ function applyGlassFromLayer(
       kctx.fillStyle = '#000000'; kctx.fillRect(0, 0, w, h)   // opaque black behind
       // render()'s canvas is reused per call — this invalidates `lens`, but it is already
       // copied into `clipped`; copy covLens out at once, before any further render.
-      const covLens = renderFieldWithBase(spec, cov, w, h)
+      const covLens = renderFieldWithBase(spec, cov, w, h, shape)
       const cl = mk()
       const clc = cl.getContext('2d')
       if (clc) {
@@ -4252,23 +4316,11 @@ function applyGlassFromLayer(
     }
   }
 
-  // 3. Clip the refracted result to this layer's own silhouette (+ its own mask ref,
-  //    mirroring applyBackdropBlur). The ghost uses an opaque solid fill so the clip is
-  //    the pane's SHAPE alpha, not the shader's (possibly transparent) output alpha.
-  const sil = mk()
-  const silctx = sil.getContext('2d')
-  if (!silctx) return false
-  silctx.setTransform(t)
-  const ghost = { ...layer, fill: '#ffffff', opacity: 1, effects: undefined, blend: undefined } as LocalLayer
-  const maskRef = layerMaskRef(layer)
-  const maskLayer = maskRef?.startsWith('l:')
-    ? localLayers.find(l => l.id === maskRef.slice(2)) ?? null
-    : null
-  drawLocalLayer(silctx, ghost, W, H, maskLayer)
+  // 4. Clip the refracted result to the silhouette from step 2.
   cctx.globalCompositeOperation = 'destination-in'
   cctx.drawImage(sil, 0, 0)
 
-  // 4. Stamp back in device space, honouring the layer's opacity (and group cascade)
+  // 5. Stamp back in device space, honouring the layer's opacity (and group cascade)
   //    and its blend op — exactly the stamp drawLocalLayer uses for a masked layer.
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)

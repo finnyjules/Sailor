@@ -75,6 +75,8 @@ class Effect:
     params: list[EffectParam]
     source: str
     generative: bool = False
+    # A lens effect that can take a layer's silhouette from the Frame (u_shape and friends).
+    follows_shape: bool = False
 
 
 @dataclass
@@ -141,6 +143,7 @@ def load_catalog(refresh: bool = False) -> Catalog:
             animated=entry["animated"],
             passes=entry.get("passes", 1),
             generative=entry.get("generative", False),
+            follows_shape=entry.get("followsShape", False),
             center_param=entry.get("centerParam"),
             textures=entry.get("textures", []),
             params=params,

@@ -542,20 +542,39 @@ function buildPasses(effect: EffectDef, spec: ShaderSpec, t: number): ShaderPass
  * bake call site already does elsewhere in this module: don't call this before the
  * shaderfx catalog has loaded (`await fetchShaderFxCatalog()` / `onFieldCatalogReady`).
  */
+/**
+ * What the Frame hands a shape-following lens (an effect whose manifest says
+ * `followsShape`): the layer's silhouette as a soft height field bound as `u_shape`
+ * (0 outside, 1 deep inside, 0.5 on the edge — blurred by the glass thickness), and
+ * the uniforms that stand in for the effect's own centre and radius. Built by
+ * `applyGlassFromLayer`; consumed only through `renderFieldWithBase`.
+ */
+export interface LensShape {
+  texture: HTMLCanvasElement | OffscreenCanvas
+  uniforms: Record<string, number>
+}
+
+/** True when `spec`'s effect can take a layer silhouette (manifest `followsShape`). */
+export function effectFollowsShape(spec: ShaderSpec): boolean {
+  return resolve(spec).effect?.followsShape === true
+}
+
 export function renderFieldWithBase(
   spec: ShaderSpec,
   base: HTMLCanvasElement | OffscreenCanvas,
   w: number,
   h: number,
+  shape?: LensShape,
 ): HTMLCanvasElement {
   const { effect, spec: resolvedSpec } = resolve(spec)
   if (!effect) {
     throw new Error(`renderFieldWithBase: effect "${spec.effectId}" is not in the loaded shaderfx catalog`)
   }
-  const passes = buildPasses(effect, resolvedSpec, 0)
+  let passes = buildPasses(effect, resolvedSpec, 0)
+  if (shape) passes = passes.map(p => ({ ...p, uniforms: { ...p.uniforms, ...shape.uniforms } }))
   // render() RETURNS the canvas, valid only until the next render call — same
   // ownership contract as resolveField's `rendered` below.
-  return shaderFx.render(passes, base, w, h)
+  return shaderFx.render(passes, base, w, h, shape ? { u_shape: shape.texture } : undefined)
 }
 
 export function resolveField(req: FieldRequest, token?: number): HTMLCanvasElement | null {

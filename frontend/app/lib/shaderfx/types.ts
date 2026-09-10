@@ -58,6 +58,8 @@ export interface EffectDef {
   params: EffectParamDef[]
   source: string
   generative?: boolean
+  /** A lens that takes the Frame layer's silhouette (u_shape + u_hasShape/u_shapeCX/u_shapeCY/u_shapeSize). */
+  followsShape?: boolean
 }
 
 export interface ShaderFxCatalog {
