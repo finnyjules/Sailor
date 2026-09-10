@@ -81,16 +81,16 @@ void main() {
     vec2 c, rel;
     float R, cover, depth;
     if (u_hasShape > 0.5) {
-        // Shape mode: the Frame blurs the silhouette across the whole shape (no
-        // thickness dial here), so the height field reads as depth from the edge —
-        // 0.5 on the outline, rising toward the middle — and the rings below follow
-        // the outline rather than a circle.
+        // Shape mode. R is the rim field (0.5 on the outline, blurred inward); G is
+        // the true distance to the outline, 0 on the edge and 1 at the deepest point.
+        // Coverage and the facet rings read G, so a star's thin arms are covered
+        // and ringed like the rest; the fresnel rim reads R.
         c = vec2(u_shapeCX, u_shapeCY) * asp;
         R = max(u_shapeSize, 0.001);
         rel = p - c;
-        float h = texture(u_shape, v_texCoord).r;
-        depth = clamp((h - 0.5) * 2.0, 0.0, 1.0);
-        cover = smoothstep(0.5 - 0.25 * max(u_edgeSoftness, 0.004), 0.5, h);
+        vec4 sh = texture(u_shape, v_texCoord);
+        depth = clamp((sh.r - 0.5) * 2.0, 0.0, 1.0);
+        cover = smoothstep(0.0, 0.03, sh.g);
     } else {
         c = vec2(u_centerX, u_centerY) * asp;
         R = max(u_radius, 0.001);
@@ -111,7 +111,7 @@ void main() {
     float r = length(rel);
     // How far out this pixel sits, 0 at the middle and 1 on the outline: the
     // circle's own radius stand-alone, the silhouette's depth when following a shape.
-    float rn = u_hasShape > 0.5 ? clamp(1.0 - depth, 0.0, 1.0) : clamp(r / R, 0.0, 1.0);
+    float rn = u_hasShape > 0.5 ? clamp(1.0 - texture(u_shape, v_texCoord).g, 0.0, 1.0) : clamp(r / R, 0.0, 1.0);
     float ang = atan(rel.y, rel.x);
     float n = max(floor(u_facets + 0.5), 3.0);
     float seg = TAU / n;

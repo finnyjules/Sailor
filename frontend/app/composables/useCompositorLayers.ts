@@ -4157,15 +4157,24 @@ export function resolveGlassSource<TSource, TItem>(
 // stroke on top). Returns false — WITHOUT touching `ctx` — when the layer isn't a
 // well-formed glass layer or an offscreen context is unavailable, so the caller can
 /**
- * The silhouette as what a shape-following lens wants: its bounds (read off a 64 px
- * thumbnail, so any shape, rotation or mask works and the scan is ~0.2 ms), then a
- * height field made by blurring the white-on-black silhouette by the glass thickness
- * — so 0.5 lands on the edge and 1.0 one thickness inside — and the uniforms that
- * replace the effect's own Center/Radius: the bounds' centre in texture space (y up)
- * and its half short side as a fraction of the shorter canvas side.
+ * The silhouette as what a shape-following lens wants, packed into one texture:
+ *
+ *  R — the RIM field: the white-on-black silhouette blurred by the glass thickness,
+ *      so 0.5 lands on the edge and 1.0 one thickness inside. Its gradient is the
+ *      edge normal and it drives the rim band of a glass pane.
+ *  G — the DEPTH field: the true distance to the outline (a chamfer transform on a
+ *      128 px thumbnail, scaled back up), 0 on the edge and 1 at the deepest point.
+ *      Coverage and anything concentric to the outline (Crystal's facet rings) read
+ *      this one. A blur cannot stand in for it: on a star the thin arms blur away
+ *      below the halfway level, and a lens reading the blur painted only a round
+ *      blob in the middle while the arms showed the plain backdrop.
+ *
+ * Plus the uniforms that replace the effect's own Center/Radius: the bounds' centre
+ * in texture space (y up) and its half short side as a fraction of the shorter canvas
+ * side. Bounds come off the same thumbnail, so any shape, rotation or mask works.
  */
 function lensShapeFromSilhouette(sil: HTMLCanvasElement, spec: ShaderSpec, w: number, h: number): LensShape | undefined {
-  const T = 64
+  const T = 128
   const thumb = document.createElement('canvas')
   thumb.width = T; thumb.height = T
   const tctx = thumb.getContext('2d', { willReadFrequently: true })
@@ -4173,17 +4182,45 @@ function lensShapeFromSilhouette(sil: HTMLCanvasElement, spec: ShaderSpec, w: nu
   tctx.drawImage(sil, 0, 0, T, T)
   const a = tctx.getImageData(0, 0, T, T).data
   let x0 = T, y0 = T, x1 = -1, y1 = -1
+  const inside = new Uint8Array(T * T)
   for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
-    if ((a[(y * T + x) * 4 + 3] ?? 0) > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
+    if ((a[(y * T + x) * 4 + 3] ?? 0) > 127) {
+      inside[y * T + x] = 1
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y
+    }
   }
   if (x1 < 0) return undefined                                    // nothing drawn
   const sx = w / T, sy = h / T
   const cx = ((x0 + x1 + 1) / 2) * sx, cy = ((y0 + y1 + 1) / 2) * sy
   const halfShort = Math.max(Math.min((x1 - x0 + 1) * sx, (y1 - y0 + 1) * sy) / 2, 1)
-  // The field's reach is the effect's Thickness when it has one (Glass lens: the bend
-  // lives in a rim band); an effect without one (Crystal) gets the whole shape, so its
-  // field reads as depth from the outline and its facet rings follow the outline.
-  const thickness = Number(spec.params.thickness ?? 1)
+
+  // Depth: a two-pass chamfer distance (3-4 weights) from the nearest outside pixel,
+  // normalised by its maximum. Thumbnail-sized, so it costs well under a millisecond.
+  const BIG = 1e9
+  const dist = new Float32Array(T * T)
+  for (let i = 0; i < T * T; i++) dist[i] = inside[i] ? BIG : 0
+  const at = (x: number, y: number) => (x < 0 || y < 0 || x >= T || y >= T) ? 0 : dist[y * T + x]!
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const i = y * T + x
+    if (!inside[i]) continue
+    dist[i] = Math.min(dist[i]!, at(x - 1, y) + 3, at(x, y - 1) + 3, at(x - 1, y - 1) + 4, at(x + 1, y - 1) + 4)
+  }
+  let maxD = 0
+  for (let y = T - 1; y >= 0; y--) for (let x = T - 1; x >= 0; x--) {
+    const i = y * T + x
+    if (!inside[i]) continue
+    dist[i] = Math.min(dist[i]!, at(x + 1, y) + 3, at(x, y + 1) + 3, at(x + 1, y + 1) + 4, at(x - 1, y + 1) + 4)
+    if (dist[i]! > maxD) maxD = dist[i]!
+  }
+  const dimg = tctx.createImageData(T, T)
+  for (let i = 0; i < T * T; i++) {
+    const v = maxD > 0 ? Math.round(255 * dist[i]! / maxD) : 0
+    dimg.data[i * 4] = v; dimg.data[i * 4 + 1] = v; dimg.data[i * 4 + 2] = v; dimg.data[i * 4 + 3] = 255
+  }
+  tctx.putImageData(dimg, 0, 0)
+
+  // Rim: blur by the effect's Thickness (a fifth of the half short side when it has none).
+  const thickness = Number(spec.params.thickness ?? 0.2)
   // A gaussian reaches ~1 about two sigmas in, so sigma = half the thickness in pixels.
   const sigma = Math.max(Math.min(thickness, 1) * halfShort * 0.5, 0.75)
   const hf = document.createElement('canvas')
@@ -4194,6 +4231,21 @@ function lensShapeFromSilhouette(sil: HTMLCanvasElement, spec: ShaderSpec, w: nu
   hctx.filter = `blur(${sigma}px)`
   hctx.drawImage(sil, 0, 0)
   hctx.filter = 'none'
+  // Keep the rim in R only, then add the depth in G: two GPU-side composites, no readback.
+  hctx.globalCompositeOperation = 'multiply'
+  hctx.fillStyle = '#ff0000'; hctx.fillRect(0, 0, w, h)
+  const dg = document.createElement('canvas')
+  dg.width = w; dg.height = h
+  const dctx = dg.getContext('2d')
+  if (dctx) {
+    dctx.imageSmoothingEnabled = true
+    dctx.drawImage(thumb, 0, 0, w, h)
+    dctx.globalCompositeOperation = 'multiply'
+    dctx.fillStyle = '#00ff00'; dctx.fillRect(0, 0, w, h)
+    hctx.globalCompositeOperation = 'lighter'
+    hctx.drawImage(dg, 0, 0)
+  }
+  hctx.globalCompositeOperation = 'source-over'
   return {
     texture: hf,
     uniforms: {

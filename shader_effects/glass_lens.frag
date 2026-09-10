@@ -76,7 +76,8 @@ void main() {
         c = vec2(u_shapeCX, u_shapeCY) * asp;
         R = max(u_shapeSize, 0.001);
         rel = p - c;
-        float h = texture(u_shape, v_texCoord).r;
+        vec4 sh = texture(u_shape, v_texCoord);
+        float h = sh.r;
         vec2 px = 1.5 / u_resolution;
         float gx = texture(u_shape, v_texCoord + vec2(px.x, 0.0)).r - texture(u_shape, v_texCoord - vec2(px.x, 0.0)).r;
         float gy = texture(u_shape, v_texCoord + vec2(0.0, px.y)).r - texture(u_shape, v_texCoord - vec2(0.0, px.y)).r;
@@ -84,7 +85,9 @@ void main() {
         float gl = length(g);
         n = gl > 1e-6 ? -g / gl : vec2(0.0, 1.0);
         depth = clamp((h - 0.5) * 2.0, 0.0, 1.0);
-        cover = smoothstep(0.5 - 0.25 * max(u_edgeSoftness, 0.004), 0.5, h);
+        // Coverage reads the true distance field (G), not the blurred rim: a thin
+        // arm of a star blurs below the halfway level and would otherwise drop out.
+        cover = smoothstep(0.0, 0.03, sh.g);
     } else {
         c = vec2(u_centerX, u_centerY) * asp;
         R = max(u_radius, 0.001);
