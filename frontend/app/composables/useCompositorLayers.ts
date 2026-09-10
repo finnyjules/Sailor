@@ -26,6 +26,7 @@ import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
+import { clipFrameIndex, clipFrameUrl, clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
 import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
 import { dealShaderFill } from '~/lib/compositor/mosaic'
@@ -545,6 +546,10 @@ export interface ImageLayer extends LayerCommon {
   tintBlend?: string      // blend mode for the tint (same names as layer blend)
   tintOpacity?: number    // 0..1 tint strength; default 1
   displaceMap?: DisplaceMapSpec // present ⇒ layer is a lens warping everything below
+  /** Living image: a looping frame sequence made from this still (see lib/compositor/clip).
+   *  Absent ⇒ the layer is exactly the still. `filename` stays the still and paints while
+   *  the clip loads or if its folder is gone. */
+  clip?: ImageClip
 }
 
 /**
@@ -1092,6 +1097,64 @@ export function imageLayerUrl(filename: string): string {
   return `/view?${new URLSearchParams({ filename, type: 'input' })}`
 }
 
+// ── Living-image clip frames ─────────────────────────────────────────────────
+// Keyed by clip dir. A folder loads ONCE (all frames, in order); until every frame is
+// in, the layer keeps painting its still, so a half-loaded clip never flickers.
+const _clipCache = new Map<string, HTMLImageElement[]>()
+const _clipLoading = new Map<string, Promise<void>>()
+const CLIP_LOAD_PARALLEL = 8
+
+function loadOne(url: string): Promise<HTMLImageElement | null> {
+  return new Promise((res) => {
+    const im = new Image()
+    im.onload = () => res(im)
+    im.onerror = () => res(null)
+    im.src = url
+  })
+}
+
+async function loadClip(clip: ImageClip): Promise<void> {
+  const out: (HTMLImageElement | null)[] = new Array(clip.frames).fill(null)
+  let next = 0
+  const worker = async () => {
+    while (next < clip.frames) { const i = next++; out[i] = await loadOne(clipFrameUrl(clip, i)) }
+  }
+  await Promise.all(Array.from({ length: Math.min(CLIP_LOAD_PARALLEL, clip.frames) }, worker))
+  // One missing frame = a broken folder: keep the still rather than a stuttering loop.
+  if (out.every(Boolean)) _clipCache.set(clip.dir, out as HTMLImageElement[])
+}
+
+function ensureClip(clip: ImageClip): Promise<void> {
+  if (_clipCache.has(clip.dir)) return Promise.resolve()
+  let p = _clipLoading.get(clip.dir)
+  if (!p) {
+    p = loadClip(clip).finally(() => _clipLoading.delete(clip.dir))
+    _clipLoading.set(clip.dir, p)
+  }
+  return p
+}
+
+/** The frame a living image shows at `tSec` for clone `k` of `n`, or null when the
+ *  layer has no clip or its frames are not all loaded yet (paint the still then). */
+export function clipFrameFor(layer: LocalLayer, tSec: number, k: number, n: number): HTMLImageElement | null {
+  if (layer.kind !== 'image' || !layer.clip) return null
+  const frames = _clipCache.get(layer.clip.dir)
+  if (!frames || !frames.length) return null
+  return frames[clipFrameIndex(layer.clip, tSec, k, n, layer.cloner?.phase ?? 1)] ?? null
+}
+
+/** One clock per living image, in the shape `deriveMasterClock` takes. Played length,
+ *  so a slowed clip still completes whole cycles in the export. */
+export function clipClocks(layers: LocalLayer[]): { duration: number; fps: number }[] {
+  const out: { duration: number; fps: number }[] = []
+  for (const l of layers) {
+    if (l.kind !== 'image' || !l.clip) continue
+    const duration = clipPlayedSeconds(l.clip)
+    if (duration > 0) out.push({ duration, fps: l.clip.fps })
+  }
+  return out
+}
+
 /** Every ImageFill `src` referenced by a layer's fill or stroke, de-duplicated.
  *  Drives the preload so the synchronous resolve arm has the bitmap in hand. */
 export function collectFillImageSrcs(layers: LocalLayer[]): string[] {
@@ -1105,20 +1168,23 @@ export function collectFillImageSrcs(layers: LocalLayer[]): string[] {
 }
 
 /** Preload every image layer's bitmap into the module cache so the synchronous
- *  `drawLocalLayer` can paint it. Resolves once all are loaded (or errored). */
+ *  `drawLocalLayer` can paint it. Resolves once all are loaded (or errored). Also
+ *  loads each image layer's clip frames (see above), when it has one. */
 export async function ensureLayerImages(layers: LocalLayer[]): Promise<void> {
   if (typeof window === 'undefined') return
   const jobs: Promise<unknown>[] = []
   for (const layer of layers) {
     if (layer.kind !== 'image') continue
     const url = imageLayerUrl(layer.filename)
-    if (_imageCache.get(url)?.complete) continue
-    jobs.push(new Promise((res) => {
-      const im = new Image()
-      im.onload = () => { _imageCache.set(url, im); res(null) }
-      im.onerror = () => res(null)
-      im.src = url
-    }))
+    if (!_imageCache.get(url)?.complete) {
+      jobs.push(new Promise((res) => {
+        const im = new Image()
+        im.onload = () => { _imageCache.set(url, im); res(null) }
+        im.onerror = () => res(null)
+        im.src = url
+      }))
+    }
+    if (layer.clip && layer.clip.frames > 0) jobs.push(ensureClip(layer.clip))
   }
   jobs.push(ensureFillBitmaps(collectFillImageSrcs(layers)))
   if (jobs.length) await Promise.all(jobs)
@@ -1150,6 +1216,10 @@ export async function ensureLayerImages(layers: LocalLayer[]): Promise<void> {
 // capture points are here (before every `applyXform`, and before the background's own
 // center translate).
 let _fieldCtx: ShaderFieldFrameCtx = { frameW: 1, frameH: 1, t: 0, fps: 30, base: null, bake: false, token: 0 }
+
+/** The clone being painted right now (set by paintLayer's cloner loop, read by the
+ *  image branch of drawLayerContent). Outside a cloner loop it is the original alone. */
+let _cloneSlot = { k: 0, n: 1 }
 
 // Frame slice F3: the current stack's sibling-outline resolver, bound to the live layer list at
 // paintLayerStack time (module-global like `_fieldCtx`, for the same reason: `drawLayerContent`
@@ -2260,6 +2330,7 @@ function paintLayer(
   // offset/rotation/scale fold into the layer's own translate/rotate/scale so
   // the rotation+scale pivot stays the layer center.
   for (const c of expandClones(layer.cloner, W / H)) {
+    _cloneSlot = { k: c.k, n: c.n }
     const lx = layer.x + c.dx
     const ly = layer.y + c.dy
     const lrot = layer.rotation + c.drot
@@ -2430,6 +2501,7 @@ function paintLayer(
     drawContent(ctx)
     ctx.restore()
   }
+  _cloneSlot = { k: 0, n: 1 }
 }
 
 /**
@@ -3291,7 +3363,11 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     if (dash) ctx.setLineDash([])
   } else if (layer.kind === 'image') {
     const w = layer.w * W, h = layer.h * W
-    const img = _imageCache.get(imageLayerUrl(layer.filename))
+    // A living image draws the frame for the paint clock (`_fieldCtx.t`, set by
+    // paintLayerStack) offset by the clone being painted; without a clip, or until
+    // every frame is loaded, `clipFrameFor` is null and the still paints exactly as before.
+    const img = clipFrameFor(layer, _fieldCtx.t, _cloneSlot.k, _cloneSlot.n)
+      ?? _imageCache.get(imageLayerUrl(layer.filename))
     if (img && img.complete && img.naturalWidth) {
       if (hasPaint(layer.tint)) drawTintedImage(ctx, img, layer, w, h)
       else ctx.drawImage(img, -w / 2, -h / 2, w, h)
