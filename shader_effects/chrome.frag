@@ -66,6 +66,29 @@ float bevelSin(float t, float shape) {
     return mix(round, machined, shape);
 }
 
+// The silhouette's distance field (G channel), heavily blurred to erase the 128px thumbnail's
+// facets. The distance field is low-frequency, so a wide two-ring 21-tap blur is safe and makes
+// the dome and bevel read as one smooth pillow instead of a bilinear-upscaled terrace.
+float dfield(vec2 uv) {
+    vec2 r = 7.0 / u_resolution;
+    vec2 d = r * 0.70711;                         // diagonal taps at the same radius
+    float s = texture(u_shape, uv).g * 2.0;
+    s += texture(u_shape, uv + vec2(r.x, 0.0)).g + texture(u_shape, uv - vec2(r.x, 0.0)).g
+       + texture(u_shape, uv + vec2(0.0, r.y)).g + texture(u_shape, uv - vec2(0.0, r.y)).g
+       + texture(u_shape, uv + d).g + texture(u_shape, uv - d).g
+       + texture(u_shape, uv + vec2(d.x, -d.y)).g + texture(u_shape, uv + vec2(-d.x, d.y)).g;
+    return s / 10.0;
+}
+
+// The surface HEIGHT as a function of distance-from-edge d (0 at the outline, 1 deepest). A
+// convex dome: rises from the edge and levels at the interior. The normal comes from this
+// height's SCREEN-space gradient (below), which stays smooth across the shape's medial axis —
+// where the raw distance-field gradient flips and would crease the surface into a fan.
+float domeH(float d) {
+    d = clamp(d, 0.0, 1.0);
+    return 1.0 - (1.0 - d) * (1.0 - d);          // parabolic dome: monotonic slope, smooth reflection
+}
+
 // The reflected studio, looked up by a reflection direction d (a unit-ish vec3). A dark
 // graphite room, a bright frontal softbox, a warm strip light at the softbox edge, a cool wash
 // below the horizon, a floor bounce and a lower cool card. A faithful port of the component's
@@ -130,21 +153,26 @@ void main() {
 
     // ---- Where the shape is, how far from its edge, and the outward edge direction ----
     vec2 c, rel, outward;
+    vec2 domeGrad = vec2(0.0);    // screen-space gradient of the height field (the dome)
     float cover, edgeD;            // edgeD: 0 on the outline, 1 at the deepest interior point
     if (u_hasShape > 0.5) {
         c = vec2(u_shapeCX, u_shapeCY) * asp;
         rel = p - c;
-        vec4 sh = texture(u_shape, v_texCoord);
-        // Outward normal from the RIM field (R): blurred at full resolution, so its gradient is
-        // smooth along the edge where the distance field (G) would stair-step (see glass_lens).
-        vec2 px = 1.5 / u_resolution;
-        float gx = texture(u_shape, v_texCoord + vec2(px.x, 0.0)).r - texture(u_shape, v_texCoord - vec2(px.x, 0.0)).r;
-        float gy = texture(u_shape, v_texCoord + vec2(0.0, px.y)).r - texture(u_shape, v_texCoord - vec2(0.0, px.y)).r;
-        vec2 g = vec2(gx, gy) / asp;
-        float gl = length(g);
-        outward = gl > 1e-6 ? -g / gl : vec2(0.0, 1.0);
-        cover = smoothstep(0.0, 0.02 + u_edgeSoftness * 0.08, sh.g);
-        edgeD = sh.g;
+        // edgeD from the BLURRED distance field (dfield erases the thumbnail's steps). Four
+        // neighbour samples serve BOTH the outward direction (raw distance gradient) and the dome
+        // (gradient of the height field domeH) — one set of taps, so the shape branch is 5 dfield
+        // reads, not nine.
+        edgeD = dfield(v_texCoord);
+        vec2 e0 = 10.0 / u_resolution;
+        float dpx = dfield(v_texCoord + vec2(e0.x, 0.0));
+        float dnx = dfield(v_texCoord - vec2(e0.x, 0.0));
+        float dpy = dfield(v_texCoord + vec2(0.0, e0.y));
+        float dny = dfield(v_texCoord - vec2(0.0, e0.y));
+        vec2 grd = vec2(dpx - dnx, dpy - dny) / asp;
+        float gl = length(grd);
+        outward = gl > 1e-6 ? -grd / gl : vec2(0.0, 1.0);    // toward the nearest edge
+        domeGrad = vec2(domeH(dpx) - domeH(dnx), domeH(dpy) - domeH(dny)) / asp;
+        cover = smoothstep(0.0, 0.02 + u_edgeSoftness * 0.08, texture(u_shape, v_texCoord).g);
     } else {
         // As a material with no silhouette handed over — a 3D surface, a Space Type / Shape fill,
         // or the catalog preview — the chrome coats the whole tile: full cover, deep interior
@@ -165,23 +193,30 @@ void main() {
     float flenN = length(relN);
     vec2 rdir = flenN > 1e-5 ? relN / flenN : vec2(0.0, 1.0);
 
-    // ---- The polished bevel: a light line following the outline ----
-    float bw = max(u_bevelWidth, 0.005) * 2.0;           // bevel width in edgeD units
+    // ---- The polished bevel + convex dome, both inflated from the distance field ----
+    // The bevel is a machined rim profile over the outer edgeD band; the dome puffs the whole
+    // face from every edge and lies flat at the deepest interior (where it faces the viewer and
+    // catches the softbox). Both lean along `outward` (the smoothed distance-field gradient), so
+    // the surface reads as one pillow that follows the shape. No waviness on the rim line and no
+    // fade onto the face — those flattened and scraggled the earlier version.
+    float bw = max(u_bevelWidth, 0.005) * 3.0;           // bevel width in edgeD units
     float t0 = clamp(edgeD / bw, 0.0, 1.0);              // 0 at the outline, 1 at the flat face
-    // Waviness wobbles the bevel light line: strongest across the middle of the bevel.
-    float rimN = vnoise(relN * 4.6) - 0.5;
-    float tw = clamp(t0 + rimN * u_waviness * 0.9 * t0 * (1.0 - t0) * 4.0, 0.0, 1.0);
-    float sBev = bevelSin(tw, u_bevelShape);
-    // A slight extra outward lean concentrated at the very edge, scaled by curvature.
-    float nt = u_curvature * 0.14 * (bw * bw / (edgeD * edgeD + bw * bw));
-    float sEdge = max(sBev, nt) * (1.0 - t0);            // the bevel term fades onto the flat face
+    float sBev = bevelSin(t0, u_bevelShape);             // the machined rim profile, 0 past the bevel
 
-    // ---- The convex dome across the face (sweeps the soft studio gradients over flat metal) ----
-    // Domes edge to edge: 0 at the centre (flat, catches the frontal softbox), full at the rim.
-    float sSphere = u_curvature * 0.75 * smoothstep(0.0, 2.3, flenN);
-
-    // ---- Assemble the surface normal: bevel edge + radial dome ----
-    vec2 txy = outward * sEdge + rdir * sSphere;
+    vec2 txy;
+    if (u_hasShape > 0.5) {
+        // The dome is the SCREEN-space gradient of the height field domeH(distance): it puffs the
+        // whole shape and follows the outline (cleft and lobes), yet stays smooth across the
+        // medial axis — where domeH is a rounded ridge, so its gradient tapers to zero instead of
+        // flipping like the raw distance gradient (that flip was the fan-crease).
+        vec2 domeXY = -domeGrad * (u_curvature * 2.6);
+        // The bevel rim leans outward on top of the dome.
+        txy = domeXY + outward * (sBev * 0.6);
+    } else {
+        // Bare material (no silhouette): a radial dome sweeps the studio across the flat tile.
+        float sSphere = u_curvature * 0.75 * smoothstep(0.0, 2.3, flenN);
+        txy = rdir * sSphere;
+    }
     float tl = min(length(txy), 0.9995);
     vec2 tn = length(txy) > 1e-4 ? txy * (tl / length(txy)) : vec2(0.0);
     float nz = sqrt(max(1.0 - tl * tl, 0.0));

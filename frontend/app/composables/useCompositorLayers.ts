@@ -66,6 +66,7 @@ import { layoutExpressive, type ExpressiveParams } from '~~/shared/text-layout/e
 import { type PaintStroke, stampStrokes, strokeBounds } from '~/lib/compositor/brushStamp'
 import {
   applyBlurPass, applyPasses, applyStackPost, chainActive,
+  strokeAlphaAlignOf, strokeAlphaBand,
   type AdjustEffect, type BloomEffect, type DofEffect, type DuotoneEffect,
   type GradientMapEffect, type GrainEffect, type PostEffect, type VignetteEffect,
 } from '~/lib/compositor/postEffects'
@@ -4592,7 +4593,11 @@ export function resolveGlassSource<TSource, TItem>(
  * side. Bounds come off the same thumbnail, so any shape, rotation or mask works.
  */
 function lensShapeFromSilhouette(sil: HTMLCanvasElement, spec: ShaderSpec, w: number, h: number): LensShape | undefined {
-  const T = 128
+  // 256, not 128: the distance field is upscaled to full resolution and read as a height field
+  // by shape-following materials (Chrome domes and bevels from it). At 128 its facets showed as
+  // a scalloped rim and speckled accent lights; 256 halves the facet size for a smooth pillow,
+  // and the two-pass chamfer is still well under a millisecond. Benefits every lens/material.
+  const T = 256
   const thumb = document.createElement('canvas')
   thumb.width = T; thumb.height = T
   const tctx = thumb.getContext('2d', { willReadFrequently: true })
