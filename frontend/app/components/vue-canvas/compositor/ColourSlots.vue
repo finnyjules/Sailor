@@ -21,12 +21,14 @@ watch(() => props.slots, (list) => {
   const h: Record<string, string> = {}, p: Record<string, string> = {}
   for (const s of list) { h[s.hex] = s.hex.slice(1).toUpperCase(); const pc = alphaPct(s.alpha); p[s.hex] = pc == null ? 'Mixed' : String(pc) }
   hexDraft.value = h; pctDraft.value = p
-}, { immediate: true, deep: true })
+}, { immediate: true })   // the parent hands over a fresh array per change; no deep walk of the sites' closures
 
-function onSwatch(slotHex: string, v: string) {
+function onSwatch(slotHex: string, slotAlpha: string | 'mixed', v: string) {
   const { hex, alpha } = parseHexA(v)                       // 6-digit → alpha 1
   const a = Math.round(alpha * 255).toString(16).padStart(2, '0')
-  if (hex.toLowerCase() === slotHex && a === 'ff') return
+  // Re-picking the colour the slot already has (same hex, same alpha) is not an edit —
+  // otherwise closing the picker would push an empty undo step and dirty the document.
+  if (hex.toLowerCase() === slotHex && a === (slotAlpha === 'mixed' ? 'ff' : slotAlpha)) return
   emit('recolour', slotHex, hex.toLowerCase(), a === 'ff' ? undefined : a)
 }
 function commitHex(slotHex: string) {
@@ -40,6 +42,9 @@ function commitAlpha(slotHex: string, current: string | 'mixed') {
   if (current === 'mixed') return
   const n = Math.round(Number((pctDraft.value[slotHex] ?? '').replace('%', '')))
   if (!Number.isFinite(n) || n < 0 || n > 100) { pctDraft.value[slotHex] = String(alphaPct(current)); return }
+  // Compare in PERCENT, the unit the field shows: 155 of the 256 alpha bytes do not survive
+  // hex → % → hex, so a tab through an untouched field would otherwise re-emit and dirty the document.
+  if (n === alphaPct(current)) return
   const a = Math.round(n / 100 * 255).toString(16).padStart(2, '0')
   if (a === current) return
   emit('recolour', slotHex, slotHex, a)
@@ -52,7 +57,7 @@ function commitAlpha(slotHex: string, current: string | 'mixed') {
       v-for="s in slots" :key="s.hex" data-testid="colour-slot" :data-hex="s.hex"
       class="flex h-8 items-center gap-1.5 rounded-md bg-white/[0.04] pl-1.5 pr-1"
     >
-      <StudioColor :model-value="swatchValue(s)" @update:model-value="(v: string) => onSwatch(s.hex, v)" />
+      <StudioColor :model-value="swatchValue(s)" @update:model-value="(v: string) => onSwatch(s.hex, s.alpha, v)" />
       <input
         data-testid="colour-slot-hex" type="text" spellcheck="false" :aria-label="`Colour ${s.hex}`"
         class="h-6 min-w-0 flex-1 rounded bg-transparent px-1 font-mono text-[11.5px] uppercase text-white/85 outline-none focus:bg-white/[0.06]"
@@ -61,8 +66,8 @@ function commitAlpha(slotHex: string, current: string | 'mixed') {
       <div class="flex h-6 w-16 items-center rounded bg-white/[0.04] px-1.5 text-[11.5px] text-white/70">
         <input
           data-testid="colour-slot-alpha" type="text" inputmode="numeric" :aria-label="`Opacity of ${s.hex}`"
-          class="w-full min-w-0 bg-transparent text-right outline-none disabled:text-white/40"
-          :disabled="s.alpha === 'mixed'" v-model="pctDraft[s.hex]"
+          class="w-full min-w-0 bg-transparent text-right outline-none read-only:text-white/40"
+          :readonly="s.alpha === 'mixed'" v-model="pctDraft[s.hex]"
           @keydown.enter.prevent="($event.target as HTMLInputElement).blur()" @blur="commitAlpha(s.hex, s.alpha)"
         />
         <span v-if="s.alpha !== 'mixed'" class="ml-0.5 text-white/40">%</span>
