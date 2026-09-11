@@ -137,3 +137,9 @@ export function firstFalImageUrl(result: unknown): string | null {
   const images = (result as { images?: Array<{ url?: string }> })?.images
   return Array.isArray(images) && images[0]?.url ? images[0].url : null
 }
+
+/** First video URL from a fal video result ({ video: { url } }). */
+export function firstFalVideoUrl(result: unknown): string | null {
+  const url = (result as { video?: { url?: string } })?.video?.url
+  return typeof url === 'string' && url ? url : null
+}

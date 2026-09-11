@@ -32,7 +32,7 @@ export const NITRO_API_PREFIXES = [
   '/api/house-styles', '/api/brand-kits', '/api/frame-templates', '/api/template-fonts', '/api/library-font',
   '/api/characters-local', '/api/lipsync', '/api/meter', '/api/pool', '/api/scene3d',
   '/api/style-profile', '/api/fonts', '/api/depth', '/api/taste', '/api/moodboards',
-  '/api/wardrobe',
+  '/api/wardrobe', '/api/frame',
 ]
 
 /** True when Nitro, not the proxy, should answer this path. */
