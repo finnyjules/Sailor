@@ -237,6 +237,91 @@ def test_key_frames_trim_last_drops_the_returning_frame(tmp_path):
     assert meta["frames"] == 3
 
 
+def test_nearest_subject_colour_fills_the_reach_and_leaves_the_rest_sentinel():
+    # 20x20 still, a red 6x6 square at rows/cols 7-12. With reach_px=5 a pixel 3 px below
+    # the square (row 16, i.e. 3 rows past row 12) gets filled with the square's red; the
+    # (0,0) corner is Chebyshev distance 7 from the square — past the 5-px reach — and
+    # stays the NaN sentinel.
+    w = 20
+    still = np.zeros((w, w, 4), dtype=np.uint8)
+    still[7:13, 7:13] = (220, 30, 30, 255)
+    ref = ck.nearest_subject_colour(still, 5)
+    assert tuple(ref[16, 9]) == (220.0, 30.0, 30.0)
+    assert np.isnan(ref[0, 0]).all()
+
+
+def test_ring_gate_keeps_matching_colour_and_drops_the_halo():
+    # Computed with ck.lab_distance, not guessed: rose(200,60,90)->rose = 0.0 Lab units
+    # (well below RING_LO=10 -> gate 1); olive(207,189,93)->rose = 77.54 (well above
+    # RING_HI=26 -> gate 0); a shaded red (180,50,50)->rose(200,60,90) = 17.91, between
+    # lo and hi, so the ramp is evaluated exactly: t=(17.91-10)/16=0.49441,
+    # smoothstep=t*t*(3-2t)=0.49162, gate=1-smoothstep=0.50838.
+    frame = np.zeros((1, 3, 3), dtype=np.uint8)
+    frame[0, 0] = ROSE
+    frame[0, 1] = (207, 189, 93)
+    frame[0, 2] = (180, 50, 50)
+    ref_rgb = np.full((1, 3, 3), np.nan, dtype=np.float32)
+    ref_rgb[0, :] = ROSE
+    ring_mask = np.ones((1, 3), dtype=bool)
+    gate = ck.ring_gate(frame, ref_rgb, ring_mask)
+    assert gate[0, 0] == pytest.approx(1.0)
+    assert gate[0, 1] == pytest.approx(0.0)
+    assert gate[0, 2] == pytest.approx(0.5083799450802757, abs=1e-6)
+
+
+def test_ring_gate_is_a_no_op_outside_the_ring_mask():
+    frame = np.zeros((1, 2, 3), dtype=np.uint8)
+    frame[0, 0] = (207, 189, 93)   # would gate to 0 if it were in the ring
+    frame[0, 1] = ROSE
+    ref_rgb = np.full((1, 2, 3), np.nan, dtype=np.float32)
+    gate = ck.ring_gate(frame, ref_rgb, np.zeros((1, 2), dtype=bool))
+    assert np.array_equal(gate, np.ones((1, 2), dtype=np.float32))
+
+
+def test_ring_gate_zeroes_a_ring_pixel_with_no_reference():
+    frame = np.zeros((1, 1, 3), dtype=np.uint8)
+    frame[0, 0] = ROSE
+    ref_rgb = np.full((1, 1, 3), np.nan, dtype=np.float32)   # nothing reached this pixel
+    gate = ck.ring_gate(frame, ref_rgb, np.ones((1, 1), dtype=bool))
+    assert gate[0, 0] == 0.0
+
+
+def test_ring_gate_drops_the_olive_halo_but_keeps_a_moved_petal(tmp_path):
+    # The synthetic rose check from the previous pass (olive ring painted around the
+    # subject at production scale), now run end to end through key_frames with the new
+    # ring gate. Small synthetic still (400px, not the real photo — kept small so the
+    # suite stays fast; the real still gets the by-hand check separately).
+    #
+    # An 80x80 square subject, an olive (207,189,93) ring painted 1-6 px outside it (the
+    # halo the model paints), AND an 8x8 patch of the subject's OWN colour painted 3-10 px
+    # outside the silhouette in a different spot (a petal that legitimately moved outside
+    # the still's frozen silhouette). The gate must drop the halo and keep the petal.
+    w = 400
+    still = np.zeros((w, w, 4), dtype=np.uint8)
+    still[160:240, 160:240] = (200, 60, 90, 255)
+    frame = ck.flatten_onto(still, GREEN)
+
+    dr = np.abs(np.arange(w)[:, None] - np.clip(np.arange(w)[:, None], 160, 239))
+    dc = np.abs(np.arange(w)[None, :] - np.clip(np.arange(w)[None, :], 160, 239))
+    dist = np.maximum(dr, dc)
+    ring = (dist >= 1) & (dist <= 6)
+    frame[ring] = (207, 189, 93)
+
+    petal_patch = np.zeros((w, w), dtype=bool)
+    petal_patch[194:202, 242:250] = True     # distance 3-10 px outside the silhouette
+    frame[petal_patch] = ROSE
+
+    out = tmp_path / "clip"
+    ck.key_frames([frame], 24.0, still, GREEN, str(out), max_edge=w, trim_last=False)
+    im = Image.open(out / "000000.png").convert("RGBA")
+    alpha = np.asarray(im)[..., 3]
+
+    olive_survive_share = (alpha[ring] > 128).mean()
+    assert olive_survive_share < 0.02
+    petal_centre_alpha = alpha[198, 246] / 255.0    # centre of the 8x8 petal patch
+    assert petal_centre_alpha > 0.5
+
+
 def test_key_then_rekey_round_trips_the_same_frame_count(tmp_path):
     import imageio.v2 as iio
 

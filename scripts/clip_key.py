@@ -41,6 +41,7 @@ BG_MIN_COVERAGE = 0.01        # below this share of the frame, don't trust the s
 TOL_LO_MIN, TOL_LO_MAX = 6.0, 28.0
 TOL_HI_MARGIN = 14.0          # hi = lo + this
 EDGE_ERODE_PX = 1
+RING_LO, RING_HI = 10.0, 26.0  # Lab-distance ramp for the in-guard subject-similarity gate
 
 
 def _hex(rgb):
@@ -128,15 +129,84 @@ def suppress_spill(rgb: np.ndarray, bg_rgb, alpha: np.ndarray) -> np.ndarray:
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
+def _reach_px(width: int, frac: float = GUARD_FRAC) -> int:
+    """Guard/propagation reach in pixels for a frame of this width."""
+    return int(round(frac * width))
+
+
 def guard_mask(still_alpha: np.ndarray, size_wh, frac: float = GUARD_FRAC) -> np.ndarray:
     """The still's alpha, resized to the frame and grown outward by `frac` of the frame width.
     Returns float32 in [0,1], shape (h, w)."""
     w, h = int(size_wh[0]), int(size_wh[1])
     im = Image.fromarray(still_alpha.astype(np.uint8), "L").resize((w, h), Image.BILINEAR)
-    reach = int(round(frac * w))
+    reach = _reach_px(w, frac)
     if reach > 0:
         im = im.filter(ImageFilter.MaxFilter(2 * reach + 1))
     return (np.asarray(im).astype(np.float32) > 127.0).astype(np.float32)
+
+
+def _resize_still(still_rgba: np.ndarray, size_wh) -> np.ndarray:
+    """Resize an RGBA still to (w, h) the same way `guard_mask` resizes its alpha channel."""
+    w, h = int(size_wh[0]), int(size_wh[1])
+    im = Image.fromarray(still_rgba.astype(np.uint8), "RGBA").resize((w, h), Image.BILINEAR)
+    return np.asarray(im)
+
+
+def nearest_subject_colour(still_rgba: np.ndarray, reach_px: int) -> np.ndarray:
+    """The RGB of the nearest opaque (alpha > 128) still pixel, for every pixel, found by
+    iterative propagation: start filled where the still is opaque, then for `reach_px` rounds
+    let every still-unfilled pixel take the colour of any already-filled 4- or 8-neighbour
+    (first match wins; fully vectorised). Pixels never reached — beyond `reach_px` steps from
+    any opaque pixel — come back NaN, the "no reference" sentinel. Returns (h, w, 3) float32."""
+    h, w = still_rgba.shape[0], still_rgba.shape[1]
+    opaque = still_rgba[..., 3] > 128
+    ref = np.where(opaque[..., None], still_rgba[..., :3].astype(np.float32), np.nan)
+    filled = opaque.copy()
+    shifts = [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+    for _ in range(int(reach_px)):
+        if filled.all():
+            break
+        prev_filled, prev_ref = filled, ref
+        for dy, dx in shifts:
+            # neighbour[y, x] = prev[y + dy, x + dx], with the wrapped-around border masked
+            # off so np.roll's wraparound never leaks colour from the opposite edge.
+            src_filled = np.roll(prev_filled, shift=(-dy, -dx), axis=(0, 1))
+            src_ref = np.roll(prev_ref, shift=(-dy, -dx), axis=(0, 1))
+            if dy == 1:
+                src_filled[h - 1, :] = False
+            elif dy == -1:
+                src_filled[0, :] = False
+            if dx == 1:
+                src_filled[:, w - 1] = False
+            elif dx == -1:
+                src_filled[:, 0] = False
+            take = (~filled) & src_filled
+            if take.any():
+                ref = np.where(take[..., None], src_ref, ref)
+                filled = filled | take
+    return ref.astype(np.float32)
+
+
+def ring_gate(frame_rgb: np.ndarray, ref_rgb: np.ndarray, ring_mask: np.ndarray,
+              lo: float = RING_LO, hi: float = RING_HI) -> np.ndarray:
+    """1 everywhere outside `ring_mask` (the still's own silhouette included — no gating
+    there), and inside `ring_mask` the smoothstep of the Lab distance from the frame pixel to
+    its nearest-subject reference colour: 1 at/below `lo` (resembles the subject, keep), 0
+    at/above `hi` (doesn't — halo/shading/leftover ground, drop). A ring pixel with no
+    reference (`ref_rgb` NaN — nothing opaque within reach) gates to 0."""
+    h, w = frame_rgb.shape[0], frame_rgb.shape[1]
+    if not np.any(ring_mask):
+        return np.ones((h, w), dtype=np.float32)
+    has_ref = ~np.isnan(ref_rgb).any(axis=-1)
+    safe_ref = np.where(np.isnan(ref_rgb), 0.0, ref_rgb).astype(np.uint8)
+    lab_frame = srgb_to_lab(frame_rgb)
+    lab_ref = srgb_to_lab(safe_ref)
+    d = np.sqrt(((lab_frame - lab_ref) ** 2).sum(axis=-1))
+    t = np.clip((d - lo) / max(1e-6, hi - lo), 0.0, 1.0)
+    ramp = 1.0 - t * t * (3.0 - 2.0 * t)
+    gate = np.where(ring_mask & has_ref, ramp, 1.0)
+    gate = np.where(ring_mask & ~has_ref, 0.0, gate)
+    return gate.astype(np.float32)
 
 
 def estimate_background(rgb: np.ndarray, far_mask: np.ndarray, key_rgb=GREEN):
@@ -186,6 +256,14 @@ def key_frames(frames, fps: float, still_rgba: np.ndarray, key_rgb, out_dir: str
     still_alpha = still_rgba[..., 3]
     guard = guard_mask(still_alpha, (ow, oh))
     far_mask = guard_mask(still_alpha, (ow, oh), frac=BG_SAMPLE_FRAC) < 0.5
+
+    # Subject-similarity gate: computed ONCE per clip, since it depends only on the still
+    # and the frame size, not on any individual frame.
+    reach_px = _reach_px(ow)
+    still_resized = _resize_still(still_rgba, (ow, oh))
+    ref_rgb = nearest_subject_colour(still_resized, reach_px)
+    ring_mask = (guard > 0) & (still_resized[..., 3] <= 128)
+
     n = 0
     for i, f in enumerate(frames):
         if (f.shape[1], f.shape[0]) != (ow, oh):
@@ -194,6 +272,7 @@ def key_frames(frames, fps: float, still_rgba: np.ndarray, key_rgb, out_dir: str
         lo = clamp(bg_spread * 1.2, TOL_LO_MIN, TOL_LO_MAX)
         hi = lo + TOL_HI_MARGIN
         a = key_alpha(f, bg_rgb, lo, hi) * guard
+        a = a * ring_gate(f, ref_rgb, ring_mask)
         a_u8 = np.clip(a * 255.0, 0, 255).astype(np.uint8)
         a = _erode_soften(a_u8, guard)
         rgb = suppress_spill(f, bg_rgb, a)
