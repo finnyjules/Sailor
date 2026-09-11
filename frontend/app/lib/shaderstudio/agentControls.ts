@@ -183,13 +183,13 @@ export const SHADER_HONESTY_CLAUSE = 'If the look isn\'t achievable here, do not
  * exists. Kept to real ids only — no aspirational ones.
  */
 export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
-  { words: 'glitchy / vhs / broken signal / datamosh / corrupted / pixel sort / streaked', ids: ['block_glitch', 'rgb_glitch', 'crt_scanlines', 'post_grain', 'pixel_sort'] },
+  { words: 'glitchy / vhs / datamosh / corrupted / pixel sort', ids: ['block_glitch', 'rgb_glitch', 'crt_scanlines', 'post_grain', 'pixel_sort'] },
   { words: 'halftone / newsprint / comic / risograph / screenprint', ids: ['halftone', 'dot_screen', 'risograph', 'bayer_dither', 'crosshatch'] },
   { words: 'pixel / 8-bit / lo-fi / blocky / ascii / terminal', ids: ['pixelate', 'blocks', 'ascii_dither', 'glyph_dither'] },
   { words: 'painterly / hand-made / illustrated / sketched', ids: ['oil_paint', 'crosshatch', 'outline'] },
   { words: 'liquid / melty / underwater / rippling / wavy', ids: ['liquify', 'water_ripple', 'wave', 'fbm_warp', 'swirl'] },
   { words: 'psychedelic / kaleidoscopic / trippy / infinite / recursive', ids: ['kaleidoscope', 'droste', 'mirror', 'recursive_grid', 'warp_tunnel'] },
-  { words: 'dreamy / soft focus / blurry / hazy / bokeh / miniature', ids: ['gaussian_blur', 'defocus_bokeh', 'tilt_shift', 'zoom_blur'] },
+  { words: 'dreamy / soft focus / blurry / bokeh / miniature', ids: ['gaussian_blur', 'defocus_bokeh', 'tilt_shift', 'zoom_blur'] },
   { words: 'glowy / bloom / neon / radiant / dreamlight', ids: ['bloom', 'glow', 'edge_glow', 'light_beams'] },
   // "prismatic"/"chrome" deliberately dropped from this cluster: crystal_prism
   // only reads as either through its `u_mode`/`u_facetStyle` ENUMS, which are
@@ -197,7 +197,7 @@ export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
   // patch cannot reach. Its default look is the refraction one, so it stays under
   // "glass" below. Likewise "anamorphic": no effect in the catalog does it.
   { words: 'iridescent / holographic / oil-slick / foiled', ids: ['holographic', 'spectrum_map'] },
-  { words: 'cinematic lens / lo-fi camera / wide angle / fringing', ids: ['chromatic_aberration', 'lens_distortion', 'fisheye', 'vignette'] },
+  { words: 'cinematic lens / wide angle / fringing', ids: ['chromatic_aberration', 'lens_distortion', 'fisheye', 'vignette'] },
   { words: 'graphic / poster / high contrast / stencil / flat', ids: ['posterize', 'threshold', 'duotone', 'outline', 'mondrian'] },
   { words: 'recolour / warmer / cooler / graded / mapped palette', ids: ['post_adjust', 'color_temperature', 'hue_shift', 'gradient_map'] },
   { words: 'glass / frosted / fluted / refracted', ids: ['blinds', 'crystal_prism', 'distort'] },
@@ -205,21 +205,21 @@ export const SHADER_LOOK_CLUSTERS: { words: string; ids: string[] }[] = [
   { words: 'noisy displacement / turbulent / smoky', ids: ['noise_distortion', 'fbm_warp', 'wisps'] },
   { words: 'flag / cloth / banner / ripple in fabric', ids: ['flag', 'wave'] },
   { words: 'film / grain / analog / dusty', ids: ['post_grain', 'risograph'] },
-  { words: 'contour lines / topographic map / isolines / terrain map', ids: ['topographic'] },
+  { words: 'contour lines / topographic map / isolines', ids: ['topographic'] },
   { words: 'stipple / pointillist / engraved dots', ids: ['stipple'] },
-  { words: 'background from nothing / generative field (draws its own field; blend the input with Image mix)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel', 'terrain_bands', 'sonar', 'oddgrid', 'static', 'mist', 'pixel_bloom', 'thread_contours', 'sear', 'culture'] },
+  { words: 'background from nothing / generative field (its own field; use Image mix)', ids: ['aurora', 'nebula', 'plasma', 'mesh_gradient', 'wisps', 'light_beams', 'fbm', 'caustics', 'voronoi_cells', 'starfield', 'warp_tunnel', 'terrain_bands', 'sonar', 'oddgrid', 'static', 'mist', 'pixel_bloom', 'thread_contours', 'sear', 'culture'] },
   { words: 'pixel patchwork / blocky colour regions / riso grid / quilt of cells / oddgrid', ids: ['oddgrid', 'mondrian'] },
-  { words: 'glitch pixel poster / one-bit static / corrupted riso / scan bars / stacked pattern bands / static', ids: ['static', 'block_glitch'] },
-  { words: 'petri dish / bacterial colonies / blobs ringed in colour / culture', ids: ['culture', 'voronoi_cells'] },
-  { words: 'banded terrain / contour landscape / heat map bands / posterised landscape', ids: ['terrain_bands', 'topographic'] },
-  { words: 'dithered map / landmasses / islands / radar map / sonar', ids: ['sonar'] },
-  { words: 'neon curtain / spray streaks over pastel blots / mist', ids: ['mist', 'nebula'] },
-  { words: 'pixel rings / mirrored pixel banner / ripple target / totem', ids: ['pixel_bloom'] },
+  { words: 'glitch pixel poster / one-bit static / scan bars / static', ids: ['static', 'block_glitch'] },
+  { words: 'petri dish / bacterial colonies / culture', ids: ['culture', 'voronoi_cells'] },
+  { words: 'banded terrain / contour landscape / heat map bands', ids: ['terrain_bands', 'topographic'] },
+  { words: 'dithered map / islands / radar map / sonar', ids: ['sonar'] },
+  { words: 'neon curtain / spray streaks / mist', ids: ['mist', 'nebula'] },
+  { words: 'pixel rings / ripple target / totem', ids: ['pixel_bloom'] },
   { words: 'thread contours / flowing iso-lines / string field', ids: ['thread_contours', 'light_beams'] },
-  { words: 'thermal camera / heat map smear / infrared / dropped frame bands / sear', ids: ['sear', 'terrain_bands'] },
-  { words: 'pixel aurora / dithered northern lights (base: aurora; add bayer_dither by hand)', ids: ['aurora', 'bayer_dither'] },
-  { words: 'ascii terrain / text-mode map (base: terrain_bands; add ascii_dither by hand)', ids: ['terrain_bands', 'ascii_dither'] },
-  { words: 'corrupted satellite / broken map mosaic (base: terrain_bands; add block_glitch + pixel_sort by hand)', ids: ['terrain_bands', 'block_glitch', 'pixel_sort'] },
+  { words: 'thermal camera / heat map / infrared / sear', ids: ['sear', 'terrain_bands'] },
+  { words: 'pixel aurora / dithered northern lights (base aurora; add bayer_dither)', ids: ['aurora', 'bayer_dither'] },
+  { words: 'ascii terrain / text-mode map (base terrain_bands; add ascii_dither)', ids: ['terrain_bands', 'ascii_dither'] },
+  { words: 'corrupted satellite / broken map mosaic (base terrain_bands; add block_glitch + pixel_sort)', ids: ['terrain_bands', 'block_glitch', 'pixel_sort'] },
 ]
 
 /**
@@ -290,11 +290,16 @@ function renderExamples(): string {
  *  how much prompt the shader domain may take before it needs compressing.
  *  Raised 8000 -> 8150 when `culture` landed (2026-09-04): the catalog entry, the
  *  modes caveat and one cluster line together cost ~130 chars and the block was
- *  already within 10 of the old figure. 8150 is the measured length (8128) rounded
- *  up to the next 50 — headroom you have not spent is headroom the next effect will
- *  spend without a decision. The NEXT effect to run it out should compress the
- *  clusters (they are the longest derived section) rather than raise this again —
- *  a ceiling that only ever moves up is not a budget. */
+ *  already within 10 of the old figure. That comment told the NEXT effect to run
+ *  it out to compress the clusters rather than raise this again — a ceiling that
+ *  only ever moves up is not a budget. That is exactly what happened: the material
+ *  and lens ports (prism, glass_lens, crystal, studio_backdrop, liquid_metal) each
+ *  added an index line and pushed the block past 8150, and `chrome` (2026-09-11)
+ *  tipped it to 8405. Rather than raise the ceiling, the clusters were compressed
+ *  back under it — the verbose "…by hand" recipe parentheticals and a run of
+ *  redundant synonyms (the longest derived section), no look word a test relies on
+ *  and no effect id removed. The next effect to run it out should compress again,
+ *  not raise this. */
 export const SHADER_GUIDANCE_CEILING = 8150
 
 /**

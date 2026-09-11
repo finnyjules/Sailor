@@ -2762,6 +2762,144 @@
       ]
     },
     {
+      "id": "chrome",
+      "name": "Chrome",
+      "category": "material",
+      "animated": true,
+      "passes": 1,
+      "textures": [],
+      "generative": false,
+      "followsShape": true,
+      "params": [
+        {
+          "uniform": "u_tint",
+          "label": "Tint",
+          "type": "color",
+          "default": "#ffffff"
+        },
+        {
+          "uniform": "u_warmColor",
+          "label": "Warm light",
+          "type": "color",
+          "default": "#ffa94d"
+        },
+        {
+          "uniform": "u_coolColor",
+          "label": "Cool light",
+          "type": "color",
+          "default": "#82a7e6"
+        },
+        {
+          "uniform": "u_bevelWidth",
+          "label": "Bevel width",
+          "type": "float",
+          "min": 0.005,
+          "max": 0.2,
+          "default": 0.028,
+          "step": 0.001
+        },
+        {
+          "uniform": "u_bevelShape",
+          "label": "Bevel profile",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.55,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_curvature",
+          "label": "Curvature",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_waviness",
+          "label": "Waviness",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.15,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_environment",
+          "label": "Environment",
+          "type": "float",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.0,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_envRotation",
+          "label": "Environment rotation",
+          "type": "float",
+          "min": 0.0,
+          "max": 360.0,
+          "default": 0.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_softness",
+          "label": "Softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.3,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_spectral",
+          "label": "Accent lights",
+          "type": "float",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 0.9,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_dispersion",
+          "label": "Dispersion",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.3,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_shadows",
+          "label": "Shadows",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.7,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_speed",
+          "label": "Speed",
+          "type": "float",
+          "min": 0.0,
+          "max": 4.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_edgeSoftness",
+          "label": "Edge softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.05,
+          "step": 0.01
+        }
+      ]
+    },
+    {
       "id": "liquid_metal",
       "name": "Liquid metal",
       "category": "material",
