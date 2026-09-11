@@ -124,6 +124,7 @@ import {
   addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder,
   type EffectInstance, type EffectKind,
 } from '~/lib/compositor/effectStack'
+import { OVERLAY_BLENDS } from '~/lib/compositor/postEffects'
 import {
   strokeStackOf, writeStrokeStackToLayer, addStroke, removeStroke, duplicateStroke,
   reorderStroke, canReorderStroke, strokeSupportsStack, strokeSupportsShapes, strokeRowLabel,
@@ -1971,6 +1972,11 @@ function updateActiveEffect(patch: Record<string, unknown>) {
 /** The kinds `PostEffectsControls` draws — read from that component's own section list,
  *  so adding a section there cannot leave an effect row selecting into an empty panel. */
 const isPanelKind = (k: EffectKind) => (PANEL_EFFECT_KINDS as string[]).includes(k)
+/** Human labels for the curated overlay blend modes — the stored value is the internal name,
+ *  the select shows sentence-case copy (per the UI copy rule for selects over internal values). */
+const OVERLAY_BLEND_LABELS: Record<string, string> = {
+  normal: 'Normal', multiply: 'Multiply', screen: 'Screen', overlay: 'Overlay', 'soft-light': 'Soft light',
+}
 // The selection is by id, so a vanished effect — its layer deleted, or an undo that
 // rolled the stack back — must not leave the inspector pointing at nothing. One watcher
 // covers every removal path (`deleteLocal`, `deleteLayers`, undo/redo), none of which
@@ -8002,6 +8008,88 @@ onUnmounted(() => {
                 <input v-scrubnum type="number" min="0" max="2" step="0.05" :value="Math.round(((activeEffect as any).intensity ?? 0.8) * 100) / 100"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ intensity: Math.min(2, Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0)) })" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Colour overlay: a flat colour composited over the layer at a blend + opacity,
+               clipped to the layer's alpha. Colour (plain hex), blend and opacity are all read
+               by passColorOverlay — no dead control. -->
+          <div v-else-if="activeEffect!.type === 'color_overlay'" class="space-y-1.5">
+            <div class="flex items-center gap-1.5">
+              <input type="color" :value="(activeEffect as any).color || '#808080'" title="Overlay colour"
+                class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
+                @input="updateActiveEffect({ color: ($event.target as HTMLInputElement).value })" />
+              <input type="text" spellcheck="false" maxlength="7" :value="(activeEffect as any).color || '#808080'" title="Hex colour"
+                class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs font-mono uppercase text-white/90 outline-none"
+                @change="updateActiveEffect({ color: ($event.target as HTMLInputElement).value })" />
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">Blend</div>
+                <select :value="(activeEffect as any).blend || 'normal'"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @change="updateActiveEffect({ blend: ($event.target as HTMLSelectElement).value })">
+                  <option v-for="b in OVERLAY_BLENDS" :key="b" :value="b">{{ OVERLAY_BLEND_LABELS[b] }}</option>
+                </select>
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Opacity</div>
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).opacity ?? 1) * 100)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ opacity: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Gradient overlay: a two-colour linear gradient (From→To) at an angle, composited
+               over the layer at a blend + opacity, clipped to the layer's alpha. Every control
+               is read by passGradientOverlay. -->
+          <div v-else-if="activeEffect!.type === 'gradient_overlay'" class="space-y-1.5">
+            <div class="grid grid-cols-2 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">From</div>
+                <div class="flex items-center gap-1.5">
+                  <input type="color" :value="(activeEffect as any).from || '#ff5b5b'" title="Gradient start colour"
+                    class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
+                    @input="updateActiveEffect({ from: ($event.target as HTMLInputElement).value })" />
+                  <input type="text" spellcheck="false" maxlength="7" :value="(activeEffect as any).from || '#ff5b5b'" title="Hex colour"
+                    class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs font-mono uppercase text-white/90 outline-none"
+                    @change="updateActiveEffect({ from: ($event.target as HTMLInputElement).value })" />
+                </div>
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">To</div>
+                <div class="flex items-center gap-1.5">
+                  <input type="color" :value="(activeEffect as any).to || '#4f8ad9'" title="Gradient end colour"
+                    class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
+                    @input="updateActiveEffect({ to: ($event.target as HTMLInputElement).value })" />
+                  <input type="text" spellcheck="false" maxlength="7" :value="(activeEffect as any).to || '#4f8ad9'" title="Hex colour"
+                    class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs font-mono uppercase text-white/90 outline-none"
+                    @change="updateActiveEffect({ to: ($event.target as HTMLInputElement).value })" />
+                </div>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">Angle</div>
+                <input v-scrubnum type="number" min="0" max="360" step="1" :value="Math.round((activeEffect as any).angle ?? 0)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ angle: Math.min(360, Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0)) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Blend</div>
+                <select :value="(activeEffect as any).blend || 'normal'"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @change="updateActiveEffect({ blend: ($event.target as HTMLSelectElement).value })">
+                  <option v-for="b in OVERLAY_BLENDS" :key="b" :value="b">{{ OVERLAY_BLEND_LABELS[b] }}</option>
+                </select>
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Opacity</div>
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).opacity ?? 1) * 100)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ opacity: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
               </div>
             </div>
           </div>

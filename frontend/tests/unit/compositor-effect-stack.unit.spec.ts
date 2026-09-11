@@ -11,10 +11,10 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 24 kinds, 3 pinned and 21 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(24)
+  it('has 26 kinds, 3 pinned and 23 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(26)
     expect(PINNED_KINDS).toEqual(['background_blur', 'dof', 'drop_shadow'])
-    expect(ORDERABLE_KINDS).toHaveLength(21)
+    expect(ORDERABLE_KINDS).toHaveLength(23)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
     expect(EFFECT_LABELS.gradientMap).toBe('Gradient map')
@@ -30,6 +30,8 @@ describe('effect kinds', () => {
     expect(EFFECT_LABELS.long_shadow).toBe('Long shadow')
     expect(EFFECT_LABELS.outer_glow).toBe('Outer glow')
     expect(EFFECT_LABELS.inner_glow).toBe('Inner glow')
+    expect(EFFECT_LABELS.color_overlay).toBe('Colour overlay')
+    expect(EFFECT_LABELS.gradient_overlay).toBe('Gradient overlay')
   })
   it('orders background blur first and drop shadow last', () => {
     expect(EFFECT_ORDER[0]).toBe('background_blur')
@@ -57,6 +59,7 @@ describe('effect kinds', () => {
       inner_shadow: 'pixel', inner_glow: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
       bloom: 'pixel', vignette: 'pixel', grain: 'pixel', torn_edge: 'pixel',
       feather: 'pixel', layer_blur: 'pixel', outer_glow: 'pixel',
+      color_overlay: 'pixel', gradient_overlay: 'pixel',
       drop_shadow: 'stamp',
     }
     for (const k of EFFECT_ORDER) expect(regionOf(k), k).toBe(expected[k])

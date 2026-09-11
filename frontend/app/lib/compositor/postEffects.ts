@@ -83,7 +83,43 @@ export interface InnerGlowEffect {
   intensity: number   // 0..2 — strength of the composite
   visible: boolean
 }
-export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect
+/** A small curated set of real blend modes an overlay may composite through. Each maps to a
+ *  `GlobalCompositeOperation`: `normal`→`source-over`, the rest are valid canvas blend ops by
+ *  the same name. Kept short on purpose — a full 16-mode menu is a dead-control trap. */
+export const OVERLAY_BLENDS = ['normal', 'multiply', 'screen', 'overlay', 'soft-light'] as const
+export type OverlayBlend = typeof OVERLAY_BLENDS[number]
+/** Coerce an arbitrary stored value to a known blend, mirroring `booleanOpOf`. */
+export function overlayBlendOf(v: unknown): OverlayBlend {
+  return (OVERLAY_BLENDS as readonly string[]).includes(v as string) ? (v as OverlayBlend) : 'normal'
+}
+/** The canvas composite op for a blend — `normal` is plain source-over, the rest are the
+ *  identically-named canvas blend modes. */
+function overlayCompositeOp(b: OverlayBlend): GlobalCompositeOperation {
+  return b === 'normal' ? 'source-over' : (b as GlobalCompositeOperation)
+}
+
+/** A flat colour painted over the layer at a blend + opacity, CLIPPED to the layer's alpha
+ *  (source-atop semantics) — never grows outside the silhouette. */
+export interface ColorOverlayEffect {
+  type: 'color_overlay'
+  color: string        // hex — the overlay colour
+  blend: OverlayBlend  // how it composites onto the layer
+  opacity: number      // 0..1 — composite strength
+  visible: boolean
+}
+/** A two-colour linear gradient (`from`→`to`) at `angle` over the layer bounds, at a blend +
+ *  opacity, CLIPPED to the layer's alpha. v1 is deliberately from/to only — a multi-stop editor
+ *  with nowhere to edit the stops would be a dead control. */
+export interface GradientOverlayEffect {
+  type: 'gradient_overlay'
+  from: string         // hex — gradient start colour
+  to: string           // hex — gradient end colour
+  angle: number        // 0..360 degrees, over the offscreen's own box
+  blend: OverlayBlend
+  opacity: number      // 0..1 — composite strength
+  visible: boolean
+}
+export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | ColorOverlayEffect | GradientOverlayEffect
 
 export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   adjust: { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
@@ -104,6 +140,11 @@ export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   // A soft warm glow, visible the moment it is added; the colour card + dials tune it.
   outer_glow: { type: 'outer_glow', color: '#ffd9a0', radius: 0.02, intensity: 0.8, visible: true },
   inner_glow: { type: 'inner_glow', color: '#ffd9a0', radius: 0.02, intensity: 0.8, visible: true },
+  // A mid grey multiplied over the layer — visibly tints the moment it is added; the colour
+  // card + blend + opacity tune it.
+  color_overlay: { type: 'color_overlay', color: '#808080', blend: 'multiply', opacity: 1, visible: true },
+  // Two contrasting colours across the box at 0°, plainly overlaid — the gradient reads at once.
+  gradient_overlay: { type: 'gradient_overlay', from: '#ff5b5b', to: '#4f8ad9', angle: 0, blend: 'normal', opacity: 1, visible: true },
 }
 export function defaultPostEffect(type: PostEffect['type']): PostEffect {
   return JSON.parse(JSON.stringify(POST_EFFECT_DEFAULTS[type])) as PostEffect
@@ -125,9 +166,12 @@ export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]
   // `color` is non-numeric, so it is not clamped (matches duotone's colours).
   outer_glow: { radius: [0, 0.5], intensity: [0, 2] },
   inner_glow: { radius: [0, 0.5], intensity: [0, 2] },
+  // Colours (`color`/`from`/`to`) and `blend` are non-numeric, so only the numeric dials clamp.
+  color_overlay: { opacity: [0, 1] },
+  gradient_overlay: { opacity: [0, 1], angle: [0, 360] },
 }
 
-const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow'])
+const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay'])
 export const isChainEffect = (e: { type: string }): e is PostEffect => CHAIN_TYPES.has(e.type)
 export const chainActive = (effects?: { type: string; visible?: boolean }[]): boolean =>
   !!effects?.some(e => e.visible !== false && CHAIN_TYPES.has(e.type))
@@ -452,10 +496,69 @@ function passInnerGlow(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e:
   ctx.restore()
 }
 
+/** Endpoints of the gradient axis across a `w×h` box for a given `angle` (degrees), centred and
+ *  spanning the box's full projection onto that direction so the ramp always covers the box.
+ *  Pure + deterministic; exported so a test can prove the direction is consumed. */
+export function gradientOverlayAxis(w: number, h: number, angle: number): { x0: number; y0: number; x1: number; y1: number } {
+  const a = ((angle % 360) + 360) % 360 * Math.PI / 180
+  const dx = Math.cos(a), dy = Math.sin(a)
+  const cx = w / 2, cy = h / 2
+  const half = (Math.abs(dx) * w + Math.abs(dy) * h) / 2
+  return { x0: cx - dx * half, y0: cy - dy * half, x1: cx + dx * half, y1: cy + dy * half }
+}
+
+/** Colour overlay: fill a scratch with `color`, knock it down to the layer's own alpha
+ *  (destination-in), then composite that onto the layer at the chosen blend, scaled by
+ *  `opacity`. The alpha-clip on the scratch keeps the fill WITHIN the silhouette while the
+ *  blend mode still applies — no double-composite, no outward growth. Deterministic. */
+function passColorOverlay(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: ColorOverlayEffect, _opts: PassOpts): void {
+  const opacity = clamp01(e.opacity ?? 1)
+  if (!(opacity > 0)) return
+  const scratch = mkCanvas(off.width, off.height)
+  const sctx = scratch.getContext('2d')
+  if (!sctx) return
+  sctx.fillStyle = e.color || '#000000'
+  sctx.fillRect(0, 0, scratch.width, scratch.height)
+  // Clip the flat fill to the layer's alpha — the overlay lives only where the layer paints.
+  sctx.globalCompositeOperation = 'destination-in'
+  sctx.drawImage(off, 0, 0)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.globalCompositeOperation = overlayCompositeOp(overlayBlendOf(e.blend))
+  ctx.globalAlpha = opacity
+  ctx.drawImage(scratch, 0, 0)
+  ctx.restore()
+}
+
+/** Gradient overlay: the same alpha-clipped composite as colour overlay, but the scratch is
+ *  filled with a two-colour linear gradient (`from`→`to`) along `angle` over the offscreen's own
+ *  box. Deterministic. */
+function passGradientOverlay(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: GradientOverlayEffect, _opts: PassOpts): void {
+  const opacity = clamp01(e.opacity ?? 1)
+  if (!(opacity > 0)) return
+  const scratch = mkCanvas(off.width, off.height)
+  const sctx = scratch.getContext('2d')
+  if (!sctx) return
+  const { x0, y0, x1, y1 } = gradientOverlayAxis(scratch.width, scratch.height, e.angle ?? 0)
+  const g = sctx.createLinearGradient(x0, y0, x1, y1)
+  g.addColorStop(0, e.from || '#000000')
+  g.addColorStop(1, e.to || '#ffffff')
+  sctx.fillStyle = g
+  sctx.fillRect(0, 0, scratch.width, scratch.height)
+  sctx.globalCompositeOperation = 'destination-in'
+  sctx.drawImage(off, 0, 0)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.globalCompositeOperation = overlayCompositeOp(overlayBlendOf(e.blend))
+  ctx.globalAlpha = opacity
+  ctx.drawImage(scratch, 0, 0)
+  ctx.restore()
+}
+
 /** The kinds this module owns as 2D passes over a layer/document offscreen. Everything
  *  else in a layer's stack (inner shadow, torn edge, feather, layer blur, drop shadow,
  *  background blur, dof) is applied by the caller at its own structural position. */
-const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow'])
+const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay'])
 
 /**
  * Apply passes in ARRAY ORDER — the per-layer entry point. Order is the caller's, so the
@@ -481,6 +584,8 @@ export function applyPasses(
       case 'grain': passGrain(ctx, off, e as unknown as GrainEffect, opts); break
       case 'outer_glow': passOuterGlow(ctx, off, e as unknown as OuterGlowEffect, opts); break
       case 'inner_glow': passInnerGlow(ctx, off, e as unknown as InnerGlowEffect, opts); break
+      case 'color_overlay': passColorOverlay(ctx, off, e as unknown as ColorOverlayEffect, opts); break
+      case 'gradient_overlay': passGradientOverlay(ctx, off, e as unknown as GradientOverlayEffect, opts); break
     }
   }
 }
@@ -515,7 +620,11 @@ export function applyBlurPass(off: HTMLCanvasElement, radiusPx: number): void {
   ctx.restore()
 }
 
-const CHAIN_ORDER = ['inner_glow', 'adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow']
+// Overlays slot in with the colour family: after the tone/luminance recolours
+// (adjust→duotone→gradientMap), before the light/texture passes (bloom→vignette→grain) and
+// the trailing outer glow. A flat/gradient fill over the surface belongs on top of the graded
+// colour but under bloom's bright pass and grain.
+const CHAIN_ORDER = ['inner_glow', 'adjust', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'bloom', 'vignette', 'grain', 'outer_glow']
 
 /**
  * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type (the first VISIBLE

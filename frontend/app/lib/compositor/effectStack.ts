@@ -118,7 +118,7 @@ export type EffectKind = LayerEffect['type']
  */
 export const EFFECT_ORDER = [
   'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow',
-  'adjust', 'duotone', 'gradientMap',
+  'adjust', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay',
   'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'layer_blur', 'outer_glow', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
 
@@ -174,6 +174,8 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   adjust: 'Adjust',
   duotone: 'Duotone',
   gradientMap: 'Gradient map',
+  color_overlay: 'Colour overlay',
+  gradient_overlay: 'Gradient overlay',
   bloom: 'Bloom',
   vignette: 'Vignette',
   grain: 'Grain',
