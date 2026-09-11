@@ -70,6 +70,7 @@ import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
+import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
 import { imageLayerUrl } from '~/composables/useCompositorLayers'
 import { useInpaint, loadImage, capDims, imageToDataUrl, cleanCutoutAlpha } from '~/composables/useInpaint'
@@ -9175,38 +9176,36 @@ onUnmounted(() => {
         <!-- Scrolls like every layer-selected panel does — without this, the frame
              properties (Background → Post-processing → Grid → templates)
              overflow the window and the lower controls become unreachable. -->
-        <div class="p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
+        <div class="p-4 flex flex-col gap-2.5 flex-1 min-h-0 overflow-y-auto">
           <!-- Canvas background fill (bottom-most; baked into the frame) -->
-          <div>
-            <div class="panel-label mb-1.5">Background</div>
+          <StudioSection title="Background">
             <FillControl allow-none :model-value="background"
               @update:model-value="(v: any) => setBackground(v)" />
             <p class="mt-1.5 text-[10px] text-white/30 leading-snug">Fills behind every layer and bakes into the frame. An opaque generated image will sit on top of it.</p>
-          </div>
+          </StudioSection>
           <!-- Colours: the frame's palette as slots, and a palette family to swap it for -->
-          <div data-testid="frame-colours">
-            <div class="panel-label mb-1.5">Colours</div>
-            <p v-if="!frameColourSlots.length" class="text-[11px] text-white/40 italic">Add a background, text or a shape to see the frame's colours.</p>
-            <template v-else>
-              <ColourSlots :slots="frameColourSlots" @recolour="reassignSlot" />
-              <p class="mt-2 mb-1.5 text-[11px] text-white/45">Pick a palette to recolour the frame. Things that share a colour keep sharing one; the darkest stays darkest.</p>
-              <div data-testid="recolour-images" class="mb-1.5">
-                <StudioSwitch v-model="recolourImages" label="Images too" hint="Photos take the palette as a gradient map." />
-              </div>
-              <PalettePicker :key="compositor?.id ?? 'frame-recolour'" mode="stops" :seed="recolourSeed" @apply-family="applyFamilyToFrame" @apply-stops="applyStopsToFrame" />
-            </template>
-          </div>
+          <StudioSection title="Colours">
+            <div data-testid="frame-colours">
+              <p v-if="!frameColourSlots.length" class="text-[11px] text-white/40 italic">Add a background, text or a shape to see the frame's colours.</p>
+              <template v-else>
+                <ColourSlots :slots="frameColourSlots" @recolour="reassignSlot" />
+                <p class="mt-2 mb-1.5 text-[11px] text-white/45">Pick a palette to recolour the frame. Things that share a colour keep sharing one; the darkest stays darkest.</p>
+                <div data-testid="recolour-images" class="mb-1.5">
+                  <StudioSwitch v-model="recolourImages" label="Images too" hint="Photos take the palette as a gradient map." />
+                </div>
+                <PalettePicker :key="compositor?.id ?? 'frame-recolour'" mode="stops" :seed="recolourSeed" @apply-family="applyFamilyToFrame" @apply-stops="applyStopsToFrame" />
+              </template>
+            </div>
+          </StudioSection>
           <!-- Whole-frame post-processing (after all layers composite) -->
-          <div class="border-t border-white/[0.06] pt-3">
-            <div class="panel-label mb-1.5">Post-processing</div>
+          <StudioSection title="Post-processing">
             <p class="text-[10px] text-white/30 leading-snug mb-2">Grades the whole frame after all layers composite — bakes into renders, exports and motion stills.</p>
             <PostEffectsControls :effects="postEffects" @update="(fx: any[]) => setPostEffects(fx as any)" />
-          </div>
+          </StudioSection>
           <!-- Grid — a layout guide (explicit or seeded-generated) that snaps
                drag/resize and, optionally, draws an editor-only overlay. Never
                baked into the render (see the comment above `gridConfig`). -->
-          <div class="border-t border-white/[0.06] pt-3">
-            <div class="panel-label mb-1.5">Grid</div>
+          <StudioSection title="Grid">
             <StudioSegmented :options="['off', 'explicit', 'generated']" :model-value="gridConfig.mode"
               @update:model-value="(v: any) => patchGrid({ mode: v })" />
 
@@ -9267,9 +9266,9 @@ onUnmounted(() => {
                 :model-value="drawSectionActive" @update:model-value="(v: boolean) => setDrawSectionActive(v)" />
               <StudioButton variant="secondary" @click="onFillGridWithSections">Fill grid with sections</StudioButton>
             </div>
-          </div>
+          </StudioSection>
           <!-- Expressive arrange (a whole group is selected) -->
-          <div v-if="soleSelectedGroup" class="border-t border-white/[0.06] pt-3">
+          <StudioSection v-if="soleSelectedGroup" title="Arrange">
             <div class="flex items-center justify-between mb-1.5">
               <div class="panel-label">Expressive arrange</div>
               <button
@@ -9313,7 +9312,7 @@ onUnmounted(() => {
                 <RefreshCw class="size-3.5" /> Re-render
               </button>
             </div>
-          </div>
+          </StudioSection>
           <p v-else class="text-xs text-white/40 italic">
             Select a layer to edit its properties, or use the toolbar to add text and shapes.
           </p>
