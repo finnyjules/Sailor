@@ -35,7 +35,8 @@ import { withFieldFrame, renderFieldWithBase, effectFollowsShape, type FieldRequ
 import {
   hasPaint, resolvePaint, OBJECT_SHADER_FIELD_PX, type ShaderFieldFrameCtx,
 } from '~/lib/paint/resolve'
-import { drawQuadWarp, type Quad } from '~/lib/compositor/warp'
+import { drawQuadWarp, drawMeshWarp, type Quad, type Pt as WarpPt } from '~/lib/compositor/warp'
+import { warpPoint, type WarpField } from '~/lib/compositor/meshWarp'
 // Task 1's pure stroke-stack data model. `StrokeAlign` already exists as a local type in
 // this file (see below), so it is NOT re-imported from there to avoid a second import
 // path for the same idea.
@@ -258,7 +259,7 @@ import { makeSiblingOutlineResolver, type SiblingResolver } from '~/lib/composit
 // module's scope, and this file references these names in its own signatures.
 import type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
-  TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
+  TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind, WarpEffect,
 } from '~/lib/compositor/effectStack'
 export type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
@@ -2093,6 +2094,15 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
   }, s)
 }
 
+// Raster mesh-warp (F3 4b) constants. `RASTER_WARP_EPS` matches `geometryEffects.WARP_EPS`:
+// an |amount| at or below it is treated as OFF, so a raster layer carrying a zero-amount warp
+// renders byte-identically to one with no warp (the warp branch never runs). `RASTER_WARP_SUBDIV`
+// is finer than corner-pin's 16 because a displacement field curves within a cell (perspective
+// does not), so a coarser grid would facet a strong bulge/twist; 24 keeps curves smooth at a
+// bounded 2·24² triangle cost per warped stamp.
+const RASTER_WARP_EPS = 1e-4
+const RASTER_WARP_SUBDIV = 24
+
 function paintLayer(
   ctx: CanvasRenderingContext2D,
   layer: LocalLayer,
@@ -2150,6 +2160,16 @@ function paintLayer(
   const shearA = hasSkew ? Math.tan((sky * Math.PI) / 180) : 0
   const shearC = hasSkew ? Math.tan((skx * Math.PI) / 180) : 0
   const cp = cornerPinActive(layer.cornerPin) ? layer.cornerPin : null
+  // Raster mesh-warp (F3 4b): the `warp` geometry kind, on a raster layer (image/wired/brush),
+  // rendered as a pixel-domain warp of the layer's box-sized content rather than an outline
+  // transform. Read straight from the stack — `warp` is a geometry kind, so `orderablePasses`
+  // excludes it from the 2D pixel passes; it is applied inside `drawContent` instead (like
+  // corner-pin). Vector layers get `undefined` here (canWarpRaster is false) and keep the 4a
+  // outline path untouched; a warp at |amount| ≤ eps is treated as absent, so a zero-amount
+  // raster warp is byte-identical to no warp. First visible warp wins (never more than one).
+  const rasterWarp: WarpEffect | undefined = canWarpRaster(layer)
+    ? (stack.find(e => e.type === 'warp' && Math.abs((e as WarpEffect).amount) > RASTER_WARP_EPS) as WarpEffect | undefined)
+    : undefined
   // A living image (Task 3): each clone shows a different frame of the same clip (see
   // `_cloneSlot` / `clipFrameFor`), so anything below that would otherwise memoise "the"
   // content across clones — the silhouette bake and `dofMemo` — must not, for this layer.
@@ -2320,7 +2340,8 @@ function paintLayer(
 
   const drawContent = (c: CanvasRenderingContext2D) => {
     const dofCanvas = dofContent()
-    if (!cp) {
+    // No corner-pin AND no raster warp ⇒ the original inline draw, byte-identical.
+    if (!cp && !rasterWarp) {
       if (dofCanvas) {
         c.drawImage(dofCanvas, -dofCanvas.width / 2, -dofCanvas.height / 2)
         return
@@ -2353,11 +2374,48 @@ function paintLayer(
       drawLayerContent(cctx, layer, W, wiredLive)
     }
     const hw = box.w / 2 + pad, hh = box.h / 2 + pad
+    // Raster mesh-warp (F3 4b): displace the box-sized artwork through the warp field BEFORE it
+    // is stamped or pinned — "warp the artwork, then place it in perspective". `cc` spans local
+    // [-hw,hw]×[-hh,hh] (its pixel rect maps 1:1 onto that rect); sample `warpPoint` over an N×N
+    // grid of that rect to build the destination mesh. `bbox` is the CONTENT box (pad excluded),
+    // so `amount` reads the same on a raster layer as on the equivalent vector outline (4a).
+    if (rasterWarp) {
+      const bbox = { minX: -box.w / 2, minY: -box.h / 2, w: box.w, h: box.h }
+      const params = { amount: rasterWarp.amount, frequency: rasterWarp.frequency }
+      const field = rasterWarp.field as WarpField
+      const N = RASTER_WARP_SUBDIV
+      const grid: WarpPt[][] = []
+      for (let j = 0; j <= N; j++) {
+        const row: WarpPt[] = []
+        for (let i = 0; i <= N; i++) {
+          const px = -hw + (i / N) * hw * 2
+          const py = -hh + (j / N) * hh * 2
+          row.push(warpPoint({ x: px, y: py }, bbox, field, params))
+        }
+        grid.push(row)
+      }
+      // No corner-pin ⇒ draw the warped mesh straight onto `c` (local space); nothing clips the
+      // mesh to the box here, so a bulge that pushes past the box edge still shows.
+      if (!cp) { drawMeshWarp(c, cc, grid, N); return }
+      // warp THEN corner-pin (rare): bake the warped artwork back into a box-sized offscreen so
+      // the projective pin has a rectangle to map. This clips any warp overflow to the box (pad
+      // is 0 on raster layers) — accepted for the warp+pin combination; the common case is the
+      // no-pin branch above.
+      const wc = document.createElement('canvas'); wc.width = bw; wc.height = bh
+      const wctx = wc.getContext('2d')
+      if (wctx) {
+        wctx.translate(bw / 2, bh / 2)
+        drawMeshWarp(wctx, cc, grid, N)
+        cc = wc
+      }
+    }
+    // Corner-pin (the 4a-era path, unchanged when there is no raster warp): warp `cc`'s rect
+    // onto the corner-pin quad in local space. Only reached with `cp` truthy.
     const quad: Quad = [
-      { x: -hw + cp.tl.x * hw, y: -hh + cp.tl.y * hh },
-      { x:  hw + cp.tr.x * hw, y: -hh + cp.tr.y * hh },
-      { x:  hw + cp.br.x * hw, y:  hh + cp.br.y * hh },
-      { x: -hw + cp.bl.x * hw, y:  hh + cp.bl.y * hh },
+      { x: -hw + cp!.tl.x * hw, y: -hh + cp!.tl.y * hh },
+      { x:  hw + cp!.tr.x * hw, y: -hh + cp!.tr.y * hh },
+      { x:  hw + cp!.br.x * hw, y:  hh + cp!.br.y * hh },
+      { x: -hw + cp!.bl.x * hw, y:  hh + cp!.bl.y * hh },
     ]
     drawQuadWarp(c, cc, quad, 16)
   }
@@ -2940,6 +2998,23 @@ export function canTakeGeometry(layer: LocalLayer): boolean {
   if (!vector) return false
   if (k === 'text' && textHasDecoration(layer as TextLayer)) return false
   return true
+}
+
+/**
+ * True when a RASTER layer can take the `warp` effect as a pixel-domain mesh warp of its
+ * rasterised content (F3 4b). Deliberately NOT `canTakeGeometry` (which is vector-only and
+ * gates the other geometry kinds): `warp` is the one geometry kind that also runs on raster
+ * layers, by warping the layer's own box-sized content offscreen rather than its outline.
+ *
+ * Only image / wired / brush qualify — the three kinds whose `localLayerBox` is a faithful,
+ * self-contained render of their content (the same contract corner-pin relies on). Generative
+ * kinds (deal / scatter / mosaic) and line paint outside their box, so a box-warp of them would
+ * clip; they stay ineligible. Vectors are excluded here on purpose — they take the vector
+ * outline warp through `applyGeometry` (Task 4a), never this raster path.
+ */
+export function canWarpRaster(layer: LocalLayer): boolean {
+  const k = layer.kind
+  return k === 'image' || k === 'wired' || k === 'brush'
 }
 
 /**

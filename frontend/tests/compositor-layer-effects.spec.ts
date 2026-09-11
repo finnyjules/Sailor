@@ -320,12 +320,17 @@ async function seedOne(page: Page, layer: Record<string, unknown>): Promise<void
 }
 
 test.describe('Frame geometry effects — menu gating + inspector dials (F2 Task 6)', () => {
-  test('greyed on an image layer, with a "needs a vector shape" reason', async ({ page }) => {
+  test('greyed on an image layer, with a "needs a vector shape" reason — except warp', async ({ page }) => {
     await openCompositor(page)
     await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
     await openFxMenuFirst(page)
-    for (const k of GEOMETRY_KINDS)
-      await expect(page.locator(`[data-testid="add-effect-item"][data-kind="${k}"]`)).toBeDisabled()
+    // Every outline-only geometry kind is greyed on an image; WARP is the one kind that also
+    // runs on raster layers (F3 4b — pixel-domain mesh warp), so it stays enabled.
+    for (const k of GEOMETRY_KINDS) {
+      const item = page.locator(`[data-testid="add-effect-item"][data-kind="${k}"]`)
+      if (k === 'warp') await expect(item, k).toBeEnabled()
+      else await expect(item, k).toBeDisabled()
+    }
     await expect(page.locator('[data-testid="add-effect-item"][data-kind="trim"]'))
       .toHaveAttribute('title', /vector shape/)
     // A pixel effect stays offered — only geometry is gated on the outline.
@@ -587,6 +592,61 @@ test.describe('Frame geometry effects — offscreen pad for outward growth (F2 T
     })
     const warpedZero = await stackPixels(page)
     expect(warpedZero).toBe(plain)
+  })
+})
+
+/**
+ * F3 Task 4b — warp on RASTER layers (image / wired / brush) as a pixel-domain mesh warp of the
+ * rasterised content. Proves: the add menu offers warp (and only warp) on an image; a warp with
+ * amount up changes the rendered pixels; a warp at amount 0 is byte-identical to no warp (the
+ * warp branch never runs); and a raster layer with NO warp is unaffected by the 4b seam.
+ */
+// A 16×16 fully-opaque red PNG, so a mesh warp of its box visibly moves ink (a transparent
+// image would warp to the same nothing).
+const RED_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR4nGO4o6HxnxLMMGrAqAGjBgwXAwBpmSsfoVs4IAAAAABJRU5ErkJggg=='
+
+test.describe('Frame warp — raster layers (F3 Task 4b)', () => {
+  const seedImage = (page: Page, effects: unknown[] = []) => page.evaluate(({ src, fx }) =>
+    (window as any).__compositorSetLayers([{
+      id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1,
+      src, effects: fx,
+    }]), { src: RED_PNG, fx: effects })
+
+  test('the add menu offers warp on an image (raster mesh warp)', async ({ page }) => {
+    await openCompositor(page)
+    await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: RED_PNG })
+    await openFxMenuFirst(page)
+    const warp = page.locator('[data-testid="add-effect-item"][data-kind="warp"]')
+    await expect(warp).toBeEnabled()
+    // No greyed reason on the enabled warp entry.
+    await expect(warp).not.toHaveAttribute('title', /vector shape/)
+  })
+
+  test('a warp with amount up changes an image layer\'s pixels', async ({ page }) => {
+    await openCompositor(page)
+    await seedImage(page, [])
+    const plain = await stackPixels(page)
+    await seedImage(page, [{ id: 'wp', type: 'warp', field: 'bulge', amount: 0.6, frequency: 3, visible: true }])
+    const warped = await stackPixels(page)
+    expect(warped).not.toBe(plain)
+  })
+
+  test('a warp at amount 0 is byte-identical to no warp on an image layer', async ({ page }) => {
+    await openCompositor(page)
+    await seedImage(page, [])
+    const plain = await stackPixels(page)
+    await seedImage(page, [{ id: 'wp', type: 'warp', field: 'bulge', amount: 0, frequency: 3, visible: true }])
+    const warpedZero = await stackPixels(page)
+    expect(warpedZero).toBe(plain)
+  })
+
+  test('an invisible warp is byte-identical to no warp on an image layer', async ({ page }) => {
+    await openCompositor(page)
+    await seedImage(page, [])
+    const plain = await stackPixels(page)
+    await seedImage(page, [{ id: 'wp', type: 'warp', field: 'twist', amount: 0.8, frequency: 3, visible: false }])
+    const invisible = await stackPixels(page)
+    expect(invisible).toBe(plain)
   })
 })
 

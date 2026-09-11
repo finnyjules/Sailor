@@ -14,7 +14,7 @@ import {
   cornerRadii, drawLocalLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, layerMaskRef, localLayerBox, createBrushLayer, newMosaicLayer,
   newScatterLayer,
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
-  outlinePathData, canTakeGeometry, cornerPinActive,
+  outlinePathData, canTakeGeometry, canWarpRaster, cornerPinActive,
 } from '~/composables/useCompositorLayers'
 import { onPaperBooleanReady, warmPaperBoolean } from '~/lib/compositor/booleanGeometry'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
@@ -2105,7 +2105,12 @@ function fxKindDisabled(kind: EffectKind): boolean {
   if (kind === 'dof' && !localDepthSource(l)) return true
   // Geometry effects transform a vector outline before it rasterises: a layer with no outline
   // (image / wired / brush / line / deal / scatter / mosaic) or decorated text can't take one.
-  if (isGeometryKind(kind) && !canTakeGeometry(l as LocalLayer)) return true
+  // WARP is the exception (F3 4b): on a raster layer (image / wired / brush) it runs as a
+  // pixel-domain mesh warp of the content, so it stays enabled there even though canTakeGeometry
+  // is false.
+  if (isGeometryKind(kind) && !canTakeGeometry(l as LocalLayer)) {
+    if (!(kind === 'warp' && canWarpRaster(l as LocalLayer))) return true
+  }
   return isPinnedKind(kind) && layerStack(l).some(e => e.type === kind)
 }
 /** Why a greyed menu entry is greyed — depth of field and the geometry kinds each have a
@@ -2115,6 +2120,8 @@ function fxKindDisabledTitle(kind: EffectKind): string | undefined {
   if (!l) return undefined
   if (kind === 'dof' && !localDepthSource(l)) return 'Depth of field needs an image with a depth map'
   if (isGeometryKind(kind) && !canTakeGeometry(l as LocalLayer)) {
+    // Warp on a raster layer is enabled (pixel-domain mesh warp) — no greyed reason.
+    if (kind === 'warp' && canWarpRaster(l as LocalLayer)) return undefined
     return l.kind === 'text'
       ? 'Underlined or struck-through text can\'t take geometry effects'
       : 'Geometry effects need a vector shape'

@@ -8,7 +8,7 @@ import {
 } from '~/lib/compositor/effectStack'
 import { DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
 import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
-import { canTakeGeometry } from '~/composables/useCompositorLayers'
+import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
   it('has 20 kinds, 3 pinned and 17 orderable, all labelled in sentence case', () => {
@@ -371,5 +371,35 @@ describe('canTakeGeometry (add-menu gating predicate)', () => {
       strokes: [{ id: 's1', paint: 'none', width: 0.01, distance: 0.02, visible: true }],
     })
     expect(canTakeGeometry(unpainted)).toBe(true)
+  })
+})
+
+describe('canWarpRaster (raster warp eligibility, F3 4b)', () => {
+  // The SEPARATE per-kind predicate for the ONE geometry kind (warp) that also runs on raster
+  // layers — a pixel-domain mesh warp of the content, not an outline transform. Deliberately
+  // NOT canTakeGeometry (vector-only). Image / wired / brush qualify; nothing else does.
+  const vec = (kind: string, extra: Record<string, unknown> = {}) =>
+    ({ id: 'l', kind, ...extra }) as unknown as Parameters<typeof canWarpRaster>[0]
+
+  it('accepts the three raster content kinds', () => {
+    for (const k of ['image', 'wired', 'brush']) {
+      expect(canWarpRaster(vec(k)), k).toBe(true)
+    }
+  })
+  it('rejects every vector kind (they take the 4a outline warp instead)', () => {
+    for (const k of ['rect', 'ellipse', 'path', 'polygon', 'star', 'text']) {
+      expect(canWarpRaster(vec(k)), k).toBe(false)
+    }
+  })
+  it('rejects the generative / line kinds that paint outside their box', () => {
+    for (const k of ['line', 'deal', 'scatter', 'mosaic']) {
+      expect(canWarpRaster(vec(k)), k).toBe(false)
+    }
+  })
+  it('is disjoint from canTakeGeometry — no kind is both raster- and vector-warpable', () => {
+    for (const k of ['rect', 'ellipse', 'path', 'polygon', 'star', 'text',
+      'image', 'wired', 'brush', 'line', 'deal', 'scatter', 'mosaic']) {
+      expect(canWarpRaster(vec(k)) && canTakeGeometry(vec(k)), k).toBe(false)
+    }
   })
 })

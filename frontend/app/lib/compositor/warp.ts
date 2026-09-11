@@ -89,8 +89,41 @@ function drawTri(
 }
 
 /**
+ * Draw `src` onto `ctx` warped so its pixel rect maps to an ARBITRARY destination grid.
+ *
+ * `dst` is an `(N+1)×(N+1)` array of points in ctx coordinates: `dst[j][i]` is the image
+ * of the source pixel `(i/N·src.width, j/N·src.height)`. Each cell is drawn as two
+ * texture-mapped triangles via the shared `drawTri` (seam-inflate). `drawQuadWarp` builds
+ * `dst` from a homography (corner-pin); the raster mesh-warp (F3 4b) builds it by sampling
+ * a displacement field over the box — both feed this ONE triangle-mesh drawer, so the seam
+ * handling and the affine texture solve live in a single place.
+ */
+export function drawMeshWarp(
+  ctx: CanvasRenderingContext2D,
+  src: HTMLCanvasElement,
+  dst: Pt[][],
+  subdiv = 16,
+): void {
+  const sw = src.width, sh = src.height
+  if (!(sw > 0 && sh > 0)) return
+  const N = Math.max(1, Math.round(subdiv))
+  if (dst.length < N + 1) return
+  for (let j = 0; j < N; j++) {
+    const rowT = dst[j]!, rowB = dst[j + 1]!
+    if (rowT.length < N + 1 || rowB.length < N + 1) return
+    for (let i = 0; i < N; i++) {
+      const su0 = (i / N) * sw, sv0 = (j / N) * sh, su1 = ((i + 1) / N) * sw, sv1 = ((j + 1) / N) * sh
+      const a = rowT[i]!, b = rowT[i + 1]!, c = rowB[i + 1]!, d = rowB[i]!
+      drawTri(ctx, src, a.x, a.y, b.x, b.y, c.x, c.y, su0, sv0, su1, sv0, su1, sv1)
+      drawTri(ctx, src, a.x, a.y, c.x, c.y, d.x, d.y, su0, sv0, su1, sv1, su0, sv1)
+    }
+  }
+}
+
+/**
  * Draw `src` (a fully-rendered layer-content canvas) onto `ctx`, warped so its rect
- * maps to `quad` (in ctx coordinates), via an N×N subdivided projective grid.
+ * maps to `quad` (in ctx coordinates), via an N×N subdivided projective grid. Builds the
+ * destination grid from the unit-square→quad homography and hands it to `drawMeshWarp`.
  */
 export function drawQuadWarp(
   ctx: CanvasRenderingContext2D,
@@ -109,12 +142,5 @@ export function drawQuadWarp(
     for (let i = 0; i <= N; i++) row.push(applyHomography(m, i / N, j / N))
     dst.push(row)
   }
-  for (let j = 0; j < N; j++) {
-    for (let i = 0; i < N; i++) {
-      const su0 = (i / N) * sw, sv0 = (j / N) * sh, su1 = ((i + 1) / N) * sw, sv1 = ((j + 1) / N) * sh
-      const a = dst[j]![i]!, b = dst[j]![i + 1]!, c = dst[j + 1]![i + 1]!, d = dst[j + 1]![i]!
-      drawTri(ctx, src, a.x, a.y, b.x, b.y, c.x, c.y, su0, sv0, su1, sv0, su1, sv1)
-      drawTri(ctx, src, a.x, a.y, c.x, c.y, d.x, d.y, su0, sv0, su1, sv1, su0, sv1)
-    }
-  }
+  drawMeshWarp(ctx, src, dst, N)
 }
