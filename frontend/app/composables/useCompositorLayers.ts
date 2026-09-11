@@ -4684,15 +4684,20 @@ function applyGlassFromLayer(
   // Bound-layer mode is active only when the key resolves to a real live item; a dangling
   // key falls back to `snap` (opaque) and needs none of the alpha recovery below.
   const boundTarget = spec.readsLayerKey && byKey ? byKey.get(spec.readsLayerKey) : undefined
-  const source = resolveGlassSource(spec, byKey, snap, (item: StackItem) => {
-    const c = mk()
-    const ictx = c.getContext('2d')
-    if (ictx) {
-      ictx.setTransform(t)
-      drawItemContent(ictx, item, W, H)
-    }
-    return c
-  })
+  // "Its own fill" on a shape-following effect (isShapeFollowingOwnFill): the shader's
+  // picture is the fill's own input, painted frame-sized, not what lies behind.
+  const ownFill = !spec.readsBackdrop
+  const source = ownFill
+    ? paintTileBox(spec.input, w, h)
+    : resolveGlassSource(spec, byKey, snap, (item: StackItem) => {
+      const c = mk()
+      const ictx = c.getContext('2d')
+      if (ictx) {
+        ictx.setTransform(t)
+        drawItemContent(ictx, item, W, H)
+      }
+      return c
+    })
 
   // 2. The layer's own silhouette (+ its own mask ref, mirroring applyBackdropBlur).
   //    The ghost uses an opaque solid fill so this is the pane's SHAPE alpha, not the
@@ -4869,6 +4874,22 @@ export function isGlassLayer(layer: LocalLayer): boolean {
   if (!fill || !isFill(fill) || !fillIsShader(fill)) return false
   const spec = fill.shader
   return !!spec.readsBackdrop && effectReadsInput(spec.effectId)
+}
+
+/** A shape-following effect (manifest `followsShape`: Glass lens, Crystal, Liquid
+ *  metal) painting the layer's OWN fill. It exists to take the shape it is applied
+ *  to, and it can only do that when it is handed the layer's silhouette — which the
+ *  plain tile path never does (it paints the effect's stand-alone circle inside the
+ *  shape). So it goes through the glass paint path too, with the fill's own input
+ *  standing in for the backdrop snapshot as the shader's picture. "Layers behind"
+ *  and "Its own fill" then both fill the real outline; only what shows in the
+ *  reflection or refraction differs. */
+export function isShapeFollowingOwnFill(layer: LocalLayer): boolean {
+  if (!('fill' in layer)) return false
+  const fill = (layer as { fill?: Paint }).fill
+  if (!fill || !isFill(fill) || !fillIsShader(fill)) return false
+  const spec = fill.shader
+  return !spec.readsBackdrop && effectFollowsShape(spec)
 }
 
 /** Whether `items`/`background` currently carry a LIVE shader fill — one whose
@@ -5087,7 +5108,7 @@ export function paintLayerStack(
       // (only) on top — the fill itself never paints. A throw from the shader path
       // (e.g. an unloaded catalog) must NOT abort the frame: on catch we fall through
       // to the normal fill+stroke paint below, so the layer still renders.
-      if (isGlassLayer(layer)) {
+      if (isGlassLayer(layer) || isShapeFollowingOwnFill(layer)) {
         let refracted = false
         try {
           refracted = applyGlassFromLayer(ctx, layer, localLayers, W, H, opacityMul, byKey)
