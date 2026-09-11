@@ -508,7 +508,15 @@ export function withFieldFrame<T>(requests: FieldRequest[], fn: (frozenCount: nu
  * deliberately have none) and their own base texture.
  */
 function buildPasses(effect: EffectDef, spec: ShaderSpec, t: number): ShaderPass[] {
-  const uniforms: Uniforms = { u_time: t, u_seed: spec.seed, u_hasInput: 1 }
+  // u_hasShape is zeroed on EVERY field render, always. A shape-following effect
+  // (glass_lens/crystal/liquid_metal) declares it, and the Frame's glass paint sets it
+  // to 1 (with the layer silhouette in u_shape) via renderFieldWithBase's `shape` merge.
+  // The renderer is a shared singleton whose per-program uniforms persist across draws,
+  // so without this reset a later render of the SAME effect that passes no shape (a 3D
+  // material, a Space Type fill) would inherit the last Compositor render's u_hasShape=1
+  // and paint the previous layer's silhouette. getUniformLocation returns null for effects
+  // that don't declare it, so this is inert everywhere else — the u_hasInput precedent.
+  const uniforms: Uniforms = { u_time: t, u_seed: spec.seed, u_hasInput: 1, u_hasShape: 0 }
   const byUniform: Record<string, ParamValue> = {}
   for (const [k, v] of Object.entries(spec.params)) byUniform[`u_${k}`] = v
   Object.assign(uniforms, toUniforms(effect, byUniform))
