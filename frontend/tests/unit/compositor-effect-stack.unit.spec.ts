@@ -11,10 +11,10 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 27 kinds, 3 pinned and 24 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(27)
+  it('has 30 kinds, 3 pinned and 27 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(30)
     expect(PINNED_KINDS).toEqual(['background_blur', 'dof', 'drop_shadow'])
-    expect(ORDERABLE_KINDS).toHaveLength(24)
+    expect(ORDERABLE_KINDS).toHaveLength(27)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
     expect(EFFECT_LABELS.gradientMap).toBe('Gradient map')
@@ -33,6 +33,9 @@ describe('effect kinds', () => {
     expect(EFFECT_LABELS.color_overlay).toBe('Colour overlay')
     expect(EFFECT_LABELS.gradient_overlay).toBe('Gradient overlay')
     expect(EFFECT_LABELS.stroke_from_alpha).toBe('Stroke from alpha')
+    expect(EFFECT_LABELS.directional_blur).toBe('Directional blur')
+    expect(EFFECT_LABELS.radial_blur).toBe('Radial blur')
+    expect(EFFECT_LABELS.zoom_blur).toBe('Zoom blur')
   })
   it('orders background blur first and drop shadow last', () => {
     expect(EFFECT_ORDER[0]).toBe('background_blur')
@@ -61,6 +64,7 @@ describe('effect kinds', () => {
       bloom: 'pixel', vignette: 'pixel', grain: 'pixel', torn_edge: 'pixel',
       feather: 'pixel', layer_blur: 'pixel', outer_glow: 'pixel',
       color_overlay: 'pixel', gradient_overlay: 'pixel', stroke_from_alpha: 'pixel',
+      directional_blur: 'pixel', radial_blur: 'pixel', zoom_blur: 'pixel',
       drop_shadow: 'stamp',
     }
     for (const k of EFFECT_ORDER) expect(regionOf(k), k).toBe(expected[k])

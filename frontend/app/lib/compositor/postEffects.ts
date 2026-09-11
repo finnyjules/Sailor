@@ -153,7 +153,37 @@ export interface StrokeFromAlphaEffect {
   color: string             // hex/rgba (alpha allowed) — the stroke colour
   visible: boolean
 }
-export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect
+/** Linear motion blur: smear the layer along `angle` for `distance·W` px, as a multi-tap
+ *  accumulation centred on the shape (so it blurs in place without drifting). Grows OUTSIDE the
+ *  alpha along the axis (folded into the offscreen pad via `motionBlurOutwardPx`). Deterministic:
+ *  a fixed tap count, no randomness. */
+export interface DirectionalBlurEffect {
+  type: 'directional_blur'
+  angle: number       // 0..360 degrees — the smear direction
+  distance: number    // total smear length, normalized to canvas width
+  visible: boolean
+}
+/** Spin blur: rotate the layer about `(centerX, centerY)` (fractions of the box) back and forth
+ *  by `amount`, accumulated over a fixed tap count. Grows OUTSIDE the alpha by a fraction of the
+ *  layer extent (folded into the offscreen pad). Deterministic: no randomness. */
+export interface RadialBlurEffect {
+  type: 'radial_blur'
+  centerX: number     // 0..1 — spin centre X, fraction of the offscreen box
+  centerY: number     // 0..1 — spin centre Y, fraction of the offscreen box
+  amount: number      // 0..1 — spin strength
+  visible: boolean
+}
+/** Zoom blur: scale the layer about `(centerX, centerY)` in and out by `amount`, accumulated over
+ *  a fixed tap count, so the shape radiates from the centre. Grows OUTSIDE the alpha by a fraction
+ *  of the layer extent (folded into the offscreen pad). Deterministic: no randomness. */
+export interface ZoomBlurEffect {
+  type: 'zoom_blur'
+  centerX: number     // 0..1 — zoom centre X, fraction of the offscreen box
+  centerY: number     // 0..1 — zoom centre Y, fraction of the offscreen box
+  amount: number      // 0..1 — radiating strength
+  visible: boolean
+}
+export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect | DirectionalBlurEffect | RadialBlurEffect | ZoomBlurEffect
 
 export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   adjust: { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
@@ -182,6 +212,11 @@ export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   // A thin dark stroke straddling the alpha edge — visible the moment it is added; width, align
   // and colour tune it.
   stroke_from_alpha: { type: 'stroke_from_alpha', width: 0.006, align: 'center', color: '#111111', visible: true },
+  // A short horizontal smear, plainly readable the moment it is added; angle + distance tune it.
+  directional_blur: { type: 'directional_blur', angle: 0, distance: 0.03, visible: true },
+  // A spin / zoom about the centre at a visible strength; the centre + amount tune each.
+  radial_blur: { type: 'radial_blur', centerX: 0.5, centerY: 0.5, amount: 0.3, visible: true },
+  zoom_blur: { type: 'zoom_blur', centerX: 0.5, centerY: 0.5, amount: 0.3, visible: true },
 }
 export function defaultPostEffect(type: PostEffect['type']): PostEffect {
   return JSON.parse(JSON.stringify(POST_EFFECT_DEFAULTS[type])) as PostEffect
@@ -208,9 +243,14 @@ export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]
   gradient_overlay: { opacity: [0, 1], angle: [0, 360] },
   // `color` and `align` are non-numeric, so only `width` clamps (agent whitelist for the two is Task 8).
   stroke_from_alpha: { width: [0, 0.2] },
+  // Every motion-blur param is numeric, so the generic sanitizer drives all three fully —
+  // no Task-8 whitelist is needed for this family.
+  directional_blur: { angle: [0, 360], distance: [0, 0.2] },
+  radial_blur: { centerX: [0, 1], centerY: [0, 1], amount: [0, 1] },
+  zoom_blur: { centerX: [0, 1], centerY: [0, 1], amount: [0, 1] },
 }
 
-const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha'])
+const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur'])
 export const isChainEffect = (e: { type: string }): e is PostEffect => CHAIN_TYPES.has(e.type)
 export const chainActive = (effects?: { type: string; visible?: boolean }[]): boolean =>
   !!effects?.some(e => e.visible !== false && CHAIN_TYPES.has(e.type))
@@ -546,6 +586,52 @@ export function gradientOverlayAxis(w: number, h: number, angle: number): { x0: 
   return { x0: cx - dx * half, y0: cy - dy * half, x1: cx + dx * half, y1: cy + dy * half }
 }
 
+// ── Motion blur (directional / radial / zoom): shared tap accumulation ────────────────────
+/** Fixed tap count for every motion-blur pass — deterministic (no randomness), and enough
+ *  samples that the smear reads smooth without becoming costly. */
+export const MOTION_BLUR_SAMPLES = 14
+/** Full angular swing (radians) a `radial_blur` spins through at `amount` 1 — split half each way
+ *  about the tap midpoint. ~34°, a strong but not dizzying spin. */
+export const RADIAL_BLUR_MAX_ANGLE = 0.6
+/** Full scale swing a `zoom_blur` radiates through at `amount` 1 (scales span 1±0.15) — split
+ *  half each way about the tap midpoint. */
+export const ZOOM_BLUR_MAX_SCALE = 0.3
+
+/** The centred multiplier for tap `i` of `n`: `(i + 0.5) / n − 0.5`, symmetric about 0 so the
+ *  accumulation blurs IN PLACE (the extreme taps are ±`motionSampleSpan(n)`, equal and opposite,
+ *  so the shape never drifts). Pure + exported so a test can prove the centring. */
+export function motionTapMultipliers(n: number): number[] {
+  const out: number[] = []
+  for (let i = 0; i < n; i++) out.push((i + 0.5) / n - 0.5)
+  return out
+}
+/** The magnitude of the OUTERMOST centred tap multiplier for `n` taps — `0.5 − 0.5/n`. The pass
+ *  reaches this fraction of its full swing at the extremes, so the outward-pad math and the pass
+ *  read the same number. */
+export function motionSampleSpan(n: number): number {
+  return n > 0 ? Math.max(0, (n - 1) / (2 * n)) : 0
+}
+
+/** Per-tap pixel offsets for a directional blur of `distancePx` along `angleDeg`, centred so the
+ *  taps straddle the shape (Σ ≈ 0). Pure + deterministic; exported so a test can prove distance +
+ *  angle are consumed and 0 distance is the identity. */
+export function directionalBlurTaps(angleDeg: number, distancePx: number, n: number): { dx: number; dy: number }[] {
+  const a = ((((angleDeg || 0) % 360) + 360) % 360) * Math.PI / 180
+  const ux = Math.cos(a), uy = Math.sin(a)
+  const d = Math.max(0, Number.isFinite(distancePx) ? distancePx : 0)
+  return motionTapMultipliers(n).map(m => ({ dx: ux * d * m, dy: uy * d * m }))
+}
+/** Per-tap rotation angles (radians) for a radial (spin) blur of `amount`, centred about 0. */
+export function radialBlurTaps(amount: number, n: number): number[] {
+  const swing = clamp01(amount) * RADIAL_BLUR_MAX_ANGLE
+  return motionTapMultipliers(n).map(m => swing * m)
+}
+/** Per-tap scale factors for a zoom blur of `amount`, centred about 1. */
+export function zoomBlurTaps(amount: number, n: number): number[] {
+  const swing = clamp01(amount) * ZOOM_BLUR_MAX_SCALE
+  return motionTapMultipliers(n).map(m => 1 + swing * m)
+}
+
 /** Colour overlay: fill a scratch with `color`, knock it down to the layer's own alpha
  *  (destination-in), then composite that onto the layer at the chosen blend, scaled by
  *  `opacity`. The alpha-clip on the scratch keeps the fill WITHIN the silhouette while the
@@ -668,10 +754,77 @@ function passStrokeFromAlpha(ctx: CanvasRenderingContext2D, off: HTMLCanvasEleme
   ctx.restore()
 }
 
+/** Directional (linear) motion blur: accumulate `MOTION_BLUR_SAMPLES` copies of the layer, each
+ *  shifted along `angle` by a centred fraction of `distance·W` px and composited at `1/N` alpha,
+ *  so the shape smears in place. Clear the offscreen and redraw the accumulation onto it (replace).
+ *  Deterministic: a fixed tap count, no randomness. */
+function passDirectionalBlur(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: DirectionalBlurEffect, opts: PassOpts): void {
+  const scale = opts.scale ?? 1
+  const distPx = Math.max(0, e.distance ?? 0) * opts.W * scale
+  if (!(distPx > 0)) return
+  const taps = directionalBlurTaps(e.angle ?? 0, distPx, MOTION_BLUR_SAMPLES)
+  const src = cloneCanvas(off)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, off.width, off.height)
+  ctx.globalAlpha = 1 / taps.length
+  for (const t of taps) ctx.drawImage(src, t.dx, t.dy)
+  ctx.restore()
+}
+
+/** Radial (spin) motion blur: accumulate `MOTION_BLUR_SAMPLES` copies of the layer, each rotated
+ *  about `(centerX·w, centerY·h)` by a centred fraction of the full swing and composited at `1/N`
+ *  alpha. Clear the offscreen and redraw the accumulation (replace). Deterministic. */
+function passRadialBlur(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: RadialBlurEffect, _opts: PassOpts): void {
+  const amount = clamp01(e.amount ?? 0)
+  if (!(amount > 0)) return
+  const angs = radialBlurTaps(amount, MOTION_BLUR_SAMPLES)
+  const cx = clamp01(e.centerX ?? 0.5) * off.width
+  const cy = clamp01(e.centerY ?? 0.5) * off.height
+  const src = cloneCanvas(off)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, off.width, off.height)
+  ctx.globalAlpha = 1 / angs.length
+  for (const th of angs) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.translate(cx, cy)
+    ctx.rotate(th)
+    ctx.translate(-cx, -cy)
+    ctx.drawImage(src, 0, 0)
+  }
+  ctx.restore()
+}
+
+/** Zoom motion blur: accumulate `MOTION_BLUR_SAMPLES` copies of the layer, each scaled about
+ *  `(centerX·w, centerY·h)` by a centred fraction of the full scale swing and composited at `1/N`
+ *  alpha, so the shape radiates from the centre. Clear the offscreen and redraw the accumulation
+ *  (replace). Deterministic. */
+function passZoomBlur(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: ZoomBlurEffect, _opts: PassOpts): void {
+  const amount = clamp01(e.amount ?? 0)
+  if (!(amount > 0)) return
+  const factors = zoomBlurTaps(amount, MOTION_BLUR_SAMPLES)
+  const cx = clamp01(e.centerX ?? 0.5) * off.width
+  const cy = clamp01(e.centerY ?? 0.5) * off.height
+  const src = cloneCanvas(off)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, off.width, off.height)
+  ctx.globalAlpha = 1 / factors.length
+  for (const f of factors) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.translate(cx, cy)
+    ctx.scale(f, f)
+    ctx.translate(-cx, -cy)
+    ctx.drawImage(src, 0, 0)
+  }
+  ctx.restore()
+}
+
 /** The kinds this module owns as 2D passes over a layer/document offscreen. Everything
  *  else in a layer's stack (inner shadow, torn edge, feather, layer blur, drop shadow,
  *  background blur, dof) is applied by the caller at its own structural position. */
-const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha'])
+const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur'])
 
 /**
  * Apply passes in ARRAY ORDER — the per-layer entry point. Order is the caller's, so the
@@ -700,6 +853,9 @@ export function applyPasses(
       case 'color_overlay': passColorOverlay(ctx, off, e as unknown as ColorOverlayEffect, opts); break
       case 'gradient_overlay': passGradientOverlay(ctx, off, e as unknown as GradientOverlayEffect, opts); break
       case 'stroke_from_alpha': passStrokeFromAlpha(ctx, off, e as unknown as StrokeFromAlphaEffect, opts); break
+      case 'directional_blur': passDirectionalBlur(ctx, off, e as unknown as DirectionalBlurEffect, opts); break
+      case 'radial_blur': passRadialBlur(ctx, off, e as unknown as RadialBlurEffect, opts); break
+      case 'zoom_blur': passZoomBlur(ctx, off, e as unknown as ZoomBlurEffect, opts); break
     }
   }
 }
@@ -741,7 +897,10 @@ export function applyBlurPass(off: HTMLCanvasElement, radiusPx: number): void {
 // stroke_from_alpha rides just after the overlays: a stroke reads as ON TOP of the graded fill
 // and its colour/gradient overlays, but UNDER the light/texture passes (bloom→vignette→grain) and
 // the trailing outer glow, so bloom can bloom the bright stroke and the glow haloes behind it.
-const CHAIN_ORDER = ['inner_glow', 'adjust', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'bloom', 'vignette', 'grain', 'outer_glow']
+// The motion blurs (directional→radial→zoom) sit just after the stroke and BEFORE bloom: the
+// layer's full colour/overlay/stroke look is settled, then smeared, so bloom blooms the smeared
+// highlights and grain/vignette dress the moved image — a blur after grain would drag the texture.
+const CHAIN_ORDER = ['inner_glow', 'adjust', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'bloom', 'vignette', 'grain', 'outer_glow']
 
 /**
  * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type (the first VISIBLE

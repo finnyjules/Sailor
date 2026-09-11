@@ -67,6 +67,7 @@ import { type PaintStroke, stampStrokes, strokeBounds } from '~/lib/compositor/b
 import {
   applyBlurPass, applyPasses, applyStackPost, chainActive,
   strokeAlphaAlignOf, strokeAlphaBand,
+  MOTION_BLUR_SAMPLES, RADIAL_BLUR_MAX_ANGLE, ZOOM_BLUR_MAX_SCALE, motionSampleSpan,
   type AdjustEffect, type BloomEffect, type DofEffect, type DuotoneEffect,
   type GradientMapEffect, type GrainEffect, type PostEffect, type VignetteEffect,
 } from '~/lib/compositor/postEffects'
@@ -1714,6 +1715,54 @@ export function strokeAlphaOutwardPx(layer: LocalLayer, W: number): number {
 }
 
 /**
+ * How far a layer's ENABLED motion-blur effects smear OUTSIDE the silhouette, logical px — the MAX
+ * outward reach across `directional_blur` / `radial_blur` / `zoom_blur` (0 with none). Read from the
+ * SAME arithmetic the passes use (`motionSampleSpan(MOTION_BLUR_SAMPLES)` × the full swing):
+ *  - directional smears along the angle by `distance·W`, reaching `distance·W · span` at the extreme
+ *    tap (direction drops out of a bounding pad — it grows the same each way);
+ *  - radial rotates about `(centerX·bw, centerY·bh)`, moving the farthest corner (radius `maxR`) by
+ *    up to `maxR · amount·RADIAL_BLUR_MAX_ANGLE · span` (arc length ≥ chord, a safe upper bound);
+ *  - zoom scales about that centre, moving the farthest corner by `maxR · amount·ZOOM_BLUR_MAX_SCALE
+ *    · span`.
+ * `box` is the pre-pad layer box in logical px, so `maxR` is measured there.
+ *
+ * Applies to ANY layer kind (image included), folded into `silhouettePadPx` beside the glow / stroke
+ * terms (NOT `cornerPinPadPx`, which re-warps). 0 when no motion blur is present (or every amount /
+ * distance is 0), keeping the raster and the identity A/B byte-identical.
+ *
+ * Like the glow / stroke pads, this is defensive today: a motion blur makes `rasterablePasses` false
+ * (it is neither torn edge / feather nor layer blur), so the layer renders through the full-device
+ * offscreen path in `paintLayer`, where the smear has the whole canvas to grow into. It costs one
+ * cheap stack scan and returns 0 in the common no-blur case.
+ */
+export function motionBlurOutwardPx(layer: LocalLayer, W: number, box: { w: number; h: number }): number {
+  const span = motionSampleSpan(MOTION_BLUR_SAMPLES)
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
+  let out = 0
+  for (const e of effectStackOf(layer as unknown as Parameters<typeof effectStackOf>[0])) {
+    if (e.visible === false) continue
+    if (e.type === 'directional_blur') {
+      const dist = Math.max(0, num((e as unknown as { distance?: number }).distance))
+      out = Math.max(out, dist * W * span)
+    } else if (e.type === 'radial_blur' || e.type === 'zoom_blur') {
+      const r = e as unknown as { amount?: number; centerX?: number; centerY?: number }
+      const amt = clamp01(num(r.amount))
+      if (!(amt > 0)) continue
+      const cx = clamp01(r.centerX === undefined ? 0.5 : num(r.centerX)) * box.w
+      const cy = clamp01(r.centerY === undefined ? 0.5 : num(r.centerY)) * box.h
+      const maxR = Math.max(
+        Math.hypot(cx, cy), Math.hypot(box.w - cx, cy),
+        Math.hypot(cx, box.h - cy), Math.hypot(box.w - cx, box.h - cy),
+      )
+      const swing = amt * (e.type === 'radial_blur' ? RADIAL_BLUR_MAX_ANGLE : ZOOM_BLUR_MAX_SCALE)
+      out = Math.max(out, maxR * swing * span)
+    }
+  }
+  return out
+}
+
+/**
  * How far a WOBBLED stroke deviates beyond where the same stroke running straight would
  * reach, in the stroke's own STORED units (`wobbleSpecOf` with `unit: 1` — the caller below
  * applies `scale * W` to the whole pad exactly once, as it already does for every other term).
@@ -2211,9 +2260,10 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
       for (const ln of wrappedTextLines(mctx, layer as TextLayer, W)) maxLineWPx = Math.max(maxLineWPx, mctx.measureText(ln || ' ').width)
     }
   }
-  // Grow the raster to hold an outer-glow halo's outward blur AND an alpha-traced stroke's outward
-  // band (each 0 with none → byte-identical raster). Logical px, like the pure helper's own answer;
-  // summed since a layer can carry both. See `outerGlowOutwardPx` / `strokeAlphaOutwardPx`.
+  // Grow the raster to hold an outer-glow halo's outward blur, an alpha-traced stroke's outward
+  // band AND a motion blur's outward smear (each 0 with none → byte-identical raster). Logical px,
+  // like the pure helper's own answer; summed since a layer can carry all three. See
+  // `outerGlowOutwardPx` / `strokeAlphaOutwardPx` / `motionBlurOutwardPx`.
   return silhouettePadPxPure({
     kind: layer.kind,
     strokeAlign,
@@ -2224,7 +2274,7 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
     boxHeightPx: box.h,
     maxLineWPx,
     boxWidthPx: box.w,
-  }, s) + outerGlowOutwardPx(layer, W) + strokeAlphaOutwardPx(layer, W)
+  }, s) + outerGlowOutwardPx(layer, W) + strokeAlphaOutwardPx(layer, W) + motionBlurOutwardPx(layer, W, box)
 }
 
 // Raster mesh-warp (F3 4b) constants. `RASTER_WARP_EPS` matches `geometryEffects.WARP_EPS`:

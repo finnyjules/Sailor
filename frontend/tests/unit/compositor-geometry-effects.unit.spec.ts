@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { applyGeometry, longShadowBody, GEOMETRY_EFFECT_LABELS } from '~/lib/compositor/geometryEffects'
+import { MOTION_BLUR_SAMPLES, RADIAL_BLUR_MAX_ANGLE, ZOOM_BLUR_MAX_SCALE, motionSampleSpan } from '~/lib/compositor/postEffects'
 import { flatten, pathLength, type Pt2 } from '~/lib/vector/pathOps'
 
 // 100×100 square: perimeter 400. Same shape the pathOps spec uses.
@@ -336,6 +337,7 @@ import {
   geometryOutwardPx,
   outerGlowOutwardPx,
   strokeAlphaOutwardPx,
+  motionBlurOutwardPx,
   outlinePathData,
   createRectLayer,
   createEllipseLayer,
@@ -574,5 +576,66 @@ describe('useCompositorLayers: strokeAlphaOutwardPx', () => {
   it('applies to an IMAGE layer too (any layer kind, reads the raster alpha)', () => {
     const img = createImageLayer('x.png', 1, { effects: [geo('stroke_from_alpha', { width: 0.02, align: 'outside', color: '#000' })] as any })
     expect(strokeAlphaOutwardPx(img, W)).toBeCloseTo(0.02 * W, 6)
+  })
+})
+
+// F4 Task 4: the silhouette raster grows to hold a motion blur's OUTWARD smear — directional along
+// its angle by distance·W·span, radial/zoom by the farthest-corner radius × the swing × span.
+// 0 with none ⇒ byte-identical. Expected values are derived from the SAME constants the pass uses.
+describe('useCompositorLayers: motionBlurOutwardPx', () => {
+  const W = 300
+  const box = { w: 100, h: 100 }
+  const span = motionSampleSpan(MOTION_BLUR_SAMPLES)
+  const maxRCentred = Math.hypot(box.w / 2, box.h / 2) // farthest corner from the box centre
+  it('is 0 for a layer with no effects (byte-identity pad preserved)', () => {
+    expect(motionBlurOutwardPx(createRectLayer(), W, box)).toBe(0)
+  })
+  it('is 0 for a layer with only a non-blur pixel effect', () => {
+    const r = createRectLayer({ effects: [geo('bloom')] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBe(0)
+  })
+  it('is distance·W·span for a directional blur (angle drops out of the pad)', () => {
+    const r = createRectLayer({ effects: [geo('directional_blur', { angle: 33, distance: 0.03 })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBeCloseTo(0.03 * W * span, 6)
+  })
+  it('is 0 for a directional blur at distance 0', () => {
+    const r = createRectLayer({ effects: [geo('directional_blur', { angle: 90, distance: 0 })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBe(0)
+  })
+  it('is maxR·(amount·RADIAL_MAX)·span for a centred radial blur', () => {
+    const r = createRectLayer({ effects: [geo('radial_blur', { centerX: 0.5, centerY: 0.5, amount: 0.3 })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBeCloseTo(maxRCentred * 0.3 * RADIAL_BLUR_MAX_ANGLE * span, 6)
+  })
+  it('is maxR·(amount·ZOOM_MAX)·span for a centred zoom blur', () => {
+    const r = createRectLayer({ effects: [geo('zoom_blur', { centerX: 0.5, centerY: 0.5, amount: 0.3 })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBeCloseTo(maxRCentred * 0.3 * ZOOM_BLUR_MAX_SCALE * span, 6)
+  })
+  it('is 0 for a radial / zoom blur at amount 0', () => {
+    const r = createRectLayer({ effects: [geo('radial_blur', { amount: 0 }), geo('zoom_blur', { amount: 0 })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBe(0)
+  })
+  it('measures the corner FARTHEST from an off-centre radial centre', () => {
+    // centre at the top-left corner ⇒ maxR is the full diagonal to the opposite corner.
+    const r = createRectLayer({ effects: [geo('radial_blur', { centerX: 0, centerY: 0, amount: 0.5 })] as any })
+    const diag = Math.hypot(box.w, box.h)
+    expect(motionBlurOutwardPx(r, W, box)).toBeCloseTo(diag * 0.5 * RADIAL_BLUR_MAX_ANGLE * span, 6)
+  })
+  it('ignores a hidden motion blur', () => {
+    const r = createRectLayer({ effects: [geo('zoom_blur', { amount: 0.8, visible: false })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBe(0)
+  })
+  it('is the MAX reach across several motion blurs', () => {
+    const r = createRectLayer({
+      effects: [
+        geo('directional_blur', { angle: 0, distance: 0.01 }),           // small: 0.01·W·span
+        geo('zoom_blur', { centerX: 0.5, centerY: 0.5, amount: 1 }),     // larger
+      ] as any,
+    })
+    const zoom = maxRCentred * 1 * ZOOM_BLUR_MAX_SCALE * span
+    expect(motionBlurOutwardPx(r, W, box)).toBeCloseTo(Math.max(0.01 * W * span, zoom), 6)
+  })
+  it('applies to an IMAGE layer too (any layer kind)', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('directional_blur', { angle: 45, distance: 0.02 })] as any })
+    expect(motionBlurOutwardPx(img, W, box)).toBeCloseTo(0.02 * W * span, 6)
   })
 })

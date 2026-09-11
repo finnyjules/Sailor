@@ -8134,6 +8134,50 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+
+          <!-- Directional blur: a linear smear along an angle for a distance. Both dials are read
+               by passDirectionalBlur — no dead control. Distance shows as a percentage of the
+               canvas width, matching every other normalised distance in the inspector. -->
+          <div v-else-if="activeEffect!.type === 'directional_blur'" class="grid grid-cols-2 gap-1.5">
+            <div>
+              <div class="panel-sublabel mb-1">Angle</div>
+              <input v-scrubnum type="number" min="0" max="360" step="1" :value="Math.round((activeEffect as any).angle ?? 0)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ angle: Math.min(360, Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0)) })" />
+            </div>
+            <div>
+              <div class="panel-sublabel mb-1">Distance</div>
+              <input v-scrubnum type="number" min="0" max="20" step="0.1" :value="Math.round(((activeEffect as any).distance ?? 0.03) * 1000) / 10"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ distance: Math.min(0.2, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+            </div>
+          </div>
+
+          <!-- Radial (spin) and zoom blur: a strength plus the centre they revolve / radiate about.
+               Every dial is read by passRadialBlur / passZoomBlur — no dead control. Centre and
+               amount show as percentages. -->
+          <div v-else-if="activeEffect!.type === 'radial_blur' || activeEffect!.type === 'zoom_blur'" class="space-y-1.5">
+            <div>
+              <div class="panel-sublabel mb-1">Amount</div>
+              <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).amount ?? 0.3) * 100)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ amount: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">Centre X</div>
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).centerX ?? 0.5) * 100)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ centerX: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Centre Y</div>
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).centerY ?? 0.5) * 100)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ centerY: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+            </div>
+          </div>
         </div>
       </template>
 
