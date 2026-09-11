@@ -8029,499 +8029,512 @@ onUnmounted(() => {
         <div class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
           <!-- Text controls -->
           <template v-if="selectedLocal.kind === 'text'">
-            <div>
-              <div class="panel-label mb-1.5">Text</div>
-              <textarea
-                :value="(selectedLocal as any).text" rows="2"
-                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none resize-none"
-                @input="setLocal(selectedLocal!.id, { text: ($event.target as HTMLTextAreaElement).value })"
-              />
-            </div>
-            <div>
-              <div class="panel-label mb-1.5">Font</div>
-              <FontPicker
-                :selected-key="fontPickerKey"
-                :label="(selectedLocal as any).fontFamily || 'Inter'"
-                sublabel=""
-                @pick="onPickFont"
-              />
-            </div>
-            <div class="grid grid-cols-2 gap-3">
+            <StudioSection title="Text">
               <div>
-                <div class="panel-label mb-1.5">Size</div>
-                <input v-scrubnum type="number" min="1" :value="pxW((selectedLocal as any).fontSize)"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                  @input="setSizePx(selectedLocal!.id, 'fontSize', parseFloat(($event.target as HTMLInputElement).value) || 1)" />
+                <textarea
+                  :value="(selectedLocal as any).text" rows="2"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none resize-none"
+                  @input="setLocal(selectedLocal!.id, { text: ($event.target as HTMLTextAreaElement).value })"
+                />
               </div>
               <div>
-                <div class="panel-label mb-1.5">Weight</div>
-                <select :value="(selectedLocal as any).fontWeight || 400"
+                <div class="panel-label mb-1.5">Font</div>
+                <FontPicker
+                  :selected-key="fontPickerKey"
+                  :label="(selectedLocal as any).fontFamily || 'Inter'"
+                  sublabel=""
+                  @pick="onPickFont"
+                />
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <div class="panel-label mb-1.5">Size</div>
+                  <input v-scrubnum type="number" min="1" :value="pxW((selectedLocal as any).fontSize)"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                    @input="setSizePx(selectedLocal!.id, 'fontSize', parseFloat(($event.target as HTMLInputElement).value) || 1)" />
+                </div>
+                <div>
+                  <div class="panel-label mb-1.5">Weight</div>
+                  <select :value="(selectedLocal as any).fontWeight || 400"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
+                    @change="setLocal(selectedLocal!.id, { fontWeight: parseInt(($event.target as HTMLSelectElement).value) || 400 })">
+                    <option v-for="w in FONT_WEIGHTS" :key="w.v" :value="w.v">{{ w.label }} · {{ w.v }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <div class="panel-label mb-1.5">Align</div>
+                  <div class="flex gap-1">
+                    <button v-for="a in (['left','center','right','justify'] as const)" :key="a" :title="a"
+                      class="flex-1 flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5"
+                      :class="(selectedLocal as any).align === a ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
+                      @click="setLocal(selectedLocal!.id, { align: a })">
+                      <component :is="a === 'left' ? AlignLeft : a === 'center' ? AlignCenter : a === 'right' ? AlignRight : AlignJustify" class="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div v-if="!textPath">
+                  <div class="panel-label mb-1.5">V-align</div>
+                  <div class="flex gap-1">
+                    <button v-for="v in (['top','middle','bottom','justify'] as const)" :key="v" :title="(selectedLocal as any).boxH ? v : 'Set box H to enable'"
+                      class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-[10px]"
+                      :class="((selectedLocal as any).valign ?? 'top') === v ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50'"
+                      @click="setLocal(selectedLocal!.id, { valign: v } as any)">{{ v === 'justify' ? '↕' : v.charAt(0).toUpperCase() }}</button>
+                  </div>
+                </div>
+              </div>
+              <div v-if="!textPath" class="grid grid-cols-2 gap-3">
+                <div>
+                  <div class="panel-label mb-1.5" title="Set a width to auto-wrap words; clear for free-flowing text">Text box W</div>
+                  <input v-scrubnum type="number" min="0" placeholder="auto"
+                    :value="(selectedLocal as any).boxW ? pxW((selectedLocal as any).boxW) : ''"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
+                    @input="(e: Event) => { const v = parseFloat((e.target as HTMLInputElement).value); setLocal(selectedLocal!.id, { boxW: v > 0 ? v / outWidth : undefined } as any) }" />
+                </div>
+                <div>
+                  <div class="panel-label mb-1.5" title="Set a height to enable vertical align / justify">Text box H</div>
+                  <input v-scrubnum type="number" min="0" placeholder="auto"
+                    :value="(selectedLocal as any).boxH ? pxW((selectedLocal as any).boxH) : ''"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
+                    @input="(e: Event) => { const v = parseFloat((e.target as HTMLInputElement).value); setLocal(selectedLocal!.id, { boxH: v > 0 ? v / outWidth : undefined } as any) }" />
+                </div>
+              </div>
+              <!-- Type on a path. The guide belongs to this layer: it shows only
+                   while the layer is selected and never appears in the layer list. -->
+              <div>
+                <div class="panel-label mb-1.5" title="Run the type along a curve instead of flat lines">Follow a path</div>
+                <select :value="textPath?.follow ?? 'off'"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
-                  @change="setLocal(selectedLocal!.id, { fontWeight: parseInt(($event.target as HTMLSelectElement).value) || 400 })">
-                  <option v-for="w in FONT_WEIGHTS" :key="w.v" :value="w.v">{{ w.label }} · {{ w.v }}</option>
+                  @change="setTextFollow(selectedLocal, ($event.target as HTMLSelectElement).value as any)">
+                  <option v-for="o in TEXT_FOLLOW_OPTIONS" :key="o.v" :value="o.v">{{ o.label }}</option>
                 </select>
-              </div>
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <div class="panel-label mb-1.5">Align</div>
-                <div class="flex gap-1">
-                  <button v-for="a in (['left','center','right','justify'] as const)" :key="a" :title="a"
-                    class="flex-1 flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5"
-                    :class="(selectedLocal as any).align === a ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
-                    @click="setLocal(selectedLocal!.id, { align: a })">
-                    <component :is="a === 'left' ? AlignLeft : a === 'center' ? AlignCenter : a === 'right' ? AlignRight : AlignJustify" class="size-3.5" />
-                  </button>
-                </div>
-              </div>
-              <div v-if="!textPath">
-                <div class="panel-label mb-1.5">V-align</div>
-                <div class="flex gap-1">
-                  <button v-for="v in (['top','middle','bottom','justify'] as const)" :key="v" :title="(selectedLocal as any).boxH ? v : 'Set box H to enable'"
-                    class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-[10px]"
-                    :class="((selectedLocal as any).valign ?? 'top') === v ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50'"
-                    @click="setLocal(selectedLocal!.id, { valign: v } as any)">{{ v === 'justify' ? '↕' : v.charAt(0).toUpperCase() }}</button>
-                </div>
-              </div>
-            </div>
-            <div v-if="!textPath" class="grid grid-cols-2 gap-3">
-              <div>
-                <div class="panel-label mb-1.5" title="Set a width to auto-wrap words; clear for free-flowing text">Text box W</div>
-                <input v-scrubnum type="number" min="0" placeholder="auto"
-                  :value="(selectedLocal as any).boxW ? pxW((selectedLocal as any).boxW) : ''"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
-                  @input="(e: Event) => { const v = parseFloat((e.target as HTMLInputElement).value); setLocal(selectedLocal!.id, { boxW: v > 0 ? v / outWidth : undefined } as any) }" />
-              </div>
-              <div>
-                <div class="panel-label mb-1.5" title="Set a height to enable vertical align / justify">Text box H</div>
-                <input v-scrubnum type="number" min="0" placeholder="auto"
-                  :value="(selectedLocal as any).boxH ? pxW((selectedLocal as any).boxH) : ''"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
-                  @input="(e: Event) => { const v = parseFloat((e.target as HTMLInputElement).value); setLocal(selectedLocal!.id, { boxH: v > 0 ? v / outWidth : undefined } as any) }" />
-              </div>
-            </div>
-            <!-- Type on a path. The guide belongs to this layer: it shows only
-                 while the layer is selected and never appears in the layer list. -->
-            <div>
-              <div class="panel-label mb-1.5" title="Run the type along a curve instead of flat lines">Follow a path</div>
-              <select :value="textPath?.follow ?? 'off'"
-                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
-                @change="setTextFollow(selectedLocal, ($event.target as HTMLSelectElement).value as any)">
-                <option v-for="o in TEXT_FOLLOW_OPTIONS" :key="o.v" :value="o.v">{{ o.label }}</option>
-              </select>
 
-              <div v-if="textPath" class="mt-2.5 space-y-2.5">
-                <!-- Curve: one dial from flat, through an arch, to a closed ring. -->
-                <StudioSlider v-if="textPath.follow === 'curve'" label="Bend"
-                  :model-value="textPath.bend ?? 0" :min="-1" :max="1" :step="0.01" :bindable="false"
-                  @update:model-value="(v) => setTextPath(selectedLocal, { bend: v })" />
+                <div v-if="textPath" class="mt-2.5 space-y-2.5">
+                  <!-- Curve: one dial from flat, through an arch, to a closed ring. -->
+                  <StudioSlider v-if="textPath.follow === 'curve'" label="Bend"
+                    :model-value="textPath.bend ?? 0" :min="-1" :max="1" :step="0.01" :bindable="false"
+                    @update:model-value="(v) => setTextPath(selectedLocal, { bend: v })" />
 
-                <div v-if="textPath.follow === 'circle'" class="grid grid-cols-2 gap-3">
-                  <div>
-                    <div class="panel-label mb-1">Radius</div>
-                    <input v-scrubnum type="number" min="1" :value="pxW(textPath.radius ?? 0)"
-                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                      @input="setTextPath(selectedLocal, { radius: Math.max(1, parseFloat(($event.target as HTMLInputElement).value) || 1) / outWidth })" />
-                  </div>
-                  <div>
-                    <div class="panel-label mb-1" title="Degrees clockwise from the top of the ring">Start angle</div>
-                    <input v-scrubnum type="number" step="1" :value="Math.round(textPath.startAngle ?? 0)"
-                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                      @input="setTextPath(selectedLocal, { startAngle: parseFloat(($event.target as HTMLInputElement).value) || 0 })" />
-                  </div>
-                </div>
-
-                <div v-if="textPath.follow === 'wave'" class="grid grid-cols-2 gap-3">
-                  <div>
-                    <div class="panel-label mb-1">Height</div>
-                    <input v-scrubnum type="number" min="0" :value="pxW(textPath.amplitude ?? 0)"
-                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                      @input="setTextPath(selectedLocal, { amplitude: Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0) / outWidth })" />
-                  </div>
-                  <div>
-                    <div class="panel-label mb-1" title="How many full waves the run crosses">Waves</div>
-                    <input v-scrubnum type="number" min="0" step="0.25" :value="textPath.frequency ?? 0"
-                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                      @input="setTextPath(selectedLocal, { frequency: Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
-                  </div>
-                </div>
-
-                <!-- Shape: the outline of any library shape becomes the guide. -->
-                <div v-if="textPath.follow === 'shape'">
-                  <div class="panel-label mb-1">Shape</div>
-                  <button
-                    ref="textPathShapeButtonRef"
-                    type="button"
-                    class="w-full flex items-center gap-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 cursor-pointer transition-colors"
-                    title="Pick the shape the type runs around"
-                    @click="openTextPathShapePicker"
-                  >
-                    <svg v-if="textPathShape" viewBox="0 0 96 96" class="size-4 shrink-0" fill="currentColor" aria-hidden="true"><path :d="textPathShape.d" :fill-rule="textPathShape.fillRule" /></svg>
-                    <span class="flex-1 text-left">{{ textPathShape?.name ?? 'Pick a shape' }}</span>
-                  </button>
-                  <ShapePicker
-                    v-if="textPathShapePickerOpen"
-                    :model-value="textPath.shapeId ?? ''"
-                    :allow-none="false"
-                    :anchor="textPathShapeAnchor"
-                    :ignore="textPathShapeButtonRef"
-                    @update:model-value="(id: string) => { setTextPath(selectedLocal, { shapeId: id }); textPathShapePickerOpen = false }"
-                    @close="textPathShapePickerOpen = false"
-                  />
-                </div>
-
-                <div v-if="textPath.follow === 'custom'" class="space-y-2">
-                  <button
-                    class="w-full flex items-center justify-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded py-1.5 text-xs text-white/80 hover:text-white cursor-pointer transition-colors"
-                    :title="textPath.d ? 'Draw a new path for this type to follow' : 'Draw the path this type will follow'"
-                    @click="drawGuideForSelectedText"
-                  >
-                    <PenTool class="size-3.5" /> {{ textPath.d ? 'Redraw the path' : 'Draw a path' }}
-                  </button>
-                  <div v-if="framePathLayers.length" class="flex items-center gap-2">
-                    <span class="text-[10px] text-white/40 shrink-0">Or use</span>
-                    <select
-                      class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
-                      title="Follow a path already on this frame"
-                      @change="useFramePathAsGuide(selectedLocal, ($event.target as HTMLSelectElement).value)"
-                    >
-                      <option value="">A path on the frame…</option>
-                      <option v-for="pl in framePathLayers" :key="pl.id" :value="pl.id">{{ pl.label }}</option>
-                    </select>
-                  </div>
-                  <p v-if="!textPath.d" class="text-[11px] text-white/45 leading-snug">
-                    Click to place points, drag to curve them. The path guides the type and isn't drawn.
-                  </p>
-                </div>
-
-                <div v-if="textPath.follow === 'shape' || textPath.follow === 'custom'">
-                  <div class="panel-label mb-1" title="How big the path is — the type's own size is set above">Path size</div>
-                  <input v-scrubnum type="number" min="1" :value="pxW(textPath.size ?? 0)"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setTextPath(selectedLocal, { size: Math.max(1, parseFloat(($event.target as HTMLInputElement).value) || 1) / outWidth })" />
-                </div>
-
-                <!-- Shared dials, meaningful on every guide. -->
-                <div>
-                  <div class="panel-label mb-1" title="Slide the type along the path">Start · {{ Math.round(textPathStartUi * 100) }}%</div>
-                  <input type="range" min="0" max="1" step="0.005" :value="textPathStartUi"
-                    class="w-full accent-white cursor-pointer"
-                    @input="setTextPathStartUi(selectedLocal, parseFloat(($event.target as HTMLInputElement).value))" />
-                </div>
-                <div>
-                  <div class="panel-label mb-1" title="Lift the type off the path, or drop it below">Baseline shift</div>
-                  <input v-scrubnum type="number" step="1" :value="pxW(textPath.shift ?? 0)"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setTextPath(selectedLocal, { shift: (parseFloat(($event.target as HTMLInputElement).value) || 0) / outWidth })" />
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                  <div>
-                    <div class="panel-label mb-1" title="Which side of the path the type sits on">Side</div>
-                    <div class="flex gap-1">
-                      <button v-for="sd in (['outside','inside'] as const)" :key="sd"
-                        class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-[10px] cursor-pointer"
-                        :class="(textPath.side ?? 'outside') === sd ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50'"
-                        @click="setTextPathSide(selectedLocal, sd)">{{ sd === 'outside' ? 'Outside' : 'Inside' }}</button>
+                  <div v-if="textPath.follow === 'circle'" class="grid grid-cols-2 gap-3">
+                    <div>
+                      <div class="panel-label mb-1">Radius</div>
+                      <input v-scrubnum type="number" min="1" :value="pxW(textPath.radius ?? 0)"
+                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                        @input="setTextPath(selectedLocal, { radius: Math.max(1, parseFloat(($event.target as HTMLInputElement).value) || 1) / outWidth })" />
+                    </div>
+                    <div>
+                      <div class="panel-label mb-1" title="Degrees clockwise from the top of the ring">Start angle</div>
+                      <input v-scrubnum type="number" step="1" :value="Math.round(textPath.startAngle ?? 0)"
+                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                        @input="setTextPath(selectedLocal, { startAngle: parseFloat(($event.target as HTMLInputElement).value) || 0 })" />
                     </div>
                   </div>
-                  <div>
-                    <div class="panel-label mb-1" title="Space the letters so they fill the whole path">Fit to path</div>
-                    <button
-                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-[10px] cursor-pointer"
-                      :class="textPath.fit ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50'"
-                      @click="setTextPath(selectedLocal, { fit: !textPath!.fit })">{{ textPath.fit ? 'On' : 'Off' }}</button>
-                  </div>
-                </div>
-              </div>
-            </div>
 
-            <div class="grid grid-cols-2 gap-3">
-              <div v-if="!textPath">
-                <div class="panel-label mb-1.5" title="Line height as a multiple of the font size">Line height</div>
-                <input v-scrubnum type="number" min="0.5" max="4" step="0.05" :value="(selectedLocal as any).lineHeight ?? 1.2"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                  @input="setLocal(selectedLocal!.id, { lineHeight: parseFloat(($event.target as HTMLInputElement).value) || 1.2 })" />
-              </div>
-              <div>
-                <div class="panel-label mb-1.5" title="Tracking, in em (fraction of the font size)">Letter spacing</div>
-                <input v-scrubnum type="number" step="0.01" :value="(selectedLocal as any).letterSpacing ?? 0"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                  @input="setLocal(selectedLocal!.id, { letterSpacing: parseFloat(($event.target as HTMLInputElement).value) || 0 })" />
-              </div>
-            </div>
-            <div>
-              <div class="panel-label mb-1.5">Style</div>
-              <div class="flex gap-1">
-                <button v-if="!textPath" title="Underline"
-                  class="flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 px-2.5"
-                  :class="(selectedLocal as any).underline ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
-                  @click="setLocal(selectedLocal!.id, { underline: !(selectedLocal as any).underline })">
-                  <Underline class="size-3.5" />
-                </button>
-                <button v-if="!textPath" title="Strikethrough"
-                  class="flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 px-2.5"
-                  :class="(selectedLocal as any).strikethrough ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
-                  @click="setLocal(selectedLocal!.id, { strikethrough: !(selectedLocal as any).strikethrough })">
-                  <Strikethrough class="size-3.5" />
-                </button>
-                <div v-if="!textPath" class="w-px bg-white/[0.08] mx-0.5"></div>
-                <button v-for="c in (['uppercase','lowercase','capitalize'] as const)" :key="c" :title="c"
-                  class="flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 px-2.5"
-                  :class="(selectedLocal as any).textTransform === c ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
-                  @click="setLocal(selectedLocal!.id, { textTransform: (selectedLocal as any).textTransform === c ? undefined : c })">
-                  <component :is="c === 'uppercase' ? CaseUpper : c === 'lowercase' ? CaseLower : CaseSensitive" class="size-3.5" />
-                </button>
-              </div>
-            </div>
-            <div v-if="!textPath">
-              <div class="flex items-center justify-between mb-1.5">
-                <div class="panel-label" title="Place words individually — overrides Align">Expressive layout</div>
-                <button
-                  class="text-[10px] px-1.5 py-0.5 rounded border"
-                  :class="(selectedLocal as any).expressive ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50 border-white/[0.08]'"
-                  @click="toggleExpressive(selectedLocal)">
-                  {{ (selectedLocal as any).expressive ? 'On' : 'Off' }}
-                </button>
-              </div>
-              <div v-if="(selectedLocal as any).expressive" class="space-y-2.5">
-                <div class="grid grid-cols-2 gap-3">
-                  <div>
-                    <div class="panel-label mb-1">Words / line</div>
-                    <input v-scrubnum type="number" min="1" max="12" :value="(selectedLocal as any).expressive.wordsPerLine"
+                  <div v-if="textPath.follow === 'wave'" class="grid grid-cols-2 gap-3">
+                    <div>
+                      <div class="panel-label mb-1">Height</div>
+                      <input v-scrubnum type="number" min="0" :value="pxW(textPath.amplitude ?? 0)"
+                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                        @input="setTextPath(selectedLocal, { amplitude: Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0) / outWidth })" />
+                    </div>
+                    <div>
+                      <div class="panel-label mb-1" title="How many full waves the run crosses">Waves</div>
+                      <input v-scrubnum type="number" min="0" step="0.25" :value="textPath.frequency ?? 0"
+                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                        @input="setTextPath(selectedLocal, { frequency: Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
+                    </div>
+                  </div>
+
+                  <!-- Shape: the outline of any library shape becomes the guide. -->
+                  <div v-if="textPath.follow === 'shape'">
+                    <div class="panel-label mb-1">Shape</div>
+                    <button
+                      ref="textPathShapeButtonRef"
+                      type="button"
+                      class="w-full flex items-center gap-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 cursor-pointer transition-colors"
+                      title="Pick the shape the type runs around"
+                      @click="openTextPathShapePicker"
+                    >
+                      <svg v-if="textPathShape" viewBox="0 0 96 96" class="size-4 shrink-0" fill="currentColor" aria-hidden="true"><path :d="textPathShape.d" :fill-rule="textPathShape.fillRule" /></svg>
+                      <span class="flex-1 text-left">{{ textPathShape?.name ?? 'Pick a shape' }}</span>
+                    </button>
+                    <ShapePicker
+                      v-if="textPathShapePickerOpen"
+                      :model-value="textPath.shapeId ?? ''"
+                      :allow-none="false"
+                      :anchor="textPathShapeAnchor"
+                      :ignore="textPathShapeButtonRef"
+                      @update:model-value="(id: string) => { setTextPath(selectedLocal, { shapeId: id }); textPathShapePickerOpen = false }"
+                      @close="textPathShapePickerOpen = false"
+                    />
+                  </div>
+
+                  <div v-if="textPath.follow === 'custom'" class="space-y-2">
+                    <button
+                      class="w-full flex items-center justify-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded py-1.5 text-xs text-white/80 hover:text-white cursor-pointer transition-colors"
+                      :title="textPath.d ? 'Draw a new path for this type to follow' : 'Draw the path this type will follow'"
+                      @click="drawGuideForSelectedText"
+                    >
+                      <PenTool class="size-3.5" /> {{ textPath.d ? 'Redraw the path' : 'Draw a path' }}
+                    </button>
+                    <div v-if="framePathLayers.length" class="flex items-center gap-2">
+                      <span class="text-[10px] text-white/40 shrink-0">Or use</span>
+                      <select
+                        class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
+                        title="Follow a path already on this frame"
+                        @change="useFramePathAsGuide(selectedLocal, ($event.target as HTMLSelectElement).value)"
+                      >
+                        <option value="">A path on the frame…</option>
+                        <option v-for="pl in framePathLayers" :key="pl.id" :value="pl.id">{{ pl.label }}</option>
+                      </select>
+                    </div>
+                    <p v-if="!textPath.d" class="text-[11px] text-white/45 leading-snug">
+                      Click to place points, drag to curve them. The path guides the type and isn't drawn.
+                    </p>
+                  </div>
+
+                  <div v-if="textPath.follow === 'shape' || textPath.follow === 'custom'">
+                    <div class="panel-label mb-1" title="How big the path is — the type's own size is set above">Path size</div>
+                    <input v-scrubnum type="number" min="1" :value="pxW(textPath.size ?? 0)"
                       class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                      @input="setExpressive(selectedLocal, { wordsPerLine: Math.max(1, parseInt(($event.target as HTMLInputElement).value) || 1) })" />
+                      @input="setTextPath(selectedLocal, { size: Math.max(1, parseFloat(($event.target as HTMLInputElement).value) || 1) / outWidth })" />
+                  </div>
+
+                  <!-- Shared dials, meaningful on every guide. -->
+                  <div>
+                    <div class="panel-label mb-1" title="Slide the type along the path">Start · {{ Math.round(textPathStartUi * 100) }}%</div>
+                    <input type="range" min="0" max="1" step="0.005" :value="textPathStartUi"
+                      class="w-full accent-white cursor-pointer"
+                      @input="setTextPathStartUi(selectedLocal, parseFloat(($event.target as HTMLInputElement).value))" />
                   </div>
                   <div>
-                    <div class="panel-label mb-1">Placement</div>
-                    <select :value="(selectedLocal as any).expressive.placement"
-                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
-                      @change="setExpressive(selectedLocal, { placement: ($event.target as HTMLSelectElement).value as any })">
-                      <option value="random">Random</option>
-                      <option value="edges">Edges</option>
-                      <option value="staircase">Staircase</option>
-                      <option value="alternate">Alternate</option>
-                    </select>
+                    <div class="panel-label mb-1" title="Lift the type off the path, or drop it below">Baseline shift</div>
+                    <input v-scrubnum type="number" step="1" :value="pxW(textPath.shift ?? 0)"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                      @input="setTextPath(selectedLocal, { shift: (parseFloat(($event.target as HTMLInputElement).value) || 0) / outWidth })" />
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <div class="panel-label mb-1" title="Which side of the path the type sits on">Side</div>
+                      <div class="flex gap-1">
+                        <button v-for="sd in (['outside','inside'] as const)" :key="sd"
+                          class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-[10px] cursor-pointer"
+                          :class="(textPath.side ?? 'outside') === sd ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50'"
+                          @click="setTextPathSide(selectedLocal, sd)">{{ sd === 'outside' ? 'Outside' : 'Inside' }}</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="panel-label mb-1" title="Space the letters so they fill the whole path">Fit to path</div>
+                      <button
+                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-[10px] cursor-pointer"
+                        :class="textPath.fit ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50'"
+                        @click="setTextPath(selectedLocal, { fit: !textPath!.fit })">{{ textPath.fit ? 'On' : 'Off' }}</button>
+                    </div>
                   </div>
                 </div>
-                <div class="grid grid-cols-2 gap-3">
-                  <StudioSlider label="Jitter X" :model-value="(selectedLocal as any).expressive.jitterX"
-                    :min="0" :max="1" :step="0.05" :bindable="false"
-                    @update:model-value="(v) => setExpressive(selectedLocal, { jitterX: v })" />
-                  <StudioSlider label="Jitter Y" :model-value="(selectedLocal as any).expressive.jitterY"
-                    :min="0" :max="1" :step="0.05" :bindable="false"
-                    @update:model-value="(v) => setExpressive(selectedLocal, { jitterY: v })" />
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div v-if="!textPath">
+                  <div class="panel-label mb-1.5" title="Line height as a multiple of the font size">Line height</div>
+                  <input v-scrubnum type="number" min="0.5" max="4" step="0.05" :value="(selectedLocal as any).lineHeight ?? 1.2"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                    @input="setLocal(selectedLocal!.id, { lineHeight: parseFloat(($event.target as HTMLInputElement).value) || 1.2 })" />
                 </div>
-                <button
-                  class="w-full flex items-center justify-center gap-1.5 bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-xs text-white/80 hover:text-white"
-                  @click="rerollExpressive(selectedLocal)">
-                  <RefreshCw class="size-3.5" /> Re-render
-                </button>
+                <div>
+                  <div class="panel-label mb-1.5" title="Tracking, in em (fraction of the font size)">Letter spacing</div>
+                  <input v-scrubnum type="number" step="0.01" :value="(selectedLocal as any).letterSpacing ?? 0"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                    @input="setLocal(selectedLocal!.id, { letterSpacing: parseFloat(($event.target as HTMLInputElement).value) || 0 })" />
+                </div>
               </div>
-            </div>
-            <div class="space-y-3">
               <div>
-                <div class="panel-label mb-1.5">Color</div>
-                <FillControl :model-value="(selectedLocal as any).color"
-                  @update:model-value="(v: any) => setLocal(selectedLocal!.id, { color: v })" />
+                <div class="panel-label mb-1.5">Style</div>
+                <div class="flex gap-1">
+                  <button v-if="!textPath" title="Underline"
+                    class="flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 px-2.5"
+                    :class="(selectedLocal as any).underline ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
+                    @click="setLocal(selectedLocal!.id, { underline: !(selectedLocal as any).underline })">
+                    <Underline class="size-3.5" />
+                  </button>
+                  <button v-if="!textPath" title="Strikethrough"
+                    class="flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 px-2.5"
+                    :class="(selectedLocal as any).strikethrough ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
+                    @click="setLocal(selectedLocal!.id, { strikethrough: !(selectedLocal as any).strikethrough })">
+                    <Strikethrough class="size-3.5" />
+                  </button>
+                  <div v-if="!textPath" class="w-px bg-white/[0.08] mx-0.5"></div>
+                  <button v-for="c in (['uppercase','lowercase','capitalize'] as const)" :key="c" :title="c"
+                    class="flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 px-2.5"
+                    :class="(selectedLocal as any).textTransform === c ? 'text-yellow-400 border-yellow-400/50' : 'text-white/60'"
+                    @click="setLocal(selectedLocal!.id, { textTransform: (selectedLocal as any).textTransform === c ? undefined : c })">
+                    <component :is="c === 'uppercase' ? CaseUpper : c === 'lowercase' ? CaseLower : CaseSensitive" class="size-3.5" />
+                  </button>
+                </div>
               </div>
-              <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
-                <div class="panel-label mb-1.5">Outline</div>
-                <FillControl allow-none :model-value="(selectedLocal as any).strokeColor"
-                  @update:model-value="(v: any) => setLocal(selectedLocal!.id, { strokeColor: v })" />
-                <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Outline width"
-                  class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                  @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
-                <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
-                  :show-align="false" :out-width="outWidth"
-                  @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
-                  @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
+              <div v-if="!textPath">
+                <div class="flex items-center justify-between mb-1.5">
+                  <div class="panel-label" title="Place words individually — overrides Align">Expressive layout</div>
+                  <button
+                    class="text-[10px] px-1.5 py-0.5 rounded border"
+                    :class="(selectedLocal as any).expressive ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50 border-white/[0.08]'"
+                    @click="toggleExpressive(selectedLocal)">
+                    {{ (selectedLocal as any).expressive ? 'On' : 'Off' }}
+                  </button>
+                </div>
+                <div v-if="(selectedLocal as any).expressive" class="space-y-2.5">
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <div class="panel-label mb-1">Words / line</div>
+                      <input v-scrubnum type="number" min="1" max="12" :value="(selectedLocal as any).expressive.wordsPerLine"
+                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                        @input="setExpressive(selectedLocal, { wordsPerLine: Math.max(1, parseInt(($event.target as HTMLInputElement).value) || 1) })" />
+                    </div>
+                    <div>
+                      <div class="panel-label mb-1">Placement</div>
+                      <select :value="(selectedLocal as any).expressive.placement"
+                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
+                        @change="setExpressive(selectedLocal, { placement: ($event.target as HTMLSelectElement).value as any })">
+                        <option value="random">Random</option>
+                        <option value="edges">Edges</option>
+                        <option value="staircase">Staircase</option>
+                        <option value="alternate">Alternate</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <StudioSlider label="Jitter X" :model-value="(selectedLocal as any).expressive.jitterX"
+                      :min="0" :max="1" :step="0.05" :bindable="false"
+                      @update:model-value="(v) => setExpressive(selectedLocal, { jitterX: v })" />
+                    <StudioSlider label="Jitter Y" :model-value="(selectedLocal as any).expressive.jitterY"
+                      :min="0" :max="1" :step="0.05" :bindable="false"
+                      @update:model-value="(v) => setExpressive(selectedLocal, { jitterY: v })" />
+                  </div>
+                  <button
+                    class="w-full flex items-center justify-center gap-1.5 bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-xs text-white/80 hover:text-white"
+                    @click="rerollExpressive(selectedLocal)">
+                    <RefreshCw class="size-3.5" /> Re-render
+                  </button>
+                </div>
               </div>
-            </div>
+              <div class="space-y-3">
+                <div>
+                  <div class="panel-label mb-1.5">Color</div>
+                  <FillControl :model-value="(selectedLocal as any).color"
+                    @update:model-value="(v: any) => setLocal(selectedLocal!.id, { color: v })" />
+                </div>
+                <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
+                  <div class="panel-label mb-1.5">Outline</div>
+                  <FillControl allow-none :model-value="(selectedLocal as any).strokeColor"
+                    @update:model-value="(v: any) => setLocal(selectedLocal!.id, { strokeColor: v })" />
+                  <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Outline width"
+                    class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                    @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+                  <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
+                    :show-align="false" :out-width="outWidth"
+                    @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
+                    @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
+                </div>
+              </div>
+            </StudioSection>
           </template>
 
           <!-- Rect / ellipse controls -->
           <template v-if="selectedLocal.kind === 'rect' || selectedLocal.kind === 'ellipse'">
-            <div>
-              <div class="panel-label mb-1.5">Fill</div>
-              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
-            </div>
-            <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
-              <div class="panel-label mb-1.5">Stroke</div>
-              <FillControl allow-none :model-value="(selectedLocal as any).stroke"
-                @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
-              <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
-                class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
-              <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
-                show-align :out-width="outWidth"
-                @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
-                @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
-            </div>
-            <div v-if="selectedLocal.kind === 'rect'">
-              <div class="panel-label mb-1.5">Corner radius</div>
-              <div class="flex items-center gap-1.5">
-                <input v-scrubnum type="number" min="0" step="1" :value="radiusLinkedPx(selectedLocal)" data-radius-linked
-                  class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                  @input="setRadiusLinkedPx(selectedLocal, parseFloat(($event.target as HTMLInputElement).value) || 0)" />
-                <button
-                  class="shrink-0 size-[26px] flex items-center justify-center rounded border transition-colors"
-                  :class="radiusRowExpanded ? 'bg-white/10 border-white/20 text-white/90' : 'bg-white/[0.04] border-white/[0.06] text-white/50 hover:text-white/80'"
-                  :title="radiusRowExpanded ? 'Use one radius for every corner' : 'Set each corner separately'"
-                  data-radius-expand
-                  @click="toggleRadiusExpanded(selectedLocal)">
-                  <component :is="radiusRowExpanded ? ChevronUp : ChevronDown" class="size-3.5" />
-                </button>
+            <StudioSection title="Fill and outline">
+              <div>
+                <div class="panel-label mb-1.5">Fill</div>
+                <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                  @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
               </div>
-              <div v-if="radiusRowExpanded" class="grid grid-cols-2 gap-1.5 mt-1.5">
-                <div v-for="corner in CORNER_FIELDS" :key="corner.label">
-                  <div class="panel-label mb-1">{{ corner.label }}</div>
-                  <input v-scrubnum type="number" min="0" step="1" :value="pxW(radiusCorners(selectedLocal)[corner.i]!)"
-                    :data-radius-corner="corner.i"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setRadiusCornerPx(selectedLocal, corner.i, parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+              <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
+                <div class="panel-label mb-1.5">Stroke</div>
+                <FillControl allow-none :model-value="(selectedLocal as any).stroke"
+                  @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
+                <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
+                  class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+                <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
+                  show-align :out-width="outWidth"
+                  @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
+                  @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
+              </div>
+              <div v-if="selectedLocal.kind === 'rect'">
+                <div class="panel-label mb-1.5">Corner radius</div>
+                <div class="flex items-center gap-1.5">
+                  <input v-scrubnum type="number" min="0" step="1" :value="radiusLinkedPx(selectedLocal)" data-radius-linked
+                    class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                    @input="setRadiusLinkedPx(selectedLocal, parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+                  <button
+                    class="shrink-0 size-[26px] flex items-center justify-center rounded border transition-colors"
+                    :class="radiusRowExpanded ? 'bg-white/10 border-white/20 text-white/90' : 'bg-white/[0.04] border-white/[0.06] text-white/50 hover:text-white/80'"
+                    :title="radiusRowExpanded ? 'Use one radius for every corner' : 'Set each corner separately'"
+                    data-radius-expand
+                    @click="toggleRadiusExpanded(selectedLocal)">
+                    <component :is="radiusRowExpanded ? ChevronUp : ChevronDown" class="size-3.5" />
+                  </button>
+                </div>
+                <div v-if="radiusRowExpanded" class="grid grid-cols-2 gap-1.5 mt-1.5">
+                  <div v-for="corner in CORNER_FIELDS" :key="corner.label">
+                    <div class="panel-label mb-1">{{ corner.label }}</div>
+                    <input v-scrubnum type="number" min="0" step="1" :value="pxW(radiusCorners(selectedLocal)[corner.i]!)"
+                      :data-radius-corner="corner.i"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                      @input="setRadiusCornerPx(selectedLocal, corner.i, parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+                  </div>
                 </div>
               </div>
-            </div>
+            </StudioSection>
           </template>
 
           <!-- Polygon controls -->
           <template v-if="selectedLocal.kind === 'polygon'">
-            <div>
-              <div class="panel-label mb-1.5">Fill</div>
-              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
-            </div>
-            <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
-              <div class="panel-label mb-1.5">Stroke</div>
-              <FillControl allow-none :model-value="(selectedLocal as any).stroke"
-                @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
-              <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
-                class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
-              <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
-                show-align :out-width="outWidth"
-                @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
-                @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
-            </div>
-            <div>
-              <div class="panel-label mb-1.5">Sides</div>
-              <input v-scrubnum type="number" min="3" step="1" :value="(selectedLocal as any).sides"
-                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                @input="setLocal(selectedLocal!.id, { sides: Math.max(3, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 3)) })" />
-            </div>
-            <StudioSlider label="Corner radius" :model-value="(selectedLocal as any).cornerRadius"
-              :min="0" :max="1" :step="0.01" :bindable="false"
-              @update:model-value="(v) => setLocal(selectedLocal!.id, { cornerRadius: v })" />
+            <StudioSection title="Fill and outline">
+              <div>
+                <div class="panel-label mb-1.5">Fill</div>
+                <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                  @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
+              </div>
+              <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
+                <div class="panel-label mb-1.5">Stroke</div>
+                <FillControl allow-none :model-value="(selectedLocal as any).stroke"
+                  @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
+                <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
+                  class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+                <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
+                  show-align :out-width="outWidth"
+                  @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
+                  @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
+              </div>
+              <div>
+                <div class="panel-label mb-1.5">Sides</div>
+                <input v-scrubnum type="number" min="3" step="1" :value="(selectedLocal as any).sides"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="setLocal(selectedLocal!.id, { sides: Math.max(3, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 3)) })" />
+              </div>
+              <StudioSlider label="Corner radius" :model-value="(selectedLocal as any).cornerRadius"
+                :min="0" :max="1" :step="0.01" :bindable="false"
+                @update:model-value="(v) => setLocal(selectedLocal!.id, { cornerRadius: v })" />
+            </StudioSection>
           </template>
 
           <!-- Star controls -->
           <template v-if="selectedLocal.kind === 'star'">
-            <div>
-              <div class="panel-label mb-1.5">Fill</div>
-              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
-            </div>
-            <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
-              <div class="panel-label mb-1.5">Stroke</div>
-              <FillControl allow-none :model-value="(selectedLocal as any).stroke"
-                @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
-              <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
-                class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
-              <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
-                show-align :out-width="outWidth"
-                @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
-                @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
-            </div>
-            <div>
-              <div class="panel-label mb-1.5">Points</div>
-              <input v-scrubnum type="number" min="3" step="1" :value="(selectedLocal as any).points"
-                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                @input="setLocal(selectedLocal!.id, { points: Math.max(3, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 3)) })" />
-            </div>
-            <StudioSlider label="Inner radius" :model-value="(selectedLocal as any).innerRatio"
-              :min="0.01" :max="0.99" :step="0.01" :bindable="false"
-              @update:model-value="(v) => setLocal(selectedLocal!.id, { innerRatio: v })" />
-            <StudioSlider label="Corner radius" :model-value="(selectedLocal as any).cornerRadius"
-              :min="0" :max="1" :step="0.01" :bindable="false"
-              @update:model-value="(v) => setLocal(selectedLocal!.id, { cornerRadius: v })" />
+            <StudioSection title="Fill and outline">
+              <div>
+                <div class="panel-label mb-1.5">Fill</div>
+                <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                  @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
+              </div>
+              <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
+                <div class="panel-label mb-1.5">Stroke</div>
+                <FillControl allow-none :model-value="(selectedLocal as any).stroke"
+                  @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
+                <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
+                  class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+                <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
+                  show-align :out-width="outWidth"
+                  @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
+                  @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
+              </div>
+              <div>
+                <div class="panel-label mb-1.5">Points</div>
+                <input v-scrubnum type="number" min="3" step="1" :value="(selectedLocal as any).points"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="setLocal(selectedLocal!.id, { points: Math.max(3, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 3)) })" />
+              </div>
+              <StudioSlider label="Inner radius" :model-value="(selectedLocal as any).innerRatio"
+                :min="0.01" :max="0.99" :step="0.01" :bindable="false"
+                @update:model-value="(v) => setLocal(selectedLocal!.id, { innerRatio: v })" />
+              <StudioSlider label="Corner radius" :model-value="(selectedLocal as any).cornerRadius"
+                :min="0" :max="1" :step="0.01" :bindable="false"
+                @update:model-value="(v) => setLocal(selectedLocal!.id, { cornerRadius: v })" />
+            </StudioSection>
           </template>
 
           <!-- Line controls -->
           <template v-if="selectedLocal.kind === 'line'">
-            <div>
-              <div class="panel-label mb-1.5">Color</div>
-              <FillControl allow-none :model-value="(selectedLocal as any).stroke"
-                @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
-            </div>
-            <div>
-              <div class="panel-label mb-1.5">Thickness</div>
-              <input v-scrubnum type="number" min="1" step="1" :value="pxW((selectedLocal as any).strokeWidth)"
-                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 1)" />
-            </div>
-            <div>
-              <StrokeStyleRow :dash="(selectedLocal as any).strokeDash" :out-width="outWidth"
-                @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
-            </div>
+            <StudioSection title="Fill and outline">
+              <div>
+                <div class="panel-label mb-1.5">Color</div>
+                <FillControl allow-none :model-value="(selectedLocal as any).stroke"
+                  @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
+              </div>
+              <div>
+                <div class="panel-label mb-1.5">Thickness</div>
+                <input v-scrubnum type="number" min="1" step="1" :value="pxW((selectedLocal as any).strokeWidth)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="setSizePx(selectedLocal!.id, 'strokeWidth', parseFloat(($event.target as HTMLInputElement).value) || 1)" />
+              </div>
+              <div>
+                <StrokeStyleRow :dash="(selectedLocal as any).strokeDash" :out-width="outWidth"
+                  @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
+              </div>
+            </StudioSection>
           </template>
 
           <!-- Path (vector) controls -->
           <template v-if="selectedLocal.kind === 'path'">
-            <div v-if="selectedShape">
-              <div class="panel-label mb-1.5">Shape</div>
-              <button
-                ref="inspectorShapeButtonRef"
-                type="button"
-                class="w-full flex items-center gap-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 cursor-pointer transition-colors"
-                title="Swap for another library shape"
-                @click="openInspectorShapePicker"
-              >
-                <svg viewBox="0 0 96 96" class="size-4 shrink-0" fill="currentColor" aria-hidden="true"><path :d="selectedShape.d" :fill-rule="selectedShape.fillRule" /></svg>
-                <span class="flex-1 text-left">{{ selectedShape.name }}</span>
-              </button>
-              <ShapePicker
-                v-if="inspectorShapePickerOpen"
-                :model-value="selectedShape.id"
-                :allow-none="false"
-                :anchor="inspectorShapeAnchor"
-                :ignore="inspectorShapeButtonRef"
-                @update:model-value="onInspectorShapePick"
-                @close="inspectorShapePickerOpen = false"
-              />
-            </div>
-            <div>
-              <div class="panel-label mb-1.5">Fill</div>
-              <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
-            </div>
-            <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
-              <div class="panel-label mb-1.5">Stroke</div>
-              <FillControl allow-none :model-value="(selectedLocal as any).stroke"
-                @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
-              <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
-                show-align :out-width="outWidth" :scale="(selectedLocal as any).scale || 1"
-                @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
-                @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
-            </div>
+            <StudioSection title="Fill and outline">
+              <div v-if="selectedShape">
+                <div class="panel-label mb-1.5">Shape</div>
+                <button
+                  ref="inspectorShapeButtonRef"
+                  type="button"
+                  class="w-full flex items-center gap-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 cursor-pointer transition-colors"
+                  title="Swap for another library shape"
+                  @click="openInspectorShapePicker"
+                >
+                  <svg viewBox="0 0 96 96" class="size-4 shrink-0" fill="currentColor" aria-hidden="true"><path :d="selectedShape.d" :fill-rule="selectedShape.fillRule" /></svg>
+                  <span class="flex-1 text-left">{{ selectedShape.name }}</span>
+                </button>
+                <ShapePicker
+                  v-if="inspectorShapePickerOpen"
+                  :model-value="selectedShape.id"
+                  :allow-none="false"
+                  :anchor="inspectorShapeAnchor"
+                  :ignore="inspectorShapeButtonRef"
+                  @update:model-value="onInspectorShapePick"
+                  @close="inspectorShapePickerOpen = false"
+                />
+              </div>
+              <div>
+                <div class="panel-label mb-1.5">Fill</div>
+                <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                  @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
+              </div>
+              <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
+                <div class="panel-label mb-1.5">Stroke</div>
+                <FillControl allow-none :model-value="(selectedLocal as any).stroke"
+                  @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
+                <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
+                  show-align :out-width="outWidth" :scale="(selectedLocal as any).scale || 1"
+                  @update:align="(v: any) => setLocal(selectedLocal!.id, { strokeAlign: v })"
+                  @update:dash="(v: any) => setLocal(selectedLocal!.id, { strokeDash: v })" />
+              </div>
+            </StudioSection>
           </template>
 
           <!-- Brush (freehand paint) controls: the stroke region takes any Paint fill -->
           <template v-if="selectedLocal.kind === 'brush'">
-            <div>
-              <div class="panel-label mb-1.5">Fill</div>
-              <FillControl allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
-              <button
-                class="mt-2 w-full flex items-center justify-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/70 hover:text-white/90 cursor-pointer transition-colors"
-                title="Fill the painted shape with an image"
-                @click="triggerBrushFillImage(selectedLocal!.id)"
-              >
-                <ImageIcon class="size-3.5" />
-                Fill with image…
-              </button>
-            </div>
+            <StudioSection title="Fill and outline">
+              <div>
+                <div class="panel-label mb-1.5">Fill</div>
+                <FillControl allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                  @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
+                <button
+                  class="mt-2 w-full flex items-center justify-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/70 hover:text-white/90 cursor-pointer transition-colors"
+                  title="Fill the painted shape with an image"
+                  @click="triggerBrushFillImage(selectedLocal!.id)"
+                >
+                  <ImageIcon class="size-3.5" />
+                  Fill with image…
+                </button>
+              </div>
+            </StudioSection>
           </template>
 
           <!-- Mosaic (kind 'deal'): Style first — which composition this layer is —
@@ -8529,354 +8542,356 @@ onUnmounted(() => {
                carries its OWN grid (Tiles reads it; the other styles have their own
                layouts and only read its seed). -->
           <template v-if="selectedLocal.kind === 'deal'">
-            <StudioSelect label="Style" :options="MOSAIC_STYLE_LABELS as any"
-              :model-value="mosaicStyleLabel(selectedLocal as DealLayer)"
-              @update:model-value="(v: any) => setMosaicStyle(selectedLocal as DealLayer, v)" />
-            <!-- Mosh has its OWN layout (horizontal bands of glitch), so the grid controls
-                 (density / inset / regularity / merge) don't apply to it. -->
-            <div v-if="(selectedLocal as any).cellFill === 'mosh'" class="mt-2 flex flex-col gap-1.5">
-              <StudioSlider label="Bands" :min="MOSH_LIMITS.bands[0]" :max="MOSH_LIMITS.bands[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).bands"
-                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { bands: Math.round(v) })" />
-              <StudioSlider label="Cells across" :min="MOSH_LIMITS.cols[0]" :max="MOSH_LIMITS.cols[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).cols"
-                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { cols: Math.round(v) })" />
-              <StudioSlider label="Mix" :min="MOSH_LIMITS.mix[0]" :max="MOSH_LIMITS.mix[1]" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).mix"
-                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { mix: v })" />
-              <StudioSlider label="Tears" :min="MOSH_LIMITS.tears[0]" :max="MOSH_LIMITS.tears[1]" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).tears"
-                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { tears: v })" />
-              <StudioSlider label="Runs" :min="MOSH_LIMITS.runs[0]" :max="MOSH_LIMITS.runs[1]" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).runs"
-                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { runs: v })" />
-              <StudioSlider label="Bright" :min="MOSH_LIMITS.bright[0]" :max="MOSH_LIMITS.bright[1]" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).bright"
-                @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { bright: v })" />
-              <StudioSelect label="Palette" :options="MOSH_PRESET_NAMES as any"
-                :model-value="moshPreset" @update:model-value="(v: any) => applyMoshPreset(selectedLocal as DealLayer, v)" />
-            </div>
-            <!-- Parcel has its OWN layout (a coarse two-tone block field with survey grids
-                 on top), so the grid controls (density / inset / regularity / merge) don't
-                 apply to it. -->
-            <div v-else-if="(selectedLocal as any).cellFill === 'parcel'" class="mt-2 flex flex-col gap-1.5">
-              <div class="flex items-center gap-2">
-                <div class="flex items-center gap-1.5 min-w-0 flex-1">
-                  <span class="text-[11px] text-white/55">Ground</span>
-                  <StudioColor :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).ground"
-                    @update:model-value="(v: string) => patchParcel(selectedLocal as DealLayer, { ground: v })" />
+            <StudioSection title="Style">
+              <StudioSelect label="Style" :options="MOSAIC_STYLE_LABELS as any"
+                :model-value="mosaicStyleLabel(selectedLocal as DealLayer)"
+                @update:model-value="(v: any) => setMosaicStyle(selectedLocal as DealLayer, v)" />
+              <!-- Mosh has its OWN layout (horizontal bands of glitch), so the grid controls
+                   (density / inset / regularity / merge) don't apply to it. -->
+              <div v-if="(selectedLocal as any).cellFill === 'mosh'" class="mt-2 flex flex-col gap-1.5">
+                <StudioSlider label="Bands" :min="MOSH_LIMITS.bands[0]" :max="MOSH_LIMITS.bands[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).bands"
+                  @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { bands: Math.round(v) })" />
+                <StudioSlider label="Cells across" :min="MOSH_LIMITS.cols[0]" :max="MOSH_LIMITS.cols[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).cols"
+                  @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { cols: Math.round(v) })" />
+                <StudioSlider label="Mix" :min="MOSH_LIMITS.mix[0]" :max="MOSH_LIMITS.mix[1]" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).mix"
+                  @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { mix: v })" />
+                <StudioSlider label="Tears" :min="MOSH_LIMITS.tears[0]" :max="MOSH_LIMITS.tears[1]" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).tears"
+                  @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { tears: v })" />
+                <StudioSlider label="Runs" :min="MOSH_LIMITS.runs[0]" :max="MOSH_LIMITS.runs[1]" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).runs"
+                  @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { runs: v })" />
+                <StudioSlider label="Bright" :min="MOSH_LIMITS.bright[0]" :max="MOSH_LIMITS.bright[1]" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).mosh ?? defaultMosh()).bright"
+                  @update:model-value="(v: number) => patchMosh(selectedLocal as DealLayer, { bright: v })" />
+                <StudioSelect label="Palette" :options="MOSH_PRESET_NAMES as any"
+                  :model-value="moshPreset" @update:model-value="(v: any) => applyMoshPreset(selectedLocal as DealLayer, v)" />
+              </div>
+              <!-- Parcel has its OWN layout (a coarse two-tone block field with survey grids
+                   on top), so the grid controls (density / inset / regularity / merge) don't
+                   apply to it. -->
+              <div v-else-if="(selectedLocal as any).cellFill === 'parcel'" class="mt-2 flex flex-col gap-1.5">
+                <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span class="text-[11px] text-white/55">Ground</span>
+                    <StudioColor :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).ground"
+                      @update:model-value="(v: string) => patchParcel(selectedLocal as DealLayer, { ground: v })" />
+                  </div>
+                  <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span class="text-[11px] text-white/55">Ink</span>
+                    <StudioColor :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).ink"
+                      @update:model-value="(v: string) => patchParcel(selectedLocal as DealLayer, { ink: v })" />
+                  </div>
+                  <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span class="text-[11px] text-white/55">Lines</span>
+                    <StudioColor :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).hairline"
+                      @update:model-value="(v: string) => patchParcel(selectedLocal as DealLayer, { hairline: v })" />
+                  </div>
                 </div>
-                <div class="flex items-center gap-1.5 min-w-0 flex-1">
-                  <span class="text-[11px] text-white/55">Ink</span>
-                  <StudioColor :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).ink"
-                    @update:model-value="(v: string) => patchParcel(selectedLocal as DealLayer, { ink: v })" />
+                <StudioSlider label="Cells" :min="PARCEL_LIMITS.cells[0]" :max="PARCEL_LIMITS.cells[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).cells"
+                  @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { cells: Math.round(v) })" />
+                <StudioSlider label="Cover" :min="PARCEL_LIMITS.cover[0]" :max="PARCEL_LIMITS.cover[1]" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).cover"
+                  @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { cover: v })" />
+                <StudioSlider label="Chunk" :min="PARCEL_LIMITS.chunk[0]" :max="PARCEL_LIMITS.chunk[1]" :step="0.05" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).chunk"
+                  @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { chunk: v })" />
+                <StudioSlider label="Survey grids" :min="PARCEL_LIMITS.grids[0]" :max="PARCEL_LIMITS.grids[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).grids"
+                  @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { grids: Math.round(v) })" />
+                <div>
+                  <div class="panel-label mb-1.5">Blend</div>
+                  <StudioSegmented :options="['Multiply', 'Normal']"
+                    :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).blend === 'normal' ? 'Normal' : 'Multiply'"
+                    @update:model-value="(v: any) => patchParcel(selectedLocal as DealLayer, { blend: v === 'Normal' ? 'normal' : 'multiply' })" />
                 </div>
-                <div class="flex items-center gap-1.5 min-w-0 flex-1">
-                  <span class="text-[11px] text-white/55">Lines</span>
-                  <StudioColor :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).hairline"
-                    @update:model-value="(v: string) => patchParcel(selectedLocal as DealLayer, { hairline: v })" />
+                <StudioSelect label="Palette" :options="PARCEL_PRESET_NAMES as any"
+                  :model-value="parcelPreset" @update:model-value="(v: any) => applyParcelPreset(selectedLocal as DealLayer, v)" />
+              </div>
+              <!-- Modular has its OWN layout (a merged module grid over a background), so the
+                   grid controls (density / inset / regularity / merge) don't apply to it. -->
+              <div v-else-if="(selectedLocal as any).cellFill === 'modular'" class="mt-2 flex flex-col gap-1.5">
+                <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span class="text-[11px] text-white/55">Background</span>
+                    <StudioColor :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).bg"
+                      @update:model-value="(v: string) => patchModular(selectedLocal as DealLayer, { bg: v })" />
+                  </div>
+                  <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span class="text-[11px] text-white/55">Rule</span>
+                    <StudioColor :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).rule"
+                      @update:model-value="(v: string) => patchModular(selectedLocal as DealLayer, { rule: v })" />
+                  </div>
+                </div>
+                <StudioSlider label="Columns" :min="MODULAR_LIMITS.gcols[0]" :max="MODULAR_LIMITS.gcols[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).gcols"
+                  @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { gcols: Math.round(v) })" />
+                <StudioSlider label="Unit" :min="MODULAR_LIMITS.unit[0]" :max="MODULAR_LIMITS.unit[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).unit"
+                  @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { unit: Math.round(v) })" />
+                <StudioSlider label="Merge" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).merge"
+                  @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { merge: v })" />
+                <div class="panel-label mt-1">Module mix</div>
+                <StudioSlider v-for="t in MODULAR_TYPE_LABELS" :key="t.type" :label="t.label"
+                  :min="MODULAR_LIMITS.weight[0]" :max="MODULAR_LIMITS.weight[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).w[t.type]"
+                  @update:model-value="(v: number) => patchModularWeight(selectedLocal as DealLayer, t.type, Math.round(v))" />
+                <StudioSlider label="Block fill" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).blockFill"
+                  @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { blockFill: v })" />
+                <StudioSlider label="Dot size" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).dot"
+                  @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { dot: v })" />
+                <StudioSlider label="Rules" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).rules"
+                  @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { rules: v })" />
+                <StudioSlider label="Rule width" :min="MODULAR_LIMITS.ruleW[0]" :max="MODULAR_LIMITS.ruleW[1]" :step="0.5" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).ruleW"
+                  @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { ruleW: v })" />
+                <div>
+                  <div class="panel-label mb-1.5">Palette</div>
+                  <StudioSegmented :options="MODULAR_PRESET_NAMES as any" :model-value="modularPreset"
+                    @update:model-value="(v: any) => applyModularPreset(selectedLocal as DealLayer, v)" />
                 </div>
               </div>
-              <StudioSlider label="Cells" :min="PARCEL_LIMITS.cells[0]" :max="PARCEL_LIMITS.cells[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).cells"
-                @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { cells: Math.round(v) })" />
-              <StudioSlider label="Cover" :min="PARCEL_LIMITS.cover[0]" :max="PARCEL_LIMITS.cover[1]" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).cover"
-                @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { cover: v })" />
-              <StudioSlider label="Chunk" :min="PARCEL_LIMITS.chunk[0]" :max="PARCEL_LIMITS.chunk[1]" :step="0.05" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).chunk"
-                @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { chunk: v })" />
-              <StudioSlider label="Survey grids" :min="PARCEL_LIMITS.grids[0]" :max="PARCEL_LIMITS.grids[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).grids"
-                @update:model-value="(v: number) => patchParcel(selectedLocal as DealLayer, { grids: Math.round(v) })" />
-              <div>
-                <div class="panel-label mb-1.5">Blend</div>
-                <StudioSegmented :options="['Multiply', 'Normal']"
-                  :model-value="((selectedLocal as DealLayer).parcel ?? defaultParcel()).blend === 'normal' ? 'Normal' : 'Multiply'"
-                  @update:model-value="(v: any) => patchParcel(selectedLocal as DealLayer, { blend: v === 'Normal' ? 'normal' : 'multiply' })" />
+              <!-- Carve has its OWN layout (one rectangle carved into panels), so the grid
+                   controls (density / inset / regularity / merge) don't apply to it. -->
+              <div v-else-if="(selectedLocal as any).cellFill === 'carve'" class="mt-2 flex flex-col gap-1.5">
+                <StudioSlider label="Cuts" :min="CARVE_LIMITS.cuts[0]" :max="CARVE_LIMITS.cuts[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).cuts"
+                  @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { cuts: Math.round(v) })" />
+                <StudioSlider label="Unevenness" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).uneven"
+                  @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { uneven: v })" />
+                <StudioSlider label="Gap" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).gap"
+                  @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { gap: v })" />
+                <div class="panel-label mt-1">Treatments</div>
+                <StudioSlider label="Patterned" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).mix"
+                  @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { mix: v })" />
+                <StudioSlider label="Stripe pitch" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).stripePitch"
+                  @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { stripePitch: v })" />
+                <StudioSlider label="Grain" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).grain"
+                  @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { grain: v })" />
+                <StudioSlider label="Grid detail" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).gridDetail"
+                  @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { gridDetail: v })" />
+                <StudioSelect label="Palette" :options="CARVE_PRESET_NAMES as any"
+                  :model-value="carvePreset" @update:model-value="(v: any) => applyCarvePreset(selectedLocal as DealLayer, v)" />
               </div>
-              <StudioSelect label="Palette" :options="PARCEL_PRESET_NAMES as any"
-                :model-value="parcelPreset" @update:model-value="(v: any) => applyParcelPreset(selectedLocal as DealLayer, v)" />
-            </div>
-            <!-- Modular has its OWN layout (a merged module grid over a background), so the
-                 grid controls (density / inset / regularity / merge) don't apply to it. -->
-            <div v-else-if="(selectedLocal as any).cellFill === 'modular'" class="mt-2 flex flex-col gap-1.5">
-              <div class="flex items-center gap-2">
-                <div class="flex items-center gap-1.5 min-w-0 flex-1">
-                  <span class="text-[11px] text-white/55">Background</span>
-                  <StudioColor :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).bg"
-                    @update:model-value="(v: string) => patchModular(selectedLocal as DealLayer, { bg: v })" />
+              <!-- Totem lays out its own framed plate, so the grid controls (density /
+                   inset / regularity / merge) have nothing to say about it. -->
+              <div v-else-if="(selectedLocal as any).cellFill === 'totem'" class="mt-2 flex flex-col gap-1.5">
+                <StudioSlider label="Border" :min="TOTEM_LIMITS.border[0]" :max="TOTEM_LIMITS.border[1]" :step="0.005" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).border"
+                  @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { border: v })" />
+                <StudioSlider label="Speckle" :min="TOTEM_LIMITS.mat[0]" :max="TOTEM_LIMITS.mat[1]" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).mat"
+                  @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { mat: v })" />
+                <StudioSlider label="Speckle size" :min="TOTEM_LIMITS.matGrain[0]" :max="TOTEM_LIMITS.matGrain[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).matGrain"
+                  @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { matGrain: Math.round(v) })" />
+                <div class="panel-label mt-1">Plate</div>
+                <StudioSlider label="Inset" :min="TOTEM_LIMITS.keyline[0]" :max="TOTEM_LIMITS.keyline[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).keyline"
+                  @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { keyline: Math.round(v) })" />
+                <StudioSlider label="Blocks" :min="TOTEM_LIMITS.regions[0]" :max="TOTEM_LIMITS.regions[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).regions"
+                  @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { regions: Math.round(v) })" />
+                <StudioSlider label="Detail" :min="TOTEM_LIMITS.grain[0]" :max="TOTEM_LIMITS.grain[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).grain"
+                  @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { grain: Math.round(v) })" />
+                <StudioSlider label="Mirror" :min="TOTEM_LIMITS.mirror[0]" :max="TOTEM_LIMITS.mirror[1]" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).mirror"
+                  @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { mirror: v })" />
+                <StudioSlider label="Variety" :min="TOTEM_LIMITS.variety[0]" :max="TOTEM_LIMITS.variety[1]" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).variety"
+                  @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { variety: v })" />
+                <div class="panel-label mt-1">Centre</div>
+                <StudioSlider label="Size" :min="TOTEM_LIMITS.core[0]" :max="TOTEM_LIMITS.core[1]" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).core"
+                  @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { core: v })" />
+                <StudioSlider label="Rings" :min="TOTEM_LIMITS.coreRings[0]" :max="TOTEM_LIMITS.coreRings[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).coreRings"
+                  @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { coreRings: Math.round(v) })" />
+                <!-- The five inks, left to right as the picture reads them: the order is
+                     what hands out the jobs, so editing one leaves the rest where they are. -->
+                <div class="panel-label mt-1">Inks</div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <StudioColor v-for="(ink, i) in totemInks" :key="i" :model-value="ink"
+                    @update:model-value="(v: string) => patchTotemInk(selectedLocal as DealLayer, i, v)" />
                 </div>
-                <div class="flex items-center gap-1.5 min-w-0 flex-1">
-                  <span class="text-[11px] text-white/55">Rule</span>
-                  <StudioColor :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).rule"
-                    @update:model-value="(v: string) => patchModular(selectedLocal as DealLayer, { rule: v })" />
+                <StudioSelect label="Palette" :options="TOTEM_PRESET_NAMES as any"
+                  :model-value="totemPreset" @update:model-value="(v: any) => applyTotemPreset(selectedLocal as DealLayer, v)" />
+              </div>
+              <!-- Blueprint draws its OWN drafting grid, so the shared grid controls
+                   (density / inset / regularity / merge) have nothing to say about it. -->
+              <div v-else-if="(selectedLocal as any).cellFill === 'blueprint'" class="mt-2 flex flex-col gap-1.5">
+                <div class="panel-label mt-1">Grid</div>
+                <StudioSlider label="Cells" :min="BLUEPRINT_LIMITS.cells[0]" :max="BLUEPRINT_LIMITS.cells[1]" :step="1" :bindable="false"
+                  :model-value="blueprintParams.cells"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { cells: Math.round(v) })" />
+                <StudioSlider label="Major every" :min="BLUEPRINT_LIMITS.major[0]" :max="BLUEPRINT_LIMITS.major[1]" :step="1" :bindable="false"
+                  :model-value="blueprintParams.major"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { major: Math.round(v) })" />
+                <StudioSlider label="Minor opacity" :min="BLUEPRINT_LIMITS.minorAlpha[0]" :max="BLUEPRINT_LIMITS.minorAlpha[1]" :step="0.01" :bindable="false"
+                  :model-value="blueprintParams.minorAlpha"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { minorAlpha: v })" />
+                <StudioSlider label="Major weight" :min="BLUEPRINT_LIMITS.majorWidth[0]" :max="BLUEPRINT_LIMITS.majorWidth[1]" :step="0.05" :bindable="false"
+                  :model-value="blueprintParams.majorWidth"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { majorWidth: v })" />
+                <div class="panel-label mt-1">Origin &amp; fan</div>
+                <StudioSelect label="Origin" :options="BLUEPRINT_CORNERS as any"
+                  :option-labels="['Auto', 'Bottom left', 'Bottom right', 'Top right', 'Top left', 'Center']"
+                  :model-value="blueprintParams.corner" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { corner: v })" />
+                <StudioSlider label="Origin X" :min="BLUEPRINT_LIMITS.originX[0]" :max="BLUEPRINT_LIMITS.originX[1]" :step="0.01" :bindable="false"
+                  :model-value="blueprintParams.originX"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { originX: v })" />
+                <StudioSlider label="Origin Y" :min="BLUEPRINT_LIMITS.originY[0]" :max="BLUEPRINT_LIMITS.originY[1]" :step="0.01" :bindable="false"
+                  :model-value="blueprintParams.originY"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { originY: v })" />
+                <StudioSlider label="Angle start" :min="BLUEPRINT_LIMITS.angleStart[0]" :max="BLUEPRINT_LIMITS.angleStart[1]" :step="1" :bindable="false"
+                  :model-value="blueprintParams.angleStart"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { angleStart: v })" />
+                <StudioSlider label="Angle step" :min="BLUEPRINT_LIMITS.angleStep[0]" :max="BLUEPRINT_LIMITS.angleStep[1]" :step="1" :bindable="false"
+                  :model-value="blueprintParams.angleStep"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { angleStep: Math.round(v) })" />
+                <StudioSlider label="Angle spread" :min="BLUEPRINT_LIMITS.angleSpread[0]" :max="BLUEPRINT_LIMITS.angleSpread[1]" :step="1" :bindable="false"
+                  :model-value="blueprintParams.angleSpread"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { angleSpread: v })" />
+                <div class="panel-label mt-1">Arcs &amp; labels</div>
+                <StudioSlider label="Arcs" :min="BLUEPRINT_LIMITS.arcs[0]" :max="BLUEPRINT_LIMITS.arcs[1]" :step="1" :bindable="false"
+                  :model-value="blueprintParams.arcs"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { arcs: Math.round(v) })" />
+                <StudioSlider label="Arc gap" :min="BLUEPRINT_LIMITS.arcGap[0]" :max="BLUEPRINT_LIMITS.arcGap[1]" :step="0.01" :bindable="false"
+                  :model-value="blueprintParams.arcGap"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { arcGap: v })" />
+                <StudioSlider label="Tick step" :min="BLUEPRINT_LIMITS.tickStep[0]" :max="BLUEPRINT_LIMITS.tickStep[1]" :step="1" :bindable="false"
+                  :model-value="blueprintParams.tickStep"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { tickStep: Math.round(v) })" />
+                <StudioSlider label="Labels" :min="BLUEPRINT_LIMITS.labels[0]" :max="BLUEPRINT_LIMITS.labels[1]" :step="0.01" :bindable="false"
+                  :model-value="blueprintParams.labels"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { labels: v })" />
+                <!-- Per-type stroke width (× the minor grid line) and the dash pattern scale. -->
+                <div class="panel-label mt-1">Line widths</div>
+                <StudioSlider label="Spoke weight" :min="BLUEPRINT_LIMITS.spokeWidth[0]" :max="BLUEPRINT_LIMITS.spokeWidth[1]" :step="0.05" :bindable="false"
+                  :model-value="blueprintParams.spokeWidth"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { spokeWidth: v })" />
+                <StudioSlider label="Arc weight" :min="BLUEPRINT_LIMITS.arcWidth[0]" :max="BLUEPRINT_LIMITS.arcWidth[1]" :step="0.05" :bindable="false"
+                  :model-value="blueprintParams.arcWidth"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { arcWidth: v })" />
+                <StudioSlider label="Tick weight" :min="BLUEPRINT_LIMITS.tickWidth[0]" :max="BLUEPRINT_LIMITS.tickWidth[1]" :step="0.05" :bindable="false"
+                  :model-value="blueprintParams.tickWidth"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { tickWidth: v })" />
+                <StudioSlider label="Dash scale" :min="BLUEPRINT_LIMITS.dashScale[0]" :max="BLUEPRINT_LIMITS.dashScale[1]" :step="0.1" :bindable="false"
+                  :model-value="blueprintParams.dashScale"
+                  @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { dashScale: v })" />
+                <!-- Line style per type: a continuous line or a dashed one. -->
+                <div class="panel-label mt-1">Line style</div>
+                <StudioSelect label="Grid" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
+                  :model-value="blueprintParams.gridDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { gridDash: v })" />
+                <StudioSelect label="Spokes" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
+                  :model-value="blueprintParams.spokeDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { spokeDash: v })" />
+                <StudioSelect label="Arcs" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
+                  :model-value="blueprintParams.arcDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { arcDash: v })" />
+                <StudioSelect label="Ticks" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
+                  :model-value="blueprintParams.tickDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { tickDash: v })" />
+                <!-- Three role inks: paper (ground), ink (lines/labels), inkDim (minor grid). -->
+                <div class="panel-label mt-1">Inks</div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <StudioColor :model-value="blueprintParams.paper" @update:model-value="(v: string) => patchBlueprintInk(selectedLocal as DealLayer, 'paper', v)" />
+                  <StudioColor :model-value="blueprintParams.ink" @update:model-value="(v: string) => patchBlueprintInk(selectedLocal as DealLayer, 'ink', v)" />
+                  <StudioColor :model-value="blueprintParams.inkDim" @update:model-value="(v: string) => patchBlueprintInk(selectedLocal as DealLayer, 'inkDim', v)" />
+                </div>
+                <StudioSelect label="Palette" :options="BLUEPRINT_PRESET_NAMES as any"
+                  :model-value="blueprintPreset" @update:model-value="(v: any) => applyBlueprintPreset(selectedLocal as DealLayer, v)" />
+              </div>
+              <!-- Pane has its OWN layout (row masonry, every cell flush and filled), so the
+                   grid controls (density / inset / regularity / merge) don't apply to it. -->
+              <div v-else-if="(selectedLocal as any).cellFill === 'pane'" class="mt-2 flex flex-col gap-1.5">
+                <StudioSlider label="Rows" :min="PANE_LIMITS.rows[0]" :max="PANE_LIMITS.rows[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).rows"
+                  @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { rows: Math.round(v) })" />
+                <StudioSlider label="Cells per row" :min="PANE_LIMITS.cells[0]" :max="PANE_LIMITS.cells[1]" :step="1" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).cells"
+                  @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { cells: Math.round(v) })" />
+                <StudioSlider label="Vary" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).vary"
+                  @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { vary: v })" />
+                <StudioSlider label="Diagonals" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).diag"
+                  @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { diag: v })" />
+                <StudioSlider label="Softness" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).soft"
+                  @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { soft: v })" />
+                <StudioSlider label="Spread" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).spread"
+                  @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { spread: v })" />
+                <!-- The ordered palette. Spread is a distance along THIS order (rule 5), so the
+                     swatches read left to right in palette order; editing one keeps the rest. -->
+                <div class="panel-label mt-1">Inks</div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <StudioColor v-for="(ink, i) in paneInks" :key="i" :model-value="ink"
+                    @update:model-value="(v: string) => patchPaneInk(selectedLocal as DealLayer, i, v)" />
+                </div>
+                <StudioSelect label="Palette" :options="PANE_PRESET_NAMES as any"
+                  :model-value="panePreset" @update:model-value="(v: any) => applyPanePreset(selectedLocal as DealLayer, v)" />
+              </div>
+              <!-- Oddgrid / Static: the shader styles. The style IS the effect, so the
+                   shared shader-fill editor mounts with its picker locked, its own seed
+                   / speed / input / anchor rows hidden (the Mosaic owns the seed; speed
+                   is 0; the input is meaningless here; the box IS the shader's frame —
+                   see the deal branch in useCompositorLayers). The effect's Looks are
+                   its Palette. -->
+              <div v-else-if="isMosaicShaderFill((selectedLocal as any).cellFill)" class="mt-2 flex flex-col gap-1.5">
+                <ShaderFillEditor :model-value="mosaicShader(selectedLocal as DealLayer)!" lock-effect
+                  :show-anchor="false" :show-speed="false" :show-seed="false" :show-input="false"
+                  @update:model-value="(v: any) => setLocal(selectedLocal!.id, { shader: v } as any)" />
+                <StudioSelect label="Palette" :options="mosaicLookOptions"
+                  :model-value="mosaicLook" @update:model-value="(v: any) => applyMosaicLookTo(selectedLocal as DealLayer, v)" />
+              </div>
+              <!-- Tiles: the seeded grid itself — density / inset / regularity / merge. -->
+              <div v-else class="mt-2 flex flex-col gap-1.5">
+                <StudioSlider label="Density" :min="0.05" :max="1" :step="0.02" :bindable="false"
+                  :model-value="(selectedLocal as any).density"
+                  @update:model-value="(v: number) => setLocal(selectedLocal!.id, { density: v })" />
+                <StudioSlider label="Cell inset" :min="0" :max="0.4" :step="0.01" :bindable="false"
+                  :model-value="(selectedLocal as any).cellInset"
+                  @update:model-value="(v: number) => setLocal(selectedLocal!.id, { cellInset: v })" />
+                <StudioSlider label="Regularity" :min="0" :max="1" :step="0.01" :bindable="false"
+                  :model-value="(selectedLocal as DealLayer).grid.gen.regularity"
+                  @update:model-value="(v: number) => patchDealGrid(selectedLocal as DealLayer, { gen: { ...(selectedLocal as DealLayer).grid.gen, regularity: v } })" />
+                <StudioSwitch label="Merge cells" :model-value="(selectedLocal as DealLayer).grid.gen.merge"
+                  @update:model-value="(v: boolean) => patchDealGrid(selectedLocal as DealLayer, { gen: { ...(selectedLocal as DealLayer).grid.gen, merge: v } })" />
+              </div>
+              <!-- The vocabulary palette only shows when something reads it: Tiles always,
+                   Modular / Pane only while they have no inks of their own. Parcel and
+                   Mosh carry their own colours (see dealVocabDrivesLook). Labelled "Inks"
+                   beside a style that already has a Palette control of its own, so two
+                   adjacent rows never both say Palette. -->
+              <div v-if="vocabDrivesLook" class="mt-2">
+                <div class="panel-label mb-1.5">{{ (selectedLocal as any).cellFill && (selectedLocal as any).cellFill !== 'solid' ? 'Inks' : 'Palette' }}</div>
+                <StudioSegmented :options="DEAL_VOCABS as any" :model-value="(selectedLocal as any).vocab"
+                  @update:model-value="(v: any) => setLocal(selectedLocal!.id, { vocab: v })" />
+                <p v-if="(selectedLocal as any).cellFill && (selectedLocal as any).cellFill !== 'solid'" class="mt-1 text-[10px] text-white/30 leading-snug">This style has no inks of its own, so it draws from this palette.</p>
+              </div>
+              <div class="mt-2 flex items-center gap-2">
+                <StudioButton variant="secondary" @click="rerollDeal(selectedLocal as DealLayer)">New variation</StudioButton>
+                <div class="min-w-0 flex-1">
+                  <StudioSlider label="Seed" :min="1" :max="9999" :step="1" :default="42" :bindable="false"
+                    :model-value="(selectedLocal as DealLayer).grid.gen.seed"
+                    @update:model-value="(v: number) => setDealSeed(selectedLocal as DealLayer, v)" />
                 </div>
               </div>
-              <StudioSlider label="Columns" :min="MODULAR_LIMITS.gcols[0]" :max="MODULAR_LIMITS.gcols[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).gcols"
-                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { gcols: Math.round(v) })" />
-              <StudioSlider label="Unit" :min="MODULAR_LIMITS.unit[0]" :max="MODULAR_LIMITS.unit[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).unit"
-                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { unit: Math.round(v) })" />
-              <StudioSlider label="Merge" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).merge"
-                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { merge: v })" />
-              <div class="panel-label mt-1">Module mix</div>
-              <StudioSlider v-for="t in MODULAR_TYPE_LABELS" :key="t.type" :label="t.label"
-                :min="MODULAR_LIMITS.weight[0]" :max="MODULAR_LIMITS.weight[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).w[t.type]"
-                @update:model-value="(v: number) => patchModularWeight(selectedLocal as DealLayer, t.type, Math.round(v))" />
-              <StudioSlider label="Block fill" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).blockFill"
-                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { blockFill: v })" />
-              <StudioSlider label="Dot size" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).dot"
-                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { dot: v })" />
-              <StudioSlider label="Rules" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).rules"
-                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { rules: v })" />
-              <StudioSlider label="Rule width" :min="MODULAR_LIMITS.ruleW[0]" :max="MODULAR_LIMITS.ruleW[1]" :step="0.5" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).modular ?? defaultModular()).ruleW"
-                @update:model-value="(v: number) => patchModular(selectedLocal as DealLayer, { ruleW: v })" />
-              <div>
-                <div class="panel-label mb-1.5">Palette</div>
-                <StudioSegmented :options="MODULAR_PRESET_NAMES as any" :model-value="modularPreset"
-                  @update:model-value="(v: any) => applyModularPreset(selectedLocal as DealLayer, v)" />
-              </div>
-            </div>
-            <!-- Carve has its OWN layout (one rectangle carved into panels), so the grid
-                 controls (density / inset / regularity / merge) don't apply to it. -->
-            <div v-else-if="(selectedLocal as any).cellFill === 'carve'" class="mt-2 flex flex-col gap-1.5">
-              <StudioSlider label="Cuts" :min="CARVE_LIMITS.cuts[0]" :max="CARVE_LIMITS.cuts[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).cuts"
-                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { cuts: Math.round(v) })" />
-              <StudioSlider label="Unevenness" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).uneven"
-                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { uneven: v })" />
-              <StudioSlider label="Gap" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).gap"
-                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { gap: v })" />
-              <div class="panel-label mt-1">Treatments</div>
-              <StudioSlider label="Patterned" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).mix"
-                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { mix: v })" />
-              <StudioSlider label="Stripe pitch" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).stripePitch"
-                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { stripePitch: v })" />
-              <StudioSlider label="Grain" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).grain"
-                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { grain: v })" />
-              <StudioSlider label="Grid detail" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).carve ?? defaultCarve()).gridDetail"
-                @update:model-value="(v: number) => patchCarve(selectedLocal as DealLayer, { gridDetail: v })" />
-              <StudioSelect label="Palette" :options="CARVE_PRESET_NAMES as any"
-                :model-value="carvePreset" @update:model-value="(v: any) => applyCarvePreset(selectedLocal as DealLayer, v)" />
-            </div>
-            <!-- Totem lays out its own framed plate, so the grid controls (density /
-                 inset / regularity / merge) have nothing to say about it. -->
-            <div v-else-if="(selectedLocal as any).cellFill === 'totem'" class="mt-2 flex flex-col gap-1.5">
-              <StudioSlider label="Border" :min="TOTEM_LIMITS.border[0]" :max="TOTEM_LIMITS.border[1]" :step="0.005" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).border"
-                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { border: v })" />
-              <StudioSlider label="Speckle" :min="TOTEM_LIMITS.mat[0]" :max="TOTEM_LIMITS.mat[1]" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).mat"
-                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { mat: v })" />
-              <StudioSlider label="Speckle size" :min="TOTEM_LIMITS.matGrain[0]" :max="TOTEM_LIMITS.matGrain[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).matGrain"
-                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { matGrain: Math.round(v) })" />
-              <div class="panel-label mt-1">Plate</div>
-              <StudioSlider label="Inset" :min="TOTEM_LIMITS.keyline[0]" :max="TOTEM_LIMITS.keyline[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).keyline"
-                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { keyline: Math.round(v) })" />
-              <StudioSlider label="Blocks" :min="TOTEM_LIMITS.regions[0]" :max="TOTEM_LIMITS.regions[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).regions"
-                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { regions: Math.round(v) })" />
-              <StudioSlider label="Detail" :min="TOTEM_LIMITS.grain[0]" :max="TOTEM_LIMITS.grain[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).grain"
-                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { grain: Math.round(v) })" />
-              <StudioSlider label="Mirror" :min="TOTEM_LIMITS.mirror[0]" :max="TOTEM_LIMITS.mirror[1]" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).mirror"
-                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { mirror: v })" />
-              <StudioSlider label="Variety" :min="TOTEM_LIMITS.variety[0]" :max="TOTEM_LIMITS.variety[1]" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).variety"
-                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { variety: v })" />
-              <div class="panel-label mt-1">Centre</div>
-              <StudioSlider label="Size" :min="TOTEM_LIMITS.core[0]" :max="TOTEM_LIMITS.core[1]" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).core"
-                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { core: v })" />
-              <StudioSlider label="Rings" :min="TOTEM_LIMITS.coreRings[0]" :max="TOTEM_LIMITS.coreRings[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).totem ?? defaultTotem()).coreRings"
-                @update:model-value="(v: number) => patchTotem(selectedLocal as DealLayer, { coreRings: Math.round(v) })" />
-              <!-- The five inks, left to right as the picture reads them: the order is
-                   what hands out the jobs, so editing one leaves the rest where they are. -->
-              <div class="panel-label mt-1">Inks</div>
-              <div class="flex flex-wrap items-center gap-1.5">
-                <StudioColor v-for="(ink, i) in totemInks" :key="i" :model-value="ink"
-                  @update:model-value="(v: string) => patchTotemInk(selectedLocal as DealLayer, i, v)" />
-              </div>
-              <StudioSelect label="Palette" :options="TOTEM_PRESET_NAMES as any"
-                :model-value="totemPreset" @update:model-value="(v: any) => applyTotemPreset(selectedLocal as DealLayer, v)" />
-            </div>
-            <!-- Blueprint draws its OWN drafting grid, so the shared grid controls
-                 (density / inset / regularity / merge) have nothing to say about it. -->
-            <div v-else-if="(selectedLocal as any).cellFill === 'blueprint'" class="mt-2 flex flex-col gap-1.5">
-              <div class="panel-label mt-1">Grid</div>
-              <StudioSlider label="Cells" :min="BLUEPRINT_LIMITS.cells[0]" :max="BLUEPRINT_LIMITS.cells[1]" :step="1" :bindable="false"
-                :model-value="blueprintParams.cells"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { cells: Math.round(v) })" />
-              <StudioSlider label="Major every" :min="BLUEPRINT_LIMITS.major[0]" :max="BLUEPRINT_LIMITS.major[1]" :step="1" :bindable="false"
-                :model-value="blueprintParams.major"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { major: Math.round(v) })" />
-              <StudioSlider label="Minor opacity" :min="BLUEPRINT_LIMITS.minorAlpha[0]" :max="BLUEPRINT_LIMITS.minorAlpha[1]" :step="0.01" :bindable="false"
-                :model-value="blueprintParams.minorAlpha"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { minorAlpha: v })" />
-              <StudioSlider label="Major weight" :min="BLUEPRINT_LIMITS.majorWidth[0]" :max="BLUEPRINT_LIMITS.majorWidth[1]" :step="0.05" :bindable="false"
-                :model-value="blueprintParams.majorWidth"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { majorWidth: v })" />
-              <div class="panel-label mt-1">Origin &amp; fan</div>
-              <StudioSelect label="Origin" :options="BLUEPRINT_CORNERS as any"
-                :option-labels="['Auto', 'Bottom left', 'Bottom right', 'Top right', 'Top left', 'Center']"
-                :model-value="blueprintParams.corner" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { corner: v })" />
-              <StudioSlider label="Origin X" :min="BLUEPRINT_LIMITS.originX[0]" :max="BLUEPRINT_LIMITS.originX[1]" :step="0.01" :bindable="false"
-                :model-value="blueprintParams.originX"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { originX: v })" />
-              <StudioSlider label="Origin Y" :min="BLUEPRINT_LIMITS.originY[0]" :max="BLUEPRINT_LIMITS.originY[1]" :step="0.01" :bindable="false"
-                :model-value="blueprintParams.originY"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { originY: v })" />
-              <StudioSlider label="Angle start" :min="BLUEPRINT_LIMITS.angleStart[0]" :max="BLUEPRINT_LIMITS.angleStart[1]" :step="1" :bindable="false"
-                :model-value="blueprintParams.angleStart"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { angleStart: v })" />
-              <StudioSlider label="Angle step" :min="BLUEPRINT_LIMITS.angleStep[0]" :max="BLUEPRINT_LIMITS.angleStep[1]" :step="1" :bindable="false"
-                :model-value="blueprintParams.angleStep"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { angleStep: Math.round(v) })" />
-              <StudioSlider label="Angle spread" :min="BLUEPRINT_LIMITS.angleSpread[0]" :max="BLUEPRINT_LIMITS.angleSpread[1]" :step="1" :bindable="false"
-                :model-value="blueprintParams.angleSpread"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { angleSpread: v })" />
-              <div class="panel-label mt-1">Arcs &amp; labels</div>
-              <StudioSlider label="Arcs" :min="BLUEPRINT_LIMITS.arcs[0]" :max="BLUEPRINT_LIMITS.arcs[1]" :step="1" :bindable="false"
-                :model-value="blueprintParams.arcs"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { arcs: Math.round(v) })" />
-              <StudioSlider label="Arc gap" :min="BLUEPRINT_LIMITS.arcGap[0]" :max="BLUEPRINT_LIMITS.arcGap[1]" :step="0.01" :bindable="false"
-                :model-value="blueprintParams.arcGap"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { arcGap: v })" />
-              <StudioSlider label="Tick step" :min="BLUEPRINT_LIMITS.tickStep[0]" :max="BLUEPRINT_LIMITS.tickStep[1]" :step="1" :bindable="false"
-                :model-value="blueprintParams.tickStep"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { tickStep: Math.round(v) })" />
-              <StudioSlider label="Labels" :min="BLUEPRINT_LIMITS.labels[0]" :max="BLUEPRINT_LIMITS.labels[1]" :step="0.01" :bindable="false"
-                :model-value="blueprintParams.labels"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { labels: v })" />
-              <!-- Per-type stroke width (× the minor grid line) and the dash pattern scale. -->
-              <div class="panel-label mt-1">Line widths</div>
-              <StudioSlider label="Spoke weight" :min="BLUEPRINT_LIMITS.spokeWidth[0]" :max="BLUEPRINT_LIMITS.spokeWidth[1]" :step="0.05" :bindable="false"
-                :model-value="blueprintParams.spokeWidth"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { spokeWidth: v })" />
-              <StudioSlider label="Arc weight" :min="BLUEPRINT_LIMITS.arcWidth[0]" :max="BLUEPRINT_LIMITS.arcWidth[1]" :step="0.05" :bindable="false"
-                :model-value="blueprintParams.arcWidth"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { arcWidth: v })" />
-              <StudioSlider label="Tick weight" :min="BLUEPRINT_LIMITS.tickWidth[0]" :max="BLUEPRINT_LIMITS.tickWidth[1]" :step="0.05" :bindable="false"
-                :model-value="blueprintParams.tickWidth"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { tickWidth: v })" />
-              <StudioSlider label="Dash scale" :min="BLUEPRINT_LIMITS.dashScale[0]" :max="BLUEPRINT_LIMITS.dashScale[1]" :step="0.1" :bindable="false"
-                :model-value="blueprintParams.dashScale"
-                @update:model-value="(v: number) => patchBlueprint(selectedLocal as DealLayer, { dashScale: v })" />
-              <!-- Line style per type: a continuous line or a dashed one. -->
-              <div class="panel-label mt-1">Line style</div>
-              <StudioSelect label="Grid" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
-                :model-value="blueprintParams.gridDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { gridDash: v })" />
-              <StudioSelect label="Spokes" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
-                :model-value="blueprintParams.spokeDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { spokeDash: v })" />
-              <StudioSelect label="Arcs" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
-                :model-value="blueprintParams.arcDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { arcDash: v })" />
-              <StudioSelect label="Ticks" :options="BLUEPRINT_DASH as any" :option-labels="['Solid', 'Dashed']"
-                :model-value="blueprintParams.tickDash" @update:model-value="(v: any) => patchBlueprint(selectedLocal as DealLayer, { tickDash: v })" />
-              <!-- Three role inks: paper (ground), ink (lines/labels), inkDim (minor grid). -->
-              <div class="panel-label mt-1">Inks</div>
-              <div class="flex flex-wrap items-center gap-1.5">
-                <StudioColor :model-value="blueprintParams.paper" @update:model-value="(v: string) => patchBlueprintInk(selectedLocal as DealLayer, 'paper', v)" />
-                <StudioColor :model-value="blueprintParams.ink" @update:model-value="(v: string) => patchBlueprintInk(selectedLocal as DealLayer, 'ink', v)" />
-                <StudioColor :model-value="blueprintParams.inkDim" @update:model-value="(v: string) => patchBlueprintInk(selectedLocal as DealLayer, 'inkDim', v)" />
-              </div>
-              <StudioSelect label="Palette" :options="BLUEPRINT_PRESET_NAMES as any"
-                :model-value="blueprintPreset" @update:model-value="(v: any) => applyBlueprintPreset(selectedLocal as DealLayer, v)" />
-            </div>
-            <!-- Pane has its OWN layout (row masonry, every cell flush and filled), so the
-                 grid controls (density / inset / regularity / merge) don't apply to it. -->
-            <div v-else-if="(selectedLocal as any).cellFill === 'pane'" class="mt-2 flex flex-col gap-1.5">
-              <StudioSlider label="Rows" :min="PANE_LIMITS.rows[0]" :max="PANE_LIMITS.rows[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).rows"
-                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { rows: Math.round(v) })" />
-              <StudioSlider label="Cells per row" :min="PANE_LIMITS.cells[0]" :max="PANE_LIMITS.cells[1]" :step="1" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).cells"
-                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { cells: Math.round(v) })" />
-              <StudioSlider label="Vary" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).vary"
-                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { vary: v })" />
-              <StudioSlider label="Diagonals" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).diag"
-                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { diag: v })" />
-              <StudioSlider label="Softness" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).soft"
-                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { soft: v })" />
-              <StudioSlider label="Spread" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="((selectedLocal as DealLayer).pane ?? defaultPane()).spread"
-                @update:model-value="(v: number) => patchPane(selectedLocal as DealLayer, { spread: v })" />
-              <!-- The ordered palette. Spread is a distance along THIS order (rule 5), so the
-                   swatches read left to right in palette order; editing one keeps the rest. -->
-              <div class="panel-label mt-1">Inks</div>
-              <div class="flex flex-wrap items-center gap-1.5">
-                <StudioColor v-for="(ink, i) in paneInks" :key="i" :model-value="ink"
-                  @update:model-value="(v: string) => patchPaneInk(selectedLocal as DealLayer, i, v)" />
-              </div>
-              <StudioSelect label="Palette" :options="PANE_PRESET_NAMES as any"
-                :model-value="panePreset" @update:model-value="(v: any) => applyPanePreset(selectedLocal as DealLayer, v)" />
-            </div>
-            <!-- Oddgrid / Static: the shader styles. The style IS the effect, so the
-                 shared shader-fill editor mounts with its picker locked, its own seed
-                 / speed / input / anchor rows hidden (the Mosaic owns the seed; speed
-                 is 0; the input is meaningless here; the box IS the shader's frame —
-                 see the deal branch in useCompositorLayers). The effect's Looks are
-                 its Palette. -->
-            <div v-else-if="isMosaicShaderFill((selectedLocal as any).cellFill)" class="mt-2 flex flex-col gap-1.5">
-              <ShaderFillEditor :model-value="mosaicShader(selectedLocal as DealLayer)!" lock-effect
-                :show-anchor="false" :show-speed="false" :show-seed="false" :show-input="false"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { shader: v } as any)" />
-              <StudioSelect label="Palette" :options="mosaicLookOptions"
-                :model-value="mosaicLook" @update:model-value="(v: any) => applyMosaicLookTo(selectedLocal as DealLayer, v)" />
-            </div>
-            <!-- Tiles: the seeded grid itself — density / inset / regularity / merge. -->
-            <div v-else class="mt-2 flex flex-col gap-1.5">
-              <StudioSlider label="Density" :min="0.05" :max="1" :step="0.02" :bindable="false"
-                :model-value="(selectedLocal as any).density"
-                @update:model-value="(v: number) => setLocal(selectedLocal!.id, { density: v })" />
-              <StudioSlider label="Cell inset" :min="0" :max="0.4" :step="0.01" :bindable="false"
-                :model-value="(selectedLocal as any).cellInset"
-                @update:model-value="(v: number) => setLocal(selectedLocal!.id, { cellInset: v })" />
-              <StudioSlider label="Regularity" :min="0" :max="1" :step="0.01" :bindable="false"
-                :model-value="(selectedLocal as DealLayer).grid.gen.regularity"
-                @update:model-value="(v: number) => patchDealGrid(selectedLocal as DealLayer, { gen: { ...(selectedLocal as DealLayer).grid.gen, regularity: v } })" />
-              <StudioSwitch label="Merge cells" :model-value="(selectedLocal as DealLayer).grid.gen.merge"
-                @update:model-value="(v: boolean) => patchDealGrid(selectedLocal as DealLayer, { gen: { ...(selectedLocal as DealLayer).grid.gen, merge: v } })" />
-            </div>
-            <!-- The vocabulary palette only shows when something reads it: Tiles always,
-                 Modular / Pane only while they have no inks of their own. Parcel and
-                 Mosh carry their own colours (see dealVocabDrivesLook). Labelled "Inks"
-                 beside a style that already has a Palette control of its own, so two
-                 adjacent rows never both say Palette. -->
-            <div v-if="vocabDrivesLook" class="mt-2">
-              <div class="panel-label mb-1.5">{{ (selectedLocal as any).cellFill && (selectedLocal as any).cellFill !== 'solid' ? 'Inks' : 'Palette' }}</div>
-              <StudioSegmented :options="DEAL_VOCABS as any" :model-value="(selectedLocal as any).vocab"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { vocab: v })" />
-              <p v-if="(selectedLocal as any).cellFill && (selectedLocal as any).cellFill !== 'solid'" class="mt-1 text-[10px] text-white/30 leading-snug">This style has no inks of its own, so it draws from this palette.</p>
-            </div>
-            <div class="mt-2 flex items-center gap-2">
-              <StudioButton variant="secondary" @click="rerollDeal(selectedLocal as DealLayer)">New variation</StudioButton>
-              <div class="min-w-0 flex-1">
-                <StudioSlider label="Seed" :min="1" :max="9999" :step="1" :default="42" :bindable="false"
-                  :model-value="(selectedLocal as DealLayer).grid.gen.seed"
-                  @update:model-value="(v: number) => setDealSeed(selectedLocal as DealLayer, v)" />
-              </div>
-            </div>
+            </StudioSection>
           </template>
 
           <!-- Scatter (kind 'scatter'): Style first — which marks these are — then
@@ -8884,185 +8899,193 @@ onUnmounted(() => {
                rendered from the style's REGISTRY ROW (lib/compositor/scatter), so a
                new style ships its controls with its module and needs no block here. -->
           <template v-if="selectedLocal.kind === 'scatter'">
-            <StudioSelect label="Style" :options="SCATTER_STYLE_LABELS as any"
-              :model-value="scatterLabelOf((selectedLocal as ScatterLayer).style)"
-              @update:model-value="(v: any) => setScatterStyle(selectedLocal as ScatterLayer, v)" />
-            <div class="mt-2 flex flex-col gap-1.5">
-              <template v-for="c in scatterRow.controls" :key="c.key">
-                <StudioSlider v-if="c.kind === 'slider'" :label="c.label" :min="c.min" :max="c.max" :step="c.step" :bindable="false"
-                  :model-value="(scatterDials[c.key] as number)"
-                  @update:model-value="(v: number) => patchScatterParam(selectedLocal as ScatterLayer, c.key, c.step >= 1 ? Math.round(v) : v)" />
-                <StudioSelect v-else :label="c.label" :options="scatterOptionLabels(asScatterSelect(c))"
-                  :model-value="scatterOptionLabel(asScatterSelect(c), scatterDials[c.key])"
-                  @update:model-value="(v: any) => patchScatterParam(selectedLocal as ScatterLayer, c.key, scatterOptionValue(asScatterSelect(c), v))" />
-              </template>
-              <!-- The ordered inks the style paints with, one swatch per role (Chaff: ground /
-                   ink; Strand: ground / plate / fill; Husk: ground / silhouette / fill). Editing
-                   one keeps the rest and drops the Palette select to custom (presetOf → null),
-                   the same way Pane's ink row behaves. -->
-              <div class="panel-label mt-1">Inks</div>
-              <div class="flex flex-wrap items-center gap-2">
-                <div v-for="(ink, i) in scatterInks" :key="i" class="flex items-center gap-1">
-                  <StudioColor :model-value="ink"
-                    @update:model-value="(v: string) => patchScatterInk(selectedLocal as ScatterLayer, i, v)" />
-                  <span class="text-[10px] text-white/45">{{ scatterRow.inkLabels[i] ?? `Ink ${i + 1}` }}</span>
+            <StudioSection title="Style">
+              <StudioSelect label="Style" :options="SCATTER_STYLE_LABELS as any"
+                :model-value="scatterLabelOf((selectedLocal as ScatterLayer).style)"
+                @update:model-value="(v: any) => setScatterStyle(selectedLocal as ScatterLayer, v)" />
+              <div class="mt-2 flex flex-col gap-1.5">
+                <template v-for="c in scatterRow.controls" :key="c.key">
+                  <StudioSlider v-if="c.kind === 'slider'" :label="c.label" :min="c.min" :max="c.max" :step="c.step" :bindable="false"
+                    :model-value="(scatterDials[c.key] as number)"
+                    @update:model-value="(v: number) => patchScatterParam(selectedLocal as ScatterLayer, c.key, c.step >= 1 ? Math.round(v) : v)" />
+                  <StudioSelect v-else :label="c.label" :options="scatterOptionLabels(asScatterSelect(c))"
+                    :model-value="scatterOptionLabel(asScatterSelect(c), scatterDials[c.key])"
+                    @update:model-value="(v: any) => patchScatterParam(selectedLocal as ScatterLayer, c.key, scatterOptionValue(asScatterSelect(c), v))" />
+                </template>
+                <!-- The ordered inks the style paints with, one swatch per role (Chaff: ground /
+                     ink; Strand: ground / plate / fill; Husk: ground / silhouette / fill). Editing
+                     one keeps the rest and drops the Palette select to custom (presetOf → null),
+                     the same way Pane's ink row behaves. -->
+                <div class="panel-label mt-1">Inks</div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <div v-for="(ink, i) in scatterInks" :key="i" class="flex items-center gap-1">
+                    <StudioColor :model-value="ink"
+                      @update:model-value="(v: string) => patchScatterInk(selectedLocal as ScatterLayer, i, v)" />
+                    <span class="text-[10px] text-white/45">{{ scatterRow.inkLabels[i] ?? `Ink ${i + 1}` }}</span>
+                  </div>
+                </div>
+                <StudioSelect label="Palette" :options="scatterRow.presetNames as any"
+                  :model-value="scatterPreset" @update:model-value="(v: any) => applyScatterPreset(selectedLocal as ScatterLayer, v)" />
+              </div>
+              <div class="mt-2 flex items-center gap-2">
+                <StudioButton variant="secondary" @click="rerollScatter(selectedLocal as ScatterLayer)">New variation</StudioButton>
+                <div class="min-w-0 flex-1">
+                  <StudioSlider label="Seed" :min="1" :max="9999" :step="1" :default="DEFAULT_SCATTER_SEED" :bindable="false"
+                    :model-value="(selectedLocal as ScatterLayer).seed"
+                    @update:model-value="(v: number) => setScatterSeed(selectedLocal as ScatterLayer, v)" />
                 </div>
               </div>
-              <StudioSelect label="Palette" :options="scatterRow.presetNames as any"
-                :model-value="scatterPreset" @update:model-value="(v: any) => applyScatterPreset(selectedLocal as ScatterLayer, v)" />
-            </div>
-            <div class="mt-2 flex items-center gap-2">
-              <StudioButton variant="secondary" @click="rerollScatter(selectedLocal as ScatterLayer)">New variation</StudioButton>
-              <div class="min-w-0 flex-1">
-                <StudioSlider label="Seed" :min="1" :max="9999" :step="1" :default="DEFAULT_SCATTER_SEED" :bindable="false"
-                  :model-value="(selectedLocal as ScatterLayer).seed"
-                  @update:model-value="(v: number) => setScatterSeed(selectedLocal as ScatterLayer, v)" />
-              </div>
-            </div>
+            </StudioSection>
           </template>
 
           <!-- Image tint: fill blended over the image, clipped to its alpha -->
           <template v-if="selectedLocal.kind === 'image'">
-            <div>
-              <div class="panel-label mb-1.5">Tint</div>
-              <FillControl allow-none :model-value="(selectedLocal as any).tint"
-                @update:model-value="(v: any) => setLocal(selectedLocal!.id, { tint: v })" />
-              <div v-if="hasTint(selectedLocal)" class="mt-1.5 flex flex-col gap-1.5">
-                <select :value="(selectedLocal as any).tintBlend || 'normal'"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer capitalize"
-                  @change="setLocal(selectedLocal!.id, { tintBlend: ($event.target as HTMLSelectElement).value } as any)">
-                  <option v-for="m in LOCAL_BLEND_MODES" :key="m" :value="m">{{ m.replace('_', ' ') }}</option>
-                </select>
-                <StudioSlider :model-value="Math.round(((selectedLocal as any).tintOpacity ?? 1) * 100)"
-                  @update:model-value="(n) => setLocal(selectedLocal!.id, { tintOpacity: Math.max(0, Math.min(1, (n || 0) / 100)) } as any)"
-                  label="Opacity" :min="0" :max="100" :step="1" :bindable="false" />
+            <StudioSection title="Image">
+              <div>
+                <div class="panel-label mb-1.5">Tint</div>
+                <FillControl allow-none :model-value="(selectedLocal as any).tint"
+                  @update:model-value="(v: any) => setLocal(selectedLocal!.id, { tint: v })" />
+                <div v-if="hasTint(selectedLocal)" class="mt-1.5 flex flex-col gap-1.5">
+                  <select :value="(selectedLocal as any).tintBlend || 'normal'"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer capitalize"
+                    @change="setLocal(selectedLocal!.id, { tintBlend: ($event.target as HTMLSelectElement).value } as any)">
+                    <option v-for="m in LOCAL_BLEND_MODES" :key="m" :value="m">{{ m.replace('_', ' ') }}</option>
+                  </select>
+                  <StudioSlider :model-value="Math.round(((selectedLocal as any).tintOpacity ?? 1) * 100)"
+                    @update:model-value="(n) => setLocal(selectedLocal!.id, { tintOpacity: Math.max(0, Math.min(1, (n || 0) / 100)) } as any)"
+                    label="Opacity" :min="0" :max="100" :step="1" :bindable="false" />
+                </div>
               </div>
-            </div>
+            </StudioSection>
           </template>
 
           <!-- Size: W / H with aspect-ratio lock (shapes & images) -->
-          <div v-if="selectedLocal.kind === 'rect' || selectedLocal.kind === 'ellipse' || selectedLocal.kind === 'image' || selectedLocal.kind === 'polygon' || selectedLocal.kind === 'star'">
-            <div class="panel-label mb-1.5">Size</div>
-            <div class="flex items-center gap-2">
-              <label class="flex-1 flex items-center gap-2 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5">
-                <span class="text-xs text-white/40">W</span>
-                <input v-scrubnum type="number" min="1" :value="pxW((selectedLocal as any).w)"
-                  class="w-full bg-transparent text-xs text-white/90 outline-none"
-                  @input="setDimPx(selectedLocal!, 'w', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
-              </label>
-              <button
-                class="shrink-0 size-7 rounded flex items-center justify-center border border-[#2a2a2a] cursor-pointer transition-colors"
-                :class="lockRatio ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/40' : 'text-white/40 hover:text-white/80'"
-                :title="lockRatio ? 'Aspect ratio locked — click to unlock' : 'Aspect ratio unlocked — click to lock'"
-                @click="lockRatio = !lockRatio"
-              >
-                <Lock v-if="lockRatio" class="size-3.5" />
-                <LockOpen v-else class="size-3.5" />
-              </button>
-              <label class="flex-1 flex items-center gap-2 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5">
-                <span class="text-xs text-white/40">H</span>
-                <input v-scrubnum type="number" min="1" :value="pxW((selectedLocal as any).h)"
-                  class="w-full bg-transparent text-xs text-white/90 outline-none"
-                  @input="setDimPx(selectedLocal!, 'h', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
-              </label>
+          <StudioSection title="Transform">
+            <div v-if="selectedLocal.kind === 'rect' || selectedLocal.kind === 'ellipse' || selectedLocal.kind === 'image' || selectedLocal.kind === 'polygon' || selectedLocal.kind === 'star'">
+              <div class="panel-label mb-1.5">Size</div>
+              <div class="flex items-center gap-2">
+                <label class="flex-1 flex items-center gap-2 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5">
+                  <span class="text-xs text-white/40">W</span>
+                  <input v-scrubnum type="number" min="1" :value="pxW((selectedLocal as any).w)"
+                    class="w-full bg-transparent text-xs text-white/90 outline-none"
+                    @input="setDimPx(selectedLocal!, 'w', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+                </label>
+                <button
+                  class="shrink-0 size-7 rounded flex items-center justify-center border border-[#2a2a2a] cursor-pointer transition-colors"
+                  :class="lockRatio ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/40' : 'text-white/40 hover:text-white/80'"
+                  :title="lockRatio ? 'Aspect ratio locked — click to unlock' : 'Aspect ratio unlocked — click to lock'"
+                  @click="lockRatio = !lockRatio"
+                >
+                  <Lock v-if="lockRatio" class="size-3.5" />
+                  <LockOpen v-else class="size-3.5" />
+                </button>
+                <label class="flex-1 flex items-center gap-2 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5">
+                  <span class="text-xs text-white/40">H</span>
+                  <input v-scrubnum type="number" min="1" :value="pxW((selectedLocal as any).h)"
+                    class="w-full bg-transparent text-xs text-white/90 outline-none"
+                    @input="setDimPx(selectedLocal!, 'h', parseFloat(($event.target as HTMLInputElement).value) || 0)" />
+                </label>
+              </div>
             </div>
-          </div>
-          <!-- Line: single length value -->
-          <div v-else-if="selectedLocal.kind === 'line'">
-            <div class="panel-label mb-1.5">Length</div>
-            <input v-scrubnum type="number" min="1" :value="pxW((selectedLocal as any).w)"
-              class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-              @input="setSizePx(selectedLocal!.id, 'w', parseFloat(($event.target as HTMLInputElement).value) || 1)" />
-          </div>
+            <!-- Line: single length value -->
+            <div v-else-if="selectedLocal.kind === 'line'">
+              <div class="panel-label mb-1.5">Length</div>
+              <input v-scrubnum type="number" min="1" :value="pxW((selectedLocal as any).w)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="setSizePx(selectedLocal!.id, 'w', parseFloat(($event.target as HTMLInputElement).value) || 1)" />
+            </div>
 
-          <!-- Common: rotation + opacity -->
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <div class="panel-label mb-1.5">Rotation</div>
-              <input v-scrubnum type="number" step="1" :value="Math.round(selectedLocal.rotation)"
-                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                @input="setLocal(selectedLocal!.id, { rotation: parseFloat(($event.target as HTMLInputElement).value) || 0 })" />
+            <!-- Common: rotation + opacity -->
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <div class="panel-label mb-1.5">Rotation</div>
+                <input v-scrubnum type="number" step="1" :value="Math.round(selectedLocal.rotation)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="setLocal(selectedLocal!.id, { rotation: parseFloat(($event.target as HTMLInputElement).value) || 0 })" />
+              </div>
+              <div v-if="!localDisplace(selectedLocal)">
+                <div class="panel-label mb-1.5">Opacity</div>
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(selectedLocal.opacity * 100)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="setLocal(selectedLocal!.id, { opacity: Math.max(0, Math.min(1, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
             </div>
-            <div v-if="!localDisplace(selectedLocal)">
-              <div class="panel-label mb-1.5">Opacity</div>
-              <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(selectedLocal.opacity * 100)"
-                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                @input="setLocal(selectedLocal!.id, { opacity: Math.max(0, Math.min(1, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
-            </div>
-          </div>
+          </StudioSection>
 
           <!-- Distort: slant (affine) + perspective + free corner-pin (Distort tool) -->
-          <div>
-            <div class="panel-label mb-1.5">Distort</div>
-            <div class="grid grid-cols-2 gap-3 mb-2">
-              <StudioSlider label="Slant X" :model-value="(selectedLocal as any).skewX || 0"
-                :min="-60" :max="60" :step="1" :bindable="false"
-                @update:model-value="(v) => setLocal(selectedLocal!.id, { skewX: v } as any)" />
-              <StudioSlider label="Slant Y" :model-value="(selectedLocal as any).skewY || 0"
-                :min="-60" :max="60" :step="1" :bindable="false"
-                @update:model-value="(v) => setLocal(selectedLocal!.id, { skewY: v } as any)" />
+          <StudioSection title="Distort and blend">
+            <div>
+              <div class="panel-label mb-1.5">Distort</div>
+              <div class="grid grid-cols-2 gap-3 mb-2">
+                <StudioSlider label="Slant X" :model-value="(selectedLocal as any).skewX || 0"
+                  :min="-60" :max="60" :step="1" :bindable="false"
+                  @update:model-value="(v) => setLocal(selectedLocal!.id, { skewX: v } as any)" />
+                <StudioSlider label="Slant Y" :model-value="(selectedLocal as any).skewY || 0"
+                  :min="-60" :max="60" :step="1" :bindable="false"
+                  @update:model-value="(v) => setLocal(selectedLocal!.id, { skewY: v } as any)" />
+              </div>
+              <div class="mb-2">
+                <StudioSlider :model-value="Math.round(perspectiveAmount(selectedLocal) * 100)" @update:model-value="(n) => setPerspective(selectedLocal!.id, (n || 0) / 100)"
+                  label="Perspective" :min="-80" :max="80" :step="1" :bindable="false" />
+              </div>
+              <div class="flex items-center gap-1.5">
+                <button class="flex-1 h-7 rounded text-[11px] cursor-pointer transition-colors" :class="distortTool ? 'bg-white text-neutral-900 font-medium' : 'bg-white/[0.05] text-white/70 hover:bg-white/10'" title="Drag the 4 corners on the canvas" @click="toggleDistort">Corner pin</button>
+                <button class="h-7 px-2.5 rounded text-[11px] bg-white/[0.05] text-white/60 hover:bg-white/10 cursor-pointer" title="Reset slant + perspective" @click="resetDistort(selectedLocal!.id)">Reset</button>
+              </div>
             </div>
-            <div class="mb-2">
-              <StudioSlider :model-value="Math.round(perspectiveAmount(selectedLocal) * 100)" @update:model-value="(n) => setPerspective(selectedLocal!.id, (n || 0) / 100)"
-                label="Perspective" :min="-80" :max="80" :step="1" :bindable="false" />
-            </div>
-            <div class="flex items-center gap-1.5">
-              <button class="flex-1 h-7 rounded text-[11px] cursor-pointer transition-colors" :class="distortTool ? 'bg-white text-neutral-900 font-medium' : 'bg-white/[0.05] text-white/70 hover:bg-white/10'" title="Drag the 4 corners on the canvas" @click="toggleDistort">Corner pin</button>
-              <button class="h-7 px-2.5 rounded text-[11px] bg-white/[0.05] text-white/60 hover:bg-white/10 cursor-pointer" title="Reset slant + perspective" @click="resetDistort(selectedLocal!.id)">Reset</button>
-            </div>
-          </div>
 
-          <!-- Blend mode (vs layers below; same modes as wired layers) -->
-          <div v-if="!localDisplace(selectedLocal)">
-            <div class="panel-label mb-1.5">Blend</div>
-            <select :value="(selectedLocal as any).blend || 'normal'"
-              class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
-              @change="setLocal(selectedLocal!.id, { blend: ($event.target as HTMLSelectElement).value } as any)">
-              <option v-for="m in LOCAL_BLEND_MODES" :key="m" :value="m">{{ m.replace('_', ' ') }}</option>
-            </select>
-          </div>
+            <!-- Blend mode (vs layers below; same modes as wired layers) -->
+            <div v-if="!localDisplace(selectedLocal)">
+              <div class="panel-label mb-1.5">Blend</div>
+              <select :value="(selectedLocal as any).blend || 'normal'"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
+                @change="setLocal(selectedLocal!.id, { blend: ($event.target as HTMLSelectElement).value } as any)">
+                <option v-for="m in LOCAL_BLEND_MODES" :key="m" :value="m">{{ m.replace('_', ' ') }}</option>
+              </select>
+            </div>
 
-          <!-- Displacement map: turn this image into a lens that warps everything below it -->
-          <div v-if="selectedLocal?.kind === 'image'" class="mt-3">
-            <div class="flex items-center justify-between">
-              <div class="panel-label">Displacement map</div>
-              <button type="button"
-                class="text-xs px-2 py-1 rounded border border-white/[0.06] text-white/80 hover:bg-white/[0.06]"
-                :class="localDisplace(selectedLocal) ? 'bg-[#2563eb]/30 text-white' : 'bg-white/[0.04]'"
-                @click="toggleLocalDisplace(selectedLocal)">
-                {{ localDisplace(selectedLocal) ? 'On' : 'Off' }}
-              </button>
+            <!-- Displacement map: turn this image into a lens that warps everything below it -->
+            <div v-if="selectedLocal?.kind === 'image'" class="mt-3">
+              <div class="flex items-center justify-between">
+                <div class="panel-label">Displacement map</div>
+                <button type="button"
+                  class="text-xs px-2 py-1 rounded border border-white/[0.06] text-white/80 hover:bg-white/[0.06]"
+                  :class="localDisplace(selectedLocal) ? 'bg-[#2563eb]/30 text-white' : 'bg-white/[0.04]'"
+                  @click="toggleLocalDisplace(selectedLocal)">
+                  {{ localDisplace(selectedLocal) ? 'On' : 'Off' }}
+                </button>
+              </div>
+              <div v-if="localDisplace(selectedLocal)" class="mt-2 flex flex-col gap-2">
+                <div>
+                  <div class="panel-label mb-1.5">Read</div>
+                  <select :value="localDisplace(selectedLocal).read"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
+                    @change="setLocalDisplace(selectedLocal, { read: ($event.target as HTMLSelectElement).value })">
+                    <option value="height">Height (brightness)</option>
+                    <option value="channels">Channels (R→x, G→y)</option>
+                    <option value="bulge">Bulge (white out / black in)</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="panel-label mb-1.5">Amount</div>
+                  <input v-scrubnum type="number" min="0" max="200" step="1" :value="localDisplace(selectedLocal).amount"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                    @input="setLocalDisplace(selectedLocal, { amount: Math.max(0, Math.min(200, parseFloat(($event.target as HTMLInputElement).value) || 0)) })" />
+                </div>
+                <div>
+                  <div class="panel-label mb-1.5">Softness</div>
+                  <input v-scrubnum type="number" min="0" max="20" step="1" :value="localDisplace(selectedLocal).softness ?? 0"
+                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                    @input="setLocalDisplace(selectedLocal, { softness: Math.max(0, Math.min(20, parseFloat(($event.target as HTMLInputElement).value) || 0)) })" />
+                </div>
+                <label v-if="localDisplace(selectedLocal).read === 'height' || localDisplace(selectedLocal).read === 'bulge'" class="flex items-center gap-2 text-xs text-white/80">
+                  <input type="checkbox" :checked="!!localDisplace(selectedLocal).invert"
+                    @change="setLocalDisplace(selectedLocal, { invert: ($event.target as HTMLInputElement).checked })" />
+                  Invert
+                </label>
+              </div>
             </div>
-            <div v-if="localDisplace(selectedLocal)" class="mt-2 flex flex-col gap-2">
-              <div>
-                <div class="panel-label mb-1.5">Read</div>
-                <select :value="localDisplace(selectedLocal).read"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
-                  @change="setLocalDisplace(selectedLocal, { read: ($event.target as HTMLSelectElement).value })">
-                  <option value="height">Height (brightness)</option>
-                  <option value="channels">Channels (R→x, G→y)</option>
-                  <option value="bulge">Bulge (white out / black in)</option>
-                </select>
-              </div>
-              <div>
-                <div class="panel-label mb-1.5">Amount</div>
-                <input v-scrubnum type="number" min="0" max="200" step="1" :value="localDisplace(selectedLocal).amount"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                  @input="setLocalDisplace(selectedLocal, { amount: Math.max(0, Math.min(200, parseFloat(($event.target as HTMLInputElement).value) || 0)) })" />
-              </div>
-              <div>
-                <div class="panel-label mb-1.5">Softness</div>
-                <input v-scrubnum type="number" min="0" max="20" step="1" :value="localDisplace(selectedLocal).softness ?? 0"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                  @input="setLocalDisplace(selectedLocal, { softness: Math.max(0, Math.min(20, parseFloat(($event.target as HTMLInputElement).value) || 0)) })" />
-              </div>
-              <label v-if="localDisplace(selectedLocal).read === 'height' || localDisplace(selectedLocal).read === 'bulge'" class="flex items-center gap-2 text-xs text-white/80">
-                <input type="checkbox" :checked="!!localDisplace(selectedLocal).invert"
-                  @change="setLocalDisplace(selectedLocal, { invert: ($event.target as HTMLInputElement).checked })" />
-                Invert
-              </label>
-            </div>
-          </div>
+          </StudioSection>
 
           <!-- Animate: make this still a looping, transparent clip -->
           <CompositorAnimatePanel
@@ -9076,60 +9099,62 @@ onUnmounted(() => {
           />
 
           <!-- Layer mask: clip this layer to another layer's silhouette (cross-source) -->
-          <div class="mt-3">
-            <div class="panel-label mb-1.5">Mask</div>
-            <select :value="currentMaskRef(localKey(selectedLocal!.id))"
-              class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-              @change="setMaskRef(localKey(selectedLocal!.id), ($event.target as HTMLSelectElement).value)">
-              <option value="">No mask</option>
-              <option v-for="o in maskCandidates(localKey(selectedLocal!.id))" :key="o.key" :value="o.key">Mask with {{ o.label }}</option>
-            </select>
-            <label v-if="currentMaskRef(localKey(selectedLocal!.id))" class="mt-1.5 flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
-              <input type="checkbox" :checked="maskShowSource(localKey(selectedLocal!.id))"
-                @change="setMaskShowSource(localKey(selectedLocal!.id), ($event.target as HTMLInputElement).checked)" />
-              Show mask layer
-            </label>
-            <div v-if="maskIsLocalShape()" class="mt-2">
-              <label class="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
-                <input type="checkbox" :checked="!!selectedBreak()" @change="setBreakEnabled(($event.target as HTMLInputElement).checked)" />
-                Break out
+          <StudioSection title="Mask and crop">
+            <div class="mt-3">
+              <div class="panel-label mb-1.5">Mask</div>
+              <select :value="currentMaskRef(localKey(selectedLocal!.id))"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @change="setMaskRef(localKey(selectedLocal!.id), ($event.target as HTMLSelectElement).value)">
+                <option value="">No mask</option>
+                <option v-for="o in maskCandidates(localKey(selectedLocal!.id))" :key="o.key" :value="o.key">Mask with {{ o.label }}</option>
+              </select>
+              <label v-if="currentMaskRef(localKey(selectedLocal!.id))" class="mt-1.5 flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
+                <input type="checkbox" :checked="maskShowSource(localKey(selectedLocal!.id))"
+                  @change="setMaskShowSource(localKey(selectedLocal!.id), ($event.target as HTMLInputElement).checked)" />
+                Show mask layer
               </label>
-              <div v-if="selectedBreak()" class="mt-1.5 space-y-1.5">
-                <StudioSegmented :options="['top','bottom','left','right']" :model-value="breakEdge()"
-                  @update:model-value="(e: string) => setBreakEdge(e as any)" />
-                <StudioSlider label="Offset" :model-value="breakOffset()"
-                  :min="0" :max="1" :step="0.01" :bindable="false"
-                  @update:model-value="(v) => setBreakOffset(v)" />
-              </div>
-            </div>
-          </div>
-
-          <!-- Crop to a rect/ellipse region -->
-          <div class="mt-3">
-            <div class="flex items-center justify-between mb-1.5">
-              <div class="panel-label">Crop</div>
-              <button class="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-white/60 hover:text-white/90"
-                @click="toggleLayerMask(selectedLocal!)">{{ layerMask(selectedLocal) ? 'Remove' : 'Add' }}</button>
-            </div>
-            <div v-if="layerMask(selectedLocal)" class="space-y-1.5">
-              <div class="flex gap-1">
-                <button class="flex-1 py-1 rounded text-[11px] border"
-                  :class="layerMask(selectedLocal)?.kind === 'rect' ? 'bg-white/10 border-white/20 text-white/90' : 'border-[#2a2a2a] text-white/50 hover:text-white/80'"
-                  @click="setLayerMask(selectedLocal!, { kind: 'rect' })">Rect</button>
-                <button class="flex-1 py-1 rounded text-[11px] border"
-                  :class="layerMask(selectedLocal)?.kind === 'ellipse' ? 'bg-white/10 border-white/20 text-white/90' : 'border-[#2a2a2a] text-white/50 hover:text-white/80'"
-                  @click="setLayerMask(selectedLocal!, { kind: 'ellipse' })">Ellipse</button>
-              </div>
-              <div class="grid grid-cols-4 gap-1.5">
-                <div v-for="k in (['x','y','w','h'] as const)" :key="k">
-                  <div class="panel-sublabel mb-1">{{ k }}</div>
-                  <input v-scrubnum type="number" step="0.5" :value="Math.round((layerMask(selectedLocal)?.[k] || 0) * 1000) / 10"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                    @input="setLayerMask(selectedLocal!, { [k]: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+              <div v-if="maskIsLocalShape()" class="mt-2">
+                <label class="flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
+                  <input type="checkbox" :checked="!!selectedBreak()" @change="setBreakEnabled(($event.target as HTMLInputElement).checked)" />
+                  Break out
+                </label>
+                <div v-if="selectedBreak()" class="mt-1.5 space-y-1.5">
+                  <StudioSegmented :options="['top','bottom','left','right']" :model-value="breakEdge()"
+                    @update:model-value="(e: string) => setBreakEdge(e as any)" />
+                  <StudioSlider label="Offset" :model-value="breakOffset()"
+                    :min="0" :max="1" :step="0.01" :bindable="false"
+                    @update:model-value="(v) => setBreakOffset(v)" />
                 </div>
               </div>
             </div>
-          </div>
+
+            <!-- Crop to a rect/ellipse region -->
+            <div class="mt-3">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="panel-label">Crop</div>
+                <button class="text-[10px] px-1.5 py-0.5 rounded border border-[#2a2a2a] text-white/60 hover:text-white/90"
+                  @click="toggleLayerMask(selectedLocal!)">{{ layerMask(selectedLocal) ? 'Remove' : 'Add' }}</button>
+              </div>
+              <div v-if="layerMask(selectedLocal)" class="space-y-1.5">
+                <div class="flex gap-1">
+                  <button class="flex-1 py-1 rounded text-[11px] border"
+                    :class="layerMask(selectedLocal)?.kind === 'rect' ? 'bg-white/10 border-white/20 text-white/90' : 'border-[#2a2a2a] text-white/50 hover:text-white/80'"
+                    @click="setLayerMask(selectedLocal!, { kind: 'rect' })">Rect</button>
+                  <button class="flex-1 py-1 rounded text-[11px] border"
+                    :class="layerMask(selectedLocal)?.kind === 'ellipse' ? 'bg-white/10 border-white/20 text-white/90' : 'border-[#2a2a2a] text-white/50 hover:text-white/80'"
+                    @click="setLayerMask(selectedLocal!, { kind: 'ellipse' })">Ellipse</button>
+                </div>
+                <div class="grid grid-cols-4 gap-1.5">
+                  <div v-for="k in (['x','y','w','h'] as const)" :key="k">
+                    <div class="panel-sublabel mb-1">{{ k }}</div>
+                    <input v-scrubnum type="number" step="0.5" :value="Math.round((layerMask(selectedLocal)?.[k] || 0) * 1000) / 10"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                      @input="setLayerMask(selectedLocal!, { [k]: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </StudioSection>
 
           <!-- Cloner: repeat this layer (linear/grid/radial) with falloff -->
           <CompositorClonerPanel
