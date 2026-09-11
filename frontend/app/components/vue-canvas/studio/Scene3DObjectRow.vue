@@ -72,7 +72,8 @@ const icon = computed(() =>
 // ── Add-treatment menu. Teleported to body: the Objects list scrolls (overflow-y-auto),
 // which would clip an absolutely positioned popover. Closes on any outside pointerdown.
 const menuOpen = ref(false)
-const menuPos = ref({ top: 0, left: 0 })
+const MENU_W = 176 // w-44
+const menuPos = ref({ top: 0, left: 0, maxHeight: 0 })
 const addBtn = ref<HTMLButtonElement | null>(null)
 function onOutside(e: PointerEvent): void {
   const t = e.target as HTMLElement | null
@@ -81,7 +82,24 @@ function onOutside(e: PointerEvent): void {
 }
 function openMenu(): void {
   const r = addBtn.value?.getBoundingClientRect()
-  if (r) menuPos.value = { top: r.bottom + 4, left: r.left }
+  if (r) {
+    // The full treatments + modifiers list is taller than the viewport, so the menu must SCROLL
+    // and stay on screen: open on whichever side of the button has more room and cap the height
+    // to that room (`maxHeight` drives the container's overflow). Also keep it off the right edge.
+    const MARGIN = 8
+    const below = window.innerHeight - (r.bottom + 4) - MARGIN
+    const above = (r.top - 4) - MARGIN
+    let top: number, maxHeight: number
+    if (below >= above) {
+      top = r.bottom + 4
+      maxHeight = Math.max(0, below)
+    } else {
+      maxHeight = Math.max(0, above)
+      top = Math.max(MARGIN, r.top - 4 - maxHeight)
+    }
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - 8 - MENU_W))
+    menuPos.value = { top, left, maxHeight }
+  }
   menuOpen.value = true
   document.addEventListener('pointerdown', onOutside, true)
 }
@@ -151,8 +169,8 @@ function onModDropOn(objectId: string, modifierId: string): void {
     </div>
     <Teleport to="body">
       <div v-if="menuOpen" data-treatment-menu
-        class="fixed z-[200] w-44 rounded-lg border border-white/10 bg-[#161616] p-1 shadow-2xl"
-        :style="{ top: `${menuPos.top}px`, left: `${menuPos.left}px` }" @pointerdown.stop>
+        class="fixed z-[200] w-44 overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-[#161616] p-1 shadow-2xl"
+        :style="{ top: `${menuPos.top}px`, left: `${menuPos.left}px`, maxHeight: `${menuPos.maxHeight}px` }" @pointerdown.stop>
         <div class="px-2 pt-0.5 pb-1 text-[10px] font-medium uppercase tracking-wide text-white/35">Treatments</div>
         <button v-for="kind in TREATMENT_KINDS" :key="kind" type="button" data-testid="add-treatment-item" :data-kind="kind"
           class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-white/80 transition-colors hover:bg-white/10 hover:text-white cursor-pointer"
