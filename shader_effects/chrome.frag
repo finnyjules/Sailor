@@ -70,7 +70,7 @@ float bevelSin(float t, float shape) {
 // facets. The distance field is low-frequency, so a wide two-ring 21-tap blur is safe and makes
 // the dome and bevel read as one smooth pillow instead of a bilinear-upscaled terrace.
 float dfield(vec2 uv) {
-    vec2 r = 7.0 / u_resolution;
+    vec2 r = 11.0 / u_resolution;
     vec2 d = r * 0.70711;                         // diagonal taps at the same radius
     float s = texture(u_shape, uv).g * 2.0;
     s += texture(u_shape, uv + vec2(r.x, 0.0)).g + texture(u_shape, uv - vec2(r.x, 0.0)).g
@@ -163,7 +163,7 @@ void main() {
         // (gradient of the height field domeH) — one set of taps, so the shape branch is 5 dfield
         // reads, not nine.
         edgeD = dfield(v_texCoord);
-        vec2 e0 = 10.0 / u_resolution;
+        vec2 e0 = 16.0 / u_resolution;
         float dpx = dfield(v_texCoord + vec2(e0.x, 0.0));
         float dnx = dfield(v_texCoord - vec2(e0.x, 0.0));
         float dpy = dfield(v_texCoord + vec2(0.0, e0.y));
