@@ -124,7 +124,7 @@ import {
   addEffect, removeEffect, duplicateEffect, reorderEffect, canReorder,
   type EffectInstance, type EffectKind,
 } from '~/lib/compositor/effectStack'
-import { OVERLAY_BLENDS } from '~/lib/compositor/postEffects'
+import { OVERLAY_BLENDS, STROKE_ALPHA_ALIGNS } from '~/lib/compositor/postEffects'
 import {
   strokeStackOf, writeStrokeStackToLayer, addStroke, removeStroke, duplicateStroke,
   reorderStroke, canReorderStroke, strokeSupportsStack, strokeSupportsShapes, strokeRowLabel,
@@ -1976,6 +1976,10 @@ const isPanelKind = (k: EffectKind) => (PANEL_EFFECT_KINDS as string[]).includes
  *  the select shows sentence-case copy (per the UI copy rule for selects over internal values). */
 const OVERLAY_BLEND_LABELS: Record<string, string> = {
   normal: 'Normal', multiply: 'Multiply', screen: 'Screen', overlay: 'Overlay', 'soft-light': 'Soft light',
+}
+/** Human labels for the alpha-stroke alignment, same select-copy rule as the blend labels. */
+const STROKE_ALPHA_ALIGN_LABELS: Record<string, string> = {
+  inside: 'Inside', center: 'Centre', outside: 'Outside',
 }
 // The selection is by id, so a vanished effect — its layer deleted, or an undo that
 // rolled the stack back — must not leave the inspector pointing at nothing. One watcher
@@ -8090,6 +8094,43 @@ onUnmounted(() => {
                 <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).opacity ?? 1) * 100)"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ opacity: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Stroke from alpha: a band traced from the layer's OWN rasterised alpha edge (any
+               layer kind), filled with a colour. Width, align and colour are all read by
+               passStrokeFromAlpha — no dead control. Colour card is the shared drop-shadow
+               pattern (activeFxHex/activeFxAlpha/composeRgba), so rgba strokes work too. -->
+          <div v-else-if="activeEffect!.type === 'stroke_from_alpha'" class="space-y-1.5">
+            <div class="flex items-center gap-1.5">
+              <input type="color" :value="activeFxHex" title="Stroke colour"
+                class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
+                @input="updateActiveEffect({ color: composeRgba(($event.target as HTMLInputElement).value, activeFxAlpha) })" />
+              <input type="text" spellcheck="false" maxlength="7" :value="activeFxHex" title="Hex colour"
+                class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs font-mono uppercase text-white/90 outline-none"
+                @change="setActiveFxHex(($event.target as HTMLInputElement).value)" />
+              <div class="flex items-center gap-0.5 shrink-0 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-1.5" title="Stroke opacity (alpha)">
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(activeFxAlpha * 100)"
+                  class="w-7 bg-transparent text-xs text-white/90 outline-none text-right"
+                  @input="updateActiveEffect({ color: composeRgba(activeFxHex, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+                <span class="text-[10px] text-white/35 select-none">%</span>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">Width</div>
+                <input v-scrubnum type="number" min="0" max="20" step="0.1" :value="Math.round(((activeEffect as any).width ?? 0.006) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ width: Math.min(0.2, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Align</div>
+                <select :value="(activeEffect as any).align || 'center'"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @change="updateActiveEffect({ align: ($event.target as HTMLSelectElement).value })">
+                  <option v-for="a in STROKE_ALPHA_ALIGNS" :key="a" :value="a">{{ STROKE_ALPHA_ALIGN_LABELS[a] }}</option>
+                </select>
               </div>
             </div>
           </div>

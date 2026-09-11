@@ -119,7 +119,41 @@ export interface GradientOverlayEffect {
   opacity: number      // 0..1 — composite strength
   visible: boolean
 }
-export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | ColorOverlayEffect | GradientOverlayEffect
+/** Where the alpha-traced stroke sits relative to the layer's OWN silhouette edge. `inside`
+ *  bands the full width WITHIN the alpha, `outside` the full width BEYOND it, `center` straddles
+ *  it half in / half out. Kept small on purpose, mirroring OVERLAY_BLENDS. */
+export const STROKE_ALPHA_ALIGNS = ['inside', 'center', 'outside'] as const
+export type StrokeAlphaAlign = typeof STROKE_ALPHA_ALIGNS[number]
+/** Coerce an arbitrary stored value to a known align, mirroring `overlayBlendOf`/`booleanOpOf`
+ *  (invalid → 'center'). */
+export function strokeAlphaAlignOf(v: unknown): StrokeAlphaAlign {
+  return (STROKE_ALPHA_ALIGNS as readonly string[]).includes(v as string) ? (v as StrokeAlphaAlign) : 'center'
+}
+/** The band's reach from the alpha EDGE, in px, for a stroke of `widthPx` on the chosen side:
+ *  `outerPx` = how far it extends OUTSIDE the silhouette (built by DILATION), `innerPx` = how far
+ *  INSIDE (built by EROSION). inside = [edge−width, edge], center = [edge−width/2, edge+width/2],
+ *  outside = [edge, edge+width]. Pure + exported so a test can prove the align math and the
+ *  outward growth without a canvas. */
+export function strokeAlphaBand(widthPx: number, align: StrokeAlphaAlign): { outerPx: number; innerPx: number } {
+  const w = Math.max(0, Number.isFinite(widthPx) ? widthPx : 0)
+  if (align === 'inside') return { outerPx: 0, innerPx: w }
+  if (align === 'outside') return { outerPx: w, innerPx: 0 }
+  return { outerPx: w / 2, innerPx: w / 2 }
+}
+
+/** A stroke traced from the layer's OWN rasterised alpha edge — works on ANY layer (image /
+ *  brush / shape), reading the raster silhouette, NOT a vector outline (distinct from the vector
+ *  stroke stack). The band is `width·W` px wide at the edge, placed by `align`, filled with
+ *  `color`. `outside`/`center` grow OUTSIDE the alpha (folded into the offscreen pad via
+ *  `strokeAlphaOutwardPx`). Deterministic: a fixed-count ring dilation, no randomness. */
+export interface StrokeFromAlphaEffect {
+  type: 'stroke_from_alpha'
+  width: number             // stroke width, normalized to canvas width
+  align: StrokeAlphaAlign   // inside | center | outside, relative to the alpha edge
+  color: string             // hex/rgba (alpha allowed) — the stroke colour
+  visible: boolean
+}
+export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect
 
 export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   adjust: { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
@@ -145,6 +179,9 @@ export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   color_overlay: { type: 'color_overlay', color: '#808080', blend: 'multiply', opacity: 1, visible: true },
   // Two contrasting colours across the box at 0°, plainly overlaid — the gradient reads at once.
   gradient_overlay: { type: 'gradient_overlay', from: '#ff5b5b', to: '#4f8ad9', angle: 0, blend: 'normal', opacity: 1, visible: true },
+  // A thin dark stroke straddling the alpha edge — visible the moment it is added; width, align
+  // and colour tune it.
+  stroke_from_alpha: { type: 'stroke_from_alpha', width: 0.006, align: 'center', color: '#111111', visible: true },
 }
 export function defaultPostEffect(type: PostEffect['type']): PostEffect {
   return JSON.parse(JSON.stringify(POST_EFFECT_DEFAULTS[type])) as PostEffect
@@ -169,9 +206,11 @@ export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]
   // Colours (`color`/`from`/`to`) and `blend` are non-numeric, so only the numeric dials clamp.
   color_overlay: { opacity: [0, 1] },
   gradient_overlay: { opacity: [0, 1], angle: [0, 360] },
+  // `color` and `align` are non-numeric, so only `width` clamps (agent whitelist for the two is Task 8).
+  stroke_from_alpha: { width: [0, 0.2] },
 }
 
-const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay'])
+const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha'])
 export const isChainEffect = (e: { type: string }): e is PostEffect => CHAIN_TYPES.has(e.type)
 export const chainActive = (effects?: { type: string; visible?: boolean }[]): boolean =>
   !!effects?.some(e => e.visible !== false && CHAIN_TYPES.has(e.type))
@@ -555,10 +594,84 @@ function passGradientOverlay(ctx: CanvasRenderingContext2D, off: HTMLCanvasEleme
   ctx.restore()
 }
 
+/** Multi-sample ring dilation: draw `src` once at the origin then at a fixed ring of offsets of
+ *  radius `rPx`, so the union grows the silhouette outward by ≈`rPx`. Fixed sample count + phase
+ *  ⇒ deterministic. `rPx ≤ 0` is a plain copy. Mirrors the `useRegionFx` ring-dilate technique. */
+const STROKE_ALPHA_SAMPLES = 24
+function ringDilate(dctx: CanvasRenderingContext2D, src: HTMLCanvasElement, rPx: number): void {
+  dctx.drawImage(src, 0, 0)
+  if (!(rPx > 0)) return
+  for (let i = 0; i < STROKE_ALPHA_SAMPLES; i++) {
+    const a = (i / STROKE_ALPHA_SAMPLES) * Math.PI * 2
+    dctx.drawImage(src, Math.cos(a) * rPx, Math.sin(a) * rPx)
+  }
+}
+
+/** A scratch whose alpha is `src`'s silhouette ERODED inward by `rPx`, via the complement-dilation
+ *  identity erode(A, r) = A \ dilate(¬A, r): grow the exterior inward by `rPx`, then knock it out
+ *  of a copy of `src`. `rPx ≤ 0` is a plain copy of `src`. Deterministic. */
+function erodeSilhouette(src: HTMLCanvasElement, rPx: number): HTMLCanvasElement {
+  const out = cloneCanvas(src)
+  if (!(rPx > 0)) return out
+  const octx = out.getContext('2d')
+  if (!octx) return out
+  // Exterior = an opaque field with the silhouette knocked out.
+  const ext = mkCanvas(src.width, src.height)
+  const ectx = ext.getContext('2d')
+  if (!ectx) return out
+  ectx.fillStyle = '#000000'
+  ectx.fillRect(0, 0, ext.width, ext.height)
+  ectx.globalCompositeOperation = 'destination-out'
+  ectx.drawImage(src, 0, 0)
+  // Grow the exterior inward by rPx.
+  const grown = mkCanvas(src.width, src.height)
+  const gctx = grown.getContext('2d')
+  if (!gctx) return out
+  ringDilate(gctx, ext, rPx)
+  // eroded = src minus the grown exterior.
+  octx.save()
+  octx.setTransform(1, 0, 0, 1, 0, 0)
+  octx.globalCompositeOperation = 'destination-out'
+  octx.drawImage(grown, 0, 0)
+  octx.restore()
+  return out
+}
+
+/** Stroke from alpha: trace a band of `color`, `width·W` px wide, at the layer's OWN rasterised
+ *  alpha edge, on the `align` side. Build the OUTER boundary by dilating the alpha by `outerPx`,
+ *  recolour that dilated silhouette to `color` (source-in), then knock out the alpha ERODED by
+ *  `innerPx` so only the band survives, and composite it onto the offscreen. `outside`/`center`
+ *  paint OUTSIDE the alpha (the pad holds them). Deterministic. */
+function passStrokeFromAlpha(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: StrokeFromAlphaEffect, opts: PassOpts): void {
+  const scale = opts.scale ?? 1
+  const widthPx = Math.max(0, e.width ?? 0) * opts.W * scale
+  if (!(widthPx > 0)) return
+  const { outerPx, innerPx } = strokeAlphaBand(widthPx, strokeAlphaAlignOf(e.align))
+  const band = mkCanvas(off.width, off.height)
+  const bctx = band.getContext('2d')
+  if (!bctx) return
+  // Outer boundary: the alpha dilated outward by outerPx (a plain copy when outerPx is 0).
+  ringDilate(bctx, off, outerPx)
+  // Recolour the dilated silhouette to the stroke colour, keeping its alpha.
+  bctx.save()
+  bctx.setTransform(1, 0, 0, 1, 0, 0)
+  bctx.globalCompositeOperation = 'source-in'
+  bctx.fillStyle = e.color || '#000000'
+  bctx.fillRect(0, 0, band.width, band.height)
+  // Inner boundary: knock the alpha eroded by innerPx out of the fill, leaving the ring band.
+  bctx.globalCompositeOperation = 'destination-out'
+  bctx.drawImage(erodeSilhouette(off, innerPx), 0, 0)
+  bctx.restore()
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.drawImage(band, 0, 0)
+  ctx.restore()
+}
+
 /** The kinds this module owns as 2D passes over a layer/document offscreen. Everything
  *  else in a layer's stack (inner shadow, torn edge, feather, layer blur, drop shadow,
  *  background blur, dof) is applied by the caller at its own structural position. */
-const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay'])
+const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha'])
 
 /**
  * Apply passes in ARRAY ORDER — the per-layer entry point. Order is the caller's, so the
@@ -586,6 +699,7 @@ export function applyPasses(
       case 'inner_glow': passInnerGlow(ctx, off, e as unknown as InnerGlowEffect, opts); break
       case 'color_overlay': passColorOverlay(ctx, off, e as unknown as ColorOverlayEffect, opts); break
       case 'gradient_overlay': passGradientOverlay(ctx, off, e as unknown as GradientOverlayEffect, opts); break
+      case 'stroke_from_alpha': passStrokeFromAlpha(ctx, off, e as unknown as StrokeFromAlphaEffect, opts); break
     }
   }
 }
@@ -624,7 +738,10 @@ export function applyBlurPass(off: HTMLCanvasElement, radiusPx: number): void {
 // (adjust→duotone→gradientMap), before the light/texture passes (bloom→vignette→grain) and
 // the trailing outer glow. A flat/gradient fill over the surface belongs on top of the graded
 // colour but under bloom's bright pass and grain.
-const CHAIN_ORDER = ['inner_glow', 'adjust', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'bloom', 'vignette', 'grain', 'outer_glow']
+// stroke_from_alpha rides just after the overlays: a stroke reads as ON TOP of the graded fill
+// and its colour/gradient overlays, but UNDER the light/texture passes (bloom→vignette→grain) and
+// the trailing outer glow, so bloom can bloom the bright stroke and the glow haloes behind it.
+const CHAIN_ORDER = ['inner_glow', 'adjust', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'bloom', 'vignette', 'grain', 'outer_glow']
 
 /**
  * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type (the first VISIBLE

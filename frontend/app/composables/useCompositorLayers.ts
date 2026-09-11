@@ -1686,6 +1686,34 @@ export function outerGlowOutwardPx(layer: LocalLayer, W: number): number {
 }
 
 /**
+ * How far a layer's ENABLED `stroke_from_alpha` effects paint OUTSIDE the silhouette, logical px —
+ * the MAX outward band reach across the stack (0 with none). An `outside` stroke dilates the alpha
+ * outward by `width·W`, a `center` one by `width·W / 2`, an `inside` one not at all — exactly
+ * `strokeAlphaBand(...).outerPx`, so this reads the SAME arithmetic the pass uses (align respected).
+ *
+ * Applies to ANY layer kind (image included), like `outerGlowOutwardPx`, and is folded into
+ * `silhouettePadPx` beside it (NOT `cornerPinPadPx`, which re-warps): the alpha-traced band grows
+ * OUTSIDE the raster and would be clipped at its edge otherwise. 0 when no stroke_from_alpha is
+ * present (or every one is inside-only), keeping the raster and the identity A/B byte-identical.
+ *
+ * Like the glow pad, this is defensive today: a `stroke_from_alpha` makes `rasterablePasses` false
+ * (it is neither torn edge / feather nor layer blur), so the layer renders through the full-device
+ * offscreen path in `paintLayer`, where the band has the whole canvas to grow into. It costs one
+ * cheap stack scan and returns 0 in the common no-stroke case.
+ */
+export function strokeAlphaOutwardPx(layer: LocalLayer, W: number): number {
+  let out = 0
+  for (const e of effectStackOf(layer as unknown as Parameters<typeof effectStackOf>[0])) {
+    if (e.type !== 'stroke_from_alpha' || e.visible === false) continue
+    const r = e as unknown as { width?: number; align?: unknown }
+    const wid = typeof r.width === 'number' && Number.isFinite(r.width) ? r.width : 0
+    const grow = strokeAlphaBand(Math.max(0, wid) * W, strokeAlphaAlignOf(r.align)).outerPx
+    if (grow > out) out = grow
+  }
+  return out
+}
+
+/**
  * How far a WOBBLED stroke deviates beyond where the same stroke running straight would
  * reach, in the stroke's own STORED units (`wobbleSpecOf` with `unit: 1` — the caller below
  * applies `scale * W` to the whole pad exactly once, as it already does for every other term).
@@ -2183,8 +2211,9 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
       for (const ln of wrappedTextLines(mctx, layer as TextLayer, W)) maxLineWPx = Math.max(maxLineWPx, mctx.measureText(ln || ' ').width)
     }
   }
-  // Grow the raster to hold an outer-glow halo's outward blur (0 with none → byte-identical
-  // raster). Logical px, like the pure helper's own answer. See `outerGlowOutwardPx`.
+  // Grow the raster to hold an outer-glow halo's outward blur AND an alpha-traced stroke's outward
+  // band (each 0 with none → byte-identical raster). Logical px, like the pure helper's own answer;
+  // summed since a layer can carry both. See `outerGlowOutwardPx` / `strokeAlphaOutwardPx`.
   return silhouettePadPxPure({
     kind: layer.kind,
     strokeAlign,
@@ -2195,7 +2224,7 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
     boxHeightPx: box.h,
     maxLineWPx,
     boxWidthPx: box.w,
-  }, s) + outerGlowOutwardPx(layer, W)
+  }, s) + outerGlowOutwardPx(layer, W) + strokeAlphaOutwardPx(layer, W)
 }
 
 // Raster mesh-warp (F3 4b) constants. `RASTER_WARP_EPS` matches `geometryEffects.WARP_EPS`:

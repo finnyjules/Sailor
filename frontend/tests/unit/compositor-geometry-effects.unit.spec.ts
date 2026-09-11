@@ -335,6 +335,7 @@ import {
   layerGeometryEffects,
   geometryOutwardPx,
   outerGlowOutwardPx,
+  strokeAlphaOutwardPx,
   outlinePathData,
   createRectLayer,
   createEllipseLayer,
@@ -527,5 +528,51 @@ describe('useCompositorLayers: outerGlowOutwardPx', () => {
   it('applies to an IMAGE layer too (not gated on canTakeGeometry)', () => {
     const img = createImageLayer('x.png', 1, { effects: [geo('outer_glow', { color: '#fff', radius: 0.02, intensity: 0.8 })] as any })
     expect(outerGlowOutwardPx(img, W)).toBeCloseTo(0.02 * W, 6)
+  })
+})
+
+// F4 Task 3: the silhouette raster grows to hold an alpha-traced stroke's OUTWARD band, respecting
+// align — outside grows by width·W, centre by half, inside not at all. 0 with none ⇒ byte-identical.
+describe('useCompositorLayers: strokeAlphaOutwardPx', () => {
+  const W = 300
+  it('is 0 for a layer with no effects (byte-identity pad preserved)', () => {
+    expect(strokeAlphaOutwardPx(createRectLayer(), W)).toBe(0)
+  })
+  it('is 0 for a layer with only a non-stroke pixel effect', () => {
+    const r = createRectLayer({ effects: [geo('bloom')] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBe(0)
+  })
+  it('is 0 for an INSIDE stroke (band stays within the silhouette)', () => {
+    const r = createRectLayer({ effects: [geo('stroke_from_alpha', { width: 0.05, align: 'inside', color: '#000' })] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBe(0)
+  })
+  it('is HALF width·W for a CENTRE stroke (straddles the edge)', () => {
+    const r = createRectLayer({ effects: [geo('stroke_from_alpha', { width: 0.04, align: 'center', color: '#000' })] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBeCloseTo(0.04 * W / 2, 6)
+  })
+  it('is the full width·W for an OUTSIDE stroke', () => {
+    const r = createRectLayer({ effects: [geo('stroke_from_alpha', { width: 0.03, align: 'outside', color: '#000' })] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBeCloseTo(0.03 * W, 6)
+  })
+  it('treats an invalid align as centre (half width·W)', () => {
+    const r = createRectLayer({ effects: [geo('stroke_from_alpha', { width: 0.04, align: 'nonsense', color: '#000' })] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBeCloseTo(0.04 * W / 2, 6)
+  })
+  it('ignores a hidden stroke', () => {
+    const r = createRectLayer({ effects: [geo('stroke_from_alpha', { width: 0.05, align: 'outside', color: '#000', visible: false })] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBe(0)
+  })
+  it('is the MAX outward reach across several strokes', () => {
+    const r = createRectLayer({
+      effects: [
+        geo('stroke_from_alpha', { width: 0.02, align: 'outside', color: '#000' }),
+        geo('stroke_from_alpha', { width: 0.05, align: 'center', color: '#f00' }), // 0.025·W outward
+      ] as any,
+    })
+    expect(strokeAlphaOutwardPx(r, W)).toBeCloseTo(0.05 * W / 2, 6) // 0.025·W beats 0.02·W
+  })
+  it('applies to an IMAGE layer too (any layer kind, reads the raster alpha)', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('stroke_from_alpha', { width: 0.02, align: 'outside', color: '#000' })] as any })
+    expect(strokeAlphaOutwardPx(img, W)).toBeCloseTo(0.02 * W, 6)
   })
 })
