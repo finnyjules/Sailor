@@ -4483,8 +4483,6 @@ const editToolbarLayer = computed<LocalLayer | null>(() => {
   const only = sel.length === 1 ? sel[0] : null
   return only && only.kind === 'image' ? only : null
 })
-const showEditToolbar = computed(() =>
-  !!editToolbarLayer.value && (editMode.value !== 'none' || isSelectTool.value))
 const wholeModelLabel = computed(() =>
   (WHOLE_IMAGE_MODELS.find(m => m.value === wholeEditModel.value) ?? WHOLE_IMAGE_MODELS[0]!).label)
 function pickWholeModel(v: string) { wholeEditModel.value = v; modelMenuOpen.value = false }
@@ -6925,9 +6923,10 @@ onUnmounted(() => {
         <button class="underline hover:text-white cursor-pointer" @click="exitNodeEdit">Done (Esc)</button>
       </div>
 
-      <!-- Entry to inpaint mode now lives ON the main toolbar (the modes appear
-           there whenever an image is selected — see the toolbar's v-else below),
-           so there is no floating bar over the image. -->
+      <!-- Entry to inpaint mode is the right-click menu (Edit image / Edit a region
+           / Select an object). Only THEN do the inpaint controls take over the main
+           toolbar (see the toolbar's v-else below) — selecting an image alone does
+           nothing to the toolbar, and there is no floating bar over the image. -->
 
       <!-- Edit PROMPT bar: while in inpaint mode the prompt sits just above the
            (swapped) main toolbar. The agent bar is hidden meanwhile, so this
@@ -7041,8 +7040,8 @@ onUnmounted(() => {
             </div>
           </Transition>
         </div>
-        <!-- Select tool — hidden once an image is selected (its modes take over). -->
-        <template v-if="!showEditToolbar">
+        <!-- Select tool — hidden only in inpaint mode (the canvas belongs to SAM/brush). -->
+        <template v-if="editMode === 'none'">
           <div class="w-px h-5 bg-white/10 mx-0.5" />
           <button
             class="flex items-center justify-center size-8 rounded cursor-pointer"
@@ -7061,8 +7060,8 @@ onUnmounted(() => {
           title="Redo (⌘⇧Z)" :disabled="!canRedo" @click="redo">
           <Redo2 class="size-4" />
         </button>
-        <!-- Canvas tools — REPLACED by the inpaint modes once an image is selected. -->
-        <template v-if="!showEditToolbar">
+        <!-- Canvas tools — REPLACED by the inpaint controls only in inpaint mode. -->
+        <template v-if="editMode === 'none'">
         <div class="w-px h-5 bg-white/10 mx-0.5" />
         <button class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/80 cursor-pointer" data-testid="add-text" title="Add text" @click="addText">
           <Type class="size-4" />
@@ -7252,12 +7251,10 @@ onUnmounted(() => {
             </div>
           </template>
 
-          <!-- Close only while actively editing; at plain selection you just deselect. -->
-          <template v-if="editMode !== 'none'">
-            <div class="w-px h-5 bg-white/10 mx-0.5" />
-            <button type="button" class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/60 cursor-pointer"
-              title="Done (Esc)" @click="editImageCancel(); editRegionCancel()"><X class="size-4" /></button>
-          </template>
+          <!-- Close inpaint mode (always shown here — this block only renders while editing). -->
+          <div class="w-px h-5 bg-white/10 mx-0.5" />
+          <button type="button" class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/60 cursor-pointer"
+            title="Done (Esc)" @click="editImageCancel(); editRegionCancel()"><X class="size-4" /></button>
         </template>
         <input ref="imageInputRef" type="file" accept="image/*" class="hidden" @change="onAddImageFile" />
         <input ref="brushFillInputRef" type="file" accept="image/*" class="hidden" @change="onBrushFillImageFile" />
