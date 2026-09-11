@@ -38,7 +38,7 @@ function clipsDir(): string | null {
   return input ? path.join(input, 'sailor_clips') : null
 }
 const PROMPT_SUFFIX = (key: 'green' | 'blue') =>
-  `, plain flat ${key} background, no shadows, camera locked, gentle motion`
+  `, on a solid ${key} screen background (uniform flat ${key === 'green' ? '#00FF00' : '#0000FF'} chroma key), evenly lit, no shadows, no gradient, camera locked, gentle motion`
 
 function py(args: string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
