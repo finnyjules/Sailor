@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { FAL_FILL_REMOVE_PROMPT } from '../../server/utils/falFill'
 import {
   removeBgInput,
   kontextInput,
@@ -123,6 +124,11 @@ describe('fluxFillDevInput', () => {
 
   it('maps the 30-scale Replicate guidance down to fal CFG: 30 -> 3.75', () => {
     expect(fluxFillDevInput('', 'i', 'm', 0, 30, 28).guidance_scale).toBe(3.75)
+  })
+  it('never sends fal an empty prompt — the Remove button and outpaint-fit send one', () => {
+    expect(fluxFillDevInput('', 'i', 'm', 0, 30, 28).prompt).toBe(FAL_FILL_REMOVE_PROMPT)
+    expect(fluxFillDevInput('   ', 'i', 'm', 0, 30, 28).prompt).toBe(FAL_FILL_REMOVE_PROMPT)
+    expect(fluxFillDevInput('a red apple', 'i', 'm', 0, 30, 28).prompt).toBe('a red apple')
   })
 
   it('clamps a high guidance to fal\'s max of 10: 80 -> 10', () => {

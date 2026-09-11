@@ -77,7 +77,7 @@ export async function ensureFalLoraWeights(sidecarPath: string, meta: LoraSideca
 
 async function migrate(sidecarPath: string, meta: LoraSidecar): Promise<string> {
   const tarUrl = String(meta?.replicate_url ?? '').trim()
-  if (!/^https?:\/\//.test(tarUrl)) {
+  if (!/^https:\/\//.test(tarUrl)) {
     throw new Error('This LoRA has no trained weights to run (no replicate_url on its sidecar).')
   }
 
@@ -87,7 +87,10 @@ async function migrate(sidecarPath: string, meta: LoraSidecar): Promise<string> 
 
   try {
     // 1. Stream the tar to disk — buffering 330 MB would be pointless here.
-    const res = await fetch(tarUrl)
+    // Bounded like the Python step: a stalled replicate.delivery connection must not
+    // hang this request forever — the in-flight memo would then pin every later
+    // generation of this LoRA to a promise that never settles.
+    const res = await fetch(tarUrl, { signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS) })
     if (!res.ok || !res.body) throw new Error(`Could not download the trained weights (${res.status})`)
     await pipeline(Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]), createWriteStream(tarPath))
 

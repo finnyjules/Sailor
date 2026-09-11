@@ -6,6 +6,7 @@
  * to each fal app without spinning up a Nitro event.
  */
 import { falImageSize } from './falImageSize'
+import { falFillPrompt } from './falFill'
 
 export interface FalCall {
   app: string
@@ -123,7 +124,10 @@ export function fluxFillDevInput(
 ): Record<string, unknown> {
   const guidance_scale = Math.max(1, Math.min(10, guidance / 8))
   return {
-    prompt,
+    // fal 400s on an empty prompt ("Prompt is required") where Replicate's fill-dev
+    // tolerated it, and the Remove button / outpaint-fit send '' at this tier — the pro
+    // tier already routes through falFillPrompt for exactly this reason.
+    prompt: falFillPrompt(prompt),
     image_url: image,
     mask_url: mask,
     num_inference_steps: steps,
