@@ -183,7 +183,39 @@ export interface ZoomBlurEffect {
   amount: number      // 0..1 — radiating strength
   visible: boolean
 }
-export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect | DirectionalBlurEffect | RadialBlurEffect | ZoomBlurEffect
+/** Levels: remap the tonal range per channel. `black`/`white` (0..1) set the input range mapped
+ *  to full black / full white; `gamma` (0.1..5) bends the midtones (>1 lightens, <1 darkens). RGB
+ *  only, alpha untouched (the op is clipped to the layer). Identity at black 0 / white 1 / gamma 1.
+ *  Deterministic. */
+export interface LevelsEffect {
+  type: 'levels'
+  black: number       // 0..1 — input level mapped to output 0
+  white: number       // 0..1 — input level mapped to output 255
+  gamma: number       // 0.1..5 — midtone bend (1 = neutral)
+  visible: boolean
+}
+/** Posterise: quantise each channel to `levels` evenly-spaced steps (2..32), flattening the
+ *  gradients into bands. RGB only, alpha untouched. Deterministic. */
+export interface PosteriseEffect {
+  type: 'posterise'
+  levels: number      // 2..32 — steps per channel (integer; rounded in the pass)
+  visible: boolean
+}
+/** Threshold: drive every pixel to black or white by whether its luminance clears `cutoff`
+ *  (0..1). RGB only, alpha untouched. Deterministic. */
+export interface ThresholdEffect {
+  type: 'threshold'
+  cutoff: number      // 0..1 — luminance split point
+  visible: boolean
+}
+/** Invert: mix each channel toward its inverse (255−v) by `amount` — 0 = off, 1 = full invert,
+ *  0.5 = the midpoint. RGB only, alpha untouched. Deterministic. */
+export interface InvertEffect {
+  type: 'invert'
+  amount: number      // 0..1 — how far toward the inverted colour
+  visible: boolean
+}
+export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect | DirectionalBlurEffect | RadialBlurEffect | ZoomBlurEffect | LevelsEffect | PosteriseEffect | ThresholdEffect | InvertEffect
 
 export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   adjust: { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
@@ -217,6 +249,15 @@ export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   // A spin / zoom about the centre at a visible strength; the centre + amount tune each.
   radial_blur: { type: 'radial_blur', centerX: 0.5, centerY: 0.5, amount: 0.3, visible: true },
   zoom_blur: { type: 'zoom_blur', centerX: 0.5, centerY: 0.5, amount: 0.3, visible: true },
+  // Identity by default (black 0 / white 1 / gamma 1) — the dials do the work once the user
+  // touches them; a levels effect added at rest changes nothing.
+  levels: { type: 'levels', black: 0, white: 1, gamma: 1, visible: true },
+  // Six steps — plainly banded the moment it is added.
+  posterise: { type: 'posterise', levels: 6, visible: true },
+  // A mid split — a stark black/white the moment it is added.
+  threshold: { type: 'threshold', cutoff: 0.5, visible: true },
+  // Full invert — visibly flips the colours the moment it is added; amount tunes it.
+  invert: { type: 'invert', amount: 1, visible: true },
 }
 export function defaultPostEffect(type: PostEffect['type']): PostEffect {
   return JSON.parse(JSON.stringify(POST_EFFECT_DEFAULTS[type])) as PostEffect
@@ -248,9 +289,15 @@ export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]
   directional_blur: { angle: [0, 360], distance: [0, 0.2] },
   radial_blur: { centerX: [0, 1], centerY: [0, 1], amount: [0, 1] },
   zoom_blur: { centerX: [0, 1], centerY: [0, 1], amount: [0, 1] },
+  // Every tone-op param is numeric, so the generic sanitizer drives all four fully — no Task-8
+  // whitelist is needed for this family. `levels` is an integer step count (rounded in the pass).
+  levels: { black: [0, 1], white: [0, 1], gamma: [0.1, 5] },
+  posterise: { levels: [2, 32] },
+  threshold: { cutoff: [0, 1] },
+  invert: { amount: [0, 1] },
 }
 
-const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur'])
+const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert'])
 export const isChainEffect = (e: { type: string }): e is PostEffect => CHAIN_TYPES.has(e.type)
 export const chainActive = (effects?: { type: string; visible?: boolean }[]): boolean =>
   !!effects?.some(e => e.visible !== false && CHAIN_TYPES.has(e.type))
@@ -367,6 +414,71 @@ export function gradientMapInPlace(
   }
 }
 
+/** Levels: remap each RGB channel through a black/white/gamma curve, alpha untouched. `black`
+ *  and `white` (0..1) set the input window mapped to output 0..255; `gamma` (0.1..5) bends the
+ *  midtones (>1 lightens). Builds a 256-entry LUT once, then maps the three colour bytes of every
+ *  pixel; the fourth byte (alpha) is never written, so the op stays clipped to the layer. Identity
+ *  (black 0 / white 1 / gamma 1) early-returns unchanged. */
+export function levelsInPlace(
+  data: Uint8ClampedArray,
+  { black, white, gamma }: { black: number; white: number; gamma: number },
+): void {
+  const b = clamp01(black), w = clamp01(white), g = clamp(gamma, 0.1, 5)
+  if (b === 0 && w === 1 && g === 1) return
+  const denom = Math.max(1e-6, w - b)
+  const invG = 1 / g
+  const lut = new Uint8ClampedArray(256)
+  for (let i = 0; i < 256; i++) {
+    lut[i] = Math.round(Math.pow(clamp01((i / 255 - b) / denom), invG) * 255)
+  }
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = lut[data[i]!]!
+    data[i + 1] = lut[data[i + 1]!]!
+    data[i + 2] = lut[data[i + 2]!]!
+  }
+}
+
+/** Posterise: quantise each RGB channel to `levels` (2..32) evenly-spaced steps via a LUT, alpha
+ *  untouched. Exactly `levels` distinct output values are possible per channel. */
+export function posteriseInPlace(data: Uint8ClampedArray, levels: number): void {
+  const n = Math.max(2, Math.min(32, Math.round(Number.isFinite(levels) ? levels : 6)))
+  const steps = n - 1
+  const lut = new Uint8ClampedArray(256)
+  for (let i = 0; i < 256; i++) {
+    lut[i] = Math.round((Math.round((i / 255) * steps) / steps) * 255)
+  }
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = lut[data[i]!]!
+    data[i + 1] = lut[data[i + 1]!]!
+    data[i + 2] = lut[data[i + 2]!]!
+  }
+}
+
+/** Threshold: set each pixel to black or white by whether its luminance clears `cutoff` (0..1),
+ *  alpha untouched. Every RGB byte becomes 0 or 255. */
+export function thresholdInPlace(data: Uint8ClampedArray, cutoff: number): void {
+  const t = clamp01(cutoff) * 255
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
+    const v = lum >= t ? 255 : 0
+    data[i] = v
+    data[i + 1] = v
+    data[i + 2] = v
+  }
+}
+
+/** Invert: lerp each RGB channel toward its inverse (255−v) by `amount` (0..1), alpha untouched.
+ *  amount 0 early-returns unchanged; amount 1 is a full invert; 0.5 lands on the 127.5 midpoint. */
+export function invertInPlace(data: Uint8ClampedArray, amount: number): void {
+  const a = clamp01(amount)
+  if (a === 0) return
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = data[i]! + (255 - 2 * data[i]!) * a
+    data[i + 1] = data[i + 1]! + (255 - 2 * data[i + 1]!) * a
+    data[i + 2] = data[i + 2]! + (255 - 2 * data[i + 2]!) * a
+  }
+}
+
 /** Radial-gradient stops (fractions of the half-diagonal) for a vignette.
  *  softness 0 still keeps a minimal ramp so the edge never bands. */
 export function vignetteStops(size: number, softness: number): { inner: number; outer: number } {
@@ -436,6 +548,46 @@ function passGradientMap(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, 
   if (!(e.mix > 0 && e.stops.length)) return
   const img = ctx.getImageData(0, 0, off.width, off.height)
   gradientMapInPlace(img.data, e.stops, e.contrast, e.mix)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.putImageData(img, 0, 0)
+  ctx.restore()
+}
+
+function passLevels(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: LevelsEffect, _opts: PassOpts): void {
+  const black = clamp01(e.black ?? 0), white = clamp01(e.white ?? 1), gamma = clamp(e.gamma ?? 1, 0.1, 5)
+  if (black === 0 && white === 1 && gamma === 1) return // identity — nothing to do
+  const img = ctx.getImageData(0, 0, off.width, off.height)
+  levelsInPlace(img.data, { black, white, gamma })
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.putImageData(img, 0, 0)
+  ctx.restore()
+}
+
+function passPosterise(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: PosteriseEffect, _opts: PassOpts): void {
+  const img = ctx.getImageData(0, 0, off.width, off.height)
+  posteriseInPlace(img.data, e.levels ?? 6)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.putImageData(img, 0, 0)
+  ctx.restore()
+}
+
+function passThreshold(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: ThresholdEffect, _opts: PassOpts): void {
+  const img = ctx.getImageData(0, 0, off.width, off.height)
+  thresholdInPlace(img.data, e.cutoff ?? 0.5)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.putImageData(img, 0, 0)
+  ctx.restore()
+}
+
+function passInvert(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: InvertEffect, _opts: PassOpts): void {
+  const a = clamp01(e.amount ?? 1)
+  if (!(a > 0)) return // amount 0 = identity
+  const img = ctx.getImageData(0, 0, off.width, off.height)
+  invertInPlace(img.data, a)
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.putImageData(img, 0, 0)
@@ -824,7 +976,7 @@ function passZoomBlur(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: 
 /** The kinds this module owns as 2D passes over a layer/document offscreen. Everything
  *  else in a layer's stack (inner shadow, torn edge, feather, layer blur, drop shadow,
  *  background blur, dof) is applied by the caller at its own structural position. */
-const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur'])
+const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert'])
 
 /**
  * Apply passes in ARRAY ORDER — the per-layer entry point. Order is the caller's, so the
@@ -856,6 +1008,10 @@ export function applyPasses(
       case 'directional_blur': passDirectionalBlur(ctx, off, e as unknown as DirectionalBlurEffect, opts); break
       case 'radial_blur': passRadialBlur(ctx, off, e as unknown as RadialBlurEffect, opts); break
       case 'zoom_blur': passZoomBlur(ctx, off, e as unknown as ZoomBlurEffect, opts); break
+      case 'levels': passLevels(ctx, off, e as unknown as LevelsEffect, opts); break
+      case 'posterise': passPosterise(ctx, off, e as unknown as PosteriseEffect, opts); break
+      case 'threshold': passThreshold(ctx, off, e as unknown as ThresholdEffect, opts); break
+      case 'invert': passInvert(ctx, off, e as unknown as InvertEffect, opts); break
     }
   }
 }
@@ -900,7 +1056,12 @@ export function applyBlurPass(off: HTMLCanvasElement, radiusPx: number): void {
 // The motion blurs (directional→radial→zoom) sit just after the stroke and BEFORE bloom: the
 // layer's full colour/overlay/stroke look is settled, then smeared, so bloom blooms the smeared
 // highlights and grain/vignette dress the moved image — a blur after grain would drag the texture.
-const CHAIN_ORDER = ['inner_glow', 'adjust', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'bloom', 'vignette', 'grain', 'outer_glow']
+// The tone ops (levels → posterise → threshold → invert) sit in the colour-grade region, right
+// after `adjust` and before `duotone`/`gradientMap`: adjust sets brightness/contrast, the tone ops
+// then reshape the luminance curve (remap / band / clip / flip), and the colour maps read that
+// reshaped luminance to place colour. Grouped and ordered levels→posterise→threshold→invert, the
+// gentlest tonal move to the harshest.
+const CHAIN_ORDER = ['inner_glow', 'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'bloom', 'vignette', 'grain', 'outer_glow']
 
 /**
  * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type (the first VISIBLE

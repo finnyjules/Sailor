@@ -8178,6 +8178,62 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+
+          <!-- Levels: remap the tonal range. Black / white (input window, shown as percentages)
+               and gamma (midtone bend) are all read by passLevels — no dead control. -->
+          <div v-else-if="activeEffect!.type === 'levels'" class="grid grid-cols-3 gap-1.5">
+            <div>
+              <div class="panel-sublabel mb-1">Black</div>
+              <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).black ?? 0) * 100)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ black: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+            </div>
+            <div>
+              <div class="panel-sublabel mb-1">White</div>
+              <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).white ?? 1) * 100)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ white: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+            </div>
+            <div>
+              <div class="panel-sublabel mb-1">Gamma</div>
+              <input v-scrubnum type="number" min="0.1" max="5" step="0.05" :value="Math.round(((activeEffect as any).gamma ?? 1) * 100) / 100"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ gamma: Math.min(5, Math.max(0.1, parseFloat(($event.target as HTMLInputElement).value) || 1)) })" />
+            </div>
+          </div>
+
+          <!-- Posterise: quantise each channel to a number of steps. Levels is read by
+               passPosterise — no dead control. -->
+          <div v-else-if="activeEffect!.type === 'posterise'" class="space-y-1.5">
+            <div>
+              <div class="panel-sublabel mb-1">Levels</div>
+              <input v-scrubnum type="number" min="2" max="32" step="1" :value="Math.round((activeEffect as any).levels ?? 6)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ levels: Math.min(32, Math.max(2, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 6))) })" />
+            </div>
+          </div>
+
+          <!-- Threshold: split every pixel to black or white by luminance. Cutoff (shown as a
+               percentage) is read by passThreshold — no dead control. -->
+          <div v-else-if="activeEffect!.type === 'threshold'" class="space-y-1.5">
+            <div>
+              <div class="panel-sublabel mb-1">Cutoff</div>
+              <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).cutoff ?? 0.5) * 100)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ cutoff: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+            </div>
+          </div>
+
+          <!-- Invert: mix toward the inverted colour. Amount (shown as a percentage) is read by
+               passInvert — no dead control. -->
+          <div v-else-if="activeEffect!.type === 'invert'" class="space-y-1.5">
+            <div>
+              <div class="panel-sublabel mb-1">Amount</div>
+              <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).amount ?? 1) * 100)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ amount: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+            </div>
+          </div>
         </div>
       </template>
 
