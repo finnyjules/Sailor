@@ -1127,3 +1127,241 @@ test.describe('Frame geometry effects — shatter (F3 Task 6)', () => {
     await expect(page.locator('[data-testid="add-effect-item"][data-kind="shatter"]')).toBeDisabled()
   })
 })
+
+/**
+ * F4 — the six new pixel-region layer-style families, end to end.
+ *
+ * The 14 F4 kinds are deterministic PASSES over the rasterised layer offscreen (extending
+ * postEffects.ts), NOT geometry-outline transforms like F2/F3. For each family this proves:
+ *   • a real pixel change when the effect is applied (a `pixelDelta` diff, never a synthetic
+ *     event — see [[synthetic-pointer-events-prove-nothing]]);
+ *   • byte-identity when the effect is present-but-HIDDEN (`visible:false` is filtered out of the
+ *     render stack → the imperative fast path → identical bytes — the brief's "or absent" form);
+ *   • the effect at its NEUTRAL value (glow intensity 0 / overlay opacity 0 / blur distance|amount
+ *     0 / levels identity / invert amount 0 / edge amount 0) is a no-op within render noise.
+ *
+ * WHY the neutral-value check is a tolerance, not strict `toBe`: a VISIBLE effect stays in the
+ * layer's render stack even at a neutral value (the stack filters only `visible:false`), so it
+ * routes the layer through the offscreen pass path — where the pass early-returns (a true no-op at
+ * the PASS level, which the unit suites assert byte-identically) but the extra offscreen
+ * round-trip can re-quantize edge AA by a level or two versus the bare imperative fast path. The
+ * STRICT byte-identity guarantee is therefore asserted on the hidden form (fast path, same as
+ * bare); the visible-neutral form is asserted within a small tolerance. LEAD: on the fresh
+ * preview, if a visible-neutral render comes back max==0, these can be tightened to strict `toBe`.
+ *
+ * All layers here are vector rects — F4 passes are synchronous and deterministic (no paper.js
+ * warm, no /view raster wobble), so `stackPixels` strict byte-identity is safe (unlike the
+ * image-layer suites that need `stableStack`). Byte-identity is checked BEFORE any active pass has
+ * run, so the padded-offscreen residue the long-shadow slice flagged on a round-trip cannot taint
+ * it.
+ */
+
+/** Seed a single sharp opaque rect (0.6·W, centred at 0.5 ⇒ box edges x∈{0.2,0.8}) in `fill`,
+ *  with an empty effect stack. Mirrors `seedRectFill` but takes a colour so the tone ops have a
+ *  mid-grey to move (levels/posterise/invert leave pure white unmoved). */
+async function f4Seed(page: Page, fill = '#ffffff'): Promise<void> {
+  await addRect(page)
+  await page.evaluate((f) => {
+    const ls = (window as any).__compositorLayers()
+    ls[0].w = 0.6; ls[0].h = 0.6; ls[0].radius = 0; ls[0].fill = f; ls[0].effects = []
+    ;(window as any).__compositorSetLayers(ls)
+  }, fill)
+}
+
+const setEffects = (page: Page, effects: unknown[]) => page.evaluate((fx) => {
+  const ls = (window as any).__compositorLayers()
+  ls[0].effects = fx
+  ;(window as any).__compositorSetLayers(ls)
+}, effects)
+
+/** Assert `effects` (all visible) move the pixels vs `bare`, and return the changed render. */
+async function expectChanges(page: Page, bare: string, effects: unknown[], minChanged = 200, minMax = 30): Promise<string> {
+  await setEffects(page, effects)
+  const after = await stackPixels(page)
+  expect(after).not.toBe(bare)
+  const d = await pixelDelta(page, bare, after)
+  expect(d.sizeMismatch).toBe(false)
+  expect(d.changed).toBeGreaterThan(minChanged)
+  expect(d.max).toBeGreaterThan(minMax) // a real change, far past any render noise
+  return after
+}
+
+/** Assert the same effect(s) with `visible:false` render byte-identical to the clean layer. */
+async function expectHiddenIdentical(page: Page, bare: string, effects: Array<Record<string, unknown>>): Promise<void> {
+  await setEffects(page, effects.map(e => ({ ...e, visible: false })))
+  expect(await stackPixels(page)).toBe(bare)
+}
+
+/** Assert a VISIBLE effect at its neutral value is a no-op within render noise (see the block
+ *  comment for why this is a tolerance, not strict byte-identity). */
+const F4_NOOP_MAX = 8
+async function expectNeutralNoop(page: Page, bare: string, neutral: unknown[]): Promise<void> {
+  await setEffects(page, neutral)
+  const d = await pixelDelta(page, bare, await stackPixels(page))
+  expect(d.sizeMismatch).toBe(false)
+  expect(d.max).toBeLessThanOrEqual(F4_NOOP_MAX)
+}
+
+test.describe('Frame layer styles — F4 pixel passes', () => {
+  // FAMILY 1 — outer glow + inner glow.
+  test('outer_glow & inner_glow change pixels; hidden byte-identical, neutral (intensity 0) a no-op', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    const bare = await stackPixels(page)
+
+    // byte-identity / neutral FIRST (before any offscreen pass has run).
+    await expectHiddenIdentical(page, bare, [{ id: 'og', type: 'outer_glow', color: '#00e5ff', radius: 0.05, intensity: 1.5 }])
+    await expectNeutralNoop(page, bare, [{ id: 'og', type: 'outer_glow', color: '#00e5ff', radius: 0.05, intensity: 0, visible: true }])
+
+    // outer glow: a coloured halo behind the shape.
+    await expectChanges(page, bare, [{ id: 'og', type: 'outer_glow', color: '#00e5ff', radius: 0.05, intensity: 1.5, visible: true }])
+    // inner glow: a coloured band hugging the inside edge.
+    await expectChanges(page, bare, [{ id: 'ig', type: 'inner_glow', color: '#00e5ff', radius: 0.06, intensity: 1.5, visible: true }])
+    await expectNeutralNoop(page, bare, [{ id: 'ig', type: 'inner_glow', color: '#00e5ff', radius: 0.06, intensity: 0, visible: true }])
+  })
+
+  // FAMILY 2 — colour overlay + gradient overlay (blend mode + opacity).
+  test('color_overlay & gradient_overlay change pixels; hidden byte-identical, neutral (opacity 0) a no-op', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    const bare = await stackPixels(page)
+
+    await expectHiddenIdentical(page, bare, [{ id: 'co', type: 'color_overlay', color: '#808080', blend: 'multiply', opacity: 1 }])
+    await expectNeutralNoop(page, bare, [{ id: 'co', type: 'color_overlay', color: '#808080', blend: 'multiply', opacity: 0, visible: true }])
+
+    // A grey multiplied over the white rect visibly darkens the whole fill.
+    await expectChanges(page, bare, [{ id: 'co', type: 'color_overlay', color: '#808080', blend: 'multiply', opacity: 1, visible: true }])
+    // A two-colour gradient plainly overlaid, clipped to the rect's alpha.
+    await expectChanges(page, bare, [{ id: 'go', type: 'gradient_overlay', from: '#ff5b5b', to: '#4f8ad9', angle: 0, blend: 'normal', opacity: 1, visible: true }])
+    await expectNeutralNoop(page, bare, [{ id: 'go', type: 'gradient_overlay', from: '#ff5b5b', to: '#4f8ad9', angle: 0, blend: 'normal', opacity: 0, visible: true }])
+  })
+
+  // FAMILY 3 — stroke from alpha (width, align, colour); inside + outside align both apply.
+  test('stroke_from_alpha inside & outside both change pixels; outside grows past the box, inside does not; neutral (width 0) a no-op', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    const bare = await stackPixels(page)
+    const bareExtent = await inkExtent(page)
+
+    await expectHiddenIdentical(page, bare, [{ id: 'sk', type: 'stroke_from_alpha', width: 0.02, align: 'center', color: '#ff0000' }])
+    await expectNeutralNoop(page, bare, [{ id: 'sk', type: 'stroke_from_alpha', width: 0, align: 'center', color: '#ff0000', visible: true }])
+
+    // Inside align: a red band on the inner edge — a real change that stays WITHIN the box.
+    await expectChanges(page, bare, [{ id: 'sk', type: 'stroke_from_alpha', width: 0.03, align: 'inside', color: '#ff0000', visible: true }])
+    const insideExtent = await inkExtent(page)
+    expect(insideExtent.maxX).toBeLessThan(bareExtent.maxX + 0.01) // inside-only: no outward growth
+
+    // Outside align: a red band on the outer edge — grows the silhouette OUTSIDE the box.
+    await expectChanges(page, bare, [{ id: 'sk', type: 'stroke_from_alpha', width: 0.03, align: 'outside', color: '#ff0000', visible: true }])
+    const outsideExtent = await inkExtent(page)
+    expect(outsideExtent.maxX).toBeGreaterThan(bareExtent.maxX + 0.01) // outside: reaches past the box edge
+  })
+
+  // FAMILY 4 — directional, radial, zoom blur.
+  test('directional/radial/zoom blur each change pixels; hidden byte-identical, neutral (distance|amount 0) a no-op', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    const bare = await stackPixels(page)
+
+    await expectHiddenIdentical(page, bare, [{ id: 'db', type: 'directional_blur', angle: 0, distance: 0.06 }])
+    await expectNeutralNoop(page, bare, [{ id: 'db', type: 'directional_blur', angle: 0, distance: 0, visible: true }])
+    await expectChanges(page, bare, [{ id: 'db', type: 'directional_blur', angle: 0, distance: 0.06, visible: true }])
+
+    await expectHiddenIdentical(page, bare, [{ id: 'rb', type: 'radial_blur', centerX: 0.5, centerY: 0.5, amount: 0.6 }])
+    await expectNeutralNoop(page, bare, [{ id: 'rb', type: 'radial_blur', centerX: 0.5, centerY: 0.5, amount: 0, visible: true }])
+    await expectChanges(page, bare, [{ id: 'rb', type: 'radial_blur', centerX: 0.5, centerY: 0.5, amount: 0.6, visible: true }])
+
+    await expectHiddenIdentical(page, bare, [{ id: 'zb', type: 'zoom_blur', centerX: 0.5, centerY: 0.5, amount: 0.6 }])
+    await expectNeutralNoop(page, bare, [{ id: 'zb', type: 'zoom_blur', centerX: 0.5, centerY: 0.5, amount: 0, visible: true }])
+    await expectChanges(page, bare, [{ id: 'zb', type: 'zoom_blur', centerX: 0.5, centerY: 0.5, amount: 0.6, visible: true }])
+  })
+
+  // FAMILY 5 — levels, posterise, threshold, invert (on a mid-grey rect so each op moves it).
+  test('levels/posterise/threshold/invert each change pixels; hidden byte-identical, levels-identity & invert-0 no-ops', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#4d4d4d') // mid grey (77) — each tone op moves it clearly
+    const bare = await stackPixels(page)
+
+    // levels: identity default is a clean pass-level no-op AND we assert it within tolerance
+    // (routes through the offscreen), then a real gamma pull darkens the grey.
+    await expectHiddenIdentical(page, bare, [{ id: 'lv', type: 'levels', black: 0, white: 1, gamma: 0.4 }])
+    await expectNeutralNoop(page, bare, [{ id: 'lv', type: 'levels', black: 0, white: 1, gamma: 1, visible: true }]) // identity
+    await expectChanges(page, bare, [{ id: 'lv', type: 'levels', black: 0, white: 1, gamma: 0.4, visible: true }])
+
+    // posterise: no clean neutral value → byte-identity via the hidden form only.
+    await expectHiddenIdentical(page, bare, [{ id: 'po', type: 'posterise', levels: 2 }])
+    await expectChanges(page, bare, [{ id: 'po', type: 'posterise', levels: 2, visible: true }])
+
+    // threshold: no clean neutral value → hidden form only; 77 < 0.5 cutoff ⇒ snaps to black.
+    await expectHiddenIdentical(page, bare, [{ id: 'th', type: 'threshold', cutoff: 0.5 }])
+    await expectChanges(page, bare, [{ id: 'th', type: 'threshold', cutoff: 0.5, visible: true }])
+
+    // invert: amount 0 is a clean neutral; amount 1 flips 77→178.
+    await expectHiddenIdentical(page, bare, [{ id: 'iv', type: 'invert', amount: 1 }])
+    await expectNeutralNoop(page, bare, [{ id: 'iv', type: 'invert', amount: 0, visible: true }])
+    await expectChanges(page, bare, [{ id: 'iv', type: 'invert', amount: 1, visible: true }])
+  })
+
+  // FAMILY 6 — rough edge + ink bleed (seeded edge kinds); prove DETERMINISM.
+  test('rough_edge & ink_bleed change pixels, are deterministic per seed, and no-op at amount 0', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    const bare = await stackPixels(page)
+
+    await expectHiddenIdentical(page, bare, [{ id: 're', type: 'rough_edge', amount: 0.6, detail: 8, seed: 5 }])
+    await expectNeutralNoop(page, bare, [{ id: 're', type: 'rough_edge', amount: 0, detail: 8, seed: 5, visible: true }])
+
+    // rough edge: a seeded jitter of the alpha boundary — a real change.
+    const rough5 = await expectChanges(page, bare, [{ id: 're', type: 'rough_edge', amount: 0.6, detail: 8, seed: 5, visible: true }])
+    // DETERMINISTIC: clear, then re-apply the SAME seed ⇒ byte-identical to the first render.
+    await setEffects(page, [])
+    await stackPixels(page)
+    await setEffects(page, [{ id: 're', type: 'rough_edge', amount: 0.6, detail: 8, seed: 5, visible: true }])
+    expect(await stackPixels(page)).toBe(rough5)
+    // A DIFFERENT seed ⇒ a different silhouette (the seed genuinely drives the noise).
+    await setEffects(page, [{ id: 're', type: 'rough_edge', amount: 0.6, detail: 8, seed: 99, visible: true }])
+    expect(await stackPixels(page)).not.toBe(rough5)
+
+    // ink bleed: a seeded outward spread — a real change, deterministic per seed.
+    await expectHiddenIdentical(page, bare, [{ id: 'ib', type: 'ink_bleed', amount: 0.5, seed: 3, softness: 0.3 }])
+    await expectNeutralNoop(page, bare, [{ id: 'ib', type: 'ink_bleed', amount: 0, seed: 3, softness: 0.3, visible: true }])
+    const bleed3 = await expectChanges(page, bare, [{ id: 'ib', type: 'ink_bleed', amount: 0.5, seed: 3, softness: 0.3, visible: true }])
+    await setEffects(page, [])
+    await stackPixels(page)
+    await setEffects(page, [{ id: 'ib', type: 'ink_bleed', amount: 0.5, seed: 3, softness: 0.3, visible: true }])
+    expect(await stackPixels(page)).toBe(bleed3)
+    await setEffects(page, [{ id: 'ib', type: 'ink_bleed', amount: 0.5, seed: 42, softness: 0.3, visible: true }])
+    expect(await stackPixels(page)).not.toBe(bleed3)
+  })
+
+  // The pad fold — an OUTER-growing kind on a layer whose box raster edge it crosses is NOT
+  // clipped there. A centred 0.6 rect has box edges at x∈{0.2,0.8}; outer glow and an outside
+  // stroke must reach OUTWARD past those edges (the offscreen pad grows to hold them), where a
+  // too-small pad would clip the growth back to the box. Byte-identity (pad 0 when absent) is
+  // checked first, on the clean fast path.
+  test('an outer-growing kind crosses the box raster edge without being clipped (pad fold)', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    const bare = await stackPixels(page)
+    const bareExtent = await inkExtent(page)
+    expect(bareExtent.any).toBe(true)
+
+    // Pad contributes 0 when the grower is absent/hidden ⇒ byte-identical to the fast path.
+    await expectHiddenIdentical(page, bare, [{ id: 'og', type: 'outer_glow', color: '#00e5ff', radius: 0.06, intensity: 2 }])
+
+    // Outer glow: a strong halo must extend OUTWARD past BOTH box edges (not clipped at 0.2/0.8).
+    await setEffects(page, [{ id: 'og', type: 'outer_glow', color: '#00e5ff', radius: 0.06, intensity: 2, visible: true }])
+    await stackPixels(page)
+    const glow = await inkExtent(page)
+    // eslint-disable-next-line no-console
+    console.log('[F4 pad] bare maxX=%s glow maxX=%s minX=%s', bareExtent.maxX.toFixed(3), glow.maxX.toFixed(3), glow.minX.toFixed(3))
+    expect(glow.maxX).toBeGreaterThan(bareExtent.maxX + 0.01) // grew rightward past the box edge
+    expect(glow.minX).toBeLessThan(bareExtent.minX - 0.01)    // and leftward — the pad held both
+
+    // Outside stroke: an alpha-edge band on the OUTSIDE also grows past the box edge.
+    await setEffects(page, [{ id: 'sk', type: 'stroke_from_alpha', width: 0.03, align: 'outside', color: '#ff0000', visible: true }])
+    await stackPixels(page)
+    const stroke = await inkExtent(page)
+    expect(stroke.maxX).toBeGreaterThan(bareExtent.maxX + 0.01)
+  })
+})
