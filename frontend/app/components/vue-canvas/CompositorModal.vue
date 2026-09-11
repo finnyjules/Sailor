@@ -2072,7 +2072,7 @@ function reorderLayerEffect(layerId: string, fromId: string, toId: string) {
 
 // ── the add-effect menu, anchored to the clicked layer row ─────────────────────────────
 const fxMenuLayerId = ref<string | null>(null)
-const fxMenuPos = ref({ top: 0, left: 0 })
+const fxMenuPos = ref({ top: 0, left: 0, maxHeight: 0 })
 function onFxMenuOutside(ev: PointerEvent) {
   const t = ev.target as HTMLElement | null
   if (t?.closest('[data-fx-menu]')) return
@@ -2092,20 +2092,37 @@ function openFxMenu(layerId: string, ev: MouseEvent) {
   const l = layerById(layerId)
   const extra = l && strokeSupportsStack(l.kind) ? FX_MENU_ITEM_H + 9 : 0
   const h = EFFECT_ORDER.length * FX_MENU_ITEM_H + extra + 8
-  let top = r.bottom + 4
-  if (top + h > window.innerHeight) top = Math.max(8, r.top - 4 - h)
+  // The full list is now taller than a short viewport (F3 added five geometry kinds), so the menu
+  // must be able to SCROLL rather than run off-screen. Open on whichever side of the button has
+  // more room, and cap the height to that room — `maxHeight` drives the container's overflow.
+  const MARGIN = 8
+  const below = window.innerHeight - (r.bottom + 4) - MARGIN
+  const above = (r.top - 4) - MARGIN
+  let top: number, maxHeight: number
+  if (h <= below || below >= above) {
+    top = r.bottom + 4
+    maxHeight = Math.min(h, below)
+  } else {
+    maxHeight = Math.min(h, above)
+    top = Math.max(MARGIN, r.top - 4 - maxHeight)
+  }
   const left = Math.max(8, Math.min(r.left, window.innerWidth - 8 - FX_MENU_W))
-  fxMenuPos.value = { top, left }
+  fxMenuPos.value = { top, left, maxHeight }
   fxMenuLayerId.value = layerId
   document.addEventListener('pointerdown', onFxMenuOutside, true)
   // The menu is teleported and fixed, so it would hang in place while the layer panel scrolls
-  // out from under its anchor. Dismiss instead of tracking.
-  document.addEventListener('scroll', closeFxMenu, true)
+  // out from under its anchor. Dismiss on an OUTSIDE scroll — but not when the user scrolls the
+  // menu's own (now overflowing) list, which also fires a captured scroll event.
+  document.addEventListener('scroll', onFxMenuScroll, true)
+}
+function onFxMenuScroll(ev: Event) {
+  if ((ev.target as HTMLElement | null)?.closest?.('[data-fx-menu]')) return
+  closeFxMenu()
 }
 function closeFxMenu() {
   fxMenuLayerId.value = null
   document.removeEventListener('pointerdown', onFxMenuOutside, true)
-  document.removeEventListener('scroll', closeFxMenu, true)
+  document.removeEventListener('scroll', onFxMenuScroll, true)
 }
 function pickFxKind(kind: EffectKind) {
   if (fxMenuLayerId.value) addLayerEffect(fxMenuLayerId.value, kind)
@@ -9370,8 +9387,8 @@ onUnmounted(() => {
          absolutely positioned popover. -->
     <Teleport to="body">
       <div v-if="fxMenuLayerId" data-fx-menu
-        class="fixed z-[200] w-48 rounded-lg border border-white/10 bg-[#161616] p-1 shadow-2xl"
-        :style="{ top: `${fxMenuPos.top}px`, left: `${fxMenuPos.left}px` }" @pointerdown.stop>
+        class="fixed z-[200] w-48 overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-[#161616] p-1 shadow-2xl"
+        :style="{ top: `${fxMenuPos.top}px`, left: `${fxMenuPos.left}px`, maxHeight: `${fxMenuPos.maxHeight}px` }" @pointerdown.stop>
         <!-- Outlines come first: on a stroked layer it is the entry most often wanted, and
              the rule keeps it from reading as one more effect kind. -->
         <template v-if="fxMenuOffersStroke">
