@@ -134,15 +134,54 @@ def _reach_px(width: int, frac: float = GUARD_FRAC) -> int:
     return int(round(frac * width))
 
 
+_SHIFTS8 = [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+
+
+def _rolled_bool(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
+    """`mask` shifted so that result[y, x] == mask[y + dy, x + dx], with the wrapped-around
+    border row/column masked to False so np.roll's wraparound never leaks a True in from the
+    opposite edge. The single border-safe roll shared by `dilate_mask` and
+    `nearest_subject_colour`'s per-round propagation."""
+    h, w = mask.shape
+    out = np.roll(mask, shift=(-dy, -dx), axis=(0, 1))
+    if dy == 1:
+        out[h - 1, :] = False
+    elif dy == -1:
+        out[0, :] = False
+    if dx == 1:
+        out[:, w - 1] = False
+    elif dx == -1:
+        out[:, 0] = False
+    return out
+
+
+def dilate_mask(mask_bool: np.ndarray, reach: int) -> np.ndarray:
+    """Grow a boolean mask outward by `reach` pixels via `reach` rounds of 8-neighbour OR
+    growth (border-safe `_rolled_bool`). Iterating a 3x3 (8-connected) dilation `reach` times
+    grows a Chebyshev/square neighbourhood of radius `reach` — the same square growth as
+    PIL's `ImageFilter.MaxFilter(2*reach+1)` on a binary image (max(window) > threshold iff
+    any pixel in the window is above threshold), so for a binary input the two are identical.
+    This is the ONE dilation routine: `guard_mask` calls it directly, and
+    `nearest_subject_colour` reuses `_rolled_bool` for its own reach bookkeeping."""
+    out = mask_bool
+    for _ in range(int(reach)):
+        if out.all():
+            break
+        grown = out.copy()
+        for dy, dx in _SHIFTS8:
+            grown |= _rolled_bool(out, dy, dx)
+        out = grown
+    return out
+
+
 def guard_mask(still_alpha: np.ndarray, size_wh, frac: float = GUARD_FRAC) -> np.ndarray:
     """The still's alpha, resized to the frame and grown outward by `frac` of the frame width.
     Returns float32 in [0,1], shape (h, w)."""
     w, h = int(size_wh[0]), int(size_wh[1])
     im = Image.fromarray(still_alpha.astype(np.uint8), "L").resize((w, h), Image.BILINEAR)
+    mask = np.asarray(im) > 127.0
     reach = _reach_px(w, frac)
-    if reach > 0:
-        im = im.filter(ImageFilter.MaxFilter(2 * reach + 1))
-    return (np.asarray(im).astype(np.float32) > 127.0).astype(np.float32)
+    return dilate_mask(mask, reach).astype(np.float32)
 
 
 def _resize_still(still_rgba: np.ndarray, size_wh) -> np.ndarray:
@@ -158,28 +197,22 @@ def nearest_subject_colour(still_rgba: np.ndarray, reach_px: int) -> np.ndarray:
     let every still-unfilled pixel take the colour of any already-filled 4- or 8-neighbour
     (first match wins; fully vectorised). Pixels never reached — beyond `reach_px` steps from
     any opaque pixel — come back NaN, the "no reference" sentinel. Returns (h, w, 3) float32."""
-    h, w = still_rgba.shape[0], still_rgba.shape[1]
     opaque = still_rgba[..., 3] > 128
     ref = np.where(opaque[..., None], still_rgba[..., :3].astype(np.float32), np.nan)
     filled = opaque.copy()
-    shifts = [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]
     for _ in range(int(reach_px)):
         if filled.all():
             break
+        # Snapshot at the start of the round: every shift below must read the SAME
+        # pre-round filled/ref state, so a pixel filled by one shift can't itself become a
+        # source for another shift in this same round (that would let colour hop 2 px in
+        # one round instead of 1, breaking the reach_px-rounds = reach_px-pixels invariant).
         prev_filled, prev_ref = filled, ref
-        for dy, dx in shifts:
-            # neighbour[y, x] = prev[y + dy, x + dx], with the wrapped-around border masked
-            # off so np.roll's wraparound never leaks colour from the opposite edge.
-            src_filled = np.roll(prev_filled, shift=(-dy, -dx), axis=(0, 1))
+        for dy, dx in _SHIFTS8:
+            # neighbour[y, x] = prev[y + dy, x + dx] — same border-safe roll dilate_mask
+            # uses for its own reach bookkeeping, so there is one dilation routine.
+            src_filled = _rolled_bool(prev_filled, dy, dx)
             src_ref = np.roll(prev_ref, shift=(-dy, -dx), axis=(0, 1))
-            if dy == 1:
-                src_filled[h - 1, :] = False
-            elif dy == -1:
-                src_filled[0, :] = False
-            if dx == 1:
-                src_filled[:, w - 1] = False
-            elif dx == -1:
-                src_filled[:, 0] = False
             take = (~filled) & src_filled
             if take.any():
                 ref = np.where(take[..., None], src_ref, ref)

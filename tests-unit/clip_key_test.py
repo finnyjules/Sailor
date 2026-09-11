@@ -5,7 +5,7 @@ import os
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location("clip_key", os.path.join(ROOT, "scripts", "clip_key.py"))
@@ -92,6 +92,32 @@ def test_guard_mask_resizes_to_the_frame_size():
     g = ck.guard_mask(still, (20, 30), frac=0.0)
     assert g.shape == (30, 20)
     assert g.min() == 1.0
+
+
+def _guard_mask_reference(still_alpha, size_wh, frac=ck.GUARD_FRAC):
+    """The pre-optimisation `guard_mask`: PIL's `ImageFilter.MaxFilter` rankfilter dilation
+    (~12s at production resolution — see .superpowers/sdd/rekey-report.md Pass 2). Kept ONLY
+    here, to prove the np.roll-based `dilate_mask` in the script produces an identical binary
+    silhouette — never reintroduce this path into clip_key.py itself."""
+    w, h = int(size_wh[0]), int(size_wh[1])
+    im = Image.fromarray(still_alpha.astype(np.uint8), "L").resize((w, h), Image.BILINEAR)
+    reach = ck._reach_px(w, frac)
+    if reach > 0:
+        im = im.filter(ImageFilter.MaxFilter(2 * reach + 1))
+    return (np.asarray(im).astype(np.float32) > 127.0).astype(np.float32)
+
+
+@pytest.mark.parametrize("reach", [0, 1, 4])
+def test_guard_mask_matches_the_maxfilter_reference_on_a_random_blob(reach):
+    # A 64x64 random binary blob (not a clean square) so the square/Chebyshev-growth
+    # equivalence between iterated np.roll dilation and PIL's MaxFilter is checked against
+    # an irregular silhouette, not just a shape that happens to dilate trivially.
+    rng = np.random.default_rng(0)
+    still = (rng.random((64, 64)) > 0.6).astype(np.uint8) * 255
+    frac = reach / 64.0   # _reach_px(64, frac) == round(frac * 64) == reach, exactly
+    got = ck.guard_mask(still, (64, 64), frac=frac)
+    want = _guard_mask_reference(still, (64, 64), frac=frac)
+    assert np.array_equal(got, want)
 
 
 def test_estimate_background_samples_the_far_pixels_and_ignores_the_subject():
