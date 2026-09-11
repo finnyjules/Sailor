@@ -303,7 +303,7 @@ test.describe('Frame geometry effects (F2)', () => {
  * Render fix A: a geometry effect on a text layer whose `renderAsOutline` is unset still
  * forces the outline path (Inter) and safely falls back to fillText on a system font (Arial).
  */
-const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'long_shadow'] as const
+const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow'] as const
 // A 1×1 transparent PNG so an image layer has a valid, instantly-decoding source.
 const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 

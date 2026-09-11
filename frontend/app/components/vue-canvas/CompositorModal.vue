@@ -2039,7 +2039,8 @@ function addLayerEffect(layerId: string, kind: EffectKind) {
   expandedLayers.value = new Set(expandedLayers.value).add(layerId)
   // A boolean needs paper.js; warm it now so its result appears as soon as the user picks a
   // sibling (the render path also kicks the warm, but pre-warming avoids a first-frame no-op).
-  if (kind === 'boolean') void warmPaperBoolean()
+  // Shatter also clips its cells through paper — pre-warm so it fragments on the very first frame.
+  if (kind === 'boolean' || kind === 'shatter') void warmPaperBoolean()
   // Select what was just added so its dials are on screen straight away.
   const fresh = next.find(e => !beforeIds.has(e.id)) ?? next[next.length - 1]
   if (fresh) selectEffect(layerId, fresh.id)
@@ -7927,6 +7928,34 @@ onUnmounted(() => {
                 <input v-scrubnum data-testid="geo-long-shadow-length" type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).length ?? 0.05) * 1000) / 10"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ length: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Shatter (F3): cells + gap + seed, mirroring the roughen 3-dial grid. Cells sets the
+               fragment count, gap the inward shrink between shards (width-normalized, shown ×100
+               like offset), seed the deterministic scatter. Every dial is read by `applyGeometry`'s
+               shatter case (Voronoi cells clipped to the outline in `geometryEffects.applyShatter`)
+               — no dead control. Self-only: no sibling picker. -->
+          <div v-else-if="activeEffect!.type === 'shatter'" class="space-y-1.5">
+            <div class="grid grid-cols-3 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">Cells</div>
+                <input v-scrubnum data-testid="geo-shatter-cells" type="number" min="1" max="96" step="1" :value="Math.round((activeEffect as any).cells ?? 12)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ cells: Math.min(96, Math.max(1, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 12))) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Gap</div>
+                <input v-scrubnum data-testid="geo-shatter-gap" type="number" min="0" step="0.1" :value="Math.round(((activeEffect as any).gap ?? 0.004) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ gap: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Seed</div>
+                <input v-scrubnum data-testid="geo-shatter-seed" type="number" step="1" :value="Math.round((activeEffect as any).seed ?? 1)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ seed: Math.round(parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
               </div>
             </div>
           </div>

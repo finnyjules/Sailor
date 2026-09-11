@@ -29,9 +29,10 @@ import {
   type Polyline,
 } from '~/lib/vector/pathOps'
 import { offsetPolyline } from '~/lib/compositor/strokeShapes'
-import { pathBoolean, isPaperWarm, booleanOpOf } from '~/lib/compositor/booleanGeometry'
+import { pathBoolean, pathIntersect, isPaperWarm, warmPaperBoolean, booleanOpOf } from '~/lib/compositor/booleanGeometry'
 import { blendPath } from '~/lib/vector/morph'
-import { warpPathD, type WarpField } from '~/lib/compositor/meshWarp'
+import { warpPathD, bboxOfPolylines, type WarpField } from '~/lib/compositor/meshWarp'
+import { voronoiCells } from '~/lib/compositor/voronoi'
 
 // The per-kind interfaces live in effectStack (it owns the whole effect vocabulary and the
 // LayerEffect union). Re-export them here so a consumer can `import type { TrimEffect } from
@@ -46,6 +47,7 @@ export type {
   MorphEffect,
   WarpEffect,
   LongShadowEffect,
+  ShatterEffect,
 } from './effectStack'
 export { GEOMETRY_KINDS, isGeometryKind } from './effectStack'
 
@@ -509,6 +511,81 @@ export function longShadowBody(d: string, angleRad: number, lengthPx: number): s
   return toPathD(parts)
 }
 
+// ── shatter (F3) ───────────────────────────────────────────────────────────────
+//
+// Fragment the outline into Voronoi cells with a gap, so the shape reads as shattered tiles
+// filled with its OWN paint. Unlike long_shadow this IS a `d → d` transform: it returns a
+// COMPOUND `d` of the gapped, clipped cells, which `drawLayerContent` fills exactly as it fills
+// any computed outline (the cells are disjoint after the inward gap, so any fill rule paints
+// them all). SELF-ONLY — `ctx.resolveSibling` is unused.
+//
+// CONSTRUCTION: (1) scatter `cells` seed points inside the outline's bbox with the SAME
+// deterministic integer hash `roughen` uses (`seededNoise` — no `Math.random`, so a saved
+// shatter renders identically every frame); (2) compute their Voronoi cells (pure, no
+// dependency — `voronoi.ts` half-plane intersection) clipped to a padded bbox; (3) clip each
+// convex cell to the possibly-concave outline via the warmed paper.js scope (`pathIntersect`,
+// sharing `booleanGeometry`'s warm infra with the boolean effect); (4) shrink each surviving
+// piece inward by `gap·W` with the winding-aware `offsetPolyline` (the same tool F2 offset uses)
+// to open the gap, dropping a piece that vanishes under the shrink.
+//
+// PASS-THROUGH (returns `d` unchanged, never blanks the shape): `cells ≤ 0`; a degenerate bbox;
+// paper not yet warm (the first shatter kicks the warm and the `onPaperBooleanReady` nudge
+// repaints — the `applyGeometry` cache folds `isPaperWarm()` by kind so the cold frame is never
+// served after paper loads); or every cell clipped/shrunk to nothing.
+const SHATTER_MAX_CELLS = 96 // O(n³) Voronoi is microseconds here; cap so an absurd count can't stall render
+const SHATTER_MIN_AREA = 1e-3 // px²: a shrunk piece below this (or winding-flipped) has vanished
+
+function polyArea(pts: readonly Pt2[]): number {
+  return shoelace(pts) / 2
+}
+
+function applyShatter(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
+  const cells = Math.round(num(e.cells, 12))
+  if (cells <= 0) return d
+  if (!isPaperWarm()) { void warmPaperBoolean(); return d } // cold: one-frame pass-through, warm kicked
+  const subs = flatten(d)
+  const box = bboxOfPolylines(subs)
+  if (!box || !(box.w > 0) || !(box.h > 0)) return d // no area to fragment
+
+  const seed = Math.round(num(e.seed, 1))
+  const n = Math.min(SHATTER_MAX_CELLS, cells)
+  // Scatter seeds uniformly in the bbox via the deterministic hash (x from an even index, y
+  // from the odd neighbour — different integers, so the hash decorrelates the two coordinates).
+  const points: Pt2[] = []
+  for (let i = 0; i < n; i++) {
+    const ux = (seededNoise(i * 2, seed) + 1) / 2
+    const uy = (seededNoise(i * 2 + 1, seed) + 1) / 2
+    points.push({ x: box.minX + ux * box.w, y: box.minY + uy * box.h })
+  }
+  // Pad the Voronoi rect beyond the bbox so boundary cells fully cover the shape edge; the clip
+  // to the outline (below) makes the exact padding irrelevant as long as it contains the shape.
+  const pad = Math.max(box.w, box.h) * 0.5 + 1
+  const rect = { x0: box.minX - pad, y0: box.minY - pad, x1: box.minX + box.w + pad, y1: box.minY + box.h + pad }
+  const vcells = voronoiCells(points, rect)
+
+  const gapPx = Math.max(0, num(e.gap, 0)) * ctx.W
+  const out: Polyline[] = []
+  for (const cell of vcells) {
+    if (!cell || cell.length < 3) continue
+    const cellD = toPathD([{ pts: cell, closed: true }])
+    const clipped = pathIntersect(cellD, d) // cell ∩ shape; '' when the cell lies outside the shape
+    if (!clipped) continue
+    for (const piece of flatten(clipped)) {
+      if (piece.pts.length < 3) continue
+      if (gapPx <= 0) { out.push({ pts: piece.pts.map(p => ({ ...p })), closed: true }); continue }
+      const shrunk = offsetPolyline(piece.pts, true, -gapPx)
+      if (shrunk.length < 3) continue // collapsed under the shrink
+      const before = polyArea(piece.pts)
+      const after = polyArea(shrunk as Pt2[])
+      // Vanished: the inward shrink flipped the winding (over-shot the inradius) or left no area.
+      if (Math.abs(after) < SHATTER_MIN_AREA || Math.sign(after) !== Math.sign(before)) continue
+      out.push({ pts: (shrunk as Pt2[]).map(p => ({ x: p.x, y: p.y })), closed: true })
+    }
+  }
+  if (out.length === 0) return d // nothing survived — pass-through rather than blank the shape
+  return toPathD(out)
+}
+
 // ── dispatch ──────────────────────────────────────────────────────────────────
 function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
   switch (e.type) {
@@ -519,6 +596,7 @@ function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): stri
     case 'boolean': return applyBoolean(d, e, ctx)
     case 'morph': return applyMorph(d, e, ctx)
     case 'warp': return applyWarp(d, e)
+    case 'shatter': return applyShatter(d, e, ctx)
     // long_shadow is a SECOND fill painted in drawLayerContent, not an outline transform —
     // a pure no-op here so it never corrupts the outline the other geometry kinds build.
     case 'long_shadow': return d
@@ -555,6 +633,12 @@ export function applyGeometry(
   // the seam is provably inert (see the byte-identity unit test).
   let refSuffix = ''
   for (const e of enabled) {
+    // `shatter` is self-only (no `refLayerId`), yet its output flips when paper warms — before
+    // that `applyShatter` passes `d` through. Fold the warm flag by KIND, UNCONDITIONALLY (unlike
+    // boolean's `bwarm`, which only matters with a live sibling), so the cold pass-through frame's
+    // cached `d` is never returned after paper loads. No shatter present ⇒ this never fires ⇒
+    // `refSuffix` stays '' ⇒ the key (and every cache hit) is byte-identical to HEAD.
+    if (e.type === 'shatter') refSuffix += `swarm:${isPaperWarm() ? 1 : 0}`
     const ref = typeof e.refLayerId === 'string' ? e.refLayerId : ''
     if (!ref) continue
     // A boolean only runs its paper op once paper is WARM; before that `applyBoolean` returns

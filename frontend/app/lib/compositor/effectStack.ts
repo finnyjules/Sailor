@@ -90,11 +90,20 @@ export interface WarpEffect { type: 'warp'; field: 'bulge' | 'pinch' | 'wave' | 
  *  painted directly in `drawLayerContent`. The body maths live in `geometryEffects.longShadowBody`
  *  (pure). `length ≈ 0` paints nothing. */
 export interface LongShadowEffect { type: 'long_shadow'; angle: number; length: number; color: string; visible: boolean }
+/** Fragment this vector layer's outline into Voronoi cells with a `gap` between them (F3), so
+ *  the shape reads as shattered tiles filled with its OWN paint. Unlike long shadow this IS a
+ *  `d → d` outline transform: `applyGeometry` returns a compound `d` of the gapped, clipped
+ *  cells. `cells` sets the fragment count, `gap` the inward shrink per cell (a fraction of
+ *  canvas width, ×W to px), `seed` the deterministic scatter. SELF-ONLY — no sibling rail.
+ *  The cell maths live in `app/lib/compositor/voronoi.ts` (pure); the clip-to-outline reuses
+ *  the warmed paper.js scope in `booleanGeometry.ts`. `cells ≤ 0` or a cold/empty result is a
+ *  pass-through (the shape unchanged). */
+export interface ShatterEffect { type: 'shatter'; cells: number; gap: number; seed: number; visible: boolean }
 
 export type LayerEffect =
   | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
   | TornEdgeEffect | FeatherEffect
-  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect | WarpEffect | LongShadowEffect
+  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect | WarpEffect | LongShadowEffect | ShatterEffect
   | PostEffect
 
 /** A stored effect, addressed by a stable id. */
@@ -108,7 +117,7 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'long_shadow', 'inner_shadow',
+  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow',
   'adjust', 'duotone', 'gradientMap',
   'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'layer_blur', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
@@ -130,7 +139,7 @@ export const ORDERABLE_KINDS = EFFECT_ORDER.filter(
  *  and reorder only among themselves (`regionOf`, `canReorder`). Contiguous in EFFECT_ORDER.
  *  `boolean` (F3) combines the outline with a sibling layer's outline via paper.js; `morph` (F3)
  *  blends the outline toward a sibling layer's outline. */
-export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'long_shadow'] as const satisfies readonly EffectKind[]
+export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow'] as const satisfies readonly EffectKind[]
 export const isGeometryKind = (k: EffectKind): boolean =>
   (GEOMETRY_KINDS as readonly string[]).includes(k)
 
@@ -157,6 +166,7 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   boolean: 'Combine shapes',
   morph: 'Morph to shape',
   warp: 'Warp',
+  shatter: 'Shatter',
   long_shadow: 'Long shadow',
   inner_shadow: 'Inner shadow',
   adjust: 'Adjust',
@@ -203,6 +213,9 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   // A fresh long shadow casts down-right (45°) for 5% of the width in a soft black —
   // immediately visible against the shape once added; the colour card tunes it.
   long_shadow: { angle: 45, length: 0.05, color: 'rgba(0,0,0,0.35)', visible: true },
+  // A fresh shatter breaks the shape into a dozen cells with a hairline gap (0.4% of the
+  // width) — visibly fragmented the moment it is added; cells/gap/seed tune it.
+  shatter: { cells: 12, gap: 0.004, seed: 1, visible: true },
 }
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {

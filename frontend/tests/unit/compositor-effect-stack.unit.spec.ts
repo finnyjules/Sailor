@@ -11,10 +11,10 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 21 kinds, 3 pinned and 18 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(21)
+  it('has 22 kinds, 3 pinned and 19 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(22)
     expect(PINNED_KINDS).toEqual(['background_blur', 'dof', 'drop_shadow'])
-    expect(ORDERABLE_KINDS).toHaveLength(18)
+    expect(ORDERABLE_KINDS).toHaveLength(19)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
     expect(EFFECT_LABELS.gradientMap).toBe('Gradient map')
@@ -26,6 +26,7 @@ describe('effect kinds', () => {
     expect(EFFECT_LABELS.boolean).toBe('Combine shapes')
     expect(EFFECT_LABELS.morph).toBe('Morph to shape')
     expect(EFFECT_LABELS.warp).toBe('Warp')
+    expect(EFFECT_LABELS.shatter).toBe('Shatter')
     expect(EFFECT_LABELS.long_shadow).toBe('Long shadow')
   })
   it('orders background blur first and drop shadow last', () => {
@@ -34,8 +35,8 @@ describe('effect kinds', () => {
     expect(isPinnedKind('dof')).toBe(true)
     expect(isPinnedKind('bloom')).toBe(false)
   })
-  it('the eight geometry kinds are contiguous in EFFECT_ORDER and precede every pixel kind', () => {
-    expect(GEOMETRY_KINDS).toEqual(['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'long_shadow'])
+  it('the nine geometry kinds are contiguous in EFFECT_ORDER and precede every pixel kind', () => {
+    expect(GEOMETRY_KINDS).toEqual(['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow'])
     const indices = GEOMETRY_KINDS.map(k => EFFECT_ORDER.indexOf(k))
     for (let i = 1; i < indices.length; i++) expect(indices[i]).toBe(indices[i - 1]! + 1)
     const lastGeometry = Math.max(...indices)
@@ -50,7 +51,7 @@ describe('effect kinds', () => {
     const expected: Record<EffectKind, string> = {
       background_blur: 'backdrop', dof: 'backdrop',
       trim: 'geometry', offset: 'geometry', round_corners: 'geometry', roughen: 'geometry',
-      boolean: 'geometry', morph: 'geometry', warp: 'geometry', long_shadow: 'geometry',
+      boolean: 'geometry', morph: 'geometry', warp: 'geometry', shatter: 'geometry', long_shadow: 'geometry',
       inner_shadow: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
       bloom: 'pixel', vignette: 'pixel', grain: 'pixel', torn_edge: 'pixel',
       feather: 'pixel', layer_blur: 'pixel',

@@ -118,3 +118,34 @@ export function pathBoolean(dSelf: string, dSibling: string, op: BooleanOp): str
     sc.project.clear()
   }
 }
+
+/**
+ * Intersect (CLIP) `dSubject` by `dClip`, returning the region inside BOTH as a new `d` — the
+ * F3 `shatter` effect uses it to clip each convex Voronoi cell to the (possibly concave, holed)
+ * shape outline. Shares the same warmed detached scope as `pathBoolean`.
+ *
+ * SYNCHRONOUS, and unlike `pathBoolean` its cold / empty / error contract is CLIP-shaped, not
+ * pass-through: with paper not yet warm it returns `''` (nothing to paint for this cell — the
+ * caller `applyShatter` gates the whole effect on `isPaperWarm()` and kicks the warm itself, so
+ * a cold cell is never actually asked for), an empty clip returns `''` (the cell lies wholly
+ * outside the shape — drop it), and any paper error also returns `''` (drop the cell rather than
+ * paint it unclipped past the outline). An empty subject or clip is likewise `''`.
+ */
+export function pathIntersect(dSubject: string, dClip: string): string {
+  if (!dSubject || !dClip) return ''
+  const sc = _scope
+  if (!sc) { void warmPaperBoolean(); return '' } // cold: caller re-renders on warm
+  sc.activate()
+  try {
+    const a = new sc.CompoundPath(dSubject)
+    const b = new sc.CompoundPath(dClip)
+    const res = a.intersect(b)
+    if (!res) return ''
+    return res.pathData ?? ''
+  } catch (err) {
+    if (import.meta.dev) console.warn('[booleanGeometry] intersect failed, dropping cell', err)
+    return ''
+  } finally {
+    sc.project.clear()
+  }
+}
