@@ -6924,22 +6924,9 @@ onUnmounted(() => {
         <button class="underline hover:text-white cursor-pointer" @click="exitNodeEdit">Done (Esc)</button>
       </div>
 
-      <!-- Edit ENTRY: pick a mode for the selected image. Once a mode is active the
-           inpaint controls take over the main toolbar's slot (see the toolbar
-           below), and this entry bar gives way to the prompt bar. -->
-      <div v-if="showEditToolbar && editMode === 'none'" data-testid="edit-toolbar"
-        class="pointer-events-auto absolute bottom-[152px] left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 bg-[#1a1a1a]/95 backdrop-blur-sm rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg"
-        @pointerdown.stop @click.stop>
-        <button type="button" data-testid="edit-mode-image"
-          class="h-8 px-2.5 rounded-[8px] text-[12px] cursor-pointer whitespace-nowrap hover:bg-white/10 text-white/80"
-          @click="editImageStart(editToolbarLayer!.id)">Edit image</button>
-        <button type="button" data-testid="edit-mode-region"
-          class="h-8 px-2.5 rounded-[8px] text-[12px] cursor-pointer whitespace-nowrap hover:bg-white/10 text-white/80"
-          @click="editRegionStart(editToolbarLayer!.id)">Edit a region</button>
-        <button type="button" data-testid="edit-mode-select"
-          class="h-8 px-2.5 rounded-[8px] text-[12px] cursor-pointer whitespace-nowrap hover:bg-white/10 text-white/80"
-          @click="selectObjectStart(editToolbarLayer!.id)">Select an object</button>
-      </div>
+      <!-- Entry to inpaint mode now lives ON the main toolbar (the modes appear
+           there whenever an image is selected — see the toolbar's v-else below),
+           so there is no floating bar over the image. -->
 
       <!-- Edit PROMPT bar: while in inpaint mode the prompt sits just above the
            (swapped) main toolbar. The agent bar is hidden meanwhile, so this
@@ -7053,8 +7040,8 @@ onUnmounted(() => {
             </div>
           </Transition>
         </div>
-        <!-- Select tool — hidden in inpaint mode (the canvas belongs to SAM/brush). -->
-        <template v-if="editMode === 'none'">
+        <!-- Select tool — hidden once an image is selected (its modes take over). -->
+        <template v-if="!showEditToolbar">
           <div class="w-px h-5 bg-white/10 mx-0.5" />
           <button
             class="flex items-center justify-center size-8 rounded cursor-pointer"
@@ -7073,8 +7060,8 @@ onUnmounted(() => {
           title="Redo (⌘⇧Z)" :disabled="!canRedo" @click="redo">
           <Redo2 class="size-4" />
         </button>
-        <!-- Canvas tools — REPLACED by the inpaint controls while in inpaint mode. -->
-        <template v-if="editMode === 'none'">
+        <!-- Canvas tools — REPLACED by the inpaint modes once an image is selected. -->
+        <template v-if="!showEditToolbar">
         <div class="w-px h-5 bg-white/10 mx-0.5" />
         <button class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/80 cursor-pointer" data-testid="add-text" title="Add text" @click="addText">
           <Type class="size-4" />
@@ -7245,7 +7232,8 @@ onUnmounted(() => {
             </div>
           </template>
 
-          <template v-if="editMode !== 'region'">
+          <!-- Model: only while actually editing a whole image (region is FLUX Fill). -->
+          <template v-if="editMode === 'image'">
             <div class="w-px h-5 bg-white/10 mx-0.5" />
             <div class="relative">
               <button type="button" data-testid="edit-model-menu"
@@ -7263,9 +7251,12 @@ onUnmounted(() => {
             </div>
           </template>
 
-          <div class="w-px h-5 bg-white/10 mx-0.5" />
-          <button type="button" class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/60 cursor-pointer"
-            title="Done (Esc)" @click="editImageCancel(); editRegionCancel()"><X class="size-4" /></button>
+          <!-- Close only while actively editing; at plain selection you just deselect. -->
+          <template v-if="editMode !== 'none'">
+            <div class="w-px h-5 bg-white/10 mx-0.5" />
+            <button type="button" class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/60 cursor-pointer"
+              title="Done (Esc)" @click="editImageCancel(); editRegionCancel()"><X class="size-4" /></button>
+          </template>
         </template>
         <input ref="imageInputRef" type="file" accept="image/*" class="hidden" @change="onAddImageFile" />
         <input ref="brushFillInputRef" type="file" accept="image/*" class="hidden" @change="onBrushFillImageFile" />
