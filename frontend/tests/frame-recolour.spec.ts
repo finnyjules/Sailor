@@ -57,7 +57,9 @@ test.describe('Frame recolour', () => {
     for (const u of uses) expect(u.toLowerCase()).toBe('#12abef80')
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')   // one step: back to opaque
     const undone = await frame(page)
-    expect([...solidColours(undone.layers)].filter(h => typeof h === 'string' && h.toLowerCase().startsWith('#12abef')).every(h => (h as string).length === 7)).toBe(true)
+    const undoneUses = [...solidColours(undone.layers), typeof undone.bg === 'string' ? undone.bg : null].filter(h => typeof h === 'string' && h.toLowerCase().startsWith('#12abef')) as string[]
+    expect(undoneUses.length).toBeGreaterThan(0)
+    expect(undoneUses.every(h => h.length === 7)).toBe(true)
   })
 
   test('Images too puts a family gradient map on the photos, in the same undo step, and clears it when turned off', async ({ page }) => {
