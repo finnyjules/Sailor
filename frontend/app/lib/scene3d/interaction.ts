@@ -225,6 +225,8 @@ export class SceneInteraction {
     this.raycaster.layers.enable(SURFACE_HIDDEN_LAYER)
     this.orbit = new OrbitControls(engine.camera, domElement)
     this.orbit.enableDamping = true
+    // Pan along the screen plane (not the ground) so a two-finger drag tracks the cursor.
+    this.orbit.screenSpacePanning = true
     this.orbit.addEventListener('change', () => callbacks.onCameraChange?.())
 
     // The combined gizmo: three pruned single-mode instances, spatially LAYERED
@@ -332,6 +334,11 @@ export class SceneInteraction {
     domElement.addEventListener('pointermove', this.onMove)
     domElement.addEventListener('pointerup', this.onUp)
     domElement.addEventListener('contextmenu', this.onContextMenu)
+    // Capture phase + non-passive so this runs BEFORE OrbitControls' own wheel
+    // listener and can preventDefault: a trackpad two-finger drag arrives as a
+    // wheel event, which OrbitControls would dolly (zoom). We pan on that and let
+    // OrbitControls keep the zoom for pinch (ctrlKey) and a real mouse wheel.
+    domElement.addEventListener('wheel', this.onWheel, { passive: false, capture: true })
   }
 
   /** Recomputes `orbit.enabled` from the three locks. Called whenever any
@@ -482,6 +489,50 @@ export class SceneInteraction {
     }
   }
   private suppressNextContextMenu = false
+
+  /** Trackpad two-finger drag → pan; pinch and a real mouse wheel → zoom.
+   *
+   *  A two-finger trackpad drag reaches the browser as a `wheel` event, which
+   *  OrbitControls treats as dolly (zoom). We intercept it here (capture phase,
+   *  before OrbitControls' own wheel listener) and pan instead. Two cases are
+   *  left for OrbitControls to zoom: a pinch, which the OS reports as a wheel
+   *  with `ctrlKey` set, and a genuine mouse wheel — a line/page-mode delta, or
+   *  a coarse vertical-only pixel delta (a wheel notch is ~100px; a trackpad
+   *  pan streams small, often horizontal, pixel deltas). */
+  private onWheel = (e: WheelEvent): void => {
+    if (!this.orbit.enabled) return                 // a gizmo/sculpt/decal drag owns the gesture
+    if (e.ctrlKey) return                           // pinch-zoom (or ctrl+wheel) → OrbitControls dollies
+    const isMouseWheel = e.deltaMode !== 0 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 100)
+    if (isMouseWheel) return                        // real mouse wheel → OrbitControls zooms
+    // Trackpad pan: stop OrbitControls' bubble-phase wheel handler from also dollying.
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    this.panByPixels(e.deltaX, e.deltaY)
+  }
+
+  /** Pan the camera and its orbit target across the screen plane by a pixel
+   *  delta, mirroring OrbitControls' own screen-space pan math so the world
+   *  tracks the fingers (grab-and-drag). */
+  private panByPixels(dxPixels: number, dyPixels: number): void {
+    const cam = this.engine.camera as THREE.PerspectiveCamera
+    const el = this.domElement
+    const h = el.clientHeight || 1
+    // Perspective pan scale: how many world units one screen pixel spans at the
+    // target's depth — `2 * distance * tan(fov/2) / viewportHeight`.
+    const dist = new THREE.Vector3().copy(cam.position).sub(this.orbit.target).length()
+    const worldPerPx = (2 * dist * Math.tan(((cam.fov || 45) / 2) * Math.PI / 180)) / h
+    const right = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 0)  // camera x
+    const up = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 1)     // camera y (screen-space pan)
+    // Grab-and-drag: the world follows the fingers. A rightward two-finger drag
+    // is a negative deltaX, so move the world +right by −deltaX; a downward drag
+    // is a positive deltaY, so move the world −up by +deltaY.
+    const move = new THREE.Vector3()
+      .addScaledVector(right, -dxPixels * worldPerPx)
+      .addScaledVector(up, dyPixels * worldPerPx)
+    cam.position.add(move)
+    this.orbit.target.add(move)
+    this.orbit.update()
+  }
 
   /** Pointer → normalized device coords against the canvas rect. */
   private ndcFrom(e: PointerEvent): THREE.Vector2 {
@@ -918,6 +969,7 @@ export class SceneInteraction {
     this.domElement.removeEventListener('pointermove', this.onMove)
     this.domElement.removeEventListener('pointerup', this.onUp)
     this.domElement.removeEventListener('contextmenu', this.onContextMenu)
+    this.domElement.removeEventListener('wheel', this.onWheel, { capture: true } as EventListenerOptions)
     for (const tc of this.gizmos) {
       tc.detach()
       // dispose() frees child geometry/materials but does not unparent _root.
