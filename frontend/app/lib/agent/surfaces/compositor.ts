@@ -15,7 +15,8 @@ import { SWISS_LIMITS } from '~/lib/agent/designPrinciples'
 import { defaultPostEffect, POST_EFFECT_DEFAULTS, POST_FX_PARAM_CLAMP, type PostEffect } from '~/lib/compositor/postEffects'
 import { sanitizeTornEdge } from '~/lib/compositor/tornEdge'
 import { sanitizeFeather } from '~/lib/compositor/feather'
-import { effectStackOf, writeStackToLayer, addEffect, createEffect, EFFECT_LABELS, EFFECT_ORDER, isEffectKind, type EffectInstance } from '~/lib/compositor/effectStack'
+import { effectStackOf, writeStackToLayer, addEffect, createEffect, EFFECT_LABELS, EFFECT_ORDER, isEffectKind, isGeometryKind, type EffectInstance, type EffectKind } from '~/lib/compositor/effectStack'
+import { booleanOpOf } from '~/lib/compositor/booleanGeometry'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import {
   strokeStackOf, layerStoresStrokeStack, writeStrokeStackToLayer,
@@ -418,12 +419,22 @@ function sanitizeLocalEffect(type: LocalEffectKind, raw: unknown, cur?: EffectIn
   }
 }
 
-type GeometryEffectKind = 'trim' | 'offset' | 'round_corners' | 'roughen'
+type GeometryEffectKind =
+  | 'trim' | 'offset' | 'round_corners' | 'roughen'
+  | 'boolean' | 'morph' | 'warp' | 'long_shadow' | 'shatter'
 
-/** Merge model-provided params for the four geometry kinds (they transform a vector
- *  layer's outline before it rasterises) over current/defaults with clamps — same
+/** The four mesh-warp fields the engine reads (`meshWarp.ts`). */
+const WARP_AGENT_FIELDS = ['bulge', 'pinch', 'wave', 'twist'] as const
+/** SHATTER_MAX_CELLS in `geometryEffects.ts` (not exported); mirrored here + in the inspector. */
+const SHATTER_AGENT_MAX_CELLS = 96
+
+/** Merge model-provided params for the nine geometry kinds (they transform a vector layer's
+ *  outline before it rasterises) over current/defaults with clamps — same
  *  merge-over-`createEffect`-defaults shape as sanitizeLocalEffect. These have no
- *  POST_EFFECT_DEFAULTS entry, so their canonical defaults come from effectStack. */
+ *  POST_EFFECT_DEFAULTS entry, so their canonical defaults come from effectStack. Every clamp
+ *  matches a param the engine actually reads (see `geometryEffects.ts` apply* + `effectStack`
+ *  interfaces); the boolean/morph SIBLING (`refLayerId`) is PICKER-ONLY — the agent never sets
+ *  it (an already-picked ref is carried through verbatim), mirroring scene3d's `refObjectId`. */
 function sanitizeGeometryEffect(type: GeometryEffectKind, raw: unknown, cur?: EffectInstance): Record<string, unknown> {
   const base = (cur ?? createEffect(type)) as unknown as Record<string, unknown>
   const r = (raw ?? {}) as Record<string, unknown>
@@ -441,9 +452,51 @@ function sanitizeGeometryEffect(type: GeometryEffectKind, raw: unknown, cur?: Ef
   if (type === 'round_corners') {
     return { radius: clamp(r.radius, 0, 1, base.radius as number), visible: true }
   }
+  if (type === 'roughen') {
+    return {
+      amount: clamp(r.amount, 0, 1, base.amount as number),
+      detail: Math.round(clamp(r.detail, 1, 32, base.detail as number)),
+      seed: Math.round(clamp(r.seed, 0, 1e6, base.seed as number)),
+      visible: true,
+    }
+  }
+  if (type === 'boolean') {
+    // op coerced to a real BooleanOp (invalid → unite). refLayerId is PICKER-ONLY: the agent
+    // adds the boolean + op, the user picks the partner in the UI. Never accept a model ref;
+    // carry an already-picked one through so an op edit does not wipe the user's choice.
+    const out: Record<string, unknown> = { op: booleanOpOf(r.op ?? base.op), visible: true }
+    if (typeof base.refLayerId === 'string') out.refLayerId = base.refLayerId
+    return out
+  }
+  if (type === 'morph') {
+    // Same picker-only refLayerId rule as boolean; amount 0..1 (0 ≈ own shape, 1 ≈ sibling).
+    const out: Record<string, unknown> = { amount: clamp(r.amount, 0, 1, base.amount as number), visible: true }
+    if (typeof base.refLayerId === 'string') out.refLayerId = base.refLayerId
+    return out
+  }
+  if (type === 'warp') {
+    // field ∈ WARP_AGENT_FIELDS; amount signed (bbox-relative, twist = amount·π so ±1 ≈ ±180°);
+    // frequency read only by the wave field but stored on every warp (matches the inspector).
+    const field = (WARP_AGENT_FIELDS as readonly string[]).includes(r.field as string) ? (r.field as string) : (base.field as string)
+    return {
+      field,
+      amount: clamp(r.amount, -1, 1, base.amount as number),
+      frequency: clamp(r.frequency, 0, 64, base.frequency as number),
+      visible: true,
+    }
+  }
+  if (type === 'long_shadow') {
+    return {
+      angle: clamp(r.angle, 0, 360, base.angle as number),
+      length: clamp(r.length, 0, 1, base.length as number),
+      color: typeof r.color === 'string' ? r.color : (base.color as string),
+      visible: true,
+    }
+  }
+  // shatter
   return {
-    amount: clamp(r.amount, 0, 1, base.amount as number),
-    detail: Math.round(clamp(r.detail, 1, 32, base.detail as number)),
+    cells: Math.round(clamp(r.cells, 1, SHATTER_AGENT_MAX_CELLS, base.cells as number)),
+    gap: clamp(r.gap, 0, 1, base.gap as number),
     seed: Math.round(clamp(r.seed, 0, 1e6, base.seed as number)),
     visible: true,
   }
@@ -665,7 +718,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'generateImage', hint: 'Generate a PHOTOGRAPHIC/illustrative AI image and add it as a layer — "generate a picture of a dog", "add a city photo". Not for gradients/colours (use setBackground/setFill). args: { prompt (vivid), aspectRatio? }.' },
   { op: 'removeImageBackground', hint: 'Cut out the subject of an existing IMAGE layer (transparent background). target = image layer id.' },
   { op: 'editImage', hint: 'Edit an existing IMAGE layer from an instruction (Flux Kontext) — "make it brighter", "change the sky". target = image layer id; args: { instruction }.' },
-  { op: 'setLayerEffect', hint: 'Add/update/remove an effect ON ONE LAYER — a post-processing look, a layer-local effect bound to the layer\'s own silhouette, or a geometry effect that reshapes a vector outline. target = layer id; args: { effect: { type: "adjust"|"bloom"|"grain"|"vignette"|"duotone"|"gradientMap"|"dof"|"trim"|"offset"|"round_corners"|"roughen"|"background_blur"|"inner_shadow"|"layer_blur"|"drop_shadow"|"torn_edge"|"feather", ...params }, remove? }. adjust (colour grade): brightness/contrast/saturation 0..2 (1 = neutral), hue -180..180. bloom (glow from bright areas): threshold 0..1, radius ~0.02, intensity 0..2. grain (film noise): amount 0..1, size 1..8. vignette (darkened edges): amount/size/softness 0..1. duotone (two-colour map): shadows "#RRGGBB", highlights "#RRGGBB", mix 0..1. gradientMap (map luminance through a colour ramp): stops [{pos,color}], contrast -1..1, mix 0..1. dof (depth of field, IMAGE LAYERS ONLY — estimated depth map, BRIGHT = NEAR so focus 1 is nearest, 0 furthest): focus 0..1 the sharp plane, range 0..1 widens the sharp band, aperture 0..1 blur strength (~0.02-0.05 normal, 0.1+ extreme), bladeCount 0..12 bokeh shape (6 = hexagonal, <3 = circular), bladeRotation 0..360, bloomThreshold 0..1 + bloomStrength 0..4 bloom of bright defocused points. trim (reveal only part of the outline): start/end 0..1 along the path. offset (grow or shrink the outline): distance 0..1 of canvas width, negative = inward. round_corners: radius 0..1 of canvas width. roughen (jitter the outline): amount 0..1 of canvas width, seed integer. trim/offset/round_corners/roughen are geometry effects — vector layers only (rect/ellipse/path/polygon/star and outlined text), no-op elsewhere. drop_shadow / inner_shadow (shadow from the layer\'s silhouette, outward or inward): color "rgba(...)"/"#RRGGBB", x/y -1..1 (fraction of canvas width), blur 0..1. layer_blur (blur the layer itself): radius 0..1. background_blur (blur what shows through behind the layer, within its silhouette): radius 0..1. torn_edge and feather take the same patch keys as setLayerTornEdge/setLayerFeather. Omitted params keep their current value. remove:true deletes that effect kind. This is what "blur the background", "trim the outline", "round the corners", "roughen the edges" mean.' },
+  { op: 'setLayerEffect', hint: 'Add/update/remove an effect ON ONE LAYER (colour/pixel, silhouette-bound, or geometry reshape). target = layer id; args: { effect: { type: "adjust"|"bloom"|"grain"|"vignette"|"duotone"|"gradientMap"|"dof"|"trim"|"offset"|"round_corners"|"roughen"|"boolean"|"morph"|"warp"|"long_shadow"|"shatter"|"background_blur"|"inner_shadow"|"layer_blur"|"drop_shadow"|"torn_edge"|"feather", ...params }, remove? }. adjust (colour grade): brightness/contrast/saturation 0..2 (1 = neutral), hue -180..180. bloom (glow from brights): threshold 0..1, radius ~0.02, intensity 0..2. grain (film noise): amount 0..1, size 1..8. vignette (darkened edges): amount/size/softness 0..1. duotone (two-colour map): shadows/highlights "#RRGGBB", mix 0..1. gradientMap (luminance→ramp): stops [{pos,color}], contrast -1..1, mix 0..1. dof (depth of field, IMAGE ONLY — BRIGHT = NEAR): focus 0..1 sharp plane, range 0..1 band width, aperture 0..1 blur (0.02-0.05, 0.1+ extreme), bladeCount 0..12 bokeh (6 = hex), bladeRotation 0..360, bloomThreshold 0..1 + bloomStrength 0..4. GEOMETRY EFFECTS (vector only — rect/ellipse/path/polygon/star + outlined text, no-op elsewhere; widths are canvas-width fractions): trim: reveal part of the outline, start/end 0..1. offset: grow/shrink, distance 0..1, negative = inward. round_corners: radius 0..1. roughen: jitter, amount 0..1, seed integer. boolean: combine two shapes, op unite|subtract|intersect|exclude. morph: morph toward another shape, amount 0..1. boolean/morph need a SIBLING shape picked in the UI — you add the effect + params, NOT the partner. warp: warp the outline, field bulge|pinch|wave|twist, amount -1..1 (signed), frequency (wave only). long_shadow: cast a solid shadow, angle 0..360, length 0..1, color "rgba(...)"/"#RRGGBB". shatter: break into fragments, cells 1..96, gap 0..1, seed integer. drop_shadow / inner_shadow (silhouette shadow, out/inward): color "rgba(...)"/"#RRGGBB", x/y -1..1, blur 0..1. layer_blur (blur the layer): radius 0..1. background_blur (blur behind the layer, within silhouette): radius 0..1. torn_edge/feather: same patch keys as setLayerTornEdge/setLayerFeather. Omitted params keep their value. remove:true deletes that effect kind. This is what "blur the background", "combine two shapes" mean.' },
   { op: 'setPostEffect', hint: 'Add/update/remove a post-processing effect on the WHOLE FRAME — applied after all layers composite. Same args and effect vocabulary as setLayerEffect (no target), EXCEPT dof, which is per-image-layer only because it needs that image\'s depth map. This is what "make it warmer", "add film grain", "cinematic colour grade" mean.' },
   { op: 'setLayerTornEdge', hint: 'Give a layer a TORN-PAPER edge (ragged, grain-dissolved boundary with an optional white "lip"). target = layer id; args: { patch: {...}, remove? }. patch keys: style ("ripped"=organic tear | "deckle"=soft handmade-paper edge | "shredded"=spiky rip), amount (tear depth px, ~10 subtle … 60 deep), roughness (0..1 fray detail), grain (px, edge crumble; 0 = crisp), grainTexture (0..1 paper-fibre on the lip), lipWidth (px white underside band; 0 = none), lipVariation (0..1 lip unevenness), lipColor ("#RRGGBB", warm white default), seed (integer, for a different tear). Omitted keys keep their value. remove:true removes it. This is what "torn paper edge" means.' },
   { op: 'setLayerFeather', hint: 'Feather (soften) a layer\'s edges so they fade smoothly to transparent — a soft edge-mask, uniform on all sides. target = layer id; args: { patch: {...}, remove? }. patch keys: amount (0..1, feather depth relative to the element\'s OWN size; ~0.1 subtle … 0.4 strong … 1 fades in to the centre), curve ("linear" = even fade | "smooth" = eased fade). Omitted keys keep their value. remove:true removes it. This is what "feather the edges" means.' },
@@ -1148,8 +1201,8 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
         : type === 'feather' ? sanitizeFeather(raw, cur as any)
         : type === 'drop_shadow' || type === 'inner_shadow' || type === 'layer_blur' || type === 'background_blur'
           ? sanitizeLocalEffect(type, raw, cur)
-        : type === 'trim' || type === 'offset' || type === 'round_corners' || type === 'roughen'
-          ? sanitizeGeometryEffect(type, raw, cur)
+        : isGeometryKind(type as EffectKind)
+          ? sanitizeGeometryEffect(type as GeometryEffectKind, raw, cur)
         : sanitizePostEffect(raw, cur as PostEffect | undefined)
       if (!sanitized) return { ok: false, reason: 'invalid', detail: 'invalid effect' }
       const next: Record<string, unknown> = { ...sanitized, type, visible: true }

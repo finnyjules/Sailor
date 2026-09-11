@@ -466,7 +466,72 @@ describe('setLayerEffect writes through the effect stack', () => {
   })
 
   it('still rejects an unknown effect type (no geometry allowlist regression)', () => {
-    expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'warp' } } }).ok).toBe(false)
+    expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'explode' } } }).ok).toBe(false)
     expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'sparkle' } } }).ok).toBe(false)
+  })
+
+  // ── F3 geometry kinds through the agent (boolean/morph/warp/long_shadow/shatter) ──
+
+  it('adds a boolean, coercing the op and NEVER accepting a model-supplied refLayerId (picker-only)', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'boolean', op: 'nonsense', refLayerId: 'l:evil' } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'boolean') as any
+    expect(regionOf(fx.type)).toBe('geometry')
+    expect(fx.op).toBe('unite')            // bad op coerced to the default
+    expect(fx.refLayerId).toBeUndefined()  // sibling is picker-only — the agent cannot set it
+  })
+
+  it('sets a valid boolean op but still drops a model refLayerId', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'boolean', op: 'subtract', refLayerId: 'l:x' } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'boolean') as any
+    expect(fx.op).toBe('subtract')
+    expect(fx.refLayerId).toBeUndefined()
+  })
+
+  it('preserves a user-picked boolean refLayerId across an agent op edit (never wipes the picker choice)', () => {
+    const before = rectState({ effects: [{ id: 'b1', type: 'boolean', op: 'unite', refLayerId: 'l:sib', visible: true }] })
+    const r = applyCompositorCommand(before, { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'boolean', op: 'intersect' } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'boolean') as any
+    expect(fx.op).toBe('intersect')     // agent changed the op
+    expect(fx.refLayerId).toBe('l:sib') // the picked sibling survived
+  })
+
+  it('adds a morph with a clamped amount and no model refLayerId', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'morph', amount: 5, refLayerId: 'l:x' } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'morph') as any
+    expect(fx.amount).toBe(1)              // clamped to [0, 1]
+    expect(fx.refLayerId).toBeUndefined() // picker-only
+  })
+
+  it('adds a warp, coercing the field and clamping the signed amount', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'warp', field: 'bogus', amount: -5, frequency: 2.5 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'warp') as any
+    expect(fx.field).toBe('bulge')  // unknown field → default
+    expect(fx.amount).toBe(-1)      // clamped to [-1, 1] (signed)
+    expect(fx.frequency).toBe(2.5)
+    const r2 = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'warp', field: 'wave', amount: 0.5 } } })
+    expect((effectStackOf((r2 as any).template.layers[0]).find(e => e.type === 'warp') as any).field).toBe('wave')
+  })
+
+  it('adds a long shadow with angle/length clamped and the colour kept', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'long_shadow', angle: 999, length: 3, color: 'rgba(0,0,0,0.5)' } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'long_shadow') as any
+    expect(fx.angle).toBe(360)  // clamped to [0, 360]
+    expect(fx.length).toBe(1)   // clamped to [0, 1]
+    expect(fx.color).toBe('rgba(0,0,0,0.5)')
+  })
+
+  it('adds a shatter, clamping cells to 1..96 and rounding cells/seed to integers', () => {
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'shatter', cells: 500, gap: 2, seed: 4.6 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'shatter') as any
+    expect(fx.cells).toBe(96)  // clamped to [1, 96]
+    expect(fx.gap).toBe(1)     // clamped to [0, 1]
+    expect(fx.seed).toBe(5)    // rounded to an integer
   })
 })
