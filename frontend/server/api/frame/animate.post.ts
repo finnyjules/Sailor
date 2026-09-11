@@ -18,14 +18,25 @@ import { assertRateLimit } from '../../lib/rateLimit'
 import { runFal, firstFalVideoUrl } from '../../utils/falRun'
 import { uploadToFalStorage } from '../../utils/falStorage'
 import { dataUrlBytes, lumaAspect } from '../../utils/frameAnimate'
+import { engineDirForType } from '../../utils/inputUploads'
 import { clipModel } from '~~/app/data/clip-models'
 
 interface Body { image?: string; prompt?: string; model?: string; seconds?: number }
 
+// PYTHON/SCRIPT are REPO files (the venv and scripts/ ship with the checkout), so the
+// cwd-relative guess is right for them. The clip folder is ENGINE DATA — it has to land
+// in the same `input/` the engine serves `/view` from, which `engineDirForType` resolves
+// (SAILOR_ENGINE_ROOT, else a marker walk up from cwd) and which is NOT necessarily
+// `<cwd>/../input`: a Nitro process started anywhere but `frontend/` wrote frames into a
+// directory nothing ever reads, and every clip came back as a broken folder.
 const ROOT = path.resolve(process.cwd(), '..')
 const PYTHON = path.join(ROOT, '.venv', 'bin', 'python')
 const SCRIPT = path.join(ROOT, 'scripts', 'clip_key.py')
-const CLIPS_DIR = path.join(ROOT, 'input', 'sailor_clips')
+/** Resolved per request — the engine root is env/cwd-derived, not a module constant. */
+function clipsDir(): string | null {
+  const input = engineDirForType('input')
+  return input ? path.join(input, 'sailor_clips') : null
+}
 const PROMPT_SUFFIX = (key: 'green' | 'blue') =>
   `, plain flat ${key} background, no shadows, camera locked, gentle motion`
 
@@ -59,6 +70,12 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: err.statusCode ?? 400, message: err.message ?? 'invalid image' })
   }
 
+  // Resolve the destination BEFORE spending money: an unresolvable engine root used to
+  // surface only after the model had run and been paid for, as a write to a path that
+  // did not exist.
+  const clipsRoot = clipsDir()
+  if (!clipsRoot) throw createError({ statusCode: 500, message: 'Could not find the engine input folder' })
+
   assertRateLimit(event, 'frame-animate', 6, 600_000)
 
   const seconds = spec.durations.includes(Number(body.seconds)) ? Number(body.seconds) : spec.defaultDuration
@@ -76,9 +93,14 @@ export default defineEventHandler(async (event) => {
     const keyName = keyHex === '#0000ff' ? 'blue' : 'green'
     const fullPrompt = (prompt || 'the subject moves gently') + PROMPT_SUFFIX(keyName)
 
-    // the flattened still must be a URL for both providers
     const flatBytes = await readFile(flatPath)
-    const stillUrl = await uploadToFalStorage(new Uint8Array(flatBytes), 'still.png', 'image/png')
+    // fal needs a URL it can fetch, so the flattened still goes to fal storage — but only
+    // for the fal branches. Replicate accepts a data URL directly, and pushing a still
+    // through a THIRD party's storage to reach it put the user's image somewhere the
+    // request never needed it to be (and added a failure mode on a service not otherwise
+    // involved in that call). Memoised so the two fal branches never upload twice.
+    let _falStill: Promise<string> | null = null
+    const falStillUrl = () => (_falStill ??= uploadToFalStorage(new Uint8Array(flatBytes), 'still.png', 'image/png'))
 
     // 2. the model
     //
@@ -98,12 +120,14 @@ export default defineEventHandler(async (event) => {
     // of `seconds`: a 12s Seedance clip costs the same hold as a 4s one.
     let videoUrl: string | null = null
     if (spec.id === 'seedance-2.0') {
+      const stillUrl = await falStillUrl()
       const out = await runFal('bytedance/seedance-2.0/image-to-video', {
         prompt: fullPrompt, duration: String(seconds), resolution: '720p',
         image_url: stillUrl, end_image_url: stillUrl,
       }, { pollDeadlineMs: 900_000 })
       videoUrl = firstFalVideoUrl(out)
     } else if (spec.id === 'hailuo-h3') {
+      const stillUrl = await falStillUrl()
       const out = await runFal('minimax/h3/image-to-video', {
         prompt: fullPrompt, duration: seconds, resolution: '768P', prompt_expansion_mode: 'balanced',
         image_url: stillUrl, end_image_url: stillUrl,
@@ -114,7 +138,8 @@ export default defineEventHandler(async (event) => {
       const { width, height } = await pngSize(flatBytes)
       const out = await runReplicate('luma/ray-2-720p', {
         prompt: fullPrompt, aspect_ratio: lumaAspect(width, height), duration: seconds, loop: true,
-        start_image_url: stillUrl,
+        // Replicate takes the bytes inline — no fal storage round-trip on this branch.
+        start_image_url: `data:image/png;base64,${flatBytes.toString('base64')}`,
       }, token, { timeoutMs: 900_000 })
       videoUrl = firstOutputUrl(out)
     }
@@ -126,11 +151,20 @@ export default defineEventHandler(async (event) => {
     if (!res.ok) throw createError({ statusCode: 502, message: `Could not download the clip (${res.status})` })
     await writeFile(mp4Path, Buffer.from(await res.arrayBuffer()))
     const id = `clip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    const outDir = path.join(CLIPS_DIR, id)
+    const outDir = path.join(clipsRoot, id)
     const metaLine = (await py(['key', mp4Path, stillPath, keyHex, outDir, spec.loopsItself ? '0' : '1'], 300_000))
       .split('\n').map(l => l.trim()).filter(Boolean).pop()
     const meta = JSON.parse(metaLine || '{}') as { frames?: number; fps?: number }
     if (!meta.frames || !meta.fps) throw createError({ statusCode: 500, message: 'Keying produced no frames' })
+
+    // clip_key.py knows the frame geometry, not what made it. Fold the model and prompt
+    // into the folder's own clip.json so a clip found on disk (or re-imported into another
+    // project) still says where it came from, instead of that only living in the layer.
+    const metaPath = path.join(outDir, 'clip.json')
+    try {
+      const onDisk = JSON.parse(await readFile(metaPath, 'utf8')) as Record<string, unknown>
+      await writeFile(metaPath, JSON.stringify({ ...onDisk, model: spec.id, prompt }, null, 2))
+    } catch { /* the frames are what matter; a missing/odd clip.json is not worth failing on */ }
 
     return { dir: `sailor_clips/${id}`, frames: meta.frames, fps: meta.fps, model: spec.id, prompt }
   } finally {

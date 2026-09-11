@@ -29,7 +29,9 @@ describe('CompositorAnimatePanel', () => {
     await w.find('select[data-role="model"]').setValue('hailuo-h3')
     expect(w.find('select[data-role="length"]').findAll('option').map(o => o.text())).toEqual(['5 s', '6 s', '10 s'])
     await w.find('select[data-role="length"]').setValue('10')
-    expect(w.find('button[data-role="generate"]').text()).toMatch(/\$0\.60/)   // 0.30 × 2
+    // The quote is the FLAT catalog row: the ledger holds the same amount for a 10 s
+    // Hailuo clip as for a 5 s one, so the button must say 0.30, not 0.30 x 2.
+    expect(w.find('button[data-role="generate"]').text()).toMatch(/\$0\.30/)
   })
   it('emits generate with prompt, model and seconds', async () => {
     const w = mountP(still())
@@ -43,6 +45,15 @@ describe('CompositorAnimatePanel', () => {
     const w = mountP(still(), true, 'The model returned no video')
     expect((w.find('button[data-role="generate"]').element as HTMLButtonElement).disabled).toBe(true)
     expect(w.text()).toContain('The model returned no video')
+  })
+  // Found in the browser: a clip whose model has left the catalog (renamed, retired)
+  // matched no <option>, so the select rendered BLANK and the Generate button lost its
+  // price. Prefill resolves through the catalog instead of trusting the stored string.
+  it('falls back to the first catalog model when the clip names one that is gone', () => {
+    const layer = { ...living(), clip: { ...living().clip!, model: 'gone' } }
+    const w = mountP(layer)
+    expect((w.find('select[data-role="model"]').element as HTMLSelectElement).value).toBe('luma-ray-2-720p')
+    expect(w.find('button[data-role="generate"]').text()).toMatch(/\$0\.40/)
   })
   it('with a clip: shows speed and remove, prefilled from the clip, and emits both', async () => {
     const w = mountP(living())

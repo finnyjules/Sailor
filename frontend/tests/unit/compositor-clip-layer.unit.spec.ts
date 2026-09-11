@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { clipClocks, clipFrameFor, createImageLayer, __setClipFramesForTest, type ImageLayer } from '~/composables/useCompositorLayers'
+import {
+  clipClocks, clipFrameFor, createImageLayer, sweepClipCache,
+  __setClipFramesForTest, __clipCacheKeysForTest, type ImageLayer,
+} from '~/composables/useCompositorLayers'
 import { DEFAULT_CLONER } from '~/composables/useCloner'
 
 const still = (): ImageLayer => createImageLayer('rose.png', 1)
@@ -62,5 +65,46 @@ describe('clipFrameFor', () => {
     // clip.frames is 48 — clipKey includes frames, so this must miss the cache.
     __setClipFramesForTest({ ...l.clip!, frames: 24 }, sentinels)
     expect(clipFrameFor(l, 0.5, 0, 1)).toBeNull()
+  })
+})
+
+/**
+ * The frame cache is bounded in two directions. Both matter because one clip is N
+ * full-size decoded bitmaps — a 10 s 24 fps clip at 1024px is ~240 frames, hundreds of
+ * MB — so "keep everything forever" is a leak measured in gigabytes per session.
+ *
+ * `sweepClipCache` is exercised directly rather than through `ensureLayerImages`: that
+ * function bails out immediately with no `window`, and this is a node-env file. The
+ * sweep runs BEFORE that bail in the real function, so the two agree.
+ */
+describe('clip cache bounds', () => {
+  const clipLayer = (dir: string): ImageLayer => ({
+    ...still(),
+    clip: { dir, frames: 24, fps: 24, speed: 1, prompt: 'p', model: 'seedance-2.0' },
+  })
+  const seed = (dir: string) => __setClipFramesForTest(clipLayer(dir).clip!, [{ i: 0 }])
+
+  it('drops every clip the layer list no longer references', () => {
+    sweepClipCache([])
+    seed('sailor_clips/a')
+    seed('sailor_clips/b')
+    expect(__clipCacheKeysForTest()).toEqual(['sailor_clips/a:24', 'sailor_clips/b:24'])
+    sweepClipCache([clipLayer('sailor_clips/a')])
+    expect(__clipCacheKeysForTest()).toEqual(['sailor_clips/a:24'])
+  })
+
+  it('a still-only layer list clears the cache entirely', () => {
+    sweepClipCache([])
+    seed('sailor_clips/a')
+    sweepClipCache([still()])
+    expect(__clipCacheKeysForTest()).toEqual([])
+  })
+
+  it('keeps only the two newest clips', () => {
+    sweepClipCache([])
+    seed('sailor_clips/a')
+    seed('sailor_clips/b')
+    seed('sailor_clips/c')
+    expect(__clipCacheKeysForTest()).toEqual(['sailor_clips/b:24', 'sailor_clips/c:24'])
   })
 })

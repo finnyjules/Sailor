@@ -15,9 +15,14 @@ describe('clip models', () => {
   it('only Luma loops by itself', () => {
     expect(CLIP_MODELS.filter(m => m.loopsItself).map(m => m.id)).toEqual(['luma-ray-2-720p'])
   })
-  it('prices scale with length from the 5 s row', () => {
-    expect(clipPriceUsd('seedance-2.0', 5)).toBeCloseTo(0.6)
-    expect(clipPriceUsd('seedance-2.0', 10)).toBeCloseTo(1.2)
-    expect(clipPriceUsd('nope', 5)).toBeNull()
+  // The hold the ledger takes is the flat MODEL_COSTS row for the slug regardless of
+  // `seconds` (see the metering note in server/api/frame/animate.post.ts), so the quote
+  // on the button must be that same flat number — a length-scaled quote promised a price
+  // that was never charged.
+  it('price is the flat catalog row regardless of length', () => {
+    expect(clipPriceUsd('seedance-2.0')).toBeCloseTo(0.6)
+    expect(clipPriceUsd('hailuo-h3')).toBeCloseTo(0.3)
+    expect(clipPriceUsd('luma-ray-2-720p')).toBeCloseTo(0.4)
+    expect(clipPriceUsd('nope')).toBeNull()
   })
 })

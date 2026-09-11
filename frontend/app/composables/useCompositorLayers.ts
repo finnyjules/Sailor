@@ -1112,6 +1112,49 @@ const _clipLoading = new Map<string, Promise<void>>()
 // the still keeps painting either way, which is the intended fallback.
 const _clipFailed = new Set<string>()
 const CLIP_LOAD_PARALLEL = 8
+// How many whole decoded clips may sit in memory at once. A clip is N full-size RGBA
+// bitmaps (a 10 s 24 fps 1024px clip is ~240 frames ≈ 1 GB decoded), so an unbounded
+// Map was a leak with a frame budget: every clip a session ever generated stayed
+// resident. Two is enough for the one being edited plus the one it was compared to.
+const CLIP_CACHE_MAX = 2
+
+/** Insert with an oldest-first eviction, so `_clipCache` never holds more than
+ *  CLIP_CACHE_MAX clips. Map iteration order IS insertion order, so the first key is
+ *  the oldest — re-inserting an existing key keeps its original position, which is
+ *  fine here: a key already cached is by definition not the one to drop. */
+function putClipFrames(key: string, frames: HTMLImageElement[]): void {
+  _clipCache.set(key, frames)
+  while (_clipCache.size > CLIP_CACHE_MAX) {
+    const oldest = _clipCache.keys().next()
+    if (oldest.done) break
+    _clipCache.delete(oldest.value)
+  }
+}
+
+/**
+ * Drop every cached clip the given layers no longer reference. Both callers of
+ * `ensureLayerImages` (the modal and the Frame card) pass the FULL layer list, so a key
+ * that is not referenced is a clip that was removed, regenerated, or whose layer is
+ * gone — keeping its frames alive only costs memory. `_clipFailed` is swept the same
+ * way, so a folder that is repaired (or a layer re-pointed at a good one) gets a fresh
+ * attempt instead of being blacklisted for the life of the tab.
+ *
+ * Exported for the unit suite: `ensureLayerImages` returns early with no `window`, so
+ * this is the only way to exercise the sweep in a node-env test.
+ */
+export function sweepClipCache(layers: LocalLayer[]): void {
+  const live = new Set<string>()
+  for (const l of layers) {
+    if (l.kind === 'image' && l.clip) live.add(clipKey(l.clip))
+  }
+  for (const key of [..._clipCache.keys()]) if (!live.has(key)) _clipCache.delete(key)
+  for (const key of [..._clipFailed]) if (!live.has(key)) _clipFailed.delete(key)
+}
+
+/** Test seam: the clip keys currently resident, oldest first. */
+export function __clipCacheKeysForTest(): string[] {
+  return [..._clipCache.keys()]
+}
 
 function clipKey(clip: ImageClip): string {
   return `${clip.dir}:${clip.frames}`
@@ -1136,8 +1179,11 @@ async function loadClip(clip: ImageClip): Promise<void> {
   const key = clipKey(clip)
   // One missing frame = a broken folder: keep the still rather than a stuttering loop,
   // and remember the key so `ensureClip` stops re-fetching it on every call.
-  if (out.every(Boolean)) _clipCache.set(key, out as HTMLImageElement[])
-  else _clipFailed.add(key)
+  if (out.every(Boolean)) putClipFrames(key, out as HTMLImageElement[])
+  else {
+    _clipFailed.add(key)
+    console.warn('[Frame] clip folder incomplete, keeping the still', clip.dir)
+  }
 }
 
 function ensureClip(clip: ImageClip): Promise<void> {
@@ -1165,7 +1211,7 @@ export function clipFrameFor(layer: LocalLayer, tSec: number, k: number, n: numb
  *  `Image` loader. A plain array of sentinels is enough — `clipFrameFor` only ever
  *  indexes into whatever is here. */
 export function __setClipFramesForTest(clip: ImageClip, frames: unknown[]): void {
-  _clipCache.set(clipKey(clip), frames as HTMLImageElement[])
+  putClipFrames(clipKey(clip), frames as HTMLImageElement[])
 }
 
 /** One clock per living image, in the shape `deriveMasterClock` takes. Played length,
@@ -1196,6 +1242,9 @@ export function collectFillImageSrcs(layers: LocalLayer[]): string[] {
  *  `drawLocalLayer` can paint it. Resolves once all are loaded (or errored). Also
  *  loads each image layer's clip frames (see above), when it has one. */
 export async function ensureLayerImages(layers: LocalLayer[]): Promise<void> {
+  // Before anything else, and before the no-DOM bail: a layer list that no longer
+  // names a clip is the signal that its frames can go (see sweepClipCache).
+  sweepClipCache(layers)
   if (typeof window === 'undefined') return
   const jobs: Promise<unknown>[] = []
   for (const layer of layers) {
@@ -1244,7 +1293,7 @@ let _fieldCtx: ShaderFieldFrameCtx = { frameW: 1, frameH: 1, t: 0, fps: 30, base
 
 /** The clone being painted right now (set by paintLayer's cloner loop, read by the
  *  image branch of drawLayerContent). Outside a cloner loop it is the original alone. */
-let _cloneSlot = { k: 0, n: 1 }
+const _cloneSlot = { k: 0, n: 1 }
 
 // Frame slice F3: the current stack's sibling-outline resolver, bound to the live layer list at
 // paintLayerStack time (module-global like `_fieldCtx`, for the same reason: `drawLayerContent`
@@ -2430,8 +2479,16 @@ function paintLayer(
   // cloner ⇒ a single identity transform ⇒ one paint exactly as before. Falloff
   // offset/rotation/scale fold into the layer's own translate/rotate/scale so
   // the rotation+scale pivot stays the layer center.
+  // `_cloneSlot` is a STABLE object mutated in place (not a fresh literal per copy): a
+  // cloner with hundreds of copies allocated one short-lived object per copy per frame,
+  // and nothing holds a reference to it across the loop. The `finally` puts it back to
+  // the original-alone slot even if a copy throws mid-paint, so the next layer can never
+  // inherit a stale clone index (which for a living image is a visibly wrong frame).
+  // (The loop body below is deliberately left at its original indentation so this wrap
+  // stays a two-line diff in a file several sessions edit at once.)
+  try {
   for (const c of expandClones(layer.cloner, W / H)) {
-    _cloneSlot = { k: c.k, n: c.n }
+    _cloneSlot.k = c.k; _cloneSlot.n = c.n
     const lx = layer.x + c.dx
     const ly = layer.y + c.dy
     const lrot = layer.rotation + c.drot
@@ -2602,7 +2659,9 @@ function paintLayer(
     drawContent(ctx)
     ctx.restore()
   }
-  _cloneSlot = { k: 0, n: 1 }
+  } finally {
+    _cloneSlot.k = 0; _cloneSlot.n = 1
+  }
 }
 
 /**

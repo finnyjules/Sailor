@@ -22,6 +22,7 @@ import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf, mosaicStylePatch, 
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
 import { onFieldCatalogReady } from '~/lib/shaderfill/field'
 import { onCompositorFontReady } from '~/lib/compositor/textOutline'
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN } from '~/lib/compositor/clip'
 import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, panePalette, paneInkPatch, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
@@ -647,7 +648,10 @@ async function animateLayer(layer: any, opts: { prompt: string; model: string; s
 }
 function setClipSpeed(layer: any, speed: number) {
   if (!layer?.clip) return
-  setLocal(layer.id, { clip: { ...layer.clip, speed: Math.max(0.25, Math.min(4, speed)) } } as any)
+  // Clamp to the SAME constants the Speed slider's min/max come from (lib/compositor/clip)
+  // — the literals that used to sit here were a second copy of the range, free to drift
+  // away from the control that feeds it.
+  setLocal(layer.id, { clip: { ...layer.clip, speed: Math.max(CLIP_SPEED_MIN, Math.min(CLIP_SPEED_MAX, speed)) } } as any)
 }
 function removeClip(layer: any) { if (layer?.clip) setLocal(layer.id, { clip: undefined } as any) }
 const {

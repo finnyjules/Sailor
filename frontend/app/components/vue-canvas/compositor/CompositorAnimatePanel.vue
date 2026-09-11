@@ -15,19 +15,30 @@ const emit = defineEmits<{
   remove: []
 }>()
 
+// Prefill through `clipModel`, never from the stored string directly: a clip made by a
+// model that has since left the catalog (an id the <select> offers no option for) left
+// the select BLANK and the price missing — v-model with no matching option renders
+// nothing. Resolving to the first catalog row keeps the control and its price real.
+const resolveModelId = (stored: string | undefined) => clipModel(stored ?? '')?.id ?? CLIP_MODELS[0]!.id
+
 const prompt = ref(props.layer.clip?.prompt ?? '')
-const model = ref(props.layer.clip?.model ?? CLIP_MODELS[0]!.id)
+const model = ref(resolveModelId(props.layer.clip?.model))
 const seconds = ref(clipModel(model.value)?.defaultDuration ?? 5)
 
 const spec = computed(() => clipModel(model.value) ?? CLIP_MODELS[0]!)
 watch(model, () => { if (!spec.value.durations.includes(seconds.value)) seconds.value = spec.value.defaultDuration })
 watch(() => props.layer.id, () => {
   prompt.value = props.layer.clip?.prompt ?? ''
-  model.value = props.layer.clip?.model ?? CLIP_MODELS[0]!.id
+  model.value = resolveModelId(props.layer.clip?.model)
+  // The `model` watcher above only fires when the id CHANGES; selecting a layer whose
+  // model happens to match the one already showing leaves a length the new model may
+  // not offer (a 12 s Seedance length on a Luma layer), so re-check it here too.
+  if (!spec.value.durations.includes(seconds.value)) seconds.value = spec.value.defaultDuration
 })
 
+// Flat per-clip price — see clipPriceUsd: the hold does not scale with length.
 const price = computed(() => {
-  const usd = clipPriceUsd(model.value, seconds.value)
+  const usd = clipPriceUsd(model.value)
   return usd == null ? '' : `$${usd.toFixed(2)}`
 })
 const hasClip = computed(() => !!props.layer.clip)
