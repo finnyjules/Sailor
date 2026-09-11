@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dataUrlBytes, MAX_IMAGE_BYTES, lumaAspect } from '../../server/utils/frameAnimate'
+import { dataUrlBytes, MAX_IMAGE_BYTES } from '../../server/utils/frameAnimate'
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 
@@ -28,13 +28,5 @@ describe('dataUrlBytes', () => {
   it('rejects a decoded buffer over the 12 MB cap with a 413', () => {
     const url = pngDataUrl(MAX_IMAGE_BYTES + 1)
     expect(() => dataUrlBytes(url)).toThrow(expect.objectContaining({ statusCode: 413 }))
-  })
-})
-
-describe('lumaAspect', () => {
-  it('picks the closest Luma aspect ratio to the still', () => {
-    expect(lumaAspect(1024, 1024)).toBe('1:1')
-    expect(lumaAspect(1920, 1080)).toBe('16:9')
-    expect(lumaAspect(1080, 1920)).toBe('9:16')
   })
 })

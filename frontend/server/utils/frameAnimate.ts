@@ -3,7 +3,7 @@
  * (server/api/frame/animate.post.ts). Kept in their own module so they can
  * be unit-tested under plain vitest: the route itself calls
  * defineEventHandler/createError/readBody at module scope (Nitro
- * auto-imports absent under vitest) and pulls in runFal/runReplicate/
+ * auto-imports absent under vitest) and pulls in runFal/
  * uploadToFalStorage, which touch the ledger, moderation and env at import
  * time — importing the route module directly would drag all of that in.
  * These two functions have none of that.
@@ -24,7 +24,6 @@ export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
 const PNG_DATA_URL_PREFIX = 'data:image/png;base64,'
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
-const LUMA_AR = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const
 
 function validationError(message: string, statusCode: number): Error {
   return Object.assign(new Error(message), { statusCode })
@@ -46,16 +45,4 @@ export function dataUrlBytes(dataUrl: string): Buffer {
     if (bytes[i] !== PNG_MAGIC[i]) throw validationError('image must be a PNG data URL', 400)
   }
   return bytes
-}
-
-/** Closest Luma aspect to the still (Luma needs one even for image-to-video). */
-export function lumaAspect(w: number, h: number): string {
-  const r = w / Math.max(1, h)
-  let best = LUMA_AR[0] as string, err = Infinity
-  for (const ar of LUMA_AR) {
-    const [a, b] = ar.split(':').map(Number)
-    const e = Math.abs(Math.log(r / (a / b)))
-    if (e < err) { err = e; best = ar }
-  }
-  return best
 }

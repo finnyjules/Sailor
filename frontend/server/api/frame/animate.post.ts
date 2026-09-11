@@ -2,11 +2,11 @@
  * Animate a Frame image layer: make a looping, transparent clip from a still.
  *
  *   1. flatten the RGBA still onto a key colour (scripts/clip_key.py flatten)
- *   2. call the video model with the still as first AND last frame (Luma: loop flag)
+ *   2. call the video model with the still as first AND last frame
  *   3. key every returned frame back to transparency (scripts/clip_key.py key)
  *   4. write input/sailor_clips/<id>/000000.png … + clip.json
  *
- * The model call goes through runFal / runReplicate so the ledger hold, prompt
+ * The model call goes through runFal so the ledger hold, prompt
  * moderation, polling and release-on-failure are the shared ones. The Python steps
  * are execFile'd from the repo venv, like voice-clone/from-youtube.
  */
@@ -17,7 +17,7 @@ import path from 'node:path'
 import { assertRateLimit } from '../../lib/rateLimit'
 import { runFal, firstFalVideoUrl } from '../../utils/falRun'
 import { uploadToFalStorage } from '../../utils/falStorage'
-import { dataUrlBytes, lumaAspect } from '../../utils/frameAnimate'
+import { dataUrlBytes } from '../../utils/frameAnimate'
 import { engineDirForType } from '../../utils/inputUploads'
 import { clipModel } from '~~/app/data/clip-models'
 
@@ -53,7 +53,7 @@ export default defineEventHandler(async (event) => {
   // Validate BEFORE rate-limiting (review fix): assertRateLimit used to run
   // first, so six malformed requests (bad image, unknown model, junk PNG)
   // burned the whole 6-per-10-min budget and locked the user out for real
-  // attempts. dataUrlBytes/lumaAspect live in server/utils/frameAnimate.ts —
+  // attempts. dataUrlBytes lives in server/utils/frameAnimate.ts —
   // h3-free pure helpers, unit-tested directly in
   // tests/unit/frame-animate-validation.unit.spec.ts — and throw PLAIN Error
   // objects carrying a `statusCode`, so re-wrap via createError here to keep
@@ -94,11 +94,8 @@ export default defineEventHandler(async (event) => {
     const fullPrompt = (prompt || 'the subject moves gently') + PROMPT_SUFFIX(keyName)
 
     const flatBytes = await readFile(flatPath)
-    // fal needs a URL it can fetch, so the flattened still goes to fal storage — but only
-    // for every branch. Luma on Replicate REFUSES a data URL for its start image
-    // ("Start image must start with http:// or https://", E006, seen live 2026-09-10),
-    // and the repo has no Replicate file-upload helper, so the flattened still goes
-    // through fal's public storage for Luma too. Memoised so no branch uploads twice.
+    // fal needs a URL it can fetch, so the flattened still goes to fal storage once,
+    // memoised so no branch uploads twice.
     let _falStill: Promise<string> | null = null
     const falStillUrl = () => (_falStill ??= uploadToFalStorage(new Uint8Array(flatBytes), 'still.png', 'image/png'))
 
@@ -107,7 +104,7 @@ export default defineEventHandler(async (event) => {
     // Metering (review fix, finding 1): server/utils/priceBook.ts's
     // MODEL_COSTS now carries a flat row for each of the three exact slugs
     // dispatched below, priced from the 5s row in app/data/video-prices.ts —
-    // without those rows preflightMeter (inside runFal/runReplicate) refused
+    // without those rows preflightMeter (inside runFal) refused
     // every call with "unpriced model refused" before any request could ever
     // resolve credits, let alone reach the model. A duration-aware hold
     // (credits scaled by `seconds` via clipPriceUsd + setMeterPriceHint) was
@@ -133,15 +130,6 @@ export default defineEventHandler(async (event) => {
         image_url: stillUrl, end_image_url: stillUrl,
       }, { pollDeadlineMs: 900_000 })
       videoUrl = firstFalVideoUrl(out)
-    } else {
-      const token = requireReplicateToken()
-      const { width, height } = await pngSize(flatBytes)
-      const out = await runReplicate('luma/ray-2-720p', {
-        prompt: fullPrompt, aspect_ratio: lumaAspect(width, height), duration: seconds, loop: true,
-        // A public https URL: Luma rejects an inline data URL (see the note above).
-        start_image_url: await falStillUrl(),
-      }, token, { timeoutMs: 900_000 })
-      videoUrl = firstOutputUrl(out)
     }
     if (!videoUrl) throw createError({ statusCode: 502, message: 'The model returned no video' })
 
@@ -152,7 +140,7 @@ export default defineEventHandler(async (event) => {
     await writeFile(mp4Path, Buffer.from(await res.arrayBuffer()))
     const id = `clip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
     const outDir = path.join(clipsRoot, id)
-    const metaLine = (await py(['key', mp4Path, stillPath, keyHex, outDir, spec.loopsItself ? '0' : '1'], 300_000))
+    const metaLine = (await py(['key', mp4Path, stillPath, keyHex, outDir, '1' /* first == last frame on both models: drop the returning frame */], 300_000))
       .split('\n').map(l => l.trim()).filter(Boolean).pop()
     const meta = JSON.parse(metaLine || '{}') as { frames?: number; fps?: number }
     if (!meta.frames || !meta.fps) throw createError({ statusCode: 500, message: 'Keying produced no frames' })
@@ -171,9 +159,3 @@ export default defineEventHandler(async (event) => {
     await rm(tmp, { recursive: true, force: true }).catch(() => {})
   }
 })
-
-/** PNG header width/height (IHDR is always the first chunk). */
-async function pngSize(bytes: Buffer): Promise<{ width: number; height: number }> {
-  if (bytes.length < 24) return { width: 1, height: 1 }
-  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
-}

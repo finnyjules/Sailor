@@ -32,7 +32,7 @@ watch(() => props.layer.id, () => {
   model.value = resolveModelId(props.layer.clip?.model)
   // The `model` watcher above only fires when the id CHANGES; selecting a layer whose
   // model happens to match the one already showing leaves a length the new model may
-  // not offer (a 12 s Seedance length on a Luma layer), so re-check it here too.
+  // not offer (a 12 s Seedance length on a Hailuo layer), so re-check it here too.
   if (!spec.value.durations.includes(seconds.value)) seconds.value = spec.value.defaultDuration
 })
 

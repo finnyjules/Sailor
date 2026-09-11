@@ -17,10 +17,10 @@ describe('CompositorAnimatePanel', () => {
     const w = mountP(still())
     expect(w.find('textarea, input[type="text"]').exists()).toBe(true)
     const models = w.find('select[data-role="model"]')
-    expect(models.findAll('option').map(o => o.text())).toEqual(['Luma, loops by itself', 'Seedance', 'Hailuo'])
+    expect(models.findAll('option').map(o => o.text())).toEqual(['Seedance 2.0', 'Hailuo H3'])
     const btn = w.find('button[data-role="generate"]')
     expect(btn.text()).toMatch(/Generate/)
-    expect(btn.text()).toMatch(/\$0\.40/)          // Luma default, 5 s
+    expect(btn.text()).toMatch(/\$0\.60/)          // Seedance default, 5 s
     expect(w.find('[data-role="speed"]').exists()).toBe(false)
     expect(w.find('button[data-role="remove"]').exists()).toBe(false)
   })
@@ -52,8 +52,8 @@ describe('CompositorAnimatePanel', () => {
   it('falls back to the first catalog model when the clip names one that is gone', () => {
     const layer = { ...living(), clip: { ...living().clip!, model: 'gone' } }
     const w = mountP(layer)
-    expect((w.find('select[data-role="model"]').element as HTMLSelectElement).value).toBe('luma-ray-2-720p')
-    expect(w.find('button[data-role="generate"]').text()).toMatch(/\$0\.40/)
+    expect((w.find('select[data-role="model"]').element as HTMLSelectElement).value).toBe('seedance-2.0')
+    expect(w.find('button[data-role="generate"]').text()).toMatch(/\$0\.60/)
   })
   it('with a clip: shows speed and remove, prefilled from the clip, and emits both', async () => {
     const w = mountP(living())
