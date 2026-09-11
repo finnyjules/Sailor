@@ -161,8 +161,6 @@ import CanvasContextMenu, { type MenuItem } from '~/components/vue-canvas/Canvas
 import type { TextPathSpec, TextPathFollow } from '~/lib/compositor/textPath'
 import { genGestureDefaults, genBoxIsValid, genBarPlacement } from '~/lib/compositor/genGesture'
 import { shapeById } from '~/lib/shapes/catalog'
-import { materialById } from '~/lib/shapes/materials'
-import { getEffectSync, refetchShaderFxCatalog } from '~/lib/shaderfx/catalogStore'
 import { createShapeLayer, swapShapeLayer } from '~/lib/shapes/pathLayer'
 import { SHAPE_PICKER_WIDTH, anchorAbove } from '~/lib/shapes/pickerLayout'
 import type { Component, ComputedRef } from 'vue'
@@ -5817,37 +5815,13 @@ function openLibraryPicker() {
   shapesMenuOpen.value = false
   libraryPickerOpen.value = true
 }
-/** A shape from the library stamps a new layer (and becomes the face). A MATERIAL
- *  from the library's Material section dresses the selected shape instead — its fill
- *  becomes the material's shader fill, reading the layers behind so the Frame hands
- *  the shader the shape's own silhouette — or, with no shape selected, stamps a
- *  library circle wearing it. One undo step either way (setLocal / addLocal). */
-async function onLibraryPick(id: string) {
-  const m = materialById(id)
-  if (m) {
-    // The paint decides "is this a glass pane?" from the sync effect catalog. A tab
-    // whose catalog was fetched before this material's effect existed would fail
-    // that gate, fall to the plain fill path and paint the effect's stand-alone
-    // circle clipped to the shape — so make sure the catalog knows the effect
-    // BEFORE the fill is written and first painted.
-    if (!getEffectSync(m.fill.shader!.effectId)) {
-      try { await refetchShaderFxCatalog() } catch { /* offline: the plain path's own self-heal retries */ }
-    }
-    const l = selectedLocal.value
-    if (l && MATERIAL_KINDS.has(l.kind)) { setLocal(l.id, { fill: structuredClone(m.fill) }); return }
-    const circle = shapeById('circle')
-    if (!circle) return
-    addLocal({ ...createShapeLayer(circle), fill: structuredClone(m.fill) })
-    return
-  }
+function onLibraryPick(id: string) {
   const s = shapeById(id)
   if (!s) return
   libraryShapeId.value = id
   shapeFace.value = 'library'
   addLocal(createShapeLayer(s))
 }
-/** The layer kinds whose `.fill` a material can dress — the glass-capable ones (see isGlassLayer). */
-const MATERIAL_KINDS = new Set(['rect', 'ellipse', 'polygon', 'star', 'path', 'brush'])
 const INSERT_ICONS: Record<ToolbarInsertId, Component> = {
   upload: ImagePlus, canvas: LayoutGrid, svg: FileUp,
 }
@@ -7152,7 +7126,6 @@ onUnmounted(() => {
             v-if="libraryPickerOpen"
             :model-value="libraryShapeId ?? 'none'"
             :allow-none="false"
-            :materials="true"
             :anchor="libraryPickerAnchor"
             :ignore="shapesClusterRef"
             @update:model-value="onLibraryPick"
