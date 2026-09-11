@@ -123,11 +123,23 @@ export default defineEventHandler(async (event) => {
         image_url: stillUrl, end_image_url: stillUrl,
       }, { pollDeadlineMs: 900_000 })
       videoUrl = firstFalVideoUrl(out)
-    } else if (spec.id === 'hailuo-h3') {
+    } else if (spec.id === 'hailuo-h3' || spec.id === 'hailuo-h3-max') {
+      // Same payload on both H3 endpoints: INTEGER duration, uppercase-P resolution,
+      // prompt_expansion_mode required (Max's enum has no 'fast'; 'balanced' is on both).
       const stillUrl = await falStillUrl()
-      const out = await runFal('minimax/h3/image-to-video', {
+      const app = spec.id === 'hailuo-h3-max' ? 'minimax/h3-max/image-to-video' : 'minimax/h3/image-to-video'
+      const out = await runFal(app, {
         prompt: fullPrompt, duration: seconds, resolution: '768P', prompt_expansion_mode: 'balanced',
         image_url: stillUrl, end_image_url: stillUrl,
+      }, { pollDeadlineMs: 900_000 })
+      videoUrl = firstFalVideoUrl(out)
+    } else if (spec.id === 'kling-v3-pro') {
+      // Kling names its frames start_/end_image_url, takes duration as a STRING enum
+      // ("3".."15"), and generates audio by default — off, a loop has no use for it.
+      const stillUrl = await falStillUrl()
+      const out = await runFal('fal-ai/kling-video/v3/pro/image-to-video', {
+        prompt: fullPrompt, duration: String(seconds), generate_audio: false,
+        start_image_url: stillUrl, end_image_url: stillUrl,
       }, { pollDeadlineMs: 900_000 })
       videoUrl = firstFalVideoUrl(out)
     }

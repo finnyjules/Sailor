@@ -4,7 +4,7 @@
 // once a clip exists, Speed + Remove clip. Pure presentation — the modal owns the call.
 import { computed, ref, watch } from 'vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
-import { CLIP_MODELS, clipModel, clipPriceUsd } from '~/data/clip-models'
+import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceUsd } from '~/data/clip-models'
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN } from '~/lib/compositor/clip'
 import type { ImageLayer } from '~/composables/useCompositorLayers'
 
@@ -56,7 +56,7 @@ const fieldCls = 'w-full bg-white/[0.04] border border-white/[0.06] rounded px-2
       <div>
         <div class="panel-label mb-1.5">Model</div>
         <select v-model="model" data-role="model" :class="fieldCls">
-          <option v-for="m in CLIP_MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
+          <option v-for="m in CLIP_MODELS" :key="m.id" :value="m.id">{{ clipModelLabel(m) }}</option>
         </select>
       </div>
       <div>
