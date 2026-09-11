@@ -7,6 +7,14 @@
  * Fixed chain order (applyEffectChain is the single source of truth):
  *   adjust → duotone → gradientMap → bloom → vignette → grain
  */
+import {
+  applyRoughEdgeToData, applyInkBleedToData,
+  ROUGH_EDGE_MAX_W, INK_BLEED_MAX_W,
+} from './edgeDistort'
+
+// Re-exported so the offscreen-pad helper (useCompositorLayers.ts) and its tests read the SAME
+// outward-reach constants the passes below use, mirroring how MOTION_BLUR_SAMPLES is shared.
+export { ROUGH_EDGE_MAX_W, INK_BLEED_MAX_W }
 
 export interface AdjustEffect {
   type: 'adjust'
@@ -215,7 +223,31 @@ export interface InvertEffect {
   amount: number      // 0..1 — how far toward the inverted colour
   visible: boolean
 }
-export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect | DirectionalBlurEffect | RadialBlurEffect | ZoomBlurEffect | LevelsEffect | PosteriseEffect | ThresholdEffect | InvertEffect
+/** Rough edge: jitter the layer's rasterised alpha boundary in AND out with a seeded noise field.
+ *  `amount` is the jitter amplitude (0..1, normalised to canvas width via ROUGH_EDGE_MAX_W),
+ *  `detail` the noise frequency (1..32 — higher = finer raggedness), `seed` the deterministic
+ *  variation. Grows OUTSIDE the alpha by the amplitude (folded into the offscreen pad via
+ *  `edgeDistortOutwardPx`). Deterministic: a seeded value-noise field, no randomness. */
+export interface RoughEdgeEffect {
+  type: 'rough_edge'
+  amount: number      // 0..1 — jitter amplitude, normalised to canvas width
+  detail: number      // 1..32 — noise frequency (finer edge at higher values)
+  seed: number        // deterministic — same seed = same edge
+  visible: boolean
+}
+/** Ink bleed: an organic, blotchy OUTWARD spread of the alpha, as ink soaking into paper. `amount`
+ *  is the spread reach (0..1, normalised to canvas width via INK_BLEED_MAX_W), `softness` (0..1)
+ *  feathers the outer boundary, `seed` the deterministic blotch pattern. ADDITIVE + OUTWARD only —
+ *  never erodes the interior — so it always grows the silhouette (folded into the offscreen pad via
+ *  `edgeDistortOutwardPx`). Deterministic: a seeded fbm field, no randomness. */
+export interface InkBleedEffect {
+  type: 'ink_bleed'
+  amount: number      // 0..1 — outward spread reach, normalised to canvas width
+  seed: number        // deterministic — same seed = same bleed
+  softness: number    // 0..1 — feathered outer boundary width (0 = crisp)
+  visible: boolean
+}
+export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect | DirectionalBlurEffect | RadialBlurEffect | ZoomBlurEffect | LevelsEffect | PosteriseEffect | ThresholdEffect | InvertEffect | RoughEdgeEffect | InkBleedEffect
 
 export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   adjust: { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
@@ -258,6 +290,10 @@ export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   threshold: { type: 'threshold', cutoff: 0.5, visible: true },
   // Full invert — visibly flips the colours the moment it is added; amount tunes it.
   invert: { type: 'invert', amount: 1, visible: true },
+  // A clearly ragged edge at a medium detail the moment it is added; amount / detail / seed tune it.
+  rough_edge: { type: 'rough_edge', amount: 0.5, detail: 8, seed: 1, visible: true },
+  // A soft outward bleed at a readable reach the moment it is added; amount / seed / softness tune it.
+  ink_bleed: { type: 'ink_bleed', amount: 0.4, seed: 1, softness: 0.3, visible: true },
 }
 export function defaultPostEffect(type: PostEffect['type']): PostEffect {
   return JSON.parse(JSON.stringify(POST_EFFECT_DEFAULTS[type])) as PostEffect
@@ -295,9 +331,13 @@ export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]
   posterise: { levels: [2, 32] },
   threshold: { cutoff: [0, 1] },
   invert: { amount: [0, 1] },
+  // Every edge-distortion param is numeric (seed included, so the agent can shuffle it), so the
+  // generic sanitizer drives both fully — no Task-8 whitelist is needed for this family.
+  rough_edge: { amount: [0, 1], detail: [1, 32], seed: [0, 1e9] },
+  ink_bleed: { amount: [0, 1], softness: [0, 1], seed: [0, 1e9] },
 }
 
-const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert'])
+const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert', 'rough_edge', 'ink_bleed'])
 export const isChainEffect = (e: { type: string }): e is PostEffect => CHAIN_TYPES.has(e.type)
 export const chainActive = (effects?: { type: string; visible?: boolean }[]): boolean =>
   !!effects?.some(e => e.visible !== false && CHAIN_TYPES.has(e.type))
@@ -973,10 +1013,36 @@ function passZoomBlur(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: 
   ctx.restore()
 }
 
+/** Rough edge: read the offscreen, jitter its alpha boundary in/out by a seeded noise field, write
+ *  it back. The kernel (`applyRoughEdgeToData`, edgeDistort.ts) reuses tornEdge's distance-transform
+ *  + seeded-noise technique. `amount ≤ 0` is a no-op. Deterministic: seeded, no randomness. */
+function passRoughEdge(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: RoughEdgeEffect, opts: PassOpts): void {
+  if (!(clamp01(e.amount ?? 0) > 0)) return
+  const img = ctx.getImageData(0, 0, off.width, off.height)
+  applyRoughEdgeToData(img.data, off.width, off.height, e, opts.scale ?? 1)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.putImageData(img, 0, 0)
+  ctx.restore()
+}
+
+/** Ink bleed: read the offscreen, spread its alpha OUTWARD in seeded blotches, write it back. The
+ *  kernel (`applyInkBleedToData`, edgeDistort.ts) never touches the interior, so it only grows the
+ *  silhouette. `amount ≤ 0` is a no-op. Deterministic: seeded, no randomness. */
+function passInkBleed(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: InkBleedEffect, opts: PassOpts): void {
+  if (!(clamp01(e.amount ?? 0) > 0)) return
+  const img = ctx.getImageData(0, 0, off.width, off.height)
+  applyInkBleedToData(img.data, off.width, off.height, e, opts.scale ?? 1)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.putImageData(img, 0, 0)
+  ctx.restore()
+}
+
 /** The kinds this module owns as 2D passes over a layer/document offscreen. Everything
  *  else in a layer's stack (inner shadow, torn edge, feather, layer blur, drop shadow,
  *  background blur, dof) is applied by the caller at its own structural position. */
-const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert'])
+const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert', 'rough_edge', 'ink_bleed'])
 
 /**
  * Apply passes in ARRAY ORDER — the per-layer entry point. Order is the caller's, so the
@@ -1012,6 +1078,8 @@ export function applyPasses(
       case 'posterise': passPosterise(ctx, off, e as unknown as PosteriseEffect, opts); break
       case 'threshold': passThreshold(ctx, off, e as unknown as ThresholdEffect, opts); break
       case 'invert': passInvert(ctx, off, e as unknown as InvertEffect, opts); break
+      case 'rough_edge': passRoughEdge(ctx, off, e as unknown as RoughEdgeEffect, opts); break
+      case 'ink_bleed': passInkBleed(ctx, off, e as unknown as InkBleedEffect, opts); break
     }
   }
 }
@@ -1061,7 +1129,10 @@ export function applyBlurPass(off: HTMLCanvasElement, radiusPx: number): void {
 // then reshape the luminance curve (remap / band / clip / flip), and the colour maps read that
 // reshaped luminance to place colour. Grouped and ordered levels→posterise→threshold→invert, the
 // gentlest tonal move to the harshest.
-const CHAIN_ORDER = ['inner_glow', 'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'bloom', 'vignette', 'grain', 'outer_glow']
+// The edge distortions (rough_edge → ink_bleed) run FIRST of all: they reshape the layer's alpha
+// silhouette, and every silhouette-derived pass after them — inner/outer glow, the alpha-clipped
+// overlays, stroke-from-alpha — must read the reshaped edge, not the clean one.
+const CHAIN_ORDER = ['rough_edge', 'ink_bleed', 'inner_glow', 'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'bloom', 'vignette', 'grain', 'outer_glow']
 
 /**
  * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type (the first VISIBLE

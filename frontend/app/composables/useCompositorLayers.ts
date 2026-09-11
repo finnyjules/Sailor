@@ -68,6 +68,7 @@ import {
   applyBlurPass, applyPasses, applyStackPost, chainActive,
   strokeAlphaAlignOf, strokeAlphaBand,
   MOTION_BLUR_SAMPLES, RADIAL_BLUR_MAX_ANGLE, ZOOM_BLUR_MAX_SCALE, motionSampleSpan,
+  ROUGH_EDGE_MAX_W, INK_BLEED_MAX_W,
   type AdjustEffect, type BloomEffect, type DofEffect, type DuotoneEffect,
   type GradientMapEffect, type GrainEffect, type PostEffect, type VignetteEffect,
 } from '~/lib/compositor/postEffects'
@@ -1763,6 +1764,37 @@ export function motionBlurOutwardPx(layer: LocalLayer, W: number, box: { w: numb
 }
 
 /**
+ * How far a layer's ENABLED edge-distortion effects push the alpha OUTSIDE the silhouette, logical
+ * px — the MAX outward reach across `rough_edge` (jitter amplitude `amount·ROUGH_EDGE_MAX_W·W`) and
+ * `ink_bleed` (spread reach `amount·INK_BLEED_MAX_W·W`) (0 with none). Reads the SAME normalised-to-
+ * width constants the passes use, so the pad and the pass agree; ink bleed's blotch factor is ≤ 1
+ * and softness feathers WITHIN the reach, so `amount·INK_BLEED_MAX_W·W` is a true upper bound.
+ *
+ * Applies to ANY layer kind (image included), folded into `silhouettePadPx` beside the glow /
+ * stroke / motion terms (NOT `cornerPinPadPx`, which re-warps). 0 when no edge distortion is present
+ * (or every amount is 0), keeping the raster and the identity A/B byte-identical.
+ *
+ * Like the other outward-pad terms, this is defensive today: a rough_edge / ink_bleed makes
+ * `rasterablePasses` false (neither torn edge / feather nor layer blur), so the layer renders
+ * through the full-device offscreen path in `paintLayer`, where the distorted edge has the whole
+ * canvas to grow into. It costs one cheap stack scan and returns 0 in the common no-effect case.
+ */
+export function edgeDistortOutwardPx(layer: LocalLayer, W: number): number {
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
+  let out = 0
+  for (const e of effectStackOf(layer as unknown as Parameters<typeof effectStackOf>[0])) {
+    if (e.visible === false) continue
+    if (e.type === 'rough_edge') {
+      out = Math.max(out, clamp01(num((e as unknown as { amount?: number }).amount)) * ROUGH_EDGE_MAX_W * W)
+    } else if (e.type === 'ink_bleed') {
+      out = Math.max(out, clamp01(num((e as unknown as { amount?: number }).amount)) * INK_BLEED_MAX_W * W)
+    }
+  }
+  return out
+}
+
+/**
  * How far a WOBBLED stroke deviates beyond where the same stroke running straight would
  * reach, in the stroke's own STORED units (`wobbleSpecOf` with `unit: 1` — the caller below
  * applies `scale * W` to the whole pad exactly once, as it already does for every other term).
@@ -2261,9 +2293,10 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
     }
   }
   // Grow the raster to hold an outer-glow halo's outward blur, an alpha-traced stroke's outward
-  // band AND a motion blur's outward smear (each 0 with none → byte-identical raster). Logical px,
-  // like the pure helper's own answer; summed since a layer can carry all three. See
-  // `outerGlowOutwardPx` / `strokeAlphaOutwardPx` / `motionBlurOutwardPx`.
+  // band, a motion blur's outward smear AND an edge distortion's outward jitter / bleed (each 0
+  // with none → byte-identical raster). Logical px, like the pure helper's own answer; summed since
+  // a layer can carry all of them. See `outerGlowOutwardPx` / `strokeAlphaOutwardPx` /
+  // `motionBlurOutwardPx` / `edgeDistortOutwardPx`.
   return silhouettePadPxPure({
     kind: layer.kind,
     strokeAlign,
@@ -2274,7 +2307,7 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
     boxHeightPx: box.h,
     maxLineWPx,
     boxWidthPx: box.w,
-  }, s) + outerGlowOutwardPx(layer, W) + strokeAlphaOutwardPx(layer, W) + motionBlurOutwardPx(layer, W, box)
+  }, s) + outerGlowOutwardPx(layer, W) + strokeAlphaOutwardPx(layer, W) + motionBlurOutwardPx(layer, W, box) + edgeDistortOutwardPx(layer, W)
 }
 
 // Raster mesh-warp (F3 4b) constants. `RASTER_WARP_EPS` matches `geometryEffects.WARP_EPS`:

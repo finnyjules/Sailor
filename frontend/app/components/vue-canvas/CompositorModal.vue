@@ -8234,6 +8234,53 @@ onUnmounted(() => {
                 @input="updateActiveEffect({ amount: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
             </div>
           </div>
+
+          <!-- Rough edge: jitter the alpha boundary in and out by a seeded noise field. Amount
+               (percentage), detail (noise frequency) and seed are all read by passRoughEdge — no
+               dead control. Mirrors the roughen 3-dial grid. -->
+          <div v-else-if="activeEffect!.type === 'rough_edge'" class="grid grid-cols-3 gap-1.5">
+            <div>
+              <div class="panel-sublabel mb-1">Amount</div>
+              <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).amount ?? 0.5) * 100)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ amount: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+            </div>
+            <div>
+              <div class="panel-sublabel mb-1">Detail</div>
+              <input v-scrubnum type="number" min="1" max="32" step="1" :value="Math.round((activeEffect as any).detail ?? 8)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ detail: Math.min(32, Math.max(1, Math.round(parseFloat(($event.target as HTMLInputElement).value) || 8))) })" />
+            </div>
+            <div>
+              <div class="panel-sublabel mb-1">Seed</div>
+              <input v-scrubnum type="number" step="1" :value="Math.round((activeEffect as any).seed ?? 1)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ seed: Math.round(parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
+            </div>
+          </div>
+
+          <!-- Ink bleed: an organic outward spread of the alpha. Amount (reach) and softness
+               (percentages) and seed are all read by passInkBleed — no dead control. -->
+          <div v-else-if="activeEffect!.type === 'ink_bleed'" class="grid grid-cols-3 gap-1.5">
+            <div>
+              <div class="panel-sublabel mb-1">Amount</div>
+              <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).amount ?? 0.4) * 100)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ amount: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+            </div>
+            <div>
+              <div class="panel-sublabel mb-1">Softness</div>
+              <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).softness ?? 0.3) * 100)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ softness: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+            </div>
+            <div>
+              <div class="panel-sublabel mb-1">Seed</div>
+              <input v-scrubnum type="number" step="1" :value="Math.round((activeEffect as any).seed ?? 1)"
+                class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                @input="updateActiveEffect({ seed: Math.round(parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
+            </div>
+          </div>
         </div>
       </template>
 

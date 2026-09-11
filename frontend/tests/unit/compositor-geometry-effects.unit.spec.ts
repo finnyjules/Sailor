@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { applyGeometry, longShadowBody, GEOMETRY_EFFECT_LABELS } from '~/lib/compositor/geometryEffects'
-import { MOTION_BLUR_SAMPLES, RADIAL_BLUR_MAX_ANGLE, ZOOM_BLUR_MAX_SCALE, motionSampleSpan } from '~/lib/compositor/postEffects'
+import { MOTION_BLUR_SAMPLES, RADIAL_BLUR_MAX_ANGLE, ZOOM_BLUR_MAX_SCALE, motionSampleSpan, ROUGH_EDGE_MAX_W, INK_BLEED_MAX_W } from '~/lib/compositor/postEffects'
 import { flatten, pathLength, type Pt2 } from '~/lib/vector/pathOps'
 
 // 100×100 square: perimeter 400. Same shape the pathOps spec uses.
@@ -338,6 +338,7 @@ import {
   outerGlowOutwardPx,
   strokeAlphaOutwardPx,
   motionBlurOutwardPx,
+  edgeDistortOutwardPx,
   outlinePathData,
   createRectLayer,
   createEllipseLayer,
@@ -637,5 +638,48 @@ describe('useCompositorLayers: motionBlurOutwardPx', () => {
   it('applies to an IMAGE layer too (any layer kind)', () => {
     const img = createImageLayer('x.png', 1, { effects: [geo('directional_blur', { angle: 45, distance: 0.02 })] as any })
     expect(motionBlurOutwardPx(img, W, box)).toBeCloseTo(0.02 * W * span, 6)
+  })
+})
+
+// F4 Task 6: the silhouette raster grows to hold an edge distortion's OUTWARD jitter / bleed —
+// rough_edge by amount·ROUGH_EDGE_MAX_W·W, ink_bleed by amount·INK_BLEED_MAX_W·W (its blotch factor
+// is ≤ 1). 0 with none ⇒ byte-identical. Expected values use the SAME constants the passes use.
+describe('useCompositorLayers: edgeDistortOutwardPx', () => {
+  const W = 300
+  it('is 0 for a layer with no effects (byte-identity pad preserved)', () => {
+    expect(edgeDistortOutwardPx(createRectLayer(), W)).toBe(0)
+  })
+  it('is 0 for a layer with only a non-edge pixel effect', () => {
+    const r = createRectLayer({ effects: [geo('bloom')] as any })
+    expect(edgeDistortOutwardPx(r, W)).toBe(0)
+  })
+  it('is amount·ROUGH_EDGE_MAX_W·W for a rough edge', () => {
+    const r = createRectLayer({ effects: [geo('rough_edge', { amount: 0.5, detail: 8, seed: 1 })] as any })
+    expect(edgeDistortOutwardPx(r, W)).toBeCloseTo(0.5 * ROUGH_EDGE_MAX_W * W, 6)
+  })
+  it('is amount·INK_BLEED_MAX_W·W for an ink bleed', () => {
+    const r = createRectLayer({ effects: [geo('ink_bleed', { amount: 0.4, seed: 1, softness: 0.3 })] as any })
+    expect(edgeDistortOutwardPx(r, W)).toBeCloseTo(0.4 * INK_BLEED_MAX_W * W, 6)
+  })
+  it('is 0 for either kind at amount 0', () => {
+    const r = createRectLayer({ effects: [geo('rough_edge', { amount: 0 }), geo('ink_bleed', { amount: 0 })] as any })
+    expect(edgeDistortOutwardPx(r, W)).toBe(0)
+  })
+  it('ignores a hidden edge distortion', () => {
+    const r = createRectLayer({ effects: [geo('ink_bleed', { amount: 1, visible: false })] as any })
+    expect(edgeDistortOutwardPx(r, W)).toBe(0)
+  })
+  it('is the MAX outward reach across several edge distortions', () => {
+    const r = createRectLayer({
+      effects: [
+        geo('rough_edge', { amount: 0.3, detail: 8, seed: 1 }),  // 0.3·ROUGH_EDGE_MAX_W·W
+        geo('ink_bleed', { amount: 1, seed: 1, softness: 0 }),   // 1·INK_BLEED_MAX_W·W — larger
+      ] as any,
+    })
+    expect(edgeDistortOutwardPx(r, W)).toBeCloseTo(Math.max(0.3 * ROUGH_EDGE_MAX_W * W, 1 * INK_BLEED_MAX_W * W), 6)
+  })
+  it('applies to an IMAGE layer too (any layer kind, reads the raster alpha)', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('rough_edge', { amount: 1, detail: 8, seed: 1 })] as any })
+    expect(edgeDistortOutwardPx(img, W)).toBeCloseTo(1 * ROUGH_EDGE_MAX_W * W, 6)
   })
 })
