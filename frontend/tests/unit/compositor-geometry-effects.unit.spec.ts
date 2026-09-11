@@ -334,6 +334,7 @@ import {
   needsComputedOutline,
   layerGeometryEffects,
   geometryOutwardPx,
+  outerGlowOutwardPx,
   outlinePathData,
   createRectLayer,
   createEllipseLayer,
@@ -488,5 +489,43 @@ describe('useCompositorLayers: geometryOutwardPx', () => {
   it('is distance·W for a non-decorated (outlined) text layer with a positive offset', () => {
     const t = createTextLayer({ effects: [geo('offset', { distance: 0.02 })] as any })
     expect(geometryOutwardPx(t, W)).toBeCloseTo(0.02 * W, 6)
+  })
+})
+
+// F4 Task 1: the silhouette raster grows to hold an outer-glow halo's outward blur, so the
+// halo is not clipped at the raster edge. 0 with none ⇒ byte-identical raster.
+describe('useCompositorLayers: outerGlowOutwardPx', () => {
+  const W = 300
+  it('is 0 for a layer with no effects (byte-identity pad preserved)', () => {
+    expect(outerGlowOutwardPx(createRectLayer(), W)).toBe(0)
+  })
+  it('is 0 for a layer with only a non-glow pixel effect', () => {
+    const r = createRectLayer({ effects: [geo('bloom')] as any })
+    expect(outerGlowOutwardPx(r, W)).toBe(0)
+  })
+  it('is radius·W for an outer glow', () => {
+    const r = createRectLayer({ effects: [geo('outer_glow', { color: '#fff', radius: 0.03, intensity: 0.8 })] as any })
+    expect(outerGlowOutwardPx(r, W)).toBeCloseTo(0.03 * W, 6)
+  })
+  it('is 0 for an INNER glow (stays within the silhouette, no outward growth)', () => {
+    const r = createRectLayer({ effects: [geo('inner_glow', { color: '#fff', radius: 0.05, intensity: 0.8 })] as any })
+    expect(outerGlowOutwardPx(r, W)).toBe(0)
+  })
+  it('ignores a hidden outer glow', () => {
+    const r = createRectLayer({ effects: [geo('outer_glow', { color: '#fff', radius: 0.05, intensity: 0.8, visible: false })] as any })
+    expect(outerGlowOutwardPx(r, W)).toBe(0)
+  })
+  it('is the MAX radius across several outer glows', () => {
+    const r = createRectLayer({
+      effects: [
+        geo('outer_glow', { color: '#fff', radius: 0.01, intensity: 0.5 }),
+        geo('outer_glow', { color: '#f00', radius: 0.04, intensity: 0.5 }),
+      ] as any,
+    })
+    expect(outerGlowOutwardPx(r, W)).toBeCloseTo(0.04 * W, 6)
+  })
+  it('applies to an IMAGE layer too (not gated on canTakeGeometry)', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('outer_glow', { color: '#fff', radius: 0.02, intensity: 0.8 })] as any })
+    expect(outerGlowOutwardPx(img, W)).toBeCloseTo(0.02 * W, 6)
   })
 })

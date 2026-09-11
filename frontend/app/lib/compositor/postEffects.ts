@@ -65,7 +65,25 @@ export interface DofEffect {
   bloomStrength: number  // 0..4 — highlight boost before accumulation
   visible: boolean
 }
-export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect
+/** A blurred, tinted halo OUTSIDE the layer's alpha, composited BEHIND it (destination-over).
+ *  Built from the layer silhouette, blurred by `radius`, filled with `color` × `intensity`. */
+export interface OuterGlowEffect {
+  type: 'outer_glow'
+  color: string       // hex/rgba (alpha allowed) — the halo colour
+  radius: number      // blur radius / spread, normalized to canvas width
+  intensity: number   // 0..2 — strength of the composite
+  visible: boolean
+}
+/** The same blurred, tinted halo but INSIDE the layer's alpha, clipped to it (source-atop).
+ *  Bleeds inward from the silhouette edge. */
+export interface InnerGlowEffect {
+  type: 'inner_glow'
+  color: string       // hex/rgba (alpha allowed) — the halo colour
+  radius: number      // blur radius / spread, normalized to canvas width
+  intensity: number   // 0..2 — strength of the composite
+  visible: boolean
+}
+export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect
 
 export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   adjust: { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
@@ -83,6 +101,9 @@ export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
     bladeCount: 6, bladeRotation: 0, bloomThreshold: 0.75, bloomStrength: 1.5,
     visible: true,
   },
+  // A soft warm glow, visible the moment it is added; the colour card + dials tune it.
+  outer_glow: { type: 'outer_glow', color: '#ffd9a0', radius: 0.02, intensity: 0.8, visible: true },
+  inner_glow: { type: 'inner_glow', color: '#ffd9a0', radius: 0.02, intensity: 0.8, visible: true },
 }
 export function defaultPostEffect(type: PostEffect['type']): PostEffect {
   return JSON.parse(JSON.stringify(POST_EFFECT_DEFAULTS[type])) as PostEffect
@@ -101,9 +122,12 @@ export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]
     bladeCount: [0, 12], bladeRotation: [0, 360],
     bloomThreshold: [0, 1], bloomStrength: [0, 4],
   },
+  // `color` is non-numeric, so it is not clamped (matches duotone's colours).
+  outer_glow: { radius: [0, 0.5], intensity: [0, 2] },
+  inner_glow: { radius: [0, 0.5], intensity: [0, 2] },
 }
 
-const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain'])
+const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow'])
 export const isChainEffect = (e: { type: string }): e is PostEffect => CHAIN_TYPES.has(e.type)
 export const chainActive = (effects?: { type: string; visible?: boolean }[]): boolean =>
   !!effects?.some(e => e.visible !== false && CHAIN_TYPES.has(e.type))
@@ -366,10 +390,72 @@ function passGrain(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: Gra
   }
 }
 
+/** Outer glow: a blurred, tinted copy of the layer SILHOUETTE composited BEHIND the layer.
+ *  Recolour the offscreen's own alpha to `color` (source-in), blur it by `radius`, then draw it
+ *  UNDER the layer (destination-over) at `intensity`. It grows OUTSIDE the alpha; on a box-sized
+ *  raster it relies on the offscreen's outward pad (see `outerGlowOutwardPx` in
+ *  useCompositorLayers.ts), but on the per-layer path here `off` is the full device canvas.
+ *  Deterministic: no randomness. */
+function passOuterGlow(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: OuterGlowEffect, opts: PassOpts): void {
+  if (!(e.intensity > 0 && e.radius > 0)) return
+  const scale = opts.scale ?? 1
+  const scratch = cloneCanvas(off)            // the layer's own pixels + alpha
+  const sctx = scratch.getContext('2d')
+  if (!sctx) return
+  // Recolour to the glow colour, keeping the silhouette alpha (source-in fill).
+  sctx.save()
+  sctx.setTransform(1, 0, 0, 1, 0, 0)
+  sctx.globalCompositeOperation = 'source-in'
+  sctx.fillStyle = e.color || '#ffffff'
+  sctx.fillRect(0, 0, scratch.width, scratch.height)
+  sctx.restore()
+  applyBlurPass(scratch, Math.max(0, e.radius * opts.W * scale))
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  // destination-over = paint the halo BEHIND everything already on the offscreen.
+  ctx.globalCompositeOperation = 'destination-over'
+  const k = Math.min(2, Math.max(0, e.intensity))
+  ctx.globalAlpha = Math.min(1, k)
+  ctx.drawImage(scratch, 0, 0)
+  if (k > 1) { ctx.globalAlpha = k - 1; ctx.drawImage(scratch, 0, 0) }
+  ctx.restore()
+}
+
+/** Inner glow: a blurred, tinted halo hugging the INSIDE of the silhouette edge, clipped to the
+ *  layer alpha. Fill a scratch with `color` everywhere, knock the layer's alpha OUT of it
+ *  (destination-out) so the tint remains only OUTSIDE the silhouette, blur it so it bleeds back
+ *  across the edge, then draw it clipped to the layer (source-atop) at `intensity`. Stays within
+ *  bounds. Deterministic: no randomness. */
+function passInnerGlow(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: InnerGlowEffect, opts: PassOpts): void {
+  if (!(e.intensity > 0 && e.radius > 0)) return
+  const scale = opts.scale ?? 1
+  const scratch = mkCanvas(off.width, off.height)
+  const sctx = scratch.getContext('2d')
+  if (!sctx) return
+  sctx.save()
+  sctx.setTransform(1, 0, 0, 1, 0, 0)
+  sctx.fillStyle = e.color || '#ffffff'
+  sctx.fillRect(0, 0, scratch.width, scratch.height)
+  // Remove the layer's own silhouette, leaving tint only OUTSIDE it — the edge source.
+  sctx.globalCompositeOperation = 'destination-out'
+  sctx.drawImage(off, 0, 0)
+  sctx.restore()
+  applyBlurPass(scratch, Math.max(0, e.radius * opts.W * scale))
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  // source-atop = keep only the part of the blurred tint that lands ON the layer's alpha.
+  ctx.globalCompositeOperation = 'source-atop'
+  const k = Math.min(2, Math.max(0, e.intensity))
+  ctx.globalAlpha = Math.min(1, k)
+  ctx.drawImage(scratch, 0, 0)
+  if (k > 1) { ctx.globalAlpha = k - 1; ctx.drawImage(scratch, 0, 0) }
+  ctx.restore()
+}
+
 /** The kinds this module owns as 2D passes over a layer/document offscreen. Everything
  *  else in a layer's stack (inner shadow, torn edge, feather, layer blur, drop shadow,
  *  background blur, dof) is applied by the caller at its own structural position. */
-const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain'])
+const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow'])
 
 /**
  * Apply passes in ARRAY ORDER — the per-layer entry point. Order is the caller's, so the
@@ -393,6 +479,8 @@ export function applyPasses(
       case 'bloom': passBloom(ctx, off, e as unknown as BloomEffect, opts); break
       case 'vignette': passVignette(ctx, off, e as unknown as VignetteEffect, opts); break
       case 'grain': passGrain(ctx, off, e as unknown as GrainEffect, opts); break
+      case 'outer_glow': passOuterGlow(ctx, off, e as unknown as OuterGlowEffect, opts); break
+      case 'inner_glow': passInnerGlow(ctx, off, e as unknown as InnerGlowEffect, opts); break
     }
   }
 }
@@ -427,7 +515,7 @@ export function applyBlurPass(off: HTMLCanvasElement, radiusPx: number): void {
   ctx.restore()
 }
 
-const CHAIN_ORDER = ['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain']
+const CHAIN_ORDER = ['inner_glow', 'adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow']
 
 /**
  * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type (the first VISIBLE

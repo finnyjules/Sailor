@@ -7969,6 +7969,42 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+
+          <!-- Outer glow / Inner glow: a tinted halo outside (behind) or inside (clipped to) the
+               layer's silhouette. Colour card (shared activeFxHex/activeFxAlpha/composeRgba, same
+               as drop shadow), then Radius (blur/spread, width-normalized, shown ×100 like the
+               shadow offsets) and Intensity (0..2 strength). All three are read by passOuterGlow /
+               passInnerGlow — no dead control. -->
+          <div v-else-if="activeEffect!.type === 'outer_glow' || activeEffect!.type === 'inner_glow'" class="space-y-1.5">
+            <div class="flex items-center gap-1.5">
+              <input type="color" :value="activeFxHex" title="Glow colour"
+                class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
+                @input="updateActiveEffect({ color: composeRgba(($event.target as HTMLInputElement).value, activeFxAlpha) })" />
+              <input type="text" spellcheck="false" maxlength="7" :value="activeFxHex" title="Hex colour"
+                class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs font-mono uppercase text-white/90 outline-none"
+                @change="setActiveFxHex(($event.target as HTMLInputElement).value)" />
+              <div class="flex items-center gap-0.5 shrink-0 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-1.5" title="Glow opacity (alpha)">
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(activeFxAlpha * 100)"
+                  class="w-7 bg-transparent text-xs text-white/90 outline-none text-right"
+                  @input="updateActiveEffect({ color: composeRgba(activeFxHex, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
+                <span class="text-[10px] text-white/35 select-none">%</span>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">Radius</div>
+                <input v-scrubnum type="number" min="0" max="50" step="0.5" :value="Math.round(((activeEffect as any).radius ?? 0.02) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ radius: Math.min(0.5, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Intensity</div>
+                <input v-scrubnum type="number" min="0" max="2" step="0.05" :value="Math.round(((activeEffect as any).intensity ?? 0.8) * 100) / 100"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ intensity: Math.min(2, Math.max(0, parseFloat(($event.target as HTMLInputElement).value) || 0)) })" />
+              </div>
+            </div>
+          </div>
         </div>
       </template>
 

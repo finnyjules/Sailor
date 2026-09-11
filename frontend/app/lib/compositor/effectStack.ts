@@ -117,9 +117,9 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow',
+  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow',
   'adjust', 'duotone', 'gradientMap',
-  'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'layer_blur', 'drop_shadow',
+  'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'layer_blur', 'outer_glow', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
 
 /** Pinned for structural reasons, not convenience:
@@ -169,6 +169,8 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   shatter: 'Shatter',
   long_shadow: 'Long shadow',
   inner_shadow: 'Inner shadow',
+  inner_glow: 'Inner glow',
+  outer_glow: 'Outer glow',
   adjust: 'Adjust',
   duotone: 'Duotone',
   gradientMap: 'Gradient map',

@@ -1654,6 +1654,37 @@ export function geometryOutwardPx(layer: LocalLayer, W: number): number {
 }
 
 /**
+ * How far a layer's ENABLED `outer_glow` effects blur their halo OUTSIDE the silhouette, logical
+ * px — the MAX `radius·W` across the stack (0 with none). The outer-glow halo is built from the
+ * layer alpha and blurred by `radius·W`, so it reaches roughly that far past the silhouette edge;
+ * a box-sized raster must grow to hold it or the halo is clipped at the raster edge (the
+ * long_shadow / F2 lesson — see `geometryOutwardPx`).
+ *
+ * Applies to ANY layer kind (image included), so unlike `geometryOutwardPx` it is NOT gated on
+ * `canTakeGeometry`. 0 when no outer glow is present, keeping the raster (and the identity A/B)
+ * byte-identical for every existing layer.
+ *
+ * NOTE on reachability: today an `outer_glow` in a layer's stack makes `rasterablePasses` false
+ * (it is neither torn edge / feather nor layer blur), so the layer renders through the
+ * FULL-DEVICE-CANVAS offscreen path in `paintLayer` — exactly like `bloom` — where the halo has
+ * the whole canvas to bleed into and is never clipped by a box. This term is folded into
+ * `silhouettePadPx` defensively, per the F4 outward-growth rule, so that IF a future change ever
+ * bakes an outer glow into a box-sized silhouette raster the halo is already contained; it costs
+ * one cheap stack scan and returns 0 in the overwhelmingly common no-glow case.
+ */
+export function outerGlowOutwardPx(layer: LocalLayer, W: number): number {
+  let out = 0
+  for (const e of effectStackOf(layer as unknown as Parameters<typeof effectStackOf>[0])) {
+    if (e.type !== 'outer_glow' || e.visible === false) continue
+    const r = e as unknown as { radius?: number }
+    const rad = typeof r.radius === 'number' && Number.isFinite(r.radius) ? r.radius : 0
+    const grow = Math.max(0, rad) * W
+    if (grow > out) out = grow
+  }
+  return out
+}
+
+/**
  * How far a WOBBLED stroke deviates beyond where the same stroke running straight would
  * reach, in the stroke's own STORED units (`wobbleSpecOf` with `unit: 1` — the caller below
  * applies `scale * W` to the whole pad exactly once, as it already does for every other term).
@@ -2151,6 +2182,8 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
       for (const ln of wrappedTextLines(mctx, layer as TextLayer, W)) maxLineWPx = Math.max(maxLineWPx, mctx.measureText(ln || ' ').width)
     }
   }
+  // Grow the raster to hold an outer-glow halo's outward blur (0 with none → byte-identical
+  // raster). Logical px, like the pure helper's own answer. See `outerGlowOutwardPx`.
   return silhouettePadPxPure({
     kind: layer.kind,
     strokeAlign,
@@ -2161,7 +2194,7 @@ export function silhouettePadPx(layer: LocalLayer, W: number, s: number, box: { 
     boxHeightPx: box.h,
     maxLineWPx,
     boxWidthPx: box.w,
-  }, s)
+  }, s) + outerGlowOutwardPx(layer, W)
 }
 
 // Raster mesh-warp (F3 4b) constants. `RASTER_WARP_EPS` matches `geometryEffects.WARP_EPS`:
