@@ -2767,41 +2767,10 @@
       "category": "material",
       "animated": true,
       "passes": 1,
-      "centerParam": [
-        "u_centerX",
-        "u_centerY"
-      ],
       "textures": [],
       "generative": false,
       "followsShape": true,
       "params": [
-        {
-          "uniform": "u_centerX",
-          "label": "Center X",
-          "type": "float",
-          "min": 0.0,
-          "max": 1.0,
-          "default": 0.5,
-          "step": 0.01
-        },
-        {
-          "uniform": "u_centerY",
-          "label": "Center Y",
-          "type": "float",
-          "min": 0.0,
-          "max": 1.0,
-          "default": 0.5,
-          "step": 0.01
-        },
-        {
-          "uniform": "u_radius",
-          "label": "Radius",
-          "type": "float",
-          "min": 0.05,
-          "max": 1.5,
-          "default": 0.35,
-          "step": 0.01
-        },
         {
           "uniform": "u_lightColor",
           "label": "Light colour",

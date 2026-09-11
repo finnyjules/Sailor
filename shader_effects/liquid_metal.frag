@@ -13,13 +13,11 @@ layout(location = 0) out vec4 fragColor0;
 // Shaders.com "LiquidMetal" component (circle shape); its defaults are the
 // "Fluid Chrome" design.
 //
-// Stand-alone the pool is a circle (Center, Radius). As a Frame material the Frame
-// hands over the layer's silhouette (u_shape: R the rim field, G the distance to the
-// outline), so the pool and its bevel fill whatever shape the layer is.
+// A material coats whatever it is applied to. On a 3D surface, a Space Type / Shape fill,
+// or the catalog preview it fills the ENTIRE tile; in the Frame the Frame hands over the
+// layer's silhouette (u_shape: R the rim field, G the distance to the outline), so the pool
+// and its bevel fill whatever shape the layer is.
 
-uniform float u_centerX;
-uniform float u_centerY;
-uniform float u_radius;          // stand-alone circle radius, fraction of the shorter side
 uniform vec3  u_lightColor;      // the bright tone of the chrome
 uniform vec3  u_darkColor;       // the tone the reflection falls to in shadow
 uniform float u_turbulence;      // how molten: depth of the flowing folds
@@ -90,10 +88,9 @@ void main() {
 
     // ---- Where the pool is, and how far from its edge ----
     vec2 c, rel, outward;
-    float R, cover, edgeD;         // edgeD: distance to the outline in units of R, 0 on the edge
+    float cover, edgeD;            // edgeD: distance inward from the outline, 0 on the edge, 1 at the deepest point
     if (u_hasShape > 0.5) {
         c = vec2(u_shapeCX, u_shapeCY) * asp;
-        R = max(u_shapeSize, 0.001);
         rel = p - c;
         vec4 sh = texture(u_shape, v_texCoord);
         // The outward direction comes from the RIM field (R): it is blurred at full
@@ -108,15 +105,17 @@ void main() {
         cover = smoothstep(0.0, 0.02 + u_edgeSoftness * 0.08, sh.g);
         edgeD = sh.g;                                   // the distance field, deepest point = 1
     } else {
-        c = vec2(u_centerX, u_centerY) * asp;
-        R = max(u_radius, 0.001);
+        // As a MATERIAL with no silhouette handed over — a 3D surface, a Space Type / Shape
+        // fill, or the catalog preview — the molten chrome coats the ENTIRE surface. A material
+        // fills whatever it is applied to, so there is no stand-alone circle and no border
+        // bevel (a bevel at the UV border would seam a sphere or a wrapped glyph). The mesh's
+        // own edges are its outline: every texel is deep interior — full cover, edgeD = 1 (flat
+        // top, the molten surface at full strength) — and the ripple is measured from the centre.
+        c = 0.5 * asp;
         rel = p - c;
-        float r = length(rel);
-        outward = r > 1e-5 ? rel / r : vec2(0.0, 1.0);
-        float d = r - R;
-        float soft = max(u_edgeSoftness, 0.004) * R;
-        cover = 1.0 - smoothstep(0.0, soft, d);
-        edgeD = clamp(-d / R, 0.0, 1.0);
+        outward = vec2(0.0, 1.0);
+        cover = 1.0;
+        edgeD = 1.0;
     }
 
     // ---- The bevel round the edge: a height profile over the bevel width ----
