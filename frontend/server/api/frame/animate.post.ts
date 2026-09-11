@@ -95,10 +95,10 @@ export default defineEventHandler(async (event) => {
 
     const flatBytes = await readFile(flatPath)
     // fal needs a URL it can fetch, so the flattened still goes to fal storage — but only
-    // for the fal branches. Replicate accepts a data URL directly, and pushing a still
-    // through a THIRD party's storage to reach it put the user's image somewhere the
-    // request never needed it to be (and added a failure mode on a service not otherwise
-    // involved in that call). Memoised so the two fal branches never upload twice.
+    // for every branch. Luma on Replicate REFUSES a data URL for its start image
+    // ("Start image must start with http:// or https://", E006, seen live 2026-09-10),
+    // and the repo has no Replicate file-upload helper, so the flattened still goes
+    // through fal's public storage for Luma too. Memoised so no branch uploads twice.
     let _falStill: Promise<string> | null = null
     const falStillUrl = () => (_falStill ??= uploadToFalStorage(new Uint8Array(flatBytes), 'still.png', 'image/png'))
 
@@ -138,8 +138,8 @@ export default defineEventHandler(async (event) => {
       const { width, height } = await pngSize(flatBytes)
       const out = await runReplicate('luma/ray-2-720p', {
         prompt: fullPrompt, aspect_ratio: lumaAspect(width, height), duration: seconds, loop: true,
-        // Replicate takes the bytes inline — no fal storage round-trip on this branch.
-        start_image_url: `data:image/png;base64,${flatBytes.toString('base64')}`,
+        // A public https URL: Luma rejects an inline data URL (see the note above).
+        start_image_url: await falStillUrl(),
       }, token, { timeoutMs: 900_000 })
       videoUrl = firstOutputUrl(out)
     }
