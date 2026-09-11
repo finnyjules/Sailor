@@ -17,6 +17,7 @@ import path from 'node:path'
 import { assertRateLimit } from '../../lib/rateLimit'
 import { runFal, firstFalVideoUrl } from '../../utils/falRun'
 import { uploadToFalStorage } from '../../utils/falStorage'
+import { dataUrlBytes, lumaAspect } from '../../utils/frameAnimate'
 import { clipModel } from '~~/app/data/clip-models'
 
 interface Body { image?: string; prompt?: string; model?: string; seconds?: number }
@@ -27,7 +28,6 @@ const SCRIPT = path.join(ROOT, 'scripts', 'clip_key.py')
 const CLIPS_DIR = path.join(ROOT, 'input', 'sailor_clips')
 const PROMPT_SUFFIX = (key: 'green' | 'blue') =>
   `, plain flat ${key} background, no shadows, camera locked, gentle motion`
-const LUMA_AR = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const
 
 function py(args: string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -38,30 +38,29 @@ function py(args: string[], timeoutMs: number): Promise<string> {
   })
 }
 
-function dataUrlBytes(dataUrl: string): Buffer {
-  const i = dataUrl.indexOf(',')
-  if (!dataUrl.startsWith('data:image/') || i < 0) throw createError({ statusCode: 400, message: 'image must be a PNG data URL' })
-  return Buffer.from(dataUrl.slice(i + 1), 'base64')
-}
-
-/** Closest Luma aspect to the still (Luma needs one even for image-to-video). */
-function lumaAspect(w: number, h: number): string {
-  const r = w / Math.max(1, h)
-  let best = LUMA_AR[0] as string, err = Infinity
-  for (const ar of LUMA_AR) {
-    const [a, b] = ar.split(':').map(Number)
-    const e = Math.abs(Math.log(r / (a / b)))
-    if (e < err) { err = e; best = ar }
-  }
-  return best
-}
-
 export default defineEventHandler(async (event) => {
-  assertRateLimit(event, 'frame-animate', 6, 600_000)
+  // Validate BEFORE rate-limiting (review fix): assertRateLimit used to run
+  // first, so six malformed requests (bad image, unknown model, junk PNG)
+  // burned the whole 6-per-10-min budget and locked the user out for real
+  // attempts. dataUrlBytes/lumaAspect live in server/utils/frameAnimate.ts —
+  // h3-free pure helpers, unit-tested directly in
+  // tests/unit/frame-animate-validation.unit.spec.ts — and throw PLAIN Error
+  // objects carrying a `statusCode`, so re-wrap via createError here to keep
+  // the client-facing status + message (see that file's header comment).
   const body = await readBody<Body>(event)
-  const spec = clipModel(body?.model ?? '')
   if (!body?.image) throw createError({ statusCode: 400, message: 'image is required' })
+  const spec = clipModel(body?.model ?? '')
   if (!spec) throw createError({ statusCode: 400, message: 'unknown model' })
+  let imageBytes: Buffer
+  try {
+    imageBytes = dataUrlBytes(body.image)
+  } catch (e) {
+    const err = e as { statusCode?: number; message?: string }
+    throw createError({ statusCode: err.statusCode ?? 400, message: err.message ?? 'invalid image' })
+  }
+
+  assertRateLimit(event, 'frame-animate', 6, 600_000)
+
   const seconds = spec.durations.includes(Number(body.seconds)) ? Number(body.seconds) : spec.defaultDuration
   const prompt = (body.prompt ?? '').trim()
 
@@ -70,7 +69,7 @@ export default defineEventHandler(async (event) => {
     // 1. flatten onto the key colour
     const stillPath = path.join(tmp, 'still.png')
     const flatPath = path.join(tmp, 'flat.png')
-    await writeFile(stillPath, dataUrlBytes(body.image))
+    await writeFile(stillPath, imageBytes)
     const keyLine = (await py(['flatten', stillPath, flatPath], 60_000)).split('\n').find(l => l.startsWith('KEY:'))
     if (!keyLine) throw createError({ statusCode: 500, message: 'Could not prepare the still' })
     const keyHex = keyLine.slice(4).trim()
@@ -82,6 +81,21 @@ export default defineEventHandler(async (event) => {
     const stillUrl = await uploadToFalStorage(new Uint8Array(flatBytes), 'still.png', 'image/png')
 
     // 2. the model
+    //
+    // Metering (review fix, finding 1): server/utils/priceBook.ts's
+    // MODEL_COSTS now carries a flat row for each of the three exact slugs
+    // dispatched below, priced from the 5s row in app/data/video-prices.ts —
+    // without those rows preflightMeter (inside runFal/runReplicate) refused
+    // every call with "unpriced model refused" before any request could ever
+    // resolve credits, let alone reach the model. A duration-aware hold
+    // (credits scaled by `seconds` via clipPriceUsd + setMeterPriceHint) was
+    // investigated but NOT wired: requestMeter's resolveCredits() checks
+    // costForModel(model) FIRST and only consults priceHintCredits when the
+    // model is UNPRICED, so once a flat MODEL_COSTS row exists for a slug any
+    // hint set here is silently ignored — flipping that precedence would
+    // change a shared chokepoint every metered route relies on, which is out
+    // of scope for this fix. The hold is therefore flat per model regardless
+    // of `seconds`: a 12s Seedance clip costs the same hold as a 4s one.
     let videoUrl: string | null = null
     if (spec.id === 'seedance-2.0') {
       const out = await runFal('bytedance/seedance-2.0/image-to-video', {

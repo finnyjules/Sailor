@@ -457,6 +457,21 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'kwaivgi/kling-v2.1': { usd: 0.35, credits: 53, confidence: 'estimate', note: 'per ~5s clip — duration-aware pricing is a hardening rider' },
   'bytedance/seedance-2.0': { usd: 0.6, credits: 90, confidence: 'estimate', note: 'matches the GenerateVideoNode picker row range-top ($0.60); node price_badge quotes $0.50 — duration-aware pricing is a hardening rider' },
   'philz1337x/clarity-upscaler': { usd: 0.2, credits: 30, confidence: 'estimate', note: 'matches the UpscaleImageNode "Clarity" picker row range-top ($0.20); node price_badge quotes $0.10 — duration/scale-factor variance is a hardening rider' },
+  // — Frame Animate (/api/frame/animate) — exact slugs runFal/runReplicate
+  // dispatch with, priced flat off the 5s row in app/data/video-prices.ts
+  // (VIDEO_MODEL_USD). Without these rows, preflightMeter's costForModel
+  // miss refuses every call ("unpriced model refused"). A duration-aware
+  // hold (credits scaled by the chosen clip length) was investigated via
+  // setMeterPriceHint but NOT wired — see the comment above the model
+  // dispatch in animate.post.ts: requestMeter's resolveCredits checks
+  // costForModel(model) FIRST and only falls back to priceHintCredits when
+  // the model is unpriced, so once a flat row exists here any hint set by
+  // the route is silently ignored. The hold is flat per model regardless of
+  // `seconds` until that precedence changes (a shared chokepoint — out of
+  // scope for this fix).
+  'bytedance/seedance-2.0/image-to-video': { usd: 0.6, credits: 90, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip; duration-aware hold via setMeterPriceHint in server/api/frame/animate.post.ts' },
+  'minimax/h3/image-to-video': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip; duration-aware hold via setMeterPriceHint in server/api/frame/animate.post.ts' },
+  'luma/ray-2-720p': { usd: 0.4, credits: 60, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip; duration-aware hold via setMeterPriceHint in server/api/frame/animate.post.ts' },
   // — training (hardware-billed; matches LoraTrainingNode=600 in the graph table) —
   'ostris/flux-dev-lora-trainer': { usd: 2.5, credits: 600, confidence: 'estimate', note: 'H100 ~15–40min; 600cr keeps parity with graph table' },
   'ostris/sdxl-lora-trainer': { usd: 2, credits: 600, confidence: 'estimate' },
