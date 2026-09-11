@@ -1118,16 +1118,29 @@ const CLIP_LOAD_PARALLEL = 8
 // resident. Two is enough for the one being edited plus the one it was compared to.
 const CLIP_CACHE_MAX = 2
 
-/** Insert with an oldest-first eviction, so `_clipCache` never holds more than
- *  CLIP_CACHE_MAX clips. Map iteration order IS insertion order, so the first key is
- *  the oldest — re-inserting an existing key keeps its original position, which is
- *  fine here: a key already cached is by definition not the one to drop. */
+// The clip keys the last swept layer list actually referenced. Empty until the first
+// `sweepClipCache` call, which makes the eviction below behave as a plain oldest-first
+// cap for any surface that never sweeps.
+const _clipLive = new Set<string>()
+
+/**
+ * Insert with an oldest-first eviction, so `_clipCache` never holds more than
+ * CLIP_CACHE_MAX clips. Map iteration order IS insertion order, so the first key is the
+ * oldest — re-inserting an existing key keeps its original position, which is fine here:
+ * a key already cached is by definition not the one to drop.
+ *
+ * A key the CURRENT layer list still references is never evicted, even over the cap. The
+ * cap and the sweep would otherwise disagree on a frame carrying three living images: the
+ * sweep spares all three, the cap drops one, `ensureClip` sees the miss and re-fetches it,
+ * and the frame re-downloads a clip on every layer edit forever. The cap's real job is
+ * bounding what is kept AFTER it stops being referenced; the sweep bounds the rest.
+ */
 function putClipFrames(key: string, frames: HTMLImageElement[]): void {
   _clipCache.set(key, frames)
-  while (_clipCache.size > CLIP_CACHE_MAX) {
-    const oldest = _clipCache.keys().next()
-    if (oldest.done) break
-    _clipCache.delete(oldest.value)
+  if (_clipCache.size <= CLIP_CACHE_MAX) return
+  for (const k of [..._clipCache.keys()]) {
+    if (_clipCache.size <= CLIP_CACHE_MAX) break
+    if (k !== key && !_clipLive.has(k)) _clipCache.delete(k)
   }
 }
 
@@ -1149,6 +1162,8 @@ export function sweepClipCache(layers: LocalLayer[]): void {
   }
   for (const key of [..._clipCache.keys()]) if (!live.has(key)) _clipCache.delete(key)
   for (const key of [..._clipFailed]) if (!live.has(key)) _clipFailed.delete(key)
+  _clipLive.clear()
+  for (const key of live) _clipLive.add(key)
 }
 
 /** Test seam: the clip keys currently resident, oldest first. */

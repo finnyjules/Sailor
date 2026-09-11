@@ -107,4 +107,20 @@ describe('clip cache bounds', () => {
     seed('sailor_clips/c')
     expect(__clipCacheKeysForTest()).toEqual(['sailor_clips/b:24', 'sailor_clips/c:24'])
   })
+
+  // The cap must not fight the sweep. A frame carrying three living images references
+  // all three, so evicting one would make `ensureClip` miss and re-download it on the
+  // next layer edit — forever. The cap bounds what is kept after a clip STOPS being
+  // referenced; while it is on screen it stays.
+  it('never evicts a clip the current layer list still references', () => {
+    sweepClipCache([])
+    sweepClipCache([clipLayer('sailor_clips/a'), clipLayer('sailor_clips/b'), clipLayer('sailor_clips/c')])
+    seed('sailor_clips/a')
+    seed('sailor_clips/b')
+    seed('sailor_clips/c')
+    expect(__clipCacheKeysForTest()).toEqual(['sailor_clips/a:24', 'sailor_clips/b:24', 'sailor_clips/c:24'])
+    // Once two of them are gone from the frame, the cap applies again.
+    sweepClipCache([clipLayer('sailor_clips/c')])
+    expect(__clipCacheKeysForTest()).toEqual(['sailor_clips/c:24'])
+  })
 })
