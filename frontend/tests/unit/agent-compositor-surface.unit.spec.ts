@@ -234,6 +234,65 @@ describe('post-processing effect commands', () => {
     const d = (r.template as any).postEffects.find((e: any) => e.type === 'duotone')
     expect(d.shadows).toBe('#1a1a40') // invalid 5-char hex → default kept
   })
+
+  // F4 (Task 8): the 14 new pixel kinds are agent-settable. Numeric params already
+  // clamp generically; these tests cover the NON-numeric whitelist — the glow / overlay
+  // / stroke COLOURS and the overlay BLEND / stroke ALIGN — that the sanitizer now keeps.
+  const layerFx = (r: any, type: string) => r.template.layers[0].effects.find((e: any) => e.type === type)
+
+  it('outer_glow / inner_glow keep an agent-set colour (was dropped before Task 8)', () => {
+    const r = applyCompositorCommand(baseState(), {
+      op: 'setLayerEffect', target: 't1', args: { effect: { type: 'outer_glow', color: '#00ff88', radius: 0.1 } },
+    })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect(layerFx(r, 'outer_glow')).toMatchObject({ color: '#00ff88', radius: 0.1, visible: true })
+  })
+
+  it('outer_glow rejects a bad colour and keeps the default (like duotone)', () => {
+    const r = applyCompositorCommand(baseState(), {
+      op: 'setLayerEffect', target: 't1', args: { effect: { type: 'outer_glow', color: 'javascript:alert(1)' } },
+    })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect(layerFx(r, 'outer_glow').color).toBe('#ffd9a0') // POST_EFFECT_DEFAULTS default kept
+  })
+
+  it('color_overlay keeps colour + a valid blend, and coerces an invalid blend to normal', () => {
+    const ok = applyCompositorCommand(baseState(), {
+      op: 'setPostEffect', args: { effect: { type: 'color_overlay', color: '#123456', blend: 'screen', opacity: 0.5 } },
+    })
+    expect(ok.ok).toBe(true); if (!ok.ok) return
+    expect((ok.template as any).postEffects.find((e: any) => e.type === 'color_overlay'))
+      .toMatchObject({ color: '#123456', blend: 'screen', opacity: 0.5 })
+    const bad = applyCompositorCommand(baseState(), {
+      op: 'setPostEffect', args: { effect: { type: 'color_overlay', blend: 'plasma' } },
+    })
+    expect(bad.ok).toBe(true); if (!bad.ok) return
+    expect((bad.template as any).postEffects.find((e: any) => e.type === 'color_overlay').blend).toBe('normal')
+  })
+
+  it('gradient_overlay keeps from/to colours (hex + rgba) and its blend', () => {
+    const r = applyCompositorCommand(baseState(), {
+      op: 'setPostEffect', args: { effect: { type: 'gradient_overlay', from: '#ff0000', to: 'rgba(0,0,255,0.5)', angle: 90, blend: 'multiply' } },
+    })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect((r.template as any).postEffects.find((e: any) => e.type === 'gradient_overlay'))
+      .toMatchObject({ from: '#ff0000', to: 'rgba(0,0,255,0.5)', angle: 90, blend: 'multiply' })
+  })
+
+  it('stroke_from_alpha keeps colour + align, coerces a bad align, and still clamps width', () => {
+    const r = applyCompositorCommand(baseState(), {
+      op: 'setLayerEffect', target: 't1', args: { effect: { type: 'stroke_from_alpha', color: '#abcdef', align: 'outside', width: 99 } },
+    })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = layerFx(r, 'stroke_from_alpha')
+    expect(fx).toMatchObject({ color: '#abcdef', align: 'outside' })
+    expect(fx.width).toBe(0.2) // numeric clamp still applies (POST_FX_PARAM_CLAMP width [0,0.2])
+    const bad = applyCompositorCommand(baseState(), {
+      op: 'setLayerEffect', target: 't1', args: { effect: { type: 'stroke_from_alpha', align: 'diagonal' } },
+    })
+    expect(bad.ok).toBe(true); if (!bad.ok) return
+    expect(layerFx(bad, 'stroke_from_alpha').align).toBe('center') // coerced to the default member
+  })
 })
 
 // Frame Template agent ops (Task 10): "use my <name> template" / "set the
