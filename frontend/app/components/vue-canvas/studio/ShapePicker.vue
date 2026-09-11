@@ -10,6 +10,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { SHAPE_FAMILIES, SHAPE_NONE, familyOf, searchShapes, type ShapeFamily } from '~/lib/shapes/catalog'
+import { searchMaterials, type LibraryMaterial } from '~/lib/shapes/materials'
 import { SHAPE_PICKER_WIDTH } from '~/lib/shapes/pickerLayout'
 
 const props = withDefaults(defineProps<{
@@ -20,15 +21,32 @@ const props = withDefaults(defineProps<{
    *  click: the trigger owns the open/closed toggle, and closing here as well
    *  would make the same press close and immediately reopen the panel. */
   ignore?: HTMLElement | null
-}>(), { allowNone: true })
+  /** Show the Material section (surfaces a shape can be made of). Only the host
+   *  that knows what to do with a material id (the Frame's library picker) sets
+   *  it; every other `shape` control keeps a shapes-only picker. */
+  materials?: boolean
+}>(), { allowNone: true, materials: false })
 const emit = defineEmits<{ (e: 'update:modelValue', v: string): void; (e: 'close'): void }>()
 
 const query = ref('')
-const family = ref<ShapeFamily | 'all'>('all')
-const rail = computed(() => [{ id: 'all' as const, label: 'All' }, ...SHAPE_FAMILIES])
+const family = ref<ShapeFamily | 'all' | 'material'>('all')
+const rail = computed(() => [
+  { id: 'all' as const, label: 'All' },
+  ...SHAPE_FAMILIES,
+  ...(props.materials ? [{ id: 'material' as const, label: 'Material' }] : []),
+])
+// Materials are not shapes: they never appear under All or a shape family, only
+// under Material (and in a search, where a name match is what the user typed).
 const visible = computed(() =>
-  searchShapes(query.value).filter(s => family.value === 'all' || familyOf(s.id) === family.value),
+  family.value === 'material'
+    ? []
+    : searchShapes(query.value).filter(s => family.value === 'all' || familyOf(s.id) === family.value),
 )
+const visibleMaterials = computed<LibraryMaterial[]>(() => {
+  if (!props.materials) return []
+  if (family.value === 'material') return searchMaterials(query.value)
+  return query.value.trim() ? searchMaterials(query.value) : []
+})
 
 /** Roving tabindex: the grid is one Tab stop, not one per tile. The selected
  *  tile (or the first tile when nothing currently rendered is selected) gets
@@ -39,6 +57,7 @@ const visible = computed(() =>
 const tileIds = computed(() => [
   ...(props.allowNone ? [SHAPE_NONE] : []),
   ...visible.value.map(s => s.id),
+  ...visibleMaterials.value.map(m => m.id),
 ])
 const rovingId = computed(() =>
   tileIds.value.includes(props.modelValue) ? props.modelValue : tileIds.value[0],
@@ -191,7 +210,16 @@ const tileOn = 'bg-white text-neutral-900'
               <path :d="s.d" :fill-rule="s.fillRule" />
             </svg>
           </button>
-          <p v-if="!visible.length" class="col-span-5 py-4 text-center text-[11px] text-white/40">No shapes match.</p>
+          <button
+            v-for="m in visibleMaterials" :key="m.id" type="button" :data-shape="m.id" :title="m.name" role="option"
+            :aria-selected="modelValue === m.id ? 'true' : 'false'"
+            :tabindex="rovingId === m.id ? 0 : -1"
+            :class="[tile, 'overflow-hidden', modelValue === m.id ? 'ring-2 ring-white' : 'hover:ring-1 hover:ring-white/40']"
+            @click="pick(m.id)"
+          >
+            <img :src="m.thumb" :alt="m.name" width="36" height="36" class="h-9 w-9 rounded-md object-cover" draggable="false" />
+          </button>
+          <p v-if="!visible.length && !visibleMaterials.length" class="col-span-5 py-4 text-center text-[11px] text-white/40">{{ family === 'material' ? 'No materials match.' : 'No shapes match.' }}</p>
         </div>
       </div>
     </div>

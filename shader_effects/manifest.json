@@ -2762,6 +2762,160 @@
       ]
     },
     {
+      "id": "liquid_metal",
+      "name": "Liquid metal",
+      "category": "stylize",
+      "animated": true,
+      "passes": 1,
+      "centerParam": [
+        "u_centerX",
+        "u_centerY"
+      ],
+      "textures": [],
+      "generative": false,
+      "followsShape": true,
+      "params": [
+        {
+          "uniform": "u_centerX",
+          "label": "Center X",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_centerY",
+          "label": "Center Y",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_radius",
+          "label": "Radius",
+          "type": "float",
+          "min": 0.05,
+          "max": 1.5,
+          "default": 0.35,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_lightColor",
+          "label": "Light colour",
+          "type": "color",
+          "default": "#eef0f6"
+        },
+        {
+          "uniform": "u_darkColor",
+          "label": "Dark colour",
+          "type": "color",
+          "default": "#141414"
+        },
+        {
+          "uniform": "u_turbulence",
+          "label": "Turbulence",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.5,
+          "default": 1.0,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_ripple",
+          "label": "Ripple scale",
+          "type": "float",
+          "min": 0.5,
+          "max": 8.0,
+          "default": 4.0,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_warp",
+          "label": "Swirl",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.5,
+          "default": 1.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_environment",
+          "label": "Environment",
+          "type": "float",
+          "min": 0.0,
+          "max": 2.0,
+          "default": 1.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_envRotation",
+          "label": "Environment rotation",
+          "type": "float",
+          "min": 0.0,
+          "max": 360.0,
+          "default": 0.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_sharpness",
+          "label": "Sharpness",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.6,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_dispersion",
+          "label": "Dispersion",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.25,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_lightAngle",
+          "label": "Light angle",
+          "type": "float",
+          "min": 0.0,
+          "max": 360.0,
+          "default": 265.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_bevelWidth",
+          "label": "Bevel width",
+          "type": "float",
+          "min": 0.005,
+          "max": 0.2,
+          "default": 0.05,
+          "step": 0.001
+        },
+        {
+          "uniform": "u_bevelShape",
+          "label": "Bevel profile",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.0,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_edgeSoftness",
+          "label": "Edge softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.05,
+          "step": 0.01
+        }
+      ]
+    },
+    {
       "id": "crt_scanlines",
       "name": "CRT",
       "category": "stylize",
