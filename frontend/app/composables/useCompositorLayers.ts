@@ -1098,11 +1098,23 @@ export function imageLayerUrl(filename: string): string {
 }
 
 // ── Living-image clip frames ─────────────────────────────────────────────────
-// Keyed by clip dir. A folder loads ONCE (all frames, in order); until every frame is
-// in, the layer keeps painting its still, so a half-loaded clip never flickers.
+// Keyed by `${dir}:${frames}` (see `clipKey`), not dir alone — a regenerated folder or
+// a clip whose stored `frames` count no longer matches what's on disk must never hand
+// back the wrong (stale-length or wrong-content) array. A folder loads ONCE (all
+// frames, in order); until every frame is in, the layer keeps painting its still, so a
+// half-loaded clip never flickers.
 const _clipCache = new Map<string, HTMLImageElement[]>()
 const _clipLoading = new Map<string, Promise<void>>()
+// A clip key where at least one frame failed to load. Without this, a broken folder
+// would re-issue all N frame requests on every `ensureLayerImages` call (i.e. every
+// layer edit) forever, since `loadClip` only populates `_clipCache` on full success —
+// the still keeps painting either way, which is the intended fallback.
+const _clipFailed = new Set<string>()
 const CLIP_LOAD_PARALLEL = 8
+
+function clipKey(clip: ImageClip): string {
+  return `${clip.dir}:${clip.frames}`
+}
 
 function loadOne(url: string): Promise<HTMLImageElement | null> {
   return new Promise((res) => {
@@ -1120,16 +1132,20 @@ async function loadClip(clip: ImageClip): Promise<void> {
     while (next < clip.frames) { const i = next++; out[i] = await loadOne(clipFrameUrl(clip, i)) }
   }
   await Promise.all(Array.from({ length: Math.min(CLIP_LOAD_PARALLEL, clip.frames) }, worker))
-  // One missing frame = a broken folder: keep the still rather than a stuttering loop.
-  if (out.every(Boolean)) _clipCache.set(clip.dir, out as HTMLImageElement[])
+  const key = clipKey(clip)
+  // One missing frame = a broken folder: keep the still rather than a stuttering loop,
+  // and remember the key so `ensureClip` stops re-fetching it on every call.
+  if (out.every(Boolean)) _clipCache.set(key, out as HTMLImageElement[])
+  else _clipFailed.add(key)
 }
 
 function ensureClip(clip: ImageClip): Promise<void> {
-  if (_clipCache.has(clip.dir)) return Promise.resolve()
-  let p = _clipLoading.get(clip.dir)
+  const key = clipKey(clip)
+  if (_clipCache.has(key) || _clipFailed.has(key)) return Promise.resolve()
+  let p = _clipLoading.get(key)
   if (!p) {
-    p = loadClip(clip).finally(() => _clipLoading.delete(clip.dir))
-    _clipLoading.set(clip.dir, p)
+    p = loadClip(clip).finally(() => _clipLoading.delete(key))
+    _clipLoading.set(key, p)
   }
   return p
 }
@@ -1138,9 +1154,17 @@ function ensureClip(clip: ImageClip): Promise<void> {
  *  layer has no clip or its frames are not all loaded yet (paint the still then). */
 export function clipFrameFor(layer: LocalLayer, tSec: number, k: number, n: number): HTMLImageElement | null {
   if (layer.kind !== 'image' || !layer.clip) return null
-  const frames = _clipCache.get(layer.clip.dir)
+  const frames = _clipCache.get(clipKey(layer.clip))
   if (!frames || !frames.length) return null
   return frames[clipFrameIndex(layer.clip, tSec, k, n, layer.cloner?.phase ?? 1)] ?? null
+}
+
+/** Test seam: seed `_clipCache` directly, under the same `clipKey` `ensureClip` would
+ *  use, so a unit test can exercise `clipFrameFor`'s populated-cache path without a DOM
+ *  `Image` loader. A plain array of sentinels is enough — `clipFrameFor` only ever
+ *  indexes into whatever is here. */
+export function __setClipFramesForTest(clip: ImageClip, frames: unknown[]): void {
+  _clipCache.set(clipKey(clip), frames as HTMLImageElement[])
 }
 
 /** One clock per living image, in the shape `deriveMasterClock` takes. Played length,
@@ -2126,6 +2150,10 @@ function paintLayer(
   const shearA = hasSkew ? Math.tan((sky * Math.PI) / 180) : 0
   const shearC = hasSkew ? Math.tan((skx * Math.PI) / 180) : 0
   const cp = cornerPinActive(layer.cornerPin) ? layer.cornerPin : null
+  // A living image (Task 3): each clone shows a different frame of the same clip (see
+  // `_cloneSlot` / `clipFrameFor`), so anything below that would otherwise memoise "the"
+  // content across clones — the silhouette bake and `dofMemo` — must not, for this layer.
+  const isClipLayer = layer.kind === 'image' && !!layer.clip
 
   // Silhouette raster cache (see `_silhouetteCache`): only cases whose LOCAL BOX is a
   // faithful, self-contained render of the layer qualify — everything else keeps the
@@ -2135,6 +2163,7 @@ function paintLayer(
     && !cp && !dof                                                  // corner-pin / DOF have their own offscreen flows
     && !(layer.kind === 'text' && layer.expressive)                 // expressive layout places words outside localLayerBox
     && !layerPaints(layer).some(p => isFill(p) && fillIsShader(p))  // shader fills are live / frame-anchored
+    && !isClipLayer                                                 // a living image changes every frame — never bake it
     && silhouetteContentReady(layer, W)
   // Memoized like `dofContent` below: identical for every clone of the SAME tint.
   //
@@ -2158,7 +2187,12 @@ function paintLayer(
   const silhouetteRaster = (
     s: number, tint: string | null, tintStrength: number,
   ): { canvas: HTMLCanvasElement; w: number; h: number } | null => {
-    const memoKey = tint ? `${tint}@${tintStrength}` : ''
+    // A clip's frame is per-clone (`_cloneSlot.k`), so its memo key carries the clone
+    // index too — otherwise the second clone of the same tint would read back the
+    // first clone's (already-null, since `isClipLayer` disqualifies the bake) entry
+    // without ever re-checking `silhouetteCacheable`. Harmless today (the entry is
+    // always null for a clip layer) but keeps this memo correct on its own terms.
+    const memoKey = (tint ? `${tint}@${tintStrength}` : '') + (isClipLayer ? `@k${_cloneSlot.k}` : '')
     const memoed = silhouetteMemo.get(memoKey)
     if (memoed !== undefined) return memoed
     const miss = (v: { canvas: HTMLCanvasElement; w: number; h: number } | null) => { silhouetteMemo.set(memoKey, v); return v }
@@ -2256,7 +2290,10 @@ function paintLayer(
   // is reused between calls — holding a reference to it would alias.
   let dofMemo: HTMLCanvasElement | null | undefined
   const dofContent = (): HTMLCanvasElement | null => {
-    if (dofMemo !== undefined) return dofMemo
+    // A clip layer never reuses this across clones: each clone's DOF-blurred content
+    // is built from a different frame (`drawLayerContent` below reads `_cloneSlot`), so
+    // returning the first clone's bake for every later clone would freeze the loop.
+    if (dofMemo !== undefined && !isClipLayer) return dofMemo
     dofMemo = null
     if (!dof || !dofAvailable()) return dofMemo
 
