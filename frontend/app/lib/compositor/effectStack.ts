@@ -82,11 +82,19 @@ export interface MorphEffect { type: 'morph'; amount: number; refLayerId?: strin
  *  The field maths live in `app/lib/compositor/meshWarp.ts` (pure). `amount ≈ 0` is a no-op.
  *  `frequency` is read only by the `wave` field. */
 export interface WarpEffect { type: 'warp'; field: 'bulge' | 'pinch' | 'wave' | 'twist'; amount: number; frequency: number; visible: boolean }
+/** A SOLID directional shadow BODY swept from this vector layer's outline along `angle`
+ *  (degrees) for `length` (a fraction of canvas width, ×W to px), filled in `color` BENEATH
+ *  the shape's own fill + stroke (F3). SELF-ONLY — no sibling rail. Architecturally unlike the
+ *  other geometry kinds: it is not a `d → d` outline transform but a SECOND coloured fill, so
+ *  `applyGeometry` no-ops it (it reads the final outline the other kinds built) and the body is
+ *  painted directly in `drawLayerContent`. The body maths live in `geometryEffects.longShadowBody`
+ *  (pure). `length ≈ 0` paints nothing. */
+export interface LongShadowEffect { type: 'long_shadow'; angle: number; length: number; color: string; visible: boolean }
 
 export type LayerEffect =
   | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
   | TornEdgeEffect | FeatherEffect
-  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect | WarpEffect
+  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect | WarpEffect | LongShadowEffect
   | PostEffect
 
 /** A stored effect, addressed by a stable id. */
@@ -100,7 +108,7 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'inner_shadow',
+  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'long_shadow', 'inner_shadow',
   'adjust', 'duotone', 'gradientMap',
   'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'layer_blur', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
@@ -122,7 +130,7 @@ export const ORDERABLE_KINDS = EFFECT_ORDER.filter(
  *  and reorder only among themselves (`regionOf`, `canReorder`). Contiguous in EFFECT_ORDER.
  *  `boolean` (F3) combines the outline with a sibling layer's outline via paper.js; `morph` (F3)
  *  blends the outline toward a sibling layer's outline. */
-export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp'] as const satisfies readonly EffectKind[]
+export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'long_shadow'] as const satisfies readonly EffectKind[]
 export const isGeometryKind = (k: EffectKind): boolean =>
   (GEOMETRY_KINDS as readonly string[]).includes(k)
 
@@ -149,6 +157,7 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   boolean: 'Combine shapes',
   morph: 'Morph to shape',
   warp: 'Warp',
+  long_shadow: 'Long shadow',
   inner_shadow: 'Inner shadow',
   adjust: 'Adjust',
   duotone: 'Duotone',
@@ -191,6 +200,9 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   // A fresh warp visibly bulges: a positive amount on the radial field, a wave frequency
   // ready for when the user switches the field to `wave`.
   warp: { field: 'bulge', amount: 0.3, frequency: 3, visible: true },
+  // A fresh long shadow casts down-right (45°) for 5% of the width in a soft black —
+  // immediately visible against the shape once added; the colour card tunes it.
+  long_shadow: { angle: 45, length: 0.05, color: 'rgba(0,0,0,0.35)', visible: true },
 }
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {

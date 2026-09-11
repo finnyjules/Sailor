@@ -242,7 +242,7 @@ import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTr
 // Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
 // `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
 // is enabled, so the no-effect draw stays byte-identical below.
-import { applyGeometry, type ResolvedSibling } from '~/lib/compositor/geometryEffects'
+import { applyGeometry, longShadowBody, type ResolvedSibling } from '~/lib/compositor/geometryEffects'
 // Frame slice F3: the sibling-reference rail. `makeSiblingOutlineResolver` turns a geometry
 // effect's `refLayerId` (a StackKey) into the referenced layer's outline, transformed into the
 // referencing layer's frame. PRESENT-BUT-UNCONSUMED until F3 Task 2 (boolean) — no current
@@ -1568,7 +1568,7 @@ export function geometryOutwardPx(layer: LocalLayer, W: number): number {
   if (!canTakeGeometry(layer)) return 0
   let out = 0
   for (const e of layerGeometryEffects(layer)) {
-    const r = e as unknown as { type: string; distance?: number; amount?: number }
+    const r = e as unknown as { type: string; distance?: number; amount?: number; length?: number }
     let grow = 0
     if (r.type === 'offset') {
       const d = typeof r.distance === 'number' && Number.isFinite(r.distance) ? r.distance : 0
@@ -1576,6 +1576,12 @@ export function geometryOutwardPx(layer: LocalLayer, W: number): number {
     } else if (r.type === 'roughen') {
       const a = typeof r.amount === 'number' && Number.isFinite(r.amount) ? r.amount : 0
       grow = Math.max(0, a) * W
+    } else if (r.type === 'long_shadow') {
+      // The shadow body reaches at most `length·W` px beyond the outline along the cast angle
+      // (the offset vector has magnitude `length·W`), so `length·W` is a safe radial bound on
+      // every side — the same width-normalized ×W the other outward-growing kinds use.
+      const l = typeof r.length === 'number' && Number.isFinite(r.length) ? r.length : 0
+      grow = Math.max(0, l) * W
     }
     // trim (removes) and round_corners (cuts inward) never grow the outline outward → 0.
     if (grow > out) out = grow
@@ -3354,6 +3360,38 @@ function paintStrokeStack(
 // `wiredLive`: same pre-resolved-content seam as `localLayerBox` above — paintLayer
 // threads its once-per-call resolve through here too so the box a corner-pin/DOF
 // offscreen was sized from is the exact same content it then draws.
+/**
+ * F3 long shadow: paint the SOLID directional shadow body BENEATH the shape's own fill + stroke.
+ *
+ * Called from each vector branch of `drawLayerContent` (rect / ellipse / path / polygon / star /
+ * outlined text) right BEFORE that branch inks the shape, with the branch's FINAL geometry
+ * outline `d` (already trimmed / offset / warped / boolean'd / morphed — `long_shadow` itself
+ * no-ops in `applyGeometry`) and the geometry-unit width `gW` for that branch (px units → `W`;
+ * local units → `1/scale` for path, `1` for polygon/star), so the length dial reads the same
+ * pixel size on screen as `offset` does.
+ *
+ * A complete NO-OP when the layer carries no VISIBLE `long_shadow` (or its length ≤ 0):
+ * `layerGeometryEffects` already filters to visible, `longShadowEffectOf` returns undefined for
+ * length ≤ 0, and nothing touches the ctx — so a layer without the effect renders byte-
+ * identically. The only ctx mutation is `fillStyle`, which every shape branch overwrites before
+ * its own fill.
+ */
+function longShadowEffectOf(layer: LocalLayer): { angle?: number; length?: number; color?: string } | undefined {
+  const eff = layerGeometryEffects(layer).find(e => e.type === 'long_shadow') as
+    | { angle?: number; length?: number; color?: string } | undefined
+  return eff && typeof eff.length === 'number' && Number.isFinite(eff.length) && eff.length > 0 ? eff : undefined
+}
+function maybePaintLongShadow(ctx: CanvasRenderingContext2D, layer: LocalLayer, outlineD: string | null, gW: number): void {
+  if (!outlineD) return
+  const eff = longShadowEffectOf(layer)
+  if (!eff) return
+  const angleDeg = typeof eff.angle === 'number' && Number.isFinite(eff.angle) ? eff.angle : 45
+  const body = longShadowBody(outlineD, (angleDeg * Math.PI) / 180, (eff.length as number) * gW)
+  if (!body) return
+  ctx.fillStyle = typeof eff.color === 'string' && eff.color ? eff.color : 'rgba(0,0,0,0.35)'
+  ctx.fill(new Path2D(body))
+}
+
 function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, wiredLive?: WiredLive | null) {
   // F3 seam: the sibling-outline resolver for THIS layer, bound to the live stack (or undefined
   // outside a paint). Threaded into every geometry `applyGeometry`/`computedOutlineD` call below.
@@ -3380,6 +3418,9 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       const gd = needsComputedOutline(layer)
         ? applyGeometry(oc.d, layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1], { W, resolveSibling: rs })
         : oc.d
+      // F3 long shadow: cast the body from the final glyph outline (px units) BENEATH both the
+      // on-edge strokes and the text fill drawn below.
+      maybePaintLongShadow(ctx, layer, gd, W)
       const path = new Path2D(gd)
       const passes = textStrokePasses(ctx, layer, W, oc.box)
       const anyDash = passes.some(p => p.dash)
@@ -3401,6 +3442,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     const gd = needsComputedOutline(layer) ? computedOutlineD(layer, W, rs) : null
     if (gd != null) {
       // F2 geometry present: fill + stroke a SINGLE shared path (in pixels, unscaled ctx).
+      maybePaintLongShadow(ctx, layer, gd, W) // F3: shadow body beneath the rect fill + stroke
       const path = new Path2D(gd)
       if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill(path) }
       paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, path, outline: gd })
@@ -3418,6 +3460,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     const w = layer.w * W, h = layer.h * W
     const gd = needsComputedOutline(layer) ? computedOutlineD(layer, W, rs) : null
     if (gd != null) {
+      maybePaintLongShadow(ctx, layer, gd, W) // F3: shadow body beneath the ellipse fill + stroke
       const path = new Path2D(gd)
       if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill(path) }
       paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, path, outline: gd })
@@ -3433,7 +3476,20 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // `drawPath` never reads `effects`, so handing it the transformed `d` cannot double-apply.
     if (needsComputedOutline(layer)) {
       const gd = computedOutlineD(layer, W, rs)
-      if (gd != null) drawPath(ctx, { ...layer, d: gd }, W)
+      if (gd != null) {
+        // Path geometry runs in LOCAL units; `drawPath` scales the ctx by `scale·W` itself, so
+        // the shadow body — built in the SAME local units as `gd` — must be painted under the
+        // same transform. gW = 1/scale so `length·gW` local units land at `length·W` px on
+        // screen, exactly like offset. Wrapped only when a long shadow is present (byte-identical
+        // otherwise — no stray save/scale).
+        if (longShadowEffectOf(layer)) {
+          const s = ((layer as unknown as { scale?: number }).scale || 1) * W
+          ctx.save(); ctx.scale(s, s)
+          maybePaintLongShadow(ctx, layer, gd, 1 / ((layer as unknown as { scale?: number }).scale || 1))
+          ctx.restore()
+        }
+        drawPath(ctx, { ...layer, d: gd }, W)
+      }
     } else {
       drawPath(ctx, layer, W)
     }
@@ -3447,6 +3503,15 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       ? applyGeometry(base, layerGeometryEffects(layer) as unknown as Parameters<typeof applyGeometry>[1], { W: 1, resolveSibling: rs })
       : base
     if (d) {
+      // Polygon/star geometry runs at scale 1, so `drawPath` scales the ctx by W. Paint the
+      // shadow body under the SAME W scale, with gW = 1 (the local unit IS the width-normalized
+      // unit here), so `length` local units land at `length·W` px like offset. Wrapped only when
+      // a long shadow is present (byte-identical otherwise).
+      if (longShadowEffectOf(layer)) {
+        ctx.save(); ctx.scale(W, W)
+        maybePaintLongShadow(ctx, layer, d, 1)
+        ctx.restore()
+      }
       drawPath(ctx, {
         ...layer, kind: 'path', d, bbox: { w: layer.w, h: layer.h }, scale: 1, fillRule: 'nonzero',
         fill: layer.fill, stroke: layer.stroke, strokeWidth: layer.strokeWidth,

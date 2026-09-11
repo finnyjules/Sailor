@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { applyGeometry, GEOMETRY_EFFECT_LABELS } from '~/lib/compositor/geometryEffects'
+import { applyGeometry, longShadowBody, GEOMETRY_EFFECT_LABELS } from '~/lib/compositor/geometryEffects'
 import { flatten, pathLength, type Pt2 } from '~/lib/vector/pathOps'
 
 // 100×100 square: perimeter 400. Same shape the pathOps spec uses.
@@ -56,6 +56,7 @@ describe('geometryEffects: labels single-source', () => {
     expect(GEOMETRY_EFFECT_LABELS.boolean).toBe('Combine shapes')
     expect(GEOMETRY_EFFECT_LABELS.morph).toBe('Morph to shape')
     expect(GEOMETRY_EFFECT_LABELS.warp).toBe('Warp')
+    expect(GEOMETRY_EFFECT_LABELS.long_shadow).toBe('Long shadow')
   })
 })
 
@@ -70,6 +71,94 @@ describe('geometryEffects: identity', () => {
   it('ignores non-geometry kinds (they never reach the outline path)', () => {
     const eff = [{ type: 'bloom', visible: true }]
     expect(applyGeometry(SQUARE_D, eff, { W })).toBe(SQUARE_D)
+  })
+  it('returns the SAME string for a long_shadow (it is a paint-beneath, not an outline transform)', () => {
+    // long_shadow is a geometry kind, so it is not filtered out — but its applyOne case is a
+    // pure no-op, so applyGeometry returns the input outline by reference (the body is painted
+    // separately in drawLayerContent). This is the byte-identity proof for the outline path.
+    const eff = [{ type: 'long_shadow', angle: 45, length: 0.05, color: 'rgba(0,0,0,0.35)', visible: true }]
+    expect(applyGeometry(SQUARE_D, eff, { W })).toBe(SQUARE_D)
+  })
+})
+
+// ── long_shadow BODY (pure). The solid swept extrude built from a vector outline; painted
+// beneath the shape in drawLayerContent (which applyGeometry never touches). Nonzero winding.
+describe('geometryEffects: longShadowBody', () => {
+  // Nonzero winding number of a compound path (all subpaths closed) at a point.
+  const windingAt = (d: string, x: number, y: number): number => {
+    let wn = 0
+    for (const s of flatten(d)) {
+      const pts = s.pts
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i]!, b = pts[(i + 1) % pts.length]!
+        if (a.y <= y) {
+          if (b.y > y && ((b.x - a.x) * (y - a.y) - (x - a.x) * (b.y - a.y)) > 0) wn++
+        } else if (b.y <= y && ((b.x - a.x) * (y - a.y) - (x - a.x) * (b.y - a.y)) < 0) wn--
+      }
+    }
+    return wn
+  }
+  const inside = (d: string, x: number, y: number) => windingAt(d, x, y) !== 0
+  // Filled area (nonzero) by sampling an N×N grid over the body's bbox.
+  const areaOf = (d: string, N = 240): number => {
+    const bb = bboxOf(d)
+    const cw = (bb.maxX - bb.minX) / N, ch = (bb.maxY - bb.minY) / N
+    let n = 0
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      if (inside(d, bb.minX + (i + 0.5) * cw, bb.minY + (j + 0.5) * ch)) n++
+    }
+    return n * cw * ch
+  }
+
+  it('angle 0 (rightward) extends the bbox right by the length; area = shape + swept band', () => {
+    const body = longShadowBody(SQUARE_D, 0, 50) // 100×100 square, cast +x by 50
+    const bb = bboxOf(body)
+    expect(bb.minX).toBeCloseTo(0, 3)
+    expect(bb.maxX).toBeCloseTo(150, 3) // 100 + length
+    expect(bb.minY).toBeCloseTo(0, 3)
+    expect(bb.maxY).toBeCloseTo(100, 3)
+    // Minkowski sum with the segment [0,(50,0)] is the rect [0,150]×[0,100] → area 15000.
+    expect(areaOf(body)).toBeGreaterThan(15000 * 0.97)
+    expect(areaOf(body)).toBeLessThan(15000 * 1.03)
+  })
+
+  it('angle 90 extends the bbox downward by the length', () => {
+    const body = longShadowBody(SQUARE_D, Math.PI / 2, 40) // cast +y by 40
+    const bb = bboxOf(body)
+    expect(bb.maxY).toBeCloseTo(140, 3)
+    expect(bb.minY).toBeCloseTo(0, 3)
+    expect(bb.maxX).toBeCloseTo(100, 3)
+  })
+
+  it('length 0 → body is (essentially) the shape itself', () => {
+    const body = longShadowBody(SQUARE_D, 0, 0)
+    const bb = bboxOf(body)
+    expect(bb.minX).toBeCloseTo(0, 3); expect(bb.maxX).toBeCloseTo(100, 3)
+    expect(bb.minY).toBeCloseTo(0, 3); expect(bb.maxY).toBeCloseTo(100, 3)
+    expect(areaOf(body)).toBeGreaterThan(10000 * 0.97)
+    expect(areaOf(body)).toBeLessThan(10000 * 1.03)
+  })
+
+  it('is a single seamless solid — a point inside the swept band is filled (nonzero), none cancels', () => {
+    const body = longShadowBody(SQUARE_D, 0, 50)
+    expect(inside(body, 125, 50)).toBe(true) // in the swept band, past the shape
+    expect(inside(body, 50, 50)).toBe(true)  // inside the original shape
+    expect(inside(body, 200, 50)).toBe(false) // beyond the far cap
+  })
+
+  it('handles multiple subpaths — the body spans both shapes', () => {
+    const TWO = 'M0 0 L20 0 L20 20 L0 20 Z M60 60 L80 60 L80 80 L60 80 Z'
+    const body = longShadowBody(TWO, 0, 30)
+    expect(inside(body, 10, 10)).toBe(true)  // first square
+    expect(inside(body, 70, 70)).toBe(true)  // second square
+    expect(inside(body, 35, 10)).toBe(true)  // first square's swept band
+    expect(inside(body, 95, 70)).toBe(true)  // second square's swept band
+  })
+
+  it('empty outline or non-finite length → empty body string', () => {
+    expect(longShadowBody('', 0, 50)).toBe('')
+    expect(longShadowBody(SQUARE_D, 0, Number.NaN)).toBe('')
+    expect(longShadowBody(SQUARE_D, 0, Number.POSITIVE_INFINITY)).toBe('')
   })
 })
 
@@ -363,6 +452,14 @@ describe('useCompositorLayers: geometryOutwardPx', () => {
   it('is amount·W for a roughen', () => {
     const r = createRectLayer({ effects: [geo('roughen', { amount: 0.03 })] as any })
     expect(geometryOutwardPx(r, W)).toBeCloseTo(0.03 * W, 6)
+  })
+  it('is length·W for a long shadow (its body reaches length·W beyond the outline)', () => {
+    const r = createRectLayer({ effects: [geo('long_shadow', { angle: 45, length: 0.06, color: 'rgba(0,0,0,0.35)' })] as any })
+    expect(geometryOutwardPx(r, W)).toBeCloseTo(0.06 * W, 6)
+  })
+  it('is 0 for a long shadow with zero length', () => {
+    const r = createRectLayer({ effects: [geo('long_shadow', { angle: 45, length: 0, color: 'rgba(0,0,0,0.35)' })] as any })
+    expect(geometryOutwardPx(r, W)).toBe(0)
   })
   it('is the MAX across several geometry effects', () => {
     const r = createRectLayer({

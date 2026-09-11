@@ -45,6 +45,7 @@ export type {
   BooleanOp,
   MorphEffect,
   WarpEffect,
+  LongShadowEffect,
 } from './effectStack'
 export { GEOMETRY_KINDS, isGeometryKind } from './effectStack'
 
@@ -447,6 +448,67 @@ function applyWarp(d: string, e: GeometryEffectInput): string {
   return warpPathD(d, field, { amount, frequency })
 }
 
+// ── long shadow / extrude (F3) ─────────────────────────────────────────────────
+//
+// ARCHITECTURALLY DIFFERENT from every other geometry kind: it is NOT a `d → d` outline
+// transform but a SECOND coloured fill (the shadow BODY) painted BENEATH the shape. So its
+// `applyOne` case is a pure NO-OP (`return d`) — it must never corrupt the outline the other
+// kinds build; `long_shadow` sits LAST in the geometry band precisely so it reads the FINAL
+// outline. The body is produced by `longShadowBody` below and painted in `drawLayerContent`.
+//
+// `longShadowBody(d, angleRad, lengthPx)` builds the solid swept body from a vector outline —
+// the classic canvas long-shadow trick, PURE and paper-free. The swept solid of a shape
+// translated by `t = (cos·len, sin·len)` is the Minkowski sum `P ⊕ [0,t]`, which decomposes
+// EXACTLY into: the shape itself, the shape translated by `t`, and — for every outline edge —
+// the parallelogram (quad) it sweeps. Emitting all of those as ONE compound path and filling
+// NONZERO merges the overlapping pieces into a single seamless solid — PROVIDED every emitted
+// subpath winds the SAME way, or two opposite windings would cancel to a hole. So every quad
+// and cap is normalised to POSITIVE orientation (shoelace), after which nonzero coverage is
+// simply "inside ≥ 1 subpath" everywhere the body covers and 0 outside: no seams, no holes,
+// concave shapes included. Holes in the source shape are filled in the body (a solid
+// silhouette) — the "reasonable" reading the brief asks for; the shape painted on top still
+// shows its own hole.
+//
+// Open subpaths (e.g. a trimmed ring) have no interior, so they contribute only edge quads
+// (no cap ring, no closing edge) — the ribbon the polyline sweeps. `lengthPx ≤ 0` or a
+// non-finite length yields an empty body (the caller also gates the paint on `length > 0`).
+function orientPositive(pts: Pt2[]): Polyline {
+  return { pts: shoelace(pts) < 0 ? [...pts].reverse() : pts, closed: true }
+}
+
+export function longShadowBody(d: string, angleRad: number, lengthPx: number): string {
+  // A non-finite length has no body. At length 0 the sweep vector is zero: the quads collapse
+  // and the caps coincide, so the body IS the shape (the Minkowski sum with a zero segment) —
+  // the caller gates the PAINT on `length > 0`, so a zero-length shadow is simply never drawn.
+  if (!Number.isFinite(lengthPx)) return ''
+  const tx = Math.cos(angleRad) * lengthPx
+  const ty = Math.sin(angleRad) * lengthPx
+  const subs = flatten(d)
+  const parts: Polyline[] = []
+  for (const sub of subs) {
+    const pts = dedupeConsecutive(sub.pts)
+    if (pts.length < 2) continue
+    const n = pts.length
+    // Caps: a closed ring contributes its own fill at both ends of the sweep; an open
+    // polyline has no interior, so it gets none (only the swept edge quads below).
+    if (sub.closed && n >= 3) {
+      parts.push(orientPositive(pts.map(p => ({ x: p.x, y: p.y }))))
+      parts.push(orientPositive(pts.map(p => ({ x: p.x + tx, y: p.y + ty }))))
+    }
+    const edgeCount = sub.closed ? n : n - 1
+    for (let i = 0; i < edgeCount; i++) {
+      const a = pts[i]!, b = pts[(i + 1) % n]!
+      parts.push(orientPositive([
+        { x: a.x, y: a.y },
+        { x: b.x, y: b.y },
+        { x: b.x + tx, y: b.y + ty },
+        { x: a.x + tx, y: a.y + ty },
+      ]))
+    }
+  }
+  return toPathD(parts)
+}
+
 // ── dispatch ──────────────────────────────────────────────────────────────────
 function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
   switch (e.type) {
@@ -457,6 +519,9 @@ function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): stri
     case 'boolean': return applyBoolean(d, e, ctx)
     case 'morph': return applyMorph(d, e, ctx)
     case 'warp': return applyWarp(d, e)
+    // long_shadow is a SECOND fill painted in drawLayerContent, not an outline transform —
+    // a pure no-op here so it never corrupts the outline the other geometry kinds build.
+    case 'long_shadow': return d
     default: return d
   }
 }

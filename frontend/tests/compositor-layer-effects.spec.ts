@@ -303,7 +303,7 @@ test.describe('Frame geometry effects (F2)', () => {
  * Render fix A: a geometry effect on a text layer whose `renderAsOutline` is unset still
  * forces the outline path (Inter) and safely falls back to fillText on a system font (Arial).
  */
-const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp'] as const
+const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'long_shadow'] as const
 // A 1×1 transparent PNG so an image layer has a valid, instantly-decoding source.
 const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
@@ -837,5 +837,86 @@ test.describe('Frame geometry effects — morph / morph to shape (F3 Task 3)', (
     await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
     await openFxMenuFirst(page)
     await expect(page.locator('[data-testid="add-effect-item"][data-kind="morph"]')).toBeDisabled()
+  })
+})
+
+/**
+ * F3 Task 5 — long shadow (extrude): a SOLID directional shadow body swept from a vector
+ * layer's outline, filled BENEATH the shape in a shadow colour. Unlike every other geometry
+ * kind it is a paint-beneath, not a `d → d` transform (applyGeometry no-ops it). These checks
+ * prove the body reaches the canvas in its own colour along the cast angle, and that a
+ * length-0 / absent effect is byte-identical to no effect.
+ */
+/** RGBA at a normalized (nx, ny) point on the stack canvas. */
+async function colorAt(page: Page, nx: number, ny: number) {
+  return page.evaluate(([x, y]) => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const px = Math.round(x * cv.width), py = Math.round(y * cv.height)
+    const d = cv.getContext('2d')!.getImageData(px, py, 1, 1).data
+    return { r: d[0]!, g: d[1]!, b: d[2]!, a: d[3]! }
+  }, [nx, ny] as const)
+}
+
+test.describe('Frame geometry effects — long shadow (F3 Task 5)', () => {
+  test('casts a coloured body along the angle; length 0 is byte-identical to none', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page) // 0.6-wide white rect centred at 0.5 ⇒ right edge at x≈0.8
+    const bare = await stackPixels(page)
+    // To the right of the rect, before any shadow, there is no rect ink.
+    const rightBefore = await colorAt(page, 0.87, 0.5)
+    expect(rightBefore.a).toBeLessThan(40)
+
+    // A visible red long shadow cast rightward (angle 0) for 0.1·W reaches x≈0.9.
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'lsh', type: 'long_shadow', angle: 0, length: 0.1, color: 'rgba(255,0,0,1)', visible: true }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    const withShadow = await stackPixels(page)
+    expect(withShadow).not.toBe(bare) // the body reached the canvas
+
+    // The swept band to the right of the rect now carries the shadow colour (red-dominant).
+    const band = await colorAt(page, 0.87, 0.5)
+    expect(band.a).toBeGreaterThan(200)
+    expect(band.r).toBeGreaterThan(180)
+    expect(band.g).toBeLessThan(80)
+    expect(band.b).toBeLessThan(80)
+
+    // The rect itself still paints on TOP of the shadow — its centre stays white.
+    const centre = await colorAt(page, 0.5, 0.5)
+    expect(centre.r).toBeGreaterThan(220)
+    expect(centre.g).toBeGreaterThan(220)
+    expect(centre.b).toBeGreaterThan(220)
+
+    // Length 0 → the body is never painted (the paint step gates on length > 0): byte-identical.
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'lsh', type: 'long_shadow', angle: 0, length: 0, color: 'rgba(255,0,0,1)', visible: true }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    await stackPixels(page)
+    const zeroLen = await stackPixels(page)
+    expect(zeroLen).toBe(bare)
+
+    // A hidden long shadow is likewise a no-op.
+    await page.evaluate(() => {
+      const ls = (window as any).__compositorLayers()
+      ls[0].effects = [{ id: 'lsh', type: 'long_shadow', angle: 0, length: 0.1, color: 'rgba(255,0,0,1)', visible: false }]
+      ;(window as any).__compositorSetLayers(ls)
+    })
+    await stackPixels(page)
+    const hidden = await stackPixels(page)
+    expect(hidden).toBe(bare)
+  })
+
+  test('the add menu offers long shadow on a rect and greys it on an image', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await openFxMenuFirst(page)
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="long_shadow"]')).toBeEnabled()
+    await seedOne(page, { id: 'i1', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.4, rotation: 0, opacity: 1, src: TINY_PNG })
+    await openFxMenuFirst(page)
+    await expect(page.locator('[data-testid="add-effect-item"][data-kind="long_shadow"]')).toBeDisabled()
   })
 })
