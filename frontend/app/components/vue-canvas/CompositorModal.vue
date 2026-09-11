@@ -1405,10 +1405,10 @@ function recolourWith(hexes: string[]) {
 }
 function applyFamilyToFrame(fam: PaletteFamily) { recolourWith(fam.hexes) }
 function applyStopsToFrame(stops: GradientStop[]) { recolourWith(stops.map(s => s.color)) }
-function reassignSlot(slotHex: string, toHex: string) {
-  if (toHex.toLowerCase() === slotHex.toLowerCase()) return
+function reassignSlot(slotHex: string, toHex: string, alpha?: string) {
+  if (toHex.toLowerCase() === slotHex.toLowerCase() && alpha === undefined) return
   const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
-  const next = recolourSlot(localLayers.value as LocalLayer[], background.value, slotHex, toHex, aspect)
+  const next = recolourSlot(localLayers.value as LocalLayer[], background.value, slotHex, toHex, aspect, alpha)
   recordHistory(); commit(next.layers); editor.writeBackground(next.background)
   const m = recolourMemory.value; if (m) writeRecolourMemory({ ...m, applied: { ...m.applied, [slotHex.toLowerCase()]: toHex.toLowerCase() } })
 }
@@ -9188,7 +9188,7 @@ onUnmounted(() => {
             <div class="panel-label mb-1.5">Colours</div>
             <p v-if="!frameColourSlots.length" class="text-[11px] text-white/40 italic">Add a background, text or a shape to see the frame's colours.</p>
             <template v-else>
-              <ColourSlots :slots="frameColourSlots" :family="recolourMemory?.hexes ?? null" @reassign="reassignSlot" />
+              <ColourSlots :slots="frameColourSlots" @recolour="reassignSlot" />
               <p class="mt-2 mb-1.5 text-[11px] text-white/45">Pick a palette to recolour the frame. Things that share a colour keep sharing one; the darkest stays darkest.</p>
               <div data-testid="recolour-images" class="mb-1.5">
                 <StudioSwitch v-model="recolourImages" label="Images too" hint="Photos take the palette as a gradient map." />

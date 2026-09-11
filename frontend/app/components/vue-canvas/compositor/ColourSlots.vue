@@ -1,35 +1,72 @@
 <!-- frontend/app/components/vue-canvas/compositor/ColourSlots.vue -->
 <script setup lang="ts">
-// The frame's colour slots as swatches (heaviest first). After a palette family
-// has been applied, a swatch opens that family's colours so one slot can be sent
-// elsewhere — a wrong mapping is one click, not a rebuild.
-import { ref } from 'vue'
-const props = withDefaults(defineProps<{ slots: { hex: string; weight: number }[]; family?: string[] | null }>(), { family: null })
-const emit = defineEmits<{ (e: 'reassign', slotHex: string, toHex: string): void }>()
-const open = ref<string | null>(null)
-function toggle(hex: string) { if (!props.family) return; open.value = open.value === hex ? null : hex }
-function pick(slotHex: string, toHex: string) { open.value = null; if (toHex !== slotHex) emit('reassign', slotHex, toHex) }
+// The frame's colours as rows — swatch, hex, opacity — heaviest first (the Figma
+// "selection colours" presentation). Editing a row rewrites that colour everywhere
+// it is used: the swatch opens the house picker, the hex is typed, the opacity
+// field sets one alpha on every use (read-only while the uses disagree).
+import { ref, watch } from 'vue'
+import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
+import { isHex, parseHexA, withAlpha } from '~/lib/color/convert'
+
+const props = defineProps<{ slots: { hex: string; weight: number; alpha: string | 'mixed' }[] }>()
+const emit = defineEmits<{ (e: 'recolour', slotHex: string, toHex: string, alpha?: string): void }>()
+
+const alphaPct = (a: string | 'mixed') => a === 'mixed' ? null : Math.round(parseInt(a, 16) / 255 * 100)
+const swatchValue = (s: { hex: string; alpha: string | 'mixed' }) => s.alpha === 'mixed' || s.alpha === 'ff' ? s.hex : withAlpha(s.hex, parseInt(s.alpha, 16) / 255)
+
+// Local drafts so typing does not fight the reactive slot list mid-edit.
+const hexDraft = ref<Record<string, string>>({})
+const pctDraft = ref<Record<string, string>>({})
+watch(() => props.slots, (list) => {
+  const h: Record<string, string> = {}, p: Record<string, string> = {}
+  for (const s of list) { h[s.hex] = s.hex.slice(1).toUpperCase(); const pc = alphaPct(s.alpha); p[s.hex] = pc == null ? 'Mixed' : String(pc) }
+  hexDraft.value = h; pctDraft.value = p
+}, { immediate: true, deep: true })
+
+function onSwatch(slotHex: string, v: string) {
+  const { hex, alpha } = parseHexA(v)                       // 6-digit → alpha 1
+  const a = Math.round(alpha * 255).toString(16).padStart(2, '0')
+  if (hex.toLowerCase() === slotHex && a === 'ff') return
+  emit('recolour', slotHex, hex.toLowerCase(), a === 'ff' ? undefined : a)
+}
+function commitHex(slotHex: string) {
+  const raw = (hexDraft.value[slotHex] ?? '').trim().replace(/^#/, '')
+  const candidate = '#' + raw.toLowerCase()
+  if (!isHex(candidate) || candidate.length !== 7) { hexDraft.value[slotHex] = slotHex.slice(1).toUpperCase(); return }
+  if (candidate === slotHex) return
+  emit('recolour', slotHex, candidate)
+}
+function commitAlpha(slotHex: string, current: string | 'mixed') {
+  if (current === 'mixed') return
+  const n = Math.round(Number((pctDraft.value[slotHex] ?? '').replace('%', '')))
+  if (!Number.isFinite(n) || n < 0 || n > 100) { pctDraft.value[slotHex] = String(alphaPct(current)); return }
+  const a = Math.round(n / 100 * 255).toString(16).padStart(2, '0')
+  if (a === current) return
+  emit('recolour', slotHex, slotHex, a)
+}
 </script>
 
 <template>
-  <div class="flex flex-col gap-2">
-    <div class="flex flex-wrap gap-1.5" aria-label="Frame colours">
-      <button
-        v-for="(s, i) in slots" :key="s.hex" type="button" data-testid="colour-slot" :data-hex="s.hex"
-        :title="family ? `Colour ${s.hex} — send to another colour` : `Colour ${s.hex}`" :aria-label="`Colour ${s.hex}`"
-        class="h-7 rounded-md ring-1 ring-white/15 transition-[box-shadow] hover:ring-white/50 focus-visible:ring-white"
-        :class="[i === 0 ? 'w-14' : 'w-7', family ? 'cursor-pointer' : 'cursor-default', open === s.hex ? 'ring-2 ring-white' : '']"
-        :style="{ background: s.hex }" :disabled="!family"
-        @click="toggle(s.hex)"
+  <div class="flex flex-col gap-1" aria-label="Frame colours">
+    <div
+      v-for="s in slots" :key="s.hex" data-testid="colour-slot" :data-hex="s.hex"
+      class="flex h-8 items-center gap-1.5 rounded-md bg-white/[0.04] pl-1.5 pr-1"
+    >
+      <StudioColor :model-value="swatchValue(s)" @update:model-value="(v: string) => onSwatch(s.hex, v)" />
+      <input
+        data-testid="colour-slot-hex" type="text" spellcheck="false" :aria-label="`Colour ${s.hex}`"
+        class="h-6 min-w-0 flex-1 rounded bg-transparent px-1 font-mono text-[11.5px] uppercase text-white/85 outline-none focus:bg-white/[0.06]"
+        v-model="hexDraft[s.hex]" @keydown.enter.prevent="($event.target as HTMLInputElement).blur()" @blur="commitHex(s.hex)"
       />
-    </div>
-    <div v-if="open && family" class="flex flex-wrap gap-1.5 rounded-lg bg-white/[0.04] p-2" data-testid="colour-slot-options">
-      <span class="w-full text-[11px] text-white/45">Send this colour to</span>
-      <button
-        v-for="h in family" :key="h" type="button" data-testid="colour-slot-option" :data-hex="h" :title="h" :aria-label="`Use ${h}`"
-        class="h-6 w-6 rounded ring-1 ring-white/15 hover:ring-white/60" :style="{ background: h }"
-        @click="pick(open!, h)"
-      />
+      <div class="flex h-6 w-16 items-center rounded bg-white/[0.04] px-1.5 text-[11.5px] text-white/70">
+        <input
+          data-testid="colour-slot-alpha" type="text" inputmode="numeric" :aria-label="`Opacity of ${s.hex}`"
+          class="w-full min-w-0 bg-transparent text-right outline-none disabled:text-white/40"
+          :disabled="s.alpha === 'mixed'" v-model="pctDraft[s.hex]"
+          @keydown.enter.prevent="($event.target as HTMLInputElement).blur()" @blur="commitAlpha(s.hex, s.alpha)"
+        />
+        <span v-if="s.alpha !== 'mixed'" class="ml-0.5 text-white/40">%</span>
+      </div>
     </div>
   </div>
 </template>

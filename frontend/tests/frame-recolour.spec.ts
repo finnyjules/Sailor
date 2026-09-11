@@ -38,21 +38,26 @@ test.describe('Frame recolour', () => {
     expect(undone.layers).toEqual(before.layers); expect(undone.bg).toEqual(before.bg)
   })
 
-  test('a slot can be sent to another colour of the applied family', async ({ page }) => {
-    await page.getByRole('button', { name: /library/i }).first().click()
-    const tile = page.locator('[data-testid="frame-colours"] [data-testid="palette-family"]').first()
-    await tile.waitFor({ timeout: 10000 }); await tile.click()
-    const slot = page.locator('[data-testid="colour-slot"]').nth(1)
-    const slotHex = await slot.getAttribute('data-hex')
-    await slot.click()
-    // `hasNot` filters by descendant match, and these option buttons are leaves with
-    // no descendants — that filter is always a no-op here, so exclude by attribute instead.
-    const option = page.locator(`[data-testid="colour-slot-option"]:not([data-hex="${slotHex}"])`).first()
-    const toHex = await option.getAttribute('data-hex')
-    await option.click()
-    const { layers, bg } = await frame(page)
-    const all = [...solidColours(layers), typeof bg === 'string' ? bg : null].filter(Boolean).map(h => (h as string).toLowerCase())
-    expect(all).not.toContain(slotHex); expect(all).toContain(toHex)
+  test('typing a hex into a colour row changes that colour everywhere; opacity sets one alpha on every use', async ({ page }) => {
+    const row = page.locator('[data-testid="colour-slot"]').nth(1)
+    const slotHex = (await row.getAttribute('data-hex'))!
+    const hexInput = row.locator('[data-testid="colour-slot-hex"]')
+    await hexInput.fill('12abef'); await hexInput.press('Enter')
+    const after = await frame(page)
+    const all = [...solidColours(after.layers), typeof after.bg === 'string' ? after.bg : null].filter(Boolean).map(h => (h as string).toLowerCase().slice(0, 7))
+    expect(all).not.toContain(slotHex); expect(all).toContain('#12abef')
+    // opacity: the row now reads #12abef; set 50 %
+    const row2 = page.locator('[data-testid="colour-slot"][data-hex="#12abef"]')
+    const alphaInput = row2.locator('[data-testid="colour-slot-alpha"]')
+    await expect(alphaInput).toBeEnabled()
+    await alphaInput.fill('50'); await alphaInput.press('Enter')
+    const after2 = await frame(page)
+    const uses = [...solidColours(after2.layers), typeof after2.bg === 'string' ? after2.bg : null].filter(h => typeof h === 'string' && h.toLowerCase().startsWith('#12abef')) as string[]
+    expect(uses.length).toBeGreaterThan(0)
+    for (const u of uses) expect(u.toLowerCase()).toBe('#12abef80')
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')   // one step: back to opaque
+    const undone = await frame(page)
+    expect([...solidColours(undone.layers)].filter(h => typeof h === 'string' && h.toLowerCase().startsWith('#12abef')).every(h => (h as string).length === 7)).toBe(true)
   })
 
   test('Images too puts a family gradient map on the photos, in the same undo step, and clears it when turned off', async ({ page }) => {
