@@ -13,6 +13,13 @@ describe('slotsOf', () => {
     expect(slots[2]!.sites).toHaveLength(2)
     expect(groundOf(slots)!.hex).toBe('#fafafa'); expect(inkOf(slots)!.hex).toBe('#111111')
   })
+  it('reports a slot\'s alpha: ff when opaque, the shared value when uniform, mixed otherwise', () => {
+    const s = (owner: string, alpha?: string) => ({ ...site(owner, '#ff0000', 0.1), alpha })
+    expect(slotsOf([s('a'), s('b')])[0]!.alpha).toBe('ff')
+    expect(slotsOf([s('a', '80'), s('b', '80')])[0]!.alpha).toBe('80')
+    expect(slotsOf([s('a', '80'), s('b')])[0]!.alpha).toBe('mixed')
+    expect(slotsOf([s('a', 'ff'), s('b')])[0]!.alpha).toBe('ff')
+  })
 })
 
 describe('mapFamily', () => {

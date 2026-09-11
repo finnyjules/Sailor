@@ -22,7 +22,17 @@ export function recolourFrame(layers: LocalLayer[], background: Paint | undefine
   return { layers: nextLayers, background: bgRoot.background }
 }
 
-/** `recolourFrame` with a one-entry mapping: rewrite one slot everywhere it appears. */
-export function recolourSlot(layers: LocalLayer[], background: Paint | undefined, slotHex: string, toHex: string, frameAspect: number) {
-  return recolourFrame(layers, background, { [slotHex.toLowerCase()]: toHex.toLowerCase() }, frameAspect)
+/** Rewrite one slot everywhere it appears; an `alpha` override is written onto every site's use
+ *  (no override leaves each use's own captured alpha in place, matching `recolourFrame`). */
+export function recolourSlot(layers: LocalLayer[], background: Paint | undefined, slotHex: string, toHex: string, frameAspect: number, alpha?: string) {
+  const from = slotHex.toLowerCase(), to = toHex.toLowerCase()
+  const nextLayers: LocalLayer[] = JSON.parse(JSON.stringify(layers))
+  const bgRoot = { background: background == null ? undefined : JSON.parse(JSON.stringify(background)) as Paint }
+  const byId = new Map(nextLayers.map(l => [l.id, l as any]))
+  for (const site of colourSites(nextLayers, bgRoot.background, frameAspect)) {
+    if (site.hex !== from) continue
+    const root = site.owner === 'bg' ? bgRoot : byId.get(site.owner)
+    if (root) site.set(root, to, alpha)
+  }
+  return { layers: nextLayers, background: bgRoot.background }
 }

@@ -24,7 +24,7 @@ export interface ColourSite {
   alpha?: string            // 2 hex digits when the source was 8-digit, else undefined
   weight: number            // coverage proxy, frame-normalised (bg = 1)
   kind: 'bg' | 'text' | 'shape' | 'stroke' | 'image' | 'ink'
-  set: (root: any, hex: string) => void   // writes hex (re-attaching alpha) onto a CLONE root
+  set: (root: any, hex: string, alpha?: string) => void   // writes hex (re-attaching alpha, or an override) onto a CLONE root
 }
 
 /** Split a 6/8-digit hex into lowercase rgb + optional alpha; null for anything else
@@ -40,7 +40,7 @@ function splitHex(v: unknown): { hex: string; alpha?: string } | null {
   }
   return null
 }
-const join = (hex: string, alpha?: string) => alpha ? hex + alpha : hex
+const join = (hex: string, alpha?: string) => alpha && alpha !== 'ff' ? hex + alpha : hex
 
 /** A stroke is a thin band, not a fill — its coverage is a small fraction of the shape it
  *  outlines, so every stroke weight (legacy single-stroke fields AND a stored stroke stack)
@@ -67,7 +67,7 @@ function paintSites(out: ColourSite[], owner: string, path: string, kind: Colour
   if (p == null) return
   if (typeof p === 'string') {
     const h = splitHex(p); if (!h) return
-    out.push({ owner, path, hex: h.hex, alpha: h.alpha, weight, kind, set: (root, hex) => setP(root, join(hex, h.alpha)) })
+    out.push({ owner, path, hex: h.hex, alpha: h.alpha, weight, kind, set: (root, hex, alpha) => setP(root, join(hex, alpha ?? h.alpha)) })
     return
   }
   if (typeof p !== 'object') return
@@ -78,7 +78,7 @@ function paintSites(out: ColourSite[], owner: string, path: string, kind: Colour
       const h = splitHex(st.color); if (!h) return
       out.push({
         owner, path: `${path}.stops[${i}]`, hex: h.hex, alpha: h.alpha, weight: w, kind,
-        set: (root, hex) => { const g = getP(root) as any; if (g?.stops?.[i]) g.stops[i].color = join(hex, h.alpha) },
+        set: (root, hex, alpha) => { const g = getP(root) as any; if (g?.stops?.[i]) g.stops[i].color = join(hex, alpha ?? h.alpha) },
       })
     })
     return
@@ -94,7 +94,7 @@ function paintSites(out: ColourSite[], owner: string, path: string, kind: Colour
     const h = splitHex((p as any)[key]); if (!h) continue
     out.push({
       owner, path: `${path}.${key}`, hex: h.hex, alpha: h.alpha, weight: weight / 3, kind,
-      set: (root, hex) => { const f = getP(root) as any; if (f && typeof f === 'object') f[key] = join(hex, h.alpha) },
+      set: (root, hex, alpha) => { const f = getP(root) as any; if (f && typeof f === 'object') f[key] = join(hex, alpha ?? h.alpha) },
     })
   }
 }
@@ -108,7 +108,7 @@ function inkArraySites(out: ColourSite[], l: any, arrPath: string[], weight: num
     const h = splitHex(v); if (!h) return
     out.push({
       owner: l.id, path: `${arrPath.join('.')}[${i}]`, hex: h.hex, alpha: h.alpha, weight: w, kind: 'ink',
-      set: (root, hex) => { const a = arrPath.reduce((o, k) => o?.[k], root); if (Array.isArray(a)) a[i] = join(hex, h.alpha) },
+      set: (root, hex, alpha) => { const a = arrPath.reduce((o, k) => o?.[k], root); if (Array.isArray(a)) a[i] = join(hex, alpha ?? h.alpha) },
     })
   })
 }
@@ -120,7 +120,7 @@ function inkFieldSites(out: ColourSite[], l: any, objPath: string[], keys: strin
     const h = splitHex(obj[key]); if (!h) continue
     out.push({
       owner: l.id, path: `${objPath.join('.')}.${key}`, hex: h.hex, alpha: h.alpha, weight: w, kind: 'ink',
-      set: (root, hex) => { const o = objPath.reduce((o, k) => o?.[k], root); if (o) o[key] = join(hex, h.alpha) },
+      set: (root, hex, alpha) => { const o = objPath.reduce((o, k) => o?.[k], root); if (o) o[key] = join(hex, alpha ?? h.alpha) },
     })
   }
 }

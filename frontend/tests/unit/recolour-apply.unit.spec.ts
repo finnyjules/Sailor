@@ -33,4 +33,11 @@ describe('recolourFrame', () => {
     const out = recolourSlot(layers as any, '#ff0000', '#ff0000', '#00aa00', 1)
     expect((out.layers[0] as any).fill).toBe('#00aa00'); expect((out.layers[1] as any).strokes[0].paint).toBe('#00aa00'); expect(out.background).toBe('#00aa00')
   })
+  it('recolourSlot with an alpha writes that alpha on every use; without one, keeps each use\'s own', () => {
+    const layers: any[] = [rect('a', '#ff0000'), rect('b', '#ff000080')]
+    const withA = recolourSlot(layers as any, undefined, '#ff0000', '#00aa00', 1, '40')
+    expect((withA.layers[0] as any).fill).toBe('#00aa0040'); expect((withA.layers[1] as any).fill).toBe('#00aa0040')
+    const noA = recolourSlot(layers as any, undefined, '#ff0000', '#00aa00', 1)
+    expect((noA.layers[0] as any).fill).toBe('#00aa00'); expect((noA.layers[1] as any).fill).toBe('#00aa0080')
+  })
 })

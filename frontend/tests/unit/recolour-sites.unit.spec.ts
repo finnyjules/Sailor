@@ -122,3 +122,13 @@ describe('colourSites', () => {
     expect(sites.find(s => s.owner === 'r' && s.kind === 'stroke')!.weight).toBeLessThan(w('small'))
   })
 })
+
+describe('site.set with an alpha override', () => {
+  it('replaces the captured alpha, and ff writes a 6-digit hex', () => {
+    const layers: any[] = [{ id: 'r', kind: 'rect', x: .5, y: .5, w: .4, h: .2, rotation: 0, opacity: 1, fill: '#ff000080', stroke: '', strokeWidth: 0 }]
+    const [site] = colourSites(layers as any, undefined, 1)
+    const c1 = JSON.parse(JSON.stringify(layers[0])); site!.set(c1, '#123456', '40'); expect(c1.fill).toBe('#12345640')
+    const c2 = JSON.parse(JSON.stringify(layers[0])); site!.set(c2, '#123456', 'ff'); expect(c2.fill).toBe('#123456')
+    const c3 = JSON.parse(JSON.stringify(layers[0])); site!.set(c3, '#123456'); expect(c3.fill).toBe('#12345680')   // no override → captured alpha kept
+  })
+})
