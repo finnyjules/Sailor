@@ -469,9 +469,9 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   // the route is silently ignored. The hold is flat per model regardless of
   // `seconds` until that precedence changes (a shared chokepoint — out of
   // scope for this fix).
-  'bytedance/seedance-2.0/image-to-video': { usd: 0.6, credits: 90, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip; duration-aware hold via setMeterPriceHint in server/api/frame/animate.post.ts' },
-  'minimax/h3/image-to-video': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip; duration-aware hold via setMeterPriceHint in server/api/frame/animate.post.ts' },
-  'luma/ray-2-720p': { usd: 0.4, credits: 60, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip; duration-aware hold via setMeterPriceHint in server/api/frame/animate.post.ts' },
+  'bytedance/seedance-2.0/image-to-video': { usd: 0.6, credits: 90, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip regardless of length — duration-aware pricing NOT wired (resolveCredits prefers this row over any price hint); a hardening rider' },
+  'minimax/h3/image-to-video': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip regardless of length — duration-aware pricing NOT wired (resolveCredits prefers this row over any price hint); a hardening rider' },
+  'luma/ray-2-720p': { usd: 0.4, credits: 60, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip regardless of length — duration-aware pricing NOT wired (resolveCredits prefers this row over any price hint); a hardening rider' },
   // — training (hardware-billed; matches LoraTrainingNode=600 in the graph table) —
   'ostris/flux-dev-lora-trainer': { usd: 2.5, credits: 600, confidence: 'estimate', note: 'H100 ~15–40min; 600cr keeps parity with graph table' },
   'ostris/sdxl-lora-trainer': { usd: 2, credits: 600, confidence: 'estimate' },
