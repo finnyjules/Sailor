@@ -418,6 +418,17 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'black-forest-labs/flux-kontext-dev': { usd: 0.025, credits: 5, confidence: 'estimate', note: 'assumed flux-dev rate' },
   'black-forest-labs/flux-fill-dev': { usd: 0.04, credits: 8, confidence: 'estimate' },
   'fal-ai/flux-pro/v1/fill': { usd: 0.05, credits: 10, confidence: 'verified', note: '$0.05/MP, rounded up' },
+  // — fal defaults (2026-09-11: every inpaint / vector route moved off Replicate) —
+  'fal-ai/flux/schnell': { usd: 0.003, credits: 1, confidence: 'verified', note: '$0.003/MP' },
+  'fal-ai/flux-2-pro': { usd: 0.03, credits: 6, confidence: 'verified', note: '$0.03/MP' },
+  'fal-ai/bytedance/seedream/v4.5/text-to-image': { usd: 0.04, credits: 8, confidence: 'verified', note: 'flat per image' },
+  'fal-ai/flux-kontext/dev': { usd: 0.025, credits: 5, confidence: 'estimate', note: 'assumed flux-dev rate' },
+  'fal-ai/flux-lora': { usd: 0.035, credits: 7, confidence: 'estimate', note: '$0.035/MP — LoRA inference moved here from per-owner Replicate models' },
+  'fal-ai/flux-lora/inpainting': { usd: 0.04, credits: 8, confidence: 'estimate', note: 'FLUX Fill dev tier' },
+  'fal-ai/nano-banana-2/edit': { usd: 0.10, credits: 20, confidence: 'estimate', note: 'pose transfer; verify against fal pricing' },
+  'fal-ai/birefnet/v2': { usd: 0.005, credits: 1, confidence: 'estimate', note: 'background removal' },
+  'fal-ai/recraft/v3/text-to-image': { usd: 0.08, credits: 16, confidence: 'verified', note: 'vector styles = 2× raster' },
+  'fal-ai/recraft/vectorize': { usd: 0.01, credits: 2, confidence: 'estimate' },
   // — segmentation / utility —
   'fal-ai/sam-3/image': { usd: 0.005, credits: 1, confidence: 'verified', note: 'promptable SAM 3 — $0.005/request flat; click-to-select fires one per refine' },
   'meta/sam-2': { usd: 0.022, credits: 4, confidence: 'verified', note: 'RETIRED from inpaint (segment-everything, ignored points); kept for pricing history' },
