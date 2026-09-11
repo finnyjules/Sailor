@@ -2597,6 +2597,171 @@
       ]
     },
     {
+      "id": "studio_backdrop",
+      "name": "Studio backdrop",
+      "category": "generative",
+      "animated": true,
+      "passes": 1,
+      "centerParam": [
+        "u_centerX",
+        "u_centerY"
+      ],
+      "textures": [],
+      "generative": true,
+      "params": [
+        {
+          "uniform": "u_surface",
+          "label": "Surface colour",
+          "type": "color",
+          "default": "#d8dbec"
+        },
+        {
+          "uniform": "u_keyColor",
+          "label": "Key colour",
+          "type": "color",
+          "default": "#d5e4ea"
+        },
+        {
+          "uniform": "u_keyIntensity",
+          "label": "Key intensity",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 40.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_keySoftness",
+          "label": "Key softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 50.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_fillColor",
+          "label": "Fill colour",
+          "type": "color",
+          "default": "#d5e4ea"
+        },
+        {
+          "uniform": "u_fillIntensity",
+          "label": "Fill intensity",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 10.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_fillSoftness",
+          "label": "Fill softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 70.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_fillSpread",
+          "label": "Fill spread",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 70.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_backColor",
+          "label": "Back colour",
+          "type": "color",
+          "default": "#c8d4e8"
+        },
+        {
+          "uniform": "u_backIntensity",
+          "label": "Back intensity",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 20.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_backSoftness",
+          "label": "Back softness",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 80.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_ambient",
+          "label": "Ambient",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 21.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_vignette",
+          "label": "Vignette",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 0.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_centerX",
+          "label": "Stage centre X",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.5,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_centerY",
+          "label": "Stage centre Y",
+          "type": "float",
+          "min": 0.0,
+          "max": 1.0,
+          "default": 0.2,
+          "step": 0.01
+        },
+        {
+          "uniform": "u_lightDepth",
+          "label": "Light depth",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_wallCurvature",
+          "label": "Wall curvature",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 10.0,
+          "step": 1.0
+        },
+        {
+          "uniform": "u_ambientDetail",
+          "label": "Ambient detail",
+          "type": "float",
+          "min": 0.0,
+          "max": 100.0,
+          "default": 100.0,
+          "step": 1.0
+        }
+      ]
+    },
+    {
       "id": "crt_scanlines",
       "name": "CRT",
       "category": "stylize",
