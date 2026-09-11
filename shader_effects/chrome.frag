@@ -155,14 +155,21 @@ void main() {
         cover = 1.0;
         edgeD = 1.0;
     }
-    float flen = length(rel);
-    vec2 rdir = flen > 1e-5 ? rel / flen : vec2(0.0, 1.0);
+    // Everything below is measured in SHAPE-NORMALISED coordinates: `rel` divided by the
+    // shape's own half-extent (u_shapeSize in the Frame, half the short side otherwise), so
+    // relN spans about [-1, 1] across the shape at ANY size. A small chip and a frame-filling
+    // clover then dome and reflect identically — measuring in absolute frame units made a large
+    // shape over-tilt into a flat top-to-bottom gradient, the "just cut, not applied" look.
+    float unit = u_hasShape > 0.5 ? max(u_shapeSize, 0.05) : 0.5;
+    vec2 relN = rel / unit;
+    float flenN = length(relN);
+    vec2 rdir = flenN > 1e-5 ? relN / flenN : vec2(0.0, 1.0);
 
     // ---- The polished bevel: a light line following the outline ----
     float bw = max(u_bevelWidth, 0.005) * 2.0;           // bevel width in edgeD units
     float t0 = clamp(edgeD / bw, 0.0, 1.0);              // 0 at the outline, 1 at the flat face
     // Waviness wobbles the bevel light line: strongest across the middle of the bevel.
-    float rimN = vnoise(rel * 21.0) - 0.5;
+    float rimN = vnoise(relN * 4.6) - 0.5;
     float tw = clamp(t0 + rimN * u_waviness * 0.9 * t0 * (1.0 - t0) * 4.0, 0.0, 1.0);
     float sBev = bevelSin(tw, u_bevelShape);
     // A slight extra outward lean concentrated at the very edge, scaled by curvature.
@@ -170,7 +177,8 @@ void main() {
     float sEdge = max(sBev, nt) * (1.0 - t0);            // the bevel term fades onto the flat face
 
     // ---- The convex dome across the face (sweeps the soft studio gradients over flat metal) ----
-    float sSphere = u_curvature * 0.75 * smoothstep(0.0, 0.5, flen);
+    // Domes edge to edge: 0 at the centre (flat, catches the frontal softbox), full at the rim.
+    float sSphere = u_curvature * 0.75 * smoothstep(0.0, 2.3, flenN);
 
     // ---- Assemble the surface normal: bevel edge + radial dome ----
     vec2 txy = outward * sEdge + rdir * sSphere;
@@ -183,12 +191,13 @@ void main() {
 
     // ---- Waviness: a broad, slowly drifting tilt so the surface reads as pressed metal ----
     float time = u_time * u_speed;
-    vec2 wg = vec2(vnoise(rel * 1.05 + vec2(time * 0.08, 3.1)) - 0.5,
-                   vnoise(rel * 1.05 + vec2(-1.7, time * 0.08 + 8.4)) - 0.5);
+    vec2 wg = vec2(vnoise(relN * 0.23 + vec2(time * 0.08, 3.1)) - 0.5,
+                   vnoise(relN * 0.23 + vec2(-1.7, time * 0.08 + 8.4)) - 0.5);
     N = normalize(N + vec3(wg, 0.0) * u_waviness * 0.6);
 
     // ---- Reflect a slightly perspective view ray, then orbit the studio around ----
-    vec3 T = normalize(vec3(rel * 0.55, 1.0));           // view ray toward the eye, mild perspective
+    // The perspective is in shape units (relN) so the reflection sweep is the same across sizes.
+    vec3 T = normalize(vec3(relN * 0.12, 1.0));          // view ray toward the eye, mild perspective
     vec3 R = reflect(T, N);
     float fres = clamp(abs(dot(N, T)), 0.0, 1.0);
 
