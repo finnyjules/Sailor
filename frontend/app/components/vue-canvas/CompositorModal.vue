@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { clipClocks } from '~/composables/useCompositorLayers'
+import { hasPaint } from '~/lib/paint/resolve'
 import {
   Image as ImageIcon, X, MousePointer2,
   Type, Square, Circle, Minus, Plus, Trash2,
@@ -2946,9 +2948,15 @@ watch(() => layers.value.map(l => l.live ? `L${l.slot}` : l.url).join('|') + '|'
 const previewT = ref<number | null>(null)
 const MAX_LIVE_SLOTS = 8
 const liveMasterClock = computed(() => deriveMasterClock(
-  layers.value.filter(l => l.live).map(l => ({ duration: l.live!.duration, fps: l.live!.fps })),
+  [
+    ...layers.value.filter(l => l.live).map(l => ({ duration: l.live!.duration, fps: l.live!.fps })),
+    ...clipClocks(localLayers.value as LocalLayer[]),
+  ],
   ((compositor.value?.data?.properties as any)?.sailor_frame?.clock) ?? null))
-const hasAnimatedSlot = computed(() => layers.value.some(l => l.live && l.live.duration > 0))
+// "Something here plays on its own": a wired studio with a loop, or a living image.
+const hasAnimatedSlot = computed(() =>
+  layers.value.some(l => l.live && l.live.duration > 0)
+  || clipClocks(localLayers.value as LocalLayer[]).length > 0)
 // A live (speed !== 0) shader fill also needs SOME clock advancing it. The scrubbable
 // playhead (`previewT`) is authoritative whenever it's set — Motion tab, scrubbing or
 // playing (see `renderStack`'s `clockT` below) — so this wall clock only needs to run
@@ -3529,7 +3537,11 @@ async function generateVideo() {
     // so the encode matches the effective motion used above.
     const fps = storedMotionParams.value?.fps ?? motionDoc.value.fps
     try {
-      const encoded = await encodeFrames({ frames: storedMotionParams.value!.rendered, fps, width: W, height: H })
+      const encoded = await encodeFrames({
+        frames: storedMotionParams.value!.rendered, fps, width: W, height: H,
+        // Transparent WebM when the frame has no background of its own; mp4 otherwise.
+        alpha: !hasPaint(background.value),
+      })
       await recordAsset(activeTab.value?.projectUuid, 'video', encoded.filename)
       window.dispatchEvent(new CustomEvent('sailor:compositorOutput', {
         detail: { sourceNodeId: node.id, nodeType: 'Video', widgetOverrides: { file: encoded.filename } },

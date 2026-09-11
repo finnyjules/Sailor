@@ -1,6 +1,7 @@
 // frontend/tests/unit/compositor-master-clock.unit.spec.ts
 import { describe, expect, it } from 'vitest'
 import { deriveMasterClock, slotPhase01 } from '~/lib/compositor/masterClock'
+import { clipClocks, createImageLayer, type ImageLayer } from '~/composables/useCompositorLayers'
 
 describe('deriveMasterClock', () => {
   it('is null with no animated slots and no override', () => {
@@ -48,5 +49,23 @@ describe('slotPhase01', () => {
   it('guards a zero/negative slot duration as phase 0', () => {
     expect(slotPhase01(2, 0)).toBe(0)
     expect(slotPhase01(2, -1)).toBe(0)
+  })
+})
+
+describe('deriveMasterClock with a living image beside a studio slot', () => {
+  it('reconciles the clip period with the slot period', () => {
+    const rose: ImageLayer = {
+      ...createImageLayer('rose.png', 1),
+      clip: { dir: 'sailor_clips/c', frames: 48, fps: 24, speed: 1, prompt: '', model: 'luma-ray-2-720p' }, // 2 s
+    }
+    const mc = deriveMasterClock([{ duration: 3, fps: 24 }, ...clipClocks([rose])])
+    expect(mc).toEqual({ duration: 6, fps: 24 })
+  })
+  it('a clip alone gives the Frame a clock', () => {
+    const rose: ImageLayer = {
+      ...createImageLayer('rose.png', 1),
+      clip: { dir: 'sailor_clips/c', frames: 120, fps: 24, speed: 2, prompt: '', model: 'seedance-2.0' }, // 2.5 s played
+    }
+    expect(deriveMasterClock(clipClocks([rose]))).toEqual({ duration: 2.5, fps: 24 })
   })
 })
