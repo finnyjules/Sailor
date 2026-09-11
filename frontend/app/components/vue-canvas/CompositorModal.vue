@@ -95,6 +95,8 @@ import CompositorMotionTimeline from '~/components/vue-canvas/compositor/Composi
 import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
+import CompositorAnimatePanel from '~/components/vue-canvas/compositor/CompositorAnimatePanel.vue'
+import { useLayerAnimate } from '~/composables/useLayerAnimate'
 import CompositorTornEdgePanel from '~/components/vue-canvas/compositor/CompositorTornEdgePanel.vue'
 import CompositorFeatherPanel from '~/components/vue-canvas/compositor/CompositorFeatherPanel.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
@@ -633,6 +635,21 @@ const editor = useLocalLayerEditor({
   onOSCopy: (payload) => { void writeLayersToOSClipboard(payload) },
 })
 const layerEdit = useLayerImageEdit()
+const layerAnimate = useLayerAnimate()
+async function animateLayer(layer: any, opts: { prompt: string; model: string; seconds: number }) {
+  if (!layer || layer.kind !== 'image' || layerAnimate.busy.value) return
+  try {
+    const clip = await layerAnimate.animate(layer, opts)
+    setLocal(layer.id, { clip } as any)
+    await ensureLayerImages(localLayers.value as LocalLayer[])
+    renderStack()
+  } catch { /* error text is on layerAnimate.error; the layer is untouched */ }
+}
+function setClipSpeed(layer: any, speed: number) {
+  if (!layer?.clip) return
+  setLocal(layer.id, { clip: { ...layer.clip, speed: Math.max(0.25, Math.min(4, speed)) } } as any)
+}
+function removeClip(layer: any) { if (layer?.clip) setLocal(layer.id, { clip: undefined } as any) }
 const {
   localLayers, setLocal, addLocal, deleteLocal, selectLocal,
   selectedId: selectedLocalId, selected: selectedLocal,
@@ -9024,6 +9041,17 @@ onUnmounted(() => {
               </label>
             </div>
           </div>
+
+          <!-- Animate: make this still a looping, transparent clip -->
+          <CompositorAnimatePanel
+            v-if="selectedLocal?.kind === 'image'"
+            :layer="selectedLocal as any"
+            :busy="layerAnimate.busy.value"
+            :error="layerAnimate.error.value"
+            @generate="(o) => animateLayer(selectedLocal, o)"
+            @speed="(v) => setClipSpeed(selectedLocal, v)"
+            @remove="removeClip(selectedLocal)"
+          />
 
           <!-- Layer mask: clip this layer to another layer's silhouette (cross-source) -->
           <div class="mt-3">
