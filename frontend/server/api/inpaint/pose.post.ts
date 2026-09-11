@@ -2,8 +2,8 @@
  * POST /api/inpaint/pose
  *
  * Put a character into a new body pose. Feeds two images to Google Nano Banana 2
- * (Gemini image) on Replicate: the CHARACTER (identity to preserve) and a gray
- * 3D artist MANNEQUIN render (the target pose). The model redraws the same
+ * (Gemini image) on fal: the CHARACTER (identity to preserve) and a gray 3D
+ * artist MANNEQUIN render (the target pose). The model redraws the same
  * character in the mannequin's pose. Spike-validated: identity holds well, pose
  * is adopted (naturalized, not joint-exact) — see project_pose_mannequin_node.
  *
@@ -16,8 +16,9 @@
  * Returns: { images: string[] }  — data URLs (base64), to dodge CORS.
  */
 import { assertRateLimit } from '../../lib/rateLimit'
+import { poseInput } from '../../utils/inpaintFalInputs'
 
-const MODEL = 'google/nano-banana-2'
+const APP = 'fal-ai/nano-banana-2/edit'
 
 // The instruction that survived the de-risking spike. Image 1 = character
 // (identity source), image 2 = mannequin (pose target). Keeping identity vs.
@@ -38,7 +39,6 @@ interface Body { character?: string; pose?: string; prompt?: string; count?: num
 
 export default defineEventHandler(async (event) => {
   assertRateLimit(event, 'inpaint-pose', 30)
-  const token = requireReplicateToken()
   const body = await readBody<Body>(event)
 
   if (!body?.character) throw createError({ statusCode: 400, message: 'character image is required' })
@@ -50,22 +50,12 @@ export default defineEventHandler(async (event) => {
 
   const images = await Promise.all(
     Array.from({ length: count }, async () => {
-      const out = await runReplicate(
-        MODEL,
-        {
-          prompt,
-          image_input: [body.character, body.pose],
-          resolution: '1K',
-          output_format: 'png',
-        },
-        token,
-        { timeoutMs: 120_000 },
-      )
-      const url = firstOutputUrl(out)
-      if (!url) throw createError({ statusCode: 502, message: 'Replicate returned no image' })
+      const out = await runFal(APP, poseInput(prompt, body.character as string, body.pose as string), { pollDeadlineMs: 120_000 })
+      const url = firstFalImageUrl(out)
+      if (!url) throw createError({ statusCode: 502, message: 'fal returned no image' })
       return fetchAsDataUrl(url)
     }),
   )
 
-  return { images, model: MODEL }
+  return { images, model: APP }
 })

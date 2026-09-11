@@ -1,10 +1,9 @@
 /**
  * POST /api/inpaint/flux-fill
  *
- * Mask-based inpainting via Black Forest Labs FLUX.1 Fill. The client paints a
- * region, describes it, and the model fills only that region while preserving
- * the rest of the image. Dev tier runs on Replicate (cheap default); pro tier
- * runs on fal (~1.6× cheaper than Replicate's flux-fill-pro).
+ * Mask-based inpainting via FLUX.1 Fill, both tiers on fal. The client paints
+ * a region, describes it, and the model fills only that region while
+ * preserving the rest of the image.
  *
  * Body:
  *   image    string  data URL (or public http URL) of the source image
@@ -12,22 +11,25 @@
  *   prompt   string  what to put in the masked area (empty = generative remove)
  *   tier     'dev' | 'pro'   model tier (default 'dev', the cheap one)
  *   count    number  how many variations to generate in parallel (default 1, max 4)
- *   guidance number  prompt adherence
+ *   guidance number  prompt adherence (dev tier: Replicate-era 30-scale knob, mapped
+ *                    down to fal's CFG guidance_scale — see fluxFillDevInput)
  *   steps    number  inference steps
  *   seed     number  base seed; variation i uses seed+i for reproducible spread
  *
  * Returns: { images: string[] }  — each a data URL (base64), to dodge CORS on
- * the Replicate CDN and let the client re-upload into ComfyUI's input dir.
+ * fal's CDN and let the client re-upload into ComfyUI's input dir.
  *
- * Mirrors the create-then-poll convention of the /api/vector/* routes
- * (runReplicate/firstOutputUrl/requireReplicateToken are auto-imported from
- * server/utils/replicate.ts).
+ * Helpers (runFal/firstFalImageUrl/fetchAsDataUrl/falFillPrompt) are
+ * auto-imported from server/utils/falRun.ts, server/utils/replicate.ts and
+ * server/utils/falFill.ts.
  */
 import { assertRateLimit } from '../../lib/rateLimit'
+import { fluxFillDevInput } from '../../utils/inpaintFalInputs'
 
-// Dev tier only; pro tier now dispatches to fal (fal-ai/flux-pro/v1/fill).
+// Dev tier: fal-ai/flux-lora/inpainting. Pro tier: fal-ai/flux-pro/v1/fill
+// (~1.6× cheaper than Replicate's old flux-fill-pro: $0.05 vs $0.08).
 const MODELS = {
-  dev: 'black-forest-labs/flux-fill-dev',
+  dev: 'fal-ai/flux-lora/inpainting',
 } as const
 
 interface Body {
@@ -54,10 +56,8 @@ export default defineEventHandler(async (event) => {
   const baseSeed = Number.isFinite(body.seed) ? Math.round(body.seed as number) : Math.floor(Date.now() % 2_000_000_000)
   const seeds = Array.from({ length: count }, (_, i) => baseSeed + i)
 
-  // Pro tier goes to fal (~1.6× cheaper than Replicate's flux-fill-pro: $0.05 vs
-  // $0.08). fal's Fill schema uses image_url/mask_url (mask white = inpaint) and
-  // has no guidance/steps knobs; output is images[].url. Dev tier stays on
-  // Replicate (the cheap default).
+  // Pro tier: fal's flux-pro/v1/fill. Schema uses image_url/mask_url (mask
+  // white = inpaint) and has no guidance/steps knobs; output is images[].url.
   if (tier === 'pro') {
     const outputs = await Promise.all(
       seeds.map(async (seed) => {
@@ -65,8 +65,8 @@ export default defineEventHandler(async (event) => {
           image_url: body.image,
           mask_url: body.mask,
           // fal rejects an empty prompt ("Prompt is required"); an empty prompt
-          // here means "remove" (see the dev/Replicate path, which allows it), so
-          // fall back to a neutral seamless-fill instruction.
+          // here means "remove" (see the dev path, which allows it), so fall
+          // back to a neutral seamless-fill instruction.
           prompt: falFillPrompt(prompt),
           seed,
           output_format: 'png',
@@ -79,25 +79,19 @@ export default defineEventHandler(async (event) => {
     return { images: outputs, tier, model: 'fal-ai/flux-pro/v1/fill' }
   }
 
-  const token = requireReplicateToken()
   const guidance = body.guidance ?? 30
   const steps = Math.round(body.steps ?? 28)
-  const buildInput = (seed: number): Record<string, unknown> => ({
-    image: body.image,
-    mask: body.mask,
-    prompt,
-    guidance,
-    seed,
-    output_format: 'png',
-    num_inference_steps: steps,
-  })
 
-  // Variations run as independent predictions with distinct seeds, in parallel.
+  // Variations run as independent fal requests with distinct seeds, in parallel.
   const outputs = await Promise.all(
     seeds.map(async (seed) => {
-      const out = await runReplicate(MODELS.dev, buildInput(seed), token, { timeoutMs: 120_000 })
-      const url = firstOutputUrl(out)
-      if (!url) throw createError({ statusCode: 502, message: 'Replicate returned no image' })
+      const out = await runFal(
+        MODELS.dev,
+        fluxFillDevInput(prompt, body.image as string, body.mask as string, seed, guidance, steps),
+        { pollDeadlineMs: 120_000 },
+      )
+      const url = firstFalImageUrl(out)
+      if (!url) throw createError({ statusCode: 502, message: 'fal returned no image' })
       return fetchAsDataUrl(url)
     }),
   )

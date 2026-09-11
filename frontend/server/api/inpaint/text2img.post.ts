@@ -1,39 +1,30 @@
 /**
  * POST /api/inpaint/text2img
  *
- * Text-to-image via Black Forest Labs FLUX.1 [schnell] on Replicate — the cheap,
- * fast (4-step) FLUX tier. Used by the Compositor's Generative Fill when nothing
- * is selected, to conjure a brand-new subject and drop it in as a layer.
+ * Text-to-image via fal, with a tier table across FLUX.1 [schnell]/[dev],
+ * Seedream 4.5, and FLUX.2 [pro]. Schnell is the cheap, fast (4-step) default;
+ * used by the Compositor's Generative Fill when nothing is selected, to
+ * conjure a brand-new subject and drop it in as a layer.
  *
  * (Lives under inpaint/ alongside flux-fill so it shares that route group.)
  *
  * Body:
  *   prompt        string  what to generate (required)
- *   aspect_ratio  string  one of flux-dev's supported ratios (default '1:1')
+ *   aspect_ratio  string  one of the fal presets, or any `w:h` ratio (default '1:1')
  *   count         number  variations (default 1, max 4)
  *   seed          number  base seed; variation i uses seed+i
+ *   model         string  tier: 'flux-schnell' | 'flux-dev' | 'seedream-4.5' | 'flux-2-pro'
  *
- * Returns: { images: string[] } — data URLs (base64), to dodge the Replicate
- * CDN's CORS and let the client re-upload into ComfyUI's input dir.
+ * Returns: { images: string[] } — data URLs (base64), to dodge fal's CDN CORS
+ * and let the client re-upload into ComfyUI's input dir.
  *
- * Helpers (runReplicate/firstOutputUrl/fetchAsDataUrl/requireReplicateToken)
- * are auto-imported from server/utils/replicate.ts.
+ * Helpers (runFal/firstFalImageUrl/fetchAsDataUrl) are auto-imported from
+ * server/utils/falRun.ts and server/utils/replicate.ts. Payload shapes per
+ * tier live in server/utils/inpaintFalInputs.ts (text2imgInput) so the exact
+ * fal app + input for each tier is pinned by a unit test.
  */
 import { assertRateLimit } from '../../lib/rateLimit'
-
-const MODEL = 'black-forest-labs/flux-schnell'
-// Opt-in higher tier (taste-wall texture testing): dev renders grain/texture
-// schnell's 4-step distillation airbrushes away. Existing callers omit `model`
-// and get schnell exactly as before.
-// Each tier owns its FULL extra-input set — models validate strictly, so a
-// field one model wants can 422 another (the fal-enum lesson, Replicate edition).
-const FLUX_EXTRAS = { num_outputs: 1, output_format: 'png', megapixels: '1', go_fast: true }
-const MODELS: Record<string, { slug: string; input: Record<string, unknown> }> = {
-  'flux-schnell': { slug: MODEL, input: { ...FLUX_EXTRAS, num_inference_steps: 4 } },
-  'flux-dev': { slug: 'black-forest-labs/flux-dev', input: { ...FLUX_EXTRAS, num_inference_steps: 28, guidance: 3 } },
-  'seedream-4.5': { slug: 'bytedance/seedream-4.5', input: { size: '2K' } }, // live schema: 2K | 4K | custom — no 1K
-  'flux-2-pro': { slug: 'black-forest-labs/flux-2-pro', input: { resolution: '1 MP', output_format: 'png' } },
-}
+import { text2imgInput } from '../../utils/inpaintFalInputs'
 
 interface Body {
   prompt?: string
@@ -45,7 +36,6 @@ interface Body {
 
 export default defineEventHandler(async (event) => {
   assertRateLimit(event, 'inpaint-text2img', 30)
-  const token = requireReplicateToken()
   const body = await readBody<Body>(event)
 
   const prompt = (body?.prompt ?? '').trim()
@@ -54,23 +44,20 @@ export default defineEventHandler(async (event) => {
   const aspect_ratio = body?.aspect_ratio || '1:1'
   const count = Math.max(1, Math.min(4, Math.round(body?.count ?? 1)))
   const baseSeed = Number.isFinite(body?.seed) ? Math.round(body!.seed as number) : Math.floor(Date.now() % 2_000_000_000)
-
-  const tier = MODELS[body?.model ?? 'flux-schnell'] ?? MODELS['flux-schnell']!
+  const tierName = body?.model ?? 'flux-schnell'
 
   const seeds = Array.from({ length: count }, (_, i) => baseSeed + i)
+  const calls = seeds.map(seed => text2imgInput(tierName, prompt, aspect_ratio, seed))
+  const app = calls[0]!.app
+
   const outputs = await Promise.all(
-    seeds.map(async (seed) => {
-      const out = await runReplicate(tier.slug, {
-        prompt,
-        aspect_ratio,
-        seed,
-        ...tier.input,            // schnell: 4 steps · dev: 28 + guidance · seedream: size only
-      }, token, { timeoutMs: 180_000 })
-      const url = firstOutputUrl(out)
-      if (!url) throw createError({ statusCode: 502, message: 'Replicate returned no image' })
+    calls.map(async ({ app: callApp, input }) => {
+      const out = await runFal(callApp, input, { pollDeadlineMs: 180_000 })
+      const url = firstFalImageUrl(out)
+      if (!url) throw createError({ statusCode: 502, message: 'fal returned no image' })
       return fetchAsDataUrl(url)
     }),
   )
 
-  return { images: outputs, model: tier.slug }
+  return { images: outputs, model: app }
 })

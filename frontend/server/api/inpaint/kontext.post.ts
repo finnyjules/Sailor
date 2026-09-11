@@ -1,7 +1,7 @@
 /**
  * POST /api/inpaint/kontext
  *
- * Mask-FREE instruction editing via FLUX.1 Kontext on Replicate. The user gives
+ * Mask-FREE instruction editing via FLUX.1 Kontext on fal. The user gives
  * the whole image plus an instruction ("make the sky a sunset") and the model
  * decides the region itself — the complement to the masked /flux-fill route.
  *
@@ -14,14 +14,14 @@
  * Returns: { images: string[] }  — data URLs (base64), to dodge CORS like /flux-fill.
  */
 import { assertRateLimit } from '../../lib/rateLimit'
+import { kontextInput } from '../../utils/inpaintFalInputs'
 
-const MODEL = 'black-forest-labs/flux-kontext-dev'
+const APP = 'fal-ai/flux-kontext/dev'
 
 interface Body { image?: string; prompt?: string; count?: number; seed?: number }
 
 export default defineEventHandler(async (event) => {
   assertRateLimit(event, 'inpaint-kontext', 30)
-  const token = requireReplicateToken()
   const body = await readBody<Body>(event)
 
   if (!body?.image) throw createError({ statusCode: 400, message: 'image is required' })
@@ -34,23 +34,12 @@ export default defineEventHandler(async (event) => {
   const seeds = Array.from({ length: count }, (_, i) => baseSeed + i)
   const images = await Promise.all(
     seeds.map(async (seed) => {
-      const out = await runReplicate(
-        MODEL,
-        {
-          prompt,
-          input_image: body.image,
-          aspect_ratio: 'match_input_image',
-          output_format: 'png',
-          seed,
-        },
-        token,
-        { timeoutMs: 120_000 },
-      )
-      const url = firstOutputUrl(out)
-      if (!url) throw createError({ statusCode: 502, message: 'Replicate returned no image' })
+      const out = await runFal(APP, kontextInput(prompt, body.image as string, seed), { pollDeadlineMs: 120_000 })
+      const url = firstFalImageUrl(out)
+      if (!url) throw createError({ statusCode: 502, message: 'fal returned no image' })
       return fetchAsDataUrl(url)
     }),
   )
 
-  return { images, model: MODEL }
+  return { images, model: APP }
 })
