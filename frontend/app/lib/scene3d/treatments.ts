@@ -9,7 +9,7 @@
 // Design: docs/superpowers/specs/2026-09-05-scene3d-object-treatments-design.md
 import type { SceneDoc, SceneObject } from './config'
 
-export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade', 'colorGrade', 'dissolve', 'halftone', 'chromaticSplit'] as const
+export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade', 'colorGrade', 'dissolve', 'halftone', 'chromaticSplit', 'glitch'] as const
 export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe'] as const
 /** Stage-rendered treatments that consume the per-frame G-buffer (view-space normals +
  *  depth). Their presence — and ONLY their presence — makes `TreatmentStage` build the
@@ -26,7 +26,7 @@ export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTrea
 /** Human names — UI copy for tree rows, inspector card titles and motion target labels.
  *  Sentence case, never the stored `kind`. */
 export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
-  blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade', colorGrade: 'Colour grade', dissolve: 'Dissolve', halftone: 'Halftone', chromaticSplit: 'Chromatic split',
+  blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade', colorGrade: 'Colour grade', dissolve: 'Dissolve', halftone: 'Halftone', chromaticSplit: 'Chromatic split', glitch: 'Glitch',
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
   edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear',
 }
@@ -106,6 +106,15 @@ export interface HalftoneTreatment extends TreatmentBase { kind: 'halftone'; cel
  *  alpha), so the stage sets haloPx to that offset. Masked like the others so `invert` splits
  *  everything else instead; NOT ramped. Deterministic — a fixed offset, no randomness. */
 export interface ChromaticSplitTreatment extends TreatmentBase { kind: 'chromaticSplit'; amount: number; angle: number }
+/** Glitch / scanlines: a VHS / datamosh look. The object layer is sliced into `bands` horizontal
+ *  bands and each band is pushed sideways by a SEEDED per-band amount, up to `amount` px (the same
+ *  "px per block on a 1000-px-tall image" units pixelate uses — 0 leaves the object still), then a
+ *  scanline darkening of strength `scanlines` (0 = none, 1 = full) is drawn across it. `seed` picks
+ *  the band-jump pattern. The bands reach up to `amount` px OUTSIDE the silhouette (each keeps its
+ *  own sampled alpha), so the stage sets haloPx to that shift. Masked like the others so `invert`
+ *  glitches everything else instead; NOT ramped. Deterministic — the same seed always gives the
+ *  same jumps, never Math.random. */
+export interface GlitchTreatment extends TreatmentBase { kind: 'glitch'; amount: number; bands: number; scanlines: number; seed: number }
 export interface RimLightTreatment extends TreatmentBase { kind: 'rimLight'; color: string; width: number; strength: number }
 export interface OutlineTreatment extends TreatmentBase { kind: 'outline'; color: string; thickness: number }
 export interface XrayTreatment extends TreatmentBase { kind: 'xray'; color: string; opacity: number }
@@ -128,7 +137,7 @@ export interface DepthFogTreatment extends TreatmentBase { kind: 'depthFog'; col
 export interface CurvatureWearTreatment extends TreatmentBase { kind: 'curvatureWear'; amount: number; width: number }
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
-  | DissolveTreatment | HalftoneTreatment | ChromaticSplitTreatment
+  | DissolveTreatment | HalftoneTreatment | ChromaticSplitTreatment | GlitchTreatment
   | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
   | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment
 
@@ -143,6 +152,7 @@ export const TREATMENT_DEFAULTS = {
   dissolve: { amount: 0.5, scale: 24, softness: 0.1, seed: 1 },
   halftone: { cell: 6, angle: 45, contrast: 1, color: '#000000' },
   chromaticSplit: { amount: 8, angle: 0 },
+  glitch: { amount: 24, bands: 12, scanlines: 0.5, seed: 1 },
   rimLight: { color: '#ffffff', width: 0.5, strength: 1 },
   outline: { color: '#000000', thickness: 0.5 },
   xray: { color: '#6fd3ff', opacity: 0.35 },
@@ -162,6 +172,13 @@ export const BLUR_AMOUNT_MAX = 3
 /** Chromatic split's maximum channel offset, in "px per block on a 1000-px-tall image" units
  *  (the pixelate scale). Shared by the dial and the parser so they cannot drift apart. */
 export const CHROMATIC_AMOUNT_MAX = 64
+
+/** Glitch's maximum horizontal band shift, in "px per block on a 1000-px-tall image" units
+ *  (the pixelate scale). Shared by the dial and the parser so they cannot drift apart. */
+export const GLITCH_AMOUNT_MAX = 64
+/** Glitch band-count bounds — how many horizontal slices the object breaks into. */
+export const GLITCH_BANDS_MIN = 2
+export const GLITCH_BANDS_MAX = 64
 
 export function isMaskedKind(kind: TreatmentKind): kind is MaskedTreatmentKind {
   return (MASKED_TREATMENT_KINDS as readonly string[]).includes(kind)
@@ -257,6 +274,13 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
       ...base, kind: 'chromaticSplit',
       amount: clampTo(num(r.amount, D.chromaticSplit.amount), CHROMATIC_AMOUNT_MAX),
       angle: wrapDeg(num(r.angle, D.chromaticSplit.angle)),
+    }
+    case 'glitch': return {
+      ...base, kind: 'glitch',
+      amount: clampTo(num(r.amount, D.glitch.amount), GLITCH_AMOUNT_MAX),
+      bands: Math.min(GLITCH_BANDS_MAX, Math.max(GLITCH_BANDS_MIN, Math.round(num(r.bands, D.glitch.bands)))),
+      scanlines: clamp01(num(r.scanlines, D.glitch.scanlines)),
+      seed: Math.max(0, Math.round(num(r.seed, D.glitch.seed))),
     }
     case 'rimLight': return {
       ...base, kind: 'rimLight', color: str(r.color, D.rimLight.color),

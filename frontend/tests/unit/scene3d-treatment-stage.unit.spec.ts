@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX, chromaticOffsetPx, chromaticSplitOffset } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX, chromaticOffsetPx, chromaticSplitOffset, glitchShiftPx, glitchBandShift } from '~/lib/scene3d/treatmentStage'
 
 describe('dissolveNoise / dissolveAlpha', () => {
   const grid = (fn: (u: number, v: number) => number, n = 16): number[] => {
@@ -147,6 +147,46 @@ describe('chromaticSplitOffset', () => {
     expect(Math.hypot(o.x, o.y)).toBeCloseTo(Math.hypot(-o.x, -o.y), 6)
     expect(o.x).not.toBe(0)
     expect(o.y).not.toBe(0)
+  })
+})
+
+describe('glitchShiftPx', () => {
+  it('scales by height/1000, resolution-independent like the pixelate scale', () => {
+    expect(glitchShiftPx(24, 1000)).toBe(24)
+    expect(glitchShiftPx(24, 2000)).toBe(48)
+  })
+  it('amount 0 → no shift at all; there is no 1px floor (unlike pixelateCellPx)', () => {
+    expect(glitchShiftPx(0, 1000)).toBe(0)
+    expect(glitchShiftPx(0.1, 100)).toBeCloseTo(0.01)
+  })
+  it('a negative amount clamps to zero', () => {
+    expect(glitchShiftPx(-5, 1000)).toBe(0)
+  })
+})
+
+describe('glitchBandShift', () => {
+  const bandShifts = (seed: number, n = 32): number[] =>
+    Array.from({ length: n }, (_, band) => glitchBandShift(band, seed))
+
+  it('is deterministic — the same (band, seed) always gives the same shift, run to run', () => {
+    expect(bandShifts(1)).toEqual(bandShifts(1)) // seeded, never Math.random
+  })
+  it('a different seed produces a different set of band jumps', () => {
+    expect(bandShifts(1)).not.toEqual(bandShifts(2))
+  })
+  it('every shift is a signed fraction in [-1, 1)', () => {
+    for (const seed of [0, 1, 7, 42]) for (const s of bandShifts(seed)) {
+      expect(s).toBeGreaterThanOrEqual(-1)
+      expect(s).toBeLessThan(1)
+    }
+  })
+  it('neighbouring bands jump different distances (the bands do not move as one)', () => {
+    const shifts = bandShifts(3)
+    expect(new Set(shifts.map((s) => s.toFixed(6))).size).toBeGreaterThan(shifts.length / 2)
+  })
+  it('more bands means more distinct jumps across the object — narrower, busier slices', () => {
+    const distinct = (n: number) => new Set(bandShifts(5, n).map((s) => s.toFixed(6))).size
+    expect(distinct(24)).toBeGreaterThan(distinct(6))
   })
 })
 

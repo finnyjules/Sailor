@@ -232,6 +232,23 @@ export function chromaticSplitOffset(amount: number, angleDeg: number, height: n
   return { x: Math.cos(a) * px, y: -Math.sin(a) * px }
 }
 
+// --- glitch: seeded per-band horizontal displacement + scanlines (twin of GLITCH_FRAG) ------
+/** The maximum horizontal band shift in device px on an image `height` px tall, from `amount` in
+ *  the same "px per block on a 1000-px-tall image" units pixelate uses — so the glitch holds the
+ *  same LOOK at every resolution. Like chromaticOffsetPx there is NO 1px floor: amount 0 → 0 px,
+ *  i.e. no shift at all. Pure. */
+export function glitchShiftPx(amount: number, height: number): number {
+  return Math.max(0, amount) * height / 1000
+}
+
+/** The SEEDED horizontal shift for horizontal band `band`, as a signed fraction in [-1, 1) — the
+ *  stage scales it by glitchShiftPx to get device px. Deterministic in (band, seed) via the house
+ *  `vhash` idiom (the same `dissolveHash` the dissolve treatment uses), NEVER Math.random; GLSL
+ *  twin: `gvhash` in GLITCH_FRAG, keyed on `vec2(band, seed)`. Pure. */
+export function glitchBandShift(band: number, seed: number): number {
+  return dissolveHash(band, seed) * 2 - 1
+}
+
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 // The base copy that seeds the accumulator: straight alpha in, premultiplied out — every composite
 // after it blends premultiplied-over, so the accumulator must start that way too.
@@ -375,6 +392,27 @@ const CHROMATIC_SPLIT_FRAG = `
     float a = max(r.a, max(g.a, b.a));
     vec3 premul = vec3(r.r * r.a, g.g * g.a, b.b * b.a);
     gl_FragColor = vec4(a > 1e-5 ? premul / a : vec3(0.0), a);
+  }`
+// Glitch / scanlines: slice the object layer into uBands horizontal bands and push each band
+// sideways by a SEEDED per-band shift (up to uAmountUV in UV), then darken with scan lines. The
+// per-band hash is the house `vhash` idiom — the CPU twin glitchBandShift()/dissolveHash(), keyed
+// on vec2(band, uSeed) — so it is deterministic, never Math.random. Each band keeps its own sampled
+// alpha, so a displaced band's colour spreads up to `amount` px past the silhouette (the stage
+// hands that reach to the composite as haloPx). uAmountUV 0 (amount 0) samples in place, so the
+// object comes back untouched but for the scan lines. Scan lines darken RGB on a fixed device-px
+// period, alpha untouched. Straight alpha in, straight alpha out — the blur/pixelate encode boundary.
+const GLITCH_SCANLINE_PERIOD_PX = 3.0
+const GLITCH_FRAG = `
+  uniform sampler2D tDiffuse; uniform vec2 uResolution;
+  uniform float uBands; uniform float uSeed; uniform float uAmountUV; uniform float uScanlines;
+  varying vec2 vUv;
+  float gvhash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+  void main(){
+    float band = floor(vUv.y * uBands);
+    float shift = (gvhash(vec2(band, uSeed)) * 2.0 - 1.0) * uAmountUV;
+    vec4 s = texture2D(tDiffuse, vec2(vUv.x + shift, vUv.y));
+    float scan = 0.5 + 0.5 * cos((vUv.y * uResolution.y) * (6.2831853 / ${GLITCH_SCANLINE_PERIOD_PX}));
+    gl_FragColor = vec4(s.rgb * (1.0 - uScanlines * scan), s.a);
   }`
 const BRIGHT_FRAG = `
   uniform sampler2D tDiffuse; uniform float uThreshold;
@@ -722,6 +760,10 @@ export class TreatmentStage {
   private readonly chromaticSplitMat = shader(CHROMATIC_SPLIT_FRAG, {
     tDiffuse: { value: null }, uOffset: { value: new THREE.Vector2() },
   })
+  private readonly glitchMat = shader(GLITCH_FRAG, {
+    tDiffuse: { value: null }, uResolution: { value: new THREE.Vector2(1, 1) },
+    uBands: { value: 12 }, uSeed: { value: 1 }, uAmountUV: { value: 0 }, uScanlines: { value: 0.5 },
+  })
   private readonly glowMergeMat = shader(GLOW_MERGE_FRAG, {
     tBase: { value: null }, tGlow: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uStrength: { value: 1 },
     uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
@@ -1039,6 +1081,23 @@ export class TreatmentStage {
       // whose output spreads past its bounds — so hand that reach to the composite as haloPx
       // (device px, like blur's radiusPx) or the outer fringe would fail the depth test and clip.
       return { rt: dst, haloPx: chromaticOffsetPx(t.amount, this.height) }
+    }
+    if (t.kind === 'glitch') {
+      const dst = this.free(src)
+      const u = this.glitchMat.uniforms
+      u.tDiffuse!.value = src.texture
+      ;(u.uResolution!.value as THREE.Vector2).set(this.width, this.height)
+      u.uBands!.value = t.bands
+      u.uSeed!.value = t.seed
+      // Max horizontal shift in device px → UV, so bands jump equal distances at any resolution.
+      const shiftPx = glitchShiftPx(t.amount, this.height)
+      u.uAmountUV!.value = shiftPx / this.width
+      u.uScanlines!.value = t.scanlines
+      this.pass(this.glitchMat, dst)
+      // A displaced band's colour reaches up to `amount` px OUTSIDE the silhouette (it keeps its
+      // own sampled alpha), so hand that horizontal reach to the composite as haloPx (device px,
+      // like blur's radiusPx / chromaticSplit) or the shifted fringe fails the depth test and clips.
+      return { rt: dst, haloPx: shiftPx }
     }
     if (t.kind === 'glow') {
       const bright = this.free(src)
@@ -1378,7 +1437,7 @@ export class TreatmentStage {
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.glitchMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }

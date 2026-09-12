@@ -40,6 +40,33 @@ describe('treatments: model', () => {
     expect(isMaskedKind('chromaticSplit')).toBe(true)
     expect(TREATMENT_LABELS.chromaticSplit).toBe('Chromatic split')
   })
+  it('TREATMENT_KINDS includes glitch as a masked kind, not a G-buffer reader', () => {
+    expect(TREATMENT_KINDS).toContain('glitch')
+    expect(isMaskedKind('glitch')).toBe(true)
+    expect(TREATMENT_LABELS.glitch).toBe('Glitch')
+  })
+})
+
+describe('treatments: glitch', () => {
+  it('createTreatment seeds defaults, enabled and not inverted, with a fresh id', () => {
+    expect(createTreatment('glitch')).toMatchObject({
+      kind: 'glitch', enabled: true, invert: false, amount: 24, bands: 12, scanlines: 0.5, seed: 1,
+    })
+  })
+  it('is NOT a ramped kind — no progressive/ramp fields', () => {
+    expect(createTreatment('glitch')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'gl', kind: 'glitch' })).not.toHaveProperty('rampSpace')
+  })
+  it('clamps amount to 0..64, bands to 2..64 (rounded), scanlines to 0..1, seed to a non-negative int', () => {
+    expect(parseTreatment({ id: 'gl1', kind: 'glitch', amount: 999, bands: 999, scanlines: 5, seed: 7.6 }))
+      .toMatchObject({ amount: 64, bands: 64, scanlines: 1, seed: 8 })
+    expect(parseTreatment({ id: 'gl2', kind: 'glitch', amount: -5, bands: 0, scanlines: -3, seed: -4 }))
+      .toMatchObject({ amount: 0, bands: 2, scanlines: 0, seed: 0 })
+    expect(parseTreatment({ id: 'gl3', kind: 'glitch', bands: 8.6 }))
+      .toMatchObject({ amount: 24, bands: 9, scanlines: 0.5, seed: 1 })
+    expect(parseTreatment({ id: 'gl4', kind: 'glitch' }))
+      .toMatchObject({ amount: 24, bands: 12, scanlines: 0.5, seed: 1 })
+  })
 })
 
 describe('treatments: chromatic split', () => {

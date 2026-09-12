@@ -3,7 +3,7 @@
 // keys to `object.treatments.<id>.<field>`; the surface reads/writes `<field>` directly
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, type TreatmentKind } from './treatments'
+import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, type TreatmentKind } from './treatments'
 
 export const TREATMENT_KEY_PREFIX = 'treatment.'
 
@@ -102,6 +102,14 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
       rows = [
         slider(g, 'amount', 'Amount', 0, CHROMATIC_AMOUNT_MAX, 1, D.chromaticSplit.amount, 'How far the colour channels split apart, relative to the image height'),
         slider(g, 'angle', 'Angle', 0, 360, 1, D.chromaticSplit.angle, 'Direction the colours split in'),
+      ]
+      break
+    case 'glitch':
+      rows = [
+        slider(g, 'amount', 'Amount', 0, GLITCH_AMOUNT_MAX, 1, D.glitch.amount, 'How far the bands jump sideways, relative to the image height'),
+        slider(g, 'bands', 'Bands', GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, 1, D.glitch.bands, 'How many horizontal slices the object breaks into'),
+        slider(g, 'scanlines', 'Scanlines', 0, 1, 0.01, D.glitch.scanlines, 'How dark the scan lines drawn across it are'),
+        slider(g, 'seed', 'Seed', 1, 100, 1, D.glitch.seed, 'Change for a different glitch pattern'),
       ]
       break
     case 'rimLight':
