@@ -4540,9 +4540,16 @@ const editToolbarLayer = computed<LocalLayer | null>(() => {
   const only = sel.length === 1 ? sel[0] : null
   return only && only.kind === 'image' ? only : null
 })
-const wholeModelLabel = computed(() =>
-  (WHOLE_IMAGE_MODELS.find(m => m.value === wholeEditModel.value) ?? WHOLE_IMAGE_MODELS[0]!).label)
-function pickWholeModel(v: string) { wholeEditModel.value = v; modelMenuOpen.value = false }
+// Model picker, contextual to the active mode: whole-image (FLUX.2/Nano) vs
+// area (FLUX Fill/FLUX General/Qwen). One dropdown drives both refs.
+const editModels = computed(() => editMode.value === 'region' ? REGION_MODELS : WHOLE_IMAGE_MODELS)
+const editModelValue = computed(() => editMode.value === 'region' ? regionEditModel.value : wholeEditModel.value)
+const editModelLabel = computed(() =>
+  (editModels.value.find(m => m.value === editModelValue.value) ?? editModels.value[0]!).label)
+function pickEditModel(v: string) {
+  if (editMode.value === 'region') regionEditModel.value = v; else wholeEditModel.value = v
+  modelMenuOpen.value = false
+}
 watch([editImage, editRegion], async () => {
   if (editImage.value || editRegion.value) { await nextTick(); editPromptRef.value?.focus() }
 })
@@ -5206,7 +5213,8 @@ async function runRegionFill() {
       mctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f)
       mctx.drawImage(genMaskCanvas, 0, 0)                        // WHITE region = inpaint
       mctx.setTransform(1, 0, 0, 1, 0, 0)
-      const results = await inpaint.fluxFill(imageData, mc.toDataURL('image/png'), genPrompt.value.trim())
+      const results = await inpaint.fluxFill(imageData, mc.toDataURL('image/png'), genPrompt.value.trim(),
+        { model: regionEditModel.value, tier: regionEditModel.value === 'flux' ? 'pro' : undefined })
       const r0 = results[0]; if (!r0) { inpaint.error.value = 'The edit returned no image — try again.'; return }
       const newName = await inpaint.uploadDataUrl(await compositeInpaintAlpha(r0, img, mc, capW, capH), 'compinpaint')
       setLocal(layer.id, { filename: newName })
@@ -7228,24 +7236,23 @@ onUnmounted(() => {
             </div>
           </template>
 
-          <!-- Model: only while actually editing a whole image (region is FLUX Fill). -->
-          <template v-if="editMode === 'image'">
-            <div class="w-px h-5 bg-white/10 mx-0.5" />
-            <div class="relative">
-              <button type="button" data-testid="edit-model-menu"
-                class="flex items-center gap-1.5 h-8 px-2 rounded hover:bg-white/10 text-white/80 text-[11px] cursor-pointer whitespace-nowrap"
-                title="Model" @click="modelMenuOpen = !modelMenuOpen">
-                <span>{{ wholeModelLabel }}</span>
-                <ChevronDown class="size-3 text-white/40" :class="modelMenuOpen ? 'rotate-180' : ''" />
-              </button>
-              <div v-if="modelMenuOpen" class="absolute bottom-full right-0 mb-1.5 z-50 w-40 rounded-md bg-neutral-900 border border-white/10 shadow-xl flex flex-col overflow-hidden">
-                <button v-for="m in WHOLE_IMAGE_MODELS" :key="m.value" type="button"
-                  class="px-3 py-2 text-left text-[12px] hover:bg-white/10 cursor-pointer"
-                  :class="m.value === wholeEditModel ? 'text-white' : 'text-white/70'"
-                  @click="pickWholeModel(m.value)">{{ m.label }}</button>
-              </div>
+          <!-- Model — contextual: whole-image (FLUX.2/Nano) or area (FLUX Fill/FLUX General/Qwen).
+               Always shown here — this block only renders while a mode is active. -->
+          <div class="w-px h-5 bg-white/10 mx-0.5" />
+          <div class="relative">
+            <button type="button" data-testid="edit-model-menu"
+              class="flex items-center gap-1.5 h-8 px-2 rounded hover:bg-white/10 text-white/80 text-[11px] cursor-pointer whitespace-nowrap"
+              title="Model" @click="modelMenuOpen = !modelMenuOpen">
+              <span>{{ editModelLabel }}</span>
+              <ChevronDown class="size-3 text-white/40" :class="modelMenuOpen ? 'rotate-180' : ''" />
+            </button>
+            <div v-if="modelMenuOpen" class="absolute bottom-full right-0 mb-1.5 z-50 w-44 rounded-md bg-neutral-900 border border-white/10 shadow-xl flex flex-col overflow-hidden">
+              <button v-for="m in editModels" :key="m.value" type="button"
+                class="px-3 py-2 text-left text-[12px] hover:bg-white/10 cursor-pointer"
+                :class="m.value === editModelValue ? 'text-white' : 'text-white/70'"
+                @click="pickEditModel(m.value)">{{ m.label }}</button>
             </div>
-          </template>
+          </div>
 
           <!-- Close inpaint mode (always shown here — this block only renders while editing). -->
           <div class="w-px h-5 bg-white/10 mx-0.5" />

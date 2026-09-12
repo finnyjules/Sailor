@@ -9,6 +9,9 @@
 
 export interface FluxFillOpts {
   tier?: 'dev' | 'pro'
+  /** Masked-inpaint model: 'flux' (FLUX.1 Fill), 'flux-general' (FLUX general
+   *  inpainting), 'qwen' (Qwen Image Edit inpaint). Omit for the tier default. */
+  model?: string
   count?: number
   guidance?: number
   steps?: number
@@ -170,6 +173,7 @@ export function useInpaint() {
         body: {
           image, mask, prompt,
           tier: opts.tier ?? 'dev',
+          model: opts.model,
           count: opts.count ?? 1,
           guidance: opts.guidance,
           steps: opts.steps,

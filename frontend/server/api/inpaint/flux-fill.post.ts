@@ -37,6 +37,10 @@ interface Body {
   mask?: string
   prompt?: string
   tier?: 'dev' | 'pro'
+  // Masked-inpaint model override (all mask-native, image_url/mask_url, white = fill):
+  //   'flux-general' → fal-ai/flux-general/inpainting, 'qwen' → fal-ai/qwen-image-edit/inpaint.
+  //   Anything else falls through to the FLUX.1 Fill tier logic below.
+  model?: string
   count?: number
   guidance?: number
   steps?: number
@@ -55,6 +59,26 @@ export default defineEventHandler(async (event) => {
   const count = Math.max(1, Math.min(4, Math.round(body.count ?? 1)))
   const baseSeed = Number.isFinite(body.seed) ? Math.round(body.seed as number) : Math.floor(Date.now() % 2_000_000_000)
   const seeds = Array.from({ length: count }, (_, i) => baseSeed + i)
+
+  // Alternative mask-native models (same image_url/mask_url schema, white = fill).
+  if (body.model === 'flux-general' || body.model === 'qwen') {
+    const app = body.model === 'qwen' ? 'fal-ai/qwen-image-edit/inpaint' : 'fal-ai/flux-general/inpainting'
+    const outputs = await Promise.all(
+      seeds.map(async (seed) => {
+        const result = await runFal(app, {
+          prompt: falFillPrompt(prompt),   // these also reject an empty prompt
+          image_url: body.image,
+          mask_url: body.mask,
+          output_format: 'png',
+          seed,
+        }, { pollDeadlineMs: 120_000 })
+        const url = firstFalImageUrl(result)
+        if (!url) throw createError({ statusCode: 502, message: 'fal returned no image' })
+        return fetchAsDataUrl(url)
+      }),
+    )
+    return { images: outputs, model: app }
+  }
 
   // Pro tier: fal's flux-pro/v1/fill. Schema uses image_url/mask_url (mask
   // white = inpaint) and has no guidance/steps knobs; output is images[].url.
