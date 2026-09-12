@@ -181,6 +181,37 @@ export function dissolveAlpha(
   return t * t * (3 - 2 * t)
 }
 
+// --- halftone: a deterministic rotated dot screen (CPU twin of HALFTONE_FRAG) --------------
+// A regular AM screen: one round dot per grid cell, its AREA tracking the darkness under the
+// cell so ink coverage reads linear in tone. No randomness — angle + cell fix the pattern.
+/** The dot radius (cell units) at which a dot's circle reaches the cell corners and the screen
+ *  goes fully solid — a half-cell diagonal. Full darkness maps here. */
+export const HALFTONE_RADIUS_MAX = Math.SQRT1_2
+
+/** Dot radius (cell units, 0..HALFTONE_RADIUS_MAX) for a region of linear luminance `lum`
+ *  (0 black … 1 white) at coverage `alpha`, shaped by a tone `contrast` around mid-grey.
+ *  Dark → a fat dot, bright → nothing; the dot AREA (∝ radius²) tracks contrast-shaped
+ *  darkness, so ink reads linear in tone. A transparent region (alpha 0) grows no dot, so the
+ *  screen never spills past the silhouette. Pure; GLSL twin in HALFTONE_FRAG. */
+export function halftoneDotRadius(lum: number, alpha: number, contrast: number): number {
+  const lc = Math.min(1, Math.max(0, (lum - 0.5) * contrast + 0.5))
+  const k = Math.min(1, Math.max(0, (1 - lc) * alpha))
+  return Math.sqrt(k) * HALFTONE_RADIUS_MAX
+}
+
+/** Distance (cell units) from device-px pixel `(px, py)` to its nearest screen-cell centre —
+ *  the screen a `cellPx`-spaced grid rotated by `angleRad`. 0 at a centre, up to ~0.707 at a
+ *  corner. Deterministic in angle + cell; a dot of radius `r` covers this pixel when the
+ *  distance is below `r`. Pure; GLSL twin in HALFTONE_FRAG. */
+export function halftoneCellDistance(px: number, py: number, cellPx: number, angleRad: number): number {
+  const c = Math.cos(angleRad), s = Math.sin(angleRad)
+  const qx = (px * c - py * s) / cellPx
+  const qy = (px * s + py * c) / cellPx
+  const fx = qx - Math.floor(qx) - 0.5
+  const fy = qy - Math.floor(qy) - 0.5
+  return Math.sqrt(fx * fx + fy * fy)
+}
+
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 // The base copy that seeds the accumulator: straight alpha in, premultiplied out — every composite
 // after it blends premultiplied-over, so the accumulator must start that way too.
@@ -276,6 +307,36 @@ const DISSOLVE_FRAG = `
     float thr = uAmount * (1.0 + 2.0 * uSoftness) - uSoftness;
     float cov = uSoftness <= 0.0 ? step(thr, n) : smoothstep(thr - uSoftness, thr + uSoftness, n);
     gl_FragColor = vec4(s.rgb, s.a * cov);
+  }`
+// Halftone: a deterministic rotated dot screen. Per pixel: rotate into a cell grid, find the
+// distance to the nearest cell centre, sample the object's tone AT that centre, and grow ONE
+// round dot per cell whose area tracks the (contrast-shaped) darkness there. Output is the
+// flat ink colour with alpha = dot coverage × the object's OWN alpha at this pixel, so the
+// screen never spills past the silhouette. The tone→radius and grid→distance maths are the
+// CPU twins halftoneDotRadius()/halftoneCellDistance() step for step — keep them in step.
+// 0.70710678 is HALFTONE_RADIUS_MAX (a half-cell diagonal), inlined because GLSL can't read it.
+const HALFTONE_FRAG = `
+  uniform sampler2D tDiffuse; uniform vec2 uResolution; uniform float uCellPx;
+  uniform float uAngle; uniform float uContrast; uniform vec3 uColor;
+  varying vec2 vUv;
+  void main(){
+    float c = cos(uAngle), s = sin(uAngle);
+    vec2 P = vUv * uResolution;
+    vec2 Q = vec2(P.x * c - P.y * s, P.x * s + P.y * c) / uCellPx;
+    vec2 cellId = floor(Q) + 0.5;
+    vec2 f = Q - cellId;
+    float d = length(f);
+    vec2 C = cellId * uCellPx;
+    vec2 centerP = vec2(C.x * c + C.y * s, -C.x * s + C.y * c);
+    vec4 sc = texture2D(tDiffuse, centerP / uResolution);
+    float lum = dot(sc.rgb, vec3(0.2126, 0.7152, 0.0722));
+    float lc = clamp((lum - 0.5) * uContrast + 0.5, 0.0, 1.0);
+    float k = clamp((1.0 - lc) * sc.a, 0.0, 1.0);
+    float R = sqrt(k) * 0.70710678;
+    float aa = 0.75 / uCellPx;
+    float cov = 1.0 - smoothstep(R - aa, R + aa, d);
+    float aPix = texture2D(tDiffuse, vUv).a;
+    gl_FragColor = vec4(uColor, cov * aPix);
   }`
 const BRIGHT_FRAG = `
   uniform sampler2D tDiffuse; uniform float uThreshold;
@@ -616,6 +677,10 @@ export class TreatmentStage {
     tDiffuse: { value: null }, uCells: { value: new THREE.Vector2(1, 1) },
     uSeed: { value: 1 }, uAmount: { value: 0.5 }, uSoftness: { value: 0.1 },
   })
+  private readonly halftoneMat = shader(HALFTONE_FRAG, {
+    tDiffuse: { value: null }, uResolution: { value: new THREE.Vector2(1, 1) }, uCellPx: { value: 6 },
+    uAngle: { value: Math.PI / 4 }, uContrast: { value: 1 }, uColor: { value: new THREE.Color(0, 0, 0) },
+  })
   private readonly glowMergeMat = shader(GLOW_MERGE_FRAG, {
     tBase: { value: null }, tGlow: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uStrength: { value: 1 },
     uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
@@ -906,6 +971,20 @@ export class TreatmentStage {
       u.uSoftness!.value = t.softness
       this.pass(this.dissolveMat, dst)
       return { rt: dst, haloPx: 0 } // erodes alpha inward — spreads nothing past the silhouette
+    }
+    if (t.kind === 'halftone') {
+      const dst = this.free(src)
+      const u = this.halftoneMat.uniforms
+      u.tDiffuse!.value = src.texture
+      ;(u.uResolution!.value as THREE.Vector2).set(this.width, this.height)
+      // Square cells in device px, resolution-independent like pixelate, so the screen holds
+      // the same LOOK at every output size (matches halftoneCellDistance's cellPx units).
+      u.uCellPx!.value = pixelateCellPx(t.cell, this.height)
+      u.uAngle!.value = t.angle * Math.PI / 180
+      u.uContrast!.value = t.contrast
+      ;(u.uColor!.value as THREE.Color).set(stripAlpha(t.color))
+      this.pass(this.halftoneMat, dst)
+      return { rt: dst, haloPx: 0 } // ink alpha is gated by the object's own alpha — no spill
     }
     if (t.kind === 'glow') {
       const bright = this.free(src)
@@ -1245,7 +1324,7 @@ export class TreatmentStage {
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }

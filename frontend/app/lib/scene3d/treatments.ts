@@ -9,7 +9,7 @@
 // Design: docs/superpowers/specs/2026-09-05-scene3d-object-treatments-design.md
 import type { SceneDoc, SceneObject } from './config'
 
-export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade', 'colorGrade', 'dissolve'] as const
+export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade', 'colorGrade', 'dissolve', 'halftone'] as const
 export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe'] as const
 /** Stage-rendered treatments that consume the per-frame G-buffer (view-space normals +
  *  depth). Their presence — and ONLY their presence — makes `TreatmentStage` build the
@@ -26,7 +26,7 @@ export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTrea
 /** Human names — UI copy for tree rows, inspector card titles and motion target labels.
  *  Sentence case, never the stored `kind`. */
 export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
-  blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade', colorGrade: 'Colour grade', dissolve: 'Dissolve',
+  blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade', colorGrade: 'Colour grade', dissolve: 'Dissolve', halftone: 'Halftone',
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
   edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear',
 }
@@ -85,6 +85,18 @@ export interface ColorGradeTreatment extends TreatmentBase { kind: 'colorGrade';
  *  so `invert` dissolves everything else instead; NOT ramped and NOT a G-buffer reader.
  *  Deterministic — the same seed always gives the same pattern, never Math.random. */
 export interface DissolveTreatment extends TreatmentBase { kind: 'dissolve'; amount: number; scale: number; softness: number; seed: number }
+/** Screen the object through a rotated dot halftone for a print / comic look. Each cell of a
+ *  regular grid — spaced `cell` px (same "px per block on a 1000-px-tall image" units as
+ *  pixelate) and rotated by `angle` degrees — carries ONE round dot whose AREA tracks the
+ *  darkness of the object under that cell (dark → a fat dot, bright → nothing), so ink
+ *  coverage reads linear in tone. `contrast` is a tone contrast around mid-grey — high snaps
+ *  the dots hard between full and empty (a graphic comic look), low leaves flat mid dots.
+ *  MONOCHROME `color` is the ink: the object's own colours are discarded and only its
+ *  luminance and silhouette survive, which is the canonical single-ink newspaper/comic screen
+ *  — and it keeps `color` a real, consumed dial rather than a dead control. Masked like the
+ *  others so `invert` screens everything else instead; NOT ramped. Deterministic — a regular
+ *  screen fixed by angle + cell, no randomness. */
+export interface HalftoneTreatment extends TreatmentBase { kind: 'halftone'; cell: number; angle: number; contrast: number; color: string }
 export interface RimLightTreatment extends TreatmentBase { kind: 'rimLight'; color: string; width: number; strength: number }
 export interface OutlineTreatment extends TreatmentBase { kind: 'outline'; color: string; thickness: number }
 export interface XrayTreatment extends TreatmentBase { kind: 'xray'; color: string; opacity: number }
@@ -107,7 +119,7 @@ export interface DepthFogTreatment extends TreatmentBase { kind: 'depthFog'; col
 export interface CurvatureWearTreatment extends TreatmentBase { kind: 'curvatureWear'; amount: number; width: number }
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
-  | DissolveTreatment
+  | DissolveTreatment | HalftoneTreatment
   | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
   | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment
 
@@ -120,6 +132,7 @@ export const TREATMENT_DEFAULTS = {
   fade: { opacity: 0.5, ...RAMP_DEFAULTS },
   colorGrade: { brightness: 1, contrast: 1, saturation: 1, hue: 0 },
   dissolve: { amount: 0.5, scale: 24, softness: 0.1, seed: 1 },
+  halftone: { cell: 6, angle: 45, contrast: 1, color: '#000000' },
   rimLight: { color: '#ffffff', width: 0.5, strength: 1 },
   outline: { color: '#000000', thickness: 0.5 },
   xray: { color: '#6fd3ff', opacity: 0.35 },
@@ -218,6 +231,13 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
       scale: Math.min(64, Math.max(2, num(r.scale, D.dissolve.scale))),
       softness: clamp01(num(r.softness, D.dissolve.softness)),
       seed: Math.max(0, Math.round(num(r.seed, D.dissolve.seed))),
+    }
+    case 'halftone': return {
+      ...base, kind: 'halftone',
+      cell: Math.min(64, Math.max(2, num(r.cell, D.halftone.cell))),
+      angle: wrapDeg(num(r.angle, D.halftone.angle)),
+      contrast: Math.min(4, Math.max(0.25, num(r.contrast, D.halftone.contrast))),
+      color: str(r.color, D.halftone.color),
     }
     case 'rimLight': return {
       ...base, kind: 'rimLight', color: str(r.color, D.rimLight.color),

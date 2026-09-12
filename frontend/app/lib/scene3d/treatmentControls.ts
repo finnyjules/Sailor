@@ -90,6 +90,14 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         slider(g, 'seed', 'Seed', 1, 100, 1, D.dissolve.seed, 'Change for a different dissolve pattern'),
       ]
       break
+    case 'halftone':
+      rows = [
+        slider(g, 'cell', 'Cell size', 2, 64, 1, D.halftone.cell, 'Size of the halftone dots, relative to the image height'),
+        slider(g, 'angle', 'Angle', 0, 360, 1, D.halftone.angle, 'Rotate the dot screen'),
+        slider(g, 'contrast', 'Contrast', 0.25, 4, 0.05, D.halftone.contrast, 'How hard the dots snap between full and empty'),
+        color(g, 'color', 'Ink', D.halftone.color),
+      ]
+      break
     case 'rimLight':
       rows = [
         color(g, 'color', 'Colour', D.rimLight.color),

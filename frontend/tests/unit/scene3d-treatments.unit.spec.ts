@@ -30,6 +30,31 @@ describe('treatments: model', () => {
     expect(isMaskedKind('dissolve')).toBe(true)
     expect(TREATMENT_LABELS.dissolve).toBe('Dissolve')
   })
+  it('TREATMENT_KINDS includes halftone as a masked kind, not a G-buffer reader', () => {
+    expect(TREATMENT_KINDS).toContain('halftone')
+    expect(isMaskedKind('halftone')).toBe(true)
+    expect(TREATMENT_LABELS.halftone).toBe('Halftone')
+  })
+})
+
+describe('treatments: halftone', () => {
+  it('createTreatment seeds defaults, enabled and not inverted, with a fresh id', () => {
+    expect(createTreatment('halftone')).toMatchObject({
+      kind: 'halftone', enabled: true, invert: false, cell: 6, angle: 45, contrast: 1, color: '#000000',
+    })
+  })
+  it('is NOT a ramped kind — no progressive/ramp fields', () => {
+    expect(createTreatment('halftone')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'ht', kind: 'halftone' })).not.toHaveProperty('rampSpace')
+  })
+  it('clamps cell to 2..64 and contrast to 0.25..4, wraps angle into 0..360 and backfills the ink', () => {
+    expect(parseTreatment({ id: 'ht1', kind: 'halftone', cell: 999, contrast: 99, angle: 405, color: '#ff0000' }))
+      .toMatchObject({ cell: 64, contrast: 4, angle: 45, color: '#ff0000' })
+    expect(parseTreatment({ id: 'ht2', kind: 'halftone', cell: 0, contrast: 0, angle: -90 }))
+      .toMatchObject({ cell: 2, contrast: 0.25, angle: 270 })
+    expect(parseTreatment({ id: 'ht3', kind: 'halftone' }))
+      .toMatchObject({ cell: 6, angle: 45, contrast: 1, color: '#000000' })
+  })
 })
 
 describe('treatments: dissolve', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX } from '~/lib/scene3d/treatmentStage'
 
 describe('dissolveNoise / dissolveAlpha', () => {
   const grid = (fn: (u: number, v: number) => number, n = 16): number[] => {
@@ -66,6 +66,45 @@ describe('colorGradeRGB', () => {
     // a 120° rotation about the grey axis cycles R→G→B, so green should now dominate
     expect(rotated[1]).toBeGreaterThan(rotated[0]!)
     expect(rotated[1]).toBeGreaterThan(rotated[2]!)
+  })
+})
+
+describe('halftoneDotRadius', () => {
+  it('a bright region grows no dot, a dark region fills to the cell corners', () => {
+    expect(halftoneDotRadius(1, 1, 1)).toBe(0) // white → nothing
+    expect(halftoneDotRadius(0, 1, 1)).toBeCloseTo(HALFTONE_RADIUS_MAX, 6) // black → solid
+  })
+  it('a transparent region grows no dot, whatever its tone (no spill past the silhouette)', () => {
+    expect(halftoneDotRadius(0, 0, 1)).toBe(0)
+  })
+  it('dot area tracks darkness — radius is √(darkness) of the max', () => {
+    // luminance 0.75 → darkness 0.25 → radius = √0.25 = 0.5 of the max
+    expect(halftoneDotRadius(0.75, 1, 1)).toBeCloseTo(0.5 * HALFTONE_RADIUS_MAX, 6)
+  })
+  it('contrast pushes mid-tones toward the extremes deterministically', () => {
+    const mid = halftoneDotRadius(0.4, 1, 1)
+    expect(halftoneDotRadius(0.4, 1, 2)).toBeGreaterThan(mid) // a dark mid gets fatter
+    expect(halftoneDotRadius(0.6, 1, 2)).toBeLessThan(halftoneDotRadius(0.6, 1, 1)) // a light mid thins
+  })
+})
+
+describe('halftoneCellDistance', () => {
+  it('is 0 at a cell centre and ~0.707 at a corner', () => {
+    expect(halftoneCellDistance(5, 5, 10, 0)).toBeCloseTo(0, 6) // centre of the 0..10 cell
+    expect(halftoneCellDistance(0, 0, 10, 0)).toBeCloseTo(Math.SQRT1_2, 6) // a corner
+  })
+  it('is deterministic and bounded to [0, ~0.707]', () => {
+    for (let y = 0; y < 40; y += 3) for (let x = 0; x < 40; x += 3) {
+      const d = halftoneCellDistance(x, y, 7, Math.PI / 5)
+      expect(d).toBeGreaterThanOrEqual(0)
+      expect(d).toBeLessThanOrEqual(Math.SQRT1_2 + 1e-9)
+      expect(halftoneCellDistance(x, y, 7, Math.PI / 5)).toBe(d) // same inputs → same value
+    }
+  })
+  it('rotating the screen moves the pattern (angle changes the field)', () => {
+    const flat = halftoneCellDistance(5, 5, 10, 0)
+    const tilted = halftoneCellDistance(5, 5, 10, Math.PI / 4)
+    expect(tilted).not.toBeCloseTo(flat, 3)
   })
 })
 
