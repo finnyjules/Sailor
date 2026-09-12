@@ -193,15 +193,40 @@ void main() {
     vec3 veilLin = srgbToLinear(u_veilColor), gasLin = srgbToLinear(u_gasColor), coreLin = srgbToLinear(u_coreColor);
     vec3 oklVeil = linearToOklab(veilLin), oklGas = linearToOklab(gasLin), oklCore = linearToOklab(coreLin);
 
-    // ---- Refraction: bend the interior sample toward the glass walls near the edge ----
-    float wall = smoothstep(0.0, 0.14, edgeD) * (1.0 - smoothstep(0.14, 0.6, edgeD)); // 0 at wall, peak just inside
-    // Gentle refraction: a small, smoothly-falling displacement toward the wall. Kept small
-    // with a wide falloff so its screen-space gradient stays low and the gas does not alias.
-    vec2 bent = relN + outward * (u_refraction * 0.14 * smoothstep(0.45, 0.0, edgeD));
+    // ---- Smooth glass shell normal (computed up here so it can REFRACT the interior) ----
+    // Heavily blur the distance field so the glass normal is smooth (no faceted rings), read as a
+    // sphere: flat at the centre, curving steeply only near the rim.
+    float gd = 0.0;
+    {
+        vec2 gr1 = 7.0 / u_resolution, gr2 = 14.0 / u_resolution;
+        gd = texture(u_shape, v_texCoord).g * 3.0;
+        gd += (texture(u_shape, v_texCoord + vec2(gr1.x, 0.0)).g + texture(u_shape, v_texCoord - vec2(gr1.x, 0.0)).g
+             + texture(u_shape, v_texCoord + vec2(0.0, gr1.y)).g + texture(u_shape, v_texCoord - vec2(0.0, gr1.y)).g
+             + texture(u_shape, v_texCoord + gr1).g + texture(u_shape, v_texCoord - gr1).g
+             + texture(u_shape, v_texCoord + vec2(gr1.x, -gr1.y)).g + texture(u_shape, v_texCoord + vec2(-gr1.x, gr1.y)).g) * 2.0;
+        gd += texture(u_shape, v_texCoord + vec2(gr2.x, 0.0)).g + texture(u_shape, v_texCoord - vec2(gr2.x, 0.0)).g
+            + texture(u_shape, v_texCoord + vec2(0.0, gr2.y)).g + texture(u_shape, v_texCoord - vec2(0.0, gr2.y)).g
+            + texture(u_shape, v_texCoord + gr2).g + texture(u_shape, v_texCoord - gr2).g
+            + texture(u_shape, v_texCoord + vec2(gr2.x, -gr2.y)).g + texture(u_shape, v_texCoord + vec2(-gr2.x, gr2.y)).g;
+        gd = u_hasShape > 0.5 ? gd / 27.0 : edgeD;
+    }
+    float la = radians(u_lightAngle);
+    float rr = clamp(1.0 - gd, 0.0, 1.0);                     // 0 at the centre, 1 at the rim
+    float theta = pow(rr, 2.6) * 1.5;                         // flat centre, steep only at the rim
+    vec3 Ng = normalize(vec3(outward * sin(theta), cos(theta)));
+
+    // ---- Refraction: the curved glass walls BEND the interior. Pull the sampled point inward
+    // toward the centre near the rim — a lens that magnifies the nebula behind the glass wall. The
+    // displacement uses a smoothstep falloff that is FLAT at both ends (max at the rim, zero at the
+    // centre), so its gradient never spikes and the magnified gas does not alias. ----
+    float refr = u_refraction * 0.45 * (1.0 - smoothstep(0.0, 1.0, gd));
+    vec2 bent = relN - outward * refr;
 
     // ---- Volumetric raymarch of the gas (6 steps front-to-back) ----
     const int STEPS = 6;
-    float freq = u_gasScale * 6.0;
+    // Coarsen the gas where the glass magnifies it (near the rim): less high frequency to
+    // undersample, so the refracted gas reads soft rather than aliasing into moire.
+    float freq = u_gasScale * 6.0 * (1.0 - clamp(refr * 1.6, 0.0, 0.62));
     float macro = vnoise3(vec3(bent * 1.3, drift * 0.6 + u_gasSeed * 0.37)) * 0.45;
     float cav = mix(-0.35, 0.5, u_cavity);
     vec3 emission = vec3(0.0);
@@ -233,28 +258,7 @@ void main() {
     vec3 farStars  = starField(bent * 0.9 + vec2(drift * 0.3, 0.0), sf,       1.7, u_stars, vec3(0.72, 0.82, 1.0), vec3(1.0, 0.92, 0.82), time);
     vec3 nearStars = starField(bent * 1.4 + vec2(-drift * 0.2, 0.1), sf * 0.56, 2.3, u_stars, vec3(0.75, 0.85, 1.0), vec3(1.0, 0.95, 0.88), time);
 
-    // ---- Smooth glass shell: a polished lens doming over the shape ----
-    // A heavily-blurred distance field so the glass normal is smooth (no faceted bevel rings), read
-    // as a sphere: flat at the centre (the nebula shows straight through), curving steeply only near
-    // the rim, where the glass turns reflective and catches a bright Fresnel edge and soft studio.
-    float gd = 0.0;
-    {
-        vec2 gr1 = 7.0 / u_resolution, gr2 = 14.0 / u_resolution;
-        gd = texture(u_shape, v_texCoord).g * 3.0;
-        gd += (texture(u_shape, v_texCoord + vec2(gr1.x, 0.0)).g + texture(u_shape, v_texCoord - vec2(gr1.x, 0.0)).g
-             + texture(u_shape, v_texCoord + vec2(0.0, gr1.y)).g + texture(u_shape, v_texCoord - vec2(0.0, gr1.y)).g
-             + texture(u_shape, v_texCoord + gr1).g + texture(u_shape, v_texCoord - gr1).g
-             + texture(u_shape, v_texCoord + vec2(gr1.x, -gr1.y)).g + texture(u_shape, v_texCoord + vec2(-gr1.x, gr1.y)).g) * 2.0;
-        gd += texture(u_shape, v_texCoord + vec2(gr2.x, 0.0)).g + texture(u_shape, v_texCoord - vec2(gr2.x, 0.0)).g
-            + texture(u_shape, v_texCoord + vec2(0.0, gr2.y)).g + texture(u_shape, v_texCoord - vec2(0.0, gr2.y)).g
-            + texture(u_shape, v_texCoord + gr2).g + texture(u_shape, v_texCoord - gr2).g
-            + texture(u_shape, v_texCoord + vec2(gr2.x, -gr2.y)).g + texture(u_shape, v_texCoord + vec2(-gr2.x, gr2.y)).g;
-        gd = u_hasShape > 0.5 ? gd / 27.0 : edgeD;
-    }
-    float la = radians(u_lightAngle);
-    float rr = clamp(1.0 - gd, 0.0, 1.0);                     // 0 at the centre, 1 at the rim
-    float theta = pow(rr, 2.6) * 1.5;                         // flat centre, steep only at the rim
-    vec3 Ng = normalize(vec3(outward * sin(theta), cos(theta)));
+    // ---- Glass surface shading (the shell normal Ng was computed up top for the refraction) ----
     float fres = pow(1.0 - clamp(Ng.z, 0.0, 1.0), 3.0);      // grazing → the bright glass rim
     vec3 Rg = reflect(vec3(0.0, 0.0, -1.0), Ng);             // reflection direction off the glass
     float envG = studio(Rg.xy * 1.5, la);                    // soft studio reflection
