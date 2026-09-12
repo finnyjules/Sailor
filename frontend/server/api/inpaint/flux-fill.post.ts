@@ -60,6 +60,27 @@ export default defineEventHandler(async (event) => {
   const baseSeed = Number.isFinite(body.seed) ? Math.round(body.seed as number) : Math.floor(Date.now() % 2_000_000_000)
   const seeds = Array.from({ length: count }, (_, i) => baseSeed + i)
 
+  // GPT Image 1.5 masked edit — different keys (image_urls[] + mask_image_url). Mask
+  // polarity is undocumented by fal; we send the same white=edit mask as the others
+  // and verify live (flip here if it fills the inverse region).
+  if (body.model === 'gptimage') {
+    const outputs = await Promise.all(
+      seeds.map(async (seed) => {
+        const result = await runFal('fal-ai/gpt-image-1.5/edit', {
+          prompt: falFillPrompt(prompt),
+          image_urls: [body.image],
+          mask_image_url: body.mask,
+          output_format: 'png',
+          seed,
+        }, { pollDeadlineMs: 150_000 })
+        const url = firstFalImageUrl(result)
+        if (!url) throw createError({ statusCode: 502, message: 'fal returned no image' })
+        return fetchAsDataUrl(url)
+      }),
+    )
+    return { images: outputs, model: 'fal-ai/gpt-image-1.5/edit' }
+  }
+
   // Alternative mask-native models (same image_url/mask_url schema, white = fill).
   if (body.model === 'flux-general' || body.model === 'qwen') {
     const app = body.model === 'qwen' ? 'fal-ai/qwen-image-edit/inpaint' : 'fal-ai/flux-general/inpainting'

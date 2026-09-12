@@ -10,6 +10,8 @@ export const WHOLE_IMAGE_MODELS: readonly EditModel[] = [
   { value: 'kontext', label: 'FLUX.2' },
   { value: 'nano', label: 'Nano Banana Pro' },
   { value: 'nano2', label: 'Nano Banana 2' },
+  { value: 'seedream', label: 'Seedream 5' },
+  { value: 'gptimage', label: 'GPT Image' },
 ]
 
 // Area ("Edit an area") masked-inpaint models — all mask-native (image + mask +
@@ -20,4 +22,5 @@ export const REGION_MODELS: readonly EditModel[] = [
   { value: 'flux', label: 'FLUX Fill' },
   { value: 'flux-general', label: 'FLUX General' },
   { value: 'qwen', label: 'Qwen Edit' },
+  { value: 'gptimage', label: 'GPT Image' },
 ]

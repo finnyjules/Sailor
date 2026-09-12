@@ -144,9 +144,16 @@ export function fluxFillDevInput(
  * the pre-existing fal-failover input construction now that fal is the only
  * path. Output: `out.images[0].url`.
  */
+// Whole-image reference editors that share the {prompt, image_urls} shape, keyed by
+// `variant`: nano2 → Nano Banana 2, seedream → Seedream 5 Lite, gptimage → GPT Image
+// 1.5; default → Nano Banana Pro. (Despite the name, this now serves more than nano.)
+const NANO_FAMILY: Record<string, string> = {
+  nano2: 'nano-banana-2',
+  seedream: 'bytedance/seedream/v5/lite',
+  gptimage: 'gpt-image-1.5',
+}
 export function nanoGenInput(prompt: string, images: string[], aspectRatio?: string, variant?: string): FalCall {
-  // 'nano2' → Nano Banana 2 (Gemini 3.1 Flash, faster/cheaper); default → Nano Banana Pro.
-  const family = variant === 'nano2' ? 'nano-banana-2' : 'nano-banana-pro'
+  const family = (variant && NANO_FAMILY[variant]) || 'nano-banana-pro'
   const app = images.length ? `fal-ai/${family}/edit` : `fal-ai/${family}`
   const input: Record<string, unknown> = { prompt, num_images: 1, output_format: 'png' }
   if (images.length) input.image_urls = images

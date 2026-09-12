@@ -2853,9 +2853,11 @@ async function runImageEdit() {
     const src = imageToDataUrl(img, w, h)
     const prompt = styledPrompt(editImagePrompt.value.trim())
     const m = wholeEditModel.value
-    const out = (m === 'nano' || m === 'nano2')
-      ? await inpaint.nanoGen(prompt, src, undefined, m)   // 'nano' = Pro, 'nano2' = Nano Banana 2
-      : await inpaint.kontext(src, prompt)                 // 'kontext' = FLUX.2
+    // Reference editors (image_urls+prompt) go through nanoGen with a variant;
+    // 'kontext' is the FLUX.2 route.
+    const out = (m === 'nano' || m === 'nano2' || m === 'seedream' || m === 'gptimage')
+      ? await inpaint.nanoGen(prompt, src, undefined, m)
+      : await inpaint.kontext(src, prompt)
     const first = out[0]; if (!first) { inpaint.error.value = 'The edit returned no image — try again.'; return }
     const name = await inpaint.uploadDataUrl(await reapplyAlpha(first, img, w, h), 'compedit')
     setLocal(layer.id, { filename: name })
