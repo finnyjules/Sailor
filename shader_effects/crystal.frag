@@ -90,7 +90,11 @@ void main() {
         rel = p - c;
         vec4 sh = texture(u_shape, v_texCoord);
         depth = clamp((sh.r - 0.5) * 2.0, 0.0, 1.0);
-        cover = smoothstep(0.0, 0.03, sh.g);
+        // Antialiased coverage from the SMOOTH rim field (R), not the faceted thumbnail distance
+        // (G): R's 0.5 contour is the true outline, so an fwidth step gives a crisp, non-stepped
+        // edge instead of the thumbnail's stair-steps; edgeSoftness widens the feather (see chrome).
+        float aaCov = fwidth(sh.r) + 1e-5;
+        cover = smoothstep(0.5 - aaCov - u_edgeSoftness * 0.15, 0.5 + aaCov, sh.r);
     } else {
         c = vec2(u_centerX, u_centerY) * asp;
         R = max(u_radius, 0.001);

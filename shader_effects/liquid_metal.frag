@@ -102,7 +102,11 @@ void main() {
         vec2 g = vec2(gx, gy) / asp;
         float gl = length(g);
         outward = gl > 1e-6 ? -g / gl : vec2(0.0, 1.0);
-        cover = smoothstep(0.0, 0.02 + u_edgeSoftness * 0.08, sh.g);
+        // Antialiased coverage from the SMOOTH rim field (R), not the faceted thumbnail distance
+        // (G): R's 0.5 contour is the true outline, so an fwidth step gives a crisp, non-stepped
+        // edge instead of the thumbnail's stair-steps; edgeSoftness widens the feather (see chrome).
+        float aaCov = fwidth(sh.r) + 1e-5;
+        cover = smoothstep(0.5 - aaCov - u_edgeSoftness * 0.15, 0.5 + aaCov, sh.r);
         edgeD = sh.g;                                   // the distance field, deepest point = 1
     } else {
         // As a MATERIAL with no silhouette handed over — a 3D surface, a Space Type / Shape
