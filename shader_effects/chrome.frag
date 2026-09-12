@@ -172,7 +172,13 @@ void main() {
         float gl = length(grd);
         outward = gl > 1e-6 ? -grd / gl : vec2(0.0, 1.0);    // toward the nearest edge
         domeGrad = vec2(domeH(dpx) - domeH(dnx), domeH(dpy) - domeH(dny)) / asp;
-        cover = smoothstep(0.0, 0.02 + u_edgeSoftness * 0.08, texture(u_shape, v_texCoord).g);
+        // Coverage from the SMOOTH full-resolution rim field (R), not the faceted thumbnail
+        // distance (G): R's 0.5 contour is the true outline, so a screen-space (fwidth) step there
+        // gives a crisp ANTIALIASED edge instead of the thumbnail's stair-steps. edgeSoftness
+        // widens it into a feather.
+        float rim = texture(u_shape, v_texCoord).r;
+        float aa = fwidth(rim) + 1e-5;
+        cover = smoothstep(0.5 - aa - u_edgeSoftness * 0.15, 0.5 + aa, rim);
     } else {
         // As a material with no silhouette handed over — a 3D surface, a Space Type / Shape fill,
         // or the catalog preview — the chrome coats the whole tile: full cover, deep interior
