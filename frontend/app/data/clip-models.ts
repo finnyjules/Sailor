@@ -2,7 +2,9 @@
 // Every one loops by first = last frame (Luma, which had a native loop flag, was dropped
 // on Julien's call 2026-09-11: its output was not worth the row). H3 Max and Kling 3.0 Pro
 // joined the same day on "are there more advanced versions"; the option label carries the
-// output resolution and the flat price in parentheses, on Julien's ask.
+// output resolution and the flat price in parentheses, on Julien's ask — in CREDITS, not
+// dollars, on his 2026-09-12 "instead of $ can we use credits" — the number is the one the
+// ledger holds (the server MODEL_COSTS row), pinned by test.
 // Durations mirror what each fal endpoint accepts, trimmed to what a loop wants (≤ 15 s).
 
 export interface ClipModel {
@@ -17,13 +19,17 @@ export interface ClipModel {
    *  the fal slug in server/utils/priceBook.ts). Kling is not in the shared video catalog,
    *  so the clip catalog owns its prices; a test pins the shared ones to VIDEO_MODEL_USD. */
   usd: number
+  /** The flat price in credits — MUST equal the server MODEL_COSTS row for the model's fal slug
+   *  (pinned by clip-models.unit.spec), so the quote is exactly what the ledger holds. Hand-set
+   *  rather than derived: 0.56 × 150 lands a hair above 84 in floating point and would ceil to 85. */
+  credits: number
 }
 
 export const CLIP_MODELS: ClipModel[] = [
-  { id: 'seedance-2.0', name: 'Seedance 2.0', resolution: '720p', durations: [4, 5, 6, 7, 8, 9, 10, 11, 12], defaultDuration: 5, usd: 0.6 },
-  { id: 'hailuo-h3', name: 'Hailuo H3', resolution: '768p', durations: [5, 6, 10], defaultDuration: 5, usd: 0.3 },
-  { id: 'hailuo-h3-max', name: 'Hailuo H3 Max', resolution: '768p', durations: [5, 6, 8, 10, 12, 15], defaultDuration: 5, usd: 0.4 },
-  { id: 'kling-v3-pro', name: 'Kling 3.0 Pro', resolution: '1080p', durations: [3, 4, 5, 6, 8, 10], defaultDuration: 5, usd: 0.56 },
+  { id: 'seedance-2.0', name: 'Seedance 2.0', resolution: '720p', durations: [4, 5, 6, 7, 8, 9, 10, 11, 12], defaultDuration: 5, usd: 0.6, credits: 90 },
+  { id: 'hailuo-h3', name: 'Hailuo H3', resolution: '768p', durations: [5, 6, 10], defaultDuration: 5, usd: 0.3, credits: 45 },
+  { id: 'hailuo-h3-max', name: 'Hailuo H3 Max', resolution: '768p', durations: [5, 6, 8, 10, 12, 15], defaultDuration: 5, usd: 0.4, credits: 60 },
+  { id: 'kling-v3-pro', name: 'Kling 3.0 Pro', resolution: '1080p', durations: [3, 4, 5, 6, 8, 10], defaultDuration: 5, usd: 0.56, credits: 84 },
 ]
 
 export function clipModel(id: string): ClipModel | null {
@@ -43,8 +49,19 @@ export function clipPriceUsd(id: string): number | null {
   return clipModel(id)?.usd ?? null
 }
 
-/** The dropdown text: "Seedance 2.0 (720p · $0.60)" — name, output resolution, flat price. */
+/** The flat price in credits — the server price book's own row, see ClipModel.credits. */
+export function clipPriceCredits(id: string): number | null {
+  return clipModel(id)?.credits ?? null
+}
+
+/** Short price text for the button and the dropdown: "90 credits". */
+export function clipPriceLabel(id: string): string {
+  const credits = clipPriceCredits(id)
+  return credits == null ? '' : `${credits} credits`
+}
+
+/** The dropdown text: "Seedance 2.0 (720p · 90 credits)" — name, output resolution, flat price. */
 export function clipModelLabel(m: ClipModel): string {
-  const usd = clipPriceUsd(m.id)
-  return usd == null ? `${m.name} (${m.resolution})` : `${m.name} (${m.resolution} · $${usd.toFixed(2)})`
+  const price = clipPriceLabel(m.id)
+  return price ? `${m.name} (${m.resolution} · ${price})` : `${m.name} (${m.resolution})`
 }

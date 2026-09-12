@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceUsd } from '~/data/clip-models'
+import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceCredits, clipPriceUsd } from '~/data/clip-models'
 import { VIDEO_MODEL_USD } from '~/data/video-prices'
+import { MODEL_COSTS } from '../../server/utils/priceBook'
 
 describe('clip models', () => {
   it('offers four rows; the label carries the version, the resolution and the flat price', () => {
     expect(CLIP_MODELS.map(m => m.id)).toEqual(['seedance-2.0', 'hailuo-h3', 'hailuo-h3-max', 'kling-v3-pro'])
     expect(CLIP_MODELS.map(clipModelLabel)).toEqual([
-      'Seedance 2.0 (720p · $0.60)', 'Hailuo H3 (768p · $0.30)', 'Hailuo H3 Max (768p · $0.40)', 'Kling 3.0 Pro (1080p · $0.56)',
+      'Seedance 2.0 (720p · 90 credits)', 'Hailuo H3 (768p · 45 credits)', 'Hailuo H3 Max (768p · 60 credits)', 'Kling 3.0 Pro (1080p · 84 credits)',
     ])
   })
   it('lengths follow what each model accepts', () => {
@@ -26,6 +27,21 @@ describe('clip models', () => {
     expect(clipPriceUsd('hailuo-h3-max')).toBeCloseTo(0.4)
     expect(clipPriceUsd('kling-v3-pro')).toBeCloseTo(0.56)
     expect(clipPriceUsd('nope')).toBeNull()
+  })
+  // The credits shown are the ledger's own numbers — the MODEL_COSTS row the animate route
+  // is metered against — so the quote on the button is exactly what is held.
+  it('credits equal the server price book row for each model', () => {
+    const slug: Record<string, string> = {
+      'seedance-2.0': 'bytedance/seedance-2.0/image-to-video',
+      'hailuo-h3': 'minimax/h3/image-to-video',
+      'hailuo-h3-max': 'minimax/h3-max/image-to-video',
+      'kling-v3-pro': 'fal-ai/kling-video/v3/pro/image-to-video',
+    }
+    for (const m of CLIP_MODELS) {
+      expect(clipPriceCredits(m.id), m.id).toBe(MODEL_COSTS[slug[m.id]!]!.credits)
+      expect(MODEL_COSTS[slug[m.id]!]!.usd, m.id).toBeCloseTo(m.usd)
+    }
+    expect(clipPriceCredits('nope')).toBeNull()
   })
   it('rows that also live in the shared video catalog quote the same price', () => {
     for (const m of CLIP_MODELS) {

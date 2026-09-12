@@ -4,7 +4,7 @@
 // once a clip exists, Speed + Remove clip. Pure presentation — the modal owns the call.
 import { computed, ref, watch } from 'vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
-import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceUsd } from '~/data/clip-models'
+import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceLabel } from '~/data/clip-models'
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN } from '~/lib/compositor/clip'
 import type { ImageLayer } from '~/composables/useCompositorLayers'
 
@@ -36,11 +36,8 @@ watch(() => props.layer.id, () => {
   if (!spec.value.durations.includes(seconds.value)) seconds.value = spec.value.defaultDuration
 })
 
-// Flat per-clip price — see clipPriceUsd: the hold does not scale with length.
-const price = computed(() => {
-  const usd = clipPriceUsd(model.value)
-  return usd == null ? '' : `$${usd.toFixed(2)}`
-})
+// Flat per-clip price in credits — see clipPriceCredits: the hold does not scale with length.
+const price = computed(() => clipPriceLabel(model.value))
 const hasClip = computed(() => !!props.layer.clip)
 const fieldCls = 'w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none'
 </script>

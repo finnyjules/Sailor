@@ -17,7 +17,7 @@ describe('CompositorAnimatePanel', () => {
     const w = mountP(still())
     expect(w.find('textarea, input[type="text"]').exists()).toBe(true)
     const models = w.find('select[data-role="model"]')
-    expect(models.findAll('option').map(o => o.text())).toEqual(['Seedance 2.0 (720p · $0.60)', 'Hailuo H3 (768p · $0.30)', 'Hailuo H3 Max (768p · $0.40)', 'Kling 3.0 Pro (1080p · $0.56)'])
+    expect(models.findAll('option').map(o => o.text())).toEqual(['Seedance 2.0 (720p · 90 credits)', 'Hailuo H3 (768p · 45 credits)', 'Hailuo H3 Max (768p · 60 credits)', 'Kling 3.0 Pro (1080p · 84 credits)'])
     const btn = w.find('button[data-role="generate"]')
     expect(btn.text()).toMatch(/Generate/)
     expect(btn.text()).toMatch(/\$0\.60/)          // Seedance default, 5 s
