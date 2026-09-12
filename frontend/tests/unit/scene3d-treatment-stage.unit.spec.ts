@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX, chromaticOffsetPx, chromaticSplitOffset, glitchShiftPx, glitchBandShift, dropShadowDistancePx, dropShadowOffset, dropShadowHaloPx, crossHatchSpacingPx, crossHatchLayerWeights, crossHatchLine, crossHatchInk } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX, chromaticOffsetPx, chromaticSplitOffset, glitchShiftPx, glitchBandShift, GLITCH_FRAG, dropShadowDistancePx, dropShadowOffset, dropShadowHaloPx, crossHatchSpacingPx, crossHatchLayerWeights, crossHatchLine, crossHatchInk } from '~/lib/scene3d/treatmentStage'
 
 describe('dissolveNoise / dissolveAlpha', () => {
   const grid = (fn: (u: number, v: number) => number, n = 16): number[] => {
@@ -70,21 +70,39 @@ describe('colorGradeRGB', () => {
 })
 
 describe('halftoneDotRadius', () => {
-  it('a bright region grows no dot, a dark region fills to the cell corners', () => {
+  it('a bright region grows no dot; pure black grows the fattest dot', () => {
     expect(halftoneDotRadius(1, 1, 1)).toBe(0) // white → nothing
-    expect(halftoneDotRadius(0, 1, 1)).toBeCloseTo(HALFTONE_RADIUS_MAX, 6) // black → solid
+    expect(halftoneDotRadius(0, 1, 1)).toBeCloseTo(HALFTONE_RADIUS_MAX, 6) // black → the max
+  })
+  it('the max radius stays BELOW the cell-corner distance, so a cell never fills solid', () => {
+    // The blob bug: at the old max (√½ ≈ 0.707) a dark cell reached its corners and merged into
+    // solid ink. Capped at half a cell, even pure black leaves the four corners open → the
+    // screen always carries gradient (a dot screen RAISES gradient energy, a blob flattens it).
+    expect(HALFTONE_RADIUS_MAX).toBeLessThan(Math.SQRT1_2)
+    expect(halftoneDotRadius(0, 1, 1)).toBeLessThan(Math.SQRT1_2)
   })
   it('a transparent region grows no dot, whatever its tone (no spill past the silhouette)', () => {
     expect(halftoneDotRadius(0, 0, 1)).toBe(0)
   })
-  it('dot area tracks darkness — radius is √(darkness) of the max', () => {
-    // luminance 0.75 → darkness 0.25 → radius = √0.25 = 0.5 of the max
-    expect(halftoneDotRadius(0.75, 1, 1)).toBeCloseTo(0.5 * HALFTONE_RADIUS_MAX, 6)
+  it('coverage VARIES across a normally-lit object and never saturates at a typical mid-tone', () => {
+    // The stage is linear-HDR: a lit object's LINEAR luminance sits low (a lit red surface ≈ 0.2
+    // by Rec.709 luma). Sample that band and require the dots to (a) shrink monotonically as the
+    // object brightens, (b) stay separated — every radius short of the merge point (half a cell)
+    // for all but pure black, and (c) actually span a range, not collapse to one fat size.
+    const ramp = [0.02, 0.05, 0.1, 0.2, 0.35, 0.6, 0.85].map((l) => halftoneDotRadius(l, 1, 1))
+    for (let i = 1; i < ramp.length; i++) expect(ramp[i]!).toBeLessThan(ramp[i - 1]!) // monotonic
+    for (const r of ramp) expect(r).toBeLessThan(HALFTONE_RADIUS_MAX + 1e-9) // never past the merge point
+    expect(Math.max(...ramp) - Math.min(...ramp)).toBeGreaterThan(0.15) // a real tonal spread
+    // A typical lit-object mid-tone (linear luma ≈ 0.2) lands as a clearly separated dot, not
+    // a near-full cell — well under the half-cell cap that would touch its neighbours.
+    expect(halftoneDotRadius(0.2, 1, 1)).toBeLessThan(0.45)
+    expect(halftoneDotRadius(0.2, 1, 1)).toBeGreaterThan(0.1)
   })
-  it('contrast pushes mid-tones toward the extremes deterministically', () => {
-    const mid = halftoneDotRadius(0.4, 1, 1)
-    expect(halftoneDotRadius(0.4, 1, 2)).toBeGreaterThan(mid) // a dark mid gets fatter
-    expect(halftoneDotRadius(0.6, 1, 2)).toBeLessThan(halftoneDotRadius(0.6, 1, 1)) // a light mid thins
+  it('contrast pushes tones toward the extremes deterministically (still a live dial)', () => {
+    // A perceptually-DARK tone (linear 0.1 → perceptual ≈ 0.35, below mid-grey) fattens with
+    // contrast; a perceptually-LIGHT tone (linear 0.5 → perceptual ≈ 0.73) thins with it.
+    expect(halftoneDotRadius(0.1, 1, 2)).toBeGreaterThan(halftoneDotRadius(0.1, 1, 1))
+    expect(halftoneDotRadius(0.5, 1, 2)).toBeLessThan(halftoneDotRadius(0.5, 1, 1))
   })
 })
 
@@ -187,6 +205,74 @@ describe('glitchBandShift', () => {
   it('more bands means more distinct jumps across the object — narrower, busier slices', () => {
     const distinct = (n: number) => new Set(bandShifts(5, n).map((s) => s.toFixed(6))).size
     expect(distinct(24)).toBeGreaterThan(distinct(6))
+  })
+})
+
+describe('GLITCH_FRAG source (the invisible-layer regression guard)', () => {
+  // ROOT CAUSE of the "glitch renders the object completely invisible" bug: the scanline period
+  // constant (JS `3.0`) was interpolated into the GLSL as a bare integer `3`, so the source read
+  // `6.2831853 / 3` — a float/int division. GLSL ES performs NO implicit int→float conversion, so
+  // strict validators (ANGLE, which backs Chromium/Playwright) reject it; the program never links,
+  // `this.pass(glitchMat, dst)` writes nothing, and the composited layer — hence the whole treated
+  // object — is empty. Unit twins passed because the maths lives in JS; only the GPU saw the bug.
+  it('never divides or multiplies by a BARE integer in a float context (would be a float/int type error)', () => {
+    // A JS number reaches the shader as a float literal only if it carries a decimal point.
+    // `* 3)` or `/ 3;` next to an arithmetic operator is the fingerprint of the original bug.
+    expect(GLITCH_FRAG).not.toMatch(/[*/]\s*\d+\s*[);]/)
+  })
+  it('emits the scanline frequency as a proper GLSL float literal (decimal point present)', () => {
+    // The cos() argument must be scaled by a float constant, e.g. `* 2.0943951)`.
+    expect(GLITCH_FRAG).toMatch(/\*\s*\d+\.\d+\s*\)\s*;/)
+  })
+})
+
+describe('glitch fragment behaviour (CPU model of GLITCH_FRAG)', () => {
+  // A faithful CPU mirror of GLITCH_FRAG's per-pixel output, over a synthetic 1-px-wide column of
+  // opaque samples, to pin the properties the live render must hold: alpha is ALWAYS taken from
+  // the sampled texel (never zeroed → an opaque object stays opaque), neutral is a pass-through,
+  // and a non-neutral setting actually moves pixels. The width of the object (its ALPHA) surviving
+  // is exactly what the Playwright "footprint" measured as 0 when the shader failed to compile.
+  const SCAN_FREQ = 2 * Math.PI / 3 // mirrors GLITCH_SCANLINE_FREQ (2π / 3px period)
+  type RGBA = { r: number; g: number; b: number; a: number }
+  // The object column: opaque in the middle rows, transparent at the ends.
+  const column: RGBA[] = Array.from({ length: 20 }, (_, y) => {
+    const opaque = y >= 4 && y < 16
+    return { r: 0.8, g: 0.1, b: 0.1, a: opaque ? 1 : 0 }
+  })
+  const H = column.length
+  // Sample the column at a fractional v (wrapping like a clamp-to-nearest texture read).
+  const sample = (v: number): RGBA => column[Math.min(H - 1, Math.max(0, Math.round(v * H - 0.5)))]!
+  const glitchPixel = (yPx: number, bands: number, seed: number, amountUV: number, scanlines: number): RGBA => {
+    const vy = (yPx + 0.5) / H
+    const band = Math.floor(vy * bands)
+    const shift = glitchBandShift(band, seed) * amountUV
+    const s = sample(vy) // x is a single column, so the horizontal shift only moves WHICH x — here it re-reads the same column, but alpha still comes from the sample
+    void shift
+    const scan = 0.5 + 0.5 * Math.cos(yPx * SCAN_FREQ)
+    return { r: s.r * (1 - scanlines * scan), g: s.g * (1 - scanlines * scan), b: s.b * (1 - scanlines * scan), a: s.a }
+  }
+
+  it('neutral (amount 0, scanlines 0) is an exact pass-through — the object is preserved', () => {
+    for (let y = 0; y < H; y++) {
+      const out = glitchPixel(y, 12, 1, 0, 0)
+      const src = sample((y + 0.5) / H)
+      expect(out).toEqual(src)
+    }
+  })
+  it('an OPAQUE input stays opaque — alpha is carried through, never dropped', () => {
+    for (const scanlines of [0, 0.5, 1]) for (const amt of [0, 0.05, 0.2]) {
+      for (let y = 4; y < 16; y++) expect(glitchPixel(y, 12, 1, amt, scanlines).a).toBe(1)
+    }
+  })
+  it('a non-neutral setting changes pixels (scanlines darken RGB, alpha untouched)', () => {
+    let changed = 0
+    for (let y = 4; y < 16; y++) {
+      const neutral = glitchPixel(y, 12, 1, 0, 0)
+      const scanned = glitchPixel(y, 12, 1, 0, 0.8)
+      if (scanned.r !== neutral.r) changed++
+      expect(scanned.a).toBe(neutral.a) // alpha never moves with scanlines
+    }
+    expect(changed).toBeGreaterThan(0)
   })
 })
 

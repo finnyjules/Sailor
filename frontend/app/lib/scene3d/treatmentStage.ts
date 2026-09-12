@@ -184,17 +184,30 @@ export function dissolveAlpha(
 // --- halftone: a deterministic rotated dot screen (CPU twin of HALFTONE_FRAG) --------------
 // A regular AM screen: one round dot per grid cell, its AREA tracking the darkness under the
 // cell so ink coverage reads linear in tone. No randomness — angle + cell fix the pattern.
-/** The dot radius (cell units) at which a dot's circle reaches the cell corners and the screen
- *  goes fully solid — a half-cell diagonal. Full darkness maps here. */
-export const HALFTONE_RADIUS_MAX = Math.SQRT1_2
+/** The maximum dot radius (cell units) at full ink — HALF a cell. A full-ink dot reaches the
+ *  cell-EDGE midpoints but always leaves the four corners open (the corner distance is √½ ≈
+ *  0.707), so the screen can never fill to a solid cell. Capping here below the corner distance
+ *  is what stops a normally-lit object collapsing into a solid ink blob. */
+export const HALFTONE_RADIUS_MAX = 0.5
+
+/** Perceptual lightness of a linear luminance, an sRGB-ish gamma (1/2.2). The stage is
+ *  linear-HDR (OutputPass applies ACES+sRGB only at the very end), so a normally-lit object's
+ *  LINEAR luminance sits well below 0.5 — a saturated hue especially (Rec.709 luma of pure red
+ *  is 0.21). Pivoting the tone map at 0.5 on that raw value floods every cell to full ink. In
+ *  this perceptual space a lit object's mid-tones land near 0.5, where the screen varies. */
+const HALFTONE_GAMMA = 1 / 2.2
 
 /** Dot radius (cell units, 0..HALFTONE_RADIUS_MAX) for a region of linear luminance `lum`
- *  (0 black … 1 white) at coverage `alpha`, shaped by a tone `contrast` around mid-grey.
- *  Dark → a fat dot, bright → nothing; the dot AREA (∝ radius²) tracks contrast-shaped
- *  darkness, so ink reads linear in tone. A transparent region (alpha 0) grows no dot, so the
- *  screen never spills past the silhouette. Pure; GLSL twin in HALFTONE_FRAG. */
+ *  (0 black … 1 white) at coverage `alpha`, shaped by a tone `contrast` around perceptual
+ *  mid-grey. Dark → a fat dot, bright → nothing; the dot AREA (∝ radius²) tracks contrast-shaped
+ *  darkness, so ink reads linear in tone. `lum` is first taken to perceptual lightness so a lit
+ *  object's mid-range maps into the visible-dot band instead of saturating; the max radius is
+ *  capped at half a cell so dots stay SEPARATED (corner gaps) at every tone but pure black. A
+ *  transparent region (alpha 0) grows no dot, so the screen never spills past the silhouette.
+ *  Pure; GLSL twin in HALFTONE_FRAG. */
 export function halftoneDotRadius(lum: number, alpha: number, contrast: number): number {
-  const lc = Math.min(1, Math.max(0, (lum - 0.5) * contrast + 0.5))
+  const lp = Math.pow(Math.max(lum, 0), HALFTONE_GAMMA)
+  const lc = Math.min(1, Math.max(0, (lp - 0.5) * contrast + 0.5))
   const k = Math.min(1, Math.max(0, (1 - lc) * alpha))
   return Math.sqrt(k) * HALFTONE_RADIUS_MAX
 }
@@ -432,7 +445,9 @@ const DISSOLVE_FRAG = `
 // flat ink colour with alpha = dot coverage × the object's OWN alpha at this pixel, so the
 // screen never spills past the silhouette. The tone→radius and grid→distance maths are the
 // CPU twins halftoneDotRadius()/halftoneCellDistance() step for step — keep them in step.
-// 0.70710678 is HALFTONE_RADIUS_MAX (a half-cell diagonal), inlined because GLSL can't read it.
+// 0.45454545 is HALFTONE_GAMMA (1/2.2, linear→perceptual); 0.5 is HALFTONE_RADIUS_MAX (a
+// half-cell — a full-ink dot reaches the cell-edge midpoints, never the corners), inlined
+// because GLSL can't read the TS consts.
 const HALFTONE_FRAG = `
   uniform sampler2D tDiffuse; uniform vec2 uResolution; uniform float uCellPx;
   uniform float uAngle; uniform float uContrast; uniform vec3 uColor;
@@ -448,9 +463,10 @@ const HALFTONE_FRAG = `
     vec2 centerP = vec2(C.x * c + C.y * s, -C.x * s + C.y * c);
     vec4 sc = texture2D(tDiffuse, centerP / uResolution);
     float lum = dot(sc.rgb, vec3(0.2126, 0.7152, 0.0722));
-    float lc = clamp((lum - 0.5) * uContrast + 0.5, 0.0, 1.0);
+    float lp = pow(max(lum, 0.0), 0.45454545);
+    float lc = clamp((lp - 0.5) * uContrast + 0.5, 0.0, 1.0);
     float k = clamp((1.0 - lc) * sc.a, 0.0, 1.0);
-    float R = sqrt(k) * 0.70710678;
+    float R = sqrt(k) * 0.5;
     float aa = 0.75 / uCellPx;
     float cov = 1.0 - smoothstep(R - aa, R + aa, d);
     float aPix = texture2D(tDiffuse, vUv).a;
@@ -483,7 +499,14 @@ const CHROMATIC_SPLIT_FRAG = `
 // object comes back untouched but for the scan lines. Scan lines darken RGB on a fixed device-px
 // period, alpha untouched. Straight alpha in, straight alpha out — the blur/pixelate encode boundary.
 const GLITCH_SCANLINE_PERIOD_PX = 3.0
-const GLITCH_FRAG = `
+// The scanline angular frequency (radians per device px) — PRECOMPUTED in JS and emitted with a
+// forced decimal via toFixed, so it lands in the GLSL as a float literal. Interpolating the raw
+// period constant was the invisible-layer bug: JS `3.0` stringifies to "3", making the source
+// read `6.2831853 / 3` — a float/int division that fails GLSL ES compilation on strict
+// validators (ANGLE), so the pass linked no program, rendered nothing, and the whole treated
+// object vanished. Any numeric constant put into a float context here MUST carry a decimal point.
+const GLITCH_SCANLINE_FREQ = (2 * Math.PI / GLITCH_SCANLINE_PERIOD_PX).toFixed(7)
+export const GLITCH_FRAG = `
   uniform sampler2D tDiffuse; uniform vec2 uResolution;
   uniform float uBands; uniform float uSeed; uniform float uAmountUV; uniform float uScanlines;
   varying vec2 vUv;
@@ -492,7 +515,7 @@ const GLITCH_FRAG = `
     float band = floor(vUv.y * uBands);
     float shift = (gvhash(vec2(band, uSeed)) * 2.0 - 1.0) * uAmountUV;
     vec4 s = texture2D(tDiffuse, vec2(vUv.x + shift, vUv.y));
-    float scan = 0.5 + 0.5 * cos((vUv.y * uResolution.y) * (6.2831853 / ${GLITCH_SCANLINE_PERIOD_PX}));
+    float scan = 0.5 + 0.5 * cos((vUv.y * uResolution.y) * ${GLITCH_SCANLINE_FREQ});
     gl_FragColor = vec4(s.rgb * (1.0 - uScanlines * scan), s.a);
   }`
 // Flat drop shadow — step 1 of 3: build the shadow silhouette. Sample the object-alone layer's
