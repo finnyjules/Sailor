@@ -5,8 +5,9 @@ import { statement } from './patterns/statement'
 import { indexPattern } from './patterns/indexPattern'
 import { shapeCounter } from './patterns/shapeCounter'
 import { photoBehind } from './patterns/photoBehind'
+import { tilt } from './patterns/tilt'
 
-export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind]
+export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, tilt]
 
 /** Patterns that fit the title's kind and whose required elements are present. */
 export function fittingPatterns(ctx: PatternContext): Pattern[] {
