@@ -61,6 +61,9 @@ export function applyPlacement(
       // normalized-frame-width units as op.w — see useCompositorLayers' layerBoxPx).
       // Writing `w` here would add a dead field and leave the shape at its old size.
       next.scale = op.w / (layer as any).bbox.w
+    } else if (layer.kind === 'wired') {
+      if (op.w != null) next.w = op.w
+      // no h: a wired layer's height comes from its lastAspect, not the op
     } else {
       if (op.w != null) next.w = op.w
       if (op.h != null) next.h = op.h

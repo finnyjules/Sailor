@@ -24,6 +24,14 @@ describe('posterLayerViews', () => {
     expect(posterLayerViews(undefined)).toEqual([])
     expect(posterLayerViews({})).toEqual([])
   })
+  it('treats a wired layer as an image element (a connected photo the engine can arrange)', () => {
+    const props = { sailor_localLayers: [
+      { id: 't', kind: 'text', text: 'HELLO', fontSize: 0.2 },
+      { id: 'w', kind: 'wired', slot: 0, w: 0.5, lastAspect: 1 },
+    ] }
+    const v = posterLayerViews(props)
+    expect(v).toContainEqual({ id: 'w', kind: 'image' })
+  })
 })
 
 describe('buildFrameContext', () => {

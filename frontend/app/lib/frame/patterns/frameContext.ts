@@ -14,6 +14,7 @@ export function posterLayerViews(props: Record<string, unknown> | undefined): Po
   for (const l of layers) {
     if (l.kind === 'text') out.push({ id: l.id, kind: 'text', text: (l as any).text, fontSize: (l as any).fontSize })
     else if (l.kind === 'image') out.push({ id: l.id, kind: 'image' })
+    else if (l.kind === 'wired') out.push({ id: l.id, kind: 'image' })   // a wired photo is an image element the engine can arrange
     else if (SHAPE_KINDS.has(l.kind)) out.push({ id: l.id, kind: 'shape', shapeId: (l as any).shapeId ?? 'circle' })
   }
   return out

@@ -161,3 +161,17 @@ describe('applyPlacement — expressive fields', () => {
     expect((out as any).align).toBe('center')
   })
 })
+
+describe('applyPlacement — wired layer sizing', () => {
+  const palette = { ink: '#111', accent: '#e33', field: '#eee' } as any
+  const elements = { images: [{ id: 'w' }], shapes: [], shapeMode: null } as any
+  const wired = { id: 'w', kind: 'wired', slot: 0, w: 0.5, lastAspect: 1, x: 0.5, y: 0.5 } as any
+
+  it('writes w onto a wired layer and never a dead h', () => {
+    const ops = [{ target: 'w', kind: 'image', x: 0.4, y: 0.3, w: 0.8, h: 1.2 }] as any
+    const [out] = applyPlacement([wired], { ops, did: 'x' }, elements, palette, { recolour: false })
+    expect((out as any).w).toBe(0.8)
+    expect((out as any).x).toBe(0.4)
+    expect('h' in (out as any)).toBe(false)   // wired height comes from lastAspect
+  })
+})
