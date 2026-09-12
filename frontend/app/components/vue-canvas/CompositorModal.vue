@@ -2851,7 +2851,7 @@ async function runImageEdit() {
     const img = await loadImage(imageLayerUrl(layer.filename))
     const { w, h } = capDims(img.naturalWidth || 1024, img.naturalHeight || 1024)
     const src = imageToDataUrl(img, w, h)
-    const prompt = editImagePrompt.value.trim()
+    const prompt = styledPrompt(editImagePrompt.value.trim())
     const m = wholeEditModel.value
     const out = (m === 'nano' || m === 'nano2')
       ? await inpaint.nanoGen(prompt, src, undefined, m)   // 'nano' = Pro, 'nano2' = Nano Banana 2
@@ -2882,7 +2882,7 @@ async function runRegionEdit() {
   if (!editRegion.value || !genHasMask.value || !regionPrompt.value.trim() || inpaint.busy.value) return
   // FLUX Fill only for now — regionEditModel is captured but 'nano' isn't wired
   // to a region-crop-and-composite path yet (see task-4-report.md, deferred).
-  genPrompt.value = regionPrompt.value
+  genPrompt.value = styledPrompt(regionPrompt.value.trim())
   await runRegionFill()
 }
 function selectObjectStart(id: string) { editImageCancel(); editRegionCancel(); selectLocal(id); toggleSmartMode() }
@@ -4530,6 +4530,13 @@ const regionPrompt = ref('')
 // takeover — prompting on the side panel felt off to the side of the work. ──
 const modelMenuOpen = ref(false)
 const editPromptRef = ref<HTMLInputElement | null>(null)
+// Keep the edited image in its own existing style. Area fills already blend, but
+// whole-image editors can drift, so (when on) we append a style-lock clause to the
+// prompt. Off lets a deliberate restyle through ("make it a watercolour").
+const keepStyle = ref(true)
+function styledPrompt(p: string): string {
+  return keepStyle.value ? `${p} — keep the original art style, colours and detail; change only what is described` : p
+}
 const editMode = computed<'image' | 'region' | 'none'>(() =>
   editImage.value ? 'image' : editRegion.value ? 'region' : 'none')
 // The image the edit toolbar acts on: the one being edited, else the single
@@ -6945,6 +6952,11 @@ onUnmounted(() => {
         <div v-if="inpaint.error.value" data-testid="edit-error"
           class="max-w-[360px] rounded bg-rose-950/95 border border-rose-500/30 px-2 py-1 text-[11px] text-rose-200 text-center shadow-lg">{{ inpaint.error.value }}</div>
         <div class="flex items-center gap-1 bg-[#1a1a1a]/95 backdrop-blur-sm rounded-[10px] p-1 border border-[#2a2a2a] shadow-lg">
+          <button type="button" data-testid="edit-keep-style"
+            class="flex items-center justify-center h-8 px-2 rounded-[8px] text-[11px] cursor-pointer whitespace-nowrap"
+            :class="keepStyle ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/45'"
+            :title="keepStyle ? 'Keeping the original style — click to allow a restyle' : 'Match the original style'"
+            @click="keepStyle = !keepStyle">Keep style</button>
           <input ref="editPromptRef" type="text"
             :value="editImage ? editImagePrompt : regionPrompt"
             :data-testid="editImage ? 'edit-image-prompt' : 'edit-region-prompt'"
