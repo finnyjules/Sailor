@@ -2756,8 +2756,11 @@ function onCanvasContextMenu(e: MouseEvent) {
     items: [
       { id: 'edit-image', label: 'Edit image…', icon: Wand2, action: () => { imageCtxMenu.value = null; editImageStart(id) } },
       { id: 'edit-region', label: 'Edit a region…', icon: SquareDashedMousePointer, action: () => { imageCtxMenu.value = null; editRegionStart(id) } },
-      { divider: true },
-      { id: 'select-object', label: 'Select an object…', icon: Lasso, action: () => { imageCtxMenu.value = null; selectObjectStart(id) } },
+      // "Select an object" (SAM smart-select) hidden for now — see SMART_SELECT_ENABLED.
+      ...(SMART_SELECT_ENABLED ? [
+        { divider: true },
+        { id: 'select-object', label: 'Select an object…', icon: Lasso, action: () => { imageCtxMenu.value = null; selectObjectStart(id) } },
+      ] : []),
     ],
   }
 }
@@ -5274,6 +5277,9 @@ async function runRegionFill() {
 // artboard→image affine as runRegionFill) and the returned silhouette becomes
 // the active selection. Alt-scribble subtracts (label 0). If the API fails the
 // raw scribble IS the selection — every action still works (spec requirement).
+// HIDDEN for now (2026-09-12): the "Select an object" entry is gated off — flip
+// to true to restore it. The machinery below is left intact.
+const SMART_SELECT_ENABLED = false
 const smart = useSmartSelect({ segment: (image, points) => inpaint.segmentPoints(image, points) })
 const smartActive = ref(false)
 const smartBrush = ref(48)                     // brush diameter, artboard px
@@ -7247,7 +7253,7 @@ onUnmounted(() => {
             class="h-8 px-2.5 rounded text-[12px] cursor-pointer whitespace-nowrap"
             :class="editRegion ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
             @click="editRegionStart(editToolbarLayer!.id)">Edit a region</button>
-          <button type="button" data-testid="edit-mode-select"
+          <button v-if="SMART_SELECT_ENABLED" type="button" data-testid="edit-mode-select"
             class="h-8 px-2.5 rounded text-[12px] cursor-pointer whitespace-nowrap"
             :class="smartActive ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
             @click="selectObjectStart(editToolbarLayer!.id)">Select an object</button>
