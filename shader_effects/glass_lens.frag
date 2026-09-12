@@ -87,11 +87,11 @@ void main() {
         depth = clamp((h - 0.5) * 2.0, 0.0, 1.0);
         // Coverage reads the true distance field (G), not the blurred rim: a thin
         // arm of a star blurs below the halfway level and would otherwise drop out.
-        // Antialiased coverage from the SMOOTH rim field (R), not the faceted thumbnail distance
-        // (G): R's 0.5 contour is the true outline, so an fwidth step gives a crisp, non-stepped
-        // edge instead of the thumbnail's stair-steps; edgeSoftness widens the feather (see chrome).
-        float aaCov = fwidth(sh.r) + 1e-5;
-        cover = smoothstep(0.5 - aaCov - u_edgeSoftness * 0.15, 0.5 + aaCov, sh.r);
+        // Paint solid: the compositor clips this fill to the layer's FULL-RES silhouette
+        // (destination-in in applyGlassFromLayer), so that crisp clip IS the outline. A cover that
+        // fades near the edge here renders at LIVE_FIELD_PX, upscales soft, and then multiplies the
+        // crisp clip — softening the edge (see chrome). Let the clip cut it.
+        cover = 1.0;
     } else {
         c = vec2(u_centerX, u_centerY) * asp;
         R = max(u_radius, 0.001);

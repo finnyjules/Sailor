@@ -172,13 +172,11 @@ void main() {
         float gl = length(grd);
         outward = gl > 1e-6 ? -grd / gl : vec2(0.0, 1.0);    // toward the nearest edge
         domeGrad = vec2(domeH(dpx) - domeH(dnx), domeH(dpy) - domeH(dny)) / asp;
-        // Coverage from the SMOOTH full-resolution rim field (R), not the faceted thumbnail
-        // distance (G): R's 0.5 contour is the true outline, so a screen-space (fwidth) step there
-        // gives a crisp ANTIALIASED edge instead of the thumbnail's stair-steps. edgeSoftness
-        // widens it into a feather.
-        float rim = texture(u_shape, v_texCoord).r;
-        float aa = fwidth(rim) + 1e-5;
-        cover = smoothstep(0.5 - aa - u_edgeSoftness * 0.15, 0.5 + aa, rim);
+        // The compositor clips this fill to the layer's FULL-RESOLUTION silhouette (destination-in
+        // in applyGlassFromLayer), so that crisp clip is the outline. Live fields render at
+        // LIVE_FIELD_PX and are upscaled, so ANY cover that fades near the edge here upscales soft
+        // and then multiplies the crisp clip — softening it. Paint solid; let the clip cut the edge.
+        cover = 1.0;
     } else {
         // As a material with no silhouette handed over — a 3D surface, a Space Type / Shape fill,
         // or the catalog preview — the chrome coats the whole tile: full cover, deep interior

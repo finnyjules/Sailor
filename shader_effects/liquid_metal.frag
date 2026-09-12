@@ -102,11 +102,11 @@ void main() {
         vec2 g = vec2(gx, gy) / asp;
         float gl = length(g);
         outward = gl > 1e-6 ? -g / gl : vec2(0.0, 1.0);
-        // Antialiased coverage from the SMOOTH rim field (R), not the faceted thumbnail distance
-        // (G): R's 0.5 contour is the true outline, so an fwidth step gives a crisp, non-stepped
-        // edge instead of the thumbnail's stair-steps; edgeSoftness widens the feather (see chrome).
-        float aaCov = fwidth(sh.r) + 1e-5;
-        cover = smoothstep(0.5 - aaCov - u_edgeSoftness * 0.15, 0.5 + aaCov, sh.r);
+        // Paint solid: the compositor clips this fill to the layer's FULL-RES silhouette
+        // (destination-in in applyGlassFromLayer), so that crisp clip IS the outline. A cover that
+        // fades near the edge here renders at LIVE_FIELD_PX, upscales soft, and then multiplies the
+        // crisp clip — softening the edge (see chrome). Let the clip cut it.
+        cover = 1.0;
         edgeD = sh.g;                                   // the distance field, deepest point = 1
     } else {
         // As a MATERIAL with no silhouette handed over — a 3D surface, a Space Type / Shape
