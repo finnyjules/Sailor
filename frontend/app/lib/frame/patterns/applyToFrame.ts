@@ -37,15 +37,16 @@ export interface ApplyArgs extends PlanArgs {
 /** What an apply would commit: the next layers, the next draw order, and the state to remember. */
 export interface PatternPlan { layers: LocalLayer[]; order: string[]; posterState: PosterState; did: string }
 
-/** Build the measure + context and run the pattern. Only the placement path needs
- *  a measure, so this stays out of planPattern's provided-placement fast path. */
+/** Build the measure + context and run the pattern — the fall-back when no
+ *  precomputed placement is supplied. The title measured is the one the layer
+ *  hierarchy inference names (largest fontSize), not the first text layer in
+ *  array order, so the width oracle matches what the engine treats as the title. */
 function runPattern(pattern: Pattern, args: PlanArgs, layers: LocalLayer[], elements: FrameElements): PatternPlacement {
   const titleLayer = layers.find(l => l.id === elements.title?.id && l.kind === 'text') as TextLayer | undefined
   const tm = titleLayer ? titleMeasureFrom(titleLayer) : { family: 'Inter', weight: 700, transform: (t: string) => t }
   const measure = makeFrameMeasure(tm.family, tm.weight, undefined, tm.transform)
   const ctx = buildFrameContext(args.props, args.frameW, args.frameH, measure, elements)
   ctx.seed = args.seed
-  if (args.shapeMode !== undefined) ctx.elements.shapeMode = args.shapeMode
   return pattern.place(ctx)
 }
 

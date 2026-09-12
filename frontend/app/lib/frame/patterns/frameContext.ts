@@ -7,7 +7,7 @@ import type { LocalLayer } from '~/composables/useCompositorLayers'
 const SHAPE_KINDS = new Set(['rect', 'ellipse', 'polygon', 'star', 'path'])
 
 /** Read a frame's layers into the engine's read-only view. Non-poster kinds
- *  (brush/wired/line/deal/scatter) are dropped. */
+ *  (brush/line/deal/scatter) are dropped; a wired layer is treated as an image element. */
 export function posterLayerViews(props: Record<string, unknown> | undefined): PosterLayerView[] {
   const layers = (props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
   const out: PosterLayerView[] = []
