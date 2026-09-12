@@ -5,9 +5,9 @@ import { MODEL_COSTS } from '../../server/utils/priceBook'
 
 describe('clip models', () => {
   it('offers four rows; the label carries the version, the resolution and the flat price', () => {
-    expect(CLIP_MODELS.map(m => m.id)).toEqual(['seedance-2.0', 'hailuo-h3', 'hailuo-h3-max', 'kling-v3-pro'])
+    expect(CLIP_MODELS.map(m => m.id)).toEqual(['seedance-2.0', 'hailuo-h3', 'hailuo-h3-max', 'kling-v3-pro', 'flux-3-draft'])
     expect(CLIP_MODELS.map(clipModelLabel)).toEqual([
-      'Seedance 2.0 (720p · 90 credits)', 'Hailuo H3 (768p · 45 credits)', 'Hailuo H3 Max (768p · 60 credits)', 'Kling 3.0 Pro (1080p · 84 credits)',
+      'Seedance 2.0 (720p · 90 credits)', 'Hailuo H3 (768p · 45 credits)', 'Hailuo H3 Max (768p · 60 credits)', 'Kling 3.0 Pro (1080p · 84 credits)', 'FLUX 3 draft (720p · 45 credits)',
     ])
   })
   it('lengths follow what each model accepts', () => {
@@ -15,6 +15,7 @@ describe('clip models', () => {
     expect(clipModel('hailuo-h3')!.durations).toEqual([5, 6, 10])
     expect(clipModel('hailuo-h3-max')!.durations).toEqual([5, 6, 8, 10, 12, 15])
     expect(clipModel('kling-v3-pro')!.durations).toEqual([3, 4, 5, 6, 8, 10])
+    expect(clipModel('flux-3-draft')!.durations).toEqual([5, 10, 15])
     expect(CLIP_MODELS.every(m => m.durations.includes(m.defaultDuration))).toBe(true)
   })
   // The hold the ledger takes is the flat MODEL_COSTS row for the slug regardless of
@@ -36,6 +37,7 @@ describe('clip models', () => {
       'hailuo-h3': 'minimax/h3/image-to-video',
       'hailuo-h3-max': 'minimax/h3-max/image-to-video',
       'kling-v3-pro': 'fal-ai/kling-video/v3/pro/image-to-video',
+      'flux-3-draft': 'blackforestlabs/flux-3/first-last-frame-to-video/draft',
     }
     for (const m of CLIP_MODELS) {
       expect(clipPriceCredits(m.id), m.id).toBe(MODEL_COSTS[slug[m.id]!]!.credits)

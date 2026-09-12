@@ -142,6 +142,18 @@ export default defineEventHandler(async (event) => {
         start_image_url: stillUrl, end_image_url: stillUrl,
       }, { pollDeadlineMs: 900_000 })
       videoUrl = firstFalVideoUrl(out)
+    } else if (spec.id === 'flux-3-draft') {
+      // FLUX 3 (BFL) on fal has a dedicated first-last-frame endpoint — the loop is native,
+      // not coaxed. DRAFT tier (720p). Frames are start_/end_image_url like Kling; duration is
+      // an INTEGER (5/10/15) and resolution a lowercase string, matching video_models.py's
+      // FLUX 3 builder. Audio has no field on this endpoint (and a keyed loop has no use for
+      // it), so it is omitted rather than guessed — sending an unknown field 422s at fal.
+      const stillUrl = await falStillUrl()
+      const out = await runFal('blackforestlabs/flux-3/first-last-frame-to-video/draft', {
+        prompt: fullPrompt, duration: seconds, resolution: '720p',
+        start_image_url: stillUrl, end_image_url: stillUrl,
+      }, { pollDeadlineMs: 900_000 })
+      videoUrl = firstFalVideoUrl(out)
     }
     if (!videoUrl) throw createError({ statusCode: 502, message: 'The model returned no video' })
 

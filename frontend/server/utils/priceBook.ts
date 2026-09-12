@@ -484,6 +484,7 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'minimax/h3/image-to-video': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip regardless of length — duration-aware pricing NOT wired (resolveCredits prefers this row over any price hint); a hardening rider' },
   'minimax/h3-max/image-to-video': { usd: 0.4, credits: 60, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip regardless of length — duration-aware pricing NOT wired (resolveCredits prefers this row over any price hint); a hardening rider' },
   'fal-ai/kling-video/v3/pro/image-to-video': { usd: 0.56, credits: 84, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip regardless of length — duration-aware pricing NOT wired (resolveCredits prefers this row over any price hint); a hardening rider' },
+  'blackforestlabs/flux-3/first-last-frame-to-video/draft': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'Frame Animate — FLUX 3 DRAFT first-last-frame (720p, ~$0.06/s); flat per 5 s clip regardless of length (resolveCredits prefers this row over any price hint); a hardening rider' },
   // — training (hardware-billed; matches LoraTrainingNode=600 in the graph table) —
   'ostris/flux-dev-lora-trainer': { usd: 2.5, credits: 600, confidence: 'estimate', note: 'H100 ~15–40min; 600cr keeps parity with graph table' },
   'ostris/sdxl-lora-trainer': { usd: 2, credits: 600, confidence: 'estimate' },

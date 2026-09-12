@@ -8,7 +8,7 @@
 // Durations mirror what each fal endpoint accepts, trimmed to what a loop wants (≤ 15 s).
 
 export interface ClipModel {
-  id: 'seedance-2.0' | 'hailuo-h3' | 'hailuo-h3-max' | 'kling-v3-pro'
+  id: 'seedance-2.0' | 'hailuo-h3' | 'hailuo-h3-max' | 'kling-v3-pro' | 'flux-3-draft'
   /** Plain name, e.g. "Seedance 2.0". */
   name: string
   /** What the model renders at — the clip is capped at this, so a large still softens below it. */
@@ -30,6 +30,11 @@ export const CLIP_MODELS: ClipModel[] = [
   { id: 'hailuo-h3', name: 'Hailuo H3', resolution: '768p', durations: [5, 6, 10], defaultDuration: 5, usd: 0.3, credits: 45 },
   { id: 'hailuo-h3-max', name: 'Hailuo H3 Max', resolution: '768p', durations: [5, 6, 8, 10, 12, 15], defaultDuration: 5, usd: 0.4, credits: 60 },
   { id: 'kling-v3-pro', name: 'Kling 3.0 Pro', resolution: '1080p', durations: [3, 4, 5, 6, 8, 10], defaultDuration: 5, usd: 0.56, credits: 84 },
+  // FLUX 3 (BFL) has a first-class first-last-frame endpoint on fal — the loop the other
+  // models are coaxed into (still as first AND last) is native here. The DRAFT tier (720p,
+  // ~$0.06/s) is the row: a keyed looping element rarely needs 1080p and the keyer downscales
+  // anyway, so this is the cheap fast loop; full quality is a one-line endpoint swap if wanted.
+  { id: 'flux-3-draft', name: 'FLUX 3 draft', resolution: '720p', durations: [5, 10, 15], defaultDuration: 5, usd: 0.3, credits: 45 },
 ]
 
 export function clipModel(id: string): ClipModel | null {

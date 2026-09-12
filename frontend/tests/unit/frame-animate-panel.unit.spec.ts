@@ -17,10 +17,10 @@ describe('CompositorAnimatePanel', () => {
     const w = mountP(still())
     expect(w.find('textarea, input[type="text"]').exists()).toBe(true)
     const models = w.find('select[data-role="model"]')
-    expect(models.findAll('option').map(o => o.text())).toEqual(['Seedance 2.0 (720p · 90 credits)', 'Hailuo H3 (768p · 45 credits)', 'Hailuo H3 Max (768p · 60 credits)', 'Kling 3.0 Pro (1080p · 84 credits)'])
+    expect(models.findAll('option').map(o => o.text())).toEqual(['Seedance 2.0 (720p · 90 credits)', 'Hailuo H3 (768p · 45 credits)', 'Hailuo H3 Max (768p · 60 credits)', 'Kling 3.0 Pro (1080p · 84 credits)', 'FLUX 3 draft (720p · 45 credits)'])
     const btn = w.find('button[data-role="generate"]')
     expect(btn.text()).toMatch(/Generate/)
-    expect(btn.text()).toMatch(/\$0\.60/)          // Seedance default, 5 s
+    expect(btn.text()).toMatch(/90 credits/)       // Seedance default, 5 s
     expect(w.find('[data-role="speed"]').exists()).toBe(false)
     expect(w.find('button[data-role="remove"]').exists()).toBe(false)
   })
@@ -31,7 +31,7 @@ describe('CompositorAnimatePanel', () => {
     await w.find('select[data-role="length"]').setValue('10')
     // The quote is the FLAT catalog row: the ledger holds the same amount for a 10 s
     // Hailuo clip as for a 5 s one, so the button must say 0.30, not 0.30 x 2.
-    expect(w.find('button[data-role="generate"]').text()).toMatch(/\$0\.30/)
+    expect(w.find('button[data-role="generate"]').text()).toMatch(/45 credits/)
   })
   it('emits generate with prompt, model and seconds', async () => {
     const w = mountP(still())
@@ -53,7 +53,7 @@ describe('CompositorAnimatePanel', () => {
     const layer = { ...living(), clip: { ...living().clip!, model: 'gone' } }
     const w = mountP(layer)
     expect((w.find('select[data-role="model"]').element as HTMLSelectElement).value).toBe('seedance-2.0')
-    expect(w.find('button[data-role="generate"]').text()).toMatch(/\$0\.60/)
+    expect(w.find('button[data-role="generate"]').text()).toMatch(/90 credits/)
   })
   it('with a clip: shows speed and remove, prefilled from the clip, and emits both', async () => {
     const w = mountP(living())
