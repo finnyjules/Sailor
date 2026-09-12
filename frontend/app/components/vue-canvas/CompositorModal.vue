@@ -3048,7 +3048,14 @@ let liveRaf = 0, liveStart = 0, liveInFlight = false, liveCapWarned = false
 // EVERY rAF — the ~50 ms/frame that held it at ~19 fps. `LIVE_PREVIEW_MAXPX` caps the
 // live backing store; `SHADER_PREVIEW_FPS` caps how often a shader-only frame repaints;
 // `lastLiveFrame` is the content-frame-index guard that skips redundant repaints.
-const LIVE_PREVIEW_MAXPX = 640_000, SHADER_PREVIEW_FPS = 30
+//
+// 640k → 1.0M (2026-09-11): an animated shape-following material (Chrome, Liquid metal — they
+// orbit/flow, so the modal is ALWAYS in this live loop while one is present) rendered its mirror
+// reflection visibly soft on a retina modal, where 640k lands the backing store near ~0.6× of
+// display. The modal is ONE focused editing surface (not the many small Frame cards), so it can
+// afford the sharper backing store; export/bake were always full resolution regardless. Higher
+// still trades preview frame rate roughly linearly with pixel count.
+const LIVE_PREVIEW_MAXPX = 1_000_000, SHADER_PREVIEW_FPS = 30
 let lastLiveFrame = -1
 function liveFrameTick(ts: number) {
   if (!liveStart) liveStart = ts
