@@ -9,8 +9,9 @@ import { tilt } from './patterns/tilt'
 import { bottomHeavy } from './patterns/bottomHeavy'
 import { fourCorners } from './patterns/fourCorners'
 import { spacedLines } from './patterns/spacedLines'
+import { ragged } from './patterns/ragged'
 
-export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, tilt, bottomHeavy, fourCorners, spacedLines]
+export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, tilt, bottomHeavy, fourCorners, spacedLines, ragged]
 
 /** Patterns that fit the title's kind and whose required elements are present. */
 export function fittingPatterns(ctx: PatternContext): Pattern[] {
