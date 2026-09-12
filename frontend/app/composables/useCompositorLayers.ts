@@ -4809,7 +4809,7 @@ function applyGlassFromLayer(
   // but this keeps `spec` well-typed and guards the should-be-unreachable case.
   if (!isFill(fill) || !fillIsShader(fill)) return false
   const spec = fill.shader
-  const t = ctx.getTransform()
+  const transform = ctx.getTransform()
   const dev = ctx.canvas
   const w = dev.width, h = dev.height          // device pixels — snapshot + field at full res
   if (w < 1 || h < 1) return false
@@ -4844,7 +4844,7 @@ function applyGlassFromLayer(
       const c = mk()
       const ictx = c.getContext('2d')
       if (ictx) {
-        ictx.setTransform(t)
+        ictx.setTransform(transform)
         drawItemContent(ictx, item, W, H)
       }
       return c
@@ -4859,7 +4859,7 @@ function applyGlassFromLayer(
   const sil = mk()
   const silctx = sil.getContext('2d')
   if (!silctx) return false
-  silctx.setTransform(t)
+  silctx.setTransform(transform)
   const ghost = { ...layer, fill: '#ffffff', opacity: 1, effects: undefined, blend: undefined } as LocalLayer
   const maskRef = layerMaskRef(layer)
   const maskLayer = maskRef?.startsWith('l:')
