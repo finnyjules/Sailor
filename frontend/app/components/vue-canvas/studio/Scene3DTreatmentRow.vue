@@ -1,10 +1,10 @@
 <script lang="ts">
 import type { Component } from 'vue'
-import { Droplets, Sparkles, Grid3x3, Ghost, Palette, Wind, Grip, Sun, Square, Scan, Hexagon, Spline, CloudFog, Gem } from 'lucide-vue-next'
+import { Droplets, Sparkles, Grid3x3, Ghost, Palette, Wind, Grip, Aperture, Sun, Square, Scan, Hexagon, Spline, CloudFog, Gem } from 'lucide-vue-next'
 import type { TreatmentKind } from '~/lib/scene3d/treatments'
 /** Shared with the object row's add menu so a kind has ONE icon everywhere. */
 export const TREATMENT_ICONS: Record<TreatmentKind, Component> = {
-  blur: Droplets, glow: Sparkles, pixelate: Grid3x3, fade: Ghost, colorGrade: Palette, dissolve: Wind, halftone: Grip,
+  blur: Droplets, glow: Sparkles, pixelate: Grid3x3, fade: Ghost, colorGrade: Palette, dissolve: Wind, halftone: Grip, chromaticSplit: Aperture,
   rimLight: Sun, outline: Square, xray: Scan, wireframe: Hexagon,
   edgeLines: Spline, depthFog: CloudFog, curvatureWear: Gem,
 }

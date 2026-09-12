@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX, chromaticOffsetPx, chromaticSplitOffset } from '~/lib/scene3d/treatmentStage'
 
 describe('dissolveNoise / dissolveAlpha', () => {
   const grid = (fn: (u: number, v: number) => number, n = 16): number[] => {
@@ -105,6 +105,48 @@ describe('halftoneCellDistance', () => {
     const flat = halftoneCellDistance(5, 5, 10, 0)
     const tilted = halftoneCellDistance(5, 5, 10, Math.PI / 4)
     expect(tilted).not.toBeCloseTo(flat, 3)
+  })
+})
+
+describe('chromaticOffsetPx', () => {
+  it('scales the offset with image height, holding the look constant, with NO 1px floor', () => {
+    expect(chromaticOffsetPx(8, 1000)).toBe(8)
+    expect(chromaticOffsetPx(8, 2000)).toBe(16)
+    expect(chromaticOffsetPx(0, 1000)).toBe(0) // amount 0 → no split at all
+    expect(chromaticOffsetPx(0.1, 100)).toBeCloseTo(0.01) // below a pixel, unlike pixelateCellPx
+  })
+  it('never goes negative', () => {
+    expect(chromaticOffsetPx(-5, 1000)).toBe(0)
+  })
+})
+
+describe('chromaticSplitOffset', () => {
+  it('amount 0 gives the zero vector — all three samples coincide, the object unchanged', () => {
+    const o = chromaticSplitOffset(0, 45, 1000)
+    expect(o.x).toBeCloseTo(0, 10)
+    expect(o.y).toBeCloseTo(0, 10)
+  })
+  it('magnitude equals chromaticOffsetPx, independent of angle', () => {
+    for (const angle of [0, 30, 90, 200, 359]) {
+      const o = chromaticSplitOffset(8, angle, 1000)
+      expect(Math.hypot(o.x, o.y)).toBeCloseTo(chromaticOffsetPx(8, 1000), 6)
+    }
+  })
+  it('angle rotates the offset vector (y negated so 0°→right, 90°→down the screen)', () => {
+    const right = chromaticSplitOffset(10, 0, 1000)
+    expect(right.x).toBeCloseTo(10, 6)
+    expect(right.y).toBeCloseTo(0, 6)
+    const down = chromaticSplitOffset(10, 90, 1000)
+    expect(down.x).toBeCloseTo(0, 6)
+    expect(down.y).toBeCloseTo(-10, 6)
+  })
+  it('the R (+offset) and B (−offset) directions are exact opposites — the fringe pulls both ways', () => {
+    const o = chromaticSplitOffset(7, 37, 1000)
+    // R samples at +o, B at −o: opposite offsets of equal magnitude.
+    expect(-o.x).toBeCloseTo(-1 * o.x, 6)
+    expect(Math.hypot(o.x, o.y)).toBeCloseTo(Math.hypot(-o.x, -o.y), 6)
+    expect(o.x).not.toBe(0)
+    expect(o.y).not.toBe(0)
   })
 })
 

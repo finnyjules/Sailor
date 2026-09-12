@@ -212,6 +212,26 @@ export function halftoneCellDistance(px: number, py: number, cellPx: number, ang
   return Math.sqrt(fx * fx + fy * fy)
 }
 
+// --- chromatic split: a deterministic colour-channel offset (twin of CHROMATIC_SPLIT_FRAG) --
+/** The maximum channel offset in device px on an image `height` px tall, from `amount` in the
+ *  same "px per block on a 1000-px-tall image" units pixelate uses — so the split holds the same
+ *  LOOK at every resolution. Unlike pixelateCellPx there is NO 1px floor: amount 0 → 0 px, i.e.
+ *  no split at all. Pure. */
+export function chromaticOffsetPx(amount: number, height: number): number {
+  return Math.max(0, amount) * height / 1000
+}
+
+/** The per-channel offset VECTOR (device px) for `amount`/`angle` on an image `height` px tall:
+ *  the R channel samples at +this, B at −this, G stays centred. Magnitude = chromaticOffsetPx,
+ *  so amount 0 gives the zero vector (all three samples coincide → the object unchanged); the
+ *  angle rotates it (y negated because texture v = 1 is the visual top, matching rampDirection).
+ *  Pure; CHROMATIC_SPLIT_FRAG applies +uOffset / −uOffset step for step. */
+export function chromaticSplitOffset(amount: number, angleDeg: number, height: number): { x: number; y: number } {
+  const px = chromaticOffsetPx(amount, height)
+  const a = angleDeg * Math.PI / 180
+  return { x: Math.cos(a) * px, y: -Math.sin(a) * px }
+}
+
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 // The base copy that seeds the accumulator: straight alpha in, premultiplied out — every composite
 // after it blends premultiplied-over, so the accumulator must start that way too.
@@ -337,6 +357,24 @@ const HALFTONE_FRAG = `
     float cov = 1.0 - smoothstep(R - aa, R + aa, d);
     float aPix = texture2D(tDiffuse, vUv).a;
     gl_FragColor = vec4(uColor, cov * aPix);
+  }`
+// Chromatic split: sample the straight-alpha object layer three times and pull the R and B
+// channels in OPPOSITE directions (green centred) for a lens-dispersion / glitch fringe. Each
+// channel keeps its OWN sampled alpha — the red at +uOffset, blue at −uOffset — so the fringe
+// fades exactly where that channel's sample runs off the silhouette; the three premultiplied
+// contributions are recombined over their union coverage (max alpha) back to straight alpha, the
+// same encode boundary blur/pixelate hand back. uOffset 0 (amount 0) makes all three samples
+// coincide, so the object comes back untouched. CPU twin: chromaticSplitOffset() sets uOffset.
+const CHROMATIC_SPLIT_FRAG = `
+  uniform sampler2D tDiffuse; uniform vec2 uOffset;
+  varying vec2 vUv;
+  void main(){
+    vec4 r = texture2D(tDiffuse, vUv + uOffset);
+    vec4 g = texture2D(tDiffuse, vUv);
+    vec4 b = texture2D(tDiffuse, vUv - uOffset);
+    float a = max(r.a, max(g.a, b.a));
+    vec3 premul = vec3(r.r * r.a, g.g * g.a, b.b * b.a);
+    gl_FragColor = vec4(a > 1e-5 ? premul / a : vec3(0.0), a);
   }`
 const BRIGHT_FRAG = `
   uniform sampler2D tDiffuse; uniform float uThreshold;
@@ -681,6 +719,9 @@ export class TreatmentStage {
     tDiffuse: { value: null }, uResolution: { value: new THREE.Vector2(1, 1) }, uCellPx: { value: 6 },
     uAngle: { value: Math.PI / 4 }, uContrast: { value: 1 }, uColor: { value: new THREE.Color(0, 0, 0) },
   })
+  private readonly chromaticSplitMat = shader(CHROMATIC_SPLIT_FRAG, {
+    tDiffuse: { value: null }, uOffset: { value: new THREE.Vector2() },
+  })
   private readonly glowMergeMat = shader(GLOW_MERGE_FRAG, {
     tBase: { value: null }, tGlow: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uStrength: { value: 1 },
     uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
@@ -985,6 +1026,19 @@ export class TreatmentStage {
       ;(u.uColor!.value as THREE.Color).set(stripAlpha(t.color))
       this.pass(this.halftoneMat, dst)
       return { rt: dst, haloPx: 0 } // ink alpha is gated by the object's own alpha — no spill
+    }
+    if (t.kind === 'chromaticSplit') {
+      const dst = this.free(src)
+      const u = this.chromaticSplitMat.uniforms
+      u.tDiffuse!.value = src.texture
+      // Offset in device px → UV, so R/B pull equal distances at any resolution.
+      const off = chromaticSplitOffset(t.amount, t.angle, this.height)
+      ;(u.uOffset!.value as THREE.Vector2).set(off.x / this.width, off.y / this.height)
+      this.pass(this.chromaticSplitMat, dst)
+      // The R/B fringe reaches up to `amount` px OUTSIDE the silhouette — the FIRST masked kind
+      // whose output spreads past its bounds — so hand that reach to the composite as haloPx
+      // (device px, like blur's radiusPx) or the outer fringe would fail the depth test and clip.
+      return { rt: dst, haloPx: chromaticOffsetPx(t.amount, this.height) }
     }
     if (t.kind === 'glow') {
       const bright = this.free(src)
@@ -1324,7 +1378,7 @@ export class TreatmentStage {
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }

@@ -35,6 +35,31 @@ describe('treatments: model', () => {
     expect(isMaskedKind('halftone')).toBe(true)
     expect(TREATMENT_LABELS.halftone).toBe('Halftone')
   })
+  it('TREATMENT_KINDS includes chromaticSplit as a masked kind, not a G-buffer reader', () => {
+    expect(TREATMENT_KINDS).toContain('chromaticSplit')
+    expect(isMaskedKind('chromaticSplit')).toBe(true)
+    expect(TREATMENT_LABELS.chromaticSplit).toBe('Chromatic split')
+  })
+})
+
+describe('treatments: chromatic split', () => {
+  it('createTreatment seeds defaults, enabled and not inverted, with a fresh id', () => {
+    expect(createTreatment('chromaticSplit')).toMatchObject({
+      kind: 'chromaticSplit', enabled: true, invert: false, amount: 8, angle: 0,
+    })
+  })
+  it('is NOT a ramped kind — no progressive/ramp fields', () => {
+    expect(createTreatment('chromaticSplit')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'cs', kind: 'chromaticSplit' })).not.toHaveProperty('rampSpace')
+  })
+  it('clamps amount to 0..64 and wraps angle into 0..360, backfilling missing dials', () => {
+    expect(parseTreatment({ id: 'cs1', kind: 'chromaticSplit', amount: 999, angle: 405 }))
+      .toMatchObject({ amount: 64, angle: 45 })
+    expect(parseTreatment({ id: 'cs2', kind: 'chromaticSplit', amount: -5, angle: -90 }))
+      .toMatchObject({ amount: 0, angle: 270 })
+    expect(parseTreatment({ id: 'cs3', kind: 'chromaticSplit' }))
+      .toMatchObject({ amount: 8, angle: 0 })
+  })
 })
 
 describe('treatments: halftone', () => {

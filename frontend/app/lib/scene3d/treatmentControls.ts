@@ -3,7 +3,7 @@
 // keys to `object.treatments.<id>.<field>`; the surface reads/writes `<field>` directly
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, type TreatmentKind } from './treatments'
+import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, type TreatmentKind } from './treatments'
 
 export const TREATMENT_KEY_PREFIX = 'treatment.'
 
@@ -96,6 +96,12 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         slider(g, 'angle', 'Angle', 0, 360, 1, D.halftone.angle, 'Rotate the dot screen'),
         slider(g, 'contrast', 'Contrast', 0.25, 4, 0.05, D.halftone.contrast, 'How hard the dots snap between full and empty'),
         color(g, 'color', 'Ink', D.halftone.color),
+      ]
+      break
+    case 'chromaticSplit':
+      rows = [
+        slider(g, 'amount', 'Amount', 0, CHROMATIC_AMOUNT_MAX, 1, D.chromaticSplit.amount, 'How far the colour channels split apart, relative to the image height'),
+        slider(g, 'angle', 'Angle', 0, 360, 1, D.chromaticSplit.angle, 'Direction the colours split in'),
       ]
       break
     case 'rimLight':

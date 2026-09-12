@@ -9,7 +9,7 @@
 // Design: docs/superpowers/specs/2026-09-05-scene3d-object-treatments-design.md
 import type { SceneDoc, SceneObject } from './config'
 
-export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade', 'colorGrade', 'dissolve', 'halftone'] as const
+export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade', 'colorGrade', 'dissolve', 'halftone', 'chromaticSplit'] as const
 export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe'] as const
 /** Stage-rendered treatments that consume the per-frame G-buffer (view-space normals +
  *  depth). Their presence — and ONLY their presence — makes `TreatmentStage` build the
@@ -26,7 +26,7 @@ export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTrea
 /** Human names — UI copy for tree rows, inspector card titles and motion target labels.
  *  Sentence case, never the stored `kind`. */
 export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
-  blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade', colorGrade: 'Colour grade', dissolve: 'Dissolve', halftone: 'Halftone',
+  blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade', colorGrade: 'Colour grade', dissolve: 'Dissolve', halftone: 'Halftone', chromaticSplit: 'Chromatic split',
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
   edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear',
 }
@@ -97,6 +97,15 @@ export interface DissolveTreatment extends TreatmentBase { kind: 'dissolve'; amo
  *  others so `invert` screens everything else instead; NOT ramped. Deterministic — a regular
  *  screen fixed by angle + cell, no randomness. */
 export interface HalftoneTreatment extends TreatmentBase { kind: 'halftone'; cell: number; angle: number; contrast: number; color: string }
+/** Chromatic split (colour aberration): the object layer is sampled three times and the R and
+ *  B channels are pulled in OPPOSITE directions while green stays centred, so a colour fringe
+ *  rims the object — a lens-dispersion / glitch-optic look. `amount` is the maximum channel
+ *  offset in "px per block on a 1000-px-tall image" units (same resolution-independent scale as
+ *  pixelate — 0 leaves the object untouched); `angle` is the offset direction in degrees. The
+ *  fringe reaches up to `amount` px OUTSIDE the silhouette (each channel keeps its own sampled
+ *  alpha), so the stage sets haloPx to that offset. Masked like the others so `invert` splits
+ *  everything else instead; NOT ramped. Deterministic — a fixed offset, no randomness. */
+export interface ChromaticSplitTreatment extends TreatmentBase { kind: 'chromaticSplit'; amount: number; angle: number }
 export interface RimLightTreatment extends TreatmentBase { kind: 'rimLight'; color: string; width: number; strength: number }
 export interface OutlineTreatment extends TreatmentBase { kind: 'outline'; color: string; thickness: number }
 export interface XrayTreatment extends TreatmentBase { kind: 'xray'; color: string; opacity: number }
@@ -119,7 +128,7 @@ export interface DepthFogTreatment extends TreatmentBase { kind: 'depthFog'; col
 export interface CurvatureWearTreatment extends TreatmentBase { kind: 'curvatureWear'; amount: number; width: number }
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
-  | DissolveTreatment | HalftoneTreatment
+  | DissolveTreatment | HalftoneTreatment | ChromaticSplitTreatment
   | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
   | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment
 
@@ -133,6 +142,7 @@ export const TREATMENT_DEFAULTS = {
   colorGrade: { brightness: 1, contrast: 1, saturation: 1, hue: 0 },
   dissolve: { amount: 0.5, scale: 24, softness: 0.1, seed: 1 },
   halftone: { cell: 6, angle: 45, contrast: 1, color: '#000000' },
+  chromaticSplit: { amount: 8, angle: 0 },
   rimLight: { color: '#ffffff', width: 0.5, strength: 1 },
   outline: { color: '#000000', thickness: 0.5 },
   xray: { color: '#6fd3ff', opacity: 0.35 },
@@ -148,6 +158,10 @@ export const TREATED_OBJECT_CAP = 8
 /** Blur amount ceiling for the inspector dial and parser. Amount 1 = 6% of image height
  *  (see `blurPasses` in treatmentStage.ts); 3 = 18%. Shared across the dial, parser and agent. */
 export const BLUR_AMOUNT_MAX = 3
+
+/** Chromatic split's maximum channel offset, in "px per block on a 1000-px-tall image" units
+ *  (the pixelate scale). Shared by the dial and the parser so they cannot drift apart. */
+export const CHROMATIC_AMOUNT_MAX = 64
 
 export function isMaskedKind(kind: TreatmentKind): kind is MaskedTreatmentKind {
   return (MASKED_TREATMENT_KINDS as readonly string[]).includes(kind)
@@ -238,6 +252,11 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
       angle: wrapDeg(num(r.angle, D.halftone.angle)),
       contrast: Math.min(4, Math.max(0.25, num(r.contrast, D.halftone.contrast))),
       color: str(r.color, D.halftone.color),
+    }
+    case 'chromaticSplit': return {
+      ...base, kind: 'chromaticSplit',
+      amount: clampTo(num(r.amount, D.chromaticSplit.amount), CHROMATIC_AMOUNT_MAX),
+      angle: wrapDeg(num(r.angle, D.chromaticSplit.angle)),
     }
     case 'rimLight': return {
       ...base, kind: 'rimLight', color: str(r.color, D.rimLight.color),
