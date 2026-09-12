@@ -2708,8 +2708,8 @@ function onCanvasPointerDownCapture(e: PointerEvent) {
   if ((e.target as HTMLElement)?.closest?.('[data-gen-bar]')) return
   if ((e.target as HTMLElement)?.closest?.('[data-smart-bar]')) return
   if (smartActive.value) { onSmartPointerDown(e); return } // smart select owns the canvas
-  // Edit-region "Select" tool: SAM click/box owns the canvas ahead of the plain
-  // brush/box gen path below (genTool stays 'brush' throughout an edit-region
+  // Edit-an-area "Box" tool: the box drag owns the canvas ahead of the plain
+  // brush/box gen path below (genTool stays 'brush' throughout an edit-area
   // session regardless of regionSelectTool, so this must be checked first).
   if (regionSelectActive.value) { onRegionSelectPointerDown(e); return }
   // Generate mode: brush/box paint the region; shape mode falls through so a
@@ -2755,9 +2755,12 @@ function onCanvasContextMenu(e: MouseEvent) {
     x: e.clientX, y: e.clientY, layerId: id,
     items: [
       { id: 'edit-image', label: 'Edit image…', icon: Wand2, action: () => { imageCtxMenu.value = null; editImageStart(id) } },
-      { id: 'edit-region', label: 'Edit a region…', icon: SquareDashedMousePointer, action: () => { imageCtxMenu.value = null; editRegionStart(id) } },
-      { divider: true },
-      { id: 'select-object', label: 'Select an object…', icon: Lasso, action: () => { imageCtxMenu.value = null; selectObjectStart(id) } },
+      { id: 'edit-region', label: 'Edit an area…', icon: SquareDashedMousePointer, action: () => { imageCtxMenu.value = null; editRegionStart(id) } },
+      // "Select an object" (SAM smart-select) hidden for now — see SMART_SELECT_ENABLED.
+      ...(SMART_SELECT_ENABLED ? [
+        { divider: true },
+        { id: 'select-object', label: 'Select an object…', icon: Lasso, action: () => { imageCtxMenu.value = null; selectObjectStart(id) } },
+      ] : []),
     ],
   }
 }
@@ -2842,15 +2845,14 @@ function editRegionStart(id: string) {
   genActive.value = true
   genTargetId.value = id
   genTool.value = 'brush'
-  regionSelectTool.value = 'select'
+  regionSelectTool.value = 'box'
   regionPrompt.value = ''
-  regionSamPoints = []
   clearGenMask()
 }
 function editRegionCancel() { editRegion.value = null; exitGenMode(); regionPrompt.value = '' }
-function setRegionSelectTool(t: 'select' | 'brush') {
+function setRegionSelectTool(t: 'box' | 'brush') {
   regionSelectTool.value = t
-  if (t === 'select') genCursor.on = false   // drop the brush-size ring immediately
+  if (t === 'box') genCursor.on = false   // drop the brush-size ring immediately
 }
 async function runRegionEdit() {
   if (!editRegion.value || !genHasMask.value || !regionPrompt.value.trim() || inpaint.busy.value) return
@@ -2876,7 +2878,7 @@ function onCanvasPointerMoveCapture(e: PointerEvent) {
 }
 function onCanvasPointerUpCapture(e: PointerEvent) {
   if (smartActive.value) { void onSmartPointerUp(e); return }
-  if (regionSelectActive.value) { void onRegionSelectPointerUp(e); return }
+  if (regionSelectActive.value) { onRegionSelectPointerUp(e); return }
   if (genActive.value && genDraw.value) { onGenPointerUp(e); return }
   if (brush.active.value) { void onBrushPointerUp(); return }
   if (pen.active.value) onPenPointerUp()
@@ -4489,15 +4491,13 @@ const editImage = ref<{ layerId: string } | null>(null)
 const editImagePrompt = ref('')
 const wholeEditModel = ref<string>(WHOLE_IMAGE_MODELS[0]!.value)   // 'kontext'
 
-// Edit a region: SAM-select or brush a silhouette on an image layer, then
-// inpaint just that region (right-click → Edit a region…). Same modal-like
-// inspector tier as `editImage` above (see the `editRegion` branch in the
-// template) — the two are mutually exclusive takeovers of the same slot.
-// Reuses the gen-mask machinery (`genActive`/`genMaskCanvas`/`runRegionFill`)
-// that already drives the on-canvas region-paint flow; `regionSelectTool`
-// picks which gesture the canvas routes to while `editRegion` is set.
+// Edit an area: drag a box OR brush a mask over an image layer, then inpaint
+// just that area (right-click → Edit an area…). No SAM. Reuses the gen-mask
+// machinery (`genActive`/`genMaskCanvas`/`runRegionFill`) that drives the
+// on-canvas region-paint flow; `regionSelectTool` ('box' | 'brush') picks which
+// gesture the canvas routes to while `editRegion` is set.
 const editRegion = ref<{ layerId: string } | null>(null)
-const regionSelectTool = ref<'select' | 'brush'>('select')
+const regionSelectTool = ref<'box' | 'brush'>('box')
 const regionEditModel = ref<string>(REGION_MODELS[0]!.value)   // 'flux'
 const regionPrompt = ref('')
 
@@ -4523,7 +4523,7 @@ function pickWholeModel(v: string) { wholeEditModel.value = v; modelMenuOpen.val
 watch([editImage, editRegion], async () => {
   if (editImage.value || editRegion.value) { await nextTick(); editPromptRef.value?.focus() }
 })
-const regionSelectActive = computed(() => !!editRegion.value && regionSelectTool.value === 'select')
+const regionSelectActive = computed(() => !!editRegion.value && regionSelectTool.value === 'box')
 // Plain function (not a template-visible ref/computed): the deep per-layer
 // inspector reads this well past the `v-else-if="editRegion"` branch above,
 // where vue-tsc's control-flow narrowing otherwise infers `editRegion` as
@@ -5135,99 +5135,35 @@ function regionAffine(layer: any, capW: number, capH: number): DOMMatrix {
   return forward.inverse()   // artboard px → image px
 }
 
-// SAM returns an opaque white-on-black mask in the layer's own (capped) pixel
-// space. genMaskCanvas is alpha-encoded (opaque white on transparent — see its
-// declaration above), so convert exactly like the smart-select refine path
-// does (`luminanceToAlpha`), then project image px → artboard px via the
-// inverse of `regionAffine` (the same affine runRegionFill uses to go the
-// other way). Each call REPLACES the mask — mirrors doSamSelect/doSamBox in
-// InpaintModal, where a fresh SAM result is the current selection, not an
-// addition to the last one; brush painting (the other regionSelectTool) still
-// composites additively via genStrokeTo, unchanged.
-async function paintSamMaskToGenMask(maskUrl: string, layer: any) {
-  const ctx = genMaskCtx(); if (!ctx || !genMaskCanvas) return
-  const maskImg = await loadImage(maskUrl)
-  const mw = maskImg.naturalWidth || 1, mh = maskImg.naturalHeight || 1
-  const c = document.createElement('canvas'); c.width = mw; c.height = mh
-  const cctx = c.getContext('2d')!
-  cctx.drawImage(maskImg, 0, 0)
-  const id = cctx.getImageData(0, 0, mw, mh)
-  luminanceToAlpha(id.data)
-  cctx.putImageData(id, 0, 0)
-  const inv = regionAffine(layer, mw, mh).inverse()   // image px → artboard px
-  ctx.clearRect(0, 0, genMaskCanvas.width, genMaskCanvas.height)
-  ctx.save()
-  ctx.setTransform(inv.a, inv.b, inv.c, inv.d, inv.e, inv.f)
-  ctx.drawImage(c, 0, 0)
-  ctx.restore()
-  genHasMask.value = true; genVersion.value++
-}
-
-// ── Region select: SAM click/box (mirrors InpaintModal's doSamSelect/doSamBox) ──
-// Only active while editRegion is set and regionSelectTool==='select'; brush
-// painting is the OTHER regionSelectTool and reuses onGenPointerDown/Move/Up
-// unchanged (genTool stays 'brush' throughout an edit-region session either way).
-const regionSamBusy = ref(false)
-let regionSamPoints: SamPoint[] = []
-const regionSelectDraw = ref<{ x0: number; y0: number; x1: number; y1: number; add: boolean; subtract: boolean; dragging: boolean } | null>(null)
-const REGION_DRAG_THRESH = 6   // artboard px — a click shorter than this stays a point-select
+// ── Region select: drag a BOX → a rectangular mask (no SAM). Brush is the other
+// tool. Both paint genMaskCanvas directly in artboard px (genBoxTo / genStrokeTo);
+// runRegionFill then projects the mask into the image via regionAffine. A box
+// REPLACES the mask; a click (no real drag) clears it. ──
+const regionSelectDraw = ref<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+const REGION_DRAG_THRESH = 4   // artboard px — below this it's a click, not a box
 function onRegionSelectPointerDown(e: PointerEvent) {
   const p = genPointFromEvent(e); if (!p) return
   e.preventDefault(); e.stopPropagation()
   canvasRef.value?.setPointerCapture?.(e.pointerId)
-  regionSelectDraw.value = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, add: e.shiftKey, subtract: e.altKey, dragging: false }
+  regionSelectDraw.value = { x0: p.x, y0: p.y, x1: p.x, y1: p.y }
 }
 function onRegionSelectPointerMove(e: PointerEvent) {
   const d = regionSelectDraw.value; if (!d) return
   const p = genPointFromEvent(e); if (!p) return
   e.preventDefault(); e.stopPropagation()
-  if (!d.dragging && Math.hypot(p.x - d.x0, p.y - d.y0) > REGION_DRAG_THRESH) d.dragging = true
   d.x1 = p.x; d.y1 = p.y
+  genBoxTo(d.x0, d.y0, d.x1, d.y1)   // live rectangle into the mask
+  genHasMask.value = Math.abs(d.x1 - d.x0) >= REGION_DRAG_THRESH && Math.abs(d.y1 - d.y0) >= REGION_DRAG_THRESH
+  genVersion.value++
 }
-async function onRegionSelectPointerUp(e: PointerEvent) {
+function onRegionSelectPointerUp(e: PointerEvent) {
   const d = regionSelectDraw.value; if (!d) return
   e.preventDefault(); e.stopPropagation()
   regionSelectDraw.value = null
-  const layer = genTarget.value
-  if (!layer || regionSamBusy.value || inpaint.busy.value) return
-  regionSamBusy.value = true
-  try {
-    const img = await loadImage(imageLayerUrl(layer.filename))
-    const { w: capW, h: capH } = capDims(img.naturalWidth || 1024, img.naturalHeight || 1024)
-    const source = imageToDataUrl(img, capW, capH)
-    const aff = regionAffine(layer, capW, capH)   // artboard → image
-    if (d.dragging) {
-      const corners = [
-        applyAffine(aff, { x: d.x0, y: d.y0 }), applyAffine(aff, { x: d.x1, y: d.y0 }),
-        applyAffine(aff, { x: d.x0, y: d.y1 }), applyAffine(aff, { x: d.x1, y: d.y1 }),
-      ]
-      const xs = corners.map(p => p.x), ys = corners.map(p => p.y)
-      const box = {
-        xMin: Math.max(0, Math.round(Math.min(...xs))), yMin: Math.max(0, Math.round(Math.min(...ys))),
-        xMax: Math.min(capW, Math.round(Math.max(...xs))), yMax: Math.min(capH, Math.round(Math.max(...ys))),
-      }
-      if (box.xMax - box.xMin < 2 || box.yMax - box.yMin < 2) return
-      regionSamPoints = []
-      const mask = await inpaint.segmentBox(source, box)
-      await paintSamMaskToGenMask(mask, layer)
-    } else {
-      const pt = applyAffine(aff, { x: d.x0, y: d.y0 })
-      const point: SamPoint = { x: Math.round(pt.x), y: Math.round(pt.y), label: d.subtract ? 0 : 1 }
-      const refining = (d.add || d.subtract) && regionSamPoints.length > 0
-      regionSamPoints = refining ? [...regionSamPoints, point] : [{ ...point, label: 1 }]
-      const mask = await inpaint.segmentPoints(source, regionSamPoints)
-      await paintSamMaskToGenMask(mask, layer)
-    }
-  } catch (err) {
-    // Surface the failure instead of swallowing it (the whole point of this feature),
-    // and drop to Brush so the user can still mark the region — mirrors the
-    // InpaintModal's doSamSelect fallback.
-    console.error('[compositor region select]', err)
-    inpaint.error.value = 'Click-select unavailable (check the SAM model); paint the area instead.'
-    regionSamPoints = []
-    regionSelectTool.value = 'brush'
-  } finally {
-    regionSamBusy.value = false
+  if (Math.abs(d.x1 - d.x0) < REGION_DRAG_THRESH || Math.abs(d.y1 - d.y0) < REGION_DRAG_THRESH) {
+    clearGenMask()   // a click, not a box — nothing selected
+  } else {
+    genHasMask.value = true; genVersion.value++
   }
 }
 
@@ -5274,6 +5210,9 @@ async function runRegionFill() {
 // artboard→image affine as runRegionFill) and the returned silhouette becomes
 // the active selection. Alt-scribble subtracts (label 0). If the API fails the
 // raw scribble IS the selection — every action still works (spec requirement).
+// HIDDEN for now (2026-09-12): the "Select an object" entry is gated off — flip
+// to true to restore it. The machinery below is left intact.
+const SMART_SELECT_ENABLED = false
 const smart = useSmartSelect({ segment: (image, points) => inpaint.segmentPoints(image, points) })
 const smartActive = ref(false)
 const smartBrush = ref(48)                     // brush diameter, artboard px
@@ -6969,7 +6908,7 @@ onUnmounted(() => {
         class="pointer-events-auto absolute bottom-[92px] left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-1.5"
         @pointerdown.stop @click.stop>
         <div v-if="editRegion && !genHasMask" class="text-[11px] text-white/60 bg-[#1a1a1a]/95 border border-[#2a2a2a] rounded-[8px] px-2 py-0.5">
-          {{ regionSelectTool === 'select' ? 'Click an object on the image to select it, or drag a box.' : 'Paint over the area to change.' }}
+          {{ regionSelectTool === 'box' ? 'Drag a box over the area to change.' : 'Paint over the area to change.' }}
         </div>
         <div v-if="inpaint.error.value" data-testid="edit-error"
           class="max-w-[360px] rounded bg-rose-950/95 border border-rose-500/30 px-2 py-1 text-[11px] text-rose-200 text-center shadow-lg">{{ inpaint.error.value }}</div>
@@ -7246,8 +7185,8 @@ onUnmounted(() => {
           <button type="button" data-testid="edit-mode-region"
             class="h-8 px-2.5 rounded text-[12px] cursor-pointer whitespace-nowrap"
             :class="editRegion ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
-            @click="editRegionStart(editToolbarLayer!.id)">Edit a region</button>
-          <button type="button" data-testid="edit-mode-select"
+            @click="editRegionStart(editToolbarLayer!.id)">Edit an area</button>
+          <button v-if="SMART_SELECT_ENABLED" type="button" data-testid="edit-mode-select"
             class="h-8 px-2.5 rounded text-[12px] cursor-pointer whitespace-nowrap"
             :class="smartActive ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
             @click="selectObjectStart(editToolbarLayer!.id)">Select an object</button>
@@ -7255,8 +7194,8 @@ onUnmounted(() => {
           <template v-if="editRegion">
             <div class="w-px h-5 bg-white/10 mx-0.5" />
             <button type="button" class="h-8 px-2 rounded text-[11px] cursor-pointer whitespace-nowrap"
-              :class="regionSelectTool === 'select' ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/70'"
-              @click="setRegionSelectTool('select')">Select</button>
+              :class="regionSelectTool === 'box' ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/70'"
+              @click="setRegionSelectTool('box')">Box</button>
             <button type="button" class="h-8 px-2 rounded text-[11px] cursor-pointer whitespace-nowrap"
               :class="regionSelectTool === 'brush' ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/70'"
               @click="setRegionSelectTool('brush')">Brush</button>
