@@ -418,7 +418,7 @@ export const fourCorners: Pattern = {
     const wpx = mb.w * 0.4
     roles.forEach((role, i) => {
       const corner: Corner = CORNERS[(start + i) % 4]!
-      const right = corner[0] === undefined ? false : corner.includes('r')
+      const right = corner.includes('r')
       const bottom = corner.includes('b')
       const xLeft = right ? mb.x + mb.w - wpx : mb.x
       const yTop = bottom ? mb.y + mb.h - smallSize : mb.y
