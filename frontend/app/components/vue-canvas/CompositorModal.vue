@@ -2803,20 +2803,43 @@ async function reapplyAlpha(resultUrl: string, srcImg: HTMLImageElement, w: numb
  *  inpaint result only inside it — so transparency outside the edited region survives.
  *  `maskCanvas` is white=inpaint / black=keep in srcImg's px space. */
 async function compositeInpaintAlpha(resultUrl: string, srcImg: HTMLImageElement, maskCanvas: HTMLCanvasElement, w: number, h: number): Promise<string> {
-  if (!srcHasTransparency(srcImg, w, h)) return resultUrl
+  if (!srcHasTransparency(srcImg, w, h)) return resultUrl   // opaque source: keep the fill as-is
   const res = await loadImage(resultUrl)
+  // Mask → alpha (white = the edited region).
   const ma = document.createElement('canvas'); ma.width = w; ma.height = h
   const mactx = ma.getContext('2d')!; mactx.drawImage(maskCanvas, 0, 0, w, h)
   const mid = mactx.getImageData(0, 0, w, h); luminanceToAlpha(mid.data); mactx.putImageData(mid, 0, 0)
+  // Bounding box of the edited region.
+  const md = mid.data; let minX = w, minY = h, maxX = -1, maxY = -1
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (md[(y * w + x) * 4 + 3]! > 128) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y }
+  }
+  // Re-cut the FILL so a cutout stays cut: FLUX flattens transparency onto black, so
+  // its fill is opaque. Crop the result to the edited region and remove that crop's
+  // background — here the fill's black IS the crop's background, so it lifts cleanly
+  // (a whole-image re-cut can't, since the black is interior to the kept subject).
+  let patchSrc: CanvasImageSource = res
+  let px = 0, py = 0, pw = w, ph = h
+  if (maxX >= minX) {
+    const bw = maxX - minX + 1, bh = maxY - minY + 1
+    const crop = document.createElement('canvas'); crop.width = bw; crop.height = bh
+    crop.getContext('2d')!.drawImage(res, minX, minY, bw, bh, 0, 0, bw, bh)
+    try {
+      patchSrc = await loadImage(await inpaint.removeBackground(crop.toDataURL('image/png')))
+      px = minX; py = minY; pw = bw; ph = bh
+    } catch { /* re-cut unavailable → fall back to the raw (opaque) fill */ }
+  }
+  // Place the (cut) fill and clip it to the mask.
   const clip = document.createElement('canvas'); clip.width = w; clip.height = h
   const cctx = clip.getContext('2d')!
-  cctx.drawImage(res, 0, 0, w, h)
+  cctx.drawImage(patchSrc, px, py, pw, ph)
   cctx.globalCompositeOperation = 'destination-in'
-  cctx.drawImage(ma, 0, 0)             // result clipped to the inpaint region
+  cctx.drawImage(ma, 0, 0)
+  // Original (alpha kept) + the fill over it, inside the mask only.
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h
   const ctx = cv.getContext('2d')!
-  ctx.drawImage(srcImg, 0, 0, w, h)    // original, alpha kept
-  ctx.drawImage(clip, 0, 0)            // inpaint result over it, inside the mask only
+  ctx.drawImage(srcImg, 0, 0, w, h)
+  ctx.drawImage(clip, 0, 0)
   return cv.toDataURL('image/png')
 }
 
