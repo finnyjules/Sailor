@@ -1,5 +1,44 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha } from '~/lib/scene3d/treatmentStage'
+
+describe('dissolveNoise / dissolveAlpha', () => {
+  const grid = (fn: (u: number, v: number) => number, n = 16): number[] => {
+    const out: number[] = []
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) out.push(fn((i + 0.5) / n, (j + 0.5) / n))
+    return out
+  }
+
+  it('noise is deterministic and bounded to [0, 1)', () => {
+    const a = grid((u, v) => dissolveNoise(u, v, 20, 20, 3))
+    const b = grid((u, v) => dissolveNoise(u, v, 20, 20, 3))
+    expect(a).toEqual(b) // same seed & lattice → identical field, run to run
+    for (const x of a) { expect(x).toBeGreaterThanOrEqual(0); expect(x).toBeLessThan(1) }
+  })
+  it('a different seed produces a different field', () => {
+    const a = grid((u, v) => dissolveNoise(u, v, 20, 20, 1))
+    const b = grid((u, v) => dissolveNoise(u, v, 20, 20, 2))
+    expect(a).not.toEqual(b)
+  })
+
+  const P = { scale: 24, softness: 0.15, seed: 1, cellsX: 18, cellsY: 18 }
+  it('amount 0 keeps the whole object (alpha 1 everywhere)', () => {
+    for (const a of grid((u, v) => dissolveAlpha(u, v, { ...P, amount: 0 }))) expect(a).toBe(1)
+  })
+  it('amount 1 dissolves the object entirely (alpha 0 everywhere)', () => {
+    for (const a of grid((u, v) => dissolveAlpha(u, v, { ...P, amount: 1 }))) expect(a).toBe(0)
+  })
+  it('alpha is also deterministic for a fixed seed', () => {
+    const f = (u: number, v: number) => dissolveAlpha(u, v, { ...P, amount: 0.5 })
+    expect(grid(f)).toEqual(grid(f))
+  })
+  it('softness widens the soft transition band (more part-dissolved pixels)', () => {
+    const band = (soft: number) =>
+      grid((u, v) => dissolveAlpha(u, v, { ...P, amount: 0.5, softness: soft }), 48)
+        .filter((a) => a > 0.001 && a < 0.999).length
+    expect(band(0)).toBe(0) // softness 0 is a hard tear — every pixel is fully in or fully out
+    expect(band(0.3)).toBeGreaterThan(band(0.1))
+  })
+})
 
 describe('colorGradeRGB', () => {
   const NEUTRAL = { brightness: 1, contrast: 1, saturation: 1, hue: 0 }

@@ -82,6 +82,14 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         slider(g, 'hue', 'Hue', -180, 180, 1, D.colorGrade.hue, 'Rotate the colours around the wheel'),
       ]
       break
+    case 'dissolve':
+      rows = [
+        slider(g, 'amount', 'Amount', 0, 1, 0.01, D.dissolve.amount, 'How much of the object burns away'),
+        slider(g, 'scale', 'Scale', 2, 64, 1, D.dissolve.scale, 'Size of the dissolve flecks, relative to the image height'),
+        slider(g, 'softness', 'Softness', 0, 1, 0.01, D.dissolve.softness, 'How soft the torn edge is'),
+        slider(g, 'seed', 'Seed', 1, 100, 1, D.dissolve.seed, 'Change for a different dissolve pattern'),
+      ]
+      break
     case 'rimLight':
       rows = [
         color(g, 'color', 'Colour', D.rimLight.color),

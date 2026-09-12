@@ -25,6 +25,31 @@ describe('treatments: model', () => {
     expect(isMaskedKind('colorGrade')).toBe(true)
     expect(TREATMENT_LABELS.colorGrade).toBe('Colour grade')
   })
+  it('TREATMENT_KINDS includes dissolve as a masked kind, not a G-buffer reader', () => {
+    expect(TREATMENT_KINDS).toContain('dissolve')
+    expect(isMaskedKind('dissolve')).toBe(true)
+    expect(TREATMENT_LABELS.dissolve).toBe('Dissolve')
+  })
+})
+
+describe('treatments: dissolve', () => {
+  it('createTreatment seeds defaults, enabled and not inverted, with a fresh id', () => {
+    expect(createTreatment('dissolve')).toMatchObject({
+      kind: 'dissolve', enabled: true, invert: false, amount: 0.5, scale: 24, softness: 0.1, seed: 1,
+    })
+  })
+  it('is NOT a ramped kind — no progressive/ramp fields', () => {
+    expect(createTreatment('dissolve')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'dv', kind: 'dissolve' })).not.toHaveProperty('rampSpace')
+  })
+  it('clamps amount/softness to 0..1, scale to 2..64, and rounds seed to a non-negative int', () => {
+    expect(parseTreatment({ id: 'dv1', kind: 'dissolve', amount: 5, scale: 999, softness: -3, seed: 7.6 }))
+      .toMatchObject({ amount: 1, scale: 64, softness: 0, seed: 8 })
+    expect(parseTreatment({ id: 'dv2', kind: 'dissolve', amount: -1, scale: 0, seed: -4 }))
+      .toMatchObject({ amount: 0, scale: 2, seed: 0 })
+    expect(parseTreatment({ id: 'dv3', kind: 'dissolve' }))
+      .toMatchObject({ amount: 0.5, scale: 24, softness: 0.1, seed: 1 })
+  })
 })
 
 describe('treatments: colour grade', () => {

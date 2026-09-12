@@ -138,6 +138,49 @@ export function colorGradeRGB(
   ]
 }
 
+// --- dissolve: a seeded value-noise alpha erosion (CPU twin of DISSOLVE_FRAG) ---------------
+// Deterministic, never Math.random. The hash/noise mirror the house `vhash`/`vnoise` idiom
+// (gradientfx/shaders.ts) step for step so the GLSL and this helper agree; the unit suite
+// pins the determinism, the endpoints and the softness band on this pure function.
+const dvFract = (v: number): number => v - Math.floor(v)
+const dvMix = (a: number, b: number, t: number): number => a + (b - a) * t
+
+/** Value-noise hash → [0, 1). GLSL twin: `vhash` in DISSOLVE_FRAG. */
+function dissolveHash(x: number, y: number): number {
+  let px = dvFract(x * 123.34), py = dvFract(y * 456.21)
+  const d = px * (px + 45.32) + py * (py + 45.32) // dot(p, p + 45.32)
+  px += d; py += d
+  return dvFract(px * py)
+}
+
+/** Seeded value noise at normalised UV `(u, v)`, sampled on a `cellsX × cellsY` lattice with
+ *  the seed shifting the lattice. Range [0, 1). Pure; GLSL twin: `vnoise` in DISSOLVE_FRAG. */
+export function dissolveNoise(u: number, v: number, cellsX: number, cellsY: number, seed: number): number {
+  const x = u * cellsX + seed * 37, y = v * cellsY + seed * 17
+  const ix = Math.floor(x), iy = Math.floor(y)
+  const fx = x - ix, fy = y - iy
+  const a = dissolveHash(ix, iy), b = dissolveHash(ix + 1, iy)
+  const c = dissolveHash(ix, iy + 1), d = dissolveHash(ix + 1, iy + 1)
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy)
+  return dvMix(dvMix(a, b, ux), dvMix(c, d, ux), uy)
+}
+
+/** The kept-alpha fraction at `(u, v)`: `smoothstep(thr - softness, thr + softness, noise)`
+ *  with `thr = amount * (1 + 2·softness) - softness`. That mapping pins the endpoints for ANY
+ *  noise in [0, 1): amount 0 ⇒ 1 everywhere (nothing dissolves), amount 1 ⇒ 0 everywhere
+ *  (all gone); softness 0 is a hard step at the threshold. Pure; GLSL twin in DISSOLVE_FRAG. */
+export function dissolveAlpha(
+  u: number, v: number,
+  p: { amount: number; scale?: number; softness: number; seed: number; cellsX: number; cellsY: number },
+): number {
+  const n = dissolveNoise(u, v, p.cellsX, p.cellsY, p.seed)
+  const thr = p.amount * (1 + 2 * p.softness) - p.softness
+  const e0 = thr - p.softness, e1 = thr + p.softness
+  if (e1 <= e0) return n >= thr ? 1 : 0 // softness 0: a hard tear (GLSL step())
+  const t = Math.min(1, Math.max(0, (n - e0) / (e1 - e0)))
+  return t * t * (3 - 2 * t)
+}
+
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 // The base copy that seeds the accumulator: straight alpha in, premultiplied out — every composite
 // after it blends premultiplied-over, so the accumulator must start that way too.
@@ -209,6 +252,30 @@ const COLORGRADE_FRAG = `
     const vec3 k = vec3(0.57735026);
     c = c * cs + cross(k, c) * sn + k * dot(k, c) * (1.0 - cs);
     gl_FragColor = vec4(max(c, 0.0), s.a);
+  }`
+// Dissolve: erode the object layer's straight alpha by a seeded value-noise threshold. The
+// hash/noise are the house `vhash`/`vnoise` idiom (gradientfx/shaders.ts), the CPU twin of
+// dissolveNoise()/dissolveAlpha(); keep the two in step. RGB pass through untouched — only
+// alpha is scaled, so the effect erodes inward and spreads nothing past the silhouette.
+const DISSOLVE_FRAG = `
+  uniform sampler2D tDiffuse; uniform vec2 uCells; uniform float uSeed;
+  uniform float uAmount; uniform float uSoftness;
+  varying vec2 vUv;
+  float dvhash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+  float dvnoise(vec2 p){
+    vec2 i = floor(p), f = fract(p);
+    float a = dvhash(i), b = dvhash(i + vec2(1.0, 0.0));
+    float c = dvhash(i + vec2(0.0, 1.0)), d = dvhash(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  }
+  void main(){
+    vec4 s = texture2D(tDiffuse, vUv);
+    vec2 p = vUv * uCells + vec2(uSeed * 37.0, uSeed * 17.0);
+    float n = dvnoise(p);
+    float thr = uAmount * (1.0 + 2.0 * uSoftness) - uSoftness;
+    float cov = uSoftness <= 0.0 ? step(thr, n) : smoothstep(thr - uSoftness, thr + uSoftness, n);
+    gl_FragColor = vec4(s.rgb, s.a * cov);
   }`
 const BRIGHT_FRAG = `
   uniform sampler2D tDiffuse; uniform float uThreshold;
@@ -545,6 +612,10 @@ export class TreatmentStage {
   private readonly colorGradeMat = shader(COLORGRADE_FRAG, {
     tDiffuse: { value: null }, uBrightness: { value: 1 }, uContrast: { value: 1 }, uSaturation: { value: 1 }, uHue: { value: 0 },
   })
+  private readonly dissolveMat = shader(DISSOLVE_FRAG, {
+    tDiffuse: { value: null }, uCells: { value: new THREE.Vector2(1, 1) },
+    uSeed: { value: 1 }, uAmount: { value: 0.5 }, uSoftness: { value: 0.1 },
+  })
   private readonly glowMergeMat = shader(GLOW_MERGE_FRAG, {
     tBase: { value: null }, tGlow: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uStrength: { value: 1 },
     uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
@@ -821,6 +892,20 @@ export class TreatmentStage {
       u.uHue!.value = t.hue
       this.pass(this.colorGradeMat, dst)
       return { rt: dst, haloPx: 0 } // a per-pixel transform spreads nothing past the silhouette
+    }
+    if (t.kind === 'dissolve') {
+      const dst = this.free(src)
+      const u = this.dissolveMat.uniforms
+      u.tDiffuse!.value = src.texture
+      // Square cells in device px (same resolution-independent scaling as pixelate), expressed
+      // as lattice counts across the layer so the GLSL noise coordinate matches dissolveNoise().
+      const cellPx = pixelateCellPx(t.scale, this.height)
+      ;(u.uCells!.value as THREE.Vector2).set(this.width / cellPx, this.height / cellPx)
+      u.uSeed!.value = t.seed
+      u.uAmount!.value = t.amount
+      u.uSoftness!.value = t.softness
+      this.pass(this.dissolveMat, dst)
+      return { rt: dst, haloPx: 0 } // erodes alpha inward — spreads nothing past the silhouette
     }
     if (t.kind === 'glow') {
       const bright = this.free(src)
@@ -1160,7 +1245,7 @@ export class TreatmentStage {
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }
