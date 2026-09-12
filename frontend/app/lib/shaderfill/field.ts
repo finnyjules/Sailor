@@ -573,12 +573,14 @@ export function renderFieldWithBase(
   w: number,
   h: number,
   shape?: LensShape,
+  t = 0,   // elapsed/scrub time → u_time; the glass paint path must pass it or an animated
+           // shape-following fill (Chrome, Nebula, Liquid metal…) renders frozen at t=0.
 ): HTMLCanvasElement {
   const { effect, spec: resolvedSpec } = resolve(spec)
   if (!effect) {
     throw new Error(`renderFieldWithBase: effect "${spec.effectId}" is not in the loaded shaderfx catalog`)
   }
-  let passes = buildPasses(effect, resolvedSpec, 0)
+  let passes = buildPasses(effect, resolvedSpec, t)
   if (shape) passes = passes.map(p => ({ ...p, uniforms: { ...p.uniforms, ...shape.uniforms } }))
   // render() RETURNS the canvas, valid only until the next render call — same
   // ownership contract as resolveField's `rendered` below.

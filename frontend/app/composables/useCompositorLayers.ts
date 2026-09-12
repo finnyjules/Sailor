@@ -4802,6 +4802,7 @@ function applyGlassFromLayer(
   H: number,
   opacityMul = 1,
   byKey?: Map<string, StackItem>,
+  t = 0,   // elapsed/scrub time → the shader's u_time, so an animated fill actually moves
 ): boolean {
   const fill = primaryFillOf(layer)
   // Narrow exactly as isGlassLayer does — the dispatch already checked isGlassLayer,
@@ -4869,7 +4870,7 @@ function applyGlassFromLayer(
 
   // 3. Refract: run the source through the shader as its input texture. render()'s
   //    canvas is valid only until the next render call, so copy it out immediately.
-  const lens = renderFieldWithBase(spec, source, w, h, shape)
+  const lens = renderFieldWithBase(spec, source, w, h, shape, t)
   const clipped = mk()
   const cctx = clipped.getContext('2d')
   if (!cctx) return false
@@ -4894,7 +4895,7 @@ function applyGlassFromLayer(
       kctx.fillStyle = '#000000'; kctx.fillRect(0, 0, w, h)   // opaque black behind
       // render()'s canvas is reused per call — this invalidates `lens`, but it is already
       // copied into `clipped`; copy covLens out at once, before any further render.
-      const covLens = renderFieldWithBase(spec, cov, w, h, shape)
+      const covLens = renderFieldWithBase(spec, cov, w, h, shape, t)
       const cl = mk()
       const clc = cl.getContext('2d')
       if (clc) {
@@ -5261,7 +5262,7 @@ export function paintLayerStack(
       if (isGlassLayer(layer) || isShapeFollowingOwnFill(layer)) {
         let refracted = false
         try {
-          refracted = applyGlassFromLayer(ctx, layer, localLayers, W, H, opacityMul, byKey)
+          refracted = applyGlassFromLayer(ctx, layer, localLayers, W, H, opacityMul, byKey, fieldT)
         } catch (err) {
           if (import.meta.dev) console.warn('[paintLayerStack] glass refraction failed; painting the layer normally', err)
         }
