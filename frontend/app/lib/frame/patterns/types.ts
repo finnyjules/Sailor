@@ -1,4 +1,5 @@
 import type { Rect } from '~/lib/frame/grid'
+import type { ExpressiveParams } from '~~/shared/text-layout/expressive'
 
 /** What the user brought, inferred from the title's word count. */
 export type PosterKind = 'word' | 'phrase' | 'sentence'
@@ -66,6 +67,17 @@ export interface LayerOp {
   blend?: 'normal' | 'multiply'
   /** The text re-broken with '\n' inserted (text ops only). */
   lineBreak?: string
+  /** Text op: vertical alignment within `boxH`. `'justify'` drives the expressive
+   *  engine's justifyY (spread word-bands top→bottom). Absent ⇒ 'top'. */
+  valign?: 'top' | 'middle' | 'bottom' | 'justify'
+  /** Text op: box height, normalized to frame WIDTH (as the layer stores boxH).
+   *  Bounds vertical justify; absent ⇒ natural height. */
+  boxH?: number
+  /** Text op: switch the title into expressive per-word layout. The renderer
+   *  runs `layoutExpressive`; align='justify' ⇒ justifyX, valign='justify' ⇒
+   *  justifyY. Absent ⇒ normal flow. A flat pattern's op omits it, which CLEARS
+   *  any expressive layout a prior pattern set (see apply.ts). */
+  expressive?: ExpressiveParams
   /** For a shape op: which library shape to draw (from shapeMode/element). */
   shapeId?: string
   /** Shape/image fill treatment. */

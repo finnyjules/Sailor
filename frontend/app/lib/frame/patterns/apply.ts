@@ -50,6 +50,12 @@ export function applyPlacement(
       if (op.w != null) next.boxW = op.w
       if (op.align) next.align = op.align
       if (op.lineBreak != null) next.text = op.lineBreak
+      // Expressive/justify/height are re-authored on every apply: set when the
+      // op carries them, otherwise DELETE so switching from an expressive
+      // pattern back to a flat one does not leave the title rendering as words.
+      if (op.expressive) next.expressive = op.expressive; else delete next.expressive
+      if (op.valign) next.valign = op.valign; else delete next.valign
+      if (op.boxH != null) next.boxH = op.boxH; else delete next.boxH
     } else if (layer.kind === 'path' && typeof op.w === 'number' && op.w > 0 && (layer as any).bbox?.w > 0) {
       // A path layer has no `w`: it sizes from `bbox × scale` (both in the same
       // normalized-frame-width units as op.w — see useCompositorLayers' layerBoxPx).

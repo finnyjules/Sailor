@@ -8,17 +8,21 @@ export const block: Pattern = {
   fits: ['phrase', 'sentence'],
   place(ctx) {
     const r = rngFor(ctx.seed, 12)
-    const { frame, margin, elements } = ctx
+    const { frame, margin, elements, measure } = ctx
     const mb = marginBox(frame, margin)
-    // a running-text block: a chunky size, justified, wrapped inside a column.
+    const text = elements.title?.text ?? 'WORD'
     const colWpx = mb.w * r.range(0.62, 0.9)
-    const sizePx = frame.w * r.range(0.055, 0.085)
-    // estimate the wrapped height from the title's character count so we can top-
-    // or centre-anchor without measuring per line (measurement is the layer's job).
-    const chars = (elements.title?.text ?? 'WORD').length
-    const perLine = Math.max(1, Math.floor(colWpx / (sizePx * 0.5)))
-    const lines = Math.max(1, Math.ceil(chars / perLine))
-    const blockH = sizePx * 1.15 * lines
+    // A justified running block wraps inside the column; its height grows roughly
+    // quadratically with the font size (taller glyphs AND more wrapped lines). Size
+    // the text off the real measured run so a long title cannot overflow the page:
+    // blockH(size) ≈ 1.15·size·lines, lines ≈ (measure(text)·size/100)/colWpx, so
+    // blockH ≈ C·size²; the size whose block just fills mb.h is sqrt(mb.h / C).
+    const at100 = measure(text) || 1
+    const C = (at100 / 100 / colWpx) * 1.15
+    const fitSizePx = Math.sqrt(mb.h / C)
+    const sizePx = Math.min(frame.w * r.range(0.05, 0.08), fitSizePx)
+    const lines = Math.max(1, Math.ceil((at100 * sizePx / 100) / colWpx))
+    const blockH = Math.min(sizePx * 1.15 * lines, mb.h)
     const top = r.chance(0.5)
     const yTop = top ? mb.y : mb.y + mb.h - blockH
     const c = toNorm({ x: mb.x, y: yTop, w: colWpx, h: blockH }, frame)

@@ -5,6 +5,7 @@ import { inferElements } from '~/lib/frame/patterns/hierarchy'
 import { ctxFor } from './_poster-fixtures'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { PatternPlacement, FrameElements } from '~/lib/frame/patterns/types'
+import type { ExpressiveParams } from '~~/shared/text-layout/expressive'
 
 const palette = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
 function textLayer(id: string, over: Partial<any> = {}): any {
@@ -133,5 +134,30 @@ describe('applyPlacement', () => {
     expect(layer.x).toBe(0.5)
     expect(layer.y).toBe(0.5)
     expect((layer as any).color).toBe('#000000')
+  })
+})
+
+describe('applyPlacement — expressive fields', () => {
+  const palette = { ink: '#111', accent: '#e33', field: '#eee' } as any
+  const elements = { title: { role: 'title', id: 't', text: 'A B C', words: ['A', 'B', 'C'] }, images: [], shapes: [], shapeMode: null } as any
+  const titleLayer = { id: 't', kind: 'text', text: 'A B C', x: 0.5, y: 0.5, fontSize: 0.1, align: 'left' } as any
+  const ex: ExpressiveParams = { wordsPerLine: 1, placement: 'random', jitterX: 0.5, jitterY: 0, seed: 3 }
+
+  it('writes expressive, valign and boxH onto the title layer', () => {
+    const ops = [{ target: 'title', kind: 'text', x: 0.5, y: 0.5, w: 0.8, fontSize: 0.1, align: 'left', valign: 'justify', boxH: 1.0, expressive: ex }] as any
+    const [out] = applyPlacement([titleLayer], { ops, did: 'x' }, elements, palette, { recolour: false })
+    expect((out as any).expressive).toEqual(ex)
+    expect((out as any).valign).toBe('justify')
+    expect((out as any).boxH).toBe(1.0)
+  })
+
+  it('clears stale expressive/valign/boxH when a later flat op omits them', () => {
+    const stale = { ...titleLayer, expressive: ex, valign: 'justify', boxH: 1.0 } as any
+    const ops = [{ target: 'title', kind: 'text', x: 0.4, y: 0.3, w: 0.6, fontSize: 0.2, align: 'center' }] as any
+    const [out] = applyPlacement([stale], { ops, did: 'x' }, elements, palette, { recolour: false })
+    expect('expressive' in (out as any)).toBe(false)
+    expect('valign' in (out as any)).toBe(false)
+    expect('boxH' in (out as any)).toBe(false)
+    expect((out as any).align).toBe('center')
   })
 })
