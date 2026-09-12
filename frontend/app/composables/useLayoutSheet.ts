@@ -57,7 +57,7 @@ export function useLayoutSheet(src: LayoutSheetSource): {
     const palette = paletteFromFrame(src.props())
     const out: SheetTile[] = []
     for (const t of raw) {
-      const plan = planPattern({ props: src.props(), frameW: src.frameW(), frameH: src.frameH(), patternId: t.patternId, seed: t.seed, palette, connectedSlots: src.connectedSlots() })
+      const plan = planPattern({ props: src.props(), frameW: src.frameW(), frameH: src.frameH(), patternId: t.patternId, seed: t.seed, palette, connectedSlots: src.connectedSlots(), placement: { ops: t.ops, did: t.did } })
       if (plan) out.push({ ...t, plan })
     }
     return out

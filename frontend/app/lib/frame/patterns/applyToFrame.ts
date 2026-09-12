@@ -1,6 +1,6 @@
 import type { LocalLayer, TextLayer } from '~/composables/useCompositorLayers'
 import type { ResolvedPalette } from './palette'
-import type { FrameElements } from './types'
+import type { FrameElements, Pattern, PatternPlacement } from './types'
 import { buildFrameContext, posterLayerViews } from './frameContext'
 import { inferElements } from './hierarchy'
 import { makeFrameMeasure, titleMeasureFrom } from './frameMeasure'
@@ -26,6 +26,8 @@ export interface PlanArgs {
   /** Write colours from the role palette. Off by default: a layout changes no
    *  colour; the palette picker turns it on. */
   recolour?: boolean
+  /** A pre-computed placement to use verbatim; when supplied, skips running the pattern. */
+  placement?: PatternPlacement
 }
 
 export interface ApplyArgs extends PlanArgs {
@@ -35,30 +37,35 @@ export interface ApplyArgs extends PlanArgs {
 /** What an apply would commit: the next layers, the next draw order, and the state to remember. */
 export interface PatternPlan { layers: LocalLayer[]; order: string[]; posterState: PosterState; did: string }
 
-/** Run a pattern on a frame and return the plan. Pure: nothing is written. */
-export function planPattern(args: PlanArgs): PatternPlan | null {
-  const pattern = PATTERNS.find(p => p.id === args.patternId)
-  if (!pattern) return null
-  const layers = ((args.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
-  // measure with what the title layer really renders with — the same layer the
-  // engine's hierarchy inference picks as the title (largest fontSize), not
-  // just the first text layer in array order.
-  const elements = inferElements(posterLayerViews(args.props))
-  const titleId = elements.title?.id
-  const titleLayer = layers.find(l => l.id === titleId && l.kind === 'text') as TextLayer | undefined
+/** Build the measure + context and run the pattern. Only the placement path needs
+ *  a measure, so this stays out of planPattern's provided-placement fast path. */
+function runPattern(pattern: Pattern, args: PlanArgs, layers: LocalLayer[], elements: FrameElements): PatternPlacement {
+  const titleLayer = layers.find(l => l.id === elements.title?.id && l.kind === 'text') as TextLayer | undefined
   const tm = titleLayer ? titleMeasureFrom(titleLayer) : { family: 'Inter', weight: 700, transform: (t: string) => t }
   const measure = makeFrameMeasure(tm.family, tm.weight, undefined, tm.transform)
   const ctx = buildFrameContext(args.props, args.frameW, args.frameH, measure, elements)
   ctx.seed = args.seed
   if (args.shapeMode !== undefined) ctx.elements.shapeMode = args.shapeMode
-  const placement = pattern.place(ctx)
+  return pattern.place(ctx)
+}
+
+/** Run a pattern on a frame and return the plan. Pure: nothing is written. */
+export function planPattern(args: PlanArgs): PatternPlan | null {
+  const pattern = PATTERNS.find(p => p.id === args.patternId)
+  if (!pattern) return null
+  const layers = ((args.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
+  const elements = inferElements(posterLayerViews(args.props))
+  if (args.shapeMode !== undefined) elements.shapeMode = args.shapeMode
+  // Reuse the placement the sheet already computed; only fall back to running the
+  // pattern (and building the measure/context it needs) when none was supplied.
+  const placement = args.placement ?? runPattern(pattern, args, layers, elements)
   // insert any library shape the pattern wanted but the frame lacks, then patch
   const ins = insertFromOps(layers, placement.ops, args.palette, `poster-${args.patternId}-${args.seed}`)
-  const next = applyPlacement(ins.layers, { ...placement, ops: ins.ops }, ctx.elements, args.palette, { recolour: args.recolour ?? false })
+  const next = applyPlacement(ins.layers, { ...placement, ops: ins.ops }, elements, args.palette, { recolour: args.recolour ?? false })
   // draw order: reconcile the saved order against what is present, then honour z
   const saved = (args.props?.sailor_stackOrder as string[] | undefined) ?? []
   const present = framePresentKeys(args.connectedSlots, next)
-  const order = nextOrderFor(saved, present, ins.ops, ctx.elements, ins.inserted)
+  const order = nextOrderFor(saved, present, ins.ops, elements, ins.inserted)
   return { layers: next, order, did: placement.did, posterState: { patternId: args.patternId, seed: args.seed, shapeMode: args.shapeMode } }
 }
 

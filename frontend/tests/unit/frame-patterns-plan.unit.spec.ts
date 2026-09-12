@@ -53,4 +53,16 @@ describe('planPattern', () => {
     const capOn = on.layers.find(l => l.id === 'cap') as any
     expect(capOn.color).toBe(palette.ink)
   })
+  it('uses a provided placement verbatim and does not re-run the pattern', () => {
+    // A placement whose `did` no real pattern would produce: if planPattern echoes
+    // it back, place() was skipped (deduped). The title op targets the fixture title.
+    const placement = {
+      ops: [{ target: 'title', kind: 'text', x: 0.5, y: 0.5, w: 0.8, fontSize: 0.2, align: 'left', colorRole: 'ink' }],
+      did: 'SENTINEL-PROVIDED-PLACEMENT',
+    } as any
+    const plan = planPattern({ ...base, patternId: 'runoff', placement })!
+    expect(plan.did).toBe('SENTINEL-PROVIDED-PLACEMENT')   // proves place() was not called
+    expect(plan.layers.length).toBeGreaterThan(0)          // it still applied the ops
+    expect(plan.posterState).toEqual({ patternId: 'runoff', seed: base.seed, shapeMode: undefined })
+  })
 })
