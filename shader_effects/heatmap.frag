@@ -123,7 +123,11 @@ void main() {
     vec2 p = v_texCoord * asp;
 
     float sc = max(u_scale, 0.05);
-    float soft = max(u_edgeSoftness, 0.001);
+    // Edge softness the USER dials in (0 = a razor edge, left to the screen-space AA
+    // below; 1 = a broad fade). Scaled down because the raw 0..1 range was so wide the
+    // no-shape disc read as an all-over blur — on a Frame the compositor's silhouette
+    // clip hides this, but the bare material tile has only the shader to define its edge.
+    float soft = u_edgeSoftness * 0.06;
 
     // ---- The signed distance field the heat is measured from ----
     // i < 0 inside, ~0 at the outline, > 0 outside. `inside` is a soft 0..1 mask.
@@ -137,12 +141,15 @@ void main() {
         // so i only goes negative (inward); the outer glow becomes an inner edge bloom.
         float depth = shapeDepth(v_texCoord);       // blurred: rounds the thumbnail facets
         i = -depth / sc;
-        inside = smoothstep(0.0, soft, depth);
+        inside = smoothstep(0.0, max(soft, fwidth(depth) * 1.5), depth);
     } else {
         c = 0.5 * asp;
         rel = p - c;
         i = (length(rel) - 0.35) / sc;              // the source default: a disc, radius 0.35
-        inside = 1.0 - smoothstep(-soft, soft, i);
+        // A crisp, screen-space antialiased edge (~1px) plus whatever softness the user
+        // dials — so the disc has a defined boundary instead of fading over ~20px.
+        float w = fwidth(i) * 1.5 + soft;
+        inside = 1.0 - smoothstep(-w, w, i);
     }
 
     // ---- Where the heat waves travel ----
