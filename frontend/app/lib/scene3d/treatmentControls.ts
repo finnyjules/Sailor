@@ -3,7 +3,7 @@
 // keys to `object.treatments.<id>.<field>`; the surface reads/writes `<field>` directly
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, type TreatmentKind } from './treatments'
+import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, DROP_SHADOW_DISTANCE_MAX, type TreatmentKind } from './treatments'
 
 export const TREATMENT_KEY_PREFIX = 'treatment.'
 
@@ -110,6 +110,15 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         slider(g, 'bands', 'Bands', GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, 1, D.glitch.bands, 'How many horizontal slices the object breaks into'),
         slider(g, 'scanlines', 'Scanlines', 0, 1, 0.01, D.glitch.scanlines, 'How dark the scan lines drawn across it are'),
         slider(g, 'seed', 'Seed', 1, 100, 1, D.glitch.seed, 'Change for a different glitch pattern'),
+      ]
+      break
+    case 'dropShadow':
+      rows = [
+        slider(g, 'angle', 'Angle', 0, 360, 1, D.dropShadow.angle, 'Direction the shadow falls in'),
+        slider(g, 'distance', 'Distance', 0, DROP_SHADOW_DISTANCE_MAX, 1, D.dropShadow.distance, 'How far the shadow is offset, relative to the image height'),
+        color(g, 'color', 'Colour', D.dropShadow.color),
+        slider(g, 'softness', 'Softness', 0, 1, 0.01, D.dropShadow.softness, 'How soft the shadow edge is'),
+        slider(g, 'opacity', 'Opacity', 0, 1, 0.01, D.dropShadow.opacity, 'How strong the shadow is'),
       ]
       break
     case 'rimLight':

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX, chromaticOffsetPx, chromaticSplitOffset, glitchShiftPx, glitchBandShift } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX, chromaticOffsetPx, chromaticSplitOffset, glitchShiftPx, glitchBandShift, dropShadowDistancePx, dropShadowOffset, dropShadowHaloPx } from '~/lib/scene3d/treatmentStage'
 
 describe('dissolveNoise / dissolveAlpha', () => {
   const grid = (fn: (u: number, v: number) => number, n = 16): number[] => {
@@ -187,6 +187,56 @@ describe('glitchBandShift', () => {
   it('more bands means more distinct jumps across the object — narrower, busier slices', () => {
     const distinct = (n: number) => new Set(bandShifts(5, n).map((s) => s.toFixed(6))).size
     expect(distinct(24)).toBeGreaterThan(distinct(6))
+  })
+})
+
+describe('dropShadowDistancePx', () => {
+  it('scales by height/1000, resolution-independent like the pixelate scale', () => {
+    expect(dropShadowDistancePx(16, 1000)).toBe(16)
+    expect(dropShadowDistancePx(16, 2000)).toBe(32)
+  })
+  it('distance 0 → the shadow sits under the object; there is no 1px floor', () => {
+    expect(dropShadowDistancePx(0, 1000)).toBe(0)
+    expect(dropShadowDistancePx(0.1, 100)).toBeCloseTo(0.01)
+  })
+  it('a negative distance clamps to zero', () => {
+    expect(dropShadowDistancePx(-5, 1000)).toBe(0)
+  })
+})
+
+describe('dropShadowOffset', () => {
+  it('distance 0 gives the zero vector — the shadow directly under the object', () => {
+    const o = dropShadowOffset(0, 45, 1000)
+    expect(o.x).toBeCloseTo(0, 10)
+    expect(o.y).toBeCloseTo(0, 10)
+  })
+  it('magnitude equals dropShadowDistancePx, independent of angle', () => {
+    for (const angle of [0, 30, 90, 200, 359]) {
+      const o = dropShadowOffset(16, angle, 1000)
+      expect(Math.hypot(o.x, o.y)).toBeCloseTo(dropShadowDistancePx(16, 1000), 6)
+    }
+  })
+  it('angle rotates the offset vector (y negated so 0°→right, 90°→down the screen)', () => {
+    const right = dropShadowOffset(10, 0, 1000)
+    expect(right.x).toBeCloseTo(10, 6)
+    expect(right.y).toBeCloseTo(0, 6)
+    const down = dropShadowOffset(10, 90, 1000)
+    expect(down.x).toBeCloseTo(0, 6)
+    expect(down.y).toBeCloseTo(-10, 6)
+  })
+})
+
+describe('dropShadowHaloPx', () => {
+  it('is the offset distance plus the softness blur radius', () => {
+    // softness 0 → no blur reach, so the halo is just the offset distance.
+    expect(dropShadowHaloPx(16, 0, 1000)).toBeCloseTo(16)
+    // softness reach == blur radius at that amount, added on top of the offset.
+    expect(dropShadowHaloPx(16, 0.5, 1000)).toBeCloseTo(16 + blurPasses(0.5, 1000).radiusPx)
+    // distance 0 → the reach is the blur alone.
+    expect(dropShadowHaloPx(0, 0.5, 1000)).toBeCloseTo(blurPasses(0.5, 1000).radiusPx)
+  })
+  it('grows with both distance and softness, resolution-scaled', () => {
+    expect(dropShadowHaloPx(16, 0.5, 2000)).toBeGreaterThan(dropShadowHaloPx(16, 0.5, 1000))
   })
 })
 

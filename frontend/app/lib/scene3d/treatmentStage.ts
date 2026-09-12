@@ -34,7 +34,7 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { stripAlpha } from '~/lib/color/convert'
-import type { BufferGroup, CurvatureWearTreatment, DepthFogTreatment, EdgeLinesTreatment, MaskedGroup, RampFields, Treatment } from './treatments'
+import type { BufferGroup, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, MaskedGroup, RampFields, Treatment } from './treatments'
 import { ownMeshes, STAGE_LAYER } from './treatmentShells'
 import { fitNearFar } from './passes'
 
@@ -249,6 +249,34 @@ export function glitchBandShift(band: number, seed: number): number {
   return dissolveHash(band, seed) * 2 - 1
 }
 
+// --- flat drop shadow: an offset silhouette, blurred, tinted, cast BEHIND the object ---------
+/** The shadow offset distance in device px on an image `height` px tall, from `distance` in the
+ *  same "px per block on a 1000-px-tall image" units pixelate uses — so the shadow holds the same
+ *  LOOK at every resolution. Like chromaticOffsetPx there is NO 1px floor: distance 0 → 0 px, i.e.
+ *  the shadow sits exactly under the object. Pure. */
+export function dropShadowDistancePx(distance: number, height: number): number {
+  return Math.max(0, distance) * height / 1000
+}
+
+/** The shadow offset VECTOR (device px) for `distance`/`angle` on an image `height` px tall: the
+ *  object's silhouette is shifted by this to make the shadow. Magnitude = dropShadowDistancePx, so
+ *  distance 0 gives the zero vector (shadow directly under the object); the angle rotates it (y
+ *  negated because texture v = 1 is the visual top, matching rampDirection / chromaticSplitOffset,
+ *  so 0°→right, 90°→down the screen). Pure; DROP_SHADOW_BUILD_FRAG samples at vUv − this offset. */
+export function dropShadowOffset(distance: number, angleDeg: number, height: number): { x: number; y: number } {
+  const px = dropShadowDistancePx(distance, height)
+  const a = angleDeg * Math.PI / 180
+  return { x: Math.cos(a) * px, y: -Math.sin(a) * px }
+}
+
+/** How far the finished shadow reaches OUTSIDE the object silhouette (device px): the offset
+ *  distance PLUS the softness blur radius (blur's own radiusPx for `softness` as its amount). The
+ *  offset is handled in the composite by an un-offset depth lookup — this reach only sizes the
+ *  small halo borrow for the blurred soft edge. Pure. */
+export function dropShadowHaloPx(distance: number, softness: number, height: number): number {
+  return dropShadowDistancePx(distance, height) + blurPasses(softness, height).radiusPx
+}
+
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 // The base copy that seeds the accumulator: straight alpha in, premultiplied out — every composite
 // after it blends premultiplied-over, so the accumulator must start that way too.
@@ -413,6 +441,73 @@ const GLITCH_FRAG = `
     vec4 s = texture2D(tDiffuse, vec2(vUv.x + shift, vUv.y));
     float scan = 0.5 + 0.5 * cos((vUv.y * uResolution.y) * (6.2831853 / ${GLITCH_SCANLINE_PERIOD_PX}));
     gl_FragColor = vec4(s.rgb * (1.0 - uScanlines * scan), s.a);
+  }`
+// Flat drop shadow — step 1 of 3: build the shadow silhouette. Sample the object-alone layer's
+// ALPHA at vUv − uOffset (so the shadow is the silhouette shifted by +uOffset, i.e. offset in the
+// shadow's fall direction) and paint the flat tint there. Straight alpha out; the blur pass softens
+// it and the merge/composite apply opacity. uOffset 0 (distance 0) sits the shadow under the object.
+const DROP_SHADOW_BUILD_FRAG = `
+  uniform sampler2D tDiffuse; uniform vec2 uOffset; uniform vec3 uColor;
+  varying vec2 vUv;
+  void main(){
+    float a = texture2D(tDiffuse, vUv - uOffset).a;
+    gl_FragColor = vec4(uColor, a);
+  }`
+// Flat drop shadow — step 2 of 3: draw the object OVER the shadow. `tObject` is the treated object
+// (straight alpha), `tShadow` the blurred silhouette; the shadow's alpha is scaled by uShadowOpacity
+// then the object is composited over it (both straight alpha in, straight alpha out) so the shadow
+// shows only where the object's own pixels do not cover. The combined layer is what the depth-tested
+// composite then blends into the scene.
+const DROP_SHADOW_MERGE_FRAG = `
+  uniform sampler2D tObject; uniform sampler2D tShadow; uniform float uShadowOpacity;
+  varying vec2 vUv;
+  void main(){
+    vec4 o = texture2D(tObject, vUv);
+    vec4 s = texture2D(tShadow, vUv);
+    float sa = s.a * uShadowOpacity;
+    float outA = o.a + sa * (1.0 - o.a);
+    vec3 rgb = (o.rgb * o.a + s.rgb * sa * (1.0 - o.a)) / max(outA, 1e-5);
+    gl_FragColor = vec4(rgb, outA);
+  }`
+// Flat drop shadow — step 3 of 3: the OWN composite branch (the Task 4-5 nuance). Every other masked
+// kind hands the generic composite ONE depth (the object's) and leans on nearestDepth's small halo
+// to give the fringe a depth to test — but a drop shadow lands on EMPTY space `distance` px from the
+// object, where no opaque neighbour sits within any reasonable halo. So here each pixel gets its own
+// depth: an OBJECT pixel (uses its own depth so it occludes / is occluded correctly), a SHADOW-only
+// pixel the depth of the silhouette that cast it — the object depth sampled at vUv − uShadowOffset
+// (the un-offset position), which is exactly where that silhouette is. That needs NO borrow for the
+// bulk offset; only the soft blurred fringe borrows within uSoftHalo texels. The shadow therefore
+// sits at the object's silhouette depth: over the background and over anything farther, behind the
+// object and behind anything nearer. Linear premultiplied "over" (a graphic shadow, no display-space
+// cross-fade); uOpacity carries a group fade if one is stacked with it.
+const DROP_SHADOW_COMPOSITE_FRAG = `
+  uniform sampler2D tLayer; uniform sampler2D tObject; uniform sampler2D tLayerDepth;
+  uniform sampler2D tBaseDepth; uniform sampler2D tBaseDepth2; uniform sampler2D tDst;
+  uniform float uOpacity; uniform vec2 uTexel; uniform float uSoftHalo; uniform vec2 uShadowOffset;
+  varying vec2 vUv;
+  float borrowedDepth(vec2 uv){
+    float d = texture2D(tLayerDepth, uv).r;
+    if (d < 1.0) return d;
+    float best = 1.0;
+    for (int i = 0; i < 8; i++) {
+      float a = float(i) * 0.785398;
+      vec2 o = vec2(cos(a), sin(a)) * uTexel * uSoftHalo;
+      best = min(best, texture2D(tLayerDepth, uv + o).r);
+      best = min(best, texture2D(tLayerDepth, uv + o * 0.5).r);
+    }
+    return best;
+  }
+  void main(){
+    vec4 d = texture2D(tDst, vUv);
+    vec4 s = texture2D(tLayer, vUv);
+    float a = s.a * uOpacity;
+    if (a <= 0.001) { gl_FragColor = d; return; }
+    float objA = texture2D(tObject, vUv).a;
+    float ld = objA > 0.5 ? texture2D(tLayerDepth, vUv).r : borrowedDepth(vUv - uShadowOffset);
+    float bd = min(texture2D(tBaseDepth, vUv).r, texture2D(tBaseDepth2, vUv).r);
+    if (ld > bd + 0.00005) { gl_FragColor = d; return; }
+    float outA = a + d.a * (1.0 - a);
+    gl_FragColor = vec4(s.rgb * a + d.rgb * (1.0 - a), outA);
   }`
 const BRIGHT_FRAG = `
   uniform sampler2D tDiffuse; uniform float uThreshold;
@@ -764,6 +859,19 @@ export class TreatmentStage {
     tDiffuse: { value: null }, uResolution: { value: new THREE.Vector2(1, 1) },
     uBands: { value: 12 }, uSeed: { value: 1 }, uAmountUV: { value: 0 }, uScanlines: { value: 0.5 },
   })
+  private readonly dropShadowBuildMat = shader(DROP_SHADOW_BUILD_FRAG, {
+    tDiffuse: { value: null }, uOffset: { value: new THREE.Vector2() }, uColor: { value: new THREE.Color(0, 0, 0) },
+  })
+  private readonly dropShadowMergeMat = shader(DROP_SHADOW_MERGE_FRAG, {
+    tObject: { value: null }, tShadow: { value: null }, uShadowOpacity: { value: 0.5 },
+  })
+  /** The drop shadow's OWN depth-tested composite (blending set NoBlending in the constructor —
+   *  it reads tDst and does the "over" itself, like the generic composite). */
+  private readonly dropShadowCompositeMat = shader(DROP_SHADOW_COMPOSITE_FRAG, {
+    tLayer: { value: null }, tObject: { value: null }, tLayerDepth: { value: null },
+    tBaseDepth: { value: null }, tBaseDepth2: { value: null }, tDst: { value: null },
+    uOpacity: { value: 1 }, uTexel: { value: new THREE.Vector2() }, uSoftHalo: { value: 2 }, uShadowOffset: { value: new THREE.Vector2() },
+  })
   private readonly glowMergeMat = shader(GLOW_MERGE_FRAG, {
     tBase: { value: null }, tGlow: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uStrength: { value: 1 },
     uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
@@ -817,6 +925,11 @@ export class TreatmentStage {
       uAmount: { value: 0.5 }, uWidthPx: { value: 1 }, uTexel: { value: new THREE.Vector2() },
     })
     this.curvatureWearMat.blending = THREE.NoBlending
+    // Build/merge REPLACE their scratch (a pure full-frame compute), and the composite reads
+    // tDst to do its own "over" — all three must keep the hardware blender off.
+    this.dropShadowBuildMat.blending = THREE.NoBlending
+    this.dropShadowMergeMat.blending = THREE.NoBlending
+    this.dropShadowCompositeMat.blending = THREE.NoBlending
   }
 
   private makeTarget(w: number, h: number, withDepth: boolean): RT {
@@ -838,6 +951,7 @@ export class TreatmentStage {
     this.scratch = [0, 1, 2].map(() => this.makeTarget(w, h, false))
     this.pixelateMat.uniforms.uResolution!.value.set(w, h)
     this.compositeMat.uniforms.uTexel!.value.set(1 / w, 1 / h)
+    ;(this.dropShadowCompositeMat.uniforms.uTexel!.value as THREE.Vector2).set(1 / w, 1 / h)
     ;(this.edgeLinesMat.uniforms.uTexel!.value as THREE.Vector2).set(1 / w, 1 / h)
     ;(this.curvatureWearMat.uniforms.uTexel!.value as THREE.Vector2).set(1 / w, 1 / h)
     this.stats.width = w; this.stats.height = h
@@ -1190,16 +1304,71 @@ export class TreatmentStage {
     let opacity = 1
     let halo = 0
     let fadeRamp: Ramp | null = null
+    let dropShadow: DropShadowTreatment | null = null
     for (const t of g.treatments) {
       // An inverted group's treated area is the rest of the scene, so "the object's own extent"
       // is meaningless there — pass no root and resolveRamp uses frame space.
       const ramp = this.resolveRamp(t as unknown as RampFields, g.invert ? null : root, camera)
       if (t.kind === 'fade') { opacity *= t.opacity; fadeRamp = ramp; continue }
+      // Drop shadow is not an in-place transform of the object layer: it ADDS an element behind it
+      // and needs its own depth-tested composite. Deferred to after the chain so any other effects
+      // (a colour grade, a blur) shape the object first; the shadow is cast from the ORIGINAL
+      // silhouette (layerRt). Only one shadow per group — the last one wins.
+      if (t.kind === 'dropShadow') { dropShadow = t; continue }
       const res = this.applyEffect(src, t, ramp)
       src = res.rt
       halo = Math.max(halo, res.haloPx)
     }
+    if (dropShadow) {
+      // The generic halo is irrelevant here — the shadow branch carries its own depth handling.
+      this.dropShadowComposite(src, layerRt, dropShadow, opacity, baseDepth2)
+      return
+    }
     this.composite(src.texture, layerRt.depthTexture, baseDepth2, opacity, halo, fadeRamp)
+  }
+
+  /** Drop shadow's OWN composite branch. `objectRt` is the (possibly treated) object colour,
+   *  `layerRt` the object-alone target whose alpha is the silhouette and whose depth is the object
+   *  depth. Builds the offset+blurred+tinted shadow, draws the object over it, then composites the
+   *  pair with the per-pixel depth described on DROP_SHADOW_COMPOSITE_FRAG. `opacity` is a group
+   *  fade (1 when none); the shadow's own `opacity` dial scales the shadow alpha in the merge. */
+  private dropShadowComposite(
+    objectRt: RT, layerRt: RT, t: DropShadowTreatment, opacity: number, baseDepth2: THREE.Texture | null,
+  ): void {
+    const off = dropShadowOffset(t.distance, t.angle, this.height)
+    const offU = off.x / this.width, offV = off.y / this.height
+    // 1. Shadow silhouette: the object's alpha shifted by the offset, painted in the tint.
+    const sil = this.free(objectRt, layerRt)
+    const bu = this.dropShadowBuildMat.uniforms
+    bu.tDiffuse!.value = layerRt.texture
+    ;(bu.uOffset!.value as THREE.Vector2).set(offU, offV)
+    ;(bu.uColor!.value as THREE.Color).set(stripAlpha(t.color))
+    this.pass(this.dropShadowBuildMat, sil)
+    // 2. Soften it. blur() reserves objectRt/layerRt so the object colour is not clobbered.
+    const { rt: shadow } = this.blur(sil, t.softness, null, objectRt, layerRt)
+    // 3. Object over the shadow (shadow alpha × the shadow's own opacity).
+    const merged = this.free(shadow, objectRt, layerRt)
+    const mu = this.dropShadowMergeMat.uniforms
+    mu.tObject!.value = objectRt.texture
+    mu.tShadow!.value = shadow.texture
+    mu.uShadowOpacity!.value = t.opacity
+    this.pass(this.dropShadowMergeMat, merged)
+    // 4. Depth-tested composite with the shadow's own branch.
+    const u = this.dropShadowCompositeMat.uniforms
+    u.tLayer!.value = merged.texture
+    u.tObject!.value = layerRt.texture
+    u.tLayerDepth!.value = layerRt.depthTexture
+    u.tBaseDepth!.value = this.base.depthTexture
+    u.tBaseDepth2!.value = baseDepth2 ?? this.base.depthTexture
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    u.uOpacity!.value = opacity
+    // The soft blurred fringe reaches softnessReach px past the offset silhouette; that is the ONLY
+    // borrow the depth lookup needs (the bulk offset is handled by the un-offset sample), so the
+    // halo is sized to the blur radius alone, never the full distance.
+    u.uSoftHalo!.value = Math.max(2, blurPasses(t.softness, this.height).radiusPx)
+    ;(u.uShadowOffset!.value as THREE.Vector2).set(offU, offV)
+    this.pass(this.dropShadowCompositeMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
   }
 
   /** Build the shared G-buffer: the buffer-treated objects alone, view-space normals in
@@ -1437,7 +1606,7 @@ export class TreatmentStage {
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.glitchMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.glitchMat, this.dropShadowBuildMat, this.dropShadowMergeMat, this.dropShadowCompositeMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }

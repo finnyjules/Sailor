@@ -45,6 +45,35 @@ describe('treatments: model', () => {
     expect(isMaskedKind('glitch')).toBe(true)
     expect(TREATMENT_LABELS.glitch).toBe('Glitch')
   })
+  it('TREATMENT_KINDS includes dropShadow as a masked kind, not a G-buffer reader', () => {
+    expect(TREATMENT_KINDS).toContain('dropShadow')
+    expect(isMaskedKind('dropShadow')).toBe(true)
+    expect(TREATMENT_LABELS.dropShadow).toBe('Flat drop shadow')
+  })
+})
+
+describe('treatments: drop shadow', () => {
+  it('createTreatment seeds defaults, enabled and not inverted, with a fresh id', () => {
+    expect(createTreatment('dropShadow')).toMatchObject({
+      kind: 'dropShadow', enabled: true, invert: false, angle: 45, distance: 16, color: '#000000', softness: 0.2, opacity: 0.5,
+    })
+  })
+  it('is NOT a ramped kind — no progressive/ramp fields', () => {
+    expect(createTreatment('dropShadow')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'ds', kind: 'dropShadow' })).not.toHaveProperty('rampSpace')
+  })
+  it('wraps angle into 0..360, clamps distance to 0..128, softness/opacity to 0..1, backfilling', () => {
+    expect(parseTreatment({ id: 'ds1', kind: 'dropShadow', angle: 405, distance: 999, softness: 5, opacity: 5 }))
+      .toMatchObject({ angle: 45, distance: 128, softness: 1, opacity: 1 })
+    expect(parseTreatment({ id: 'ds2', kind: 'dropShadow', angle: -90, distance: -5, softness: -3, opacity: -3 }))
+      .toMatchObject({ angle: 270, distance: 0, softness: 0, opacity: 0 })
+    expect(parseTreatment({ id: 'ds3', kind: 'dropShadow' }))
+      .toMatchObject({ angle: 45, distance: 16, color: '#000000', softness: 0.2, opacity: 0.5 })
+  })
+  it('keeps a valid colour and backfills a non-string one', () => {
+    expect(parseTreatment({ id: 'ds4', kind: 'dropShadow', color: '#123456' })).toMatchObject({ color: '#123456' })
+    expect(parseTreatment({ id: 'ds5', kind: 'dropShadow', color: 42 })).toMatchObject({ color: '#000000' })
+  })
 })
 
 describe('treatments: glitch', () => {
