@@ -89,6 +89,23 @@ vec3 heatRamp(float t) {
     return linearToSrgb(oklabToLinear(linearToOklab(srgbToLinear(u_ramp[clamp(n - 1, 0, MAXS - 1)]))));
 }
 
+// The chamfer distance (u_shape.g) is built from a 256px silhouette thumbnail and
+// upscaled, so its iso-contours are POLYGONAL — read raw, the hot rim and contour band
+// (both narrow bands riding an iso-contour) trace those facets and the sharp ramp turns
+// them into a jagged bright edge (liquid_metal/chrome hit the same thumbnail stair-step).
+// A small disc blur, sized in texture space (~1.5 thumbnail texels, resolution-independent),
+// rounds the contour before it drives an edge-critical feature.
+float shapeDepth(vec2 uv) {
+    const float r = 1.5 / 256.0;
+    const float d = r * 0.70710678;
+    float s = texture(u_shape, uv).g;
+    s += texture(u_shape, uv + vec2(r, 0.0)).g + texture(u_shape, uv + vec2(-r, 0.0)).g;
+    s += texture(u_shape, uv + vec2(0.0, r)).g + texture(u_shape, uv + vec2(0.0, -r)).g;
+    s += texture(u_shape, uv + vec2(d, d)).g + texture(u_shape, uv + vec2(-d, d)).g;
+    s += texture(u_shape, uv + vec2(d, -d)).g + texture(u_shape, uv + vec2(-d, -d)).g;
+    return s / 9.0;
+}
+
 // Sw: a soft Gaussian heat band whose centre sweeps across the travel direction as its
 // phase runs 0 -> 1, its edge wobbled by noise, fading in and out over its life. Three
 // staggered layers carve the cool streaks that flow through the hot interior.
@@ -118,7 +135,7 @@ void main() {
         // G (the chamfer field) is 0 at the outline and rises to 1 at the deepest point.
         // There is no true outside distance once the compositor clips to the silhouette,
         // so i only goes negative (inward); the outer glow becomes an inner edge bloom.
-        float depth = texture(u_shape, v_texCoord).g;
+        float depth = shapeDepth(v_texCoord);       // blurred: rounds the thumbnail facets
         i = -depth / sc;
         inside = smoothstep(0.0, soft, depth);
     } else {
