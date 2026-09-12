@@ -53,7 +53,7 @@ export function planPattern(args: PlanArgs): PatternPlan | null {
   if (args.shapeMode !== undefined) ctx.elements.shapeMode = args.shapeMode
   const placement = pattern.place(ctx)
   // insert any library shape the pattern wanted but the frame lacks, then patch
-  const ins = insertFromOps(layers, placement.ops, args.palette)
+  const ins = insertFromOps(layers, placement.ops, args.palette, `poster-${args.patternId}-${args.seed}`)
   const next = applyPlacement(ins.layers, { ...placement, ops: ins.ops }, ctx.elements, args.palette, { recolour: args.recolour ?? false })
   // draw order: reconcile the saved order against what is present, then honour z
   const saved = (args.props?.sailor_stackOrder as string[] | undefined) ?? []

@@ -13,7 +13,7 @@ describe('insertFromOps', () => {
       { target: 'title', kind: 'text', x: .5, y: .5, fontSize: .2, colorRole: 'ink', z: 1 },
     ]
     const layers: LocalLayer[] = [title]
-    const out = insertFromOps(layers, ops, palette)
+    const out = insertFromOps(layers, ops, palette, 'poster-test-1')
     expect(layers).toHaveLength(1)                                   // input untouched
     expect(out.layers).toHaveLength(2)
     const added: any = out.layers[1]
@@ -31,9 +31,31 @@ describe('insertFromOps', () => {
       { target: 's1', kind: 'shape', x: .5, y: .5, w: .3, shapeId: 'circle' },          // real layer target
       { target: 'shape', kind: 'shape', x: .5, y: .5, w: .3, shapeId: 'no-such-shape' }, // unknown id
     ]
-    const out = insertFromOps([title], ops, palette)
+    const out = insertFromOps([title], ops, palette, 'poster-test-1')
     expect(out.layers).toHaveLength(1)
     expect(out.inserted.size).toBe(0)
     expect(out.ops).toEqual(ops)
+  })
+
+  describe('insertFromOps — deterministic ids', () => {
+    const paletteForIds = { ink: '#111', accent: '#e33', field: '#eee' } as any
+    const shapeOp = { target: 'shape', kind: 'shape', shapeId: 'circle', x: 0.5, y: 0.5, w: 0.3, colorRole: 'accent' } as any
+
+    it('gives an inserted shape a deterministic id from the idBase and op index', () => {
+      const a = insertFromOps([], [shapeOp], paletteForIds, 'poster-shapeCounter-7')
+      const b = insertFromOps([], [shapeOp], paletteForIds, 'poster-shapeCounter-7')
+      const idA = a.layers[a.layers.length - 1]!.id
+      const idB = b.layers[b.layers.length - 1]!.id
+      expect(idA).toBe('poster-shapeCounter-7-0')     // idBase + op index
+      expect(idB).toBe(idA)                            // same inputs → same id (preview == apply)
+      expect(a.inserted.get(0)).toBe(idA)
+      expect(a.ops[0]!.target).toBe(idA)               // op retargeted to the new id
+    })
+
+    it('a different seed yields a different id', () => {
+      const a = insertFromOps([], [shapeOp], paletteForIds, 'poster-shapeCounter-7')
+      const b = insertFromOps([], [shapeOp], paletteForIds, 'poster-shapeCounter-8')
+      expect(a.layers.at(-1)!.id).not.toBe(b.layers.at(-1)!.id)
+    })
   })
 })

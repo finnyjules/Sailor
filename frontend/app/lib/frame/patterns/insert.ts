@@ -11,7 +11,7 @@ const SENTINEL = 'shape'
  *  layer was placed), build a real path layer with the shape factory, append it,
  *  and retarget the op to the new id. Pure: returns new arrays. */
 export function insertFromOps(
-  layers: LocalLayer[], ops: LayerOp[], palette: ResolvedPalette,
+  layers: LocalLayer[], ops: LayerOp[], palette: ResolvedPalette, idBase: string,
 ): { layers: LocalLayer[]; inserted: Map<number, string>; ops: LayerOp[] } {
   const next = [...layers]
   const inserted = new Map<number, string>()
@@ -20,6 +20,7 @@ export function insertFromOps(
     const shape = shapeById(op.shapeId)
     if (!shape) return op
     const layer = createShapeLayer(shape, {
+      id: `${idBase}-${i}`,
       x: op.x, y: op.y,
       targetWidth: op.w,
       fill: roleToPaint(op.colorRole ?? 'accent', palette),
