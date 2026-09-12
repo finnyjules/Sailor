@@ -22,4 +22,20 @@ describe('block', () => {
     expect(title.lineBreak).toBeUndefined()     // content untouched
     expect(title.expressive).toBeUndefined()
   })
+  it('shrinks a long title so the justified block fits the page height', () => {
+    const longText = 'THE ANNUAL FESTIVAL OF SOUND AND THE CITY RETURNS THIS OCTOBER WITH TALKS PERFORMANCES AND LATE NIGHT LISTENING SESSIONS ACROSS TOWN'
+    const long = inferElements([
+      { id: 't', kind: 'text', text: longText, fontSize: 0.2 },
+      { id: 'd', kind: 'text', text: 'more', fontSize: 0.03 },
+    ])
+    const title = block.place(ctxFor({ elements: long })).ops.find(o => o.target === 'title')!
+    // Recompute the fit bound with the SAME stub measure the fixture uses (len*60).
+    const frameW = 800, mbH = 1000 - 2 * 0.05 * 800   // margin-box height in px = 920
+    const colWpx = title.w! * frameW
+    const at100 = longText.length * 60
+    const C = (at100 / 100 / colWpx) * 1.15
+    const fitSizePx = Math.sqrt(mbH / C)
+    const sizePx = title.fontSize! * frameW
+    expect(sizePx).toBeLessThanOrEqual(fitSizePx + 1e-6)   // the block fits the page height
+  })
 })
