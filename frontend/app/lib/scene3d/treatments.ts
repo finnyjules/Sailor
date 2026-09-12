@@ -10,7 +10,7 @@
 import type { SceneDoc, SceneObject } from './config'
 
 export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade', 'colorGrade', 'dissolve', 'halftone', 'chromaticSplit', 'glitch', 'dropShadow'] as const
-export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe'] as const
+export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe', 'dashedOutline', 'silhouetteCutout'] as const
 /** Stage-rendered treatments that consume the per-frame G-buffer (view-space normals +
  *  depth). Their presence — and ONLY their presence — makes `TreatmentStage` build the
  *  GBufferPass; with none enabled the pass never runs and the frame is byte-identical to
@@ -28,6 +28,7 @@ export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTrea
 export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
   blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade', colorGrade: 'Colour grade', dissolve: 'Dissolve', halftone: 'Halftone', chromaticSplit: 'Chromatic split', glitch: 'Glitch', dropShadow: 'Flat drop shadow',
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
+  dashedOutline: 'Dashed outline', silhouetteCutout: 'Silhouette cutout',
   edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear',
 }
 
@@ -131,6 +132,28 @@ export interface RimLightTreatment extends TreatmentBase { kind: 'rimLight'; col
 export interface OutlineTreatment extends TreatmentBase { kind: 'outline'; color: string; thickness: number }
 export interface XrayTreatment extends TreatmentBase { kind: 'xray'; color: string; opacity: number }
 export interface WireframeTreatment extends TreatmentBase { kind: 'wireframe'; color: string; lineOpacity: number; showSurface: boolean }
+/** The object's outline drawn as a DASHED line. Rides the exact inverted-hull `outline` shell
+ *  (a fattened BackSide hull the object overdraws down to a rim ring), but its fragment shader
+ *  stipples the ring: a screen-space diagonal march (gl_FragCoord.x + .y) is chopped into `dash`
+ *  device-px marks separated by `gap` device-px holes, so the outline reads dashed at any zoom.
+ *  A hull shell is a filled ring, not a traced curve, so screen-space stippling is the cheapest
+ *  dashing it affords (a true arc-length dash would need a traced silhouette the hull never
+ *  builds). `width` is the on-screen ring thickness (0..1, same mapping as `outline.thickness`).
+ *  An EDGE shell like outline/xray/wireframe — `invert` is a masked-family concept and is not
+ *  honoured (no invert row for edge kinds). Deterministic — a fixed screen pattern, no randomness. */
+export interface DashedOutlineTreatment extends TreatmentBase { kind: 'dashedOutline'; color: string; width: number; dash: number; gap: number }
+/** Fill the object's silhouette FLAT with `color` (a sticker / knockout look), with an optional
+ *  `border` keyline in `borderColor` (0 = no keyline). Model: FLAT FILL, not a true
+ *  knockout-to-hole. The fill is a FrontSide opaque shell over the object's own front faces
+ *  (polygon-offset toward the camera so it wins the depth test), so it replaces the object's
+ *  shading inside its silhouette while riding the same `addShell` path as outline/wireframe —
+ *  no material swap, no offscreen buffer, works over every material type. A real knockout
+ *  (punching the framebuffer to reveal the background) would need a stencil / composite pass the
+ *  edge family deliberately avoids, so flat fill is the safe v1. The keyline is the inverted-hull
+ *  `outline` shell in `borderColor`, sized by `border` (0..1, the outline thickness mapping). An
+ *  EDGE shell — `invert` is not honoured (edge family), matching outline/xray/wireframe.
+ *  Deterministic. */
+export interface SilhouetteCutoutTreatment extends TreatmentBase { kind: 'silhouetteCutout'; color: string; border: number; borderColor: string }
 /** Toon crease line drawn from the G-buffer: a Sobel over view-space normals AND depth, so
  *  it catches a box's INTERIOR creases (two faces meeting at an angle) where the inverted-
  *  hull `outline` treatment can only trace the silhouette. `width` is line reach in screen
@@ -151,6 +174,7 @@ export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
   | DissolveTreatment | HalftoneTreatment | ChromaticSplitTreatment | GlitchTreatment | DropShadowTreatment
   | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
+  | DashedOutlineTreatment | SilhouetteCutoutTreatment
   | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment
 
 /** Dial defaults per kind — everything except id/kind/enabled/invert. The ONE source the
@@ -170,6 +194,8 @@ export const TREATMENT_DEFAULTS = {
   outline: { color: '#000000', thickness: 0.5 },
   xray: { color: '#6fd3ff', opacity: 0.35 },
   wireframe: { color: '#ffffff', lineOpacity: 0.8, showSurface: true },
+  dashedOutline: { color: '#000000', width: 0.5, dash: 8, gap: 6 },
+  silhouetteCutout: { color: '#ffffff', border: 0, borderColor: '#000000' },
   edgeLines: { color: '#000000', width: 0.5, threshold: 0.5 },
   depthFog: { color: '#8fa6bf', start: 0.3, end: 1 },
   curvatureWear: { amount: 0.5, width: 0.5 },
@@ -196,6 +222,11 @@ export const GLITCH_BANDS_MAX = 64
 /** Flat drop shadow's maximum offset distance, in "px per block on a 1000-px-tall image" units
  *  (the pixelate scale). Shared by the dial and the parser so they cannot drift apart. */
 export const DROP_SHADOW_DISTANCE_MAX = 128
+
+/** Dashed outline's dash- and gap-length ceiling, in DEVICE px along the screen-space march.
+ *  Dash floors at 1 (a zero-length dash would draw nothing); gap floors at 0 (a solid outline).
+ *  Shared by the dial and the parser so they cannot drift apart. */
+export const DASHED_OUTLINE_LEN_MAX = 64
 
 export function isMaskedKind(kind: TreatmentKind): kind is MaskedTreatmentKind {
   return (MASKED_TREATMENT_KINDS as readonly string[]).includes(kind)
@@ -316,6 +347,17 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
     case 'wireframe': return {
       ...base, kind: 'wireframe', color: str(r.color, D.wireframe.color),
       lineOpacity: clamp01(num(r.lineOpacity, D.wireframe.lineOpacity)), showSurface: r.showSurface !== false,
+    }
+    case 'dashedOutline': return {
+      ...base, kind: 'dashedOutline', color: str(r.color, D.dashedOutline.color),
+      width: clamp01(num(r.width, D.dashedOutline.width)),
+      dash: Math.min(DASHED_OUTLINE_LEN_MAX, Math.max(1, num(r.dash, D.dashedOutline.dash))),
+      gap: clampTo(num(r.gap, D.dashedOutline.gap), DASHED_OUTLINE_LEN_MAX),
+    }
+    case 'silhouetteCutout': return {
+      ...base, kind: 'silhouetteCutout', color: str(r.color, D.silhouetteCutout.color),
+      border: clamp01(num(r.border, D.silhouetteCutout.border)),
+      borderColor: str(r.borderColor, D.silhouetteCutout.borderColor),
     }
     case 'edgeLines': return {
       ...base, kind: 'edgeLines', color: str(r.color, D.edgeLines.color),

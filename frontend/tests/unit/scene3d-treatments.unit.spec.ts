@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { defaultDoc, createPrimitive, createLight, serializeDoc, parseDoc } from '~/lib/scene3d/config'
 import {
   TREATMENT_KINDS, TREATMENT_LABELS, TREATED_OBJECT_CAP, createTreatment, parseTreatment, parseTreatments,
-  cloneTreatments, maskedTreatmentPlan, unrenderedTreatmentIds, findTreatment, edgeTreatmentsOf, isMaskedKind, BLUR_AMOUNT_MAX,
-  docHasGBufferTreatment, bufferTreatmentPlan,
+  cloneTreatments, maskedTreatmentPlan, unrenderedTreatmentIds, findTreatment, edgeTreatmentsOf, isMaskedKind, isEdgeKind, BLUR_AMOUNT_MAX,
+  DASHED_OUTLINE_LEN_MAX, docHasGBufferTreatment, bufferTreatmentPlan,
 } from '~/lib/scene3d/treatments'
 import { treatmentControls } from '~/lib/scene3d/treatmentControls'
 import { blurPasses } from '~/lib/scene3d/treatmentStage'
@@ -49,6 +49,58 @@ describe('treatments: model', () => {
     expect(TREATMENT_KINDS).toContain('dropShadow')
     expect(isMaskedKind('dropShadow')).toBe(true)
     expect(TREATMENT_LABELS.dropShadow).toBe('Flat drop shadow')
+  })
+  it('TREATMENT_KINDS includes dashedOutline as an EDGE kind (a shell, not masked, not a G-buffer reader)', () => {
+    expect(TREATMENT_KINDS).toContain('dashedOutline')
+    expect(isEdgeKind('dashedOutline')).toBe(true)
+    expect(isMaskedKind('dashedOutline')).toBe(false)
+    expect(TREATMENT_LABELS.dashedOutline).toBe('Dashed outline')
+  })
+  it('TREATMENT_KINDS includes silhouetteCutout as an EDGE kind (a shell, not masked, not a G-buffer reader)', () => {
+    expect(TREATMENT_KINDS).toContain('silhouetteCutout')
+    expect(isEdgeKind('silhouetteCutout')).toBe(true)
+    expect(isMaskedKind('silhouetteCutout')).toBe(false)
+    expect(TREATMENT_LABELS.silhouetteCutout).toBe('Silhouette cutout')
+  })
+})
+
+describe('treatments: dashed outline', () => {
+  it('createTreatment seeds defaults, enabled and not inverted, with a fresh id', () => {
+    expect(createTreatment('dashedOutline')).toMatchObject({
+      kind: 'dashedOutline', enabled: true, invert: false, color: '#000000', width: 0.5, dash: 8, gap: 6,
+    })
+  })
+  it('is NOT a ramped kind — no progressive/ramp fields', () => {
+    expect(createTreatment('dashedOutline')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'do', kind: 'dashedOutline' })).not.toHaveProperty('rampSpace')
+  })
+  it('clamps width to 0..1, dash to 1..64, gap to 0..64, keeps/backfills colour', () => {
+    expect(parseTreatment({ id: 'do1', kind: 'dashedOutline', width: 9, dash: 999, gap: 999, color: '#abcdef' }))
+      .toMatchObject({ width: 1, dash: DASHED_OUTLINE_LEN_MAX, gap: DASHED_OUTLINE_LEN_MAX, color: '#abcdef' })
+    expect(parseTreatment({ id: 'do2', kind: 'dashedOutline', width: -3, dash: -5, gap: -5, color: 42 }))
+      .toMatchObject({ width: 0, dash: 1, gap: 0, color: '#000000' })
+    expect(parseTreatment({ id: 'do3', kind: 'dashedOutline' }))
+      .toMatchObject({ color: '#000000', width: 0.5, dash: 8, gap: 6 })
+  })
+})
+
+describe('treatments: silhouette cutout', () => {
+  it('createTreatment seeds defaults, enabled and not inverted, with a fresh id', () => {
+    expect(createTreatment('silhouetteCutout')).toMatchObject({
+      kind: 'silhouetteCutout', enabled: true, invert: false, color: '#ffffff', border: 0, borderColor: '#000000',
+    })
+  })
+  it('is NOT a ramped kind — no progressive/ramp fields', () => {
+    expect(createTreatment('silhouetteCutout')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'sc', kind: 'silhouetteCutout' })).not.toHaveProperty('rampSpace')
+  })
+  it('clamps border to 0..1, keeps/backfills both colours', () => {
+    expect(parseTreatment({ id: 'sc1', kind: 'silhouetteCutout', border: 9, color: '#111111', borderColor: '#222222' }))
+      .toMatchObject({ border: 1, color: '#111111', borderColor: '#222222' })
+    expect(parseTreatment({ id: 'sc2', kind: 'silhouetteCutout', border: -3, color: 42, borderColor: {} }))
+      .toMatchObject({ border: 0, color: '#ffffff', borderColor: '#000000' })
+    expect(parseTreatment({ id: 'sc3', kind: 'silhouetteCutout' }))
+      .toMatchObject({ color: '#ffffff', border: 0, borderColor: '#000000' })
   })
 })
 
@@ -467,7 +519,7 @@ describe('the shared ramp', () => {
   })
 
   it('leaves the edge kinds alone', () => {
-    for (const kind of ['rimLight', 'outline', 'xray', 'wireframe'] as const) {
+    for (const kind of ['rimLight', 'outline', 'xray', 'wireframe', 'dashedOutline', 'silhouetteCutout'] as const) {
       expect(parseTreatment({ id: `t-${kind}`, kind }), kind).not.toHaveProperty('progressive')
     }
   })

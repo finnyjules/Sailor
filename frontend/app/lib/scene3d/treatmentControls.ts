@@ -3,7 +3,7 @@
 // keys to `object.treatments.<id>.<field>`; the surface reads/writes `<field>` directly
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, DROP_SHADOW_DISTANCE_MAX, type TreatmentKind } from './treatments'
+import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, DROP_SHADOW_DISTANCE_MAX, DASHED_OUTLINE_LEN_MAX, type TreatmentKind } from './treatments'
 
 export const TREATMENT_KEY_PREFIX = 'treatment.'
 
@@ -145,6 +145,21 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         color(g, 'color', 'Colour', D.wireframe.color),
         slider(g, 'lineOpacity', 'Line opacity', 0, 1, 0.01, D.wireframe.lineOpacity),
         toggle(g, 'showSurface', 'Show surface', D.wireframe.showSurface, 'Keep the solid surface under the lines'),
+      ]
+      break
+    case 'dashedOutline':
+      rows = [
+        color(g, 'color', 'Colour', D.dashedOutline.color),
+        slider(g, 'width', 'Thickness', 0, 1, 0.01, D.dashedOutline.width, 'Stays the same on screen as you zoom'),
+        slider(g, 'dash', 'Dash', 1, DASHED_OUTLINE_LEN_MAX, 1, D.dashedOutline.dash, 'Length of each dash'),
+        slider(g, 'gap', 'Gap', 0, DASHED_OUTLINE_LEN_MAX, 1, D.dashedOutline.gap, 'Space between the dashes'),
+      ]
+      break
+    case 'silhouetteCutout':
+      rows = [
+        color(g, 'color', 'Fill', D.silhouetteCutout.color),
+        slider(g, 'border', 'Keyline', 0, 1, 0.01, D.silhouetteCutout.border, 'Width of the outline around the fill, zero for none'),
+        color(g, 'borderColor', 'Keyline colour', D.silhouetteCutout.borderColor),
       ]
       break
     case 'edgeLines':

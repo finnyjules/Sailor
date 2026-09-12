@@ -77,6 +77,25 @@ const XRAY_FRAG = /* glsl */ `
     float f = pow(1.0 - clamp(dot(normalize(vNormal), normalize(vView)), 0.0, 1.0), 2.0);
     gl_FragColor = vec4(uColor, uOpacity * (0.25 + 0.75 * f));
   }`
+// Dashed outline: the OUTLINE hull ring, stippled in screen space. A diagonal march
+// (gl_FragCoord.x + .y) is chopped into `uDash` device-px marks separated by `uGap` holes;
+// pixels landing in a hole are discarded. `dashPatternOn` below is the CPU twin of this test.
+const DASHED_OUTLINE_FRAG = /* glsl */ `
+  uniform vec3 uColor; uniform float uDash; uniform float uGap;
+  void main() {
+    float period = max(uDash + uGap, 1.0);
+    float s = gl_FragCoord.x + gl_FragCoord.y;
+    if (mod(s, period) > uDash) discard;
+    gl_FragColor = vec4(uColor, 1.0);
+  }`
+
+/** CPU twin of DASHED_OUTLINE_FRAG's keep/discard test: true where a mark is drawn, false in a
+ *  gap. `s` is the screen-space march coordinate (fragCoord.x + .y). gap 0 ⇒ solid (always on). */
+export function dashPatternOn(s: number, dash: number, gap: number): boolean {
+  const period = Math.max(dash + gap, 1)
+  const m = ((s % period) + period) % period
+  return m <= dash
+}
 
 function rimMaterial(t: Extract<Treatment, { kind: 'rimLight' }>): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
@@ -110,6 +129,32 @@ function xrayMaterial(t: Extract<Treatment, { kind: 'xray' }>): THREE.ShaderMate
 function wireMaterial(t: Extract<Treatment, { kind: 'wireframe' }>): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
     wireframe: true, color: stripAlpha(t.color), transparent: true, opacity: t.lineOpacity, toneMapped: false,
+  })
+}
+function dashedOutlineMaterial(t: Extract<Treatment, { kind: 'dashedOutline' }>): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(stripAlpha(t.color)) },
+      uThickness: { value: t.width }, uDash: { value: t.dash }, uGap: { value: t.gap },
+    },
+    vertexShader: OUTLINE_VERT, fragmentShader: DASHED_OUTLINE_FRAG, side: THREE.BackSide,
+  })
+}
+/** The flat fill of a silhouette cutout: an unlit, opaque FrontSide shell over the object's own
+ *  front faces, pulled toward the camera by a polygon offset so it wins the depth test and
+ *  replaces the object's shading inside its silhouette. */
+function cutoutFillMaterial(t: Extract<Treatment, { kind: 'silhouetteCutout' }>): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    color: stripAlpha(t.color), toneMapped: false,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  })
+}
+/** The cutout's optional keyline: the same inverted-hull outline shell, in `borderColor`, sized
+ *  by `border` (the outline-thickness mapping). Only built when `border > 0`. */
+function cutoutBorderMaterial(t: Extract<Treatment, { kind: 'silhouetteCutout' }>): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(stripAlpha(t.borderColor)) }, uThickness: { value: t.border } },
+    vertexShader: OUTLINE_VERT, fragmentShader: OUTLINE_FRAG, side: THREE.BackSide,
   })
 }
 
@@ -165,7 +210,11 @@ export function syncTreatmentShells(root: THREE.Object3D, obj: SceneObject, opts
     for (const t of edges) {
       if (t.kind === 'rimLight') addShell(mesh, t.kind, rimMaterial(t))
       else if (t.kind === 'outline') addShell(mesh, t.kind, outlineMaterial(t))
-      else if (t.kind === 'wireframe') {
+      else if (t.kind === 'dashedOutline') addShell(mesh, t.kind, dashedOutlineMaterial(t))
+      else if (t.kind === 'silhouetteCutout') {
+        addShell(mesh, t.kind, cutoutFillMaterial(t))
+        if (t.border > 0) addShell(mesh, t.kind, cutoutBorderMaterial(t))
+      } else if (t.kind === 'wireframe') {
         addShell(mesh, t.kind, wireMaterial(t))
         if (!t.showSurface) { mesh.layers.disable(0); mesh.layers.enable(SURFACE_HIDDEN_LAYER) }
       } else if (t.kind === 'xray' && !opts.lightView) {
