@@ -249,12 +249,12 @@ export function useInpaint() {
   /** High-quality object generation via Nano Banana 2 (Gemini image). Pass an
    *  optional `image` (a cropped scene region) to paint the object into a scene;
    *  omit it for a clean text→image object. Returns data URLs. */
-  async function nanoGen(prompt: string, image?: string, images?: string[]): Promise<string[]> {
+  async function nanoGen(prompt: string, image?: string, images?: string[], variant?: string): Promise<string[]> {
     busy.value = true; error.value = ''
     try {
       const res = await $fetch<{ images: string[] }>('/api/inpaint/nano-gen', {
         method: 'POST',
-        body: { prompt, image, images },
+        body: { prompt, image, images, variant },
       })
       results.value = res.images
       return res.images

@@ -144,8 +144,10 @@ export function fluxFillDevInput(
  * the pre-existing fal-failover input construction now that fal is the only
  * path. Output: `out.images[0].url`.
  */
-export function nanoGenInput(prompt: string, images: string[], aspectRatio?: string): FalCall {
-  const app = images.length ? 'fal-ai/nano-banana-pro/edit' : 'fal-ai/nano-banana-pro'
+export function nanoGenInput(prompt: string, images: string[], aspectRatio?: string, variant?: string): FalCall {
+  // 'nano2' → Nano Banana 2 (Gemini 3.1 Flash, faster/cheaper); default → Nano Banana Pro.
+  const family = variant === 'nano2' ? 'nano-banana-2' : 'nano-banana-pro'
+  const app = images.length ? `fal-ai/${family}/edit` : `fal-ai/${family}`
   const input: Record<string, unknown> = { prompt, num_images: 1, output_format: 'png' }
   if (images.length) input.image_urls = images
   if (aspectRatio) input.aspect_ratio = aspectRatio

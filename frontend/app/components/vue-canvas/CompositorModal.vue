@@ -2852,9 +2852,10 @@ async function runImageEdit() {
     const { w, h } = capDims(img.naturalWidth || 1024, img.naturalHeight || 1024)
     const src = imageToDataUrl(img, w, h)
     const prompt = editImagePrompt.value.trim()
-    const out = wholeEditModel.value === 'nano'
-      ? await inpaint.nanoGen(prompt, src)
-      : await inpaint.kontext(src, prompt)
+    const m = wholeEditModel.value
+    const out = (m === 'nano' || m === 'nano2')
+      ? await inpaint.nanoGen(prompt, src, undefined, m)   // 'nano' = Pro, 'nano2' = Nano Banana 2
+      : await inpaint.kontext(src, prompt)                 // 'kontext' = FLUX.2
     const first = out[0]; if (!first) { inpaint.error.value = 'The edit returned no image — try again.'; return }
     const name = await inpaint.uploadDataUrl(await reapplyAlpha(first, img, w, h), 'compedit')
     setLocal(layer.id, { filename: name })

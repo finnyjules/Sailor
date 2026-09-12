@@ -18,7 +18,7 @@
 import { assertRateLimit } from '../../lib/rateLimit'
 import { nanoGenInput } from '../../utils/inpaintFalInputs'
 
-interface Body { prompt?: string; image?: string; images?: string[]; aspect_ratio?: string }
+interface Body { prompt?: string; image?: string; images?: string[]; aspect_ratio?: string; variant?: string }
 
 export default defineEventHandler(async (event) => {
   assertRateLimit(event, 'inpaint-nano-gen', 30)
@@ -31,7 +31,7 @@ export default defineEventHandler(async (event) => {
   const imageList = (Array.isArray(body?.images) ? body!.images : (body?.image ? [body.image] : []))
     .filter((s): s is string => typeof s === 'string' && s.length > 0)
 
-  const { app, input } = nanoGenInput(prompt, imageList, typeof body?.aspect_ratio === 'string' ? body.aspect_ratio : undefined)
+  const { app, input } = nanoGenInput(prompt, imageList, typeof body?.aspect_ratio === 'string' ? body.aspect_ratio : undefined, typeof body?.variant === 'string' ? body.variant : undefined)
 
   const out = await runFal<{ images?: { url?: string }[] }>(app, input, { pollDeadlineMs: 150_000 })
   const url = out?.images?.[0]?.url
