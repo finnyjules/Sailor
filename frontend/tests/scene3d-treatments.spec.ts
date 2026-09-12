@@ -896,3 +896,370 @@ test.describe('3D Studio depth fog + curvature wear (S3 G-buffer)', () => {
     expect(absent, 'disabled depth-fog and curvature-wear treatments must leave the frame byte-identical').toBe(0)
   })
 })
+
+/**
+ * S4 — the six masked, two edge and one buffer treatment kinds added on the S3 stage.
+ *
+ * Oracle: the same `__scene3dSnapshot()` fixed-camera render the S3 suites use. It composites
+ * the stage, so it reflects every one of these kinds (unlike a camera move). Two claims per kind:
+ *
+ *  1. APPLIED CHANGES THE RENDER. For a masked kind that has a genuine no-op value
+ *     (colorGrade 1/1/1/0, dissolve amount 0, chromaticSplit amount 0, glitch amount 0 +
+ *     scanlines 0, dropShadow opacity 0) the active frame is diffed against that NEUTRAL frame —
+ *     BOTH go through the composer path, so the post stack's known background shift (see the file
+ *     header) cancels. The comparison is self-calibrating: the treatment's pixel footprint in the
+ *     object box must dominate the cross-reload noise of rendering the neutral scene twice, so no
+ *     hand-tuned pixel threshold is trusted blind. Kinds with no neutral value (halftone,
+ *     crossHatch) are proven structurally instead — a dot screen / a pen-and-ink lattice multiplies
+ *     the object's gradient energy, a ratio that is robust to any absolute tone shift. Edge shells
+ *     (dashedOutline, silhouetteCutout) take the PLAIN path, so they diff straight against the
+ *     untreated frame (plain-path reload determinism is already proven by the S3 byte-identity
+ *     cases).
+ *
+ *  2. NEUTRAL / ABSENT IS UNCHANGED. A DISABLED treatment must take the plain path (stage frames
+ *     0) and be byte-identical to the same scene with no treatment at all — the opt-in guarantee,
+ *     exactly the S3 disabled-vs-absent oracle. (An ENABLED neutral-value masked treatment is
+ *     deliberately NOT byte-compared to the plain frame: it still runs the composer path, which
+ *     legitimately shifts the background — so the neutral value is used as the cancelling CONTROL
+ *     above, not as a byte oracle. See the report.)
+ *
+ * crossHatch additionally proves the S3 GATE: with no enabled buffer treatment the frame takes the
+ * plain path (frames 0 ⇔ docHasGBufferTreatment false) and is byte-identical, and the disabled
+ * treatment is still present in the doc — so it is the enabled flag, not absence, that gates the
+ * G-buffer pass. dissolve, glitch and crossHatch also prove DETERMINISM: a second render of the
+ * same scene is pixel-for-pixel identical (no Math.random), and — where a seed exists — a
+ * different seed changes the pattern.
+ *
+ * NONE OF THESE HAVE BEEN RUN. :3002 is stale and this task must not start a server; the lead runs
+ * them against a fresh preview at closeout and tunes any floor the real numbers need.
+ */
+
+const LEFT_BOX = { fx0: 0.20, fy0: 0.30, fx1: 0.47, fy1: 0.70 }
+const DROP_BOX = { fx0: 0.14, fy0: 0.28, fx1: 0.52, fy1: 0.82 }
+const FULL_BOX = { fx0: 0, fy0: 0, fx1: 1, fy1: 1 }
+type Box = { fx0: number; fy0: number; fx1: number; fy1: number }
+
+/** Count of pixels inside `box` whose RGB differs between two data-URL snapshots. */
+async function boxChangedPixels(page: Page, a: string, b: string, box: Box): Promise<number> {
+  return page.evaluate(async ({ ua, ub, box }) => {
+    const load = async (u: string) => {
+      const img = new Image(); img.src = u; await img.decode()
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+      c.getContext('2d')!.drawImage(img, 0, 0)
+      return c.getContext('2d')!.getImageData(0, 0, c.width, c.height)
+    }
+    const A = await load(ua), B = await load(ub); const { width, height } = A
+    const x0 = Math.floor(width * box.fx0), x1 = Math.floor(width * box.fx1)
+    const y0 = Math.floor(height * box.fy0), y1 = Math.floor(height * box.fy1)
+    let changed = 0
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const i = (y * width + x) * 4
+      if (A.data[i] !== B.data[i] || A.data[i + 1] !== B.data[i + 1] || A.data[i + 2] !== B.data[i + 2]) changed++
+    }
+    return changed
+  }, { ua: a, ub: b, box })
+}
+
+/** Mean squared horizontal luminance step (gradient energy) inside `box` — the S3 "sharpness"
+ *  measure, high for a dot screen or a hatch lattice, low on a smoothly shaded surface. */
+async function boxGradEnergy(page: Page, url: string, box: Box): Promise<number> {
+  return page.evaluate(async ({ u, box }) => {
+    const img = new Image(); img.src = u; await img.decode()
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+    const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+    const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height)
+    const lum = (i: number) => 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
+    const x0 = Math.floor(width * box.fx0), x1 = Math.floor(width * box.fx1)
+    const y0 = Math.floor(height * box.fy0), y1 = Math.floor(height * box.fy1)
+    let s = 0, n = 0
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1 - 1; x++) {
+      const i = (y * width + x) * 4; const d = lum(i) - lum(i + 4); s += d * d; n++
+    }
+    return n ? s / n : 0
+  }, { u: url, box })
+}
+
+/** Mean luminance inside `box`. */
+async function boxMeanLuma(page: Page, url: string, box: Box): Promise<number> {
+  return page.evaluate(async ({ u, box }) => {
+    const img = new Image(); img.src = u; await img.decode()
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+    const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+    const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height)
+    const x0 = Math.floor(width * box.fx0), x1 = Math.floor(width * box.fx1)
+    const y0 = Math.floor(height * box.fy0), y1 = Math.floor(height * box.fy1)
+    let s = 0, n = 0
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const i = (y * width + x) * 4; s += 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!; n++
+    }
+    return n ? s / n : 0
+  }, { u: url, box })
+}
+
+test.describe('3D Studio treatments — S4 masked/edge/buffer', () => {
+  /** APPLIED oracle for a masked kind with a neutral value: three loads on the SAME composer
+   *  path (neutral, neutral, active). Returns the active-vs-neutral footprint and the
+   *  neutral-vs-neutral cross-reload noise, both measured inside `box`, plus the active stats. */
+  async function maskedFootprint(
+    page: Page, active: Record<string, unknown>, neutral: Record<string, unknown>, box: Box = LEFT_BOX,
+  ) {
+    const errs = watchConsole(page)
+    await openLab(page, twoSpheres([neutral]))
+    const n1 = await snapshot(page)
+    await openLab(page, twoSpheres([neutral]))
+    const n2 = await snapshot(page)
+    await openLab(page, twoSpheres([active]))
+    const s = await stats(page)
+    expect(s.frames, `stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    expect(s.groups).toBe(1)
+    const a = await snapshot(page)
+    const noise = await boxChangedPixels(page, n1, n2, box)
+    const footprint = await boxChangedPixels(page, a, n2, box)
+    return { noise, footprint, frames: s.frames, groups: s.groups, active: a, neutral: n2 }
+  }
+
+  /** NEUTRAL/ABSENT oracle: a DISABLED treatment must take the plain path (frames 0) and leave
+   *  the frame byte-identical to the same scene with no treatment. Mirrors the S3 disabled-vs-
+   *  absent test (plain-path reload determinism is proven there, so a zero diff is a real claim). */
+  async function disabledIsAbsent(page: Page, disabled: Record<string, unknown>) {
+    await openLab(page, twoSpheres())
+    expect((await stats(page)).frames).toBe(0)
+    const absent = await snapshot(page)
+    await openLab(page, twoSpheres())
+    const absent2 = await snapshot(page)
+    await openLab(page, twoSpheres([disabled]))
+    expect((await stats(page)).frames, 'a disabled treatment must not run the stage').toBe(0)
+    const off = await snapshot(page)
+    const determinism = await boxChangedPixels(page, absent, absent2, FULL_BOX)
+    const delta = await boxChangedPixels(page, absent, off, FULL_BOX)
+    return { determinism, delta }
+  }
+
+  // ---- colorGrade (masked) --------------------------------------------------------------------
+  const CG_NEUTRAL = { id: 't-cg', kind: 'colorGrade', enabled: true, invert: false, brightness: 1, contrast: 1, saturation: 1, hue: 0 }
+  const CG_ACTIVE = { ...CG_NEUTRAL, brightness: 1.6, saturation: 0 }
+
+  test('colorGrade applied changes the render (brighter, desaturated)', async ({ page }) => {
+    const r = await maskedFootprint(page, CG_ACTIVE, CG_NEUTRAL)
+    const meanA = await boxMeanLuma(page, r.active, LEFT_BOX)
+    const meanN = await boxMeanLuma(page, r.neutral, LEFT_BOX)
+    console.log(`[colorGrade] footprint=${r.footprint} noise=${r.noise} meanActive=${meanA.toFixed(1)} meanNeutral=${meanN.toFixed(1)}`)
+    expect(r.footprint).toBeGreaterThan(r.noise * 3 + 300)
+    expect(meanA).toBeGreaterThan(meanN) // brightness 1.6 lifts the object
+  })
+  test('colorGrade neutral/absent: a disabled grade is byte-identical to none', async ({ page }) => {
+    const { determinism, delta } = await disabledIsAbsent(page, { ...CG_ACTIVE, enabled: false })
+    console.log(`[colorGrade byte] determinism=${determinism} disabled-vs-absent=${delta}`)
+    expect(determinism).toBe(0)
+    expect(delta).toBe(0)
+  })
+
+  // ---- dissolve (masked, seeded) --------------------------------------------------------------
+  const DS_NEUTRAL = { id: 't-ds', kind: 'dissolve', enabled: true, invert: false, amount: 0, scale: 24, softness: 0.1, seed: 1 }
+  const DS_ACTIVE = { ...DS_NEUTRAL, amount: 0.85 }
+
+  test('dissolve applied changes the render (erodes the object)', async ({ page }) => {
+    const r = await maskedFootprint(page, DS_ACTIVE, DS_NEUTRAL)
+    console.log(`[dissolve] footprint=${r.footprint} noise=${r.noise}`)
+    expect(r.footprint).toBeGreaterThan(r.noise * 3 + 300)
+  })
+  test('dissolve neutral/absent: a disabled dissolve is byte-identical to none', async ({ page }) => {
+    const { determinism, delta } = await disabledIsAbsent(page, { ...DS_ACTIVE, enabled: false })
+    console.log(`[dissolve byte] determinism=${determinism} disabled-vs-absent=${delta}`)
+    expect(determinism).toBe(0)
+    expect(delta).toBe(0)
+  })
+  test('dissolve is deterministic: same seed identical, different seed differs', async ({ page }) => {
+    await openLab(page, twoSpheres([DS_ACTIVE]))
+    expect((await stats(page)).frames).toBeGreaterThan(0)
+    const one = await snapshot(page)
+    const two = await snapshot(page) // same page, same seed, second render
+    const same = await boxChangedPixels(page, one, two, FULL_BOX)
+    await openLab(page, twoSpheres([{ ...DS_ACTIVE, seed: 987 }]))
+    const other = await snapshot(page)
+    const diff = await boxChangedPixels(page, one, other, LEFT_BOX)
+    console.log(`[dissolve determinism] same-seed=${same} different-seed=${diff}`)
+    expect(same, 'same seed must render identically (no Math.random)').toBe(0)
+    expect(diff, 'a different seed must change the dissolve pattern').toBeGreaterThan(300)
+  })
+
+  // ---- halftone (masked, no neutral value → structural) ---------------------------------------
+  const HT_ACTIVE = { id: 't-ht', kind: 'halftone', enabled: true, invert: false, cell: 6, angle: 45, contrast: 1, color: '#000000' }
+
+  test('halftone applied changes the render (dot screen raises gradient energy)', async ({ page }) => {
+    const errs = watchConsole(page)
+    await openLab(page, twoSpheres())
+    expect((await stats(page)).frames).toBe(0)
+    const plainGrad = await boxGradEnergy(page, await snapshot(page), LEFT_BOX)
+    await openLab(page, twoSpheres([HT_ACTIVE]))
+    const s = await stats(page)
+    expect(s.frames, `stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    expect(s.groups).toBe(1)
+    const inkedGrad = await boxGradEnergy(page, await snapshot(page), LEFT_BOX)
+    console.log(`[halftone] plainGrad=${plainGrad.toFixed(3)} inkedGrad=${inkedGrad.toFixed(3)} ratio=${(inkedGrad / plainGrad).toFixed(2)}`)
+    expect(inkedGrad).toBeGreaterThan(plainGrad * 3)
+  })
+  test('halftone neutral/absent: a disabled halftone is byte-identical to none', async ({ page }) => {
+    const { determinism, delta } = await disabledIsAbsent(page, { ...HT_ACTIVE, enabled: false })
+    console.log(`[halftone byte] determinism=${determinism} disabled-vs-absent=${delta}`)
+    expect(determinism).toBe(0)
+    expect(delta).toBe(0)
+  })
+
+  // ---- chromaticSplit (masked, amount 0 = neutral) --------------------------------------------
+  const CS_NEUTRAL = { id: 't-cs', kind: 'chromaticSplit', enabled: true, invert: false, amount: 0, angle: 0 }
+  const CS_ACTIVE = { ...CS_NEUTRAL, amount: 16 }
+
+  test('chromaticSplit applied changes the render (RGB fringing at the edges)', async ({ page }) => {
+    const r = await maskedFootprint(page, CS_ACTIVE, CS_NEUTRAL)
+    console.log(`[chromaticSplit] footprint=${r.footprint} noise=${r.noise}`)
+    expect(r.footprint).toBeGreaterThan(r.noise * 3 + 300)
+  })
+  test('chromaticSplit neutral/absent: a disabled split is byte-identical to none', async ({ page }) => {
+    const { determinism, delta } = await disabledIsAbsent(page, { ...CS_ACTIVE, enabled: false })
+    console.log(`[chromaticSplit byte] determinism=${determinism} disabled-vs-absent=${delta}`)
+    expect(determinism).toBe(0)
+    expect(delta).toBe(0)
+  })
+
+  // ---- glitch (masked, seeded; amount 0 + scanlines 0 = neutral) ------------------------------
+  const GL_NEUTRAL = { id: 't-gl', kind: 'glitch', enabled: true, invert: false, amount: 0, bands: 12, scanlines: 0, seed: 1 }
+  const GL_ACTIVE = { ...GL_NEUTRAL, amount: 24, scanlines: 0.5 }
+
+  test('glitch applied changes the render (band shift + scanlines)', async ({ page }) => {
+    const r = await maskedFootprint(page, GL_ACTIVE, GL_NEUTRAL)
+    console.log(`[glitch] footprint=${r.footprint} noise=${r.noise}`)
+    expect(r.footprint).toBeGreaterThan(r.noise * 3 + 300)
+  })
+  test('glitch neutral/absent: a disabled glitch is byte-identical to none', async ({ page }) => {
+    const { determinism, delta } = await disabledIsAbsent(page, { ...GL_ACTIVE, enabled: false })
+    console.log(`[glitch byte] determinism=${determinism} disabled-vs-absent=${delta}`)
+    expect(determinism).toBe(0)
+    expect(delta).toBe(0)
+  })
+  test('glitch is deterministic: same seed identical, different seed differs', async ({ page }) => {
+    await openLab(page, twoSpheres([GL_ACTIVE]))
+    expect((await stats(page)).frames).toBeGreaterThan(0)
+    const one = await snapshot(page)
+    const two = await snapshot(page)
+    const same = await boxChangedPixels(page, one, two, FULL_BOX)
+    await openLab(page, twoSpheres([{ ...GL_ACTIVE, seed: 987 }]))
+    const other = await snapshot(page)
+    const diff = await boxChangedPixels(page, one, other, LEFT_BOX)
+    console.log(`[glitch determinism] same-seed=${same} different-seed=${diff}`)
+    expect(same, 'same seed must render identically (no Math.random)').toBe(0)
+    expect(diff, 'a different seed must change the glitch pattern').toBeGreaterThan(300)
+  })
+
+  // ---- dropShadow (masked, opacity 0 = neutral) ----------------------------------------------
+  const SH_NEUTRAL = { id: 't-sh', kind: 'dropShadow', enabled: true, invert: false, angle: 45, distance: 28, color: '#000000', softness: 0.2, opacity: 0 }
+  const SH_ACTIVE = { ...SH_NEUTRAL, opacity: 0.6 }
+
+  test('dropShadow applied changes the render (a dark offset shadow appears)', async ({ page }) => {
+    const r = await maskedFootprint(page, SH_ACTIVE, SH_NEUTRAL, DROP_BOX)
+    const meanA = await boxMeanLuma(page, r.active, DROP_BOX)
+    const meanN = await boxMeanLuma(page, r.neutral, DROP_BOX)
+    console.log(`[dropShadow] footprint=${r.footprint} noise=${r.noise} meanActive=${meanA.toFixed(1)} meanNeutral=${meanN.toFixed(1)}`)
+    expect(r.footprint).toBeGreaterThan(r.noise * 3 + 300)
+    expect(meanA).toBeLessThan(meanN) // the shadow darkens the region around the object
+  })
+  test('dropShadow neutral/absent: a disabled shadow is byte-identical to none', async ({ page }) => {
+    const { determinism, delta } = await disabledIsAbsent(page, { ...SH_ACTIVE, enabled: false })
+    console.log(`[dropShadow byte] determinism=${determinism} disabled-vs-absent=${delta}`)
+    expect(determinism).toBe(0)
+    expect(delta).toBe(0)
+  })
+
+  // ---- dashedOutline (edge shell, plain path) -------------------------------------------------
+  const DO_ACTIVE = { id: 't-do', kind: 'dashedOutline', enabled: true, invert: false, color: '#000000', width: 0.5, dash: 8, gap: 6 }
+
+  test('dashedOutline applied changes the render (a dashed ring on the silhouette)', async ({ page }) => {
+    const errs = watchConsole(page)
+    await openLab(page, twoSpheres())
+    expect((await stats(page)).frames, 'plain scene must take the direct path').toBe(0)
+    const plain = await snapshot(page)
+    await openLab(page, twoSpheres([DO_ACTIVE]))
+    // Edge kinds are shells, not stage groups — they never run the composer stage.
+    expect((await stats(page)).frames, `dashedOutline is a shell, not a stage group; console: ${errs.join(' | ')}`).toBe(0)
+    const shelled = await snapshot(page)
+    const changed = await boxChangedPixels(page, plain, shelled, LEFT_BOX)
+    console.log(`[dashedOutline] changed=${changed}`)
+    expect(changed).toBeGreaterThan(200)
+  })
+  test('dashedOutline neutral/absent: a disabled outline is byte-identical to none', async ({ page }) => {
+    const { determinism, delta } = await disabledIsAbsent(page, { ...DO_ACTIVE, enabled: false })
+    console.log(`[dashedOutline byte] determinism=${determinism} disabled-vs-absent=${delta}`)
+    expect(determinism).toBe(0)
+    expect(delta).toBe(0)
+  })
+
+  // ---- silhouetteCutout (edge shell, plain path) ---------------------------------------------
+  const SC_ACTIVE = { id: 't-sc', kind: 'silhouetteCutout', enabled: true, invert: false, color: '#ffffff', border: 0, borderColor: '#000000' }
+
+  test('silhouetteCutout applied changes the render (fills the silhouette flat)', async ({ page }) => {
+    const errs = watchConsole(page)
+    await openLab(page, twoSpheres())
+    expect((await stats(page)).frames, 'plain scene must take the direct path').toBe(0)
+    const plain = await snapshot(page)
+    const plainMean = await boxMeanLuma(page, plain, LEFT_BOX)
+    await openLab(page, twoSpheres([SC_ACTIVE]))
+    expect((await stats(page)).frames, `silhouetteCutout is a shell, not a stage group; console: ${errs.join(' | ')}`).toBe(0)
+    const filled = await snapshot(page)
+    const changed = await boxChangedPixels(page, plain, filled, LEFT_BOX)
+    const filledMean = await boxMeanLuma(page, filled, LEFT_BOX)
+    console.log(`[silhouetteCutout] changed=${changed} plainMean=${plainMean.toFixed(1)} filledMean=${filledMean.toFixed(1)}`)
+    expect(changed).toBeGreaterThan(1000) // a flat fill repaints most of the silhouette
+    expect(filledMean).toBeGreaterThan(plainMean) // white fill over a mid-tone sphere lifts it
+  })
+  test('silhouetteCutout neutral/absent: a disabled cutout is byte-identical to none', async ({ page }) => {
+    const { determinism, delta } = await disabledIsAbsent(page, { ...SC_ACTIVE, enabled: false })
+    console.log(`[silhouetteCutout byte] determinism=${determinism} disabled-vs-absent=${delta}`)
+    expect(determinism).toBe(0)
+    expect(delta).toBe(0)
+  })
+
+  // ---- crossHatch (buffer, G-buffer reader) ---------------------------------------------------
+  const CH_ACTIVE = { id: 't-ch', kind: 'crossHatch', enabled: true, invert: false, color: '#000000', spacing: 6, angle: 45, threshold: 0.6 }
+
+  test('crossHatch applied changes the render (pen-and-ink lattice raises gradient energy)', async ({ page }) => {
+    const errs = watchConsole(page)
+    await openLab(page, twoSpheres())
+    expect((await stats(page)).frames, 'plain scene must take the direct path').toBe(0)
+    const plainGrad = await boxGradEnergy(page, await snapshot(page), LEFT_BOX)
+    await openLab(page, twoSpheres([CH_ACTIVE]))
+    const s = await stats(page)
+    expect(s.frames, `G-buffer stage never ran; console errors: ${errs.join(' | ')}`).toBeGreaterThan(0)
+    expect(s.groups).toBeGreaterThanOrEqual(1)
+    const hatchedGrad = await boxGradEnergy(page, await snapshot(page), LEFT_BOX)
+    console.log(`[crossHatch] plainGrad=${plainGrad.toFixed(3)} hatchedGrad=${hatchedGrad.toFixed(3)} ratio=${(hatchedGrad / plainGrad).toFixed(2)}`)
+    expect(hatchedGrad).toBeGreaterThan(plainGrad * 3)
+  })
+  test('crossHatch S3 gate: no enabled buffer treatment ⇒ plain path, byte-identical', async ({ page }) => {
+    // docHasGBufferTreatment false ⇔ the G-buffer pass never runs ⇔ frames 0 ⇔ byte-identical.
+    await openLab(page, twoSpheres())
+    expect((await stats(page)).frames).toBe(0)
+    const absent = await snapshot(page)
+    await openLab(page, twoSpheres())
+    const absent2 = await snapshot(page)
+    await openLab(page, twoSpheres([{ ...CH_ACTIVE, enabled: false }]))
+    // A DISABLED buffer treatment is present in the doc but must not run the pass…
+    expect((await stats(page)).frames, 'a disabled crossHatch must not run the G-buffer pass').toBe(0)
+    const doc = await page.evaluate(() => (window as any).__scene3dDoc())
+    expect(doc.objects[0].treatments?.[0]).toMatchObject({ kind: 'crossHatch', enabled: false })
+    const disabled = await snapshot(page)
+    const determinism = await boxChangedPixels(page, absent, absent2, FULL_BOX)
+    const delta = await boxChangedPixels(page, absent, disabled, FULL_BOX)
+    console.log(`[crossHatch gate] determinism=${determinism} disabled-vs-absent=${delta}`)
+    expect(determinism, 'the harness must render the same scene identically across reloads').toBe(0)
+    expect(delta, 'a disabled buffer treatment must leave the frame byte-identical (S3 gate)').toBe(0)
+  })
+  test('crossHatch is deterministic: the same scene renders identically', async ({ page }) => {
+    await openLab(page, twoSpheres([CH_ACTIVE]))
+    expect((await stats(page)).frames).toBeGreaterThan(0)
+    const one = await snapshot(page)
+    const two = await snapshot(page) // same page, second render — a fixed lattice, no Math.random
+    const same = await boxChangedPixels(page, one, two, FULL_BOX)
+    console.log(`[crossHatch determinism] same-scene=${same}`)
+    expect(same, 'the crossHatch lattice must be deterministic (no Math.random)').toBe(0)
+  })
+})
