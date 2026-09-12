@@ -53,15 +53,24 @@ float hash13(vec3 p) {
     p += dot(p, p.zyx + 31.32);
     return fract((p.x + p.y) * p.z);
 }
+vec3 grad3(vec3 p) {
+    return normalize(vec3(hash13(p + 11.0), hash13(p + 47.0), hash13(p + 83.0)) * 2.0 - 1.0);
+}
+// 3D gradient (Perlin-style) noise, in [-1,1] — the natural flowing structure the component's
+// MaterialX noise gives, in place of the earlier blobby value noise.
 float vnoise3(vec3 p) {
     vec3 i = floor(p), f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float n000 = hash13(i + vec3(0.0, 0.0, 0.0)), n100 = hash13(i + vec3(1.0, 0.0, 0.0));
-    float n010 = hash13(i + vec3(0.0, 1.0, 0.0)), n110 = hash13(i + vec3(1.0, 1.0, 0.0));
-    float n001 = hash13(i + vec3(0.0, 0.0, 1.0)), n101 = hash13(i + vec3(1.0, 0.0, 1.0));
-    float n011 = hash13(i + vec3(0.0, 1.0, 1.0)), n111 = hash13(i + vec3(1.0, 1.0, 1.0));
-    return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
-               mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z) * 2.0 - 1.0;
+    vec3 u = f * f * (3.0 - 2.0 * f);
+    float n000 = dot(grad3(i + vec3(0.0, 0.0, 0.0)), f - vec3(0.0, 0.0, 0.0));
+    float n100 = dot(grad3(i + vec3(1.0, 0.0, 0.0)), f - vec3(1.0, 0.0, 0.0));
+    float n010 = dot(grad3(i + vec3(0.0, 1.0, 0.0)), f - vec3(0.0, 1.0, 0.0));
+    float n110 = dot(grad3(i + vec3(1.0, 1.0, 0.0)), f - vec3(1.0, 1.0, 0.0));
+    float n001 = dot(grad3(i + vec3(0.0, 0.0, 1.0)), f - vec3(0.0, 0.0, 1.0));
+    float n101 = dot(grad3(i + vec3(1.0, 0.0, 1.0)), f - vec3(1.0, 0.0, 1.0));
+    float n011 = dot(grad3(i + vec3(0.0, 1.0, 1.0)), f - vec3(0.0, 1.0, 1.0));
+    float n111 = dot(grad3(i + vec3(1.0, 1.0, 1.0)), f - vec3(1.0, 1.0, 1.0));
+    return mix(mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),
+               mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y), u.z) * 1.6;
 }
 
 // The gas field at a point: domain-warped fbm folded by Billow (port of the component's `zze`).
@@ -204,12 +213,12 @@ void main() {
         gasField(vec3(bent, z), freq, drift, u_gasSeed * 7.31, u_billow * 0.9, density, mid, fine);
         float endFade = smoothstep(0.0, 0.11, min(t, 1.0 - t));       // fade the volume's front/back
         float grain = 1.0 - clamp(abs(fine) * 1.6, 0.0, 1.0);
-        float dens = smoothstep(0.12, 0.62, density + macro - cav) * endFade * (0.55 + grain * 0.8);
+        float dens = smoothstep(0.34, 0.86, density + macro - cav) * endFade * (0.55 + grain * 0.8);
         float dust = smoothstep(0.45, 0.75, mid) * endFade * u_dust;
         vec3 col = nebulaRamp(oklVeil, oklGas, oklCore, smoothstep(0.05, 0.75, dens), smoothstep(0.68, 1.0, dens));
         float be = 1.0 - t * 0.45;                            // depth darkening
         float veilTerm = smoothstep(-0.7, 0.3, density) * 0.05 * endFade;
-        vec3 emit = col * (dens * be * 1.3)
+        vec3 emit = col * (dens * be)
                   + coreLin * (pow(dens, 2.4) * (0.5 + u_glow * 1.3) * be)
                   + veilLin * (veilTerm * be);
         float aGain = (0.5 + t * 2.2) * u_density * 0.5;
