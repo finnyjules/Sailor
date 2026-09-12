@@ -153,10 +153,20 @@ void main() {
     float disp = u_dispersion * 0.12;
     vec3 env = vec3(studio(look * (1.0 + disp)), studio(look), studio(look * (1.0 - disp))) * u_environment;
     vec2 refl = v_texCoord + N.xy * 0.18 / asp;
-    vec3 scene = vec3(texture(u_image0, clamp(refl + vec2(disp * 0.5, 0.0), 0.0, 1.0)).r,
-                      texture(u_image0, clamp(refl, 0.0, 1.0)).g,
-                      texture(u_image0, clamp(refl - vec2(disp * 0.5, 0.0), 0.0, 1.0)).b);
-    float sceneLum = dot(scene, vec3(0.299, 0.587, 0.114));
+    // GLOSSY reflection of the layers behind (only the brightness is used, to shade the chrome):
+    // sample the backdrop through a small disc blur, WIDENED where the reflection compresses — the
+    // fast-curving bevel, where fwidth(refl) is large. A sharp mirror of a busy background aliases
+    // into scraggle there; the blur turns it into soft chrome. Base radius eases with Sharpness.
+    float gloss = mix(0.02, 0.004, clamp(u_sharpness, 0.0, 1.0)) + (fwidth(refl.x) + fwidth(refl.y)) * 1.5;
+    vec2 gx = vec2(gloss, 0.0), gy = vec2(0.0, gloss), gd = vec2(gloss, gloss) * 0.70711;
+    vec3 sc = texture(u_image0, clamp(refl, 0.0, 1.0)).rgb * 2.0;
+    sc += texture(u_image0, clamp(refl + gx, 0.0, 1.0)).rgb + texture(u_image0, clamp(refl - gx, 0.0, 1.0)).rgb;
+    sc += texture(u_image0, clamp(refl + gy, 0.0, 1.0)).rgb + texture(u_image0, clamp(refl - gy, 0.0, 1.0)).rgb;
+    sc += texture(u_image0, clamp(refl + gd, 0.0, 1.0)).rgb + texture(u_image0, clamp(refl - gd, 0.0, 1.0)).rgb;
+    sc += texture(u_image0, clamp(refl + vec2(gd.x, -gd.y), 0.0, 1.0)).rgb
+        + texture(u_image0, clamp(refl + vec2(-gd.x, gd.y), 0.0, 1.0)).rgb;
+    sc /= 10.0;
+    float sceneLum = dot(sc, vec3(0.299, 0.587, 0.114));
     float shade = clamp(env.g * 0.85 + sceneLum * 0.35 * u_environment, 0.0, 1.0);
     shade = smoothstep(0.02, 0.9, shade);                              // chrome contrast
     vec3 col = mix(u_darkColor, u_lightColor, shade);
