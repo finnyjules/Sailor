@@ -20,6 +20,30 @@ describe('treatments: model', () => {
     // (constraints.md) and its second character is a hyphen, not a lowercase letter.
     for (const k of TREATMENT_KINDS) expect(TREATMENT_LABELS[k]).toMatch(/^[A-Z]/)
   })
+  it('TREATMENT_KINDS includes colorGrade as a masked kind with a British label', () => {
+    expect(TREATMENT_KINDS).toContain('colorGrade')
+    expect(isMaskedKind('colorGrade')).toBe(true)
+    expect(TREATMENT_LABELS.colorGrade).toBe('Colour grade')
+  })
+})
+
+describe('treatments: colour grade', () => {
+  it('createTreatment seeds neutral defaults, enabled and not inverted, with a fresh id', () => {
+    expect(createTreatment('colorGrade')).toMatchObject({
+      kind: 'colorGrade', enabled: true, invert: false, brightness: 1, contrast: 1, saturation: 1, hue: 0,
+    })
+  })
+  it('is NOT a ramped kind — no progressive/ramp fields', () => {
+    expect(createTreatment('colorGrade')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'cg', kind: 'colorGrade' })).not.toHaveProperty('rampSpace')
+  })
+  it('clamps the three factor dials to 0..2 and hue to -180..180, backfilling from defaults', () => {
+    expect(parseTreatment({ id: 'cg1', kind: 'colorGrade', brightness: 5, contrast: -3, saturation: 9, hue: 400 }))
+      .toMatchObject({ brightness: 2, contrast: 0, saturation: 2, hue: 180 })
+    expect(parseTreatment({ id: 'cg2', kind: 'colorGrade', hue: -400 })).toMatchObject({ hue: -180 })
+    expect(parseTreatment({ id: 'cg3', kind: 'colorGrade' }))
+      .toMatchObject({ brightness: 1, contrast: 1, saturation: 1, hue: 0 })
+  })
 })
 
 describe('treatments: parse', () => {

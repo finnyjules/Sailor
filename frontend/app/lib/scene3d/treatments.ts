@@ -9,7 +9,7 @@
 // Design: docs/superpowers/specs/2026-09-05-scene3d-object-treatments-design.md
 import type { SceneDoc, SceneObject } from './config'
 
-export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade'] as const
+export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade', 'colorGrade'] as const
 export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe'] as const
 /** Stage-rendered treatments that consume the per-frame G-buffer (view-space normals +
  *  depth). Their presence — and ONLY their presence — makes `TreatmentStage` build the
@@ -26,7 +26,7 @@ export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTrea
 /** Human names — UI copy for tree rows, inspector card titles and motion target labels.
  *  Sentence case, never the stored `kind`. */
 export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
-  blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade',
+  blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade', colorGrade: 'Colour grade',
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
   edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear',
 }
@@ -72,6 +72,11 @@ export interface BlurTreatment extends TreatmentBase, RampFields { kind: 'blur';
 export interface GlowTreatment extends TreatmentBase, RampFields { kind: 'glow'; strength: number; threshold: number; tint: string }
 export interface PixelateTreatment extends TreatmentBase, RampFields { kind: 'pixelate'; cellSize: number }
 export interface FadeTreatment extends TreatmentBase, RampFields { kind: 'fade'; opacity: number }
+/** Colour grade over the object alone: brightness/contrast/saturation are ×-factors around
+ *  neutral 1 (1 = unchanged, 0 = black / flat grey / greyscale), hue a rotation in degrees
+ *  about the grey axis (0 = unchanged). Masked like the others so `invert` grades everything
+ *  else instead; NOT ramped — a colour grade covers the object evenly. */
+export interface ColorGradeTreatment extends TreatmentBase { kind: 'colorGrade'; brightness: number; contrast: number; saturation: number; hue: number }
 export interface RimLightTreatment extends TreatmentBase { kind: 'rimLight'; color: string; width: number; strength: number }
 export interface OutlineTreatment extends TreatmentBase { kind: 'outline'; color: string; thickness: number }
 export interface XrayTreatment extends TreatmentBase { kind: 'xray'; color: string; opacity: number }
@@ -93,7 +98,7 @@ export interface DepthFogTreatment extends TreatmentBase { kind: 'depthFog'; col
  *  it modulates brightness, never paints a fixed colour, and ignores the depth silhouette. */
 export interface CurvatureWearTreatment extends TreatmentBase { kind: 'curvatureWear'; amount: number; width: number }
 export type Treatment =
-  | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment
+  | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
   | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
   | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment
 
@@ -104,6 +109,7 @@ export const TREATMENT_DEFAULTS = {
   glow: { strength: 1, threshold: 0.6, tint: '#ffffff', ...RAMP_DEFAULTS },
   pixelate: { cellSize: 12, ...RAMP_DEFAULTS },
   fade: { opacity: 0.5, ...RAMP_DEFAULTS },
+  colorGrade: { brightness: 1, contrast: 1, saturation: 1, hue: 0 },
   rimLight: { color: '#ffffff', width: 0.5, strength: 1 },
   outline: { color: '#000000', thickness: 0.5 },
   xray: { color: '#6fd3ff', opacity: 0.35 },
@@ -189,6 +195,13 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
     }
     case 'pixelate': return { ...base, kind: 'pixelate', cellSize: Math.max(1, Math.round(num(r.cellSize, D.pixelate.cellSize))), ...parseRamp(r) }
     case 'fade': return { ...base, kind: 'fade', opacity: clamp01(num(r.opacity, D.fade.opacity)), ...parseRamp(r) }
+    case 'colorGrade': return {
+      ...base, kind: 'colorGrade',
+      brightness: clampTo(num(r.brightness, D.colorGrade.brightness), 2),
+      contrast: clampTo(num(r.contrast, D.colorGrade.contrast), 2),
+      saturation: clampTo(num(r.saturation, D.colorGrade.saturation), 2),
+      hue: Math.min(180, Math.max(-180, num(r.hue, D.colorGrade.hue))),
+    }
     case 'rimLight': return {
       ...base, kind: 'rimLight', color: str(r.color, D.rimLight.color),
       width: clamp01(num(r.width, D.rimLight.width)), strength: Math.max(0, num(r.strength, D.rimLight.strength)),

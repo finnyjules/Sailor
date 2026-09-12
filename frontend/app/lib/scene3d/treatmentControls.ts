@@ -74,6 +74,14 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         ...rampRows(g),
       ]
       break
+    case 'colorGrade':
+      rows = [
+        slider(g, 'brightness', 'Brightness', 0, 2, 0.01, D.colorGrade.brightness),
+        slider(g, 'contrast', 'Contrast', 0, 2, 0.01, D.colorGrade.contrast),
+        slider(g, 'saturation', 'Saturation', 0, 2, 0.01, D.colorGrade.saturation, 'Zero is greyscale'),
+        slider(g, 'hue', 'Hue', -180, 180, 1, D.colorGrade.hue, 'Rotate the colours around the wheel'),
+      ]
+      break
     case 'rimLight':
       rows = [
         color(g, 'color', 'Colour', D.rimLight.color),

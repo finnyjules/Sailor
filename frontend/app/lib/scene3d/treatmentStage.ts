@@ -114,6 +114,30 @@ export function rampSupport(w: number, h: number, angleDeg: number): number {
   return Math.abs(w * Math.cos(a)) + Math.abs(h * Math.sin(a))
 }
 
+/** Colour grade one linear RGB triple: brightness × factor, contrast around mid-grey 0.5,
+ *  saturation toward Rec.709 luma, then a hue rotation (degrees) about the (1,1,1)/√3 grey
+ *  axis (Rodrigues — a rotation about the grey axis, so neutral greys are left untouched
+ *  and a greyscale result stays grey). Neutral params
+ *  (1,1,1,0) are the identity; saturation 0 is greyscale. Clamped to ≥ 0 so contrast can't
+ *  push a channel to unphysical negative light. Pure; the GLSL in COLORGRADE_FRAG mirrors it
+ *  step for step — keep the two in step. */
+export function colorGradeRGB(
+  rgb: readonly [number, number, number],
+  p: { brightness: number; contrast: number; saturation: number; hue: number },
+): [number, number, number] {
+  let r = rgb[0] * p.brightness, g = rgb[1] * p.brightness, b = rgb[2] * p.brightness
+  r = (r - 0.5) * p.contrast + 0.5; g = (g - 0.5) * p.contrast + 0.5; b = (b - 0.5) * p.contrast + 0.5
+  const l = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  r = l + (r - l) * p.saturation; g = l + (g - l) * p.saturation; b = l + (b - l) * p.saturation
+  const a = p.hue * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), k = 0.5773502691896258
+  const dotK = k * (r + g + b), one = k * dotK * (1 - c)
+  return [
+    Math.max(r * c + k * (b - g) * s + one, 0),
+    Math.max(g * c + k * (r - b) * s + one, 0),
+    Math.max(b * c + k * (g - r) * s + one, 0),
+  ]
+}
+
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 // The base copy that seeds the accumulator: straight alpha in, premultiplied out — every composite
 // after it blends premultiplied-over, so the accumulator must start that way too.
@@ -165,6 +189,26 @@ const PIXELATE_FRAG = `
     vec2 cell = vec2(mix(1.0, uCell, band)) / uResolution;
     vec2 uv = (floor(vUv / cell) + 0.5) * cell;
     gl_FragColor = texture2D(tDiffuse, uv);
+  }`
+// Colour grade over the object's straight-alpha layer, in the same linear light blur and
+// pixelate work in (the stage stays linear-HDR; OutputPass applies ACES at the very end), so
+// no display-space round trip is needed here. Alpha is passed through untouched. GLSL twin of
+// colorGradeRGB() — brightness, contrast around 0.5, saturation toward Rec.709 luma, then a
+// hue rotation about the (1,1,1)/√3 grey axis; clamped ≥ 0.
+const COLORGRADE_FRAG = `
+  uniform sampler2D tDiffuse; uniform float uBrightness; uniform float uContrast;
+  uniform float uSaturation; uniform float uHue;
+  varying vec2 vUv;
+  void main(){
+    vec4 s = texture2D(tDiffuse, vUv);
+    vec3 c = s.rgb * uBrightness;
+    c = (c - 0.5) * uContrast + 0.5;
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(l), c, uSaturation);
+    float a = radians(uHue); float cs = cos(a); float sn = sin(a);
+    const vec3 k = vec3(0.57735026);
+    c = c * cs + cross(k, c) * sn + k * dot(k, c) * (1.0 - cs);
+    gl_FragColor = vec4(max(c, 0.0), s.a);
   }`
 const BRIGHT_FRAG = `
   uniform sampler2D tDiffuse; uniform float uThreshold;
@@ -498,6 +542,9 @@ export class TreatmentStage {
     uRampMin: { value: 0 }, uRampSpan: { value: 1 }, uRampStart: { value: 0 }, uRampEnd: { value: 1 },
   })
   private readonly brightMat = shader(BRIGHT_FRAG, { tDiffuse: { value: null }, uThreshold: { value: 0.6 } })
+  private readonly colorGradeMat = shader(COLORGRADE_FRAG, {
+    tDiffuse: { value: null }, uBrightness: { value: 1 }, uContrast: { value: 1 }, uSaturation: { value: 1 }, uHue: { value: 0 },
+  })
   private readonly glowMergeMat = shader(GLOW_MERGE_FRAG, {
     tBase: { value: null }, tGlow: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uStrength: { value: 1 },
     uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
@@ -763,6 +810,17 @@ export class TreatmentStage {
       this.setRampUniforms(this.pixelateMat, ramp)
       this.pass(this.pixelateMat, dst)
       return { rt: dst, haloPx: cellPx } // device px, like blur's radiusPx — uHaloRadius is in texels
+    }
+    if (t.kind === 'colorGrade') {
+      const dst = this.free(src)
+      const u = this.colorGradeMat.uniforms
+      u.tDiffuse!.value = src.texture
+      u.uBrightness!.value = t.brightness
+      u.uContrast!.value = t.contrast
+      u.uSaturation!.value = t.saturation
+      u.uHue!.value = t.hue
+      this.pass(this.colorGradeMat, dst)
+      return { rt: dst, haloPx: 0 } // a per-pixel transform spreads nothing past the silhouette
     }
     if (t.kind === 'glow') {
       const bright = this.free(src)
@@ -1102,7 +1160,7 @@ export class TreatmentStage {
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }

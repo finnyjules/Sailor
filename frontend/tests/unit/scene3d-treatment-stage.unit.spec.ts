@@ -1,5 +1,34 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB } from '~/lib/scene3d/treatmentStage'
+
+describe('colorGradeRGB', () => {
+  const NEUTRAL = { brightness: 1, contrast: 1, saturation: 1, hue: 0 }
+  const close = (a: readonly number[], b: readonly number[]) => a.forEach((v, i) => expect(v).toBeCloseTo(b[i]!, 5))
+
+  it('neutral params are the identity', () => {
+    close(colorGradeRGB([0.2, 0.6, 0.9], NEUTRAL), [0.2, 0.6, 0.9])
+    close(colorGradeRGB([0, 0, 0], NEUTRAL), [0, 0, 0])
+  })
+  it('saturation 0 collapses to Rec.709 luma (greyscale)', () => {
+    const l = 0.2126 * 0.2 + 0.7152 * 0.6 + 0.0722 * 0.9
+    close(colorGradeRGB([0.2, 0.6, 0.9], { ...NEUTRAL, saturation: 0 }), [l, l, l])
+  })
+  it('brightness scales every channel', () => {
+    close(colorGradeRGB([0.2, 0.4, 0.5], { ...NEUTRAL, brightness: 1.5 }), [0.3, 0.6, 0.75])
+  })
+  it('contrast pivots around mid-grey and clamps below zero', () => {
+    close(colorGradeRGB([0.5, 0.5, 0.5], { ...NEUTRAL, contrast: 2 }), [0.5, 0.5, 0.5])
+    close(colorGradeRGB([0.25, 0.25, 0.25], { ...NEUTRAL, contrast: 2 }), [0, 0, 0]) // (0.25-0.5)*2+0.5 = 0
+  })
+  it('hue rotation leaves a neutral grey untouched and stays clamped non-negative', () => {
+    close(colorGradeRGB([0.4, 0.4, 0.4], { ...NEUTRAL, hue: 120 }), [0.4, 0.4, 0.4])
+    const rotated = colorGradeRGB([0.8, 0.1, 0.1], { ...NEUTRAL, hue: 120 })
+    rotated.forEach((v) => expect(v).toBeGreaterThanOrEqual(0))
+    // a 120° rotation about the grey axis cycles R→G→B, so green should now dominate
+    expect(rotated[1]).toBeGreaterThan(rotated[0]!)
+    expect(rotated[1]).toBeGreaterThan(rotated[2]!)
+  })
+})
 
 describe('blurPasses', () => {
   it('scales the radius with amount and image height', () => {
