@@ -62,7 +62,7 @@ import {
 } from '~/lib/scene3d/config'
 import {
   SCENE_GUIDANCE, sceneBindableControls, sceneAgentControls,
-  scenePrimitiveMacro, SCENE_PRIMITIVE_MACRO_KEY, sceneModifierAwareParams,
+  scenePrimitiveMacro, SCENE_PRIMITIVE_MACRO_KEY,
 } from '~/lib/scene3d/agentControls'
 
 const MEDIA_OPS = new Set(['generateImage', 'editImage', 'removeImageBackground'])
@@ -864,9 +864,9 @@ const scene3dAdapter: PatchAdapter = {
   // whatever the macro created or targeted this run — see sceneMacroTargetIndex.
   // With no macro it resolves to -1 → every relative key dead, which is what the
   // old hard-coded 'layer' prefix could not express.
-  params: (config: any) => sceneModifierAwareParams(makeConfigParams(
+  params: (config: any) => makeConfigParams(
     () => config, () => sceneMacroTargetIndex(config), 'objects', 'id', 'object',
-  ), () => config),
+  ),
   write: (n: any, config: any) => {
     const i = scene3dWidgetIndex(n)
     if (i < 0) return

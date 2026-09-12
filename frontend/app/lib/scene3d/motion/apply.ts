@@ -4,7 +4,6 @@ import { evaluateObjectMotion, evaluateCameraMotion } from './evaluate'
 import type { SceneMotionTrack } from './types'
 import { getByPath, setByPath } from '~/lib/studio/path'
 import { setByIdPath } from '~/lib/studio/idPath'
-import { materializeModifierStackForPath } from '~/lib/scene3d/modifierStack'
 import { trackValue } from '~/lib/studio/track'
 
 // The namespace `ObjectMotion` (the preset/envelope system above) owns. A ControlSpec
@@ -22,12 +21,6 @@ function applyTrack(doc: SceneDoc, track: SceneMotionTrack, t: number, duration:
   if (!path || MOTION_SUBNAMESPACE.test(path)) return
   const value = trackValue(track, t, duration)
   if (path.startsWith('objects.')) {
-    // Materialize-on-write: a legacy object mints modifier motion targets through the read-through
-    // `modifierStackOf` (deterministic `mod:<kind>:0` ids) but has no `modifierStack` ARRAY, so
-    // setByIdPath would refuse and the target would silently no-op. Fold the bag into the stack
-    // (same ids, Vary bag kept) before the write; a no-op for a non-modifier path or an object
-    // that already has a stack.
-    materializeModifierStackForPath(doc, path)
     // ID-addressed: setByIdPath resolves the id (never a bare index) and applies the
     // SAME parent-container guard as the branch below — an unknown id, or a path whose
     // parent doesn't exist, is silently skipped rather than fabricated. See idPath.ts's

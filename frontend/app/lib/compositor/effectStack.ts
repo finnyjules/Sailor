@@ -62,48 +62,10 @@ export interface OffsetEffect { type: 'offset'; distance: number; visible: boole
 export interface RoundCornersEffect { type: 'round_corners'; radius: number; visible: boolean }
 export interface RoughenEffect { type: 'roughen'; amount: number; detail: number; seed: number; visible: boolean }
 
-/** The four paper.js boolean ops the F3 `boolean` effect exposes. Defined here — the effect
- *  stack owns the whole effect vocabulary — and re-used by `booleanGeometry.ts` (the paper
- *  bridge) via a type-only import, so the two never drift. */
-export type BooleanOp = 'unite' | 'subtract' | 'intersect' | 'exclude'
-/** Combine this vector layer's outline with a SIBLING layer's outline (via the F3 sibling
- *  rail, `refLayerId`) using a paper.js boolean op. `refLayerId` is a `StackKey` (`l:<id>`)
- *  mirroring `maskedByKey`; a missing/dangling/self/non-vector ref makes the effect a no-op. */
-export interface BooleanEffect { type: 'boolean'; op: BooleanOp; refLayerId?: string; visible: boolean }
-/** Blend this vector layer's outline TOWARD a SIBLING layer's outline (via the same F3 sibling
- *  rail, `refLayerId`) by `amount` — 0 keeps the layer's own shape, 1 becomes the sibling's
- *  shape (in this layer's frame). The blend maths live in `app/lib/vector/morph.ts` (pure,
- *  synchronous — no paper.js). A missing/dangling/self/non-vector ref, or `amount ≈ 0`, makes
- *  the effect a no-op. */
-export interface MorphEffect { type: 'morph'; amount: number; refLayerId?: string; visible: boolean }
-/** Displace this vector layer's outline through one of four mesh-warp FIELDS (F3), relative
- *  to the layer's own bounding box: `bulge`/`pinch` push the outline out/in radially, `wave`
- *  shears it sinusoidally, `twist` rotates it about the centre. SELF-ONLY — no sibling rail.
- *  The field maths live in `app/lib/compositor/meshWarp.ts` (pure). `amount ≈ 0` is a no-op.
- *  `frequency` is read only by the `wave` field. */
-export interface WarpEffect { type: 'warp'; field: 'bulge' | 'pinch' | 'wave' | 'twist'; amount: number; frequency: number; visible: boolean }
-/** A SOLID directional shadow BODY swept from this vector layer's outline along `angle`
- *  (degrees) for `length` (a fraction of canvas width, ×W to px), filled in `color` BENEATH
- *  the shape's own fill + stroke (F3). SELF-ONLY — no sibling rail. Architecturally unlike the
- *  other geometry kinds: it is not a `d → d` outline transform but a SECOND coloured fill, so
- *  `applyGeometry` no-ops it (it reads the final outline the other kinds built) and the body is
- *  painted directly in `drawLayerContent`. The body maths live in `geometryEffects.longShadowBody`
- *  (pure). `length ≈ 0` paints nothing. */
-export interface LongShadowEffect { type: 'long_shadow'; angle: number; length: number; color: string; visible: boolean }
-/** Fragment this vector layer's outline into Voronoi cells with a `gap` between them (F3), so
- *  the shape reads as shattered tiles filled with its OWN paint. Unlike long shadow this IS a
- *  `d → d` outline transform: `applyGeometry` returns a compound `d` of the gapped, clipped
- *  cells. `cells` sets the fragment count, `gap` the inward shrink per cell (a fraction of
- *  canvas width, ×W to px), `seed` the deterministic scatter. SELF-ONLY — no sibling rail.
- *  The cell maths live in `app/lib/compositor/voronoi.ts` (pure); the clip-to-outline reuses
- *  the warmed paper.js scope in `booleanGeometry.ts`. `cells ≤ 0` or a cold/empty result is a
- *  pass-through (the shape unchanged). */
-export interface ShatterEffect { type: 'shatter'; cells: number; gap: number; seed: number; visible: boolean }
-
 export type LayerEffect =
   | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
   | TornEdgeEffect | FeatherEffect
-  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect | WarpEffect | LongShadowEffect | ShatterEffect
+  | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect
   | PostEffect
 
 /** A stored effect, addressed by a stable id. */
@@ -117,10 +79,9 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow',
-  'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha',
-  'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'rough_edge', 'ink_bleed',
-  'directional_blur', 'radial_blur', 'zoom_blur', 'layer_blur', 'outer_glow', 'drop_shadow',
+  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'inner_shadow',
+  'adjust', 'duotone', 'gradientMap',
+  'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'layer_blur', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
 
 /** Pinned for structural reasons, not convenience:
@@ -135,12 +96,10 @@ export const ORDERABLE_KINDS = EFFECT_ORDER.filter(
   (k): k is Exclude<EffectKind, typeof PINNED_KINDS[number]> => !(PINNED_KINDS as readonly string[]).includes(k),
 )
 
-/** The geometry kinds: they transform a vector layer's outline BEFORE rasterise,
+/** The four geometry kinds: they transform a vector layer's outline BEFORE rasterise,
  *  so they sit in their own region — after the backdrop pins, before every pixel kind —
- *  and reorder only among themselves (`regionOf`, `canReorder`). Contiguous in EFFECT_ORDER.
- *  `boolean` (F3) combines the outline with a sibling layer's outline via paper.js; `morph` (F3)
- *  blends the outline toward a sibling layer's outline. */
-export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow'] as const satisfies readonly EffectKind[]
+ *  and reorder only among themselves (`regionOf`, `canReorder`). Contiguous in EFFECT_ORDER. */
+export const GEOMETRY_KINDS = ['trim', 'offset', 'round_corners', 'roughen'] as const satisfies readonly EffectKind[]
 export const isGeometryKind = (k: EffectKind): boolean =>
   (GEOMETRY_KINDS as readonly string[]).includes(k)
 
@@ -164,34 +123,15 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   offset: 'Offset path',
   round_corners: 'Round corners',
   roughen: 'Roughen',
-  boolean: 'Combine shapes',
-  morph: 'Morph to shape',
-  warp: 'Warp',
-  shatter: 'Shatter',
-  long_shadow: 'Long shadow',
   inner_shadow: 'Inner shadow',
-  inner_glow: 'Inner glow',
-  outer_glow: 'Outer glow',
   adjust: 'Adjust',
-  levels: 'Levels',
-  posterise: 'Posterise',
-  threshold: 'Threshold',
-  invert: 'Invert',
   duotone: 'Duotone',
   gradientMap: 'Gradient map',
-  color_overlay: 'Colour overlay',
-  gradient_overlay: 'Gradient overlay',
-  stroke_from_alpha: 'Stroke from alpha',
-  directional_blur: 'Directional blur',
-  radial_blur: 'Radial blur',
-  zoom_blur: 'Zoom blur',
   bloom: 'Bloom',
   vignette: 'Vignette',
   grain: 'Grain',
   torn_edge: 'Torn edge',
   feather: 'Feather',
-  rough_edge: 'Rough edge',
-  ink_bleed: 'Ink bleed',
   layer_blur: 'Layer blur',
   drop_shadow: 'Drop shadow',
 }
@@ -216,21 +156,6 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   offset: { distance: 0.01, visible: true },
   round_corners: { radius: 0.02, visible: true },
   roughen: { amount: 0.02, detail: 8, seed: 1, visible: true },
-  // No `refLayerId` default: a fresh boolean points at nothing (no-op) until the picker
-  // sets a sibling. `unite` is the least-surprising default op.
-  boolean: { op: 'unite', visible: true },
-  // Like boolean, no `refLayerId` default — a fresh morph is a no-op until the picker sets a
-  // sibling. `amount: 0.5` so it visibly blends halfway once a sibling is chosen.
-  morph: { amount: 0.5, visible: true },
-  // A fresh warp visibly bulges: a positive amount on the radial field, a wave frequency
-  // ready for when the user switches the field to `wave`.
-  warp: { field: 'bulge', amount: 0.3, frequency: 3, visible: true },
-  // A fresh long shadow casts down-right (45°) for 5% of the width in a soft black —
-  // immediately visible against the shape once added; the colour card tunes it.
-  long_shadow: { angle: 45, length: 0.05, color: 'rgba(0,0,0,0.35)', visible: true },
-  // A fresh shatter breaks the shape into a dozen cells with a hairline gap (0.4% of the
-  // width) — visibly fragmented the moment it is added; cells/gap/seed tune it.
-  shatter: { cells: 12, gap: 0.004, seed: 1, visible: true },
 }
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {

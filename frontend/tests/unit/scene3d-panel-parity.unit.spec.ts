@@ -323,11 +323,29 @@ const ANCHOR_LABEL: Record<string, string> = {
   'ui.camera.output': 'Output',
   'ui.background.transparent': 'Transparent',
   'ui.background.color': 'Color',
-  // Geometry — the text editor, the remesh block, and the Cloner's cost readout. Every modifier /
-  // cloner / vary dial moved to the per-modifier inspector (S1 Task 6), so the only ui.cloner.*
-  // anchor left on the schema panel is the cost readout.
+  // Geometry — the text editor, the remesh block, the five modifier group captions,
+  // the four index-valued pickers, and the Cloner's caption + cost readout.
   'ui.geometry.text': 'Text',
   'ui.geometry.mesh': 'Mesh',
+  'ui.mod.group.taper': 'Taper',
+  'ui.mod.group.twist': 'Twist',
+  'ui.mod.group.bend': 'Bend',
+  'ui.mod.group.noise': 'Noise',
+  'ui.mod.group.jitter': 'Jitter',
+  'ui.mod.taperAxis': 'Taper axis',
+  'ui.mod.twistAxis': 'Twist axis',
+  'ui.mod.bendAxis': 'Bend axis',
+  'ui.mod.jitterMode': 'Jitter mode',
+  'ui.cloner.mode': 'Mode',
+  'ui.cloner.axis': 'Around',
+  'ui.cloner.step': 'Step',
+  // Vary. The three pickers borrow MODIFIER_SPECS' own captions (modLabel), so these
+  // read exactly as the spec declares them; the caption and the palette are literals.
+  'ui.cloner.vary': 'Vary',
+  'ui.cloner.varyMode': 'Pattern',
+  'ui.cloner.varyColor': 'Vary colour',
+  'ui.cloner.varyPalette': 'Palette',
+  'ui.cloner.varyColorSpread': 'Spread',
   'ui.cloner.cost': 'Clone cost',
   // Decal
   'ui.decal.text': 'Label',
@@ -1079,30 +1097,69 @@ const GEO_LITERAL: Partial<Record<PrimitiveKind, ReadonlyArray<readonly [string,
   ],
 }
 
-// S1 Task 6 removed the always-on Modifiers and Cloner cards: a modifier's dials now live on the
-// per-modifier inspector (driven by modifierControls(kind), read/written on the stack instance —
-// covered by tests/unit/scene3d-modifier-controls.unit.spec.ts), not on this schema-driven panel.
-// The Geometry card keeps the primitive's own parameters plus the Cloner's cost readout, whose
-// clone COUNT now reads the modifier STACK rather than the legacy bag.
+/** The Modifiers card, as the template laid it out: a lone Subdivide slider, then five
+ *  captioned groups. A caption is an anchor (a plain uppercase `<div>`, not a control);
+ *  an axis/mode picker is an anchor too (it stores an index). */
+const MODIFIERS_ROWS = [
+  `${MOD}subdivide`,
+  'ui.mod.group.taper', `${MOD}taper`, 'ui.mod.taperAxis',
+  'ui.mod.group.twist', `${MOD}twist`, 'ui.mod.twistAxis',
+  'ui.mod.group.bend', `${MOD}bend`, 'ui.mod.bendAxis',
+  'ui.mod.group.noise', `${MOD}noise`, `${MOD}noiseScale`, `${MOD}noiseSeed`,
+  'ui.mod.group.jitter', `${MOD}jitter`, 'ui.mod.jitterMode', `${MOD}jitterSeed`,
+  // NO vary row belongs here. The four numeric ones (varySeed, the two falloff dials,
+  // varyColorStrength) briefly fell through `panelCardOf`'s permissive tail into this
+  // card, ungated, because they are real MODIFIER_SPECS entries; `panelCardOf` now routes
+  // every `vary*` key to Cloner beside the `clone*` keys it varies, and each carries a
+  // VARY_GATE predicate. The three `control: 'options'` ones were never schema rows at
+  // all — they are Cloner anchors now (same as taperAxis and friends).
+] as const
+
+/** The Cloner card, per mode. CLONER_KEYS swapped the placement controls by mode and
+ *  grid dropped `cloneCount` entirely; the Step block and the cost readout follow in
+ *  every mode. */
+const CLONER_ROWS: Record<number, readonly string[]> = {
+  0: [`${MOD}cloneCount`, 'ui.cloner.mode', `${MOD}cloneOffsetX`, `${MOD}cloneOffsetY`, `${MOD}cloneOffsetZ`],
+  1: [`${MOD}cloneCount`, 'ui.cloner.mode', `${MOD}cloneRadius`, 'ui.cloner.axis'],
+  2: [
+    'ui.cloner.mode',
+    `${MOD}cloneCountX`, `${MOD}cloneCountY`, `${MOD}cloneCountZ`,
+    `${MOD}cloneSpacingX`, `${MOD}cloneSpacingY`, `${MOD}cloneSpacingZ`,
+  ],
+}
+const CLONER_TAIL = [
+  'ui.cloner.step',
+  `${MOD}cloneStepRotX`, `${MOD}cloneStepRotY`, `${MOD}cloneStepRotZ`, `${MOD}cloneStepScale`,
+] as const
+
+/** …plus the Vary block and the cost readout, both of which need MORE THAN ONE COPY —
+ *  the readout was gated on `cloneCost` (null at one copy) and Vary has nothing to vary
+ *  across a single object. Grid mode's own defaults are 3 × 1 × 3, so picking it shows
+ *  nine copies straight away and both of them with it.
+ *
+ *  Only three Vary rows show in the default state: the caption, the driver picker, and
+ *  the colour switch. The seed is random-mode only, centre/reach falloff-mode only, and
+ *  the palette / spread / strength appear only once the colour switch is on — those
+ *  states are covered by tests/unit/scene3d-vary-panel.unit.spec.ts. */
+const VARY_ROWS = ['ui.cloner.vary', 'ui.cloner.varyMode', 'ui.cloner.varyColor'] as const
+const clonerRows = (mode: number, manyCopies = mode === 2) =>
+  [...CLONER_ROWS[mode]!, ...CLONER_TAIL, ...(manyCopies ? [...VARY_ROWS, 'ui.cloner.cost'] : [])]
 
 describe('Scene3D panel parity — Geometry', () => {
-  it('draws only the Geometry card for every primitive kind — Modifiers and Cloner are gone', () => {
+  it('draws the Geometry card, then Modifiers and Cloner, for every primitive kind', () => {
     const doc = defaultDoc()
     for (const kind of PRIMITIVE_KINDS) {
       const titles = geometryCards(doc, primOf(kind)).map((s) => s.title)
-      expect(titles, kind).toEqual(['Geometry'])
+      expect(titles, kind).toEqual(['Geometry', 'Modifiers', 'Cloner'])
     }
   })
 
-  it('the Geometry card holds that kind\'s PRIMITIVE_PARAMS rows, in table order (no modifier rows)', () => {
+  it('the Geometry card holds that kind\'s PRIMITIVE_PARAMS rows, in table order', () => {
     const doc = defaultDoc()
     for (const kind of PRIMITIVE_KINDS) {
       const keys = geometryCards(doc, primOf(kind)).find((s) => s.title === 'Geometry')!.keys
       const bespoke = kind === 'text' ? ['ui.geometry.text'] : kind === 'mesh' ? ['ui.geometry.mesh'] : []
-      // A default primitive has no clones, so the cost readout is gated away and no ui.mod.* /
-      // ui.cloner.* / object.modifiers.* row appears at all.
       expect(keys, kind).toEqual([...bespoke, ...PRIMITIVE_PARAMS[kind].map((s) => `${GEO}${s.key}`)])
-      expect(keys.some((k) => k.startsWith('ui.mod.') || k.startsWith('ui.cloner.') || k.startsWith(MOD)), kind).toBe(false)
     }
   })
 
@@ -1194,40 +1251,49 @@ describe('Scene3D panel parity — Geometry', () => {
     expect(keys).toEqual(['ui.geometry.mesh'])
   })
 
-  it('no modifier dial (deformation, cloner placement or vary) is drawn on the schema panel', () => {
+  it('the Modifiers card holds the shipped rows, captions and axis pickers, in order', () => {
     const doc = defaultDoc()
-    // Every modifier param lives on the per-modifier inspector now, so scenePanelControls emits
-    // none of them — not even mode-gated cloner rows — regardless of the object's clone state.
+    const keys = geometryCards(doc, primOf('box')).find((s) => s.title === 'Modifiers')!.keys
+    expect(keys).toEqual([...MODIFIERS_ROWS])
+  })
+
+  it('every modifier row carries MODIFIER_SPECS\' own label, hint, bounds and step', () => {
+    const doc = defaultDoc()
     const rows = byKey(doc, primOf('box'))
     for (const spec of MODIFIER_SPECS) {
-      expect(rows.get(`${MOD}${spec.key}`), spec.key).toBeUndefined()
-    }
-    const cloned = primOf('box') as { modifiers?: Record<string, number> }
-    cloned.modifiers = { cloneCount: 6, cloneMode: 2 }
-    const clonedRows = byKey(doc, cloned as unknown as SceneObject)
-    for (const spec of MODIFIER_SPECS) {
-      expect(clonedRows.get(`${MOD}${spec.key}`), `cloned ${spec.key}`).toBeUndefined()
+      if (spec.control === 'options') continue
+      const c = rows.get(`${MOD}${spec.key}`)
+      if (!c) continue // mode-gated cloner keys: covered by the Cloner cases below
+      expectRow(c, spec.key, {
+        label: spec.label, kind: 'slider', min: spec.min, max: spec.max, step: spec.step, hint: spec.hint,
+      })
     }
   })
 
-  it('the cost readout lands on the Geometry card once there is more than one copy, sourced from the stack', () => {
+  it('the Cloner card swaps its placement rows with the mode, and keeps the Step block', () => {
     const doc = defaultDoc()
-    const geoKeys = (o: SceneObject) => geometryCards(doc, o).find((s) => s.title === 'Geometry')!.keys
-    const one = primOf('box')
-    expect(geoKeys(one)).not.toContain('ui.cloner.cost')
-    // A legacy bag folds into the stack via modifierStackOf, so stackCloneCount sees the count and
-    // the readout appears — proving the gate reads the stack, not a hand-kept bag total.
+    for (const mode of [0, 1, 2]) {
+      const o = primOf('box') as { modifiers?: Record<string, number> }
+      o.modifiers = { cloneMode: mode }
+      const keys = geometryCards(doc, o as unknown as SceneObject).find((s) => s.title === 'Cloner')!.keys
+      expect(keys, `mode ${mode}`).toEqual(clonerRows(mode))
+    }
+  })
+
+  it('the copies/vertices cost readout appears only once there is more than one copy', () => {
+    const doc = defaultDoc()
+    const one = primOf('box') as { modifiers?: Record<string, number> }
+    expect(geometryCards(doc, one as unknown as SceneObject).find((s) => s.title === 'Cloner')!.keys)
+      .not.toContain('ui.cloner.cost')
     const many = primOf('box') as { modifiers?: Record<string, number> }
     many.modifiers = { cloneCount: 4 }
-    const manyKeys = geoKeys(many as unknown as SceneObject)
-    expect(manyKeys).toContain('ui.cloner.cost')
-    expect(manyKeys[manyKeys.length - 1], 'the cost row sits at the foot of the Geometry card').toBe('ui.cloner.cost')
+    expect(geometryCards(doc, many as unknown as SceneObject).find((s) => s.title === 'Cloner')!.keys)
+      .toEqual(clonerRows(0, true))
   })
 
-  it('the Modifiers and Cloner cards no longer appear in the panel chrome', () => {
-    const chrome = scenePanelChrome('standard')
-    expect(chrome.Modifiers).toBeUndefined()
-    expect(chrome.Cloner).toBeUndefined()
+  it('Modifiers and Cloner start collapsed, exactly as the bare <details> did', () => {
+    expect(scenePanelChrome('standard').Modifiers).toEqual({ open: false })
+    expect(scenePanelChrome('standard').Cloner).toEqual({ open: false })
   })
 
   it('no geometry row is offered to a GLB, a light, a decal or an empty selection', () => {
@@ -1625,7 +1691,8 @@ describe('Scene3D panel contract', () => {
       'Coat & sheen': { open: false }, Glow: { open: false },
       Transparency: { open: false }, Iridescence: { open: false }, Reflection: { open: false },
       Screen: { open: false },
-      // Geometry's Modifiers and Cloner sub-cards are gone (S1 Task 6), so no chrome for them.
+      // Geometry's own two bare <details>, collapsed for the same reason.
+      Modifiers: { open: false }, Cloner: { open: false },
     })
     expect(scenePanelChrome('glass').Transparency).toEqual({ open: true })
   })

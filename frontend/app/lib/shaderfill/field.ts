@@ -573,14 +573,22 @@ export function renderFieldWithBase(
   w: number,
   h: number,
   shape?: LensShape,
-  t = 0,   // elapsed/scrub time → u_time; the glass paint path must pass it or an animated
-           // shape-following fill (Chrome, Nebula, Liquid metal…) renders frozen at t=0.
+  t = 0,   // elapsed/scrub time (PRE-speed) → scaled by the fill's Speed below, then u_time;
+           // the glass paint path must pass it or an animated shape-following fill (Chrome,
+           // Nebula, Liquid metal…) renders frozen at t = 0.
 ): HTMLCanvasElement {
   const { effect, spec: resolvedSpec } = resolve(spec)
   if (!effect) {
     throw new Error(`renderFieldWithBase: effect "${spec.effectId}" is not in the loaded shaderfx catalog`)
   }
-  let passes = buildPasses(effect, resolvedSpec, t)
+  // Fold the fill's own Speed (fill.shader.speed) into the clock, exactly as the
+  // resolveField path does below. The glass/Frame paint path is the ONLY way a
+  // shape-following fill renders, so without this its frozen Speed slider is dead
+  // (u_time never scales by speed) and every such fill animates at one fixed rate.
+  // speed 0 = frozen. This is also what lets the single Speed control drive the ~38
+  // effects whose duplicate u_speed slider is now hidden (see derivedShaderFillControls).
+  const sp = typeof resolvedSpec.speed === 'number' ? resolvedSpec.speed : 1
+  let passes = buildPasses(effect, resolvedSpec, sp === 0 ? 0 : t * sp)
   if (shape) passes = passes.map(p => ({ ...p, uniforms: { ...p.uniforms, ...shape.uniforms } }))
   // render() RETURNS the canvas, valid only until the next render call — same
   // ownership contract as resolveField's `rendered` below.

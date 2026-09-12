@@ -18,7 +18,7 @@ bits 29–31 reserved; one dev server; verification through `/dev/scene3d-lab?st
 
 ---
 
-## Slice S1 · The modifier stack  (≈9 tasks) — ✅ LANDED 2026-09-10 (base 7483f7853 → 627a19d14; whole-slice review Approved-with-minors; see 2026-09-09-scene3d-S1-modifier-stack.md + memory scene3d-modifier-stack-landed)
+## Slice S1 · The modifier stack  (≈9 tasks)
 
 **Interfaces produced**
 - `lib/scene3d/modifierStack.ts` (pure): `MODIFIER_KINDS` (`subdivide, taper, twist, bend, noise,
@@ -45,14 +45,14 @@ bits 29–31 reserved; one dev server; verification through `/dev/scene3d-lab?st
 8. Playwright on the lab page: twist-then-bend ≠ bend-then-twist; two twists; legacy doc identical.
 9. Copy + dashboard.
 
-## Slice S2 · New modifiers  (≈10 tasks) — ✅ LANDED 2026-09-10 (base fd58c4b3a → 7ad94f0b8; 11 kinds; whole-slice review Approved-with-minors; see 2026-09-09-scene3d-S2-new-modifiers.md + memory scene3d-modifiers-s2-landed)
+## Slice S2 · New modifiers  (≈10 tasks)
 Shear; spherify/inflate; mirror; radial array; displace by noise/texture; smooth (Laplacian);
 decimate (SimplifyModifier); lattice deform (3×3×3, trilinear); melt; shatter/explode;
 voxelise (voxel module); boolean with a sibling (SDF union/subtract/intersect via the voxel module,
 `refObjectId` like decals' `targetId`). One task each (grouped where trivial), each with a
 known-geometry unit test and the export override-material path checked.
 
-## Slice S3 · Live G-buffer + edge lines, depth fog, curvature wear  (≈7 tasks) — ✅ LANDED 2026-09-10 (base e45630a5a → fef808715; edgeLines/depthFog/curvatureWear; whole-slice review Approved-with-minors; see 2026-09-09-scene3d-S3-gbuffer.md + memory scene3d-gbuffer-treatments-s3-landed)
+## Slice S3 · Live G-buffer + edge lines, depth fog, curvature wear  (≈7 tasks)
 1. `GBufferPass` in the stage: normals via `MeshNormalMaterial` override into an RT, depth from the
    base target; runs only when a consuming treatment exists; byte-identity A/B otherwise.
 2. Edge lines (Sobel over normal+depth; width, threshold, colour) as a masked treatment.

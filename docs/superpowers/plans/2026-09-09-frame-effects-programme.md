@@ -44,7 +44,7 @@ rules are unchanged; UI copy sentence case, human names; `CompositorModal.vue` s
 
 **Acceptance:** tasks 3, 5 and 6 green; every existing text Playwright spec passes unchanged.
 
-## Slice F2 · Geometry region + trim, offset, round corners, roughen  (≈9 tasks) — ✅ LANDED 2026-09-09 (base 56fa11cad → HEAD bcc7cab16; whole-slice review Approved-with-minors; see `2026-09-09-frame-effects-F2-geometry-region.md` and memory `frame-effects-programme`)
+## Slice F2 · Geometry region + trim, offset, round corners, roughen  (≈9 tasks)
 
 **Interfaces produced**
 - `lib/compositor/geometryEffects.ts`: `GEOMETRY_KINDS`, `isGeometryKind`, `applyGeometry(d: string,

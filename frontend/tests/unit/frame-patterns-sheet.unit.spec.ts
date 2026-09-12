@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { sheetFor, variantsFor, tileFor } from '~/lib/frame/patterns/sheet'
 import { PATTERNS, fittingPatterns } from '~/lib/frame/patterns/catalog'
-import { inferElements } from '~/lib/frame/patterns/hierarchy'
 import { ctxFor } from './_poster-fixtures'
 
 describe('sheet model', () => {
@@ -26,15 +25,5 @@ describe('sheet model', () => {
     expect(v).toHaveLength(4)
     expect(new Set(v.map(t => t.seed)).size).toBe(4)
     expect(v.every(t => t.patternId === 'runoff')).toBe(true)
-  })
-  it('offers a generous sheet: more options for a phrase than for a bare word', () => {
-    const word = inferElements([{ id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 }])
-    const phrase = inferElements([{ id: 't', kind: 'text', text: 'SOUND AND THE CITY', fontSize: 0.2 }])
-    const wordTiles = sheetFor(ctxFor({ elements: word }), 7)
-    const phraseTiles = sheetFor(ctxFor({ elements: phrase }), 7)
-    expect(wordTiles.length).toBeGreaterThanOrEqual(6)     // free patterns fit a word
-    expect(phraseTiles.length).toBeGreaterThan(wordTiles.length) // expressive + block add more
-    // no expressive-only pattern leaks into a single-word sheet
-    expect(wordTiles.map(t => t.patternId)).not.toContain('spacedLines')
   })
 })

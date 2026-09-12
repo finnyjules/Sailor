@@ -4,13 +4,10 @@ import { inferElements } from '~/lib/frame/patterns/hierarchy'
 import { ctxFor } from './_poster-fixtures'
 
 describe('catalog', () => {
-  it('registers all patterns with unique ids', () => {
+  it('registers the five patterns with unique ids', () => {
     const ids = PATTERNS.map(p => p.id)
     expect(new Set(ids).size).toBe(ids.length)
-    expect(ids).toEqual(expect.arrayContaining([
-      'runoff', 'statement', 'index', 'shapeCounter', 'photoBehind',
-      'tilt', 'bottomHeavy', 'fourCorners', 'spacedLines', 'ragged', 'edges', 'staircase', 'block',
-    ]))
+    expect(ids).toEqual(expect.arrayContaining(['runoff', 'statement', 'index', 'shapeCounter', 'photoBehind']))
   })
   it('every pattern is deterministic and returns at least a title op', () => {
     for (const p of PATTERNS) {

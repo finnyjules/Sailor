@@ -1,20 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import {
   sceneStackControls, sceneAgentControls, sceneBindableControls, SCENE_GUIDANCE,
-  SCENE_PRIMITIVE_MACRO_KEY, iterateModifierControls, sceneModifierAwareParams,
+  SCENE_PRIMITIVE_MACRO_KEY,
 } from '~/lib/scene3d/agentControls'
 import { SCENE_CONTROLS } from '~/lib/scene3d/controls'
 import {
-  defaultDoc, createPrimitive, createLight, createGroup, createGlbObject,
+  defaultDoc, createPrimitive, createLight,
   MATERIAL_TYPES, PRIMITIVE_KINDS, ENVIRONMENT_KINDS, PLACEABLE_PRIMITIVE_KINDS,
   type SceneDoc, type PrimitiveKind, type MaterialType, type EnvironmentKind,
 } from '~/lib/scene3d/config'
 import { PRIMITIVE_PARAMS } from '~/lib/scene3d/primParams'
 import { createTreatment } from '~/lib/scene3d/treatments'
-import {
-  createModifier, addModifier, writeModifierStack, modifierStackOf,
-} from '~/lib/scene3d/modifierStack'
-import { makeConfigParams } from '~/lib/agent/configParams'
 
 /** Every `WORKED EXAMPLE … {…}` block in the guidance, as `[label, parsed JSON]`.
  *  Balanced-brace scan rather than a regex: the examples nest objects (gradient stops),
@@ -375,163 +371,5 @@ describe('sceneStackControls: treatments', () => {
     ;(light as unknown as { treatments: unknown[] }).treatments = [createTreatment('blur')]
     doc.objects.push(light)
     expect(sceneStackControls(doc).some((c) => c.key.includes('.treatments.'))).toBe(false)
-  })
-})
-
-describe('sceneStackControls / iterateModifierControls: modifiers', () => {
-  /** A new-shape primitive whose modifierStack holds one twist row (fixed id for assertions). */
-  function twistBox(): { doc: SceneDoc; boxId: string; modId: string } {
-    const doc = defaultDoc()
-    const box = createPrimitive('box', doc.objects)
-    box.name = 'Bottle'
-    const twist = { ...createModifier('twist'), id: 'mod_twist_1', twist: 30 }
-    box.modifierStack = writeModifierStack([twist]).modifierStack
-    doc.objects.push(box)
-    return { doc, boxId: box.id, modId: 'mod_twist_1' }
-  }
-
-  it('names every modifier dial absolutely, by object id and modifier id', () => {
-    const { doc, boxId, modId } = twistBox()
-    const keys = sceneStackControls(doc).map((c) => c.key)
-    expect(keys).toContain(`objects.${boxId}.modifierStack.${modId}.twist`)
-    expect(keys).toContain(`objects.${boxId}.modifierStack.${modId}.twistAxis`)
-    const c = sceneStackControls(doc).find((x) => x.key.endsWith(`.${modId}.twist`))!
-    expect(c.label).toBe('Bottle · Twist')
-    expect((c as any).bindable).toBeUndefined()
-  })
-
-  it('a select param (twistAxis) reaches the agent vocab but is NOT a motion target', () => {
-    const { doc, boxId, modId } = twistBox()
-    const axis = sceneStackControls(doc).find((c) => c.key === `objects.${boxId}.modifierStack.${modId}.twistAxis`)
-    expect(axis).toBeTruthy()
-    expect(axis!.kind).toBe('select')
-    // optionLabels are stripped from the agent vocab — the model writes raw option values.
-    expect((axis as any).optionLabels).toBeUndefined()
-  })
-
-  it('folds a LEGACY bag into deterministic-id modifier controls (no writes on read)', () => {
-    const doc = defaultDoc()
-    const box = createPrimitive('box', doc.objects)
-    box.modifiers = { twist: 90, bend: 45 }
-    doc.objects.push(box)
-    const keys = sceneStackControls(doc).map((c) => c.key)
-    expect(keys).toContain(`objects.${box.id}.modifierStack.mod:twist:0.twist`)
-    expect(keys).toContain(`objects.${box.id}.modifierStack.mod:bend:0.bend`)
-    // Read-through mints controls without ever writing the array onto the object.
-    expect((box as any).modifierStack).toBeUndefined()
-  })
-
-  it('a duplicate modifier (two twists) mints two distinct addressable controls', () => {
-    const doc = defaultDoc()
-    const box = createPrimitive('box', doc.objects)
-    let stack = addModifier([], 'twist')
-    stack = addModifier(stack, 'twist')
-    box.modifierStack = stack
-    doc.objects.push(box)
-    const twistKeys = sceneStackControls(doc)
-      .map((c) => c.key)
-      .filter((k) => k.startsWith(`objects.${box.id}.modifierStack.`) && k.endsWith('.twist'))
-    expect(twistKeys).toHaveLength(2)
-    expect(new Set(twistKeys).size).toBe(2)
-    expect(twistKeys[0]).toContain(stack[0]!.id)
-    expect(twistKeys[1]).toContain(stack[1]!.id)
-  })
-
-  it('GLB, light and group objects mint no modifier controls', () => {
-    const doc = defaultDoc()
-    const glb = createGlbObject('http://x/y.glb', doc.objects)
-    const light = createLight('point', doc.objects)
-    const group = createGroup(doc.objects)
-    // Even a stray modifierStack on a non-primitive is ignored.
-    ;(glb as any).modifierStack = [createModifier('twist')]
-    ;(light as any).modifiers = { twist: 90 }
-    doc.objects.push(glb, light, group)
-    expect(sceneStackControls(doc).some((c) => c.key.includes('.modifierStack.'))).toBe(false)
-  })
-
-  it('modifier dials reach the agent stack but never the Collections bind menu', () => {
-    const { doc } = twistBox()
-    expect(sceneStackControls(doc).some((c) => c.key.includes('.modifierStack.'))).toBe(true)
-    expect(sceneBindableControls(doc).filter((c) => c.key.includes('.modifierStack.'))).toEqual([])
-  })
-
-  it('reordering rows keeps each control addressing its own row by id', () => {
-    const doc = defaultDoc()
-    const box = createPrimitive('box', doc.objects)
-    box.modifierStack = [
-      { ...createModifier('twist'), id: 'mA', twist: 10 },
-      { ...createModifier('bend'), id: 'mB', bend: 20 },
-    ]
-    doc.objects.push(box)
-    // Swap the two rows: the ids travel with them, so the control keys are unchanged.
-    box.modifierStack = [box.modifierStack[1]!, box.modifierStack[0]!]
-    const keys = sceneStackControls(doc).map((c) => c.key)
-    expect(keys).toContain(`objects.${box.id}.modifierStack.mA.twist`)
-    expect(keys).toContain(`objects.${box.id}.modifierStack.mB.bend`)
-  })
-
-  it('iterateModifierControls visits with the live modifier instance', () => {
-    const { doc, modId } = twistBox()
-    const seen: string[] = []
-    iterateModifierControls(doc, (_c, _obj, _id, mod) => { if (mod.id === modId) seen.push(mod.kind) })
-    expect(seen.length).toBeGreaterThan(0)
-    expect(new Set(seen)).toEqual(new Set(['twist']))
-  })
-})
-
-describe('agent apply: modifier writes (materialize on edit + option/index coercion)', () => {
-  // The SAME params proxy the scene adapter wires (studioTune.ts): absolute id paths, no live
-  // selection (relative prefix resolves to -1, unused here).
-  const paramsFor = (config: SceneDoc) =>
-    sceneModifierAwareParams(makeConfigParams(() => config, () => -1, 'objects', 'id', 'object'), () => config)
-
-  it('materializes a LEGACY bag on write, lands the twist row, and keeps the Vary bag', () => {
-    const doc = defaultDoc()
-    const box = createPrimitive('box', doc.objects)
-    box.modifiers = { twist: 90, varyColorStrength: 0.7 }
-    doc.objects.push(box)
-    const params = paramsFor(doc)
-    params[`objects.${box.id}.modifierStack.mod:twist:0.twist`] = 45
-    const out = doc.objects[0] as any
-    expect(Array.isArray(out.modifierStack)).toBe(true)
-    expect(out.modifierStack.find((r: any) => r.id === 'mod:twist:0').twist).toBe(45)
-    // materialize KEEPS the legacy bag, so the Vary material uniform survives the first edit.
-    expect(out.modifiers.varyColorStrength).toBe(0.7)
-  })
-
-  it('lands on a NEW-shape object without re-folding — the row id is untouched', () => {
-    const doc = defaultDoc()
-    const box = createPrimitive('box', doc.objects)
-    box.modifierStack = [{ ...createModifier('twist'), id: 'mod_t', twist: 0 }]
-    doc.objects.push(box)
-    const params = paramsFor(doc)
-    params[`objects.${box.id}.modifierStack.mod_t.twist`] = 30
-    const out = doc.objects[0] as any
-    expect(out.modifierStack).toHaveLength(1)
-    expect(out.modifierStack[0].id).toBe('mod_t')
-    expect(out.modifierStack[0].twist).toBe(30)
-  })
-
-  it('coerces an axis SELECT option back to its stored INDEX, and reads the index back as the option', () => {
-    const doc = defaultDoc()
-    const box = createPrimitive('box', doc.objects)
-    box.modifierStack = [{ ...createModifier('twist'), id: 'mod_t', twist: 10, twistAxis: 1 }]
-    doc.objects.push(box)
-    const params = paramsFor(doc)
-    const key = `objects.${box.id}.modifierStack.mod_t.twistAxis`
-    params[key] = 'z' // the option string the model was offered
-    expect((doc.objects[0] as any).modifierStack[0].twistAxis).toBe(2) // stored as the numeric index
-    expect(params[key]).toBe('z') // read renders the stored index back to its option
-  })
-
-  it('leaves a non-modifier path alone (no materialize, plain write-through)', () => {
-    const doc = defaultDoc()
-    const box = createPrimitive('box', doc.objects)
-    box.modifiers = { twist: 90 }
-    doc.objects.push(box)
-    const params = paramsFor(doc)
-    params[`objects.${box.id}.material.roughness`] = 0.5
-    expect((doc.objects[0] as any).modifierStack).toBeUndefined()
-    expect((doc.objects[0] as any).material.roughness).toBe(0.5)
   })
 })

@@ -29,10 +29,6 @@ import {
   type Polyline,
 } from '~/lib/vector/pathOps'
 import { offsetPolyline } from '~/lib/compositor/strokeShapes'
-import { pathBoolean, pathIntersect, isPaperWarm, warmPaperBoolean, booleanOpOf } from '~/lib/compositor/booleanGeometry'
-import { blendPath } from '~/lib/vector/morph'
-import { warpPathD, bboxOfPolylines, type WarpField } from '~/lib/compositor/meshWarp'
-import { voronoiCells } from '~/lib/compositor/voronoi'
 
 // The per-kind interfaces live in effectStack (it owns the whole effect vocabulary and the
 // LayerEffect union). Re-export them here so a consumer can `import type { TrimEffect } from
@@ -42,12 +38,6 @@ export type {
   OffsetEffect,
   RoundCornersEffect,
   RoughenEffect,
-  BooleanEffect,
-  BooleanOp,
-  MorphEffect,
-  WarpEffect,
-  LongShadowEffect,
-  ShatterEffect,
 } from './effectStack'
 export { GEOMETRY_KINDS, isGeometryKind } from './effectStack'
 
@@ -67,28 +57,8 @@ export const GEOMETRY_EFFECT_DEFAULTS = Object.fromEntries(
 ) as Record<(typeof GEOMETRY_KINDS)[number], Record<string, unknown>>
 
 // ── input shape ──────────────────────────────────────────────────────────────
-/** A sibling outline delivered into the transform, in THIS layer's own outline units — the
- *  return of `makeSiblingOutlineResolver` in `siblingRef.ts`. `subKey` is a stable signature
- *  the cache folds in so moving either layer (or the sibling's own geometry changing)
- *  re-renders. */
-export interface ResolvedSibling { d: string; W: number; subKey: string }
-/**
- * `applyGeometry`'s options.
- *
- * `resolveSibling` is the F3 sibling-reference SEAM: a geometry effect that carries a
- * `refLayerId` (a `StackKey` mirroring `maskedByKey`) resolves its partner's outline through
- * this closure, which the `drawLayerContent` boundary builds bound to the current layer. It is
- * CONSUMED STARTING F3 TASK 2 (boolean) — the current four kinds ignore it, so passing it is
- * inert and output is byte-identical whether or not it is supplied. Its only effect today is
- * on the CACHE KEY: an effect carrying a `refLayerId` folds that key (and, when resolvable, the
- * resolved sibling's `subKey`) into the cache key, so Task 2 does not have to re-touch the
- * cache. With no such effect present the key is exactly as before.
- */
-export interface GeometryContext {
-  W: number
-  resolveSibling?: (key: string) => ResolvedSibling | null
-}
-type GeometryEffectInput = { type: string; visible?: boolean; refLayerId?: string; [k: string]: unknown }
+export interface GeometryContext { W: number }
+type GeometryEffectInput = { type: string; visible?: boolean; [k: string]: unknown }
 
 const num = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback
@@ -384,208 +354,6 @@ function applyRoundCorners(d: string, e: GeometryEffectInput, ctx: GeometryConte
   return subs.map(sub => roundSubpathD(sub, radiusPx)).filter(Boolean).join(' ')
 }
 
-// ── boolean (F3) ───────────────────────────────────────────────────────────────
-//
-// Combine this layer's outline with a SIBLING layer's outline via a paper.js boolean op
-// (unite / subtract / intersect / exclude). The partner outline arrives through the F3 sibling
-// rail: `e.refLayerId` (a `StackKey`) is resolved by `ctx.resolveSibling` into the sibling's
-// `d` ALREADY in this layer's own outline units (see `siblingRef.ts`), so no transform happens
-// here. A missing / dangling / self / non-vector / cyclic ref makes `resolveSibling` return
-// `null`, and the effect is a NO-OP (returns `d` unchanged) — it never throws.
-//
-// paper is loaded lazily (`booleanGeometry.ts`): on the first boolean of a session it is not
-// yet warm, so `pathBoolean` returns `d` unchanged for one frame and kicks the warm; the
-// compositor's `onPaperBooleanReady` → `renderStack` nudge repaints with the real result. The
-// cache key folds `isPaperWarm()` (see `applyGeometry`) so that cold no-op frame is never
-// served after paper loads.
-function applyBoolean(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
-  const ref = typeof e.refLayerId === 'string' ? e.refLayerId : ''
-  if (!ref) return d // no sibling chosen yet
-  const sib = ctx.resolveSibling?.(ref)
-  if (!sib || !sib.d) return d // dangling / self / non-vector / cycle → no-op
-  return pathBoolean(d, sib.d, booleanOpOf(e.op))
-}
-
-// ── morph (F3) ───────────────────────────────────────────────────────────────
-//
-// Blend this layer's outline TOWARD a SIBLING layer's outline by `amount` — 0 keeps the
-// layer's own shape, 1 becomes the sibling's shape (in this layer's own frame). The partner
-// outline arrives through the same F3 sibling rail as boolean: `e.refLayerId` (a `StackKey`)
-// is resolved by `ctx.resolveSibling` into the sibling's `d` ALREADY in this layer's outline
-// units (see `siblingRef.ts`), so no transform happens here. A missing / dangling / self /
-// non-vector / cyclic ref makes `resolveSibling` return `null`, and the effect is a NO-OP.
-//
-// The blend engine (`app/lib/vector/morph.ts`, pure + synchronous — no paper.js warm needed)
-// only byte-preserves the self `d` at t=0 when both outlines share a command skeleton; the
-// resampled branch returns a RESAMPLED (visually-identical, not byte-identical) `d` even at
-// t=0. So we SHORT-CIRCUIT `amount ≤ MORPH_EPS → return d`: a cheap exact no-op that also
-// spares a just-added morph (amount default 0.5, but 0 before the user dials it up on some
-// paths) the pointless resample drift when it is effectively off.
-const MORPH_EPS = 1e-4
-function applyMorph(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
-  const amount = num(e.amount, 0)
-  if (amount <= MORPH_EPS) return d // effectively self — exact no-op, avoids resample drift
-  const ref = typeof e.refLayerId === 'string' ? e.refLayerId : ''
-  if (!ref) return d // no sibling chosen yet
-  const sib = ctx.resolveSibling?.(ref)
-  if (!sib || !sib.d) return d // dangling / self / non-vector / cycle → no-op
-  return blendPath(d, sib.d, amount)
-}
-
-// ── warp (F3) ──────────────────────────────────────────────────────────────────
-//
-// Displace this layer's outline through one of four mesh-warp FIELDS (bulge / pinch / wave /
-// twist), relative to the layer's OWN bounding box — the maths live in `meshWarp.ts` (pure).
-// SELF-ONLY: no sibling rail, so `ctx` is unused. Because the field normalises to bbox-relative
-// coordinates, the warp is bbox-relative and needs no `W` (unlike offset/roughen/round). The
-// `amount ≈ 0` short-circuit returns `d` BY REFERENCE — `warpPathD` would otherwise reserialise
-// the flattened outline (curves become polylines), so the no-op must not reach it.
-const WARP_EPS = 1e-4
-const WARP_FIELDS: readonly WarpField[] = ['bulge', 'pinch', 'wave', 'twist']
-function applyWarp(d: string, e: GeometryEffectInput): string {
-  const amount = num(e.amount, 0)
-  if (Math.abs(amount) <= WARP_EPS) return d // effectively off — exact no-op, no reserialise
-  const field: WarpField = WARP_FIELDS.includes(e.field as WarpField) ? (e.field as WarpField) : 'bulge'
-  const frequency = num(e.frequency, 3)
-  return warpPathD(d, field, { amount, frequency })
-}
-
-// ── long shadow / extrude (F3) ─────────────────────────────────────────────────
-//
-// ARCHITECTURALLY DIFFERENT from every other geometry kind: it is NOT a `d → d` outline
-// transform but a SECOND coloured fill (the shadow BODY) painted BENEATH the shape. So its
-// `applyOne` case is a pure NO-OP (`return d`) — it must never corrupt the outline the other
-// kinds build; `long_shadow` sits LAST in the geometry band precisely so it reads the FINAL
-// outline. The body is produced by `longShadowBody` below and painted in `drawLayerContent`.
-//
-// `longShadowBody(d, angleRad, lengthPx)` builds the solid swept body from a vector outline —
-// the classic canvas long-shadow trick, PURE and paper-free. The swept solid of a shape
-// translated by `t = (cos·len, sin·len)` is the Minkowski sum `P ⊕ [0,t]`, which decomposes
-// EXACTLY into: the shape itself, the shape translated by `t`, and — for every outline edge —
-// the parallelogram (quad) it sweeps. Emitting all of those as ONE compound path and filling
-// NONZERO merges the overlapping pieces into a single seamless solid — PROVIDED every emitted
-// subpath winds the SAME way, or two opposite windings would cancel to a hole. So every quad
-// and cap is normalised to POSITIVE orientation (shoelace), after which nonzero coverage is
-// simply "inside ≥ 1 subpath" everywhere the body covers and 0 outside: no seams, no holes,
-// concave shapes included. Holes in the source shape are filled in the body (a solid
-// silhouette) — the "reasonable" reading the brief asks for; the shape painted on top still
-// shows its own hole.
-//
-// Open subpaths (e.g. a trimmed ring) have no interior, so they contribute only edge quads
-// (no cap ring, no closing edge) — the ribbon the polyline sweeps. `lengthPx ≤ 0` or a
-// non-finite length yields an empty body (the caller also gates the paint on `length > 0`).
-function orientPositive(pts: Pt2[]): Polyline {
-  return { pts: shoelace(pts) < 0 ? [...pts].reverse() : pts, closed: true }
-}
-
-export function longShadowBody(d: string, angleRad: number, lengthPx: number): string {
-  // A non-finite length has no body. At length 0 the sweep vector is zero: the quads collapse
-  // and the caps coincide, so the body IS the shape (the Minkowski sum with a zero segment) —
-  // the caller gates the PAINT on `length > 0`, so a zero-length shadow is simply never drawn.
-  if (!Number.isFinite(lengthPx)) return ''
-  const tx = Math.cos(angleRad) * lengthPx
-  const ty = Math.sin(angleRad) * lengthPx
-  const subs = flatten(d)
-  const parts: Polyline[] = []
-  for (const sub of subs) {
-    const pts = dedupeConsecutive(sub.pts)
-    if (pts.length < 2) continue
-    const n = pts.length
-    // Caps: a closed ring contributes its own fill at both ends of the sweep; an open
-    // polyline has no interior, so it gets none (only the swept edge quads below).
-    if (sub.closed && n >= 3) {
-      parts.push(orientPositive(pts.map(p => ({ x: p.x, y: p.y }))))
-      parts.push(orientPositive(pts.map(p => ({ x: p.x + tx, y: p.y + ty }))))
-    }
-    const edgeCount = sub.closed ? n : n - 1
-    for (let i = 0; i < edgeCount; i++) {
-      const a = pts[i]!, b = pts[(i + 1) % n]!
-      parts.push(orientPositive([
-        { x: a.x, y: a.y },
-        { x: b.x, y: b.y },
-        { x: b.x + tx, y: b.y + ty },
-        { x: a.x + tx, y: a.y + ty },
-      ]))
-    }
-  }
-  return toPathD(parts)
-}
-
-// ── shatter (F3) ───────────────────────────────────────────────────────────────
-//
-// Fragment the outline into Voronoi cells with a gap, so the shape reads as shattered tiles
-// filled with its OWN paint. Unlike long_shadow this IS a `d → d` transform: it returns a
-// COMPOUND `d` of the gapped, clipped cells, which `drawLayerContent` fills exactly as it fills
-// any computed outline (the cells are disjoint after the inward gap, so any fill rule paints
-// them all). SELF-ONLY — `ctx.resolveSibling` is unused.
-//
-// CONSTRUCTION: (1) scatter `cells` seed points inside the outline's bbox with the SAME
-// deterministic integer hash `roughen` uses (`seededNoise` — no `Math.random`, so a saved
-// shatter renders identically every frame); (2) compute their Voronoi cells (pure, no
-// dependency — `voronoi.ts` half-plane intersection) clipped to a padded bbox; (3) clip each
-// convex cell to the possibly-concave outline via the warmed paper.js scope (`pathIntersect`,
-// sharing `booleanGeometry`'s warm infra with the boolean effect); (4) shrink each surviving
-// piece inward by `gap·W` with the winding-aware `offsetPolyline` (the same tool F2 offset uses)
-// to open the gap, dropping a piece that vanishes under the shrink.
-//
-// PASS-THROUGH (returns `d` unchanged, never blanks the shape): `cells ≤ 0`; a degenerate bbox;
-// paper not yet warm (the first shatter kicks the warm and the `onPaperBooleanReady` nudge
-// repaints — the `applyGeometry` cache folds `isPaperWarm()` by kind so the cold frame is never
-// served after paper loads); or every cell clipped/shrunk to nothing.
-const SHATTER_MAX_CELLS = 96 // O(n³) Voronoi is microseconds here; cap so an absurd count can't stall render
-const SHATTER_MIN_AREA = 1e-3 // px²: a shrunk piece below this (or winding-flipped) has vanished
-
-function polyArea(pts: readonly Pt2[]): number {
-  return shoelace(pts) / 2
-}
-
-function applyShatter(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
-  const cells = Math.round(num(e.cells, 12))
-  if (cells <= 0) return d
-  if (!isPaperWarm()) { void warmPaperBoolean(); return d } // cold: one-frame pass-through, warm kicked
-  const subs = flatten(d)
-  const box = bboxOfPolylines(subs)
-  if (!box || !(box.w > 0) || !(box.h > 0)) return d // no area to fragment
-
-  const seed = Math.round(num(e.seed, 1))
-  const n = Math.min(SHATTER_MAX_CELLS, cells)
-  // Scatter seeds uniformly in the bbox via the deterministic hash (x from an even index, y
-  // from the odd neighbour — different integers, so the hash decorrelates the two coordinates).
-  const points: Pt2[] = []
-  for (let i = 0; i < n; i++) {
-    const ux = (seededNoise(i * 2, seed) + 1) / 2
-    const uy = (seededNoise(i * 2 + 1, seed) + 1) / 2
-    points.push({ x: box.minX + ux * box.w, y: box.minY + uy * box.h })
-  }
-  // Pad the Voronoi rect beyond the bbox so boundary cells fully cover the shape edge; the clip
-  // to the outline (below) makes the exact padding irrelevant as long as it contains the shape.
-  const pad = Math.max(box.w, box.h) * 0.5 + 1
-  const rect = { x0: box.minX - pad, y0: box.minY - pad, x1: box.minX + box.w + pad, y1: box.minY + box.h + pad }
-  const vcells = voronoiCells(points, rect)
-
-  const gapPx = Math.max(0, num(e.gap, 0)) * ctx.W
-  const out: Polyline[] = []
-  for (const cell of vcells) {
-    if (!cell || cell.length < 3) continue
-    const cellD = toPathD([{ pts: cell, closed: true }])
-    const clipped = pathIntersect(cellD, d) // cell ∩ shape; '' when the cell lies outside the shape
-    if (!clipped) continue
-    for (const piece of flatten(clipped)) {
-      if (piece.pts.length < 3) continue
-      if (gapPx <= 0) { out.push({ pts: piece.pts.map(p => ({ ...p })), closed: true }); continue }
-      const shrunk = offsetPolyline(piece.pts, true, -gapPx)
-      if (shrunk.length < 3) continue // collapsed under the shrink
-      const before = polyArea(piece.pts)
-      const after = polyArea(shrunk as Pt2[])
-      // Vanished: the inward shrink flipped the winding (over-shot the inradius) or left no area.
-      if (Math.abs(after) < SHATTER_MIN_AREA || Math.sign(after) !== Math.sign(before)) continue
-      out.push({ pts: (shrunk as Pt2[]).map(p => ({ x: p.x, y: p.y })), closed: true })
-    }
-  }
-  if (out.length === 0) return d // nothing survived — pass-through rather than blank the shape
-  return toPathD(out)
-}
-
 // ── dispatch ──────────────────────────────────────────────────────────────────
 function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): string {
   switch (e.type) {
@@ -593,13 +361,6 @@ function applyOne(d: string, e: GeometryEffectInput, ctx: GeometryContext): stri
     case 'roughen': return applyRoughen(d, e, ctx)
     case 'offset': return applyOffset(d, e, ctx)
     case 'round_corners': return applyRoundCorners(d, e, ctx)
-    case 'boolean': return applyBoolean(d, e, ctx)
-    case 'morph': return applyMorph(d, e, ctx)
-    case 'warp': return applyWarp(d, e)
-    case 'shatter': return applyShatter(d, e, ctx)
-    // long_shadow is a SECOND fill painted in drawLayerContent, not an outline transform —
-    // a pure no-op here so it never corrupts the outline the other geometry kinds build.
-    case 'long_shadow': return d
     default: return d
   }
 }
@@ -625,31 +386,7 @@ export function applyGeometry(
   const enabled = effects.filter(e => isGeometryKind(e.type as EffectKind) && e.visible !== false)
   if (enabled.length === 0) return d // identity — same reference
 
-  // F3 seam: fold each sibling reference into the cache key SHAPE now, so Task 2's boolean does
-  // not restructure the cache. An effect's `refLayerId` (+ the resolved sibling's `subKey`, when
-  // a resolver is supplied and the reference is live) enters the key; a dangling ref contributes
-  // only its raw key. NONE of the current four kinds carry a `refLayerId`, so `refSuffix` is ''
-  // and the key — and therefore every cache hit and the returned string — is exactly as before:
-  // the seam is provably inert (see the byte-identity unit test).
-  let refSuffix = ''
-  for (const e of enabled) {
-    // `shatter` is self-only (no `refLayerId`), yet its output flips when paper warms — before
-    // that `applyShatter` passes `d` through. Fold the warm flag by KIND, UNCONDITIONALLY (unlike
-    // boolean's `bwarm`, which only matters with a live sibling), so the cold pass-through frame's
-    // cached `d` is never returned after paper loads. No shatter present ⇒ this never fires ⇒
-    // `refSuffix` stays '' ⇒ the key (and every cache hit) is byte-identical to HEAD.
-    if (e.type === 'shatter') refSuffix += `swarm:${isPaperWarm() ? 1 : 0}`
-    const ref = typeof e.refLayerId === 'string' ? e.refLayerId : ''
-    if (!ref) continue
-    // A boolean only runs its paper op once paper is WARM; before that `applyBoolean` returns
-    // `d` unchanged. Fold the warm flag into the key so the cold no-op frame's cached `d` is
-    // never returned after paper loads — the key flips false→true, forcing a real recompute.
-    // (No boolean effect ⇒ no `refLayerId` ⇒ this whole loop no-ops ⇒ key identical to HEAD.)
-    if (e.type === 'boolean') refSuffix += `bwarm:${isPaperWarm() ? 1 : 0}`
-    const resolved = ctx.resolveSibling?.(ref)
-    refSuffix += `ref:${e.type}:${ref}:${resolved ? resolved.subKey : '∅'}`
-  }
-  const key = `${ctx.W}${d}${JSON.stringify(enabled)}${refSuffix}`
+  const key = `${ctx.W}${d}${JSON.stringify(enabled)}`
   const hit = cache.get(key)
   if (hit !== undefined) {
     cache.delete(key)

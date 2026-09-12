@@ -187,6 +187,17 @@ export function getShaderFillControls(): ControlSpec[] {
 export function derivedShaderFillControls(effect: EffectDef, prefix: string): ControlSpec[] {
   const out: ControlSpec[] = []
   for (const p of effect.params) {
+    // The fill's frozen `speed` control (fill.shader.speed, shaderFillControls above)
+    // already scales u_time, which an animated frag multiplies by u_speed — so ALSO
+    // surfacing the effect's own u_speed here paints a SECOND "Speed" slider that
+    // compounds with the frozen one (all ~38 animated catalog effects declare u_speed).
+    // Skip it; u_speed stays at its manifest default when hidden (toUniforms fills it),
+    // so each effect keeps its tuned baseline rate at speed = 1 and the frozen Speed
+    // scales from there. The exception is an effect whose u_speed DEFAULT is 0
+    // (kaleidoscope, mirror, pinch_bulge): there u_speed is the ONLY motion switch —
+    // the frag is frozen until it is raised, and the frozen speed cannot un-freeze it
+    // (0 × anything = 0) — so it must stay editable.
+    if (p.uniform === 'u_speed' && Number(p.default) !== 0) continue
     const key = `${prefix}.params.${unprefixedKey(p.uniform)}`
     if (p.type === 'color') {
       // `ControlSpec`'s own `color` kind — a scalar hex string, the same

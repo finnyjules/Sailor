@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { createPrimitive } from '~/lib/scene3d/config'
 import { createTreatment } from '~/lib/scene3d/treatments'
 import {
-  syncTreatmentShells, isTreatmentShell, ownMeshes, beginDataPassView, SURFACE_HIDDEN_LAYER, dashPatternOn,
+  syncTreatmentShells, isTreatmentShell, ownMeshes, beginDataPassView, SURFACE_HIDDEN_LAYER,
 } from '~/lib/scene3d/treatmentShells'
 
 function primitiveRoot(): { mesh: THREE.Mesh; obj: ReturnType<typeof createPrimitive> } {
@@ -96,37 +96,6 @@ describe('syncTreatmentShells', () => {
     syncTreatmentShells(mesh, obj, { lightView: true })
     expect(mesh.material).toBe(real)
   })
-  it('dashedOutline rides the inverted-hull outline shell (one BackSide shell, dash uniforms fed)', () => {
-    const { mesh, obj } = primitiveRoot()
-    const dash = createTreatment('dashedOutline') as Extract<ReturnType<typeof createTreatment>, { kind: 'dashedOutline' }>
-    obj.treatments = [dash]
-    syncTreatmentShells(mesh, obj, { lightView: false })
-    expect(kinds(mesh)).toEqual(['dashedOutline'])
-    const shell = shells(mesh)[0]!
-    expect(shell.geometry).toBe(mesh.geometry)
-    expect((shell.material as THREE.Material).side).toBe(THREE.BackSide)
-    const u = (shell.material as THREE.ShaderMaterial).uniforms
-    expect(u.uDash!.value).toBe(dash.dash)
-    expect(u.uGap!.value).toBe(dash.gap)
-    expect(u.uThickness!.value).toBe(dash.width)
-  })
-  it('silhouetteCutout is a flat FrontSide fill shell, adding a BackSide keyline only when border > 0', () => {
-    const { mesh, obj } = primitiveRoot()
-    const cut = createTreatment('silhouetteCutout') as Extract<ReturnType<typeof createTreatment>, { kind: 'silhouetteCutout' }>
-    obj.treatments = [cut]
-    syncTreatmentShells(mesh, obj, { lightView: false })
-    // border 0 by default → fill only, and it is a front-side opaque shell (not the object material)
-    expect(kinds(mesh)).toEqual(['silhouetteCutout'])
-    const fill = shells(mesh)[0]!.material as THREE.MeshBasicMaterial
-    expect(fill.side).toBe(THREE.FrontSide)
-    expect(fill.polygonOffset).toBe(true)
-    expect(mesh.material).toBe(mesh.userData.realMaterial) // flat fill never swaps the object material
-    // a keyline appears once border > 0
-    cut.border = 0.5
-    syncTreatmentShells(mesh, obj, { lightView: false })
-    expect(kinds(mesh)).toEqual(['silhouetteCutout', 'silhouetteCutout'])
-    expect((shells(mesh)[1]!.material as THREE.Material).side).toBe(THREE.BackSide)
-  })
   it('ownMeshes skips a nested child object\'s root and existing shells', () => {
     const { mesh, obj } = primitiveRoot()
     const child = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial())
@@ -136,23 +105,6 @@ describe('syncTreatmentShells', () => {
     syncTreatmentShells(mesh, obj, { lightView: false })
     expect(ownMeshes(mesh)).toEqual([mesh])
     expect(shells(child)).toHaveLength(0)
-  })
-})
-
-describe('dashPatternOn (CPU twin of the dashed-outline stipple)', () => {
-  it('marks the dash run and clears the gap run, repeating each period', () => {
-    // dash 4, gap 4 → period 8: [0,4] on, (4,8) off, then repeats.
-    expect(dashPatternOn(0, 4, 4)).toBe(true)
-    expect(dashPatternOn(3, 4, 4)).toBe(true)
-    expect(dashPatternOn(6, 4, 4)).toBe(false)
-    expect(dashPatternOn(8, 4, 4)).toBe(true) // next period
-    expect(dashPatternOn(14, 4, 4)).toBe(false)
-  })
-  it('gap 0 is a solid outline (always on)', () => {
-    for (const s of [0, 1, 7, 33, 128]) expect(dashPatternOn(s, 8, 0), String(s)).toBe(true)
-  })
-  it('is deterministic and handles negative coordinates by wrapping', () => {
-    expect(dashPatternOn(-2, 4, 4)).toBe(dashPatternOn(6, 4, 4)) // -2 ≡ 6 (mod 8)
   })
 })
 

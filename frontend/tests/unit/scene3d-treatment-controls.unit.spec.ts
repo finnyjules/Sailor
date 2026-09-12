@@ -110,7 +110,7 @@ describe('the shared ramp rows', () => {
   })
 
   it('the edge kinds have no ramp rows', () => {
-    for (const kind of ['rimLight', 'outline', 'xray', 'wireframe', 'dashedOutline', 'silhouetteCutout'] as const) {
+    for (const kind of ['rimLight', 'outline', 'xray', 'wireframe'] as const) {
       const keys = treatmentControls(kind).map((r) => r.key)
       expect(keys.filter((k) => RAMP_KEYS.includes(k)), kind).toEqual([])
     }
