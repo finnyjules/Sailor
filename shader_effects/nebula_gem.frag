@@ -114,6 +114,42 @@ vec3 nebulaRamp(vec3 oklVeil, vec3 oklGas, vec3 oklCore, float a, float b) {
     return max(oklabToLinear(lab), 0.0);
 }
 
+// Globals set in main() so the raymarch can read the pre-converted colours and drift without a
+// long parameter list (it is called several times per pixel when supersampling the refracted rim).
+vec3 g_oklVeil, g_oklGas, g_oklCore, g_veilLin, g_coreLin;
+float g_drift;
+
+// One volumetric raymarch of the gas from a given sample point (6 steps, front to back). Returns
+// the accumulated emission and, via `transmit`, how much light makes it through.
+vec3 marchGas(vec2 bent, float freq, float cav, out float transmit) {
+    const int STEPS = 6;
+    float macro = vnoise3(vec3(bent * 1.3, g_drift * 0.6 + u_gasSeed * 0.37)) * 0.45;
+    vec3 emission = vec3(0.0);
+    transmit = 1.0;
+    for (int s = 0; s < STEPS; s++) {
+        float t = (float(s) + 0.5) / float(STEPS);
+        float z = t * 2.0 + u_gasSeed * 7.31;
+        float density, mid, fine;
+        gasField(vec3(bent, z), freq, g_drift, u_gasSeed * 7.31, u_billow * 0.9, density, mid, fine);
+        float endFade = smoothstep(0.0, 0.11, min(t, 1.0 - t));
+        float grain = 1.0 - clamp(abs(fine) * 1.6, 0.0, 1.0);
+        float dens = smoothstep(0.40, 0.90, density + macro - cav) * endFade * (0.55 + grain * 0.8);
+        float dust = smoothstep(0.45, 0.75, mid) * endFade * u_dust;
+        vec3 col = nebulaRamp(g_oklVeil, g_oklGas, g_oklCore, smoothstep(0.05, 0.75, dens), smoothstep(0.68, 1.0, dens));
+        float be = 1.0 - t * 0.45;
+        float veilTerm = smoothstep(-0.7, 0.3, density) * 0.05 * endFade;
+        vec3 emit = col * (dens * be * 0.85)
+                  + g_coreLin * (pow(dens, 2.4) * (0.5 + u_glow * 1.3) * be)
+                  + g_veilLin * (veilTerm * be);
+        float aGain = (0.5 + t * 2.2) * u_density * 0.5;
+        vec3 absorb = vec3(dens * aGain) + vec3(1.5, 1.0, 0.55) * (dust * aGain * 2.2);
+        float eGain = (0.3 + t * 0.9);
+        emission += emit * eGain * transmit;
+        transmit *= exp(-(absorb.r + absorb.g + absorb.b) * 0.5);
+    }
+    return emission;
+}
+
 // A drifting star field at one depth: bright points on a hashed grid, with a soft radius and a
 // per-star twinkle (port of the component's `vO`, simplified). Returns premultiplied colour.
 vec3 starField(vec2 uv, float freq, float twinkleRate, float gain, vec3 tintFrom, vec3 tintTo, float t) {
@@ -222,35 +258,28 @@ void main() {
     float refr = u_refraction * 0.45 * (1.0 - smoothstep(0.0, 1.0, gd));
     vec2 bent = relN - outward * refr;
 
-    // ---- Volumetric raymarch of the gas (6 steps front-to-back) ----
-    const int STEPS = 6;
-    // Coarsen the gas where the glass magnifies it (near the rim): less high frequency to
-    // undersample, so the refracted gas reads soft rather than aliasing into moire.
+    // ---- Volumetric raymarch of the gas, supersampled where the glass compresses it ----
+    g_oklVeil = oklVeil; g_oklGas = oklGas; g_oklCore = oklCore; g_veilLin = veilLin; g_coreLin = coreLin; g_drift = drift;
+    // Coarsen the gas a little where the glass magnifies it (near the rim), then SUPERSAMPLE: near
+    // the rim the lens compresses many noise-lattice cells into a pixel, which aliases into a grid;
+    // averaging a ring of samples across the pixel's footprint (fwidth(bent)) resolves it. The flat
+    // interior (no compression) takes a single exact sample.
     float freq = u_gasScale * 6.0 * (1.0 - clamp(refr * 1.6, 0.0, 0.62));
-    float macro = vnoise3(vec3(bent * 1.3, drift * 0.6 + u_gasSeed * 0.37)) * 0.45;
     float cav = mix(-0.35, 0.5, u_cavity);
-    vec3 emission = vec3(0.0);
-    float transmit = 1.0;
-    for (int s = 0; s < STEPS; s++) {
-        float t = (float(s) + 0.5) / float(STEPS);           // 0 (front) .. 1 (back)
-        float z = t * 2.0 + u_gasSeed * 7.31;                   // depth into the volume
-        float density, mid, fine;
-        gasField(vec3(bent, z), freq, drift, u_gasSeed * 7.31, u_billow * 0.9, density, mid, fine);
-        float endFade = smoothstep(0.0, 0.11, min(t, 1.0 - t));       // fade the volume's front/back
-        float grain = 1.0 - clamp(abs(fine) * 1.6, 0.0, 1.0);
-        float dens = smoothstep(0.40, 0.90, density + macro - cav) * endFade * (0.55 + grain * 0.8);
-        float dust = smoothstep(0.45, 0.75, mid) * endFade * u_dust;
-        vec3 col = nebulaRamp(oklVeil, oklGas, oklCore, smoothstep(0.05, 0.75, dens), smoothstep(0.68, 1.0, dens));
-        float be = 1.0 - t * 0.45;                            // depth darkening
-        float veilTerm = smoothstep(-0.7, 0.3, density) * 0.05 * endFade;
-        vec3 emit = col * (dens * be * 0.85)
-                  + coreLin * (pow(dens, 2.4) * (0.5 + u_glow * 1.3) * be)
-                  + veilLin * (veilTerm * be);
-        float aGain = (0.5 + t * 2.2) * u_density * 0.5;
-        vec3 absorb = vec3(dens * aGain) + vec3(1.5, 1.0, 0.55) * (dust * aGain * 2.2);
-        float eGain = (0.3 + t * 0.9) * 1.0;
-        emission += emit * eGain * transmit;
-        transmit *= exp(-(absorb.r + absorb.g + absorb.b) * 0.5);
+    vec3 emission; float transmit;
+    if (refr > 0.03) {
+        vec2 fw = fwidth(bent);
+        vec3 em = vec3(0.0); float tr = 0.0;
+        const int SS = 4;
+        for (int k = 0; k < SS; k++) {
+            float a = (float(k) + 0.5) / float(SS) * 6.2831853;
+            float trk;
+            em += marchGas(bent + vec2(cos(a), sin(a)) * fw * 0.7, freq, cav, trk);
+            tr += trk;
+        }
+        emission = em / float(SS); transmit = tr / float(SS);
+    } else {
+        emission = marchGas(bent, freq, cav, transmit);
     }
 
     // ---- Star fields at two depths, drifting and twinkling behind/through the gas ----
