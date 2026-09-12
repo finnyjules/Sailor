@@ -14,9 +14,9 @@ export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe',
 /** Stage-rendered treatments that consume the per-frame G-buffer (view-space normals +
  *  depth). Their presence — and ONLY their presence — makes `TreatmentStage` build the
  *  GBufferPass; with none enabled the pass never runs and the frame is byte-identical to
- *  before S3. All three share the gate, the shared `gbuf` and the per-object `drawAlone`
+ *  before S3. They all share the gate, the shared `gbuf` and the per-object `drawAlone`
  *  mask; each adds only its own composite shader. */
-export const BUFFER_TREATMENT_KINDS = ['edgeLines', 'depthFog', 'curvatureWear'] as const
+export const BUFFER_TREATMENT_KINDS = ['edgeLines', 'depthFog', 'curvatureWear', 'crossHatch'] as const
 export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS] as const
 export type MaskedTreatmentKind = typeof MASKED_TREATMENT_KINDS[number]
 export type EdgeTreatmentKind = typeof EDGE_TREATMENT_KINDS[number]
@@ -29,7 +29,7 @@ export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
   blur: 'Blur', glow: 'Glow', pixelate: 'Pixelate', fade: 'Fade', colorGrade: 'Colour grade', dissolve: 'Dissolve', halftone: 'Halftone', chromaticSplit: 'Chromatic split', glitch: 'Glitch', dropShadow: 'Flat drop shadow',
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
   dashedOutline: 'Dashed outline', silhouetteCutout: 'Silhouette cutout',
-  edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear',
+  edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear', crossHatch: 'Cross-hatch',
 }
 
 /** What a Progressive ramp is measured across. `object` = the object's own on-screen extent
@@ -170,12 +170,23 @@ export interface DepthFogTreatment extends TreatmentBase { kind: 'depthFog'; col
  *  within `width` screen px of high-curvature edges. Distinct from edge lines' hard ink line:
  *  it modulates brightness, never paints a fixed colour, and ignores the depth silhouette. */
 export interface CurvatureWearTreatment extends TreatmentBase { kind: 'curvatureWear'; amount: number; width: number }
+/** Pen-and-ink cross-hatching drawn from the G-buffer, whose density follows the object's TONE.
+ *  The object's own colour (already in the accumulator) sets a per-pixel darkness; as tone falls
+ *  below `threshold` the stage lays on 1, then 2, then 3 crossed line screens — the classic
+ *  etched shading where the darkest passages carry the densest hatch. `color` is the ink,
+ *  `spacing` the line pitch (same "px per block on a 1000-px-tall image" units as pixelate, so the
+ *  hatch keeps its look at every resolution) and `angle` the first screen's direction; the two
+ *  extra screens sit at +60° and +120°. It reads the G-buffer NORMAL to shift the pattern by the
+ *  surface's screen tilt, so the lines follow the form rather than lying flat on the image — which
+ *  is why it is a BUFFER treatment, not a masked one. Deterministic: a regular rotated line screen
+ *  keyed only on pixel position, tone and the dials, never Math.random. */
+export interface CrossHatchTreatment extends TreatmentBase { kind: 'crossHatch'; color: string; spacing: number; angle: number; threshold: number }
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
   | DissolveTreatment | HalftoneTreatment | ChromaticSplitTreatment | GlitchTreatment | DropShadowTreatment
   | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
   | DashedOutlineTreatment | SilhouetteCutoutTreatment
-  | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment
+  | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment | CrossHatchTreatment
 
 /** Dial defaults per kind — everything except id/kind/enabled/invert. The ONE source the
  *  parser, `createTreatment` and the inspector controls all read. */
@@ -199,7 +210,13 @@ export const TREATMENT_DEFAULTS = {
   edgeLines: { color: '#000000', width: 0.5, threshold: 0.5 },
   depthFog: { color: '#8fa6bf', start: 0.3, end: 1 },
   curvatureWear: { amount: 0.5, width: 0.5 },
+  crossHatch: { color: '#000000', spacing: 6, angle: 45, threshold: 0.6 },
 } as const
+
+/** Cross-hatch line-pitch bounds, in "px per block on a 1000-px-tall image" units (the pixelate
+ *  scale). Shared by the dial and the parser so they cannot drift apart. */
+export const CROSS_HATCH_SPACING_MIN = 2
+export const CROSS_HATCH_SPACING_MAX = 64
 
 /** How many masked-treatment groups the stage draws per frame. */
 export const TREATED_OBJECT_CAP = 8
@@ -371,6 +388,12 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
       ...base, kind: 'curvatureWear',
       amount: Math.min(1, Math.max(-1, num(r.amount, D.curvatureWear.amount))),
       width: clamp01(num(r.width, D.curvatureWear.width)),
+    }
+    case 'crossHatch': return {
+      ...base, kind: 'crossHatch', color: str(r.color, D.crossHatch.color),
+      spacing: Math.min(CROSS_HATCH_SPACING_MAX, Math.max(CROSS_HATCH_SPACING_MIN, num(r.spacing, D.crossHatch.spacing))),
+      angle: wrapDeg(num(r.angle, D.crossHatch.angle)),
+      threshold: clamp01(num(r.threshold, D.crossHatch.threshold)),
     }
   }
   return undefined

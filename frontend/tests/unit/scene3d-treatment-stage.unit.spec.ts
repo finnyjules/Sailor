@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX, chromaticOffsetPx, chromaticSplitOffset, glitchShiftPx, glitchBandShift, dropShadowDistancePx, dropShadowOffset, dropShadowHaloPx } from '~/lib/scene3d/treatmentStage'
+import { blurPasses, pixelateCellPx, stageSamples, rampValueAt, pixelateBand, rampDirection, rampSupport, colorGradeRGB, dissolveNoise, dissolveAlpha, halftoneDotRadius, halftoneCellDistance, HALFTONE_RADIUS_MAX, chromaticOffsetPx, chromaticSplitOffset, glitchShiftPx, glitchBandShift, dropShadowDistancePx, dropShadowOffset, dropShadowHaloPx, crossHatchSpacingPx, crossHatchLayerWeights, crossHatchLine, crossHatchInk } from '~/lib/scene3d/treatmentStage'
 
 describe('dissolveNoise / dissolveAlpha', () => {
   const grid = (fn: (u: number, v: number) => number, n = 16): number[] => {
@@ -364,5 +364,58 @@ describe('pixelateBand', () => {
       expect(v).toBeGreaterThanOrEqual(prev)
       prev = v
     }
+  })
+})
+
+describe('cross-hatch: tone-driven rotated line screen', () => {
+  it('spacing scales with height, floors at 1px, and holds the pixelate look', () => {
+    expect(crossHatchSpacingPx(6, 1000)).toBe(6)
+    expect(crossHatchSpacingPx(6, 2000)).toBe(12)
+    expect(crossHatchSpacingPx(0, 1000)).toBe(1) // never collapses the lattice
+  })
+
+  it('layer weights: a bright pixel (tone >= threshold) gets no ink at all', () => {
+    expect(crossHatchLayerWeights(0.8, 0.6)).toEqual([0, 0, 0])
+    expect(crossHatchLayerWeights(0.6, 0.6)).toEqual([0, 0, 0])
+  })
+
+  it('layer weights: darker tone brings on more screens, and no weight ever decreases as it darkens', () => {
+    const total = (tone: number) => crossHatchLayerWeights(tone, 0.6).reduce((a, b) => a + b, 0)
+    // Well below the threshold two/three screens are active; near black all three are full.
+    expect(total(0.5)).toBeGreaterThan(0)
+    expect(total(0.3)).toBeGreaterThan(total(0.5))
+    expect(total(0.0)).toBeGreaterThan(total(0.3))
+    expect(crossHatchLayerWeights(0, 0.6)).toEqual([1, 1, 1])
+    let prev = [-1, -1, -1]
+    for (let i = 0; i <= 60; i++) {
+      const w = crossHatchLayerWeights(0.6 - i / 100, 0.6)
+      w.forEach((v, k) => expect(v).toBeGreaterThanOrEqual(prev[k]!))
+      prev = w
+    }
+  })
+
+  it('the line screen is deterministic, periodic in the spacing and rotated by the angle', () => {
+    // Angle 0 → lines run horizontally (perpendicular axis is y), so the pattern repeats along y.
+    expect(crossHatchLine(0, 0, 8, 0)).toBeCloseTo(crossHatchLine(0, 8, 8, 0), 6)
+    // Peaks on a line (~1), troughs midway between lines (~0).
+    expect(crossHatchLine(0, 0, 8, 0)).toBeGreaterThan(0.9)
+    expect(crossHatchLine(0, 4, 8, 0)).toBeLessThan(0.1)
+    // Rotating 90° swaps which axis the lines run along: the walk down y now stays on one line.
+    const alongY0 = [0, 2, 4, 6].map((y) => crossHatchLine(0, y, 8, 0))
+    const alongY90 = [0, 2, 4, 6].map((y) => crossHatchLine(0, y, 8, Math.PI / 2))
+    expect(alongY0).not.toEqual(alongY90)
+    // Same inputs → same output, run to run.
+    expect(crossHatchLine(3, 5, 7, 1.2)).toBe(crossHatchLine(3, 5, 7, 1.2))
+  })
+
+  it('ink: bright objects stay clean, dark objects pick up ink where the screens fall', () => {
+    // Bright tone: no ink anywhere regardless of pixel.
+    for (let x = 0; x < 16; x++) expect(crossHatchInk(x, 0, 0.9, 8, 0, 0.6)).toBe(0)
+    // Dark tone: some pixels ink up (on the lines), some stay clean (between them).
+    let maxInk = 0
+    for (let x = 0; x < 32; x++) maxInk = Math.max(maxInk, crossHatchInk(x, 0, 0.05, 8, 0, 0.6))
+    expect(maxInk).toBeGreaterThan(0.5)
+    // Deterministic.
+    expect(crossHatchInk(5, 9, 0.2, 6, 0.7, 0.6)).toBe(crossHatchInk(5, 9, 0.2, 6, 0.7, 0.6))
   })
 })

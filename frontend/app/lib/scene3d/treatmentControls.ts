@@ -3,7 +3,7 @@
 // keys to `object.treatments.<id>.<field>`; the surface reads/writes `<field>` directly
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, DROP_SHADOW_DISTANCE_MAX, DASHED_OUTLINE_LEN_MAX, type TreatmentKind } from './treatments'
+import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, DROP_SHADOW_DISTANCE_MAX, DASHED_OUTLINE_LEN_MAX, CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX, type TreatmentKind } from './treatments'
 
 export const TREATMENT_KEY_PREFIX = 'treatment.'
 
@@ -180,6 +180,14 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
       rows = [
         slider(g, 'amount', 'Amount', -1, 1, 0.01, D.curvatureWear.amount, 'Below zero darkens the creases like grime, above zero lightens the edges like wear'),
         slider(g, 'width', 'Width', 0, 1, 0.01, D.curvatureWear.width, 'How wide a band the edge shading covers'),
+      ]
+      break
+    case 'crossHatch':
+      rows = [
+        color(g, 'color', 'Ink', D.crossHatch.color),
+        slider(g, 'spacing', 'Spacing', CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX, 1, D.crossHatch.spacing, 'Distance between the hatch lines, relative to the image height'),
+        slider(g, 'angle', 'Angle', 0, 360, 1, D.crossHatch.angle, 'Direction of the first set of lines'),
+        slider(g, 'threshold', 'Threshold', 0, 1, 0.01, D.crossHatch.threshold, 'How dark the object has to be before the hatching starts'),
       ]
       break
     default:

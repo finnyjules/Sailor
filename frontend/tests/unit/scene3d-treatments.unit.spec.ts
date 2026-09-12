@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { defaultDoc, createPrimitive, createLight, serializeDoc, parseDoc } from '~/lib/scene3d/config'
 import {
   TREATMENT_KINDS, TREATMENT_LABELS, TREATED_OBJECT_CAP, createTreatment, parseTreatment, parseTreatments,
-  cloneTreatments, maskedTreatmentPlan, unrenderedTreatmentIds, findTreatment, edgeTreatmentsOf, isMaskedKind, isEdgeKind, BLUR_AMOUNT_MAX,
-  DASHED_OUTLINE_LEN_MAX, docHasGBufferTreatment, bufferTreatmentPlan,
+  cloneTreatments, maskedTreatmentPlan, unrenderedTreatmentIds, findTreatment, edgeTreatmentsOf, isMaskedKind, isEdgeKind, isBufferKind, BLUR_AMOUNT_MAX,
+  DASHED_OUTLINE_LEN_MAX, docHasGBufferTreatment, bufferTreatmentPlan, BUFFER_TREATMENT_KINDS,
+  CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX,
 } from '~/lib/scene3d/treatments'
 import { treatmentControls } from '~/lib/scene3d/treatmentControls'
 import { blurPasses } from '~/lib/scene3d/treatmentStage'
@@ -393,8 +394,8 @@ describe('treatments: G-buffer family (edge lines, depth fog, curvature wear)', 
     expect(back.objects.at(-1)!.treatments!.map((t) => t.kind)).toEqual(['depthFog', 'curvatureWear'])
     expect(back).toEqual(doc)
   })
-  it('the gate is true iff a visible host carries an ENABLED buffer treatment (any of the three)', () => {
-    const bufferKinds = ['edgeLines', 'depthFog', 'curvatureWear'] as const
+  it('the gate is true iff a visible host carries an ENABLED buffer treatment (any of them)', () => {
+    const bufferKinds = ['edgeLines', 'depthFog', 'curvatureWear', 'crossHatch'] as const
     // No buffer treatment ⇒ gated off (a masked treatment must not trip it).
     const bare = defaultDoc()
     const b0 = createPrimitive('box', bare.objects); b0.treatments = [createTreatment('blur')]; bare.objects.push(b0)
@@ -412,6 +413,18 @@ describe('treatments: G-buffer family (edge lines, depth fog, curvature wear)', 
       box.treatments = [createTreatment(kind)]; box.visible = false
       expect(docHasGBufferTreatment(doc), `${kind} hidden`).toBe(false)
     }
+  })
+  it('createTreatment seeds cross-hatch from its defaults; it is a G-buffer reader, not masked', () => {
+    expect(createTreatment('crossHatch')).toMatchObject({ kind: 'crossHatch', enabled: true, invert: false, color: '#000000', spacing: 6, angle: 45, threshold: 0.6 })
+    expect(isMaskedKind('crossHatch')).toBe(false)
+    expect(isBufferKind('crossHatch')).toBe(true)
+    expect(BUFFER_TREATMENT_KINDS).toContain('crossHatch')
+  })
+  it('parses cross-hatch, clamping spacing to its bounds, angle to 0..360 and threshold to 0..1', () => {
+    expect(parseTreatment({ id: 't-h', kind: 'crossHatch', color: '#abcdef', spacing: 999, angle: 400, threshold: 5 }))
+      .toMatchObject({ id: 't-h', kind: 'crossHatch', color: '#abcdef', spacing: CROSS_HATCH_SPACING_MAX, angle: 40, threshold: 1 })
+    expect(parseTreatment({ id: 't-h2', kind: 'crossHatch', spacing: 0, threshold: -3 }))
+      .toMatchObject({ color: '#000000', spacing: CROSS_HATCH_SPACING_MIN, angle: 45, threshold: 0 })
   })
 })
 

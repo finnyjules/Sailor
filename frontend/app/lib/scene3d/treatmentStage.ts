@@ -34,7 +34,7 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { stripAlpha } from '~/lib/color/convert'
-import type { BufferGroup, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, MaskedGroup, RampFields, Treatment } from './treatments'
+import type { BufferGroup, CrossHatchTreatment, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, MaskedGroup, RampFields, Treatment } from './treatments'
 import { ownMeshes, STAGE_LAYER } from './treatmentShells'
 import { fitNearFar } from './passes'
 
@@ -275,6 +275,59 @@ export function dropShadowOffset(distance: number, angleDeg: number, height: num
  *  small halo borrow for the blurred soft edge. Pure. */
 export function dropShadowHaloPx(distance: number, softness: number, height: number): number {
   return dropShadowDistancePx(distance, height) + blurPasses(softness, height).radiusPx
+}
+
+// --- cross-hatch: a deterministic tone-driven rotated line screen (twin of CROSS_HATCH_FRAG) --
+/** GLSL-style smoothstep, so the CPU twins match the shader edge for edge. Pure. */
+function smoothstep01(lo: number, hi: number, x: number): number {
+  if (hi <= lo) return x < lo ? 0 : 1
+  const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)))
+  return t * t * (3 - 2 * t)
+}
+
+/** Hatch line pitch in device px on an image `height` px tall, from `spacing` in the same
+ *  "px per block on a 1000-px-tall image" units pixelate uses — so the hatch holds the same LOOK
+ *  at every resolution. Floors at 1 px (a zero pitch would collapse the line lattice). Pure. */
+export function crossHatchSpacingPx(spacing: number, height: number): number {
+  return Math.max(1, spacing * height / 1000)
+}
+
+/** The three line-screen weights for a pixel of tone `tone` (0 = black, 1 = white) at hatch
+ *  `threshold`: darkness demand rises from 0 at/above the threshold to 1 at black, and the three
+ *  crossed screens fade in one after another across it (a single set for light shade, all three
+ *  crossing for the darkest passages). Deterministic; GLSL twin inline in CROSS_HATCH_FRAG. Pure. */
+export function crossHatchLayerWeights(tone: number, threshold: number): [number, number, number] {
+  const demand = Math.min(1, Math.max(0, (threshold - tone) / Math.max(threshold, 1e-4)))
+  return [
+    smoothstep01(0.0, 0.34, demand),
+    smoothstep01(0.33, 0.67, demand),
+    smoothstep01(0.66, 1.0, demand),
+  ]
+}
+
+/** Coverage (0..1) of ONE rotated line screen at device-px pixel `(px, py)`: a ~1px-wide ink line
+ *  every `spacingPx` px, the screen rotated by `angleRad`. 1 on a line, 0 midway between. Keyed only
+ *  on position + spacing + angle — no randomness. GLSL twin: `hatch()` in CROSS_HATCH_FRAG. Pure. */
+export function crossHatchLine(px: number, py: number, spacingPx: number, angleRad: number): number {
+  // Distance along the axis perpendicular to the line direction, in pitch units.
+  const ax = -Math.sin(angleRad), ay = Math.cos(angleRad)
+  const coord = (px * ax + py * ay) / spacingPx
+  const f = coord - Math.floor(coord)
+  const d = Math.min(f, 1 - f) * spacingPx
+  return 1 - smoothstep01(0.5, 1.5, d)
+}
+
+/** Combined ink coverage (0..1) for a pixel: the darkest of the three crossed screens weighted by
+ *  the tone→layers ramp — so a bright pixel (tone ≥ threshold) gets no ink and a black one carries
+ *  all three screens crossing. Excludes the shader's normal-based coordinate warp (a G-buffer-only
+ *  surface refinement CROSS_HATCH_FRAG adds on top); this is the pinned oracle for the tone/pattern
+ *  logic. Deterministic. Pure. */
+export function crossHatchInk(px: number, py: number, tone: number, spacingPx: number, angleRad: number, threshold: number): number {
+  const [w1, w2, w3] = crossHatchLayerWeights(tone, threshold)
+  const h1 = crossHatchLine(px, py, spacingPx, angleRad)
+  const h2 = crossHatchLine(px, py, spacingPx, angleRad + Math.PI / 3)
+  const h3 = crossHatchLine(px, py, spacingPx, angleRad + 2 * Math.PI / 3)
+  return Math.min(1, Math.max(h1 * w1, Math.max(h2 * w2, h3 * w3)))
 }
 
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
@@ -798,6 +851,55 @@ const CURVATURE_WEAR_FRAG = `
     gl_FragColor = vec4(dst.rgb * factor, dst.a);
   }`
 
+// Cross-hatch — pen-and-ink shading whose density follows the object's TONE. The object's own
+// colour is already in the premultiplied accumulator (tDst); its luminance sets a per-pixel
+// darkness, and as tone falls below uThreshold three crossed line screens (uAngle, +60°, +120°)
+// fade in one after another, so light passages carry one set of lines and the darkest carry all
+// three crossing. The pattern is a regular rotated line lattice keyed on gl_FragCoord/device px —
+// deterministic, no randomness. It reads the G-buffer NORMAL (tNormal) to shift the lattice by the
+// surface's screen tilt, so the hatch follows the form instead of lying flat on the image (the
+// reason this is a buffer treatment). `tMaskDepth` (the object drawn alone) gates coverage and
+// `tBaseDepth` occlusion, exactly like edge lines. Writes premultiplied "over" the accumulator.
+const CROSS_HATCH_FRAG = `
+  uniform sampler2D tDst; uniform sampler2D tNormal;
+  uniform sampler2D tMaskDepth; uniform sampler2D tBaseDepth;
+  uniform vec3 uColor; uniform vec2 uResolution;
+  uniform float uSpacingPx; uniform float uAngle; uniform float uThreshold;
+  varying vec2 vUv;
+  float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
+  // Coverage of one rotated line screen at device-px pixel P: a ~1px ink line every uSpacingPx px.
+  float hatch(vec2 P, float ang){
+    vec2 axis = vec2(-sin(ang), cos(ang)); // perpendicular to the line direction
+    float coord = dot(P, axis) / uSpacingPx;
+    float f = fract(coord);
+    float d = min(f, 1.0 - f) * uSpacingPx;
+    return 1.0 - smoothstep(0.5, 1.5, d);
+  }
+  void main(){
+    vec4 dst = texture2D(tDst, vUv);
+    float md = texture2D(tMaskDepth, vUv).r;
+    if (md >= 0.9999) { gl_FragColor = dst; return; }
+    float bd = texture2D(tBaseDepth, vUv).r;
+    if (md > bd + 0.0005) { gl_FragColor = dst; return; }
+    // Straight-alpha tone from the premultiplied accumulator.
+    float a = max(dst.a, 1e-4);
+    float tone = clamp(luma(dst.rgb / a), 0.0, 1.0);
+    // Darkness demand → the three crossed screens fade in one after another.
+    float demand = clamp((uThreshold - tone) / max(uThreshold, 1e-4), 0.0, 1.0);
+    float w1 = smoothstep(0.0, 0.34, demand);
+    float w2 = smoothstep(0.33, 0.67, demand);
+    float w3 = smoothstep(0.66, 1.0, demand);
+    // Warp the lattice by the view-normal's screen tilt so the lines follow the surface form.
+    vec3 n = texture2D(tNormal, vUv).rgb * 2.0 - 1.0;
+    vec2 P = vUv * uResolution + n.xy * uSpacingPx * 2.0;
+    float h1 = hatch(P, uAngle);
+    float h2 = hatch(P, uAngle + 1.0471976); // +60°
+    float h3 = hatch(P, uAngle + 2.0943951); // +120°
+    float ink = clamp(max(h1 * w1, max(h2 * w2, h3 * w3)), 0.0, 1.0) * a; // stay inside the silhouette
+    vec3 inkP = uColor * ink; // dst is premultiplied
+    gl_FragColor = vec4(inkP + dst.rgb * (1.0 - ink), ink + dst.a * (1.0 - ink));
+  }`
+
 type RT = THREE.WebGLRenderTarget
 
 /** A resolved progressive ramp in UV space: direction, where t = 0 sits along it
@@ -885,6 +987,7 @@ export class TreatmentStage {
   private readonly edgeLinesMat: THREE.ShaderMaterial
   private readonly depthFogMat: THREE.ShaderMaterial
   private readonly curvatureWearMat: THREE.ShaderMaterial
+  private readonly crossHatchMat: THREE.ShaderMaterial
   private readonly tmpSize = new THREE.Vector2()
   private readonly prevClearColor = new THREE.Color()
   private readonly rampBox = new THREE.Box3()
@@ -925,6 +1028,12 @@ export class TreatmentStage {
       uAmount: { value: 0.5 }, uWidthPx: { value: 1 }, uTexel: { value: new THREE.Vector2() },
     })
     this.curvatureWearMat.blending = THREE.NoBlending
+    this.crossHatchMat = shader(CROSS_HATCH_FRAG, {
+      tDst: { value: null }, tNormal: { value: null }, tMaskDepth: { value: null }, tBaseDepth: { value: null },
+      uColor: { value: new THREE.Color(0, 0, 0) }, uResolution: { value: new THREE.Vector2(1, 1) },
+      uSpacingPx: { value: 6 }, uAngle: { value: Math.PI / 4 }, uThreshold: { value: 0.6 },
+    })
+    this.crossHatchMat.blending = THREE.NoBlending
     // Build/merge REPLACE their scratch (a pure full-frame compute), and the composite reads
     // tDst to do its own "over" — all three must keep the hardware blender off.
     this.dropShadowBuildMat.blending = THREE.NoBlending
@@ -1480,6 +1589,25 @@ export class TreatmentStage {
     this.accumIdx = 1 - this.accumIdx
   }
 
+  /** Draw one cross-hatch treatment over the accumulator: a tone-driven rotated line screen whose
+   *  density follows the object's own luminance (read from the accumulator) and whose lattice is
+   *  warped by the gbuf normal so the lines follow the surface. Masked to `maskDepth` and
+   *  occlusion-tested against the base scene, like edge lines. Advances the ping-pong. */
+  private hatchComposite(t: CrossHatchTreatment, maskDepth: THREE.Texture): void {
+    const u = this.crossHatchMat.uniforms
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    u.tNormal!.value = this.gbuf!.texture
+    u.tMaskDepth!.value = maskDepth
+    u.tBaseDepth!.value = this.base.depthTexture
+    ;(u.uColor!.value as THREE.Color).set(stripAlpha(t.color))
+    ;(u.uResolution!.value as THREE.Vector2).set(this.width, this.height)
+    u.uSpacingPx!.value = crossHatchSpacingPx(t.spacing, this.height)
+    u.uAngle!.value = t.angle * Math.PI / 180
+    u.uThreshold!.value = t.threshold
+    this.pass(this.crossHatchMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
+  }
+
   render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], ctx: StageContext): THREE.Texture | null {
     const r = this.renderer
     const size = r.getDrawingBufferSize(this.tmpSize)
@@ -1580,6 +1708,7 @@ export class TreatmentStage {
             if (t.kind === 'edgeLines') this.edgeComposite(t, this.layer.depthTexture!, camera)
             else if (t.kind === 'depthFog') this.fogComposite(t, this.layer.depthTexture!, root, camera)
             else if (t.kind === 'curvatureWear') this.wearComposite(t, this.layer.depthTexture!)
+            else if (t.kind === 'crossHatch') this.hatchComposite(t, this.layer.depthTexture!)
           }
         }
       } else {
@@ -1606,7 +1735,7 @@ export class TreatmentStage {
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.glitchMat, this.dropShadowBuildMat, this.dropShadowMergeMat, this.dropShadowCompositeMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.normalMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.glitchMat, this.dropShadowBuildMat, this.dropShadowMergeMat, this.dropShadowCompositeMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.crossHatchMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }
