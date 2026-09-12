@@ -213,12 +213,12 @@ void main() {
         gasField(vec3(bent, z), freq, drift, u_gasSeed * 7.31, u_billow * 0.9, density, mid, fine);
         float endFade = smoothstep(0.0, 0.11, min(t, 1.0 - t));       // fade the volume's front/back
         float grain = 1.0 - clamp(abs(fine) * 1.6, 0.0, 1.0);
-        float dens = smoothstep(0.34, 0.86, density + macro - cav) * endFade * (0.55 + grain * 0.8);
+        float dens = smoothstep(0.40, 0.90, density + macro - cav) * endFade * (0.55 + grain * 0.8);
         float dust = smoothstep(0.45, 0.75, mid) * endFade * u_dust;
         vec3 col = nebulaRamp(oklVeil, oklGas, oklCore, smoothstep(0.05, 0.75, dens), smoothstep(0.68, 1.0, dens));
         float be = 1.0 - t * 0.45;                            // depth darkening
         float veilTerm = smoothstep(-0.7, 0.3, density) * 0.05 * endFade;
-        vec3 emit = col * (dens * be)
+        vec3 emit = col * (dens * be * 0.85)
                   + coreLin * (pow(dens, 2.4) * (0.5 + u_glow * 1.3) * be)
                   + veilLin * (veilTerm * be);
         float aGain = (0.5 + t * 2.2) * u_density * 0.5;
@@ -233,22 +233,45 @@ void main() {
     vec3 farStars  = starField(bent * 0.9 + vec2(drift * 0.3, 0.0), sf,       1.7, u_stars, vec3(0.72, 0.82, 1.0), vec3(1.0, 0.92, 0.82), time);
     vec3 nearStars = starField(bent * 1.4 + vec2(-drift * 0.2, 0.1), sf * 0.56, 2.3, u_stars, vec3(0.75, 0.85, 1.0), vec3(1.0, 0.95, 0.88), time);
 
-    // ---- Glass surface: reflected studio + a key-light glint on the bevel ----
+    // ---- Smooth glass shell: a polished lens doming over the shape ----
+    // A heavily-blurred distance field so the glass normal is smooth (no faceted bevel rings), read
+    // as a sphere: flat at the centre (the nebula shows straight through), curving steeply only near
+    // the rim, where the glass turns reflective and catches a bright Fresnel edge and soft studio.
+    float gd = 0.0;
+    {
+        vec2 gr1 = 7.0 / u_resolution, gr2 = 14.0 / u_resolution;
+        gd = texture(u_shape, v_texCoord).g * 3.0;
+        gd += (texture(u_shape, v_texCoord + vec2(gr1.x, 0.0)).g + texture(u_shape, v_texCoord - vec2(gr1.x, 0.0)).g
+             + texture(u_shape, v_texCoord + vec2(0.0, gr1.y)).g + texture(u_shape, v_texCoord - vec2(0.0, gr1.y)).g
+             + texture(u_shape, v_texCoord + gr1).g + texture(u_shape, v_texCoord - gr1).g
+             + texture(u_shape, v_texCoord + vec2(gr1.x, -gr1.y)).g + texture(u_shape, v_texCoord + vec2(-gr1.x, gr1.y)).g) * 2.0;
+        gd += texture(u_shape, v_texCoord + vec2(gr2.x, 0.0)).g + texture(u_shape, v_texCoord - vec2(gr2.x, 0.0)).g
+            + texture(u_shape, v_texCoord + vec2(0.0, gr2.y)).g + texture(u_shape, v_texCoord - vec2(0.0, gr2.y)).g
+            + texture(u_shape, v_texCoord + gr2).g + texture(u_shape, v_texCoord - gr2).g
+            + texture(u_shape, v_texCoord + vec2(gr2.x, -gr2.y)).g + texture(u_shape, v_texCoord + vec2(-gr2.x, gr2.y)).g;
+        gd = u_hasShape > 0.5 ? gd / 27.0 : edgeD;
+    }
     float la = radians(u_lightAngle);
-    vec2 rdir = reflect(normalize(vec3(relN * 0.5, 1.0)), normalize(vec3(outward * (1.0 - edgeD), 0.3))).xy;
-    float env = studio(rdir * 1.6, la) * u_environment * smoothstep(0.02, 0.18, edgeD);
-    float ndh = clamp(dot(outward, vec2(cos(la), -sin(la))) * (1.0 - edgeD) + edgeD * 0.3, 0.0, 1.0);
-    float glint = (pow(ndh, mix(140.0, 20.0, u_highlightSoftness)) * 1.3
-                 + pow(ndh, 22.0) * 0.14) * u_highlight;
+    float rr = clamp(1.0 - gd, 0.0, 1.0);                     // 0 at the centre, 1 at the rim
+    float theta = pow(rr, 2.6) * 1.5;                         // flat centre, steep only at the rim
+    vec3 Ng = normalize(vec3(outward * sin(theta), cos(theta)));
+    float fres = pow(1.0 - clamp(Ng.z, 0.0, 1.0), 3.0);      // grazing → the bright glass rim
+    vec3 Rg = reflect(vec3(0.0, 0.0, -1.0), Ng);             // reflection direction off the glass
+    float envG = studio(Rg.xy * 1.5, la);                    // soft studio reflection
+    vec2 lightv = vec2(cos(la), -sin(la));
+    float ndh = clamp(dot(Ng.xy, lightv) + Ng.z * 0.15, 0.0, 1.0);
+    float glint = pow(ndh, mix(240.0, 30.0, u_highlightSoftness)) * u_highlight;
 
-    // ---- Composite: veil bg, gas volume, stars behind the gas, then glass reflections ----
+    // ---- Composite: veil bg, gas volume, stars, then the glass shell on top ----
     vec3 col = veilLin * 0.03 * transmit;                     // deep-space veil behind everything
     col += emission;                                          // the gas
     float interior = smoothstep(0.0, 0.08, edgeD);
     col += farStars * transmit * interior;
     col += nearStars * mix(transmit, 1.0, 0.35) * interior;
-    col += vec3(0.85, 0.92, 1.08) * env * 0.38;               // studio reflection
-    col += vec3(1.0, 0.98, 0.95) * glint;                     // key glint
+    col *= 1.0 - fres * 0.55;                                 // at the rim the glass turns reflective
+    col += vec3(0.72, 0.80, 1.0) * fres * (0.25 + 0.35 * u_environment);   // bright Fresnel rim
+    col += vec3(0.85, 0.92, 1.08) * envG * u_environment * 0.5;            // soft studio reflection
+    col += vec3(1.0, 0.98, 0.95) * glint;                                  // sharp key glint
     col = linearToSrgb(tonemap(col));
 
     fragColor0 = vec4(clamp(col, 0.0, 1.0), 1.0) * cover;
