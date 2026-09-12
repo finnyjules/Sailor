@@ -77,10 +77,32 @@ void gasField(vec3 pos, float freq, float drift, float seed, float billow,
     density = (vnoise3(qw) + mid * 0.5 + fine * 0.27) * 0.57;
 }
 
-// Veil -> gas -> core colour ramp (RGB; the component blends in OKLab, approximated here).
-vec3 nebulaRamp(float a, float b) {
-    vec3 vg = mix(u_veilColor, u_gasColor, clamp(a, 0.0, 1.0));
-    return mix(vg, u_coreColor, clamp(b, 0.0, 1.0));
+// sRGB <-> linear, and linear-RGB <-> OKLab (the exact matrices the component blends in). The
+// veil -> gas -> core ramp is mixed in OKLab so the midtones stay vivid instead of muddying.
+vec3 srgbToLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+vec3 linearToSrgb(vec3 c) { c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+vec3 linearToOklab(vec3 c) {
+    float l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;
+    float m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;
+    float s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;
+    float l_ = pow(max(l, 0.0), 1.0 / 3.0), m_ = pow(max(m, 0.0), 1.0 / 3.0), s_ = pow(max(s, 0.0), 1.0 / 3.0);
+    return vec3(0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+                1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+                0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_);
+}
+vec3 oklabToLinear(vec3 lab) {
+    float l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
+    float m_ = lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z;
+    float s_ = lab.x - 0.0894841775 * lab.y - 1.2914855480 * lab.z;
+    float l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+    return vec3( 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+                -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+                -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s);
+}
+// veil -> gas -> core, blended in OKLab, returned as LINEAR rgb.
+vec3 nebulaRamp(vec3 oklVeil, vec3 oklGas, vec3 oklCore, float a, float b) {
+    vec3 lab = mix(mix(oklVeil, oklGas, clamp(a, 0.0, 1.0)), oklCore, clamp(b, 0.0, 1.0));
+    return max(oklabToLinear(lab), 0.0);
 }
 
 // A drifting star field at one depth: bright points on a hashed grid, with a soft radius and a
@@ -158,6 +180,10 @@ void main() {
     float time = u_time * u_speed;
     float drift = time * 0.14;
 
+    // The three nebula colours are sRGB; work in linear, and pre-convert to OKLab for the ramp.
+    vec3 veilLin = srgbToLinear(u_veilColor), gasLin = srgbToLinear(u_gasColor), coreLin = srgbToLinear(u_coreColor);
+    vec3 oklVeil = linearToOklab(veilLin), oklGas = linearToOklab(gasLin), oklCore = linearToOklab(coreLin);
+
     // ---- Refraction: bend the interior sample toward the glass walls near the edge ----
     float wall = smoothstep(0.0, 0.14, edgeD) * (1.0 - smoothstep(0.14, 0.6, edgeD)); // 0 at wall, peak just inside
     // Gentle refraction: a small, smoothly-falling displacement toward the wall. Kept small
@@ -180,12 +206,12 @@ void main() {
         float grain = 1.0 - clamp(abs(fine) * 1.6, 0.0, 1.0);
         float dens = smoothstep(0.12, 0.62, density + macro - cav) * endFade * (0.55 + grain * 0.8);
         float dust = smoothstep(0.45, 0.75, mid) * endFade * u_dust;
-        vec3 col = nebulaRamp(smoothstep(0.05, 0.75, dens), smoothstep(0.68, 1.0, dens));
+        vec3 col = nebulaRamp(oklVeil, oklGas, oklCore, smoothstep(0.05, 0.75, dens), smoothstep(0.68, 1.0, dens));
         float be = 1.0 - t * 0.45;                            // depth darkening
         float veilTerm = smoothstep(-0.7, 0.3, density) * 0.05 * endFade;
         vec3 emit = col * (dens * be * 1.3)
-                  + u_coreColor * (pow(dens, 2.4) * (0.5 + u_glow * 1.3) * be)
-                  + u_veilColor * (veilTerm * be);
+                  + coreLin * (pow(dens, 2.4) * (0.5 + u_glow * 1.3) * be)
+                  + veilLin * (veilTerm * be);
         float aGain = (0.5 + t * 2.2) * u_density * 0.5;
         vec3 absorb = vec3(dens * aGain) + vec3(1.5, 1.0, 0.55) * (dust * aGain * 2.2);
         float eGain = (0.3 + t * 0.9) * 1.0;
@@ -207,14 +233,14 @@ void main() {
                  + pow(ndh, 22.0) * 0.14) * u_highlight;
 
     // ---- Composite: veil bg, gas volume, stars behind the gas, then glass reflections ----
-    vec3 col = u_veilColor * 0.025 * transmit;                // deep-space veil behind everything
+    vec3 col = veilLin * 0.03 * transmit;                     // deep-space veil behind everything
     col += emission;                                          // the gas
     float interior = smoothstep(0.0, 0.08, edgeD);
     col += farStars * transmit * interior;
     col += nearStars * mix(transmit, 1.0, 0.35) * interior;
     col += vec3(0.85, 0.92, 1.08) * env * 0.38;               // studio reflection
     col += vec3(1.0, 0.98, 0.95) * glint;                     // key glint
-    col = tonemap(col);
+    col = linearToSrgb(tonemap(col));
 
     fragColor0 = vec4(clamp(col, 0.0, 1.0), 1.0) * cover;
 }
