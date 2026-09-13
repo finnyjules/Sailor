@@ -20,8 +20,10 @@ import { badge } from './patterns/badge'
 import { split } from './patterns/split'
 import { diagonal } from './patterns/diagonal'
 import { wall } from './patterns/wall'
+import { scatter } from './patterns/scatter'
+import { cascade } from './patterns/cascade'
 
-export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, fullBleed, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge, split, diagonal, wall]
+export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, fullBleed, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge, split, diagonal, wall, scatter, cascade]
 
 /** Patterns that fit the title's kind and whose required elements are present. */
 export function fittingPatterns(ctx: PatternContext): Pattern[] {

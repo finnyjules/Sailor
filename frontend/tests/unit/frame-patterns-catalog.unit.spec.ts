@@ -11,6 +11,7 @@ describe('catalog', () => {
       'runoff', 'statement', 'index', 'shapeCounter', 'photoBehind',
       'tilt', 'bottomHeavy', 'fourCorners', 'spacedLines', 'ragged', 'edges', 'staircase', 'block',
       'knockout', 'shapeBleed', 'badge', 'split', 'fullBleed', 'diagonal', 'wall',
+      'scatter', 'cascade',
     ]))
   })
   it('every pattern is deterministic and returns at least a title op', () => {
@@ -46,5 +47,11 @@ describe('catalog', () => {
     const ids = fittingPatterns(ctxFor({ elements: bare })).map(p => p.id)
     expect(ids).not.toContain('split')
     expect(ids).not.toContain('fullBleed')
+  })
+  it('offers exploded-letter moves for a single word', () => {
+    const bare = inferElements([{ id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 }])
+    const ids = fittingPatterns(ctxFor({ elements: bare })).map(p => p.id)
+    expect(ids).toContain('scatter')
+    expect(ids).toContain('cascade')
   })
 })
