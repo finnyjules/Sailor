@@ -4550,6 +4550,10 @@ const editToolbarLayer = computed<LocalLayer | null>(() => {
   const only = sel.length === 1 ? sel[0] : null
   return only && only.kind === 'image' ? only : null
 })
+// The toolbar swaps to the inpaint controls whenever an image is selected (or a
+// mode is active) — selecting an image is the entry, not just a right-click.
+const showEditToolbar = computed(() =>
+  !!editToolbarLayer.value && (editMode.value !== 'none' || isSelectTool.value))
 // Model picker, contextual to the active mode: whole-image (FLUX.2/Nano) vs
 // area (FLUX Fill/FLUX General/Qwen). One dropdown drives both refs.
 const editModels = computed(() => editMode.value === 'region' ? REGION_MODELS : WHOLE_IMAGE_MODELS)
@@ -7071,8 +7075,8 @@ onUnmounted(() => {
             </div>
           </Transition>
         </div>
-        <!-- Select tool — hidden only in inpaint mode (the canvas belongs to SAM/brush). -->
-        <template v-if="editMode === 'none'">
+        <!-- Select tool — hidden once an image is selected (its modes take over). -->
+        <template v-if="!showEditToolbar">
           <div class="w-px h-5 bg-white/10 mx-0.5" />
           <button
             class="flex items-center justify-center size-8 rounded cursor-pointer"
@@ -7091,8 +7095,8 @@ onUnmounted(() => {
           title="Redo (⌘⇧Z)" :disabled="!canRedo" @click="redo">
           <Redo2 class="size-4" />
         </button>
-        <!-- Canvas tools — REPLACED by the inpaint controls only in inpaint mode. -->
-        <template v-if="editMode === 'none'">
+        <!-- Canvas tools — REPLACED by the inpaint controls once an image is selected. -->
+        <template v-if="!showEditToolbar">
         <div class="w-px h-5 bg-white/10 mx-0.5" />
         <button class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/80 cursor-pointer" data-testid="add-text" title="Add text" @click="addText">
           <Type class="size-4" />
@@ -7263,28 +7267,31 @@ onUnmounted(() => {
             </div>
           </template>
 
-          <!-- Model — contextual: whole-image (FLUX.2/Nano) or area (FLUX Fill/FLUX General/Qwen).
-               Always shown here — this block only renders while a mode is active. -->
-          <div class="w-px h-5 bg-white/10 mx-0.5" />
-          <div class="relative">
-            <button type="button" data-testid="edit-model-menu"
-              class="flex items-center gap-1.5 h-8 px-2 rounded hover:bg-white/10 text-white/80 text-[11px] cursor-pointer whitespace-nowrap"
-              title="Model" @click="modelMenuOpen = !modelMenuOpen">
-              <span>{{ editModelLabel }}</span>
-              <ChevronDown class="size-3 text-white/40" :class="modelMenuOpen ? 'rotate-180' : ''" />
-            </button>
-            <div v-if="modelMenuOpen" class="absolute bottom-full right-0 mb-1.5 z-50 w-44 rounded-md bg-neutral-900 border border-white/10 shadow-xl flex flex-col overflow-hidden">
-              <button v-for="m in editModels" :key="m.value" type="button"
-                class="px-3 py-2 text-left text-[12px] hover:bg-white/10 cursor-pointer"
-                :class="m.value === editModelValue ? 'text-white' : 'text-white/70'"
-                @click="pickEditModel(m.value)">{{ m.label }}</button>
+          <!-- Model + close only once a mode is active; at plain selection the toolbar
+               shows just the modes (pick one, then the model/prompt appear). -->
+          <template v-if="editMode !== 'none'">
+            <!-- Model — contextual: whole-image (FLUX.2/Nano/…) or area (FLUX Fill/…). -->
+            <div class="w-px h-5 bg-white/10 mx-0.5" />
+            <div class="relative">
+              <button type="button" data-testid="edit-model-menu"
+                class="flex items-center gap-1.5 h-8 px-2 rounded hover:bg-white/10 text-white/80 text-[11px] cursor-pointer whitespace-nowrap"
+                title="Model" @click="modelMenuOpen = !modelMenuOpen">
+                <span>{{ editModelLabel }}</span>
+                <ChevronDown class="size-3 text-white/40" :class="modelMenuOpen ? 'rotate-180' : ''" />
+              </button>
+              <div v-if="modelMenuOpen" class="absolute bottom-full right-0 mb-1.5 z-50 w-44 rounded-md bg-neutral-900 border border-white/10 shadow-xl flex flex-col overflow-hidden">
+                <button v-for="m in editModels" :key="m.value" type="button"
+                  class="px-3 py-2 text-left text-[12px] hover:bg-white/10 cursor-pointer"
+                  :class="m.value === editModelValue ? 'text-white' : 'text-white/70'"
+                  @click="pickEditModel(m.value)">{{ m.label }}</button>
+              </div>
             </div>
-          </div>
 
-          <!-- Close inpaint mode (always shown here — this block only renders while editing). -->
-          <div class="w-px h-5 bg-white/10 mx-0.5" />
-          <button type="button" class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/60 cursor-pointer"
-            title="Done (Esc)" @click="editImageCancel(); editRegionCancel()"><X class="size-4" /></button>
+            <!-- Close inpaint mode back to plain selection. -->
+            <div class="w-px h-5 bg-white/10 mx-0.5" />
+            <button type="button" class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/60 cursor-pointer"
+              title="Done (Esc)" @click="editImageCancel(); editRegionCancel()"><X class="size-4" /></button>
+          </template>
         </template>
         <input ref="imageInputRef" type="file" accept="image/*" class="hidden" @change="onAddImageFile" />
         <input ref="brushFillInputRef" type="file" accept="image/*" class="hidden" @change="onBrushFillImageFile" />
