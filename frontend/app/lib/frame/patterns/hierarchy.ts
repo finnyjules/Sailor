@@ -11,6 +11,7 @@ const asText = (l: PosterLayerView, role: TextEl['role']): TextEl =>
 export function inferElements(
   layers: PosterLayerView[],
   shapeMode: FrameElements['shapeMode'] = null,
+  imageMode: boolean = false,
 ): FrameElements {
   const texts = layers.filter(l => l.kind === 'text' && (l.text ?? '').trim().length > 0)
   const images: ImageEl[] = layers.filter(l => l.kind === 'image').map(l => ({ id: l.id }))
@@ -18,7 +19,7 @@ export function inferElements(
     .filter(l => l.kind === 'shape')
     .map(l => ({ id: l.id, shapeId: l.shapeId ?? 'circle' }))
 
-  const base: FrameElements = { images, shapes, shapeMode }
+  const base: FrameElements = { images, shapes, shapeMode, imageMode }
   if (!texts.length) return base
 
   const bySize = [...texts].sort((a, b) => (b.fontSize ?? 0) - (a.fontSize ?? 0))

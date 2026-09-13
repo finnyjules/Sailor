@@ -10,7 +10,7 @@ import { insertFromOps } from './insert'
 import { nextOrderFor } from './order'
 import { framePresentKeys } from '~/lib/compositor/frameStack'
 
-export interface PosterState { patternId: string; seed: number; shapeMode?: FrameElements['shapeMode'] }
+export interface PosterState { patternId: string; seed: number; shapeMode?: FrameElements['shapeMode']; imageMode?: boolean }
 
 export interface PlanArgs {
   props: Record<string, unknown> | undefined
@@ -21,6 +21,8 @@ export interface PlanArgs {
   palette: ResolvedPalette
   /** A library shape to use when the frame has no shape layer (the picker's family/id choice). */
   shapeMode?: FrameElements['shapeMode']
+  /** Show image patterns with a stand-in when the frame has no image layer. */
+  imageMode?: boolean
   /** Wired image slots connected on the node (for the present-keys reconcile). */
   connectedSlots: number[]
   /** Write colours from the role palette. Off by default: a layout changes no
@@ -57,6 +59,7 @@ export function planPattern(args: PlanArgs): PatternPlan | null {
   const layers = ((args.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
   const elements = inferElements(posterLayerViews(args.props))
   if (args.shapeMode !== undefined) elements.shapeMode = args.shapeMode
+  if (args.imageMode !== undefined) elements.imageMode = args.imageMode
   // Reuse the placement the sheet already computed; only fall back to running the
   // pattern (and building the measure/context it needs) when none was supplied.
   const placement = args.placement ?? runPattern(pattern, args, layers, elements)
@@ -67,7 +70,7 @@ export function planPattern(args: PlanArgs): PatternPlan | null {
   const saved = (args.props?.sailor_stackOrder as string[] | undefined) ?? []
   const present = framePresentKeys(args.connectedSlots, next)
   const order = nextOrderFor(saved, present, ins.ops, elements, ins.inserted)
-  return { layers: next, order, did: placement.did, posterState: { patternId: args.patternId, seed: args.seed, shapeMode: args.shapeMode } }
+  return { layers: next, order, did: placement.did, posterState: { patternId: args.patternId, seed: args.seed, shapeMode: args.shapeMode, imageMode: args.imageMode } }
 }
 
 /** Apply a pattern as ONE undo step: history → layers → order. */

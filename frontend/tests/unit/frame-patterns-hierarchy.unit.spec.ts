@@ -32,4 +32,12 @@ describe('inferElements', () => {
     const e = inferElements([{ id: 't', kind: 'text', text: 'X', fontSize: 0.2 }], { family: 'suns' })
     expect(e.shapeMode).toEqual({ family: 'suns' })
   })
+  it('sets imageMode to false by default', () => {
+    const e = inferElements([{ id: 't', kind: 'text', text: 'X', fontSize: 0.2 }])
+    expect(e.imageMode).toBe(false)
+  })
+  it('carries imageMode through when set to true', () => {
+    const e = inferElements([{ id: 't', kind: 'text', text: 'X', fontSize: 0.2 }], null, true)
+    expect(e.imageMode).toBe(true)
+  })
 })

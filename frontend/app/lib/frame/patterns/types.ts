@@ -43,6 +43,7 @@ export interface FrameElements {
   images: ImageEl[]
   shapes: ShapeEl[]
   shapeMode: { id: string } | { family: string } | null
+  imageMode: boolean
 }
 
 /** Exactly the shape `resolveGrid` returns. `null` when grid mode is 'off'. */

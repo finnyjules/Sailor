@@ -25,7 +25,7 @@ export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounte
 export function fittingPatterns(ctx: PatternContext): Pattern[] {
   const kind = kindOf(ctx.elements.title?.words.length ?? 0)
   const hasShape = ctx.elements.shapes.length > 0 || ctx.elements.shapeMode != null
-  const hasImage = ctx.elements.images.length > 0
+  const hasImage = ctx.elements.images.length > 0 || ctx.elements.imageMode
   return PATTERNS.filter(p => {
     if (!p.fits.includes(kind)) return false
     if (p.needs?.shape && !hasShape) return false

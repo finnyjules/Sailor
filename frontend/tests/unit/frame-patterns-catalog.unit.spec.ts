@@ -35,4 +35,16 @@ describe('catalog', () => {
     expect(ids).toContain('shapeCounter')
     expect(ids).toContain('photoBehind')
   })
+  it('includes image patterns when imageMode is on (no real image)', () => {
+    const bare = inferElements([{ id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 }], null, true)
+    const ids = fittingPatterns(ctxFor({ elements: bare })).map(p => p.id)
+    expect(ids).toContain('split')
+    expect(ids).toContain('fullBleed')
+  })
+  it('excludes image patterns when imageMode is off (no real image)', () => {
+    const bare = inferElements([{ id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 }], null, false)
+    const ids = fittingPatterns(ctxFor({ elements: bare })).map(p => p.id)
+    expect(ids).not.toContain('split')
+    expect(ids).not.toContain('fullBleed')
+  })
 })
