@@ -161,7 +161,7 @@ import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
 import CanvasContextMenu, { type MenuItem } from '~/components/vue-canvas/CanvasContextMenu.vue'
 import type { TextPathSpec, TextPathFollow } from '~/lib/compositor/textPath'
 import { genGestureDefaults, genBoxIsValid, genBarPlacement } from '~/lib/compositor/genGesture'
-import { shapeById } from '~/lib/shapes/catalog'
+import { shapeById, SHAPE_NONE } from '~/lib/shapes/catalog'
 import { createShapeLayer, swapShapeLayer } from '~/lib/shapes/pathLayer'
 import { SHAPE_PICKER_WIDTH, anchorAbove } from '~/lib/shapes/pickerLayout'
 import type { Component, ComputedRef } from 'vue'
@@ -690,6 +690,26 @@ const layoutSheet = useLayoutSheet({
   editor: () => editor,
   remember: (s) => { const n = compositor.value; if (!n) return; const p = (n.data.properties ||= {}); (p as any).sailor_posterState = s },
 })
+
+// Shape picker for the Layout tab: choose a library shape the engine may use
+// even without a placed shape layer (sets the sheet's shapeMode).
+const layoutShapeOpen = ref(false)
+const layoutShapeAnchor = ref({ x: 0, y: 0 })
+const layoutShapeTrigger = ref<HTMLElement | null>(null)
+const layoutShapeValue = computed(() => {
+  const m = layoutSheet.shapeMode.value
+  return m && 'id' in m ? m.id : SHAPE_NONE
+})
+function openLayoutShape(e: MouseEvent) {
+  const el = e.currentTarget as HTMLElement
+  const r = el.getBoundingClientRect()
+  layoutShapeTrigger.value = el
+  layoutShapeAnchor.value = { x: r.left, y: r.bottom + 6 }
+  layoutShapeOpen.value = !layoutShapeOpen.value
+}
+function pickLayoutShape(id: string) {
+  layoutSheet.setShapeMode(id === SHAPE_NONE ? null : { id })
+}
 
 // Region-count cap for "Fill grid with sections": a dense generated/explicit
 // grid (say 12×8) can resolve to dozens of cells — stamping a rect per cell past
@@ -7582,6 +7602,17 @@ onUnmounted(() => {
           <LayoutGrid class="size-3.5 text-white/70" />
           <span class="text-sm font-medium">{{ layoutSheet.focus.value ? 'More like this' : 'Frame layout' }}</span>
         </div>
+        <div class="px-4 pt-3 flex items-center gap-2 text-[11px] text-white/55">
+          <span>Shape for the engine</span>
+          <button type="button" data-testid="layout-shape-trigger"
+            class="ml-auto flex items-center gap-1.5 h-7 px-2 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+            @click="openLayoutShape">
+            {{ layoutShapeValue === 'none' ? 'No shape' : (shapeById(layoutShapeValue)?.name ?? layoutShapeValue) }}
+          </button>
+        </div>
+        <ShapePicker v-if="layoutShapeOpen"
+          :model-value="layoutShapeValue" :anchor="layoutShapeAnchor" :ignore="layoutShapeTrigger"
+          @update:model-value="pickLayoutShape" @close="layoutShapeOpen = false" />
         <div data-testid="layout-sheet" class="p-4 flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
           <p v-if="!layoutSheet.tiles.value.length" class="text-xs text-white/40 italic">Add a text layer to get layout options. The largest text is read as the title.</p>
           <template v-else>
