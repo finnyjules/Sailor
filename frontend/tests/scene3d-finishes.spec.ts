@@ -164,7 +164,7 @@ test('a disabled opalescence treatment renders exactly like no treatment at all'
   expect(disabled).toBe(plain)
 })
 
-test('the strength dial changes the render — a live uniform, not a dead control', async ({ page }) => {
+test('the opalescence strength dial changes the render — a live uniform, not a dead control', async ({ page }) => {
   const bad = watchConsole(page)
   await openLab(page, sceneWith([OPAL({ strength: 0 })]))
   const zero = await snapshot(page)
@@ -351,7 +351,7 @@ test('matcap coat is deterministic — the same params render the identical fram
   expect(second).toBe(first)
 })
 
-test('the strength dial changes the render — a live uniform, not a dead control', async ({ page }) => {
+test('the matcap coat strength dial changes the render — a live uniform, not a dead control', async ({ page }) => {
   const bad = watchConsole(page)
   await openLab(page, sceneWith([MATCAP({ strength: 0 })]))
   const zero = await snapshot(page)
