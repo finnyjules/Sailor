@@ -8,25 +8,30 @@ describe('shape bleed', () => {
     const a = shapeBleed.place(ctxFor()); const b = shapeBleed.place(ctxFor())
     expect(a).toEqual(b); assertSaneOps(a.ops)
   })
-  it('runs the shape off an edge (its centre sits outside the margin box on one axis)', () => {
-    const shape = shapeBleed.place(ctxFor()).ops.find(o => o.kind === 'shape')!
-    const offX = shape.x < 0.1 || shape.x > 0.9
-    const offY = shape.y < 0.1 || shape.y > 0.9
-    expect(offX || offY).toBe(true)
-  })
-  it('places the title clear of the shape on every edge', () => {
+  it('bleeds off every edge and keeps the shape and title from overlapping', () => {
     const seen = new Set<string>()
-    for (let s = 1; s <= 60 && seen.size < 4; s++) {
+    for (let s = 1; s <= 80 && seen.size < 4; s++) {
       const out = shapeBleed.place(ctxFor({ seed: s }))
       const edge = (['top', 'bottom', 'left', 'right'] as const).find(e => out.did.includes(`the ${e} edge`))
       if (!edge || seen.has(edge)) continue
       seen.add(edge)
+      const shape = out.ops.find(o => o.kind === 'shape')!
       const title = out.ops.find(o => o.target === 'title')!
-      if (edge === 'left') expect(title.x).toBeGreaterThan(0.5)   // shape left → title right half
-      if (edge === 'right') expect(title.x).toBeLessThan(0.5)     // shape right → title left half
-      if (edge === 'top') expect(title.y).toBeGreaterThan(0.5)    // shape top → title low
-      if (edge === 'bottom') expect(title.y).toBeLessThan(0.5)    // shape bottom → title high
+      const shHalfW = shape.w! / 2, tHalfW = title.w! / 2
+      if (edge === 'left') {
+        expect(shape.x - shHalfW).toBeLessThan(0)                       // bleeds off the left
+        expect(shape.x + shHalfW).toBeLessThanOrEqual(title.x - tHalfW) // shape right edge clears the title's left edge
+      } else if (edge === 'right') {
+        expect(shape.x + shHalfW).toBeGreaterThan(1)                    // bleeds off the right
+        expect(title.x + tHalfW).toBeLessThanOrEqual(shape.x - shHalfW) // title right edge clears the shape's left edge
+      } else if (edge === 'top') {
+        expect(shape.y).toBeLessThan(0.4)                               // shape sits high (bleeds off top)
+        expect(title.y).toBeGreaterThan(0.5)                           // title in the lower band
+      } else {
+        expect(shape.y).toBeGreaterThan(0.6)                           // shape sits low (bleeds off bottom)
+        expect(title.y).toBeLessThan(0.5)                              // title in the upper band
+      }
     }
-    expect(seen.size).toBe(4)   // all four edges exercised, each with the title on the clear side
+    expect(seen.size).toBe(4)   // all four edges exercised
   })
 })
