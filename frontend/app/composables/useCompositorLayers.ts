@@ -62,7 +62,7 @@ import { DEFAULT_FLATTEN_TOLERANCE, longestSubpath } from '~/lib/compositor/path
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapePath2D } from '~/lib/shapes/path2d'
 import { resolveGroupCascade, type LayerGroup } from '~/lib/compositor/layerGroups'
-import { layoutExpressive, type ExpressiveParams } from '~~/shared/text-layout/expressive'
+import { layoutExpressive, isAccentGlyph, type ExpressiveParams, type AccentRule } from '~~/shared/text-layout/expressive'
 import { type PaintStroke, stampStrokes, strokeBounds } from '~/lib/compositor/brushStamp'
 import {
   applyBlurPass, applyPasses, applyStackPost, chainActive,
@@ -410,6 +410,10 @@ export interface TextLayer extends LayerCommon {
    *  today. Only takes effect for a layer whose font has a fetchable byte source
    *  (see `getCompositorFont`); a system font falls back to `fillText` forever. */
   renderAsOutline?: boolean
+  /** Per-glyph accent face (Letters mode only): the resolved, loaded CSS family
+   *  a subset of glyphs render in. Absent ⇒ every glyph uses the base face. */
+  accentFace?: string
+  accentRule?: AccentRule
 }
 
 /**
@@ -4531,9 +4535,19 @@ function drawExpressiveText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: 
   const fontPx = layer.fontSize * W
   const deco = layer.underline || layer.strikethrough
   const decoThick = Math.max(1, fontPx * 0.06)
+  // Accent face (Letters mode only): render a rule-selected subset of glyphs in a
+  // second, user-chosen face. Layout measured with the base face; the swap is
+  // draw-time only. When no accent face is set the font is never touched, so the
+  // render is byte-identical. Base glyphs re-apply `applyFont` so their variable
+  // axes / tracking survive an accent glyph's font reset.
+  const accentOn = !!layer.expressive?.perChar && !!layer.accentFace
+  const accentRule: AccentRule = layer.accentRule ?? 'first'
+  const accentWeight = layer.axes?.wght != null && Number.isFinite(layer.axes.wght) ? Math.round(layer.axes.wght) : layer.fontWeight
+  const accentFontStr = accentOn ? `${accentWeight} ${fontPx}px ${cssFontStack(layer.accentFace!)}` : ''
   for (let i = 0; i < lay.words.length; i++) {
     const wd = lay.words[i]!
     const { x, y } = runs[i]!
+    if (accentOn) { if (isAccentGlyph(i, accentRule)) ctx.font = accentFontStr; else applyFont(ctx, layer, W) }
     strokeTextPasses(ctx, passes, anyDash, wd.text, x, y)
     ctx.fillText(wd.text, x, y)
     if (deco && wd.text) {

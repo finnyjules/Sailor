@@ -761,6 +761,8 @@ function applyFaceTo(ids: (string | undefined)[], family: string) {
 }
 function onPickTitleFace(p: FontPick) { applyFaceTo([posterFaceEls.value.titleId], familyFromPick(p)) }
 function onPickTextFace(p: FontPick) { applyFaceTo(posterFaceEls.value.textIds, familyFromPick(p)) }
+function onPickAccentFace(p: FontPick) { if (selectedLocal.value) setLocal(selectedLocal.value.id, { accentFace: familyFromPick(p) } as any) }
+function clearAccentFace() { if (selectedLocal.value) setLocal(selectedLocal.value.id, { accentFace: undefined } as any) }
 function onSuggestTextFace() {
   const s = suggestTextFace(titleFaceFamily.value)
   ensureGoogleFont(s.family); ensureLibraryFont(s.family)
@@ -8887,6 +8889,22 @@ onUnmounted(() => {
                     @click="rerollExpressive(selectedLocal)">
                     <RefreshCw class="size-3.5" /> Re-render
                   </button>
+                  <div v-if="(selectedLocal as any).expressive.perChar" class="space-y-1.5 pt-1 border-t border-white/[0.06]">
+                    <div class="panel-label" title="Render some letters in a second face">Accent face</div>
+                    <div class="flex items-center gap-1.5">
+                      <div class="flex-1 min-w-0">
+                        <FontPicker :selected-key="(selectedLocal as any).accentFace || ''" :label="(selectedLocal as any).accentFace || 'None'" sublabel="" @pick="onPickAccentFace" />
+                      </div>
+                      <button v-if="(selectedLocal as any).accentFace" title="Clear the accent face"
+                        class="shrink-0 px-2 py-1.5 rounded border border-white/[0.08] text-white/50 hover:text-white/80 text-xs" @click="clearAccentFace">Clear</button>
+                    </div>
+                    <select v-if="(selectedLocal as any).accentFace" :value="(selectedLocal as any).accentRule || 'first'"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
+                      @change="setLocal(selectedLocal!.id, { accentRule: ($event.target as HTMLSelectElement).value as any })">
+                      <option value="first">First letter</option>
+                      <option value="alternate">Every other letter</option>
+                    </select>
+                  </div>
                 </div>
               </div>
               <div class="space-y-3">
