@@ -35,6 +35,8 @@ import {
 import { resolveField, withFieldFrame, type FieldRequest } from '~/lib/shaderfill/field'
 import { DEFAULT_SHADER_SPEC, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { paintTileBox } from '~/lib/compositor/paint'
+import { applyFinish, updateFinishUniforms, finishKey } from './finishes'
+import type { FinishTreatment } from './treatments'
 
 const hasDOM = typeof document !== 'undefined'
 
@@ -561,7 +563,7 @@ function bindTextureMaps(m: THREE.Material, mat: SceneMaterial, manifest: Textur
  *  comes from the fetch route (cached per id per session); until it lands the material
  *  renders untextured, then the maps bind and `needsUpdate` fires — same shape as the
  *  relief heal. Applied AFTER applyRelief so an explicit relief's bump survives. */
-export function applyTextureSet(m: THREE.Material, mat: SceneMaterial): void {
+export function applyTextureSet(m: THREE.Material, mat: SceneMaterial, finishes?: FinishTreatment[]): void {
   if (m.userData.disposed) return // nothing left to bind onto — see the .then guard below
   if (!textureApplies(m, mat)) return
   // Stamped BEFORE the DOM guard: updateMaterial's in-place tiling block keys off
@@ -578,8 +580,11 @@ export function applyTextureSet(m: THREE.Material, mat: SceneMaterial): void {
     // window, passes that guard) and these six textures could never be freed again.
     if (m.userData.disposed) return
     // The material may have been rebuilt while we waited; only bind if it still wants this
-    // exact set.
-    if (m.userData.identity !== identityKey(mat)) return
+    // exact set. `finishes` must match what `materialFor` stamped `m.userData.identity` with
+    // (S5) — omitting it here would make this guard mismatch forever on any material that
+    // also carries a finish, since `m.userData.identity` would carry a `|fin:` suffix this
+    // recomputed key never would.
+    if (m.userData.identity !== identityKey(mat, finishes)) return
     bindTextureMaps(m, mat, manifest)
     // Swallowed deliberately, and NOT because something else reports it: the picker row only
     // shows an error for a fetch the picker itself started. On document load, or when an
@@ -1320,6 +1325,7 @@ export function materialFor(
   geometry?: THREE.BufferGeometry,
   ownerId: string = UNOWNED_SCENE3D,
   varyStrength?: number,
+  finishes?: FinishTreatment[],
 ): THREE.Material {
   let m: THREE.Material
   switch (mat.type) {
@@ -1633,14 +1639,18 @@ export function materialFor(
     }
   }
   m.userData.matType = mat.type
-  m.userData.identity = identityKey(mat)
+  m.userData.identity = identityKey(mat, finishes)
   applyRelief(m, mat, ownerId)
-  applyTextureSet(m, mat)
+  applyTextureSet(m, mat, finishes)
   applyScreen(m, mat)
   // Cloner Vary: the merged clone geometry carries one colour per copy, and a SINGLE
   // material shows all of them through vertexColors plus a shader mix (applyVaryTint).
   // Last, so it chains on top of every injection above — including applyScreen's.
   if (hasVertexTint(mat, geometry)) applyVaryTint(m, varyStrength)
+  // Finishes (S5): the topmost coat, chained after every other injection above (including
+  // Vary) — a finish overlays the object's ALREADY-tinted/screened surface. `?? []` is the
+  // byte-identical default: a caller with no opinion gets the pre-S5 material exactly.
+  applyFinish(m, finishes ?? [])
   return m
 }
 
@@ -1677,9 +1687,12 @@ function screenKey(mat: SceneMaterial): string {
   return s.pattern === 'none' ? '|scr:-' : `|scr:${s.gap === 'transparent' ? 't' : 'c'}`
 }
 
-/** Params that require a rebuild when they change (texture/ramp identity). */
-function identityKey(mat: SceneMaterial): string {
-  return baseIdentityKey(mat) + reliefKey(mat) + screenKey(mat)
+/** Params that require a rebuild when they change (texture/ramp identity). `finishes` folds in
+ *  the ordered finish-kind list (finishKey) — an added/removed/reordered finish is a program
+ *  boundary (a different shader body entirely), while a finish's own DIALS update in place via
+ *  `updateFinishUniforms`, exactly like the screen dials above. */
+function identityKey(mat: SceneMaterial, finishes?: FinishTreatment[]): string {
+  return baseIdentityKey(mat) + reliefKey(mat) + screenKey(mat) + finishKey(finishes ?? [])
 }
 
 function baseIdentityKey(mat: SceneMaterial): string {
@@ -1719,13 +1732,20 @@ export function updateMaterial(
   mat: SceneMaterial,
   geometry?: THREE.BufferGeometry,
   varyStrength?: number,
+  finishes?: FinishTreatment[],
 ): boolean {
-  if (m.userData.matType !== mat.type || m.userData.identity !== identityKey(mat)) return false
+  const fin = finishes ?? []
+  if (m.userData.matType !== mat.type || m.userData.identity !== identityKey(mat, fin)) return false
   // Vertex-colour state is a property of the GEOMETRY, not of `mat`, so it
   // cannot ride in identityKey. Crossing this boundary needs a rebuild: three
   // bakes vertexColors into the compiled program. Callers that pass no geometry
   // (unit tests, and any path with no mesh in hand) keep the old behaviour.
   if (geometry && (m.userData.vertexTint === true) !== hasVertexTint(mat, geometry)) return false
+  // Finish dials update IN PLACE, like the screen/vary uniforms below — a slider drag must
+  // never rebuild. `updateFinishUniforms` returns false only on a mismatch identityKey's
+  // finishKey (above) should already have caught (kind list/order); kept as its own guard
+  // for a boundary identityKey does not fold in yet (a matcap id change, Task 3).
+  if (!updateFinishUniforms(m, fin)) return false
   // Vary colour STRENGTH is a uniform, not a program boundary — write it in place, like
   // the screen dials below, so dragging the Colour strength slider never rebuilds. Only
   // the tint on/off crossing (the guard above) forces a rebuild. Gated on the parameter

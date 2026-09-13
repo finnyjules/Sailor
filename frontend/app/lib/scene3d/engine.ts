@@ -14,14 +14,15 @@ import type { SceneDoc, SceneObject, SceneMaterial, Vec3, LightingPreset, Primit
 import { LIGHT_DEFAULTS, DEFAULT_FONT_URL } from './config'
 import { buildDecalMesh, decalTextureFor, decalKeyFor, decalContentKey, releaseDecalTexture } from './decals'
 import { buildEnvironmentScene, type GelEnvOptions } from './environments'
-import { orderParentsFirst } from './hierarchy'
+import { orderParentsFirst, worldMatrixOf } from './hierarchy'
 import { loadGlb, clearGlbCache, ensureUv } from './glb'
 import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/contextRegistry'
 import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/lib/scene3d/outlines'
 import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime } from './materials'
 import { refreshImageBounds, type ImageUniforms } from './imageShader'
-import { applyModifiers } from '~/lib/scene3d/modifiers'
-import { PRIMITIVE_PARAMS, paramValue, MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
+import { applyModifiers, applyModifierStack, type ModifierApplyCtx } from '~/lib/scene3d/modifiers'
+import { PRIMITIVE_PARAMS, paramValue, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
+import { modifierStackOf, MODIFIER_KIND_PARAMS, type ModifierInstance } from '~/lib/scene3d/modifierStack'
 import type { VarySettings } from '~/lib/vary'
 import { pathToShapes } from './svgPath'
 import { buildLightWidget, setWidgetSelected, disposeWidget } from '~/lib/scene3d/lightWidgets'
@@ -29,7 +30,7 @@ import { PostChain, postEnabled, DEFAULT_POST, type PostSettings } from '~/lib/s
 import { collectEditorHelpers } from '~/lib/scene3d/passes'
 import { syncTreatmentShells } from './treatmentShells'
 import { TreatmentStage } from './treatmentStage'
-import { maskedTreatmentPlan } from './treatments'
+import { maskedTreatmentPlan, bufferTreatmentPlan, finishPlan } from './treatments'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry } from './gem'
@@ -253,9 +254,13 @@ export function baseSizeFor(
   modifiers?: Record<string, number>,
   content?: PrimitiveContent,
   vary?: VarySettings,
+  stack?: ModifierInstance[],
 ): [number, number, number] {
   const font = kind === 'text' ? fontCacheGet(content?.font ?? DEFAULT_FONT_URL) : null
-  const geo = buildGeometry(kind, params, modifiers, 'smooth', content, font, vary ? { ...vary, colorEnabled: false } : undefined)
+  // `stack` threaded because the size row's caller has the whole object and the bounding
+  // extent depends on deform ORDER (twist-then-bend ≠ bend-then-twist); on the bag path a
+  // reordered stack would read the wrong size. Legacy objects fold identically (byte-identity).
+  const geo = buildGeometry(kind, params, modifiers, 'smooth', content, font, vary ? { ...vary, colorEnabled: false } : undefined, stack)
   geo.computeBoundingBox()
   const b = geo.boundingBox!
   const size: [number, number, number] = [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z]
@@ -283,7 +288,13 @@ export function baseSizeFor(
  *  colour ACROSS copies — so threading it here would buy nothing and cost the palette
  *  resolution and the merge this function forces off, on a path that runs per slider
  *  tick. (With the clone counts pinned to 1, `applyModifiers` skips `planClones`/
- *  `mergeClones` entirely, so no colour work happens today either way.) */
+ *  `mergeClones` entirely, so no colour work happens today either way.)
+ *
+ *  No `stack` param, unlike `baseSizeFor`: this counts vertices of ONE copy, and a single
+ *  copy's vertex COUNT is invariant to deform ORDER — taper/twist/bend/noise/jitter move
+ *  vertices but never add or remove them, and subdivision's iteration count folds identically
+ *  from the bag. So the folded-bag estimate equals the stack estimate for any equivalent state;
+ *  threading the stack would buy nothing on a per-tick cost readout. */
 export function baseVertexCountFor(
   kind: PrimitiveKind,
   params?: Record<string, number>,
@@ -306,19 +317,23 @@ export function baseVertexCountFor(
  *  SceneEngine/GL context. */
 export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): string {
   const vals = PRIMITIVE_PARAMS[obj.primitive].map((s) => paramValue(obj.primitive, obj.params, s.key))
-  const mods: number[] = []
-  for (const s of MODIFIER_SPECS) {
-    // `varyColorStrength` is the ONE modifier deliberately left out of this key, and
-    // the exclusion is by name so it stays a decision rather than an accident. Every
-    // other modifier changes VERTEX DATA; the strength does not — the merged geometry
-    // carries the raw palette colour and the strength is applied as a shader uniform
-    // (`materialFor`/`updateMaterial` take it as a parameter). Including it meant
-    // disposing the geometry and re-merging all N clone copies on every tick of the
-    // Colour strength slider to produce byte-identical vertices. Safe precisely
-    // because the strength is not baked in: if that ever changes, it belongs back here.
-    if (s.key === 'varyColorStrength') continue
-    mods.push(modifierValue(obj.modifiers, s.key))
-  }
+  // The modifier segment keys on the ORDERED stack, not a fixed spec sweep: reorder and
+  // duplicate both change the geometry `applyModifierStack` produces, so both must change the
+  // key — order is part of the string, rows are not a set. Routing through `modifierStackOf`
+  // (the same read-through the renderer uses) also makes a stored `modifierStack` hash IDENTICALLY
+  // to its equivalent folded legacy bag, so persisting the stack on first edit (writeModifierStack)
+  // rebuilds no geometry. Each row is `kind:enabled:params`, rows joined by ';'; bounded and small.
+  //
+  // `varyColorStrength` stays OUT, by construction: it belongs to no modifier kind, so it is
+  // naturally absent from every row's params (MODIFIER_KIND_PARAMS) — do NOT add it back. It
+  // changes no VERTEX DATA; the merged geometry carries the raw palette colour and the strength
+  // is a shader uniform (`materialFor`/`updateMaterial` take it as a parameter). Baking it here
+  // meant disposing the geometry and re-merging all N clone copies on every tick of the Colour
+  // strength slider to produce byte-identical vertices. If the strength ever gets baked in, it
+  // belongs back in this key.
+  const mods = modifierStackOf(obj)
+    .map((row) => `${row.kind}:${row.enabled === false ? 0 : 1}:${MODIFIER_KIND_PARAMS[row.kind].map((k) => modifierValue(row, k)).join(',')}`)
+    .join(';')
   // Neither an svgPath's `d` (several KB) nor a mesh's vertex buffer (tens of
   // KB) may reach this key: it is rebuilt on EVERY sync for EVERY object, and
   // stringifying either would put tens of KB of string work on the drag path.
@@ -327,22 +342,54 @@ export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): st
   const content = c
     ? JSON.stringify({ ...c, ...(c.pathKey ? { path: undefined } : {}), ...(c.meshKey ? { mesh: undefined } : {}) })
     : ''
-  // The Vary PALETTE is a string[], so unlike the seven numeric vary dials it is not in
-  // the MODIFIER_SPECS sweep above — without it, editing a swatch would leave the old
-  // clone colours on screen. Joined rather than digested, against the bulky-string rule
-  // two comments up, because a palette is BOUNDED at VARY_PALETTE_MAX (8) short hex
-  // strings — about 60 characters, versus the kilobytes `pathKey`/`meshKey` stand in
-  // for. That bound is the whole justification: anything unbounded added to this key
-  // must be a digest instead.
+  // Cloner Vary bakes into GEOMETRY, so its numeric dials MUST be in the key: in random and
+  // falloff modes `varyStepFactor` damps each copy's step rotate/scale (moving the copies), and
+  // colour-on writes a per-copy colour ATTRIBUTE into the merged buffer. Change any of these and
+  // the clone geometry is stale until it is rebuilt. They live in the `modifiers` bag, NOT the
+  // modifier stack (Vary is a material/cloner feature, never a modifier row — see modifierStack),
+  // so they are read here directly rather than through the stack segment above. `varyColorStrength`
+  // is the ONE dial deliberately excluded (see the modifier-stack comment above): it is a pure
+  // shader uniform that `materialFor`/`updateMaterial` set in place with no geometry rebuild.
+  const varyDials = ['varyMode', 'varySeed', 'varyColor', 'varyColorSpread', 'varyFalloffCenter', 'varyFalloffRadius']
+    .map((k) => modifierValue(obj.modifiers, k))
+    .join(',')
+  // The Vary PALETTE is a string[], so unlike the numeric dials above it can't ride the joined
+  // number segment — without it, editing a swatch would leave the old clone colours on screen.
+  // Joined rather than digested, against the bulky-string rule two comments up, because a palette
+  // is BOUNDED at VARY_PALETTE_MAX (8) short hex strings — about 60 characters, versus the
+  // kilobytes `pathKey`/`meshKey` stand in for. That bound is the whole justification: anything
+  // unbounded added to this key must be a digest instead.
   //
-  // Deliberately the RAW field, not `varySettingsFor(obj).palette`: the resolved
-  // settings substitute DEFAULT_VARY.palette for an absent one, so an object that
-  // happens to store a copy of the defaults would key differently from one that stores
-  // nothing while rendering the same — one extra rebuild, in a state the palette editor
-  // cannot actually produce. Completeness is what this key owes; reading seven more
-  // modifier values per object per sync to buy that last bit of precision is not worth it.
+  // Deliberately the RAW field, not `varySettingsFor(obj).palette`: the resolved settings
+  // substitute DEFAULT_VARY.palette for an absent one, so an object that happens to store a copy
+  // of the defaults would key differently from one that stores nothing while rendering the same —
+  // one extra rebuild, in a state the palette editor cannot actually produce.
   const vary = obj.varyPalette?.join(',') ?? ''
-  return `${obj.primitive}|${vals.join(',')}|${mods.join(',')}|${variant}|${content}|${vary}`
+  return `${obj.primitive}|${vals.join(',')}|${mods}|${variant}|${content}|${varyDials}|${vary}`
+}
+
+/** The boolean-sibling segment appended to `geoKeyFor(obj)` at the engine call site (where the doc
+ *  is reachable, unlike the pure `geoKeyFor`). A boolean combines `obj` with a SIBLING, so editing
+ *  OR moving the sibling must rebuild this object — neither shows up in `obj`'s own fields. Each
+ *  enabled boolean row contributes its sibling's `geoKeyFor` (so the sibling's params/modifiers
+ *  changing rebuilds this object) AND the relative transform `inverse(thisWorld) · siblingWorld`
+ *  (so moving either object rebuilds it, since that matrix is baked into the merged geometry). A
+ *  missing / self / non-primitive sibling folds to a stable "none" token. Empty when `obj` has no
+ *  enabled boolean rows, so a non-boolean object's key is byte-identical to before. */
+export function booleanRefKeys(obj: PrimitiveObject, doc: SceneDoc | null): string {
+  const rows = modifierStackOf(obj).filter((r) => r.kind === 'boolean' && r.enabled !== false)
+  if (rows.length === 0) return ''
+  const parts = rows.map((r) => {
+    const refId = r.refObjectId
+    if (!refId || refId === obj.id || !doc) return `${r.id}:none`
+    const sib = doc.objects.find((o) => o.id === refId)
+    if (!sib || sib.kind !== 'primitive') return `${r.id}:none`
+    const selfInv = worldMatrixOf(doc.objects, obj.id).invert()
+    const rel = new THREE.Matrix4().multiplyMatrices(selfInv, worldMatrixOf(doc.objects, sib.id))
+    const relKey = rel.elements.map((n) => n.toFixed(3)).join(',')
+    return `${r.id}:${geoKeyFor(sib, 'smooth')}@${relKey}`
+  })
+  return `|bool:${parts.join(';')}`
 }
 
 /** Bake each triangle's own bounding extent into per-vertex attributes
@@ -388,7 +435,14 @@ function addFaceExtentAttributes(geo: THREE.BufferGeometry): void {
  *  omitting it is exactly the pre-Vary behaviour: the cloner then plans copies with
  *  no per-copy variation and writes no colour attribute. Callers with a
  *  `PrimitiveObject` in scope pass it; the standalone measuring helpers above do
- *  not, since they have only the loose kind/params/modifiers triple. */
+ *  not, since they have only the loose kind/params/modifiers triple.
+ *
+ *  `stack` is the object's ordered modifier stack (`modifierStackOf(obj)`). When
+ *  given, it — not the flat `modifiers` bag — decides the geometry, so a written
+ *  stack (reordered / duplicated rows) actually renders. For a LEGACY object it is
+ *  the folded bag, so `applyModifierStack(base, that)` is byte-identical to the bag
+ *  path (Task 2). Omit it (measuring helpers) and the legacy `modifiers` bag path
+ *  runs unchanged. */
 export function buildGeometry(
   kind: PrimitiveKind,
   params: Record<string, number> | undefined,
@@ -397,11 +451,16 @@ export function buildGeometry(
   content?: PrimitiveContent,
   font?: Font | null,
   vary?: VarySettings,
+  stack?: ModifierInstance[],
+  ctx?: ModifierApplyCtx,
 ): THREE.BufferGeometry {
   const base = geometryFor(kind, params, content, font)
-  // applyModifiers returns the SAME object when nothing is set (and never
-  // disposes its input), so only free the base when it produced a new one.
-  const shaped = applyModifiers(base, modifiers, vary)
+  // applyModifiers/applyModifierStack return the SAME object when nothing is set (and
+  // never dispose their input), so only free the base when it produced a new one. When a
+  // stack is supplied it is authoritative; otherwise fold the legacy bag as before. `ctx` carries
+  // a boolean row's resolved sibling geometry — only relevant on the stack path (a legacy bag
+  // never holds a boolean), so it rides alongside `vary` there.
+  const shaped = stack ? applyModifierStack(base, stack, { vary, ctx }) : applyModifiers(base, modifiers, vary)
   if (shaped !== base) base.dispose()
   if (variant !== 'facet') return shaped
   let geo = shaped
@@ -893,7 +952,83 @@ export class SceneEngine {
     // the Vary settings — the numeric dials from `obj.modifiers`, the swatches from
     // `obj.varyPalette` (which is not in the modifier bag, and so is folded into
     // `geoKeyFor` separately). Everything gating this call on the key is above.
-    return buildGeometry(obj.primitive, obj.params, obj.modifiers, variant, obj.content, font, varySettingsFor(obj))
+    //
+    // Boolean rows also need the whole object AND the doc in scope, since a boolean combines this
+    // object with a SIBLING. Resolve each enabled boolean row's sibling into this object's local
+    // space here, hand them to buildGeometry via `ctx`, and dispose them after the build (the
+    // merge only reads their vertex buffers — the merged result is a fresh geometry).
+    // Only objects with a live doc AND an enabled boolean row need the sibling resolution; every
+    // other object skips it entirely (and the method call), so the common path is untouched.
+    const hasBoolean = !!this.lastDoc && modifierStackOf(obj).some((r) => r.kind === 'boolean' && r.enabled !== false)
+    const { ctx, siblingGeos } = hasBoolean
+      ? this.booleanCtxFor(obj, variant)
+      : { ctx: undefined as ModifierApplyCtx | undefined, siblingGeos: [] as THREE.BufferGeometry[] }
+    try {
+      return buildGeometry(obj.primitive, obj.params, obj.modifiers, variant, obj.content, font, varySettingsFor(obj), modifierStackOf(obj), ctx)
+    } finally {
+      for (const g of siblingGeos) g.dispose()
+    }
+  }
+
+  /** Resolve every enabled `boolean` row on `obj` to its sibling geometry, baked into `obj`'s LOCAL
+   *  space, for `applyModifierStack` to combine with. Returns the ctx handed to buildGeometry plus
+   *  the geometries to dispose once the build is done.
+   *
+   *  LOCAL SPACE: both meshes must share a coordinate frame for the SDF merge to mean anything, so
+   *  the sibling geometry (in the sibling's own local space) is transformed by
+   *  `inverse(thisWorld) · siblingWorld` — the sibling's world transform expressed relative to this
+   *  object — and that matrix is baked into the geometry.
+   *
+   *  CYCLE GUARD: the sibling is built through `siblingGeometryFor`, which calls `buildGeometry`
+   *  with NO ctx, so the sibling's OWN boolean rows resolve to no-ops. A→B→A can therefore never
+   *  recurse. A missing sibling, a self-reference, or a non-primitive object resolves to null → the
+   *  boolean is a no-op (never throws). */
+  private booleanCtxFor(
+    obj: PrimitiveObject, variant: 'smooth' | 'facet',
+  ): { ctx: ModifierApplyCtx | undefined; siblingGeos: THREE.BufferGeometry[] } {
+    const doc = this.lastDoc
+    const rows = modifierStackOf(obj).filter((r) => r.kind === 'boolean' && r.enabled !== false)
+    if (!doc || rows.length === 0) return { ctx: undefined, siblingGeos: [] }
+    const byRef = new Map<string, THREE.BufferGeometry | null>()
+    const resolve = (refId: string | undefined): THREE.BufferGeometry | null => {
+      if (!refId || refId === obj.id) return null // missing / self-reference → no-op
+      if (byRef.has(refId)) return byRef.get(refId) ?? null
+      let geo: THREE.BufferGeometry | null = null
+      const sibling = doc.objects.find((o) => o.id === refId)
+      if (sibling && sibling.kind === 'primitive') {
+        const built = this.siblingGeometryFor(sibling, variant)
+        if (built) {
+          const selfWorldInv = worldMatrixOf(doc.objects, obj.id).invert()
+          const rel = new THREE.Matrix4().multiplyMatrices(selfWorldInv, worldMatrixOf(doc.objects, sibling.id))
+          built.applyMatrix4(rel)
+          geo = built
+        }
+      }
+      byRef.set(refId, geo)
+      return geo
+    }
+    for (const r of rows) resolve(r.refObjectId)
+    const siblingGeos = [...byRef.values()].filter((g): g is THREE.BufferGeometry => g !== null)
+    const ctx: ModifierApplyCtx = { siblingGeoFor: (row) => (row.refObjectId ? byRef.get(row.refObjectId) ?? null : null) }
+    return { ctx, siblingGeos }
+  }
+
+  /** Build a boolean sibling's geometry synchronously, WITHOUT a ctx (so its own boolean rows
+   *  no-op — the cycle guard). Returns null when an async dependency is not yet cached (a text
+   *  font, or a mesh primitive's decoded buffer) — the boolean then no-ops until the next sync
+   *  after the load completes, exactly like the placeholder-then-resync path the object's own
+   *  geometry uses. */
+  private siblingGeometryFor(sib: PrimitiveObject, variant: 'smooth' | 'facet'): THREE.BufferGeometry | null {
+    let font: Font | null = null
+    if (sib.primitive === 'text') {
+      font = fontCacheGet(sib.content?.font ?? DEFAULT_FONT_URL)
+      if (!font) return null // font not loaded yet
+    }
+    if (sib.primitive === 'mesh') {
+      const key = sib.content?.meshKey
+      if (key && !meshCacheGet(key)) return null // mesh buffer not decoded yet
+    }
+    return buildGeometry(sib.primitive, sib.params, sib.modifiers, variant, sib.content, font, varySettingsFor(sib), modifierStackOf(sib))
   }
 
   /** While a sculpt session is live, this object's geometry comes from the
@@ -970,13 +1105,13 @@ export class SceneEngine {
     if (!root) {
       if (obj.kind === 'primitive') {
         const geo = this.geometryForObject(obj, 'smooth')
-        const mat = materialFor(obj.material, geo, this.id, modifierValue(obj.modifiers, 'varyColorStrength'))
+        const mat = materialFor(obj.material, geo, this.id, modifierValue(obj.modifiers, 'varyColorStrength'), finishPlan(obj))
         // Flat shapes must be visible from both sides (plane was previously
         // invisible from below; ring inherits the fix) — for every material type.
         if (obj.primitive === 'plane' || obj.primitive === 'ring') mat.side = THREE.DoubleSide
         const mesh = new THREE.Mesh(geo, this.lightView ? this.clay : mat)
         mesh.userData.realMaterial = mat
-        mesh.userData.geoKey = geoKeyFor(obj, 'smooth') // facet variant applied by the sync below
+        mesh.userData.geoKey = geoKeyFor(obj, 'smooth') + booleanRefKeys(obj, this.lastDoc) // facet variant applied by the sync below
         mesh.castShadow = mesh.receiveShadow = true
         root = mesh
       } else if (obj.kind === 'glb') {
@@ -1050,7 +1185,7 @@ export class SceneEngine {
       const wantFacet = obj.material.type === 'gradient' &&
         (obj.material.gradientShading ?? 'smooth') !== 'smooth'
       const variant = wantFacet ? 'facet' : 'smooth'
-      const geoKey = geoKeyFor(obj, variant)
+      const geoKey = geoKeyFor(obj, variant) + booleanRefKeys(obj, this.lastDoc)
       // Geometry params and the shading variant share one key: either change
       // swaps the geometry in place, leaving the material instance (and its
       // in-place update path) and the transform untouched.
@@ -1080,10 +1215,11 @@ export class SceneEngine {
       // about it belongs in vertex data. That is also what lets `geoKeyFor` leave
       // `varyColorStrength` out and the slider drag update a uniform in place.
       const varyStrength = modifierValue(obj.modifiers, 'varyColorStrength')
-      if (!updateMaterial(current, obj.material, mesh.geometry, varyStrength)) {
+      const finishes = finishPlan(obj)
+      if (!updateMaterial(current, obj.material, mesh.geometry, varyStrength, finishes)) {
         // Type or texture identity changed — rebuild, preserving double-siding.
         disposeMaterial(current)
-        const fresh = materialFor(obj.material, mesh.geometry, this.id, varyStrength)
+        const fresh = materialFor(obj.material, mesh.geometry, this.id, varyStrength, finishes)
         if (obj.primitive === 'plane' || obj.primitive === 'ring') fresh.side = THREE.DoubleSide
         real = fresh
       }
@@ -1321,7 +1457,12 @@ export class SceneEngine {
     // composer's OutputPass tone-maps a texture to the canvas.
     const plan = this.lastDoc ? maskedTreatmentPlan(this.lastDoc) : []
     const stageGroups = plan.filter((g) => g.rendered).length
-    if (!postEnabled(post) && stageGroups === 0) { this.renderer.render(scene, camera); return }
+    // The live G-buffer pass runs ONLY when a consuming treatment (edge lines today; depth
+    // fog / curvature wear next) is present — its absence is the byte-identity gate: no buffer
+    // plan ⇒ no G-buffer, no extra render, the same frame as before S3.
+    const bufferPlan = this.lastDoc ? bufferTreatmentPlan(this.lastDoc) : []
+    const runStage = stageGroups > 0 || bufferPlan.length > 0
+    if (!postEnabled(post) && !runStage) { this.renderer.render(scene, camera); return }
     const s = this.renderer.getSize(new THREE.Vector2())
     if (!this.postChain) { this.postChain = new PostChain(this.renderer, scene, camera, s.x, s.y); this.postW = s.x; this.postH = s.y }
     else if (this.postW !== s.x || this.postH !== s.y) { this.postChain.setSize(s.x, s.y); this.postW = s.x; this.postH = s.y }
@@ -1337,11 +1478,11 @@ export class SceneEngine {
     const helpers = collectEditorHelpers(scene)
     for (const h of helpers) h.visible = false
     try {
-      if (stageGroups > 0) {
+      if (runStage) {
         if (!this.treatmentStage) this.treatmentStage = new TreatmentStage(this.renderer)
         let tex: THREE.Texture | null = null
         try {
-          tex = this.treatmentStage.render(scene, camera, plan, { objectRoots: this.objectRoots })
+          tex = this.treatmentStage.render(scene, camera, plan, bufferPlan, { objectRoots: this.objectRoots })
           this.postChain.setInputTexture(tex)
         } catch (e) {
           this.postChain.setInputTexture(null)
