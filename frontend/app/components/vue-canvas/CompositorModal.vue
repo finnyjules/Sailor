@@ -7189,8 +7189,12 @@ onUnmounted(() => {
             </div>
           </Transition>
         </div>
-        <!-- Select tool — hidden once an image is selected (its modes take over). -->
-        <template v-if="!showEditToolbar">
+        <!-- Select tool — hidden once an image is selected. Collapses out with the
+             same tb-expand transition as the canvas tools, concurrently with the
+             inpaint cluster expanding in, so the swap is one continuous morph. -->
+        <Transition name="tb-expand">
+        <div v-if="!showEditToolbar" class="tb-cluster">
+        <div class="tb-cluster-inner flex items-center gap-1">
           <div class="w-px h-5 bg-white/10 mx-0.5" />
           <button
             class="flex items-center justify-center size-8 rounded cursor-pointer"
@@ -7198,7 +7202,9 @@ onUnmounted(() => {
             title="Select (V)" @click="selectTool">
             <MousePointer2 class="size-4" />
           </button>
-        </template>
+        </div>
+        </div>
+        </Transition>
         <!-- Undo / redo — kept in inpaint mode too (take back a brush stroke). -->
         <div class="w-px h-5 bg-white/10 mx-0.5" />
         <button class="flex items-center justify-center size-8 rounded cursor-pointer disabled:opacity-30 hover:bg-white/10 text-white/80"
@@ -7209,8 +7215,12 @@ onUnmounted(() => {
           title="Redo (⌘⇧Z)" :disabled="!canRedo" @click="redo">
           <Redo2 class="size-4" />
         </button>
-        <!-- Canvas tools — REPLACED by the inpaint controls once an image is selected. -->
-        <template v-if="!showEditToolbar">
+        <!-- Canvas tools — collapse out as the inpaint controls expand in. Both run
+             the tb-expand transition at once, so it reads as one fluid handoff
+             rather than a hard cut then a separate expand. -->
+        <Transition name="tb-expand">
+        <div v-if="!showEditToolbar" class="tb-cluster">
+        <div class="tb-cluster-inner flex items-center gap-1">
         <div class="w-px h-5 bg-white/10 mx-0.5" />
         <button class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/80 cursor-pointer" data-testid="add-text" title="Add text" @click="addText">
           <Type class="size-4" />
@@ -7350,7 +7360,9 @@ onUnmounted(() => {
         >
           <LayoutTemplate class="size-4" />
         </button>
-        </template>
+        </div>
+        </div>
+        </Transition>
         <!-- Inpaint controls: the modes + region tools + model take the tools' slot.
              They expand in (grid 0fr→1fr, so the buttons keep their real size) as
              the canvas tools swap out — see .tb-cluster in <style>. -->
@@ -9918,20 +9930,24 @@ button:active:not(:disabled) {
    app/assets/css/main.css — so the canvas-node Inpaint modal stays cohesive.
    Interior bg is set inline via --pastel-hairline-bg on the textarea. */
 
-/* Toolbar swap: the inpaint controls expand in over the canvas tools. A single
-   grid track animating 0fr→1fr grows the cluster to its intrinsic width without
-   squishing the buttons (unlike a scaleX). The resting state lives here so the
-   enter-from override can win. */
+/* Toolbar swap: the outgoing cluster (Select + canvas tools) collapses while the
+   inpaint cluster expands, CONCURRENTLY, so it reads as one fluid morph instead
+   of a hard cut then a separate expand. Each side is a single grid track
+   animating 0fr↔1fr — grows/shrinks to intrinsic width without squishing the
+   buttons (unlike a scaleX). The resting state lives here so enter-from wins. */
 .tb-cluster {
   display: grid;
   grid-template-columns: 1fr;
   align-items: center;
 }
-.tb-expand-enter-active {
-  transition: grid-template-columns 0.22s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.2s ease;
-}
+/* Enter (expand-in) and leave (collapse-out) share IDENTICAL timing + easing so
+   the two sides mirror each other exactly — no lurch from a fast-out/slow-in
+   mismatch. */
+.tb-expand-enter-active,
 .tb-expand-leave-active {
-  transition: grid-template-columns 0.16s ease-in, opacity 0.12s ease-in;
+  transition:
+    grid-template-columns 0.34s cubic-bezier(0.33, 0.7, 0.15, 1),
+    opacity 0.26s cubic-bezier(0.33, 0.7, 0.15, 1);
 }
 .tb-expand-enter-from,
 .tb-expand-leave-to {
@@ -9939,8 +9955,8 @@ button:active:not(:disabled) {
   opacity: 0;
 }
 /* Clip to the animating track WHILE animating only — the min-width:0 + overflow
-   lets the fr track collapse past min-content. Never at rest, or the model
-   dropdown (which opens above the bar) would be clipped. */
+   lets the fr track collapse past min-content. Never at rest, or the popovers
+   (model dropdown, shape/insert menus) that open above the bar would be clipped. */
 .tb-expand-enter-active > .tb-cluster-inner,
 .tb-expand-leave-active > .tb-cluster-inner {
   overflow: hidden;
