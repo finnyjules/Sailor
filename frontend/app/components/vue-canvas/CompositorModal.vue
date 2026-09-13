@@ -8845,9 +8845,19 @@ onUnmounted(() => {
                   </button>
                 </div>
                 <div v-if="(selectedLocal as any).expressive" class="space-y-2.5">
+                  <div class="flex items-center gap-1">
+                    <button
+                      class="flex-1 text-[11px] py-1 rounded border"
+                      :class="!(selectedLocal as any).expressive.perChar ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50 border-white/[0.08]'"
+                      @click="setExpressive(selectedLocal, { perChar: false })">Words</button>
+                    <button
+                      class="flex-1 text-[11px] py-1 rounded border"
+                      :class="(selectedLocal as any).expressive.perChar ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50 border-white/[0.08]'"
+                      @click="setExpressive(selectedLocal, { perChar: true })">Letters</button>
+                  </div>
                   <div class="grid grid-cols-2 gap-3">
                     <div>
-                      <div class="panel-label mb-1">Words / line</div>
+                      <div class="panel-label mb-1">{{ (selectedLocal as any).expressive.perChar ? 'Glyphs / line' : 'Words / line' }}</div>
                       <input v-scrubnum type="number" min="1" max="12" :value="(selectedLocal as any).expressive.wordsPerLine"
                         class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                         @input="setExpressive(selectedLocal, { wordsPerLine: Math.max(1, parseInt(($event.target as HTMLInputElement).value) || 1) })" />
