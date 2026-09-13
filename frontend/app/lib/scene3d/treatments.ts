@@ -288,9 +288,12 @@ export const TREATMENT_DEFAULTS = {
   crossHatch: { color: '#000000', spacing: 6, angle: 45, threshold: 0.6 },
   // Verbatim from MATERIAL_DEFAULTS.opal* (config.ts) — the same shader, ported as a finish.
   opalescence: { strength: 1, frequency: 1.5, hueShift: 0, angleMix: 0.6 },
-  // strength/bands/angle/hueShift mirror MATERIAL_DEFAULTS.holo* (config.ts); gloss keeps the
-  // holographic material's default sharpness but drives the finish's highlight falloff exponent,
-  // never roughness (see FoilShimmerTreatment's doc comment).
+  // strength/bands/angle/hueShift mirror MATERIAL_DEFAULTS.holo* (config.ts). gloss does NOT
+  // mirror MATERIAL_DEFAULTS.holoGloss (0.85, config.ts) — the two aren't the same knob: holoGloss
+  // there drives derived roughness on a material forced to metalness 1, while this finish's gloss
+  // drives only the highlight's env-exponent falloff over an untouched host material (see
+  // FoilShimmerTreatment's doc comment). 0.5 is a deliberate finish-specific default — a medium
+  // falloff — chosen independently of the material type's own default.
   foilShimmer: { strength: 1, bands: 3, angle: 0, hueShift: 0, gloss: 0.5 },
   // 'chrome' mirrors MATERIAL_DEFAULTS.matcap (config.ts) and MATCAP_IDS[0] — a literal, not a
   // live `MATCAP_IDS[0]` read: config.ts imports `parseTreatments` FROM this file, so when THIS

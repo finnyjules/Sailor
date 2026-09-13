@@ -394,6 +394,26 @@ describe('sceneStackControls: treatments', () => {
     // Not masked — no invert row for a finish.
     expect(keys.some((k) => k.endsWith(`.${opal.id}.invert`))).toBe(false)
   })
+  // matcapCoat's `matcap` dial is a `select`, not a `slider` — the plan's "no colour whitelist"
+  // clause is really about no CONTROL-KIND whitelist: a finish's non-slider dial (a select here,
+  // a colour on some future finish) still reaches the agent stack by the exact same generic
+  // iterateTreatmentControls path a slider does, with no per-kind code in agentControls.ts.
+  it('a stacked opalescence + matcapCoat finish both mint id-addressed agent controls, including the matcap select', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Gem'
+    const opal = createTreatment('opalescence')
+    const matcap = createTreatment('matcapCoat')
+    box.treatments = [opal, matcap]
+    doc.objects.push(box)
+    const controls = sceneStackControls(doc)
+    const keys = controls.map((c) => c.key)
+    expect(keys).toContain(`objects.${box.id}.treatments.${opal.id}.strength`)
+    expect(keys).toContain(`objects.${box.id}.treatments.${matcap.id}.strength`)
+    expect(keys).toContain(`objects.${box.id}.treatments.${matcap.id}.matcap`)
+    const matcapSelect = controls.find((c) => c.key === `objects.${box.id}.treatments.${matcap.id}.matcap`)!
+    expect(matcapSelect.kind).toBe('select')
+    expect(matcapSelect.label).toBe('Gem · Matcap coat matcap')
+  })
 })
 
 describe('sceneStackControls / iterateModifierControls: modifiers', () => {

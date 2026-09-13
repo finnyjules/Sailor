@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { defaultDoc, createPrimitive, createLight, createGroup, serializeDoc, parseDoc, MATCAP_IDS } from '~/lib/scene3d/config'
+import { defaultDoc, createPrimitive, createLight, createGroup, createGlbObject, serializeDoc, parseDoc, MATCAP_IDS } from '~/lib/scene3d/config'
 import {
   TREATMENT_KINDS, TREATMENT_LABELS, TREATED_OBJECT_CAP, createTreatment, parseTreatment, parseTreatments,
   cloneTreatments, maskedTreatmentPlan, unrenderedTreatmentIds, findTreatment, edgeTreatmentsOf, isMaskedKind, isEdgeKind, isBufferKind, BLUR_AMOUNT_MAX,
   DASHED_OUTLINE_LEN_MAX, docHasGBufferTreatment, bufferTreatmentPlan, BUFFER_TREATMENT_KINDS,
   CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX,
   FINISH_TREATMENT_KINDS, isFinishKind, canTakeFinish, finishPlan, TREATMENT_DEFAULTS,
+  MASKED_TREATMENT_KINDS, EDGE_TREATMENT_KINDS,
 } from '~/lib/scene3d/treatments'
 import { treatmentControls } from '~/lib/scene3d/treatmentControls'
 import { blurPasses } from '~/lib/scene3d/treatmentStage'
@@ -766,5 +767,43 @@ describe('treatments: matcap coat (S5 finish family, task 3)', () => {
     expect(optionLabels).toBeDefined()
     expect(optionLabels).toHaveLength(MATCAP_IDS.length)
     for (const label of optionLabels!) expect(label).toMatch(/^[A-Z]/)
+  })
+})
+
+describe('treatments: finish add-menu is never a dead control on a non-primitive host (S5 task 4)', () => {
+  // The three earlier finish describe blocks already prove canTakeFinish is false for a light
+  // and a group; this fills the gap the plan calls out specifically — a GLB host, which (unlike
+  // light/group) IS a general treatment host (isTreatmentHost) and so DOES reach the add-menu,
+  // just not for finishes (materialFor/updateMaterial — the only build path a finish is wired
+  // through this slice — is the primitive path; syncGlbMaterials has no finish path yet).
+  it('canTakeFinish is false for a GLB host, true for a primitive', () => {
+    const prim = createPrimitive('box', [])
+    const glb = createGlbObject('https://example.com/model.glb', [])
+    expect(glb.kind).toBe('glb')
+    expect(canTakeFinish(prim)).toBe(true)
+    expect(canTakeFinish(glb)).toBe(false)
+  })
+
+  // Mirrors Scene3DObjectRow.vue's `finishDisabled = (kind) => isFinishKind(kind) && !canTakeFinish(obj)`
+  // verbatim, so a change to either half of that predicate breaks this test rather than a live
+  // Playwright interaction test (the plan accepts a unit here). A wrong `canTakeFinish` that
+  // always returned true would make every assertion in the first loop fail (nothing would be
+  // disabled), and a wrong `isFinishKind` that matched too broadly would make the second loop's
+  // masked/edge/buffer assertions fail — the test cannot pass by accident either way.
+  it('the add-menu disable predicate disables exactly the three finish kinds on a GLB, and none of masked/edge/buffer', () => {
+    const glb = createGlbObject('https://example.com/model.glb', [])
+    const finishDisabled = (kind: string): boolean => isFinishKind(kind) && !canTakeFinish(glb)
+    for (const kind of FINISH_TREATMENT_KINDS) expect(finishDisabled(kind)).toBe(true)
+    for (const kind of [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS]) {
+      expect(finishDisabled(kind)).toBe(false)
+    }
+    // Every TREATMENT_KINDS entry is accounted for by exactly one of the two groups above.
+    expect(TREATMENT_KINDS.filter((k) => finishDisabled(k))).toEqual([...FINISH_TREATMENT_KINDS])
+  })
+
+  it('the same predicate does NOT disable any finish kind on a primitive host', () => {
+    const prim = createPrimitive('box', [])
+    const finishDisabled = (kind: string): boolean => isFinishKind(kind) && !canTakeFinish(prim)
+    for (const kind of FINISH_TREATMENT_KINDS) expect(finishDisabled(kind)).toBe(false)
   })
 })
