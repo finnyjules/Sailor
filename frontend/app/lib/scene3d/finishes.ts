@@ -2,7 +2,8 @@
 // treatments.ts) built as an onBeforeCompile CHAIN on the `applyScreen`/`applyVaryTint` model
 // (materials.ts), not a treatmentStage pass. See docs/superpowers/plans/2026-09-09-scene3d-S5-
 // finishes.md for the whole slice; this file is Task 1's `applyFinish` seam plus the reference
-// finish, opalescence.
+// finish, opalescence, and Task 2's foil shimmer (a diffraction-grating rainbow, ADDED over
+// `gl_FragColor` rather than mixed into it — see `foilBody`/`foilShimmerRGB` below).
 //
 // A finish injects DISPLAY-SPACE overlay math at the TERMINAL `#include <dithering_fragment>`
 // anchor — the very last chunk in every lit material's fragment `main()`, right before the
@@ -29,7 +30,7 @@
 // builds/compiles exactly as it did before this file existed.
 import * as THREE from 'three'
 import { OPAL_DEFAULT_STOPS } from './config'
-import type { FinishTreatment, OpalescenceTreatment } from './treatments'
+import type { FinishTreatment, OpalescenceTreatment, FoilShimmerTreatment } from './treatments'
 
 // ── Opalescence ram­p LUT ─────────────────────────────────────────────────────
 // A small, self-contained sRGB-LUT builder — deliberately NOT imported from materials.ts's
@@ -81,8 +82,12 @@ function buildOpalRamp(): THREE.DataTexture {
   return t
 }
 
-/** Lazily built, shared across every opalescence finish — the ramp is currently fixed
- *  (OPAL_DEFAULT_STOPS), so one texture object serves every instance. */
+/** Lazily built, shared across every opalescence AND foil-shimmer finish instance — the ramp is
+ *  currently fixed (OPAL_DEFAULT_STOPS), so one texture object serves every instance of either
+ *  kind. Foil shimmer's grating samples the SAME spectrum as opalescence (mirroring how the
+ *  `holographic`/`opalescent` MATERIAL types already share `opalStopsOf`'s ramp) — not a separate
+ *  LUT, since neither finish threads a per-treatment custom ramp through `applyFinish` yet (see
+ *  the module comment above). */
 let opalRampCache: THREE.DataTexture | null = null
 function opalRamp(): THREE.DataTexture {
   if (!opalRampCache) opalRampCache = buildOpalRamp()
@@ -125,6 +130,73 @@ export function opalescenceRGB(
   ]
 }
 
+/** CPU twin of the foil-shimmer finish body — mirrors `FOIL_FINISH_BODY`'s math exactly (same
+ *  tangent frame built from the surface normal, same sun/view half-vector, same fract-wrapped
+ *  band position, same gloss-driven highlight falloff), so a unit test can assert the two agree
+ *  without a GPU. `hueShiftNorm` is PRE-NORMALISED 0..1 (degrees/360) and `angleDeg` is the raw
+ *  stored degrees, matching what the shader's uniforms actually carry (the shader itself converts
+ *  angle to radians). `lightDir: null` mirrors the shader's `#if NUM_DIR_LIGHTS > 0` guard's ELSE
+ *  branch — a lightless scene falls back to a fixed forward direction rather than reading past the
+ *  end of an empty array. Unlike `opalescenceRGB`'s `mix()` (replaces the base colour), this is
+ *  ADDITIVE — the shimmer is a highlight added on top of whatever `base` already is, exactly as
+ *  `FOIL_FINISH_BODY` writes `gl_FragColor.rgb = clamp(gl_FragColor.rgb + rainbow*env*strength, ..)`.
+ *  `sampleRamp` stands in for the `texture2D(uFinFoilRamp_i, vec2(s, 0.5))` lookup. */
+export function foilShimmerRGB(
+  base: readonly [number, number, number],
+  normal: readonly [number, number, number],
+  viewDir: readonly [number, number, number],
+  lightDir: readonly [number, number, number] | null,
+  params: { hueShiftNorm: number; bands: number; angleDeg: number; gloss: number; strength: number },
+  sampleRamp: (s: number) => readonly [number, number, number],
+): [number, number, number] {
+  const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
+  const norm = (v: readonly [number, number, number]): [number, number, number] => {
+    const len = Math.hypot(v[0], v[1], v[2]) || 1
+    return [v[0] / len, v[1] / len, v[2] / len]
+  }
+  const add3 = (a: readonly [number, number, number], b: readonly [number, number, number]): [number, number, number] =>
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+  const cross3 = (a: readonly [number, number, number], b: readonly [number, number, number]): [number, number, number] => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ]
+  const dot3 = (a: readonly [number, number, number], b: readonly [number, number, number]): number =>
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  const smoothstep = (e0: number, e1: number, x: number): number => {
+    const t = clamp01((x - e0) / (e1 - e0))
+    return t * t * (3 - 2 * t)
+  }
+
+  const nrm = norm(normal)
+  const vdir = norm(viewDir)
+  const ldir = norm(lightDir ?? [0, 0, 1])
+  const h = norm(add3(ldir, vdir))
+  const ref: [number, number, number] = Math.abs(nrm[1]) < 0.95 ? [0, 1, 0] : [1, 0, 0]
+  const t0 = norm(cross3(ref, nrm))
+  const b0 = cross3(nrm, t0)
+  const a = (params.angleDeg * Math.PI) / 180
+  const tang: [number, number, number] = [
+    t0[0] * Math.cos(a) + b0[0] * Math.sin(a),
+    t0[1] * Math.cos(a) + b0[1] * Math.sin(a),
+    t0[2] * Math.cos(a) + b0[2] * Math.sin(a),
+  ]
+  const u = dot3(tang, h)
+  const au = Math.abs(u)
+  const sMixed = au * params.bands + params.hueShiftNorm
+  const s = sMixed - Math.floor(sMixed) // fract()
+  const rainbow = sampleRamp(s)
+  const glossPow = 1 + (6 - 1) * clamp01(params.gloss) // mix(1.0, 6.0, gloss)
+  let env = smoothstep(0.02, 0.12, au) * (1 - smoothstep(0.55, 0.95, au))
+  env *= Math.pow(clamp01(dot3(nrm, h)), glossPow)
+  const strength = params.strength
+  return [
+    clamp01(base[0] + rainbow[0] * env * strength),
+    clamp01(base[1] + rainbow[1] * env * strength),
+    clamp01(base[2] + rainbow[2] * env * strength),
+  ]
+}
+
 // ── GLSL bodies ───────────────────────────────────────────────────────────────
 // Every identifier is suffixed `_${i}` (the finish's index within the object's finish stack) so
 // two finishes of the same kind stacked on one object never collide — required because uniform
@@ -163,15 +235,73 @@ function opalUniformBag(t: OpalescenceTreatment, i: number): Record<string, { va
   }
 }
 
+// Foil shimmer: a diffraction-grating rainbow highlight, ADDED over `gl_FragColor` rather than
+// mixed into it (opal's body) — the sweep is a bright streak near the key-light/view half vector,
+// not a whole-surface recolour. Ported from materials.ts's HOLO_FRAG_DECL/BODY (the `holographic`
+// MATERIAL type), dropping its vertex-injected `vHoloPos`/per-flake jitter (the finish seam only
+// injects into the fragment shader — no vertex stage available here) and its forced
+// metalness/roughness (the host material's own PBR values are left alone; see
+// FoilShimmerTreatment's doc comment in treatments.ts). `directionalLights[0]` is the engine's
+// sun (added at construction, so it is index 0); `#if NUM_DIR_LIGHTS > 0` guards a lightless
+// scene exactly as HOLO_FRAG_BODY already does, falling back to a fixed forward direction rather
+// than reading past the end of an empty array.
+const foilPars = (i: number): string => /* glsl */ `
+uniform sampler2D uFinFoilRamp_${i};
+uniform float uFinFoilStrength_${i};
+uniform float uFinFoilBands_${i};
+uniform float uFinFoilAngle_${i};
+uniform float uFinFoilHueShift_${i};
+uniform float uFinFoilGloss_${i};
+`
+
+const foilBody = (i: number): string => /* glsl */ `
+{
+  vec3 finNrm_${i} = normalize( normal );
+  vec3 finView_${i} = normalize( vViewPosition );
+  #if NUM_DIR_LIGHTS > 0
+    vec3 finLdir_${i} = normalize( directionalLights[ 0 ].direction );
+  #else
+    vec3 finLdir_${i} = vec3( 0.0, 0.0, 1.0 );
+  #endif
+  vec3 finH_${i} = normalize( finLdir_${i} + finView_${i} );
+  vec3 finRef_${i} = abs( finNrm_${i}.y ) < 0.95 ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 );
+  vec3 finT0_${i} = normalize( cross( finRef_${i}, finNrm_${i} ) );
+  vec3 finB0_${i} = cross( finNrm_${i}, finT0_${i} );
+  float finAngRad_${i} = radians( uFinFoilAngle_${i} );
+  vec3 finTang_${i} = finT0_${i} * cos( finAngRad_${i} ) + finB0_${i} * sin( finAngRad_${i} );
+  float finU_${i} = dot( finTang_${i}, finH_${i} );
+  float finAu_${i} = abs( finU_${i} );
+  float finS_${i} = fract( finAu_${i} * uFinFoilBands_${i} + uFinFoilHueShift_${i} );
+  vec3 finRainbow_${i} = texture2D( uFinFoilRamp_${i}, vec2( finS_${i}, 0.5 ) ).rgb;
+  float finGlossPow_${i} = mix( 1.0, 6.0, clamp( uFinFoilGloss_${i}, 0.0, 1.0 ) );
+  float finEnv_${i} = smoothstep( 0.02, 0.12, finAu_${i} ) * ( 1.0 - smoothstep( 0.55, 0.95, finAu_${i} ) );
+  finEnv_${i} *= pow( clamp( dot( finNrm_${i}, finH_${i} ), 0.0, 1.0 ), finGlossPow_${i} );
+  gl_FragColor.rgb = clamp( gl_FragColor.rgb + finRainbow_${i} * finEnv_${i} * uFinFoilStrength_${i}, 0.0, 1.0 );
+}
+`
+
+function foilUniformBag(t: FoilShimmerTreatment, i: number): Record<string, { value: unknown }> {
+  return {
+    [`uFinFoilRamp_${i}`]: { value: opalRamp() },
+    [`uFinFoilStrength_${i}`]: { value: t.strength },
+    [`uFinFoilBands_${i}`]: { value: t.bands },
+    [`uFinFoilAngle_${i}`]: { value: t.angle },
+    [`uFinFoilHueShift_${i}`]: { value: t.hueShift / 360 },
+    [`uFinFoilGloss_${i}`]: { value: t.gloss },
+  }
+}
+
 function uniformBagFor(t: FinishTreatment, i: number): Record<string, { value: unknown }> {
   switch (t.kind) {
     case 'opalescence': return opalUniformBag(t, i)
+    case 'foilShimmer': return foilUniformBag(t, i)
   }
 }
 
 function glslFor(t: FinishTreatment, i: number): { pars: string; body: string } {
   switch (t.kind) {
     case 'opalescence': return { pars: opalPars(i), body: opalBody(i) }
+    case 'foilShimmer': return { pars: foilPars(i), body: foilBody(i) }
   }
 }
 
@@ -183,6 +313,13 @@ function writeFinishUniforms(t: FinishTreatment, u: Record<string, { value: unkn
       u[`uFinOpalFrequency_${i}`]!.value = t.frequency
       u[`uFinOpalAngleMix_${i}`]!.value = t.angleMix
       u[`uFinOpalStrength_${i}`]!.value = t.strength
+      break
+    case 'foilShimmer':
+      u[`uFinFoilStrength_${i}`]!.value = t.strength
+      u[`uFinFoilBands_${i}`]!.value = t.bands
+      u[`uFinFoilAngle_${i}`]!.value = t.angle
+      u[`uFinFoilHueShift_${i}`]!.value = t.hueShift / 360
+      u[`uFinFoilGloss_${i}`]!.value = t.gloss
       break
   }
 }

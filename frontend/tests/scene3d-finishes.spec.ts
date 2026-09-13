@@ -2,7 +2,9 @@ import { test, expect, type Page } from '@playwright/test'
 
 /**
  * S5 finishes, end to end against the real WebGL path. Task 1 covers the reference finish,
- * opalescence, and the byte-identical-when-absent claim the whole slice is built on.
+ * opalescence, and the byte-identical-when-absent claim the whole slice is built on. Task 2 adds
+ * foil shimmer — a diffraction-grating highlight, ADDITIVE rather than opal's `mix()` — further
+ * down this file.
  *
  * Byte-identity is the load-bearing claim here: `applyFinish` never touches a material at all
  * when the finish list is empty (finishes.ts), so a sphere with zero finish treatments must
@@ -31,6 +33,12 @@ const sceneWith = (treatments?: unknown[]) => ({
 const OPAL = (overrides: Record<string, unknown> = {}) => ({
   id: 't-opal', kind: 'opalescence', enabled: true, invert: false,
   strength: 1, frequency: 1.5, hueShift: 0, angleMix: 0.6,
+  ...overrides,
+})
+
+const FOIL = (overrides: Record<string, unknown> = {}) => ({
+  id: 't-foil', kind: 'foilShimmer', enabled: true, invert: false,
+  strength: 1, bands: 3, angle: 0, hueShift: 0, gloss: 0.5,
   ...overrides,
 })
 
@@ -166,4 +174,113 @@ test('the strength dial changes the render — a live uniform, not a dead contro
 
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
   expect(full).not.toBe(zero)
+})
+
+/**
+ * S5 task 2, foil shimmer. Foil is ADDITIVE (writes `gl_FragColor.rgb + rainbow*env*strength`,
+ * not opal's `mix()`), so it never floods the whole sphere with saturated colour the way opal
+ * does — it is a narrow diffraction streak near the sun/view half-vector. `saturatedCount` (an
+ * area metric tuned for opal's whole-surface recolour) would under-count a thin highlight, so
+ * this suite uses the plan's prescribed metric instead: raw CHANGED-PIXELS-vs-plain (S4's lesson
+ * against a gradient-energy metric, which a thin streak could also fail to move).
+ */
+const CHANGED_PIXEL_THRESHOLD = 10 // per-channel byte delta below this counts as "unchanged"
+
+async function changedPixelCount(page: Page, dataUrlA: string, dataUrlB: string): Promise<number> {
+  return page.evaluate(async ([urlA, urlB, threshold]) => {
+    const load = async (url: string) => {
+      const img = new Image(); img.src = url; await img.decode()
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+      const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+      return ctx.getImageData(0, 0, c.width, c.height).data
+    }
+    const [a, b] = await Promise.all([load(urlA), load(urlB)])
+    let n = 0
+    for (let i = 0; i < a.length; i += 4) {
+      const dr = Math.abs(a[i]! - b[i]!)
+      const dg = Math.abs(a[i + 1]! - b[i + 1]!)
+      const db = Math.abs(a[i + 2]! - b[i + 2]!)
+      if (dr > threshold || dg > threshold || db > threshold) n++
+    }
+    return n
+  }, [dataUrlA, dataUrlB, CHANGED_PIXEL_THRESHOLD] as const)
+}
+
+test('foil shimmer changes the render versus a plain sphere, no shader failure', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith(undefined))
+  const plain = await snapshot(page)
+
+  await openLab(page, sceneWith([FOIL()]))
+  const foilSnap = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(foilSnap).not.toBe(plain)
+  const changed = await changedPixelCount(page, plain, foilSnap)
+  // A diffraction streak is narrow, not a whole-surface recolour (that is opal's job) — a few
+  // hundred changed pixels is a real, visible highlight; zero would mean the injection compiled
+  // but never actually painted anything (e.g. the NUM_DIR_LIGHTS guard silently zeroing it out).
+  expect(changed, `foil render changed ${changed} px vs plain`).toBeGreaterThan(200)
+})
+
+test('a disabled foil-shimmer treatment renders exactly like no treatment at all', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith(undefined))
+  const plain = await snapshot(page)
+
+  await openLab(page, sceneWith([FOIL({ enabled: false })]))
+  const disabled = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(disabled).toBe(plain)
+})
+
+test('foil shimmer with an empty finish list is byte-identical to a sphere with none at all', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith(undefined))
+  const noField = await snapshot(page)
+
+  await openLab(page, sceneWith([]))
+  const emptyList = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(emptyList).toBe(noField)
+})
+
+test('foil shimmer is deterministic — the same params render the identical frame twice', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith([FOIL()]))
+  const first = await snapshot(page)
+
+  await openLab(page, sceneWith([FOIL()]))
+  const second = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(second).toBe(first)
+})
+
+test('the gloss dial changes the render — a live uniform, not a dead control', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith([FOIL({ gloss: 0 })]))
+  const soft = await snapshot(page)
+
+  await openLab(page, sceneWith([FOIL({ gloss: 1 })]))
+  const sharp = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(sharp).not.toBe(soft)
+})
+
+test('opalescence and foil shimmer stack on one object — both overlays are visible together', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith(undefined))
+  const plain = await snapshot(page)
+
+  await openLab(page, sceneWith([OPAL(), FOIL()]))
+  const stacked = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(stacked).not.toBe(plain)
+  const changed = await changedPixelCount(page, plain, stacked)
+  expect(changed, `stacked render changed ${changed} px vs plain`).toBeGreaterThan(500)
 })

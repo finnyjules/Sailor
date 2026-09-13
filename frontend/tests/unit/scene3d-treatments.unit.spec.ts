@@ -5,7 +5,7 @@ import {
   cloneTreatments, maskedTreatmentPlan, unrenderedTreatmentIds, findTreatment, edgeTreatmentsOf, isMaskedKind, isEdgeKind, isBufferKind, BLUR_AMOUNT_MAX,
   DASHED_OUTLINE_LEN_MAX, docHasGBufferTreatment, bufferTreatmentPlan, BUFFER_TREATMENT_KINDS,
   CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX,
-  FINISH_TREATMENT_KINDS, isFinishKind, canTakeFinish, finishPlan,
+  FINISH_TREATMENT_KINDS, isFinishKind, canTakeFinish, finishPlan, TREATMENT_DEFAULTS,
 } from '~/lib/scene3d/treatments'
 import { treatmentControls } from '~/lib/scene3d/treatmentControls'
 import { blurPasses } from '~/lib/scene3d/treatmentStage'
@@ -594,5 +594,86 @@ describe('treatments: opalescence (S5 finish family)', () => {
     const disabledOpal = { ...createTreatment('opalescence'), enabled: false }
     prim.treatments = [glow, opal, disabledOpal]
     expect(finishPlan(prim)).toEqual([opal])
+  })
+})
+
+describe('treatments: foil shimmer (S5 finish family, task 2)', () => {
+  it('TREATMENT_KINDS includes foilShimmer as a FINISH kind — not masked, not edge, not buffer', () => {
+    expect(TREATMENT_KINDS).toContain('foilShimmer')
+    expect(FINISH_TREATMENT_KINDS).toContain('foilShimmer')
+    expect(isFinishKind('foilShimmer')).toBe(true)
+    expect(isMaskedKind('foilShimmer')).toBe(false)
+    expect(isEdgeKind('foilShimmer')).toBe(false)
+    expect(isBufferKind('foilShimmer')).toBe(false)
+    expect(TREATMENT_LABELS.foilShimmer).toBe('Foil shimmer')
+  })
+
+  it('TREATMENT_DEFAULTS.foilShimmer is present with the five dials', () => {
+    expect(TREATMENT_DEFAULTS.foilShimmer).toEqual({ strength: 1, bands: 3, angle: 0, hueShift: 0, gloss: 0.5 })
+  })
+
+  it('createTreatment seeds defaults, enabled and not inverted, with a fresh id', () => {
+    expect(createTreatment('foilShimmer')).toMatchObject({
+      kind: 'foilShimmer', enabled: true, invert: false, strength: 1, bands: 3, angle: 0, hueShift: 0, gloss: 0.5,
+    })
+    expect(createTreatment('foilShimmer').id).toMatch(/^trt_/)
+  })
+
+  it('is NOT a ramped kind — no progressive/ramp fields', () => {
+    expect(createTreatment('foilShimmer')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'fo', kind: 'foilShimmer' })).not.toHaveProperty('rampSpace')
+  })
+
+  it('clamps strength to 0..2, bands to 0.5..8, gloss to 0..1, wraps angle/hueShift into 0..360, backfilling', () => {
+    expect(parseTreatment({ id: 'fo1', kind: 'foilShimmer', strength: 9, bands: 99, angle: 405, hueShift: 720, gloss: 9 }))
+      .toMatchObject({ strength: 2, bands: 8, angle: 45, hueShift: 0, gloss: 1 })
+    expect(parseTreatment({ id: 'fo2', kind: 'foilShimmer', strength: -3, bands: 0.01, angle: -30, hueShift: -30, gloss: -3 }))
+      .toMatchObject({ strength: 0, bands: 0.5, angle: 330, hueShift: 330, gloss: 0 })
+    expect(parseTreatment({ id: 'fo3', kind: 'foilShimmer' }))
+      .toMatchObject({ strength: 1, bands: 3, angle: 0, hueShift: 0, gloss: 0.5 })
+  })
+
+  it('round-trips through parseTreatments/serialize the same as every other kind', () => {
+    const t = createTreatment('foilShimmer')
+    expect(parseTreatments([t])).toEqual([t])
+  })
+
+  it('a document with only a foilShimmer finish parses/round-trips through serializeDoc/parseDoc', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.treatments = [createTreatment('foilShimmer')]
+    doc.objects.push(box)
+    const back = parseDoc(serializeDoc(doc))
+    expect(back.objects.at(-1)!.treatments!.map((t) => t.kind)).toEqual(['foilShimmer'])
+    expect(back).toEqual(doc)
+  })
+
+  it('canTakeFinish: primitives only this slice — not GLB, light or group', () => {
+    const prim = createPrimitive('box', [])
+    const light = createLight('point', [])
+    const group = createGroup([])
+    expect(canTakeFinish(prim)).toBe(true)
+    expect(canTakeFinish(light)).toBe(false)
+    expect(canTakeFinish(group)).toBe(false)
+  })
+
+  it('finishPlan: a foilShimmer treatment is included alongside opalescence, in stack order', () => {
+    const prim = createPrimitive('box', [])
+    const opal = createTreatment('opalescence')
+    const foilShimmer = createTreatment('foilShimmer')
+    const glow = createTreatment('glow') // masked — must be excluded
+    prim.treatments = [glow, foilShimmer, opal]
+    expect(finishPlan(prim)).toEqual([foilShimmer, opal])
+  })
+
+  it('has a control row for every dial, group-titled by the human label', () => {
+    const rows = treatmentControls('foilShimmer')
+    const fields = rows.map((r) => r.key)
+    expect(fields).toEqual([
+      'treatment.strength', 'treatment.bands', 'treatment.angle', 'treatment.hueShift', 'treatment.gloss',
+    ])
+    for (const r of rows) expect(r.group).toBe('Foil shimmer')
+    // Not masked — no trailing "Everything else" invert toggle.
+    expect(fields).not.toContain('treatment.invert')
   })
 })

@@ -198,6 +198,15 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         slider(g, 'angleMix', 'Angle mix', 0, 1, 0.01, D.opalescence.angleMix, 'Normal-driven at zero, view angle at one'),
       ]
       break
+    case 'foilShimmer':
+      rows = [
+        slider(g, 'strength', 'Strength', 0, 2, 0.01, D.foilShimmer.strength, 'Rainbow shimmer added over the object'),
+        slider(g, 'bands', 'Bands', 0.5, 8, 0.1, D.foilShimmer.bands, 'How many rainbow repeats sweep across the surface'),
+        slider(g, 'angle', 'Angle', 0, 360, 1, D.foilShimmer.angle, 'Direction the shimmer sweep runs in'),
+        slider(g, 'hueShift', 'Hue shift', 0, 360, 1, D.foilShimmer.hueShift, 'Rotates the spectrum around the colour wheel'),
+        slider(g, 'gloss', 'Gloss', 0, 1, 0.01, D.foilShimmer.gloss, 'Sharper, more mirror-like highlight at higher values'),
+      ]
+      break
     default:
       rows = []
   }

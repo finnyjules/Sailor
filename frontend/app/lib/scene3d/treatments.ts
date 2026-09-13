@@ -21,10 +21,11 @@ export const BUFFER_TREATMENT_KINDS = ['edgeLines', 'depthFog', 'curvatureWear',
  *  (`applyFinish`, in finishes.ts) on the `applyScreen`/`applyVaryTint` onBeforeCompile-chain
  *  model, rather than a treatmentStage pass — it costs nothing at the treatment stage and is
  *  byte-identical when absent (an empty finish list never touches the material at all).
- *  `opalescence` is the reference finish (S5 task 1); `foilShimmer` / `matcapCoat` land in later
- *  S5 tasks and append here when they do, exactly as edgeLines→depthFog→curvatureWear→crossHatch
- *  grew BUFFER_TREATMENT_KINDS one task at a time above. */
-export const FINISH_TREATMENT_KINDS = ['opalescence'] as const
+ *  `opalescence` is the reference finish (S5 task 1); `foilShimmer` (task 2) is a diffraction-
+ *  grating rainbow, additive rather than a mix; `matcapCoat` lands in a later S5 task and appends
+ *  here when it does, exactly as edgeLines→depthFog→curvatureWear→crossHatch grew
+ *  BUFFER_TREATMENT_KINDS one task at a time above. */
+export const FINISH_TREATMENT_KINDS = ['opalescence', 'foilShimmer'] as const
 export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS, ...FINISH_TREATMENT_KINDS] as const
 export type MaskedTreatmentKind = typeof MASKED_TREATMENT_KINDS[number]
 export type EdgeTreatmentKind = typeof EDGE_TREATMENT_KINDS[number]
@@ -39,7 +40,7 @@ export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
   dashedOutline: 'Dashed outline', silhouetteCutout: 'Silhouette cutout',
   edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear', crossHatch: 'Cross-hatch',
-  opalescence: 'Opalescence',
+  opalescence: 'Opalescence', foilShimmer: 'Foil shimmer',
 }
 
 /** What a Progressive ramp is measured across. `object` = the object's own on-screen extent
@@ -208,16 +209,40 @@ export interface OpalescenceTreatment extends TreatmentBase {
   hueShift: number
   angleMix: number
 }
+/** Diffraction-grating foil shimmer: an ADDITIVE display-space rainbow highlight, ported from
+ *  the `holographic` MATERIAL type's grating (materials.ts's HOLO_FRAG_DECL/BODY) but as a
+ *  finish (finishes.ts's `applyFinish`) so it layers onto ANY base material, not only one built
+ *  as `type:'holographic'`. Unlike opalescence's `mix()` (which replaces the lit colour toward
+ *  the ramp), this ADDS a highlight over the base — the diffraction sweep is a bright streak, not
+ *  a whole-surface recolour. `bands` rainbow repeats across one sweep, `angle` the grating
+ *  direction in degrees, `hueShift` degrees (spectrum rotation), `gloss` 0 = soft/wide highlight,
+ *  1 = tight/mirror-like. Deliberately drops the material type's per-flake jitter (`holoFlakes`/
+ *  `holoFlakeSize`) — that needs an object-local position varying (HOLO_VERT_DECL/BODY), and the
+ *  finish seam (finishes.ts's `applyFinish`) only injects into the fragment shader, no vertex
+ *  stage — a clean single-direction grating only (S5 follow-up if flakes are wanted back). Also
+ *  deliberately does NOT force metalness/roughness the way the holographic material type does
+ *  (metalness 1, roughness from Gloss) — that stays the host material's own, the difference from
+ *  the material type (by-eye follow-up: whether foil shimmer should carry those too). Not masked
+ *  (no invert row — a finish coats the whole object evenly), not ramped (Progressive is a
+ *  masked-family concept). */
+export interface FoilShimmerTreatment extends TreatmentBase {
+  kind: 'foilShimmer'
+  strength: number
+  bands: number
+  angle: number
+  hueShift: number
+  gloss: number
+}
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
   | DissolveTreatment | HalftoneTreatment | ChromaticSplitTreatment | GlitchTreatment | DropShadowTreatment
   | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
   | DashedOutlineTreatment | SilhouetteCutoutTreatment
   | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment | CrossHatchTreatment
-  | OpalescenceTreatment
+  | OpalescenceTreatment | FoilShimmerTreatment
 /** The finish-family subset of `Treatment` — grows exactly as `FINISH_TREATMENT_KINDS` does.
  *  `finishPlan`'s return type and `applyFinish`'s parameter type. */
-export type FinishTreatment = OpalescenceTreatment
+export type FinishTreatment = OpalescenceTreatment | FoilShimmerTreatment
 
 /** Dial defaults per kind — everything except id/kind/enabled/invert. The ONE source the
  *  parser, `createTreatment` and the inspector controls all read. */
@@ -244,6 +269,10 @@ export const TREATMENT_DEFAULTS = {
   crossHatch: { color: '#000000', spacing: 6, angle: 45, threshold: 0.6 },
   // Verbatim from MATERIAL_DEFAULTS.opal* (config.ts) — the same shader, ported as a finish.
   opalescence: { strength: 1, frequency: 1.5, hueShift: 0, angleMix: 0.6 },
+  // strength/bands/angle/hueShift mirror MATERIAL_DEFAULTS.holo* (config.ts); gloss keeps the
+  // holographic material's default sharpness but drives the finish's highlight falloff exponent,
+  // never roughness (see FoilShimmerTreatment's doc comment).
+  foilShimmer: { strength: 1, bands: 3, angle: 0, hueShift: 0, gloss: 0.5 },
 } as const
 
 /** Cross-hatch line-pitch bounds, in "px per block on a 1000-px-tall image" units (the pixelate
@@ -449,6 +478,14 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
       frequency: Math.min(5, Math.max(0.5, num(r.frequency, D.opalescence.frequency))),
       hueShift: wrapDeg(num(r.hueShift, D.opalescence.hueShift)),
       angleMix: clamp01(num(r.angleMix, D.opalescence.angleMix)),
+    }
+    case 'foilShimmer': return {
+      ...base, kind: 'foilShimmer',
+      strength: Math.min(2, Math.max(0, num(r.strength, D.foilShimmer.strength))),
+      bands: Math.min(8, Math.max(0.5, num(r.bands, D.foilShimmer.bands))),
+      angle: wrapDeg(num(r.angle, D.foilShimmer.angle)),
+      hueShift: wrapDeg(num(r.hueShift, D.foilShimmer.hueShift)),
+      gloss: clamp01(num(r.gloss, D.foilShimmer.gloss)),
     }
   }
   return undefined
