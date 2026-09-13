@@ -2,8 +2,10 @@
 // treatments.ts) built as an onBeforeCompile CHAIN on the `applyScreen`/`applyVaryTint` model
 // (materials.ts), not a treatmentStage pass. See docs/superpowers/plans/2026-09-09-scene3d-S5-
 // finishes.md for the whole slice; this file is Task 1's `applyFinish` seam plus the reference
-// finish, opalescence, and Task 2's foil shimmer (a diffraction-grating rainbow, ADDED over
-// `gl_FragColor` rather than mixed into it — see `foilBody`/`foilShimmerRGB` below).
+// finish, opalescence, Task 2's foil shimmer (a diffraction-grating rainbow, ADDED over
+// `gl_FragColor` rather than mixed into it — see `foilBody`/`foilShimmerRGB` below), and Task 3's
+// matcap coat (`matcapBody`/`matcapCoatUV` below) — a fresh-authored body, not a port of an
+// existing MATERIAL type's `_FRAG_BODY`, since matcap has no injectable chunk today at all.
 //
 // A finish injects DISPLAY-SPACE overlay math at the TERMINAL `#include <dithering_fragment>`
 // anchor — the very last chunk in every lit material's fragment `main()`, right before the
@@ -29,8 +31,17 @@
 // at all in that case (not even to snapshot a cache key), so an object with no finish treatment
 // builds/compiles exactly as it did before this file existed.
 import * as THREE from 'three'
-import { OPAL_DEFAULT_STOPS } from './config'
-import type { FinishTreatment, OpalescenceTreatment, FoilShimmerTreatment } from './treatments'
+import { OPAL_DEFAULT_STOPS, MATCAP_IDS, MATCAP_SPECS } from './config'
+// `drawMatcap` is the ONE value this three-and-DOM-heavy module imports from materials.ts — a
+// two-way dependency (materials.ts already imports `applyFinish`/`updateFinishUniforms`/
+// `finishKey` FROM here), safe under ESM circular imports because neither side touches the
+// other's export at module-evaluation time, only later, inside a function body (materialFor's /
+// applyFinish's), by which point both modules have finished loading. `MATCAP_IDS`/`MATCAP_SPECS`
+// come from config.ts instead of materials.ts, even though materials.ts re-exports them too —
+// config.ts is the one shared, three-free home neither direction of the materials.ts↔finishes.ts
+// cycle needs to round-trip through.
+import { drawMatcap } from './materials'
+import type { FinishTreatment, OpalescenceTreatment, FoilShimmerTreatment, MatcapCoatTreatment } from './treatments'
 
 // ── Opalescence ram­p LUT ─────────────────────────────────────────────────────
 // A small, self-contained sRGB-LUT builder — deliberately NOT imported from materials.ts's
@@ -291,10 +302,104 @@ function foilUniformBag(t: FoilShimmerTreatment, i: number): Record<string, { va
   }
 }
 
+// Matcap coat: samples a matcap "sphere" texture at the screen-space normal→UV lookup three's OWN
+// MeshMatcapMaterial uses — verified against the installed three's
+// renderers/shaders/ShaderLib/meshmatcap.glsl.js, whose relevant lines read (unmodified):
+//   vec3 viewDir = normalize( vViewPosition );
+//   vec3 x = normalize( vec3( viewDir.z, 0.0, - viewDir.x ) );
+//   vec3 y = cross( viewDir, x );
+//   vec2 uv = vec2( dot( x, normal ), dot( y, normal ) ) * 0.495 + 0.5;
+// This is the hardest of the three S5 finishes because matcap has no injectable chunk at all
+// today (a whole separate THREE material CLASS, not a fragment built from ShaderChunk pieces
+// applyScreen/applyVaryTint/opal/foil can hook into), so the body below is authored fresh rather
+// than ported from an existing MATERIAL type's `_FRAG_BODY`. `finNrm_i` re-normalizes the local
+// `normal` defensively, matching OPAL_FRAG_BODY/foilBody's own style in this file — three's literal
+// meshmatcap.glsl.js does not re-normalize it, since `<normal_fragment_begin>`/
+// `<normal_fragment_maps>` (which run earlier in every lit material, including this one) already
+// leave it unit-length. `finY_i` is deliberately NOT normalized either — neither is three's own
+// `y` — a defensive normalize there would silently diverge from the reference this ports.
+const matcapPars = (i: number): string => /* glsl */ `
+uniform sampler2D uFinMatcapTex_${i};
+uniform float uFinMatcapStrength_${i};
+`
+
+const matcapBody = (i: number): string => /* glsl */ `
+{
+  vec3 finNrm_${i} = normalize( normal );
+  vec3 finViewDir_${i} = normalize( vViewPosition );
+  vec3 finX_${i} = normalize( vec3( finViewDir_${i}.z, 0.0, - finViewDir_${i}.x ) );
+  vec3 finY_${i} = cross( finViewDir_${i}, finX_${i} );
+  vec2 finUv_${i} = vec2( dot( finX_${i}, finNrm_${i} ), dot( finY_${i}, finNrm_${i} ) ) * 0.495 + 0.5;
+  vec3 finMatcap_${i} = texture2D( uFinMatcapTex_${i}, finUv_${i} ).rgb;
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, finMatcap_${i}, clamp( uFinMatcapStrength_${i}, 0.0, 1.0 ) );
+}
+`
+
+/** A matcap CanvasTexture OWNED by this finish, per id, NEVER the same instance as materials.ts's
+ *  `getMatcap()` cache (the `type:'matcap'` MATERIAL's texture) — the S5 review's Critical fix
+ *  (the opal ramp's colour-space bug) applies here too, just via a shared-cache hazard instead of
+ *  a single wrong tag. `getMatcap`'s texture is `SRGBColorSpace` because the matcap MATERIAL's
+ *  own program samples it upstream of tonemapping/`<colorspace_fragment>`, where an sRGB→linear
+ *  GPU decode is correct; this finish samples the IDENTICAL visual spec at the DISPLAY-space
+ *  `<dithering_fragment>` anchor (like every other finish body in this file), so its own copy
+ *  must return the raw authored bytes untouched — `NoColorSpace` — or the `mix()` above blends a
+ *  GPU-decoded-linear sample into an already-encoded buffer, darkening/desaturating exactly like
+ *  the opal-ramp bug this same review caught. Mutating `getMatcap`'s shared instance's
+ *  `colorSpace` in place instead would silently break every `type:'matcap'` material using it —
+ *  so this builds a SEPARATE texture from the same `drawMatcap` canvas (materials.ts), cached per
+ *  id, rather than sharing. */
+const matcapFinishCache = new Map<string, THREE.CanvasTexture>()
+function matcapFinishTexture(id: string): THREE.Texture | null {
+  if (typeof document === 'undefined') return null
+  const key = MATCAP_SPECS[id] ? id : MATCAP_IDS[0]!
+  let t = matcapFinishCache.get(key)
+  if (!t) {
+    t = new THREE.CanvasTexture(drawMatcap(MATCAP_SPECS[key]!, 256))
+    t.colorSpace = THREE.NoColorSpace
+    matcapFinishCache.set(key, t)
+  }
+  return t
+}
+
+function matcapUniformBag(t: MatcapCoatTreatment, i: number): Record<string, { value: unknown }> {
+  return {
+    [`uFinMatcapTex_${i}`]: { value: matcapFinishTexture(t.matcap) },
+    [`uFinMatcapStrength_${i}`]: { value: t.strength },
+  }
+}
+
+/** CPU twin of the matcap-coat finish body's UV lookup — mirrors `matcapBody`'s (and three's OWN
+ *  `meshmatcap.glsl.js`) math verbatim, so a unit test can assert the two agree without a GPU.
+ *  `normal`/`viewPos` need not be pre-normalized — both are normalized here, exactly as
+ *  `matcapBody` normalizes `finNrm_i`/`finViewDir_i` before use. `y` is deliberately left
+ *  un-normalized, matching three's own line (see the module comment above `matcapPars`). */
+export function matcapCoatUV(
+  normal: readonly [number, number, number],
+  viewPos: readonly [number, number, number],
+): [number, number] {
+  const norm = (v: readonly [number, number, number]): [number, number, number] => {
+    const len = Math.hypot(v[0], v[1], v[2]) || 1
+    return [v[0] / len, v[1] / len, v[2] / len]
+  }
+  const cross3 = (a: readonly [number, number, number], b: readonly [number, number, number]): [number, number, number] => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ]
+  const dot3 = (a: readonly [number, number, number], b: readonly [number, number, number]): number =>
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  const nrm = norm(normal)
+  const viewDir = norm(viewPos)
+  const x = norm([viewDir[2], 0, -viewDir[0]])
+  const y = cross3(viewDir, x)
+  return [dot3(x, nrm) * 0.495 + 0.5, dot3(y, nrm) * 0.495 + 0.5]
+}
+
 function uniformBagFor(t: FinishTreatment, i: number): Record<string, { value: unknown }> {
   switch (t.kind) {
     case 'opalescence': return opalUniformBag(t, i)
     case 'foilShimmer': return foilUniformBag(t, i)
+    case 'matcapCoat': return matcapUniformBag(t, i)
   }
 }
 
@@ -302,10 +407,14 @@ function glslFor(t: FinishTreatment, i: number): { pars: string; body: string } 
   switch (t.kind) {
     case 'opalescence': return { pars: opalPars(i), body: opalBody(i) }
     case 'foilShimmer': return { pars: foilPars(i), body: foilBody(i) }
+    case 'matcapCoat': return { pars: matcapPars(i), body: matcapBody(i) }
   }
 }
 
-/** Writes one finish's dials into its already-bound uniform bag, in place. */
+/** Writes one finish's dials into its already-bound uniform bag, in place. `matcapCoat`'s
+ *  `matcap` id is deliberately NOT written here — an id change is the REBUILD boundary
+ *  `updateFinishUniforms` and `finishKey` enforce (it swaps the bound texture uniform, which a
+ *  plain in-place write cannot do), only `strength` updates like every other finish's dials. */
 function writeFinishUniforms(t: FinishTreatment, u: Record<string, { value: unknown }>, i: number): void {
   switch (t.kind) {
     case 'opalescence':
@@ -321,39 +430,52 @@ function writeFinishUniforms(t: FinishTreatment, u: Record<string, { value: unkn
       u[`uFinFoilHueShift_${i}`]!.value = t.hueShift / 360
       u[`uFinFoilGloss_${i}`]!.value = t.gloss
       break
+    case 'matcapCoat':
+      u[`uFinMatcapStrength_${i}`]!.value = t.strength
+      break
   }
 }
 
 interface FinishUniformEntry {
   id: string
   kind: FinishTreatment['kind']
+  /** The matcap id this entry's texture uniform was built from — `matcapCoat` only, `undefined`
+   *  for every other kind. `updateFinishUniforms` compares this against the incoming treatment's
+   *  `matcap` field to catch the one dial that is a rebuild boundary rather than an in-place
+   *  write (see `writeFinishUniforms`'s doc comment). */
+  matcap?: string
   u: Record<string, { value: unknown }>
 }
 
 /** The rebuild boundary for the finish stack, folded into materials.ts's `identityKey`: the
  *  ORDERED list of finish kinds (order-sensitive — reordering the stack changes which body reads
- *  which uniform bag). Matcap ids (Task 3) fold in here too once `matcapCoat` exists, mirroring
- *  `baseIdentityKey`'s own matcap case — an id change swaps a bound texture, so it needs a
- *  rebuild the way a plain dial change never does. Empty finishes ⇒ empty string, so a document
- *  with no finish treatment contributes NOTHING to the identity key — byte-identical. */
+ *  which uniform bag), PLUS the matcap id for any `matcapCoat` entry — mirroring
+ *  `baseIdentityKey`'s own matcap case, an id change swaps a bound texture, so it needs a rebuild
+ *  the way a plain dial change never does. Empty finishes ⇒ empty string, so a document with no
+ *  finish treatment contributes NOTHING to the identity key — byte-identical. */
 export function finishKey(finishes: FinishTreatment[]): string {
   if (!finishes.length) return ''
-  return `|fin:${finishes.map((f) => f.kind).join(',')}`
+  return `|fin:${finishes.map((f) => f.kind + (f.kind === 'matcapCoat' ? `:${f.matcap}` : '')).join(',')}`
 }
 
 /** Writes every finish's CURRENT dial values into the material's already-bound uniform bags, in
  *  place — a slider drag must never rebuild. Returns `false` when the ordered kind sequence on
  *  the material no longer matches `finishes` (a finish was added/removed/reordered, or the
- *  material never had any while `finishes` is now non-empty) — the caller (materials.ts's
- *  `updateMaterial`) must then rebuild via `materialFor`+`applyFinish` instead. Two finish-less
- *  states (no bag, no finishes) are NOT a mismatch — that is the steady state before this
- *  feature and after every finish is removed. */
+ *  material never had any while `finishes` is now non-empty), OR when a `matcapCoat` entry's
+ *  matcap id has changed (it swaps the bound texture uniform — a program/uniform-bag boundary
+ *  `finishKey` already forces a rebuild for via `identityKey`, kept here too as its own guard for
+ *  any caller that reaches `updateFinishUniforms` without having checked identity first) — the
+ *  caller (materials.ts's `updateMaterial`) must then rebuild via `materialFor`+`applyFinish`
+ *  instead. Two finish-less states (no bag, no finishes) are NOT a mismatch — that is the steady
+ *  state before this feature and after every finish is removed. */
 export function updateFinishUniforms(m: THREE.Material, finishes: FinishTreatment[]): boolean {
   const bag = m.userData.finishUniforms as FinishUniformEntry[] | undefined
   if (!bag) return finishes.length === 0
   if (bag.length !== finishes.length) return false
   for (let i = 0; i < finishes.length; i++) {
-    if (bag[i]!.kind !== finishes[i]!.kind) return false
+    const f = finishes[i]!
+    if (bag[i]!.kind !== f.kind) return false
+    if (f.kind === 'matcapCoat' && bag[i]!.matcap !== f.matcap) return false
   }
   for (let i = 0; i < finishes.length; i++) writeFinishUniforms(finishes[i]!, bag[i]!.u, i)
   return true
@@ -370,7 +492,7 @@ export function applyFinish(m: THREE.Material, finishes: FinishTreatment[]): voi
   // treatment builds/compiles exactly as it did before this feature existed.
   if (finishes.length === 0) return
   const entries: FinishUniformEntry[] = finishes.map((t, i) => ({
-    id: t.id, kind: t.kind, u: uniformBagFor(t, i),
+    id: t.id, kind: t.kind, matcap: t.kind === 'matcapCoat' ? t.matcap : undefined, u: uniformBagFor(t, i),
   }))
   const baseKey = String(m.customProgramCacheKey())
   const prev = m.onBeforeCompile

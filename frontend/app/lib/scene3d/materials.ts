@@ -13,8 +13,8 @@ import * as THREE from 'three'
 import { stripAlpha } from '~/lib/color/convert'
 import {
   MATERIAL_DEFAULTS, gradientAngles, gradientDirection, gradientStopsOf, rampStopsOf, opalStopsOf, screenOf,
-  NO_BASE_COLOR,
-  type GradientStop, type ReliefSpec, type SceneMaterial,
+  NO_BASE_COLOR, MATCAP_IDS, MATCAP_SPECS,
+  type GradientStop, type ReliefSpec, type SceneMaterial, type MatcapSpec,
 } from './config'
 import { toHeightPixels } from './relief'
 import { isResolvedTexture, textureMapFilename, ensureTextureFetched, type TextureManifest } from './textures'
@@ -41,18 +41,17 @@ import type { FinishTreatment } from './treatments'
 const hasDOM = typeof document !== 'undefined'
 
 // ── Matcaps: runtime-generated set (no bundled assets) ───────────────────────
-export const MATCAP_IDS = ['chrome', 'clay', 'pearl', 'gold', 'carbon']
+// `MATCAP_IDS`/`MATCAP_SPECS`/`MatcapSpec` are re-exported here unchanged (now sourced from
+// config.ts, which is three-free so treatments.ts/treatmentControls.ts can also read them for the
+// `matcapCoat` finish, S5 task 3) so every existing `~/lib/scene3d/materials` import site keeps
+// working without a path change.
+export { MATCAP_IDS, MATCAP_SPECS, type MatcapSpec }
 
-interface MatcapSpec { inner: string; mid: string; outer: string; highlight: number }
-const MATCAP_SPECS: Record<string, MatcapSpec> = {
-  chrome: { inner: '#f8fafc', mid: '#94a3b8', outer: '#1e293b', highlight: 0.9 },
-  clay:   { inner: '#e7e2da', mid: '#b6aa99', outer: '#57503f', highlight: 0.25 },
-  pearl:  { inner: '#fff7fb', mid: '#dcc8e8', outer: '#8e7a9d', highlight: 0.55 },
-  gold:   { inner: '#fff3c4', mid: '#d9a441', outer: '#5c3a10', highlight: 0.8 },
-  carbon: { inner: '#4b5563', mid: '#1f2937', outer: '#030712', highlight: 0.35 },
-}
-
-function drawMatcap(spec: MatcapSpec, size: number): HTMLCanvasElement {
+/** Exported for finishes.ts's `matcapCoat` finish (S5 task 3): its own NoColorSpace texture is
+ *  drawn from this SAME canvas, keyed separately from `getMatcap`'s cache — see finishes.ts's
+ *  `matcapFinishTexture` for why the two textures cannot be the same instance (a colour-space
+ *  tag correct for one is wrong for the other). */
+export function drawMatcap(spec: MatcapSpec, size: number): HTMLCanvasElement {
   const c = document.createElement('canvas')
   c.width = c.height = size
   const ctx = c.getContext('2d')!
@@ -73,8 +72,11 @@ function drawMatcap(spec: MatcapSpec, size: number): HTMLCanvasElement {
 }
 
 const matcapCache = new Map<string, THREE.Texture>()
-/** Module-lifetime singleton textures — shared across materials, never disposed. */
-function getMatcap(id: string): THREE.Texture | null {
+/** Module-lifetime singleton textures — shared across materials, never disposed. Exported for
+ *  completeness (S5 task 3's plan) — the `matcapCoat` FINISH deliberately does NOT call this: it
+ *  needs a NoColorSpace copy, and mutating this SRGBColorSpace-tagged shared instance in place
+ *  would break every `type:'matcap'` MATERIAL using it (see finishes.ts's `matcapFinishTexture`). */
+export function getMatcap(id: string): THREE.Texture | null {
   if (!hasDOM) return null
   const key = MATCAP_SPECS[id] ? id : MATCAP_IDS[0]!
   let t = matcapCache.get(key)
@@ -1742,9 +1744,10 @@ export function updateMaterial(
   // (unit tests, and any path with no mesh in hand) keep the old behaviour.
   if (geometry && (m.userData.vertexTint === true) !== hasVertexTint(mat, geometry)) return false
   // Finish dials update IN PLACE, like the screen/vary uniforms below — a slider drag must
-  // never rebuild. `updateFinishUniforms` returns false only on a mismatch identityKey's
-  // finishKey (above) should already have caught (kind list/order); kept as its own guard
-  // for a boundary identityKey does not fold in yet (a matcap id change, Task 3).
+  // never rebuild. `updateFinishUniforms` returns false when the ordered kind list changed OR
+  // (S5 task 3) when a `matcapCoat` entry's matcap id changed — both boundaries `identityKey`'s
+  // `finishKey` (above) already forces a rebuild for; this is kept as its own guard in case a
+  // future caller reaches `updateFinishUniforms` without having checked identity first.
   if (!updateFinishUniforms(m, fin)) return false
   // Vary colour STRENGTH is a uniform, not a program boundary — write it in place, like
   // the screen dials below, so dragging the Colour strength slider never rebuilds. Only

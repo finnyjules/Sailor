@@ -7,7 +7,7 @@
 // the flat `doc.objects` array: eight modules iterate that array and the agent/motion
 // path space is built over it, and none of them should have to learn a new kind.
 // Design: docs/superpowers/specs/2026-09-05-scene3d-object-treatments-design.md
-import type { SceneDoc, SceneObject } from './config'
+import { MATCAP_IDS, type SceneDoc, type SceneObject } from './config'
 
 export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade', 'colorGrade', 'dissolve', 'halftone', 'chromaticSplit', 'glitch', 'dropShadow'] as const
 export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe', 'dashedOutline', 'silhouetteCutout'] as const
@@ -22,10 +22,12 @@ export const BUFFER_TREATMENT_KINDS = ['edgeLines', 'depthFog', 'curvatureWear',
  *  model, rather than a treatmentStage pass — it costs nothing at the treatment stage and is
  *  byte-identical when absent (an empty finish list never touches the material at all).
  *  `opalescence` is the reference finish (S5 task 1); `foilShimmer` (task 2) is a diffraction-
- *  grating rainbow, additive rather than a mix; `matcapCoat` lands in a later S5 task and appends
- *  here when it does, exactly as edgeLines→depthFog→curvatureWear→crossHatch grew
- *  BUFFER_TREATMENT_KINDS one task at a time above. */
-export const FINISH_TREATMENT_KINDS = ['opalescence', 'foilShimmer'] as const
+ *  grating rainbow, additive rather than a mix; `matcapCoat` (task 3) samples a matcap "sphere"
+ *  texture at the screen-space normal→UV lookup three's OWN MeshMatcapMaterial uses and mixes it
+ *  over the base like opal — the hardest of the three because matcap today is not an injectable
+ *  chunk at all (a whole separate THREE material class), so its body is authored fresh rather
+ *  than ported from an existing MATERIAL type's `_FRAG_BODY`. */
+export const FINISH_TREATMENT_KINDS = ['opalescence', 'foilShimmer', 'matcapCoat'] as const
 export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS, ...FINISH_TREATMENT_KINDS] as const
 export type MaskedTreatmentKind = typeof MASKED_TREATMENT_KINDS[number]
 export type EdgeTreatmentKind = typeof EDGE_TREATMENT_KINDS[number]
@@ -40,7 +42,7 @@ export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
   rimLight: 'Rim light', outline: 'Outline', xray: 'X-ray', wireframe: 'Wireframe',
   dashedOutline: 'Dashed outline', silhouetteCutout: 'Silhouette cutout',
   edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear', crossHatch: 'Cross-hatch',
-  opalescence: 'Opalescence', foilShimmer: 'Foil shimmer',
+  opalescence: 'Opalescence', foilShimmer: 'Foil shimmer', matcapCoat: 'Matcap coat',
 }
 
 /** What a Progressive ramp is measured across. `object` = the object's own on-screen extent
@@ -233,16 +235,33 @@ export interface FoilShimmerTreatment extends TreatmentBase {
   hueShift: number
   gloss: number
 }
+/** Matcap coat: samples a matcap "sphere" texture at the screen-space normal→UV lookup three's
+ *  OWN `MeshMatcapMaterial` uses (verified against the installed three's
+ *  `renderers/shaders/ShaderLib/meshmatcap.glsl.js`: `viewDir = normalize(vViewPosition)`,
+ *  `x = normalize(vec3(viewDir.z, 0, -viewDir.x))`, `y = cross(viewDir, x)`,
+ *  `uv = vec2(dot(x, normal), dot(y, normal)) * 0.495 + 0.5`) and `mix()`es it over the object's
+ *  own lit colour by `strength` — a material-shader-INJECTION finish (finishes.ts's
+ *  `applyFinish`) so a matcap look can coat ANY base material, not only one built as
+ *  `type:'matcap'`. Unlike every other finish dial, `matcap` (one of `MATCAP_IDS`, materials.ts's
+ *  runtime-generated chrome/clay/pearl/gold/carbon set) is a REBUILD boundary — an id change
+ *  swaps the sampled texture uniform, so it is folded into `finishKey` rather than written in
+ *  place by `updateFinishUniforms` the way `strength` is. Not masked (no invert row), not
+ *  ramped. */
+export interface MatcapCoatTreatment extends TreatmentBase {
+  kind: 'matcapCoat'
+  matcap: string
+  strength: number
+}
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
   | DissolveTreatment | HalftoneTreatment | ChromaticSplitTreatment | GlitchTreatment | DropShadowTreatment
   | RimLightTreatment | OutlineTreatment | XrayTreatment | WireframeTreatment
   | DashedOutlineTreatment | SilhouetteCutoutTreatment
   | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment | CrossHatchTreatment
-  | OpalescenceTreatment | FoilShimmerTreatment
+  | OpalescenceTreatment | FoilShimmerTreatment | MatcapCoatTreatment
 /** The finish-family subset of `Treatment` — grows exactly as `FINISH_TREATMENT_KINDS` does.
  *  `finishPlan`'s return type and `applyFinish`'s parameter type. */
-export type FinishTreatment = OpalescenceTreatment | FoilShimmerTreatment
+export type FinishTreatment = OpalescenceTreatment | FoilShimmerTreatment | MatcapCoatTreatment
 
 /** Dial defaults per kind — everything except id/kind/enabled/invert. The ONE source the
  *  parser, `createTreatment` and the inspector controls all read. */
@@ -273,6 +292,14 @@ export const TREATMENT_DEFAULTS = {
   // holographic material's default sharpness but drives the finish's highlight falloff exponent,
   // never roughness (see FoilShimmerTreatment's doc comment).
   foilShimmer: { strength: 1, bands: 3, angle: 0, hueShift: 0, gloss: 0.5 },
+  // 'chrome' mirrors MATERIAL_DEFAULTS.matcap (config.ts) and MATCAP_IDS[0] — a literal, not a
+  // live `MATCAP_IDS[0]` read: config.ts imports `parseTreatments` FROM this file, so when THIS
+  // module is reached via THAT import cycle, config.ts's own top-level (where MATCAP_IDS is
+  // assigned) has not finished running yet and the binding is still uninitialized. `parseTreatment`
+  // below reads `MATCAP_IDS` too, but lazily, inside a function body invoked long after both
+  // modules have finished loading — only a module-TOP-LEVEL read of the live binding is unsafe.
+  // Strength 1 matches opal/foil's own full-strength default.
+  matcapCoat: { matcap: 'chrome', strength: 1 },
 } as const
 
 /** Cross-hatch line-pitch bounds, in "px per block on a 1000-px-tall image" units (the pixelate
@@ -486,6 +513,11 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
       angle: wrapDeg(num(r.angle, D.foilShimmer.angle)),
       hueShift: wrapDeg(num(r.hueShift, D.foilShimmer.hueShift)),
       gloss: clamp01(num(r.gloss, D.foilShimmer.gloss)),
+    }
+    case 'matcapCoat': return {
+      ...base, kind: 'matcapCoat',
+      matcap: typeof r.matcap === 'string' && MATCAP_IDS.includes(r.matcap) ? r.matcap : D.matcapCoat.matcap,
+      strength: clamp01(num(r.strength, D.matcapCoat.strength)),
     }
   }
   return undefined

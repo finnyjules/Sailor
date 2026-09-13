@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { defaultDoc, createPrimitive, createLight, createGroup, serializeDoc, parseDoc } from '~/lib/scene3d/config'
+import { defaultDoc, createPrimitive, createLight, createGroup, serializeDoc, parseDoc, MATCAP_IDS } from '~/lib/scene3d/config'
 import {
   TREATMENT_KINDS, TREATMENT_LABELS, TREATED_OBJECT_CAP, createTreatment, parseTreatment, parseTreatments,
   cloneTreatments, maskedTreatmentPlan, unrenderedTreatmentIds, findTreatment, edgeTreatmentsOf, isMaskedKind, isEdgeKind, isBufferKind, BLUR_AMOUNT_MAX,
@@ -675,5 +675,96 @@ describe('treatments: foil shimmer (S5 finish family, task 2)', () => {
     for (const r of rows) expect(r.group).toBe('Foil shimmer')
     // Not masked — no trailing "Everything else" invert toggle.
     expect(fields).not.toContain('treatment.invert')
+  })
+})
+
+describe('treatments: matcap coat (S5 finish family, task 3)', () => {
+  it('TREATMENT_KINDS includes matcapCoat as a FINISH kind — not masked, not edge, not buffer', () => {
+    expect(TREATMENT_KINDS).toContain('matcapCoat')
+    expect(FINISH_TREATMENT_KINDS).toContain('matcapCoat')
+    expect(isFinishKind('matcapCoat')).toBe(true)
+    expect(isMaskedKind('matcapCoat')).toBe(false)
+    expect(isEdgeKind('matcapCoat')).toBe(false)
+    expect(isBufferKind('matcapCoat')).toBe(false)
+    expect(TREATMENT_LABELS.matcapCoat).toBe('Matcap coat')
+  })
+
+  it('TREATMENT_DEFAULTS.matcapCoat defaults to the first matcap id at full strength', () => {
+    expect(TREATMENT_DEFAULTS.matcapCoat).toEqual({ matcap: MATCAP_IDS[0], strength: 1 })
+  })
+
+  it('createTreatment seeds defaults, enabled and not inverted, with a fresh id', () => {
+    expect(createTreatment('matcapCoat')).toMatchObject({
+      kind: 'matcapCoat', enabled: true, invert: false, matcap: MATCAP_IDS[0], strength: 1,
+    })
+    expect(createTreatment('matcapCoat').id).toMatch(/^trt_/)
+  })
+
+  it('is NOT a ramped kind — no progressive/ramp fields', () => {
+    expect(createTreatment('matcapCoat')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'mc', kind: 'matcapCoat' })).not.toHaveProperty('rampSpace')
+  })
+
+  it('validates matcap against MATCAP_IDS, backfilling an unknown id to the default; clamps strength to 0..1', () => {
+    expect(parseTreatment({ id: 'mc1', kind: 'matcapCoat', matcap: 'gold', strength: 9 }))
+      .toMatchObject({ matcap: 'gold', strength: 1 })
+    expect(parseTreatment({ id: 'mc2', kind: 'matcapCoat', matcap: 'not-a-real-matcap', strength: -3 }))
+      .toMatchObject({ matcap: MATCAP_IDS[0], strength: 0 })
+    expect(parseTreatment({ id: 'mc3', kind: 'matcapCoat' }))
+      .toMatchObject({ matcap: MATCAP_IDS[0], strength: 1 })
+    // Every id in the runtime-generated set round-trips unchanged.
+    for (const id of MATCAP_IDS) {
+      expect(parseTreatment({ id: `mc-${id}`, kind: 'matcapCoat', matcap: id })).toMatchObject({ matcap: id })
+    }
+  })
+
+  it('round-trips through parseTreatments/serialize the same as every other kind', () => {
+    const t = createTreatment('matcapCoat')
+    expect(parseTreatments([t])).toEqual([t])
+  })
+
+  it('a document with only a matcapCoat finish parses/round-trips through serializeDoc/parseDoc', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.treatments = [createTreatment('matcapCoat')]
+    doc.objects.push(box)
+    const back = parseDoc(serializeDoc(doc))
+    expect(back.objects.at(-1)!.treatments!.map((t) => t.kind)).toEqual(['matcapCoat'])
+    expect(back).toEqual(doc)
+  })
+
+  it('canTakeFinish: primitives only this slice — not GLB, light or group', () => {
+    const prim = createPrimitive('box', [])
+    const light = createLight('point', [])
+    const group = createGroup([])
+    expect(canTakeFinish(prim)).toBe(true)
+    expect(canTakeFinish(light)).toBe(false)
+    expect(canTakeFinish(group)).toBe(false)
+  })
+
+  it('finishPlan: a matcapCoat treatment is included alongside opalescence/foilShimmer, in stack order', () => {
+    const prim = createPrimitive('box', [])
+    const opal = createTreatment('opalescence')
+    const matcap = createTreatment('matcapCoat')
+    const glow = createTreatment('glow') // masked — must be excluded
+    prim.treatments = [glow, matcap, opal]
+    expect(finishPlan(prim)).toEqual([matcap, opal])
+  })
+
+  it('has a control row for every dial, group-titled by the human label — a select over MATCAP_IDS plus a strength slider', () => {
+    const rows = treatmentControls('matcapCoat')
+    const fields = rows.map((r) => r.key)
+    expect(fields).toEqual(['treatment.matcap', 'treatment.strength'])
+    for (const r of rows) expect(r.group).toBe('Matcap coat')
+    // Not masked — no trailing "Everything else" invert toggle.
+    expect(fields).not.toContain('treatment.invert')
+    const matcapRow = rows[0]!
+    expect(matcapRow.kind).toBe('select')
+    expect((matcapRow as { options?: string[] }).options).toEqual(MATCAP_IDS)
+    // optionLabels is mandatory on every select in this file (no raw internal values in copy).
+    const optionLabels = (matcapRow as { optionLabels?: string[] }).optionLabels
+    expect(optionLabels).toBeDefined()
+    expect(optionLabels).toHaveLength(MATCAP_IDS.length)
+    for (const label of optionLabels!) expect(label).toMatch(/^[A-Z]/)
   })
 })

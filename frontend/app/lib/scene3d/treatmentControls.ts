@@ -4,6 +4,9 @@
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, DROP_SHADOW_DISTANCE_MAX, DASHED_OUTLINE_LEN_MAX, CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX, type TreatmentKind } from './treatments'
+// Three-free (config.ts, like this file, carries no three/canvas dependency): the matcap id set
+// and their human names for the `matcapCoat` finish's `select` row (S5 task 3).
+import { MATCAP_IDS, MATCAP_SPECS } from './config'
 
 export const TREATMENT_KEY_PREFIX = 'treatment.'
 
@@ -205,6 +208,12 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         slider(g, 'angle', 'Angle', 0, 360, 1, D.foilShimmer.angle, 'Direction the shimmer sweep runs in'),
         slider(g, 'hueShift', 'Hue shift', 0, 360, 1, D.foilShimmer.hueShift, 'Rotates the spectrum around the colour wheel'),
         slider(g, 'gloss', 'Gloss', 0, 1, 0.01, D.foilShimmer.gloss, 'Sharper, more mirror-like highlight at higher values'),
+      ]
+      break
+    case 'matcapCoat':
+      rows = [
+        select(g, 'matcap', 'Matcap', MATCAP_IDS, MATCAP_IDS.map((id) => MATCAP_SPECS[id]!.name), D.matcapCoat.matcap),
+        slider(g, 'strength', 'Strength', 0, 1, 0.01, D.matcapCoat.strength, 'Matcap versus the object\'s own lit colour'),
       ]
       break
     default:

@@ -284,3 +284,107 @@ test('opalescence and foil shimmer stack on one object — both overlays are vis
   const changed = await changedPixelCount(page, plain, stacked)
   expect(changed, `stacked render changed ${changed} px vs plain`).toBeGreaterThan(500)
 })
+
+/**
+ * S5 task 3, matcap coat — the hardest of the three finishes because matcap has no injectable
+ * chunk today (a whole separate THREE material CLASS), so `MATCAP_FINISH_BODY` (finishes.ts) is
+ * authored fresh from three's own `meshmatcap.glsl.js` UV math rather than ported from an
+ * existing MATERIAL type's `_FRAG_BODY`. Like opalescence, matcap coat `mix()`es over the whole
+ * visible surface (not a narrow highlight like foil), so `changedPixelCount` against a plain
+ * sphere should read a LARGE area, not merely "some pixels changed".
+ */
+const MATCAP = (overrides: Record<string, unknown> = {}) => ({
+  id: 't-matcap', kind: 'matcapCoat', enabled: true, invert: false,
+  matcap: 'chrome', strength: 1,
+  ...overrides,
+})
+
+test('matcap coat changes the render versus a plain sphere, no shader failure', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith(undefined))
+  const plain = await snapshot(page)
+
+  await openLab(page, sceneWith([MATCAP()]))
+  const matcapSnap = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(matcapSnap).not.toBe(plain)
+  const changed = await changedPixelCount(page, plain, matcapSnap)
+  // A full-strength matcap coat replaces the lit colour across the whole visible sphere — a
+  // whole-surface change, not a thin streak, so the bar is set much higher than foil's.
+  expect(changed, `matcap coat render changed ${changed} px vs plain`).toBeGreaterThan(2000)
+})
+
+test('a disabled matcap-coat treatment renders exactly like no treatment at all', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith(undefined))
+  const plain = await snapshot(page)
+
+  await openLab(page, sceneWith([MATCAP({ enabled: false })]))
+  const disabled = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(disabled).toBe(plain)
+})
+
+test('matcap coat with an empty finish list is byte-identical to a sphere with none at all', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith(undefined))
+  const noField = await snapshot(page)
+
+  await openLab(page, sceneWith([]))
+  const emptyList = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(emptyList).toBe(noField)
+})
+
+test('matcap coat is deterministic — the same params render the identical frame twice', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith([MATCAP()]))
+  const first = await snapshot(page)
+
+  await openLab(page, sceneWith([MATCAP()]))
+  const second = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(second).toBe(first)
+})
+
+test('the strength dial changes the render — a live uniform, not a dead control', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith([MATCAP({ strength: 0 })]))
+  const zero = await snapshot(page)
+
+  await openLab(page, sceneWith([MATCAP({ strength: 1 })]))
+  const full = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(full).not.toBe(zero)
+})
+
+test('changing the matcap id changes the render — a rebuild boundary, not a dead control', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith([MATCAP({ matcap: 'chrome' })]))
+  const chrome = await snapshot(page)
+
+  await openLab(page, sceneWith([MATCAP({ matcap: 'gold' })]))
+  const gold = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(gold).not.toBe(chrome)
+})
+
+test('opalescence and matcap coat stack on one object — both overlays are visible together', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith(undefined))
+  const plain = await snapshot(page)
+
+  await openLab(page, sceneWith([OPAL(), MATCAP()]))
+  const stacked = await snapshot(page)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(stacked).not.toBe(plain)
+  const changed = await changedPixelCount(page, plain, stacked)
+  expect(changed, `stacked render changed ${changed} px vs plain`).toBeGreaterThan(500)
+})
