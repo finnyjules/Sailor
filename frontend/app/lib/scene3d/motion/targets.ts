@@ -24,7 +24,7 @@
  */
 import type { SceneDoc } from '~/lib/scene3d/config'
 import { visibleSceneControls, type SceneControl } from '~/lib/scene3d/controls'
-import { OBJECT_PREFIX, iterateObjectControls, iterateTreatmentControls } from '~/lib/scene3d/agentControls'
+import { OBJECT_PREFIX, iterateObjectControls, iterateTreatmentControls, iterateModifierControls } from '~/lib/scene3d/agentControls'
 import { treatmentField } from '~/lib/scene3d/treatmentControls'
 import { showIfVisible } from '~/lib/studio/sections'
 
@@ -78,6 +78,19 @@ export function animatableTargets(doc: SceneDoc): SceneAnimatableTarget[] {
   iterateTreatmentControls(doc, (c, obj, id, treatment) => {
     if (c.kind !== 'slider') return
     if (!showIfVisible(c, (key) => (treatment as unknown as Record<string, unknown>)[treatmentField(key)] as any)) return
+    out.push({
+      path: `objects.${id}.${c.key.slice(OBJECT_PREFIX.length)}`,
+      label: `${obj.name || 'Object'} · ${c.label}`,
+      ...animatableRange(c as any),
+    })
+  })
+
+  // Modifier dials — slider rows only. A track is numeric, so the axis/mode SELECTS
+  // (taperAxis/twistAxis/bendAxis/jitterMode/cloneMode/cloneAxis) are NOT targets: animating a
+  // discrete option is meaningless and would write a string into the row's index field. Modifier
+  // rows carry no `showIf`, so every numeric param of every row is a target with no gate to clear.
+  iterateModifierControls(doc, (c, obj, id) => {
+    if (c.kind !== 'slider') return
     out.push({
       path: `objects.${id}.${c.key.slice(OBJECT_PREFIX.length)}`,
       label: `${obj.name || 'Object'} · ${c.label}`,

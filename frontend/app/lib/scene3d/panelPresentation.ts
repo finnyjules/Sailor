@@ -8,13 +8,9 @@ import {
   type MaterialType, type SceneDoc, type SceneObject,
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, resolveParam, totalClones } from './primParams'
+import { modifierStackOf } from './modifierStack'
 import {
   SCENE_CONTROLS, GEOMETRY_PARAM_PREFIX, MODIFIER_PREFIX,
-  // The Vary gates come from controls.ts rather than being restated here: the schema rows
-  // (`varySeed`, the two falloff dials, `varyColorStrength`) and the bespoke option
-  // ANCHORS below must appear and disappear together, and two copies of "more than one
-  // copy, and this material has a base colour" would eventually disagree.
-  varyOn, varyColorable, varyColorOn,
   type SceneControl,
 } from './controls'
 
@@ -72,16 +68,18 @@ import {
 export const SCENE_TRANSFORM_SECTIONS = ['Transform'] as readonly string[]
 
 /**
- * The Geometry card and its two sub-cards, in their own panel too — and for a sharper
- * reason than Transform's. `Scene3DSculptPanel` REPLACES exactly this card (and nothing
- * else in the inspector column) for the duration of a stroke session, because
- * `geometryForObject` short-circuits to the session's raw buffer and a Modifiers/Cloner
- * edit would silently do nothing. A sibling can be swapped out; a card in the middle of
- * one StudioControlPanel cannot.
+ * The Geometry card, in its own panel too — and for a sharper reason than Transform's.
+ * `Scene3DSculptPanel` REPLACES exactly this card (and nothing else in the inspector column)
+ * for the duration of a stroke session, because `geometryForObject` short-circuits to the
+ * session's raw buffer. A sibling can be swapped out; a card in the middle of one
+ * StudioControlPanel cannot.
+ *
+ * The Modifiers and Cloner sub-cards are GONE (S1 Task 6): a modifier's dials moved onto the
+ * per-row inspector, read/written on the stack instance rather than the legacy bag. The Geometry
+ * card keeps the primitive's own parameters plus the Cloner's cost readout (`ui.cloner.cost`,
+ * routed here, its count sourced from the stack).
  */
-export const SCENE_GEOMETRY_SECTIONS = [
-  'Geometry', 'Geometry/Modifiers', 'Geometry/Cloner',
-] as readonly string[]
+export const SCENE_GEOMETRY_SECTIONS = ['Geometry'] as readonly string[]
 
 /** Light, Decal, Material (+ its five shipped sub-blocks, as nesting paths) and the
  *  doc-level cards, in the order the shipped inspector drew them. Light and Decal are
@@ -115,9 +113,8 @@ export const SCENE_PANEL_SECTIONS = [...SCENE_PANEL_ORDER, ...POST_SECTIONS] as 
  * `transparencyOpen` ref, which seeded itself open for glass and re-seeded on every
  * material-type change.
  *
- * Modifiers and Cloner were bare `<details>` too — peers of the Geometry sliders rather
- * than of the Material sub-blocks, but collapsed by default for the same reason and now
- * by the same mechanism.
+ * The Modifiers and Cloner sub-cards were removed with S1 Task 6 (their dials moved onto the
+ * per-modifier inspector), so their collapsed-by-default chrome went with them.
  */
 export function scenePanelChrome(matType: MaterialType | null): Record<string, { badge?: string; open?: boolean }> {
   return {
@@ -129,8 +126,6 @@ export function scenePanelChrome(matType: MaterialType | null): Record<string, {
     Iridescence: { open: false },
     Reflection: { open: false },
     Screen: { open: false },
-    Modifiers: { open: false },
-    Cloner: { open: false },
   }
 }
 
@@ -378,54 +373,16 @@ const isPrim = (obj: SceneObject | null | undefined, primitive?: string): boolea
 const isDecalContent = (obj: SceneObject | null | undefined, type: 'text' | 'image'): boolean =>
   !!obj && obj.kind === 'decal' && obj.content.type === type
 
-const modSpecOf = (key: string) => MODIFIER_SPECS.find((s) => s.key === key)!
-const modLabel = (key: string): string => modSpecOf(key).label
-
-const cloneModeOf = (obj: SceneObject | null | undefined): number =>
-  isPrim(obj) ? Math.round(resolveParam(MODIFIER_SPECS, (obj as { modifiers?: Record<string, number> }).modifiers, 'cloneMode')) : 0
-
-/**
- * The Modifiers card's five captioned groups, as the deleted `MODIFIER_GROUPS` computed
- * had them: a caption, then that deformation's amount slider, then its axis/mode picker
- * where it has one. Subdivide sits above them all, ungrouped.
- */
-const MODIFIER_GROUPS = [
-  { key: 'taper', label: 'Taper', keys: ['taper', 'taperAxis'] },
-  { key: 'twist', label: 'Twist', keys: ['twist', 'twistAxis'] },
-  { key: 'bend', label: 'Bend', keys: ['bend', 'bendAxis'] },
-  { key: 'noise', label: 'Noise', keys: ['noise', 'noiseScale', 'noiseSeed'] },
-  { key: 'jitter', label: 'Jitter', keys: ['jitter', 'jitterMode', 'jitterSeed'] },
-] as const
-
-/** The Cloner's placement rows, swapped by mode exactly as the deleted `CLONER_KEYS`
- *  computed swapped them — grid drops `cloneCount` outright, its three axis counts
- *  replacing it. The Step block and the cost readout follow in every mode. */
-function clonerKeys(mode: number): readonly string[] {
-  if (mode === 1) return ['cloneCount', 'cloneMode', 'cloneRadius', 'cloneAxis']
-  if (mode === 2) {
-    return [
-      'cloneMode',
-      'cloneCountX', 'cloneCountY', 'cloneCountZ',
-      'cloneSpacingX', 'cloneSpacingY', 'cloneSpacingZ',
-    ]
-  }
-  return ['cloneCount', 'cloneMode', 'cloneOffsetX', 'cloneOffsetY', 'cloneOffsetZ']
+/** The clone count from the object's modifier STACK (the enabled cloner row), not the legacy
+ *  bag — the bag's count is stale once the stack is edited. Used only to gate the cost readout. */
+const stackCloneCount = (obj: SceneObject | null | undefined): number => {
+  if (!isPrim(obj)) return 0
+  // `isPrim` is a runtime guard, not a type predicate; the object is a primitive here, which carries
+  // the `modifiers` / `modifierStack` fields modifierStackOf reads.
+  const cloner = modifierStackOf(obj as { modifiers?: Record<string, number>; modifierStack?: unknown })
+    .find((m) => m.kind === 'cloner' && m.enabled !== false)
+  return cloner ? totalClones(cloner as unknown as Record<string, number>) : 0
 }
-const CLONER_STEP_KEYS = ['cloneStepRotX', 'cloneStepRotY', 'cloneStepRotZ', 'cloneStepScale'] as const
-
-/** The anchor that stands in for each index-valued modifier — spelled out rather than
- *  derived from the key, because the two Cloner ones are captioned by their POSITION in
- *  that card ("Mode", "Around"), not by their bag key. */
-const OPTION_ANCHOR: Record<string, string> = {
-  taperAxis: 'ui.mod.taperAxis', twistAxis: 'ui.mod.twistAxis', bendAxis: 'ui.mod.bendAxis',
-  jitterMode: 'ui.mod.jitterMode', cloneMode: 'ui.cloner.mode', cloneAxis: 'ui.cloner.axis',
-  varyMode: 'ui.cloner.varyMode', varyColor: 'ui.cloner.varyColor',
-  varyColorSpread: 'ui.cloner.varyColorSpread',
-}
-
-/** A modifier key's row: the index-valued ones are anchors (a bespoke segmented control),
- *  everything else is a schema row. */
-const modRowKey = (key: string): string => OPTION_ANCHOR[key] ?? `${MODIFIER_PREFIX}${key}`
 
 const SCENE_PANEL_ANCHORS: readonly ScenePanelAnchor[] = [
   // Material card
@@ -472,35 +429,10 @@ const SCENE_PANEL_ANCHORS: readonly ScenePanelAnchor[] = [
   // transient inputs to an ACTION, not fields on the document at all.
   { key: 'ui.geometry.text', label: 'Text', visible: (_d, o) => isPrim(o, 'text') },
   { key: 'ui.geometry.mesh', label: 'Mesh', visible: (_d, o) => isPrim(o, 'mesh') },
-  // Modifiers — the five group captions (plain uppercase labels in the shipped markup)
-  // and the four index-valued pickers. See controls.ts on why an index picker cannot be
-  // a schema `select`.
-  ...MODIFIER_GROUPS.map((g) => ({
-    key: `ui.mod.group.${g.key}`, label: g.label, visible: (_d: SceneDoc, o: SceneObject | null | undefined) => isPrim(o),
-  })),
-  ...(['taperAxis', 'twistAxis', 'bendAxis', 'jitterMode'] as const).map((k) => ({
-    key: `ui.mod.${k}`, label: modLabel(k), visible: (_d: SceneDoc, o: SceneObject | null | undefined) => isPrim(o),
-  })),
-  // Cloner — the mode picker (always), the radial axis picker, the Step caption, and the
-  // live copies/vertices cost readout.
-  { key: 'ui.cloner.mode', label: modLabel('cloneMode'), visible: (_d, o) => isPrim(o) },
-  { key: 'ui.cloner.axis', label: modLabel('cloneAxis'), visible: (_d, o) => isPrim(o) && cloneModeOf(o) === 1 },
-  { key: 'ui.cloner.step', label: 'Step', visible: (_d, o) => isPrim(o) },
-  // Vary — per-copy variation across the cloner's copies. The whole block needs more than
-  // one copy; the colour half additionally needs a material with a base colour for the
-  // per-copy tint to mix against. Note these predicates are the GATE: the card's key list
-  // in `geometryCardOrder` is order only and would happily draw an un-listed row at the
-  // end of the card (see `panelCardOf`'s doc).
-  { key: 'ui.cloner.vary', label: 'Vary', visible: (_d, o) => varyOn(o ?? undefined) },
-  { key: 'ui.cloner.varyMode', label: modLabel('varyMode'), visible: (_d, o) => varyOn(o ?? undefined) },
-  { key: 'ui.cloner.varyColor', label: modLabel('varyColor'), visible: (_d, o) => varyColorable(o ?? undefined) },
-  { key: 'ui.cloner.varyPalette', label: 'Palette', visible: (_d, o) => varyColorOn(o ?? undefined) },
-  { key: 'ui.cloner.varyColorSpread', label: modLabel('varyColorSpread'), visible: (_d, o) => varyColorOn(o ?? undefined) },
-  // …and the cost readout only once there is more than one copy — `cloneCost` was null
-  // below that and the whole block was `v-if`'d away. An always-present anchor would leave
-  // an empty row (and its 12px of `space-y`) at the foot of every Cloner card.
-  { key: 'ui.cloner.cost', label: 'Clone cost',
-    visible: (_d, o) => isPrim(o) && totalClones((o as { modifiers?: Record<string, number> }).modifiers) > 1 },
+  // Cloner cost — the ONLY modifier/cloner row still on the always-on Geometry card (S1 Task 6:
+  // every dial moved to the per-modifier inspector). The live copies/vertices readout, shown only
+  // once there is more than one copy — and its count reads the STACK's cloner, not the stale bag.
+  { key: 'ui.cloner.cost', label: 'Clone cost', visible: (_d, o) => stackCloneCount(o) > 1 },
   // Decal card — a text sticker's label + font picker, an image sticker's thumbnail +
   // Replace button, and Reposition (a decal has no gizmo; re-placing it re-arms the
   // click-to-place flow).
@@ -627,38 +559,16 @@ const KIND_CARDS: Record<string, readonly string[]> = {
   ],
 }
 
-/** The three Geometry cards. Unlike every other card these depend on the SELECTION —
- *  which primitive kind is selected decides the parameter rows outright, and the live
- *  clone mode swaps the Cloner's placement rows — so they are computed, not tabulated,
- *  from the same two sources the deleted template iterated. */
-function geometryCardOrder(card: string, obj: SceneObject | null | undefined): readonly string[] {
-  if (card === 'Geometry') {
-    const params = isPrim(obj)
-      ? PRIMITIVE_PARAMS[(obj as { primitive: keyof typeof PRIMITIVE_PARAMS }).primitive]
-      : []
-    return ['ui.geometry.text', 'ui.geometry.mesh', ...params.map((s) => `${GEOMETRY_PARAM_PREFIX}${s.key}`)]
-  }
-  if (card === 'Geometry/Modifiers') {
-    return [
-      `${MODIFIER_PREFIX}subdivide`,
-      ...MODIFIER_GROUPS.flatMap((g) => [`ui.mod.group.${g.key}`, ...g.keys.map(modRowKey)]),
-    ]
-  }
-  return [
-    ...clonerKeys(cloneModeOf(obj)).map(modRowKey),
-    'ui.cloner.step', ...CLONER_STEP_KEYS.map((k) => `${MODIFIER_PREFIX}${k}`),
-    // Vary sits below the Step block and above the cost readout. ORDER ONLY — every row
-    // here is gated by its anchor's `visible` or its schema `when`, not by this list.
-    'ui.cloner.vary', 'ui.cloner.varyMode',
-    `${MODIFIER_PREFIX}varySeed`,
-    `${MODIFIER_PREFIX}varyFalloffCenter`, `${MODIFIER_PREFIX}varyFalloffRadius`,
-    'ui.cloner.varyColor', 'ui.cloner.varyPalette', 'ui.cloner.varyColorSpread',
-    `${MODIFIER_PREFIX}varyColorStrength`,
-    'ui.cloner.cost',
-  ]
+/** The Geometry card. Unlike every other card it depends on the SELECTION — which primitive kind
+ *  is selected decides the parameter rows outright — so it is computed, not tabulated. The Cloner
+ *  cost readout is the one modifier row still here (its count sourced from the stack); every dial
+ *  moved to the per-modifier inspector (S1 Task 6). */
+function geometryCardOrder(obj: SceneObject | null | undefined): readonly string[] {
+  const params = isPrim(obj)
+    ? PRIMITIVE_PARAMS[(obj as { primitive: keyof typeof PRIMITIVE_PARAMS }).primitive]
+    : []
+  return ['ui.geometry.text', 'ui.geometry.mesh', ...params.map((s) => `${GEOMETRY_PARAM_PREFIX}${s.key}`), 'ui.cloner.cost']
 }
-
-const isGeometryCard = (card: string): boolean => card === 'Geometry' || card.startsWith('Geometry/')
 
 const DOC_CARDS: Record<string, readonly string[]> = {
   Transform: [
@@ -706,15 +616,12 @@ const DOC_CARDS: Record<string, readonly string[]> = {
  */
 function panelCardOf(key: string, matType: MaterialType | null, group?: string): string | null {
   if (key.startsWith(GEOMETRY_PARAM_PREFIX) || key.startsWith('ui.geometry.')) return 'Geometry'
-  if (key.startsWith('ui.mod.')) return 'Geometry/Modifiers'
-  if (key.startsWith('ui.cloner.')) return 'Geometry/Cloner'
-  if (key.startsWith(MODIFIER_PREFIX)) {
-    // `vary*` joins `clone*` on the Cloner card: it varies the CLONER's copies and means
-    // nothing without them. Without this line it would fall through to Modifiers, which is
-    // where every non-clone modifier key goes.
-    const sub = key.slice(MODIFIER_PREFIX.length)
-    return sub.startsWith('clone') || sub.startsWith('vary') ? 'Geometry/Cloner' : 'Geometry/Modifiers'
-  }
+  // The Cloner cost readout is the one modifier/cloner row kept on the always-on Geometry card
+  // (S1 Task 6). Every other ui.mod.* / ui.cloner.* anchor and every object.modifiers.* dial moved
+  // onto the per-modifier inspector, read/written on the stack instance, so they no longer render
+  // here — dropped (null) rather than routed to a card the panel no longer draws.
+  if (key === 'ui.cloner.cost') return 'Geometry'
+  if (key.startsWith('ui.mod.') || key.startsWith('ui.cloner.') || key.startsWith(MODIFIER_PREFIX)) return null
   for (const [card, keys] of Object.entries(KIND_CARDS)) if (keys.includes(key)) return card
   for (const [card, keys] of Object.entries(DOC_CARDS)) if (keys.includes(key)) return card
   if (MATERIAL_HEAD.includes(key)) return 'Material'
@@ -731,7 +638,7 @@ function cardOrder(
   card: string, matType: MaterialType | null, obj: SceneObject | null | undefined,
 ): readonly string[] {
   if (card === 'Material') return [...MATERIAL_HEAD, ...(matType ? MATERIAL_BODY[matType] : [])]
-  if (isGeometryCard(card)) return geometryCardOrder(card, obj)
+  if (card === 'Geometry') return geometryCardOrder(obj)
   return SUB_CARDS[card] ?? KIND_CARDS[card] ?? DOC_CARDS[card] ?? []
 }
 

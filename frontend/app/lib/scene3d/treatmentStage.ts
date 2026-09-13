@@ -34,8 +34,9 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { stripAlpha } from '~/lib/color/convert'
-import type { MaskedGroup, RampFields, Treatment } from './treatments'
+import type { BufferGroup, CrossHatchTreatment, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, MaskedGroup, RampFields, Treatment } from './treatments'
 import { ownMeshes, STAGE_LAYER } from './treatmentShells'
+import { fitNearFar } from './passes'
 
 /** MSAA samples on the base/layer targets. three ≥ r165 resolves a multisampled target's
  *  depth into its `depthTexture` (`resolveDepthBuffer`, default true), which the composite
@@ -113,6 +114,235 @@ export function rampSupport(w: number, h: number, angleDeg: number): number {
   return Math.abs(w * Math.cos(a)) + Math.abs(h * Math.sin(a))
 }
 
+/** Colour grade one linear RGB triple: brightness × factor, contrast around mid-grey 0.5,
+ *  saturation toward Rec.709 luma, then a hue rotation (degrees) about the (1,1,1)/√3 grey
+ *  axis (Rodrigues — a rotation about the grey axis, so neutral greys are left untouched
+ *  and a greyscale result stays grey). Neutral params
+ *  (1,1,1,0) are the identity; saturation 0 is greyscale. Clamped to ≥ 0 so contrast can't
+ *  push a channel to unphysical negative light. Pure; the GLSL in COLORGRADE_FRAG mirrors it
+ *  step for step — keep the two in step. */
+export function colorGradeRGB(
+  rgb: readonly [number, number, number],
+  p: { brightness: number; contrast: number; saturation: number; hue: number },
+): [number, number, number] {
+  let r = rgb[0] * p.brightness, g = rgb[1] * p.brightness, b = rgb[2] * p.brightness
+  r = (r - 0.5) * p.contrast + 0.5; g = (g - 0.5) * p.contrast + 0.5; b = (b - 0.5) * p.contrast + 0.5
+  const l = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  r = l + (r - l) * p.saturation; g = l + (g - l) * p.saturation; b = l + (b - l) * p.saturation
+  const a = p.hue * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), k = 0.5773502691896258
+  const dotK = k * (r + g + b), one = k * dotK * (1 - c)
+  return [
+    Math.max(r * c + k * (b - g) * s + one, 0),
+    Math.max(g * c + k * (r - b) * s + one, 0),
+    Math.max(b * c + k * (g - r) * s + one, 0),
+  ]
+}
+
+// --- dissolve: a seeded value-noise alpha erosion (CPU twin of DISSOLVE_FRAG) ---------------
+// Deterministic, never Math.random. The hash/noise mirror the house `vhash`/`vnoise` idiom
+// (gradientfx/shaders.ts) step for step so the GLSL and this helper agree; the unit suite
+// pins the determinism, the endpoints and the softness band on this pure function.
+const dvFract = (v: number): number => v - Math.floor(v)
+const dvMix = (a: number, b: number, t: number): number => a + (b - a) * t
+
+/** Value-noise hash → [0, 1). GLSL twin: `vhash` in DISSOLVE_FRAG. */
+function dissolveHash(x: number, y: number): number {
+  let px = dvFract(x * 123.34), py = dvFract(y * 456.21)
+  const d = px * (px + 45.32) + py * (py + 45.32) // dot(p, p + 45.32)
+  px += d; py += d
+  return dvFract(px * py)
+}
+
+/** Seeded value noise at normalised UV `(u, v)`, sampled on a `cellsX × cellsY` lattice with
+ *  the seed shifting the lattice. Range [0, 1). Pure; GLSL twin: `vnoise` in DISSOLVE_FRAG. */
+export function dissolveNoise(u: number, v: number, cellsX: number, cellsY: number, seed: number): number {
+  const x = u * cellsX + seed * 37, y = v * cellsY + seed * 17
+  const ix = Math.floor(x), iy = Math.floor(y)
+  const fx = x - ix, fy = y - iy
+  const a = dissolveHash(ix, iy), b = dissolveHash(ix + 1, iy)
+  const c = dissolveHash(ix, iy + 1), d = dissolveHash(ix + 1, iy + 1)
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy)
+  return dvMix(dvMix(a, b, ux), dvMix(c, d, ux), uy)
+}
+
+/** The kept-alpha fraction at `(u, v)`: `smoothstep(thr - softness, thr + softness, noise)`
+ *  with `thr = amount * (1 + 2·softness) - softness`. That mapping pins the endpoints for ANY
+ *  noise in [0, 1): amount 0 ⇒ 1 everywhere (nothing dissolves), amount 1 ⇒ 0 everywhere
+ *  (all gone); softness 0 is a hard step at the threshold. Pure; GLSL twin in DISSOLVE_FRAG. */
+export function dissolveAlpha(
+  u: number, v: number,
+  p: { amount: number; scale?: number; softness: number; seed: number; cellsX: number; cellsY: number },
+): number {
+  const n = dissolveNoise(u, v, p.cellsX, p.cellsY, p.seed)
+  const thr = p.amount * (1 + 2 * p.softness) - p.softness
+  const e0 = thr - p.softness, e1 = thr + p.softness
+  if (e1 <= e0) return n >= thr ? 1 : 0 // softness 0: a hard tear (GLSL step())
+  const t = Math.min(1, Math.max(0, (n - e0) / (e1 - e0)))
+  return t * t * (3 - 2 * t)
+}
+
+// --- halftone: a deterministic rotated dot screen (CPU twin of HALFTONE_FRAG) --------------
+// A regular AM screen: one round dot per grid cell, its AREA tracking the darkness under the
+// cell so ink coverage reads linear in tone. No randomness — angle + cell fix the pattern.
+/** The maximum dot radius (cell units) at full ink — HALF a cell. A full-ink dot reaches the
+ *  cell-EDGE midpoints but always leaves the four corners open (the corner distance is √½ ≈
+ *  0.707), so the screen can never fill to a solid cell. Capping here below the corner distance
+ *  is what stops a normally-lit object collapsing into a solid ink blob. */
+export const HALFTONE_RADIUS_MAX = 0.5
+
+/** Perceptual lightness of a linear luminance, an sRGB-ish gamma (1/2.2). The stage is
+ *  linear-HDR (OutputPass applies ACES+sRGB only at the very end), so a normally-lit object's
+ *  LINEAR luminance sits well below 0.5 — a saturated hue especially (Rec.709 luma of pure red
+ *  is 0.21). Pivoting the tone map at 0.5 on that raw value floods every cell to full ink. In
+ *  this perceptual space a lit object's mid-tones land near 0.5, where the screen varies. */
+const HALFTONE_GAMMA = 1 / 2.2
+
+/** Dot radius (cell units, 0..HALFTONE_RADIUS_MAX) for a region of linear luminance `lum`
+ *  (0 black … 1 white) at coverage `alpha`, shaped by a tone `contrast` around perceptual
+ *  mid-grey. Dark → a fat dot, bright → nothing; the dot AREA (∝ radius²) tracks contrast-shaped
+ *  darkness, so ink reads linear in tone. `lum` is first taken to perceptual lightness so a lit
+ *  object's mid-range maps into the visible-dot band instead of saturating; the max radius is
+ *  capped at half a cell so dots stay SEPARATED (corner gaps) at every tone but pure black. A
+ *  transparent region (alpha 0) grows no dot, so the screen never spills past the silhouette.
+ *  Pure; GLSL twin in HALFTONE_FRAG. */
+export function halftoneDotRadius(lum: number, alpha: number, contrast: number): number {
+  const lp = Math.pow(Math.max(lum, 0), HALFTONE_GAMMA)
+  const lc = Math.min(1, Math.max(0, (lp - 0.5) * contrast + 0.5))
+  const k = Math.min(1, Math.max(0, (1 - lc) * alpha))
+  return Math.sqrt(k) * HALFTONE_RADIUS_MAX
+}
+
+/** Distance (cell units) from device-px pixel `(px, py)` to its nearest screen-cell centre —
+ *  the screen a `cellPx`-spaced grid rotated by `angleRad`. 0 at a centre, up to ~0.707 at a
+ *  corner. Deterministic in angle + cell; a dot of radius `r` covers this pixel when the
+ *  distance is below `r`. Pure; GLSL twin in HALFTONE_FRAG. */
+export function halftoneCellDistance(px: number, py: number, cellPx: number, angleRad: number): number {
+  const c = Math.cos(angleRad), s = Math.sin(angleRad)
+  const qx = (px * c - py * s) / cellPx
+  const qy = (px * s + py * c) / cellPx
+  const fx = qx - Math.floor(qx) - 0.5
+  const fy = qy - Math.floor(qy) - 0.5
+  return Math.sqrt(fx * fx + fy * fy)
+}
+
+// --- chromatic split: a deterministic colour-channel offset (twin of CHROMATIC_SPLIT_FRAG) --
+/** The maximum channel offset in device px on an image `height` px tall, from `amount` in the
+ *  same "px per block on a 1000-px-tall image" units pixelate uses — so the split holds the same
+ *  LOOK at every resolution. Unlike pixelateCellPx there is NO 1px floor: amount 0 → 0 px, i.e.
+ *  no split at all. Pure. */
+export function chromaticOffsetPx(amount: number, height: number): number {
+  return Math.max(0, amount) * height / 1000
+}
+
+/** The per-channel offset VECTOR (device px) for `amount`/`angle` on an image `height` px tall:
+ *  the R channel samples at +this, B at −this, G stays centred. Magnitude = chromaticOffsetPx,
+ *  so amount 0 gives the zero vector (all three samples coincide → the object unchanged); the
+ *  angle rotates it (y negated because texture v = 1 is the visual top, matching rampDirection).
+ *  Pure; CHROMATIC_SPLIT_FRAG applies +uOffset / −uOffset step for step. */
+export function chromaticSplitOffset(amount: number, angleDeg: number, height: number): { x: number; y: number } {
+  const px = chromaticOffsetPx(amount, height)
+  const a = angleDeg * Math.PI / 180
+  return { x: Math.cos(a) * px, y: -Math.sin(a) * px }
+}
+
+// --- glitch: seeded per-band horizontal displacement + scanlines (twin of GLITCH_FRAG) ------
+/** The maximum horizontal band shift in device px on an image `height` px tall, from `amount` in
+ *  the same "px per block on a 1000-px-tall image" units pixelate uses — so the glitch holds the
+ *  same LOOK at every resolution. Like chromaticOffsetPx there is NO 1px floor: amount 0 → 0 px,
+ *  i.e. no shift at all. Pure. */
+export function glitchShiftPx(amount: number, height: number): number {
+  return Math.max(0, amount) * height / 1000
+}
+
+/** The SEEDED horizontal shift for horizontal band `band`, as a signed fraction in [-1, 1) — the
+ *  stage scales it by glitchShiftPx to get device px. Deterministic in (band, seed) via the house
+ *  `vhash` idiom (the same `dissolveHash` the dissolve treatment uses), NEVER Math.random; GLSL
+ *  twin: `gvhash` in GLITCH_FRAG, keyed on `vec2(band, seed)`. Pure. */
+export function glitchBandShift(band: number, seed: number): number {
+  return dissolveHash(band, seed) * 2 - 1
+}
+
+// --- flat drop shadow: an offset silhouette, blurred, tinted, cast BEHIND the object ---------
+/** The shadow offset distance in device px on an image `height` px tall, from `distance` in the
+ *  same "px per block on a 1000-px-tall image" units pixelate uses — so the shadow holds the same
+ *  LOOK at every resolution. Like chromaticOffsetPx there is NO 1px floor: distance 0 → 0 px, i.e.
+ *  the shadow sits exactly under the object. Pure. */
+export function dropShadowDistancePx(distance: number, height: number): number {
+  return Math.max(0, distance) * height / 1000
+}
+
+/** The shadow offset VECTOR (device px) for `distance`/`angle` on an image `height` px tall: the
+ *  object's silhouette is shifted by this to make the shadow. Magnitude = dropShadowDistancePx, so
+ *  distance 0 gives the zero vector (shadow directly under the object); the angle rotates it (y
+ *  negated because texture v = 1 is the visual top, matching rampDirection / chromaticSplitOffset,
+ *  so 0°→right, 90°→down the screen). Pure; DROP_SHADOW_BUILD_FRAG samples at vUv − this offset. */
+export function dropShadowOffset(distance: number, angleDeg: number, height: number): { x: number; y: number } {
+  const px = dropShadowDistancePx(distance, height)
+  const a = angleDeg * Math.PI / 180
+  return { x: Math.cos(a) * px, y: -Math.sin(a) * px }
+}
+
+/** How far the finished shadow reaches OUTSIDE the object silhouette (device px): the offset
+ *  distance PLUS the softness blur radius (blur's own radiusPx for `softness` as its amount). The
+ *  offset is handled in the composite by an un-offset depth lookup — this reach only sizes the
+ *  small halo borrow for the blurred soft edge. Pure. */
+export function dropShadowHaloPx(distance: number, softness: number, height: number): number {
+  return dropShadowDistancePx(distance, height) + blurPasses(softness, height).radiusPx
+}
+
+// --- cross-hatch: a deterministic tone-driven rotated line screen (twin of CROSS_HATCH_FRAG) --
+/** GLSL-style smoothstep, so the CPU twins match the shader edge for edge. Pure. */
+function smoothstep01(lo: number, hi: number, x: number): number {
+  if (hi <= lo) return x < lo ? 0 : 1
+  const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)))
+  return t * t * (3 - 2 * t)
+}
+
+/** Hatch line pitch in device px on an image `height` px tall, from `spacing` in the same
+ *  "px per block on a 1000-px-tall image" units pixelate uses — so the hatch holds the same LOOK
+ *  at every resolution. Floors at 1 px (a zero pitch would collapse the line lattice). Pure. */
+export function crossHatchSpacingPx(spacing: number, height: number): number {
+  return Math.max(1, spacing * height / 1000)
+}
+
+/** The three line-screen weights for a pixel of tone `tone` (0 = black, 1 = white) at hatch
+ *  `threshold`: darkness demand rises from 0 at/above the threshold to 1 at black, and the three
+ *  crossed screens fade in one after another across it (a single set for light shade, all three
+ *  crossing for the darkest passages). Deterministic; GLSL twin inline in CROSS_HATCH_FRAG. Pure. */
+export function crossHatchLayerWeights(tone: number, threshold: number): [number, number, number] {
+  const demand = Math.min(1, Math.max(0, (threshold - tone) / Math.max(threshold, 1e-4)))
+  return [
+    smoothstep01(0.0, 0.34, demand),
+    smoothstep01(0.33, 0.67, demand),
+    smoothstep01(0.66, 1.0, demand),
+  ]
+}
+
+/** Coverage (0..1) of ONE rotated line screen at device-px pixel `(px, py)`: a ~1px-wide ink line
+ *  every `spacingPx` px, the screen rotated by `angleRad`. 1 on a line, 0 midway between. Keyed only
+ *  on position + spacing + angle — no randomness. GLSL twin: `hatch()` in CROSS_HATCH_FRAG. Pure. */
+export function crossHatchLine(px: number, py: number, spacingPx: number, angleRad: number): number {
+  // Distance along the axis perpendicular to the line direction, in pitch units.
+  const ax = -Math.sin(angleRad), ay = Math.cos(angleRad)
+  const coord = (px * ax + py * ay) / spacingPx
+  const f = coord - Math.floor(coord)
+  const d = Math.min(f, 1 - f) * spacingPx
+  return 1 - smoothstep01(0.5, 1.5, d)
+}
+
+/** Combined ink coverage (0..1) for a pixel: the darkest of the three crossed screens weighted by
+ *  the tone→layers ramp — so a bright pixel (tone ≥ threshold) gets no ink and a black one carries
+ *  all three screens crossing. Excludes the shader's normal-based coordinate warp (a G-buffer-only
+ *  surface refinement CROSS_HATCH_FRAG adds on top); this is the pinned oracle for the tone/pattern
+ *  logic. Deterministic. Pure. */
+export function crossHatchInk(px: number, py: number, tone: number, spacingPx: number, angleRad: number, threshold: number): number {
+  const [w1, w2, w3] = crossHatchLayerWeights(tone, threshold)
+  const h1 = crossHatchLine(px, py, spacingPx, angleRad)
+  const h2 = crossHatchLine(px, py, spacingPx, angleRad + Math.PI / 3)
+  const h3 = crossHatchLine(px, py, spacingPx, angleRad + 2 * Math.PI / 3)
+  return Math.min(1, Math.max(h1 * w1, Math.max(h2 * w2, h3 * w3)))
+}
+
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 // The base copy that seeds the accumulator: straight alpha in, premultiplied out — every composite
 // after it blends premultiplied-over, so the accumulator must start that way too.
@@ -164,6 +394,196 @@ const PIXELATE_FRAG = `
     vec2 cell = vec2(mix(1.0, uCell, band)) / uResolution;
     vec2 uv = (floor(vUv / cell) + 0.5) * cell;
     gl_FragColor = texture2D(tDiffuse, uv);
+  }`
+// Colour grade over the object's straight-alpha layer, in the same linear light blur and
+// pixelate work in (the stage stays linear-HDR; OutputPass applies ACES at the very end), so
+// no display-space round trip is needed here. Alpha is passed through untouched. GLSL twin of
+// colorGradeRGB() — brightness, contrast around 0.5, saturation toward Rec.709 luma, then a
+// hue rotation about the (1,1,1)/√3 grey axis; clamped ≥ 0.
+const COLORGRADE_FRAG = `
+  uniform sampler2D tDiffuse; uniform float uBrightness; uniform float uContrast;
+  uniform float uSaturation; uniform float uHue;
+  varying vec2 vUv;
+  void main(){
+    vec4 s = texture2D(tDiffuse, vUv);
+    vec3 c = s.rgb * uBrightness;
+    c = (c - 0.5) * uContrast + 0.5;
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(l), c, uSaturation);
+    float a = radians(uHue); float cs = cos(a); float sn = sin(a);
+    const vec3 k = vec3(0.57735026);
+    c = c * cs + cross(k, c) * sn + k * dot(k, c) * (1.0 - cs);
+    gl_FragColor = vec4(max(c, 0.0), s.a);
+  }`
+// Dissolve: erode the object layer's straight alpha by a seeded value-noise threshold. The
+// hash/noise are the house `vhash`/`vnoise` idiom (gradientfx/shaders.ts), the CPU twin of
+// dissolveNoise()/dissolveAlpha(); keep the two in step. RGB pass through untouched — only
+// alpha is scaled, so the effect erodes inward and spreads nothing past the silhouette.
+const DISSOLVE_FRAG = `
+  uniform sampler2D tDiffuse; uniform vec2 uCells; uniform float uSeed;
+  uniform float uAmount; uniform float uSoftness;
+  varying vec2 vUv;
+  float dvhash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+  float dvnoise(vec2 p){
+    vec2 i = floor(p), f = fract(p);
+    float a = dvhash(i), b = dvhash(i + vec2(1.0, 0.0));
+    float c = dvhash(i + vec2(0.0, 1.0)), d = dvhash(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  }
+  void main(){
+    vec4 s = texture2D(tDiffuse, vUv);
+    vec2 p = vUv * uCells + vec2(uSeed * 37.0, uSeed * 17.0);
+    float n = dvnoise(p);
+    float thr = uAmount * (1.0 + 2.0 * uSoftness) - uSoftness;
+    float cov = uSoftness <= 0.0 ? step(thr, n) : smoothstep(thr - uSoftness, thr + uSoftness, n);
+    gl_FragColor = vec4(s.rgb, s.a * cov);
+  }`
+// Halftone: a deterministic rotated dot screen. Per pixel: rotate into a cell grid, find the
+// distance to the nearest cell centre, sample the object's tone AT that centre, and grow ONE
+// round dot per cell whose area tracks the (contrast-shaped) darkness there. Output is the
+// flat ink colour with alpha = dot coverage × the object's OWN alpha at this pixel, so the
+// screen never spills past the silhouette. The tone→radius and grid→distance maths are the
+// CPU twins halftoneDotRadius()/halftoneCellDistance() step for step — keep them in step.
+// 0.45454545 is HALFTONE_GAMMA (1/2.2, linear→perceptual); 0.5 is HALFTONE_RADIUS_MAX (a
+// half-cell — a full-ink dot reaches the cell-edge midpoints, never the corners), inlined
+// because GLSL can't read the TS consts.
+const HALFTONE_FRAG = `
+  uniform sampler2D tDiffuse; uniform vec2 uResolution; uniform float uCellPx;
+  uniform float uAngle; uniform float uContrast; uniform vec3 uColor;
+  varying vec2 vUv;
+  void main(){
+    float c = cos(uAngle), s = sin(uAngle);
+    vec2 P = vUv * uResolution;
+    vec2 Q = vec2(P.x * c - P.y * s, P.x * s + P.y * c) / uCellPx;
+    vec2 cellId = floor(Q) + 0.5;
+    vec2 f = Q - cellId;
+    float d = length(f);
+    vec2 C = cellId * uCellPx;
+    vec2 centerP = vec2(C.x * c + C.y * s, -C.x * s + C.y * c);
+    vec4 sc = texture2D(tDiffuse, centerP / uResolution);
+    float lum = dot(sc.rgb, vec3(0.2126, 0.7152, 0.0722));
+    float lp = pow(max(lum, 0.0), 0.45454545);
+    float lc = clamp((lp - 0.5) * uContrast + 0.5, 0.0, 1.0);
+    float k = clamp((1.0 - lc) * sc.a, 0.0, 1.0);
+    float R = sqrt(k) * 0.5;
+    float aa = 0.75 / uCellPx;
+    float cov = 1.0 - smoothstep(R - aa, R + aa, d);
+    float aPix = texture2D(tDiffuse, vUv).a;
+    gl_FragColor = vec4(uColor, cov * aPix);
+  }`
+// Chromatic split: sample the straight-alpha object layer three times and pull the R and B
+// channels in OPPOSITE directions (green centred) for a lens-dispersion / glitch fringe. Each
+// channel keeps its OWN sampled alpha — the red at +uOffset, blue at −uOffset — so the fringe
+// fades exactly where that channel's sample runs off the silhouette; the three premultiplied
+// contributions are recombined over their union coverage (max alpha) back to straight alpha, the
+// same encode boundary blur/pixelate hand back. uOffset 0 (amount 0) makes all three samples
+// coincide, so the object comes back untouched. CPU twin: chromaticSplitOffset() sets uOffset.
+const CHROMATIC_SPLIT_FRAG = `
+  uniform sampler2D tDiffuse; uniform vec2 uOffset;
+  varying vec2 vUv;
+  void main(){
+    vec4 r = texture2D(tDiffuse, vUv + uOffset);
+    vec4 g = texture2D(tDiffuse, vUv);
+    vec4 b = texture2D(tDiffuse, vUv - uOffset);
+    float a = max(r.a, max(g.a, b.a));
+    vec3 premul = vec3(r.r * r.a, g.g * g.a, b.b * b.a);
+    gl_FragColor = vec4(a > 1e-5 ? premul / a : vec3(0.0), a);
+  }`
+// Glitch / scanlines: slice the object layer into uBands horizontal bands and push each band
+// sideways by a SEEDED per-band shift (up to uAmountUV in UV), then darken with scan lines. The
+// per-band hash is the house `vhash` idiom — the CPU twin glitchBandShift()/dissolveHash(), keyed
+// on vec2(band, uSeed) — so it is deterministic, never Math.random. Each band keeps its own sampled
+// alpha, so a displaced band's colour spreads up to `amount` px past the silhouette (the stage
+// hands that reach to the composite as haloPx). uAmountUV 0 (amount 0) samples in place, so the
+// object comes back untouched but for the scan lines. Scan lines darken RGB on a fixed device-px
+// period, alpha untouched. Straight alpha in, straight alpha out — the blur/pixelate encode boundary.
+const GLITCH_SCANLINE_PERIOD_PX = 3.0
+// The scanline angular frequency (radians per device px) — PRECOMPUTED in JS and emitted with a
+// forced decimal via toFixed, so it lands in the GLSL as a float literal. Interpolating the raw
+// period constant was the invisible-layer bug: JS `3.0` stringifies to "3", making the source
+// read `6.2831853 / 3` — a float/int division that fails GLSL ES compilation on strict
+// validators (ANGLE), so the pass linked no program, rendered nothing, and the whole treated
+// object vanished. Any numeric constant put into a float context here MUST carry a decimal point.
+const GLITCH_SCANLINE_FREQ = (2 * Math.PI / GLITCH_SCANLINE_PERIOD_PX).toFixed(7)
+export const GLITCH_FRAG = `
+  uniform sampler2D tDiffuse; uniform vec2 uResolution;
+  uniform float uBands; uniform float uSeed; uniform float uAmountUV; uniform float uScanlines;
+  varying vec2 vUv;
+  float gvhash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+  void main(){
+    float band = floor(vUv.y * uBands);
+    float shift = (gvhash(vec2(band, uSeed)) * 2.0 - 1.0) * uAmountUV;
+    vec4 s = texture2D(tDiffuse, vec2(vUv.x + shift, vUv.y));
+    float scan = 0.5 + 0.5 * cos((vUv.y * uResolution.y) * ${GLITCH_SCANLINE_FREQ});
+    gl_FragColor = vec4(s.rgb * (1.0 - uScanlines * scan), s.a);
+  }`
+// Flat drop shadow — step 1 of 3: build the shadow silhouette. Sample the object-alone layer's
+// ALPHA at vUv − uOffset (so the shadow is the silhouette shifted by +uOffset, i.e. offset in the
+// shadow's fall direction) and paint the flat tint there. Straight alpha out; the blur pass softens
+// it and the merge/composite apply opacity. uOffset 0 (distance 0) sits the shadow under the object.
+const DROP_SHADOW_BUILD_FRAG = `
+  uniform sampler2D tDiffuse; uniform vec2 uOffset; uniform vec3 uColor;
+  varying vec2 vUv;
+  void main(){
+    float a = texture2D(tDiffuse, vUv - uOffset).a;
+    gl_FragColor = vec4(uColor, a);
+  }`
+// Flat drop shadow — step 2 of 3: draw the object OVER the shadow. `tObject` is the treated object
+// (straight alpha), `tShadow` the blurred silhouette; the shadow's alpha is scaled by uShadowOpacity
+// then the object is composited over it (both straight alpha in, straight alpha out) so the shadow
+// shows only where the object's own pixels do not cover. The combined layer is what the depth-tested
+// composite then blends into the scene.
+const DROP_SHADOW_MERGE_FRAG = `
+  uniform sampler2D tObject; uniform sampler2D tShadow; uniform float uShadowOpacity;
+  varying vec2 vUv;
+  void main(){
+    vec4 o = texture2D(tObject, vUv);
+    vec4 s = texture2D(tShadow, vUv);
+    float sa = s.a * uShadowOpacity;
+    float outA = o.a + sa * (1.0 - o.a);
+    vec3 rgb = (o.rgb * o.a + s.rgb * sa * (1.0 - o.a)) / max(outA, 1e-5);
+    gl_FragColor = vec4(rgb, outA);
+  }`
+// Flat drop shadow — step 3 of 3: the OWN composite branch (the Task 4-5 nuance). Every other masked
+// kind hands the generic composite ONE depth (the object's) and leans on nearestDepth's small halo
+// to give the fringe a depth to test — but a drop shadow lands on EMPTY space `distance` px from the
+// object, where no opaque neighbour sits within any reasonable halo. So here each pixel gets its own
+// depth: an OBJECT pixel (uses its own depth so it occludes / is occluded correctly), a SHADOW-only
+// pixel the depth of the silhouette that cast it — the object depth sampled at vUv − uShadowOffset
+// (the un-offset position), which is exactly where that silhouette is. That needs NO borrow for the
+// bulk offset; only the soft blurred fringe borrows within uSoftHalo texels. The shadow therefore
+// sits at the object's silhouette depth: over the background and over anything farther, behind the
+// object and behind anything nearer. Linear premultiplied "over" (a graphic shadow, no display-space
+// cross-fade); uOpacity carries a group fade if one is stacked with it.
+const DROP_SHADOW_COMPOSITE_FRAG = `
+  uniform sampler2D tLayer; uniform sampler2D tObject; uniform sampler2D tLayerDepth;
+  uniform sampler2D tBaseDepth; uniform sampler2D tBaseDepth2; uniform sampler2D tDst;
+  uniform float uOpacity; uniform vec2 uTexel; uniform float uSoftHalo; uniform vec2 uShadowOffset;
+  varying vec2 vUv;
+  float borrowedDepth(vec2 uv){
+    float d = texture2D(tLayerDepth, uv).r;
+    if (d < 1.0) return d;
+    float best = 1.0;
+    for (int i = 0; i < 8; i++) {
+      float a = float(i) * 0.785398;
+      vec2 o = vec2(cos(a), sin(a)) * uTexel * uSoftHalo;
+      best = min(best, texture2D(tLayerDepth, uv + o).r);
+      best = min(best, texture2D(tLayerDepth, uv + o * 0.5).r);
+    }
+    return best;
+  }
+  void main(){
+    vec4 d = texture2D(tDst, vUv);
+    vec4 s = texture2D(tLayer, vUv);
+    float a = s.a * uOpacity;
+    if (a <= 0.001) { gl_FragColor = d; return; }
+    float objA = texture2D(tObject, vUv).a;
+    float ld = objA > 0.5 ? texture2D(tLayerDepth, vUv).r : borrowedDepth(vUv - uShadowOffset);
+    float bd = min(texture2D(tBaseDepth, vUv).r, texture2D(tBaseDepth2, vUv).r);
+    if (ld > bd + 0.00005) { gl_FragColor = d; return; }
+    float outA = a + d.a * (1.0 - a);
+    gl_FragColor = vec4(s.rgb * a + d.rgb * (1.0 - a), outA);
   }`
 const BRIGHT_FRAG = `
   uniform sampler2D tDiffuse; uniform float uThreshold;
@@ -321,6 +741,188 @@ const COMPOSITE_FRAG = `
     gl_FragColor = vec4(mix(linearResult, displayResult, k), outA);
   }`
 
+// Window depth (0..1, non-linear under perspective) → a linear 0-at-near, 1-at-far metric,
+// so a Sobel over it means the same thing at every distance and depth fog's start/end read
+// as real fractions of the near→far span. Ortho depth is already linear. Needs `uNear`,
+// `uFar` and `uOrtho` in scope — every shader that imports this declares them. Shared so edge
+// lines and depth fog cannot drift apart (Task 1 flagged the duplication).
+const LINEAR_DEPTH_GLSL = `
+  float linearDepth(float z){
+    if (uOrtho > 0.5) return clamp(z, 0.0, 1.0);
+    float ndc = z * 2.0 - 1.0;
+    float eye = (2.0 * uNear * uFar) / (uFar + uNear - ndc * (uFar - uNear));
+    return clamp((eye - uNear) / (uFar - uNear), 0.0, 1.0);
+  }`
+
+// Edge lines — a toon crease line drawn from the shared G-buffer (view-space normals in
+// tNormal, window depth in tDepth). A 3×3 Sobel over the normals catches a box's INTERIOR
+// creases (two faces meeting at an angle change the normal abruptly while depth stays
+// continuous — exactly what the inverted-hull `outline` treatment cannot see); a Sobel over
+// linearised depth catches the silhouette and any depth step. `tMaskDepth` is the object drawn
+// ALONE, so the line only lands on THIS object (its coverage) and only where the full scene
+// (`tBaseDepth`) does not occlude it. Writes into the premultiplied accumulator like the
+// composite: every pixel is written (line pixels blend the colour over, the rest pass the
+// destination through), because this targets the OTHER half of the ping-pong.
+const EDGE_LINES_FRAG = `
+  uniform sampler2D tDst; uniform sampler2D tNormal; uniform sampler2D tDepth;
+  uniform sampler2D tMaskDepth; uniform sampler2D tBaseDepth;
+  uniform vec3 uColor; uniform float uWidthPx; uniform float uThreshold;
+  uniform vec2 uTexel; uniform float uNear; uniform float uFar; uniform float uOrtho;
+  varying vec2 vUv;
+  ${LINEAR_DEPTH_GLSL}
+  vec3 nAt(vec2 uv){ return texture2D(tNormal, uv).rgb * 2.0 - 1.0; }
+  float dAt(vec2 uv){ return linearDepth(texture2D(tDepth, uv).r); }
+  void main(){
+    vec4 dst = texture2D(tDst, vUv);
+    float md = texture2D(tMaskDepth, vUv).r;
+    // Not this object's pixel (isolated draw left the background at the far plane), or the
+    // full scene occludes it here — pass the accumulator through untouched.
+    if (md >= 0.9999) { gl_FragColor = dst; return; }
+    float bd = texture2D(tBaseDepth, vUv).r;
+    if (md > bd + 0.0005) { gl_FragColor = dst; return; }
+
+    vec2 o = uTexel * uWidthPx;
+    vec3 ntl = nAt(vUv + vec2(-o.x,  o.y)), nt = nAt(vUv + vec2(0.0,  o.y)), ntr = nAt(vUv + vec2(o.x,  o.y));
+    vec3 nl  = nAt(vUv + vec2(-o.x, 0.0)),                                    nr  = nAt(vUv + vec2(o.x, 0.0));
+    vec3 nbl = nAt(vUv + vec2(-o.x, -o.y)), nb = nAt(vUv + vec2(0.0, -o.y)), nbr = nAt(vUv + vec2(o.x, -o.y));
+    vec3 gxN = (ntr + 2.0 * nr + nbr) - (ntl + 2.0 * nl + nbl);
+    vec3 gyN = (ntl + 2.0 * nt + ntr) - (nbl + 2.0 * nb + nbr);
+    float nMag = length(gxN) + length(gyN);
+
+    float dtl = dAt(vUv + vec2(-o.x,  o.y)), dt = dAt(vUv + vec2(0.0,  o.y)), dtr = dAt(vUv + vec2(o.x,  o.y));
+    float dl  = dAt(vUv + vec2(-o.x, 0.0)),                                    dr  = dAt(vUv + vec2(o.x, 0.0));
+    float dbl = dAt(vUv + vec2(-o.x, -o.y)), db = dAt(vUv + vec2(0.0, -o.y)), dbr = dAt(vUv + vec2(o.x, -o.y));
+    float gxD = (dtr + 2.0 * dr + dbr) - (dtl + 2.0 * dl + dbl);
+    float gyD = (dtl + 2.0 * dt + dtr) - (dbl + 2.0 * db + dbr);
+    float dMag = abs(gxD) + abs(gyD);
+
+    // Threshold raises the bar for both cues together. A 90° box crease drives nMag to ~4-5;
+    // a silhouette drives dMag well past 0.1. Higher threshold ⇒ only sharper creases draw.
+    float loN = mix(0.45, 2.2, uThreshold);
+    float loD = mix(0.025, 0.20, uThreshold);
+    float cov = max(smoothstep(loN, loN + 0.4, nMag), smoothstep(loD, loD + 0.03, dMag));
+    // Premultiplied "over": colour * cov laid over the accumulator. Black (the default) drives
+    // the object toward 0 along the crease; a tint paints that colour there instead.
+    vec3 lineP = uColor * cov;
+    gl_FragColor = vec4(lineP + dst.rgb * (1.0 - cov), cov + dst.a * (1.0 - cov));
+  }`
+
+// Depth fog — aerial perspective. The object's own colour (already in the premultiplied
+// accumulator) is mixed toward `uColor` by the smoothstep of its depth between `uStart` and
+// `uEnd`, so the far end of a deep object washes into the tint while the near end stays clear.
+// `linearDepth` (the shared snippet, fed the REAL camera near/far in `uNear`/`uFar`) inverts
+// the projection to a 0-at-near..1-at-far value; that is then remapped across THIS object's
+// FITTED depth span [uDepthLo, uDepthHi] (fitNearFar in eye space, converted to the same
+// 0..1 units on the CPU) so start/end read as fractions of the object rather than of the whole
+// 0.1–200 camera range — otherwise a compact scene would sit near 0 and never fog. `tMaskDepth`
+// (the object drawn alone) gates coverage and `tBaseDepth` occlusion, exactly like edge lines.
+// Alpha is untouched: fog tints, it does not dissolve; premultiplied, so the tint is × dst.a.
+const DEPTH_FOG_FRAG = `
+  uniform sampler2D tDst; uniform sampler2D tDepth;
+  uniform sampler2D tMaskDepth; uniform sampler2D tBaseDepth;
+  uniform vec3 uColor; uniform float uStart; uniform float uEnd;
+  uniform float uDepthLo; uniform float uDepthHi;
+  uniform float uNear; uniform float uFar; uniform float uOrtho;
+  varying vec2 vUv;
+  ${LINEAR_DEPTH_GLSL}
+  void main(){
+    vec4 dst = texture2D(tDst, vUv);
+    float md = texture2D(tMaskDepth, vUv).r;
+    if (md >= 0.9999) { gl_FragColor = dst; return; }
+    float bd = texture2D(tBaseDepth, vUv).r;
+    if (md > bd + 0.0005) { gl_FragColor = dst; return; }
+    float ld = linearDepth(texture2D(tDepth, vUv).r);
+    float dn = clamp((ld - uDepthLo) / max(uDepthHi - uDepthLo, 1e-6), 0.0, 1.0);
+    float t = smoothstep(uStart, uEnd, dn);
+    // Straight colour mixes toward uColor by t; premultiply the tint by dst.a, keep alpha.
+    gl_FragColor = vec4(mix(dst.rgb, uColor * dst.a, t), dst.a);
+  }`
+
+// Curvature wear — a soft worn/beveled edge shade, NOT an ink line. A 3×3 Sobel over the
+// G-buffer normals gives the local curvature magnitude (same normal gradient edge lines
+// reads), but here it modulates the object's OWN colour rather than painting `uColor`: a
+// feathered coverage scales brightness up (uAmount > 0, wear/AO-inverse) or down
+// (uAmount < 0, grime in the creases). No depth Sobel, so — unlike edge lines — it never
+// draws the silhouette, only interior curvature; and the ramp is wide/soft, so the band
+// fades in gently instead of snapping to a hard line. Alpha untouched; premultiplied, so
+// scaling rgb scales the straight colour by the same factor.
+const CURVATURE_WEAR_FRAG = `
+  uniform sampler2D tDst; uniform sampler2D tNormal;
+  uniform sampler2D tMaskDepth; uniform sampler2D tBaseDepth;
+  uniform float uAmount; uniform float uWidthPx; uniform vec2 uTexel;
+  varying vec2 vUv;
+  vec3 nAt(vec2 uv){ return texture2D(tNormal, uv).rgb * 2.0 - 1.0; }
+  void main(){
+    vec4 dst = texture2D(tDst, vUv);
+    float md = texture2D(tMaskDepth, vUv).r;
+    if (md >= 0.9999) { gl_FragColor = dst; return; }
+    float bd = texture2D(tBaseDepth, vUv).r;
+    if (md > bd + 0.0005) { gl_FragColor = dst; return; }
+
+    vec2 o = uTexel * uWidthPx;
+    vec3 ntl = nAt(vUv + vec2(-o.x,  o.y)), nt = nAt(vUv + vec2(0.0,  o.y)), ntr = nAt(vUv + vec2(o.x,  o.y));
+    vec3 nl  = nAt(vUv + vec2(-o.x, 0.0)),                                    nr  = nAt(vUv + vec2(o.x, 0.0));
+    vec3 nbl = nAt(vUv + vec2(-o.x, -o.y)), nb = nAt(vUv + vec2(0.0, -o.y)), nbr = nAt(vUv + vec2(o.x, -o.y));
+    vec3 gxN = (ntr + 2.0 * nr + nbr) - (ntl + 2.0 * nl + nbl);
+    vec3 gyN = (ntl + 2.0 * nt + ntr) - (nbl + 2.0 * nb + nbr);
+    float nMag = length(gxN) + length(gyN);
+    // Feathered over the whole 0.3–2.6 curvature range (edge lines uses a hard 0.4-wide step
+    // at a threshold-driven floor) so the shade is a soft band, not a crisp line.
+    float cov = smoothstep(0.3, 2.6, nMag);
+    // Scale the object's own colour; +amount lightens the edge, -amount darkens the crease.
+    float factor = clamp(1.0 + uAmount * cov, 0.0, 4.0);
+    gl_FragColor = vec4(dst.rgb * factor, dst.a);
+  }`
+
+// Cross-hatch — pen-and-ink shading whose density follows the object's TONE. The object's own
+// colour is already in the premultiplied accumulator (tDst); its luminance sets a per-pixel
+// darkness, and as tone falls below uThreshold three crossed line screens (uAngle, +60°, +120°)
+// fade in one after another, so light passages carry one set of lines and the darkest carry all
+// three crossing. The pattern is a regular rotated line lattice keyed on gl_FragCoord/device px —
+// deterministic, no randomness. It reads the G-buffer NORMAL (tNormal) to shift the lattice by the
+// surface's screen tilt, so the hatch follows the form instead of lying flat on the image (the
+// reason this is a buffer treatment). `tMaskDepth` (the object drawn alone) gates coverage and
+// `tBaseDepth` occlusion, exactly like edge lines. Writes premultiplied "over" the accumulator.
+const CROSS_HATCH_FRAG = `
+  uniform sampler2D tDst; uniform sampler2D tNormal;
+  uniform sampler2D tMaskDepth; uniform sampler2D tBaseDepth;
+  uniform vec3 uColor; uniform vec2 uResolution;
+  uniform float uSpacingPx; uniform float uAngle; uniform float uThreshold;
+  varying vec2 vUv;
+  float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
+  // Coverage of one rotated line screen at device-px pixel P: a ~1px ink line every uSpacingPx px.
+  float hatch(vec2 P, float ang){
+    vec2 axis = vec2(-sin(ang), cos(ang)); // perpendicular to the line direction
+    float coord = dot(P, axis) / uSpacingPx;
+    float f = fract(coord);
+    float d = min(f, 1.0 - f) * uSpacingPx;
+    return 1.0 - smoothstep(0.5, 1.5, d);
+  }
+  void main(){
+    vec4 dst = texture2D(tDst, vUv);
+    float md = texture2D(tMaskDepth, vUv).r;
+    if (md >= 0.9999) { gl_FragColor = dst; return; }
+    float bd = texture2D(tBaseDepth, vUv).r;
+    if (md > bd + 0.0005) { gl_FragColor = dst; return; }
+    // Straight-alpha tone from the premultiplied accumulator.
+    float a = max(dst.a, 1e-4);
+    float tone = clamp(luma(dst.rgb / a), 0.0, 1.0);
+    // Darkness demand → the three crossed screens fade in one after another.
+    float demand = clamp((uThreshold - tone) / max(uThreshold, 1e-4), 0.0, 1.0);
+    float w1 = smoothstep(0.0, 0.34, demand);
+    float w2 = smoothstep(0.33, 0.67, demand);
+    float w3 = smoothstep(0.66, 1.0, demand);
+    // Warp the lattice by the view-normal's screen tilt so the lines follow the surface form.
+    vec3 n = texture2D(tNormal, vUv).rgb * 2.0 - 1.0;
+    vec2 P = vUv * uResolution + n.xy * uSpacingPx * 2.0;
+    float h1 = hatch(P, uAngle);
+    float h2 = hatch(P, uAngle + 1.0471976); // +60°
+    float h3 = hatch(P, uAngle + 2.0943951); // +120°
+    float ink = clamp(max(h1 * w1, max(h2 * w2, h3 * w3)), 0.0, 1.0) * a; // stay inside the silhouette
+    vec3 inkP = uColor * ink; // dst is premultiplied
+    gl_FragColor = vec4(inkP + dst.rgb * (1.0 - ink), ink + dst.a * (1.0 - ink));
+  }`
+
 type RT = THREE.WebGLRenderTarget
 
 /** A resolved progressive ramp in UV space: direction, where t = 0 sits along it
@@ -343,6 +945,11 @@ export class TreatmentStage {
   private accum: RT[] = []
   private accumIdx = 0
   private scratch: RT[] = []
+  /** The shared G-buffer: view-space normals (colour) + window depth (depthTexture) of the
+   *  buffer-treated objects, built ONCE per frame and read by every buffer treatment. Null
+   *  until a frame needs it, and disposed on the first frame that has no buffer treatment —
+   *  so most scenes, which never use one, pay nothing. */
+  private gbuf: RT | null = null
   private width = 0
   private height = 0
   private readonly quad = new FullScreenQuad()
@@ -359,16 +966,57 @@ export class TreatmentStage {
     uRampMin: { value: 0 }, uRampSpan: { value: 1 }, uRampStart: { value: 0 }, uRampEnd: { value: 1 },
   })
   private readonly brightMat = shader(BRIGHT_FRAG, { tDiffuse: { value: null }, uThreshold: { value: 0.6 } })
+  private readonly colorGradeMat = shader(COLORGRADE_FRAG, {
+    tDiffuse: { value: null }, uBrightness: { value: 1 }, uContrast: { value: 1 }, uSaturation: { value: 1 }, uHue: { value: 0 },
+  })
+  private readonly dissolveMat = shader(DISSOLVE_FRAG, {
+    tDiffuse: { value: null }, uCells: { value: new THREE.Vector2(1, 1) },
+    uSeed: { value: 1 }, uAmount: { value: 0.5 }, uSoftness: { value: 0.1 },
+  })
+  private readonly halftoneMat = shader(HALFTONE_FRAG, {
+    tDiffuse: { value: null }, uResolution: { value: new THREE.Vector2(1, 1) }, uCellPx: { value: 6 },
+    uAngle: { value: Math.PI / 4 }, uContrast: { value: 1 }, uColor: { value: new THREE.Color(0, 0, 0) },
+  })
+  private readonly chromaticSplitMat = shader(CHROMATIC_SPLIT_FRAG, {
+    tDiffuse: { value: null }, uOffset: { value: new THREE.Vector2() },
+  })
+  private readonly glitchMat = shader(GLITCH_FRAG, {
+    tDiffuse: { value: null }, uResolution: { value: new THREE.Vector2(1, 1) },
+    uBands: { value: 12 }, uSeed: { value: 1 }, uAmountUV: { value: 0 }, uScanlines: { value: 0.5 },
+  })
+  private readonly dropShadowBuildMat = shader(DROP_SHADOW_BUILD_FRAG, {
+    tDiffuse: { value: null }, uOffset: { value: new THREE.Vector2() }, uColor: { value: new THREE.Color(0, 0, 0) },
+  })
+  private readonly dropShadowMergeMat = shader(DROP_SHADOW_MERGE_FRAG, {
+    tObject: { value: null }, tShadow: { value: null }, uShadowOpacity: { value: 0.5 },
+  })
+  /** The drop shadow's OWN depth-tested composite (blending set NoBlending in the constructor —
+   *  it reads tDst and does the "over" itself, like the generic composite). */
+  private readonly dropShadowCompositeMat = shader(DROP_SHADOW_COMPOSITE_FRAG, {
+    tLayer: { value: null }, tObject: { value: null }, tLayerDepth: { value: null },
+    tBaseDepth: { value: null }, tBaseDepth2: { value: null }, tDst: { value: null },
+    uOpacity: { value: 1 }, uTexel: { value: new THREE.Vector2() }, uSoftHalo: { value: 2 }, uShadowOffset: { value: new THREE.Vector2() },
+  })
   private readonly glowMergeMat = shader(GLOW_MERGE_FRAG, {
     tBase: { value: null }, tGlow: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uStrength: { value: 1 },
     uProgressive: { value: 0 }, uRampDir: { value: new THREE.Vector2(1, 0) },
     uRampMin: { value: 0 }, uRampSpan: { value: 1 }, uRampStart: { value: 0 }, uRampEnd: { value: 1 },
   })
   private readonly compositeMat: THREE.ShaderMaterial
+  /** View-space normal override for the G-buffer pass — the live twin of passes.ts's export
+   *  bake. flatShading forces per-face normals, so an interior crease steps sharply even on
+   *  smooth-shaded geometry (a GLB), which is what a toon crease line needs. */
+  private readonly normalMat = new THREE.MeshNormalMaterial({ flatShading: true })
+  private readonly edgeLinesMat: THREE.ShaderMaterial
+  private readonly depthFogMat: THREE.ShaderMaterial
+  private readonly curvatureWearMat: THREE.ShaderMaterial
+  private readonly crossHatchMat: THREE.ShaderMaterial
   private readonly tmpSize = new THREE.Vector2()
   private readonly prevClearColor = new THREE.Color()
   private readonly rampBox = new THREE.Box3()
   private readonly rampMeshBox = new THREE.Box3()
+  /** Scratch for depth fog's per-object bounds (fitNearFar). */
+  private readonly fogBox = new THREE.Box3()
   private readonly rampCorner = new THREE.Vector3()
   private readonly rampView = new THREE.Vector3()
 
@@ -384,6 +1032,36 @@ export class TreatmentStage {
     // fade on tone-mapped values), so the hardware blender must stay out of the way — with
     // it on, every composite would be applied twice.
     this.compositeMat.blending = THREE.NoBlending
+    this.edgeLinesMat = shader(EDGE_LINES_FRAG, {
+      tDst: { value: null }, tNormal: { value: null }, tDepth: { value: null },
+      tMaskDepth: { value: null }, tBaseDepth: { value: null },
+      uColor: { value: new THREE.Color(0, 0, 0) }, uWidthPx: { value: 1 }, uThreshold: { value: 0.5 },
+      uTexel: { value: new THREE.Vector2() }, uNear: { value: FALLBACK_NEAR }, uFar: { value: 100 }, uOrtho: { value: 0 },
+    })
+    this.edgeLinesMat.blending = THREE.NoBlending
+    this.depthFogMat = shader(DEPTH_FOG_FRAG, {
+      tDst: { value: null }, tDepth: { value: null }, tMaskDepth: { value: null }, tBaseDepth: { value: null },
+      uColor: { value: new THREE.Color(0.56, 0.65, 0.75) }, uStart: { value: 0.3 }, uEnd: { value: 1 },
+      uDepthLo: { value: 0 }, uDepthHi: { value: 1 },
+      uNear: { value: FALLBACK_NEAR }, uFar: { value: 100 }, uOrtho: { value: 0 },
+    })
+    this.depthFogMat.blending = THREE.NoBlending
+    this.curvatureWearMat = shader(CURVATURE_WEAR_FRAG, {
+      tDst: { value: null }, tNormal: { value: null }, tMaskDepth: { value: null }, tBaseDepth: { value: null },
+      uAmount: { value: 0.5 }, uWidthPx: { value: 1 }, uTexel: { value: new THREE.Vector2() },
+    })
+    this.curvatureWearMat.blending = THREE.NoBlending
+    this.crossHatchMat = shader(CROSS_HATCH_FRAG, {
+      tDst: { value: null }, tNormal: { value: null }, tMaskDepth: { value: null }, tBaseDepth: { value: null },
+      uColor: { value: new THREE.Color(0, 0, 0) }, uResolution: { value: new THREE.Vector2(1, 1) },
+      uSpacingPx: { value: 6 }, uAngle: { value: Math.PI / 4 }, uThreshold: { value: 0.6 },
+    })
+    this.crossHatchMat.blending = THREE.NoBlending
+    // Build/merge REPLACE their scratch (a pure full-frame compute), and the composite reads
+    // tDst to do its own "over" — all three must keep the hardware blender off.
+    this.dropShadowBuildMat.blending = THREE.NoBlending
+    this.dropShadowMergeMat.blending = THREE.NoBlending
+    this.dropShadowCompositeMat.blending = THREE.NoBlending
   }
 
   private makeTarget(w: number, h: number, withDepth: boolean): RT {
@@ -405,7 +1083,30 @@ export class TreatmentStage {
     this.scratch = [0, 1, 2].map(() => this.makeTarget(w, h, false))
     this.pixelateMat.uniforms.uResolution!.value.set(w, h)
     this.compositeMat.uniforms.uTexel!.value.set(1 / w, 1 / h)
+    ;(this.dropShadowCompositeMat.uniforms.uTexel!.value as THREE.Vector2).set(1 / w, 1 / h)
+    ;(this.edgeLinesMat.uniforms.uTexel!.value as THREE.Vector2).set(1 / w, 1 / h)
+    ;(this.curvatureWearMat.uniforms.uTexel!.value as THREE.Vector2).set(1 / w, 1 / h)
     this.stats.width = w; this.stats.height = h
+  }
+
+  /** The shared G-buffer, built on first use. NON-MSAA so the Sobel reads crisp normals
+   *  rather than a resolved average that would soften every crease it should catch. */
+  private ensureGbuffer(): RT {
+    if (!this.gbuf) {
+      this.gbuf = new THREE.WebGLRenderTarget(this.width, this.height, {
+        type: THREE.UnsignedByteType, depthBuffer: true, stencilBuffer: false, samples: 0,
+      })
+      this.gbuf.depthTexture = new THREE.DepthTexture(this.width, this.height, THREE.UnsignedIntType)
+    }
+    return this.gbuf
+  }
+
+  /** Free the G-buffer between frames that do not need it (mirrors the layerInv lifecycle). */
+  private releaseGbuffer(): void {
+    if (!this.gbuf) return
+    this.gbuf.depthTexture?.dispose()
+    this.gbuf.dispose()
+    this.gbuf = null
   }
 
   /** The invert layer, built on first use — most scenes never have an "everything else" group. */
@@ -415,12 +1116,13 @@ export class TreatmentStage {
   }
 
   private disposeTargets(): void {
-    for (const rt of [this.base, this.layer, this.layerInv, ...this.accum, ...this.scratch]) {
+    for (const rt of [this.base, this.layer, this.layerInv, this.gbuf, ...this.accum, ...this.scratch]) {
       if (!rt) continue
       rt.depthTexture?.dispose()
       rt.dispose()
     }
     this.layerInv = null
+    this.gbuf = null
     this.accum = []
     this.scratch = []
     this.width = 0; this.height = 0 // a disposed stage must re-allocate on next use
@@ -574,6 +1276,75 @@ export class TreatmentStage {
       this.pass(this.pixelateMat, dst)
       return { rt: dst, haloPx: cellPx } // device px, like blur's radiusPx — uHaloRadius is in texels
     }
+    if (t.kind === 'colorGrade') {
+      const dst = this.free(src)
+      const u = this.colorGradeMat.uniforms
+      u.tDiffuse!.value = src.texture
+      u.uBrightness!.value = t.brightness
+      u.uContrast!.value = t.contrast
+      u.uSaturation!.value = t.saturation
+      u.uHue!.value = t.hue
+      this.pass(this.colorGradeMat, dst)
+      return { rt: dst, haloPx: 0 } // a per-pixel transform spreads nothing past the silhouette
+    }
+    if (t.kind === 'dissolve') {
+      const dst = this.free(src)
+      const u = this.dissolveMat.uniforms
+      u.tDiffuse!.value = src.texture
+      // Square cells in device px (same resolution-independent scaling as pixelate), expressed
+      // as lattice counts across the layer so the GLSL noise coordinate matches dissolveNoise().
+      const cellPx = pixelateCellPx(t.scale, this.height)
+      ;(u.uCells!.value as THREE.Vector2).set(this.width / cellPx, this.height / cellPx)
+      u.uSeed!.value = t.seed
+      u.uAmount!.value = t.amount
+      u.uSoftness!.value = t.softness
+      this.pass(this.dissolveMat, dst)
+      return { rt: dst, haloPx: 0 } // erodes alpha inward — spreads nothing past the silhouette
+    }
+    if (t.kind === 'halftone') {
+      const dst = this.free(src)
+      const u = this.halftoneMat.uniforms
+      u.tDiffuse!.value = src.texture
+      ;(u.uResolution!.value as THREE.Vector2).set(this.width, this.height)
+      // Square cells in device px, resolution-independent like pixelate, so the screen holds
+      // the same LOOK at every output size (matches halftoneCellDistance's cellPx units).
+      u.uCellPx!.value = pixelateCellPx(t.cell, this.height)
+      u.uAngle!.value = t.angle * Math.PI / 180
+      u.uContrast!.value = t.contrast
+      ;(u.uColor!.value as THREE.Color).set(stripAlpha(t.color))
+      this.pass(this.halftoneMat, dst)
+      return { rt: dst, haloPx: 0 } // ink alpha is gated by the object's own alpha — no spill
+    }
+    if (t.kind === 'chromaticSplit') {
+      const dst = this.free(src)
+      const u = this.chromaticSplitMat.uniforms
+      u.tDiffuse!.value = src.texture
+      // Offset in device px → UV, so R/B pull equal distances at any resolution.
+      const off = chromaticSplitOffset(t.amount, t.angle, this.height)
+      ;(u.uOffset!.value as THREE.Vector2).set(off.x / this.width, off.y / this.height)
+      this.pass(this.chromaticSplitMat, dst)
+      // The R/B fringe reaches up to `amount` px OUTSIDE the silhouette — the FIRST masked kind
+      // whose output spreads past its bounds — so hand that reach to the composite as haloPx
+      // (device px, like blur's radiusPx) or the outer fringe would fail the depth test and clip.
+      return { rt: dst, haloPx: chromaticOffsetPx(t.amount, this.height) }
+    }
+    if (t.kind === 'glitch') {
+      const dst = this.free(src)
+      const u = this.glitchMat.uniforms
+      u.tDiffuse!.value = src.texture
+      ;(u.uResolution!.value as THREE.Vector2).set(this.width, this.height)
+      u.uBands!.value = t.bands
+      u.uSeed!.value = t.seed
+      // Max horizontal shift in device px → UV, so bands jump equal distances at any resolution.
+      const shiftPx = glitchShiftPx(t.amount, this.height)
+      u.uAmountUV!.value = shiftPx / this.width
+      u.uScanlines!.value = t.scanlines
+      this.pass(this.glitchMat, dst)
+      // A displaced band's colour reaches up to `amount` px OUTSIDE the silhouette (it keeps its
+      // own sampled alpha), so hand that horizontal reach to the composite as haloPx (device px,
+      // like blur's radiusPx / chromaticSplit) or the shifted fringe fails the depth test and clips.
+      return { rt: dst, haloPx: shiftPx }
+    }
     if (t.kind === 'glow') {
       const bright = this.free(src)
       this.brightMat.uniforms.tDiffuse!.value = src.texture
@@ -665,19 +1436,202 @@ export class TreatmentStage {
     let opacity = 1
     let halo = 0
     let fadeRamp: Ramp | null = null
+    let dropShadow: DropShadowTreatment | null = null
     for (const t of g.treatments) {
       // An inverted group's treated area is the rest of the scene, so "the object's own extent"
       // is meaningless there — pass no root and resolveRamp uses frame space.
       const ramp = this.resolveRamp(t as unknown as RampFields, g.invert ? null : root, camera)
       if (t.kind === 'fade') { opacity *= t.opacity; fadeRamp = ramp; continue }
+      // Drop shadow is not an in-place transform of the object layer: it ADDS an element behind it
+      // and needs its own depth-tested composite. Deferred to after the chain so any other effects
+      // (a colour grade, a blur) shape the object first; the shadow is cast from the ORIGINAL
+      // silhouette (layerRt). Only one shadow per group — the last one wins.
+      if (t.kind === 'dropShadow') { dropShadow = t; continue }
       const res = this.applyEffect(src, t, ramp)
       src = res.rt
       halo = Math.max(halo, res.haloPx)
     }
+    if (dropShadow) {
+      // The generic halo is irrelevant here — the shadow branch carries its own depth handling.
+      this.dropShadowComposite(src, layerRt, dropShadow, opacity, baseDepth2)
+      return
+    }
     this.composite(src.texture, layerRt.depthTexture, baseDepth2, opacity, halo, fadeRamp)
   }
 
-  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], ctx: StageContext): THREE.Texture | null {
+  /** Drop shadow's OWN composite branch. `objectRt` is the (possibly treated) object colour,
+   *  `layerRt` the object-alone target whose alpha is the silhouette and whose depth is the object
+   *  depth. Builds the offset+blurred+tinted shadow, draws the object over it, then composites the
+   *  pair with the per-pixel depth described on DROP_SHADOW_COMPOSITE_FRAG. `opacity` is a group
+   *  fade (1 when none); the shadow's own `opacity` dial scales the shadow alpha in the merge. */
+  private dropShadowComposite(
+    objectRt: RT, layerRt: RT, t: DropShadowTreatment, opacity: number, baseDepth2: THREE.Texture | null,
+  ): void {
+    const off = dropShadowOffset(t.distance, t.angle, this.height)
+    const offU = off.x / this.width, offV = off.y / this.height
+    // 1. Shadow silhouette: the object's alpha shifted by the offset, painted in the tint.
+    const sil = this.free(objectRt, layerRt)
+    const bu = this.dropShadowBuildMat.uniforms
+    bu.tDiffuse!.value = layerRt.texture
+    ;(bu.uOffset!.value as THREE.Vector2).set(offU, offV)
+    ;(bu.uColor!.value as THREE.Color).set(stripAlpha(t.color))
+    this.pass(this.dropShadowBuildMat, sil)
+    // 2. Soften it. blur() reserves objectRt/layerRt so the object colour is not clobbered.
+    const { rt: shadow } = this.blur(sil, t.softness, null, objectRt, layerRt)
+    // 3. Object over the shadow (shadow alpha × the shadow's own opacity).
+    const merged = this.free(shadow, objectRt, layerRt)
+    const mu = this.dropShadowMergeMat.uniforms
+    mu.tObject!.value = objectRt.texture
+    mu.tShadow!.value = shadow.texture
+    mu.uShadowOpacity!.value = t.opacity
+    this.pass(this.dropShadowMergeMat, merged)
+    // 4. Depth-tested composite with the shadow's own branch.
+    const u = this.dropShadowCompositeMat.uniforms
+    u.tLayer!.value = merged.texture
+    u.tObject!.value = layerRt.texture
+    u.tLayerDepth!.value = layerRt.depthTexture
+    u.tBaseDepth!.value = this.base.depthTexture
+    u.tBaseDepth2!.value = baseDepth2 ?? this.base.depthTexture
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    u.uOpacity!.value = opacity
+    // The soft blurred fringe reaches softnessReach px past the offset silhouette; that is the ONLY
+    // borrow the depth lookup needs (the bulk offset is handled by the un-offset sample), so the
+    // halo is sized to the blur radius alone, never the full distance.
+    u.uSoftHalo!.value = Math.max(2, blurPasses(t.softness, this.height).radiusPx)
+    ;(u.uShadowOffset!.value as THREE.Vector2).set(offU, offV)
+    this.pass(this.dropShadowCompositeMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
+  }
+
+  /** Build the shared G-buffer: the buffer-treated objects alone, view-space normals in
+   *  colour and window depth in the depth texture. ONE geometry pass for all of them, via
+   *  the private stage layer + a normal-material override (the live twin of passes.ts's bake).
+   *  Only own meshes are enabled, so a nested treated object is not double-drawn; lights,
+   *  shells and gizmos are excluded. Never leaves renderer/scene/camera state changed. */
+  private renderGbuffer(scene: THREE.Scene, camera: THREE.Camera, roots: THREE.Object3D[]): void {
+    const gbuf = this.ensureGbuffer()
+    const touched: THREE.Mesh[] = []
+    for (const root of roots) {
+      for (const mesh of ownMeshes(root)) {
+        if (mesh.visible && mesh.layers.isEnabled(0)) { mesh.layers.enable(STAGE_LAYER); touched.push(mesh) }
+      }
+    }
+    const prevMask = camera.layers.mask
+    const prevOverride = scene.overrideMaterial
+    const prevBg = scene.background
+    try {
+      camera.layers.set(STAGE_LAYER)
+      scene.overrideMaterial = this.normalMat
+      scene.background = null
+      this.renderer.setRenderTarget(gbuf)
+      // Encode the camera-facing normal (0,0,1) → 0x8080ff in the cleared background, and
+      // clear depth to the far plane, so the silhouette reads as a depth step. The mask
+      // discards the background anyway; this only keeps it from faking an interior crease.
+      this.renderer.setClearColor(0x8080ff, 1)
+      this.renderer.clear()
+      this.renderer.render(scene, camera)
+    } finally {
+      camera.layers.mask = prevMask
+      scene.overrideMaterial = prevOverride
+      scene.background = prevBg
+      for (const m of touched) m.layers.disable(STAGE_LAYER)
+    }
+  }
+
+  /** Draw one edge-lines treatment over the accumulator: a Sobel crease line from the shared
+   *  G-buffer, masked to `maskDepth` (the object drawn alone) and occlusion-tested against the
+   *  base scene. Advances the ping-pong like `composite`. */
+  private edgeComposite(t: EdgeLinesTreatment, maskDepth: THREE.Texture, camera: THREE.Camera): void {
+    const u = this.edgeLinesMat.uniforms
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    u.tNormal!.value = this.gbuf!.texture
+    u.tDepth!.value = this.gbuf!.depthTexture
+    u.tMaskDepth!.value = maskDepth
+    u.tBaseDepth!.value = this.base.depthTexture
+    ;(u.uColor!.value as THREE.Color).set(stripAlpha(t.color))
+    // Width 0→1 maps to a 0.75–3.5 px Sobel reach: a wider tap spacing detects the crease
+    // over a wider band, i.e. a thicker line. Threshold passes straight through.
+    u.uWidthPx!.value = 0.75 + t.width * 2.75
+    u.uThreshold!.value = t.threshold
+    this.setCameraDepth(u, camera)
+    this.pass(this.edgeLinesMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
+  }
+
+  /** Feed a shader's `linearDepth` uniforms (uNear/uFar/uOrtho) from the live camera, with
+   *  the same fallbacks edge lines and depth fog share. */
+  private setCameraDepth(u: Record<string, THREE.IUniform>, camera: THREE.Camera): void {
+    const cam = camera as unknown as { near?: number; far?: number; isOrthographicCamera?: boolean }
+    u.uNear!.value = typeof cam.near === 'number' && cam.near > 0 ? cam.near : FALLBACK_NEAR
+    u.uFar!.value = typeof cam.far === 'number' && cam.far > 0 ? cam.far : 100
+    u.uOrtho!.value = cam.isOrthographicCamera ? 1 : 0
+  }
+
+  /** Draw one depth-fog treatment over the accumulator: each of the object's covered pixels
+   *  is mixed toward the tint by the smoothstep of its depth between `start` and `end`. Depth
+   *  comes from the shared gbuf, linearised with the REAL camera near/far, then remapped over
+   *  THIS object's fitted depth span (fitNearFar) so 0..1 spans the object. Masked and
+   *  occlusion-tested like edge lines; alpha is left alone. Advances the ping-pong. */
+  private fogComposite(t: DepthFogTreatment, maskDepth: THREE.Texture, root: THREE.Object3D, camera: THREE.Camera): void {
+    const u = this.depthFogMat.uniforms
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    u.tDepth!.value = this.gbuf!.depthTexture
+    u.tMaskDepth!.value = maskDepth
+    u.tBaseDepth!.value = this.base.depthTexture
+    ;(u.uColor!.value as THREE.Color).set(stripAlpha(t.color))
+    u.uStart!.value = t.start
+    // end <= start would make smoothstep a hard step; nudge end up so the fade stays a ramp.
+    u.uEnd!.value = t.end > t.start ? t.end : t.start + 1e-4
+    this.setCameraDepth(u, camera)
+    // Fit the object's eye-space depth span, then express it in the same 0..1 units linearDepth
+    // returns ((eye − camNear) / (camFar − camNear)) so the shader can remap into it.
+    const camNear = u.uNear!.value as number
+    const camFar = u.uFar!.value as number
+    const span = Math.max(camFar - camNear, 1e-6)
+    const { near, far } = fitNearFar(this.fogBox.setFromObject(root), camera.position)
+    u.uDepthLo!.value = (near - camNear) / span
+    u.uDepthHi!.value = (far - camNear) / span
+    this.pass(this.depthFogMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
+  }
+
+  /** Draw one curvature-wear treatment over the accumulator: a Sobel over the gbuf normals
+   *  gives the curvature magnitude, and the object's OWN colour is scaled up or down within
+   *  `width` px of high-curvature edges. No depth Sobel (no silhouette) and a soft ramp — a
+   *  shade, not a line. Masked and occlusion-tested like edge lines. Advances the ping-pong. */
+  private wearComposite(t: CurvatureWearTreatment, maskDepth: THREE.Texture): void {
+    const u = this.curvatureWearMat.uniforms
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    u.tNormal!.value = this.gbuf!.texture
+    u.tMaskDepth!.value = maskDepth
+    u.tBaseDepth!.value = this.base.depthTexture
+    u.uAmount!.value = t.amount
+    // Width 0→1 maps to the same 0.75–3.5 px Sobel reach edge lines uses, for a wider band.
+    u.uWidthPx!.value = 0.75 + t.width * 2.75
+    this.pass(this.curvatureWearMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
+  }
+
+  /** Draw one cross-hatch treatment over the accumulator: a tone-driven rotated line screen whose
+   *  density follows the object's own luminance (read from the accumulator) and whose lattice is
+   *  warped by the gbuf normal so the lines follow the surface. Masked to `maskDepth` and
+   *  occlusion-tested against the base scene, like edge lines. Advances the ping-pong. */
+  private hatchComposite(t: CrossHatchTreatment, maskDepth: THREE.Texture): void {
+    const u = this.crossHatchMat.uniforms
+    u.tDst!.value = this.accum[this.accumIdx]!.texture
+    u.tNormal!.value = this.gbuf!.texture
+    u.tMaskDepth!.value = maskDepth
+    u.tBaseDepth!.value = this.base.depthTexture
+    ;(u.uColor!.value as THREE.Color).set(stripAlpha(t.color))
+    ;(u.uResolution!.value as THREE.Vector2).set(this.width, this.height)
+    u.uSpacingPx!.value = crossHatchSpacingPx(t.spacing, this.height)
+    u.uAngle!.value = t.angle * Math.PI / 180
+    u.uThreshold!.value = t.threshold
+    this.pass(this.crossHatchMat, this.accum[1 - this.accumIdx]!)
+    this.accumIdx = 1 - this.accumIdx
+  }
+
+  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], ctx: StageContext): THREE.Texture | null {
     const r = this.renderer
     const size = r.getDrawingBufferSize(this.tmpSize)
     if (size.x <= 0 || size.y <= 0) return null
@@ -685,6 +1639,7 @@ export class TreatmentStage {
     const groups = plan.filter((g) => g.rendered && ctx.objectRoots.has(g.objectId))
     const treatedRoots = groups.map((g) => ctx.objectRoots.get(g.objectId)!)
     const invertGroup = groups.find((g) => g.invert)
+    const bufGroups = bufferPlan.filter((g) => ctx.objectRoots.has(g.objectId))
 
     // Lights must be on the stage layer to light an isolated draw; layers.test is any-overlap
     // so leaving the bit set is harmless for the normal layer-0 render.
@@ -760,6 +1715,28 @@ export class TreatmentStage {
         this.drawAlone(scene, camera, root, treatedRoots, this.layer, null)
         this.treatAndComposite(g, this.layer, invDepth, root, camera)
       }
+      // 2c. Buffer treatments (edge lines). Build the shared G-buffer ONCE from the treated
+      //     objects, then draw each object alone for its coverage/occlusion mask and lay its
+      //     crease lines over the accumulator. Released the moment a frame has none, so a
+      //     masked-only scene reclaims it (the byte-identical no-treatment frame never even
+      //     calls render(), so it never allocates one).
+      if (bufGroups.length) {
+        const bufRoots = bufGroups.map((g) => ctx.objectRoots.get(g.objectId)!)
+        this.renderGbuffer(scene, camera, bufRoots)
+        const exclude = [...treatedRoots, ...bufRoots]
+        for (const g of bufGroups) {
+          const root = ctx.objectRoots.get(g.objectId)!
+          this.drawAlone(scene, camera, root, exclude, this.layer, null)
+          for (const t of g.treatments) {
+            if (t.kind === 'edgeLines') this.edgeComposite(t, this.layer.depthTexture!, camera)
+            else if (t.kind === 'depthFog') this.fogComposite(t, this.layer.depthTexture!, root, camera)
+            else if (t.kind === 'curvatureWear') this.wearComposite(t, this.layer.depthTexture!)
+            else if (t.kind === 'crossHatch') this.hatchComposite(t, this.layer.depthTexture!)
+          }
+        }
+      } else {
+        this.releaseGbuffer()
+      }
       // 3. One un-premultiply back to straight alpha for the consumers downstream. The
       //    scratch it lands in is not touched again until the next render().
       const outStraight = this.free()
@@ -775,13 +1752,13 @@ export class TreatmentStage {
       r.setRenderTarget(prevTarget)
     }
     this.stats.frames++
-    this.stats.groups = groups.length
+    this.stats.groups = groups.length + bufGroups.length
     return result
   }
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.brightMat, this.glowMergeMat, this.compositeMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.glitchMat, this.dropShadowBuildMat, this.dropShadowMergeMat, this.dropShadowCompositeMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.crossHatchMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }

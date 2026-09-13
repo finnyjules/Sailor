@@ -352,6 +352,7 @@ const placeholder = (() => { const c = document.createElement('canvas'); c.width
 // the visual grouping.
 const SHADER_SECTIONS = [
   { id: 'distortion', label: 'Distortion' },
+  { id: 'material', label: 'Material' },
   { id: 'stylize', label: 'Stylize' },
   { id: 'color', label: 'Color' },
   { id: 'lens', label: 'Lens' },

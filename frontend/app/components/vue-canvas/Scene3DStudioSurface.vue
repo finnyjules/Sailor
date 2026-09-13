@@ -19,7 +19,7 @@ import {
 import {
   parseDoc, serializeDoc, createPrimitive, createGlbObject, createLight, createGroup, createDecal,
   MATERIAL_DEFAULTS, LIGHT_KINDS, gradientAngles, gradientStopsOf, opalStopsOf, screenOf,
-  DEFAULT_FONT_URL, DECAL_DEFAULTS, sceneHasShaderFill, sceneHasOpalFlow, applySeedStopsToMaterial,
+  DEFAULT_FONT_URL, DECAL_DEFAULTS, sceneHasShaderFill, sceneHasOpalFlow, applySeedStopsToMaterial, NO_BASE_COLOR,
   type SceneDoc, type SceneObject, type PrimitiveObject, type PrimitiveKind, type MaterialType, type GradientStop, type LightKind, type LightObject, type ReliefSpec, type SceneMaterial, type ScreenSpec, type Vec3,
   type DecalObject, type DecalContent,
 } from '~/lib/scene3d/config'
@@ -69,6 +69,13 @@ import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
 import Scene3DObjectRow from './studio/Scene3DObjectRow.vue'
 import { totalClones, clampedClones } from '~/lib/scene3d/modifiers'
 import { MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
+import {
+  modifierStackOf, writeModifierStack, canReorderModifier, cloneModifierStack, MODIFIER_LABELS,
+  addModifier as addModifierOp, removeModifier as removeModifierOp,
+  duplicateModifier as duplicateModifierOp, reorderModifier as reorderModifierOp,
+  type ModifierKind, type ModifierInstance,
+} from '~/lib/scene3d/modifierStack'
+import { modifierControls, modifierField } from '~/lib/scene3d/modifierControls'
 import { SceneInteraction, type PlacementHit } from '~/lib/scene3d/interaction'
 import { loadGlb, GLB_SIZE_CAP_BYTES } from '~/lib/scene3d/glb'
 import { fitGlbGroup } from '~/lib/scene3d/fitGlb'
@@ -191,6 +198,7 @@ const unrenderedTreatments = computed(() => unrenderedTreatmentIds(maskedTreatme
 function selectTreatment(objectId: string, treatmentId: string): void {
   if (sculpting.value) return // same guard as toggleSelected: never re-point a live sculpt session
   selectedIds.value = []
+  selectedModifier.value = null // treatment / modifier / object selection are mutually exclusive
   selectedTreatment.value = { objectId, treatmentId }
 }
 function addTreatment(objectId: string, kind: TreatmentKind): void {
@@ -233,6 +241,68 @@ function reorderTreatment(objectId: string, fromId: string, toId: string): void 
   o.treatments = list
 }
 
+// ── Modifiers: per-primitive geometry stack, managed from the tree the same way treatments
+// are (S1 Task 5). A modifier selection is a SEPARATE concept from the object / treatment
+// selection: picking a modifier row clears both. EVERY mutation runs through the read-through —
+// modifierStackOf(o) → list op → Object.assign(o, writeModifierStack(next)) — never a raw write
+// to o.modifierStack. writeModifierStack KEEPS the legacy `modifiers` bag, which still holds the
+// Cloner Vary uniform (varyMode/…/varyColorStrength), so a stack edit never strips Vary.
+const selectedModifier = ref<{ objectId: string; modifierId: string } | null>(null)
+const activeModifier = computed(() => {
+  const sel = selectedModifier.value
+  if (!sel) return null
+  const o = doc.objects.find((x) => x.id === sel.objectId)
+  if (!o || o.kind !== 'primitive') return null
+  const mo = modifierStackOf(o).find((m) => m.id === sel.modifierId)
+  return mo ? { obj: o, modifier: mo } : null
+})
+
+function selectModifier(objectId: string, modifierId: string): void {
+  if (sculpting.value) return // same guard as selectTreatment: never re-point a live sculpt session
+  selectedIds.value = []
+  selectedTreatment.value = null
+  selectedModifier.value = { objectId, modifierId }
+}
+function addModifier(objectId: string, kind: ModifierKind): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || o.kind !== 'primitive') return
+  const before = modifierStackOf(o)
+  const next = addModifierOp(before, kind)
+  if (next === before) return // a second pinned kind (subdivide / cloner) is refused
+  Object.assign(o, writeModifierStack(next))
+  const added = next.find((m) => !before.some((b) => b.id === m.id))
+  if (added) selectModifier(objectId, added.id)
+}
+function removeModifier(objectId: string, modifierId: string): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || o.kind !== 'primitive') return
+  Object.assign(o, writeModifierStack(removeModifierOp(modifierStackOf(o), modifierId)))
+  if (selectedModifier.value?.modifierId === modifierId) selectedModifier.value = null
+}
+function duplicateModifier(objectId: string, modifierId: string): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || o.kind !== 'primitive') return
+  const before = modifierStackOf(o)
+  const next = duplicateModifierOp(before, modifierId)
+  if (next === before) return
+  Object.assign(o, writeModifierStack(next))
+  const copy = next.find((m) => !before.some((b) => b.id === m.id))
+  if (copy) selectModifier(objectId, copy.id)
+}
+function toggleModifier(objectId: string, modifierId: string): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || o.kind !== 'primitive') return
+  const next = modifierStackOf(o).map((m) => (m.id === modifierId ? { ...m, enabled: !m.enabled } as ModifierInstance : m))
+  Object.assign(o, writeModifierStack(next))
+}
+function reorderModifier(objectId: string, fromId: string, toId: string): void {
+  const o = doc.objects.find((x) => x.id === objectId)
+  if (!o || o.kind !== 'primitive') return
+  const stack = modifierStackOf(o)
+  if (!canReorderModifier(stack, fromId, toId)) return // pinned rows can't move, nothing crosses a pin
+  Object.assign(o, writeModifierStack(reorderModifierOp(stack, fromId, toId)))
+}
+
 // The treatment inspector: ONE card from treatmentControls(kind), read/written straight
 // on the selected Treatment. Colour rows arrive as 8-digit #rrggbbaa from StudioColor;
 // stored as-is, stripped by every three consumer (treatmentShells.ts / treatmentStage.ts).
@@ -253,6 +323,130 @@ function setTreatmentControl(key: string, value: string | number | boolean): voi
 function treatmentControlVisible(c: ControlSpec): boolean {
   return showIfVisible(c, (key) => readTreatmentControl(key))
 }
+
+// The modifier inspector: ONE card from modifierControls(kind), read/written straight on the
+// SELECTED instance (activeModifier.modifier) — never the legacy bag, which a stored stack has
+// left stale. Its option-valued rows (taper/twist/bend axis, jitter mode, clone mode/axis) store
+// the option's INDEX in the flat instance, so a `select` here surfaces the option words but must
+// coerce label→index on write and index→label on read — the same word↔index mapping `optionOf` /
+// `setOption` do for the bag, done here against the instance. Every edit persists through the
+// read-through: modifierStackOf(o) → map the one row → Object.assign(o, writeModifierStack(next)),
+// which keeps the vary bag alive (Task 3b).
+const modifierPanelControls = computed(() => activeModifier.value ? modifierControls(activeModifier.value.modifier.kind) : [])
+const modifierPanelOrder = computed(() => activeModifier.value ? [MODIFIER_LABELS[activeModifier.value.modifier.kind]] : [])
+function readModifierControl(key: string): string | number | boolean {
+  const am = activeModifier.value
+  if (!am) return ''
+  const field = modifierField(key)
+  const spec = MODIFIER_SPECS.find((s) => s.key === field)
+  const raw = (am.modifier as unknown as Record<string, number>)[field]
+  const v = raw === undefined ? (spec?.default ?? 0) : raw
+  if (spec?.control === 'options') return (spec.options ?? [])[Math.round(v)] ?? (spec.options ?? [])[0] ?? ''
+  if (spec?.control === 'toggle') return Math.round(v) === 1
+  return v
+}
+function setModifierControl(key: string, value: string | number | boolean): void {
+  const sel = selectedModifier.value
+  if (!sel) return
+  const o = doc.objects.find((x) => x.id === sel.objectId)
+  if (!o || o.kind !== 'primitive') return
+  const field = modifierField(key)
+  const spec = MODIFIER_SPECS.find((s) => s.key === field)
+  if (!spec) return
+  let stored: number
+  if (spec.control === 'options') {
+    const i = (spec.options ?? []).indexOf(String(value)) // label→index; a select emits the option word
+    if (i < 0) return
+    stored = i
+  } else if (spec.control === 'toggle') {
+    stored = value ? 1 : 0
+  } else {
+    stored = Number(value)
+  }
+  const next = modifierStackOf(o).map((m) => (m.id === sel.modifierId ? { ...m, [field]: stored } as ModifierInstance : m))
+  Object.assign(o, writeModifierStack(next))
+}
+// The Boolean modifier's "Combine with" picker: a DYNAMIC select sourced from the LIVE scene, so
+// it cannot live in static MODIFIER_SPECS (those are numeric dials only). It lists every OTHER
+// primitive object by name — groups, lights and decals are excluded because a boolean can only
+// combine solid geometry, and self is excluded — and writes the chosen object's id into the
+// selected boolean instance's `refObjectId` (a STRING field the engine reads to resolve the sibling
+// geometry) through the SAME read-through every other dial uses. An empty pick clears it, and the
+// boolean then no-ops. NOT a dead control: booleanOp/blend/resolution come from the panel above,
+// the sibling comes from here, and applyBoolean reads all four.
+const BOOLEAN_NONE = ''
+const booleanSiblings = computed<PrimitiveObject[]>(() => {
+  const am = activeModifier.value
+  if (!am || am.modifier.kind !== 'boolean') return []
+  return doc.objects.filter((o): o is PrimitiveObject => o.kind === 'primitive' && o.id !== am.obj.id)
+})
+const booleanSiblingOptions = computed<string[]>(() => [BOOLEAN_NONE, ...booleanSiblings.value.map((o) => o.id)])
+const booleanSiblingLabels = computed<string[]>(() => ['None', ...booleanSiblings.value.map((o) => o.name)])
+const booleanRefId = computed<string>({
+  get() {
+    const am = activeModifier.value
+    const ref = am?.modifier.kind === 'boolean' ? am.modifier.refObjectId : undefined
+    // Only surface a ref that still points at a listable sibling; a stale or self id reads as None.
+    return ref && booleanSiblings.value.some((o) => o.id === ref) ? ref : BOOLEAN_NONE
+  },
+  set(value: string) {
+    const sel = selectedModifier.value
+    if (!sel) return
+    const o = doc.objects.find((x) => x.id === sel.objectId)
+    if (!o || o.kind !== 'primitive') return
+    const next = modifierStackOf(o).map((m) => {
+      if (m.id !== sel.modifierId) return m
+      const patched = { ...m } as ModifierInstance
+      if (value) patched.refObjectId = value
+      else delete patched.refObjectId
+      return patched
+    })
+    Object.assign(o, writeModifierStack(next))
+  },
+})
+// The Cloner's placement rows swap with its mode exactly as the shipped Cloner card did (grid
+// drops the linear/radial rows for its per-axis counts), so a row that does nothing in the
+// current mode is hidden rather than left as a dead control. Mode/step rows show in every mode.
+const CLONER_ALWAYS_KEYS = new Set(['cloneMode', 'cloneStepRotX', 'cloneStepRotY', 'cloneStepRotZ', 'cloneStepScale'])
+const CLONER_MODE_KEYS: Record<number, Set<string>> = {
+  0: new Set(['cloneCount', 'cloneOffsetX', 'cloneOffsetY', 'cloneOffsetZ']),
+  1: new Set(['cloneCount', 'cloneRadius', 'cloneAxis']),
+  2: new Set(['cloneCountX', 'cloneCountY', 'cloneCountZ', 'cloneSpacingX', 'cloneSpacingY', 'cloneSpacingZ']),
+}
+const activeCloneMode = computed(() => {
+  const am = activeModifier.value
+  if (!am || am.modifier.kind !== 'cloner') return 0
+  return Math.round((am.modifier as unknown as Record<string, number>).cloneMode ?? 0)
+})
+function modifierControlVisible(c: ControlSpec): boolean {
+  const am = activeModifier.value
+  if (!am) return false
+  if (am.modifier.kind !== 'cloner') return true
+  const field = modifierField(c.key)
+  if (!field.startsWith('clone') || CLONER_ALWAYS_KEYS.has(field)) return true
+  return (CLONER_MODE_KEYS[activeCloneMode.value] ?? CLONER_MODE_KEYS[0]!).has(field)
+}
+// Vary lives under the Cloner row's inspector but is NOT a stack field (constraint): its dials
+// (varyMode/seed/falloff/varyColor/spread/varyColorStrength) and its palette stay in the legacy
+// `modifiers` bag, read/written by modOf/setMod/varyPaletteOf below. `varyObject` is the primitive
+// that owns the selected cloner — the object modOf/setMod target while a modifier row is selected
+// (the ordinary object `selected` is null then, its selection having moved to the row).
+const varyObject = computed<PrimitiveObject | null>(() => {
+  const am = activeModifier.value
+  return am && am.modifier.kind === 'cloner' && am.obj.kind === 'primitive' ? (am.obj as PrimitiveObject) : null
+})
+// The Vary gates read the cloner's clone count from the STACK instance (the bag's count is stale
+// once the stack is edited), and its colour half additionally needs a material with a base colour.
+const varyClones = computed(() => {
+  const am = activeModifier.value
+  if (!am || am.modifier.kind !== 'cloner' || am.modifier.enabled === false) return 0
+  return totalClones(am.modifier as unknown as Record<string, number>)
+})
+const varyBlockVisible = computed(() => varyClones.value > 1)
+const varyModeNow = computed(() => Math.round(modOf('varyMode')))
+const varyColorableNow = computed(() =>
+  varyBlockVisible.value && !!varyObject.value && !NO_BASE_COLOR.has(varyObject.value.material.type))
+const varyColorOnNow = computed(() => varyColorableNow.value && Math.round(modOf('varyColor')) === 1)
 
 function toggleSelected(id: string, additive: boolean): void {
   // A stray click (viewport or the Objects list) must never re-point the
@@ -1251,26 +1445,28 @@ function setParam(key: string, v: number): void {
   o.params[key] = v
 }
 
-// Modifier bag: same schema-driven read/write shape as geometry params, but the
-// specs are shared across every primitive kind rather than keyed by kind.
+// The Cloner Vary bag: varyMode/seed/falloff/varyColor/spread/varyColorStrength are a MATERIAL
+// uniform, not a modifier row, so they stay in the legacy `modifiers` bag (writeModifierStack keeps
+// it) and never enter the stack. Vary only shows under the selected Cloner row, so these target
+// `varyObject` — the primitive that owns that cloner — rather than `selected`, which is null while
+// a modifier row holds the selection.
 function modOf(key: string): number {
-  const o = selected.value
-  return o && o.kind === 'primitive' ? modifierValue(o.modifiers, key) : 0
+  const o = varyObject.value
+  return o ? modifierValue(o.modifiers, key) : 0
 }
 function setMod(key: string, v: number): void {
-  const o = selected.value
-  if (!o || o.kind !== 'primitive') return
+  const o = varyObject.value
+  if (!o) return
   if (!o.modifiers) o.modifiers = {}
   o.modifiers[key] = v
 }
 const modSpec = (key: string) => MODIFIER_SPECS.find((s) => s.key === key)!
-/** A shared-row `select` spec for an index-valued modifier picker (the Cloner's Mode /
- *  Around and the Modifiers' axis / jitter pickers). Built from the MODIFIER_SPEC so the
- *  six option anchors draw as StudioRow rows — the same 28px chrome as the sliders beside
- *  them — instead of a bare label + segmented. They stay bespoke (not schema controls)
- *  because they store the option's INDEX in the numeric modifier bag; `optionOf` /
- *  `setOption` do that word ↔ index mapping. Values are the spec's own words; the row
- *  shows them sentence-cased. */
+/** A shared-row `select` spec for an index-valued Vary picker (Pattern / Vary colour / Spread).
+ *  Built from the MODIFIER_SPEC so the option row draws with the same 28px chrome as the sliders
+ *  beside it. These stay bespoke (not schema controls) because they store the option's INDEX in the
+ *  numeric Vary bag; `optionOf` / `setOption` do that word ↔ index mapping. Values are the spec's
+ *  own words; the row shows them sentence-cased. (The deformation-axis / clone-mode pickers moved
+ *  onto the per-modifier inspector, coerced there straight on the instance.) */
 function optionRowSpec(key: string, anchor: string): ControlSpec {
   const spec = modSpec(key)
   const options = spec.options ?? []
@@ -1289,19 +1485,22 @@ function setOption(key: string, label: string): void {
   const i = modSpec(key).options!.indexOf(label)
   if (i >= 0) setMod(key, i)
 }
+/** A bag-backed slider spec for one of Vary's numeric dials (seed, the two falloff dials, colour
+ *  strength), from the MODIFIER_SPEC. Drawn through StudioRow with `modOf` / `setMod`. */
+function varySliderSpec(key: string): ControlSpec {
+  const spec = modSpec(key)
+  return { key, label: spec.label, kind: 'slider', min: spec.min, max: spec.max, step: spec.step, default: spec.default, group: 'Vary', hint: spec.hint }
+}
 
 /** Vary's palette is a `string[]` on the OBJECT (`PrimitiveObject.varyPalette`), not a
  *  number in the modifier bag, so it never goes through `setMod`. `undefined` here means
  *  "untouched" and VaryPalette falls back to the shared DEFAULT_VARY swatches — writing
  *  those defaults in on first render would put a palette on every scene that never asked
  *  for one. */
-const varyPaletteOf = computed<string[] | undefined>(() => {
-  const o = selected.value
-  return o && o.kind === 'primitive' ? o.varyPalette : undefined
-})
+const varyPaletteOf = computed<string[] | undefined>(() => varyObject.value?.varyPalette)
 function setVaryPalette(palette: string[]): void {
-  const o = selected.value
-  if (!o || o.kind !== 'primitive') return
+  const o = varyObject.value
+  if (!o) return
   // Direct assignment onto the reactive doc, the same commit path `setParam` / the text
   // `content` writer use on this surface — there is no store action in between.
   o.varyPalette = palette
@@ -1317,7 +1516,13 @@ const AMBER_VERTS = 200_000
 const cloneCost = computed(() => {
   const o = selected.value
   if (!o || o.kind !== 'primitive') return null
-  const copies = totalClones(o.modifiers)
+  // Clone COUNT comes from the STACK's cloner row, not the legacy bag: once the stack has been
+  // edited the bag's cloneCount is stale (writeModifierStack keeps the bag only for the Vary
+  // uniform). The cloner instance is bag-shaped, so totalClones/clampedClones read it directly.
+  // The per-copy base vertex count is invariant to the stack (Task 3b), so it still reads the bag.
+  const cloner = modifierStackOf(o).find((m) => m.kind === 'cloner' && m.enabled !== false)
+  const clonerBag = cloner as unknown as Record<string, number> | undefined
+  const copies = clonerBag ? totalClones(clonerBag) : 0
   if (copies <= 1) return null
   const base = baseVertexCountFor(o.primitive, o.params, o.modifiers, o.content)
   const verts = base * copies
@@ -1325,9 +1530,43 @@ const cloneCost = computed(() => {
   // reduced in the doc, but applyModifiers clamps the actual clone count
   // against the shaped (post-subdivision) base vertex count, same as `base`
   // here. Surfaced so a clamp never reads as a silent rendering bug.
-  const clamp = clampedClones(o.modifiers, base)
+  const clamp = clampedClones(clonerBag, base)
   return { copies, verts, heavy: verts > AMBER_VERTS, clamp }
 })
+// A boolean row with a RESOLVED sibling, or an enabled voxelise row, is heavy
+// even when the object has no clones (cloneCost returns null at ≤1 copy). Both
+// rebuild through the synchronous SDF/voxel merge — ~9s per tick at res 32³ —
+// so a bare Resolution-slider drag on such an object would freeze the tab. This
+// mirrors booleanRefKeys' resolution rule (ref set, not self, resolves to a
+// sibling primitive) so the "heavy" verdict matches what actually rebuilds.
+function objectHasHeavyProducer(o: PrimitiveObject): boolean {
+  return modifierStackOf(o).some((r) => {
+    if (r.enabled === false) return false
+    if (r.kind === 'voxelise') return true
+    if (r.kind !== 'boolean') return false
+    const refId = r.refObjectId
+    if (!refId || refId === o.id) return false
+    const sib = doc.objects.find((x) => x.id === refId)
+    return !!sib && sib.kind === 'primitive'
+  })
+}
+// The pointerdown-sampled "is this drag heavy?" verdict: a heavy clone set OR a
+// boolean/voxelise producer on the selected object. Any of these makes a
+// per-tick geometry rebuild block the main thread long enough that the slider
+// stops tracking the pointer.
+const heavyGeometry = computed(() => {
+  if (cloneCost.value?.heavy) return true
+  const o = selected.value
+  return !!o && o.kind === 'primitive' && objectHasHeavyProducer(o)
+})
+// True when SOME object in the scene booleans against another: moving any object
+// then changes a booleaning sibling's relative transform every frame → its
+// booleanRefKeys (hence geoKey) churns → a synchronous merge per drag frame.
+// Booleans are rare, so "any boolean dependency anywhere" is a cheap, safe gate
+// to defer geometry for the whole transform drag and catch up once on release.
+const sceneHasBooleanDependency = computed(() =>
+  doc.objects.some((o) => o.kind === 'primitive' && objectHasHeavyProducer(o) &&
+    modifierStackOf(o).some((r) => r.kind === 'boolean' && r.enabled !== false && !!r.refObjectId && r.refObjectId !== o.id)))
 // Heavy-drag deferral. A rebuild at 300k+ verts blocks the main thread long
 // enough that the slider itself stops tracking the pointer, so for the duration
 // of a drag on a heavy object the engine skips geometry rebuilds and catches up
@@ -1335,9 +1574,30 @@ const cloneCost = computed(() => {
 // Heaviness is sampled once at pointerdown so a drag never changes mode midway.
 const deferringGeometry = ref(false)
 function onControlsPointerDown() {
-  if (!engine || deferringGeometry.value || !cloneCost.value?.heavy) return
+  if (!engine || deferringGeometry.value || !heavyGeometry.value) return
   deferringGeometry.value = true
   engine.deferGeometry = true
+}
+// A gizmo/pivot transform drag on ANY object churns a booleaning sibling's
+// geometry per frame when a boolean dependency exists in the scene. Raise
+// deferGeometry for the whole drag (sampled at drag start) and catch up on
+// release — the same defer-then-rebuild-once contract as the dial-drag path.
+const deferringForGizmo = ref(false)
+function onGizmoDragChange(dragging: boolean) {
+  if (!engine) return
+  if (dragging) {
+    if (deferringForGizmo.value || !sceneHasBooleanDependency.value) return
+    deferringForGizmo.value = true
+    engine.deferGeometry = true
+  } else {
+    if (!deferringForGizmo.value) return
+    deferringForGizmo.value = false
+    engine.deferGeometry = false
+    // The catch-up sync runs from the drag-end release hooks (onPivotDragEnd for
+    // a pivot drag; the doc watcher for a single-object drag once this flag is
+    // down), so the geometry rebuilds once at the final transform.
+    engine.syncFromDoc(doc)
+  }
 }
 // On window, not the panel: the pointer routinely leaves the controls column
 // mid-drag, and a missed release would leave the viewport permanently stale.
@@ -1372,7 +1632,7 @@ const baseSize = computed<[number, number, number]>(() => {
   if (!o) return [1, 1, 1]
   if (deferringGeometry.value) return lastBaseSize
   lastBaseSize = o.kind === 'primitive'
-    ? baseSizeFor(o.primitive, o.params, o.modifiers, o.content, varySettingsFor(o))
+    ? baseSizeFor(o.primitive, o.params, o.modifiers, o.content, varySettingsFor(o), modifierStackOf(o))
     : engine?.baseSizeOf(o.id) ?? [1, 1, 1]
   return lastBaseSize
 })
@@ -1789,6 +2049,7 @@ onMounted(() => {
     // run the one that was owed now that the roots are back in the scene, so
     // they land under their real parents again.
     onPivotDragEnd: () => { engine?.syncFromDoc(doc) },
+    onGizmoDragChange,
     // A right-click in the viewport dropped the armed placement — clear the
     // surface's half of that mode (crosshair, hint banner, "Click a surface…").
     onPlacementCancelled: () => { placingDecal.value = null },
@@ -1960,7 +2221,7 @@ watch(() => [doc.lighting.softness, doc.lighting.warmth, doc.lighting.brightness
 // that only extends the list leaves `selectedId` unchanged but still has to
 // rebuild the gizmo around a pivot.
 watch(selectedIds, (ids) => {
-  if (ids.length) selectedTreatment.value = null // an object selection replaces a treatment selection
+  if (ids.length) { selectedTreatment.value = null; selectedModifier.value = null } // an object selection replaces a treatment/modifier selection
   // ANY light in the selection suppresses the scale gizmo, not just the primary:
   // LightObject's scale is never read, so scaling a light in a mixed selection
   // writes a number nothing honours — and a light that resists scaling alone but
@@ -2214,7 +2475,7 @@ async function convertSelectionToMesh() {
   // would only pay for a Float32Array of per-vertex colour plus a THREE.Color per
   // copy that nothing ever reads. Positions are untouched by colour, so no behaviour
   // changes.
-  const geo = buildGeometry(src.primitive, src.params, src.modifiers, 'smooth', src.content, font, { ...varySettingsFor(src), colorEnabled: false })
+  const geo = buildGeometry(src.primitive, src.params, src.modifiers, 'smooth', src.content, font, { ...varySettingsFor(src), colorEnabled: false }, modifierStackOf(src))
   try {
     // Counted here rather than left to encodeMesh's throw so the message can
     // name the real figures in plain words; encodeMesh still guards the library
@@ -2382,7 +2643,7 @@ async function localMeshDataFor(obj: PrimitiveObject): Promise<MeshData | null> 
   // would only pay for a Float32Array of per-vertex colour plus a THREE.Color per
   // copy that nothing ever reads. Positions are untouched by colour, so no behaviour
   // changes.
-  const geo = buildGeometry(obj.primitive, obj.params, obj.modifiers, 'smooth', obj.content, font, { ...varySettingsFor(obj), colorEnabled: false })
+  const geo = buildGeometry(obj.primitive, obj.params, obj.modifiers, 'smooth', obj.content, font, { ...varySettingsFor(obj), colorEnabled: false }, modifierStackOf(obj))
   const data = meshDataFromGeometry(geo)
   geo.dispose()
   return data
@@ -3241,6 +3502,7 @@ function removeObject(id: string) {
   // which would discard any other selected objects when multi-selection is active.
   selectedIds.value = selectedIds.value.filter((x) => !doomed.has(x))
   if (selectedTreatment.value && doomed.has(selectedTreatment.value.objectId)) selectedTreatment.value = null
+  if (selectedModifier.value && doomed.has(selectedModifier.value.objectId)) selectedModifier.value = null
   for (const gone of doomed) delete glbError[gone]
 }
 // C3 fix (final review): `{ ...src.material }` is a SHALLOW copy — `material.relief` (and
@@ -3327,6 +3589,11 @@ function cloneObject(src: SceneObject, existing: SceneObject[] = doc.objects): S
     // would make both objects' shapes move together on any later edit.
     ...(src.kind === 'primitive' && src.params ? { params: { ...src.params } } : {}),
     ...(src.kind === 'primitive' && src.modifiers ? { modifiers: { ...src.modifiers } } : {}),
+    // The modifier stack travels with the copy under FRESH ids — a shared id would let one
+    // motion track drive both copies' geometry (the same hazard cloneTreatments guards, and
+    // cloneModifierStack mints new ids for exactly this). Absent ⇒ omitted, so a legacy-bag
+    // object (no stored stack) still duplicates byte-identically.
+    ...(src.kind === 'primitive' && src.modifierStack?.length ? { modifierStack: cloneModifierStack(src.modifierStack) } : {}),
     // Vary palette travels with the copy the same defensive way as params/modifiers —
     // a shared array would let editing one copy's swatches mutate the other's.
     ...(src.kind === 'primitive' && src.varyPalette ? { varyPalette: [...src.varyPalette] } : {}),
@@ -4117,7 +4384,7 @@ async function onClose() {
           </div>
           <Scene3DObjectRow v-for="o in rootObjectList" :key="o.id"
             :object="o" :objects="doc.objects" :selected-ids="selectedIds" :glb-error="glbError" :depth="0"
-            :selected-treatment="selectedTreatment" :not-rendered="unrenderedTreatments"
+            :selected-treatment="selectedTreatment" :not-rendered="unrenderedTreatments" :selected-modifier="selectedModifier"
             @select="toggleSelected"
             @remove="removeObject"
             @duplicate="duplicateObject"
@@ -4128,7 +4395,13 @@ async function onClose() {
             @remove-treatment="removeTreatment"
             @duplicate-treatment="duplicateTreatment"
             @toggle-treatment="toggleTreatment"
-            @reorder-treatment="reorderTreatment" />
+            @reorder-treatment="reorderTreatment"
+            @add-modifier="addModifier"
+            @select-modifier="selectModifier"
+            @remove-modifier="removeModifier"
+            @duplicate-modifier="duplicateModifier"
+            @toggle-modifier="toggleModifier"
+            @reorder-modifier="reorderModifier" />
         </div>
         <div v-if="wiredGlbUrl" class="shrink-0 border-t border-white/[0.08] p-2">
           <StudioButton @click="addGlb(wiredGlbUrl)">
@@ -4204,7 +4477,69 @@ async function onClose() {
           />
         </div>
       </template>
-      <template v-if="activeTab === 'build' && !activeTreatment">
+
+      <!-- Modifier inspector (S1 Task 6): a modifier row is selected in the tree, so this column
+           shows ONLY that modifier's dials under a breadcrumb naming its object. The dials come
+           from modifierControls(kind) and read/write the SELECTED instance — the axis / mode
+           selects coerce label↔index on the instance (readModifierControl / setModifierControl),
+           and every edit persists through writeModifierStack (keeping the Vary bag). The Cloner
+           additionally shows the bag-backed Vary section below its placement dials. -->
+      <template v-if="activeTab === 'build' && activeModifier">
+        <div class="mb-2 flex items-center gap-1.5 px-1 text-[11px] text-white/50" data-testid="modifier-breadcrumb">
+          <button type="button" class="truncate hover:text-white/80" @click="selectedIds = [activeModifier.obj.id]">{{ activeModifier.obj.name }}</button>
+          <ChevronRight class="h-3 w-3 shrink-0 opacity-60" />
+          <span class="truncate text-white/80">{{ MODIFIER_LABELS[activeModifier.modifier.kind] }}</span>
+        </div>
+        <div class="flex flex-col gap-2" @pointerdown.capture="onControlsPointerDown">
+          <!-- Boolean — the "Combine with" object picker, sourced from the live scene (a dynamic
+               select can't live in static MODIFIER_SPECS). Sits above the operation/blend/resolution
+               dials so you choose the sibling first. Writes the object's id into refObjectId. -->
+          <div v-if="activeModifier.modifier.kind === 'boolean'" data-testid="boolean-combine-with">
+            <label class="mb-1 block text-[11px] text-white/55">Combine with</label>
+            <StudioSelect
+              v-model="booleanRefId"
+              :options="booleanSiblingOptions"
+              :option-labels="booleanSiblingLabels"
+            />
+            <p v-if="booleanSiblingOptions.length <= 1" class="mt-1 text-[11px] text-white/45">
+              Add another object to combine this one with.
+            </p>
+          </div>
+          <StudioControlPanel
+            :controls="modifierPanelControls"
+            :order="modifierPanelOrder"
+            :value="readModifierControl"
+            :visible="modifierControlVisible"
+            @set="setModifierControl"
+          />
+          <!-- Vary — bag-backed (NOT a stack field): how a property changes from one copy to the
+               next. Only the Cloner has it, and only with more than one copy. -->
+          <div v-if="activeModifier.modifier.kind === 'cloner' && varyBlockVisible" class="flex flex-col gap-2" data-testid="modifier-vary">
+            <div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Vary</div>
+            <StudioRow :spec="optionRowSpec('varyMode', 'ui.cloner.varyMode')" :model-value="optionOf('varyMode')" :bindable="false"
+              @update:model-value="(v: string | number | boolean) => setOption('varyMode', String(v))" />
+            <StudioRow v-if="varyModeNow === 1" :spec="varySliderSpec('varySeed')" :model-value="modOf('varySeed')" :bindable="false"
+              @update:model-value="(v: string | number | boolean) => setMod('varySeed', Number(v))" />
+            <template v-if="varyModeNow === 2">
+              <StudioRow :spec="varySliderSpec('varyFalloffCenter')" :model-value="modOf('varyFalloffCenter')" :bindable="false"
+                @update:model-value="(v: string | number | boolean) => setMod('varyFalloffCenter', Number(v))" />
+              <StudioRow :spec="varySliderSpec('varyFalloffRadius')" :model-value="modOf('varyFalloffRadius')" :bindable="false"
+                @update:model-value="(v: string | number | boolean) => setMod('varyFalloffRadius', Number(v))" />
+            </template>
+            <StudioRow v-if="varyColorableNow" :spec="optionRowSpec('varyColor', 'ui.cloner.varyColor')" :model-value="optionOf('varyColor')" :bindable="false"
+              @update:model-value="(v: string | number | boolean) => setOption('varyColor', String(v))" />
+            <template v-if="varyColorOnNow">
+              <VaryPalette :model-value="varyPaletteOf" @update:model-value="setVaryPalette" />
+              <StudioRow :spec="optionRowSpec('varyColorSpread', 'ui.cloner.varyColorSpread')" :model-value="optionOf('varyColorSpread')" :bindable="false"
+                @update:model-value="(v: string | number | boolean) => setOption('varyColorSpread', String(v))" />
+              <StudioRow :spec="varySliderSpec('varyColorStrength')" :model-value="modOf('varyColorStrength')" :bindable="false"
+                @update:model-value="(v: string | number | boolean) => setMod('varyColorStrength', Number(v))" />
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <template v-if="activeTab === 'build' && !activeTreatment && !activeModifier">
       <!-- Multi-selection indicator. Every row below reads the PRIMARY's value
            but writes to the whole selection, so without this the panel looks
            like an ordinary single-object inspector right up until one edit
@@ -4232,16 +4567,16 @@ async function onClose() {
         />
       </div>
 
-      <!-- Geometry / Modifiers / Cloner — DRAWN FROM SCENE_CONTROLS, from the same
-           `panelControls` row list the Transform panel above and the Material panel below
-           use. Its own StudioControlPanel because the sculpt panel above replaces exactly
-           these three cards and nothing else in the column (see SCENE_GEOMETRY_SECTIONS'
-           own note); the parameter rows come from PRIMITIVE_PARAMS[kind] and the
-           deformations from MODIFIER_SPECS, which is what the deleted markup iterated too.
-           What stays bespoke below is what was never a parameter: the text primitive's
-           string + font pickers, the mesh remesh/solidify block, the five modifier group
-           captions, the four index-valued segmented pickers, the Cloner's Step caption and
-           its live cost readout. -->
+      <!-- Geometry — DRAWN FROM SCENE_CONTROLS, from the same `panelControls` row list the
+           Transform panel above and the Material panel below use. Its own StudioControlPanel
+           because the sculpt panel above replaces exactly this card and nothing else in the
+           column (see SCENE_GEOMETRY_SECTIONS' own note); the parameter rows come from
+           PRIMITIVE_PARAMS[kind]. The Modifiers and Cloner cards are GONE (S1 Task 6): a
+           modifier's dials now live on the per-row inspector, read/written on the stack instance,
+           so the always-on cards that read the now-dead legacy bag are removed. What stays bespoke
+           below is what was never a parameter: the text primitive's string + font pickers, the mesh
+           remesh/solidify block, and the Cloner's live cost readout (its clone COUNT sourced from
+           the stack). -->
       <div v-if="selectedIsPrimitive && !sculpting" class="flex flex-col gap-2" @pointerdown.capture="onControlsPointerDown">
         <StudioControlPanel
           :controls="panelControls"
@@ -4319,73 +4654,10 @@ async function onClose() {
         </div>
         </template>
 
-        <!-- The five Modifiers group captions. Plain uppercase labels in the shipped
-             markup, and still markup here: a caption is not a control. -->
-        <template #control-ui.mod.group.taper><div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Taper</div></template>
-        <template #control-ui.mod.group.twist><div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Twist</div></template>
-        <template #control-ui.mod.group.bend><div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Bend</div></template>
-        <template #control-ui.mod.group.noise><div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Noise</div></template>
-        <template #control-ui.mod.group.jitter><div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Jitter</div></template>
-
-        <!-- The six index-valued pickers (four deformation axes/modes here, the Cloner's
-             two below). Each stores its option's INDEX in the same flat number bag the
-             sliders write to, so a schema `select` would put the option's STRING there —
-             see controls.ts's "Deliberately NOT in this schema". Written out one per
-             anchor rather than looped over dynamic slot names: a slot that silently
-             resolves to nothing renders a bare StudioRow instead, with no error. -->
-        <template #control-ui.mod.taperAxis>
-          <StudioRow :spec="optionRowSpec('taperAxis', 'ui.mod.taperAxis')" :model-value="optionOf('taperAxis')" :bindable="false"
-            @update:model-value="(v: string | number | boolean) => setOption('taperAxis', String(v))" />
-        </template>
-        <template #control-ui.mod.twistAxis>
-          <StudioRow :spec="optionRowSpec('twistAxis', 'ui.mod.twistAxis')" :model-value="optionOf('twistAxis')" :bindable="false"
-            @update:model-value="(v: string | number | boolean) => setOption('twistAxis', String(v))" />
-        </template>
-        <template #control-ui.mod.bendAxis>
-          <StudioRow :spec="optionRowSpec('bendAxis', 'ui.mod.bendAxis')" :model-value="optionOf('bendAxis')" :bindable="false"
-            @update:model-value="(v: string | number | boolean) => setOption('bendAxis', String(v))" />
-        </template>
-        <template #control-ui.mod.jitterMode>
-          <StudioRow :spec="optionRowSpec('jitterMode', 'ui.mod.jitterMode')" :model-value="optionOf('jitterMode')" :bindable="false"
-            @update:model-value="(v: string | number | boolean) => setOption('jitterMode', String(v))" />
-        </template>
-        <template #control-ui.cloner.mode>
-          <StudioRow :spec="optionRowSpec('cloneMode', 'ui.cloner.mode')" :model-value="optionOf('cloneMode')" :bindable="false"
-            @update:model-value="(v: string | number | boolean) => setOption('cloneMode', String(v))" />
-        </template>
-        <template #control-ui.cloner.axis>
-          <StudioRow :spec="optionRowSpec('cloneAxis', 'ui.cloner.axis')" :model-value="optionOf('cloneAxis')" :bindable="false"
-            @update:model-value="(v: string | number | boolean) => setOption('cloneAxis', String(v))" />
-        </template>
-
-        <!-- Step transforms accumulate across copies in every mode, so they sit under
-             their own caption below the mode-specific placement rows. -->
-        <template #control-ui.cloner.step><div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Step</div></template>
-
-        <!-- Vary — how a property changes from one copy to the next. The three pickers are
-             index-valued exactly like Mode and Around above, so they take the same
-             optionRowSpec / optionOf / setOption path and draw with the same 28px chrome.
-             Every row here is gated by its anchor in panelPresentation; the surface just
-             supplies the slot. -->
-        <template #control-ui.cloner.vary><div class="text-[10px] uppercase tracking-[0.12em] text-white/25">Vary</div></template>
-        <template #control-ui.cloner.varyMode>
-          <StudioRow :spec="optionRowSpec('varyMode', 'ui.cloner.varyMode')" :model-value="optionOf('varyMode')" :bindable="false"
-            @update:model-value="(v: string | number | boolean) => setOption('varyMode', String(v))" />
-        </template>
-        <template #control-ui.cloner.varyColor>
-          <StudioRow :spec="optionRowSpec('varyColor', 'ui.cloner.varyColor')" :model-value="optionOf('varyColor')" :bindable="false"
-            @update:model-value="(v: string | number | boolean) => setOption('varyColor', String(v))" />
-        </template>
-        <template #control-ui.cloner.varyColorSpread>
-          <StudioRow :spec="optionRowSpec('varyColorSpread', 'ui.cloner.varyColorSpread')" :model-value="optionOf('varyColorSpread')" :bindable="false"
-            @update:model-value="(v: string | number | boolean) => setOption('varyColorSpread', String(v))" />
-        </template>
-        <template #control-ui.cloner.varyPalette>
-          <VaryPalette :model-value="varyPaletteOf" @update:model-value="setVaryPalette" />
-        </template>
-
         <!-- Cost disclosure: what this clone set actually costs, live while dragging.
-             Amber past the point where rebuilds start to hitch. -->
+             Amber past the point where rebuilds start to hitch. The clone COUNT reads the STACK's
+             cloner row (cloneCost), not the legacy bag. The Modifiers and Cloner dials themselves
+             now live on the per-modifier inspector (S1 Task 6), one row at a time. -->
         <template #control-ui.cloner.cost>
           <div>
             <div

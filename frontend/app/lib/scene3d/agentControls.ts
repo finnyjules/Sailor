@@ -1,10 +1,15 @@
-import type { ControlSpec } from '~/lib/spacetype/effect'
+import type { ControlSpec, Params } from '~/lib/spacetype/effect'
 import { getEffectSync } from '~/lib/shaderfx/catalog'
 import { derivedShaderFillControls, shaderFillControls } from '~/lib/shaderfill/controls'
 import { SCENE_CONTROLS, visibleSceneControls, type SceneControl } from './controls'
 import { MACRO_PRIMITIVE_KINDS, MACRO_NONE, type SceneDoc, type SceneObject, type PrimitiveObject } from './config'
 import { isTreatmentHost, treatmentsOf, TREATMENT_LABELS, type Treatment } from '~/lib/scene3d/treatments'
 import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentControls'
+import {
+  modifierStackOf, MODIFIER_LABELS, isModifierStackPath, materializeModifierStackForPath,
+  modifierOptionsFor, type ModifierInstance,
+} from '~/lib/scene3d/modifierStack'
+import { modifierControls, modifierField } from '~/lib/scene3d/modifierControls'
 
 /** Strip the schema-only fields (`when`/`agent`/`animatable`/`summary`/`bindable`/
  *  `entry`/`optionLabels`) a `SceneControl` may carry, and drop anything explicitly
@@ -132,6 +137,48 @@ export function iterateTreatmentControls(
   }
 }
 
+/** "Twist" / "Twist axis" / "Cloner count": the kind's human label + the row label lowercased
+ *  (except a one-word label that already IS the kind, e.g. Twist's own "Twist" row, which reads
+ *  just "Twist" rather than the doubled "Twist twist"). */
+function modifierRowLabel(kind: ModifierInstance['kind'], rowLabel: string): string {
+  const g = MODIFIER_LABELS[kind]
+  if (rowLabel === g) return g
+  return `${g} ${rowLabel.charAt(0).toLowerCase()}${rowLabel.slice(1)}`
+}
+
+/**
+ * The modifier-stack counterpart of `iterateTreatmentControls`: one RELATIVE control per
+ * (object, modifier row, inspector row), keyed `object.modifierStack.<modifierId>.<field>`.
+ * Same id-safety refusal on the OBJECT id. ONLY primitive objects host modifiers — a GLB, light
+ * or group mints none, mirroring `modifierStackOf`'s own contract (the read-through folds a bag
+ * that only a primitive carries) and controls.ts's `isPrimitiveObj` gate. Modifier ids are
+ * already safe by construction (deterministic `mod:<kind>:0` for a folded legacy bag, `mod_<uuid>_<n>`
+ * for a real mutation — never empty, dotted or all-digit), so nothing here emits a path the
+ * nested-id resolvers would misread.
+ */
+export function iterateModifierControls(
+  doc: SceneDoc,
+  visit: (control: SceneControl, obj: SceneObject, id: string, modifier: ModifierInstance) => void,
+): void {
+  const objects = Array.isArray(doc?.objects) ? doc.objects : []
+  for (const obj of objects) {
+    const id = obj?.id
+    if (typeof id !== 'string' || id === '' || id.includes('.') || /^\d+$/.test(id)) continue
+    // Only primitives host modifiers. A GLB/light/group carrying a stray `modifierStack` — a
+    // hand-edited scene_state — must not mint controls the renderer will never apply.
+    if (obj.kind !== 'primitive') continue
+    for (const mod of modifierStackOf(obj)) {
+      for (const c of modifierControls(mod.kind)) {
+        visit({
+          ...c,
+          key: `${OBJECT_PREFIX}modifierStack.${mod.id}.${modifierField(c.key)}`,
+          label: modifierRowLabel(mod.kind, c.label),
+        } as SceneControl, obj, id, mod)
+      }
+    }
+  }
+}
+
 export function sceneStackControls(doc: SceneDoc): ControlSpec[] {
   const out: ControlSpec[] = []
   iterateObjectControls(doc, (c, obj, id) => {
@@ -148,6 +195,16 @@ export function sceneStackControls(doc: SceneDoc): ControlSpec[] {
   // make that impossible — the model would have to write `progressive: true` first,
   // read back the (now-changed) control list, then write the ramp in a second turn.
   iterateTreatmentControls(doc, (c, obj, id) => {
+    if ((c as { agent?: boolean }).agent === false) return
+    const rest = c.key.slice(OBJECT_PREFIX.length)
+    const { when, agent, animatable, summary, bindable, entry, optionLabels, ...spec } = c as any
+    out.push({ ...spec, key: `objects.${id}.${rest}`, label: `${obj.name || 'Object'} · ${c.label}` } as ControlSpec)
+  })
+  // Modifier-stack rows, addressed absolutely by object id + modifier id. A modifier row has no
+  // `showIf`, so — like treatments and unlike motion/targets.ts — every row stays in the agent's
+  // vocabulary (a single patch can add a twist AND set its angle). The axis/mode SELECTS ride
+  // along here too; the agent write path coerces their chosen option back to the stored index.
+  iterateModifierControls(doc, (c, obj, id) => {
     if ((c as { agent?: boolean }).agent === false) return
     const rest = c.key.slice(OBJECT_PREFIX.length)
     const { when, agent, animatable, summary, bindable, entry, optionLabels, ...spec } = c as any
@@ -268,12 +325,62 @@ export function scenePrimitiveMacro(doc: SceneDoc): ControlSpec {
 export function sceneBindableControls(doc: SceneDoc): ControlSpec[] {
   return [
     ...stripMeta(visibleSceneControls(doc)).filter((c) => !c.key.startsWith(OBJECT_PREFIX)),
-    // Treatment rows are `bindable: false` by contract, but `sceneStackControls` strips that
-    // flag (like every other schema-only field) before the bind menu ever sees it — so the
-    // refusal has to be re-stated here, by key, or a Collection column could bind a dial that
-    // the treatment editor owns.
-    ...sceneStackControls(doc).filter((c) => !c.key.includes('.treatments.')),
+    // Treatment AND modifier rows are `bindable: false` by contract, but `sceneStackControls`
+    // strips that flag (like every other schema-only field) before the bind menu ever sees it —
+    // so the refusal has to be re-stated here, by key, or a Collection column could bind a dial
+    // that the treatment/modifier editor owns. A modifier binding would also be DEAD on a legacy
+    // object: a Collection sweep write does not materialize the stack the way motion/agent do, so
+    // the bind would resolve to nothing on every unedited object — another reason to withhold it.
+    ...sceneStackControls(doc).filter((c) => !c.key.includes('.treatments.') && !c.key.includes('.modifierStack.')),
   ]
+}
+
+/**
+ * Scene3D's modifier-stack write seam, wrapping the flat `Params` proxy `makeConfigParams` returns
+ * the way `vtMoveEaseAwareParams` wraps Vector Type's — so `agent/configParams.ts` stays generic and
+ * every scene-specific rule lives here. `studioTune.ts`'s scene adapter wires it around the proxy.
+ *
+ * Two jobs, both ONLY on `objects.<id>.modifierStack.<mid>.<field>` keys; every other key passes
+ * straight through:
+ *  1. MATERIALIZE ON EDIT. A legacy object mints modifier controls through the read-through
+ *     `modifierStackOf` (deterministic `mod:<kind>:0` ids) but has no `modifierStack` array yet, so
+ *     the underlying `write` would fabricate a bogus `{ '<mid>': { … } }` OBJECT on it. Folding the
+ *     bag into the id-stamped stack first (Vary bag kept) makes the following write land on the
+ *     right row — the agent counterpart of motion/apply.ts's own materialize call.
+ *  2. OPTION ↔ INDEX. `modifierControls` surfaces the axis/mode modifiers as SELECTS (with human
+ *     option labels), but the flat bag stores the option's INDEX (`applyModifierStack` reads
+ *     `Math.round(m('twistAxis'))`). `validatePatch` keeps the raw option string, so a WRITE coerces
+ *     it back to its index (else the select is a dead control — the exact numeric-field corruption
+ *     controls.ts's note calls out), and a READ renders the stored index back to its option string
+ *     so `describeControls`'s "current" matches what the model was offered.
+ */
+export function sceneModifierAwareParams(base: Params, config: () => unknown): Params {
+  const fieldOf = (key: string): string => key.slice(key.lastIndexOf('.') + 1)
+  return new Proxy(base, {
+    get: (target, key) => {
+      if (typeof key !== 'string' || !isModifierStackPath(key)) return (target as any)[key]
+      const v = (target as any)[key]
+      const options = modifierOptionsFor(fieldOf(key))
+      // Stored index → option string, so a select's "current" reads back as it was offered.
+      return options && typeof v === 'number' && v >= 0 && v < options.length ? options[v] : v
+    },
+    set: (target, key, value) => {
+      if (typeof key === 'string' && isModifierStackPath(key)) {
+        materializeModifierStackForPath(config(), key)
+        const options = modifierOptionsFor(fieldOf(key))
+        if (options && typeof value === 'string') {
+          const i = options.indexOf(value)
+          // An unknown option is dropped, not guessed — validatePatch already snaps selects to
+          // their options, so this only ever fires with a real member.
+          if (i >= 0) (target as any)[key] = i
+          return true
+        }
+      }
+      ;(target as any)[key] = value
+      return true
+    },
+    has: (target, key) => key in target,
+  })
 }
 
 /**

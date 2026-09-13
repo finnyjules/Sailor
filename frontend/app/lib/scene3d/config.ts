@@ -2,6 +2,7 @@
 // the editor mutates a SceneDoc, the engine renders from it, and serializeDoc's
 // output is what the Scene3DStudio node stores in its `scene_state` widget.
 import { sanitizeParams, sanitizeModifiers } from '~/lib/scene3d/primParams'
+import { sanitizeModifierStack, type ModifierInstance } from '~/lib/scene3d/modifierStack'
 import { VARY_PALETTE_MAX } from '~/lib/vary'
 import { parseTreatments, type Treatment } from './treatments'
 import type { ObjectMotion, CameraMotion, SceneMotion, SceneMotionTrack, LoopKind, TransitionPreset, Direction, EaseRef, TransitionSpec } from '~/lib/scene3d/motion/types'
@@ -406,6 +407,10 @@ export interface PrimitiveObject extends SceneObjectBase {
   /** Deformations applied on top of the built geometry, keyed by
    *  MODIFIER_SPECS.key (primParams.ts). Absent means undeformed. */
   modifiers?: Record<string, number>
+  /** The new persisted modifier shape: an ordered, id-stamped stack (modifierStack.ts).
+   *  Written on the first edit (`writeModifierStack`), which retires the legacy `modifiers`
+   *  bag above. Absent means read-through folds the bag; both hash to the same geoKeyFor. */
+  modifierStack?: ModifierInstance[]
   /** Cloner Vary palette — 1..8 hex swatches the copies are coloured from. A
    *  string[] rather than a `MODIFIER_SPECS` key because that bag is numbers
    *  only; the numeric vary dials DO live there. Absent means the shared default
@@ -1454,12 +1459,19 @@ export function parseDoc(json: string): SceneDoc {
         if (o.kind === 'primitive' && PRIMITIVE_KINDS.includes(o.primitive)) {
           const params = sanitizeParams(o.primitive, o.params)
           const modifiers = sanitizeModifiers(o.modifiers)
+          // The new persisted shape (modifierStack.ts). A stored stack MUST round-trip —
+          // applyMotionToDoc deep-clones via parseDoc(serializeDoc(doc)), so dropping it here
+          // would strip a new-shape object's rows on every frame and leave its modifier motion
+          // targets pointing at nothing. `undefined` (never edited) stays absent; an explicit
+          // empty stack survives so a cleared object does not revert to its dead legacy bag.
+          const modifierStack = sanitizeModifierStack(o.modifierStack)
           const varyPalette = sanitizeVaryPalette(o.varyPalette)
           const content = parseContent(o.content)
           return [{
             ...common, kind: 'primitive', primitive: o.primitive,
             ...(params ? { params } : {}),
             ...(modifiers ? { modifiers } : {}),
+            ...(modifierStack ? { modifierStack } : {}),
             ...(varyPalette ? { varyPalette } : {}),
             ...(content ? { content } : {}),
           }]

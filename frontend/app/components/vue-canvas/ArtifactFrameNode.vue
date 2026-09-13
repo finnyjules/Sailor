@@ -6,7 +6,8 @@ import {
 } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
 import { useLocalLayerEditor, aspectLockedResizeKind } from '~/composables/useLocalLayerEditor'
-import { type LocalLayer, type TextLayer, type StackItem, type WiredLayer as UnifiedWiredLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, hasAnimatedShaderFill, withWiredContent } from '~/composables/useCompositorLayers'
+import { type LocalLayer, type TextLayer, type StackItem, type WiredLayer as UnifiedWiredLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, hasAnimatedShaderFill, withWiredContent, clipClocks } from '~/composables/useCompositorLayers'
+import { hasPaint } from '~/lib/paint/resolve'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
@@ -554,9 +555,14 @@ function renderStack(t?: number, live = false) {
 // is unchanged, so a Frame with nothing time-dependent never pays for a rAF loop.
 const MAX_LIVE_SLOTS = 8   // soft cap on concurrently-animated slots (perf bound)
 const masterClock = computed(() => deriveMasterClock(
-  wiredLayers.value.filter(l => l.live).map(l => ({ duration: l.live!.duration, fps: l.live!.fps })),
+  [
+    ...wiredLayers.value.filter(l => l.live).map(l => ({ duration: l.live!.duration, fps: l.live!.fps })),
+    ...clipClocks(editor.localLayers.value),
+  ],
   (props.data.properties as any)?.sailor_frame?.clock ?? null))
-const hasAnimatedSlot = computed(() => wiredLayers.value.some(l => l.live && l.live.duration > 0))
+const hasAnimatedSlot = computed(() =>
+  wiredLayers.value.some(l => l.live && l.live.duration > 0)
+  || clipClocks(editor.localLayers.value).length > 0)
 // A `speed: 0` shader fill must NOT start this loop (it's deliberately frozen); only a
 // live (speed !== 0) fill counts. See `hasAnimatedShaderFill`'s doc for why this needs
 // to be pure/shared rather than re-derived per host.
@@ -926,7 +932,7 @@ async function downloadVideo() {
     })
     let encoded: Awaited<ReturnType<typeof encodeFrames>>
     try {
-      encoded = await encodeFrames({ frames: bake.frames, fps: mc.fps, width: W, height: H })
+      encoded = await encodeFrames({ frames: bake.frames, fps: mc.fps, width: W, height: H, alpha: !hasPaint(editor.background.value) })
     } catch (err) {
       console.error('[Frame] video encode failed', err)
       return
