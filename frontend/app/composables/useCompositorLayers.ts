@@ -3771,6 +3771,13 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     if (img && img.complete && img.naturalWidth) {
       if (hasPaint(layer.tint)) drawTintedImage(ctx, img, layer, w, h)
       else ctx.drawImage(img, -w / 2, -h / 2, w, h)
+    } else if ((layer as ImageLayer).standIn) {
+      // Poster stand-in: a clear grey "photo goes here" box (a real photo replaces it on apply).
+      ctx.fillStyle = 'rgba(140,140,140,0.55)'
+      ctx.fillRect(-w / 2, -h / 2, w, h)
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)'
+      ctx.lineWidth = Math.max(1, Math.min(w, h) * 0.01)
+      ctx.strokeRect(-w / 2 + 2, -h / 2 + 2, w - 4, h - 4)
     } else {
       // Not loaded yet — faint placeholder; a preload + re-render fills it in.
       ctx.fillStyle = 'rgba(255,255,255,0.06)'
