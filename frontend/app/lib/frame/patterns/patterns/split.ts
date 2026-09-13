@@ -27,7 +27,7 @@ export const split: Pattern = {
     const gap = frame.w * 0.03
     const colX = photoLeft ? cut + gap : mb.x
     const colRight = photoLeft ? frame.w - mb.x : cut - gap
-    const colW = colRight - colX
+    const colW = Math.max(frame.w * 0.1, colRight - colX)
     const widest = words.reduce((a, b) => (measure(b) > measure(a) ? b : a), words[0]!)
     const size = Math.min(fitSize(widest, colW, measure), mb.h / (1.2 * words.length))
     const blockH = size * 0.86 * words.length

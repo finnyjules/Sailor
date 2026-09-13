@@ -30,7 +30,7 @@ export const shapeBleed: Pattern = {
       // title in the OTHER half, starting a gap past the divide
       const colX = edge === 'left' ? midX + gap : mb.x
       const colRight = edge === 'left' ? frame.w - mb.x : frame.w - midX - gap
-      const colW = colRight - colX
+      const colW = Math.max(frame.w * 0.1, colRight - colX)
       const size = Math.min(fitSize(widest, colW, measure), mb.h / (1.2 * words.length))
       const blockH = size * 0.86 * words.length
       const tc = toNorm({ x: colX, y: (frame.h - blockH) / 2, w: colW, h: blockH }, frame)
@@ -44,7 +44,7 @@ export const shapeBleed: Pattern = {
       // title in the OTHER band, full width, starting a gap past the divide
       const bandTop = edge === 'top' ? midY + gap : mb.y
       const bandBottom = edge === 'top' ? frame.h - mb.y : frame.h - midY - gap
-      const bandH = bandBottom - bandTop
+      const bandH = Math.max(frame.h * 0.1, bandBottom - bandTop)
       const size = Math.min(fitSize(widest, mb.w, measure), bandH / (1.1 * words.length))
       const blockH = size * 0.86 * words.length
       const tc = toNorm({ x: mb.x, y: bandTop + (bandH - blockH) / 2, w: mb.w, h: blockH }, frame)
