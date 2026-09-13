@@ -7683,6 +7683,11 @@ onUnmounted(() => {
         <ShapePicker v-if="layoutShapeOpen"
           :model-value="layoutShapeValue" :anchor="layoutShapeAnchor" :ignore="layoutShapeTrigger"
           @update:model-value="pickLayoutShape" @close="layoutShapeOpen = false" />
+        <div class="px-4 pt-3">
+          <StudioSwitch :model-value="layoutSheet.imageMode.value" data-testid="layout-photo-moves"
+            label="Photo moves" hint="Show photo layouts with a grey stand-in, even before you drop a photo."
+            @update:model-value="layoutSheet.setImageMode" />
+        </div>
         <div data-testid="layout-sheet" class="p-4 flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
           <p v-if="!layoutSheet.tiles.value.length" class="text-xs text-white/40 italic">Add a text layer to get layout options. The largest text is read as the title.</p>
           <template v-else>
