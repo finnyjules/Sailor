@@ -4,7 +4,7 @@ import { rngFor } from '~/lib/frame/patterns/rng'
 import { familyOf, shapeById } from '~/lib/shapes/catalog'
 import type { FrameElements } from '~/lib/frame/patterns/types'
 
-const base: FrameElements = { images: [], shapes: [], shapeMode: null }
+const base: FrameElements = { images: [], shapes: [], shapeMode: null, imageMode: false }
 
 describe('pickShape', () => {
   it('returns null when nothing is chosen', () => {
