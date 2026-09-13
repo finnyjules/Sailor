@@ -6810,9 +6810,22 @@ onUnmounted(() => {
           class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
           :viewBox="`0 0 ${canvasDisplay.w} ${canvasDisplay.h}`"
         >
+          <!-- In Edit image mode the selection outline animates as a pastel gradient stroke. -->
+          <defs v-if="editImage">
+            <linearGradient id="editStrokeGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ffb3c7" />
+              <stop offset="33%" stop-color="#ffd9a8" />
+              <stop offset="66%" stop-color="#c3b8ff" />
+              <stop offset="100%" stop-color="#a8ffe0" />
+              <animateTransform attributeName="gradientTransform" type="rotate"
+                values="0 0.5 0.5;360 0.5 0.5" dur="5s" repeatCount="indefinite" />
+            </linearGradient>
+          </defs>
           <polygon
             :points="`${localHandlePositions.tl.x},${localHandlePositions.tl.y} ${localHandlePositions.tr.x},${localHandlePositions.tr.y} ${localHandlePositions.br.x},${localHandlePositions.br.y} ${localHandlePositions.bl.x},${localHandlePositions.bl.y}`"
-            fill="none" stroke="#ffffff" stroke-width="2" vector-effect="non-scaling-stroke"
+            fill="none" :stroke="editImage ? 'url(#editStrokeGrad)' : '#ffffff'"
+            :stroke-width="editImage ? 3 : 2" :class="editImage ? 'edit-stroke-anim' : ''"
+            vector-effect="non-scaling-stroke"
           />
           <line
             :x1="localHandlePositions.topCenter.x" :y1="localHandlePositions.topCenter.y"
@@ -9735,6 +9748,9 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* Edit-image selection outline: marching dashes over the pastel gradient stroke. */
+@keyframes editStrokeMarch { to { stroke-dashoffset: -30; } }
+.edit-stroke-anim { stroke-dasharray: 9 6; animation: editStrokeMarch 0.9s linear infinite; }
 /* Glassy section cards in the inspector — each top-level control group becomes a
    bordered translucent card (the studios' panel look) without restructuring the
    template. Direct children only, so nested grids/rows are unaffected. */
