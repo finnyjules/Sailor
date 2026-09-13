@@ -58,4 +58,23 @@ describe('insertFromOps', () => {
       expect(a.layers.at(-1)!.id).not.toBe(b.layers.at(-1)!.id)
     })
   })
+
+  describe('insertFromOps — image stand-in', () => {
+    const palette = { ink: '#111', accent: '#e33', field: '#eee' } as any
+    const imgOp = { target: 'image', kind: 'image', x: 0.5, y: 0.5, w: 1, h: 1.25, fill: 'photo' } as any
+
+    it('inserts a stand-in image layer for the image sentinel and retargets the op', () => {
+      const out = insertFromOps([], [imgOp], palette, 'poster-fullBleed-3')
+      const layer = out.layers.at(-1)! as any
+      expect(layer.kind).toBe('image')
+      expect(layer.standIn).toBe(true)
+      expect(layer.id).toBe('poster-fullBleed-3-0')     // deterministic, matches the shape scheme
+      expect(out.ops[0]!.target).toBe(layer.id)
+    })
+    it('is deterministic (same inputs → same id)', () => {
+      const a = insertFromOps([], [imgOp], palette, 'poster-fullBleed-3').layers.at(-1)!.id
+      const b = insertFromOps([], [imgOp], palette, 'poster-fullBleed-3').layers.at(-1)!.id
+      expect(a).toBe(b)
+    })
+  })
 })

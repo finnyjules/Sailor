@@ -545,6 +545,9 @@ export interface LineLayer extends LayerCommon {
 export interface ImageLayer extends LayerCommon {
   kind: 'image'
   filename: string        // uploaded image in ComfyUI's input dir
+  /** A poster STAND-IN: no real file yet — the renderer paints a clear grey box
+   *  so image moves are visible before a photo is dropped. Absent ⇒ a normal image. */
+  standIn?: boolean
   w: number; h: number    // normalized to canvas width (aspect preserved on drop)
   tint?: Paint            // optional fill blended over the image, clipped to its alpha
   tintBlend?: string      // blend mode for the tint (same names as layer blend)
