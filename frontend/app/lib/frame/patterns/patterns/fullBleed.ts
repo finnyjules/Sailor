@@ -12,11 +12,8 @@ export const fullBleed: Pattern = {
     const { frame, margin, elements, measure } = ctx
     const mb = marginBox(frame, margin)
     const ops: LayerOp[] = []
-    const img = elements.images[0]
-    if (img) {
-      const c = toNorm({ x: 0, y: 0, w: frame.w, h: frame.h }, frame)
-      ops.push({ target: img.id, kind: 'image', x: c.x, y: c.y, w: 1, h: frame.h / frame.w, fill: 'photo', z: 0 })
-    }
+    const c = toNorm({ x: 0, y: 0, w: frame.w, h: frame.h }, frame)
+    ops.push({ target: elements.images[0]?.id ?? 'image', kind: 'image', x: c.x, y: c.y, w: 1, h: frame.h / frame.w, fill: 'photo', z: 0 })
     // title big, reversed, anchored top or bottom
     const words = elements.title?.words ?? ['WORD']
     const size = Math.min(fitSize(words.reduce((a, b) => (measure(b) > measure(a) ? b : a), words[0]!), mb.w, measure), mb.h / (1.3 * words.length))

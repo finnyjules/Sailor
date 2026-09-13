@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { split } from '~/lib/frame/patterns/patterns/split'
 import { ctxFor, assertSaneOps } from './_poster-fixtures'
+import { inferElements } from '~/lib/frame/patterns/hierarchy'
 
 describe('split', () => {
   it('needs an image', () => { expect(split.needs?.image).toBe(true) })
@@ -19,5 +20,14 @@ describe('split', () => {
         expect(tL < pR && tR > pL).toBe(false)   // no horizontal overlap between photo and title column
       }
     }
+  })
+  it('emits a sentinel image op when there is no real image', () => {
+    const { ops } = split.place(ctxFor({ elements: inferElements([
+      { id: 't', kind: 'text', text: 'WORD', fontSize: 0.2 },
+    ]) }))
+    const photo = ops.find(o => o.fill === 'photo')!
+    expect(photo).toBeDefined()
+    expect(photo.target).toBe('image')
+    expect(photo.w!).toBeGreaterThan(0)
   })
 })

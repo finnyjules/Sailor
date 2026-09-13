@@ -12,15 +12,12 @@ export const split: Pattern = {
     const { frame, margin, elements, measure } = ctx
     const mb = marginBox(frame, margin)
     const ops: LayerOp[] = []
-    const img = elements.images[0]
     const photoLeft = r.chance(0.5)
     const cut = frame.w * r.range(0.42, 0.55)   // vertical cut x
-    if (img) {
-      const pxLeft = photoLeft ? 0 : cut
-      const pw = photoLeft ? cut : frame.w - cut
-      const c = toNorm({ x: pxLeft, y: 0, w: pw, h: frame.h }, frame)
-      ops.push({ target: img.id, kind: 'image', x: c.x, y: c.y, w: pw / frame.w, h: frame.h / frame.w, fill: 'photo', z: 0 })
-    }
+    const pxLeft = photoLeft ? 0 : cut
+    const pw = photoLeft ? cut : frame.w - cut
+    const c = toNorm({ x: pxLeft, y: 0, w: pw, h: frame.h }, frame)
+    ops.push({ target: elements.images[0]?.id ?? 'image', kind: 'image', x: c.x, y: c.y, w: pw / frame.w, h: frame.h / frame.w, fill: 'photo', z: 0 })
     // title stacked in the OTHER half, a fixed gap clear of the cut AND inside the
     // margin on the outer side — so it never overlaps the photo at any margin.
     const words = elements.title?.words ?? ['WORD']

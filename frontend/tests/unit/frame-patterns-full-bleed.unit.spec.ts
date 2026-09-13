@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { fullBleed } from '~/lib/frame/patterns/patterns/fullBleed'
 import { ctxFor, assertSaneOps } from './_poster-fixtures'
+import { inferElements } from '~/lib/frame/patterns/hierarchy'
 
 describe('full bleed', () => {
   it('needs an image', () => { expect(fullBleed.needs?.image).toBe(true) })
@@ -15,5 +16,14 @@ describe('full bleed', () => {
     expect(photo.w).toBeGreaterThanOrEqual(1)                 // full width
     expect((photo.z ?? 0)).toBeLessThan(title.z ?? 0)         // photo behind the title
     expect(title.colorRole).toBe('field')                     // reversed for contrast
+  })
+  it('emits a sentinel image op when there is no real image', () => {
+    const { ops } = fullBleed.place(ctxFor({ elements: inferElements([
+      { id: 't', kind: 'text', text: 'WORD', fontSize: 0.2 },
+    ]) }))
+    const photo = ops.find(o => o.fill === 'photo')!
+    expect(photo).toBeDefined()
+    expect(photo.target).toBe('image')
+    expect(photo.w).toBeGreaterThanOrEqual(1)                 // full width
   })
 })

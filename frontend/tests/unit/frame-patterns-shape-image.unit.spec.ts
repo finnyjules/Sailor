@@ -31,5 +31,14 @@ describe('photoBehind', () => {
     expect(img.w!).toBeGreaterThan(0)
     assertSaneOps(ops.filter(o => o.kind === 'text'))
   })
+  it('emits a sentinel image op when there is no real image', () => {
+    const { ops } = photoBehind.place(ctxFor({ elements: inferElements([
+      { id: 't', kind: 'text', text: 'WORD', fontSize: 0.2 },
+    ]) }))
+    const img = ops.find(o => o.kind === 'image')!
+    expect(img).toBeDefined()
+    expect(img.target).toBe('image')
+    expect(img.w!).toBeGreaterThan(0)
+  })
   it('declares needs.image', () => { expect(photoBehind.needs?.image).toBe(true) })
 })
