@@ -31,7 +31,7 @@ const VARIANTS = 6
  *  the engine). Pure over the engine; the only side effects are in apply(). */
 export function useLayoutSheet(src: LayoutSheetSource): {
   seed: Ref<number>; focus: Ref<string | null>; tiles: ComputedRef<SheetTile[]>
-  shapeMode: Ref<FrameElements['shapeMode']>; setShapeMode(m: FrameElements['shapeMode']): void
+  shapeMode: Ref<FrameElements['shapeMode'] | undefined>; setShapeMode(m: FrameElements['shapeMode']): void
   apply(tile: SheetTile): void; another(): void; moreLikeThis(tile: SheetTile): void; back(): void
 } {
   const remembered = (src.props()?.sailor_posterState as PosterState | undefined)?.seed
@@ -39,7 +39,7 @@ export function useLayoutSheet(src: LayoutSheetSource): {
   const focus = ref<string | null>(null)
 
   const stored = src.props()?.sailor_posterState as { shapeMode?: FrameElements['shapeMode'] } | undefined
-  const shapeMode = ref<FrameElements['shapeMode']>(stored?.shapeMode ?? undefined)
+  const shapeMode = ref<FrameElements['shapeMode'] | undefined>(stored?.shapeMode ?? undefined)
   function setShapeMode(m: FrameElements['shapeMode']) {
     shapeMode.value = m
     const p = src.props(); if (p) (p as any).sailor_posterState = { ...(p as any).sailor_posterState, shapeMode: m }
