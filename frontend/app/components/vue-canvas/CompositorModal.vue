@@ -162,6 +162,9 @@ import CanvasContextMenu, { type MenuItem } from '~/components/vue-canvas/Canvas
 import type { TextPathSpec, TextPathFollow } from '~/lib/compositor/textPath'
 import { genGestureDefaults, genBoxIsValid, genBarPlacement } from '~/lib/compositor/genGesture'
 import { shapeById, SHAPE_NONE } from '~/lib/shapes/catalog'
+import { inferElements } from '~/lib/frame/patterns/hierarchy'
+import { posterLayerViews } from '~/lib/frame/patterns/frameContext'
+import { suggestTextFace } from '~/lib/frame/patterns/pairings'
 import { createShapeLayer, swapShapeLayer } from '~/lib/shapes/pathLayer'
 import { SHAPE_PICKER_WIDTH, anchorAbove } from '~/lib/shapes/pickerLayout'
 import type { Component, ComputedRef } from 'vue'
@@ -709,6 +712,50 @@ function openLayoutShape(e: MouseEvent) {
 }
 function pickLayoutShape(id: string) {
   layoutSheet.setShapeMode(id === SHAPE_NONE ? null : { id })
+}
+
+// Face pickers for the Layout tab: title face → the inferred title layer; text
+// face → the inferred details/caption/date layers; Suggest pairs a text face
+// from the standalone table. These are USER picks (setLocal on your own layers),
+// like the shape/palette — the sheet never rolls a face.
+const posterFaceEls = computed(() => {
+  const els = inferElements(posterLayerViews(compositor.value?.data?.properties as Record<string, unknown> | undefined))
+  return { titleId: els.title?.id as string | undefined, textIds: [els.details?.id, els.caption?.id, els.date?.id] as (string | undefined)[] }
+})
+function faceKeyFor(fam: string): string {
+  if (!fam) return 'goog:Inter'
+  const v = VARIABLE_FONTS.find(f => f.family === fam)
+  if (v) return 'var:' + v.id
+  if (libraryFamily(fam)) return 'lib:' + fam
+  return 'goog:' + fam
+}
+function familyFromLayer(id: string | undefined): string {
+  const l = id ? (localLayers.value.find((x: any) => x.id === id) as any) : null
+  return l?.fontFamily || ''
+}
+const titleFaceFamily = computed(() => familyFromLayer(posterFaceEls.value.titleId) || 'Inter')
+const textFaceFamily = computed(() => familyFromLayer(posterFaceEls.value.textIds.find(Boolean)) || titleFaceFamily.value)
+const titleFaceKey = computed(() => faceKeyFor(titleFaceFamily.value))
+const textFaceKey = computed(() => faceKeyFor(textFaceFamily.value))
+const hasTextRole = computed(() => posterFaceEls.value.textIds.some(Boolean))
+type FontPick = { source: 'variable'; id: string } | { source: 'google'; font: GoogleFont } | { source: 'library'; family: string }
+function familyFromPick(p: FontPick): string {
+  if (p.source === 'library') { if (p.family) ensureLibraryFont(p.family); return p.family }
+  const family = p.source === 'variable' ? (VARIABLE_FONTS.find(f => f.id === p.id)?.family ?? '') : p.font.family
+  if (family) ensureGoogleFont(family)
+  return family
+}
+function applyFaceTo(ids: (string | undefined)[], family: string) {
+  if (!family) return
+  for (const id of ids) if (id) setLocal(id, { fontFamily: family })
+}
+function onPickTitleFace(p: FontPick) { applyFaceTo([posterFaceEls.value.titleId], familyFromPick(p)) }
+function onPickTextFace(p: FontPick) { applyFaceTo(posterFaceEls.value.textIds, familyFromPick(p)) }
+function onSuggestTextFace() {
+  const s = suggestTextFace(titleFaceFamily.value)
+  ensureGoogleFont(s.family); ensureLibraryFont(s.family)
+  applyFaceTo(posterFaceEls.value.textIds, s.family)
+  toast(`Text face: ${s.family}`, { description: s.reason })
 }
 
 // Region-count cap for "Fill grid with sections": a dense generated/explicit
@@ -7613,6 +7660,17 @@ onUnmounted(() => {
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <LayoutGrid class="size-3.5 text-white/70" />
           <span class="text-sm font-medium">{{ layoutSheet.focus.value ? 'More like this' : 'Frame layout' }}</span>
+        </div>
+        <div v-if="posterFaceEls.titleId" class="px-4 pt-3 flex flex-col gap-2">
+          <div class="flex items-center gap-2 text-[11px] text-white/55">
+            <span class="w-16 shrink-0">Title face</span>
+            <div class="flex-1 min-w-0"><FontPicker :selected-key="titleFaceKey" :label="titleFaceFamily" sublabel="" @pick="onPickTitleFace" /></div>
+          </div>
+          <div v-if="hasTextRole" class="flex items-center gap-2 text-[11px] text-white/55">
+            <span class="w-16 shrink-0">Text face</span>
+            <div class="flex-1 min-w-0"><FontPicker :selected-key="textFaceKey" :label="textFaceFamily" sublabel="" @pick="onPickTextFace" /></div>
+            <button type="button" data-testid="layout-suggest-face" class="h-7 px-2 shrink-0 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80" @click="onSuggestTextFace">Suggest</button>
+          </div>
         </div>
         <div class="px-4 pt-3 flex items-center gap-2 text-[11px] text-white/55">
           <span>Shape for the engine</span>
