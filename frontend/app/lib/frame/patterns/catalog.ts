@@ -13,8 +13,9 @@ import { ragged } from './patterns/ragged'
 import { edges } from './patterns/edges'
 import { staircase } from './patterns/staircase'
 import { block } from './patterns/block'
+import { knockout } from './patterns/knockout'
 
-export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block]
+export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout]
 
 /** Patterns that fit the title's kind and whose required elements are present. */
 export function fittingPatterns(ctx: PatternContext): Pattern[] {
