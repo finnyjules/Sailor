@@ -37,4 +37,19 @@ describe('sheet model', () => {
     // no expressive-only pattern leaks into a single-word sheet
     expect(wordTiles.map(t => t.patternId)).not.toContain('spacedLines')
   })
+  it('shows shape moves only with a shape (placed or picked) and image moves only with a photo', () => {
+    const wordNoExtras = inferElements([{ id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 }])
+    const bare = sheetFor(ctxFor({ elements: wordNoExtras }), 7).map(t => t.patternId)
+    expect(bare).not.toContain('knockout')     // no shape
+    expect(bare).not.toContain('split')        // no image
+
+    const withShapeMode = inferElements([{ id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 }], { id: 'circle' })
+    const shaped = sheetFor(ctxFor({ elements: withShapeMode }), 7).map(t => t.patternId)
+    expect(shaped).toContain('knockout')       // a picked shape enables shape moves
+    expect(shaped).not.toContain('split')      // still no image
+
+    const withImage = inferElements([{ id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 }, { id: 'p', kind: 'image' }])
+    const imaged = sheetFor(ctxFor({ elements: withImage }), 7).map(t => t.patternId)
+    expect(imaged).toContain('split')          // a photo enables image moves
+  })
 })

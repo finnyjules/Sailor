@@ -10,6 +10,7 @@ describe('catalog', () => {
     expect(ids).toEqual(expect.arrayContaining([
       'runoff', 'statement', 'index', 'shapeCounter', 'photoBehind',
       'tilt', 'bottomHeavy', 'fourCorners', 'spacedLines', 'ragged', 'edges', 'staircase', 'block',
+      'knockout', 'shapeBleed', 'badge', 'split', 'fullBleed',
     ]))
   })
   it('every pattern is deterministic and returns at least a title op', () => {
