@@ -161,7 +161,7 @@ import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
 import CanvasContextMenu, { type MenuItem } from '~/components/vue-canvas/CanvasContextMenu.vue'
 import type { TextPathSpec, TextPathFollow } from '~/lib/compositor/textPath'
 import { genGestureDefaults, genBoxIsValid, genBarPlacement } from '~/lib/compositor/genGesture'
-import { shapeById, SHAPE_NONE } from '~/lib/shapes/catalog'
+import { shapeById, SHAPE_NONE, SHAPE_FAMILIES } from '~/lib/shapes/catalog'
 import { inferElements } from '~/lib/frame/patterns/hierarchy'
 import { posterLayerViews } from '~/lib/frame/patterns/frameContext'
 import { suggestTextFace } from '~/lib/frame/patterns/pairings'
@@ -703,6 +703,16 @@ const layoutShapeValue = computed(() => {
   const m = layoutSheet.shapeMode.value
   return m && 'id' in m ? m.id : SHAPE_NONE
 })
+// Trigger label + family mode: shapeMode can be a specific {id} OR a {family}
+// (the seed picks a shape within it per tile — the engine already handles both).
+const layoutShapeLabel = computed(() => {
+  const m = layoutSheet.shapeMode.value
+  if (!m) return 'No shape'
+  if ('family' in m) return 'Any ' + (SHAPE_FAMILIES.find(f => f.id === m.family)?.label ?? m.family).toLowerCase()
+  return shapeById(m.id)?.name ?? m.id
+})
+const layoutFamily = computed(() => { const m = layoutSheet.shapeMode.value; return m && 'family' in m ? m.family : '' })
+function pickLayoutFamily(fam: string) { if (fam) layoutSheet.setShapeMode({ family: fam }) }
 function openLayoutShape(e: MouseEvent) {
   const el = e.currentTarget as HTMLElement
   const r = el.getBoundingClientRect()
@@ -7673,11 +7683,17 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="px-4 pt-3 flex items-center gap-2 text-[11px] text-white/55">
-          <span>Shape for the engine</span>
+          <span class="shrink-0">Shape for the engine</span>
+          <select data-testid="layout-shape-family" :value="layoutFamily"
+            class="ml-auto h-7 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80 px-1.5 cursor-pointer outline-none"
+            @change="pickLayoutFamily(($event.target as HTMLSelectElement).value)">
+            <option value="">a shape…</option>
+            <option v-for="f in SHAPE_FAMILIES" :key="f.id" :value="f.id">Any {{ f.label.toLowerCase() }}</option>
+          </select>
           <button type="button" data-testid="layout-shape-trigger"
-            class="ml-auto flex items-center gap-1.5 h-7 px-2 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+            class="flex items-center gap-1.5 h-7 px-2 shrink-0 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80"
             @click="openLayoutShape">
-            {{ layoutShapeValue === 'none' ? 'No shape' : (shapeById(layoutShapeValue)?.name ?? layoutShapeValue) }}
+            {{ layoutShapeLabel }}
           </button>
         </div>
         <ShapePicker v-if="layoutShapeOpen"
