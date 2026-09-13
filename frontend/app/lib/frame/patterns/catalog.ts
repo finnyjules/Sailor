@@ -16,8 +16,9 @@ import { block } from './patterns/block'
 import { knockout } from './patterns/knockout'
 import { shapeBleed } from './patterns/shapeBleed'
 import { badge } from './patterns/badge'
+import { split } from './patterns/split'
 
-export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge]
+export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge, split]
 
 /** Patterns that fit the title's kind and whose required elements are present. */
 export function fittingPatterns(ctx: PatternContext): Pattern[] {
