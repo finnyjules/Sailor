@@ -5018,16 +5018,38 @@ function genUseShape() {
 // modal via the useRegionFx composable so both read as one design.
 const genOverlayCanvas = ref<HTMLCanvasElement | null>(null)
 const genSweepCanvas = ref<HTMLCanvasElement | null>(null)
+// Whole-image edit: a white silhouette of the selected image in artboard space, so
+// the glimm sweep can run over the image (not just a painted region) while it edits.
+let editSilhouetteCanvas: HTMLCanvasElement | null = null
 const regionFx = useRegionFx({
   overlay: genOverlayCanvas,
   sweep: genSweepCanvas,
-  getMask: () => (genHasMask.value && genMaskCanvas) ? genMaskCanvas : null,
+  getMask: () => editImage.value ? editSilhouetteCanvas
+    : (genHasMask.value && genMaskCanvas) ? genMaskCanvas : null,
   getDims: () => canvasDisplay,
   busy: () => inpaint.busy.value,
 })
 const { sweepMaskUrl: genSweepMaskUrl } = regionFx
-watch(genActive, (on) => { on ? regionFx.start() : regionFx.stop() })
+watch([genActive, editImage], ([g, e]) => { (g || e) ? regionFx.start() : regionFx.stop() })
 watch([genVersion, () => canvasDisplay.w, () => canvasDisplay.h], () => regionFx.rebuild())
+async function buildEditSilhouette() {
+  const e = editImage.value
+  const layer = e ? (localLayers.value.find((l: any) => l.id === e.layerId && l.kind === 'image') as any) : null
+  if (!layer) { editSilhouetteCanvas = null; return }
+  const W = Math.max(1, Math.round(canvasDisplay.w)), H = Math.max(1, Math.round(canvasDisplay.h))
+  try {
+    const imgEl = await loadImage(imageLayerUrl(layer.filename))
+    const iw = imgEl.naturalWidth || 1, ih = imgEl.naturalHeight || 1
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H
+    const ctx = cv.getContext('2d')!
+    const inv = regionAffine(layer, iw, ih).inverse()   // image px → artboard px
+    ctx.save(); ctx.setTransform(inv.a, inv.b, inv.c, inv.d, inv.e, inv.f); ctx.drawImage(imgEl, 0, 0, iw, ih); ctx.restore()
+    ctx.globalCompositeOperation = 'source-in'; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)  // → white silhouette
+    editSilhouetteCanvas = cv
+  } catch { editSilhouetteCanvas = null }
+  regionFx.rebuild()
+}
+watch(editImage, (v) => { if (v) void buildEditSilhouette(); else { editSilhouetteCanvas = null; regionFx.rebuild() } })
 
 // flux-dev's supported aspect ratios → nearest match for a region's bbox.
 const FLUX_ASPECTS: [string, number][] = [
@@ -6564,10 +6586,10 @@ onUnmounted(() => {
           class="absolute inset-0 pointer-events-none"
           :style="{ width: canvasDisplay.w + 'px', height: canvasDisplay.h + 'px', opacity: 0.9 }"
         />
-        <!-- glimm prism sweep while a generation is running, clipped to the region
-             silhouette via a CSS mask (the mask updates only when the region changes). -->
+        <!-- glimm prism sweep while a generation is running, clipped to the region (or, in
+             whole-image Edit, the image) silhouette via a CSS mask. -->
         <canvas
-          v-show="genActive"
+          v-show="genActive || !!editImage"
           ref="genSweepCanvas"
           class="absolute inset-0 pointer-events-none"
           :style="{
