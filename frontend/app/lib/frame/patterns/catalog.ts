@@ -5,6 +5,7 @@ import { statement } from './patterns/statement'
 import { indexPattern } from './patterns/indexPattern'
 import { shapeCounter } from './patterns/shapeCounter'
 import { photoBehind } from './patterns/photoBehind'
+import { fullBleed } from './patterns/fullBleed'
 import { tilt } from './patterns/tilt'
 import { bottomHeavy } from './patterns/bottomHeavy'
 import { fourCorners } from './patterns/fourCorners'
@@ -18,7 +19,7 @@ import { shapeBleed } from './patterns/shapeBleed'
 import { badge } from './patterns/badge'
 import { split } from './patterns/split'
 
-export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge, split]
+export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, fullBleed, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge, split]
 
 /** Patterns that fit the title's kind and whose required elements are present. */
 export function fittingPatterns(ctx: PatternContext): Pattern[] {
