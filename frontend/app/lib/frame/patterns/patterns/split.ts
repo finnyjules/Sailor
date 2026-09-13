@@ -21,11 +21,15 @@ export const split: Pattern = {
       const c = toNorm({ x: pxLeft, y: 0, w: pw, h: frame.h }, frame)
       ops.push({ target: img.id, kind: 'image', x: c.x, y: c.y, w: pw / frame.w, h: frame.h / frame.w, fill: 'photo', z: 0 })
     }
-    // title stacked in the OTHER half
+    // title stacked in the OTHER half, a fixed gap clear of the cut AND inside the
+    // margin on the outer side — so it never overlaps the photo at any margin.
     const words = elements.title?.words ?? ['WORD']
-    const colX = photoLeft ? cut + frame.w * 0.03 : mb.x
-    const colW = (photoLeft ? frame.w - cut : cut) - frame.w * 0.06
-    const size = Math.min(fitSize(words.reduce((a, b) => (measure(b) > measure(a) ? b : a), words[0]!), colW, measure), mb.h / (1.2 * words.length))
+    const gap = frame.w * 0.03
+    const colX = photoLeft ? cut + gap : mb.x
+    const colRight = photoLeft ? frame.w - mb.x : cut - gap
+    const colW = colRight - colX
+    const widest = words.reduce((a, b) => (measure(b) > measure(a) ? b : a), words[0]!)
+    const size = Math.min(fitSize(widest, colW, measure), mb.h / (1.2 * words.length))
     const blockH = size * 0.86 * words.length
     const tc = toNorm({ x: colX, y: (frame.h - blockH) / 2, w: colW, h: blockH }, frame)
     ops.push({ target: 'title', kind: 'text', x: tc.x, y: tc.y, w: colW / frame.w, fontSize: size / frame.w, align: 'left', lineBreak: words.join('\n'), colorRole: 'ink', z: 1 })

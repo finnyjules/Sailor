@@ -8,11 +8,16 @@ describe('split', () => {
     const a = split.place(ctxFor()); const b = split.place(ctxFor())
     expect(a).toEqual(b); assertSaneOps(a.ops)
   })
-  it('places a photo op and a title op on opposite sides', () => {
-    const out = split.place(ctxFor())
-    const photo = out.ops.find(o => o.fill === 'photo')!
-    const title = out.ops.find(o => o.target === 'title')!
-    expect(photo).toBeTruthy()
-    expect(Math.abs(photo.x - title.x)).toBeGreaterThan(0.2)  // opposite halves
+  it('keeps the title column clear of the photo on both sides, even at a large margin', () => {
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      for (const margin of [0.05, 0.12]) {   // 0.12 > the old 0.06 threshold where the overlap used to appear
+        const out = split.place(ctxFor({ seed, margin }))
+        const photo = out.ops.find(o => o.fill === 'photo')!
+        const title = out.ops.find(o => o.target === 'title')!
+        const pL = photo.x - photo.w! / 2, pR = photo.x + photo.w! / 2   // photo x-extent
+        const tL = title.x - title.w! / 2, tR = title.x + title.w! / 2   // title x-extent
+        expect(tL < pR && tR > pL).toBe(false)   // no horizontal overlap between photo and title column
+      }
+    }
   })
 })
