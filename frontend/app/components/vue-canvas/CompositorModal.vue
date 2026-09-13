@@ -5223,7 +5223,12 @@ async function runRegionFill() {
       mctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f)
       mctx.drawImage(genMaskCanvas, 0, 0)                        // WHITE region = inpaint
       mctx.setTransform(1, 0, 0, 1, 0, 0)
-      const results = await inpaint.fluxFill(imageData, mc.toDataURL('image/png'), genPrompt.value.trim(),
+      // Keep the named subject WHOLE inside the box: FLUX Fill treats the region as a
+      // window and will draw a close-up that the edge crops, so — like the new-object
+      // path — tell it to draw the subject small and centred with margin. No white-
+      // background clause here: this must blend into the layer, not sit on white.
+      const framed = `${genPrompt.value.trim() || 'subject'}. Keep everything requested fully inside this region and complete: the whole subject visible, drawn small and centred with generous empty margin on all sides, nothing cropped or touching the edges of the filled area.`
+      const results = await inpaint.fluxFill(imageData, mc.toDataURL('image/png'), framed,
         { model: regionEditModel.value, tier: regionEditModel.value === 'flux' ? 'pro' : undefined })
       const r0 = results[0]; if (!r0) { inpaint.error.value = 'The edit returned no image — try again.'; return }
       const newName = await inpaint.uploadDataUrl(await compositeInpaintAlpha(r0, img, mc, capW, capH), 'compinpaint')
