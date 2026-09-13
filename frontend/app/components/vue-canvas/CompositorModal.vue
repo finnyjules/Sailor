@@ -7442,7 +7442,10 @@ onUnmounted(() => {
             :class="smartActive ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
             @click="selectObjectStart(editToolbarLayer!.id)">Select an object</button>
 
-          <template v-if="editRegion">
+          <!-- Area tools morph in the same way the cluster itself did (grid 0fr→1fr). -->
+          <Transition name="tb-expand">
+          <div v-if="editRegion" class="tb-cluster">
+          <div class="tb-cluster-inner flex items-center gap-1">
             <div class="w-px h-5 bg-white/10 mx-0.5" />
             <button type="button" class="h-8 px-2 rounded text-[11px] cursor-pointer whitespace-nowrap"
               :class="regionSelectTool === 'box' ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/70'"
@@ -7454,11 +7457,16 @@ onUnmounted(() => {
               <span class="text-[10px] text-white/40">Size</span>
               <input type="range" min="8" max="240" step="2" v-model.number="genBrush" class="w-24 accent-white cursor-pointer" />
             </div>
-          </template>
+          </div>
+          </div>
+          </Transition>
 
           <!-- Model + close only once a mode is active; at plain selection the toolbar
-               shows just the modes (pick one, then the model/prompt appear). -->
-          <template v-if="editMode !== 'none'">
+               shows just the modes (pick one, then the model/prompt appear). Morphs
+               in with the same grid 0fr→1fr expand as the cluster. -->
+          <Transition name="tb-expand">
+          <div v-if="editMode !== 'none'" class="tb-cluster">
+          <div class="tb-cluster-inner flex items-center gap-1">
             <!-- Model — contextual: whole-image (FLUX.2/Nano/…) or area (FLUX Fill/…). -->
             <div class="w-px h-5 bg-white/10 mx-0.5" />
             <div class="relative">
@@ -7480,7 +7488,9 @@ onUnmounted(() => {
             <div class="w-px h-5 bg-white/10 mx-0.5" />
             <button type="button" class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/60 cursor-pointer"
               title="Done (Esc)" @click="editImageCancel(); editRegionCancel()"><X class="size-4" /></button>
-          </template>
+          </div>
+          </div>
+          </Transition>
         </div>
         </div>
         </Transition>
