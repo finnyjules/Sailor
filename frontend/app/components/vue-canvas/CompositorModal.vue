@@ -6960,10 +6960,17 @@ onUnmounted(() => {
           class="max-w-[360px] rounded bg-rose-950/95 border border-rose-500/30 px-2 py-1 text-[11px] text-rose-200 text-center shadow-lg">{{ inpaint.error.value }}</div>
         <div class="flex items-center gap-1 bg-[#1a1a1a]/95 backdrop-blur-sm rounded-[10px] p-1 border border-[#2a2a2a] shadow-lg">
           <button type="button" data-testid="edit-keep-style"
-            class="flex items-center justify-center h-8 px-2 rounded-[8px] text-[11px] cursor-pointer whitespace-nowrap"
-            :class="keepStyle ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/45'"
-            :title="keepStyle ? 'Keeping the original style — click to allow a restyle' : 'Match the original style'"
-            @click="keepStyle = !keepStyle">Keep style</button>
+            role="checkbox" :aria-checked="keepStyle"
+            class="flex items-center gap-1.5 h-8 pl-1.5 pr-2.5 rounded-[8px] text-[11px] cursor-pointer whitespace-nowrap ring-1 transition-colors"
+            :class="keepStyle ? 'bg-white/20 text-white ring-white/25' : 'bg-transparent text-white/50 ring-white/10 hover:bg-white/[0.06]'"
+            :title="keepStyle ? 'Keeping the original style — click to allow a restyle' : 'Restyle allowed — click to keep the original style'"
+            @click="keepStyle = !keepStyle">
+            <span class="flex size-3.5 items-center justify-center rounded-[4px] border transition-colors"
+              :class="keepStyle ? 'border-white bg-white text-[#1a1a1a]' : 'border-white/40 text-transparent'">
+              <svg viewBox="0 0 12 12" class="size-2.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.6 9.5 3.6" /></svg>
+            </span>
+            Keep style
+          </button>
           <input ref="editPromptRef" type="text"
             :value="editImage ? editImagePrompt : regionPrompt"
             :data-testid="editImage ? 'edit-image-prompt' : 'edit-region-prompt'"
