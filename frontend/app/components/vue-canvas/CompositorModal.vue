@@ -7331,8 +7331,12 @@ onUnmounted(() => {
           <LayoutTemplate class="size-4" />
         </button>
         </template>
-        <!-- Inpaint controls: the modes + region tools + model take the tools' slot. -->
-        <template v-else>
+        <!-- Inpaint controls: the modes + region tools + model take the tools' slot.
+             They expand in (grid 0fr→1fr, so the buttons keep their real size) as
+             the canvas tools swap out — see .tb-cluster in <style>. -->
+        <Transition name="tb-expand">
+        <div v-if="showEditToolbar" key="inpaint-cluster" class="tb-cluster">
+        <div class="tb-cluster-inner flex items-center gap-1">
           <div class="w-px h-5 bg-white/10 mx-0.5" />
           <button type="button" data-testid="edit-mode-image"
             class="h-8 px-2.5 rounded text-[12px] cursor-pointer whitespace-nowrap"
@@ -7386,7 +7390,9 @@ onUnmounted(() => {
             <button type="button" class="flex items-center justify-center size-8 rounded hover:bg-white/10 text-white/60 cursor-pointer"
               title="Done (Esc)" @click="editImageCancel(); editRegionCancel()"><X class="size-4" /></button>
           </template>
-        </template>
+        </div>
+        </div>
+        </Transition>
         <input ref="imageInputRef" type="file" accept="image/*" class="hidden" @change="onAddImageFile" />
         <input ref="brushFillInputRef" type="file" accept="image/*" class="hidden" @change="onBrushFillImageFile" />
         <input ref="svgInputRef" type="file" accept=".svg,image/svg+xml" class="hidden" @change="onImportSvgFile" />
@@ -9880,4 +9886,33 @@ button:active:not(:disabled) {
    prompt hairline the shared `.pastel-hairline` utility — both in
    app/assets/css/main.css — so the canvas-node Inpaint modal stays cohesive.
    Interior bg is set inline via --pastel-hairline-bg on the textarea. */
+
+/* Toolbar swap: the inpaint controls expand in over the canvas tools. A single
+   grid track animating 0fr→1fr grows the cluster to its intrinsic width without
+   squishing the buttons (unlike a scaleX). The resting state lives here so the
+   enter-from override can win. */
+.tb-cluster {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+}
+.tb-expand-enter-active {
+  transition: grid-template-columns 0.22s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.2s ease;
+}
+.tb-expand-leave-active {
+  transition: grid-template-columns 0.16s ease-in, opacity 0.12s ease-in;
+}
+.tb-expand-enter-from,
+.tb-expand-leave-to {
+  grid-template-columns: 0fr;
+  opacity: 0;
+}
+/* Clip to the animating track WHILE animating only — the min-width:0 + overflow
+   lets the fr track collapse past min-content. Never at rest, or the model
+   dropdown (which opens above the bar) would be clipped. */
+.tb-expand-enter-active > .tb-cluster-inner,
+.tb-expand-leave-active > .tb-cluster-inner {
+  overflow: hidden;
+  min-width: 0;
+}
 </style>
