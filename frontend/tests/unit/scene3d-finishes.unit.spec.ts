@@ -143,6 +143,25 @@ describe('applyFinish: no bare-int GLSL operand (the S4 ANGLE-rejects-float÷int
 
 })
 
+// ── Ramp texture colour space: the S5 review Critical ────────────────────────
+// The finish injects at the TERMINAL `<dithering_fragment>` anchor, which runs AFTER
+// `<colorspace_fragment>` has already display-encoded `gl_FragColor` — so `texture2D` on the
+// ramp must return the raw authored sRGB bytes, unmodified. Tagging the DataTexture
+// `THREE.SRGBColorSpace` (correct at opal's ORIGINAL emissivemap_fragment site in materials.ts,
+// which is pre-tonemap/scene-linear) is wrong here: it makes the GPU decode sRGB→linear on every
+// sample, so the `mix(gl_FragColor.rgb, finRainbow, strength)` blends a LINEAR sample into a
+// DISPLAY-ENCODED buffer — the rainbow renders darker/less saturated than OPAL_DEFAULT_STOPS at
+// every strength > 0.
+describe('applyFinish: the opalescence ramp texture is display-space (no GPU decode)', () => {
+  it('tags the ramp DataTexture NoColorSpace, not SRGBColorSpace', () => {
+    const m = new THREE.MeshStandardMaterial({ color: '#3366cc' })
+    applyFinish(m, [opal()])
+    const { uniforms } = compiledFragment(m)
+    const ramp = (uniforms.uFinOpalRamp_0 as { value: THREE.DataTexture }).value
+    expect(ramp.colorSpace).toBe(THREE.NoColorSpace)
+  })
+})
+
 // ── CPU twin ──────────────────────────────────────────────────────────────────
 describe('opalescenceRGB (CPU twin)', () => {
   const white: [number, number, number] = [1, 1, 1]

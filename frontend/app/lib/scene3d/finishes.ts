@@ -66,7 +66,15 @@ function buildOpalRamp(): THREE.DataTexture {
     data.set([Math.round(r), Math.round(g), Math.round(b), 255], i * 4)
   }
   const t = new THREE.DataTexture(data, RAMP_WIDTH, 1, THREE.RGBAFormat)
-  t.colorSpace = THREE.SRGBColorSpace
+  // Deliberately NOT SRGBColorSpace: this finish injects at the TERMINAL `<dithering_fragment>`
+  // anchor, which runs AFTER `<colorspace_fragment>` has already display-encoded gl_FragColor.
+  // Tagging the texture SRGBColorSpace would make the GPU decode sRGB→linear on every
+  // `texture2D` sample, and the mix() below writes that decoded (linear) sample straight into
+  // the display-encoded gl_FragColor.rgb — darker/desaturated at every strength > 0. Leaving
+  // colorSpace at the THREE.NoColorSpace default returns the raw authored sRGB bytes untouched,
+  // matching the space gl_FragColor is already in at this anchor. (Contrast materials.ts's
+  // OPAL_FRAG_BODY, which injects at the pre-tonemap/scene-linear `emissivemap_fragment` and
+  // correctly DOES want SRGBColorSpace there.)
   t.magFilter = t.minFilter = THREE.LinearFilter
   t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping
   t.needsUpdate = true

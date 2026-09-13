@@ -85,6 +85,40 @@ test('a sphere with no treatments renders byte-identically to one with an empty 
   expect(emptyList).toBe(noField)
 })
 
+/** Mean relative luminance (0.2126r+0.7152g+0.0722b, sRGB-byte-normalised) over the same
+ *  "hued" pixel set `saturatedCount` counts — i.e. the pixels the opalescence overlay actually
+ *  painted, ignoring flat grey background/backdrop.
+ *
+ *  This is the assertion the S5 review's Critical fix needs: at `strength: 1` the finish's
+ *  `mix()` writes the ramp sample directly into `gl_FragColor.rgb` with no further encode, so
+ *  the on-screen luminance of a hued pixel is ~ the LUT byte value itself when the ramp texture
+ *  is (correctly) `NoColorSpace`, or ~ `srgbToLinear(byte)` when it is (incorrectly) tagged
+ *  `SRGBColorSpace` and the GPU decodes it before the mix ever runs. Analytically averaging the
+ *  actual 256-entry OPAL_DEFAULT_STOPS LUT both ways (see
+ *  frontend/tests/unit/scene3d-finishes.unit.spec.ts for the colour-space unit test that pins
+ *  the texture tag itself) gives mean luminance ≈0.591 correct vs ≈0.414 with the bug — a ~30%
+ *  relative darkening. `LUMINANCE_FLOOR` sits between the two, biased toward the correct value,
+ *  so a regression of the SRGBColorSpace tag on this ramp fails this assertion. */
+async function meanHueLuminance(page: Page, dataUrl: string): Promise<number> {
+  return page.evaluate(async (url) => {
+    const img = new Image(); img.src = url; await img.decode()
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+    const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+    const { data } = ctx.getImageData(0, 0, c.width, c.height)
+    let sum = 0, n = 0
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i]! / 255, g = data[i + 1]! / 255, b = data[i + 2]! / 255
+      const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min
+      if (max > 0.12 && d / max > 0.28) {
+        sum += 0.2126 * r + 0.7152 * g + 0.0722 * b
+        n++
+      }
+    }
+    return n > 0 ? sum / n : 0
+  }, dataUrl)
+}
+const LUMINANCE_FLOOR = 0.5 // correct ≈0.591, sRGB-misdecoded-ramp bug ≈0.414 — see comment above
+
 test('opalescence renders a rainbow overlay on a standard-material sphere, no shader failure', async ({ page }) => {
   const bad = watchConsole(page)
   await openLab(page, sceneWith(undefined))
@@ -101,6 +135,13 @@ test('opalescence renders a rainbow overlay on a standard-material sphere, no sh
   expect(opalSaturated, `opal render (${opalSaturated} saturated px vs plain ${plainSaturated})`)
     .toBeGreaterThan(plainSaturated + 500)
   expect(opalSnap).not.toBe(plain)
+
+  // "More saturated pixels than plain grey" alone passes a dark/desaturated-but-hued rainbow —
+  // e.g. the ramp-texture sRGB-colour-space regression this spec now guards against, which
+  // darkens the overlay without removing its hue. Pin the overlay's brightness too.
+  const opalLuminance = await meanHueLuminance(page, opalSnap)
+  expect(opalLuminance, `opal overlay mean luminance ${opalLuminance} (floor ${LUMINANCE_FLOOR})`)
+    .toBeGreaterThan(LUMINANCE_FLOOR)
 })
 
 test('a disabled opalescence treatment renders exactly like no treatment at all', async ({ page }) => {
