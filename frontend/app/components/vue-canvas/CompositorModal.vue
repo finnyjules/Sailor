@@ -7744,6 +7744,16 @@ onUnmounted(() => {
           <span class="text-sm font-medium">{{ selectedLocal ? 'Layer motion' : 'Frame motion' }}</span>
         </div>
         <div class="p-4 flex-1 min-h-0 overflow-y-auto">
+          <!-- Animate: make this still a looping, transparent clip. Lives in Motion (not
+               Design) because it is how the layer moves — it composes with the keyframes below. -->
+          <CompositorAnimatePanel v-if="selectedLocal?.kind === 'image'"
+            :layer="selectedLocal as any"
+            :busy="layerAnimate.busy.value"
+            :error="layerAnimate.error.value"
+            @generate="(o) => animateLayer(selectedLocal, o)"
+            @speed="(v) => setClipSpeed(selectedLocal, v)"
+            @remove="removeClip(selectedLocal)"
+          />
           <MotionLayerEditor v-if="selectedLocal"
             :animation="(selectedLocal as any).animation" :frame-duration="effectiveMotion.duration"
             :layer-kind="selectedLocal.kind"
@@ -9686,16 +9696,6 @@ onUnmounted(() => {
             </div>
           </StudioSection>
 
-          <!-- Animate: make this still a looping, transparent clip -->
-          <CompositorAnimatePanel
-            v-if="selectedLocal?.kind === 'image'"
-            :layer="selectedLocal as any"
-            :busy="layerAnimate.busy.value"
-            :error="layerAnimate.error.value"
-            @generate="(o) => animateLayer(selectedLocal, o)"
-            @speed="(v) => setClipSpeed(selectedLocal, v)"
-            @remove="removeClip(selectedLocal)"
-          />
 
           <!-- Layer mask: clip this layer to another layer's silhouette (cross-source) -->
           <StudioSection title="Mask and crop">
