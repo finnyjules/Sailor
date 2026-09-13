@@ -2772,7 +2772,7 @@ function editImageStart(id: string) {
   editImagePrompt.value = ''
   selectLocal(id)
 }
-function editImageCancel() { editImage.value = null; editImagePrompt.value = '' }
+function editImageCancel() { editImage.value = null; editImagePrompt.value = ''; editResult.value = null }
 
 // The edit models (Kontext / Nano / FLUX Fill) return OPAQUE images — they fill in any
 // transparency. So editing a transparent element (a cutout, an alpha shape) would come back
@@ -2847,20 +2847,36 @@ async function runImageEdit() {
   const e = editImage.value; if (!e || !editImagePrompt.value.trim() || inpaint.busy.value) return
   const layer = localLayers.value.find((l: any) => l.id === e.layerId && l.kind === 'image') as any
   if (!layer) return
-  try {
-    const img = await loadImage(imageLayerUrl(layer.filename))
+  const layerId = layer.id
+  const origFilename = layer.filename        // revert target + re-roll source (never compound)
+  const prompt = styledPrompt(editImagePrompt.value.trim())
+  const m = wholeEditModel.value
+  // Generate from the ORIGINAL image every call (a re-roll must not stack on the
+  // previous result). Returns true on success.
+  const apply = async (): Promise<boolean> => {
+    const img = await loadImage(imageLayerUrl(origFilename))
     const { w, h } = capDims(img.naturalWidth || 1024, img.naturalHeight || 1024)
     const src = imageToDataUrl(img, w, h)
-    const prompt = styledPrompt(editImagePrompt.value.trim())
-    const m = wholeEditModel.value
     // Reference editors (image_urls+prompt) go through nanoGen with a variant;
     // 'kontext' is the FLUX.2 route.
     const out = (m === 'nano' || m === 'nano2' || m === 'seedream' || m === 'gptimage')
       ? await inpaint.nanoGen(prompt, src, undefined, m)
       : await inpaint.kontext(src, prompt)
-    const first = out[0]; if (!first) { inpaint.error.value = 'The edit returned no image — try again.'; return }
+    const first = out[0]; if (!first) { inpaint.error.value = 'The edit returned no image — try again.'; return false }
     const name = await inpaint.uploadDataUrl(await reapplyAlpha(first, img, w, h), 'compedit')
-    setLocal(layer.id, { filename: name })
+    setLocal(layerId, { filename: name })
+    return true
+  }
+  try {
+    if (await apply()) {
+      const b = boxPx(layer)
+      const cx = layer.x * canvasDisplay.w, cy = layer.y * canvasDisplay.h
+      editResult.value = {
+        layerId, origFilename,
+        bnd: { minX: cx - b.w / 2, minY: cy - b.h / 2, maxX: cx + b.w / 2, maxY: cy + b.h / 2 },
+        reroll: async () => { await apply() },
+      }
+    }
   } catch (err) { console.error('[compositor edit image]', err) /* inpaint.error is shown in the panel */ }
 }
 function editRegionStart(id: string) {
@@ -4602,6 +4618,24 @@ const showStylePicker = computed(() => genModel.value === 'flux' && genMode.valu
 type GenBounds = { minX: number; minY: number; maxX: number; maxY: number }
 const genResult = ref<{ layerId: string; mask: HTMLCanvasElement; bnd: GenBounds } | null>(null)
 
+// After a whole-image or region edit lands, the change is applied to the layer
+// immediately but stays PENDING: an on-image toolbar offers revert (restore the
+// pre-edit image), re-roll (regenerate from the ORIGINAL with a fresh seed), and
+// validate (accept). `origFilename` is the revert target; `reroll` re-runs the
+// same generation (always from the original, so rolls never compound); `bnd`
+// (artboard px) anchors the toolbar. Cleared on revert/validate and on exit.
+const editResult = ref<{ layerId: string; origFilename: string; bnd: GenBounds; reroll: () => Promise<void> } | null>(null)
+function revertEdit() {
+  const r = editResult.value; if (!r || inpaint.busy.value) return
+  setLocal(r.layerId, { filename: r.origFilename })
+  editResult.value = null
+}
+async function rerollEdit() {
+  const r = editResult.value; if (!r || inpaint.busy.value) return
+  try { await r.reroll() } catch (err) { console.error('[compositor edit reroll]', err) }
+}
+function validateEdit() { editResult.value = null }
+
 // ── Streamlined drag-to-generate gesture ─────────────────────────────────────
 // The Generate-in-region engine (genActive + box tool) re-surfaced as a direct
 // canvas gesture: a top-level Generate tool + hold-Option drag, a minimal on-box
@@ -4702,7 +4736,7 @@ function enterGenMode() {
   styleList.refresh()
   clearGenMask()
 }
-function exitGenMode() { genActive.value = false; genCursor.on = false; clearGenMask(); genResult.value = null }
+function exitGenMode() { genActive.value = false; genCursor.on = false; clearGenMask(); genResult.value = null; editResult.value = null }
 function toggleGenMode() { genActive.value ? exitGenMode() : enterGenMode() }
 
 // ── Wired-image mask target: resolves a selected wired image + its live,
@@ -5238,7 +5272,9 @@ async function runRegionFill() {
   const layer = genTarget.value
   try {
     if (layer) {
-      const img = await loadImage(imageLayerUrl(layer.filename))
+      const layerId = layer.id
+      const origFilename = layer.filename    // revert target + re-roll source (never compound)
+      const img = await loadImage(imageLayerUrl(origFilename))
       const { w: capW, h: capH } = capDims(img.naturalWidth || 1024, img.naturalHeight || 1024)
       const imageData = imageToDataUrl(img, capW, capH)
       // Affine (artboard px → image px): inverse of the image's draw transform.
@@ -5249,16 +5285,26 @@ async function runRegionFill() {
       mctx.setTransform(m.a, m.b, m.c, m.d, m.e, m.f)
       mctx.drawImage(genMaskCanvas, 0, 0)                        // WHITE region = inpaint
       mctx.setTransform(1, 0, 0, 1, 0, 0)
+      const maskPng = mc.toDataURL('image/png')
       // Keep the named subject WHOLE inside the box: FLUX Fill treats the region as a
       // window and will draw a close-up that the edge crops, so — like the new-object
       // path — tell it to draw the subject small and centred with margin. No white-
       // background clause here: this must blend into the layer, not sit on white.
       const framed = `${genPrompt.value.trim() || 'subject'}. Keep everything requested fully inside this region and complete: the whole subject visible, drawn small and centred with generous empty margin on all sides, nothing cropped or touching the edges of the filled area.`
-      const results = await inpaint.fluxFill(imageData, mc.toDataURL('image/png'), framed,
-        { model: regionEditModel.value, tier: regionEditModel.value === 'flux' ? 'pro' : undefined })
-      const r0 = results[0]; if (!r0) { inpaint.error.value = 'The edit returned no image — try again.'; return }
-      const newName = await inpaint.uploadDataUrl(await compositeInpaintAlpha(r0, img, mc, capW, capH), 'compinpaint')
-      setLocal(layer.id, { filename: newName })
+      // Same original image + mask every call, so a re-roll re-fills the identical
+      // region from the untouched source rather than stacking on the last fill.
+      const apply = async (): Promise<boolean> => {
+        const results = await inpaint.fluxFill(imageData, maskPng, framed,
+          { model: regionEditModel.value, tier: regionEditModel.value === 'flux' ? 'pro' : undefined })
+        const r0 = results[0]; if (!r0) { inpaint.error.value = 'The edit returned no image — try again.'; return false }
+        const newName = await inpaint.uploadDataUrl(await compositeInpaintAlpha(r0, img, mc, capW, capH), 'compinpaint')
+        setLocal(layerId, { filename: newName })
+        return true
+      }
+      const bnd = genMaskBounds()   // capture before clearGenMask() wipes the region
+      if (await apply() && bnd) {
+        editResult.value = { layerId, origFilename, bnd, reroll: async () => { await apply() } }
+      }
     } else {
       // No target image → generate a brand-new object, then keep the region
       // snapshot + bounds so the mini toolbar can re-roll / cancel / confirm it.
@@ -6711,6 +6757,19 @@ onUnmounted(() => {
           <button class="flex items-center justify-center size-8 rounded-[8px] bg-white text-neutral-900 hover:bg-white/90 cursor-pointer disabled:opacity-40 disabled:cursor-default" title="Confirm" :disabled="inpaint.busy.value" @click="confirmObject"><Check class="size-4" /></button>
         </div>
 
+        <!-- Applied-edit toolbar: revert / re-roll / validate (whole-image + region) -->
+        <div
+          v-if="editResult"
+          data-edit-result-bar
+          class="absolute z-40 -translate-x-1/2 flex items-center gap-1 bg-[#1a1a1a]/95 backdrop-blur-sm rounded-[10px] p-1 border border-[#2a2a2a] shadow-lg"
+          :style="{ left: Math.min(Math.max((editResult.bnd.minX + editResult.bnd.maxX) / 2, 64), canvasDisplay.w - 64) + 'px', top: Math.min(editResult.bnd.maxY + 12, canvasDisplay.h - 44) + 'px' }"
+          @pointerdown.stop @click.stop
+        >
+          <button data-testid="edit-result-revert" class="flex items-center justify-center size-8 rounded-[8px] hover:bg-white/10 text-white/80 cursor-pointer disabled:opacity-40 disabled:cursor-default" title="Revert to the original" :disabled="inpaint.busy.value" @click="revertEdit"><Undo2 class="size-4" /></button>
+          <button data-testid="edit-result-reroll" class="flex items-center justify-center size-8 rounded-[8px] hover:bg-white/10 text-white/80 cursor-pointer disabled:opacity-40 disabled:cursor-default" title="Re-roll" :disabled="inpaint.busy.value" @click="rerollEdit"><RefreshCw class="size-4" :class="inpaint.busy.value ? 'animate-spin' : ''" /></button>
+          <button data-testid="edit-result-validate" class="flex items-center justify-center size-8 rounded-[8px] bg-white text-neutral-900 hover:bg-white/90 cursor-pointer disabled:opacity-40 disabled:cursor-default" title="Validate" :disabled="inpaint.busy.value" @click="validateEdit"><Check class="size-4" /></button>
+        </div>
+
         <!-- Smart-select action bar -->
         <div
           v-if="smartActive && smartBnd"
@@ -6989,7 +7048,7 @@ onUnmounted(() => {
       <!-- Edit PROMPT bar: while in inpaint mode the prompt sits just above the
            (swapped) main toolbar. The agent bar is hidden meanwhile, so this
            space is clear. -->
-      <div v-if="editMode !== 'none'"
+      <div v-if="editMode !== 'none' && !editResult"
         class="pointer-events-auto absolute bottom-[92px] left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-1.5"
         @pointerdown.stop @click.stop>
         <div v-if="editRegion && !genHasMask" class="text-[11px] text-white/60 bg-[#1a1a1a]/95 border border-[#2a2a2a] rounded-[8px] px-2 py-0.5">
