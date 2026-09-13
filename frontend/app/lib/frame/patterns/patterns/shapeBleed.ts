@@ -27,12 +27,17 @@ export const shapeBleed: Pattern = {
       else cx = frame.w - wpx * 0.1
       ops.push({ target: elements.shapes[0]?.id ?? 'shape', kind: 'shape', shapeId: sh.id, x: cx / frame.w, y: cy / frame.h, w: wpx / frame.w, h: hpx / frame.w, colorRole: 'accent', fill: 'solid', z: 0 })
     }
-    // title in the clear band opposite the bleed
-    const size = Math.min(fitSize(words.reduce((a, b) => (measure(b) > measure(a) ? b : a), words[0]!), mb.w, measure), mb.h / (1.2 * words.length))
+    // title placed clear of the bleed: opposite HALF for a left/right bleed
+    // (shape is vertically centred there), opposite vertical band for top/bottom.
+    const horiz = edge === 'left' || edge === 'right'
+    const widest = words.reduce((a, b) => (measure(b) > measure(a) ? b : a), words[0]!)
+    const colW = horiz ? (frame.w * 0.5 - mb.x * 1.5) : mb.w
+    const size = Math.min(fitSize(widest, colW, measure), mb.h / (1.2 * words.length))
     const blockH = size * 0.86 * words.length
-    const clearTop = edge === 'top' ? frame.h - mb.y - blockH : mb.y
-    const tc = toNorm({ x: mb.x, y: clearTop, w: mb.w, h: blockH }, frame)
-    ops.push({ target: 'title', kind: 'text', x: tc.x, y: tc.y, w: mb.w / frame.w, fontSize: size / frame.w, align: 'left', lineBreak: words.join('\n'), colorRole: 'ink', z: 1 })
+    const colX = horiz ? (edge === 'left' ? frame.w - mb.x - colW : mb.x) : mb.x
+    const yTop = horiz ? (frame.h - blockH) / 2 : (edge === 'top' ? frame.h - mb.y - blockH : mb.y)
+    const tc = toNorm({ x: colX, y: yTop, w: colW, h: blockH }, frame)
+    ops.push({ target: 'title', kind: 'text', x: tc.x, y: tc.y, w: colW / frame.w, fontSize: size / frame.w, align: 'left', lineBreak: words.join('\n'), colorRole: 'ink', z: 1 })
     return { ops, did: `a ${sh ? sh.id : 'shape'} bleeding off the ${edge} edge, title clear of it` }
   },
 }
