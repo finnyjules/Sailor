@@ -177,3 +177,11 @@ export function layoutExpressive(opts: {
     height: justifyY ? boxHeight! : lineCount * lineHeight,
   }
 }
+
+/** Which glyphs of a per-glyph title take the accent face. Pure so the render
+ *  path and its tests agree. `first` = the leading glyph only; `alternate` =
+ *  even indices (0,2,4…). */
+export type AccentRule = 'first' | 'alternate'
+export function isAccentGlyph(index: number, rule: AccentRule): boolean {
+  return rule === 'alternate' ? index % 2 === 0 : index === 0
+}
