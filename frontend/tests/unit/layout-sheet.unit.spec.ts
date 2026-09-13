@@ -54,4 +54,11 @@ describe('useLayoutSheet', () => {
     const { sheet } = harness({ sailor_localLayers: [img] })
     expect(sheet.tiles.value).toEqual([])
   })
+  it('a set shape mode makes shape patterns fit even with no placed shape', () => {
+    const { sheet } = harness()
+    expect(sheet.tiles.value.map(t => t.patternId)).not.toContain('knockout')  // no shape yet
+    sheet.setShapeMode({ id: 'circle' })
+    expect(sheet.shapeMode.value).toEqual({ id: 'circle' })
+    expect(sheet.tiles.value.map(t => t.patternId)).toContain('knockout')      // now a shape is available
+  })
 })
