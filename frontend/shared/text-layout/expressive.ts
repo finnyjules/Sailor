@@ -23,6 +23,9 @@ export interface ExpressiveParams {
   jitterY: number
   /** Deterministic seed; reroll bumps it. */
   seed: number
+  /** Split the text into single characters instead of words; `wordsPerLine`
+   *  then means glyphs-per-line. Absent/false ⇒ the word split, unchanged. */
+  perChar?: boolean
 }
 
 export interface PlacedWord {
@@ -81,7 +84,10 @@ export function layoutExpressive(opts: {
   const boxHeight = opts.boxHeight
   const justifyX = !!opts.justifyX
   const justifyY = !!opts.justifyY && boxHeight != null
-  const words = String(opts.text ?? '').split(/\s+/).filter(Boolean)
+  const src = String(opts.text ?? '')
+  const words = params.perChar
+    ? Array.from(src).filter(c => c.trim().length > 0)   // glyphs, whitespace dropped
+    : src.split(/\s+/).filter(Boolean)
   if (!words.length) return { words: [], lines: 0, width: boxWidth, height: 0 }
 
   const wpl = Math.max(1, Math.floor(params.wordsPerLine || 1))
