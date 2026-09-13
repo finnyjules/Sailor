@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { applyGeometry, GEOMETRY_EFFECT_LABELS } from '~/lib/compositor/geometryEffects'
+import { applyGeometry, longShadowBody, GEOMETRY_EFFECT_LABELS } from '~/lib/compositor/geometryEffects'
+import { MOTION_BLUR_SAMPLES, RADIAL_BLUR_MAX_ANGLE, ZOOM_BLUR_MAX_SCALE, motionSampleSpan, ROUGH_EDGE_MAX_W, INK_BLEED_MAX_W } from '~/lib/compositor/postEffects'
 import { flatten, pathLength, type Pt2 } from '~/lib/vector/pathOps'
 
 // 100×100 square: perimeter 400. Same shape the pathOps spec uses.
@@ -48,11 +49,16 @@ const RECT_WITH_HOLE = 'M0 0 L100 0 L100 100 L0 100 Z M30 30 L70 30 L70 70 L30 7
 const SQUARE_CW_D = 'M0 0 L0 100 L100 100 L100 0 Z'
 
 describe('geometryEffects: labels single-source', () => {
-  it('exposes sentence-case labels for the four geometry kinds', () => {
+  it('exposes sentence-case labels for the geometry kinds', () => {
     expect(GEOMETRY_EFFECT_LABELS.trim).toBe('Trim path')
     expect(GEOMETRY_EFFECT_LABELS.roughen).toBe('Roughen')
     expect(GEOMETRY_EFFECT_LABELS.offset).toBe('Offset path')
     expect(GEOMETRY_EFFECT_LABELS.round_corners).toBe('Round corners')
+    expect(GEOMETRY_EFFECT_LABELS.boolean).toBe('Combine shapes')
+    expect(GEOMETRY_EFFECT_LABELS.morph).toBe('Morph to shape')
+    expect(GEOMETRY_EFFECT_LABELS.warp).toBe('Warp')
+    expect(GEOMETRY_EFFECT_LABELS.shatter).toBe('Shatter')
+    expect(GEOMETRY_EFFECT_LABELS.long_shadow).toBe('Long shadow')
   })
 })
 
@@ -67,6 +73,94 @@ describe('geometryEffects: identity', () => {
   it('ignores non-geometry kinds (they never reach the outline path)', () => {
     const eff = [{ type: 'bloom', visible: true }]
     expect(applyGeometry(SQUARE_D, eff, { W })).toBe(SQUARE_D)
+  })
+  it('returns the SAME string for a long_shadow (it is a paint-beneath, not an outline transform)', () => {
+    // long_shadow is a geometry kind, so it is not filtered out — but its applyOne case is a
+    // pure no-op, so applyGeometry returns the input outline by reference (the body is painted
+    // separately in drawLayerContent). This is the byte-identity proof for the outline path.
+    const eff = [{ type: 'long_shadow', angle: 45, length: 0.05, color: 'rgba(0,0,0,0.35)', visible: true }]
+    expect(applyGeometry(SQUARE_D, eff, { W })).toBe(SQUARE_D)
+  })
+})
+
+// ── long_shadow BODY (pure). The solid swept extrude built from a vector outline; painted
+// beneath the shape in drawLayerContent (which applyGeometry never touches). Nonzero winding.
+describe('geometryEffects: longShadowBody', () => {
+  // Nonzero winding number of a compound path (all subpaths closed) at a point.
+  const windingAt = (d: string, x: number, y: number): number => {
+    let wn = 0
+    for (const s of flatten(d)) {
+      const pts = s.pts
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i]!, b = pts[(i + 1) % pts.length]!
+        if (a.y <= y) {
+          if (b.y > y && ((b.x - a.x) * (y - a.y) - (x - a.x) * (b.y - a.y)) > 0) wn++
+        } else if (b.y <= y && ((b.x - a.x) * (y - a.y) - (x - a.x) * (b.y - a.y)) < 0) wn--
+      }
+    }
+    return wn
+  }
+  const inside = (d: string, x: number, y: number) => windingAt(d, x, y) !== 0
+  // Filled area (nonzero) by sampling an N×N grid over the body's bbox.
+  const areaOf = (d: string, N = 240): number => {
+    const bb = bboxOf(d)
+    const cw = (bb.maxX - bb.minX) / N, ch = (bb.maxY - bb.minY) / N
+    let n = 0
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      if (inside(d, bb.minX + (i + 0.5) * cw, bb.minY + (j + 0.5) * ch)) n++
+    }
+    return n * cw * ch
+  }
+
+  it('angle 0 (rightward) extends the bbox right by the length; area = shape + swept band', () => {
+    const body = longShadowBody(SQUARE_D, 0, 50) // 100×100 square, cast +x by 50
+    const bb = bboxOf(body)
+    expect(bb.minX).toBeCloseTo(0, 3)
+    expect(bb.maxX).toBeCloseTo(150, 3) // 100 + length
+    expect(bb.minY).toBeCloseTo(0, 3)
+    expect(bb.maxY).toBeCloseTo(100, 3)
+    // Minkowski sum with the segment [0,(50,0)] is the rect [0,150]×[0,100] → area 15000.
+    expect(areaOf(body)).toBeGreaterThan(15000 * 0.97)
+    expect(areaOf(body)).toBeLessThan(15000 * 1.03)
+  })
+
+  it('angle 90 extends the bbox downward by the length', () => {
+    const body = longShadowBody(SQUARE_D, Math.PI / 2, 40) // cast +y by 40
+    const bb = bboxOf(body)
+    expect(bb.maxY).toBeCloseTo(140, 3)
+    expect(bb.minY).toBeCloseTo(0, 3)
+    expect(bb.maxX).toBeCloseTo(100, 3)
+  })
+
+  it('length 0 → body is (essentially) the shape itself', () => {
+    const body = longShadowBody(SQUARE_D, 0, 0)
+    const bb = bboxOf(body)
+    expect(bb.minX).toBeCloseTo(0, 3); expect(bb.maxX).toBeCloseTo(100, 3)
+    expect(bb.minY).toBeCloseTo(0, 3); expect(bb.maxY).toBeCloseTo(100, 3)
+    expect(areaOf(body)).toBeGreaterThan(10000 * 0.97)
+    expect(areaOf(body)).toBeLessThan(10000 * 1.03)
+  })
+
+  it('is a single seamless solid — a point inside the swept band is filled (nonzero), none cancels', () => {
+    const body = longShadowBody(SQUARE_D, 0, 50)
+    expect(inside(body, 125, 50)).toBe(true) // in the swept band, past the shape
+    expect(inside(body, 50, 50)).toBe(true)  // inside the original shape
+    expect(inside(body, 200, 50)).toBe(false) // beyond the far cap
+  })
+
+  it('handles multiple subpaths — the body spans both shapes', () => {
+    const TWO = 'M0 0 L20 0 L20 20 L0 20 Z M60 60 L80 60 L80 80 L60 80 Z'
+    const body = longShadowBody(TWO, 0, 30)
+    expect(inside(body, 10, 10)).toBe(true)  // first square
+    expect(inside(body, 70, 70)).toBe(true)  // second square
+    expect(inside(body, 35, 10)).toBe(true)  // first square's swept band
+    expect(inside(body, 95, 70)).toBe(true)  // second square's swept band
+  })
+
+  it('empty outline or non-finite length → empty body string', () => {
+    expect(longShadowBody('', 0, 50)).toBe('')
+    expect(longShadowBody(SQUARE_D, 0, Number.NaN)).toBe('')
+    expect(longShadowBody(SQUARE_D, 0, Number.POSITIVE_INFINITY)).toBe('')
   })
 })
 
@@ -240,6 +334,11 @@ import {
   computedOutlineD,
   needsComputedOutline,
   layerGeometryEffects,
+  geometryOutwardPx,
+  outerGlowOutwardPx,
+  strokeAlphaOutwardPx,
+  motionBlurOutwardPx,
+  edgeDistortOutwardPx,
   outlinePathData,
   createRectLayer,
   createEllipseLayer,
@@ -329,5 +428,258 @@ describe('useCompositorLayers: needsComputedOutline', () => {
       strokes: [{ id: 's1', paint: '#000', width: 0.01, distance: 0.02, align: 'center', visible: true }] as any,
     })
     expect(needsComputedOutline(t)).toBe(false)
+  })
+})
+
+// ── Task 8 (Minor 1): offscreen rasters pad for outward geometry growth. The pure
+// helper reports how far a layer's enabled geometry effects push its outline PAST the
+// box edge, so the silhouette / corner-pin / DOF rasters grow to hold the grown ink.
+describe('useCompositorLayers: geometryOutwardPx', () => {
+  const W = 300
+  it('is 0 for a layer with no geometry effect (byte-identity pad preserved)', () => {
+    expect(geometryOutwardPx(createRectLayer(), W)).toBe(0)
+  })
+  it('is 0 for trim-only (trim removes, never grows outward)', () => {
+    const r = createRectLayer({ effects: [geo('trim', { start: 0, end: 0.5, offset: 0.3 })] as any })
+    expect(geometryOutwardPx(r, W)).toBe(0)
+  })
+  it('is 0 for round_corners-only (fillets only cut inward)', () => {
+    const r = createRectLayer({ effects: [geo('round_corners', { radius: 0.05 })] as any })
+    expect(geometryOutwardPx(r, W)).toBe(0)
+  })
+  it('is distance·W for a positive offset', () => {
+    const r = createRectLayer({ effects: [geo('offset', { distance: 0.02 })] as any })
+    expect(geometryOutwardPx(r, W)).toBeCloseTo(0.02 * W, 6)
+  })
+  it('is 0 for a NEGATIVE offset (inward shrink grows nothing)', () => {
+    const r = createRectLayer({ effects: [geo('offset', { distance: -0.02 })] as any })
+    expect(geometryOutwardPx(r, W)).toBe(0)
+  })
+  it('is amount·W for a roughen', () => {
+    const r = createRectLayer({ effects: [geo('roughen', { amount: 0.03 })] as any })
+    expect(geometryOutwardPx(r, W)).toBeCloseTo(0.03 * W, 6)
+  })
+  it('is length·W for a long shadow (its body reaches length·W beyond the outline)', () => {
+    const r = createRectLayer({ effects: [geo('long_shadow', { angle: 45, length: 0.06, color: 'rgba(0,0,0,0.35)' })] as any })
+    expect(geometryOutwardPx(r, W)).toBeCloseTo(0.06 * W, 6)
+  })
+  it('is 0 for a long shadow with zero length', () => {
+    const r = createRectLayer({ effects: [geo('long_shadow', { angle: 45, length: 0, color: 'rgba(0,0,0,0.35)' })] as any })
+    expect(geometryOutwardPx(r, W)).toBe(0)
+  })
+  it('is the MAX across several geometry effects', () => {
+    const r = createRectLayer({
+      effects: [
+        geo('offset', { distance: 0.01 }),
+        geo('roughen', { amount: 0.04 }),
+        geo('trim', { start: 0, end: 0.9, offset: 0.2 }),
+        geo('round_corners', { radius: 0.5 }),
+      ] as any,
+    })
+    expect(geometryOutwardPx(r, W)).toBeCloseTo(0.04 * W, 6)
+  })
+  it('ignores a hidden geometry effect', () => {
+    const r = createRectLayer({ effects: [geo('offset', { distance: 0.05, visible: false })] as any })
+    expect(geometryOutwardPx(r, W)).toBe(0)
+  })
+  it('is 0 for an image layer (cannot take geometry) even with an offset', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('offset', { distance: 0.05 })] as any })
+    expect(geometryOutwardPx(img, W)).toBe(0)
+  })
+  it('is 0 for a DECORATED text layer (underline) that carries an offset', () => {
+    const t = createTextLayer({ underline: true, effects: [geo('offset', { distance: 0.05 })] as any })
+    expect(geometryOutwardPx(t, W)).toBe(0)
+  })
+  it('is distance·W for a non-decorated (outlined) text layer with a positive offset', () => {
+    const t = createTextLayer({ effects: [geo('offset', { distance: 0.02 })] as any })
+    expect(geometryOutwardPx(t, W)).toBeCloseTo(0.02 * W, 6)
+  })
+})
+
+// F4 Task 1: the silhouette raster grows to hold an outer-glow halo's outward blur, so the
+// halo is not clipped at the raster edge. 0 with none ⇒ byte-identical raster.
+describe('useCompositorLayers: outerGlowOutwardPx', () => {
+  const W = 300
+  it('is 0 for a layer with no effects (byte-identity pad preserved)', () => {
+    expect(outerGlowOutwardPx(createRectLayer(), W)).toBe(0)
+  })
+  it('is 0 for a layer with only a non-glow pixel effect', () => {
+    const r = createRectLayer({ effects: [geo('bloom')] as any })
+    expect(outerGlowOutwardPx(r, W)).toBe(0)
+  })
+  it('is radius·W for an outer glow', () => {
+    const r = createRectLayer({ effects: [geo('outer_glow', { color: '#fff', radius: 0.03, intensity: 0.8 })] as any })
+    expect(outerGlowOutwardPx(r, W)).toBeCloseTo(0.03 * W, 6)
+  })
+  it('is 0 for an INNER glow (stays within the silhouette, no outward growth)', () => {
+    const r = createRectLayer({ effects: [geo('inner_glow', { color: '#fff', radius: 0.05, intensity: 0.8 })] as any })
+    expect(outerGlowOutwardPx(r, W)).toBe(0)
+  })
+  it('ignores a hidden outer glow', () => {
+    const r = createRectLayer({ effects: [geo('outer_glow', { color: '#fff', radius: 0.05, intensity: 0.8, visible: false })] as any })
+    expect(outerGlowOutwardPx(r, W)).toBe(0)
+  })
+  it('is the MAX radius across several outer glows', () => {
+    const r = createRectLayer({
+      effects: [
+        geo('outer_glow', { color: '#fff', radius: 0.01, intensity: 0.5 }),
+        geo('outer_glow', { color: '#f00', radius: 0.04, intensity: 0.5 }),
+      ] as any,
+    })
+    expect(outerGlowOutwardPx(r, W)).toBeCloseTo(0.04 * W, 6)
+  })
+  it('applies to an IMAGE layer too (not gated on canTakeGeometry)', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('outer_glow', { color: '#fff', radius: 0.02, intensity: 0.8 })] as any })
+    expect(outerGlowOutwardPx(img, W)).toBeCloseTo(0.02 * W, 6)
+  })
+})
+
+// F4 Task 3: the silhouette raster grows to hold an alpha-traced stroke's OUTWARD band, respecting
+// align — outside grows by width·W, centre by half, inside not at all. 0 with none ⇒ byte-identical.
+describe('useCompositorLayers: strokeAlphaOutwardPx', () => {
+  const W = 300
+  it('is 0 for a layer with no effects (byte-identity pad preserved)', () => {
+    expect(strokeAlphaOutwardPx(createRectLayer(), W)).toBe(0)
+  })
+  it('is 0 for a layer with only a non-stroke pixel effect', () => {
+    const r = createRectLayer({ effects: [geo('bloom')] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBe(0)
+  })
+  it('is 0 for an INSIDE stroke (band stays within the silhouette)', () => {
+    const r = createRectLayer({ effects: [geo('stroke_from_alpha', { width: 0.05, align: 'inside', color: '#000' })] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBe(0)
+  })
+  it('is HALF width·W for a CENTRE stroke (straddles the edge)', () => {
+    const r = createRectLayer({ effects: [geo('stroke_from_alpha', { width: 0.04, align: 'center', color: '#000' })] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBeCloseTo(0.04 * W / 2, 6)
+  })
+  it('is the full width·W for an OUTSIDE stroke', () => {
+    const r = createRectLayer({ effects: [geo('stroke_from_alpha', { width: 0.03, align: 'outside', color: '#000' })] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBeCloseTo(0.03 * W, 6)
+  })
+  it('treats an invalid align as centre (half width·W)', () => {
+    const r = createRectLayer({ effects: [geo('stroke_from_alpha', { width: 0.04, align: 'nonsense', color: '#000' })] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBeCloseTo(0.04 * W / 2, 6)
+  })
+  it('ignores a hidden stroke', () => {
+    const r = createRectLayer({ effects: [geo('stroke_from_alpha', { width: 0.05, align: 'outside', color: '#000', visible: false })] as any })
+    expect(strokeAlphaOutwardPx(r, W)).toBe(0)
+  })
+  it('is the MAX outward reach across several strokes', () => {
+    const r = createRectLayer({
+      effects: [
+        geo('stroke_from_alpha', { width: 0.02, align: 'outside', color: '#000' }),
+        geo('stroke_from_alpha', { width: 0.05, align: 'center', color: '#f00' }), // 0.025·W outward
+      ] as any,
+    })
+    expect(strokeAlphaOutwardPx(r, W)).toBeCloseTo(0.05 * W / 2, 6) // 0.025·W beats 0.02·W
+  })
+  it('applies to an IMAGE layer too (any layer kind, reads the raster alpha)', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('stroke_from_alpha', { width: 0.02, align: 'outside', color: '#000' })] as any })
+    expect(strokeAlphaOutwardPx(img, W)).toBeCloseTo(0.02 * W, 6)
+  })
+})
+
+// F4 Task 4: the silhouette raster grows to hold a motion blur's OUTWARD smear — directional along
+// its angle by distance·W·span, radial/zoom by the farthest-corner radius × the swing × span.
+// 0 with none ⇒ byte-identical. Expected values are derived from the SAME constants the pass uses.
+describe('useCompositorLayers: motionBlurOutwardPx', () => {
+  const W = 300
+  const box = { w: 100, h: 100 }
+  const span = motionSampleSpan(MOTION_BLUR_SAMPLES)
+  const maxRCentred = Math.hypot(box.w / 2, box.h / 2) // farthest corner from the box centre
+  it('is 0 for a layer with no effects (byte-identity pad preserved)', () => {
+    expect(motionBlurOutwardPx(createRectLayer(), W, box)).toBe(0)
+  })
+  it('is 0 for a layer with only a non-blur pixel effect', () => {
+    const r = createRectLayer({ effects: [geo('bloom')] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBe(0)
+  })
+  it('is distance·W·span for a directional blur (angle drops out of the pad)', () => {
+    const r = createRectLayer({ effects: [geo('directional_blur', { angle: 33, distance: 0.03 })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBeCloseTo(0.03 * W * span, 6)
+  })
+  it('is 0 for a directional blur at distance 0', () => {
+    const r = createRectLayer({ effects: [geo('directional_blur', { angle: 90, distance: 0 })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBe(0)
+  })
+  it('is maxR·(amount·RADIAL_MAX)·span for a centred radial blur', () => {
+    const r = createRectLayer({ effects: [geo('radial_blur', { centerX: 0.5, centerY: 0.5, amount: 0.3 })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBeCloseTo(maxRCentred * 0.3 * RADIAL_BLUR_MAX_ANGLE * span, 6)
+  })
+  it('is maxR·(amount·ZOOM_MAX)·span for a centred zoom blur', () => {
+    const r = createRectLayer({ effects: [geo('zoom_blur', { centerX: 0.5, centerY: 0.5, amount: 0.3 })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBeCloseTo(maxRCentred * 0.3 * ZOOM_BLUR_MAX_SCALE * span, 6)
+  })
+  it('is 0 for a radial / zoom blur at amount 0', () => {
+    const r = createRectLayer({ effects: [geo('radial_blur', { amount: 0 }), geo('zoom_blur', { amount: 0 })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBe(0)
+  })
+  it('measures the corner FARTHEST from an off-centre radial centre', () => {
+    // centre at the top-left corner ⇒ maxR is the full diagonal to the opposite corner.
+    const r = createRectLayer({ effects: [geo('radial_blur', { centerX: 0, centerY: 0, amount: 0.5 })] as any })
+    const diag = Math.hypot(box.w, box.h)
+    expect(motionBlurOutwardPx(r, W, box)).toBeCloseTo(diag * 0.5 * RADIAL_BLUR_MAX_ANGLE * span, 6)
+  })
+  it('ignores a hidden motion blur', () => {
+    const r = createRectLayer({ effects: [geo('zoom_blur', { amount: 0.8, visible: false })] as any })
+    expect(motionBlurOutwardPx(r, W, box)).toBe(0)
+  })
+  it('is the MAX reach across several motion blurs', () => {
+    const r = createRectLayer({
+      effects: [
+        geo('directional_blur', { angle: 0, distance: 0.01 }),           // small: 0.01·W·span
+        geo('zoom_blur', { centerX: 0.5, centerY: 0.5, amount: 1 }),     // larger
+      ] as any,
+    })
+    const zoom = maxRCentred * 1 * ZOOM_BLUR_MAX_SCALE * span
+    expect(motionBlurOutwardPx(r, W, box)).toBeCloseTo(Math.max(0.01 * W * span, zoom), 6)
+  })
+  it('applies to an IMAGE layer too (any layer kind)', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('directional_blur', { angle: 45, distance: 0.02 })] as any })
+    expect(motionBlurOutwardPx(img, W, box)).toBeCloseTo(0.02 * W * span, 6)
+  })
+})
+
+// F4 Task 6: the silhouette raster grows to hold an edge distortion's OUTWARD jitter / bleed —
+// rough_edge by amount·ROUGH_EDGE_MAX_W·W, ink_bleed by amount·INK_BLEED_MAX_W·W (its blotch factor
+// is ≤ 1). 0 with none ⇒ byte-identical. Expected values use the SAME constants the passes use.
+describe('useCompositorLayers: edgeDistortOutwardPx', () => {
+  const W = 300
+  it('is 0 for a layer with no effects (byte-identity pad preserved)', () => {
+    expect(edgeDistortOutwardPx(createRectLayer(), W)).toBe(0)
+  })
+  it('is 0 for a layer with only a non-edge pixel effect', () => {
+    const r = createRectLayer({ effects: [geo('bloom')] as any })
+    expect(edgeDistortOutwardPx(r, W)).toBe(0)
+  })
+  it('is amount·ROUGH_EDGE_MAX_W·W for a rough edge', () => {
+    const r = createRectLayer({ effects: [geo('rough_edge', { amount: 0.5, detail: 8, seed: 1 })] as any })
+    expect(edgeDistortOutwardPx(r, W)).toBeCloseTo(0.5 * ROUGH_EDGE_MAX_W * W, 6)
+  })
+  it('is amount·INK_BLEED_MAX_W·W for an ink bleed', () => {
+    const r = createRectLayer({ effects: [geo('ink_bleed', { amount: 0.4, seed: 1, softness: 0.3 })] as any })
+    expect(edgeDistortOutwardPx(r, W)).toBeCloseTo(0.4 * INK_BLEED_MAX_W * W, 6)
+  })
+  it('is 0 for either kind at amount 0', () => {
+    const r = createRectLayer({ effects: [geo('rough_edge', { amount: 0 }), geo('ink_bleed', { amount: 0 })] as any })
+    expect(edgeDistortOutwardPx(r, W)).toBe(0)
+  })
+  it('ignores a hidden edge distortion', () => {
+    const r = createRectLayer({ effects: [geo('ink_bleed', { amount: 1, visible: false })] as any })
+    expect(edgeDistortOutwardPx(r, W)).toBe(0)
+  })
+  it('is the MAX outward reach across several edge distortions', () => {
+    const r = createRectLayer({
+      effects: [
+        geo('rough_edge', { amount: 0.3, detail: 8, seed: 1 }),  // 0.3·ROUGH_EDGE_MAX_W·W
+        geo('ink_bleed', { amount: 1, seed: 1, softness: 0 }),   // 1·INK_BLEED_MAX_W·W — larger
+      ] as any,
+    })
+    expect(edgeDistortOutwardPx(r, W)).toBeCloseTo(Math.max(0.3 * ROUGH_EDGE_MAX_W * W, 1 * INK_BLEED_MAX_W * W), 6)
+  })
+  it('applies to an IMAGE layer too (any layer kind, reads the raster alpha)', () => {
+    const img = createImageLayer('x.png', 1, { effects: [geo('rough_edge', { amount: 1, detail: 8, seed: 1 })] as any })
+    expect(edgeDistortOutwardPx(img, W)).toBeCloseTo(1 * ROUGH_EDGE_MAX_W * W, 6)
   })
 })

@@ -8,12 +8,13 @@ import {
 } from '~/lib/compositor/effectStack'
 import { DEFAULT_TORN_EDGE } from '~/lib/compositor/tornEdge'
 import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
+import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 17 kinds, 3 pinned and 14 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(17)
+  it('has 36 kinds, 3 pinned and 33 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(36)
     expect(PINNED_KINDS).toEqual(['background_blur', 'dof', 'drop_shadow'])
-    expect(ORDERABLE_KINDS).toHaveLength(14)
+    expect(ORDERABLE_KINDS).toHaveLength(33)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
     expect(EFFECT_LABELS.gradientMap).toBe('Gradient map')
@@ -22,6 +23,25 @@ describe('effect kinds', () => {
     expect(EFFECT_LABELS.offset).toBe('Offset path')
     expect(EFFECT_LABELS.round_corners).toBe('Round corners')
     expect(EFFECT_LABELS.roughen).toBe('Roughen')
+    expect(EFFECT_LABELS.boolean).toBe('Combine shapes')
+    expect(EFFECT_LABELS.morph).toBe('Morph to shape')
+    expect(EFFECT_LABELS.warp).toBe('Warp')
+    expect(EFFECT_LABELS.shatter).toBe('Shatter')
+    expect(EFFECT_LABELS.long_shadow).toBe('Long shadow')
+    expect(EFFECT_LABELS.outer_glow).toBe('Outer glow')
+    expect(EFFECT_LABELS.inner_glow).toBe('Inner glow')
+    expect(EFFECT_LABELS.color_overlay).toBe('Colour overlay')
+    expect(EFFECT_LABELS.gradient_overlay).toBe('Gradient overlay')
+    expect(EFFECT_LABELS.stroke_from_alpha).toBe('Stroke from alpha')
+    expect(EFFECT_LABELS.directional_blur).toBe('Directional blur')
+    expect(EFFECT_LABELS.radial_blur).toBe('Radial blur')
+    expect(EFFECT_LABELS.zoom_blur).toBe('Zoom blur')
+    expect(EFFECT_LABELS.levels).toBe('Levels')
+    expect(EFFECT_LABELS.posterise).toBe('Posterise')
+    expect(EFFECT_LABELS.threshold).toBe('Threshold')
+    expect(EFFECT_LABELS.invert).toBe('Invert')
+    expect(EFFECT_LABELS.rough_edge).toBe('Rough edge')
+    expect(EFFECT_LABELS.ink_bleed).toBe('Ink bleed')
   })
   it('orders background blur first and drop shadow last', () => {
     expect(EFFECT_ORDER[0]).toBe('background_blur')
@@ -29,8 +49,8 @@ describe('effect kinds', () => {
     expect(isPinnedKind('dof')).toBe(true)
     expect(isPinnedKind('bloom')).toBe(false)
   })
-  it('the four geometry kinds are contiguous in EFFECT_ORDER and precede every pixel kind', () => {
-    expect(GEOMETRY_KINDS).toEqual(['trim', 'offset', 'round_corners', 'roughen'])
+  it('the nine geometry kinds are contiguous in EFFECT_ORDER and precede every pixel kind', () => {
+    expect(GEOMETRY_KINDS).toEqual(['trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow'])
     const indices = GEOMETRY_KINDS.map(k => EFFECT_ORDER.indexOf(k))
     for (let i = 1; i < indices.length; i++) expect(indices[i]).toBe(indices[i - 1]! + 1)
     const lastGeometry = Math.max(...indices)
@@ -45,9 +65,14 @@ describe('effect kinds', () => {
     const expected: Record<EffectKind, string> = {
       background_blur: 'backdrop', dof: 'backdrop',
       trim: 'geometry', offset: 'geometry', round_corners: 'geometry', roughen: 'geometry',
-      inner_shadow: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
+      boolean: 'geometry', morph: 'geometry', warp: 'geometry', shatter: 'geometry', long_shadow: 'geometry',
+      inner_shadow: 'pixel', inner_glow: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
       bloom: 'pixel', vignette: 'pixel', grain: 'pixel', torn_edge: 'pixel',
-      feather: 'pixel', layer_blur: 'pixel',
+      feather: 'pixel', layer_blur: 'pixel', outer_glow: 'pixel',
+      color_overlay: 'pixel', gradient_overlay: 'pixel', stroke_from_alpha: 'pixel',
+      directional_blur: 'pixel', radial_blur: 'pixel', zoom_blur: 'pixel',
+      levels: 'pixel', posterise: 'pixel', threshold: 'pixel', invert: 'pixel',
+      rough_edge: 'pixel', ink_bleed: 'pixel',
       drop_shadow: 'stamp',
     }
     for (const k of EFFECT_ORDER) expect(regionOf(k), k).toBe(expected[k])
@@ -67,6 +92,13 @@ describe('effect kinds', () => {
     expect(createEffect('offset')).toMatchObject({ type: 'offset', distance: 0.01, visible: true })
     expect(createEffect('round_corners')).toMatchObject({ type: 'round_corners', radius: 0.02, visible: true })
     expect(createEffect('roughen')).toMatchObject({ type: 'roughen', amount: 0.02, detail: 8, seed: 1, visible: true })
+    // boolean defaults to unite with no ref (a no-op until the picker sets a sibling).
+    expect(createEffect('boolean')).toMatchObject({ type: 'boolean', op: 'unite', visible: true })
+    expect((createEffect('boolean') as any).refLayerId).toBeUndefined()
+    // morph defaults to amount 0.5 with no ref (a no-op until the picker sets a sibling).
+    expect(createEffect('morph')).toMatchObject({ type: 'morph', amount: 0.5, visible: true })
+    expect((createEffect('morph') as any).refLayerId).toBeUndefined()
+    expect(createEffect('warp')).toMatchObject({ type: 'warp', field: 'bulge', amount: 0.3, frequency: 3, visible: true })
     const a = createEffect('trim'), b = createEffect('trim')
     expect(a.id).not.toBe(b.id)
   })
@@ -315,5 +347,79 @@ describe('rasterablePasses', () => {
   })
   it('refuses a blur with no edge pass at all', () => {
     expect(rasterablePasses(t(['layer_blur']))).toBe(false)
+  })
+})
+
+describe('canTakeGeometry (add-menu gating predicate)', () => {
+  // Imported from the composable, not the pure stack, because the decorated-text branch
+  // reads a text layer's stroke stack (textHasDecoration). It is the vector half of
+  // needsComputedOutline — the same answer the renderer uses — so the menu greys geometry on
+  // exactly the layers the renderer would silently drop it on.
+  const vec = (kind: string, extra: Record<string, unknown> = {}) =>
+    ({ id: 'l', kind, ...extra }) as unknown as Parameters<typeof canTakeGeometry>[0]
+
+  it('accepts every vector kind that can produce an outline', () => {
+    for (const k of ['rect', 'ellipse', 'path', 'polygon', 'star', 'text']) {
+      expect(canTakeGeometry(vec(k)), k).toBe(true)
+    }
+  })
+  it('rejects kinds with no outline to transform', () => {
+    for (const k of ['image', 'wired', 'brush', 'line', 'deal', 'scatter', 'mosaic']) {
+      expect(canTakeGeometry(vec(k)), k).toBe(false)
+    }
+  })
+  it('rejects underlined or struck-through text (it inks with fillText)', () => {
+    expect(canTakeGeometry(vec('text', { underline: true }))).toBe(false)
+    expect(canTakeGeometry(vec('text', { strikethrough: true }))).toBe(false)
+  })
+  it('accepts plain text with no decoration', () => {
+    expect(canTakeGeometry(vec('text', { text: 'hi' }))).toBe(true)
+  })
+  it('rejects text carrying a painting distance-band stroke, accepts an inert one', () => {
+    // A band that actually paints (has paint + width + distance) is a dilation with no outline.
+    const painting = vec('text', {
+      strokes: [{ id: 's1', paint: '#000', width: 0.01, distance: 0.02, visible: true }],
+    })
+    expect(canTakeGeometry(painting)).toBe(false)
+    // An inert band (zero width) must NOT suppress geometry (Minor 2 tightening).
+    const inert = vec('text', {
+      strokes: [{ id: 's1', paint: '#000', width: 0, distance: 0.02, visible: true }],
+    })
+    expect(canTakeGeometry(inert)).toBe(true)
+    // A band with distance but no paint must not suppress it either.
+    const unpainted = vec('text', {
+      strokes: [{ id: 's1', paint: 'none', width: 0.01, distance: 0.02, visible: true }],
+    })
+    expect(canTakeGeometry(unpainted)).toBe(true)
+  })
+})
+
+describe('canWarpRaster (raster warp eligibility, F3 4b)', () => {
+  // The SEPARATE per-kind predicate for the ONE geometry kind (warp) that also runs on raster
+  // layers — a pixel-domain mesh warp of the content, not an outline transform. Deliberately
+  // NOT canTakeGeometry (vector-only). Image / wired / brush qualify; nothing else does.
+  const vec = (kind: string, extra: Record<string, unknown> = {}) =>
+    ({ id: 'l', kind, ...extra }) as unknown as Parameters<typeof canWarpRaster>[0]
+
+  it('accepts the three raster content kinds', () => {
+    for (const k of ['image', 'wired', 'brush']) {
+      expect(canWarpRaster(vec(k)), k).toBe(true)
+    }
+  })
+  it('rejects every vector kind (they take the 4a outline warp instead)', () => {
+    for (const k of ['rect', 'ellipse', 'path', 'polygon', 'star', 'text']) {
+      expect(canWarpRaster(vec(k)), k).toBe(false)
+    }
+  })
+  it('rejects the generative / line kinds that paint outside their box', () => {
+    for (const k of ['line', 'deal', 'scatter', 'mosaic']) {
+      expect(canWarpRaster(vec(k)), k).toBe(false)
+    }
+  })
+  it('is disjoint from canTakeGeometry — no kind is both raster- and vector-warpable', () => {
+    for (const k of ['rect', 'ellipse', 'path', 'polygon', 'star', 'text',
+      'image', 'wired', 'brush', 'line', 'deal', 'scatter', 'mosaic']) {
+      expect(canWarpRaster(vec(k)) && canTakeGeometry(vec(k)), k).toBe(false)
+    }
   })
 })
