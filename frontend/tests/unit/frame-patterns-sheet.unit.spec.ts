@@ -52,4 +52,11 @@ describe('sheet model', () => {
     const imaged = sheetFor(ctxFor({ elements: withImage }), 7).map(t => t.patternId)
     expect(imaged).toContain('split')          // a photo enables image moves
   })
+
+  it('photo-moves mode shows image moves with a stand-in, no real photo needed', () => {
+    const off = inferElements([{ id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 }])            // no image, imageMode off
+    expect(sheetFor(ctxFor({ elements: off }), 7).map(t => t.patternId)).not.toContain('split')
+    const on = inferElements([{ id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 }], null, true)  // imageMode on
+    expect(sheetFor(ctxFor({ elements: on }), 7).map(t => t.patternId)).toContain('split')
+  })
 })
