@@ -6824,7 +6824,7 @@ onUnmounted(() => {
           <polygon
             :points="`${localHandlePositions.tl.x},${localHandlePositions.tl.y} ${localHandlePositions.tr.x},${localHandlePositions.tr.y} ${localHandlePositions.br.x},${localHandlePositions.br.y} ${localHandlePositions.bl.x},${localHandlePositions.bl.y}`"
             fill="none" :stroke="editImage ? 'url(#editStrokeGrad)' : '#ffffff'"
-            :stroke-width="editImage ? 3 : 2" :class="editImage ? 'edit-stroke-anim' : ''"
+            :stroke-width="editImage ? 2.5 : 2"
             vector-effect="non-scaling-stroke"
           />
           <line
@@ -9748,9 +9748,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* Edit-image selection outline: marching dashes over the pastel gradient stroke. */
-@keyframes editStrokeMarch { to { stroke-dashoffset: -30; } }
-.edit-stroke-anim { stroke-dasharray: 9 6; animation: editStrokeMarch 0.9s linear infinite; }
 /* Glassy section cards in the inspector — each top-level control group becomes a
    bordered translucent card (the studios' panel look) without restructuring the
    template. Direct children only, so nested grids/rows are unaffected. */
