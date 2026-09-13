@@ -48,7 +48,7 @@ describe('useLayoutSheet', () => {
     expect(editor.commit).toHaveBeenCalledTimes(1)
     expect(editor.commit.mock.calls[0][0]).toEqual(tile.plan.layers)
     expect(editor.writeOrder.mock.calls[0][0]).toEqual(tile.plan.order)
-    expect(remember).toHaveBeenCalledWith({ patternId: tile.patternId, seed: tile.seed, shapeMode: undefined })
+    expect(remember).toHaveBeenCalledWith({ patternId: tile.patternId, seed: tile.seed, shapeMode: undefined, imageMode: false })
   })
   it('a frame with no text has no tiles', () => {
     const { sheet } = harness({ sailor_localLayers: [img] })
@@ -60,5 +60,12 @@ describe('useLayoutSheet', () => {
     sheet.setShapeMode({ id: 'circle' })
     expect(sheet.shapeMode.value).toEqual({ id: 'circle' })
     expect(sheet.tiles.value.map(t => t.patternId)).toContain('knockout')      // now a shape is available
+  })
+  it('set image mode makes image patterns fit even with no photo', () => {
+    const { sheet } = harness({ sailor_localLayers: [title] })  // no image layer
+    expect(sheet.tiles.value.map(t => t.patternId)).not.toContain('split')  // no photo yet
+    sheet.setImageMode(true)
+    expect(sheet.imageMode.value).toBe(true)
+    expect(sheet.tiles.value.map(t => t.patternId)).toContain('split')      // now image patterns fit
   })
 })
