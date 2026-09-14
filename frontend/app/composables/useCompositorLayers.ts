@@ -392,6 +392,9 @@ export interface TextLayer extends LayerCommon {
                          // set => words auto-wrap to fit, unset => explicit \n only
   boxH?: number          // optional text-box height (normalized to canvas width);
                          // enables valign + vertical justify. Absent => natural height.
+  boxFill?: boolean      // fill mode: derive fontSize so the wrapped text fills
+                         // boxW (and fits boxH when set). fontSize is then ignored
+                         // for rendering. Absent/false => size-first (unchanged).
   /** Live variable-font axis values (wght/wdth/slnt/…). When present, `wght`
    *  drives the numeric font-weight in the canvas `font` shorthand (the only
    *  variable-axis path that renders on every browser); the full set is also
@@ -4384,7 +4387,30 @@ interface TextOutlineCollect {
   box: { w: number; h: number }
 }
 
+/** Fill mode: the largest fontSize (normalized to width) at which the wrapped
+ *  text still fits boxW (and boxH when set). A binary search over the same wrap +
+ *  measure the renderer uses, so what fits here is what draws. */
+function fillFontSize(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number): number {
+  const boxWpx = (layer.boxW ?? 0) * W
+  if (!(boxWpx > 0)) return layer.fontSize
+  const boxHpx = (layer.boxH ?? 0) * W
+  const fits = (fsPx: number): boolean => {
+    const probe = { ...layer, fontSize: fsPx / W } as TextLayer
+    const lines = wrappedTextLines(ctx, probe, W)
+    applyFont(ctx, probe, W)
+    let maxW = 0
+    for (const ln of lines) maxW = Math.max(maxW, ctx.measureText(ln || ' ').width)
+    if (maxW > boxWpx + 0.5) return false
+    if (boxHpx > 0 && lines.length * fsPx * layer.lineHeight > boxHpx + 0.5) return false
+    return true
+  }
+  let lo = 2, hi = (boxHpx > 0 ? boxHpx : boxWpx) * 3
+  for (let i = 0; i < 32 && hi - lo > 0.25; i++) { const mid = (lo + hi) / 2; if (fits(mid)) lo = mid; else hi = mid }
+  return lo / W
+}
+
 function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, collect?: TextOutlineCollect) {
+  if (layer.boxFill && (layer.boxW ?? 0) > 0 && !layer.expressive && !layer.path) layer = { ...layer, fontSize: fillFontSize(ctx, layer, W) }
   const lineH = layer.fontSize * W * layer.lineHeight
   // A path takes over the whole layout: one run along a curve, so box wrapping,
   // valign, justify and expressive placement have nothing to act on. `null` from
