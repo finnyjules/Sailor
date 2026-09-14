@@ -723,6 +723,10 @@ function openLayoutShape(e: MouseEvent) {
 function pickLayoutShape(id: string) {
   layoutSheet.setShapeMode(id === SHAPE_NONE ? null : { id })
 }
+function onLayoutPalette(fam: { hexes: string[] }) { layoutSheet.setPaletteMode(fam.hexes) }
+function onLayoutPaletteStops(stops: GradientStop[]) { layoutSheet.setPaletteMode(stops.map(s => s.color)) }
+function clearLayoutPalette() { layoutSheet.setPaletteMode(null) }
+const layoutPaletteHexes = computed(() => layoutSheet.paletteMode.value)
 
 // Face pickers for the Layout tab: title face → the inferred title layer; text
 // face → the inferred details/caption/date layers; Suggest pairs a text face
@@ -7715,6 +7719,18 @@ onUnmounted(() => {
           <StudioSwitch :model-value="layoutSheet.imageMode.value" data-testid="layout-photo-moves"
             label="Photo moves" hint="Show photo layouts with a grey stand-in, even before you drop a photo."
             @update:model-value="layoutSheet.setImageMode" />
+        </div>
+        <div class="px-4 pt-3 space-y-1.5">
+          <div class="flex items-center gap-2 text-[11px] text-white/55">
+            <span class="shrink-0">Palette</span>
+            <span v-if="layoutPaletteHexes" class="flex items-center gap-1 ml-1">
+              <span v-for="(h, i) in layoutPaletteHexes" :key="i" class="size-3.5 rounded-sm ring-1 ring-white/10" :style="{ background: h }"></span>
+            </span>
+            <span v-else class="text-white/40 italic">Frame's own colours</span>
+            <button v-if="layoutPaletteHexes" data-testid="layout-palette-clear"
+              class="ml-auto h-6 px-2 shrink-0 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80" @click="clearLayoutPalette">Reset</button>
+          </div>
+          <PalettePicker mode="stops" data-testid="layout-palette" @apply-family="onLayoutPalette" @apply-stops="onLayoutPaletteStops" />
         </div>
         <div data-testid="layout-sheet" class="p-4 flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
           <p v-if="!layoutSheet.tiles.value.length" class="text-xs text-white/40 italic">Add a text layer to get layout options. The largest text is read as the title.</p>
