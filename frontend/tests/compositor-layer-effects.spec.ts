@@ -1498,14 +1498,19 @@ test.describe('Frame shader effect inspector (F5 Task 3)', () => {
     await page.locator('[data-testid="add-effect-item"][data-kind="shader"]').click()
     await page.getByTestId('shader-fx-picker').click()
 
+    // Scope to the teleported CatalogModal (identified by its "Shader effects" heading), so the
+    // card locator can't also match the picker TRIGGER button, which shows the current selection
+    // name and lives outside the modal — matching both is a strict-mode violation.
+    const catalog = page.locator('div.fixed.inset-0').filter({ hasText: 'Shader effects' })
+
     // Wait generously — the catalog is fetched from the ComfyUI backend and this is the first
     // thing in the suite that needs it warm. Once this card is visible the catalog (and
     // therefore the `effectReadsInput` filter) has genuinely resolved.
-    await expect(page.getByRole('button', { name: /chromatic aberration/i })).toBeVisible({ timeout: 20_000 })
+    await expect(catalog.getByRole('button', { name: /chromatic aberration/i })).toBeVisible({ timeout: 20_000 })
 
     // Asserted only AFTER the catalog is confirmed warm above, so this is a real absence
     // (the effect was excluded), not "the list just hasn't loaded yet" giving a false pass.
-    await expect(page.getByRole('button', { name: /plasma/i })).toHaveCount(0)
+    await expect(catalog.getByRole('button', { name: /plasma/i })).toHaveCount(0)
   })
 
   test('picking an effect renders it over the layer, and a param dial moves the render again', async ({ page }) => {
@@ -1517,7 +1522,9 @@ test.describe('Frame shader effect inspector (F5 Task 3)', () => {
     await openFxMenuFirst(page)
     await page.locator('[data-testid="add-effect-item"][data-kind="shader"]').click()
     await page.getByTestId('shader-fx-picker').click()
-    const card = page.getByRole('button', { name: /chromatic aberration/i })
+    // Scope to the teleported CatalogModal so the card can't also match the picker trigger button.
+    const catalog = page.locator('div.fixed.inset-0').filter({ hasText: 'Shader effects' })
+    const card = catalog.getByRole('button', { name: /chromatic aberration/i })
     await expect(card).toBeVisible({ timeout: 20_000 })
     await card.click()
     await page.getByRole('button', { name: 'Use effect' }).click()
