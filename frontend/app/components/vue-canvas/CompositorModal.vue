@@ -8909,6 +8909,7 @@ onUnmounted(() => {
                         <option value="edges">Edges</option>
                         <option value="staircase">Staircase</option>
                         <option value="alternate">Alternate</option>
+                        <option value="ring">Ring</option>
                       </select>
                     </div>
                   </div>
