@@ -11,7 +11,7 @@
  * the seed. Nothing ever overflows the box (each word's left is clamped).
  */
 
-export type PlacementRule = 'random' | 'edges' | 'staircase' | 'alternate'
+export type PlacementRule = 'random' | 'edges' | 'staircase' | 'alternate' | 'ring'
 
 export interface ExpressiveParams {
   /** Words per line; grouped in reading order. Integer >= 1. */
@@ -98,6 +98,29 @@ export function layoutExpressive(opts: {
   // is fully determined by (seed, text, params) — pulled even when an axis is
   // justified, so toggling justify on one axis leaves the other axis unchanged.
   const rng = mulberry32((params.seed | 0) ^ 0x9e3779b9)
+
+  // Ring: place every token around a circle centred in the box, bypassing the
+  // line bands. jitterX wobbles the angle, jitterY the radius; the RNG is still
+  // pulled per token (x then y) so the stream matches the other rules.
+  if (params.placement === 'ring' && !justifyX && !justifyY) {
+    const H = boxHeight ?? boxWidth
+    const cx = boxWidth / 2, cy = H / 2
+    const n = words.length
+    const rBase = Math.max(0, Math.min(boxWidth, H) / 2 - lineHeight * 0.6)
+    const ring: PlacedWord[] = []
+    for (let i = 0; i < n; i++) {
+      const text = words[i]!
+      const w = measure(text)
+      const rx = rng(), ry = rng()
+      const ang = -Math.PI / 2 + (i / n) * Math.PI * 2 + (rx - 0.5) * jx * (Math.PI / Math.max(1, n))
+      const r = rBase * (1 - (ry - 0.5) * jy * 0.4)
+      const gx = cx + r * Math.cos(ang)
+      const gy = cy + r * Math.sin(ang)
+      const maxLeft = Math.max(0, boxWidth - w)
+      ring.push({ text, line: 0, x: clamp(gx - w / 2, 0, maxLeft), y: gy - lineHeight / 2, w })
+    }
+    return { words: ring, lines: 1, width: boxWidth, height: H }
+  }
 
   const placed: PlacedWord[] = []
   for (let li = 0; li < lineCount; li++) {

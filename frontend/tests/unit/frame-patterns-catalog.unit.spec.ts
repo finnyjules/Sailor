@@ -11,7 +11,7 @@ describe('catalog', () => {
       'runoff', 'statement', 'index', 'shapeCounter', 'photoBehind',
       'tilt', 'bottomHeavy', 'fourCorners', 'spacedLines', 'ragged', 'edges', 'staircase', 'block',
       'knockout', 'shapeBleed', 'badge', 'split', 'fullBleed', 'diagonal', 'wall',
-      'scatter', 'cascade',
+      'scatter', 'cascade', 'ring', 'cells',
     ]))
   })
   it('every pattern is deterministic and returns at least a title op', () => {
