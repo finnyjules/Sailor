@@ -438,6 +438,17 @@ describe('shader effect kind (F5 Task 1: model only, no render)', () => {
     expect(e.speed).toBe(1)
     expect(e.seed).toBe(42)
   })
+  it('createEffect(shader) gives each instance its OWN params object (no shared-mutable-default)', () => {
+    // Whole-slice review Minor 1: LOCAL_DEFAULTS['shader'].params is one object literal;
+    // a shallow `{ ...local }` spread would hand every new shader effect that SAME
+    // `params` reference, so tuning one layer's shader params would mutate every other
+    // freshly-created shader effect's params too.
+    const a = createEffect('shader') as any
+    const b = createEffect('shader') as any
+    expect(a.params).not.toBe(b.params)
+    a.params.amount = 0.5
+    expect(b.params).toEqual({})
+  })
   it('effectStackOf round-trips a stored shader effect untouched on a new-shape layer', () => {
     const stored: EffectInstance[] = [
       { id: 'a', type: 'shader', effectId: 'chromatic_aberration', params: { amount: 0.5 }, speed: 1, seed: 42, visible: true } as any,

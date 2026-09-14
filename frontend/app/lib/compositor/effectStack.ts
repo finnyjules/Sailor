@@ -274,7 +274,11 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {
   const local = LOCAL_DEFAULTS[kind]
-  if (local) return { ...local }
+  // Deep clone here too: a shallow spread hands every new `shader` effect the SAME
+  // `params: {}` object reference, so tuning one layer's shader params would mutate
+  // every other freshly-created shader effect's params too (see the POST_EFFECT_DEFAULTS
+  // clone below, which exists for the identical reason with `stops`).
+  if (local) return JSON.parse(JSON.stringify(local)) as Record<string, unknown>
   const post = POST_EFFECT_DEFAULTS[kind as PostEffect['type']]
   // Deep clone, matching `defaultPostEffect`: a shallow spread would hand every new
   // gradient map the SAME `stops` array, so editing one layer's stops would edit them all.

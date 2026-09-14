@@ -5164,13 +5164,14 @@ export function hasAnimatedShaderFill(items: StackItem[], background?: Paint): b
   // F5 Task 4: a shader-catalog-as-a-pass EFFECT (layer.effects, distinct from the
   // fill/stroke Paint checked above) can be just as animated as a shader FILL, and the
   // modal's live loop only advances when THIS predicate says so — an animated effect
-  // that isn't recognised here renders once and freezes. "Animated" mirrors the picked
-  // catalog effect's own def (`animated: true` — it samples u_time in its GLSL) OR a
-  // nonzero speed (a user-dialled speed on an effect that isn't itself flagged
-  // animated still drives renderFieldWithBase's u_time scale — see the two-speed fix).
+  // that isn't recognised here renders once and freezes. "Animated" requires BOTH the
+  // picked catalog effect's own def (`animated: true` — it samples u_time in its GLSL)
+  // AND a nonzero speed — a static catalog def (e.g. the default `chromatic_aberration`,
+  // `animated: false`) never reads u_time no matter what speed is dialled in, so OR'ing
+  // in `speed !== 0` falsely called it live and spun a perpetual identical-frame loop.
   // An invisible effect never paints, so it never needs the clock either.
   const isLiveShaderEffect = (e: LayerEffect): boolean =>
-    e.type === 'shader' && e.visible && (getEffectSync(e.effectId)?.animated === true || e.speed !== 0)
+    e.type === 'shader' && e.visible && getEffectSync(e.effectId)?.animated === true && e.speed !== 0
   for (const it of items) {
     if (it.type !== 'local') continue
     if (layerPaints(it.layer).some(isLiveShader)) return true

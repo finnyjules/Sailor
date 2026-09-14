@@ -13,10 +13,12 @@ import { setShaderFxCatalog } from '~/lib/shaderfx/catalogStore'
 
 // F5 Task 4: a shader-catalog-as-a-pass EFFECT (distinct from a shader FILL above) can
 // also be animated, and the modal's live loop must recognise it too, or a picked
-// animated effect (or one with a nonzero speed) renders once and freezes. `anim_fx`'s
-// catalog def is animated:true; `still_fx`'s is animated:false — both fixtures are
-// otherwise identical so only the `animated` flag (and, separately, `speed`) is under
-// test.
+// animated effect at a nonzero speed renders once and freezes. Live requires BOTH the
+// catalog def's `animated: true` AND a nonzero speed — a static def (e.g. the real
+// `chromatic_aberration`) never reads u_time regardless of speed, so speed alone must
+// never flip this true. `anim_fx`'s catalog def is animated:true; `still_fx`'s is
+// animated:false — both fixtures are otherwise identical so only the `animated` flag
+// (and, separately, `speed`) is under test.
 setShaderFxCatalog({
   version: 1,
   effects: [
@@ -108,12 +110,16 @@ describe('hasAnimatedShaderFill', () => {
   // predicate, or the modal's live loop never advances for it and the effect
   // freezes after its first paint.
   describe('a shader EFFECT (layer.effects, not layer.fill)', () => {
-    it('is true when the picked effect\'s catalog def is animated, even at speed 0', () => {
-      expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('anim_fx', 0))])).toBe(true)
+    it('is false when the picked effect\'s catalog def is animated but speed is 0 (frozen at t=0)', () => {
+      expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('anim_fx', 0))])).toBe(false)
     })
 
-    it('is true when speed !== 0, even for a non-animated catalog def', () => {
-      expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('still_fx', 1))])).toBe(true)
+    it('is true when the picked effect\'s catalog def is animated AND speed !== 0', () => {
+      expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('anim_fx', 1))])).toBe(true)
+    })
+
+    it('is false when speed !== 0 but the catalog def is NOT animated (static frag never reads u_time)', () => {
+      expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('still_fx', 1))])).toBe(false)
     })
 
     it('is false for a non-animated effect at speed 0 (genuinely still)', () => {
