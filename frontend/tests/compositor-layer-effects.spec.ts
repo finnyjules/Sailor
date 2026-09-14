@@ -1458,3 +1458,89 @@ test.describe('Frame shader-catalog pixel pass (F5 Task 2)', () => {
     expect(cornerAfter.a).toBeLessThan(20)
   })
 })
+
+/**
+ * F5 Task 3 — the shader effect INSPECTOR: picking a catalog effect for a layer's `shader`
+ * pass and tuning its params. Distinct from Task 2 above (the GPU pass itself, exercised there
+ * via direct `setEffects` writes) — this suite drives the real add → pick → tune UI: the tree
+ * "+" menu, the reused `CatalogModal` picker (filtered to `effectReadsInput` effects, the same
+ * gate the glass lens's Reads picker applies), and the derived param dials
+ * (`buildShaderParamRows` / `derivedShaderFillControls`, shared with ShaderFillEditor.vue's
+ * shader-FILL editor).
+ *
+ * `plasma` is the picker's confirmed-excluded generative: its .frag declares
+ * `uniform sampler2D u_image0` (every catalog frag does) but never calls `texture(u_image0, …)`
+ * — a bare declaration is NOT enough for `effectReadsInput` (catalogStore.ts's own doc), so this
+ * is a real "never samples its input" case, not a guess from the effect's name or category.
+ * `chromatic_aberration` is the confirmed-included input-sampler (it per-channel offsets a real
+ * `texture(u_image0, …)` read — Task 2's own fixture above) and is also the `shader` kind's
+ * `LOCAL_DEFAULTS` effect (effectStack.ts), so a freshly added shader effect already renders it.
+ */
+test.describe('Frame shader effect inspector (F5 Task 3)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  test('adding a Shader effect shows the breadcrumb, and its picker opens', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await openFxMenuFirst(page)
+    await page.locator('[data-testid="add-effect-item"][data-kind="shader"]').click()
+
+    await expect(page.getByTestId('effect-breadcrumb')).toContainText('Shader')
+
+    await page.getByTestId('shader-fx-picker').click()
+    await expect(page.getByText('Shader effects')).toBeVisible()
+  })
+
+  test('the picker lists an input-sampling effect and excludes a confirmed pure-generative one', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await openFxMenuFirst(page)
+    await page.locator('[data-testid="add-effect-item"][data-kind="shader"]').click()
+    await page.getByTestId('shader-fx-picker').click()
+
+    // Wait generously — the catalog is fetched from the ComfyUI backend and this is the first
+    // thing in the suite that needs it warm. Once this card is visible the catalog (and
+    // therefore the `effectReadsInput` filter) has genuinely resolved.
+    await expect(page.getByRole('button', { name: /chromatic aberration/i })).toBeVisible({ timeout: 20_000 })
+
+    // Asserted only AFTER the catalog is confirmed warm above, so this is a real absence
+    // (the effect was excluded), not "the list just hasn't loaded yet" giving a false pass.
+    await expect(page.getByRole('button', { name: /plasma/i })).toHaveCount(0)
+  })
+
+  test('picking an effect renders it over the layer, and a param dial moves the render again', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page)
+    const bare = await stackPixels(page)
+
+    await openFxMenuFirst(page)
+    await page.locator('[data-testid="add-effect-item"][data-kind="shader"]').click()
+    await page.getByTestId('shader-fx-picker').click()
+    const card = page.getByRole('button', { name: /chromatic aberration/i })
+    await expect(card).toBeVisible({ timeout: 20_000 })
+    await card.click()
+    await page.getByRole('button', { name: 'Use effect' }).click()
+
+    // The pick reached the stored effect (not just the picker's own UI state) …
+    await expect.poll(() => page.evaluate(() =>
+      ((window as any).__compositorLayers()[0].effects || []).find((e: any) => e.type === 'shader')?.effectId))
+      .toBe('chromatic_aberration')
+
+    // … and moved real pixels vs the plain, shader-less layer.
+    const picked = await stackPixels(page)
+    expect(picked).not.toBe(bare)
+    const d1 = await pixelDelta(page, bare, picked)
+    expect(d1.sizeMismatch).toBe(false)
+    expect(d1.changed).toBeGreaterThan(50)
+
+    // Move the Amount dial via its accessible slider role (StudioRow's own keyboard path,
+    // step 0.002 over 0..0.08) — a live uniform must move the render again, not sit dead.
+    const track = page.getByTestId('shader-fx-param-amount').locator('[role="slider"]')
+    await track.focus()
+    for (let i = 0; i < 20; i++) await track.press('ArrowRight')
+
+    const tuned = await stackPixels(page)
+    expect(tuned).not.toBe(picked)
+  })
+})
