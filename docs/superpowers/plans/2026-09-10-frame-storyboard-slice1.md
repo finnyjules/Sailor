@@ -12,16 +12,19 @@
 
 ## Global Constraints
 
-- **Shared checkout — private git index for EVERY commit.** Several sessions share this working tree, so a bare `git commit` after `git add` commits whatever anyone has staged. Every commit step MUST run:
+- **The CONTROLLER commits, by hunk. Subagents DO NOT commit.** This working tree is shared by several live sessions and is currently dirty with dozens of other sessions' uncommitted files (see the opening `git status`). A subagent that runs `git add`/`git commit` will sweep foreign hunks into our commit. So: a subagent implements its task and leaves the working tree changed, then REPORTS the exact paths it touched; the controller (this session) stages ONLY those hunks and commits. Use the private index for every controller commit:
   ```bash
   export GIT_INDEX_FILE=/private/tmp/sb-index
   git read-tree HEAD
-  git add <ONLY your exact paths>
-  git diff --cached --stat        # confirm ONLY your files
+  # add ONLY our files; on a file another session also has open, add by hunk:
+  git apply --cached <(git diff -- frontend/app/components/vue-canvas/CompositorModal.vue)   # then review
+  git add frontend/app/lib/frame/storyboard/... frontend/tests/unit/...                        # our own new files
+  git diff --cached --stat        # MUST list only our paths
   git commit -m "..."
   unset GIT_INDEX_FILE
   ```
-  Then, in a SEPARATE shell (so `GIT_INDEX_FILE` is unset), resync the shared index: `git restore --staged <modified paths>` and `git reset -q -- <newly added paths>`. Never `git stash`. On a file another session has open (`CompositorModal.vue`, `useCompositorLayers.ts`), stage only your own hunks with `git apply --cached`.
+  Then, in a SEPARATE shell (so `GIT_INDEX_FILE` is unset), resync the shared index: `git restore --staged <modified paths>` and `git reset -q -- <newly added paths>`. Never `git stash`. The commit steps below say "hand back to controller to commit" — a subagent must not run them.
+- **Typecheck is baselined, not absolute.** `npm run typecheck` may already be RED at HEAD because another session's uncommitted change does not compile (the tree is dirty). Before Task 1, capture the baseline: `cd frontend && npm run typecheck 2>&1 | grep -c error` and save the error list. The gate for each task is "**no NEW typecheck error in a file this plan creates or modifies**", not a clean run. If a pre-existing error blocks a test file from running, note it and proceed against the isolated unit under test.
 - **Copy rules:** sentence case, no lowercase-first labels, no internal identifiers in UI text. Words for people: "Board", "Hold", "Transition", "enters", "leaves", "travels", "loops". "Move" keeps its gallery meaning.
 - **Byte-identity:** a Frame with no storyboard must render byte-for-byte as today. New keyframe fields (`scaleX`/`scaleY`/`color`) absent ⇒ identical output.
 - **Persistence key:** the storyboard lives at `node.data.properties.sailor_storyboard` (round-trips through the node properties path; do NOT store on `node.data.*`).
@@ -29,7 +32,22 @@
   ```
   Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
   ```
-- **Run unit tests** with `cd frontend && npx vitest run <path>`. **Typecheck baseline** must not regress: `cd frontend && npm run typecheck`.
+- **Run unit tests** with `cd frontend && npx vitest run <path>`.
+
+---
+
+## Gaming log — hardening pass 2026-09-13
+
+Adversarial walk of every task against HEAD (the codebase moved several days since the plan was drafted). Fixes are folded into the tasks below; this is the index of what changed and why, so a reviewer can spot-check.
+
+1. **Editor construction signature (Tasks 6, 7) — was wrong, would fail at `useLocalLayerEditor(...)`.** The real signature is `useLocalLayerEditor(opts: EditorOpts)` where `EditorOpts = { node: () => any; dims: () => { w; h }; getRect: () => DOMRect | null; wiredDims?; ... }`. The plan's `useLocalLayerEditor(() => node)` is invalid. Every harness now passes `{ node: () => node, dims: () => ({ w: 1000, h: 1000 }), getRect: () => null }`.
+2. **Test node must be `reactive()` (Tasks 6, 7).** `localLayers`/`storyboard` are `computed(() => node()?.data?.properties?.…)`. A plain-object mutation is not tracked, so `commit()` writes but the computed returns stale and the tests read the wrong value. Wrap the harness node in `reactive()`. (The real app node is Vue-Flow-reactive, so this is a test-only concern — but without it the tests fail for a harness reason, masking real logic.)
+3. **Keyframe non-uniform scale is NOT read by the painter (Task 4) — confirmed, now a concrete step.** `drawLayerWithMotion` computes `sx = scale * (whole?.scaleX ?? 1)` where `whole` is the per-UNIT state; the keyframe's `scaleX`/`scaleY` land on `st.layer` and are ignored. Task 4 now folds `st.layer.scaleX/scaleY` into `sx`/`sy` with exact code.
+4. **Wired layers must be excluded from the compiler (Task 5).** A wired layer duplicated across boards would get poses → keyframes, but wired kinds have no keyframe paint path and their transform write-through to the backend must not be driven by `.animation`. The compiler now skips `layer.kind === 'wired'`; `applyAnimations` also leaves wired layers untouched.
+5. **Line-number anchors replaced with search anchors (Tasks 3, 6, 8, 9, 10).** The effects programme (F1–F5) and other work moved `useLocalLayerEditor.ts`, `evaluate.ts`, `CompositorModal.vue`. Every "line ~N" is now "search for `<string>`".
+6. **Import cycle checked and clear (Task 3).** `evaluate.ts` → `lib/studio/moves/ease.ts` → `lib/motion/easing.ts` + `./types` only; `ease.ts` does NOT import `evaluate.ts`. Adding `easeSample`/`mixHex` imports to `evaluate.ts` introduces no cycle. Verified 2026-09-13.
+7. **`recompile` commits twice per mutation (Tasks 7) — safe, documented.** `applyPoses`→`commit`, then `recompile`→`applyAnimations`→`commit`. `commit()` does NOT call `recordHistory` (verified), so history stays one entry (the explicit `recordHistory()` at the top of each op). The second `commit` reads `localLayers.value` fresh (post-poses), correct under a reactive node.
+8. **`applyAnimations` strips `.animation` from unmatched layers — intended, scoped.** Once a storyboard exists all motion is storyboard-derived, so stripping a stale hand-authored `.animation` is correct. It only runs inside `recompile`, which only runs when a storyboard exists.
 
 ---
 
@@ -390,7 +408,7 @@ Expected: FAIL — `scaleX`/`color` are not interpolated (undefined) and MoveEas
 
 - [ ] **Step 3a: Extend the `LayerKeyframe` interface**
 
-In `frontend/app/lib/motion/types.ts`, replace the `LayerKeyframe` interface (currently lines ~29-37) with:
+In `frontend/app/lib/motion/types.ts`, search for `export interface LayerKeyframe` and replace the whole interface with:
 
 ```ts
 export interface LayerKeyframe {
@@ -421,7 +439,7 @@ In `frontend/app/lib/motion/evaluate.ts`, add to the `UnitState` interface (afte
 
 - [ ] **Step 3c: Rewrite `evaluateKeyframes`**
 
-In `frontend/app/lib/motion/evaluate.ts`, replace the body of `evaluateKeyframes` (lines ~473-496). Add these imports at the top of the file if absent: `import { easeSample } from '~/lib/studio/moves/ease'`, `import { mixHex } from '~/lib/color/mix'`, `import type { MoveEase } from '~/lib/studio/moves/types'`.
+In `frontend/app/lib/motion/evaluate.ts`, search for `export function evaluateKeyframes` and replace the whole function. Add these imports near the existing `import { resolveEase, easeInOutQuad, linear } from './easing'` line: `import { easeSample } from '~/lib/studio/moves/ease'`, `import { mixHex } from '~/lib/color/mix'`, `import type { MoveEase } from '~/lib/studio/moves/types'`. (Verified cycle-free 2026-09-13: `ease.ts` imports only `~/lib/motion/easing` + `./types`, never `evaluate.ts`.)
 
 ```ts
 export function evaluateKeyframes(kfs: LayerKeyframe[], t: number): UnitState {
@@ -535,7 +553,20 @@ In `frontend/app/lib/motion/paint.ts`, inside `composeEffectiveLayer`, before `r
   return next
 ```
 
-Note: `scale`, `scaleX`, `scaleY` continue to be applied by the existing ctx-transform path in `drawLayerWithMotion` (unchanged) — verify `scaleX`/`scaleY` already flow there; the compositor path multiplies `scale` around the centre. If `scaleX`/`scaleY` are not yet read there, multiply them into the horizontal/vertical ctx scale next to the existing `scale` use (search for where `st.layer.scale` becomes a `ctx.scale`/`setTransform` in `drawLayerWithMotion`), so a rect can go wide and short.
+- [ ] **Step 3b: Wire the keyframe's non-uniform scale into `drawLayerWithMotion` (REQUIRED — confirmed missing 2026-09-13)**
+
+The painter currently reads only the per-UNIT `scaleX`/`scaleY`, so a keyframe's `st.layer.scaleX/scaleY` (a rect going wide and short between boards) does nothing. In `frontend/app/lib/motion/paint.ts`, search for `const sx = scale * (whole?.scaleX ?? 1)` and replace those two lines with:
+
+```ts
+  const sx = scale * (st.layer.scaleX ?? 1) * (whole?.scaleX ?? 1)
+  const sy = scale * (st.layer.scaleY ?? 1) * (whole?.scaleY ?? 1)
+```
+
+`scale` already carries `st.layer.scale` (via `motionScale`), so uniform scale is unchanged; this adds the independent axes.
+
+- [ ] **Step 3c: Add a test proving non-uniform keyframe scale reaches the transform**
+
+Append to `storyboard-keyframes.unit.spec.ts` a test that builds a `LayerMotionState` with `layer.scaleX = 3, scaleY = 0.5` and asserts, via a stub `ctx` recording `scale` calls passed to `drawLayerWithMotion` (or via a direct check of the computed `sx`/`sy` if you extract them into a tiny exported helper), that the horizontal scale is 3× and vertical 0.5×. If a full `ctx` stub is heavy, extract `function motionScaleXY(st): [number, number]` and unit-test that instead, then use it in `drawLayerWithMotion`.
 
 - [ ] **Step 4: Run tests**
 
@@ -704,6 +735,7 @@ export function compileStoryboard(
 
   for (const layer of layers) {
     const id = layer.id
+    if (layer.kind === 'wired') continue          // wired layers are static across boards in slice 1
     const present = presence(sb, id)
     if (!present.length) continue
     const live = sb.boards[curIdx]?.poses[id] ?? poseFromLayer(layer)
@@ -786,7 +818,10 @@ function keyframeFrom(pose: Pose, live: Pose, liveSize: number, layer: LocalLaye
 - [ ] **Step 4: Run tests**
 
 Run: `cd frontend && npx vitest run tests/unit/storyboard-compile.unit.spec.ts`
-Expected: PASS (6 tests). If the interior-gap or absent-at-end paths need a dedicated test, add one asserting the opacity-0 keyframes and the `out` spec, then make it pass.
+Expected: PASS (6 tests). Then add these THREE required cases and make them pass (do not skip — each is a distinct code path the six above don't cover):
+- **Interior gap:** title present on boards 1 and 3, absent on 2 → its keyframes include an `opacity: 0` pair spanning board 2's hold, and the window (`offset`+`duration`) still covers boards 1..3.
+- **Absent at end:** title present on boards 1 and 2, absent on 3 → `animations.title.out?.presetId` is set and the window ends at board 2's hold-end.
+- **Wired layer skipped:** a `kind: 'wired'` layer with poses on both boards produces NO entry in `animations`.
 
 - [ ] **Step 5: Commit**
 
@@ -812,26 +847,31 @@ git commit -m "feat(frame): storyboard compiler → keyframes + frame motion"
 ```ts
 // frontend/tests/unit/storyboard-composable.unit.spec.ts
 import { describe, it, expect } from 'vitest'
+import { reactive } from 'vue'
 import { createStoryboard } from '~/lib/frame/storyboard/types'
-// Harness: build a minimal fake node + editor. Import the real composable factory.
 import { useLocalLayerEditor } from '~/composables/useLocalLayerEditor'
 
-function fakeNode() {
-  const node: any = { data: { properties: { sailor_localLayers: [] } } }
-  return node
+// REAL signature: useLocalLayerEditor({ node, dims, getRect, ... }). The node MUST
+// be reactive() or the composable's computeds never invalidate on commit() writes.
+function makeEditor(layers: any[] = []) {
+  const node = reactive<any>({ data: { properties: { sailor_localLayers: layers } } })
+  const ed = useLocalLayerEditor({
+    node: () => node,
+    dims: () => ({ w: 1000, h: 1000 }),
+    getRect: () => null,
+  })
+  return { node, ed }
 }
 
 describe('editor storyboard storage + undo', () => {
   it('writeStoryboard round-trips through node properties', () => {
-    const node = fakeNode()
-    const ed = useLocalLayerEditor(() => node)
+    const { node, ed } = makeEditor()
     ed.writeStoryboard(createStoryboard('b1'))
     expect(ed.storyboard.value?.boards).toHaveLength(1)
     expect(node.data.properties.sailor_storyboard.current).toBe('b1')
   })
   it('undo restores the previous storyboard', () => {
-    const node = fakeNode()
-    const ed = useLocalLayerEditor(() => node)
+    const { ed } = makeEditor()
     ed.writeStoryboard(createStoryboard('b1'))
     ed.recordHistory()
     const sb2 = createStoryboard('b1'); sb2.boards.push({ id: 'b2', hold: 1, poses: {}, loops: [] })
@@ -842,7 +882,7 @@ describe('editor storyboard storage + undo', () => {
 })
 ```
 
-Note: check `useLocalLayerEditor`'s real call signature (it takes the `node` getter). If its exported shape differs, adapt the harness to the real signature — do not change the composable's public API for the test.
+Note: `EditorOpts` may declare more optional callbacks (`wiredDims?`, a host content resolver) — they are optional; the three required ones above are enough for the unit harness. Confirm the exact returned key names (`localLayers`, `commit`, `recordHistory`, `undo`, `snapshot`, `restore`, `selectedId`) from the composable's final `return { … }` block; the plan assumes these exist (verified at HEAD 2026-09-13).
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -865,9 +905,11 @@ function writeStoryboard(next: Storyboard | null) {
   else delete n.data.properties.sailor_storyboard
 }
 ```
-3. Extend the `Snapshot` type (line ~220) to add `storyboard: Storyboard | null`, and `snapshot()` (line ~224) to capture `storyboard: storyboard.value ? JSON.parse(JSON.stringify(storyboard.value)) : null`.
-4. Extend `restore(s)` (line ~225) to call `writeStoryboard(s.storyboard)`.
-5. Return `storyboard` and `writeStoryboard` from the composable's returned object.
+3. Search for `type Snapshot = {` and add `storyboard: Storyboard | null` to it; in `function snapshot()` add `storyboard: storyboard.value ? JSON.parse(JSON.stringify(storyboard.value)) : null`.
+4. Search for `function restore(` and add `writeStoryboard(s.storyboard)` inside it.
+5. Add `storyboard` and `writeStoryboard` to the composable's final `return { … }` object.
+
+Note: do NOT rely on any line number — the file moved since this plan was drafted (effects programme F1–F5). Anchor every edit on a search string.
 
 - [ ] **Step 4: Run tests**
 
@@ -904,15 +946,15 @@ git commit -m "feat(frame): editor stores storyboard, folded into undo"
 - [ ] **Step 1: Write the failing tests** (append)
 
 ```ts
+import { reactive } from 'vue'
 import { useStoryboard } from '~/composables/useStoryboard'
-import { capturePoses } from '~/lib/frame/storyboard/poses'
 
 function harness() {
-  const node: any = { data: { properties: { sailor_localLayers: [
+  const node = reactive<any>({ data: { properties: { sailor_localLayers: [
     { id: 'title', kind: 'text', x: 0.5, y: 0.5, rotation: 0, opacity: 1, text: 'X',
       fontFamily: 'Inter', fontWeight: 700, fontSize: 0.2, color: '#111', align: 'left', lineHeight: 1, strokeColor: '', strokeWidth: 0 },
   ] } } }
-  const ed = useLocalLayerEditor(() => node)
+  const ed = useLocalLayerEditor({ node: () => node, dims: () => ({ w: 1000, h: 1000 }), getRect: () => null })
   const motions: any[] = []; const animMaps: any[] = []
   const sbApi = useStoryboard({
     editor: ed,
@@ -921,6 +963,8 @@ function harness() {
   })
   return { node, ed, sbApi, motions, animMaps }
 }
+// NOTE the reactive() node: without it, ed.localLayers/ed.storyboard are cached
+// computeds that never see commit()'s writes, and selectBoard's capture reads stale.
 
 describe('useStoryboard', () => {
   it('addBoard creates the record and a second board that duplicates the first', () => {
@@ -1115,7 +1159,7 @@ git commit -m "feat(frame): storyboard composable — boards, materialise, recom
 - Test: manual/visual (covered by E2E in Task 11); no unit test for the SFC.
 
 **Interfaces:**
-- Consumes: `useStoryboard` API (Task 7); `inspectorTab` ref in `CompositorModal.vue` (line ~3059); `setMotion` (line ~3003); the editor's per-layer `.animation` writer.
+- Consumes: `useStoryboard` API (Task 7); the modal's `inspectorTab` ref (search `inspectorTab`); `setMotion` (search `function setMotion`); the editor's per-layer `.animation` writer.
 - Produces: a `'story'` value on the left-panel tab; `StoryPanel` emits `select-board`, `add-board`, and (slice 2) transition/ease edits.
 
 The visual target is `.superpowers/brainstorm/78992-1788970762/content/story-tab-v3.html`. Reproduce the left-panel structure: a toolbar (play/pause, `mm:ss.d / mm:ss.d`, "Loop back" toggle), then a vertical list alternating board rows and transition rows, with a playhead rail down the left.
@@ -1125,19 +1169,24 @@ The visual target is `.superpowers/brainstorm/78992-1788970762/content/story-tab
 Near where the editor is created, add:
 ```ts
 import { useStoryboard } from '~/composables/useStoryboard'
-// setMotion(patch) already exists (~line 3003). Provide the two callbacks:
+// setMotion(patch) already exists — search for `function setMotion` in the modal.
 const story = useStoryboard({
-  editor: layerEditor,   // the object returned by useLocalLayerEditor
-  writeMotion: (m) => setMotion(m),
+  editor: layerEditor,   // the object returned by useLocalLayerEditor — match its real local name
+  writeMotion: (m) => setMotion(m),   // setMotion merges: {...motionDoc.value, ...patch}, so {fps,duration} sets both
   applyAnimations: (map) => {
-    // write each layer's .animation, through the editor's commit choke point
-    const next = layerEditor.localLayers.value.map(l =>
-      map[l.id] ? { ...l, animation: map[l.id] } : (l.animation ? { ...l, animation: undefined } : l))
+    // write each layer's .animation through the editor's commit choke point.
+    // Skip wired layers (they are static in slice 1 and their transform write-through
+    // to the backend must not be driven by .animation).
+    const next = layerEditor.localLayers.value.map(l => {
+      if (l.kind === 'wired') return l
+      if (map[l.id]) return { ...l, animation: map[l.id] }
+      return l.animation ? { ...l, animation: undefined } : l
+    })
     layerEditor.commit(next)
   },
 })
 ```
-(Confirm the real editor variable name; the composable is `useLocalLayerEditor(...)` — match its actual local name in the modal.)
+Confirm the real editor variable name (search the modal for `useLocalLayerEditor(`) and that `setMotion` merges into `motionDoc` (search `function setMotion`). Also confirm the modal exposes `storyboard` from the editor for Tasks 9–10 — if not, add `const storyboard = computed(() => layerEditor.storyboard.value)`.
 
 - [ ] **Step 2: Add a `'story'` tab button**
 
@@ -1220,11 +1269,13 @@ Inside the left-panel `v-if="leftTab === 'story'"` block:
 <StoryPanel
   :boards="story.boards.value" :current="story.current.value"
   :playhead-t="previewT ?? 0" :duration="effectiveMotion.duration" :playing="isPlaying"
-  :loop-back="story.boards.value.length ? (storyboard?.loopBack ?? false) : false"
+  :loop-back="storyboard?.loopBack ?? false"
   @add-board="story.addBoard()" @select-board="story.selectBoard($event)"
-  @toggle-play="togglePlay()" @scrub="scrubTo($event)" />
+  @toggle-play="togglePlay()" @toggle-loop="story.toggleLoopBack()" @scrub="scrubTo($event)" />
 ```
-(Use the modal's real playhead ref name — earlier code shows `previewT` and `scrubTo`; confirm and match.)
+(Use the modal's real playhead ref name — earlier code shows `previewT` and `scrubTo`; confirm and match. `togglePlay`/`isPlaying`: match the modal's real play state.)
+
+Add `toggleLoopBack()` to `useStoryboard` (Task 7): `recordHistory(); sb.loopBack = !sb.loopBack; writeStoryboard(sb); recompile()` — and add it to the returned object. (Small addition; fold into Task 7 if executing in order.)
 
 - [ ] **Step 5: Verify the tab renders and Add board works, then commit**
 
@@ -1437,7 +1488,7 @@ git commit -m "test(frame): storyboard end-to-end on the real Compositor"
 - Undo folds storyboard into history → Task 6. ✓
 - Persistence at `sailor_storyboard` → Task 6. ✓
 - E2E on the real Compositor → Task 11. ✓
-- Wired layers static across boards → holds by construction (no keyframes authored for wired kinds; `capturePose` still captures their transform, but the compiler only animates layers with poses on ≥1 board — a wired layer with identical poses on every board produces flat keyframes). **Flag:** confirm wired layers are excluded from `applyAnimations` writing `.animation` if that interferes with the backend write-through; if so, skip `kind === 'wired'` in `applyAnimations`.
+- Wired layers static across boards → **RESOLVED in the hardening pass:** the compiler skips `kind === 'wired'` (Task 5) AND `applyAnimations` leaves wired layers untouched (Task 8), so their backend transform write-through is never driven by `.animation`.
 
 **Placeholder scan:** the two thumbnail/entries-line spots in Tasks 8/9 are explicitly marked as follow-ups within slice 1's read-only timeline; they are not blocking behaviour. The E2E body (Task 11 Step 1) is a scaffold completed in Step 2 against the frame-templates pattern — acceptable because the exact pixel assertions depend on the harness's real canvas id, which the implementer confirms live.
 
