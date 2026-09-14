@@ -42,12 +42,12 @@ const node = reactive({
       sailor_localGroups: [],
       sailor_localBg: LOOKS[0].bg,
       sailor_frame: { displayEdge: 640 },
-      // A poster grid: six columns for the big type, a fine base module as the
-      // baseline the small text snaps to. Guides show in the editor and tuning
-      // snaps to them. Shared across the looks; vary per look later if wanted.
+      // A 16×16 poster grid — a fine modular grid for precise alignment; the
+      // module doubles as the baseline the small text snaps to. Guides show in
+      // the editor and tuning snaps to them. Shared across the looks.
       sailor_localGrid: {
-        mode: 'explicit', columns: 6, rows: 9, margin: 0.05, gutter: 0.015,
-        baseModule: 1 / 24, overlay: true,
+        mode: 'explicit', columns: 16, rows: 16, margin: 0.04, gutter: 0.006,
+        baseModule: 1 / 16, overlay: true,
       },
     },
     mode: 0,
