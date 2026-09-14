@@ -7480,11 +7480,14 @@ onUnmounted(() => {
                 <span>{{ editModelLabel }}</span>
                 <ChevronDown class="size-3 text-white/40" :class="modelMenuOpen ? 'rotate-180' : ''" />
               </button>
-              <div v-if="modelMenuOpen" class="absolute bottom-full right-0 mb-1.5 z-50 w-44 rounded-md bg-neutral-900 border border-white/10 shadow-xl flex flex-col overflow-hidden">
+              <div v-if="modelMenuOpen" class="absolute bottom-full right-0 mb-1.5 z-50 w-56 rounded-md bg-neutral-900 border border-white/10 shadow-xl flex flex-col overflow-hidden">
                 <button v-for="m in editModels" :key="m.value" type="button"
-                  class="px-3 py-2 text-left text-[12px] hover:bg-white/10 cursor-pointer"
+                  class="flex flex-col gap-0.5 px-3 py-1.5 text-left hover:bg-white/10 cursor-pointer"
                   :class="m.value === editModelValue ? 'text-white' : 'text-white/70'"
-                  @click="pickEditModel(m.value)">{{ m.label }}</button>
+                  @click="pickEditModel(m.value)">
+                  <span class="text-[12px] leading-tight">{{ m.label }}</span>
+                  <span class="text-[10.5px] leading-tight text-white/40">{{ m.hint }}</span>
+                </button>
               </div>
             </div>
 
