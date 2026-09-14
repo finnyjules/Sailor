@@ -12,6 +12,7 @@ describe('catalog', () => {
       'tilt', 'bottomHeavy', 'fourCorners', 'spacedLines', 'ragged', 'edges', 'staircase', 'block',
       'knockout', 'shapeBleed', 'badge', 'split', 'fullBleed', 'diagonal', 'wall',
       'scatter', 'cascade', 'ring', 'cells',
+      'kicker', 'sidebar', 'footer',
     ]))
   })
   it('every pattern is deterministic and returns at least a title op', () => {

@@ -24,8 +24,11 @@ import { scatter } from './patterns/scatter'
 import { cascade } from './patterns/cascade'
 import { ring } from './patterns/ring'
 import { cells } from './patterns/cells'
+import { kicker } from './patterns/kicker'
+import { sidebar } from './patterns/sidebar'
+import { footer } from './patterns/footer'
 
-export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, fullBleed, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge, split, diagonal, wall, scatter, cascade, ring, cells]
+export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, fullBleed, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge, split, diagonal, wall, scatter, cascade, ring, cells, kicker, sidebar, footer]
 
 /** Patterns that fit the title's kind and whose required elements are present. */
 export function fittingPatterns(ctx: PatternContext): Pattern[] {
