@@ -42,6 +42,13 @@ const node = reactive({
       sailor_localGroups: [],
       sailor_localBg: LOOKS[0].bg,
       sailor_frame: { displayEdge: 640 },
+      // A poster grid: six columns for the big type, a fine base module as the
+      // baseline the small text snaps to. Guides show in the editor and tuning
+      // snaps to them. Shared across the looks; vary per look later if wanted.
+      sailor_localGrid: {
+        mode: 'explicit', columns: 6, rows: 9, margin: 0.05, gutter: 0.015,
+        baseModule: 1 / 24, overlay: true,
+      },
     },
     mode: 0,
   },
@@ -114,14 +121,20 @@ onMounted(async () => {
       :pan-on-scroll="true"
     />
 
-    <div v-if="ready" class="absolute top-3 left-1/2 -translate-x-1/2 z-[200] flex max-w-[92vw] flex-wrap items-center justify-center gap-1.5 rounded-xl bg-black/50 px-2 py-2 backdrop-blur">
+    <div
+      v-if="ready"
+      class="absolute left-1/2 z-[200] flex max-w-[92vw] flex-wrap items-center justify-center gap-1.5 rounded-xl bg-black/50 px-2 py-2 backdrop-blur"
+      :class="modalOpen ? 'bottom-3 -translate-x-1/2' : 'top-3 -translate-x-1/2'"
+    >
       <button
         v-for="(l, i) in LOOKS" :key="l.name"
+        v-show="!modalOpen"
         class="rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors"
         :class="current === i ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20'"
         @click="loadLook(i)"
       >{{ l.name }}<span v-if="tuned[l.name]" class="ml-1 text-emerald-400">•</span></button>
-      <div class="mx-1 h-5 w-px bg-white/15"></div>
+      <div v-show="!modalOpen" class="mx-1 h-5 w-px bg-white/15"></div>
+      <span v-if="modalOpen" class="px-1 text-[12px] font-medium text-white/60">{{ LOOKS[current].name }}</span>
       <button
         class="rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-medium text-white/80 hover:bg-white/20"
         @click="modalOpen = !modalOpen"
