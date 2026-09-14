@@ -263,10 +263,12 @@ import { makeSiblingOutlineResolver, type SiblingResolver } from '~/lib/composit
 import type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind, WarpEffect,
+  ShaderPixelEffect,
 } from '~/lib/compositor/effectStack'
 export type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
+  ShaderPixelEffect,
 }
 export type { AdjustEffect, BloomEffect, DofEffect, DuotoneEffect, GradientMapEffect, GrainEffect, PostEffect, VignetteEffect }
 
@@ -2173,6 +2175,72 @@ function compositeInnerShadow(off: HTMLCanvasElement, fx: InnerShadowEffect, W: 
   }
 }
 
+// F5 Task 2: pure — the ShaderSpec (fillTile.ts) `renderFieldWithBase` needs for a shader
+// pixel-pass, built from the stored effect. Only effectId/params/speed/seed are ever
+// dereferenced by `resolve()`/`buildPasses()` on this path (see field.ts); anchor/input/
+// readsBackdrop/readsLayerKey are fill-only concerns with no equivalent here — off's own
+// pixels ARE the input, so there's nothing to anchor or read a backdrop through. Exported
+// (and kept pure) so this mapping has its own unit test; the canvas recombine around it
+// needs a real GPU context, which only the live Playwright gate can exercise.
+export function shaderSpecFromEffect(e: Pick<ShaderPixelEffect, 'effectId' | 'params' | 'speed' | 'seed'>): ShaderSpec {
+  return { effectId: e.effectId, params: e.params, speed: e.speed, seed: e.seed } as unknown as ShaderSpec
+}
+
+// F5 Task 2: the shader-catalog-as-a-pass pixel effect. Runs a named Shader Studio
+// catalog effect over the layer's OWN already-rendered pixels (`off`) — a GPU pass,
+// reorderable alongside the other pixel passes above. DISTINCT from a shader FILL
+// (which replaces the layer's fill, `resolvePaint`/`paintTileBox`) and from the glass
+// lens (`applyGlassFromLayer`, which refracts the layers BEHIND this one): this reads
+// and writes `off`'s own current pixels only, full-frame (no `shape` arg — not
+// shape-following), so it works the same over photos, text and shapes alike.
+//
+// Alpha: most catalog frags hard-code output alpha to 1.0 (see the comment at
+// `applyGlassFromLayer`'s ownFill branch), so the shader's raw result would flood a
+// text/cutout layer's transparent regions opaque. Recombine against `off`'s OWN
+// pre-shader pixels — the exact `destination-in` recipe `applyGlassFromLayer` uses to
+// clip its refracted result to the layer's silhouette (step 4, ~line 4940) — except the
+// clip source here is `off`'s own snapshot rather than a separately rendered silhouette,
+// since `off`'s pixels already carry the correct per-pixel alpha before the shader runs.
+//
+// `renderFieldWithBase` THROWS on a catalog miss (unloaded catalog, bad effectId) — the
+// same precedent `applyGlassFromLayer`'s caller relies on — so a throw here is caught and
+// leaves `off` completely untouched, never aborting the frame.
+function applyShaderPixelEffect(off: HTMLCanvasElement, e: ShaderPixelEffect, opts: { W: number; scale: number; t: number }): void {
+  const w = off.width, h = off.height
+  if (w < 1 || h < 1) return
+  try {
+    // Snapshot off's pre-shader pixels — the alpha source for the recombine below, and
+    // (since renderFieldWithBase's returned canvas is only valid until the next render
+    // call) what a throw leaves `off` looking like: untouched.
+    const pre = document.createElement('canvas')
+    pre.width = w; pre.height = h
+    const pctx = pre.getContext('2d')
+    if (!pctx) return
+    pctx.drawImage(off, 0, 0)
+
+    const spec = shaderSpecFromEffect(e)
+    // off is already device-sized (opts.W/opts.scale exist for spatial params, matching
+    // the sibling passes' W*scale convention, but the catalog's own params are already in
+    // the shader's normalized units — no shape (undefined): a full-layer pass, not
+    // shape-following.
+    const result = renderFieldWithBase(spec, off, w, h, undefined, opts.t)
+
+    const octx = off.getContext('2d')
+    if (!octx) return
+    octx.save()
+    octx.setTransform(1, 0, 0, 1, 0, 0)
+    octx.clearRect(0, 0, w, h)
+    octx.drawImage(result, 0, 0)
+    // Recombine: clip the shader's (possibly all-opaque) output back to off's own
+    // original alpha, so a transparent region of the layer stays transparent.
+    octx.globalCompositeOperation = 'destination-in'
+    octx.drawImage(pre, 0, 0)
+    octx.restore()
+  } catch {
+    // Unloaded catalog / bad effectId (renderFieldWithBase throws) — leave `off` as-is.
+  }
+}
+
 // ── Silhouette raster cache (torn edge + feather) ────────────────────────────
 // Both effects are per-pixel CPU passes over the layer's rasterized alpha, and
 // paintLayer used to re-run them on every repaint — so dragging a torn-edge layer
@@ -2755,6 +2823,10 @@ function paintLayer(
                 applyFeather(off, e as unknown as FeatherSpec); break
               case 'layer_blur':
                 applyBlurPass(off, Math.max(0, (e as LayerBlurEffect).radius * W * s)); break
+              // F5 Task 2: runs a catalog shader over off's own pixels, alpha preserved.
+              // See applyShaderPixelEffect above for the throw-safe / alpha recombine.
+              case 'shader':
+                applyShaderPixelEffect(off, e as unknown as ShaderPixelEffect, { W, scale: s, t: _fieldCtx.t }); break
               default:
                 applyPasses(off, [e], { W, scale: s })
             }

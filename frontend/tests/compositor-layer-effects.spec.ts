@@ -1365,3 +1365,96 @@ test.describe('Frame layer styles — F4 pixel passes', () => {
     expect(stroke.maxX).toBeGreaterThan(bareExtent.maxX + 0.01)
   })
 })
+
+/**
+ * F5 Task 2 — the `shader` pixel effect: `applyShaderPixelEffect` in useCompositorLayers.ts
+ * runs a named Shader Studio catalog effect over a layer's OWN already-rendered pixels,
+ * alpha preserved, byte-identical when absent. DISTINCT from a shader FILL (which replaces
+ * the layer's fill entirely — see shader-fill.spec.ts) and from the glass lens (which
+ * refracts the layers BEHIND the layer, not its own content).
+ *
+ * Byte-identity is the load-bearing guard here: before this task, a `shader` entry in a
+ * layer's effect stack was a silent no-op (Task 1's model comment: 'shader' is not in
+ * postEffects.ts's own `PASS_TYPES`, so the pixel-pass switch's `default: applyPasses(...)`
+ * branch drops it on the floor). The new `case 'shader'` in the switch (paintLayer,
+ * useCompositorLayers.ts ~2745) is the ONE thing that can make a shader effect actually
+ * paint — so the "applied" test below is what proves the case is wired at all, and the
+ * byte-identity test proves it is inert whenever no `shader` effect is present (a stub that
+ * called `applyShaderPixelEffect` unconditionally, outside the switch's per-type dispatch,
+ * would fail the byte-identity test here while still passing "applied" — that contrast is
+ * what makes the gate load-bearing, not merely present).
+ *
+ * The shader catalog is fetched asynchronously (`fetchShaderFxCatalog`, ~/lib/shaderfx/
+ * catalogStore.ts) and `renderFieldWithBase` throws until it lands — `applyShaderPixelEffect`
+ * catches that and leaves the layer's pixels untouched for that frame (see the comment at its
+ * definition). Unlike Space Type/Scene3D (their own rAF loop repaints once the catalog
+ * resolves), the Compositor's static edit view only repaints reactively, so `settledWithShader`
+ * below waits for the fetch then forces a fresh paint — the same recipe shader-fill.spec.ts's
+ * "Frame (Compositor)" golden coverage uses for the identical race.
+ */
+test.describe('Frame shader-catalog pixel pass (F5 Task 2)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  // chromatic_aberration hard-codes its output alpha to 1.0 (shader_effects/
+  // chromatic_aberration.frag: `fragColor0 = vec4(r, g, b, 1.0)`) — exactly the "most
+  // catalog frags don't preserve alpha" case the recombine exists for. amount is pushed
+  // well past the picker's own 0..0.08 slider range so the radial RGB split is unmistakable
+  // at the rect's edge, not a borderline render-noise delta.
+  const CHROMA = { id: 'sh', type: 'shader', effectId: 'chromatic_aberration', params: { amount: 0.3 }, speed: 1, seed: 42, visible: true }
+
+  /** Force a fresh paintLayerStack() after giving the async catalog fetch time to land. The
+   *  Compositor's static edit view does not repaint on its own once the fetch resolves (no
+   *  idle rAF loop, unlike Space Type/Scene3D) — a real layer-list write is what forces the
+   *  next repaint, so re-set the SAME effects (a new array reference) once the wait is up. */
+  async function settledWithShader(page: Page, effects: unknown[]): Promise<string> {
+    await setEffects(page, effects)
+    await stackPixels(page)                 // first paint likely races the catalog fetch — a no-op
+    await page.waitForTimeout(1_500)
+    await setEffects(page, effects)         // re-set forces a repaint now the catalog is warm
+    return stackPixels(page)
+  }
+
+  test('byte-identity A/B: a layer with no shader effect renders identically before/after a round-trip', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    const before = await stackPixels(page)
+
+    // Toggle a visible, real shader effect ON, then back OFF: the return-to-none render must
+    // be byte-identical to the virgin bare render — the `case 'shader'` never fires once the
+    // effect is gone (bodyPasses no longer contains it), so nothing it does can leak forward.
+    await settledWithShader(page, [CHROMA])
+    await setEffects(page, [])
+    const after = await stackPixels(page)
+
+    expect(after).toBe(before)
+  })
+
+  test('adding chromatic_aberration changes the layer\'s own pixels (applied)', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    const bare = await stackPixels(page)
+
+    const after = await settledWithShader(page, [CHROMA])
+    expect(after).not.toBe(bare)
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    // A radial RGB split at the rect's edge is a real (if edge-only) pixel change, not noise.
+    expect(d.changed).toBeGreaterThan(50)
+  })
+
+  test('alpha is preserved: a transparent region of the layer stays transparent', async ({ page }) => {
+    await openCompositor(page)
+    // An ellipse inscribed in its own SQUARE bounding box leaves the box's corners
+    // transparent — the curve never reaches them — so it's a partially-transparent layer
+    // with no extra geometry effect needed. A broken recombine (or none at all) would flood
+    // this corner opaque black, since chromatic_aberration forces alpha=1 everywhere.
+    await seedOne(page, { id: 'e1', kind: 'ellipse', x: 0.5, y: 0.5, w: 0.5, h: 0.5, rotation: 0, opacity: 1, fill: '#ffffff' })
+    await stackPixels(page) // settle the first paint before sampling
+    const cornerBefore = await colorAt(page, 0.27, 0.27) // just inside the box corner, outside the ellipse curve
+    expect(cornerBefore.a).toBeLessThan(20)
+
+    await settledWithShader(page, [CHROMA])
+    const cornerAfter = await colorAt(page, 0.27, 0.27)
+    expect(cornerAfter.a).toBeLessThan(20)
+  })
+})
