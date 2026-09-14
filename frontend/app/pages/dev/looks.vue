@@ -47,11 +47,31 @@ const node = reactive({
   },
 })
 
+// Julien's saved tunings, name → { bg, layers }. Merged over the spike defaults
+// so an adjusted look survives a reload (persisted by /api/dev-looks).
+const tuned = ref<Record<string, { bg: string; layers: any[] }>>({})
+const clone = (v: any) => JSON.parse(JSON.stringify(v))
+
 const current = ref(0)
 function loadLook(i: number) {
   current.value = i
-  node.data.properties.sailor_localLayers = LOOKS[i].layers()
-  node.data.properties.sailor_localBg = LOOKS[i].bg
+  const t = tuned.value[LOOKS[i].name]
+  node.data.properties.sailor_localLayers = t ? clone(t.layers) : LOOKS[i].layers()
+  node.data.properties.sailor_localBg = t ? t.bg : LOOKS[i].bg
+}
+
+const saveState = ref<'' | 'saving' | 'saved' | 'error'>('')
+async function saveDefault() {
+  const name = LOOKS[current.value].name
+  const bg = node.data.properties.sailor_localBg
+  const layers = clone(node.data.properties.sailor_localLayers)
+  saveState.value = 'saving'
+  try {
+    await $fetch('/api/dev-looks', { method: 'POST', body: { name, bg, layers } })
+    tuned.value = { ...tuned.value, [name]: { bg, layers } }
+    saveState.value = 'saved'
+    setTimeout(() => { if (saveState.value === 'saved') saveState.value = '' }, 2000)
+  } catch { saveState.value = 'error' }
 }
 
 const nodes = ref<any[]>([node])
@@ -67,6 +87,9 @@ const ready = ref(false)
 onMounted(async () => {
   ready.value = true
   ;(window as any).__looks = { node, nodes, LOOKS, loadLook }
+  // Pull any saved tunings, then load the current look so overrides apply.
+  try { tuned.value = (await $fetch('/api/dev-looks')) as any } catch { /* none saved */ }
+  loadLook(current.value)
   // Re-nudge once the spike fonts load, so the canvas re-renders with them
   // instead of the fallback it first painted.
   try { await (document as any).fonts?.ready; loadLook(current.value) } catch { /* no font API */ }
@@ -97,12 +120,17 @@ onMounted(async () => {
         class="rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors"
         :class="current === i ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20'"
         @click="loadLook(i)"
-      >{{ l.name }}</button>
+      >{{ l.name }}<span v-if="tuned[l.name]" class="ml-1 text-emerald-400">•</span></button>
       <div class="mx-1 h-5 w-px bg-white/15"></div>
       <button
         class="rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-medium text-white/80 hover:bg-white/20"
         @click="modalOpen = !modalOpen"
       >{{ modalOpen ? 'Close editor' : 'Adjust' }}</button>
+      <button
+        class="rounded-lg px-3 py-1.5 text-[12px] font-medium transition-colors"
+        :class="saveState === 'error' ? 'bg-red-500/20 text-red-300' : saveState === 'saved' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-white/80 hover:bg-white/20'"
+        @click="saveDefault"
+      >{{ saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved ✓' : saveState === 'error' ? 'Save failed' : 'Save as default' }}</button>
     </div>
 
     <CompositorModal

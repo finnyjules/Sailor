@@ -23,6 +23,8 @@ export const NITRO_API_PATHS = [
   '/api/vibe-pick', '/api/agent-plan', '/api/agent-review', '/api/image-search',
   '/api/image-fetch', '/api/copy-assist', '/api/ai-status', '/api/dataset-match',
   '/api/training-image', '/api/wallet',
+  // Dev-only; the handler 404s unless this is a local dev server.
+  '/api/dev-scratch', '/api/dev-looks',
 ]
 
 /** Prefixes Nitro owns wholesale. */

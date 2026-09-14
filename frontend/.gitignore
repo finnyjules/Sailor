@@ -46,3 +46,4 @@ public/embed/
 
 # clerk configuration (can include secrets)
 /.clerk/
+server/data/looks-tuned.json
