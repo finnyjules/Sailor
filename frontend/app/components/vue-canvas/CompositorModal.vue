@@ -4364,6 +4364,27 @@ const outWidth = computed(() => {
 function pxW(norm: number) { return Math.round(norm * outWidth.value) }
 function setSizePx(id: string, key: string, px: number) { setLocal(id, { [key]: Math.max(0, px) / outWidth.value }) }
 
+// Text-box dimensions in the unit the user is thinking in: pixels, % of the
+// composition width, or grid columns (1/columns of the width — the module).
+// Values are stored normalized to width, so a column reads as boxW·columns.
+const boxUnit = ref<'col' | '%' | 'px'>('col')
+function boxToUnit(norm: number | undefined): string | number {
+  if (!norm) return ''
+  if (boxUnit.value === 'px') return pxW(norm)
+  if (boxUnit.value === '%') return Math.round(norm * 100)
+  return Math.round(norm * (gridConfig.value.columns || 16) * 10) / 10
+}
+function setBoxDim(id: string, key: 'boxW' | 'boxH', raw: string) {
+  const v = parseFloat(raw)
+  let norm: number | undefined
+  if (!(v > 0)) norm = undefined
+  else if (boxUnit.value === 'px') norm = v / outWidth.value
+  else if (boxUnit.value === '%') norm = v / 100
+  else norm = v / (gridConfig.value.columns || 16)
+  setLocal(id, { [key]: norm } as any)
+}
+function toggleBoxFill(l: any) { setLocal(l.id, { boxFill: !l?.boxFill } as any) }
+
 // A shape's stroke needs BOTH a colour and a width > 0 to show. New shapes start
 // at strokeWidth 0, so adding a stroke colour alone paints nothing — the stroke
 // reads as "didn't work". When a colour is added to a widthless stroke, give it a
@@ -9004,20 +9025,34 @@ onUnmounted(() => {
                   </div>
                 </div>
               </div>
-              <div v-if="!textPath" class="grid grid-cols-2 gap-3">
-                <div>
-                  <div class="panel-label mb-1.5" title="Set a width to auto-wrap words; clear for free-flowing text">Text box W</div>
-                  <input v-scrubnum type="number" min="0" placeholder="auto"
-                    :value="(selectedLocal as any).boxW ? pxW((selectedLocal as any).boxW) : ''"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
-                    @input="(e: Event) => { const v = parseFloat((e.target as HTMLInputElement).value); setLocal(selectedLocal!.id, { boxW: v > 0 ? v / outWidth : undefined } as any) }" />
+              <div v-if="!textPath" class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="panel-label" title="The text box, sized in columns, %, or pixels. Fill sizes the type to the box.">Text box</div>
+                  <div class="flex items-center gap-1">
+                    <button v-for="u in (['col','%','px'] as const)" :key="u"
+                      class="text-[10px] px-1.5 py-0.5 rounded border"
+                      :class="boxUnit === u ? 'text-yellow-400 border-yellow-400/50' : 'text-white/40 border-white/[0.08]'"
+                      @click="boxUnit = u">{{ u }}</button>
+                    <button class="ml-1 text-[10px] px-1.5 py-0.5 rounded border" title="Size the type to fill the box"
+                      :class="(selectedLocal as any).boxFill ? 'text-yellow-400 border-yellow-400/50' : 'text-white/40 border-white/[0.08]'"
+                      @click="toggleBoxFill(selectedLocal)">Fill</button>
+                  </div>
                 </div>
-                <div>
-                  <div class="panel-label mb-1.5" title="Set a height to enable vertical align / justify">Text box H</div>
-                  <input v-scrubnum type="number" min="0" placeholder="auto"
-                    :value="(selectedLocal as any).boxH ? pxW((selectedLocal as any).boxH) : ''"
-                    class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
-                    @input="(e: Event) => { const v = parseFloat((e.target as HTMLInputElement).value); setLocal(selectedLocal!.id, { boxH: v > 0 ? v / outWidth : undefined } as any) }" />
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <div class="panel-label mb-1">Width</div>
+                    <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'cols' : 'auto'"
+                      :value="boxToUnit((selectedLocal as any).boxW)"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
+                      @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxW', (e.target as HTMLInputElement).value)" />
+                  </div>
+                  <div>
+                    <div class="panel-label mb-1">Height</div>
+                    <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'rows' : 'auto'"
+                      :value="boxToUnit((selectedLocal as any).boxH)"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
+                      @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxH', (e.target as HTMLInputElement).value)" />
+                  </div>
                 </div>
               </div>
               <!-- Type on a path. The guide belongs to this layer: it shows only
