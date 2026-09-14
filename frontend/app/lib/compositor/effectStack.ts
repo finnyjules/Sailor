@@ -16,6 +16,7 @@
 import { DEFAULT_TORN_EDGE, tornEdgeActive, type TornEdgeSpec } from './tornEdge'
 import { DEFAULT_FEATHER, featherActive, type FeatherSpec } from './feather'
 import { POST_EFFECT_DEFAULTS, type PostEffect } from './postEffects'
+import type { ParamValue } from '~/lib/shaderfx/types'
 
 // ── the four layer-local effects (moved verbatim from useCompositorLayers.ts) ──────────
 // All distances normalized to canvas width, like every other dimension in the Compositor,
@@ -100,10 +101,40 @@ export interface LongShadowEffect { type: 'long_shadow'; angle: number; length: 
  *  pass-through (the shape unchanged). */
 export interface ShatterEffect { type: 'shatter'; cells: number; gap: number; seed: number; visible: boolean }
 
+// ── F5: the shader-catalog-as-a-pass pixel effect ──────────────────────────────────────
+/** Runs an input-sampling Shader Studio catalog effect over this layer's OWN already-
+ *  rendered pixels — a GPU pass, reorderable alongside the other pixel effects (`regionOf`
+ *  falls through to `'pixel'` for it, same as every other non-backdrop/geometry/stamp kind).
+ *  A deliberate SUBSET of `ShaderSpec` (~/lib/spacetype/fillTile.ts) minus the fill-only
+ *  fields — `anchor`, `input`, `readsBackdrop`, `readsLayerKey` — none of which apply to a
+ *  pass over the layer's own content (there is no separate `input` Paint to anchor or read
+ *  a backdrop/sibling through: the layer's own rendered pixels ARE the input). Task 1 is the
+ *  model only — no render, no UI; see the F5 plan for the GPU pass (Task 2) and picker
+ *  (Task 3). `params` uses the SAME `ParamValue` vocabulary as the shader fill so the picked
+ *  effect's dials (`derivedShaderFillControls`) work unchanged over either shape. */
+export interface ShaderPixelEffect {
+  type: 'shader'
+  id?: string
+  // Required (not `visible?:`), matching every sibling `LayerEffect` variant: an optional
+  // `visible` here breaks `applyPasses`'s `{ type: string; visible: boolean }[]` parameter
+  // at its one call site in useCompositorLayers.ts (bodyPasses' default-case dispatch),
+  // where `shader` flows through structurally today even though it isn't a member of that
+  // function's own `PASS_TYPES` set (so it's a runtime no-op there until Task 2's real
+  // `case 'shader'` intercepts it first).
+  visible: boolean
+  effectId: string
+  /** Keyed WITHOUT the `u_` prefix, same convention as `ShaderSpec.params`. */
+  params: Record<string, ParamValue>
+  speed: number
+  /** varies the generative parts of the picked effect; 42 is the historical default. */
+  seed: number
+}
+
 export type LayerEffect =
   | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
   | TornEdgeEffect | FeatherEffect
   | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect | WarpEffect | LongShadowEffect | ShatterEffect
+  | ShaderPixelEffect
   | PostEffect
 
 /** A stored effect, addressed by a stable id. */
@@ -118,7 +149,7 @@ export type EffectKind = LayerEffect['type']
  */
 export const EFFECT_ORDER = [
   'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow',
-  'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha',
+  'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'shader',
   'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'rough_edge', 'ink_bleed',
   'directional_blur', 'radial_blur', 'zoom_blur', 'layer_blur', 'outer_glow', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
@@ -182,6 +213,7 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   color_overlay: 'Colour overlay',
   gradient_overlay: 'Gradient overlay',
   stroke_from_alpha: 'Stroke from alpha',
+  shader: 'Shader',
   directional_blur: 'Directional blur',
   radial_blur: 'Radial blur',
   zoom_blur: 'Zoom blur',
@@ -231,6 +263,13 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   // A fresh shatter breaks the shape into a dozen cells with a hairline gap (0.4% of the
   // width) — visibly fragmented the moment it is added; cells/gap/seed tune it.
   shatter: { cells: 12, gap: 0.004, seed: 1, visible: true },
+  // `chromatic_aberration` is a real input-sampling catalog effect (it samples
+  // `u_image0` per-channel with a small offset — see effectReadsInput/READS_INPUT_RE in
+  // ~/lib/shaderfx/catalogStore.ts) rather than a generative field: a fresh shader effect
+  // visibly, subtly processes the layer's own pixels the moment it's added, instead of
+  // silently overwriting them (the F5 plan's picker-eligibility gate). `params: {}` lets
+  // the picked effect's own catalog defaults show through until the user tunes a dial.
+  shader: { effectId: 'chromatic_aberration', params: {}, speed: 1, seed: 42, visible: true },
 }
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {
