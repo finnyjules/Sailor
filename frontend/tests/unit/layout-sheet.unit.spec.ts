@@ -68,4 +68,37 @@ describe('useLayoutSheet', () => {
     expect(sheet.imageMode.value).toBe(true)
     expect(sheet.tiles.value.map(t => t.patternId)).toContain('split')      // now image patterns fit
   })
+  it('a set palette recolours the tiles and applies with recolour on', () => {
+    const { sheet, editor } = harness()
+    const plainTitleColor = () => {
+      const t = sheet.tiles.value[0]!
+      const titleLayer = t.plan.layers.find(l => l.id === 't' && l.kind === 'text')
+      return (titleLayer as any)?.color
+    }
+    const before = plainTitleColor()
+    sheet.setPaletteMode(['#0b0b0b', '#f4f1ea', '#e4572e'])   // ink-ish / field-ish / accent
+    const after = plainTitleColor()
+    expect(after).not.toBe(before)                            // the palette recoloured the tile
+    // apply now commits recoloured layers (title colour is the palette's, not the frame's)
+    sheet.apply(sheet.tiles.value[0]!)
+    const committed = editor.commit.mock.calls.at(-1)![0]
+    const committedTitle = committed.find((l: any) => l.id === 't' && l.kind === 'text')
+    expect(committedTitle.color).toBe(after)
+  })
+
+  it('clearing the palette returns to the frame\'s own colours (recolour off)', () => {
+    const { sheet } = harness()
+    const title0 = () => (sheet.tiles.value[0]!.plan.layers.find((l: any) => l.id === 't' && l.kind === 'text') as any)?.color
+    const original = title0()
+    sheet.setPaletteMode(['#0b0b0b', '#f4f1ea', '#e4572e'])
+    expect(title0()).not.toBe(original)
+    sheet.setPaletteMode(null)
+    expect(title0()).toBe(original)                           // back to the frame's colours
+  })
+
+  it('remembers the picked palette in sailor_posterState', () => {
+    const { sheet, props } = harness()
+    sheet.setPaletteMode(['#0b0b0b', '#f4f1ea', '#e4572e'])
+    expect((props.sailor_posterState as any).palette).toEqual(['#0b0b0b', '#f4f1ea', '#e4572e'])
+  })
 })

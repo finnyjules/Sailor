@@ -3,6 +3,7 @@ import type { Ref, ComputedRef } from 'vue'
 import { planPattern, applyPatternToFrame } from '~/lib/frame/patterns/applyToFrame'
 import type { PatternPlan, PosterState } from '~/lib/frame/patterns/applyToFrame'
 import { paletteFromFrame } from '~/lib/frame/patterns/framePalette'
+import { rolesFromFamily } from '~/lib/frame/patterns/palette'
 import { sheetFor, variantsFor } from '~/lib/frame/patterns/sheet'
 import type { Tile } from '~/lib/frame/patterns/sheet'
 import { PATTERNS } from '~/lib/frame/patterns/catalog'
@@ -33,6 +34,7 @@ export function useLayoutSheet(src: LayoutSheetSource): {
   seed: Ref<number>; focus: Ref<string | null>; tiles: ComputedRef<SheetTile[]>
   shapeMode: Ref<FrameElements['shapeMode'] | undefined>; setShapeMode(m: FrameElements['shapeMode']): void
   imageMode: Ref<boolean>; setImageMode(on: boolean): void
+  paletteMode: Ref<string[] | null>; setPaletteMode(hexes: string[] | null): void
   apply(tile: SheetTile): void; another(): void; moreLikeThis(tile: SheetTile): void; back(): void
 } {
   const remembered = (src.props()?.sailor_posterState as PosterState | undefined)?.seed
@@ -52,6 +54,15 @@ export function useLayoutSheet(src: LayoutSheetSource): {
     const p = src.props(); if (p) (p as any).sailor_posterState = { ...(p as any).sailor_posterState, imageMode: on }
   }
 
+  const paletteMode = ref<string[] | null>((stored as any)?.palette ?? null)
+  function setPaletteMode(hexes: string[] | null) {
+    paletteMode.value = hexes && hexes.length ? hexes : null
+    const p = src.props(); if (p) (p as any).sailor_posterState = { ...(p as any).sailor_posterState, palette: paletteMode.value ?? undefined }
+  }
+  /** The role palette the sheet paints with: the picked family projected to
+   *  roles, or the frame's own colours when nothing is picked. */
+  const posterPalette = () => paletteMode.value ? rolesFromFamily({ hexes: paletteMode.value }) : paletteFromFrame(src.props())
+
   function context() {
     const props = src.props()
     const layers = ((props?.sailor_localLayers as any[] | undefined) ?? [])
@@ -70,21 +81,22 @@ export function useLayoutSheet(src: LayoutSheetSource): {
     const raw = focus.value
       ? (() => { const p = PATTERNS.find(x => x.id === focus.value); return p ? variantsFor(ctx, p, seed.value, VARIANTS) : [] })()
       : sheetFor(ctx, seed.value)
-    const palette = paletteFromFrame(src.props())
+    const palette = posterPalette()
+    const recolour = paletteMode.value != null
     const out: SheetTile[] = []
     for (const t of raw) {
-      const plan = planPattern({ props: src.props(), frameW: src.frameW(), frameH: src.frameH(), patternId: t.patternId, seed: t.seed, palette, connectedSlots: src.connectedSlots(), placement: { ops: t.ops, did: t.did }, shapeMode: shapeMode.value, imageMode: imageMode.value })
+      const plan = planPattern({ props: src.props(), frameW: src.frameW(), frameH: src.frameH(), patternId: t.patternId, seed: t.seed, palette, recolour, connectedSlots: src.connectedSlots(), placement: { ops: t.ops, did: t.did }, shapeMode: shapeMode.value, imageMode: imageMode.value })
       if (plan) out.push({ ...t, plan })
     }
     return out
   })
 
   function apply(tile: SheetTile) {
-    const out = applyPatternToFrame({ props: src.props(), frameW: src.frameW(), frameH: src.frameH(), patternId: tile.patternId, seed: tile.seed, palette: paletteFromFrame(src.props()), connectedSlots: src.connectedSlots(), shapeMode: shapeMode.value, imageMode: imageMode.value, editor: src.editor() })
+    const out = applyPatternToFrame({ props: src.props(), frameW: src.frameW(), frameH: src.frameH(), patternId: tile.patternId, seed: tile.seed, palette: posterPalette(), recolour: paletteMode.value != null, connectedSlots: src.connectedSlots(), shapeMode: shapeMode.value, imageMode: imageMode.value, editor: src.editor() })
     if (out.ok && out.posterState) src.remember(out.posterState)
   }
   function another() { seed.value += 1 }
   function moreLikeThis(tile: SheetTile) { focus.value = tile.patternId }
   function back() { focus.value = null }
-  return { seed, focus, tiles, shapeMode, setShapeMode, imageMode, setImageMode, apply, another, moreLikeThis, back }
+  return { seed, focus, tiles, shapeMode, setShapeMode, imageMode, setImageMode, paletteMode, setPaletteMode, apply, another, moreLikeThis, back }
 }
