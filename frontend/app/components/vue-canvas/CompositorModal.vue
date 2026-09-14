@@ -20,7 +20,7 @@ import { onPaperBooleanReady, warmPaperBoolean } from '~/lib/compositor/booleanG
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
 import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf, mosaicStylePatch, mosaicSeedPatch, freshMosaicSeed, isMosaicShaderFill, mosaicShaderSpec, mosaicLookNames, mosaicLookOf, applyMosaicLook } from '~/lib/compositor/mosaic'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
-import { onFieldCatalogReady } from '~/lib/shaderfill/field'
+import { onFieldCatalogReady, retryFieldCatalog } from '~/lib/shaderfill/field'
 import { onCompositorFontReady } from '~/lib/compositor/textOutline'
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN } from '~/lib/compositor/clip'
 import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, panePalette, paneInkPatch, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
@@ -65,6 +65,7 @@ import { useVectorPen, buildPathLayerFromAnchors } from '~/composables/useVector
 import { useBrushPaint } from '~/composables/useBrushPaint'
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
+import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
@@ -89,6 +90,17 @@ import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
+// F5 Task 3: the shader-catalog-as-a-pass effect inspector — reuses the app's canonical
+// CatalogModal (the same picker ShaderFillEditor.vue mounts for a shader FILL) and the shared
+// buildShaderParamRows/derivedShaderFillControls dial walk, filtered to input-sampling effects
+// only (effectReadsInput) since a PASS over the layer's own pixels has no separate Input paint
+// to fall back to if the picked effect is purely generative.
+import CatalogModal from '~/components/CatalogModal.vue'
+import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
+import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
+import type { EffectDef, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/types'
+import { cleanStops } from '~/lib/shaderfx/params'
+import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
 import '~/lib/motion/paint' // registers the motion painter for paintLayerStack(t)
 import { bakeAndUpload, motionSourceKey, type MotionParams } from '~/lib/motion/bake'
 import { readGrid } from '~/lib/frame/gridConfig'
@@ -2121,6 +2133,128 @@ const geometrySiblingReason = computed<string>(() => {
   if (ref && !geometrySiblingRefResolvable(ref)) return 'The chosen layer is no longer a shape — pick another'
   return ''
 })
+
+// ── F5 Task 3: the shader-pass effect inspector (picker + derived param dials) ──────────
+// Mirrors ShaderFillEditor.vue's picker/dials shape (CatalogModal + derivedShaderFillControls,
+// via the shared buildShaderParamRows walk) but trimmed to what a PASS over the layer's own
+// pixels needs: no anchor toggle, no nested input-fill editor, no Reads/glass picker — there is
+// no separate `input` Paint here to anchor or read a backdrop through (ShaderPixelEffect's own
+// doc in effectStack.ts). `activeEffect` is the single read/write source, via updateActiveEffect.
+const shaderFxCatalog = ref<ShaderFxCatalog | null>(null)
+function loadShaderFxCatalog() {
+  retryFieldCatalog()
+  fetchShaderFxCatalog().then((c) => { shaderFxCatalog.value = c }).catch(() => { /* picker falls back to the raw id */ })
+}
+onMounted(loadShaderFxCatalog)
+
+const activeShaderEffectId = computed<string>(() => ((activeEffect.value as any)?.effectId as string | undefined) ?? '')
+const activeShaderEffectDef = computed<EffectDef | null>(() => {
+  if (!activeShaderEffectId.value) return null
+  return shaderFxCatalog.value?.effects.find((e) => e.id === resolveEffectId(activeShaderEffectId.value)) ?? null
+})
+function shaderFxTitleCase(s: string): string {
+  return s.replace(/(^|[_\s])(\w)/g, (_, sep, c) => (sep ? ' ' : '') + c.toUpperCase()).trim()
+}
+
+// Picker filtered to input-sampling effects only — a purely generative effect would overwrite
+// the layer's pixels rather than process them (the F5 plan's picker-eligibility gate, same rule
+// the glass lens's Reads picker applies to what it may read).
+const shaderFxAllItems = computed<EffectDef[]>(() =>
+  (shaderFxCatalog.value?.effects ?? []).filter((e) => effectReadsInput(e.id)))
+const shaderFxPickerOpen = ref(false)
+const shaderFxPickerSearch = ref('')
+const shaderFxPickerFilter = ref('all')
+const shaderFxPickerFilters = computed(() => {
+  const counts = new Map<string, number>()
+  for (const e of shaderFxAllItems.value) counts.set(e.category, (counts.get(e.category) ?? 0) + 1)
+  return [
+    { id: 'all', label: 'All', count: shaderFxAllItems.value.length },
+    ...[...counts].map(([id, count]) => ({ id, label: shaderFxTitleCase(id), count })),
+  ]
+})
+const shaderFxPickerItems = computed<EffectDef[]>(() => {
+  const q = shaderFxPickerSearch.value.trim().toLowerCase()
+  return shaderFxAllItems.value.filter((e) =>
+    (shaderFxPickerFilter.value === 'all' || e.category === shaderFxPickerFilter.value)
+    && (!q || e.name.toLowerCase().includes(q) || e.category.toLowerCase().includes(q)))
+})
+function openShaderFxPicker() {
+  shaderFxPickerSearch.value = ''
+  shaderFxPickerFilter.value = 'all'
+  shaderFxPickerOpen.value = true
+}
+function pickShaderFxEffect(id: string) {
+  // Params are per-effect — reset rather than carry stale values across the switch (mirrors
+  // ShaderFillEditor's pickEffect); `params: {}` lets the newly picked effect's own catalog
+  // defaults show through until the user tunes a dial.
+  updateActiveEffect({ effectId: id, params: {} })
+  shaderFxPickerOpen.value = false
+  retryFieldCatalog()
+}
+
+// ── Derived per-effect param dials, same row shape ShaderFillEditor renders ─────────────
+const SHADER_FX_PREFIX = 'layer.shader'
+const shaderFxParamRows = computed<ShaderParamRow[]>(() => {
+  const eff = activeShaderEffectDef.value
+  return eff ? buildShaderParamRows(eff, SHADER_FX_PREFIX) : []
+})
+const isShaderFxColourParam = (r: ShaderParamRow) => r.kind === 'color' || r.kind === 'gradientStops'
+function shaderFxDividesAbove(i: number): boolean {
+  const rows = shaderFxParamRows.value
+  const prev = rows[i - 1]
+  return i > 0 && !!prev && isShaderFxColourParam(rows[i]!) !== isShaderFxColourParam(prev)
+}
+function shaderFxParamsOf(): Record<string, ParamValue> {
+  return ((activeEffect.value as any)?.params as Record<string, ParamValue> | undefined) ?? {}
+}
+function shaderFxParamValue(row: ShaderParamRow): number {
+  const raw = shaderFxParamsOf()[row.key]
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : (row.default as number)
+}
+function shaderFxColorValue(row: ShaderParamRow): string {
+  const raw = shaderFxParamsOf()[row.key]
+  return typeof raw === 'string' && raw ? raw : String(row.default)
+}
+function shaderFxStopsValue(row: ShaderParamRow): GradientStop[] {
+  const fallback = cleanStops(row.default, row.maxStops ?? 8, [])
+  return cleanStops(shaderFxParamsOf()[row.key], row.maxStops ?? 8, fallback)
+}
+function shaderFxRampCss(stops: GradientStop[]): string {
+  const s = [...stops].sort((a, b) => a.pos - b.pos)
+  if (!s.length) return 'transparent'
+  return `linear-gradient(to right, ${s.map((x) => `${x.color} ${Math.round(x.pos * 100)}%`).join(', ')})`
+}
+function setShaderFxParam(key: string, v: ParamValue) {
+  updateActiveEffect({ params: { ...shaderFxParamsOf(), [key]: v } })
+}
+function applyShaderFxRowStops(row: ShaderParamRow, v: GradientStop[]) {
+  setShaderFxParam(row.key, v.slice(0, row.maxStops ?? 8).map((s) => ({ pos: s.pos, color: s.color })))
+}
+const shaderFxClampUnit = (n: number) => Math.max(0, Math.min(1, n))
+function editShaderFxRowStopColor(row: ShaderParamRow, i: number, color: string) {
+  applyShaderFxRowStops(row, shaderFxStopsValue(row).map((s, j) => (j === i ? { ...s, color } : s)))
+}
+function editShaderFxRowStopPos(row: ShaderParamRow, i: number, pos: number) {
+  applyShaderFxRowStops(row, shaderFxStopsValue(row).map((s, j) => (j === i ? { ...s, pos: shaderFxClampUnit(pos) } : s)))
+}
+function removeShaderFxRowStop(row: ShaderParamRow, i: number) {
+  const s = shaderFxStopsValue(row)
+  if (s.length > 2) applyShaderFxRowStops(row, s.filter((_, j) => j !== i))
+}
+function addShaderFxRowStop(row: ShaderParamRow) {
+  const s = [...shaderFxStopsValue(row)].sort((a, b) => a.pos - b.pos)
+  let gap = -1, at = 0.5
+  for (let i = 0; i < s.length - 1; i++) {
+    const g = s[i + 1]!.pos - s[i]!.pos
+    if (g > gap) { gap = g; at = (s[i]!.pos + s[i + 1]!.pos) / 2 }
+  }
+  applyShaderFxRowStops(row, [...shaderFxStopsValue(row), { pos: at, color: s[Math.floor(s.length / 2)]?.color ?? '#888888' }])
+}
+// Palette generator, folded (same disclosure ShaderFillEditor uses) — keyed per row.
+const shaderFxOpenPickers = ref<Record<string, boolean>>({})
+function toggleShaderFxPicker(key: string) {
+  shaderFxOpenPickers.value = { ...shaderFxOpenPickers.value, [key]: !shaderFxOpenPickers.value[key] }
+}
 
 function addLayerEffect(layerId: string, kind: EffectKind) {
   const l = layerById(layerId); if (!l) return
@@ -8251,6 +8385,144 @@ onUnmounted(() => {
                   @input="updateActiveEffect({ seed: Math.round(parseFloat(($event.target as HTMLInputElement).value) || 0) })" />
               </div>
             </div>
+          </div>
+
+          <!-- Shader (F5): runs a picked Shader Studio catalog effect over this layer's OWN
+               already-rendered pixels — a GPU pass (applyShaderPixelEffect, useCompositorLayers.ts),
+               not a fill. Picker → derived param dials → Speed, the same picker/dials shape
+               ShaderFillEditor.vue uses for a shader FILL, minus the fill-only anchor toggle and
+               nested input-fill editor (there is no separate Input paint here to anchor or blend —
+               the layer's own pixels ARE the input). The picker is filtered to effectReadsInput
+               effects only: a purely generative pick would overwrite the layer instead of
+               processing it. -->
+          <div v-else-if="activeEffect!.type === 'shader'" class="space-y-2.5" data-testid="shader-fx-inspector">
+            <div>
+              <div class="mb-1 flex items-center justify-between gap-2">
+                <label class="block panel-label">Effect</label>
+                <button
+                  v-if="shaderFxCatalog && !activeShaderEffectDef"
+                  type="button"
+                  title="Retry loading this effect"
+                  class="nopan nodrag flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-white/40 transition-colors hover:bg-white/10 hover:text-white/70"
+                  @click="loadShaderFxCatalog"
+                ><RefreshCw class="size-2.5" :stroke-width="2" /> Retry</button>
+              </div>
+              <button
+                type="button" data-testid="shader-fx-picker"
+                class="flex w-full cursor-pointer items-center gap-2 rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-left transition-colors hover:border-white/20 hover:bg-white/[0.08]"
+                @click="openShaderFxPicker"
+              >
+                <Sparkles class="size-3.5 shrink-0 text-white/60" :stroke-width="1.75" />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-[11px] font-medium leading-tight text-white/90" data-testid="shader-fx-effect-name">{{ activeShaderEffectDef?.name ?? activeShaderEffectId }}</span>
+                  <span v-if="activeShaderEffectDef" class="block truncate text-[10px] leading-tight text-white/40">{{ shaderFxTitleCase(activeShaderEffectDef.category) }}</span>
+                </span>
+                <ChevronRight class="size-3.5 shrink-0 text-white/30" />
+              </button>
+            </div>
+
+            <!-- Effect params (derived per catalog effect). A hairline rules the colour
+                 params off from the shape/number ones wherever the two meet — same layout
+                 ShaderFillEditor uses for a shader fill's dials. -->
+            <div
+              v-for="(row, i) in shaderFxParamRows" :key="row.key"
+              :data-testid="`shader-fx-param-${row.key}`"
+              :class="shaderFxDividesAbove(i) ? 'border-t border-white/[0.06] pt-2.5' : ''"
+            >
+              <template v-if="row.kind === 'select'">
+                <StudioSelect
+                  :label="row.label"
+                  :options="(row.options ?? []).map((o) => String(o.value))"
+                  :option-labels="(row.options ?? []).map((o) => o.label)"
+                  :model-value="String(shaderFxParamValue(row))"
+                  @update:model-value="(v: string) => setShaderFxParam(row.key, Number(v))"
+                />
+              </template>
+              <template v-else-if="row.kind === 'color'">
+                <StudioColorField
+                  :label="row.label"
+                  :model-value="shaderFxColorValue(row)"
+                  @update:model-value="(v: string) => setShaderFxParam(row.key, v)"
+                />
+              </template>
+              <template v-else-if="row.kind === 'gradientStops'">
+                <label class="mb-1 block panel-label">{{ row.label }}</label>
+                <div class="mb-1.5 h-5 overflow-hidden rounded border border-white/10" :style="{ background: shaderFxRampCss(shaderFxStopsValue(row)) }" />
+                <div class="mb-2 flex flex-col gap-1">
+                  <div v-for="(s, si) in shaderFxStopsValue(row)" :key="si" class="flex items-center gap-2">
+                    <StudioColor :model-value="s.color" @update:model-value="(c: string) => editShaderFxRowStopColor(row, si, c)" />
+                    <div class="min-w-0 flex-1">
+                      <StudioSlider :model-value="Math.round(s.pos * 100)" @update:model-value="(v: number) => editShaderFxRowStopPos(row, si, v / 100)"
+                        :min="0" :max="100" :step="1" :bindable="false" />
+                    </div>
+                    <button class="shrink-0 rounded p-0.5 text-white/30 hover:bg-white/10 hover:text-white/70 disabled:opacity-20"
+                      :disabled="shaderFxStopsValue(row).length <= 2" title="Remove ink" @click="removeShaderFxRowStop(row, si)"><Trash2 :size="12" /></button>
+                  </div>
+                  <button class="mt-0.5 flex items-center justify-center gap-1 rounded border border-dashed border-white/15 py-1 text-[11px] text-white/50 hover:border-white/30 hover:text-white/80 disabled:opacity-30"
+                    :disabled="shaderFxStopsValue(row).length >= (row.maxStops ?? 8)" @click="addShaderFxRowStop(row)"><Plus :size="12" /> Add ink</button>
+                </div>
+                <button
+                  class="flex w-full items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-[11px] text-white/70 transition hover:bg-white/[0.08] hover:text-white/90"
+                  @click="toggleShaderFxPicker(row.key)"
+                >
+                  <Palette :size="12" class="shrink-0 opacity-70" />
+                  <span>Generate a palette</span>
+                  <ChevronRight :size="12" class="ml-auto shrink-0 opacity-60 transition-transform" :class="shaderFxOpenPickers[row.key] ? 'rotate-90' : ''" />
+                </button>
+                <div v-if="shaderFxOpenPickers[row.key]" class="mt-1.5 rounded border border-white/10 bg-white/[0.02] p-2">
+                  <PalettePicker
+                    mode="stops" manual-stops
+                    :stop-count="shaderFxStopsValue(row).length || 3"
+                    :seed="shaderFxStopsValue(row)[0]?.color ?? '#4f8ad9'"
+                    @apply-stops="(v: GradientStop[]) => applyShaderFxRowStops(row, v)"
+                    @apply-literal-stops="(v: GradientStop[]) => applyShaderFxRowStops(row, v)"
+                  />
+                </div>
+              </template>
+              <StudioSlider
+                v-else
+                :model-value="shaderFxParamValue(row)"
+                :label="row.label" :min="row.min ?? 0" :max="row.max ?? 1" :step="row.step ?? 0.01" :default="Number(row.default)"
+                @update:model-value="(v: number) => setShaderFxParam(row.key, v)"
+              />
+            </div>
+
+            <!-- Speed: the one non-param control — no anchor, no nested input fill (this is a
+                 pass over the layer's own pixels, not a fill with its own Input paint). -->
+            <StudioSlider
+              data-testid="shader-fx-speed"
+              :model-value="(activeEffect as any).speed ?? 1"
+              label="Speed" :min="0" :max="4" :step="0.05" :default="1"
+              @update:model-value="(v: number) => updateActiveEffect({ speed: v })"
+            />
+
+            <CatalogModal
+              :open="shaderFxPickerOpen"
+              title="Shader effects"
+              subtitle="Pick an effect to process this layer's pixels"
+              :items="shaderFxPickerItems"
+              :selected-id="activeShaderEffectId"
+              :filters="shaderFxPickerFilters"
+              :active-filter-id="shaderFxPickerFilter"
+              :search-query="shaderFxPickerSearch"
+              search-placeholder="Search effects…"
+              confirm-label="Use effect"
+              empty-message="No effects match your search."
+              @close="shaderFxPickerOpen = false"
+              @confirm="pickShaderFxEffect(($event as EffectDef).id)"
+              @update:active-filter-id="shaderFxPickerFilter = $event"
+              @update:search-query="shaderFxPickerSearch = $event"
+            >
+              <template #card="{ item }">
+                <div class="flex aspect-video items-center justify-center bg-white/[0.03]">
+                  <Sparkles class="size-5 text-white/25" :stroke-width="1.5" />
+                </div>
+                <div class="px-2 py-1.5">
+                  <div class="truncate text-[11px] text-white/85">{{ (item as EffectDef).name }}</div>
+                  <div class="truncate text-[10px] capitalize text-white/35">{{ (item as EffectDef).category }}</div>
+                </div>
+              </template>
+            </CatalogModal>
           </div>
 
           <!-- Outer glow / Inner glow: a tinted halo outside (behind) or inside (clipped to) the
