@@ -15,12 +15,13 @@ import {
   newScatterLayer,
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
   outlinePathData, canTakeGeometry, canWarpRaster, cornerPinActive,
+  applyShaderPixelEffect, shaderSpecFromEffect, type ShaderPixelEffect,
 } from '~/composables/useCompositorLayers'
 import { onPaperBooleanReady, warmPaperBoolean } from '~/lib/compositor/booleanGeometry'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
 import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf, mosaicStylePatch, mosaicSeedPatch, freshMosaicSeed, isMosaicShaderFill, mosaicShaderSpec, mosaicLookNames, mosaicLookOf, applyMosaicLook } from '~/lib/compositor/mosaic'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
-import { onFieldCatalogReady, retryFieldCatalog } from '~/lib/shaderfill/field'
+import { onFieldCatalogReady, retryFieldCatalog, renderFieldWithBase } from '~/lib/shaderfill/field'
 import { onCompositorFontReady } from '~/lib/compositor/textOutline'
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, withTake, withTakeSpeed, type ImageClip } from '~/lib/compositor/clip'
 import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, panePalette, paneInkPatch, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
@@ -1916,6 +1917,41 @@ onMounted(() => {
     // the outline path actually ran rather than silently falling back to fillText.
     ;(window as any).__compositorTextOutline = (i: number) =>
       outlinePathData(localLayers.value[i], canvasDisplay.w)
+    // F5 Task 4 parity proof hook: proves the `shader` layer PASS (applyShaderPixelEffect)
+    // is exactly `renderFieldWithBase` + the documented destination-in alpha recombine —
+    // the studio effect itself, not a parallel reimplementation. Builds its OWN synthetic
+    // base canvas (a flat-colour split with a punched-out transparent corner, so both the
+    // RGB-split and the alpha recombine have something real to bite on) rather than reusing
+    // whatever layer happens to be open, so the comparison is not tangled up in a layer's
+    // own box geometry/transform. See compositor-layer-effects.spec.ts "F5 Task 4".
+    ;(window as any).__compositorShaderParityProbe = (effect: ShaderPixelEffect, w: number, h: number) => {
+      const base = document.createElement('canvas')
+      base.width = w; base.height = h
+      const bctx = base.getContext('2d')!
+      bctx.fillStyle = '#ff0000'; bctx.fillRect(0, 0, w, h)
+      bctx.clearRect(0, 0, Math.round(w * 0.2), Math.round(h * 0.2))
+      bctx.fillStyle = '#00ff00'; bctx.fillRect(Math.round(w / 2), 0, Math.round(w / 2), h)
+
+      // 1) The real pass under test.
+      const actual = document.createElement('canvas')
+      actual.width = w; actual.height = h
+      actual.getContext('2d')!.drawImage(base, 0, 0)
+      applyShaderPixelEffect(actual, effect, { W: w, scale: 1, t: 0 })
+
+      // 2) The hand-built "studio effect" recipe: renderFieldWithBase over the SAME base,
+      //    then destination-in against that SAME base — applyShaderPixelEffect's own
+      //    documented recombine, spelled out here independently.
+      const spec = shaderSpecFromEffect(effect)
+      const fieldResult = renderFieldWithBase(spec, base, w, h, undefined, 0)
+      const expected = document.createElement('canvas')
+      expected.width = w; expected.height = h
+      const ectx = expected.getContext('2d')!
+      ectx.drawImage(fieldResult, 0, 0)
+      ectx.globalCompositeOperation = 'destination-in'
+      ectx.drawImage(base, 0, 0)
+
+      return { actual: actual.toDataURL(), expected: expected.toDataURL() }
+    }
   }
 })
 onBeforeUnmount(() => {

@@ -1457,6 +1457,75 @@ test.describe('Frame shader-catalog pixel pass (F5 Task 2)', () => {
     const cornerAfter = await colorAt(page, 0.27, 0.27)
     expect(cornerAfter.a).toBeLessThan(20)
   })
+
+  // ── F5 Task 4 ──────────────────────────────────────────────────────────────────────
+  // Duplicates + reorder, the layer-pass/studio-effect parity proof, and the animated-
+  // preview-advances proof. `posterize` is a second real, input-sampling, NON-animated
+  // catalog effect (manifest.json: `animated: false`, reads `u_image0`) — distinct
+  // enough from `chromatic_aberration`'s RGB split that stacking/reordering the two
+  // moves real pixels, not render noise.
+  const POSTERIZE = { id: 'sh2', type: 'shader', effectId: 'posterize', params: { levels: 3 }, speed: 0, seed: 42, visible: true }
+
+  test('two shader effects on one layer both apply, in stack order', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+
+    const oneOnly = await settledWithShader(page, [CHROMA])
+    const both = await settledWithShader(page, [CHROMA, POSTERIZE])
+    expect(both).not.toBe(oneOnly)
+    const d = await pixelDelta(page, oneOnly, both)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(50)
+  })
+
+  test('reordering two shader effects changes the render (canReorder, automatic)', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+
+    const chromaThenPosterize = await settledWithShader(page, [CHROMA, POSTERIZE])
+    const posterizeThenChroma = await settledWithShader(page, [POSTERIZE, CHROMA])
+    expect(posterizeThenChroma).not.toBe(chromaThenPosterize)
+  })
+
+  test('parity: the layer pass IS renderFieldWithBase + the documented alpha recombine, not a reimplementation', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    // Warm the shader catalog exactly like the other tests in this suite, so the probe's
+    // own renderFieldWithBase call (below) doesn't race the fetch.
+    await settledWithShader(page, [CHROMA])
+
+    const result = await page.evaluate(() =>
+      (window as any).__compositorShaderParityProbe(
+        { type: 'shader', visible: true, effectId: 'chromatic_aberration', params: { amount: 0.3 }, speed: 0, seed: 42 },
+        200, 200,
+      ))
+    expect(result.actual).toBe(result.expected)
+  })
+
+  test('an animated shader effect makes the preview advance over time', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    // fbm_warp is a real, input-sampling, ANIMATED catalog effect (manifest.json:
+    // `animated: true`, its .frag scales u_time by u_speed) — unlike chromatic_aberration
+    // (whose .frag never reads u_time at all), so a nonzero top-level `speed` here actually
+    // moves the render frame over frame, which is what this test needs to prove the modal's
+    // live loop is really advancing, not just repainting the same pixels.
+    const ANIM = { id: 'sh3', type: 'shader', effectId: 'fbm_warp', params: {}, speed: 1, seed: 42, visible: true }
+    const readCanvas = () => page.evaluate(() =>
+      (document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement).toDataURL())
+
+    await setEffects(page, [ANIM])
+    await readCanvas()                 // first paint likely races the catalog fetch — a no-op
+    await page.waitForTimeout(1_500)
+    await setEffects(page, [ANIM])     // re-set forces a repaint now the catalog is warm, and
+                                        // (this is the Task 4 fix under test) starts the modal's
+                                        // live rAF loop now that hasAnimatedShaderFill sees it.
+    await page.waitForTimeout(300)     // let the live loop actually tick a few frames
+    const frame1 = await readCanvas()
+    await page.waitForTimeout(600)     // real wall-clock time passing, well past one SHADER_PREVIEW_FPS tick
+    const frame2 = await readCanvas()
+    expect(frame2).not.toBe(frame1)
+  })
 })
 
 /**

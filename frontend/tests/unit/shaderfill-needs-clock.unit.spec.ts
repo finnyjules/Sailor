@@ -9,6 +9,21 @@
 import { describe, expect, it } from 'vitest'
 import { hasAnimatedShaderFill, type StackItem } from '~/composables/useCompositorLayers'
 import { DEFAULT_SHADER_SPEC, type Fill } from '~/lib/spacetype/fillTile'
+import { setShaderFxCatalog } from '~/lib/shaderfx/catalogStore'
+
+// F5 Task 4: a shader-catalog-as-a-pass EFFECT (distinct from a shader FILL above) can
+// also be animated, and the modal's live loop must recognise it too, or a picked
+// animated effect (or one with a nonzero speed) renders once and freezes. `anim_fx`'s
+// catalog def is animated:true; `still_fx`'s is animated:false — both fixtures are
+// otherwise identical so only the `animated` flag (and, separately, `speed`) is under
+// test.
+setShaderFxCatalog({
+  version: 1,
+  effects: [
+    { id: 'anim_fx', name: 'Anim FX', category: 'test', animated: true, passes: 1, centerParam: null, textures: [], params: [], source: 'void main(){}' },
+    { id: 'still_fx', name: 'Still FX', category: 'test', animated: false, passes: 1, centerParam: null, textures: [], params: [], source: 'void main(){}' },
+  ],
+} as any)
 
 const solidFill: Fill = { type: 'solid', a: '#ffffff', b: '#000000', textColor: '#ffffff', angle: 45, density: 8 }
 const shaderFill = (speed: number): Fill => ({
@@ -28,6 +43,12 @@ const textLayer = (color: Fill | string, strokeColor?: Fill): any => ({
 })
 const localItem = (layer: any): StackItem => ({ type: 'local', key: `l:${layer.id}`, layer })
 const wiredItem = (key = 'w:1'): StackItem => ({ type: 'wired', key, draw: () => {} })
+
+// F5 Task 4: a shader-catalog-as-a-pass EFFECT fixture (`layer.effects`, not `layer.fill`).
+const shaderEffectLayer = (effectId: string, speed: number, visible = true): any => ({
+  id: 'r2', kind: 'rect', x: 0.5, y: 0.5, w: 0.2, h: 0.2, rotation: 0, opacity: 1, fill: solidFill,
+  effects: [{ id: 'sh', type: 'shader', visible, effectId, params: {}, speed, seed: 42 }],
+})
 
 describe('hasAnimatedShaderFill', () => {
   it('is false for no items and no background', () => {
@@ -81,5 +102,30 @@ describe('hasAnimatedShaderFill', () => {
       localItem(rectLayer(shaderFill(2))),
     ]
     expect(hasAnimatedShaderFill(items)).toBe(true)
+  })
+
+  // F5 Task 4: an animated shader-catalog EFFECT (not a fill) must also flip the
+  // predicate, or the modal's live loop never advances for it and the effect
+  // freezes after its first paint.
+  describe('a shader EFFECT (layer.effects, not layer.fill)', () => {
+    it('is true when the picked effect\'s catalog def is animated, even at speed 0', () => {
+      expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('anim_fx', 0))])).toBe(true)
+    })
+
+    it('is true when speed !== 0, even for a non-animated catalog def', () => {
+      expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('still_fx', 1))])).toBe(true)
+    })
+
+    it('is false for a non-animated effect at speed 0 (genuinely still)', () => {
+      expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('still_fx', 0))])).toBe(false)
+    })
+
+    it('ignores an invisible shader effect (it never paints, so it never needs to advance)', () => {
+      expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('anim_fx', 1, false))])).toBe(false)
+    })
+
+    it('is false for an unknown effectId (no catalog def) at speed 0', () => {
+      expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('nope', 0))])).toBe(false)
+    })
   })
 })

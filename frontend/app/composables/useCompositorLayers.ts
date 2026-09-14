@@ -28,7 +28,7 @@ import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
 import { clipFrameIndex, clipFrameUrl, clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
 import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
-import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
+import { effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
 import { dealShaderFill } from '~/lib/compositor/mosaic'
 import { paintScatter, SCATTER_STYLES, DEFAULT_SCATTER_STYLE, DEFAULT_SCATTER_SEED, type ScatterStyle } from '~/lib/compositor/scatter'
 import { withFieldFrame, renderFieldWithBase, effectFollowsShape, type FieldRequest, type LensShape } from '~/lib/shaderfill/field'
@@ -2208,7 +2208,14 @@ export function shaderSpecFromEffect(e: Pick<ShaderPixelEffect, 'effectId' | 'pa
 // `renderFieldWithBase` THROWS on a catalog miss (unloaded catalog, bad effectId) — the
 // same precedent `applyGlassFromLayer`'s caller relies on — so a throw here is caught and
 // leaves `off` completely untouched, never aborting the frame.
-function applyShaderPixelEffect(off: HTMLCanvasElement, e: ShaderPixelEffect, opts: { W: number; scale: number; t: number }): void {
+//
+// F5 Task 4: exported (like `shaderSpecFromEffect` above) so the layer-pass-vs-studio-
+// effect PARITY proof (compositor-layer-effects.spec.ts, "F5 Task 4") can call this real
+// function directly against a synthetic base canvas and diff it against a hand-built
+// `renderFieldWithBase` + destination-in recombine — proving this pass IS the studio
+// effect rather than a parallel reimplementation. Not called from any new production
+// site; `paintLayer`'s `case 'shader'` above remains the one dispatch path.
+export function applyShaderPixelEffect(off: HTMLCanvasElement, e: ShaderPixelEffect, opts: { W: number; scale: number; t: number }): void {
   const w = off.width, h = off.height
   if (w < 1 || h < 1) return
   try {
@@ -5154,9 +5161,20 @@ export function isShapeFollowingOwnFill(layer: LocalLayer): boolean {
 export function hasAnimatedShaderFill(items: StackItem[], background?: Paint): boolean {
   const isLiveShader = (p: Paint | undefined): boolean => isFill(p) && fillIsShader(p) && p.shader.speed !== 0
   if (isLiveShader(background)) return true
+  // F5 Task 4: a shader-catalog-as-a-pass EFFECT (layer.effects, distinct from the
+  // fill/stroke Paint checked above) can be just as animated as a shader FILL, and the
+  // modal's live loop only advances when THIS predicate says so — an animated effect
+  // that isn't recognised here renders once and freezes. "Animated" mirrors the picked
+  // catalog effect's own def (`animated: true` — it samples u_time in its GLSL) OR a
+  // nonzero speed (a user-dialled speed on an effect that isn't itself flagged
+  // animated still drives renderFieldWithBase's u_time scale — see the two-speed fix).
+  // An invisible effect never paints, so it never needs the clock either.
+  const isLiveShaderEffect = (e: LayerEffect): boolean =>
+    e.type === 'shader' && e.visible && (getEffectSync(e.effectId)?.animated === true || e.speed !== 0)
   for (const it of items) {
     if (it.type !== 'local') continue
     if (layerPaints(it.layer).some(isLiveShader)) return true
+    if (effectStackOf(it.layer as unknown as Parameters<typeof effectStackOf>[0]).some(isLiveShaderEffect)) return true
   }
   return false
 }
