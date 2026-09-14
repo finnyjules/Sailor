@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clipFrameIndex, clipFrameUrl, clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
+import { CLIP_TAKES_MAX, clipFrameIndex, clipFrameUrl, clipPlayedSeconds, takeIndexOf, withTake, withTakeSpeed, type ImageClip } from '~/lib/compositor/clip'
 
 const clip = (over: Partial<ImageClip> = {}): ImageClip =>
   ({ dir: 'sailor_clips/clip_1', frames: 24, fps: 24, speed: 1, prompt: 'p', model: 'seedance-2.0', ...over })
@@ -52,5 +52,36 @@ describe('clipFrameIndex', () => {
 describe('clipFrameUrl', () => {
   it('is a /view URL into the clip folder with a six-digit name', () => {
     expect(clipFrameUrl(clip(), 7)).toBe('/view?filename=000007.png&subfolder=sailor_clips%2Fclip_1&type=input')
+  })
+})
+
+describe('takes', () => {
+  it('appends each generation, oldest first', () => {
+    const a = clip({ dir: 'a' }), b = clip({ dir: 'b' })
+    expect(withTake(undefined, a)).toEqual([a])
+    expect(withTake([a], b)).toEqual([a, b])
+  })
+  it('a re-generation of the same folder moves it to the end rather than duplicating it', () => {
+    const a = clip({ dir: 'a' }), b = clip({ dir: 'b' })
+    expect(withTake([a, b], { ...a, speed: 2 })).toEqual([b, { ...a, speed: 2 }])
+  })
+  it('caps at CLIP_TAKES_MAX by dropping the oldest reference', () => {
+    let takes: ImageClip[] = []
+    for (let i = 0; i < CLIP_TAKES_MAX + 3; i++) takes = withTake(takes, clip({ dir: `d${i}` }))
+    expect(takes).toHaveLength(CLIP_TAKES_MAX)
+    expect(takes[0]!.dir).toBe('d3')
+    expect(takes[takes.length - 1]!.dir).toBe(`d${CLIP_TAKES_MAX + 2}`)
+  })
+  it('finds the active take by folder, -1 when none', () => {
+    const a = clip({ dir: 'a' }), b = clip({ dir: 'b' })
+    expect(takeIndexOf([a, b], b)).toBe(1)
+    expect(takeIndexOf([a, b], clip({ dir: 'zzz' }))).toBe(-1)
+    expect(takeIndexOf(undefined, a)).toBe(-1)
+    expect(takeIndexOf([a], undefined)).toBe(-1)
+  })
+  it('remembers a speed change on the matching take only', () => {
+    const a = clip({ dir: 'a' }), b = clip({ dir: 'b' })
+    expect(withTakeSpeed([a, b], 'b', 2)).toEqual([a, { ...b, speed: 2 }])
+    expect(withTakeSpeed(undefined, 'b', 2)).toBeUndefined()
   })
 })

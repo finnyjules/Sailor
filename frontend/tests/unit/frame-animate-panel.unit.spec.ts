@@ -65,4 +65,30 @@ describe('CompositorAnimatePanel', () => {
     await w.find('button[data-role="remove"]').trigger('click')
     expect(w.emitted('remove')).toHaveLength(1)
   })
+  // A re-roll used to overwrite the clip and orphan the old folder. Every generation is
+  // now a take; the row appears once there is something to go back to.
+  it('shows no takes row for a single take that is still the active clip', () => {
+    const c = living().clip!
+    expect(mountP({ ...living(), takes: [c] }).find('[data-role="takes"]').exists()).toBe(false)
+  })
+  it('lists every take, marks the active one, and emits the take you click', async () => {
+    const one = living().clip!
+    const two = { ...one, dir: 'sailor_clips/d', prompt: 'petals open', model: 'flux-3-draft' }
+    const w = mountP({ ...living(), clip: two, takes: [one, two] })
+    const takes = w.findAll('button[data-role="take"]')
+    expect(takes).toHaveLength(2)
+    expect(takes[0]!.attributes('aria-pressed')).toBe('false')
+    expect(takes[1]!.attributes('aria-pressed')).toBe('true')
+    expect(takes[0]!.find('img').attributes('src')).toContain('sailor_clips%2Fc')
+    expect(takes[1]!.attributes('title')).toContain('flux-3-draft')
+    await takes[0]!.trigger('click')
+    expect(w.emitted('take')![0][0]).toEqual(one)
+  })
+  it('after Remove clip the takes stay, so one can be brought back', () => {
+    const one = living().clip!
+    const w = mountP({ ...still(), takes: [one] })
+    expect(w.find('[data-role="takes"]').exists()).toBe(true)
+    expect(w.find('button[data-role="take"]').attributes('aria-pressed')).toBe('false')
+    expect(w.find('[data-role="speed"]').exists()).toBe(false)
+  })
 })

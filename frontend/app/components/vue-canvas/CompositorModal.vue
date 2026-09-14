@@ -22,7 +22,7 @@ import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf, mosaicStylePatch, 
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
 import { onFieldCatalogReady, retryFieldCatalog } from '~/lib/shaderfill/field'
 import { onCompositorFontReady } from '~/lib/compositor/textOutline'
-import { CLIP_SPEED_MAX, CLIP_SPEED_MIN } from '~/lib/compositor/clip'
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, withTake, withTakeSpeed, type ImageClip } from '~/lib/compositor/clip'
 import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, panePalette, paneInkPatch, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
 import { defaultParcel, PARCEL_LIMITS, PARCEL_PRESET_NAMES, parcelPresetPatch, parcelPresetOf, type ParcelParams, type ParcelPresetName } from '~/lib/compositor/parcel'
@@ -658,7 +658,8 @@ async function animateLayer(layer: any, opts: { prompt: string; model: string; s
   if (!layer || layer.kind !== 'image' || layerAnimate.busy.value) return
   try {
     const clip = await layerAnimate.animate(layer, opts)
-    setLocal(layer.id, { clip } as any)
+    // Keep every generation: a re-roll appends a take instead of orphaning the last one.
+    setLocal(layer.id, { clip, takes: withTake(layer.takes, clip) } as any)
     await ensureLayerImages(localLayers.value as LocalLayer[])
     renderStack()
   } catch { /* error text is on layerAnimate.error; the layer is untouched */ }
@@ -667,10 +668,18 @@ function setClipSpeed(layer: any, speed: number) {
   if (!layer?.clip) return
   // Clamp to the SAME constants the Speed slider's min/max come from (lib/compositor/clip)
   // — the literals that used to sit here were a second copy of the range, free to drift
-  // away from the control that feeds it.
-  setLocal(layer.id, { clip: { ...layer.clip, speed: Math.max(CLIP_SPEED_MIN, Math.min(CLIP_SPEED_MAX, speed)) } } as any)
+  // away from the control that feeds it. The matching take remembers the speed too.
+  const s = Math.max(CLIP_SPEED_MIN, Math.min(CLIP_SPEED_MAX, speed))
+  setLocal(layer.id, { clip: { ...layer.clip, speed: s }, takes: withTakeSpeed(layer.takes, layer.clip.dir, s) } as any)
 }
+/** Remove clip keeps the takes — the still shows, and any take can be brought back. */
 function removeClip(layer: any) { if (layer?.clip) setLocal(layer.id, { clip: undefined } as any) }
+async function restoreTake(layer: any, take: ImageClip) {
+  if (!layer || layer.kind !== 'image') return
+  setLocal(layer.id, { clip: { ...take } } as any)
+  await ensureLayerImages(localLayers.value as LocalLayer[])
+  renderStack()
+}
 const {
   localLayers, setLocal, addLocal, deleteLocal, selectLocal,
   selectedId: selectedLocalId, selected: selectedLocal,
@@ -7906,6 +7915,7 @@ onUnmounted(() => {
             @generate="(o) => animateLayer(selectedLocal, o)"
             @speed="(v) => setClipSpeed(selectedLocal, v)"
             @remove="removeClip(selectedLocal)"
+            @take="(t) => restoreTake(selectedLocal, t)"
           />
           <MotionLayerEditor v-if="selectedLocal"
             :animation="(selectedLocal as any).animation" :frame-duration="effectiveMotion.duration"

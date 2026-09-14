@@ -563,6 +563,9 @@ export interface ImageLayer extends LayerCommon {
    *  Absent ⇒ the layer is exactly the still. `filename` stays the still and paints while
    *  the clip loads or if its folder is gone. */
   clip?: ImageClip
+  /** Every clip generated for this layer, oldest first (see lib/compositor/clip withTake).
+   *  `clip` is the active one; Remove clip keeps the takes so a take can be restored. */
+  takes?: ImageClip[]
 }
 
 /**

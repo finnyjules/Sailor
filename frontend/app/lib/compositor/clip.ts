@@ -18,6 +18,32 @@ export interface ImageClip {
 export const CLIP_SPEED_MIN = 0.25
 export const CLIP_SPEED_MAX = 4
 
+/**
+ * Takes: every clip generated for a layer, oldest first. A re-roll used to overwrite
+ * `layer.clip` and orphan the old folder — the frames were still on disk with nothing
+ * pointing at them. Now each generation is appended and the panel lets you go back.
+ * The cap drops the oldest REFERENCE only; folders are never deleted here.
+ */
+export const CLIP_TAKES_MAX = 12
+
+/** Append `clip` as the newest take (a take with the same folder moves to the end). */
+export function withTake(takes: ImageClip[] | undefined, clip: ImageClip): ImageClip[] {
+  const kept = (takes ?? []).filter(t => t.dir !== clip.dir)
+  return [...kept, clip].slice(-CLIP_TAKES_MAX)
+}
+
+/** Index of the take whose folder is `clip`'s, or -1. */
+export function takeIndexOf(takes: ImageClip[] | undefined, clip: ImageClip | undefined): number {
+  if (!takes || !clip) return -1
+  return takes.findIndex(t => t.dir === clip.dir)
+}
+
+/** The same takes with one take's speed changed, so switching back restores it. */
+export function withTakeSpeed(takes: ImageClip[] | undefined, dir: string, speed: number): ImageClip[] | undefined {
+  if (!takes) return takes
+  return takes.map(t => (t.dir === dir ? { ...t, speed } : t))
+}
+
 /** How long one loop of the clip lasts on screen, in seconds. */
 export function clipPlayedSeconds(clip: ImageClip): number {
   const fps = clip.fps > 0 ? clip.fps : 0

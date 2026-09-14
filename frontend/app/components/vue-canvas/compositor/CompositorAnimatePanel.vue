@@ -5,7 +5,7 @@
 import { computed, ref, watch } from 'vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceLabel } from '~/data/clip-models'
-import { CLIP_SPEED_MAX, CLIP_SPEED_MIN } from '~/lib/compositor/clip'
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, clipFrameUrl, takeIndexOf, type ImageClip } from '~/lib/compositor/clip'
 import type { ImageLayer } from '~/composables/useCompositorLayers'
 
 const props = defineProps<{ layer: ImageLayer; busy: boolean; error: string }>()
@@ -13,6 +13,7 @@ const emit = defineEmits<{
   generate: [payload: { prompt: string; model: string; seconds: number }]
   speed: [value: number]
   remove: []
+  take: [take: ImageClip]
 }>()
 
 // Prefill through `clipModel`, never from the stored string directly: a clip made by a
@@ -39,6 +40,12 @@ watch(() => props.layer.id, () => {
 // Flat per-clip price in credits — see clipPriceCredits: the hold does not scale with length.
 const price = computed(() => clipPriceLabel(model.value))
 const hasClip = computed(() => !!props.layer.clip)
+// Every generation so far, oldest first. Shown once there is something to go back to:
+// a second take, or a removed clip whose take is still here.
+const takes = computed(() => props.layer.takes ?? [])
+const showTakes = computed(() => takes.value.length > 1 || (takes.value.length === 1 && !hasClip.value))
+const activeTake = computed(() => takeIndexOf(takes.value, props.layer.clip))
+const takeTitle = (t: ImageClip, i: number) => `Take ${i + 1} · ${t.model}${t.prompt ? ' · ' + t.prompt : ''}`
 const fieldCls = 'w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none'
 </script>
 
@@ -69,6 +76,19 @@ const fieldCls = 'w-full bg-white/[0.04] border border-white/[0.06] rounded px-2
         {{ busy ? 'Generating…' : `Generate${price ? ' · ' + price : ''}` }}
       </button>
       <div v-if="error" class="text-[11px] text-red-300/90">{{ error }}</div>
+      <div v-if="showTakes" data-role="takes">
+        <div class="panel-label mb-1.5">Takes</div>
+        <div class="flex flex-wrap gap-1.5">
+          <button v-for="(t, i) in takes" :key="t.dir" type="button" data-role="take"
+            class="relative size-12 rounded overflow-hidden border bg-white/[0.04] hover:bg-white/[0.08]"
+            :class="i === activeTake ? 'border-white/80' : 'border-white/[0.08]'"
+            :aria-pressed="i === activeTake" :title="takeTitle(t, i)"
+            @click="emit('take', t)">
+            <img :src="clipFrameUrl(t, 0)" :alt="takeTitle(t, i)" class="size-full object-contain" draggable="false" />
+            <span class="absolute bottom-0 right-0 px-1 text-[10px] leading-4 bg-black/60 text-white/90">{{ i + 1 }}</span>
+          </button>
+        </div>
+      </div>
       <template v-if="hasClip">
         <div data-role="speed">
           <StudioSlider :model-value="layer.clip!.speed" @update:model-value="(v: number) => emit('speed', v)"
