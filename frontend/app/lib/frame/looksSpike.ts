@@ -8,7 +8,7 @@ let _id = 0
 function t(o: any): any { return { id:'t'+(_id++), kind:'text', rotation:0, opacity:1, strokeColor:'#000', strokeWidth:0, ...o } }
 function r(o: any): any { return { id:'r'+(_id++), kind:'rect', rotation:0, opacity:1, stroke:'', strokeWidth:0, radius:0, ...o } }
 function e(o: any): any { return { id:'e'+(_id++), kind:'ellipse', rotation:0, opacity:1, stroke:'', strokeWidth:0, ...o } }
-function img(o: any): any { return { id:'i'+(_id++), kind:'image', rotation:0, opacity:1, filename:'', standIn:true, ...o } }
+function img(o: any): any { return { id:'i'+(_id++), kind:'image', rotation:0, opacity:1, filename:'looks-photo2.png', standIn:true, ...o } }
 export interface SpikeLook { name: string; bg: string; layers: () => LocalLayer[] }
 export const SPIKE_LOOKS: SpikeLook[] = [
   { name:'Run-off', bg:'#f2f0ef', layers:()=>[
