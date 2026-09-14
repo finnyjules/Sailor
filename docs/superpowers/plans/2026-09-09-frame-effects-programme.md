@@ -18,7 +18,7 @@ rules are unchanged; UI copy sentence case, human names; `CompositorModal.vue` s
 
 ---
 
-## Slice F1 · Text to outlines  (≈6 tasks)
+## Slice F1 · Text to outlines  (≈6 tasks) — ✅ LANDED 2026-09-09 (with F2; see memory frame-effects-programme)
 
 **Interfaces produced**
 - `lib/compositor/textOutline.ts`: `textLayerOutline(layer: TextLayer, W: number): { d: string; bbox } | null`
@@ -73,7 +73,7 @@ rules are unchanged; UI copy sentence case, human names; `CompositorModal.vue` s
 **Acceptance:** byte-identity A/B 0 px; Playwright order test; each kind proven on rect, path,
 library shape and outlined text.
 
-## Slice F3 · Boolean, morph, warp, long shadow, shatter  (≈8 tasks)
+## Slice F3 · Boolean, morph, warp, long shadow, shatter  (≈8 tasks) — ✅ LANDED 2026-09-10 (memory frame-effects-f3-landed)
 1. Sibling reference plumbing (`refLayerId`) with the mask reference's lifecycle (delete/duplicate).
 2. Boolean (unite|subtract|intersect|exclude) via paper.js; unit + Playwright.
 3. Morph toward sibling (amount) via `prepareBlend`/`blendPath`.
@@ -85,13 +85,13 @@ library shape and outlined text.
    (paper.js intersect), gap dial, seed.
 7. Playwright per kind; 8. agent + copy.
 
-## Slice F4 · Missing layer styles  (≈8 tasks)
+## Slice F4 · Missing layer styles  (≈8 tasks) — ✅ LANDED 2026-09-11 (memory frame-effects-f4-landed)
 One task per family, each = pass fn + `PASS_TYPES` + defaults + kind + label + icon + agent + tests:
 1. Outer glow, inner glow. 2. Colour overlay, gradient overlay (blend mode). 3. Stroke from alpha
 (width, align, colour). 4. Directional, radial, zoom blur. 5. Levels, posterise, threshold, invert.
 6. Rough edge, ink bleed (edge kinds). 7. Playwright per family. 8. Copy sweep + agent hint.
 
-## Slice F5 · Shader catalog as a layer pass  (≈6 tasks)
+## Slice F5 · Shader catalog as a layer pass  (≈6 tasks) — ✅ LANDED 2026-09-14 (base 8afbb079a → bc7482d20; whole-slice review Ready-to-merge, live gate 10/10; agent PICKER-ONLY pending the hint-ceiling decision; see 2026-09-09-frame-effects-F5-shader-pass.md + memory frame-effects-f5-landed)
 1. `shader` kind with `effectId` + `params` (manifest-derived controls, the studios' derived-inspector
    pattern). 2. GPU pass over the layer offscreen through `lib/studio/post/chain.ts` (`applyPost`
    with a single-pass settings object), alpha preserved, frame clock for time. 3. Effect picker in the
