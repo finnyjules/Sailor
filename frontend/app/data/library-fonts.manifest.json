@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-15T19:22:29.376Z",
+  "generatedAt": "2026-09-15T20:09:43.363Z",
   "fontsRoot": "Assets/Fonts",
   "foundries": [
     {
@@ -11250,6 +11250,25 @@
       "redistributable": true
     },
     {
+      "id": "bram-naus-vercetti",
+      "family": "Vercetti",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-vercetti-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Vercetti-Regular",
+          "src": "Free Fonts/Vercetti/Vercetti-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 14,
+      "license": "Free-noredist",
+      "redistributable": false
+    },
+    {
       "id": "bram-naus-national-park",
       "family": "National Park",
       "foundry": "bram-naus",
@@ -11270,6 +11289,25 @@
       "num": 16,
       "license": "OFL-1.1",
       "redistributable": true
+    },
+    {
+      "id": "bram-naus-migha",
+      "family": "Migha",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-migha-thincondensed",
+          "weight": 100,
+          "style": "Thin Condensed",
+          "italic": false,
+          "postscriptName": "Migha-ThinCondensed",
+          "src": "Free Fonts/Migha/Migha_Variable.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 17,
+      "license": "Free-noredist",
+      "redistributable": false
     },
     {
       "id": "bram-naus-bricolage-grotesque",
@@ -11453,6 +11491,25 @@
       "num": 34,
       "license": "OFL-1.1",
       "redistributable": true
+    },
+    {
+      "id": "bram-naus-nan-holo-gigawide",
+      "family": "NaN Holo Gigawide",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-nanhologigawide-ultra",
+          "weight": 900,
+          "style": "Ultra",
+          "italic": false,
+          "postscriptName": "NaNHoloGigawide-Ultra",
+          "src": "Free Fonts/Holo Gigawide Ultra/NaNHoloGigawide-Ultra.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 36,
+      "license": "Free-noredist",
+      "redistributable": false
     },
     {
       "id": "bram-naus-absans",
@@ -11690,6 +11747,25 @@
       "redistributable": true
     },
     {
+      "id": "bram-naus-realce",
+      "family": "Realce",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-realce-blackv0-006",
+          "weight": 900,
+          "style": "Black v0.006",
+          "italic": false,
+          "postscriptName": "Realce-Blackv0.006",
+          "src": "Free Fonts/Realce/Realce-Black-v0.006.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 55,
+      "license": "Free-noredist",
+      "redistributable": false
+    },
+    {
       "id": "bram-naus-platypi",
       "family": "Platypi",
       "foundry": "bram-naus",
@@ -11854,6 +11930,105 @@
       "redistributable": true
     },
     {
+      "id": "bram-naus-neue-regrade",
+      "family": "Neue Regrade",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-neueregrade-light",
+          "weight": 300,
+          "style": "Light",
+          "italic": false,
+          "postscriptName": "NeueRegrade-Light",
+          "src": "Free Fonts/_incoming/Neue Regrade Light.otf"
+        },
+        {
+          "id": "bram-naus-neueregrade-light-italic",
+          "weight": 300,
+          "style": "Light-Italic",
+          "italic": true,
+          "postscriptName": "NeueRegrade-Light-Italic",
+          "src": "Free Fonts/_incoming/Neue Regrade Light Italic.otf"
+        },
+        {
+          "id": "bram-naus-neueregrade-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "NeueRegrade-Regular",
+          "src": "Free Fonts/_incoming/Neue Regrade Regular.otf"
+        },
+        {
+          "id": "bram-naus-neueregrade-regular-italic",
+          "weight": 400,
+          "style": "Regular-Italic",
+          "italic": true,
+          "postscriptName": "NeueRegrade-Regular-Italic",
+          "src": "Free Fonts/_incoming/Neue Regrade Regular Italic.otf"
+        },
+        {
+          "id": "bram-naus-neueregrade-medium",
+          "weight": 500,
+          "style": "Medium",
+          "italic": false,
+          "postscriptName": "NeueRegrade-Medium",
+          "src": "Free Fonts/_incoming/Neue Regrade Medium.otf"
+        },
+        {
+          "id": "bram-naus-neueregrade-medium-italic",
+          "weight": 500,
+          "style": "Medium-Italic",
+          "italic": true,
+          "postscriptName": "NeueRegrade-Medium-Italic",
+          "src": "Free Fonts/_incoming/Neue Regrade Medium Italic.otf"
+        },
+        {
+          "id": "bram-naus-neueregrade-semibold",
+          "weight": 600,
+          "style": "Semibold",
+          "italic": false,
+          "postscriptName": "NeueRegrade-Semibold",
+          "src": "Free Fonts/_incoming/Neue Regrade Semibold.otf"
+        },
+        {
+          "id": "bram-naus-neueregrade-semibold-italic",
+          "weight": 600,
+          "style": "SemiBold-Italic",
+          "italic": true,
+          "postscriptName": "NeueRegrade-SemiBold-Italic",
+          "src": "Free Fonts/_incoming/Neue Regrade SemiBold Italic.otf"
+        },
+        {
+          "id": "bram-naus-neueregrade-bold-italic",
+          "weight": 700,
+          "style": "Bold-Italic",
+          "italic": true,
+          "postscriptName": "NeueRegrade-Bold-Italic",
+          "src": "Free Fonts/_incoming/Neue Regrade Bold Italic.otf"
+        },
+        {
+          "id": "bram-naus-neueregrade-extrabold",
+          "weight": 800,
+          "style": "Extrabold",
+          "italic": false,
+          "postscriptName": "NeueRegrade-Extrabold",
+          "src": "Free Fonts/_incoming/Neue Regrade Extrabold.otf"
+        },
+        {
+          "id": "bram-naus-neueregrade-extrabold-italic",
+          "weight": 800,
+          "style": "ExtraBold-Italic",
+          "italic": true,
+          "postscriptName": "NeueRegrade-ExtraBold-Italic",
+          "src": "Free Fonts/_incoming/Neue Regrade ExtraBold Italic.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 68,
+      "license": "Free-noredist",
+      "redistributable": false
+    },
+    {
       "id": "bram-naus-damion",
       "family": "Damion",
       "foundry": "bram-naus",
@@ -11914,6 +12089,41 @@
       "redistributable": true
     },
     {
+      "id": "bram-naus-fungis",
+      "family": "FUNGIS",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-fungis-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "FUNGIS-Regular",
+          "src": "Free Fonts/Fungis/FUNGIS Regular.otf"
+        },
+        {
+          "id": "bram-naus-fungis-bold",
+          "weight": 700,
+          "style": "Bold",
+          "italic": false,
+          "postscriptName": "FUNGIS-Bold",
+          "src": "Free Fonts/_incoming/FUNGIS Bold.otf"
+        },
+        {
+          "id": "bram-naus-fungis-heavy",
+          "weight": 700,
+          "style": "Heavy",
+          "italic": false,
+          "postscriptName": "FUNGIS-Heavy",
+          "src": "Free Fonts/_incoming/FUNGIS Heavy.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 74,
+      "license": "Free-noredist",
+      "redistributable": false
+    },
+    {
       "id": "bram-naus-gully",
       "family": "Gully",
       "foundry": "bram-naus",
@@ -11972,6 +12182,25 @@
       "num": 80,
       "license": "OFL-1.1",
       "redistributable": true
+    },
+    {
+      "id": "bram-naus-glyseric",
+      "family": "Glyseric",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-glyseric-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Glyseric-Regular",
+          "src": "Free Fonts/Glyseric/Glyseric.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 82,
+      "license": "Free-noredist",
+      "redistributable": false
     },
     {
       "id": "bram-naus-murecho",
@@ -12146,6 +12375,25 @@
       "redistributable": true
     },
     {
+      "id": "bram-naus-maragsa",
+      "family": "Maragsa",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-maragsadisplay",
+          "weight": 400,
+          "style": "Display",
+          "italic": false,
+          "postscriptName": "MaragsaDisplay",
+          "src": "Free Fonts/Maragsa/Maragsâ-Display.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 96,
+      "license": "Free-noredist",
+      "redistributable": false
+    },
+    {
       "id": "bram-naus-liter",
       "family": "Liter",
       "foundry": "bram-naus",
@@ -12185,6 +12433,25 @@
       "num": 99,
       "license": "OFL-1.1",
       "redistributable": true
+    },
+    {
+      "id": "bram-naus-modelo",
+      "family": "Modelo",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-modelo",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Modelo",
+          "src": "Free Fonts/Modelo/ModeloGX.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 100,
+      "license": "Free-noredist",
+      "redistributable": false
     },
     {
       "id": "bram-naus-special-gothic",
@@ -12382,6 +12649,44 @@
       "num": 117,
       "license": "OFL-1.1",
       "redistributable": true
+    },
+    {
+      "id": "bram-naus-esse-grotesk",
+      "family": "Esse Grotesk",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-essegroteskregular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "EsseGroteskRegular",
+          "src": "Free Fonts/Esse Grotesk/EsseGrotesk.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 118,
+      "license": "Free-noredist",
+      "redistributable": false
+    },
+    {
+      "id": "bram-naus-kyivtype-sans",
+      "family": "KyivType Sans",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-kyivtypesans",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "KyivTypeSans",
+          "src": "Free Fonts/Kyiv Type Sans/KyivTypeSans-VarGX.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 119,
+      "license": "unknown",
+      "redistributable": false
     },
     {
       "id": "bram-naus-tiktok-sans",
@@ -12634,6 +12939,89 @@
       "num": 143,
       "license": "OFL-1.1",
       "redistributable": true
+    },
+    {
+      "id": "bram-naus-now",
+      "family": "Now",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-now-thin",
+          "weight": 100,
+          "style": "Thin",
+          "italic": false,
+          "postscriptName": "Now-Thin",
+          "src": "Free Fonts/_incoming/Now-Thin.otf"
+        },
+        {
+          "id": "bram-naus-now-extralight",
+          "weight": 200,
+          "style": "ExtraLight",
+          "italic": false,
+          "postscriptName": "Now-ExtraLight",
+          "src": "Free Fonts/_incoming/Now-ExtraLight.otf"
+        },
+        {
+          "id": "bram-naus-now-light",
+          "weight": 300,
+          "style": "Light",
+          "italic": false,
+          "postscriptName": "Now-Light",
+          "src": "Free Fonts/_incoming/Now-Light.otf"
+        },
+        {
+          "id": "bram-naus-now-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Now-Regular",
+          "src": "Free Fonts/Now/Now-Regular.otf"
+        },
+        {
+          "id": "bram-naus-now-black",
+          "weight": 400,
+          "style": "Black",
+          "italic": false,
+          "postscriptName": "Now-Black",
+          "src": "Free Fonts/_incoming/Now-Black.otf"
+        },
+        {
+          "id": "bram-naus-now-medium",
+          "weight": 500,
+          "style": "Medium",
+          "italic": false,
+          "postscriptName": "Now-Medium",
+          "src": "Free Fonts/_incoming/Now-Medium.otf"
+        },
+        {
+          "id": "bram-naus-now-semibold",
+          "weight": 600,
+          "style": "SemiBold",
+          "italic": false,
+          "postscriptName": "Now-SemiBold",
+          "src": "Free Fonts/_incoming/Now-SemiBold.otf"
+        },
+        {
+          "id": "bram-naus-now-bold",
+          "weight": 700,
+          "style": "Bold",
+          "italic": false,
+          "postscriptName": "Now-Bold",
+          "src": "Free Fonts/_incoming/Now-Bold.otf"
+        },
+        {
+          "id": "bram-naus-now-extrabold",
+          "weight": 800,
+          "style": "ExtraBold",
+          "italic": false,
+          "postscriptName": "Now-ExtraBold",
+          "src": "Free Fonts/_incoming/Now-ExtraBold.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 145,
+      "license": "Free-noredist",
+      "redistributable": false
     },
     {
       "id": "bram-naus-paysage",
