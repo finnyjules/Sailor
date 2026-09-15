@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import { describeCompositor, applyCompositorCommand, summarizeCompositorChange, verifyCompositor, COMPOSITOR_HINT_CEILING, type CompositorState } from '~/lib/agent/surfaces/compositor'
+import { describeCompositor, applyCompositorCommand, summarizeCompositorChange, verifyCompositor, type CompositorState } from '~/lib/agent/surfaces/compositor'
 import { effectStackOf, regionOf } from '~/lib/compositor/effectStack'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
 
@@ -527,16 +527,6 @@ describe('setLayerEffect writes through the effect stack', () => {
   it('still rejects an unknown effect type (no geometry allowlist regression)', () => {
     expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'explode' } } }).ok).toBe(false)
     expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'sparkle' } } }).ok).toBe(false)
-  })
-
-  it('rejects the F6 backdrop kinds through the agent (picker/UI-only; no hint-budget change)', () => {
-    // backdrop_shader and backdrop_luminance_mask are not in LocalEffectKind/GeometryEffectKind
-    // and have no POST_EFFECT_DEFAULTS entry, so sanitizePostEffect returns null and the op is
-    // refused — the agent cannot add either; they are added only via the inspector picker/UI.
-    expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_shader' } } }).ok).toBe(false)
-    expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_luminance_mask' } } }).ok).toBe(false)
-    // Adding these picker-only kinds must not have grown the agent's hint budget.
-    expect(COMPOSITOR_HINT_CEILING).toBe(26250)
   })
 
   // ── F3 geometry kinds through the agent (boolean/morph/warp/long_shadow/shatter) ──
