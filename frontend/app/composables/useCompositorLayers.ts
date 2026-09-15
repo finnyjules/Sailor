@@ -1495,9 +1495,12 @@ export function localLayerBox(
     const lines = wrappedTextLines(ctx, layer, W)
     const lineH = layer.fontSize * W * layer.lineHeight
     // With a text box, the box width IS the layer width (selection/handles
-    // track the box, not the glyph extents).
+    // track the box, not the glyph extents). An explicit boxH is the box height
+    // too — so it shows in the selection box and resizes with the handles;
+    // without it, the height falls back to the painted lines.
     if ((layer.boxW ?? 0) > 0) {
-      return { w: Math.max(layer.boxW! * W, 4), h: Math.max(lines.length * lineH, lineH) }
+      const hpx = (layer.boxH ?? 0) > 0 ? layer.boxH! * W : Math.max(lines.length * lineH, lineH)
+      return { w: Math.max(layer.boxW! * W, 4), h: Math.max(hpx, 4) }
     }
     let maxW = 0
     if (ctx) {
