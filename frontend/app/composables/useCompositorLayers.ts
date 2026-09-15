@@ -77,6 +77,7 @@ import { depthImageFor, requestDepth, depthSourceFromViewUrl, type DepthRef } fr
 import { ensureFillBitmaps, getFillBitmap } from '~/lib/paint/imageFillCache'
 import { applyTornEdge, type TornEdgeSpec } from '~/lib/compositor/tornEdge'
 import { applyFeather, type FeatherSpec } from '~/lib/compositor/feather'
+import { luminanceMaskAlpha } from '~/lib/compositor/luminanceMask'
 import {
   LruCache, SILHOUETTE_CACHE_CAP, SILHOUETTE_CACHE_MAX_BYTES, silhouetteCacheKey,
   silhouettePadPx as silhouettePadPxPure, silhouetteContentReady as silhouetteContentReadyPure,
@@ -263,12 +264,12 @@ import { makeSiblingOutlineResolver, type SiblingResolver } from '~/lib/composit
 import type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind, WarpEffect,
-  ShaderPixelEffect, BackdropShaderEffect,
+  ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
 } from '~/lib/compositor/effectStack'
 export type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
-  ShaderPixelEffect, BackdropShaderEffect,
+  ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
 }
 export type { AdjustEffect, BloomEffect, DofEffect, DuotoneEffect, GradientMapEffect, GrainEffect, PostEffect, VignetteEffect }
 
@@ -4857,6 +4858,46 @@ function applyBackdropShader(
   })
 }
 
+// F6 Task 3: mask the layer's OWN content by the backdrop's luminance. Reads the backdrop as
+// painted so far (device canvas), builds a per-pixel luminance→alpha mask, renders the layer's
+// own content to an offscreen at the SAME transform, multiplies the mask in (destination-in),
+// and stamps the result. Unlike applyBackdropShader this REPLACES the own-content paint (the
+// caller passes the exact paint it would otherwise run as `drawOwn`), so byte-identity when
+// absent is automatic: with no effect the caller runs `drawOwn(ctx)` unchanged.
+function applyBackdropLuminanceMask(
+  ctx: CanvasRenderingContext2D,
+  layer: LocalLayer,
+  e: BackdropLuminanceMaskEffect,
+  _localLayers: LocalLayer[],
+  _W: number,
+  _H: number,
+  drawOwn: (target: CanvasRenderingContext2D) => void,
+) {
+  const dev = ctx.canvas
+  const T = ctx.getTransform()
+  const mk = () => { const c = document.createElement('canvas'); c.width = dev.width; c.height = dev.height; return c }
+  // 1. backdrop luminance → alpha mask (device space, identity transform).
+  const maskC = mk(); const mctx = maskC.getContext('2d'); if (!mctx) { drawOwn(ctx); return }
+  mctx.drawImage(dev, 0, 0)
+  const img = mctx.getImageData(0, 0, maskC.width, maskC.height)
+  const d = img.data
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = (0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!) / 255
+    const a = luminanceMaskAlpha(lum, e.threshold, e.softness, e.invert)
+    d[i] = 255; d[i + 1] = 255; d[i + 2] = 255; d[i + 3] = Math.round(a * 255)
+  }
+  mctx.putImageData(img, 0, 0)
+  // 2. own content to an offscreen at the SAME transform the main ctx carries.
+  const own = mk(); const octx = own.getContext('2d'); if (!octx) { drawOwn(ctx); return }
+  octx.setTransform(T)
+  drawOwn(octx)
+  // 3. multiply the mask into the own content's alpha, then stamp.
+  octx.setTransform(1, 0, 0, 1, 0, 0)
+  octx.globalCompositeOperation = 'destination-in'
+  octx.drawImage(maskC, 0, 0)
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(own, 0, 0); ctx.restore()
+}
+
 /**
  * Pure resolution of a glass shader's input source — mirrors mask resolution
  * (`byKey.get(ref)`) rather than reinventing it. `spec.readsLayerKey` set AND
@@ -5474,7 +5515,15 @@ export function paintLayerStack(
           // doesn't thread an opacityMul through, so an animated layer's group cascade
           // opacity isn't applied for that frame. Visibility (gc.hidden) IS honored via
           // the `continue` above. Static (non-animated) layers are unaffected.
-          drawLayerWithMotion(ctx, layer, W, H, maskLocal, st, maskState)
+          // F6 Task 3: a backdrop luminance mask WRAPS the motion own-content paint the same
+          // way the static path does — absent → drawOwn(ctx) runs drawLayerWithMotion verbatim.
+          const bdLum = layer.effects?.find(
+            (e): e is BackdropLuminanceMaskEffect => e.type === 'backdrop_luminance_mask' && e.visible,
+          )
+          const drawOwn = (target: CanvasRenderingContext2D) =>
+            drawLayerWithMotion(target, layer, W, H, maskLocal, st, maskState)
+          if (bdLum) applyBackdropLuminanceMask(ctx, layer, bdLum, localLayers, W, H, drawOwn)
+          else drawOwn(ctx)
           continue
         }
       }
@@ -5512,13 +5561,24 @@ export function paintLayerStack(
         // else: refraction unavailable → fall through and paint the layer normally.
       }
 
-      if (maskItem && maskItem.type !== 'local') {
-        // Wired silhouette masking a local layer → generic cross-source path.
-        drawItemMasked(ctx, item, maskItem, W, H, localBlendOp(layer), opacityMul)
-      } else {
-        // Local content + local mask (or no mask) → unchanged fast path.
-        drawLocalLayer(ctx, layer, W, H, maskItem?.type === 'local' ? maskItem.layer : null, opacityMul)
+      // F6 Task 3: a backdrop luminance mask WRAPS the own-content paint (modulates its
+      // alpha by the backdrop's luminance), rather than stamping under it like the additive
+      // backdrop treatments above. When absent, `drawOwn(ctx)` runs the exact same paint as
+      // before → byte-identical.
+      const bdLum = layer.effects?.find(
+        (e): e is BackdropLuminanceMaskEffect => e.type === 'backdrop_luminance_mask' && e.visible,
+      )
+      const drawOwn = (target: CanvasRenderingContext2D) => {
+        if (maskItem && maskItem.type !== 'local') {
+          // Wired silhouette masking a local layer → generic cross-source path.
+          drawItemMasked(target, item, maskItem, W, H, localBlendOp(layer), opacityMul)
+        } else {
+          // Local content + local mask (or no mask) → unchanged fast path.
+          drawLocalLayer(target, layer, W, H, maskItem?.type === 'local' ? maskItem.layer : null, opacityMul)
+        }
       }
+      if (bdLum) applyBackdropLuminanceMask(ctx, layer, bdLum, localLayers, W, H, drawOwn)
+      else drawOwn(ctx)
     }
 
     if (post && chainActive(post)) applyStackPost(ctx, post, W)

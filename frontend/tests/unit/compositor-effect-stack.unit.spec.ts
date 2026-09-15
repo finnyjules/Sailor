@@ -11,9 +11,9 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 38 kinds, 4 pinned and 34 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(38)
-    expect(PINNED_KINDS).toEqual(['background_blur', 'backdrop_shader', 'dof', 'drop_shadow'])
+  it('has 39 kinds, 5 pinned and 34 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(39)
+    expect(PINNED_KINDS).toEqual(['background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'drop_shadow'])
     expect(ORDERABLE_KINDS).toHaveLength(34)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
@@ -44,6 +44,7 @@ describe('effect kinds', () => {
     expect(EFFECT_LABELS.ink_bleed).toBe('Ink bleed')
     expect(EFFECT_LABELS.shader).toBe('Shader')
     expect(EFFECT_LABELS.backdrop_shader).toBe('Backdrop shader')
+    expect(EFFECT_LABELS.backdrop_luminance_mask).toBe('Backdrop luminance mask')
   })
   it('orders background blur first and drop shadow last', () => {
     expect(EFFECT_ORDER[0]).toBe('background_blur')
@@ -57,7 +58,7 @@ describe('effect kinds', () => {
     for (let i = 1; i < indices.length; i++) expect(indices[i]).toBe(indices[i - 1]! + 1)
     const lastGeometry = Math.max(...indices)
     for (const k of EFFECT_ORDER) {
-      if (isGeometryKind(k) || k === 'background_blur' || k === 'backdrop_shader' || k === 'dof') continue
+      if (isGeometryKind(k) || k === 'background_blur' || k === 'backdrop_shader' || k === 'backdrop_luminance_mask' || k === 'dof') continue
       expect(EFFECT_ORDER.indexOf(k), k).toBeGreaterThan(lastGeometry)
     }
     for (const k of GEOMETRY_KINDS) expect(isGeometryKind(k)).toBe(true)
@@ -65,7 +66,7 @@ describe('effect kinds', () => {
   })
   it('regionOf assigns every kind to the right region', () => {
     const expected: Record<EffectKind, string> = {
-      background_blur: 'backdrop', backdrop_shader: 'backdrop', dof: 'backdrop',
+      background_blur: 'backdrop', backdrop_shader: 'backdrop', backdrop_luminance_mask: 'backdrop', dof: 'backdrop',
       trim: 'geometry', offset: 'geometry', round_corners: 'geometry', roughen: 'geometry',
       boolean: 'geometry', morph: 'geometry', warp: 'geometry', shatter: 'geometry', long_shadow: 'geometry',
       inner_shadow: 'pixel', inner_glow: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',

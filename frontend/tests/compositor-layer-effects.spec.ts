@@ -434,6 +434,116 @@ test.describe('Frame backdrop shader (F6 Task 2)', () => {
 })
 
 /**
+ * F6 Task 3 — the `backdrop_luminance_mask` effect: masks/reveals a layer's OWN content by the
+ * LUMINANCE of the backdrop painted behind it. Unlike backdrop_shader (additive, stamped UNDER
+ * the layer via withBackdrop), this WRAPS the own-content paint: it multiplies the layer's
+ * rendered alpha by a per-pixel mask derived from the backdrop's luminance, so the content
+ * shows where the backdrop is bright (lum ≥ threshold) by default and is hidden where dark;
+ * `invert` flips that. Pure CPU (no async catalog fetch), so a plain setLayers→stackPixels
+ * drives the repaint — no wait-then-re-set recipe needed. The controller runs these against
+ * :3002 (the live GPU/canvas gate); the pure luminance→alpha mapping is unit-tested in
+ * tests/unit/compositor-luminance-mask.unit.spec.ts.
+ */
+test.describe('Frame backdrop luminance mask (F6 Task 3)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  // A clean bright|dark split backdrop: WHITE left half, BLACK right half. A single fully
+  // opaque GREEN top layer spans both halves, so a mask keyed on backdrop luminance reveals
+  // the green over the white (bright) half and hides it over the black (dark) half — two probe
+  // points, one per half, both under the top layer.
+  async function seedLumScene(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const bar = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.5, h: 1, radius: 0, rotation: 0, opacity: 1, fill, effects: [],
+      })
+      const top = {
+        id: 'top', kind: 'rect', x: 0.5, y: 0.5, w: 0.9, h: 0.6, radius: 0, rotation: 0,
+        opacity: 1, fill: '#00cc00', effects: [],
+      }
+      ;(window as any).__compositorSetLayers([bar('L', 0.25, '#ffffff'), bar('R', 0.75, '#000000'), top])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(3)
+  }
+  const setTopEffects = (page: Page, effects: unknown[]) => page.evaluate((fx) => {
+    const ls = (window as any).__compositorLayers()
+    ls[2].effects = fx
+    ;(window as any).__compositorSetLayers(ls)
+  }, effects)
+  const sameColor = (a: { r: number; g: number; b: number; a: number }, b: typeof a) =>
+    Math.abs(a.r - b.r) <= 4 && Math.abs(a.g - b.g) <= 4 && Math.abs(a.b - b.b) <= 4 && Math.abs(a.a - b.a) <= 4
+
+  const LUM_MASK = { id: 'lm', type: 'backdrop_luminance_mask', threshold: 0.5, softness: 0.2, invert: false, visible: true }
+  // Probe columns: x=0.3 sits over the white (bright) left bar, x=0.7 over the black (dark)
+  // right bar — both under the green top layer (which spans x∈[0.05,0.95]).
+  const WHITE_X = 0.3, DARK_X = 0.7, MID_Y = 0.5
+
+  test('byte-identity: no backdrop_luminance_mask effect renders identically before/after a round-trip', async ({ page }) => {
+    await openCompositor(page)
+    await seedLumScene(page)
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [LUM_MASK])
+    await stackPixels(page)
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+
+    expect(after).toBe(bare)
+  })
+
+  test('applied: content revealed over the bright half, masked away over the dark half', async ({ page }) => {
+    await openCompositor(page)
+    await seedLumScene(page)
+    await setTopEffects(page, [])
+    const bare = await stackPixels(page)
+    // With no effect the opaque green layer covers both halves → both probes read green.
+    const whiteBare = await colorAt(page, WHITE_X, MID_Y)
+    const darkBare = await colorAt(page, DARK_X, MID_Y)
+    expect(whiteBare.g).toBeGreaterThan(150) // sanity: probes really are on the green layer
+    expect(darkBare.g).toBeGreaterThan(150)
+
+    await setTopEffects(page, [LUM_MASK])
+    const after = await stackPixels(page)
+    expect(after).not.toBe(bare)
+    const whiteAfter = await colorAt(page, WHITE_X, MID_Y)
+    const darkAfter = await colorAt(page, DARK_X, MID_Y)
+
+    // Bright half: content still revealed → unchanged green.
+    expect(sameColor(whiteAfter, whiteBare)).toBe(true)
+    // Dark half: content masked away → the black backdrop shows through (≈ backdrop-only colour
+    // at that point, since the layer's own alpha was multiplied to ~0 there).
+    expect(sameColor(darkAfter, darkBare)).toBe(false)
+    expect(darkAfter.r).toBeLessThan(20)
+    expect(darkAfter.g).toBeLessThan(20)
+    expect(darkAfter.b).toBeLessThan(20)
+    // The two halves now clearly differ.
+    expect(sameColor(whiteAfter, darkAfter)).toBe(false)
+  })
+
+  test('invert: content revealed over the dark half, masked away over the bright half', async ({ page }) => {
+    await openCompositor(page)
+    await seedLumScene(page)
+    await setTopEffects(page, [])
+    await stackPixels(page)
+    const greenRef = await colorAt(page, WHITE_X, MID_Y) // the layer's own green, uncovered
+
+    await setTopEffects(page, [{ ...LUM_MASK, invert: true }])
+    await stackPixels(page)
+    const whiteAfter = await colorAt(page, WHITE_X, MID_Y)
+    const darkAfter = await colorAt(page, DARK_X, MID_Y)
+
+    // Bright half: now MASKED → the white backdrop shows through.
+    expect(whiteAfter.r).toBeGreaterThan(235)
+    expect(whiteAfter.g).toBeGreaterThan(235)
+    expect(whiteAfter.b).toBeGreaterThan(235)
+    // Dark half: now REVEALED → the layer's own green.
+    expect(sameColor(darkAfter, greenRef)).toBe(true)
+    // Opposite of the non-inverted case at both probes.
+    expect(sameColor(whiteAfter, darkAfter)).toBe(false)
+  })
+})
+
+/**
  * F2 Task 5 — geometry effects render through a computed outline `d`.
  *
  * The rect is drawn through its shared, geometry-transformed Path2D only when a geometry
