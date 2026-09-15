@@ -4368,19 +4368,25 @@ function setSizePx(id: string, key: string, px: number) { setLocal(id, { [key]: 
 // composition width, or grid columns (1/columns of the width — the module).
 // Values are stored normalized to width, so a column reads as boxW·columns.
 const boxUnit = ref<'col' | '%' | 'px'>('col')
-function boxToUnit(norm: number | undefined): string | number {
+// boxW and boxH are BOTH stored normalized to width. So px is absolute for both
+// (·width = px), but % and columns/rows must read against the axis the user means:
+// width for the width field, HEIGHT for the height field — via the W/H factor.
+function boxToUnit(norm: number | undefined, dim: 'w' | 'h' = 'w'): string | number {
   if (!norm) return ''
   if (boxUnit.value === 'px') return pxW(norm)
-  if (boxUnit.value === '%') return Math.round(norm * 100)
-  return Math.round(norm * (gridConfig.value.columns || 16) * 10) / 10
+  const frac = dim === 'h' ? norm * outWidth.value / Math.max(1, outHeight.value) : norm
+  if (boxUnit.value === '%') return Math.round(frac * 100)
+  return Math.round(frac * (gridConfig.value.columns || 16) * 10) / 10
 }
 function setBoxDim(id: string, key: 'boxW' | 'boxH', raw: string) {
   const v = parseFloat(raw)
   let norm: number | undefined
   if (!(v > 0)) norm = undefined
   else if (boxUnit.value === 'px') norm = v / outWidth.value
-  else if (boxUnit.value === '%') norm = v / 100
-  else norm = v / (gridConfig.value.columns || 16)
+  else {
+    const frac = boxUnit.value === '%' ? v / 100 : v / (gridConfig.value.columns || 16)
+    norm = key === 'boxH' ? frac * outHeight.value / Math.max(1, outWidth.value) : frac
+  }
   setLocal(id, { [key]: norm } as any)
 }
 function setBoxFit(l: any, fit: 'wrap' | 'shrink' | 'fill') { setLocal(l.id, { boxFit: fit } as any) }
@@ -9053,7 +9059,7 @@ onUnmounted(() => {
                   <div>
                     <div class="panel-label mb-1">Height</div>
                     <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'rows' : 'auto'"
-                      :value="boxToUnit((selectedLocal as any).boxH)"
+                      :value="boxToUnit((selectedLocal as any).boxH, 'h')"
                       class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
                       @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxH', (e.target as HTMLInputElement).value)" />
                   </div>
