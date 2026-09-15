@@ -25,6 +25,15 @@ export function isItalicFace(style, italicAngle) {
   return (Number(italicAngle) || 0) !== 0 || /italic|oblique/i.test(String(style))
 }
 
+/** Lower rank = preferred format when the same face exists in multiple files. */
+export function faceFormatRank(src) {
+  const s = String(src).toLowerCase()
+  if (s.endsWith('.otf')) return 0
+  if (s.endsWith('.ttf')) return 1
+  if (s.endsWith('.woff2')) return 2
+  return 3
+}
+
 /**
  * Group flat face records into families. A record:
  *   { foundryId, foundryLabel, family, style, weight, italic, postscriptName, src }
@@ -39,7 +48,10 @@ export function buildFamilies(records) {
     }
     const fam = byKey.get(fid)
     const id = faceId(r.foundryId, r.postscriptName)
-    if (fam._faces.has(id)) continue // dedup (e.g. flat + otf/ copies)
+    // dedup (e.g. flat + otf/ copies, or the same face in otf/ttf/woff2): keep the
+    // record whose src has the better (lower-rank) format, so the pick is
+    // deterministic regardless of filesystem enumeration order.
+    if (fam._faces.has(id) && faceFormatRank(r.src) >= faceFormatRank(fam._faces.get(id).src)) continue
     fam._faces.set(id, {
       id, weight: r.weight, style: r.style, italic: r.italic,
       postscriptName: r.postscriptName, src: r.src,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { foundryFromRelPath, slug, familyId, faceId, isItalicFace, buildFamilies } from '../../scripts/fontLibrary.mjs'
+import { foundryFromRelPath, slug, familyId, faceId, isItalicFace, buildFamilies, faceFormatRank } from '../../scripts/fontLibrary.mjs'
 import { buildFeaturedFamilies } from '../../scripts/fontLibrary.mjs'
 
 describe('foundryFromRelPath', () => {
@@ -48,6 +48,24 @@ describe('buildFamilies', () => {
       rec({}),
     ])
     expect(fams.map(f => f.family)).toEqual(['PP Editorial New', 'PP Mori'])
+  })
+  it('on a faceId collision across formats, keeps the otf src over a woff2/ttf seen first', () => {
+    const fams = buildFamilies([
+      rec({ src: 'Free Fonts/Editorial New/PPEditorialNew-Regular.woff2' }),
+      rec({ src: 'PPF Fonts - v7.72/Editorial New/PPEditorialNew-Regular.otf' }),
+    ])
+    expect(fams).toHaveLength(1)
+    expect(fams[0].faces).toHaveLength(1)
+    expect(fams[0].faces[0].src).toBe('PPF Fonts - v7.72/Editorial New/PPEditorialNew-Regular.otf')
+  })
+})
+
+describe('faceFormatRank', () => {
+  it('orders otf < ttf < woff2 < other', () => {
+    expect(faceFormatRank('a/Foo-Regular.otf')).toBeLessThan(faceFormatRank('a/Foo-Regular.ttf'))
+    expect(faceFormatRank('a/Foo-Regular.ttf')).toBeLessThan(faceFormatRank('a/Foo-Regular.woff2'))
+    expect(faceFormatRank('a/Foo-Regular.woff2')).toBeLessThan(faceFormatRank('a/Foo-Regular.xyz'))
+    expect(faceFormatRank('A/FOO-REGULAR.OTF')).toBe(0)
   })
 })
 
