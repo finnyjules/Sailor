@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-15T14:04:30.040Z",
+  "generatedAt": "2026-09-15T14:35:12.865Z",
   "fontsRoot": "Assets/Fonts",
   "foundries": [
     {
@@ -11294,6 +11294,25 @@
       "redistributable": true
     },
     {
+      "id": "bram-naus-junicode",
+      "family": "Junicode",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-junicode-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Junicode-Regular",
+          "src": "Free Fonts/Junicode/Junicode-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 22,
+      "license": "OFL-1.1",
+      "redistributable": true
+    },
+    {
       "id": "bram-naus-gabarito",
       "family": "Gabarito",
       "foundry": "bram-naus",
@@ -11404,6 +11423,25 @@
       "num": 32,
       "license": "OFL-1.1",
       "redistributable": true
+    },
+    {
+      "id": "bram-naus-cabinet-grotesk",
+      "family": "Cabinet Grotesk",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-cabinetgrotesk-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "CabinetGrotesk-Regular",
+          "src": "Free Fonts/Cabinet/CabinetGrotesk-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 33,
+      "license": "Free-noredist",
+      "redistributable": false
     },
     {
       "id": "bram-naus-tasa-orbiter",
@@ -11601,6 +11639,25 @@
       "num": 51,
       "license": "OFL-1.1",
       "redistributable": true
+    },
+    {
+      "id": "bram-naus-new-title",
+      "family": "New Title",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-newtitle-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "NewTitle-Regular",
+          "src": "Free Fonts/New Title/NewTitle-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 52,
+      "license": "Free-noredist",
+      "redistributable": false
     },
     {
       "id": "bram-naus-shippori-mincho",
@@ -12499,6 +12556,25 @@
       "source": "google",
       "googleFamily": "Lilex",
       "num": 142,
+      "license": "OFL-1.1",
+      "redistributable": true
+    },
+    {
+      "id": "bram-naus-uncut-sans",
+      "family": "Uncut Sans",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-uncutsans-rg",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "UncutSans-Rg",
+          "src": "Free Fonts/Uncut Sans/UncutSans-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 143,
       "license": "OFL-1.1",
       "redistributable": true
     },
