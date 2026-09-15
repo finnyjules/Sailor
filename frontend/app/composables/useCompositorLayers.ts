@@ -4830,9 +4830,20 @@ function applyBackdropShader(
   H: number,
   t: number,
 ) {
-  withBackdrop(ctx, layer, localLayers, W, H, (snapshot, w, h) => {
+  withBackdrop(ctx, layer, localLayers, W, H, (snapshot) => {
     try {
-      return renderFieldWithBase(shaderSpecFromEffect(e), snapshot, w, h, undefined, t)
+      // Render at the snapshot's DEVICE dimensions (like F5's applyShaderPixelEffect uses
+      // off.width/height), NOT withBackdrop's logical W/H — the snapshot is device-sized, so
+      // a logical size would produce a half-scale output (at dpr 2) that misses a centred layer.
+      const lens = renderFieldWithBase(shaderSpecFromEffect(e), snapshot, snapshot.width, snapshot.height, undefined, t)
+      // `lens` is the shared WebGL canvas — getContext('2d') on it returns null. withBackdrop
+      // needs a 2D canvas to clip + stamp, so draw the treated result back onto the (2D)
+      // snapshot and return THAT (the same drawImage-the-GL-result pattern F5 uses on `off`).
+      const sctx = snapshot.getContext('2d')
+      if (!sctx) return undefined
+      sctx.clearRect(0, 0, snapshot.width, snapshot.height)
+      sctx.drawImage(lens, 0, 0)
+      return snapshot
     } catch {
       // Unloaded catalog / bad effectId — leave the backdrop untreated (`withBackdrop`
       // falls back to `snap` when `treat` returns nothing).

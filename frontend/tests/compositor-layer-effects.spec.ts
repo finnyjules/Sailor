@@ -327,11 +327,31 @@ test.describe('Frame backdrop shader (F6 Task 2)', () => {
     await setTopEffects(page, effects)      // re-set forces a repaint now the catalog is warm
     return stackPixels(page)
   }
+  /** Robust warm for a catalog-dependent backdrop shader: the async catalog fetch can land
+   *  later than a fixed sleep under full-run load, and a cold catalog makes renderFieldWithBase
+   *  throw → withBackdrop stamps the UNTREATED backdrop → a silent no-op (after === bare). Poll:
+   *  re-set + repaint until the render actually differs from `bare`, or time out (then the
+   *  caller's own assertion fails honestly — proving a real no-op, not a race). */
+  async function settledUntilChanged(page: Page, bare: string, effects: unknown[]): Promise<string> {
+    let last = bare
+    for (let i = 0; i < 20; i++) {          // ~20 × ~750ms ≈ 15s ceiling
+      await setTopEffects(page, effects)
+      last = await stackPixels(page)
+      if (last !== bare) return last
+      await page.waitForTimeout(750)
+    }
+    return last
+  }
 
+  // hue_shift, not chromatic_aberration: the probe must move backdrop pixels within a
+  // CENTRED silhouette. chromatic_aberration offsets radially from the image centre AND only
+  // shifts colour at edges, so a centred solid-bar panel sits in its exact blind spot (offset
+  // ≈ 0, no edges) and reads as a near-no-op even when the stamp is perfect. hue_shift rotates
+  // hue uniformly across every pixel, so a solid backdrop changes wherever it shows through.
   // speed: 0 — the LOCAL_DEFAULTS choice (a static backdrop treatment must not spin the live
   // loop) — determinism here doesn't depend on it, but a live probe should look like a real add.
-  const CHROMA_BACKDROP = {
-    id: 'bd', type: 'backdrop_shader', effectId: 'chromatic_aberration', params: { amount: 0.3 }, speed: 0, seed: 42, visible: true,
+  const HUE_BACKDROP = {
+    id: 'bd', type: 'backdrop_shader', effectId: 'hue_shift', params: { hue: 0.5 }, speed: 0, seed: 42, visible: true,
   }
 
   test('byte-identity: no backdrop_shader effect renders identically before/after a round-trip', async ({ page }) => {
@@ -339,7 +359,7 @@ test.describe('Frame backdrop shader (F6 Task 2)', () => {
     await seedBackdropShaderScene(page)
     const bare = await stackPixels(page)
 
-    await settledWithTopEffects(page, [CHROMA_BACKDROP])
+    await settledWithTopEffects(page, [HUE_BACKDROP])
     await setTopEffects(page, [])
     const after = await stackPixels(page)
 
@@ -351,8 +371,8 @@ test.describe('Frame backdrop shader (F6 Task 2)', () => {
     await seedBackdropShaderScene(page)
     await setTopEffects(page, [])
     const bare = await stackPixels(page)
-    // Centre of the translucent fill, straddling the red|blue seam — the backdrop shows
-    // through here, and chromatic_aberration has real edge detail to split.
+    // Centre of the translucent fill, over the red|blue backdrop — the backdrop shows through
+    // the 0.35 panel here, so a hue rotation of it registers as a colour change.
     const seamBare = await colorAt(page, 0.5, 0.5)
     // Inside the opaque inside-stroke band (box spans x∈[0.3,0.7]; the 0.04-wide band hugs
     // the edge from x=0.3) — the layer's OWN paint, fully opaque, so it fully overwrites
@@ -360,7 +380,7 @@ test.describe('Frame backdrop shader (F6 Task 2)', () => {
     const strokeBare = await colorAt(page, 0.31, 0.5)
     expect(strokeBare.a).toBe(255) // sanity: this probe really is on the opaque stroke
 
-    const after = await settledWithTopEffects(page, [CHROMA_BACKDROP])
+    const after = await settledUntilChanged(page, bare, [HUE_BACKDROP])
     expect(after).not.toBe(bare)
     const seamAfter = await colorAt(page, 0.5, 0.5)
     const strokeAfter = await colorAt(page, 0.31, 0.5)
@@ -396,7 +416,7 @@ test.describe('Frame backdrop shader (F6 Task 2)', () => {
       { timeout: 10_000 }).toBe(3)
     const bare = await stackPixels(page)
 
-    const after = await settledWithTopEffects(page, [CHROMA_BACKDROP])
+    const after = await settledUntilChanged(page, bare, [HUE_BACKDROP])
     expect(after).not.toBe(bare)
     // The backdrop within the text silhouette changed — real pixel movement, not noise.
     const d = await pixelDelta(page, bare, after)
@@ -407,8 +427,8 @@ test.describe('Frame backdrop shader (F6 Task 2)', () => {
   test('determinism: the same params render identically', async ({ page }) => {
     await openCompositor(page)
     await seedBackdropShaderScene(page)
-    const once = await settledWithTopEffects(page, [CHROMA_BACKDROP])
-    const twice = await settledWithTopEffects(page, [{ ...CHROMA_BACKDROP }])
+    const once = await settledWithTopEffects(page, [HUE_BACKDROP])
+    const twice = await settledWithTopEffects(page, [{ ...HUE_BACKDROP }])
     expect(twice).toBe(once)
   })
 })
