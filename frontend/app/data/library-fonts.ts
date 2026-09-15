@@ -16,8 +16,10 @@ import { setLibraryFaceResolver } from '~/lib/scene3d/outlines'
 
 export {
   LIBRARY_FONTS,
+  FEATURED_FOUNDRY_ID,
   librariesByFoundry,
   filterLibraryGroups,
+  featuredFamilies,
   libraryFamily,
   libraryFontUrl,
   resolveLibraryFace,
