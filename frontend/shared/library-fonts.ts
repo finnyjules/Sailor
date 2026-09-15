@@ -17,9 +17,19 @@ export interface LibraryFamily {
   id: string
   /** Typographic family name, e.g. "PP Editorial New". */
   family: string
-  /** Foundry id: "pangram" | "off-type". */
+  /** Foundry id: "pangram" | "off-type" | "bram-naus". */
   foundry: string
   faces: LibraryFace[]
+  /** 'self-hosted' (bundled file) | 'google' (resolves via the Google path). Absent → 'self-hosted'. */
+  source?: 'self-hosted' | 'google'
+  /** Exact Google Fonts family name when source === 'google'. */
+  googleFamily?: string
+  /** SPDX-ish license tag, e.g. "OFL-1.1". */
+  license?: string
+  /** false → dropped from the build when BUNDLE_RESTRICTED_FONTS=0. Absent → true. */
+  redistributable?: boolean
+  /** Curation order (Bram's series number); Featured tab sort key. */
+  num?: number
 }
 
 export interface LibraryFoundry { id: string; label: string }
