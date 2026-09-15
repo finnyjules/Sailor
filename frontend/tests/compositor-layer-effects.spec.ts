@@ -194,6 +194,88 @@ test.describe('Frame per-layer effect stack', () => {
 })
 
 /**
+ * F6 Task 1 — `withBackdrop` extracted from `applyBackdropBlur`: a pure refactor, so
+ * `background_blur` must keep rendering byte-for-byte the same. Two properties actually
+ * protect the extraction (not just "it still looks blurry"):
+ *  - absent ⇒ byte-identical — nothing about the new scaffolding leaks once the effect is
+ *    removed again;
+ *  - the treated backdrop stays clipped to the layer's OWN silhouette — a pixel outside the
+ *    layer's box must be untouched, even though `withBackdrop` builds its snapshot/treated
+ *    canvas at full DEVICE size. A `withBackdrop` that dropped the `destination-in` clip step
+ *    (the deliberate break used to prove this suite is load-bearing) would still pass the
+ *    absence check and would still visibly change the render, but would fail exactly the
+ *    "outside the box" assertion below — the treated canvas would stamp over the WHOLE frame
+ *    in the final identity-transform `drawImage`, not just the silhouette.
+ */
+test.describe('Frame backdrop effects — withBackdrop extraction (F6 Task 1)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  // A hard red|blue seam at x=0.5 across the FULL backdrop, with a translucent rect straddling
+  // it. background_blur needs real backdrop detail to treat, and the top layer's own alpha is
+  // what lets the treated backdrop show through once normal painting resumes on top of it
+  // (additive — no `continue` — not a fill replacement).
+  async function seedBackdropScene(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const bar = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.5, h: 1, radius: 0, rotation: 0, opacity: 1, fill, effects: [],
+      })
+      const top = {
+        id: 'top', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, radius: 0, rotation: 0,
+        opacity: 1, fill: 'rgba(255,255,255,0.35)', effects: [],
+      }
+      ;(window as any).__compositorSetLayers([bar('L', 0.25, '#ff0000'), bar('R', 0.75, '#0000ff'), top])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(3)
+  }
+  const setTopEffects = (page: Page, effects: unknown[]) => page.evaluate((fx) => {
+    const ls = (window as any).__compositorLayers()
+    ls[2].effects = fx
+    ;(window as any).__compositorSetLayers(ls)
+  }, effects)
+  /** Loose per-channel tolerance for "this pixel did not move" across two full-canvas
+   *  renders — tight enough that a full-frame blur bleed (the bug this guards against)
+   *  cannot slip through, loose enough to absorb incidental 1-value render noise. */
+  const sameColor = (a: { r: number; g: number; b: number; a: number }, b: typeof a) =>
+    Math.abs(a.r - b.r) <= 2 && Math.abs(a.g - b.g) <= 2 && Math.abs(a.b - b.b) <= 2 && Math.abs(a.a - b.a) <= 2
+
+  test('byte-identity: background_blur toggled on then off returns to the untouched render', async ({ page }) => {
+    await openCompositor(page)
+    await seedBackdropScene(page)
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'bg', type: 'background_blur', radius: 0.06, visible: true }])
+    await stackPixels(page)
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+
+    expect(after).toBe(bare)
+  })
+
+  test('clips the treated backdrop to the layer silhouette; the backdrop itself visibly changes inside it', async ({ page }) => {
+    await openCompositor(page)
+    await seedBackdropScene(page)
+    await setTopEffects(page, [])
+    const bare = await stackPixels(page)
+    // Far outside the top layer's 0.4-wide centred box (still red), and inside it, straddling
+    // the hard red|blue seam (where a blur has real detail to smear).
+    const cornerBare = await colorAt(page, 0.05, 0.5)
+    const seamBare = await colorAt(page, 0.5, 0.5)
+
+    await setTopEffects(page, [{ id: 'bg', type: 'background_blur', radius: 0.06, visible: true }])
+    const blurred = await stackPixels(page)
+    expect(blurred).not.toBe(bare)
+    const cornerAfter = await colorAt(page, 0.05, 0.5)
+    const seamAfter = await colorAt(page, 0.5, 0.5)
+
+    // Outside the silhouette: untouched — this is the destination-in clip doing its job.
+    expect(sameColor(cornerAfter, cornerBare)).toBe(true)
+    // Inside it, showing through the translucent top layer over the seam: the blur moved it.
+    expect(sameColor(seamAfter, seamBare)).toBe(false)
+  })
+})
+
+/**
  * F2 Task 5 — geometry effects render through a computed outline `d`.
  *
  * The rect is drawn through its shared, geometry-transformed Path2D only when a geometry

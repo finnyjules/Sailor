@@ -4731,18 +4731,26 @@ export type StackItem =
   | { type: 'wired'; key: string; draw: (ctx: CanvasRenderingContext2D, W: number, H: number) => void }
   | { type: 'local'; key: string; layer: LocalLayer }
 
-// Figma background blur: blur the ALREADY-PAINTED backdrop within the layer's
-// silhouette, then the layer paints on top. Operates in device space so it's
-// correct under the dpr transform renderers apply to the stack canvas.
-function applyBackdropBlur(
+// Shared scaffolding for any "read the already-painted backdrop, treat it,
+// clip to the layer's silhouette, stamp it back" effect — factored out of the
+// original `applyBackdropBlur` (Figma-style background blur) so later backdrop
+// kinds (shader, luminance-mask) reuse the same device-space math instead of
+// re-deriving it. Operates in device space so it's correct under the dpr
+// transform renderers apply to the stack canvas.
+//
+// `treat` is the ONLY effect-specific part: it receives an untouched COPY of
+// the backdrop snapshot (plus W/H and the transform's device scale) and
+// returns the treated canvas, or mutates the one it was given and returns
+// nothing. Everything else — the silhouette ghost/mask build, the
+// destination-in clip, and the identity-transform stamp-back — lives here.
+function withBackdrop(
   ctx: CanvasRenderingContext2D,
   layer: LocalLayer,
   localLayers: LocalLayer[],
   W: number,
   H: number,
-  radius: number,
+  treat: (snapshot: HTMLCanvasElement, W: number, H: number, scale: number) => HTMLCanvasElement | void,
 ) {
-  if (!(radius > 0)) return
   const t = ctx.getTransform()
   const dev = ctx.canvas
   const mk = () => {
@@ -4761,19 +4769,46 @@ function applyBackdropBlur(
     ? localLayers.find(l => l.id === maskRef.slice(2)) ?? null
     : null
   drawLocalLayer(silctx, ghost, W, H, maskLayer)
-  // Blur the current backdrop, clip to the silhouette, stamp it back.
-  const out = mk()
+  // Snapshot the current backdrop, hand it to the caller's `treat`, clip the
+  // result to the silhouette, stamp it back.
+  const snap = mk()
+  const snapCtx = snap.getContext('2d')
+  if (!snapCtx) return
+  snapCtx.drawImage(dev, 0, 0)
+  const out = treat(snap, W, H, t.a) ?? snap
   const octx = out.getContext('2d')
   if (!octx) return
-  octx.filter = `blur(${Math.max(0, radius * W * t.a)}px)`
-  octx.drawImage(dev, 0, 0)
-  octx.filter = 'none'
   octx.globalCompositeOperation = 'destination-in'
   octx.drawImage(sil, 0, 0)
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.drawImage(out, 0, 0)
   ctx.restore()
+}
+
+// Figma background blur: blur the ALREADY-PAINTED backdrop within the layer's
+// silhouette, then the layer paints on top. `treat` is the one blur-specific
+// line — a CSS filter applied while re-drawing the snapshot onto a fresh
+// canvas (`snap` is an exact pixel copy of the device canvas, so blurring it
+// is byte-identical to blurring the device canvas directly).
+function applyBackdropBlur(
+  ctx: CanvasRenderingContext2D,
+  layer: LocalLayer,
+  localLayers: LocalLayer[],
+  W: number,
+  H: number,
+  radius: number,
+) {
+  if (!(radius > 0)) return
+  withBackdrop(ctx, layer, localLayers, W, H, (snapshot, w, _h, scale) => {
+    const out = document.createElement('canvas')
+    out.width = snapshot.width; out.height = snapshot.height
+    const octx = out.getContext('2d')
+    if (!octx) return snapshot
+    octx.filter = `blur(${Math.max(0, radius * w * scale)}px)`
+    octx.drawImage(snapshot, 0, 0)
+    return out
+  })
 }
 
 /**
