@@ -1571,6 +1571,20 @@ export function localLayerBox(
 }
 
 /**
+ * How far (px) a text layer's block centre sits from its stored y-origin, so the
+ * valign-anchored edge stays put as the block's height changes. The layer's y
+ * marks the anchored edge: `top` ⇒ the top edge (block grows down), `bottom` ⇒
+ * the bottom edge (block grows up), `middle`/`justify`/absent ⇒ centred (0), the
+ * legacy behaviour every existing layer keeps. `boxHPx` is the block/box height
+ * from `localLayerBox`. Both the renderer and the editor's box geometry read this
+ * so the drawn text and its selection box stay in lockstep.
+ */
+export function textVAlignCenterOffset(layer: { kind: string; valign?: string }, boxHPx: number): number {
+  if (layer.kind !== 'text') return 0
+  return layer.valign === 'top' ? boxHPx / 2 : layer.valign === 'bottom' ? -boxHPx / 2 : 0
+}
+
+/**
  * Half the ink extent of ONE mark of a `style: 'shapes'` stroke, in the stroke's own stored
  * units — how far past its centre a mark can put ink, which is what such a stroke adds to its
  * `distance` to reach.
@@ -4484,11 +4498,16 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
   const startY = -totalH / 2 + lineH / 2          // legacy: block centred on origin
   const H = boxHpx > 0 ? boxHpx : totalH
   const vJustify = va === 'justify' && lines.length > 1
+  // Anchor the whole block by valign so it grows FROM the aligned edge: `top`
+  // pins the top and grows down, `bottom` pins the bottom and grows up. The same
+  // offset feeds the selection box (via textVAlignCenterOffset), so handles track
+  // the drawn text. middle/justify/absent ⇒ 0 ⇒ the legacy centred block.
+  const oy = textVAlignCenterOffset(layer, H)
   const lineY = (i: number): number => {
     if (!va && boxHpx <= 0) return startY + i * lineH
     if (vJustify) return -H / 2 + lineH / 2 + (i / (lines.length - 1)) * (H - lineH)
     const s = va === 'top' ? -H / 2 + lineH / 2 : va === 'bottom' ? H / 2 - totalH + lineH / 2 : startY
-    return s + i * lineH
+    return s + i * lineH + oy
   }
   const textBox = { w: Math.max(blockW, 1), h: Math.max(H, 1) }
   // `strokeText` honours setLineDash, so a text outline dashes like a shape's.
