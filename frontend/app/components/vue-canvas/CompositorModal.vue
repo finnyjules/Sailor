@@ -4389,7 +4389,7 @@ function setBoxDim(id: string, key: 'boxW' | 'boxH', raw: string) {
   }
   setLocal(id, { [key]: norm } as any)
 }
-function setBoxFit(l: any, fit: 'wrap' | 'shrink' | 'fill') { setLocal(l.id, { boxFit: fit } as any) }
+function setBoxFit(l: any, fit: 'wrap' | 'shrink' | 'fill' | 'break') { setLocal(l.id, { boxFit: fit } as any) }
 
 // A shape's stroke needs BOTH a colour and a width > 0 to show. New shapes start
 // at strokeWidth 0, so adding a stroke colour alone paints nothing — the stroke
@@ -9077,10 +9077,10 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <div class="flex items-center gap-1">
-                  <button v-for="f in (['wrap','shrink','fill'] as const)" :key="f"
+                  <button v-for="f in (['wrap','shrink','fill','break'] as const)" :key="f"
                     class="flex-1 text-[11px] py-1 rounded border capitalize"
                     :class="((selectedLocal as any).boxFit ?? 'wrap') === f ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50 border-white/[0.08]'"
-                    :title="f === 'wrap' ? 'Words wrap; the type keeps its size' : f === 'shrink' ? 'Shrink the type to fit the box' : 'Size the type to fill the box'"
+                    :title="f === 'wrap' ? 'Words wrap; the type keeps its size' : f === 'shrink' ? 'Shrink the type to fit the box' : f === 'fill' ? 'Size the type to fill the box' : 'Break even a single word across lines to fill the box (needs a height)'"
                     @click="setBoxFit(selectedLocal, f)">{{ f }}</button>
                 </div>
                 <div class="grid grid-cols-2 gap-3">

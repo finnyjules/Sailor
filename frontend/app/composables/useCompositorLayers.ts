@@ -393,11 +393,14 @@ export interface TextLayer extends LayerCommon {
                          // set => words auto-wrap to fit, unset => explicit \n only
   boxH?: number          // optional text-box height (normalized to canvas width);
                          // enables valign + vertical justify. Absent => natural height.
-  boxFit?: 'wrap' | 'shrink' | 'fill'
+  boxFit?: 'wrap' | 'shrink' | 'fill' | 'break'
                          // how the type meets its box: 'wrap' (fixed size, words
                          // wrap — the default), 'shrink' (shrink the font to fit
                          // the box), 'fill' (size the font to fill boxW, and boxH
-                         // when set). Absent => 'wrap' (byte-identical).
+                         // when set), 'break' (split even a single long word across
+                         // lines and grow it to fill the box — needs boxH; without
+                         // boxH it behaves like 'fill'). Absent => 'wrap'
+                         // (byte-identical).
   /** Live variable-font axis values (wght/wdth/slnt/…). When present, `wght`
    *  drives the numeric font-weight in the canvas `font` shorthand (the only
    *  variable-axis path that renders on every browser); the full set is also
@@ -1406,25 +1409,43 @@ function textLines(layer: TextLayer): string[] {
 /**
  * Final render lines: explicit newlines, then — when the layer has a text box
  * (`boxW`) — greedy word-wrap each line to fit the box. A word longer than the
- * box overflows on its own line rather than breaking mid-word. Needs a 2D
- * context for measurement; without one, falls back to explicit lines only.
+ * box overflows on its own line rather than breaking mid-word, EXCEPT in 'break'
+ * fit (with a boxH set), where an over-long word is split across lines at the
+ * character so a single word like NOISE stacks (NO / ISE) to fill its box. Needs
+ * a 2D context for measurement; without one, falls back to explicit lines only.
  */
 export function wrappedTextLines(ctx: CanvasRenderingContext2D | null, layer: TextLayer, W: number): string[] {
   const manual = textLines(layer)
   const boxPx = (layer.boxW ?? 0) * W
   if (!ctx || !(boxPx > 0)) return manual
   applyFont(ctx, layer, W)
+  // Character-breaking only makes sense with a height to fill; without one it is
+  // ambiguous (a word could grow forever), so 'break' falls back to plain wrap.
+  const brk = layer.boxFit === 'break' && (layer.boxH ?? 0) > 0
+  const fitsW = (s: string) => ctx.measureText(s).width <= boxPx
   const out: string[] = []
+  // Split a token wider than the box into char chunks; returns the trailing
+  // partial chunk for the caller to keep accumulating onto.
+  const breakToken = (word: string): string => {
+    let chunk = ''
+    for (const ch of word) {
+      if (chunk && !fitsW(chunk + ch)) { out.push(chunk); chunk = ch }
+      else chunk += ch
+    }
+    return chunk
+  }
   for (const line of manual) {
     const words = line.split(/\s+/).filter(Boolean)
     if (!words.length) { out.push(''); continue }
-    let cur = words[0]
-    for (let i = 1; i < words.length; i++) {
-      const candidate = `${cur} ${words[i]}`
-      if (ctx.measureText(candidate).width <= boxPx) cur = candidate
-      else { out.push(cur); cur = words[i] }
+    let cur = ''
+    for (const word of words) {
+      const candidate = cur ? `${cur} ${word}` : word
+      if (fitsW(candidate)) { cur = candidate; continue }
+      if (cur) { out.push(cur); cur = '' }         // flush what we have
+      if (fitsW(word) || !brk) cur = word          // fits alone, or we don't break (may overflow)
+      else cur = breakToken(word)                  // split the long word; keep the tail
     }
-    out.push(cur)
+    if (cur) out.push(cur)
   }
   return out
 }
