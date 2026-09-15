@@ -2355,4 +2355,76 @@ test.describe('Frame effect-dial motion (F8)', () => {
   // reactive path (a mid-session raw doc mutation doesn't reach the mounted modal's paint).
   // Task 3's `animate` case already proves a two-keyframe track drives the render, and the
   // `picker adds…` case above proves the picker creates the track; Task 5 joins them live.
+
+  // ── Task 5 · per-dial keyframe rows on the timeline ────────────────────────
+  test('Task 5 · a timeline lane click authors a second keyframe on a picker-created dial track', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+    await setMotionDoc(page, { fps: 30, duration: 2 }) // no tracks yet
+    await enterMotionTab(page)
+    await selectSeededLayer(page)
+
+    const target = `layers.${layerId}.effects.e-grain-anim.amount`
+    const dk = dialKey(target)
+
+    // Picker creates the track (one keyframe at the playhead) — the RIGHT reactive path.
+    await page.locator(`[data-testid="dial-add-${dk}"]`).click()
+
+    // The dial-track row nests under the layer band: a label cell + a lane with the first diamond.
+    await expect(page.locator(`[data-testid="dial-track-${dk}"]`)).toBeVisible()
+    const lane = page.locator(`[data-testid="dial-lane-${dk}"]`)
+    await expect(lane).toBeVisible()
+    await expect(lane.locator('[data-testid="kf-0"]')).toBeVisible()
+
+    // Click the empty lane near the end → a SECOND keyframe, authored via emit('update:motion').
+    const box = (await lane.boundingBox())!
+    await page.mouse.click(box.x + box.width * 0.9, box.y + box.height / 2)
+    await expect(lane.locator('[data-testid="kf-1"]')).toBeVisible()
+
+    // It persists on the reactive doc: one track, now two keyframes.
+    const tracks = await page.evaluate(() =>
+      (window as any).__frameLab.node.data.properties.sailor_motion.tracks)
+    expect(tracks).toHaveLength(1)
+    expect(tracks[0].target).toBe(target)
+    expect(tracks[0].keyframes).toHaveLength(2)
+  })
+
+  test('Task 5 · dragging a dial keyframe re-renders the dial at a fixed playhead', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+
+    // A two-keyframe grain ramp (0 → 0.9), seeded BEFORE entering the tab so it reaches paint.
+    await setMotionDoc(page, {
+      fps: 30, duration: 2,
+      tracks: [{
+        target: `layers.${layerId}.effects.e-grain-anim.amount`,
+        keyframes: [{ t: 0, v: 0, ease: 'linear' }, { t: 2, v: 0.9, ease: 'linear' }],
+      }],
+    })
+    await enterMotionTab(page)
+
+    const dk = dialKey(`layers.${layerId}.effects.e-grain-anim.amount`)
+    const lane = page.locator(`[data-testid="dial-lane-${dk}"]`)
+    await expect(lane).toBeVisible()
+
+    // Park the playhead near the start (t ≈ 0.2 → grain ≈ 0.09, barely any).
+    await scrubRuler(page, 0.1)
+    const before = await stackPixels(page)
+
+    // Drag the far-right keyframe (t = 2, v = 0.9) hard left, so the fixed playhead now sits
+    // AFTER it and the grain clamps to 0.9 — the interpolated render at the playhead changes.
+    const laneBox = (await lane.boundingBox())!
+    const kfBox = (await lane.locator('[data-testid="kf-1"]').boundingBox())!
+    await page.mouse.move(kfBox.x + kfBox.width / 2, kfBox.y + kfBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(laneBox.x + laneBox.width * 0.03, laneBox.y + laneBox.height / 2, { steps: 10 })
+    await page.mouse.up()
+    await page.waitForTimeout(300)
+    const after = await stackPixels(page)
+
+    expect(after).not.toBe(before)
+    const d = await pixelDelta(page, before, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(200) // the grain jumps from ~none to heavy at the playhead
+  })
 })

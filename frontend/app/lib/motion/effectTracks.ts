@@ -169,6 +169,77 @@ export function removeDialTrack(
   return (tracks ?? []).filter((tr) => tr?.target !== target)
 }
 
+/**
+ * Task 5 · Pure keyframe reducers behind the timeline's per-dial track rows.
+ *
+ * All four are pure — they never mutate the input track/array or any keyframe
+ * object, always return a value safe to hand straight to `setMotion({ tracks })`,
+ * and keep a track's `keyframes` sorted ascending by `t`.
+ *
+ * Note: `removeKeyframe` does NOT collapse a track that reaches zero keyframes —
+ * removing the LAST keyframe should be handled by the caller by dropping the whole
+ * track via `removeDialTrack`, so an empty-keyframe track never reaches the fold.
+ */
+
+/** Two keyframes within ~1ms count as the same time — a lane click landing on an
+ *  existing diamond REPLACES it rather than stacking a duplicate at the same t. */
+const KEYFRAME_EPS = 1e-3
+
+/**
+ * Insert a keyframe at `t` (seconds, clamped ≥ 0) with value `v`; if a keyframe
+ * already sits at ~`t`, it is REPLACED (its old value/ease dropped). Returns a NEW
+ * track with the keyframes re-sorted by `t`; never mutates the input.
+ */
+export function addKeyframe(track: EffectDialTrack, t: number, v: number | string): EffectDialTrack {
+  const at = Math.max(0, t)
+  const kept = track.keyframes.filter((kf) => Math.abs(kf.t - at) > KEYFRAME_EPS)
+  const keyframes = [...kept, { t: at, v }].sort((a, b) => a.t - b.t)
+  return { ...track, keyframes }
+}
+
+/**
+ * Move the keyframe at `index` to time `t` (clamped ≥ 0), keeping its value and
+ * ease. Returns a NEW track with the keyframes re-sorted (a keyframe dragged past a
+ * neighbour reorders); an out-of-range index returns the input unchanged. Never
+ * mutates the input array or any keyframe object.
+ */
+export function moveKeyframe(track: EffectDialTrack, index: number, t: number): EffectDialTrack {
+  const kfs = track.keyframes
+  if (index < 0 || index >= kfs.length) return track
+  const moved: DialKeyframe = { ...kfs[index]!, t: Math.max(0, t) }
+  const keyframes = kfs.map((kf, i) => (i === index ? moved : kf)).sort((a, b) => a.t - b.t)
+  return { ...track, keyframes }
+}
+
+/**
+ * Drop the keyframe at `index`. Returns a NEW track; an out-of-range index returns
+ * the input unchanged. A track left with zero keyframes is the CALLER's problem —
+ * remove the whole track with `removeDialTrack` (see the module note above). Never
+ * mutates the input.
+ */
+export function removeKeyframe(track: EffectDialTrack, index: number): EffectDialTrack {
+  if (index < 0 || index >= track.keyframes.length) return track
+  return { ...track, keyframes: track.keyframes.filter((_, i) => i !== index) }
+}
+
+/**
+ * Replace the track driving `target` with `next`, immutably. If no track currently
+ * drives `target`, `next` is appended (an immutable upsert). Returns a NEW array;
+ * never mutates the input.
+ */
+export function setTrack(
+  tracks: EffectDialTrack[],
+  target: string,
+  next: EffectDialTrack,
+): EffectDialTrack[] {
+  let replaced = false
+  const out = tracks.map((tr) => {
+    if (tr?.target === target) { replaced = true; return next }
+    return tr
+  })
+  return replaced ? out : [...out, next]
+}
+
 /** One track pre-parsed to the effect + dial it drives (the layer key is the Map key). */
 interface ParsedTrack { effectId: string; dialKey: string; track: EffectDialTrack }
 

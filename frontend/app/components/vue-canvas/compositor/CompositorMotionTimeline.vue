@@ -9,6 +9,10 @@ import type { LocalLayer } from '~/composables/useCompositorLayers'
 import {
   bandSegments, setClipOffset, resizeTransition, setWindowDuration, snapSeconds, windowSeconds,
 } from '~/lib/motion/timelineBands'
+import {
+  effectDialTargets, evaluateDialTrack, addKeyframe, moveKeyframe, removeKeyframe,
+  setTrack, removeDialTrack, type EffectDialTrack,
+} from '~/lib/motion/effectTracks'
 import { Play, Pause, Plus } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -107,6 +111,66 @@ function resetWindowEnd(l: LocalLayer) {
   l.animation.duration = undefined
   emit('commit')
 }
+
+// ── Effect-dial keyframe rows (F8 Task 5) ────────────────────────────────────
+// Per-dial tracks nested under each layer band. Every edit flows through the
+// reactive path — emit('update:motion', { tracks }) then emit('commit') — never a
+// raw mutation of props.motion (a raw doc write does not reach the mounted modal's
+// paint). Keyframe positions are seconds→fraction via `pct`/`dur`, exactly like the
+// bands, and the shared playhead is redrawn in each lane so a scrub lines up.
+const tracksForLayer = (l: LocalLayer): EffectDialTrack[] =>
+  (props.motion.tracks ?? []).filter((tk) => tk?.target?.startsWith(`layers.${l.id}.`))
+// The dial's human name (Effect · Dial), falling back to the last path segment.
+function dialLabel(l: LocalLayer, tk: EffectDialTrack): string {
+  return effectDialTargets(l).find((d) => d.path === tk.target)?.label
+    || tk.target.split('.').pop() || tk.target
+}
+// A DOM-safe id fragment for a dial target's data-testid — mirrors the modal's
+// dialTestKey() convention (dots/colons flattened) so tests address either UI.
+const dialTestKey = (target: string) => target.replace(/[^a-z0-9]+/gi, '-')
+
+// Drag a keyframe diamond horizontally to change its time. Mirrors the band drag
+// idiom (beforeChange on down, window listeners, activeCleanup, commit on up), but
+// mutates via the setTrack/moveKeyframe reducers through emit('update:motion').
+function startKfDrag(e: PointerEvent, tk: EffectDialTrack, i: number) {
+  emit('beforeChange')
+  const lane = (e.currentTarget as HTMLElement).closest('[data-dial-lane]') as HTMLElement
+  const r = lane.getBoundingClientRect()
+  const move = (ev: PointerEvent) => {
+    const frac = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width))
+    const newT = frac * dur.value
+    emit('update:motion', { tracks: setTrack(props.motion.tracks ?? [], tk.target, moveKeyframe(tk, i, newT)) })
+  }
+  const up = () => {
+    window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
+    activeCleanup = null
+    emit('commit')
+  }
+  activeCleanup = up
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+}
+// Click the empty lane to add a keyframe at that time, seeded with the dial's value
+// there (the interpolated value, so the ramp is unchanged until the diamond moves).
+function onLaneAdd(e: MouseEvent, tk: EffectDialTrack) {
+  const lane = e.currentTarget as HTMLElement
+  const r = lane.getBoundingClientRect()
+  const t = Math.max(0, Math.min(dur.value, ((e.clientX - r.left) / r.width) * dur.value))
+  const v = evaluateDialTrack(tk, t) ?? tk.keyframes[0]?.v ?? 0
+  emit('beforeChange')
+  emit('update:motion', { tracks: setTrack(props.motion.tracks ?? [], tk.target, addKeyframe(tk, t, v)) })
+  emit('commit')
+}
+// Double-click a diamond to delete it; deleting the last keyframe drops the track.
+function deleteKf(tk: EffectDialTrack, i: number) {
+  emit('beforeChange')
+  const tracks = props.motion.tracks ?? []
+  const next = tk.keyframes.length <= 1
+    ? removeDialTrack(tracks, tk.target)
+    : setTrack(tracks, tk.target, removeKeyframe(tk, i))
+  emit('update:motion', { tracks: next })
+  emit('commit')
+}
 </script>
 
 <template>
@@ -183,6 +247,29 @@ function resetWindowEnd(l: LocalLayer) {
           <div v-if="t != null" class="absolute inset-y-0 w-px bg-white/80 pointer-events-none z-20"
             :style="{ left: pct(Math.min(1, (t ?? 0) / motion.duration)) }" />
         </div>
+
+        <!-- Per-dial keyframe rows, nested under this layer's band (F8 Task 5) -->
+        <template v-for="tk in tracksForLayer(l)" :key="tk.target">
+          <span class="truncate text-left text-[10px] text-white/40 pl-3 self-center"
+            :data-testid="'dial-track-' + dialTestKey(tk.target)"
+            :title="dialLabel(l, tk)">{{ dialLabel(l, tk) }}</span>
+          <div data-dial-lane :data-testid="'dial-lane-' + dialTestKey(tk.target)"
+            class="relative my-0.5 h-4 rounded border border-white/[0.06] bg-white/[0.02] cursor-copy"
+            title="Click to add a keyframe"
+            @click="(e: MouseEvent) => onLaneAdd(e, tk)">
+            <div v-for="(kf, i) in tk.keyframes" :key="i"
+              :data-testid="'kf-' + i"
+              class="absolute top-1/2 size-2 -ml-1 -mt-1 rotate-45 bg-amber-300 border border-amber-200/70 cursor-ew-resize z-10 hover:bg-amber-200"
+              :style="{ left: pct(Math.min(1, kf.t / dur)) }"
+              title="Keyframe · drag to move, double-click to delete"
+              @pointerdown.stop.prevent="(e: PointerEvent) => startKfDrag(e, tk, i)"
+              @click.stop
+              @dblclick.stop="() => deleteKf(tk, i)" />
+            <!-- playhead across the dial lane, same scale as the band above -->
+            <div v-if="t != null" class="absolute inset-y-0 w-px bg-white/80 pointer-events-none z-20"
+              :style="{ left: pct(Math.min(1, (t ?? 0) / motion.duration)) }" />
+          </div>
+        </template>
       </template>
     </div>
     </div>
