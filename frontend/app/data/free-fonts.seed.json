@@ -610,7 +610,7 @@
     "redistributable": true
   },
   {
-    "name": "Museum",
+    "name": "LT Museum",
     "num": 85,
     "source": "self-hosted",
     "license": "OFL-1.1",
@@ -694,7 +694,7 @@
     "bram": "Ronzino"
   },
   {
-    "name": "Superior",
+    "name": "LT Superior",
     "num": 95,
     "source": "self-hosted",
     "license": "OFL-1.1",

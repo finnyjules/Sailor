@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-15T14:35:12.865Z",
+  "generatedAt": "2026-09-15T19:22:29.376Z",
   "fontsRoot": "Assets/Fonts",
   "foundries": [
     {
@@ -11996,6 +11996,25 @@
       "redistributable": true
     },
     {
+      "id": "bram-naus-lt-museum",
+      "family": "LT Museum",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-ltmuseum-medium",
+          "weight": 500,
+          "style": "Medium",
+          "italic": false,
+          "postscriptName": "LTMuseum-Medium",
+          "src": "Free Fonts/Museum/LTMuseum-Medium.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 85,
+      "license": "OFL-1.1",
+      "redistributable": true
+    },
+    {
       "id": "bram-naus-parkinsans",
       "family": "Parkinsans",
       "foundry": "bram-naus",
@@ -12070,6 +12089,25 @@
       "redistributable": true
     },
     {
+      "id": "bram-naus-moche",
+      "family": "Moche",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-moche-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Moche-Regular",
+          "src": "Free Fonts/Moche/Moche-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 93,
+      "license": "OFL-1.1",
+      "redistributable": true
+    },
+    {
       "id": "bram-naus-ronzino",
       "family": "Ronzino",
       "foundry": "bram-naus",
@@ -12085,6 +12123,25 @@
       ],
       "source": "self-hosted",
       "num": 94,
+      "license": "OFL-1.1",
+      "redistributable": true
+    },
+    {
+      "id": "bram-naus-lt-superior",
+      "family": "LT Superior",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-ltsuperior-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "LTSuperior-Regular",
+          "src": "Free Fonts/Superior/LTSuperior-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 95,
       "license": "OFL-1.1",
       "redistributable": true
     },
