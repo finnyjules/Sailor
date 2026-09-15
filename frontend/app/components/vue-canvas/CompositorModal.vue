@@ -90,6 +90,8 @@ import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
+import { effectDialTargets, addDialTrack, removeDialTrack, type EffectDialTrack, type DialTargetSpec } from '~/lib/motion/effectTracks'
+import { getByIdPath } from '~/lib/studio/idPath'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 // F5 Task 3: the shader-catalog-as-a-pass effect inspector — reuses the app's canonical
 // CatalogModal (the same picker ShaderFillEditor.vue mounts for a shader FILL) and the shared
@@ -3633,6 +3635,50 @@ function setMotion(patch: Partial<FrameMotion>) {
 // snapshot captures the pre-edit state.
 function commitMotionTimeline() {
   commit(localLayers.value)
+}
+
+// ── Motion tab · animate an effect dial ─────────────────────────────────────
+// The picker lists the selected layer's animatable effect dials (F8) and adds/
+// removes a frame-level EffectDialTrack. `sailor_motion.tracks` is an untyped
+// field on the persisted doc (FrameMotion carries it structurally through the
+// painter seam), so it is read through a small cast here.
+const motionTracks = computed<EffectDialTrack[]>(() => (motionDoc.value as any).tracks ?? [])
+const animatableDials = computed<DialTargetSpec[]>(() =>
+  selectedLocal.value ? effectDialTargets(selectedLocal.value as any) : [],
+)
+function dialIsAnimated(target: string): boolean {
+  return motionTracks.value.some((tr) => tr.target === target)
+}
+// A stable, DOM-safe id fragment for a dial target's data-testid (paths carry
+// dots and colons from the effect id).
+function dialTestKey(target: string): string {
+  return target.replace(/[^a-z0-9]+/gi, '-')
+}
+function toggleDialTrack(spec: DialTargetSpec) {
+  const l = selectedLocal.value
+  if (!l) return
+  if (dialIsAnimated(spec.path)) {
+    setMotion({ tracks: removeDialTrack(motionTracks.value, spec.path) } as Partial<FrameMotion>)
+    return
+  }
+  // Seed the first keyframe from the dial's CURRENT value at the playhead, so the
+  // track starts as a no-op hold until a second keyframe is authored (Task 5).
+  const cur = getByIdPath({ layers: [l] }, spec.path)
+  const seed: number | string =
+    typeof cur === 'number' || typeof cur === 'string'
+      ? cur
+      : spec.kind === 'color'
+        ? '#ffffff'
+        : (spec.min ?? 0)
+  setMotion({
+    tracks: addDialTrack(
+      motionTracks.value,
+      spec.path,
+      previewT.value ?? 0,
+      seed,
+      spec.kind === 'color' ? 'oklch' : undefined,
+    ),
+  } as Partial<FrameMotion>)
 }
 
 const playing = ref(false)
@@ -7720,6 +7766,29 @@ onUnmounted(() => {
       <div v-if="inspectorTab === 'motion'" ref="motionTimelineRef" class="absolute bottom-8 z-20 pointer-events-auto"
         :style="{ left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' }"
         @pointerdown.stop @click.stop @dblclick.stop>
+        <!-- Animate a dial: pick an effect dial on the selected layer to make it a
+             motion target. Adding seeds one keyframe at the playhead (a no-op hold);
+             the keyframes themselves are edited on the timeline. -->
+        <div v-if="selectedLocal" data-testid="dial-picker"
+          class="glass-panel mb-2 rounded-lg border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-lg px-3 py-2">
+          <div class="text-[11px] font-medium text-white/60 mb-1.5">Animate a dial</div>
+          <p v-if="!animatableDials.length" class="text-[11px] text-white/35">
+            No animatable effect dials on this layer.
+          </p>
+          <div v-else class="flex flex-wrap gap-1.5">
+            <button v-for="spec in animatableDials" :key="spec.path" type="button"
+              :data-testid="'dial-add-' + dialTestKey(spec.path)"
+              :aria-pressed="dialIsAnimated(spec.path)"
+              class="flex items-center gap-1.5 h-7 px-2 rounded text-[11px] cursor-pointer whitespace-nowrap border transition-colors"
+              :class="dialIsAnimated(spec.path)
+                ? 'bg-white/15 text-white border-white/20'
+                : 'text-white/70 border-white/10 hover:bg-white/10'"
+              @click="toggleDialTrack(spec)">
+              <span>{{ dialIsAnimated(spec.path) ? '✓' : '+' }}</span>
+              <span>{{ spec.label }}</span>
+            </button>
+          </div>
+        </div>
         <CompositorMotionTimeline
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
           :motion="effectiveMotion" :t="previewT" :playing="playing"

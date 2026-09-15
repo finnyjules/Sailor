@@ -10,6 +10,8 @@
  * the layer; the painter converts to px.
  */
 
+import type { EffectDialTrack } from '~/lib/motion/effectTracks'
+
 export interface LayerAnimSpec {
   presetId: string      // kinetic preset id (subset supported; see evaluate.ts)
   duration: number      // seconds the in/out phase takes (loop: cycle length)
@@ -49,6 +51,9 @@ export interface FrameMotion {
   fps: number
   duration: number      // seconds
   loop?: boolean
+  /** F8: per-layer effect-dial motion tracks (`layers.<id>.effects.<effectId>.<dial>`).
+   *  Absent ⇒ no dial animation (byte-identical). Type-only import — no runtime cycle. */
+  tracks?: EffectDialTrack[]
 }
 
 export const DEFAULT_FRAME_MOTION: FrameMotion = { fps: 30, duration: 4 }

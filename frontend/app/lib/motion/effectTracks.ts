@@ -129,6 +129,46 @@ export function evaluateDialTrack(track: EffectDialTrack, t: number): number | s
   return lo.v
 }
 
+/**
+ * Task 4 · Pure reducers the Motion-tab picker uses to add / remove a dial track.
+ *
+ * Both are pure: they never mutate the input array and always yield a value safe to
+ * hand straight to `setMotion({ tracks })`. `addDialTrack` seeds ONE keyframe at the
+ * playhead — the dial becomes animatable; a SECOND keyframe (the actual motion) is
+ * authored on the timeline in Task 5, so re-adding an already-animated dial is a no-op.
+ */
+
+/**
+ * Append a one-keyframe track for `target` (seeded at time `t` with value `v`).
+ *
+ * IDEMPOTENT: if a track already drives `target`, the input is returned UNCHANGED
+ * (adding an already-animated dial does nothing — a second keyframe is Task 5's job).
+ * Otherwise a NEW array is returned with the track appended; an `undefined` input
+ * yields a fresh single-element array. Never mutates the input.
+ */
+export function addDialTrack(
+  tracks: EffectDialTrack[] | undefined,
+  target: string,
+  t: number,
+  v: number | string,
+  space?: 'oklch' | 'srgb',
+): EffectDialTrack[] {
+  if (tracks && tracks.some((tr) => tr?.target === target)) return tracks
+  const track: EffectDialTrack = { target, keyframes: [{ t, v }], ...(space ? { space } : {}) }
+  return [...(tracks ?? []), track]
+}
+
+/**
+ * Remove the track driving `target`. Returns a NEW array with it filtered out (an
+ * `undefined` input yields an empty array). Never mutates the input.
+ */
+export function removeDialTrack(
+  tracks: EffectDialTrack[] | undefined,
+  target: string,
+): EffectDialTrack[] {
+  return (tracks ?? []).filter((tr) => tr?.target !== target)
+}
+
 /** One track pre-parsed to the effect + dial it drives (the layer key is the Map key). */
 interface ParsedTrack { effectId: string; dialKey: string; track: EffectDialTrack }
 

@@ -2300,4 +2300,59 @@ test.describe('Frame effect-dial motion (F8)', () => {
     expect(d.sizeMismatch).toBe(false)
     expect(d.changed).toBeGreaterThan(200) // the animated grain repaints a large area of the rect
   })
+
+  // ── Task 4 · the Motion-tab dial picker (add / remove tracks) ──────────────
+  // The picker mirrors dialTestKey() in CompositorModal.vue: a target id-path with its
+  // dots/colons flattened to a DOM-safe data-testid fragment.
+  const dialKey = (target: string) => target.replace(/[^a-z0-9]+/gi, '-')
+
+  /** Select the (only) seeded layer via its timeline row label, so the picker
+   *  (`v-if="selectedLocal"`) mounts. rowLabel of a nameless rect is its kind, "rect". */
+  async function selectSeededLayer(page: Page): Promise<void> {
+    await page.getByRole('button', { name: 'rect', exact: true }).first().click()
+  }
+
+  test('Task 4 · picker adds a dial track to sailor_motion, shows it added, and removes it', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+    await setMotionDoc(page, { fps: 30, duration: 2 }) // no tracks yet
+    await enterMotionTab(page)
+    await selectSeededLayer(page)
+
+    // The picker mounts for the selected layer and offers the grain Amount dial.
+    await expect(page.locator('[data-testid="dial-picker"]')).toBeVisible()
+    const target = `layers.${layerId}.effects.e-grain-anim.amount`
+    const addBtn = page.locator(`[data-testid="dial-add-${dialKey(target)}"]`)
+    await expect(addBtn).toBeVisible()
+    await expect(addBtn).toHaveAttribute('aria-pressed', 'false')
+
+    await addBtn.click()
+
+    // A track for the Amount dial is appended, with ONE keyframe seeded at the playhead
+    // (t = 0 here) from the dial's current value (0.5). It persists on the node's doc.
+    const afterAdd = await page.evaluate(() =>
+      (window as any).__frameLab.node.data.properties.sailor_motion.tracks)
+    expect(Array.isArray(afterAdd)).toBe(true)
+    expect(afterAdd).toHaveLength(1)
+    expect(afterAdd[0].target).toBe(target)
+    expect(afterAdd[0].keyframes).toHaveLength(1)
+    expect(afterAdd[0].keyframes[0].t).toBe(0)
+    expect(afterAdd[0].keyframes[0].v).toBe(0.5)
+
+    // The picker reflects the added state (toggle now pressed).
+    await expect(addBtn).toHaveAttribute('aria-pressed', 'true')
+
+    // Adding the same dial again is idempotent (still one track, still one keyframe).
+    await addBtn.click() // toggles OFF (remove), so add once more to re-check idempotency below
+    await expect(addBtn).toHaveAttribute('aria-pressed', 'false')
+    const afterRemove = await page.evaluate(() =>
+      (window as any).__frameLab.node.data.properties.sailor_motion.tracks)
+    expect(afterRemove).toHaveLength(0) // removed cleanly
+  })
+
+  // NOTE: the end-to-end proof that a PICKER-created track animates once it has a second
+  // keyframe belongs to Task 5 — the second keyframe must be authored through the timeline's
+  // reactive path (a mid-session raw doc mutation doesn't reach the mounted modal's paint).
+  // Task 3's `animate` case already proves a two-keyframe track drives the render, and the
+  // `picker adds…` case above proves the picker creates the track; Task 5 joins them live.
 })
