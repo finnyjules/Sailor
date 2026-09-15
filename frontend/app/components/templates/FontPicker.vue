@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Check, ChevronDown, Search, Sparkles, X as XIcon } from 'lucide-vue-next'
 import { TEMPLATE_FONTS } from '~~/shared/template-fonts'
-import { filterLibraryGroups, libraryFamily, librariesByFoundry, featuredFamilies } from '~/data/library-fonts'
+import { filterLibraryGroups, libraryFamily, librariesByFoundry, featuredFamilies, FEATURED_FOUNDRY_ID } from '~/data/library-fonts'
 
 interface FontEntry {
   name: string
@@ -159,6 +159,7 @@ watch(uploadedFonts, () => { if (activeTab.value === 'brand') preloadTab('brand'
 function ownerTab(): FontTab {
   const fam = props.modelValue
   if (!fam) return 'google'
+  if (libraryFamily(fam)?.foundry === FEATURED_FOUNDRY_ID) return 'featured'
   if (libraryFamily(fam)) return 'pangram'
   if (uploadedFonts.value.some(f => f.family === fam)) return 'brand'
   return 'google'
@@ -433,7 +434,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside, true
             :key="f.id"
             type="button"
             class="w-full px-3 py-2 flex items-center gap-2 hover:bg-white/[0.05] transition-colors cursor-pointer"
-            :class="f.family === modelValue ? 'bg-action/[0.08]' : ''"
+            :class="(f.source === 'google' ? (f.googleFamily || f.family) : f.family) === modelValue ? 'bg-action/[0.08]' : ''"
             @click="selectFeatured(f)"
           >
             <span
@@ -441,7 +442,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside, true
               :style="{ fontFamily: f.source === 'google' ? (f.googleFamily || f.family) : f.family }"
             >{{ f.family }}</span>
             <span class="text-[9px] text-white/20 uppercase tracking-wider shrink-0 select-none">{{ f.source === 'google' ? 'google' : f.faces.length }}</span>
-            <Check v-if="f.family === modelValue" class="size-3 text-action shrink-0" />
+            <Check v-if="(f.source === 'google' ? (f.googleFamily || f.family) : f.family) === modelValue" class="size-3 text-action shrink-0" />
           </button>
           <div
             v-if="filteredFeatured.length === 0"

@@ -249,6 +249,7 @@ watch(fontPickerOpen, (open) => { if (!open && fontSuggestRan.value) clearFontSu
         :key="f.id"
         type="button"
         class="flex w-full items-baseline justify-between gap-2 rounded px-2 py-1 text-left hover:bg-white/10"
+        :class="{ 'bg-white/15': (f.source === 'google' ? (f.googleFamily || f.family) : f.family) === modelValue }"
         @click="selectFeatured(f)"
       >
         <span class="truncate text-[13px] text-white/90" :style="{ fontFamily: f.source === 'google' ? (f.googleFamily || f.family) : f.family }">{{ f.family }}</span>
