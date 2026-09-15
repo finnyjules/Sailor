@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-09T09:41:36.393Z",
+  "generatedAt": "2026-09-15T08:12:41.362Z",
   "fontsRoot": "Assets/Fonts",
   "foundries": [
     {
@@ -9,6 +9,10 @@
     {
       "id": "off-type",
       "label": "Off-Type"
+    },
+    {
+      "id": "bram-naus",
+      "label": "Featured"
     }
   ],
   "families": [
@@ -2593,6 +2597,22 @@
           "src": "PPF Fonts - v7.72/Editorial Old/otf/PPEditorialOld-Italic.otf"
         },
         {
+          "id": "pangram-ppeditorialold-medium",
+          "weight": 500,
+          "style": "Medium",
+          "italic": false,
+          "postscriptName": "PPEditorialOld-Medium",
+          "src": "PPF Fonts - v7.72/Editorial Old/ttf/PPEditorialOld-Medium.ttf"
+        },
+        {
+          "id": "pangram-ppeditorialold-mediumitalic",
+          "weight": 500,
+          "style": "Medium Italic",
+          "italic": true,
+          "postscriptName": "PPEditorialOld-MediumItalic",
+          "src": "PPF Fonts - v7.72/Editorial Old/ttf/PPEditorialOld-MediumItalic.ttf"
+        },
+        {
           "id": "pangram-ppeditorialold-bold",
           "weight": 700,
           "style": "Bold",
@@ -2607,6 +2627,22 @@
           "italic": true,
           "postscriptName": "PPEditorialOld-BoldItalic",
           "src": "PPF Fonts - v7.72/Editorial Old/otf/PPEditorialOld-BoldItalic.otf"
+        },
+        {
+          "id": "pangram-ppeditorialold-ultrabold",
+          "weight": 800,
+          "style": "Ultrabold",
+          "italic": false,
+          "postscriptName": "PPEditorialOld-Ultrabold",
+          "src": "PPF Fonts - v7.72/Editorial Old/ttf/PPEditorialOld-Ultrabold.ttf"
+        },
+        {
+          "id": "pangram-ppeditorialold-ultrabolditalic",
+          "weight": 800,
+          "style": "Ultrabold Italic",
+          "italic": true,
+          "postscriptName": "PPEditorialOld-UltraboldItalic",
+          "src": "PPF Fonts - v7.72/Editorial Old/ttf/PPEditorialOld-UltraboldItalic.ttf"
         },
         {
           "id": "pangram-ppeditorialold-heavy",
@@ -3384,6 +3420,14 @@
           "italic": true,
           "postscriptName": "PPFraktionSans-LightItalic",
           "src": "PPF Fonts - v7.72/Fraktion/PPFraktionSans-LightItalic.otf"
+        },
+        {
+          "id": "pangram-ppfraktionsans",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "PPFraktionSans",
+          "src": "PPF Fonts - v7.72/Fraktion/PPFraktionSans-Variable.ttf"
         },
         {
           "id": "pangram-ppfraktionsans-bold",
@@ -7307,6 +7351,21 @@
       ]
     },
     {
+      "id": "pangram-pp-nikkei-crests",
+      "family": "PP Nikkei Crests",
+      "foundry": "pangram",
+      "faces": [
+        {
+          "id": "pangram-ppnikkeicrests-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "PPNikkeiCrests-Regular",
+          "src": "PPF Fonts - v7.72/Nikkei/Crests/PPNikkeiCrests.ttf"
+        }
+      ]
+    },
+    {
       "id": "pangram-pp-nikkei-journal",
       "family": "PP Nikkei Journal",
       "foundry": "pangram",
@@ -11042,6 +11101,14 @@
           "src": "PPF Fonts - v7.72/Writer/PPWriter-ThinItalic.otf"
         },
         {
+          "id": "pangram-ppwriter-ultralighttext",
+          "weight": 200,
+          "style": "Ultralight Text",
+          "italic": false,
+          "postscriptName": "PPWriter-UltralightText",
+          "src": "PPF Fonts - v7.72/Writer/PPWriter-UltralightText.woff2"
+        },
+        {
           "id": "pangram-ppwriter-book",
           "weight": 340,
           "style": "Book",
@@ -11162,6 +11229,61 @@
           "src": "PPF Fonts - v7.72/Writer/PPWriter-BlackItalic.otf"
         }
       ]
+    },
+    {
+      "id": "bram-naus-sora",
+      "family": "Sora",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Sora",
+      "num": 26,
+      "license": "OFL-1.1",
+      "redistributable": true
+    },
+    {
+      "id": "bram-naus-onest",
+      "family": "Onest",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Onest",
+      "num": 29,
+      "license": "OFL-1.1",
+      "redistributable": true
+    },
+    {
+      "id": "bram-naus-geologica",
+      "family": "Geologica",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Geologica",
+      "num": 30,
+      "license": "OFL-1.1",
+      "redistributable": true
+    },
+    {
+      "id": "bram-naus-lexend",
+      "family": "Lexend",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Lexend",
+      "num": 40,
+      "license": "OFL-1.1",
+      "redistributable": true
+    },
+    {
+      "id": "bram-naus-syne",
+      "family": "Syne",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Syne",
+      "num": 125,
+      "license": "OFL-1.1",
+      "redistributable": true
     }
   ]
 }

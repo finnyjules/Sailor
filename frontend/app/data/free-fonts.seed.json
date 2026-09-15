@@ -1,0 +1,7 @@
+[
+  { "name": "Sora", "num": 26, "source": "google", "googleFamily": "Sora", "license": "OFL-1.1", "redistributable": true, "designer": "Jonny Pinhorn", "sourceUrl": "https://fonts.google.com/specimen/Sora" },
+  { "name": "Lexend", "num": 40, "source": "google", "googleFamily": "Lexend", "license": "OFL-1.1", "redistributable": true, "designer": "Bonnie Shaver-Troup, Thomas Jockin", "sourceUrl": "https://fonts.google.com/specimen/Lexend" },
+  { "name": "Geologica", "num": 30, "source": "google", "googleFamily": "Geologica", "license": "OFL-1.1", "redistributable": true, "designer": "Vasily Biryukov", "sourceUrl": "https://fonts.google.com/specimen/Geologica" },
+  { "name": "Onest", "num": 29, "source": "google", "googleFamily": "Onest", "license": "OFL-1.1", "redistributable": true, "designer": "Rasmus Andersson (adapt.)", "sourceUrl": "https://fonts.google.com/specimen/Onest" },
+  { "name": "Syne", "num": 125, "source": "google", "googleFamily": "Syne", "license": "OFL-1.1", "redistributable": true, "designer": "Bonjour Monde", "sourceUrl": "https://fonts.google.com/specimen/Syne" }
+]
