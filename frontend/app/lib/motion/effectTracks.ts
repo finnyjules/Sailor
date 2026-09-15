@@ -13,6 +13,8 @@
 // none of `useCompositorLayers.ts`'s composable runtime.
 import { effectStackOf, EFFECT_LABELS } from '~/lib/compositor/effectStack'
 import { dialSpecsFor, type DialKind } from '~/lib/compositor/effectDials'
+import { linear, easeInOutQuad } from '~/lib/motion/easing'
+import { mixHex } from '~/lib/color/mix'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 
 /** One keyframe of a dial track: a value at time `t` (seconds), easing INTO the next
@@ -71,11 +73,62 @@ export function effectDialTargets(layer: LocalLayer): DialTargetSpec[] {
   return out
 }
 
-// Task 2 · evaluateDialTrack(track: EffectDialTrack, t: number): number | string | undefined
-//   Numeric lerp via `~/lib/motion/easing.ts` (linear / easeInOut), matching evaluate.ts's
-//   seconds-based ease-into-NEXT idiom; colour mix via `mixHex` (~/lib/color/mix.ts) when both
-//   bracketing values are hex; step (nearest earlier keyframe) for enum/bool; clamp
-//   before-first / after-last; empty or malformed → undefined (never NaN).
+/** A hex colour mixHex accepts: `#` + 3, 6, or 8 hex digits (see `parseHexA`/`clampHex`
+ *  in `~/lib/color/convert.ts`). Used to decide colour-mix vs. step. */
+const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
+function isHex(v: unknown): v is string {
+  return typeof v === 'string' && HEX_RE.test(v)
+}
+
+/**
+ * Evaluate one effect-dial track at absolute frame-time `t` (seconds).
+ *
+ * Mirrors `evaluateKeyframes` (evaluate.ts) EXACTLY — sort a copy by `t`, clamp before the
+ * first keyframe to the first value and after the last to the last value, find the bracket
+ * whose upper keyframe is the first with `kf.t >= t`, and ease INTO the next keyframe using
+ * the FROM keyframe's `ease` (default `easeInOut`, i.e. `easeInOutQuad`) — so a dial animates
+ * identically to a whole-layer keyframe.
+ *
+ * - Empty / missing keyframes → `undefined` (the fold leaves the dial untouched; never NaN).
+ * - Both bracket values numbers → linear interpolation of the numbers by the eased fraction.
+ * - Both bracket values hex colours → `mixHex(from, to, p, track.space ?? 'oklch')`, which
+ *   returns the exact endpoint at p===0 / p===1.
+ * - Otherwise (mismatched types, or a non-hex string) → STEP: the FROM keyframe's value,
+ *   unchanged. This covers any future enum/bool dial with no special-casing.
+ *
+ * Pure interpolator: integer/count dials are NOT rounded here — the passes that need integers
+ * round internally (e.g. posterise rounds `levels`), so the animated ramp stays smooth and a
+ * single rounding site owns the quantisation.
+ */
+export function evaluateDialTrack(track: EffectDialTrack, t: number): number | string | undefined {
+  const kfs = track.keyframes
+  if (!kfs || !kfs.length) return undefined
+  const sorted = [...kfs].sort((a, b) => a.t - b.t)
+  // `sorted` is non-empty and the clamps below run before the bracket search, so every
+  // index access here is in-bounds; the `!`s mirror evaluate.ts's proven idiom under
+  // `noUncheckedIndexedAccess`.
+  const first = sorted[0]!
+  if (t <= first.t) return first.v
+  const last = sorted[sorted.length - 1]!
+  if (t >= last.t) return last.v
+  let lo = first, hi = sorted[1]!
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i]!.t >= t) { lo = sorted[i - 1]!; hi = sorted[i]!; break }
+  }
+  const span = Math.max(1e-6, hi.t - lo.t)
+  const easeFn = (lo.ease ?? 'easeInOut') === 'linear' ? linear : easeInOutQuad
+  const p = easeFn((t - lo.t) / span)
+  if (typeof lo.v === 'number' && typeof hi.v === 'number') {
+    return lo.v + (hi.v - lo.v) * p
+  }
+  if (isHex(lo.v) && isHex(hi.v)) {
+    // `EffectDialTrack.space` is 'oklch' | 'srgb'; `mixHex` names the RGB space 'rgb'.
+    return mixHex(lo.v, hi.v, p, (track.space ?? 'oklch') === 'srgb' ? 'rgb' : 'oklch')
+  }
+  // Mismatched types or a non-hex string: hold the FROM value (step).
+  return lo.v
+}
+
 //
 // Task 3 · applyEffectDialTracks(layers: LocalLayer[], tracks: EffectDialTrack[] | undefined,
 //                                t: number): LocalLayer[]
