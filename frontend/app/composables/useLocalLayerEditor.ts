@@ -116,6 +116,13 @@ export function cornerResizableKind(kind: string): boolean {
   return resizableKind(kind) || aspectLockedResizeKind(kind)
 }
 
+/** A text layer WITH a box resizes the box (boxW/boxH) like a rectangle — corners
+ *  and edges — instead of scaling the font. Boxless text keeps uniform corner
+ *  scaling. Hosts OR this into their edge- and corner-handle gates. */
+export function textBoxResizable(l: { kind: string; boxW?: number; boxH?: number } | null | undefined): boolean {
+  return !!l && l.kind === 'text' && (((l.boxW ?? 0) > 0) || ((l.boxH ?? 0) > 0))
+}
+
 /** Compute handle positions (corners, edges, rotation, center) from box geometry
  *  and rotation. All positions are rotated and translated to world space. */
 export function boxHandles(cx: number, cy: number, hw: number, hh: number, rotationDeg: number) {
@@ -716,11 +723,16 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const l = selected.value; const r = getRect(); if (!l || !r) return
     const W = dims().w, H = dims().h
     const b = boxPx(l)
+    // A text box resizes its own boxW/boxH (px = fraction·WIDTH), so start from
+    // those when set — not the painted glyph bounds — so the drag maths is honest.
+    const tb = textBoxResizable(l)
+    const sw = tb ? ((l as TextLayer).boxW ?? b.w / W) * W : b.w
+    const sh = tb ? ((l as TextLayer).boxH ?? b.h / W) * W : b.h
     const { nx, ny } = toNorm(e.clientX, e.clientY, r)
     recordHistory()
     drag.value = {
       type: 'resize', id: l.id, handle, rot: l.rotation,
-      start: { cx: l.x * W, cy: l.y * H, w: b.w, h: b.h },
+      start: { cx: l.x * W, cy: l.y * H, w: sw, h: sh },
       p0: { x: nx * W, y: ny * H },
     }
     attach()
@@ -783,12 +795,16 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       // recomputed centre are written back. `d.start.h` is the derived height, which
       // is what keeps the anchored maths honest: the opposite corner stays pinned in
       // BOTH axes, exactly like a rect's.
-      const locked = aspectLockedResizeKind(
-        localLayers.value.find(l => l.id === d.id)?.kind ?? '')
+      const cur = localLayers.value.find(l => l.id === d.id)
+      const locked = aspectLockedResizeKind(cur?.kind ?? '')
       const box = resizeBox(d.start, d.rot, d.handle, d.p0, { x: nx * W, y: ny * H }, { aspect: e.shiftKey || locked, fromCenter: e.altKey })
-      // px → normalized (w,h fractions of WIDTH; x of width, y of height)
-      const patch: Record<string, number> = { x: box.cx / W, y: box.cy / H, w: box.w / W }
-      if (!locked) patch.h = box.h / W
+      // px → normalized (w,h fractions of WIDTH; x of width, y of height). A text
+      // box writes its boxW/boxH — the same normalized-to-width fields — instead of
+      // a rect's w/h, so the handles resize the box rather than nothing.
+      const tb = textBoxResizable(cur)
+      const patch: Record<string, number> = { x: box.cx / W, y: box.cy / H }
+      patch[tb ? 'boxW' : 'w'] = box.w / W
+      if (!locked) patch[tb ? 'boxH' : 'h'] = box.h / W
       setLocal(d.id, patch)
     } else if (d.type === 'groupResize') {
       const W = dims().w, H = dims().h

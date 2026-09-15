@@ -41,7 +41,7 @@ import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWi
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
-import { useLocalLayerEditor, resizableKind, cornerResizableKind } from '~/composables/useLocalLayerEditor'
+import { useLocalLayerEditor, resizableKind, cornerResizableKind, textBoxResizable } from '~/composables/useLocalLayerEditor'
 import { useLayoutSheet } from '~/composables/useLayoutSheet'
 import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
@@ -1521,12 +1521,12 @@ function reassignSlot(slotHex: string, toHex: string, alpha?: string) {
 }
 // Box layers (rect/ellipse/image) get full Figma-style resize (corners + edges,
 // anchored opposite side); text/line/path keep uniform corner scale (no 2D box).
-const selectedResizable = computed(() => !!selectedLocal.value && resizableKind(selectedLocal.value.kind))
+const selectedResizable = computed(() => !!selectedLocal.value && (resizableKind(selectedLocal.value.kind) || textBoxResizable(selectedLocal.value)))
 // Wired layers join the anchored corner path (aspect-locked, no edge handles):
 // the grabbed corner follows the pointer and the opposite corner stays pinned,
 // which is the Figma feel. Only kinds with NO box at all (text/line/path) still
 // fall back to the uniform-from-centre scale.
-const selectedCornerResizable = computed(() => !!selectedLocal.value && cornerResizableKind(selectedLocal.value.kind))
+const selectedCornerResizable = computed(() => !!selectedLocal.value && (cornerResizableKind(selectedLocal.value.kind) || textBoxResizable(selectedLocal.value)))
 const ALIGN_BTNS = [
   { mode: 'left', icon: AlignStartVertical, title: 'Align left' },
   { mode: 'hcenter', icon: AlignCenterVertical, title: 'Align horizontal centers' },
@@ -4383,7 +4383,7 @@ function setBoxDim(id: string, key: 'boxW' | 'boxH', raw: string) {
   else norm = v / (gridConfig.value.columns || 16)
   setLocal(id, { [key]: norm } as any)
 }
-function toggleBoxFill(l: any) { setLocal(l.id, { boxFill: !l?.boxFill } as any) }
+function setBoxFit(l: any, fit: 'wrap' | 'shrink' | 'fill') { setLocal(l.id, { boxFit: fit } as any) }
 
 // A shape's stroke needs BOTH a colour and a width > 0 to show. New shapes start
 // at strokeWidth 0, so adding a stroke colour alone paints nothing — the stroke
@@ -9033,10 +9033,14 @@ onUnmounted(() => {
                       class="text-[10px] px-1.5 py-0.5 rounded border"
                       :class="boxUnit === u ? 'text-yellow-400 border-yellow-400/50' : 'text-white/40 border-white/[0.08]'"
                       @click="boxUnit = u">{{ u }}</button>
-                    <button class="ml-1 text-[10px] px-1.5 py-0.5 rounded border" title="Size the type to fill the box"
-                      :class="(selectedLocal as any).boxFill ? 'text-yellow-400 border-yellow-400/50' : 'text-white/40 border-white/[0.08]'"
-                      @click="toggleBoxFill(selectedLocal)">Fill</button>
                   </div>
+                </div>
+                <div class="flex items-center gap-1">
+                  <button v-for="f in (['wrap','shrink','fill'] as const)" :key="f"
+                    class="flex-1 text-[11px] py-1 rounded border capitalize"
+                    :class="((selectedLocal as any).boxFit ?? 'wrap') === f ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50 border-white/[0.08]'"
+                    :title="f === 'wrap' ? 'Words wrap; the type keeps its size' : f === 'shrink' ? 'Shrink the type to fit the box' : 'Size the type to fill the box'"
+                    @click="setBoxFit(selectedLocal, f)">{{ f }}</button>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                   <div>

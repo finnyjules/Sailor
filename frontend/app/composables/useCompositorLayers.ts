@@ -392,9 +392,11 @@ export interface TextLayer extends LayerCommon {
                          // set => words auto-wrap to fit, unset => explicit \n only
   boxH?: number          // optional text-box height (normalized to canvas width);
                          // enables valign + vertical justify. Absent => natural height.
-  boxFill?: boolean      // fill mode: derive fontSize so the wrapped text fills
-                         // boxW (and fits boxH when set). fontSize is then ignored
-                         // for rendering. Absent/false => size-first (unchanged).
+  boxFit?: 'wrap' | 'shrink' | 'fill'
+                         // how the type meets its box: 'wrap' (fixed size, words
+                         // wrap — the default), 'shrink' (shrink the font to fit
+                         // the box), 'fill' (size the font to fill boxW, and boxH
+                         // when set). Absent => 'wrap' (byte-identical).
   /** Live variable-font axis values (wght/wdth/slnt/…). When present, `wght`
    *  drives the numeric font-weight in the canvas `font` shorthand (the only
    *  variable-axis path that renders on every browser); the full set is also
@@ -4410,7 +4412,10 @@ function fillFontSize(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number
 }
 
 function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, collect?: TextOutlineCollect) {
-  if (layer.boxFill && (layer.boxW ?? 0) > 0 && !layer.expressive && !layer.path) layer = { ...layer, fontSize: fillFontSize(ctx, layer, W) }
+  if (layer.boxFit && layer.boxFit !== 'wrap' && (layer.boxW ?? 0) > 0 && !layer.expressive && !layer.path) {
+    const fit = fillFontSize(ctx, layer, W)
+    layer = { ...layer, fontSize: layer.boxFit === 'shrink' ? Math.min(layer.fontSize, fit) : fit }
+  }
   const lineH = layer.fontSize * W * layer.lineHeight
   // A path takes over the whole layout: one run along a curve, so box wrapping,
   // valign, justify and expressive placement have nothing to act on. `null` from
