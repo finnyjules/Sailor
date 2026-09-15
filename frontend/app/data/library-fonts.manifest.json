@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-15T20:09:43.363Z",
+  "generatedAt": "2026-09-15T20:16:17.306Z",
   "fontsRoot": "Assets/Fonts",
   "foundries": [
     {
@@ -13134,6 +13134,58 @@
       "num": 157,
       "license": "OFL-1.1",
       "redistributable": true
+    },
+    {
+      "id": "bram-naus-abc-areal-superfamily-variable",
+      "family": "ABC Areal Superfamily Variable",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-abcarealsuperfamilyvariable-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "ABCArealSuperfamilyVariable-Regular",
+          "src": "Free Fonts/ABC Areal/ABCArealSuperfamilyVariable.woff2"
+        }
+      ],
+      "source": "self-hosted",
+      "license": "Dinamo trial (free to use, no redistribution)",
+      "redistributable": false
+    },
+    {
+      "id": "bram-naus-ladi",
+      "family": "Ladi",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-ladi-weak",
+          "weight": 300,
+          "style": "Weak",
+          "italic": false,
+          "postscriptName": "Ladi-Weak",
+          "src": "Free Fonts/Ladi/Ladi-Weak.otf"
+        },
+        {
+          "id": "bram-naus-ladi-gross",
+          "weight": 400,
+          "style": "Gross",
+          "italic": false,
+          "postscriptName": "Ladi-Gross",
+          "src": "Free Fonts/Ladi/Ladi-Gross.otf"
+        },
+        {
+          "id": "bram-naus-ladi-dense",
+          "weight": 700,
+          "style": "Dense",
+          "italic": false,
+          "postscriptName": "Ladi-Dense",
+          "src": "Free Fonts/Ladi/Ladi-Dense.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "license": "unknown (free to use per owner)",
+      "redistributable": false
     }
   ]
 }

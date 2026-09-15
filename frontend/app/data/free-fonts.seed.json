@@ -1217,5 +1217,21 @@
     "googleFamily": "Scoutie Sans",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Ladi",
+    "source": "self-hosted",
+    "license": "unknown (free to use per owner)",
+    "redistributable": false,
+    "designer": "",
+    "note": "user-supplied; not on Bram list; flagged pending license confirmation"
+  },
+  {
+    "name": "ABC Areal Superfamily Variable",
+    "source": "self-hosted",
+    "license": "Dinamo trial (free to use, no redistribution)",
+    "redistributable": false,
+    "designer": "Dinamo",
+    "note": "user-supplied trial; flagged, must not ship"
   }
 ]
