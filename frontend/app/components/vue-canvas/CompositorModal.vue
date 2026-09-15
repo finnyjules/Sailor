@@ -90,7 +90,7 @@ import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
-import { effectDialTargets, addDialTrack, removeDialTrack, type EffectDialTrack, type DialTargetSpec } from '~/lib/motion/effectTracks'
+import { effectDialTargets, addDialTrack, removeDialTrack, animatedDialKeysOf, type EffectDialTrack, type DialTargetSpec } from '~/lib/motion/effectTracks'
 import { getByIdPath } from '~/lib/studio/idPath'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 // F5 Task 3: the shader-catalog-as-a-pass effect inspector — reuses the app's canonical
@@ -3680,6 +3680,34 @@ function toggleDialTrack(spec: DialTargetSpec) {
     ),
   } as Partial<FrameMotion>)
 }
+
+// ── F8 Task 6 · signal driven dials in the effect inspector ──────────────────
+// Authoring stays on the Motion tab; the inspector only SIGNALS that a dial is a
+// variable (it has a motion track) and refuses to present a driven dial as a plain
+// editable static value — the track overrides the stored value at paint, so editing
+// the static slider would do nothing visible (misleading). `animatedDialKeys` is the
+// set of the OPEN effect's dial KEYS that a track drives; `animatedDialLabels` names
+// them (dial half only) for the compact summary drawn under the breadcrumb.
+const animatedDialKeys = computed<Set<string>>(() => {
+  const layer = activeEffectLayer.value
+  const fx = activeEffect.value
+  if (!layer || !fx) return new Set<string>()
+  return animatedDialKeysOf(effectDialTargets(layer as any), (fx as any).id, motionTracks.value)
+})
+const animatedDialLabels = computed<string[]>(() => {
+  const layer = activeEffectLayer.value
+  const fx = activeEffect.value
+  if (!layer || !fx || !animatedDialKeys.value.size) return []
+  const out: string[] = []
+  for (const spec of effectDialTargets(layer as any)) {
+    // spec.label is "Effect · Dial"; the summary already sits under the effect
+    // breadcrumb, so show just the dial half.
+    if (spec.effectId === (fx as any).id && animatedDialKeys.value.has(spec.dialKey)) {
+      out.push(spec.label.split(' · ').pop() || spec.label)
+    }
+  }
+  return out
+})
 
 const playing = ref(false)
 let rafId = 0
@@ -8197,6 +8225,15 @@ onUnmounted(() => {
           <span class="truncate text-white/80">{{ EFFECT_LABELS[activeEffect!.type] }}</span>
         </div>
         <div class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
+          <!-- Variable signal: which of this effect's dials are driven by a Motion-tab
+               track. Authoring stays on the Motion tab; this is the primary per-effect
+               "it's animated" cue, drawn in the motion accent (amber, as the timeline
+               diamonds + playhead use). -->
+          <div v-if="animatedDialKeys.size" data-testid="inspector-animated-dials"
+            class="flex items-start gap-1.5 rounded-md border border-amber-400/25 bg-amber-400/10 px-2.5 py-1.5 text-[11px] leading-snug text-amber-300">
+            <span class="shrink-0" aria-hidden="true">◆</span>
+            <span>Animated: {{ animatedDialLabels.join(', ') }} — edit on the Motion tab</span>
+          </div>
           <!-- The seven kinds PostEffectsControls already draws. `only` narrows it to the
                selected kind, and `effects` is the one instance, so its patch comes back as
                a single-entry array we write straight onto that id. -->
@@ -8205,99 +8242,148 @@ onUnmounted(() => {
             Depth of field needs an image with a depth map. Add it to an image layer, or
             generate depth for this one first.
           </p>
-          <PostEffectsControls
-            v-else-if="isPanelKind(activeEffect!.type)"
-            :effects="([activeEffect] as any)"
-            :only="([activeEffect!.type] as any)"
-            :depth-source="activeEffectDepth"
-            :hide-toggle="true"
-            @update="(fx: any[]) => { const n = fx[0]; if (n) updateActiveEffect(n) }" />
+          <!-- PostEffectsControls is a packaged panel (not per-row editable from here), so a
+               driven dial is signalled + delegated with a shared wrapper: a compact ◆ marker
+               and the panel muted + non-interactive (a driven dial must not read as a freely
+               editable static value — the track wins at paint). -->
+          <div v-else-if="isPanelKind(activeEffect!.type)">
+            <div v-if="animatedDialKeys.size" data-testid="effect-panel-dial-lock"
+              class="mb-2 inline-flex items-center gap-1 text-[10px] text-amber-300"
+              title="Animated — edit on the Motion tab timeline">
+              <span aria-hidden="true">◆</span><span>Animated</span>
+            </div>
+            <div :class="animatedDialKeys.size ? 'opacity-50 pointer-events-none select-none' : ''"
+              :title="animatedDialKeys.size ? 'Animated — edit on the Motion tab timeline' : undefined">
+              <PostEffectsControls
+                :effects="([activeEffect] as any)"
+                :only="([activeEffect!.type] as any)"
+                :depth-source="activeEffectDepth"
+                :hide-toggle="true"
+                @update="(fx: any[]) => { const n = fx[0]; if (n) updateActiveEffect(n) }" />
+            </div>
+          </div>
 
-          <!-- Drop shadow -->
+          <!-- Drop shadow (per-dial: a driven dial is marked ◆ + disabled, edit on Motion tab) -->
           <div v-else-if="activeEffect!.type === 'drop_shadow'" class="space-y-1.5">
-            <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-1.5"
+              :class="animatedDialKeys.has('color') ? 'opacity-50' : ''"
+              :title="animatedDialKeys.has('color') ? 'Animated — edit on the Motion tab timeline' : undefined">
+              <span v-if="animatedDialKeys.has('color')" class="text-amber-300 text-[10px] shrink-0" aria-hidden="true">◆</span>
               <input type="color" :value="activeFxHex" title="Shadow color"
+                :disabled="animatedDialKeys.has('color')"
+                :class="animatedDialKeys.has('color') ? 'pointer-events-none' : ''"
                 class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
                 @input="updateActiveEffect({ color: composeRgba(($event.target as HTMLInputElement).value, activeFxAlpha) })" />
               <input type="text" spellcheck="false" maxlength="7" :value="activeFxHex" title="Hex color"
+                :disabled="animatedDialKeys.has('color')"
+                :class="animatedDialKeys.has('color') ? 'pointer-events-none' : ''"
                 class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs font-mono uppercase text-white/90 outline-none"
                 @change="setActiveFxHex(($event.target as HTMLInputElement).value)" />
               <div class="flex items-center gap-0.5 shrink-0 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-1.5" title="Shadow opacity (alpha)">
                 <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(activeFxAlpha * 100)"
+                  :disabled="animatedDialKeys.has('color')"
+                  :class="animatedDialKeys.has('color') ? 'pointer-events-none' : ''"
                   class="w-7 bg-transparent text-xs text-white/90 outline-none text-right"
                   @input="updateActiveEffect({ color: composeRgba(activeFxHex, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
                 <span class="text-[10px] text-white/35 select-none">%</span>
               </div>
             </div>
             <div class="grid grid-cols-3 gap-1.5">
-              <div>
-                <div class="panel-sublabel mb-1">X</div>
+              <div :class="animatedDialKeys.has('x') ? 'opacity-50' : ''">
+                <div class="panel-sublabel mb-1">X<span v-if="animatedDialKeys.has('x')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
                 <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).x || 0) * 1000) / 10"
+                  :disabled="animatedDialKeys.has('x')"
+                  :class="animatedDialKeys.has('x') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ x: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
               </div>
-              <div>
-                <div class="panel-sublabel mb-1">Y</div>
+              <div :class="animatedDialKeys.has('y') ? 'opacity-50' : ''">
+                <div class="panel-sublabel mb-1">Y<span v-if="animatedDialKeys.has('y')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
                 <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).y || 0) * 1000) / 10"
+                  :disabled="animatedDialKeys.has('y')"
+                  :class="animatedDialKeys.has('y') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ y: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
               </div>
-              <div>
-                <div class="panel-sublabel mb-1">Blur</div>
+              <div :class="animatedDialKeys.has('blur') ? 'opacity-50' : ''">
+                <div class="panel-sublabel mb-1">Blur<span v-if="animatedDialKeys.has('blur')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
                 <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).blur || 0) * 1000) / 10"
+                  :disabled="animatedDialKeys.has('blur')"
+                  :class="animatedDialKeys.has('blur') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ blur: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
               </div>
             </div>
           </div>
 
-          <!-- Inner shadow -->
+          <!-- Inner shadow (per-dial: a driven dial is marked ◆ + disabled, edit on Motion tab) -->
           <div v-else-if="activeEffect!.type === 'inner_shadow'" class="space-y-1.5">
-            <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-1.5"
+              :class="animatedDialKeys.has('color') ? 'opacity-50' : ''"
+              :title="animatedDialKeys.has('color') ? 'Animated — edit on the Motion tab timeline' : undefined">
+              <span v-if="animatedDialKeys.has('color')" class="text-amber-300 text-[10px] shrink-0" aria-hidden="true">◆</span>
               <input type="color" :value="activeFxHex" title="Shadow color"
+                :disabled="animatedDialKeys.has('color')"
+                :class="animatedDialKeys.has('color') ? 'pointer-events-none' : ''"
                 class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
                 @input="updateActiveEffect({ color: composeRgba(($event.target as HTMLInputElement).value, activeFxAlpha) })" />
               <div class="flex items-center gap-0.5 shrink-0 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-1.5" title="Shadow opacity (alpha)">
                 <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(activeFxAlpha * 100)"
+                  :disabled="animatedDialKeys.has('color')"
+                  :class="animatedDialKeys.has('color') ? 'pointer-events-none' : ''"
                   class="w-7 bg-transparent text-xs text-white/90 outline-none text-right"
                   @input="updateActiveEffect({ color: composeRgba(activeFxHex, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
                 <span class="text-[10px] text-white/35 select-none">%</span>
               </div>
             </div>
             <div class="grid grid-cols-3 gap-1.5">
-              <div>
-                <div class="panel-sublabel mb-1">X</div>
+              <div :class="animatedDialKeys.has('x') ? 'opacity-50' : ''">
+                <div class="panel-sublabel mb-1">X<span v-if="animatedDialKeys.has('x')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
                 <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).x || 0) * 1000) / 10"
+                  :disabled="animatedDialKeys.has('x')"
+                  :class="animatedDialKeys.has('x') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ x: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
               </div>
-              <div>
-                <div class="panel-sublabel mb-1">Y</div>
+              <div :class="animatedDialKeys.has('y') ? 'opacity-50' : ''">
+                <div class="panel-sublabel mb-1">Y<span v-if="animatedDialKeys.has('y')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
                 <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).y || 0) * 1000) / 10"
+                  :disabled="animatedDialKeys.has('y')"
+                  :class="animatedDialKeys.has('y') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ y: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
               </div>
-              <div>
-                <div class="panel-sublabel mb-1">Blur</div>
+              <div :class="animatedDialKeys.has('blur') ? 'opacity-50' : ''">
+                <div class="panel-sublabel mb-1">Blur<span v-if="animatedDialKeys.has('blur')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
                 <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).blur || 0) * 1000) / 10"
+                  :disabled="animatedDialKeys.has('blur')"
+                  :class="animatedDialKeys.has('blur') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ blur: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
               </div>
             </div>
           </div>
 
-          <!-- Layer blur -->
-          <div v-else-if="activeEffect!.type === 'layer_blur'" class="flex items-center gap-2">
-            <div class="panel-sublabel shrink-0">Radius</div>
+          <!-- Layer blur (Radius is the sole dial — marked ◆ + disabled when animated) -->
+          <div v-else-if="activeEffect!.type === 'layer_blur'" class="flex items-center gap-2"
+            :class="animatedDialKeys.has('radius') ? 'opacity-50' : ''"
+            :title="animatedDialKeys.has('radius') ? 'Animated — edit on the Motion tab timeline' : undefined">
+            <div class="panel-sublabel shrink-0">Radius<span v-if="animatedDialKeys.has('radius')" class="ml-1 text-amber-300" aria-hidden="true">◆</span></div>
             <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).radius || 0) * 1000) / 10"
+              :disabled="animatedDialKeys.has('radius')"
+              :class="animatedDialKeys.has('radius') ? 'pointer-events-none' : ''"
               class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
               @input="updateActiveEffect({ radius: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
           </div>
 
           <!-- Background blur (blurs what's behind the layer, inside its shape) -->
-          <div v-else-if="activeEffect!.type === 'background_blur'" class="flex items-center gap-2">
-            <div class="panel-sublabel shrink-0">Radius</div>
+          <div v-else-if="activeEffect!.type === 'background_blur'" class="flex items-center gap-2"
+            :class="animatedDialKeys.has('radius') ? 'opacity-50' : ''"
+            :title="animatedDialKeys.has('radius') ? 'Animated — edit on the Motion tab timeline' : undefined">
+            <div class="panel-sublabel shrink-0">Radius<span v-if="animatedDialKeys.has('radius')" class="ml-1 text-amber-300" aria-hidden="true">◆</span></div>
             <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).radius || 0) * 1000) / 10"
+              :disabled="animatedDialKeys.has('radius')"
+              :class="animatedDialKeys.has('radius') ? 'pointer-events-none' : ''"
               class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
               @input="updateActiveEffect({ radius: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
           </div>

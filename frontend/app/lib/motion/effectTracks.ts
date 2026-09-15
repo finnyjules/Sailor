@@ -73,6 +73,30 @@ export function effectDialTargets(layer: LocalLayer): DialTargetSpec[] {
   return out
 }
 
+/**
+ * Task 6 · Which of one effect instance's dials are driven by a motion track — the
+ * pure core behind the effect inspector's "animated" (variable) signal.
+ *
+ * Given the layer's enumerated `targets` (from `effectDialTargets`), the open effect's
+ * `effectId`, and the frame's `tracks`, returns the SET of that effect's dial KEYS
+ * (`grain`, `amount`, `color`, …) that a track targets. Empty when there are no tracks,
+ * or none resolve to this effect. Pure: no Vue, no lookups beyond the args — so the
+ * inspector's variable-marker logic is testable without mounting the modal.
+ */
+export function animatedDialKeysOf(
+  targets: DialTargetSpec[],
+  effectId: string,
+  tracks: EffectDialTrack[] | undefined,
+): Set<string> {
+  const out = new Set<string>()
+  if (!tracks || !tracks.length) return out
+  const driven = new Set(tracks.map((tr) => tr?.target))
+  for (const spec of targets) {
+    if (spec.effectId === effectId && driven.has(spec.path)) out.add(spec.dialKey)
+  }
+  return out
+}
+
 /** A hex colour mixHex accepts: `#` + 3, 6, or 8 hex digits (see `parseHexA`/`clampHex`
  *  in `~/lib/color/convert.ts`). Used to decide colour-mix vs. step. */
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i

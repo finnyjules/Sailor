@@ -2427,4 +2427,36 @@ test.describe('Frame effect-dial motion (F8)', () => {
     expect(d.sizeMismatch).toBe(false)
     expect(d.changed).toBeGreaterThan(200) // the grain jumps from ~none to heavy at the playhead
   })
+
+  // ── Task 6 · inspector variable-signal for a driven dial ────────────────────
+  // Authoring stays on the Motion tab; the effect inspector must SIGNAL that a dial
+  // is animated (a variable) and must NOT present it as a freely editable static value.
+  test('Task 6 · a driven dial reads as a variable in the effect inspector (summary + locked control)', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+    await setMotionDoc(page, { fps: 30, duration: 2 }) // no tracks yet
+    await enterMotionTab(page)
+    await selectSeededLayer(page)
+
+    // Add the grain Amount dial via the Motion-tab picker (Task-4 flow).
+    const target = `layers.${layerId}.effects.e-grain-anim.amount`
+    const dk = dialKey(target)
+    await page.locator(`[data-testid="dial-add-${dk}"]`).click()
+
+    // Back to Design; open the grain effect's inspector via its tree row.
+    await page.getByRole('button', { name: 'Design', exact: true }).click()
+    await expandLayerEffects(page)
+    await page.locator('[data-testid="effect-row"][data-effect-kind="grain"]').click()
+    await expect(page.getByTestId('effect-breadcrumb')).toBeVisible()
+
+    // The primary per-effect signal: an "Animated" summary that names the driven dial.
+    const summary = page.getByTestId('inspector-animated-dials')
+    await expect(summary).toBeVisible()
+    await expect(summary).toContainText('Animated')
+    await expect(summary).toContainText('Amount') // the grain dial, by its human label
+
+    // The grain panel (a packaged control) is marked ◆ and locked — a driven dial is not
+    // presented as a freely editable static value (the track wins at paint).
+    await expect(page.getByTestId('effect-panel-dial-lock')).toBeVisible()
+  })
 })
