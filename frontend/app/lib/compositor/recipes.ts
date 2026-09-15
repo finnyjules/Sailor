@@ -27,6 +27,22 @@ const PHOTOCOPY_EDGE_PER_DIRT = 0.03
  *  still reads as gritty toner over the crushed tone. */
 const PHOTOCOPY_GRAIN_PER_DIRT = 1.2
 
+// --- Letterpress -------------------------------------------------------------------------------
+// No emboss primitive: a dark, TIGHT inner glow hugging the alpha edge reads as the debossed
+// impression (ink pressed into paper), then a slight desaturate + paper tooth finish the look.
+// All magic numbers are named so the controller can tune the look by eye in the live gate.
+
+/** Letterpress `depth` dial (0..1) → the inner glow's `radius` (normalised to canvas width, like
+ *  every spatial dial). Small on purpose — the impression hugs the edge, it does not flood inward. */
+const LETTERPRESS_DEPTH_RADIUS = 0.03
+/** Letterpress `depth` dial (0..1) → the inner glow's `intensity` (0..2). Deeper press = darker,
+ *  stronger impression. */
+const LETTERPRESS_DEPTH_INTENSITY = 1.6
+/** Pressed ink on paper reads muted — a fixed slight desaturate (adjust.saturation, 1 = neutral). */
+const LETTERPRESS_DESAT = 0.85
+/** Letterpress `paper` dial (0..1) → paper-tooth grain composite alpha (0..1). */
+const LETTERPRESS_GRAIN_PER_PAPER = 0.6
+
 /**
  * Expand a print recipe into the ordered `PostEffect[]` that produces its look. Each entry is
  * a full effect built from `defaultPostEffect(type)` + the dial-derived overrides, always
@@ -70,10 +86,23 @@ export function expandRecipe(e: RisographEffect | PhotocopyEffect | LetterpressE
       }
       return out
     }
-    // Letterpress (Task 3): a `[]` expansion is a visible no-op, safe until its own task fills in
-    // its composition.
-    case 'letterpress':
-      return []
+    case 'letterpress': {
+      // Composed from existing passes only (no emboss primitive): a dark, tight inner glow hugging
+      // the layer's alpha edge is the debossed impression; a slight desaturate + paper grain finish
+      // it. `angle` was dropped — no existing pass embosses directionally, so it would be a dead
+      // control (directional emboss is a documented follow-up).
+      const out: PostEffect[] = []
+      out.push({
+        ...defaultPostEffect('inner_glow'),
+        color: e.ink,
+        radius: e.depth * LETTERPRESS_DEPTH_RADIUS,
+        intensity: e.depth * LETTERPRESS_DEPTH_INTENSITY,
+        visible: true,
+      } as PostEffect)
+      out.push({ ...defaultPostEffect('adjust'), saturation: LETTERPRESS_DESAT, visible: true } as PostEffect)
+      if (e.paper > 0) out.push({ ...defaultPostEffect('grain'), amount: e.paper * LETTERPRESS_GRAIN_PER_PAPER, visible: true } as PostEffect)
+      return out
+    }
     default:
       return []
   }

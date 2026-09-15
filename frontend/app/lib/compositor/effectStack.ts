@@ -168,7 +168,7 @@ export interface ShaderPixelEffect {
  *  already-tuned primitive passes, so there is no new render machinery. */
 export interface RisographEffect   { type: 'risograph';   visible: boolean; ink: string; inkTwo: string; levels: number; grain: number; contrast: number }
 export interface PhotocopyEffect   { type: 'photocopy';   visible: boolean; threshold: number; dirt: number; contrast: number }
-export interface LetterpressEffect { type: 'letterpress'; visible: boolean; depth: number; angle: number; ink: string; paper: number }
+export interface LetterpressEffect { type: 'letterpress'; visible: boolean; depth: number; ink: string; paper: number }
 
 export type LayerEffect =
   | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
@@ -334,7 +334,7 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   // by eye in the live gate.
   risograph:   { ink: '#2b3a8c', inkTwo: '#e03a6d', levels: 4, grain: 0.16, contrast: 1.12, visible: true },
   photocopy:   { threshold: 0.5, dirt: 0.2, contrast: 1.4, visible: true },
-  letterpress: { depth: 0.5, angle: 135, ink: '#2a2a2a', paper: 0.3, visible: true },
+  letterpress: { depth: 0.5, ink: '#2a2a2a', paper: 0.3, visible: true },
 }
 
 function defaultsFor(kind: EffectKind): Record<string, unknown> {

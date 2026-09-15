@@ -106,9 +106,44 @@ describe('expandRecipe: photocopy', () => {
   })
 })
 
-describe('expandRecipe: letterpress is a safe no-op until its task', () => {
-  it('letterpress returns []', () => {
-    const e: LetterpressEffect = { type: 'letterpress', visible: true, depth: 0.5, angle: 135, ink: '#2a2a2a', paper: 0.3 }
-    expect(expandRecipe(e)).toEqual([])
+const letter = (over: Partial<LetterpressEffect> = {}): LetterpressEffect => ({
+  type: 'letterpress', visible: true, depth: 0.5, ink: '#2a2a2a', paper: 0.3, ...over,
+})
+
+describe('expandRecipe: letterpress', () => {
+  it('expands to inner_glow → adjust → grain, in order, all visible', () => {
+    const passes = expandRecipe(letter())
+    expect(passes.map(p => p.type)).toEqual(['inner_glow', 'adjust', 'grain'])
+    for (const p of passes) expect(p.visible).toBe(true)
+  })
+
+  it('the inner glow carries the ink dial as its colour (the debossed impression)', () => {
+    const passes = expandRecipe(letter({ ink: '#123456' }))
+    const glow = passes.find(p => p.type === 'inner_glow')! as Extract<typeof passes[number], { type: 'inner_glow' }>
+    expect(glow.color).toBe('#123456')
+  })
+
+  it('maps the depth dial onto the inner glow radius + intensity', () => {
+    const passes = expandRecipe(letter({ depth: 0.5 }))
+    const glow = passes.find(p => p.type === 'inner_glow')! as Extract<typeof passes[number], { type: 'inner_glow' }>
+    expect(glow.radius).toBeCloseTo(0.5 * 0.03) // depth → tight radius, normalised to canvas width
+    expect(glow.intensity).toBeCloseTo(0.5 * 1.6) // depth → impression strength
+  })
+
+  it('applies a slight, fixed desaturate (pressed ink reads muted)', () => {
+    const passes = expandRecipe(letter())
+    const adjust = passes.find(p => p.type === 'adjust')! as Extract<typeof passes[number], { type: 'adjust' }>
+    expect(adjust.saturation).toBeCloseTo(0.85)
+  })
+
+  it('maps the paper dial onto the grain amount', () => {
+    const passes = expandRecipe(letter({ paper: 0.5 }))
+    const grain = passes.find(p => p.type === 'grain')! as Extract<typeof passes[number], { type: 'grain' }>
+    expect(grain.amount).toBeCloseTo(0.5 * 0.6) // paper → tooth
+  })
+
+  it('drops the grain pass when paper is 0, leaving inner_glow + adjust', () => {
+    const passes = expandRecipe(letter({ paper: 0 }))
+    expect(passes.map(p => p.type)).toEqual(['inner_glow', 'adjust'])
   })
 })

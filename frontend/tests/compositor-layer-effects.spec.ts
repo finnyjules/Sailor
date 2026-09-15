@@ -2163,4 +2163,30 @@ test.describe('Frame print recipes (F7)', () => {
     expect(mono.opaque).toBeGreaterThan(0)
     expect(mono.near / mono.opaque).toBeGreaterThan(0.7) // overwhelmingly monochrome after the crush
   })
+
+  test('letterpress byte-identity: added then removed returns to the untouched render (F7 recipe absent)', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#808080') // a rect gives the inner-glow impression a real alpha edge to hug
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'press', type: 'letterpress', depth: 0.5, ink: '#2a2a2a', paper: 0.3, visible: true }])
+    await stackPixels(page)
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+    expect(after).toBe(bare) // no recipe case fires ⇒ byte-identical
+  })
+
+  test('letterpress applied: the debossed impression moves the pixels near the layer edge', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#808080')
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'press', type: 'letterpress', depth: 0.7, ink: '#2a2a2a', paper: 0.3, visible: true }])
+    const after = await stackPixels(page)
+    expect(after).not.toBe(bare)
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(200) // the dark inner glow along the edge + grain repaint pixels
+    expect(d.max).toBeGreaterThan(30)      // a real tonal shift, far past render noise
+  })
 })
