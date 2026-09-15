@@ -8633,6 +8633,101 @@ onUnmounted(() => {
             </label>
           </div>
 
+          <!-- Print recipe · Risograph (F7): flat limited-ink bands on paper, expanded at paint time
+               into contrast → posterise → riso ramp → grain. Two inks, band count, grain and
+               contrast — every dial is read by expandRecipe, no dead control. -->
+          <div v-else-if="activeEffect!.type === 'risograph'" class="space-y-1.5">
+            <p class="text-xs text-white/50">Flat ink bands on paper, like a risograph print.</p>
+            <StudioColorField
+              data-testid="riso-ink"
+              label="Ink"
+              :model-value="(activeEffect as any).ink ?? '#2b3a8c'"
+              @update:model-value="(v: string) => updateActiveEffect({ ink: v })"
+            />
+            <StudioColorField
+              data-testid="riso-ink-two"
+              label="Second ink"
+              :model-value="(activeEffect as any).inkTwo ?? '#e03a6d'"
+              @update:model-value="(v: string) => updateActiveEffect({ inkTwo: v })"
+            />
+            <StudioSlider
+              data-testid="riso-levels"
+              label="Levels"
+              :min="2" :max="8" :step="1" :default="4"
+              :model-value="(activeEffect as any).levels ?? 4"
+              @update:model-value="(v: number) => updateActiveEffect({ levels: v })"
+            />
+            <StudioSlider
+              data-testid="riso-grain"
+              label="Grain"
+              :min="0" :max="1" :step="0.01" :default="0.16"
+              :model-value="(activeEffect as any).grain ?? 0.16"
+              @update:model-value="(v: number) => updateActiveEffect({ grain: v })"
+            />
+            <StudioSlider
+              data-testid="riso-contrast"
+              label="Contrast"
+              :min="0.5" :max="2" :step="0.01" :default="1.12"
+              :model-value="(activeEffect as any).contrast ?? 1.12"
+              @update:model-value="(v: number) => updateActiveEffect({ contrast: v })"
+            />
+          </div>
+
+          <!-- Print recipe · Photocopy (F7): harsh 1-bit crush with dirt, expanded into contrast →
+               threshold → ink bleed + rough edge → grain. Threshold, dirt and contrast are all read
+               by expandRecipe — no dead control. -->
+          <div v-else-if="activeEffect!.type === 'photocopy'" class="space-y-1.5">
+            <p class="text-xs text-white/50">Harsh high-contrast black and white, like a photocopy.</p>
+            <StudioSlider
+              data-testid="pc-threshold"
+              label="Threshold"
+              :min="0" :max="1" :step="0.01" :default="0.5"
+              :model-value="(activeEffect as any).threshold ?? 0.5"
+              @update:model-value="(v: number) => updateActiveEffect({ threshold: v })"
+            />
+            <StudioSlider
+              data-testid="pc-dirt"
+              label="Dirt"
+              :min="0" :max="1" :step="0.01" :default="0.2"
+              :model-value="(activeEffect as any).dirt ?? 0.2"
+              @update:model-value="(v: number) => updateActiveEffect({ dirt: v })"
+            />
+            <StudioSlider
+              data-testid="pc-contrast"
+              label="Contrast"
+              :min="0.5" :max="2" :step="0.01" :default="1.4"
+              :model-value="(activeEffect as any).contrast ?? 1.4"
+              @update:model-value="(v: number) => updateActiveEffect({ contrast: v })"
+            />
+          </div>
+
+          <!-- Print recipe · Letterpress (F7): a pressed-in impression on textured paper, expanded
+               into a debossed inner shadow + paper tint + slight desaturate. Depth, ink and paper are
+               all read by expandRecipe — no dead control. -->
+          <div v-else-if="activeEffect!.type === 'letterpress'" class="space-y-1.5">
+            <p class="text-xs text-white/50">A pressed-in impression on textured paper.</p>
+            <StudioSlider
+              data-testid="lp-depth"
+              label="Depth"
+              :min="0" :max="1" :step="0.01" :default="0.5"
+              :model-value="(activeEffect as any).depth ?? 0.5"
+              @update:model-value="(v: number) => updateActiveEffect({ depth: v })"
+            />
+            <StudioColorField
+              data-testid="lp-ink"
+              label="Ink"
+              :model-value="(activeEffect as any).ink ?? '#2a2a2a'"
+              @update:model-value="(v: string) => updateActiveEffect({ ink: v })"
+            />
+            <StudioSlider
+              data-testid="lp-paper"
+              label="Paper"
+              :min="0" :max="1" :step="0.01" :default="0.3"
+              :model-value="(activeEffect as any).paper ?? 0.3"
+              @update:model-value="(v: number) => updateActiveEffect({ paper: v })"
+            />
+          </div>
+
           <!-- Outer glow / Inner glow: a tinted halo outside (behind) or inside (clipped to) the
                layer's silhouette. Colour card (shared activeFxHex/activeFxAlpha/composeRgba, same
                as drop shadow), then Radius (blur/spread, width-normalized, shown ×100 like the
