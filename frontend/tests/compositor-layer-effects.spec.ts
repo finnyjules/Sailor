@@ -2459,4 +2459,155 @@ test.describe('Frame effect-dial motion (F8)', () => {
     // presented as a freely editable static value (the track wins at paint).
     await expect(page.getByTestId('effect-panel-dial-lock')).toBeVisible()
   })
+
+  // ── Task 7 · bake carries the animated dial ─────────────────────────────────
+  // The motion bake (CompositorModal.vue `bakeMotion` → `bakeAndUpload` → bake.ts
+  // `bakeMotionFrames`) renders every frame through the SAME painter seam as the live
+  // preview:  paintLayerStack(ctx, W, H, items, frozenLayers, undefined, t, motion, …, true)
+  // (bake.ts:79-80), with `t = i / motion.fps` per frame and `motion = effectiveMotion`
+  // (CompositorModal.vue:3861), which is `motionDoc` carrying `sailor_motion.tracks`. So the
+  // F8 fold (applyEffectDialTracks at the TOP of paintLayerStack, useCompositorLayers.ts:5443)
+  // runs per baked frame exactly as it does on the ruler — a baked frame at t≈0 vs t≈end shows
+  // the animated dial.
+  //
+  // The REAL bake uploads PNGs to /upload/image and persists motion_params; it is not drivable
+  // from this headless harness (no `window` bake hook, and the allowed edit set forbids adding
+  // one). So — the fallback the plan sanctions — this proves the two things a bake depends on:
+  //   (1) the node persists the tracks-carrying doc the bake reads (motionDoc → effectiveMotion), and
+  //   (2) the shared paintLayerStack seam animates the dial at the bake's FIRST frame (t≈0) vs
+  //       its LAST frame (t≈duration) — the pixels a baked frame 0 and frame N would carry.
+  // (Which one we did: the scrub-driven paintLayerStack equivalent, not the server bake.)
+  test('Task 7 · bake carries the animated dial: the tracks persist and the shared painter seam animates them across the bake\'s end frames', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+    const target = `layers.${layerId}.effects.e-grain-anim.amount`
+    await setMotionDoc(page, {
+      fps: 30, duration: 2,
+      tracks: [{ target, keyframes: [{ t: 0, v: 0, ease: 'linear' }, { t: 2, v: 0.9, ease: 'linear' }] }],
+    })
+    await enterMotionTab(page)
+
+    // (1) The doc the bake reads (CompositorModal.vue `motionDoc` → `effectiveMotion`) carries
+    //     the track, at the fps/duration the bake's frame loop iterates.
+    const bakeInput = await page.evaluate(() =>
+      (window as any).__frameLab.node.data.properties.sailor_motion)
+    expect(bakeInput.tracks).toHaveLength(1)
+    expect(bakeInput.tracks[0].target).toBe(target)
+    expect(bakeInput.fps).toBe(30)
+    expect(bakeInput.duration).toBe(2)
+
+    // (2) The shared paintLayerStack seam animates the dial at the bake's first frame
+    //     (frame 0 → t = 0) and last frame (frame total-1 → t ≈ duration).
+    await scrubRuler(page, 0)
+    const frame0 = await stackPixels(page)
+    await scrubRuler(page, 1)
+    const frameN = await stackPixels(page)
+
+    expect(frameN).not.toBe(frame0)
+    const d = await pixelDelta(page, frame0, frameN)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(200) // the animated grain repaints a large area of the rect
+  })
+
+  // ── Task 7 · coexistence ────────────────────────────────────────────────────
+  /** The same grain rect, but carrying a whole-layer `animation` (transform/opacity
+   *  keyframes) alongside the effect. Returns the committed layer id. */
+  async function seedGrainRectWithAnim(page: Page): Promise<string> {
+    return page.evaluate(() => {
+      const rect = {
+        id: 'fx8-rect', kind: 'rect', x: 0.5, y: 0.5, w: 0.6, h: 0.6, rot: 0,
+        fill: { type: 'solid', color: '#8899aa' }, opacity: 1,
+        effects: [{ id: 'e-grain-anim', type: 'grain', amount: 0.5, size: 3, visible: true }],
+        // Whole-layer motion: slide right + fade over the timeline (canvas-normalized dx).
+        animation: { offset: 0, keyframes: [
+          { t: 0, dx: 0, opacity: 1, ease: 'linear' },
+          { t: 2, dx: 0.3, opacity: 0.25, ease: 'linear' },
+        ] },
+      }
+      ;(window as any).__compositorSetLayers([rect])
+      return (window as any).__compositorLayers()[0].id as string
+    })
+  }
+
+  test('Task 7 · a dial track and whole-layer motion compose on one layer (the fold clone still animates through drawLayerWithMotion)', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRectWithAnim(page)
+    const track = {
+      target: `layers.${layerId}.effects.e-grain-anim.amount`,
+      keyframes: [{ t: 0, v: 0, ease: 'linear' }, { t: 2, v: 0.9, ease: 'linear' }],
+    }
+    await setMotionDoc(page, { fps: 30, duration: 2, tracks: [track] })
+    await enterMotionTab(page)
+
+    // Both animate together: the grain dial folds (0→0.9) AND the layer slides/fades — the
+    // render moves a lot between the two ends of the ruler.
+    await scrubRuler(page, 0)
+    const start = await stackPixels(page)
+    await scrubRuler(page, 1)
+    const end = await stackPixels(page)
+    expect(end).not.toBe(start)
+    const composed = await pixelDelta(page, start, end)
+    expect(composed.sizeMismatch).toBe(false)
+    expect(composed.changed).toBeGreaterThan(200)
+
+    // Isolate the whole-layer motion: re-seed the SAME layer WITHOUT `animation`, keep the SAME
+    // grain track, and compare at the END playhead. The folded grain value is 0.9 in both
+    // renders, so any difference is the transform/opacity of the whole-layer motion path —
+    // which draws the dial-animated CLONE. Different ⇒ the two paths compose, not clobber.
+    await page.evaluate(() => {
+      const rect = {
+        id: 'fx8-rect', kind: 'rect', x: 0.5, y: 0.5, w: 0.6, h: 0.6, rot: 0,
+        fill: { type: 'solid', color: '#8899aa' }, opacity: 1,
+        effects: [{ id: 'e-grain-anim', type: 'grain', amount: 0.5, size: 3, visible: true }],
+      }
+      ;(window as any).__compositorSetLayers([rect]) // no whole-layer animation this time
+    })
+    await scrubRuler(page, 1)
+    const dialOnlyEnd = await stackPixels(page)
+    expect(dialOnlyEnd).not.toBe(end) // the whole-layer slide/fade changed the frame on top of the dial
+  })
+
+  test('Task 7 · two dial tracks on two effects of one layer both apply', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await page.evaluate(() => {
+      const rect = {
+        id: 'fx8-rect', kind: 'rect', x: 0.5, y: 0.5, w: 0.6, h: 0.6, rot: 0,
+        fill: { type: 'solid', color: '#8899aa' }, opacity: 1,
+        effects: [
+          { id: 'e-grain-anim', type: 'grain', amount: 0.5, size: 3, visible: true },
+          { id: 'e-adjust-anim', type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
+        ],
+      }
+      ;(window as any).__compositorSetLayers([rect])
+      return (window as any).__compositorLayers()[0].id as string
+    })
+    const grainTrack = {
+      target: `layers.${layerId}.effects.e-grain-anim.amount`,
+      keyframes: [{ t: 0, v: 0, ease: 'linear' }, { t: 2, v: 0.9, ease: 'linear' }],
+    }
+    const adjustTrack = {
+      target: `layers.${layerId}.effects.e-adjust-anim.brightness`,
+      keyframes: [{ t: 0, v: 1, ease: 'linear' }, { t: 2, v: 2, ease: 'linear' }],
+    }
+
+    // BOTH tracks at the end playhead → grain 0.9 AND brightness 2.
+    await setMotionDoc(page, { fps: 30, duration: 2, tracks: [grainTrack, adjustTrack] })
+    await enterMotionTab(page)
+    await scrubRuler(page, 1)
+    const both = await stackPixels(page)
+
+    // Only the grain track → the adjust dial stays at its static brightness (1). If the ADJUST
+    // track applied in `both`, this render (brightness 1) must differ from it (brightness 2).
+    await setMotionDoc(page, { fps: 30, duration: 2, tracks: [grainTrack] })
+    await scrubRuler(page, 1)
+    const grainOnly = await stackPixels(page)
+    expect(grainOnly).not.toBe(both) // the ADJUST track contributed in `both`
+
+    // Only the adjust track → the grain dial stays at its static amount (0.5). If the GRAIN
+    // track applied in `both`, this render (grain 0.5) must differ from it (grain 0.9).
+    await setMotionDoc(page, { fps: 30, duration: 2, tracks: [adjustTrack] })
+    await scrubRuler(page, 1)
+    const adjustOnly = await stackPixels(page)
+    expect(adjustOnly).not.toBe(both) // the GRAIN track contributed in `both`
+  })
 })
