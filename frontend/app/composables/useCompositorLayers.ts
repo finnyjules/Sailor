@@ -263,12 +263,12 @@ import { makeSiblingOutlineResolver, type SiblingResolver } from '~/lib/composit
 import type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind, WarpEffect,
-  ShaderPixelEffect,
+  ShaderPixelEffect, BackdropShaderEffect,
 } from '~/lib/compositor/effectStack'
 export type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
-  ShaderPixelEffect,
+  ShaderPixelEffect, BackdropShaderEffect,
 }
 export type { AdjustEffect, BloomEffect, DofEffect, DuotoneEffect, GradientMapEffect, GrainEffect, PostEffect, VignetteEffect }
 
@@ -4811,6 +4811,36 @@ function applyBackdropBlur(
   })
 }
 
+// F6 Task 2: run any input-sampling Shader Studio catalog effect over the layers BEHIND
+// this layer — ADDITIVELY (the layer's own content still paints on top, unlike the glass
+// lens's fill-REPLACING `continue`), clipped to the layer's silhouette, on ANY layer
+// including text. `treat` mirrors `applyShaderPixelEffect`'s recombine call
+// (`shaderSpecFromEffect` + `renderFieldWithBase`) but over the BACKDROP snapshot
+// `withBackdrop` hands it, not the layer's own pixels — so there is no destination-in
+// recombine here: `withBackdrop` already clips the treated result to the silhouette itself.
+// `renderFieldWithBase` THROWS on a catalog miss (unloaded catalog, bad effectId — same
+// precedent as `applyShaderPixelEffect`/the glass lens); caught here so a bad pick leaves
+// the backdrop untouched instead of aborting the whole frame.
+function applyBackdropShader(
+  ctx: CanvasRenderingContext2D,
+  layer: LocalLayer,
+  e: BackdropShaderEffect,
+  localLayers: LocalLayer[],
+  W: number,
+  H: number,
+  t: number,
+) {
+  withBackdrop(ctx, layer, localLayers, W, H, (snapshot, w, h) => {
+    try {
+      return renderFieldWithBase(shaderSpecFromEffect(e), snapshot, w, h, undefined, t)
+    } catch {
+      // Unloaded catalog / bad effectId — leave the backdrop untreated (`withBackdrop`
+      // falls back to `snap` when `treat` returns nothing).
+      return undefined
+    }
+  })
+}
+
 /**
  * Pure resolution of a glass shader's input source — mirrors mask resolution
  * (`byKey.get(ref)`) rather than reinventing it. `spec.readsLayerKey` set AND
@@ -5419,6 +5449,10 @@ export function paintLayerStack(
             (e): e is BackgroundBlurEffect => e.type === 'background_blur' && e.visible,
           )
           if (bgBlur) applyBackdropBlur(ctx, layer, localLayers, W, H, bgBlur.radius)
+          const bdShader = layer.effects?.find(
+            (e): e is BackdropShaderEffect => e.type === 'backdrop_shader' && e.visible,
+          )
+          if (bdShader) applyBackdropShader(ctx, layer, bdShader, localLayers, W, H, _fieldCtx.t)
           // Group-cascade limitation (Task 3, mirrors the mask limitation above): the
           // motion path composes its own effective layer in lib/motion/paint.ts and
           // doesn't thread an opacityMul through, so an animated layer's group cascade
@@ -5432,6 +5466,10 @@ export function paintLayerStack(
         (e): e is BackgroundBlurEffect => e.type === 'background_blur' && e.visible,
       )
       if (bgBlur) applyBackdropBlur(ctx, layer, localLayers, W, H, bgBlur.radius)
+      const bdShader = layer.effects?.find(
+        (e): e is BackdropShaderEffect => e.type === 'backdrop_shader' && e.visible,
+      )
+      if (bdShader) applyBackdropShader(ctx, layer, bdShader, localLayers, W, H, _fieldCtx.t)
 
       // Glass lens ("Layers behind"): the layer's fill is a backdrop-reading shader.
       // Refract everything painted below, clipped to this pane, then paint the stroke

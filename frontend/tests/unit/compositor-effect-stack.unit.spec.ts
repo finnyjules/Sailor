@@ -11,9 +11,9 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 37 kinds, 3 pinned and 34 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(37)
-    expect(PINNED_KINDS).toEqual(['background_blur', 'dof', 'drop_shadow'])
+  it('has 38 kinds, 4 pinned and 34 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(38)
+    expect(PINNED_KINDS).toEqual(['background_blur', 'backdrop_shader', 'dof', 'drop_shadow'])
     expect(ORDERABLE_KINDS).toHaveLength(34)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
@@ -43,6 +43,7 @@ describe('effect kinds', () => {
     expect(EFFECT_LABELS.rough_edge).toBe('Rough edge')
     expect(EFFECT_LABELS.ink_bleed).toBe('Ink bleed')
     expect(EFFECT_LABELS.shader).toBe('Shader')
+    expect(EFFECT_LABELS.backdrop_shader).toBe('Backdrop shader')
   })
   it('orders background blur first and drop shadow last', () => {
     expect(EFFECT_ORDER[0]).toBe('background_blur')
@@ -56,7 +57,7 @@ describe('effect kinds', () => {
     for (let i = 1; i < indices.length; i++) expect(indices[i]).toBe(indices[i - 1]! + 1)
     const lastGeometry = Math.max(...indices)
     for (const k of EFFECT_ORDER) {
-      if (isGeometryKind(k) || k === 'background_blur' || k === 'dof') continue
+      if (isGeometryKind(k) || k === 'background_blur' || k === 'backdrop_shader' || k === 'dof') continue
       expect(EFFECT_ORDER.indexOf(k), k).toBeGreaterThan(lastGeometry)
     }
     for (const k of GEOMETRY_KINDS) expect(isGeometryKind(k)).toBe(true)
@@ -64,7 +65,7 @@ describe('effect kinds', () => {
   })
   it('regionOf assigns every kind to the right region', () => {
     const expected: Record<EffectKind, string> = {
-      background_blur: 'backdrop', dof: 'backdrop',
+      background_blur: 'backdrop', backdrop_shader: 'backdrop', dof: 'backdrop',
       trim: 'geometry', offset: 'geometry', round_corners: 'geometry', roughen: 'geometry',
       boolean: 'geometry', morph: 'geometry', warp: 'geometry', shatter: 'geometry', long_shadow: 'geometry',
       inner_shadow: 'pixel', inner_glow: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
@@ -467,6 +468,74 @@ describe('shader effect kind (F5 Task 1: model only, no render)', () => {
     const stack = effectStackOf(layer)
     expect(stack.map(e => e.type)).toEqual(['adjust', 'grain', 'drop_shadow'])
     expect(stack.some(e => e.type === 'shader')).toBe(false)
+  })
+})
+
+describe('backdrop_shader effect kind (F6 Task 2: model only, render is a live-canvas concern)', () => {
+  it('regionOf places it in the backdrop region, alongside background_blur and dof', () => {
+    expect(regionOf('backdrop_shader')).toBe('backdrop')
+  })
+  it('is pinned: at most one per layer, and it never reorders', () => {
+    expect(isPinnedKind('backdrop_shader')).toBe(true)
+  })
+  it('coexists with background_blur — addEffect places backdrop_shader right after it, before dof', () => {
+    const s0 = effectStackOf({ effects: [{ type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true }] })
+    const s1 = addEffect(addEffect(s0, 'background_blur'), 'backdrop_shader')
+    expect(s1.map(e => e.type)).toEqual(['background_blur', 'backdrop_shader', 'adjust'])
+    const s2 = addEffect(s1, 'dof')
+    expect(s2.map(e => e.type)).toEqual(['background_blur', 'backdrop_shader', 'dof', 'adjust'])
+  })
+  it('refuses a second backdrop_shader on the same layer', () => {
+    const s = addEffect(effectStackOf({}), 'backdrop_shader')
+    expect(addEffect(s, 'backdrop_shader')).toEqual(s)
+  })
+  it('canReorder refuses backdrop_shader against anything (pinned)', () => {
+    const s = effectStackOf({ effects: [
+      { type: 'backdrop_shader', effectId: 'chromatic_aberration', params: {}, speed: 0, seed: 42, visible: true },
+      { type: 'bloom', threshold: 0.1, radius: 0.01, intensity: 1, visible: true },
+    ] })
+    const bd = s.find(e => e.type === 'backdrop_shader')!.id
+    const bloom = s.find(e => e.type === 'bloom')!.id
+    expect(canReorder(s, bd, bloom)).toBe(false)
+    expect(canReorder(s, bloom, bd)).toBe(false)
+  })
+  it('createEffect / defaultsFor(backdrop_shader) returns a real input-sampling effect with speed 0', () => {
+    const e = createEffect('backdrop_shader') as any
+    expect(e.type).toBe('backdrop_shader')
+    expect(e.visible).toBe(true)
+    expect(typeof e.effectId).toBe('string')
+    expect(e.effectId.length).toBeGreaterThan(0)
+    expect(e.params).toEqual({})
+    // A static backdrop treatment must NOT spin the live loop the moment it's added
+    // (the F5 lesson: hasAnimatedShaderFill needs BOTH an animated catalog def AND a
+    // nonzero speed) — so the default speed is 0, unlike the `shader` pass effect (1).
+    expect(e.speed).toBe(0)
+    expect(e.seed).toBe(42)
+  })
+  it('createEffect(backdrop_shader) gives each instance its OWN params object', () => {
+    const a = createEffect('backdrop_shader') as any
+    const b = createEffect('backdrop_shader') as any
+    expect(a.params).not.toBe(b.params)
+    a.params.amount = 0.5
+    expect(b.params).toEqual({})
+  })
+  it('effectStackOf round-trips a stored backdrop_shader effect untouched on a new-shape layer', () => {
+    const stored: EffectInstance[] = [
+      { id: 'a', type: 'backdrop_shader', effectId: 'chromatic_aberration', params: { amount: 0.5 }, speed: 0, seed: 42, visible: true } as any,
+    ]
+    const stack = effectStackOf({ effects: stored })
+    expect(stack).toEqual(stored.map(e => ({ ...e, visible: true })))
+  })
+  it('a legacy (old-shape) layer with no backdrop_shader effect yields the same stack as before it existed', () => {
+    const layer = {
+      effects: [
+        { type: 'background_blur', radius: 0.02, visible: true },
+        { type: 'drop_shadow', color: '#000', x: 0, y: 0, blur: 0.01, visible: true },
+      ],
+    }
+    const stack = effectStackOf(layer)
+    expect(stack.map(e => e.type)).toEqual(['background_blur', 'drop_shadow'])
+    expect(stack.some(e => e.type === 'backdrop_shader')).toBe(false)
   })
 })
 

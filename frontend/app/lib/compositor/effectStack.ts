@@ -49,6 +49,24 @@ export interface BackgroundBlurEffect {
   radius: number
   visible: boolean
 }
+/** F6: runs an input-sampling Shader Studio catalog effect over the layers BEHIND this
+ *  layer, ADDITIVELY — the layer's own content still paints on top — clipped to its
+ *  silhouette via `withBackdrop` (the same scaffolding `BackgroundBlurEffect` uses).
+ *  Reachable from ANY layer including text, unlike the glass lens (`.fill`-only, which
+ *  REPLACES the fill and is gated off text). Same field shape as `ShaderPixelEffect`
+ *  (effectId/params/speed/seed) so the F5 picker (`shaderSpecFromEffect`,
+ *  `derivedShaderFillControls`) works unchanged over either kind — this one samples the
+ *  backdrop snapshot instead of the layer's own already-rendered pixels. */
+export interface BackdropShaderEffect {
+  type: 'backdrop_shader'
+  visible: boolean
+  effectId: string
+  /** Keyed WITHOUT the `u_` prefix, same convention as `ShaderSpec.params`. */
+  params: Record<string, ParamValue>
+  speed: number
+  /** varies the generative parts of the picked effect; 42 is the historical default. */
+  seed: number
+}
 /** Torn edge and feather were fields on the layer (`layer.tornEdge`, `layer.feather`),
  *  which is exactly what pinned them to one position in the pipeline. As effects they
  *  carry the same spec fields and become orderable like everything else. */
@@ -132,6 +150,7 @@ export interface ShaderPixelEffect {
 
 export type LayerEffect =
   | DropShadowEffect | LayerBlurEffect | InnerShadowEffect | BackgroundBlurEffect
+  | BackdropShaderEffect
   | TornEdgeEffect | FeatherEffect
   | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect | WarpEffect | LongShadowEffect | ShatterEffect
   | ShaderPixelEffect
@@ -148,7 +167,7 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow',
+  'background_blur', 'backdrop_shader', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow',
   'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'shader',
   'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'rough_edge', 'ink_bleed',
   'directional_blur', 'radial_blur', 'zoom_blur', 'layer_blur', 'outer_glow', 'drop_shadow',
@@ -157,11 +176,13 @@ export const EFFECT_ORDER = [
 /** Pinned for structural reasons, not convenience:
  *  - background_blur samples the backdrop BEFORE the layer paints, so it has no position
  *    inside the layer's own pass list;
+ *  - backdrop_shader (F6) samples the backdrop the same way, via the same `withBackdrop`
+ *    scaffolding — coexists with background_blur (both are additive backdrop treatments);
  *  - dof needs its depth map aligned to the layer's own pixels, before the layer is
  *    rotated/scaled into frame space, and runs on the GPU against a box-sized source;
  *  - drop_shadow is derived from the finished silhouette at stamp time.
  *  At most one of each per layer, and they never move. */
-export const PINNED_KINDS = ['background_blur', 'dof', 'drop_shadow'] as const satisfies readonly EffectKind[]
+export const PINNED_KINDS = ['background_blur', 'backdrop_shader', 'dof', 'drop_shadow'] as const satisfies readonly EffectKind[]
 export const ORDERABLE_KINDS = EFFECT_ORDER.filter(
   (k): k is Exclude<EffectKind, typeof PINNED_KINDS[number]> => !(PINNED_KINDS as readonly string[]).includes(k),
 )
@@ -181,7 +202,7 @@ export const isGeometryKind = (k: EffectKind): boolean =>
  *  Reorder and add both respect regions: an effect only ever moves within its own region. */
 export type EffectRegion = 'backdrop' | 'geometry' | 'pixel' | 'stamp'
 export function regionOf(kind: EffectKind): EffectRegion {
-  if (kind === 'background_blur' || kind === 'dof') return 'backdrop'
+  if (kind === 'background_blur' || kind === 'backdrop_shader' || kind === 'dof') return 'backdrop'
   if (kind === 'drop_shadow') return 'stamp'
   if (isGeometryKind(kind)) return 'geometry'
   return 'pixel'
@@ -190,6 +211,7 @@ export function regionOf(kind: EffectKind): EffectRegion {
 /** UI copy: sentence case, human names, never the stored `type`. */
 export const EFFECT_LABELS: Record<EffectKind, string> = {
   background_blur: 'Background blur',
+  backdrop_shader: 'Backdrop shader',
   dof: 'Depth of field',
   trim: 'Trim path',
   offset: 'Offset path',
@@ -242,6 +264,13 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   layer_blur: { radius: 0.01, visible: true },
   inner_shadow: { color: 'rgba(0,0,0,0.35)', x: 0, y: 0.01, blur: 0.02, visible: true },
   background_blur: { radius: 0.02, visible: true },
+  // Same catalog default as `shader` (a confirmed real input-sampling effect — see that
+  // entry's comment) — but speed 0: a freshly-added backdrop treatment must NOT start
+  // spinning the live loop (the F5 lesson: `animated` def + nonzero speed together drive
+  // hasAnimatedShaderFill, so speed 0 keeps a fresh backdrop_shader inert until the user
+  // deliberately dials in motion). `params: {}` lets the picked effect's own catalog
+  // defaults show through until tuned.
+  backdrop_shader: { effectId: 'chromatic_aberration', params: {}, speed: 0, seed: 42, visible: true },
   torn_edge: { ...DEFAULT_TORN_EDGE, visible: true },
   feather: { ...DEFAULT_FEATHER, visible: true },
   trim: { start: 0, end: 1, offset: 0, visible: true },

@@ -276,6 +276,144 @@ test.describe('Frame backdrop effects — withBackdrop extraction (F6 Task 1)', 
 })
 
 /**
+ * F6 Task 2 — the `backdrop_shader` effect: `applyBackdropShader` runs an input-sampling
+ * Shader Studio catalog effect over the layers BEHIND a layer, via the SAME `withBackdrop`
+ * scaffolding `background_blur` uses (silhouette clip + identity stamp), ADDITIVELY — the
+ * layer's own content still paints on top afterwards (no `continue`, unlike the glass lens,
+ * which REPLACES `.fill` entirely) — on ANY layer including text (the gap the glass lens
+ * cannot fill: it lives on the `.fill` slot and is gated off text).
+ *
+ * chromatic_aberration is reused from F5 for the same reason: a real input-sampling catalog
+ * effect (samples `u_image0` per-channel with a small offset), not a generative field, so a
+ * fresh backdrop_shader visibly (if subtly) treats the backdrop rather than silently no-op'ing.
+ * The catalog is fetched asynchronously and the static edit view does not repaint on its own
+ * once it lands (no idle rAF loop) — `settledWithTopEffects` mirrors F5's `settledWithShader`
+ * wait-then-re-set recipe.
+ */
+test.describe('Frame backdrop shader (F6 Task 2)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  // Same red|blue seam backdrop as F6 Task 1 (real edge detail for the shader to treat). The
+  // top layer carries BOTH a translucent fill (so the treated backdrop shows through at its
+  // centre) AND a fully OPAQUE inside stroke — a known pixel of the layer's OWN paint that a
+  // fill-REPLACING treatment (the glass lens's `continue`) could never leave alone, since with
+  // that pattern the normal fill+stroke paint would never run at all.
+  async function seedBackdropShaderScene(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const bar = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.5, h: 1, radius: 0, rotation: 0, opacity: 1, fill, effects: [],
+      })
+      const top = {
+        id: 'top', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, radius: 0, rotation: 0, opacity: 1,
+        fill: 'rgba(255,255,255,0.35)', stroke: '#000000', strokeWidth: 0.04, strokeAlign: 'inside',
+        effects: [],
+      }
+      ;(window as any).__compositorSetLayers([bar('L', 0.25, '#ff0000'), bar('R', 0.75, '#0000ff'), top])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(3)
+  }
+  const setTopEffects = (page: Page, effects: unknown[]) => page.evaluate((fx) => {
+    const ls = (window as any).__compositorLayers()
+    ls[2].effects = fx
+    ;(window as any).__compositorSetLayers(ls)
+  }, effects)
+  /** Mirrors F5's `settledWithShader`: force a fresh paint after giving the async catalog
+   *  fetch time to land — the static edit view does not repaint on its own once it resolves. */
+  async function settledWithTopEffects(page: Page, effects: unknown[]): Promise<string> {
+    await setTopEffects(page, effects)
+    await stackPixels(page)                 // first paint likely races the catalog fetch — a no-op
+    await page.waitForTimeout(1_500)
+    await setTopEffects(page, effects)      // re-set forces a repaint now the catalog is warm
+    return stackPixels(page)
+  }
+
+  // speed: 0 — the LOCAL_DEFAULTS choice (a static backdrop treatment must not spin the live
+  // loop) — determinism here doesn't depend on it, but a live probe should look like a real add.
+  const CHROMA_BACKDROP = {
+    id: 'bd', type: 'backdrop_shader', effectId: 'chromatic_aberration', params: { amount: 0.3 }, speed: 0, seed: 42, visible: true,
+  }
+
+  test('byte-identity: no backdrop_shader effect renders identically before/after a round-trip', async ({ page }) => {
+    await openCompositor(page)
+    await seedBackdropShaderScene(page)
+    const bare = await stackPixels(page)
+
+    await settledWithTopEffects(page, [CHROMA_BACKDROP])
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+
+    expect(after).toBe(bare)
+  })
+
+  test('applied + additive: the backdrop changes within the silhouette; the layer\'s own opaque stroke pixel does not', async ({ page }) => {
+    await openCompositor(page)
+    await seedBackdropShaderScene(page)
+    await setTopEffects(page, [])
+    const bare = await stackPixels(page)
+    // Centre of the translucent fill, straddling the red|blue seam — the backdrop shows
+    // through here, and chromatic_aberration has real edge detail to split.
+    const seamBare = await colorAt(page, 0.5, 0.5)
+    // Inside the opaque inside-stroke band (box spans x∈[0.3,0.7]; the 0.04-wide band hugs
+    // the edge from x=0.3) — the layer's OWN paint, fully opaque, so it fully overwrites
+    // whatever the backdrop stamp left underneath, whatever that stamp's content is.
+    const strokeBare = await colorAt(page, 0.31, 0.5)
+    expect(strokeBare.a).toBe(255) // sanity: this probe really is on the opaque stroke
+
+    const after = await settledWithTopEffects(page, [CHROMA_BACKDROP])
+    expect(after).not.toBe(bare)
+    const seamAfter = await colorAt(page, 0.5, 0.5)
+    const strokeAfter = await colorAt(page, 0.31, 0.5)
+
+    // (a) the backdrop, visible through the translucent fill, changed — real pixel movement,
+    // not render noise (changed-pixel COUNT, per the F6 lesson about gradient-energy proxies).
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(50)
+    expect(seamAfter).not.toEqual(seamBare)
+    // (b) the layer's OWN opaque stroke pixel is untouched — additive/under, not fill-replacing.
+    expect(strokeAfter).toEqual(strokeBare)
+  })
+
+  test('renders on a TEXT layer (the gap the glass lens cannot fill — it is `.fill`-only, off text)', async ({ page }) => {
+    await openCompositor(page)
+    await page.evaluate(() => {
+      const bar = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.5, h: 1, radius: 0, rotation: 0, opacity: 1, fill, effects: [],
+      })
+      // opacity: 0.5 (not the text colour's own alpha) so the WHOLE glyph paint blends with
+      // whatever is beneath it — otherwise fully-opaque glyph ink would completely overwrite
+      // the treated backdrop stamp the same way the stroke probe above does, and there would
+      // be no observable difference to assert on a text layer at all.
+      const text = {
+        id: 'txt', kind: 'text', x: 0.5, y: 0.5, rotation: 0, opacity: 0.5, text: 'HI',
+        fontFamily: 'Inter', fontWeight: 900, fontSize: 0.5, color: '#ffffff', align: 'center', lineHeight: 1.1,
+        effects: [],
+      }
+      ;(window as any).__compositorSetLayers([bar('L', 0.25, '#ff0000'), bar('R', 0.75, '#0000ff'), text])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(3)
+    const bare = await stackPixels(page)
+
+    const after = await settledWithTopEffects(page, [CHROMA_BACKDROP])
+    expect(after).not.toBe(bare)
+    // The backdrop within the text silhouette changed — real pixel movement, not noise.
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(20)
+  })
+
+  test('determinism: the same params render identically', async ({ page }) => {
+    await openCompositor(page)
+    await seedBackdropShaderScene(page)
+    const once = await settledWithTopEffects(page, [CHROMA_BACKDROP])
+    const twice = await settledWithTopEffects(page, [{ ...CHROMA_BACKDROP }])
+    expect(twice).toBe(once)
+  })
+})
+
+/**
  * F2 Task 5 — geometry effects render through a computed outline `d`.
  *
  * The rect is drawn through its shared, geometry-transformed Path2D only when a geometry
