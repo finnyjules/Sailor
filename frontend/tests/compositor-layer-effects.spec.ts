@@ -2190,3 +2190,114 @@ test.describe('Frame print recipes (F7)', () => {
     expect(d.max).toBeGreaterThan(30)      // a real tonal shift, far past render noise
   })
 })
+
+/**
+ * F8 · Effect-dial motion (Task 3 — the fold + byte-identity seam).
+ *
+ * These drive the REAL `/dev/frame-lab` harness (the only one exposing the node so a
+ * `sailor_motion` doc with `tracks` can be set), because the fold runs inside `paintLayerStack`
+ * only when the modal is in a motion preview (`previewT != null` → the live paint passes
+ * `motionDoc.value` as `motion`, carrying `tracks`). The playhead is moved with the existing
+ * Motion-tab ruler (F8 builds no new scrub UI until Tasks 4–6), so these use the shipped path.
+ *
+ * (a) byte-identity: a layer with a static effect and NO dial track renders data-URL-identical
+ *     whether `sailor_motion.tracks` is absent or `[]` — the same-reference seam. RED-first: a
+ *     broken fold that clones for an empty track list would re-quantize and change the bytes.
+ * (b) animate: a numeric grain-amount track (0→0.9 over the timeline) renders DIFFERENT pixels
+ *     at the two ends of the ruler.
+ */
+test.describe('Frame effect-dial motion (F8)', () => {
+  test.describe.configure({ timeout: 180_000 })
+
+  async function openFrameLab(page: Page): Promise<void> {
+    await page.goto('/dev/frame-lab')
+    await page.waitForSelector('[data-ready]', { timeout: 30_000 })
+    await page.locator('[data-testid="compositor-stack-canvas"]').waitFor({ state: 'visible', timeout: 15_000 })
+    await expect.poll(() => page.evaluate(() => typeof (window as any).__compositorSetLayers === 'function'),
+      { timeout: 10_000 }).toBe(true)
+  }
+
+  /** Replace the frame with ONE static rect carrying a single grain effect (explicit id so a
+   *  track can target it); returns the committed layer id for the track's target path. */
+  async function seedGrainRect(page: Page): Promise<string> {
+    return page.evaluate(() => {
+      const rect = {
+        id: 'fx8-rect', kind: 'rect', x: 0.5, y: 0.5, w: 0.6, h: 0.6, rot: 0,
+        fill: { type: 'solid', color: '#8899aa' }, opacity: 1,
+        effects: [{ id: 'e-grain-anim', type: 'grain', amount: 0.5, size: 3, visible: true }],
+      }
+      ;(window as any).__compositorSetLayers([rect])
+      const ls = (window as any).__compositorLayers()
+      return ls[0].id as string
+    })
+  }
+
+  /** Write a fresh `sailor_motion` doc onto the reactive frame-lab node (reassign the whole
+   *  properties object so the `motionDoc` computed re-reads it). */
+  async function setMotionDoc(page: Page, doc: Record<string, unknown>): Promise<void> {
+    await page.evaluate((d) => {
+      const fl = (window as any).__frameLab
+      fl.node.data.properties = { ...fl.node.data.properties, sailor_motion: d }
+    }, doc)
+  }
+
+  async function enterMotionTab(page: Page): Promise<void> {
+    await page.getByRole('button', { name: 'Motion', exact: true }).click()
+    await page.locator('.cursor-ew-resize').first().waitFor({ state: 'visible', timeout: 10_000 })
+  }
+
+  /** Move the playhead by clicking the Motion-tab ruler at `frac` of its width (0 = start of
+   *  the timeline, 1 = the end). `onRulerDown` scrubs on pointerdown, so a click is enough;
+   *  `scrubTo` re-renders synchronously. */
+  async function scrubRuler(page: Page, frac: number): Promise<void> {
+    const ruler = page.locator('.cursor-ew-resize').first()
+    const box = (await ruler.boundingBox())!
+    const x = box.x + Math.max(2, Math.min(box.width - 2, box.width * frac))
+    await page.mouse.move(x, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.up()
+    await page.waitForTimeout(300)
+  }
+
+  test('byte-identity: absent tracks vs an empty track list render identically at the same playhead', async ({ page }) => {
+    await openFrameLab(page)
+    await seedGrainRect(page)
+
+    // Motion present, NO tracks field → the fold short-circuits on `!tracks`.
+    await setMotionDoc(page, { fps: 30, duration: 2 })
+    await enterMotionTab(page)
+    await scrubRuler(page, 0)
+    const noTracks = await stackPixels(page)
+
+    // Motion present, tracks: [] → the fold short-circuits on `tracks.length === 0` (same ref).
+    await setMotionDoc(page, { fps: 30, duration: 2, tracks: [] })
+    await scrubRuler(page, 0)
+    const emptyTracks = await stackPixels(page)
+
+    expect(emptyTracks).toBe(noTracks) // byte-identical; a broken always-clone fold would differ
+  })
+
+  test('animate: a numeric grain-amount track renders different pixels at the two ends of the ruler', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+
+    await setMotionDoc(page, {
+      fps: 30, duration: 2,
+      tracks: [{
+        target: `layers.${layerId}.effects.e-grain-anim.amount`,
+        keyframes: [{ t: 0, v: 0, ease: 'linear' }, { t: 2, v: 0.9, ease: 'linear' }],
+      }],
+    })
+    await enterMotionTab(page)
+
+    await scrubRuler(page, 0)       // t ≈ 0 → grain amount 0 (no grain)
+    const atStart = await stackPixels(page)
+    await scrubRuler(page, 1)       // t ≈ 2 → grain amount 0.9 (heavy grain)
+    const atEnd = await stackPixels(page)
+
+    expect(atEnd).not.toBe(atStart)
+    const d = await pixelDelta(page, atStart, atEnd)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(200) // the animated grain repaints a large area of the rect
+  })
+})

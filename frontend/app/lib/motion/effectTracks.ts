@@ -11,7 +11,7 @@
 //
 // Pure: no Vue, no canvas, no DOM. `LocalLayer` is a type-only import, so this module carries
 // none of `useCompositorLayers.ts`'s composable runtime.
-import { effectStackOf, EFFECT_LABELS } from '~/lib/compositor/effectStack'
+import { effectStackOf, EFFECT_LABELS, writeStackToLayer, type EffectInstance } from '~/lib/compositor/effectStack'
 import { dialSpecsFor, type DialKind } from '~/lib/compositor/effectDials'
 import { linear, easeInOutQuad } from '~/lib/motion/easing'
 import { mixHex } from '~/lib/color/mix'
@@ -129,10 +129,76 @@ export function evaluateDialTrack(track: EffectDialTrack, t: number): number | s
   return lo.v
 }
 
-//
-// Task 3 · applyEffectDialTracks(layers: LocalLayer[], tracks: EffectDialTrack[] | undefined,
-//                                t: number): LocalLayer[]
-//   The pure fold: clone only touched layers + their id-stamped `.effects`, `setByIdPath`
-//   (~/lib/studio/idPath.ts) the evaluated value against a root `{ layers }`, and return the
-//   SAME reference when `tracks`/`t` are absent or nothing resolves (the byte-identity seam).
-//   Wired into `paintLayerStack` (useCompositorLayers.ts) at the top; local items rebuilt by id.
+/** One track pre-parsed to the effect + dial it drives (the layer key is the Map key). */
+interface ParsedTrack { effectId: string; dialKey: string; track: EffectDialTrack }
+
+/**
+ * Task 3 · The pure fold — apply effect-dial motion tracks to a layer array at frame-time `t`.
+ *
+ * BYTE-IDENTITY SEAM. Returns the SAME `layers` reference when there are no tracks, no clock,
+ * no target resolves, or every resolved value already equals the current dial. The painter
+ * reassigns its `localLayers`/`items` ONLY when the reference differs, so an absent/idle track
+ * list leaves the whole draw untouched → byte-identical output.
+ *
+ * Why an UNCHANGED value also renders identically: the painter reads every layer's effects
+ * through `effectStackOf`. A cloned layer's `.effects` IS the materialized id-stamped stack
+ * with the legacy `tornEdge`/`feather` fields folded in and cleared (`writeStackToLayer`
+ * shape), so `effectStackOf(clone)` returns the identical sorted/visible list — same pixels
+ * for an unchanged dial. Clearing the legacy fields is MANDATORY: leaving them live would make
+ * `effectStackOf(clone)` re-append (double) the torn edge / feather that `.effects` now holds.
+ *
+ * Purity: no Vue, no canvas, no mutation of the input — a touched layer is a fresh clone, its
+ * effects are fresh clones, and every untouched layer is returned by identity.
+ */
+export function applyEffectDialTracks(
+  layers: LocalLayer[],
+  tracks: EffectDialTrack[] | undefined,
+  t: number | undefined,
+): LocalLayer[] {
+  // The byte-identity short-circuit: nothing to fold ⇒ the exact same array reference.
+  if (!tracks || tracks.length === 0 || t == null) return layers
+
+  // Group tracks by the layer they target, parsing `layers.<layerId>.effects.<effectId>.<dial>`.
+  // A malformed or foreign target is skipped, never thrown on.
+  const byLayer = new Map<string, ParsedTrack[]>()
+  for (const track of tracks) {
+    const segs = track?.target?.split('.') ?? []
+    if (segs.length !== 5 || segs[0] !== 'layers' || segs[2] !== 'effects') continue
+    const [, layerId, , effectId, dialKey] = segs as [string, string, string, string, string]
+    const entry: ParsedTrack = { effectId, dialKey, track }
+    const list = byLayer.get(layerId)
+    if (list) list.push(entry)
+    else byLayer.set(layerId, [entry])
+  }
+  if (byLayer.size === 0) return layers
+
+  let anyLayerCloned = false
+  const next = layers.map((layer) => {
+    const layerTracks = byLayer.get(layer.id)
+    if (!layerTracks) return layer // untouched layer → same object reference
+
+    // Materialize the id-stamped stack EXACTLY as the painter reads it, so a legacy layer's
+    // deterministic `fx:<type>:<ordinal>` ids (and its folded torn_edge/feather) resolve.
+    const stack = effectStackOf(layer)
+    let anyEffectChanged = false
+    const nextStack = stack.map((eff) => {
+      let nextEff = eff
+      for (const { effectId, dialKey, track } of layerTracks) {
+        if (effectId !== eff.id) continue
+        const v = evaluateDialTrack(track, t)
+        if (v === undefined) continue
+        if ((nextEff as unknown as Record<string, unknown>)[dialKey] === v) continue
+        nextEff = { ...nextEff, [dialKey]: v } as EffectInstance
+        anyEffectChanged = true
+      }
+      return nextEff
+    })
+    if (!anyEffectChanged) return layer // resolved but no value differed → same object reference
+    anyLayerCloned = true
+    // `writeStackToLayer` clears the legacy fields (see the doc above): `.effects` now carries
+    // the folded torn_edge/feather, so leaving them live would double them under `effectStackOf`.
+    return { ...layer, ...writeStackToLayer(nextStack) } as LocalLayer
+  })
+
+  return anyLayerCloned ? next : layers
+}

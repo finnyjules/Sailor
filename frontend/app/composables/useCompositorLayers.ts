@@ -24,6 +24,7 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 // (evaluate.ts/types.ts don't import this file).
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
+import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
 import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
 import { clipFrameIndex, clipFrameUrl, clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
@@ -5372,7 +5373,7 @@ export function paintLayerStack(
   localLayers: LocalLayer[],
   skip?: (layer: LocalLayer) => boolean,
   t?: number,
-  motion?: { fps: number; duration: number },
+  motion?: { fps: number; duration: number; tracks?: EffectDialTrack[] },
   /** Per-key treatments for wired layers (mask ref + showSource). Locals carry their own. */
   wiredTreatments?: Record<string, { maskedByKey?: string; showSource?: boolean }>,
   /** Doc-level background fill, painted first (behind every layer). */
@@ -5396,6 +5397,15 @@ export function paintLayerStack(
     frameW: W, frameH: H, t: fieldT, fps: fieldFps,
     base: typeof ctx.getTransform === 'function' ? ctx.getTransform() : null,
     bake, token: 0,
+  }
+  // F8: fold any effect-dial motion tracks into the layers for this frame. Same-reference return
+  // when there are no tracks / no clock ⇒ items & localLayers untouched ⇒ byte-identical.
+  const animatedLocals = applyEffectDialTracks(localLayers, motion?.tracks, t)
+  if (animatedLocals !== localLayers) {
+    const byId = new Map(animatedLocals.map(l => [l.id, l]))
+    items = items.map(it => (it.type === 'local' && byId.has(it.layer.id))
+      ? { ...it, layer: byId.get(it.layer.id)! } : it)
+    localLayers = animatedLocals
   }
   // Task 6 / Item 1 (final review): one `withFieldFrame` call per rendered frame, scoped
   // to exactly the shader fills THIS document's layers/background carry this pass — see
