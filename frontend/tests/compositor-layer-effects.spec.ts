@@ -2115,4 +2115,52 @@ test.describe('Frame print recipes (F7)', () => {
     expect(d.changed).toBeGreaterThan(500) // the paper→ink ramp + grain repaint a lot of the rect
     expect(d.max).toBeGreaterThan(30)      // a real tonal shift, far past render noise
   })
+
+  test('photocopy byte-identity: added then removed returns to the untouched render (F7 recipe absent)', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#808080') // a mid-grey rect gives the threshold crush something to move
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'copy', type: 'photocopy', threshold: 0.5, dirt: 0.2, contrast: 1.4, visible: true }])
+    await stackPixels(page)
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+    expect(after).toBe(bare) // no recipe case fires ⇒ byte-identical
+  })
+
+  test('photocopy applied: the composed look moves the pixels and crushes them near-B&W', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#808080')
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'copy', type: 'photocopy', threshold: 0.5, dirt: 0.2, contrast: 1.4, visible: true }])
+    const after = await stackPixels(page)
+    expect(after).not.toBe(bare)
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(500) // threshold + speckle repaint a lot of the rect
+    expect(d.max).toBeGreaterThan(30)      // a real tonal shift, far past render noise
+
+    // near-B&W: threshold drives each opaque pixel to black or white, so the vast majority sit at a
+    // low channel spread even after the toner grain lays a little colour noise over them.
+    const mono = await page.evaluate(async (url) => {
+      const img = await new Promise<HTMLImageElement>((res, rej) => {
+        const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url
+      })
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+      const cx = c.getContext('2d')!; cx.drawImage(img, 0, 0)
+      const px = cx.getImageData(0, 0, img.width, img.height).data
+      let opaque = 0, near = 0
+      for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] < 250) continue
+        opaque++
+        const r = px[i], g = px[i + 1], b = px[i + 2]
+        const spread = Math.max(r, g, b) - Math.min(r, g, b)
+        if (spread < 64) near++
+      }
+      return { opaque, near }
+    }, after)
+    expect(mono.opaque).toBeGreaterThan(0)
+    expect(mono.near / mono.opaque).toBeGreaterThan(0.7) // overwhelmingly monochrome after the crush
+  })
 })

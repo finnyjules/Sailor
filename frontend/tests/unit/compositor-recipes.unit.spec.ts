@@ -62,11 +62,51 @@ describe('expandRecipe: risograph', () => {
   })
 })
 
-describe('expandRecipe: photocopy + letterpress are safe no-ops until their tasks', () => {
-  it('photocopy returns []', () => {
-    const e: PhotocopyEffect = { type: 'photocopy', visible: true, threshold: 0.5, dirt: 0.2, contrast: 1.4 }
-    expect(expandRecipe(e)).toEqual([])
+const photo = (over: Partial<PhotocopyEffect> = {}): PhotocopyEffect => ({
+  type: 'photocopy', visible: true, threshold: 0.5, dirt: 0.2, contrast: 1.4, ...over,
+})
+
+describe('expandRecipe: photocopy', () => {
+  it('expands to adjust → threshold → rough_edge → grain, in order, all visible', () => {
+    const passes = expandRecipe(photo())
+    expect(passes.map(p => p.type)).toEqual(['adjust', 'threshold', 'rough_edge', 'grain'])
+    for (const p of passes) expect(p.visible).toBe(true)
   })
+
+  it('the threshold pass carries the threshold dial as its cutoff', () => {
+    const passes = expandRecipe(photo({ threshold: 0.72 }))
+    const thr = passes.find(p => p.type === 'threshold')! as Extract<typeof passes[number], { type: 'threshold' }>
+    expect(thr.cutoff).toBe(0.72)
+  })
+
+  it('maps the contrast + dirt dials onto the primitive passes', () => {
+    const passes = expandRecipe(photo({ contrast: 1.6, dirt: 0.5 }))
+    const adjust = passes.find(p => p.type === 'adjust')! as Extract<typeof passes[number], { type: 'adjust' }>
+    const rough = passes.find(p => p.type === 'rough_edge')! as Extract<typeof passes[number], { type: 'rough_edge' }>
+    const grain = passes.find(p => p.type === 'grain')! as Extract<typeof passes[number], { type: 'grain' }>
+    expect(adjust.contrast).toBe(1.6)
+    expect(rough.amount).toBeCloseTo(0.5 * 0.03) // dirt → small torn-edge amplitude
+    expect(grain.amount).toBeCloseTo(Math.min(1, 0.5 * 1.2)) // dirt → toner speckle, clamped to 1
+  })
+
+  it('clamps the grain amount at 1 for a high dirt dial', () => {
+    const passes = expandRecipe(photo({ dirt: 1 }))
+    const grain = passes.find(p => p.type === 'grain')! as Extract<typeof passes[number], { type: 'grain' }>
+    expect(grain.amount).toBe(1)
+  })
+
+  it('drops the adjust pass when contrast is 1 (neutral) — threshold still crushes the tone', () => {
+    const passes = expandRecipe(photo({ contrast: 1 }))
+    expect(passes.map(p => p.type)).toEqual(['threshold', 'rough_edge', 'grain'])
+  })
+
+  it('drops both dirt passes (rough_edge + grain) when dirt is 0, leaving adjust + threshold', () => {
+    const passes = expandRecipe(photo({ dirt: 0 }))
+    expect(passes.map(p => p.type)).toEqual(['adjust', 'threshold'])
+  })
+})
+
+describe('expandRecipe: letterpress is a safe no-op until its task', () => {
   it('letterpress returns []', () => {
     const e: LetterpressEffect = { type: 'letterpress', visible: true, depth: 0.5, angle: 135, ink: '#2a2a2a', paper: 0.3 }
     expect(expandRecipe(e)).toEqual([])

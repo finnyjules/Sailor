@@ -19,6 +19,14 @@ export const isRecipeKind = (k: string): k is RecipeKind =>
  *  is easy to tune by eye in the live gate. */
 const RISO_PAPER = '#f4f1e6'
 
+/** Photocopy `dirt` dial → the ragged-alpha jitter amplitude. `rough_edge.amount` is 0..1
+ *  normalised to canvas width, so a full dirt still wants only a small torn amplitude — this keeps
+ *  the boundary grubby, not shredded. Named so the controller can tune the edge by eye. */
+const PHOTOCOPY_EDGE_PER_DIRT = 0.03
+/** Photocopy `dirt` dial → toner-speckle grain composite alpha (clamped to 1). >1 so a modest dirt
+ *  still reads as gritty toner over the crushed tone. */
+const PHOTOCOPY_GRAIN_PER_DIRT = 1.2
+
 /**
  * Expand a print recipe into the ordered `PostEffect[]` that produces its look. Each entry is
  * a full effect built from `defaultPostEffect(type)` + the dial-derived overrides, always
@@ -46,9 +54,24 @@ export function expandRecipe(e: RisographEffect | PhotocopyEffect | LetterpressE
       if (e.grain > 0) out.push({ ...defaultPostEffect('grain'), amount: e.grain, visible: true } as PostEffect)
       return out
     }
-    // Photocopy (Task 2) and letterpress (Task 3): a `[]` expansion is a visible no-op, safe
-    // until each recipe's own task fills in its composition.
-    case 'photocopy':
+    case 'photocopy': {
+      // A harsh xerox: bump contrast → crush tone to near-1-bit black/white (the copier core) →
+      // a dirty, degraded edge + toner speckle, both driven by the one `dirt` dial.
+      const out: PostEffect[] = []
+      if (e.contrast !== 1) out.push({ ...defaultPostEffect('adjust'), contrast: e.contrast, visible: true } as PostEffect)
+      // `threshold.cutoff` (0..1) IS the threshold dial — drive every pixel to black or white by
+      // whether its luminance clears the cutoff. This is the 1-bit crush that reads as a photocopy.
+      out.push({ ...defaultPostEffect('threshold'), cutoff: e.threshold, visible: true } as PostEffect)
+      if (e.dirt > 0) {
+        // rough_edge jitters the alpha boundary (grows outward — fine for a grubby copied edge,
+        // already handled by the offscreen pad); grain lays toner speckle over the crushed tone.
+        out.push({ ...defaultPostEffect('rough_edge'), amount: e.dirt * PHOTOCOPY_EDGE_PER_DIRT, visible: true } as PostEffect)
+        out.push({ ...defaultPostEffect('grain'), amount: Math.min(1, e.dirt * PHOTOCOPY_GRAIN_PER_DIRT), visible: true } as PostEffect)
+      }
+      return out
+    }
+    // Letterpress (Task 3): a `[]` expansion is a visible no-op, safe until its own task fills in
+    // its composition.
     case 'letterpress':
       return []
     default:
