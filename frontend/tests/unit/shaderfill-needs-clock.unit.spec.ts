@@ -52,6 +52,13 @@ const shaderEffectLayer = (effectId: string, speed: number, visible = true): any
   effects: [{ id: 'sh', type: 'shader', visible, effectId, params: {}, speed, seed: 42 }],
 })
 
+// F6 Task 4: the backdrop_shader twin — same shader-catalog-as-a-pass shape, run over the
+// layers behind this one. Its liveness predicate is identical to `shader`'s.
+const backdropShaderEffectLayer = (effectId: string, speed: number, visible = true): any => ({
+  id: 'r3', kind: 'rect', x: 0.5, y: 0.5, w: 0.2, h: 0.2, rotation: 0, opacity: 1, fill: solidFill,
+  effects: [{ id: 'bd', type: 'backdrop_shader', visible, effectId, params: {}, speed, seed: 42 }],
+})
+
 describe('hasAnimatedShaderFill', () => {
   it('is false for no items and no background', () => {
     expect(hasAnimatedShaderFill([])).toBe(false)
@@ -132,6 +139,28 @@ describe('hasAnimatedShaderFill', () => {
 
     it('is false for an unknown effectId (no catalog def) at speed 0', () => {
       expect(hasAnimatedShaderFill([localItem(shaderEffectLayer('nope', 0))])).toBe(false)
+    })
+  })
+
+  // F6 Task 4: a backdrop_shader EFFECT is the same shader-catalog-as-a-pass shape (run over the
+  // layers behind this one), so it must flip the predicate on exactly the same terms — an
+  // animated catalog def AND a nonzero speed. A fresh backdrop_shader defaults to speed 0, so the
+  // frozen-at-0 case is the one that keeps a just-added effect from spinning the live loop.
+  describe('a backdrop_shader EFFECT (F6, layer.effects)', () => {
+    it('is true when the picked effect\'s catalog def is animated AND speed !== 0', () => {
+      expect(hasAnimatedShaderFill([localItem(backdropShaderEffectLayer('anim_fx', 1))])).toBe(true)
+    })
+
+    it('is false when the catalog def is animated but speed is 0 (the fresh-default: inert)', () => {
+      expect(hasAnimatedShaderFill([localItem(backdropShaderEffectLayer('anim_fx', 0))])).toBe(false)
+    })
+
+    it('is false when speed !== 0 but the catalog def is NOT animated (static frag never reads u_time)', () => {
+      expect(hasAnimatedShaderFill([localItem(backdropShaderEffectLayer('still_fx', 2))])).toBe(false)
+    })
+
+    it('ignores an invisible backdrop_shader (it never paints, so it never needs to advance)', () => {
+      expect(hasAnimatedShaderFill([localItem(backdropShaderEffectLayer('anim_fx', 1, false))])).toBe(false)
     })
   })
 })

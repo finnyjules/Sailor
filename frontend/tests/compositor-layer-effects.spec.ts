@@ -544,6 +544,109 @@ test.describe('Frame backdrop luminance mask (F6 Task 3)', () => {
 })
 
 /**
+ * F6 Task 4 — the three backdrop effects COEXIST on one layer.
+ *
+ * background_blur (CPU), backdrop_shader (catalog GPU pass) and backdrop_luminance_mask (CPU)
+ * are all pinned backdrop-region effects on a single layer. They must stack and each stay
+ * observable, not one clobber the others. Scene: a red|blue split backdrop under a single
+ * TRANSLUCENT white panel (0.35) spanning both halves — the same shape Task 2 proved. The
+ * translucency is the point: the blurred + hue-shifted backdrop shows THROUGH the panel
+ * everywhere (so blur and shader are observable independent of the mask, not gated by it),
+ * while the luminance mask modulates the panel's OWN alpha. Removing any one of the three
+ * changes the render again — the proof each participates, without the fragile 3-way coupling a
+ * fully-opaque layer + a large blur would create (the blur flooding the mask that gates the
+ * shader's only visible region).
+ */
+test.describe('Frame backdrop effects coexist (F6 Task 4)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  // RED left half, BLUE right half (real hue for backdrop_shader to rotate, a sharp seam for
+  // the blur to smear), under a translucent white panel so the treated backdrop reads through.
+  async function seedCoexistScene(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const bar = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.5, h: 1, radius: 0, rotation: 0, opacity: 1, fill, effects: [],
+      })
+      const top = {
+        id: 'top', kind: 'rect', x: 0.5, y: 0.5, w: 0.9, h: 0.6, radius: 0, rotation: 0,
+        opacity: 1, fill: 'rgba(255,255,255,0.35)', effects: [],
+      }
+      ;(window as any).__compositorSetLayers([bar('L', 0.25, '#ff0000'), bar('R', 0.75, '#0000ff'), top])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(3)
+  }
+  const setTopEffects = (page: Page, effects: unknown[]) => page.evaluate((fx) => {
+    const ls = (window as any).__compositorLayers()
+    ls[2].effects = fx
+    ;(window as any).__compositorSetLayers(ls)
+  }, effects)
+  // Warm the async shader catalog: a cold catalog makes the backdrop_shader a silent no-op, so
+  // poll re-set + repaint until the render differs from `bare` (or time out → the caller's own
+  // assertion fails honestly). Same recipe as F6 Task 2's settledUntilChanged.
+  async function settledUntilChanged(page: Page, bare: string, effects: unknown[]): Promise<string> {
+    let last = bare
+    for (let i = 0; i < 20; i++) {
+      await setTopEffects(page, effects)
+      last = await stackPixels(page)
+      if (last !== bare) return last
+      await page.waitForTimeout(750)
+    }
+    return last
+  }
+  // Reset to the untouched render and confirm the canvas actually returned to it. Removing all
+  // effects is a plain (GPU-free) re-render, so it reverts reliably within a few polls.
+  async function settleToBare(page: Page, bareRef: string): Promise<void> {
+    for (let i = 0; i < 20; i++) {
+      await setTopEffects(page, [])
+      if (await stackPixels(page) === bareRef) return
+      await page.waitForTimeout(300)
+    }
+  }
+  // Capture a variant RELIABLY by starting from a confirmed-bare canvas every time, rather than
+  // mutating from the previous variant. The async catalog GPU pass means a stackPixels taken
+  // right after an effect change can lock onto a momentarily-stable STALE frame (the previous
+  // set) — a real non-determinism that made a drop-one read back equal to `full`. From a known
+  // bare canvas, `settledUntilChanged` polls until the render has actually moved off bare (the
+  // new pass landed), then a short settle + re-capture returns the stable frame.
+  async function variant(page: Page, bareRef: string, effects: unknown[]): Promise<string> {
+    await settleToBare(page, bareRef)
+    await settledUntilChanged(page, bareRef, effects)
+    await page.waitForTimeout(800)
+    await setTopEffects(page, effects)
+    return stackPixels(page)
+  }
+
+  const BLUR = { id: 'bl', type: 'background_blur', radius: 0.06, visible: true }
+  const SHADER = { id: 'sh', type: 'backdrop_shader', effectId: 'hue_shift', params: { hue: 0.5 }, speed: 0, seed: 42, visible: true }
+  const MASK = { id: 'lm', type: 'backdrop_luminance_mask', threshold: 0.5, softness: 0.2, invert: false, visible: true }
+
+  test('all three on one layer render differently from bare, and each one removed changes the render', async ({ page }) => {
+    await openCompositor(page)
+    await seedCoexistScene(page)
+    await setTopEffects(page, [])
+    const bare = await stackPixels(page)
+
+    // Full stack (order is canonical via EFFECT_ORDER regardless of array order). This warms the
+    // catalog and proves the combined stack is not a no-op.
+    const full = await variant(page, bare, [BLUR, SHADER, MASK])
+    expect(full).not.toBe(bare)
+
+    // Each drop-one is captured fresh from bare (see `variant`) so no stale frame leaks in.
+    const noMask = await variant(page, bare, [BLUR, SHADER])       // luminance mask removed
+    const noShader = await variant(page, bare, [BLUR, MASK])       // backdrop shader removed
+    const noBlur = await variant(page, bare, [SHADER, MASK])       // background blur removed
+
+    // Each effect visibly participates: dropping it moves a large, unmistakable block of pixels
+    // (changed-pixel COUNT, not exact bytes — a GPU pass isn't byte-reproducible frame to frame,
+    // per the F6 lesson; each real effect here moves >300k pixels, far above any GPU noise).
+    expect((await pixelDelta(page, full, noMask)).changed).toBeGreaterThan(1000)    // mask in play (the panel's white tint returns)
+    expect((await pixelDelta(page, full, noShader)).changed).toBeGreaterThan(1000)  // shader in play (backdrop hue reverts through the panel)
+    expect((await pixelDelta(page, full, noBlur)).changed).toBeGreaterThan(1000)    // blur in play (the red|blue seam is no longer smeared)
+  })
+})
+
+/**
  * F2 Task 5 — geometry effects render through a computed outline `d`.
  *
  * The rect is drawn through its shared, geometry-transformed Path2D only when a geometry

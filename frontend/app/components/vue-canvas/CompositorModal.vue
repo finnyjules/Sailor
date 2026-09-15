@@ -8460,15 +8460,23 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Shader (F5): runs a picked Shader Studio catalog effect over this layer's OWN
-               already-rendered pixels — a GPU pass (applyShaderPixelEffect, useCompositorLayers.ts),
-               not a fill. Picker → derived param dials → Speed, the same picker/dials shape
-               ShaderFillEditor.vue uses for a shader FILL, minus the fill-only anchor toggle and
-               nested input-fill editor (there is no separate Input paint here to anchor or blend —
-               the layer's own pixels ARE the input). The picker is filtered to effectReadsInput
-               effects only: a purely generative pick would overwrite the layer instead of
-               processing it. -->
-          <div v-else-if="activeEffect!.type === 'shader'" class="space-y-2.5" data-testid="shader-fx-inspector">
+          <!-- Shader (F5) + Backdrop shader (F6): ONE inspector serves both, because they carry
+               the identical effectId/params/speed/seed shape and every helper this block uses
+               (activeShaderEffectId, activeShaderEffectDef, shaderFxParamRows, setShaderFxParam,
+               shaderFxParamValue, shaderFxPickerItems — filtered to effectReadsInput —
+               updateActiveEffect, the Speed slider) reads `activeEffect` generically. They differ
+               only in WHAT the picked catalog effect processes:
+                 • `shader` (F5) runs the effect over this layer's OWN already-rendered pixels —
+                   a GPU pass (applyShaderPixelEffect, useCompositorLayers.ts), not a fill.
+                 • `backdrop_shader` (F6) runs the same effect over the LAYERS BEHIND this one
+                   (an additive backdrop treatment stamped under the layer, via withBackdrop).
+               Picker → derived param dials → Speed, the same picker/dials shape ShaderFillEditor.vue
+               uses for a shader FILL, minus the fill-only anchor toggle and nested input-fill editor
+               (there is no separate Input paint here to anchor or blend — the input is the layer's
+               own pixels for `shader`, the backdrop for `backdrop_shader`). The picker is filtered
+               to effectReadsInput effects only: a purely generative pick would overwrite the input
+               instead of processing it. -->
+          <div v-else-if="activeEffect!.type === 'shader' || activeEffect!.type === 'backdrop_shader'" class="space-y-2.5" data-testid="shader-fx-inspector">
             <div>
               <div class="mb-1 flex items-center justify-between gap-2">
                 <label class="block panel-label">Effect</label>
@@ -8572,7 +8580,7 @@ onUnmounted(() => {
             <CatalogModal
               :open="shaderFxPickerOpen"
               title="Shader effects"
-              subtitle="Pick an effect to process this layer's pixels"
+              :subtitle="activeEffect!.type === 'backdrop_shader' ? 'Pick an effect to treat the layers behind this one' : 'Pick an effect to process this layer\'s pixels'"
               :items="shaderFxPickerItems"
               :selected-id="resolveEffectId(activeShaderEffectId)"
               :filters="shaderFxPickerFilters"
@@ -8596,6 +8604,33 @@ onUnmounted(() => {
                 </div>
               </template>
             </CatalogModal>
+          </div>
+
+          <!-- Backdrop luminance mask (F6): masks the layer's OWN content by the luminance of the
+               backdrop painted behind it — reveals where the backdrop is bright (lum ≥ threshold),
+               hides where dark; Softness feathers the cut-over; Invert flips it. Pure CPU, three
+               controls, all read by applyBackdropLuminanceMask — no dead control. -->
+          <div v-else-if="activeEffect!.type === 'backdrop_luminance_mask'" class="space-y-1.5">
+            <p class="text-xs text-white/50">Reveals the layer where the backdrop behind it is bright; invert to reveal over dark areas.</p>
+            <StudioSlider
+              data-testid="lum-mask-threshold"
+              label="Threshold"
+              :min="0" :max="1" :step="0.01" :default="0.5"
+              :model-value="(activeEffect as any).threshold ?? 0.5"
+              @update:model-value="(v: number) => updateActiveEffect({ threshold: v })"
+            />
+            <StudioSlider
+              data-testid="lum-mask-softness"
+              label="Softness"
+              :min="0" :max="1" :step="0.01" :default="0.25"
+              :model-value="(activeEffect as any).softness ?? 0.25"
+              @update:model-value="(v: number) => updateActiveEffect({ softness: v })"
+            />
+            <label class="flex items-center justify-between gap-2 panel-label">Invert
+              <input type="checkbox" class="accent-white/80" data-testid="lum-mask-invert"
+                :checked="!!(activeEffect as any).invert"
+                @change="(e) => updateActiveEffect({ invert: (e.target as HTMLInputElement).checked })">
+            </label>
           </div>
 
           <!-- Outer glow / Inner glow: a tinted halo outside (behind) or inside (clipped to) the

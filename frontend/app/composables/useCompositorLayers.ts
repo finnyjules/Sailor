@@ -5320,10 +5320,18 @@ export function hasAnimatedShaderFill(items: StackItem[], background?: Paint): b
   // An invisible effect never paints, so it never needs the clock either.
   const isLiveShaderEffect = (e: LayerEffect): boolean =>
     e.type === 'shader' && e.visible && getEffectSync(e.effectId)?.animated === true && e.speed !== 0
+  // F6 Task 4: backdrop_shader is the same shader-catalog-as-a-pass shape as `shader` (just run
+  // over the layers BEHIND this one rather than its own pixels), so it can be just as animated
+  // and needs the identical predicate — BOTH an animated catalog def AND a nonzero speed. Note a
+  // fresh backdrop_shader defaults to speed 0 (LOCAL_DEFAULTS), so a just-added one stays inert
+  // and spins no loop until the user dials a speed (the F5 lesson: a static default at nonzero
+  // speed must NOT be called live — hence AND, never OR).
+  const isLiveBackdropShaderEffect = (e: LayerEffect): boolean =>
+    e.type === 'backdrop_shader' && e.visible && getEffectSync(e.effectId)?.animated === true && e.speed !== 0
   for (const it of items) {
     if (it.type !== 'local') continue
     if (layerPaints(it.layer).some(isLiveShader)) return true
-    if (effectStackOf(it.layer as unknown as Parameters<typeof effectStackOf>[0]).some(isLiveShaderEffect)) return true
+    if (effectStackOf(it.layer as unknown as Parameters<typeof effectStackOf>[0]).some(e => isLiveShaderEffect(e) || isLiveBackdropShaderEffect(e))) return true
   }
   return false
 }
