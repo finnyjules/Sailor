@@ -1,5 +1,27 @@
 [
   {
+    "name": "iA Writer Quattro S",
+    "num": 11,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Information Architects Inc. / Bold Monday",
+    "sourceUrl": "https://github.com/iaolo/iA-Fonts",
+    "fileUrl": "https://raw.githubusercontent.com/iaolo/iA-Fonts/master/iA%20Writer%20Quattro/Static/iAWriterQuattroS-Regular.ttf",
+    "bram": "iA Writer"
+  },
+  {
+    "name": "Vercetti",
+    "num": 14,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Filippos Fragkogiannis (concept) / Richard Mandona (execution)",
+    "sourceUrl": "https://filipposfragkogiannis.com/fonts/vercetti-regular/",
+    "bram": "Vercetti",
+    "note": "no direct file URL found"
+  },
+  {
     "name": "National Park",
     "num": 15,
     "source": "google",
@@ -14,6 +36,17 @@
     "googleFamily": "Familjen Grotesk",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Migha",
+    "num": 17,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Seniors Studio (distributed via Pixel Surplus)",
+    "sourceUrl": "https://pixelsurplus.com/products/migha-free-variable-font",
+    "bram": "Migha",
+    "note": "no direct file URL found"
   },
   {
     "name": "Bricolage Grotesque",
@@ -32,6 +65,17 @@
     "redistributable": true
   },
   {
+    "name": "Junicode",
+    "num": 22,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Peter S. Baker (psb1558)",
+    "sourceUrl": "https://github.com/psb1558/Junicode-font",
+    "bram": "Junicode",
+    "note": "zip-only source"
+  },
+  {
     "name": "Gabarito",
     "num": 25,
     "source": "google",
@@ -46,6 +90,17 @@
     "googleFamily": "Sora",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Nacelle",
+    "num": 27,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Sora Sagano (dotcolon.net)",
+    "sourceUrl": "https://github.com/reinhart1010/nacelle",
+    "fileUrl": "https://raw.githubusercontent.com/reinhart1010/nacelle/master/fonts/Nacelle-Regular.ttf",
+    "bram": "Nacelle"
   },
   {
     "name": "Goudy Bookletter 1911",
@@ -72,12 +127,89 @@
     "redistributable": true
   },
   {
+    "name": "Ortica Linear",
+    "num": 31,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Benedetta Bovani for Collletttivo",
+    "sourceUrl": "https://github.com/collletttivo/ortica",
+    "fileUrl": "https://raw.githubusercontent.com/collletttivo/ortica/master/fonts/OrticaLinear-Regular.otf",
+    "bram": "Ortica"
+  },
+  {
+    "name": "Overused Grotesk",
+    "num": 32,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Bao Nguyen (RandomMaerks)",
+    "sourceUrl": "https://github.com/RandomMaerks/Overused-Grotesk",
+    "fileUrl": "https://raw.githubusercontent.com/RandomMaerks/Overused-Grotesk/main/fonts/ttf/OverusedGrotesk-Roman.ttf",
+    "bram": "Overused Grotesk"
+  },
+  {
+    "name": "Cabinet",
+    "num": 33,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Indian Type Foundry (via Fontshare)",
+    "sourceUrl": "https://www.fontshare.com/fonts/cabinet-grotesk",
+    "bram": "Cabinet",
+    "note": "no direct file URL found"
+  },
+  {
     "name": "TASA Orbiter",
     "num": 34,
     "source": "google",
     "googleFamily": "TASA Orbiter",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Sleigh",
+    "num": 35,
+    "source": "self-hosted",
+    "license": "unknown",
+    "redistributable": false,
+    "designer": "",
+    "sourceUrl": "",
+    "bram": "Sleigh",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "Holo Gigawide Ultra",
+    "num": 36,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "NaN (nan.xyz)",
+    "sourceUrl": "https://www.nan.xyz/fonts/nan-holo-gigawide-ultra/",
+    "bram": "Holo Gigawide Ultra",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "Absans",
+    "num": 37,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Valerio Monopoli for Collletttivo",
+    "sourceUrl": "https://github.com/collletttivo/absans",
+    "fileUrl": "https://raw.githubusercontent.com/collletttivo/absans/master/fonts/Absans-Regular.otf",
+    "bram": "Absans"
+  },
+  {
+    "name": "Open Sauce Sans",
+    "num": 38,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Marcus Sterz / Creative Sauce",
+    "sourceUrl": "https://github.com/marcologous/Open-Sauce-Fonts",
+    "fileUrl": "https://raw.githubusercontent.com/marcologous/Open-Sauce-Fonts/master/fonts/ttf/OpenSauceSans-Regular.ttf",
+    "bram": "Open Sauce"
   },
   {
     "name": "Hedvig Letters Serif",
@@ -112,6 +244,17 @@
     "redistributable": true
   },
   {
+    "name": "Lastik",
+    "num": 43,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Harbor Bickmore / That That Type (published by That That Creative)",
+    "sourceUrl": "https://www.thatthattype.com/fonts/lastik",
+    "bram": "Lastik",
+    "note": "no direct file URL found"
+  },
+  {
     "name": "SN Pro",
     "num": 44,
     "source": "google",
@@ -120,12 +263,34 @@
     "redistributable": true
   },
   {
+    "name": "Violet Sans",
+    "num": 45,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Calvin Waterman (Violet Office)",
+    "sourceUrl": "https://github.com/violetoffice/violet_sans",
+    "fileUrl": "https://raw.githubusercontent.com/violetoffice/violet_sans/master/fonts/TTF/VioletSans-Regular.ttf",
+    "bram": "Violet"
+  },
+  {
     "name": "Ojuju",
     "num": 46,
     "source": "google",
     "googleFamily": "Ojuju",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Sneaky",
+    "num": 47,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Jules Durand (Collletttivo)",
+    "sourceUrl": "https://github.com/collletttivo/sneaky-times",
+    "fileUrl": "https://raw.githubusercontent.com/collletttivo/sneaky-times/main/fonts/Sneaky-Times.otf",
+    "bram": "Sneaky Times"
   },
   {
     "name": "Shantell Sans",
@@ -160,12 +325,45 @@
     "redistributable": true
   },
   {
+    "name": "New Title",
+    "num": 52,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Jérémie Hornus & Julie Soudanne (Indian Type Foundry)",
+    "sourceUrl": "https://www.fontshare.com/fonts/new-title",
+    "bram": "New Title",
+    "note": "no direct file URL found"
+  },
+  {
     "name": "Shippori Mincho",
     "num": 53,
     "source": "google",
     "googleFamily": "Shippori Mincho",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Haskoy",
+    "num": 54,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Ertekin Erdin (ertekinno)",
+    "sourceUrl": "https://github.com/ertekinno/haskoy",
+    "fileUrl": "https://raw.githubusercontent.com/ertekinno/haskoy/main/fonts/ttf/Haskoy-variable.ttf",
+    "bram": "Hasköy"
+  },
+  {
+    "name": "Realce",
+    "num": 55,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Carlos Mignot (Plau)",
+    "sourceUrl": "https://www-plau-co.rds.land/realce",
+    "bram": "Realce",
+    "note": "no direct file URL found"
   },
   {
     "name": "Platypi",
@@ -182,6 +380,17 @@
     "googleFamily": "Koulen",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Aspekta",
+    "num": 58,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Ivo Dolenc",
+    "sourceUrl": "https://github.com/ivodolenc/aspekta",
+    "fileUrl": "https://raw.githubusercontent.com/ivodolenc/aspekta/main/packages/fonts/ttf/Aspekta-400.ttf",
+    "bram": "Aspekta"
   },
   {
     "name": "Jaro",
@@ -208,6 +417,28 @@
     "redistributable": true
   },
   {
+    "name": "Ribes",
+    "num": 62,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Luigi Gorlero (Collletttivo)",
+    "sourceUrl": "https://github.com/collletttivo/ribes",
+    "fileUrl": "https://raw.githubusercontent.com/collletttivo/ribes/main/fonts/Ribes-Black.otf",
+    "bram": "Ribes"
+  },
+  {
+    "name": "Open Runde",
+    "num": 63,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Laurids Kern",
+    "sourceUrl": "https://github.com/lauridskern/open-runde",
+    "fileUrl": "https://raw.githubusercontent.com/lauridskern/open-runde/main/src/desktop/OpenRunde-Regular.otf",
+    "bram": "Open Runde"
+  },
+  {
     "name": "Anek Bangla",
     "num": 64,
     "source": "google",
@@ -224,12 +455,34 @@
     "redistributable": true
   },
   {
+    "name": "Heal The Web A",
+    "num": 66,
+    "source": "self-hosted",
+    "license": "MPL-2.0",
+    "redistributable": true,
+    "designer": "Rainbow Unicorn (studio); production by Jakub Kanior",
+    "sourceUrl": "https://github.com/rainbowunicornstudio/healtheweb-typeface",
+    "fileUrl": "https://raw.githubusercontent.com/rainbowunicornstudio/healtheweb-typeface/main/HealTheWebA-Regular.otf",
+    "bram": "Heal The Web"
+  },
+  {
     "name": "Funnel",
     "num": 67,
     "source": "google",
     "googleFamily": "Funnel Display",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Neue Regrade",
+    "num": 68,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Ungvári József Márk",
+    "sourceUrl": "https://jociungvari.gumroad.com/l/neueregrade",
+    "bram": "Neue Regrade",
+    "note": "no direct file URL found"
   },
   {
     "name": "Damion",
@@ -240,12 +493,67 @@
     "redistributable": true
   },
   {
+    "name": "LCT Mogi",
+    "num": 70,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Deni Anggara (Lokal Container / LCTipografi)",
+    "sourceUrl": "https://github.com/LCTipografi/LCT-Mogi",
+    "fileUrl": "https://raw.githubusercontent.com/LCTipografi/LCT-Mogi/main/Fonts/TTF/LCTMogi-A.ttf",
+    "bram": "Mogi"
+  },
+  {
     "name": "Cause",
     "num": 71,
     "source": "google",
     "googleFamily": "Cause",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "NT Somic",
+    "num": 72,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "NT Type (github: nnttttyyppee)",
+    "sourceUrl": "https://github.com/nnttttyyppee/NT-Somic",
+    "fileUrl": "https://raw.githubusercontent.com/nnttttyyppee/NT-Somic/main/Fonts/Desktop/Static/TrueType/NTSomic-Regular.ttf",
+    "bram": "Somic"
+  },
+  {
+    "name": "Sinar",
+    "num": 73,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Lokal Container (Lokal Container Tipografi / lokalcontainer.com)",
+    "sourceUrl": "https://fontesk.com/lc-sinar-font/",
+    "bram": "Sinar",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "Fungis",
+    "num": 74,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Milena Leimig",
+    "sourceUrl": "https://www.behance.net/gallery/119722547/FUNGIS-Free-Typeface",
+    "bram": "Fungis",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "Gully",
+    "num": 75,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "MagicType (Jaikishan Patel)",
+    "sourceUrl": "https://github.com/magictype/Gully",
+    "fileUrl": "https://raw.githubusercontent.com/magictype/Gully/main/fonts/ttf/Gully-Bold.ttf",
+    "bram": "Gully"
   },
   {
     "name": "Atkinson Hyperlegible",
@@ -256,12 +564,34 @@
     "redistributable": true
   },
   {
+    "name": "Frick 0.3",
+    "num": 79,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Dennis Grauel",
+    "sourceUrl": "https://github.com/dennisgrauel/Frick",
+    "fileUrl": "https://raw.githubusercontent.com/dennisgrauel/Frick/main/fonts/otf/Frick0.3-Regular.otf",
+    "bram": "Frick"
+  },
+  {
     "name": "Petrona",
     "num": 80,
     "source": "google",
     "googleFamily": "Petrona",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Glyseric",
+    "num": 82,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Bring To Type",
+    "sourceUrl": "https://pixelsurplus.com/products/glyseric-typeface",
+    "bram": "Glyseric",
+    "note": "no direct file URL found"
   },
   {
     "name": "Murecho",
@@ -278,6 +608,17 @@
     "googleFamily": "AR One Sans",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Museum",
+    "num": 85,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "LyonsType (Dan P. Lyons)",
+    "sourceUrl": "https://www.dafont.com/lt-museum.font",
+    "bram": "Museum",
+    "note": "no direct file URL found"
   },
   {
     "name": "Parkinsans",
@@ -312,12 +653,67 @@
     "redistributable": true
   },
   {
+    "name": "Pretendard",
+    "num": 91,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Kil Hyung-jin (github: orioncactus)",
+    "sourceUrl": "https://github.com/orioncactus/pretendard",
+    "fileUrl": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/public/static/Pretendard-Regular.otf",
+    "bram": "Pretendard"
+  },
+  {
     "name": "Ovo",
     "num": 92,
     "source": "google",
     "googleFamily": "Ovo",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Moche",
+    "num": 93,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Vivien Gorse (Pépite type foundry)",
+    "sourceUrl": "https://www.typo.pepite.world/fonderie/moche",
+    "bram": "Moche",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "Ronzino",
+    "num": 94,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Luigi Gorlero & Nunzio Mazzaferro (Collletttivo)",
+    "sourceUrl": "https://github.com/collletttivo/ronzino",
+    "fileUrl": "https://raw.githubusercontent.com/collletttivo/ronzino/main/fonts/Ronzino-Regular.otf",
+    "bram": "Ronzino"
+  },
+  {
+    "name": "Superior",
+    "num": 95,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "LyonsType (Dan P. Lyons)",
+    "sourceUrl": "https://github.com/LyonsType/LTSuperior",
+    "bram": "Superior",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "Maragsa",
+    "num": 96,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "John David Maza",
+    "sourceUrl": "https://johndavidmaza.gumroad.com/l/Maragsa",
+    "bram": "Maragsa",
+    "note": "no direct file URL found"
   },
   {
     "name": "Liter",
@@ -328,12 +724,34 @@
     "redistributable": true
   },
   {
+    "name": "Aujournuit",
+    "num": 98,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Teo Gaudet",
+    "sourceUrl": "https://github.com/collletttivo/aujournuit",
+    "fileUrl": "https://raw.githubusercontent.com/collletttivo/aujournuit/main/fonts/Aujournuit-Regular.otf",
+    "bram": "Aujournuit"
+  },
+  {
     "name": "Boldonse",
     "num": 99,
     "source": "google",
     "googleFamily": "Boldonse",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Modelo",
+    "num": 100,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Maxitype (Maximage studio)",
+    "sourceUrl": "https://maxitype.com/typeface/modelo/",
+    "bram": "Modelo",
+    "note": "no direct file URL found"
   },
   {
     "name": "Special Gothic",
@@ -360,6 +778,17 @@
     "redistributable": true
   },
   {
+    "name": "Epistle",
+    "num": 105,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Eli Heuer (eliheuer)",
+    "sourceUrl": "https://github.com/eliheuer/epistle",
+    "fileUrl": "https://raw.githubusercontent.com/eliheuer/epistle/master/fonts/Epistle-Regular.ttf",
+    "bram": "Epistle"
+  },
+  {
     "name": "Cascadia Mono",
     "num": 106,
     "source": "google",
@@ -384,12 +813,34 @@
     "redistributable": true
   },
   {
+    "name": "Oak Sans",
+    "num": 110,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Walven (GitHub handle; full name not found)",
+    "sourceUrl": "https://github.com/Walven/OakSans",
+    "fileUrl": "https://raw.githubusercontent.com/Walven/OakSans/main/fonts/ttf/OakSans-Regular.ttf",
+    "bram": "Oak Sans"
+  },
+  {
     "name": "Commissioner",
     "num": 111,
     "source": "google",
     "googleFamily": "Commissioner",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "BDO Grotesk",
+    "num": 112,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Deni Anggara (Lokal Container)",
+    "sourceUrl": "https://github.com/LCTipografi/BDO-Grotesk",
+    "fileUrl": "https://raw.githubusercontent.com/LCTipografi/BDO-Grotesk/main/Fonts/TTF/BDOGrotesk-Regular.ttf",
+    "bram": "BDO Grotesk"
   },
   {
     "name": "Maname",
@@ -416,12 +867,45 @@
     "redistributable": true
   },
   {
+    "name": "Necto Mono",
+    "num": 116,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Marco Condello",
+    "sourceUrl": "https://github.com/collletttivo/necto-mono",
+    "fileUrl": "https://raw.githubusercontent.com/collletttivo/necto-mono/main/fonts/NectoMono-Regular.otf",
+    "bram": "Necto Mono"
+  },
+  {
     "name": "Quattrocento",
     "num": 117,
     "source": "google",
     "googleFamily": "Quattrocento",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Esse Grotesk",
+    "num": 118,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Enzo Grandio",
+    "sourceUrl": "https://pixelsurplus.com/products/esse-grotesk-free-typeface",
+    "bram": "Esse Grotesk",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "Kyiv Type Sans",
+    "num": 119,
+    "source": "self-hosted",
+    "license": "unknown",
+    "redistributable": false,
+    "designer": "Dmytro Rastvortsev",
+    "sourceUrl": "https://www.behance.net/gallery/90690285/KyivType-variable-superfamily",
+    "bram": "Kyiv Type Sans",
+    "note": "no direct file URL found"
   },
   {
     "name": "TikTok Sans",
@@ -446,6 +930,28 @@
     "googleFamily": "Tuffy",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Sunday Masthead",
+    "num": 123,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Dennis Grauel",
+    "sourceUrl": "https://github.com/dennisgrauel/The-Sunday-Paper-fonts",
+    "fileUrl": "https://raw.githubusercontent.com/dennisgrauel/The-Sunday-Paper-fonts/main/Sunday%20Masthead/fonts/otf/SundayMasthead-Regular.otf",
+    "bram": "Sunday Masthead"
+  },
+  {
+    "name": "Drago",
+    "num": 124,
+    "source": "self-hosted",
+    "license": "unknown",
+    "redistributable": false,
+    "designer": "",
+    "sourceUrl": "",
+    "bram": "Drago",
+    "note": "no direct file URL found"
   },
   {
     "name": "Syne",
@@ -528,6 +1034,28 @@
     "redistributable": true
   },
   {
+    "name": "Mattone",
+    "num": 136,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Nunzio Mazzaferro (Collletttivo)",
+    "sourceUrl": "https://github.com/collletttivo/mattone",
+    "fileUrl": "https://raw.githubusercontent.com/collletttivo/mattone/main/fonts/Mattone-Regular.otf",
+    "bram": "Mattone"
+  },
+  {
+    "name": "Feroniapi",
+    "num": 137,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Julienne Richard (redesign of Peter Wiegel's Feronia)",
+    "sourceUrl": "https://gitlab.com/velvetyne/feroniapi",
+    "fileUrl": "https://gitlab.com/velvetyne/feroniapi/-/raw/main/fonts/otf/Feroniapi-MediumItalic.otf",
+    "bram": "Feroniapi"
+  },
+  {
     "name": "Google Sans",
     "num": 138,
     "source": "google",
@@ -552,6 +1080,61 @@
     "redistributable": true
   },
   {
+    "name": "Uncut Sans",
+    "num": 143,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Kasper Nordkvist",
+    "sourceUrl": "https://github.com/kaspernordkvist/uncut_sans",
+    "bram": "Uncut Sans",
+    "note": "zip-only source"
+  },
+  {
+    "name": "Faberge",
+    "num": 144,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Vasiliy Shishkin",
+    "sourceUrl": "https://fontesk.com/faberge-font/",
+    "bram": "Faberge",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "Now",
+    "num": 145,
+    "source": "self-hosted",
+    "license": "Free-noredist",
+    "redistributable": false,
+    "designer": "Hanken Design Co.",
+    "sourceUrl": "https://hanken.co/products/now",
+    "bram": "Now",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "Memoir",
+    "num": 147,
+    "source": "self-hosted",
+    "license": "unknown",
+    "redistributable": false,
+    "designer": "Daniel Gremme",
+    "sourceUrl": "https://danielgremme.com/type/",
+    "bram": "Memoir",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "Paysage",
+    "num": 148,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Anton Moglia",
+    "sourceUrl": "https://gitlab.com/antonmoglia/Paysage",
+    "fileUrl": "https://gitlab.com/antonmoglia/Paysage/-/raw/master/fonts/otf/Paysage-Regular.otf",
+    "bram": "Paysage"
+  },
+  {
     "name": "Miranda Sans",
     "num": 149,
     "source": "google",
@@ -560,12 +1143,56 @@
     "redistributable": true
   },
   {
+    "name": "Marauder",
+    "num": 150,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Owen Earl (indestructible type*)",
+    "sourceUrl": "https://indestructibletype.com/Marauder/",
+    "bram": "Marauder",
+    "note": "no direct file URL found"
+  },
+  {
+    "name": "LCT-Ciburial",
+    "num": 151,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Lokal Container Tipografi (LCTipografi), Bandung, Indonesia",
+    "sourceUrl": "https://github.com/LCTipografi/LCT-Ciburial",
+    "fileUrl": "https://raw.githubusercontent.com/LCTipografi/LCT-Ciburial/main/Fonts/OTF/LCT-Ciburial-Regular.otf",
+    "bram": "Ciburial"
+  },
+  {
+    "name": "Kecal",
+    "num": 152,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Jiri Krblich (Fungi Type)",
+    "sourceUrl": "https://github.com/fungitype/kecal",
+    "fileUrl": "https://raw.githubusercontent.com/fungitype/kecal/main/export/Desktop/Kecal-Regular.otf",
+    "bram": "Kecal"
+  },
+  {
     "name": "Hepta Slab",
     "num": 153,
     "source": "google",
     "googleFamily": "Hepta Slab",
     "license": "OFL-1.1",
     "redistributable": true
+  },
+  {
+    "name": "Avio Sans",
+    "num": 154,
+    "source": "self-hosted",
+    "license": "OFL-1.1",
+    "redistributable": true,
+    "designer": "Lerbb Group",
+    "sourceUrl": "https://aviosans.lerbb.com/",
+    "bram": "Avio Sans",
+    "note": "no direct file URL found"
   },
   {
     "name": "Spectral",
