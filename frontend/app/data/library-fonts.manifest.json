@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-15T20:16:17.306Z",
+  "generatedAt": "2026-09-15T21:10:05.338Z",
   "fontsRoot": "Assets/Fonts",
   "foundries": [
     {
@@ -11247,7 +11247,8 @@
       "source": "self-hosted",
       "num": 11,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-vercetti",
@@ -11266,7 +11267,8 @@
       "source": "self-hosted",
       "num": 14,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-national-park",
@@ -11277,7 +11279,8 @@
       "googleFamily": "National Park",
       "num": 15,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-familjen-grotesk",
@@ -11288,7 +11291,8 @@
       "googleFamily": "Familjen Grotesk",
       "num": 16,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-migha",
@@ -11307,7 +11311,8 @@
       "source": "self-hosted",
       "num": 17,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Display"
     },
     {
       "id": "bram-naus-bricolage-grotesque",
@@ -11318,7 +11323,8 @@
       "googleFamily": "Bricolage Grotesque",
       "num": 18,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-dela-gothic",
@@ -11329,7 +11335,8 @@
       "googleFamily": "Dela Gothic One",
       "num": 20,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-junicode",
@@ -11348,7 +11355,8 @@
       "source": "self-hosted",
       "num": 22,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-gabarito",
@@ -11359,7 +11367,8 @@
       "googleFamily": "Gabarito",
       "num": 25,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-sora",
@@ -11370,7 +11379,8 @@
       "googleFamily": "Sora",
       "num": 26,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-nacelle",
@@ -11389,7 +11399,8 @@
       "source": "self-hosted",
       "num": 27,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-goudy-bookletter-1911",
@@ -11400,7 +11411,8 @@
       "googleFamily": "Goudy Bookletter 1911",
       "num": 28,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-onest",
@@ -11411,7 +11423,8 @@
       "googleFamily": "Onest",
       "num": 29,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-geologica",
@@ -11422,7 +11435,8 @@
       "googleFamily": "Geologica",
       "num": 30,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-ortica-linear",
@@ -11441,7 +11455,8 @@
       "source": "self-hosted",
       "num": 31,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-overused-grotesk",
@@ -11460,7 +11475,8 @@
       "source": "self-hosted",
       "num": 32,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-cabinet-grotesk",
@@ -11479,7 +11495,8 @@
       "source": "self-hosted",
       "num": 33,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-tasa-orbiter",
@@ -11490,7 +11507,8 @@
       "googleFamily": "TASA Orbiter",
       "num": 34,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-nan-holo-gigawide",
@@ -11509,7 +11527,8 @@
       "source": "self-hosted",
       "num": 36,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Display"
     },
     {
       "id": "bram-naus-absans",
@@ -11528,7 +11547,8 @@
       "source": "self-hosted",
       "num": 37,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-open-sauce-sans",
@@ -11547,7 +11567,8 @@
       "source": "self-hosted",
       "num": 38,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-hedvig-letters-serif",
@@ -11558,7 +11579,8 @@
       "googleFamily": "Hedvig Letters Serif",
       "num": 39,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-lexend",
@@ -11569,7 +11591,8 @@
       "googleFamily": "Lexend",
       "num": 40,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-stoke",
@@ -11580,7 +11603,8 @@
       "googleFamily": "Stoke",
       "num": 41,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-climate-crisis",
@@ -11591,7 +11615,8 @@
       "googleFamily": "Climate Crisis",
       "num": 42,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-sn-pro",
@@ -11602,7 +11627,8 @@
       "googleFamily": "SN Pro",
       "num": 44,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-violet-sans",
@@ -11621,7 +11647,8 @@
       "source": "self-hosted",
       "num": 45,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-ojuju",
@@ -11632,7 +11659,8 @@
       "googleFamily": "Ojuju",
       "num": 46,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-sneaky",
@@ -11651,7 +11679,8 @@
       "source": "self-hosted",
       "num": 47,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-shantell-sans",
@@ -11662,7 +11691,8 @@
       "googleFamily": "Shantell Sans",
       "num": 48,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-be-vietnam-pro",
@@ -11673,7 +11703,8 @@
       "googleFamily": "Be Vietnam Pro",
       "num": 49,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-mochiy-pop-one",
@@ -11684,7 +11715,8 @@
       "googleFamily": "Mochiy Pop One",
       "num": 50,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-gloock",
@@ -11695,7 +11727,8 @@
       "googleFamily": "Gloock",
       "num": 51,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-new-title",
@@ -11714,7 +11747,8 @@
       "source": "self-hosted",
       "num": 52,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-shippori-mincho",
@@ -11725,7 +11759,8 @@
       "googleFamily": "Shippori Mincho",
       "num": 53,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-haskoy",
@@ -11744,7 +11779,8 @@
       "source": "self-hosted",
       "num": 54,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-realce",
@@ -11763,7 +11799,8 @@
       "source": "self-hosted",
       "num": 55,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Display"
     },
     {
       "id": "bram-naus-platypi",
@@ -11774,7 +11811,8 @@
       "googleFamily": "Platypi",
       "num": 56,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-koulen",
@@ -11785,7 +11823,8 @@
       "googleFamily": "Koulen",
       "num": 57,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-aspekta",
@@ -11804,7 +11843,8 @@
       "source": "self-hosted",
       "num": 58,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-jaro",
@@ -11815,7 +11855,8 @@
       "googleFamily": "Jaro",
       "num": 59,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-afacad",
@@ -11826,7 +11867,8 @@
       "googleFamily": "Afacad",
       "num": 60,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-kalnia",
@@ -11837,7 +11879,8 @@
       "googleFamily": "Kalnia",
       "num": 61,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-ribes",
@@ -11856,7 +11899,8 @@
       "source": "self-hosted",
       "num": 62,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-open-runde",
@@ -11875,7 +11919,8 @@
       "source": "self-hosted",
       "num": 63,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-anek-bangla",
@@ -11886,7 +11931,8 @@
       "googleFamily": "Anek Bangla",
       "num": 64,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-galdeano",
@@ -11897,7 +11943,8 @@
       "googleFamily": "Galdeano",
       "num": 65,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-heal-the-web-a",
@@ -11916,7 +11963,8 @@
       "source": "self-hosted",
       "num": 66,
       "license": "MPL-2.0",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-funnel",
@@ -11927,7 +11975,8 @@
       "googleFamily": "Funnel Display",
       "num": 67,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-neue-regrade",
@@ -11935,98 +11984,19 @@
       "foundry": "bram-naus",
       "faces": [
         {
-          "id": "bram-naus-neueregrade-light",
-          "weight": 300,
-          "style": "Light",
-          "italic": false,
-          "postscriptName": "NeueRegrade-Light",
-          "src": "Free Fonts/_incoming/Neue Regrade Light.otf"
-        },
-        {
-          "id": "bram-naus-neueregrade-light-italic",
-          "weight": 300,
-          "style": "Light-Italic",
-          "italic": true,
-          "postscriptName": "NeueRegrade-Light-Italic",
-          "src": "Free Fonts/_incoming/Neue Regrade Light Italic.otf"
-        },
-        {
           "id": "bram-naus-neueregrade-regular",
           "weight": 400,
           "style": "Regular",
           "italic": false,
           "postscriptName": "NeueRegrade-Regular",
-          "src": "Free Fonts/_incoming/Neue Regrade Regular.otf"
-        },
-        {
-          "id": "bram-naus-neueregrade-regular-italic",
-          "weight": 400,
-          "style": "Regular-Italic",
-          "italic": true,
-          "postscriptName": "NeueRegrade-Regular-Italic",
-          "src": "Free Fonts/_incoming/Neue Regrade Regular Italic.otf"
-        },
-        {
-          "id": "bram-naus-neueregrade-medium",
-          "weight": 500,
-          "style": "Medium",
-          "italic": false,
-          "postscriptName": "NeueRegrade-Medium",
-          "src": "Free Fonts/_incoming/Neue Regrade Medium.otf"
-        },
-        {
-          "id": "bram-naus-neueregrade-medium-italic",
-          "weight": 500,
-          "style": "Medium-Italic",
-          "italic": true,
-          "postscriptName": "NeueRegrade-Medium-Italic",
-          "src": "Free Fonts/_incoming/Neue Regrade Medium Italic.otf"
-        },
-        {
-          "id": "bram-naus-neueregrade-semibold",
-          "weight": 600,
-          "style": "Semibold",
-          "italic": false,
-          "postscriptName": "NeueRegrade-Semibold",
-          "src": "Free Fonts/_incoming/Neue Regrade Semibold.otf"
-        },
-        {
-          "id": "bram-naus-neueregrade-semibold-italic",
-          "weight": 600,
-          "style": "SemiBold-Italic",
-          "italic": true,
-          "postscriptName": "NeueRegrade-SemiBold-Italic",
-          "src": "Free Fonts/_incoming/Neue Regrade SemiBold Italic.otf"
-        },
-        {
-          "id": "bram-naus-neueregrade-bold-italic",
-          "weight": 700,
-          "style": "Bold-Italic",
-          "italic": true,
-          "postscriptName": "NeueRegrade-Bold-Italic",
-          "src": "Free Fonts/_incoming/Neue Regrade Bold Italic.otf"
-        },
-        {
-          "id": "bram-naus-neueregrade-extrabold",
-          "weight": 800,
-          "style": "Extrabold",
-          "italic": false,
-          "postscriptName": "NeueRegrade-Extrabold",
-          "src": "Free Fonts/_incoming/Neue Regrade Extrabold.otf"
-        },
-        {
-          "id": "bram-naus-neueregrade-extrabold-italic",
-          "weight": 800,
-          "style": "ExtraBold-Italic",
-          "italic": true,
-          "postscriptName": "NeueRegrade-ExtraBold-Italic",
-          "src": "Free Fonts/_incoming/Neue Regrade ExtraBold Italic.otf"
+          "src": "Free Fonts/Neue Regrade/Neue Regrade Variable.ttf"
         }
       ],
       "source": "self-hosted",
       "num": 68,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-damion",
@@ -12037,7 +12007,8 @@
       "googleFamily": "Damion",
       "num": 69,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Script"
     },
     {
       "id": "bram-naus-lct-mogi",
@@ -12056,7 +12027,8 @@
       "source": "self-hosted",
       "num": 70,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-cause",
@@ -12067,7 +12039,8 @@
       "googleFamily": "Cause",
       "num": 71,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Script"
     },
     {
       "id": "bram-naus-nt-somic",
@@ -12086,7 +12059,8 @@
       "source": "self-hosted",
       "num": 72,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-fungis",
@@ -12100,28 +12074,13 @@
           "italic": false,
           "postscriptName": "FUNGIS-Regular",
           "src": "Free Fonts/Fungis/FUNGIS Regular.otf"
-        },
-        {
-          "id": "bram-naus-fungis-bold",
-          "weight": 700,
-          "style": "Bold",
-          "italic": false,
-          "postscriptName": "FUNGIS-Bold",
-          "src": "Free Fonts/_incoming/FUNGIS Bold.otf"
-        },
-        {
-          "id": "bram-naus-fungis-heavy",
-          "weight": 700,
-          "style": "Heavy",
-          "italic": false,
-          "postscriptName": "FUNGIS-Heavy",
-          "src": "Free Fonts/_incoming/FUNGIS Heavy.otf"
         }
       ],
       "source": "self-hosted",
       "num": 74,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Display"
     },
     {
       "id": "bram-naus-gully",
@@ -12140,7 +12099,8 @@
       "source": "self-hosted",
       "num": 75,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-atkinson-hyperlegible",
@@ -12151,7 +12111,8 @@
       "googleFamily": "Atkinson Hyperlegible",
       "num": 77,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-frick-0-3",
@@ -12170,7 +12131,8 @@
       "source": "self-hosted",
       "num": 79,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-petrona",
@@ -12181,7 +12143,8 @@
       "googleFamily": "Petrona",
       "num": 80,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-glyseric",
@@ -12200,7 +12163,8 @@
       "source": "self-hosted",
       "num": 82,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Display"
     },
     {
       "id": "bram-naus-murecho",
@@ -12211,7 +12175,8 @@
       "googleFamily": "Murecho",
       "num": 83,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-ar-one-sans",
@@ -12222,7 +12187,8 @@
       "googleFamily": "AR One Sans",
       "num": 84,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-lt-museum",
@@ -12241,7 +12207,8 @@
       "source": "self-hosted",
       "num": 85,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-parkinsans",
@@ -12252,7 +12219,8 @@
       "googleFamily": "Parkinsans",
       "num": 87,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-faculty-glyphic",
@@ -12263,7 +12231,8 @@
       "googleFamily": "Faculty Glyphic",
       "num": 88,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-doto",
@@ -12274,7 +12243,8 @@
       "googleFamily": "Doto",
       "num": 89,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-azeret-mono",
@@ -12285,7 +12255,8 @@
       "googleFamily": "Azeret Mono",
       "num": 90,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-pretendard",
@@ -12304,7 +12275,8 @@
       "source": "self-hosted",
       "num": 91,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-ovo",
@@ -12315,7 +12287,8 @@
       "googleFamily": "Ovo",
       "num": 92,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-moche",
@@ -12334,7 +12307,8 @@
       "source": "self-hosted",
       "num": 93,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-ronzino",
@@ -12353,7 +12327,8 @@
       "source": "self-hosted",
       "num": 94,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-lt-superior",
@@ -12372,7 +12347,8 @@
       "source": "self-hosted",
       "num": 95,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-maragsa",
@@ -12391,7 +12367,8 @@
       "source": "self-hosted",
       "num": 96,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Display"
     },
     {
       "id": "bram-naus-liter",
@@ -12402,7 +12379,8 @@
       "googleFamily": "Liter",
       "num": 97,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-aujournuit",
@@ -12421,7 +12399,8 @@
       "source": "self-hosted",
       "num": 98,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-boldonse",
@@ -12432,7 +12411,8 @@
       "googleFamily": "Boldonse",
       "num": 99,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-modelo",
@@ -12451,7 +12431,8 @@
       "source": "self-hosted",
       "num": 100,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Display"
     },
     {
       "id": "bram-naus-special-gothic",
@@ -12462,7 +12443,8 @@
       "googleFamily": "Special Gothic",
       "num": 102,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-phudu",
@@ -12473,7 +12455,8 @@
       "googleFamily": "Phudu",
       "num": 103,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-golos-text",
@@ -12484,7 +12467,8 @@
       "googleFamily": "Golos Text",
       "num": 104,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-epistle",
@@ -12503,7 +12487,8 @@
       "source": "self-hosted",
       "num": 105,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-cascadia-mono",
@@ -12514,7 +12499,8 @@
       "googleFamily": "Cascadia Mono",
       "num": 106,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-ancizar-sans",
@@ -12525,7 +12511,8 @@
       "googleFamily": "Ancizar Sans",
       "num": 107,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-albert-sans",
@@ -12536,7 +12523,8 @@
       "googleFamily": "Albert Sans",
       "num": 108,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-oak-sans",
@@ -12555,7 +12543,8 @@
       "source": "self-hosted",
       "num": 110,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-commissioner",
@@ -12566,7 +12555,8 @@
       "googleFamily": "Commissioner",
       "num": 111,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-bdo-grotesk",
@@ -12585,7 +12575,8 @@
       "source": "self-hosted",
       "num": 112,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-maname",
@@ -12596,7 +12587,8 @@
       "googleFamily": "Maname",
       "num": 113,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-jost",
@@ -12607,7 +12599,8 @@
       "googleFamily": "Jost",
       "num": 114,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-hanken-grotesk",
@@ -12618,7 +12611,8 @@
       "googleFamily": "Hanken Grotesk",
       "num": 115,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-necto-mono",
@@ -12637,7 +12631,8 @@
       "source": "self-hosted",
       "num": 116,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Mono"
     },
     {
       "id": "bram-naus-quattrocento",
@@ -12648,7 +12643,8 @@
       "googleFamily": "Quattrocento",
       "num": 117,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-esse-grotesk",
@@ -12667,7 +12663,8 @@
       "source": "self-hosted",
       "num": 118,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-kyivtype-sans",
@@ -12686,7 +12683,8 @@
       "source": "self-hosted",
       "num": 119,
       "license": "unknown",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-tiktok-sans",
@@ -12697,7 +12695,8 @@
       "googleFamily": "TikTok Sans",
       "num": 120,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-nata-sans",
@@ -12708,7 +12707,8 @@
       "googleFamily": "Nata Sans",
       "num": 121,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-tuffy",
@@ -12719,7 +12719,8 @@
       "googleFamily": "Tuffy",
       "num": 122,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-sunday-masthead",
@@ -12738,7 +12739,8 @@
       "source": "self-hosted",
       "num": 123,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-syne",
@@ -12749,7 +12751,8 @@
       "googleFamily": "Syne",
       "num": 125,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-caudex",
@@ -12760,7 +12763,8 @@
       "googleFamily": "Caudex",
       "num": 126,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-alata",
@@ -12771,7 +12775,8 @@
       "googleFamily": "Alata",
       "num": 127,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-alan",
@@ -12782,7 +12787,8 @@
       "googleFamily": "Alan Sans",
       "num": 128,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-zalando-sans",
@@ -12793,7 +12799,8 @@
       "googleFamily": "Zalando Sans",
       "num": 130,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-schibsted-grotesk",
@@ -12804,7 +12811,8 @@
       "googleFamily": "Schibsted Grotesk",
       "num": 131,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-averia-serif-libre",
@@ -12815,7 +12823,8 @@
       "googleFamily": "Averia Serif Libre",
       "num": 132,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-stack-sans",
@@ -12826,7 +12835,8 @@
       "googleFamily": "Stack Sans Text",
       "num": 133,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-source-serif",
@@ -12837,7 +12847,8 @@
       "googleFamily": "Source Serif 4",
       "num": 134,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-cal-sans",
@@ -12848,7 +12859,8 @@
       "googleFamily": "Cal Sans",
       "num": 135,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-mattone",
@@ -12867,7 +12879,8 @@
       "source": "self-hosted",
       "num": 136,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-feroniapi",
@@ -12886,7 +12899,8 @@
       "source": "self-hosted",
       "num": 137,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-google-sans",
@@ -12897,7 +12911,8 @@
       "googleFamily": "Google Sans",
       "num": 138,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-epilogue",
@@ -12908,7 +12923,8 @@
       "googleFamily": "Epilogue",
       "num": 141,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-lilex",
@@ -12919,7 +12935,8 @@
       "googleFamily": "Lilex",
       "num": 142,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-uncut-sans",
@@ -12938,7 +12955,8 @@
       "source": "self-hosted",
       "num": 143,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-now",
@@ -12946,82 +12964,19 @@
       "foundry": "bram-naus",
       "faces": [
         {
-          "id": "bram-naus-now-thin",
-          "weight": 100,
-          "style": "Thin",
-          "italic": false,
-          "postscriptName": "Now-Thin",
-          "src": "Free Fonts/_incoming/Now-Thin.otf"
-        },
-        {
-          "id": "bram-naus-now-extralight",
-          "weight": 200,
-          "style": "ExtraLight",
-          "italic": false,
-          "postscriptName": "Now-ExtraLight",
-          "src": "Free Fonts/_incoming/Now-ExtraLight.otf"
-        },
-        {
-          "id": "bram-naus-now-light",
-          "weight": 300,
-          "style": "Light",
-          "italic": false,
-          "postscriptName": "Now-Light",
-          "src": "Free Fonts/_incoming/Now-Light.otf"
-        },
-        {
           "id": "bram-naus-now-regular",
           "weight": 400,
           "style": "Regular",
           "italic": false,
           "postscriptName": "Now-Regular",
           "src": "Free Fonts/Now/Now-Regular.otf"
-        },
-        {
-          "id": "bram-naus-now-black",
-          "weight": 400,
-          "style": "Black",
-          "italic": false,
-          "postscriptName": "Now-Black",
-          "src": "Free Fonts/_incoming/Now-Black.otf"
-        },
-        {
-          "id": "bram-naus-now-medium",
-          "weight": 500,
-          "style": "Medium",
-          "italic": false,
-          "postscriptName": "Now-Medium",
-          "src": "Free Fonts/_incoming/Now-Medium.otf"
-        },
-        {
-          "id": "bram-naus-now-semibold",
-          "weight": 600,
-          "style": "SemiBold",
-          "italic": false,
-          "postscriptName": "Now-SemiBold",
-          "src": "Free Fonts/_incoming/Now-SemiBold.otf"
-        },
-        {
-          "id": "bram-naus-now-bold",
-          "weight": 700,
-          "style": "Bold",
-          "italic": false,
-          "postscriptName": "Now-Bold",
-          "src": "Free Fonts/_incoming/Now-Bold.otf"
-        },
-        {
-          "id": "bram-naus-now-extrabold",
-          "weight": 800,
-          "style": "ExtraBold",
-          "italic": false,
-          "postscriptName": "Now-ExtraBold",
-          "src": "Free Fonts/_incoming/Now-ExtraBold.otf"
         }
       ],
       "source": "self-hosted",
       "num": 145,
       "license": "Free-noredist",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-paysage",
@@ -13040,7 +12995,8 @@
       "source": "self-hosted",
       "num": 148,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-miranda-sans",
@@ -13051,7 +13007,8 @@
       "googleFamily": "Miranda Sans",
       "num": 149,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-lct-ciburial",
@@ -13070,7 +13027,8 @@
       "source": "self-hosted",
       "num": 151,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-kecal",
@@ -13089,7 +13047,8 @@
       "source": "self-hosted",
       "num": 152,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Display"
     },
     {
       "id": "bram-naus-hepta-slab",
@@ -13100,7 +13059,8 @@
       "googleFamily": "Hepta Slab",
       "num": 153,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-spectral",
@@ -13111,7 +13071,8 @@
       "googleFamily": "Spectral",
       "num": 155,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Serif"
     },
     {
       "id": "bram-naus-strichpunkt-sans",
@@ -13122,7 +13083,8 @@
       "googleFamily": "Strichpunkt Sans",
       "num": 156,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-scoutie-sans",
@@ -13133,7 +13095,8 @@
       "googleFamily": "Scoutie Sans",
       "num": 157,
       "license": "OFL-1.1",
-      "redistributable": true
+      "redistributable": true,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-abc-areal-superfamily-variable",
@@ -13151,7 +13114,8 @@
       ],
       "source": "self-hosted",
       "license": "Dinamo trial (free to use, no redistribution)",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Sans"
     },
     {
       "id": "bram-naus-ladi",
@@ -13185,7 +13149,8 @@
       ],
       "source": "self-hosted",
       "license": "unknown (free to use per owner)",
-      "redistributable": false
+      "redistributable": false,
+      "category": "Display"
     }
   ]
 }

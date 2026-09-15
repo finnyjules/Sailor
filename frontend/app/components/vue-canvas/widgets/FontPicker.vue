@@ -234,7 +234,7 @@ function pickLibrary(family: string) { emit('pick', { source: 'library', family 
           @click="pickFeatured(f)"
         >
           <span class="fp__row-name" :style="{ fontFamily: f.source === 'google' ? (f.googleFamily || f.family) : f.family }">{{ f.family }}</span>
-          <span class="fp__row-meta">{{ f.source === 'google' ? 'google' : f.faces.length }}</span>
+          <span class="fp__row-meta">{{ f.category }}</span>
         </button>
         <div v-if="!filteredFeatured.length" class="fp__more">No fonts match “{{ query }}”.</div>
       </div>

@@ -441,7 +441,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside, true
               class="flex-1 text-left text-[15px] text-white leading-tight truncate"
               :style="{ fontFamily: f.source === 'google' ? (f.googleFamily || f.family) : f.family }"
             >{{ f.family }}</span>
-            <span class="text-[9px] text-white/20 uppercase tracking-wider shrink-0 select-none">{{ f.source === 'google' ? 'google' : f.faces.length }}</span>
+            <span class="text-[9px] text-white/20 uppercase tracking-wider shrink-0 select-none">{{ f.category }}</span>
             <Check v-if="(f.source === 'google' ? (f.googleFamily || f.family) : f.family) === modelValue" class="size-3 text-action shrink-0" />
           </button>
           <div

@@ -84,7 +84,7 @@ export function buildFeaturedFamilies(scanned, seed, { bundleRestricted } = {}) 
   for (const e of seed || []) {
     const redistributable = e.redistributable !== false
     if (!redistributable && !bundleRestricted) continue
-    const base = { num: e.num, license: e.license, redistributable }
+    const base = { num: e.num, license: e.license, redistributable, category: e.category }
     if (e.source === 'google') {
       out.push({
         id: familyId('bram-naus', e.name),

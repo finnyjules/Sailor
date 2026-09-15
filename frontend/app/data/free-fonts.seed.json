@@ -8,7 +8,8 @@
     "designer": "Information Architects Inc. / Bold Monday",
     "sourceUrl": "https://github.com/iaolo/iA-Fonts",
     "fileUrl": "https://raw.githubusercontent.com/iaolo/iA-Fonts/master/iA%20Writer%20Quattro/Static/iAWriterQuattroS-Regular.ttf",
-    "bram": "iA Writer"
+    "bram": "iA Writer",
+    "category": "Serif"
   },
   {
     "name": "Vercetti",
@@ -19,7 +20,8 @@
     "designer": "Filippos Fragkogiannis (concept) / Richard Mandona (execution)",
     "sourceUrl": "https://filipposfragkogiannis.com/fonts/vercetti-regular/",
     "bram": "Vercetti",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Sans"
   },
   {
     "name": "National Park",
@@ -27,7 +29,8 @@
     "source": "google",
     "googleFamily": "National Park",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Familjen Grotesk",
@@ -35,7 +38,8 @@
     "source": "google",
     "googleFamily": "Familjen Grotesk",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Migha",
@@ -46,7 +50,8 @@
     "designer": "Seniors Studio (distributed via Pixel Surplus)",
     "sourceUrl": "https://pixelsurplus.com/products/migha-free-variable-font",
     "bram": "Migha",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Display"
   },
   {
     "name": "Bricolage Grotesque",
@@ -54,7 +59,8 @@
     "source": "google",
     "googleFamily": "Bricolage Grotesque",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Dela Gothic",
@@ -62,7 +68,8 @@
     "source": "google",
     "googleFamily": "Dela Gothic One",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Display"
   },
   {
     "name": "Junicode",
@@ -73,7 +80,8 @@
     "designer": "Peter S. Baker (psb1558)",
     "sourceUrl": "https://github.com/psb1558/Junicode-font",
     "bram": "Junicode",
-    "note": "zip-only source"
+    "note": "zip-only source",
+    "category": "Serif"
   },
   {
     "name": "Gabarito",
@@ -81,7 +89,8 @@
     "source": "google",
     "googleFamily": "Gabarito",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Display"
   },
   {
     "name": "Sora",
@@ -89,7 +98,8 @@
     "source": "google",
     "googleFamily": "Sora",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Nacelle",
@@ -100,7 +110,8 @@
     "designer": "Sora Sagano (dotcolon.net)",
     "sourceUrl": "https://github.com/reinhart1010/nacelle",
     "fileUrl": "https://raw.githubusercontent.com/reinhart1010/nacelle/master/fonts/Nacelle-Regular.ttf",
-    "bram": "Nacelle"
+    "bram": "Nacelle",
+    "category": "Sans"
   },
   {
     "name": "Goudy Bookletter 1911",
@@ -108,7 +119,8 @@
     "source": "google",
     "googleFamily": "Goudy Bookletter 1911",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Onest",
@@ -116,7 +128,8 @@
     "source": "google",
     "googleFamily": "Onest",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Geologica",
@@ -124,7 +137,8 @@
     "source": "google",
     "googleFamily": "Geologica",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Ortica Linear",
@@ -135,7 +149,8 @@
     "designer": "Benedetta Bovani for Collletttivo",
     "sourceUrl": "https://github.com/collletttivo/ortica",
     "fileUrl": "https://raw.githubusercontent.com/collletttivo/ortica/master/fonts/OrticaLinear-Regular.otf",
-    "bram": "Ortica"
+    "bram": "Ortica",
+    "category": "Sans"
   },
   {
     "name": "Overused Grotesk",
@@ -146,7 +161,8 @@
     "designer": "Bao Nguyen (RandomMaerks)",
     "sourceUrl": "https://github.com/RandomMaerks/Overused-Grotesk",
     "fileUrl": "https://raw.githubusercontent.com/RandomMaerks/Overused-Grotesk/main/fonts/ttf/OverusedGrotesk-Roman.ttf",
-    "bram": "Overused Grotesk"
+    "bram": "Overused Grotesk",
+    "category": "Sans"
   },
   {
     "name": "Cabinet Grotesk",
@@ -157,7 +173,8 @@
     "designer": "Indian Type Foundry (via Fontshare)",
     "sourceUrl": "https://www.fontshare.com/fonts/cabinet-grotesk",
     "bram": "Cabinet",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Sans"
   },
   {
     "name": "TASA Orbiter",
@@ -165,7 +182,8 @@
     "source": "google",
     "googleFamily": "TASA Orbiter",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Sleigh",
@@ -187,7 +205,8 @@
     "designer": "NaN (nan.xyz)",
     "sourceUrl": "https://www.nan.xyz/fonts/nan-holo-gigawide-ultra/",
     "bram": "Holo Gigawide Ultra",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Display"
   },
   {
     "name": "Absans",
@@ -198,7 +217,8 @@
     "designer": "Valerio Monopoli for Collletttivo",
     "sourceUrl": "https://github.com/collletttivo/absans",
     "fileUrl": "https://raw.githubusercontent.com/collletttivo/absans/master/fonts/Absans-Regular.otf",
-    "bram": "Absans"
+    "bram": "Absans",
+    "category": "Sans"
   },
   {
     "name": "Open Sauce Sans",
@@ -209,7 +229,8 @@
     "designer": "Marcus Sterz / Creative Sauce",
     "sourceUrl": "https://github.com/marcologous/Open-Sauce-Fonts",
     "fileUrl": "https://raw.githubusercontent.com/marcologous/Open-Sauce-Fonts/master/fonts/ttf/OpenSauceSans-Regular.ttf",
-    "bram": "Open Sauce"
+    "bram": "Open Sauce",
+    "category": "Sans"
   },
   {
     "name": "Hedvig Letters Serif",
@@ -217,7 +238,8 @@
     "source": "google",
     "googleFamily": "Hedvig Letters Serif",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Lexend",
@@ -225,7 +247,8 @@
     "source": "google",
     "googleFamily": "Lexend",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Stoke",
@@ -233,7 +256,8 @@
     "source": "google",
     "googleFamily": "Stoke",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Climate Crisis",
@@ -241,7 +265,8 @@
     "source": "google",
     "googleFamily": "Climate Crisis",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Display"
   },
   {
     "name": "Lastik",
@@ -260,7 +285,8 @@
     "source": "google",
     "googleFamily": "SN Pro",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Violet Sans",
@@ -271,7 +297,8 @@
     "designer": "Calvin Waterman (Violet Office)",
     "sourceUrl": "https://github.com/violetoffice/violet_sans",
     "fileUrl": "https://raw.githubusercontent.com/violetoffice/violet_sans/master/fonts/TTF/VioletSans-Regular.ttf",
-    "bram": "Violet"
+    "bram": "Violet",
+    "category": "Sans"
   },
   {
     "name": "Ojuju",
@@ -279,7 +306,8 @@
     "source": "google",
     "googleFamily": "Ojuju",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Sneaky",
@@ -290,7 +318,8 @@
     "designer": "Jules Durand (Collletttivo)",
     "sourceUrl": "https://github.com/collletttivo/sneaky-times",
     "fileUrl": "https://raw.githubusercontent.com/collletttivo/sneaky-times/main/fonts/Sneaky-Times.otf",
-    "bram": "Sneaky Times"
+    "bram": "Sneaky Times",
+    "category": "Serif"
   },
   {
     "name": "Shantell Sans",
@@ -298,7 +327,8 @@
     "source": "google",
     "googleFamily": "Shantell Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Display"
   },
   {
     "name": "Be Vietnam Pro",
@@ -306,7 +336,8 @@
     "source": "google",
     "googleFamily": "Be Vietnam Pro",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Mochiy Pop One",
@@ -314,7 +345,8 @@
     "source": "google",
     "googleFamily": "Mochiy Pop One",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Gloock",
@@ -322,7 +354,8 @@
     "source": "google",
     "googleFamily": "Gloock",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "New Title",
@@ -333,7 +366,8 @@
     "designer": "Jérémie Hornus & Julie Soudanne (Indian Type Foundry)",
     "sourceUrl": "https://www.fontshare.com/fonts/new-title",
     "bram": "New Title",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Serif"
   },
   {
     "name": "Shippori Mincho",
@@ -341,7 +375,8 @@
     "source": "google",
     "googleFamily": "Shippori Mincho",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Haskoy",
@@ -352,7 +387,8 @@
     "designer": "Ertekin Erdin (ertekinno)",
     "sourceUrl": "https://github.com/ertekinno/haskoy",
     "fileUrl": "https://raw.githubusercontent.com/ertekinno/haskoy/main/fonts/ttf/Haskoy-variable.ttf",
-    "bram": "Hasköy"
+    "bram": "Hasköy",
+    "category": "Sans"
   },
   {
     "name": "Realce",
@@ -363,7 +399,8 @@
     "designer": "Carlos Mignot (Plau)",
     "sourceUrl": "https://www-plau-co.rds.land/realce",
     "bram": "Realce",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Display"
   },
   {
     "name": "Platypi",
@@ -371,7 +408,8 @@
     "source": "google",
     "googleFamily": "Platypi",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Koulen",
@@ -379,7 +417,8 @@
     "source": "google",
     "googleFamily": "Koulen",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Display"
   },
   {
     "name": "Aspekta",
@@ -390,7 +429,8 @@
     "designer": "Ivo Dolenc",
     "sourceUrl": "https://github.com/ivodolenc/aspekta",
     "fileUrl": "https://raw.githubusercontent.com/ivodolenc/aspekta/main/packages/fonts/ttf/Aspekta-400.ttf",
-    "bram": "Aspekta"
+    "bram": "Aspekta",
+    "category": "Sans"
   },
   {
     "name": "Jaro",
@@ -398,7 +438,8 @@
     "source": "google",
     "googleFamily": "Jaro",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Afacad",
@@ -406,7 +447,8 @@
     "source": "google",
     "googleFamily": "Afacad",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Kalnia",
@@ -414,7 +456,8 @@
     "source": "google",
     "googleFamily": "Kalnia",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Ribes",
@@ -425,7 +468,8 @@
     "designer": "Luigi Gorlero (Collletttivo)",
     "sourceUrl": "https://github.com/collletttivo/ribes",
     "fileUrl": "https://raw.githubusercontent.com/collletttivo/ribes/main/fonts/Ribes-Black.otf",
-    "bram": "Ribes"
+    "bram": "Ribes",
+    "category": "Display"
   },
   {
     "name": "Open Runde",
@@ -436,7 +480,8 @@
     "designer": "Laurids Kern",
     "sourceUrl": "https://github.com/lauridskern/open-runde",
     "fileUrl": "https://raw.githubusercontent.com/lauridskern/open-runde/main/src/desktop/OpenRunde-Regular.otf",
-    "bram": "Open Runde"
+    "bram": "Open Runde",
+    "category": "Sans"
   },
   {
     "name": "Anek Bangla",
@@ -444,7 +489,8 @@
     "source": "google",
     "googleFamily": "Anek Bangla",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Galdeano",
@@ -452,7 +498,8 @@
     "source": "google",
     "googleFamily": "Galdeano",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Heal The Web A",
@@ -463,7 +510,8 @@
     "designer": "Rainbow Unicorn (studio); production by Jakub Kanior",
     "sourceUrl": "https://github.com/rainbowunicornstudio/healtheweb-typeface",
     "fileUrl": "https://raw.githubusercontent.com/rainbowunicornstudio/healtheweb-typeface/main/HealTheWebA-Regular.otf",
-    "bram": "Heal The Web"
+    "bram": "Heal The Web",
+    "category": "Sans"
   },
   {
     "name": "Funnel",
@@ -471,7 +519,8 @@
     "source": "google",
     "googleFamily": "Funnel Display",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Display"
   },
   {
     "name": "Neue Regrade",
@@ -482,7 +531,8 @@
     "designer": "Ungvári József Márk",
     "sourceUrl": "https://jociungvari.gumroad.com/l/neueregrade",
     "bram": "Neue Regrade",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Sans"
   },
   {
     "name": "Damion",
@@ -490,7 +540,8 @@
     "source": "google",
     "googleFamily": "Damion",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Script"
   },
   {
     "name": "LCT Mogi",
@@ -501,7 +552,8 @@
     "designer": "Deni Anggara (Lokal Container / LCTipografi)",
     "sourceUrl": "https://github.com/LCTipografi/LCT-Mogi",
     "fileUrl": "https://raw.githubusercontent.com/LCTipografi/LCT-Mogi/main/Fonts/TTF/LCTMogi-A.ttf",
-    "bram": "Mogi"
+    "bram": "Mogi",
+    "category": "Display"
   },
   {
     "name": "Cause",
@@ -509,7 +561,8 @@
     "source": "google",
     "googleFamily": "Cause",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Script"
   },
   {
     "name": "NT Somic",
@@ -520,7 +573,8 @@
     "designer": "NT Type (github: nnttttyyppee)",
     "sourceUrl": "https://github.com/nnttttyyppee/NT-Somic",
     "fileUrl": "https://raw.githubusercontent.com/nnttttyyppee/NT-Somic/main/Fonts/Desktop/Static/TrueType/NTSomic-Regular.ttf",
-    "bram": "Somic"
+    "bram": "Somic",
+    "category": "Sans"
   },
   {
     "name": "Sinar",
@@ -542,7 +596,8 @@
     "designer": "Milena Leimig",
     "sourceUrl": "https://www.behance.net/gallery/119722547/FUNGIS-Free-Typeface",
     "bram": "Fungis",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Display"
   },
   {
     "name": "Gully",
@@ -553,7 +608,8 @@
     "designer": "MagicType (Jaikishan Patel)",
     "sourceUrl": "https://github.com/magictype/Gully",
     "fileUrl": "https://raw.githubusercontent.com/magictype/Gully/main/fonts/ttf/Gully-Bold.ttf",
-    "bram": "Gully"
+    "bram": "Gully",
+    "category": "Display"
   },
   {
     "name": "Atkinson Hyperlegible",
@@ -561,7 +617,8 @@
     "source": "google",
     "googleFamily": "Atkinson Hyperlegible",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Frick 0.3",
@@ -572,7 +629,8 @@
     "designer": "Dennis Grauel",
     "sourceUrl": "https://github.com/dennisgrauel/Frick",
     "fileUrl": "https://raw.githubusercontent.com/dennisgrauel/Frick/main/fonts/otf/Frick0.3-Regular.otf",
-    "bram": "Frick"
+    "bram": "Frick",
+    "category": "Display"
   },
   {
     "name": "Petrona",
@@ -580,7 +638,8 @@
     "source": "google",
     "googleFamily": "Petrona",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Glyseric",
@@ -591,7 +650,8 @@
     "designer": "Bring To Type",
     "sourceUrl": "https://pixelsurplus.com/products/glyseric-typeface",
     "bram": "Glyseric",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Display"
   },
   {
     "name": "Murecho",
@@ -599,7 +659,8 @@
     "source": "google",
     "googleFamily": "Murecho",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "AR One Sans",
@@ -607,7 +668,8 @@
     "source": "google",
     "googleFamily": "AR One Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "LT Museum",
@@ -618,7 +680,8 @@
     "designer": "LyonsType (Dan P. Lyons)",
     "sourceUrl": "https://www.dafont.com/lt-museum.font",
     "bram": "Museum",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Serif"
   },
   {
     "name": "Parkinsans",
@@ -626,7 +689,8 @@
     "source": "google",
     "googleFamily": "Parkinsans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Faculty Glyphic",
@@ -634,7 +698,8 @@
     "source": "google",
     "googleFamily": "Faculty Glyphic",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Doto",
@@ -642,7 +707,8 @@
     "source": "google",
     "googleFamily": "Doto",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Azeret Mono",
@@ -650,7 +716,8 @@
     "source": "google",
     "googleFamily": "Azeret Mono",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Pretendard",
@@ -661,7 +728,8 @@
     "designer": "Kil Hyung-jin (github: orioncactus)",
     "sourceUrl": "https://github.com/orioncactus/pretendard",
     "fileUrl": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/public/static/Pretendard-Regular.otf",
-    "bram": "Pretendard"
+    "bram": "Pretendard",
+    "category": "Sans"
   },
   {
     "name": "Ovo",
@@ -669,7 +737,8 @@
     "source": "google",
     "googleFamily": "Ovo",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Moche",
@@ -680,7 +749,8 @@
     "designer": "Vivien Gorse (Pépite type foundry)",
     "sourceUrl": "https://www.typo.pepite.world/fonderie/moche",
     "bram": "Moche",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Sans"
   },
   {
     "name": "Ronzino",
@@ -691,7 +761,8 @@
     "designer": "Luigi Gorlero & Nunzio Mazzaferro (Collletttivo)",
     "sourceUrl": "https://github.com/collletttivo/ronzino",
     "fileUrl": "https://raw.githubusercontent.com/collletttivo/ronzino/main/fonts/Ronzino-Regular.otf",
-    "bram": "Ronzino"
+    "bram": "Ronzino",
+    "category": "Serif"
   },
   {
     "name": "LT Superior",
@@ -702,7 +773,8 @@
     "designer": "LyonsType (Dan P. Lyons)",
     "sourceUrl": "https://github.com/LyonsType/LTSuperior",
     "bram": "Superior",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Sans"
   },
   {
     "name": "Maragsa",
@@ -713,7 +785,8 @@
     "designer": "John David Maza",
     "sourceUrl": "https://johndavidmaza.gumroad.com/l/Maragsa",
     "bram": "Maragsa",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Display"
   },
   {
     "name": "Liter",
@@ -721,7 +794,8 @@
     "source": "google",
     "googleFamily": "Liter",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Aujournuit",
@@ -732,7 +806,8 @@
     "designer": "Teo Gaudet",
     "sourceUrl": "https://github.com/collletttivo/aujournuit",
     "fileUrl": "https://raw.githubusercontent.com/collletttivo/aujournuit/main/fonts/Aujournuit-Regular.otf",
-    "bram": "Aujournuit"
+    "bram": "Aujournuit",
+    "category": "Serif"
   },
   {
     "name": "Boldonse",
@@ -740,7 +815,8 @@
     "source": "google",
     "googleFamily": "Boldonse",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Display"
   },
   {
     "name": "Modelo",
@@ -751,7 +827,8 @@
     "designer": "Maxitype (Maximage studio)",
     "sourceUrl": "https://maxitype.com/typeface/modelo/",
     "bram": "Modelo",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Display"
   },
   {
     "name": "Special Gothic",
@@ -759,7 +836,8 @@
     "source": "google",
     "googleFamily": "Special Gothic",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Phudu",
@@ -767,7 +845,8 @@
     "source": "google",
     "googleFamily": "Phudu",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Display"
   },
   {
     "name": "Golos Text",
@@ -775,7 +854,8 @@
     "source": "google",
     "googleFamily": "Golos Text",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Epistle",
@@ -786,7 +866,8 @@
     "designer": "Eli Heuer (eliheuer)",
     "sourceUrl": "https://github.com/eliheuer/epistle",
     "fileUrl": "https://raw.githubusercontent.com/eliheuer/epistle/master/fonts/Epistle-Regular.ttf",
-    "bram": "Epistle"
+    "bram": "Epistle",
+    "category": "Serif"
   },
   {
     "name": "Cascadia Mono",
@@ -794,7 +875,8 @@
     "source": "google",
     "googleFamily": "Cascadia Mono",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Ancizar Sans",
@@ -802,7 +884,8 @@
     "source": "google",
     "googleFamily": "Ancizar Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Albert Sans",
@@ -810,7 +893,8 @@
     "source": "google",
     "googleFamily": "Albert Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Oak Sans",
@@ -821,7 +905,8 @@
     "designer": "Walven (GitHub handle; full name not found)",
     "sourceUrl": "https://github.com/Walven/OakSans",
     "fileUrl": "https://raw.githubusercontent.com/Walven/OakSans/main/fonts/ttf/OakSans-Regular.ttf",
-    "bram": "Oak Sans"
+    "bram": "Oak Sans",
+    "category": "Sans"
   },
   {
     "name": "Commissioner",
@@ -829,7 +914,8 @@
     "source": "google",
     "googleFamily": "Commissioner",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "BDO Grotesk",
@@ -840,7 +926,8 @@
     "designer": "Deni Anggara (Lokal Container)",
     "sourceUrl": "https://github.com/LCTipografi/BDO-Grotesk",
     "fileUrl": "https://raw.githubusercontent.com/LCTipografi/BDO-Grotesk/main/Fonts/TTF/BDOGrotesk-Regular.ttf",
-    "bram": "BDO Grotesk"
+    "bram": "BDO Grotesk",
+    "category": "Sans"
   },
   {
     "name": "Maname",
@@ -848,7 +935,8 @@
     "source": "google",
     "googleFamily": "Maname",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Jost",
@@ -856,7 +944,8 @@
     "source": "google",
     "googleFamily": "Jost",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Hanken Grotesk",
@@ -864,7 +953,8 @@
     "source": "google",
     "googleFamily": "Hanken Grotesk",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Necto Mono",
@@ -875,7 +965,8 @@
     "designer": "Marco Condello",
     "sourceUrl": "https://github.com/collletttivo/necto-mono",
     "fileUrl": "https://raw.githubusercontent.com/collletttivo/necto-mono/main/fonts/NectoMono-Regular.otf",
-    "bram": "Necto Mono"
+    "bram": "Necto Mono",
+    "category": "Mono"
   },
   {
     "name": "Quattrocento",
@@ -883,7 +974,8 @@
     "source": "google",
     "googleFamily": "Quattrocento",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Esse Grotesk",
@@ -894,7 +986,8 @@
     "designer": "Enzo Grandio",
     "sourceUrl": "https://pixelsurplus.com/products/esse-grotesk-free-typeface",
     "bram": "Esse Grotesk",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Sans"
   },
   {
     "name": "KyivType Sans",
@@ -905,7 +998,8 @@
     "designer": "Dmytro Rastvortsev",
     "sourceUrl": "https://www.behance.net/gallery/90690285/KyivType-variable-superfamily",
     "bram": "Kyiv Type Sans",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Sans"
   },
   {
     "name": "TikTok Sans",
@@ -913,7 +1007,8 @@
     "source": "google",
     "googleFamily": "TikTok Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Nata Sans",
@@ -921,7 +1016,8 @@
     "source": "google",
     "googleFamily": "Nata Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Tuffy",
@@ -929,7 +1025,8 @@
     "source": "google",
     "googleFamily": "Tuffy",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Sunday Masthead",
@@ -940,7 +1037,8 @@
     "designer": "Dennis Grauel",
     "sourceUrl": "https://github.com/dennisgrauel/The-Sunday-Paper-fonts",
     "fileUrl": "https://raw.githubusercontent.com/dennisgrauel/The-Sunday-Paper-fonts/main/Sunday%20Masthead/fonts/otf/SundayMasthead-Regular.otf",
-    "bram": "Sunday Masthead"
+    "bram": "Sunday Masthead",
+    "category": "Serif"
   },
   {
     "name": "Drago",
@@ -959,7 +1057,8 @@
     "source": "google",
     "googleFamily": "Syne",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Caudex",
@@ -967,7 +1066,8 @@
     "source": "google",
     "googleFamily": "Caudex",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Alata",
@@ -975,7 +1075,8 @@
     "source": "google",
     "googleFamily": "Alata",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Alan",
@@ -983,7 +1084,8 @@
     "source": "google",
     "googleFamily": "Alan Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Zalando Sans",
@@ -991,7 +1093,8 @@
     "source": "google",
     "googleFamily": "Zalando Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Schibsted Grotesk",
@@ -999,7 +1102,8 @@
     "source": "google",
     "googleFamily": "Schibsted Grotesk",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Averia Serif Libre",
@@ -1007,7 +1111,8 @@
     "source": "google",
     "googleFamily": "Averia Serif Libre",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Display"
   },
   {
     "name": "Stack Sans",
@@ -1015,7 +1120,8 @@
     "source": "google",
     "googleFamily": "Stack Sans Text",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Source Serif",
@@ -1023,7 +1129,8 @@
     "source": "google",
     "googleFamily": "Source Serif 4",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Cal Sans",
@@ -1031,7 +1138,8 @@
     "source": "google",
     "googleFamily": "Cal Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Mattone",
@@ -1042,7 +1150,8 @@
     "designer": "Nunzio Mazzaferro (Collletttivo)",
     "sourceUrl": "https://github.com/collletttivo/mattone",
     "fileUrl": "https://raw.githubusercontent.com/collletttivo/mattone/main/fonts/Mattone-Regular.otf",
-    "bram": "Mattone"
+    "bram": "Mattone",
+    "category": "Display"
   },
   {
     "name": "Feroniapi",
@@ -1053,7 +1162,8 @@
     "designer": "Julienne Richard (redesign of Peter Wiegel's Feronia)",
     "sourceUrl": "https://gitlab.com/velvetyne/feroniapi",
     "fileUrl": "https://gitlab.com/velvetyne/feroniapi/-/raw/main/fonts/otf/Feroniapi-MediumItalic.otf",
-    "bram": "Feroniapi"
+    "bram": "Feroniapi",
+    "category": "Serif"
   },
   {
     "name": "Google Sans",
@@ -1061,7 +1171,8 @@
     "source": "google",
     "googleFamily": "Google Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Epilogue",
@@ -1069,7 +1180,8 @@
     "source": "google",
     "googleFamily": "Epilogue",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Lilex",
@@ -1077,7 +1189,8 @@
     "source": "google",
     "googleFamily": "Lilex",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Uncut Sans",
@@ -1088,7 +1201,8 @@
     "designer": "Kasper Nordkvist",
     "sourceUrl": "https://github.com/kaspernordkvist/uncut_sans",
     "bram": "Uncut Sans",
-    "note": "zip-only source"
+    "note": "zip-only source",
+    "category": "Sans"
   },
   {
     "name": "Faberge",
@@ -1110,7 +1224,8 @@
     "designer": "Hanken Design Co.",
     "sourceUrl": "https://hanken.co/products/now",
     "bram": "Now",
-    "note": "no direct file URL found"
+    "note": "no direct file URL found",
+    "category": "Sans"
   },
   {
     "name": "Memoir",
@@ -1132,7 +1247,8 @@
     "designer": "Anton Moglia",
     "sourceUrl": "https://gitlab.com/antonmoglia/Paysage",
     "fileUrl": "https://gitlab.com/antonmoglia/Paysage/-/raw/master/fonts/otf/Paysage-Regular.otf",
-    "bram": "Paysage"
+    "bram": "Paysage",
+    "category": "Display"
   },
   {
     "name": "Miranda Sans",
@@ -1140,7 +1256,8 @@
     "source": "google",
     "googleFamily": "Miranda Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Marauder",
@@ -1162,7 +1279,8 @@
     "designer": "Lokal Container Tipografi (LCTipografi), Bandung, Indonesia",
     "sourceUrl": "https://github.com/LCTipografi/LCT-Ciburial",
     "fileUrl": "https://raw.githubusercontent.com/LCTipografi/LCT-Ciburial/main/Fonts/OTF/LCT-Ciburial-Regular.otf",
-    "bram": "Ciburial"
+    "bram": "Ciburial",
+    "category": "Sans"
   },
   {
     "name": "Kecal",
@@ -1173,7 +1291,8 @@
     "designer": "Jiri Krblich (Fungi Type)",
     "sourceUrl": "https://github.com/fungitype/kecal",
     "fileUrl": "https://raw.githubusercontent.com/fungitype/kecal/main/export/Desktop/Kecal-Regular.otf",
-    "bram": "Kecal"
+    "bram": "Kecal",
+    "category": "Display"
   },
   {
     "name": "Hepta Slab",
@@ -1181,7 +1300,8 @@
     "source": "google",
     "googleFamily": "Hepta Slab",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Avio Sans",
@@ -1200,7 +1320,8 @@
     "source": "google",
     "googleFamily": "Spectral",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Serif"
   },
   {
     "name": "Strichpunkt Sans",
@@ -1208,7 +1329,8 @@
     "source": "google",
     "googleFamily": "Strichpunkt Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Scoutie Sans",
@@ -1216,7 +1338,8 @@
     "source": "google",
     "googleFamily": "Scoutie Sans",
     "license": "OFL-1.1",
-    "redistributable": true
+    "redistributable": true,
+    "category": "Sans"
   },
   {
     "name": "Ladi",
@@ -1224,7 +1347,8 @@
     "license": "unknown (free to use per owner)",
     "redistributable": false,
     "designer": "",
-    "note": "user-supplied; not on Bram list; flagged pending license confirmation"
+    "note": "user-supplied; not on Bram list; flagged pending license confirmation",
+    "category": "Display"
   },
   {
     "name": "ABC Areal Superfamily Variable",
@@ -1232,6 +1356,7 @@
     "license": "Dinamo trial (free to use, no redistribution)",
     "redistributable": false,
     "designer": "Dinamo",
-    "note": "user-supplied trial; flagged, must not ship"
+    "note": "user-supplied trial; flagged, must not ship",
+    "category": "Sans"
   }
 ]

@@ -253,7 +253,7 @@ watch(fontPickerOpen, (open) => { if (!open && fontSuggestRan.value) clearFontSu
         @click="selectFeatured(f)"
       >
         <span class="truncate text-[13px] text-white/90" :style="{ fontFamily: f.source === 'google' ? (f.googleFamily || f.family) : f.family }">{{ f.family }}</span>
-        <span class="shrink-0 text-[10px] text-white/40">{{ f.source === 'google' ? 'google' : f.faces.length }}</span>
+        <span class="shrink-0 text-[10px] text-white/40">{{ f.category }}</span>
       </button>
       <p v-if="!filteredFeatured.length" class="px-2 py-1 text-white/40">No matches</p>
     </div>

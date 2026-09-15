@@ -30,6 +30,8 @@ export interface LibraryFamily {
   redistributable?: boolean
   /** Curation order (Bram's series number); Featured tab sort key. */
   num?: number
+  /** Style label shown in the Featured picker: Sans | Serif | Display | Mono | Script. */
+  category?: string
 }
 
 export interface LibraryFoundry { id: string; label: string }
