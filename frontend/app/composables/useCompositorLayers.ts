@@ -243,6 +243,7 @@ export {
 import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/paint'
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
 import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTrailingBlurs, isGeometryKind } from '~/lib/compositor/effectStack'
+import { expandRecipe } from '~/lib/compositor/recipes'
 // Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
 // `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
 // is enabled, so the no-effect draw stays byte-identical below.
@@ -265,11 +266,13 @@ import type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind, WarpEffect,
   ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
+  RisographEffect, PhotocopyEffect, LetterpressEffect,
 } from '~/lib/compositor/effectStack'
 export type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
   ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
+  RisographEffect, PhotocopyEffect, LetterpressEffect,
 }
 export type { AdjustEffect, BloomEffect, DofEffect, DuotoneEffect, GradientMapEffect, GrainEffect, PostEffect, VignetteEffect }
 
@@ -2846,6 +2849,13 @@ function paintLayer(
               // See applyShaderPixelEffect above for the throw-safe / alpha recombine.
               case 'shader':
                 applyShaderPixelEffect(off, e as unknown as ShaderPixelEffect, { W, scale: s, t: _fieldCtx.t }); break
+              // F7 print recipes: expand the recipe's few dials into an ordered list of the
+              // primitive passes and run them on the layer's device-res offscreen. Absent =>
+              // this case never fires => byte-identical.
+              case 'risograph':
+              case 'photocopy':
+              case 'letterpress':
+                applyPasses(off, expandRecipe(e as unknown as RisographEffect | PhotocopyEffect | LetterpressEffect), { W, scale: s }); break
               default:
                 applyPasses(off, [e], { W, scale: s })
             }
