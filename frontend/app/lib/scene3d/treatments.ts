@@ -308,6 +308,9 @@ export interface AiRestyleTreatment extends TreatmentBase {
   mix: number
   resultRef: string
   inputHash: string
+  /** A MoodboardEntry id; '' = no Style (default). A POINTER only — the board's images/palette/prose
+   *  resolve at run time (useMoodboards().byId); pixels never enter the doc. */
+  styleId: string
   // S7.1 projector metadata: the bake view-projection (16, column-major .toArray()), the crop rect
   // [x, y, w, h] in bake-canvas px (4), the bake canvas size [w, h] (2), and the projector forward
   // normalize(target - position) in world space (3). Stored so the material can project the cached
@@ -388,7 +391,7 @@ export const TREATMENT_DEFAULTS = {
   // inputHash empty until the first re-run (pixels never live in the doc).
   // projViewProj/projRect/projSize/projForward default to [] — an unstamped restyle stores no
   // projector, so the material never injects and the object stays byte-identical to shipped S7.
-  aiRestyle: { prompt: '', strength: 0.6, model: 'fal-ai/flux-control-lora-depth', mix: 1, resultRef: '', inputHash: '', projViewProj: [], projRect: [], projSize: [], projForward: [] },
+  aiRestyle: { prompt: '', strength: 0.6, model: 'fal-ai/flux-control-lora-depth', mix: 1, resultRef: '', inputHash: '', styleId: '', projViewProj: [], projRect: [], projSize: [], projForward: [] },
 } as const
 
 /** Cross-hatch line-pitch bounds, in "px per block on a 1000-px-tall image" units (the pixelate
@@ -665,6 +668,7 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
         mix: clamp01(num(r.mix, D.aiRestyle.mix)),
         resultRef: typeof r.resultRef === 'string' ? r.resultRef : '',
         inputHash: typeof r.inputHash === 'string' ? r.inputHash : '',
+        styleId: typeof r.styleId === 'string' ? r.styleId : '',
         projViewProj: numArrayN(r.projViewProj, 16),
         projRect: numArrayN(r.projRect, 4),
         projSize: numArrayN(r.projSize, 2),

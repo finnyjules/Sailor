@@ -19,8 +19,9 @@
 //
 // runFal / firstFalImageUrl are auto-imported by Nitro from server/utils/falRun.ts.
 import { assertRateLimit } from '../../lib/rateLimit'
-import { RESTYLE_MODELS } from '~~/app/data/scene3d-restyle-models'
+import { pickRestyleModel } from '~~/app/data/scene3d-restyle-models'
 import { restyleInput } from '../../utils/restyleFalInputs'
+import { MOODBOARD_MAX_REFS } from '~~/shared/taste/moodboard'
 
 interface Body {
   prompt?: string
@@ -29,6 +30,8 @@ interface Body {
   strength?: number
   model?: string
   seed?: number
+  styleRefs?: string[] // ≤3 moodboard reference images as data-URLs, resolved client-side
+  styleText?: string   // moodboardStyleBlock(reading): palette + prose + avoids
 }
 
 export default defineEventHandler(async (event) => {
@@ -38,21 +41,28 @@ export default defineEventHandler(async (event) => {
   const prompt = (body?.prompt ?? '').trim()
   if (!prompt) throw createError({ statusCode: 400, message: 'prompt (the restyle instruction) is required' })
 
-  // Allowlist: pick the requested model from the fixed set, default to the first (depth control).
-  const model = RESTYLE_MODELS.find((m) => m.id === body?.model) ?? RESTYLE_MODELS[0]!
+  const styleRefs = Array.isArray(body?.styleRefs)
+    ? body.styleRefs.filter((u): u is string => typeof u === 'string' && !!u).slice(0, MOODBOARD_MAX_REFS)
+    : []
+  const styleText = typeof body?.styleText === 'string' ? body.styleText : ''
+
+  // A Style WITH reference images ⇒ the depth+style model; otherwise today's requested (selectable)
+  // model. pickRestyleModel enforces the allowlist and can never return the route-internal model
+  // from `requestedId` alone (it is selectable:false, reachable only via hasStyleRefs).
+  const model = pickRestyleModel(body?.model, styleRefs.length > 0)
 
   const beauty = typeof body?.beauty === 'string' ? body.beauty : ''
   const depth = typeof body?.depth === 'string' ? body.depth : ''
-  // The control image the chosen model actually consumes must be present.
-  const control = model.control === 'depth' ? depth : beauty
+  // 'image' models consume the beauty crop; 'depth' and 'depth+style' consume the depth crop.
+  const control = model.control === 'image' ? beauty : depth
   if (!control) {
-    throw createError({ statusCode: 400, message: `${model.control === 'depth' ? 'depth' : 'beauty'} control image is required` })
+    throw createError({ statusCode: 400, message: `${model.control === 'image' ? 'beauty' : 'depth'} control image is required` })
   }
 
   const strength = Math.max(0, Math.min(1, Number.isFinite(body?.strength) ? (body!.strength as number) : 0.6))
   const seed = Number.isFinite(body?.seed) ? Math.round(body!.seed as number) : Math.floor(Date.now() % 2_000_000_000)
 
-  const { app, input } = restyleInput(model, prompt, beauty, depth, strength, seed)
+  const { app, input } = restyleInput(model, prompt, beauty, depth, strength, seed, styleRefs, styleText)
   // 240s: a depth-control generation queues + runs longer than the 120s default under load (the
   // S7 acceptance run saw a job still settling past 120s), and this route is a deliberate one-shot
   // user action, not a hot path — a generous deadline avoids a false timeout on a job that succeeds.

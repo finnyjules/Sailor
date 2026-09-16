@@ -38,10 +38,19 @@ const SEP = '\0'
  */
 export function restyleInputHash(
   m: RestyleModel, prompt: string, strength: number, beauty: string, depth: string,
+  styleId = '', styleSig = '',
 ): string {
   const s = Math.round((Number.isFinite(strength) ? strength : 0) * 100) / 100
-  const control = m.control === 'depth' ? depth : beauty
-  return fnv1a([m.id, m.control, prompt, String(s), control].join(SEP))
+  // 'image' models key on the beauty crop; 'depth' AND 'depth+style' key on the depth crop.
+  const control = m.control === 'image' ? beauty : depth
+  return fnv1a([m.id, m.control, prompt, String(s), control, styleId, styleSig].join(SEP))
+}
+
+/** A fingerprint of the resolved Style reference set — the moodboard's folder + image filenames +
+ *  its composed style text. Folded into restyleInputHash so switching the board, or editing its
+ *  images / palette / prose, re-bills; an unchanged Style still short-circuits. */
+export function restyleStyleSig(folder: string, files: string[], styleText: string): string {
+  return fnv1a([folder, ...files, styleText].join(SEP))
 }
 
 /**

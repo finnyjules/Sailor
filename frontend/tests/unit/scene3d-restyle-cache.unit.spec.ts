@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
-import { restyleInputHash, shouldRunRestyle } from '~/lib/scene3d/restyleCache'
+import { restyleInputHash, restyleStyleSig, shouldRunRestyle } from '~/lib/scene3d/restyleCache'
 
 const DEPTH_MODEL = RESTYLE_MODELS.find((m) => m.control === 'depth')!
 const IMAGE_MODEL = RESTYLE_MODELS.find((m) => m.control === 'image')!
@@ -40,6 +40,30 @@ describe('restyleInputHash (deterministic cache key)', () => {
   it('float noise below the dial precision does not force a new key', () => {
     expect(restyleInputHash(DEPTH_MODEL, 'p', 0.6, BEAUTY, DEPTH))
       .toBe(restyleInputHash(DEPTH_MODEL, 'p', 0.6000001, BEAUTY, DEPTH))
+  })
+})
+
+describe('restyleInputHash — Style fold', () => {
+  it('no Style (both empty) is stable and equals the 5-arg call', () => {
+    const withDefaults = restyleInputHash(DEPTH_MODEL, 'p', 0.6, BEAUTY, DEPTH, '', '')
+    expect(withDefaults).toBe(restyleInputHash(DEPTH_MODEL, 'p', 0.6, BEAUTY, DEPTH))
+  })
+  it('a styleId or a styleSig change yields a new key; both stable ⇒ same key', () => {
+    const base = restyleInputHash(DEPTH_MODEL, 'p', 0.6, BEAUTY, DEPTH, 'board-a', 'sigA')
+    expect(restyleInputHash(DEPTH_MODEL, 'p', 0.6, BEAUTY, DEPTH, 'board-b', 'sigA')).not.toBe(base) // switch board
+    expect(restyleInputHash(DEPTH_MODEL, 'p', 0.6, BEAUTY, DEPTH, 'board-a', 'sigB')).not.toBe(base) // edited board
+    expect(restyleInputHash(DEPTH_MODEL, 'p', 0.6, BEAUTY, DEPTH, 'board-a', 'sigA')).toBe(base)     // unchanged
+  })
+})
+
+describe('restyleStyleSig', () => {
+  it('is deterministic and changes with folder, files, or styleText', () => {
+    const base = restyleStyleSig('moodboard_1', ['00_a.png', '01_b.png'], 'In the style of: warm.')
+    expect(restyleStyleSig('moodboard_1', ['00_a.png', '01_b.png'], 'In the style of: warm.')).toBe(base)
+    expect(restyleStyleSig('moodboard_2', ['00_a.png', '01_b.png'], 'In the style of: warm.')).not.toBe(base)
+    expect(restyleStyleSig('moodboard_1', ['00_a.png'], 'In the style of: warm.')).not.toBe(base)
+    expect(restyleStyleSig('moodboard_1', ['00_a.png', '01_b.png'], 'In the style of: cool.')).not.toBe(base)
+    expect(base).toMatch(/^[0-9a-f]{8}$/)
   })
 })
 

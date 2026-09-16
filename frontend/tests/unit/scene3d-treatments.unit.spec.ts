@@ -964,6 +964,13 @@ describe('treatments: AI restyle family (S7)', () => {
       .toMatchObject({ resultRef: '', inputHash: '' })
   })
 
+  it('aiRestyle defaults styleId to "" and round-trips a stored id; coerces a non-string to ""', () => {
+    expect(createTreatment('aiRestyle')).toMatchObject({ styleId: '' })
+    expect(parseTreatment({ id: 'r0', kind: 'aiRestyle' })).toMatchObject({ styleId: '' })
+    expect(parseTreatment({ id: 'r1', kind: 'aiRestyle', styleId: 'warm-editorial' })).toMatchObject({ styleId: 'warm-editorial' })
+    expect(parseTreatment({ id: 'r2', kind: 'aiRestyle', styleId: 42 })).toMatchObject({ styleId: '' })
+  })
+
   it('parses the S7.1 projector metadata: round-trips valid arrays, collapses bad ones to []', () => {
     const vp = Array.from({ length: 16 }, (_, i) => i * 0.5)
     const good = parseTreatment({

@@ -84,8 +84,11 @@ import { fitGlbGroup } from '~/lib/scene3d/fitGlb'
 import { svgToLeafPaths, outlineStrokes, type SvgLeafPath } from '~/composables/useVectorSvg'
 import { buildSvgObjects, SVG_SPLIT_THRESHOLD } from '~/lib/scene3d/svgImport'
 import { renderPasses, renderObjectPasses, screenRectOfBox } from '~/lib/scene3d/passes'
-import { restyleInputHash, shouldRunRestyle } from '~/lib/scene3d/restyleCache'
+import { restyleInputHash, restyleStyleSig, shouldRunRestyle } from '~/lib/scene3d/restyleCache'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
+import { useMoodboards } from '~/composables/useMoodboards'
+import { moodboardStyleBlock } from '~/lib/taste/styleBlock'
+import { MOODBOARD_MAX_REFS } from '~~/shared/taste/moodboard'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { SCENE_TEMPLATES, animateSceneDefaults } from '~/lib/scene3d/motion/defaults'
 import { LOOP_OPTIONS, IN_OPTIONS, OUT_OPTIONS, CAMERA_OPTIONS, LOOP_USES_AMOUNT, CAMERA_USES_CYCLES, CAMERA_USES_AMOUNT, setObjectLoop, setObjectTransition, setObjectDirection } from '~/lib/scene3d/motion/panel'
@@ -1988,6 +1991,33 @@ function restyleViewUrl(name: string): string {
  * decodes it into a cached texture, stamps the treatment's resultRef/inputHash, and re-renders. On
  * any error the last good resultRef/inputHash are left intact.
  */
+/** Resolve a treatment's styleId → the moodboard's ≤3 reference data-URLs + style text + a cache sig.
+ *  Graceful fallback: an empty id, a deleted/missing board (byId ⇒ undefined) returns null (⇒ plain
+ *  depth restyle, no error). A board with NO images returns refs:[] but keeps styleText (a text-only
+ *  nudge on the depth-only model — spec default). */
+async function resolveRestyleStyle(
+  styleId: string,
+): Promise<{ refs: string[]; styleText: string; sig: string } | null> {
+  if (!styleId) return null
+  const entry = useMoodboards().byId(styleId)
+  if (!entry) return null
+  const styleText = moodboardStyleBlock(entry.reading)
+  let files: string[] = []
+  try {
+    const list = await $fetch<{ files: string[] }>('/api/moodboards/images', { query: { folder: entry.folder } })
+    files = (list?.files ?? []).slice(0, MOODBOARD_MAX_REFS)
+  } catch { files = [] }
+  const refs: string[] = []
+  for (const file of files) {
+    try {
+      const blob = await $fetch<Blob>('/api/moodboards/images', { query: { folder: entry.folder, file }, responseType: 'blob' })
+      refs.push(await blobToDataUrl(blob))
+    } catch { /* skip an unreadable file; the others still ride */ }
+  }
+  const sig = restyleStyleSig(entry.folder, files, styleText)
+  return { refs, styleText, sig }
+}
+
 async function runRestyle(objectId: string, treatmentId: string): Promise<void> {
   if (!engine) return
   const hit = findTreatment(doc, objectId, treatmentId)
@@ -2004,9 +2034,14 @@ async function runRestyle(objectId: string, treatmentId: string): Promise<void> 
     const passes = await renderObjectPasses(engine, doc, objectId, (performance.now() - scene3dMountedAt) / 1000)
     if (!passes) { restyleStatus[treatmentId] = 'error'; return }
 
-    // 2. Prospective hash from the SAME inputs the key is defined over; short-circuit if unchanged
-    //    and the result is still in hand (no fetch, no bill).
-    const hash = restyleInputHash(model, prompt, t.strength, passes.beauty, passes.depth)
+    // 1b. Resolve the attached Style (moodboard), if any. Graceful fallback ⇒ null (plain restyle).
+    const style = await resolveRestyleStyle(t.styleId)
+    const styleId = style ? t.styleId : ''
+    const styleSig = style?.sig ?? ''
+
+    // 2. Prospective hash from the SAME inputs the key is defined over — now also over the Style id +
+    //    its resolved ref-set sig; short-circuit if unchanged and the result is still in hand.
+    const hash = restyleInputHash(model, prompt, t.strength, passes.beauty, passes.depth, styleId, styleSig)
     if (!shouldRunRestyle(hash, t.inputHash, t.resultRef, restyleTexCache.has(t.resultRef))) {
       restyleStatus[treatmentId] = 'idle'
       return
@@ -2019,7 +2054,10 @@ async function runRestyle(objectId: string, treatmentId: string): Promise<void> 
     const gen = await $fetch<{ imageUrl: string; model: string; seed: number }>('/api/scene3d/restyle', {
       method: 'POST',
       timeout: 300_000,
-      body: { prompt, beauty: passes.beauty, depth: passes.depth, strength: t.strength, model: model.id },
+      body: {
+        prompt, beauty: passes.beauty, depth: passes.depth, strength: t.strength, model: model.id,
+        styleRefs: style?.refs ?? [], styleText: style?.styleText ?? '',
+      },
     })
     // 4. Persist the bytes into ComfyUI's input dir so the result survives the CDN link expiring.
     const stored = await $fetch<{ name?: string }>('/api/image-fetch', { method: 'POST', body: { url: gen.imageUrl } })
