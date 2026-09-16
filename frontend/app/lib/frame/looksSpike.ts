@@ -137,6 +137,37 @@ export const SPIKE_LOOKS: SpikeLook[] = [
     t({text:'Kunsthalle, Hall 2',x:0.7992,y:0.0395,fontSize:0.0339,fontFamily:'Inter Tight',fontWeight:500,color:'#121212',align:'left',letterSpacing:0,lineHeight:1.28,boxW:0.2879}),
     t({text:'Free entry · noise.kunsthalle.org',x:0.7559,y:0.0355,fontSize:0.0268,fontFamily:'Inter Tight',fontWeight:500,color:'#121212',align:'right',letterSpacing:0.01,lineHeight:1.2,boxW:0.42})
   ]},
+  // ── Sentence / slogan looks ─────────────────────────────────────────────────
+  // The looks above put a single WORD on the frame; these are built for a PHRASE,
+  // set as running type. Block leans on the ragged-last justify (a wrapped column,
+  // edges flush, last line ragged); Inline is a flowing paragraph; Highlight
+  // reverses the slogan out of stacked knockout bars; Spaced uses vertical justify
+  // to fling the phrase, one line per band, down the full height.
+  { name:'Sentence · Block', bg:'#f2f0ef', layers:()=>[
+    t({text:'SOUND SHAPES THE CITY',x:0.5,y:0.36,fontSize:0.15,fontFamily:'Inter Tight',fontWeight:800,color:'#121212',align:'justify',letterSpacing:-0.03,lineHeight:0.94,boxW:0.9}),
+    t({text:'Talks on sound and the city\n12–14 October 2026\nKunsthalle, Hall 2',x:0.26,y:0.9298,fontSize:0.0339,fontFamily:'Inter Tight',fontWeight:500,color:'#121212',align:'left',letterSpacing:0,lineHeight:1.28,boxW:0.42}),
+    t({text:'Free entry · noise.kunsthalle.org',x:0.74,y:0.9645,fontSize:0.0268,fontFamily:'Inter Tight',fontWeight:500,color:'#121212',align:'right',letterSpacing:0.01,lineHeight:1.2,boxW:0.42})
+  ]},
+  { name:'Sentence · Inline', bg:'#f2f0ef', layers:()=>[
+    t({text:'NOISE',x:0.13,y:0.075,fontSize:0.05,fontFamily:'Inter Tight',fontWeight:800,color:'#dd2200',align:'left',letterSpacing:-0.02,lineHeight:1,boxW:0.2}),
+    t({text:'Three nights of listening — talks, field recordings and live sets tracing how sound builds the city.',x:0.37,y:0.46,fontSize:0.062,fontFamily:'Inter Tight',fontWeight:600,color:'#121212',align:'left',letterSpacing:-0.01,lineHeight:1.18,boxW:0.62}),
+    t({text:'Talks on sound and the city\n12–14 October 2026\nKunsthalle, Hall 2',x:0.26,y:0.9298,fontSize:0.0339,fontFamily:'Inter Tight',fontWeight:500,color:'#121212',align:'left',letterSpacing:0,lineHeight:1.28,boxW:0.42}),
+    t({text:'Free entry · noise.kunsthalle.org',x:0.74,y:0.9645,fontSize:0.0268,fontFamily:'Inter Tight',fontWeight:500,color:'#121212',align:'right',letterSpacing:0.01,lineHeight:1.2,boxW:0.42})
+  ]},
+  { name:'Sentence · Highlight', bg:'#f2f0ef', layers:()=>[
+    r({x:0.5,y:0.34,w:0.9,h:0.125,fill:'#121212'}),
+    t({text:'MAKE',x:0.5,y:0.34,fontSize:0.1,fontFamily:'Inter Tight',fontWeight:800,color:'#f2f0ef',align:'left',letterSpacing:-0.03,lineHeight:1,boxW:0.82}),
+    r({x:0.5,y:0.48,w:0.9,h:0.125,fill:'#121212'}),
+    t({text:'SOME',x:0.5,y:0.48,fontSize:0.1,fontFamily:'Inter Tight',fontWeight:800,color:'#f2f0ef',align:'left',letterSpacing:-0.03,lineHeight:1,boxW:0.82}),
+    r({x:0.5,y:0.62,w:0.9,h:0.125,fill:'#dd2200'}),
+    t({text:'NOISE',x:0.5,y:0.62,fontSize:0.1,fontFamily:'Inter Tight',fontWeight:800,color:'#f2f0ef',align:'left',letterSpacing:-0.03,lineHeight:1,boxW:0.82}),
+    t({text:'Talks on sound and the city\n12–14 October 2026\nKunsthalle, Hall 2',x:0.26,y:0.9298,fontSize:0.0339,fontFamily:'Inter Tight',fontWeight:500,color:'#121212',align:'left',letterSpacing:0,lineHeight:1.28,boxW:0.42}),
+    t({text:'Free entry · noise.kunsthalle.org',x:0.74,y:0.9645,fontSize:0.0268,fontFamily:'Inter Tight',fontWeight:500,color:'#121212',align:'right',letterSpacing:0.01,lineHeight:1.2,boxW:0.42})
+  ]},
+  { name:'Sentence · Spaced', bg:'#f2f0ef', layers:()=>[
+    t({text:'LISTEN\nTO THE\nWHOLE\nCITY',x:0.5,y:0.49,fontSize:0.17,fontFamily:'Inter Tight',fontWeight:800,color:'#121212',align:'left',valign:'justify',letterSpacing:-0.03,lineHeight:0.9,boxW:0.9,boxH:1.1}),
+    t({text:'Free entry · noise.kunsthalle.org',x:0.74,y:0.9645,fontSize:0.0268,fontFamily:'Inter Tight',fontWeight:500,color:'#121212',align:'right',letterSpacing:0.01,lineHeight:1.2,boxW:0.42})
+  ]},
   { name:'Photo as field', bg:'#f2f0ef', layers:()=>[
     img({x:0.5,y:0.5,w:1,h:1}),
     r({x:0.5,y:0.9298,w:1,h:0.1404,fill:'#121212'}),
