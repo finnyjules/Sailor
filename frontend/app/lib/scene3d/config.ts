@@ -659,6 +659,23 @@ export function lightIntensityMax(kind: LightKind): number {
 // actually ship, rather than retyping them — the anti-drift habit this whole schema follows.
 export const DEFAULT_MATERIAL: SceneMaterial = { type: 'standard', color: '#9aa3af', roughness: 0.6, metalness: 0.0 }
 
+// ── Matcaps: ids + visual specs, three-free ──────────────────────────────────
+// Plain lookup data only — no canvas, no three — so this stays importable from BOTH materials.ts
+// (which turns a spec into an actual canvas-drawn CanvasTexture: drawMatcap/getMatcap/matcapThumb)
+// and treatments.ts/treatmentControls.ts (both deliberately three-free — see this file's own
+// top-of-file constraint and treatmentControls.ts's "Pure: no three, no Vue" note) for the
+// `matcapCoat` finish (S5 task 3): validating a stored matcap id and labelling it in the
+// inspector's `select` must not drag three into either module's import graph.
+export const MATCAP_IDS = ['chrome', 'clay', 'pearl', 'gold', 'carbon']
+export interface MatcapSpec { name: string; inner: string; mid: string; outer: string; highlight: number }
+export const MATCAP_SPECS: Record<string, MatcapSpec> = {
+  chrome: { name: 'Chrome', inner: '#f8fafc', mid: '#94a3b8', outer: '#1e293b', highlight: 0.9 },
+  clay:   { name: 'Clay',   inner: '#e7e2da', mid: '#b6aa99', outer: '#57503f', highlight: 0.25 },
+  pearl:  { name: 'Pearl',  inner: '#fff7fb', mid: '#dcc8e8', outer: '#8e7a9d', highlight: 0.55 },
+  gold:   { name: 'Gold',   inner: '#fff3c4', mid: '#d9a441', outer: '#5c3a10', highlight: 0.8 },
+  carbon: { name: 'Carbon', inner: '#4b5563', mid: '#1f2937', outer: '#030712', highlight: 0.35 },
+}
+
 /** Per-type parameter defaults — the single source of truth shared by the
  *  material factory (materials.ts) and the Selection UI's proxies. */
 export const MATERIAL_DEFAULTS = {
