@@ -67,13 +67,20 @@ case and adds a **depth+style** model used only when a Style with references is 
 - A new `MODEL_COSTS` row for the depth+style model so `runFal` meters it (an unpriced slug is refused
   before any call — the allowlist↔pricing unit ties them).
 
-**OPEN / top risk:** the exact fal model slug + input schema for "depth control + IP-adapter refs" is
-unconfirmed. The FIRST implementation step confirms the fal model and its field names; the enum/field
-strings are pinned in the builder unit (`fal-enum-mismatch-silent-fallover`); and the single paid
-acceptance run validates it end-to-end (exactly the class of bug the S7 paid run caught with
-`control_lora_image_url`). If no single-call depth+IP-adapter model is available, we revisit (the
-brainstorm's Approach B two-pass is the fallback) before building — this risk is retired in the plan's
-first task, not deferred.
+**CONFIRMED (2026-09-16, fal API docs):** `fal-ai/flux-general` DOES accept both in ONE request —
+`controlnets: [{ path, control_image_url, conditioning_scale }]` (our depth crop → `control_image_url`
+with a depth-ControlNet `path`) AND `ip_adapters: [{ path, image_url, scale, image_encoder_path,
+weight_name }]` (the moodboard refs), alongside `prompt`, `image_size`, `num_inference_steps`. So the
+"does a single-call depth+style model exist?" risk is retired: **yes.**
+
+**Narrowed residual (plan task 1 + paid run):** the `path` fields are generic — fal ships no *named*
+depth ControlNet, so we supply the exact weight repos: a FLUX **depth ControlNet** repo path for
+`controlnets[].path`, and a FLUX **IP-adapter** repo path (+ `image_encoder_path`/`weight_name`) for
+`ip_adapters[].path`. Our depth crop is ALREADY a depth map, so it is passed directly with
+preprocessing OFF (not re-derived). Task 1 pins the exact repos + the conditioning/IP scales; the
+enum/field strings are pinned in the builder unit (`fal-enum-mismatch-silent-fallover`); and the single
+paid acceptance run validates the concrete config end-to-end (the class of detail the S7 paid run
+caught with `control_lora_image_url`).
 
 ## Route + builder
 
