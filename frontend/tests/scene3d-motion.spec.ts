@@ -168,6 +168,23 @@ const stillScene = (treatments?: unknown[]) => ({
   objects: [stillSphere(treatments)],
 })
 
+// A STATIC object (no `motion` field ⇒ zero world motion) under a scene whose CAMERA orbits it
+// (`camera.motion.preset = 'orbit'`, parsed by config.ts's parseCameraMotion / evaluateCameraMotion
+// → a per-t01 yaw of the camera about the target). This is the fixture for Decision 4 — object-only
+// velocity: velocity is sampled at t/t−dt for the OBJECT and projected through the SAME camera-at-t
+// viewProj, so a moving camera contributes no screen velocity to a motionless object. `orbit` speed
+// 1 sweeps a full turn over the clip, so at the chosen t01 the camera has visibly moved (the frame
+// is a genuine moving-camera instant) yet the static object must stay crisp / unsmeared.
+const orbitCamStatic = (treatments?: unknown[]) => ({
+  version: 1, background: '#202020', showFloor: false,
+  camera: {
+    position: [0, 0.6, 4.6], target: [0, 0.6, 0], fov: 40,
+    motion: { preset: 'orbit', speed: 1, amount: 1 },
+  },
+  motion: { duration: 4, fps: 30, loop: true },
+  objects: [stillSphere(treatments)],
+})
+
 // CONTROLLER / CI: run live against a fresh preview with the pane VISIBLE (a hidden pane pauses the
 // scene3d rAF ⇒ blank snapshot). Authored in Task 3; NOT run by the implementing subagent.
 test('ghost trails: a moving object shows multiple faded silhouettes, more with a higher count', async ({ page }) => {
@@ -292,4 +309,74 @@ test('a sphere with a disabled ghost-trails row renders byte-identically to one 
 
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
   expect(disabled).toBe(plain)
+})
+
+// CONTROLLER / CI: run live (pane visible). Authored in Task 4; NOT run by the subagent.
+// Decision 4 — the load-bearing correctness property of object-only velocity (both motion samples
+// projected through the camera-at-t viewProj): an ORBITING CAMERA must not smear a STATIC object.
+// The object carries no `motion` field, so `sceneScreenVelocities` finds pNow == pPrev and stores
+// no velocity for it (velocityBlurComposite then takes the v=null crisp branch, independent of
+// `amount`) — even though the camera has demonstrably moved by this t01. So amount 2 must be
+// byte-identical to amount 0. This is NOT the "still object, still camera" apex case above: here the
+// CAMERA is moving, which a screen-true velocity (a documented follow-up) WOULD smear — this case
+// pins the v1 object-only choice. The velocityBlur row is enabled, so the motion stage still runs
+// (groups >= 1, frames > 0) — the guard that a silent plain fall-back can't pass this by drawing
+// the same crisp frame for a different reason.
+test('velocity blur: an orbiting camera does not smear a static object (byte-identical to amount 0)', async ({ page }) => {
+  const bad = watchConsole(page)
+  const T = 0.1 // orbit speed 1 ⇒ ~36° of camera yaw by here: a genuine moving-camera instant
+
+  await openLab(page, orbitCamStatic([VELOCITY_BLUR({ amount: 2, shutter: 0.5 })]))
+  const moving = await snapshotAt(page, T)
+  const movingStats = await stats(page)
+
+  await openLab(page, orbitCamStatic([VELOCITY_BLUR({ amount: 0, shutter: 0.5 })]))
+  const amountZero = await snapshotAt(page, T)
+
+  // The stage actually ran on this object (S4/S5 loud-failure guard — not a silent plain fall-back).
+  expect(movingStats.frames, 'the treatment stage rendered a frame').toBeGreaterThan(0)
+  expect(movingStats.groups, 'the velocity-blur group was treated').toBeGreaterThanOrEqual(1)
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  // Object-only velocity: the moving camera adds no screen velocity to the motionless object, so the
+  // amount-2 frame is identical to amount 0 — the camera does not smear a static object.
+  expect(moving, 'a moving camera does not smear a static object').toBe(amountZero)
+})
+
+// CONTROLLER / CI: run live (pane visible). Authored in Task 4; NOT run by the subagent.
+// Determinism: the motion sampling (evaluateObjectMotion at t / t−dt, ghostLocalPoses at t−k·spacing)
+// is pure and re-derived from doc + t01 every call, so the SAME t01 must render an IDENTICAL frame
+// twice on the same page — no seeded/temporal drift, nothing that depends on frame history or wall
+// clock. Two __scene3dSnapshotAt(T) calls on one load; assert the data-URLs are equal. Guards the
+// export/bake path's reproducibility (a stuttering rAF must not change the smear).
+test('velocity blur: the same moving frame renders identically twice (deterministic sampling)', async ({ page }) => {
+  const bad = watchConsole(page)
+  const T = 0.05
+
+  await openLab(page, orbitScene([VELOCITY_BLUR({ amount: 2, shutter: 0.5 })]))
+  const first = await snapshotAt(page, T)
+  const firstStats = await stats(page)
+  const second = await snapshotAt(page, T)
+
+  expect(firstStats.frames, 'the treatment stage rendered a frame').toBeGreaterThan(0)
+  expect(firstStats.groups, 'the motion group was treated').toBeGreaterThanOrEqual(1)
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(second, 'the same t01 smears identically twice').toBe(first)
+})
+
+// CONTROLLER / CI: run live (pane visible). Authored in Task 4; NOT run by the subagent.
+// The ghost-trails twin of the determinism case above: N past poses at a fixed t01 are re-derived
+// identically each call, so the fanned frame is byte-identical twice.
+test('ghost trails: the same moving frame renders identically twice (deterministic sampling)', async ({ page }) => {
+  const bad = watchConsole(page)
+  const T = 0.05
+
+  await openLab(page, orbitScene([GHOST_TRAILS({ count: 4, spacing: 3, fade: 0.6 })]))
+  const first = await snapshotAt(page, T)
+  const firstStats = await stats(page)
+  const second = await snapshotAt(page, T)
+
+  expect(firstStats.frames, 'the treatment stage rendered a frame').toBeGreaterThan(0)
+  expect(firstStats.groups, 'the ghost-trails group was treated').toBeGreaterThanOrEqual(1)
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(second, 'the same t01 fans ghosts identically twice').toBe(first)
 })
