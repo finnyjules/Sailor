@@ -658,9 +658,12 @@ async function runVueWorkflow(
   // graph is sufficient.
   // Hosted mounts no engine iframe at all, and its runs never touch one (the
   // bridge section below is skipped and dispatch is always direct), so a null
-  // here is expected rather than a lost connection.
+  // here is expected rather than a lost connection. Tier 1 (bridge retirement):
+  // direct execution now runs the same way in DEV — `useDirect` is always true,
+  // no iframe is mounted, and dispatch is direct — so the guard skips it too.
+  // Only the legacy bridge path (neither hosted nor direct) still needs an iframe.
   const iframe = getWorkerIframe(workerIdx)
-  if (!hostedShell && !iframe?.contentWindow) {
+  if (!hostedShell && !useDirect && !iframe?.contentWindow) {
     console.error('[Run] bridge iframe not found or not ready')
     toast.error('ComfyUI not ready', { description: 'Lost the canvas connection — try reloading the page.' })
     return false
@@ -962,7 +965,12 @@ async function runVueWorkflow(
   // does not mount one — no engine origin is reachable from a hosted browser),
   // so sendLoadWorkflow would await a bridge that never becomes ready. Hosted
   // always runs direct — useDirectExecutionEnabled forces the setting ON.
-  if (!hostedShell) await withKeyedLock(`bridge-run:${workerIdx}`, async () => {
+  // Tier 1 (bridge retirement): `useDirect` is now always true (direct execution
+  // is the only dispatch path), so this whole iframe critical section is skipped
+  // in dev exactly as it already is in hosted — there is no bridge iframe to load
+  // the workflow into or to queuePrompt against. Gated on `!useDirect` so a
+  // temporary revert of the direct-execution flag restores the bridge path.
+  if (!hostedShell && !useDirect) await withKeyedLock(`bridge-run:${workerIdx}`, async () => {
     await sendLoadWorkflow(plainWorkflow, workerIdx)
 
     // Dev-only shadow parity: on EVERY run (direct or bridge), ask the freshly
@@ -2154,7 +2162,10 @@ const { backendUp, start: startHealthPoll, stop: stopHealthPoll } =
 
 // Truly ready = backend HTTP up AND ComfyUI ready inside the iframe. Hosted has
 // no bridge iframe to become ready, so backend-up is the whole condition.
-const canvasReady = computed(() => backendUp.value && (hostedShell || bridgeReady.value))
+// Tier 1 (bridge retirement): with direct execution the only path, no bridge
+// iframe is mounted, so backend-up is the whole readiness condition (same as
+// hosted). `bridgeReady` only gates the legacy bridge path, kept for a revert.
+const canvasReady = computed(() => backendUp.value && (hostedShell || directExecutionEnabled.value || bridgeReady.value))
 const hasBeenReady = ref(false)
 watch(canvasReady, (v) => { if (v) hasBeenReady.value = true })
 
@@ -3825,7 +3836,7 @@ function dismissRunResult() {
          browser, and mounting it is the exact hole that let the iframe post
          straight to the engine unmetered. -->
     <iframe
-      v-if="!hostedShell"
+      v-if="!hostedShell && !directExecutionEnabled"
       id="sailor-bridge-iframe"
       :src="`${comfyOrigin}/`"
       class="fixed w-[10px] h-[10px] -left-[100px] -top-[100px] opacity-0 pointer-events-none"
@@ -3837,7 +3848,7 @@ function dismissRunResult() {
          (index >= 1). Worker 0 is the main comfyui-shared canvas iframe below.
          Rendered only when the pool is enabled, so single-worker is untouched.
          Never in hosted mode — same unmetered-engine-access reason as above. -->
-    <template v-if="!hostedShell">
+    <template v-if="!hostedShell && !directExecutionEnabled">
       <iframe
         v-for="i in (comfyWorkers.length - 1)"
         :key="`worker-${i}`"
@@ -4463,7 +4474,7 @@ function dismissRunResult() {
              reused in Vue mode). Never in hosted mode: this is the engine
              origin, and it is the frame bridge.js posts from. -->
         <div
-          v-if="!hostedShell && tabs.some((t) => t.type === 'project')"
+          v-if="!hostedShell && !directExecutionEnabled && tabs.some((t) => t.type === 'project')"
           v-show="(!vueNodesEnabled && activeTab.type === 'project') || (vueNodesEnabled && vueSidebarOpen)"
           data-tab-id="comfyui-shared"
           class="absolute inset-0 overflow-hidden z-30"
