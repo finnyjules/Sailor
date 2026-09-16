@@ -83,7 +83,7 @@ import { loadGlb, GLB_SIZE_CAP_BYTES } from '~/lib/scene3d/glb'
 import { fitGlbGroup } from '~/lib/scene3d/fitGlb'
 import { svgToLeafPaths, outlineStrokes, type SvgLeafPath } from '~/composables/useVectorSvg'
 import { buildSvgObjects, SVG_SPLIT_THRESHOLD } from '~/lib/scene3d/svgImport'
-import { renderPasses } from '~/lib/scene3d/passes'
+import { renderPasses, renderObjectPasses } from '~/lib/scene3d/passes'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { SCENE_TEMPLATES, animateSceneDefaults } from '~/lib/scene3d/motion/defaults'
 import { LOOP_OPTIONS, IN_OPTIONS, OUT_OPTIONS, CAMERA_OPTIONS, LOOP_USES_AMOUNT, CAMERA_USES_CYCLES, CAMERA_USES_AMOUNT, setObjectLoop, setObjectTransition, setObjectDirection } from '~/lib/scene3d/motion/panel'
@@ -2031,6 +2031,12 @@ onMounted(() => {
   // object's aiRestyle treatment, pushes the map and re-renders. Task 3's live composite reads
   // exactly this cached texture; Task 1's stub ignores it (draws the plain object), so this only
   // exercises the resultRef → cache → stage plumbing today.
+  // S7 Task-2 test hook: bake the single-object beauty + depth (+ normal) crop for `objectId` and
+  // return it as a plain JSON-serialisable object ({ beauty, depth, normal } data URLs + `rect`), or
+  // null when the object is off-screen / degenerate. Off-screen bake only — the live canvas is
+  // restored in renderObjectPasses's finally, so a bake never disturbs the viewport.
+  ;(window as any).__scene3dObjectPasses = async (objectId: string) =>
+    engine ? await renderObjectPasses(engine, doc, objectId, (performance.now() - scene3dMountedAt) / 1000) : null
   ;(window as any).__scene3dRestyleInject = (objectId: string, dataUrl: string): Promise<boolean> => {
     const obj = doc.objects.find((o) => o.id === objectId)
     const t = treatmentsOf(obj).find((x) => x.kind === 'aiRestyle') as AiRestyleTreatment | undefined
@@ -2050,7 +2056,7 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => {
-  for (const k of ['__scene3dDoc', '__scene3dCamera', '__scene3dTreatmentStats', '__scene3dSnapshot', '__scene3dBeauty', '__scene3dSnapshotAt', '__scene3dRestyleInject']) delete (window as any)[k]
+  for (const k of ['__scene3dDoc', '__scene3dCamera', '__scene3dTreatmentStats', '__scene3dSnapshot', '__scene3dBeauty', '__scene3dSnapshotAt', '__scene3dObjectPasses', '__scene3dRestyleInject']) delete (window as any)[k]
 })
 
 onMounted(() => {
