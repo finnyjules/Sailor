@@ -405,6 +405,32 @@ describe('animatableTargets: treatments', () => {
     expect(paths).not.toContain(`objects.${box.id}.treatments.${matcap.id}.matcap`)
   })
 
+  // S6: a motion-family treatment is a treatment like any other from the motion vantage point —
+  // no per-kind edit to animatableTargets is needed for velocityBlur/ghostTrails to become
+  // motion targets, because the derivation runs over treatmentControls(kind) via
+  // iterateTreatmentControls. Both kinds are numeric-only (no colour rows), so every dial lists.
+  it('emits id-addressed slider paths for velocityBlur + ghostTrails dials (no per-kind edit)', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Mover'
+    const vb = createTreatment('velocityBlur')
+    const gt = createTreatment('ghostTrails')
+    box.treatments = [vb, gt]
+    doc.objects.push(box)
+    const targets = animatableTargets(doc)
+    const paths = targets.map((t) => t.path)
+    for (const field of ['amount', 'shutter']) {
+      expect(paths).toContain(`objects.${box.id}.treatments.${vb.id}.${field}`)
+    }
+    for (const field of ['count', 'spacing', 'fade']) {
+      expect(paths).toContain(`objects.${box.id}.treatments.${gt.id}.${field}`)
+    }
+    // Label convention (agentControls.treatmentRowLabel): "<object> · <kind label> <lowercased row>".
+    expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${vb.id}.amount`)?.label)
+      .toBe('Mover · Velocity blur amount')
+    expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${gt.id}.count`)?.label)
+      .toBe('Mover · Ghost trails trails')
+  })
+
   it('a track on a treatment dial writes through the id, and survives reordering the stack', () => {
     const doc = defaultDoc()
     const box = createPrimitive('box', doc.objects)

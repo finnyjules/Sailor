@@ -30,7 +30,8 @@ import { PostChain, postEnabled, DEFAULT_POST, type PostSettings } from '~/lib/s
 import { collectEditorHelpers } from '~/lib/scene3d/passes'
 import { syncTreatmentShells } from './treatmentShells'
 import { TreatmentStage } from './treatmentStage'
-import { maskedTreatmentPlan, bufferTreatmentPlan, finishPlan } from './treatments'
+import { maskedTreatmentPlan, bufferTreatmentPlan, finishPlan, motionTreatmentPlan } from './treatments'
+import type { ScreenVelocity, LocalPose } from './motion/velocity'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry } from './gem'
@@ -564,6 +565,14 @@ export class SceneEngine {
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
   readonly objectRoots = new Map<string, THREE.Object3D>()
+  /** Per-object screen velocities / past poses for the S6 motion treatment family, pushed in
+   *  from the seam that still holds the doc + t01 (the live loop / renderMotionFrame) because
+   *  the stage is stateless. Both default EMPTY, so an ordinary scene (and every render that
+   *  never sets them) pays nothing and stays byte-identical. */
+  private motionVelocities = new Map<string, ScreenVelocity>()
+  private ghostPoses = new Map<string, LocalPose[]>()
+  setMotionVelocities(m: Map<string, ScreenVelocity>): void { this.motionVelocities = m }
+  setGhostPoses(m: Map<string, LocalPose[]>): void { this.ghostPoses = m }
   readonly grid: THREE.GridHelper
   /** Stable per-instance id, never reused — see `_nextSceneEngineId`'s doc above. */
   readonly id: string = `scene3d${_nextSceneEngineId++}`
@@ -1461,7 +1470,12 @@ export class SceneEngine {
     // fog / curvature wear next) is present — its absence is the byte-identity gate: no buffer
     // plan ⇒ no G-buffer, no extra render, the same frame as before S3.
     const bufferPlan = this.lastDoc ? bufferTreatmentPlan(this.lastDoc) : []
-    const runStage = stageGroups > 0 || bufferPlan.length > 0
+    // The S6 motion sub-loop runs ONLY when a velocity-blur / ghost-trails treatment is present
+    // — its absence is the byte-identity gate: empty plan ⇒ no motion pass, the same frame as
+    // before S6. The per-object velocities/ghosts it consumes are pushed in by the seams that
+    // still hold the doc + t01; absent (an ordinary render call) they are empty and it no-ops.
+    const motionPlan = this.lastDoc ? motionTreatmentPlan(this.lastDoc) : []
+    const runStage = stageGroups > 0 || bufferPlan.length > 0 || motionPlan.length > 0
     if (!postEnabled(post) && !runStage) { this.renderer.render(scene, camera); return }
     const s = this.renderer.getSize(new THREE.Vector2())
     if (!this.postChain) { this.postChain = new PostChain(this.renderer, scene, camera, s.x, s.y); this.postW = s.x; this.postH = s.y }
@@ -1482,7 +1496,7 @@ export class SceneEngine {
         if (!this.treatmentStage) this.treatmentStage = new TreatmentStage(this.renderer)
         let tex: THREE.Texture | null = null
         try {
-          tex = this.treatmentStage.render(scene, camera, plan, bufferPlan, { objectRoots: this.objectRoots })
+          tex = this.treatmentStage.render(scene, camera, plan, bufferPlan, motionPlan, { objectRoots: this.objectRoots, velocities: this.motionVelocities, ghosts: this.ghostPoses })
           this.postChain.setInputTexture(tex)
         } catch (e) {
           this.postChain.setInputTexture(null)

@@ -7,6 +7,8 @@ import {
   CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX,
   FINISH_TREATMENT_KINDS, isFinishKind, canTakeFinish, finishPlan, TREATMENT_DEFAULTS,
   MASKED_TREATMENT_KINDS, EDGE_TREATMENT_KINDS,
+  MOTION_TREATMENT_KINDS, isMotionKind, motionTreatmentPlan, docHasMotionTreatment,
+  VELOCITY_BLUR_AMOUNT_MAX, GHOST_COUNT_MAX, GHOST_SPACING_MAX,
 } from '~/lib/scene3d/treatments'
 import { treatmentControls } from '~/lib/scene3d/treatmentControls'
 import { blurPasses } from '~/lib/scene3d/treatmentStage'
@@ -805,5 +807,111 @@ describe('treatments: finish add-menu is never a dead control on a non-primitive
     const prim = createPrimitive('box', [])
     const finishDisabled = (kind: string): boolean => isFinishKind(kind) && !canTakeFinish(prim)
     for (const kind of FINISH_TREATMENT_KINDS) expect(finishDisabled(kind)).toBe(false)
+  })
+})
+
+describe('treatments: motion family (S6 velocity blur / ghost trails)', () => {
+  it('TREATMENT_KINDS includes both motion kinds — not masked, edge, buffer or finish', () => {
+    for (const kind of ['velocityBlur', 'ghostTrails'] as const) {
+      expect(TREATMENT_KINDS).toContain(kind)
+      expect(MOTION_TREATMENT_KINDS).toContain(kind)
+      expect(isMotionKind(kind)).toBe(true)
+      expect(isMaskedKind(kind)).toBe(false)
+      expect(isEdgeKind(kind)).toBe(false)
+      expect(isBufferKind(kind)).toBe(false)
+      expect(isFinishKind(kind)).toBe(false)
+    }
+    expect(TREATMENT_LABELS.velocityBlur).toBe('Velocity blur')
+    expect(TREATMENT_LABELS.ghostTrails).toBe('Ghost trails')
+  })
+
+  it('createTreatment seeds both kinds from TREATMENT_DEFAULTS, enabled and not inverted', () => {
+    expect(createTreatment('velocityBlur')).toMatchObject({ kind: 'velocityBlur', enabled: true, invert: false, amount: 1, shutter: 0.5 })
+    expect(createTreatment('ghostTrails')).toMatchObject({ kind: 'ghostTrails', enabled: true, invert: false, count: 3, spacing: 2, fade: 0.5 })
+    expect(createTreatment('velocityBlur').id).toMatch(/^trt_/)
+  })
+
+  it('neither kind is ramped — no progressive/ramp fields', () => {
+    expect(createTreatment('velocityBlur')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'vb', kind: 'velocityBlur' })).not.toHaveProperty('rampSpace')
+    expect(createTreatment('ghostTrails')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'gt', kind: 'ghostTrails' })).not.toHaveProperty('rampSpace')
+  })
+
+  it('parses velocityBlur, clamping amount to 0..VELOCITY_BLUR_AMOUNT_MAX and shutter to 0..1', () => {
+    expect(parseTreatment({ id: 'vb1', kind: 'velocityBlur', amount: 99, shutter: 9 }))
+      .toMatchObject({ amount: VELOCITY_BLUR_AMOUNT_MAX, shutter: 1 })
+    expect(parseTreatment({ id: 'vb2', kind: 'velocityBlur', amount: -5, shutter: -5 }))
+      .toMatchObject({ amount: 0, shutter: 0 })
+    expect(parseTreatment({ id: 'vb3', kind: 'velocityBlur' }))
+      .toMatchObject({ amount: 1, shutter: 0.5 })
+  })
+
+  it('parses ghostTrails, rounding/clamping count to 1..GHOST_COUNT_MAX, spacing to 1..GHOST_SPACING_MAX, fade to 0..1', () => {
+    expect(parseTreatment({ id: 'gt1', kind: 'ghostTrails', count: 99, spacing: 99, fade: 9 }))
+      .toMatchObject({ count: GHOST_COUNT_MAX, spacing: GHOST_SPACING_MAX, fade: 1 })
+    expect(parseTreatment({ id: 'gt2', kind: 'ghostTrails', count: 0, spacing: 0, fade: -5 }))
+      .toMatchObject({ count: 1, spacing: 1, fade: 0 })
+    expect(parseTreatment({ id: 'gt3', kind: 'ghostTrails', count: 4.6 }))
+      .toMatchObject({ count: 5, spacing: 2, fade: 0.5 })
+    expect(parseTreatment({ id: 'gt4', kind: 'ghostTrails' }))
+      .toMatchObject({ count: 3, spacing: 2, fade: 0.5 })
+  })
+
+  it('round-trips both kinds through parseTreatments the same as every other kind', () => {
+    for (const kind of ['velocityBlur', 'ghostTrails'] as const) {
+      const t = createTreatment(kind)
+      expect(parseTreatments([t])).toEqual([t])
+    }
+  })
+
+  it('a document with only a motion treatment round-trips through serializeDoc/parseDoc', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.treatments = [createTreatment('velocityBlur'), createTreatment('ghostTrails')]
+    doc.objects.push(box)
+    const back = parseDoc(serializeDoc(doc))
+    expect(back.objects.at(-1)!.treatments!.map((t) => t.kind)).toEqual(['velocityBlur', 'ghostTrails'])
+    expect(back).toEqual(doc)
+  })
+
+  it('motionTreatmentPlan / docHasMotionTreatment: the byte-identity gate', () => {
+    // No motion treatment ⇒ empty plan, gate off (a masked treatment must not trip it).
+    const bare = defaultDoc()
+    const b0 = createPrimitive('box', bare.objects); b0.treatments = [createTreatment('blur')]; bare.objects.push(b0)
+    expect(docHasMotionTreatment(bare)).toBe(false)
+    expect(motionTreatmentPlan(bare)).toEqual([])
+
+    for (const kind of ['velocityBlur', 'ghostTrails'] as const) {
+      const doc = defaultDoc()
+      const box = createPrimitive('box', doc.objects); box.treatments = [createTreatment(kind)]; doc.objects.push(box)
+      expect(docHasMotionTreatment(doc), kind).toBe(true)
+      expect(motionTreatmentPlan(doc).map((g) => g.objectId), kind).toEqual([box.id])
+      // Disabled ⇒ no plan, no gate — the byte-identity guarantee.
+      box.treatments = [{ ...createTreatment(kind), enabled: false }]
+      expect(docHasMotionTreatment(doc), `${kind} disabled`).toBe(false)
+      // Hidden host ⇒ excluded even when enabled.
+      box.treatments = [createTreatment(kind)]; box.visible = false
+      expect(docHasMotionTreatment(doc), `${kind} hidden`).toBe(false)
+    }
+  })
+
+  it('caps the motion plan at TREATED_OBJECT_CAP groups', () => {
+    const doc = defaultDoc()
+    for (let i = 0; i < TREATED_OBJECT_CAP + 2; i++) {
+      const o = createPrimitive('sphere', doc.objects)
+      o.treatments = [createTreatment('velocityBlur')]
+      doc.objects.push(o)
+    }
+    expect(motionTreatmentPlan(doc)).toHaveLength(TREATED_OBJECT_CAP)
+  })
+
+  it('has a control row for each dial, group-titled by the human label, with no invert row', () => {
+    expect(treatmentControls('velocityBlur').map((r) => r.key)).toEqual(['treatment.amount', 'treatment.shutter'])
+    expect(treatmentControls('ghostTrails').map((r) => r.key)).toEqual(['treatment.count', 'treatment.spacing', 'treatment.fade'])
+    for (const r of treatmentControls('velocityBlur')) expect(r.group).toBe('Velocity blur')
+    for (const r of treatmentControls('ghostTrails')) expect(r.group).toBe('Ghost trails')
+    expect(treatmentControls('velocityBlur').map((r) => r.key)).not.toContain('treatment.invert')
+    expect(treatmentControls('ghostTrails').map((r) => r.key)).not.toContain('treatment.invert')
   })
 })

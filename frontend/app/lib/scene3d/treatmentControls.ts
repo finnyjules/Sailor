@@ -3,7 +3,7 @@
 // keys to `object.treatments.<id>.<field>`; the surface reads/writes `<field>` directly
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, DROP_SHADOW_DISTANCE_MAX, DASHED_OUTLINE_LEN_MAX, CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX, type TreatmentKind } from './treatments'
+import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, DROP_SHADOW_DISTANCE_MAX, DASHED_OUTLINE_LEN_MAX, CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX, VELOCITY_BLUR_AMOUNT_MAX, GHOST_COUNT_MAX, GHOST_SPACING_MAX, type TreatmentKind } from './treatments'
 // Three-free (config.ts, like this file, carries no three/canvas dependency): the matcap id set
 // and their human names for the `matcapCoat` finish's `select` row (S5 task 3).
 import { MATCAP_IDS, MATCAP_SPECS } from './config'
@@ -214,6 +214,19 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
       rows = [
         select(g, 'matcap', 'Matcap', MATCAP_IDS, MATCAP_IDS.map((id) => MATCAP_SPECS[id]!.name), D.matcapCoat.matcap),
         slider(g, 'strength', 'Strength', 0, 1, 0.01, D.matcapCoat.strength, 'Matcap versus the object\'s own lit colour'),
+      ]
+      break
+    case 'velocityBlur':
+      rows = [
+        slider(g, 'amount', 'Amount', 0, VELOCITY_BLUR_AMOUNT_MAX, 0.01, D.velocityBlur.amount, 'How strong the motion smear is'),
+        slider(g, 'shutter', 'Shutter', 0, 1, 0.01, D.velocityBlur.shutter, 'How much of the movement each frame captures'),
+      ]
+      break
+    case 'ghostTrails':
+      rows = [
+        slider(g, 'count', 'Trails', 1, GHOST_COUNT_MAX, 1, D.ghostTrails.count, 'How many faded copies trail behind'),
+        slider(g, 'spacing', 'Spacing', 1, GHOST_SPACING_MAX, 1, D.ghostTrails.spacing, 'How far apart the copies are, in frames'),
+        slider(g, 'fade', 'Fade', 0, 1, 0.01, D.ghostTrails.fade, 'How quickly the copies fade out'),
       ]
       break
     default:

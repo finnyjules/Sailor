@@ -25,8 +25,9 @@ import {
 } from '~/lib/scene3d/config'
 import {
   cloneTreatments, createTreatment, findTreatment, isTreatmentHost, maskedTreatmentPlan, newTreatmentId,
-  treatmentsOf, unrenderedTreatmentIds, TREATMENT_LABELS, type Treatment, type TreatmentKind,
+  treatmentsOf, unrenderedTreatmentIds, docHasMotionTreatment, TREATMENT_LABELS, type Treatment, type TreatmentKind,
 } from '~/lib/scene3d/treatments'
+import { sceneScreenVelocities, collectGhostPoses } from '~/lib/scene3d/motion/velocity'
 import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentControls'
 import { eulerFromNormal } from '~/lib/scene3d/decals'
 import { getLook, resolveLook, resolveDials } from '~/lib/scene3d/lighting'
@@ -1996,9 +1997,16 @@ onMounted(() => {
   ;(window as any).__scene3dTreatmentStats = () => engine ? { ...engine.treatmentStats } : null
   ;(window as any).__scene3dSnapshot = () => engine?.snapshot() ?? ''
   ;(window as any).__scene3dBeauty = async () => engine ? (await renderPasses(engine, doc, 0)).beauty : ''
+  // A deterministic MOVING-frame oracle for the S6 motion tests: the existing __scene3d* hooks
+  // render at t=0 (still), where velocity blur / ghost trails have nothing to show. This runs the
+  // full sample → velocity/ghost push → render path at an arbitrary t01 (renderMotionFrame does
+  // all of it) and returns the data-URL, so a Playwright test gets a frame at a chosen moment
+  // without racing the playhead.
+  ;(window as any).__scene3dSnapshotAt = (t01: number) =>
+    engine ? (renderMotionFrame(engine, doc, t01) as HTMLCanvasElement).toDataURL('image/png') : ''
 })
 onBeforeUnmount(() => {
-  for (const k of ['__scene3dDoc', '__scene3dCamera', '__scene3dTreatmentStats', '__scene3dSnapshot', '__scene3dBeauty']) delete (window as any)[k]
+  for (const k of ['__scene3dDoc', '__scene3dCamera', '__scene3dTreatmentStats', '__scene3dSnapshot', '__scene3dBeauty', '__scene3dSnapshotAt']) delete (window as any)[k]
 })
 
 onMounted(() => {
@@ -2123,12 +2131,30 @@ onMounted(() => {
       engine.applyCameraFromDoc(sampled)
       engine.applyObjectOpacities(opacities)
       interaction?.orbit.update()
+      // S6 motion treatments: sample the per-object screen velocity / past poses from the
+      // ORIGINAL doc + t01 (the sampled doc has motion already baked into its transforms) and
+      // push them into the engine so the stage can smear / trail the object. Camera-at-t viewProj
+      // (object-only velocity — an orbiting camera does not blur a static object). Cleared to
+      // empty otherwise, so a scene with no motion treatment pays nothing and stays byte-identical.
+      if (docHasMotionTreatment(doc)) {
+        engine.camera.updateMatrixWorld()
+        const viewProj = new THREE.Matrix4().multiplyMatrices(engine.camera.projectionMatrix, engine.camera.matrixWorldInverse)
+        engine.setMotionVelocities(sceneScreenVelocities(doc, t01, viewProj))
+        engine.setGhostPoses(collectGhostPoses(doc, t01))
+      } else {
+        engine.setMotionVelocities(new Map())
+        engine.setGhostPoses(new Map())
+      }
       engine.render((performance.now() - scene3dMountedAt) / 1000)
       updateLightLabels()
     } else {
       interaction?.setCameraLocked(false)
       interaction?.setPlaybackLocked(false)
       interaction?.orbit.update()
+      // A paused (not-playing) frame is still: clear the motion maps so velocityBlur no-ops and
+      // ghost trails collapse — "none when still" holds for a paused clip.
+      engine?.setMotionVelocities(new Map())
+      engine?.setGhostPoses(new Map())
       engine?.render((performance.now() - scene3dMountedAt) / 1000)
       updateLightLabels()
     }

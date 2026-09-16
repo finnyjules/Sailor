@@ -34,7 +34,8 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { stripAlpha } from '~/lib/color/convert'
-import type { BufferGroup, CrossHatchTreatment, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, MaskedGroup, RampFields, Treatment } from './treatments'
+import type { BufferGroup, CrossHatchTreatment, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, GhostTrailsTreatment, MaskedGroup, MotionGroup, RampFields, Treatment, VelocityBlurTreatment } from './treatments'
+import type { ScreenVelocity, LocalPose } from './motion/velocity'
 import { ownMeshes, STAGE_LAYER } from './treatmentShells'
 import { fitNearFar } from './passes'
 
@@ -56,7 +57,14 @@ const MIN_EXPOSURE = 1e-4
  *  plane to clamp against; this keeps the clamp in `objectRampSpan` well-defined anyway. */
 const FALLBACK_NEAR = 0.01
 
-export interface StageContext { objectRoots: Map<string, THREE.Object3D> }
+export interface StageContext {
+  objectRoots: Map<string, THREE.Object3D>
+  /** Per-object screen velocities / past poses for the S6 motion family, sampled at the doc+t01
+   *  seam and threaded through the engine. Optional so existing call sites and tests compile;
+   *  the stage treats absent as empty. */
+  velocities?: Map<string, ScreenVelocity>
+  ghosts?: Map<string, LocalPose[]>
+}
 export interface StageStats { frames: number; groups: number; width: number; height: number }
 
 /** MSAA sample count for a stage target of `width` × `height` on a device whose cap is
@@ -1631,7 +1639,29 @@ export class TreatmentStage {
     this.accumIdx = 1 - this.accumIdx
   }
 
-  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], ctx: StageContext): THREE.Texture | null {
+  /** Velocity motion blur — a directional smear of `root` along its screen velocity `v`.
+   *  STUB (S6 Task 1 scaffold): no-op so the family plumbing lands with no visual change yet.
+   *  Task 2 fills this in (drawAlone → directional reuse of BLUR_FRAG → depth-tested composite,
+   *  with a hard no-op below one device px so a still object matches amount 0). */
+  private velocityBlurComposite(
+    _scene: THREE.Scene, _camera: THREE.Camera, _root: THREE.Object3D, _exclude: THREE.Object3D[],
+    _t: VelocityBlurTreatment, _v: ScreenVelocity | null,
+  ): void {
+    // S6 Task 2
+  }
+
+  /** Ghost trails / onion skin — a fan of faded past copies of `root` at `poses`, drawn behind
+   *  the crisp current object. STUB (S6 Task 1 scaffold): no-op so the family plumbing lands
+   *  with no visual change yet. Task 3 fills this in (draw each past pose faintest-first, then
+   *  the current pose on top, restoring the live transform in a finally). */
+  private ghostTrailsComposite(
+    _scene: THREE.Scene, _camera: THREE.Camera, _root: THREE.Object3D, _exclude: THREE.Object3D[],
+    _t: GhostTrailsTreatment, _poses: LocalPose[],
+  ): void {
+    // S6 Task 3
+  }
+
+  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], motionPlan: MotionGroup[], ctx: StageContext): THREE.Texture | null {
     const r = this.renderer
     const size = r.getDrawingBufferSize(this.tmpSize)
     if (size.x <= 0 || size.y <= 0) return null
@@ -1640,6 +1670,8 @@ export class TreatmentStage {
     const treatedRoots = groups.map((g) => ctx.objectRoots.get(g.objectId)!)
     const invertGroup = groups.find((g) => g.invert)
     const bufGroups = bufferPlan.filter((g) => ctx.objectRoots.has(g.objectId))
+    const motionGroups = motionPlan.filter((g) => ctx.objectRoots.has(g.objectId))
+    const motionRoots = motionGroups.map((g) => ctx.objectRoots.get(g.objectId)!)
 
     // Lights must be on the stage layer to light an isolated draw; layers.test is any-overlap
     // so leaving the bit set is harmless for the normal layer-0 render.
@@ -1678,10 +1710,13 @@ export class TreatmentStage {
       r.clear()
       r.render(scene, camera)
       // 1. Base: everything but the treated objects — or, inverted, the inverted object alone.
+      //    Motion-family objects are hidden from the base pass too, exactly like masked ones:
+      //    the motion sub-loop (2d) redraws them (smeared / with ghosts). Empty motionRoots ⇒
+      //    this adds nothing ⇒ byte-identical when no motion treatment is present.
       if (invertGroup) {
-        this.drawAlone(scene, camera, ctx.objectRoots.get(invertGroup.objectId)!, treatedRoots, this.base, prevBackground)
+        this.drawAlone(scene, camera, ctx.objectRoots.get(invertGroup.objectId)!, [...treatedRoots, ...motionRoots], this.base, prevBackground)
       } else {
-        for (const root of treatedRoots) hide(root)
+        for (const root of [...treatedRoots, ...motionRoots]) hide(root)
         r.setRenderTarget(this.base)
         r.setClearColor(0x000000, 0)
         r.clear()
@@ -1697,7 +1732,7 @@ export class TreatmentStage {
       let invDepth: THREE.Texture | null = null
       if (invertGroup) {
         const inv = this.ensureLayerInv()
-        for (const o of treatedRoots) hide(o) // this object AND the other treated ones (their own groups draw them)
+        for (const o of [...treatedRoots, ...motionRoots]) hide(o) // this object AND the other treated / motion ones (their own groups draw them)
         scene.background = null
         r.setRenderTarget(inv)
         r.setClearColor(0x000000, 0)
@@ -1712,7 +1747,7 @@ export class TreatmentStage {
       for (const g of groups) {
         if (g.invert) continue
         const root = ctx.objectRoots.get(g.objectId)!
-        this.drawAlone(scene, camera, root, treatedRoots, this.layer, null)
+        this.drawAlone(scene, camera, root, [...treatedRoots, ...motionRoots], this.layer, null)
         this.treatAndComposite(g, this.layer, invDepth, root, camera)
       }
       // 2c. Buffer treatments (edge lines). Build the shared G-buffer ONCE from the treated
@@ -1723,7 +1758,7 @@ export class TreatmentStage {
       if (bufGroups.length) {
         const bufRoots = bufGroups.map((g) => ctx.objectRoots.get(g.objectId)!)
         this.renderGbuffer(scene, camera, bufRoots)
-        const exclude = [...treatedRoots, ...bufRoots]
+        const exclude = [...treatedRoots, ...bufRoots, ...motionRoots]
         for (const g of bufGroups) {
           const root = ctx.objectRoots.get(g.objectId)!
           this.drawAlone(scene, camera, root, exclude, this.layer, null)
@@ -1736,6 +1771,20 @@ export class TreatmentStage {
         }
       } else {
         this.releaseGbuffer()
+      }
+      // 2d. Motion treatments (S6 velocity blur / ghost trails). Each motion-family object was
+      //     hidden from the base above; its own composite here redraws it (smeared / with a fan
+      //     of faded past copies) using the per-object screen velocity / past poses the engine
+      //     was handed at the doc+t01 seam. The two composite methods are STUBBED no-ops in
+      //     S6 Task 1 (scaffold) — Tasks 2 and 3 fill them in — so there is no visual effect yet.
+      const bufRoots = bufGroups.map((bg) => ctx.objectRoots.get(bg.objectId)!)
+      for (const g of motionGroups) {
+        const root = ctx.objectRoots.get(g.objectId)!
+        const exclude = [...treatedRoots, ...bufRoots, ...motionRoots]
+        for (const t of g.treatments) {
+          if (t.kind === 'velocityBlur') this.velocityBlurComposite(scene, camera, root, exclude, t, ctx.velocities?.get(g.objectId) ?? null)
+          else if (t.kind === 'ghostTrails') this.ghostTrailsComposite(scene, camera, root, exclude, t, ctx.ghosts?.get(g.objectId) ?? [])
+        }
       }
       // 3. One un-premultiply back to straight alpha for the consumers downstream. The
       //    scratch it lands in is not touched again until the next render().
@@ -1752,7 +1801,7 @@ export class TreatmentStage {
       r.setRenderTarget(prevTarget)
     }
     this.stats.frames++
-    this.stats.groups = groups.length + bufGroups.length
+    this.stats.groups = groups.length + bufGroups.length + motionGroups.length
     return result
   }
 

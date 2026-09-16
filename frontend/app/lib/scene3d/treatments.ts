@@ -28,12 +28,23 @@ export const BUFFER_TREATMENT_KINDS = ['edgeLines', 'depthFog', 'curvatureWear',
  *  chunk at all (a whole separate THREE material class), so its body is authored fresh rather
  *  than ported from an existing MATERIAL type's `_FRAG_BODY`. */
 export const FINISH_TREATMENT_KINDS = ['opalescence', 'foilShimmer', 'matcapCoat'] as const
-export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS, ...FINISH_TREATMENT_KINDS] as const
+/** A FIFTH treatment family (S6): MOTION-DRIVEN treatments that read an object's on-screen
+ *  motion (where it was a moment ago) and render it — `velocityBlur` as a directional smear,
+ *  `ghostTrails` as a fan of faded past copies. Unlike the four families above, the stage
+ *  cannot compute their input from the current pose alone: motion is stateless and applied
+ *  BEFORE the stage runs, so a per-object screen velocity / list of past poses is sampled at
+ *  the seams that still hold the doc + t01 (the live loop and renderMotionFrame) and pushed
+ *  through the engine into the stage. They are NOT masked (no invert row) and NOT ramped;
+ *  their presence — and ONLY their presence — makes the motion sub-loop run, so a scene with
+ *  none is byte-identical (mirrors the S3 buffer gate). */
+export const MOTION_TREATMENT_KINDS = ['velocityBlur', 'ghostTrails'] as const
+export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS, ...FINISH_TREATMENT_KINDS, ...MOTION_TREATMENT_KINDS] as const
 export type MaskedTreatmentKind = typeof MASKED_TREATMENT_KINDS[number]
 export type EdgeTreatmentKind = typeof EDGE_TREATMENT_KINDS[number]
 export type BufferTreatmentKind = typeof BUFFER_TREATMENT_KINDS[number]
 export type FinishTreatmentKind = typeof FINISH_TREATMENT_KINDS[number]
-export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTreatmentKind | FinishTreatmentKind
+export type MotionTreatmentKind = typeof MOTION_TREATMENT_KINDS[number]
+export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTreatmentKind | FinishTreatmentKind | MotionTreatmentKind
 
 /** Human names — UI copy for tree rows, inspector card titles and motion target labels.
  *  Sentence case, never the stored `kind`. */
@@ -43,6 +54,7 @@ export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
   dashedOutline: 'Dashed outline', silhouetteCutout: 'Silhouette cutout',
   edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear', crossHatch: 'Cross-hatch',
   opalescence: 'Opalescence', foilShimmer: 'Foil shimmer', matcapCoat: 'Matcap coat',
+  velocityBlur: 'Velocity blur', ghostTrails: 'Ghost trails',
 }
 
 /** What a Progressive ramp is measured across. `object` = the object's own on-screen extent
@@ -252,6 +264,20 @@ export interface MatcapCoatTreatment extends TreatmentBase {
   matcap: string
   strength: number
 }
+/** Velocity motion blur (S6): a directional smear of the object along its on-screen motion.
+ *  `amount` scales the smear length (0 = none, up to VELOCITY_BLUR_AMOUNT_MAX); `shutter` is
+ *  the fraction of a frame's motion captured (0..1, a virtual shutter angle). Both are pure
+ *  multipliers on the sampled per-frame screen velocity the stage is handed — the treatment
+ *  itself stores no motion, so a still object (velocity below one device px) is a hard no-op,
+ *  byte-identical to `amount` 0. NOT masked (no invert row), NOT ramped. */
+export interface VelocityBlurTreatment extends TreatmentBase { kind: 'velocityBlur'; amount: number; shutter: number }
+/** Ghost trails / onion skin (S6): a fan of faded past copies of the object drawn behind it,
+ *  re-sampled from its own motion at earlier times. `count` copies (1..GHOST_COUNT_MAX),
+ *  `spacing` frames apart (1..GHOST_SPACING_MAX), each fainter than the last by `fade` (0..1
+ *  per-copy alpha falloff). A still object's past poses collapse onto the current pose and are
+ *  suppressed, so a motionless clip shows a single crisp object. NOT masked (no invert row),
+ *  NOT ramped. */
+export interface GhostTrailsTreatment extends TreatmentBase { kind: 'ghostTrails'; count: number; spacing: number; fade: number }
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
   | DissolveTreatment | HalftoneTreatment | ChromaticSplitTreatment | GlitchTreatment | DropShadowTreatment
@@ -259,9 +285,12 @@ export type Treatment =
   | DashedOutlineTreatment | SilhouetteCutoutTreatment
   | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment | CrossHatchTreatment
   | OpalescenceTreatment | FoilShimmerTreatment | MatcapCoatTreatment
+  | VelocityBlurTreatment | GhostTrailsTreatment
 /** The finish-family subset of `Treatment` — grows exactly as `FINISH_TREATMENT_KINDS` does.
  *  `finishPlan`'s return type and `applyFinish`'s parameter type. */
 export type FinishTreatment = OpalescenceTreatment | FoilShimmerTreatment | MatcapCoatTreatment
+/** The motion-family subset of `Treatment` — grows exactly as `MOTION_TREATMENT_KINDS` does. */
+export type MotionTreatment = VelocityBlurTreatment | GhostTrailsTreatment
 
 /** Dial defaults per kind — everything except id/kind/enabled/invert. The ONE source the
  *  parser, `createTreatment` and the inspector controls all read. */
@@ -303,6 +332,8 @@ export const TREATMENT_DEFAULTS = {
   // modules have finished loading — only a module-TOP-LEVEL read of the live binding is unsafe.
   // Strength 1 matches opal/foil's own full-strength default.
   matcapCoat: { matcap: 'chrome', strength: 1 },
+  velocityBlur: { amount: 1, shutter: 0.5 },
+  ghostTrails: { count: 3, spacing: 2, fade: 0.5 },
 } as const
 
 /** Cross-hatch line-pitch bounds, in "px per block on a 1000-px-tall image" units (the pixelate
@@ -337,6 +368,14 @@ export const DROP_SHADOW_DISTANCE_MAX = 128
  *  Shared by the dial and the parser so they cannot drift apart. */
 export const DASHED_OUTLINE_LEN_MAX = 64
 
+/** Velocity blur's maximum `amount` — the strength multiplier on the sampled screen-velocity
+ *  smear length. Shared by the dial and the parser so they cannot drift apart. */
+export const VELOCITY_BLUR_AMOUNT_MAX = 3
+/** Ghost trails' maximum number of faded past copies. Shared by the dial and the parser. */
+export const GHOST_COUNT_MAX = 8
+/** Ghost trails' maximum spacing between copies, in frames. Shared by the dial and the parser. */
+export const GHOST_SPACING_MAX = 12
+
 export function isMaskedKind(kind: TreatmentKind): kind is MaskedTreatmentKind {
   return (MASKED_TREATMENT_KINDS as readonly string[]).includes(kind)
 }
@@ -352,6 +391,12 @@ export function isBufferKind(kind: TreatmentKind): kind is BufferTreatmentKind {
  *  render path, parallel to (not inside) the treatmentStage pass the other three families share. */
 export function isFinishKind(kind: TreatmentKind): kind is FinishTreatmentKind {
   return (FINISH_TREATMENT_KINDS as readonly string[]).includes(kind)
+}
+/** A motion-driven treatment (velocity blur / ghost trails). Never masked, never a G-buffer
+ *  reader, never a finish — it renders in its OWN stage sub-loop, fed a per-object screen
+ *  velocity / list of past poses sampled at the doc+t01 seam. */
+export function isMotionKind(kind: TreatmentKind): kind is MotionTreatmentKind {
+  return (MOTION_TREATMENT_KINDS as readonly string[]).includes(kind)
 }
 export function isTreatmentKind(v: unknown): v is TreatmentKind {
   return typeof v === 'string' && (TREATMENT_KINDS as readonly string[]).includes(v)
@@ -522,6 +567,17 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
       matcap: typeof r.matcap === 'string' && MATCAP_IDS.includes(r.matcap) ? r.matcap : D.matcapCoat.matcap,
       strength: clamp01(num(r.strength, D.matcapCoat.strength)),
     }
+    case 'velocityBlur': return {
+      ...base, kind: 'velocityBlur',
+      amount: clampTo(num(r.amount, D.velocityBlur.amount), VELOCITY_BLUR_AMOUNT_MAX),
+      shutter: clamp01(num(r.shutter, D.velocityBlur.shutter)),
+    }
+    case 'ghostTrails': return {
+      ...base, kind: 'ghostTrails',
+      count: Math.min(GHOST_COUNT_MAX, Math.max(1, Math.round(num(r.count, D.ghostTrails.count)))),
+      spacing: Math.min(GHOST_SPACING_MAX, Math.max(1, num(r.spacing, D.ghostTrails.spacing))),
+      fade: clamp01(num(r.fade, D.ghostTrails.fade)),
+    }
   }
   return undefined
 }
@@ -604,6 +660,36 @@ export function bufferTreatmentPlan(doc: SceneDoc): BufferGroup[] {
  *  G-buffer pass is built on — false ⇒ no pass, no extra render, byte-identical frame. */
 export function docHasGBufferTreatment(doc: SceneDoc): boolean {
   return bufferTreatmentPlan(doc).length > 0
+}
+
+/** One object's enabled motion-family treatments (velocity blur / ghost trails), in stack
+ *  order — the stage draws these in its own sub-loop, fed the per-object screen velocity /
+ *  past poses sampled at the doc+t01 seam. */
+export interface MotionGroup { objectId: string; treatments: Treatment[] }
+
+/**
+ * The per-frame plan for the motion family, in doc (tree) order — one group per host object
+ * that carries an enabled motion treatment. Capped at TREATED_OBJECT_CAP like the buffer
+ * plan. EMPTY when nothing carries one, which is exactly the gate the stage reads: an empty
+ * plan ⇒ the motion sub-loop never runs ⇒ the frame is byte-identical to before S6. A
+ * near-verbatim copy of `bufferTreatmentPlan`.
+ */
+export function motionTreatmentPlan(doc: SceneDoc): MotionGroup[] {
+  const groups: MotionGroup[] = []
+  for (const obj of doc.objects) {
+    if (!obj.visible || !isTreatmentHost(obj)) continue
+    const motion = treatmentsOf(obj).filter((t) => t.enabled && isMotionKind(t.kind))
+    if (motion.length) groups.push({ objectId: obj.id, treatments: motion })
+    if (groups.length >= TREATED_OBJECT_CAP) break
+  }
+  return groups
+}
+
+/** Does any visible host object carry an enabled motion treatment? The one gate the live
+ *  velocity/ghost sampling and the stage's motion sub-loop are built on — false ⇒ no sampling,
+ *  no extra draw, byte-identical frame. */
+export function docHasMotionTreatment(doc: SceneDoc): boolean {
+  return motionTreatmentPlan(doc).length > 0
 }
 
 export interface MaskedGroup {
