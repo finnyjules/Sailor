@@ -235,17 +235,21 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         slider(g, 'fade', 'Fade', 0, 1, 0.01, D.ghostTrails.fade, 'How quickly the copies fade out'),
       ]
       break
-    case 'aiRestyle':
+    case 'aiRestyle': {
       // NOT masked → no invert row appended below. resultRef/inputHash are not rows (they hold the
       // cached result, not a user dial). `strength`/`mix` are sliders → motion targets + agent
       // controls; `prompt` (text) and `model` (select) are not numeric, so neither is a target.
+      // Only user-selectable models reach the dropdown; the route-internal depth+style model
+      // (`selectable: false`) is chosen by the route when a Style with refs is attached, never here.
+      const selectable = RESTYLE_MODELS.filter((m) => m.selectable !== false)
       rows = [
         text(g, 'prompt', 'Prompt', D.aiRestyle.prompt, 'Describe the new look, then use the restyle button'),
-        select(g, 'model', 'Model', RESTYLE_MODELS.map((m) => m.id), RESTYLE_MODELS.map((m) => m.label), D.aiRestyle.model),
+        select(g, 'model', 'Model', selectable.map((m) => m.id), selectable.map((m) => m.label), D.aiRestyle.model),
         slider(g, 'strength', 'Strength', 0, RESTYLE_STRENGTH_MAX, 0.01, D.aiRestyle.strength, 'How far the restyle departs from the original'),
         slider(g, 'mix', 'Mix', 0, 1, 0.01, D.aiRestyle.mix, 'Blend the result over the original — changing this is free'),
       ]
       break
+    }
     default:
       rows = []
   }

@@ -192,6 +192,13 @@ describe('restyle-family treatment rows (aiRestyle)', () => {
       expect(typeof (row as { hint?: string }).hint, `${key} hint`).toBe('string')
     }
   })
+
+  it('the Model select lists only selectable models (not the route-internal depth+style)', () => {
+    const rows = treatmentControls('aiRestyle')
+    const model = rows.find((r) => r.key.endsWith('model')) as any
+    expect(model.options).toEqual(['fal-ai/flux-control-lora-depth', 'fal-ai/flux/dev/image-to-image'])
+    expect(model.options).not.toContain('fal-ai/flux-general')
+  })
 })
 
 describe('the shared ramp rows', () => {

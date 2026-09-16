@@ -116,6 +116,7 @@ import StudioGradientRamp from '~/components/vue-canvas/studio/StudioGradientRam
 import VaryPalette from '~/components/vue-canvas/VaryPalette.vue'
 import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPanel.vue'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
+import WidgetMoodboardChip from '~/components/vue-canvas/widgets/WidgetMoodboardChip.vue'
 import Scene3DMotionTimeline from '~/components/vue-canvas/Scene3DMotionTimeline.vue'
 import CurveEditor from '~/components/vue-canvas/CurveEditor.vue'
 import {
@@ -2017,6 +2018,46 @@ async function resolveRestyleStyle(
   const sig = restyleStyleSig(entry.folder, files, styleText)
   return { refs, styleText, sig }
 }
+
+// ── The "+ Style" picker for the restyle inspector ─────────────────────────
+// Attach a saved Style (moodboard) to a restyle: a pointer only (`styleId`) — the board's refs +
+// palette + prose resolve at run time (resolveRestyleStyle). Reuses WidgetMoodboardChip for the
+// filled/empty chip and a compact studio-native popover (LoraGalleryModal is node-graph-coupled, so
+// its useMoodboards() data source is reused, not the modal). Mirrors the surface's anchorAbove +
+// outside-pointerdown popover pattern.
+const { moodboards: restyleMoodboards } = useMoodboards()
+const restyleStyleRowEl = ref<HTMLElement | null>(null)
+const restyleStylePickerOpen = ref<string | null>(null) // the treatmentId whose picker is open, or null
+const restyleStyleAnchor = ref<{ x: number; y: number } | null>(null)
+
+function openRestyleStylePicker(treatmentId: string): void {
+  // WidgetMoodboardChip's @open emits no native event, so anchor to the row element itself.
+  restyleStyleAnchor.value = anchorAbove(restyleStyleRowEl.value?.getBoundingClientRect())
+  restyleStylePickerOpen.value = treatmentId
+}
+// Direct reactive mutation of `.styleId` — the same doc-treatment write path runRestyle uses to
+// persist `t.resultRef`, so the picker persists through the identical watcher.
+function setRestyleStyle(objectId: string, treatmentId: string, moodboardId: string): void {
+  const hit = findTreatment(doc, objectId, treatmentId)
+  if (!hit || hit.treatment.kind !== 'aiRestyle') return
+  ;(hit.treatment as AiRestyleTreatment).styleId = moodboardId
+  restyleStylePickerOpen.value = null
+}
+function clearRestyleStyle(objectId: string, treatmentId: string): void {
+  const hit = findTreatment(doc, objectId, treatmentId)
+  if (!hit || hit.treatment.kind !== 'aiRestyle') return
+  ;(hit.treatment as AiRestyleTreatment).styleId = ''
+}
+// Click-away closer, matching the add-menu popovers' capture-phase outside-pointerdown watch.
+function onRestyleStylePickerOutside(e: PointerEvent): void {
+  const el = e.target as HTMLElement | null
+  if (el?.closest?.('[data-testid="restyle-style-popover"]') || el?.closest?.('[data-testid="restyle-style-row"]')) return
+  restyleStylePickerOpen.value = null
+}
+watch(restyleStylePickerOpen, (open) => {
+  if (open) window.addEventListener('pointerdown', onRestyleStylePickerOutside, true)
+  else window.removeEventListener('pointerdown', onRestyleStylePickerOutside, true)
+})
 
 async function runRestyle(objectId: string, treatmentId: string): Promise<void> {
   if (!engine) return
@@ -4721,6 +4762,23 @@ async function onClose() {
               @input="setTreatmentControl('treatment.prompt', ($event.target as HTMLTextAreaElement).value)"
             />
           </div>
+          <!-- Style (moodboard): OPTIONAL. Attached ⇒ the restyle adopts the board's look (its refs +
+               palette + prose) while depth holds the geometry. Reuses the Generate node's chip; the
+               picker popover lives near the surface's other anchored popovers below. -->
+          <div
+            v-if="activeTreatment.treatment.kind === 'aiRestyle'"
+            ref="restyleStyleRowEl"
+            class="space-y-1"
+            data-testid="restyle-style-row"
+          >
+            <label class="block px-1 text-[11px] text-white/55">Style</label>
+            <WidgetMoodboardChip
+              :moodboard-id="(activeTreatment.treatment as AiRestyleTreatment).styleId || undefined"
+              :has-refs="!!(activeTreatment.treatment as AiRestyleTreatment).styleId"
+              @open="openRestyleStylePicker(activeTreatment.treatment.id)"
+              @clear="clearRestyleStyle(activeTreatment.obj.id, activeTreatment.treatment.id)"
+            />
+          </div>
           <StudioControlPanel
             :controls="treatmentPanelControls"
             :order="treatmentPanelOrder"
@@ -4756,6 +4814,31 @@ async function onClose() {
               Runs the model once — this costs credits, and takes a minute or two. Mix blends the result for free.
             </p>
           </div>
+        </div>
+
+        <!-- The Style picker popover — a compact studio-native moodboard list, anchored above the
+             Style row (the surface's anchorAbove pattern). Its useMoodboards() data source mirrors the
+             Generate node's chip; the outside-pointerdown watch closes it. -->
+        <div
+          v-if="restyleStylePickerOpen && restyleStyleAnchor"
+          class="fixed z-50 max-h-80 w-64 overflow-auto rounded-lg border border-white/10 bg-[#1b1b1f] p-1.5 shadow-xl"
+          :style="{ left: restyleStyleAnchor.x + 'px', top: restyleStyleAnchor.y + 'px' }"
+          data-testid="restyle-style-popover"
+          @pointerdown.stop
+        >
+          <p v-if="!restyleMoodboards.length" class="px-2 py-3 text-[11px] text-white/40">
+            No styles yet — create a moodboard first.
+          </p>
+          <button
+            v-for="m in restyleMoodboards"
+            :key="m.id"
+            type="button"
+            class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-white/[0.06]"
+            :data-testid="`restyle-style-option-${m.id}`"
+            @click="setRestyleStyle(activeTreatment!.obj.id, restyleStylePickerOpen!, m.id)"
+          >
+            <span class="truncate text-[12px] text-white/85">{{ m.name }}</span>
+          </button>
         </div>
       </template>
 
