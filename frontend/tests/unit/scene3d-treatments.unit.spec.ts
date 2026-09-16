@@ -1065,8 +1065,11 @@ describe('treatments: AI restyle family (S7)', () => {
     const byKey = Object.fromEntries(rows.map((r) => [r.key, r]))
     expect(byKey['treatment.prompt']!.kind).toBe('text')
     expect(byKey['treatment.model']!.kind).toBe('select')
-    expect((byKey['treatment.model'] as { options: string[] }).options).toEqual(RESTYLE_MODELS.map((m) => m.id))
-    expect((byKey['treatment.model'] as { optionLabels: string[] }).optionLabels).toEqual(RESTYLE_MODELS.map((m) => m.label))
+    // Only user-selectable models reach the dropdown; the route-internal depth+style model
+    // (fal-ai/flux-general, selectable:false) is chosen by the route, never offered as a pick.
+    const selectableModels = RESTYLE_MODELS.filter((m) => m.selectable !== false)
+    expect((byKey['treatment.model'] as { options: string[] }).options).toEqual(selectableModels.map((m) => m.id))
+    expect((byKey['treatment.model'] as { optionLabels: string[] }).optionLabels).toEqual(selectableModels.map((m) => m.label))
     expect(byKey['treatment.strength']!.kind).toBe('slider')
     expect(byKey['treatment.mix']!.kind).toBe('slider')
     for (const r of rows) expect(r.group).toBe('AI restyle')

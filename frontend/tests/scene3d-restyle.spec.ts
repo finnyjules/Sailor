@@ -525,6 +525,57 @@ test('orbit-stability: the projected restyle stays registered to the surface acr
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
 })
 
+/* ── Task 4 (restyle-style) · a STYLED restyle round-trips the doc + still holds under orbit ──────
+ * The depth+style feature adds ONE pointer field to the doc (aiRestyle.styleId). The projection path
+ * is Style-agnostic — a moodboard only changes WHAT image the route requests, never how the cached
+ * result is projected onto the surface. So this mirrors the orbit-stability test exactly, differing
+ * only by setting `styleId` on the treatment and asserting the pointer survives serializeDoc →
+ * parseTreatment. `styleId: 'warm-editorial'` resolves to no library entry in the lab ⇒ the
+ * graceful-fallback path; the injected split texture bypasses `runRestyle`, so there is NO route/fal
+ * call anywhere (zero spend).
+ *
+ * NOTE (controller-run): needs a live preview (WebGL via SwiftShader) with the pane VISIBLE. Run
+ * against a fresh preview on the isolated preview port — NOT the shared :3002.
+ */
+const RESTYLE_STYLED = (overrides: Record<string, unknown> = {}) =>
+  RESTYLE_ENABLED({ styleId: 'warm-editorial', ...overrides })
+
+test('a styled restyle (styleId set) round-trips the doc and still projects + holds under orbit', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, orbitCamScene([RESTYLE_STYLED()]))
+
+  // styleId survives serializeDoc → parseTreatment (Task 2): the pointer is in the doc, pixels are not.
+  const styleId = await page.evaluate(() => (window as any).__scene3dDoc().objects[0].treatments[0].styleId)
+  expect(styleId).toBe('warm-editorial')
+
+  // The projection path does not care where the image came from — inject a LOCAL split texture (zero
+  // spend) and assert orbit-registration, exactly as the no-Style orbit test does.
+  expect(await injectSplit(page, 'restyle-sphere'), 'inject hook returned false').toBe(true)
+  await page.waitForTimeout(SETTLE_MS)
+
+  const nn = (v: [number, number, number]): [number, number, number] => {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0]/l, v[1]/l, v[2]/l]
+  }
+  const n = nn([-0.7, 0, 0.71])
+  const P: [number, number, number] = [0.5*n[0], 0.6 + 0.5*n[1], 0.5*n[2]]
+  const FOV = 40
+
+  const still = await snapshotAt(page, 0)
+  const cam0 = await camera(page)
+  const c0 = await sampleWorldPoint(page, still, cam0, P, FOV)
+  expect(sat(c0), `bake frame not a restyle colour: ${JSON.stringify(c0)}`).toBeGreaterThan(60)
+  const magenta0 = c0.r > c0.g
+
+  const orbited = await snapshotAt(page, 0.1)
+  const cam1 = await camera(page)
+  expect(Math.hypot(cam1.x - cam0.x, cam1.z - cam0.z), 'camera did not orbit').toBeGreaterThan(0.5)
+  const c1 = await sampleWorldPoint(page, orbited, cam1, P, FOV)
+  expect(sat(c1), `after orbit slid off onto grey: ${JSON.stringify(c1)}`).toBeGreaterThan(60)
+  expect(c1.r > c1.g, `after orbit colour class changed: ${JSON.stringify(c0)} → ${JSON.stringify(c1)}`).toBe(magenta0)
+
+  expect(bad, `shader failures:\n${bad.join('\n')}`).toEqual([])
+})
+
 /* ── Task 5 · the ONE live PAID acceptance run (env-gated; ~7 credits) ─────────────────────────
  * Every case above proves the restyle path with INJECTED local results at zero cost. The one thing
  * only a real call can prove is that the route -> fal actually returns a usable restyled image from
