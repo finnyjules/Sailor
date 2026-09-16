@@ -83,6 +83,20 @@ export function blurPasses(amount: number, height: number): { passes: number; st
   return { passes, step: radiusPx / (passes * TAPS), radiusPx }
 }
 
+/** The velocity-blur smear length in device px for screen velocity `v` on a `width`×`height`
+ *  target: half the per-frame NDC displacement mapped to px (the 0.5 maps NDC's [-1,1] span, 2
+ *  units, onto the axis's pixel count), scaled by `shutter` (fraction of a frame's motion each
+ *  frame captures) and `amount`. A null velocity — a still object, a parented object, or a
+ *  motion apex where the object is momentarily stationary — is 0. The stage treats `lenPx < 1`
+ *  as a hard no-op (Decision 9), so a still velocity blur is byte-identical to amount 0 (which
+ *  is also 0 here). Pure; the GLSL-free CPU twin of what `velocityBlurComposite` computes. */
+export function velocityBlurLenPx(
+  v: ScreenVelocity | null, width: number, height: number, shutter: number, amount: number,
+): number {
+  if (!v) return 0
+  return 0.5 * Math.hypot(v.x * width, v.y * height) * shutter * amount
+}
+
 /** Pixelate cell size in device px on an image `height` px tall, given `cellSize` in "pixels
  *  per block on a 1000-px-tall image" units: 12 → 12px at 1000px, ~24.6px at 2048px — the
  *  same LOOK at every resolution, exactly as `blurPasses` scales by height. Pure. */
@@ -1173,6 +1187,30 @@ export class TreatmentStage {
     return { rt: cur, radiusPx }
   }
 
+  /** A DIRECTIONAL smear of `src` by `lenPx` device px along the unit screen direction `dir`
+   *  (device-px space), reusing the separable-blur GLSL along ONE axis only — the S6 velocity
+   *  blur's symmetric streak along the path (Decision 5). Sizes its pass count / step from
+   *  `lenPx` exactly as `blurPasses` sizes a normal blur, but never runs the perpendicular pass.
+   *  Returns the scratch holding the result (never `src`). Ramp-free (`uProgressive` 0 — an even
+   *  smear). Callers guarantee `lenPx >= 1` and a unit `dir`. */
+  private velocityBlur(src: RT, lenPx: number, dir: { x: number; y: number }, ...reserve: RT[]): RT {
+    const passes = Math.min(MAX_PAIRS, Math.max(1, Math.ceil(lenPx / TAPS)))
+    const step = lenPx / (passes * TAPS)
+    this.setRampUniforms(this.blurMat, null)
+    const a = this.free(src, ...reserve)
+    const b = this.free(src, a, ...reserve)
+    let cur = src
+    let dst = a
+    for (let i = 0; i < passes; i++) {
+      this.blurMat.uniforms.tDiffuse!.value = cur.texture
+      this.blurMat.uniforms.uDir!.value.set((dir.x * step) / this.width, (dir.y * step) / this.height)
+      this.pass(this.blurMat, dst)
+      cur = dst
+      dst = dst === a ? b : a
+    }
+    return cur
+  }
+
   /** UV-space min and max of `root`'s world AABB — over the meshes its OWN layer draws
    *  (see `ownMeshes`; a child object's root sits inside its parent's subtree since
    *  parenting landed, and `drawAlone` excludes it, so the box must too) — projected
@@ -1639,15 +1677,33 @@ export class TreatmentStage {
     this.accumIdx = 1 - this.accumIdx
   }
 
-  /** Velocity motion blur — a directional smear of `root` along its screen velocity `v`.
-   *  STUB (S6 Task 1 scaffold): no-op so the family plumbing lands with no visual change yet.
-   *  Task 2 fills this in (drawAlone → directional reuse of BLUR_FRAG → depth-tested composite,
-   *  with a hard no-op below one device px so a still object matches amount 0). */
+  /** Velocity motion blur — a directional smear of `root` along its screen velocity `v`, drawn
+   *  behind nothing and composited depth-tested over the base. The object is hidden from the base
+   *  pass like every motion-family root, so it MUST be redrawn here even when it is not moving —
+   *  hence the object is drawn alone FIRST, before any early-out, or it would vanish. Below one
+   *  device px of smear (`lenPx < 1`) — a null / zero velocity, a motion apex, or amount 0 — this
+   *  is a HARD no-op: the crisp object is composited unblurred, byte-identical to the same
+   *  treatment at amount 0 (Decision 9). Otherwise the object-alone layer is smeared along the
+   *  screen velocity (reusing BLUR_FRAG one axis at a time) and composited with `haloPx = lenPx`
+   *  so the streak reaching past the silhouette is not clipped. */
   private velocityBlurComposite(
-    _scene: THREE.Scene, _camera: THREE.Camera, _root: THREE.Object3D, _exclude: THREE.Object3D[],
-    _t: VelocityBlurTreatment, _v: ScreenVelocity | null,
+    scene: THREE.Scene, camera: THREE.Camera, root: THREE.Object3D, exclude: THREE.Object3D[],
+    t: VelocityBlurTreatment, v: ScreenVelocity | null, invDepth: THREE.Texture | null,
   ): void {
-    // S6 Task 2
+    this.drawAlone(scene, camera, root, exclude, this.layer, null)
+    const lenPx = velocityBlurLenPx(v, this.width, this.height, t.shutter, t.amount)
+    if (lenPx < 1) {
+      // The still / amount-0 branch: the exact crisp composite an amount-0 velocity blur produces
+      // (halo 0 ⇒ the composite's default 2px borrow, matching a plain object composite).
+      this.composite(this.layer.texture, this.layer.depthTexture, invDepth, 1, 0, null)
+      return
+    }
+    // `v` is non-null here (lenPx > 0 ⇒ velocityBlurLenPx saw a velocity). Direction in
+    // device-px space, normalised — the axis the smear runs along.
+    const mag = Math.hypot(v!.x * this.width, v!.y * this.height)
+    const dir = { x: (v!.x * this.width) / mag, y: (v!.y * this.height) / mag }
+    const blurred = this.velocityBlur(this.layer, lenPx, dir)
+    this.composite(blurred.texture, this.layer.depthTexture, invDepth, 1, lenPx, null)
   }
 
   /** Ghost trails / onion skin — a fan of faded past copies of `root` at `poses`, drawn behind
@@ -1775,14 +1831,14 @@ export class TreatmentStage {
       // 2d. Motion treatments (S6 velocity blur / ghost trails). Each motion-family object was
       //     hidden from the base above; its own composite here redraws it (smeared / with a fan
       //     of faded past copies) using the per-object screen velocity / past poses the engine
-      //     was handed at the doc+t01 seam. The two composite methods are STUBBED no-ops in
-      //     S6 Task 1 (scaffold) — Tasks 2 and 3 fill them in — so there is no visual effect yet.
+      //     was handed at the doc+t01 seam. velocityBlur is live (S6 Task 2 — a directional
+      //     smear); ghostTrails is still a STUBBED no-op (S6 Task 3 fills it in).
       const bufRoots = bufGroups.map((bg) => ctx.objectRoots.get(bg.objectId)!)
       for (const g of motionGroups) {
         const root = ctx.objectRoots.get(g.objectId)!
         const exclude = [...treatedRoots, ...bufRoots, ...motionRoots]
         for (const t of g.treatments) {
-          if (t.kind === 'velocityBlur') this.velocityBlurComposite(scene, camera, root, exclude, t, ctx.velocities?.get(g.objectId) ?? null)
+          if (t.kind === 'velocityBlur') this.velocityBlurComposite(scene, camera, root, exclude, t, ctx.velocities?.get(g.objectId) ?? null, invDepth)
           else if (t.kind === 'ghostTrails') this.ghostTrailsComposite(scene, camera, root, exclude, t, ctx.ghosts?.get(g.objectId) ?? [])
         }
       }
