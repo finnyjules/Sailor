@@ -266,3 +266,172 @@ test('mix 0 is a byte-identical no-op: an injected result is ignored, equal to a
 
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
 })
+
+/* ── Task 4 · whole-slice determinism, camera-static alignment, mix ramp, orbit-misaligns xfail ──
+ * These lock the composite's per-frame behaviour with a FAKE injected texture (zero spend, no fal):
+ *   - determinism: the composite is pure — same injected result + same camera renders a
+ *     data-URL-IDENTICAL frame twice (guards nondeterministic sampling in restyleComposite);
+ *   - camera-static alignment: object static + camera static ⇒ the injected result stays registered
+ *     to the silhouette across a re-render (each frame recomputes screenRectOfBox — it must land the
+ *     same when nothing moves);
+ *   - mix ramp: at mix 0.5 the composited pixel is strictly between the plain object and the full
+ *     injected image (the blend behaves);
+ *   - orbit-misaligns (test.fixme): the KNOWN follow-up — after a CAMERA ORBIT the flat 2D result no
+ *     longer registers to the rotated silhouette (needs re-projection). Marked fixme so it is a
+ *     visible limitation in the report, never a false green.
+ * Every visual assertion pairs with __scene3dTreatmentStats() (frames>0, groups>=1) + the console
+ * shader-error gate, matching the S4/S5 loud-failure discipline of the cases above.
+ *
+ * NOTE (controller-run): needs a live preview (WebGL via SwiftShader). Run against a fresh preview,
+ * pane visible, on the isolated preview port — NOT the shared :3002.
+ */
+const snapshotAt = (page: Page, t01: number) =>
+  page.evaluate((t) => (window as any).__scene3dSnapshotAt(t) as string, t01)
+const treatmentStats = (page: Page) => page.evaluate(() => (window as any).__scene3dTreatmentStats())
+
+test('an injected restyle composites deterministically: the same frame twice is byte-identical', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith([RESTYLE_ENABLED()]))
+  expect(await injectSolid(page, 'restyle-sphere', MAGENTA), 'inject hook returned false').toBe(true)
+  await page.waitForTimeout(SETTLE_MS)
+
+  // Two snapshots at the same (static) camera — each re-renders through restyleComposite, which
+  // recomputes the screen crop rect from the object Box3. A pure composite must land identically.
+  const first = await snapshot(page)
+  const stats = await treatmentStats(page)
+  const second = await snapshot(page)
+
+  expect(stats.groups, 'the restyle group did not render').toBeGreaterThanOrEqual(1)
+  expect(stats.frames, 'no frames rendered').toBeGreaterThan(0)
+  expect(second, 'the same injected result + camera did not render identically twice').toBe(first)
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+})
+
+test('camera-static: the injected result stays registered to the silhouette across a re-render', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith([RESTYLE_ENABLED()]))
+  expect(await injectSolid(page, 'restyle-sphere', MAGENTA), 'inject hook returned false').toBe(true)
+  await page.waitForTimeout(SETTLE_MS)
+
+  // First render: the injected magenta lands inside the sphere, the corner stays background.
+  const shot1 = await snapshot(page)
+  const inside1 = await samplePatch(page, shot1, 0.5, 0.5)
+  expect(inside1.r, `object centre not magenta on first render: ${JSON.stringify(inside1)}`).toBeGreaterThan(110)
+  expect(inside1.b, `object centre not magenta on first render: ${JSON.stringify(inside1)}`).toBeGreaterThan(60)
+  expect(inside1.g, `object centre too green on first render: ${JSON.stringify(inside1)}`).toBeLessThan(inside1.r * 0.7)
+
+  // Force another render (nothing moved). The per-frame screenRectOfBox recompute must keep the
+  // flat result registered: inside is still magenta, the corner is still the dark background.
+  const shot2 = await snapshot(page)
+  const stats = await treatmentStats(page)
+  const inside2 = await samplePatch(page, shot2, 0.5, 0.5)
+  const corner2 = await samplePatch(page, shot2, 0.04, 0.04)
+  expect(stats.groups, 'the restyle group did not render').toBeGreaterThanOrEqual(1)
+  expect(stats.frames, 'no frames rendered').toBeGreaterThan(0)
+  expect(inside2.r, `object centre drifted off the injected result: ${JSON.stringify(inside2)}`).toBeGreaterThan(110)
+  expect(inside2.b, `object centre drifted off the injected result: ${JSON.stringify(inside2)}`).toBeGreaterThan(60)
+  expect(inside2.g, `object centre too green on re-render: ${JSON.stringify(inside2)}`).toBeLessThan(inside2.r * 0.7)
+  expect(corner2.r + corner2.g + corner2.b, `corner is not background after re-render: ${JSON.stringify(corner2)}`).toBeLessThan(150)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+})
+
+test('mix 0.5 blends: the object centre is strictly between the plain object and the full injected image', async ({ page }) => {
+  const bad = watchConsole(page)
+
+  // Plain object (mix 0 — the early-out, texture ignored): the grey lit sphere.
+  await openLab(page, sceneWith([RESTYLE_ENABLED({ mix: 0 })]))
+  expect(await injectSolid(page, 'restyle-sphere', MAGENTA)).toBe(true)
+  await page.waitForTimeout(SETTLE_MS)
+  const plain = await samplePatch(page, await snapshot(page), 0.5, 0.5)
+
+  // Full restyle (mix 1): the injected magenta.
+  await openLab(page, sceneWith([RESTYLE_ENABLED({ mix: 1 })]))
+  expect(await injectSolid(page, 'restyle-sphere', MAGENTA)).toBe(true)
+  await page.waitForTimeout(SETTLE_MS)
+  const full = await samplePatch(page, await snapshot(page), 0.5, 0.5)
+
+  // Half blend (mix 0.5): every channel must sit strictly between the two endpoints. The blend is
+  // mix(litColour, restyle, 0.5) in LINEAR space then tone-mapped to sRGB — monotonic, so the
+  // sampled sRGB channel lands strictly between the endpoints even if not the arithmetic midpoint.
+  await openLab(page, sceneWith([RESTYLE_ENABLED({ mix: 0.5 })]))
+  expect(await injectSolid(page, 'restyle-sphere', MAGENTA)).toBe(true)
+  await page.waitForTimeout(SETTLE_MS)
+  const stats = await treatmentStats(page)
+  const mid = await samplePatch(page, await snapshot(page), 0.5, 0.5)
+
+  expect(stats.groups, 'the restyle group did not render').toBeGreaterThanOrEqual(1)
+  expect(stats.frames, 'no frames rendered').toBeGreaterThan(0)
+
+  const between = (m: number, a: number, b: number) => {
+    const lo = Math.min(a, b), hi = Math.max(a, b)
+    return m > lo + 2 && m < hi - 2
+  }
+  const ctx = `plain=${JSON.stringify(plain)} mid=${JSON.stringify(mid)} full=${JSON.stringify(full)}`
+  // Green has the largest, most reliable spread (grey g is mid-bright, magenta g is 0) — the
+  // anchor channel. Red and blue rise toward magenta; assert all three are strictly interior.
+  expect(between(mid.g, plain.g, full.g), `green not between plain and full: ${ctx}`).toBe(true)
+  expect(between(mid.r, plain.r, full.r), `red not between plain and full: ${ctx}`).toBe(true)
+  expect(between(mid.b, plain.b, full.b), `blue not between plain and full: ${ctx}`).toBe(true)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+})
+
+/* ── KNOWN LIMITATION (owed follow-up: camera-orbit re-projection) ──────────────────────────────
+ * The restyle result is a FLAT 2D image fitted to the object's screen-space bounding box. The crop
+ * rect is recomputed each frame, so the result tracks the box as the object/camera move — but the
+ * texture content is a projection baked from the COMMITTED camera. After a camera ORBIT the object's
+ * silhouette rotates in 3D while the flat texture is merely re-stretched to the new axis-aligned
+ * bbox, so a feature that should stay pinned to a point ON the object slides off. Fixing this needs
+ * re-projection (or auto-invalidation) — the plan's first owed follow-up.
+ *
+ * Authored as test.fixme so it is REPORTED as a known limitation and never runs as a false green.
+ * The body is a real regression test (a two-colour split texture whose seam should stay anchored to
+ * the object across an orbit): drop the `.fixme` once re-projection lands and it becomes live.
+ */
+const orbitCamScene = (treatments?: unknown[]) => ({
+  version: 1, background: '#202020', showFloor: false,
+  camera: {
+    position: [0, 1.2, 4.2], target: [0, 0.6, 0], fov: 40,
+    motion: { preset: 'orbit', speed: 1, amount: 1 },
+  },
+  objects: [sphere(treatments)],
+})
+
+/** Inject a LOCAL texture split left-half magenta / right-half cyan, so an orbit that fails to
+ *  re-project shows the seam sliding relative to the object. Zero spend. */
+async function injectSplit(page: Page, objectId: string): Promise<boolean> {
+  return page.evaluate(async (oid) => {
+    const cv = document.createElement('canvas')
+    cv.width = 32; cv.height = 32
+    const c = cv.getContext('2d')!
+    c.fillStyle = '#ff00ff'; c.fillRect(0, 0, 16, 32)
+    c.fillStyle = '#00ffff'; c.fillRect(16, 0, 16, 32)
+    return await (window as any).__scene3dRestyleInject(oid, cv.toDataURL('image/png')) as boolean
+  }, objectId)
+}
+
+test.fixme('orbit re-projection (OWED): the flat result stays pinned to the silhouette after a camera orbit', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, orbitCamScene([RESTYLE_ENABLED()]))
+  expect(await injectSplit(page, 'restyle-sphere'), 'inject hook returned false').toBe(true)
+  await page.waitForTimeout(SETTLE_MS)
+
+  // At t01=0 the camera is at its committed pose: left of the object reads magenta, right reads cyan.
+  const still = await snapshotAt(page, 0)
+  const stillL = await samplePatch(page, still, 0.42, 0.5)
+  const stillR = await samplePatch(page, still, 0.58, 0.5)
+  expect(stillL.r > stillL.g, `still: left patch not magenta ${JSON.stringify(stillL)}`).toBe(true)
+  expect(stillR.g > stillR.r, `still: right patch not cyan ${JSON.stringify(stillR)}`).toBe(true)
+
+  // After ~36 degrees of orbit the object's surface has rotated. With CORRECT re-projection a
+  // point that was on the magenta half stays magenta; today the flat texture re-stretches to the
+  // new bbox and the seam slides, so this assertion fails — the follow-up. Kept as fixme.
+  const orbited = await snapshotAt(page, 0.1)
+  const stats = await treatmentStats(page)
+  expect(stats.groups, 'the restyle group did not render').toBeGreaterThanOrEqual(1)
+  const orbitedL = await samplePatch(page, orbited, 0.42, 0.5)
+  expect(orbitedL.r > orbitedL.g, `orbit misregistered the flat result (owed re-projection): ${JSON.stringify(orbitedL)}`).toBe(true)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+})
