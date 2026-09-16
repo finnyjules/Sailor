@@ -59,16 +59,16 @@ known-geometry unit test and the export override-material path checked.
 3. Depth fog / atmospheric tint. 4. Curvature wear. 5. Lab-page Playwright: a box's creases get lines
    where the hull outline gaps. 6. Agent/motion. 7. Copy.
 
-## Slice S4 · New masked and edge treatments  (≈8 tasks)
+## Slice S4 · New masked and edge treatments  (≈8 tasks) — ✅ LANDED 2026-09-12 (9 new kinds → 20 total; TREATMENT_ICONS total-Record guard; live Playwright caught 2 GPU bugs unit twins missed — emit FLOAT literals; see memory scene3d-treatments-s4-landed)
 Masked: colour grade; dissolve; halftone/dot screen; chromatic split; glitch/scanlines; flat drop
 shadow. Edge: dashed outline; silhouette cutout; cross-hatch. One task per family + Playwright.
 
-## Slice S5 · Finishes as treatments; light linking  (≈7 tasks)
+## Slice S5 · Finishes as treatments  (≈4 tasks) — ✅ LANDED 2026-09-13 (base 11bbb37035 → e80e854c3; finishes only — LIGHT-LINKING DEFERRED to its own slice, three 0.171 can't mask lights per-object; whole-slice review Ready-to-merge, live gate 17/17; see 2026-09-09-scene3d-S5-finishes.md + memory scene3d-finishes-s5-landed)
 1. `applyFinish` seam (the `applyScreen` pattern) for foil shimmer, opalescence, matcap overlay;
 2–4. the three finishes; 5. light-linking SPIKE (shader-side mask by light index through the seam);
 6. light exclusion + per-object colour cast, or colour cast only if the spike fails; 7. proofs.
 
-## Slice S6 · Motion-driven treatments  (≈5 tasks)
+## Slice S6 · Motion-driven treatments  (≈5 tasks) — ✅ LANDED 2026-09-16 (restore e10ee3e17 + T1 aebaec0e1 → T5 54f3b6869; MOTION_TREATMENT_KINDS = velocityBlur + ghostTrails; velocity/ghosts sampled from doc+t01 at the live-loop AND renderMotionFrame seams, pushed through the stateless stage; new motion/velocity.ts + __scene3dSnapshotAt oracle hook; velocityBlur = directional BLUR_FRAG smear, ghostTrails = faded past-pose fan; LIVE gate 9/9 real GPU, byte-identical when absent; S6 commits sign Opus 4.8. NB: recovered scene3d S3–S5 first — bec8b3845 "docs(fonts)" had stealth-reverted them. OWED: parented-object support, trailing/camera blur, GLB live case. See 2026-09-09-scene3d-S6-motion-driven-treatments.md + memory scene3d-motion-treatments-s6-landed)
 1. Velocity from two motion samples (`t`, `t − dt`) projected to screen; 2. velocity motion blur in
 the stage; 3. ghost trails / onion skin (N samples faded); 4. Playwright: blur along the path, none
 when still; 5. agent/motion/copy.
