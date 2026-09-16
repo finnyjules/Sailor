@@ -452,6 +452,30 @@ describe('animatableTargets: treatments', () => {
     expect((out.find((t) => t.id === gt.id) as any).fade).toBeCloseTo(0.4, 5)
   })
 
+  // S7: an aiRestyle treatment's NUMERIC dials (strength, mix) are motion targets like every
+  // other treatment slider — derived over treatmentControls(kind) via iterateTreatmentControls,
+  // no per-kind edit. Its prompt (a text row) and model (a select row) are NOT numeric, so they
+  // never reach animatableTargets — exactly as matcapCoat's `matcap` select is withheld.
+  it('emits strength + mix as targets for aiRestyle; withholds prompt (text) and model (select)', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Statue'
+    const ar = createTreatment('aiRestyle')
+    box.treatments = [ar]
+    doc.objects.push(box)
+    const targets = animatableTargets(doc)
+    const paths = targets.map((t) => t.path)
+    for (const field of ['strength', 'mix']) {
+      expect(paths).toContain(`objects.${box.id}.treatments.${ar.id}.${field}`)
+    }
+    expect(paths).not.toContain(`objects.${box.id}.treatments.${ar.id}.prompt`)
+    expect(paths).not.toContain(`objects.${box.id}.treatments.${ar.id}.model`)
+    // resultRef/inputHash are not control rows at all, so certainly not targets.
+    expect(paths).not.toContain(`objects.${box.id}.treatments.${ar.id}.resultRef`)
+    expect(paths).not.toContain(`objects.${box.id}.treatments.${ar.id}.inputHash`)
+    expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${ar.id}.strength`)?.label)
+      .toBe('Statue · AI restyle strength')
+  })
+
   it('a track on a treatment dial writes through the id, and survives reordering the stack', () => {
     const doc = defaultDoc()
     const box = createPrimitive('box', doc.objects)

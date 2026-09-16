@@ -30,7 +30,7 @@ import { PostChain, postEnabled, DEFAULT_POST, type PostSettings } from '~/lib/s
 import { collectEditorHelpers } from '~/lib/scene3d/passes'
 import { syncTreatmentShells } from './treatmentShells'
 import { TreatmentStage } from './treatmentStage'
-import { maskedTreatmentPlan, bufferTreatmentPlan, finishPlan, motionTreatmentPlan } from './treatments'
+import { maskedTreatmentPlan, bufferTreatmentPlan, finishPlan, motionTreatmentPlan, restyleTreatmentPlan } from './treatments'
 import type { ScreenVelocity, LocalPose } from './motion/velocity'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
@@ -573,6 +573,13 @@ export class SceneEngine {
   private ghostPoses = new Map<string, LocalPose[]>()
   setMotionVelocities(m: Map<string, ScreenVelocity>): void { this.motionVelocities = m }
   setGhostPoses(m: Map<string, LocalPose[]>): void { this.ghostPoses = m }
+  /** Per-object decoded restyle result textures for the S7 AI restyle family, keyed by object id.
+   *  Pushed in each frame from the surface's client-side texture cache (a pure map lookup — never
+   *  a fetch or a model call) at the seam that owns the doc + cache. Defaults EMPTY, so an
+   *  ordinary scene (and every render that never sets it) pays nothing and stays byte-identical;
+   *  a miss for a restyle host makes its stage composite draw the plain object (a no-op). */
+  private restyleTextures = new Map<string, THREE.Texture>()
+  setRestyleTextures(m: Map<string, THREE.Texture>): void { this.restyleTextures = m }
   readonly grid: THREE.GridHelper
   /** Stable per-instance id, never reused — see `_nextSceneEngineId`'s doc above. */
   readonly id: string = `scene3d${_nextSceneEngineId++}`
@@ -1475,7 +1482,12 @@ export class SceneEngine {
     // before S6. The per-object velocities/ghosts it consumes are pushed in by the seams that
     // still hold the doc + t01; absent (an ordinary render call) they are empty and it no-ops.
     const motionPlan = this.lastDoc ? motionTreatmentPlan(this.lastDoc) : []
-    const runStage = stageGroups > 0 || bufferPlan.length > 0 || motionPlan.length > 0
+    // The S7 restyle sub-loop runs ONLY when an aiRestyle treatment is present — its absence is
+    // the byte-identity gate: empty plan ⇒ no restyle pass, the same frame as before S7. The
+    // per-object result textures it composites are pushed in by the surface (a pure cache lookup);
+    // absent (an ordinary render call) they are empty and its composite draws the plain object.
+    const restylePlan = this.lastDoc ? restyleTreatmentPlan(this.lastDoc) : []
+    const runStage = stageGroups > 0 || bufferPlan.length > 0 || motionPlan.length > 0 || restylePlan.length > 0
     if (!postEnabled(post) && !runStage) { this.renderer.render(scene, camera); return }
     const s = this.renderer.getSize(new THREE.Vector2())
     if (!this.postChain) { this.postChain = new PostChain(this.renderer, scene, camera, s.x, s.y); this.postW = s.x; this.postH = s.y }
@@ -1496,7 +1508,7 @@ export class SceneEngine {
         if (!this.treatmentStage) this.treatmentStage = new TreatmentStage(this.renderer)
         let tex: THREE.Texture | null = null
         try {
-          tex = this.treatmentStage.render(scene, camera, plan, bufferPlan, motionPlan, { objectRoots: this.objectRoots, velocities: this.motionVelocities, ghosts: this.ghostPoses })
+          tex = this.treatmentStage.render(scene, camera, plan, bufferPlan, motionPlan, restylePlan, { objectRoots: this.objectRoots, velocities: this.motionVelocities, ghosts: this.ghostPoses, restyles: this.restyleTextures })
           this.postChain.setInputTexture(tex)
         } catch (e) {
           this.postChain.setInputTexture(null)

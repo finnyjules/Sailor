@@ -25,7 +25,8 @@ import {
 } from '~/lib/scene3d/config'
 import {
   cloneTreatments, createTreatment, findTreatment, isTreatmentHost, maskedTreatmentPlan, newTreatmentId,
-  treatmentsOf, unrenderedTreatmentIds, docHasMotionTreatment, TREATMENT_LABELS, type Treatment, type TreatmentKind,
+  treatmentsOf, unrenderedTreatmentIds, docHasMotionTreatment, docHasRestyleTreatment, restyleTreatmentPlan,
+  TREATMENT_LABELS, type Treatment, type TreatmentKind, type AiRestyleTreatment,
 } from '~/lib/scene3d/treatments'
 import { sceneScreenVelocities, collectGhostPoses } from '~/lib/scene3d/motion/velocity'
 import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentControls'
@@ -1935,6 +1936,27 @@ let engine: SceneEngine | null = null
 let interaction: SceneInteraction | null = null
 let raf = 0
 let ro: ResizeObserver | null = null
+// ── S7 AI restyle: client-side result-texture cache ───────────────────────────
+// Decoded restyle result textures keyed by their stable `resultRef` filename. Pixels live HERE,
+// never in the doc — the treatment stores only the small `resultRef`/`inputHash` strings. This
+// map is populated by an explicit re-run (Task 3) or the `__scene3dRestyleInject` test hook; a
+// pure lookup per frame, never a fetch or a model call. Empty this task (no re-run wired yet).
+const restyleTexCache = new Map<string, THREE.Texture>()
+/** Build the per-frame objectId → texture map the stage reads (StageContext.restyles): for each
+ *  restyle host with a stored `resultRef` already decoded in the cache, map its object id to the
+ *  texture. A miss (no result yet / not cached) omits the object, so the stage draws the plain
+ *  object. Pure — a cache lookup, no network. Empty cache ⇒ empty map ⇒ every restyle is a no-op. */
+function collectRestyleTextures(d: SceneDoc, cache: Map<string, THREE.Texture>): Map<string, THREE.Texture> {
+  const out = new Map<string, THREE.Texture>()
+  for (const g of restyleTreatmentPlan(d)) {
+    const obj = d.objects.find((o) => o.id === g.objectId)
+    const t = treatmentsOf(obj).find((x) => x.enabled && x.kind === 'aiRestyle') as AiRestyleTreatment | undefined
+    if (!t?.resultRef) continue
+    const tex = cache.get(t.resultRef)
+    if (tex) out.set(g.objectId, tex)
+  }
+  return out
+}
 // Wall-clock start of this surface's rAF loop — a shaderFill field's animation clock runs off
 // elapsed real time, same as ShapeStudioSurface.vue's `mountedAt` (Scene3D's own playhead
 // governs object motion, not this). Set once in onMounted, read every loop() tick.
@@ -2004,9 +2026,31 @@ onMounted(() => {
   // without racing the playhead.
   ;(window as any).__scene3dSnapshotAt = (t01: number) =>
     engine ? (renderMotionFrame(engine, doc, t01) as HTMLCanvasElement).toDataURL('image/png') : ''
+  // S7 restyle test hook: inject a LOCAL image as an object's restyle result — zero spend, no fal
+  // call. Decodes the data URL into a texture, caches it under a fresh resultRef, stamps the
+  // object's aiRestyle treatment, pushes the map and re-renders. Task 3's live composite reads
+  // exactly this cached texture; Task 1's stub ignores it (draws the plain object), so this only
+  // exercises the resultRef → cache → stage plumbing today.
+  ;(window as any).__scene3dRestyleInject = (objectId: string, dataUrl: string): Promise<boolean> => {
+    const obj = doc.objects.find((o) => o.id === objectId)
+    const t = treatmentsOf(obj).find((x) => x.kind === 'aiRestyle') as AiRestyleTreatment | undefined
+    if (!engine || !obj || !t) return Promise.resolve(false)
+    return new Promise<boolean>((resolve) => {
+      new THREE.TextureLoader().load(dataUrl, (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace
+        const ref = `inject-${objectId}-${Date.now()}.png`
+        restyleTexCache.set(ref, tex)
+        t.resultRef = ref
+        t.inputHash = 'injected'
+        engine!.setRestyleTextures(collectRestyleTextures(doc, restyleTexCache))
+        engine!.render((performance.now() - scene3dMountedAt) / 1000)
+        resolve(true)
+      }, undefined, () => resolve(false))
+    })
+  }
 })
 onBeforeUnmount(() => {
-  for (const k of ['__scene3dDoc', '__scene3dCamera', '__scene3dTreatmentStats', '__scene3dSnapshot', '__scene3dBeauty', '__scene3dSnapshotAt']) delete (window as any)[k]
+  for (const k of ['__scene3dDoc', '__scene3dCamera', '__scene3dTreatmentStats', '__scene3dSnapshot', '__scene3dBeauty', '__scene3dSnapshotAt', '__scene3dRestyleInject']) delete (window as any)[k]
 })
 
 onMounted(() => {
@@ -2102,6 +2146,10 @@ onMounted(() => {
       // Same gate shape as shaderFill: only a flowing opal (opalFlowSpeed > 0) needs a per-frame
       // uTime write; a still opal or an opal-free scene skips it entirely.
       if (sceneHasOpalFlow(doc)) engine.refreshOpal((performance.now() - scene3dMountedAt) / 1000)
+      // S7 AI restyle: push the per-object cached result textures ONCE per frame regardless of
+      // play state (a pure cache lookup, never a fetch or a model call). Empty when no aiRestyle
+      // treatment is present, so a scene with none pays nothing and stays byte-identical.
+      engine.setRestyleTextures(docHasRestyleTreatment(doc) ? collectRestyleTextures(doc, restyleTexCache) : new Map())
     }
     if (playing.value && engine) {
       const dur = doc.motion.duration

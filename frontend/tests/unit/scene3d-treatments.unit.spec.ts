@@ -9,7 +9,9 @@ import {
   MASKED_TREATMENT_KINDS, EDGE_TREATMENT_KINDS,
   MOTION_TREATMENT_KINDS, isMotionKind, motionTreatmentPlan, docHasMotionTreatment,
   VELOCITY_BLUR_AMOUNT_MAX, GHOST_COUNT_MAX, GHOST_SPACING_MAX,
+  RESTYLE_TREATMENT_KINDS, isRestyleKind, restyleTreatmentPlan, docHasRestyleTreatment, RESTYLE_STRENGTH_MAX,
 } from '~/lib/scene3d/treatments'
+import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { treatmentControls } from '~/lib/scene3d/treatmentControls'
 import { blurPasses } from '~/lib/scene3d/treatmentStage'
 
@@ -913,5 +915,109 @@ describe('treatments: motion family (S6 velocity blur / ghost trails)', () => {
     for (const r of treatmentControls('ghostTrails')) expect(r.group).toBe('Ghost trails')
     expect(treatmentControls('velocityBlur').map((r) => r.key)).not.toContain('treatment.invert')
     expect(treatmentControls('ghostTrails').map((r) => r.key)).not.toContain('treatment.invert')
+  })
+})
+
+describe('treatments: AI restyle family (S7)', () => {
+  it('TREATMENT_KINDS includes aiRestyle — its own family, not masked/edge/buffer/finish/motion', () => {
+    expect(TREATMENT_KINDS).toContain('aiRestyle')
+    expect(RESTYLE_TREATMENT_KINDS).toContain('aiRestyle')
+    expect(isRestyleKind('aiRestyle')).toBe(true)
+    expect(isMaskedKind('aiRestyle')).toBe(false)
+    expect(isEdgeKind('aiRestyle')).toBe(false)
+    expect(isBufferKind('aiRestyle')).toBe(false)
+    expect(isFinishKind('aiRestyle')).toBe(false)
+    expect(isMotionKind('aiRestyle')).toBe(false)
+    expect(TREATMENT_LABELS.aiRestyle).toBe('AI restyle')
+  })
+
+  it('createTreatment seeds aiRestyle from TREATMENT_DEFAULTS; model defaults to RESTYLE_MODELS[0]', () => {
+    const t = createTreatment('aiRestyle')
+    expect(t).toMatchObject({ kind: 'aiRestyle', enabled: true, invert: false, prompt: '', strength: 0.6, mix: 1, resultRef: '', inputHash: '' })
+    expect((t as any).model).toBe(RESTYLE_MODELS[0]!.id)
+    expect(t.id).toMatch(/^trt_/)
+  })
+
+  it('TREATMENT_DEFAULTS.aiRestyle.model matches RESTYLE_MODELS[0].id (no literal drift)', () => {
+    expect((TREATMENT_DEFAULTS.aiRestyle as { model: string }).model).toBe(RESTYLE_MODELS[0]!.id)
+  })
+
+  it('not ramped — no progressive/ramp fields', () => {
+    expect(createTreatment('aiRestyle')).not.toHaveProperty('progressive')
+    expect(parseTreatment({ id: 'ar', kind: 'aiRestyle' })).not.toHaveProperty('rampSpace')
+  })
+
+  it('parses aiRestyle: allows empty prompt, clamps strength/mix to 0..1, validates model against RESTYLE_MODELS', () => {
+    expect(parseTreatment({ id: 'ar1', kind: 'aiRestyle', prompt: 'a bronze statue', strength: 9, mix: 9, model: RESTYLE_MODELS[1]!.id }))
+      .toMatchObject({ prompt: 'a bronze statue', strength: RESTYLE_STRENGTH_MAX, mix: 1, model: RESTYLE_MODELS[1]!.id })
+    expect(parseTreatment({ id: 'ar2', kind: 'aiRestyle', strength: -5, mix: -5, model: 'not-a-real-model' }))
+      .toMatchObject({ strength: 0, mix: 0, model: RESTYLE_MODELS[0]!.id })
+    expect(parseTreatment({ id: 'ar3', kind: 'aiRestyle' }))
+      .toMatchObject({ prompt: '', strength: 0.6, mix: 1, model: RESTYLE_MODELS[0]!.id })
+  })
+
+  it('PRESERVES resultRef/inputHash through parse; a non-string backfills to empty', () => {
+    expect(parseTreatment({ id: 'ar4', kind: 'aiRestyle', resultRef: 'restyle-abc.png', inputHash: 'h123' }))
+      .toMatchObject({ resultRef: 'restyle-abc.png', inputHash: 'h123' })
+    expect(parseTreatment({ id: 'ar5', kind: 'aiRestyle', resultRef: 42, inputHash: {} }))
+      .toMatchObject({ resultRef: '', inputHash: '' })
+  })
+
+  it('round-trips through parseTreatments incl. resultRef/inputHash', () => {
+    const t = { ...createTreatment('aiRestyle'), prompt: 'chrome', strength: 0.4, mix: 0.8, resultRef: 'r.png', inputHash: 'h' }
+    expect(parseTreatments([t])).toEqual([t])
+  })
+
+  it('a document with only an aiRestyle treatment round-trips through serializeDoc/parseDoc', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    box.treatments = [{ ...createTreatment('aiRestyle'), resultRef: 'r.png', inputHash: 'h' }]
+    doc.objects.push(box)
+    const back = parseDoc(serializeDoc(doc))
+    expect(back.objects.at(-1)!.treatments!.map((t) => t.kind)).toEqual(['aiRestyle'])
+    expect(back).toEqual(doc)
+  })
+
+  it('restyleTreatmentPlan / docHasRestyleTreatment: the byte-identity gate', () => {
+    // A masked treatment must not trip the restyle gate.
+    const bare = defaultDoc()
+    const b0 = createPrimitive('box', bare.objects); b0.treatments = [createTreatment('blur')]; bare.objects.push(b0)
+    expect(docHasRestyleTreatment(bare)).toBe(false)
+    expect(restyleTreatmentPlan(bare)).toEqual([])
+
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.treatments = [createTreatment('aiRestyle')]; doc.objects.push(box)
+    expect(docHasRestyleTreatment(doc)).toBe(true)
+    expect(restyleTreatmentPlan(doc).map((g) => g.objectId)).toEqual([box.id])
+    // Disabled ⇒ not in plan (byte-identity).
+    box.treatments = [{ ...createTreatment('aiRestyle'), enabled: false }]
+    expect(docHasRestyleTreatment(doc)).toBe(false)
+    // Hidden host ⇒ excluded even when enabled.
+    box.treatments = [createTreatment('aiRestyle')]; box.visible = false
+    expect(docHasRestyleTreatment(doc)).toBe(false)
+  })
+
+  it('caps the restyle plan at TREATED_OBJECT_CAP groups', () => {
+    const doc = defaultDoc()
+    for (let i = 0; i < TREATED_OBJECT_CAP + 2; i++) {
+      const o = createPrimitive('sphere', doc.objects)
+      o.treatments = [createTreatment('aiRestyle')]
+      doc.objects.push(o)
+    }
+    expect(restyleTreatmentPlan(doc)).toHaveLength(TREATED_OBJECT_CAP)
+  })
+
+  it('has control rows: prompt (text), model (select), strength + mix sliders; no invert row', () => {
+    const rows = treatmentControls('aiRestyle')
+    expect(rows.map((r) => r.key)).toEqual(['treatment.prompt', 'treatment.model', 'treatment.strength', 'treatment.mix'])
+    const byKey = Object.fromEntries(rows.map((r) => [r.key, r]))
+    expect(byKey['treatment.prompt']!.kind).toBe('text')
+    expect(byKey['treatment.model']!.kind).toBe('select')
+    expect((byKey['treatment.model'] as { options: string[] }).options).toEqual(RESTYLE_MODELS.map((m) => m.id))
+    expect((byKey['treatment.model'] as { optionLabels: string[] }).optionLabels).toEqual(RESTYLE_MODELS.map((m) => m.label))
+    expect(byKey['treatment.strength']!.kind).toBe('slider')
+    expect(byKey['treatment.mix']!.kind).toBe('slider')
+    for (const r of rows) expect(r.group).toBe('AI restyle')
+    expect(rows.map((r) => r.key)).not.toContain('treatment.invert')
   })
 })

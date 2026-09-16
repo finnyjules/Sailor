@@ -3,10 +3,12 @@
 // keys to `object.treatments.<id>.<field>`; the surface reads/writes `<field>` directly
 // on the selected Treatment). Pure: no three, no Vue.
 import type { ControlSpec } from '~/lib/spacetype/effect'
-import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, DROP_SHADOW_DISTANCE_MAX, DASHED_OUTLINE_LEN_MAX, CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX, VELOCITY_BLUR_AMOUNT_MAX, GHOST_COUNT_MAX, GHOST_SPACING_MAX, type TreatmentKind } from './treatments'
+import { RAMP_SPACES, RAMP_DEFAULTS, TREATMENT_DEFAULTS, TREATMENT_LABELS, isMaskedKind, BLUR_AMOUNT_MAX, CHROMATIC_AMOUNT_MAX, GLITCH_AMOUNT_MAX, GLITCH_BANDS_MIN, GLITCH_BANDS_MAX, DROP_SHADOW_DISTANCE_MAX, DASHED_OUTLINE_LEN_MAX, CROSS_HATCH_SPACING_MIN, CROSS_HATCH_SPACING_MAX, VELOCITY_BLUR_AMOUNT_MAX, GHOST_COUNT_MAX, GHOST_SPACING_MAX, RESTYLE_STRENGTH_MAX, type TreatmentKind } from './treatments'
 // Three-free (config.ts, like this file, carries no three/canvas dependency): the matcap id set
 // and their human names for the `matcapCoat` finish's `select` row (S5 task 3).
 import { MATCAP_IDS, MATCAP_SPECS } from './config'
+// Pure data (three-free): the AI restyle model ids + human names for the `aiRestyle` select row (S7).
+import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 
 export const TREATMENT_KEY_PREFIX = 'treatment.'
 
@@ -25,6 +27,10 @@ const toggle = (group: string, field: string, label: string, def: boolean, hint?
 // internal value, and showing those raw would break the studio's copy rule.
 const select = (group: string, field: string, label: string, options: string[], optionLabels: string[], def: string, hint?: string): Row =>
   ({ key: TREATMENT_KEY_PREFIX + field, label, kind: 'select', options, optionLabels, default: def, group, bindable: false, ...(hint ? { hint } : {}) })
+// A free-text row (ControlSpec kind 'text', spacetype/effect.ts) — the AI restyle prompt (S7).
+// Not numeric, so it never becomes a motion target; not a select, so it stores a raw string.
+const text = (group: string, field: string, label: string, def: string, hint?: string): Row =>
+  ({ key: TREATMENT_KEY_PREFIX + field, label, kind: 'text', default: def, group, bindable: false, ...(hint ? { hint } : {}) })
 
 /** Show this row only while Progressive is on. */
 const whenProgressive = (row: Row): Row =>
@@ -227,6 +233,17 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
         slider(g, 'count', 'Copies', 1, GHOST_COUNT_MAX, 1, D.ghostTrails.count, 'How many faded copies trail behind'),
         slider(g, 'spacing', 'Spacing', 1, GHOST_SPACING_MAX, 1, D.ghostTrails.spacing, 'How far apart the copies are, in frames'),
         slider(g, 'fade', 'Fade', 0, 1, 0.01, D.ghostTrails.fade, 'How quickly the copies fade out'),
+      ]
+      break
+    case 'aiRestyle':
+      // NOT masked → no invert row appended below. resultRef/inputHash are not rows (they hold the
+      // cached result, not a user dial). `strength`/`mix` are sliders → motion targets + agent
+      // controls; `prompt` (text) and `model` (select) are not numeric, so neither is a target.
+      rows = [
+        text(g, 'prompt', 'Prompt', D.aiRestyle.prompt, 'Describe the new look, then use the restyle button'),
+        select(g, 'model', 'Model', RESTYLE_MODELS.map((m) => m.id), RESTYLE_MODELS.map((m) => m.label), D.aiRestyle.model),
+        slider(g, 'strength', 'Strength', 0, RESTYLE_STRENGTH_MAX, 0.01, D.aiRestyle.strength, 'How far the restyle departs from the original'),
+        slider(g, 'mix', 'Mix', 0, 1, 0.01, D.aiRestyle.mix, 'Blend the result over the original — changing this is free'),
       ]
       break
     default:

@@ -8,6 +8,7 @@
 // path space is built over it, and none of them should have to learn a new kind.
 // Design: docs/superpowers/specs/2026-09-05-scene3d-object-treatments-design.md
 import { MATCAP_IDS, type SceneDoc, type SceneObject } from './config'
+import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 
 export const MASKED_TREATMENT_KINDS = ['blur', 'glow', 'pixelate', 'fade', 'colorGrade', 'dissolve', 'halftone', 'chromaticSplit', 'glitch', 'dropShadow'] as const
 export const EDGE_TREATMENT_KINDS = ['rimLight', 'outline', 'xray', 'wireframe', 'dashedOutline', 'silhouetteCutout'] as const
@@ -38,13 +39,22 @@ export const FINISH_TREATMENT_KINDS = ['opalescence', 'foilShimmer', 'matcapCoat
  *  their presence — and ONLY their presence — makes the motion sub-loop run, so a scene with
  *  none is byte-identical (mirrors the S3 buffer gate). */
 export const MOTION_TREATMENT_KINDS = ['velocityBlur', 'ghostTrails'] as const
-export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS, ...FINISH_TREATMENT_KINDS, ...MOTION_TREATMENT_KINDS] as const
+/** A SIXTH treatment family (S7): the first PAID, ASYNC treatment — an AI restyle that re-skins
+ *  the object with an image model. Unlike every prior family the stage cannot compute its input
+ *  from the current frame: the model is called OFF the render loop (an explicit re-run), its
+ *  result is an external image held as a cached texture keyed by a stable filename (`resultRef`),
+ *  and the stage samples it every frame via `StageContext.restyles`. Pixels NEVER enter the doc.
+ *  It is NOT masked (no invert row) and NOT ramped; its presence — and ONLY its presence — makes
+ *  the restyle sub-loop run, so a scene with none is byte-identical (mirrors the S3/S6 gates). */
+export const RESTYLE_TREATMENT_KINDS = ['aiRestyle'] as const
+export const TREATMENT_KINDS = [...MASKED_TREATMENT_KINDS, ...EDGE_TREATMENT_KINDS, ...BUFFER_TREATMENT_KINDS, ...FINISH_TREATMENT_KINDS, ...MOTION_TREATMENT_KINDS, ...RESTYLE_TREATMENT_KINDS] as const
 export type MaskedTreatmentKind = typeof MASKED_TREATMENT_KINDS[number]
 export type EdgeTreatmentKind = typeof EDGE_TREATMENT_KINDS[number]
 export type BufferTreatmentKind = typeof BUFFER_TREATMENT_KINDS[number]
 export type FinishTreatmentKind = typeof FINISH_TREATMENT_KINDS[number]
 export type MotionTreatmentKind = typeof MOTION_TREATMENT_KINDS[number]
-export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTreatmentKind | FinishTreatmentKind | MotionTreatmentKind
+export type RestyleTreatmentKind = typeof RESTYLE_TREATMENT_KINDS[number]
+export type TreatmentKind = MaskedTreatmentKind | EdgeTreatmentKind | BufferTreatmentKind | FinishTreatmentKind | MotionTreatmentKind | RestyleTreatmentKind
 
 /** Human names — UI copy for tree rows, inspector card titles and motion target labels.
  *  Sentence case, never the stored `kind`. */
@@ -55,6 +65,7 @@ export const TREATMENT_LABELS: Record<TreatmentKind, string> = {
   edgeLines: 'Edge lines', depthFog: 'Depth fog', curvatureWear: 'Curvature wear', crossHatch: 'Cross-hatch',
   opalescence: 'Opalescence', foilShimmer: 'Foil shimmer', matcapCoat: 'Matcap coat',
   velocityBlur: 'Velocity blur', ghostTrails: 'Ghost trails',
+  aiRestyle: 'AI restyle',
 }
 
 /** What a Progressive ramp is measured across. `object` = the object's own on-screen extent
@@ -278,6 +289,26 @@ export interface VelocityBlurTreatment extends TreatmentBase { kind: 'velocityBl
  *  suppressed, so a motionless clip shows a single crisp object. NOT masked (no invert row),
  *  NOT ramped. */
 export interface GhostTrailsTreatment extends TreatmentBase { kind: 'ghostTrails'; count: number; spacing: number; fade: number }
+/** AI restyle (S7): re-skins the object with an image model. The first PAID, ASYNC treatment.
+ *  `prompt` is the restyle instruction (a text row, NOT a motion target); `strength` (0..1) drives
+ *  the model's denoise / control scale (a dial + agent target); `model` is one of RESTYLE_MODELS'
+ *  ids (a select row); `mix` (0..1) is a LIVE, FREE blend of the cached result over the plain
+ *  object — changing it never re-bills. Pixels NEVER enter the doc: `resultRef` is a stable
+ *  input-dir filename of the last result ('' until first run; survives reload via inputViewUrl),
+ *  and `inputHash` is a hash of (crop + prompt + strength + model) the current `resultRef` was
+ *  generated for ('' until first run) — the two together let an unchanged re-run short-circuit
+ *  without re-billing. The decoded result texture lives in a client-side cache keyed by
+ *  `resultRef`, sampled by the stage via StageContext.restyles — never in the treatment itself.
+ *  NOT masked (no invert row), NOT ramped. */
+export interface AiRestyleTreatment extends TreatmentBase {
+  kind: 'aiRestyle'
+  prompt: string
+  strength: number
+  model: string
+  mix: number
+  resultRef: string
+  inputHash: string
+}
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
   | DissolveTreatment | HalftoneTreatment | ChromaticSplitTreatment | GlitchTreatment | DropShadowTreatment
@@ -286,11 +317,14 @@ export type Treatment =
   | EdgeLinesTreatment | DepthFogTreatment | CurvatureWearTreatment | CrossHatchTreatment
   | OpalescenceTreatment | FoilShimmerTreatment | MatcapCoatTreatment
   | VelocityBlurTreatment | GhostTrailsTreatment
+  | AiRestyleTreatment
 /** The finish-family subset of `Treatment` — grows exactly as `FINISH_TREATMENT_KINDS` does.
  *  `finishPlan`'s return type and `applyFinish`'s parameter type. */
 export type FinishTreatment = OpalescenceTreatment | FoilShimmerTreatment | MatcapCoatTreatment
 /** The motion-family subset of `Treatment` — grows exactly as `MOTION_TREATMENT_KINDS` does. */
 export type MotionTreatment = VelocityBlurTreatment | GhostTrailsTreatment
+/** The restyle-family subset of `Treatment` — one kind today (grows as RESTYLE_TREATMENT_KINDS). */
+export type RestyleTreatment = AiRestyleTreatment
 
 /** Dial defaults per kind — everything except id/kind/enabled/invert. The ONE source the
  *  parser, `createTreatment` and the inspector controls all read. */
@@ -334,6 +368,15 @@ export const TREATMENT_DEFAULTS = {
   matcapCoat: { matcap: 'chrome', strength: 1 },
   velocityBlur: { amount: 1, shutter: 0.5 },
   ghostTrails: { count: 3, spacing: 2, fade: 0.5 },
+  // `model` is the LITERAL RESTYLE_MODELS[0].id, not a live read — same reasoning as matcapCoat's
+  // 'chrome' above: TREATMENT_DEFAULTS is a module-top-level const, and a top-level read of an
+  // imported binding is only safe when the source is fully initialized. RESTYLE_MODELS imports
+  // nothing, so a live read would actually be safe here too, but the literal keeps this object a
+  // pure `as const` and the scene3d-treatments unit spec pins it to RESTYLE_MODELS[0].id so it
+  // cannot drift. `parseTreatment` below reads RESTYLE_MODELS lazily (inside the function body).
+  // strength 0.6 is a moderate restyle; mix 1 shows the full result once one arrives; resultRef /
+  // inputHash empty until the first re-run (pixels never live in the doc).
+  aiRestyle: { prompt: '', strength: 0.6, model: 'fal-ai/flux-control-lora-depth', mix: 1, resultRef: '', inputHash: '' },
 } as const
 
 /** Cross-hatch line-pitch bounds, in "px per block on a 1000-px-tall image" units (the pixelate
@@ -376,6 +419,10 @@ export const GHOST_COUNT_MAX = 8
 /** Ghost trails' maximum spacing between copies, in frames. Shared by the dial and the parser. */
 export const GHOST_SPACING_MAX = 12
 
+/** AI restyle's `strength` ceiling — the 0..1 model denoise / control scale. Shared by the dial
+ *  and the parser so they cannot drift apart. */
+export const RESTYLE_STRENGTH_MAX = 1
+
 export function isMaskedKind(kind: TreatmentKind): kind is MaskedTreatmentKind {
   return (MASKED_TREATMENT_KINDS as readonly string[]).includes(kind)
 }
@@ -397,6 +444,12 @@ export function isFinishKind(kind: TreatmentKind): kind is FinishTreatmentKind {
  *  velocity / list of past poses sampled at the doc+t01 seam. */
 export function isMotionKind(kind: TreatmentKind): kind is MotionTreatmentKind {
   return (MOTION_TREATMENT_KINDS as readonly string[]).includes(kind)
+}
+/** An AI restyle treatment (S7). Never masked, never a G-buffer reader, never a finish, never a
+ *  motion kind — it renders in its OWN stage sub-loop, compositing a cached external result
+ *  texture (fed via StageContext.restyles) masked to the object's silhouette. */
+export function isRestyleKind(kind: TreatmentKind): kind is RestyleTreatmentKind {
+  return (RESTYLE_TREATMENT_KINDS as readonly string[]).includes(kind)
 }
 export function isTreatmentKind(v: unknown): v is TreatmentKind {
   return typeof v === 'string' && (TREATMENT_KINDS as readonly string[]).includes(v)
@@ -578,6 +631,24 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
       spacing: Math.min(GHOST_SPACING_MAX, Math.max(1, num(r.spacing, D.ghostTrails.spacing))),
       fade: clamp01(num(r.fade, D.ghostTrails.fade)),
     }
+    case 'aiRestyle': {
+      // RESTYLE_MODELS read LAZILY here (function body), never at module top level — see the
+      // TREATMENT_DEFAULTS.aiRestyle comment. `prompt` allows empty (str() would swap '' for the
+      // default, so it is NOT used for prompt). resultRef/inputHash are PRESERVED verbatim (a
+      // valid stored filename/hash must survive a round-trip) and default to '' when absent or
+      // non-string — pixels never live in the doc, only these small strings.
+      const modelDefault = RESTYLE_MODELS[0]!.id
+      const model = typeof r.model === 'string' && RESTYLE_MODELS.some((m) => m.id === r.model) ? r.model : modelDefault
+      return {
+        ...base, kind: 'aiRestyle',
+        prompt: typeof r.prompt === 'string' ? r.prompt : D.aiRestyle.prompt,
+        strength: clampTo(num(r.strength, D.aiRestyle.strength), RESTYLE_STRENGTH_MAX),
+        model,
+        mix: clamp01(num(r.mix, D.aiRestyle.mix)),
+        resultRef: typeof r.resultRef === 'string' ? r.resultRef : '',
+        inputHash: typeof r.inputHash === 'string' ? r.inputHash : '',
+      }
+    }
   }
   return undefined
 }
@@ -690,6 +761,36 @@ export function motionTreatmentPlan(doc: SceneDoc): MotionGroup[] {
  *  no extra draw, byte-identical frame. */
 export function docHasMotionTreatment(doc: SceneDoc): boolean {
   return motionTreatmentPlan(doc).length > 0
+}
+
+/** One object's enabled restyle-family treatments (aiRestyle), in stack order — the stage
+ *  composites each object's cached result texture (fed via StageContext.restyles) masked to its
+ *  silhouette, in its own sub-loop. */
+export interface RestyleGroup { objectId: string; treatments: Treatment[] }
+
+/**
+ * The per-frame plan for the restyle family, in doc (tree) order — one group per host object
+ * that carries an enabled aiRestyle treatment. Capped at TREATED_OBJECT_CAP like the motion
+ * plan. EMPTY when nothing carries one, which is exactly the gate the stage reads: an empty plan
+ * ⇒ the restyle sub-loop never runs ⇒ the frame is byte-identical to before S7. A near-verbatim
+ * copy of `motionTreatmentPlan`.
+ */
+export function restyleTreatmentPlan(doc: SceneDoc): RestyleGroup[] {
+  const groups: RestyleGroup[] = []
+  for (const obj of doc.objects) {
+    if (!obj.visible || !isTreatmentHost(obj)) continue
+    const restyle = treatmentsOf(obj).filter((t) => t.enabled && isRestyleKind(t.kind))
+    if (restyle.length) groups.push({ objectId: obj.id, treatments: restyle })
+    if (groups.length >= TREATED_OBJECT_CAP) break
+  }
+  return groups
+}
+
+/** Does any visible host object carry an enabled aiRestyle treatment? The one gate the per-frame
+ *  restyle-texture push and the stage's restyle sub-loop are built on — false ⇒ no push, no extra
+ *  draw, byte-identical frame. */
+export function docHasRestyleTreatment(doc: SceneDoc): boolean {
+  return restyleTreatmentPlan(doc).length > 0
 }
 
 export interface MaskedGroup {
