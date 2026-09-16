@@ -73,7 +73,7 @@ shadow. Edge: dashed outline; silhouette cutout; cross-hatch. One task per famil
 the stage; 3. ghost trails / onion skin (N samples faded); 4. Playwright: blur along the path, none
 when still; 5. agent/motion/copy.
 
-## Slice S7 · AI restyle pass  (≈6 tasks)
+## Slice S7 · AI restyle pass  (≈6 tasks) — ✅ CODE-COMPLETE 2026-09-16, PAID ACCEPTANCE RUN OWED (T1 ecf8b15f0 → T5a f184ab222; aiRestyle treatment = bake one object's depth crop via renderObjectPasses → paid route server/api/scene3d/restyle.post.ts on fal flux-control-lora-depth → cache result texture keyed by resultRef+inputHash, no re-bill → composite masked to silhouette with a free mix dial; byte-identical when absent; agent/motion drive strength+mix by id. LIVE gate proven with INJECTED local results — the ONE real paid run is env-gated (FAL_KEY + SCENE3D_RESTYLE_LIVE=1) and OWED, gated on Julien. Model choice = Julien's "Flux depth-control" ratification. Follow-ups: orbit re-projection (test.fixme), depth+normal union, Replicate fallback, GLB live case. See 2026-09-09-scene3d-S7-ai-restyle-pass.md + memory scene3d-ai-restyle-s7-landed)
 1. Model choice + route `server/api/scene3d/restyle.post.ts` (fal/Replicate; allowlist; cost gate);
 2. crop beauty + depth (+ normal) for the object from `renderPasses`; 3. treatment kind with prompt,
 strength, re-run; 4. composite masked to the silhouette, cached by inputs; 5. one live paid run at
