@@ -53,7 +53,10 @@ export default defineEventHandler(async (event) => {
   const seed = Number.isFinite(body?.seed) ? Math.round(body!.seed as number) : Math.floor(Date.now() % 2_000_000_000)
 
   const { app, input } = restyleInput(model, prompt, beauty, depth, strength, seed)
-  const out = await runFal(app, input, { pollDeadlineMs: 120_000 })
+  // 240s: a depth-control generation queues + runs longer than the 120s default under load (the
+  // S7 acceptance run saw a job still settling past 120s), and this route is a deliberate one-shot
+  // user action, not a hot path — a generous deadline avoids a false timeout on a job that succeeds.
+  const out = await runFal(app, input, { pollDeadlineMs: 240_000 })
   const imageUrl = firstFalImageUrl(out)
   if (!imageUrl) throw createError({ statusCode: 502, message: 'fal returned no image' })
 

@@ -6,7 +6,9 @@
  *
  * The two control modes (RestyleModel.control):
  *  - 'depth' → a depth-structure-preserving control model (fal-ai/flux-control-lora-depth). The
- *    object's rendered DEPTH crop is the `control_image_url`; the `strength` dial drives BOTH the
+ *    object's rendered DEPTH crop is the `control_lora_image_url` (the exact field name the model
+ *    requires — verified against a live 422 at the S7 paid acceptance run; `control_image_url` is
+ *    silently ignored and the request fails validation); the `strength` dial drives BOTH the
  *    control scale and a mapped `guidance_scale` (v1 simplification — one dial, per the ratified
  *    Task-0 decision). The normal crop is rendered but held for a union-ControlNet follow-up.
  *  - 'image' → an img2img fallback (fal-ai/flux/dev/image-to-image). The BEAUTY crop is the
@@ -42,7 +44,7 @@ export function restyleInput(
       app: m.id,
       input: {
         prompt,
-        control_image_url: depth,
+        control_lora_image_url: depth,
         image_size: 'square_hd',
         strength: s,
         guidance_scale: restyleGuidanceScale(s),

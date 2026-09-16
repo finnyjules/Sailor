@@ -435,3 +435,48 @@ test.fixme('orbit re-projection (OWED): the flat result stays pinned to the silh
 
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
 })
+
+/* ── Task 5 · the ONE live PAID acceptance run (env-gated; ~7 credits) ─────────────────────────
+ * Every case above proves the restyle path with INJECTED local results at zero cost. The one thing
+ * only a real call can prove is that the route -> fal actually returns a usable restyled image from
+ * our baked depth crop (a fal slug/enum mismatch passes at submit and fails at result). This makes
+ * EXACTLY ONE paid fal call, only when SCENE3D_RESTYLE_LIVE=1 and FAL_KEY is set on the server, and
+ * is skipped everywhere else (CI never spends). Reconcile the observed cost against the ~7-credit
+ * MODEL_COSTS estimate.
+ */
+test('LIVE PAID: the restyle route bakes a depth crop and fal returns a usable image', async ({ page }) => {
+  test.skip(!process.env.SCENE3D_RESTYLE_LIVE, 'paid — run manually with SCENE3D_RESTYLE_LIVE=1 and FAL_KEY set')
+  test.setTimeout(180_000)
+  await openLab(page, sceneWith([RESTYLE_ENABLED()]))
+
+  // Bake the object's real beauty + depth crop (Task 2) — exactly what runRestyle sends.
+  const passes = await objectPasses(page, 'restyle-sphere')
+  expect(passes, 'renderObjectPasses returned null').not.toBeNull()
+  expect(passes!.depth.startsWith('data:image/'), 'depth crop is not a data URL').toBe(true)
+
+  // ONE real call to the paid route, from the page (same-origin :3002, which holds FAL_KEY).
+  const res = await page.evaluate(async (p) => {
+    const r = await fetch('/api/scene3d/restyle', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ beauty: p.beauty, depth: p.depth, prompt: 'a weathered bronze statue, patina', model: 'fal-ai/flux-control-lora-depth', strength: 0.6 }),
+    })
+    return { ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) as any }
+  }, passes!)
+
+  console.log('[S7 paid acceptance] status', res.status, 'model', res.body?.model, 'seed', res.body?.seed, 'imageUrl', String(res.body?.imageUrl).slice(0, 90))
+  expect(res.ok, `route failed ${res.status}: ${JSON.stringify(res.body).slice(0, 400)}`).toBe(true)
+  const imageUrl = res.body?.imageUrl as string
+  expect(imageUrl, 'no imageUrl in the response').toMatch(/^https?:\/\//)
+
+  // Fetch the returned image from the TEST context (no CORS) and prove it is a real, non-trivial image.
+  const img = await page.request.get(imageUrl)
+  expect(img.ok(), `imageUrl did not load: ${img.status()}`).toBe(true)
+  const bytes = await img.body()
+  console.log('[S7 paid acceptance] image bytes', bytes.length, 'content-type', img.headers()['content-type'])
+  expect(bytes.length, 'restyle image is suspiciously small').toBeGreaterThan(5000)
+
+  // Save it so the controller can eyeball the actual restyle.
+  const fs = await import('node:fs')
+  fs.mkdirSync('test-results', { recursive: true })
+  fs.writeFileSync('test-results/s7-restyle-acceptance.png', bytes)
+})

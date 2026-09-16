@@ -9,13 +9,15 @@ const BEAUTY = 'data:image/png;base64,BEAUTY'
 const DEPTH = 'data:image/png;base64,DEPTH'
 
 describe('restyleInput (pure fal payload builder)', () => {
-  it('depth control → control_image_url = depth crop, mapped strength + guidance_scale', () => {
+  it('depth control → control_lora_image_url = depth crop, mapped strength + guidance_scale', () => {
     const call = restyleInput(DEPTH_MODEL, 'a bronze statue', BEAUTY, DEPTH, 0.6, 42)
     expect(call).toEqual({
       app: 'fal-ai/flux-control-lora-depth',
       input: {
         prompt: 'a bronze statue',
-        control_image_url: DEPTH,
+        // The exact field the model requires — verified against a live 422 (a wrong
+        // control_image_url is silently ignored and the request fails validation).
+        control_lora_image_url: DEPTH,
         image_size: 'square_hd',
         strength: 0.6,
         guidance_scale: 7.4, // 3.5 + 0.6 * 6.5
@@ -43,7 +45,7 @@ describe('restyleInput (pure fal payload builder)', () => {
       },
     })
     // The img2img model takes no control image and no guidance_scale.
-    expect(call.input).not.toHaveProperty('control_image_url')
+    expect(call.input).not.toHaveProperty('control_lora_image_url')
     expect(call.input).not.toHaveProperty('guidance_scale')
   })
 
