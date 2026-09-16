@@ -289,9 +289,9 @@ test('mix 0 is a byte-identical no-op: an injected result is ignored, equal to a
  *     front surface across a re-render;
  *   - mix ramp: at mix 0.5 the projected pixel is strictly between the plain object and the full
  *     injected image (the blend behaves);
- *   - orbit-stability (test.fixme here; Task 3 turns it into a real PASS): the projective material
- *     keeps the paint registered to the surface across a camera orbit — the headline S7.1 win the v1
- *     billboard could not achieve. Left fixme in this task; Task 3 authors the passing assertion.
+ *   - orbit-stability (a real PASS, Task 3): the projective material keeps the paint registered to the
+ *     surface across a camera orbit — the headline S7.1 win the v1 billboard could not achieve (it is
+ *     the last test in this file, tracking one world surface point through the orbit).
  * Every visual assertion pairs with the console shader-error gate (on the new material program),
  * matching the S4/S5 loud-failure discipline of the cases above.
  *
@@ -300,7 +300,6 @@ test('mix 0 is a byte-identical no-op: an injected result is ignored, equal to a
  */
 const snapshotAt = (page: Page, t01: number) =>
   page.evaluate((t) => (window as any).__scene3dSnapshotAt(t) as string, t01)
-const treatmentStats = (page: Page) => page.evaluate(() => (window as any).__scene3dTreatmentStats())
 
 test('an injected restyle composites deterministically: the same frame twice is byte-identical', async ({ page }) => {
   const bad = watchConsole(page)
@@ -380,17 +379,31 @@ test('mix 0.5 blends: the object centre is strictly between the plain object and
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
 })
 
-/* ── KNOWN LIMITATION (owed follow-up: camera-orbit re-projection) ──────────────────────────────
- * The restyle result is a FLAT 2D image fitted to the object's screen-space bounding box. The crop
- * rect is recomputed each frame, so the result tracks the box as the object/camera move — but the
- * texture content is a projection baked from the COMMITTED camera. After a camera ORBIT the object's
- * silhouette rotates in 3D while the flat texture is merely re-stretched to the new axis-aligned
- * bbox, so a feature that should stay pinned to a point ON the object slides off. Fixing this needs
- * re-projection (or auto-invalidation) — the plan's first owed follow-up.
+/* ── Task 3 · orbit-stability: the projected restyle STAYS registered to the 3D surface ──────────
+ * The S7.1 headline. S7 v1 masked a FLAT result to the object's SCREEN silhouette and re-stretched it
+ * into the new axis-aligned bbox every frame, so after a camera orbit a feature that should stay
+ * pinned to a point ON the object slid off (the reported bug — "masking a fixed image"). Task 2
+ * replaced that with a per-object MATERIAL injection that projects the cached result onto the object's
+ * real geometry from a FIXED world-space bake projector, so orbiting the LIVE camera cannot move the
+ * paint off the surface (the projector is a constant uniform — zero per-frame churn).
  *
- * Authored as test.fixme so it is REPORTED as a known limitation and never runs as a false green.
- * The body is a real regression test (a two-colour split texture whose seam should stay anchored to
- * the object across an orbit): drop the `.fixme` once re-projection lands and it becomes live.
+ * The oracle: inject a split (left magenta / right cyan) LOCAL texture (zero spend), then track ONE
+ * world-space surface point across two camera angles and assert it keeps its restyle colour CLASS.
+ * Because the object moves on screen as the camera orbits, the sample coordinate is NOT hard-coded: at
+ * each angle it is computed by projecting the tracked WORLD point through the ACTUAL live camera pose
+ * (`__scene3dCamera`, which `renderMotionFrame` leaves at the orbit pose) using the scene fov + the
+ * rendered aspect (`screenRectOfBox`'s projection convention). A v1 billboard re-stretched to the new
+ * bbox would show a DIFFERENT colour at that surface point after the orbit; the world-space projector
+ * cannot — a fixed world point samples a fixed crop UV, hence a fixed colour. That colour-class
+ * identity across the orbit IS the surface-registration proof.
+ *
+ * NO fal / paid call. Restyle no longer runs through the treatment stage, so there is NO
+ * `__scene3dTreatmentStats` assertion (it does not reflect the material injection); every visual claim
+ * is paired with the console shader-error gate, matching the material-path cases above.
+ *
+ * NOTE (controller-run): needs a live preview (WebGL via SwiftShader) with the pane VISIBLE (a hidden
+ * pane pauses the scene3d rAF ⇒ blank snapshot). Run against a fresh preview on the isolated preview
+ * port — NOT the shared :3002.
  */
 const orbitCamScene = (treatments?: unknown[]) => ({
   version: 1, background: '#202020', showFloor: false,
@@ -398,11 +411,12 @@ const orbitCamScene = (treatments?: unknown[]) => ({
     position: [0, 1.2, 4.2], target: [0, 0.6, 0], fov: 40,
     motion: { preset: 'orbit', speed: 1, amount: 1 },
   },
+  motion: { duration: 4, fps: 30, loop: true },
   objects: [sphere(treatments)],
 })
 
-/** Inject a LOCAL texture split left-half magenta / right-half cyan, so an orbit that fails to
- *  re-project shows the seam sliding relative to the object. Zero spend. */
+/** Inject a LOCAL texture split left-half magenta / right-half cyan (zero spend), so a point on ONE
+ *  half has an unambiguous restyle colour that must persist as the camera orbits. */
 async function injectSplit(page: Page, objectId: string): Promise<boolean> {
   return page.evaluate(async (oid) => {
     const cv = document.createElement('canvas')
@@ -414,27 +428,99 @@ async function injectSplit(page: Page, objectId: string): Promise<boolean> {
   }, objectId)
 }
 
-test.fixme('orbit re-projection (OWED): the flat result stays pinned to the silhouette after a camera orbit', async ({ page }) => {
+type Cam = { x: number; y: number; z: number; tx: number; ty: number; tz: number }
+const camera = (page: Page) => page.evaluate(() => (window as any).__scene3dCamera() as Cam)
+
+/** Project a WORLD point to fractional canvas coords (top-left origin, 0..1) through a camera pose and
+ *  average an RGB patch there off the given frame. Mirrors passes.ts's `screenRectOfBox` projection
+ *  convention: perspective, VERTICAL fov, flip-Y for the top-left origin. The aspect is read from the
+ *  DECODED frame so it matches the rendered drawing buffer exactly (the engine's camera aspect is set
+ *  from the same viewport). This is the "track the object's projected position, never a hard-coded
+ *  pixel" rule — the sample coordinate follows the surface point as the camera orbits. Runs in-page so
+ *  the 2D context does the decode. */
+async function sampleWorldPoint(page: Page, dataUrl: string, cam: Cam, world: [number, number, number], fovDeg: number) {
+  return page.evaluate(({ url, c, w, fov }) => new Promise<{ r: number; g: number; b: number; fx: number; fy: number }>((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const cv = document.createElement('canvas')
+      cv.width = img.width; cv.height = img.height
+      const ctx = cv.getContext('2d')!
+      ctx.drawImage(img, 0, 0)
+      // Camera basis (three's lookAt: right = normalize(forward x up), up = right x forward).
+      const sub = (a: number[], b: number[]) => [a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!]
+      const cross = (a: number[], b: number[]) => [a[1]! * b[2]! - a[2]! * b[1]!, a[2]! * b[0]! - a[0]! * b[2]!, a[0]! * b[1]! - a[1]! * b[0]!]
+      const dot = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!
+      const norm = (a: number[]) => { const l = Math.hypot(a[0]!, a[1]!, a[2]!) || 1; return [a[0]! / l, a[1]! / l, a[2]! / l] }
+      const pos = [c.x, c.y, c.z], tgt = [c.tx, c.ty, c.tz], up = [0, 1, 0]
+      const f = norm(sub(tgt, pos))       // forward (camera looks along f)
+      const s = norm(cross(f, up))        // camera right
+      const u = cross(s, f)               // camera up
+      const d = sub(w, pos)
+      const vx = dot(d, s), vy = dot(d, u), vz = dot(d, f) // view coords; vz > 0 is in front
+      const aspect = img.width / img.height
+      const tanHalf = Math.tan((fov * Math.PI) / 180 / 2)
+      const ndcX = vx / (vz * tanHalf * aspect)
+      const ndcY = vy / (vz * tanHalf)
+      const fx = ndcX * 0.5 + 0.5
+      const fy = 0.5 - ndcY * 0.5 // flip Y for the top-left origin
+      const px = Math.round(fx * img.width), py = Math.round(fy * img.height)
+      const half = 3
+      const data = ctx.getImageData(px - half, py - half, half * 2 + 1, half * 2 + 1).data
+      let r = 0, g = 0, b = 0, n = 0
+      for (let i = 0; i < data.length; i += 4) { r += data[i]!; g += data[i + 1]!; b += data[i + 2]!; n++ }
+      resolve({ r: r / n, g: g / n, b: b / n, fx, fy })
+    }
+    img.onerror = reject
+    img.src = url
+  }), { url: dataUrl, c: cam, w: world, fov: fovDeg })
+}
+
+/** Colour spread — the distance from a neutral grey. A restyle colour (magenta/cyan) is saturated;
+ *  the base lit grey sphere (#9aa3af) is near-neutral. */
+const sat = (p: { r: number; g: number; b: number }) => Math.max(p.r, p.g, p.b) - Math.min(p.r, p.g, p.b)
+
+test('orbit-stability: the projected restyle stays registered to the surface across a camera orbit', async ({ page }) => {
   const bad = watchConsole(page)
   await openLab(page, orbitCamScene([RESTYLE_ENABLED()]))
   expect(await injectSplit(page, 'restyle-sphere'), 'inject hook returned false').toBe(true)
   await page.waitForTimeout(SETTLE_MS)
 
-  // At t01=0 the camera is at its committed pose: left of the object reads magenta, right reads cyan.
-  const still = await snapshotAt(page, 0)
-  const stillL = await samplePatch(page, still, 0.42, 0.5)
-  const stillR = await samplePatch(page, still, 0.58, 0.5)
-  expect(stillL.r > stillL.g, `still: left patch not magenta ${JSON.stringify(stillL)}`).toBe(true)
-  expect(stillR.g > stillR.r, `still: right patch not cyan ${JSON.stringify(stillR)}`).toBe(true)
+  // A front-hemisphere surface point ~45deg to the -X side of the sphere (centre [0,0.6,0], radius
+  // 0.5). It is squarely on ONE half of the split (an unambiguous colour) at the bake pose and stays
+  // visible + front-facing to the projector after the orbit swings the camera toward -X (~36deg).
+  const nn = (v: [number, number, number]): [number, number, number] => {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1
+    return [v[0] / l, v[1] / l, v[2] / l]
+  }
+  const n = nn([-0.7, 0, 0.71])
+  const P: [number, number, number] = [0 + 0.5 * n[0], 0.6 + 0.5 * n[1], 0 + 0.5 * n[2]]
+  const FOV = 40
 
-  // After ~36 degrees of orbit the object's surface has rotated. With CORRECT re-projection a
-  // point that was on the magenta half stays magenta; today the flat texture re-stretches to the
-  // new bbox and the seam slides, so this assertion fails — the follow-up. Kept as fixme.
+  // Frame 0: the committed (bake) camera pose. The tracked surface point reads a clear restyle colour
+  // on one unambiguous half of the split.
+  const still = await snapshotAt(page, 0)
+  const cam0 = await camera(page)
+  const c0 = await sampleWorldPoint(page, still, cam0, P, FOV)
+  expect(sat(c0), `bake frame: tracked point is not a restyle colour (near-neutral base?): ${JSON.stringify(c0)}`).toBeGreaterThan(60)
+  expect(Math.abs(c0.r - c0.g), `bake frame: tracked point sits on the magenta/cyan seam (ambiguous): ${JSON.stringify(c0)}`).toBeGreaterThan(25)
+  const magenta0 = c0.r > c0.g // magenta half ⇒ r>g; cyan half ⇒ g>r
+
+  // Frame at ~36deg of orbit: the SAME world point, projected through the NOW-orbited live camera.
   const orbited = await snapshotAt(page, 0.1)
-  const stats = await treatmentStats(page)
-  expect(stats.groups, 'the restyle group did not render').toBeGreaterThanOrEqual(1)
-  const orbitedL = await samplePatch(page, orbited, 0.42, 0.5)
-  expect(orbitedL.r > orbitedL.g, `orbit misregistered the flat result (owed re-projection): ${JSON.stringify(orbitedL)}`).toBe(true)
+  const cam1 = await camera(page)
+  expect(Math.hypot(cam1.x - cam0.x, cam1.z - cam0.z), 'the camera did not actually orbit').toBeGreaterThan(0.5)
+  const c1 = await sampleWorldPoint(page, orbited, cam1, P, FOV)
+
+  // Registration proof: the tracked surface point is STILL a restyle colour (it did NOT slide off to
+  // base grey) AND it is the SAME magenta/cyan half it was before the orbit. A v1 billboard,
+  // re-stretched to the new axis-aligned bbox, would change the colour at this surface point; the
+  // world-space projector samples a fixed crop UV for a fixed world point, so it cannot.
+  expect(sat(c1), `after orbit: tracked point slid off the restyle onto base grey: ${JSON.stringify(c1)}`).toBeGreaterThan(60)
+  expect(c1.r > c1.g, `after orbit: the tracked surface point changed colour class (restyle slid off the surface): still=${JSON.stringify(c0)} orbited=${JSON.stringify(c1)}`).toBe(magenta0)
+
+  // The paint stays ON the object: an off-object corner is still the dark background after the orbit.
+  const corner = await samplePatch(page, orbited, 0.04, 0.04)
+  expect(corner.r + corner.g + corner.b, `corner is not background after orbit: ${JSON.stringify(corner)}`).toBeLessThan(150)
 
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
 })
