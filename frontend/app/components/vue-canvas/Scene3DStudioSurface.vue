@@ -325,6 +325,10 @@ function setTreatmentControl(key: string, value: string | number | boolean): voi
 // StudioControlPanel's `visible` prop is that seam. Without this the ramp rows would
 // show even with Progressive off, which is the classic silently-inert gate.
 function treatmentControlVisible(c: ControlSpec): boolean {
+  // The aiRestyle prompt is drawn as a full-width textarea in the bespoke block below — a
+  // one-line dial field is far too small for a model instruction. It stays in treatmentControls
+  // (so the agent/motion vocabulary still carries it), it just isn't drawn as a cramped row here.
+  if (activeTreatment.value?.treatment.kind === 'aiRestyle' && treatmentField(c.key) === 'prompt') return false
   return showIfVisible(c, (key) => readTreatmentControl(key))
 }
 
@@ -2009,8 +2013,12 @@ async function runRestyle(objectId: string, treatmentId: string): Promise<void> 
     }
 
     // 3. The paid route → a temporary fal CDN url. runFal owns all metering; the route is thin.
+    //    A depth-control generation runs ~1-3 min (the route polls fal up to 240s), so this fetch is
+    //    deliberately long — bound it at 300s (just above the route's own deadline) so a genuinely
+    //    stuck job surfaces as an error rather than an endless spinner, instead of $fetch's no-timeout.
     const gen = await $fetch<{ imageUrl: string; model: string; seed: number }>('/api/scene3d/restyle', {
       method: 'POST',
+      timeout: 300_000,
       body: { prompt, beauty: passes.beauty, depth: passes.depth, strength: t.strength, model: model.id },
     })
     // 4. Persist the bytes into ComfyUI's input dir so the result survives the CDN link expiring.
@@ -4629,6 +4637,21 @@ async function onClose() {
           <span class="truncate text-white/80">{{ TREATMENT_LABELS[activeTreatment.treatment.kind] }}</span>
         </div>
         <div class="flex flex-col gap-2" @pointerdown.capture="onControlsPointerDown">
+          <!-- S7 AI restyle: the prompt is a FULL-WIDTH textarea, drawn first. A one-line dial row
+               (RowText, ~128px) is far too small for a model instruction — it's rendered bespoke
+               here and hidden from the schema panel via treatmentControlVisible. -->
+          <div v-if="activeTreatment.treatment.kind === 'aiRestyle'" class="space-y-1" data-testid="restyle-prompt">
+            <label class="block px-1 text-[11px] text-white/55">Prompt</label>
+            <textarea
+              class="nodrag w-full resize-y rounded-md bg-white/[0.06] px-2 py-1.5 text-[12px] leading-snug text-white/90 placeholder:text-white/30 outline-none transition-colors focus:bg-white/[0.10]"
+              rows="3"
+              spellcheck="false"
+              placeholder="Describe the new look — e.g. a weathered bronze statue, patina"
+              :value="String(readTreatmentControl('treatment.prompt'))"
+              @pointerdown.stop
+              @input="setTreatmentControl('treatment.prompt', ($event.target as HTMLTextAreaElement).value)"
+            />
+          </div>
           <StudioControlPanel
             :controls="treatmentPanelControls"
             :order="treatmentPanelOrder"
@@ -4651,14 +4674,17 @@ async function onClose() {
                 {{ restyleStatusOf(activeTreatment.treatment.id) === 'running' ? 'Restyling…' : 'Restyle' }}
               </span>
             </StudioButton>
-            <p v-if="restyleStatusOf(activeTreatment.treatment.id) === 'error'" class="text-[11px] text-red-400/90" data-testid="restyle-status-error">
+            <p v-if="restyleStatusOf(activeTreatment.treatment.id) === 'running'" class="text-[11px] text-white/50" data-testid="restyle-status-running">
+              Generating — this usually takes a minute or two. Keep the studio open.
+            </p>
+            <p v-else-if="restyleStatusOf(activeTreatment.treatment.id) === 'error'" class="text-[11px] text-red-400/90" data-testid="restyle-status-error">
               Restyle failed — try again.
             </p>
             <p v-else-if="!restyleTreatmentPromptOf(activeTreatment.treatment)" class="text-[11px] text-white/40">
               Describe the new look above, then run a restyle.
             </p>
             <p v-else class="text-[11px] text-white/40">
-              Runs the model once — this costs credits. Mix blends the result for free.
+              Runs the model once — this costs credits, and takes a minute or two. Mix blends the result for free.
             </p>
           </div>
         </div>
