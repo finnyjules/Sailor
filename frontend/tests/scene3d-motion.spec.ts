@@ -132,6 +132,98 @@ async function hExtent(page: Page, dataUrl: string): Promise<{ minX: number; max
   }, dataUrl)
 }
 
+/** Fraction of "foreground" pixels (clearly brighter than the #202020 ≈ 32 background) across the
+ *  object's mid-height band. A fan of faded ghost copies alongside the crisp object covers more of
+ *  the band than the crisp object alone, and more copies cover still more — the multi-silhouette
+ *  signal, robust to SwiftShader's exact shading. */
+async function fgCoverage(page: Page, dataUrl: string): Promise<number> {
+  return page.evaluate(async (url) => {
+    const img = new Image(); img.src = url; await img.decode()
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+    const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+    const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height)
+    const lum = (i: number) => 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
+    let fg = 0, n = 0
+    for (let y = Math.floor(height * 0.3); y < height * 0.7; y++) {
+      for (let x = 0; x < width; x++) { if (lum((y * width + x) * 4) > 45) fg++; n++ }
+    }
+    return fg / n
+  }, dataUrl)
+}
+
+// A genuinely STILL sphere (no motion field at all) — for the ghost "none when still" case, where
+// every past pose collapses onto the current one and `ghostLocalPoses` returns an empty list. (A
+// bob apex will NOT do here: velocity is ~0 there, but the position a few frames back is a real,
+// non-collapsed pose, so ghosts would still draw — unlike velocity blur, which reads the derivative.)
+const stillSphere = (treatments?: unknown[]) => ({
+  id: 'motion-sphere', kind: 'primitive', primitive: 'sphere', name: 'Sphere', visible: true,
+  position: [0, 0.6, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+  material: { type: 'standard', color: '#c9d2de', roughness: 0.4, metalness: 0 },
+  ...(treatments ? { treatments } : {}),
+})
+const stillScene = (treatments?: unknown[]) => ({
+  version: 1, background: '#202020', showFloor: false,
+  camera: { position: [0, 0.6, 4.6], target: [0, 0.6, 0], fov: 40 },
+  motion: { duration: 4, fps: 30, loop: true },
+  objects: [stillSphere(treatments)],
+})
+
+// CONTROLLER / CI: run live against a fresh preview with the pane VISIBLE (a hidden pane pauses the
+// scene3d rAF ⇒ blank snapshot). Authored in Task 3; NOT run by the implementing subagent.
+test('ghost trails: a moving object shows multiple faded silhouettes, more with a higher count', async ({ page }) => {
+  const bad = watchConsole(page)
+  const T = 0.05 // early in the orbit: the trail fans dominantly along X
+
+  // Crisp control: the same moving sphere with NO treatment (single silhouette, no ghosts).
+  await openLab(page, orbitScene(undefined))
+  const crisp = await snapshotAt(page, T)
+  const crispCov = await fgCoverage(page, crisp)
+  const crispX = await hExtent(page, crisp)
+
+  await openLab(page, orbitScene([GHOST_TRAILS({ count: 3, spacing: 3, fade: 0.6 })]))
+  const few = await snapshotAt(page, T)
+  const fewStats = await stats(page)
+  const fewCov = await fgCoverage(page, few)
+  const fewX = await hExtent(page, few)
+
+  await openLab(page, orbitScene([GHOST_TRAILS({ count: 6, spacing: 3, fade: 0.6 })]))
+  const many = await snapshotAt(page, T)
+  const manyCov = await fgCoverage(page, many)
+
+  // The stage actually ran on this object (the S4/S5 loud-failure guard).
+  expect(fewStats.frames, 'the treatment stage rendered a frame').toBeGreaterThan(0)
+  expect(fewStats.groups, 'the ghost-trails group was treated').toBeGreaterThanOrEqual(1)
+  // Ghosts add faded copies ⇒ more of the band is covered than the lone crisp object …
+  expect(few, 'the trail changes the frame vs the untreated object').not.toBe(crisp)
+  expect(fewCov, 'the ghost fan covers more than the crisp object alone').toBeGreaterThan(crispCov)
+  // … and the silhouette reaches farther along the path than the crisp control.
+  expect(fewX.width, 'the trail extends the silhouette along the path').toBeGreaterThanOrEqual(crispX.width)
+  // MORE copies ⇒ still more coverage (the count dial does something visible).
+  expect(manyCov, 'a higher count paints more faded copies').toBeGreaterThan(fewCov)
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+})
+
+// CONTROLLER / CI: run live (pane visible). Authored in Task 3; NOT run by the subagent.
+// NOTE the byte-identity here is count-3-still == count-1-still — BOTH route through the motion
+// stage and hard-collapse to a single crisp composite (the "none when still" no-op). It is NOT
+// compared to a NO-treatment object: that one skips the stage entirely (a different render path);
+// the absent-vs-present byte-identity is the separate Task-1 disabled-row gate above.
+test('ghost trails: none when still — count 3 at rest is byte-identical to count 1 at rest', async ({ page }) => {
+  const bad = watchConsole(page)
+  const T = 0.4 // any t01: a motionless object has no past poses to draw at any time
+
+  // count 3 on a still object: every past pose collapses onto the current one ⇒ empty ⇒ one crisp draw.
+  await openLab(page, stillScene([GHOST_TRAILS({ count: 3, spacing: 2, fade: 0.5 })]))
+  const stillGhost = await snapshotAt(page, T)
+
+  // count 1 at rest: also collapses to a single crisp composite through the same stage path.
+  await openLab(page, stillScene([GHOST_TRAILS({ count: 1, spacing: 2, fade: 0.5 })]))
+  const countOne = await snapshotAt(page, T)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+  expect(stillGhost, 'a still object draws no ghosts, matching count 1 at rest').toBe(countOne)
+})
+
 test('velocity blur smears a moving object along its screen path (and differs from amount 0)', async ({ page }) => {
   const bad = watchConsole(page)
   const T = 0.05 // early in the orbit: on-screen motion is dominantly horizontal

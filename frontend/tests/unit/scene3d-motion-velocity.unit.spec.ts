@@ -72,6 +72,26 @@ describe('ghostLocalPoses', () => {
     expect(new Set(ys.map((y) => y.toFixed(6))).size).toBe(3)
   })
 
+  it('samples farther back as `spacing` grows — the same count, a wider fan', () => {
+    const { doc, box } = movingDoc()
+    const tight = ghostLocalPoses(box, doc, 0.4, 3, 1)
+    const wide = ghostLocalPoses(box, doc, 0.4, 3, 4)
+    expect(tight).toHaveLength(3)
+    expect(wide).toHaveLength(3)
+    // The oldest ghost (last) of the wider spacing sits farther from the current pose in Y.
+    const nowY = box.position[1]
+    expect(Math.abs(wide.at(-1)!.position[1] - nowY)).toBeGreaterThan(
+      Math.abs(tight.at(-1)!.position[1] - nowY),
+    )
+  })
+
+  it('wraps past t01=0 for a looping clip — count poses, all finite (no negative-time NaN)', () => {
+    const { doc, box } = movingDoc() // doc.motion.loop === true
+    const poses = ghostLocalPoses(box, doc, 0.01, 4, 3) // t01−k·spacing·dt walks below 0
+    expect(poses).toHaveLength(4)
+    for (const p of poses) expect(Number.isFinite(p.position[1])).toBe(true)
+  })
+
   it('returns no poses for a still object (all past poses collapse onto the current pose)', () => {
     const doc = defaultDoc()
     doc.motion = { duration: 4, fps: 30, loop: true }

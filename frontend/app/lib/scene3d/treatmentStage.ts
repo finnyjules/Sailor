@@ -97,6 +97,21 @@ export function velocityBlurLenPx(
   return 0.5 * Math.hypot(v.x * width, v.y * height) * shutter * amount
 }
 
+/** The per-ghost composite opacities for a ghost-trails fan of `count` copies fading by `fade`
+ *  per step — a geometric falloff `fade^k` for the k-th ghost behind the object (k = 1..count).
+ *  Index 0 is the NEAREST-PAST ghost (fade^1, the brightest) and the last is the OLDEST
+ *  (fade^count, the faintest) — the same order `ghostLocalPoses` returns its poses in, so the
+ *  stage reads `alphas[i]` for `poses[i]`. The crisp current object sits above them all at the
+ *  implicit `fade^0 = 1`. Pure; the GLSL-free CPU twin of the fade `ghostTrailsComposite` applies.
+ *  A geometric (not linear) falloff is chosen so successive ghosts read as a receding trail — each
+ *  a constant FRACTION of the one in front, which perceptually spaces them evenly under the ACES
+ *  display-blend the composite uses for a sub-1 opacity. */
+export function ghostAlphas(count: number, fade: number): number[] {
+  const out: number[] = []
+  for (let k = 1; k <= count; k++) out.push(Math.pow(fade, k))
+  return out
+}
+
 /** Pixelate cell size in device px on an image `height` px tall, given `cellSize` in "pixels
  *  per block on a 1000-px-tall image" units: 12 → 12px at 1000px, ~24.6px at 2048px — the
  *  same LOOK at every resolution, exactly as `blurPasses` scales by height. Pure. */
@@ -1707,14 +1722,46 @@ export class TreatmentStage {
   }
 
   /** Ghost trails / onion skin — a fan of faded past copies of `root` at `poses`, drawn behind
-   *  the crisp current object. STUB (S6 Task 1 scaffold): no-op so the family plumbing lands
-   *  with no visual change yet. Task 3 fills this in (draw each past pose faintest-first, then
-   *  the current pose on top, restoring the live transform in a finally). */
+   *  the crisp current object. Each ghost is `root` drawn ALONE (via `drawAlone`, so it excludes
+   *  the other treated/motion roots) at a past LOCAL pose, composited depth-tested against the
+   *  base with a geometric fade (`ghostAlphas`). Poses arrive nearest-past-first / oldest-last
+   *  (`ghostLocalPoses`), and are drawn OLDEST → NEWEST (faintest first) so nearer ghosts sit on
+   *  top. The crisp current object is drawn LAST at the restored pose (it was hidden from the base
+   *  pass with the rest of the motion family). An empty `poses` — a still object whose past poses
+   *  all collapsed onto the current one (or a parented / zero-motion object) — draws just the crisp
+   *  object once: byte-identical to a plain single composite (the "none when still" no-op). */
   private ghostTrailsComposite(
-    _scene: THREE.Scene, _camera: THREE.Camera, _root: THREE.Object3D, _exclude: THREE.Object3D[],
-    _t: GhostTrailsTreatment, _poses: LocalPose[],
+    scene: THREE.Scene, camera: THREE.Camera, root: THREE.Object3D, exclude: THREE.Object3D[],
+    t: GhostTrailsTreatment, poses: LocalPose[], invDepth: THREE.Texture | null,
   ): void {
-    // S6 Task 3
+    // The live scene-graph object is mutated to each past pose in turn — snapshot its current
+    // local TRS and restore it in a `finally` so a throw mid-loop can never leave it parked in
+    // the past (it is the same object the next frame's sync reads).
+    const savedPos = root.position.clone()
+    const savedRot = root.rotation.clone()
+    const savedScale = root.scale.clone()
+    try {
+      // Oldest first (faintest first): draw high indices — the farthest past poses — before the
+      // nearer, brighter ones, so a nearer ghost composites over an older one.
+      for (let i = poses.length - 1; i >= 0; i--) {
+        const p = poses[i]!
+        root.position.set(p.position[0]!, p.position[1]!, p.position[2]!)
+        root.rotation.set(p.rotation[0]!, p.rotation[1]!, p.rotation[2]!)
+        root.scale.set(p.scale[0]!, p.scale[1]!, p.scale[2]!)
+        root.updateMatrixWorld(true)
+        this.drawAlone(scene, camera, root, exclude, this.layer, null)
+        // alphas[i] = fade^(i+1): poses[i] is the (i+1)-th ghost behind the object.
+        this.composite(this.layer.texture, this.layer.depthTexture, invDepth, Math.pow(t.fade, i + 1), 0, null)
+      }
+    } finally {
+      root.position.copy(savedPos)
+      root.rotation.copy(savedRot)
+      root.scale.copy(savedScale)
+      root.updateMatrixWorld(true)
+    }
+    // The crisp current object on top, at the restored pose (fade^0 = 1).
+    this.drawAlone(scene, camera, root, exclude, this.layer, null)
+    this.composite(this.layer.texture, this.layer.depthTexture, invDepth, 1, 0, null)
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], motionPlan: MotionGroup[], ctx: StageContext): THREE.Texture | null {
@@ -1831,15 +1878,15 @@ export class TreatmentStage {
       // 2d. Motion treatments (S6 velocity blur / ghost trails). Each motion-family object was
       //     hidden from the base above; its own composite here redraws it (smeared / with a fan
       //     of faded past copies) using the per-object screen velocity / past poses the engine
-      //     was handed at the doc+t01 seam. velocityBlur is live (S6 Task 2 — a directional
-      //     smear); ghostTrails is still a STUBBED no-op (S6 Task 3 fills it in).
+      //     was handed at the doc+t01 seam. velocityBlur is a directional smear (S6 Task 2);
+      //     ghostTrails a fan of faded past copies behind the crisp object (S6 Task 3).
       const bufRoots = bufGroups.map((bg) => ctx.objectRoots.get(bg.objectId)!)
       for (const g of motionGroups) {
         const root = ctx.objectRoots.get(g.objectId)!
         const exclude = [...treatedRoots, ...bufRoots, ...motionRoots]
         for (const t of g.treatments) {
           if (t.kind === 'velocityBlur') this.velocityBlurComposite(scene, camera, root, exclude, t, ctx.velocities?.get(g.objectId) ?? null, invDepth)
-          else if (t.kind === 'ghostTrails') this.ghostTrailsComposite(scene, camera, root, exclude, t, ctx.ghosts?.get(g.objectId) ?? [])
+          else if (t.kind === 'ghostTrails') this.ghostTrailsComposite(scene, camera, root, exclude, t, ctx.ghosts?.get(g.objectId) ?? [], invDepth)
         }
       }
       // 3. One un-premultiply back to straight alpha for the consumers downstream. The
