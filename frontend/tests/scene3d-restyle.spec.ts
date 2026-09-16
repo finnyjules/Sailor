@@ -166,3 +166,103 @@ test('renderObjectPasses crops the object alone, refits depth, and leaves the vi
 
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
 })
+
+/* ── Task 3 · the injected composite (restyleComposite via __scene3dRestyleInject) ─────────────
+ * The stage's restyle composite exercised with a FAKE cached result texture — a LOCAL solid-colour
+ * PNG data URL injected through window.__scene3dRestyleInject. NO fal / paid call anywhere: the
+ * "result" is a canvas the browser draws. This proves (a) the composite runs (stats.groups >= 1,
+ * frames > 0), (b) the injected image is masked to the object's silhouette (a pixel inside the
+ * object is the injected colour; a pixel in the corner is the background), (c) mix 0 is a
+ * byte-identical no-op (the injected texture is ignored — the plain-object early-out), and mix 1 is
+ * fully the injected image. Console shader-error gate stays on `restyleMat`.
+ *
+ * NOTE (controller-run): needs a live preview (WebGL via SwiftShader). Run against a fresh preview,
+ * pane visible, on the isolated preview port.
+ */
+const RESTYLE_ENABLED = (overrides: Record<string, unknown> = {}) => ({
+  id: 't-restyle', kind: 'aiRestyle', enabled: true, invert: false,
+  prompt: 'a bronze statue', strength: 0.6, model: 'fal-ai/flux-control-lora-depth',
+  mix: 1, resultRef: '', inputHash: '',
+  ...overrides,
+})
+
+/** Inject a solid-colour LOCAL PNG as the object's restyle result (zero spend). Returns the hook's
+ *  boolean (true once the texture decoded + a frame re-rendered). */
+async function injectSolid(page: Page, objectId: string, color: string): Promise<boolean> {
+  return page.evaluate(async ({ oid, col }) => {
+    const cv = document.createElement('canvas')
+    cv.width = 16; cv.height = 16
+    const c = cv.getContext('2d')!
+    c.fillStyle = col
+    c.fillRect(0, 0, 16, 16)
+    return await (window as any).__scene3dRestyleInject(oid, cv.toDataURL('image/png')) as boolean
+  }, { oid: objectId, col: color })
+}
+
+/** Average RGB over a small patch centred on fractional canvas coords (fx, fy in 0..1). */
+async function samplePatch(page: Page, dataUrl: string, fx: number, fy: number) {
+  return page.evaluate(({ url, x, y }) => new Promise<{ r: number; g: number; b: number }>((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const cv = document.createElement('canvas')
+      cv.width = img.width; cv.height = img.height
+      const ctx = cv.getContext('2d')!
+      ctx.drawImage(img, 0, 0)
+      const px = Math.round(x * img.width), py = Math.round(y * img.height)
+      const half = 3
+      const data = ctx.getImageData(px - half, py - half, half * 2 + 1, half * 2 + 1).data
+      let r = 0, g = 0, b = 0, n = 0
+      for (let i = 0; i < data.length; i += 4) { r += data[i]!; g += data[i + 1]!; b += data[i + 2]!; n++ }
+      resolve({ r: r / n, g: g / n, b: b / n })
+    }
+    img.onerror = reject
+    img.src = url
+  }), { url: dataUrl, x: fx, y: fy })
+}
+
+const MAGENTA = '#ff00ff'
+
+test('an injected restyle composites to the silhouette (mix 1), background untouched', async ({ page }) => {
+  const bad = watchConsole(page)
+  await openLab(page, sceneWith([RESTYLE_ENABLED()]))
+  expect(await injectSolid(page, 'restyle-sphere', MAGENTA), 'inject hook returned false').toBe(true)
+  await page.waitForTimeout(SETTLE_MS)
+
+  const stats = await page.evaluate(() => (window as any).__scene3dTreatmentStats())
+  expect(stats.groups, 'the restyle group did not render').toBeGreaterThanOrEqual(1)
+  expect(stats.frames, 'no frames rendered').toBeGreaterThan(0)
+
+  const shot = await snapshot(page)
+  // Inside the sphere (canvas centre-ish): the injected magenta — high R + B, low G.
+  const inside = await samplePatch(page, shot, 0.5, 0.5)
+  expect(inside.r, `object centre not magenta: ${JSON.stringify(inside)}`).toBeGreaterThan(110)
+  expect(inside.b, `object centre not magenta: ${JSON.stringify(inside)}`).toBeGreaterThan(60)
+  expect(inside.g, `object centre has too much green for magenta: ${JSON.stringify(inside)}`).toBeLessThan(inside.r * 0.7)
+  // Top-left corner: the dark background (#202020), unaffected by the object's restyle.
+  const corner = await samplePatch(page, shot, 0.04, 0.04)
+  expect(corner.r + corner.g + corner.b, `corner is not background: ${JSON.stringify(corner)}`).toBeLessThan(150)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+})
+
+test('mix 0 is a byte-identical no-op: an injected result is ignored, equal to an uncached restyle', async ({ page }) => {
+  const bad = watchConsole(page)
+  // Injected but mix 0 → the plain-object early-out (the texture must not appear).
+  await openLab(page, sceneWith([RESTYLE_ENABLED({ mix: 0 })]))
+  expect(await injectSolid(page, 'restyle-sphere', MAGENTA)).toBe(true)
+  await page.waitForTimeout(SETTLE_MS)
+  const injectedMix0 = await snapshot(page)
+
+  // Same enabled restyle at mix 0 but with NO result injected — also the plain-object early-out.
+  await openLab(page, sceneWith([RESTYLE_ENABLED({ mix: 0 })]))
+  await page.waitForTimeout(SETTLE_MS)
+  const uncached = await snapshot(page)
+
+  expect(injectedMix0, 'mix 0 sampled the injected texture instead of the plain object').toBe(uncached)
+  // And the object centre is the grey sphere, not magenta (proves the texture really was ignored).
+  const inside = await samplePatch(page, injectedMix0, 0.5, 0.5)
+  expect(Math.abs(inside.r - inside.g), `mix 0 leaked magenta: ${JSON.stringify(inside)}`).toBeLessThan(40)
+  expect(Math.abs(inside.r - inside.b), `mix 0 leaked magenta: ${JSON.stringify(inside)}`).toBeLessThan(40)
+
+  expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
+})

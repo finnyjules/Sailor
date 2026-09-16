@@ -84,6 +84,8 @@ import { fitGlbGroup } from '~/lib/scene3d/fitGlb'
 import { svgToLeafPaths, outlineStrokes, type SvgLeafPath } from '~/composables/useVectorSvg'
 import { buildSvgObjects, SVG_SPLIT_THRESHOLD } from '~/lib/scene3d/svgImport'
 import { renderPasses, renderObjectPasses } from '~/lib/scene3d/passes'
+import { restyleInputHash, shouldRunRestyle } from '~/lib/scene3d/restyleCache'
+import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { SCENE_TEMPLATES, animateSceneDefaults } from '~/lib/scene3d/motion/defaults'
 import { LOOP_OPTIONS, IN_OPTIONS, OUT_OPTIONS, CAMERA_OPTIONS, LOOP_USES_AMOUNT, CAMERA_USES_CYCLES, CAMERA_USES_AMOUNT, setObjectLoop, setObjectTransition, setObjectDirection } from '~/lib/scene3d/motion/panel'
@@ -1956,6 +1958,85 @@ function collectRestyleTextures(d: SceneDoc, cache: Map<string, THREE.Texture>):
     if (tex) out.set(g.objectId, tex)
   }
   return out
+}
+// Transient per-treatment run status for the restyle re-run button (idle / running / error). NOT in
+// the doc — a UI-only ref, like texGenerating. 'error' keeps the last good resultRef so the object
+// still shows its previous restyle.
+const restyleStatus = reactive<Record<string, 'idle' | 'running' | 'error'>>({})
+function restyleStatusOf(id: string): 'idle' | 'running' | 'error' { return restyleStatus[id] ?? 'idle' }
+/** The trimmed restyle prompt, or '' for a non-restyle treatment — gates the re-run button. */
+function restyleTreatmentPromptOf(t: Treatment): string {
+  return t.kind === 'aiRestyle' ? (t as AiRestyleTreatment).prompt.trim() : ''
+}
+
+// The /view URL for an input-dir file returned by /api/image-fetch (bare filename, no subfolder) —
+// the same shape app/lib/brand/upload.ts and materials.ts's inputViewUrl build. TextureLoader loads
+// it through the dev server's ComfyUI proxy, exactly as a generated material texture does.
+function restyleViewUrl(name: string): string {
+  return `/view?filename=${encodeURIComponent(name)}&type=input`
+}
+
+/**
+ * The S7 restyle re-run lifecycle (Task-0 (c)). An EXPLICIT button — never per-frame, never
+ * automatic; it costs money (the gen-map posture). Bakes the object's crop, computes the prospective
+ * inputHash, and SHORT-CIRCUITS (no fetch, no bill) when the inputs are unchanged and the result is
+ * still cached. Otherwise it posts to the paid route, persists the result via /api/image-fetch,
+ * decodes it into a cached texture, stamps the treatment's resultRef/inputHash, and re-renders. On
+ * any error the last good resultRef/inputHash are left intact.
+ */
+async function runRestyle(objectId: string, treatmentId: string): Promise<void> {
+  if (!engine) return
+  const hit = findTreatment(doc, objectId, treatmentId)
+  if (!hit || hit.treatment.kind !== 'aiRestyle') return
+  const t = hit.treatment as AiRestyleTreatment
+  const prompt = t.prompt.trim()
+  if (!prompt) { restyleStatus[treatmentId] = 'error'; return }
+  if (restyleStatus[treatmentId] === 'running') return
+  const model = RESTYLE_MODELS.find((m) => m.id === t.model) ?? RESTYLE_MODELS[0]!
+
+  restyleStatus[treatmentId] = 'running'
+  try {
+    // 1. Bake the object's crop (Task 2). Null ⇒ off-screen / degenerate — nothing to send.
+    const passes = await renderObjectPasses(engine, doc, objectId, (performance.now() - scene3dMountedAt) / 1000)
+    if (!passes) { restyleStatus[treatmentId] = 'error'; return }
+
+    // 2. Prospective hash from the SAME inputs the key is defined over; short-circuit if unchanged
+    //    and the result is still in hand (no fetch, no bill).
+    const hash = restyleInputHash(model, prompt, t.strength, passes.beauty, passes.depth)
+    if (!shouldRunRestyle(hash, t.inputHash, t.resultRef, restyleTexCache.has(t.resultRef))) {
+      restyleStatus[treatmentId] = 'idle'
+      return
+    }
+
+    // 3. The paid route → a temporary fal CDN url. runFal owns all metering; the route is thin.
+    const gen = await $fetch<{ imageUrl: string; model: string; seed: number }>('/api/scene3d/restyle', {
+      method: 'POST',
+      body: { prompt, beauty: passes.beauty, depth: passes.depth, strength: t.strength, model: model.id },
+    })
+    // 4. Persist the bytes into ComfyUI's input dir so the result survives the CDN link expiring.
+    const stored = await $fetch<{ name?: string }>('/api/image-fetch', { method: 'POST', body: { url: gen.imageUrl } })
+    const name = stored?.name
+    if (!name) throw new Error('no filename')
+
+    // 5. Decode into a cached texture keyed by the stable filename.
+    const tex = await new Promise<THREE.Texture>((resolve, reject) => {
+      new THREE.TextureLoader().load(restyleViewUrl(name), (loaded) => {
+        loaded.colorSpace = THREE.SRGBColorSpace
+        resolve(loaded)
+      }, undefined, reject)
+    })
+    restyleTexCache.set(name, tex)
+
+    // 6. Stamp the treatment (small strings only — pixels never enter the doc) and re-render.
+    t.resultRef = name
+    t.inputHash = hash
+    engine.setRestyleTextures(collectRestyleTextures(doc, restyleTexCache))
+    engine.render((performance.now() - scene3dMountedAt) / 1000)
+    restyleStatus[treatmentId] = 'idle'
+  } catch (err) {
+    console.error('[scene3d-studio] restyle failed', err)
+    restyleStatus[treatmentId] = 'error' // last good resultRef / inputHash untouched
+  }
 }
 // Wall-clock start of this surface's rAF loop — a shaderFill field's animation clock runs off
 // elapsed real time, same as ShapeStudioSurface.vue's `mountedAt` (Scene3D's own playhead
@@ -4555,6 +4636,31 @@ async function onClose() {
             :visible="treatmentControlVisible"
             @set="setTreatmentControl"
           />
+          <!-- S7 AI restyle: the explicit re-run action + status. Bespoke UI (there is no button
+               ControlSpec kind). Never automatic — a restyle is a paid model call. Mix blends the
+               cached result live and for free; only this button spends. -->
+          <div v-if="activeTreatment.treatment.kind === 'aiRestyle'" class="mt-1 space-y-1.5" data-testid="restyle-actions">
+            <StudioButton
+              variant="primary"
+              :disabled="!restyleTreatmentPromptOf(activeTreatment.treatment) || restyleStatusOf(activeTreatment.treatment.id) === 'running'"
+              @click="runRestyle(activeTreatment.obj.id, activeTreatment.treatment.id)"
+            >
+              <span class="flex items-center gap-1.5">
+                <Loader2 v-if="restyleStatusOf(activeTreatment.treatment.id) === 'running'" class="h-3.5 w-3.5 animate-spin" />
+                <Sparkles v-else class="h-3.5 w-3.5" />
+                {{ restyleStatusOf(activeTreatment.treatment.id) === 'running' ? 'Restyling…' : 'Restyle' }}
+              </span>
+            </StudioButton>
+            <p v-if="restyleStatusOf(activeTreatment.treatment.id) === 'error'" class="text-[11px] text-red-400/90" data-testid="restyle-status-error">
+              Restyle failed — try again.
+            </p>
+            <p v-else-if="!restyleTreatmentPromptOf(activeTreatment.treatment)" class="text-[11px] text-white/40">
+              Describe the new look above, then run a restyle.
+            </p>
+            <p v-else class="text-[11px] text-white/40">
+              Runs the model once — this costs credits. Mix blends the result for free.
+            </p>
+          </div>
         </div>
       </template>
 

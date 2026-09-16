@@ -37,7 +37,7 @@ import { stripAlpha } from '~/lib/color/convert'
 import type { AiRestyleTreatment, BufferGroup, CrossHatchTreatment, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, GhostTrailsTreatment, MaskedGroup, MotionGroup, RampFields, RestyleGroup, Treatment, VelocityBlurTreatment } from './treatments'
 import type { ScreenVelocity, LocalPose } from './motion/velocity'
 import { ownMeshes, STAGE_LAYER } from './treatmentShells'
-import { fitNearFar } from './passes'
+import { fitNearFar, screenRectOfBox } from './passes'
 
 /** MSAA samples on the base/layer targets. three ≥ r165 resolves a multisampled target's
  *  depth into its `depthTexture` (`resolveDepthBuffer`, default true), which the composite
@@ -782,6 +782,41 @@ const COMPOSITE_FRAG = `
     gl_FragColor = vec4(mix(linearResult, displayResult, k), outA);
   }`
 
+// AI restyle (S7) — the flat composite of the object's cached restyle RESULT texture over the
+// object-alone layer, masked to its silhouette. `tLayer` is the object drawn alone (straight lit
+// colour + coverage in alpha); `uResultTex` is the decoded result image, whose square content maps
+// onto the object's CURRENT screen crop rect (`uRectPx`, recomputed each frame) exactly as
+// passes.ts's cropSquareDataUrl laid it in — so the flat result tracks the silhouette as the object
+// moves. The result PNG is sRGB-encoded; a raw ShaderMaterial does NOT auto-decode a sampled
+// texture, so `srgbToLinear` converts it into the stage's linear-HDR working space HERE (verified
+// against a plain-object mix:1 reference so it is not double-gamma'd). Output is STRAIGHT colour +
+// coverage alpha — `composite()` premultiplies, exactly as for the plain object layer. Every float
+// operand carries a decimal (ANGLE float-literal rule); source-guarded in Task 4.
+const RESTYLE_FRAG = `
+  uniform sampler2D tLayer;
+  uniform sampler2D uResultTex;
+  uniform float uMix;
+  uniform vec4 uRectPx;    // object screen crop rect: x, y (TOP-left origin), w, h — device px
+  uniform vec2 uViewSize;  // drawing-buffer size in device px
+  varying vec2 vUv;
+  vec3 srgbToLinear(vec3 c){
+    return mix(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, vec3(lessThanEqual(c, vec3(0.04045))));
+  }
+  void main(){
+    vec4 layer = texture2D(tLayer, vUv);   // straight lit colour + coverage (alpha)
+    float cov = layer.a;
+    // vUv is bottom-left origin; the crop rect is top-left origin — flip Y into device px.
+    vec2 frag = vec2(vUv.x * uViewSize.x, (1.0 - vUv.y) * uViewSize.y);
+    float side = max(uRectPx.z, uRectPx.w);
+    vec2 off = vec2(floor((side - uRectPx.z) * 0.5), floor((side - uRectPx.w) * 0.5));
+    vec2 ruv = (vec2(frag.x - uRectPx.x, frag.y - uRectPx.y) + off) / max(side, 1.0);
+    // The result texture is flipY = true (TextureLoader default), so flip v to read the crop
+    // square top-left → top-left.
+    vec3 restyle = srgbToLinear(texture2D(uResultTex, vec2(ruv.x, 1.0 - ruv.y)).rgb);
+    vec3 outColor = mix(layer.rgb, restyle, uMix);
+    gl_FragColor = vec4(outColor, cov);    // straight colour + coverage; composite() premultiplies
+  }`
+
 // Window depth (0..1, non-linear under perspective) → a linear 0-at-near, 1-at-far metric,
 // so a Sobel over it means the same thing at every distance and depth fog's start/end read
 // as real fractions of the near→far span. Ortho depth is already linear. Needs `uNear`,
@@ -1052,6 +1087,14 @@ export class TreatmentStage {
   private readonly depthFogMat: THREE.ShaderMaterial
   private readonly curvatureWearMat: THREE.ShaderMaterial
   private readonly crossHatchMat: THREE.ShaderMaterial
+  /** S7 AI restyle — the flat result-texture composite over the object-alone layer. */
+  private readonly restyleMat = shader(RESTYLE_FRAG, {
+    tLayer: { value: null }, uResultTex: { value: null }, uMix: { value: 1 },
+    uRectPx: { value: new THREE.Vector4() }, uViewSize: { value: new THREE.Vector2() },
+  })
+  /** Scratch for the restyle composite's per-frame object bounds + view-projection (Task 3). */
+  private readonly restyleBox = new THREE.Box3()
+  private readonly restyleViewProj = new THREE.Matrix4()
   private readonly tmpSize = new THREE.Vector2()
   private readonly prevClearColor = new THREE.Color()
   private readonly rampBox = new THREE.Box3()
@@ -1103,6 +1146,9 @@ export class TreatmentStage {
     this.dropShadowBuildMat.blending = THREE.NoBlending
     this.dropShadowMergeMat.blending = THREE.NoBlending
     this.dropShadowCompositeMat.blending = THREE.NoBlending
+    // Writes every pixel of its scratch target (a pure full-frame compute) — the hardware blender
+    // must stay off or it would blend the restyle over the scratch's stale frame.
+    this.restyleMat.blending = THREE.NoBlending
   }
 
   private makeTarget(w: number, h: number, withDepth: boolean): RT {
@@ -1770,24 +1816,44 @@ export class TreatmentStage {
 
   /** AI restyle (S7) — composite the object's cached restyle result texture, masked to its
    *  silhouette, over the accumulator. Like the motion composites, the object was hidden from the
-   *  base pass, so this redraws it.
+   *  base pass, so this redraws it ALONE into `this.layer` first (its alpha = the silhouette mask,
+   *  its colour = the plain lit `mix:0` reference, its depthTexture = the occluder).
    *
-   *  S7 TASK 1 STUB: this draws the PLAIN object only (no texture sampled, no visual change), so a
-   *  present-but-uncached restyle — and every restyle this task, since no result is ever produced —
-   *  renders exactly as `mix:0` (the no-op reference the byte-identity claim rests on). `drawAlone`
-   *  the object into `this.layer` (its alpha = the silhouette mask, its colour = the plain lit
-   *  object, its depthTexture = the occluder), then composite it straight over the accumulator.
+   *  No cached result (`tex` null — a present-but-uncached restyle) OR `mix <= 0` folds to the
+   *  PLAIN-object no-op: the exact composite a `mix:0` restyle produces, and the byte-identity claim
+   *  rests on this early-out (no `restyleMat` pass runs, so mix:0 == plain, .toBe).
    *
-   *  S7 Task 3 replaces the body below with the real texture composite: sample `tex` in the
-   *  object's current screen crop-rect UV, blend `mix(litColor, restyleColor, t.mix)` × coverage
-   *  (premultiplied) via a new `restyleMat`, and composite THAT. `tex` and the `t.mix<=0` early-out
-   *  become live then; today they are accepted but unused (the stub is a pure plain-object draw). */
+   *  Otherwise `restyleMat` samples `tex` in the object's CURRENT screen crop rect (recomputed each
+   *  frame so the flat result tracks the silhouette as the object moves), decodes it to linear,
+   *  blends `mix(litColour, restyleColour, t.mix)` and carries the layer's coverage alpha; the
+   *  result is composited depth-tested with the object's own depth exactly like the plain layer. */
   private restyleComposite(
     scene: THREE.Scene, camera: THREE.Camera, root: THREE.Object3D, exclude: THREE.Object3D[],
-    _t: AiRestyleTreatment, _tex: THREE.Texture | null, invDepth: THREE.Texture | null,
+    t: AiRestyleTreatment, tex: THREE.Texture | null, invDepth: THREE.Texture | null,
   ): void {
     this.drawAlone(scene, camera, root, exclude, this.layer, null)
-    this.composite(this.layer.texture, this.layer.depthTexture, invDepth, 1, 0, null)
+    if (!tex || t.mix <= 0) {
+      this.composite(this.layer.texture, this.layer.depthTexture, invDepth, 1, 0, null)
+      return
+    }
+    // Recompute the object's screen crop rect THIS frame (pad 8 matches renderObjectPasses). A
+    // degenerate / off-screen rect falls back to the plain object rather than sampling garbage.
+    this.restyleBox.setFromObject(root)
+    this.restyleViewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+    const rect = screenRectOfBox(this.restyleBox, this.restyleViewProj, this.width, this.height, 8)
+    if (!rect) {
+      this.composite(this.layer.texture, this.layer.depthTexture, invDepth, 1, 0, null)
+      return
+    }
+    const restyled = this.free(this.layer)
+    const u = this.restyleMat.uniforms
+    u.tLayer!.value = this.layer.texture
+    u.uResultTex!.value = tex
+    u.uMix!.value = t.mix
+    ;(u.uRectPx!.value as THREE.Vector4).set(rect.x, rect.y, rect.w, rect.h)
+    ;(u.uViewSize!.value as THREE.Vector2).set(this.width, this.height)
+    this.pass(this.restyleMat, restyled)
+    this.composite(restyled.texture, this.layer.depthTexture, invDepth, 1, 0, null)
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], motionPlan: MotionGroup[], restylePlan: RestyleGroup[], ctx: StageContext): THREE.Texture | null {
@@ -1951,7 +2017,7 @@ export class TreatmentStage {
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.glitchMat, this.dropShadowBuildMat, this.dropShadowMergeMat, this.dropShadowCompositeMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.crossHatchMat, this.normalMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.glitchMat, this.dropShadowBuildMat, this.dropShadowMergeMat, this.dropShadowCompositeMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.crossHatchMat, this.normalMat, this.restyleMat]) m.dispose()
     this.quad.dispose()
   }
 }
