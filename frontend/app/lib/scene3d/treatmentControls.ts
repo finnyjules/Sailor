@@ -224,7 +224,7 @@ export function treatmentControls(kind: TreatmentKind): ControlSpec[] {
       break
     case 'ghostTrails':
       rows = [
-        slider(g, 'count', 'Trails', 1, GHOST_COUNT_MAX, 1, D.ghostTrails.count, 'How many faded copies trail behind'),
+        slider(g, 'count', 'Copies', 1, GHOST_COUNT_MAX, 1, D.ghostTrails.count, 'How many faded copies trail behind'),
         slider(g, 'spacing', 'Spacing', 1, GHOST_SPACING_MAX, 1, D.ghostTrails.spacing, 'How far apart the copies are, in frames'),
         slider(g, 'fade', 'Fade', 0, 1, 0.01, D.ghostTrails.fade, 'How quickly the copies fade out'),
       ]

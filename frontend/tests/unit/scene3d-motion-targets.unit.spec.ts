@@ -428,7 +428,28 @@ describe('animatableTargets: treatments', () => {
     expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${vb.id}.amount`)?.label)
       .toBe('Mover · Velocity blur amount')
     expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${gt.id}.count`)?.label)
-      .toBe('Mover · Ghost trails trails')
+      .toBe('Mover · Ghost trails copies')
+  })
+
+  // S6: SET each motion-family dial by its stable id — the write path is the same generic
+  // nested-id resolver every treatment dial uses, so no per-kind write code was needed. Proves
+  // the derivation is bidirectional: the dial is not just listed as a target, a track aimed at it
+  // actually lands on the right treatment by id.
+  it('a track writes through velocityBlur amount + ghostTrails fade by their stable ids', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    const vb = createTreatment('velocityBlur')
+    const gt = createTreatment('ghostTrails')
+    box.treatments = [vb, gt]
+    doc.objects.push(box)
+    doc.motion.tracks = [
+      track({ path: `objects.${box.id}.treatments.${vb.id}.amount`, from: 0, to: 2 }),
+      track({ path: `objects.${box.id}.treatments.${gt.id}.fade`, from: 0, to: 0.8 }),
+    ]
+    // Sampled mid-track (t01 = 0.5) rather than at the end, where a looping track wraps to `from`.
+    const out = applyMotionToDoc(doc, 0.5).doc.objects[0]!.treatments!
+    expect((out.find((t) => t.id === vb.id) as any).amount).toBeCloseTo(1, 5)
+    expect((out.find((t) => t.id === gt.id) as any).fade).toBeCloseTo(0.4, 5)
   })
 
   it('a track on a treatment dial writes through the id, and survives reordering the stack', () => {

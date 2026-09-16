@@ -414,6 +414,34 @@ describe('sceneStackControls: treatments', () => {
     expect(matcapSelect.kind).toBe('select')
     expect(matcapSelect.label).toBe('Gem · Matcap coat matcap')
   })
+  // S6: a MOTION-family treatment is a treatment like any other from the agent vantage point —
+  // iterateTreatmentControls is fully generic over treatmentControls(kind), so velocityBlur and
+  // ghostTrails needed NO per-kind edit to agentControls.ts to become id-addressed agent controls.
+  // Both kinds are numeric-only (no colour rows) and non-masked (no invert), so every dial — and
+  // only their own dials — reaches the agent stack by stable id.
+  it('velocityBlur + ghostTrails dials mint id-addressed agent controls, with no invert row (no per-kind edit)', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Mover'
+    const vb = createTreatment('velocityBlur')
+    const gt = createTreatment('ghostTrails')
+    box.treatments = [vb, gt]
+    doc.objects.push(box)
+    const controls = sceneStackControls(doc)
+    const keys = controls.map((c) => c.key)
+    for (const field of ['amount', 'shutter']) {
+      expect(keys).toContain(`objects.${box.id}.treatments.${vb.id}.${field}`)
+    }
+    for (const field of ['count', 'spacing', 'fade']) {
+      expect(keys).toContain(`objects.${box.id}.treatments.${gt.id}.${field}`)
+    }
+    expect(controls.find((c) => c.key === `objects.${box.id}.treatments.${vb.id}.amount`)!.label)
+      .toBe('Mover · Velocity blur amount')
+    expect(controls.find((c) => c.key === `objects.${box.id}.treatments.${gt.id}.count`)!.label)
+      .toBe('Mover · Ghost trails copies')
+    // Not masked — neither kind mints an "Everything else" invert control.
+    expect(keys.some((k) => k.endsWith(`.${vb.id}.invert`))).toBe(false)
+    expect(keys.some((k) => k.endsWith(`.${gt.id}.invert`))).toBe(false)
+  })
 })
 
 describe('sceneStackControls / iterateModifierControls: modifiers', () => {

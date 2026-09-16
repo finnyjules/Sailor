@@ -77,6 +77,64 @@ describe('progressive blur rows', () => {
   })
 })
 
+// S6 · the motion family (velocityBlur, ghostTrails). These are NOT masked and NOT ramped,
+// so treatmentControls(kind) must yield ONLY their own dials — no "Everything else" invert row
+// (the copy-sweep guard: an invert row here would read as a dead, meaningless control) and no
+// ramp rows. Every dial maps to a real field the stage reads (Tasks 2/3), which the generic
+// "row key is treatment.<field> … with the same default" test above already proves for all kinds;
+// this pins the exact row set, ranges and human hints so a copy or control-shape regression fails.
+describe('motion-family treatment rows (velocityBlur, ghostTrails)', () => {
+  it('velocityBlur offers exactly Amount + Shutter — no invert, no ramp', () => {
+    const rows = treatmentControls('velocityBlur')
+    expect(rows.map((r) => r.key)).toEqual(['treatment.amount', 'treatment.shutter'])
+    expect(rows.every((r) => r.group === 'Velocity blur')).toBe(true)
+    expect(rows.find((r) => r.key === 'treatment.amount')).toMatchObject({
+      kind: 'slider', label: 'Amount', min: 0, max: 3, default: TREATMENT_DEFAULTS.velocityBlur.amount,
+      hint: 'How strong the motion smear is',
+    })
+    expect(rows.find((r) => r.key === 'treatment.shutter')).toMatchObject({
+      kind: 'slider', label: 'Shutter', min: 0, max: 1, default: TREATMENT_DEFAULTS.velocityBlur.shutter,
+      hint: 'How much of the movement each frame captures',
+    })
+  })
+
+  it('ghostTrails offers exactly Trails + Spacing + Fade — no invert, no ramp', () => {
+    const rows = treatmentControls('ghostTrails')
+    expect(rows.map((r) => r.key)).toEqual(['treatment.count', 'treatment.spacing', 'treatment.fade'])
+    expect(rows.every((r) => r.group === 'Ghost trails')).toBe(true)
+    expect(rows.find((r) => r.key === 'treatment.count')).toMatchObject({
+      kind: 'slider', label: 'Copies', min: 1, max: 8, default: TREATMENT_DEFAULTS.ghostTrails.count,
+      hint: 'How many faded copies trail behind',
+    })
+    expect(rows.find((r) => r.key === 'treatment.spacing')).toMatchObject({
+      kind: 'slider', label: 'Spacing', min: 1, max: 12, default: TREATMENT_DEFAULTS.ghostTrails.spacing,
+      hint: 'How far apart the copies are, in frames',
+    })
+    expect(rows.find((r) => r.key === 'treatment.fade')).toMatchObject({
+      kind: 'slider', label: 'Fade', min: 0, max: 1, default: TREATMENT_DEFAULTS.ghostTrails.fade,
+      hint: 'How quickly the copies fade out',
+    })
+  })
+
+  it('neither motion kind is masked, so neither renders the "Everything else" row', () => {
+    for (const kind of ['velocityBlur', 'ghostTrails'] as const) {
+      expect(isMaskedKind(kind), kind).toBe(false)
+      expect(treatmentControls(kind).some((r) => r.key === 'treatment.invert'), kind).toBe(false)
+    }
+  })
+
+  it('every motion-family label is sentence case and carries a human hint', () => {
+    for (const kind of ['velocityBlur', 'ghostTrails'] as const) {
+      for (const row of treatmentControls(kind)) {
+        expect(row.label, row.key).toMatch(/^[A-Z]/)
+        // No raw identifier leaked as a label, and every numeric dial explains itself.
+        expect(row.label, row.key).not.toMatch(/[._]/)
+        expect(typeof (row as { hint?: string }).hint, `${kind}.${row.key} hint`).toBe('string')
+      }
+    }
+  })
+})
+
 describe('the shared ramp rows', () => {
   const RAMP_KEYS = [
     'treatment.progressive', 'treatment.rampSpace',
