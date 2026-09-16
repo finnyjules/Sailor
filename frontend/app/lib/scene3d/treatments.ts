@@ -308,6 +308,16 @@ export interface AiRestyleTreatment extends TreatmentBase {
   mix: number
   resultRef: string
   inputHash: string
+  // S7.1 projector metadata: the bake view-projection (16, column-major .toArray()), the crop rect
+  // [x, y, w, h] in bake-canvas px (4), the bake canvas size [w, h] (2), and the projector forward
+  // normalize(target - position) in world space (3). Stored so the material can project the cached
+  // result onto the object's surface across live-camera motion (Task 2). Each is [] until a run or
+  // inject stamps it; when ALL are empty there is no injection, so the object is byte-identical to
+  // shipped S7. Pixels never enter the doc (only these small matrices + resultRef live here).
+  projViewProj: number[]
+  projRect: number[]
+  projSize: number[]
+  projForward: number[]
 }
 export type Treatment =
   | BlurTreatment | GlowTreatment | PixelateTreatment | FadeTreatment | ColorGradeTreatment
@@ -376,7 +386,9 @@ export const TREATMENT_DEFAULTS = {
   // cannot drift. `parseTreatment` below reads RESTYLE_MODELS lazily (inside the function body).
   // strength 0.6 is a moderate restyle; mix 1 shows the full result once one arrives; resultRef /
   // inputHash empty until the first re-run (pixels never live in the doc).
-  aiRestyle: { prompt: '', strength: 0.6, model: 'fal-ai/flux-control-lora-depth', mix: 1, resultRef: '', inputHash: '' },
+  // projViewProj/projRect/projSize/projForward default to [] — an unstamped restyle stores no
+  // projector, so the material never injects and the object stays byte-identical to shipped S7.
+  aiRestyle: { prompt: '', strength: 0.6, model: 'fal-ai/flux-control-lora-depth', mix: 1, resultRef: '', inputHash: '', projViewProj: [], projRect: [], projSize: [], projForward: [] },
 } as const
 
 /** Cross-hatch line-pitch bounds, in "px per block on a 1000-px-tall image" units (the pixelate
@@ -639,6 +651,12 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
       // non-string — pixels never live in the doc, only these small strings.
       const modelDefault = RESTYLE_MODELS[0]!.id
       const model = typeof r.model === 'string' && RESTYLE_MODELS.some((m) => m.id === r.model) ? r.model : modelDefault
+      // S7.1 projector arrays: keep only an array of EXACTLY `n` finite numbers, else collapse to
+      // [] — so an absent, short/long, or NaN/Infinity/non-number-carrying value becomes [] (=>
+      // byte-identity when absent, and Task 2's material seam early-outs on empty).
+      const numArrayN = (raw: unknown, n: number): number[] =>
+        Array.isArray(raw) && raw.length === n && raw.every((v) => typeof v === 'number' && Number.isFinite(v))
+          ? (raw as number[]) : []
       return {
         ...base, kind: 'aiRestyle',
         prompt: typeof r.prompt === 'string' ? r.prompt : D.aiRestyle.prompt,
@@ -647,6 +665,10 @@ export function parseTreatment(raw: unknown): Treatment | undefined {
         mix: clamp01(num(r.mix, D.aiRestyle.mix)),
         resultRef: typeof r.resultRef === 'string' ? r.resultRef : '',
         inputHash: typeof r.inputHash === 'string' ? r.inputHash : '',
+        projViewProj: numArrayN(r.projViewProj, 16),
+        projRect: numArrayN(r.projRect, 4),
+        projSize: numArrayN(r.projSize, 2),
+        projForward: numArrayN(r.projForward, 3),
       }
     }
   }

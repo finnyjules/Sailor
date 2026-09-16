@@ -83,7 +83,7 @@ import { loadGlb, GLB_SIZE_CAP_BYTES } from '~/lib/scene3d/glb'
 import { fitGlbGroup } from '~/lib/scene3d/fitGlb'
 import { svgToLeafPaths, outlineStrokes, type SvgLeafPath } from '~/composables/useVectorSvg'
 import { buildSvgObjects, SVG_SPLIT_THRESHOLD } from '~/lib/scene3d/svgImport'
-import { renderPasses, renderObjectPasses } from '~/lib/scene3d/passes'
+import { renderPasses, renderObjectPasses, screenRectOfBox } from '~/lib/scene3d/passes'
 import { restyleInputHash, shouldRunRestyle } from '~/lib/scene3d/restyleCache'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
@@ -2036,8 +2036,14 @@ async function runRestyle(objectId: string, treatmentId: string): Promise<void> 
     restyleTexCache.set(name, tex)
 
     // 6. Stamp the treatment (small strings only — pixels never enter the doc) and re-render.
+    //    S7.1: also stamp the bake projection (matrix + rect + size + forward) so Task 2's material
+    //    can project the result onto the surface. These are tiny arrays, not pixels.
     t.resultRef = name
     t.inputHash = hash
+    t.projViewProj = passes.viewProj
+    t.projRect = [passes.rect.x, passes.rect.y, passes.rect.w, passes.rect.h]
+    t.projSize = passes.size
+    t.projForward = passes.forward
     engine.setRestyleTextures(collectRestyleTextures(doc, restyleTexCache))
     engine.render((performance.now() - scene3dMountedAt) / 1000)
     restyleStatus[treatmentId] = 'idle'
@@ -2137,6 +2143,23 @@ onMounted(() => {
         restyleTexCache.set(ref, tex)
         t.resultRef = ref
         t.inputHash = 'injected'
+        // S7.1: this hook does NOT bake, so stamp a projector from the CURRENT live camera + the
+        // object's screen rect, so Task 3's zero-spend oracle can project from a known frame. Uses
+        // the drawing-buffer size so rect/size/matrix are mutually consistent. Left unstamped ([])
+        // when the object has no on-screen rect (off-screen) — then no injection, like an unrun one.
+        const cam = engine!.camera
+        cam.updateMatrixWorld()
+        const proj = new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse)
+        const canvas = engine!.renderer.domElement as HTMLCanvasElement
+        const cw = canvas.width, ch = canvas.height
+        const root = engine!.objectRoots.get(objectId)
+        const rect = root ? screenRectOfBox(new THREE.Box3().setFromObject(root), proj, cw, ch, 8) : null
+        if (rect) {
+          t.projViewProj = proj.toArray()
+          t.projRect = [rect.x, rect.y, rect.w, rect.h]
+          t.projSize = [cw, ch]
+          t.projForward = cam.getWorldDirection(new THREE.Vector3()).toArray()
+        }
         engine!.setRestyleTextures(collectRestyleTextures(doc, restyleTexCache))
         engine!.render((performance.now() - scene3dMountedAt) / 1000)
         resolve(true)

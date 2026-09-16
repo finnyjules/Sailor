@@ -11,6 +11,7 @@ import {
   VELOCITY_BLUR_AMOUNT_MAX, GHOST_COUNT_MAX, GHOST_SPACING_MAX,
   RESTYLE_TREATMENT_KINDS, isRestyleKind, restyleTreatmentPlan, docHasRestyleTreatment, RESTYLE_STRENGTH_MAX,
 } from '~/lib/scene3d/treatments'
+import type { AiRestyleTreatment } from '~/lib/scene3d/treatments'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { treatmentControls } from '~/lib/scene3d/treatmentControls'
 import { blurPasses } from '~/lib/scene3d/treatmentStage'
@@ -961,6 +962,50 @@ describe('treatments: AI restyle family (S7)', () => {
       .toMatchObject({ resultRef: 'restyle-abc.png', inputHash: 'h123' })
     expect(parseTreatment({ id: 'ar5', kind: 'aiRestyle', resultRef: 42, inputHash: {} }))
       .toMatchObject({ resultRef: '', inputHash: '' })
+  })
+
+  it('parses the S7.1 projector metadata: round-trips valid arrays, collapses bad ones to []', () => {
+    const vp = Array.from({ length: 16 }, (_, i) => i * 0.5)
+    const good = parseTreatment({
+      id: 'arp1', kind: 'aiRestyle',
+      projViewProj: vp, projRect: [10, 20, 100, 120], projSize: [512, 512], projForward: [0, 0, -1],
+    }) as AiRestyleTreatment
+    expect(good.projViewProj).toEqual(vp)
+    expect(good.projRect).toEqual([10, 20, 100, 120])
+    expect(good.projSize).toEqual([512, 512])
+    expect(good.projForward).toEqual([0, 0, -1])
+
+    // absent => []
+    expect(parseTreatment({ id: 'arp2', kind: 'aiRestyle' }) as AiRestyleTreatment)
+      .toMatchObject({ projViewProj: [], projRect: [], projSize: [], projForward: [] })
+
+    // wrong length => []
+    expect(parseTreatment({ id: 'arp3', kind: 'aiRestyle', projViewProj: vp.slice(0, 15), projRect: [1, 2, 3], projSize: [1], projForward: [1, 2] }) as AiRestyleTreatment)
+      .toMatchObject({ projViewProj: [], projRect: [], projSize: [], projForward: [] })
+
+    // NaN / Infinity / non-number element => []
+    expect(parseTreatment({
+      id: 'arp4', kind: 'aiRestyle',
+      projViewProj: vp.map((_, i) => (i === 0 ? NaN : 1)),
+      projRect: [1, 2, Infinity, 4],
+      projSize: ['a', 2] as unknown as number[],
+      projForward: [1, 2, '3'] as unknown as number[],
+    }) as AiRestyleTreatment)
+      .toMatchObject({ projViewProj: [], projRect: [], projSize: [], projForward: [] })
+  })
+
+  it('serializeDoc/parseDoc preserves the S7.1 projector metadata', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    const vp = Array.from({ length: 16 }, (_, i) => i + 1)
+    box.treatments = [{
+      ...createTreatment('aiRestyle'), resultRef: 'r.png', inputHash: 'h',
+      projViewProj: vp, projRect: [1, 2, 3, 4], projSize: [640, 480], projForward: [0, 1, 0],
+    }]
+    doc.objects.push(box)
+    const back = parseDoc(serializeDoc(doc))
+    expect((back.objects.at(-1)!.treatments![0] as AiRestyleTreatment).projViewProj).toEqual(vp)
+    expect(back).toEqual(doc)
   })
 
   it('round-trips through parseTreatments incl. resultRef/inputHash', () => {

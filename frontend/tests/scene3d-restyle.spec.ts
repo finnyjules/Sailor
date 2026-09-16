@@ -99,7 +99,7 @@ const twoObjectScene = () => ({
   ],
 })
 
-type Passes = { beauty: string; depth: string; normal: string; rect: { x: number; y: number; w: number; h: number } } | null
+type Passes = { beauty: string; depth: string; normal: string; rect: { x: number; y: number; w: number; h: number }; viewProj: number[]; size: [number, number]; forward: number[] } | null
 const objectPasses = (page: Page, id: string) =>
   page.evaluate((oid) => (window as any).__scene3dObjectPasses(oid) as Promise<Passes>, id)
 
@@ -163,6 +163,17 @@ test('renderObjectPasses crops the object alone, refits depth, and leaves the vi
   //     flatten this small box's depth to near-black (spread ≈ 0).
   const depth = await analyseDataUrl(page, p.depth)
   expect(depth.lumSpread, 'depth crop is flat — near/far was not refit to the single object').toBeGreaterThan(0.15)
+
+  // (d) S7.1: the bake projection is returned alongside the crop (Task 2 projects the result onto
+  //     the surface from it). viewProj = 16 finite floats, size = 2 finite, forward = 3 ~unit-length.
+  expect(p.viewProj, 'viewProj is not a 16-element matrix').toHaveLength(16)
+  expect(p.viewProj.every((v) => Number.isFinite(v)), 'viewProj has a non-finite element').toBe(true)
+  expect(p.size, 'size is not [w, h]').toHaveLength(2)
+  expect(p.size.every((v) => Number.isFinite(v) && v > 0), 'size is not positive/finite').toBe(true)
+  expect(p.forward, 'forward is not a 3-vector').toHaveLength(3)
+  const fLen = Math.hypot(p.forward[0]!, p.forward[1]!, p.forward[2]!)
+  expect(fLen, 'forward is not ~unit-length').toBeGreaterThan(0.99)
+  expect(fLen, 'forward is not ~unit-length').toBeLessThan(1.01)
 
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
 })

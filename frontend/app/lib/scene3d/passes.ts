@@ -267,7 +267,14 @@ function cropSquareDataUrl(source: HTMLCanvasElement, rect: ScreenRect): string 
  */
 export async function renderObjectPasses(
   engine: SceneEngine, doc: SceneDoc, objectId: string, t = 0,
-): Promise<{ beauty: string; depth: string; normal: string; rect: ScreenRect } | null> {
+): Promise<{
+  beauty: string; depth: string; normal: string; rect: ScreenRect
+  // S7.1: the bake projection, stored on the treatment so the material can project the result onto
+  // the surface (Task 2). `viewProj` is the SAME matrix used for the crop (column-major .toArray()),
+  // `size` the bake canvas [w, h], `forward` the bake camera's world look direction. Bake pixels /
+  // rect are unchanged — these are extra read-outs of values renderObjectPasses already computes.
+  viewProj: number[]; size: [number, number]; forward: number[]
+} | null> {
   const root = engine.objectRoots.get(objectId)
   if (!root) return null
 
@@ -289,6 +296,14 @@ export async function renderObjectPasses(
   const viewProj = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
   const rect = screenRectOfBox(objBounds, viewProj, width, height, 8)
   if (!rect) return null // off-screen or degenerate
+
+  // S7.1: the projector's world look direction = normalize(target - position). Pure read-out of the
+  // committed doc camera params already used above; does not affect the bake.
+  const forward = new THREE.Vector3(
+    doc.camera.target[0]! - doc.camera.position[0]!,
+    doc.camera.target[1]! - doc.camera.position[1]!,
+    doc.camera.target[2]! - doc.camera.position[2]!,
+  ).normalize()
 
   const prevBg = scene.background
   const prevOverride = scene.overrideMaterial
@@ -344,7 +359,7 @@ export async function renderObjectPasses(
     renderer.render(scene, camera)
     const normal = cropSquareDataUrl(canvas, rect)
 
-    return { beauty, depth, normal, rect }
+    return { beauty, depth, normal, rect, viewProj: viewProj.toArray(), size: [width, height], forward: forward.toArray() }
   } finally {
     scene.overrideMaterial = prevOverride
     scene.background = prevBg
