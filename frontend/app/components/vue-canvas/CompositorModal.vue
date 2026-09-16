@@ -696,7 +696,7 @@ const {
   postEffects, setPostEffects,
   setGrid,
   undo, redo, canUndo, canRedo,
-  selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, recordHistory, commit, handleEditorKey, pasteClipboard,
+  selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, recordHistory, commit, handleEditorKey, pasteClipboard,
   selectionBox, selectionHandles, startGroupResize,
   groupSelected, ungroupSelected, ungroupGroup, renameGroup, canGroup, canUngroup,
   localGroups, commitBoth, selectGroupById, writeGroups,
@@ -1545,6 +1545,15 @@ const ALIGN_BTNS = [
   { mode: 'bottom', icon: AlignEndHorizontal, title: 'Align bottom' },
   { mode: 'hdist', icon: AlignHorizontalSpaceAround, title: 'Distribute horizontally' },
   { mode: 'vdist', icon: AlignVerticalSpaceAround, title: 'Distribute vertically' },
+] as const
+// Align the selected layer(s) to the FRAME (works for one layer, unlike ALIGN_BTNS).
+const ALIGN_FRAME_BTNS = [
+  { mode: 'left', icon: AlignStartVertical, title: 'Align left edge of frame' },
+  { mode: 'hcenter', icon: AlignCenterVertical, title: 'Centre horizontally in frame' },
+  { mode: 'right', icon: AlignEndVertical, title: 'Align right edge of frame' },
+  { mode: 'top', icon: AlignStartHorizontal, title: 'Align top of frame' },
+  { mode: 'vcenter', icon: AlignCenterHorizontal, title: 'Centre vertically in frame' },
+  { mode: 'bottom', icon: AlignEndHorizontal, title: 'Align bottom of frame' },
 ] as const
 
 // ── Node edit (direct anchor/handle selection) ──────────────────────────────
@@ -10285,6 +10294,18 @@ onUnmounted(() => {
               <input v-scrubnum type="number" min="1" :value="pxW((selectedLocal as any).w)"
                 class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                 @input="setSizePx(selectedLocal!.id, 'w', parseFloat(($event.target as HTMLInputElement).value) || 1)" />
+            </div>
+
+            <!-- Common: align the layer to the frame (edges + centres) -->
+            <div>
+              <div class="panel-label mb-1.5">Align to frame</div>
+              <div class="flex items-center gap-1">
+                <button v-for="a in ALIGN_FRAME_BTNS" :key="a.mode" :title="a.title"
+                  class="flex-1 flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-white/60 hover:text-yellow-400 hover:border-yellow-400/50 transition-colors"
+                  @click="alignToFrame(a.mode)">
+                  <component :is="a.icon" class="size-3.5" />
+                </button>
+              </div>
             </div>
 
             <!-- Common: rotation + opacity -->

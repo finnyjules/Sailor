@@ -508,6 +508,30 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     }
   }
 
+  /** Align every selected layer to the FRAME (canvas), not to each other — so it
+   *  works for a single layer too (centre the headline, pin the meta to a corner).
+   *  Each layer's own box is placed against the frame edge/centre; the vertical
+   *  modes honour a text box's valign offset so the VISIBLE box lands on the edge. */
+  type FrameAlign = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom'
+  function alignToFrame(mode: FrameAlign) {
+    if (!selectedIds.value.size) return
+    const W = dims().w, H = dims().h
+    recordHistory()
+    commit(localLayers.value.map((l) => {
+      if (!selectedIds.value.has(l.id)) return l
+      const b = boxPx(l)
+      const hx = b.w / 2 / W, hy = b.h / 2 / H
+      const oyN = textVAlignCenterOffset(l, b.h) / H   // valign shifts the box off stored y
+      if (mode === 'left') return { ...l, x: hx } as LocalLayer
+      if (mode === 'right') return { ...l, x: 1 - hx } as LocalLayer
+      if (mode === 'hcenter') return { ...l, x: 0.5 } as LocalLayer
+      if (mode === 'top') return { ...l, y: hy - oyN } as LocalLayer
+      if (mode === 'bottom') return { ...l, y: 1 - hy - oyN } as LocalLayer
+      if (mode === 'vcenter') return { ...l, y: 0.5 - oyN } as LocalLayer
+      return l
+    }))
+  }
+
   /** Move the whole multi-selection by a normalized delta (keyboard nudge). */
   function nudgeSelection(dx: number, dy: number) {
     if (!selectedIds.value.size || (dx === 0 && dy === 0)) return
@@ -1076,7 +1100,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     postEffects, setPostEffects,
     grid, setGrid,
     undo, redo, canUndo, canRedo,
-    selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, nudgeSelection, duplicateSelection, handleEditorKey,
+    selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, nudgeSelection, duplicateSelection, handleEditorKey,
     copySelection, pasteClipboard,
     groupSelected, ungroupSelected, ungroupGroup, renameGroup, canGroup, canUngroup,
     setGroupHidden, setGroupLocked, setGroupOpacity, groupCascade,
