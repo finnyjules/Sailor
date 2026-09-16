@@ -530,8 +530,8 @@ describe('setLayerEffect writes through the effect stack', () => {
   })
 
   // F-cap Task 1 — backdrop_luminance_mask is now a plain-DIAL kind the agent can add
-  // (sanitizeSchemaEffect, driven by EFFECT_DIAL_SCHEMA). backdrop_shader stays picker-only
-  // (a curated-look vocabulary is Task 2), so it must still be rejected here.
+  // (sanitizeSchemaEffect, driven by EFFECT_DIAL_SCHEMA). backdrop_shader gained a curated-look
+  // vocabulary in Task 2 (see below).
   it('adds a backdrop_luminance_mask through the agent (F6 plain-dial vocabulary, F-cap)', () => {
     const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_luminance_mask', threshold: 0.7, softness: 0.4, invert: true } } })
     expect(r.ok).toBe(true); if (!r.ok) return
@@ -552,12 +552,26 @@ describe('setLayerEffect writes through the effect stack', () => {
     expect(fx.invert).toBe(false)    // non-boolean → the createEffect default
   })
 
-  it('still rejects backdrop_shader through the agent (curated-look vocabulary is Task 2)', () => {
-    // backdrop_shader is not in LocalEffectKind/GeometryEffectKind, not one of the four schema
-    // kinds sanitizeSchemaEffect covers, and has no POST_EFFECT_DEFAULTS entry, so the ladder
-    // falls to sanitizePostEffect, which returns null — the agent cannot add it yet.
+  it('adds a backdrop_shader through the agent by naming a curated look (F-cap Task 2)', () => {
+    // backdrop_shader carries an effectId; the agent names it by a curated look word
+    // (resolveShaderLook), speed/seed are plain dials, params stay picker-only.
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_shader', look: 'halftone', speed: 2 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'backdrop_shader') as any
+    expect(fx).toBeTruthy()
+    expect(fx.effectId).toBe('halftone')
+    expect(fx.params).toEqual({})
+    expect(fx.speed).toBe(2)
+    expect(fx.visible).toBe(true)
+    expect(typeof fx.id).toBe('string')
+  })
+
+  it('rejects an UNKNOWN backdrop_shader look (uncurated id/word), and pins the F-cap ceiling', () => {
+    // An arbitrary/uncurated look resolves to null → the ladder reports invalid, never a
+    // silent no-op or a raw effectId reaching the engine.
+    expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_shader', look: 'made up' } } }).ok).toBe(false)
     expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_shader' } } }).ok).toBe(false)
-    expect(COMPOSITOR_HINT_CEILING).toBe(26600)
+    expect(COMPOSITOR_HINT_CEILING).toBe(27000)
   })
 
   // F-cap Task 1 — the F7 print recipes are now plain-DIAL kinds the agent can add/edit.
@@ -579,7 +593,7 @@ describe('setLayerEffect writes through the effect stack', () => {
     const l1 = effectStackOf(letter.template.layers[0] as any).find(e => e.type === 'letterpress') as any
     expect(l1.depth).toBe(0.7); expect(l1.ink).toBe('#101010'); expect(l1.paper).toBe(0.4)
 
-    expect(COMPOSITOR_HINT_CEILING).toBe(26600)
+    expect(COMPOSITOR_HINT_CEILING).toBe(27000)
   })
 
   it('clamps out-of-range recipe numbers, falls back a bad colour, and drops unknown fields', () => {
