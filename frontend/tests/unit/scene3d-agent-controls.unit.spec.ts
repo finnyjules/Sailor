@@ -442,6 +442,46 @@ describe('sceneStackControls: treatments', () => {
     expect(keys.some((k) => k.endsWith(`.${vb.id}.invert`))).toBe(false)
     expect(keys.some((k) => k.endsWith(`.${gt.id}.invert`))).toBe(false)
   })
+  // S7: an aiRestyle treatment is a treatment like any other from the agent vantage point —
+  // iterateTreatmentControls is fully generic over treatmentControls(kind), so aiRestyle needed
+  // NO per-kind edit to agentControls.ts to mint id-addressed agent controls. Its numeric dials
+  // (strength, mix) come through as sliders, its `model` as a select and its `prompt` as a text
+  // row (a select/text still reaches the agent stack by the same generic path — like matcapCoat's
+  // matcap select above). resultRef/inputHash are NOT control rows, so they mint nothing, and the
+  // kind is not masked, so there is no "Everything else" invert control.
+  it('aiRestyle dials mint id-addressed agent controls — strength/mix sliders, model select, prompt text, no invert (no per-kind edit)', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Statue'
+    const ar = createTreatment('aiRestyle')
+    box.treatments = [ar]
+    doc.objects.push(box)
+    const controls = sceneStackControls(doc)
+    const keys = controls.map((c) => c.key)
+    const at = (field: string) => controls.find((c) => c.key === `objects.${box.id}.treatments.${ar.id}.${field}`)
+
+    // Both numeric dials are id-addressed slider agent controls, human-labelled.
+    for (const field of ['strength', 'mix']) {
+      expect(keys).toContain(`objects.${box.id}.treatments.${ar.id}.${field}`)
+      expect(at(field)!.kind).toBe('slider')
+    }
+    expect(at('strength')!.label).toBe('Statue · AI restyle strength')
+    expect(at('mix')!.label).toBe('Statue · AI restyle mix')
+
+    // The model is a select and the prompt a text row — both reach the agent stack by the same
+    // generic iterateTreatmentControls path a slider does.
+    expect(at('model')!.kind).toBe('select')
+    expect(at('model')!.label).toBe('Statue · AI restyle model')
+    // optionLabels are stripped from the agent vocab — the model writes the raw option value.
+    expect((at('model') as any).optionLabels).toBeUndefined()
+    expect(at('prompt')!.kind).toBe('text')
+    expect(at('prompt')!.label).toBe('Statue · AI restyle prompt')
+
+    // resultRef/inputHash are not control rows — they hold the cached result, not a user dial.
+    expect(keys.some((k) => k.endsWith(`.${ar.id}.resultRef`))).toBe(false)
+    expect(keys.some((k) => k.endsWith(`.${ar.id}.inputHash`))).toBe(false)
+    // Not masked — no "Everything else" invert control.
+    expect(keys.some((k) => k.endsWith(`.${ar.id}.invert`))).toBe(false)
+  })
 })
 
 describe('sceneStackControls / iterateModifierControls: modifiers', () => {

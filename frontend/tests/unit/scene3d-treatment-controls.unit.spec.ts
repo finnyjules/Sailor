@@ -135,6 +135,65 @@ describe('motion-family treatment rows (velocityBlur, ghostTrails)', () => {
   })
 })
 
+// S7 · the restyle family (aiRestyle). NOT masked and NOT ramped, so treatmentControls('aiRestyle')
+// must yield ONLY its own rows — prompt (text), model (select), strength + mix (sliders) — with no
+// "Everything else" invert row (a dead control here) and no ramp rows. resultRef/inputHash are not
+// rows at all (they hold the cached result, not a user dial). The generic "row key is
+// treatment.<field> … with the same default" test above already proves every row maps to a real
+// field; this pins the exact row set, kinds, ranges and human hints so a copy or control-shape
+// regression fails, exactly like the S6 ghostTrails block.
+describe('restyle-family treatment rows (aiRestyle)', () => {
+  it('offers exactly Prompt + Model + Strength + Mix — no invert, no ramp', () => {
+    const rows = treatmentControls('aiRestyle')
+    expect(rows.map((r) => r.key)).toEqual([
+      'treatment.prompt', 'treatment.model', 'treatment.strength', 'treatment.mix',
+    ])
+    expect(rows.every((r) => r.group === 'AI restyle')).toBe(true)
+  })
+
+  it('prompt is a text row, model a labelled select, strength + mix sliders with human hints', () => {
+    const rows = treatmentControls('aiRestyle')
+    expect(rows.find((r) => r.key === 'treatment.prompt')).toMatchObject({
+      kind: 'text', label: 'Prompt', default: TREATMENT_DEFAULTS.aiRestyle.prompt,
+      hint: 'Describe the new look, then use the restyle button',
+    })
+    const model = rows.find((r) => r.key === 'treatment.model') as any
+    expect(model.kind).toBe('select')
+    expect(model.label).toBe('Model')
+    expect(model.default).toBe(TREATMENT_DEFAULTS.aiRestyle.model)
+    // A select never shows its stored ids raw — every option carries a human label.
+    expect(Array.isArray(model.options)).toBe(true)
+    expect(model.options.length).toBeGreaterThan(0)
+    expect(model.optionLabels).toHaveLength(model.options.length)
+    expect(model.options).toContain(TREATMENT_DEFAULTS.aiRestyle.model)
+    expect(rows.find((r) => r.key === 'treatment.strength')).toMatchObject({
+      kind: 'slider', label: 'Strength', min: 0, max: 1, default: TREATMENT_DEFAULTS.aiRestyle.strength,
+      hint: 'How far the restyle departs from the original',
+    })
+    expect(rows.find((r) => r.key === 'treatment.mix')).toMatchObject({
+      kind: 'slider', label: 'Mix', min: 0, max: 1, default: TREATMENT_DEFAULTS.aiRestyle.mix,
+      hint: 'Blend the result over the original — changing this is free',
+    })
+  })
+
+  it('is not masked, so it never renders the "Everything else" row', () => {
+    expect(isMaskedKind('aiRestyle')).toBe(false)
+    expect(treatmentControls('aiRestyle').some((r) => r.key === 'treatment.invert')).toBe(false)
+  })
+
+  it('every label is sentence case, leaks no raw identifier, and carries a human hint on the dials', () => {
+    for (const row of treatmentControls('aiRestyle')) {
+      expect(row.label, row.key).toMatch(/^[A-Z]/)
+      expect(row.label, row.key).not.toMatch(/[._]/)
+    }
+    // The prompt/strength/mix rows each explain themselves; the select's options are self-describing.
+    for (const key of ['treatment.prompt', 'treatment.strength', 'treatment.mix']) {
+      const row = treatmentControls('aiRestyle').find((r) => r.key === key)!
+      expect(typeof (row as { hint?: string }).hint, `${key} hint`).toBe('string')
+    }
+  })
+})
+
 describe('the shared ramp rows', () => {
   const RAMP_KEYS = [
     'treatment.progressive', 'treatment.rampSpace',
