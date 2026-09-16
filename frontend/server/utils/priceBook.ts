@@ -429,6 +429,7 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   //   live invoice at the Task-5 paid acceptance run (reconcile observed cost).
   'fal-ai/flux-control-lora-depth': { usd: 0.035, credits: 7, confidence: 'estimate', note: 'FLUX.1 [dev] Depth Control LoRA — ~$0.035/MP; re-verify against a live invoice (S7 Task 5)' },
   'fal-ai/flux/dev/image-to-image': { usd: 0.025, credits: 5, confidence: 'estimate', note: 'FLUX.1 [dev] img2img fallback — assumed fal flux/dev $0.025/MP rate; re-verify against a live invoice (S7 Task 5)' },
+  'fal-ai/flux-general': { usd: 0.05, credits: 10, confidence: 'estimate', note: 'FLUX general (depth ControlNet + IP-adapter, one call) — assumed ~$0.05/MP for the heavier graph; re-verify against a live invoice (restyle-style Task 5)' },
   'fal-ai/flux-lora/inpainting': { usd: 0.04, credits: 8, confidence: 'estimate', note: 'FLUX Fill dev tier' },
   'fal-ai/nano-banana-2/edit': { usd: 0.10, credits: 20, confidence: 'estimate', note: 'pose transfer; verify against fal pricing' },
   'fal-ai/birefnet/v2': { usd: 0.005, credits: 1, confidence: 'estimate', note: 'background removal' },

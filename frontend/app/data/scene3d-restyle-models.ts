@@ -14,11 +14,28 @@
 export interface RestyleModel {
   id: string
   label: string
-  control: 'depth' | 'image'
+  control: 'depth' | 'image' | 'depth+style'
   provider: 'fal'
+  /** Shown on the inspector's Model dropdown. The depth+style model is route-internal (the route
+   *  swaps to it when a Style with refs is attached), never a user pick — so `false`. Absent ⇒ true. */
+  selectable?: boolean
 }
 
 export const RESTYLE_MODELS: RestyleModel[] = [
   { id: 'fal-ai/flux-control-lora-depth', label: 'Depth control (Flux)', control: 'depth', provider: 'fal' },
   { id: 'fal-ai/flux/dev/image-to-image', label: 'Image to image (Flux)', control: 'image', provider: 'fal' },
+  // Route-internal: chosen by pickRestyleModel when a moodboard with reference images is attached.
+  // Accepts a depth ControlNet + IP-adapter refs in one call (spec 2026-09-16, Approach A).
+  { id: 'fal-ai/flux-general', label: 'Depth + Style (Flux)', control: 'depth+style', provider: 'fal', selectable: false },
 ]
+
+/** Which model the route dispatches. A Style with reference images ⇒ the depth+style model; otherwise
+ *  the requested selectable model (default the first). The internal depth+style model can never be
+ *  chosen by `requestedId` — it is `selectable: false` and only reachable via `hasStyleRefs`. */
+export function pickRestyleModel(requestedId: string | undefined, hasStyleRefs: boolean): RestyleModel {
+  if (hasStyleRefs) {
+    const styled = RESTYLE_MODELS.find((m) => m.control === 'depth+style')
+    if (styled) return styled
+  }
+  return RESTYLE_MODELS.find((m) => m.id === requestedId && m.selectable !== false) ?? RESTYLE_MODELS[0]!
+}

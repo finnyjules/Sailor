@@ -22,9 +22,29 @@ import type { RestyleModel } from '~~/app/data/scene3d-restyle-models'
 // FalCall ({ app, input }) is already defined + auto-imported from inpaintFalInputs.ts — reuse it
 // rather than declaring a second global of the same name (which trips the duplicate-import warning).
 import type { FalCall } from './inpaintFalInputs'
+import { MOODBOARD_MAX_REFS } from '~~/shared/taste/moodboard'
 
 const clamp01 = (n: number): number => (Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0)
 const round2 = (n: number): number => Math.round(n * 100) / 100
+
+// ── fal-ai/flux-general depth+style repos. CONFIRMED 2026-09-16 against fal's own docs +
+// HuggingFace (Task 1, restyle-style plan):
+//  · fal schema (https://fal.ai/models/fal-ai/flux-general/api and .../openapi.json) documents the
+//    controlnet fields (path / control_image_url / conditioning_scale) and the ip-adapter fields
+//    (path / image_url / scale / weight_name / image_encoder_path), and gives 'openai/clip-vit-large-patch14'
+//    as the image_encoder_path example — but pins NO concrete controlnet / ip-adapter repo.
+//  · HuggingFace confirms XLabs-AI/flux-controlnet-depth-v3 exists (a FLUX.1-dev depth ControlNet) and
+//    XLabs-AI/flux-ip-adapter's sole weight file is exactly 'ip_adapter.safetensors' (982 MB).
+// The concrete controlnet/ip-adapter repos are still doc-consistent candidates, not a fal-canonical
+// pin: a wrong repo passes at submit and fails at result (the S7 `control_lora_image_url` lesson), so
+// the env-gated Task-5 paid run is the concrete end-to-end validator.
+export const FLUX_DEPTH_CONTROLNET_PATH = 'XLabs-AI/flux-controlnet-depth-v3'
+export const FLUX_IP_ADAPTER_PATH = 'XLabs-AI/flux-ip-adapter'
+export const FLUX_IP_ADAPTER_ENCODER = 'openai/clip-vit-large-patch14'
+export const FLUX_IP_ADAPTER_WEIGHT = 'ip_adapter.safetensors'
+// Tuned defaults (no user dial — spec YAGNI). Depth control holds structure; IP-adapter carries look.
+export const RESTYLE_DEPTH_CONDITIONING_SCALE = 0.6
+export const RESTYLE_IP_ADAPTER_SCALE = 0.7
 
 /**
  * Map the 0..1 `strength` dial to a depth-control model's `guidance_scale`, linearly across fal's
@@ -35,15 +55,50 @@ export function restyleGuidanceScale(strength: number): number {
   return round2(3.5 + clamp01(strength) * 6.5)
 }
 
+/** Fold the moodboard's palette+prose block into the prompt. Empty/whitespace styleText ⇒ the prompt
+ *  is returned verbatim, so the no-Style payload is byte-identical to today. */
+function foldStylePrompt(prompt: string, styleText: string): string {
+  const s = styleText.trim()
+  return s ? `${prompt}. ${s}` : prompt
+}
+
 export function restyleInput(
   m: RestyleModel, prompt: string, beauty: string, depth: string, strength: number, seed: number,
+  styleRefs: string[] = [], styleText = '',
 ): FalCall {
   const s = clamp01(strength)
+  const finalPrompt = foldStylePrompt(prompt, styleText)
+  if (m.control === 'depth+style') {
+    return {
+      app: m.id,
+      input: {
+        prompt: finalPrompt,
+        // Our depth crop is ALREADY a depth map → passed directly as the control image (no fal preprocess).
+        controlnets: [{
+          path: FLUX_DEPTH_CONTROLNET_PATH,
+          control_image_url: depth,
+          conditioning_scale: RESTYLE_DEPTH_CONDITIONING_SCALE,
+        }],
+        ip_adapters: styleRefs.slice(0, MOODBOARD_MAX_REFS).map((url) => ({
+          path: FLUX_IP_ADAPTER_PATH,
+          image_url: url,
+          scale: RESTYLE_IP_ADAPTER_SCALE,
+          image_encoder_path: FLUX_IP_ADAPTER_ENCODER,
+          weight_name: FLUX_IP_ADAPTER_WEIGHT,
+        })),
+        image_size: 'square_hd',
+        num_inference_steps: 28,
+        num_images: 1,
+        output_format: 'png',
+        seed,
+      },
+    }
+  }
   if (m.control === 'depth') {
     return {
       app: m.id,
       input: {
-        prompt,
+        prompt: finalPrompt,
         control_lora_image_url: depth,
         image_size: 'square_hd',
         strength: s,
@@ -57,7 +112,7 @@ export function restyleInput(
   return {
     app: m.id,
     input: {
-      prompt,
+      prompt: finalPrompt,
       image_url: beauty,
       strength: s,
       image_size: 'square_hd',

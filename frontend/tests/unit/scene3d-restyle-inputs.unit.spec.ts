@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
-import { restyleInput, restyleGuidanceScale } from '../../server/utils/restyleFalInputs'
+import {
+  restyleInput, restyleGuidanceScale,
+  FLUX_DEPTH_CONTROLNET_PATH, FLUX_IP_ADAPTER_PATH, FLUX_IP_ADAPTER_ENCODER, FLUX_IP_ADAPTER_WEIGHT,
+  RESTYLE_DEPTH_CONDITIONING_SCALE, RESTYLE_IP_ADAPTER_SCALE,
+} from '../../server/utils/restyleFalInputs'
 
 const DEPTH_MODEL = RESTYLE_MODELS.find((m) => m.control === 'depth')!
 const IMAGE_MODEL = RESTYLE_MODELS.find((m) => m.control === 'image')!
+const STYLE_MODEL = RESTYLE_MODELS.find((m) => m.control === 'depth+style')!
 
 const BEAUTY = 'data:image/png;base64,BEAUTY'
 const DEPTH = 'data:image/png;base64,DEPTH'
@@ -77,5 +82,57 @@ describe('restyleInput (pure fal payload builder)', () => {
     expect(restyleGuidanceScale(0.6)).toBe(7.4)
     expect(restyleGuidanceScale(2)).toBe(10)
     expect(restyleGuidanceScale(-1)).toBe(3.5)
+  })
+})
+
+const REF_A = 'data:image/png;base64,REFA'
+const REF_B = 'data:image/png;base64,REFB'
+
+describe('restyleInput — depth+style (fal-ai/flux-general)', () => {
+  it('emits controlnets[depth] + one ip_adapter per ref + the prompt with styleText folded in', () => {
+    const call = restyleInput(STYLE_MODEL, 'a bronze statue', BEAUTY, DEPTH, 0.6, 42, [REF_A, REF_B], 'In the style of: warm.')
+    expect(call).toEqual({
+      app: 'fal-ai/flux-general',
+      input: {
+        prompt: 'a bronze statue. In the style of: warm.',
+        controlnets: [{
+          path: FLUX_DEPTH_CONTROLNET_PATH,
+          control_image_url: DEPTH, // our crop is already a depth map — passed directly, no preprocess
+          conditioning_scale: RESTYLE_DEPTH_CONDITIONING_SCALE,
+        }],
+        ip_adapters: [
+          { path: FLUX_IP_ADAPTER_PATH, image_url: REF_A, scale: RESTYLE_IP_ADAPTER_SCALE, image_encoder_path: FLUX_IP_ADAPTER_ENCODER, weight_name: FLUX_IP_ADAPTER_WEIGHT },
+          { path: FLUX_IP_ADAPTER_PATH, image_url: REF_B, scale: RESTYLE_IP_ADAPTER_SCALE, image_encoder_path: FLUX_IP_ADAPTER_ENCODER, weight_name: FLUX_IP_ADAPTER_WEIGHT },
+        ],
+        image_size: 'square_hd',
+        num_inference_steps: 28,
+        num_images: 1,
+        output_format: 'png',
+        seed: 42,
+      },
+    })
+  })
+
+  it('caps ip_adapters at MOODBOARD_MAX_REFS (3)', () => {
+    const refs = ['a', 'b', 'c', 'd', 'e'].map((x) => `data:image/png;base64,${x}`)
+    const call = restyleInput(STYLE_MODEL, 'p', BEAUTY, DEPTH, 0.6, 1, refs, '')
+    expect(call.input.ip_adapters).toHaveLength(3)
+  })
+
+  it('pins the exact fal enum/repo strings (fal-enum-mismatch-silent-fallover guard)', () => {
+    const call = restyleInput(STYLE_MODEL, 'p', BEAUTY, DEPTH, 0.6, 1, [REF_A], '')
+    expect(call.input.image_size).toBe('square_hd')
+    expect(call.input.output_format).toBe('png')
+    expect(call.input.num_inference_steps).toBe(28)
+    expect(FLUX_DEPTH_CONTROLNET_PATH).toBe('XLabs-AI/flux-controlnet-depth-v3')
+    expect(FLUX_IP_ADAPTER_PATH).toBe('XLabs-AI/flux-ip-adapter')
+    expect(FLUX_IP_ADAPTER_ENCODER).toBe('openai/clip-vit-large-patch14')
+    expect(FLUX_IP_ADAPTER_WEIGHT).toBe('ip_adapter.safetensors')
+  })
+
+  it('styleText folds into the prompt for the depth path too (empty-board text-only nudge)', () => {
+    const call = restyleInput(DEPTH_MODEL, 'a bronze statue', BEAUTY, DEPTH, 0.6, 1, [], 'In the style of: warm.')
+    expect(call.input.prompt).toBe('a bronze statue. In the style of: warm.')
+    expect(call.input).not.toHaveProperty('ip_adapters') // no refs ⇒ still the depth-only payload
   })
 })
