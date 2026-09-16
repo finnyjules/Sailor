@@ -27,8 +27,8 @@ const state = (): CompositorState => ({
 const track = { target: 'layers.L1.effects.e-grain.amount', keyframes: [{ t: 0, v: 0 }, { t: 2, v: 0.9 }] }
 
 describe('F8 · effect-dial motion is agent-invisible this slice', () => {
-  it('the compositor hint ceiling is untouched at 26250 (no F8 agent vocabulary was added)', () => {
-    expect(COMPOSITOR_HINT_CEILING).toBe(26250)
+  it('the compositor hint ceiling is at the F-cap value 26600 (raised for F6/F7 plain-dial vocab)', () => {
+    expect(COMPOSITOR_HINT_CEILING).toBe(26600)
   })
 
   it('setLayerProps refuses a { motion: { tracks } } patch — motion is not a common layer prop', () => {
