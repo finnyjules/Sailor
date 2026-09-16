@@ -30,7 +30,7 @@ import { PostChain, postEnabled, DEFAULT_POST, type PostSettings } from '~/lib/s
 import { collectEditorHelpers } from '~/lib/scene3d/passes'
 import { syncTreatmentShells } from './treatmentShells'
 import { TreatmentStage } from './treatmentStage'
-import { maskedTreatmentPlan, bufferTreatmentPlan, finishPlan, motionTreatmentPlan, restyleTreatmentPlan } from './treatments'
+import { maskedTreatmentPlan, bufferTreatmentPlan, finishPlan, motionTreatmentPlan, objectRestylePlan } from './treatments'
 import type { ScreenVelocity, LocalPose } from './motion/velocity'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
@@ -1121,7 +1121,11 @@ export class SceneEngine {
     if (!root) {
       if (obj.kind === 'primitive') {
         const geo = this.geometryForObject(obj, 'smooth')
-        const mat = materialFor(obj.material, geo, this.id, modifierValue(obj.modifiers, 'varyColorStrength'), finishPlan(obj))
+        // S7.1: project the object's cached restyle result onto its surface via the material, when a
+        // stamped aiRestyle AND a decoded texture are both in hand (else null ⇒ byte-identical).
+        const rp = objectRestylePlan(obj)
+        const rtex = rp ? this.restyleTextures.get(obj.id) ?? null : null
+        const mat = materialFor(obj.material, geo, this.id, modifierValue(obj.modifiers, 'varyColorStrength'), finishPlan(obj), rp && rtex ? { t: rp, tex: rtex } : null)
         // Flat shapes must be visible from both sides (plane was previously
         // invisible from below; ring inherits the fix) — for every material type.
         if (obj.primitive === 'plane' || obj.primitive === 'ring') mat.side = THREE.DoubleSide
@@ -1232,10 +1236,14 @@ export class SceneEngine {
       // `varyColorStrength` out and the slider drag update a uniform in place.
       const varyStrength = modifierValue(obj.modifiers, 'varyColorStrength')
       const finishes = finishPlan(obj)
-      if (!updateMaterial(current, obj.material, mesh.geometry, varyStrength, finishes)) {
+      // S7.1: the restyle spec (plan + cached texture) — null unless both are in hand.
+      const rp = objectRestylePlan(obj)
+      const rtex = rp ? this.restyleTextures.get(obj.id) ?? null : null
+      const restyle = rp && rtex ? { t: rp, tex: rtex } : null
+      if (!updateMaterial(current, obj.material, mesh.geometry, varyStrength, finishes, restyle)) {
         // Type or texture identity changed — rebuild, preserving double-siding.
         disposeMaterial(current)
-        const fresh = materialFor(obj.material, mesh.geometry, this.id, varyStrength, finishes)
+        const fresh = materialFor(obj.material, mesh.geometry, this.id, varyStrength, finishes, restyle)
         if (obj.primitive === 'plane' || obj.primitive === 'ring') fresh.side = THREE.DoubleSide
         real = fresh
       }
@@ -1482,12 +1490,13 @@ export class SceneEngine {
     // before S6. The per-object velocities/ghosts it consumes are pushed in by the seams that
     // still hold the doc + t01; absent (an ordinary render call) they are empty and it no-ops.
     const motionPlan = this.lastDoc ? motionTreatmentPlan(this.lastDoc) : []
-    // The S7 restyle sub-loop runs ONLY when an aiRestyle treatment is present — its absence is
-    // the byte-identity gate: empty plan ⇒ no restyle pass, the same frame as before S7. The
-    // per-object result textures it composites are pushed in by the surface (a pure cache lookup);
-    // absent (an ordinary render call) they are empty and its composite draws the plain object.
-    const restylePlan = this.lastDoc ? restyleTreatmentPlan(this.lastDoc) : []
-    const runStage = stageGroups > 0 || bufferPlan.length > 0 || motionPlan.length > 0 || restylePlan.length > 0
+    // S7.1: AI restyle is NO LONGER a stage pass — it is a per-object MATERIAL injection
+    // (restyleProjection.ts, threaded through materialFor/updateMaterial above), so it needs no
+    // stage sub-loop and does NOT gate `runStage`. An object with an aiRestyle but no other
+    // treatment renders through the ordinary path, its material projecting the cached result onto
+    // the surface. `restyleTextures`/`setRestyleTextures` stay — their CONSUMER moved from the
+    // stage to the material builder.
+    const runStage = stageGroups > 0 || bufferPlan.length > 0 || motionPlan.length > 0
     if (!postEnabled(post) && !runStage) { this.renderer.render(scene, camera); return }
     const s = this.renderer.getSize(new THREE.Vector2())
     if (!this.postChain) { this.postChain = new PostChain(this.renderer, scene, camera, s.x, s.y); this.postW = s.x; this.postH = s.y }
@@ -1508,7 +1517,7 @@ export class SceneEngine {
         if (!this.treatmentStage) this.treatmentStage = new TreatmentStage(this.renderer)
         let tex: THREE.Texture | null = null
         try {
-          tex = this.treatmentStage.render(scene, camera, plan, bufferPlan, motionPlan, restylePlan, { objectRoots: this.objectRoots, velocities: this.motionVelocities, ghosts: this.ghostPoses, restyles: this.restyleTextures })
+          tex = this.treatmentStage.render(scene, camera, plan, bufferPlan, motionPlan, { objectRoots: this.objectRoots, velocities: this.motionVelocities, ghosts: this.ghostPoses })
           this.postChain.setInputTexture(tex)
         } catch (e) {
           this.postChain.setInputTexture(null)

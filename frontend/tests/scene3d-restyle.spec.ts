@@ -9,9 +9,15 @@ import { test, expect, type Page } from '@playwright/test'
  * therefore render a data-URL-IDENTICAL frame to one with no treatments at all — the same claim
  * (and the same real-pixel A/B) `tests/scene3d-finishes.spec.ts` makes for finishes.
  *
- * The injected-composite / mix-ramp cases (which exercise the stage's restyleComposite with a
- * FAKE cached texture via `window.__scene3dRestyleInject`, at zero cost) are Task 3/4 — this file
- * grows them there. NO fal / paid call is made anywhere in this spec.
+ * S7.1 SWAP: the restyle is no longer a stage composite — it is a per-object MATERIAL injection
+ * (restyleProjection.ts) that PROJECTS the cached result onto the object's real surface from the bake
+ * camera, so it stays registered as the live camera orbits. The injected-composite / mix-ramp cases
+ * below exercise that material path with a FAKE cached texture via `window.__scene3dRestyleInject`
+ * (at zero cost); because the restyle now renders in the ordinary path (NOT the treatment stage),
+ * these cases assert the projected colour on the object's FRONT surface + the console shader-error
+ * gate rather than `__scene3dTreatmentStats` (which the stage-less restyle no longer drives). The
+ * orbit-stability test (Task 3) becomes a real PASS under this material path. NO fal / paid call is
+ * made anywhere in this spec.
  *
  * Headless Chromium draws WebGL through SwiftShader, hence the generous settle wait — see the
  * sibling specs (scene3d-finishes.spec.ts, scene3d-treatments.spec.ts) for the same pattern.
@@ -178,14 +184,15 @@ test('renderObjectPasses crops the object alone, refits depth, and leaves the vi
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
 })
 
-/* ── Task 3 · the injected composite (restyleComposite via __scene3dRestyleInject) ─────────────
- * The stage's restyle composite exercised with a FAKE cached result texture — a LOCAL solid-colour
- * PNG data URL injected through window.__scene3dRestyleInject. NO fal / paid call anywhere: the
- * "result" is a canvas the browser draws. This proves (a) the composite runs (stats.groups >= 1,
- * frames > 0), (b) the injected image is masked to the object's silhouette (a pixel inside the
- * object is the injected colour; a pixel in the corner is the background), (c) mix 0 is a
- * byte-identical no-op (the injected texture is ignored — the plain-object early-out), and mix 1 is
- * fully the injected image. Console shader-error gate stays on `restyleMat`.
+/* ── Task 2/3 · the projective material injection (via __scene3dRestyleInject) ──────────────────
+ * The per-object restyle MATERIAL exercised with a FAKE cached result texture — a LOCAL solid-colour
+ * PNG data URL injected through window.__scene3dRestyleInject (which also stamps a projector from the
+ * live camera). NO fal / paid call anywhere: the "result" is a canvas the browser draws. This proves
+ * (a) the projected image paints the object's FRONT surface (a pixel inside the object is the injected
+ * colour; a pixel in the corner is the background), (b) mix 0 is a byte-identical no-op (the injection
+ * blends nothing — equal to an uncached restyle), and mix 1 is fully the injected image. The restyle
+ * renders in the ordinary path now, so the assertions are the projected pixels + the console
+ * shader-error gate (on the new material program), NOT `__scene3dTreatmentStats` (stage-less).
  *
  * NOTE (controller-run): needs a live preview (WebGL via SwiftShader). Run against a fresh preview,
  * pane visible, on the isolated preview port.
@@ -239,12 +246,8 @@ test('an injected restyle composites to the silhouette (mix 1), background untou
   expect(await injectSolid(page, 'restyle-sphere', MAGENTA), 'inject hook returned false').toBe(true)
   await page.waitForTimeout(SETTLE_MS)
 
-  const stats = await page.evaluate(() => (window as any).__scene3dTreatmentStats())
-  expect(stats.groups, 'the restyle group did not render').toBeGreaterThanOrEqual(1)
-  expect(stats.frames, 'no frames rendered').toBeGreaterThan(0)
-
   const shot = await snapshot(page)
-  // Inside the sphere (canvas centre-ish): the injected magenta — high R + B, low G.
+  // Inside the sphere (canvas centre-ish): the projected magenta on the FRONT face — high R + B, low G.
   const inside = await samplePatch(page, shot, 0.5, 0.5)
   expect(inside.r, `object centre not magenta: ${JSON.stringify(inside)}`).toBeGreaterThan(110)
   expect(inside.b, `object centre not magenta: ${JSON.stringify(inside)}`).toBeGreaterThan(60)
@@ -258,13 +261,13 @@ test('an injected restyle composites to the silhouette (mix 1), background untou
 
 test('mix 0 is a byte-identical no-op: an injected result is ignored, equal to an uncached restyle', async ({ page }) => {
   const bad = watchConsole(page)
-  // Injected but mix 0 → the plain-object early-out (the texture must not appear).
+  // Injected but mix 0 → the injection blends nothing at mix 0 (the projected texture must not appear).
   await openLab(page, sceneWith([RESTYLE_ENABLED({ mix: 0 })]))
   expect(await injectSolid(page, 'restyle-sphere', MAGENTA)).toBe(true)
   await page.waitForTimeout(SETTLE_MS)
   const injectedMix0 = await snapshot(page)
 
-  // Same enabled restyle at mix 0 but with NO result injected — also the plain-object early-out.
+  // Same enabled restyle at mix 0 but with NO result injected — also renders the plain object.
   await openLab(page, sceneWith([RESTYLE_ENABLED({ mix: 0 })]))
   await page.waitForTimeout(SETTLE_MS)
   const uncached = await snapshot(page)
@@ -279,19 +282,18 @@ test('mix 0 is a byte-identical no-op: an injected result is ignored, equal to a
 })
 
 /* ── Task 4 · whole-slice determinism, camera-static alignment, mix ramp, orbit-misaligns xfail ──
- * These lock the composite's per-frame behaviour with a FAKE injected texture (zero spend, no fal):
- *   - determinism: the composite is pure — same injected result + same camera renders a
- *     data-URL-IDENTICAL frame twice (guards nondeterministic sampling in restyleComposite);
- *   - camera-static alignment: object static + camera static ⇒ the injected result stays registered
- *     to the silhouette across a re-render (each frame recomputes screenRectOfBox — it must land the
- *     same when nothing moves);
- *   - mix ramp: at mix 0.5 the composited pixel is strictly between the plain object and the full
+ * These lock the projective material's per-frame behaviour with a FAKE injected texture (zero spend):
+ *   - determinism: the render is pure — same injected result + same camera renders a data-URL-
+ *     IDENTICAL frame twice (the projector is a constant uniform, no per-frame recompute);
+ *   - camera-static alignment: object static + camera static ⇒ the projected result stays on the
+ *     front surface across a re-render;
+ *   - mix ramp: at mix 0.5 the projected pixel is strictly between the plain object and the full
  *     injected image (the blend behaves);
- *   - orbit-misaligns (test.fixme): the KNOWN follow-up — after a CAMERA ORBIT the flat 2D result no
- *     longer registers to the rotated silhouette (needs re-projection). Marked fixme so it is a
- *     visible limitation in the report, never a false green.
- * Every visual assertion pairs with __scene3dTreatmentStats() (frames>0, groups>=1) + the console
- * shader-error gate, matching the S4/S5 loud-failure discipline of the cases above.
+ *   - orbit-stability (test.fixme here; Task 3 turns it into a real PASS): the projective material
+ *     keeps the paint registered to the surface across a camera orbit — the headline S7.1 win the v1
+ *     billboard could not achieve. Left fixme in this task; Task 3 authors the passing assertion.
+ * Every visual assertion pairs with the console shader-error gate (on the new material program),
+ * matching the S4/S5 loud-failure discipline of the cases above.
  *
  * NOTE (controller-run): needs a live preview (WebGL via SwiftShader). Run against a fresh preview,
  * pane visible, on the isolated preview port — NOT the shared :3002.
@@ -306,14 +308,11 @@ test('an injected restyle composites deterministically: the same frame twice is 
   expect(await injectSolid(page, 'restyle-sphere', MAGENTA), 'inject hook returned false').toBe(true)
   await page.waitForTimeout(SETTLE_MS)
 
-  // Two snapshots at the same (static) camera — each re-renders through restyleComposite, which
-  // recomputes the screen crop rect from the object Box3. A pure composite must land identically.
+  // Two snapshots at the same (static) camera — the projective material samples the fixed bake
+  // projector, so a pure render must land identically.
   const first = await snapshot(page)
-  const stats = await treatmentStats(page)
   const second = await snapshot(page)
 
-  expect(stats.groups, 'the restyle group did not render').toBeGreaterThanOrEqual(1)
-  expect(stats.frames, 'no frames rendered').toBeGreaterThan(0)
   expect(second, 'the same injected result + camera did not render identically twice').toBe(first)
   expect(bad, `shader failures on the console:\n${bad.join('\n')}`).toEqual([])
 })
@@ -334,11 +333,8 @@ test('camera-static: the injected result stays registered to the silhouette acro
   // Force another render (nothing moved). The per-frame screenRectOfBox recompute must keep the
   // flat result registered: inside is still magenta, the corner is still the dark background.
   const shot2 = await snapshot(page)
-  const stats = await treatmentStats(page)
   const inside2 = await samplePatch(page, shot2, 0.5, 0.5)
   const corner2 = await samplePatch(page, shot2, 0.04, 0.04)
-  expect(stats.groups, 'the restyle group did not render').toBeGreaterThanOrEqual(1)
-  expect(stats.frames, 'no frames rendered').toBeGreaterThan(0)
   expect(inside2.r, `object centre drifted off the injected result: ${JSON.stringify(inside2)}`).toBeGreaterThan(110)
   expect(inside2.b, `object centre drifted off the injected result: ${JSON.stringify(inside2)}`).toBeGreaterThan(60)
   expect(inside2.g, `object centre too green on re-render: ${JSON.stringify(inside2)}`).toBeLessThan(inside2.r * 0.7)
@@ -350,7 +346,7 @@ test('camera-static: the injected result stays registered to the silhouette acro
 test('mix 0.5 blends: the object centre is strictly between the plain object and the full injected image', async ({ page }) => {
   const bad = watchConsole(page)
 
-  // Plain object (mix 0 — the early-out, texture ignored): the grey lit sphere.
+  // Plain object (mix 0 — the injection blends nothing, texture ignored): the grey lit sphere.
   await openLab(page, sceneWith([RESTYLE_ENABLED({ mix: 0 })]))
   expect(await injectSolid(page, 'restyle-sphere', MAGENTA)).toBe(true)
   await page.waitForTimeout(SETTLE_MS)
@@ -368,11 +364,7 @@ test('mix 0.5 blends: the object centre is strictly between the plain object and
   await openLab(page, sceneWith([RESTYLE_ENABLED({ mix: 0.5 })]))
   expect(await injectSolid(page, 'restyle-sphere', MAGENTA)).toBe(true)
   await page.waitForTimeout(SETTLE_MS)
-  const stats = await treatmentStats(page)
   const mid = await samplePatch(page, await snapshot(page), 0.5, 0.5)
-
-  expect(stats.groups, 'the restyle group did not render').toBeGreaterThanOrEqual(1)
-  expect(stats.frames, 'no frames rendered').toBeGreaterThan(0)
 
   const between = (m: number, a: number, b: number) => {
     const lo = Math.min(a, b), hi = Math.max(a, b)

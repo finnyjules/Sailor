@@ -34,10 +34,10 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { stripAlpha } from '~/lib/color/convert'
-import type { AiRestyleTreatment, BufferGroup, CrossHatchTreatment, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, GhostTrailsTreatment, MaskedGroup, MotionGroup, RampFields, RestyleGroup, Treatment, VelocityBlurTreatment } from './treatments'
+import type { BufferGroup, CrossHatchTreatment, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, GhostTrailsTreatment, MaskedGroup, MotionGroup, RampFields, Treatment, VelocityBlurTreatment } from './treatments'
 import type { ScreenVelocity, LocalPose } from './motion/velocity'
 import { ownMeshes, STAGE_LAYER } from './treatmentShells'
-import { fitNearFar, screenRectOfBox } from './passes'
+import { fitNearFar } from './passes'
 
 /** MSAA samples on the base/layer targets. three ≥ r165 resolves a multisampled target's
  *  depth into its `depthTexture` (`resolveDepthBuffer`, default true), which the composite
@@ -64,10 +64,6 @@ export interface StageContext {
    *  the stage treats absent as empty. */
   velocities?: Map<string, ScreenVelocity>
   ghosts?: Map<string, LocalPose[]>
-  /** Per-object decoded restyle result textures for the S7 AI restyle family, keyed by object id,
-   *  pushed in from the surface's client-side cache. Optional so existing call sites and tests
-   *  compile; the stage treats an absent object as a miss and draws the plain object (a no-op). */
-  restyles?: Map<string, THREE.Texture>
 }
 export interface StageStats { frames: number; groups: number; width: number; height: number }
 
@@ -782,40 +778,13 @@ const COMPOSITE_FRAG = `
     gl_FragColor = vec4(mix(linearResult, displayResult, k), outA);
   }`
 
-// AI restyle (S7) — the flat composite of the object's cached restyle RESULT texture over the
-// object-alone layer, masked to its silhouette. `tLayer` is the object drawn alone (straight lit
-// colour + coverage in alpha); `uResultTex` is the decoded result image, whose square content maps
-// onto the object's CURRENT screen crop rect (`uRectPx`, recomputed each frame) exactly as
-// passes.ts's cropSquareDataUrl laid it in — so the flat result tracks the silhouette as the object
-// moves. The result PNG is sRGB-encoded; a raw ShaderMaterial does NOT auto-decode a sampled
-// texture, so `srgbToLinear` converts it into the stage's linear-HDR working space HERE (verified
-// against a plain-object mix:1 reference so it is not double-gamma'd). Output is STRAIGHT colour +
-// coverage alpha — `composite()` premultiplies, exactly as for the plain object layer. Every float
-// operand carries a decimal (ANGLE float-literal rule); source-guarded in Task 4.
-const RESTYLE_FRAG = `
-  uniform sampler2D tLayer;
-  uniform sampler2D uResultTex;
-  uniform float uMix;
-  uniform vec4 uRectPx;    // object screen crop rect: x, y (TOP-left origin), w, h — device px
-  uniform vec2 uViewSize;  // drawing-buffer size in device px
-  varying vec2 vUv;
-  vec3 srgbToLinear(vec3 c){
-    return mix(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, vec3(lessThanEqual(c, vec3(0.04045))));
-  }
-  void main(){
-    vec4 layer = texture2D(tLayer, vUv);   // straight lit colour + coverage (alpha)
-    float cov = layer.a;
-    // vUv is bottom-left origin; the crop rect is top-left origin — flip Y into device px.
-    vec2 frag = vec2(vUv.x * uViewSize.x, (1.0 - vUv.y) * uViewSize.y);
-    float side = max(uRectPx.z, uRectPx.w);
-    vec2 off = vec2(floor((side - uRectPx.z) * 0.5), floor((side - uRectPx.w) * 0.5));
-    vec2 ruv = (vec2(frag.x - uRectPx.x, frag.y - uRectPx.y) + off) / max(side, 1.0);
-    // The result texture is flipY = true (TextureLoader default), so flip v to read the crop
-    // square top-left → top-left.
-    vec3 restyle = srgbToLinear(texture2D(uResultTex, vec2(ruv.x, 1.0 - ruv.y)).rgb);
-    vec3 outColor = mix(layer.rgb, restyle, uMix);
-    gl_FragColor = vec4(outColor, cov);    // straight colour + coverage; composite() premultiplies
-  }`
+// AI restyle (S7.1): the restyle is NO LONGER a stage composite. It moved to a per-object MATERIAL
+// injection that projects the cached result onto the object's real surface from the bake camera
+// (restyleProjection.ts, threaded through materials.ts), so it holds registered to the surface as
+// the live camera orbits — which the old screen-space billboard here could not. The v1 `RESTYLE_FRAG`
+// / `restyleComposite` / `StageContext.restyles` path was removed; the crop-square UV maths it used
+// live on in restyleProjection.ts's fragment body (only the INPUT changed from live screen position
+// to the projected bake NDC).
 
 // Window depth (0..1, non-linear under perspective) → a linear 0-at-near, 1-at-far metric,
 // so a Sobel over it means the same thing at every distance and depth fog's start/end read
@@ -1087,14 +1056,6 @@ export class TreatmentStage {
   private readonly depthFogMat: THREE.ShaderMaterial
   private readonly curvatureWearMat: THREE.ShaderMaterial
   private readonly crossHatchMat: THREE.ShaderMaterial
-  /** S7 AI restyle — the flat result-texture composite over the object-alone layer. */
-  private readonly restyleMat = shader(RESTYLE_FRAG, {
-    tLayer: { value: null }, uResultTex: { value: null }, uMix: { value: 1 },
-    uRectPx: { value: new THREE.Vector4() }, uViewSize: { value: new THREE.Vector2() },
-  })
-  /** Scratch for the restyle composite's per-frame object bounds + view-projection (Task 3). */
-  private readonly restyleBox = new THREE.Box3()
-  private readonly restyleViewProj = new THREE.Matrix4()
   private readonly tmpSize = new THREE.Vector2()
   private readonly prevClearColor = new THREE.Color()
   private readonly rampBox = new THREE.Box3()
@@ -1146,9 +1107,6 @@ export class TreatmentStage {
     this.dropShadowBuildMat.blending = THREE.NoBlending
     this.dropShadowMergeMat.blending = THREE.NoBlending
     this.dropShadowCompositeMat.blending = THREE.NoBlending
-    // Writes every pixel of its scratch target (a pure full-frame compute) — the hardware blender
-    // must stay off or it would blend the restyle over the scratch's stale frame.
-    this.restyleMat.blending = THREE.NoBlending
   }
 
   private makeTarget(w: number, h: number, withDepth: boolean): RT {
@@ -1814,49 +1772,7 @@ export class TreatmentStage {
     this.composite(this.layer.texture, this.layer.depthTexture, invDepth, 1, 0, null)
   }
 
-  /** AI restyle (S7) — composite the object's cached restyle result texture, masked to its
-   *  silhouette, over the accumulator. Like the motion composites, the object was hidden from the
-   *  base pass, so this redraws it ALONE into `this.layer` first (its alpha = the silhouette mask,
-   *  its colour = the plain lit `mix:0` reference, its depthTexture = the occluder).
-   *
-   *  No cached result (`tex` null — a present-but-uncached restyle) OR `mix <= 0` folds to the
-   *  PLAIN-object no-op: the exact composite a `mix:0` restyle produces, and the byte-identity claim
-   *  rests on this early-out (no `restyleMat` pass runs, so mix:0 == plain, .toBe).
-   *
-   *  Otherwise `restyleMat` samples `tex` in the object's CURRENT screen crop rect (recomputed each
-   *  frame so the flat result tracks the silhouette as the object moves), decodes it to linear,
-   *  blends `mix(litColour, restyleColour, t.mix)` and carries the layer's coverage alpha; the
-   *  result is composited depth-tested with the object's own depth exactly like the plain layer. */
-  private restyleComposite(
-    scene: THREE.Scene, camera: THREE.Camera, root: THREE.Object3D, exclude: THREE.Object3D[],
-    t: AiRestyleTreatment, tex: THREE.Texture | null, invDepth: THREE.Texture | null,
-  ): void {
-    this.drawAlone(scene, camera, root, exclude, this.layer, null)
-    if (!tex || t.mix <= 0) {
-      this.composite(this.layer.texture, this.layer.depthTexture, invDepth, 1, 0, null)
-      return
-    }
-    // Recompute the object's screen crop rect THIS frame (pad 8 matches renderObjectPasses). A
-    // degenerate / off-screen rect falls back to the plain object rather than sampling garbage.
-    this.restyleBox.setFromObject(root)
-    this.restyleViewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
-    const rect = screenRectOfBox(this.restyleBox, this.restyleViewProj, this.width, this.height, 8)
-    if (!rect) {
-      this.composite(this.layer.texture, this.layer.depthTexture, invDepth, 1, 0, null)
-      return
-    }
-    const restyled = this.free(this.layer)
-    const u = this.restyleMat.uniforms
-    u.tLayer!.value = this.layer.texture
-    u.uResultTex!.value = tex
-    u.uMix!.value = t.mix
-    ;(u.uRectPx!.value as THREE.Vector4).set(rect.x, rect.y, rect.w, rect.h)
-    ;(u.uViewSize!.value as THREE.Vector2).set(this.width, this.height)
-    this.pass(this.restyleMat, restyled)
-    this.composite(restyled.texture, this.layer.depthTexture, invDepth, 1, 0, null)
-  }
-
-  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], motionPlan: MotionGroup[], restylePlan: RestyleGroup[], ctx: StageContext): THREE.Texture | null {
+  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], motionPlan: MotionGroup[], ctx: StageContext): THREE.Texture | null {
     const r = this.renderer
     const size = r.getDrawingBufferSize(this.tmpSize)
     if (size.x <= 0 || size.y <= 0) return null
@@ -1867,8 +1783,6 @@ export class TreatmentStage {
     const bufGroups = bufferPlan.filter((g) => ctx.objectRoots.has(g.objectId))
     const motionGroups = motionPlan.filter((g) => ctx.objectRoots.has(g.objectId))
     const motionRoots = motionGroups.map((g) => ctx.objectRoots.get(g.objectId)!)
-    const restyleGroups = restylePlan.filter((g) => ctx.objectRoots.has(g.objectId))
-    const restyleRoots = restyleGroups.map((g) => ctx.objectRoots.get(g.objectId)!)
 
     // Lights must be on the stage layer to light an isolated draw; layers.test is any-overlap
     // so leaving the bit set is harmless for the normal layer-0 render.
@@ -1911,9 +1825,9 @@ export class TreatmentStage {
       //    the motion sub-loop (2d) redraws them (smeared / with ghosts). Empty motionRoots ⇒
       //    this adds nothing ⇒ byte-identical when no motion treatment is present.
       if (invertGroup) {
-        this.drawAlone(scene, camera, ctx.objectRoots.get(invertGroup.objectId)!, [...treatedRoots, ...motionRoots, ...restyleRoots], this.base, prevBackground)
+        this.drawAlone(scene, camera, ctx.objectRoots.get(invertGroup.objectId)!, [...treatedRoots, ...motionRoots], this.base, prevBackground)
       } else {
-        for (const root of [...treatedRoots, ...motionRoots, ...restyleRoots]) hide(root)
+        for (const root of [...treatedRoots, ...motionRoots]) hide(root)
         r.setRenderTarget(this.base)
         r.setClearColor(0x000000, 0)
         r.clear()
@@ -1929,7 +1843,7 @@ export class TreatmentStage {
       let invDepth: THREE.Texture | null = null
       if (invertGroup) {
         const inv = this.ensureLayerInv()
-        for (const o of [...treatedRoots, ...motionRoots, ...restyleRoots]) hide(o) // this object AND the other treated / motion ones (their own groups draw them)
+        for (const o of [...treatedRoots, ...motionRoots]) hide(o) // this object AND the other treated / motion ones (their own groups draw them)
         scene.background = null
         r.setRenderTarget(inv)
         r.setClearColor(0x000000, 0)
@@ -1944,7 +1858,7 @@ export class TreatmentStage {
       for (const g of groups) {
         if (g.invert) continue
         const root = ctx.objectRoots.get(g.objectId)!
-        this.drawAlone(scene, camera, root, [...treatedRoots, ...motionRoots, ...restyleRoots], this.layer, null)
+        this.drawAlone(scene, camera, root, [...treatedRoots, ...motionRoots], this.layer, null)
         this.treatAndComposite(g, this.layer, invDepth, root, camera)
       }
       // 2c. Buffer treatments (edge lines). Build the shared G-buffer ONCE from the treated
@@ -1955,7 +1869,7 @@ export class TreatmentStage {
       if (bufGroups.length) {
         const bufRoots = bufGroups.map((g) => ctx.objectRoots.get(g.objectId)!)
         this.renderGbuffer(scene, camera, bufRoots)
-        const exclude = [...treatedRoots, ...bufRoots, ...motionRoots, ...restyleRoots]
+        const exclude = [...treatedRoots, ...bufRoots, ...motionRoots]
         for (const g of bufGroups) {
           const root = ctx.objectRoots.get(g.objectId)!
           this.drawAlone(scene, camera, root, exclude, this.layer, null)
@@ -1977,25 +1891,15 @@ export class TreatmentStage {
       const bufRoots = bufGroups.map((bg) => ctx.objectRoots.get(bg.objectId)!)
       for (const g of motionGroups) {
         const root = ctx.objectRoots.get(g.objectId)!
-        const exclude = [...treatedRoots, ...bufRoots, ...motionRoots, ...restyleRoots]
+        const exclude = [...treatedRoots, ...bufRoots, ...motionRoots]
         for (const t of g.treatments) {
           if (t.kind === 'velocityBlur') this.velocityBlurComposite(scene, camera, root, exclude, t, ctx.velocities?.get(g.objectId) ?? null, invDepth)
           else if (t.kind === 'ghostTrails') this.ghostTrailsComposite(scene, camera, root, exclude, t, ctx.ghosts?.get(g.objectId) ?? [], invDepth)
         }
       }
-      // 2e. Restyle treatments (S7 AI restyle). Each restyle-family object was hidden from the
-      //     base above; its own composite here redraws it — masked to its silhouette, with its
-      //     cached restyle result texture blended over the plain object by `mix` (S7 Task 3).
-      //     TASK 1: restyleComposite is a STUB that draws only the plain object (no texture, no
-      //     blend), so an uncached restyle is a no-op == mix:0 and the frame is byte-identical to
-      //     one with no restyle. A texture miss (no cached result) passes null and draws plain too.
-      for (const g of restyleGroups) {
-        const root = ctx.objectRoots.get(g.objectId)!
-        const exclude = [...treatedRoots, ...bufRoots, ...motionRoots, ...restyleRoots]
-        for (const t of g.treatments) {
-          if (t.kind === 'aiRestyle') this.restyleComposite(scene, camera, root, exclude, t, ctx.restyles?.get(g.objectId) ?? null, invDepth)
-        }
-      }
+      // S7.1: AI restyle is no longer a stage sub-loop — it is a per-object MATERIAL injection
+      // (restyleProjection.ts) that projects the cached result onto the surface, drawn in the
+      // ordinary render path. The v1 restyle composite that lived here was removed.
       // 3. One un-premultiply back to straight alpha for the consumers downstream. The
       //    scratch it lands in is not touched again until the next render().
       const outStraight = this.free()
@@ -2011,13 +1915,13 @@ export class TreatmentStage {
       r.setRenderTarget(prevTarget)
     }
     this.stats.frames++
-    this.stats.groups = groups.length + bufGroups.length + motionGroups.length + restyleGroups.length
+    this.stats.groups = groups.length + bufGroups.length + motionGroups.length
     return result
   }
 
   dispose(): void {
     this.disposeTargets()
-    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.glitchMat, this.dropShadowBuildMat, this.dropShadowMergeMat, this.dropShadowCompositeMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.crossHatchMat, this.normalMat, this.restyleMat]) m.dispose()
+    for (const m of [this.premulMat, this.unpremulMat, this.blurMat, this.pixelateMat, this.colorGradeMat, this.dissolveMat, this.halftoneMat, this.chromaticSplitMat, this.glitchMat, this.dropShadowBuildMat, this.dropShadowMergeMat, this.dropShadowCompositeMat, this.brightMat, this.glowMergeMat, this.compositeMat, this.edgeLinesMat, this.depthFogMat, this.curvatureWearMat, this.crossHatchMat, this.normalMat]) m.dispose()
     this.quad.dispose()
   }
 }

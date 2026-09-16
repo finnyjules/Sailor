@@ -2029,7 +2029,13 @@ async function runRestyle(objectId: string, treatmentId: string): Promise<void> 
     // 5. Decode into a cached texture keyed by the stable filename.
     const tex = await new Promise<THREE.Texture>((resolve, reject) => {
       new THREE.TextureLoader().load(restyleViewUrl(name), (loaded) => {
-        loaded.colorSpace = THREE.SRGBColorSpace
+        // S7.1: the restyle is projected by the object's MATERIAL at the display-space
+        // <dithering_fragment> anchor (restyleProjection.ts), where gl_FragColor is already
+        // sRGB-encoded — so the result PNG's sRGB bytes are sampled RAW (NoColorSpace), NOT decoded
+        // to linear as v1's LINEAR-stage composite required (was SRGBColorSpace). Tagging it sRGB
+        // here would GPU-decode every sample and darken the projected surface. See the opal-ramp
+        // lesson (finishes.ts) and Task-0 (g).
+        loaded.colorSpace = THREE.NoColorSpace
         resolve(loaded)
       }, undefined, reject)
     })
@@ -2138,7 +2144,9 @@ onMounted(() => {
     if (!engine || !obj || !t) return Promise.resolve(false)
     return new Promise<boolean>((resolve) => {
       new THREE.TextureLoader().load(dataUrl, (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace
+        // S7.1: sampled RAW by the projective material at the display-space anchor — NoColorSpace,
+        // not SRGBColorSpace (see runRestyle's decode above and Task-0 (g)).
+        tex.colorSpace = THREE.NoColorSpace
         const ref = `inject-${objectId}-${Date.now()}.png`
         restyleTexCache.set(ref, tex)
         t.resultRef = ref

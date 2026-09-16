@@ -36,7 +36,14 @@ import { resolveField, withFieldFrame, type FieldRequest } from '~/lib/shaderfil
 import { DEFAULT_SHADER_SPEC, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { paintTileBox } from '~/lib/compositor/paint'
 import { applyFinish, updateFinishUniforms, finishKey } from './finishes'
-import type { FinishTreatment } from './treatments'
+import { applyRestyleProjection, updateRestyleUniforms, restyleProjectionKey } from './restyleProjection'
+import type { AiRestyleTreatment, FinishTreatment } from './treatments'
+
+/** The projective AI-restyle spec threaded into `materialFor`/`updateMaterial`/`identityKey`
+ *  (S7.1): the object's enabled aiRestyle treatment plus its decoded, cached result texture.
+ *  `null`/absent ⇒ no injection ⇒ byte-identical, exactly like an empty finish list. The engine
+ *  passes it as `{ t, tex }` only when BOTH a plan and a cached texture are in hand. */
+export type RestyleSpec = { t: AiRestyleTreatment; tex: THREE.Texture } | null
 
 const hasDOM = typeof document !== 'undefined'
 
@@ -1328,6 +1335,7 @@ export function materialFor(
   ownerId: string = UNOWNED_SCENE3D,
   varyStrength?: number,
   finishes?: FinishTreatment[],
+  restyle?: RestyleSpec,
 ): THREE.Material {
   let m: THREE.Material
   switch (mat.type) {
@@ -1641,7 +1649,7 @@ export function materialFor(
     }
   }
   m.userData.matType = mat.type
-  m.userData.identity = identityKey(mat, finishes)
+  m.userData.identity = identityKey(mat, finishes, restyle)
   applyRelief(m, mat, ownerId)
   applyTextureSet(m, mat, finishes)
   applyScreen(m, mat)
@@ -1653,6 +1661,11 @@ export function materialFor(
   // Vary) — a finish overlays the object's ALREADY-tinted/screened surface. `?? []` is the
   // byte-identical default: a caller with no opinion gets the pre-S5 material exactly.
   applyFinish(m, finishes ?? [])
+  // AI restyle (S7.1): the TOPMOST coat, chained after even the finishes — the projected result
+  // overlays the object's already-lit/tinted/finished surface. Absent (or an uncached / unstamped
+  // restyle) ⇒ `applyRestyleProjection` early-outs and never touches the material, so this is
+  // byte-identical to the pre-S7.1 build exactly as `applyFinish([])` is.
+  if (restyle) applyRestyleProjection(m, restyle.t, restyle.tex)
   return m
 }
 
@@ -1693,8 +1706,9 @@ function screenKey(mat: SceneMaterial): string {
  *  the ordered finish-kind list (finishKey) — an added/removed/reordered finish is a program
  *  boundary (a different shader body entirely), while a finish's own DIALS update in place via
  *  `updateFinishUniforms`, exactly like the screen dials above. */
-function identityKey(mat: SceneMaterial, finishes?: FinishTreatment[]): string {
+function identityKey(mat: SceneMaterial, finishes?: FinishTreatment[], restyle?: RestyleSpec): string {
   return baseIdentityKey(mat) + reliefKey(mat) + screenKey(mat) + finishKey(finishes ?? [])
+    + (restyle ? restyleProjectionKey(restyle.t, restyle.tex) : '')
 }
 
 function baseIdentityKey(mat: SceneMaterial): string {
@@ -1735,9 +1749,10 @@ export function updateMaterial(
   geometry?: THREE.BufferGeometry,
   varyStrength?: number,
   finishes?: FinishTreatment[],
+  restyle?: RestyleSpec,
 ): boolean {
   const fin = finishes ?? []
-  if (m.userData.matType !== mat.type || m.userData.identity !== identityKey(mat, fin)) return false
+  if (m.userData.matType !== mat.type || m.userData.identity !== identityKey(mat, fin, restyle)) return false
   // Vertex-colour state is a property of the GEOMETRY, not of `mat`, so it
   // cannot ride in identityKey. Crossing this boundary needs a rebuild: three
   // bakes vertexColors into the compiled program. Callers that pass no geometry
@@ -1749,6 +1764,18 @@ export function updateMaterial(
   // `finishKey` (above) already forces a rebuild for; this is kept as its own guard in case a
   // future caller reaches `updateFinishUniforms` without having checked identity first.
   if (!updateFinishUniforms(m, fin)) return false
+  // AI restyle (S7.1): `mix` updates IN PLACE (a mix-slider drag / motion track must never rebuild),
+  // exactly like the finish/screen dials. `updateRestyleUniforms` returns false — forcing a rebuild
+  // via `materialFor` — when a first result texture arrives, a fresh bake changes the bound
+  // texture/resultRef/projector, or a bound injection is no longer wanted; all of those swap a
+  // bound texture or a constant uniform, which the identity guard above (via `restyleProjectionKey`)
+  // already forces a rebuild for. Kept here as its own guard for any caller that skips the identity
+  // check. `restyle` absent ⇒ if the material carries a stale injection, rebuild to drop it.
+  if (restyle) {
+    if (!updateRestyleUniforms(m, restyle.t, restyle.tex)) return false
+  } else if (m.userData.restyleUniforms) {
+    return false
+  }
   // Vary colour STRENGTH is a uniform, not a program boundary — write it in place, like
   // the screen dials below, so dragging the Colour strength slider never rebuilds. Only
   // the tint on/off crossing (the guard above) forces a rebuild. Gated on the parameter

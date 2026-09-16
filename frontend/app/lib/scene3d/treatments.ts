@@ -728,6 +728,17 @@ export function finishPlan(obj: SceneObject | null | undefined): FinishTreatment
   return treatmentsOf(obj).filter((t): t is FinishTreatment => t.enabled && isFinishKind(t.kind))
 }
 
+/** The object's first ENABLED aiRestyle treatment, or null — the material-side analogue of
+ *  `finishPlan`, consumed by `materialFor`/`updateMaterial` (via engine.ts) to project the cached
+ *  result onto the surface (S7.1). One restyle per object (unlike the finish STACK): a second coat
+ *  of a whole-surface reprojection has no meaning, so only the first is honoured. Null when the
+ *  object carries none — exactly the gate the material seam reads to stay byte-identical. Replaces
+ *  the stage's `restyleTreatmentPlan` as the restyle's consumer (that plan + `docHasRestyleTreatment`
+ *  stay for the surface's per-frame texture-push gate). */
+export function objectRestylePlan(obj: SceneObject | null | undefined): AiRestyleTreatment | null {
+  return (treatmentsOf(obj).find((t): t is AiRestyleTreatment => t.enabled && t.kind === 'aiRestyle')) ?? null
+}
+
 /** One object's enabled G-buffer treatments (edge lines today), in stack order — the stage
  *  draws these from the shared normals+depth buffer. */
 export interface BufferGroup { objectId: string; treatments: Treatment[] }
