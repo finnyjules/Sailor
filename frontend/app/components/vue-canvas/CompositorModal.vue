@@ -1188,12 +1188,19 @@ const {
     // frame instead of a square (layer boxes are width-normalized).
     aspect: canvasDisplay.h / Math.max(1, canvasDisplay.w),
     brandPalette: brandSwatches(projectBrand?.activeKit.value),
+    motion: motionDoc.value,
   }),
   setState: (s) => {
     commit(s.layers)
     if (s.background !== background.value) setBackground(s.background)
     if (JSON.stringify(s.postEffects ?? []) !== JSON.stringify(postEffects.value)) setPostEffects(s.postEffects ?? [])
     if (s.grid && JSON.stringify(s.grid) !== JSON.stringify(gridConfig.value)) setGrid(s.grid)
+    // Only the effect-dial TRACKS flow back (animateDial authors them) — fps/duration are the
+    // timeline's own controls, never touched by the agent.
+    if (JSON.stringify(s.motion?.tracks ?? []) !== JSON.stringify(motionDoc.value.tracks ?? [])) {
+      setMotion({ tracks: s.motion?.tracks ?? [] })
+      commitMotionTimeline()
+    }
   },
   apiKey: () => getLocalSetting('Sailor.AI.AnthropicApiKey') ?? '',
   dims: () => ({ w: canvasDisplay.w, h: canvasDisplay.h }),

@@ -17,6 +17,8 @@ import { sanitizeTornEdge } from '~/lib/compositor/tornEdge'
 import { sanitizeFeather } from '~/lib/compositor/feather'
 import { effectStackOf, writeStackToLayer, addEffect, createEffect, EFFECT_LABELS, EFFECT_ORDER, isEffectKind, isGeometryKind, type EffectInstance, type EffectKind } from '~/lib/compositor/effectStack'
 import { EFFECT_DIAL_SCHEMA, dialSpecsFor } from '~/lib/compositor/effectDials'
+import { addDialTrack, addKeyframe, setTrack } from '~/lib/motion/effectTracks'
+import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { SHADER_LOOK_WORDS, resolveShaderLook } from '~/lib/compositor/shaderLooks'
 import { booleanOpOf } from '~/lib/compositor/booleanGeometry'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
@@ -77,6 +79,10 @@ export interface CompositorState {
    *  boxes are width-normalized, so a layer that fills the frame is `w: 1,
    *  h: aspect` — the mosaic op's create reads it. Absent = square (1). */
   aspect?: number
+  /** The frame's motion doc (`sailor_motion` — fps/duration/tracks). The agent
+   *  only ever authors `tracks` (via animateDial); fps/duration are the timeline's
+   *  own controls and flow through here read-only. Absent = no motion authored. */
+  motion?: FrameMotion
 }
 
 function clone<T>(v: T): T {
@@ -776,12 +782,14 @@ const PROP_CLAMP: Record<string, [number, number]> = { x: [-1, 2], y: [-1, 2], o
  * and the F6 backdrop_luminance_mask — extended the `setLayerEffect` hint by 377 chars (Task 1,
  * pushing the sum over the old 26,250). Task 2 then teaches the two PICKER shader kinds (F5
  * `shader`, F6 `backdrop_shader`) via a curated look vocabulary (`SHADER_LOOK_HINT`, built from
- * `SHADER_LOOK_WORDS`), adding a further 389 chars. 27,000 is the new measured 26,982 rounded up
- * to the next 50, matching `SHADER_GUIDANCE_CEILING`'s convention. The `mosaic` hint (11 KB) is
- * still the standing compression target — this ceiling only ever going up is not a budget; the
- * next op to run it out should recover chars from mosaic rather than raise it again.
+ * `SHADER_LOOK_WORDS`), adding a further 389 chars. Task 3 then adds the NOVEL `animateDial` op
+ * (F8 dial-animation authoring — "animate the grain from 0 to 0.9"), whose hint is 696 chars.
+ * 27,700 is the new measured 27,678 rounded up to the next 50, matching `SHADER_GUIDANCE_CEILING`'s
+ * convention. The `mosaic` hint (11 KB) is still the standing compression target — this ceiling
+ * only ever going up is not a budget; the next op to run it out should recover chars from mosaic
+ * rather than raise it again.
  */
-export const COMPOSITOR_HINT_CEILING = 27000
+export const COMPOSITOR_HINT_CEILING = 27700
 
 /** The `setLayerEffect` clause for the two PICKER shader kinds (F5/F6). Built from
  *  the curated `SHADER_LOOK_WORDS` so the taught words never drift from what
@@ -817,6 +825,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'editImage', hint: 'Edit an existing IMAGE layer from an instruction (Flux Kontext) — "make it brighter", "change the sky". target = image layer id; args: { instruction }.' },
   { op: 'setLayerEffect', hint: 'Add/update/remove an effect ON ONE LAYER. target = layer id; args: { effect: { type: "adjust"|"bloom"|"grain"|"vignette"|"duotone"|"gradientMap"|"dof"|"trim"|"offset"|"round_corners"|"roughen"|"boolean"|"morph"|"warp"|"long_shadow"|"shatter"|"background_blur"|"inner_shadow"|"layer_blur"|"drop_shadow"|"torn_edge"|"feather", ...params }, remove? }. adjust: brightness/contrast/saturation 0..2 (1=neutral), hue -180..180. bloom: threshold 0..1, radius ~0.02, intensity 0..2. grain: amount 0..1, size 1..8. vignette: amount/size/softness 0..1. duotone: shadows/highlights "#RRGGBB", mix 0..1. gradientMap: stops [{pos,color}], contrast -1..1, mix 0..1. dof (IMAGE ONLY, BRIGHT=NEAR): focus 0..1, range 0..1, aperture 0..1 blur, bladeCount 0..12 (6=hex), bladeRotation 0..360, bloomThreshold 0..1, bloomStrength 0..4. GEOMETRY EFFECTS (vector only — rect/ellipse/path/polygon/star + outlined text, no-op elsewhere; widths are canvas-width fractions): trim: start/end 0..1. offset: distance 0..1, negative=inward. round_corners: radius 0..1. roughen: amount 0..1, seed integer. boolean: op unite|subtract|intersect|exclude. morph: amount 0..1. boolean/morph need a SIBLING shape picked in UI (you set params, NOT the partner). warp: field bulge|pinch|wave|twist, amount -1..1 (signed), frequency (wave only). long_shadow: angle 0..360, length 0..1, color "#RRGGBB"/rgba(). shatter: cells 1..96, gap 0..1, seed integer. drop_shadow / inner_shadow (silhouette, out/inward): color "#RRGGBB"/rgba(), x/y -1..1, blur 0..1. layer_blur: radius 0..1. background_blur (behind layer, within silhouette): radius 0..1. torn_edge/feather: patch keys as setLayerTornEdge/setLayerFeather. LAYER STYLES (more "type" values, pixel passes, any layer): outer_glow/inner_glow (color,radius,intensity); color_overlay (color,blend,opacity) and gradient_overlay (from,to,angle,blend,opacity), blend normal|multiply|screen|overlay|soft-light; stroke_from_alpha (width,align inside|center|outside,color); directional_blur (angle,distance), radial_blur/zoom_blur (centerX,centerY,amount); levels (black,white,gamma), posterise (levels), threshold (cutoff), invert (amount); rough_edge/ink_bleed (amount,seed). PRINT RECIPES (pixel passes, any layer): risograph (ink,inkTwo "#RRGGBB"; levels 2..8; grain 0..1; contrast 0.5..2), photocopy (threshold 0..1; dirt 0..1; contrast 0.5..3), letterpress (depth 0..1; ink "#RRGGBB"; paper 0..1). backdrop_luminance_mask (masks the layer to where the backdrop is bright: threshold 0..1; softness 0..1; invert true/false).' + SHADER_LOOK_HINT + ' Numeric params clamp to range. Omitted params keep their value. remove:true deletes that kind.' },
   { op: 'setPostEffect', hint: 'Add/update/remove a post-processing effect on the WHOLE FRAME — applied after all layers composite. Same args and effect vocabulary as setLayerEffect (no target), EXCEPT dof, which is per-image-layer only because it needs that image\'s depth map. This is what "make it warmer", "add film grain", "cinematic colour grade" mean.' },
+  { op: 'animateDial', hint: 'Animate one EFFECT DIAL on a layer over time — "animate the grain from 0 to 0.9", "fade the blur in", "ramp the vignette up". The effect must ALREADY be on the layer (add it with setLayerEffect first). target = layer id; args: { effect (an effect KIND on the layer, e.g. grain), dial (one of that effect\'s animatable dials, e.g. grain: amount|size; adjust: brightness|contrast|saturation|hue; a colour dial like long_shadow: color), from, to (start/end values — a number dial clamps to the dial\'s range, a colour dial takes a hex), start? (seconds, default 0), end? (seconds, default the frame duration) }. Authors a two-keyframe motion track on the frame; re-animating the same dial replaces it.' },
   { op: 'setLayerTornEdge', hint: 'Give a layer a TORN-PAPER edge (ragged, grain-dissolved boundary with an optional white "lip"). target = layer id; args: { patch: {...}, remove? }. patch keys: style ("ripped"=organic tear | "deckle"=soft handmade-paper edge | "shredded"=spiky rip), amount (tear depth px, ~10 subtle … 60 deep), roughness (0..1 fray detail), grain (px, edge crumble; 0 = crisp), grainTexture (0..1 paper-fibre on the lip), lipWidth (px white underside band; 0 = none), lipVariation (0..1 lip unevenness), lipColor ("#RRGGBB", warm white default), seed (integer, for a different tear). Omitted keys keep their value. remove:true removes it. This is what "torn paper edge" means.' },
   { op: 'setLayerFeather', hint: 'Feather (soften) a layer\'s edges so they fade smoothly to transparent — a soft edge-mask, uniform on all sides. target = layer id; args: { patch: {...}, remove? }. patch keys: amount (0..1, feather depth relative to the element\'s OWN size; ~0.1 subtle … 0.4 strong … 1 fades in to the centre), curve ("linear" = even fade | "smooth" = eased fade). Omitted keys keep their value. remove:true removes it. This is what "feather the edges" means.' },
   { op: 'setLayerMaskBreak', hint: 'Let a SUBJECT masked to a shape BREAK OUT of one edge — the head pops over the top of the circle while the rest stays clipped. target = the MASKED layer id (must already be masked to a shape, see maskBreak in its description). args: { edge ("top"|"bottom"|"left"|"right"), offset? (0..1, how far the break line sits into the shape from that edge; default 0 = the shape edge), remove? }. This is what "let his head pop out of the top" means.' },
@@ -935,7 +944,7 @@ function defaultLayer(kind: LocalLayerKind, id: string): Record<string, unknown>
  *  Pure — the input is never mutated. */
 export function applyCompositorCommand(input: CompositorState, cmd: Command): CommandResult<CompositorState> {
   const state = clone(input)
-  const snapshot = (): Command => ({ op: 'restore', args: { layers: clone(input.layers), background: clone(input.background), postEffects: clone(input.postEffects), groups: clone(input.groups), templates: clone(input.templates) } })
+  const snapshot = (): Command => ({ op: 'restore', args: { layers: clone(input.layers), background: clone(input.background), postEffects: clone(input.postEffects), groups: clone(input.groups), templates: clone(input.templates), motion: clone(input.motion) } })
 
   switch (cmd.op) {
     case 'setLayerProps': {
@@ -1316,6 +1325,49 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       Object.assign(layer, writeStackToLayer(applied))
       return { ok: true, template: state, inverse: snapshot() }
     }
+    case 'animateDial': {
+      // Author an EFFECT-DIAL motion track (F8) — "animate the grain from 0 to 0.9".
+      // Motion is a FRAME doc, not a layer prop (setLayerProps/setLayerEffect refuse a
+      // smuggled track), so it gets its own op that writes state.motion.tracks through the
+      // shipped engine (addDialTrack/addKeyframe/setTrack).
+      const layer = findLayer(state, cmd.target)
+      if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
+      const a = (cmd.args ?? {}) as Record<string, unknown>
+      const effectKind = String(a.effect ?? '')
+      // effect → the FIRST instance of that kind on the layer (resolved via effectStackOf so
+      // legacy layers' deterministic ids work); its stored id anchors the track's id-path.
+      const fx = effectStackOf(layer).find(e => e.type === effectKind)
+      if (!fx) return { ok: false, reason: 'invalid', detail: `no ${effectKind || 'effect'} on this layer` }
+      // dial → an ANIMATABLE DialSpec (number/colour) from the schema; a non-animatable
+      // dial (seed, an enum, a stepped/nested field) is not in dialSpecsFor → rejected (the
+      // dead-control guard: never author a track that resolves to nothing).
+      const spec = dialSpecsFor(fx.type).find(d => d.key === a.dial)
+      if (!spec) return { ok: false, reason: 'invalid', detail: `'${String(a.dial)}' is not an animatable dial of ${fx.type}` }
+      // Validate/clamp the endpoints against the dial's kind: numbers clamp to [min,max];
+      // colours must be real hex/rgba strings (mirrors sanitizeSchemaEffect's colour rule).
+      let from: number | string, to: number | string
+      if (spec.kind === 'color') {
+        if (!isColorString(a.from) || !isColorString(a.to)) {
+          return { ok: false, reason: 'invalid', detail: `dial '${spec.key}' is a colour — from/to must be hex/rgba` }
+        }
+        from = a.from as string; to = a.to as string
+      } else {
+        from = clamp(a.from, spec.min ?? 0, spec.max ?? 1, spec.min ?? 0)
+        to = clamp(a.to, spec.min ?? 0, spec.max ?? 1, spec.max ?? 1)
+      }
+      const start = Number.isFinite(+(a.start as number)) ? Math.max(0, +(a.start as number)) : 0
+      const end = Number.isFinite(+(a.end as number)) ? +(a.end as number) : (state.motion?.duration ?? DEFAULT_FRAME_MOTION.duration)
+      const target = `layers.${layer.id}.effects.${fx.id}.${spec.key}`
+      // addDialTrack seeds the START keyframe (idempotent — a no-op when the target already
+      // has a track); re-asserting both keyframes via addKeyframe makes re-animating the same
+      // dial with new from/to fully replace it, and setTrack upserts the extended track.
+      const seeded = addDialTrack(state.motion?.tracks, target, start, from, spec.kind === 'color' ? 'oklch' : undefined)
+      let track = seeded.find(tr => tr.target === target)!
+      track = addKeyframe(track, start, from)
+      track = addKeyframe(track, end, to)
+      state.motion = { ...(state.motion ?? DEFAULT_FRAME_MOTION), tracks: setTrack(seeded, target, track) }
+      return { ok: true, template: state, inverse: snapshot() }
+    }
     // Thin aliases: torn edge and feather are now just two more entries in the
     // stack, reachable through setLayerEffect — kept as named ops so an existing
     // agent recipe (and the command hints) keep working unchanged.
@@ -1365,6 +1417,7 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       if ('postEffects' in (cmd.args ?? {})) next.postEffects = clone(cmd.args!.postEffects as PostEffect[] | undefined)
       if ('groups' in (cmd.args ?? {})) next.groups = clone(cmd.args!.groups as LayerGroup[] | undefined)
       if ('templates' in (cmd.args ?? {})) next.templates = clone(cmd.args!.templates as TemplateInstance[] | undefined)
+      if ('motion' in (cmd.args ?? {})) next.motion = clone(cmd.args!.motion as FrameMotion | undefined)
       return { ok: true, template: next, inverse: snapshot() }
     }
     case 'placeTemplate': {
@@ -1486,6 +1539,7 @@ export function summarizeCompositorChange(state: CompositorState, cmd: Command):
       return { label: `${type} effect (frame)`, before: had ? type : 'none', after: a.remove === true ? 'removed' : 'updated' }
     }
     case 'setLayerMaskBreak': return { label: `${name} break-out`, before: '', after: a.remove === true ? 'removed' : String(a.edge ?? '') }
+    case 'animateDial': return { label: `Animate ${String(a.effect ?? '')} ${String(a.dial ?? '')} (layer ${name || String(cmd.target ?? '')})`, before: String(a.from ?? ''), after: String(a.to ?? '') }
     case 'placeTemplate': { const t = a.template as { name?: string } | undefined; return { label: 'Place template', before: '', after: t?.name ?? 'template' } }
     case 'setTemplateSlot': {
       const inst = state.templates?.find(i => i.instanceId === cmd.target)

@@ -571,7 +571,7 @@ describe('setLayerEffect writes through the effect stack', () => {
     // silent no-op or a raw effectId reaching the engine.
     expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_shader', look: 'made up' } } }).ok).toBe(false)
     expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_shader' } } }).ok).toBe(false)
-    expect(COMPOSITOR_HINT_CEILING).toBe(27000)
+    expect(COMPOSITOR_HINT_CEILING).toBe(27700)
   })
 
   // F-cap Task 1 — the F7 print recipes are now plain-DIAL kinds the agent can add/edit.
@@ -593,7 +593,7 @@ describe('setLayerEffect writes through the effect stack', () => {
     const l1 = effectStackOf(letter.template.layers[0] as any).find(e => e.type === 'letterpress') as any
     expect(l1.depth).toBe(0.7); expect(l1.ink).toBe('#101010'); expect(l1.paper).toBe(0.4)
 
-    expect(COMPOSITOR_HINT_CEILING).toBe(27000)
+    expect(COMPOSITOR_HINT_CEILING).toBe(27700)
   })
 
   it('clamps out-of-range recipe numbers, falls back a bad colour, and drops unknown fields', () => {
