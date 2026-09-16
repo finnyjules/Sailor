@@ -59,11 +59,27 @@ const node = reactive({
 const tuned = ref<Record<string, { bg: string; layers: any[] }>>({})
 const clone = (v: any) => JSON.parse(JSON.stringify(v))
 
+// The main word every look ships with. Swap it to a longer/shorter word and each
+// look ADAPTS — the headline fills its box, so the design's footprint stays put
+// while the type resizes. This is the "content adapts" test: does the look still
+// read with INTERFERENCE, or with a two-letter word? Only whole "NOISE" headline
+// layers are swapped (the exploded N + OISE look keeps its split letters).
+const SHIPPED_WORD = 'NOISE'
+const word = ref(SHIPPED_WORD)
+function applyWord(layers: any[]): any[] {
+  const w = word.value.trim().toUpperCase()
+  if (!w || w === SHIPPED_WORD) return layers          // default: looks render exactly as authored
+  return layers.map(l => (l.kind === 'text' && typeof l.text === 'string'
+    && l.text.trim().toUpperCase() === SHIPPED_WORD)
+    ? { ...l, text: w, boxFit: 'fill' }                // fill the authored box, whatever the length
+    : l)
+}
+
 const current = ref(0)
 function loadLook(i: number) {
   current.value = i
   const t = tuned.value[LOOKS[i].name]
-  node.data.properties.sailor_localLayers = t ? clone(t.layers) : LOOKS[i].layers()
+  node.data.properties.sailor_localLayers = applyWord(t ? clone(t.layers) : LOOKS[i].layers())
   node.data.properties.sailor_localBg = t ? t.bg : LOOKS[i].bg
 }
 
@@ -133,6 +149,16 @@ onMounted(async () => {
         :class="current === i ? 'bg-white text-black' : 'bg-white/10 text-white/80 hover:bg-white/20'"
         @click="loadLook(i)"
       >{{ l.name }}<span v-if="tuned[l.name]" class="ml-1 text-emerald-400">•</span></button>
+      <div v-show="!modalOpen" class="mx-1 h-5 w-px bg-white/15"></div>
+      <div v-show="!modalOpen" class="flex items-center gap-1.5" title="Swap the headline word — each look fills its box, so the design holds at any length">
+        <span class="text-[11px] text-white/40">Word</span>
+        <input
+          :value="word"
+          class="w-32 rounded-lg bg-white/10 px-2 py-1.5 text-[12px] font-medium uppercase tracking-wide text-white/90 outline-none placeholder-white/30 focus:bg-white/15"
+          :placeholder="SHIPPED_WORD"
+          @input="(e) => { word = (e.target as HTMLInputElement).value; loadLook(current) }"
+        />
+      </div>
       <div v-show="!modalOpen" class="mx-1 h-5 w-px bg-white/15"></div>
       <span v-if="modalOpen" class="px-1 text-[12px] font-medium text-white/60">{{ LOOKS[current].name }}</span>
       <button
