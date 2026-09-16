@@ -57,7 +57,6 @@ import { resolveEventTab } from '~/lib/graph/resolveEventTab'
 import { withKeyedLock } from '~/lib/graph/keyedLock'
 import { useDirectExecution } from '~/composables/useDirectExecution'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
-import { useShadowParity } from '~/composables/useShadowParity'
 import { useVueNodes } from '~/composables/useVueNodes'
 
 const { tabs, activeTabId, activeTab, setActiveTab, closeTab, openTab, updateTabStatus, renameTab, runningCount } = useTabs()
@@ -539,50 +538,6 @@ function surfaceQueueError(nodeErrors: any, fallbackMessage?: string, opts?: { s
   currentRunSilent.value = false
 }
 
-// Dev-only shadow parity: build OUR prompt for `workflow`, ask the bridge iframe
-// for ITS graphToPrompt output, and record any divergence. Strictly
-// fire-and-forget — any failure (build throw, no iframe, no/late reply) is
-// swallowed so the run is never blocked, delayed, or failed by this.
-function requestShadowParity(workflow: any, label: string) {
-  let ours: import('~/lib/graph/graphToPrompt').ApiPrompt
-  try {
-    ours = graphToPrompt(workflow, objectInfo.value)
-  } catch {
-    // Our builder disagreeing is itself a real divergence, but with nothing to
-    // compare against we can't record it here — the flag-ON path surfaces build
-    // failures directly. Silently skip parity for this run.
-    return
-  }
-  const iframe = getSharedIframe()
-  if (!iframe?.contentWindow) return
-
-  let done = false
-  const handler = (event: MessageEvent) => {
-    if (done) return
-    if (event.data?.type !== 'sailor-bridge' || event.data?.event !== 'prompt_data') return
-    done = true
-    window.removeEventListener('message', handler)
-    try {
-      const result = event.data.prompt
-      // window.app.graphToPrompt() returns { workflow, output }; the API prompt
-      // is `.output`. Fall back to the raw result if a build already unwrapped it.
-      const theirs = result?.output ?? result
-      if (theirs) useShadowParity().record(ours, theirs, label)
-    } catch (err) {
-      console.warn('[shadow-parity] record failed (ignored)', err)
-    }
-  }
-  window.addEventListener('message', handler)
-  iframe.contentWindow.postMessage({ type: 'sailor', action: 'getPrompt' }, '*')
-  // Give up quietly if the reply never comes — a missing prompt_data is fine.
-  setTimeout(() => {
-    if (!done) {
-      done = true
-      window.removeEventListener('message', handler)
-    }
-  }, 4000)
-}
-
 // Run workflow from Vue canvas — loads into bridge iframe, then queues via bridge.
 // When `targetIds` is provided, runs only that subset (plus upstream deps).
 // Forgiving filtering happens via buildFilteredWorkflow which mutes everything
@@ -653,21 +608,6 @@ async function runVueWorkflow(
   // once here (dispatch is single-canvas) and shared across parallel takes of this run.
   const runEstimateNodes: any[] = vueCanvasRef.value!.getNodes?.() || []
 
-  // Load workflow into that worker's LiteGraph, then queue. Once-only — the
-  // hidden iframe only backs dev shadow-parity, so loading the last take's
-  // graph is sufficient.
-  // Hosted mounts no engine iframe at all, and its runs never touch one (the
-  // bridge section below is skipped and dispatch is always direct), so a null
-  // here is expected rather than a lost connection. Tier 1 (bridge retirement):
-  // direct execution now runs the same way in DEV — `useDirect` is always true,
-  // no iframe is mounted, and dispatch is direct — so the guard skips it too.
-  // Only the legacy bridge path (neither hosted nor direct) still needs an iframe.
-  const iframe = getWorkerIframe(workerIdx)
-  if (!hostedShell && !useDirect && !iframe?.contentWindow) {
-    console.error('[Run] bridge iframe not found or not ready')
-    toast.error('ComfyUI not ready', { description: 'Lost the canvas connection — try reloading the page.' })
-    return false
-  }
 
   // Assemble one take: roll fresh seeds (getFilteredWorkflow does this per call),
   // run the full prep chain + build the direct ApiPrompt. Returns the plain
@@ -953,48 +893,10 @@ async function runVueWorkflow(
   const { firstTake, extraTakes } = assembled
   const { plainWorkflow, directPrompt } = firstTake
 
-  // The worker iframe holds ONE graph at a time, and bridge-mode queueing is a
-  // two-step critical section (loadWorkflow → delay → queuePrompt) against it.
-  // Overlapping runs on the same worker used to interleave those steps: run B's
-  // load overwrote run A's graph before A's queuePrompt fired, so one node's
-  // graph queued twice and the other's never. Serialize the iframe section per
-  // worker; direct-mode queueing (own pre-built ApiPrompt, no iframe read at
-  // queue time) stays outside the lock and still overlaps freely.
-  //
-  // Hosted skips this whole section: there IS no worker iframe (the template
-  // does not mount one — no engine origin is reachable from a hosted browser),
-  // so sendLoadWorkflow would await a bridge that never becomes ready. Hosted
-  // always runs direct — useDirectExecutionEnabled forces the setting ON.
-  // Tier 1 (bridge retirement): `useDirect` is now always true (direct execution
-  // is the only dispatch path), so this whole iframe critical section is skipped
-  // in dev exactly as it already is in hosted — there is no bridge iframe to load
-  // the workflow into or to queuePrompt against. Gated on `!useDirect` so a
-  // temporary revert of the direct-execution flag restores the bridge path.
-  if (!hostedShell && !useDirect) await withKeyedLock(`bridge-run:${workerIdx}`, async () => {
-    await sendLoadWorkflow(plainWorkflow, workerIdx)
-
-    // Dev-only shadow parity: on EVERY run (direct or bridge), ask the freshly
-    // loaded iframe for its own graphToPrompt output and compare it to ours.
-    // Fire-and-forget: never blocks, delays, or fails the run.
-    if (import.meta.dev) {
-      try {
-        requestShadowParity(plainWorkflow, `run:${Date.now()}`)
-      } catch (err) {
-        console.warn('[Run] shadow parity request failed (ignored)', err)
-      }
-    }
-
-    if (!useDirect) {
-      await new Promise(r => setTimeout(r, 800))
-      console.log('[Run] sending queuePrompt to worker', workerIdx)
-      iframe?.contentWindow?.postMessage({ type: 'sailor', action: 'queuePrompt' }, '*')
-      // Explicit (non-live) runs get a no-response watchdog. Live-preview runs fire
-      // continuously and silently by design, so they're exempt from the toast.
-      // Armed inside the lock so queued-behind runs measure from their own
-      // queue time, not from click time.
-      if (!opts.live) armQueueWatchdog(runTabId)
-    }
-  })
+  // Tier 1 (bridge retirement): the bridge dispatch path — load the graph into a
+  // worker iframe, then postMessage queuePrompt against it — has been removed.
+  // Every run now dispatches directly to ComfyUI's /prompt below (the same path
+  // hosted has always used).
 
   if (useDirect) {
     try {
@@ -3241,15 +3143,6 @@ onMounted(async () => {
   trainingPollTimer = setInterval(fetchTrainingJobs, 5000)
   window.addEventListener('sailor:trainingQueueUpdated', fetchTrainingJobs)
 
-  // Also check bridge iframe loaded after delay and request client ID
-  setTimeout(() => {
-    const bridge = document.getElementById('sailor-bridge-iframe') as HTMLIFrameElement
-    console.log('[Sailor] Bridge iframe check:', {
-      exists: !!bridge,
-      src: bridge?.src,
-      display: bridge ? getComputedStyle(bridge).display : 'N/A',
-    })
-  }, 5000)
 })
 
 onUnmounted(() => {
@@ -3831,35 +3724,6 @@ function dismissRunResult() {
 
 <template>
   <div class="flex h-screen bg-sidebar">
-    <!-- Hidden bridge iframe: mounted so credits/auth work on all pages.
-         NOT in hosted mode — the engine origin isn't reachable from a hosted
-         browser, and mounting it is the exact hole that let the iframe post
-         straight to the engine unmetered. -->
-    <iframe
-      v-if="!hostedShell && !directExecutionEnabled"
-      id="sailor-bridge-iframe"
-      :src="`${comfyOrigin}/`"
-      class="fixed w-[10px] h-[10px] -left-[100px] -top-[100px] opacity-0 pointer-events-none"
-      aria-hidden="true"
-      tabindex="-1"
-    />
-
-    <!-- Parallel-run prototype: one hidden execution iframe per extra worker
-         (index >= 1). Worker 0 is the main comfyui-shared canvas iframe below.
-         Rendered only when the pool is enabled, so single-worker is untouched.
-         Never in hosted mode — same unmetered-engine-access reason as above. -->
-    <template v-if="!hostedShell && !directExecutionEnabled">
-      <iframe
-        v-for="i in (comfyWorkers.length - 1)"
-        :key="`worker-${i}`"
-        :data-worker="i"
-        :src="`${comfyWorkers[i]}/`"
-        class="fixed w-[10px] h-[10px] -left-[300px] -top-[300px] opacity-0 pointer-events-none"
-        aria-hidden="true"
-        tabindex="-1"
-      />
-    </template>
-
     <!-- Pre-run cost confirm -->
     <div
       v-if="costConfirmHead"
