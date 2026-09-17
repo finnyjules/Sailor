@@ -503,64 +503,58 @@ function facetRng(seed: number): () => number {
 
 /**
  * Facet — re-cut the shape as the convex hull of its original corners PLUS `count`
- * new points sampled over its surface (area-weighted). More points ⇒ more facets;
- * `jitter` scatters the sampled points off the surface along their normal for a raw-
- * crystal look (0 = a clean cut). It convex-hulls, so concavities are filled — the
- * intended "gemify / add facets" behaviour. `count === 0 && jitter === 0` is a no-op
- * (returns the input untouched — the byte-identity contract for a disabled row).
+ * facet points placed at EVEN, geodesic directions (a Fibonacci sphere) around the
+ * shape. Each direction contributes a point just beyond the shape's supporting plane
+ * in that direction, so it becomes a fresh hull vertex — one regular facet per point.
+ * `count` is therefore a REGULAR, deterministic facet expander (a faceted-gem dome
+ * that follows the silhouette); `jitter` scatters those points for a random raw-crystal
+ * look on top (0 = a clean geometric cut). `count === 0` is a no-op (returns the input
+ * untouched — the byte-identity contract for a disabled row).
  */
 function applyFacet(geo: THREE.BufferGeometry, count: number, jitter: number, seed: number): THREE.BufferGeometry {
   const c = Math.max(0, Math.min(400, Math.round(count)))
   const j = Math.max(0, Math.min(1, jitter))
-  if (c === 0 && j === 0) return geo
+  if (c === 0) return geo
 
   const pos = geo.getAttribute('position') as THREE.BufferAttribute
-  const index = geo.getIndex()
-  const triCount = index ? index.count / 3 : pos.count / 3
-  if (triCount < 1) return geo
+  if (pos.count < 3) return geo
 
-  // Bounding-box centre + radius drive the jitter scale (so it reads the same at any object size).
+  // Bounding-box centre + radius: the centre is the geodesic origin, the radius scales jitter
+  // (so roughness reads the same at any object size).
   const box = new THREE.Box3().setFromBufferAttribute(pos)
+  const center = box.getCenter(new THREE.Vector3())
   const radius = Math.max(1e-4, box.getSize(new THREE.Vector3()).length() * 0.5)
 
-  const vi = (t: number, k: number) => (index ? index.getX(t * 3 + k) : t * 3 + k)
-  const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3()
-
-  // The original corners anchor the silhouette (they are the extreme points a clean cut keeps).
-  // Cap how many we carry so a dense input mesh cannot blow the hull cost.
-  const pts: THREE.Vector3[] = []
+  // Original corners anchor the silhouette AND feed the support query; cap how many we carry so a
+  // dense input mesh cannot blow the hull cost.
+  const verts: THREE.Vector3[] = []
   const vertStep = Math.max(1, Math.ceil(pos.count / 400))
-  for (let i = 0; i < pos.count; i += vertStep) pts.push(new THREE.Vector3().fromBufferAttribute(pos, i))
-
-  // Cumulative triangle areas for area-weighted sampling.
-  const cum = new Float64Array(triCount)
-  let total = 0
-  for (let t = 0; t < triCount; t++) {
-    va.fromBufferAttribute(pos, vi(t, 0)); vb.fromBufferAttribute(pos, vi(t, 1)); vc.fromBufferAttribute(pos, vi(t, 2))
-    total += vb.clone().sub(va).cross(vc.clone().sub(va)).length() * 0.5
-    cum[t] = total
-  }
+  for (let i = 0; i < pos.count; i += vertStep) verts.push(new THREE.Vector3().fromBufferAttribute(pos, i))
+  const pts: THREE.Vector3[] = verts.slice()
 
   const rng = facetRng(seed)
-  const nrm = new THREE.Vector3()
+  const golden = Math.PI * (3 - Math.sqrt(5)) // ~2.399963 rad — the even angular step
+  const dir = new THREE.Vector3()
   for (let s = 0; s < c; s++) {
-    // pick a triangle weighted by area (linear scan is fine at these counts)
-    const target = rng() * total
-    let t = 0
-    while (t < triCount - 1 && cum[t]! < target) t++
-    va.fromBufferAttribute(pos, vi(t, 0)); vb.fromBufferAttribute(pos, vi(t, 1)); vc.fromBufferAttribute(pos, vi(t, 2))
-    // uniform barycentric point in the triangle
-    let u = rng(), v = rng()
-    if (u + v > 1) { u = 1 - u; v = 1 - v }
-    const p = new THREE.Vector3()
-      .addScaledVector(va, 1 - u - v).addScaledVector(vb, u).addScaledVector(vc, v)
+    // An even point on the unit sphere (Fibonacci lattice) → a regular direction, no RNG.
+    const y = 1 - ((s + 0.5) / c) * 2
+    const rr = Math.sqrt(Math.max(0, 1 - y * y))
+    const th = golden * s
+    dir.set(Math.cos(th) * rr, y, Math.sin(th) * rr)
+    // Supporting-plane distance of the shape in this direction; a point just past it is guaranteed
+    // OUTSIDE the current hull, so it adds a facet (a point ON the surface would be coplanar).
+    let sup = -Infinity
+    for (const v of verts) {
+      const d = (v.x - center.x) * dir.x + (v.y - center.y) * dir.y + (v.z - center.z) * dir.z
+      if (d > sup) sup = d
+    }
+    const r = sup * 1.01
+    const p = new THREE.Vector3(center.x + dir.x * r, center.y + dir.y * r, center.z + dir.z * r)
     if (j > 0) {
-      nrm.copy(vb).sub(va).cross(vc.clone().sub(va)).normalize()
-      p.addScaledVector(nrm, radius * j * (rng() * 2 - 1) * 0.4)
-      // a little sideways scatter too, so flat faces gain facets and not just bulge
-      p.x += radius * j * (rng() * 2 - 1) * 0.15
-      p.y += radius * j * (rng() * 2 - 1) * 0.15
-      p.z += radius * j * (rng() * 2 - 1) * 0.15
+      // Roughness: random scatter off the regular position — the crystalline overlay.
+      p.x += radius * j * (rng() * 2 - 1) * 0.35
+      p.y += radius * j * (rng() * 2 - 1) * 0.35
+      p.z += radius * j * (rng() * 2 - 1) * 0.35
     }
     pts.push(p)
   }
