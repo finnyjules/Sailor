@@ -13,7 +13,7 @@ import * as THREE from 'three'
 import { stripAlpha } from '~/lib/color/convert'
 import {
   MATERIAL_DEFAULTS, gradientAngles, gradientDirection, gradientStopsOf, rampStopsOf, opalStopsOf, screenOf,
-  NO_BASE_COLOR, MATCAP_IDS, MATCAP_SPECS,
+  NO_BASE_COLOR, MATCAP_IDS, MATCAP_SPECS, STONE_PRESETS,
   type GradientStop, type ReliefSpec, type SceneMaterial, type MatcapSpec,
 } from './config'
 import { toHeightPixels } from './relief'
@@ -1035,6 +1035,39 @@ function applyPhysical(p: THREE.MeshPhysicalMaterial, mat: SceneMaterial): void 
   p.envMapIntensity = mat.envMapIntensity ?? MATERIAL_DEFAULTS.envMapIntensity
 }
 
+/** The `gemstone` material: a MeshPhysicalMaterial fully driven by a precious-stone PRESET
+ *  (STONE_PRESETS) rather than the raw physical sliders. The stone's body colour is carried by
+ *  attenuation over a SHORT distance so a coloured gem reads saturated (the fix for glass's
+ *  transmitted-colour grey-out). `envMapIntensity` is the one doc field respected, so the stone
+ *  can be brightened per scene. */
+function applyGemstone(p: THREE.MeshPhysicalMaterial, mat: SceneMaterial): void {
+  const preset = STONE_PRESETS[mat.stone ?? 'diamond'] ?? STONE_PRESETS.diamond
+  p.color.set(stripAlpha(preset.color))
+  p.roughness = preset.roughness
+  p.metalness = 0
+  p.transmission = 1
+  p.ior = preset.ior
+  p.thickness = preset.thickness
+  p.side = THREE.DoubleSide
+  p.clearcoat = 1
+  p.clearcoatRoughness = 0.03
+  p.dispersion = preset.dispersion
+  p.attenuationColor.set(stripAlpha(preset.atten))
+  p.attenuationDistance = preset.attenDist > 0 ? preset.attenDist : Infinity
+  // A colourless diamond wants punchy reflections; a coloured stone is washed grey by them,
+  // so it reflects the environment more gently and lets the transmitted body colour read.
+  const isColoured = preset.attenDist > 0
+  p.envMapIntensity = mat.envMapIntensity ?? (isColoured ? 1.2 : 2)
+  p.clearcoat = isColoured ? 0.5 : 1
+  // Reset channels an earlier material of a different type may have left on this instance.
+  p.sheen = 0
+  p.iridescence = 0
+  p.emissive.set('#000000')
+  p.emissiveIntensity = 1
+  p.opacity = 1
+  p.transparent = false
+}
+
 /**
  * The image material's transparency, shared by the build and the in-place update so the
  * two can never disagree.
@@ -1639,6 +1672,12 @@ export function materialFor(
       m = t
       break
     }
+    case 'gemstone': {
+      const p = new THREE.MeshPhysicalMaterial()
+      applyGemstone(p, mat)
+      m = p
+      break
+    }
     case 'glass':
     case 'standard':
     default: {
@@ -1840,6 +1879,12 @@ export function updateMaterial(
       // transmission crosses zero — the same crossing at which three's transmission
       // setter self-recompiles — so that recompile already picks up the new side
       // define. No extra needsUpdate bump here, or the crossing would recompile twice.
+      return true
+    }
+    case 'gemstone': {
+      // Every gemstone is transmission 1 + dispersion > 0, so switching stones never
+      // crosses a define boundary three doesn't self-manage — apply the preset in place.
+      applyGemstone(m as THREE.MeshPhysicalMaterial, mat)
       return true
     }
     case 'toon': {

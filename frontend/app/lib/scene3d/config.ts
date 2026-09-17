@@ -46,8 +46,39 @@ export const DEFAULT_FONT_URL = '/fonts/ABCROM-Bold.otf'
 // no amount of roughness tuning on the PBR types (standard/glass) can reproduce — that
 // hard-dot look is a distinct retro-CG aesthetic worth keeping on its own terms. Do not
 // "modernise" it away in favour of Standard.
-export type MaterialType = 'standard' | 'phong' | 'toon' | 'matcap' | 'glass' | 'fresnel' | 'gradient' | 'opalescent' | 'holographic' | 'image' | 'shaderFill'
-export const MATERIAL_TYPES: MaterialType[] = ['standard', 'phong', 'toon', 'matcap', 'glass', 'fresnel', 'gradient', 'opalescent', 'holographic', 'image', 'shaderFill']
+export type MaterialType = 'standard' | 'phong' | 'toon' | 'matcap' | 'glass' | 'gemstone' | 'fresnel' | 'gradient' | 'opalescent' | 'holographic' | 'image' | 'shaderFill'
+export const MATERIAL_TYPES: MaterialType[] = ['standard', 'phong', 'toon', 'matcap', 'glass', 'gemstone', 'fresnel', 'gradient', 'opalescent', 'holographic', 'image', 'shaderFill']
+
+/** Precious-stone presets for the `gemstone` material. Three-free (colour strings + numbers)
+ *  so the pure config module and the controls can read them; materials.ts turns a preset into a
+ *  MeshPhysicalMaterial. The body colour comes from `atten` (attenuation) over a SHORT
+ *  `attenDist`, which is what makes a coloured gem read saturated rather than greying out —
+ *  `attenDist: 0` means colourless (diamond). Append only; the id is stored in the doc. */
+export type MaterialStone = 'diamond' | 'ruby' | 'sapphire' | 'emerald' | 'amethyst' | 'aquamarine' | 'topaz' | 'peridot' | 'garnet' | 'smoky'
+export const STONE_IDS: MaterialStone[] = ['diamond', 'ruby', 'sapphire', 'emerald', 'amethyst', 'aquamarine', 'topaz', 'peridot', 'garnet', 'smoky']
+export const STONE_LABELS: Record<MaterialStone, string> = {
+  diamond: 'Diamond', ruby: 'Ruby', sapphire: 'Sapphire', emerald: 'Emerald', amethyst: 'Amethyst',
+  aquamarine: 'Aquamarine', topaz: 'Topaz', peridot: 'Peridot', garnet: 'Garnet', smoky: 'Smoky quartz',
+}
+export interface StonePreset {
+  color: string; atten: string; attenDist: number; ior: number; dispersion: number; roughness: number; thickness: number
+}
+// `atten` is three's attenuationColor — the colour white light BECOMES after travelling
+// `attenDist` through the stone (Beer–Lambert), so it must be the SATURATED body hue, NOT a
+// dark absorber (a near-black atten drives the whole gem to grey/black — the grey-out trap).
+// `color` is the surface/reflection tint, a lighter cast of the same hue.
+export const STONE_PRESETS: Record<MaterialStone, StonePreset> = {
+  diamond:    { color: '#ffffff', atten: '#ffffff', attenDist: 0,    ior: 2.33, dispersion: 5.0, roughness: 0.0, thickness: 0.7 },
+  ruby:       { color: '#ffb0bc', atten: '#ff1636', attenDist: 0.35, ior: 1.77, dispersion: 1.4, roughness: 0.02, thickness: 1.0 },
+  sapphire:   { color: '#9fb6ff', atten: '#1a44ff', attenDist: 0.38, ior: 1.77, dispersion: 1.4, roughness: 0.02, thickness: 1.0 },
+  emerald:    { color: '#9fe8c6', atten: '#10d878', attenDist: 0.42, ior: 1.58, dispersion: 0.9, roughness: 0.03, thickness: 1.1 },
+  amethyst:   { color: '#d3b6ff', atten: '#9a44ff', attenDist: 0.45, ior: 1.55, dispersion: 1.1, roughness: 0.02, thickness: 1.0 },
+  aquamarine: { color: '#bff2f2', atten: '#3ad8d8', attenDist: 0.5,  ior: 1.58, dispersion: 0.8, roughness: 0.02, thickness: 1.0 },
+  topaz:      { color: '#ffe6ac', atten: '#ffab1e', attenDist: 0.45, ior: 1.62, dispersion: 1.0, roughness: 0.02, thickness: 1.0 },
+  peridot:    { color: '#dcefac', atten: '#a8dc28', attenDist: 0.45, ior: 1.65, dispersion: 1.0, roughness: 0.03, thickness: 1.0 },
+  garnet:     { color: '#ffa694', atten: '#e0240f', attenDist: 0.3,  ior: 1.79, dispersion: 1.3, roughness: 0.03, thickness: 1.0 },
+  smoky:      { color: '#d8c4b2', atten: '#8a6448', attenDist: 0.5,  ior: 1.55, dispersion: 0.9, roughness: 0.03, thickness: 1.0 },
+}
 
 /** Display text per material type — the panel must never show a raw id ("shaderFill" would
  *  title-case to "ShaderFill"). Keyed, not a positional array: a Record over MaterialType
@@ -55,6 +86,7 @@ export const MATERIAL_TYPES: MaterialType[] = ['standard', 'phong', 'toon', 'mat
  *  silently slide every label one place along. Read via MATERIAL_TYPE_LABELS_ORDERED. */
 export const MATERIAL_TYPE_LABELS: Record<MaterialType, string> = {
   standard: 'Standard', phong: 'Phong', toon: 'Toon', matcap: 'Matcap', glass: 'Glass',
+  gemstone: 'Gemstone',
   fresnel: 'Fresnel', gradient: 'Gradient', opalescent: 'Opalescent',
   holographic: 'Holographic', image: 'Image', shaderFill: 'Shader fill',
 }
@@ -183,6 +215,9 @@ export interface SceneMaterial {
   ior?: number
   transmission?: number
   thickness?: number
+  /** `gemstone` only — which precious-stone preset drives the physical params (see
+   *  STONE_PRESETS). Absent ⇒ diamond. */
+  stone?: MaterialStone
   fresnelColor?: string
   fresnelPower?: number
   gradientB?: string
@@ -687,6 +722,7 @@ export const MATERIAL_DEFAULTS = {
   ior: 1.5,
   transmission: 1,
   thickness: 0.5,
+  stone: 'diamond' as MaterialStone,
   fresnelColor: '#8ab4ff',
   fresnelPower: 3,
   gradientB: '#1c2740',
@@ -1282,6 +1318,7 @@ export function parseDoc(json: string): SceneDoc {
     if (typeof m?.ior === 'number') out.ior = num(m.ior, MATERIAL_DEFAULTS.ior)
     if (typeof m?.transmission === 'number') out.transmission = num(m.transmission, MATERIAL_DEFAULTS.transmission)
     if (typeof m?.thickness === 'number') out.thickness = num(m.thickness, MATERIAL_DEFAULTS.thickness)
+    if (STONE_IDS.includes(m?.stone)) out.stone = m.stone
     if (typeof m?.fresnelColor === 'string') out.fresnelColor = m.fresnelColor
     if (typeof m?.fresnelPower === 'number') out.fresnelPower = num(m.fresnelPower, MATERIAL_DEFAULTS.fresnelPower)
     if (typeof m?.gradientB === 'string') out.gradientB = m.gradientB

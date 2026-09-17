@@ -290,6 +290,7 @@ function geometryParamField(obj: SceneObject, sub: string): ParamValue {
   const spec = specs.find((s) => s.key === sub)
   if (!spec) return 0
   const v = resolveParam(specs, obj.params, sub)
+  if (spec.control === 'options') return spec.options?.[Math.round(v)] ?? spec.options?.[0] ?? ''
   return spec.control === 'toggle' ? v > 0.5 : v
 }
 
@@ -465,6 +466,8 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
     'ui.material.surface', 'object.material.color', 'object.material.roughness', 'object.material.metalness',
     'ui.material.textureSet', 'object.material.textureTiling',
   ],
+  // Gemstone is preset-driven: the stone picker is the whole body.
+  gemstone: ['object.material.stone'],
   phong: ['object.material.color', 'object.material.shininess', 'object.material.specular'],
   toon: ['object.material.color', 'object.material.toonSteps'],
   matcap: ['ui.material.matcap'],
@@ -739,9 +742,12 @@ function dynamicPatch(key: string, obj: SceneObject | null | undefined): RowPatc
     if (!spec) return null
     return {
       label: spec.label, hint: spec.hint, min: spec.min, max: spec.max, step: spec.step,
-      // A toggle spec stores 0 | 1 but draws as a switch, so its default is boolean here —
-      // the same conversion `geometryParamField` does on the way out.
-      default: spec.control === 'toggle' ? spec.default > 0.5 : spec.default,
+      // A toggle spec stores 0 | 1 but draws as a switch, so its default is boolean here;
+      // an options spec stores an index but draws as a select, so its default is the option
+      // LABEL — both mirror the conversion `geometryParamField` does on the way out.
+      default: spec.control === 'toggle' ? spec.default > 0.5
+        : spec.control === 'options' ? (spec.options ?? [])[Math.round(spec.default)]
+        : spec.default,
     }
   }
   if (key === 'object.intensity' && obj?.kind === 'light') {

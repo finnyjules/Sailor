@@ -5,7 +5,8 @@ import {
   PRIMITIVE_KINDS, LIGHT_DEFAULTS, DECAL_DEFAULTS, DECAL_BLENDS, lightIntensityMax, TEXTURE_TILING_RANGE,
   SCREEN_PATTERNS, SCREEN_GAPS, SCREEN_INKS, IMAGE_WRAPS, IMAGE_TILING_RANGE, IMAGE_FITS,
   IMAGE_PROJECTIONS, IMAGE_AXES, NO_BASE_COLOR,
-  type SceneDoc, type SceneObject, type MaterialType, MATERIAL_TYPE_LABELS_ORDERED } from './config'
+  type SceneDoc, type SceneObject, type MaterialType, MATERIAL_TYPE_LABELS_ORDERED,
+  STONE_IDS, STONE_LABELS } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, totalClones, type ParamSpec } from './primParams'
 
 /**
@@ -209,7 +210,7 @@ const reliefApplies = (doc: SceneDoc, obj?: SceneObject): boolean => {
 // whatever the pattern is, so the agent can set pattern AND density in one patch; the panel
 // hides them while the pattern is none (panelPresentation's panelGate, the relief precedent).
 const screenApplies = (doc: SceneDoc, obj?: SceneObject): boolean =>
-  isEditableMaterial(doc, obj) && materialTypeOf(obj) !== 'glass'
+  isEditableMaterial(doc, obj) && materialTypeOf(obj) !== 'glass' && materialTypeOf(obj) !== 'gemstone'
 
 // Per-type branches the inspector draws but the schema had never described. Each is
 // `agent: false` AND `animatable: false`: declaring a control so the INSPECTOR can draw it
@@ -225,6 +226,12 @@ const isFresnelMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
 
 const isGradientMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
   isEditableMaterial(doc, obj) && materialTypeOf(obj) === 'gradient'
+
+// Gemstone is a preset-driven material: the stone picker is its ONLY control (every physical
+// param is derived from STONE_PRESETS), so it is deliberately kept out of isPhysicalMaterial /
+// hasReflectiveCoat / COLOR_TYPES — those sliders would be dead controls on it.
+const isGemstoneMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
+  isEditableMaterial(doc, obj) && materialTypeOf(obj) === 'gemstone'
 
 // Faceted/prismatic shading needs the per-face extent attributes only primitive
 // geometry bakes; an imported GLB always ramps smooth. Mirrors the template's
@@ -314,6 +321,17 @@ function geometryParamControls(): SceneControl[] {
         default: first.default > 0.5, group: 'Geometry', hint: first.hint,
         when: declares, ...INSPECTOR_ONLY,
       } as SceneControl)
+      continue
+    }
+    // An options row is a select over its human option labels; the flat bag stores the INDEX,
+    // so the reader maps index→label and setParam maps label→index (mirrors the modifier selects).
+    const opt = specs.find((s) => s.control === 'options')
+    if (opt) {
+      const options = opt.options ?? []
+      out.push(select(
+        `${GEOMETRY_PARAM_PREFIX}${key}`, first.label, options, options[Math.round(first.default)] ?? options[0] ?? '',
+        'Geometry', first.hint, { when: declares, ...INSPECTOR_ONLY },
+      ))
       continue
     }
     out.push(slider(
@@ -442,6 +460,10 @@ export const SCENE_CONTROLS: SceneControl[] = [
     hint: 'Glows flat instead of being shaded by scene lights',
     when: hasUnlitToggle,
   } as SceneControl,
+
+  // Gemstone — pick the stone; every physical value comes from its preset.
+  select('object.material.stone', 'Stone', [...STONE_IDS], MATERIAL_DEFAULTS.stone, 'Material',
+    'Which precious stone to cut', { when: isGemstoneMaterial, summary: 1, optionLabels: STONE_IDS.map((s) => STONE_LABELS[s]) }),
 
   // Physical block — standard + glass only.
   slider('object.material.clearcoat', 'Clearcoat', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.clearcoat,

@@ -71,7 +71,7 @@ import { remesh, boundsOf } from '~/lib/scene3d/voxel'
 import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
 import Scene3DObjectRow from './studio/Scene3DObjectRow.vue'
 import { totalClones, clampedClones } from '~/lib/scene3d/modifiers'
-import { MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
+import { MODIFIER_SPECS, PRIMITIVE_PARAMS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
 import {
   modifierStackOf, writeModifierStack, canReorderModifier, cloneModifierStack, MODIFIER_LABELS,
   addModifier as addModifierOp, removeModifier as removeModifierOp,
@@ -1475,11 +1475,19 @@ function writeTransform(prop: 'position' | 'rotation' | 'scale', axis: 0 | 1 | 2
 // panel, the parity spec and the write path share one description of them); this is the
 // write half — it creates the params bag on first touch. Toggles store 0 | 1 so `params`
 // stays a flat number map, which is what `resolveParam` and the geometry factory expect.
-function setParam(key: string, v: number): void {
+function setParam(key: string, v: number | string): void {
   const o = selected.value
   if (!o || o.kind !== 'primitive') return
   if (!o.params) o.params = {}
-  o.params[key] = v
+  // An options row (e.g. the gem Cut) emits the chosen option STRING; the flat param bag
+  // stores its INDEX, so coerce it back the way the modifier option rows do at their seam.
+  let num: number
+  if (typeof v === 'string') {
+    const spec = PRIMITIVE_PARAMS[o.primitive]?.find((s) => s.key === key)
+    const idx = spec?.options?.indexOf(v) ?? -1
+    num = idx >= 0 ? idx : Number(v)
+  } else num = v
+  o.params[key] = num
 }
 
 // The Cloner Vary bag: varyMode/seed/falloff/varyColor/spread/varyColorStrength are a MATERIAL
@@ -1934,7 +1942,9 @@ function setControl(key: string, value: string | number | boolean): void {
   // the exact inverse. Writing `true` in there would make `resolveParam` fall straight
   // back to the default and the checkbox would appear to do nothing.
   if (key.startsWith('object.params.')) {
-    setParam(key.slice('object.params.'.length), typeof value === 'boolean' ? (value ? 1 : 0) : Number(value))
+    // A string value is an options row's chosen label — setParam coerces it to its index.
+    setParam(key.slice('object.params.'.length),
+      typeof value === 'boolean' ? (value ? 1 : 0) : typeof value === 'string' ? value : Number(value))
     return
   }
   if (key.startsWith('object.modifiers.')) { setMod(key.slice('object.modifiers.'.length), Number(value)); return }
