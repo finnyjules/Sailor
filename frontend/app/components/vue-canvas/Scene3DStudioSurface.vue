@@ -4865,11 +4865,12 @@ async function onClose() {
                cached result live and for free; only this button spends. -->
           <div v-if="activeTreatment.treatment.kind === 'aiRestyle'" class="mt-1 space-y-1.5" data-testid="restyle-actions">
             <StudioButton
-              variant="primary"
+              variant="neutral"
+              class="w-full"
               :disabled="!restyleTreatmentPromptOf(activeTreatment.treatment) || restyleStatusOf(activeTreatment.treatment.id) === 'running'"
               @click="runRestyle(activeTreatment.obj.id, activeTreatment.treatment.id)"
             >
-              <span class="flex items-center gap-1.5">
+              <span class="flex items-center justify-center gap-1.5">
                 <Loader2 v-if="restyleStatusOf(activeTreatment.treatment.id) === 'running'" class="h-3.5 w-3.5 animate-spin" />
                 <Sparkles v-else class="h-3.5 w-3.5" />
                 {{ restyleStatusOf(activeTreatment.treatment.id) === 'running' ? 'Restyling…' : 'Restyle' }}
