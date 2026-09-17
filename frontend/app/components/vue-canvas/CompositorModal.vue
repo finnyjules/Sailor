@@ -114,6 +114,7 @@ import { bakeAndUpload, motionSourceKey, type MotionParams } from '~/lib/motion/
 import { readGrid } from '~/lib/frame/gridConfig'
 import { resolveGrid, type FrameGrid } from '~/lib/frame/grid'
 import CompositorMotionTimeline from '~/components/vue-canvas/compositor/CompositorMotionTimeline.vue'
+import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
 import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
@@ -3734,6 +3735,8 @@ function toggleDialTrack(spec: DialTargetSpec) {
 // timeline yet; that lands next.
 const motionxTracks = computed<MotionxTrack[]>(() => (motionDoc.value as any).motionx ?? [])
 const behaviourPickerOpen = ref(false)
+// Slice 1: preview the new band timeline alongside the old dial timeline.
+const bandUiPreview = ref(true)
 function addBehaviour(kind: string) {
   const l = selectedLocal.value
   if (!l) return
@@ -7909,6 +7912,15 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+        <div v-if="selectedLocal" class="mb-2 flex items-center gap-2 text-[11px] text-white/50">
+          <button type="button" class="cursor-pointer hover:text-white/80"
+            @click="bandUiPreview = !bandUiPreview">{{ bandUiPreview ? 'Hide' : 'Show' }} band preview</button>
+        </div>
+        <MotionBandTimeline v-if="bandUiPreview"
+          class="mb-2"
+          :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
+          :motionx="motionxTracks" :duration="effectiveMotion.duration" :t="previewT"
+          @select="(id: string) => selectLocal(id)" />
         <CompositorMotionTimeline
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
           :motion="effectiveMotion" :t="previewT" :playing="playing"
