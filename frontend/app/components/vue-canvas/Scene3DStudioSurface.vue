@@ -2026,14 +2026,12 @@ async function resolveRestyleStyle(
 // its useMoodboards() data source is reused, not the modal). Mirrors the surface's anchorAbove +
 // outside-pointerdown popover pattern.
 const { moodboards: restyleMoodboards } = useMoodboards()
-const restyleStyleRowEl = ref<HTMLElement | null>(null)
 const restyleStylePickerOpen = ref<string | null>(null) // the treatmentId whose picker is open, or null
-const restyleStyleAnchor = ref<{ x: number; y: number } | null>(null)
 
 function openRestyleStylePicker(treatmentId: string): void {
-  // WidgetMoodboardChip's @open emits no native event, so anchor to the row element itself.
-  restyleStyleAnchor.value = anchorAbove(restyleStyleRowEl.value?.getBoundingClientRect())
-  restyleStylePickerOpen.value = treatmentId
+  // Toggle: the picker is an `absolute` child of the Style row (see template), so it needs no anchor
+  // math — clicking the chip again just closes it.
+  restyleStylePickerOpen.value = restyleStylePickerOpen.value === treatmentId ? null : treatmentId
 }
 // Direct reactive mutation of `.styleId` — the same doc-treatment write path runRestyle uses to
 // persist `t.resultRef`, so the picker persists through the identical watcher.
@@ -4767,8 +4765,7 @@ async function onClose() {
                picker popover lives near the surface's other anchored popovers below. -->
           <div
             v-if="activeTreatment.treatment.kind === 'aiRestyle'"
-            ref="restyleStyleRowEl"
-            class="space-y-1"
+            class="relative space-y-1"
             data-testid="restyle-style-row"
           >
             <label class="block px-1 text-[11px] text-white/55">Style</label>
@@ -4778,6 +4775,29 @@ async function onClose() {
               @open="openRestyleStylePicker(activeTreatment.treatment.id)"
               @clear="clearRestyleStyle(activeTreatment.obj.id, activeTreatment.treatment.id)"
             />
+            <!-- Style picker: a compact moodboard list anchored to this row (absolute, like the
+                 surface's toolbar popups) so it opens right under the chip. Its useMoodboards() data
+                 source mirrors the Generate node's chip; the outside-pointerdown watch closes it. -->
+            <div
+              v-if="restyleStylePickerOpen === activeTreatment.treatment.id"
+              class="absolute left-0 top-full z-50 mt-1 max-h-72 w-64 overflow-auto rounded-lg border border-white/10 bg-[#1b1b1f] p-1.5 shadow-xl"
+              data-testid="restyle-style-popover"
+              @pointerdown.stop
+            >
+              <p v-if="!restyleMoodboards.length" class="px-2 py-3 text-[11px] text-white/40">
+                No styles yet — create a moodboard first.
+              </p>
+              <button
+                v-for="m in restyleMoodboards"
+                :key="m.id"
+                type="button"
+                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-white/[0.06]"
+                :data-testid="`restyle-style-option-${m.id}`"
+                @click="setRestyleStyle(activeTreatment!.obj.id, activeTreatment!.treatment.id, m.id)"
+              >
+                <span class="truncate text-[12px] text-white/85">{{ m.name }}</span>
+              </button>
+            </div>
           </div>
           <StudioControlPanel
             :controls="treatmentPanelControls"
@@ -4814,31 +4834,6 @@ async function onClose() {
               Runs the model once — this costs credits, and takes a minute or two. Mix blends the result for free.
             </p>
           </div>
-        </div>
-
-        <!-- The Style picker popover — a compact studio-native moodboard list, anchored above the
-             Style row (the surface's anchorAbove pattern). Its useMoodboards() data source mirrors the
-             Generate node's chip; the outside-pointerdown watch closes it. -->
-        <div
-          v-if="restyleStylePickerOpen && restyleStyleAnchor"
-          class="fixed z-50 max-h-80 w-64 overflow-auto rounded-lg border border-white/10 bg-[#1b1b1f] p-1.5 shadow-xl"
-          :style="{ left: restyleStyleAnchor.x + 'px', top: restyleStyleAnchor.y + 'px' }"
-          data-testid="restyle-style-popover"
-          @pointerdown.stop
-        >
-          <p v-if="!restyleMoodboards.length" class="px-2 py-3 text-[11px] text-white/40">
-            No styles yet — create a moodboard first.
-          </p>
-          <button
-            v-for="m in restyleMoodboards"
-            :key="m.id"
-            type="button"
-            class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-white/[0.06]"
-            :data-testid="`restyle-style-option-${m.id}`"
-            @click="setRestyleStyle(activeTreatment!.obj.id, restyleStylePickerOpen!, m.id)"
-          >
-            <span class="truncate text-[12px] text-white/85">{{ m.name }}</span>
-          </button>
         </div>
       </template>
 
@@ -5366,7 +5361,10 @@ async function onClose() {
         </StudioControlPanel>
       </div>
       </template>
-      <template v-else>
+      <!-- Motion authoring lives ONLY on the Motion tab (never an inspector block): a bare v-else of
+           the object inspector above leaked this whole section into the treatment/modifier inspectors
+           (a selected treatment makes that v-if false). Gate it to the Motion tab explicitly. -->
+      <template v-else-if="activeTab === 'motion'">
         <StudioSection title="Motion">
           <div class="flex items-center justify-between">
             <span class="text-[11px] text-white/55">Animate scene</span>
