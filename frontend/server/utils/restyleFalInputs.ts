@@ -43,9 +43,16 @@ export const FLUX_DEPTH_CONTROLNET_PATH = 'jasperai/Flux.1-dev-Controlnet-Depth'
 export const FLUX_IP_ADAPTER_PATH = 'XLabs-AI/flux-ip-adapter'
 export const FLUX_IP_ADAPTER_ENCODER = 'openai/clip-vit-large-patch14'
 export const FLUX_IP_ADAPTER_WEIGHT = 'ip_adapter.safetensors'
-// Tuned defaults (no user dial — spec YAGNI). Depth control holds structure; IP-adapter carries look.
-export const RESTYLE_DEPTH_CONDITIONING_SCALE = 0.6
-export const RESTYLE_IP_ADAPTER_SCALE = 0.7
+// Tuned defaults (no user dial — spec YAGNI). Depth control holds STRUCTURE; the IP-adapter only
+// NUDGES the look. Balance validated live 2026-09-16 against a real moodboard (blue ballpoint on
+// white paper): ip scale 0.7 FLOODED the output with the refs' flat white/cream field, erasing both
+// the depth structure and the prompt (a blank cream disc — Julien's "solid stays the same"). Depth
+// conditioning 0.85 + guidance 3.5 + ip 0.4 restores a structured, clearly-styled result; ip 0.25 is
+// crisper still. Keep depth dominant and the ip-adapter a nudge.
+export const RESTYLE_DEPTH_CONDITIONING_SCALE = 0.85
+export const RESTYLE_IP_ADAPTER_SCALE = 0.4
+// flux-general defaults guidance to 3.5; we pin it so the prompt stays legible under the controlnet.
+export const RESTYLE_DEPTH_STYLE_GUIDANCE = 3.5
 
 /**
  * Map the 0..1 `strength` dial to a depth-control model's `guidance_scale`, linearly across fal's
@@ -87,6 +94,7 @@ export function restyleInput(
           image_encoder_path: FLUX_IP_ADAPTER_ENCODER,
           weight_name: FLUX_IP_ADAPTER_WEIGHT,
         })),
+        guidance_scale: RESTYLE_DEPTH_STYLE_GUIDANCE,
         image_size: 'square_hd',
         num_inference_steps: 28,
         num_images: 1,

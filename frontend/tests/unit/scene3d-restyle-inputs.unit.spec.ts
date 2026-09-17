@@ -104,6 +104,7 @@ describe('restyleInput — depth+style (fal-ai/flux-general)', () => {
           { path: FLUX_IP_ADAPTER_PATH, image_url: REF_A, scale: RESTYLE_IP_ADAPTER_SCALE, image_encoder_path: FLUX_IP_ADAPTER_ENCODER, weight_name: FLUX_IP_ADAPTER_WEIGHT },
           { path: FLUX_IP_ADAPTER_PATH, image_url: REF_B, scale: RESTYLE_IP_ADAPTER_SCALE, image_encoder_path: FLUX_IP_ADAPTER_ENCODER, weight_name: FLUX_IP_ADAPTER_WEIGHT },
         ],
+        guidance_scale: 3.5, // pinned so the prompt stays legible under the depth controlnet
         image_size: 'square_hd',
         num_inference_steps: 28,
         num_images: 1,
