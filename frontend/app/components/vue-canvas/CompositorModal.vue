@@ -91,7 +91,7 @@ import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { effectDialTargets, addDialTrack, removeDialTrack, animatedDialKeysOf, type EffectDialTrack, type DialTargetSpec } from '~/lib/motion/effectTracks'
-import { compileBehaviourForLayer } from '~/lib/motionx/adapter/frame'
+import { compileBehaviourForLayer, animatableProperties } from '~/lib/motionx/adapter/frame'
 import { type Behaviour, type Track as MotionxTrack } from '~/lib/motionx'
 import { fillDialTargets } from '~/lib/motion/fillTracks'
 import { getByIdPath } from '~/lib/studio/idPath'
@@ -115,6 +115,7 @@ import { readGrid } from '~/lib/frame/gridConfig'
 import { resolveGrid, type FrameGrid } from '~/lib/frame/grid'
 import CompositorMotionTimeline from '~/components/vue-canvas/compositor/CompositorMotionTimeline.vue'
 import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
+import MotionInspector from '~/components/vue-canvas/compositor/MotionInspector.vue'
 import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
@@ -3737,6 +3738,23 @@ const motionxTracks = computed<MotionxTrack[]>(() => (motionDoc.value as any).mo
 const behaviourPickerOpen = ref(false)
 // Slice 1: preview the new band timeline alongside the old dial timeline.
 const bandUiPreview = ref(true)
+// Slice 2: band-timeline selection (a property band, or a control point on it) drives the
+// contextual inspector in the Motion right column. Writes flow through setMotion({ motionx }).
+const motionSel = ref<{ kind: 'band' | 'point'; path: string; index?: number } | null>(null)
+function updateMotionx(tracks: MotionxTrack[]) {
+  setMotion({ motionx: tracks } as Partial<FrameMotion>)
+}
+function selectMotionBand(path: string) { motionSel.value = { kind: 'band', path } }
+function selectMotionPoint(sel: { path: string; index: number }) { motionSel.value = { kind: 'point', ...sel } }
+function clearMotionSel() { motionSel.value = null }
+// Human label for the selected band's property path (Fill · Gradient, Opacity, …).
+const motionSelLabel = computed<string>(() => {
+  const l = selectedLocal.value, sel = motionSel.value
+  if (!l || !sel) return ''
+  return animatableProperties(l).find((p) => p.path === sel.path)?.label || sel.path.split('.').pop() || ''
+})
+// Selecting a different layer clears the motion selection (bands are per-layer).
+watch(() => selectedLocal.value?.id, () => { motionSel.value = null })
 function addBehaviour(kind: string) {
   const l = selectedLocal.value
   if (!l) return
@@ -7920,7 +7938,10 @@ onUnmounted(() => {
           class="mb-2"
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
           :motionx="motionxTracks" :duration="effectiveMotion.duration" :t="previewT"
-          @select="(id: string) => selectLocal(id)" />
+          :selection="motionSel"
+          @select="(id: string) => selectLocal(id)"
+          @select-band="selectMotionBand" @select-point="selectMotionPoint"
+          @update:motionx="updateMotionx" @before-change="recordHistory" />
         <CompositorMotionTimeline
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
           :motion="effectiveMotion" :t="previewT" :playing="playing"
@@ -8170,6 +8191,15 @@ onUnmounted(() => {
           <span class="text-sm font-medium">{{ selectedLocal ? 'Layer motion' : 'Frame motion' }}</span>
         </div>
         <div class="p-4 flex-1 min-h-0 overflow-y-auto">
+          <!-- Contextual motion inspector (Slice 2): shows the selected band's timing/easing
+               or the selected control point's typed value editor. Decision A — right column. -->
+          <MotionInspector v-if="motionSel"
+            class="mb-3"
+            :motionx="motionxTracks" :selection="motionSel"
+            :duration="effectiveMotion.duration" :t="previewT"
+            :label="motionSelLabel"
+            @update:motionx="updateMotionx" @before-change="recordHistory"
+            @select-point="selectMotionPoint" @clear="clearMotionSel" />
           <!-- Animate: make this still a looping, transparent clip. Lives in Motion (not
                Design) because it is how the layer moves — it composes with the keyframes below. -->
           <CompositorAnimatePanel v-if="selectedLocal?.kind === 'image'"
