@@ -15,13 +15,16 @@ import { effectStackOf, EFFECT_LABELS, writeStackToLayer, type EffectInstance } 
 import { dialSpecsFor, type DialKind } from '~/lib/compositor/effectDials'
 import { linear, easeInOutQuad } from '~/lib/motion/easing'
 import { mixHex } from '~/lib/color/mix'
+import { crossfadeStops, travelStops } from '~/lib/color/gradientTween'
+import type { GradientStop as ColorStop } from '~/lib/color/harmony'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 
 /** One keyframe of a dial track: a value at time `t` (seconds), easing INTO the next
- *  keyframe. `v` is a number for numeric dials, a colour string for colour dials. */
+ *  keyframe. `v` is a number for numeric dials, a colour string for colour dials, or a
+ *  stop array for a gradient dial. */
 export interface DialKeyframe {
   t: number
-  v: number | string
+  v: number | string | ColorStop[]
   ease?: 'linear' | 'easeInOut'
 }
 
@@ -31,6 +34,10 @@ export interface EffectDialTrack {
   target: string
   keyframes: DialKeyframe[]
   space?: 'oklch' | 'srgb'
+  /** For a GRADIENT dial: how two gradient keyframes interpolate. */
+  mode?: 'crossfade' | 'travel'
+  /** For a GRADIENT dial: colour-blend space (default oklab). */
+  blendSpace?: 'oklab' | 'hybrid'
 }
 
 /** One animatable dial of one effect instance on a layer — what the Motion-tab picker and
@@ -104,6 +111,13 @@ function isHex(v: unknown): v is string {
   return typeof v === 'string' && HEX_RE.test(v)
 }
 
+/** Recognises a gradient dial value: a non-empty array of `{pos:number,color:string}`
+ *  stops. Used to route `evaluateDialTrack` to the gradient-interpolation branch. */
+export function isGradientValue(v: unknown): v is ColorStop[] {
+  return Array.isArray(v) && v.length > 0 &&
+    v.every((s) => s && typeof (s as any).pos === 'number' && typeof (s as any).color === 'string')
+}
+
 /**
  * Evaluate one effect-dial track at absolute frame-time `t` (seconds).
  *
@@ -124,7 +138,7 @@ function isHex(v: unknown): v is string {
  * round internally (e.g. posterise rounds `levels`), so the animated ramp stays smooth and a
  * single rounding site owns the quantisation.
  */
-export function evaluateDialTrack(track: EffectDialTrack, t: number): number | string | undefined {
+export function evaluateDialTrack(track: EffectDialTrack, t: number): number | string | ColorStop[] | undefined {
   const kfs = track.keyframes
   if (!kfs || !kfs.length) return undefined
   const sorted = [...kfs].sort((a, b) => a.t - b.t)
@@ -142,6 +156,12 @@ export function evaluateDialTrack(track: EffectDialTrack, t: number): number | s
   const span = Math.max(1e-6, hi.t - lo.t)
   const easeFn = (lo.ease ?? 'easeInOut') === 'linear' ? linear : easeInOutQuad
   const p = easeFn((t - lo.t) / span)
+  if (isGradientValue(lo.v) && isGradientValue(hi.v)) {
+    const space = track.blendSpace ?? 'oklab'
+    return (track.mode ?? 'crossfade') === 'travel'
+      ? travelStops(lo.v, hi.v, p, space)
+      : crossfadeStops(lo.v, hi.v, p, space)
+  }
   if (typeof lo.v === 'number' && typeof hi.v === 'number') {
     return lo.v + (hi.v - lo.v) * p
   }
