@@ -3788,6 +3788,14 @@ function addGlb(url: string) {
   // load silently leaves an empty group; this catch flags it in the list).
   loadGlb(url).catch(() => { glbError[o.id] = true })
 }
+// Rename an object from the tree's inline editor (Scene3DObjectRow's pencil action). The row drafts;
+// this is the sole writer of `name` on the doc. A blank/whitespace name is rejected (keep the old one).
+function renameObject(id: string, name: string) {
+  const o = doc.objects.find((x) => x.id === id)
+  const next = name.trim()
+  if (o && next) o.name = next
+}
+
 function removeObject(id: string) {
   // A group's children are independent doc objects; deleting only the group
   // would leave them orphaned at the root — visually "escaping" the delete.
@@ -4719,6 +4727,7 @@ async function onClose() {
             @select="toggleSelected"
             @remove="removeObject"
             @duplicate="duplicateObject"
+            @rename="renameObject"
             @retry="retryGlb"
             @toggle-visible="(id) => { const found = doc.objects.find((x) => x.id === id); if (found) found.visible = !found.visible }"
             @add-treatment="addTreatment"

@@ -6,8 +6,8 @@
 // Treatments (design spec §2) render as PSEUDO-children between the object row and
 // its real children: they are entries of `object.treatments`, not scene objects, so
 // every treatment event is a separate emit the surface routes to its own handlers.
-import { computed, ref, onBeforeUnmount } from 'vue'
-import { Box, Lightbulb, Folder, Sticker, ChevronRight, ChevronDown, Eye, EyeOff, Copy, Trash2, RotateCcw, Plus } from 'lucide-vue-next'
+import { computed, ref, nextTick, onBeforeUnmount } from 'vue'
+import { Box, Lightbulb, Folder, Sticker, ChevronRight, ChevronDown, Eye, EyeOff, Copy, Trash2, RotateCcw, Plus, Pencil } from 'lucide-vue-next'
 import type { SceneObject } from '~/lib/scene3d/config'
 import { childrenOf } from '~/lib/scene3d/hierarchy'
 import { TREATMENT_KINDS, TREATMENT_LABELS, treatmentsOf, isTreatmentHost, isFinishKind, canTakeFinish, type TreatmentKind } from '~/lib/scene3d/treatments'
@@ -46,7 +46,27 @@ const emit = defineEmits<{
   duplicateModifier: [objectId: string, modifierId: string]
   toggleModifier: [objectId: string, modifierId: string]
   reorderModifier: [objectId: string, fromId: string, toId: string]
+  rename: [id: string, name: string]
 }>()
+
+// Inline rename: the pencil action swaps the name label for an input. Enter (or blur) commits a
+// trimmed non-empty name, Escape cancels. The name lives on the doc, so the surface's `rename`
+// handler is the sole writer — this component only drafts.
+const editing = ref(false)
+const draft = ref('')
+const nameInput = ref<HTMLInputElement | null>(null)
+function startRename(): void {
+  draft.value = props.object.name
+  editing.value = true
+  nextTick(() => { nameInput.value?.focus(); nameInput.value?.select() })
+}
+function commitRename(): void {
+  if (!editing.value) return // Escape already closed it — blur must not re-commit
+  editing.value = false
+  const next = draft.value.trim()
+  if (next && next !== props.object.name) emit('rename', props.object.id, next)
+}
+function cancelRename(): void { editing.value = false }
 
 const children = computed(() => childrenOf(props.objects, props.object.id))
 const treatments = computed(() => treatmentsOf(props.object))
@@ -159,8 +179,11 @@ function onModDropOn(objectId: string, modifierId: string): void {
       </button>
       <span v-else class="w-2 shrink-0" />
       <component :is="icon" class="h-3.5 w-3.5 shrink-0 opacity-60" />
-      <span class="flex-1 truncate" :class="glbError[object.id] ? 'text-red-400' : ''">{{ object.name }}</span>
-      <span v-if="children.length" data-testid="object-row-children" class="shrink-0 text-[10px] tabular-nums opacity-40">{{ children.length }}</span>
+      <input v-if="editing" ref="nameInput" v-model="draft" type="text" data-testid="object-row-name-input"
+        class="min-w-0 flex-1 rounded bg-black/40 px-1 py-0.5 text-xs text-white outline-none ring-1 ring-white/25"
+        @click.stop @pointerdown.stop @keydown.enter.prevent="commitRename" @keydown.esc.prevent="cancelRename" @blur="commitRename" />
+      <span v-else class="flex-1 truncate" :class="glbError[object.id] ? 'text-red-400' : ''">{{ object.name }}</span>
+      <span v-if="children.length && !editing" data-testid="object-row-children" class="shrink-0 text-[10px] tabular-nums opacity-40">{{ children.length }}</span>
       <button v-if="glbError[object.id]" type="button" class="text-red-400 opacity-90 hover:opacity-100"
         title="Load failed — retry" @click.stop="emit('retry', object.id)"><RotateCcw class="h-3.5 w-3.5" /></button>
       <button v-if="canHost" ref="addBtn" type="button" data-testid="add-treatment" aria-label="Add treatment or modifier"
@@ -169,6 +192,7 @@ function onModDropOn(objectId: string, modifierId: string): void {
       <button type="button" class="opacity-0 group-hover:opacity-70" @click.stop="emit('toggleVisible', object.id)">
         <component :is="object.visible ? Eye : EyeOff" class="h-3.5 w-3.5" />
       </button>
+      <button type="button" class="opacity-0 group-hover:opacity-70" title="Rename" aria-label="Rename object" data-testid="rename-object" @click.stop="startRename"><Pencil class="h-3.5 w-3.5" /></button>
       <button type="button" class="opacity-0 group-hover:opacity-70" @click.stop="emit('duplicate', object.id)"><Copy class="h-3.5 w-3.5" /></button>
       <button type="button" class="opacity-0 group-hover:opacity-70" @click.stop="emit('remove', object.id)"><Trash2 class="h-3.5 w-3.5" /></button>
     </div>
@@ -230,6 +254,7 @@ function onModDropOn(objectId: string, modifierId: string): void {
         @select="(id, additive) => emit('select', id, additive)"
         @remove="(id) => emit('remove', id)"
         @duplicate="(id) => emit('duplicate', id)"
+        @rename="(id, name) => emit('rename', id, name)"
         @retry="(id) => emit('retry', id)"
         @toggle-visible="(id) => emit('toggleVisible', id)"
         @add-treatment="(oid, kind) => emit('addTreatment', oid, kind)"
