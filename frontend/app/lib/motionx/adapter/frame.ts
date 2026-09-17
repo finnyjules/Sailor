@@ -1,11 +1,11 @@
 // Frame adapter — the ONE intentionally compositor-coupled file in the motionx package.
 // Applies a resolved motionx property value onto a cloned Frame/Compositor layer. The
 // motionx core stays pure (no compositor imports); only this file bridges the two.
-import { evaluateTracks, type PropertyValue, type Track } from '~/lib/motionx'
+import { evaluateTracks, type BehaviourTarget, type PropertyValue, type Track } from '~/lib/motionx'
 import type { GradientStop as ColorStop } from '~/lib/color/harmony'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { isGradient, type Paint } from '~/lib/compositor/paint'
-import { withScrolledStops, withGradientStops } from '~/lib/compositor/gradientPaint'
+import { withScrolledStops, withGradientStops, paintStopsToColor } from '~/lib/compositor/gradientPaint'
 import { effectStackOf, writeStackToLayer } from '~/lib/compositor/effectStack'
 
 const TRANSFORM = new Set(['x', 'y', 'rotation', 'scale', 'opacity'])
@@ -62,4 +62,45 @@ export function applyMotionxTracks(layers: LocalLayer[], tracks: Track[] | undef
     return l
   })
   return changed ? next : layers
+}
+
+/** Builds a BehaviourTarget over a Frame/Compositor layer: reads current values by
+ *  property path so a Behaviour can compile tracks relative to where the layer already is. */
+export function frameTarget(layer: LocalLayer): BehaviourTarget {
+  const rec = layer as unknown as Record<string, unknown>
+  const fill = rec.fill as Paint | undefined
+  return {
+    get(prop) {
+      if (TRANSFORM.has(prop) && typeof rec[prop] === 'number') return rec[prop] as number
+      if (prop === 'fill' && isGradient(fill)) return paintStopsToColor(fill)
+      return undefined
+    },
+    has(prop) { return this.get(prop) !== undefined },
+  }
+}
+
+/** Plain data list of the properties a layer can be animated on — transform/opacity,
+ *  the fill gradient (+ its scroll phase) when the fill is a gradient, and one entry
+ *  per animatable effect dial. Seed for Phase 3's picker/gallery; not itself UI. */
+export function animatableProperties(layer: LocalLayer): Array<{ path: string; type: 'number' | 'color' | 'gradient'; label: string }> {
+  const id = layer.id
+  const out: Array<{ path: string; type: 'number' | 'color' | 'gradient'; label: string }> = [
+    { path: `layers.${id}.x`, type: 'number', label: 'Position X' },
+    { path: `layers.${id}.y`, type: 'number', label: 'Position Y' },
+    { path: `layers.${id}.scale`, type: 'number', label: 'Scale' },
+    { path: `layers.${id}.rotation`, type: 'number', label: 'Rotation' },
+    { path: `layers.${id}.opacity`, type: 'number', label: 'Opacity' },
+  ]
+  const fill = (layer as unknown as { fill?: Paint }).fill
+  if (isGradient(fill)) {
+    out.push({ path: `layers.${id}.fill`, type: 'gradient', label: 'Fill · Gradient' })
+    out.push({ path: `layers.${id}.fill.phase`, type: 'number', label: 'Fill · Scroll' })
+  }
+  for (const e of effectStackOf(layer)) {
+    // Minimal: expose the gradientMap ramp; scalar dials come with the full registry in Phase 3.
+    if ((e as { type?: string }).type === 'gradientMap') {
+      out.push({ path: `layers.${id}.effects.${e.id}.stops`, type: 'gradient', label: 'Gradient map · Ramp' })
+    }
+  }
+  return out
 }

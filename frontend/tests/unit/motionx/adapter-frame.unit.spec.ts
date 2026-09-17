@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import { applyResolvedValue, applyMotionxTracks } from '~/lib/motionx/adapter/frame'
+import { applyResolvedValue, applyMotionxTracks, frameTarget, animatableProperties } from '~/lib/motionx/adapter/frame'
 import type { GradientStop } from '~/lib/color/harmony'
 import type { Track } from '~/lib/motionx'
 
@@ -43,5 +43,20 @@ describe('applyMotionxTracks', () => {
     const other = layer({ id: 'L2' })
     const out = applyMotionxTracks([layer(), other], [opacityTrack], 0.5)
     expect(out[1]).toBe(other)
+  })
+})
+
+describe('frameTarget + animatableProperties', () => {
+  it('target reads current values', () => {
+    const tg = frameTarget(layer({ opacity: 0.7 }))
+    expect(tg.get('opacity')).toBe(0.7)
+    expect(Array.isArray(tg.get('fill'))).toBe(true) // gradient -> {pos,color}[]
+    expect(tg.get('nope')).toBeUndefined()
+  })
+  it('enumerates transform + fill properties for a gradient-filled layer', () => {
+    const paths = animatableProperties(layer()).map(p => p.path)
+    expect(paths).toContain('layers.L1.opacity')
+    expect(paths).toContain('layers.L1.fill')
+    expect(paths).toContain('layers.L1.fill.phase')
   })
 })
