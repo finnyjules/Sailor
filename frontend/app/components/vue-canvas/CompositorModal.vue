@@ -116,7 +116,9 @@ import { readGrid } from '~/lib/frame/gridConfig'
 import { resolveGrid, type FrameGrid } from '~/lib/frame/grid'
 import CompositorMotionTimeline from '~/components/vue-canvas/compositor/CompositorMotionTimeline.vue'
 import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
+import MotionGallery from '~/components/vue-canvas/compositor/MotionGallery.vue'
 import MotionInspector from '~/components/vue-canvas/compositor/MotionInspector.vue'
+import type { GalleryMove } from '~/lib/motionx/gallery'
 import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
@@ -3748,6 +3750,16 @@ function updateMotionx(tracks: MotionxTrack[]) {
 }
 function selectMotionBand(path: string) { motionSel.value = { kind: 'band', path } }
 function selectMotionBehaviour(id: string) { motionSel.value = { kind: 'behaviour', path: id } }
+// Slice 4: what behaviour groups the selected layer supports (gradient fill / text layer).
+const motionLayerCaps = computed(() => {
+  const l = selectedLocal.value
+  const fill = (l as unknown as { fill?: Paint })?.fill
+  return { gradient: !!l && isGradient(fill), text: l?.kind === 'text' }
+})
+function onGalleryAdd(move: GalleryMove) {
+  addBehaviour(move.kind, move.params ?? {})
+  behaviourPickerOpen.value = false
+}
 function selectMotionPoint(sel: { path: string; index: number }) { motionSel.value = { kind: 'point', ...sel } }
 function clearMotionSel() { motionSel.value = null }
 // Human label for the selected band's property path (Fill · Gradient, Opacity, …).
@@ -7952,10 +7964,9 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Add behaviour: temporary entry point for the unified-motion (motionx)
-             core — compiles a behaviour against the selected layer and appends its
-             tracks to sailor_motion.motionx. Real previewing gallery + band
-             timeline come next; this is deliberately minimal. -->
+        <!-- Add behaviour: the previewing gallery (Slice 4). Grouped In/Loop/Out/Gradient,
+             filtered to what the selected layer supports; each tile plays a live preview
+             and lands a live behaviour band via addBehaviour(kind, params). -->
         <div v-if="selectedLocal" data-testid="behaviour-picker"
           class="glass-panel mb-2 rounded-lg border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-lg px-3 py-2">
           <button type="button" data-testid="add-behaviour-toggle"
@@ -7964,18 +7975,8 @@ onUnmounted(() => {
             <span>{{ behaviourPickerOpen ? '−' : '+' }}</span>
             <span>Add behaviour</span>
           </button>
-          <div v-if="behaviourPickerOpen" class="flex flex-wrap gap-1.5 mt-1.5">
-            <button type="button" data-testid="add-behaviour-fade"
-              class="flex items-center h-7 px-2 rounded text-[11px] cursor-pointer whitespace-nowrap border border-white/10 text-white/70 hover:bg-white/10 transition-colors"
-              @click="addBehaviour('fade')">
-              Fade in
-            </button>
-            <button type="button" data-testid="add-behaviour-gradient-scroll"
-              class="flex items-center h-7 px-2 rounded text-[11px] cursor-pointer whitespace-nowrap border border-white/10 text-white/70 hover:bg-white/10 transition-colors"
-              @click="addBehaviour('gradientScroll')">
-              Scroll
-            </button>
-          </div>
+          <MotionGallery v-if="behaviourPickerOpen" class="mt-2"
+            :caps="motionLayerCaps" @add="onGalleryAdd" @close="behaviourPickerOpen = false" />
         </div>
         <div v-if="selectedLocal" class="mb-2 flex items-center gap-2 text-[11px] text-white/50">
           <button type="button" class="cursor-pointer hover:text-white/80"
