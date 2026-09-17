@@ -16,3 +16,11 @@ export function withScrolledStops(g: Gradient, phase: number): Gradient {
     ? { type: 'radial', stops: scrolled }
     : { type: 'linear', angle: g.angle, stops: scrolled }
 }
+
+/** A new gradient of the same type/angle, stops replaced by `stops` ({pos,color} → {offset,color}). */
+export function withGradientStops(g: Gradient, stops: ColorStop[]): Gradient {
+  const mapped = stops.map(s => ({ offset: s.pos, color: s.color }))
+  return g.type === 'radial'
+    ? { type: 'radial', stops: mapped }
+    : { type: 'linear', angle: g.angle, stops: mapped }
+}
