@@ -1,10 +1,10 @@
 // Pure band model for the Frame motion timeline ("everything is a band").
 // Derives read-only display bands from stored motionx Track[]. Zero Vue /
 // compositor coupling — mirrors the purity of the rest of ~/lib/motionx.
-import type { Track, PropertyType, Keyframe } from '~/lib/motionx'
+import type { Track, PropertyType, Keyframe, StoredBehaviour } from '~/lib/motionx'
 import { evaluateTrack } from '~/lib/motionx'
 
-export type BandKind = 'number' | 'color' | 'gradient'
+export type BandKind = 'number' | 'color' | 'gradient' | 'behaviour'
 
 export interface Band {
   key: string
@@ -15,6 +15,7 @@ export interface Band {
   start: number
   end: number
   keyframes: Keyframe[]
+  behaviourId?: string   // set on behaviour bands (kind 'behaviour')
 }
 
 interface GradStop { pos: number; color: string }
@@ -41,6 +42,7 @@ export function bandsForLayer(
   const out: Band[] = []
   for (const tk of tracks) {
     if (!tk.path.startsWith(prefix)) continue
+    if (tk.behaviourId) continue   // tagged tracks belong to a behaviour band, not a property band
     const { start, end } = trackSpan(tk)
     const label = (labelFor?.(tk.path) || '') || tk.path.split('.').pop() || tk.path
     out.push({
@@ -55,6 +57,41 @@ export function bandsForLayer(
     })
   }
   return out
+}
+
+/** Human, sentence-case labels for the built-in behaviour kinds (extended as kinds land). */
+export const BEHAVIOUR_LABELS: Record<string, string> = {
+  fade: 'Fade',
+  slide: 'Slide',
+  gradientScroll: 'Scroll',
+  gradientMorph: 'Morph',
+}
+export function behaviourLabel(b: { kind: string; params?: Record<string, unknown>; timing?: { loop?: boolean } }): string {
+  const base = BEHAVIOUR_LABELS[b.kind] ?? b.kind
+  const dir = b.params?.dir
+  const withDir = b.kind === 'fade' || b.kind === 'slide' ? `${base} ${dir ?? (b.kind === 'fade' ? 'in' : 'up')}` : base
+  return b.timing?.loop ? `${withDir} · loop` : withDir
+}
+
+/** Behaviour bands for one layer — one labeled band per stored behaviour, spanning its
+ *  timing window. Their compiled tracks are hidden (represented by the band) until Open. */
+export function behaviourBandsForLayer(layerId: string, behaviours: StoredBehaviour[]): Band[] {
+  return behaviours
+    .filter((b) => b.layerId === layerId)
+    .map((b) => {
+      const start = b.timing.start + (b.timing.delay ?? 0)
+      return {
+        key: b.id,
+        kind: 'behaviour' as const,
+        type: 'number' as PropertyType,
+        label: behaviourLabel(b),
+        path: `behaviour:${b.id}`,
+        start,
+        end: start + Math.max(1e-4, b.timing.duration),
+        keyframes: [],
+        behaviourId: b.id,
+      }
+    })
 }
 
 /** Sample a number track's value across its span → points in the unit square.
