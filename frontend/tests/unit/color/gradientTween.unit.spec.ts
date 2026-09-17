@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { hexToOklab } from '~/lib/color/convert'
-import { blendHex, sampleRamp, buildLUT } from '~/lib/color/gradientTween'
+import { blendHex, sampleRamp, buildLUT, resampleStops, pairStops } from '~/lib/color/gradientTween'
 import type { GradientStop } from '~/lib/color/harmony'
 
 function chroma(hex: string): number { const [, a, b] = hexToOklab(hex); return Math.hypot(a, b) }
@@ -53,5 +53,22 @@ describe('buildLUT', () => {
     expect(lut.length).toBe(768)
     expect([lut[0], lut[1], lut[2]]).toEqual([0, 0, 0])
     expect([lut[765], lut[766], lut[767]]).toEqual([255, 255, 255])
+  })
+})
+
+describe('resampleStops / pairStops', () => {
+  it('resamples up to n evenly-positioned stops', () => {
+    const out = resampleStops([{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }], 5)
+    expect(out.length).toBe(5)
+    expect(out.map(s => s.pos)).toEqual([0, 0.25, 0.5, 0.75, 1])
+    expect(out[0].color).toBe('#000000')
+    expect(out[4].color).toBe('#ffffff')
+  })
+  it('returns equal-length arrays paired to the larger count', () => {
+    const a = [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }]          // 2
+    const b = [{ pos: 0, color: '#001122' }, { pos: 0.5, color: '#334455' }, { pos: 1, color: '#66778f' }] // 3
+    const [A, B] = pairStops(a, b)
+    expect(A.length).toBe(3)
+    expect(B.length).toBe(3)
   })
 })

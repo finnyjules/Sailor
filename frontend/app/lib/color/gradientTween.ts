@@ -68,3 +68,32 @@ export function buildLUT(stops: GradientStop[], space: BlendSpace = 'oklab', siz
   }
   return lut
 }
+
+/**
+ * Re-express a ramp as `n` evenly-positioned stops (appearance-preserving):
+ * sample the existing ramp at u = i/(n-1) for each new stop. Returns a copy
+ * of the (sorted) input when `stops.length === n`.
+ */
+export function resampleStops(stops: GradientStop[], n: number, space: BlendSpace = 'oklab'): GradientStop[] {
+  const s = sortStops(stops)
+  if (s.length === n) return s.map(x => ({ pos: x.pos, color: x.color }))
+  const out: GradientStop[] = []
+  for (let i = 0; i < n; i++) {
+    const u = n === 1 ? 0.5 : i / (n - 1)
+    out.push({ pos: u, color: sampleRamp(s, u, space) })
+  }
+  return out
+}
+
+/**
+ * Resample both ramps to `N = max(from.length, to.length)` evenly-positioned
+ * stops so index `i` pairs across `from`/`to` for a stop-by-stop tween.
+ */
+export function pairStops(
+  from: GradientStop[],
+  to: GradientStop[],
+  space: BlendSpace = 'oklab',
+): [GradientStop[], GradientStop[]] {
+  const N = Math.max(from.length, to.length)
+  return [resampleStops(from, N, space), resampleStops(to, N, space)]
+}
