@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import { applyResolvedValue } from '~/lib/motionx/adapter/frame'
+import { applyResolvedValue, applyMotionxTracks } from '~/lib/motionx/adapter/frame'
 import type { GradientStop } from '~/lib/color/harmony'
+import type { Track } from '~/lib/motionx'
 
 const grad = () => ({ type: 'linear' as const, angle: 0, stops: [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ff0000' }] })
 const layer = (over: Partial<any> = {}) => ({ id: 'L1', x: 0.5, y: 0.5, rotation: 0, scale: 1, opacity: 1, fill: grad(), effects: [], ...over } as unknown as LocalLayer)
@@ -23,5 +24,24 @@ describe('applyResolvedValue', () => {
   })
   it('unknown prop returns the input unchanged', () => {
     const l = layer(); expect(applyResolvedValue(l, 'nope', 1)).toBe(l)
+  })
+})
+
+describe('applyMotionxTracks', () => {
+  const opacityTrack: Track = { path: 'layers.L1.opacity', type: 'number', keyframes: [
+    { t: 0, value: 0, ease: 'linear' }, { t: 1, value: 1, ease: 'linear' } ] }
+  it('same reference when idle', () => {
+    const arr = [layer()]
+    expect(applyMotionxTracks(arr, undefined, 0)).toBe(arr)
+    expect(applyMotionxTracks(arr, [], 0)).toBe(arr)
+  })
+  it('applies a resolved value onto the targeted layer', () => {
+    const out = applyMotionxTracks([layer()], [opacityTrack], 0.5)
+    expect((out[0] as any).opacity).toBeCloseTo(0.5, 6)
+  })
+  it('leaves non-targeted layers by identity', () => {
+    const other = layer({ id: 'L2' })
+    const out = applyMotionxTracks([layer(), other], [opacityTrack], 0.5)
+    expect(out[1]).toBe(other)
   })
 })
