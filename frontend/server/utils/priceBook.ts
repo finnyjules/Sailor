@@ -444,8 +444,9 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'recraft-ai/recraft-vectorize': { usd: 0.01, credits: 2, confidence: 'estimate', note: 'hardware-billed, cheap CPU-ish job' },
   // — 3D —
   'fal-ai/hunyuan3d/v2': { usd: 0.48, credits: 72, confidence: 'verified', note: 'textured mesh; white mesh is $0.16' },
+  'fal-ai/hyper3d/rodin': { usd: 0.5, credits: 75, confidence: 'estimate', note: 'Rodin (Deemos); medium quality/PBR — HighPack (4K/high-poly) costs more' },
   'fal-ai/trellis-2': { usd: 0.3, credits: 45, confidence: 'verified', note: '$0.25–0.35 by resolution' },
-  'fal-ai/tripo3d/tripo/v2.5/image-to-3d': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'model page 404s — re-check slug too' },
+  'tripo3d/tripo/v2.5/image-to-3d': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'partner slug (no fal-ai/ prefix); verified against live model page' },
   'fal-ai/triposr': { usd: 0.02, credits: 4, confidence: 'estimate' },
   // — audio / speech —
   'minimax/speech-02-turbo': { usd: 0.03, credits: 6, confidence: 'verified', note: '$0.06/1k chars — priced per ~500-char clip' },

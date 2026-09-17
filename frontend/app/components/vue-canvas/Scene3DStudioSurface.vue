@@ -14,7 +14,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import * as THREE from 'three'
 import {
   Box, Boxes, Plus, Loader2, Upload, Lightbulb, Sparkles, Shuffle, ClipboardPaste,
-  ChevronUp, ChevronRight, Shapes,
+  ChevronUp, ChevronRight, Shapes, ImagePlus,
 } from 'lucide-vue-next'
 import {
   parseDoc, serializeDoc, createPrimitive, createGlbObject, createLight, createGroup, createDecal,
@@ -42,6 +42,7 @@ import { AVAILABLE_FONTS, loadFont, fontDisplayName, fontCacheGet, parseGoogleFo
 import { loadGoogleCatalog, type GoogleFont } from '~/data/google-fonts'
 import { libraryToken, resolveLibraryFace, libraryFamily } from '~/data/library-fonts'
 import FontPicker from '~/components/vue-canvas/FontPicker.vue'
+import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import TexturePicker from '~/components/vue-canvas/TexturePicker.vue'
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
@@ -724,7 +725,15 @@ watch([primMenuOpen, lightMenuOpen, decalMenuOpen, genOpen], (open) => {
 })
 
 // ── Generate panel (text → image review → make 3D → insert) ────────────────
-const GEN_3D_MODELS = ['hunyuan3d-v2', 'trellis-2', 'tripo-v2.5', 'triposr']
+// id must match the server's THREE_D_MODELS keys (server/utils/scene3dGen.ts).
+// `sub` is a 1–2 word steer, kept short to fit the narrow Generate panel.
+const GEN_3D_MODELS: { id: string, name: string, sub: string }[] = [
+  { id: 'hunyuan3d-v2', name: 'Hunyuan3D v2', sub: 'Balanced' },
+  { id: 'rodin', name: 'Rodin', sub: 'Highest quality' },
+  { id: 'trellis-2', name: 'TRELLIS 2', sub: 'Fine detail' },
+  { id: 'tripo-v2.5', name: 'Tripo v2.5', sub: 'Best textures' },
+  { id: 'triposr', name: 'TripoSR', sub: 'Fastest draft' },
+]
 // (`genOpen` is declared with the other add-pill menu flags above.)
 const genPrompt = ref('')
 const genImageUrl = ref<string | null>(null)
@@ -733,6 +742,16 @@ const gen3dModel = ref('hunyuan3d-v2')
 const genTextured = ref(false)
 const genStage = ref<'idle' | 'image' | 'review' | 'making' | 'error'>('idle')
 const genError = ref('')
+// Canvas-image source: a pick from FillImagePicker jumps straight to the review
+// stage, reusing the same model selector / Textured / Make 3D as the text path.
+const genPickerOpen = ref(false)
+function pickCanvasImage(src: string) {
+  genImageUrl.value = src
+  genSeed.value = Math.floor(Math.random() * 2e9)
+  genError.value = ''
+  genStage.value = 'review'
+  genPickerOpen.value = false
+}
 
 // (Generate's outside-click closer is the pill's shared one — see the
 // onAddMenuOutside watch above, which lists genOpen alongside the other three.)
@@ -780,7 +799,13 @@ async function make3d() {
     genImageUrl.value = null
   } catch (err) {
     console.error('[scene3d-studio] gen-3d failed', err)
-    genError.value = '3D generation failed — try again.'
+    // Surface the real reason (fal submit status, timeout, meter refusal, …) —
+    // Nuxt's $fetch error carries the server message in `.data`. A generic
+    // "try again" hides whether it's a bad image, an overloaded model or a
+    // deadline, which is exactly what the user needs to act on.
+    const e = err as { data?: { message?: string, statusMessage?: string }, statusMessage?: string, message?: string }
+    const reason = e?.data?.message || e?.data?.statusMessage || e?.statusMessage || e?.message || ''
+    genError.value = reason ? `3D generation failed: ${reason}` : '3D generation failed — try again.'
     genStage.value = 'error'
   }
 }
@@ -4566,6 +4591,21 @@ async function onClose() {
                 </span>
               </StudioButton>
 
+              <!-- Second source: an image already on the canvas. Opens the shared
+                   canvas-image grid; a pick jumps to the review stage below. -->
+              <div class="my-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.12em] text-white/25">
+                <span class="h-px flex-1 bg-white/10" /> or <span class="h-px flex-1 bg-white/10" />
+              </div>
+              <button
+                type="button"
+                data-testid="gen-use-canvas-image"
+                class="flex w-full items-center justify-center gap-1.5 rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[12px] text-white/80 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                :disabled="genStage === 'making'"
+                @click="genPickerOpen = true"
+              >
+                <ImagePlus class="h-3.5 w-3.5" /> Use an image from the canvas
+              </button>
+
               <template v-if="genImageUrl && genStage !== 'idle'">
                 <div class="mt-3 space-y-2">
                   <img :src="genImageUrl!" alt="" class="h-32 w-full rounded object-cover" />
@@ -4576,12 +4616,17 @@ async function onClose() {
                   </div>
                   <div>
                     <label class="mb-1 block text-[11px] text-white/55">3D model</label>
-                    <select
-                      v-model="gen3dModel"
-                      class="w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[12px] text-white/85 outline-none focus:border-white/25"
-                    >
-                      <option v-for="m in GEN_3D_MODELS" :key="m" :value="m">{{ m }}</option>
-                    </select>
+                    <div class="space-y-1">
+                      <button
+                        v-for="m in GEN_3D_MODELS" :key="m.id" type="button"
+                        class="flex w-full items-center justify-between rounded border px-2 py-1.5 text-left transition-colors cursor-pointer"
+                        :class="gen3dModel === m.id ? 'border-white/30 bg-white/[0.08]' : 'border-white/10 bg-white/[0.04] hover:bg-white/[0.06]'"
+                        @click="gen3dModel = m.id"
+                      >
+                        <span class="text-[12px] text-white/85">{{ m.name }}</span>
+                        <span class="text-[10px] text-white/40">{{ m.sub }}</span>
+                      </button>
+                    </div>
                   </div>
                   <label class="flex cursor-pointer items-center justify-between text-[11px] text-white/55">
                     <span>Textured</span>
@@ -4598,6 +4643,15 @@ async function onClose() {
               </template>
 
               <p v-if="genStage === 'error' && genError" class="mt-2 text-[11px] text-red-400/90">{{ genError }}</p>
+
+              <!-- Canvas-image chooser (teleported modal grid); a pick lands in
+                   the review slot above via pickCanvasImage. -->
+              <AddImageSourcePopover
+                :open="genPickerOpen"
+                picker-only
+                @pick="pickCanvasImage"
+                @close="genPickerOpen = false"
+              />
             </div>
             </div>
           </div>
