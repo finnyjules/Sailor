@@ -93,6 +93,8 @@ import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { effectDialTargets, addDialTrack, removeDialTrack, animatedDialKeysOf, type EffectDialTrack, type DialTargetSpec } from '~/lib/motion/effectTracks'
 import { fillDialTargets } from '~/lib/motion/fillTracks'
 import { getByIdPath } from '~/lib/studio/idPath'
+import { paintStopsToColor } from '~/lib/compositor/gradientPaint'
+import { isGradient } from '~/lib/compositor/paint'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 // F5 Task 3: the shader-catalog-as-a-pass effect inspector — reuses the app's canonical
 // CatalogModal (the same picker ShaderFillEditor.vue mounts for a shader FILL) and the shared
@@ -3679,6 +3681,27 @@ function toggleDialTrack(spec: DialTargetSpec) {
   if (!l) return
   if (dialIsAnimated(spec.path)) {
     setMotion({ tracks: removeDialTrack(motionTracks.value, spec.path) } as Partial<FrameMotion>)
+    return
+  }
+  if (spec.kind === 'gradient') {
+    // Seed from the CURRENT gradient's stops. `gradientMap.stops` targets already
+    // resolve (via getByIdPath) to a GradientMapStop[] — already {pos,color}. A
+    // `layers.<id>.fill` target resolves to the layer's Paint, so read the fill
+    // directly and adapt it via `paintStopsToColor`; a non-gradient fill falls
+    // back to a sensible 2-stop default.
+    const cur = getByIdPath({ layers: [l] }, spec.path)
+    const fill = (l as unknown as { fill?: Paint }).fill
+    const seed = Array.isArray(cur)
+      ? cur
+      : isGradient(fill)
+        ? paintStopsToColor(fill)
+        : [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }]
+    setMotion({
+      tracks: addDialTrack(motionTracks.value, spec.path, previewT.value ?? 0, seed, undefined, {
+        mode: 'crossfade',
+        blendSpace: 'oklab',
+      }),
+    } as Partial<FrameMotion>)
     return
   }
   // Seed the first keyframe from the dial's CURRENT value at the playhead, so the

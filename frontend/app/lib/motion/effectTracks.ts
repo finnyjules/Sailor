@@ -194,11 +194,12 @@ export function addDialTrack(
   tracks: EffectDialTrack[] | undefined,
   target: string,
   t: number,
-  v: number | string,
+  v: number | string | ColorStop[],
   space?: 'oklch' | 'srgb',
+  opts?: { mode?: 'crossfade' | 'travel'; blendSpace?: 'oklab' | 'hybrid' },
 ): EffectDialTrack[] {
   if (tracks && tracks.some((tr) => tr?.target === target)) return tracks
-  const track: EffectDialTrack = { target, keyframes: [{ t, v }], ...(space ? { space } : {}) }
+  const track: EffectDialTrack = { target, keyframes: [{ t, v }], ...(space ? { space } : {}), ...opts }
   return [...(tracks ?? []), track]
 }
 
