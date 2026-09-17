@@ -33,14 +33,15 @@ A **behaviour** is a parameterised generator: `Behaviour { id; kind; params; tim
 
 - **Open = bake.** A behaviour is "live" (edit via params) until you **Open** it; then it expands into raw keyframes on the property lanes and the behaviour dissolves into them (params gone, edit anything). No live params-plus-manual-edits hybrid in v1.
 
-### 5. The authoring UI (one surface)
-Replaces the preset-gallery-panel + dial-timeline split with a single Motion timeline:
+### 5. The authoring UI (one surface) — REFINED (2026-09-17 UX session, "everything is a band")
+Replaces the preset-gallery-panel + dial-timeline split with a single docked Motion timeline. **One visual primitive: the band.**
 
-- **Behaviour bands** on a layer's row (drag to retime; each parametric with an **Open** action).
-- **Twirl a layer open → property keyframe lanes** (Transform, Opacity, each animated effect/fill/gradient property), After-Effects style.
-- **Keyframe value editor** — selecting a keyframe opens a typed editor (number field / colour picker / gradient editor). This is the missing piece today.
-- **Gradient keyframes render as swatches**; the lane carries the Crossfade/Travel + OKLab/Hybrid control.
-- **Add behaviour → a previewing gallery.** Each tile plays a live preview of the move; grouped **In / Loop / Out / Gradient**; **filtered to what the selected layer supports** (text-only moves like Typewriter/Scramble hidden on a shape; Gradient shown only when the fill is a gradient). Reuses the existing kinetic-preset catalog as behaviour generators — not a new list.
+- **Everything is a band.** A behaviour = a labeled band. A property animation = a band whose **interior shows the value over time**: a fade **curve** for numbers, the **colour transition** for colours, the **morphing gradient** (A→B across the band's length) for gradients. Retime = drag the band's ends. There are **no diamonds-on-empty-lanes**.
+- **Control points live on the band** (on the curve / gradient), not floating on a bare lane. Adding a "keyframe" = adding a control point to a band.
+- **Bands are the clean default** (Jitter-like). A live behaviour is just a band, tuned via the inspector. **Open** reveals the band's editable interior (bakes to control points) — it **never switches representation** to a different-looking thing. Keyframe-level detail is opt-in.
+- **The inspector (right panel) is contextual to the selection** (params + rich editors live here — decision A, not popovers): a **behaviour band** → its params + Open; a **property band** → its timing + an **easing/value curve editor**; a **control point** → the full typed value editor (number field / colour picker / the full gradient editor). A strong selection highlight + a header naming the selection ties the timeline to the inspector.
+- **Quick popover on a control point = just the input** (a number field, or a colour swatch+hex) for fast tweaks at the point; anything richer stays in the inspector. Escape/click-away dismisses.
+- **Add behaviour → a previewing gallery.** Each tile plays a live preview of the move; grouped **In / Loop / Out / Gradient**; **filtered to what the selected layer supports** (text-only moves like Typewriter/Scramble hidden on a shape; Gradient shown only when the fill is a gradient). Reuses the existing kinetic-preset catalog as behaviour generators — not a new list. (Jitter reference: behaviours + easing editor, but Jitter exposes no keyframes; we add the band-interior control points as the opt-in depth.)
 
 ## Scope boundaries
 
