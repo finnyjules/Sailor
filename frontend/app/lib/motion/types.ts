@@ -11,7 +11,7 @@
  */
 
 import type { EffectDialTrack } from '~/lib/motion/effectTracks'
-import type { Track as MotionxTrack } from '~/lib/motionx'
+import type { Track as MotionxTrack, StoredBehaviour } from '~/lib/motionx'
 
 export interface LayerAnimSpec {
   presetId: string      // kinetic preset id (subset supported; see evaluate.ts)
@@ -59,6 +59,10 @@ export interface FrameMotion {
    *  authored Behaviours via compileBehaviourForLayer. Absent ⇒ no motionx
    *  animation (byte-identical). Type-only import — no runtime cycle. */
   motionx?: MotionxTrack[]
+  /** Author-time live behaviours (Slice 3). Each compiles to `motionx` tracks tagged with
+   *  its id; editing params recompiles, Open bakes (strips the tag + drops the behaviour).
+   *  Absent ⇒ no live behaviours. Type-only import — no runtime cycle. */
+  behaviours?: StoredBehaviour[]
 }
 
 export const DEFAULT_FRAME_MOTION: FrameMotion = { fps: 30, duration: 4 }

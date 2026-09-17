@@ -92,7 +92,8 @@ import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { effectDialTargets, addDialTrack, removeDialTrack, animatedDialKeysOf, type EffectDialTrack, type DialTargetSpec } from '~/lib/motion/effectTracks'
 import { compileBehaviourForLayer, animatableProperties } from '~/lib/motionx/adapter/frame'
-import { type Behaviour, type Track as MotionxTrack } from '~/lib/motionx'
+import { type Behaviour, type StoredBehaviour, type Timing, type Track as MotionxTrack } from '~/lib/motionx'
+import { setBehaviourTracks, bakeBehaviour, upsertBehaviour, removeBehaviour } from '~/lib/motionx/behaviourStore'
 import { fillDialTargets } from '~/lib/motion/fillTracks'
 import { getByIdPath } from '~/lib/studio/idPath'
 import { paintStopsToColor } from '~/lib/compositor/gradientPaint'
@@ -3738,13 +3739,15 @@ const motionxTracks = computed<MotionxTrack[]>(() => (motionDoc.value as any).mo
 const behaviourPickerOpen = ref(false)
 // Slice 1: preview the new band timeline alongside the old dial timeline.
 const bandUiPreview = ref(true)
-// Slice 2: band-timeline selection (a property band, or a control point on it) drives the
-// contextual inspector in the Motion right column. Writes flow through setMotion({ motionx }).
-const motionSel = ref<{ kind: 'band' | 'point'; path: string; index?: number } | null>(null)
+// Slice 2/3: band-timeline selection (a behaviour band, a property band, or a control point)
+// drives the contextual inspector in the Motion right column. Writes flow through setMotion.
+const motionSel = ref<{ kind: 'band' | 'point' | 'behaviour'; path: string; index?: number } | null>(null)
+const motionBehaviours = computed<StoredBehaviour[]>(() => (motionDoc.value as any).behaviours ?? [])
 function updateMotionx(tracks: MotionxTrack[]) {
   setMotion({ motionx: tracks } as Partial<FrameMotion>)
 }
 function selectMotionBand(path: string) { motionSel.value = { kind: 'band', path } }
+function selectMotionBehaviour(id: string) { motionSel.value = { kind: 'behaviour', path: id } }
 function selectMotionPoint(sel: { path: string; index: number }) { motionSel.value = { kind: 'point', ...sel } }
 function clearMotionSel() { motionSel.value = null }
 // Human label for the selected band's property path (Fill · Gradient, Opacity, …).
@@ -3755,17 +3758,61 @@ const motionSelLabel = computed<string>(() => {
 })
 // Selecting a different layer clears the motion selection (bands are per-layer).
 watch(() => selectedLocal.value?.id, () => { motionSel.value = null })
-function addBehaviour(kind: string) {
+// Slice 3: a behaviour is a live, param-editable band. Adding one stores a StoredBehaviour
+// AND its compiled tracks (tagged with the behaviour id) so the render path (which reads
+// motionx) is unchanged, while the band UI shows a single labeled behaviour band.
+function addBehaviour(kind: string, params: Record<string, unknown> = {}) {
   const l = selectedLocal.value
   if (!l) return
-  const behaviour: Behaviour = {
+  const b: StoredBehaviour = {
     id: 'b' + Date.now(),
+    layerId: l.id,
     kind,
     timing: { start: 0, duration: motionDoc.value.duration ?? 4, loop: kind === 'gradientScroll' },
-    params: kind === 'fade' ? { dir: 'in' } : {},
+    params: { ...(kind === 'fade' ? { dir: 'in' } : {}), ...params },
   }
-  const tracks = compileBehaviourForLayer(l, behaviour)
-  setMotion({ motionx: [...motionxTracks.value, ...tracks] } as Partial<FrameMotion>)
+  const tracks = compileBehaviourForLayer(l, b as Behaviour)
+  recordHistory()
+  setMotion({
+    behaviours: upsertBehaviour(motionBehaviours.value, b),
+    motionx: setBehaviourTracks(motionxTracks.value, b.id, tracks),
+  } as Partial<FrameMotion>)
+  motionSel.value = { kind: 'behaviour', path: b.id }
+}
+// Edit a live behaviour's params/timing → recompile its tracks against the current layer.
+function editBehaviour(id: string, patch: { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }) {
+  const cur = motionBehaviours.value.find((b) => b.id === id)
+  const l = cur ? localLayers.value.find((x) => x.id === cur.layerId) : null
+  if (!cur || !l) return
+  const next: StoredBehaviour = {
+    ...cur, ...patch,
+    timing: { ...cur.timing, ...(patch.timing ?? {}) },
+    params: { ...cur.params, ...(patch.params ?? {}) },
+  }
+  const tracks = compileBehaviourForLayer(l as LocalLayer, next as Behaviour)
+  recordHistory()
+  setMotion({
+    behaviours: upsertBehaviour(motionBehaviours.value, next),
+    motionx: setBehaviourTracks(motionxTracks.value, id, tracks),
+  } as Partial<FrameMotion>)
+}
+// Open = bake: strip the behaviour tag (tracks become plain property bands) + drop the behaviour.
+function openBehaviour(id: string) {
+  recordHistory()
+  setMotion({
+    behaviours: removeBehaviour(motionBehaviours.value, id),
+    motionx: bakeBehaviour(motionxTracks.value, id),
+  } as Partial<FrameMotion>)
+  motionSel.value = null
+}
+// Delete a behaviour entirely (band + its tracks).
+function deleteBehaviour(id: string) {
+  recordHistory()
+  setMotion({
+    behaviours: removeBehaviour(motionBehaviours.value, id),
+    motionx: setBehaviourTracks(motionxTracks.value, id, []),
+  } as Partial<FrameMotion>)
+  motionSel.value = null
 }
 
 // ── F8 Task 6 · signal driven dials in the effect inspector ──────────────────
@@ -7937,10 +7984,11 @@ onUnmounted(() => {
         <MotionBandTimeline v-if="bandUiPreview"
           class="mb-2"
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
-          :motionx="motionxTracks" :duration="effectiveMotion.duration" :t="previewT"
+          :motionx="motionxTracks" :behaviours="motionBehaviours"
+          :duration="effectiveMotion.duration" :t="previewT"
           :selection="motionSel"
           @select="(id: string) => selectLocal(id)"
-          @select-band="selectMotionBand" @select-point="selectMotionPoint"
+          @select-band="selectMotionBand" @select-point="selectMotionPoint" @select-behaviour="selectMotionBehaviour"
           @update:motionx="updateMotionx" @before-change="recordHistory" />
         <CompositorMotionTimeline
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
@@ -8195,11 +8243,12 @@ onUnmounted(() => {
                or the selected control point's typed value editor. Decision A — right column. -->
           <MotionInspector v-if="motionSel"
             class="mb-3"
-            :motionx="motionxTracks" :selection="motionSel"
+            :motionx="motionxTracks" :behaviours="motionBehaviours" :selection="motionSel"
             :duration="effectiveMotion.duration" :t="previewT"
             :label="motionSelLabel"
             @update:motionx="updateMotionx" @before-change="recordHistory"
-            @select-point="selectMotionPoint" @clear="clearMotionSel" />
+            @select-point="selectMotionPoint" @clear="clearMotionSel"
+            @behaviour-change="editBehaviour" @behaviour-open="openBehaviour" @behaviour-delete="deleteBehaviour" />
           <!-- Animate: make this still a looping, transparent clip. Lives in Motion (not
                Design) because it is how the layer moves — it composes with the keyframes below. -->
           <CompositorAnimatePanel v-if="selectedLocal?.kind === 'image'"
