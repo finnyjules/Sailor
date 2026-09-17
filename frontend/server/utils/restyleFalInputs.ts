@@ -27,18 +27,19 @@ import { MOODBOARD_MAX_REFS } from '~~/shared/taste/moodboard'
 const clamp01 = (n: number): number => (Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0)
 const round2 = (n: number): number => Math.round(n * 100) / 100
 
-// ── fal-ai/flux-general depth+style repos. CONFIRMED 2026-09-16 against fal's own docs +
-// HuggingFace (Task 1, restyle-style plan):
-//  · fal schema (https://fal.ai/models/fal-ai/flux-general/api and .../openapi.json) documents the
-//    controlnet fields (path / control_image_url / conditioning_scale) and the ip-adapter fields
-//    (path / image_url / scale / weight_name / image_encoder_path), and gives 'openai/clip-vit-large-patch14'
-//    as the image_encoder_path example — but pins NO concrete controlnet / ip-adapter repo.
-//  · HuggingFace confirms XLabs-AI/flux-controlnet-depth-v3 exists (a FLUX.1-dev depth ControlNet) and
-//    XLabs-AI/flux-ip-adapter's sole weight file is exactly 'ip_adapter.safetensors' (982 MB).
-// The concrete controlnet/ip-adapter repos are still doc-consistent candidates, not a fal-canonical
-// pin: a wrong repo passes at submit and fails at result (the S7 `control_lora_image_url` lesson), so
-// the env-gated Task-5 paid run is the concrete end-to-end validator.
-export const FLUX_DEPTH_CONTROLNET_PATH = 'XLabs-AI/flux-controlnet-depth-v3'
+// ── fal-ai/flux-general depth+style repos. fal loads the controlnet with diffusers'
+// FluxControlNetModel.from_pretrained(path) and the IP-adapter with pipe.load_ip_adapter(path,
+// weight_name, image_encoder_path), so BOTH must be diffusers-loadable HF repos (fal's schema names
+// the fields but pins no repo).
+//  · Depth controlnet: MUST be diffusers-format (a repo with config.json + diffusion_pytorch_model
+//    .safetensors). A raw XLabs checkpoint (XLabs-AI/flux-controlnet-depth-v3) is NOT — fal 422s
+//    "Failed to load controlnet … config_url=None" (caught live 2026-09-16, Julien's moodboard run).
+//    jasperai/Flux.1-dev-Controlnet-Depth IS diffusers-format (its own example loads it via
+//    from_pretrained + controlnet_conditioning_scale=0.6, matching ours). Verified HF 2026-09-16.
+//  · IP-adapter: XLabs-AI/flux-ip-adapter is the repo diffusers' FLUX load_ip_adapter example uses;
+//    its sole weight is 'ip_adapter.safetensors', encoder 'openai/clip-vit-large-patch14'.
+// The Task-5 paid run remains the end-to-end validator (a wrong repo passes at submit, fails at result).
+export const FLUX_DEPTH_CONTROLNET_PATH = 'jasperai/Flux.1-dev-Controlnet-Depth'
 export const FLUX_IP_ADAPTER_PATH = 'XLabs-AI/flux-ip-adapter'
 export const FLUX_IP_ADAPTER_ENCODER = 'openai/clip-vit-large-patch14'
 export const FLUX_IP_ADAPTER_WEIGHT = 'ip_adapter.safetensors'

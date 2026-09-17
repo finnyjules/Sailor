@@ -124,7 +124,7 @@ describe('restyleInput — depth+style (fal-ai/flux-general)', () => {
     expect(call.input.image_size).toBe('square_hd')
     expect(call.input.output_format).toBe('png')
     expect(call.input.num_inference_steps).toBe(28)
-    expect(FLUX_DEPTH_CONTROLNET_PATH).toBe('XLabs-AI/flux-controlnet-depth-v3')
+    expect(FLUX_DEPTH_CONTROLNET_PATH).toBe('jasperai/Flux.1-dev-Controlnet-Depth')
     expect(FLUX_IP_ADAPTER_PATH).toBe('XLabs-AI/flux-ip-adapter')
     expect(FLUX_IP_ADAPTER_ENCODER).toBe('openai/clip-vit-large-patch14')
     expect(FLUX_IP_ADAPTER_WEIGHT).toBe('ip_adapter.safetensors')
