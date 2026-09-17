@@ -120,3 +120,22 @@ export function crossfadeLUT(
   }
   return lut
 }
+
+/**
+ * Travel two ramps as paired stops: pair `from`/`to` to `N = max(length)`,
+ * then per index ease the colour (`blendHex`) and lerp the position. Byte-exact
+ * at `t=0`/`t=1` (equals `pairStops(from, to)[0]` / `[1]`) because `blendHex`
+ * returns the raw endpoint colour at `t<=0`/`t>=1` and `pos + (…)*0 === pos`.
+ */
+export function travelStops(
+  from: GradientStop[],
+  to: GradientStop[],
+  t: number,
+  space: BlendSpace = 'oklab',
+): GradientStop[] {
+  const [A, B] = pairStops(from, to, space)
+  return A.map((a, i) => ({
+    color: blendHex(a.color, B[i].color, t, space),
+    pos: a.pos + (B[i].pos - a.pos) * t,
+  }))
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { hexToOklab } from '~/lib/color/convert'
-import { blendHex, sampleRamp, buildLUT, resampleStops, pairStops, crossfadeLUT } from '~/lib/color/gradientTween'
+import { blendHex, sampleRamp, buildLUT, resampleStops, pairStops, crossfadeLUT, travelStops } from '~/lib/color/gradientTween'
 import type { GradientStop } from '~/lib/color/harmony'
 
 function chroma(hex: string): number { const [, a, b] = hexToOklab(hex); return Math.hypot(a, b) }
@@ -80,5 +80,19 @@ describe('crossfadeLUT', () => {
   it('equals the source LUTs at the endpoints', () => {
     expect(Array.from(crossfadeLUT(FROM, TO, 0))).toEqual(Array.from(buildLUT(FROM)))
     expect(Array.from(crossfadeLUT(FROM, TO, 1))).toEqual(Array.from(buildLUT(TO)))
+  })
+})
+
+describe('travelStops', () => {
+  it('lands on the paired endpoints', () => {
+    const [A, B] = pairStops(FROM, TO)
+    expect(travelStops(FROM, TO, 0)).toEqual(A)
+    expect(travelStops(FROM, TO, 1)).toEqual(B)
+  })
+  it('lerps a stop position across the transition', () => {
+    // paired FROM (3→5) sits at even positions; TO keeps its real positions.
+    const [A, B] = pairStops(FROM, TO)
+    const mid = travelStops(FROM, TO, 0.5)
+    expect(mid[1].pos).toBeCloseTo((A[1].pos + B[1].pos) / 2, 6)
   })
 })
