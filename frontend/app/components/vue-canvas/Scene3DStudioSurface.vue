@@ -85,6 +85,7 @@ import { fitGlbGroup } from '~/lib/scene3d/fitGlb'
 import { svgToLeafPaths, outlineStrokes, type SvgLeafPath } from '~/composables/useVectorSvg'
 import { buildSvgObjects, SVG_SPLIT_THRESHOLD } from '~/lib/scene3d/svgImport'
 import { renderPasses, renderObjectPasses, screenRectOfBox } from '~/lib/scene3d/passes'
+import { cinematicScopeWarning } from '~/lib/scene3d/pathtrace/scope'
 import { restyleInputHash, restyleStyleSig, shouldRunRestyle } from '~/lib/scene3d/restyleCache'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { useMoodboards } from '~/composables/useMoodboards'
@@ -616,6 +617,26 @@ watch(playing, (v) => {
 
 const snap = ref(false)
 const lightView = ref(false)  // clay + light-widget preview mode (Task 1/3 engine support)
+// Cinematic (path-traced) view mode. Preview / Light / Cinematic are mutually-exclusive VIEW
+// modes shown as one segmented control — a single boolean each, exclusivity enforced in
+// setViewMode. Cinematic is the expensive path-tracer (a segmented, never a hidden dropdown, so
+// you always see it is on).
+const cinematic = ref(false)
+const cineStatus = ref({ samples: 0, compiling: false }) // drives the "refining…" indicator
+const cineWarning = ref('')   // one-time warn-then-render pill for shader-materials/treatments
+let cineWarned = false
+type ViewMode = 'preview' | 'light' | 'cinematic'
+const viewMode = computed<ViewMode>(() => cinematic.value ? 'cinematic' : lightView.value ? 'light' : 'preview')
+function setViewMode(m: ViewMode): void {
+  if (m === 'cinematic' && !cinematic.value && !cineWarned) {
+    cineWarned = true
+    const w = cinematicScopeWarning(doc)
+    if (w) { cineWarning.value = w; setTimeout(() => { cineWarning.value = '' }, 6500) }
+  }
+  lightView.value = m === 'light'
+  cinematic.value = m === 'cinematic'
+}
+watch(cinematic, (on) => { void engine?.setCinematic(on) })
 const baking = ref(false)
 const videoBaking = ref(false)  // reentrancy guard for bakeSceneVideo (separate from `baking`, the image-bake guard — footer video actions + the Motion panel's Export video button all funnel through bakeSceneVideo)
 const bakeError = ref('')       // last export failure message (inline "retry")
@@ -2250,7 +2271,11 @@ onMounted(() => {
   ;(window as any).__scene3dCineStep = (n: number) => { for (let i = 0; i < n; i++) engine?.render(0); return engine?.cinematicStatus() }
   ;(window as any).__scene3dCineStatus = () => engine?.cinematicStatus() ?? null
   ;(window as any).__scene3dCineCanvas = () => (engine as any)?.renderer?.domElement?.toDataURL('image/png') ?? ''
-  ;(window as any).__scene3dCineSize = (n: number) => { (engine as any)?.renderer?.setSize(n, n, false) }
+  ;(window as any).__scene3dCineSize = (n: number) => {
+    const e = engine as any
+    e?.renderer?.setSize(n, n, false)
+    if (e?.camera) { e.camera.aspect = 1; e.camera.updateProjectionMatrix() }
+  }
   // A deterministic MOVING-frame oracle for the S6 motion tests: the existing __scene3d* hooks
   // render at t=0 (still), where velocity blur / ghost trails have nothing to show. This runs the
   // full sample → velocity/ghost push → render path at an arbitrary t01 (renderMotionFrame does
@@ -2463,6 +2488,7 @@ onMounted(() => {
       engine?.render((performance.now() - scene3dMountedAt) / 1000)
       updateLightLabels()
     }
+    if (cinematic.value && engine) cineStatus.value = engine.cinematicStatus()
     raf = requestAnimationFrame(loop)
   }
   raf = requestAnimationFrame(loop)
@@ -2517,9 +2543,12 @@ watch(doc, () => {
   // rip them out of the pivot after the first delta and leave the rest of the
   // gesture moving nothing. The viewport is already live during that window
   // (the pivot moves the roots directly), and onPivotDragEnd runs the sync.
-  if (!interaction?.pivotDragActive) engine?.syncFromDoc(doc)
+  if (!interaction?.pivotDragActive) { engine?.syncFromDoc(doc); engine?.cinematicRefresh() }
   scheduleHistory()
 }, { deep: true })
+// An environment switch must re-bake the equirect the path-tracer lights from (the deep watch
+// above only rebuilds the trace geometry). No-op unless Cinematic is active.
+watch(() => doc.lighting.environment, () => engine?.cinematicRefresh(true))
 // Look change → apply the whole recipe (direction, env, preset, default dials),
 // then recompute the dial-driven fields from those defaults.
 watch(() => doc.lighting.look, (id) => {
@@ -4452,9 +4481,31 @@ async function onClose() {
           <button type="button" class="rounded px-2 py-1 text-xs"
             :class="snap ? 'bg-white/25 text-white' : 'bg-white/10 text-white/70 hover:bg-white/15'"
             @click="snap = !snap">snap</button>
-          <button type="button" class="flex items-center gap-1 rounded px-2 py-1 text-xs"
-            :class="lightView ? 'bg-white/25 text-white' : 'bg-white/10 text-white/70 hover:bg-white/15'"
-            @click="lightView = !lightView"><Lightbulb class="size-3.5" /> Light</button>
+          <!-- Viewport mode: Preview (fast raster) · Light (clay + light widgets) · Cinematic
+               (path-traced). Segmented, not a dropdown, so the expensive Cinematic state is always
+               visible. -->
+          <div class="flex items-center gap-0.5 rounded bg-white/10 p-0.5">
+            <button type="button" class="rounded px-2 py-0.5 text-xs"
+              :class="viewMode === 'preview' ? 'bg-white/25 text-white' : 'text-white/70 hover:text-white'"
+              @click="setViewMode('preview')">Preview</button>
+            <button type="button" class="flex items-center gap-1 rounded px-2 py-0.5 text-xs"
+              :class="viewMode === 'light' ? 'bg-white/25 text-white' : 'text-white/70 hover:text-white'"
+              @click="setViewMode('light')"><Lightbulb class="size-3.5" /> Light</button>
+            <button type="button" class="flex items-center gap-1 rounded px-2 py-0.5 text-xs"
+              :class="viewMode === 'cinematic' ? 'bg-white/25 text-white' : 'text-white/70 hover:text-white'"
+              @click="setViewMode('cinematic')"><Sparkles class="size-3.5" /> Cinematic</button>
+          </div>
+        </div>
+
+        <!-- Cinematic "refining…" indicator: unobtrusive, top-right; fades once converged. -->
+        <div v-if="webglOk && viewMode === 'cinematic'"
+             class="pointer-events-none absolute right-3 top-3 z-20 rounded-full bg-black/60 px-3 py-1 text-[11px] text-white/85 backdrop-blur">
+          {{ cineStatus.compiling ? 'Preparing…' : cineStatus.samples >= 256 ? 'Ray-traced' : `Refining… ${Math.min(99, Math.round(cineStatus.samples / 256 * 100))}%` }}
+        </div>
+        <!-- Warn-then-render: one-time heads-up when the scene has effects Cinematic can't trace. -->
+        <div v-if="cineWarning"
+             class="pointer-events-none absolute left-1/2 top-14 z-20 -translate-x-1/2 rounded-full bg-black/80 px-3 py-1.5 text-[12px] text-amber-200/90 shadow-lg">
+          {{ cineWarning }}
         </div>
 
         <!-- Contextual selection actions, top-center. Only while not sculpting and the
