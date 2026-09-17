@@ -1,7 +1,7 @@
 // Frame adapter — the ONE intentionally compositor-coupled file in the motionx package.
 // Applies a resolved motionx property value onto a cloned Frame/Compositor layer. The
 // motionx core stays pure (no compositor imports); only this file bridges the two.
-import { evaluateTracks, type BehaviourTarget, type PropertyValue, type Track } from '~/lib/motionx'
+import { compileBehaviour, evaluateTracks, type Behaviour, type BehaviourTarget, type PropertyValue, type Track } from '~/lib/motionx'
 import type { GradientStop as ColorStop } from '~/lib/color/harmony'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { isGradient, type Paint } from '~/lib/compositor/paint'
@@ -103,4 +103,12 @@ export function animatableProperties(layer: LocalLayer): Array<{ path: string; t
     }
   }
   return out
+}
+
+/** Compile a behaviour for one layer: compiles via the core against the layer's
+ *  current values, then prefixes each track path with `layers.<id>.` so the
+ *  resulting tracks are ready for `applyMotionxTracks` / storage on the frame doc. */
+export function compileBehaviourForLayer(layer: LocalLayer, behaviour: Behaviour): Track[] {
+  const target = frameTarget(layer)
+  return compileBehaviour(behaviour, target).map((tr) => ({ ...tr, path: `layers.${layer.id}.${tr.path}` }))
 }
