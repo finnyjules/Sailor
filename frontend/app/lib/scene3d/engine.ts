@@ -18,7 +18,7 @@ import { orderParentsFirst, worldMatrixOf } from './hierarchy'
 import { loadGlb, clearGlbCache, ensureUv } from './glb'
 import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/contextRegistry'
 import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/lib/scene3d/outlines'
-import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime } from './materials'
+import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime, type RestyleSpec } from './materials'
 import { refreshImageBounds, type ImageUniforms } from './imageShader'
 import { applyModifiers, applyModifierStack, type ModifierApplyCtx } from '~/lib/scene3d/modifiers'
 import { PRIMITIVE_PARAMS, paramValue, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
@@ -491,8 +491,14 @@ export function buildGeometry(
  *  updated in place while its type holds, same as the primitive path. Off
  *  restores the baked material and frees the override. Light View swaps the
  *  shared clay on top without losing either. */
-function syncGlbMaterials(root: THREE.Object3D, obj: GlbObject, lightView: boolean, clay: THREE.Material, ownerId: string): void {
+function syncGlbMaterials(root: THREE.Object3D, obj: GlbObject, lightView: boolean, clay: THREE.Material, ownerId: string, restyle: RestyleSpec): void {
   const override = obj.materialOverride === true
+  // S7.1: an AI restyle projects its cached result onto the surface through the object's MATERIAL
+  // (restyleProjection.ts). Imported loader materials aren't ours to inject, so a restyle needs a
+  // material WE build — we therefore build the override material whenever a restyle is active, even
+  // if the user hasn't overridden the base look. Without this, a restyle on a generated GLB (Julien's
+  // flower) is baked + cached but never painted. Absent restyle ⇒ this is byte-identical to before.
+  const useOverride = override || !!restyle
   // Faceted/prismatic gradient shading samples per-face extent attributes
   // (aFaceMin/aFaceMax) that only primitive geometry bakes — imported meshes
   // fall back to the smooth ramp.
@@ -503,14 +509,15 @@ function syncGlbMaterials(root: THREE.Object3D, obj: GlbObject, lightView: boole
     const m = c as THREE.Mesh
     if (!m.isMesh) return
     if (m.userData.origMaterial === undefined) m.userData.origMaterial = m.material
-    if (override) {
+    if (useOverride) {
       let ov = m.userData.overrideMaterial as THREE.Material | undefined
       // No Vary strength: `GlbObject` has no `modifiers` bag and no cloner, so an
       // imported mesh's geometry never carries the `varyTint` stamp and there is
-      // nothing for a strength to blend. Omitting it is the whole story here.
-      if (!ov || !updateMaterial(ov, mat, m.geometry)) {
+      // nothing for a strength to blend. Omitting it is the whole story here. The restyle
+      // spec IS threaded (last arg) so the projection coats the imported surface.
+      if (!ov || !updateMaterial(ov, mat, m.geometry, undefined, undefined, restyle)) {
         if (ov) disposeMaterial(ov)
-        ov = materialFor(mat, m.geometry, ownerId)
+        ov = materialFor(mat, m.geometry, ownerId, undefined, undefined, restyle)
         m.userData.overrideMaterial = ov
       }
       // Same in-place bbox refresh as the primitive path: a gradient spans the
@@ -580,6 +587,13 @@ export class SceneEngine {
    *  a miss for a restyle host makes its stage composite draw the plain object (a no-op). */
   private restyleTextures = new Map<string, THREE.Texture>()
   setRestyleTextures(m: Map<string, THREE.Texture>): void { this.restyleTextures = m }
+  /** The restyle spec (enabled plan + its decoded texture) for one object, or null when either is
+   *  absent. Shared by the primitive and GLB material paths so both project a cached restyle. */
+  private restyleSpecFor(obj: SceneObject): RestyleSpec {
+    const rp = objectRestylePlan(obj)
+    const rtex = rp ? this.restyleTextures.get(obj.id) ?? null : null
+    return rp && rtex ? { t: rp, tex: rtex } : null
+  }
   readonly grid: THREE.GridHelper
   /** Stable per-instance id, never reused — see `_nextSceneEngineId`'s doc above. */
   readonly id: string = `scene3d${_nextSceneEngineId++}`
@@ -1146,7 +1160,8 @@ export class SceneEngine {
           // The load can finish after later syncs already ran against the empty
           // placeholder — apply against the LATEST object state (stamped on the
           // root each sync), not the one captured when the load started.
-          syncGlbMaterials(root!, (root!.userData.glbObj as GlbObject | undefined) ?? obj, this.lightView, this.clay, this.id)
+          const glbObj = (root!.userData.glbObj as GlbObject | undefined) ?? obj
+          syncGlbMaterials(root!, glbObj, this.lightView, this.clay, this.id, this.restyleSpecFor(glbObj))
           // The interior meshes only exist now — attach any edge treatments to them.
           syncTreatmentShells(root!, (root!.userData.glbObj as GlbObject | undefined) ?? obj, { lightView: this.lightView })
         }).catch(() => { /* surface shows the error state; the group stays empty */ })
@@ -1270,7 +1285,7 @@ export class SceneEngine {
       if (imgUniforms) refreshImageBounds(imgUniforms, mesh.geometry)
     } else if (obj.kind === 'glb') {
       root.userData.glbObj = obj
-      syncGlbMaterials(root, obj, this.lightView, this.clay, this.id)
+      syncGlbMaterials(root, obj, this.lightView, this.clay, this.id, this.restyleSpecFor(obj))
     } else if (obj.kind === 'light') {
       const light = root.userData.light as THREE.Light
       const color = new THREE.Color(stripAlpha(obj.color))
