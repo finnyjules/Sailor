@@ -294,6 +294,16 @@ export const MODIFIER_SPECS: ParamSpec[] = [
   { key: 'booleanBlend', label: 'Blend', hint: 'Rounds the join with a smooth fillet — 0 keeps the seam sharp', min: 0, max: 1, step: 0.01, default: 0 },
   { key: 'booleanResolution', label: 'Resolution', hint: 'How finely the combined shape is rebuilt — higher keeps more detail', min: 8, max: 64, step: 1, default: 32 },
 
+  // Facet — a geometry PRODUCER: it re-cuts the shape as a convex hull over the original corners
+  // plus new surface-sampled points, adding facets like a jeweller's cut. `facetCount` is how many
+  // extra facet points to sample (more = finer facets); `facetJitter` scatters them off the surface
+  // for an irregular raw-crystal look (0 = a clean cut); `facetSeed` shuffles the arrangement. It
+  // convex-hulls, so concavities are filled — that is the intended "gemify" behaviour. Read by
+  // `applyFacet`; count 0 with jitter 0 is a no-op.
+  { key: 'facetCount', label: 'Facets', hint: 'How many extra facets to cut into the shape — higher gives finer facets', min: 0, max: 400, step: 1, default: 32 },
+  { key: 'facetJitter', label: 'Roughness', hint: 'Scatters facets off the surface for a raw-crystal look — 0 is a clean cut', min: 0, max: 1, step: 0.01, default: 0 },
+  { key: 'facetSeed', label: 'Facet seed', hint: 'Shuffles the facets into a different arrangement', min: 0, max: 99, step: 1, default: 0 },
+
   // Cloner keys. Named clone* rather than array* because this is its own panel
   // section now and is meant to accumulate more clone options — an arrayCount
   // sitting beside a future cloneMode/cloneStep* would be inconsistent from day one.

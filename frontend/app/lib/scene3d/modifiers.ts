@@ -15,6 +15,7 @@
 import * as THREE from 'three'
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { SimplifyModifier } from 'three/examples/jsm/modifiers/SimplifyModifier.js'
+import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js'
 import { meshDataFromGeometry, geometryFromMeshData, type MeshData } from '~/lib/scene3d/mesh'
 import { remesh, boundsOf } from '~/lib/scene3d/voxel'
 import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
@@ -489,6 +490,90 @@ function applyLattice(geo: THREE.BufferGeometry, bulge: number, axis: number, bi
 
 // --- geometry producers ------------------------------------------------------
 
+/** Seeded mulberry32 (self-contained; matches gem.ts's generator family). */
+function facetRng(seed: number): () => number {
+  let a = (seed | 0) + 0x6d2b79f5
+  return () => {
+    a |= 0; a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/**
+ * Facet — re-cut the shape as the convex hull of its original corners PLUS `count`
+ * new points sampled over its surface (area-weighted). More points ⇒ more facets;
+ * `jitter` scatters the sampled points off the surface along their normal for a raw-
+ * crystal look (0 = a clean cut). It convex-hulls, so concavities are filled — the
+ * intended "gemify / add facets" behaviour. `count === 0 && jitter === 0` is a no-op
+ * (returns the input untouched — the byte-identity contract for a disabled row).
+ */
+function applyFacet(geo: THREE.BufferGeometry, count: number, jitter: number, seed: number): THREE.BufferGeometry {
+  const c = Math.max(0, Math.min(400, Math.round(count)))
+  const j = Math.max(0, Math.min(1, jitter))
+  if (c === 0 && j === 0) return geo
+
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  const index = geo.getIndex()
+  const triCount = index ? index.count / 3 : pos.count / 3
+  if (triCount < 1) return geo
+
+  // Bounding-box centre + radius drive the jitter scale (so it reads the same at any object size).
+  const box = new THREE.Box3().setFromBufferAttribute(pos)
+  const radius = Math.max(1e-4, box.getSize(new THREE.Vector3()).length() * 0.5)
+
+  const vi = (t: number, k: number) => (index ? index.getX(t * 3 + k) : t * 3 + k)
+  const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3()
+
+  // The original corners anchor the silhouette (they are the extreme points a clean cut keeps).
+  // Cap how many we carry so a dense input mesh cannot blow the hull cost.
+  const pts: THREE.Vector3[] = []
+  const vertStep = Math.max(1, Math.ceil(pos.count / 400))
+  for (let i = 0; i < pos.count; i += vertStep) pts.push(new THREE.Vector3().fromBufferAttribute(pos, i))
+
+  // Cumulative triangle areas for area-weighted sampling.
+  const cum = new Float64Array(triCount)
+  let total = 0
+  for (let t = 0; t < triCount; t++) {
+    va.fromBufferAttribute(pos, vi(t, 0)); vb.fromBufferAttribute(pos, vi(t, 1)); vc.fromBufferAttribute(pos, vi(t, 2))
+    total += vb.clone().sub(va).cross(vc.clone().sub(va)).length() * 0.5
+    cum[t] = total
+  }
+
+  const rng = facetRng(seed)
+  const nrm = new THREE.Vector3()
+  for (let s = 0; s < c; s++) {
+    // pick a triangle weighted by area (linear scan is fine at these counts)
+    const target = rng() * total
+    let t = 0
+    while (t < triCount - 1 && cum[t]! < target) t++
+    va.fromBufferAttribute(pos, vi(t, 0)); vb.fromBufferAttribute(pos, vi(t, 1)); vc.fromBufferAttribute(pos, vi(t, 2))
+    // uniform barycentric point in the triangle
+    let u = rng(), v = rng()
+    if (u + v > 1) { u = 1 - u; v = 1 - v }
+    const p = new THREE.Vector3()
+      .addScaledVector(va, 1 - u - v).addScaledVector(vb, u).addScaledVector(vc, v)
+    if (j > 0) {
+      nrm.copy(vb).sub(va).cross(vc.clone().sub(va)).normalize()
+      p.addScaledVector(nrm, radius * j * (rng() * 2 - 1) * 0.4)
+      // a little sideways scatter too, so flat faces gain facets and not just bulge
+      p.x += radius * j * (rng() * 2 - 1) * 0.15
+      p.y += radius * j * (rng() * 2 - 1) * 0.15
+      p.z += radius * j * (rng() * 2 - 1) * 0.15
+    }
+    pts.push(p)
+  }
+
+  try {
+    const hull = new ConvexGeometry(pts)
+    if (hull.getAttribute('position').count < 12) { hull.dispose(); return geo }
+    return hull
+  } catch {
+    return geo
+  }
+}
+
 /** Reverse the winding of every triangle in a NON-INDEXED geometry by swapping the first and
  *  third vertex of each triple across every attribute. A reflection is orientation-reversing,
  *  so the reflected copy's faces would point inward; flipping the winding back makes
@@ -925,7 +1010,7 @@ export function mergeClones(geo: THREE.BufferGeometry, recipes: CloneRecipe[]): 
  *  middle rows are EXACTLY the deforms, so "any middle row" and "any deform" coincide and the
  *  byte-identity oracle is untouched. */
 const DEFORM_KINDS: readonly ModifierKind[] = ['taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice']
-const PRODUCER_KINDS: readonly ModifierKind[] = ['array', 'shatter', 'mirror', 'decimate', 'voxelise', 'boolean']
+const PRODUCER_KINDS: readonly ModifierKind[] = ['array', 'shatter', 'mirror', 'decimate', 'voxelise', 'boolean', 'facet']
 const isDeformKind = (k: ModifierKind): boolean => (DEFORM_KINDS as readonly string[]).includes(k)
 const isProducerKind = (k: ModifierKind): boolean => (PRODUCER_KINDS as readonly string[]).includes(k)
 /** An enabled middle row is either a deformer or a producer — the reorderable region between the
@@ -955,6 +1040,7 @@ function applyMiddleRow(geo: THREE.BufferGeometry, row: ModifierInstance, ctx?: 
     case 'shatter': return applyShatter(geo, m('shatter'), Math.round(m('shatterSeed')))
     case 'mirror': return applyMirror(geo, Math.round(m('mirrorAxis')), m('mirrorOffset'))
     case 'decimate': return applyDecimate(geo, m('decimate'))
+    case 'facet': return applyFacet(geo, Math.round(m('facetCount')), m('facetJitter'), Math.round(m('facetSeed')))
     case 'voxelise': return applyVoxelise(geo, Math.round(m('voxelResolution')))
     case 'boolean': {
       // The engine resolves `refObjectId` → the sibling geometry (baked into this object's local

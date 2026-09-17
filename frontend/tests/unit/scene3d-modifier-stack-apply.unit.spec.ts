@@ -1091,3 +1091,35 @@ describe('boolean producer', () => {
     expect(out.getAttribute('position').count).toBeLessThanOrEqual(VERTEX_BUDGET)
   }, 15000)
 })
+
+describe('facet producer', () => {
+  const facetRow = (facetCount: number, facetJitter = 0, facetSeed = 0): ModifierInstance =>
+    ({ ...createModifier('facet'), facetCount, facetJitter, facetSeed })
+  const vcount = (g: THREE.BufferGeometry) => g.getAttribute('position').count
+
+  it('a disabled facet row returns the input untouched (byte-identity)', () => {
+    const g = new THREE.BoxGeometry(1, 1, 1)
+    expect(applyModifierStack(g, [{ ...facetRow(60), enabled: false }])).toBe(g)
+  })
+
+  it('re-cuts the shape into a solid faceted hull with UVs implied by the pipeline', () => {
+    const out = applyModifierStack(new THREE.BoxGeometry(1, 1, 1), [facetRow(80)])
+    expect(vcount(out)).toBeGreaterThanOrEqual(12)
+    // a real re-cut, not the passthrough box (24)
+    expect(vcount(out)).toBeGreaterThan(24)
+  })
+
+  it('more facets adds vertices', () => {
+    const low = vcount(applyModifierStack(new THREE.SphereGeometry(0.6, 24, 16), [facetRow(12)]))
+    const high = vcount(applyModifierStack(new THREE.SphereGeometry(0.6, 24, 16), [facetRow(200)]))
+    expect(high).toBeGreaterThan(low)
+  })
+
+  it('is deterministic per seed and varies with the seed under jitter', () => {
+    const mk = (seed: number) => Array.from(
+      applyModifierStack(new THREE.SphereGeometry(0.6, 24, 16), [facetRow(80, 0.5, seed)]).getAttribute('position').array,
+    )
+    expect(mk(3)).toEqual(mk(3))
+    expect(mk(3)).not.toEqual(mk(7))
+  })
+})
