@@ -1,4 +1,5 @@
 import type { Behaviour, BehaviourTarget, Track, Timing, Ease } from './types'
+import type { GradientStop } from '~/lib/color/harmony'
 
 type Compiler = (b: Behaviour, target: BehaviourTarget) => Track[]
 const REGISTRY = new Map<string, Compiler>()
@@ -28,4 +29,22 @@ registerBehaviour('slide', (b) => {
   const axis = dir === 'left' || dir === 'right' ? 'x' : 'y'
   const from = dir === 'up' || dir === 'left' ? dist : -dist
   return [numTrack(axis, from, 0, w), numTrack('opacity', 0, 1, w)]
+})
+
+registerBehaviour('gradientScroll', (b) => {
+  const w = window(b.timing)
+  return [numTrack('fill.phase', 0, 1, w, 'linear')]
+})
+
+registerBehaviour('gradientMorph', (b, target) => {
+  const from = (b.params?.from as GradientStop[]) ?? (target.get('fill') as GradientStop[] | undefined)
+  const to = b.params?.to as GradientStop[] | undefined
+  if (!from || !to) return []
+  const [t0, t1] = window(b.timing)
+  return [{
+    path: 'fill', type: 'gradient',
+    mode: (b.params?.mode as 'crossfade' | 'travel') ?? 'crossfade',
+    space: (b.params?.space as 'oklab' | 'hybrid') ?? 'oklab',
+    keyframes: [{ t: t0, value: from, ease: 'easeInOut' }, { t: t1, value: to, ease: 'linear' }],
+  }]
 })
