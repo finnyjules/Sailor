@@ -24,9 +24,9 @@ import {
   type DecalObject, type DecalContent,
 } from '~/lib/scene3d/config'
 import {
-  cloneTreatments, createTreatment, findTreatment, isTreatmentHost, maskedTreatmentPlan, newTreatmentId,
+  cloneTreatments, createTreatment, findTreatment, isTreatmentHost, isFinishKind, maskedTreatmentPlan, newTreatmentId,
   treatmentsOf, unrenderedTreatmentIds, docHasMotionTreatment, docHasRestyleTreatment, restyleTreatmentPlan,
-  TREATMENT_LABELS, type Treatment, type TreatmentKind, type AiRestyleTreatment,
+  TREATMENT_LABELS, type Treatment, type TreatmentKind, type AiRestyleTreatment, type FinishTreatment,
 } from '~/lib/scene3d/treatments'
 import { sceneScreenVelocities, collectGhostPoses } from '~/lib/scene3d/motion/velocity'
 import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentControls'
@@ -73,7 +73,7 @@ import Scene3DObjectRow from './studio/Scene3DObjectRow.vue'
 import { totalClones, clampedClones } from '~/lib/scene3d/modifiers'
 import { MODIFIER_SPECS, PRIMITIVE_PARAMS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
 import {
-  modifierStackOf, writeModifierStack, canReorderModifier, cloneModifierStack, MODIFIER_LABELS,
+  modifierStackOf, writeModifierStack, canReorderModifier, cloneModifierStack, isPinnedModifier, newModifierId, MODIFIER_LABELS,
   addModifier as addModifierOp, removeModifier as removeModifierOp,
   duplicateModifier as duplicateModifierOp, reorderModifier as reorderModifierOp,
   type ModifierKind, type ModifierInstance,
@@ -2630,6 +2630,12 @@ function onKey(e: KeyboardEvent) {
     // the brief first sketched) because the very next line unconditionally
     // returns on ANY modified key — a branch placed after it would never run.
     if (k === 'g') { e.preventDefault(); e.stopImmediatePropagation(); if (e.shiftKey) ungroupSelection(); else groupSelection(); return }
+    // Copy the selection's style (or a selected modifier); paste onto the selected object(s). Copy
+    // only swallows the chord when it actually copied (a stray Cmd+C still does the native copy);
+    // paste swallows whenever the clipboard holds something, so it can also show a "select a shape"
+    // hint instead of a no-op native paste.
+    if (k === 'c') { if (copySelection()) { e.preventDefault(); e.stopImmediatePropagation(); return } }
+    if (k === 'v') { if (studioClipboard.value) { e.preventDefault(); e.stopImmediatePropagation(); pasteToSelection(); return } }
   }
   // Never hijack other modified chords (Cmd+R reload, Ctrl/Alt combos).
   if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -3806,6 +3812,93 @@ function renameObject(id: string, name: string) {
   if (o && next) o.name = next
 }
 
+// ── Copy / paste (keyboard: Cmd/Ctrl+C, Cmd/Ctrl+V) ────────────────────────────────────────────
+// A session clipboard (NOT the doc) holding EITHER an object's STYLE (material + its finish coats)
+// OR a single MODIFIER. Copy reads the current selection; paste applies to the selected object(s).
+// AI restyle is deliberately excluded — its result is baked from one object's depth and projected
+// from its own camera, so it does not transfer to other geometry.
+type StudioClip =
+  | { kind: 'style'; material: SceneMaterial; finishes: FinishTreatment[] }
+  | { kind: 'modifier'; modifier: ModifierInstance }
+const studioClipboard = ref<StudioClip | null>(null)
+const jclone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T
+// Transient confirmation pill (keyboard actions are otherwise invisible).
+const clipboardHint = ref('')
+let clipboardHintTimer: ReturnType<typeof setTimeout> | undefined
+function flashClipboardHint(msg: string): void {
+  clipboardHint.value = msg
+  if (clipboardHintTimer) clearTimeout(clipboardHintTimer)
+  clipboardHintTimer = setTimeout(() => { clipboardHint.value = '' }, 1500)
+}
+
+/** The object Cmd+C copies a STYLE from: the primary (last) selected object, else the host of a
+ *  selected treatment / modifier. */
+function activeStyleObjectId(): string | null {
+  if (selectedIds.value.length) return selectedIds.value[selectedIds.value.length - 1] ?? null
+  return selectedModifier.value?.objectId ?? selectedTreatment.value?.objectId ?? null
+}
+
+/** Cmd+C. A selected modifier copies AS a modifier; otherwise the active object's style (material +
+ *  finish coats). Returns true when something was copied, so the key handler only swallows the chord
+ *  when it acted (a stray Cmd+C over nothing still does the native copy). */
+function copySelection(): boolean {
+  if (selectedModifier.value) {
+    const o = doc.objects.find((x) => x.id === selectedModifier.value!.objectId)
+    if (!o || o.kind !== 'primitive') return false // only primitives host a modifier stack
+    const m = modifierStackOf(o).find((x) => x.id === selectedModifier.value!.modifierId)
+    if (!m) return false
+    studioClipboard.value = { kind: 'modifier', modifier: jclone(m) }
+    flashClipboardHint(`Copied ${MODIFIER_LABELS[m.kind]} modifier`)
+    return true
+  }
+  const id = activeStyleObjectId()
+  const o = id ? doc.objects.find((x) => x.id === id) : null
+  if (!o) return false
+  const finishes = treatmentsOf(o).filter((t) => isFinishKind(t.kind)) as FinishTreatment[]
+  studioClipboard.value = { kind: 'style', material: cloneMaterial(o.material), finishes: jclone(finishes) }
+  flashClipboardHint(finishes.length ? 'Copied style + finishes' : 'Copied style')
+  return true
+}
+
+/** Cmd+V. Apply the clipboard to the selected object(s). Style ⇒ replace material + finish coats,
+ *  leaving other treatments, geometry and any restyle untouched. Modifier ⇒ append a copy to each
+ *  primitive target's stack (respecting the one-per-kind rule for subdivide / cloner). */
+function pasteToSelection(): boolean {
+  const clip = studioClipboard.value
+  if (!clip) return false
+  const ids = selectedIds.value.length ? [...selectedIds.value]
+    : selectedModifier.value?.objectId ? [selectedModifier.value.objectId]
+    : selectedTreatment.value?.objectId ? [selectedTreatment.value.objectId] : []
+  const targets = ids.map((id) => doc.objects.find((o) => o.id === id)).filter((o): o is SceneObject => !!o)
+  if (!targets.length) return false
+  let applied = 0
+  for (const o of targets) {
+    if (clip.kind === 'style') {
+      o.material = cloneMaterial(clip.material)
+      // Replace finish coats only: keep the target's non-finish treatments (edge lines, restyle, motion).
+      const others = treatmentsOf(o).filter((t) => !isFinishKind(t.kind))
+      const pasted = clip.finishes.map((f) => ({ ...jclone(f), id: newTreatmentId() }))
+      const next = [...others, ...pasted]
+      if (next.length) o.treatments = next
+      else delete o.treatments
+      applied++
+    } else {
+      if (o.kind !== 'primitive') continue // only primitives host a modifier stack
+      const before = modifierStackOf(o)
+      if (isPinnedModifier(clip.modifier.kind) && before.some((m) => m.kind === clip.modifier.kind)) continue
+      Object.assign(o, writeModifierStack([...before, { ...jclone(clip.modifier), id: newModifierId() } as ModifierInstance]))
+      applied++
+    }
+  }
+  if (!applied) {
+    flashClipboardHint(clip.kind === 'modifier' ? 'Select a shape to paste onto' : 'Nothing to paste onto')
+    return false
+  }
+  const noun = clip.kind === 'modifier' ? 'modifier' : 'style'
+  flashClipboardHint(`Pasted ${noun}${applied > 1 ? ` to ${applied} objects` : ''}`)
+  return true
+}
+
 function removeObject(id: string) {
   // A group's children are independent doc objects; deleting only the group
   // would leave them orphaned at the root — visually "escaping" the delete.
@@ -4319,6 +4412,11 @@ async function onClose() {
         <div v-if="placingDecal"
              class="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-[11px] text-white/85">
           Click a surface to place — Esc to cancel
+        </div>
+        <!-- Copy/paste confirmation: keyboard-only, so a brief pill is the only signal it worked. -->
+        <div v-if="clipboardHint" data-testid="clipboard-hint"
+             class="pointer-events-none absolute bottom-16 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/80 px-3 py-1.5 text-[12px] text-white/90 shadow-lg">
+          {{ clipboardHint }}
         </div>
         <!-- Overlay toolbar: snap only — the combined gizmo (Spline-style) moves,
              rotates, and scales without mode switching, so no mode buttons.
