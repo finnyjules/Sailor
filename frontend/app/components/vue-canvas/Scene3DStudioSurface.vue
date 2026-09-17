@@ -2289,6 +2289,30 @@ onMounted(() => {
     }
     return { min: [rMin, gMin, bMin], max: [rMax, gMax, bMax], texels: d.length / 4 }
   }
+  ;(window as any).__scene3dCineHelperCheck = () => {
+    const sc = (engine as any)?.scene
+    if (!sc) return null
+    let shadowVis = 0, lineVis = 0, meshVis = 0
+    sc.traverse((o: any) => {
+      const m = o.material
+      const isShadow = m && (Array.isArray(m) ? m.some((x: any) => x.isShadowMaterial) : m.isShadowMaterial)
+      if (o.visible && isShadow) shadowVis++
+      if (o.visible && o.isLine) lineVis++
+      if (o.visible && o.isMesh && !isShadow) meshVis++
+    })
+    return { visibleShadowCatchers: shadowVis, visibleLines: lineVis, visibleMeshes: meshVis }
+  }
+  ;(window as any).__scene3dCineEnvURL = () => {
+    const tex = (engine as any)?.cinematicEnv
+    const d = tex?.image?.data as Uint8Array | undefined
+    if (!d || !tex) return ''
+    const cv = document.createElement('canvas'); cv.width = tex.image.width; cv.height = tex.image.height
+    const ctx = cv.getContext('2d')!
+    const img = ctx.createImageData(cv.width, cv.height)
+    img.data.set(d)
+    ctx.putImageData(img, 0, 0)
+    return cv.toDataURL('image/png')
+  }
   // A deterministic MOVING-frame oracle for the S6 motion tests: the existing __scene3d* hooks
   // render at t=0 (still), where velocity blur / ghost trails have nothing to show. This runs the
   // full sample → velocity/ghost push → render path at an arbitrary t01 (renderMotionFrame does

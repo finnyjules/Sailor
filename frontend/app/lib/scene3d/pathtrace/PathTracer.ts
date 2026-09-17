@@ -40,7 +40,18 @@ export class ScenePathTracer {
     this.end() // idempotent — restore any prior attach first
     for (const h of collectEditorHelpers(scene)) if (h.visible) { h.visible = false; this.hidden.push(h) }
     scene.traverse((o) => {
-      if ((isTreatmentShell(o) || o.userData.isGizmoHelper) && o.visible) { o.visible = false; this.hidden.push(o) }
+      // Also hide RASTER-ONLY helpers the tracer would otherwise mis-trace: the shadow-catcher
+      // ground is a ShadowMaterial mesh (meaningless to a path tracer — it becomes a big
+      // semi-transparent plane whose stochastic alpha reads as structured moiré across the frame),
+      // and GridHelper lines (LineSegments) aren't real surfaces. Both belong to the raster preview.
+      const mat = (o as THREE.Mesh).material
+      const isShadowCatcher = !!mat && (Array.isArray(mat)
+        ? mat.some((m) => (m as THREE.Material & { isShadowMaterial?: boolean }).isShadowMaterial)
+        : (mat as THREE.Material & { isShadowMaterial?: boolean }).isShadowMaterial === true)
+      const isLine = (o as THREE.Line).isLine === true
+      if ((isTreatmentShell(o) || o.userData.isGizmoHelper || isShadowCatcher || isLine) && o.visible) {
+        o.visible = false; this.hidden.push(o)
+      }
     })
     this.prevEnv = scene.environment
     if (env) scene.environment = env
