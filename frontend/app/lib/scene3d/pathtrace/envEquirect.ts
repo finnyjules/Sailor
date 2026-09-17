@@ -25,8 +25,19 @@ const FRAG = /* glsl */ `
   }
 `
 
+/** A byte floor added to every equirect texel to stand in for the raster's non-physical
+ *  AmbientLight fill. three-gpu-pathtracer samples DirectionalLight/Point/Spot/RectArea but
+ *  NEVER AmbientLight, so a dark "designed" look (rim-on-dark, gels) — where the sun rims from
+ *  behind and the front is carried entirely by ambient — traces to pitch-black silhouettes.
+ *  The env is scaled by `environmentIntensity` at render time, so the floor is pre-divided by
+ *  it to land near `ambient` after scaling. Pure (no GL) so it is unit-tested. */
+export function ambientFloorByte(ambient: number, envIntensity: number): number {
+  const target = Math.max(ambient, 0) / Math.max(envIntensity, 0.1)
+  return Math.round(Math.min(target, 1) * 255)
+}
+
 export function envSceneToEquirect(
-  renderer: THREE.WebGLRenderer, envScene: THREE.Scene, faceSize = 512,
+  renderer: THREE.WebGLRenderer, envScene: THREE.Scene, faceSize = 512, ambientFloor = 0,
 ): THREE.DataTexture {
   // 1) Capture the env scene into a cube.
   const cubeRT = new THREE.WebGLCubeRenderTarget(faceSize, { type: THREE.HalfFloatType })
@@ -55,6 +66,18 @@ export function envSceneToEquirect(
   renderer.readRenderTargetPixels(eqRT, 0, 0, W, H, data)
   renderer.setRenderTarget(prevTarget)
   renderer.autoClear = prevAutoClear
+
+  // Lift the whole equirect by the ambient floor so the tracer has a uniform fill term (the
+  // AmbientLight it won't sample). Added in the env's tone-mapped LINEAR space; the visible
+  // backdrop is a separate `scene.background`, so this brightens object shading + reflections
+  // without greying the black backdrop. Alpha (i+3) is left untouched.
+  if (ambientFloor > 0) {
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = Math.min(255, data[i] + ambientFloor)
+      data[i + 1] = Math.min(255, data[i + 1] + ambientFloor)
+      data[i + 2] = Math.min(255, data[i + 2] + ambientFloor)
+    }
+  }
 
   // 3) A CPU-backed equirect DataTexture the tracer can both sample and importance-map. The shader
   //    wrote tone-mapped LINEAR values into the 8-bit target (three does not sRGB-encode a render

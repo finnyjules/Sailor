@@ -35,7 +35,7 @@ import type { ScreenVelocity, LocalPose } from './motion/velocity'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry, GEM_CUTS } from './gem'
-import { envSceneToEquirect } from './pathtrace/envEquirect'
+import { envSceneToEquirect, ambientFloorByte } from './pathtrace/envEquirect'
 import type { ScenePathTracer } from './pathtrace/PathTracer'
 
 /** Private THREE layer used to overlay editor gizmos on top of the post-processed
@@ -870,7 +870,11 @@ export class SceneEngine {
   private rebuildCinematicEnv(): void {
     this.cinematicEnv?.dispose()
     const envScene = buildEnvironmentScene(this.envKind, this.envGel ?? undefined)
-    this.cinematicEnv = envSceneToEquirect(this.renderer, envScene)
+    // Bake in the raster's ambient fill (the tracer won't sample AmbientLight). Pre-divided by the
+    // preset's envIntensity so the fill lands near `lighting.ambient` after the tracer scales the env.
+    const amb = this.lastDoc?.lighting.ambient ?? 0
+    const envI = PRESETS[this.lastDoc?.lighting.preset ?? 'studio'].envIntensity
+    this.cinematicEnv = envSceneToEquirect(this.renderer, envScene, 512, ambientFloorByte(amb, envI))
     envScene.dispose()
   }
 

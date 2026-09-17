@@ -2276,6 +2276,19 @@ onMounted(() => {
     e?.renderer?.setSize(n, n, false)
     if (e?.camera) { e.camera.aspect = 1; e.camera.updateProjectionMatrix() }
   }
+  // Env-bake verification: the baked cinematic equirect (env + ambient fill floor). Offscreen
+  // baking works even in a hidden pane (unlike throttled path-trace accumulation), so channel min
+  // proves the ambient floor was actually added (env min ≈ floorByte) independent of the GPU trace.
+  ;(window as any).__scene3dCineEnvStats = () => {
+    const d = (engine as any)?.cinematicEnv?.image?.data as Uint8Array | undefined
+    if (!d) return null
+    let rMin = 255, gMin = 255, bMin = 255, rMax = 0, gMax = 0, bMax = 0
+    for (let i = 0; i < d.length; i += 4) {
+      rMin = Math.min(rMin, d[i]!); gMin = Math.min(gMin, d[i + 1]!); bMin = Math.min(bMin, d[i + 2]!)
+      rMax = Math.max(rMax, d[i]!); gMax = Math.max(gMax, d[i + 1]!); bMax = Math.max(bMax, d[i + 2]!)
+    }
+    return { min: [rMin, gMin, bMin], max: [rMax, gMax, bMax], texels: d.length / 4 }
+  }
   // A deterministic MOVING-frame oracle for the S6 motion tests: the existing __scene3d* hooks
   // render at t=0 (still), where velocity blur / ghost trails have nothing to show. This runs the
   // full sample → velocity/ghost push → render path at an arbitrary t01 (renderMotionFrame does
@@ -2546,9 +2559,11 @@ watch(doc, () => {
   if (!interaction?.pivotDragActive) { engine?.syncFromDoc(doc); engine?.cinematicRefresh() }
   scheduleHistory()
 }, { deep: true })
-// An environment switch must re-bake the equirect the path-tracer lights from (the deep watch
-// above only rebuilds the trace geometry). No-op unless Cinematic is active.
-watch(() => doc.lighting.environment, () => engine?.cinematicRefresh(true))
+// An environment switch — or an ambient/preset change (both feed the baked ambient fill floor) —
+// must re-bake the equirect the path-tracer lights from (the deep watch above only rebuilds the
+// trace geometry). No-op unless Cinematic is active.
+watch(() => [doc.lighting.environment, doc.lighting.ambient, doc.lighting.preset],
+  () => engine?.cinematicRefresh(true))
 // Look change → apply the whole recipe (direction, env, preset, default dials),
 // then recompute the dial-driven fields from those defaults.
 watch(() => doc.lighting.look, (id) => {
