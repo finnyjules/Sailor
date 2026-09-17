@@ -95,4 +95,11 @@ describe('travelStops', () => {
     const mid = travelStops(FROM, TO, 0.5)
     expect(mid[1].pos).toBeCloseTo((A[1].pos + B[1].pos) / 2, 6)
   })
+  it('is byte-exact at the endpoints for positions that do not round-trip', () => {
+    const FROM2: GradientStop[] = [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }]
+    const TO2: GradientStop[] = [{ pos: 0, color: '#010101' }, { pos: 0.1, color: '#808080' }, { pos: 1, color: '#fefefe' }]
+    const [A, B] = pairStops(FROM2, TO2)
+    expect(travelStops(FROM2, TO2, 0)).toEqual(A)
+    expect(travelStops(FROM2, TO2, 1)).toEqual(B) // fails pre-fix: 0.5+(0.1-0.5) !== 0.1
+  })
 })

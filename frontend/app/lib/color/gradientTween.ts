@@ -136,6 +136,6 @@ export function travelStops(
   const [A, B] = pairStops(from, to, space)
   return A.map((a, i) => ({
     color: blendHex(a.color, B[i].color, t, space),
-    pos: a.pos + (B[i].pos - a.pos) * t,
+    pos: t <= 0 ? a.pos : t >= 1 ? B[i].pos : a.pos + (B[i].pos - a.pos) * t,
   }))
 }
