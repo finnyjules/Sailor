@@ -91,6 +91,7 @@ import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { effectDialTargets, addDialTrack, removeDialTrack, animatedDialKeysOf, type EffectDialTrack, type DialTargetSpec } from '~/lib/motion/effectTracks'
+import { fillDialTargets } from '~/lib/motion/fillTracks'
 import { getByIdPath } from '~/lib/studio/idPath'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 // F5 Task 3: the shader-catalog-as-a-pass effect inspector — reuses the app's canonical
@@ -3659,9 +3660,12 @@ function commitMotionTimeline() {
 // field on the persisted doc (FrameMotion carries it structurally through the
 // painter seam), so it is read through a small cast here.
 const motionTracks = computed<EffectDialTrack[]>(() => (motionDoc.value as any).tracks ?? [])
-const animatableDials = computed<DialTargetSpec[]>(() =>
-  selectedLocal.value ? effectDialTargets(selectedLocal.value as any) : [],
-)
+const animatableDials = computed<DialTargetSpec[]>(() => {
+  const l = selectedLocal.value
+  if (!l) return []
+  // Layer-level fill targets (a gradient fill's scroll phase) precede the effect dials.
+  return [...fillDialTargets(l as any), ...effectDialTargets(l as any)]
+})
 function dialIsAnimated(target: string): boolean {
   return motionTracks.value.some((tr) => tr.target === target)
 }
