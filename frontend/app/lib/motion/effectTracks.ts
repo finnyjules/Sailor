@@ -235,7 +235,7 @@ const KEYFRAME_EPS = 1e-3
  * already sits at ~`t`, it is REPLACED (its old value/ease dropped). Returns a NEW
  * track with the keyframes re-sorted by `t`; never mutates the input.
  */
-export function addKeyframe(track: EffectDialTrack, t: number, v: number | string): EffectDialTrack {
+export function addKeyframe(track: EffectDialTrack, t: number, v: number | string | ColorStop[]): EffectDialTrack {
   const at = Math.max(0, t)
   const kept = track.keyframes.filter((kf) => Math.abs(kf.t - at) > KEYFRAME_EPS)
   const keyframes = [...kept, { t: at, v }].sort((a, b) => a.t - b.t)
