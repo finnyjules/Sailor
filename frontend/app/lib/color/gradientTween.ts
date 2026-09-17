@@ -192,3 +192,25 @@ export function scrollStops(
   }
   return out
 }
+
+/**
+ * Stop-array form of `crossfadeLUT`: `n` evenly-positioned stops
+ * (`pos = i/(n-1)`), each the blend of `from`/`to` sampled independently at
+ * that position. Byte-exact at `t=0`/`t=1` (equals `resampleStops(from, n)` /
+ * `resampleStops(to, n)` colours) for surfaces that consume stops rather
+ * than a LUT.
+ */
+export function crossfadeStops(
+  from: GradientStop[],
+  to: GradientStop[],
+  t: number,
+  space: BlendSpace = 'oklab',
+  n = 48,
+): GradientStop[] {
+  const out: GradientStop[] = []
+  for (let i = 0; i < n; i++) {
+    const pos = n === 1 ? 0 : i / (n - 1)
+    out.push({ pos, color: blendHex(sampleRamp(from, pos, space), sampleRamp(to, pos, space), t, space) })
+  }
+  return out
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { hexToOklab, hexToRgb, rgbToHex } from '~/lib/color/convert'
-import { blendHex, sampleRamp, buildLUT, resampleStops, pairStops, crossfadeLUT, travelStops, scrollLUT, scrollStops } from '~/lib/color/gradientTween'
+import { blendHex, sampleRamp, buildLUT, resampleStops, pairStops, crossfadeLUT, travelStops, scrollLUT, scrollStops, crossfadeStops } from '~/lib/color/gradientTween'
 import { mixHex } from '~/lib/color/mix'
 import type { GradientStop } from '~/lib/color/harmony'
 
@@ -178,5 +178,21 @@ describe('crossfade smoothness (OKLab beats OKLCH)', () => {
   })
   it('oklch would seam (documents why it is not the default)', () => {
     expect(worstSpatial(EMBER, OCEAN, t => oklchCrossfade(EMBER, OCEAN, t))).toBeGreaterThan(0.1)
+  })
+})
+
+describe('crossfadeStops', () => {
+  const A: GradientStop[] = [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ff0000' }]
+  const B: GradientStop[] = [{ pos: 0, color: '#0000ff' }, { pos: 0.5, color: '#00ff00' }, { pos: 1, color: '#ffffff' }]
+  it('returns n evenly-positioned stops', () => {
+    const out = crossfadeStops(A, B, 0.5, 'oklab', 8)
+    expect(out.length).toBe(8)
+    expect(out.map(s => s.pos)).toEqual([0, 1 / 7, 2 / 7, 3 / 7, 4 / 7, 5 / 7, 6 / 7, 1])
+  })
+  it('at t=0 matches sampling FROM, at t=1 matches sampling TO', () => {
+    const at0 = crossfadeStops(A, B, 0, 'oklab', 5)
+    const at1 = crossfadeStops(A, B, 1, 'oklab', 5)
+    expect(at0.map(s => s.color)).toEqual([0, 0.25, 0.5, 0.75, 1].map(u => sampleRamp(A, u, 'oklab')))
+    expect(at1.map(s => s.color)).toEqual([0, 0.25, 0.5, 0.75, 1].map(u => sampleRamp(B, u, 'oklab')))
   })
 })
