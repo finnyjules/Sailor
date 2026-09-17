@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { hexToOklab } from '~/lib/color/convert'
+import { hexToOklab, hexToRgb, rgbToHex } from '~/lib/color/convert'
 import { blendHex, sampleRamp, buildLUT, resampleStops, pairStops, crossfadeLUT, travelStops, scrollLUT } from '~/lib/color/gradientTween'
+import { mixHex } from '~/lib/color/mix'
 import type { GradientStop } from '~/lib/color/harmony'
 
 function chroma(hex: string): number { const [, a, b] = hexToOklab(hex); return Math.hypot(a, b) }
@@ -123,5 +124,45 @@ describe('scrollLUT', () => {
     // blue ≈ (20,54,255); red ≈ (255,45,45)
     expect(startStep[0]).toBeGreaterThan(startBase[0]) // more red channel
     expect(startStep[2]).toBeLessThan(startBase[2])    // less blue channel
+  })
+})
+
+function dE(h1: string, h2: string): number {
+  const A = hexToOklab(h1), B = hexToOklab(h2)
+  return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2])
+}
+function lutHex(lut: Uint8ClampedArray, i: number): string {
+  return rgbToHex(lut[i * 3], lut[i * 3 + 1], lut[i * 3 + 2])
+}
+// worst jump between ADJACENT positions within a frame (a hue seam), swept over t.
+function worstSpatial(from: GradientStop[], to: GradientStop[], make: (t: number) => Uint8ClampedArray): number {
+  let worst = 0
+  for (let f = 0; f <= 40; f++) {
+    const lut = make(f / 40)
+    for (let i = 1; i < 256; i++) worst = Math.max(worst, dE(lutHex(lut, i - 1), lutHex(lut, i)))
+  }
+  return worst
+}
+// an OKLCH crossfade built directly, for contrast only (not a shipped path).
+function oklchCrossfade(from: GradientStop[], to: GradientStop[], t: number): Uint8ClampedArray {
+  const lut = new Uint8ClampedArray(256 * 3)
+  for (let i = 0; i < 256; i++) {
+    const u = i / 255
+    const c = mixHex(sampleRamp(from, u), sampleRamp(to, u), t, 'oklch')
+    const [r, g, b] = hexToRgb(c)
+    lut[i * 3] = r; lut[i * 3 + 1] = g; lut[i * 3 + 2] = b
+  }
+  return lut
+}
+
+describe('crossfade smoothness (OKLab beats OKLCH)', () => {
+  const EMBER: GradientStop[] = [{ pos: 0, color: '#120000' }, { pos: 0.6, color: '#c9370e' }, { pos: 1, color: '#ffcf7a' }]
+  const OCEAN: GradientStop[] = [{ pos: 0, color: '#01121f' }, { pos: 0.28, color: '#043a5b' }, { pos: 0.55, color: '#1f8fa8' }, { pos: 0.8, color: '#7fe0c9' }, { pos: 1, color: '#f6ffe8' }]
+
+  it('oklab has no spatial seam', () => {
+    expect(worstSpatial(EMBER, OCEAN, t => crossfadeLUT(EMBER, OCEAN, t, 'oklab'))).toBeLessThan(0.05)
+  })
+  it('oklch would seam (documents why it is not the default)', () => {
+    expect(worstSpatial(EMBER, OCEAN, t => oklchCrossfade(EMBER, OCEAN, t))).toBeGreaterThan(0.1)
   })
 })
