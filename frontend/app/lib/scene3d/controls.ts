@@ -8,6 +8,7 @@ import {
   type SceneDoc, type SceneObject, type MaterialType, MATERIAL_TYPE_LABELS_ORDERED,
   STONE_IDS, STONE_LABELS } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, totalClones, type ParamSpec } from './primParams'
+import { HDRI_ENVIRONMENTS } from './hdri'
 
 /**
  * The single declarative description of Scene3D (3D Studio)'s parameters.
@@ -749,6 +750,10 @@ export const SCENE_CONTROLS: SceneControl[] = [
   select('lighting.preset', 'Shadow preset', [...LIGHTING_PRESETS], D.lighting.preset, 'Lighting', undefined,
     { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
   select('lighting.environment', 'Environment', [...ENVIRONMENT_KINDS], D.lighting.environment, 'Lighting', undefined,
+    { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
+  // A real Poly Haven studio HDRI, overriding the procedural Environment above. Value stored is the
+  // slug (or null = None); the panel shows sentence-case labels (readSceneControl/setControl remap).
+  select('lighting.hdri', 'Studio HDRI', ['None', ...HDRI_ENVIRONMENTS.map((h) => h.label)], 'None', 'Lighting', undefined,
     { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
   slider('lighting.sunIntensity', 'Sun intensity', 0, 3, 0.05, 'Lighting', D.lighting.sunIntensity,
     'How bright the main sunlight is', { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
