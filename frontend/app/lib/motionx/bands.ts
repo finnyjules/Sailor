@@ -1,0 +1,102 @@
+// Pure band model for the Frame motion timeline ("everything is a band").
+// Derives read-only display bands from stored motionx Track[]. Zero Vue /
+// compositor coupling — mirrors the purity of the rest of ~/lib/motionx.
+import type { Track, PropertyType, Keyframe } from '~/lib/motionx'
+import { evaluateTrack } from '~/lib/motionx'
+
+export type BandKind = 'number' | 'color' | 'gradient'
+
+export interface Band {
+  key: string
+  kind: BandKind
+  type: PropertyType
+  label: string
+  path: string
+  start: number
+  end: number
+  keyframes: Keyframe[]
+}
+
+interface GradStop { pos: number; color: string }
+
+/** Format a 0..1 fraction as a percent string with no trailing-zero noise (0.5 → "50", 1 → "100"). */
+const pctStr = (f: number) => `${+(f * 100).toFixed(1)}`
+
+/** First/last keyframe time of a track (seconds). Empty → 0..0; one point → start==end. */
+export function trackSpan(track: Track): { start: number; end: number } {
+  const ts = track.keyframes.map((k) => k.t)
+  if (ts.length === 0) return { start: 0, end: 0 }
+  return { start: Math.min(...ts), end: Math.max(...ts) }
+}
+
+/** Property bands for one layer, in the track order given. `labelFor(path)` supplies
+ *  the human name (from the adapter's animatableProperties); a falsy return falls back
+ *  to the last path segment. */
+export function bandsForLayer(
+  layerId: string,
+  tracks: Track[],
+  labelFor?: (path: string) => string,
+): Band[] {
+  const prefix = `layers.${layerId}.`
+  const out: Band[] = []
+  for (const tk of tracks) {
+    if (!tk.path.startsWith(prefix)) continue
+    const { start, end } = trackSpan(tk)
+    const label = (labelFor?.(tk.path) || '') || tk.path.split('.').pop() || tk.path
+    out.push({
+      key: tk.path,
+      kind: tk.type as BandKind,
+      type: tk.type,
+      label,
+      path: tk.path,
+      start,
+      end,
+      keyframes: tk.keyframes,
+    })
+  }
+  return out
+}
+
+/** Sample a number track's value across its span → points in the unit square.
+ *  x = fraction across span; y = value normalised to the track's [min,max]
+ *  (flat track → 0.5). SVG y-flip is the component's job, not this. */
+export function numberBandCurve(track: Track, samples = 24): Array<{ x: number; y: number }> {
+  const n = Math.max(2, samples)
+  const { start, end } = trackSpan(track)
+  const span = end - start
+  const vals: number[] = []
+  for (let i = 0; i < n; i++) {
+    const t = start + (span * i) / (n - 1)
+    const v = evaluateTrack(track, t)
+    vals.push(typeof v === 'number' ? v : 0)
+  }
+  const lo = Math.min(...vals)
+  const hi = Math.max(...vals)
+  const range = hi - lo
+  return vals.map((v, i) => ({
+    x: i / (n - 1),
+    y: range < 1e-9 ? 0.5 : (v - lo) / range,
+  }))
+}
+
+/** A colour track's keyframe colours laid out left→right by fractional t. */
+export function colorBandCss(track: Track): string {
+  const ks = track.keyframes
+  if (ks.length === 0) return 'transparent'
+  if (ks.length === 1) return `linear-gradient(90deg, ${String(ks[0]!.value)} 0%, ${String(ks[0]!.value)} 100%)`
+  const { start, end } = trackSpan(track)
+  const span = end - start
+  const stops = ks.map((k) => {
+    const f = span < 1e-9 ? 0 : (k.t - start) / span
+    return `${String(k.value)} ${pctStr(f)}%`
+  })
+  return `linear-gradient(90deg, ${stops.join(', ')})`
+}
+
+/** Representative fill for a gradient band: the first keyframe's stops as a 90deg gradient. */
+export function gradientBandCss(track: Track): string {
+  const first = track.keyframes[0]
+  if (!first || !Array.isArray(first.value) || first.value.length === 0) return 'transparent'
+  const stops = (first.value as GradStop[]).map((s) => `${s.color} ${pctStr(s.pos)}%`)
+  return `linear-gradient(90deg, ${stops.join(', ')})`
+}
