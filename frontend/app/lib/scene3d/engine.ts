@@ -34,7 +34,7 @@ import { maskedTreatmentPlan, bufferTreatmentPlan, finishPlan, motionTreatmentPl
 import type { ScreenVelocity, LocalPose } from './motion/velocity'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
-import { gemGeometry } from './gem'
+import { gemGeometry, GEM_CUTS } from './gem'
 
 /** Private THREE layer used to overlay editor gizmos on top of the post-processed
  *  image without bloom/grade catching them. Nothing else in the scene uses layers,
@@ -213,7 +213,7 @@ export function geometryFor(
       return data ? geometryFromMeshData(data) : new THREE.BoxGeometry(0.3, 0.3, 0.3)
     }
     case 'gem':
-      return gemGeometry(p('points'), p('spread'), p('depth'), p('gemSeed'))
+      return gemGeometry(p('points'), p('spread'), p('depth'), p('gemSeed'), GEM_CUTS[Math.round(p('cut'))] ?? 'raw')
   }
 }
 
