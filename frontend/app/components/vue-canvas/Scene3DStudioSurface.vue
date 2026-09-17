@@ -526,7 +526,13 @@ const playhead = ref(0)     // seconds
 let playStart = 0           // performance.now anchor
 function togglePlay() {
   if (!sceneHasMotion(doc)) return
-  playing.value = !playing.value
+  const willPlay = !playing.value
+  // Capture the live viewport camera as the motion's base BEFORE playback starts,
+  // so a scene with no camera motion keeps your exact angle (the per-frame
+  // applyCameraFromDoc would otherwise snap to a stale saved doc.camera) and any
+  // orbit/push motion animates relative to the view you're looking at.
+  if (willPlay) syncDocCamera()
+  playing.value = willPlay
   if (playing.value) playStart = performance.now() - playhead.value * 1000
 }
 // Bake the Motion timeline to an encoded file (reuses the studios' bake→encode
@@ -543,6 +549,11 @@ async function bakeSceneVideo(): Promise<{ filename: string; ext: 'mp4' | 'webm'
   videoBaking.value = true
   const wasPlaying = playing.value; playing.value = false
   try {
+    // Export from the live preview camera, not a stale saved one. If we were
+    // already playing, doc.camera is the base captured at play start (the loop
+    // never writes it back), so keep it; otherwise the engine camera holds the
+    // current orbit view — persist that as the base the frames render from.
+    if (!wasPlaying) syncDocCamera()
     const W = doc.output.width, H = doc.output.height
     const fps = doc.motion.fps, dur = doc.motion.duration
     const total = Math.max(1, Math.round(fps * dur))
