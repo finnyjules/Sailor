@@ -25,6 +25,8 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
+import { applyMotionxTracks } from '~/lib/motionx/adapter/frame'
+import type { Track as MotionxTrack } from '~/lib/motionx'
 import { applyFillPhaseTracks } from '~/lib/motion/fillTracks'
 import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
@@ -5440,7 +5442,7 @@ export function paintLayerStack(
   localLayers: LocalLayer[],
   skip?: (layer: LocalLayer) => boolean,
   t?: number,
-  motion?: { fps: number; duration: number; tracks?: EffectDialTrack[] },
+  motion?: { fps: number; duration: number; tracks?: EffectDialTrack[]; motionx?: MotionxTrack[] },
   /** Per-key treatments for wired layers (mask ref + showSource). Locals carry their own. */
   wiredTreatments?: Record<string, { maskedByKey?: string; showSource?: boolean }>,
   /** Doc-level background fill, painted first (behind every layer). */
@@ -5467,9 +5469,13 @@ export function paintLayerStack(
   }
   // F8: fold any effect-dial motion tracks into the layers for this frame. Same-reference return
   // when there are no tracks / no clock ⇒ items & localLayers untouched ⇒ byte-identical.
-  const animatedLocals = applyFillPhaseTracks(
-    applyEffectDialTracks(localLayers, motion?.tracks, t),
-    motion?.tracks,
+  const animatedLocals = applyMotionxTracks(
+    applyFillPhaseTracks(
+      applyEffectDialTracks(localLayers, motion?.tracks, t),
+      motion?.tracks,
+      t,
+    ),
+    motion?.motionx,
     t,
   )
   if (animatedLocals !== localLayers) {
