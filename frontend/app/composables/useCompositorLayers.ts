@@ -25,6 +25,7 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
+import { applyFillPhaseTracks } from '~/lib/motion/fillTracks'
 import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
 import { clipFrameIndex, clipFrameUrl, clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
@@ -5466,7 +5467,11 @@ export function paintLayerStack(
   }
   // F8: fold any effect-dial motion tracks into the layers for this frame. Same-reference return
   // when there are no tracks / no clock ⇒ items & localLayers untouched ⇒ byte-identical.
-  const animatedLocals = applyEffectDialTracks(localLayers, motion?.tracks, t)
+  const animatedLocals = applyFillPhaseTracks(
+    applyEffectDialTracks(localLayers, motion?.tracks, t),
+    motion?.tracks,
+    t,
+  )
   if (animatedLocals !== localLayers) {
     const byId = new Map(animatedLocals.map(l => [l.id, l]))
     items = items.map(it => (it.type === 'local' && byId.has(it.layer.id))
