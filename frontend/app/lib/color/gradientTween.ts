@@ -97,3 +97,26 @@ export function pairStops(
   const N = Math.max(from.length, to.length)
   return [resampleStops(from, N, space), resampleStops(to, N, space)]
 }
+
+/**
+ * Crossfade two ramps into a single LUT: for each position `u`, blend the
+ * two ramps' sampled colours at `t`. No pairing needed — each ramp is
+ * sampled independently at `u` before blending. Byte-exact at `t=0`/`t=1`
+ * (equals `buildLUT(from)` / `buildLUT(to)`).
+ */
+export function crossfadeLUT(
+  from: GradientStop[],
+  to: GradientStop[],
+  t: number,
+  space: BlendSpace = 'oklab',
+  size = 256,
+): Uint8ClampedArray {
+  const lut = new Uint8ClampedArray(size * 3)
+  for (let i = 0; i < size; i++) {
+    const u = size === 1 ? 0 : i / (size - 1)
+    const c = blendHex(sampleRamp(from, u, space), sampleRamp(to, u, space), t, space)
+    const [r, g, b] = hexToRgb(c)
+    lut[i * 3] = r; lut[i * 3 + 1] = g; lut[i * 3 + 2] = b
+  }
+  return lut
+}
