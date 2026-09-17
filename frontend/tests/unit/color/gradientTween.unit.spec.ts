@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { hexToOklab } from '~/lib/color/convert'
-import { blendHex, sampleRamp, buildLUT, resampleStops, pairStops, crossfadeLUT, travelStops } from '~/lib/color/gradientTween'
+import { blendHex, sampleRamp, buildLUT, resampleStops, pairStops, crossfadeLUT, travelStops, scrollLUT } from '~/lib/color/gradientTween'
 import type { GradientStop } from '~/lib/color/harmony'
 
 function chroma(hex: string): number { const [, a, b] = hexToOklab(hex); return Math.hypot(a, b) }
@@ -101,5 +101,27 @@ describe('travelStops', () => {
     const [A, B] = pairStops(FROM2, TO2)
     expect(travelStops(FROM2, TO2, 0)).toEqual(A)
     expect(travelStops(FROM2, TO2, 1)).toEqual(B) // fails pre-fix: 0.5+(0.1-0.5) !== 0.1
+  })
+})
+
+const WHEEL: GradientStop[] = [
+  { pos: 0, color: '#1436ff' },   // blue
+  { pos: 0.5, color: '#ff2d2d' },  // red
+  { pos: 1, color: '#ffd21f' },    // yellow
+]
+
+describe('scrollLUT', () => {
+  it('loops seamlessly (phase 0 == phase 1)', () => {
+    expect(Array.from(scrollLUT(WHEEL, 0))).toEqual(Array.from(scrollLUT(WHEEL, 1)))
+  })
+  it('advances the wheel by one stop at phase = 1/n', () => {
+    // at phase 0 the LUT starts on blue; at phase 1/3 (n=3) it starts on red.
+    const base = scrollLUT(WHEEL, 0)
+    const oneStep = scrollLUT(WHEEL, 1 / 3)
+    const startBase = [base[0], base[1], base[2]]
+    const startStep = [oneStep[0], oneStep[1], oneStep[2]]
+    // blue ≈ (20,54,255); red ≈ (255,45,45)
+    expect(startStep[0]).toBeGreaterThan(startBase[0]) // more red channel
+    expect(startStep[2]).toBeLessThan(startBase[2])    // less blue channel
   })
 })

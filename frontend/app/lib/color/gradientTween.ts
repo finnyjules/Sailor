@@ -139,3 +139,30 @@ export function travelStops(
     pos: t <= 0 ? a.pos : t >= 1 ? B[i].pos : a.pos + (B[i].pos - a.pos) * t,
   }))
 }
+
+/**
+ * Scroll a single gradient's stops around a seamless wheel: stops spaced
+ * evenly by order (wrap last→first), sampled at `u + phase` wrapped into
+ * `[0,1)`. `scrollLUT(s, 0)` deep-equals `scrollLUT(s, 1)` (phase wraps
+ * identically), and at `phase = k/n` the wheel has advanced `k` stops.
+ */
+export function scrollLUT(
+  stops: GradientStop[],
+  phase: number,
+  space: BlendSpace = 'oklab',
+  size = 256,
+): Uint8ClampedArray {
+  const cols = sortStops(stops).map(s => s.color)
+  const n = cols.length || 1
+  const lut = new Uint8ClampedArray(size * 3)
+  for (let i = 0; i < size; i++) {
+    const u = size === 1 ? 0 : i / (size - 1)
+    const w = (((u + phase) % 1) + 1) % 1
+    const seg = w * n
+    const k = Math.floor(seg)
+    const lt = seg - k
+    const [r, g, b] = hexToRgb(blendHex(cols[k % n], cols[(k + 1) % n], lt, space))
+    lut[i * 3] = r; lut[i * 3 + 1] = g; lut[i * 3 + 2] = b
+  }
+  return lut
+}
