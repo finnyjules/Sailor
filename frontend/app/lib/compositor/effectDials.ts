@@ -82,7 +82,7 @@ export const EFFECT_DIAL_SCHEMA: Record<EffectKind, DialSpec[]> = {
   threshold: [num('cutoff', 'Cutoff', 0, 1)],
   invert: [num('amount', 'Amount', 0, 1)],
   duotone: [col('shadows', 'Shadows'), col('highlights', 'Highlights'), num('mix', 'Mix', 0, 1)],
-  gradientMap: [num('contrast', 'Contrast', -1, 1), num('mix', 'Mix', 0, 1)], // stops excluded (nested).
+  gradientMap: [num('contrast', 'Contrast', -1, 1), num('mix', 'Mix', 0, 1), num('scrollPhase', 'Scroll', 0, 1)], // stops (nested) still excluded; scroll rides a scalar phase.
   color_overlay: [col('color', 'Colour'), num('opacity', 'Opacity', 0, 1)], // blend excluded (enum).
   gradient_overlay: [col('from', 'From colour'), col('to', 'To colour'), num('angle', 'Angle', 0, 360), num('opacity', 'Opacity', 0, 1)], // blend excluded.
   stroke_from_alpha: [num('width', 'Width', 0, 0.2), col('color', 'Colour')], // align excluded (enum).

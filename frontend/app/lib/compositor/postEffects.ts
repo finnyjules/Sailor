@@ -11,6 +11,7 @@ import {
   applyRoughEdgeToData, applyInkBleedToData,
   ROUGH_EDGE_MAX_W, INK_BLEED_MAX_W,
 } from './edgeDistort'
+import { scrollStops } from '~/lib/color/gradientTween'
 
 // Re-exported so the offscreen-pad helper (useCompositorLayers.ts) and its tests read the SAME
 // outward-reach constants the passes below use, mirroring how MOTION_BLUR_SAMPLES is shared.
@@ -57,6 +58,7 @@ export interface GradientMapEffect {
   stops: GradientMapStop[]  // {pos 0..1, hex}; sorted at apply; >= 1 stop
   contrast: number          // -1..1, 0 = neutral (luminance stretch around 0.5)
   mix: number               // 0..1 — blend original -> mapped
+  scrollPhase: number       // 0..1 — cycles the ramp along itself (0 = off); loops seamlessly
   visible: boolean
 }
 /** Depth of field. GPU-only — applied to layer content BEFORE the 2D chain, because
@@ -258,7 +260,7 @@ export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   gradientMap: {
     type: 'gradientMap',
     stops: [{ pos: 0, color: '#1a1a40' }, { pos: 0.5, color: '#c0397a' }, { pos: 1, color: '#ffe8d6' }],
-    contrast: 0, mix: 0.85, visible: true,
+    contrast: 0, mix: 0.85, scrollPhase: 0, visible: true,
   },
   dof: {
     type: 'dof', focus: 0.5, range: 0.15, aperture: 0.02,
@@ -454,6 +456,13 @@ export function gradientMapInPlace(
   }
 }
 
+/** Scroll a gradient-map ramp along itself by `phase` (0..1). Identity at 0 (same
+ *  reference — a still bake stays byte-identical). Reuses the colour-lib wheel cycle. */
+export function scrolledGradientMapStops(stops: GradientMapStop[], phase: number): GradientMapStop[] {
+  if (!phase) return stops
+  return scrollStops(stops, phase).map(s => ({ pos: s.pos, color: s.color }))
+}
+
 /** Levels: remap each RGB channel through a black/white/gamma curve, alpha untouched. `black`
  *  and `white` (0..1) set the input window mapped to output 0..255; `gamma` (0.1..5) bends the
  *  midtones (>1 lightens). Builds a 256-entry LUT once, then maps the three colour bytes of every
@@ -587,7 +596,7 @@ function passDuotone(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: D
 function passGradientMap(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: GradientMapEffect, _opts: PassOpts): void {
   if (!(e.mix > 0 && e.stops.length)) return
   const img = ctx.getImageData(0, 0, off.width, off.height)
-  gradientMapInPlace(img.data, e.stops, e.contrast, e.mix)
+  gradientMapInPlace(img.data, scrolledGradientMapStops(e.stops, e.scrollPhase ?? 0), e.contrast, e.mix)
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.putImageData(img, 0, 0)
