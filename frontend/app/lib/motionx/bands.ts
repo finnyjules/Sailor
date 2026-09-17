@@ -63,13 +63,21 @@ export function bandsForLayer(
 export const BEHAVIOUR_LABELS: Record<string, string> = {
   fade: 'Fade',
   slide: 'Slide',
+  scale: 'Scale',
+  spin: 'Spin',
+  pulse: 'Pulse',
+  sway: 'Sway',
+  float: 'Float',
   gradientScroll: 'Scroll',
   gradientMorph: 'Morph',
 }
 export function behaviourLabel(b: { kind: string; params?: Record<string, unknown>; timing?: { loop?: boolean } }): string {
   const base = BEHAVIOUR_LABELS[b.kind] ?? b.kind
-  const dir = b.params?.dir
-  const withDir = b.kind === 'fade' || b.kind === 'slide' ? `${base} ${dir ?? (b.kind === 'fade' ? 'in' : 'up')}` : base
+  const dir = b.params?.dir as string | undefined
+  let withDir = base
+  if (b.kind === 'fade') withDir = `${base} ${dir ?? 'in'}`
+  else if (b.kind === 'slide') withDir = `${base} ${dir ?? 'up'}`
+  else if (b.kind === 'scale') withDir = dir === 'out' ? 'Shrink out' : 'Grow in'
   return b.timing?.loop ? `${withDir} · loop` : withDir
 }
 

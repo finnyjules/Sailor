@@ -4,7 +4,10 @@
 // addBehaviour(kind, params). Pure — zero Vue/compositor coupling.
 
 export type MoveGroup = 'In' | 'Loop' | 'Out' | 'Gradient'
-export type PreviewKind = 'fade' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right' | 'scroll' | 'morph'
+export type PreviewKind =
+  | 'fade' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right'
+  | 'grow' | 'shrink' | 'spin' | 'pulse' | 'sway' | 'float'
+  | 'scroll' | 'morph'
 
 export interface GalleryMove {
   id: string
@@ -22,12 +25,19 @@ export interface LayerCaps { gradient: boolean; text: boolean }
 export const GALLERY_MOVES: GalleryMove[] = [
   // In
   { id: 'fade-in', kind: 'fade', label: 'Fade in', group: 'In', preview: 'fade', params: { dir: 'in' } },
+  { id: 'scale-in', kind: 'scale', label: 'Grow in', group: 'In', preview: 'grow', params: { dir: 'in' } },
   { id: 'slide-up', kind: 'slide', label: 'Slide up', group: 'In', preview: 'slide-up', params: { dir: 'up' } },
   { id: 'slide-down', kind: 'slide', label: 'Slide down', group: 'In', preview: 'slide-down', params: { dir: 'down' } },
   { id: 'slide-left', kind: 'slide', label: 'Slide left', group: 'In', preview: 'slide-left', params: { dir: 'left' } },
   { id: 'slide-right', kind: 'slide', label: 'Slide right', group: 'In', preview: 'slide-right', params: { dir: 'right' } },
+  // Loop
+  { id: 'spin', kind: 'spin', label: 'Spin', group: 'Loop', preview: 'spin' },
+  { id: 'pulse', kind: 'pulse', label: 'Pulse', group: 'Loop', preview: 'pulse' },
+  { id: 'sway', kind: 'sway', label: 'Sway', group: 'Loop', preview: 'sway' },
+  { id: 'float', kind: 'float', label: 'Float', group: 'Loop', preview: 'float' },
   // Out
   { id: 'fade-out', kind: 'fade', label: 'Fade out', group: 'Out', preview: 'fade', params: { dir: 'out' } },
+  { id: 'scale-out', kind: 'scale', label: 'Shrink out', group: 'Out', preview: 'shrink', params: { dir: 'out' } },
   // Gradient
   { id: 'gradient-scroll', kind: 'gradientScroll', label: 'Scroll', group: 'Gradient', preview: 'scroll', needs: 'gradient' },
 ]

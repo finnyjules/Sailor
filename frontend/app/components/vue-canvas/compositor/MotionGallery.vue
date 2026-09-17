@@ -48,6 +48,12 @@ const groups = computed(() => groupedMoves(movesForLayer(props.caps)))
 .prev-slide-down { animation: prevDown 1.6s ease-in-out infinite; }
 .prev-slide-left { animation: prevLeft 1.6s ease-in-out infinite; }
 .prev-slide-right { animation: prevRight 1.6s ease-in-out infinite; }
+.prev-grow { animation: prevGrow 1.8s ease-out infinite; }
+.prev-shrink { animation: prevShrink 1.8s ease-in infinite; }
+.prev-spin { animation: prevSpin 1.8s linear infinite; }
+.prev-pulse { animation: prevPulse 1.4s ease-in-out infinite; }
+.prev-sway { animation: prevSway 1.8s ease-in-out infinite; transform-origin: 50% 100%; }
+.prev-float { animation: prevFloat 2s ease-in-out infinite; }
 .prev-scroll {
   background: linear-gradient(90deg, #1436ff, #ff2d2d, #ffd21f, #1436ff);
   background-size: 200% 100%;
@@ -62,6 +68,12 @@ const groups = computed(() => groupedMoves(movesForLayer(props.caps)))
 @keyframes prevDown { 0% { transform: translateY(-8px); opacity: 0 } 40%,100% { transform: translateY(0); opacity: 1 } }
 @keyframes prevLeft { 0% { transform: translateX(8px); opacity: 0 } 40%,100% { transform: translateX(0); opacity: 1 } }
 @keyframes prevRight { 0% { transform: translateX(-8px); opacity: 0 } 40%,100% { transform: translateX(0); opacity: 1 } }
+@keyframes prevGrow { 0% { transform: scale(0); opacity: 0 } 45%,100% { transform: scale(1); opacity: 1 } }
+@keyframes prevShrink { 0% { transform: scale(1); opacity: 1 } 55%,100% { transform: scale(0); opacity: 0 } }
+@keyframes prevSpin { 0% { transform: rotate(0) } 100% { transform: rotate(360deg) } }
+@keyframes prevPulse { 0%,100% { transform: scale(0.85) } 50% { transform: scale(1.15) } }
+@keyframes prevSway { 0%,100% { transform: rotate(-14deg) } 50% { transform: rotate(14deg) } }
+@keyframes prevFloat { 0%,100% { transform: translateY(5px) } 50% { transform: translateY(-5px) } }
 @keyframes prevScroll { 0% { background-position: 0% 0 } 100% { background-position: 200% 0 } }
 @keyframes prevMorph { 0% { filter: hue-rotate(0deg) } 100% { filter: hue-rotate(90deg) } }
 @media (prefers-reduced-motion: reduce) {

@@ -8,7 +8,7 @@ describe('GALLERY_MOVES catalog', () => {
       expect(m.id).toBeTruthy()
       expect(ids.has(m.id)).toBe(false)   // ids unique
       ids.add(m.id)
-      expect(['fade', 'slide', 'gradientScroll', 'gradientMorph']).toContain(m.kind)
+      expect(['fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph']).toContain(m.kind)
       expect(['In', 'Loop', 'Out', 'Gradient']).toContain(m.group)
       expect(m.preview).toBeTruthy()
     }
