@@ -9,6 +9,7 @@ export interface Track {
   path: string
   type: PropertyType
   keyframes: Keyframe[]
+  loop?: boolean                   // when true, evaluateTrack wraps t into the keyframe span
   mode?: 'crossfade' | 'travel'    // gradient tracks only
   space?: 'oklab' | 'hybrid'       // colour/gradient tracks only
 }

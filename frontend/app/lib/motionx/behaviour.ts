@@ -33,7 +33,8 @@ registerBehaviour('slide', (b) => {
 
 registerBehaviour('gradientScroll', (b) => {
   const w = window(b.timing)
-  return [numTrack('fill.phase', 0, 1, w, 'linear')]
+  const track = numTrack('fill.phase', 0, 1, w, 'linear')
+  return [{ ...track, loop: b.timing.loop ?? false }]
 })
 
 registerBehaviour('gradientMorph', (b, target) => {

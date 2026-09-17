@@ -7,8 +7,12 @@ export function evaluateTrack(track: Track, t: number): PropertyValue | undefine
   if (!kfs.length) return undefined
   const sorted = [...kfs].sort((a, b) => a.t - b.t)
   const first = sorted[0]!
-  if (t <= first.t) return first.value
   const last = sorted[sorted.length - 1]!
+  if (track.loop && sorted.length > 1) {
+    const span = last.t - first.t
+    if (span > 1e-9 && t > first.t) t = first.t + ((t - first.t) % span)
+  }
+  if (t <= first.t) return first.value
   if (t >= last.t) return last.value
   let lo = first, hi = sorted[1]!
   for (let i = 1; i < sorted.length; i++) {

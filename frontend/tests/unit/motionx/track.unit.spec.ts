@@ -20,4 +20,11 @@ describe('evaluateTrack', () => {
     ] }
     expect(evaluateTrack(eased, 0.5)).toBeCloseTo(0.25, 6) // easeIn(0.5)=0.25
   })
+  it('loop wraps t into the keyframe span', () => {
+    const loopT = { path: 'p', type: 'number' as const, loop: true, keyframes: [
+      { t: 0, value: 0, ease: 'linear' as const }, { t: 2, value: 1, ease: 'linear' as const } ] }
+    expect(evaluateTrack(loopT, 0)).toBe(0)
+    expect(evaluateTrack(loopT, 2.0)).toBeCloseTo(0, 6) // wraps
+    expect(evaluateTrack(loopT, 3.0)).toBeCloseTo(0.5, 6)
+  })
 })

@@ -31,12 +31,14 @@ const G: GradientStop[] = [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ff00
 const gradTarget = { get: (p: string) => (p === 'fill' ? G : undefined), has: () => true }
 
 describe('gradient behaviours', () => {
-  it('scroll -> a fill.phase 0->1 number track', () => {
+  it('scroll -> a looping fill.phase 0->1 track that wraps', () => {
     const t = compileBehaviour({ id: 'sc', kind: 'gradientScroll', timing: { start: 0, duration: 2, loop: true } }, gradTarget)
     const ph = t.find(x => x.path === 'fill.phase')!
-    expect(ph.type).toBe('number')
+    expect(ph.type).toBe('number'); expect(ph.loop).toBe(true)
     expect(evaluateTrack(ph, 0)).toBe(0)
-    expect(evaluateTrack(ph, 2)).toBe(1)
+    expect(evaluateTrack(ph, 1)).toBeCloseTo(0.5, 6)
+    expect(evaluateTrack(ph, 4)).toBeCloseTo(0, 6)   // wraps (2 full spans) — was falsely 1 before the fix
+    expect(evaluateTrack(ph, 3)).toBeCloseTo(0.5, 6) // wraps to t=1
   })
   it('morph -> a fill gradient track from current to target', () => {
     const To: GradientStop[] = [{ pos: 0, color: '#0000ff' }, { pos: 1, color: '#ffffff' }]
