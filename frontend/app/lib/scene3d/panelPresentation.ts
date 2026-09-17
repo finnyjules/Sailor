@@ -323,12 +323,12 @@ function objectLeaf(obj: SceneObject, rest: string): ParamValue {
  *  over `ENVIRONMENT_KINDS` — 'darkStrips' read as 'dark', 'colorGels' as 'gels'. Kept
  *  here (rather than left in the surface) so the row's `options`, the reader and the
  *  writer cannot drift apart. */
-export const ENV_OPTIONS = ['room', 'dark', 'softbox', 'gels'] as const
+export const ENV_OPTIONS = ['room', 'dark', 'softbox', 'studio', 'gels'] as const
 export const ENV_BY_LABEL: Record<string, SceneDoc['lighting']['environment']> = {
-  room: 'room', dark: 'darkStrips', softbox: 'softbox', gels: 'colorGels',
+  room: 'room', dark: 'darkStrips', softbox: 'softbox', studio: 'studio', gels: 'colorGels',
 }
 const ENV_LABEL: Record<string, string> = {
-  room: 'room', darkStrips: 'dark', softbox: 'softbox', colorGels: 'gels',
+  room: 'room', darkStrips: 'dark', softbox: 'softbox', studio: 'studio', colorGels: 'gels',
 }
 
 // ── bespoke-block anchors ────────────────────────────────────────────────────

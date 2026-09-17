@@ -10,6 +10,7 @@ import { HalftonePass } from 'three/examples/jsm/postprocessing/HalftonePass.js'
 import { DotScreenPass } from 'three/examples/jsm/postprocessing/DotScreenPass.js'
 import { GlitchPass } from 'three/examples/jsm/postprocessing/GlitchPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
 import type { PostSettings } from '~~/shared/spacetype/state'
 import { DEFAULT_POST, postEnabled } from '~/lib/spacetype/postSettings'
 import { makeGrainPass, makeVignettePass, makeDuotonePass, makeDistortPass, applyPostExtras } from '~/lib/studio/post/threePasses'
@@ -118,6 +119,11 @@ export class PostChain {
   private vignettePass: ShaderPass
   private grainPass: ShaderPass
   private outputPass: OutputPass
+  /** Always-on final anti-alias. The composer's MSAA target resolves GEOMETRY edges, but
+   *  shader/transmission aliasing (a gem's refracted facets, dispersion streaks) slips through
+   *  it; SMAA runs on the tone-mapped sRGB image AFTER OutputPass and cleans those up. Terminal
+   *  pass, so it renders to the canvas. */
+  private smaaPass: SMAAPass
   /** Feeds vignette's aspect-ratio correction (`applyPostExtras`'s `resolution` arg) — kept in
    *  sync with the composer's own size in `setSize`. A dedicated Vector2 rather than reusing
    *  `gradePass.uniforms.uResolution` so the two ports stay independent. */
@@ -197,6 +203,7 @@ export class PostChain {
     this.grainPass = makeGrainPass()
     this.extrasResolution = new THREE.Vector2(width, height)
     this.outputPass = new OutputPass()
+    this.smaaPass = new SMAAPass(width, height)
     this.composer.addPass(this.renderPass)
     this.composer.addPass(this.texturePass)
     this.composer.addPass(this.gtaoPass)
@@ -223,10 +230,13 @@ export class PostChain {
     // intermediate result to the renderer's configured tone mapping + output colour space on the
     // way to the screen (see the class doc above). Grain must stay immediately before it.
     this.composer.addPass(this.outputPass)
+    // SMAA is the terminal pass so it runs on OutputPass's tone-mapped sRGB result.
+    this.composer.addPass(this.smaaPass)
   }
 
   setSize(width: number, height: number): void {
     this.composer.setSize(width, height)
+    this.smaaPass.setSize(width, height)
     this.gtaoPass.setSize(width, height)
     this.bloomPass.setSize(width, height)
     this.halftonePass.setSize(width, height)

@@ -557,7 +557,7 @@ export function sceneHasOpalFlow(doc: SceneDoc): boolean {
 }
 
 export type LightingPreset = 'studio' | 'soft' | 'dramatic' | 'flat'
-export type EnvironmentKind = 'room' | 'darkStrips' | 'softbox' | 'colorGels'
+export type EnvironmentKind = 'room' | 'darkStrips' | 'softbox' | 'colorGels' | 'studio'
 export interface SceneLighting {
   preset: LightingPreset
   environment: EnvironmentKind
@@ -663,7 +663,7 @@ export const MACRO_PRIMITIVE_KINDS: PrimitiveKind[] =
 export const MACRO_NONE = '(none)'
 
 export const LIGHTING_PRESETS: LightingPreset[] = ['studio', 'soft', 'dramatic', 'flat']
-export const ENVIRONMENT_KINDS: EnvironmentKind[] = ['room', 'darkStrips', 'softbox', 'colorGels']
+export const ENVIRONMENT_KINDS: EnvironmentKind[] = ['room', 'darkStrips', 'softbox', 'colorGels', 'studio']
 
 
 const LOOP_KINDS: LoopKind[] = ['none', 'spin', 'bob', 'pulse', 'orbit', 'sway', 'tumble']

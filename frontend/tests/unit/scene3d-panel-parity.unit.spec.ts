@@ -1523,7 +1523,7 @@ describe('Scene3D panel parity — reading values', () => {
     doc.lighting.environment = 'darkStrips'
     expect(readSceneControl(doc, null, 'lighting.environment')).toBe('dark')
     const row = byKey(doc, null).get('lighting.environment') as unknown as { options: string[] }
-    expect(row.options).toEqual(['room', 'dark', 'softbox', 'gels'])
+    expect(row.options).toEqual(['room', 'dark', 'softbox', 'studio', 'gels'])
   })
 
   it('reads the doc-level rows straight off the document', () => {
