@@ -3,16 +3,19 @@
  *  selection: a property band → its timing (start/duration) + easing + add-point; a control
  *  point → its typed value (number field / colour picker / full GradientEditor) + ease-to-next.
  *  Emits the next motionx Track[] upstream; CompositorModal persists via setMotion. */
-import type { Track, Ease, PropertyValue } from '~/lib/motionx'
-import { trackSpan } from '~/lib/motionx/bands'
+import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/motionx'
+
+export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }
+import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
 import { retimeTrack, addPoint, setPointValue, setPointEase, removePoint, setBandTrack } from '~/lib/motionx/bandEdit'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import type { Gradient } from '~/lib/compositor/paint'
 
-export interface MotionSelection { kind: 'band' | 'point'; path: string; index?: number }
+export interface MotionSelection { kind: 'band' | 'point' | 'behaviour'; path: string; index?: number }
 
 const props = defineProps<{
   motionx: Track[]
+  behaviours?: StoredBehaviour[]
   selection: MotionSelection | null
   duration: number
   t: number | null
@@ -24,7 +27,26 @@ const emit = defineEmits<{
   commit: []
   'select-point': [sel: { path: string; index: number }]
   clear: []
+  'behaviour-change': [id: string, patch: BehaviourPatch]
+  'behaviour-open': [id: string]
+  'behaviour-delete': [id: string]
 }>()
+
+// ── Behaviour selection (Slice 3) ────────────────────────────────────────────
+const behaviour = computed<StoredBehaviour | null>(() =>
+  props.selection?.kind === 'behaviour'
+    ? (props.behaviours ?? []).find((b) => b.id === props.selection!.path) ?? null
+    : null)
+const behParam = (k: string) => behaviour.value?.params?.[k]
+function setBehParams(patch: Record<string, unknown>) {
+  if (behaviour.value) emit('behaviour-change', behaviour.value.id, { params: patch })
+}
+function setBehTiming(patch: { start?: number; duration?: number; loop?: boolean }) {
+  if (behaviour.value) emit('behaviour-change', behaviour.value.id, { timing: patch })
+}
+const SLIDE_DIRS: Array<{ v: string; l: string }> = [
+  { v: 'up', l: 'Up' }, { v: 'down', l: 'Down' }, { v: 'left', l: 'Left' }, { v: 'right', l: 'Right' },
+]
 
 const EASES: Array<{ v: Ease; l: string }> = [
   { v: 'linear', l: 'Linear' }, { v: 'easeIn', l: 'In' }, { v: 'easeOut', l: 'Out' }, { v: 'easeInOut', l: 'Smooth' },
@@ -98,7 +120,82 @@ function onGradient(g: Gradient) {
 </script>
 
 <template>
-  <div v-if="track" data-testid="motion-inspector"
+  <!-- Behaviour band selected: kind params + timing + Open into keyframes -->
+  <div v-if="behaviour" data-testid="motion-inspector"
+    class="rounded-lg border border-white/10 bg-[#0e0e10]/80 px-3 py-2.5 text-[11px] text-white/70">
+    <div class="mb-2 flex items-center justify-between border-b border-white/10 pb-2">
+      <div class="flex items-center gap-1.5">
+        <span class="inline-block w-2 h-2 rounded-sm" style="background:#78dcaa" />
+        <span class="font-medium text-white/85">{{ behaviourLabel(behaviour) }}</span>
+        <span class="text-white/35">behaviour</span>
+      </div>
+      <button class="cursor-pointer text-white/40 hover:text-white/80" @click="emit('clear')">Done</button>
+    </div>
+
+    <!-- kind-specific params -->
+    <template v-if="behaviour.kind === 'fade'">
+      <div class="mb-2 flex items-center justify-between">Direction
+        <span class="inline-flex overflow-hidden rounded border border-white/15">
+          <button v-for="d in [{v:'in',l:'In'},{v:'out',l:'Out'}]" :key="d.v" type="button" class="px-2 py-0.5 cursor-pointer"
+            :class="(behParam('dir') ?? 'in') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
+            @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
+        </span>
+      </div>
+    </template>
+    <template v-else-if="behaviour.kind === 'slide'">
+      <div class="mb-2 flex items-center justify-between">Direction
+        <span class="inline-flex overflow-hidden rounded border border-white/15">
+          <button v-for="d in SLIDE_DIRS" :key="d.v" type="button" class="px-2 py-0.5 cursor-pointer"
+            :class="(behParam('dir') ?? 'up') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
+            @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
+        </span>
+      </div>
+      <div class="mb-2 flex items-center justify-between">Distance
+        <input v-scrubnum type="number" step="1" :value="(behParam('distance') as number) ?? 40"
+          class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
+          @change="setBehParams({ distance: Number(($event.target as HTMLInputElement).value) || 0 })"></div>
+    </template>
+    <template v-else-if="behaviour.kind === 'gradientMorph'">
+      <div class="mb-2 flex items-center justify-between">Mode
+        <span class="inline-flex overflow-hidden rounded border border-white/15">
+          <button v-for="m in [{v:'crossfade',l:'Crossfade'},{v:'travel',l:'Travel'}]" :key="m.v" type="button" class="px-2 py-0.5 cursor-pointer"
+            :class="(behParam('mode') ?? 'crossfade') === m.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
+            @click="setBehParams({ mode: m.v })">{{ m.l }}</button>
+        </span>
+      </div>
+      <div class="mb-2 flex items-center justify-between">Colour
+        <span class="inline-flex overflow-hidden rounded border border-white/15">
+          <button v-for="s in [{v:'oklab',l:'OKLab'},{v:'hybrid',l:'Hybrid'}]" :key="s.v" type="button" class="px-2 py-0.5 cursor-pointer"
+            :class="(behParam('space') ?? 'oklab') === s.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
+            @click="setBehParams({ space: s.v })">{{ s.l }}</button>
+        </span>
+      </div>
+    </template>
+
+    <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Timing</div>
+    <div class="mb-2 flex items-center gap-3">
+      <label class="flex items-center gap-1">Start
+        <input v-scrubnum type="number" step="0.1" min="0" :value="+behaviour.timing.start.toFixed(2)" data-testid="beh-start"
+          class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
+          @change="setBehTiming({ start: Number(($event.target as HTMLInputElement).value) || 0 })"></label>
+      <label class="flex items-center gap-1">Duration
+        <input v-scrubnum type="number" step="0.1" min="0.05" :value="+behaviour.timing.duration.toFixed(2)" data-testid="beh-duration"
+          class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
+          @change="setBehTiming({ duration: Math.max(0.05, Number(($event.target as HTMLInputElement).value) || 0.05) })"></label>
+    </div>
+    <label class="mb-2 flex items-center justify-between">Loop
+      <input type="checkbox" class="accent-[#7c9cff]" :checked="behaviour.timing.loop ?? false"
+        @change="setBehTiming({ loop: ($event.target as HTMLInputElement).checked })"></label>
+
+    <div class="mt-2 flex items-center justify-between border-t border-white/10 pt-2">
+      <button type="button" class="text-white/40 hover:text-rose-300 cursor-pointer" @click="emit('behaviour-delete', behaviour.id)">Delete</button>
+      <button type="button" data-testid="beh-open"
+        class="rounded border border-white/15 px-2 py-0.5 text-white/80 hover:bg-white/10 cursor-pointer"
+        title="Bake into editable control-point bands" @click="emit('behaviour-open', behaviour.id)">Open into keyframes</button>
+    </div>
+  </div>
+
+  <div v-else-if="track" data-testid="motion-inspector"
     class="rounded-lg border border-white/10 bg-[#0e0e10]/80 px-3 py-2.5 text-[11px] text-white/70">
     <!-- Header naming the selection -->
     <div class="mb-2 flex items-center justify-between border-b border-white/10 pb-2">

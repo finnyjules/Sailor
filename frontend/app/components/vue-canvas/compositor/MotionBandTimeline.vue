@@ -6,17 +6,18 @@
  *  it; double-click a point to delete; click a point to select it (opens a minimal popover
  *  + the right-column inspector). Every edit emits the next motionx Track[] upstream. */
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import type { Track } from '~/lib/motionx'
-import { bandsForLayer, numberBandCurve, colorBandCss, gradientBandCss, type Band } from '~/lib/motionx/bands'
+import type { Track, StoredBehaviour } from '~/lib/motionx'
+import { bandsForLayer, behaviourBandsForLayer, numberBandCurve, colorBandCss, gradientBandCss, type Band } from '~/lib/motionx/bands'
 import { animatableProperties } from '~/lib/motionx/adapter/frame'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setPointValue, setBandTrack } from '~/lib/motionx/bandEdit'
 
-export interface MotionSelection { kind: 'band' | 'point'; path: string; index?: number }
+export interface MotionSelection { kind: 'band' | 'point' | 'behaviour'; path: string; index?: number }
 
 const props = defineProps<{
   layers: LocalLayer[]
   selectedId: string | null
   motionx: Track[]
+  behaviours?: StoredBehaviour[]
   duration: number
   t: number | null
   selection: MotionSelection | null
@@ -25,10 +26,16 @@ const emit = defineEmits<{
   select: [id: string]
   'select-band': [path: string]
   'select-point': [sel: { path: string; index: number }]
+  'select-behaviour': [id: string]
   'update:motionx': [tracks: Track[]]
   'before-change': []
   commit: []
 }>()
+
+const behBandsFor = (layerId: string) => behaviourBandsForLayer(layerId, props.behaviours ?? [])
+const isBehSel = (b: Band) => props.selection?.kind === 'behaviour' && props.selection.path === b.behaviourId
+const behLeft = (b: Band) => (props.duration > 0 ? b.start / props.duration : 0)
+const behWidth = (b: Band) => (props.duration > 0 ? Math.max(0.02, (b.end - b.start) / props.duration) : 0.02)
 
 const pct = (f: number) => `${(Math.max(0, Math.min(1, f)) * 100).toFixed(3)}%`
 const rowLabel = (l: LocalLayer) =>
@@ -175,10 +182,23 @@ function setSelPointColor(v: string) {
     </div>
     <div class="grid grid-cols-[110px_1fr] gap-x-2">
       <template v-for="l in layers" :key="l.id">
-        <button class="truncate text-left text-[11px] cursor-pointer"
+        <button class="truncate text-left text-[11px] cursor-pointer self-center"
           :class="l.id === selectedId ? 'text-white' : 'text-white/50 hover:text-white/75'"
           @click="emit('select', l.id)">{{ rowLabel(l) }}</button>
-        <div class="relative my-0.5 h-5 rounded border border-white/10 bg-white/[0.03]" />
+        <div class="relative my-0.5 h-6 rounded border border-white/10 bg-white/[0.03]">
+          <div v-if="t != null" class="absolute inset-y-0 w-px bg-white/40 pointer-events-none z-30"
+            :style="{ left: pct(duration > 0 ? (t ?? 0) / duration : 0) }" />
+          <!-- behaviour bands live on the layer's own lane (labeled, param-editable via inspector) -->
+          <div v-for="b in behBandsFor(l.id)" :key="b.key"
+            :data-testid="'beh-band-' + b.behaviourId"
+            class="absolute inset-y-0.5 flex items-center gap-1 rounded-md border px-2 text-[10px] cursor-pointer overflow-hidden"
+            :class="isBehSel(b) ? 'border-emerald-300 ring-1 ring-emerald-300 text-white' : 'border-emerald-400/40 text-white/80 hover:border-emerald-300/70'"
+            :style="{ left: pct(behLeft(b)), width: pct(behWidth(b)), background: 'rgba(120,220,170,.16)' }"
+            :title="b.label"
+            @click.stop="emit('select-behaviour', b.behaviourId!)">
+            <span class="truncate">{{ b.label }}</span>
+          </div>
+        </div>
       </template>
 
       <template v-for="b in bands" :key="b.key">
