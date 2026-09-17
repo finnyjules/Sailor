@@ -5,6 +5,7 @@ import { sanitizeParams, sanitizeModifiers } from '~/lib/scene3d/primParams'
 import { sanitizeModifierStack, type ModifierInstance } from '~/lib/scene3d/modifierStack'
 import { VARY_PALETTE_MAX } from '~/lib/vary'
 import { parseTreatments, type Treatment } from './treatments'
+import { isKnownHdri } from './hdri'
 import type { ObjectMotion, CameraMotion, SceneMotion, SceneMotionTrack, LoopKind, TransitionPreset, Direction, EaseRef, TransitionSpec } from '~/lib/scene3d/motion/types'
 import { DEFAULT_SCENE_MOTION } from '~/lib/scene3d/motion/types'
 import type { TrackEasing } from '~/lib/studio/track'
@@ -561,6 +562,10 @@ export type EnvironmentKind = 'room' | 'darkStrips' | 'softbox' | 'colorGels' | 
 export interface SceneLighting {
   preset: LightingPreset
   environment: EnvironmentKind
+  /** Optional Poly Haven studio HDRI slug (see lib/scene3d/hdri.ts). When set, it OVERRIDES the
+   *  procedural `environment` for lighting/reflection/background — a real HDR equirect, which the
+   *  cinematic path tracer samples at full energy (fire/sparkle). null ⇒ use `environment`. */
+  hdri: string | null
   sunAzimuth: number
   sunElevation: number
   sunIntensity: number
@@ -956,7 +961,7 @@ export function defaultDoc(): SceneDoc {
     camera: { position: [4, 3, 6], target: [0, 0.5, 0], fov: 45 },
     // Raw fields seeded to match the 'softbox-beauty' Look (lib/scene3d/lighting.ts) so a fresh scene renders what its Look name promises. Keep in sync if that recipe changes.
     lighting: {
-      preset: 'soft', environment: 'softbox', sunAzimuth: 35, sunElevation: 40, sunIntensity: 1.2, ambient: 0.7,
+      preset: 'soft', environment: 'softbox', hdri: null, sunAzimuth: 35, sunElevation: 40, sunIntensity: 1.2, ambient: 0.7,
       look: 'softbox-beauty', softness: 0.85, warmth: 0.5, brightness: 1, sunColor: '#ffffff', shadowSoftness: 10.35,
       advanced: false,
       gelColorA: '#ff0da6', gelBrightnessA: 7, gelSizeA: 1, gelAzimuthA: -100, gelHeightA: 1.5, gelDistanceA: 4.6,
@@ -1569,6 +1574,7 @@ export function parseDoc(json: string): SceneDoc {
     lighting: {
       preset: LIGHTING_PRESETS.includes(raw.lighting?.preset) ? raw.lighting.preset : d.lighting.preset,
       environment: ENVIRONMENT_KINDS.includes(raw.lighting?.environment) ? raw.lighting.environment : d.lighting.environment,
+      hdri: isKnownHdri(raw.lighting?.hdri) ? raw.lighting.hdri : null,
       sunAzimuth: typeof raw.lighting?.sunAzimuth === 'number' ? raw.lighting.sunAzimuth : d.lighting.sunAzimuth,
       sunElevation: typeof raw.lighting?.sunElevation === 'number' ? raw.lighting.sunElevation : d.lighting.sunElevation,
       sunIntensity: typeof raw.lighting?.sunIntensity === 'number' ? raw.lighting.sunIntensity : d.lighting.sunIntensity,

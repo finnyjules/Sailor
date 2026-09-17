@@ -9,6 +9,7 @@ import {
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, resolveParam, totalClones } from './primParams'
 import { modifierStackOf } from './modifierStack'
+import { HDRI_ENVIRONMENTS, hdriLabel } from './hdri'
 import {
   SCENE_CONTROLS, GEOMETRY_PARAM_PREFIX, MODIFIER_PREFIX,
   type SceneControl,
@@ -239,6 +240,7 @@ export function readSceneControl(
   if (key === 'showFloor') return doc.showFloor
   if (key === 'camera.fov') return doc.camera.fov
   if (key === 'lighting.environment') return ENV_LABEL[doc.lighting.environment] ?? 'room'
+  if (key === 'lighting.hdri') return doc.lighting.hdri ? hdriLabel(doc.lighting.hdri) : 'None'
   if (key.startsWith('lighting.')) {
     return (doc.lighting as unknown as Record<string, ParamValue>)[key.slice('lighting.'.length)] ?? 0
   }
@@ -329,6 +331,16 @@ export const ENV_BY_LABEL: Record<string, SceneDoc['lighting']['environment']> =
 }
 const ENV_LABEL: Record<string, string> = {
   room: 'room', darkStrips: 'dark', softbox: 'softbox', studio: 'studio', colorGels: 'gels',
+}
+
+// ── the Studio HDRI select's labels ──────────────────────────────────────────
+// A separate select (not part of the Environment segmented) because HDRIs are a growing list.
+// The control shows sentence-case labels; the doc stores the Poly Haven slug (or null = None).
+export const HDRI_OPTION_NONE = 'None'
+export const HDRI_OPTIONS = [HDRI_OPTION_NONE, ...HDRI_ENVIRONMENTS.map((h) => h.label)] as const
+export const HDRI_BY_LABEL: Record<string, string | null> = {
+  [HDRI_OPTION_NONE]: null,
+  ...Object.fromEntries(HDRI_ENVIRONMENTS.map((h) => [h.label, h.slug])),
 }
 
 // ── bespoke-block anchors ────────────────────────────────────────────────────
@@ -588,7 +600,7 @@ const DOC_CARDS: Record<string, readonly string[]> = {
     'lighting.sunAzimuth', 'lighting.sunElevation',
     'lighting.softness', 'lighting.warmth', 'lighting.brightness',
     'lighting.advanced',
-    'lighting.preset', 'lighting.environment', 'lighting.sunIntensity', 'lighting.ambient',
+    'lighting.preset', 'lighting.environment', 'lighting.hdri', 'lighting.sunIntensity', 'lighting.ambient',
   ],
   Background: ['showFloor', 'ui.background.transparent', 'ui.background.color'],
 }
@@ -697,6 +709,7 @@ const OVERRIDE: Record<string, RowPatch> = {
   // read as a second, competing mood picker. It only tunes the shadow/env-intensity bucket.
   'lighting.preset': { label: 'Shadow preset' },
   'lighting.environment': { label: 'Environment', options: [...ENV_OPTIONS], default: 'room' },
+  'lighting.hdri': { label: 'Studio HDRI', options: [...HDRI_OPTIONS], default: 'None', hint: 'A real studio photo environment (Poly Haven). Overrides the environment above and gives cinematic renders their reflections and sparkle.' },
   showFloor: { hint: null },
   // Degrees, and no 'Radians' tooltip: the row has ALWAYS been edited in degrees, so the
   // schema's hint is a lie about what the user is typing into.

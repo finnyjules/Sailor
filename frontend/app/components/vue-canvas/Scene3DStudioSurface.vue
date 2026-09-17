@@ -122,7 +122,7 @@ import WidgetMoodboardChip from '~/components/vue-canvas/widgets/WidgetMoodboard
 import Scene3DMotionTimeline from '~/components/vue-canvas/Scene3DMotionTimeline.vue'
 import CurveEditor from '~/components/vue-canvas/CurveEditor.vue'
 import {
-  ENV_BY_LABEL, SCENE_PANEL_SECTIONS, SCENE_TRANSFORM_SECTIONS, SCENE_GEOMETRY_SECTIONS,
+  ENV_BY_LABEL, HDRI_BY_LABEL, SCENE_PANEL_SECTIONS, SCENE_TRANSFORM_SECTIONS, SCENE_GEOMETRY_SECTIONS,
   readSceneControl, scenePanelChrome, scenePanelControls, writeMaterialField, isNoOpTransformCommit,
 } from '~/lib/scene3d/panelPresentation'
 import { setByPath } from '~/lib/studio/path'
@@ -1942,6 +1942,8 @@ function setControl(key: string, value: string | number | boolean): void {
   if (key === 'lighting.preset') { doc.lighting.preset = String(value) as SceneDoc['lighting']['preset']; return }
   // The row offers the segmented control's SHORT labels, not the EnvironmentKind values.
   if (key === 'lighting.environment') { doc.lighting.environment = ENV_BY_LABEL[String(value)] ?? 'room'; return }
+  // The Studio HDRI select offers sentence-case labels; the doc stores the Poly Haven slug (or null = None).
+  if (key === 'lighting.hdri') { doc.lighting.hdri = HDRI_BY_LABEL[String(value)] ?? null; return }
   // Gel string/boolean fields must bypass the numeric coercion below: the four gel colours
   // (hex strings) and the rim toggle (boolean). Everything else under lighting.* is numeric.
   if (key === 'lighting.gelColorA' || key === 'lighting.gelColorB'
@@ -2289,6 +2291,19 @@ onMounted(() => {
     }
     return { min: [rMin, gMin, bMin], max: [rMax, gMax, bMax], texels: d.length / 4 }
   }
+  ;(window as any).__scene3dEnvState = () => {
+    const e = engine as any
+    const env = e?.scene?.environment
+    const bg = e?.scene?.background
+    return {
+      hdriSlug: e?.hdriSlug ?? null,
+      hdriEquirectLoaded: !!e?.hdriEquirect,
+      environmentSet: !!env,
+      environmentName: env?.name ?? null,
+      backgroundName: bg?.name ?? (bg?.isColor ? 'color' : bg ? 'texture' : null),
+      envIntensity: e?.scene?.environmentIntensity ?? null,
+    }
+  }
   ;(window as any).__scene3dCineHelperCheck = () => {
     const sc = (engine as any)?.scene
     if (!sc) return null
@@ -2586,7 +2601,7 @@ watch(doc, () => {
 // An environment switch — or an ambient/preset change (both feed the baked ambient fill floor) —
 // must re-bake the equirect the path-tracer lights from (the deep watch above only rebuilds the
 // trace geometry). No-op unless Cinematic is active.
-watch(() => [doc.lighting.environment, doc.lighting.ambient, doc.lighting.preset],
+watch(() => [doc.lighting.environment, doc.lighting.hdri, doc.lighting.ambient, doc.lighting.preset],
   () => engine?.cinematicRefresh(true))
 // Look change → apply the whole recipe (direction, env, preset, default dials),
 // then recompute the dial-driven fields from those defaults.

@@ -36,6 +36,7 @@ import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry, GEM_CUTS } from './gem'
 import { envSceneToEquirect, ambientFloorByte } from './pathtrace/envEquirect'
+import { loadHdriEquirect } from './hdriLoader'
 import type { ScenePathTracer } from './pathtrace/PathTracer'
 
 /** Private THREE layer used to overlay editor gizmos on top of the post-processed
@@ -622,6 +623,13 @@ export class SceneEngine {
    *  and compared via `envGelSig` so any gel edit re-bakes (only while colorGels is live). */
   private envGel: GelEnvOptions | null = null
   private envGelSig = ''
+  /** Active Poly Haven HDRI slug (overrides the procedural env), the loaded equirect it resolved
+   *  to, and a token so a rapid switch's slow async load can't overwrite a newer selection. The
+   *  equirect is owned by hdriLoader's cache — the engine points env/background/tracer at it but
+   *  never disposes it. */
+  private hdriSlug: string | null = null
+  private hdriEquirect: THREE.DataTexture | null = null
+  private hdriToken = 0
   private glbTokens = new Map<string, number>() // id → load generation (drop stale async loads)
   private fontTokens = new Map<string, number>() // id → font-load generation, same drop-stale contract as glbTokens
   private meshTokens = new Map<string, number>()
@@ -759,6 +767,38 @@ export class SceneEngine {
     pmrem.dispose()
   }
 
+  /** Apply a Poly Haven HDRI as the environment. Async (fetch + parse), so `hdriSlug` is set
+   *  immediately (intent) and the GPU work happens when the equirect resolves; a `hdriToken`
+   *  guards against a slow load landing after a newer selection. On success: PMREM for the raster
+   *  preview, the equirect straight into the background + the cinematic tracer (full HDR energy).
+   *  A failed load keeps whatever env was showing. */
+  private applyHdriEnvironment(slug: string): void {
+    const token = ++this.hdriToken
+    this.hdriSlug = slug
+    loadHdriEquirect(slug).then((equirect) => {
+      if (token !== this.hdriToken) return // superseded by a newer selection
+      const pmrem = new THREE.PMREMGenerator(this.renderer)
+      this.envTarget?.dispose()
+      this.envTarget = pmrem.fromEquirectangular(equirect)
+      pmrem.dispose()
+      this.scene.environment = this.envTarget.texture
+      this.hdriEquirect = equirect
+      // The cube backdrop belonged to the procedural world; the HDRI shows its own equirect.
+      // (Leaving the HDRI later forces a procedural rebuild via the `hdriSlug !== null` guard.)
+      this.envBackgroundTarget?.dispose()
+      this.envBackgroundTarget = null
+      if (this.lastDoc?.background === 'environment') this.scene.background = equirect
+      // Re-point the live cinematic trace at the real HDR env (no bake, no ambient floor needed).
+      if (this._cinematic && this.pathTracer?.isActive) this.cinematicRefresh(true)
+    }).catch(() => { /* network/parse failure — keep the current environment */ })
+  }
+
+  /** The texture the cinematic tracer lights from: the loaded HDRI equirect when one is active
+   *  (real HDR — used directly), else the procedural env baked to an 8-bit equirect. */
+  private get cinematicEnvTexture(): THREE.Texture | null {
+    return this.hdriSlug ? this.hdriEquirect : this.cinematicEnv
+  }
+
   // WebGL context loss leaves the renderer permanently blank with NO throwable
   // error (three only console.logs "Context Lost."), so without these handlers a
   // dropped context — a background tab reclaim, too many live WebGL contexts
@@ -787,7 +827,8 @@ export class SceneEngine {
    *  the live context (rather than trusting three's stale per-buffer cache). */
   private restoreGLResources(): void {
     try { RectAreaLightUniformsLib.init() } catch { /* no-op on a headless/lost path */ }
-    this.buildEnvironment()
+    if (this.hdriSlug) this.applyHdriEnvironment(this.hdriSlug) // re-fetch (cached) + rebuild PMREM
+    else this.buildEnvironment()
     this.postChain?.dispose()
     this.postChain = null
     this.postW = this.postH = 0
@@ -860,14 +901,17 @@ export class SceneEngine {
         this.pathTracer = new ScenePathTracer(this.renderer)
       }
       this.rebuildCinematicEnv()
-      this.pathTracer.begin(this.scene, this.camera, this.cinematicEnv ?? null)
+      this.pathTracer.begin(this.scene, this.camera, this.cinematicEnvTexture)
     } else {
       this.pathTracer?.end()
     }
   }
 
-  /** Bake the current procedural env into the equirect the tracer lights from. */
+  /** Prepare the env the tracer lights from. An active HDRI is fed DIRECTLY (a real HDR equirect —
+   *  no bake, no ambient floor); otherwise bake the procedural env to an 8-bit equirect with the
+   *  ambient fill floored in. `cinematicEnvTexture` then returns whichever applies. */
   private rebuildCinematicEnv(): void {
+    if (this.hdriSlug) { this.cinematicEnv?.dispose(); this.cinematicEnv = null; return }
     this.cinematicEnv?.dispose()
     const envScene = buildEnvironmentScene(this.envKind, this.envGel ?? undefined)
     // Bake in the raster's ambient fill (the tracer won't sample AmbientLight). Pre-divided by the
@@ -887,7 +931,7 @@ export class SceneEngine {
     if (envChanged) {
       this.pathTracer.end()
       this.rebuildCinematicEnv()
-      this.pathTracer.begin(this.scene, this.camera, this.cinematicEnv ?? null)
+      this.pathTracer.begin(this.scene, this.camera, this.cinematicEnvTexture)
     } else {
       this.pathTracer.rebuild(this.scene, this.camera)
     }
@@ -954,14 +998,26 @@ export class SceneEngine {
     // any gel field changes, since they're baked into the reflected/refracted world. Gel edits
     // are inspector-only (not animatable), so this never fires per frame.
     const gel = gelOptionsFor(doc.lighting)
-    const gelChanged = doc.lighting.environment === 'colorGels' && JSON.stringify(gel) !== this.envGelSig
-    if (doc.lighting.environment !== this.envKind || gelChanged) {
-      this.buildEnvironment(doc.lighting.environment, gel)
+    const wantHdri = doc.lighting.hdri || null
+    if (wantHdri) {
+      // An HDRI overrides the procedural env. Load (async) + apply only on an actual change.
+      if (wantHdri !== this.hdriSlug) this.applyHdriEnvironment(wantHdri)
+    } else {
+      // No HDRI: (re)build the procedural env on a kind switch, when LEAVING an HDRI, or — only
+      // while colorGels is live — when any gel field changes (they bake into the reflected world).
+      const gelChanged = doc.lighting.environment === 'colorGels' && JSON.stringify(gel) !== this.envGelSig
+      if (this.hdriSlug !== null || doc.lighting.environment !== this.envKind || gelChanged) {
+        this.hdriSlug = null
+        this.hdriEquirect = null
+        this.buildEnvironment(doc.lighting.environment, gel)
+      }
     }
-    this.scene.environmentIntensity = preset.envIntensity
+    // An HDRI drives its OWN env intensity (a real HDR carries its own energy); the procedural
+    // preset multiplier only shapes the procedural panels.
+    this.scene.environmentIntensity = wantHdri ? 1 : preset.envIntensity
     this.scene.background =
       doc.background === 'transparent' ? null
-      : doc.background === 'environment' ? (this.envBackgroundTarget?.texture ?? null)
+      : doc.background === 'environment' ? (this.hdriEquirect ?? this.envBackgroundTarget?.texture ?? null)
       : new THREE.Color(stripAlpha(doc.background))
     // Floor = the reference grid + the shadow-catcher ground. Off ⇒ a clean floating
     // look in the viewport AND the beauty bake (renderPasses keeps the grid hidden and
