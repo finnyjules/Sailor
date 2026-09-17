@@ -91,6 +91,8 @@ import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { effectDialTargets, addDialTrack, removeDialTrack, animatedDialKeysOf, type EffectDialTrack, type DialTargetSpec } from '~/lib/motion/effectTracks'
+import { compileBehaviourForLayer } from '~/lib/motionx/adapter/frame'
+import { type Behaviour, type Track as MotionxTrack } from '~/lib/motionx'
 import { fillDialTargets } from '~/lib/motion/fillTracks'
 import { getByIdPath } from '~/lib/studio/idPath'
 import { paintStopsToColor } from '~/lib/compositor/gradientPaint'
@@ -3722,6 +3724,27 @@ function toggleDialTrack(spec: DialTargetSpec) {
       spec.kind === 'color' ? 'oklch' : undefined,
     ),
   } as Partial<FrameMotion>)
+}
+
+// ── Motion tab · unified-motion behaviours (motionx, live slice 1) ──────────
+// Temporary entry point: a behaviour compiles to Track[] (via the Frame
+// adapter) against the selected layer's CURRENT values and is appended to
+// `sailor_motion.motionx`. The render fold (paintLayerStack) already reads
+// this field — see CLAUDE.md / um-p3 report. No preview gallery or band
+// timeline yet; that lands next.
+const motionxTracks = computed<MotionxTrack[]>(() => (motionDoc.value as any).motionx ?? [])
+const behaviourPickerOpen = ref(false)
+function addBehaviour(kind: string) {
+  const l = selectedLocal.value
+  if (!l) return
+  const behaviour: Behaviour = {
+    id: 'b' + Date.now(),
+    kind,
+    timing: { start: 0, duration: motionDoc.value.duration ?? 4, loop: kind === 'gradientScroll' },
+    params: kind === 'fade' ? { dir: 'in' } : {},
+  }
+  const tracks = compileBehaviourForLayer(l, behaviour)
+  setMotion({ motionx: [...motionxTracks.value, ...tracks] } as Partial<FrameMotion>)
 }
 
 // ── F8 Task 6 · signal driven dials in the effect inspector ──────────────────
@@ -7857,6 +7880,32 @@ onUnmounted(() => {
               @click="toggleDialTrack(spec)">
               <span>{{ dialIsAnimated(spec.path) ? '✓' : '+' }}</span>
               <span>{{ spec.label }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Add behaviour: temporary entry point for the unified-motion (motionx)
+             core — compiles a behaviour against the selected layer and appends its
+             tracks to sailor_motion.motionx. Real previewing gallery + band
+             timeline come next; this is deliberately minimal. -->
+        <div v-if="selectedLocal" data-testid="behaviour-picker"
+          class="glass-panel mb-2 rounded-lg border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-lg px-3 py-2">
+          <button type="button" data-testid="add-behaviour-toggle"
+            class="flex items-center gap-1.5 text-[11px] font-medium text-white/60 hover:text-white/85 cursor-pointer"
+            @click="behaviourPickerOpen = !behaviourPickerOpen">
+            <span>{{ behaviourPickerOpen ? '−' : '+' }}</span>
+            <span>Add behaviour</span>
+          </button>
+          <div v-if="behaviourPickerOpen" class="flex flex-wrap gap-1.5 mt-1.5">
+            <button type="button" data-testid="add-behaviour-fade"
+              class="flex items-center h-7 px-2 rounded text-[11px] cursor-pointer whitespace-nowrap border border-white/10 text-white/70 hover:bg-white/10 transition-colors"
+              @click="addBehaviour('fade')">
+              Fade in
+            </button>
+            <button type="button" data-testid="add-behaviour-gradient-scroll"
+              class="flex items-center h-7 px-2 rounded text-[11px] cursor-pointer whitespace-nowrap border border-white/10 text-white/70 hover:bg-white/10 transition-colors"
+              @click="addBehaviour('gradientScroll')">
+              Scroll
             </button>
           </div>
         </div>

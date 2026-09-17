@@ -11,6 +11,7 @@
  */
 
 import type { EffectDialTrack } from '~/lib/motion/effectTracks'
+import type { Track as MotionxTrack } from '~/lib/motionx'
 
 export interface LayerAnimSpec {
   presetId: string      // kinetic preset id (subset supported; see evaluate.ts)
@@ -54,6 +55,10 @@ export interface FrameMotion {
   /** F8: per-layer effect-dial motion tracks (`layers.<id>.effects.<effectId>.<dial>`).
    *  Absent ⇒ no dial animation (byte-identical). Type-only import — no runtime cycle. */
   tracks?: EffectDialTrack[]
+  /** Unified-motion (motionx) tracks — `layers.<id>.<prop>` paths compiled from
+   *  authored Behaviours via compileBehaviourForLayer. Absent ⇒ no motionx
+   *  animation (byte-identical). Type-only import — no runtime cycle. */
+  motionx?: MotionxTrack[]
 }
 
 export const DEFAULT_FRAME_MOTION: FrameMotion = { fps: 30, duration: 4 }
