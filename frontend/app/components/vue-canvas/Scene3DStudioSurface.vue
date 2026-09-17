@@ -2243,6 +2243,14 @@ onMounted(() => {
   ;(window as any).__scene3dTreatmentStats = () => engine ? { ...engine.treatmentStats } : null
   ;(window as any).__scene3dSnapshot = () => engine?.snapshot() ?? ''
   ;(window as any).__scene3dBeauty = async () => engine ? (await renderPasses(engine, doc, 0)).beauty : ''
+  // Cinematic (path-trace) dev hooks — drive accumulation manually so a hidden Browser pane (rAF
+  // paused) can still be verified. __scene3dCinematic(on) toggles; __scene3dCineStep(n) accumulates
+  // n frames; __scene3dCineStatus() reads {samples,compiling}; capture via the canvas toDataURL.
+  ;(window as any).__scene3dCinematic = async (on: boolean) => { await engine?.setCinematic(on) }
+  ;(window as any).__scene3dCineStep = (n: number) => { for (let i = 0; i < n; i++) engine?.render(0); return engine?.cinematicStatus() }
+  ;(window as any).__scene3dCineStatus = () => engine?.cinematicStatus() ?? null
+  ;(window as any).__scene3dCineCanvas = () => (engine as any)?.renderer?.domElement?.toDataURL('image/png') ?? ''
+  ;(window as any).__scene3dCineSize = (n: number) => { (engine as any)?.renderer?.setSize(n, n, false) }
   // A deterministic MOVING-frame oracle for the S6 motion tests: the existing __scene3d* hooks
   // render at t=0 (still), where velocity blur / ghost trails have nothing to show. This runs the
   // full sample → velocity/ghost push → render path at an arbitrary t01 (renderMotionFrame does

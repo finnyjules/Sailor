@@ -35,6 +35,8 @@ import type { ScreenVelocity, LocalPose } from './motion/velocity'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry, GEM_CUTS } from './gem'
+import { envSceneToEquirect } from './pathtrace/envEquirect'
+import type { ScenePathTracer } from './pathtrace/PathTracer'
 
 /** Private THREE layer used to overlay editor gizmos on top of the post-processed
  *  image without bloom/grade catching them. Nothing else in the scene uses layers,
@@ -834,6 +836,59 @@ export class SceneEngine {
     this.updateLightWidgets() // no-op until Task 3; safe to call
   }
 
+  // ── Cinematic (path-traced) view mode ──────────────────────────────────────
+  // The heavy three-gpu-pathtracer wrapper is dynamic-imported so it never lands in the main
+  // bundle; the equirect env baker is three-only (statically imported, cheap). When cinematic is
+  // active, `render()` routes to the tracer (progressive accumulation) instead of the raster path,
+  // so a host that keeps calling `render()` each frame refines the image and idles when converged.
+  private _cinematic = false
+  private pathTracer: ScenePathTracer | null = null
+  private cinematicEnv: THREE.DataTexture | null = null
+
+  get cinematicActive(): boolean { return this._cinematic }
+  cinematicStatus(): { samples: number; compiling: boolean } {
+    return { samples: this.pathTracer?.samples ?? 0, compiling: this.pathTracer?.isCompiling ?? false }
+  }
+
+  /** Enter/leave cinematic. Async because it lazy-loads the tracer on first use. */
+  async setCinematic(on: boolean): Promise<void> {
+    if (this._cinematic === on) return
+    this._cinematic = on
+    if (on) {
+      if (!this.pathTracer) {
+        const { ScenePathTracer } = await import('./pathtrace/PathTracer')
+        this.pathTracer = new ScenePathTracer(this.renderer)
+      }
+      this.rebuildCinematicEnv()
+      this.pathTracer.begin(this.scene, this.camera, this.cinematicEnv ?? null)
+    } else {
+      this.pathTracer?.end()
+    }
+  }
+
+  /** Bake the current procedural env into the equirect the tracer lights from. */
+  private rebuildCinematicEnv(): void {
+    this.cinematicEnv?.dispose()
+    const envScene = buildEnvironmentScene(this.envKind, this.envGel ?? undefined)
+    this.cinematicEnv = envSceneToEquirect(this.renderer, envScene)
+    envScene.dispose()
+  }
+
+  /** Discard accumulation (a material/lighting tweak that didn't change geometry). */
+  cinematicReset(): void { this.pathTracer?.reset() }
+
+  /** Rebuild the trace after a geometry/scene edit (new BVH) and, if the env moved, re-bake it. */
+  cinematicRefresh(envChanged = false): void {
+    if (!this._cinematic || !this.pathTracer?.isActive) return
+    if (envChanged) {
+      this.pathTracer.end()
+      this.rebuildCinematicEnv()
+      this.pathTracer.begin(this.scene, this.camera, this.cinematicEnv ?? null)
+    } else {
+      this.pathTracer.rebuild(this.scene, this.camera)
+    }
+  }
+
   setSelected(id: string | null): void {
     this.selectedId = id
     this.updateLightWidgets()
@@ -1476,6 +1531,8 @@ export class SceneEngine {
     // host rAF keeps calling this harmlessly until `handleContextRestored` clears
     // the flag and rebuilds, at which point rendering resumes on its own.
     if (this._contextLost) return
+    // Cinematic view: accumulate a path-traced frame instead of the raster+post pipeline.
+    if (this._cinematic && this.pathTracer?.isActive) { this.pathTracer.frame(this.camera); return }
     this.renderWithPost(this.scene, this.camera, this.lastDoc?.post ?? DEFAULT_POST, elapsedSec)
   }
 
