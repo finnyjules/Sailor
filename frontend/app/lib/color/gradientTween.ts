@@ -28,3 +28,43 @@ export function blendHex(from: string, to: string, t: number, space: BlendSpace 
   if (cStraight > 1e-6 && cWant > cStraight) { const s = cWant / cStraight; a *= s; b *= s }
   return rgbToHex(...oklabToRgb(L, a, b))
 }
+
+function sortStops(stops: GradientStop[]): GradientStop[] {
+  return [...stops].sort((x, y) => x.pos - y.pos)
+}
+
+/**
+ * Sample a static ramp of stops at `u`, blending piecewise between the
+ * bracketing stops in the given space. Clamped to the end stops outside
+ * `[first.pos, last.pos]`. Stops are sorted by `pos` before sampling, so
+ * input order does not matter.
+ */
+export function sampleRamp(stops: GradientStop[], u: number, space: BlendSpace = 'oklab'): string {
+  const s = sortStops(stops)
+  if (s.length === 0) return '#000000'
+  if (u <= s[0].pos) return s[0].color
+  const last = s[s.length - 1]
+  if (u >= last.pos) return last.color
+  for (let i = 0; i < s.length - 1; i++) {
+    const a = s[i], b = s[i + 1]
+    if (u >= a.pos && u <= b.pos) {
+      const lt = (u - a.pos) / ((b.pos - a.pos) || 1)
+      return blendHex(a.color, b.color, lt, space)
+    }
+  }
+  return last.color
+}
+
+/**
+ * Build a `size*3`-byte RGB lookup table by sampling the ramp at
+ * `u = i/(size-1)` for row `i`. Default `size = 256`.
+ */
+export function buildLUT(stops: GradientStop[], space: BlendSpace = 'oklab', size = 256): Uint8ClampedArray {
+  const lut = new Uint8ClampedArray(size * 3)
+  for (let i = 0; i < size; i++) {
+    const u = size === 1 ? 0 : i / (size - 1)
+    const [r, g, b] = hexToRgb(sampleRamp(stops, u, space))
+    lut[i * 3] = r; lut[i * 3 + 1] = g; lut[i * 3 + 2] = b
+  }
+  return lut
+}

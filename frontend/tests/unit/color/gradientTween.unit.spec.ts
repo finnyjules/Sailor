@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { hexToOklab } from '~/lib/color/convert'
-import { blendHex } from '~/lib/color/gradientTween'
+import { blendHex, sampleRamp, buildLUT } from '~/lib/color/gradientTween'
+import type { GradientStop } from '~/lib/color/harmony'
 
 function chroma(hex: string): number { const [, a, b] = hexToOklab(hex); return Math.hypot(a, b) }
 
@@ -23,5 +24,34 @@ describe('blendHex', () => {
     const cOklab = chroma(blendHex('#ff7a00', '#0060ff', 0.5, 'oklab'))
     const cHybrid = chroma(blendHex('#ff7a00', '#0060ff', 0.5, 'hybrid'))
     expect(cHybrid).toBeGreaterThan(cOklab)
+  })
+})
+
+const RAMP: GradientStop[] = [
+  { pos: 0, color: '#000000' },
+  { pos: 0.5, color: '#ff0000' },
+  { pos: 1, color: '#ffffff' },
+]
+
+describe('sampleRamp', () => {
+  it('clamps to the end stops outside [first,last]', () => {
+    expect(sampleRamp(RAMP, -1)).toBe('#000000')
+    expect(sampleRamp(RAMP, 2)).toBe('#ffffff')
+  })
+  it('returns a stop colour exactly at its position', () => {
+    expect(sampleRamp(RAMP, 0.5)).toBe('#ff0000')
+  })
+  it('is order-independent (unsorted input)', () => {
+    const shuffled = [RAMP[2], RAMP[0], RAMP[1]]
+    expect(sampleRamp(shuffled, 0.5)).toBe('#ff0000')
+  })
+})
+
+describe('buildLUT', () => {
+  it('has size*3 bytes and exact endpoints', () => {
+    const lut = buildLUT(RAMP, 'oklab', 256)
+    expect(lut.length).toBe(768)
+    expect([lut[0], lut[1], lut[2]]).toEqual([0, 0, 0])
+    expect([lut[765], lut[766], lut[767]]).toEqual([255, 255, 255])
   })
 })
