@@ -18,16 +18,16 @@
 //   - enum / pick fields (boolean `op`, warp `field`, overlay `blend`, stroke `align`,
 //     torn-edge `style`, feather `curve`) and sibling refs (`refLayerId`) — stepped
 //     dials whose authoring UX is a deferred follow-up;
-//   - nested / complex fields (gradientMap `stops`, gradient overlay is from/to not
-//     stops, shader/backdrop_shader `params` objects, the shader instance `id`);
+//   - nested / complex fields (gradient overlay is from/to not stops, shader/
+//     backdrop_shader `params` objects, the shader instance `id`);
 //   - `visible` — the show/hide toggle, not a dial.
-// `enum` and `bool` stay in `DialKind` for when those land; the SCHEMA emits only
-// `number` and `color` this slice.
+// `enum` and `bool` stay in `DialKind` for when those land; the SCHEMA emits `number`,
+// `color`, and — for gradientMap's `stops` (Plan 3) — `gradient` this slice.
 //
 // Pure: no Vue, no canvas, no DOM.
 import type { EffectKind } from './effectStack'
 
-export type DialKind = 'number' | 'color' | 'enum' | 'bool'
+export type DialKind = 'number' | 'color' | 'enum' | 'bool' | 'gradient'
 
 export interface DialSpec {
   key: string
@@ -39,6 +39,7 @@ export interface DialSpec {
 
 const num = (key: string, label: string, min: number, max: number): DialSpec => ({ key, label, kind: 'number', min, max })
 const col = (key: string, label: string): DialSpec => ({ key, label, kind: 'color' })
+const grad = (key: string, label: string): DialSpec => ({ key, label, kind: 'gradient' })
 
 /**
  * The animatable dials of every effect kind. A TOTAL record over `EffectKind` — TS
@@ -82,7 +83,7 @@ export const EFFECT_DIAL_SCHEMA: Record<EffectKind, DialSpec[]> = {
   threshold: [num('cutoff', 'Cutoff', 0, 1)],
   invert: [num('amount', 'Amount', 0, 1)],
   duotone: [col('shadows', 'Shadows'), col('highlights', 'Highlights'), num('mix', 'Mix', 0, 1)],
-  gradientMap: [num('contrast', 'Contrast', -1, 1), num('mix', 'Mix', 0, 1), num('scrollPhase', 'Scroll', 0, 1)], // stops (nested) still excluded; scroll rides a scalar phase.
+  gradientMap: [num('contrast', 'Contrast', -1, 1), num('mix', 'Mix', 0, 1), num('scrollPhase', 'Scroll', 0, 1), grad('stops', 'Ramp')], // scroll rides a scalar phase; stops is a gradient-kind dial (a stop array, not a scalar).
   color_overlay: [col('color', 'Colour'), num('opacity', 'Opacity', 0, 1)], // blend excluded (enum).
   gradient_overlay: [col('from', 'From colour'), col('to', 'To colour'), num('angle', 'Angle', 0, 360), num('opacity', 'Opacity', 0, 1)], // blend excluded.
   stroke_from_alpha: [num('width', 'Width', 0, 0.2), col('color', 'Colour')], // align excluded (enum).

@@ -43,8 +43,10 @@ describe('EFFECT_DIAL_SCHEMA', () => {
       'seed', 'visible', 'type', 'id',
       // enum / pick fields and sibling refs
       'op', 'field', 'blend', 'align', 'style', 'curve', 'refLayerId', 'effectId',
-      // nested / complex
-      'params', 'stops',
+      // nested / complex — `stops` is now the one permitted exception: Plan 3 gives
+      // gradientMap.stops its own `gradient`-kind dial (see the next assertion), so it is
+      // excluded from this ban rather than added to a per-kind allowlist.
+      'params',
     ])
     for (const kind of EFFECT_ORDER) {
       for (const spec of EFFECT_DIAL_SCHEMA[kind]) {
@@ -53,10 +55,14 @@ describe('EFFECT_DIAL_SCHEMA', () => {
     }
   })
 
-  it('emits only number and colour specs in v1', () => {
+  it('emits only number, colour, and gradient specs (gradient reserved for gradientMap.stops)', () => {
     for (const kind of EFFECT_ORDER) {
       for (const spec of EFFECT_DIAL_SCHEMA[kind]) {
-        expect(['number', 'color']).toContain(spec.kind)
+        expect(['number', 'color', 'gradient']).toContain(spec.kind)
+        if (spec.kind === 'gradient') {
+          expect(kind, `${kind}.${spec.key} is gradient-kind outside gradientMap`).toBe('gradientMap')
+          expect(spec.key).toBe('stops')
+        }
       }
     }
   })
