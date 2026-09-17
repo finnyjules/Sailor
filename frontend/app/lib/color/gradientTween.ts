@@ -166,3 +166,29 @@ export function scrollLUT(
   }
   return lut
 }
+
+/**
+ * Stop-array analogue of `scrollLUT`: `n` evenly-positioned stops
+ * (`pos = i/(n-1)`) whose colours are the wheel (stops spaced evenly by
+ * order, wrap last→first) sampled at `pos + phase`. `scrollStops(s, 0)`
+ * deep-equals `scrollStops(s, 1)` (seamless).
+ */
+export function scrollStops(
+  stops: GradientStop[],
+  phase: number,
+  space: BlendSpace = 'oklab',
+  n = 48,
+): GradientStop[] {
+  const cols = sortStops(stops).map(s => s.color)
+  const m = cols.length || 1
+  const out: GradientStop[] = []
+  for (let i = 0; i < n; i++) {
+    const pos = n === 1 ? 0 : i / (n - 1)
+    const w = (((pos + phase) % 1) + 1) % 1
+    const seg = w * m
+    const k = Math.floor(seg)
+    const lt = seg - k
+    out.push({ pos, color: blendHex(cols[k % m], cols[(k + 1) % m], lt, space) })
+  }
+  return out
+}

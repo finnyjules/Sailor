@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { hexToOklab, hexToRgb, rgbToHex } from '~/lib/color/convert'
-import { blendHex, sampleRamp, buildLUT, resampleStops, pairStops, crossfadeLUT, travelStops, scrollLUT } from '~/lib/color/gradientTween'
+import { blendHex, sampleRamp, buildLUT, resampleStops, pairStops, crossfadeLUT, travelStops, scrollLUT, scrollStops } from '~/lib/color/gradientTween'
 import { mixHex } from '~/lib/color/mix'
 import type { GradientStop } from '~/lib/color/harmony'
 
@@ -154,6 +154,20 @@ function oklchCrossfade(from: GradientStop[], to: GradientStop[], t: number): Ui
   }
   return lut
 }
+
+describe('scrollStops', () => {
+  const WHEEL3: GradientStop[] = [
+    { pos: 0, color: '#1436ff' }, { pos: 0.5, color: '#ff2d2d' }, { pos: 1, color: '#ffd21f' },
+  ]
+  it('returns n evenly-positioned stops', () => {
+    const out = scrollStops(WHEEL3, 0, 'oklab', 8)
+    expect(out.length).toBe(8)
+    expect(out.map(s => s.pos)).toEqual([0, 1 / 7, 2 / 7, 3 / 7, 4 / 7, 5 / 7, 6 / 7, 1])
+  })
+  it('loops seamlessly (phase 0 == phase 1)', () => {
+    expect(scrollStops(WHEEL3, 0)).toEqual(scrollStops(WHEEL3, 1))
+  })
+})
 
 describe('crossfade smoothness (OKLab beats OKLCH)', () => {
   const EMBER: GradientStop[] = [{ pos: 0, color: '#120000' }, { pos: 0.6, color: '#c9370e' }, { pos: 1, color: '#ffcf7a' }]
