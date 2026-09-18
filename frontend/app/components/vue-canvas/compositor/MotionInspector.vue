@@ -98,6 +98,13 @@ function setEase(e: Ease) {
   if (!track.value || i == null) return
   apply(setPointEase(track.value, i, e))
 }
+function deleteBand() {
+  if (!track.value) return
+  emit('before-change')
+  emit('update:motionx', setBandTrack(props.motionx, track.value.path, null))
+  emit('commit')
+  emit('clear')
+}
 function deletePoint() {
   const i = props.selection?.index
   if (!track.value || i == null) return
@@ -151,7 +158,7 @@ function onGradient(g: Gradient) {
         </span>
       </div>
       <div class="mb-2 flex items-center justify-between">Distance
-        <input v-scrubnum type="number" step="1" :value="(behParam('distance') as number) ?? 40"
+        <input v-scrubnum type="number" step="0.01" min="0" max="1" :value="(behParam('distance') as number) ?? 0.15" title="Fraction of the frame (0–1)"
           class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
           @change="setBehParams({ distance: Number(($event.target as HTMLInputElement).value) || 0 })"></div>
     </template>
@@ -188,7 +195,9 @@ function onGradient(g: Gradient) {
         @change="setBehTiming({ loop: ($event.target as HTMLInputElement).checked })"></label>
 
     <div class="mt-2 flex items-center justify-between border-t border-white/10 pt-2">
-      <button type="button" class="text-white/40 hover:text-rose-300 cursor-pointer" @click="emit('behaviour-delete', behaviour.id)">Delete</button>
+      <button type="button" data-testid="beh-delete"
+        class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:border-rose-400/60 hover:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
+        title="Remove this behaviour (Delete)" @click="emit('behaviour-delete', behaviour.id)">Delete</button>
       <button type="button" data-testid="beh-open"
         class="rounded border border-white/15 px-2 py-0.5 text-white/80 hover:bg-white/10 cursor-pointer"
         title="Bake into editable control-point bands" @click="emit('behaviour-open', behaviour.id)">Open into keyframes</button>
@@ -232,7 +241,8 @@ function onGradient(g: Gradient) {
           :class="(point.ease) === e.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
           @click="setEase(e.v)">{{ e.l }}</button>
       </div>
-      <button type="button" class="mt-1 text-white/40 hover:text-rose-300 cursor-pointer" @click="deletePoint">Delete point</button>
+      <button type="button" class="mt-1 rounded border border-white/15 px-2 py-0.5 text-white/70 hover:border-rose-400/60 hover:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
+        title="Remove this control point (Delete)" @click="deletePoint">Delete point</button>
     </template>
 
     <!-- Property band selected: timing + easing + add point -->
@@ -257,6 +267,11 @@ function onGradient(g: Gradient) {
         <span class="text-white/40">{{ track.keyframes.length }} control points</span>
         <button type="button" class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:bg-white/10 cursor-pointer"
           data-testid="inspector-add-point" @click="addAtPlayhead">＋ point</button>
+      </div>
+      <div class="mt-2 flex items-center justify-between border-t border-white/10 pt-2">
+        <button type="button" data-testid="band-delete"
+          class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:border-rose-400/60 hover:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
+          title="Remove this band and all its points (Delete)" @click="deleteBand">Delete band</button>
       </div>
     </template>
   </div>
