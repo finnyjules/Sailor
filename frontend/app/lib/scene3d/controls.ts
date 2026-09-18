@@ -270,8 +270,6 @@ const inStudioLook = (doc: SceneDoc) => !doc.lighting.hdri
 const inHdri = (doc: SceneDoc) => !!doc.lighting.hdri
 // Studio-look dials hide once the look is hand-detached to Custom (they'd recompute nothing).
 const studioDialsOn = (doc: SceneDoc) => !doc.lighting.hdri && !doc.lighting.custom
-// Fine-tune (raw sun/ambient/preset): Studio-look mode, revealed by the Fine-tune toggle.
-const fineTuneOn = (doc: SceneDoc) => !doc.lighting.hdri && !!doc.lighting.advanced
 
 // ── Geometry / Light / Decal: the inspector-only tail ───────────────────────────────
 // Every entry below carries this pair. See the module doc's "inspector-only tail" note:
@@ -763,16 +761,15 @@ export const SCENE_CONTROLS: SceneControl[] = [
   // Environment is a creative choice, so it lives in the primary Studio-look zone (not Fine-tune).
   select('lighting.environment', 'Environment', [...ENVIRONMENT_KINDS], D.lighting.environment, 'Lighting', undefined,
     { when: inStudioLook }),
-  { key: 'lighting.advanced', label: 'Fine-tune', kind: 'switch', default: D.lighting.advanced, group: 'Lighting',
-    hint: 'Hand-adjust shadow preset, sun intensity, and ambient. Editing these detaches from the Look.',
-    when: inStudioLook } as SceneControl,
-  // Fine-tune raw controls — editing any detaches the Look to Custom (surface sets lighting.custom).
+  // Fine-tune raw controls — grouped into the collapsed 'Lighting/Fine-tune' sub-card (SUB_CARDS),
+  // which replaces the old Advanced toggle. Editing any detaches the Look to Custom (the surface
+  // sets lighting.custom). Available throughout Studio-look mode; the sub-card starts collapsed.
   select('lighting.preset', 'Shadow preset', [...LIGHTING_PRESETS], D.lighting.preset, 'Lighting', undefined,
-    { when: fineTuneOn }),
+    { when: inStudioLook }),
   slider('lighting.sunIntensity', 'Sun intensity', 0, 3, 0.05, 'Lighting', D.lighting.sunIntensity,
-    'How bright the main sunlight is', { when: fineTuneOn }),
+    'How bright the main sunlight is', { when: inStudioLook }),
   slider('lighting.ambient', 'Ambient', 0, 2, 0.05, 'Lighting', D.lighting.ambient,
-    'Soft fill light that lifts the shadows', { when: fineTuneOn }),
+    'Soft fill light that lifts the shadows', { when: inStudioLook }),
   // ── HDRI mode ─────────────────────────────────────────────────────────────
   // The studio HDRI IS the light. No None (the Light source segmented owns leaving HDRI mode).
   select('lighting.hdri', 'Studio HDRI', HDRI_ENVIRONMENTS.map((h) => h.label), hdriLabel(DEFAULT_HDRI), 'Lighting', undefined,

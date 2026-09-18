@@ -101,6 +101,8 @@ export const SCENE_PANEL_ORDER = [
   'Material/Screen',
   'Camera',
   'Lighting',
+  'Lighting/Gel lighting',
+  'Lighting/Fine-tune',
   'Background',
 ] as readonly string[]
 
@@ -127,6 +129,9 @@ export function scenePanelChrome(matType: MaterialType | null): Record<string, {
     Iridescence: { open: false },
     Reflection: { open: false },
     Screen: { open: false },
+    // Lighting sub-cards — collapsed by default so the card reads as a short primary list.
+    'Fine-tune': { open: false },
+    'Gel lighting': { open: false },
   }
 }
 
@@ -526,6 +531,17 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
 }
 
 const SUB_CARDS: Record<string, readonly string[]> = {
+  // Lighting sub-groups: the raw fine-tune trio (collapsed — replaces the old Advanced toggle) and
+  // the whole gel rig (kept next to, and clearly owned by, the Gels environment picker).
+  'Lighting/Fine-tune': ['lighting.preset', 'lighting.sunIntensity', 'lighting.ambient'],
+  'Lighting/Gel lighting': [
+    'lighting.gelColorA', 'lighting.gelBrightnessA', 'lighting.gelSizeA', 'lighting.gelAzimuthA',
+    'lighting.gelHeightA', 'lighting.gelDistanceA',
+    'lighting.gelColorB', 'lighting.gelBrightnessB', 'lighting.gelSizeB', 'lighting.gelAzimuthB',
+    'lighting.gelHeightB', 'lighting.gelDistanceB',
+    'lighting.gelRim', 'lighting.gelRimColor', 'lighting.gelRimBrightness',
+    'lighting.gelSoftness', 'lighting.gelBackground', 'lighting.gelExposure',
+  ],
   'Material/Image placement': [
     'object.material.imageOffsetX', 'object.material.imageOffsetY', 'object.material.imageRotation',
     'object.material.imageFlipX', 'object.material.imageFlipY', 'object.material.imageSeamless',
@@ -599,13 +615,12 @@ const DOC_CARDS: Record<string, readonly string[]> = {
   // the raw rows it reveals (they carry a `when` gate, so they only draw when it's on).
   Lighting: [
     'lighting.lightSource',
-    // Studio-look mode
+    // Studio-look mode primary (raw preset/sun/ambient live in the Fine-tune sub-card, gels in the
+    // Gel lighting sub-card — see SUB_CARDS).
     'lighting.look',
     'lighting.softness', 'lighting.warmth', 'lighting.brightness',
     'lighting.sunAzimuth', 'lighting.sunElevation',
     'lighting.environment',
-    'lighting.advanced',
-    'lighting.preset', 'lighting.sunIntensity', 'lighting.ambient',
     // HDRI mode
     'lighting.hdri', 'lighting.hdriExposure', 'lighting.hdriRotation',
   ],

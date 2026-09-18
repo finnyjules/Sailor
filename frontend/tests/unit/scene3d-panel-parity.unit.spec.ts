@@ -496,12 +496,12 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
 
 const DOC_SCENARIO: Record<string, readonly string[]> = {
   Camera: ['camera.fov', 'ui.camera.output'],
-  // Default doc has `advanced: false`, so only the simple layer draws: Look, direction,
-  // the three feel dials, and the Advanced toggle. The four raw rows are `when`-gated off.
-  // Default doc = Studio-look mode (hdri null), Fine-tune off, non-gel env: the visible set is the
-  // light-source segmented, the Look, the three dials, direction/height, the environment, and the
-  // Fine-tune toggle. HDRI-mode + fine-tune + gel controls are gated out.
-  Lighting: ['lighting.lightSource', 'lighting.look', 'lighting.softness', 'lighting.warmth', 'lighting.brightness', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.environment', 'lighting.advanced'],
+  // Default doc = Studio-look mode (hdri null), non-gel env. The Lighting card's PRIMARY rows are the
+  // light-source segmented, the Look, the three dials, direction/height, and the environment. The raw
+  // sun/ambient/preset live in a nested, collapsed 'Fine-tune' sub-card (always present in Studio-look
+  // mode); the Gel lighting sub-card is pruned (no Gels env). HDRI-mode rows are gated out.
+  Lighting: ['lighting.lightSource', 'lighting.look', 'lighting.softness', 'lighting.warmth', 'lighting.brightness', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.environment'],
+  'Fine-tune': ['lighting.preset', 'lighting.sunIntensity', 'lighting.ambient'],
   Background: ['showFloor', 'ui.background.transparent', 'ui.background.color'],
 }
 
@@ -1647,6 +1647,8 @@ describe('Scene3D panel contract', () => {
       'Coat & sheen': { open: false }, Glow: { open: false },
       Transparency: { open: false }, Iridescence: { open: false }, Reflection: { open: false },
       Screen: { open: false },
+      // Lighting sub-cards — collapsed by default (Fine-tune replaces the old Advanced toggle).
+      'Fine-tune': { open: false }, 'Gel lighting': { open: false },
       // Geometry's Modifiers and Cloner sub-cards are gone (S1 Task 6), so no chrome for them.
     })
     expect(scenePanelChrome('glass').Transparency).toEqual({ open: true })

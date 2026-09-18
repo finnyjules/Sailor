@@ -81,9 +81,10 @@ describe('lighting light-source modes (control gating)', () => {
     expect(keys).toContain('lighting.look') // the Look row stays (to re-pick / reset)
   })
 
-  it('Fine-tune reveals the raw sun/ambient/preset (Studio-look mode)', () => {
-    const doc = defaultDoc(); doc.lighting.advanced = true
-    const keys = lightingKeys(doc)
+  it('the raw sun/ambient/preset are available in Studio-look mode (Fine-tune sub-card)', () => {
+    // They're grouped into the collapsed Fine-tune sub-card by panelPresentation, but as controls
+    // they're simply available throughout Studio-look mode (no Advanced toggle gates them now).
+    const keys = lightingKeys(defaultDoc())
     for (const k of ['lighting.preset', 'lighting.sunIntensity', 'lighting.ambient']) {
       expect(keys, k).toContain(k)
     }
