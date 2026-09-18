@@ -121,7 +121,7 @@ import CompositorMotionTimeline from '~/components/vue-canvas/compositor/Composi
 import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
 import MotionGallery from '~/components/vue-canvas/compositor/MotionGallery.vue'
 import MotionInspector from '~/components/vue-canvas/compositor/MotionInspector.vue'
-import type { GalleryMove } from '~/lib/motionx/gallery'
+import { behavioursForMove, defaultDurationFor, type GalleryMove } from '~/lib/motionx/gallery'
 import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
@@ -3760,8 +3760,13 @@ const motionLayerCaps = computed(() => {
   const fill = (l as unknown as { fill?: Paint })?.fill
   return { gradient: !!l && isGradient(fill), text: l?.kind === 'text' }
 })
+// A tile is a RECIPE: one or more single-property behaviours, all placed at the
+// playhead with the group's default length. The first lands selected.
 function onGalleryAdd(move: GalleryMove) {
-  addBehaviour(move.kind, move.params ?? {})
+  const parts = behavioursForMove(move)
+  const timing = { start: previewT.value ?? 0, duration: defaultDurationFor(move.group) }
+  recordHistory()
+  parts.forEach((p, i) => addBehaviour(p.kind, p.params ?? {}, timing, { select: i === 0, record: false }))
   behaviourPickerOpen.value = false
 }
 // 6a: "Add property" — animate ANY property directly (transform, fill, effect dials) as
@@ -3804,23 +3809,31 @@ watch(() => selectedLocal.value?.id, () => { motionSel.value = null })
 // Slice 3: a behaviour is a live, param-editable band. Adding one stores a StoredBehaviour
 // AND its compiled tracks (tagged with the behaviour id) so the render path (which reads
 // motionx) is unchanged, while the band UI shows a single labeled behaviour band.
-function addBehaviour(kind: string, params: Record<string, unknown> = {}) {
+// Adds ONE single-property behaviour. `timing` defaults to the playhead + the full
+// remaining timeline; gallery tiles pass their group's default length (In/Out 0.8s,
+// Loop → to the end) so new bars sequence naturally instead of all landing at 0–4s.
+function addBehaviour(kind: string, params: Record<string, unknown> = {}, timing?: { start?: number; duration?: number }, opts: { select?: boolean; record?: boolean } = {}) {
   const l = selectedLocal.value
   if (!l) return
+  const total = motionDoc.value.duration ?? 4
+  const start = Math.max(0, Math.min(total - 0.05, timing?.start ?? previewT.value ?? 0))
+  const duration = Math.max(0.05, Math.min(total - start, timing?.duration ?? (total - start)))
+  const loop = kind === 'gradientScroll' || kind === 'spin' || kind === 'pulse' || kind === 'sway' || kind === 'float'
   const b: StoredBehaviour = {
-    id: 'b' + Date.now(),
+    id: 'b' + Date.now() + Math.random().toString(36).slice(2, 6),
     layerId: l.id,
     kind,
-    timing: { start: 0, duration: motionDoc.value.duration ?? 4, loop: kind === 'gradientScroll' },
+    timing: { start, duration, loop },
     params: { ...(kind === 'fade' ? { dir: 'in' } : {}), ...params },
   }
   const tracks = compileBehaviourForLayer(l, b as Behaviour)
-  recordHistory()
+  if (opts.record !== false) recordHistory()
   setMotion({
     behaviours: upsertBehaviour(motionBehaviours.value, b),
     motionx: setBehaviourTracks(motionxTracks.value, b.id, tracks),
   } as Partial<FrameMotion>)
-  motionSel.value = { kind: 'behaviour', path: b.id }
+  if (opts.select !== false) motionSel.value = { kind: 'behaviour', path: b.id }
+  return b.id
 }
 // Edit a live behaviour's params/timing → recompile its tracks against the current layer.
 // `record=false` for continuous edits (timeline drags) — the drag already emitted
