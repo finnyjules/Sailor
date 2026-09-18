@@ -24,10 +24,15 @@ function loopTrack(path: string, values: number[], [t0, t1]: [number, number], e
 }
 const numOr = (v: unknown, d: number) => (typeof v === 'number' ? v : d)
 
-registerBehaviour('fade', (b) => {
+// ONE BEHAVIOUR = ONE PROPERTY. Every compiler below emits exactly one track, so a
+// behaviour bar always sits in a single property row and a clash is always visible
+// as two bars in the same row. Composite moves (slide + fade) are gallery RECIPES
+// that add several single-property behaviours.
+registerBehaviour('fade', (b, target) => {
   const dir = (b.params?.dir as string) ?? 'in'
   const w = window(b.timing)
-  return [numTrack('opacity', dir === 'out' ? 1 : 0, dir === 'out' ? 0 : 1, w)]
+  const cur = numOr(target.get('opacity'), 1)   // fade to/from the layer's CURRENT opacity
+  return [dir === 'out' ? numTrack('opacity', cur, 0, w) : numTrack('opacity', 0, cur, w)]
 })
 
 registerBehaviour('slide', (b, target) => {
@@ -40,7 +45,7 @@ registerBehaviour('slide', (b, target) => {
   const axis = dir === 'left' || dir === 'right' ? 'x' : 'y'
   const cur = numOr(target.get(axis), 0.5)
   const off = dir === 'up' || dir === 'left' ? dist : -dist
-  return [numTrack(axis, cur + off, cur, w), numTrack('opacity', 0, 1, w)]
+  return [numTrack(axis, cur + off, cur, w)]
 })
 
 // Whole-layer transform behaviours (Slice 5). Scale/rotation/opacity are unambiguous;
@@ -49,9 +54,7 @@ registerBehaviour('scale', (b, target) => {
   const dir = (b.params?.dir as string) ?? 'in'
   const w = window(b.timing)
   const cur = numOr(target.get('scale'), 1)
-  return dir === 'out'
-    ? [numTrack('scale', cur, 0, w), numTrack('opacity', 1, 0, w)]
-    : [numTrack('scale', 0, cur, w), numTrack('opacity', 0, 1, w)]
+  return [dir === 'out' ? numTrack('scale', cur, 0, w) : numTrack('scale', 0, cur, w)]
 })
 
 registerBehaviour('spin', (b, target) => {

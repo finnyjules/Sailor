@@ -18,7 +18,7 @@ describe('compileBehaviour', () => {
     expect(evaluateTrack(op, 0)).toBe(0)
     expect(evaluateTrack(op, 2)).toBe(1)
   })
-  it('slide up -> a y track ending at the CURRENT position (relative) plus a fade', () => {
+  it('slide up -> ONLY a y track ending at the CURRENT position (relative); no hidden opacity', () => {
     // x/y are normalized 0..1; slide is relative to where the layer sits (target reads 0.4).
     const at: BehaviourTarget = { get: (p) => (p === 'y' ? 0.4 : undefined), has: () => true }
     const b: Behaviour = { id: 's', kind: 'slide', timing: { start: 0, duration: 1 }, params: { dir: 'up', distance: 0.15 } }
@@ -26,14 +26,27 @@ describe('compileBehaviour', () => {
     const y = tracks.find(t => t.path === 'y')!
     expect(evaluateTrack(y, 0)).toBeCloseTo(0.55, 6)   // starts below current (+offset)
     expect(evaluateTrack(y, 1)).toBeCloseTo(0.4, 6)     // ends at current
-    expect(tracks.some(t => t.path === 'opacity')).toBe(true)
+    expect(tracks).toHaveLength(1)   // one behaviour = one property
+  })
+  it('every registered behaviour drives exactly ONE property', () => {
+    const at: BehaviourTarget = { get: (p) => ({ scale: 1, rotation: 0, y: 0.5, x: 0.5, opacity: 0.8 } as Record<string, number>)[p], has: () => true }
+    for (const kind of ['fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll']) {
+      expect(compileBehaviour({ id: kind, kind, timing: { start: 0, duration: 1 } }, at), kind).toHaveLength(1)
+    }
+  })
+  it('fade in ends at the layer\'s CURRENT opacity, not a hardcoded 1', () => {
+    const at: BehaviourTarget = { get: (p) => (p === 'opacity' ? 0.6 : undefined), has: () => true }
+    const op = compileBehaviour({ id: 'f', kind: 'fade', timing: { start: 0, duration: 1 }, params: { dir: 'in' } }, at)[0]!
+    expect(evaluateTrack(op, 0)).toBe(0)
+    expect(evaluateTrack(op, 1)).toBe(0.6)
   })
 })
 
 describe('whole-layer transform behaviours (Slice 5)', () => {
   const at: BehaviourTarget = { get: (p) => ({ scale: 1, rotation: 0, y: 0.5 } as Record<string, number>)[p], has: () => true }
-  it('scale in -> scale 0->current + opacity 0->1', () => {
+  it('scale in -> scale 0->current only (no opacity side-effect)', () => {
     const t = compileBehaviour({ id: 'a', kind: 'scale', timing: { start: 0, duration: 1 }, params: { dir: 'in' } }, at)
+    expect(t).toHaveLength(1)
     const s = t.find(x => x.path === 'scale')!
     expect(evaluateTrack(s, 0)).toBe(0)
     expect(evaluateTrack(s, 1)).toBe(1)
