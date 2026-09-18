@@ -185,7 +185,7 @@ describe('SCENE_CONTROLS integrity', () => {
     const c = SCENE_CONTROLS.find((c) => c.key === 'lighting.environment')
     expect(c).toBeTruthy()
     expect(c!.kind).toBe('select')
-    expect((c as any).options).toEqual(['room', 'darkStrips', 'softbox', 'colorGels'])
+    expect((c as any).options).toEqual(['room', 'darkStrips', 'softbox', 'colorGels', 'studio'])
   })
 })
 
@@ -262,11 +262,12 @@ describe('screen finish controls', () => {
     prim.material.type = type
     return visibleSceneControls(doc, prim).map((c) => c.key)
   }
-  it('offers the screen rows on every material type except glass', () => {
+  it('offers the screen rows on every material type except the transmissive ones (glass, gemstone)', () => {
+    const noScreen = new Set(['glass', 'gemstone'])
     for (const type of MATERIAL_TYPES) {
       const keys = keysFor(type)
       const has = keys.includes('object.material.screen.pattern')
-      expect(has, type).toBe(type !== 'glass')
+      expect(has, type).toBe(!noScreen.has(type))
       if (has) {
         for (const k of ['density', 'angle', 'contrast', 'softness', 'misregister', 'invert', 'gap', 'gapColor', 'ink', 'inkColor']) {
           expect(keys, `${type} ${k}`).toContain(`object.material.screen.${k}`)
@@ -290,5 +291,30 @@ describe('screen finish controls', () => {
     expect(gap.showIf).toEqual({ key: 'object.material.screen.gap', equals: 'colour' })
     const ink = SCENE_CONTROLS.find((c) => c.key === 'object.material.screen.inkColor') as any
     expect(ink.showIf).toEqual({ key: 'object.material.screen.ink', equals: 'colour' })
+  })
+
+  describe('floor controls', () => {
+    const byKey = (k: string) => SCENE_CONTROLS.find((c) => c.key === k) as any
+    const doc = (floorMode: string) => ({ ...defaultDoc(), floorMode }) as any
+
+    it('floorMode is a select with four sentence-case labels', () => {
+      const c = byKey('floorMode')
+      expect(c.kind).toBe('select')
+      expect(c.options).toEqual(['off', 'shadow', 'reflection', 'polished'])
+      expect(c.optionLabels).toEqual(['Off', 'Shadow only', 'Reflection', 'Polished'])
+    })
+    it('reflectivity shows for reflection and polished only', () => {
+      const c = byKey('floorReflectivity')
+      expect(c.when(doc('off'))).toBe(false)
+      expect(c.when(doc('shadow'))).toBe(false)
+      expect(c.when(doc('reflection'))).toBe(true)
+      expect(c.when(doc('polished'))).toBe(true)
+    })
+    it('floor colour shows for polished only', () => {
+      const c = byKey('floorColor')
+      expect(c.when(doc('polished'))).toBe(true)
+      expect(c.when(doc('reflection'))).toBe(false)
+      expect(c.when(doc('off'))).toBe(false)
+    })
   })
 })
