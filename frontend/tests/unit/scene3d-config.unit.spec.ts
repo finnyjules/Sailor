@@ -20,6 +20,26 @@ describe('scene3d config', () => {
     expect(back).toEqual(doc)
   })
 
+  describe('camera projection', () => {
+    const parse = (o: Record<string, unknown>) => parseDoc(JSON.stringify({ version: 1, ...o }))
+    it('defaults to perspective with a positive orthoZoom', () => {
+      const d = defaultDoc()
+      expect(d.camera.projection).toBe('perspective')
+      expect(d.camera.orthoZoom).toBeGreaterThan(0)
+    })
+    it('round-trips an explicit isometric projection + orthoZoom', () => {
+      const back = parse({ camera: { position: [4, 3, 6], target: [0, 0.5, 0], fov: 45, projection: 'isometric', orthoZoom: 0.3 } })
+      expect(back.camera.projection).toBe('isometric')
+      expect(back.camera.orthoZoom).toBeCloseTo(0.3)
+    })
+    it('rejects a garbage projection, falling back to perspective', () => {
+      expect(parse({ camera: { position: [4, 3, 6], target: [0, 0.5, 0], fov: 45, projection: 'nope' } }).camera.projection).toBe('perspective')
+    })
+    it('legacy docs without projection default to perspective', () => {
+      expect(parse({ camera: { position: [4, 3, 6], target: [0, 0.5, 0], fov: 45 } }).camera.projection).toBe('perspective')
+    })
+  })
+
   describe('floor migration', () => {
     const parse = (o: Record<string, unknown>) => parseDoc(JSON.stringify({ version: 1, ...o }))
     it('new default is shadow with reflectivity + colour, no showFloor', () => {

@@ -617,7 +617,14 @@ export interface SceneLighting {
   gelBackground: string
   gelExposure: number
 }
-export interface SceneCamera { position: Vec3; target: Vec3; fov: number; motion?: CameraMotion }
+export interface SceneCamera {
+  position: Vec3
+  target: Vec3
+  fov: number
+  projection: 'perspective' | 'isometric'  // isometric = orthographic (no vanishing point)
+  orthoZoom: number                        // orthographic frustum zoom (export-true base); only used in isometric
+  motion?: CameraMotion
+}
 
 export interface SceneDoc {
   version: 1
@@ -970,7 +977,7 @@ export function defaultDoc(): SceneDoc {
   return {
     version: 1,
     objects: [],
-    camera: { position: [4, 3, 6], target: [0, 0.5, 0], fov: 45 },
+    camera: { position: [4, 3, 6], target: [0, 0.5, 0], fov: 45, projection: 'perspective', orthoZoom: 0.15 },
     // Raw fields seeded to match the 'softbox-beauty' Look (lib/scene3d/lighting.ts) so a fresh scene renders what its Look name promises. Keep in sync if that recipe changes.
     lighting: {
       preset: 'soft', environment: 'softbox', hdri: null, hdriExposure: 1, hdriRotation: 0, custom: false, sunAzimuth: 35, sunElevation: 40, sunIntensity: 1.2, ambient: 0.7,
@@ -1584,6 +1591,8 @@ export function parseDoc(json: string): SceneDoc {
       position: vec3(raw.camera?.position, d.camera.position),
       target: vec3(raw.camera?.target, d.camera.target),
       fov: typeof raw.camera?.fov === 'number' ? raw.camera.fov : d.camera.fov,
+      projection: raw.camera?.projection === 'isometric' ? 'isometric' : 'perspective',
+      orthoZoom: typeof raw.camera?.orthoZoom === 'number' && raw.camera.orthoZoom > 0 ? raw.camera.orthoZoom : d.camera.orthoZoom,
     },
     lighting: {
       preset: LIGHTING_PRESETS.includes(raw.lighting?.preset) ? raw.lighting.preset : d.lighting.preset,
