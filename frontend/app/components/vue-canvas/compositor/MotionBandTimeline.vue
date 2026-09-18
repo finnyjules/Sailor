@@ -189,6 +189,22 @@ watch(() => dv.value.safeViewStart, (vs) => {
   if (Math.abs(el.scrollLeft - want) > 0.5) el.scrollLeft = want
 })
 
+// ── Popover dismissal (click outside the popover + its toggle buttons, or Escape) ──
+const popoverEl = ref<HTMLElement | null>(null)
+function closePopovers() {
+  if (props.galleryOpen) emit('toggle-gallery')
+  if (props.propertyPickerOpen) emit('toggle-property-picker')
+}
+function onDocPointerDown(e: PointerEvent) {
+  if (!props.galleryOpen && !props.propertyPickerOpen) return
+  const t = e.target as HTMLElement
+  if (popoverEl.value?.contains(t) || t.closest('[data-testid="add-behaviour-toggle"],[data-testid="add-property-toggle"]')) return
+  closePopovers()
+}
+function onDocKey(e: KeyboardEvent) { if (e.key === 'Escape') closePopovers() }
+onMounted(() => { document.addEventListener('pointerdown', onDocPointerDown, true); document.addEventListener('keydown', onDocKey) })
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', onDocPointerDown, true); document.removeEventListener('keydown', onDocKey) })
+
 // ── Behaviour bar gestures: move / retime edges; a click (no move) selects ───
 function startBehDrag(e: PointerEvent, b: Band, mode: 'move' | 'start' | 'end') {
   const id = b.behaviourId!
@@ -276,7 +292,7 @@ function setSelPointValue(v: number | string) {
 </script>
 
 <template>
-  <div class="rounded-[14px] border border-white/10 bg-[#1a1a1a]/95 p-2.5 text-xs text-white/70 font-[var(--font-sans)]" data-testid="band-timeline" @wheel="onWheel">
+  <div class="relative rounded-[14px] border border-white/10 bg-[#1a1a1a]/95 p-2.5 text-xs text-white/70 font-[var(--font-sans)]" data-testid="band-timeline" @wheel="onWheel">
     <!-- Dock header: transport on the left, actions on the right (DialKit section header) -->
     <div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] whitespace-nowrap">
       <button type="button" class="w-7 h-7 shrink-0 grid place-items-center rounded-md cursor-pointer hover:bg-white/10 text-white/85"
@@ -319,9 +335,14 @@ function setSelPointValue(v: number | string) {
         {{ baking ? `Baking ${Math.round((bakeProgress ?? 0) * 100)}%` : stale ? 'Re-bake' : 'Bake' }}
       </button>
     </div>
-    <!-- The previewing gallery lives inside the dock (one surface, not a separate box) -->
-    <div v-if="galleryOpen" class="mb-2"><slot name="gallery" /></div>
-    <div v-if="propertyPickerOpen" class="mb-2"><slot name="property-picker" /></div>
+    <!-- Add behaviour / Add property open as a POPOVER anchored to the header (upward, the
+         dock sits at the bottom of the frame) — never expanding the dock itself. -->
+    <div v-if="galleryOpen || propertyPickerOpen" ref="popoverEl" data-testid="dock-popover"
+      class="absolute right-2.5 bottom-[calc(100%-2px)] z-50 w-[min(560px,calc(100vw-48px))] max-h-[min(62vh,640px)] overflow-y-auto rounded-[14px] border border-white/10 bg-[#0e0e10]/95 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,0,.5)]"
+      @pointerdown.stop @wheel.stop>
+      <slot v-if="galleryOpen" name="gallery" />
+      <slot v-else name="property-picker" />
+    </div>
 
     <div class="grid grid-cols-[96px_1fr] gap-x-2">
       <!-- Ruler row (28px) -->

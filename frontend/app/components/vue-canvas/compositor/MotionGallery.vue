@@ -12,7 +12,7 @@ const groups = computed(() => groupedMoves(movesForLayer(props.caps)))
 </script>
 
 <template>
-  <div data-testid="motion-gallery" class="rounded-lg border border-white/10 bg-[#0e0e10]/85 p-2.5">
+  <div data-testid="motion-gallery" class="p-3">
     <div class="mb-1.5 flex items-center justify-between">
       <span class="text-[11px] font-medium text-white/60">Add behaviour</span>
       <button type="button" class="text-white/40 hover:text-white/80 cursor-pointer text-[11px]" @click="$emit('close')">Done</button>
