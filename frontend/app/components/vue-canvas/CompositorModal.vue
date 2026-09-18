@@ -7990,7 +7990,8 @@ onUnmounted(() => {
           :selection="motionSel"
           @select="(id: string) => selectLocal(id)"
           @select-band="selectMotionBand" @select-point="selectMotionPoint" @select-behaviour="selectMotionBehaviour"
-          @update:motionx="updateMotionx" @before-change="recordHistory" />
+          @update:motionx="updateMotionx" @before-change="recordHistory"
+          @scrub="scrubTo" @pause="pause" />
         <CompositorMotionTimeline
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
           :motion="effectiveMotion" :t="previewT" :playing="playing"
