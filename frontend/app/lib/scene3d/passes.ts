@@ -141,13 +141,24 @@ export async function renderPasses(
   const renderer = engine.renderer
   const canvas = renderer.domElement as HTMLCanvasElement
 
-  // Bake from the LIVE viewport camera so the export matches exactly what the
-  // user is looking at (same angle → same shading). Only the aspect is
-  // overridden to the square/portrait output ratio.
-  const camera = engine.camera.clone() as THREE.PerspectiveCamera
-  camera.aspect = width / height
-  camera.fov = engine.baseFov // the TRUE fov, not the viewport's resolution-gate overscan
-  camera.updateProjectionMatrix()
+  // Bake from the LIVE viewport camera so the export matches exactly what the user is looking at
+  // (same angle → same shading). Only the framing is overridden to the output aspect at the TRUE
+  // (pre-gate) framing — the viewport's resolution-gate overscan is excluded so the export is
+  // exactly what the gate rectangle previews.
+  let camera: THREE.Camera
+  if (engine.projection === 'isometric') {
+    const oc = engine.orthoCam.clone() as THREE.OrthographicCamera
+    oc.top = 1; oc.bottom = -1; oc.left = -(width / height); oc.right = (width / height)
+    oc.zoom = engine.orthoBaseZoom
+    oc.updateProjectionMatrix()
+    camera = oc
+  } else {
+    const pc = engine.camera.clone() as THREE.PerspectiveCamera
+    pc.aspect = width / height
+    pc.fov = engine.baseFov
+    pc.updateProjectionMatrix()
+    camera = pc
+  }
 
   const scene = engine.scene
   const prevBg = scene.background
