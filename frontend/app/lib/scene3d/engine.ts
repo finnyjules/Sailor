@@ -40,7 +40,7 @@ import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry, GEM_CUTS } from './gem'
 import { envSceneToEquirect, ambientFloorByte } from './pathtrace/envEquirect'
 import { loadHdriEquirect } from './hdriLoader'
-import { overscanFov } from './resolutionGate'
+import { overscanFov, orthoOverscanScale } from './resolutionGate'
 import type { ScenePathTracer } from './pathtrace/PathTracer'
 
 /** Private THREE layer used to overlay editor gizmos on top of the post-processed
@@ -578,6 +578,19 @@ export class SceneEngine {
   readonly renderer: THREE.WebGLRenderer
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
+  /** Orthographic twin of `camera`, active when the doc's projection is 'isometric'. Shares the
+   *  perspective camera's position/target; its `zoom` carries the (gate-overscanned) viewport
+   *  zoom while `_orthoBaseZoom` is the export-true base. */
+  readonly orthoCam: THREE.OrthographicCamera
+  private _projection: 'perspective' | 'isometric' = 'perspective'
+  /** Export-true ortho zoom (pre-gate). The viewport's `orthoCam.zoom` = this / gate-overscan. */
+  private _orthoBaseZoom = 0.15
+  /** The camera the viewport, path tracer and export currently use. */
+  get activeCamera(): THREE.PerspectiveCamera | THREE.OrthographicCamera {
+    return this._projection === 'isometric' ? this.orthoCam : this.camera
+  }
+  get projection(): 'perspective' | 'isometric' { return this._projection }
+  get orthoBaseZoom(): number { return this._orthoBaseZoom }
   readonly objectRoots = new Map<string, THREE.Object3D>()
   /** Per-object screen velocities / past poses for the S6 motion treatment family, pushed in
    *  from the seam that still holds the doc + t01 (the live loop / renderMotionFrame) because
@@ -723,6 +736,14 @@ export class SceneEngine {
     try { RectAreaLightUniformsLib.init() } catch { /* no GL context (unit tests) */ }
     this.scene = new THREE.Scene()
     this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 200)
+    // Orthographic twin: unit half-height (top=1), extents follow the pane aspect. Wide near/far
+    // brackets the scene along the view direction (ortho projects parallel, so a generous range is
+    // safe). Zoom is set from the doc / framed from the perspective view on switch.
+    { const a = width / height
+      this.orthoCam = new THREE.OrthographicCamera(-a, a, 1, -1, -1000, 1000)
+      this.orthoCam.zoom = this._orthoBaseZoom
+      this.orthoCam.position.copy(this.camera.position)
+      this.orthoCam.updateProjectionMatrix() }
     this.buildEnvironment()
     this.sun = new THREE.DirectionalLight(0xffffff, 1.4)
     this.sun.castShadow = true
@@ -889,8 +910,12 @@ export class SceneEngine {
 
   setSize(width: number, height: number): void {
     this.renderer.setSize(width, height, false)
-    this.camera.aspect = width / height
-    this.applyViewportFov() // pane aspect changed → recompute any overscan
+    const a = width / height
+    this.camera.aspect = a
+    // Ortho frustum follows the pane aspect at unit half-height (top=1), so orthoOverscanScale's
+    // paneAspect = right/top = right.
+    this.orthoCam.left = -a; this.orthoCam.right = a; this.orthoCam.top = 1; this.orthoCam.bottom = -1
+    this.applyViewportGate() // pane aspect changed → recompute any overscan
   }
 
   /** The TRUE fov (degrees) an export/bake renders at — the doc's fov, NOT the viewport's overscan. */
@@ -899,23 +924,83 @@ export class SceneEngine {
   /** Turn the resolution gate on (viewport overscans to `outputAspect`) or off (null). */
   setResolutionGate(outputAspect: number | null): void {
     this._gateAspect = outputAspect && outputAspect > 0 ? outputAspect : null
-    this.applyViewportFov()
+    this.applyViewportGate()
   }
 
-  /** Apply the viewport fov: overscanned to fit the output frame when the gate is on, else the true
-   *  fov. Export/bake overrides fov back to `baseFov`, so only the on-screen view is widened. */
-  private applyViewportFov(): void {
+  /** Apply the resolution gate to the ACTIVE camera: the viewport overscans to fit the output frame
+   *  when the gate is on, else renders at the true framing. Export/bake overrides back to the true
+   *  fov / ortho base zoom, so only the on-screen view is widened. Projection-aware:
+   *  perspective widens fov; isometric shrinks ortho zoom. */
+  private applyViewportGate(): void {
+    // Perspective camera always kept current (it may become active on a switch back).
     this.camera.fov = this._gateAspect
       ? overscanFov(this._baseFov, this.camera.aspect || 1, this._gateAspect)
       : this._baseFov
     this.camera.updateProjectionMatrix()
+    // Ortho camera: viewport zoom = base zoom / overscan. paneAspect = orthoCam.right (top=1).
+    const s = this._gateAspect ? orthoOverscanScale(this.orthoCam.right || 1, this._gateAspect) : 1
+    this.orthoCam.zoom = this._orthoBaseZoom / s
+    this.orthoCam.updateProjectionMatrix()
   }
 
   applyCameraFromDoc(doc: SceneDoc): void {
+    this._projection = doc.camera.projection
+    this._baseFov = doc.camera.fov
+    this._orthoBaseZoom = doc.camera.orthoZoom > 0 ? doc.camera.orthoZoom : this._orthoBaseZoom
+    // Both cameras share the doc's position/target so switching projection never jumps.
     this.camera.position.set(...doc.camera.position)
     this.camera.lookAt(...doc.camera.target)
-    this._baseFov = doc.camera.fov
-    this.applyViewportFov()
+    this.orthoCam.position.set(...doc.camera.position)
+    this.orthoCam.lookAt(...doc.camera.target)
+    this.applyViewportGate()
+  }
+
+  /** Switch projection in place (does NOT move the camera). Entering isometric frames the ortho
+   *  camera to match the current perspective view (same apparent size at the target), so the
+   *  picture doesn't jump; leaving copies the ortho position back to the perspective camera.
+   *  Returns after updating so the caller can re-point OrbitControls at `activeCamera`. */
+  setProjection(p: 'perspective' | 'isometric', target: Vec3): void {
+    if (p === this._projection) return
+    const t = new THREE.Vector3(...target)
+    if (p === 'isometric') {
+      this.orthoCam.position.copy(this.camera.position)
+      this.orthoCam.lookAt(t)
+      // Match apparent size: ortho half-height (world) at the target = perspective's.
+      const dist = this.camera.position.distanceTo(t)
+      const halfH = Math.max(1e-4, dist * Math.tan((this._baseFov * Math.PI / 180) / 2))
+      this._orthoBaseZoom = 1 / halfH // orthoCam top=1 → visible half-height = 1/zoom
+    } else {
+      this.camera.position.copy(this.orthoCam.position)
+      this.camera.lookAt(t)
+    }
+    this._projection = p
+    this.applyViewportGate()
+  }
+
+  /** Recompute the export-true ortho base zoom from the (gate-overscanned) viewport zoom OrbitControls
+   *  wrote. Call after an orbit/zoom change in isometric so the doc persists the real base. */
+  captureOrthoZoom(): number {
+    const s = this._gateAspect ? orthoOverscanScale(this.orthoCam.right || 1, this._gateAspect) : 1
+    this._orthoBaseZoom = this.orthoCam.zoom * s
+    return this._orthoBaseZoom
+  }
+
+  /** Move the active camera to the canonical isometric 3/4 angle (azimuth 45°, elevation 35.264°)
+   *  about `target`, keeping the current distance. A convenience — does not change projection. */
+  snapToIsometricAngle(target: Vec3): void {
+    const cam = this.activeCamera
+    const t = new THREE.Vector3(...target)
+    const dist = cam.position.distanceTo(t) || 8
+    const el = Math.atan(1 / Math.SQRT2)   // 35.264° — equal foreshortening on all three axes
+    const az = Math.PI / 4                  // 45°
+    const p = new THREE.Vector3(
+      Math.cos(el) * Math.sin(az),
+      Math.sin(el),
+      Math.cos(el) * Math.cos(az),
+    ).multiplyScalar(dist).add(t)
+    this.camera.position.copy(p); this.camera.lookAt(t)
+    this.orthoCam.position.copy(p); this.orthoCam.lookAt(t)
+    this.applyViewportGate()
   }
 
   setLightView(on: boolean): void {
@@ -953,7 +1038,7 @@ export class SceneEngine {
       // before the BVH build or the tracer traces a big transparent plane. Cinematic owns the floor.
       this.reflectorFloor.visible = false
       this.rebuildCinematicEnv()
-      this.pathTracer.begin(this.scene, this.camera, this.cinematicEnvTexture)
+      this.pathTracer.begin(this.scene, this.activeCamera, this.cinematicEnvTexture)
     } else {
       this.cinematicFloor.visible = false
       // Restore the raster Reflector for the current floor mode.
@@ -991,9 +1076,9 @@ export class SceneEngine {
     if (envChanged) {
       this.pathTracer.end()
       this.rebuildCinematicEnv()
-      this.pathTracer.begin(this.scene, this.camera, this.cinematicEnvTexture)
+      this.pathTracer.begin(this.scene, this.activeCamera, this.cinematicEnvTexture)
     } else {
-      this.pathTracer.rebuild(this.scene, this.camera)
+      this.pathTracer.rebuild(this.scene, this.activeCamera)
     }
   }
 
@@ -1106,7 +1191,9 @@ export class SceneEngine {
       m.color.set(doc.floorMode === 'polished' ? stripAlpha(doc.floorColor) : '#15151a')
     }
     this._baseFov = doc.camera.fov
-    this.applyViewportFov()
+    this._projection = doc.camera.projection
+    if (doc.camera.orthoZoom > 0) this._orthoBaseZoom = doc.camera.orthoZoom
+    this.applyViewportGate()
   }
 
   /** Resolves a primitive's geometry, handling `text`'s async font dependency.
@@ -1673,8 +1760,8 @@ export class SceneEngine {
     // the flag and rebuilds, at which point rendering resumes on its own.
     if (this._contextLost) return
     // Cinematic view: accumulate a path-traced frame instead of the raster+post pipeline.
-    if (this._cinematic && this.pathTracer?.isActive) { this.pathTracer.frame(this.camera); return }
-    this.renderWithPost(this.scene, this.camera, this.lastDoc?.post ?? DEFAULT_POST, elapsedSec)
+    if (this._cinematic && this.pathTracer?.isActive) { this.pathTracer.frame(this.activeCamera); return }
+    this.renderWithPost(this.scene, this.activeCamera, this.lastDoc?.post ?? DEFAULT_POST, elapsedSec)
   }
 
   /** Render one frame NOW and return the canvas as a PNG data URL. A test instrument
