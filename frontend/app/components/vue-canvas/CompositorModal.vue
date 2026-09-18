@@ -94,6 +94,9 @@ import { effectDialTargets, addDialTrack, removeDialTrack, animatedDialKeysOf, t
 import { compileBehaviourForLayer, animatableProperties } from '~/lib/motionx/adapter/frame'
 import { type Behaviour, type StoredBehaviour, type Timing, type Track as MotionxTrack } from '~/lib/motionx'
 import { setBehaviourTracks, bakeBehaviour, upsertBehaviour, removeBehaviour } from '~/lib/motionx/behaviourStore'
+import { seedHoldTrack, setBandTrack } from '~/lib/motionx/bandEdit'
+import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
+import MotionPropertyPicker from '~/components/vue-canvas/compositor/MotionPropertyPicker.vue'
 import { fillDialTargets } from '~/lib/motion/fillTracks'
 import { getByIdPath } from '~/lib/studio/idPath'
 import { paintStopsToColor } from '~/lib/compositor/gradientPaint'
@@ -3760,6 +3763,33 @@ const motionLayerCaps = computed(() => {
 function onGalleryAdd(move: GalleryMove) {
   addBehaviour(move.kind, move.params ?? {})
   behaviourPickerOpen.value = false
+}
+// 6a: "Add property" — animate ANY property directly (transform, fill, effect dials) as
+// a plain property band. Seeds a flat hold at the property's current value so the band
+// is visible + retimeable immediately and a no-op until a point is changed.
+const propertyPickerOpen = ref(false)
+const selectedAnimatableProps = computed<AnimatableProperty[]>(() =>
+  selectedLocal.value ? animatableProperties(selectedLocal.value as LocalLayer) : [])
+const animatedPropertyPaths = computed<string[]>(() =>
+  motionxTracks.value.filter((t) => !t.behaviourId).map((t) => t.path))
+function currentPropertyValue(l: LocalLayer, p: AnimatableProperty): number | string | Array<{ pos: number; color: string }> {
+  const prop = p.path.replace(`layers.${l.id}.`, '')
+  const rec = l as unknown as Record<string, unknown>
+  if (prop === 'fill.phase') return 0
+  if (prop === 'fill') { const f = rec.fill as Paint | undefined; return isGradient(f) ? paintStopsToColor(f) : [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }] }
+  const cur = prop.startsWith('effects.') ? getByIdPath({ layers: [l] }, p.path) : rec[prop]
+  if (p.type === 'number') return typeof cur === 'number' ? cur : (p.min ?? 0)
+  if (p.type === 'color') return typeof cur === 'string' ? cur : '#ffffff'
+  return Array.isArray(cur) ? (cur as Array<{ pos: number; color: string }>) : [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }]
+}
+function addProperty(p: AnimatableProperty) {
+  const l = selectedLocal.value as LocalLayer | null
+  if (!l || animatedPropertyPaths.value.includes(p.path)) return
+  const track = seedHoldTrack(p.path, p.type, currentPropertyValue(l, p), motionDoc.value.duration ?? 4)
+  recordHistory()
+  setMotion({ motionx: setBandTrack(motionxTracks.value, p.path, track) } as Partial<FrameMotion>)
+  motionSel.value = { kind: 'band', path: p.path }
+  propertyPickerOpen.value = false
 }
 function selectMotionPoint(sel: { path: string; index: number }) { motionSel.value = { kind: 'point', ...sel } }
 function clearMotionSel() { motionSel.value = null }
@@ -7976,15 +8006,22 @@ onUnmounted(() => {
           :playing="playing" :fps="effectiveMotion.fps" :loop="effectiveMotion.loop ?? false"
           :baking="baking" :bake-progress="bakeProgress" :stale="motionStale" :bake-error="bakeError"
           :gallery-open="behaviourPickerOpen && !!selectedLocal"
+          :property-picker-open="propertyPickerOpen && !!selectedLocal"
           @select="(id: string) => selectLocal(id)"
           @select-band="selectMotionBand" @select-point="selectMotionPoint" @select-behaviour="selectMotionBehaviour"
           @update:motionx="updateMotionx" @before-change="recordHistory"
           @scrub="scrubTo" @pause="pause" @play="play" @bake="bakeMotion"
-          @update:motion="setMotion" @toggle-gallery="behaviourPickerOpen = !behaviourPickerOpen"
+          @update:motion="setMotion"
+          @toggle-gallery="behaviourPickerOpen = !behaviourPickerOpen; if (behaviourPickerOpen) propertyPickerOpen = false"
+          @toggle-property-picker="propertyPickerOpen = !propertyPickerOpen; if (propertyPickerOpen) behaviourPickerOpen = false"
           @behaviour-change="(id: string, p: { timing: { start?: number; duration?: number } }) => editBehaviour(id, p, false)"
           @behaviour-open="openBehaviour">
           <template #gallery>
             <MotionGallery :caps="motionLayerCaps" @add="onGalleryAdd" @close="behaviourPickerOpen = false" />
+          </template>
+          <template #property-picker>
+            <MotionPropertyPicker :properties="selectedAnimatableProps" :animated-paths="animatedPropertyPaths"
+              @add="addProperty" @close="propertyPickerOpen = false" />
           </template>
         </MotionBandTimeline>
         <CompositorMotionTimeline v-if="legacyMotionUi" class="mt-2"
