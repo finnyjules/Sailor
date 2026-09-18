@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { HDRI_ENVIRONMENTS, DEFAULT_HDRI, isKnownHdri, hdriLabel } from '~/lib/scene3d/hdri'
 import { HDRI_OPTIONS, HDRI_BY_LABEL, HDRI_OPTION_NONE } from '~/lib/scene3d/panelPresentation'
 import { defaultDoc, parseDoc } from '~/lib/scene3d/config'
+import { visibleSceneControls } from '~/lib/scene3d/controls'
+
+const lightingKeys = (doc: ReturnType<typeof defaultDoc>) =>
+  visibleSceneControls(doc).filter((c) => c.group === 'Lighting').map((c) => c.key)
 
 describe('hdri registry', () => {
   it('every curated entry has a slug + sentence-case label + note', () => {
@@ -41,6 +45,55 @@ describe('hdri picker labels (panel <-> doc)', () => {
       expect(HDRI_OPTIONS).toContain(h.label)
       expect(HDRI_BY_LABEL[h.label]).toBe(h.slug)
     }
+  })
+})
+
+describe('lighting light-source modes (control gating)', () => {
+  it('Studio-look mode shows the Look system, not the HDRI controls', () => {
+    const keys = lightingKeys(defaultDoc()) // default: hdri null
+    expect(keys).toContain('lighting.lightSource')
+    expect(keys).toContain('lighting.look')
+    expect(keys).toContain('lighting.environment')
+    expect(keys).toContain('lighting.softness')
+    expect(keys).not.toContain('lighting.hdri')
+    expect(keys).not.toContain('lighting.hdriExposure')
+    expect(keys).not.toContain('lighting.hdriRotation')
+  })
+
+  it('HDRI mode shows the HDRI controls, not the Look/procedural ones', () => {
+    const doc = defaultDoc(); doc.lighting.hdri = DEFAULT_HDRI
+    const keys = lightingKeys(doc)
+    expect(keys).toContain('lighting.lightSource')
+    expect(keys).toContain('lighting.hdri')
+    expect(keys).toContain('lighting.hdriExposure')
+    expect(keys).toContain('lighting.hdriRotation')
+    for (const gone of ['lighting.look', 'lighting.softness', 'lighting.sunAzimuth', 'lighting.environment', 'lighting.preset']) {
+      expect(keys, gone).not.toContain(gone)
+    }
+  })
+
+  it('Custom detach hides the three dials (Studio-look mode)', () => {
+    const doc = defaultDoc(); doc.lighting.custom = true
+    const keys = lightingKeys(doc)
+    for (const dial of ['lighting.softness', 'lighting.warmth', 'lighting.brightness']) {
+      expect(keys, dial).not.toContain(dial)
+    }
+    expect(keys).toContain('lighting.look') // the Look row stays (to re-pick / reset)
+  })
+
+  it('Fine-tune reveals the raw sun/ambient/preset (Studio-look mode)', () => {
+    const doc = defaultDoc(); doc.lighting.advanced = true
+    const keys = lightingKeys(doc)
+    for (const k of ['lighting.preset', 'lighting.sunIntensity', 'lighting.ambient']) {
+      expect(keys, k).toContain(k)
+    }
+  })
+
+  it('gel controls need Studio-look mode AND the Gels environment', () => {
+    const gel = defaultDoc(); gel.lighting.environment = 'colorGels'
+    expect(lightingKeys(gel)).toContain('lighting.gelColorA')
+    const hdriOverGel = defaultDoc(); hdriOverGel.lighting.environment = 'colorGels'; hdriOverGel.lighting.hdri = DEFAULT_HDRI
+    expect(lightingKeys(hdriOverGel)).not.toContain('lighting.gelColorA')
   })
 })
 

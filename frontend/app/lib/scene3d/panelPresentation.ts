@@ -9,7 +9,7 @@ import {
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, resolveParam, totalClones } from './primParams'
 import { modifierStackOf } from './modifierStack'
-import { HDRI_ENVIRONMENTS, hdriLabel } from './hdri'
+import { HDRI_ENVIRONMENTS, hdriLabel, DEFAULT_HDRI } from './hdri'
 import {
   SCENE_CONTROLS, GEOMETRY_PARAM_PREFIX, MODIFIER_PREFIX,
   type SceneControl,
@@ -240,7 +240,9 @@ export function readSceneControl(
   if (key === 'showFloor') return doc.showFloor
   if (key === 'camera.fov') return doc.camera.fov
   if (key === 'lighting.environment') return ENV_LABEL[doc.lighting.environment] ?? 'room'
-  if (key === 'lighting.hdri') return doc.lighting.hdri ? hdriLabel(doc.lighting.hdri) : 'None'
+  // Synthetic: the light-source mode is derived from whether an HDRI is chosen.
+  if (key === 'lighting.lightSource') return doc.lighting.hdri ? 'HDRI' : 'Studio look'
+  if (key === 'lighting.hdri') return doc.lighting.hdri ? hdriLabel(doc.lighting.hdri) : hdriLabel(DEFAULT_HDRI)
   if (key.startsWith('lighting.')) {
     return (doc.lighting as unknown as Record<string, ParamValue>)[key.slice('lighting.'.length)] ?? 0
   }
@@ -596,11 +598,16 @@ const DOC_CARDS: Record<string, readonly string[]> = {
   // light comes from; then the three feel dials; then the Advanced toggle, followed by
   // the raw rows it reveals (they carry a `when` gate, so they only draw when it's on).
   Lighting: [
+    'lighting.lightSource',
+    // Studio-look mode
     'lighting.look',
-    'lighting.sunAzimuth', 'lighting.sunElevation',
     'lighting.softness', 'lighting.warmth', 'lighting.brightness',
+    'lighting.sunAzimuth', 'lighting.sunElevation',
+    'lighting.environment',
     'lighting.advanced',
-    'lighting.preset', 'lighting.environment', 'lighting.hdri', 'lighting.sunIntensity', 'lighting.ambient',
+    'lighting.preset', 'lighting.sunIntensity', 'lighting.ambient',
+    // HDRI mode
+    'lighting.hdri', 'lighting.hdriExposure', 'lighting.hdriRotation',
   ],
   Background: ['showFloor', 'ui.background.transparent', 'ui.background.color'],
 }
@@ -709,7 +716,7 @@ const OVERRIDE: Record<string, RowPatch> = {
   // read as a second, competing mood picker. It only tunes the shadow/env-intensity bucket.
   'lighting.preset': { label: 'Shadow preset' },
   'lighting.environment': { label: 'Environment', options: [...ENV_OPTIONS], default: 'room' },
-  'lighting.hdri': { label: 'Studio HDRI', options: [...HDRI_OPTIONS], default: 'None', hint: 'A real studio photo environment (Poly Haven). Overrides the environment above and gives cinematic renders their reflections and sparkle.' },
+  'lighting.hdri': { label: 'Studio HDRI', hint: 'A real studio photo environment (Poly Haven). Its reflections and sparkle carry into cinematic renders.' },
   showFloor: { hint: null },
   // Degrees, and no 'Radians' tooltip: the row has ALWAYS been edited in degrees, so the
   // schema's hint is a lie about what the user is typing into.

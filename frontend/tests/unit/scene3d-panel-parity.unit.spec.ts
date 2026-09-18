@@ -498,7 +498,10 @@ const DOC_SCENARIO: Record<string, readonly string[]> = {
   Camera: ['camera.fov', 'ui.camera.output'],
   // Default doc has `advanced: false`, so only the simple layer draws: Look, direction,
   // the three feel dials, and the Advanced toggle. The four raw rows are `when`-gated off.
-  Lighting: ['lighting.look', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.softness', 'lighting.warmth', 'lighting.brightness', 'lighting.advanced'],
+  // Default doc = Studio-look mode (hdri null), Fine-tune off, non-gel env: the visible set is the
+  // light-source segmented, the Look, the three dials, direction/height, the environment, and the
+  // Fine-tune toggle. HDRI-mode + fine-tune + gel controls are gated out.
+  Lighting: ['lighting.lightSource', 'lighting.look', 'lighting.softness', 'lighting.warmth', 'lighting.brightness', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.environment', 'lighting.advanced'],
   Background: ['showFloor', 'ui.background.transparent', 'ui.background.color'],
 }
 

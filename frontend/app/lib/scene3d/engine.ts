@@ -1012,9 +1012,17 @@ export class SceneEngine {
         this.buildEnvironment(doc.lighting.environment, gel)
       }
     }
-    // An HDRI drives its OWN env intensity (a real HDR carries its own energy); the procedural
-    // preset multiplier only shapes the procedural panels.
-    this.scene.environmentIntensity = wantHdri ? 1 : preset.envIntensity
+    // An HDRI drives its OWN exposure (a real HDR carries its own energy); the procedural preset
+    // multiplier only shapes the procedural panels. Rotation spins the studio (highlights move).
+    this.scene.environmentIntensity = wantHdri ? doc.lighting.hdriExposure : preset.envIntensity
+    if (wantHdri) {
+      const rot = (doc.lighting.hdriRotation * Math.PI) / 180
+      this.scene.environmentRotation.set(0, rot, 0)
+      this.scene.backgroundRotation.set(0, rot, 0)
+    } else {
+      this.scene.environmentRotation.set(0, 0, 0)
+      this.scene.backgroundRotation.set(0, 0, 0)
+    }
     this.scene.background =
       doc.background === 'transparent' ? null
       : doc.background === 'environment' ? (this.hdriEquirect ?? this.envBackgroundTarget?.texture ?? null)

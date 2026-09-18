@@ -562,10 +562,19 @@ export type EnvironmentKind = 'room' | 'darkStrips' | 'softbox' | 'colorGels' | 
 export interface SceneLighting {
   preset: LightingPreset
   environment: EnvironmentKind
-  /** Optional Poly Haven studio HDRI slug (see lib/scene3d/hdri.ts). When set, it OVERRIDES the
-   *  procedural `environment` for lighting/reflection/background — a real HDR equirect, which the
-   *  cinematic path tracer samples at full energy (fire/sparkle). null ⇒ use `environment`. */
+  /** Optional Poly Haven studio HDRI slug (see lib/scene3d/hdri.ts). Non-null selects HDRI light-
+   *  source mode: the HDRI IS the light (replacing the procedural Look system), a real HDR equirect
+   *  the cinematic path tracer samples at full energy (fire/sparkle). null ⇒ Studio-look mode. */
   hdri: string | null
+  /** HDRI mode only: exposure of the environment lighting (→ scene.environmentIntensity). */
+  hdriExposure: number
+  /** HDRI mode only: rotation of the environment in degrees (→ scene.environment/backgroundRotation)
+   *  — spins the studio so highlights/reflections move around the object. */
+  hdriRotation: number
+  /** Studio-look mode: true once the user hand-edits a fine-tune control (sun/ambient/preset), which
+   *  DETACHES from the Look — the dials hide and stop recomputing so manual values stick. Picking a
+   *  Look (or Reset to Look) clears it. `look` keeps the last real recipe id as the detach base. */
+  custom: boolean
   sunAzimuth: number
   sunElevation: number
   sunIntensity: number
@@ -961,7 +970,7 @@ export function defaultDoc(): SceneDoc {
     camera: { position: [4, 3, 6], target: [0, 0.5, 0], fov: 45 },
     // Raw fields seeded to match the 'softbox-beauty' Look (lib/scene3d/lighting.ts) so a fresh scene renders what its Look name promises. Keep in sync if that recipe changes.
     lighting: {
-      preset: 'soft', environment: 'softbox', hdri: null, sunAzimuth: 35, sunElevation: 40, sunIntensity: 1.2, ambient: 0.7,
+      preset: 'soft', environment: 'softbox', hdri: null, hdriExposure: 1, hdriRotation: 0, custom: false, sunAzimuth: 35, sunElevation: 40, sunIntensity: 1.2, ambient: 0.7,
       look: 'softbox-beauty', softness: 0.85, warmth: 0.5, brightness: 1, sunColor: '#ffffff', shadowSoftness: 10.35,
       advanced: false,
       gelColorA: '#ff0da6', gelBrightnessA: 7, gelSizeA: 1, gelAzimuthA: -100, gelHeightA: 1.5, gelDistanceA: 4.6,
@@ -1575,6 +1584,9 @@ export function parseDoc(json: string): SceneDoc {
       preset: LIGHTING_PRESETS.includes(raw.lighting?.preset) ? raw.lighting.preset : d.lighting.preset,
       environment: ENVIRONMENT_KINDS.includes(raw.lighting?.environment) ? raw.lighting.environment : d.lighting.environment,
       hdri: isKnownHdri(raw.lighting?.hdri) ? raw.lighting.hdri : null,
+      hdriExposure: typeof raw.lighting?.hdriExposure === 'number' ? raw.lighting.hdriExposure : d.lighting.hdriExposure,
+      hdriRotation: typeof raw.lighting?.hdriRotation === 'number' ? raw.lighting.hdriRotation : d.lighting.hdriRotation,
+      custom: raw.lighting?.custom === true,
       sunAzimuth: typeof raw.lighting?.sunAzimuth === 'number' ? raw.lighting.sunAzimuth : d.lighting.sunAzimuth,
       sunElevation: typeof raw.lighting?.sunElevation === 'number' ? raw.lighting.sunElevation : d.lighting.sunElevation,
       sunIntensity: typeof raw.lighting?.sunIntensity === 'number' ? raw.lighting.sunIntensity : d.lighting.sunIntensity,

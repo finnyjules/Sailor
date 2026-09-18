@@ -8,7 +8,7 @@ import {
   type SceneDoc, type SceneObject, type MaterialType, MATERIAL_TYPE_LABELS_ORDERED,
   STONE_IDS, STONE_LABELS } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, totalClones, type ParamSpec } from './primParams'
-import { HDRI_ENVIRONMENTS } from './hdri'
+import { HDRI_ENVIRONMENTS, DEFAULT_HDRI, hdriLabel } from './hdri'
 
 /**
  * The single declarative description of Scene3D (3D Studio)'s parameters.
@@ -263,6 +263,15 @@ const color = (key: string, label: string, def: string, group: string, extra: Pa
   ({ key, label, kind: 'color', default: def, group, ...extra } as SceneControl)
 
 const D = defaultDoc()
+
+// Lighting is two mutually-exclusive light sources, gated on `lighting.hdri` (null = Studio look,
+// a slug = HDRI). Each mode's controls carry one of these `when`s so only the owning set draws.
+const inStudioLook = (doc: SceneDoc) => !doc.lighting.hdri
+const inHdri = (doc: SceneDoc) => !!doc.lighting.hdri
+// Studio-look dials hide once the look is hand-detached to Custom (they'd recompute nothing).
+const studioDialsOn = (doc: SceneDoc) => !doc.lighting.hdri && !doc.lighting.custom
+// Fine-tune (raw sun/ambient/preset): Studio-look mode, revealed by the Fine-tune toggle.
+const fineTuneOn = (doc: SceneDoc) => !doc.lighting.hdri && !!doc.lighting.advanced
 
 // ── Geometry / Light / Decal: the inspector-only tail ───────────────────────────────
 // Every entry below carries this pair. See the module doc's "inspector-only tail" note:
@@ -735,36 +744,49 @@ export const SCENE_CONTROLS: SceneControl[] = [
   // --- Lighting (doc-level; no active object needed) -------------------------------
   // Simple layer: pick a Look, then nudge three dials. Direction stays visible, so it's
   // the one raw pair that stays ungated even in the simple view.
+  // Light source: Studio look (procedural Look + dials) vs HDRI (a real studio environment IS the
+  // light). Each mode below shows ONLY the controls that own something in it, gated on lighting.hdri.
+  select('lighting.lightSource', 'Light source', ['Studio look', 'HDRI'], 'Studio look', 'Lighting', undefined,
+    { agent: false }),
+  // ── Studio-look mode ──────────────────────────────────────────────────────
   // A `look` row: thumbnail + name that opens the Look library picker (RowLook/LookPicker).
-  { key: 'lighting.look', label: 'Look', kind: 'look', default: D.lighting.look, group: 'Lighting' } as SceneControl,
-  slider('lighting.softness', 'Softness', 0, 1, 0.01, 'Lighting', D.lighting.softness),
-  slider('lighting.warmth', 'Warmth', 0, 1, 0.01, 'Lighting', D.lighting.warmth),
-  slider('lighting.brightness', 'Brightness', 0.25, 3, 0.05, 'Lighting', D.lighting.brightness),
+  { key: 'lighting.look', label: 'Look', kind: 'look', default: D.lighting.look, group: 'Lighting',
+    when: inStudioLook } as SceneControl,
+  // The three shaping dials — hidden once the look is hand-detached to Custom (they'd recompute it).
+  slider('lighting.softness', 'Softness', 0, 1, 0.01, 'Lighting', D.lighting.softness, undefined, { when: studioDialsOn }),
+  slider('lighting.warmth', 'Warmth', 0, 1, 0.01, 'Lighting', D.lighting.warmth, undefined, { when: studioDialsOn }),
+  slider('lighting.brightness', 'Brightness', 0.25, 3, 0.05, 'Lighting', D.lighting.brightness, undefined, { when: studioDialsOn }),
   slider('lighting.sunAzimuth', 'Light direction', 0, 360, 1, 'Lighting', D.lighting.sunAzimuth,
-    'Compass direction the sunlight comes from'),
+    'Compass direction the sunlight comes from', { when: inStudioLook }),
   slider('lighting.sunElevation', 'Light height', 5, 90, 1, 'Lighting', D.lighting.sunElevation,
-    'How high the sun sits above the horizon'),
-  { key: 'lighting.advanced', label: 'Advanced lighting', kind: 'switch', default: D.lighting.advanced, group: 'Lighting',
-    hint: 'Show the raw shadow preset, environment, sun intensity, and ambient controls' } as SceneControl,
-  // Raw controls kept behind Advanced — nothing is removed, they just gain a `when` gate.
-  select('lighting.preset', 'Shadow preset', [...LIGHTING_PRESETS], D.lighting.preset, 'Lighting', undefined,
-    { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
+    'How high the sun sits above the horizon', { when: inStudioLook }),
+  // Environment is a creative choice, so it lives in the primary Studio-look zone (not Fine-tune).
   select('lighting.environment', 'Environment', [...ENVIRONMENT_KINDS], D.lighting.environment, 'Lighting', undefined,
-    { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
-  // A real Poly Haven studio HDRI, overriding the procedural Environment above. Value stored is the
-  // slug (or null = None); the panel shows sentence-case labels (readSceneControl/setControl remap).
-  select('lighting.hdri', 'Studio HDRI', ['None', ...HDRI_ENVIRONMENTS.map((h) => h.label)], 'None', 'Lighting', undefined,
-    { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
+    { when: inStudioLook }),
+  { key: 'lighting.advanced', label: 'Fine-tune', kind: 'switch', default: D.lighting.advanced, group: 'Lighting',
+    hint: 'Hand-adjust shadow preset, sun intensity, and ambient. Editing these detaches from the Look.',
+    when: inStudioLook } as SceneControl,
+  // Fine-tune raw controls — editing any detaches the Look to Custom (surface sets lighting.custom).
+  select('lighting.preset', 'Shadow preset', [...LIGHTING_PRESETS], D.lighting.preset, 'Lighting', undefined,
+    { when: fineTuneOn }),
   slider('lighting.sunIntensity', 'Sun intensity', 0, 3, 0.05, 'Lighting', D.lighting.sunIntensity,
-    'How bright the main sunlight is', { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
+    'How bright the main sunlight is', { when: fineTuneOn }),
   slider('lighting.ambient', 'Ambient', 0, 2, 0.05, 'Lighting', D.lighting.ambient,
-    'Soft fill light that lifts the shadows', { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
+    'Soft fill light that lifts the shadows', { when: fineTuneOn }),
+  // ── HDRI mode ─────────────────────────────────────────────────────────────
+  // The studio HDRI IS the light. No None (the Light source segmented owns leaving HDRI mode).
+  select('lighting.hdri', 'Studio HDRI', HDRI_ENVIRONMENTS.map((h) => h.label), hdriLabel(DEFAULT_HDRI), 'Lighting', undefined,
+    { when: inHdri, agent: false }),
+  slider('lighting.hdriExposure', 'Exposure', 0.1, 3, 0.05, 'Lighting', D.lighting.hdriExposure,
+    'How brightly the studio lights the object', { when: inHdri }),
+  slider('lighting.hdriRotation', 'Rotation', 0, 360, 1, 'Lighting', D.lighting.hdriRotation,
+    'Spin the studio to move highlights and reflections around the object', { when: inHdri }),
   // Granular shaping of the `colorGels` world — shown only when it's the live environment.
   // ALL of these are inspector-only: editing any re-bakes the env (see engine.buildEnvironment),
   // so none may be animatable (a per-frame PMREM rebuild), and they're not part of the agent's
   // documented lighting surface. `GEL` carries that gate + those two flags for every row.
   ...(() => {
-    const when = (doc: SceneDoc) => doc.lighting.environment === 'colorGels'
+    const when = (doc: SceneDoc) => !doc.lighting.hdri && doc.lighting.environment === 'colorGels'
     const GEL = { when, agent: false, animatable: false } as const
     const L = D.lighting
     return [

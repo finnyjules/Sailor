@@ -32,6 +32,7 @@ import { sceneScreenVelocities, collectGhostPoses } from '~/lib/scene3d/motion/v
 import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentControls'
 import { eulerFromNormal } from '~/lib/scene3d/decals'
 import { getLook, resolveLook, resolveDials } from '~/lib/scene3d/lighting'
+import { DEFAULT_HDRI } from '~/lib/scene3d/hdri'
 import { HARMONY_TYPES, HARMONY_LABELS } from '~/lib/color/harmony'
 import { MATCAP_IDS, matcapThumb, onTextureError } from '~/lib/scene3d/materials'
 import { toHeightPixels, heightGradient, RELIEF_FLAT_THRESHOLD } from '~/lib/scene3d/relief'
@@ -621,6 +622,9 @@ const lightView = ref(false)  // clay + light-widget preview mode (Task 1/3 engi
 // modes shown as one segmented control — a single boolean each, exclusivity enforced in
 // setViewMode. Cinematic is the expensive path-tracer (a segmented, never a hidden dropdown, so
 // you always see it is on).
+// Remembers the last studio HDRI so toggling the Light source segmented back to HDRI restores the
+// user's choice (session-only; the persisted value lives in doc.lighting.hdri). Seeded from the doc.
+const lastHdri = ref<string>(doc.lighting.hdri || DEFAULT_HDRI)
 const cinematic = ref(false)
 const cineStatus = ref({ samples: 0, compiling: false }) // drives the "refining…" indicator
 const cineWarning = ref('')   // one-time warn-then-render pill for shader-materials/treatments
@@ -1939,11 +1943,25 @@ function setControl(key: string, value: string | number | boolean): void {
   if (key.startsWith('post.')) { setPost(key, value); return }
   if (key === 'showFloor') { doc.showFloor = value === true; return }
   if (key === 'camera.fov') { doc.camera.fov = Number(value); return }
-  if (key === 'lighting.preset') { doc.lighting.preset = String(value) as SceneDoc['lighting']['preset']; return }
+  // Light source mode: HDRI on ⇒ set the remembered/default HDRI; Studio look ⇒ clear it.
+  if (key === 'lighting.lightSource') {
+    doc.lighting.hdri = String(value) === 'HDRI' ? (lastHdri.value || DEFAULT_HDRI) : null
+    return
+  }
+  // Fine-tune edits DETACH the Look → Custom (dials hide, the resolver stops recomputing).
+  if (key === 'lighting.preset') { doc.lighting.preset = String(value) as SceneDoc['lighting']['preset']; doc.lighting.custom = true; return }
+  if (key === 'lighting.sunIntensity' || key === 'lighting.ambient') {
+    ;(doc.lighting as Record<string, unknown>)[key.slice('lighting.'.length)] = Number(value); doc.lighting.custom = true; return
+  }
   // The row offers the segmented control's SHORT labels, not the EnvironmentKind values.
   if (key === 'lighting.environment') { doc.lighting.environment = ENV_BY_LABEL[String(value)] ?? 'room'; return }
-  // The Studio HDRI select offers sentence-case labels; the doc stores the Poly Haven slug (or null = None).
-  if (key === 'lighting.hdri') { doc.lighting.hdri = HDRI_BY_LABEL[String(value)] ?? null; return }
+  // The Studio HDRI select offers sentence-case labels; the doc stores the Poly Haven slug. In HDRI
+  // mode there is no None, so keep the current slug if a label ever fails to resolve; remember it.
+  if (key === 'lighting.hdri') {
+    const slug = HDRI_BY_LABEL[String(value)]
+    if (slug) { doc.lighting.hdri = slug; lastHdri.value = slug }
+    return
+  }
   // Gel string/boolean fields must bypass the numeric coercion below: the four gel colours
   // (hex strings) and the rim toggle (boolean). Everything else under lighting.* is numeric.
   if (key === 'lighting.gelColorA' || key === 'lighting.gelColorB'
@@ -1955,7 +1973,15 @@ function setControl(key: string, value: string | number | boolean): void {
   // Simple-lighting non-numeric fields must also bypass the numeric coercion below:
   // `look` is a recipe id (string) and `advanced` is a boolean. Without this,
   // Number('softbox-beauty') → NaN and the Look select never sticks.
-  if (key === 'lighting.look') { doc.lighting.look = String(value); return }
+  // Picking a Look clears Custom and re-derives. Re-picking the SAME look must still reset (the
+  // value-unchanged watcher wouldn't fire), so derive directly in that case.
+  if (key === 'lighting.look') {
+    const id = String(value)
+    doc.lighting.custom = false
+    if (id === doc.lighting.look) deriveFromLook(id)
+    else doc.lighting.look = id
+    return
+  }
   if (key === 'lighting.advanced') { doc.lighting.advanced = value === true; return }
   if (key.startsWith('lighting.')) {
     ;(doc.lighting as Record<string, unknown>)[key.slice('lighting.'.length)] = Number(value)
@@ -2302,6 +2328,7 @@ onMounted(() => {
       environmentName: env?.name ?? null,
       backgroundName: bg?.name ?? (bg?.isColor ? 'color' : bg ? 'texture' : null),
       envIntensity: e?.scene?.environmentIntensity ?? null,
+      envRotationYdeg: e?.scene?.environmentRotation ? Math.round((e.scene.environmentRotation.y * 180) / Math.PI) : null,
     }
   }
   ;(window as any).__scene3dCineHelperCheck = () => {
@@ -2601,11 +2628,13 @@ watch(doc, () => {
 // An environment switch — or an ambient/preset change (both feed the baked ambient fill floor) —
 // must re-bake the equirect the path-tracer lights from (the deep watch above only rebuilds the
 // trace geometry). No-op unless Cinematic is active.
-watch(() => [doc.lighting.environment, doc.lighting.hdri, doc.lighting.ambient, doc.lighting.preset],
+watch(() => [doc.lighting.environment, doc.lighting.hdri, doc.lighting.hdriExposure, doc.lighting.hdriRotation,
+  doc.lighting.ambient, doc.lighting.preset],
   () => engine?.cinematicRefresh(true))
-// Look change → apply the whole recipe (direction, env, preset, default dials),
-// then recompute the dial-driven fields from those defaults.
-watch(() => doc.lighting.look, (id) => {
+// Stamp a Look recipe over every derived field (direction, env, preset, default dials, then the
+// dial-driven fields). Shared by the look watcher AND setControl (so re-picking the SAME look resets
+// a Custom detach, which a value-unchanged watcher would miss). Callers own `custom`.
+function deriveFromLook(id: string): void {
   const recipe = getLook(id)
   const p = resolveLook(recipe)
   doc.lighting.sunAzimuth = p.sunAzimuth
@@ -2619,9 +2648,13 @@ watch(() => doc.lighting.look, (id) => {
   doc.lighting.ambient = d.ambient
   doc.lighting.sunColor = d.sunColor
   doc.lighting.shadowSoftness = d.shadowSoftness
-})
-// Dial change → recompute ONLY the dial-driven fields; direction/env/preset untouched.
+}
+// Picking a Look re-derives and clears any Custom detach.
+watch(() => doc.lighting.look, (id) => { doc.lighting.custom = false; deriveFromLook(id) })
+// Dial change → recompute ONLY the dial-driven fields; direction/env/preset untouched. Inert while
+// the look is detached to Custom (the dials are hidden then anyway — this guards programmatic writes).
 watch(() => [doc.lighting.softness, doc.lighting.warmth, doc.lighting.brightness], () => {
+  if (doc.lighting.custom) return
   const recipe = getLook(doc.lighting.look)
   const d = resolveDials(recipe, {
     softness: doc.lighting.softness, warmth: doc.lighting.warmth, brightness: doc.lighting.brightness,
