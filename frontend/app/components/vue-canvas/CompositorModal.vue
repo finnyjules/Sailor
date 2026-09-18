@@ -1881,6 +1881,18 @@ function onKeydown(e: KeyboardEvent) {
     armGenGesture(true)
     return
   }
+  // Space on the Motion tab → play / pause the timeline (standard transport shortcut).
+  // `repeat` is ignored so holding the key doesn't flicker; the pan gesture below is
+  // a Design-tab affordance and must not arm here.
+  if (e.code === 'Space' && !inField && inspectorTab.value === 'motion') {
+    e.preventDefault()
+    // This listener is capture-phase on window; stopping here keeps Space from also
+    // reaching the app layout's bubble handler, which opens the canvas node search
+    // behind the modal.
+    e.stopPropagation()
+    if (!e.repeat) (playing.value ? pause() : play())
+    return
+  }
   // Space → hold-to-pan. Prevent the default page scroll while held.
   if (e.code === 'Space' && !inField) { e.preventDefault(); spaceDown.value = true }
   // ⌘\ hides/shows both glass panels. Unlike the zoom combos it is allowed while
