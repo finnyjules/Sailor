@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { planPileTokens } from '~/lib/spacetype/pile/tokens'
+import { FRAME_HALF_H } from '~/lib/spacetype/pile/physics'
 
 const FRAME = { width: 960, height: 540 }
 
@@ -46,6 +47,17 @@ describe('planPileTokens', () => {
     const c = planPileTokens(p({ textAs: 'off', shapeCount: 6, seed: 2 }), FRAME)
     expect(b.map(s => s.w)).toEqual(a.map(s => s.w))
     expect(c.map(s => s.w)).not.toEqual(a.map(s => s.w)) // size jitter reshuffles
+  })
+
+  it('clamps oversized tokens to fit the container (or they wedge and never fall)', () => {
+    // A long word at huge type would exceed the container width; it must be scaled to fit.
+    const container = 0.8
+    const maxW = container * FRAME_HALF_H * (FRAME.width / FRAME.height) * 2 * 0.9
+    const specs = planPileTokens(p({ text: 'BREAKING', textAs: 'words', typeSize: 360, container, shapeCount: 0 }), FRAME)
+    expect(specs[0]!.w).toBeLessThanOrEqual(maxW + 1e-6)
+    expect(specs[0]!.h).toBeLessThanOrEqual(FRAME_HALF_H * 0.9 + 1e-6)
+    // aspect preserved (uniform scale)
+    expect(specs[0]!.w / specs[0]!.h).toBeCloseTo(0.62 * 8, 3)
   })
 
   it('token extents are positive world units', () => {

@@ -32,19 +32,34 @@ export function planPileTokens(params: Params, frame: { width: number; height: n
   const specs: PileTokenSpec[] = []
   let fillIndex = 0
 
+  // A token must fit inside the container, or it wedges between the walls and never
+  // falls (looks like it vanished). Clamp every token to the container width and most
+  // of the frame height, scaling it down UNIFORMLY so text/shapes keep their aspect.
+  const frameAspect = Math.max(0.1, frame.width / Math.max(1, frame.height))
+  const containerHalfW = Math.max(0.2, num(params, 'container', 0.8)) * FRAME_HALF_H * frameAspect
+  const maxW = containerHalfW * 2 * 0.9
+  // Cap a single token to ~45% of the frame height so a couple of stacked tokens still
+  // fit in view (the pile builds up from the floor; without this, big type overflows
+  // the top and the pile reads as "gone").
+  const maxH = FRAME_HALF_H * 0.9
+  const fit = (w: number, h: number): [number, number] => {
+    const s = Math.min(1, maxW / Math.max(1e-4, w), maxH / Math.max(1e-4, h))
+    return [w * s, h * s]
+  }
+
   const textAs = str(params, 'textAs', 'words')
   const text = str(params, 'text')
   if (textAs === 'words') {
     for (const word of text.split(/\s+/).filter(Boolean)) {
-      const h = num(params, 'typeSize', 200) * worldPerPx
-      const w = h * TEXT_ADVANCE * Math.max(1, word.length)
+      const h0 = num(params, 'typeSize', 200) * worldPerPx
+      const [w, h] = fit(h0 * TEXT_ADVANCE * Math.max(1, word.length), h0)
       specs.push({ kind: 'word', text: word, w, h, fillIndex: fillIndex++ })
     }
   } else if (textAs === 'letters') {
     for (const ch of [...text]) {
       if (/\s/.test(ch)) continue
-      const h = num(params, 'typeSize', 200) * worldPerPx
-      const w = h * TEXT_ADVANCE
+      const h0 = num(params, 'typeSize', 200) * worldPerPx
+      const [w, h] = fit(h0 * TEXT_ADVANCE, h0)
       specs.push({ kind: 'letter', text: ch, w, h, fillIndex: fillIndex++ })
     }
   }
@@ -59,8 +74,9 @@ export function planPileTokens(params: Params, frame: { width: number; height: n
     const variation = Math.min(0.95, Math.max(0, num(params, 'sizeVariation')))
     for (let i = 0; i < shapeCount; i++) {
       const jitter = 1 + (rng() * 2 - 1) * variation
-      const h = baseH * jitter
-      specs.push({ kind: 'shape', shapeId: chosen, w: h * aspect, h, fillIndex: fillIndex++ })
+      const h1 = baseH * jitter
+      const [w, h] = fit(h1 * aspect, h1)
+      specs.push({ kind: 'shape', shapeId: chosen, w, h, fillIndex: fillIndex++ })
     }
   }
 
