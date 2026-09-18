@@ -553,14 +553,14 @@ describe('scene3d motion — ease presets + CurveEditor bridge', () => {
   })
 })
 
-describe('scene3d — showFloor parse (backward-compat)', () => {
-  it('defaults floor ON for old docs without the key', () => {
-    const raw = JSON.parse(serializeDoc(defaultDoc())); delete raw.showFloor
-    expect(parseDoc(JSON.stringify(raw)).showFloor).toBe(true)
+describe('scene3d — floor parse (showFloor backward-compat)', () => {
+  it('defaults floor to shadow for old docs without a floor key', () => {
+    const raw = JSON.parse(serializeDoc(defaultDoc())); delete raw.floorMode
+    expect(parseDoc(JSON.stringify(raw)).floorMode).toBe('shadow')
   })
-  it('round-trips an explicit false', () => {
-    const doc = defaultDoc(); doc.showFloor = false
-    expect(parseDoc(serializeDoc(doc)).showFloor).toBe(false)
+  it('migrates a legacy explicit showFloor:false to off', () => {
+    const raw = JSON.parse(serializeDoc(defaultDoc())); delete raw.floorMode; raw.showFloor = false
+    expect(parseDoc(JSON.stringify(raw)).floorMode).toBe('off')
   })
 })
 

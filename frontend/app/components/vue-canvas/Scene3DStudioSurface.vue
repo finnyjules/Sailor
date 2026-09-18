@@ -14,7 +14,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import * as THREE from 'three'
 import {
   Box, Boxes, Plus, Loader2, Upload, Lightbulb, Sparkles, Shuffle, ClipboardPaste,
-  ChevronUp, ChevronRight, Shapes,
+  ChevronUp, ChevronRight, Shapes, ImagePlus,
 } from 'lucide-vue-next'
 import {
   parseDoc, serializeDoc, createPrimitive, createGlbObject, createLight, createGroup, createDecal,
@@ -24,12 +24,16 @@ import {
   type DecalObject, type DecalContent,
 } from '~/lib/scene3d/config'
 import {
-  cloneTreatments, createTreatment, findTreatment, isTreatmentHost, maskedTreatmentPlan, newTreatmentId,
-  treatmentsOf, unrenderedTreatmentIds, TREATMENT_LABELS, type Treatment, type TreatmentKind,
+  cloneTreatments, createTreatment, findTreatment, isTreatmentHost, isFinishKind, maskedTreatmentPlan, newTreatmentId,
+  treatmentsOf, unrenderedTreatmentIds, docHasMotionTreatment, docHasRestyleTreatment, restyleTreatmentPlan,
+  TREATMENT_LABELS, type Treatment, type TreatmentKind, type AiRestyleTreatment, type FinishTreatment,
 } from '~/lib/scene3d/treatments'
+import { sceneScreenVelocities, collectGhostPoses } from '~/lib/scene3d/motion/velocity'
 import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentControls'
 import { eulerFromNormal } from '~/lib/scene3d/decals'
 import { getLook, resolveLook, resolveDials } from '~/lib/scene3d/lighting'
+import { DEFAULT_HDRI } from '~/lib/scene3d/hdri'
+import { gateRect } from '~/lib/scene3d/resolutionGate'
 import { HARMONY_TYPES, HARMONY_LABELS } from '~/lib/color/harmony'
 import { MATCAP_IDS, matcapThumb, onTextureError } from '~/lib/scene3d/materials'
 import { toHeightPixels, heightGradient, RELIEF_FLAT_THRESHOLD } from '~/lib/scene3d/relief'
@@ -40,6 +44,7 @@ import { AVAILABLE_FONTS, loadFont, fontDisplayName, fontCacheGet, parseGoogleFo
 import { loadGoogleCatalog, type GoogleFont } from '~/data/google-fonts'
 import { libraryToken, resolveLibraryFace, libraryFamily } from '~/data/library-fonts'
 import FontPicker from '~/components/vue-canvas/FontPicker.vue'
+import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import TexturePicker from '~/components/vue-canvas/TexturePicker.vue'
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
@@ -68,9 +73,9 @@ import { remesh, boundsOf } from '~/lib/scene3d/voxel'
 import { mergeMeshes, type MergeOp } from '~/lib/scene3d/voxel/merge'
 import Scene3DObjectRow from './studio/Scene3DObjectRow.vue'
 import { totalClones, clampedClones } from '~/lib/scene3d/modifiers'
-import { MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
+import { MODIFIER_SPECS, PRIMITIVE_PARAMS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
 import {
-  modifierStackOf, writeModifierStack, canReorderModifier, cloneModifierStack, MODIFIER_LABELS,
+  modifierStackOf, writeModifierStack, canReorderModifier, cloneModifierStack, isPinnedModifier, newModifierId, MODIFIER_LABELS,
   addModifier as addModifierOp, removeModifier as removeModifierOp,
   duplicateModifier as duplicateModifierOp, reorderModifier as reorderModifierOp,
   type ModifierKind, type ModifierInstance,
@@ -81,7 +86,13 @@ import { loadGlb, GLB_SIZE_CAP_BYTES } from '~/lib/scene3d/glb'
 import { fitGlbGroup } from '~/lib/scene3d/fitGlb'
 import { svgToLeafPaths, outlineStrokes, type SvgLeafPath } from '~/composables/useVectorSvg'
 import { buildSvgObjects, SVG_SPLIT_THRESHOLD } from '~/lib/scene3d/svgImport'
-import { renderPasses } from '~/lib/scene3d/passes'
+import { renderPasses, renderObjectPasses, screenRectOfBox } from '~/lib/scene3d/passes'
+import { cinematicScopeWarning } from '~/lib/scene3d/pathtrace/scope'
+import { restyleInputHash, restyleStyleSig, shouldRunRestyle } from '~/lib/scene3d/restyleCache'
+import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
+import { useMoodboards } from '~/composables/useMoodboards'
+import { moodboardStyleBlock } from '~/lib/taste/styleBlock'
+import { MOODBOARD_MAX_REFS } from '~~/shared/taste/moodboard'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { SCENE_TEMPLATES, animateSceneDefaults } from '~/lib/scene3d/motion/defaults'
 import { LOOP_OPTIONS, IN_OPTIONS, OUT_OPTIONS, CAMERA_OPTIONS, LOOP_USES_AMOUNT, CAMERA_USES_CYCLES, CAMERA_USES_AMOUNT, setObjectLoop, setObjectTransition, setObjectDirection } from '~/lib/scene3d/motion/panel'
@@ -109,6 +120,7 @@ import StudioGradientRamp from '~/components/vue-canvas/studio/StudioGradientRam
 import VaryPalette from '~/components/vue-canvas/VaryPalette.vue'
 import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPanel.vue'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
+import WidgetMoodboardChip from '~/components/vue-canvas/widgets/WidgetMoodboardChip.vue'
 import Scene3DMotionTimeline from '~/components/vue-canvas/Scene3DMotionTimeline.vue'
 import CurveEditor from '~/components/vue-canvas/CurveEditor.vue'
 import {
@@ -321,6 +333,10 @@ function setTreatmentControl(key: string, value: string | number | boolean): voi
 // StudioControlPanel's `visible` prop is that seam. Without this the ramp rows would
 // show even with Progressive off, which is the classic silently-inert gate.
 function treatmentControlVisible(c: ControlSpec): boolean {
+  // The aiRestyle prompt is drawn as a full-width textarea in the bespoke block below — a
+  // one-line dial field is far too small for a model instruction. It stays in treatmentControls
+  // (so the agent/motion vocabulary still carries it), it just isn't drawn as a cramped row here.
+  if (activeTreatment.value?.treatment.kind === 'aiRestyle' && treatmentField(c.key) === 'prompt') return false
   return showIfVisible(c, (key) => readTreatmentControl(key))
 }
 
@@ -513,7 +529,13 @@ const playhead = ref(0)     // seconds
 let playStart = 0           // performance.now anchor
 function togglePlay() {
   if (!sceneHasMotion(doc)) return
-  playing.value = !playing.value
+  const willPlay = !playing.value
+  // Capture the live viewport camera as the motion's base BEFORE playback starts,
+  // so a scene with no camera motion keeps your exact angle (the per-frame
+  // applyCameraFromDoc would otherwise snap to a stale saved doc.camera) and any
+  // orbit/push motion animates relative to the view you're looking at.
+  if (willPlay) syncDocCamera()
+  playing.value = willPlay
   if (playing.value) playStart = performance.now() - playhead.value * 1000
 }
 // Bake the Motion timeline to an encoded file (reuses the studios' bake→encode
@@ -530,6 +552,11 @@ async function bakeSceneVideo(): Promise<{ filename: string; ext: 'mp4' | 'webm'
   videoBaking.value = true
   const wasPlaying = playing.value; playing.value = false
   try {
+    // Export from the live preview camera, not a stale saved one. If we were
+    // already playing, doc.camera is the base captured at play start (the loop
+    // never writes it back), so keep it; otherwise the engine camera holds the
+    // current orbit view — persist that as the base the frames render from.
+    if (!wasPlaying) syncDocCamera()
     const W = doc.output.width, H = doc.output.height
     const fps = doc.motion.fps, dur = doc.motion.duration
     const total = Math.max(1, Math.round(fps * dur))
@@ -592,6 +619,29 @@ watch(playing, (v) => {
 
 const snap = ref(false)
 const lightView = ref(false)  // clay + light-widget preview mode (Task 1/3 engine support)
+// Cinematic (path-traced) view mode. Preview / Light / Cinematic are mutually-exclusive VIEW
+// modes shown as one segmented control — a single boolean each, exclusivity enforced in
+// setViewMode. Cinematic is the expensive path-tracer (a segmented, never a hidden dropdown, so
+// you always see it is on).
+// Remembers the last studio HDRI so toggling the Light source segmented back to HDRI restores the
+// user's choice (session-only; the persisted value lives in doc.lighting.hdri). Seeded from the doc.
+const lastHdri = ref<string>(doc.lighting.hdri || DEFAULT_HDRI)
+const cinematic = ref(false)
+const cineStatus = ref({ samples: 0, compiling: false }) // drives the "refining…" indicator
+const cineWarning = ref('')   // one-time warn-then-render pill for shader-materials/treatments
+let cineWarned = false
+type ViewMode = 'preview' | 'light' | 'cinematic'
+const viewMode = computed<ViewMode>(() => cinematic.value ? 'cinematic' : lightView.value ? 'light' : 'preview')
+function setViewMode(m: ViewMode): void {
+  if (m === 'cinematic' && !cinematic.value && !cineWarned) {
+    cineWarned = true
+    const w = cinematicScopeWarning(doc)
+    if (w) { cineWarning.value = w; setTimeout(() => { cineWarning.value = '' }, 6500) }
+  }
+  lightView.value = m === 'light'
+  cinematic.value = m === 'cinematic'
+}
+watch(cinematic, (on) => { void engine?.setCinematic(on) })
 const baking = ref(false)
 const videoBaking = ref(false)  // reentrancy guard for bakeSceneVideo (separate from `baking`, the image-bake guard — footer video actions + the Motion panel's Export video button all funnel through bakeSceneVideo)
 const bakeError = ref('')       // last export failure message (inline "retry")
@@ -712,7 +762,15 @@ watch([primMenuOpen, lightMenuOpen, decalMenuOpen, genOpen], (open) => {
 })
 
 // ── Generate panel (text → image review → make 3D → insert) ────────────────
-const GEN_3D_MODELS = ['hunyuan3d-v2', 'trellis-2', 'tripo-v2.5', 'triposr']
+// id must match the server's THREE_D_MODELS keys (server/utils/scene3dGen.ts).
+// `sub` is a 1–2 word steer, kept short to fit the narrow Generate panel.
+const GEN_3D_MODELS: { id: string, name: string, sub: string }[] = [
+  { id: 'hunyuan3d-v2', name: 'Hunyuan3D v2', sub: 'Balanced' },
+  { id: 'rodin', name: 'Rodin', sub: 'Highest quality' },
+  { id: 'trellis-2', name: 'TRELLIS 2', sub: 'Fine detail' },
+  { id: 'tripo-v2.5', name: 'Tripo v2.5', sub: 'Best textures' },
+  { id: 'triposr', name: 'TripoSR', sub: 'Fastest draft' },
+]
 // (`genOpen` is declared with the other add-pill menu flags above.)
 const genPrompt = ref('')
 const genImageUrl = ref<string | null>(null)
@@ -721,6 +779,16 @@ const gen3dModel = ref('hunyuan3d-v2')
 const genTextured = ref(false)
 const genStage = ref<'idle' | 'image' | 'review' | 'making' | 'error'>('idle')
 const genError = ref('')
+// Canvas-image source: a pick from FillImagePicker jumps straight to the review
+// stage, reusing the same model selector / Textured / Make 3D as the text path.
+const genPickerOpen = ref(false)
+function pickCanvasImage(src: string) {
+  genImageUrl.value = src
+  genSeed.value = Math.floor(Math.random() * 2e9)
+  genError.value = ''
+  genStage.value = 'review'
+  genPickerOpen.value = false
+}
 
 // (Generate's outside-click closer is the pill's shared one — see the
 // onAddMenuOutside watch above, which lists genOpen alongside the other three.)
@@ -768,7 +836,13 @@ async function make3d() {
     genImageUrl.value = null
   } catch (err) {
     console.error('[scene3d-studio] gen-3d failed', err)
-    genError.value = '3D generation failed — try again.'
+    // Surface the real reason (fal submit status, timeout, meter refusal, …) —
+    // Nuxt's $fetch error carries the server message in `.data`. A generic
+    // "try again" hides whether it's a bad image, an overloaded model or a
+    // deadline, which is exactly what the user needs to act on.
+    const e = err as { data?: { message?: string, statusMessage?: string }, statusMessage?: string, message?: string }
+    const reason = e?.data?.message || e?.data?.statusMessage || e?.statusMessage || e?.message || ''
+    genError.value = reason ? `3D generation failed: ${reason}` : '3D generation failed — try again.'
     genStage.value = 'error'
   }
 }
@@ -1438,11 +1512,19 @@ function writeTransform(prop: 'position' | 'rotation' | 'scale', axis: 0 | 1 | 2
 // panel, the parity spec and the write path share one description of them); this is the
 // write half — it creates the params bag on first touch. Toggles store 0 | 1 so `params`
 // stays a flat number map, which is what `resolveParam` and the geometry factory expect.
-function setParam(key: string, v: number): void {
+function setParam(key: string, v: number | string): void {
   const o = selected.value
   if (!o || o.kind !== 'primitive') return
   if (!o.params) o.params = {}
-  o.params[key] = v
+  // An options row (e.g. the gem Cut) emits the chosen option STRING; the flat param bag
+  // stores its INDEX, so coerce it back the way the modifier option rows do at their seam.
+  let num: number
+  if (typeof v === 'string') {
+    const spec = PRIMITIVE_PARAMS[o.primitive]?.find((s) => s.key === key)
+    const idx = spec?.options?.indexOf(v) ?? -1
+    num = idx >= 0 ? idx : Number(v)
+  } else num = v
+  o.params[key] = num
 }
 
 // The Cloner Vary bag: varyMode/seed/falloff/varyColor/spread/varyColorStrength are a MATERIAL
@@ -1860,11 +1942,29 @@ function setMaterialControl(field: string, value: string | number | boolean): vo
 /** The panel's `@set`. One dispatch over the same dotted keys `readControl` resolves. */
 function setControl(key: string, value: string | number | boolean): void {
   if (key.startsWith('post.')) { setPost(key, value); return }
-  if (key === 'showFloor') { doc.showFloor = value === true; return }
+  if (key === 'floorMode') { doc.floorMode = String(value) as typeof doc.floorMode; return }
+  if (key === 'floorReflectivity') { doc.floorReflectivity = Number(value); return }
+  if (key === 'floorColor') { doc.floorColor = String(value); return }
   if (key === 'camera.fov') { doc.camera.fov = Number(value); return }
-  if (key === 'lighting.preset') { doc.lighting.preset = String(value) as SceneDoc['lighting']['preset']; return }
+  // Light source mode: HDRI on ⇒ set the remembered/default HDRI; Studio look ⇒ clear it.
+  if (key === 'lighting.lightSource') {
+    doc.lighting.hdri = String(value) === 'HDRI' ? (lastHdri.value || DEFAULT_HDRI) : null
+    return
+  }
+  // Fine-tune edits DETACH the Look → Custom (dials hide, the resolver stops recomputing).
+  if (key === 'lighting.preset') { doc.lighting.preset = String(value) as SceneDoc['lighting']['preset']; doc.lighting.custom = true; return }
+  if (key === 'lighting.sunIntensity' || key === 'lighting.ambient') {
+    ;(doc.lighting as Record<string, unknown>)[key.slice('lighting.'.length)] = Number(value); doc.lighting.custom = true; return
+  }
   // The row offers the segmented control's SHORT labels, not the EnvironmentKind values.
   if (key === 'lighting.environment') { doc.lighting.environment = ENV_BY_LABEL[String(value)] ?? 'room'; return }
+  // The HDRI gallery row (RowHdri) emits the chosen Poly Haven slug directly; remember it so the
+  // Light source segmented can restore it when toggling back into HDRI mode.
+  if (key === 'lighting.hdri') {
+    const slug = String(value)
+    if (slug) { doc.lighting.hdri = slug; lastHdri.value = slug }
+    return
+  }
   // Gel string/boolean fields must bypass the numeric coercion below: the four gel colours
   // (hex strings) and the rim toggle (boolean). Everything else under lighting.* is numeric.
   if (key === 'lighting.gelColorA' || key === 'lighting.gelColorB'
@@ -1876,7 +1976,15 @@ function setControl(key: string, value: string | number | boolean): void {
   // Simple-lighting non-numeric fields must also bypass the numeric coercion below:
   // `look` is a recipe id (string) and `advanced` is a boolean. Without this,
   // Number('softbox-beauty') → NaN and the Look select never sticks.
-  if (key === 'lighting.look') { doc.lighting.look = String(value); return }
+  // Picking a Look clears Custom and re-derives. Re-picking the SAME look must still reset (the
+  // value-unchanged watcher wouldn't fire), so derive directly in that case.
+  if (key === 'lighting.look') {
+    const id = String(value)
+    doc.lighting.custom = false
+    if (id === doc.lighting.look) deriveFromLook(id)
+    else doc.lighting.look = id
+    return
+  }
   if (key === 'lighting.advanced') { doc.lighting.advanced = value === true; return }
   if (key.startsWith('lighting.')) {
     ;(doc.lighting as Record<string, unknown>)[key.slice('lighting.'.length)] = Number(value)
@@ -1897,7 +2005,9 @@ function setControl(key: string, value: string | number | boolean): void {
   // the exact inverse. Writing `true` in there would make `resolveParam` fall straight
   // back to the default and the checkbox would appear to do nothing.
   if (key.startsWith('object.params.')) {
-    setParam(key.slice('object.params.'.length), typeof value === 'boolean' ? (value ? 1 : 0) : Number(value))
+    // A string value is an options row's chosen label — setParam coerces it to its index.
+    setParam(key.slice('object.params.'.length),
+      typeof value === 'boolean' ? (value ? 1 : 0) : typeof value === 'string' ? value : Number(value))
     return
   }
   if (key.startsWith('object.modifiers.')) { setMod(key.slice('object.modifiers.'.length), Number(value)); return }
@@ -1930,10 +2040,209 @@ function setControl(key: string, value: string | number | boolean): void {
 // ── Engine lifecycle ──────────────────────────────────────────────────────────
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const viewportEl = ref<HTMLDivElement | null>(null)
+// Resolution gate: the output frame as a centered rectangle over the viewport (the engine overscans
+// the camera so it always fits). `viewportSize` is kept live by the ResizeObserver.
+const viewportSize = ref({ w: 1, h: 1 })
+const gateBox = computed(() => {
+  const va = viewportSize.value.w / Math.max(1, viewportSize.value.h)
+  const oa = (doc.output.width || 1) / (doc.output.height || 1)
+  const { wFrac, hFrac } = gateRect(doc.camera.fov, va, oa, 0.9)
+  return { wPct: wFrac * 100, hPct: hFrac * 100, label: `${doc.output.width} × ${doc.output.height}` }
+})
+watch(() => [doc.output.width, doc.output.height], () => engine?.setResolutionGate((doc.output.width || 1) / (doc.output.height || 1)))
 let engine: SceneEngine | null = null
 let interaction: SceneInteraction | null = null
 let raf = 0
 let ro: ResizeObserver | null = null
+// ── S7 AI restyle: client-side result-texture cache ───────────────────────────
+// Decoded restyle result textures keyed by their stable `resultRef` filename. Pixels live HERE,
+// never in the doc — the treatment stores only the small `resultRef`/`inputHash` strings. This
+// map is populated by an explicit re-run (Task 3) or the `__scene3dRestyleInject` test hook; a
+// pure lookup per frame, never a fetch or a model call. Empty this task (no re-run wired yet).
+const restyleTexCache = new Map<string, THREE.Texture>()
+/** Build the per-frame objectId → texture map the stage reads (StageContext.restyles): for each
+ *  restyle host with a stored `resultRef` already decoded in the cache, map its object id to the
+ *  texture. A miss (no result yet / not cached) omits the object, so the stage draws the plain
+ *  object. Pure — a cache lookup, no network. Empty cache ⇒ empty map ⇒ every restyle is a no-op. */
+function collectRestyleTextures(d: SceneDoc, cache: Map<string, THREE.Texture>): Map<string, THREE.Texture> {
+  const out = new Map<string, THREE.Texture>()
+  for (const g of restyleTreatmentPlan(d)) {
+    const obj = d.objects.find((o) => o.id === g.objectId)
+    const t = treatmentsOf(obj).find((x) => x.enabled && x.kind === 'aiRestyle') as AiRestyleTreatment | undefined
+    if (!t?.resultRef) continue
+    const tex = cache.get(t.resultRef)
+    if (tex) out.set(g.objectId, tex)
+  }
+  return out
+}
+// Transient per-treatment run status for the restyle re-run button (idle / running / error). NOT in
+// the doc — a UI-only ref, like texGenerating. 'error' keeps the last good resultRef so the object
+// still shows its previous restyle.
+const restyleStatus = reactive<Record<string, 'idle' | 'running' | 'error'>>({})
+function restyleStatusOf(id: string): 'idle' | 'running' | 'error' { return restyleStatus[id] ?? 'idle' }
+/** The trimmed restyle prompt, or '' for a non-restyle treatment — gates the re-run button. */
+function restyleTreatmentPromptOf(t: Treatment): string {
+  return t.kind === 'aiRestyle' ? (t as AiRestyleTreatment).prompt.trim() : ''
+}
+
+// The /view URL for an input-dir file returned by /api/image-fetch (bare filename, no subfolder) —
+// the same shape app/lib/brand/upload.ts and materials.ts's inputViewUrl build. TextureLoader loads
+// it through the dev server's ComfyUI proxy, exactly as a generated material texture does.
+function restyleViewUrl(name: string): string {
+  return `/view?filename=${encodeURIComponent(name)}&type=input`
+}
+
+/**
+ * The S7 restyle re-run lifecycle (Task-0 (c)). An EXPLICIT button — never per-frame, never
+ * automatic; it costs money (the gen-map posture). Bakes the object's crop, computes the prospective
+ * inputHash, and SHORT-CIRCUITS (no fetch, no bill) when the inputs are unchanged and the result is
+ * still cached. Otherwise it posts to the paid route, persists the result via /api/image-fetch,
+ * decodes it into a cached texture, stamps the treatment's resultRef/inputHash, and re-renders. On
+ * any error the last good resultRef/inputHash are left intact.
+ */
+/** Resolve a treatment's styleId → the moodboard's ≤3 reference data-URLs + style text + a cache sig.
+ *  Graceful fallback: an empty id, a deleted/missing board (byId ⇒ undefined) returns null (⇒ plain
+ *  depth restyle, no error). A board with NO images returns refs:[] but keeps styleText (a text-only
+ *  nudge on the depth-only model — spec default). */
+async function resolveRestyleStyle(
+  styleId: string,
+): Promise<{ refs: string[]; styleText: string; sig: string } | null> {
+  if (!styleId) return null
+  const entry = useMoodboards().byId(styleId)
+  if (!entry) return null
+  const styleText = moodboardStyleBlock(entry.reading)
+  let files: string[] = []
+  try {
+    const list = await $fetch<{ files: string[] }>('/api/moodboards/images', { query: { folder: entry.folder } })
+    files = (list?.files ?? []).slice(0, MOODBOARD_MAX_REFS)
+  } catch { files = [] }
+  const refs: string[] = []
+  for (const file of files) {
+    try {
+      const blob = await $fetch<Blob>('/api/moodboards/images', { query: { folder: entry.folder, file }, responseType: 'blob' })
+      refs.push(await blobToDataUrl(blob))
+    } catch { /* skip an unreadable file; the others still ride */ }
+  }
+  const sig = restyleStyleSig(entry.folder, files, styleText)
+  return { refs, styleText, sig }
+}
+
+// ── The "+ Style" picker for the restyle inspector ─────────────────────────
+// Attach a saved Style (moodboard) to a restyle: a pointer only (`styleId`) — the board's refs +
+// palette + prose resolve at run time (resolveRestyleStyle). Reuses WidgetMoodboardChip for the
+// filled/empty chip and a compact studio-native popover (LoraGalleryModal is node-graph-coupled, so
+// its useMoodboards() data source is reused, not the modal). Mirrors the surface's anchorAbove +
+// outside-pointerdown popover pattern.
+const { moodboards: restyleMoodboards } = useMoodboards()
+const restyleStylePickerOpen = ref<string | null>(null) // the treatmentId whose picker is open, or null
+
+function openRestyleStylePicker(treatmentId: string): void {
+  // Toggle: the picker is an `absolute` child of the Style row (see template), so it needs no anchor
+  // math — clicking the chip again just closes it.
+  restyleStylePickerOpen.value = restyleStylePickerOpen.value === treatmentId ? null : treatmentId
+}
+// Direct reactive mutation of `.styleId` — the same doc-treatment write path runRestyle uses to
+// persist `t.resultRef`, so the picker persists through the identical watcher.
+function setRestyleStyle(objectId: string, treatmentId: string, moodboardId: string): void {
+  const hit = findTreatment(doc, objectId, treatmentId)
+  if (!hit || hit.treatment.kind !== 'aiRestyle') return
+  ;(hit.treatment as AiRestyleTreatment).styleId = moodboardId
+  restyleStylePickerOpen.value = null
+}
+function clearRestyleStyle(objectId: string, treatmentId: string): void {
+  const hit = findTreatment(doc, objectId, treatmentId)
+  if (!hit || hit.treatment.kind !== 'aiRestyle') return
+  ;(hit.treatment as AiRestyleTreatment).styleId = ''
+}
+// Click-away closer, matching the add-menu popovers' capture-phase outside-pointerdown watch.
+function onRestyleStylePickerOutside(e: PointerEvent): void {
+  const el = e.target as HTMLElement | null
+  if (el?.closest?.('[data-testid="restyle-style-popover"]') || el?.closest?.('[data-testid="restyle-style-row"]')) return
+  restyleStylePickerOpen.value = null
+}
+watch(restyleStylePickerOpen, (open) => {
+  if (open) window.addEventListener('pointerdown', onRestyleStylePickerOutside, true)
+  else window.removeEventListener('pointerdown', onRestyleStylePickerOutside, true)
+})
+
+async function runRestyle(objectId: string, treatmentId: string): Promise<void> {
+  if (!engine) return
+  const hit = findTreatment(doc, objectId, treatmentId)
+  if (!hit || hit.treatment.kind !== 'aiRestyle') return
+  const t = hit.treatment as AiRestyleTreatment
+  const prompt = t.prompt.trim()
+  if (!prompt) { restyleStatus[treatmentId] = 'error'; return }
+  if (restyleStatus[treatmentId] === 'running') return
+  const model = RESTYLE_MODELS.find((m) => m.id === t.model) ?? RESTYLE_MODELS[0]!
+
+  restyleStatus[treatmentId] = 'running'
+  try {
+    // 1. Bake the object's crop (Task 2). Null ⇒ off-screen / degenerate — nothing to send.
+    const passes = await renderObjectPasses(engine, doc, objectId, (performance.now() - scene3dMountedAt) / 1000)
+    if (!passes) { restyleStatus[treatmentId] = 'error'; return }
+
+    // 1b. Resolve the attached Style (moodboard), if any. Graceful fallback ⇒ null (plain restyle).
+    const style = await resolveRestyleStyle(t.styleId)
+    const styleId = style ? t.styleId : ''
+    const styleSig = style?.sig ?? ''
+
+    // 2. Prospective hash from the SAME inputs the key is defined over — now also over the Style id +
+    //    its resolved ref-set sig; short-circuit if unchanged and the result is still in hand.
+    const hash = restyleInputHash(model, prompt, t.strength, passes.beauty, passes.depth, styleId, styleSig)
+    if (!shouldRunRestyle(hash, t.inputHash, t.resultRef, restyleTexCache.has(t.resultRef))) {
+      restyleStatus[treatmentId] = 'idle'
+      return
+    }
+
+    // 3. The paid route → a temporary fal CDN url. runFal owns all metering; the route is thin.
+    //    A depth-control generation runs ~1-3 min (the route polls fal up to 240s), so this fetch is
+    //    deliberately long — bound it at 300s (just above the route's own deadline) so a genuinely
+    //    stuck job surfaces as an error rather than an endless spinner, instead of $fetch's no-timeout.
+    const gen = await $fetch<{ imageUrl: string; model: string; seed: number }>('/api/scene3d/restyle', {
+      method: 'POST',
+      timeout: 300_000,
+      body: {
+        prompt, beauty: passes.beauty, depth: passes.depth, strength: t.strength, model: model.id,
+        styleRefs: style?.refs ?? [], styleText: style?.styleText ?? '',
+      },
+    })
+    // 4. Persist the bytes into ComfyUI's input dir so the result survives the CDN link expiring.
+    const stored = await $fetch<{ name?: string }>('/api/image-fetch', { method: 'POST', body: { url: gen.imageUrl } })
+    const name = stored?.name
+    if (!name) throw new Error('no filename')
+
+    // 5. Decode into a cached texture keyed by the stable filename.
+    const tex = await new Promise<THREE.Texture>((resolve, reject) => {
+      new THREE.TextureLoader().load(restyleViewUrl(name), (loaded) => {
+        // S7.1: the restyle is projected by the object's MATERIAL at the display-space
+        // <dithering_fragment> anchor (restyleProjection.ts), where gl_FragColor is already
+        // sRGB-encoded — so the result PNG's sRGB bytes are sampled RAW (NoColorSpace), NOT decoded
+        // to linear as v1's LINEAR-stage composite required (was SRGBColorSpace). Tagging it sRGB
+        // here would GPU-decode every sample and darken the projected surface. See the opal-ramp
+        // lesson (finishes.ts) and Task-0 (g).
+        loaded.colorSpace = THREE.NoColorSpace
+        resolve(loaded)
+      }, undefined, reject)
+    })
+    restyleTexCache.set(name, tex)
+
+    // 6. Stamp the treatment (small strings only — pixels never enter the doc) and re-render.
+    //    S7.1: also stamp the bake projection (matrix + rect + size + forward) so Task 2's material
+    //    can project the result onto the surface. These are tiny arrays, not pixels.
+    t.resultRef = name
+    t.inputHash = hash
+    t.projViewProj = passes.viewProj
+    t.projRect = [passes.rect.x, passes.rect.y, passes.rect.w, passes.rect.h]
+    t.projSize = passes.size
+    t.projForward = passes.forward
+    engine.setRestyleTextures(collectRestyleTextures(doc, restyleTexCache))
+    engine.render((performance.now() - scene3dMountedAt) / 1000)
+    restyleStatus[treatmentId] = 'idle'
+  } catch (err) {
+    console.error('[scene3d-studio] restyle failed', err)
+    restyleStatus[treatmentId] = 'error' // last good resultRef / inputHash untouched
+  }
+}
 // Wall-clock start of this surface's rAF loop — a shaderFill field's animation clock runs off
 // elapsed real time, same as ShapeStudioSurface.vue's `mountedAt` (Scene3D's own playhead
 // governs object motion, not this). Set once in onMounted, read every loop() tick.
@@ -1996,9 +2305,132 @@ onMounted(() => {
   ;(window as any).__scene3dTreatmentStats = () => engine ? { ...engine.treatmentStats } : null
   ;(window as any).__scene3dSnapshot = () => engine?.snapshot() ?? ''
   ;(window as any).__scene3dBeauty = async () => engine ? (await renderPasses(engine, doc, 0)).beauty : ''
+  // Cinematic (path-trace) dev hooks — drive accumulation manually so a hidden Browser pane (rAF
+  // paused) can still be verified. __scene3dCinematic(on) toggles; __scene3dCineStep(n) accumulates
+  // n frames; __scene3dCineStatus() reads {samples,compiling}; capture via the canvas toDataURL.
+  ;(window as any).__scene3dCinematic = async (on: boolean) => { await engine?.setCinematic(on) }
+  ;(window as any).__scene3dCineStep = (n: number) => { for (let i = 0; i < n; i++) engine?.render(0); return engine?.cinematicStatus() }
+  ;(window as any).__scene3dCineStatus = () => engine?.cinematicStatus() ?? null
+  ;(window as any).__scene3dCineCanvas = () => (engine as any)?.renderer?.domElement?.toDataURL('image/png') ?? ''
+  ;(window as any).__scene3dCineSize = (n: number) => {
+    const e = engine as any
+    e?.renderer?.setSize(n, n, false)
+    if (e?.camera) { e.camera.aspect = 1; e.camera.updateProjectionMatrix() }
+  }
+  // Env-bake verification: the baked cinematic equirect (env + ambient fill floor). Offscreen
+  // baking works even in a hidden pane (unlike throttled path-trace accumulation), so channel min
+  // proves the ambient floor was actually added (env min ≈ floorByte) independent of the GPU trace.
+  ;(window as any).__scene3dCineEnvStats = () => {
+    const d = (engine as any)?.cinematicEnv?.image?.data as Uint8Array | undefined
+    if (!d) return null
+    let rMin = 255, gMin = 255, bMin = 255, rMax = 0, gMax = 0, bMax = 0
+    for (let i = 0; i < d.length; i += 4) {
+      rMin = Math.min(rMin, d[i]!); gMin = Math.min(gMin, d[i + 1]!); bMin = Math.min(bMin, d[i + 2]!)
+      rMax = Math.max(rMax, d[i]!); gMax = Math.max(gMax, d[i + 1]!); bMax = Math.max(bMax, d[i + 2]!)
+    }
+    return { min: [rMin, gMin, bMin], max: [rMax, gMax, bMax], texels: d.length / 4 }
+  }
+  ;(window as any).__scene3dEnvState = () => {
+    const e = engine as any
+    const env = e?.scene?.environment
+    const bg = e?.scene?.background
+    return {
+      hdriSlug: e?.hdriSlug ?? null,
+      hdriEquirectLoaded: !!e?.hdriEquirect,
+      environmentSet: !!env,
+      environmentName: env?.name ?? null,
+      backgroundName: bg?.name ?? (bg?.isColor ? 'color' : bg ? 'texture' : null),
+      envIntensity: e?.scene?.environmentIntensity ?? null,
+      envRotationYdeg: e?.scene?.environmentRotation ? Math.round((e.scene.environmentRotation.y * 180) / Math.PI) : null,
+      cinematicFloor: (() => {
+        const f = e?.cinematicFloor
+        return f ? { visible: f.visible, mat: f.material?.type, isStandard: !!f.material?.isMeshStandardMaterial } : null
+      })(),
+      viewportFov: e?.camera?.fov ? +e.camera.fov.toFixed(2) : null,
+      baseFov: e?.baseFov ? +e.baseFov.toFixed(2) : null,
+    }
+  }
+  ;(window as any).__scene3dCineHelperCheck = () => {
+    const sc = (engine as any)?.scene
+    if (!sc) return null
+    let shadowVis = 0, lineVis = 0, meshVis = 0
+    sc.traverse((o: any) => {
+      const m = o.material
+      const isShadow = m && (Array.isArray(m) ? m.some((x: any) => x.isShadowMaterial) : m.isShadowMaterial)
+      if (o.visible && isShadow) shadowVis++
+      if (o.visible && o.isLine) lineVis++
+      if (o.visible && o.isMesh && !isShadow) meshVis++
+    })
+    return { visibleShadowCatchers: shadowVis, visibleLines: lineVis, visibleMeshes: meshVis }
+  }
+  ;(window as any).__scene3dCineEnvURL = () => {
+    const tex = (engine as any)?.cinematicEnv
+    const d = tex?.image?.data as Uint8Array | undefined
+    if (!d || !tex) return ''
+    const cv = document.createElement('canvas'); cv.width = tex.image.width; cv.height = tex.image.height
+    const ctx = cv.getContext('2d')!
+    const img = ctx.createImageData(cv.width, cv.height)
+    img.data.set(d)
+    ctx.putImageData(img, 0, 0)
+    return cv.toDataURL('image/png')
+  }
+  // A deterministic MOVING-frame oracle for the S6 motion tests: the existing __scene3d* hooks
+  // render at t=0 (still), where velocity blur / ghost trails have nothing to show. This runs the
+  // full sample → velocity/ghost push → render path at an arbitrary t01 (renderMotionFrame does
+  // all of it) and returns the data-URL, so a Playwright test gets a frame at a chosen moment
+  // without racing the playhead.
+  ;(window as any).__scene3dSnapshotAt = (t01: number) =>
+    engine ? (renderMotionFrame(engine, doc, t01) as HTMLCanvasElement).toDataURL('image/png') : ''
+  // S7 restyle test hook: inject a LOCAL image as an object's restyle result — zero spend, no fal
+  // call. Decodes the data URL into a texture, caches it under a fresh resultRef, stamps the
+  // object's aiRestyle treatment, pushes the map and re-renders. Task 3's live composite reads
+  // exactly this cached texture; Task 1's stub ignores it (draws the plain object), so this only
+  // exercises the resultRef → cache → stage plumbing today.
+  // S7 Task-2 test hook: bake the single-object beauty + depth (+ normal) crop for `objectId` and
+  // return it as a plain JSON-serialisable object ({ beauty, depth, normal } data URLs + `rect`), or
+  // null when the object is off-screen / degenerate. Off-screen bake only — the live canvas is
+  // restored in renderObjectPasses's finally, so a bake never disturbs the viewport.
+  ;(window as any).__scene3dObjectPasses = async (objectId: string) =>
+    engine ? await renderObjectPasses(engine, doc, objectId, (performance.now() - scene3dMountedAt) / 1000) : null
+  ;(window as any).__scene3dRestyleInject = (objectId: string, dataUrl: string): Promise<boolean> => {
+    const obj = doc.objects.find((o) => o.id === objectId)
+    const t = treatmentsOf(obj).find((x) => x.kind === 'aiRestyle') as AiRestyleTreatment | undefined
+    if (!engine || !obj || !t) return Promise.resolve(false)
+    return new Promise<boolean>((resolve) => {
+      new THREE.TextureLoader().load(dataUrl, (tex) => {
+        // S7.1: sampled RAW by the projective material at the display-space anchor — NoColorSpace,
+        // not SRGBColorSpace (see runRestyle's decode above and Task-0 (g)).
+        tex.colorSpace = THREE.NoColorSpace
+        const ref = `inject-${objectId}-${Date.now()}.png`
+        restyleTexCache.set(ref, tex)
+        t.resultRef = ref
+        t.inputHash = 'injected'
+        // S7.1: this hook does NOT bake, so stamp a projector from the CURRENT live camera + the
+        // object's screen rect, so Task 3's zero-spend oracle can project from a known frame. Uses
+        // the drawing-buffer size so rect/size/matrix are mutually consistent. Left unstamped ([])
+        // when the object has no on-screen rect (off-screen) — then no injection, like an unrun one.
+        const cam = engine!.camera
+        cam.updateMatrixWorld()
+        const proj = new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse)
+        const canvas = engine!.renderer.domElement as HTMLCanvasElement
+        const cw = canvas.width, ch = canvas.height
+        const root = engine!.objectRoots.get(objectId)
+        const rect = root ? screenRectOfBox(new THREE.Box3().setFromObject(root), proj, cw, ch, 8) : null
+        if (rect) {
+          t.projViewProj = proj.toArray()
+          t.projRect = [rect.x, rect.y, rect.w, rect.h]
+          t.projSize = [cw, ch]
+          t.projForward = cam.getWorldDirection(new THREE.Vector3()).toArray()
+        }
+        engine!.setRestyleTextures(collectRestyleTextures(doc, restyleTexCache))
+        engine!.render((performance.now() - scene3dMountedAt) / 1000)
+        resolve(true)
+      }, undefined, () => resolve(false))
+    })
+  }
 })
 onBeforeUnmount(() => {
-  for (const k of ['__scene3dDoc', '__scene3dCamera', '__scene3dTreatmentStats', '__scene3dSnapshot', '__scene3dBeauty']) delete (window as any)[k]
+  for (const k of ['__scene3dDoc', '__scene3dCamera', '__scene3dTreatmentStats', '__scene3dSnapshot', '__scene3dBeauty', '__scene3dSnapshotAt', '__scene3dObjectPasses', '__scene3dRestyleInject']) delete (window as any)[k]
 })
 
 onMounted(() => {
@@ -2006,7 +2438,9 @@ onMounted(() => {
   if (!webglOk.value || !canvasEl.value || !viewportEl.value) return
   const rect = viewportEl.value.getBoundingClientRect()
   engine = new SceneEngine(canvasEl.value, rect.width, rect.height)
+  viewportSize.value = { w: rect.width, h: rect.height }
   engine.applyCameraFromDoc(doc)
+  engine.setResolutionGate(doc.output.width / doc.output.height) // show the export frame in the viewport
   interaction = new SceneInteraction(engine, viewportEl.value, {
     onSelect: (id, additive) => {
       // Gap 3 fix: a miss must not touch selection while sculpting either — this
@@ -2094,6 +2528,10 @@ onMounted(() => {
       // Same gate shape as shaderFill: only a flowing opal (opalFlowSpeed > 0) needs a per-frame
       // uTime write; a still opal or an opal-free scene skips it entirely.
       if (sceneHasOpalFlow(doc)) engine.refreshOpal((performance.now() - scene3dMountedAt) / 1000)
+      // S7 AI restyle: push the per-object cached result textures ONCE per frame regardless of
+      // play state (a pure cache lookup, never a fetch or a model call). Empty when no aiRestyle
+      // treatment is present, so a scene with none pays nothing and stays byte-identical.
+      engine.setRestyleTextures(docHasRestyleTreatment(doc) ? collectRestyleTextures(doc, restyleTexCache) : new Map())
     }
     if (playing.value && engine) {
       const dur = doc.motion.duration
@@ -2123,21 +2561,40 @@ onMounted(() => {
       engine.applyCameraFromDoc(sampled)
       engine.applyObjectOpacities(opacities)
       interaction?.orbit.update()
+      // S6 motion treatments: sample the per-object screen velocity / past poses from the
+      // ORIGINAL doc + t01 (the sampled doc has motion already baked into its transforms) and
+      // push them into the engine so the stage can smear / trail the object. Camera-at-t viewProj
+      // (object-only velocity — an orbiting camera does not blur a static object). Cleared to
+      // empty otherwise, so a scene with no motion treatment pays nothing and stays byte-identical.
+      if (docHasMotionTreatment(doc)) {
+        engine.camera.updateMatrixWorld()
+        const viewProj = new THREE.Matrix4().multiplyMatrices(engine.camera.projectionMatrix, engine.camera.matrixWorldInverse)
+        engine.setMotionVelocities(sceneScreenVelocities(doc, t01, viewProj))
+        engine.setGhostPoses(collectGhostPoses(doc, t01))
+      } else {
+        engine.setMotionVelocities(new Map())
+        engine.setGhostPoses(new Map())
+      }
       engine.render((performance.now() - scene3dMountedAt) / 1000)
       updateLightLabels()
     } else {
       interaction?.setCameraLocked(false)
       interaction?.setPlaybackLocked(false)
       interaction?.orbit.update()
+      // A paused (not-playing) frame is still: clear the motion maps so velocityBlur no-ops and
+      // ghost trails collapse — "none when still" holds for a paused clip.
+      engine?.setMotionVelocities(new Map())
+      engine?.setGhostPoses(new Map())
       engine?.render((performance.now() - scene3dMountedAt) / 1000)
       updateLightLabels()
     }
+    if (cinematic.value && engine) cineStatus.value = engine.cinematicStatus()
     raf = requestAnimationFrame(loop)
   }
   raf = requestAnimationFrame(loop)
   ro = new ResizeObserver(() => {
     const r = viewportEl.value?.getBoundingClientRect()
-    if (r && engine) engine.setSize(r.width, r.height)
+    if (r && engine) { engine.setSize(r.width, r.height); viewportSize.value = { w: r.width, h: r.height } }
   })
   ro.observe(viewportEl.value)
   // Capture phase: StudioModalShell (a child, so its onMounted runs first)
@@ -2186,12 +2643,19 @@ watch(doc, () => {
   // rip them out of the pivot after the first delta and leave the rest of the
   // gesture moving nothing. The viewport is already live during that window
   // (the pivot moves the roots directly), and onPivotDragEnd runs the sync.
-  if (!interaction?.pivotDragActive) engine?.syncFromDoc(doc)
+  if (!interaction?.pivotDragActive) { engine?.syncFromDoc(doc); engine?.cinematicRefresh() }
   scheduleHistory()
 }, { deep: true })
-// Look change → apply the whole recipe (direction, env, preset, default dials),
-// then recompute the dial-driven fields from those defaults.
-watch(() => doc.lighting.look, (id) => {
+// An environment switch — or an ambient/preset change (both feed the baked ambient fill floor) —
+// must re-bake the equirect the path-tracer lights from (the deep watch above only rebuilds the
+// trace geometry). No-op unless Cinematic is active.
+watch(() => [doc.lighting.environment, doc.lighting.hdri, doc.lighting.hdriExposure, doc.lighting.hdriRotation,
+  doc.lighting.ambient, doc.lighting.preset],
+  () => engine?.cinematicRefresh(true))
+// Stamp a Look recipe over every derived field (direction, env, preset, default dials, then the
+// dial-driven fields). Shared by the look watcher AND setControl (so re-picking the SAME look resets
+// a Custom detach, which a value-unchanged watcher would miss). Callers own `custom`.
+function deriveFromLook(id: string): void {
   const recipe = getLook(id)
   const p = resolveLook(recipe)
   doc.lighting.sunAzimuth = p.sunAzimuth
@@ -2205,9 +2669,13 @@ watch(() => doc.lighting.look, (id) => {
   doc.lighting.ambient = d.ambient
   doc.lighting.sunColor = d.sunColor
   doc.lighting.shadowSoftness = d.shadowSoftness
-})
-// Dial change → recompute ONLY the dial-driven fields; direction/env/preset untouched.
+}
+// Picking a Look re-derives and clears any Custom detach.
+watch(() => doc.lighting.look, (id) => { doc.lighting.custom = false; deriveFromLook(id) })
+// Dial change → recompute ONLY the dial-driven fields; direction/env/preset untouched. Inert while
+// the look is detached to Custom (the dials are hidden then anyway — this guards programmatic writes).
 watch(() => [doc.lighting.softness, doc.lighting.warmth, doc.lighting.brightness], () => {
+  if (doc.lighting.custom) return
   const recipe = getLook(doc.lighting.look)
   const d = resolveDials(recipe, {
     softness: doc.lighting.softness, warmth: doc.lighting.warmth, brightness: doc.lighting.brightness,
@@ -2274,7 +2742,9 @@ function applySnapshot(snap: string) {
   doc.camera = p.camera
   doc.lighting = p.lighting
   doc.background = p.background
-  doc.showFloor = p.showFloor
+  doc.floorMode = p.floorMode
+  doc.floorReflectivity = p.floorReflectivity
+  doc.floorColor = p.floorColor
   doc.post = p.post
   doc.output = p.output
   doc.motion = p.motion
@@ -2318,6 +2788,12 @@ function onKey(e: KeyboardEvent) {
     // the brief first sketched) because the very next line unconditionally
     // returns on ANY modified key — a branch placed after it would never run.
     if (k === 'g') { e.preventDefault(); e.stopImmediatePropagation(); if (e.shiftKey) ungroupSelection(); else groupSelection(); return }
+    // Copy the selection's style (or a selected modifier); paste onto the selected object(s). Copy
+    // only swallows the chord when it actually copied (a stray Cmd+C still does the native copy);
+    // paste swallows whenever the clipboard holds something, so it can also show a "select a shape"
+    // hint instead of a no-op native paste.
+    if (k === 'c') { if (copySelection()) { e.preventDefault(); e.stopImmediatePropagation(); return } }
+    if (k === 'v') { if (studioClipboard.value) { e.preventDefault(); e.stopImmediatePropagation(); pasteToSelection(); return } }
   }
   // Never hijack other modified chords (Cmd+R reload, Ctrl/Alt combos).
   if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -2346,6 +2822,8 @@ function onKey(e: KeyboardEvent) {
     // registered its capture listener after us, so yielding lets it close itself and
     // preventDefault, which the shell honours — otherwise Escape would close the editor.
     if (document.querySelector('[data-look-picker]')) return
+    // Same yield for the browsable HDRI library picker (RowHdri → HdriPicker).
+    if (document.querySelector('[data-hdri-picker]')) return
     // Open primitive/light/decal/generate menu owns Esc: close it, never the modal.
     if (primMenuOpen.value || lightMenuOpen.value || decalMenuOpen.value || genOpen.value) {
       e.preventDefault()
@@ -3486,6 +3964,101 @@ function addGlb(url: string) {
   // load silently leaves an empty group; this catch flags it in the list).
   loadGlb(url).catch(() => { glbError[o.id] = true })
 }
+// Rename an object from the tree's inline editor (Scene3DObjectRow's pencil action). The row drafts;
+// this is the sole writer of `name` on the doc. A blank/whitespace name is rejected (keep the old one).
+function renameObject(id: string, name: string) {
+  const o = doc.objects.find((x) => x.id === id)
+  const next = name.trim()
+  if (o && next) o.name = next
+}
+
+// ── Copy / paste (keyboard: Cmd/Ctrl+C, Cmd/Ctrl+V) ────────────────────────────────────────────
+// A session clipboard (NOT the doc) holding EITHER an object's STYLE (material + its finish coats)
+// OR a single MODIFIER. Copy reads the current selection; paste applies to the selected object(s).
+// AI restyle is deliberately excluded — its result is baked from one object's depth and projected
+// from its own camera, so it does not transfer to other geometry.
+type StudioClip =
+  | { kind: 'style'; material: SceneMaterial; finishes: FinishTreatment[] }
+  | { kind: 'modifier'; modifier: ModifierInstance }
+const studioClipboard = ref<StudioClip | null>(null)
+const jclone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T
+// Transient confirmation pill (keyboard actions are otherwise invisible).
+const clipboardHint = ref('')
+let clipboardHintTimer: ReturnType<typeof setTimeout> | undefined
+function flashClipboardHint(msg: string): void {
+  clipboardHint.value = msg
+  if (clipboardHintTimer) clearTimeout(clipboardHintTimer)
+  clipboardHintTimer = setTimeout(() => { clipboardHint.value = '' }, 1500)
+}
+
+/** The object Cmd+C copies a STYLE from: the primary (last) selected object, else the host of a
+ *  selected treatment / modifier. */
+function activeStyleObjectId(): string | null {
+  if (selectedIds.value.length) return selectedIds.value[selectedIds.value.length - 1] ?? null
+  return selectedModifier.value?.objectId ?? selectedTreatment.value?.objectId ?? null
+}
+
+/** Cmd+C. A selected modifier copies AS a modifier; otherwise the active object's style (material +
+ *  finish coats). Returns true when something was copied, so the key handler only swallows the chord
+ *  when it acted (a stray Cmd+C over nothing still does the native copy). */
+function copySelection(): boolean {
+  if (selectedModifier.value) {
+    const o = doc.objects.find((x) => x.id === selectedModifier.value!.objectId)
+    if (!o || o.kind !== 'primitive') return false // only primitives host a modifier stack
+    const m = modifierStackOf(o).find((x) => x.id === selectedModifier.value!.modifierId)
+    if (!m) return false
+    studioClipboard.value = { kind: 'modifier', modifier: jclone(m) }
+    flashClipboardHint(`Copied ${MODIFIER_LABELS[m.kind]} modifier`)
+    return true
+  }
+  const id = activeStyleObjectId()
+  const o = id ? doc.objects.find((x) => x.id === id) : null
+  if (!o) return false
+  const finishes = treatmentsOf(o).filter((t) => isFinishKind(t.kind)) as FinishTreatment[]
+  studioClipboard.value = { kind: 'style', material: cloneMaterial(o.material), finishes: jclone(finishes) }
+  flashClipboardHint(finishes.length ? 'Copied style + finishes' : 'Copied style')
+  return true
+}
+
+/** Cmd+V. Apply the clipboard to the selected object(s). Style ⇒ replace material + finish coats,
+ *  leaving other treatments, geometry and any restyle untouched. Modifier ⇒ append a copy to each
+ *  primitive target's stack (respecting the one-per-kind rule for subdivide / cloner). */
+function pasteToSelection(): boolean {
+  const clip = studioClipboard.value
+  if (!clip) return false
+  const ids = selectedIds.value.length ? [...selectedIds.value]
+    : selectedModifier.value?.objectId ? [selectedModifier.value.objectId]
+    : selectedTreatment.value?.objectId ? [selectedTreatment.value.objectId] : []
+  const targets = ids.map((id) => doc.objects.find((o) => o.id === id)).filter((o): o is SceneObject => !!o)
+  if (!targets.length) return false
+  let applied = 0
+  for (const o of targets) {
+    if (clip.kind === 'style') {
+      o.material = cloneMaterial(clip.material)
+      // Replace finish coats only: keep the target's non-finish treatments (edge lines, restyle, motion).
+      const others = treatmentsOf(o).filter((t) => !isFinishKind(t.kind))
+      const pasted = clip.finishes.map((f) => ({ ...jclone(f), id: newTreatmentId() }))
+      const next = [...others, ...pasted]
+      if (next.length) o.treatments = next
+      else delete o.treatments
+      applied++
+    } else {
+      if (o.kind !== 'primitive') continue // only primitives host a modifier stack
+      const before = modifierStackOf(o)
+      if (isPinnedModifier(clip.modifier.kind) && before.some((m) => m.kind === clip.modifier.kind)) continue
+      Object.assign(o, writeModifierStack([...before, { ...jclone(clip.modifier), id: newModifierId() } as ModifierInstance]))
+      applied++
+    }
+  }
+  if (!applied) {
+    flashClipboardHint(clip.kind === 'modifier' ? 'Select a shape to paste onto' : 'Nothing to paste onto')
+    return false
+  }
+  const noun = clip.kind === 'modifier' ? 'modifier' : 'style'
+  flashClipboardHint(`Pasted ${noun}${applied > 1 ? ` to ${applied} objects` : ''}`)
+  return true
+}
+
 function removeObject(id: string) {
   // A group's children are independent doc objects; deleting only the group
   // would leave them orphaned at the root — visually "escaping" the delete.
@@ -3989,6 +4562,16 @@ async function onClose() {
         <div v-else class="flex h-full items-center justify-center text-sm text-white/50">
           WebGL is unavailable — the 3D Studio needs a WebGL-capable browser.
         </div>
+        <!-- Resolution gate: the exact export frame. The engine overscans the camera so this always
+             fits; everything outside the rectangle is dimmed and won't be in the render. -->
+        <div v-if="webglOk" class="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+          <div
+            class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-white/35"
+            :style="{ width: `${gateBox.wPct}%`, height: `${gateBox.hPct}%`, boxShadow: '0 0 0 100vmax rgba(0,0,0,0.34)' }"
+          >
+            <span class="absolute left-1 top-1 rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-white/70">{{ gateBox.label }}</span>
+          </div>
+        </div>
         <!-- Decal image picker. Lives here, OUTSIDE the bottom toolbar's v-if, because
              both callers need it: the toolbar's "Image sticker" and the Decal section's
              "Replace image" (which is reachable in Motion mode, where the toolbar is
@@ -3999,6 +4582,11 @@ async function onClose() {
         <div v-if="placingDecal"
              class="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-[11px] text-white/85">
           Click a surface to place — Esc to cancel
+        </div>
+        <!-- Copy/paste confirmation: keyboard-only, so a brief pill is the only signal it worked. -->
+        <div v-if="clipboardHint" data-testid="clipboard-hint"
+             class="pointer-events-none absolute bottom-16 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/80 px-3 py-1.5 text-[12px] text-white/90 shadow-lg">
+          {{ clipboardHint }}
         </div>
         <!-- Overlay toolbar: snap only — the combined gizmo (Spline-style) moves,
              rotates, and scales without mode switching, so no mode buttons.
@@ -4015,9 +4603,31 @@ async function onClose() {
           <button type="button" class="rounded px-2 py-1 text-xs"
             :class="snap ? 'bg-white/25 text-white' : 'bg-white/10 text-white/70 hover:bg-white/15'"
             @click="snap = !snap">snap</button>
-          <button type="button" class="flex items-center gap-1 rounded px-2 py-1 text-xs"
-            :class="lightView ? 'bg-white/25 text-white' : 'bg-white/10 text-white/70 hover:bg-white/15'"
-            @click="lightView = !lightView"><Lightbulb class="size-3.5" /> Light</button>
+          <!-- Viewport mode: Preview (fast raster) · Light (clay + light widgets) · Cinematic
+               (path-traced). Segmented, not a dropdown, so the expensive Cinematic state is always
+               visible. -->
+          <div class="flex items-center gap-0.5 rounded bg-white/10 p-0.5">
+            <button type="button" class="rounded px-2 py-0.5 text-xs"
+              :class="viewMode === 'preview' ? 'bg-white/25 text-white' : 'text-white/70 hover:text-white'"
+              @click="setViewMode('preview')">Preview</button>
+            <button type="button" class="flex items-center gap-1 rounded px-2 py-0.5 text-xs"
+              :class="viewMode === 'light' ? 'bg-white/25 text-white' : 'text-white/70 hover:text-white'"
+              @click="setViewMode('light')"><Lightbulb class="size-3.5" /> Light</button>
+            <button type="button" class="flex items-center gap-1 rounded px-2 py-0.5 text-xs"
+              :class="viewMode === 'cinematic' ? 'bg-white/25 text-white' : 'text-white/70 hover:text-white'"
+              @click="setViewMode('cinematic')"><Sparkles class="size-3.5" /> Cinematic</button>
+          </div>
+        </div>
+
+        <!-- Cinematic "refining…" indicator: unobtrusive, top-right; fades once converged. -->
+        <div v-if="webglOk && viewMode === 'cinematic'"
+             class="pointer-events-none absolute right-3 top-3 z-20 rounded-full bg-black/60 px-3 py-1 text-[11px] text-white/85 backdrop-blur">
+          {{ cineStatus.compiling ? 'Preparing…' : cineStatus.samples >= 256 ? 'Ray-traced' : `Refining… ${Math.min(99, Math.round(cineStatus.samples / 256 * 100))}%` }}
+        </div>
+        <!-- Warn-then-render: one-time heads-up when the scene has effects Cinematic can't trace. -->
+        <div v-if="cineWarning"
+             class="pointer-events-none absolute left-1/2 top-14 z-20 -translate-x-1/2 rounded-full bg-black/80 px-3 py-1.5 text-[12px] text-amber-200/90 shadow-lg">
+          {{ cineWarning }}
         </div>
 
         <!-- Contextual selection actions, top-center. Only while not sculpting and the
@@ -4289,6 +4899,21 @@ async function onClose() {
                 </span>
               </StudioButton>
 
+              <!-- Second source: an image already on the canvas. Opens the shared
+                   canvas-image grid; a pick jumps to the review stage below. -->
+              <div class="my-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.12em] text-white/25">
+                <span class="h-px flex-1 bg-white/10" /> or <span class="h-px flex-1 bg-white/10" />
+              </div>
+              <button
+                type="button"
+                data-testid="gen-use-canvas-image"
+                class="flex w-full items-center justify-center gap-1.5 rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[12px] text-white/80 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                :disabled="genStage === 'making'"
+                @click="genPickerOpen = true"
+              >
+                <ImagePlus class="h-3.5 w-3.5" /> Use an image from the canvas
+              </button>
+
               <template v-if="genImageUrl && genStage !== 'idle'">
                 <div class="mt-3 space-y-2">
                   <img :src="genImageUrl!" alt="" class="h-32 w-full rounded object-cover" />
@@ -4299,12 +4924,17 @@ async function onClose() {
                   </div>
                   <div>
                     <label class="mb-1 block text-[11px] text-white/55">3D model</label>
-                    <select
-                      v-model="gen3dModel"
-                      class="w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[12px] text-white/85 outline-none focus:border-white/25"
-                    >
-                      <option v-for="m in GEN_3D_MODELS" :key="m" :value="m">{{ m }}</option>
-                    </select>
+                    <div class="space-y-1">
+                      <button
+                        v-for="m in GEN_3D_MODELS" :key="m.id" type="button"
+                        class="flex w-full items-center justify-between rounded border px-2 py-1.5 text-left transition-colors cursor-pointer"
+                        :class="gen3dModel === m.id ? 'border-white/30 bg-white/[0.08]' : 'border-white/10 bg-white/[0.04] hover:bg-white/[0.06]'"
+                        @click="gen3dModel = m.id"
+                      >
+                        <span class="text-[12px] text-white/85">{{ m.name }}</span>
+                        <span class="text-[10px] text-white/40">{{ m.sub }}</span>
+                      </button>
+                    </div>
                   </div>
                   <label class="flex cursor-pointer items-center justify-between text-[11px] text-white/55">
                     <span>Textured</span>
@@ -4321,6 +4951,15 @@ async function onClose() {
               </template>
 
               <p v-if="genStage === 'error' && genError" class="mt-2 text-[11px] text-red-400/90">{{ genError }}</p>
+
+              <!-- Canvas-image chooser (teleported modal grid); a pick lands in
+                   the review slot above via pickCanvasImage. -->
+              <AddImageSourcePopover
+                :open="genPickerOpen"
+                picker-only
+                @pick="pickCanvasImage"
+                @close="genPickerOpen = false"
+              />
             </div>
             </div>
           </div>
@@ -4388,6 +5027,7 @@ async function onClose() {
             @select="toggleSelected"
             @remove="removeObject"
             @duplicate="duplicateObject"
+            @rename="renameObject"
             @retry="retryGlb"
             @toggle-visible="(id) => { const found = doc.objects.find((x) => x.id === id); if (found) found.visible = !found.visible }"
             @add-treatment="addTreatment"
@@ -4468,6 +5108,60 @@ async function onClose() {
           <span class="truncate text-white/80">{{ TREATMENT_LABELS[activeTreatment.treatment.kind] }}</span>
         </div>
         <div class="flex flex-col gap-2" @pointerdown.capture="onControlsPointerDown">
+          <!-- S7 AI restyle: the prompt is a FULL-WIDTH textarea, drawn first. A one-line dial row
+               (RowText, ~128px) is far too small for a model instruction — it's rendered bespoke
+               here and hidden from the schema panel via treatmentControlVisible. -->
+          <div v-if="activeTreatment.treatment.kind === 'aiRestyle'" class="space-y-1" data-testid="restyle-prompt">
+            <label class="block px-1 text-[11px] text-white/55">Prompt</label>
+            <textarea
+              class="nodrag w-full resize-y rounded-md bg-white/[0.06] px-2 py-1.5 text-[12px] leading-snug text-white/90 placeholder:text-white/30 outline-none transition-colors focus:bg-white/[0.10]"
+              rows="3"
+              spellcheck="false"
+              placeholder="Describe the new look — e.g. a weathered bronze statue, patina"
+              :value="String(readTreatmentControl('treatment.prompt'))"
+              @pointerdown.stop
+              @input="setTreatmentControl('treatment.prompt', ($event.target as HTMLTextAreaElement).value)"
+            />
+          </div>
+          <!-- Style (moodboard): OPTIONAL. Attached ⇒ the restyle adopts the board's look (its refs +
+               palette + prose) while depth holds the geometry. Reuses the Generate node's chip; the
+               picker popover lives near the surface's other anchored popovers below. -->
+          <div
+            v-if="activeTreatment.treatment.kind === 'aiRestyle'"
+            class="relative space-y-1"
+            data-testid="restyle-style-row"
+          >
+            <label class="block px-1 text-[11px] text-white/55">Style</label>
+            <WidgetMoodboardChip
+              :moodboard-id="(activeTreatment.treatment as AiRestyleTreatment).styleId || undefined"
+              :has-refs="!!(activeTreatment.treatment as AiRestyleTreatment).styleId"
+              @open="openRestyleStylePicker(activeTreatment.treatment.id)"
+              @clear="clearRestyleStyle(activeTreatment.obj.id, activeTreatment.treatment.id)"
+            />
+            <!-- Style picker: a compact moodboard list anchored to this row (absolute, like the
+                 surface's toolbar popups) so it opens right under the chip. Its useMoodboards() data
+                 source mirrors the Generate node's chip; the outside-pointerdown watch closes it. -->
+            <div
+              v-if="restyleStylePickerOpen === activeTreatment.treatment.id"
+              class="absolute left-0 top-full z-50 mt-1 max-h-72 w-64 overflow-auto rounded-lg border border-white/10 bg-[#1b1b1f] p-1.5 shadow-xl"
+              data-testid="restyle-style-popover"
+              @pointerdown.stop
+            >
+              <p v-if="!restyleMoodboards.length" class="px-2 py-3 text-[11px] text-white/40">
+                No styles yet — create a moodboard first.
+              </p>
+              <button
+                v-for="m in restyleMoodboards"
+                :key="m.id"
+                type="button"
+                class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-white/[0.06]"
+                :data-testid="`restyle-style-option-${m.id}`"
+                @click="setRestyleStyle(activeTreatment!.obj.id, activeTreatment!.treatment.id, m.id)"
+              >
+                <span class="truncate text-[12px] text-white/85">{{ m.name }}</span>
+              </button>
+            </div>
+          </div>
           <StudioControlPanel
             :controls="treatmentPanelControls"
             :order="treatmentPanelOrder"
@@ -4475,6 +5169,35 @@ async function onClose() {
             :visible="treatmentControlVisible"
             @set="setTreatmentControl"
           />
+          <!-- S7 AI restyle: the explicit re-run action + status. Bespoke UI (there is no button
+               ControlSpec kind). Never automatic — a restyle is a paid model call. Mix blends the
+               cached result live and for free; only this button spends. -->
+          <div v-if="activeTreatment.treatment.kind === 'aiRestyle'" class="mt-1 space-y-1.5" data-testid="restyle-actions">
+            <StudioButton
+              variant="neutral"
+              class="w-full"
+              :disabled="!restyleTreatmentPromptOf(activeTreatment.treatment) || restyleStatusOf(activeTreatment.treatment.id) === 'running'"
+              @click="runRestyle(activeTreatment.obj.id, activeTreatment.treatment.id)"
+            >
+              <span class="flex items-center justify-center gap-1.5">
+                <Loader2 v-if="restyleStatusOf(activeTreatment.treatment.id) === 'running'" class="h-3.5 w-3.5 animate-spin" />
+                <Sparkles v-else class="h-3.5 w-3.5" />
+                {{ restyleStatusOf(activeTreatment.treatment.id) === 'running' ? 'Restyling…' : 'Restyle' }}
+              </span>
+            </StudioButton>
+            <p v-if="restyleStatusOf(activeTreatment.treatment.id) === 'running'" class="text-[11px] text-white/50" data-testid="restyle-status-running">
+              Generating — this usually takes a minute or two. Keep the studio open.
+            </p>
+            <p v-else-if="restyleStatusOf(activeTreatment.treatment.id) === 'error'" class="text-[11px] text-red-400/90" data-testid="restyle-status-error">
+              Restyle failed — try again.
+            </p>
+            <p v-else-if="!restyleTreatmentPromptOf(activeTreatment.treatment)" class="text-[11px] text-white/40">
+              Describe the new look above, then run a restyle.
+            </p>
+            <p v-else class="text-[11px] text-white/40">
+              Runs the model once — this costs credits, and takes a minute or two. Mix blends the result for free.
+            </p>
+          </div>
         </div>
       </template>
 
@@ -5002,7 +5725,10 @@ async function onClose() {
         </StudioControlPanel>
       </div>
       </template>
-      <template v-else>
+      <!-- Motion authoring lives ONLY on the Motion tab (never an inspector block): a bare v-else of
+           the object inspector above leaked this whole section into the treatment/modifier inspectors
+           (a selected treatment makes that v-if false). Gate it to the Motion tab explicitly. -->
+      <template v-else-if="activeTab === 'motion'">
         <StudioSection title="Motion">
           <div class="flex items-center justify-between">
             <span class="text-[11px] text-white/55">Animate scene</span>

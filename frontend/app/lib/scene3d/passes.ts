@@ -154,6 +154,7 @@ export async function renderPasses(
   const prevOverride = scene.overrideMaterial
   const prevGrid = engine.grid.visible
   const prevGround = engine.shadowGround.visible
+  const prevReflector = engine.reflectorFloor.visible
   const prevSize = renderer.getSize(new THREE.Vector2())
   const prevPixelRatio = renderer.getPixelRatio()
   const prevToneMapping = renderer.toneMapping
@@ -199,6 +200,9 @@ export async function renderPasses(
     // depth ramp, and the shadow catcher would render as a floor in both maps.
     renderer.toneMapping = THREE.NoToneMapping
     engine.shadowGround.visible = false
+    // The reflector is a real plane; under overrideMaterial it would paint a fake floor into
+    // the depth/normal maps (same reason the shadow catcher is hidden). Beauty already used it.
+    engine.reflectorFloor.visible = false
 
     // Depth — custom near-white ramp fitted to the visible objects.
     const bounds = new THREE.Box3()
@@ -228,6 +232,7 @@ export async function renderPasses(
     scene.background = prevBg
     engine.grid.visible = prevGrid
     engine.shadowGround.visible = prevGround
+    engine.reflectorFloor.visible = prevReflector
     for (const h of helpers) h.visible = true
     restoreDataView?.()
     // Restore the shared live renderer (do NOT dispose it — the viewport keeps
@@ -322,6 +327,7 @@ export async function renderObjectPasses(
   const prevOverride = scene.overrideMaterial
   const prevGrid = engine.grid.visible
   const prevGround = engine.shadowGround.visible
+  const prevReflector = engine.reflectorFloor.visible
   const prevSize = renderer.getSize(new THREE.Vector2())
   const prevPixelRatio = renderer.getPixelRatio()
   const prevToneMapping = renderer.toneMapping
@@ -353,6 +359,9 @@ export async function renderObjectPasses(
     restoreDataView = beginDataPassView(engine.scene)
     renderer.toneMapping = THREE.NoToneMapping
     engine.shadowGround.visible = false
+    // The reflector is a real plane; under overrideMaterial it would paint a fake floor into
+    // the depth/normal maps (same reason the shadow catcher is hidden). Beauty already used it.
+    engine.reflectorFloor.visible = false
 
     // Depth — near/far fitted to THIS OBJECT alone (the correctness trap): the whole-scene fit in
     // renderPasses would spread the ramp across the entire scene and flatten a small object's depth.
@@ -378,6 +387,7 @@ export async function renderObjectPasses(
     scene.background = prevBg
     engine.grid.visible = prevGrid
     engine.shadowGround.visible = prevGround
+    engine.reflectorFloor.visible = prevReflector
     for (const [o, v] of prevVis) o.visible = v
     restoreDataView?.()
     renderer.toneMapping = prevToneMapping

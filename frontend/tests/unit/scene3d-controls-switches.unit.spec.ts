@@ -12,36 +12,36 @@ const objWithType = (type: SceneObject['material']['type']): SceneObject => {
   return o
 }
 
-describe('new switches: object.material.unlit + showFloor', () => {
-  it('new switches resolve on the doc and reach the agent', () => {
+describe('new controls: object.material.unlit + floorMode', () => {
+  it('new controls resolve on the doc and reach the agent', () => {
     const keys = SCENE_CONTROLS.map((c) => c.key)
     expect(keys).toContain('object.material.unlit')
-    expect(keys).toContain('showFloor')
+    expect(keys).toContain('floorMode')
 
     // Defaults resolve on a real doc/material through the same dotted-path machinery
     // sweeps use.
     const doc = defaultDoc()
-    expect(getByPath(doc, 'showFloor')).toBe(true)
-    expect(doc.showFloor).toBe(true)
+    expect(getByPath(doc, 'floorMode')).toBe('shadow')
+    expect(doc.floorMode).toBe('shadow')
     expect(MATERIAL_DEFAULTS.unlit).toBe(false)
 
     const unlitControl = SCENE_CONTROLS.find((c) => c.key === 'object.material.unlit')!
     expect(unlitControl.kind).toBe('switch')
     expect((unlitControl as { default: boolean }).default).toBe(false)
-    const showFloorControl = SCENE_CONTROLS.find((c) => c.key === 'showFloor')!
-    expect(showFloorControl.kind).toBe('switch')
-    expect((showFloorControl as { default: boolean }).default).toBe(true)
-    expect(showFloorControl.group).toBe('Background')
+    const floorControl = SCENE_CONTROLS.find((c) => c.key === 'floorMode')!
+    expect(floorControl.kind).toBe('select')
+    expect((floorControl as { default: string }).default).toBe('shadow')
+    expect(floorControl.group).toBe('Background')
 
-    // Reaches the agent (doc-level showFloor is unconditional; unlit needs a shaderFill obj).
+    // Reaches the agent (doc-level floorMode is unconditional; unlit needs a shaderFill obj).
     const agentKeys = sceneAgentControls(doc).map((c) => c.key)
-    expect(agentKeys).toContain('showFloor')
+    expect(agentKeys).toContain('floorMode')
     const shaderObj = objWithType('shaderFill')
     const agentKeysWithShaderObj = sceneAgentControls(doc, shaderObj).map((c) => c.key)
     expect(agentKeysWithShaderObj).toContain('object.material.unlit')
 
     // Reaches the bindable (Collection) vocabulary too.
-    expect(sceneBindableControls(doc).map((c) => c.key)).toContain('showFloor')
+    expect(sceneBindableControls(doc).map((c) => c.key)).toContain('floorMode')
   })
 
   it('object.material.unlit is gated to shaderFill + image (the two types with a Basic-vs-Standard choice)', () => {
@@ -54,18 +54,18 @@ describe('new switches: object.material.unlit + showFloor', () => {
     expect(unlitControl.when!(doc, objWithType('phong'))).toBe(false)
   })
 
-  it('showFloor carries no `when` gate — always visible, doc-level', () => {
-    const showFloorControl = SCENE_CONTROLS.find((c) => c.key === 'showFloor')!
-    expect(showFloorControl.when).toBeUndefined()
+  it('floorMode carries no `when` gate — always visible, doc-level', () => {
+    const floorControl = SCENE_CONTROLS.find((c) => c.key === 'floorMode')!
+    expect(floorControl.when).toBeUndefined()
     const doc = defaultDoc()
     const keys = visibleSceneControls(doc, objWithType('standard')).map((c) => c.key)
-    expect(keys).toContain('showFloor')
+    expect(keys).toContain('floorMode')
   })
 
   it('Background is a declared SCENE_SECTIONS group (not silently dropped)', () => {
     const doc = defaultDoc()
     const keys = visibleSceneControls(doc).map((c) => c.key)
-    expect(keys).toContain('showFloor')
+    expect(keys).toContain('floorMode')
   })
 })
 
