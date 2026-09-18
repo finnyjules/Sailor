@@ -1,7 +1,9 @@
-import { Engine, Bodies, Composite, type Body } from 'matter-js'
+import { Engine, Bodies, Composite, Vertices, type Body } from 'matter-js'
 import type { Params } from '../effect'
 import type { PileTokenSpec } from './tokens'
 import { mulberry32, hashSeed } from '../rng'
+import { shapeById } from '~/lib/shapes/catalog'
+import { parseShapePolygon } from './shapeCollider'
 
 // Mirrors engine.ts ORTHO_HALF_H: half-height the camera frames at z=14, FOV 45°.
 export const FRAME_HALF_H = Math.tan((45 / 2) * Math.PI / 180) * 14
@@ -58,22 +60,48 @@ export function bakePile(specs: PileTokenSpec[], params: Params, frame: { width:
   const restitution = Math.min(0.9, Math.max(0, num(params, 'bounciness', 0.1)))
   // Tokens stacked in a loose column ABOVE the frame (higher = arrives later → the pile
   // rains in). Drop distance no longer needs to fit the window: we sim to rest, then resample.
-  const bodies: Body[] = specs.map((s, i) => {
+  // `offsets[i]` is the vector from a body's physics centroid to the token-plane centre (the
+  // shape ink-box centre), so the mesh (centred on the plane) tracks the collider exactly.
+  // Polygon colliders re-centre on their centroid, which is NOT the box centre for asymmetric
+  // shapes; rectangles/circles are symmetric so their offset is zero.
+  const bodies: Body[] = []
+  const offsets: { x: number; y: number }[] = []
+  for (let i = 0; i < specs.length; i++) {
+    const s = specs[i]!
     const hw = Math.max(0.05, s.w) * SCALE
     const hh = Math.max(0.05, s.h) * SCALE
     const x = (rng() * 2 - 1) * halfW * (0.15 + 0.8 * spread)
     const y = topY + hh * 0.7 + i * hh * (0.9 + spread)
     const angle = (rng() * 2 - 1) * spread * 0.6
-    // Shapes get a CIRCLE collider (they're broadly round) so they nest and roll instead
-    // of stacking on invisible box corners; text boxes stay rectangles.
-    return s.kind === 'shape'
-      ? Bodies.circle(x, y, Math.max(0.05, Math.min(hw, hh) / 2), { restitution, friction: 0.5, angle })
-      : Bodies.rectangle(x, y, hw, hh, { restitution, friction: 0.5, angle })
-  })
+    let body: Body | null = null
+    let offset = { x: 0, y: 0 }
+    if (s.kind === 'shape') {
+      // Trace the shape's real outline (convex hull) so it collides on its true edges.
+      const shape = s.shapeId ? shapeById(s.shapeId) : undefined
+      const poly = shape ? parseShapePolygon(shape.d, shape.box, hw, hh) : null
+      if (poly && poly.length >= 3) {
+        const hull = Vertices.hull(poly)
+        if (hull.length >= 3) {
+          const b = Bodies.fromVertices(x, y, [hull], { restitution, friction: 0.5, angle })
+          if (b) { body = b; const c = Vertices.centre(hull); offset = { x: c.x, y: c.y } }
+        }
+      }
+      // Fallback: broadly-round shapes (or a failed parse) get a circle.
+      if (!body) body = Bodies.circle(x, y, Math.max(0.05, Math.min(hw, hh) / 2), { restitution, friction: 0.5, angle })
+    } else {
+      body = Bodies.rectangle(x, y, hw, hh, { restitution, friction: 0.5, angle })
+    }
+    bodies.push(body)
+    offsets.push(offset)
+  }
   Composite.add(engine.world, bodies)
 
-  // Simulate to rest, recording a raw pose per step.
-  const scaled = (b: Body): Pose => ({ x: b.position.x / SCALE, y: b.position.y / SCALE, angle: b.angle })
+  // Simulate to rest, recording a raw pose per step. The recorded pose is the token-plane
+  // centre (box centre = position − R(angle)·centroidOffset), so the mesh tracks the collider.
+  const scaled = (b: Body, k: number): Pose => {
+    const off = offsets[k]!, a = b.angle, cos = Math.cos(a), sin = Math.sin(a)
+    return { x: (b.position.x - (off.x * cos - off.y * sin)) / SCALE, y: (b.position.y - (off.x * sin + off.y * cos)) / SCALE, angle: a }
+  }
   const raw: Pose[][] = []
   for (let step = 0; step < MAX_STEPS; step++) {
     Engine.update(engine, DT_MS)
