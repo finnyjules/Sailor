@@ -5,10 +5,8 @@ import {
   PRIMITIVE_KINDS, LIGHT_DEFAULTS, DECAL_DEFAULTS, DECAL_BLENDS, lightIntensityMax, TEXTURE_TILING_RANGE,
   SCREEN_PATTERNS, SCREEN_GAPS, SCREEN_INKS, IMAGE_WRAPS, IMAGE_TILING_RANGE, IMAGE_FITS,
   IMAGE_PROJECTIONS, IMAGE_AXES, NO_BASE_COLOR,
-  type SceneDoc, type SceneObject, type MaterialType, MATERIAL_TYPE_LABELS_ORDERED,
-  STONE_IDS, STONE_LABELS } from './config'
+  type SceneDoc, type SceneObject, type MaterialType, MATERIAL_TYPE_LABELS_ORDERED } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, totalClones, type ParamSpec } from './primParams'
-import { DEFAULT_HDRI } from './hdri'
 
 /**
  * The single declarative description of Scene3D (3D Studio)'s parameters.
@@ -48,9 +46,8 @@ import { DEFAULT_HDRI } from './hdri'
  * `agent: false` switch: declared for the inspector, still withheld from the agent.
  * `GlbObject.materialOverride` remains hand-omitted.
  *
- * `floorMode` (scene-level, doc.floorMode) also joins here, under a new 'Background'
- * group — the floor-style select (off / shadow / reflection / polished) from the
- * surface's Background panel, with reflectivity + colour gated to the reflective modes.
+ * `showFloor` (scene-level, doc.showFloor) also joins here, under a new 'Background'
+ * group — the grid + shadow-catcher ground toggle from the surface's Background panel.
  *
  * ## The inspector-only tail: Geometry, Light, Decal
  * Three whole panel sections used to be hand-written markup, outside this schema
@@ -212,7 +209,7 @@ const reliefApplies = (doc: SceneDoc, obj?: SceneObject): boolean => {
 // whatever the pattern is, so the agent can set pattern AND density in one patch; the panel
 // hides them while the pattern is none (panelPresentation's panelGate, the relief precedent).
 const screenApplies = (doc: SceneDoc, obj?: SceneObject): boolean =>
-  isEditableMaterial(doc, obj) && materialTypeOf(obj) !== 'glass' && materialTypeOf(obj) !== 'gemstone'
+  isEditableMaterial(doc, obj) && materialTypeOf(obj) !== 'glass'
 
 // Per-type branches the inspector draws but the schema had never described. Each is
 // `agent: false` AND `animatable: false`: declaring a control so the INSPECTOR can draw it
@@ -228,12 +225,6 @@ const isFresnelMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
 
 const isGradientMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
   isEditableMaterial(doc, obj) && materialTypeOf(obj) === 'gradient'
-
-// Gemstone is a preset-driven material: the stone picker is its ONLY control (every physical
-// param is derived from STONE_PRESETS), so it is deliberately kept out of isPhysicalMaterial /
-// hasReflectiveCoat / COLOR_TYPES — those sliders would be dead controls on it.
-const isGemstoneMaterial = (doc: SceneDoc, obj?: SceneObject): boolean =>
-  isEditableMaterial(doc, obj) && materialTypeOf(obj) === 'gemstone'
 
 // Faceted/prismatic shading needs the per-face extent attributes only primitive
 // geometry bakes; an imported GLB always ramps smooth. Mirrors the template's
@@ -264,13 +255,6 @@ const color = (key: string, label: string, def: string, group: string, extra: Pa
   ({ key, label, kind: 'color', default: def, group, ...extra } as SceneControl)
 
 const D = defaultDoc()
-
-// Lighting is two mutually-exclusive light sources, gated on `lighting.hdri` (null = Studio look,
-// a slug = HDRI). Each mode's controls carry one of these `when`s so only the owning set draws.
-const inStudioLook = (doc: SceneDoc) => !doc.lighting.hdri
-const inHdri = (doc: SceneDoc) => !!doc.lighting.hdri
-// Studio-look dials hide once the look is hand-detached to Custom (they'd recompute nothing).
-const studioDialsOn = (doc: SceneDoc) => !doc.lighting.hdri && !doc.lighting.custom
 
 // ── Geometry / Light / Decal: the inspector-only tail ───────────────────────────────
 // Every entry below carries this pair. See the module doc's "inspector-only tail" note:
@@ -330,17 +314,6 @@ function geometryParamControls(): SceneControl[] {
         default: first.default > 0.5, group: 'Geometry', hint: first.hint,
         when: declares, ...INSPECTOR_ONLY,
       } as SceneControl)
-      continue
-    }
-    // An options row is a select over its human option labels; the flat bag stores the INDEX,
-    // so the reader maps index→label and setParam maps label→index (mirrors the modifier selects).
-    const opt = specs.find((s) => s.control === 'options')
-    if (opt) {
-      const options = opt.options ?? []
-      out.push(select(
-        `${GEOMETRY_PARAM_PREFIX}${key}`, first.label, options, options[Math.round(first.default)] ?? options[0] ?? '',
-        'Geometry', first.hint, { when: declares, ...INSPECTOR_ONLY },
-      ))
       continue
     }
     out.push(slider(
@@ -469,10 +442,6 @@ export const SCENE_CONTROLS: SceneControl[] = [
     hint: 'Glows flat instead of being shaded by scene lights',
     when: hasUnlitToggle,
   } as SceneControl,
-
-  // Gemstone — pick the stone; every physical value comes from its preset.
-  select('object.material.stone', 'Stone', [...STONE_IDS], MATERIAL_DEFAULTS.stone, 'Material',
-    'Which precious stone to cut', { when: isGemstoneMaterial, summary: 1, optionLabels: STONE_IDS.map((s) => STONE_LABELS[s]) }),
 
   // Physical block — standard + glass only.
   slider('object.material.clearcoat', 'Clearcoat', 0, 1, 0.01, 'Material', MATERIAL_DEFAULTS.clearcoat,
@@ -743,49 +712,32 @@ export const SCENE_CONTROLS: SceneControl[] = [
   // --- Lighting (doc-level; no active object needed) -------------------------------
   // Simple layer: pick a Look, then nudge three dials. Direction stays visible, so it's
   // the one raw pair that stays ungated even in the simple view.
-  // Light source: Studio look (procedural Look + dials) vs HDRI (a real studio environment IS the
-  // light). Each mode below shows ONLY the controls that own something in it, gated on lighting.hdri.
-  select('lighting.lightSource', 'Light source', ['Studio look', 'HDRI'], 'Studio look', 'Lighting', undefined,
-    { agent: false }),
-  // ── Studio-look mode ──────────────────────────────────────────────────────
   // A `look` row: thumbnail + name that opens the Look library picker (RowLook/LookPicker).
-  { key: 'lighting.look', label: 'Look', kind: 'look', default: D.lighting.look, group: 'Lighting',
-    when: inStudioLook } as SceneControl,
-  // The three shaping dials — hidden once the look is hand-detached to Custom (they'd recompute it).
-  slider('lighting.softness', 'Softness', 0, 1, 0.01, 'Lighting', D.lighting.softness, undefined, { when: studioDialsOn }),
-  slider('lighting.warmth', 'Warmth', 0, 1, 0.01, 'Lighting', D.lighting.warmth, undefined, { when: studioDialsOn }),
-  slider('lighting.brightness', 'Brightness', 0.25, 3, 0.05, 'Lighting', D.lighting.brightness, undefined, { when: studioDialsOn }),
+  { key: 'lighting.look', label: 'Look', kind: 'look', default: D.lighting.look, group: 'Lighting' } as SceneControl,
+  slider('lighting.softness', 'Softness', 0, 1, 0.01, 'Lighting', D.lighting.softness),
+  slider('lighting.warmth', 'Warmth', 0, 1, 0.01, 'Lighting', D.lighting.warmth),
+  slider('lighting.brightness', 'Brightness', 0.25, 3, 0.05, 'Lighting', D.lighting.brightness),
   slider('lighting.sunAzimuth', 'Light direction', 0, 360, 1, 'Lighting', D.lighting.sunAzimuth,
-    'Compass direction the sunlight comes from', { when: inStudioLook }),
+    'Compass direction the sunlight comes from'),
   slider('lighting.sunElevation', 'Light height', 5, 90, 1, 'Lighting', D.lighting.sunElevation,
-    'How high the sun sits above the horizon', { when: inStudioLook }),
-  // Environment is a creative choice, so it lives in the primary Studio-look zone (not Fine-tune).
-  select('lighting.environment', 'Environment', [...ENVIRONMENT_KINDS], D.lighting.environment, 'Lighting', undefined,
-    { when: inStudioLook }),
-  // Fine-tune raw controls — grouped into the collapsed 'Lighting/Fine-tune' sub-card (SUB_CARDS),
-  // which replaces the old Advanced toggle. Editing any detaches the Look to Custom (the surface
-  // sets lighting.custom). Available throughout Studio-look mode; the sub-card starts collapsed.
+    'How high the sun sits above the horizon'),
+  { key: 'lighting.advanced', label: 'Advanced lighting', kind: 'switch', default: D.lighting.advanced, group: 'Lighting',
+    hint: 'Show the raw shadow preset, environment, sun intensity, and ambient controls' } as SceneControl,
+  // Raw controls kept behind Advanced — nothing is removed, they just gain a `when` gate.
   select('lighting.preset', 'Shadow preset', [...LIGHTING_PRESETS], D.lighting.preset, 'Lighting', undefined,
-    { when: inStudioLook }),
+    { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
+  select('lighting.environment', 'Environment', [...ENVIRONMENT_KINDS], D.lighting.environment, 'Lighting', undefined,
+    { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
   slider('lighting.sunIntensity', 'Sun intensity', 0, 3, 0.05, 'Lighting', D.lighting.sunIntensity,
-    'How bright the main sunlight is', { when: inStudioLook }),
+    'How bright the main sunlight is', { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
   slider('lighting.ambient', 'Ambient', 0, 2, 0.05, 'Lighting', D.lighting.ambient,
-    'Soft fill light that lifts the shadows', { when: inStudioLook }),
-  // ── HDRI mode ─────────────────────────────────────────────────────────────
-  // The studio HDRI IS the light. A browsable gallery row (RowHdri → HdriPicker over the whole Poly
-  // Haven library); the bound value is the slug. Leaving HDRI mode is the Light source segmented's job.
-  { key: 'lighting.hdri', label: 'Studio HDRI', kind: 'hdri', default: DEFAULT_HDRI, group: 'Lighting',
-    when: inHdri, agent: false } as SceneControl,
-  slider('lighting.hdriExposure', 'Exposure', 0.1, 3, 0.05, 'Lighting', D.lighting.hdriExposure,
-    'How brightly the studio lights the object', { when: inHdri }),
-  slider('lighting.hdriRotation', 'Rotation', 0, 360, 1, 'Lighting', D.lighting.hdriRotation,
-    'Spin the studio to move highlights and reflections around the object', { when: inHdri }),
+    'Soft fill light that lifts the shadows', { when: (doc: SceneDoc) => !!doc.lighting.advanced }),
   // Granular shaping of the `colorGels` world — shown only when it's the live environment.
   // ALL of these are inspector-only: editing any re-bakes the env (see engine.buildEnvironment),
   // so none may be animatable (a per-frame PMREM rebuild), and they're not part of the agent's
   // documented lighting surface. `GEL` carries that gate + those two flags for every row.
   ...(() => {
-    const when = (doc: SceneDoc) => !doc.lighting.hdri && doc.lighting.environment === 'colorGels'
+    const when = (doc: SceneDoc) => doc.lighting.environment === 'colorGels'
     const GEL = { when, agent: false, animatable: false } as const
     const L = D.lighting
     return [
@@ -834,16 +786,12 @@ export const SCENE_CONTROLS: SceneControl[] = [
 
   // --- Background (doc-level) -------------------------------------------------------
   // `background` itself (colour/transparent) stays a bespoke row — see this module's
-  // doc for why (a stateful proxy, not a plain doc leaf). `floorMode` and its two
-  // dependent rows ARE plain leaves on SceneDoc (config.ts), so they join here directly.
-  select('floorMode', 'Floor', ['off', 'shadow', 'reflection', 'polished'], D.floorMode, 'Background',
-    'How the ground reads — off, a soft contact shadow, a fading reflection, or a polished surface',
-    { optionLabels: ['Off', 'Shadow only', 'Reflection', 'Polished'] }),
-  slider('floorReflectivity', 'Reflection', 0, 1, 0.01, 'Background', D.floorReflectivity,
-    'How strong the reflection reads',
-    { when: (doc) => doc.floorMode === 'reflection' || doc.floorMode === 'polished' }),
-  color('floorColor', 'Floor colour', D.floorColor, 'Background',
-    { when: (doc) => doc.floorMode === 'polished' }),
+  // doc for why (a stateful proxy, not a plain doc leaf). `showFloor` IS one: a plain
+  // boolean on SceneDoc (config.ts), so it joins here as a switch.
+  {
+    key: 'showFloor', label: 'Floor', kind: 'switch', default: D.showFloor, group: 'Background',
+    hint: 'Grid + shadow-catcher ground — off gives a clean floating look',
+  } as SceneControl,
 
   // --- Post (doc-level; derived from the shared manifest, not hand-declared) -------
   // Includes ambient occlusion (gtao needs a depth buffer — `three-depth` is the only
