@@ -132,16 +132,14 @@ In the existing **Background** control group where `showFloor` lives today
   "Floor". Option labels sentence-case per the UI copy rule (needs `optionLabels`, since
   the stored values are lowercase identifiers): "Off", "Shadow only", "Reflection",
   "Polished".
-- `floorReflectivity` slider (0–1), label "Reflection", shown via `showWhen` when
-  `floorMode` equals `reflection` or `polished`.
-- `floorColor` StudioColor, label "Floor colour", shown via `showWhen` when `floorMode`
-  equals `polished`.
+- `floorReflectivity` slider (0–1), label "Reflection", gated to reflection or polished.
+- `floorColor` colour, label "Floor colour", gated to polished.
 
-Relevance gating uses the existing `showWhen` system. Note the landed constraint: the
-gating helper supports `equals` only (see the slice_shift note). `floorReflectivity` must
-show for two values (reflection **or** polished), which `equals` can't express.
-**Decision: extend the gating predicate with an `in` operator** — small, reusable, and
-cleaner than splitting the control in two.
+Relevance gating uses the scene3d control system's own `when: (doc) => boolean`
+predicate (controls.ts:94 — arbitrary function, unlike Frame's `equals`-only `showWhen`).
+So the two-value case is a plain predicate:
+`when: (doc) => doc.floorMode === 'reflection' || doc.floorMode === 'polished'`.
+No gating helper change needed.
 
 Update `panelPresentation.ts`: the `showFloor` special-cases at lines 245 (value read)
 and 726 (hint) become `floorMode` / the new keys; the Background group list at line 618
@@ -160,14 +158,13 @@ gains the two new keys.
   (lines 1945, 2743) becomes `floorMode` + the new keys.
 - `frontend/app/lib/scene3d/` new file for the reflector shader variants
   (e.g. `reflectorFloor.ts`).
-- Relevance gating helper — add `in` predicate.
 - Tests (below).
 
 ## Testing
 
 - **Unit (config):** legacy `showFloor:false` → `floorMode:'off'`; `showFloor:true` and
   absent → `'shadow'`; new fields get defaults; round-trip through the sanitiser is stable.
-- **Unit (gating):** the new `in` predicate; `floorReflectivity` visible for reflection +
+- **Unit (gating):** the `when` predicates — `floorReflectivity` visible for reflection +
   polished, hidden for off + shadow; `floorColor` visible only for polished.
 - **Unit (engine mapping):** a pure function from `floorMode` → the four visibility flags
   + the cinematic roughness value, tested without a GL context (the engine reads it).

@@ -381,30 +381,6 @@ describe('animatableTargets: treatments', () => {
     for (const p of rampPaths) expect(onPaths, p).toContain(p)
   })
 
-  // S5: a finish is a treatment like any other from the motion vantage point — no per-kind edit
-  // to animatableTargets was needed for opalescence/foilShimmer/matcapCoat to become motion
-  // targets. matcapCoat's `matcap` dial is a `select`, not a `slider` — `usable` (this file's
-  // `c.kind === 'slider'` gate) correctly withholds it exactly like a treatment `color` row,
-  // while its `strength` slider is offered like any other.
-  it('emits id-addressed slider paths for a stacked opalescence + matcapCoat finish; withholds the matcap select', () => {
-    const doc = defaultDoc()
-    const box = createPrimitive('box', doc.objects); box.name = 'Gem'
-    const opal = createTreatment('opalescence')
-    const matcap = createTreatment('matcapCoat')
-    box.treatments = [opal, matcap]
-    doc.objects.push(box)
-    const targets = animatableTargets(doc)
-    const paths = targets.map((t) => t.path)
-    for (const field of ['strength', 'frequency', 'hueShift', 'angleMix']) {
-      expect(paths).toContain(`objects.${box.id}.treatments.${opal.id}.${field}`)
-    }
-    expect(paths).toContain(`objects.${box.id}.treatments.${matcap.id}.strength`)
-    expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${matcap.id}.strength`)?.label)
-      .toBe('Gem · Matcap coat strength')
-    // The select is not a track target at all.
-    expect(paths).not.toContain(`objects.${box.id}.treatments.${matcap.id}.matcap`)
-  })
-
   it('a track on a treatment dial writes through the id, and survives reordering the stack', () => {
     const doc = defaultDoc()
     const box = createPrimitive('box', doc.objects)

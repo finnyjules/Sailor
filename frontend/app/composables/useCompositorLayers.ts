@@ -393,14 +393,11 @@ export interface TextLayer extends LayerCommon {
                          // set => words auto-wrap to fit, unset => explicit \n only
   boxH?: number          // optional text-box height (normalized to canvas width);
                          // enables valign + vertical justify. Absent => natural height.
-  boxFit?: 'wrap' | 'shrink' | 'fill' | 'break'
+  boxFit?: 'wrap' | 'shrink' | 'fill'
                          // how the type meets its box: 'wrap' (fixed size, words
                          // wrap — the default), 'shrink' (shrink the font to fit
                          // the box), 'fill' (size the font to fill boxW, and boxH
-                         // when set), 'break' (split even a single long word across
-                         // lines and grow it to fill the box — needs boxH; without
-                         // boxH it behaves like 'fill'). Absent => 'wrap'
-                         // (byte-identical).
+                         // when set). Absent => 'wrap' (byte-identical).
   /** Live variable-font axis values (wght/wdth/slnt/…). When present, `wght`
    *  drives the numeric font-weight in the canvas `font` shorthand (the only
    *  variable-axis path that renders on every browser); the full set is also
@@ -1409,43 +1406,25 @@ function textLines(layer: TextLayer): string[] {
 /**
  * Final render lines: explicit newlines, then — when the layer has a text box
  * (`boxW`) — greedy word-wrap each line to fit the box. A word longer than the
- * box overflows on its own line rather than breaking mid-word, EXCEPT in 'break'
- * fit (with a boxH set), where an over-long word is split across lines at the
- * character so a single word like NOISE stacks (NO / ISE) to fill its box. Needs
- * a 2D context for measurement; without one, falls back to explicit lines only.
+ * box overflows on its own line rather than breaking mid-word. Needs a 2D
+ * context for measurement; without one, falls back to explicit lines only.
  */
 export function wrappedTextLines(ctx: CanvasRenderingContext2D | null, layer: TextLayer, W: number): string[] {
   const manual = textLines(layer)
   const boxPx = (layer.boxW ?? 0) * W
   if (!ctx || !(boxPx > 0)) return manual
   applyFont(ctx, layer, W)
-  // Character-breaking only makes sense with a height to fill; without one it is
-  // ambiguous (a word could grow forever), so 'break' falls back to plain wrap.
-  const brk = layer.boxFit === 'break' && (layer.boxH ?? 0) > 0
-  const fitsW = (s: string) => ctx.measureText(s).width <= boxPx
   const out: string[] = []
-  // Split a token wider than the box into char chunks; returns the trailing
-  // partial chunk for the caller to keep accumulating onto.
-  const breakToken = (word: string): string => {
-    let chunk = ''
-    for (const ch of word) {
-      if (chunk && !fitsW(chunk + ch)) { out.push(chunk); chunk = ch }
-      else chunk += ch
-    }
-    return chunk
-  }
   for (const line of manual) {
     const words = line.split(/\s+/).filter(Boolean)
     if (!words.length) { out.push(''); continue }
-    let cur = ''
-    for (const word of words) {
-      const candidate = cur ? `${cur} ${word}` : word
-      if (fitsW(candidate)) { cur = candidate; continue }
-      if (cur) { out.push(cur); cur = '' }         // flush what we have
-      if (fitsW(word) || !brk) cur = word          // fits alone, or we don't break (may overflow)
-      else cur = breakToken(word)                  // split the long word; keep the tail
+    let cur = words[0]
+    for (let i = 1; i < words.length; i++) {
+      const candidate = `${cur} ${words[i]}`
+      if (ctx.measureText(candidate).width <= boxPx) cur = candidate
+      else { out.push(cur); cur = words[i] }
     }
-    if (cur) out.push(cur)
+    out.push(cur)
   }
   return out
 }
@@ -1568,20 +1547,6 @@ export function localLayerBox(
     return wiredBoxPx(layer, W, wiredLive !== undefined ? wiredLive : wiredContent(layer))
   }
   return { w: (layer as RectLayer).w * W, h: (layer as RectLayer).h * W }
-}
-
-/**
- * How far (px) a text layer's block centre sits from its stored y-origin, so the
- * valign-anchored edge stays put as the block's height changes. The layer's y
- * marks the anchored edge: `top` ⇒ the top edge (block grows down), `bottom` ⇒
- * the bottom edge (block grows up), `middle`/`justify`/absent ⇒ centred (0), the
- * legacy behaviour every existing layer keeps. `boxHPx` is the block/box height
- * from `localLayerBox`. Both the renderer and the editor's box geometry read this
- * so the drawn text and its selection box stay in lockstep.
- */
-export function textVAlignCenterOffset(layer: { kind: string; valign?: string }, boxHPx: number): number {
-  if (layer.kind !== 'text') return 0
-  return layer.valign === 'top' ? boxHPx / 2 : layer.valign === 'bottom' ? -boxHPx / 2 : 0
 }
 
 /**
@@ -4498,16 +4463,11 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
   const startY = -totalH / 2 + lineH / 2          // legacy: block centred on origin
   const H = boxHpx > 0 ? boxHpx : totalH
   const vJustify = va === 'justify' && lines.length > 1
-  // Anchor the whole block by valign so it grows FROM the aligned edge: `top`
-  // pins the top and grows down, `bottom` pins the bottom and grows up. The same
-  // offset feeds the selection box (via textVAlignCenterOffset), so handles track
-  // the drawn text. middle/justify/absent ⇒ 0 ⇒ the legacy centred block.
-  const oy = textVAlignCenterOffset(layer, H)
   const lineY = (i: number): number => {
     if (!va && boxHpx <= 0) return startY + i * lineH
     if (vJustify) return -H / 2 + lineH / 2 + (i / (lines.length - 1)) * (H - lineH)
     const s = va === 'top' ? -H / 2 + lineH / 2 : va === 'bottom' ? H / 2 - totalH + lineH / 2 : startY
-    return s + i * lineH + oy
+    return s + i * lineH
   }
   const textBox = { w: Math.max(blockW, 1), h: Math.max(H, 1) }
   // `strokeText` honours setLineDash, so a text outline dashes like a shape's.

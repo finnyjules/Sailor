@@ -13,7 +13,7 @@ import {
   type PostEffect,
   createTextLayer, createRectLayer, createEllipseLayer, createLineLayer, createImageLayer,
   createPolygonLayer, createStarLayer,
-  localLayerBox, textVAlignCenterOffset, shapeToPathLayer, withWiredContent,
+  localLayerBox, shapeToPathLayer, withWiredContent,
   type WiredContentProvider, type WiredLayer,
 } from '~/composables/useCompositorLayers'
 import { svgToPathLayers, pathLayerBoolean, type BooleanOp } from '~/composables/useVectorSvg'
@@ -444,14 +444,14 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const l = selected.value
     if (!l) return null
     const b = boxPx(l)
-    return boxHandles(l.x * dims().w, l.y * dims().h + textVAlignCenterOffset(l, b.h), b.w / 2, b.h / 2, l.rotation)
+    return boxHandles(l.x * dims().w, l.y * dims().h, b.w / 2, b.h / 2, l.rotation)
   })
 
   /** Union box (px) of the current multi-selection (≥2), else null. */
   const selectionBox = computed<GBox | null>(() => {
     if (selectedIds.value.size < 2) return null
     const W = dims().w, H = dims().h
-    const boxes = selectedLayers.value.map((l) => { const b = boxPx(l); return { cx: l.x * W, cy: l.y * H + textVAlignCenterOffset(l, b.h), w: b.w, h: b.h } })
+    const boxes = selectedLayers.value.map((l) => { const b = boxPx(l); return { cx: l.x * W, cy: l.y * H, w: b.w, h: b.h } })
     return boxes.length ? unionBox(boxes) : null
   })
   const selectionHandles = computed(() => {
@@ -474,7 +474,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const kind = d.type === 'resize' ? 'scale' : d.type
     const hh = dragHud(kind, { wPx: b.w, hPx: b.h, xPx: l.x * W, yPx: l.y * H, rotation: l.rotation })
     if (!hh) return null
-    return { text: hh.text, left: l.x * W, top: l.y * H + textVAlignCenterOffset(l, b.h) - b.h / 2 - 12 }
+    return { text: hh.text, left: l.x * W, top: l.y * H - b.h / 2 - 12 }
   })
 
   // ── Align / distribute (operates on the multi-selection) ────────────────────
@@ -649,7 +649,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       const gc = resolveGroupCascade(l.groupId, localGroups.value)
       if (gc.hidden || gc.locked) continue
       const b = boxPx(l)
-      const cx = l.x * W, cy = l.y * H + textVAlignCenterOffset(l, b.h)
+      const cx = l.x * W, cy = l.y * H
       const rad = (-l.rotation * Math.PI) / 180
       const dx = px - cx, dy = py - cy
       const lx = dx * Math.cos(rad) - dy * Math.sin(rad)
@@ -732,10 +732,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     recordHistory()
     drag.value = {
       type: 'resize', id: l.id, handle, rot: l.rotation,
-      // Start from the DISPLAYED centre (valign shifts a text box's centre off its
-      // stored y), so the drag maths and the handles share one frame; the writeback
-      // converts the resized centre back through the new offset.
-      start: { cx: l.x * W, cy: l.y * H + textVAlignCenterOffset(l, sh), w: sw, h: sh },
+      start: { cx: l.x * W, cy: l.y * H, w: sw, h: sh },
       p0: { x: nx * W, y: ny * H },
     }
     attach()
@@ -805,11 +802,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       // box writes its boxW/boxH — the same normalized-to-width fields — instead of
       // a rect's w/h, so the handles resize the box rather than nothing.
       const tb = textBoxResizable(cur)
-      // `box.cy` is the resized DISPLAY centre; the render re-adds the valign offset
-      // for the NEW height, so store y with that offset removed — this pins the
-      // aligned edge (top/bottom) instead of the centre while the box is dragged.
-      const oy = cur ? textVAlignCenterOffset(cur, box.h) : 0
-      const patch: Record<string, number> = { x: box.cx / W, y: (box.cy - oy) / H }
+      const patch: Record<string, number> = { x: box.cx / W, y: box.cy / H }
       patch[tb ? 'boxW' : 'w'] = box.w / W
       if (!locked) patch[tb ? 'boxH' : 'h'] = box.h / W
       setLocal(d.id, patch)

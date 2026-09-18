@@ -234,41 +234,6 @@ describe('the command-menu hint budget', () => {
 })
 
 /**
- * F5 Task 4 — the agent is deliberately picker-only for the `shader` layer-effect kind (see
- * the F5 plan's "Scope decisions": the hint budget had ~8 chars of headroom when F5 landed,
- * not enough to teach the agent an effectId + per-effect param vocabulary without either
- * raising `COMPOSITOR_HINT_CEILING` or recovering chars elsewhere first).
- *
- * `shader` IS a member of `EFFECT_ORDER` (Task 1's model), so `isEffectKind('shader')` is
- * true and `setLayerEffect`'s own top-level type guard lets it through. But `shader` has no
- * entry in `POST_EFFECT_DEFAULTS`, `LocalEffectKind`, or `GeometryEffectKind`, so the
- * dispatch below falls all the way through to `sanitizePostEffect`, which returns `null` for
- * any type outside `POST_EFFECT_DEFAULTS` — the exact mechanism that already rejects a
- * typo'd/unknown effect type. This pins that a `shader` patch is rejected THROUGH THAT PATH
- * (no special-cased "shader" guard was added, and none is needed) — a regression that gave
- * `shader` a `POST_EFFECT_DEFAULTS` entry (teaching the agent vocabulary without first making
- * the hint-ceiling decision the plan calls out) would flip this green for the wrong reason,
- * which is exactly what this test guards against.
- */
-describe('agent rejects a shader effect (F5 picker-only, deliberate — see the F5 plan)', () => {
-  it('a setLayerEffect patch of type "shader" is rejected, not applied', () => {
-    const r = run(st(rect()), 'setLayerEffect', 'r1', {
-      effect: { type: 'shader', effectId: 'chromatic_aberration', params: { amount: 0.3 }, speed: 1, seed: 42 },
-    })
-    expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toBe('invalid')
-  })
-
-  it('the layer gains no shader entry from the rejected patch (no partial/silent apply)', () => {
-    const before = st(rect())
-    const r = run(before, 'setLayerEffect', 'r1', { effect: { type: 'shader', effectId: 'chromatic_aberration' } })
-    expect(r.ok).toBe(false)
-    // The rejected command must not have mutated the ORIGINAL layer object either.
-    expect((before.layers[0] as unknown as Record<string, unknown>).effects).toBeUndefined()
-  })
-})
-
-/**
  * FIX WAVE 1 — the folded legacy entry.
  *
  * `strokeStackOf` stamps the ONE entry it synthesises from a legacy layer with the sentinel

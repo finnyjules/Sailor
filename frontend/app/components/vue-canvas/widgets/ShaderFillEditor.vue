@@ -38,7 +38,8 @@ import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
 import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
 import type { EffectDef, GradientStop, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/types'
 import { cleanStops } from '~/lib/shaderfx/params'
-import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
+import { derivedShaderFillControls } from '~/lib/shaderfill/controls'
+import { unprefixedKey } from '~/lib/shaderfill/descriptor'
 import { retryFieldCatalog } from '~/lib/shaderfill/field'
 
 const props = withDefaults(defineProps<{
@@ -162,19 +163,60 @@ function pickEffect(id: string) {
 // off to the bare param id); it doesn't need to match where this ShaderSpec
 // actually lives in its host (Fill.shader vs Scene3D's bare material.shader).
 const PREFIX = 'fill.shader'
+const PARAM_PREFIX = `${PREFIX}.params.`
 
-type ParamRow = ShaderParamRow
+interface ParamRow {
+  key: string
+  label: string
+  kind: 'slider' | 'select' | 'color' | 'gradientStops'
+  maxStops?: number
+  min?: number
+  max?: number
+  step?: number
+  /** number for slider/select · hex string for color · JSON stops for gradientStops */
+  default: number | string
+  options?: { value: number; label: string }[]
+}
 
 const paramRows = computed<ParamRow[]>(() => {
   const eff = effectDef.value
   if (!eff) return []
-  // The row-building walk itself (derivedShaderFillControls → ParamRow) is shared with
-  // CompositorModal.vue's F5 shader-PASS inspector — see buildShaderParamRows's own doc.
-  // `mix` is filtered here rather than there: it blends the effect with its Input paint,
-  // a fill-only concept (a shader PASS has no separate Input paint to blend with) — when
-  // this host hides the Input rows the dial would silently blend in a paint nobody can
-  // see or change.
-  return buildShaderParamRows(eff, PREFIX).filter((row) => row.key !== 'mix' || props.showInput)
+  // derivedShaderFillControls emits 'slider', 'select', 'color' and
+  // 'gradientStops' (see its own source); its return type is the full ControlSpec
+  // union (shared with every other control kind in the app) — flatMap + an
+  // explicit kind check on each branch narrows properly instead of asserting past
+  // the type checker. A branch MISSING here is not a type error, it just returns
+  // [] — which is how colour params silently had no editor on this widget for a
+  // commit. Any new derived kind needs a branch here AND in StudioControlPanel.
+  return derivedShaderFillControls(eff, PREFIX).flatMap((c): ParamRow[] => {
+    const key = c.key.startsWith(PARAM_PREFIX) ? c.key.slice(PARAM_PREFIX.length) : c.key
+    // `mix` blends the effect with its Input paint: when the host hides the Input
+    // rows the dial would silently blend in a paint nobody can see or change.
+    if (key === 'mix' && !props.showInput) return []
+    if (c.kind === 'select') {
+      // The control's own `options` are stringified NUMBERS — the stored value
+      // domain (ShaderSpec.params is Record<string, number>; resolveEffectParams
+      // only ever accepts a number). Display labels aren't on the ControlSpec at
+      // all (`select` has no value/label channel — see controls.ts's documented
+      // gap); resolved here instead, from the live EffectDef's own option list,
+      // by matching back on the same unprefixedKey the control was built from.
+      const orig = eff.params.find((p) => unprefixedKey(p.uniform) === key)
+      return [{
+        key, label: c.label, kind: 'select', default: Number(c.default),
+        options: (orig?.options ?? []).map((o) => ({ value: o.value, label: o.label })),
+      }]
+    }
+    if (c.kind === 'slider') {
+      return [{ key, label: c.label, kind: 'slider', default: c.default, min: c.min, max: c.max, step: c.step }]
+    }
+    if (c.kind === 'color') {
+      return [{ key, label: c.label, kind: 'color', default: c.default }]
+    }
+    if (c.kind === 'gradientStops') {
+      return [{ key, label: c.label, kind: 'gradientStops', default: c.default, maxStops: c.maxStops ?? 8 }]
+    }
+    return []
+  })
 })
 
 /** Colour params (the inks, a background) answer "what is it made of"; sliders and
