@@ -33,6 +33,7 @@ import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentContro
 import { eulerFromNormal } from '~/lib/scene3d/decals'
 import { getLook, resolveLook, resolveDials } from '~/lib/scene3d/lighting'
 import { DEFAULT_HDRI } from '~/lib/scene3d/hdri'
+import { gateRect } from '~/lib/scene3d/resolutionGate'
 import { HARMONY_TYPES, HARMONY_LABELS } from '~/lib/color/harmony'
 import { MATCAP_IDS, matcapThumb, onTextureError } from '~/lib/scene3d/materials'
 import { toHeightPixels, heightGradient, RELIEF_FLAT_THRESHOLD } from '~/lib/scene3d/relief'
@@ -2037,6 +2038,16 @@ function setControl(key: string, value: string | number | boolean): void {
 // ── Engine lifecycle ──────────────────────────────────────────────────────────
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const viewportEl = ref<HTMLDivElement | null>(null)
+// Resolution gate: the output frame as a centered rectangle over the viewport (the engine overscans
+// the camera so it always fits). `viewportSize` is kept live by the ResizeObserver.
+const viewportSize = ref({ w: 1, h: 1 })
+const gateBox = computed(() => {
+  const va = viewportSize.value.w / Math.max(1, viewportSize.value.h)
+  const oa = (doc.output.width || 1) / (doc.output.height || 1)
+  const { wFrac, hFrac } = gateRect(doc.camera.fov, va, oa, 0.9)
+  return { wPct: wFrac * 100, hPct: hFrac * 100, label: `${doc.output.width} × ${doc.output.height}` }
+})
+watch(() => [doc.output.width, doc.output.height], () => engine?.setResolutionGate((doc.output.width || 1) / (doc.output.height || 1)))
 let engine: SceneEngine | null = null
 let interaction: SceneInteraction | null = null
 let raf = 0
@@ -2333,6 +2344,8 @@ onMounted(() => {
         const f = e?.cinematicFloor
         return f ? { visible: f.visible, mat: f.material?.type, isStandard: !!f.material?.isMeshStandardMaterial } : null
       })(),
+      viewportFov: e?.camera?.fov ? +e.camera.fov.toFixed(2) : null,
+      baseFov: e?.baseFov ? +e.baseFov.toFixed(2) : null,
     }
   }
   ;(window as any).__scene3dCineHelperCheck = () => {
@@ -2423,7 +2436,9 @@ onMounted(() => {
   if (!webglOk.value || !canvasEl.value || !viewportEl.value) return
   const rect = viewportEl.value.getBoundingClientRect()
   engine = new SceneEngine(canvasEl.value, rect.width, rect.height)
+  viewportSize.value = { w: rect.width, h: rect.height }
   engine.applyCameraFromDoc(doc)
+  engine.setResolutionGate(doc.output.width / doc.output.height) // show the export frame in the viewport
   interaction = new SceneInteraction(engine, viewportEl.value, {
     onSelect: (id, additive) => {
       // Gap 3 fix: a miss must not touch selection while sculpting either — this
@@ -2577,7 +2592,7 @@ onMounted(() => {
   raf = requestAnimationFrame(loop)
   ro = new ResizeObserver(() => {
     const r = viewportEl.value?.getBoundingClientRect()
-    if (r && engine) engine.setSize(r.width, r.height)
+    if (r && engine) { engine.setSize(r.width, r.height); viewportSize.value = { w: r.width, h: r.height } }
   })
   ro.observe(viewportEl.value)
   // Capture phase: StudioModalShell (a child, so its onMounted runs first)
@@ -4542,6 +4557,16 @@ async function onClose() {
         <canvas v-if="webglOk" ref="canvasEl" data-scene3d class="h-full w-full" />
         <div v-else class="flex h-full items-center justify-center text-sm text-white/50">
           WebGL is unavailable — the 3D Studio needs a WebGL-capable browser.
+        </div>
+        <!-- Resolution gate: the exact export frame. The engine overscans the camera so this always
+             fits; everything outside the rectangle is dimmed and won't be in the render. -->
+        <div v-if="webglOk" class="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+          <div
+            class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border border-white/35"
+            :style="{ width: `${gateBox.wPct}%`, height: `${gateBox.hPct}%`, boxShadow: '0 0 0 100vmax rgba(0,0,0,0.34)' }"
+          >
+            <span class="absolute left-1 top-1 rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-white/70">{{ gateBox.label }}</span>
+          </div>
         </div>
         <!-- Decal image picker. Lives here, OUTSIDE the bottom toolbar's v-if, because
              both callers need it: the toolbar's "Image sticker" and the Decal section's

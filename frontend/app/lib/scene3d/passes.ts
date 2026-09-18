@@ -134,6 +134,7 @@ export async function renderPasses(
   // overridden to the square/portrait output ratio.
   const camera = engine.camera.clone() as THREE.PerspectiveCamera
   camera.aspect = width / height
+  camera.fov = engine.baseFov // the TRUE fov, not the viewport's resolution-gate overscan
   camera.updateProjectionMatrix()
 
   const scene = engine.scene

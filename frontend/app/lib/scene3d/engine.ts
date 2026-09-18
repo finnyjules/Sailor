@@ -37,6 +37,7 @@ import { geometryFromMeshData } from '~/lib/scene3d/mesh'
 import { gemGeometry, GEM_CUTS } from './gem'
 import { envSceneToEquirect, ambientFloorByte } from './pathtrace/envEquirect'
 import { loadHdriEquirect } from './hdriLoader'
+import { overscanFov } from './resolutionGate'
 import type { ScenePathTracer } from './pathtrace/PathTracer'
 
 /** Private THREE layer used to overlay editor gizmos on top of the post-processed
@@ -635,6 +636,11 @@ export class SceneEngine {
   private hdriSlug: string | null = null
   private hdriEquirect: THREE.DataTexture | null = null
   private hdriToken = 0
+  /** Resolution gate: the LIVE viewport camera overscans to `_gateAspect` so the output frame is
+   *  always visible (the overlay draws it). `_baseFov` is the TRUE fov an export uses — see
+   *  `baseFov` / passes.ts — so what's inside the gate is exactly what gets rendered. */
+  private _baseFov = 45
+  private _gateAspect: number | null = null
   private glbTokens = new Map<string, number>() // id → load generation (drop stale async loads)
   private fontTokens = new Map<string, number>() // id → font-load generation, same drop-stale contract as glbTokens
   private meshTokens = new Map<string, number>()
@@ -876,14 +882,32 @@ export class SceneEngine {
   setSize(width: number, height: number): void {
     this.renderer.setSize(width, height, false)
     this.camera.aspect = width / height
+    this.applyViewportFov() // pane aspect changed → recompute any overscan
+  }
+
+  /** The TRUE fov (degrees) an export/bake renders at — the doc's fov, NOT the viewport's overscan. */
+  get baseFov(): number { return this._baseFov }
+
+  /** Turn the resolution gate on (viewport overscans to `outputAspect`) or off (null). */
+  setResolutionGate(outputAspect: number | null): void {
+    this._gateAspect = outputAspect && outputAspect > 0 ? outputAspect : null
+    this.applyViewportFov()
+  }
+
+  /** Apply the viewport fov: overscanned to fit the output frame when the gate is on, else the true
+   *  fov. Export/bake overrides fov back to `baseFov`, so only the on-screen view is widened. */
+  private applyViewportFov(): void {
+    this.camera.fov = this._gateAspect
+      ? overscanFov(this._baseFov, this.camera.aspect || 1, this._gateAspect)
+      : this._baseFov
     this.camera.updateProjectionMatrix()
   }
 
   applyCameraFromDoc(doc: SceneDoc): void {
     this.camera.position.set(...doc.camera.position)
     this.camera.lookAt(...doc.camera.target)
-    this.camera.fov = doc.camera.fov
-    this.camera.updateProjectionMatrix()
+    this._baseFov = doc.camera.fov
+    this.applyViewportFov()
   }
 
   setLightView(on: boolean): void {
@@ -1052,8 +1076,8 @@ export class SceneEngine {
     this.shadowGround.visible = doc.showFloor
     // The real cinematic floor stands in for the shadow-catcher only while cinematic is live.
     this.cinematicFloor.visible = this._cinematic && doc.showFloor
-    this.camera.fov = doc.camera.fov
-    this.camera.updateProjectionMatrix()
+    this._baseFov = doc.camera.fov
+    this.applyViewportFov()
   }
 
   /** Resolves a primitive's geometry, handling `text`'s async font dependency.
