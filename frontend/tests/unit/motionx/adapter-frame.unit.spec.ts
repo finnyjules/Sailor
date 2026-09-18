@@ -59,4 +59,18 @@ describe('frameTarget + animatableProperties', () => {
     expect(paths).toContain('layers.L1.fill')
     expect(paths).toContain('layers.L1.fill.phase')
   })
+  it('tags every property with a group (Transform / Fill / Effects)', () => {
+    const props = animatableProperties(layer())
+    expect(props.find(p => p.path === 'layers.L1.x')!.group).toBe('Transform')
+    expect(props.find(p => p.path === 'layers.L1.fill')!.group).toBe('Fill')
+    expect(props.every(p => ['Transform', 'Fill', 'Effects'].includes(p.group))).toBe(true)
+  })
+  it('enumerates every number/colour/gradient effect dial, with range, skipping enum/bool dials', () => {
+    const l = layer({ effects: [{ id: 'fx1', type: 'bloom', threshold: 0.5, radius: 0.1, intensity: 1 }] })
+    const props = animatableProperties(l)
+    const intensity = props.find(p => p.path === 'layers.L1.effects.fx1.intensity')!
+    expect(intensity).toMatchObject({ type: 'number', group: 'Effects', min: 0, max: 2 })
+    expect(intensity.label).toMatch(/Bloom .* Intensity/i)
+    expect(props.filter(p => p.group === 'Effects')).toHaveLength(3)   // threshold, radius, intensity
+  })
 })

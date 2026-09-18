@@ -6,7 +6,8 @@ import type { GradientStop as ColorStop } from '~/lib/color/harmony'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { isGradient, type Paint } from '~/lib/compositor/paint'
 import { withScrolledStops, withGradientStops, paintStopsToColor } from '~/lib/compositor/gradientPaint'
-import { effectStackOf, writeStackToLayer } from '~/lib/compositor/effectStack'
+import { effectStackOf, writeStackToLayer, EFFECT_LABELS } from '~/lib/compositor/effectStack'
+import { dialSpecsFor } from '~/lib/compositor/effectDials'
 
 const TRANSFORM = new Set(['x', 'y', 'rotation', 'scale', 'opacity'])
 
@@ -79,27 +80,46 @@ export function frameTarget(layer: LocalLayer): BehaviourTarget {
   }
 }
 
-/** Plain data list of the properties a layer can be animated on — transform/opacity,
- *  the fill gradient (+ its scroll phase) when the fill is a gradient, and one entry
- *  per animatable effect dial. Seed for Phase 3's picker/gallery; not itself UI. */
-export function animatableProperties(layer: LocalLayer): Array<{ path: string; type: 'number' | 'color' | 'gradient'; label: string }> {
+export type PropertyGroup = 'Transform' | 'Fill' | 'Effects'
+export interface AnimatableProperty {
+  path: string
+  type: 'number' | 'color' | 'gradient'
+  label: string
+  group: PropertyGroup
+  min?: number
+  max?: number
+}
+
+/** Every property a layer can be animated on, grouped for the "Add property" picker:
+ *  Transform (x/y/scale/rotation/opacity), Fill (gradient + scroll phase, when the fill
+ *  is a gradient), Effects (every number/colour/gradient dial of every effect in the
+ *  stack, with its range; enum/bool dials are not animatable). Paths are
+ *  `layers.<id>.<prop>` — exactly what the render fold applies. */
+export function animatableProperties(layer: LocalLayer): AnimatableProperty[] {
   const id = layer.id
-  const out: Array<{ path: string; type: 'number' | 'color' | 'gradient'; label: string }> = [
-    { path: `layers.${id}.x`, type: 'number', label: 'Position X' },
-    { path: `layers.${id}.y`, type: 'number', label: 'Position Y' },
-    { path: `layers.${id}.scale`, type: 'number', label: 'Scale' },
-    { path: `layers.${id}.rotation`, type: 'number', label: 'Rotation' },
-    { path: `layers.${id}.opacity`, type: 'number', label: 'Opacity' },
+  const out: AnimatableProperty[] = [
+    { path: `layers.${id}.x`, type: 'number', label: 'Position X', group: 'Transform', min: 0, max: 1 },
+    { path: `layers.${id}.y`, type: 'number', label: 'Position Y', group: 'Transform', min: 0, max: 1 },
+    { path: `layers.${id}.scale`, type: 'number', label: 'Scale', group: 'Transform', min: 0, max: 4 },
+    { path: `layers.${id}.rotation`, type: 'number', label: 'Rotation', group: 'Transform', min: -360, max: 360 },
+    { path: `layers.${id}.opacity`, type: 'number', label: 'Opacity', group: 'Transform', min: 0, max: 1 },
   ]
   const fill = (layer as unknown as { fill?: Paint }).fill
   if (isGradient(fill)) {
-    out.push({ path: `layers.${id}.fill`, type: 'gradient', label: 'Fill · Gradient' })
-    out.push({ path: `layers.${id}.fill.phase`, type: 'number', label: 'Fill · Scroll' })
+    out.push({ path: `layers.${id}.fill`, type: 'gradient', label: 'Fill · Gradient', group: 'Fill' })
+    out.push({ path: `layers.${id}.fill.phase`, type: 'number', label: 'Fill · Scroll', group: 'Fill', min: 0, max: 1 })
   }
-  for (const e of effectStackOf(layer)) {
-    // Minimal: expose the gradientMap ramp; scalar dials come with the full registry in Phase 3.
-    if ((e as { type?: string }).type === 'gradientMap') {
-      out.push({ path: `layers.${id}.effects.${e.id}.stops`, type: 'gradient', label: 'Gradient map · Ramp' })
+  for (const fx of effectStackOf(layer)) {
+    for (const spec of dialSpecsFor(fx.type)) {
+      if (spec.kind !== 'number' && spec.kind !== 'color' && spec.kind !== 'gradient') continue
+      out.push({
+        path: `layers.${id}.effects.${fx.id}.${spec.key}`,
+        type: spec.kind,
+        label: `${EFFECT_LABELS[fx.type]} · ${spec.label}`,
+        group: 'Effects',
+        min: spec.min,
+        max: spec.max,
+      })
     }
   }
   return out

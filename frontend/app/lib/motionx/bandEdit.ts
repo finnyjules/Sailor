@@ -1,7 +1,7 @@
 // Pure track editors for the Frame band timeline (Slice 2). Every function returns a
 // NEW track/array and never mutates its input — the component emits the result up to
 // CompositorModal, which persists it via setMotion({ motionx }). Zero Vue coupling.
-import type { Track, Keyframe, PropertyValue, Ease } from '~/lib/motionx'
+import type { Track, Keyframe, PropertyValue, PropertyType, Ease } from '~/lib/motionx'
 import { evaluateTrack } from '~/lib/motionx'
 
 const clone = (k: Keyframe): Keyframe => ({ t: k.t, value: k.value, ease: k.ease })
@@ -75,4 +75,12 @@ export function setBandTrack(tracks: Track[], path: string, next: Track | null):
   if (idx === -1) return next ? [...tracks, next] : [...tracks]
   if (next === null) return tracks.filter((_, i) => i !== idx)
   return tracks.map((t, i) => (i === idx ? next : t))
+}
+
+/** Seed a property band as a FLAT HOLD: two keyframes at [0, duration], both the property's
+ *  current value. Visible and retimeable immediately, a no-op until a point is changed.
+ *  Untagged (a plain property band, not behaviour-owned). */
+export function seedHoldTrack(path: string, type: PropertyType, value: PropertyValue, duration: number): Track {
+  const end = Math.max(0.05, duration)
+  return { path, type, keyframes: [{ t: 0, value, ease: 'easeInOut' }, { t: end, value, ease: 'linear' }] }
 }

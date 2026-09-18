@@ -101,3 +101,20 @@ describe('setBandTrack', () => {
     expect(setBandTrack([a, b], 'layers.x.opacity', null)).toEqual([b])
   })
 })
+
+describe('seedHoldTrack', () => {
+  it('seeds a flat hold band: two keyframes at [0, duration] both = the current value', async () => {
+    const { seedHoldTrack } = await import('~/lib/motionx/bandEdit')
+    const t = seedHoldTrack('layers.a.opacity', 'number', 0.7, 4)
+    expect(t.path).toBe('layers.a.opacity')
+    expect(t.type).toBe('number')
+    expect(t.keyframes.map((k) => [k.t, k.value])).toEqual([[0, 0.7], [4, 0.7]])
+    expect(t.behaviourId).toBeUndefined()   // a plain property band, not behaviour-owned
+  })
+  it('keeps a gradient value intact for a gradient property', async () => {
+    const { seedHoldTrack } = await import('~/lib/motionx/bandEdit')
+    const g = [{ pos: 0, color: '#000' }, { pos: 1, color: '#fff' }]
+    const t = seedHoldTrack('layers.a.fill', 'gradient', g, 2)
+    expect(t.keyframes[1]!.value).toEqual(g)
+  })
+})
