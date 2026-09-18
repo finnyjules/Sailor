@@ -14,10 +14,10 @@ import TakeStrip from '~/components/vue-canvas/studio/TakeStrip.vue'
 // agent's progress / proposal take over the controls column — the same layout the
 // Compositor uses, so every studio behaves consistently.
 //
-// Sizing is uniform across every studio. The larger 1400×820 frame started as an
-// opt-in for 3D Studio's object list, then graduated to the default — the extra
-// preview room helps every editor, and one size keeps the studios from feeling
-// like different apps when you move between them.
+// Sizing is uniform across every studio. The frame started at 1400×820 (an opt-in
+// for 3D Studio's object list that graduated to the default), then grew to 1600×900
+// (caps 96vw × 94vh) — the extra preview room helps every editor, and one size keeps
+// the studios from feeling like different apps when you move between them.
 //
 // `fullBleed` (opt-in, default OFF) swaps the boxed three-column body for one
 // full-bleed viewport: #preview becomes the ground layer (absolute inset-0) and
@@ -109,7 +109,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 <template>
   <div class="fixed inset-0 flex items-center justify-center bg-black/70" :class="elevated ? 'z-[110]' : 'z-50'">
     <div ref="rootEl" tabindex="-1" role="dialog" aria-modal="true"
-         class="flex h-[820px] max-h-[92vh] w-[1400px] max-w-[95vw] flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-[#0e0e10] text-white outline-none">
+         class="flex h-[900px] max-h-[94vh] w-[1600px] max-w-[96vw] flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-[#0e0e10] text-white outline-none">
       <div class="flex shrink-0 items-center gap-2 px-4 pt-3 pb-1">
         <span class="text-[13px] font-medium tracking-[-0.01em] text-white/90">{{ title }}</span>
         <template v-if="breadcrumb">
