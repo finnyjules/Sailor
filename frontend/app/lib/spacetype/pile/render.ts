@@ -7,13 +7,15 @@ import { drawShape } from '~/lib/shapes/path2d'
 
 const TEX_H = 128 // token texture height in px; width follows the spec aspect
 
+export interface TokenFont { family: string; weight: number }
+
 function canvasAvailable(): boolean {
   return typeof document !== 'undefined' && typeof document.createElement === 'function'
 }
 
 /** A token's own artwork (word / letter / shape) on a transparent canvas texture.
  *  Headless (unit tests, no DOM): a 1×1 opaque texture so buildScene still works. */
-export function renderTokenTexture(three: typeof THREE, spec: PileTokenSpec, fill: Fill): THREE.Texture {
+export function renderTokenTexture(three: typeof THREE, spec: PileTokenSpec, fill: Fill, font: TokenFont): THREE.Texture {
   if (!canvasAvailable()) {
     const tex = new three.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, three.RGBAFormat)
     tex.needsUpdate = true
@@ -34,7 +36,9 @@ export function renderTokenTexture(three: typeof THREE, spec: PileTokenSpec, fil
   } else if (spec.text) {
     ctx.fillStyle = `#${fillTextColor(three, fill).getHexString()}`
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.font = `700 ${Math.round(TEX_H * 0.8)}px Anton, system-ui, sans-serif`
+    // Honour the chosen family + weight (the Studio preloads it before build); a
+    // quoted family with a fallback stack keeps unloaded fonts from breaking.
+    ctx.font = `${font.weight} ${Math.round(TEX_H * 0.8)}px "${font.family}", system-ui, sans-serif`
     ctx.fillText(spec.text, w / 2, TEX_H / 2 + TEX_H * 0.02)
   }
   const tex = new three.CanvasTexture(canvas)
@@ -46,7 +50,7 @@ export function renderTokenTexture(three: typeof THREE, spec: PileTokenSpec, fil
  *  the token artwork plane, plus an optional box (filled quad / outline) behind it.
  *  Created textures are stashed on `group.userData.tex` for disposal on rebuild. */
 export function makeTokenMesh(
-  three: typeof THREE, spec: PileTokenSpec, fill: Fill, boxStyle: string, paddingFrac: number, _radiusFrac: number,
+  three: typeof THREE, spec: PileTokenSpec, fill: Fill, boxStyle: string, paddingFrac: number, _radiusFrac: number, font: TokenFont,
 ): THREE.Object3D {
   const group = new three.Group()
   const texs: THREE.Texture[] = []
@@ -64,7 +68,7 @@ export function makeTokenMesh(
   }
 
   const pad = spec.kind === 'shape' ? 1 : (1 - 2 * Math.min(0.4, Math.max(0, paddingFrac)))
-  const tex = renderTokenTexture(three, spec, fill)
+  const tex = renderTokenTexture(three, spec, fill, font)
   texs.push(tex)
   const tokenMat = new three.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
   const token = new three.Mesh(new three.PlaneGeometry(w * pad, h * pad), tokenMat)

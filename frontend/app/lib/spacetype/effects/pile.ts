@@ -57,10 +57,11 @@ export const pileEffect: SpaceTypeEffect = {
     const fills = parseFills(params.fills)
     const boxStyle = String(params.boxStyle ?? 'filled')
     const padding = Number(params.padding ?? 0.14)
+    const font = { family: String(params.font ?? 'Anton'), weight: Number(params.typeWeight ?? 700) || 700 }
 
     const meshes: THREE.Object3D[] = specs.map((s) => {
       const fill = fills[s.fillIndex % Math.max(1, fills.length)]!
-      const mesh = makeTokenMesh(three, s, fill, s.kind === 'shape' ? 'bare' : boxStyle, padding, 0)
+      const mesh = makeTokenMesh(three, s, fill, s.kind === 'shape' ? 'bare' : boxStyle, padding, 0, font)
       root.add(mesh)
       return mesh
     })
