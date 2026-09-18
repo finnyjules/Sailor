@@ -8253,28 +8253,20 @@ onUnmounted(() => {
             @remove="removeClip(selectedLocal)"
             @take="(t) => restoreTake(selectedLocal, t)"
           />
-          <MotionLayerEditor v-if="selectedLocal"
+          <!-- Legacy In/Loop/Out preset editor (layer.animation). Replaced by behaviours
+               (gallery In/Loop/Out); kept in code behind legacyMotionUi until 6b deletes it. -->
+          <MotionLayerEditor v-if="selectedLocal && legacyMotionUi"
             :animation="(selectedLocal as any).animation" :frame-duration="effectiveMotion.duration"
             :layer-kind="selectedLocal.kind"
             @update="(a) => setLocal(selectedLocal!.id, { animation: a } as any)"
           />
-          <div v-else class="flex flex-col gap-3 text-xs text-white/55">
-            <p class="text-white/40 italic">Select a layer to animate it, or set the frame's timing below.</p>
-            <label class="flex items-center justify-between gap-2">Duration (s)
-              <input v-scrubnum type="number" min="0.5" max="60" step="0.5" :value="effectiveMotion.duration"
-                class="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-1 py-0.5 text-white/90 outline-none"
-                @change="setMotion({ duration: Math.max(0.5, Number(($event.target as HTMLInputElement).value) || 4) })">
-            </label>
-            <label class="flex items-center justify-between gap-2">FPS
-              <input v-scrubnum type="number" min="1" max="60" step="1" :value="effectiveMotion.fps"
-                class="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-1 py-0.5 text-white/90 outline-none"
-                @change="setMotion({ fps: Math.max(1, Math.min(60, Number(($event.target as HTMLInputElement).value) || 30)) })">
-            </label>
-            <label class="flex items-center justify-between gap-2">Loop playback
-              <input type="checkbox" class="accent-white/80" :checked="effectiveMotion.loop ?? false"
-                @change="setMotion({ loop: ($event.target as HTMLInputElement).checked })">
-            </label>
-          </div>
+          <!-- Empty state: the dock owns frame timing (dur/fps/loop) and Add behaviour;
+               this panel is the contextual inspector for whatever is selected on it. -->
+          <p v-else-if="!motionSel" class="text-xs text-white/40">
+            {{ selectedLocal
+              ? 'Select a band on the timeline to edit it, or add a behaviour from the timeline.'
+              : 'Select a layer, then add a behaviour from the timeline.' }}
+          </p>
         </div>
       </template>
 
