@@ -5,7 +5,7 @@ import { sanitizeParams, sanitizeModifiers } from '~/lib/scene3d/primParams'
 import { sanitizeModifierStack, type ModifierInstance } from '~/lib/scene3d/modifierStack'
 import { VARY_PALETTE_MAX } from '~/lib/vary'
 import { parseTreatments, type Treatment } from './treatments'
-import { isKnownHdri } from './hdri'
+import { isValidHdriSlug } from './hdri'
 import type { ObjectMotion, CameraMotion, SceneMotion, SceneMotionTrack, LoopKind, TransitionPreset, Direction, EaseRef, TransitionSpec } from '~/lib/scene3d/motion/types'
 import { DEFAULT_SCENE_MOTION } from '~/lib/scene3d/motion/types'
 import type { TrackEasing } from '~/lib/studio/track'
@@ -1583,7 +1583,7 @@ export function parseDoc(json: string): SceneDoc {
     lighting: {
       preset: LIGHTING_PRESETS.includes(raw.lighting?.preset) ? raw.lighting.preset : d.lighting.preset,
       environment: ENVIRONMENT_KINDS.includes(raw.lighting?.environment) ? raw.lighting.environment : d.lighting.environment,
-      hdri: isKnownHdri(raw.lighting?.hdri) ? raw.lighting.hdri : null,
+      hdri: isValidHdriSlug(raw.lighting?.hdri) ? raw.lighting.hdri : null,
       hdriExposure: typeof raw.lighting?.hdriExposure === 'number' ? raw.lighting.hdriExposure : d.lighting.hdriExposure,
       hdriRotation: typeof raw.lighting?.hdriRotation === 'number' ? raw.lighting.hdriRotation : d.lighting.hdriRotation,
       custom: raw.lighting?.custom === true,

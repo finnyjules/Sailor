@@ -123,7 +123,7 @@ import WidgetMoodboardChip from '~/components/vue-canvas/widgets/WidgetMoodboard
 import Scene3DMotionTimeline from '~/components/vue-canvas/Scene3DMotionTimeline.vue'
 import CurveEditor from '~/components/vue-canvas/CurveEditor.vue'
 import {
-  ENV_BY_LABEL, HDRI_BY_LABEL, SCENE_PANEL_SECTIONS, SCENE_TRANSFORM_SECTIONS, SCENE_GEOMETRY_SECTIONS,
+  ENV_BY_LABEL, SCENE_PANEL_SECTIONS, SCENE_TRANSFORM_SECTIONS, SCENE_GEOMETRY_SECTIONS,
   readSceneControl, scenePanelChrome, scenePanelControls, writeMaterialField, isNoOpTransformCommit,
 } from '~/lib/scene3d/panelPresentation'
 import { setByPath } from '~/lib/studio/path'
@@ -1955,10 +1955,10 @@ function setControl(key: string, value: string | number | boolean): void {
   }
   // The row offers the segmented control's SHORT labels, not the EnvironmentKind values.
   if (key === 'lighting.environment') { doc.lighting.environment = ENV_BY_LABEL[String(value)] ?? 'room'; return }
-  // The Studio HDRI select offers sentence-case labels; the doc stores the Poly Haven slug. In HDRI
-  // mode there is no None, so keep the current slug if a label ever fails to resolve; remember it.
+  // The HDRI gallery row (RowHdri) emits the chosen Poly Haven slug directly; remember it so the
+  // Light source segmented can restore it when toggling back into HDRI mode.
   if (key === 'lighting.hdri') {
-    const slug = HDRI_BY_LABEL[String(value)]
+    const slug = String(value)
     if (slug) { doc.lighting.hdri = slug; lastHdri.value = slug }
     return
   }
@@ -2799,6 +2799,8 @@ function onKey(e: KeyboardEvent) {
     // registered its capture listener after us, so yielding lets it close itself and
     // preventDefault, which the shell honours — otherwise Escape would close the editor.
     if (document.querySelector('[data-look-picker]')) return
+    // Same yield for the browsable HDRI library picker (RowHdri → HdriPicker).
+    if (document.querySelector('[data-hdri-picker]')) return
     // Open primitive/light/decal/generate menu owns Esc: close it, never the modal.
     if (primMenuOpen.value || lightMenuOpen.value || decalMenuOpen.value || genOpen.value) {
       e.preventDefault()

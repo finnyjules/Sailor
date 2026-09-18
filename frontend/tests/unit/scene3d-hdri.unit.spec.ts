@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { HDRI_ENVIRONMENTS, DEFAULT_HDRI, isKnownHdri, hdriLabel } from '~/lib/scene3d/hdri'
-import { HDRI_OPTIONS, HDRI_BY_LABEL, HDRI_OPTION_NONE } from '~/lib/scene3d/panelPresentation'
+import { HDRI_ENVIRONMENTS, DEFAULT_HDRI, isKnownHdri, isValidHdriSlug, hdriLabel } from '~/lib/scene3d/hdri'
 import { defaultDoc, parseDoc } from '~/lib/scene3d/config'
 import { visibleSceneControls } from '~/lib/scene3d/controls'
 
@@ -36,14 +35,14 @@ describe('hdri registry', () => {
   })
 })
 
-describe('hdri picker labels (panel <-> doc)', () => {
-  it('options are None plus every curated label, and the reverse map round-trips', () => {
-    expect(HDRI_OPTIONS[0]).toBe(HDRI_OPTION_NONE)
-    expect(HDRI_OPTIONS.length).toBe(HDRI_ENVIRONMENTS.length + 1)
-    expect(HDRI_BY_LABEL[HDRI_OPTION_NONE]).toBeNull()
-    for (const h of HDRI_ENVIRONMENTS) {
-      expect(HDRI_OPTIONS).toContain(h.label)
-      expect(HDRI_BY_LABEL[h.label]).toBe(h.slug)
+describe('isValidHdriSlug (whole-library validation)', () => {
+  it('accepts any well-formed Poly Haven slug, curated or not', () => {
+    expect(isValidHdriSlug(DEFAULT_HDRI)).toBe(true)
+    expect(isValidHdriSlug('kloofendal_48d_partly_cloudy_puresky')).toBe(true) // not curated, still valid
+  })
+  it('rejects path/uppercase/empty junk (matches the server route guard)', () => {
+    for (const bad of ['evil/../path', 'Studio_Small', 'has space', '', null, undefined]) {
+      expect(isValidHdriSlug(bad as never), String(bad)).toBe(false)
     }
   })
 })
@@ -103,11 +102,13 @@ describe('config: lighting.hdri', () => {
     expect(defaultDoc().lighting.hdri).toBeNull()
   })
 
-  it('round-trips a known HDRI slug and rejects an unknown one', () => {
+  it('round-trips any valid slug (whole library) and rejects malformed ones', () => {
     const withHdri = (hdri: unknown) =>
       JSON.stringify({ ...defaultDoc(), lighting: { ...defaultDoc().lighting, hdri } })
 
     expect(parseDoc(withHdri(DEFAULT_HDRI)).lighting.hdri).toBe(DEFAULT_HDRI)
+    // A non-curated but valid Poly Haven slug must survive a save/reload now.
+    expect(parseDoc(withHdri('kloofendal_48d_partly_cloudy_puresky')).lighting.hdri).toBe('kloofendal_48d_partly_cloudy_puresky')
     expect(parseDoc(withHdri('evil/../path')).lighting.hdri).toBeNull()
     expect(parseDoc(withHdri(null)).lighting.hdri).toBeNull()
   })

@@ -34,9 +34,16 @@ export const DEFAULT_HDRI = 'studio_small_08'
 
 const BY_SLUG = new Map(HDRI_ENVIRONMENTS.map((h) => [h.slug, h]))
 
-/** True when `slug` names one of the curated HDRIs (used to validate persisted docs). */
+/** True when `slug` names one of the curated (Featured) HDRIs. */
 export function isKnownHdri(slug: string | null | undefined): slug is string {
   return typeof slug === 'string' && BY_SLUG.has(slug)
+}
+
+/** True when `slug` is a syntactically valid Poly Haven slug — the whole 997-asset library is
+ *  selectable now, so persisted docs validate on SHAPE (matching the server route's guard), not
+ *  membership of the small curated set. */
+export function isValidHdriSlug(slug: string | null | undefined): slug is string {
+  return typeof slug === 'string' && /^[a-z0-9_]{1,80}$/.test(slug)
 }
 
 /** Picker label for a slug, or the slug itself as a fallback (browsable HDRIs, later). */

@@ -6,6 +6,7 @@ import RowColor from './RowColor.vue'
 import RowText from './RowText.vue'
 import RowShape from './RowShape.vue'
 import RowLook from './RowLook.vue'
+import RowHdri from './RowHdri.vue'
 
 /**
  * kind → the component that draws the VALUE side of a row. The row shell
@@ -20,6 +21,7 @@ export const rowRenderers: Record<string, Component> = {
   text: RowText,
   shape: RowShape,
   look: RowLook,
+  hdri: RowHdri,
 }
 
 /** Kinds whose value is a number the row itself can drag and type into. */

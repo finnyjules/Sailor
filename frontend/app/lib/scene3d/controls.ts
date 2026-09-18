@@ -8,7 +8,7 @@ import {
   type SceneDoc, type SceneObject, type MaterialType, MATERIAL_TYPE_LABELS_ORDERED,
   STONE_IDS, STONE_LABELS } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, modifierValue, totalClones, type ParamSpec } from './primParams'
-import { HDRI_ENVIRONMENTS, DEFAULT_HDRI, hdriLabel } from './hdri'
+import { DEFAULT_HDRI } from './hdri'
 
 /**
  * The single declarative description of Scene3D (3D Studio)'s parameters.
@@ -771,9 +771,10 @@ export const SCENE_CONTROLS: SceneControl[] = [
   slider('lighting.ambient', 'Ambient', 0, 2, 0.05, 'Lighting', D.lighting.ambient,
     'Soft fill light that lifts the shadows', { when: inStudioLook }),
   // ── HDRI mode ─────────────────────────────────────────────────────────────
-  // The studio HDRI IS the light. No None (the Light source segmented owns leaving HDRI mode).
-  select('lighting.hdri', 'Studio HDRI', HDRI_ENVIRONMENTS.map((h) => h.label), hdriLabel(DEFAULT_HDRI), 'Lighting', undefined,
-    { when: inHdri, agent: false }),
+  // The studio HDRI IS the light. A browsable gallery row (RowHdri → HdriPicker over the whole Poly
+  // Haven library); the bound value is the slug. Leaving HDRI mode is the Light source segmented's job.
+  { key: 'lighting.hdri', label: 'Studio HDRI', kind: 'hdri', default: DEFAULT_HDRI, group: 'Lighting',
+    when: inHdri, agent: false } as SceneControl,
   slider('lighting.hdriExposure', 'Exposure', 0.1, 3, 0.05, 'Lighting', D.lighting.hdriExposure,
     'How brightly the studio lights the object', { when: inHdri }),
   slider('lighting.hdriRotation', 'Rotation', 0, 360, 1, 'Lighting', D.lighting.hdriRotation,

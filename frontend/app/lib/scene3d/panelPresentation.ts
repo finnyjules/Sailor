@@ -9,7 +9,7 @@ import {
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, resolveParam, totalClones } from './primParams'
 import { modifierStackOf } from './modifierStack'
-import { HDRI_ENVIRONMENTS, hdriLabel, DEFAULT_HDRI } from './hdri'
+import { DEFAULT_HDRI } from './hdri'
 import {
   SCENE_CONTROLS, GEOMETRY_PARAM_PREFIX, MODIFIER_PREFIX,
   type SceneControl,
@@ -247,7 +247,8 @@ export function readSceneControl(
   if (key === 'lighting.environment') return ENV_LABEL[doc.lighting.environment] ?? 'room'
   // Synthetic: the light-source mode is derived from whether an HDRI is chosen.
   if (key === 'lighting.lightSource') return doc.lighting.hdri ? 'HDRI' : 'Studio look'
-  if (key === 'lighting.hdri') return doc.lighting.hdri ? hdriLabel(doc.lighting.hdri) : hdriLabel(DEFAULT_HDRI)
+  // The `hdri` row binds the raw Poly Haven slug (RowHdri renders its name/thumbnail).
+  if (key === 'lighting.hdri') return doc.lighting.hdri ?? DEFAULT_HDRI
   if (key.startsWith('lighting.')) {
     return (doc.lighting as unknown as Record<string, ParamValue>)[key.slice('lighting.'.length)] ?? 0
   }
@@ -338,16 +339,6 @@ export const ENV_BY_LABEL: Record<string, SceneDoc['lighting']['environment']> =
 }
 const ENV_LABEL: Record<string, string> = {
   room: 'room', darkStrips: 'dark', softbox: 'softbox', studio: 'studio', colorGels: 'gels',
-}
-
-// ── the Studio HDRI select's labels ──────────────────────────────────────────
-// A separate select (not part of the Environment segmented) because HDRIs are a growing list.
-// The control shows sentence-case labels; the doc stores the Poly Haven slug (or null = None).
-export const HDRI_OPTION_NONE = 'None'
-export const HDRI_OPTIONS = [HDRI_OPTION_NONE, ...HDRI_ENVIRONMENTS.map((h) => h.label)] as const
-export const HDRI_BY_LABEL: Record<string, string | null> = {
-  [HDRI_OPTION_NONE]: null,
-  ...Object.fromEntries(HDRI_ENVIRONMENTS.map((h) => [h.label, h.slug])),
 }
 
 // ── bespoke-block anchors ────────────────────────────────────────────────────
