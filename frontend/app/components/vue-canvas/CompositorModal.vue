@@ -3793,7 +3793,9 @@ function addBehaviour(kind: string, params: Record<string, unknown> = {}) {
   motionSel.value = { kind: 'behaviour', path: b.id }
 }
 // Edit a live behaviour's params/timing → recompile its tracks against the current layer.
-function editBehaviour(id: string, patch: { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }) {
+// `record=false` for continuous edits (timeline drags) — the drag already emitted
+// before-change once, so per-move recompiles must not push a history entry each.
+function editBehaviour(id: string, patch: { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }, record = true) {
   const cur = motionBehaviours.value.find((b) => b.id === id)
   const l = cur ? localLayers.value.find((x) => x.id === cur.layerId) : null
   if (!cur || !l) return
@@ -3803,7 +3805,7 @@ function editBehaviour(id: string, patch: { params?: Record<string, unknown>; ti
     params: { ...cur.params, ...(patch.params ?? {}) },
   }
   const tracks = compileBehaviourForLayer(l as LocalLayer, next as Behaviour)
-  recordHistory()
+  if (record) recordHistory()
   setMotion({
     behaviours: upsertBehaviour(motionBehaviours.value, next),
     motionx: setBehaviourTracks(motionxTracks.value, id, tracks),
@@ -7978,7 +7980,9 @@ onUnmounted(() => {
           @select-band="selectMotionBand" @select-point="selectMotionPoint" @select-behaviour="selectMotionBehaviour"
           @update:motionx="updateMotionx" @before-change="recordHistory"
           @scrub="scrubTo" @pause="pause" @play="play" @bake="bakeMotion"
-          @update:motion="setMotion" @toggle-gallery="behaviourPickerOpen = !behaviourPickerOpen">
+          @update:motion="setMotion" @toggle-gallery="behaviourPickerOpen = !behaviourPickerOpen"
+          @behaviour-change="(id: string, p: { timing: { start?: number; duration?: number } }) => editBehaviour(id, p, false)"
+          @behaviour-open="openBehaviour">
           <template #gallery>
             <MotionGallery :caps="motionLayerCaps" @add="onGalleryAdd" @close="behaviourPickerOpen = false" />
           </template>
