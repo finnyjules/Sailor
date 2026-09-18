@@ -7,7 +7,7 @@
  *  ~/lib/motionx/timelineView (ported from dialkit). motionx stays the source of truth. */
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Track, StoredBehaviour } from '~/lib/motionx'
-import { bandsForLayer, behaviourBandsForLayer, numberBandCurve, colorBandCss, gradientBandCss, type Band } from '~/lib/motionx/bands'
+import { bandsForLayer, behaviourBandsForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
 import { animatableProperties } from '~/lib/motionx/adapter/frame'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setPointValue, setBandTrack } from '~/lib/motionx/bandEdit'
 import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, type View } from '~/lib/motionx/timelineView'
@@ -59,39 +59,22 @@ const playheadVisible = computed(() =>
 const rowLabel = (l: LocalLayer) =>
   (l as { name?: string }).name || (l.kind === 'text' ? ((l as { text?: string }).text?.split('\n')[0] || 'Text') : l.kind)
 
-const selectedLayer = computed(() => props.layers.find((l) => l.id === props.selectedId) ?? null)
-const labelMap = computed(() => {
-  const m = new Map<string, string>()
-  const l = selectedLayer.value
-  if (l) for (const p of animatableProperties(l)) m.set(p.path, p.label)
-  return m
-})
-const bands = computed(() =>
-  selectedLayer.value
-    ? bandsForLayer(selectedLayer.value.id, props.motionx, (p) => labelMap.value.get(p) ?? '')
-    : [])
-
-// ── Groups (collapsible layer rows) ──────────────────────────────────────────
-const collapsedGroups = ref<Set<string>>(new Set())
-function toggleGroup(id: string) {
-  const s = new Set(collapsedGroups.value)
+// ── Layer groups (each layer is a collapsible header; its behaviours + property
+//    bands are the rows under it — DialKit's clip-per-row model). ──────────────
+const collapsedLayers = ref<Set<string>>(new Set())
+function toggleLayer(id: string) {
+  const s = new Set(collapsedLayers.value)
   s.has(id) ? s.delete(id) : s.add(id)
-  collapsedGroups.value = s
+  collapsedLayers.value = s
 }
-type LayerRow = { type: 'group'; id: string } | { type: 'layer'; layer: LocalLayer; grouped: boolean }
-const layerRows = computed<LayerRow[]>(() => {
-  const out: LayerRow[] = []
-  let last: string | undefined
-  for (const l of props.layers) {
-    const gid = (l as { groupId?: string }).groupId
-    if (gid && gid !== last) out.push({ type: 'group', id: gid })
-    last = gid
-    if (!gid || !collapsedGroups.value.has(gid)) out.push({ type: 'layer', layer: l, grouped: !!gid })
-  }
-  return out
-})
-
 const behBandsFor = (layerId: string) => behaviourBandsForLayer(layerId, props.behaviours ?? [])
+// Property bands for any layer (untagged tracks), each its own row.
+function propBandsFor(l: LocalLayer): Band[] {
+  const m = new Map<string, string>()
+  for (const p of animatableProperties(l)) m.set(p.path, p.label)
+  return bandsForLayer(l.id, props.motionx, (p) => m.get(p) ?? '')
+}
+const rowCountFor = (l: LocalLayer) => behBandsFor(l.id).length + propBandsFor(l).length
 const isBehSel = (b: Band) => props.selection?.kind === 'behaviour' && props.selection.path === b.behaviourId
 
 const trackByPath = (path: string) => props.motionx.find((t) => t.path === path)
@@ -200,7 +183,7 @@ function startRetime(e: PointerEvent, b: Band, edge: 'start' | 'end') {
   const lane = (e.currentTarget as HTMLElement).closest('[data-band-lane]') as HTMLElement
   drag((ev) => {
     const s = laneSeconds(lane, ev.clientX)
-    const cur = bands.value.find((x) => x.path === b.path)!
+    const cur = trackSpan(trackByPath(b.path) ?? tk)
     emitTrack(edge === 'start' ? retimeTrack(tk, Math.min(s, cur.end - 0.05), cur.end) : retimeTrack(tk, cur.start, Math.max(s, cur.start + 0.05)))
   }, () => emit('commit'))
 }
@@ -227,8 +210,13 @@ function deletePoint(b: Band, i: number) {
 }
 
 // ── Control-point popover ────────────────────────────────────────────────────
-const selPointBand = computed<Band | null>(() =>
-  props.selection?.kind === 'point' ? (bands.value.find((b) => b.path === props.selection!.path) ?? null) : null)
+const selPointBand = computed<Band | null>(() => {
+  if (props.selection?.kind !== 'point') return null
+  const path = props.selection.path
+  const m = path.match(/^layers\.([^.]+)\./)
+  const l = m ? props.layers.find((x) => x.id === m[1]) : null
+  return l ? (propBandsFor(l).find((b) => b.path === path) ?? null) : null
+})
 const selPointKf = computed(() => {
   const b = selPointBand.value, i = props.selection?.index
   return b && i != null ? b.keyframes[i] ?? null : null
@@ -264,67 +252,73 @@ function setSelPointValue(v: number | string) {
         <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff] z-30 pointer-events-none" :style="{ left: px(playheadX) }" />
       </div>
 
-      <!-- Layer rows (behaviour bands live on the layer's lane) -->
-      <template v-for="row in layerRows" :key="row.type === 'group' ? 'g:' + row.id : row.layer.id">
-        <template v-if="row.type === 'group'">
-          <button class="col-span-2 flex items-center gap-1 h-[22px] text-[10px] text-white/45 hover:text-white/75 cursor-pointer"
-            @click="toggleGroup(row.id)">
-            <span class="inline-block transition-transform" :class="collapsedGroups.has(row.id) ? '-rotate-90' : ''">▾</span>
-            <span class="truncate">{{ row.id }}</span>
-          </button>
-        </template>
-        <template v-else>
-          <button class="truncate text-left text-[11px] cursor-pointer self-center"
-            :class="[row.layer.id === selectedId ? 'text-white' : 'text-white/50 hover:text-white/75', row.grouped ? 'pl-3.5' : '']"
-            @click="emit('select', row.layer.id)">{{ rowLabel(row.layer) }}</button>
-          <div class="relative my-0.5 h-7 rounded-lg border border-white/10 bg-white/[0.03] overflow-hidden">
-            <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/60 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
-            <div v-for="b in behBandsFor(row.layer.id)" :key="b.key"
-              :data-testid="'beh-band-' + b.behaviourId"
-              class="absolute top-[3px] bottom-[3px] flex items-center gap-1 rounded-md border px-2 text-[10px] cursor-pointer overflow-hidden"
-              :class="isBehSel(b) ? 'border-emerald-300 ring-2 ring-[#7c9cff] text-white' : 'border-emerald-400/40 text-white/80 hover:border-emerald-300/70'"
-              :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: 'rgba(120,220,170,.16)' }"
-              :title="b.label" @click.stop="emit('select-behaviour', b.behaviourId!)">
-              <span class="truncate">{{ b.label }}</span>
+      <!-- Each layer is a collapsible group header; its behaviours + property bands are
+           rows (one compact bar each) — DialKit's clip-per-row model. -->
+      <template v-for="l in layers" :key="l.id">
+        <button class="col-span-2 flex items-center gap-1.5 h-[22px] text-[11px] cursor-pointer"
+          :class="l.id === selectedId ? 'text-white' : 'text-white/55 hover:text-white/80'"
+          @click="emit('select', l.id)">
+          <span class="inline-block w-3 text-center transition-transform text-white/40 hover:text-white/70"
+            :class="collapsedLayers.has(l.id) ? '-rotate-90' : ''"
+            @click.stop="toggleLayer(l.id)">▾</span>
+          <span class="truncate">{{ rowLabel(l) }}</span>
+        </button>
+
+        <template v-if="!collapsedLayers.has(l.id)">
+          <!-- behaviour rows -->
+          <template v-for="b in behBandsFor(l.id)" :key="b.key">
+            <span class="truncate text-left text-[10px] pl-5 self-center cursor-pointer"
+              :class="isBehSel(b) ? 'text-white' : 'text-white/45 hover:text-white/75'"
+              :title="b.label" @click="emit('select-behaviour', b.behaviourId!)">{{ b.label }}</span>
+            <div class="relative my-0.5 h-6">
+              <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
+              <div :data-testid="'beh-band-' + b.behaviourId"
+                class="absolute inset-y-0 flex items-center rounded-md border px-2 text-[9.5px] cursor-pointer overflow-hidden"
+                :class="isBehSel(b) ? 'border-emerald-300 ring-2 ring-[#7c9cff] text-white' : 'border-emerald-400/40 text-white/80 hover:border-emerald-300/70'"
+                :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: 'rgba(120,220,170,.16)' }"
+                :title="b.label" @click.stop="emit('select-behaviour', b.behaviourId!)">
+                <span class="truncate">{{ b.label }}</span>
+              </div>
             </div>
-          </div>
+          </template>
+
+          <!-- property band rows -->
+          <template v-for="b in propBandsFor(l)" :key="b.key">
+            <span class="truncate text-left text-[10px] pl-5 self-center cursor-pointer"
+              :class="isBandSel(b) ? 'text-white' : 'text-white/45 hover:text-white/75'"
+              :title="b.label" @click="emit('select-band', b.path)">{{ b.label }}</span>
+            <div data-band-lane class="relative my-0.5 h-6">
+              <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
+              <div class="absolute inset-y-0 rounded-md border overflow-hidden cursor-grab active:cursor-grabbing"
+                :data-testid="'band-' + b.key"
+                :class="isBandSel(b) ? 'border-[#7c9cff] ring-2 ring-[#7c9cff]' : 'border-white/15'"
+                :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: b.kind === 'number' ? 'linear-gradient(180deg,#171a20,#12141a)' : bandCss(b) }"
+                @pointerdown.stop.prevent="(e: PointerEvent) => startShift(e, b)">
+                <svg v-if="b.kind === 'number'" viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block pointer-events-none">
+                  <polyline :points="curvePoints(b)" fill="none" stroke="#7c9cff" stroke-width="2" vector-effect="non-scaling-stroke" />
+                </svg>
+                <div class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize z-20 hover:bg-white/20"
+                  @pointerdown.stop.prevent="(e: PointerEvent) => startRetime(e, b, 'start')" />
+                <div class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize z-20 hover:bg-white/20"
+                  @pointerdown.stop.prevent="(e: PointerEvent) => startRetime(e, b, 'end')" />
+                <div v-for="(kf, i) in b.keyframes" :key="i"
+                  :data-testid="'point-' + b.key + '-' + i"
+                  class="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full bg-white cursor-ew-resize z-20"
+                  :class="isPointSel(b, i) ? 'ring-2 ring-[#7c9cff] border border-white' : 'border border-[#7c9cff] hover:ring-1 hover:ring-white/60'"
+                  :style="{ left: pctX(pointX(b, kf.t)) }"
+                  title="Drag to move · click to edit · double-click to delete"
+                  @pointerdown.stop.prevent="(e: PointerEvent) => startPointDrag(e, b, i)"
+                  @click.stop="emit('select-point', { path: b.path, index: i })"
+                  @dblclick.stop="() => deletePoint(b, i)" />
+              </div>
+            </div>
+          </template>
+
+          <!-- empty layer -->
+          <template v-if="rowCountFor(l) === 0">
+            <div /><div class="py-1 pl-5 text-[10px] text-white/25">No motion — add a behaviour above.</div>
+          </template>
         </template>
-      </template>
-
-      <!-- Selected layer's property bands -->
-      <template v-for="b in bands" :key="b.key">
-        <span class="truncate text-left text-[10px] pl-3 self-center cursor-pointer"
-          :class="isBandSel(b) ? 'text-white' : 'text-white/40 hover:text-white/70'"
-          :title="b.label" @click="emit('select-band', b.path)">{{ b.label }}</span>
-        <div data-band-lane class="relative my-0.5 h-7 overflow-hidden">
-          <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/60 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
-          <div class="absolute top-[3px] bottom-[3px] rounded-md border overflow-hidden cursor-grab active:cursor-grabbing"
-            :data-testid="'band-' + b.key"
-            :class="isBandSel(b) ? 'border-[#7c9cff] ring-2 ring-[#7c9cff]' : 'border-white/15'"
-            :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: b.kind === 'number' ? 'linear-gradient(180deg,#171a20,#12141a)' : bandCss(b) }"
-            @pointerdown.stop.prevent="(e: PointerEvent) => startShift(e, b)">
-            <svg v-if="b.kind === 'number'" viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block pointer-events-none">
-              <polyline :points="curvePoints(b)" fill="none" stroke="#7c9cff" stroke-width="2" vector-effect="non-scaling-stroke" />
-            </svg>
-            <div class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize z-20 hover:bg-white/20"
-              @pointerdown.stop.prevent="(e: PointerEvent) => startRetime(e, b, 'start')" />
-            <div class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize z-20 hover:bg-white/20"
-              @pointerdown.stop.prevent="(e: PointerEvent) => startRetime(e, b, 'end')" />
-            <div v-for="(kf, i) in b.keyframes" :key="i"
-              :data-testid="'point-' + b.key + '-' + i"
-              class="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full bg-white cursor-ew-resize z-20"
-              :class="isPointSel(b, i) ? 'ring-2 ring-[#7c9cff] border border-white' : 'border border-[#7c9cff] hover:ring-1 hover:ring-white/60'"
-              :style="{ left: pctX(pointX(b, kf.t)) }"
-              title="Drag to move · click to edit · double-click to delete"
-              @pointerdown.stop.prevent="(e: PointerEvent) => startPointDrag(e, b, i)"
-              @click.stop="emit('select-point', { path: b.path, index: i })"
-              @dblclick.stop="() => deletePoint(b, i)" />
-          </div>
-        </div>
-      </template>
-
-      <template v-if="selectedLayer && bands.length === 0">
-        <div /><div class="py-2 text-[11px] text-white/30">No motion on this layer yet.</div>
       </template>
 
       <!-- Sticky pan scrollbar (only when zoomed) -->
