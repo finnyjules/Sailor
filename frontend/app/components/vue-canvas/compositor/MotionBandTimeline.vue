@@ -46,7 +46,11 @@ const emit = defineEmits<{
   bake: []
   'update:motion': [patch: { duration?: number; fps?: number; loop?: boolean }]
   'toggle-gallery': []
+  // Behaviour bars: drag to move / drag edges to retime (DialKit clip gestures) + Open on the bar.
+  'behaviour-change': [id: string, patch: { timing: { start?: number; duration?: number } }]
+  'behaviour-open': [id: string]
 }>()
+const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
 // ── View state (component-local, DialKit idiom) ──────────────────────────────
 const view = ref<View>({ zoom: 1, viewStart: 0 })
@@ -68,6 +72,9 @@ const px = (n: number) => `${n}px`
 const playheadX = computed(() => xOf(props.t ?? 0))
 const playheadVisible = computed(() =>
   props.t != null && props.t >= dv.value.safeViewStart - 1e-6 && props.t <= dv.value.viewEnd + 1e-6 && laneWidth.value > 0)
+// DialKit keeps the 52px time flag fully inside the lane (its centre is clamped).
+const FLAG_W = 52
+const flagX = computed(() => clampN(playheadX.value, FLAG_W / 2, Math.max(FLAG_W / 2, laneWidth.value - FLAG_W / 2)))
 
 const rowLabel = (l: LocalLayer) =>
   (l as { name?: string }).name || (l.kind === 'text' ? ((l as { text?: string }).text?.split('\n')[0] || 'Text') : l.kind)
@@ -179,6 +186,29 @@ watch(() => dv.value.safeViewStart, (vs) => {
   const want = vs * dv.value.pxPerSecond
   if (Math.abs(el.scrollLeft - want) > 0.5) el.scrollLeft = want
 })
+
+// ── Behaviour bar gestures: move / retime edges; a click (no move) selects ───
+function startBehDrag(e: PointerEvent, b: Band, mode: 'move' | 'start' | 'end') {
+  const id = b.behaviourId!
+  const startX = e.clientX
+  const at0 = b.start, dur0 = b.end - b.start
+  let moved = false
+  emit('before-change')
+  drag((ev) => {
+    const dx = ev.clientX - startX
+    if (!moved && Math.abs(dx) <= 3) return
+    moved = true
+    const dt = dx / Math.max(1e-6, dv.value.pxPerSecond)
+    if (mode === 'move') {
+      emit('behaviour-change', id, { timing: { start: clampN(at0 + dt, 0, Math.max(0, props.duration - dur0)) } })
+    } else if (mode === 'end') {
+      emit('behaviour-change', id, { timing: { duration: clampN(dur0 + dt, 0.05, Math.max(0.05, props.duration - at0)) } })
+    } else {
+      const s = clampN(at0 + dt, 0, at0 + dur0 - 0.05)
+      emit('behaviour-change', id, { timing: { start: s, duration: at0 + dur0 - s } })
+    }
+  }, () => { if (moved) emit('commit'); else emit('select-behaviour', id) })
+}
 
 // ── Band edits (view-aware seconds) ──────────────────────────────────────────
 function startShift(e: PointerEvent, b: Band) {
@@ -295,6 +325,10 @@ function setSelPointValue(v: number | string) {
           <span class="absolute top-0 -translate-x-1/2 text-[9.5px] text-white/40 whitespace-nowrap" :style="{ left: px(xOf(tk)) }">{{ formatRulerSeconds(tk, ticks.majorStep) }}</span>
         </template>
         <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff] z-30 pointer-events-none" :style="{ left: px(playheadX) }" />
+        <!-- playhead time flag (Sailor accent), centre clamped inside the lane like DialKit -->
+        <div v-if="playheadVisible" data-testid="playhead-flag"
+          class="absolute top-0 -translate-x-1/2 h-4 px-1.5 rounded-[5px] bg-[#7c9cff] text-black text-[9.5px] leading-4 tabular-nums font-medium z-40 pointer-events-none"
+          :style="{ left: px(flagX) }">{{ (t ?? 0).toFixed(2) }}</div>
       </div>
 
       <!-- Each layer is a collapsible group header; its behaviours + property bands are
@@ -318,11 +352,22 @@ function setSelPointValue(v: number | string) {
             <div class="relative my-0.5 h-6">
               <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
               <div :data-testid="'beh-band-' + b.behaviourId"
-                class="absolute inset-y-0 flex items-center rounded-md border px-2 text-[9.5px] cursor-pointer overflow-hidden"
+                class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
                 :class="isBehSel(b) ? 'border-emerald-300 ring-2 ring-[#7c9cff] text-white' : 'border-emerald-400/40 text-white/80 hover:border-emerald-300/70'"
                 :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: 'rgba(120,220,170,.16)' }"
-                :title="b.label" @click.stop="emit('select-behaviour', b.behaviourId!)">
+                :title="b.label + ' · drag to move, drag edges to retime'"
+                @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')">
                 <span class="truncate">{{ b.label }}</span>
+                <button v-if="isBehSel(b) && wOf(b.start, b.end) > 120" type="button"
+                  class="shrink-0 px-1.5 rounded border border-white/25 text-[9px] text-white/85 hover:bg-white/15 cursor-pointer"
+                  title="Bake into editable control-point bands"
+                  @pointerdown.stop @click.stop="emit('behaviour-open', b.behaviourId!)">Open ▾</button>
+                <span v-if="wOf(b.start, b.end) > 56" class="ml-auto shrink-0 tabular-nums text-white/50">{{ (b.end - b.start).toFixed(2) }}s</span>
+                <!-- edge handles: retime -->
+                <div class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize hover:bg-white/25"
+                  @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'start')" />
+                <div class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize hover:bg-white/25"
+                  @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'end')" />
               </div>
             </div>
           </template>
