@@ -4389,7 +4389,7 @@ function setBoxDim(id: string, key: 'boxW' | 'boxH', raw: string) {
   }
   setLocal(id, { [key]: norm } as any)
 }
-function setBoxFit(l: any, fit: 'wrap' | 'shrink' | 'fill') { setLocal(l.id, { boxFit: fit } as any) }
+function setBoxFit(l: any, fit: 'wrap' | 'shrink' | 'fill' | 'break') { setLocal(l.id, { boxFit: fit } as any) }
 
 // A shape's stroke needs BOTH a colour and a width > 0 to show. New shapes start
 // at strokeWidth 0, so adding a stroke colour alone paints nothing — the stroke
@@ -9067,36 +9067,44 @@ onUnmounted(() => {
                 </div>
               </div>
               <div v-if="!textPath" class="space-y-2">
-                <div class="flex items-center justify-between">
-                  <div class="panel-label" title="The text box, sized in columns, %, or pixels. Fill sizes the type to the box.">Text box</div>
-                  <div class="flex items-center gap-1">
-                    <button v-for="u in (['col','%','px'] as const)" :key="u"
-                      class="text-[10px] px-1.5 py-0.5 rounded border"
-                      :class="boxUnit === u ? 'text-yellow-400 border-yellow-400/50' : 'text-white/40 border-white/[0.08]'"
-                      @click="boxUnit = u">{{ u }}</button>
-                  </div>
-                </div>
+                <div class="panel-label" title="The text box, sized in columns, %, or pixels. Fill sizes the type to the box.">Text box</div>
                 <div class="flex items-center gap-1">
-                  <button v-for="f in (['wrap','shrink','fill'] as const)" :key="f"
+                  <button v-for="f in (['wrap','shrink','fill','break'] as const)" :key="f"
                     class="flex-1 text-[11px] py-1 rounded border capitalize"
                     :class="((selectedLocal as any).boxFit ?? 'wrap') === f ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50 border-white/[0.08]'"
-                    :title="f === 'wrap' ? 'Words wrap; the type keeps its size' : f === 'shrink' ? 'Shrink the type to fit the box' : 'Size the type to fill the box'"
+                    :title="f === 'wrap' ? 'Words wrap; the type keeps its size' : f === 'shrink' ? 'Shrink the type to fit the box' : f === 'fill' ? 'Size the type to fill the box' : 'Break even a single word across lines to fill the box (needs a height)'"
                     @click="setBoxFit(selectedLocal, f)">{{ f }}</button>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                   <div>
                     <div class="panel-label mb-1">Width</div>
-                    <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'cols' : 'auto'"
-                      :value="boxToUnit((selectedLocal as any).boxW)"
-                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
-                      @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxW', (e.target as HTMLInputElement).value)" />
+                    <div class="relative">
+                      <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'cols' : 'auto'"
+                        :value="boxToUnit((selectedLocal as any).boxW)"
+                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded pl-2 pr-11 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
+                        @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxW', (e.target as HTMLInputElement).value)" />
+                      <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none text-white/30 text-[8px]">▾</div>
+                      <select :value="boxUnit" title="Unit: columns, percent, or pixels"
+                        class="absolute inset-y-0 right-0 my-px mr-px pl-1.5 pr-4 rounded-r bg-transparent text-[10px] text-white/50 outline-none cursor-pointer appearance-none hover:text-white/80"
+                        @change="boxUnit = ($event.target as HTMLSelectElement).value as any">
+                        <option v-for="u in (['col','%','px'] as const)" :key="u" :value="u" class="bg-neutral-800 text-white">{{ u }}</option>
+                      </select>
+                    </div>
                   </div>
                   <div>
                     <div class="panel-label mb-1">Height</div>
-                    <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'rows' : 'auto'"
-                      :value="boxToUnit((selectedLocal as any).boxH, 'h')"
-                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
-                      @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxH', (e.target as HTMLInputElement).value)" />
+                    <div class="relative">
+                      <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'rows' : 'auto'"
+                        :value="boxToUnit((selectedLocal as any).boxH, 'h')"
+                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded pl-2 pr-11 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
+                        @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxH', (e.target as HTMLInputElement).value)" />
+                      <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none text-white/30 text-[8px]">▾</div>
+                      <select :value="boxUnit" title="Unit: columns, percent, or pixels"
+                        class="absolute inset-y-0 right-0 my-px mr-px pl-1.5 pr-4 rounded-r bg-transparent text-[10px] text-white/50 outline-none cursor-pointer appearance-none hover:text-white/80"
+                        @change="boxUnit = ($event.target as HTMLSelectElement).value as any">
+                        <option v-for="u in (['col','%','px'] as const)" :key="u" :value="u" class="bg-neutral-800 text-white">{{ u }}</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>

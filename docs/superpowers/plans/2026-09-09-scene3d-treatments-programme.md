@@ -63,7 +63,7 @@ known-geometry unit test and the export override-material path checked.
 Masked: colour grade; dissolve; halftone/dot screen; chromatic split; glitch/scanlines; flat drop
 shadow. Edge: dashed outline; silhouette cutout; cross-hatch. One task per family + Playwright.
 
-## Slice S5 · Finishes as treatments; light linking  (≈7 tasks)
+## Slice S5 · Finishes as treatments  (≈4 tasks) — ✅ LANDED 2026-09-13 (base 11bbb37035 → e80e854c3; finishes only — LIGHT-LINKING DEFERRED to its own slice, three 0.171 can't mask lights per-object; whole-slice review Ready-to-merge, live gate 17/17; see 2026-09-09-scene3d-S5-finishes.md + memory scene3d-finishes-s5-landed)
 1. `applyFinish` seam (the `applyScreen` pattern) for foil shimmer, opalescence, matcap overlay;
 2–4. the three finishes; 5. light-linking SPIKE (shader-side mask by light index through the seam);
 6. light exclusion + per-object colour cast, or colour cast only if the spike fails; 7. proofs.
