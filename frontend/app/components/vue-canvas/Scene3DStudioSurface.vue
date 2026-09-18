@@ -33,7 +33,7 @@ import { treatmentControls, treatmentField } from '~/lib/scene3d/treatmentContro
 import { eulerFromNormal } from '~/lib/scene3d/decals'
 import { getLook, resolveLook, resolveDials } from '~/lib/scene3d/lighting'
 import { DEFAULT_HDRI } from '~/lib/scene3d/hdri'
-import { gateRect } from '~/lib/scene3d/resolutionGate'
+import { gateRect, orthoGateRect } from '~/lib/scene3d/resolutionGate'
 import { HARMONY_TYPES, HARMONY_LABELS } from '~/lib/color/harmony'
 import { MATCAP_IDS, matcapThumb, onTextureError } from '~/lib/scene3d/materials'
 import { toHeightPixels, heightGradient, RELIEF_FLAT_THRESHOLD } from '~/lib/scene3d/relief'
@@ -869,10 +869,18 @@ const wiredGlbUrl = computed<string>(() => {
 function enumProxy<T extends string>(get: () => T, set: (v: T) => void) {
   return computed<string>({ get, set: (v: string) => set(v as T) })
 }
-const OUTPUT_OPTIONS = ['1024×1024', '1344×768', '768×1344']
-const outputProxy = computed<string>({
-  get: () => `${doc.output.width}×${doc.output.height}`,
-  set: (v) => { const [w, h] = v.split('×').map(Number); doc.output.width = w ?? 1024; doc.output.height = h ?? 1024 },
+// Free output dimensions: two clamped integer fields (256–4096). The resolution-gate watch
+// downstream reacts to width/height changes, so the export frame preview updates live.
+const OUTPUT_MIN = 256
+const OUTPUT_MAX = 4096
+const clampDim = (n: number) => Math.max(OUTPUT_MIN, Math.min(OUTPUT_MAX, Math.round(n || 0) || OUTPUT_MIN))
+const outputWidth = computed<number>({
+  get: () => doc.output.width,
+  set: (v) => { doc.output.width = clampDim(Number(v)) },
+})
+const outputHeight = computed<number>({
+  get: () => doc.output.height,
+  set: (v) => { doc.output.height = clampDim(Number(v)) },
 })
 
 // Background transparency toggle — remember the last real color so toggling back
@@ -1946,6 +1954,7 @@ function setControl(key: string, value: string | number | boolean): void {
   if (key === 'floorReflectivity') { doc.floorReflectivity = Number(value); return }
   if (key === 'floorColor') { doc.floorColor = String(value); return }
   if (key === 'camera.fov') { doc.camera.fov = Number(value); return }
+  if (key === 'camera.projection') { setProjection(value === 'isometric' ? 'isometric' : 'perspective'); return }
   // Light source mode: HDRI on ⇒ set the remembered/default HDRI; Studio look ⇒ clear it.
   if (key === 'lighting.lightSource') {
     doc.lighting.hdri = String(value) === 'HDRI' ? (lastHdri.value || DEFAULT_HDRI) : null
@@ -2046,7 +2055,9 @@ const viewportSize = ref({ w: 1, h: 1 })
 const gateBox = computed(() => {
   const va = viewportSize.value.w / Math.max(1, viewportSize.value.h)
   const oa = (doc.output.width || 1) / (doc.output.height || 1)
-  const { wFrac, hFrac } = gateRect(doc.camera.fov, va, oa, 0.9)
+  const { wFrac, hFrac } = doc.camera.projection === 'isometric'
+    ? orthoGateRect(va, oa, 0.9)
+    : gateRect(doc.camera.fov, va, oa, 0.9)
   return { wPct: wFrac * 100, hPct: hFrac * 100, label: `${doc.output.width} × ${doc.output.height}` }
 })
 watch(() => [doc.output.width, doc.output.height], () => engine?.setResolutionGate((doc.output.width || 1) / (doc.output.height || 1)))
@@ -4400,9 +4411,31 @@ async function onSvgFilePicked(e: Event) {
 // bake itself renders from the live engine camera, so what you see is what exports.
 function syncDocCamera() {
   if (!engine || !interaction) return
-  doc.camera.position = engine.camera.position.toArray() as [number, number, number]
+  doc.camera.position = engine.activeCamera.position.toArray() as [number, number, number]
   doc.camera.target = interaction.orbit.target.toArray() as [number, number, number]
-  doc.camera.fov = engine.camera.fov
+  doc.camera.fov = engine.baseFov // the TRUE fov, not the viewport's resolution-gate overscan
+  doc.camera.projection = engine.projection
+  if (engine.projection === 'isometric') doc.camera.orthoZoom = engine.captureOrthoZoom()
+}
+
+/** Switch projection: update the engine (frames ortho from the current view, no jump), re-point
+ *  OrbitControls at the active camera, and re-apply the resolution gate for the new projection. */
+function setProjection(p: 'perspective' | 'isometric') {
+  doc.camera.projection = p
+  if (!engine || !interaction) return
+  engine.setProjection(p, doc.camera.target)
+  interaction.retargetCamera()
+  engine.setResolutionGate((doc.output.width || 1) / (doc.output.height || 1))
+  if (p === 'isometric') doc.camera.orthoZoom = engine.orthoBaseZoom
+  syncDocCamera()
+}
+
+/** Snap the camera to the canonical isometric 3/4 angle about the current target. */
+function snapIsometric() {
+  if (!engine || !interaction) return
+  engine.snapToIsometricAngle(doc.camera.target)
+  interaction.orbit.update()
+  syncDocCamera()
 }
 
 // ── Bake ──────────────────────────────────────────────────────────────────────
@@ -5695,9 +5728,28 @@ async function onClose() {
 
           <template #control-ui.camera.output>
             <div>
-              <label class="mb-1 block text-[11px] text-white/55">Output</label>
-              <StudioSegmented v-model="outputProxy" :options="OUTPUT_OPTIONS" />
+              <label class="mb-1 block text-[11px] text-white/55">Output size</label>
+              <div class="flex items-center gap-2">
+                <div class="flex flex-1 items-center gap-1.5">
+                  <span class="text-[11px] text-white/40">W</span>
+                  <input v-model.number.lazy="outputWidth" type="number" :min="OUTPUT_MIN" :max="OUTPUT_MAX" step="1"
+                         class="w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[12px] tabular-nums text-white/85 outline-none focus:border-white/25" />
+                </div>
+                <span class="text-white/25">×</span>
+                <div class="flex flex-1 items-center gap-1.5">
+                  <span class="text-[11px] text-white/40">H</span>
+                  <input v-model.number.lazy="outputHeight" type="number" :min="OUTPUT_MIN" :max="OUTPUT_MAX" step="1"
+                         class="w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[12px] tabular-nums text-white/85 outline-none focus:border-white/25" />
+                </div>
+              </div>
             </div>
+          </template>
+
+          <template #control-ui.camera.snapIso>
+            <button type="button" @click="snapIsometric"
+                    class="w-full rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[12px] text-white/80 transition-colors hover:border-white/25 hover:text-white">
+              Snap to isometric angle
+            </button>
           </template>
 
           <!-- Background transparency remembers the last real colour, so toggling back

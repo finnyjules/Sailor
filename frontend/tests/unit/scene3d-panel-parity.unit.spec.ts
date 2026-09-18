@@ -269,6 +269,7 @@ const ROW: Record<string, Row> = {
   [`${M}screen.inkColor`]: { label: 'Ink colour', kind: 'color' },
 
   // Camera / Lighting / Background
+  'camera.projection': { label: 'Projection', kind: 'select', options: ['perspective', 'isometric'] },
   'camera.fov': { label: 'FOV', kind: 'slider', min: 15, max: 100, step: 1, hint: 'Camera field of view — how wide the lens sees' },
   // Simple-lighting layer: Look leads, then the feel dials, then the Advanced toggle.
   'lighting.look': { label: 'Look', kind: 'look' },
@@ -330,6 +331,7 @@ const ANCHOR_LABEL: Record<string, string> = {
   'ui.relief.image': 'Relief image',
   'ui.relief.shader': 'Relief effect',
   'ui.camera.output': 'Output',
+  'ui.camera.snapIso': 'Isometric angle',
   'ui.background.transparent': 'Transparent',
   'ui.background.color': 'Color',
   // Geometry — the text editor, the remesh block, and the Cloner's cost readout. Every modifier /
@@ -497,7 +499,7 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
 }
 
 const DOC_SCENARIO: Record<string, readonly string[]> = {
-  Camera: ['camera.fov', 'ui.camera.output'],
+  Camera: ['camera.projection', 'camera.fov', 'ui.camera.output'],
   // Default doc = Studio-look mode (hdri null), non-gel env. The Lighting card's PRIMARY rows are the
   // light-source segmented, the Look, the three dials, direction/height, and the environment. The raw
   // sun/ambient/preset live in a nested, collapsed 'Fine-tune' sub-card (always present in Studio-look

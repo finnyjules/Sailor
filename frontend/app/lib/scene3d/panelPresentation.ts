@@ -246,6 +246,7 @@ export function readSceneControl(
   if (key === 'floorReflectivity') return doc.floorReflectivity
   if (key === 'floorColor') return doc.floorColor
   if (key === 'camera.fov') return doc.camera.fov
+  if (key === 'camera.projection') return doc.camera.projection
   if (key === 'lighting.environment') return ENV_LABEL[doc.lighting.environment] ?? 'room'
   // Synthetic: the light-source mode is derived from whether an HDRI is chosen.
   if (key === 'lighting.lightSource') return doc.lighting.hdri ? 'HDRI' : 'Studio look'
@@ -454,6 +455,7 @@ const SCENE_PANEL_ANCHORS: readonly ScenePanelAnchor[] = [
   { key: 'ui.decal.reposition', label: 'Reposition', visible: (_d, o) => o?.kind === 'decal' },
   // Camera / Background
   { key: 'ui.camera.output', label: 'Output', visible: () => true },
+  { key: 'ui.camera.snapIso', label: 'Isometric angle', visible: (d) => d.camera.projection === 'isometric' },
   { key: 'ui.background.transparent', label: 'Transparent', visible: () => true },
   { key: 'ui.background.color', label: 'Color', visible: (d) => d.background !== 'transparent' },
 ]
@@ -602,7 +604,7 @@ const DOC_CARDS: Record<string, readonly string[]> = {
     'object.rotation.0', 'object.rotation.1', 'object.rotation.2',
     'object.scale.0', 'object.scale.1', 'object.scale.2',
   ],
-  Camera: ['camera.fov', 'ui.camera.output'],
+  Camera: ['camera.projection', 'camera.fov', 'ui.camera.output', 'ui.camera.snapIso'],
   // Simple-lighting hierarchy: the Look drives everything so it leads; then where the
   // light comes from; then the three feel dials; then the Advanced toggle, followed by
   // the raw rows it reveals (they carry a `when` gate, so they only draw when it's on).

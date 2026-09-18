@@ -829,8 +829,12 @@ export const SCENE_CONTROLS: SceneControl[] = [
   })(),
 
   // --- Camera (doc-level) -----------------------------------------------------------
+  select('camera.projection', 'Projection', ['perspective', 'isometric'], D.camera.projection, 'Camera',
+    'Perspective converges to a vanishing point; isometric keeps parallel lines parallel',
+    { optionLabels: ['Perspective', 'Isometric'] }),
   slider('camera.fov', 'Field of view', 15, 100, 1, 'Camera', D.camera.fov,
-    'Camera field of view — how wide the lens sees'),
+    'Camera field of view — how wide the lens sees',
+    { when: (doc) => doc.camera.projection !== 'isometric' }),
 
   // --- Background (doc-level) -------------------------------------------------------
   // `background` itself (colour/transparent) stays a bespoke row — see this module's
