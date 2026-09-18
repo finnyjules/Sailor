@@ -3863,6 +3863,24 @@ function openBehaviour(id: string) {
   } as Partial<FrameMotion>)
   motionSel.value = null
 }
+// Delete whatever is selected on the timeline: a behaviour (bar + its track), a whole
+// property band, or a single control point (dropping the band when it was the last).
+function deleteMotionSelection() {
+  const sel = motionSel.value
+  if (!sel) return
+  if (sel.kind === 'behaviour') { deleteBehaviour(sel.path); return }
+  const tk = motionxTracks.value.find((t) => t.path === sel.path && !t.behaviourId)
+  if (!tk) { motionSel.value = null; return }
+  recordHistory()
+  if (sel.kind === 'point' && sel.index != null && tk.keyframes.length > 1) {
+    const next = { ...tk, keyframes: tk.keyframes.filter((_, i) => i !== sel.index) }
+    setMotion({ motionx: setBandTrack(motionxTracks.value, sel.path, next) } as Partial<FrameMotion>)
+    motionSel.value = { kind: 'band', path: sel.path }
+    return
+  }
+  setMotion({ motionx: setBandTrack(motionxTracks.value, sel.path, null) } as Partial<FrameMotion>)
+  motionSel.value = null
+}
 // Delete a behaviour entirely (band + its tracks).
 function deleteBehaviour(id: string) {
   recordHistory()
@@ -6606,6 +6624,14 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
   if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !genActive.value && !smartActive.value && !brush.active.value) {
+    // A timeline selection (behaviour bar / property band / control point) is a pseudo-
+    // child of its layer exactly like an effect row: Delete must remove THAT and stop,
+    // never fall through to deleteLocal and throw away the layer being animated.
+    if (motionSel.value) {
+      e.preventDefault()
+      deleteMotionSelection()
+      return
+    }
     // An effect row is a pseudo-child of its layer, so while one is selected Delete must
     // remove THAT EFFECT and stop — reaching `deleteLocal` below would throw away the whole
     // layer the user was tuning.
