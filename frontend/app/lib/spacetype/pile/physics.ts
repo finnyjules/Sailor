@@ -31,12 +31,16 @@ const MAX_STEPS = 900       // hard cap on the raw settle sim (~7.5s physics)
 const REST_WINDOW = 12
 const WINDOW_EPS = 0.05
 const MIN_STEPS = 8
+// The fall-and-settle is resampled into the first SETTLE_FRACTION of the loop; the
+// settled pile holds for the remainder (so the finished result is visible before it
+// repeats). The animation's LENGTH is the shared loop-duration, not this split.
+const SETTLE_FRACTION = 0.8
 
 /**
  * Drop the token rectangles into a Matter.js world, simulate to FULL REST, then
  * RESAMPLE that settle into the fall window and hold the settled pose after. So the
  * pile ALWAYS fully settles regardless of token count/drop height, and the fall
- * plays over exactly `settleTime` of the loop (never instant, never unfinished).
+ * plays over the first SETTLE_FRACTION of the loop, then holds the settled pose.
  * World is y-UP (gravity negative-y), floor at y = -FRAME_HALF_H; poses map to scene
  * coordinates with no sign flips. Pure & deterministic in (specs, params).
  */
@@ -118,7 +122,7 @@ export function bakePile(specs: PileTokenSpec[], params: Params, frame: { width:
   const settled = raw[raw.length - 1] ?? specs.map(() => ({ x: 0, y: floorY / SCALE, angle: 0 }))
 
   // Resample the raw settle into the fall window, then hold the settled pose.
-  const fallSamples = Math.max(1, Math.round((PILE_SAMPLES - 1) * Math.min(1, Math.max(0.05, num(params, 'settleTime', 0.6)))))
+  const fallSamples = Math.max(1, Math.round((PILE_SAMPLES - 1) * SETTLE_FRACTION))
   const lastRaw = raw.length - 1
   const traj: PileTrajectory = []
   for (let j = 0; j < fallSamples; j++) {

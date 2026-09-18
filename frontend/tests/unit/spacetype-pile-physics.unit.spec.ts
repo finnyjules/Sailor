@@ -33,9 +33,10 @@ describe('bakePile', () => {
     }
   })
 
-  it('holds the settled pose after settleTime (last sample == settle sample)', () => {
-    const traj = bakePile(boxes(4), params({ settleTime: 0.5 }), FRAME)
-    const settleIdx = Math.round((PILE_SAMPLES - 1) * 0.5)
+  it('holds the settled pose after the fall (last sample == the settle-fraction sample)', () => {
+    const SETTLE_FRACTION = 0.8 // mirrors physics.ts (control removed; length = loop duration)
+    const traj = bakePile(boxes(4), params(), FRAME)
+    const settleIdx = Math.round((PILE_SAMPLES - 1) * SETTLE_FRACTION)
     expect(traj[PILE_SAMPLES - 1]).toEqual(traj[settleIdx])
   })
 

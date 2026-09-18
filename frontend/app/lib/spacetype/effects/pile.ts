@@ -32,7 +32,6 @@ const controls: ControlSpec[] = [
   { key: 'gravity', label: 'Gravity', kind: 'slider', min: 0.2, max: 3, step: 0.1, default: 1, group: 'Stack' },
   { key: 'bounciness', label: 'Bounciness', kind: 'slider', min: 0, max: 0.9, step: 0.05, default: 0.1, group: 'Stack' },
   { key: 'dropSpread', label: 'Drop spread', kind: 'slider', min: 0, max: 1, step: 0.05, default: 0.5, group: 'Stack' },
-  { key: 'settleTime', label: 'Settle time', kind: 'slider', min: 0.2, max: 1, step: 0.05, default: 0.6, group: 'Stack' },
   { key: 'seed', label: 'Seed', kind: 'slider', min: 0, max: 999, step: 1, default: 1, group: 'Stack' },
   // COLOR
   { key: 'fills', label: 'Fills', kind: 'fillList', default: defaultFillsFor(6, 'pile'), group: 'Color' },
