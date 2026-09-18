@@ -97,6 +97,38 @@ function propBandsFor(l: LocalLayer): Band[] {
   return bandsForLayer(l.id, props.motionx, (p) => m.get(p) ?? '')
 }
 const rowCountFor = (l: LocalLayer) => behBandsFor(l.id).length + propBandsFor(l).length
+
+// ── Rows keyed by PROPERTY (one behaviour = one property). A row holds every bar that
+//    drives that property: behaviour bars + the explicit property band. Two bars whose
+//    spans overlap in the same row are a genuine clash → flagged. ─────────────────────
+interface PropertyRow { path: string; label: string; behaviours: Band[]; property: Band | null; conflicts: Set<string> }
+function rowsFor(l: LocalLayer): PropertyRow[] {
+  const labels = new Map(animatableProperties(l).map((p) => [p.path, p.label] as const))
+  const order = [...labels.keys()]
+  const byPath = new Map<string, PropertyRow>()
+  const row = (path: string) => {
+    let r = byPath.get(path)
+    if (!r) { r = { path, label: labels.get(path) ?? path.split('.').pop() ?? path, behaviours: [], property: null, conflicts: new Set() }; byPath.set(path, r) }
+    return r
+  }
+  for (const b of behBandsFor(l.id)) {
+    const tk = props.motionx.find((t) => t.behaviourId === b.behaviourId)
+    if (tk) row(tk.path).behaviours.push(b)
+  }
+  for (const b of propBandsFor(l)) row(b.path).property = b
+  const rows = [...byPath.values()].sort((a, b) => {
+    const ia = order.indexOf(a.path), ib = order.indexOf(b.path)
+    return (ia === -1 ? 1e9 : ia) - (ib === -1 ? 1e9 : ib)
+  })
+  for (const r of rows) {
+    const bars = [...r.behaviours, ...(r.property ? [r.property] : [])]
+    for (let i = 0; i < bars.length; i++) for (let j = i + 1; j < bars.length; j++) {
+      const a = bars[i]!, b = bars[j]!
+      if (Math.min(a.end, b.end) - Math.max(a.start, b.start) > 1e-6) { r.conflicts.add(a.key); r.conflicts.add(b.key) }
+    }
+  }
+  return rows
+}
 const isBehSel = (b: Band) => props.selection?.kind === 'behaviour' && props.selection.path === b.behaviourId
 
 const trackByPath = (path: string) => props.motionx.find((t) => t.path === path)
@@ -375,18 +407,21 @@ function setSelPointValue(v: number | string) {
         </button>
 
         <template v-if="!collapsedLayers.has(l.id)">
-          <!-- behaviour rows -->
-          <template v-for="b in behBandsFor(l.id)" :key="b.key">
-            <span class="truncate text-left text-[10px] pl-5 self-center cursor-pointer"
-              :class="isBehSel(b) ? 'text-white' : 'text-white/45 hover:text-white/75'"
-              :title="b.label" @click="emit('select-behaviour', b.behaviourId!)">{{ b.label }}</span>
-            <div class="relative my-0.5 h-6">
+          <!-- one row per PROPERTY; every bar that drives it lives in this row -->
+          <template v-for="r in rowsFor(l)" :key="r.path">
+            <span class="truncate text-left text-[10px] pl-5 self-center"
+              :class="r.conflicts.size ? 'text-amber-300/80' : 'text-white/45'"
+              :title="r.conflicts.size ? r.label + ' — overlapping bars clash; the most recently started one is in charge' : r.label">{{ r.label }}<span v-if="r.conflicts.size" class="ml-1">⚠</span></span>
+            <div data-band-lane class="relative my-0.5 h-6">
               <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
-              <div :data-testid="'beh-band-' + b.behaviourId"
+
+              <!-- behaviour bars -->
+              <div v-for="b in r.behaviours" :key="b.key" :data-testid="'beh-band-' + b.behaviourId"
                 class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
-                :class="isBehSel(b) ? 'border-emerald-300 ring-2 ring-[#7c9cff] text-white' : 'border-emerald-400/40 text-white/80 hover:border-emerald-300/70'"
-                :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: 'rgba(120,220,170,.16)' }"
-                :title="b.label + ' · drag to move, drag edges to retime'"
+                :class="[isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white' : 'text-white/80',
+                         r.conflicts.has(b.key) ? 'border-amber-400/70' : (isBehSel(b) ? 'border-emerald-300' : 'border-emerald-400/40 hover:border-emerald-300/70')]"
+                :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: r.conflicts.has(b.key) ? 'rgba(251,191,36,.14)' : 'rgba(120,220,170,.16)' }"
+                :title="b.label + (r.conflicts.has(b.key) ? ' · overlaps another bar on ' + r.label : '') + ' · drag to move, drag edges to retime'"
                 @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')">
                 <span class="truncate">{{ b.label }}</span>
                 <button v-if="isBehSel(b) && wOf(b.start, b.end) > 120" type="button"
@@ -394,43 +429,34 @@ function setSelPointValue(v: number | string) {
                   title="Bake into editable control-point bands"
                   @pointerdown.stop @click.stop="emit('behaviour-open', b.behaviourId!)">Open ▾</button>
                 <span v-if="wOf(b.start, b.end) > 56" class="ml-auto shrink-0 tabular-nums text-white/50">{{ (b.end - b.start).toFixed(2) }}s</span>
-                <!-- edge handles: retime -->
                 <div class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize hover:bg-white/25"
                   @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'start')" />
                 <div class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize hover:bg-white/25"
                   @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'end')" />
               </div>
-            </div>
-          </template>
 
-          <!-- property band rows -->
-          <template v-for="b in propBandsFor(l)" :key="b.key">
-            <span class="truncate text-left text-[10px] pl-5 self-center cursor-pointer"
-              :class="isBandSel(b) ? 'text-white' : 'text-white/45 hover:text-white/75'"
-              :title="b.label" @click="emit('select-band', b.path)">{{ b.label }}</span>
-            <div data-band-lane class="relative my-0.5 h-6">
-              <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
-              <div class="absolute inset-y-0 rounded-md border overflow-hidden cursor-grab active:cursor-grabbing"
-                :data-testid="'band-' + b.key"
-                :class="isBandSel(b) ? 'border-[#7c9cff] ring-2 ring-[#7c9cff]' : 'border-white/15'"
-                :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: b.kind === 'number' ? 'linear-gradient(180deg,#171a20,#12141a)' : bandCss(b) }"
-                @pointerdown.stop.prevent="(e: PointerEvent) => startShift(e, b)">
-                <svg v-if="b.kind === 'number'" viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block pointer-events-none">
-                  <polyline :points="curvePoints(b)" fill="none" stroke="#7c9cff" stroke-width="2" vector-effect="non-scaling-stroke" />
+              <!-- explicit property band (control points) -->
+              <div v-if="r.property" :data-testid="'band-' + r.property.key"
+                class="absolute inset-y-0 rounded-md border overflow-hidden cursor-grab active:cursor-grabbing"
+                :class="[isBandSel(r.property) ? 'ring-2 ring-[#7c9cff] border-[#7c9cff]' : (r.conflicts.has(r.property.key) ? 'border-amber-400/70' : 'border-white/15')]"
+                :style="{ left: px(xOf(r.property.start)), width: px(wOf(r.property.start, r.property.end)), background: r.property.kind === 'number' ? 'linear-gradient(180deg,#171a20,#12141a)' : bandCss(r.property) }"
+                @pointerdown.stop.prevent="(e: PointerEvent) => startShift(e, r.property!)">
+                <svg v-if="r.property.kind === 'number'" viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block pointer-events-none">
+                  <polyline :points="curvePoints(r.property)" fill="none" stroke="#7c9cff" stroke-width="2" vector-effect="non-scaling-stroke" />
                 </svg>
                 <div class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize z-20 hover:bg-white/20"
-                  @pointerdown.stop.prevent="(e: PointerEvent) => startRetime(e, b, 'start')" />
+                  @pointerdown.stop.prevent="(e: PointerEvent) => startRetime(e, r.property!, 'start')" />
                 <div class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize z-20 hover:bg-white/20"
-                  @pointerdown.stop.prevent="(e: PointerEvent) => startRetime(e, b, 'end')" />
-                <div v-for="(kf, i) in b.keyframes" :key="i"
-                  :data-testid="'point-' + b.key + '-' + i"
+                  @pointerdown.stop.prevent="(e: PointerEvent) => startRetime(e, r.property!, 'end')" />
+                <div v-for="(kf, i) in r.property.keyframes" :key="i"
+                  :data-testid="'point-' + r.property.key + '-' + i"
                   class="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full bg-white cursor-ew-resize z-20"
-                  :class="isPointSel(b, i) ? 'ring-2 ring-[#7c9cff] border border-white' : 'border border-[#7c9cff] hover:ring-1 hover:ring-white/60'"
-                  :style="{ left: pctX(pointX(b, kf.t)) }"
+                  :class="isPointSel(r.property, i) ? 'ring-2 ring-[#7c9cff] border border-white' : 'border border-[#7c9cff] hover:ring-1 hover:ring-white/60'"
+                  :style="{ left: pctX(pointX(r.property, kf.t)) }"
                   title="Drag to move · click to edit · double-click to delete"
-                  @pointerdown.stop.prevent="(e: PointerEvent) => startPointDrag(e, b, i)"
-                  @click.stop="emit('select-point', { path: b.path, index: i })"
-                  @dblclick.stop="() => deletePoint(b, i)" />
+                  @pointerdown.stop.prevent="(e: PointerEvent) => startPointDrag(e, r.property!, i)"
+                  @click.stop="emit('select-point', { path: r.property!.path, index: i })"
+                  @dblclick.stop="() => deletePoint(r.property!, i)" />
               </div>
             </div>
           </template>

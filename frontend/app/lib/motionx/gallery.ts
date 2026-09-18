@@ -17,6 +17,20 @@ export interface GalleryMove {
   preview: PreviewKind
   params?: Record<string, unknown>
   needs?: 'gradient' | 'text'        // layer capability required to offer this move
+  /** A composite move: adds SEVERAL single-property behaviours at once (e.g. Slide up =
+   *  position + fade). Each part lands in its own property row. Omit for a single kind. */
+  recipe?: Array<{ kind: string; params?: Record<string, unknown> }>
+}
+
+/** Default length (seconds) a new behaviour of this group gets when placed at the playhead.
+ *  Loops run to the end of the timeline (returns Infinity → caller clamps). */
+export function defaultDurationFor(group: MoveGroup): number {
+  return group === 'Loop' || group === 'Gradient' ? Infinity : 0.8
+}
+
+/** The behaviours a gallery tile adds — its recipe, or its single kind. */
+export function behavioursForMove(m: GalleryMove): Array<{ kind: string; params?: Record<string, unknown> }> {
+  return m.recipe ?? [{ kind: m.kind, params: m.params }]
 }
 
 /** Layer capabilities the gallery filters against. */
@@ -25,11 +39,16 @@ export interface LayerCaps { gradient: boolean; text: boolean }
 export const GALLERY_MOVES: GalleryMove[] = [
   // In
   { id: 'fade-in', kind: 'fade', label: 'Fade in', group: 'In', preview: 'fade', params: { dir: 'in' } },
-  { id: 'scale-in', kind: 'scale', label: 'Grow in', group: 'In', preview: 'grow', params: { dir: 'in' } },
-  { id: 'slide-up', kind: 'slide', label: 'Slide up', group: 'In', preview: 'slide-up', params: { dir: 'up' } },
-  { id: 'slide-down', kind: 'slide', label: 'Slide down', group: 'In', preview: 'slide-down', params: { dir: 'down' } },
-  { id: 'slide-left', kind: 'slide', label: 'Slide left', group: 'In', preview: 'slide-left', params: { dir: 'left' } },
-  { id: 'slide-right', kind: 'slide', label: 'Slide right', group: 'In', preview: 'slide-right', params: { dir: 'right' } },
+  { id: 'scale-in', kind: 'scale', label: 'Grow in', group: 'In', preview: 'grow', params: { dir: 'in' },
+    recipe: [{ kind: 'scale', params: { dir: 'in' } }, { kind: 'fade', params: { dir: 'in' } }] },
+  { id: 'slide-up', kind: 'slide', label: 'Slide up', group: 'In', preview: 'slide-up', params: { dir: 'up' },
+    recipe: [{ kind: 'slide', params: { dir: 'up' } }, { kind: 'fade', params: { dir: 'in' } }] },
+  { id: 'slide-down', kind: 'slide', label: 'Slide down', group: 'In', preview: 'slide-down', params: { dir: 'down' },
+    recipe: [{ kind: 'slide', params: { dir: 'down' } }, { kind: 'fade', params: { dir: 'in' } }] },
+  { id: 'slide-left', kind: 'slide', label: 'Slide left', group: 'In', preview: 'slide-left', params: { dir: 'left' },
+    recipe: [{ kind: 'slide', params: { dir: 'left' } }, { kind: 'fade', params: { dir: 'in' } }] },
+  { id: 'slide-right', kind: 'slide', label: 'Slide right', group: 'In', preview: 'slide-right', params: { dir: 'right' },
+    recipe: [{ kind: 'slide', params: { dir: 'right' } }, { kind: 'fade', params: { dir: 'in' } }] },
   // Loop
   { id: 'spin', kind: 'spin', label: 'Spin', group: 'Loop', preview: 'spin' },
   { id: 'pulse', kind: 'pulse', label: 'Pulse', group: 'Loop', preview: 'pulse' },
@@ -37,7 +56,8 @@ export const GALLERY_MOVES: GalleryMove[] = [
   { id: 'float', kind: 'float', label: 'Float', group: 'Loop', preview: 'float' },
   // Out
   { id: 'fade-out', kind: 'fade', label: 'Fade out', group: 'Out', preview: 'fade', params: { dir: 'out' } },
-  { id: 'scale-out', kind: 'scale', label: 'Shrink out', group: 'Out', preview: 'shrink', params: { dir: 'out' } },
+  { id: 'scale-out', kind: 'scale', label: 'Shrink out', group: 'Out', preview: 'shrink', params: { dir: 'out' },
+    recipe: [{ kind: 'scale', params: { dir: 'out' } }, { kind: 'fade', params: { dir: 'out' } }] },
   // Gradient
   { id: 'gradient-scroll', kind: 'gradientScroll', label: 'Scroll', group: 'Gradient', preview: 'scroll', needs: 'gradient' },
 ]

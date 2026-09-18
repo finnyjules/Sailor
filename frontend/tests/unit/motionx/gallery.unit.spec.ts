@@ -48,3 +48,19 @@ describe('groupedMoves', () => {
     expect(g[0]!.moves.map((m) => m.id)).toEqual(['a'])
   })
 })
+
+describe('recipes + placement defaults', () => {
+  it('composite tiles expand to several single-property behaviours; simple tiles to one', async () => {
+    const { behavioursForMove } = await import('~/lib/motionx/gallery')
+    const slideUp = GALLERY_MOVES.find((m) => m.id === 'slide-up')!
+    expect(behavioursForMove(slideUp).map((b) => b.kind)).toEqual(['slide', 'fade'])
+    const fadeIn = GALLERY_MOVES.find((m) => m.id === 'fade-in')!
+    expect(behavioursForMove(fadeIn)).toEqual([{ kind: 'fade', params: { dir: 'in' } }])
+  })
+  it('In/Out default to 0.8s; Loop/Gradient run to the end', async () => {
+    const { defaultDurationFor } = await import('~/lib/motionx/gallery')
+    expect(defaultDurationFor('In')).toBe(0.8)
+    expect(defaultDurationFor('Out')).toBe(0.8)
+    expect(defaultDurationFor('Loop')).toBe(Infinity)
+  })
+})
