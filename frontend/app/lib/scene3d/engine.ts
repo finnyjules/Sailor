@@ -604,6 +604,11 @@ export class SceneEngine {
   // in the beauty render. Public so the bake can hide it for the depth/normal
   // passes (it must not appear as a floor in the ControlNet maps).
   readonly shadowGround: THREE.Mesh
+  /** A REAL matte floor used ONLY in cinematic (the ShadowMaterial catcher above is meaningless to
+   *  the path tracer). Kept in the scene, `visible` gated to cinematic + showFloor, so it catches
+   *  true contact shadows + the gem's coloured caustics. Skipped by the raster renderer (invisible)
+   *  and by the tracer BVH when invisible. */
+  private readonly cinematicFloor: THREE.Mesh
   private sun: THREE.DirectionalLight
   private ambient: THREE.AmbientLight
   private envTarget: THREE.WebGLRenderTarget | null = null
@@ -726,7 +731,18 @@ export class SceneEngine {
     this.shadowGround.rotation.x = -Math.PI / 2
     this.shadowGround.position.y = -0.005 // just under y=0 so it never z-fights the grid
     this.shadowGround.receiveShadow = true
-    this.scene.add(this.sun, this.ambient, this.grid, this.shadowGround)
+    // Real cinematic floor: a large dark, slightly-glossy matte plane. Roughness 0.5 catches soft
+    // reflections + caustics without mirroring; envMap picks up the studio/HDRI so it reads as a real
+    // surface. Invisible until cinematic turns it on (setCinematic / syncFromDoc).
+    this.cinematicFloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(200, 200),
+      new THREE.MeshStandardMaterial({ color: 0x15151a, roughness: 0.5, metalness: 0 }),
+    )
+    this.cinematicFloor.rotation.x = -Math.PI / 2
+    this.cinematicFloor.position.y = this.shadowGround.position.y
+    this.cinematicFloor.receiveShadow = true
+    this.cinematicFloor.visible = false
+    this.scene.add(this.sun, this.ambient, this.grid, this.shadowGround, this.cinematicFloor)
     this.canvas = canvas
     canvas.addEventListener('webglcontextlost', this.handleContextLost, false)
     canvas.addEventListener('webglcontextrestored', this.handleContextRestored, false)
@@ -900,9 +916,11 @@ export class SceneEngine {
         const { ScenePathTracer } = await import('./pathtrace/PathTracer')
         this.pathTracer = new ScenePathTracer(this.renderer)
       }
+      this.cinematicFloor.visible = this.lastDoc?.showFloor ?? true // real floor instead of the catcher
       this.rebuildCinematicEnv()
       this.pathTracer.begin(this.scene, this.camera, this.cinematicEnvTexture)
     } else {
+      this.cinematicFloor.visible = false
       this.pathTracer?.end()
     }
   }
@@ -1032,6 +1050,8 @@ export class SceneEngine {
     // renders beauty with the ground's current visibility, so this carries into export).
     this.grid.visible = doc.showFloor
     this.shadowGround.visible = doc.showFloor
+    // The real cinematic floor stands in for the shadow-catcher only while cinematic is live.
+    this.cinematicFloor.visible = this._cinematic && doc.showFloor
     this.camera.fov = doc.camera.fov
     this.camera.updateProjectionMatrix()
   }

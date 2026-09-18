@@ -2329,6 +2329,10 @@ onMounted(() => {
       backgroundName: bg?.name ?? (bg?.isColor ? 'color' : bg ? 'texture' : null),
       envIntensity: e?.scene?.environmentIntensity ?? null,
       envRotationYdeg: e?.scene?.environmentRotation ? Math.round((e.scene.environmentRotation.y * 180) / Math.PI) : null,
+      cinematicFloor: (() => {
+        const f = e?.cinematicFloor
+        return f ? { visible: f.visible, mat: f.material?.type, isStandard: !!f.material?.isMeshStandardMaterial } : null
+      })(),
     }
   }
   ;(window as any).__scene3dCineHelperCheck = () => {
