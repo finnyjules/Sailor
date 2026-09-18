@@ -347,6 +347,16 @@ export class SceneInteraction {
     this.orbit.enabled = orbitShouldBeEnabled(this.cameraLocked, this.gizmoDragging, this.sculpting, this.decalDragging)
   }
 
+  /** Point the orbit + gizmos at the engine's current active camera (call after a projection
+   *  switch). OrbitControls reads `.object` each update and drives ortho zoom via `object.zoom`
+   *  natively; the gizmos use the camera for screen-space sizing/handling. */
+  retargetCamera(): void {
+    const cam = this.engine.activeCamera
+    this.orbit.object = cam
+    this.orbit.update()
+    for (const g of this.gizmos) g.camera = cam
+  }
+
   /** Surface-owned lock: true while camera motion is animating playback.
    *  Safe (and expected) to call every frame — it's a cheap idempotent
    *  recompute, not a raw write, so it can never stomp a concurrent gizmo
