@@ -84,7 +84,9 @@ export function bakePile(specs: PileTokenSpec[], params: Params, frame: { width:
       const shape = s.shapeId ? shapeById(s.shapeId) : undefined
       const poly = shape ? parseShapePolygon(shape.d, shape.box, hw, hh) : null
       if (poly && poly.length >= 3) {
-        const hull = Vertices.hull(poly)
+        // Matter's Vertices.hull types the input as Vertex[] (index/body/isInternal), but only
+        // reads x/y — our {x,y} points are fine at runtime; cast to the declared param type.
+        const hull = Vertices.hull(poly as unknown as Parameters<typeof Vertices.hull>[0])
         if (hull.length >= 3) {
           const b = Bodies.fromVertices(x, y, [hull], { restitution, friction: 0.5, angle })
           if (b) { body = b; const c = Vertices.centre(hull); offset = { x: c.x, y: c.y } }

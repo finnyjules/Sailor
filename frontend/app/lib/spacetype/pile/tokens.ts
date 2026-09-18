@@ -66,13 +66,13 @@ export function planPileTokens(params: Params, frame: { width: number; height: n
 
   const shapeCount = Math.max(0, Math.round(num(params, 'shapeCount')))
   if (shapeCount > 0) {
-    const shapeId = str(params, 'shape', 'none')
-    const chosen = shapeId && shapeId !== 'none' ? shapeId : (SHAPES[0]?.id ?? 'none')
-    const shape = SHAPES.find(s => s.id === chosen)
-    const aspect = shape ? shapeAspect(shape) : 1 // width / height
+    const set = shapeIdSet(params)
     const baseH = num(params, 'shapeSize', 120) * worldPerPx
     const variation = Math.min(0.95, Math.max(0, num(params, 'sizeVariation')))
     for (let i = 0; i < shapeCount; i++) {
+      const chosen = set[Math.floor(rng() * set.length)] ?? set[0]!
+      const shape = SHAPES.find(s => s.id === chosen)
+      const aspect = shape ? shapeAspect(shape) : 1 // width / height
       const jitter = 1 + (rng() * 2 - 1) * variation
       const h1 = baseH * jitter
       const [w, h] = fit(h1 * aspect, h1)
@@ -81,4 +81,19 @@ export function planPileTokens(params: Params, frame: { width: number; height: n
   }
 
   return specs
+}
+
+/** The hand-picked shape ids (params.shapes = JSON array), filtered to real catalog ids.
+ *  Falls back to a legacy single `shape`, then to the first catalog shape — so the pile is
+ *  never empty when Shape count > 0 but nothing is picked. */
+function shapeIdSet(params: Params): string[] {
+  const valid = (id: unknown): id is string => typeof id === 'string' && id !== 'none' && SHAPES.some(s => s.id === id)
+  let ids: string[] = []
+  try {
+    const parsed = JSON.parse(str(params, 'shapes', '[]'))
+    if (Array.isArray(parsed)) ids = parsed.filter(valid)
+  } catch { /* fall through to legacy/default */ }
+  if (!ids.length) { const legacy = str(params, 'shape', 'none'); if (valid(legacy)) ids = [legacy] }
+  if (!ids.length && SHAPES[0]) ids = [SHAPES[0].id]
+  return ids
 }

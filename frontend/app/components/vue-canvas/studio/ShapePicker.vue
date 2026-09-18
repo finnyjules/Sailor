@@ -20,8 +20,15 @@ const props = withDefaults(defineProps<{
    *  click: the trigger owns the open/closed toggle, and closing here as well
    *  would make the same press close and immediately reopen the panel. */
   ignore?: HTMLElement | null
-}>(), { allowNone: true })
-const emit = defineEmits<{ (e: 'update:modelValue', v: string): void; (e: 'close'): void }>()
+  /** Multi-select: a tile toggles (emits `toggle`), the picker stays open, and
+   *  tiles in `selectedIds` show as on. Single-select (default) is unchanged. */
+  multiple?: boolean
+  selectedIds?: string[]
+}>(), { allowNone: true, multiple: false, selectedIds: () => [] })
+const emit = defineEmits<{ (e: 'update:modelValue', v: string): void; (e: 'toggle', v: string): void; (e: 'close'): void }>()
+
+/** Whether a tile shows as selected: the set membership in multi mode, else the single value. */
+function isOn(id: string): boolean { return props.multiple ? props.selectedIds.includes(id) : props.modelValue === id }
 
 const query = ref('')
 const family = ref<ShapeFamily | 'all'>('all')
@@ -45,6 +52,7 @@ const rovingId = computed(() =>
 )
 
 function pick(id: string) {
+  if (props.multiple) { emit('toggle', id); return } // stay open; the parent updates the set
   emit('update:modelValue', id)
   emit('close')
 }
@@ -174,7 +182,7 @@ const tileOn = 'bg-white text-neutral-900'
           @keydown="onGridKeydown"
         >
           <button
-            v-if="allowNone" type="button" data-shape="none" title="None" role="option"
+            v-if="allowNone && !multiple" type="button" data-shape="none" title="None" role="option"
             :aria-selected="modelValue === SHAPE_NONE ? 'true' : 'false'"
             :tabindex="rovingId === SHAPE_NONE ? 0 : -1"
             :class="[tile, modelValue === SHAPE_NONE ? tileOn : tileIdle]"
@@ -182,9 +190,9 @@ const tileOn = 'bg-white text-neutral-900'
           ><span class="text-[11px]">None</span></button>
           <button
             v-for="s in visible" :key="s.id" type="button" :data-shape="s.id" :title="s.name" role="option"
-            :aria-selected="modelValue === s.id ? 'true' : 'false'"
+            :aria-selected="isOn(s.id) ? 'true' : 'false'"
             :tabindex="rovingId === s.id ? 0 : -1"
-            :class="[tile, modelValue === s.id ? tileOn : tileIdle]"
+            :class="[tile, isOn(s.id) ? tileOn : tileIdle]"
             @click="pick(s.id)"
           >
             <svg viewBox="0 0 96 96" width="26" height="26" fill="currentColor" aria-hidden="true">

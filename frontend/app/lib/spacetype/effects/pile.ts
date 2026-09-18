@@ -24,7 +24,7 @@ const controls: ControlSpec[] = [
   { key: 'padding', label: 'Padding', kind: 'slider', min: 0, max: 0.4, step: 0.01, default: 0.14, group: 'Style', showIf: { key: 'boxStyle', notEquals: 'bare' } },
   // SHAPES (what populates the pile) → the Layout section.
   { key: 'shapeCount', label: 'Shape count', kind: 'slider', min: 0, max: 40, step: 1, default: 0, group: 'Layout' },
-  { key: 'shape', label: 'Shape', kind: 'shape', default: 'none', allowNone: true, group: 'Layout', showIf: { key: 'shapeCount', notEquals: 0 } },
+  { key: 'shapes', label: 'Shapes', kind: 'shapeList', default: '[]', group: 'Layout', showIf: { key: 'shapeCount', notEquals: 0 } },
   { key: 'shapeSize', label: 'Shape size', kind: 'slider', min: 30, max: 260, step: 2, default: 120, group: 'Layout', showIf: { key: 'shapeCount', notEquals: 0 } },
   { key: 'sizeVariation', label: 'Size variation', kind: 'slider', min: 0, max: 0.9, step: 0.05, default: 0.3, group: 'Layout', showIf: { key: 'shapeCount', notEquals: 0 } },
   // PHYSICS (the fall & settle) → the Stack section.

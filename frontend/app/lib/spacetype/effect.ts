@@ -107,6 +107,10 @@ export type ControlSpec = (
   // 'none'. `allowNone: false` for consumers that always need a shape (a base
   // shape); the default (true) offers a None tile and lists 'none' to the agent.
   | { key: string; label: string; kind: 'shape'; default: string; allowNone?: boolean; group: string }
+  // A hand-picked SET of shape ids, stored as one JSON-array string (like fillList —
+  // ParamValue is scalar). The surface renders a multi-select shape picker; consumers
+  // parse it into an id list. Empty array = none picked.
+  | { key: string; label: string; kind: 'shapeList'; default: string; group: string }
   | { key: string; label: string; kind: 'look'; default: string; group: string }
   // An interactive bézier path drawn on the preview (String effect). Stored as one JSON
   // string in params (StringPathDoc); the surface renders the StringPathEditor overlay.

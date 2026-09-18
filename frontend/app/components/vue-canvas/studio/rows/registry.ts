@@ -5,6 +5,7 @@ import RowSwitch from './RowSwitch.vue'
 import RowColor from './RowColor.vue'
 import RowText from './RowText.vue'
 import RowShape from './RowShape.vue'
+import RowShapeList from './RowShapeList.vue'
 import RowLook from './RowLook.vue'
 
 /**
@@ -19,6 +20,7 @@ export const rowRenderers: Record<string, Component> = {
   color: RowColor,
   text: RowText,
   shape: RowShape,
+  shapeList: RowShapeList,
   look: RowLook,
 }
 
