@@ -22,6 +22,15 @@ const props = defineProps<{
   duration: number
   t: number | null
   selection: MotionSelection | null
+  // Transport + actions (the dock header — DialKit has these on the section header)
+  playing?: boolean
+  fps?: number
+  loop?: boolean
+  baking?: boolean
+  bakeProgress?: number
+  stale?: boolean
+  bakeError?: string | null
+  galleryOpen?: boolean
 }>()
 const emit = defineEmits<{
   select: [id: string]
@@ -33,6 +42,10 @@ const emit = defineEmits<{
   commit: []
   scrub: [t: number]
   pause: []
+  play: []
+  bake: []
+  'update:motion': [patch: { duration?: number; fps?: number; loop?: boolean }]
+  'toggle-gallery': []
 }>()
 
 // ── View state (component-local, DialKit idiom) ──────────────────────────────
@@ -232,11 +245,43 @@ function setSelPointValue(v: number | string) {
 
 <template>
   <div class="rounded-[14px] border border-white/10 bg-[#1a1a1a]/95 p-2.5 text-xs text-white/70 font-[var(--font-sans)]" data-testid="band-timeline" @wheel="onWheel">
-    <div class="mb-2 flex items-center gap-2 text-[11px]">
-      <span class="tabular-nums text-white/60">{{ (t ?? 0).toFixed(2) }} / {{ duration.toFixed(1) }}s</span>
-      <span class="text-white/30">Timeline</span>
-      <span v-if="view.zoom > 1" class="ml-auto tabular-nums text-white/30">{{ view.zoom.toFixed(1) }}×</span>
+    <!-- Dock header: transport on the left, actions on the right (DialKit section header) -->
+    <div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] whitespace-nowrap">
+      <button type="button" class="w-7 h-7 shrink-0 grid place-items-center rounded-md cursor-pointer hover:bg-white/10 text-white/85"
+        :title="playing ? 'Pause' : 'Play'" data-testid="dock-play" @click="playing ? emit('pause') : emit('play')">
+        <svg v-if="!playing" viewBox="0 0 12 12" class="size-3 fill-current"><path d="M2 1.5v9l8-4.5z"/></svg>
+        <svg v-else viewBox="0 0 12 12" class="size-3 fill-current"><path d="M2 1.5h3v9H2zM7 1.5h3v9H7z"/></svg>
+      </button>
+      <span class="tabular-nums text-white/70">{{ (t ?? 0).toFixed(2) }} / {{ duration.toFixed(1) }}s</span>
+      <span v-if="view.zoom > 1" class="tabular-nums text-white/30">{{ view.zoom.toFixed(1) }}×</span>
+      <div class="flex-1" />
+      <button type="button" data-testid="add-behaviour-toggle"
+        class="flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors"
+        :class="galleryOpen ? 'bg-[#7c9cff] text-black' : 'bg-white/10 text-white/85 hover:bg-white/15'"
+        @click="emit('toggle-gallery')">
+        <span>{{ galleryOpen ? '−' : '+' }}</span><span>Add behaviour</span>
+      </button>
+      <label class="flex items-center gap-1 text-white/45">dur
+        <input v-scrubnum type="number" min="0.5" max="60" step="0.5" :value="duration"
+          class="w-12 bg-[#0d0d0d] border border-white/10 rounded px-1 py-0.5 text-white/90 outline-none tabular-nums"
+          @change="emit('update:motion', { duration: Math.max(0.5, Number(($event.target as HTMLInputElement).value) || 4) })"></label>
+      <label class="flex items-center gap-1 text-white/45">fps
+        <input v-scrubnum type="number" min="1" max="60" step="1" :value="fps ?? 30"
+          class="w-11 bg-[#0d0d0d] border border-white/10 rounded px-1 py-0.5 text-white/90 outline-none tabular-nums"
+          @change="emit('update:motion', { fps: Math.max(1, Math.min(60, Number(($event.target as HTMLInputElement).value) || 30)) })"></label>
+      <label class="flex items-center gap-1 text-white/45 cursor-pointer" title="Loop playback">
+        <input type="checkbox" class="accent-[#7c9cff]" :checked="loop ?? false"
+          @change="emit('update:motion', { loop: ($event.target as HTMLInputElement).checked })">loop</label>
+      <span v-if="bakeError" class="max-w-[160px] truncate text-rose-400" :title="bakeError">{{ bakeError }}</span>
+      <button type="button" class="h-7 px-2.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors"
+        :class="stale ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30' : 'bg-white/10 text-white/80 hover:bg-white/15'"
+        :disabled="baking" :title="stale ? 'Layers changed since last bake' : 'Bake motion to frames'"
+        data-testid="dock-bake" @click="emit('bake')">
+        {{ baking ? `Baking ${Math.round((bakeProgress ?? 0) * 100)}%` : stale ? 'Re-bake' : 'Bake' }}
+      </button>
     </div>
+    <!-- The previewing gallery lives inside the dock (one surface, not a separate box) -->
+    <div v-if="galleryOpen" class="mb-2"><slot name="gallery" /></div>
 
     <div class="grid grid-cols-[96px_1fr] gap-x-2">
       <!-- Ruler row (28px) -->
