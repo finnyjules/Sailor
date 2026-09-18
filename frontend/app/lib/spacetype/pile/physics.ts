@@ -64,7 +64,11 @@ export function bakePile(specs: PileTokenSpec[], params: Params, frame: { width:
     const x = (rng() * 2 - 1) * halfW * (0.15 + 0.8 * spread)
     const y = topY + hh * 0.7 + i * hh * (0.9 + spread)
     const angle = (rng() * 2 - 1) * spread * 0.6
-    return Bodies.rectangle(x, y, hw, hh, { restitution, friction: 0.5, angle })
+    // Shapes get a CIRCLE collider (they're broadly round) so they nest and roll instead
+    // of stacking on invisible box corners; text boxes stay rectangles.
+    return s.kind === 'shape'
+      ? Bodies.circle(x, y, Math.max(0.05, Math.min(hw, hh) / 2), { restitution, friction: 0.5, angle })
+      : Bodies.rectangle(x, y, hw, hh, { restitution, friction: 0.5, angle })
   })
   Composite.add(engine.world, bodies)
 
