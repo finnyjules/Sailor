@@ -15,7 +15,7 @@ const KEYS = ['separator', 'separatorSize', 'separatorGap']
 // in or out of those sets. This literal list is the second opinion — an
 // effect changing eligibility has to be a deliberate edit here too. Every id
 // is asserted to still exist below, so the list cannot rot into a no-op.
-const INELIGIBLE = ['coil', 'elastic', 'echo', 'blend', 'cascade', 'onionburst', 'ring', 'slot']
+const INELIGIBLE = ['coil', 'elastic', 'echo', 'blend', 'cascade', 'onionburst', 'ring', 'slot', 'pile']
 
 describe('separator controls are injected once at registration', () => {
   it('every ineligible id is still a registered effect', () => {

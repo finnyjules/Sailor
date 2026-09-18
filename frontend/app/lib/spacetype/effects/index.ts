@@ -27,6 +27,7 @@ import { shutterEffect } from './shutter'
 import { ringEffect } from './ring'
 import { loftEffect } from './loft'
 import { slotEffect } from './slot'
+import { pileEffect } from './pile'
 import { withSeparatorControls } from '../separator'
 
 /** All registered Space Type effects, in picker order. Add new effect modules here.
@@ -70,6 +71,7 @@ export const SPACE_TYPE_EFFECTS: SpaceTypeEffect[] = /* @__PURE__ */ [
   ringEffect,
   loftEffect,
   slotEffect,
+  pileEffect,
 ].map(withSeparatorControls)
 
 export function getEffect(id: string): SpaceTypeEffect {

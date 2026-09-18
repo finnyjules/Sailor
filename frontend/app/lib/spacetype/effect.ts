@@ -139,7 +139,7 @@ export function defaultsFromControls(controls: ControlSpec[]): Params {
  * gap, no separator. ONE definition: state.ts's texOptsFromState and the embed's
  * buildTexOpts both read this (they used to carry private copies).
  */
-export const RAW_WORD_EFFECTS: ReadonlySet<string> = new Set(['coil', 'elastic', 'echo'])
+export const RAW_WORD_EFFECTS: ReadonlySet<string> = new Set(['coil', 'elastic', 'echo', 'pile'])
 
 /**
  * Effects that lay out individual letters via layoutChars and never sample the
