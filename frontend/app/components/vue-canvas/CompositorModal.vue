@@ -3739,8 +3739,9 @@ function toggleDialTrack(spec: DialTargetSpec) {
 // timeline yet; that lands next.
 const motionxTracks = computed<MotionxTrack[]>(() => (motionDoc.value as any).motionx ?? [])
 const behaviourPickerOpen = ref(false)
-// Slice 1: preview the new band timeline alongside the old dial timeline.
-const bandUiPreview = ref(true)
+// The Motion tab renders ONE DialKit-style dock (MotionBandTimeline). The legacy dial
+// picker + dial timeline are kept in code until 6b deletes them, behind this flag.
+const legacyMotionUi = ref(false)
 // Slice 2/3: band-timeline selection (a behaviour band, a property band, or a control point)
 // drives the contextual inspector in the Motion right column. Writes flow through setMotion.
 const motionSel = ref<{ kind: 'band' | 'point' | 'behaviour'; path: string; index?: number } | null>(null)
@@ -7940,10 +7941,11 @@ onUnmounted(() => {
       <div v-if="inspectorTab === 'motion'" ref="motionTimelineRef" class="absolute bottom-8 z-20 pointer-events-auto"
         :style="{ left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' }"
         @pointerdown.stop @click.stop @dblclick.stop>
-        <!-- Animate a dial: pick an effect dial on the selected layer to make it a
-             motion target. Adding seeds one keyframe at the playhead (a no-op hold);
-             the keyframes themselves are edited on the timeline. -->
-        <div v-if="selectedLocal" data-testid="dial-picker"
+        <!-- The Motion tab is ONE DialKit-style dock (MotionBandTimeline): transport +
+             Add behaviour + Bake in its header, the gallery inside it, ruler, grouped rows.
+             The legacy dial picker + dial timeline below stay in code (deleted in 6b) but
+             only render behind `legacyMotionUi`. -->
+        <div v-if="selectedLocal && legacyMotionUi" data-testid="dial-picker"
           class="glass-panel mb-2 rounded-lg border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-lg px-3 py-2">
           <div class="text-[11px] font-medium text-white/60 mb-1.5">Animate a dial</div>
           <p v-if="!animatableDials.length" class="text-[11px] text-white/35">
@@ -7964,35 +7966,24 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Add behaviour: the previewing gallery (Slice 4). Grouped In/Loop/Out/Gradient,
-             filtered to what the selected layer supports; each tile plays a live preview
-             and lands a live behaviour band via addBehaviour(kind, params). -->
-        <div v-if="selectedLocal" data-testid="behaviour-picker"
-          class="glass-panel mb-2 rounded-lg border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-lg px-3 py-2">
-          <button type="button" data-testid="add-behaviour-toggle"
-            class="flex items-center gap-1.5 text-[11px] font-medium text-white/60 hover:text-white/85 cursor-pointer"
-            @click="behaviourPickerOpen = !behaviourPickerOpen">
-            <span>{{ behaviourPickerOpen ? '−' : '+' }}</span>
-            <span>Add behaviour</span>
-          </button>
-          <MotionGallery v-if="behaviourPickerOpen" class="mt-2"
-            :caps="motionLayerCaps" @add="onGalleryAdd" @close="behaviourPickerOpen = false" />
-        </div>
-        <div v-if="selectedLocal" class="mb-2 flex items-center gap-2 text-[11px] text-white/50">
-          <button type="button" class="cursor-pointer hover:text-white/80"
-            @click="bandUiPreview = !bandUiPreview">{{ bandUiPreview ? 'Hide' : 'Show' }} band preview</button>
-        </div>
-        <MotionBandTimeline v-if="bandUiPreview"
-          class="mb-2"
+        <MotionBandTimeline
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
           :motionx="motionxTracks" :behaviours="motionBehaviours"
           :duration="effectiveMotion.duration" :t="previewT"
           :selection="motionSel"
+          :playing="playing" :fps="effectiveMotion.fps" :loop="effectiveMotion.loop ?? false"
+          :baking="baking" :bake-progress="bakeProgress" :stale="motionStale" :bake-error="bakeError"
+          :gallery-open="behaviourPickerOpen && !!selectedLocal"
           @select="(id: string) => selectLocal(id)"
           @select-band="selectMotionBand" @select-point="selectMotionPoint" @select-behaviour="selectMotionBehaviour"
           @update:motionx="updateMotionx" @before-change="recordHistory"
-          @scrub="scrubTo" @pause="pause" />
-        <CompositorMotionTimeline
+          @scrub="scrubTo" @pause="pause" @play="play" @bake="bakeMotion"
+          @update:motion="setMotion" @toggle-gallery="behaviourPickerOpen = !behaviourPickerOpen">
+          <template #gallery>
+            <MotionGallery :caps="motionLayerCaps" @add="onGalleryAdd" @close="behaviourPickerOpen = false" />
+          </template>
+        </MotionBandTimeline>
+        <CompositorMotionTimeline v-if="legacyMotionUi" class="mt-2"
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
           :motion="effectiveMotion" :t="previewT" :playing="playing"
           :baking="baking" :bake-progress="bakeProgress" :stale="motionStale" :bake-error="bakeError"
