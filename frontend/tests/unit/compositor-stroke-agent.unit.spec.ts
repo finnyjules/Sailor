@@ -234,42 +234,6 @@ describe('the command-menu hint budget', () => {
 })
 
 /**
- * F-cap Task 2 — the agent can now add the PICKER shader kind (`shader`) by NAMING a
- * curated LOOK word (`shaderLooks.ts` — `SHADER_LOOK_WORDS`/`resolveShaderLook`), resolved to a
- * real input-sampling catalog effectId. `params` stay picker-only (`{}` — the look's catalog
- * defaults show through, like a fresh UI add); speed/seed are plain dials.
- *
- * This was a deliberate REJECT test until Task 2 (the F5 hint budget had ~8 chars of headroom
- * when F5 landed; the F-cap ceiling raise + curated look vocabulary is what unblocked it). What
- * still rejects: a look word (or id) that is not in the curated set — the sanitizer returns null
- * and the ladder turns that into an `invalid` result, never a silent no-op.
- */
-describe('agent adds a shader effect by naming a curated look (F-cap Task 2)', () => {
-  it('a setLayerEffect patch of type "shader" with a look word applies and stores the effectId', () => {
-    const r = run(st(rect()), 'setLayerEffect', 'r1', {
-      effect: { type: 'shader', look: 'liquify', speed: 1 },
-    })
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    const eff = (r.template.layers[0] as unknown as { effects: Record<string, unknown>[] }).effects.find(e => e.type === 'shader')!
-    expect(eff.effectId).toBe('liquify')
-    expect(eff.params).toEqual({})
-    expect(eff.speed).toBe(1)
-    expect(eff.visible).toBe(true)
-    expect(typeof eff.id).toBe('string')
-  })
-
-  it('an UNKNOWN look is still rejected (no partial/silent apply)', () => {
-    const before = st(rect())
-    const r = run(before, 'setLayerEffect', 'r1', { effect: { type: 'shader', look: 'not a real look' } })
-    expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toBe('invalid')
-    // The rejected command must not have mutated the ORIGINAL layer object either.
-    expect((before.layers[0] as unknown as Record<string, unknown>).effects).toBeUndefined()
-  })
-})
-
-/**
  * FIX WAVE 1 — the folded legacy entry.
  *
  * `strokeStackOf` stamps the ONE entry it synthesises from a legacy layer with the sentinel

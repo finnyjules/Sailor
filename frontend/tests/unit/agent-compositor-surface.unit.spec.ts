@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import { describeCompositor, applyCompositorCommand, summarizeCompositorChange, verifyCompositor, COMPOSITOR_HINT_CEILING, type CompositorState } from '~/lib/agent/surfaces/compositor'
+import { describeCompositor, applyCompositorCommand, summarizeCompositorChange, verifyCompositor, type CompositorState } from '~/lib/agent/surfaces/compositor'
 import { effectStackOf, regionOf } from '~/lib/compositor/effectStack'
 import type { Template, TemplateInstance } from '~/lib/frametemplate/types'
 
@@ -527,94 +527,6 @@ describe('setLayerEffect writes through the effect stack', () => {
   it('still rejects an unknown effect type (no geometry allowlist regression)', () => {
     expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'explode' } } }).ok).toBe(false)
     expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'sparkle' } } }).ok).toBe(false)
-  })
-
-  // F-cap Task 1 — backdrop_luminance_mask is now a plain-DIAL kind the agent can add
-  // (sanitizeSchemaEffect, driven by EFFECT_DIAL_SCHEMA). backdrop_shader gained a curated-look
-  // vocabulary in Task 2 (see below).
-  it('adds a backdrop_luminance_mask through the agent (F6 plain-dial vocabulary, F-cap)', () => {
-    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_luminance_mask', threshold: 0.7, softness: 0.4, invert: true } } })
-    expect(r.ok).toBe(true); if (!r.ok) return
-    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'backdrop_luminance_mask') as any
-    expect(fx).toBeTruthy()
-    expect(fx.threshold).toBe(0.7)
-    expect(fx.softness).toBe(0.4)
-    expect(fx.invert).toBe(true)
-    expect(fx.visible).toBe(true)
-    expect(typeof fx.id).toBe('string')
-  })
-
-  it('clamps a backdrop_luminance_mask number and defaults a non-boolean invert', () => {
-    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_luminance_mask', threshold: 9, invert: 'yes' } } })
-    expect(r.ok).toBe(true); if (!r.ok) return
-    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'backdrop_luminance_mask') as any
-    expect(fx.threshold).toBe(1)     // clamped to [0, 1]
-    expect(fx.invert).toBe(false)    // non-boolean → the createEffect default
-  })
-
-  it('adds a backdrop_shader through the agent by naming a curated look (F-cap Task 2)', () => {
-    // backdrop_shader carries an effectId; the agent names it by a curated look word
-    // (resolveShaderLook), speed/seed are plain dials, params stay picker-only.
-    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_shader', look: 'halftone', speed: 2 } } })
-    expect(r.ok).toBe(true); if (!r.ok) return
-    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'backdrop_shader') as any
-    expect(fx).toBeTruthy()
-    expect(fx.effectId).toBe('halftone')
-    expect(fx.params).toEqual({})
-    expect(fx.speed).toBe(2)
-    expect(fx.visible).toBe(true)
-    expect(typeof fx.id).toBe('string')
-  })
-
-  it('rejects an UNKNOWN backdrop_shader look (uncurated id/word), and pins the F-cap ceiling', () => {
-    // An arbitrary/uncurated look resolves to null → the ladder reports invalid, never a
-    // silent no-op or a raw effectId reaching the engine.
-    expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_shader', look: 'made up' } } }).ok).toBe(false)
-    expect(applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'backdrop_shader' } } }).ok).toBe(false)
-    expect(COMPOSITOR_HINT_CEILING).toBe(27700)
-  })
-
-  // F-cap Task 1 — the F7 print recipes are now plain-DIAL kinds the agent can add/edit.
-  it('adds the F7 print recipes through the agent (risograph/photocopy/letterpress, F-cap)', () => {
-    const riso = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'risograph', ink: '#2b3a8c', inkTwo: '#e03a6d', levels: 4, grain: 0.16, contrast: 1.12 } } })
-    expect(riso.ok).toBe(true); if (!riso.ok) return
-    const r1 = effectStackOf(riso.template.layers[0] as any).find(e => e.type === 'risograph') as any
-    expect(r1.ink).toBe('#2b3a8c'); expect(r1.inkTwo).toBe('#e03a6d')
-    expect(r1.levels).toBe(4); expect(r1.grain).toBe(0.16); expect(r1.contrast).toBe(1.12)
-    expect(r1.visible).toBe(true); expect(typeof r1.id).toBe('string')
-
-    const photo = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'photocopy', threshold: 0.6, dirt: 0.3, contrast: 1.5 } } })
-    expect(photo.ok).toBe(true); if (!photo.ok) return
-    const p1 = effectStackOf(photo.template.layers[0] as any).find(e => e.type === 'photocopy') as any
-    expect(p1.threshold).toBe(0.6); expect(p1.dirt).toBe(0.3); expect(p1.contrast).toBe(1.5)
-
-    const letter = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'letterpress', depth: 0.7, ink: '#101010', paper: 0.4 } } })
-    expect(letter.ok).toBe(true); if (!letter.ok) return
-    const l1 = effectStackOf(letter.template.layers[0] as any).find(e => e.type === 'letterpress') as any
-    expect(l1.depth).toBe(0.7); expect(l1.ink).toBe('#101010'); expect(l1.paper).toBe(0.4)
-
-    expect(COMPOSITOR_HINT_CEILING).toBe(27700)
-  })
-
-  it('clamps out-of-range recipe numbers, falls back a bad colour, and drops unknown fields', () => {
-    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'risograph', levels: 99, ink: 'not-a-colour', bogus: 'x' } } })
-    expect(r.ok).toBe(true); if (!r.ok) return
-    const fx = effectStackOf(r.template.layers[0] as any).find(e => e.type === 'risograph') as any
-    expect(fx.levels).toBe(8)          // clamped to the schema max
-    expect(fx.ink).toBe('#2b3a8c')     // bad colour → the createEffect default
-    expect((fx as Record<string, unknown>).bogus).toBeUndefined()  // unknown field dropped
-  })
-
-  it('edits an existing recipe in place, keeping its id and unedited dials', () => {
-    const before = rectState({ effects: [{ id: 'riso1', type: 'risograph', ink: '#2b3a8c', inkTwo: '#e03a6d', levels: 4, grain: 0.16, contrast: 1.12, visible: true }] })
-    const r = applyCompositorCommand(before, { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'risograph', grain: 0.5 } } })
-    expect(r.ok).toBe(true); if (!r.ok) return
-    const stack = effectStackOf(r.template.layers[0] as any).filter(e => e.type === 'risograph')
-    expect(stack.length).toBe(1)       // edited in place, not a second entry
-    const fx = stack[0] as any
-    expect(fx.id).toBe('riso1')
-    expect(fx.grain).toBe(0.5)         // the edited dial
-    expect(fx.ink).toBe('#2b3a8c')     // unedited colour kept via base merge
   })
 
   // ── F3 geometry kinds through the agent (boolean/morph/warp/long_shadow/shatter) ──

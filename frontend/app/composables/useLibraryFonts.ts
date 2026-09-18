@@ -10,15 +10,6 @@ function cssEscape(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 }
 
-/** CSS `format()` token for a face's on-disk file, by extension. Manifest faces
- *  ship as .otf/.ttf/.woff2 (see the manifest walker); default to opentype for
- *  any other/unknown extension. */
-function faceFormat(src: string): string {
-  if (src.endsWith('.woff2')) return 'woff2'
-  if (src.endsWith('.ttf')) return 'truetype'
-  return 'opentype'
-}
-
 /** All @font-face rules for a family (one per face). Pure — unit-tested. */
 export function familyFaceCss(fam: LibraryFamily): string {
   return fam.faces.map(face =>
@@ -26,7 +17,7 @@ export function familyFaceCss(fam: LibraryFamily): string {
     + `font-weight:${face.weight};`
     + `font-style:${face.italic ? 'italic' : 'normal'};`
     + `font-display:swap;`
-    + `src:url('${libraryFontUrl(face.id)}') format('${faceFormat(face.src)}')}`,
+    + `src:url('${libraryFontUrl(face.id)}') format('opentype')}`,
   ).join('')
 }
 

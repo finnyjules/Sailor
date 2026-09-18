@@ -1,6 +1,6 @@
 import { hostedModeEnabled } from '~/lib/hostedMode'
 
-const directExecutionEnabled = ref(true)
+const directExecutionEnabled = ref(false)
 let listenerRegistered = false
 
 /**
@@ -28,13 +28,7 @@ export function directExecutionDefault(stored: string | null): boolean {
  * unmetered. Local mode keeps the default-OFF beta behavior byte-for-byte.
  */
 export function directExecutionResolved(stored: string | null, hosted: boolean): boolean {
-  // Tier 1 (bridge retirement): direct execution is now the ONLY dispatch path
-  // in every mode — the bridge iframe/queuePrompt route is being removed. Dev no
-  // longer falls back to the bridge, so this resolves ON unconditionally.
-  // (Previous behaviour: `hosted || directExecutionDefault(stored)`.) To restore
-  // the dev bridge toggle for debugging, revert this and the `ref(true)` above.
-  void stored; void hosted
-  return true
+  return hosted || directExecutionDefault(stored)
 }
 
 export function useDirectExecutionEnabled() {

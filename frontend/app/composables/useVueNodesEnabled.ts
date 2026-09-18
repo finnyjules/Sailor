@@ -26,13 +26,7 @@ export function vueNodesDefault(stored: string | null): boolean {
  * Local mode keeps the stored setting byte-for-byte.
  */
 export function vueNodesResolved(stored: string | null, hosted: boolean): boolean {
-  // Tier 1 (bridge retirement): the VueFlow canvas is now the ONLY canvas in
-  // every mode. The LiteGraph canvas mode rode the bridge iframe, which is being
-  // removed, so an explicit stored 'false' can no longer route there — it would
-  // wait out a 120s bridge timeout on an empty canvas. Resolve ON unconditionally.
-  // (Previous behaviour: `hosted || vueNodesDefault(stored)`.)
-  void stored; void hosted
-  return true
+  return hosted || vueNodesDefault(stored)
 }
 
 export function useVueNodesEnabled() {

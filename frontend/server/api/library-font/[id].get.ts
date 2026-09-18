@@ -4,7 +4,7 @@
  * Mirrors server/api/template-fonts/file/[name].get.ts.
  */
 import { readFile } from 'node:fs/promises'
-import { resolveLibraryFontPath, libraryFontsRoot, contentTypeForPath } from '~~/server/utils/libraryFontManifest'
+import { resolveLibraryFontPath, libraryFontsRoot } from '~~/server/utils/libraryFontManifest'
 
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
   const buf = await readFile(path).catch(() => null)
   if (!buf) throw createError({ statusCode: 404, statusMessage: 'Font file missing' })
 
-  setHeader(event, 'content-type', contentTypeForPath(path))
+  setHeader(event, 'content-type', 'font/otf')
   setHeader(event, 'cache-control', 'public, max-age=31536000, immutable')
   return buf
 })

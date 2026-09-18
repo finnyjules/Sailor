@@ -14,15 +14,14 @@ import type { SceneDoc, SceneObject, SceneMaterial, Vec3, LightingPreset, Primit
 import { LIGHT_DEFAULTS, DEFAULT_FONT_URL } from './config'
 import { buildDecalMesh, decalTextureFor, decalKeyFor, decalContentKey, releaseDecalTexture } from './decals'
 import { buildEnvironmentScene, type GelEnvOptions } from './environments'
-import { orderParentsFirst, worldMatrixOf } from './hierarchy'
+import { orderParentsFirst } from './hierarchy'
 import { loadGlb, clearGlbCache, ensureUv } from './glb'
 import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/contextRegistry'
 import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/lib/scene3d/outlines'
-import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime, type RestyleSpec } from './materials'
+import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime } from './materials'
 import { refreshImageBounds, type ImageUniforms } from './imageShader'
-import { applyModifiers, applyModifierStack, type ModifierApplyCtx } from '~/lib/scene3d/modifiers'
-import { PRIMITIVE_PARAMS, paramValue, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
-import { modifierStackOf, MODIFIER_KIND_PARAMS, type ModifierInstance } from '~/lib/scene3d/modifierStack'
+import { applyModifiers } from '~/lib/scene3d/modifiers'
+import { PRIMITIVE_PARAMS, paramValue, MODIFIER_SPECS, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
 import type { VarySettings } from '~/lib/vary'
 import { pathToShapes } from './svgPath'
 import { buildLightWidget, setWidgetSelected, disposeWidget } from '~/lib/scene3d/lightWidgets'
@@ -30,15 +29,10 @@ import { PostChain, postEnabled, DEFAULT_POST, type PostSettings } from '~/lib/s
 import { collectEditorHelpers } from '~/lib/scene3d/passes'
 import { syncTreatmentShells } from './treatmentShells'
 import { TreatmentStage } from './treatmentStage'
-import { maskedTreatmentPlan, bufferTreatmentPlan, finishPlan, motionTreatmentPlan, objectRestylePlan } from './treatments'
-import type { ScreenVelocity, LocalPose } from './motion/velocity'
+import { maskedTreatmentPlan } from './treatments'
 import { meshCacheGet, loadMesh } from '~/lib/scene3d/meshCache'
 import { geometryFromMeshData } from '~/lib/scene3d/mesh'
-import { gemGeometry, GEM_CUTS } from './gem'
-import { envSceneToEquirect, ambientFloorByte } from './pathtrace/envEquirect'
-import { loadHdriEquirect } from './hdriLoader'
-import { overscanFov } from './resolutionGate'
-import type { ScenePathTracer } from './pathtrace/PathTracer'
+import { gemGeometry } from './gem'
 
 /** Private THREE layer used to overlay editor gizmos on top of the post-processed
  *  image without bloom/grade catching them. Nothing else in the scene uses layers,
@@ -217,7 +211,7 @@ export function geometryFor(
       return data ? geometryFromMeshData(data) : new THREE.BoxGeometry(0.3, 0.3, 0.3)
     }
     case 'gem':
-      return gemGeometry(p('points'), p('spread'), p('depth'), p('gemSeed'), GEM_CUTS[Math.round(p('cut'))] ?? 'raw')
+      return gemGeometry(p('points'), p('spread'), p('depth'), p('gemSeed'))
   }
 }
 
@@ -259,13 +253,9 @@ export function baseSizeFor(
   modifiers?: Record<string, number>,
   content?: PrimitiveContent,
   vary?: VarySettings,
-  stack?: ModifierInstance[],
 ): [number, number, number] {
   const font = kind === 'text' ? fontCacheGet(content?.font ?? DEFAULT_FONT_URL) : null
-  // `stack` threaded because the size row's caller has the whole object and the bounding
-  // extent depends on deform ORDER (twist-then-bend ≠ bend-then-twist); on the bag path a
-  // reordered stack would read the wrong size. Legacy objects fold identically (byte-identity).
-  const geo = buildGeometry(kind, params, modifiers, 'smooth', content, font, vary ? { ...vary, colorEnabled: false } : undefined, stack)
+  const geo = buildGeometry(kind, params, modifiers, 'smooth', content, font, vary ? { ...vary, colorEnabled: false } : undefined)
   geo.computeBoundingBox()
   const b = geo.boundingBox!
   const size: [number, number, number] = [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z]
@@ -293,13 +283,7 @@ export function baseSizeFor(
  *  colour ACROSS copies — so threading it here would buy nothing and cost the palette
  *  resolution and the merge this function forces off, on a path that runs per slider
  *  tick. (With the clone counts pinned to 1, `applyModifiers` skips `planClones`/
- *  `mergeClones` entirely, so no colour work happens today either way.)
- *
- *  No `stack` param, unlike `baseSizeFor`: this counts vertices of ONE copy, and a single
- *  copy's vertex COUNT is invariant to deform ORDER — taper/twist/bend/noise/jitter move
- *  vertices but never add or remove them, and subdivision's iteration count folds identically
- *  from the bag. So the folded-bag estimate equals the stack estimate for any equivalent state;
- *  threading the stack would buy nothing on a per-tick cost readout. */
+ *  `mergeClones` entirely, so no colour work happens today either way.) */
 export function baseVertexCountFor(
   kind: PrimitiveKind,
   params?: Record<string, number>,
@@ -322,23 +306,19 @@ export function baseVertexCountFor(
  *  SceneEngine/GL context. */
 export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): string {
   const vals = PRIMITIVE_PARAMS[obj.primitive].map((s) => paramValue(obj.primitive, obj.params, s.key))
-  // The modifier segment keys on the ORDERED stack, not a fixed spec sweep: reorder and
-  // duplicate both change the geometry `applyModifierStack` produces, so both must change the
-  // key — order is part of the string, rows are not a set. Routing through `modifierStackOf`
-  // (the same read-through the renderer uses) also makes a stored `modifierStack` hash IDENTICALLY
-  // to its equivalent folded legacy bag, so persisting the stack on first edit (writeModifierStack)
-  // rebuilds no geometry. Each row is `kind:enabled:params`, rows joined by ';'; bounded and small.
-  //
-  // `varyColorStrength` stays OUT, by construction: it belongs to no modifier kind, so it is
-  // naturally absent from every row's params (MODIFIER_KIND_PARAMS) — do NOT add it back. It
-  // changes no VERTEX DATA; the merged geometry carries the raw palette colour and the strength
-  // is a shader uniform (`materialFor`/`updateMaterial` take it as a parameter). Baking it here
-  // meant disposing the geometry and re-merging all N clone copies on every tick of the Colour
-  // strength slider to produce byte-identical vertices. If the strength ever gets baked in, it
-  // belongs back in this key.
-  const mods = modifierStackOf(obj)
-    .map((row) => `${row.kind}:${row.enabled === false ? 0 : 1}:${MODIFIER_KIND_PARAMS[row.kind].map((k) => modifierValue(row, k)).join(',')}`)
-    .join(';')
+  const mods: number[] = []
+  for (const s of MODIFIER_SPECS) {
+    // `varyColorStrength` is the ONE modifier deliberately left out of this key, and
+    // the exclusion is by name so it stays a decision rather than an accident. Every
+    // other modifier changes VERTEX DATA; the strength does not — the merged geometry
+    // carries the raw palette colour and the strength is applied as a shader uniform
+    // (`materialFor`/`updateMaterial` take it as a parameter). Including it meant
+    // disposing the geometry and re-merging all N clone copies on every tick of the
+    // Colour strength slider to produce byte-identical vertices. Safe precisely
+    // because the strength is not baked in: if that ever changes, it belongs back here.
+    if (s.key === 'varyColorStrength') continue
+    mods.push(modifierValue(obj.modifiers, s.key))
+  }
   // Neither an svgPath's `d` (several KB) nor a mesh's vertex buffer (tens of
   // KB) may reach this key: it is rebuilt on EVERY sync for EVERY object, and
   // stringifying either would put tens of KB of string work on the drag path.
@@ -347,54 +327,22 @@ export function geoKeyFor(obj: PrimitiveObject, variant: 'smooth' | 'facet'): st
   const content = c
     ? JSON.stringify({ ...c, ...(c.pathKey ? { path: undefined } : {}), ...(c.meshKey ? { mesh: undefined } : {}) })
     : ''
-  // Cloner Vary bakes into GEOMETRY, so its numeric dials MUST be in the key: in random and
-  // falloff modes `varyStepFactor` damps each copy's step rotate/scale (moving the copies), and
-  // colour-on writes a per-copy colour ATTRIBUTE into the merged buffer. Change any of these and
-  // the clone geometry is stale until it is rebuilt. They live in the `modifiers` bag, NOT the
-  // modifier stack (Vary is a material/cloner feature, never a modifier row — see modifierStack),
-  // so they are read here directly rather than through the stack segment above. `varyColorStrength`
-  // is the ONE dial deliberately excluded (see the modifier-stack comment above): it is a pure
-  // shader uniform that `materialFor`/`updateMaterial` set in place with no geometry rebuild.
-  const varyDials = ['varyMode', 'varySeed', 'varyColor', 'varyColorSpread', 'varyFalloffCenter', 'varyFalloffRadius']
-    .map((k) => modifierValue(obj.modifiers, k))
-    .join(',')
-  // The Vary PALETTE is a string[], so unlike the numeric dials above it can't ride the joined
-  // number segment — without it, editing a swatch would leave the old clone colours on screen.
-  // Joined rather than digested, against the bulky-string rule two comments up, because a palette
-  // is BOUNDED at VARY_PALETTE_MAX (8) short hex strings — about 60 characters, versus the
-  // kilobytes `pathKey`/`meshKey` stand in for. That bound is the whole justification: anything
-  // unbounded added to this key must be a digest instead.
+  // The Vary PALETTE is a string[], so unlike the seven numeric vary dials it is not in
+  // the MODIFIER_SPECS sweep above — without it, editing a swatch would leave the old
+  // clone colours on screen. Joined rather than digested, against the bulky-string rule
+  // two comments up, because a palette is BOUNDED at VARY_PALETTE_MAX (8) short hex
+  // strings — about 60 characters, versus the kilobytes `pathKey`/`meshKey` stand in
+  // for. That bound is the whole justification: anything unbounded added to this key
+  // must be a digest instead.
   //
-  // Deliberately the RAW field, not `varySettingsFor(obj).palette`: the resolved settings
-  // substitute DEFAULT_VARY.palette for an absent one, so an object that happens to store a copy
-  // of the defaults would key differently from one that stores nothing while rendering the same —
-  // one extra rebuild, in a state the palette editor cannot actually produce.
+  // Deliberately the RAW field, not `varySettingsFor(obj).palette`: the resolved
+  // settings substitute DEFAULT_VARY.palette for an absent one, so an object that
+  // happens to store a copy of the defaults would key differently from one that stores
+  // nothing while rendering the same — one extra rebuild, in a state the palette editor
+  // cannot actually produce. Completeness is what this key owes; reading seven more
+  // modifier values per object per sync to buy that last bit of precision is not worth it.
   const vary = obj.varyPalette?.join(',') ?? ''
-  return `${obj.primitive}|${vals.join(',')}|${mods}|${variant}|${content}|${varyDials}|${vary}`
-}
-
-/** The boolean-sibling segment appended to `geoKeyFor(obj)` at the engine call site (where the doc
- *  is reachable, unlike the pure `geoKeyFor`). A boolean combines `obj` with a SIBLING, so editing
- *  OR moving the sibling must rebuild this object — neither shows up in `obj`'s own fields. Each
- *  enabled boolean row contributes its sibling's `geoKeyFor` (so the sibling's params/modifiers
- *  changing rebuilds this object) AND the relative transform `inverse(thisWorld) · siblingWorld`
- *  (so moving either object rebuilds it, since that matrix is baked into the merged geometry). A
- *  missing / self / non-primitive sibling folds to a stable "none" token. Empty when `obj` has no
- *  enabled boolean rows, so a non-boolean object's key is byte-identical to before. */
-export function booleanRefKeys(obj: PrimitiveObject, doc: SceneDoc | null): string {
-  const rows = modifierStackOf(obj).filter((r) => r.kind === 'boolean' && r.enabled !== false)
-  if (rows.length === 0) return ''
-  const parts = rows.map((r) => {
-    const refId = r.refObjectId
-    if (!refId || refId === obj.id || !doc) return `${r.id}:none`
-    const sib = doc.objects.find((o) => o.id === refId)
-    if (!sib || sib.kind !== 'primitive') return `${r.id}:none`
-    const selfInv = worldMatrixOf(doc.objects, obj.id).invert()
-    const rel = new THREE.Matrix4().multiplyMatrices(selfInv, worldMatrixOf(doc.objects, sib.id))
-    const relKey = rel.elements.map((n) => n.toFixed(3)).join(',')
-    return `${r.id}:${geoKeyFor(sib, 'smooth')}@${relKey}`
-  })
-  return `|bool:${parts.join(';')}`
+  return `${obj.primitive}|${vals.join(',')}|${mods.join(',')}|${variant}|${content}|${vary}`
 }
 
 /** Bake each triangle's own bounding extent into per-vertex attributes
@@ -440,14 +388,7 @@ function addFaceExtentAttributes(geo: THREE.BufferGeometry): void {
  *  omitting it is exactly the pre-Vary behaviour: the cloner then plans copies with
  *  no per-copy variation and writes no colour attribute. Callers with a
  *  `PrimitiveObject` in scope pass it; the standalone measuring helpers above do
- *  not, since they have only the loose kind/params/modifiers triple.
- *
- *  `stack` is the object's ordered modifier stack (`modifierStackOf(obj)`). When
- *  given, it — not the flat `modifiers` bag — decides the geometry, so a written
- *  stack (reordered / duplicated rows) actually renders. For a LEGACY object it is
- *  the folded bag, so `applyModifierStack(base, that)` is byte-identical to the bag
- *  path (Task 2). Omit it (measuring helpers) and the legacy `modifiers` bag path
- *  runs unchanged. */
+ *  not, since they have only the loose kind/params/modifiers triple. */
 export function buildGeometry(
   kind: PrimitiveKind,
   params: Record<string, number> | undefined,
@@ -456,16 +397,11 @@ export function buildGeometry(
   content?: PrimitiveContent,
   font?: Font | null,
   vary?: VarySettings,
-  stack?: ModifierInstance[],
-  ctx?: ModifierApplyCtx,
 ): THREE.BufferGeometry {
   const base = geometryFor(kind, params, content, font)
-  // applyModifiers/applyModifierStack return the SAME object when nothing is set (and
-  // never dispose their input), so only free the base when it produced a new one. When a
-  // stack is supplied it is authoritative; otherwise fold the legacy bag as before. `ctx` carries
-  // a boolean row's resolved sibling geometry — only relevant on the stack path (a legacy bag
-  // never holds a boolean), so it rides alongside `vary` there.
-  const shaped = stack ? applyModifierStack(base, stack, { vary, ctx }) : applyModifiers(base, modifiers, vary)
+  // applyModifiers returns the SAME object when nothing is set (and never
+  // disposes its input), so only free the base when it produced a new one.
+  const shaped = applyModifiers(base, modifiers, vary)
   if (shaped !== base) base.dispose()
   if (variant !== 'facet') return shaped
   let geo = shaped
@@ -495,14 +431,8 @@ export function buildGeometry(
  *  updated in place while its type holds, same as the primitive path. Off
  *  restores the baked material and frees the override. Light View swaps the
  *  shared clay on top without losing either. */
-function syncGlbMaterials(root: THREE.Object3D, obj: GlbObject, lightView: boolean, clay: THREE.Material, ownerId: string, restyle: RestyleSpec): void {
+function syncGlbMaterials(root: THREE.Object3D, obj: GlbObject, lightView: boolean, clay: THREE.Material, ownerId: string): void {
   const override = obj.materialOverride === true
-  // S7.1: an AI restyle projects its cached result onto the surface through the object's MATERIAL
-  // (restyleProjection.ts). Imported loader materials aren't ours to inject, so a restyle needs a
-  // material WE build — we therefore build the override material whenever a restyle is active, even
-  // if the user hasn't overridden the base look. Without this, a restyle on a generated GLB (Julien's
-  // flower) is baked + cached but never painted. Absent restyle ⇒ this is byte-identical to before.
-  const useOverride = override || !!restyle
   // Faceted/prismatic gradient shading samples per-face extent attributes
   // (aFaceMin/aFaceMax) that only primitive geometry bakes — imported meshes
   // fall back to the smooth ramp.
@@ -513,15 +443,14 @@ function syncGlbMaterials(root: THREE.Object3D, obj: GlbObject, lightView: boole
     const m = c as THREE.Mesh
     if (!m.isMesh) return
     if (m.userData.origMaterial === undefined) m.userData.origMaterial = m.material
-    if (useOverride) {
+    if (override) {
       let ov = m.userData.overrideMaterial as THREE.Material | undefined
       // No Vary strength: `GlbObject` has no `modifiers` bag and no cloner, so an
       // imported mesh's geometry never carries the `varyTint` stamp and there is
-      // nothing for a strength to blend. Omitting it is the whole story here. The restyle
-      // spec IS threaded (last arg) so the projection coats the imported surface.
-      if (!ov || !updateMaterial(ov, mat, m.geometry, undefined, undefined, restyle)) {
+      // nothing for a strength to blend. Omitting it is the whole story here.
+      if (!ov || !updateMaterial(ov, mat, m.geometry)) {
         if (ov) disposeMaterial(ov)
-        ov = materialFor(mat, m.geometry, ownerId, undefined, undefined, restyle)
+        ov = materialFor(mat, m.geometry, ownerId)
         m.userData.overrideMaterial = ov
       }
       // Same in-place bbox refresh as the primitive path: a gradient spans the
@@ -576,28 +505,6 @@ export class SceneEngine {
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
   readonly objectRoots = new Map<string, THREE.Object3D>()
-  /** Per-object screen velocities / past poses for the S6 motion treatment family, pushed in
-   *  from the seam that still holds the doc + t01 (the live loop / renderMotionFrame) because
-   *  the stage is stateless. Both default EMPTY, so an ordinary scene (and every render that
-   *  never sets them) pays nothing and stays byte-identical. */
-  private motionVelocities = new Map<string, ScreenVelocity>()
-  private ghostPoses = new Map<string, LocalPose[]>()
-  setMotionVelocities(m: Map<string, ScreenVelocity>): void { this.motionVelocities = m }
-  setGhostPoses(m: Map<string, LocalPose[]>): void { this.ghostPoses = m }
-  /** Per-object decoded restyle result textures for the S7 AI restyle family, keyed by object id.
-   *  Pushed in each frame from the surface's client-side texture cache (a pure map lookup — never
-   *  a fetch or a model call) at the seam that owns the doc + cache. Defaults EMPTY, so an
-   *  ordinary scene (and every render that never sets it) pays nothing and stays byte-identical;
-   *  a miss for a restyle host makes its stage composite draw the plain object (a no-op). */
-  private restyleTextures = new Map<string, THREE.Texture>()
-  setRestyleTextures(m: Map<string, THREE.Texture>): void { this.restyleTextures = m }
-  /** The restyle spec (enabled plan + its decoded texture) for one object, or null when either is
-   *  absent. Shared by the primitive and GLB material paths so both project a cached restyle. */
-  private restyleSpecFor(obj: SceneObject): RestyleSpec {
-    const rp = objectRestylePlan(obj)
-    const rtex = rp ? this.restyleTextures.get(obj.id) ?? null : null
-    return rp && rtex ? { t: rp, tex: rtex } : null
-  }
   readonly grid: THREE.GridHelper
   /** Stable per-instance id, never reused — see `_nextSceneEngineId`'s doc above. */
   readonly id: string = `scene3d${_nextSceneEngineId++}`
@@ -605,11 +512,6 @@ export class SceneEngine {
   // in the beauty render. Public so the bake can hide it for the depth/normal
   // passes (it must not appear as a floor in the ControlNet maps).
   readonly shadowGround: THREE.Mesh
-  /** A REAL matte floor used ONLY in cinematic (the ShadowMaterial catcher above is meaningless to
-   *  the path tracer). Kept in the scene, `visible` gated to cinematic + showFloor, so it catches
-   *  true contact shadows + the gem's coloured caustics. Skipped by the raster renderer (invisible)
-   *  and by the tracer BVH when invisible. */
-  private readonly cinematicFloor: THREE.Mesh
   private sun: THREE.DirectionalLight
   private ambient: THREE.AmbientLight
   private envTarget: THREE.WebGLRenderTarget | null = null
@@ -629,18 +531,6 @@ export class SceneEngine {
    *  and compared via `envGelSig` so any gel edit re-bakes (only while colorGels is live). */
   private envGel: GelEnvOptions | null = null
   private envGelSig = ''
-  /** Active Poly Haven HDRI slug (overrides the procedural env), the loaded equirect it resolved
-   *  to, and a token so a rapid switch's slow async load can't overwrite a newer selection. The
-   *  equirect is owned by hdriLoader's cache — the engine points env/background/tracer at it but
-   *  never disposes it. */
-  private hdriSlug: string | null = null
-  private hdriEquirect: THREE.DataTexture | null = null
-  private hdriToken = 0
-  /** Resolution gate: the LIVE viewport camera overscans to `_gateAspect` so the output frame is
-   *  always visible (the overlay draws it). `_baseFov` is the TRUE fov an export uses — see
-   *  `baseFov` / passes.ts — so what's inside the gate is exactly what gets rendered. */
-  private _baseFov = 45
-  private _gateAspect: number | null = null
   private glbTokens = new Map<string, number>() // id → load generation (drop stale async loads)
   private fontTokens = new Map<string, number>() // id → font-load generation, same drop-stale contract as glbTokens
   private meshTokens = new Map<string, number>()
@@ -737,18 +627,7 @@ export class SceneEngine {
     this.shadowGround.rotation.x = -Math.PI / 2
     this.shadowGround.position.y = -0.005 // just under y=0 so it never z-fights the grid
     this.shadowGround.receiveShadow = true
-    // Real cinematic floor: a large dark, slightly-glossy matte plane. Roughness 0.5 catches soft
-    // reflections + caustics without mirroring; envMap picks up the studio/HDRI so it reads as a real
-    // surface. Invisible until cinematic turns it on (setCinematic / syncFromDoc).
-    this.cinematicFloor = new THREE.Mesh(
-      new THREE.PlaneGeometry(200, 200),
-      new THREE.MeshStandardMaterial({ color: 0x15151a, roughness: 0.5, metalness: 0 }),
-    )
-    this.cinematicFloor.rotation.x = -Math.PI / 2
-    this.cinematicFloor.position.y = this.shadowGround.position.y
-    this.cinematicFloor.receiveShadow = true
-    this.cinematicFloor.visible = false
-    this.scene.add(this.sun, this.ambient, this.grid, this.shadowGround, this.cinematicFloor)
+    this.scene.add(this.sun, this.ambient, this.grid, this.shadowGround)
     this.canvas = canvas
     canvas.addEventListener('webglcontextlost', this.handleContextLost, false)
     canvas.addEventListener('webglcontextrestored', this.handleContextRestored, false)
@@ -789,38 +668,6 @@ export class SceneEngine {
     pmrem.dispose()
   }
 
-  /** Apply a Poly Haven HDRI as the environment. Async (fetch + parse), so `hdriSlug` is set
-   *  immediately (intent) and the GPU work happens when the equirect resolves; a `hdriToken`
-   *  guards against a slow load landing after a newer selection. On success: PMREM for the raster
-   *  preview, the equirect straight into the background + the cinematic tracer (full HDR energy).
-   *  A failed load keeps whatever env was showing. */
-  private applyHdriEnvironment(slug: string): void {
-    const token = ++this.hdriToken
-    this.hdriSlug = slug
-    loadHdriEquirect(slug).then((equirect) => {
-      if (token !== this.hdriToken) return // superseded by a newer selection
-      const pmrem = new THREE.PMREMGenerator(this.renderer)
-      this.envTarget?.dispose()
-      this.envTarget = pmrem.fromEquirectangular(equirect)
-      pmrem.dispose()
-      this.scene.environment = this.envTarget.texture
-      this.hdriEquirect = equirect
-      // The cube backdrop belonged to the procedural world; the HDRI shows its own equirect.
-      // (Leaving the HDRI later forces a procedural rebuild via the `hdriSlug !== null` guard.)
-      this.envBackgroundTarget?.dispose()
-      this.envBackgroundTarget = null
-      if (this.lastDoc?.background === 'environment') this.scene.background = equirect
-      // Re-point the live cinematic trace at the real HDR env (no bake, no ambient floor needed).
-      if (this._cinematic && this.pathTracer?.isActive) this.cinematicRefresh(true)
-    }).catch(() => { /* network/parse failure — keep the current environment */ })
-  }
-
-  /** The texture the cinematic tracer lights from: the loaded HDRI equirect when one is active
-   *  (real HDR — used directly), else the procedural env baked to an 8-bit equirect. */
-  private get cinematicEnvTexture(): THREE.Texture | null {
-    return this.hdriSlug ? this.hdriEquirect : this.cinematicEnv
-  }
-
   // WebGL context loss leaves the renderer permanently blank with NO throwable
   // error (three only console.logs "Context Lost."), so without these handlers a
   // dropped context — a background tab reclaim, too many live WebGL contexts
@@ -849,8 +696,7 @@ export class SceneEngine {
    *  the live context (rather than trusting three's stale per-buffer cache). */
   private restoreGLResources(): void {
     try { RectAreaLightUniformsLib.init() } catch { /* no-op on a headless/lost path */ }
-    if (this.hdriSlug) this.applyHdriEnvironment(this.hdriSlug) // re-fetch (cached) + rebuild PMREM
-    else this.buildEnvironment()
+    this.buildEnvironment()
     this.postChain?.dispose()
     this.postChain = null
     this.postW = this.postH = 0
@@ -882,32 +728,14 @@ export class SceneEngine {
   setSize(width: number, height: number): void {
     this.renderer.setSize(width, height, false)
     this.camera.aspect = width / height
-    this.applyViewportFov() // pane aspect changed → recompute any overscan
-  }
-
-  /** The TRUE fov (degrees) an export/bake renders at — the doc's fov, NOT the viewport's overscan. */
-  get baseFov(): number { return this._baseFov }
-
-  /** Turn the resolution gate on (viewport overscans to `outputAspect`) or off (null). */
-  setResolutionGate(outputAspect: number | null): void {
-    this._gateAspect = outputAspect && outputAspect > 0 ? outputAspect : null
-    this.applyViewportFov()
-  }
-
-  /** Apply the viewport fov: overscanned to fit the output frame when the gate is on, else the true
-   *  fov. Export/bake overrides fov back to `baseFov`, so only the on-screen view is widened. */
-  private applyViewportFov(): void {
-    this.camera.fov = this._gateAspect
-      ? overscanFov(this._baseFov, this.camera.aspect || 1, this._gateAspect)
-      : this._baseFov
     this.camera.updateProjectionMatrix()
   }
 
   applyCameraFromDoc(doc: SceneDoc): void {
     this.camera.position.set(...doc.camera.position)
     this.camera.lookAt(...doc.camera.target)
-    this._baseFov = doc.camera.fov
-    this.applyViewportFov()
+    this.camera.fov = doc.camera.fov
+    this.camera.updateProjectionMatrix()
   }
 
   setLightView(on: boolean): void {
@@ -915,68 +743,6 @@ export class SceneEngine {
     this.lightView = on
     for (const obj of this.lastDoc?.objects ?? []) this.syncObject(obj) // re-apply materials/visibility
     this.updateLightWidgets() // no-op until Task 3; safe to call
-  }
-
-  // ── Cinematic (path-traced) view mode ──────────────────────────────────────
-  // The heavy three-gpu-pathtracer wrapper is dynamic-imported so it never lands in the main
-  // bundle; the equirect env baker is three-only (statically imported, cheap). When cinematic is
-  // active, `render()` routes to the tracer (progressive accumulation) instead of the raster path,
-  // so a host that keeps calling `render()` each frame refines the image and idles when converged.
-  private _cinematic = false
-  private pathTracer: ScenePathTracer | null = null
-  private cinematicEnv: THREE.DataTexture | null = null
-
-  get cinematicActive(): boolean { return this._cinematic }
-  cinematicStatus(): { samples: number; compiling: boolean } {
-    return { samples: this.pathTracer?.samples ?? 0, compiling: this.pathTracer?.isCompiling ?? false }
-  }
-
-  /** Enter/leave cinematic. Async because it lazy-loads the tracer on first use. */
-  async setCinematic(on: boolean): Promise<void> {
-    if (this._cinematic === on) return
-    this._cinematic = on
-    if (on) {
-      if (!this.pathTracer) {
-        const { ScenePathTracer } = await import('./pathtrace/PathTracer')
-        this.pathTracer = new ScenePathTracer(this.renderer)
-      }
-      this.cinematicFloor.visible = this.lastDoc?.showFloor ?? true // real floor instead of the catcher
-      this.rebuildCinematicEnv()
-      this.pathTracer.begin(this.scene, this.camera, this.cinematicEnvTexture)
-    } else {
-      this.cinematicFloor.visible = false
-      this.pathTracer?.end()
-    }
-  }
-
-  /** Prepare the env the tracer lights from. An active HDRI is fed DIRECTLY (a real HDR equirect —
-   *  no bake, no ambient floor); otherwise bake the procedural env to an 8-bit equirect with the
-   *  ambient fill floored in. `cinematicEnvTexture` then returns whichever applies. */
-  private rebuildCinematicEnv(): void {
-    if (this.hdriSlug) { this.cinematicEnv?.dispose(); this.cinematicEnv = null; return }
-    this.cinematicEnv?.dispose()
-    const envScene = buildEnvironmentScene(this.envKind, this.envGel ?? undefined)
-    // Bake in the raster's ambient fill (the tracer won't sample AmbientLight). Pre-divided by the
-    // preset's envIntensity so the fill lands near `lighting.ambient` after the tracer scales the env.
-    const amb = this.lastDoc?.lighting.ambient ?? 0
-    const envI = PRESETS[this.lastDoc?.lighting.preset ?? 'studio'].envIntensity
-    this.cinematicEnv = envSceneToEquirect(this.renderer, envScene, 512, ambientFloorByte(amb, envI))
-    envScene.dispose()
-  }
-
-  /** Discard accumulation (a material/lighting tweak that didn't change geometry). */
-  cinematicReset(): void { this.pathTracer?.reset() }
-
-  /** Rebuild the trace after a geometry/scene edit (new BVH) and, if the env moved, re-bake it. */
-  cinematicRefresh(envChanged = false): void {
-    if (!this._cinematic || !this.pathTracer?.isActive) return
-    if (envChanged) {
-      this.pathTracer.end()
-      this.rebuildCinematicEnv()
-      this.pathTracer.begin(this.scene, this.camera, this.cinematicEnvTexture)
-    } else {
-      this.pathTracer.rebuild(this.scene, this.camera)
-    }
   }
 
   setSelected(id: string | null): void {
@@ -1040,44 +806,22 @@ export class SceneEngine {
     // any gel field changes, since they're baked into the reflected/refracted world. Gel edits
     // are inspector-only (not animatable), so this never fires per frame.
     const gel = gelOptionsFor(doc.lighting)
-    const wantHdri = doc.lighting.hdri || null
-    if (wantHdri) {
-      // An HDRI overrides the procedural env. Load (async) + apply only on an actual change.
-      if (wantHdri !== this.hdriSlug) this.applyHdriEnvironment(wantHdri)
-    } else {
-      // No HDRI: (re)build the procedural env on a kind switch, when LEAVING an HDRI, or — only
-      // while colorGels is live — when any gel field changes (they bake into the reflected world).
-      const gelChanged = doc.lighting.environment === 'colorGels' && JSON.stringify(gel) !== this.envGelSig
-      if (this.hdriSlug !== null || doc.lighting.environment !== this.envKind || gelChanged) {
-        this.hdriSlug = null
-        this.hdriEquirect = null
-        this.buildEnvironment(doc.lighting.environment, gel)
-      }
+    const gelChanged = doc.lighting.environment === 'colorGels' && JSON.stringify(gel) !== this.envGelSig
+    if (doc.lighting.environment !== this.envKind || gelChanged) {
+      this.buildEnvironment(doc.lighting.environment, gel)
     }
-    // An HDRI drives its OWN exposure (a real HDR carries its own energy); the procedural preset
-    // multiplier only shapes the procedural panels. Rotation spins the studio (highlights move).
-    this.scene.environmentIntensity = wantHdri ? doc.lighting.hdriExposure : preset.envIntensity
-    if (wantHdri) {
-      const rot = (doc.lighting.hdriRotation * Math.PI) / 180
-      this.scene.environmentRotation.set(0, rot, 0)
-      this.scene.backgroundRotation.set(0, rot, 0)
-    } else {
-      this.scene.environmentRotation.set(0, 0, 0)
-      this.scene.backgroundRotation.set(0, 0, 0)
-    }
+    this.scene.environmentIntensity = preset.envIntensity
     this.scene.background =
       doc.background === 'transparent' ? null
-      : doc.background === 'environment' ? (this.hdriEquirect ?? this.envBackgroundTarget?.texture ?? null)
+      : doc.background === 'environment' ? (this.envBackgroundTarget?.texture ?? null)
       : new THREE.Color(stripAlpha(doc.background))
     // Floor = the reference grid + the shadow-catcher ground. Off ⇒ a clean floating
     // look in the viewport AND the beauty bake (renderPasses keeps the grid hidden and
     // renders beauty with the ground's current visibility, so this carries into export).
     this.grid.visible = doc.showFloor
     this.shadowGround.visible = doc.showFloor
-    // The real cinematic floor stands in for the shadow-catcher only while cinematic is live.
-    this.cinematicFloor.visible = this._cinematic && doc.showFloor
-    this._baseFov = doc.camera.fov
-    this.applyViewportFov()
+    this.camera.fov = doc.camera.fov
+    this.camera.updateProjectionMatrix()
   }
 
   /** Resolves a primitive's geometry, handling `text`'s async font dependency.
@@ -1149,83 +893,7 @@ export class SceneEngine {
     // the Vary settings — the numeric dials from `obj.modifiers`, the swatches from
     // `obj.varyPalette` (which is not in the modifier bag, and so is folded into
     // `geoKeyFor` separately). Everything gating this call on the key is above.
-    //
-    // Boolean rows also need the whole object AND the doc in scope, since a boolean combines this
-    // object with a SIBLING. Resolve each enabled boolean row's sibling into this object's local
-    // space here, hand them to buildGeometry via `ctx`, and dispose them after the build (the
-    // merge only reads their vertex buffers — the merged result is a fresh geometry).
-    // Only objects with a live doc AND an enabled boolean row need the sibling resolution; every
-    // other object skips it entirely (and the method call), so the common path is untouched.
-    const hasBoolean = !!this.lastDoc && modifierStackOf(obj).some((r) => r.kind === 'boolean' && r.enabled !== false)
-    const { ctx, siblingGeos } = hasBoolean
-      ? this.booleanCtxFor(obj, variant)
-      : { ctx: undefined as ModifierApplyCtx | undefined, siblingGeos: [] as THREE.BufferGeometry[] }
-    try {
-      return buildGeometry(obj.primitive, obj.params, obj.modifiers, variant, obj.content, font, varySettingsFor(obj), modifierStackOf(obj), ctx)
-    } finally {
-      for (const g of siblingGeos) g.dispose()
-    }
-  }
-
-  /** Resolve every enabled `boolean` row on `obj` to its sibling geometry, baked into `obj`'s LOCAL
-   *  space, for `applyModifierStack` to combine with. Returns the ctx handed to buildGeometry plus
-   *  the geometries to dispose once the build is done.
-   *
-   *  LOCAL SPACE: both meshes must share a coordinate frame for the SDF merge to mean anything, so
-   *  the sibling geometry (in the sibling's own local space) is transformed by
-   *  `inverse(thisWorld) · siblingWorld` — the sibling's world transform expressed relative to this
-   *  object — and that matrix is baked into the geometry.
-   *
-   *  CYCLE GUARD: the sibling is built through `siblingGeometryFor`, which calls `buildGeometry`
-   *  with NO ctx, so the sibling's OWN boolean rows resolve to no-ops. A→B→A can therefore never
-   *  recurse. A missing sibling, a self-reference, or a non-primitive object resolves to null → the
-   *  boolean is a no-op (never throws). */
-  private booleanCtxFor(
-    obj: PrimitiveObject, variant: 'smooth' | 'facet',
-  ): { ctx: ModifierApplyCtx | undefined; siblingGeos: THREE.BufferGeometry[] } {
-    const doc = this.lastDoc
-    const rows = modifierStackOf(obj).filter((r) => r.kind === 'boolean' && r.enabled !== false)
-    if (!doc || rows.length === 0) return { ctx: undefined, siblingGeos: [] }
-    const byRef = new Map<string, THREE.BufferGeometry | null>()
-    const resolve = (refId: string | undefined): THREE.BufferGeometry | null => {
-      if (!refId || refId === obj.id) return null // missing / self-reference → no-op
-      if (byRef.has(refId)) return byRef.get(refId) ?? null
-      let geo: THREE.BufferGeometry | null = null
-      const sibling = doc.objects.find((o) => o.id === refId)
-      if (sibling && sibling.kind === 'primitive') {
-        const built = this.siblingGeometryFor(sibling, variant)
-        if (built) {
-          const selfWorldInv = worldMatrixOf(doc.objects, obj.id).invert()
-          const rel = new THREE.Matrix4().multiplyMatrices(selfWorldInv, worldMatrixOf(doc.objects, sibling.id))
-          built.applyMatrix4(rel)
-          geo = built
-        }
-      }
-      byRef.set(refId, geo)
-      return geo
-    }
-    for (const r of rows) resolve(r.refObjectId)
-    const siblingGeos = [...byRef.values()].filter((g): g is THREE.BufferGeometry => g !== null)
-    const ctx: ModifierApplyCtx = { siblingGeoFor: (row) => (row.refObjectId ? byRef.get(row.refObjectId) ?? null : null) }
-    return { ctx, siblingGeos }
-  }
-
-  /** Build a boolean sibling's geometry synchronously, WITHOUT a ctx (so its own boolean rows
-   *  no-op — the cycle guard). Returns null when an async dependency is not yet cached (a text
-   *  font, or a mesh primitive's decoded buffer) — the boolean then no-ops until the next sync
-   *  after the load completes, exactly like the placeholder-then-resync path the object's own
-   *  geometry uses. */
-  private siblingGeometryFor(sib: PrimitiveObject, variant: 'smooth' | 'facet'): THREE.BufferGeometry | null {
-    let font: Font | null = null
-    if (sib.primitive === 'text') {
-      font = fontCacheGet(sib.content?.font ?? DEFAULT_FONT_URL)
-      if (!font) return null // font not loaded yet
-    }
-    if (sib.primitive === 'mesh') {
-      const key = sib.content?.meshKey
-      if (key && !meshCacheGet(key)) return null // mesh buffer not decoded yet
-    }
-    return buildGeometry(sib.primitive, sib.params, sib.modifiers, variant, sib.content, font, varySettingsFor(sib), modifierStackOf(sib))
+    return buildGeometry(obj.primitive, obj.params, obj.modifiers, variant, obj.content, font, varySettingsFor(obj))
   }
 
   /** While a sculpt session is live, this object's geometry comes from the
@@ -1302,17 +970,13 @@ export class SceneEngine {
     if (!root) {
       if (obj.kind === 'primitive') {
         const geo = this.geometryForObject(obj, 'smooth')
-        // S7.1: project the object's cached restyle result onto its surface via the material, when a
-        // stamped aiRestyle AND a decoded texture are both in hand (else null ⇒ byte-identical).
-        const rp = objectRestylePlan(obj)
-        const rtex = rp ? this.restyleTextures.get(obj.id) ?? null : null
-        const mat = materialFor(obj.material, geo, this.id, modifierValue(obj.modifiers, 'varyColorStrength'), finishPlan(obj), rp && rtex ? { t: rp, tex: rtex } : null)
+        const mat = materialFor(obj.material, geo, this.id, modifierValue(obj.modifiers, 'varyColorStrength'))
         // Flat shapes must be visible from both sides (plane was previously
         // invisible from below; ring inherits the fix) — for every material type.
         if (obj.primitive === 'plane' || obj.primitive === 'ring') mat.side = THREE.DoubleSide
         const mesh = new THREE.Mesh(geo, this.lightView ? this.clay : mat)
         mesh.userData.realMaterial = mat
-        mesh.userData.geoKey = geoKeyFor(obj, 'smooth') + booleanRefKeys(obj, this.lastDoc) // facet variant applied by the sync below
+        mesh.userData.geoKey = geoKeyFor(obj, 'smooth') // facet variant applied by the sync below
         mesh.castShadow = mesh.receiveShadow = true
         root = mesh
       } else if (obj.kind === 'glb') {
@@ -1327,8 +991,7 @@ export class SceneEngine {
           // The load can finish after later syncs already ran against the empty
           // placeholder — apply against the LATEST object state (stamped on the
           // root each sync), not the one captured when the load started.
-          const glbObj = (root!.userData.glbObj as GlbObject | undefined) ?? obj
-          syncGlbMaterials(root!, glbObj, this.lightView, this.clay, this.id, this.restyleSpecFor(glbObj))
+          syncGlbMaterials(root!, (root!.userData.glbObj as GlbObject | undefined) ?? obj, this.lightView, this.clay, this.id)
           // The interior meshes only exist now — attach any edge treatments to them.
           syncTreatmentShells(root!, (root!.userData.glbObj as GlbObject | undefined) ?? obj, { lightView: this.lightView })
         }).catch(() => { /* surface shows the error state; the group stays empty */ })
@@ -1387,7 +1050,7 @@ export class SceneEngine {
       const wantFacet = obj.material.type === 'gradient' &&
         (obj.material.gradientShading ?? 'smooth') !== 'smooth'
       const variant = wantFacet ? 'facet' : 'smooth'
-      const geoKey = geoKeyFor(obj, variant) + booleanRefKeys(obj, this.lastDoc)
+      const geoKey = geoKeyFor(obj, variant)
       // Geometry params and the shading variant share one key: either change
       // swaps the geometry in place, leaving the material instance (and its
       // in-place update path) and the transform untouched.
@@ -1417,15 +1080,10 @@ export class SceneEngine {
       // about it belongs in vertex data. That is also what lets `geoKeyFor` leave
       // `varyColorStrength` out and the slider drag update a uniform in place.
       const varyStrength = modifierValue(obj.modifiers, 'varyColorStrength')
-      const finishes = finishPlan(obj)
-      // S7.1: the restyle spec (plan + cached texture) — null unless both are in hand.
-      const rp = objectRestylePlan(obj)
-      const rtex = rp ? this.restyleTextures.get(obj.id) ?? null : null
-      const restyle = rp && rtex ? { t: rp, tex: rtex } : null
-      if (!updateMaterial(current, obj.material, mesh.geometry, varyStrength, finishes, restyle)) {
+      if (!updateMaterial(current, obj.material, mesh.geometry, varyStrength)) {
         // Type or texture identity changed — rebuild, preserving double-siding.
         disposeMaterial(current)
-        const fresh = materialFor(obj.material, mesh.geometry, this.id, varyStrength, finishes, restyle)
+        const fresh = materialFor(obj.material, mesh.geometry, this.id, varyStrength)
         if (obj.primitive === 'plane' || obj.primitive === 'ring') fresh.side = THREE.DoubleSide
         real = fresh
       }
@@ -1452,7 +1110,7 @@ export class SceneEngine {
       if (imgUniforms) refreshImageBounds(imgUniforms, mesh.geometry)
     } else if (obj.kind === 'glb') {
       root.userData.glbObj = obj
-      syncGlbMaterials(root, obj, this.lightView, this.clay, this.id, this.restyleSpecFor(obj))
+      syncGlbMaterials(root, obj, this.lightView, this.clay, this.id)
     } else if (obj.kind === 'light') {
       const light = root.userData.light as THREE.Light
       const color = new THREE.Color(stripAlpha(obj.color))
@@ -1643,8 +1301,6 @@ export class SceneEngine {
     // host rAF keeps calling this harmlessly until `handleContextRestored` clears
     // the flag and rebuilds, at which point rendering resumes on its own.
     if (this._contextLost) return
-    // Cinematic view: accumulate a path-traced frame instead of the raster+post pipeline.
-    if (this._cinematic && this.pathTracer?.isActive) { this.pathTracer.frame(this.camera); return }
     this.renderWithPost(this.scene, this.camera, this.lastDoc?.post ?? DEFAULT_POST, elapsedSec)
   }
 
@@ -1665,23 +1321,7 @@ export class SceneEngine {
     // composer's OutputPass tone-maps a texture to the canvas.
     const plan = this.lastDoc ? maskedTreatmentPlan(this.lastDoc) : []
     const stageGroups = plan.filter((g) => g.rendered).length
-    // The live G-buffer pass runs ONLY when a consuming treatment (edge lines today; depth
-    // fog / curvature wear next) is present — its absence is the byte-identity gate: no buffer
-    // plan ⇒ no G-buffer, no extra render, the same frame as before S3.
-    const bufferPlan = this.lastDoc ? bufferTreatmentPlan(this.lastDoc) : []
-    // The S6 motion sub-loop runs ONLY when a velocity-blur / ghost-trails treatment is present
-    // — its absence is the byte-identity gate: empty plan ⇒ no motion pass, the same frame as
-    // before S6. The per-object velocities/ghosts it consumes are pushed in by the seams that
-    // still hold the doc + t01; absent (an ordinary render call) they are empty and it no-ops.
-    const motionPlan = this.lastDoc ? motionTreatmentPlan(this.lastDoc) : []
-    // S7.1: AI restyle is NO LONGER a stage pass — it is a per-object MATERIAL injection
-    // (restyleProjection.ts, threaded through materialFor/updateMaterial above), so it needs no
-    // stage sub-loop and does NOT gate `runStage`. An object with an aiRestyle but no other
-    // treatment renders through the ordinary path, its material projecting the cached result onto
-    // the surface. `restyleTextures`/`setRestyleTextures` stay — their CONSUMER moved from the
-    // stage to the material builder.
-    const runStage = stageGroups > 0 || bufferPlan.length > 0 || motionPlan.length > 0
-    if (!postEnabled(post) && !runStage) { this.renderer.render(scene, camera); return }
+    if (!postEnabled(post) && stageGroups === 0) { this.renderer.render(scene, camera); return }
     const s = this.renderer.getSize(new THREE.Vector2())
     if (!this.postChain) { this.postChain = new PostChain(this.renderer, scene, camera, s.x, s.y); this.postW = s.x; this.postH = s.y }
     else if (this.postW !== s.x || this.postH !== s.y) { this.postChain.setSize(s.x, s.y); this.postW = s.x; this.postH = s.y }
@@ -1697,11 +1337,11 @@ export class SceneEngine {
     const helpers = collectEditorHelpers(scene)
     for (const h of helpers) h.visible = false
     try {
-      if (runStage) {
+      if (stageGroups > 0) {
         if (!this.treatmentStage) this.treatmentStage = new TreatmentStage(this.renderer)
         let tex: THREE.Texture | null = null
         try {
-          tex = this.treatmentStage.render(scene, camera, plan, bufferPlan, motionPlan, { objectRoots: this.objectRoots, velocities: this.motionVelocities, ghosts: this.ghostPoses })
+          tex = this.treatmentStage.render(scene, camera, plan, { objectRoots: this.objectRoots })
           this.postChain.setInputTexture(tex)
         } catch (e) {
           this.postChain.setInputTexture(null)

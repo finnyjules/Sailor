@@ -25,14 +25,6 @@ export function resolveLibraryFontPath(id: string, fontsRoot: string): string | 
   return full
 }
 
-/** HTTP content-type for a resolved font path, by extension. Manifest faces ship
- *  as .otf/.ttf/.woff2; default to font/otf for any other/unknown extension. */
-export function contentTypeForPath(path: string): string {
-  if (path.endsWith('.woff2')) return 'font/woff2'
-  if (path.endsWith('.ttf')) return 'font/ttf'
-  return 'font/otf'
-}
-
 /** Repo-root Assets/Fonts, overridable for other machines. */
 export function libraryFontsRoot(): string {
   return process.env.SAILOR_FONTS_ROOT || resolve(process.cwd(), '..', m.fontsRoot)

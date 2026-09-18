@@ -30,31 +30,10 @@ describe('scene3d text-to-3d generation logic', () => {
       const m = THREE_D_MODELS[id]!
       expect(typeof m.app).toBe('string')
       const input = m.buildInput('https://x/i.png', {})
-      // each model carries the image url under some field — a scalar (image_url /
-      // input_image_url) or inside an array (Rodin's input_image_urls). Flatten
-      // one level so both shapes count.
-      const flat = Object.values(input).flatMap((v) => Array.isArray(v) ? v : [v])
-      expect(flat).toContain('https://x/i.png')
+      // each model carries the image url under some field
+      expect(Object.values(input)).toContain('https://x/i.png')
       expect(m.glbUrlFrom({ model_mesh: { url: 'g.glb' } })).toBe('g.glb')
     }
-  })
-
-  it('builds Rodin with an image-url array + PBR/Shaded material and a uint16 seed', () => {
-    const m = THREE_D_MODELS['rodin']!
-    expect(m.app).toBe('fal-ai/hyper3d/rodin')
-    const textured = m.buildInput('https://x/i.png', { textured: true, seed: 7 })
-    expect(textured.input_image_urls).toEqual(['https://x/i.png'])
-    expect(textured.material).toBe('PBR')
-    expect(textured.seed).toBe(7)
-    // Shaded when not textured; a large seed is folded into fal's 0–65535 range.
-    const plain = m.buildInput('https://x/i.png', { textured: false, seed: 1_500_000_000 })
-    expect(plain.material).toBe('Shaded')
-    expect(plain.seed as number).toBeGreaterThanOrEqual(0)
-    expect(plain.seed as number).toBeLessThan(65536)
-  })
-
-  it('uses the tripo partner slug without a fal-ai/ prefix', () => {
-    expect(THREE_D_MODELS['tripo-v2.5']!.app).toBe('tripo3d/tripo/v2.5/image-to-3d')
   })
 })
 

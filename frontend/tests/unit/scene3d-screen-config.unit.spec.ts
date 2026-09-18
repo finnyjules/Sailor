@@ -14,7 +14,7 @@ const withScreen = (screen: Partial<SceneMaterial['screen']>) => {
 
 describe('scene3d screen — config', () => {
   it('the material type list is untouched — a screen is a finish, not a type', () => {
-    expect(MATERIAL_TYPES).toEqual(['standard', 'phong', 'toon', 'matcap', 'glass', 'gemstone', 'fresnel', 'gradient', 'opalescent', 'holographic', 'image', 'shaderFill'])
+    expect(MATERIAL_TYPES).toEqual(['standard', 'phong', 'toon', 'matcap', 'glass', 'fresnel', 'gradient', 'opalescent', 'holographic', 'image', 'shaderFill'])
     expect([...SCREEN_PATTERNS]).toEqual(['none', 'dots', 'lines', 'cross'])
     expect([...SCREEN_GAPS]).toEqual(['transparent', 'colour'])
     expect([...SCREEN_INKS]).toEqual(['lit', 'colour'])

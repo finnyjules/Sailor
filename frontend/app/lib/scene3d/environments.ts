@@ -116,31 +116,11 @@ function colorGels(partial?: Partial<GelEnvOptions>): EnvScene {
   return s
 }
 
-/** A jewellery studio: big soft key/fill panels (rich broad reflections that make a stone read
- *  as glass, not plastic) PLUS a handful of small very bright bars whose sharp reflections become
- *  the sparkle glints on a cut gem. Deep-grey void so the stone pops without the pure-black
- *  darkStrips cut-out. Warm/cool split on the fills for depth. */
-function studio(): EnvScene {
-  const s = new ProceduralEnv()
-  s.background = new THREE.Color(0x1a1a20)
-  // Big soft sources — fill + broad sliding reflections.
-  bar(s, 7, 5.0, 0.1, [-4.2, 3.0, 2.2], 0.5, 0, new THREE.Color(1, 1, 1), 5)          // key, front-left
-  bar(s, 6, 4.5, 0.1, [4.6, 2.4, 1.2], -0.6, 0, new THREE.Color(1, 0.97, 0.9), 3.6)   // fill, warm
-  bar(s, 8, 3.0, 0.1, [0, 5.6, -1.0], 0, Math.PI / 2, new THREE.Color(0.94, 0.97, 1), 4.2) // top, cool
-  bar(s, 5, 4.0, 0.1, [0, 1.0, -5.2], 0, 0, new THREE.Color(1, 1, 1), 2.6)             // back fill
-  // Small hot bars — sharp reflections → sparkle glints on the facets.
-  bar(s, 2.4, 0.16, 0.1, [-3.0, 5.0, 3.0], 0.6, 0.3, new THREE.Color(1, 1, 1), 16)
-  bar(s, 2.0, 0.14, 0.1, [3.6, 4.6, -2.0], -0.5, -0.4, new THREE.Color(1, 1, 1), 18)
-  bar(s, 1.8, 0.14, 0.1, [0, -2.2, 4.2], 0.2, 1.2, new THREE.Color(1, 1, 1), 12)       // low kick
-  return s
-}
-
 export function buildEnvironmentScene(kind: EnvironmentKind, gel?: Partial<GelEnvOptions>): EnvScene {
   switch (kind) {
     case 'darkStrips': return darkStrips()
     case 'softbox': return softbox()
     case 'colorGels': return colorGels(gel)
-    case 'studio': return studio()
     case 'room': default: return new RoomEnvironment() as unknown as EnvScene
   }
 }

@@ -1,14 +1,6 @@
-import * as THREE from 'three'
 import type { SceneEngine } from '~/lib/scene3d/engine'
 import { type SceneDoc, sceneHasShaderFill } from '~/lib/scene3d/config'
 import { applyMotionToDoc } from './apply'
-import { docHasMotionTreatment } from '~/lib/scene3d/treatments'
-import { sceneScreenVelocities, collectGhostPoses, type ScreenVelocity, type LocalPose } from './velocity'
-
-// Shared empties for the "no motion treatment" branch — the engine never mutates the maps it is
-// handed, so one immutable-by-convention instance each is enough (and avoids a per-frame alloc).
-const EMPTY_VELOCITIES = new Map<string, ScreenVelocity>()
-const EMPTY_GHOSTS = new Map<string, LocalPose[]>()
 
 export function sceneHasMotion(doc: SceneDoc): boolean {
   for (const o of doc.objects) {
@@ -58,20 +50,6 @@ export function renderMotionFrame(engine: SceneEngine, doc: SceneDoc, t01: numbe
   engine.syncFromDoc(sampled)
   engine.applyCameraFromDoc(sampled)
   engine.applyObjectOpacities(opacities)
-  // S6 motion treatments: compute the per-object screen velocity / past poses from the ORIGINAL
-  // doc + t01 (the sampled doc has already had motion baked into its transforms, so it can no
-  // longer tell where the object was a moment ago) and push them into the engine, so the export /
-  // headless path gets the same blur / trails as live playback. Cleared to empty otherwise, so a
-  // scene without a motion treatment is byte-identical. Camera-at-t viewProj (object-only velocity).
-  if (docHasMotionTreatment(doc)) {
-    engine.camera.updateMatrixWorld()
-    const viewProj = new THREE.Matrix4().multiplyMatrices(engine.camera.projectionMatrix, engine.camera.matrixWorldInverse)
-    engine.setMotionVelocities(sceneScreenVelocities(doc, t01, viewProj))
-    engine.setGhostPoses(collectGhostPoses(doc, t01))
-  } else {
-    engine.setMotionVelocities(EMPTY_VELOCITIES)
-    engine.setGhostPoses(EMPTY_GHOSTS)
-  }
   if (sceneHasShaderFill(doc)) engine.refreshShaderFields(t01 * doc.motion.duration, false)
   engine.render()
   return engine.renderer.domElement as HTMLCanvasElement

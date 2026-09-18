@@ -185,7 +185,7 @@ describe('SCENE_CONTROLS integrity', () => {
     const c = SCENE_CONTROLS.find((c) => c.key === 'lighting.environment')
     expect(c).toBeTruthy()
     expect(c!.kind).toBe('select')
-    expect((c as any).options).toEqual(['room', 'darkStrips', 'softbox', 'colorGels', 'studio'])
+    expect((c as any).options).toEqual(['room', 'darkStrips', 'softbox', 'colorGels'])
   })
 })
 
@@ -262,12 +262,11 @@ describe('screen finish controls', () => {
     prim.material.type = type
     return visibleSceneControls(doc, prim).map((c) => c.key)
   }
-  it('offers the screen rows on every material type except the transmissive ones (glass, gemstone)', () => {
-    const noScreen = new Set(['glass', 'gemstone'])
+  it('offers the screen rows on every material type except glass', () => {
     for (const type of MATERIAL_TYPES) {
       const keys = keysFor(type)
       const has = keys.includes('object.material.screen.pattern')
-      expect(has, type).toBe(!noScreen.has(type))
+      expect(has, type).toBe(type !== 'glass')
       if (has) {
         for (const k of ['density', 'angle', 'contrast', 'softness', 'misregister', 'invert', 'gap', 'gapColor', 'ink', 'inkColor']) {
           expect(keys, `${type} ${k}`).toContain(`object.material.screen.${k}`)

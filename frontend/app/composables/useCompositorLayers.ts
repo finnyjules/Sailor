@@ -24,10 +24,6 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 // (evaluate.ts/types.ts don't import this file).
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
-import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
-import { applyMotionxTracks } from '~/lib/motionx/adapter/frame'
-import type { Track as MotionxTrack } from '~/lib/motionx'
-import { applyFillPhaseTracks } from '~/lib/motion/fillTracks'
 import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
 import { clipFrameIndex, clipFrameUrl, clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
@@ -247,7 +243,6 @@ export {
 import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/paint'
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
 import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTrailingBlurs, isGeometryKind } from '~/lib/compositor/effectStack'
-import { expandRecipe } from '~/lib/compositor/recipes'
 // Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
 // `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
 // is enabled, so the no-effect draw stays byte-identical below.
@@ -270,13 +265,11 @@ import type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind, WarpEffect,
   ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
-  RisographEffect, PhotocopyEffect, LetterpressEffect,
 } from '~/lib/compositor/effectStack'
 export type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
   ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
-  RisographEffect, PhotocopyEffect, LetterpressEffect,
 }
 export type { AdjustEffect, BloomEffect, DofEffect, DuotoneEffect, GradientMapEffect, GrainEffect, PostEffect, VignetteEffect }
 
@@ -400,14 +393,11 @@ export interface TextLayer extends LayerCommon {
                          // set => words auto-wrap to fit, unset => explicit \n only
   boxH?: number          // optional text-box height (normalized to canvas width);
                          // enables valign + vertical justify. Absent => natural height.
-  boxFit?: 'wrap' | 'shrink' | 'fill' | 'break'
+  boxFit?: 'wrap' | 'shrink' | 'fill'
                          // how the type meets its box: 'wrap' (fixed size, words
                          // wrap — the default), 'shrink' (shrink the font to fit
                          // the box), 'fill' (size the font to fill boxW, and boxH
-                         // when set), 'break' (split even a single long word across
-                         // lines and grow it to fill the box — needs boxH; without
-                         // boxH it behaves like 'fill'). Absent => 'wrap'
-                         // (byte-identical).
+                         // when set). Absent => 'wrap' (byte-identical).
   /** Live variable-font axis values (wght/wdth/slnt/…). When present, `wght`
    *  drives the numeric font-weight in the canvas `font` shorthand (the only
    *  variable-axis path that renders on every browser); the full set is also
@@ -1414,72 +1404,29 @@ function textLines(layer: TextLayer): string[] {
 }
 
 /**
- * Final render lines plus per-line justification metadata: explicit newlines,
- * then — when the layer has a text box (`boxW`) — greedy word-wrap each line to
- * fit the box. A word longer than the box overflows on its own line rather than
- * breaking mid-word, EXCEPT in 'break' fit (with a boxH set), where an over-long
- * word is split across lines at the character so a single word like NOISE stacks
- * (NO / ISE) to fill its box. Needs a 2D context for measurement; without one,
- * falls back to explicit lines only.
- *
- * `ragged[i]` marks a line that justify (`align: 'justify'`) must NOT stretch
- * edge-to-edge: the last line of a paragraph that actually wrapped (>1 line), so
- * body copy ends ragged-left like proper typesetting. A single-line paragraph
- * (e.g. a two-word title) is never ragged, so it still justifies full-width.
+ * Final render lines: explicit newlines, then — when the layer has a text box
+ * (`boxW`) — greedy word-wrap each line to fit the box. A word longer than the
+ * box overflows on its own line rather than breaking mid-word. Needs a 2D
+ * context for measurement; without one, falls back to explicit lines only.
  */
-export function wrappedTextLinesMeta(
-  ctx: CanvasRenderingContext2D | null,
-  layer: TextLayer,
-  W: number,
-): { lines: string[]; ragged: boolean[] } {
+export function wrappedTextLines(ctx: CanvasRenderingContext2D | null, layer: TextLayer, W: number): string[] {
   const manual = textLines(layer)
   const boxPx = (layer.boxW ?? 0) * W
-  // No wrapping: each explicit line is its own single-line paragraph, so none is
-  // a wrapped-paragraph tail — justify treats them all as full lines.
-  if (!ctx || !(boxPx > 0)) return { lines: manual, ragged: manual.map(() => false) }
+  if (!ctx || !(boxPx > 0)) return manual
   applyFont(ctx, layer, W)
-  // Character-breaking only makes sense with a height to fill; without one it is
-  // ambiguous (a word could grow forever), so 'break' falls back to plain wrap.
-  const brk = layer.boxFit === 'break' && (layer.boxH ?? 0) > 0
-  const fitsW = (s: string) => ctx.measureText(s).width <= boxPx
   const out: string[] = []
-  // Split a token wider than the box into char chunks; returns the trailing
-  // partial chunk for the caller to keep accumulating onto.
-  const breakToken = (word: string): string => {
-    let chunk = ''
-    for (const ch of word) {
-      if (chunk && !fitsW(chunk + ch)) { out.push(chunk); chunk = ch }
-      else chunk += ch
-    }
-    return chunk
-  }
-  const ragged: boolean[] = []
   for (const line of manual) {
-    const startLen = out.length
     const words = line.split(/\s+/).filter(Boolean)
-    if (!words.length) { out.push('') }
-    else {
-      let cur = ''
-      for (const word of words) {
-        const candidate = cur ? `${cur} ${word}` : word
-        if (fitsW(candidate)) { cur = candidate; continue }
-        if (cur) { out.push(cur); cur = '' }         // flush what we have
-        if (fitsW(word) || !brk) cur = word          // fits alone, or we don't break (may overflow)
-        else cur = breakToken(word)                  // split the long word; keep the tail
-      }
-      if (cur) out.push(cur)
+    if (!words.length) { out.push(''); continue }
+    let cur = words[0]
+    for (let i = 1; i < words.length; i++) {
+      const candidate = `${cur} ${words[i]}`
+      if (ctx.measureText(candidate).width <= boxPx) cur = candidate
+      else { out.push(cur); cur = words[i] }
     }
-    // Only a paragraph that wrapped (>1 line) gets a ragged tail; a single line
-    // stays justifiable so titles still span the box edge-to-edge.
-    const n = out.length - startLen
-    for (let i = startLen; i < out.length; i++) ragged.push(n > 1 && i === out.length - 1)
+    out.push(cur)
   }
-  return { lines: out, ragged }
-}
-
-/** Render lines only (see {@link wrappedTextLinesMeta}). */
-export function wrappedTextLines(ctx: CanvasRenderingContext2D | null, layer: TextLayer, W: number): string[] {
-  return wrappedTextLinesMeta(ctx, layer, W).lines
+  return out
 }
 
 export function applyFont(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number) {
@@ -1600,20 +1547,6 @@ export function localLayerBox(
     return wiredBoxPx(layer, W, wiredLive !== undefined ? wiredLive : wiredContent(layer))
   }
   return { w: (layer as RectLayer).w * W, h: (layer as RectLayer).h * W }
-}
-
-/**
- * How far (px) a text layer's block centre sits from its stored y-origin, so the
- * valign-anchored edge stays put as the block's height changes. The layer's y
- * marks the anchored edge: `top` ⇒ the top edge (block grows down), `bottom` ⇒
- * the bottom edge (block grows up), `middle`/`justify`/absent ⇒ centred (0), the
- * legacy behaviour every existing layer keeps. `boxHPx` is the block/box height
- * from `localLayerBox`. Both the renderer and the editor's box geometry read this
- * so the drawn text and its selection box stay in lockstep.
- */
-export function textVAlignCenterOffset(layer: { kind: string; valign?: string }, boxHPx: number): number {
-  if (layer.kind !== 'text') return 0
-  return layer.valign === 'top' ? boxHPx / 2 : layer.valign === 'bottom' ? -boxHPx / 2 : 0
 }
 
 /**
@@ -2913,13 +2846,6 @@ function paintLayer(
               // See applyShaderPixelEffect above for the throw-safe / alpha recombine.
               case 'shader':
                 applyShaderPixelEffect(off, e as unknown as ShaderPixelEffect, { W, scale: s, t: _fieldCtx.t }); break
-              // F7 print recipes: expand the recipe's few dials into an ordered list of the
-              // primitive passes and run them on the layer's device-res offscreen. Absent =>
-              // this case never fires => byte-identical.
-              case 'risograph':
-              case 'photocopy':
-              case 'letterpress':
-                applyPasses(off, expandRecipe(e as unknown as RisographEffect | PhotocopyEffect | LetterpressEffect), { W, scale: s }); break
               default:
                 applyPasses(off, [e], { W, scale: s })
             }
@@ -4512,7 +4438,7 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
   // Expressive per-word layout has its own draw loop; outlining it is out of F1
   // scope, so collect mode emits nothing and the caller falls back to fillText.
   if (layer.expressive) { if (collect) return; drawExpressiveText(ctx, layer, W, lineH); return }
-  const { lines, ragged } = wrappedTextLinesMeta(ctx, layer, W)
+  const lines = wrappedTextLines(ctx, layer, W)
   applyFont(ctx, layer, W)
   ctx.textBaseline = 'middle'
   // 'justify' isn't a canvas textAlign — draw its words manually, left-anchored.
@@ -4537,16 +4463,11 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
   const startY = -totalH / 2 + lineH / 2          // legacy: block centred on origin
   const H = boxHpx > 0 ? boxHpx : totalH
   const vJustify = va === 'justify' && lines.length > 1
-  // Anchor the whole block by valign so it grows FROM the aligned edge: `top`
-  // pins the top and grows down, `bottom` pins the bottom and grows up. The same
-  // offset feeds the selection box (via textVAlignCenterOffset), so handles track
-  // the drawn text. middle/justify/absent ⇒ 0 ⇒ the legacy centred block.
-  const oy = textVAlignCenterOffset(layer, H)
   const lineY = (i: number): number => {
     if (!va && boxHpx <= 0) return startY + i * lineH
     if (vJustify) return -H / 2 + lineH / 2 + (i / (lines.length - 1)) * (H - lineH)
     const s = va === 'top' ? -H / 2 + lineH / 2 : va === 'bottom' ? H / 2 - totalH + lineH / 2 : startY
-    return s + i * lineH + oy
+    return s + i * lineH
   }
   const textBox = { w: Math.max(blockW, 1), h: Math.max(H, 1) }
   // `strokeText` honours setLineDash, so a text outline dashes like a shape's.
@@ -4564,10 +4485,9 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
   const drawn: { runs: TextRun[]; deco: { left: number; y: number; w: number } | null }[] = []
   for (let i = 0; i < lines.length; i++) {
     const y = lineY(i)
-    if (justifyH && !ragged[i]) {
-      // Distribute the line's words edge-to-edge across blockW. A paragraph's
-      // wrapped tail (`ragged[i]`) is skipped, so it falls through to the normal
-      // left-anchored draw below — ragged-left, like proper justified body copy.
+    if (justifyH) {
+      // Distribute the line's words edge-to-edge across blockW (last line too —
+      // expressive/box justify has no ragged-last-line concept).
       const words = (lines[i] || '').split(/\s+/).filter(Boolean)
       const widths = words.map(w => ctx.measureText(w).width)
       const total = widths.reduce((a, b) => a + b, 0)
@@ -5442,7 +5362,7 @@ export function paintLayerStack(
   localLayers: LocalLayer[],
   skip?: (layer: LocalLayer) => boolean,
   t?: number,
-  motion?: { fps: number; duration: number; tracks?: EffectDialTrack[]; motionx?: MotionxTrack[] },
+  motion?: { fps: number; duration: number },
   /** Per-key treatments for wired layers (mask ref + showSource). Locals carry their own. */
   wiredTreatments?: Record<string, { maskedByKey?: string; showSource?: boolean }>,
   /** Doc-level background fill, painted first (behind every layer). */
@@ -5466,23 +5386,6 @@ export function paintLayerStack(
     frameW: W, frameH: H, t: fieldT, fps: fieldFps,
     base: typeof ctx.getTransform === 'function' ? ctx.getTransform() : null,
     bake, token: 0,
-  }
-  // F8: fold any effect-dial motion tracks into the layers for this frame. Same-reference return
-  // when there are no tracks / no clock ⇒ items & localLayers untouched ⇒ byte-identical.
-  const animatedLocals = applyMotionxTracks(
-    applyFillPhaseTracks(
-      applyEffectDialTracks(localLayers, motion?.tracks, t),
-      motion?.tracks,
-      t,
-    ),
-    motion?.motionx,
-    t,
-  )
-  if (animatedLocals !== localLayers) {
-    const byId = new Map(animatedLocals.map(l => [l.id, l]))
-    items = items.map(it => (it.type === 'local' && byId.has(it.layer.id))
-      ? { ...it, layer: byId.get(it.layer.id)! } : it)
-    localLayers = animatedLocals
   }
   // Task 6 / Item 1 (final review): one `withFieldFrame` call per rendered frame, scoped
   // to exactly the shader fills THIS document's layers/background carry this pass — see

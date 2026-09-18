@@ -11,7 +11,7 @@ import { MODIFIER_SPECS } from '~/lib/scene3d/primParams'
 
 describe('modifier stack: constants', () => {
   it('kinds and order are the fixed pipeline sequence, pinning subdivide first and cloner last', () => {
-    expect([...MODIFIER_KINDS]).toEqual(['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'boolean', 'facet', 'cloner'])
+    expect([...MODIFIER_KINDS]).toEqual(['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'boolean', 'cloner'])
     expect([...MODIFIER_ORDER]).toEqual([...MODIFIER_KINDS])
     expect([...PINNED_MODIFIERS]).toEqual(['subdivide', 'cloner'])
   })

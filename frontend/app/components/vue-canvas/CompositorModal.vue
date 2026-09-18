@@ -90,17 +90,6 @@ import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
-import { effectDialTargets, addDialTrack, removeDialTrack, animatedDialKeysOf, type EffectDialTrack, type DialTargetSpec } from '~/lib/motion/effectTracks'
-import { compileBehaviourForLayer, animatableProperties } from '~/lib/motionx/adapter/frame'
-import { type Behaviour, type StoredBehaviour, type Timing, type Track as MotionxTrack } from '~/lib/motionx'
-import { setBehaviourTracks, bakeBehaviour, upsertBehaviour, removeBehaviour } from '~/lib/motionx/behaviourStore'
-import { seedHoldTrack, setBandTrack } from '~/lib/motionx/bandEdit'
-import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
-import MotionPropertyPicker from '~/components/vue-canvas/compositor/MotionPropertyPicker.vue'
-import { fillDialTargets } from '~/lib/motion/fillTracks'
-import { getByIdPath } from '~/lib/studio/idPath'
-import { paintStopsToColor } from '~/lib/compositor/gradientPaint'
-import { isGradient } from '~/lib/compositor/paint'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 // F5 Task 3: the shader-catalog-as-a-pass effect inspector — reuses the app's canonical
 // CatalogModal (the same picker ShaderFillEditor.vue mounts for a shader FILL) and the shared
@@ -118,10 +107,6 @@ import { bakeAndUpload, motionSourceKey, type MotionParams } from '~/lib/motion/
 import { readGrid } from '~/lib/frame/gridConfig'
 import { resolveGrid, type FrameGrid } from '~/lib/frame/grid'
 import CompositorMotionTimeline from '~/components/vue-canvas/compositor/CompositorMotionTimeline.vue'
-import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
-import MotionGallery from '~/components/vue-canvas/compositor/MotionGallery.vue'
-import MotionInspector from '~/components/vue-canvas/compositor/MotionInspector.vue'
-import { behavioursForMove, defaultDurationFor, type GalleryMove } from '~/lib/motionx/gallery'
 import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
@@ -709,7 +694,7 @@ const {
   postEffects, setPostEffects,
   setGrid,
   undo, redo, canUndo, canRedo,
-  selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, recordHistory, commit, handleEditorKey, pasteClipboard,
+  selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, recordHistory, commit, handleEditorKey, pasteClipboard,
   selectionBox, selectionHandles, startGroupResize,
   groupSelected, ungroupSelected, ungroupGroup, renameGroup, canGroup, canUngroup,
   localGroups, commitBoth, selectGroupById, writeGroups,
@@ -1201,19 +1186,12 @@ const {
     // frame instead of a square (layer boxes are width-normalized).
     aspect: canvasDisplay.h / Math.max(1, canvasDisplay.w),
     brandPalette: brandSwatches(projectBrand?.activeKit.value),
-    motion: motionDoc.value,
   }),
   setState: (s) => {
     commit(s.layers)
     if (s.background !== background.value) setBackground(s.background)
     if (JSON.stringify(s.postEffects ?? []) !== JSON.stringify(postEffects.value)) setPostEffects(s.postEffects ?? [])
     if (s.grid && JSON.stringify(s.grid) !== JSON.stringify(gridConfig.value)) setGrid(s.grid)
-    // Only the effect-dial TRACKS flow back (animateDial authors them) — fps/duration are the
-    // timeline's own controls, never touched by the agent.
-    if (JSON.stringify(s.motion?.tracks ?? []) !== JSON.stringify(motionDoc.value.tracks ?? [])) {
-      setMotion({ tracks: s.motion?.tracks ?? [] })
-      commitMotionTimeline()
-    }
   },
   apiKey: () => getLocalSetting('Sailor.AI.AnthropicApiKey') ?? '',
   dims: () => ({ w: canvasDisplay.w, h: canvasDisplay.h }),
@@ -1559,15 +1537,6 @@ const ALIGN_BTNS = [
   { mode: 'hdist', icon: AlignHorizontalSpaceAround, title: 'Distribute horizontally' },
   { mode: 'vdist', icon: AlignVerticalSpaceAround, title: 'Distribute vertically' },
 ] as const
-// Align the selected layer(s) to the FRAME (works for one layer, unlike ALIGN_BTNS).
-const ALIGN_FRAME_BTNS = [
-  { mode: 'left', icon: AlignStartVertical, title: 'Align left edge of frame' },
-  { mode: 'hcenter', icon: AlignCenterVertical, title: 'Centre horizontally in frame' },
-  { mode: 'right', icon: AlignEndVertical, title: 'Align right edge of frame' },
-  { mode: 'top', icon: AlignStartHorizontal, title: 'Align top of frame' },
-  { mode: 'vcenter', icon: AlignCenterHorizontal, title: 'Centre vertically in frame' },
-  { mode: 'bottom', icon: AlignEndHorizontal, title: 'Align bottom of frame' },
-] as const
 
 // ── Node edit (direct anchor/handle selection) ──────────────────────────────
 const nodeEdit = useVectorNodeEdit()
@@ -1879,18 +1848,6 @@ function onKeydown(e: KeyboardEvent) {
       && !smartActive.value && isSelectTool.value && !editingId.value) {
     optDown.value = true
     armGenGesture(true)
-    return
-  }
-  // Space on the Motion tab → play / pause the timeline (standard transport shortcut).
-  // `repeat` is ignored so holding the key doesn't flicker; the pan gesture below is
-  // a Design-tab affordance and must not arm here.
-  if (e.code === 'Space' && !inField && inspectorTab.value === 'motion') {
-    e.preventDefault()
-    // This listener is capture-phase on window; stopping here keeps Space from also
-    // reaching the app layout's bubble handler, which opens the canvas node search
-    // behind the modal.
-    e.stopPropagation()
-    if (!e.repeat) (playing.value ? pause() : play())
     return
   }
   // Space → hold-to-pan. Prevent the default page scroll while held.
@@ -3678,259 +3635,6 @@ function commitMotionTimeline() {
   commit(localLayers.value)
 }
 
-// ── Motion tab · animate an effect dial ─────────────────────────────────────
-// The picker lists the selected layer's animatable effect dials (F8) and adds/
-// removes a frame-level EffectDialTrack. `sailor_motion.tracks` is an untyped
-// field on the persisted doc (FrameMotion carries it structurally through the
-// painter seam), so it is read through a small cast here.
-const motionTracks = computed<EffectDialTrack[]>(() => (motionDoc.value as any).tracks ?? [])
-const animatableDials = computed<DialTargetSpec[]>(() => {
-  const l = selectedLocal.value
-  if (!l) return []
-  // Layer-level fill targets (a gradient fill's scroll phase) precede the effect dials.
-  return [...fillDialTargets(l as any), ...effectDialTargets(l as any)]
-})
-function dialIsAnimated(target: string): boolean {
-  return motionTracks.value.some((tr) => tr.target === target)
-}
-// A stable, DOM-safe id fragment for a dial target's data-testid (paths carry
-// dots and colons from the effect id).
-function dialTestKey(target: string): string {
-  return target.replace(/[^a-z0-9]+/gi, '-')
-}
-function toggleDialTrack(spec: DialTargetSpec) {
-  const l = selectedLocal.value
-  if (!l) return
-  if (dialIsAnimated(spec.path)) {
-    setMotion({ tracks: removeDialTrack(motionTracks.value, spec.path) } as Partial<FrameMotion>)
-    return
-  }
-  if (spec.kind === 'gradient') {
-    // Seed from the CURRENT gradient's stops. `gradientMap.stops` targets already
-    // resolve (via getByIdPath) to a GradientMapStop[] — already {pos,color}. A
-    // `layers.<id>.fill` target resolves to the layer's Paint, so read the fill
-    // directly and adapt it via `paintStopsToColor`; a non-gradient fill falls
-    // back to a sensible 2-stop default.
-    const cur = getByIdPath({ layers: [l] }, spec.path)
-    const fill = (l as unknown as { fill?: Paint }).fill
-    const seed = Array.isArray(cur)
-      ? cur
-      : isGradient(fill)
-        ? paintStopsToColor(fill)
-        : [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }]
-    setMotion({
-      tracks: addDialTrack(motionTracks.value, spec.path, previewT.value ?? 0, seed, undefined, {
-        mode: 'crossfade',
-        blendSpace: 'oklab',
-      }),
-    } as Partial<FrameMotion>)
-    return
-  }
-  // Seed the first keyframe from the dial's CURRENT value at the playhead, so the
-  // track starts as a no-op hold until a second keyframe is authored (Task 5).
-  const cur = getByIdPath({ layers: [l] }, spec.path)
-  const seed: number | string =
-    typeof cur === 'number' || typeof cur === 'string'
-      ? cur
-      : spec.kind === 'color'
-        ? '#ffffff'
-        : (spec.min ?? 0)
-  setMotion({
-    tracks: addDialTrack(
-      motionTracks.value,
-      spec.path,
-      previewT.value ?? 0,
-      seed,
-      spec.kind === 'color' ? 'oklch' : undefined,
-    ),
-  } as Partial<FrameMotion>)
-}
-
-// ── Motion tab · unified-motion behaviours (motionx, live slice 1) ──────────
-// Temporary entry point: a behaviour compiles to Track[] (via the Frame
-// adapter) against the selected layer's CURRENT values and is appended to
-// `sailor_motion.motionx`. The render fold (paintLayerStack) already reads
-// this field — see CLAUDE.md / um-p3 report. No preview gallery or band
-// timeline yet; that lands next.
-const motionxTracks = computed<MotionxTrack[]>(() => (motionDoc.value as any).motionx ?? [])
-const behaviourPickerOpen = ref(false)
-// The Motion tab renders ONE DialKit-style dock (MotionBandTimeline). The legacy dial
-// picker + dial timeline are kept in code until 6b deletes them, behind this flag.
-const legacyMotionUi = ref(false)
-// Slice 2/3: band-timeline selection (a behaviour band, a property band, or a control point)
-// drives the contextual inspector in the Motion right column. Writes flow through setMotion.
-const motionSel = ref<{ kind: 'band' | 'point' | 'behaviour'; path: string; index?: number } | null>(null)
-const motionBehaviours = computed<StoredBehaviour[]>(() => (motionDoc.value as any).behaviours ?? [])
-function updateMotionx(tracks: MotionxTrack[]) {
-  setMotion({ motionx: tracks } as Partial<FrameMotion>)
-}
-function selectMotionBand(path: string) { motionSel.value = { kind: 'band', path } }
-function selectMotionBehaviour(id: string) { motionSel.value = { kind: 'behaviour', path: id } }
-// Slice 4: what behaviour groups the selected layer supports (gradient fill / text layer).
-const motionLayerCaps = computed(() => {
-  const l = selectedLocal.value
-  const fill = (l as unknown as { fill?: Paint })?.fill
-  return { gradient: !!l && isGradient(fill), text: l?.kind === 'text' }
-})
-// A tile is a RECIPE: one or more single-property behaviours, all placed at the
-// playhead with the group's default length. The first lands selected.
-function onGalleryAdd(move: GalleryMove) {
-  const parts = behavioursForMove(move)
-  const timing = { start: previewT.value ?? 0, duration: defaultDurationFor(move.group) }
-  recordHistory()
-  parts.forEach((p, i) => addBehaviour(p.kind, p.params ?? {}, timing, { select: i === 0, record: false }))
-  behaviourPickerOpen.value = false
-}
-// 6a: "Add property" — animate ANY property directly (transform, fill, effect dials) as
-// a plain property band. Seeds a flat hold at the property's current value so the band
-// is visible + retimeable immediately and a no-op until a point is changed.
-const propertyPickerOpen = ref(false)
-const selectedAnimatableProps = computed<AnimatableProperty[]>(() =>
-  selectedLocal.value ? animatableProperties(selectedLocal.value as LocalLayer) : [])
-const animatedPropertyPaths = computed<string[]>(() =>
-  motionxTracks.value.filter((t) => !t.behaviourId).map((t) => t.path))
-function currentPropertyValue(l: LocalLayer, p: AnimatableProperty): number | string | Array<{ pos: number; color: string }> {
-  const prop = p.path.replace(`layers.${l.id}.`, '')
-  const rec = l as unknown as Record<string, unknown>
-  if (prop === 'fill.phase') return 0
-  if (prop === 'fill') { const f = rec.fill as Paint | undefined; return isGradient(f) ? paintStopsToColor(f) : [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }] }
-  const cur = prop.startsWith('effects.') ? getByIdPath({ layers: [l] }, p.path) : rec[prop]
-  if (p.type === 'number') return typeof cur === 'number' ? cur : (p.min ?? 0)
-  if (p.type === 'color') return typeof cur === 'string' ? cur : '#ffffff'
-  return Array.isArray(cur) ? (cur as Array<{ pos: number; color: string }>) : [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }]
-}
-function addProperty(p: AnimatableProperty) {
-  const l = selectedLocal.value as LocalLayer | null
-  if (!l || animatedPropertyPaths.value.includes(p.path)) return
-  const track = seedHoldTrack(p.path, p.type, currentPropertyValue(l, p), motionDoc.value.duration ?? 4)
-  recordHistory()
-  setMotion({ motionx: setBandTrack(motionxTracks.value, p.path, track) } as Partial<FrameMotion>)
-  motionSel.value = { kind: 'band', path: p.path }
-  propertyPickerOpen.value = false
-}
-function selectMotionPoint(sel: { path: string; index: number }) { motionSel.value = { kind: 'point', ...sel } }
-function clearMotionSel() { motionSel.value = null }
-// Human label for the selected band's property path (Fill · Gradient, Opacity, …).
-const motionSelLabel = computed<string>(() => {
-  const l = selectedLocal.value, sel = motionSel.value
-  if (!l || !sel) return ''
-  return animatableProperties(l).find((p) => p.path === sel.path)?.label || sel.path.split('.').pop() || ''
-})
-// Selecting a different layer clears the motion selection (bands are per-layer).
-watch(() => selectedLocal.value?.id, () => { motionSel.value = null })
-// Slice 3: a behaviour is a live, param-editable band. Adding one stores a StoredBehaviour
-// AND its compiled tracks (tagged with the behaviour id) so the render path (which reads
-// motionx) is unchanged, while the band UI shows a single labeled behaviour band.
-// Adds ONE single-property behaviour. `timing` defaults to the playhead + the full
-// remaining timeline; gallery tiles pass their group's default length (In/Out 0.8s,
-// Loop → to the end) so new bars sequence naturally instead of all landing at 0–4s.
-function addBehaviour(kind: string, params: Record<string, unknown> = {}, timing?: { start?: number; duration?: number }, opts: { select?: boolean; record?: boolean } = {}) {
-  const l = selectedLocal.value
-  if (!l) return
-  const total = motionDoc.value.duration ?? 4
-  const start = Math.max(0, Math.min(total - 0.05, timing?.start ?? previewT.value ?? 0))
-  const duration = Math.max(0.05, Math.min(total - start, timing?.duration ?? (total - start)))
-  const loop = kind === 'gradientScroll' || kind === 'spin' || kind === 'pulse' || kind === 'sway' || kind === 'float'
-  const b: StoredBehaviour = {
-    id: 'b' + Date.now() + Math.random().toString(36).slice(2, 6),
-    layerId: l.id,
-    kind,
-    timing: { start, duration, loop },
-    params: { ...(kind === 'fade' ? { dir: 'in' } : {}), ...params },
-  }
-  const tracks = compileBehaviourForLayer(l, b as Behaviour)
-  if (opts.record !== false) recordHistory()
-  setMotion({
-    behaviours: upsertBehaviour(motionBehaviours.value, b),
-    motionx: setBehaviourTracks(motionxTracks.value, b.id, tracks),
-  } as Partial<FrameMotion>)
-  if (opts.select !== false) motionSel.value = { kind: 'behaviour', path: b.id }
-  return b.id
-}
-// Edit a live behaviour's params/timing → recompile its tracks against the current layer.
-// `record=false` for continuous edits (timeline drags) — the drag already emitted
-// before-change once, so per-move recompiles must not push a history entry each.
-function editBehaviour(id: string, patch: { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }, record = true) {
-  const cur = motionBehaviours.value.find((b) => b.id === id)
-  const l = cur ? localLayers.value.find((x) => x.id === cur.layerId) : null
-  if (!cur || !l) return
-  const next: StoredBehaviour = {
-    ...cur, ...patch,
-    timing: { ...cur.timing, ...(patch.timing ?? {}) },
-    params: { ...cur.params, ...(patch.params ?? {}) },
-  }
-  const tracks = compileBehaviourForLayer(l as LocalLayer, next as Behaviour)
-  if (record) recordHistory()
-  setMotion({
-    behaviours: upsertBehaviour(motionBehaviours.value, next),
-    motionx: setBehaviourTracks(motionxTracks.value, id, tracks),
-  } as Partial<FrameMotion>)
-}
-// Open = bake: strip the behaviour tag (tracks become plain property bands) + drop the behaviour.
-function openBehaviour(id: string) {
-  recordHistory()
-  setMotion({
-    behaviours: removeBehaviour(motionBehaviours.value, id),
-    motionx: bakeBehaviour(motionxTracks.value, id),
-  } as Partial<FrameMotion>)
-  motionSel.value = null
-}
-// Delete whatever is selected on the timeline: a behaviour (bar + its track), a whole
-// property band, or a single control point (dropping the band when it was the last).
-function deleteMotionSelection() {
-  const sel = motionSel.value
-  if (!sel) return
-  if (sel.kind === 'behaviour') { deleteBehaviour(sel.path); return }
-  const tk = motionxTracks.value.find((t) => t.path === sel.path && !t.behaviourId)
-  if (!tk) { motionSel.value = null; return }
-  recordHistory()
-  if (sel.kind === 'point' && sel.index != null && tk.keyframes.length > 1) {
-    const next = { ...tk, keyframes: tk.keyframes.filter((_, i) => i !== sel.index) }
-    setMotion({ motionx: setBandTrack(motionxTracks.value, sel.path, next) } as Partial<FrameMotion>)
-    motionSel.value = { kind: 'band', path: sel.path }
-    return
-  }
-  setMotion({ motionx: setBandTrack(motionxTracks.value, sel.path, null) } as Partial<FrameMotion>)
-  motionSel.value = null
-}
-// Delete a behaviour entirely (band + its tracks).
-function deleteBehaviour(id: string) {
-  recordHistory()
-  setMotion({
-    behaviours: removeBehaviour(motionBehaviours.value, id),
-    motionx: setBehaviourTracks(motionxTracks.value, id, []),
-  } as Partial<FrameMotion>)
-  motionSel.value = null
-}
-
-// ── F8 Task 6 · signal driven dials in the effect inspector ──────────────────
-// Authoring stays on the Motion tab; the inspector only SIGNALS that a dial is a
-// variable (it has a motion track) and refuses to present a driven dial as a plain
-// editable static value — the track overrides the stored value at paint, so editing
-// the static slider would do nothing visible (misleading). `animatedDialKeys` is the
-// set of the OPEN effect's dial KEYS that a track drives; `animatedDialLabels` names
-// them (dial half only) for the compact summary drawn under the breadcrumb.
-const animatedDialKeys = computed<Set<string>>(() => {
-  const layer = activeEffectLayer.value
-  const fx = activeEffect.value
-  if (!layer || !fx) return new Set<string>()
-  return animatedDialKeysOf(effectDialTargets(layer as any), (fx as any).id, motionTracks.value)
-})
-const animatedDialLabels = computed<string[]>(() => {
-  const layer = activeEffectLayer.value
-  const fx = activeEffect.value
-  if (!layer || !fx || !animatedDialKeys.value.size) return []
-  const out: string[] = []
-  for (const spec of effectDialTargets(layer as any)) {
-    // spec.label is "Effect · Dial"; the summary already sits under the effect
-    // breadcrumb, so show just the dial half.
-    if (spec.effectId === (fx as any).id && animatedDialKeys.value.has(spec.dialKey)) {
-      out.push(spec.label.split(' · ').pop() || spec.label)
-    }
-  }
-  return out
-})
-
 const playing = ref(false)
 let rafId = 0
 let playStartWall = 0
@@ -4685,7 +4389,7 @@ function setBoxDim(id: string, key: 'boxW' | 'boxH', raw: string) {
   }
   setLocal(id, { [key]: norm } as any)
 }
-function setBoxFit(l: any, fit: 'wrap' | 'shrink' | 'fill' | 'break') { setLocal(l.id, { boxFit: fit } as any) }
+function setBoxFit(l: any, fit: 'wrap' | 'shrink' | 'fill') { setLocal(l.id, { boxFit: fit } as any) }
 
 // A shape's stroke needs BOTH a colour and a width > 0 to show. New shapes start
 // at strokeWidth 0, so adding a stroke colour alone paints nothing — the stroke
@@ -6636,14 +6340,6 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
   if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && !genActive.value && !smartActive.value && !brush.active.value) {
-    // A timeline selection (behaviour bar / property band / control point) is a pseudo-
-    // child of its layer exactly like an effect row: Delete must remove THAT and stop,
-    // never fall through to deleteLocal and throw away the layer being animated.
-    if (motionSel.value) {
-      e.preventDefault()
-      deleteMotionSelection()
-      return
-    }
     // An effect row is a pseudo-child of its layer, so while one is selected Delete must
     // remove THAT EFFECT and stop — reaching `deleteLocal` below would throw away the whole
     // layer the user was tuning.
@@ -8024,58 +7720,7 @@ onUnmounted(() => {
       <div v-if="inspectorTab === 'motion'" ref="motionTimelineRef" class="absolute bottom-8 z-20 pointer-events-auto"
         :style="{ left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' }"
         @pointerdown.stop @click.stop @dblclick.stop>
-        <!-- The Motion tab is ONE DialKit-style dock (MotionBandTimeline): transport +
-             Add behaviour + Bake in its header, the gallery inside it, ruler, grouped rows.
-             The legacy dial picker + dial timeline below stay in code (deleted in 6b) but
-             only render behind `legacyMotionUi`. -->
-        <div v-if="selectedLocal && legacyMotionUi" data-testid="dial-picker"
-          class="glass-panel mb-2 rounded-lg border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-lg px-3 py-2">
-          <div class="text-[11px] font-medium text-white/60 mb-1.5">Animate a dial</div>
-          <p v-if="!animatableDials.length" class="text-[11px] text-white/35">
-            No animatable effect dials on this layer.
-          </p>
-          <div v-else class="flex flex-wrap gap-1.5">
-            <button v-for="spec in animatableDials" :key="spec.path" type="button"
-              :data-testid="'dial-add-' + dialTestKey(spec.path)"
-              :aria-pressed="dialIsAnimated(spec.path)"
-              class="flex items-center gap-1.5 h-7 px-2 rounded text-[11px] cursor-pointer whitespace-nowrap border transition-colors"
-              :class="dialIsAnimated(spec.path)
-                ? 'bg-white/15 text-white border-white/20'
-                : 'text-white/70 border-white/10 hover:bg-white/10'"
-              @click="toggleDialTrack(spec)">
-              <span>{{ dialIsAnimated(spec.path) ? '✓' : '+' }}</span>
-              <span>{{ spec.label }}</span>
-            </button>
-          </div>
-        </div>
-
-        <MotionBandTimeline
-          :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
-          :motionx="motionxTracks" :behaviours="motionBehaviours"
-          :duration="effectiveMotion.duration" :t="previewT"
-          :selection="motionSel"
-          :playing="playing" :fps="effectiveMotion.fps" :loop="effectiveMotion.loop ?? false"
-          :baking="baking" :bake-progress="bakeProgress" :stale="motionStale" :bake-error="bakeError"
-          :gallery-open="behaviourPickerOpen && !!selectedLocal"
-          :property-picker-open="propertyPickerOpen && !!selectedLocal"
-          @select="(id: string) => selectLocal(id)"
-          @select-band="selectMotionBand" @select-point="selectMotionPoint" @select-behaviour="selectMotionBehaviour"
-          @update:motionx="updateMotionx" @before-change="recordHistory"
-          @scrub="scrubTo" @pause="pause" @play="play" @bake="bakeMotion"
-          @update:motion="setMotion"
-          @toggle-gallery="behaviourPickerOpen = !behaviourPickerOpen; if (behaviourPickerOpen) propertyPickerOpen = false"
-          @toggle-property-picker="propertyPickerOpen = !propertyPickerOpen; if (propertyPickerOpen) behaviourPickerOpen = false"
-          @behaviour-change="(id: string, p: { timing: { start?: number; duration?: number } }) => editBehaviour(id, p, false)"
-          @behaviour-open="openBehaviour">
-          <template #gallery>
-            <MotionGallery :caps="motionLayerCaps" @add="onGalleryAdd" @close="behaviourPickerOpen = false" />
-          </template>
-          <template #property-picker>
-            <MotionPropertyPicker :properties="selectedAnimatableProps" :animated-paths="animatedPropertyPaths"
-              @add="addProperty" @close="propertyPickerOpen = false" />
-          </template>
-        </MotionBandTimeline>
-        <CompositorMotionTimeline v-if="legacyMotionUi" class="mt-2"
+        <CompositorMotionTimeline
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
           :motion="effectiveMotion" :t="previewT" :playing="playing"
           :baking="baking" :bake-progress="bakeProgress" :stale="motionStale" :bake-error="bakeError"
@@ -8324,16 +7969,6 @@ onUnmounted(() => {
           <span class="text-sm font-medium">{{ selectedLocal ? 'Layer motion' : 'Frame motion' }}</span>
         </div>
         <div class="p-4 flex-1 min-h-0 overflow-y-auto">
-          <!-- Contextual motion inspector (Slice 2): shows the selected band's timing/easing
-               or the selected control point's typed value editor. Decision A — right column. -->
-          <MotionInspector v-if="motionSel"
-            class="mb-3"
-            :motionx="motionxTracks" :behaviours="motionBehaviours" :selection="motionSel"
-            :duration="effectiveMotion.duration" :t="previewT"
-            :label="motionSelLabel"
-            @update:motionx="updateMotionx" @before-change="recordHistory"
-            @select-point="selectMotionPoint" @clear="clearMotionSel"
-            @behaviour-change="editBehaviour" @behaviour-open="openBehaviour" @behaviour-delete="deleteBehaviour" />
           <!-- Animate: make this still a looping, transparent clip. Lives in Motion (not
                Design) because it is how the layer moves — it composes with the keyframes below. -->
           <CompositorAnimatePanel v-if="selectedLocal?.kind === 'image'"
@@ -8345,20 +7980,28 @@ onUnmounted(() => {
             @remove="removeClip(selectedLocal)"
             @take="(t) => restoreTake(selectedLocal, t)"
           />
-          <!-- Legacy In/Loop/Out preset editor (layer.animation). Replaced by behaviours
-               (gallery In/Loop/Out); kept in code behind legacyMotionUi until 6b deletes it. -->
-          <MotionLayerEditor v-if="selectedLocal && legacyMotionUi"
+          <MotionLayerEditor v-if="selectedLocal"
             :animation="(selectedLocal as any).animation" :frame-duration="effectiveMotion.duration"
             :layer-kind="selectedLocal.kind"
             @update="(a) => setLocal(selectedLocal!.id, { animation: a } as any)"
           />
-          <!-- Empty state: the dock owns frame timing (dur/fps/loop) and Add behaviour;
-               this panel is the contextual inspector for whatever is selected on it. -->
-          <p v-else-if="!motionSel" class="text-xs text-white/40">
-            {{ selectedLocal
-              ? 'Select a band on the timeline to edit it, or add a behaviour from the timeline.'
-              : 'Select a layer, then add a behaviour from the timeline.' }}
-          </p>
+          <div v-else class="flex flex-col gap-3 text-xs text-white/55">
+            <p class="text-white/40 italic">Select a layer to animate it, or set the frame's timing below.</p>
+            <label class="flex items-center justify-between gap-2">Duration (s)
+              <input v-scrubnum type="number" min="0.5" max="60" step="0.5" :value="effectiveMotion.duration"
+                class="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-1 py-0.5 text-white/90 outline-none"
+                @change="setMotion({ duration: Math.max(0.5, Number(($event.target as HTMLInputElement).value) || 4) })">
+            </label>
+            <label class="flex items-center justify-between gap-2">FPS
+              <input v-scrubnum type="number" min="1" max="60" step="1" :value="effectiveMotion.fps"
+                class="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-1 py-0.5 text-white/90 outline-none"
+                @change="setMotion({ fps: Math.max(1, Math.min(60, Number(($event.target as HTMLInputElement).value) || 30)) })">
+            </label>
+            <label class="flex items-center justify-between gap-2">Loop playback
+              <input type="checkbox" class="accent-white/80" :checked="effectiveMotion.loop ?? false"
+                @change="setMotion({ loop: ($event.target as HTMLInputElement).checked })">
+            </label>
+          </div>
         </div>
       </template>
 
@@ -8485,15 +8128,6 @@ onUnmounted(() => {
           <span class="truncate text-white/80">{{ EFFECT_LABELS[activeEffect!.type] }}</span>
         </div>
         <div class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
-          <!-- Variable signal: which of this effect's dials are driven by a Motion-tab
-               track. Authoring stays on the Motion tab; this is the primary per-effect
-               "it's animated" cue, drawn in the motion accent (amber, as the timeline
-               diamonds + playhead use). -->
-          <div v-if="animatedDialKeys.size" data-testid="inspector-animated-dials"
-            class="flex items-start gap-1.5 rounded-md border border-amber-400/25 bg-amber-400/10 px-2.5 py-1.5 text-[11px] leading-snug text-amber-300">
-            <span class="shrink-0" aria-hidden="true">◆</span>
-            <span>Animated: {{ animatedDialLabels.join(', ') }} — edit on the Motion tab</span>
-          </div>
           <!-- The seven kinds PostEffectsControls already draws. `only` narrows it to the
                selected kind, and `effects` is the one instance, so its patch comes back as
                a single-entry array we write straight onto that id. -->
@@ -8502,148 +8136,99 @@ onUnmounted(() => {
             Depth of field needs an image with a depth map. Add it to an image layer, or
             generate depth for this one first.
           </p>
-          <!-- PostEffectsControls is a packaged panel (not per-row editable from here), so a
-               driven dial is signalled + delegated with a shared wrapper: a compact ◆ marker
-               and the panel muted + non-interactive (a driven dial must not read as a freely
-               editable static value — the track wins at paint). -->
-          <div v-else-if="isPanelKind(activeEffect!.type)">
-            <div v-if="animatedDialKeys.size" data-testid="effect-panel-dial-lock"
-              class="mb-2 inline-flex items-center gap-1 text-[10px] text-amber-300"
-              title="Animated — edit on the Motion tab timeline">
-              <span aria-hidden="true">◆</span><span>Animated</span>
-            </div>
-            <div :class="animatedDialKeys.size ? 'opacity-50 pointer-events-none select-none' : ''"
-              :title="animatedDialKeys.size ? 'Animated — edit on the Motion tab timeline' : undefined">
-              <PostEffectsControls
-                :effects="([activeEffect] as any)"
-                :only="([activeEffect!.type] as any)"
-                :depth-source="activeEffectDepth"
-                :hide-toggle="true"
-                @update="(fx: any[]) => { const n = fx[0]; if (n) updateActiveEffect(n) }" />
-            </div>
-          </div>
+          <PostEffectsControls
+            v-else-if="isPanelKind(activeEffect!.type)"
+            :effects="([activeEffect] as any)"
+            :only="([activeEffect!.type] as any)"
+            :depth-source="activeEffectDepth"
+            :hide-toggle="true"
+            @update="(fx: any[]) => { const n = fx[0]; if (n) updateActiveEffect(n) }" />
 
-          <!-- Drop shadow (per-dial: a driven dial is marked ◆ + disabled, edit on Motion tab) -->
+          <!-- Drop shadow -->
           <div v-else-if="activeEffect!.type === 'drop_shadow'" class="space-y-1.5">
-            <div class="flex items-center gap-1.5"
-              :class="animatedDialKeys.has('color') ? 'opacity-50' : ''"
-              :title="animatedDialKeys.has('color') ? 'Animated — edit on the Motion tab timeline' : undefined">
-              <span v-if="animatedDialKeys.has('color')" class="text-amber-300 text-[10px] shrink-0" aria-hidden="true">◆</span>
+            <div class="flex items-center gap-1.5">
               <input type="color" :value="activeFxHex" title="Shadow color"
-                :disabled="animatedDialKeys.has('color')"
-                :class="animatedDialKeys.has('color') ? 'pointer-events-none' : ''"
                 class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
                 @input="updateActiveEffect({ color: composeRgba(($event.target as HTMLInputElement).value, activeFxAlpha) })" />
               <input type="text" spellcheck="false" maxlength="7" :value="activeFxHex" title="Hex color"
-                :disabled="animatedDialKeys.has('color')"
-                :class="animatedDialKeys.has('color') ? 'pointer-events-none' : ''"
                 class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs font-mono uppercase text-white/90 outline-none"
                 @change="setActiveFxHex(($event.target as HTMLInputElement).value)" />
               <div class="flex items-center gap-0.5 shrink-0 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-1.5" title="Shadow opacity (alpha)">
                 <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(activeFxAlpha * 100)"
-                  :disabled="animatedDialKeys.has('color')"
-                  :class="animatedDialKeys.has('color') ? 'pointer-events-none' : ''"
                   class="w-7 bg-transparent text-xs text-white/90 outline-none text-right"
                   @input="updateActiveEffect({ color: composeRgba(activeFxHex, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
                 <span class="text-[10px] text-white/35 select-none">%</span>
               </div>
             </div>
             <div class="grid grid-cols-3 gap-1.5">
-              <div :class="animatedDialKeys.has('x') ? 'opacity-50' : ''">
-                <div class="panel-sublabel mb-1">X<span v-if="animatedDialKeys.has('x')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
+              <div>
+                <div class="panel-sublabel mb-1">X</div>
                 <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).x || 0) * 1000) / 10"
-                  :disabled="animatedDialKeys.has('x')"
-                  :class="animatedDialKeys.has('x') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ x: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
               </div>
-              <div :class="animatedDialKeys.has('y') ? 'opacity-50' : ''">
-                <div class="panel-sublabel mb-1">Y<span v-if="animatedDialKeys.has('y')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
+              <div>
+                <div class="panel-sublabel mb-1">Y</div>
                 <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).y || 0) * 1000) / 10"
-                  :disabled="animatedDialKeys.has('y')"
-                  :class="animatedDialKeys.has('y') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ y: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
               </div>
-              <div :class="animatedDialKeys.has('blur') ? 'opacity-50' : ''">
-                <div class="panel-sublabel mb-1">Blur<span v-if="animatedDialKeys.has('blur')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
+              <div>
+                <div class="panel-sublabel mb-1">Blur</div>
                 <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).blur || 0) * 1000) / 10"
-                  :disabled="animatedDialKeys.has('blur')"
-                  :class="animatedDialKeys.has('blur') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ blur: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
               </div>
             </div>
           </div>
 
-          <!-- Inner shadow (per-dial: a driven dial is marked ◆ + disabled, edit on Motion tab) -->
+          <!-- Inner shadow -->
           <div v-else-if="activeEffect!.type === 'inner_shadow'" class="space-y-1.5">
-            <div class="flex items-center gap-1.5"
-              :class="animatedDialKeys.has('color') ? 'opacity-50' : ''"
-              :title="animatedDialKeys.has('color') ? 'Animated — edit on the Motion tab timeline' : undefined">
-              <span v-if="animatedDialKeys.has('color')" class="text-amber-300 text-[10px] shrink-0" aria-hidden="true">◆</span>
+            <div class="flex items-center gap-1.5">
               <input type="color" :value="activeFxHex" title="Shadow color"
-                :disabled="animatedDialKeys.has('color')"
-                :class="animatedDialKeys.has('color') ? 'pointer-events-none' : ''"
                 class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
                 @input="updateActiveEffect({ color: composeRgba(($event.target as HTMLInputElement).value, activeFxAlpha) })" />
               <div class="flex items-center gap-0.5 shrink-0 bg-white/[0.04] border border-white/[0.06] rounded px-1.5 py-1.5" title="Shadow opacity (alpha)">
                 <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(activeFxAlpha * 100)"
-                  :disabled="animatedDialKeys.has('color')"
-                  :class="animatedDialKeys.has('color') ? 'pointer-events-none' : ''"
                   class="w-7 bg-transparent text-xs text-white/90 outline-none text-right"
                   @input="updateActiveEffect({ color: composeRgba(activeFxHex, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
                 <span class="text-[10px] text-white/35 select-none">%</span>
               </div>
             </div>
             <div class="grid grid-cols-3 gap-1.5">
-              <div :class="animatedDialKeys.has('x') ? 'opacity-50' : ''">
-                <div class="panel-sublabel mb-1">X<span v-if="animatedDialKeys.has('x')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
+              <div>
+                <div class="panel-sublabel mb-1">X</div>
                 <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).x || 0) * 1000) / 10"
-                  :disabled="animatedDialKeys.has('x')"
-                  :class="animatedDialKeys.has('x') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ x: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
               </div>
-              <div :class="animatedDialKeys.has('y') ? 'opacity-50' : ''">
-                <div class="panel-sublabel mb-1">Y<span v-if="animatedDialKeys.has('y')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
+              <div>
+                <div class="panel-sublabel mb-1">Y</div>
                 <input v-scrubnum type="number" step="0.5" :value="Math.round(((activeEffect as any).y || 0) * 1000) / 10"
-                  :disabled="animatedDialKeys.has('y')"
-                  :class="animatedDialKeys.has('y') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ y: (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100 })" />
               </div>
-              <div :class="animatedDialKeys.has('blur') ? 'opacity-50' : ''">
-                <div class="panel-sublabel mb-1">Blur<span v-if="animatedDialKeys.has('blur')" class="ml-1 text-amber-300" title="Animated — edit on the Motion tab timeline" aria-hidden="true">◆</span></div>
+              <div>
+                <div class="panel-sublabel mb-1">Blur</div>
                 <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).blur || 0) * 1000) / 10"
-                  :disabled="animatedDialKeys.has('blur')"
-                  :class="animatedDialKeys.has('blur') ? 'pointer-events-none' : ''"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                   @input="updateActiveEffect({ blur: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
               </div>
             </div>
           </div>
 
-          <!-- Layer blur (Radius is the sole dial — marked ◆ + disabled when animated) -->
-          <div v-else-if="activeEffect!.type === 'layer_blur'" class="flex items-center gap-2"
-            :class="animatedDialKeys.has('radius') ? 'opacity-50' : ''"
-            :title="animatedDialKeys.has('radius') ? 'Animated — edit on the Motion tab timeline' : undefined">
-            <div class="panel-sublabel shrink-0">Radius<span v-if="animatedDialKeys.has('radius')" class="ml-1 text-amber-300" aria-hidden="true">◆</span></div>
+          <!-- Layer blur -->
+          <div v-else-if="activeEffect!.type === 'layer_blur'" class="flex items-center gap-2">
+            <div class="panel-sublabel shrink-0">Radius</div>
             <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).radius || 0) * 1000) / 10"
-              :disabled="animatedDialKeys.has('radius')"
-              :class="animatedDialKeys.has('radius') ? 'pointer-events-none' : ''"
               class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
               @input="updateActiveEffect({ radius: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
           </div>
 
           <!-- Background blur (blurs what's behind the layer, inside its shape) -->
-          <div v-else-if="activeEffect!.type === 'background_blur'" class="flex items-center gap-2"
-            :class="animatedDialKeys.has('radius') ? 'opacity-50' : ''"
-            :title="animatedDialKeys.has('radius') ? 'Animated — edit on the Motion tab timeline' : undefined">
-            <div class="panel-sublabel shrink-0">Radius<span v-if="animatedDialKeys.has('radius')" class="ml-1 text-amber-300" aria-hidden="true">◆</span></div>
+          <div v-else-if="activeEffect!.type === 'background_blur'" class="flex items-center gap-2">
+            <div class="panel-sublabel shrink-0">Radius</div>
             <input v-scrubnum type="number" min="0" step="0.5" :value="Math.round(((activeEffect as any).radius || 0) * 1000) / 10"
-              :disabled="animatedDialKeys.has('radius')"
-              :class="animatedDialKeys.has('radius') ? 'pointer-events-none' : ''"
               class="flex-1 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
               @input="updateActiveEffect({ radius: Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100) })" />
           </div>
@@ -9046,101 +8631,6 @@ onUnmounted(() => {
                 :checked="!!(activeEffect as any).invert"
                 @change="(e) => updateActiveEffect({ invert: (e.target as HTMLInputElement).checked })">
             </label>
-          </div>
-
-          <!-- Print recipe · Risograph (F7): flat limited-ink bands on paper, expanded at paint time
-               into contrast → posterise → riso ramp → grain. Two inks, band count, grain and
-               contrast — every dial is read by expandRecipe, no dead control. -->
-          <div v-else-if="activeEffect!.type === 'risograph'" class="space-y-1.5">
-            <p class="text-xs text-white/50">Flat ink bands on paper, like a risograph print.</p>
-            <StudioColorField
-              data-testid="riso-ink"
-              label="Ink"
-              :model-value="(activeEffect as any).ink ?? '#2b3a8c'"
-              @update:model-value="(v: string) => updateActiveEffect({ ink: v })"
-            />
-            <StudioColorField
-              data-testid="riso-ink-two"
-              label="Second ink"
-              :model-value="(activeEffect as any).inkTwo ?? '#e03a6d'"
-              @update:model-value="(v: string) => updateActiveEffect({ inkTwo: v })"
-            />
-            <StudioSlider
-              data-testid="riso-levels"
-              label="Levels"
-              :min="2" :max="8" :step="1" :default="4"
-              :model-value="(activeEffect as any).levels ?? 4"
-              @update:model-value="(v: number) => updateActiveEffect({ levels: v })"
-            />
-            <StudioSlider
-              data-testid="riso-grain"
-              label="Grain"
-              :min="0" :max="1" :step="0.01" :default="0.16"
-              :model-value="(activeEffect as any).grain ?? 0.16"
-              @update:model-value="(v: number) => updateActiveEffect({ grain: v })"
-            />
-            <StudioSlider
-              data-testid="riso-contrast"
-              label="Contrast"
-              :min="0.5" :max="2" :step="0.01" :default="1.12"
-              :model-value="(activeEffect as any).contrast ?? 1.12"
-              @update:model-value="(v: number) => updateActiveEffect({ contrast: v })"
-            />
-          </div>
-
-          <!-- Print recipe · Photocopy (F7): harsh 1-bit crush with dirt, expanded into contrast →
-               threshold → ink bleed + rough edge → grain. Threshold, dirt and contrast are all read
-               by expandRecipe — no dead control. -->
-          <div v-else-if="activeEffect!.type === 'photocopy'" class="space-y-1.5">
-            <p class="text-xs text-white/50">Harsh high-contrast black and white, like a photocopy.</p>
-            <StudioSlider
-              data-testid="pc-threshold"
-              label="Threshold"
-              :min="0" :max="1" :step="0.01" :default="0.5"
-              :model-value="(activeEffect as any).threshold ?? 0.5"
-              @update:model-value="(v: number) => updateActiveEffect({ threshold: v })"
-            />
-            <StudioSlider
-              data-testid="pc-dirt"
-              label="Dirt"
-              :min="0" :max="1" :step="0.01" :default="0.2"
-              :model-value="(activeEffect as any).dirt ?? 0.2"
-              @update:model-value="(v: number) => updateActiveEffect({ dirt: v })"
-            />
-            <StudioSlider
-              data-testid="pc-contrast"
-              label="Contrast"
-              :min="0.5" :max="2" :step="0.01" :default="1.4"
-              :model-value="(activeEffect as any).contrast ?? 1.4"
-              @update:model-value="(v: number) => updateActiveEffect({ contrast: v })"
-            />
-          </div>
-
-          <!-- Print recipe · Letterpress (F7): a pressed-in impression on textured paper, expanded
-               into a debossed inner shadow + paper tint + slight desaturate. Depth, ink and paper are
-               all read by expandRecipe — no dead control. -->
-          <div v-else-if="activeEffect!.type === 'letterpress'" class="space-y-1.5">
-            <p class="text-xs text-white/50">A pressed-in impression on textured paper.</p>
-            <StudioSlider
-              data-testid="lp-depth"
-              label="Depth"
-              :min="0" :max="1" :step="0.01" :default="0.5"
-              :model-value="(activeEffect as any).depth ?? 0.5"
-              @update:model-value="(v: number) => updateActiveEffect({ depth: v })"
-            />
-            <StudioColorField
-              data-testid="lp-ink"
-              label="Ink"
-              :model-value="(activeEffect as any).ink ?? '#2a2a2a'"
-              @update:model-value="(v: string) => updateActiveEffect({ ink: v })"
-            />
-            <StudioSlider
-              data-testid="lp-paper"
-              label="Paper"
-              :min="0" :max="1" :step="0.01" :default="0.3"
-              :model-value="(activeEffect as any).paper ?? 0.3"
-              @update:model-value="(v: number) => updateActiveEffect({ paper: v })"
-            />
           </div>
 
           <!-- Outer glow / Inner glow: a tinted halo outside (behind) or inside (clipped to) the
@@ -9577,44 +9067,36 @@ onUnmounted(() => {
                 </div>
               </div>
               <div v-if="!textPath" class="space-y-2">
-                <div class="panel-label" title="The text box, sized in columns, %, or pixels. Fill sizes the type to the box.">Text box</div>
+                <div class="flex items-center justify-between">
+                  <div class="panel-label" title="The text box, sized in columns, %, or pixels. Fill sizes the type to the box.">Text box</div>
+                  <div class="flex items-center gap-1">
+                    <button v-for="u in (['col','%','px'] as const)" :key="u"
+                      class="text-[10px] px-1.5 py-0.5 rounded border"
+                      :class="boxUnit === u ? 'text-yellow-400 border-yellow-400/50' : 'text-white/40 border-white/[0.08]'"
+                      @click="boxUnit = u">{{ u }}</button>
+                  </div>
+                </div>
                 <div class="flex items-center gap-1">
-                  <button v-for="f in (['wrap','shrink','fill','break'] as const)" :key="f"
+                  <button v-for="f in (['wrap','shrink','fill'] as const)" :key="f"
                     class="flex-1 text-[11px] py-1 rounded border capitalize"
                     :class="((selectedLocal as any).boxFit ?? 'wrap') === f ? 'text-yellow-400 border-yellow-400/50' : 'text-white/50 border-white/[0.08]'"
-                    :title="f === 'wrap' ? 'Words wrap; the type keeps its size' : f === 'shrink' ? 'Shrink the type to fit the box' : f === 'fill' ? 'Size the type to fill the box' : 'Break even a single word across lines to fill the box (needs a height)'"
+                    :title="f === 'wrap' ? 'Words wrap; the type keeps its size' : f === 'shrink' ? 'Shrink the type to fit the box' : 'Size the type to fill the box'"
                     @click="setBoxFit(selectedLocal, f)">{{ f }}</button>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                   <div>
                     <div class="panel-label mb-1">Width</div>
-                    <div class="relative">
-                      <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'cols' : 'auto'"
-                        :value="boxToUnit((selectedLocal as any).boxW)"
-                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded pl-2 pr-11 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
-                        @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxW', (e.target as HTMLInputElement).value)" />
-                      <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none text-white/30 text-[8px]">▾</div>
-                      <select :value="boxUnit" title="Unit: columns, percent, or pixels"
-                        class="absolute inset-y-0 right-0 my-px mr-px pl-1.5 pr-4 rounded-r bg-transparent text-[10px] text-white/50 outline-none cursor-pointer appearance-none hover:text-white/80"
-                        @change="boxUnit = ($event.target as HTMLSelectElement).value as any">
-                        <option v-for="u in (['col','%','px'] as const)" :key="u" :value="u" class="bg-neutral-800 text-white">{{ u }}</option>
-                      </select>
-                    </div>
+                    <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'cols' : 'auto'"
+                      :value="boxToUnit((selectedLocal as any).boxW)"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
+                      @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxW', (e.target as HTMLInputElement).value)" />
                   </div>
                   <div>
                     <div class="panel-label mb-1">Height</div>
-                    <div class="relative">
-                      <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'rows' : 'auto'"
-                        :value="boxToUnit((selectedLocal as any).boxH, 'h')"
-                        class="w-full bg-white/[0.04] border border-white/[0.06] rounded pl-2 pr-11 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
-                        @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxH', (e.target as HTMLInputElement).value)" />
-                      <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none text-white/30 text-[8px]">▾</div>
-                      <select :value="boxUnit" title="Unit: columns, percent, or pixels"
-                        class="absolute inset-y-0 right-0 my-px mr-px pl-1.5 pr-4 rounded-r bg-transparent text-[10px] text-white/50 outline-none cursor-pointer appearance-none hover:text-white/80"
-                        @change="boxUnit = ($event.target as HTMLSelectElement).value as any">
-                        <option v-for="u in (['col','%','px'] as const)" :key="u" :value="u" class="bg-neutral-800 text-white">{{ u }}</option>
-                      </select>
-                    </div>
+                    <input v-scrubnum type="number" min="0" :placeholder="boxUnit === 'col' ? 'rows' : 'auto'"
+                      :value="boxToUnit((selectedLocal as any).boxH, 'h')"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none placeholder-white/25"
+                      @input="(e: Event) => setBoxDim(selectedLocal!.id, 'boxH', (e.target as HTMLInputElement).value)" />
                   </div>
                 </div>
               </div>
@@ -10538,18 +10020,6 @@ onUnmounted(() => {
               <input v-scrubnum type="number" min="1" :value="pxW((selectedLocal as any).w)"
                 class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
                 @input="setSizePx(selectedLocal!.id, 'w', parseFloat(($event.target as HTMLInputElement).value) || 1)" />
-            </div>
-
-            <!-- Common: align the layer to the frame (edges + centres) -->
-            <div>
-              <div class="panel-label mb-1.5">Align to frame</div>
-              <div class="flex items-center gap-1">
-                <button v-for="a in ALIGN_FRAME_BTNS" :key="a.mode" :title="a.title"
-                  class="flex-1 flex items-center justify-center bg-white/[0.04] border border-white/[0.06] rounded py-1.5 text-white/60 hover:text-yellow-400 hover:border-yellow-400/50 transition-colors"
-                  @click="alignToFrame(a.mode)">
-                  <component :is="a.icon" class="size-3.5" />
-                </button>
-              </div>
             </div>
 
             <!-- Common: rotation + opacity -->

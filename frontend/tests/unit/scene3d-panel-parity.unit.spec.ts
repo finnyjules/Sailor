@@ -18,8 +18,7 @@ import { SCENE_CONTROLS, type SceneControl } from '~/lib/scene3d/controls'
 import {
   createDecal, createGlbObject, createLight, createPrimitive, defaultDoc,
   LIGHTING_PRESETS, MATERIAL_TYPES, PRIMITIVE_KINDS,
-  type LightKind, type MaterialType, type PrimitiveKind, type SceneDoc, type SceneObject, MATERIAL_TYPE_LABELS_ORDERED,
-  STONE_IDS, STONE_LABELS } from '~/lib/scene3d/config'
+  type LightKind, type MaterialType, type PrimitiveKind, type SceneDoc, type SceneObject, MATERIAL_TYPE_LABELS_ORDERED } from '~/lib/scene3d/config'
 
 /**
  * CHARACTERIZATION of the 3D Studio inspector's Transform / Material / Camera / Lighting /
@@ -91,12 +90,6 @@ const ROW: Record<string, Row> = {
   [`${M}type`]: {
     label: 'Material', kind: 'select', options: MATERIAL_TYPES,
     optionLabels: MATERIAL_TYPE_LABELS_ORDERED,
-  },
-
-  // gemstone — the one preset-driven material control
-  [`${M}stone`]: {
-    label: 'Stone', kind: 'select', options: STONE_IDS,
-    optionLabels: STONE_IDS.map((s) => STONE_LABELS[s]), hint: 'Which precious stone to cut', default: 'diamond',
   },
 
   // standard + glass "Surface" block
@@ -394,11 +387,6 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
     Reflection: [`${M}envMapIntensity`],
     'Surface relief': RELIEF_OFF,
   },
-  // Preset-driven: the stone picker is the whole body. Transmissive like glass, so no Screen.
-  gemstone: {
-    Material: [`${M}type`, `${M}stone`],
-    'Surface relief': RELIEF_OFF,
-  },
   phong: {
     Material: [`${M}type`, `${M}color`, `${M}shininess`, `${M}specular`],
     'Surface relief': RELIEF_OFF,
@@ -496,12 +484,9 @@ const MATERIAL_SCENARIO: Record<MaterialType, Record<string, readonly string[]>>
 
 const DOC_SCENARIO: Record<string, readonly string[]> = {
   Camera: ['camera.fov', 'ui.camera.output'],
-  // Default doc = Studio-look mode (hdri null), non-gel env. The Lighting card's PRIMARY rows are the
-  // light-source segmented, the Look, the three dials, direction/height, and the environment. The raw
-  // sun/ambient/preset live in a nested, collapsed 'Fine-tune' sub-card (always present in Studio-look
-  // mode); the Gel lighting sub-card is pruned (no Gels env). HDRI-mode rows are gated out.
-  Lighting: ['lighting.lightSource', 'lighting.look', 'lighting.softness', 'lighting.warmth', 'lighting.brightness', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.environment'],
-  'Fine-tune': ['lighting.preset', 'lighting.sunIntensity', 'lighting.ambient'],
+  // Default doc has `advanced: false`, so only the simple layer draws: Look, direction,
+  // the three feel dials, and the Advanced toggle. The four raw rows are `when`-gated off.
+  Lighting: ['lighting.look', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.softness', 'lighting.warmth', 'lighting.brightness', 'lighting.advanced'],
   Background: ['showFloor', 'ui.background.transparent', 'ui.background.color'],
 }
 
@@ -1086,13 +1071,11 @@ const GEO_LITERAL: Partial<Record<PrimitiveKind, ReadonlyArray<readonly [string,
     ['letterSpacing', 'Letter spacing', -0.1, 0.5, 0.01, 'Gap between individual characters'],
     ['curveSegments', 'Curve segments', 2, 12, 1, 'How detailed the letter curves appear'],
   ],
-  // NB the gem's Cut row is an options select, not a slider, so it is exercised by the
-  // per-spec parity tests above rather than this slider-only literal table.
   gem: [
-    ['points', 'Facets', 4, 60, 1, 'How many points form the stone — more gives finer facets'],
+    ['points', 'Facets', 4, 40, 1, 'How many points form the stone — more gives finer facets'],
     ['spread', 'Spread', 0, 1, 0.01, 'Tight, pointy stone → wide, full one'],
     ['depth', 'Depth', 0.2, 2, 0.01, 'Flat, cut-gem slab → deep, chunky stone'],
-    ['gemSeed', 'Seed', 0, 99, 1, 'Shuffles the facets into a different stone (Rough cut only)'],
+    ['gemSeed', 'Seed', 0, 99, 1, 'Shuffles the facets into a different stone'],
   ],
 }
 
@@ -1129,15 +1112,12 @@ describe('Scene3D panel parity — Geometry', () => {
       const rows = byKey(doc, primOf(kind))
       for (const spec of PRIMITIVE_PARAMS[kind]) {
         const c = rows.get(`${GEO}${spec.key}`)
-        const want = spec.control === 'toggle'
-          ? { label: spec.label, kind: 'switch' as const, hint: spec.hint, default: spec.default > 0.5 }
-          : spec.control === 'options'
-          ? { label: spec.label, kind: 'select' as const, options: spec.options, hint: spec.hint, default: (spec.options ?? [])[Math.round(spec.default)] }
+        expectRow(c, `${kind}.${spec.key}`, spec.control === 'toggle'
+          ? { label: spec.label, kind: 'switch', hint: spec.hint, default: spec.default > 0.5 }
           : {
-            label: spec.label, kind: 'slider' as const, min: spec.min, max: spec.max, step: spec.step,
+            label: spec.label, kind: 'slider', min: spec.min, max: spec.max, step: spec.step,
             hint: spec.hint, default: spec.default,
-          }
-        expectRow(c, `${kind}.${spec.key}`, want)
+          })
       }
     }
   })
@@ -1171,11 +1151,9 @@ describe('Scene3D panel parity — Geometry', () => {
     // Every kind, exhaustively — the two lists above are the readable examples.
     for (const kind of PRIMITIVE_KINDS) {
       for (const spec of PRIMITIVE_PARAMS[kind]) {
-        const row = byKey(doc, primOf(kind)).get(`${GEO}${spec.key}`) as unknown as { default: number | boolean | string }
-        const wantDefault = spec.control === 'toggle' ? spec.default > 0.5
-          : spec.control === 'options' ? (spec.options ?? [])[Math.round(spec.default)]
-          : spec.default
-        expect(row.default, `${kind}.${spec.key}`).toBe(wantDefault)
+        const row = byKey(doc, primOf(kind)).get(`${GEO}${spec.key}`) as unknown as { default: number | boolean }
+        expect(row.default, `${kind}.${spec.key}`)
+          .toBe(spec.control === 'toggle' ? spec.default > 0.5 : spec.default)
       }
     }
   })
@@ -1526,7 +1504,7 @@ describe('Scene3D panel parity — reading values', () => {
     doc.lighting.environment = 'darkStrips'
     expect(readSceneControl(doc, null, 'lighting.environment')).toBe('dark')
     const row = byKey(doc, null).get('lighting.environment') as unknown as { options: string[] }
-    expect(row.options).toEqual(['room', 'dark', 'softbox', 'studio', 'gels'])
+    expect(row.options).toEqual(['room', 'dark', 'softbox', 'gels'])
   })
 
   it('reads the doc-level rows straight off the document', () => {
@@ -1647,8 +1625,6 @@ describe('Scene3D panel contract', () => {
       'Coat & sheen': { open: false }, Glow: { open: false },
       Transparency: { open: false }, Iridescence: { open: false }, Reflection: { open: false },
       Screen: { open: false },
-      // Lighting sub-cards — collapsed by default (Fine-tune replaces the old Advanced toggle).
-      'Fine-tune': { open: false }, 'Gel lighting': { open: false },
       // Geometry's Modifiers and Cloner sub-cards are gone (S1 Task 6), so no chrome for them.
     })
     expect(scenePanelChrome('glass').Transparency).toEqual({ open: true })

@@ -5,7 +5,6 @@ import { sanitizeParams, sanitizeModifiers } from '~/lib/scene3d/primParams'
 import { sanitizeModifierStack, type ModifierInstance } from '~/lib/scene3d/modifierStack'
 import { VARY_PALETTE_MAX } from '~/lib/vary'
 import { parseTreatments, type Treatment } from './treatments'
-import { isValidHdriSlug } from './hdri'
 import type { ObjectMotion, CameraMotion, SceneMotion, SceneMotionTrack, LoopKind, TransitionPreset, Direction, EaseRef, TransitionSpec } from '~/lib/scene3d/motion/types'
 import { DEFAULT_SCENE_MOTION } from '~/lib/scene3d/motion/types'
 import type { TrackEasing } from '~/lib/studio/track'
@@ -47,39 +46,8 @@ export const DEFAULT_FONT_URL = '/fonts/ABCROM-Bold.otf'
 // no amount of roughness tuning on the PBR types (standard/glass) can reproduce — that
 // hard-dot look is a distinct retro-CG aesthetic worth keeping on its own terms. Do not
 // "modernise" it away in favour of Standard.
-export type MaterialType = 'standard' | 'phong' | 'toon' | 'matcap' | 'glass' | 'gemstone' | 'fresnel' | 'gradient' | 'opalescent' | 'holographic' | 'image' | 'shaderFill'
-export const MATERIAL_TYPES: MaterialType[] = ['standard', 'phong', 'toon', 'matcap', 'glass', 'gemstone', 'fresnel', 'gradient', 'opalescent', 'holographic', 'image', 'shaderFill']
-
-/** Precious-stone presets for the `gemstone` material. Three-free (colour strings + numbers)
- *  so the pure config module and the controls can read them; materials.ts turns a preset into a
- *  MeshPhysicalMaterial. The body colour comes from `atten` (attenuation) over a SHORT
- *  `attenDist`, which is what makes a coloured gem read saturated rather than greying out —
- *  `attenDist: 0` means colourless (diamond). Append only; the id is stored in the doc. */
-export type MaterialStone = 'diamond' | 'ruby' | 'sapphire' | 'emerald' | 'amethyst' | 'aquamarine' | 'topaz' | 'peridot' | 'garnet' | 'smoky'
-export const STONE_IDS: MaterialStone[] = ['diamond', 'ruby', 'sapphire', 'emerald', 'amethyst', 'aquamarine', 'topaz', 'peridot', 'garnet', 'smoky']
-export const STONE_LABELS: Record<MaterialStone, string> = {
-  diamond: 'Diamond', ruby: 'Ruby', sapphire: 'Sapphire', emerald: 'Emerald', amethyst: 'Amethyst',
-  aquamarine: 'Aquamarine', topaz: 'Topaz', peridot: 'Peridot', garnet: 'Garnet', smoky: 'Smoky quartz',
-}
-export interface StonePreset {
-  color: string; atten: string; attenDist: number; ior: number; dispersion: number; roughness: number; thickness: number
-}
-// `atten` is three's attenuationColor — the colour white light BECOMES after travelling
-// `attenDist` through the stone (Beer–Lambert), so it must be the SATURATED body hue, NOT a
-// dark absorber (a near-black atten drives the whole gem to grey/black — the grey-out trap).
-// `color` is the surface/reflection tint, a lighter cast of the same hue.
-export const STONE_PRESETS: Record<MaterialStone, StonePreset> = {
-  diamond:    { color: '#ffffff', atten: '#ffffff', attenDist: 0,    ior: 2.33, dispersion: 5.0, roughness: 0.0, thickness: 0.7 },
-  ruby:       { color: '#ffb0bc', atten: '#ff1636', attenDist: 0.35, ior: 1.77, dispersion: 1.4, roughness: 0.02, thickness: 1.0 },
-  sapphire:   { color: '#9fb6ff', atten: '#1a44ff', attenDist: 0.38, ior: 1.77, dispersion: 1.4, roughness: 0.02, thickness: 1.0 },
-  emerald:    { color: '#9fe8c6', atten: '#10d878', attenDist: 0.42, ior: 1.58, dispersion: 0.9, roughness: 0.03, thickness: 1.1 },
-  amethyst:   { color: '#d3b6ff', atten: '#9a44ff', attenDist: 0.45, ior: 1.55, dispersion: 1.1, roughness: 0.02, thickness: 1.0 },
-  aquamarine: { color: '#bff2f2', atten: '#3ad8d8', attenDist: 0.5,  ior: 1.58, dispersion: 0.8, roughness: 0.02, thickness: 1.0 },
-  topaz:      { color: '#ffe6ac', atten: '#ffab1e', attenDist: 0.45, ior: 1.62, dispersion: 1.0, roughness: 0.02, thickness: 1.0 },
-  peridot:    { color: '#dcefac', atten: '#a8dc28', attenDist: 0.45, ior: 1.65, dispersion: 1.0, roughness: 0.03, thickness: 1.0 },
-  garnet:     { color: '#ffa694', atten: '#e0240f', attenDist: 0.3,  ior: 1.79, dispersion: 1.3, roughness: 0.03, thickness: 1.0 },
-  smoky:      { color: '#d8c4b2', atten: '#8a6448', attenDist: 0.5,  ior: 1.55, dispersion: 0.9, roughness: 0.03, thickness: 1.0 },
-}
+export type MaterialType = 'standard' | 'phong' | 'toon' | 'matcap' | 'glass' | 'fresnel' | 'gradient' | 'opalescent' | 'holographic' | 'image' | 'shaderFill'
+export const MATERIAL_TYPES: MaterialType[] = ['standard', 'phong', 'toon', 'matcap', 'glass', 'fresnel', 'gradient', 'opalescent', 'holographic', 'image', 'shaderFill']
 
 /** Display text per material type — the panel must never show a raw id ("shaderFill" would
  *  title-case to "ShaderFill"). Keyed, not a positional array: a Record over MaterialType
@@ -87,7 +55,6 @@ export const STONE_PRESETS: Record<MaterialStone, StonePreset> = {
  *  silently slide every label one place along. Read via MATERIAL_TYPE_LABELS_ORDERED. */
 export const MATERIAL_TYPE_LABELS: Record<MaterialType, string> = {
   standard: 'Standard', phong: 'Phong', toon: 'Toon', matcap: 'Matcap', glass: 'Glass',
-  gemstone: 'Gemstone',
   fresnel: 'Fresnel', gradient: 'Gradient', opalescent: 'Opalescent',
   holographic: 'Holographic', image: 'Image', shaderFill: 'Shader fill',
 }
@@ -216,9 +183,6 @@ export interface SceneMaterial {
   ior?: number
   transmission?: number
   thickness?: number
-  /** `gemstone` only — which precious-stone preset drives the physical params (see
-   *  STONE_PRESETS). Absent ⇒ diamond. */
-  stone?: MaterialStone
   fresnelColor?: string
   fresnelPower?: number
   gradientB?: string
@@ -558,23 +522,10 @@ export function sceneHasOpalFlow(doc: SceneDoc): boolean {
 }
 
 export type LightingPreset = 'studio' | 'soft' | 'dramatic' | 'flat'
-export type EnvironmentKind = 'room' | 'darkStrips' | 'softbox' | 'colorGels' | 'studio'
+export type EnvironmentKind = 'room' | 'darkStrips' | 'softbox' | 'colorGels'
 export interface SceneLighting {
   preset: LightingPreset
   environment: EnvironmentKind
-  /** Optional Poly Haven studio HDRI slug (see lib/scene3d/hdri.ts). Non-null selects HDRI light-
-   *  source mode: the HDRI IS the light (replacing the procedural Look system), a real HDR equirect
-   *  the cinematic path tracer samples at full energy (fire/sparkle). null ⇒ Studio-look mode. */
-  hdri: string | null
-  /** HDRI mode only: exposure of the environment lighting (→ scene.environmentIntensity). */
-  hdriExposure: number
-  /** HDRI mode only: rotation of the environment in degrees (→ scene.environment/backgroundRotation)
-   *  — spins the studio so highlights/reflections move around the object. */
-  hdriRotation: number
-  /** Studio-look mode: true once the user hand-edits a fine-tune control (sun/ambient/preset), which
-   *  DETACHES from the Look — the dials hide and stop recomputing so manual values stick. Picking a
-   *  Look (or Reset to Look) clears it. `look` keeps the last real recipe id as the detach base. */
-  custom: boolean
   sunAzimuth: number
   sunElevation: number
   sunIntensity: number
@@ -677,7 +628,7 @@ export const MACRO_PRIMITIVE_KINDS: PrimitiveKind[] =
 export const MACRO_NONE = '(none)'
 
 export const LIGHTING_PRESETS: LightingPreset[] = ['studio', 'soft', 'dramatic', 'flat']
-export const ENVIRONMENT_KINDS: EnvironmentKind[] = ['room', 'darkStrips', 'softbox', 'colorGels', 'studio']
+export const ENVIRONMENT_KINDS: EnvironmentKind[] = ['room', 'darkStrips', 'softbox', 'colorGels']
 
 
 const LOOP_KINDS: LoopKind[] = ['none', 'spin', 'bob', 'pulse', 'orbit', 'sway', 'tumble']
@@ -708,23 +659,6 @@ export function lightIntensityMax(kind: LightKind): number {
 // actually ship, rather than retyping them — the anti-drift habit this whole schema follows.
 export const DEFAULT_MATERIAL: SceneMaterial = { type: 'standard', color: '#9aa3af', roughness: 0.6, metalness: 0.0 }
 
-// ── Matcaps: ids + visual specs, three-free ──────────────────────────────────
-// Plain lookup data only — no canvas, no three — so this stays importable from BOTH materials.ts
-// (which turns a spec into an actual canvas-drawn CanvasTexture: drawMatcap/getMatcap/matcapThumb)
-// and treatments.ts/treatmentControls.ts (both deliberately three-free — see this file's own
-// top-of-file constraint and treatmentControls.ts's "Pure: no three, no Vue" note) for the
-// `matcapCoat` finish (S5 task 3): validating a stored matcap id and labelling it in the
-// inspector's `select` must not drag three into either module's import graph.
-export const MATCAP_IDS = ['chrome', 'clay', 'pearl', 'gold', 'carbon']
-export interface MatcapSpec { name: string; inner: string; mid: string; outer: string; highlight: number }
-export const MATCAP_SPECS: Record<string, MatcapSpec> = {
-  chrome: { name: 'Chrome', inner: '#f8fafc', mid: '#94a3b8', outer: '#1e293b', highlight: 0.9 },
-  clay:   { name: 'Clay',   inner: '#e7e2da', mid: '#b6aa99', outer: '#57503f', highlight: 0.25 },
-  pearl:  { name: 'Pearl',  inner: '#fff7fb', mid: '#dcc8e8', outer: '#8e7a9d', highlight: 0.55 },
-  gold:   { name: 'Gold',   inner: '#fff3c4', mid: '#d9a441', outer: '#5c3a10', highlight: 0.8 },
-  carbon: { name: 'Carbon', inner: '#4b5563', mid: '#1f2937', outer: '#030712', highlight: 0.35 },
-}
-
 /** Per-type parameter defaults — the single source of truth shared by the
  *  material factory (materials.ts) and the Selection UI's proxies. */
 export const MATERIAL_DEFAULTS = {
@@ -736,7 +670,6 @@ export const MATERIAL_DEFAULTS = {
   ior: 1.5,
   transmission: 1,
   thickness: 0.5,
-  stone: 'diamond' as MaterialStone,
   fresnelColor: '#8ab4ff',
   fresnelPower: 3,
   gradientB: '#1c2740',
@@ -970,7 +903,7 @@ export function defaultDoc(): SceneDoc {
     camera: { position: [4, 3, 6], target: [0, 0.5, 0], fov: 45 },
     // Raw fields seeded to match the 'softbox-beauty' Look (lib/scene3d/lighting.ts) so a fresh scene renders what its Look name promises. Keep in sync if that recipe changes.
     lighting: {
-      preset: 'soft', environment: 'softbox', hdri: null, hdriExposure: 1, hdriRotation: 0, custom: false, sunAzimuth: 35, sunElevation: 40, sunIntensity: 1.2, ambient: 0.7,
+      preset: 'soft', environment: 'softbox', sunAzimuth: 35, sunElevation: 40, sunIntensity: 1.2, ambient: 0.7,
       look: 'softbox-beauty', softness: 0.85, warmth: 0.5, brightness: 1, sunColor: '#ffffff', shadowSoftness: 10.35,
       advanced: false,
       gelColorA: '#ff0da6', gelBrightnessA: 7, gelSizeA: 1, gelAzimuthA: -100, gelHeightA: 1.5, gelDistanceA: 4.6,
@@ -1332,7 +1265,6 @@ export function parseDoc(json: string): SceneDoc {
     if (typeof m?.ior === 'number') out.ior = num(m.ior, MATERIAL_DEFAULTS.ior)
     if (typeof m?.transmission === 'number') out.transmission = num(m.transmission, MATERIAL_DEFAULTS.transmission)
     if (typeof m?.thickness === 'number') out.thickness = num(m.thickness, MATERIAL_DEFAULTS.thickness)
-    if (STONE_IDS.includes(m?.stone)) out.stone = m.stone
     if (typeof m?.fresnelColor === 'string') out.fresnelColor = m.fresnelColor
     if (typeof m?.fresnelPower === 'number') out.fresnelPower = num(m.fresnelPower, MATERIAL_DEFAULTS.fresnelPower)
     if (typeof m?.gradientB === 'string') out.gradientB = m.gradientB
@@ -1583,10 +1515,6 @@ export function parseDoc(json: string): SceneDoc {
     lighting: {
       preset: LIGHTING_PRESETS.includes(raw.lighting?.preset) ? raw.lighting.preset : d.lighting.preset,
       environment: ENVIRONMENT_KINDS.includes(raw.lighting?.environment) ? raw.lighting.environment : d.lighting.environment,
-      hdri: isValidHdriSlug(raw.lighting?.hdri) ? raw.lighting.hdri : null,
-      hdriExposure: typeof raw.lighting?.hdriExposure === 'number' ? raw.lighting.hdriExposure : d.lighting.hdriExposure,
-      hdriRotation: typeof raw.lighting?.hdriRotation === 'number' ? raw.lighting.hdriRotation : d.lighting.hdriRotation,
-      custom: raw.lighting?.custom === true,
       sunAzimuth: typeof raw.lighting?.sunAzimuth === 'number' ? raw.lighting.sunAzimuth : d.lighting.sunAzimuth,
       sunElevation: typeof raw.lighting?.sunElevation === 'number' ? raw.lighting.sunElevation : d.lighting.sunElevation,
       sunIntensity: typeof raw.lighting?.sunIntensity === 'number' ? raw.lighting.sunIntensity : d.lighting.sunIntensity,

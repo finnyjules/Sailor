@@ -98,7 +98,6 @@ describe('scene3d config', () => {
     boxFor({ type: 'toon', toonSteps: 4 })
     boxFor({ type: 'matcap', matcap: 'gold' })
     boxFor({ type: 'glass', ior: 1.8, transmission: 0.9, thickness: 1.2, roughness: 0.1 })
-    boxFor({ type: 'gemstone', stone: 'ruby' })
     boxFor({ type: 'fresnel', fresnelColor: '#ff00aa', fresnelPower: 5 })
     boxFor({ type: 'gradient', gradientB: '#123456', gradientAxis: 'z', gradientShading: 'faceted' })
     boxFor({ type: 'opalescent', opalHueShift: 120, opalFrequency: 2, opalAngleMix: 0.5, opalFlowSpeed: 1, opalStrength: 0.8 })
@@ -114,7 +113,7 @@ describe('scene3d config', () => {
     // Exact list, not a count: a new material type shows up as an intentional
     // one-line diff here instead of an opaque "expected length 9" failure.
     expect(MATERIAL_TYPES).toEqual([
-      'standard', 'phong', 'toon', 'matcap', 'glass', 'gemstone', 'fresnel', 'gradient', 'opalescent', 'holographic', 'image', 'shaderFill',
+      'standard', 'phong', 'toon', 'matcap', 'glass', 'fresnel', 'gradient', 'opalescent', 'holographic', 'image', 'shaderFill',
     ])
     expect(doc.objects.map((o) => o.material.type)).toEqual([...MATERIAL_TYPES])
     const back = parseDoc(serializeDoc(doc))

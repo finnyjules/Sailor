@@ -23,7 +23,7 @@ import { MODIFIER_SPECS, modifierValue, totalClones } from '~/lib/scene3d/primPa
  *  `array`/`shatter`/`mirror` are geometry PRODUCERS (they change the vertex buffer — array folds N
  *  rotated copies, shatter splits every face, mirror duplicates + welds), living in the orderable
  *  middle between the deforms and the pinned cloner. */
-export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'boolean', 'facet', 'cloner'] as const
+export const MODIFIER_KINDS = ['subdivide', 'taper', 'twist', 'bend', 'noise', 'jitter', 'shear', 'spherify', 'smooth', 'melt', 'lattice', 'array', 'shatter', 'mirror', 'decimate', 'voxelise', 'boolean', 'cloner'] as const
 export type ModifierKind = typeof MODIFIER_KINDS[number]
 
 /** The order the pipeline applies these in — and therefore the order an old-shape bag is folded
@@ -64,7 +64,6 @@ export const MODIFIER_KIND_PARAMS: Record<ModifierKind, string[]> = {
   // sanitizeModifierStack below. Keeping it out of this list is what lets `createModifier` and the
   // generic inspector/agent/motion surfaces stay purely numeric.
   boolean: ['booleanOp', 'booleanBlend', 'booleanResolution'],
-  facet: ['facetCount', 'facetJitter', 'facetSeed'],
   cloner: [
     'cloneCount', 'cloneMode', 'cloneOffsetX', 'cloneOffsetY', 'cloneOffsetZ', 'cloneRadius', 'cloneAxis',
     'cloneCountX', 'cloneCountY', 'cloneCountZ', 'cloneSpacingX', 'cloneSpacingY', 'cloneSpacingZ',
@@ -91,7 +90,6 @@ export const MODIFIER_LABELS: Record<ModifierKind, string> = {
   decimate: 'Decimate',
   voxelise: 'Voxelise',
   boolean: 'Boolean',
-  facet: 'Facets',
   cloner: 'Cloner',
 }
 
@@ -205,8 +203,6 @@ export function modifierStackOf(obj: StackHost | null | undefined): ModifierInst
     decimate: false,
     voxelise: false,
     boolean: false,
-    // The facet producer never lived in the legacy flat bag either, so it never folds active.
-    facet: false,
     cloner: totalClones(bag) > 1,
   }
 

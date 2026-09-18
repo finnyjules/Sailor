@@ -6,10 +6,8 @@ import type { LibraryManifest } from '../../shared/library-fonts'
 const m = manifest as unknown as LibraryManifest
 
 describe('generated library manifest', () => {
-  it('includes the licensed foundries', () => {
-    const ids = new Set(m.foundries.map(f => f.id))
-    expect(ids.has('pangram')).toBe(true)
-    expect(ids.has('off-type')).toBe(true)
+  it('has both foundries and a substantial family count', () => {
+    expect(m.foundries.map(f => f.id).sort()).toEqual(['off-type', 'pangram'])
     expect(m.families.length).toBeGreaterThan(60)
   })
   it('every family + face id is unique', () => {
@@ -18,21 +16,16 @@ describe('generated library manifest', () => {
     const faceIds = m.families.flatMap(f => f.faces.map(x => x.id))
     expect(new Set(faceIds).size).toBe(faceIds.length)
   })
-  it('self-hosted faces have a weight in range, a style, a font src, a known foundry; google families have no faces', () => {
+  it('every face has a weight in range, a style, an OTF src, a known foundry', () => {
     const foundries = new Set(m.foundries.map(f => f.id))
     for (const fam of m.families) {
       expect(foundries.has(fam.foundry)).toBe(true)
-      if (fam.source === 'google') {
-        expect(fam.faces.length).toBe(0)
-        expect(typeof fam.googleFamily).toBe('string')
-        continue
-      }
       expect(fam.faces.length).toBeGreaterThan(0)
       for (const face of fam.faces) {
         expect(face.weight).toBeGreaterThanOrEqual(1)
         expect(face.weight).toBeLessThanOrEqual(1000)
         expect(face.style.length).toBeGreaterThan(0)
-        expect(/\.(otf|ttf|woff2)$/i.test(face.src)).toBe(true)
+        expect(face.src.toLowerCase().endsWith('.otf')).toBe(true)
       }
     }
   })

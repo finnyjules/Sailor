@@ -424,12 +424,6 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'fal-ai/bytedance/seedream/v4.5/text-to-image': { usd: 0.04, credits: 8, confidence: 'verified', note: 'flat per image' },
   'fal-ai/flux-kontext/dev': { usd: 0.025, credits: 5, confidence: 'estimate', note: 'assumed flux-dev rate' },
   'fal-ai/flux-lora': { usd: 0.035, credits: 7, confidence: 'estimate', note: '$0.035/MP — LoRA inference moved here from per-owner Replicate models' },
-  // — scene3d AI restyle (S7) — allowlisted in app/data/scene3d-restyle-models.ts; each id MUST
-  //   have a row here or runFal refuses ("unpriced model"). Both estimates — re-verify against a
-  //   live invoice at the Task-5 paid acceptance run (reconcile observed cost).
-  'fal-ai/flux-control-lora-depth': { usd: 0.035, credits: 7, confidence: 'estimate', note: 'FLUX.1 [dev] Depth Control LoRA — ~$0.035/MP; re-verify against a live invoice (S7 Task 5)' },
-  'fal-ai/flux/dev/image-to-image': { usd: 0.025, credits: 5, confidence: 'estimate', note: 'FLUX.1 [dev] img2img fallback — assumed fal flux/dev $0.025/MP rate; re-verify against a live invoice (S7 Task 5)' },
-  'fal-ai/flux-general': { usd: 0.05, credits: 10, confidence: 'estimate', note: 'FLUX general (depth ControlNet + IP-adapter, one call) — assumed ~$0.05/MP for the heavier graph; re-verify against a live invoice (restyle-style Task 5)' },
   'fal-ai/flux-lora/inpainting': { usd: 0.04, credits: 8, confidence: 'estimate', note: 'FLUX Fill dev tier' },
   'fal-ai/nano-banana-2/edit': { usd: 0.10, credits: 20, confidence: 'estimate', note: 'pose transfer; verify against fal pricing' },
   'fal-ai/birefnet/v2': { usd: 0.005, credits: 1, confidence: 'estimate', note: 'background removal' },
@@ -444,9 +438,8 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'recraft-ai/recraft-vectorize': { usd: 0.01, credits: 2, confidence: 'estimate', note: 'hardware-billed, cheap CPU-ish job' },
   // — 3D —
   'fal-ai/hunyuan3d/v2': { usd: 0.48, credits: 72, confidence: 'verified', note: 'textured mesh; white mesh is $0.16' },
-  'fal-ai/hyper3d/rodin': { usd: 0.5, credits: 75, confidence: 'estimate', note: 'Rodin (Deemos); medium quality/PBR — HighPack (4K/high-poly) costs more' },
   'fal-ai/trellis-2': { usd: 0.3, credits: 45, confidence: 'verified', note: '$0.25–0.35 by resolution' },
-  'tripo3d/tripo/v2.5/image-to-3d': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'partner slug (no fal-ai/ prefix); verified against live model page' },
+  'fal-ai/tripo3d/tripo/v2.5/image-to-3d': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'model page 404s — re-check slug too' },
   'fal-ai/triposr': { usd: 0.02, credits: 4, confidence: 'estimate' },
   // — audio / speech —
   'minimax/speech-02-turbo': { usd: 0.03, credits: 6, confidence: 'verified', note: '$0.06/1k chars — priced per ~500-char clip' },

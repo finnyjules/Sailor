@@ -42,26 +42,6 @@ describe('scene3d environments', () => {
     scene.dispose()
   })
 
-  it('studio is a deep-grey void with soft fills AND small hot glint bars', () => {
-    const scene = buildEnvironmentScene('studio')
-    const bg = scene.background as THREE.Color
-    expect(bg.r).toBeGreaterThan(0)   // not pure black
-    expect(bg.r).toBeLessThan(0.3)    // deep grey
-    const bars = meshes(scene)
-    expect(bars.length).toBeGreaterThanOrEqual(6) // big fills + small glints
-    // Every source is HDR-bright so PMREM captures it as light; at least one is a small, very
-    // bright bar (a sparkle glint) and at least one is a big soft panel (broad reflection).
-    for (const b of bars) expect(maxChannel((b.material as THREE.MeshBasicMaterial).color)).toBeGreaterThan(1)
-    const areas = bars.map((b) => {
-      b.geometry.computeBoundingBox()
-      const s = b.geometry.boundingBox!.getSize(new THREE.Vector3())
-      return s.x * s.y
-    })
-    expect(Math.max(...areas)).toBeGreaterThan(10) // a big soft panel
-    expect(Math.min(...areas)).toBeLessThan(1)     // a small glint bar
-    scene.dispose()
-  })
-
   it('colorGels has opposing magenta-ish and cyan-ish sources on black', () => {
     const scene = buildEnvironmentScene('colorGels')
     expect((scene.background as THREE.Color).getHex()).toBe(0x000000)

@@ -59,21 +59,21 @@ known-geometry unit test and the export override-material path checked.
 3. Depth fog / atmospheric tint. 4. Curvature wear. 5. Lab-page Playwright: a box's creases get lines
    where the hull outline gaps. 6. Agent/motion. 7. Copy.
 
-## Slice S4 · New masked and edge treatments  (≈8 tasks) — ✅ LANDED 2026-09-12 (9 new kinds → 20 total; TREATMENT_ICONS total-Record guard; live Playwright caught 2 GPU bugs unit twins missed — emit FLOAT literals; see memory scene3d-treatments-s4-landed)
+## Slice S4 · New masked and edge treatments  (≈8 tasks)
 Masked: colour grade; dissolve; halftone/dot screen; chromatic split; glitch/scanlines; flat drop
 shadow. Edge: dashed outline; silhouette cutout; cross-hatch. One task per family + Playwright.
 
-## Slice S5 · Finishes as treatments  (≈4 tasks) — ✅ LANDED 2026-09-13 (base 11bbb37035 → e80e854c3; finishes only — LIGHT-LINKING DEFERRED to its own slice, three 0.171 can't mask lights per-object; whole-slice review Ready-to-merge, live gate 17/17; see 2026-09-09-scene3d-S5-finishes.md + memory scene3d-finishes-s5-landed)
+## Slice S5 · Finishes as treatments; light linking  (≈7 tasks)
 1. `applyFinish` seam (the `applyScreen` pattern) for foil shimmer, opalescence, matcap overlay;
 2–4. the three finishes; 5. light-linking SPIKE (shader-side mask by light index through the seam);
 6. light exclusion + per-object colour cast, or colour cast only if the spike fails; 7. proofs.
 
-## Slice S6 · Motion-driven treatments  (≈5 tasks) — ✅ LANDED 2026-09-16 (restore e10ee3e17 + T1 aebaec0e1 → T5 54f3b6869; MOTION_TREATMENT_KINDS = velocityBlur + ghostTrails; velocity/ghosts sampled from doc+t01 at the live-loop AND renderMotionFrame seams, pushed through the stateless stage; new motion/velocity.ts + __scene3dSnapshotAt oracle hook; velocityBlur = directional BLUR_FRAG smear, ghostTrails = faded past-pose fan; LIVE gate 9/9 real GPU, byte-identical when absent; S6 commits sign Opus 4.8. NB: recovered scene3d S3–S5 first — bec8b3845 "docs(fonts)" had stealth-reverted them. OWED: parented-object support, trailing/camera blur, GLB live case. See 2026-09-09-scene3d-S6-motion-driven-treatments.md + memory scene3d-motion-treatments-s6-landed)
+## Slice S6 · Motion-driven treatments  (≈5 tasks)
 1. Velocity from two motion samples (`t`, `t − dt`) projected to screen; 2. velocity motion blur in
 the stage; 3. ghost trails / onion skin (N samples faded); 4. Playwright: blur along the path, none
 when still; 5. agent/motion/copy.
 
-## Slice S7 · AI restyle pass  (≈6 tasks) — ✅ LANDED 2026-09-16, PAID ACCEPTANCE DONE (T1 ecf8b15f0 → T5a f184ab222 → T5b 6227cfaf0; the paid run caught a real bug — depth model needs `control_lora_image_url` not `control_image_url` (422 = silent fallover), fixed + poll deadline 120s→240s; live run green, real 1024² restyle, ~7 credits matching estimate; aiRestyle treatment = bake one object's depth crop via renderObjectPasses → paid route server/api/scene3d/restyle.post.ts on fal flux-control-lora-depth → cache result texture keyed by resultRef+inputHash, no re-bill → composite masked to silhouette with a free mix dial; byte-identical when absent; agent/motion drive strength+mix by id. LIVE gate proven with INJECTED local results — the ONE real paid run is env-gated (FAL_KEY + SCENE3D_RESTYLE_LIVE=1) and OWED, gated on Julien. Model choice = Julien's "Flux depth-control" ratification. Follow-ups: orbit re-projection (test.fixme), depth+normal union, Replicate fallback, GLB live case. See 2026-09-09-scene3d-S7-ai-restyle-pass.md + memory scene3d-ai-restyle-s7-landed)
+## Slice S7 · AI restyle pass  (≈6 tasks)
 1. Model choice + route `server/api/scene3d/restyle.post.ts` (fal/Replicate; allowlist; cost gate);
 2. crop beauty + depth (+ normal) for the object from `renderPasses`; 3. treatment kind with prompt,
 strength, re-run; 4. composite masked to the silhouette, cached by inputs; 5. one live paid run at

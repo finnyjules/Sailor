@@ -9,7 +9,6 @@ import {
 } from './config'
 import { PRIMITIVE_PARAMS, MODIFIER_SPECS, resolveParam, totalClones } from './primParams'
 import { modifierStackOf } from './modifierStack'
-import { DEFAULT_HDRI } from './hdri'
 import {
   SCENE_CONTROLS, GEOMETRY_PARAM_PREFIX, MODIFIER_PREFIX,
   type SceneControl,
@@ -101,8 +100,6 @@ export const SCENE_PANEL_ORDER = [
   'Material/Screen',
   'Camera',
   'Lighting',
-  'Lighting/Gel lighting',
-  'Lighting/Fine-tune',
   'Background',
 ] as readonly string[]
 
@@ -129,9 +126,6 @@ export function scenePanelChrome(matType: MaterialType | null): Record<string, {
     Iridescence: { open: false },
     Reflection: { open: false },
     Screen: { open: false },
-    // Lighting sub-cards — collapsed by default so the card reads as a short primary list.
-    'Fine-tune': { open: false },
-    'Gel lighting': { open: false },
   }
 }
 
@@ -245,10 +239,6 @@ export function readSceneControl(
   if (key === 'showFloor') return doc.showFloor
   if (key === 'camera.fov') return doc.camera.fov
   if (key === 'lighting.environment') return ENV_LABEL[doc.lighting.environment] ?? 'room'
-  // Synthetic: the light-source mode is derived from whether an HDRI is chosen.
-  if (key === 'lighting.lightSource') return doc.lighting.hdri ? 'HDRI' : 'Studio look'
-  // The `hdri` row binds the raw Poly Haven slug (RowHdri renders its name/thumbnail).
-  if (key === 'lighting.hdri') return doc.lighting.hdri ?? DEFAULT_HDRI
   if (key.startsWith('lighting.')) {
     return (doc.lighting as unknown as Record<string, ParamValue>)[key.slice('lighting.'.length)] ?? 0
   }
@@ -300,7 +290,6 @@ function geometryParamField(obj: SceneObject, sub: string): ParamValue {
   const spec = specs.find((s) => s.key === sub)
   if (!spec) return 0
   const v = resolveParam(specs, obj.params, sub)
-  if (spec.control === 'options') return spec.options?.[Math.round(v)] ?? spec.options?.[0] ?? ''
   return spec.control === 'toggle' ? v > 0.5 : v
 }
 
@@ -333,12 +322,12 @@ function objectLeaf(obj: SceneObject, rest: string): ParamValue {
  *  over `ENVIRONMENT_KINDS` — 'darkStrips' read as 'dark', 'colorGels' as 'gels'. Kept
  *  here (rather than left in the surface) so the row's `options`, the reader and the
  *  writer cannot drift apart. */
-export const ENV_OPTIONS = ['room', 'dark', 'softbox', 'studio', 'gels'] as const
+export const ENV_OPTIONS = ['room', 'dark', 'softbox', 'gels'] as const
 export const ENV_BY_LABEL: Record<string, SceneDoc['lighting']['environment']> = {
-  room: 'room', dark: 'darkStrips', softbox: 'softbox', studio: 'studio', gels: 'colorGels',
+  room: 'room', dark: 'darkStrips', softbox: 'softbox', gels: 'colorGels',
 }
 const ENV_LABEL: Record<string, string> = {
-  room: 'room', darkStrips: 'dark', softbox: 'softbox', studio: 'studio', colorGels: 'gels',
+  room: 'room', darkStrips: 'dark', softbox: 'softbox', colorGels: 'gels',
 }
 
 // ── bespoke-block anchors ────────────────────────────────────────────────────
@@ -476,8 +465,6 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
     'ui.material.surface', 'object.material.color', 'object.material.roughness', 'object.material.metalness',
     'ui.material.textureSet', 'object.material.textureTiling',
   ],
-  // Gemstone is preset-driven: the stone picker is the whole body.
-  gemstone: ['object.material.stone'],
   phong: ['object.material.color', 'object.material.shininess', 'object.material.specular'],
   toon: ['object.material.color', 'object.material.toonSteps'],
   matcap: ['ui.material.matcap'],
@@ -522,17 +509,6 @@ const MATERIAL_BODY: Record<MaterialType, readonly string[]> = {
 }
 
 const SUB_CARDS: Record<string, readonly string[]> = {
-  // Lighting sub-groups: the raw fine-tune trio (collapsed — replaces the old Advanced toggle) and
-  // the whole gel rig (kept next to, and clearly owned by, the Gels environment picker).
-  'Lighting/Fine-tune': ['lighting.preset', 'lighting.sunIntensity', 'lighting.ambient'],
-  'Lighting/Gel lighting': [
-    'lighting.gelColorA', 'lighting.gelBrightnessA', 'lighting.gelSizeA', 'lighting.gelAzimuthA',
-    'lighting.gelHeightA', 'lighting.gelDistanceA',
-    'lighting.gelColorB', 'lighting.gelBrightnessB', 'lighting.gelSizeB', 'lighting.gelAzimuthB',
-    'lighting.gelHeightB', 'lighting.gelDistanceB',
-    'lighting.gelRim', 'lighting.gelRimColor', 'lighting.gelRimBrightness',
-    'lighting.gelSoftness', 'lighting.gelBackground', 'lighting.gelExposure',
-  ],
   'Material/Image placement': [
     'object.material.imageOffsetX', 'object.material.imageOffsetY', 'object.material.imageRotation',
     'object.material.imageFlipX', 'object.material.imageFlipY', 'object.material.imageSeamless',
@@ -605,15 +581,11 @@ const DOC_CARDS: Record<string, readonly string[]> = {
   // light comes from; then the three feel dials; then the Advanced toggle, followed by
   // the raw rows it reveals (they carry a `when` gate, so they only draw when it's on).
   Lighting: [
-    'lighting.lightSource',
-    // Studio-look mode primary (raw preset/sun/ambient live in the Fine-tune sub-card, gels in the
-    // Gel lighting sub-card — see SUB_CARDS).
     'lighting.look',
-    'lighting.softness', 'lighting.warmth', 'lighting.brightness',
     'lighting.sunAzimuth', 'lighting.sunElevation',
-    'lighting.environment',
-    // HDRI mode
-    'lighting.hdri', 'lighting.hdriExposure', 'lighting.hdriRotation',
+    'lighting.softness', 'lighting.warmth', 'lighting.brightness',
+    'lighting.advanced',
+    'lighting.preset', 'lighting.environment', 'lighting.sunIntensity', 'lighting.ambient',
   ],
   Background: ['showFloor', 'ui.background.transparent', 'ui.background.color'],
 }
@@ -722,7 +694,6 @@ const OVERRIDE: Record<string, RowPatch> = {
   // read as a second, competing mood picker. It only tunes the shadow/env-intensity bucket.
   'lighting.preset': { label: 'Shadow preset' },
   'lighting.environment': { label: 'Environment', options: [...ENV_OPTIONS], default: 'room' },
-  'lighting.hdri': { label: 'Studio HDRI', hint: 'A real studio photo environment (Poly Haven). Its reflections and sparkle carry into cinematic renders.' },
   showFloor: { hint: null },
   // Degrees, and no 'Radians' tooltip: the row has ALWAYS been edited in degrees, so the
   // schema's hint is a lie about what the user is typing into.
@@ -768,12 +739,9 @@ function dynamicPatch(key: string, obj: SceneObject | null | undefined): RowPatc
     if (!spec) return null
     return {
       label: spec.label, hint: spec.hint, min: spec.min, max: spec.max, step: spec.step,
-      // A toggle spec stores 0 | 1 but draws as a switch, so its default is boolean here;
-      // an options spec stores an index but draws as a select, so its default is the option
-      // LABEL — both mirror the conversion `geometryParamField` does on the way out.
-      default: spec.control === 'toggle' ? spec.default > 0.5
-        : spec.control === 'options' ? (spec.options ?? [])[Math.round(spec.default)]
-        : spec.default,
+      // A toggle spec stores 0 | 1 but draws as a switch, so its default is boolean here —
+      // the same conversion `geometryParamField` does on the way out.
+      default: spec.control === 'toggle' ? spec.default > 0.5 : spec.default,
     }
   }
   if (key === 'object.intensity' && obj?.kind === 'light') {

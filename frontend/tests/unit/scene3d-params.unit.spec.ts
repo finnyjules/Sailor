@@ -130,7 +130,6 @@ describe('scene3d modifier specs', () => {
       'decimate',
       'voxelResolution',
       'booleanOp', 'booleanBlend', 'booleanResolution',
-      'facetCount', 'facetJitter', 'facetSeed',
       'cloneCount', 'cloneMode', 'cloneOffsetX', 'cloneOffsetY', 'cloneOffsetZ', 'cloneRadius', 'cloneAxis',
       'cloneCountX', 'cloneCountY', 'cloneCountZ',
       'cloneSpacingX', 'cloneSpacingY', 'cloneSpacingZ',

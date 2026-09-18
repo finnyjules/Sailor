@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveLibraryFaceByFamily, contentTypeForPath } from '../../server/utils/libraryFontManifest'
+import { resolveLibraryFaceByFamily } from '../../server/utils/libraryFontManifest'
 import manifest from '../../app/data/library-fonts.manifest.json'
 import type { LibraryManifest } from '../../shared/library-fonts'
 
@@ -37,20 +37,5 @@ describe('resolveLibraryFaceByFamily', () => {
 
   it('returns null for an unknown family', () => {
     expect(resolveLibraryFaceByFamily('Not A Real Family', 400, false, ROOT)).toBeNull()
-  })
-})
-
-describe('contentTypeForPath', () => {
-  it('serves .otf as font/otf', () => {
-    expect(contentTypeForPath('/x/Regular.otf')).toBe('font/otf')
-  })
-  it('serves .woff2 as font/woff2', () => {
-    expect(contentTypeForPath('/x/Regular.woff2')).toBe('font/woff2')
-  })
-  it('serves .ttf as font/ttf', () => {
-    expect(contentTypeForPath('/x/Regular.ttf')).toBe('font/ttf')
-  })
-  it('defaults unknown extensions to font/otf', () => {
-    expect(contentTypeForPath('/x/Regular.weird')).toBe('font/otf')
   })
 })

@@ -151,11 +151,10 @@ export const PRIMITIVE_PARAMS: Record<PrimitiveKind, ParamSpec[]> = {
   // Convex-hull gem (see gem.ts). Point count drives facet density; spread widens
   // the stone; depth stretches it along Z; gemSeed re-rolls the hull.
   gem: [
-    { key: 'cut', label: 'Cut', hint: 'Jewellery cut of the stone (Rough is the raw crystal)', min: 0, max: 5, step: 1, default: 1, control: 'options', options: ['Rough', 'Brilliant', 'Emerald', 'Cushion', 'Marquise', 'Cabochon'] },
-    { key: 'points', label: 'Facets', hint: 'How many points form the stone — more gives finer facets', min: 4, max: 60, step: 1, default: 16 },
+    { key: 'points', label: 'Facets', hint: 'How many points form the stone — more gives finer facets', min: 4, max: 40, step: 1, default: 14 },
     { key: 'spread', label: 'Spread', hint: 'Tight, pointy stone → wide, full one', min: 0, max: 1, step: 0.01, default: 0.5 },
     { key: 'depth', label: 'Depth', hint: 'Flat, cut-gem slab → deep, chunky stone', min: 0.2, max: 2, step: 0.01, default: 1 },
-    { key: 'gemSeed', label: 'Seed', hint: 'Shuffles the facets into a different stone (Rough cut only)', min: 0, max: 99, step: 1, default: 0 },
+    { key: 'gemSeed', label: 'Seed', hint: 'Shuffles the facets into a different stone', min: 0, max: 99, step: 1, default: 0 },
   ],
 }
 
@@ -293,16 +292,6 @@ export const MODIFIER_SPECS: ParamSpec[] = [
   { key: 'booleanOp', label: 'Operation', hint: 'Union fuses the shapes, Subtract carves the other out, Intersect keeps only the overlap', min: 0, max: 2, step: 1, default: 0, control: 'options', options: ['union', 'subtract', 'intersect'] },
   { key: 'booleanBlend', label: 'Blend', hint: 'Rounds the join with a smooth fillet — 0 keeps the seam sharp', min: 0, max: 1, step: 0.01, default: 0 },
   { key: 'booleanResolution', label: 'Resolution', hint: 'How finely the combined shape is rebuilt — higher keeps more detail', min: 8, max: 64, step: 1, default: 32 },
-
-  // Facet — a geometry PRODUCER: it re-cuts the shape as a convex hull over the original corners
-  // plus `facetCount` points placed at EVEN geodesic directions around the shape, so cranking it
-  // adds regular, even facets like a jeweller's cut (deterministic — no randomness). `facetJitter`
-  // scatters those points off their even positions for a random raw-crystal look (0 = a clean
-  // geometric cut); `facetSeed` shuffles that random scatter. It convex-hulls, so concavities are
-  // filled — the intended "gemify" behaviour. Read by `applyFacet`; count 0 is a no-op.
-  { key: 'facetCount', label: 'Facets', hint: 'How many even facets to cut into the shape — higher gives finer, regular facets', min: 0, max: 400, step: 1, default: 32 },
-  { key: 'facetJitter', label: 'Roughness', hint: 'Scatters the facets randomly for a raw-crystal look — 0 keeps them even and geometric', min: 0, max: 1, step: 0.01, default: 0 },
-  { key: 'facetSeed', label: 'Facet seed', hint: 'Shuffles the random roughness into a different arrangement', min: 0, max: 99, step: 1, default: 0 },
 
   // Cloner keys. Named clone* rather than array* because this is its own panel
   // section now and is meant to accumulate more clone options — an arrayCount

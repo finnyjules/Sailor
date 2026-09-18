@@ -34,8 +34,7 @@
 import * as THREE from 'three'
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
 import { stripAlpha } from '~/lib/color/convert'
-import type { BufferGroup, CrossHatchTreatment, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, GhostTrailsTreatment, MaskedGroup, MotionGroup, RampFields, Treatment, VelocityBlurTreatment } from './treatments'
-import type { ScreenVelocity, LocalPose } from './motion/velocity'
+import type { BufferGroup, CrossHatchTreatment, CurvatureWearTreatment, DepthFogTreatment, DropShadowTreatment, EdgeLinesTreatment, MaskedGroup, RampFields, Treatment } from './treatments'
 import { ownMeshes, STAGE_LAYER } from './treatmentShells'
 import { fitNearFar } from './passes'
 
@@ -57,14 +56,7 @@ const MIN_EXPOSURE = 1e-4
  *  plane to clamp against; this keeps the clamp in `objectRampSpan` well-defined anyway. */
 const FALLBACK_NEAR = 0.01
 
-export interface StageContext {
-  objectRoots: Map<string, THREE.Object3D>
-  /** Per-object screen velocities / past poses for the S6 motion family, sampled at the doc+t01
-   *  seam and threaded through the engine. Optional so existing call sites and tests compile;
-   *  the stage treats absent as empty. */
-  velocities?: Map<string, ScreenVelocity>
-  ghosts?: Map<string, LocalPose[]>
-}
+export interface StageContext { objectRoots: Map<string, THREE.Object3D> }
 export interface StageStats { frames: number; groups: number; width: number; height: number }
 
 /** MSAA sample count for a stage target of `width` × `height` on a device whose cap is
@@ -81,35 +73,6 @@ export function blurPasses(amount: number, height: number): { passes: number; st
   if (radiusPx <= 0) return { passes: 0, step: 0, radiusPx: 0 }
   const passes = Math.min(MAX_PAIRS, Math.max(1, Math.ceil(radiusPx / TAPS)))
   return { passes, step: radiusPx / (passes * TAPS), radiusPx }
-}
-
-/** The velocity-blur smear length in device px for screen velocity `v` on a `width`×`height`
- *  target: half the per-frame NDC displacement mapped to px (the 0.5 maps NDC's [-1,1] span, 2
- *  units, onto the axis's pixel count), scaled by `shutter` (fraction of a frame's motion each
- *  frame captures) and `amount`. A null velocity — a still object, a parented object, or a
- *  motion apex where the object is momentarily stationary — is 0. The stage treats `lenPx < 1`
- *  as a hard no-op (Decision 9), so a still velocity blur is byte-identical to amount 0 (which
- *  is also 0 here). Pure; the GLSL-free CPU twin of what `velocityBlurComposite` computes. */
-export function velocityBlurLenPx(
-  v: ScreenVelocity | null, width: number, height: number, shutter: number, amount: number,
-): number {
-  if (!v) return 0
-  return 0.5 * Math.hypot(v.x * width, v.y * height) * shutter * amount
-}
-
-/** The per-ghost composite opacities for a ghost-trails fan of `count` copies fading by `fade`
- *  per step — a geometric falloff `fade^k` for the k-th ghost behind the object (k = 1..count).
- *  Index 0 is the NEAREST-PAST ghost (fade^1, the brightest) and the last is the OLDEST
- *  (fade^count, the faintest) — the same order `ghostLocalPoses` returns its poses in, so the
- *  stage reads `alphas[i]` for `poses[i]`. The crisp current object sits above them all at the
- *  implicit `fade^0 = 1`. Pure; the GLSL-free CPU twin of the fade `ghostTrailsComposite` applies.
- *  A geometric (not linear) falloff is chosen so successive ghosts read as a receding trail — each
- *  a constant FRACTION of the one in front, which perceptually spaces them evenly under the ACES
- *  display-blend the composite uses for a sub-1 opacity. */
-export function ghostAlphas(count: number, fade: number): number[] {
-  const out: number[] = []
-  for (let k = 1; k <= count; k++) out.push(Math.pow(fade, k))
-  return out
 }
 
 /** Pixelate cell size in device px on an image `height` px tall, given `cellSize` in "pixels
@@ -778,14 +741,6 @@ const COMPOSITE_FRAG = `
     gl_FragColor = vec4(mix(linearResult, displayResult, k), outA);
   }`
 
-// AI restyle (S7.1): the restyle is NO LONGER a stage composite. It moved to a per-object MATERIAL
-// injection that projects the cached result onto the object's real surface from the bake camera
-// (restyleProjection.ts, threaded through materials.ts), so it holds registered to the surface as
-// the live camera orbits — which the old screen-space billboard here could not. The v1 `RESTYLE_FRAG`
-// / `restyleComposite` / `StageContext.restyles` path was removed; the crop-square UV maths it used
-// live on in restyleProjection.ts's fragment body (only the INPUT changed from live screen position
-// to the projected bake NDC).
-
 // Window depth (0..1, non-linear under perspective) → a linear 0-at-near, 1-at-far metric,
 // so a Sobel over it means the same thing at every distance and depth fog's start/end read
 // as real fractions of the near→far span. Ortho depth is already linear. Needs `uNear`,
@@ -1208,30 +1163,6 @@ export class TreatmentStage {
       cur = b
     }
     return { rt: cur, radiusPx }
-  }
-
-  /** A DIRECTIONAL smear of `src` by `lenPx` device px along the unit screen direction `dir`
-   *  (device-px space), reusing the separable-blur GLSL along ONE axis only — the S6 velocity
-   *  blur's symmetric streak along the path (Decision 5). Sizes its pass count / step from
-   *  `lenPx` exactly as `blurPasses` sizes a normal blur, but never runs the perpendicular pass.
-   *  Returns the scratch holding the result (never `src`). Ramp-free (`uProgressive` 0 — an even
-   *  smear). Callers guarantee `lenPx >= 1` and a unit `dir`. */
-  private velocityBlur(src: RT, lenPx: number, dir: { x: number; y: number }, ...reserve: RT[]): RT {
-    const passes = Math.min(MAX_PAIRS, Math.max(1, Math.ceil(lenPx / TAPS)))
-    const step = lenPx / (passes * TAPS)
-    this.setRampUniforms(this.blurMat, null)
-    const a = this.free(src, ...reserve)
-    const b = this.free(src, a, ...reserve)
-    let cur = src
-    let dst = a
-    for (let i = 0; i < passes; i++) {
-      this.blurMat.uniforms.tDiffuse!.value = cur.texture
-      this.blurMat.uniforms.uDir!.value.set((dir.x * step) / this.width, (dir.y * step) / this.height)
-      this.pass(this.blurMat, dst)
-      cur = dst
-      dst = dst === a ? b : a
-    }
-    return cur
   }
 
   /** UV-space min and max of `root`'s world AABB — over the meshes its OWN layer draws
@@ -1700,79 +1631,7 @@ export class TreatmentStage {
     this.accumIdx = 1 - this.accumIdx
   }
 
-  /** Velocity motion blur — a directional smear of `root` along its screen velocity `v`, drawn
-   *  behind nothing and composited depth-tested over the base. The object is hidden from the base
-   *  pass like every motion-family root, so it MUST be redrawn here even when it is not moving —
-   *  hence the object is drawn alone FIRST, before any early-out, or it would vanish. Below one
-   *  device px of smear (`lenPx < 1`) — a null / zero velocity, a motion apex, or amount 0 — this
-   *  is a HARD no-op: the crisp object is composited unblurred, byte-identical to the same
-   *  treatment at amount 0 (Decision 9). Otherwise the object-alone layer is smeared along the
-   *  screen velocity (reusing BLUR_FRAG one axis at a time) and composited with `haloPx = lenPx`
-   *  so the streak reaching past the silhouette is not clipped. */
-  private velocityBlurComposite(
-    scene: THREE.Scene, camera: THREE.Camera, root: THREE.Object3D, exclude: THREE.Object3D[],
-    t: VelocityBlurTreatment, v: ScreenVelocity | null, invDepth: THREE.Texture | null,
-  ): void {
-    this.drawAlone(scene, camera, root, exclude, this.layer, null)
-    const lenPx = velocityBlurLenPx(v, this.width, this.height, t.shutter, t.amount)
-    if (lenPx < 1) {
-      // The still / amount-0 branch: the exact crisp composite an amount-0 velocity blur produces
-      // (halo 0 ⇒ the composite's default 2px borrow, matching a plain object composite).
-      this.composite(this.layer.texture, this.layer.depthTexture, invDepth, 1, 0, null)
-      return
-    }
-    // `v` is non-null here (lenPx > 0 ⇒ velocityBlurLenPx saw a velocity). Direction in
-    // device-px space, normalised — the axis the smear runs along.
-    const mag = Math.hypot(v!.x * this.width, v!.y * this.height)
-    const dir = { x: (v!.x * this.width) / mag, y: (v!.y * this.height) / mag }
-    const blurred = this.velocityBlur(this.layer, lenPx, dir)
-    this.composite(blurred.texture, this.layer.depthTexture, invDepth, 1, lenPx, null)
-  }
-
-  /** Ghost trails / onion skin — a fan of faded past copies of `root` at `poses`, drawn behind
-   *  the crisp current object. Each ghost is `root` drawn ALONE (via `drawAlone`, so it excludes
-   *  the other treated/motion roots) at a past LOCAL pose, composited depth-tested against the
-   *  base with a geometric fade (`ghostAlphas`). Poses arrive nearest-past-first / oldest-last
-   *  (`ghostLocalPoses`), and are drawn OLDEST → NEWEST (faintest first) so nearer ghosts sit on
-   *  top. The crisp current object is drawn LAST at the restored pose (it was hidden from the base
-   *  pass with the rest of the motion family). An empty `poses` — a still object whose past poses
-   *  all collapsed onto the current one (or a parented / zero-motion object) — draws just the crisp
-   *  object once: byte-identical to a plain single composite (the "none when still" no-op). */
-  private ghostTrailsComposite(
-    scene: THREE.Scene, camera: THREE.Camera, root: THREE.Object3D, exclude: THREE.Object3D[],
-    t: GhostTrailsTreatment, poses: LocalPose[], invDepth: THREE.Texture | null,
-  ): void {
-    // The live scene-graph object is mutated to each past pose in turn — snapshot its current
-    // local TRS and restore it in a `finally` so a throw mid-loop can never leave it parked in
-    // the past (it is the same object the next frame's sync reads).
-    const savedPos = root.position.clone()
-    const savedRot = root.rotation.clone()
-    const savedScale = root.scale.clone()
-    try {
-      // Oldest first (faintest first): draw high indices — the farthest past poses — before the
-      // nearer, brighter ones, so a nearer ghost composites over an older one.
-      for (let i = poses.length - 1; i >= 0; i--) {
-        const p = poses[i]!
-        root.position.set(p.position[0]!, p.position[1]!, p.position[2]!)
-        root.rotation.set(p.rotation[0]!, p.rotation[1]!, p.rotation[2]!)
-        root.scale.set(p.scale[0]!, p.scale[1]!, p.scale[2]!)
-        root.updateMatrixWorld(true)
-        this.drawAlone(scene, camera, root, exclude, this.layer, null)
-        // alphas[i] = fade^(i+1): poses[i] is the (i+1)-th ghost behind the object.
-        this.composite(this.layer.texture, this.layer.depthTexture, invDepth, Math.pow(t.fade, i + 1), 0, null)
-      }
-    } finally {
-      root.position.copy(savedPos)
-      root.rotation.copy(savedRot)
-      root.scale.copy(savedScale)
-      root.updateMatrixWorld(true)
-    }
-    // The crisp current object on top, at the restored pose (fade^0 = 1).
-    this.drawAlone(scene, camera, root, exclude, this.layer, null)
-    this.composite(this.layer.texture, this.layer.depthTexture, invDepth, 1, 0, null)
-  }
-
-  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], motionPlan: MotionGroup[], ctx: StageContext): THREE.Texture | null {
+  render(scene: THREE.Scene, camera: THREE.Camera, plan: MaskedGroup[], bufferPlan: BufferGroup[], ctx: StageContext): THREE.Texture | null {
     const r = this.renderer
     const size = r.getDrawingBufferSize(this.tmpSize)
     if (size.x <= 0 || size.y <= 0) return null
@@ -1781,8 +1640,6 @@ export class TreatmentStage {
     const treatedRoots = groups.map((g) => ctx.objectRoots.get(g.objectId)!)
     const invertGroup = groups.find((g) => g.invert)
     const bufGroups = bufferPlan.filter((g) => ctx.objectRoots.has(g.objectId))
-    const motionGroups = motionPlan.filter((g) => ctx.objectRoots.has(g.objectId))
-    const motionRoots = motionGroups.map((g) => ctx.objectRoots.get(g.objectId)!)
 
     // Lights must be on the stage layer to light an isolated draw; layers.test is any-overlap
     // so leaving the bit set is harmless for the normal layer-0 render.
@@ -1821,13 +1678,10 @@ export class TreatmentStage {
       r.clear()
       r.render(scene, camera)
       // 1. Base: everything but the treated objects — or, inverted, the inverted object alone.
-      //    Motion-family objects are hidden from the base pass too, exactly like masked ones:
-      //    the motion sub-loop (2d) redraws them (smeared / with ghosts). Empty motionRoots ⇒
-      //    this adds nothing ⇒ byte-identical when no motion treatment is present.
       if (invertGroup) {
-        this.drawAlone(scene, camera, ctx.objectRoots.get(invertGroup.objectId)!, [...treatedRoots, ...motionRoots], this.base, prevBackground)
+        this.drawAlone(scene, camera, ctx.objectRoots.get(invertGroup.objectId)!, treatedRoots, this.base, prevBackground)
       } else {
-        for (const root of [...treatedRoots, ...motionRoots]) hide(root)
+        for (const root of treatedRoots) hide(root)
         r.setRenderTarget(this.base)
         r.setClearColor(0x000000, 0)
         r.clear()
@@ -1843,7 +1697,7 @@ export class TreatmentStage {
       let invDepth: THREE.Texture | null = null
       if (invertGroup) {
         const inv = this.ensureLayerInv()
-        for (const o of [...treatedRoots, ...motionRoots]) hide(o) // this object AND the other treated / motion ones (their own groups draw them)
+        for (const o of treatedRoots) hide(o) // this object AND the other treated ones (their own groups draw them)
         scene.background = null
         r.setRenderTarget(inv)
         r.setClearColor(0x000000, 0)
@@ -1858,7 +1712,7 @@ export class TreatmentStage {
       for (const g of groups) {
         if (g.invert) continue
         const root = ctx.objectRoots.get(g.objectId)!
-        this.drawAlone(scene, camera, root, [...treatedRoots, ...motionRoots], this.layer, null)
+        this.drawAlone(scene, camera, root, treatedRoots, this.layer, null)
         this.treatAndComposite(g, this.layer, invDepth, root, camera)
       }
       // 2c. Buffer treatments (edge lines). Build the shared G-buffer ONCE from the treated
@@ -1869,7 +1723,7 @@ export class TreatmentStage {
       if (bufGroups.length) {
         const bufRoots = bufGroups.map((g) => ctx.objectRoots.get(g.objectId)!)
         this.renderGbuffer(scene, camera, bufRoots)
-        const exclude = [...treatedRoots, ...bufRoots, ...motionRoots]
+        const exclude = [...treatedRoots, ...bufRoots]
         for (const g of bufGroups) {
           const root = ctx.objectRoots.get(g.objectId)!
           this.drawAlone(scene, camera, root, exclude, this.layer, null)
@@ -1883,23 +1737,6 @@ export class TreatmentStage {
       } else {
         this.releaseGbuffer()
       }
-      // 2d. Motion treatments (S6 velocity blur / ghost trails). Each motion-family object was
-      //     hidden from the base above; its own composite here redraws it (smeared / with a fan
-      //     of faded past copies) using the per-object screen velocity / past poses the engine
-      //     was handed at the doc+t01 seam. velocityBlur is a directional smear (S6 Task 2);
-      //     ghostTrails a fan of faded past copies behind the crisp object (S6 Task 3).
-      const bufRoots = bufGroups.map((bg) => ctx.objectRoots.get(bg.objectId)!)
-      for (const g of motionGroups) {
-        const root = ctx.objectRoots.get(g.objectId)!
-        const exclude = [...treatedRoots, ...bufRoots, ...motionRoots]
-        for (const t of g.treatments) {
-          if (t.kind === 'velocityBlur') this.velocityBlurComposite(scene, camera, root, exclude, t, ctx.velocities?.get(g.objectId) ?? null, invDepth)
-          else if (t.kind === 'ghostTrails') this.ghostTrailsComposite(scene, camera, root, exclude, t, ctx.ghosts?.get(g.objectId) ?? [], invDepth)
-        }
-      }
-      // S7.1: AI restyle is no longer a stage sub-loop — it is a per-object MATERIAL injection
-      // (restyleProjection.ts) that projects the cached result onto the surface, drawn in the
-      // ordinary render path. The v1 restyle composite that lived here was removed.
       // 3. One un-premultiply back to straight alpha for the consumers downstream. The
       //    scratch it lands in is not touched again until the next render().
       const outStraight = this.free()
@@ -1915,7 +1752,7 @@ export class TreatmentStage {
       r.setRenderTarget(prevTarget)
     }
     this.stats.frames++
-    this.stats.groups = groups.length + bufGroups.length + motionGroups.length
+    this.stats.groups = groups.length + bufGroups.length
     return result
   }
 
