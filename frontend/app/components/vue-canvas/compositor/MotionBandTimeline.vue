@@ -31,6 +31,7 @@ const props = defineProps<{
   stale?: boolean
   bakeError?: string | null
   galleryOpen?: boolean
+  propertyPickerOpen?: boolean
 }>()
 const emit = defineEmits<{
   select: [id: string]
@@ -46,6 +47,7 @@ const emit = defineEmits<{
   bake: []
   'update:motion': [patch: { duration?: number; fps?: number; loop?: boolean }]
   'toggle-gallery': []
+  'toggle-property-picker': []
   // Behaviour bars: drag to move / drag edges to retime (DialKit clip gestures) + Open on the bar.
   'behaviour-change': [id: string, patch: { timing: { start?: number; duration?: number } }]
   'behaviour-open': [id: string]
@@ -291,6 +293,13 @@ function setSelPointValue(v: number | string) {
         @click="emit('toggle-gallery')">
         <span>{{ galleryOpen ? '−' : '+' }}</span><span>Add behaviour</span>
       </button>
+      <button type="button" data-testid="add-property-toggle"
+        class="flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors"
+        :class="propertyPickerOpen ? 'bg-[#7c9cff] text-black' : 'bg-white/10 text-white/85 hover:bg-white/15'"
+        title="Animate any property directly (transform, fill, effect dials)"
+        @click="emit('toggle-property-picker')">
+        <span>{{ propertyPickerOpen ? '−' : '+' }}</span><span>Add property</span>
+      </button>
       <label class="flex items-center gap-1 text-white/45">dur
         <input v-scrubnum type="number" min="0.5" max="60" step="0.5" :value="duration"
           class="w-12 bg-[#0d0d0d] border border-white/10 rounded px-1 py-0.5 text-white/90 outline-none tabular-nums"
@@ -312,6 +321,7 @@ function setSelPointValue(v: number | string) {
     </div>
     <!-- The previewing gallery lives inside the dock (one surface, not a separate box) -->
     <div v-if="galleryOpen" class="mb-2"><slot name="gallery" /></div>
+    <div v-if="propertyPickerOpen" class="mb-2"><slot name="property-picker" /></div>
 
     <div class="grid grid-cols-[96px_1fr] gap-x-2">
       <!-- Ruler row (28px) -->

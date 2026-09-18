@@ -74,3 +74,18 @@ describe('frameTarget + animatableProperties', () => {
     expect(props.filter(p => p.group === 'Effects')).toHaveLength(3)   // threshold, radius, intensity
   })
 })
+
+describe('Add property → effect dial band drives the render fold', () => {
+  it('a seeded Bloom·intensity band, edited, changes the effect dial at t', async () => {
+    const { seedHoldTrack, setPointValue } = await import('~/lib/motionx/bandEdit')
+    const l = layer({ effects: [{ id: 'fx1', type: 'bloom', threshold: 0.5, radius: 0.1, intensity: 1 }] })
+    const path = 'layers.L1.effects.fx1.intensity'
+    const hold = seedHoldTrack(path, 'number', 1, 4)
+    // flat hold: byte-identical effect value at any t
+    expect((applyMotionxTracks([l], [hold], 2)[0] as any).effects[0].intensity).toBe(1)
+    // edit the end point → ramps 1 → 0 across the band
+    const ramp = setPointValue(hold, 1, 0)
+    expect((applyMotionxTracks([l], [ramp], 4)[0] as any).effects[0].intensity).toBe(0)
+    expect((applyMotionxTracks([l], [ramp], 2)[0] as any).effects[0].intensity).toBeCloseTo(0.5, 6)
+  })
+})
