@@ -39,6 +39,15 @@ describe('bakePile', () => {
     expect(traj[PILE_SAMPLES - 1]).toEqual(traj[settleIdx])
   })
 
+  it('a small pile settles INSIDE the frame, not frozen at its spawn above the top', () => {
+    // Regression: single-step rest detection false-fired during the slow start of
+    // free-fall, freezing 2-token (text-only) piles at their spawn point above the frame.
+    const traj = bakePile(boxes(2), params(), FRAME)
+    for (const pose of traj[PILE_SAMPLES - 1]!) {
+      expect(pose.y).toBeLessThan(FRAME_HALF_H) // came down into the frame, didn't stay up top
+    }
+  })
+
   it('deterministic: identical trajectories for identical inputs', () => {
     const a = bakePile(boxes(7), params(), FRAME)
     const b = bakePile(boxes(7), params(), FRAME)
