@@ -11,7 +11,13 @@ defineEmits<{ add: [move: GalleryMove]; close: [] }>()
 const groups = computed(() => groupedMoves(movesForLayer(props.caps)))
 
 const isLettersPreview = (p: PreviewKind) =>
-  p === 'letters-cascade' || p === 'letters-typewriter' || p === 'letters-mask' || p === 'letters-scramble'
+  p === 'letters-cascade' || p === 'letters-typewriter' || p === 'letters-mask' || p === 'letters-scramble' ||
+  p === 'letters-decode' || p === 'letters-slot' || p === 'letters-wave' || p === 'letters-bounce' || p === 'letters-jitter'
+
+// Decode/Slot previews swap the letter's GLYPH, so they need extra stacked spans the other
+// (pure-transform) previews don't — small fixed decoy sets, purely decorative.
+const DECODE_FLICKER: Record<number, string> = { 0: '#', 1: '%', 2: '&', 3: '$' }
+const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9', 'z'], 2: ['@', 'g'], 3: ['5', 'r'] }
 </script>
 
 <template>
@@ -33,7 +39,18 @@ const isLettersPreview = (p: PreviewKind) =>
               class="letters-prev absolute inset-0 flex items-center justify-center gap-[1px] font-medium text-[11px] text-[#7c9cff]"
               :class="m.preview">
               <span v-for="(ch, i) in ['T', 'y', 'p', 'e']" :key="i" class="letter-piece" :style="{ '--i': i }">
-                <span class="letter-inner">{{ ch }}</span>
+                <span v-if="m.preview === 'letters-decode'" class="letter-decode-stack">
+                  <span class="letter-decode-glyph letter-decode-glyph--flicker">{{ DECODE_FLICKER[i] }}</span>
+                  <span class="letter-decode-glyph letter-decode-glyph--real">{{ ch }}</span>
+                </span>
+                <span v-else-if="m.preview === 'letters-slot'" class="letter-slot-window">
+                  <span class="letter-slot-reel">
+                    <span class="letter-slot-glyph">{{ SLOT_FILLERS[i]?.[0] }}</span>
+                    <span class="letter-slot-glyph">{{ SLOT_FILLERS[i]?.[1] }}</span>
+                    <span class="letter-slot-glyph letter-slot-glyph--real">{{ ch }}</span>
+                  </span>
+                </span>
+                <span v-else class="letter-inner">{{ ch }}</span>
               </span>
             </span>
             <!-- transform/opacity previews: a small mark that plays the move on loop -->
@@ -145,9 +162,59 @@ const isLettersPreview = (p: PreviewKind) =>
 @keyframes prevScramble3 { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(3px, 3px); } 50% { transform: translate(-4px, -1px); } 75% { transform: translate(1px, -3px); } }
 @keyframes prevScramble4 { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(-3px, -3px); } 50% { transform: translate(2px, 3px); } 75% { transform: translate(-1px, 2px); } }
 
+/* Decode preview — a flicker glyph over the real one, opacity cut with steps() (no easing: a
+   flicker ticks, it doesn't fade). */
+.letters-decode .letter-decode-stack { position: relative; display: inline-block; }
+.letters-decode .letter-decode-glyph { display: inline-block; }
+.letters-decode .letter-decode-glyph--flicker {
+  position: absolute; inset: 0;
+  animation: prevDecodeFlicker 1.5s steps(1) infinite;
+  animation-delay: calc(var(--i) * 0.1s);
+}
+.letters-decode .letter-decode-glyph--real {
+  opacity: 0;
+  animation: prevDecodeReal 1.5s steps(1) infinite;
+  animation-delay: calc(var(--i) * 0.1s);
+}
+@keyframes prevDecodeFlicker { 0%, 55% { opacity: 1; } 60%, 100% { opacity: 0; } }
+@keyframes prevDecodeReal { 0%, 55% { opacity: 0; } 60%, 100% { opacity: 1; } }
+
+/* Slot slide preview — a 3-glyph reel in an overflow:hidden window, easing out onto the real
+   character (rolls up, the default). */
+.letters-slot .letter-slot-window { display: inline-block; overflow: hidden; height: 1.1em; line-height: 1.1em; vertical-align: -0.18em; }
+.letters-slot .letter-slot-reel {
+  display: flex; flex-direction: column;
+  animation: prevSlotRoll 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  animation-delay: calc(var(--i) * 0.08s);
+}
+.letters-slot .letter-slot-glyph { height: 1.1em; }
+@keyframes prevSlotRoll { 0%, 15% { transform: translateY(0); } 70%, 100% { transform: translateY(-200%); } }
+
+/* Wave — a travelling sine, staggered per letter. */
+.letters-wave .letter-inner { animation: prevWave 1.4s ease-in-out infinite; animation-delay: calc(var(--i) * 0.12s); }
+@keyframes prevWave { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-40%); } }
+
+/* Bounce — an absolute half-sine hop, never sinking below the baseline. */
+.letters-bounce .letter-inner { animation: prevBounce 0.9s ease-in-out infinite; animation-delay: calc(var(--i) * 0.1s); }
+@keyframes prevBounce { 0%, 100% { transform: translateY(0); } 45% { transform: translateY(-55%); } }
+
+/* Jitter — a per-letter shake that CUTS to a new offset (steps, not a curve). */
+.letters-jitter .letter-inner { animation: prevJitter1 0.5s steps(3) infinite; }
+.letters-jitter .letter-piece:nth-child(1) .letter-inner { animation-name: prevJitter1; }
+.letters-jitter .letter-piece:nth-child(2) .letter-inner { animation-name: prevJitter2; }
+.letters-jitter .letter-piece:nth-child(3) .letter-inner { animation-name: prevJitter3; }
+.letters-jitter .letter-piece:nth-child(4) .letter-inner { animation-name: prevJitter4; }
+@keyframes prevJitter1 { 0%, 100% { transform: translate(0, 0) rotate(0); } 33% { transform: translate(1px, -1px) rotate(-3deg); } 66% { transform: translate(-1px, 1px) rotate(2deg); } }
+@keyframes prevJitter2 { 0%, 100% { transform: translate(0, 0) rotate(0); } 33% { transform: translate(-1px, 1px) rotate(3deg); } 66% { transform: translate(1px, -1px) rotate(-2deg); } }
+@keyframes prevJitter3 { 0%, 100% { transform: translate(0, 0) rotate(0); } 33% { transform: translate(1px, 1px) rotate(-2deg); } 66% { transform: translate(-1px, -1px) rotate(3deg); } }
+@keyframes prevJitter4 { 0%, 100% { transform: translate(0, 0) rotate(0); } 33% { transform: translate(-1px, -1px) rotate(2deg); } 66% { transform: translate(1px, 1px) rotate(-3deg); } }
+
 @media (prefers-reduced-motion: reduce) {
   .prev-mark, .prev-scroll, .prev-morph { animation: none; opacity: 1; }
   .letter-inner { animation: none; opacity: 1; transform: none; }
   .letters-typewriter::after { animation: none; opacity: 1; }
+  .letter-decode-glyph--flicker { animation: none; opacity: 0; }
+  .letter-decode-glyph--real { animation: none; opacity: 1; }
+  .letter-slot-reel { animation: none; transform: translateY(-200%); }
 }
 </style>

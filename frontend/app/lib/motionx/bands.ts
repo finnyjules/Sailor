@@ -77,6 +77,11 @@ export const BEHAVIOUR_LABELS: Record<string, string> = {
   'text.typewriter': 'Typewriter',
   'text.maskSlide': 'Mask slide',
   'text.scramble': 'Scramble',
+  'text.decode': 'Decode',
+  'text.slot': 'Slot slide',
+  'text.wave': 'Wave',
+  'text.bounce': 'Bounce',
+  'text.jitter': 'Jitter',
 }
 export function behaviourLabel(b: { kind: string; params?: Record<string, unknown>; timing?: { loop?: boolean } }): string {
   const base = BEHAVIOUR_LABELS[b.kind] ?? b.kind
@@ -93,6 +98,8 @@ export function behaviourLabel(b: { kind: string; params?: Record<string, unknow
     const suffix = mode === 'scatter' ? 'scatter' : mode === 'loop' ? 'keep going' : 'settle'
     withDir = `${base} · ${suffix}`
   }
+  else if (b.kind === 'text.decode') withDir = dir === 'dissolve' ? 'Decode out' : 'Decode'
+  else if (b.kind === 'text.slot') withDir = dir === 'out' ? 'Slot slide out' : 'Slot slide'
   return b.timing?.loop ? `${withDir} · loop` : withDir
 }
 

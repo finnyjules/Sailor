@@ -9,6 +9,7 @@ export type PreviewKind =
   | 'grow' | 'shrink' | 'spin' | 'pulse' | 'sway' | 'float'
   | 'scroll' | 'morph'
   | 'letters-cascade' | 'letters-typewriter' | 'letters-mask' | 'letters-scramble'
+  | 'letters-decode' | 'letters-slot' | 'letters-wave' | 'letters-bounce' | 'letters-jitter'
 
 export interface GalleryMove {
   id: string
@@ -50,6 +51,11 @@ export const GALLERY_MOVES: GalleryMove[] = [
   { id: 'letters-typewriter', kind: 'text.typewriter', label: 'Typewriter', group: 'Letters', preview: 'letters-typewriter', needs: 'text', params: { dir: 'type' } },
   { id: 'letters-mask', kind: 'text.maskSlide', label: 'Mask slide', group: 'Letters', preview: 'letters-mask', needs: 'text', params: { dir: 'reveal', from: 'up' } },
   { id: 'letters-scramble', kind: 'text.scramble', label: 'Scramble', group: 'Letters', preview: 'letters-scramble', needs: 'text', params: { mode: 'settle' }, cycle: 2 },
+  { id: 'letters-decode', kind: 'text.decode', label: 'Decode', group: 'Letters', preview: 'letters-decode', needs: 'text', params: { dir: 'resolve' }, cycle: 1.5 },
+  { id: 'letters-slot', kind: 'text.slot', label: 'Slot slide', group: 'Letters', preview: 'letters-slot', needs: 'text', params: { dir: 'in', roll: 'up' }, cycle: 1.6 },
+  { id: 'letters-wave', kind: 'text.wave', label: 'Wave', group: 'Letters', preview: 'letters-wave', needs: 'text', cycle: 3 },
+  { id: 'letters-bounce', kind: 'text.bounce', label: 'Bounce', group: 'Letters', preview: 'letters-bounce', needs: 'text', cycle: 3 },
+  { id: 'letters-jitter', kind: 'text.jitter', label: 'Jitter', group: 'Letters', preview: 'letters-jitter', needs: 'text', cycle: 3 },
   // In
   { id: 'fade-in', kind: 'fade', label: 'Fade in', group: 'In', preview: 'fade', params: { dir: 'in' } },
   { id: 'scale-in', kind: 'scale', label: 'Grow in', group: 'In', preview: 'grow', params: { dir: 'in' },

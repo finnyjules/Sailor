@@ -8,7 +8,7 @@ import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
 import { retimeTrack, addPoint, setPointValue, setPointEase, removePoint, setBandTrack, bandTrackAt } from '~/lib/motionx/bandEdit'
-import { DEFAULT_TEXT_EASE, isTextBehaviour, pieceRanks, pieceTiming, type Order } from '~/lib/motionx/text'
+import { DEFAULT_TEXT_EASE, isTextBehaviour, pieceRanks, pieceTiming, textBehaviourUsesEase, type Order } from '~/lib/motionx/text'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import MotionEasingCurve from '~/components/vue-canvas/compositor/MotionEasingCurve.vue'
 import type { Gradient } from '~/lib/compositor/paint'
@@ -87,6 +87,20 @@ const MASK_FROM_OPTIONS: Array<{ v: string; l: string }> = [
 const SCRAMBLE_MODE_OPTIONS: Array<{ v: string; l: string }> = [
   { v: 'settle', l: 'Settle' }, { v: 'scatter', l: 'Scatter' }, { v: 'loop', l: 'Keep going' },
 ]
+const DECODE_DIR_OPTIONS: Array<{ v: string; l: string }> = [
+  { v: 'resolve', l: 'Resolve' }, { v: 'dissolve', l: 'Dissolve' },
+]
+const SLOT_DIR_OPTIONS: Array<{ v: string; l: string }> = [
+  { v: 'in', l: 'In' }, { v: 'out', l: 'Out' },
+]
+const SLOT_ROLL_OPTIONS: Array<{ v: string; l: string }> = [
+  { v: 'up', l: 'Rolls up' }, { v: 'down', l: 'Rolls down' },
+]
+// Shared by Decode's Characters and Slot slide's Filler — the same five character pools.
+const CHARSET_OPTIONS: Array<{ v: string; l: string }> = [
+  { v: 'text', l: 'Same as the text' }, { v: 'letters', l: 'Letters' },
+  { v: 'numbers', l: 'Numbers' }, { v: 'symbols', l: 'Symbols' }, { v: 'mixed', l: 'Mixed' },
+]
 // A number field must never send NaN — an emptied input sends the behaviour's own default.
 function numOrDefault(raw: string, d: number): number {
   const n = Number(raw)
@@ -111,7 +125,29 @@ const cascadeAmountLabel = computed(() => {
 const showShuffle = computed(() => {
   const beh = behaviour.value
   if (!beh) return false
-  return ((behParam('order') as string) ?? 'ltr') === 'random' || beh.kind === 'text.scramble'
+  const HASHED_KINDS = ['text.scramble', 'text.decode', 'text.slot', 'text.jitter']
+  return ((behParam('order') as string) ?? 'ltr') === 'random' || HASHED_KINDS.includes(beh.kind)
+})
+// Loops (wave/bounce/jitter): span the whole bar with no per-piece stagger, so Stagger and
+// "each piece runs for" say nothing — they show Amount/Speed(/Offset) instead.
+const isLoopBeh = computed(() => {
+  const k = behaviour.value?.kind
+  return k === 'text.wave' || k === 'text.bounce' || k === 'text.jitter'
+})
+const loopAmountDefault = computed(() => {
+  const k = behaviour.value?.kind
+  return k === 'text.bounce' ? 0.35 : k === 'text.jitter' ? 0.08 : 0.25
+})
+const loopSpeedDefault = computed(() => {
+  const k = behaviour.value?.kind
+  return k === 'text.bounce' ? 1.4 : k === 'text.jitter' ? 12 : 1
+})
+// The Easing block is dead for a kind whose curve does nothing (a hard cut, a hashed flicker,
+// a loop riding its own sine) — read from the registry so this can never drift from evaluate.ts.
+const showEasing = computed(() => {
+  if (!behaviour.value) return false
+  if (!isTextBeh.value) return true
+  return textBehaviourUsesEase(behaviour.value.kind, behaviour.value.params)
 })
 function shuffleSeed() {
   // Authoring click only — never reachable from rendering.
@@ -301,7 +337,7 @@ function onGradient(g: Gradient) {
             @click="setBehParams({ by: o.v })">{{ o.l }}</button>
         </span>
       </div>
-      <div class="mb-2 flex items-center justify-between">Stagger
+      <div v-if="!isLoopBeh" class="mb-2 flex items-center justify-between">Stagger
         <input v-scrubnum type="number" step="0.01" min="0" data-testid="letters-stagger" title="Seconds between one piece starting and the next"
           :value="numParam('stagger', 0.04)"
           class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
@@ -318,9 +354,27 @@ function onGradient(g: Gradient) {
           class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:bg-white/10 cursor-pointer"
           title="Pick a new random order" @click="shuffleSeed">Shuffle</button>
       </div>
-      <div v-if="pieceLine" data-testid="letters-piece-time" class="mb-2 leading-snug text-white/50">
+      <div v-if="pieceLine && !isLoopBeh" data-testid="letters-piece-time" class="mb-2 leading-snug text-white/50">
         {{ pieceLine }}<span v-if="staggerShortened"> Stagger shortened to fit the bar.</span>
       </div>
+
+      <template v-if="isLoopBeh">
+        <div class="mb-2 flex items-center justify-between">Amount (letter heights)
+          <input v-scrubnum type="number" step="0.01" min="0" data-testid="loop-amount"
+            :value="numParam('amount', loopAmountDefault)"
+            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
+            @change="setBehParams({ amount: Math.max(0, numOrDefault(($event.target as HTMLInputElement).value, loopAmountDefault)) })"></div>
+        <div class="mb-2 flex items-center justify-between">Speed (per second)
+          <input v-scrubnum type="number" step="0.1" min="0.1" data-testid="loop-speed"
+            :value="numParam('speed', loopSpeedDefault)"
+            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
+            @change="setBehParams({ speed: Math.max(0.1, numOrDefault(($event.target as HTMLInputElement).value, loopSpeedDefault)) })"></div>
+        <div v-if="behaviour.kind === 'text.wave' || behaviour.kind === 'text.bounce'" class="mb-2 flex items-center justify-between">Offset between pieces
+          <input v-scrubnum type="number" step="0.01" min="0" data-testid="loop-offset"
+            :value="numParam('offset', 0.12)"
+            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
+            @change="setBehParams({ offset: Math.max(0, numOrDefault(($event.target as HTMLInputElement).value, 0.12)) })"></div>
+      </template>
 
       <template v-if="behaviour.kind === 'text.cascade'">
         <div class="mb-2 flex items-center justify-between">Direction
@@ -416,11 +470,62 @@ function onGradient(g: Gradient) {
             class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
             @change="setBehParams({ spin: Math.min(180, Math.max(0, numOrDefault(($event.target as HTMLInputElement).value, 0))) })"></div>
       </template>
+      <template v-else-if="behaviour.kind === 'text.decode'">
+        <div class="mb-2 flex items-center justify-between">Direction
+          <span data-testid="decode-dir" class="inline-flex overflow-hidden rounded border border-white/15">
+            <button v-for="d in DECODE_DIR_OPTIONS" :key="d.v" type="button" :data-value="d.v" class="px-2 py-0.5 cursor-pointer"
+              :class="(behParam('dir') ?? 'resolve') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
+              @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
+          </span>
+        </div>
+        <div class="mb-2 flex items-center justify-between">Characters
+          <span data-testid="decode-charset" class="inline-flex overflow-hidden rounded border border-white/15">
+            <button v-for="c in CHARSET_OPTIONS" :key="c.v" type="button" :data-value="c.v" class="px-2 py-0.5 cursor-pointer"
+              :class="(behParam('charset') ?? 'text') === c.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
+              @click="setBehParams({ charset: c.v })">{{ c.l }}</button>
+          </span>
+        </div>
+        <div class="mb-2 flex items-center justify-between">Flicker rate (per second)
+          <input v-scrubnum type="number" step="1" min="1" data-testid="decode-rate"
+            :value="numParam('rate', 14)"
+            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
+            @change="setBehParams({ rate: Math.max(1, numOrDefault(($event.target as HTMLInputElement).value, 14)) })"></div>
+      </template>
+      <template v-else-if="behaviour.kind === 'text.slot'">
+        <div class="mb-2 flex items-center justify-between">Direction
+          <span data-testid="slot-dir" class="inline-flex overflow-hidden rounded border border-white/15">
+            <button v-for="d in SLOT_DIR_OPTIONS" :key="d.v" type="button" :data-value="d.v" class="px-2 py-0.5 cursor-pointer"
+              :class="(behParam('dir') ?? 'in') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
+              @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
+          </span>
+        </div>
+        <div class="mb-2 flex items-center justify-between">Roll
+          <span data-testid="slot-roll" class="inline-flex overflow-hidden rounded border border-white/15">
+            <button v-for="r in SLOT_ROLL_OPTIONS" :key="r.v" type="button" :data-value="r.v" class="px-2 py-0.5 cursor-pointer"
+              :class="(behParam('roll') ?? 'up') === r.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
+              @click="setBehParams({ roll: r.v })">{{ r.l }}</button>
+          </span>
+        </div>
+        <div class="mb-2 flex items-center justify-between">Steps
+          <input v-scrubnum type="number" step="1" min="1" max="40" data-testid="slot-steps" title="How many characters roll past before it lands"
+            :value="numParam('steps', 8)"
+            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
+            @change="setBehParams({ steps: Math.min(40, Math.max(1, Math.round(numOrDefault(($event.target as HTMLInputElement).value, 8)))) })"></div>
+        <div class="mb-2 flex items-center justify-between">Filler
+          <span data-testid="slot-filler" class="inline-flex overflow-hidden rounded border border-white/15">
+            <button v-for="c in CHARSET_OPTIONS" :key="c.v" type="button" :data-value="c.v" class="px-2 py-0.5 cursor-pointer"
+              :class="(behParam('filler') ?? 'letters') === c.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
+              @click="setBehParams({ filler: c.v })">{{ c.l }}</button>
+          </span>
+        </div>
+      </template>
     </template>
 
-    <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Easing</div>
-    <MotionEasingCurve class="mb-2" :ease="behEase"
-      @start="emit('before-change')" @change="setBehEaseLive" @end="emit('commit')" />
+    <template v-if="showEasing">
+      <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Easing</div>
+      <MotionEasingCurve class="mb-2" :ease="behEase"
+        @start="emit('before-change')" @change="setBehEaseLive" @end="emit('commit')" />
+    </template>
 
     <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Timing</div>
     <div class="mb-2 flex items-center gap-3">

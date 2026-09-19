@@ -11,6 +11,7 @@ describe('GALLERY_MOVES catalog', () => {
       expect([
         'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph',
         'text.cascade', 'text.typewriter', 'text.maskSlide', 'text.scramble',
+        'text.decode', 'text.slot', 'text.wave', 'text.bounce', 'text.jitter',
       ]).toContain(m.kind)
       expect(['Letters', 'In', 'Loop', 'Out', 'Gradient']).toContain(m.group)
       expect(m.preview).toBeTruthy()
@@ -38,10 +39,10 @@ describe('movesForLayer', () => {
     const out = movesForLayer({ gradient: true, text: false })
     expect(out.every((m) => m.needs !== 'text')).toBe(true)
   })
-  it('offers the five Letters moves on a text layer', () => {
+  it('offers the ten Letters moves on a text layer', () => {
     const out = movesForLayer({ gradient: false, text: true })
     const letters = out.filter((m) => m.group === 'Letters')
-    expect(letters).toHaveLength(5)
+    expect(letters).toHaveLength(10)
     expect(letters.every((m) => m.needs === 'text')).toBe(true)
   })
 })
@@ -94,6 +95,15 @@ describe('Letters moves', () => {
     expect(byId['letters-typewriter']).toMatchObject({ kind: 'text.typewriter', label: 'Typewriter', params: { dir: 'type' } })
     expect(byId['letters-mask']).toMatchObject({ kind: 'text.maskSlide', label: 'Mask slide', params: { dir: 'reveal', from: 'up' } })
     expect(byId['letters-scramble']).toMatchObject({ kind: 'text.scramble', label: 'Scramble', params: { mode: 'settle' }, cycle: 2 })
+  })
+
+  it('phase 2 adds five more text.* moves with the exact ids, kinds, params and cycles from the brief', () => {
+    const byId = Object.fromEntries(GALLERY_MOVES.filter((m) => m.group === 'Letters').map((m) => [m.id, m]))
+    expect(byId['letters-decode']).toMatchObject({ kind: 'text.decode', label: 'Decode', preview: 'letters-decode', needs: 'text', params: { dir: 'resolve' }, cycle: 1.5 })
+    expect(byId['letters-slot']).toMatchObject({ kind: 'text.slot', label: 'Slot slide', preview: 'letters-slot', needs: 'text', params: { dir: 'in', roll: 'up' }, cycle: 1.6 })
+    expect(byId['letters-wave']).toMatchObject({ kind: 'text.wave', label: 'Wave', preview: 'letters-wave', needs: 'text', cycle: 3 })
+    expect(byId['letters-bounce']).toMatchObject({ kind: 'text.bounce', label: 'Bounce', preview: 'letters-bounce', needs: 'text', cycle: 3 })
+    expect(byId['letters-jitter']).toMatchObject({ kind: 'text.jitter', label: 'Jitter', preview: 'letters-jitter', needs: 'text', cycle: 3 })
   })
 })
 

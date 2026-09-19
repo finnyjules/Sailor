@@ -108,6 +108,21 @@ describe('behaviourLabel — letter behaviours', () => {
     expect(behaviourLabel({ kind: 'text.scramble', params: { mode: 'scatter' } })).toBe('Scramble · scatter')
     expect(behaviourLabel({ kind: 'text.scramble', params: { mode: 'loop' } })).toBe('Scramble · keep going')
   })
+  it('Decode / Decode out by dir', () => {
+    expect(behaviourLabel({ kind: 'text.decode', params: { dir: 'resolve' } })).toBe('Decode')
+    expect(behaviourLabel({ kind: 'text.decode', params: { dir: 'dissolve' } })).toBe('Decode out')
+    expect(behaviourLabel({ kind: 'text.decode', params: {} })).toBe('Decode')
+  })
+  it('Slot slide / Slot slide out by dir', () => {
+    expect(behaviourLabel({ kind: 'text.slot', params: { dir: 'in' } })).toBe('Slot slide')
+    expect(behaviourLabel({ kind: 'text.slot', params: { dir: 'out' } })).toBe('Slot slide out')
+    expect(behaviourLabel({ kind: 'text.slot', params: {} })).toBe('Slot slide')
+  })
+  it('Wave, Bounce, Jitter — no dir variant', () => {
+    expect(behaviourLabel({ kind: 'text.wave', params: {} })).toBe('Wave')
+    expect(behaviourLabel({ kind: 'text.bounce', params: {} })).toBe('Bounce')
+    expect(behaviourLabel({ kind: 'text.jitter', params: {} })).toBe('Jitter')
+  })
 })
 
 describe('bands carry the loop flag', () => {
