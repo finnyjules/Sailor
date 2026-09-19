@@ -3,21 +3,29 @@
 // says what EACH kind does to one piece at progress `e`, and (typewriter) where the cursor sits.
 import { applyEase, type Ease } from '~/lib/motionx'
 import { hash01 } from './rng'
-import { REST, HIDDEN, registerTextBehaviour, type CursorDraw } from './evaluate'
+import { REST, HIDDEN, registerTextBehaviour, oneOf, type CursorDraw } from './evaluate'
 import type { Piece } from './units'
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
-const str = (v: unknown, d: string): string => (typeof v === 'string' ? v : d)
+
+const CASCADE_DIRS = ['in', 'out'] as const
+const CASCADE_STYLES = ['fade', 'rise', 'drop', 'grow', 'spin'] as const
+const MASK_DIRS = ['reveal', 'hide'] as const
+const MASK_FROM = ['up', 'down', 'left', 'right'] as const
+const TYPE_DIRS = ['type', 'delete'] as const
+const CURSOR_STYLES = ['bar', 'underscore', 'none'] as const
+const SCRAMBLE_MODES = ['settle', 'scatter', 'loop'] as const
+const SCRAMBLE_MOVES = ['snap', 'glide'] as const
 
 // ---------------------------------------------------------------------------
 // Cascade — fade / rise / drop / grow / spin, in or out.
 // ---------------------------------------------------------------------------
 registerTextBehaviour('text.cascade', {
-  phase: (params) => (str(params.dir, 'in') === 'out' ? 'out' : 'in'),
+  phase: (params) => (oneOf(params.dir, CASCADE_DIRS, 'in') === 'out' ? 'out' : 'in'),
   piece: (c) => {
-    const dir = str(c.params.dir, 'in')
-    const style = str(c.params.style, 'rise')
+    const dir = oneOf(c.params.dir, CASCADE_DIRS, 'in')
+    const style = oneOf(c.params.style, CASCADE_STYLES, 'rise')
     // k = how far from rest, 1 → 0 on the way in (mirrored on the way out). A spring entrance
     // can push e past 1, so k can go negative — that is the overshoot past rest.
     const k = dir === 'out' ? c.e : 1 - c.e
@@ -51,10 +59,10 @@ registerTextBehaviour('text.cascade', {
 // Mask slide — the piece travels in from (or out to) one side, clipped to its own resting box.
 // ---------------------------------------------------------------------------
 registerTextBehaviour('text.maskSlide', {
-  phase: (params) => (str(params.dir, 'reveal') === 'hide' ? 'out' : 'in'),
+  phase: (params) => (oneOf(params.dir, MASK_DIRS, 'reveal') === 'hide' ? 'out' : 'in'),
   piece: (c) => {
-    const dir = str(c.params.dir, 'reveal')
-    const from = str(c.params.from, 'up')
+    const dir = oneOf(c.params.dir, MASK_DIRS, 'reveal')
+    const from = oneOf(c.params.from, MASK_FROM, 'up')
     const k = dir === 'hide' ? c.e : 1 - c.e
     let dx = 0, dy = 0
     if (from === 'up') dy = k * c.piece.h
@@ -69,13 +77,13 @@ registerTextBehaviour('text.maskSlide', {
 // Typewriter — hard cut in (or against) reading order, plus a blinking cursor.
 // ---------------------------------------------------------------------------
 registerTextBehaviour('text.typewriter', {
-  phase: (params) => (str(params.dir, 'type') === 'delete' ? 'out' : 'in'),
-  reverseOrder: (params) => str(params.dir, 'type') === 'delete',
+  phase: (params) => (oneOf(params.dir, TYPE_DIRS, 'type') === 'delete' ? 'out' : 'in'),
+  reverseOrder: (params) => oneOf(params.dir, TYPE_DIRS, 'type') === 'delete',
   // Only called while 0 < p < 1 (already past HIDDEN/REST at the edges): typing shows the
   // letter in full the instant its turn starts; deleting hides it the instant its turn starts.
-  piece: (c) => (str(c.params.dir, 'type') === 'delete' ? HIDDEN : REST),
+  piece: (c) => (oneOf(c.params.dir, TYPE_DIRS, 'type') === 'delete' ? HIDDEN : REST),
   cursor: ({ pieces, visible, params }) => {
-    const style = str(params.cursor, 'bar')
+    const style = oneOf(params.cursor, CURSOR_STYLES, 'bar')
     if (style === 'none') return undefined
     let lastVisible = -1
     for (let i = 0; i < visible.length; i++) if (visible[i]) lastVisible = i
@@ -90,7 +98,7 @@ registerTextBehaviour('text.typewriter', {
       y: piece.cy + sign * sinA * (piece.w / 2),
       h: piece.h,
       angle: piece.angle,
-      style: style as CursorDraw['style'],
+      style,
     }
     return draw
   },
@@ -114,15 +122,15 @@ function scrambleSpot(
 
 registerTextBehaviour('text.scramble', {
   phase: (params) => {
-    const mode = str(params.mode, 'settle')
+    const mode = oneOf(params.mode, SCRAMBLE_MODES, 'settle')
     return mode === 'scatter' ? 'out' : mode === 'loop' ? 'span' : 'in'
   },
   piece: (c) => {
-    const mode = str(c.params.mode, 'settle')
+    const mode = oneOf(c.params.mode, SCRAMBLE_MODES, 'settle')
     const areaW = num(c.params.areaW, 0.6)
     const areaH = num(c.params.areaH, 0.6)
     const interval = Math.max(0.001, num(c.params.interval, 0.18))
-    const move = str(c.params.move, 'snap')
+    const move = oneOf(c.params.move, SCRAMBLE_MOVES, 'snap')
     const spinRad = (num(c.params.spin, 0) * Math.PI) / 180
     const ease = c.params.ease as Ease
 

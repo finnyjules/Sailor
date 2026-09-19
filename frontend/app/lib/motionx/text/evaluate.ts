@@ -1,7 +1,7 @@
 // Letter behaviours — pure evaluator. Turns a set of stored text behaviours + a time `t` into an
 // absolute placement per glyph cell (`TextFrame`). No canvas, no Vue — a later task draws this.
 import { applyEase, type Ease, type StoredBehaviour } from '~/lib/motionx'
-import { isSpringEase } from '~/lib/motionx/ease'
+import { isSpringEase, springSettle } from '~/lib/motionx/ease'
 import { groupCells, type Piece, type PieceBy, type TextCell } from './units'
 import { pieceRanks, pieceTiming, type Order } from './order'
 
@@ -43,6 +43,18 @@ export function registerTextBehaviour(kind: string, def: TextBehaviourDef): void
 export const isTextBehaviour = (b: { kind: string }) => typeof b?.kind === 'string' && b.kind.startsWith('text.')
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
+const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
+
+/** Reads an enum-like param, falling back to `fallback` for anything not in `allowed` — so a
+ *  garbage/unknown string can never land in an accidental code branch. Shared by `by`/`order`
+ *  here and by every behaviour-specific enum param in behaviours.ts, so `phase()` and `piece()`
+ *  can never disagree about which mode is active. */
+export function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : fallback
+}
+
+const PIECE_BY: readonly PieceBy[] = ['letters', 'words', 'lines']
+const ORDERS: readonly Order[] = ['ltr', 'rtl', 'center', 'edges', 'random']
 
 interface ComposedCell { x: number; y: number; rotation: number; scale: number; opacity: number; clip?: CellDraw['clip'] }
 
@@ -81,19 +93,22 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
   for (const b of active) {
     const def = REGISTRY.get(b.kind)!
     const params: Record<string, unknown> = { by: 'letters', stagger: 0.04, order: 'ltr', seed: 1, ease: 'easeOut', ...(b.params ?? {}) }
-    const by = params.by as PieceBy
+    const by = oneOf(params.by, PIECE_BY, 'letters')
+    const order = oneOf(params.order, ORDERS, 'ltr')
+    const seed = num(params.seed, 1)
+    const stagger = num(params.stagger, 0.04)
     const pieces = groupCells(cells, by)
     const cellPiece: Piece[] = new Array(cells.length)
     pieces.forEach((pc) => pc.cells.forEach((ci) => { cellPiece[ci] = pc }))
 
     const start = b.timing.start + (b.timing.delay ?? 0)
     const D = Math.max(0.05, b.timing.duration)
-    let ranks = pieceRanks(pieces.length, params.order as Order, params.seed as number)
+    let ranks = pieceRanks(pieces.length, order, seed)
     if (def.reverseOrder?.(params)) {
       const maxRank = Math.max(0, ...ranks)
       ranks = ranks.map((r) => maxRank - r)
     }
-    const { delays, pieceDur } = pieceTiming(ranks, params.stagger as number, D)
+    const { delays, pieceDur } = pieceTiming(ranks, stagger, D)
     const ease = params.ease as Ease
     const spring = isSpringEase(ease)
     const phase = def.phase(params)
@@ -103,7 +118,7 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
 
     const makeCtx = (piece: Piece, delay: number, rawP: number, e: number, barElapsed: number): PieceCtx => ({
       piece, pieces, p: rawP, e, elapsed: t - start - delay, pieceDur, t,
-      seed: params.seed as number, frame, params, delay, barElapsed, barDur: D,
+      seed, frame, params, delay, barElapsed, barDur: D,
     })
 
     for (const piece of pieces) {
@@ -121,6 +136,10 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
           const p = spring ? Math.max(0, rawP) : clamp01(rawP)
           state = def.piece(makeCtx(piece, delay, rawP, applyEase(p, ease), barElapsed))
           visible[i] = true
+          // A spring keeps settling past p = 1 (never hit by the branch above); it is at REST
+          // once p reaches springSettle(bounce), the point where springProgress starts returning
+          // exactly 1 — otherwise atRest would never become true again for this piece.
+          if (isSpringEase(ease) && rawP >= springSettle(ease.bounce)) isRest = true
         }
       } else if (phase === 'out') {
         if (rawP <= 0) { state = REST; isRest = true; visible[i] = true }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { evaluateTextBehaviours, isTextBehaviour } from '~/lib/motionx/text'
+import { springSettle } from '~/lib/motionx/ease'
 import type { TextCell } from '~/lib/motionx/text/units'
 
 const cell = (char: string, x: number, word = 0, line = 0, angle = 0): TextCell => ({ char, x, y: 0, w: 10, h: 20, angle, word, line })
@@ -58,6 +59,22 @@ describe('text.cascade', () => {
     const b = beh('text.cascade', { style: 'rise', amount: 1, ease: { type: 'spring', bounce: 0.6 } })
     const ys = [1.3, 1.4, 1.5, 1.6, 1.8].map((t) => ev(b, t).cells[0]!.y)
     expect(Math.min(...ys)).toBeLessThan(0)            // went ABOVE rest (y < 0) before settling
+  })
+  it('a spring entrance reaches rest once the spring settles, not merely once p passes 1', () => {
+    const b = beh('text.cascade', { style: 'rise', amount: 1, ease: { type: 'spring', bounce: 0.6 } })
+    expect(ev(b, 2.2).atRest).toBe(false)                          // still settling
+    expect(ev(b, 1 + springSettle(0.6) + 0.01).atRest).toBe(true)  // just past settle
+    expect(ev(b, 60).atRest).toBe(true)                            // long after
+  })
+  it('a staggered spring entrance reaches rest once every piece has settled', () => {
+    const b = beh('text.cascade', { style: 'rise', amount: 1, stagger: 0.2, ease: { type: 'spring', bounce: 0.6 } })
+    expect(ev(b, 2.2).atRest).toBe(false)      // the last piece is still settling
+    expect(ev(b, 60).atRest).toBe(true)        // well after every piece's own settle time
+  })
+  it('an exit with a spring ease still ends exactly HIDDEN at the bar end (progress is clamped 0..1 for exits)', () => {
+    const b = beh('text.cascade', { dir: 'out', style: 'fade', ease: { type: 'spring', bounce: 0.6 } })
+    expect(ev(b, 2).cells.every((c) => c.opacity === 0)).toBe(true)    // bar end: start(1) + duration(1)
+    expect(ev(b, 2.5).cells.every((c) => c.opacity === 0)).toBe(true)
   })
 })
 
@@ -144,5 +161,37 @@ describe('composition', () => {
     const f = ev([a, { ...b, id: 'b2' }], 1.5)
     expect(f.cells[0]!.y).toBeCloseTo(10, 6)
     expect(f.cells[0]!.opacity).toBeCloseTo(0.25, 6)
+  })
+})
+
+describe('unknown enum values fall back to their documented default', () => {
+  const GARBAGE = 'not-a-real-value'
+  const same = (kind: string, param: string, extra: Record<string, unknown> = {}, t = 1.5) => {
+    expect(ev(beh(kind, { ...extra, [param]: GARBAGE }), t)).toEqual(ev(beh(kind, { ...extra }), t))
+  }
+  it('cascade style falls back to rise', () => same('text.cascade', 'style'))
+  it('cascade dir falls back to in', () => same('text.cascade', 'dir'))
+  it('maskSlide dir falls back to reveal', () => same('text.maskSlide', 'dir'))
+  it('maskSlide from falls back to up', () => same('text.maskSlide', 'from'))
+  it('typewriter dir falls back to type', () => same('text.typewriter', 'dir'))
+  it('typewriter cursor falls back to bar', () => same('text.typewriter', 'cursor'))
+  it('scramble mode falls back to settle', () =>
+    same('text.scramble', 'mode', { areaW: 0.5, areaH: 0.5, interval: 0.2, stagger: 0.1 }))
+  it('scramble move falls back to snap', () =>
+    same('text.scramble', 'move', { areaW: 0.5, areaH: 0.5, interval: 0.2 }))
+  it('shared by falls back to letters', () => same('text.cascade', 'by'))
+  it('shared order falls back to ltr', () => same('text.cascade', 'order', { stagger: 0.2 }))
+})
+
+describe('finite-number guards', () => {
+  it('a NaN stagger falls back to the documented default (0.04)', () => {
+    const a = ev(beh('text.cascade', { style: 'fade', order: 'rtl', stagger: NaN }), 1.5)
+    const b = ev(beh('text.cascade', { style: 'fade', order: 'rtl', stagger: 0.04 }), 1.5)
+    expect(a).toEqual(b)
+  })
+  it('a NaN seed falls back to the documented default (1)', () => {
+    const a = ev(beh('text.scramble', { areaW: 0.5, areaH: 0.5, interval: 0.2, seed: NaN }, 1, 2), 1.5)
+    const b = ev(beh('text.scramble', { areaW: 0.5, areaH: 0.5, interval: 0.2, seed: 1 }, 1, 2), 1.5)
+    expect(a).toEqual(b)
   })
 })
