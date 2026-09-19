@@ -1,3 +1,5 @@
+> **STATUS 2026-09-19: Phase 3 is COMPLETE**, including Slice 6b (legacy Motion authoring retired). This handoff is historical. Current state, decisions and what deliberately remains: `docs/superpowers/plans/2026-09-18-unified-motion-6b-retire-legacy.md` (see Non-goals) and the local ledger `.superpowers/sdd/progress-unified-motion.md`.
+
 # Handoff — Unified Motion, Phase 3: the band timeline UI
 
 **For a fresh session with zero prior context.** Goal: build the "everything is a band" motion timeline UI. The whole model underneath is already built, proven, and wired — this handoff is the last (and biggest) piece: the visual authoring surface.
