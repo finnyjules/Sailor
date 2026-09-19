@@ -151,10 +151,15 @@ describe('a behaviour inside its bar draws glyph by glyph', () => {
     ])
   })
 
-  it('per-glyph opacity multiplies the current globalAlpha', () => {
-    const log = record(withMotion(textLayer(), 0.5))
-    expect(log.filter(l => l.startsWith('globalAlpha='))).toEqual(
-      ['globalAlpha=0.5', 'globalAlpha=0.5', 'globalAlpha=0.5', 'globalAlpha=0.5'],
+  it('per-glyph opacity MULTIPLIES the alpha already on the context (layer / group / cloner alpha)', () => {
+    // Base alpha 0.5 × glyph opacity 0.5 = 0.25. With a base of 1 an overwrite and a multiply
+    // look the same, which would let `ctx.globalAlpha = d.opacity` slip through unnoticed.
+    const { ctx, rec } = recorder()
+    ctx.globalAlpha = 0.5
+    rec.log.length = 0
+    __drawTextForTest(ctx, withMotion(textLayer(), 0.5) as never, W)
+    expect(rec.log.filter(l => l.startsWith('globalAlpha='))).toEqual(
+      ['globalAlpha=0.25', 'globalAlpha=0.25', 'globalAlpha=0.25', 'globalAlpha=0.25'],
     )
   })
 
