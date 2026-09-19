@@ -107,6 +107,10 @@ export type ControlSpec = (
   // 'none'. `allowNone: false` for consumers that always need a shape (a base
   // shape); the default (true) offers a None tile and lists 'none' to the agent.
   | { key: string; label: string; kind: 'shape'; default: string; allowNone?: boolean; group: string }
+  // A hand-picked SET of shape ids, stored as one JSON-array string (like fillList —
+  // ParamValue is scalar). The surface renders a multi-select shape picker; consumers
+  // parse it into an id list. Empty array = none picked.
+  | { key: string; label: string; kind: 'shapeList'; default: string; group: string }
   | { key: string; label: string; kind: 'look'; default: string; group: string }
   // An interactive bézier path drawn on the preview (String effect). Stored as one JSON
   // string in params (StringPathDoc); the surface renders the StringPathEditor overlay.
@@ -139,7 +143,7 @@ export function defaultsFromControls(controls: ControlSpec[]): Params {
  * gap, no separator. ONE definition: state.ts's texOptsFromState and the embed's
  * buildTexOpts both read this (they used to carry private copies).
  */
-export const RAW_WORD_EFFECTS: ReadonlySet<string> = new Set(['coil', 'elastic', 'echo'])
+export const RAW_WORD_EFFECTS: ReadonlySet<string> = new Set(['coil', 'elastic', 'echo', 'pile'])
 
 /**
  * Effects that lay out individual letters via layoutChars and never sample the
@@ -163,6 +167,13 @@ export interface BuildEnv {
    *  build path is synchronous (withShaderFillContext), so images MUST be loaded
    *  by the caller (setImageTextures) before build; the effect only reads here. */
   imageTextures?: Map<string, import('three').Texture>
+  /** The loop's real duration in seconds. Effects that bake a time-based simulation (Pile)
+   *  need it to play the sim at real wall-clock speed rather than stretched to fill the loop. */
+  loopDuration?: number
+  /** The RESOLVED CSS font family (already mapped from the font token — Google name or a
+   *  `local:` library family — and loaded). Effects that draw their own text to a canvas (Pile)
+   *  need this, not the raw `params.font` token, or the canvas falls back to a default. */
+  fontFamily?: string
 }
 
 export interface SpaceTypeEffect {

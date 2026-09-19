@@ -361,7 +361,7 @@ function openEditor() {
     <!-- Header -->
     <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
       <Sparkles class="h-3.5 w-3.5 text-white/70" />
-      <span class="text-xs font-medium text-white/80">Expressive Studio</span>
+      <span class="text-xs font-medium text-white/80">Kinetic Studio</span>
       <span class="ml-auto max-w-[110px] truncate text-[10px] uppercase tracking-wide text-white/40">{{ text }}</span>
     </div>
 
