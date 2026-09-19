@@ -23,10 +23,13 @@ const controls: ControlSpec[] = [
   { key: 'boxStyle', label: 'Box style', kind: 'select', options: ['filled', 'bare', 'outline'], optionLabels: ['Filled box', 'Just words', 'Outline'], default: 'filled', group: 'Style' },
   { key: 'padding', label: 'Padding', kind: 'slider', min: 0, max: 0.4, step: 0.01, default: 0.04, group: 'Style', showIf: { key: 'boxStyle', notEquals: 'bare' } },
   // SHAPES (what populates the pile) → the Layout section.
+  // Shape controls are always visible (no showIf gate) so the picker is discoverable — you pick
+  // shapes here and set how many drop with Shape count (0 = none). Gating the picker behind the
+  // count hid the very control you needed to find.
+  { key: 'shapes', label: 'Shapes', kind: 'shapeList', default: '[]', group: 'Layout' },
   { key: 'shapeCount', label: 'Shape count', kind: 'slider', min: 0, max: 40, step: 1, default: 0, group: 'Layout' },
-  { key: 'shapes', label: 'Shapes', kind: 'shapeList', default: '[]', group: 'Layout', showIf: { key: 'shapeCount', notEquals: 0 } },
-  { key: 'shapeSize', label: 'Shape size', kind: 'slider', min: 30, max: 260, step: 2, default: 120, group: 'Layout', showIf: { key: 'shapeCount', notEquals: 0 } },
-  { key: 'sizeVariation', label: 'Size variation', kind: 'slider', min: 0, max: 0.9, step: 0.05, default: 0.3, group: 'Layout', showIf: { key: 'shapeCount', notEquals: 0 } },
+  { key: 'shapeSize', label: 'Shape size', kind: 'slider', min: 30, max: 260, step: 2, default: 120, group: 'Layout' },
+  { key: 'sizeVariation', label: 'Size variation', kind: 'slider', min: 0, max: 0.9, step: 0.05, default: 0.3, group: 'Layout' },
   // PHYSICS (the fall & settle) → the Stack section.
   { key: 'container', label: 'Container', kind: 'slider', min: 0.3, max: 1, step: 0.02, default: 0.4, group: 'Stack' },
   { key: 'gravity', label: 'Gravity', kind: 'slider', min: 0.2, max: 3, step: 0.1, default: 0.4, group: 'Stack' },
