@@ -1003,5 +1003,6 @@ Expected: all pass; only the 6 baseline `CompositorModal.vue` errors. Timeline/V
 
 - **Per-letter staggering is not reproduced.** Text layers convert as a whole layer (user decision 2026-09-19, "just convert"). Same for the blur of `blur-in` / `blur-slide-up` / `blur-out`: they convert as fades/slides.
 - **Masks, axis flips and tiled copies are not converted** (12 presets). No band can express them; they keep playing through the old engine and show as a locked bar with Remove.
-- **Converted bands are sampled curves, not tidy two-point bands.** Fidelity over tidiness; the gallery is there to rebuild a move cleanly.
+- **Converted bands are ABSOLUTE; the old animation was RELATIVE.** An old animation moved/faded the layer relative to wherever it sat (x += dx, opacity ×=). Converted bands pin the values sampled from the layer's position and opacity at conversion time — like every other band. If the layer is later moved or its opacity changed in Design, the converted bands do not follow. Found by the final review; accepted, and called out to the user.
+- **Converted bands are refit into tidy eased two-point bands where the old curve allows, sampled curves otherwise.** Fidelity over tidiness; the gallery is there to rebuild a move cleanly.
 - **The legacy dial-track render fold stays.** Frames that are never reopened (card previews, batch bakes) still carry `tracks`; deleting the fold would silently stop their animation. It is ~50 pure, tested lines.

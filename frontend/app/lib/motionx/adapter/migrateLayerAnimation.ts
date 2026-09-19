@@ -52,7 +52,8 @@ const BACK_OVERSHOOTS = [1.4, 1.7, 2] as const
 /** Candidate eases tried, in order, to replace a sampled span with two keyframes. 'linear'
  *  comes first so a genuinely straight (or flat) span is never mistaken for a curve. Cubic
  *  power3 out/in and the back overshoots are exact bézier equivalents of the GSAP formulas
- *  the old engine's presets actually use (fade/slide = power2, grow/spin = back.out). */
+ *  the old engine's presets actually use (fade/slide are power2 = the named easeOut / easeIn;
+ *  mask/shrink = power3 = the cubic béziers; grow/spin = back.out). */
 const CANDIDATE_EASES: readonly Ease[] = [
   'linear', 'easeIn', 'easeOut', 'easeInOut',
   [1 / 3, 1, 2 / 3, 1], [1 / 3, 0, 2 / 3, 0],

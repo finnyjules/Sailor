@@ -96,6 +96,7 @@ import { type Behaviour, type StoredBehaviour, type Timing, type Track as Motion
 import { setBehaviourTracks, bakeBehaviour, upsertBehaviour, removeBehaviour } from '~/lib/motionx/behaviourStore'
 import { seedHoldTrack, setBandTrack } from '~/lib/motionx/bandEdit'
 import { migrateDialTracks } from '~/lib/motionx/adapter/migrateDialTracks'
+import { mergeAgentBands } from '~/lib/motionx/adapter/agentBands'
 import { migrateLayerAnimations } from '~/lib/motionx/adapter/migrateLayerAnimation'
 import { legacyBandForLayer } from '~/lib/motionx/bands'
 import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
@@ -1210,8 +1211,12 @@ const {
     if (s.grid && JSON.stringify(s.grid) !== JSON.stringify(gridConfig.value)) setGrid(s.grid)
     // Only the agent's timeline BANDS flow back (animateDial authors them) — fps/duration are
     // the timeline's own controls, never touched by the agent.
-    if (JSON.stringify(s.motion?.motionx ?? []) !== JSON.stringify(motionDoc.value.motionx ?? [])) {
-      setMotion({ motionx: s.motion?.motionx ?? [] })
+    // The agent's state is a snapshot from when the user asked and is replayed on accept / reject,
+    // so it must never replace the whole list — only its own dial bands merge back in.
+    const curBands = motionDoc.value.motionx ?? []
+    const nextBands = mergeAgentBands(curBands, s.motion?.motionx ?? [])
+    if (nextBands !== curBands) {
+      setMotion({ motionx: nextBands })
       commitMotionTimeline()
     }
   },
@@ -3711,7 +3716,14 @@ watch(() => compositor.value?.id, (_id, _prev, onCleanup) => {
   const tryMigrateLayerAnimations = (aspect: number) => {
     const dims = { w: 1000, h: 1000 / aspect }
     const res = migrateLayerAnimations(localLayers.value, motionDoc.value, dims)
-    if (res.converted.length) { commit(res.layers); setMotion({ motionx: res.motionx } as Partial<FrameMotion>) }
+    if (!res.converted.length) return
+    // Write the layers DIRECTLY, not through commit(): commit() also re-syncs every wired layer's
+    // widgets from `dims()`, which is still the 1:1 canvas placeholder while setup runs — on a
+    // non-square frame that would silently resize wired layers. Converting only drops the
+    // `animation` key; no transform changes, so there is nothing to sync.
+    const props = (compositor.value!.data.properties ||= {}) as Record<string, any>
+    props.sailor_localLayers = res.layers
+    setMotion({ motionx: res.motionx } as Partial<FrameMotion>)
   }
   const initialAspect = knownFrameAspect()
   if (initialAspect != null) tryMigrateLayerAnimations(initialAspect)
