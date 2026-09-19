@@ -74,6 +74,12 @@ describe('pieceTiming — the bar is the whole move', () => {
     expect(t.staggerUsed).toBeCloseTo(0.475, 9)
     expect(t.delays[2]).toBeCloseTo(0.95, 9)
   })
+  it('NaN / negative inputs never produce NaN timing', () => {
+    expect(pieceTiming([0, 1, 2], NaN, 1)).toEqual({ delays: [0, 0, 0], pieceDur: 1, staggerUsed: 0 })
+    const t = pieceTiming([0, 1], 0.1, NaN)
+    expect(t.pieceDur).toBe(0.05); expect(t.delays.every(Number.isFinite)).toBe(true)
+    expect(pieceTiming([0, 1], -5, 1).delays).toEqual([0, 0])
+  })
   it('single piece / zero stagger → the whole bar', () => {
     expect(pieceTiming([0], 0.3, 2)).toEqual({ delays: [0], pieceDur: 2, staggerUsed: 0.3 })
     expect(pieceTiming([0, 1], 0, 2).pieceDur).toBe(2)

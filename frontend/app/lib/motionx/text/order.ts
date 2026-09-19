@@ -21,6 +21,10 @@ export function pieceRanks(count: number, order: Order, seed: number): number[] 
 
 /** The bar is the WHOLE move: the last piece ends when the bar ends. */
 export function pieceTiming(ranks: number[], stagger: number, duration: number): { delays: number[]; pieceDur: number; staggerUsed: number } {
+  // Params arrive from number fields: an emptied field is NaN, and NaN poisons every delay
+  // (even rank 0 — 0 × NaN is NaN) and defeats the minimum piece length.
+  stagger = Number.isFinite(stagger) ? stagger : 0
+  duration = Number.isFinite(duration) ? duration : MIN_PIECE
   const maxRank = Math.max(0, ...ranks)
   const room = Math.max(0, duration - MIN_PIECE)
   const staggerUsed = maxRank > 0 ? Math.min(Math.max(0, stagger), room / maxRank) : Math.max(0, stagger)
