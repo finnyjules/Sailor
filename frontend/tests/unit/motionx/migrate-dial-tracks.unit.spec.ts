@@ -101,4 +101,24 @@ describe('migrateDialTracks', () => {
     const once = migrateDialTracks({ tracks: [num] }).motion
     expect(migrateDialTracks(once).motion).toBe(once)
   })
+  it('any ease other than linear converts to easeInOut, exactly as the old evaluator treated it', () => {
+    const odd = { target: P, keyframes: [{ t: 0, v: 0, ease: 'easeIn' as never }, { t: 1, v: 10, ease: 'garbage' as never }, { t: 2, v: 0, ease: 'linear' }] }
+    const tr = dialTrackToMotionx(odd)!
+    expect(tr.keyframes.map((k) => k.ease)).toEqual(['easeInOut', 'easeInOut', 'linear'])
+    for (const t of [0.25, 0.5, 1.5]) expect(evaluateTrack(tr, t)).toEqual(evaluateDialTrack(odd, t))
+  })
+  it('keeps only the last legacy track when there are duplicates (matching old fold behaviour)', () => {
+    const first = { target: P, keyframes: [{ t: 0, v: 0 }, { t: 1, v: 10 }] }
+    const second = { target: P, keyframes: [{ t: 0, v: 5 }, { t: 1, v: 15 }] }
+    const out = migrateDialTracks({ tracks: [first, second] })
+    expect(out.converted).toBe(1)
+    expect(out.dropped).toBe(1)
+    expect(out.motion.motionx).toEqual([dialTrackToMotionx(second)])
+
+    // Verify parity: the fold applies the second (later) track
+    const l = { id: 'L1', x: 0.5, y: 0.5, rotation: 0, scale: 1, opacity: 1, effects: [{ id: 'fx1', type: 'bloom', threshold: 0.5, radius: 0.1, intensity: 1 }] } as unknown as LocalLayer
+    for (const t of SAMPLES) {
+      expect(applyMotionxTracks([l], out.motion.motionx, t)).toEqual(applyEffectDialTracks([l], [second], t))
+    }
+  })
 })

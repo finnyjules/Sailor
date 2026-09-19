@@ -20,7 +20,12 @@ export function dialTrackToMotionx(tr: EffectDialTrack): Track | null {
   if (!type || typeof tr.target !== 'string' || !tr.target) return null
   const keyframes: Keyframe[] = [...tr.keyframes]
     .sort((a, b) => a.t - b.t)
-    .map((k) => ({ t: k.t, value: k.v as Keyframe['value'], ease: k.ease ?? 'easeInOut' }))
+    .map((k) => ({
+      t: k.t,
+      value: k.v as Keyframe['value'],
+      // Mirror the old evaluator: only 'linear' maps to linear, everything else (missing or stray) → easeInOut
+      ease: k.ease === 'linear' ? 'linear' : 'easeInOut',
+    }))
   const out: Track = { path: tr.target, type, keyframes }
   if (type === 'gradient') {
     if (tr.mode) out.mode = tr.mode
@@ -38,13 +43,38 @@ export function migrateDialTracks<M extends MotionLike>(motion: M): { motion: M;
   if (!legacy || !legacy.length) return { motion, converted: 0, dropped: 0 }
   const existing = motion.motionx ?? []
   const taken = new Set(existing.map((t) => t.path))
+
+  // Build a map of the LAST convertible track for each target: the old fold (applyEffectDialTracks)
+  // lets the later track win when there are duplicates.
+  const lastConvertible = new Map<string, { index: number; track: EffectDialTrack; conv: Track }>()
+  for (let i = 0; i < legacy.length; i++) {
+    const tr = legacy[i]
+    if (!tr || taken.has(tr.target)) continue
+    const conv = dialTrackToMotionx(tr)
+    if (conv) {
+      lastConvertible.set(tr.target, { index: i, track: tr, conv })
+    }
+  }
+
   const added: Track[] = [], left: EffectDialTrack[] = []
   let dropped = 0
-  for (const tr of legacy) {
-    // motionx folded AFTER dial tracks, so a band on the same path already hid this track.
-    if (tr && taken.has(tr.target)) { dropped++; continue }
-    const conv = tr ? dialTrackToMotionx(tr) : null
-    if (conv) { added.push(conv); taken.add(conv.path) } else left.push(tr)
+  for (let i = 0; i < legacy.length; i++) {
+    const tr = legacy[i]
+    if (!tr) continue
+    const last = lastConvertible.get(tr.target)
+    if (!last) {
+      // motionx folded AFTER dial tracks, so a band on the same path already hid this track.
+      if (taken.has(tr.target)) { dropped++; continue }
+      // Unconvertible track
+      left.push(tr)
+    } else if (last.index === i) {
+      // This is the last convertible track for its target: keep it.
+      added.push(last.conv)
+      taken.add(last.conv.path)
+    } else {
+      // A second legacy track on the same target is dropped too — the old fold let the later one win
+      dropped++
+    }
   }
   if (!added.length && !dropped) return { motion, converted: 0, dropped: 0 }
   const next = { ...motion, motionx: [...existing, ...added] } as M
