@@ -2017,6 +2017,14 @@ async function exportWebEmbed() {
                 :bindable="false"
                 @update:model-value="(v) => { params[c.key] = String(v); rebuild(); onEdit(c.key, String(v)) }"
               />
+              <!-- Shape SET (multi-select library picker): same StudioRow path, value side is RowShapeList. -->
+              <StudioRow
+                v-else-if="c.kind === 'shapeList'"
+                :spec="c"
+                :model-value="String(params[c.key] ?? c.default)"
+                :bindable="false"
+                @update:model-value="(v) => { params[c.key] = String(v); rebuild(); onEdit(c.key, String(v)) }"
+              />
               <div v-else-if="c.kind === 'textList' && boundColumnFor(c.key)" class="flex items-center justify-between gap-2 rounded bg-white/[0.04] px-2 py-1.5">
                 <span class="truncate text-[12px]" style="color: var(--var-accent-text)">{{ boundColumnFor(c.key) }}</span>
                 <button type="button" @click="goToCollection"
