@@ -121,4 +121,52 @@ describe('migrateDialTracks', () => {
       expect(applyMotionxTracks([l], out.motion.motionx, t)).toEqual(applyEffectDialTracks([l], [second], t))
     }
   })
+
+  // A dial the bloom fixture below really has (`intensity`), driven with non-hex string
+  // values so `evaluateDialTrack` STEPs — mixed/non-hex-string keyframes are unconvertible
+  // (`dialTrackToMotionx` returns null), matching `typeOf`'s "mixed types / non-hex strings
+  // STEP in the legacy evaluator" comment.
+  const unconv: EffectDialTrack = { target: P, keyframes: [{ t: 0, v: 'soft' }, { t: 1, v: 'hard' }] }
+  const bloomLayer = { id: 'L1', x: 0.5, y: 0.5, rotation: 0, scale: 1, opacity: 1, effects: [{ id: 'fx1', type: 'bloom', threshold: 0.5, radius: 0.1, intensity: 1 }] } as unknown as LocalLayer
+
+  it('keeps the literal last duplicate on a target even when it is unconvertible: drops the earlier convertible one, creates no band', () => {
+    const out = migrateDialTracks({ tracks: [num, unconv] })
+    expect(out.motion.tracks).toEqual([unconv])
+    expect((out.motion.motionx ?? []).some((tr) => tr.path === P)).toBe(false)
+    expect(out.converted).toBe(0)
+    expect(out.dropped).toBe(1)
+
+    for (const t of SAMPLES) {
+      expect(applyMotionxTracks(applyEffectDialTracks([bloomLayer], out.motion.tracks, t), out.motion.motionx, t))
+        .toEqual(applyEffectDialTracks([bloomLayer], [num, unconv], t))
+    }
+  })
+
+  it('converts the literal last duplicate on a target even when an earlier duplicate was unconvertible', () => {
+    const out = migrateDialTracks({ tracks: [unconv, num] })
+    expect('tracks' in out.motion).toBe(false)
+    expect(out.motion.motionx).toEqual([dialTrackToMotionx(num)])
+    expect(out.converted).toBe(1)
+    expect(out.dropped).toBe(1)
+
+    for (const t of SAMPLES) {
+      expect(applyMotionxTracks(applyEffectDialTracks([bloomLayer], out.motion.tracks, t), out.motion.motionx, t))
+        .toEqual(applyEffectDialTracks([bloomLayer], [unconv, num], t))
+    }
+  })
+
+  it('when both duplicates convert, the band is built from the literal last one (a keyframe value differs from the first)', () => {
+    const first = { target: P, keyframes: [{ t: 0, v: 0 }, { t: 1, v: 10 }] }
+    const second = { target: P, keyframes: [{ t: 0, v: 5 }, { t: 1, v: 15 }] }
+    const out = migrateDialTracks({ tracks: [first, second] })
+    expect(out.motion.motionx).toEqual([dialTrackToMotionx(second)])
+    expect((out.motion.motionx ?? []).filter((tr) => tr.path === P)).toHaveLength(1)
+    // second's t=0 keyframe value (5) differs from first's (0) — confirms it's built from second.
+    expect(out.motion.motionx![0]!.keyframes[0]!.value).toBe(5)
+
+    for (const t of SAMPLES) {
+      expect(applyMotionxTracks(applyEffectDialTracks([bloomLayer], out.motion.tracks, t), out.motion.motionx, t))
+        .toEqual(applyEffectDialTracks([bloomLayer], [first, second], t))
+    }
+  })
 })
