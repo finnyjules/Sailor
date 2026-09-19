@@ -16,6 +16,7 @@ import { applyCompositorCommand, describeCompositor, summarizeCompositorChange, 
 import { buildAgentPrompt, buildCommandSchema, buildReviewPrompt, buildReviewSchema, parseAgentResponse, parseReviewResponse } from '~/lib/agent/protocol'
 import type { LayoutIssue } from '~/lib/agent/verify'
 import { ensureLayerImages, paintLayerStack, type LocalLayer } from '~/composables/useCompositorLayers'
+import { mergeCompositorState } from '~/lib/agent/mergeCompositorState'
 
 const REROLLABLE = new Set(['setText', 'setTextStyle', 'setFill', 'setStroke', 'setBackground'])
 const clone = (s: CompositorState): CompositorState => JSON.parse(JSON.stringify(s)) as CompositorState
@@ -59,6 +60,15 @@ export function useCompositorAgent(opts: { getState: () => CompositorState; setS
   const reviewing = ref(false)
   const hovered = ref<number | null>(null)
   let original: CompositorState | null = null
+  // The agent's view of the doc as of its last push. Every push is a three-way merge against
+  // it, so edits the user makes while a proposal is open survive accept / reject / revert.
+  let lastPushed: CompositorState | null = null
+  function push(next: CompositorState): CompositorState {
+    const merged = mergeCompositorState(clone(opts.getState()), lastPushed ?? original ?? next, next)
+    opts.setState(merged)
+    lastPushed = clone(next)
+    return merged
+  }
   const hasProposal = computed(() => changes.value.length > 0)
 
   async function callModel(prompt: string) {
@@ -83,8 +93,7 @@ export function useCompositorAgent(opts: { getState: () => CompositorState; setS
       const r = applyCompositorCommand(s, ch.command)
       if (r.ok) s = r.template
     }
-    opts.setState(s)
-    issues.value = verifyCompositor(s)
+    issues.value = verifyCompositor(push(s))
   }
 
   function buildChange(probe: CompositorState, cmd: Command, rationale: string): ProposedChange | null {
@@ -204,6 +213,7 @@ export function useCompositorAgent(opts: { getState: () => CompositorState; setS
     busy.value = true; error.value = ''; notice.value = ''; reasoning.value = ''; issues.value = []; review.value = null; lastPhrase.value = p
     try {
       original = clone(opts.getState())
+      lastPushed = clone(original)
       const { commands, changeRationales, message } = await callModel(buildAgentPrompt(describeCompositor(original), p))
       const { resolved, genFailed } = await resolveMedia(commands, changeRationales)
       const built: ProposedChange[] = []
@@ -225,7 +235,7 @@ export function useCompositorAgent(opts: { getState: () => CompositorState; setS
       if (built.length) void runVisualReview(p) // fire-and-forget: proposal shows now, review catches up
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
-      if (original) opts.setState(original)
+      if (original) push(original)
     } finally {
       busy.value = false
     }
@@ -257,8 +267,8 @@ export function useCompositorAgent(opts: { getState: () => CompositorState; setS
     }
   }
 
-  function keep() { changes.value = []; original = null; notice.value = ''; issues.value = []; review.value = null }
-  function revert() { if (original) opts.setState(original); changes.value = []; original = null; notice.value = ''; issues.value = []; review.value = null }
+  function keep() { changes.value = []; original = null; lastPushed = null; notice.value = ''; issues.value = []; review.value = null }
+  function revert() { if (original) push(original); changes.value = []; original = null; lastPushed = null; notice.value = ''; issues.value = []; review.value = null }
 
   return { busy, error, notice, reasoning, changes, issues, review, reviewing, hasProposal, hovered, ask, acceptChange, rejectChange, reroll, keep, revert }
 }
