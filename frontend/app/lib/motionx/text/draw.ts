@@ -190,10 +190,17 @@ export function lineAtRest(cells: TextCell[], draws: CellDraw[], line: number): 
  * so the layer's own opacity, a group's cascade and a clone's alpha all still apply. The
  * save/restore pair around each glyph is what keeps that (and the clip) from leaking.
  *
- * A clip (mask slide) is applied in the PIECE's own turned frame and padded 15% of its height
- * top and bottom: the piece box is measured from the cells' `h`, which is the font size, and
- * a descender or a tall ascender reaches past it — without the pad a resting masked letter
- * would be shaved.
+ * A clip (mask slide) is applied in the PIECE's own turned frame and padded, by default, 15%
+ * of its height top and bottom (`clip.pad ?? 0.15`): the piece box is measured from the cells'
+ * `h`, which is the font size, and a descender or a tall ascender reaches past it — without the
+ * pad a resting masked letter would be shaved. A reel's window asks for `pad: 0` instead — its
+ * whole point is to hide the neighbours riding past it, so the window must not let them peek.
+ *
+ * `d.char` substitutes one character for the cell's own (Decode's flicker); `d.reel` substitutes
+ * a whole strip of them riding past the same window (Slot). Only one glyph is inked per cell
+ * without a reel; with one, every character close enough to `reel.pos` to still be inside its
+ * one-line-tall window is inked, each under its own extra `translate` — so the reel's window
+ * (a `clipToCell` clip, sized to the cell) is what actually crops it to one line.
  */
 export function drawTextCells(
   ctx: CanvasRenderingContext2D, cells: TextCell[], frame: TextFrame, paint: (ch: string) => void,
@@ -204,10 +211,13 @@ export function drawTextCells(
     // A NaN in a transform matrix silently blanks the whole canvas, so an unplaceable
     // glyph is dropped rather than drawn (same last line of defence as the path layout).
     if (!Number.isFinite(d.x) || !Number.isFinite(d.y) || !Number.isFinite(d.rotation) || !Number.isFinite(d.scale)) continue
+    // A non-finite `reel.pos` means there is nothing sensible to centre the window on, so the
+    // cell is skipped outright — no save/restore opened for it at all.
+    if (d.reel && !Number.isFinite(d.reel.pos)) continue
     ctx.save()
     const clip = d.clip
     if (clip) {
-      const padY = clip.h * 0.15
+      const padY = clip.h * (clip.pad ?? 0.15)
       ctx.translate(clip.x, clip.y)
       ctx.rotate(clip.angle)
       ctx.beginPath()
@@ -220,7 +230,22 @@ export function drawTextCells(
     ctx.translate(d.x, d.y)
     if (d.rotation) ctx.rotate(d.rotation)
     if (d.scale !== 1) ctx.scale(d.scale, d.scale)
-    paint(cells[i]!.char)
+    const reel = d.reel
+    if (reel) {
+      const h = cells[i]!.h
+      const lo = Math.floor(reel.pos) - 1
+      const hi = Math.ceil(reel.pos) + 1
+      for (let k = lo; k <= hi; k++) {
+        const ch = reel.chars[k]
+        if (k < 0 || k >= reel.chars.length || !ch) continue
+        ctx.save()
+        ctx.translate(0, (k - reel.pos) * h * reel.roll)
+        paint(ch)
+        ctx.restore()
+      }
+    } else {
+      paint(d.char ?? cells[i]!.char)
+    }
     ctx.restore()
   }
   const cursor = frame.cursor

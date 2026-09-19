@@ -331,6 +331,139 @@ describe('drawTextCells', () => {
   })
 })
 
+// ── 7c. substitute characters and reels (Task 2) ────────────────────────────
+
+describe('drawTextCells — substitute characters', () => {
+  it('a substitute char reaches paint instead of the cell\'s own character', () => {
+    const { ctx } = recorder()
+    const painted: string[] = []
+    drawTextCells(ctx, cellsOf('A'), {
+      atRest: false,
+      cells: [{ x: 5, y: 0, rotation: 0, scale: 1, opacity: 1, char: 'Z' }],
+    }, ch => painted.push(ch))
+    expect(painted).toEqual(['Z'])
+  })
+
+  it('pad: 0 produces a clip rect of exactly clip.h — no padding', () => {
+    const { ctx, rec } = recorder()
+    drawTextCells(ctx, cellsOf('A'), {
+      atRest: false,
+      cells: [{ x: 5, y: 0, rotation: 0, scale: 1, opacity: 1, clip: { x: 5, y: 0, w: 10, h: 100, angle: 0, pad: 0 } }],
+    }, () => {})
+    expect(rec.log).toContain('rect(-5,-50,10,100)')
+  })
+
+  it('an absent pad still defaults to the 15% pad', () => {
+    const { ctx, rec } = recorder()
+    drawTextCells(ctx, cellsOf('A'), {
+      atRest: false,
+      cells: [{ x: 5, y: 0, rotation: 0, scale: 1, opacity: 1, clip: { x: 5, y: 0, w: 10, h: 100, angle: 0 } }],
+    }, () => {})
+    expect(rec.log).toContain('rect(-5,-65,10,130)')
+  })
+})
+
+describe('drawTextCells — reels', () => {
+  const REEL_CHARS = ['a', 'b', 'c', 'd', 'e', 'f']
+  const oneCell = () => cellsOf('A')   // h = FONT_PX = 100
+
+  it('inks exactly the chars.length-bounded indices from floor(pos)-1 to ceil(pos)+1, offset (k-pos)*h*roll', () => {
+    const { ctx, rec } = recorder()
+    const painted: string[] = []
+    drawTextCells(ctx, oneCell(), {
+      atRest: false,
+      cells: [{ x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, reel: { chars: REEL_CHARS, pos: 2.5, roll: 1 } }],
+    }, ch => painted.push(ch))
+    expect(painted).toEqual(['b', 'c', 'd', 'e'])   // indices 1..4
+    const translates = calls(rec.log, 'translate')
+    expect(translates[0]).toBe('translate(0,0)')    // the outer cell transform
+    expect(translates.slice(1)).toEqual([
+      'translate(0,-150)', 'translate(0,-50)', 'translate(0,50)', 'translate(0,150)',
+    ])
+  })
+
+  it('flips the sign of the offset when roll is -1', () => {
+    const { ctx, rec } = recorder()
+    const painted: string[] = []
+    drawTextCells(ctx, oneCell(), {
+      atRest: false,
+      cells: [{ x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, reel: { chars: REEL_CHARS, pos: 2.5, roll: -1 } }],
+    }, ch => painted.push(ch))
+    expect(painted).toEqual(['b', 'c', 'd', 'e'])
+    expect(calls(rec.log, 'translate').slice(1)).toEqual([
+      'translate(0,150)', 'translate(0,50)', 'translate(0,-50)', 'translate(0,-150)',
+    ])
+  })
+
+  it('an empty-string entry inks nothing for that index', () => {
+    const chars = ['a', 'b', '', 'd', 'e', 'f']
+    const { ctx } = recorder()
+    const painted: string[] = []
+    drawTextCells(ctx, oneCell(), {
+      atRest: false,
+      cells: [{ x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, reel: { chars, pos: 2.5, roll: 1 } }],
+    }, ch => painted.push(ch))
+    expect(painted).toEqual(['b', 'd', 'e'])
+  })
+
+  it('an index outside the chars list inks nothing, never undefined', () => {
+    const { ctx } = recorder()
+    const painted: string[] = []
+    drawTextCells(ctx, oneCell(), {
+      atRest: false,
+      cells: [{ x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, reel: { chars: ['a', 'b', 'c'], pos: 0.5, roll: 1 } }],
+    }, ch => painted.push(ch))
+    // floor(0.5)-1 = -1 (out of range, skipped), ceil(0.5)+1 = 2 → indices -1,0,1,2
+    expect(painted).toEqual(['a', 'b', 'c'])
+    expect(painted.every(c => typeof c === 'string')).toBe(true)
+  })
+
+  it('a spring overshoot past the last character inks nothing', () => {
+    const { ctx } = recorder()
+    const painted: string[] = []
+    drawTextCells(ctx, oneCell(), {
+      atRest: false,
+      cells: [{ x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, reel: { chars: REEL_CHARS, pos: 10, roll: 1 } }],
+    }, ch => painted.push(ch))
+    expect(painted).toEqual([])
+  })
+
+  it('a spring undershoot before the first character inks nothing', () => {
+    const { ctx } = recorder()
+    const painted: string[] = []
+    drawTextCells(ctx, oneCell(), {
+      atRest: false,
+      cells: [{ x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, reel: { chars: REEL_CHARS, pos: -10, roll: 1 } }],
+    }, ch => painted.push(ch))
+    expect(painted).toEqual([])
+  })
+
+  it('a non-finite pos skips the cell entirely — no ink, no save/restore for it', () => {
+    const { ctx, rec } = recorder()
+    const painted: string[] = []
+    drawTextCells(ctx, oneCell(), {
+      atRest: false,
+      cells: [{ x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, reel: { chars: REEL_CHARS, pos: NaN, roll: 1 } }],
+    }, ch => painted.push(ch))
+    expect(painted).toEqual([])
+    expect(calls(rec.log, 'save')).toHaveLength(0)
+    expect(calls(rec.log, 'restore')).toHaveLength(0)
+  })
+
+  it('keeps save/restore balanced across a multi-cell reel draw', () => {
+    const { ctx, rec } = recorder()
+    drawTextCells(ctx, cellsOf('AB'), {
+      atRest: false,
+      cells: [
+        { x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, reel: { chars: REEL_CHARS, pos: 2.5, roll: 1 } },
+        { x: 10, y: 0, rotation: 0, scale: 1, opacity: 1, reel: { chars: REEL_CHARS, pos: 1, roll: -1 } },
+      ],
+    }, () => {})
+    expect(calls(rec.log, 'save').length).toBe(calls(rec.log, 'restore').length)
+    expect(calls(rec.log, 'save').length).toBeGreaterThan(0)
+  })
+})
+
 describe('movingTextFrame', () => {
   it('returns null at rest so the caller keeps the static path', () => {
     expect(movingTextFrame(cellsOf('AB'), [fade()], 5, { w: W, h: W })).toBeNull()
