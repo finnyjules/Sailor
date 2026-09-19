@@ -75,6 +75,14 @@ Today's per-letter drawing (`drawAnimatedTextLayer`) bypasses layer effects and 
 - `MotionInspector.vue`: a Text section + per-kind params; hides Open for `text.*`.
 - `CompositorModal.vue`: `addBehaviour` skips track compilation for `text.*`; nothing else changes (undo, delete, Space, agent merge all already operate on `behaviours`).
 
+## Phase 2 (approved 2026-09-19) — loops, Decode, Slot slide
+
+- **Wave · Bounce · Jitter** — loops that run for the bar's length with a soft ramp in and out. Controls: Amount, Speed, Offset between pieces (wave/bounce), animate by letters / words / lines, Order, Shuffle (jitter).
+- **Decode** — letters flicker through random characters, then lock (Resolve) or the reverse (Dissolve). Characters: Same as the text · Letters · Numbers · Symbols · Mixed; Flicker rate; Stagger + Order decide which lock first. Substitute glyphs are centred in the real letter's slot.
+- **Slot slide** — each letter is a window with a reel rolling through it that lands on the real glyph. Direction In · Out; Rolls up · Rolls down; **Steps** = how many characters roll past before it lands (Julien's ask); Filler set; easing (ease-out = deceleration, spring = overshoot and tick back).
+- The **Easing** section shows only where easing does something: Cascade, Mask slide, Slot slide, Scramble in Glide mode. Hidden on Typewriter, Decode, loops, Scramble in Snap mode.
+- Plan: `docs/superpowers/plans/2026-09-19-letter-behaviours-phase2.md`.
+
 ## Out of scope for phase 1
 
 Loops, Decode, Slot slide (phase 2) · type-property moves (phase 3) · expressive per-word layouts · letter behaviours on non-text layers · converting old `layer.animation` text presets into letter behaviours (possible later: the leftovers already show as "Older animation").
