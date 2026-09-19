@@ -68,13 +68,19 @@ export function removePoint(track: Track, index: number): Track {
   return { ...track, keyframes: track.keyframes.filter((_, i) => i !== index).map(clone) }
 }
 
-/** Replace (next Track) / remove (next null) / append (path absent, next given) the track at
- *  `path` within `tracks`. */
+/** Replace (next Track) / remove (next null) / append (path absent, next given) the UNTAGGED
+ *  property band at `path` within `tracks`. Never matches a behaviour's tagged track sharing
+ *  that path — those are owned by setBehaviourTracks and must be left alone. */
 export function setBandTrack(tracks: Track[], path: string, next: Track | null): Track[] {
-  const idx = tracks.findIndex((t) => t.path === path)
+  const idx = tracks.findIndex((t) => t.path === path && !t.behaviourId)
   if (idx === -1) return next ? [...tracks, next] : [...tracks]
   if (next === null) return tracks.filter((_, i) => i !== idx)
   return tracks.map((t, i) => (i === idx ? next : t))
+}
+
+/** The untagged property band at `path`, ignoring any behaviour-tagged track sharing it. */
+export function bandTrackAt(tracks: Track[], path: string): Track | undefined {
+  return tracks.find((t) => t.path === path && !t.behaviourId)
 }
 
 /** Seed a property band as a FLAT HOLD: two keyframes at [0, duration], both the property's

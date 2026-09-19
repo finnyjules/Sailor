@@ -9,7 +9,7 @@ import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Track, StoredBehaviour } from '~/lib/motionx'
 import { bandsForLayer, behaviourBandsForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
 import { animatableProperties } from '~/lib/motionx/adapter/frame'
-import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt } from '~/lib/motionx/bandEdit'
+import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt, bandTrackAt } from '~/lib/motionx/bandEdit'
 import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, ghostCycles, type View } from '~/lib/motionx/timelineView'
 
 export interface MotionSelection { kind: 'band' | 'point' | 'behaviour'; path: string; index?: number }
@@ -146,7 +146,7 @@ function rowsFor(l: LocalLayer): PropertyRow[] {
 }
 const isBehSel = (b: Band) => props.selection?.kind === 'behaviour' && props.selection.path === b.behaviourId
 
-const trackByPath = (path: string) => props.motionx.find((t) => t.path === path)
+const trackByPath = (path: string) => bandTrackAt(props.motionx, path)
 const pointX = (b: Band, t: number) => {
   const s = b.end - b.start
   return s < 1e-9 ? 0 : (t - b.start) / s

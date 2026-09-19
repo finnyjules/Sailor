@@ -102,6 +102,38 @@ describe('setBandTrack', () => {
   })
 })
 
+describe('setBandTrack never touches a behaviour\'s tagged track on the same path', () => {
+  const kf = (t: number, value: number) => ({ t, value, ease: 'linear' as const })
+  const tagged = { path: 'layers.a.opacity', type: 'number' as const, keyframes: [kf(0, 0), kf(1, 1)], behaviourId: 'b1' }
+  const band = { path: 'layers.a.opacity', type: 'number' as const, keyframes: [kf(0, 1), kf(4, 1)] }
+  it('adding a band next to a tagged track appends it and leaves the tagged one alone', async () => {
+    const { setBandTrack } = await import('~/lib/motionx/bandEdit')
+    expect(setBandTrack([tagged], band.path, band)).toEqual([tagged, band])
+  })
+  it('replacing and removing only ever hit the untagged band', async () => {
+    const { setBandTrack } = await import('~/lib/motionx/bandEdit')
+    const edited = { ...band, keyframes: [kf(0, 0.5), kf(4, 1)] }
+    expect(setBandTrack([tagged, band], band.path, edited)).toEqual([tagged, edited])
+    expect(setBandTrack([band, tagged], band.path, null)).toEqual([tagged])
+    expect(setBandTrack([tagged], band.path, null)).toEqual([tagged])   // no band → nothing removed
+  })
+})
+
+describe('bandTrackAt', () => {
+  const kf = (t: number, value: number) => ({ t, value, ease: 'linear' as const })
+  const tagged = { path: 'layers.a.opacity', type: 'number' as const, keyframes: [kf(0, 0), kf(1, 1)], behaviourId: 'b1' }
+  const band = { path: 'layers.a.opacity', type: 'number' as const, keyframes: [kf(0, 1), kf(4, 1)] }
+  it('returns undefined when only a tagged track exists on that path', async () => {
+    const { bandTrackAt } = await import('~/lib/motionx/bandEdit')
+    expect(bandTrackAt([tagged], band.path)).toBeUndefined()
+  })
+  it('returns the untagged band regardless of array order', async () => {
+    const { bandTrackAt } = await import('~/lib/motionx/bandEdit')
+    expect(bandTrackAt([tagged, band], band.path)).toBe(band)
+    expect(bandTrackAt([band, tagged], band.path)).toBe(band)
+  })
+})
+
 describe('seedHoldTrack', () => {
   it('seeds a flat hold band: two keyframes at [0, duration] both = the current value', async () => {
     const { seedHoldTrack } = await import('~/lib/motionx/bandEdit')

@@ -7,7 +7,7 @@ import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/
 
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
-import { retimeTrack, addPoint, setPointValue, setPointEase, removePoint, setBandTrack } from '~/lib/motionx/bandEdit'
+import { retimeTrack, addPoint, setPointValue, setPointEase, removePoint, setBandTrack, bandTrackAt } from '~/lib/motionx/bandEdit'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import MotionEasingCurve from '~/components/vue-canvas/compositor/MotionEasingCurve.vue'
 import type { Gradient } from '~/lib/compositor/paint'
@@ -61,7 +61,7 @@ const SLIDE_DIRS: Array<{ v: string; l: string }> = [
 ]
 
 const track = computed<Track | null>(() =>
-  props.selection ? (props.motionx.find((t) => t.path === props.selection!.path) ?? null) : null)
+  props.selection ? (bandTrackAt(props.motionx, props.selection!.path) ?? null) : null)
 const span = computed(() => (track.value ? trackSpan(track.value) : { start: 0, end: 0 }))
 const point = computed(() => {
   const i = props.selection?.index
