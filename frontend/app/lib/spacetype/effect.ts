@@ -170,6 +170,10 @@ export interface BuildEnv {
   /** The loop's real duration in seconds. Effects that bake a time-based simulation (Pile)
    *  need it to play the sim at real wall-clock speed rather than stretched to fill the loop. */
   loopDuration?: number
+  /** The RESOLVED CSS font family (already mapped from the font token — Google name or a
+   *  `local:` library family — and loaded). Effects that draw their own text to a canvas (Pile)
+   *  need this, not the raw `params.font` token, or the canvas falls back to a default. */
+  fontFamily?: string
 }
 
 export interface SpaceTypeEffect {

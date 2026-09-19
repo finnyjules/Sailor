@@ -59,7 +59,9 @@ export const pileEffect: SpaceTypeEffect = {
     const fills = parseFills(params.fills)
     const boxStyle = String(params.boxStyle ?? 'filled')
     const padding = Number(params.padding ?? 0.14)
-    const font = { family: String(params.font ?? 'Anton'), weight: Number(params.typeWeight ?? 700) || 700 }
+    // Use the RESOLVED CSS family from the engine (handles Google + `local:` library fonts);
+    // params.font is a token, not a family, so drawing with it would fall back to a default.
+    const font = { family: env?.fontFamily || String(params.font ?? 'Anton'), weight: Number(params.typeWeight ?? 700) || 700 }
 
     const meshes: THREE.Object3D[] = specs.map((s) => {
       const fill = fills[s.fillIndex % Math.max(1, fills.length)]!
