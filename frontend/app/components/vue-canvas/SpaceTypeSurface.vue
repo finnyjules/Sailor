@@ -99,7 +99,7 @@ const stateSource = computed<SpaceTypeStateSource>(() =>
     ? clipSpaceTypeStateSource(props.clipId)
     : nodeSpaceTypeStateSource(currentNode))
 
-const fps = ref(60)
+const fps = ref(30)
 const FPS_OPTIONS = ['24', '30', '60']
 const seamlessLoop = ref(false)
 // True loop length shown beside the Seamless-loop toggle: loopDuration × k when
@@ -116,9 +116,9 @@ const DIMS: Record<string, [number, number]> = {
   '960 × 540 (16:9)': [960, 540],
 }
 const CUSTOM = 'Custom'
-const dimsKey = ref('1920 × 1080 (16:9)')
-const W = ref(1920)
-const H = ref(1080)
+const dimsKey = ref('960 × 540 (16:9)')
+const W = ref(960)
+const H = ref(540)
 // Editing W/H directly switches to Custom; clamp to an encodable range (even, 16–4096).
 function onCustomDims() {
   const clamp = (v: number) => Math.max(16, Math.min(4096, Math.round((Number(v) || 16) / 2) * 2))
@@ -483,17 +483,6 @@ let lastPreviewFrame = -1
 const baking = ref(false)
 const renderError = ref<string | null>(null)
 const webglOk = ref(true)
-// Preview transport (all effects): play/pause + scrub. `playing` gates the rAF loop;
-// `scrubFrame` is the current/target frame; `previewOffsetFrames` lets a resumed play
-// continue from the scrubbed frame instead of restarting at 0.
-const playing = ref(true)
-const scrubFrame = ref(0)
-let previewOffsetFrames = 0
-const previewTotalFrames = computed(() => {
-  const base = Math.max(1, Math.round(fps.value * loopDuration.value))
-  const k = loopMultiplier(effect.value.loopRates?.(params) ?? [])
-  return Math.max(1, base * k)
-})
 // ── web embed export ────────────────────────────────────────────────────────
 const embedding = ref(false)
 const embedMsg = ref('')
@@ -898,14 +887,10 @@ function startPreview() {
   // per repaint — otherwise playback runs at the display refresh rate (~2x on
   // 60Hz, ~4x on 120Hz) and faster than the baked export. The rAF timestamp
   // keeps it frame-rate independent and matched to what export produces.
-  // Paused: don't run the rAF loop; just hold the current frame (edits still repaint it
-  // via rebuild()/the immediate-render watchers). Every startPreview() caller respects pause.
-  if (!playing.value) { engine?.renderFrameAt(previewT01, effectiveRenderParams()); return }
   previewStart = 0
   lastPreviewFrame = -1
   const tick = (ts: number) => {
-    // Resume from the scrubbed frame rather than restarting at 0.
-    if (!previewStart) previewStart = ts - previewOffsetFrames * (1000 / Math.max(1, fps.value))
+    if (!previewStart) previewStart = ts
     // Extend the loop to k loops so fractional spin/wave rates seam at the wrap (same logic the
     // seamless export uses). Unwrapped t01 = frame / base runs 0..k; renderFrameAt keeps motions
     // at their per-loop rate across loops instead of re-wrapping each loop (which caused the jump).
@@ -921,7 +906,6 @@ function startPreview() {
     if (frame !== lastPreviewFrame) {
       lastPreviewFrame = frame
       previewT01 = frame / base
-      scrubFrame.value = frame % previewTotalFrames.value // keep the scrubber in step with playback
       engine?.renderFrameAt(previewT01, effectiveRenderParams())
       renderError.value = engine?.lastError ?? null
       frozenFieldCount.value = engine?.frozenFieldCount ?? 0
@@ -929,24 +913,6 @@ function startPreview() {
     raf = requestAnimationFrame(tick)
   }
   raf = requestAnimationFrame(tick)
-}
-
-/** Play/pause the preview. Resuming continues from the scrubbed frame. */
-function togglePlay() {
-  if (playing.value) { playing.value = false; stopPreview() }
-  else { playing.value = true; previewOffsetFrames = scrubFrame.value; startPreview() }
-}
-
-/** Scrub to a frame (pauses if playing) and render exactly that moment. */
-function onScrub(v: number) {
-  if (playing.value) { playing.value = false; stopPreview() }
-  const total = previewTotalFrames.value
-  const frame = Math.min(total - 1, Math.max(0, Math.round(v || 0)))
-  scrubFrame.value = frame
-  previewOffsetFrames = frame
-  lastPreviewFrame = frame
-  previewT01 = frame / Math.max(1, Math.round(fps.value * loopDuration.value))
-  engine?.renderFrameAt(previewT01, effectiveRenderParams())
 }
 
 function stopPreview() {
@@ -1855,24 +1821,10 @@ async function exportWebEmbed() {
 </script>
 
 <template>
-  <StudioModalShell title="Kinetic Studio" :breadcrumb="effect.label" :elevated="clipMode" @close="closeEditor">
+  <StudioModalShell title="Expressive Studio" :breadcrumb="effect.label" :elevated="clipMode" @close="closeEditor">
     <template #preview>
       <div class="relative flex h-full w-full items-center justify-center">
         <canvas ref="canvas" class="max-h-full max-w-full rounded-lg" style="background:#0e0e10" />
-        <!-- Preview transport: play/pause + scrub (every effect). -->
-        <div v-if="webglOk" class="pointer-events-auto absolute inset-x-0 bottom-2 mx-auto flex w-[min(92%,520px)] items-center gap-2 rounded-full border border-white/10 bg-black/60 px-3 py-1.5 backdrop-blur">
-          <button type="button" :aria-label="playing ? 'Pause' : 'Play'"
-                  class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/10"
-                  @click="togglePlay">
-            <svg v-if="playing" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
-            <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>
-          </button>
-          <input type="range" min="0" :max="Math.max(1, previewTotalFrames - 1)" step="1" :value="scrubFrame"
-                 aria-label="Scrub preview"
-                 class="h-1 flex-1 cursor-pointer accent-white"
-                 @input="onScrub(($event.target as HTMLInputElement).valueAsNumber)" />
-          <span class="shrink-0 text-[10px] tabular-nums text-white/45">{{ scrubFrame + 1 }}/{{ previewTotalFrames }}</span>
-        </div>
         <div v-if="renderError"
              class="pointer-events-none absolute inset-x-3 bottom-3 rounded-md border border-amber-400/30 bg-black/70 px-3 py-2 text-[11px] text-amber-200/90">
           Effect failed to render — adjust a parameter to recover.
@@ -2012,14 +1964,6 @@ async function exportWebEmbed() {
                    returns null for 'shape'). -->
               <StudioRow
                 v-else-if="c.kind === 'shape'"
-                :spec="c"
-                :model-value="String(params[c.key] ?? c.default)"
-                :bindable="false"
-                @update:model-value="(v) => { params[c.key] = String(v); rebuild(); onEdit(c.key, String(v)) }"
-              />
-              <!-- Shape SET (multi-select library picker): same StudioRow path, value side is RowShapeList. -->
-              <StudioRow
-                v-else-if="c.kind === 'shapeList'"
                 :spec="c"
                 :model-value="String(params[c.key] ?? c.default)"
                 :bindable="false"

@@ -9,7 +9,7 @@ import { fillShaderTexture, fillIsTextured, fillTiling, fillPrimary, normalizeFi
 import { fillIsShader } from '../fillTile'
 
 /**
- * RING — the Kinetic Studio keystone effect: photos and words ride one
+ * RING — the Expressive Studio keystone effect: photos and words ride one
  * arrangement, spinning on a circle. Each `ContentItem` (word or image) expands
  * to one or more tiles (`tile.ts`); each tile becomes one quad on the ring
  * (`ringLayout.ts`'s pure placement math). Words are rasterised once per
