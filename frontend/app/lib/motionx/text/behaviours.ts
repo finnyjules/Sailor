@@ -1,9 +1,11 @@
-// Registers the four letter behaviour kinds. One small definition per kind — the shared timing
+// Registers the letter behaviour kinds. One small definition per kind — the shared timing
 // (stagger, order, seed, easing, entrance/exit clamping) lives in evaluate.ts; this file only
-// says what EACH kind does to one piece at progress `e`, and (typewriter) where the cursor sits.
+// says what EACH kind does to one piece at progress `e`, what it does to one GLYPH (a
+// substitute character, a reel), and (typewriter) where the cursor sits.
 import { applyEase, type Ease } from '~/lib/motionx'
 import { hash01 } from './rng'
-import { REST, HIDDEN, registerTextBehaviour, oneOf, type CursorDraw } from './evaluate'
+import { REST, HIDDEN, registerTextBehaviour, oneOf, type CursorDraw, type PieceCtx } from './evaluate'
+import { framePool, pickFrom, TEXT_CHARSETS } from './charsets'
 import type { Piece } from './units'
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
@@ -17,6 +19,9 @@ const TYPE_DIRS = ['type', 'delete'] as const
 const CURSOR_STYLES = ['bar', 'underscore', 'none'] as const
 const SCRAMBLE_MODES = ['settle', 'scatter', 'loop'] as const
 const SCRAMBLE_MOVES = ['snap', 'glide'] as const
+const DECODE_DIRS = ['resolve', 'dissolve'] as const
+const SLOT_DIRS = ['in', 'out'] as const
+const SLOT_ROLLS = ['up', 'down'] as const
 
 // ---------------------------------------------------------------------------
 // Cascade — fade / rise / drop / grow / spin, in or out.
@@ -84,6 +89,8 @@ registerTextBehaviour('text.typewriter', {
   // Only called while 0 < p < 1 (already past HIDDEN/REST at the edges): typing shows the
   // letter in full the instant its turn starts; deleting hides it the instant its turn starts.
   piece: (c) => (oneOf(c.params.dir, TYPE_DIRS, 'type') === 'delete' ? HIDDEN : REST),
+  usesEase: () => false,        // a hard cut has no curve to run under
+
   cursor: ({ pieces, visible, params }) => {
     const style = oneOf(params.cursor, CURSOR_STYLES, 'bar')
     if (style === 'none') return undefined
@@ -127,6 +134,8 @@ registerTextBehaviour('text.scramble', {
     const mode = oneOf(params.mode, SCRAMBLE_MODES, 'settle')
     return mode === 'scatter' ? 'out' : mode === 'loop' ? 'span' : 'in'
   },
+  // A snap CUTS between hashed spots — only a glide interpolates, and only it reads the curve.
+  usesEase: (params) => oneOf(params.move, SCRAMBLE_MOVES, 'snap') === 'glide',
   piece: (c) => {
     const mode = oneOf(c.params.mode, SCRAMBLE_MODES, 'settle')
     const areaW = num(c.params.areaW, 0.6)
@@ -170,5 +179,123 @@ registerTextBehaviour('text.scramble', {
     }
 
     return { dx: sx - c.piece.cx, dy: sy - c.piece.cy, frame: 'layer', rotation, scale: 1, opacity: 1 }
+  },
+})
+
+// ---------------------------------------------------------------------------
+// The loops — wave / bounce / jitter. Span bars: they run for as long as the bar is long and
+// leave the text exactly where they found it.
+// ---------------------------------------------------------------------------
+const smoothstep = (x: number) => { const c = clamp01(x); return c * c * (3 - 2 * c) }
+
+/** 0 at both edges of the bar, 1 across the middle.
+ *
+ *  A loop that simply started would POP: at the bar's first frame the letters would already be
+ *  a quarter of a letter-height off their place. The ramp is a quarter of the bar at each end,
+ *  capped at 0.3s so a long loop does not spend ten seconds fading in. */
+function loopEnvelope(barElapsed: number, barDur: number): number {
+  const r = Math.min(0.3, barDur * 0.25)
+  if (!(r > 0)) return 0
+  return smoothstep(barElapsed / r) * smoothstep((barDur - barElapsed) / r)
+}
+
+/** Where this piece is in the cycle. One shared clock from the BAR's start (a loop has no
+ *  stagger to ride — every piece is live the whole time), lagged by the piece's RANK so the
+ *  wave travels along the word in the chosen order. */
+const loopPhase = (c: PieceCtx, speed: number, offset: number) => c.barElapsed * speed - c.rank * offset
+
+registerTextBehaviour('text.wave', {
+  phase: () => 'span',
+  usesEase: () => false,        // rides its own sine, not the curve
+  piece: (c) => {
+    const amount = num(c.params.amount, 0.25)
+    const env = loopEnvelope(c.barElapsed, c.barDur)
+    const phi = loopPhase(c, num(c.params.speed, 1), num(c.params.offset, 0.12))
+    return { dx: 0, dy: -env * amount * c.piece.h * Math.sin(2 * Math.PI * phi), frame: 'piece', rotation: 0, scale: 1, opacity: 1 }
+  },
+})
+
+registerTextBehaviour('text.bounce', {
+  phase: () => 'span',
+  usesEase: () => false,
+  piece: (c) => {
+    const amount = num(c.params.amount, 0.35)
+    const env = loopEnvelope(c.barElapsed, c.barDur)
+    const phi = loopPhase(c, num(c.params.speed, 1.4), num(c.params.offset, 0.12))
+    // The ABSOLUTE half-sine: every hop goes up and comes back down to the baseline, and the
+    // letter never sinks below the line it is written on.
+    return { dx: 0, dy: -env * amount * c.piece.h * Math.abs(Math.sin(Math.PI * phi)), frame: 'piece', rotation: 0, scale: 1, opacity: 1 }
+  },
+})
+
+/** A jitter's turn, at full envelope: ±6°. */
+const JITTER_SPIN = (6 * Math.PI) / 180
+
+registerTextBehaviour('text.jitter', {
+  phase: () => 'span',
+  usesEase: () => false,
+  piece: (c) => {
+    const amount = num(c.params.amount, 0.08)
+    const speed = num(c.params.speed, 12)          // TICKS per second here, not cycles
+    const env = loopEnvelope(c.barElapsed, c.barDur)
+    // A shake is a CUT to a new hashed offset, held for a whole tick — interpolating between
+    // them would read as a wobble, not a shake. Every piece ticks on the same clock, so
+    // `offset` has nothing to lag.
+    const k = Math.floor(c.barElapsed * speed)
+    const reach = env * amount * c.piece.h
+    return {
+      dx: reach * (hash01(c.seed, c.piece.index, k, 1) - 0.5) * 2,
+      dy: reach * (hash01(c.seed, c.piece.index, k, 2) - 0.5) * 2,
+      frame: 'piece',
+      rotation: env * (hash01(c.seed, c.piece.index, k, 3) - 0.5) * 2 * JITTER_SPIN,
+      scale: 1,
+      opacity: 1,
+    }
+  },
+})
+
+// ---------------------------------------------------------------------------
+// Decode — every letter churns through random characters and locks onto the real one.
+// ---------------------------------------------------------------------------
+registerTextBehaviour('text.decode', {
+  phase: (params) => (oneOf(params.dir, DECODE_DIRS, 'resolve') === 'dissolve' ? 'out' : 'in'),
+  // The churn is the point: the whole word is already flickering on the bar's first frame, and
+  // the stagger says only when each letter LOCKS (or, dissolving, when it starts to go).
+  wholeBar: true,
+  usesEase: () => false,        // a flicker ticks on a hashed clock; there is nothing to curve
+  piece: () => REST,            // the letters do not move — only what they SAY changes
+  cell: (c) => {
+    const set = oneOf(c.params.charset, TEXT_CHARSETS, 'text')
+    const rate = Math.max(1, num(c.params.rate, 14))
+    const pool = framePool(c.store, set, c.cell.char, c.cells)
+    // One shared clock for the whole layer, so the churn reads as one machine working, not as
+    // each letter running its own timer.
+    const tick = Math.floor(Math.max(0, c.barElapsed) * rate)
+    return { char: pickFrom(pool, hash01(c.seed, c.cellIndex, tick)) }
+  },
+})
+
+// ---------------------------------------------------------------------------
+// Slot slide — each letter is a reel of characters that rolls to a stop on the real one.
+// ---------------------------------------------------------------------------
+registerTextBehaviour('text.slot', {
+  phase: (params) => (oneOf(params.dir, SLOT_DIRS, 'in') === 'out' ? 'out' : 'in'),
+  springTail: true,             // a spring rolls past the landing and comes back — the point
+  piece: () => REST,            // the letter holds its place; the REEL does the travelling
+  cell: (c) => {
+    const dir = oneOf(c.params.dir, SLOT_DIRS, 'in')
+    const roll: 1 | -1 = oneOf(c.params.roll, SLOT_ROLLS, 'up') === 'down' ? -1 : 1
+    // How many characters roll past before it lands.
+    const steps = Math.min(40, Math.max(1, Math.round(num(c.params.steps, 8))))
+    const pool = framePool(c.store, oneOf(c.params.filler, TEXT_CHARSETS, 'letters'), c.cell.char, c.cells)
+    const real = c.cell.char
+    const out = dir === 'out'
+    // Built only for a cell that is actually rolling — a landed (or unstarted) one never gets
+    // here, so a resting layer allocates nothing.
+    const chars: string[] = out ? [real] : []
+    for (let j = 1; j <= steps; j++) chars.push(pickFrom(pool, hash01(c.seed, c.cellIndex, j)))
+    chars.push(out ? '' : real)
+    // Leaving, the reel rolls one step FURTHER than it has fillers, onto the empty landing.
+    return { reel: { chars, pos: c.e * (out ? steps + 1 : steps), roll }, clipToCell: true, clipPad: 0 }
   },
 })

@@ -5,7 +5,24 @@ import { isSpringEase, springSettle } from '~/lib/motionx/ease'
 import { groupCells, type Piece, type PieceBy, type TextCell } from './units'
 import { pieceRanks, pieceTiming, type Order } from './order'
 
-export interface CellDraw { x: number; y: number; rotation: number; scale: number; opacity: number; clip?: { x: number; y: number; w: number; h: number; angle: number } }
+/** A clip WINDOW in layer coordinates. `pad` is the share of `h` the painter adds above and
+ *  below before clipping: a box measured from the font size shaves a descender or a tall
+ *  ascender without it. Absent means the painter's own default (0.15); a reel, whose window is
+ *  the cell's box and whose whole point is that the neighbouring characters stay hidden, asks
+ *  for 0. */
+export interface ClipBox { x: number; y: number; w: number; h: number; angle: number; pad?: number }
+/** A strip of characters and where it is stopped. `pos` is an index INTO `chars` — fractional
+ *  between two of them, and possibly past the last one when a spring overshoots, in which case
+ *  the entries beyond the list are simply not drawn. `roll: 1` rolls UP (the next character
+ *  arrives from below), `-1` rolls down. */
+export interface ReelDraw { chars: string[]; pos: number; roll: 1 | -1 }
+export interface CellDraw {
+  x: number; y: number; rotation: number; scale: number; opacity: number; clip?: ClipBox
+  /** A SUBSTITUTE character to ink instead of the cell's own (Decode's flicker). */
+  char?: string
+  /** A reel to ink instead of a single character (Slot). */
+  reel?: ReelDraw
+}
 export interface CursorDraw { x: number; y: number; h: number; angle: number; style: 'bar' | 'underscore' }
 export interface TextFrame { atRest: boolean; cells: CellDraw[]; cursor?: CursorDraw }
 export interface FrameBox { w: number; h: number }
@@ -24,14 +41,43 @@ export const HIDDEN: PieceState = Object.freeze({ ...REST, opacity: 0 }) as Piec
  *  - `delay` this piece's stagger delay in seconds (bar-relative).
  *  - `barElapsed` seconds since the BAR's start (`t - start`, ignoring stagger) — what
  *    scramble's settle/loop modes use, since all pieces jump on one shared clock.
- *  - `barDur` the bar's total duration (`D`, i.e. `max(0.05, timing.duration)`). */
+ *  - `barDur` the bar's total duration (`D`, i.e. `max(0.05, timing.duration)`).
+ *  - `rank`/`maxRank` this piece's place in the chosen order (0 = first) and the last rank —
+ *    what a LOOP lags by, since a loop has no stagger to ride (every piece is live for the
+ *    whole bar) and takes its offset from the rank instead. */
 export interface PieceCtx {
   piece: Piece; pieces: Piece[]; p: number; e: number; elapsed: number; pieceDur: number; t: number
   seed: number; frame: FrameBox; params: Record<string, unknown>; delay: number; barElapsed: number; barDur: number
+  rank: number; maxRank: number
 }
+/** Context for a `cell` callback: one PIECE's state plus which GLYPH of it is being asked
+ *  about. `store` is a scratch bag shared by every cell of this behaviour in this frame — the
+ *  place to build per-frame data (a charset pool) once instead of once per glyph. */
+export interface CellCtx extends PieceCtx {
+  cellIndex: number; cell: TextCell; cells: TextCell[]; store: Record<string, unknown>
+}
+/** What one behaviour does to one CELL. `clipToCell` asks for the cell's own resting box as
+ *  the clip window (carried through whatever the bars before it did, exactly as a mask
+ *  slide's is); `clipPad` overrides the painter's default padding for it. */
+export interface CellResult { char?: string; reel?: ReelDraw; clipToCell?: boolean; clipPad?: number }
 export interface TextBehaviourDef {
   phase: (params: Record<string, unknown>) => 'in' | 'out' | 'span'
   piece: (c: PieceCtx) => PieceState
+  /** Per-GLYPH output — a substitute character, a reel, a window. Called only for a piece
+   *  whose `piece` callback ran this frame (never at REST or HIDDEN), once per glyph of it. */
+  cell?: (c: CellCtx) => CellResult | undefined
+  /** Whether this kind's `ease` param does anything, so the inspector can hide a dead control.
+   *  Absent means yes. */
+  usesEase?: (params: Record<string, unknown>) => boolean
+  /** Pieces are ACTIVE from the BAR's start rather than from their own staggered delay.
+   *
+   *  An entrance normally hides a piece until its own turn comes. A kind whose whole point is
+   *  that the text CHURNS while it resolves (Decode) wants the opposite: every letter is
+   *  already flickering on the bar's first frame, and the stagger says only when each one
+   *  LOCKS. So with this flag the `piece`/`cell` callbacks run from `barElapsed >= 0` until
+   *  the piece's own `p >= 1` (before the bar: HIDDEN; at/after its own end: REST), and an
+   *  exit mirrors it — from the piece's own start until the BAR's end, HIDDEN after. */
+  wholeBar?: boolean
   cursor?: (c: { pieces: Piece[]; visible: boolean[]; t: number; params: Record<string, unknown> }) => CursorDraw | undefined
   /** Delete-style behaviours (typewriter delete) run the chosen order BACKWARDS: whichever
    *  piece would start last under the normal order starts first. Applied to ranks before
@@ -49,6 +95,21 @@ export interface TextBehaviourDef {
 const REGISTRY = new Map<string, TextBehaviourDef>()
 export function registerTextBehaviour(kind: string, def: TextBehaviourDef): void { REGISTRY.set(kind, def) }
 export const isTextBehaviour = (b: { kind: string }) => typeof b?.kind === 'string' && b.kind.startsWith('text.')
+
+/**
+ * Does this kind, under these params, do anything with its easing curve?
+ *
+ * The inspector shows one Easing control for every letter bar, and for half the kinds it is
+ * dead: a typewriter hard-cuts, Decode ticks on a hashed clock, a loop rides a sine of its own.
+ * Read from the registry so the answer cannot drift from what the evaluator actually does with
+ * `params.ease`. An unregistered kind draws nothing, so it uses nothing.
+ */
+export function textBehaviourUsesEase(kind: string, params?: Record<string, unknown>): boolean {
+  const def = REGISTRY.get(kind)
+  if (!def) return false
+  if (!def.usesEase) return true
+  return def.usesEase({ ...SHARED_DEFAULTS, ...(params ?? {}) })
+}
 
 /**
  * Whether a layer can run letter behaviours at all — THE predicate, shared by the gallery
@@ -91,9 +152,15 @@ const SHARED_DEFAULTS: Record<string, unknown> = { by: 'letters', stagger: 0.04,
  *  clip is the piece's resting box, and it has to be placed in whatever frame the bars BEFORE
  *  it have already moved the piece into. */
 interface ComposedCell {
-  x: number; y: number; rotation: number; scale: number; opacity: number; clip?: CellDraw['clip']
+  x: number; y: number; rotation: number; scale: number; opacity: number; clip?: ClipBox
+  char?: string; reel?: ReelDraw
   accX: number; accY: number; accRot: number; accScale: number
 }
+
+/** A clip window stated in RESTING coordinates, before `applyStateToCell` carries it into the
+ *  frame the earlier bars left the piece in. Either the PIECE's box (a mask slide) or one
+ *  CELL's box (a reel). */
+interface RestClipBox { cx: number; cy: number; w: number; h: number; angle: number; pad?: number }
 
 /**
  * Composes one behaviour's piece state onto one cell: the cell's offset from its piece's
@@ -112,8 +179,12 @@ interface ComposedCell {
  *
  * That also makes the pair order-independent: a mask slide added before or after a scramble
  * or a cascade produces the same window in the same place.
+ *
+ * `restClip` is the same mechanism reached from a `cell` callback: a reel's window is ONE
+ * cell's box rather than the whole piece's, and it takes precedence over `state.clip` because
+ * it is the more specific of the two.
  */
-function applyStateToCell(cell: ComposedCell, piece: Piece, state: PieceState): void {
+function applyStateToCell(cell: ComposedCell, piece: Piece, state: PieceState, restClip?: RestClipBox): void {
   const cosR = Math.cos(state.rotation), sinR = Math.sin(state.rotation)
   let dx = state.dx, dy = state.dy
   if (state.frame === 'piece') {
@@ -136,24 +207,30 @@ function applyStateToCell(cell: ComposedCell, piece: Piece, state: PieceState): 
     ]
   }
 
-  if (state.clip) {
+  const box: RestClipBox | undefined =
+    restClip ?? (state.clip ? { cx: piece.cx, cy: piece.cy, w: piece.w, h: piece.h, angle: piece.angle } : undefined)
+  if (box) {
     // The resting box, carried into the frame the earlier bars left this piece in.
     const c = Math.cos(cell.accRot), s = Math.sin(cell.accRot)
-    cell.clip = {
-      x: cell.accScale * (piece.cx * c - piece.cy * s) + cell.accX,
-      y: cell.accScale * (piece.cx * s + piece.cy * c) + cell.accY,
-      w: piece.w * cell.accScale,
-      h: piece.h * cell.accScale,
-      angle: piece.angle + cell.accRot,
+    const next: ClipBox = {
+      x: cell.accScale * (box.cx * c - box.cy * s) + cell.accX,
+      y: cell.accScale * (box.cx * s + box.cy * c) + cell.accY,
+      w: box.w * cell.accScale,
+      h: box.h * cell.accScale,
+      angle: box.angle + cell.accRot,
     }
+    if (box.pad !== undefined) next.pad = box.pad
+    cell.clip = next
   } else if (cell.clip) {
     const [cx, cy] = map(cell.clip.x, cell.clip.y)
-    cell.clip = {
+    const next: ClipBox = {
       x: cx, y: cy,
       w: cell.clip.w * state.scale,
       h: cell.clip.h * state.scale,
       angle: cell.clip.angle + state.rotation,
     }
+    if (cell.clip.pad !== undefined) next.pad = cell.clip.pad
+    cell.clip = next
   }
 
   const [nx, ny] = map(cell.x, cell.y)
@@ -197,9 +274,10 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
     const D = Math.max(0.05, b.timing.duration)
     let ranks = pieceRanks(pieces.length, order, seed)
     if (def.reverseOrder?.(params)) {
-      const maxRank = Math.max(0, ...ranks)
-      ranks = ranks.map((r) => maxRank - r)
+      const reversed = Math.max(0, ...ranks)
+      ranks = ranks.map((r) => reversed - r)
     }
+    const maxRank = Math.max(0, ...ranks)
     const { delays, pieceDur } = pieceTiming(ranks, stagger, D)
     const ease = params.ease as Ease
     // Only a kind that opted in (`springTail`) keeps running past its bar under a spring.
@@ -208,10 +286,14 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
 
     const visible: boolean[] = new Array(pieces.length)
     const states: PieceState[] = new Array(pieces.length)
+    // The context of each piece whose callbacks RAN this frame — undefined for a piece sitting
+    // at REST or HIDDEN, which is what keeps `cell` off the glyphs that have nothing to say.
+    const live: Array<PieceCtx | undefined> = new Array(pieces.length)
+    const wholeBar = def.wholeBar === true
 
     const makeCtx = (piece: Piece, delay: number, rawP: number, e: number, barElapsed: number): PieceCtx => ({
       piece, pieces, p: rawP, e, elapsed: t - start - delay, pieceDur, t,
-      seed, frame, params, delay, barElapsed, barDur: D,
+      seed, frame, params, delay, barElapsed, barDur: D, rank: ranks[piece.index] ?? 0, maxRank,
     })
 
     for (const piece of pieces) {
@@ -223,11 +305,14 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
       let isRest = false
 
       if (phase === 'in') {
-        if (rawP <= 0) { state = HIDDEN; visible[i] = false }
+        // `wholeBar` moves the near edge from this piece's own turn to the BAR's start.
+        if (wholeBar ? !(barElapsed >= 0) : rawP <= 0) { state = HIDDEN; visible[i] = false }
         else if (rawP >= 1 && !spring) { state = REST; isRest = true; visible[i] = true }
         else {
           const p = spring ? Math.max(0, rawP) : clamp01(rawP)
-          state = def.piece(makeCtx(piece, delay, rawP, applyEase(p, ease), barElapsed))
+          const ctx = makeCtx(piece, delay, rawP, applyEase(p, ease), barElapsed)
+          live[i] = ctx
+          state = def.piece(ctx)
           visible[i] = true
           // A spring keeps settling past p = 1 (never hit by the branch above); it is at REST
           // once p reaches springSettle(bounce), the point where springProgress starts returning
@@ -235,16 +320,21 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
           if (spring && isSpringEase(ease) && rawP >= springSettle(ease.bounce)) isRest = true
         }
       } else if (phase === 'out') {
+        // The mirror: `wholeBar` moves the FAR edge from this piece's own end to the bar's.
         if (rawP <= 0) { state = REST; isRest = true; visible[i] = true }
-        else if (rawP >= 1) { state = HIDDEN; visible[i] = false }
+        else if (wholeBar ? barElapsed >= D : rawP >= 1) { state = HIDDEN; visible[i] = false }
         else {
-          state = def.piece(makeCtx(piece, delay, rawP, applyEase(clamp01(rawP), ease), barElapsed))
+          const ctx = makeCtx(piece, delay, rawP, applyEase(clamp01(rawP), ease), barElapsed)
+          live[i] = ctx
+          state = def.piece(ctx)
           visible[i] = true
         }
       } else {
         if (barElapsed <= 0 || barElapsed >= D) { state = REST; isRest = true; visible[i] = true }
         else {
-          state = def.piece(makeCtx(piece, delay, rawP, applyEase(clamp01(rawP), ease), barElapsed))
+          const ctx = makeCtx(piece, delay, rawP, applyEase(clamp01(rawP), ease), barElapsed)
+          live[i] = ctx
+          state = def.piece(ctx)
           visible[i] = true
         }
       }
@@ -253,9 +343,35 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
       if (!isRest) allRest = false
     }
 
+    // `cell` runs for EVERY glyph of every frame, so the context object is built once and
+    // refilled per glyph, and whatever the behaviour has to compute for the whole frame (a
+    // charset pool) goes in `store` rather than being rebuilt per glyph.
+    const store: Record<string, unknown> = {}
+    let cellCtx: CellCtx | undefined
+
     for (let ci = 0; ci < cells.length; ci++) {
       const piece = cellPiece[ci]!
-      applyStateToCell(composed[ci]!, piece, states[piece.index]!)
+      const target = composed[ci]!
+      let restClip: RestClipBox | undefined
+      const ctx = def.cell ? live[piece.index] : undefined
+      if (ctx) {
+        if (!cellCtx) cellCtx = Object.assign({}, ctx, { cellIndex: ci, cell: cells[ci]!, cells, store })
+        else { Object.assign(cellCtx, ctx); cellCtx.cellIndex = ci; cellCtx.cell = cells[ci]! }
+        const out = def.cell!(cellCtx)
+        if (out) {
+          // The LAST behaviour that names one wins; a behaviour that names neither leaves
+          // whatever an earlier one put there alone.
+          if (out.char !== undefined) target.char = out.char
+          if (out.reel !== undefined) target.reel = out.reel
+          if (out.clipToCell) {
+            const c = cells[ci]!
+            // Wider than the advance, because a reel shows OTHER characters through the same
+            // window and a narrow glyph's own box would shave them.
+            restClip = { cx: c.x, cy: c.y, w: Math.max(c.w, c.h * 0.8) * 1.1, h: c.h, angle: c.angle, pad: num(out.clipPad, 0.15) }
+          }
+        }
+      }
+      applyStateToCell(target, piece, states[piece.index]!, restClip)
     }
 
     if (def.cursor) {
@@ -274,6 +390,8 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
   const outCells: CellDraw[] = composed.map((c) => {
     const cd: CellDraw = { x: c.x, y: c.y, rotation: c.rotation, scale: Math.max(0.001, c.scale), opacity: clamp01(c.opacity) }
     if (c.clip) cd.clip = c.clip
+    if (c.char !== undefined) cd.char = c.char
+    if (c.reel) cd.reel = c.reel
     return cd
   })
   const result: TextFrame = { atRest: allRest, cells: outCells }
