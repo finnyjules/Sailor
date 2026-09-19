@@ -96,6 +96,8 @@ import { type Behaviour, type StoredBehaviour, type Timing, type Track as Motion
 import { setBehaviourTracks, bakeBehaviour, upsertBehaviour, removeBehaviour } from '~/lib/motionx/behaviourStore'
 import { seedHoldTrack, setBandTrack } from '~/lib/motionx/bandEdit'
 import { migrateDialTracks } from '~/lib/motionx/adapter/migrateDialTracks'
+import { migrateLayerAnimations } from '~/lib/motionx/adapter/migrateLayerAnimation'
+import { legacyBandForLayer } from '~/lib/motionx/bands'
 import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
 import MotionPropertyPicker from '~/components/vue-canvas/compositor/MotionPropertyPicker.vue'
 import { fillDialTargets } from '~/lib/motion/fillTracks'
@@ -3678,10 +3680,25 @@ function setMotion(patch: Partial<FrameMotion>) {
 // per node; writes only when something actually converted, so untouched frames stay byte-identical.
 watch(() => compositor.value?.id, () => {
   const node = compositor.value
+  if (!node) return
   const stored = (node?.data?.properties as Record<string, any> | undefined)?.sailor_motion
-  if (!node || !stored) return
-  const { motion, converted, dropped } = migrateDialTracks(stored)
-  if (converted || dropped) (node.data.properties as Record<string, any>).sailor_motion = motion
+  if (stored) {
+    const { motion, converted, dropped } = migrateDialTracks(stored)
+    if (converted || dropped) (node.data.properties as Record<string, any>).sailor_motion = motion
+  }
+  // Task 5: an older per-layer In/Loop/Out animation (`layer.animation`) converts to motionx
+  // bands on open too. Whatever it refuses keeps rendering through the old engine and shows up
+  // as a locked "Older animation" bar in the dock instead (legacyBandForLayer). Opening a frame
+  // is not an undoable edit, so no recordHistory() here. Only the W/H RATIO matters to the
+  // converter — if the canvas isn't sized yet, defer once and bail if it's still 0.
+  const tryMigrateLayerAnimations = () => {
+    const { w, h } = canvasDisplay
+    if (!w || !h) return
+    const res = migrateLayerAnimations(localLayers.value, motionDoc.value, { w, h })
+    if (res.converted.length) { commit(res.layers); setMotion({ motionx: res.motionx } as Partial<FrameMotion>) }
+  }
+  if (canvasDisplay.w && canvasDisplay.h) tryMigrateLayerAnimations()
+  else nextTick(tryMigrateLayerAnimations)
 }, { immediate: true })
 // The docked timeline mutates layer.animation in place during a drag, then
 // emits 'commit' (no payload) on pointerup. `commit()` from the local-layer
@@ -3774,7 +3791,7 @@ const behaviourPickerOpen = ref(false)
 const legacyMotionUi = ref(false)
 // Slice 2/3: band-timeline selection (a behaviour band, a property band, or a control point)
 // drives the contextual inspector in the Motion right column. Writes flow through setMotion.
-const motionSel = ref<{ kind: 'band' | 'point' | 'behaviour'; path: string; index?: number } | null>(null)
+const motionSel = ref<{ kind: 'band' | 'point' | 'behaviour' | 'legacy'; path: string; index?: number } | null>(null)
 const motionBehaviours = computed<StoredBehaviour[]>(() => (motionDoc.value as any).behaviours ?? [])
 function updateMotionx(tracks: MotionxTrack[]) {
   setMotion({ motionx: tracks } as Partial<FrameMotion>)
@@ -3784,6 +3801,12 @@ function updateMotionx(tracks: MotionxTrack[]) {
 watch([() => motionxTracks.value, () => motionBehaviours.value], () => {
   const s = motionSel.value
   if (!s) return
+  if (s.kind === 'legacy') {
+    // Not a motionx selection — only clear it if the layer's older animation is actually gone.
+    const l = localLayers.value.find((x) => x.id === s.path) as (LocalLayer & { animation?: unknown }) | undefined
+    if (!l?.animation) motionSel.value = null
+    return
+  }
   if (s.kind === 'behaviour') {
     if (!motionBehaviours.value.some((b) => b.id === s.path)) motionSel.value = null
     return
@@ -3837,6 +3860,25 @@ function addProperty(p: AnimatableProperty) {
 }
 function selectMotionPoint(sel: { path: string; index: number }) { motionSel.value = { kind: 'point', ...sel } }
 function clearMotionSel() { motionSel.value = null }
+// An older In/Loop/Out layer animation the converter refused (mask/flip/copies presets, or a
+// layer that already has transform bands) — selectable in the dock, removable from the
+// inspector. `selectLocal` must run first because the watch below clears `motionSel` whenever
+// the selected layer changes, hence the `nextTick`.
+function selectLegacyMotion(layerId: string) { selectLocal(layerId); nextTick(() => { motionSel.value = { kind: 'legacy', path: layerId } }) }
+function removeLegacyAnimation(layerId: string) {
+  recordHistory()
+  commit(localLayers.value.map((l) => {
+    if (l.id !== layerId) return l
+    const { animation: _gone, ...rest } = l as LocalLayer & { animation?: unknown }
+    return rest as LocalLayer
+  }))
+  motionSel.value = null
+}
+const legacyMotionLabel = computed(() => {
+  const s = motionSel.value
+  const l = s?.kind === 'legacy' ? localLayers.value.find((x) => x.id === s.path) : null
+  return l ? (legacyBandForLayer(l as never, motionDoc.value.duration ?? 4)?.label.replace('Older animation · ', '') ?? '') : ''
+})
 // Human label for the selected band's property path (Fill · Gradient, Opacity, …).
 const motionSelLabel = computed<string>(() => {
   const l = selectedLocal.value, sel = motionSel.value
@@ -3907,6 +3949,7 @@ function openBehaviour(id: string) {
 function deleteMotionSelection() {
   const sel = motionSel.value
   if (!sel) return
+  if (sel.kind === 'legacy') { removeLegacyAnimation(sel.path); return }
   if (sel.kind === 'behaviour') { deleteBehaviour(sel.path); return }
   const tk = motionxTracks.value.find((t) => t.path === sel.path && !t.behaviourId)
   if (!tk) { motionSel.value = null; return }
@@ -8087,6 +8130,7 @@ onUnmounted(() => {
           :property-picker-open="propertyPickerOpen && !!selectedLocal"
           @select="(id: string) => selectLocal(id)"
           @select-band="selectMotionBand" @select-point="selectMotionPoint" @select-behaviour="selectMotionBehaviour"
+          @select-legacy="selectLegacyMotion"
           @update:motionx="updateMotionx" @before-change="recordHistory"
           @scrub="scrubTo" @pause="pause" @play="play" @bake="bakeMotion"
           @update:motion="setMotion"
@@ -8357,10 +8401,11 @@ onUnmounted(() => {
             class="mb-3"
             :motionx="motionxTracks" :behaviours="motionBehaviours" :selection="motionSel"
             :duration="effectiveMotion.duration" :t="previewT"
-            :label="motionSelLabel"
+            :label="motionSelLabel" :legacy-label="legacyMotionLabel"
             @update:motionx="updateMotionx" @before-change="recordHistory"
             @select-point="selectMotionPoint" @clear="clearMotionSel"
-            @behaviour-change="editBehaviour" @behaviour-open="openBehaviour" @behaviour-delete="deleteBehaviour" />
+            @behaviour-change="editBehaviour" @behaviour-open="openBehaviour" @behaviour-delete="deleteBehaviour"
+            @legacy-remove="removeLegacyAnimation" />
           <!-- Animate: make this still a looping, transparent clip. Lives in Motion (not
                Design) because it is how the layer moves — it composes with the keyframes below. -->
           <CompositorAnimatePanel v-if="selectedLocal?.kind === 'image'"

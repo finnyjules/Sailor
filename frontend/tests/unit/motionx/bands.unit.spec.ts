@@ -106,3 +106,25 @@ describe('bands carry the loop flag', () => {
     expect(beh[0]!.loop).toBe(true)
   })
 })
+
+describe('legacyBandForLayer — an older In/Loop/Out animation, shown as one locked bar', () => {
+  it('no animation → null', async () => {
+    const { legacyBandForLayer } = await import('~/lib/motionx/bands')
+    expect(legacyBandForLayer({ id: 'a' }, 4)).toBeNull()
+    expect(legacyBandForLayer({ id: 'a', animation: { offset: 0 } }, 4)).toBeNull()   // empty shell
+  })
+  it('spans the layer window and names its presets in plain words', async () => {
+    const { legacyBandForLayer } = await import('~/lib/motionx/bands')
+    const b = legacyBandForLayer({ id: 'a', animation: { offset: 0.5, duration: 2, in: { presetId: 'fade-in' }, loop: { presetId: 'float' } } }, 4)!
+    expect(b).toMatchObject({ key: 'legacy:a', kind: 'legacy', start: 0.5, end: 2.5, label: 'Older animation · Fade in, Float' })
+  })
+  it('no duration → runs to the end of the timeline; never past it', async () => {
+    const { legacyBandForLayer } = await import('~/lib/motionx/bands')
+    expect(legacyBandForLayer({ id: 'a', animation: { offset: 1, out: { presetId: 'fade-out' } } }, 4)!.end).toBe(4)
+    expect(legacyBandForLayer({ id: 'a', animation: { offset: 3, duration: 9, in: { presetId: 'grow-in' } } }, 4)!.end).toBe(4)
+  })
+  it('keyframes-only animations still get a bar', async () => {
+    const { legacyBandForLayer } = await import('~/lib/motionx/bands')
+    expect(legacyBandForLayer({ id: 'a', animation: { offset: 0, keyframes: [{ t: 0 }, { t: 1 }] } }, 4)!.label).toBe('Older animation · Keyframes')
+  })
+})

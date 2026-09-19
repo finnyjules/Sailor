@@ -12,7 +12,7 @@ import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vu
 import MotionEasingCurve from '~/components/vue-canvas/compositor/MotionEasingCurve.vue'
 import type { Gradient } from '~/lib/compositor/paint'
 
-export interface MotionSelection { kind: 'band' | 'point' | 'behaviour'; path: string; index?: number }
+export interface MotionSelection { kind: 'band' | 'point' | 'behaviour' | 'legacy'; path: string; index?: number }
 
 const props = defineProps<{
   motionx: Track[]
@@ -21,6 +21,7 @@ const props = defineProps<{
   duration: number
   t: number | null
   label?: string
+  legacyLabel?: string
 }>()
 const emit = defineEmits<{
   'update:motionx': [tracks: Track[]]
@@ -31,6 +32,7 @@ const emit = defineEmits<{
   'behaviour-change': [id: string, patch: BehaviourPatch, record?: boolean]
   'behaviour-open': [id: string]
   'behaviour-delete': [id: string]
+  'legacy-remove': [layerId: string]
 }>()
 
 // ── Behaviour selection (Slice 3) ────────────────────────────────────────────
@@ -142,8 +144,22 @@ function onGradient(g: Gradient) {
 </script>
 
 <template>
+  <!-- An older In/Loop/Out layer animation selected: explain it, offer removal (Task 5) -->
+  <div v-if="selection?.kind === 'legacy'" data-testid="motion-inspector"
+    class="rounded-lg border border-white/10 bg-[#0e0e10]/80 px-3 py-2.5 text-[11px] text-white/70">
+    <div class="mb-2 flex items-center justify-between border-b border-white/10 pb-2">
+      <span class="font-medium text-white/85">Older animation</span>
+      <button class="cursor-pointer text-white/40 hover:text-white/80" @click="emit('clear')">Done</button>
+    </div>
+    <p class="mb-1 text-white/85">{{ legacyLabel }}</p>
+    <p class="mb-3 leading-snug text-white/50">This was made with the older animation tools. It still plays exactly as before, but it can't be edited on this timeline. Remove it to animate this layer with behaviours instead.</p>
+    <button type="button" data-testid="legacy-remove"
+      class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:border-rose-400/60 hover:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
+      @click="emit('legacy-remove', selection.path)">Remove animation</button>
+  </div>
+
   <!-- Behaviour band selected: kind params + timing + Open into keyframes -->
-  <div v-if="behaviour" data-testid="motion-inspector"
+  <div v-else-if="behaviour" data-testid="motion-inspector"
     class="rounded-lg border border-white/10 bg-[#0e0e10]/80 px-3 py-2.5 text-[11px] text-white/70">
     <div class="mb-2 flex items-center justify-between border-b border-white/10 pb-2">
       <div class="flex items-center gap-1.5">

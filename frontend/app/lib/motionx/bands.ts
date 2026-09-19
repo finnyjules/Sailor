@@ -4,7 +4,7 @@
 import type { Track, PropertyType, Keyframe, StoredBehaviour } from '~/lib/motionx'
 import { evaluateTrack } from '~/lib/motionx'
 
-export type BandKind = 'number' | 'color' | 'gradient' | 'behaviour'
+export type BandKind = 'number' | 'color' | 'gradient' | 'behaviour' | 'legacy'
 
 export interface Band {
   key: string
@@ -104,6 +104,27 @@ export function behaviourBandsForLayer(layerId: string, behaviours: StoredBehavi
         loop: tracks.some((t) => t.behaviourId === b.id && !!t.loop),
       }
     })
+}
+
+const words = (presetId: string) => {
+  const s = presetId.replace(/-/g, ' ')
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+/** An older In/Loop/Out layer animation (`layer.animation`). It still renders through the old
+ *  engine — per-letter staggering, masks, blur and copies have no band equivalent — so the dock
+ *  shows it as ONE locked bar over the layer's window. */
+export function legacyBandForLayer(
+  layer: { id: string; animation?: { offset?: number; duration?: number; in?: { presetId: string }; loop?: { presetId: string }; out?: { presetId: string }; keyframes?: unknown[] } },
+  timelineDuration: number,
+): Band | null {
+  const a = layer.animation
+  if (!a) return null
+  const parts = [a.in, a.loop, a.out].filter((s): s is { presetId: string } => !!s?.presetId).map((s) => words(s.presetId))
+  if (a.keyframes?.length) parts.push('Keyframes')
+  if (!parts.length) return null
+  const start = Math.max(0, a.offset ?? 0)
+  const end = a.duration == null ? timelineDuration : Math.min(timelineDuration, start + Math.max(0, a.duration))
+  return { key: `legacy:${layer.id}`, kind: 'legacy', type: 'number', label: `Older animation · ${parts.join(', ')}`, path: `legacy:${layer.id}`, start, end: Math.max(start, end), keyframes: [] }
 }
 
 /** Sample a number track's value across its span → points in the unit square.

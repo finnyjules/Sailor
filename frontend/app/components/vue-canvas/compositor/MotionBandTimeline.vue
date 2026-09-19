@@ -7,12 +7,12 @@
  *  ~/lib/motionx/timelineView (ported from dialkit). motionx stays the source of truth. */
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Track, StoredBehaviour } from '~/lib/motionx'
-import { bandsForLayer, behaviourBandsForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
+import { bandsForLayer, behaviourBandsForLayer, legacyBandForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
 import { animatableProperties } from '~/lib/motionx/adapter/frame'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt, bandTrackAt } from '~/lib/motionx/bandEdit'
 import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, ghostCycles, type View } from '~/lib/motionx/timelineView'
 
-export interface MotionSelection { kind: 'band' | 'point' | 'behaviour'; path: string; index?: number }
+export interface MotionSelection { kind: 'band' | 'point' | 'behaviour' | 'legacy'; path: string; index?: number }
 
 const props = defineProps<{
   layers: LocalLayer[]
@@ -38,6 +38,7 @@ const emit = defineEmits<{
   'select-band': [path: string]
   'select-point': [sel: { path: string; index: number }]
   'select-behaviour': [id: string]
+  'select-legacy': [layerId: string]
   'update:motionx': [tracks: Track[]]
   'before-change': []
   commit: []
@@ -111,7 +112,9 @@ function propBandsFor(l: LocalLayer): Band[] {
   for (const p of animatableProperties(l)) m.set(p.path, p.label)
   return bandsForLayer(l.id, props.motionx, (p) => m.get(p) ?? '')
 }
-const rowCountFor = (l: LocalLayer) => behBandsFor(l.id).length + propBandsFor(l).length
+const legacyFor = (l: LocalLayer) => legacyBandForLayer(l as never, props.duration)
+const rowCountFor = (l: LocalLayer) => behBandsFor(l.id).length + propBandsFor(l).length + (legacyFor(l) ? 1 : 0)
+const isLegacySel = (l: LocalLayer) => props.selection?.kind === 'legacy' && props.selection.path === l.id
 
 // ── Rows keyed by PROPERTY (one behaviour = one property). A row holds every bar that
 //    drives that property: behaviour bars + the explicit property band. Two bars whose
@@ -479,6 +482,22 @@ function deletePoint(b: Band, i: number) {
         </button>
 
         <template v-if="!collapsedLayers.has(l.id)">
+          <!-- an older In/Loop/Out layer animation (layer.animation) — still plays through the
+               old engine; shown as one locked bar, not editable here (Task 5). -->
+          <template v-if="legacyFor(l)">
+            <span class="truncate text-left text-[10px] pl-5 self-center text-white/45">Older animation</span>
+            <div data-band-lane class="relative my-0.5 h-6">
+              <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
+              <button type="button" :data-testid="'legacy-band-' + l.id"
+                class="absolute inset-y-0 flex items-center gap-1.5 overflow-hidden rounded-md border border-dashed px-2 text-left text-[9.5px] cursor-pointer select-none"
+                :class="isLegacySel(l) ? 'ring-2 ring-[#7c9cff] border-white/40 text-white' : 'border-white/25 text-white/60 hover:border-white/45'"
+                :style="{ left: px(xOf(legacyFor(l)!.start)), width: px(wOf(legacyFor(l)!.start, legacyFor(l)!.end)), background: 'rgba(255,255,255,.05)' }"
+                title="Made with the older animation tools — it still plays, but can't be edited here"
+                @click.stop="emit('select-legacy', l.id)">
+                <span class="truncate">{{ legacyFor(l)!.label.replace('Older animation · ', '') }}</span>
+              </button>
+            </div>
+          </template>
           <!-- one row per PROPERTY; every bar that drives it lives in this row -->
           <template v-for="r in rowsFor(l)" :key="r.path">
             <span class="truncate text-left text-[10px] pl-5 self-center"
