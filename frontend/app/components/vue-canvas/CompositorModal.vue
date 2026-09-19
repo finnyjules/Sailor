@@ -3857,6 +3857,18 @@ const motionSelLabel = computed<string>(() => {
   if (!l || !sel) return ''
   return animatableProperties(l).find((p) => p.path === sel.path)?.label || sel.path.split('.').pop() || ''
 })
+// Letter/word/line counts of the selected TEXT layer, for the letter-behaviour inspector's
+// "runs for" line (Task 5). Wrapped lines aren't known here — the inspector says "about" for lines.
+const motionPieceCounts = computed<{ letters: number; words: number; lines: number } | undefined>(() => {
+  const l = selectedLocal.value
+  if (!l || l.kind !== 'text') return undefined
+  const text = String((l as { text?: string }).text ?? '')
+  return {
+    letters: Array.from(text).filter((ch) => !/\s/.test(ch)).length,
+    words: text.split(/\s+/).filter(Boolean).length,
+    lines: text.split('\n').length,
+  }
+})
 // Selecting a different layer clears the motion selection (bands are per-layer).
 watch(() => selectedLocal.value?.id, () => { motionSel.value = null })
 // Slice 3: a behaviour is a live, param-editable band. Adding one stores a StoredBehaviour
@@ -8346,7 +8358,7 @@ onUnmounted(() => {
             class="mb-3"
             :motionx="motionxTracks" :behaviours="motionBehaviours" :selection="motionSel"
             :duration="effectiveMotion.duration" :t="previewT"
-            :label="motionSelLabel" :legacy-label="legacyMotionLabel"
+            :label="motionSelLabel" :legacy-label="legacyMotionLabel" :piece-counts="motionPieceCounts"
             @update:motionx="updateMotionx" @before-change="recordHistory"
             @select-point="selectMotionPoint" @clear="clearMotionSel"
             @behaviour-change="editBehaviour" @behaviour-open="openBehaviour" @behaviour-delete="deleteBehaviour"

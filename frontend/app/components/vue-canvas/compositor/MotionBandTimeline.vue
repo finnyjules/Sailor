@@ -7,6 +7,7 @@
  *  ~/lib/motionx/timelineView (ported from dialkit). motionx stays the source of truth. */
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Track, StoredBehaviour } from '~/lib/motionx'
+import { isTextBehaviour } from '~/lib/motionx/text'
 import { bandsForLayer, behaviourBandsForLayer, legacyBandForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
 import { animatableProperties } from '~/lib/motionx/adapter/frame'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt, bandTrackAt } from '~/lib/motionx/bandEdit'
@@ -91,6 +92,13 @@ function toggleLayer(id: string) {
   collapsedLayers.value = s
 }
 const behBandsFor = (layerId: string) => behaviourBandsForLayer(layerId, props.behaviours ?? [], props.motionx)
+// text.* behaviours compile to no track (per-letter/word/line, not a property curve), so they
+// never match a row in rowsFor() below and would simply vanish. They get their own row instead.
+const lettersBandsFor = (layerId: string): Band[] =>
+  behBandsFor(layerId).filter((b) => {
+    const beh = (props.behaviours ?? []).find((bb) => bb.id === b.behaviourId)
+    return !!beh && isTextBehaviour(beh)
+  })
 // The legs of a multi-point band (between consecutive control points), for DialKit-style segments.
 function legsOf(b: Band): Array<{ index: number; left: number; width: number; seconds: number }> {
   const kfs = [...b.keyframes].sort((a, c) => a.t - c.t)
@@ -497,6 +505,28 @@ function deletePoint(b: Band, i: number) {
                 @click.stop="emit('select-legacy', l.id)">
                 <span class="truncate">{{ lb.label.replace('Older animation · ', '') }}</span>
               </button>
+            </div>
+          </template>
+          <!-- Letters row: every text.* behaviour of this layer (letters/words/lines have no
+               compiled track, so they can't join a property row below — Task 5). One shared
+               lane; bars never clash-tint, never show loop ghosts/∞, never show the Open ▾ chip. -->
+          <template v-if="lettersBandsFor(l.id).length">
+            <span class="truncate text-left text-[10px] pl-5 self-center text-white/45">Letters</span>
+            <div data-band-lane class="relative my-0.5 h-6">
+              <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
+              <div v-for="b in lettersBandsFor(l.id)" :key="b.key" :data-testid="'beh-band-' + b.behaviourId"
+                class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
+                :class="isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white border-emerald-300' : 'text-white/80 border-emerald-400/40 hover:border-emerald-300/70'"
+                :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: 'rgba(120,220,170,.16)' }"
+                :title="b.label + ' · drag to move, drag edges to retime'"
+                @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')">
+                <span class="truncate">{{ b.label }}</span>
+                <span v-if="wOf(b.start, b.end) > 56" class="ml-auto shrink-0 tabular-nums text-white/50">{{ (b.end - b.start).toFixed(2) }}s</span>
+                <div class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize hover:bg-white/25"
+                  @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'start')" />
+                <div class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize hover:bg-white/25"
+                  @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'end')" />
+              </div>
             </div>
           </template>
           <!-- one row per PROPERTY; every bar that drives it lives in this row -->
