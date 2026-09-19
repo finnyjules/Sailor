@@ -84,3 +84,28 @@ export function seedHoldTrack(path: string, type: PropertyType, value: PropertyV
   const end = Math.max(0.05, duration)
   return { path, type, keyframes: [{ t: 0, value, ease: 'easeInOut' }, { t: end, value, ease: 'linear' }] }
 }
+
+const MIN_LEG = 0.05
+/** Drag a boundary the DialKit way: the leg BEFORE `index` changes length and every later point
+ *  rides along by the same amount (values and eases untouched). Clamped so the point can't cross
+ *  its predecessor and the band can't run past `maxEnd`. On the first point it shifts the band. */
+export function ripplePoint(track: Track, index: number, newT: number, maxEnd: number): Track {
+  const kfs = sortByT(track.keyframes.map(clone))
+  const cur = kfs[index]
+  if (!cur) return track
+  const prev = kfs[index - 1]
+  const last = kfs[kfs.length - 1]!
+  const lo = prev ? prev.t + MIN_LEG : 0
+  const hi = Math.max(lo, cur.t + (maxEnd - last.t))
+  const delta = Math.min(hi, Math.max(lo, newT)) - cur.t
+  const round = (n: number) => Math.round(n * 1e6) / 1e6
+  return { ...track, keyframes: kfs.map((k, i) => (i >= index ? { ...k, t: round(k.t + delta) } : k)) }
+}
+
+/** Index of the point that STARTS the leg under time `t` (clamped to the band's legs). */
+export function segmentAt(track: Track, t: number): number {
+  const kfs = sortByT(track.keyframes.map(clone))
+  let i = 0
+  while (i < kfs.length - 2 && t >= kfs[i + 1]!.t) i++
+  return i
+}

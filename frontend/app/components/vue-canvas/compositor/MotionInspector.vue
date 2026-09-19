@@ -240,7 +240,7 @@ function onGradient(g: Gradient) {
     <template v-if="point">
       <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Value</div>
       <div v-if="typeof point.value === 'number'" class="mb-2">
-        <input v-scrubnum type="number" step="0.01" :value="point.value" data-testid="inspector-number"
+        <input v-scrubnum type="number" step="0.01" :value="+point.value.toFixed(3)" data-testid="inspector-number"
           class="w-full bg-[#0d0d0d] border border-white/15 rounded px-2 py-1 text-white/90 outline-none"
           @change="setValue(Number(($event.target as HTMLInputElement).value) || 0)">
       </div>

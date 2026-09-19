@@ -9,7 +9,7 @@ import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Track, StoredBehaviour } from '~/lib/motionx'
 import { bandsForLayer, behaviourBandsForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
 import { animatableProperties } from '~/lib/motionx/adapter/frame'
-import { shiftTrack, retimeTrack, movePoint, removePoint, setPointValue, setBandTrack } from '~/lib/motionx/bandEdit'
+import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt } from '~/lib/motionx/bandEdit'
 import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, ghostCycles, type View } from '~/lib/motionx/timelineView'
 
 export interface MotionSelection { kind: 'band' | 'point' | 'behaviour'; path: string; index?: number }
@@ -90,6 +90,17 @@ function toggleLayer(id: string) {
   collapsedLayers.value = s
 }
 const behBandsFor = (layerId: string) => behaviourBandsForLayer(layerId, props.behaviours ?? [], props.motionx)
+// The legs of a multi-point band (between consecutive control points), for DialKit-style segments.
+function legsOf(b: Band): Array<{ index: number; left: number; width: number; seconds: number }> {
+  const kfs = [...b.keyframes].sort((a, c) => a.t - c.t)
+  if (kfs.length <= 2) return []
+  const span = Math.max(1e-6, b.end - b.start), total = wOf(b.start, b.end)
+  return kfs.slice(0, -1).map((k, i) => {
+    const seconds = kfs[i + 1]!.t - k.t
+    return { index: i, left: ((k.t - b.start) / span) * total, width: (seconds / span) * total, seconds }
+  })
+}
+const isLegSel = (b: Band, i: number) => props.selection?.kind === 'point' && props.selection.path === b.path && props.selection.index === i
 // A looping bar is ONE cycle; these are its faint repeats out to the end of the timeline.
 const ghostsOf = (b: Band) => (b.loop ? ghostCycles(b.start, b.end - b.start, props.duration, dv.value.safeViewStart) : [])
 // A loop owns its property from its start to the END of the timeline, not just its bar.
@@ -242,16 +253,21 @@ onMounted(() => { document.addEventListener('pointerdown', onDocPointerDown, tru
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', onDocPointerDown, true); document.removeEventListener('keydown', onDocKey) })
 
 // ── Behaviour bar gestures: move / retime edges; a click (no move) selects ───
+// A gesture only becomes an edit once the pointer travels 3px: a plain click never pushes a
+// no-op undo step (undo covers the timeline now) and is reported to `onEnd(false)` instead.
+function gesture(e: PointerEvent, onMove: (ev: PointerEvent, dx: number) => void, onEnd?: (moved: boolean) => void) {
+  const x0 = e.clientX
+  let moved = false
+  drag((ev) => {
+    const dx = ev.clientX - x0
+    if (!moved) { if (Math.abs(dx) <= 3) return; moved = true; emit('before-change') }
+    onMove(ev, dx)
+  }, () => { if (moved) emit('commit'); onEnd?.(moved) })
+}
 function startBehDrag(e: PointerEvent, b: Band, mode: 'move' | 'start' | 'end') {
   const id = b.behaviourId!
-  const startX = e.clientX
   const at0 = b.start, dur0 = b.end - b.start
-  let moved = false
-  emit('before-change')
-  drag((ev) => {
-    const dx = ev.clientX - startX
-    if (!moved && Math.abs(dx) <= 3) return
-    moved = true
+  gesture(e, (_ev, dx) => {
     const dt = dx / Math.max(1e-6, dv.value.pxPerSecond)
     if (mode === 'move') {
       emit('behaviour-change', id, { timing: { start: clampN(at0 + dt, 0, Math.max(0, props.duration - dur0)) } })
@@ -261,41 +277,48 @@ function startBehDrag(e: PointerEvent, b: Band, mode: 'move' | 'start' | 'end') 
       const s = clampN(at0 + dt, 0, at0 + dur0 - 0.05)
       emit('behaviour-change', id, { timing: { start: s, duration: at0 + dur0 - s } })
     }
-  }, () => { if (moved) emit('commit'); else emit('select-behaviour', id) })
+  }, (moved) => { if (!moved) emit('select-behaviour', id) })
 }
-
-// ── Band edits (view-aware seconds) ──────────────────────────────────────────
 function startShift(e: PointerEvent, b: Band) {
   const tk = trackByPath(b.path)
   if (!tk) return
-  emit('select-band', b.path); emit('before-change')
-  const startX = e.clientX
-  drag((ev) => emitTrack(shiftTrack(tk, (ev.clientX - startX) / Math.max(1e-6, dv.value.pxPerSecond))),
-    () => emit('commit'))
+  const lane = (e.currentTarget as HTMLElement).closest('[data-band-lane]') as HTMLElement
+  const downT = laneSeconds(lane, e.clientX)
+  gesture(e,
+    (_ev, dx) => emitTrack(shiftTrack(tk, dx / Math.max(1e-6, dv.value.pxPerSecond))),
+    (moved) => {
+      if (moved) return
+      // Click: a band with several legs selects the LEG under the pointer (its start point owns
+      // that leg's easing); a single-leg band selects the band. The row label always selects the band.
+      if (tk.keyframes.length > 2) emit('select-point', { path: b.path, index: segmentAt(tk, downT) })
+      else emit('select-band', b.path)
+    })
 }
 function startRetime(e: PointerEvent, b: Band, edge: 'start' | 'end') {
   const tk = trackByPath(b.path)
   if (!tk) return
-  emit('select-band', b.path); emit('before-change')
+  emit('select-band', b.path)
   const lane = (e.currentTarget as HTMLElement).closest('[data-band-lane]') as HTMLElement
-  drag((ev) => {
+  gesture(e, (ev) => {
     const s = laneSeconds(lane, ev.clientX)
     const cur = trackSpan(trackByPath(b.path) ?? tk)
     emitTrack(edge === 'start' ? retimeTrack(tk, Math.min(s, cur.end - 0.05), cur.end) : retimeTrack(tk, cur.start, Math.max(s, cur.start + 0.05)))
-  }, () => emit('commit'))
+  })
 }
 function startPointDrag(e: PointerEvent, b: Band, i: number) {
   const tk = trackByPath(b.path)
   if (!tk) return
-  emit('select-point', { path: b.path, index: i }); emit('before-change')
+  emit('select-point', { path: b.path, index: i })
   const lane = (e.currentTarget as HTMLElement).closest('[data-band-lane]') as HTMLElement
+  const ripple = e.shiftKey   // Shift-drag: push every later point along (DialKit's boundary drag)
   let idx = i
-  drag((ev) => {
+  gesture(e, (ev) => {
+    if (ripple) { emitTrack(ripplePoint(tk, i, laneSeconds(lane, ev.clientX), props.duration)); return }
     const res = movePoint(trackByPath(b.path) ?? tk, idx, laneSeconds(lane, ev.clientX))
     idx = res.index
     emit('update:motionx', setBandTrack(props.motionx, b.path, res.track))
     emit('select-point', { path: b.path, index: idx })
-  }, () => emit('commit'))
+  })
 }
 function deletePoint(b: Band, i: number) {
   const tk = trackByPath(b.path)
@@ -306,25 +329,6 @@ function deletePoint(b: Band, i: number) {
   emit('commit')
 }
 
-// ── Control-point popover ────────────────────────────────────────────────────
-const selPointBand = computed<Band | null>(() => {
-  if (props.selection?.kind !== 'point') return null
-  const path = props.selection.path
-  const m = path.match(/^layers\.([^.]+)\./)
-  const l = m ? props.layers.find((x) => x.id === m[1]) : null
-  return l ? (propBandsFor(l).find((b) => b.path === path) ?? null) : null
-})
-const selPointKf = computed(() => {
-  const b = selPointBand.value, i = props.selection?.index
-  return b && i != null ? b.keyframes[i] ?? null : null
-})
-function setSelPointValue(v: number | string) {
-  const b = selPointBand.value, i = props.selection?.index, tk = b && trackByPath(b.path)
-  if (!b || i == null || !tk) return
-  emit('before-change')
-  emit('update:motionx', setBandTrack(props.motionx, b.path, setPointValue(tk, i, v)))
-  emit('commit')
-}
 </script>
 
 <template>
@@ -414,7 +418,8 @@ function setSelPointValue(v: number | string) {
           <!-- one row per PROPERTY; every bar that drives it lives in this row -->
           <template v-for="r in rowsFor(l)" :key="r.path">
             <span class="truncate text-left text-[10px] pl-5 self-center"
-              :class="r.conflicts.size ? 'text-amber-300/80' : 'text-white/45'"
+              :class="[r.conflicts.size ? 'text-amber-300/80' : 'text-white/45', r.property ? 'cursor-pointer hover:text-white/80' : '']"
+              @click="r.property && emit('select-band', r.property.path)"
               :title="r.conflicts.size ? r.label + ' — overlapping bars clash; the most recently started one is in charge' : r.label">{{ r.label }}<span v-if="r.conflicts.size" class="ml-1">⚠</span></span>
             <div data-band-lane class="relative my-0.5 h-6">
               <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
@@ -459,6 +464,13 @@ function setSelPointValue(v: number | string) {
                 <svg v-if="r.property.kind === 'number'" viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block pointer-events-none">
                   <polyline :points="curvePoints(r.property)" fill="none" stroke="#7c9cff" stroke-width="2" vector-effect="non-scaling-stroke" />
                 </svg>
+                <!-- legs: one segment per pair of points — hover shade, divider, its own length -->
+                <div v-for="leg in legsOf(r.property)" :key="'leg' + leg.index" :data-testid="'leg-' + r.property.key + '-' + leg.index"
+                  class="absolute inset-y-0 flex items-end justify-end overflow-hidden px-2 pb-px text-[9px] tabular-nums text-white/45 hover:bg-white/[0.06]"
+                  :class="[leg.index > 0 ? 'shadow-[inset_1.5px_0_0_rgba(0,0,0,.45)]' : '', isLegSel(r.property, leg.index) ? 'bg-white/[0.10]' : '']"
+                  :style="{ left: px(leg.left), width: px(leg.width) }">
+                  <span v-if="leg.width > 52" class="pointer-events-none">{{ leg.seconds.toFixed(2) }}s</span>
+                </div>
                 <div class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize z-20 hover:bg-white/20"
                   @pointerdown.stop.prevent="(e: PointerEvent) => startRetime(e, r.property!, 'start')" />
                 <div class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize z-20 hover:bg-white/20"
@@ -468,7 +480,7 @@ function setSelPointValue(v: number | string) {
                   class="absolute top-1/2 w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full bg-white cursor-ew-resize z-20"
                   :class="isPointSel(r.property, i) ? 'ring-2 ring-[#7c9cff] border border-white' : 'border border-[#7c9cff] hover:ring-1 hover:ring-white/60'"
                   :style="{ left: pctX(pointX(r.property, kf.t)) }"
-                  title="Drag to move · click to edit · double-click to delete"
+                  title="Drag to move · Shift-drag to push the later points along · click to edit · double-click to delete"
                   @pointerdown.stop.prevent="(e: PointerEvent) => startPointDrag(e, r.property!, i)"
                   @click.stop="emit('select-point', { path: r.property!.path, index: i })"
                   @dblclick.stop="() => deletePoint(r.property!, i)" />
@@ -492,24 +504,5 @@ function setSelPointValue(v: number | string) {
       </template>
     </div>
 
-    <!-- Minimal control-point popover -->
-    <div v-if="selPointKf" data-testid="point-popover"
-      class="mt-2 flex items-center gap-2 rounded-md border border-white/15 bg-[#111]/90 px-2 py-1.5 text-[11px]">
-      <span class="text-white/40">{{ selPointBand?.label }} · {{ (selPointKf.t).toFixed(2) }}s</span>
-      <template v-if="typeof selPointKf.value === 'number'">
-        <input v-scrubnum type="number" step="0.01" :value="selPointKf.value" data-testid="point-number"
-          class="w-20 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none tabular-nums"
-          @change="setSelPointValue(Number(($event.target as HTMLInputElement).value) || 0)">
-      </template>
-      <template v-else-if="typeof selPointKf.value === 'string'">
-        <input type="color" :value="selPointKf.value" data-testid="point-color"
-          class="w-6 h-6 rounded cursor-pointer bg-transparent border border-white/15"
-          @input="setSelPointValue(($event.target as HTMLInputElement).value)">
-        <span class="tabular-nums text-white/60 uppercase">{{ selPointKf.value }}</span>
-      </template>
-      <template v-else>
-        <span class="text-white/40">Edit gradient in the inspector →</span>
-      </template>
-    </div>
   </div>
 </template>

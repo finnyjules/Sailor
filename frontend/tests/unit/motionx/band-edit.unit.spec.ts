@@ -118,3 +118,36 @@ describe('seedHoldTrack', () => {
     expect(t.keyframes[1]!.value).toEqual(g)
   })
 })
+
+describe('ripplePoint — drag a boundary, push the later points along (DialKit legs)', () => {
+  const kf = (t: number, value = t) => ({ t, value, ease: 'linear' as const })
+  const tr = { path: 'layers.a.x', type: 'number' as const, keyframes: [kf(0), kf(1), kf(2), kf(3)] }
+  it('lengthens the leg before the point and shifts every later point by the same amount', async () => {
+    const { ripplePoint } = await import('~/lib/motionx/bandEdit')
+    expect(ripplePoint(tr, 1, 1.5, 10).keyframes.map((k) => k.t)).toEqual([0, 1.5, 2.5, 3.5])
+  })
+  it('cannot cross the previous point, and cannot push the band past the end of the timeline', async () => {
+    const { ripplePoint } = await import('~/lib/motionx/bandEdit')
+    expect(ripplePoint(tr, 2, 0.2, 10).keyframes.map((k) => k.t)).toEqual([0, 1, 1.05, 2.05])
+    expect(ripplePoint(tr, 1, 9, 4).keyframes.map((k) => k.t)).toEqual([0, 2, 3, 4])
+  })
+  it('on the first point it shifts the whole band; values and eases are untouched', async () => {
+    const { ripplePoint } = await import('~/lib/motionx/bandEdit')
+    const out = ripplePoint(tr, 0, 0.5, 10)
+    expect(out.keyframes.map((k) => k.t)).toEqual([0.5, 1.5, 2.5, 3.5])
+    expect(out.keyframes.map((k) => k.value)).toEqual([0, 1, 2, 3])
+    expect(ripplePoint(tr, 0, -5, 10).keyframes[0]!.t).toBe(0)
+  })
+})
+
+describe('segmentAt — which leg of a band is under a time', () => {
+  it('returns the index of the point that STARTS the leg', async () => {
+    const { segmentAt } = await import('~/lib/motionx/bandEdit')
+    const kf = (t: number) => ({ t, value: 0, ease: 'linear' as const })
+    const tr = { path: 'p', type: 'number' as const, keyframes: [kf(0), kf(1), kf(3)] }
+    expect(segmentAt(tr, 0.4)).toBe(0)
+    expect(segmentAt(tr, 2.9)).toBe(1)
+    expect(segmentAt(tr, 99)).toBe(1)
+    expect(segmentAt(tr, -1)).toBe(0)
+  })
+})
