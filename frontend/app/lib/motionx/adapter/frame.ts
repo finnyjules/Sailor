@@ -15,6 +15,12 @@ const TRANSFORM = new Set(['x', 'y', 'rotation', 'scale', 'opacity'])
  *  input layer unchanged (same ref), so callers can cheaply detect a no-op. */
 export function applyResolvedValue(layer: LocalLayer, prop: string, value: PropertyValue): LocalLayer {
   if (TRANSFORM.has(prop) && typeof value === 'number') {
+    // Only path/image layers have a native `scale` the painter reads. Everything else gets a
+    // transient `motionScale` that paintLayerStack applies as a draw-time scale about the
+    // layer centre (what the old motion engine did). Clones only — never persisted.
+    if (prop === 'scale' && typeof (layer as unknown as { scale?: unknown }).scale !== 'number') {
+      return { ...layer, motionScale: value } as unknown as LocalLayer
+    }
     return { ...layer, [prop]: value } as LocalLayer
   }
   const fill = (layer as unknown as { fill?: Paint }).fill
@@ -72,6 +78,7 @@ export function frameTarget(layer: LocalLayer): BehaviourTarget {
   const fill = rec.fill as Paint | undefined
   return {
     get(prop) {
+      if (prop === 'scale' && typeof rec.scale !== 'number') return 1
       if (TRANSFORM.has(prop) && typeof rec[prop] === 'number') return rec[prop] as number
       if (prop === 'fill' && isGradient(fill)) return paintStopsToColor(fill)
       return undefined

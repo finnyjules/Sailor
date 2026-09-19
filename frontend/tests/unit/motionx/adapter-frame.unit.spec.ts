@@ -89,3 +89,21 @@ describe('Add property → effect dial band drives the render fold', () => {
     expect((applyMotionxTracks([l], [ramp], 2)[0] as any).effects[0].intensity).toBeCloseTo(0.5, 6)
   })
 })
+
+describe('scale on every layer kind', () => {
+  it('a layer with a native scale field still gets `scale`', () => {
+    const l = layer({ kind: 'path', scale: 2 })
+    expect((applyResolvedValue(l, 'scale', 3) as any).scale).toBe(3)
+    expect((applyResolvedValue(l, 'scale', 3) as any).motionScale).toBeUndefined()
+  })
+  it('a layer without one gets the transient motionScale and keeps no `scale` key', () => {
+    const { scale: _drop, ...rect } = layer({ kind: 'rect', w: 0.3, h: 0.2 }) as any
+    const out = applyResolvedValue(rect, 'scale', 1.5) as any
+    expect(out.motionScale).toBe(1.5)
+    expect('scale' in out).toBe(false)
+  })
+  it('behaviours read a base scale of 1 on such layers', () => {
+    const { scale: _drop, ...rect } = layer({ kind: 'rect', w: 0.3, h: 0.2 }) as any
+    expect(frameTarget(rect).get('scale')).toBe(1)
+  })
+})

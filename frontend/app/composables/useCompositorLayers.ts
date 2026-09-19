@@ -5568,7 +5568,9 @@ export function paintLayerStack(
       }
     }
 
+    let motionScaleOpen = false
     for (const item of items) {
+      if (motionScaleOpen) { ctx.restore(); motionScaleOpen = false }
       if (maskSourceKeys.has(item.key) && !keepVisibleKeys.has(item.key)) continue
 
       if (item.type === 'wired') {
@@ -5594,6 +5596,16 @@ export function paintLayerStack(
       }
 
       const opacityMul = gc ? gc.opacity : 1
+
+      // motionx `scale` on a layer kind with no native scale: draw-time scale about the centre.
+      const ms = (layer as unknown as { motionScale?: number }).motionScale
+      if (typeof ms === 'number' && Math.abs(ms - 1) > 1e-4) {
+        ctx.save()
+        ctx.translate(layer.x * W, layer.y * H)
+        ctx.scale(Math.max(0.001, ms), Math.max(0.001, ms))
+        ctx.translate(-layer.x * W, -layer.y * H)
+        motionScaleOpen = true
+      }
 
       const ref = layerMaskRef(layer)
       const maskItem = ref ? byKey.get(ref) ?? null : null
@@ -5688,6 +5700,7 @@ export function paintLayerStack(
       if (bdLum) applyBackdropLuminanceMask(ctx, layer, bdLum, localLayers, W, H, drawOwn)
       else drawOwn(ctx)
     }
+    if (motionScaleOpen) ctx.restore()
 
     if (post && chainActive(post)) applyStackPost(ctx, post, W)
     return { frozenCount }
