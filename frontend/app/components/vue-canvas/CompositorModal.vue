@@ -3678,7 +3678,7 @@ function setMotion(patch: Partial<FrameMotion>) {
 // 6b: a frame saved with the old effect-dial tracks opens with them converted to timeline
 // bands (same paths, same interpolation — see migrateDialTracks + its parity spec). Runs once
 // per node; writes only when something actually converted, so untouched frames stay byte-identical.
-watch(() => compositor.value?.id, () => {
+watch(() => compositor.value?.id, (_id, _prev, onCleanup) => {
   const node = compositor.value
   if (!node) return
   const stored = (node?.data?.properties as Record<string, any> | undefined)?.sailor_motion
@@ -3718,7 +3718,15 @@ watch(() => compositor.value?.id, () => {
   }
   const initialAspect = knownFrameAspect()
   if (initialAspect != null) tryMigrateLayerAnimations(initialAspect)
-  else watch(knownFrameAspect, (a) => { if (a != null) tryMigrateLayerAnimations(a) }, { once: true })
+  else {
+    // Deferred until the frame's real aspect is known. The conversion is one-way, so it must
+    // never fire for a DIFFERENT node: stop it when this watcher re-runs (modal reused for
+    // another frame), and re-check the node id when it fires.
+    const stop = watch(knownFrameAspect, (a) => {
+      if (a != null && compositor.value?.id === node.id) tryMigrateLayerAnimations(a)
+    }, { once: true })
+    onCleanup(stop)
+  }
 }, { immediate: true })
 // The docked timeline mutates layer.animation in place during a drag, then
 // emits 'commit' (no payload) on pointerup. `commit()` from the local-layer

@@ -113,7 +113,8 @@ function propBandsFor(l: LocalLayer): Band[] {
   return bandsForLayer(l.id, props.motionx, (p) => m.get(p) ?? '')
 }
 const legacyFor = (l: LocalLayer) => legacyBandForLayer(l as never, props.duration)
-const rowCountFor = (l: LocalLayer) => behBandsFor(l.id).length + propBandsFor(l).length + (legacyFor(l) ? 1 : 0)
+const legacyBandsFor = (l: LocalLayer): Band[] => { const b = legacyFor(l); return b ? [b] : [] }
+const rowCountFor = (l: LocalLayer) => behBandsFor(l.id).length + propBandsFor(l).length + legacyBandsFor(l).length
 const isLegacySel = (l: LocalLayer) => props.selection?.kind === 'legacy' && props.selection.path === l.id
 
 // ── Rows keyed by PROPERTY (one behaviour = one property). A row holds every bar that
@@ -484,7 +485,7 @@ function deletePoint(b: Band, i: number) {
         <template v-if="!collapsedLayers.has(l.id)">
           <!-- an older In/Loop/Out layer animation (layer.animation) — still plays through the
                old engine; shown as one locked bar, not editable here (Task 5). -->
-          <template v-for="lb in (legacyFor(l) ? [legacyFor(l)!] : [])" :key="lb.key">
+          <template v-for="lb in legacyBandsFor(l)" :key="lb.key">
             <span class="truncate text-left text-[10px] pl-5 self-center text-white/45">Older animation</span>
             <div data-band-lane class="relative my-0.5 h-6">
               <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
