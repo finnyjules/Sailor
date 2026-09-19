@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { evaluateTextBehaviours, isTextBehaviour } from '~/lib/motionx/text'
+import { evaluateTextBehaviours, isTextBehaviour, textCanMove } from '~/lib/motionx/text'
 import { springSettle } from '~/lib/motionx/ease'
 import type { TextCell } from '~/lib/motionx/text/units'
 
@@ -164,6 +164,76 @@ describe('composition', () => {
   })
 })
 
+// A mask slide's clip is the WINDOW the letter slides through. Anything else on the same
+// layer moves the letter AND its window together — otherwise the glyph is drawn in one place
+// and clipped to a box left behind somewhere else, and nothing paints at all.
+describe('a mask slide composed with another bar keeps its window on the glyph', () => {
+  const mask = { ...beh('text.maskSlide', { dir: 'reveal', from: 'up' }, 1, 2), id: 'm' }
+  const scramble = { ...beh('text.scramble', { mode: 'settle', areaW: 0.5, areaH: 0.5, interval: 0.2 }, 1, 2), id: 's' }
+  const rise = { ...beh('text.cascade', { style: 'rise', amount: 3 }, 1, 2), id: 'c' }
+  const MID = 2   // both bars run 1 → 3
+
+  /** Every visible cell sits inside its OWN clip box, grown by one cell height all round. */
+  const insideItsOwnClip = (f: ReturnType<typeof ev>) => {
+    let seen = 0
+    f.cells.forEach((c, i) => {
+      if (c.opacity <= 0) return
+      seen++
+      const clip = c.clip
+      expect(clip, `cell ${i} lost its clip`).toBeDefined()
+      const ox = c.x - clip!.x, oy = c.y - clip!.y
+      const cos = Math.cos(-clip!.angle), sin = Math.sin(-clip!.angle)
+      const lx = ox * cos - oy * sin, ly = ox * sin + oy * cos
+      const h = CELLS[0]!.h
+      expect(Math.abs(lx), `cell ${i} drawn outside its clip in x`).toBeLessThanOrEqual(clip!.w / 2 + h)
+      expect(Math.abs(ly), `cell ${i} drawn outside its clip in y`).toBeLessThanOrEqual(clip!.h / 2 + h)
+    })
+    expect(seen).toBeGreaterThan(0)
+  }
+
+  it('mask slide + scramble: the window travels with the letter, in either order', () => {
+    insideItsOwnClip(ev([mask, scramble], MID))
+    insideItsOwnClip(ev([scramble, mask], MID))
+  })
+  it('mask slide + scramble: the two orders draw the same frame', () => {
+    expect(ev([mask, scramble], MID)).toEqual(ev([scramble, mask], MID))
+  })
+  it('mask slide + cascade rise: the window travels with the letter, in either order', () => {
+    insideItsOwnClip(ev([mask, rise], MID))
+    insideItsOwnClip(ev([rise, mask], MID))
+  })
+  it('mask slide + cascade rise: the two orders draw the same frame', () => {
+    expect(ev([mask, rise], MID)).toEqual(ev([rise, mask], MID))
+  })
+})
+
+// A spring keeps moving past the end of its segment, which is what lets a cascade or a mask
+// slide overshoot and settle. A kind that does not INTERPOLATE towards rest — scramble hops to
+// a hashed spot, typewriter hard-cuts — has nothing to settle into, so for it a spring is just
+// another curve: the bar's edges still mean REST / HIDDEN exactly.
+describe('the spring tail is opt-in per behaviour kind', () => {
+  const SPRING = { type: 'spring', bounce: 0.4 } as const
+  const atRestCell = (i: number) => ({ x: CELLS[i]!.x, y: CELLS[i]!.y, rotation: CELLS[i]!.angle, scale: 1, opacity: 1 })
+
+  it('scramble settle with a spring ease has landed by the end of its bar', () => {
+    const f = ev(beh('text.scramble', { mode: 'settle', areaW: 0.5, areaH: 0.5, interval: 0.2, ease: SPRING }, 1, 2), 3.01)
+    expect(f.atRest).toBe(true)
+    f.cells.forEach((c, i) => expect(c).toEqual(atRestCell(i)))
+  })
+
+  it('typewriter with a spring ease behaves exactly as with a linear one', () => {
+    const tw = (ease: unknown) => beh('text.typewriter', { stagger: 0.25, cursor: 'bar', blink: 0, ease })
+    for (const t of [0.5, 1.1, 1.3, 1.6, 2, 2.01, 2.5, 3]) {
+      expect(ev(tw(SPRING), t), `at t=${t}`).toEqual(ev(tw('linear'), t))
+    }
+  })
+
+  it('cascade and mask slide KEEP their tail (the overshoot is the point)', () => {
+    expect(ev(beh('text.cascade', { style: 'rise', amount: 1, ease: SPRING }), 2.01).atRest).toBe(false)
+    expect(ev(beh('text.maskSlide', { from: 'up', ease: SPRING }), 2.01).atRest).toBe(false)
+  })
+})
+
 describe('unknown enum values fall back to their documented default', () => {
   const GARBAGE = 'not-a-real-value'
   const same = (kind: string, param: string, extra: Record<string, unknown> = {}, t = 1.5) => {
@@ -181,6 +251,80 @@ describe('unknown enum values fall back to their documented default', () => {
     same('text.scramble', 'move', { areaW: 0.5, areaH: 0.5, interval: 0.2 }))
   it('shared by falls back to letters', () => same('text.cascade', 'by'))
   it('shared order falls back to ltr', () => same('text.cascade', 'order', { stagger: 0.2 }))
+})
+
+// `textCanMove` is the cheap gate in front of the whole per-glyph path: it answers "could any
+// of these bars move a letter at t" WITHOUT laying out a single cell, so a text layer whose
+// entrance finished a second ago goes back to being an ordinary, cacheable text layer.
+describe('textCanMove', () => {
+  const canMove = (b: any, t: number) => textCanMove(Array.isArray(b) ? b : [b], t)
+
+  it('an entrance is live up to the end of its bar, and inert after it', () => {
+    const b = beh('text.cascade', { style: 'fade' })          // 1 → 2
+    expect(canMove(b, 0)).toBe(true)                          // before: HIDDEN, not at rest
+    expect(canMove(b, 1.5)).toBe(true)
+    expect(canMove(b, 2.5)).toBe(false)
+  })
+  it('a FINISHED exit is NOT inert — its pieces are hidden, not at rest', () => {
+    const b = beh('text.cascade', { dir: 'out', style: 'fade' })
+    expect(canMove(b, 0.5)).toBe(false)                       // before an exit the text just sits there
+    expect(canMove(b, 1.5)).toBe(true)
+    expect(canMove(b, 99)).toBe(true)                         // still hidden — the fold must keep drawing it
+  })
+  it('a span bar is inert on both sides of its bar', () => {
+    const b = beh('text.scramble', { mode: 'loop', interval: 0.2 }, 1, 2)
+    expect(canMove(b, 0.5)).toBe(false)
+    expect(canMove(b, 2)).toBe(true)
+    expect(canMove(b, 3.5)).toBe(false)
+  })
+  it('a spring-tail entrance stays live through the settle tail', () => {
+    const ease = { type: 'spring', bounce: 0.6 } as const
+    const b = beh('text.cascade', { style: 'rise', ease })
+    expect(canMove(b, 2.5)).toBe(true)                        // past the bar, still settling
+    expect(canMove(b, 1 + springSettle(0.6) + 0.01)).toBe(false)
+    // A kind without the tail gets no extra grace.
+    expect(canMove(beh('text.scramble', { mode: 'settle', interval: 0.2, ease }), 2.5)).toBe(false)
+  })
+  it('the bar delay shifts the whole window', () => {
+    const b = { ...beh('text.cascade', { style: 'fade' }), timing: { start: 1, duration: 1, delay: 2 } }
+    expect(canMove(b, 2.5)).toBe(true)
+    expect(canMove(b, 4.5)).toBe(false)
+  })
+  it('an unknown kind, a non-text kind and an empty list are inert', () => {
+    expect(canMove(beh('text.nope'), 1.5)).toBe(false)
+    expect(canMove(beh('fade'), 1.5)).toBe(false)
+    expect(textCanMove([], 1.5)).toBe(false)
+  })
+  it('one live bar is enough', () => {
+    expect(canMove([beh('text.cascade', { style: 'fade' }), beh('text.scramble', { mode: 'loop' }, 10, 1)], 1.5)).toBe(true)
+  })
+})
+
+describe('textCanMove never disagrees with the evaluator', () => {
+  const KINDS: Array<[string, Record<string, unknown>]> = [
+    ['text.cascade', { style: 'rise', dir: 'in' }],
+    ['text.cascade', { style: 'fade', dir: 'out' }],
+    ['text.cascade', { style: 'rise', dir: 'in', ease: { type: 'spring', bounce: 0.5 } }],
+    ['text.maskSlide', { dir: 'reveal', from: 'up' }],
+    ['text.maskSlide', { dir: 'hide', from: 'left' }],
+    ['text.typewriter', { dir: 'type', cursor: 'bar', blink: 0 }],
+    ['text.typewriter', { dir: 'delete', cursor: 'bar', blink: 0 }],
+    ['text.scramble', { mode: 'settle', interval: 0.2 }],
+    ['text.scramble', { mode: 'scatter', interval: 0.2 }],
+    ['text.scramble', { mode: 'loop', interval: 0.2 }],
+    ['text.scramble', { mode: 'settle', interval: 0.2, ease: { type: 'spring', bounce: 0.5 } }],
+  ]
+  it('whenever it says a layer cannot move, the evaluator is exactly at rest', () => {
+    for (const [kind, params] of KINDS) {
+      for (const stagger of [0, 0.15]) {
+        const b = beh(kind, { ...params, stagger }, 1, 2)
+        for (let t = -1; t <= 8.0001; t += 0.05) {
+          if (textCanMove([b], t)) continue
+          expect(ev(b, t).atRest, `${kind} ${JSON.stringify(params)} stagger=${stagger} t=${t.toFixed(2)}`).toBe(true)
+        }
+      }
+    }
+  })
 })
 
 describe('finite-number guards', () => {

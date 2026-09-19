@@ -23,6 +23,7 @@ const SCRAMBLE_MOVES = ['snap', 'glide'] as const
 // ---------------------------------------------------------------------------
 registerTextBehaviour('text.cascade', {
   phase: (params) => (oneOf(params.dir, CASCADE_DIRS, 'in') === 'out' ? 'out' : 'in'),
+  springTail: true,      // interpolates towards rest — a spring may overshoot and settle
   piece: (c) => {
     const dir = oneOf(c.params.dir, CASCADE_DIRS, 'in')
     const style = oneOf(c.params.style, CASCADE_STYLES, 'rise')
@@ -60,6 +61,7 @@ registerTextBehaviour('text.cascade', {
 // ---------------------------------------------------------------------------
 registerTextBehaviour('text.maskSlide', {
   phase: (params) => (oneOf(params.dir, MASK_DIRS, 'reveal') === 'hide' ? 'out' : 'in'),
+  springTail: true,      // travels towards rest behind its window — same overshoot
   piece: (c) => {
     const dir = oneOf(c.params.dir, MASK_DIRS, 'reveal')
     const from = oneOf(c.params.from, MASK_FROM, 'up')

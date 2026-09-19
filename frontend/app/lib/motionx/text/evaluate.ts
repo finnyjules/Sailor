@@ -37,10 +37,32 @@ export interface TextBehaviourDef {
    *  piece would start last under the normal order starts first. Applied to ranks before
    *  `pieceTiming` runs. */
   reverseOrder?: (params: Record<string, unknown>) => boolean
+  /** OPT IN to the spring tail: with a spring easing this kind's entrance keeps being
+   *  evaluated past the end of its bar, until the spring settles, so it can overshoot its
+   *  resting place and come back. Only a kind that INTERPOLATES towards rest (cascade, mask
+   *  slide) has anything to settle into. For every other kind — scramble hops to a hashed
+   *  spot, typewriter hard-cuts — a spring is just another curve, and the bar's edges still
+   *  mean REST / HIDDEN exactly; without that, scramble would keep hopping past the end of
+   *  its bar and then snap into place when the spring finally settled. */
+  springTail?: boolean
 }
 const REGISTRY = new Map<string, TextBehaviourDef>()
 export function registerTextBehaviour(kind: string, def: TextBehaviourDef): void { REGISTRY.set(kind, def) }
 export const isTextBehaviour = (b: { kind: string }) => typeof b?.kind === 'string' && b.kind.startsWith('text.')
+
+/**
+ * Whether a layer can run letter behaviours at all — THE predicate, shared by the gallery
+ * (which Letters tiles to offer) and the add path (which bars to accept), so the two cannot
+ * drift apart and offer something that would do nothing.
+ *
+ * A text layer whose older `animation` preset is still on it is drawn by the previous motion
+ * engine, which knows nothing about `textMotion`: a letter bar added there would be stored,
+ * shown on the timeline and silently ignored by the painter. Removing the "Older animation"
+ * bar first is what makes the layer eligible.
+ */
+export function canAnimateLetters(layer: { kind?: string; animation?: unknown } | null | undefined): boolean {
+  return !!layer && layer.kind === 'text' && !layer.animation
+}
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
@@ -56,17 +78,43 @@ export function oneOf<T extends string>(value: unknown, allowed: readonly T[], f
 const PIECE_BY: readonly PieceBy[] = ['letters', 'words', 'lines']
 const ORDERS: readonly Order[] = ['ltr', 'rtl', 'center', 'edges', 'random']
 
-interface ComposedCell { x: number; y: number; rotation: number; scale: number; opacity: number; clip?: CellDraw['clip'] }
+/** The curve a letter bar runs under when it carries no `ease` of its own. Exported because
+ *  the inspector has to SHOW this one: a text bar compiles to no track, so there is no
+ *  keyframe to read the curve back off. */
+export const DEFAULT_TEXT_EASE: Ease = 'easeOut'
+/** The shared params every letter behaviour gets, whatever its kind. */
+const SHARED_DEFAULTS: Record<string, unknown> = { by: 'letters', stagger: 0.04, order: 'ltr', seed: 1, ease: DEFAULT_TEXT_EASE }
 
-/** Composes one behaviour's piece state onto one cell: the cell's offset from its piece's
- *  centre is rotated/scaled by the behaviour, then the behaviour's own dx/dy is added (rotated
- *  into the layer frame first when it was stated in the piece's own frame). Rotation adds,
- *  scale multiplies, opacity multiplies; a set clip always wins (last behaviour to set one). */
+/** A cell mid-composition. `acc*` is the similarity (uniform scale + rotation + translation)
+ *  that maps this cell's REST frame to where the behaviours applied so far have put it:
+ *  `p ↦ accScale · R(accRot) · p + (accX, accY)`. It exists for one reason — a mask slide's
+ *  clip is the piece's resting box, and it has to be placed in whatever frame the bars BEFORE
+ *  it have already moved the piece into. */
+interface ComposedCell {
+  x: number; y: number; rotation: number; scale: number; opacity: number; clip?: CellDraw['clip']
+  accX: number; accY: number; accRot: number; accScale: number
+}
+
+/**
+ * Composes one behaviour's piece state onto one cell: the cell's offset from its piece's
+ * centre is rotated/scaled by the behaviour, then the behaviour's own dx/dy is added (rotated
+ * into the layer frame first when it was stated in the piece's own frame). Rotation adds,
+ * scale multiplies, opacity multiplies.
+ *
+ * THE CLIP TRAVELS. A mask slide's clip is the WINDOW its letter slides through, so any other
+ * bar on the same layer has to move the window and the letter together:
+ *
+ *  - a behaviour that SETS a clip places it at the piece's resting box seen through the
+ *    accumulated transform of the bars before it (its own dx/dy is excluded — that offset is
+ *    precisely the letter's travel INSIDE its window);
+ *  - a behaviour that sets none carries any clip already on the cell through its own
+ *    transform (centre, turn and size alike).
+ *
+ * That also makes the pair order-independent: a mask slide added before or after a scramble
+ * or a cascade produces the same window in the same place.
+ */
 function applyStateToCell(cell: ComposedCell, piece: Piece, state: PieceState): void {
-  const offX = cell.x - piece.cx, offY = cell.y - piece.cy
   const cosR = Math.cos(state.rotation), sinR = Math.sin(state.rotation)
-  const rx = (offX * cosR - offY * sinR) * state.scale
-  const ry = (offX * sinR + offY * cosR) * state.scale
   let dx = state.dx, dy = state.dy
   if (state.frame === 'piece') {
     const cosA = Math.cos(piece.angle), sinA = Math.sin(piece.angle)
@@ -74,25 +122,69 @@ function applyStateToCell(cell: ComposedCell, piece: Piece, state: PieceState): 
     const rdy = dx * sinA + dy * cosA
     dx = rdx; dy = rdy
   }
-  cell.x = piece.cx + rx + dx
-  cell.y = piece.cy + ry + dy
+  // The behaviour as a map on layer coordinates: p ↦ s·R·p + t. `pure` is the same map when
+  // it is only a translation — written as a plain add so composing two translations is exact
+  // (the round trip through the piece centre is not, and two bars in the other order would
+  // then land an ULP apart).
+  const pure = state.rotation === 0 && state.scale === 1
+  const map = (px: number, py: number): [number, number] => {
+    if (pure) return [px + dx, py + dy]
+    const ox = px - piece.cx, oy = py - piece.cy
+    return [
+      piece.cx + (ox * cosR - oy * sinR) * state.scale + dx,
+      piece.cy + (ox * sinR + oy * cosR) * state.scale + dy,
+    ]
+  }
+
+  if (state.clip) {
+    // The resting box, carried into the frame the earlier bars left this piece in.
+    const c = Math.cos(cell.accRot), s = Math.sin(cell.accRot)
+    cell.clip = {
+      x: cell.accScale * (piece.cx * c - piece.cy * s) + cell.accX,
+      y: cell.accScale * (piece.cx * s + piece.cy * c) + cell.accY,
+      w: piece.w * cell.accScale,
+      h: piece.h * cell.accScale,
+      angle: piece.angle + cell.accRot,
+    }
+  } else if (cell.clip) {
+    const [cx, cy] = map(cell.clip.x, cell.clip.y)
+    cell.clip = {
+      x: cx, y: cy,
+      w: cell.clip.w * state.scale,
+      h: cell.clip.h * state.scale,
+      angle: cell.clip.angle + state.rotation,
+    }
+  }
+
+  const [nx, ny] = map(cell.x, cell.y)
+  cell.x = nx
+  cell.y = ny
   cell.rotation += state.rotation
   cell.scale *= state.scale
   cell.opacity *= state.opacity
-  if (state.clip) cell.clip = { x: piece.cx, y: piece.cy, w: piece.w, h: piece.h, angle: piece.angle }
+  // acc ← thisBehaviour ∘ acc. The linear parts multiply; the translation is the old one
+  // carried THROUGH this behaviour's map, which is exactly `map` applied to it as a point.
+  const [ax, ay] = map(cell.accX, cell.accY)
+  cell.accX = ax
+  cell.accY = ay
+  cell.accRot += state.rotation
+  cell.accScale *= state.scale
 }
 
 export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number, cells: TextCell[], frame: FrameBox): TextFrame {
   const active = behaviours.filter((b) => isTextBehaviour(b) && REGISTRY.has(b.kind))
   if (active.length === 0 || cells.length === 0) return { atRest: true, cells: [] }
 
-  const composed: ComposedCell[] = cells.map((c) => ({ x: c.x, y: c.y, rotation: c.angle, scale: 1, opacity: 1 }))
+  const composed: ComposedCell[] = cells.map((c) => ({
+    x: c.x, y: c.y, rotation: c.angle, scale: 1, opacity: 1,
+    accX: 0, accY: 0, accRot: 0, accScale: 1,
+  }))
   let allRest = true
   let cursor: CursorDraw | undefined
 
   for (const b of active) {
     const def = REGISTRY.get(b.kind)!
-    const params: Record<string, unknown> = { by: 'letters', stagger: 0.04, order: 'ltr', seed: 1, ease: 'easeOut', ...(b.params ?? {}) }
+    const params: Record<string, unknown> = { ...SHARED_DEFAULTS, ...(b.params ?? {}) }
     const by = oneOf(params.by, PIECE_BY, 'letters')
     const order = oneOf(params.order, ORDERS, 'ltr')
     const seed = num(params.seed, 1)
@@ -110,7 +202,8 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
     }
     const { delays, pieceDur } = pieceTiming(ranks, stagger, D)
     const ease = params.ease as Ease
-    const spring = isSpringEase(ease)
+    // Only a kind that opted in (`springTail`) keeps running past its bar under a spring.
+    const spring = isSpringEase(ease) && def.springTail === true
     const phase = def.phase(params)
 
     const visible: boolean[] = new Array(pieces.length)
@@ -139,7 +232,7 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
           // A spring keeps settling past p = 1 (never hit by the branch above); it is at REST
           // once p reaches springSettle(bounce), the point where springProgress starts returning
           // exactly 1 — otherwise atRest would never become true again for this piece.
-          if (isSpringEase(ease) && rawP >= springSettle(ease.bounce)) isRest = true
+          if (spring && isSpringEase(ease) && rawP >= springSettle(ease.bounce)) isRest = true
         }
       } else if (phase === 'out') {
         if (rawP <= 0) { state = REST; isRest = true; visible[i] = true }
@@ -186,4 +279,50 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
   const result: TextFrame = { atRest: allRest, cells: outCells }
   if (cursor) result.cursor = cursor
   return result
+}
+
+/**
+ * Could ANY of these bars move a letter at `t`? The same phase rules as
+ * `evaluateTextBehaviours`, decided from the bars alone — no cells, no layout, no measuring.
+ *
+ * This is what keeps an idle text layer idle. `applyTextBehaviours` attaches its per-frame
+ * `textMotion` only when this says yes, so a layer whose 0.8s entrance finished at t = 0.8 is
+ * an ordinary text layer for the rest of the clip: whole-run `fillText`, and eligible for the
+ * silhouette raster cache again (which skips any layer carrying `textMotion`, since moving
+ * letters are never twice the same raster).
+ *
+ * The rules, per bar:
+ *  - entrance (`in`): inert once `t` is past the bar's end — before and during it the pieces
+ *    are hidden or travelling. A `springTail` kind under a spring easing keeps settling past
+ *    that end; the true end is `lastDelay + pieceDur × springSettle`, and the piece count is
+ *    unknown here, so the CONSERVATIVE bound `start + D × springSettle` is used instead. It is
+ *    never early: `D ≥ pieceDur` and `springSettle > 1`, so `D×S ≥ lastDelay + pieceDur×S`.
+ *  - exit (`out`): inert only BEFORE the bar. A finished exit is not inert — its pieces are
+ *    hidden, which is a thing to draw (nothing), not a thing to skip.
+ *  - span (`loop`): inert on both sides of the bar.
+ *  - an unknown or unregistered kind does nothing, so it is inert.
+ *
+ * The bounds are STRICT on purpose: a typewriter paints its cursor at both closed edges of
+ * its bar, so only the open interval is honestly inert. Erring live costs one frame of
+ * glyph-by-glyph drawing; erring inert would drop that cursor.
+ */
+export function textCanMove(behaviours: StoredBehaviour[], t: number): boolean {
+  for (const b of behaviours) {
+    if (!isTextBehaviour(b) || !REGISTRY.has(b.kind)) continue
+    const def = REGISTRY.get(b.kind)!
+    const params: Record<string, unknown> = { ...SHARED_DEFAULTS, ...(b.params ?? {}) }
+    const start = b.timing.start + (b.timing.delay ?? 0)
+    const D = Math.max(0.05, b.timing.duration)
+    const phase = def.phase(params)
+    if (phase === 'out') {
+      if (!(t < start)) return true
+      continue
+    }
+    const ease = params.ease as Ease
+    const tail = phase === 'in' && def.springTail === true && isSpringEase(ease) ? springSettle(ease.bounce) : 1
+    const end = start + D * tail
+    // NaN timings compare false everywhere, which lands on "live" — the safe side.
+    if (phase === 'in' ? !(t > end) : !(t < start || t > end)) return true
+  }
+  return false
 }

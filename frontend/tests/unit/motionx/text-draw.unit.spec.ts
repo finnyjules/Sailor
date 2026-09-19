@@ -27,6 +27,7 @@ import type { StoredBehaviour } from '~/lib/motionx'
 import { createTextLayer, __drawTextForTest } from '~/composables/useCompositorLayers'
 import {
   drawTextCells,
+  hasComplexScript,
   lineAtRest,
   movingTextFrame,
   pathGlyphCells,
@@ -341,6 +342,48 @@ describe('movingTextFrame', () => {
   })
   it('returns null for no cells', () => {
     expect(movingTextFrame([], [fade()], 0.5, { w: W, h: W })).toBeNull()
+  })
+})
+
+// ── 7b. complex scripts: animate nothing rather than animate them wrongly ───
+//
+// The cells are cut with `Array.from`, which is codepoint-by-codepoint: a combining mark
+// becomes its own "letter", a ZWJ emoji comes apart into its parts, and an RTL run is
+// animated left-to-right in memory order, which is the wrong end of the word. Phase 1
+// declines such text instead: the static draw is used and nothing animates.
+
+describe('hasComplexScript', () => {
+  it('plain Latin, digits, punctuation and a lone emoji are fine', () => {
+    for (const s of ['AB CD', 'Hello, world!', '2026', 'café', '😀 hi']) expect(hasComplexScript(s)).toBe(false)
+  })
+  it('a combining mark is complex', () => {
+    expect(hasComplexScript('é')).toBe(true)          // e + combining acute
+    expect(hasComplexScript('नमस्ते')).toBe(true)              // Devanagari matras
+  })
+  it('a ZWJ sequence or a variation selector is complex', () => {
+    expect(hasComplexScript('👨‍👩‍👧')).toBe(true)
+    expect(hasComplexScript('❤️')).toBe(true)
+  })
+  it('a strong RTL script is complex', () => {
+    expect(hasComplexScript('שלום')).toBe(true)
+    expect(hasComplexScript('مرحبا')).toBe(true)
+    expect(hasComplexScript('AB שלום')).toBe(true)          // one RTL word is enough
+  })
+})
+
+describe('complex text is drawn statically, however live the bar is', () => {
+  it('movingTextFrame declines it', () => {
+    expect(movingTextFrame(cellsOf('שלום'), [fade()], 0.5, { w: W, h: W })).toBeNull()
+    expect(movingTextFrame(cellsOf('é'), [fade()], 0.5, { w: W, h: W })).toBeNull()
+  })
+  it('the draw takes the untouched static path', () => {
+    const plain = record(textLayer({ text: 'שלום' }))
+    expect(record(withMotion(textLayer({ text: 'שלום' }), 0.5))).toEqual(plain)
+    expect(fills(plain)).toHaveLength(1)                    // one whole-run fillText, not four
+  })
+  it('path text is declined the same way', () => {
+    const plain = record(textLayer({ text: 'שלום', path: ring }))
+    expect(record(withMotion(textLayer({ text: 'שלום', path: ring }), 0.5))).toEqual(plain)
   })
 })
 

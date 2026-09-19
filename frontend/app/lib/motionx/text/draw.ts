@@ -124,17 +124,35 @@ export function pathGlyphCells(placed: PlacedLike[], run: string, fontPx: number
 }
 
 /**
+ * PHASE-1 LIMITATION: text a per-codepoint split would mangle is not animated at all.
+ *
+ * Cells are cut with `Array.from`, one cell per codepoint. That is right for Latin and for a
+ * lone emoji, and wrong for everything below: a combining mark would become its own "letter"
+ * and fly off without the base it sits on; a ZWJ emoji would come apart into its people; and
+ * an RTL run would animate in memory order, i.e. from the wrong end of the word. Until the
+ * cell builders segment by GRAPHEME and order by bidi run, such text takes the static path
+ * and simply does not animate — an honest nothing rather than a wrong something.
+ */
+export function hasComplexScript(text: string): boolean {
+  return COMPLEX_SCRIPT.test(text)
+}
+const COMPLEX_SCRIPT = /[\p{M}‍️֐-׿؀-ۿݐ-ݿࢠ-ࣿיִ-﷿ﹰ-﻿]/u
+
+/**
  * Evaluate `behaviours` over `cells` at `t` — or `null` when there is nothing to animate
  * this frame.
  *
  * `null` is the load-bearing return: it is what sends the caller down its UNTOUCHED static
  * path, so text whose behaviours are all outside their bars keeps the kerning and ligatures
- * of whole-run `fillText` instead of being redrawn glyph by glyph to look the same.
+ * of whole-run `fillText` instead of being redrawn glyph by glyph to look the same. It is
+ * also how complex scripts (see `hasComplexScript`) opt out of the per-glyph path entirely —
+ * one guard here covers both the flat draw and the on-path one.
  */
 export function movingTextFrame(
   cells: TextCell[], behaviours: StoredBehaviour[], t: number, frame: FrameBox,
 ): MovingText | null {
   if (!cells.length) return null
+  for (const c of cells) if (hasComplexScript(c.char)) return null
   const evaluated = evaluateTextBehaviours(behaviours, t, cells, frame)
   return evaluated.atRest ? null : { cells, frame: evaluated }
 }

@@ -164,6 +164,26 @@ describe('applyTextBehaviours', () => {
     expect(applyTextBehaviours(arr, [cascade('R1')], 0.5)).toBe(arr)
   })
 
+  // `textMotion` excludes a layer from the silhouette raster cache and sends every draw down
+  // the per-glyph path, so it must only be attached while a bar can actually move a letter —
+  // not for the whole clip because an entrance played once at the start.
+  it('same reference once every bar on that layer has finished (an entrance)', () => {
+    const arr = [text('L1')]
+    expect(applyTextBehaviours(arr, [cascade('L1')], 5)).toBe(arr)      // bar is 0 → 1
+  })
+
+  it('STILL clones after a finished exit — hidden is not at rest', () => {
+    const out = applyTextBehaviours([text('L1')], [cascade('L1', { params: { dir: 'out', style: 'fade' } })], 5)
+    expect((out[0] as any).textMotion.t).toBe(5)
+  })
+
+  it('a layer whose own bars are done is left alone while another layer still moves', () => {
+    const a = text('L1'), b = text('L2')
+    const out = applyTextBehaviours([a, b], [cascade('L1'), cascade('L2', { timing: { start: 4, duration: 1 } })], 4.5)
+    expect(out[0]).toBe(a)
+    expect((out[1] as any).textMotion.t).toBe(4.5)
+  })
+
   it("the clone carries only that layer's own text.* behaviours", () => {
     const out = applyTextBehaviours(
       [text('L1'), text('L2')],

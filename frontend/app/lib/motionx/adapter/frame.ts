@@ -4,7 +4,7 @@
 import { compileBehaviour, evaluateTracks, type Behaviour, type BehaviourTarget, type PropertyValue, type StoredBehaviour, type Track } from '~/lib/motionx'
 // The index, not `./evaluate` — importing it is what REGISTERS the four letter behaviour
 // kinds, and this file is on the only path the painter reaches them by.
-import { isTextBehaviour } from '~/lib/motionx/text'
+import { isTextBehaviour, textCanMove } from '~/lib/motionx/text'
 import type { GradientStop as ColorStop } from '~/lib/color/harmony'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { isGradient, type Paint } from '~/lib/compositor/paint'
@@ -91,6 +91,11 @@ export interface TextMotion { behaviours: StoredBehaviour[]; t: number }
  * letter behaviours never even allocates — and, downstream, never leaves the byte-identical
  * static draw. Non-targeted layers come back by identity. A `text.*` behaviour aimed at a
  * non-text layer is ignored rather than attached: nothing would read it.
+ *
+ * A layer is ALSO left alone at instants when none of its own bars can move a letter
+ * (`textCanMove`) — an entrance that finished at t = 0.8 must not cost the rest of the clip
+ * a per-glyph redraw, nor keep the layer out of the silhouette raster cache, which skips
+ * anything carrying `textMotion`.
  */
 export function applyTextBehaviours(
   layers: LocalLayer[], behaviours: StoredBehaviour[] | undefined, t: number | undefined,
@@ -107,7 +112,7 @@ export function applyTextBehaviours(
   const next = layers.map((layer) => {
     if (layer.kind !== 'text') return layer
     const own = byLayer.get(layer.id)
-    if (!own) return layer
+    if (!own || !textCanMove(own, t)) return layer
     changed = true
     return { ...layer, textMotion: { behaviours: own, t } as TextMotion } as unknown as LocalLayer
   })
