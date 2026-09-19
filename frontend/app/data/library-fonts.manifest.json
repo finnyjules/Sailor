@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-09T09:41:36.393Z",
+  "generatedAt": "2026-09-15T21:10:05.338Z",
   "fontsRoot": "Assets/Fonts",
   "foundries": [
     {
@@ -9,6 +9,10 @@
     {
       "id": "off-type",
       "label": "Off-Type"
+    },
+    {
+      "id": "bram-naus",
+      "label": "Featured"
     }
   ],
   "families": [
@@ -2593,6 +2597,22 @@
           "src": "PPF Fonts - v7.72/Editorial Old/otf/PPEditorialOld-Italic.otf"
         },
         {
+          "id": "pangram-ppeditorialold-medium",
+          "weight": 500,
+          "style": "Medium",
+          "italic": false,
+          "postscriptName": "PPEditorialOld-Medium",
+          "src": "PPF Fonts - v7.72/Editorial Old/ttf/PPEditorialOld-Medium.ttf"
+        },
+        {
+          "id": "pangram-ppeditorialold-mediumitalic",
+          "weight": 500,
+          "style": "Medium Italic",
+          "italic": true,
+          "postscriptName": "PPEditorialOld-MediumItalic",
+          "src": "PPF Fonts - v7.72/Editorial Old/ttf/PPEditorialOld-MediumItalic.ttf"
+        },
+        {
           "id": "pangram-ppeditorialold-bold",
           "weight": 700,
           "style": "Bold",
@@ -2607,6 +2627,22 @@
           "italic": true,
           "postscriptName": "PPEditorialOld-BoldItalic",
           "src": "PPF Fonts - v7.72/Editorial Old/otf/PPEditorialOld-BoldItalic.otf"
+        },
+        {
+          "id": "pangram-ppeditorialold-ultrabold",
+          "weight": 800,
+          "style": "Ultrabold",
+          "italic": false,
+          "postscriptName": "PPEditorialOld-Ultrabold",
+          "src": "PPF Fonts - v7.72/Editorial Old/ttf/PPEditorialOld-Ultrabold.ttf"
+        },
+        {
+          "id": "pangram-ppeditorialold-ultrabolditalic",
+          "weight": 800,
+          "style": "Ultrabold Italic",
+          "italic": true,
+          "postscriptName": "PPEditorialOld-UltraboldItalic",
+          "src": "PPF Fonts - v7.72/Editorial Old/ttf/PPEditorialOld-UltraboldItalic.ttf"
         },
         {
           "id": "pangram-ppeditorialold-heavy",
@@ -3384,6 +3420,14 @@
           "italic": true,
           "postscriptName": "PPFraktionSans-LightItalic",
           "src": "PPF Fonts - v7.72/Fraktion/PPFraktionSans-LightItalic.otf"
+        },
+        {
+          "id": "pangram-ppfraktionsans",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "PPFraktionSans",
+          "src": "PPF Fonts - v7.72/Fraktion/PPFraktionSans-Variable.ttf"
         },
         {
           "id": "pangram-ppfraktionsans-bold",
@@ -7307,6 +7351,21 @@
       ]
     },
     {
+      "id": "pangram-pp-nikkei-crests",
+      "family": "PP Nikkei Crests",
+      "foundry": "pangram",
+      "faces": [
+        {
+          "id": "pangram-ppnikkeicrests-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "PPNikkeiCrests-Regular",
+          "src": "PPF Fonts - v7.72/Nikkei/Crests/PPNikkeiCrests.ttf"
+        }
+      ]
+    },
+    {
       "id": "pangram-pp-nikkei-journal",
       "family": "PP Nikkei Journal",
       "foundry": "pangram",
@@ -11042,6 +11101,14 @@
           "src": "PPF Fonts - v7.72/Writer/PPWriter-ThinItalic.otf"
         },
         {
+          "id": "pangram-ppwriter-ultralighttext",
+          "weight": 200,
+          "style": "Ultralight Text",
+          "italic": false,
+          "postscriptName": "PPWriter-UltralightText",
+          "src": "PPF Fonts - v7.72/Writer/PPWriter-UltralightText.woff2"
+        },
+        {
           "id": "pangram-ppwriter-book",
           "weight": 340,
           "style": "Book",
@@ -11162,6 +11229,1928 @@
           "src": "PPF Fonts - v7.72/Writer/PPWriter-BlackItalic.otf"
         }
       ]
+    },
+    {
+      "id": "bram-naus-ia-writer-quattro-s",
+      "family": "iA Writer Quattro S",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-iawriterquattros-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "iAWriterQuattroS-Regular",
+          "src": "Free Fonts/iA Writer Quattro/iAWriterQuattroS-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 11,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-vercetti",
+      "family": "Vercetti",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-vercetti-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Vercetti-Regular",
+          "src": "Free Fonts/Vercetti/Vercetti-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 14,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-national-park",
+      "family": "National Park",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "National Park",
+      "num": 15,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-familjen-grotesk",
+      "family": "Familjen Grotesk",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Familjen Grotesk",
+      "num": 16,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-migha",
+      "family": "Migha",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-migha-thincondensed",
+          "weight": 100,
+          "style": "Thin Condensed",
+          "italic": false,
+          "postscriptName": "Migha-ThinCondensed",
+          "src": "Free Fonts/Migha/Migha_Variable.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 17,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-bricolage-grotesque",
+      "family": "Bricolage Grotesque",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Bricolage Grotesque",
+      "num": 18,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-dela-gothic",
+      "family": "Dela Gothic",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Dela Gothic One",
+      "num": 20,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-junicode",
+      "family": "Junicode",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-junicode-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Junicode-Regular",
+          "src": "Free Fonts/Junicode/Junicode-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 22,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-gabarito",
+      "family": "Gabarito",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Gabarito",
+      "num": 25,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-sora",
+      "family": "Sora",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Sora",
+      "num": 26,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-nacelle",
+      "family": "Nacelle",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-nacelle-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Nacelle-Regular",
+          "src": "Free Fonts/Nacelle/Nacelle-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 27,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-goudy-bookletter-1911",
+      "family": "Goudy Bookletter 1911",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Goudy Bookletter 1911",
+      "num": 28,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-onest",
+      "family": "Onest",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Onest",
+      "num": 29,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-geologica",
+      "family": "Geologica",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Geologica",
+      "num": 30,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-ortica-linear",
+      "family": "Ortica Linear",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-orticalinear-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "OrticaLinear-Regular",
+          "src": "Free Fonts/Ortica Linear/OrticaLinear-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 31,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-overused-grotesk",
+      "family": "Overused Grotesk",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-overusedgrotesk-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "OverusedGrotesk-Regular",
+          "src": "Free Fonts/Overused Grotesk/OverusedGrotesk-Roman.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 32,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-cabinet-grotesk",
+      "family": "Cabinet Grotesk",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-cabinetgrotesk-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "CabinetGrotesk-Regular",
+          "src": "Free Fonts/Cabinet/CabinetGrotesk-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 33,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-tasa-orbiter",
+      "family": "TASA Orbiter",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "TASA Orbiter",
+      "num": 34,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-nan-holo-gigawide",
+      "family": "NaN Holo Gigawide",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-nanhologigawide-ultra",
+          "weight": 900,
+          "style": "Ultra",
+          "italic": false,
+          "postscriptName": "NaNHoloGigawide-Ultra",
+          "src": "Free Fonts/Holo Gigawide Ultra/NaNHoloGigawide-Ultra.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 36,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-absans",
+      "family": "Absans",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-absans-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Absans-Regular",
+          "src": "Free Fonts/Absans/Absans-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 37,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-open-sauce-sans",
+      "family": "Open Sauce Sans",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-opensaucesans-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "OpenSauceSans-Regular",
+          "src": "Free Fonts/Open Sauce Sans/OpenSauceSans-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 38,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-hedvig-letters-serif",
+      "family": "Hedvig Letters Serif",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Hedvig Letters Serif",
+      "num": 39,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-lexend",
+      "family": "Lexend",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Lexend",
+      "num": 40,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-stoke",
+      "family": "Stoke",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Stoke",
+      "num": 41,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-climate-crisis",
+      "family": "Climate Crisis",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Climate Crisis",
+      "num": 42,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-sn-pro",
+      "family": "SN Pro",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "SN Pro",
+      "num": 44,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-violet-sans",
+      "family": "Violet Sans",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-violetsans-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "VioletSans-Regular",
+          "src": "Free Fonts/Violet Sans/VioletSans-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 45,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-ojuju",
+      "family": "Ojuju",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Ojuju",
+      "num": 46,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-sneaky",
+      "family": "Sneaky",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-sneaky-times",
+          "weight": 400,
+          "style": "Times",
+          "italic": false,
+          "postscriptName": "Sneaky-Times",
+          "src": "Free Fonts/Sneaky Times/Sneaky-Times.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 47,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-shantell-sans",
+      "family": "Shantell Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Shantell Sans",
+      "num": 48,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-be-vietnam-pro",
+      "family": "Be Vietnam Pro",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Be Vietnam Pro",
+      "num": 49,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-mochiy-pop-one",
+      "family": "Mochiy Pop One",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Mochiy Pop One",
+      "num": 50,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-gloock",
+      "family": "Gloock",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Gloock",
+      "num": 51,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-new-title",
+      "family": "New Title",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-newtitle-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "NewTitle-Regular",
+          "src": "Free Fonts/New Title/NewTitle-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 52,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-shippori-mincho",
+      "family": "Shippori Mincho",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Shippori Mincho",
+      "num": 53,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-haskoy",
+      "family": "Haskoy",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-haskoy-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Haskoy-Regular",
+          "src": "Free Fonts/Hasköy/Haskoy-variable.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 54,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-realce",
+      "family": "Realce",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-realce-blackv0-006",
+          "weight": 900,
+          "style": "Black v0.006",
+          "italic": false,
+          "postscriptName": "Realce-Blackv0.006",
+          "src": "Free Fonts/Realce/Realce-Black-v0.006.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 55,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-platypi",
+      "family": "Platypi",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Platypi",
+      "num": 56,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-koulen",
+      "family": "Koulen",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Koulen",
+      "num": 57,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-aspekta",
+      "family": "Aspekta",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-aspekta-400",
+          "weight": 400,
+          "style": "400",
+          "italic": false,
+          "postscriptName": "Aspekta-400",
+          "src": "Free Fonts/Aspekta/Aspekta-400.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 58,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-jaro",
+      "family": "Jaro",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Jaro",
+      "num": 59,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-afacad",
+      "family": "Afacad",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Afacad",
+      "num": 60,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-kalnia",
+      "family": "Kalnia",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Kalnia",
+      "num": 61,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-ribes",
+      "family": "Ribes",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-ribes-black",
+          "weight": 900,
+          "style": "Black",
+          "italic": false,
+          "postscriptName": "Ribes-Black",
+          "src": "Free Fonts/Ribes/Ribes-Black.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 62,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-open-runde",
+      "family": "Open Runde",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-openrunde-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "OpenRunde-Regular",
+          "src": "Free Fonts/Open Runde/OpenRunde-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 63,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-anek-bangla",
+      "family": "Anek Bangla",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Anek Bangla",
+      "num": 64,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-galdeano",
+      "family": "Galdeano",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Galdeano",
+      "num": 65,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-heal-the-web-a",
+      "family": "Heal The Web A",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-healtheweba-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "HealTheWebA-Regular",
+          "src": "Free Fonts/Heal The Web A/HealTheWebA-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 66,
+      "license": "MPL-2.0",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-funnel",
+      "family": "Funnel",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Funnel Display",
+      "num": 67,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-neue-regrade",
+      "family": "Neue Regrade",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-neueregrade-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "NeueRegrade-Regular",
+          "src": "Free Fonts/Neue Regrade/Neue Regrade Variable.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 68,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-damion",
+      "family": "Damion",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Damion",
+      "num": 69,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Script"
+    },
+    {
+      "id": "bram-naus-lct-mogi",
+      "family": "LCT Mogi",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-lctmogi-a",
+          "weight": 400,
+          "style": "A",
+          "italic": false,
+          "postscriptName": "LCTMogi-A",
+          "src": "Free Fonts/LC Mogi/LCTMogi-A.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 70,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-cause",
+      "family": "Cause",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Cause",
+      "num": 71,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Script"
+    },
+    {
+      "id": "bram-naus-nt-somic",
+      "family": "NT Somic",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-ntsomic-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "NTSomic-Regular",
+          "src": "Free Fonts/NT Somic/NTSomic-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 72,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-fungis",
+      "family": "FUNGIS",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-fungis-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "FUNGIS-Regular",
+          "src": "Free Fonts/Fungis/FUNGIS Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 74,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-gully",
+      "family": "Gully",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-gully-bold",
+          "weight": 700,
+          "style": "Bold",
+          "italic": false,
+          "postscriptName": "Gully-Bold",
+          "src": "Free Fonts/Gully/Gully-Bold.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 75,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-atkinson-hyperlegible",
+      "family": "Atkinson Hyperlegible",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Atkinson Hyperlegible",
+      "num": 77,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-frick-0-3",
+      "family": "Frick 0.3",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-frick0-3-regular",
+          "weight": 700,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Frick0.3-Regular",
+          "src": "Free Fonts/Frick/Frick0.3-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 79,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-petrona",
+      "family": "Petrona",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Petrona",
+      "num": 80,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-glyseric",
+      "family": "Glyseric",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-glyseric-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Glyseric-Regular",
+          "src": "Free Fonts/Glyseric/Glyseric.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 82,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-murecho",
+      "family": "Murecho",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Murecho",
+      "num": 83,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-ar-one-sans",
+      "family": "AR One Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "AR One Sans",
+      "num": 84,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-lt-museum",
+      "family": "LT Museum",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-ltmuseum-medium",
+          "weight": 500,
+          "style": "Medium",
+          "italic": false,
+          "postscriptName": "LTMuseum-Medium",
+          "src": "Free Fonts/Museum/LTMuseum-Medium.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 85,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-parkinsans",
+      "family": "Parkinsans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Parkinsans",
+      "num": 87,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-faculty-glyphic",
+      "family": "Faculty Glyphic",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Faculty Glyphic",
+      "num": 88,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-doto",
+      "family": "Doto",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Doto",
+      "num": 89,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-azeret-mono",
+      "family": "Azeret Mono",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Azeret Mono",
+      "num": 90,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-pretendard",
+      "family": "Pretendard",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-pretendard-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Pretendard-Regular",
+          "src": "Free Fonts/Pretendard/Pretendard-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 91,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-ovo",
+      "family": "Ovo",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Ovo",
+      "num": 92,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-moche",
+      "family": "Moche",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-moche-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Moche-Regular",
+          "src": "Free Fonts/Moche/Moche-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 93,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-ronzino",
+      "family": "Ronzino",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-ronzino-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Ronzino-Regular",
+          "src": "Free Fonts/Ronzino/Ronzino-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 94,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-lt-superior",
+      "family": "LT Superior",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-ltsuperior-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "LTSuperior-Regular",
+          "src": "Free Fonts/Superior/LTSuperior-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 95,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-maragsa",
+      "family": "Maragsa",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-maragsadisplay",
+          "weight": 400,
+          "style": "Display",
+          "italic": false,
+          "postscriptName": "MaragsaDisplay",
+          "src": "Free Fonts/Maragsa/Maragsâ-Display.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 96,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-liter",
+      "family": "Liter",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Liter",
+      "num": 97,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-aujournuit",
+      "family": "Aujournuit",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-aujournuit-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Aujournuit-Regular",
+          "src": "Free Fonts/Aujournuit/Aujournuit-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 98,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-boldonse",
+      "family": "Boldonse",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Boldonse",
+      "num": 99,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-modelo",
+      "family": "Modelo",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-modelo",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Modelo",
+          "src": "Free Fonts/Modelo/ModeloGX.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 100,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-special-gothic",
+      "family": "Special Gothic",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Special Gothic",
+      "num": 102,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-phudu",
+      "family": "Phudu",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Phudu",
+      "num": 103,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-golos-text",
+      "family": "Golos Text",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Golos Text",
+      "num": 104,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-epistle",
+      "family": "Epistle",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-epistle-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Epistle-Regular",
+          "src": "Free Fonts/Epistle/Epistle-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 105,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-cascadia-mono",
+      "family": "Cascadia Mono",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Cascadia Mono",
+      "num": 106,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-ancizar-sans",
+      "family": "Ancizar Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Ancizar Sans",
+      "num": 107,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-albert-sans",
+      "family": "Albert Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Albert Sans",
+      "num": 108,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-oak-sans",
+      "family": "Oak Sans",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-oaksans-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "OakSans-Regular",
+          "src": "Free Fonts/Oak Sans/OakSans-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 110,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-commissioner",
+      "family": "Commissioner",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Commissioner",
+      "num": 111,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-bdo-grotesk",
+      "family": "BDO Grotesk",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-bdogrotesk-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "BDOGrotesk-Regular",
+          "src": "Free Fonts/BDO Grotesk/BDOGrotesk-Regular.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 112,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-maname",
+      "family": "Maname",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Maname",
+      "num": 113,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-jost",
+      "family": "Jost",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Jost",
+      "num": 114,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-hanken-grotesk",
+      "family": "Hanken Grotesk",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Hanken Grotesk",
+      "num": 115,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-necto-mono",
+      "family": "Necto Mono",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-nectomono-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "NectoMono-Regular",
+          "src": "Free Fonts/Necto Mono/NectoMono-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 116,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Mono"
+    },
+    {
+      "id": "bram-naus-quattrocento",
+      "family": "Quattrocento",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Quattrocento",
+      "num": 117,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-esse-grotesk",
+      "family": "Esse Grotesk",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-essegroteskregular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "EsseGroteskRegular",
+          "src": "Free Fonts/Esse Grotesk/EsseGrotesk.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 118,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-kyivtype-sans",
+      "family": "KyivType Sans",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-kyivtypesans",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "KyivTypeSans",
+          "src": "Free Fonts/Kyiv Type Sans/KyivTypeSans-VarGX.ttf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 119,
+      "license": "unknown",
+      "redistributable": false,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-tiktok-sans",
+      "family": "TikTok Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "TikTok Sans",
+      "num": 120,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-nata-sans",
+      "family": "Nata Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Nata Sans",
+      "num": 121,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-tuffy",
+      "family": "Tuffy",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Tuffy",
+      "num": 122,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-sunday-masthead",
+      "family": "Sunday Masthead",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-sundaymasthead-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "SundayMasthead-Regular",
+          "src": "Free Fonts/Sunday Masthead/SundayMasthead-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 123,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-syne",
+      "family": "Syne",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Syne",
+      "num": 125,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-caudex",
+      "family": "Caudex",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Caudex",
+      "num": 126,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-alata",
+      "family": "Alata",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Alata",
+      "num": 127,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-alan",
+      "family": "Alan",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Alan Sans",
+      "num": 128,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-zalando-sans",
+      "family": "Zalando Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Zalando Sans",
+      "num": 130,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-schibsted-grotesk",
+      "family": "Schibsted Grotesk",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Schibsted Grotesk",
+      "num": 131,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-averia-serif-libre",
+      "family": "Averia Serif Libre",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Averia Serif Libre",
+      "num": 132,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-stack-sans",
+      "family": "Stack Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Stack Sans Text",
+      "num": 133,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-source-serif",
+      "family": "Source Serif",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Source Serif 4",
+      "num": 134,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-cal-sans",
+      "family": "Cal Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Cal Sans",
+      "num": 135,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-mattone",
+      "family": "Mattone",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-mattone-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Mattone-Regular",
+          "src": "Free Fonts/Mattone/Mattone-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 136,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-feroniapi",
+      "family": "Feroniapi",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-feroniapi",
+          "weight": 500,
+          "style": "MediumItalic",
+          "italic": true,
+          "postscriptName": "Feroniapi",
+          "src": "Free Fonts/Feroniapi/Feroniapi-MediumItalic.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 137,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-google-sans",
+      "family": "Google Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Google Sans",
+      "num": 138,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-epilogue",
+      "family": "Epilogue",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Epilogue",
+      "num": 141,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-lilex",
+      "family": "Lilex",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Lilex",
+      "num": 142,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-uncut-sans",
+      "family": "Uncut Sans",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-uncutsans-rg",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "UncutSans-Rg",
+          "src": "Free Fonts/Uncut Sans/UncutSans-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 143,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-now",
+      "family": "Now",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-now-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Now-Regular",
+          "src": "Free Fonts/Now/Now-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 145,
+      "license": "Free-noredist",
+      "redistributable": false,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-paysage",
+      "family": "Paysage",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-paysage-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Paysage-Regular",
+          "src": "Free Fonts/Paysage/Paysage-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 148,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-miranda-sans",
+      "family": "Miranda Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Miranda Sans",
+      "num": 149,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-lct-ciburial",
+      "family": "LCT-Ciburial",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-lct-ciburial-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "LCT-Ciburial-Regular",
+          "src": "Free Fonts/LCT Ciburial/LCT-Ciburial-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 151,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-kecal",
+      "family": "Kecal",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-kecal-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "Kecal-Regular",
+          "src": "Free Fonts/Kecal/Kecal-Regular.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "num": 152,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Display"
+    },
+    {
+      "id": "bram-naus-hepta-slab",
+      "family": "Hepta Slab",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Hepta Slab",
+      "num": 153,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-spectral",
+      "family": "Spectral",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Spectral",
+      "num": 155,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Serif"
+    },
+    {
+      "id": "bram-naus-strichpunkt-sans",
+      "family": "Strichpunkt Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Strichpunkt Sans",
+      "num": 156,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-scoutie-sans",
+      "family": "Scoutie Sans",
+      "foundry": "bram-naus",
+      "faces": [],
+      "source": "google",
+      "googleFamily": "Scoutie Sans",
+      "num": 157,
+      "license": "OFL-1.1",
+      "redistributable": true,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-abc-areal-superfamily-variable",
+      "family": "ABC Areal Superfamily Variable",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-abcarealsuperfamilyvariable-regular",
+          "weight": 400,
+          "style": "Regular",
+          "italic": false,
+          "postscriptName": "ABCArealSuperfamilyVariable-Regular",
+          "src": "Free Fonts/ABC Areal/ABCArealSuperfamilyVariable.woff2"
+        }
+      ],
+      "source": "self-hosted",
+      "license": "Dinamo trial (free to use, no redistribution)",
+      "redistributable": false,
+      "category": "Sans"
+    },
+    {
+      "id": "bram-naus-ladi",
+      "family": "Ladi",
+      "foundry": "bram-naus",
+      "faces": [
+        {
+          "id": "bram-naus-ladi-weak",
+          "weight": 300,
+          "style": "Weak",
+          "italic": false,
+          "postscriptName": "Ladi-Weak",
+          "src": "Free Fonts/Ladi/Ladi-Weak.otf"
+        },
+        {
+          "id": "bram-naus-ladi-gross",
+          "weight": 400,
+          "style": "Gross",
+          "italic": false,
+          "postscriptName": "Ladi-Gross",
+          "src": "Free Fonts/Ladi/Ladi-Gross.otf"
+        },
+        {
+          "id": "bram-naus-ladi-dense",
+          "weight": 700,
+          "style": "Dense",
+          "italic": false,
+          "postscriptName": "Ladi-Dense",
+          "src": "Free Fonts/Ladi/Ladi-Dense.otf"
+        }
+      ],
+      "source": "self-hosted",
+      "license": "unknown (free to use per owner)",
+      "redistributable": false,
+      "category": "Display"
     }
   ]
 }

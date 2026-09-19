@@ -381,6 +381,101 @@ describe('animatableTargets: treatments', () => {
     for (const p of rampPaths) expect(onPaths, p).toContain(p)
   })
 
+  // S5: a finish is a treatment like any other from the motion vantage point — no per-kind edit
+  // to animatableTargets was needed for opalescence/foilShimmer/matcapCoat to become motion
+  // targets. matcapCoat's `matcap` dial is a `select`, not a `slider` — `usable` (this file's
+  // `c.kind === 'slider'` gate) correctly withholds it exactly like a treatment `color` row,
+  // while its `strength` slider is offered like any other.
+  it('emits id-addressed slider paths for a stacked opalescence + matcapCoat finish; withholds the matcap select', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Gem'
+    const opal = createTreatment('opalescence')
+    const matcap = createTreatment('matcapCoat')
+    box.treatments = [opal, matcap]
+    doc.objects.push(box)
+    const targets = animatableTargets(doc)
+    const paths = targets.map((t) => t.path)
+    for (const field of ['strength', 'frequency', 'hueShift', 'angleMix']) {
+      expect(paths).toContain(`objects.${box.id}.treatments.${opal.id}.${field}`)
+    }
+    expect(paths).toContain(`objects.${box.id}.treatments.${matcap.id}.strength`)
+    expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${matcap.id}.strength`)?.label)
+      .toBe('Gem · Matcap coat strength')
+    // The select is not a track target at all.
+    expect(paths).not.toContain(`objects.${box.id}.treatments.${matcap.id}.matcap`)
+  })
+
+  // S6: a motion-family treatment is a treatment like any other from the motion vantage point —
+  // no per-kind edit to animatableTargets is needed for velocityBlur/ghostTrails to become
+  // motion targets, because the derivation runs over treatmentControls(kind) via
+  // iterateTreatmentControls. Both kinds are numeric-only (no colour rows), so every dial lists.
+  it('emits id-addressed slider paths for velocityBlur + ghostTrails dials (no per-kind edit)', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Mover'
+    const vb = createTreatment('velocityBlur')
+    const gt = createTreatment('ghostTrails')
+    box.treatments = [vb, gt]
+    doc.objects.push(box)
+    const targets = animatableTargets(doc)
+    const paths = targets.map((t) => t.path)
+    for (const field of ['amount', 'shutter']) {
+      expect(paths).toContain(`objects.${box.id}.treatments.${vb.id}.${field}`)
+    }
+    for (const field of ['count', 'spacing', 'fade']) {
+      expect(paths).toContain(`objects.${box.id}.treatments.${gt.id}.${field}`)
+    }
+    // Label convention (agentControls.treatmentRowLabel): "<object> · <kind label> <lowercased row>".
+    expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${vb.id}.amount`)?.label)
+      .toBe('Mover · Velocity blur amount')
+    expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${gt.id}.count`)?.label)
+      .toBe('Mover · Ghost trails copies')
+  })
+
+  // S6: SET each motion-family dial by its stable id — the write path is the same generic
+  // nested-id resolver every treatment dial uses, so no per-kind write code was needed. Proves
+  // the derivation is bidirectional: the dial is not just listed as a target, a track aimed at it
+  // actually lands on the right treatment by id.
+  it('a track writes through velocityBlur amount + ghostTrails fade by their stable ids', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects)
+    const vb = createTreatment('velocityBlur')
+    const gt = createTreatment('ghostTrails')
+    box.treatments = [vb, gt]
+    doc.objects.push(box)
+    doc.motion.tracks = [
+      track({ path: `objects.${box.id}.treatments.${vb.id}.amount`, from: 0, to: 2 }),
+      track({ path: `objects.${box.id}.treatments.${gt.id}.fade`, from: 0, to: 0.8 }),
+    ]
+    // Sampled mid-track (t01 = 0.5) rather than at the end, where a looping track wraps to `from`.
+    const out = applyMotionToDoc(doc, 0.5).doc.objects[0]!.treatments!
+    expect((out.find((t) => t.id === vb.id) as any).amount).toBeCloseTo(1, 5)
+    expect((out.find((t) => t.id === gt.id) as any).fade).toBeCloseTo(0.4, 5)
+  })
+
+  // S7: an aiRestyle treatment's NUMERIC dials (strength, mix) are motion targets like every
+  // other treatment slider — derived over treatmentControls(kind) via iterateTreatmentControls,
+  // no per-kind edit. Its prompt (a text row) and model (a select row) are NOT numeric, so they
+  // never reach animatableTargets — exactly as matcapCoat's `matcap` select is withheld.
+  it('emits strength + mix as targets for aiRestyle; withholds prompt (text) and model (select)', () => {
+    const doc = defaultDoc()
+    const box = createPrimitive('box', doc.objects); box.name = 'Statue'
+    const ar = createTreatment('aiRestyle')
+    box.treatments = [ar]
+    doc.objects.push(box)
+    const targets = animatableTargets(doc)
+    const paths = targets.map((t) => t.path)
+    for (const field of ['strength', 'mix']) {
+      expect(paths).toContain(`objects.${box.id}.treatments.${ar.id}.${field}`)
+    }
+    expect(paths).not.toContain(`objects.${box.id}.treatments.${ar.id}.prompt`)
+    expect(paths).not.toContain(`objects.${box.id}.treatments.${ar.id}.model`)
+    // resultRef/inputHash are not control rows at all, so certainly not targets.
+    expect(paths).not.toContain(`objects.${box.id}.treatments.${ar.id}.resultRef`)
+    expect(paths).not.toContain(`objects.${box.id}.treatments.${ar.id}.inputHash`)
+    expect(targets.find((t) => t.path === `objects.${box.id}.treatments.${ar.id}.strength`)?.label)
+      .toBe('Statue · AI restyle strength')
+  })
+
   it('a track on a treatment dial writes through the id, and survives reordering the stack', () => {
     const doc = defaultDoc()
     const box = createPrimitive('box', doc.objects)

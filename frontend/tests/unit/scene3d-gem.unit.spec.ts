@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
-import { gemPoints, gemGeometry } from '~/lib/scene3d/gem'
+import { gemPoints, gemGeometry, GEM_CUTS } from '~/lib/scene3d/gem'
 import { PRIMITIVE_KINDS } from '~/lib/scene3d/config'
 import { PRIMITIVE_PARAMS } from '~/lib/scene3d/primParams'
 import { geometryFor } from '~/lib/scene3d/engine'
@@ -37,12 +37,38 @@ describe('scene3d gem geometry', () => {
     expect(geo.getAttribute('position').count).toBeGreaterThanOrEqual(12)
     geo.dispose()
   })
+
+  it('omitting cut is byte-identical to the raw cut (back-compat)', () => {
+    const a = gemGeometry(20, 0.6, 1, 1)
+    const b = gemGeometry(20, 0.6, 1, 1, 'raw')
+    expect(Array.from(a.getAttribute('position').array))
+      .toEqual(Array.from(b.getAttribute('position').array))
+    a.dispose(); b.dispose()
+  })
+
+  it('every jewellery cut builds a solid, non-degenerate hull', () => {
+    for (const cut of GEM_CUTS) {
+      const geo = gemGeometry(20, 0.5, 1, 0, cut)
+      expect(geo.getAttribute('position').count, cut).toBeGreaterThanOrEqual(12)
+      expect(geo.getAttribute('uv'), cut).toBeTruthy()
+      // the cut must be an actual solid, not the tetrahedron fallback (24 verts)
+      if (cut !== 'raw') expect(geo.getAttribute('position').count, cut).toBeGreaterThan(24)
+      geo.dispose()
+    }
+  })
+
+  it('a higher facet count adds facets to a cut', () => {
+    const low = gemGeometry(8, 0.5, 1, 0, 'brilliant')
+    const high = gemGeometry(40, 0.5, 1, 0, 'brilliant')
+    expect(high.getAttribute('position').count).toBeGreaterThan(low.getAttribute('position').count)
+    low.dispose(); high.dispose()
+  })
 })
 
 describe('scene3d gem registration', () => {
   it('gem is a registered, param-carrying kind', () => {
     expect(PRIMITIVE_KINDS).toContain('gem')
-    expect(PRIMITIVE_PARAMS.gem.map(p => p.key)).toEqual(['points', 'spread', 'depth', 'gemSeed'])
+    expect(PRIMITIVE_PARAMS.gem.map(p => p.key)).toEqual(['cut', 'points', 'spread', 'depth', 'gemSeed'])
   })
 
   it('geometryFor builds the gem hull from params', () => {

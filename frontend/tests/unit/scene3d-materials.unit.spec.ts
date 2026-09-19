@@ -31,6 +31,35 @@ describe('scene3d materials factory', () => {
     expect((m as THREE.MeshStandardMaterial).roughness).toBe(0.2)
   })
 
+  it('gemstone builds a transmissive MeshPhysicalMaterial driven by the stone preset', () => {
+    const ruby = materialFor(base({ type: 'gemstone', stone: 'ruby' })) as THREE.MeshPhysicalMaterial
+    expect(ruby).toBeInstanceOf(THREE.MeshPhysicalMaterial)
+    expect(ruby.transmission).toBe(1)
+    expect(ruby.side).toBe(THREE.DoubleSide)
+    expect(ruby.transparent).toBe(false) // transmission is the see-through path, not alpha blend
+    expect(ruby.ior).toBeCloseTo(1.77, 5)
+    expect(ruby.dispersion).toBeCloseTo(1.4, 5)
+    // The grey-out fix: a coloured stone carries its body colour in a SHORT, tinted attenuation.
+    expect(ruby.attenuationColor.getHexString()).not.toBe('ffffff')
+    expect(Number.isFinite(ruby.attenuationDistance)).toBe(true)
+    expect(ruby.attenuationDistance).toBeGreaterThan(0)
+  })
+
+  it('a diamond gemstone is colourless (no attenuation) with a high IOR and full fire', () => {
+    const d = materialFor(base({ type: 'gemstone', stone: 'diamond' })) as THREE.MeshPhysicalMaterial
+    expect(d.attenuationColor.getHexString()).toBe('ffffff')
+    expect(d.attenuationDistance).toBe(Infinity) // attenDist 0 ⇒ colourless
+    expect(d.ior).toBeCloseTo(2.33, 5)
+    expect(d.dispersion).toBeCloseTo(5, 5)
+  })
+
+  it('gemstone updates the preset in place on a stone change (no rebuild)', () => {
+    const m = materialFor(base({ type: 'gemstone', stone: 'diamond' })) as THREE.MeshPhysicalMaterial
+    expect(updateMaterial(m, base({ type: 'gemstone', stone: 'emerald' }))).toBe(true)
+    expect(m.ior).toBeCloseTo(1.58, 5) // emerald's IOR now
+    expect(m.attenuationColor.getHexString()).not.toBe('ffffff')
+  })
+
   it('requests a rebuild on type change and identity-param change', () => {
     expect(updateMaterial(materialFor(base()), base({ type: 'toon' }))).toBe(false)
     expect(updateMaterial(materialFor(base({ type: 'toon' })), base({ type: 'toon', toonSteps: 5 }))).toBe(false)

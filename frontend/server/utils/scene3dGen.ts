@@ -42,14 +42,32 @@ export const THREE_D_MODELS: Record<string, ThreeDModel> = {
     buildInput: (imageUrl, o) => ({ input_image_url: imageUrl, textured_mesh: o.textured ?? false, ...(o.seed != null ? { seed: o.seed } : {}) }),
     glbUrlFrom: meshUrl,
   },
+  // Rodin (Deemos) — the highest-fidelity option here. Takes an ARRAY of image
+  // urls (`input_image_urls`), and its texture control is `material`: PBR bakes
+  // a textured mesh, Shaded is the quick white/vertex-coloured mesh — so map our
+  // `textured` bool onto it. Seed is a uint16 (0–65535), narrower than our 2e9
+  // range, so fold it in rather than passing an out-of-range value. Output is the
+  // standard model_mesh.url (default geometry_file_format is glb).
+  'rodin': {
+    app: 'fal-ai/hyper3d/rodin',
+    buildInput: (imageUrl, o) => ({
+      input_image_urls: [imageUrl],
+      material: o.textured ? 'PBR' : 'Shaded',
+      ...(o.seed != null ? { seed: ((Math.round(o.seed) % 65536) + 65536) % 65536 } : {}),
+    }),
+    glbUrlFrom: meshUrl,
+  },
   // The others use `image_url`; exact fields verified against fal's live schema at build.
   'trellis-2': {
     app: 'fal-ai/trellis-2',
     buildInput: (imageUrl) => ({ image_url: imageUrl }),
     glbUrlFrom: meshUrl,
   },
+  // Endpoint id is `tripo3d/tripo/…` with NO `fal-ai/` prefix (partner namespace) —
+  // the old `fal-ai/tripo3d/…` slug 404s, silently failing this option. Verified
+  // against fal's live model page.
   'tripo-v2.5': {
-    app: 'fal-ai/tripo3d/tripo/v2.5/image-to-3d',
+    app: 'tripo3d/tripo/v2.5/image-to-3d',
     buildInput: (imageUrl, o) => ({ image_url: imageUrl, texture: o.textured ?? true }),
     glbUrlFrom: (r) => meshUrl(r) ?? ((r as { pbr_model?: { url?: string } })?.pbr_model?.url ?? null),
   },

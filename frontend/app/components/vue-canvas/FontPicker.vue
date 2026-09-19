@@ -9,7 +9,7 @@
  * internally; closes + clears the search on select.
  */
 import { loadGoogleCatalog, type GoogleFont } from '~/data/google-fonts'
-import { filterLibraryGroups } from '~/data/library-fonts'
+import { filterLibraryGroups, featuredFamilies } from '~/data/library-fonts'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import VariableGlyph from '~/components/vue-canvas/studio/VariableGlyph.vue'
 
@@ -85,7 +85,7 @@ function selectPinned(value: string) {
 
 // Source tabs: Google catalog vs. the licensed Pangram/Off-Type library. The
 // library list comes from the static manifest (no network) via filterLibraryGroups.
-type FontPickerTab = 'google' | 'pangram'
+type FontPickerTab = 'google' | 'pangram' | 'featured'
 const activeTab = ref<FontPickerTab>('google')
 const { ensure: ensureLibFace } = useLibraryFonts()
 const filteredLibrary = computed(() => filterLibraryGroups(fontSearch.value))
@@ -97,6 +97,18 @@ function selectLibrary(family: string, foundry: string) {
 watch([activeTab, filteredLibrary], () => {
   if (activeTab.value === 'pangram') for (const g of filteredLibrary.value) for (const f of g.families) ensureLibFace(f.family)
 })
+const filteredFeatured = computed(() => featuredFamilies(fontSearch.value))
+watch([activeTab, filteredFeatured], () => {
+  if (activeTab.value !== 'featured') return
+  for (const f of filteredFeatured.value) {
+    if (f.source === 'google') ensureFontFace(f.googleFamily || f.family)
+    else ensureLibFace(f.family)
+  }
+})
+function selectFeatured(f: { family: string; foundry: string; source?: string; googleFamily?: string }) {
+  if (f.source === 'google') selectGoogle(f.googleFamily || f.family)
+  else selectLibrary(f.family, f.foundry)
+}
 
 // ✨ Describe-a-font search: type a description ("fonts like the Knicks logo"),
 // an LLM suggests real Google families (grounded against fontCatalog), shown atop
@@ -161,6 +173,9 @@ watch(fontPickerOpen, (open) => { if (!open && fontSuggestRan.value) clearFontSu
       <button type="button" @click="activeTab = 'pangram'"
               class="rounded px-2 py-0.5 text-[11px]"
               :class="activeTab === 'pangram' ? 'bg-white/15 text-white/90' : 'text-white/50 hover:text-white/80'">Pangram</button>
+      <button type="button" @click="activeTab = 'featured'"
+              class="rounded px-2 py-0.5 text-[11px]"
+              :class="activeTab === 'featured' ? 'bg-white/15 text-white/90' : 'text-white/50 hover:text-white/80'">Featured</button>
     </div>
     <div v-if="activeTab === 'google'">
       <label v-if="showVariableToggle" class="mb-1 flex items-center justify-between px-1 py-0.5 text-[11px] text-white/55">
@@ -226,6 +241,21 @@ watch(fontPickerOpen, (open) => { if (!open && fontSuggestRan.value) clearFontSu
         </button>
       </template>
       <p v-if="!filteredLibrary.length" class="px-2 py-1 text-white/40">No matches</p>
+    </div>
+    <!-- Featured (curated free) -->
+    <div v-if="activeTab === 'featured'" class="max-h-48 overflow-y-auto">
+      <button
+        v-for="f in filteredFeatured"
+        :key="f.id"
+        type="button"
+        class="flex w-full items-baseline justify-between gap-2 rounded px-2 py-1 text-left hover:bg-white/10"
+        :class="{ 'bg-white/15': (f.source === 'google' ? (f.googleFamily || f.family) : f.family) === modelValue }"
+        @click="selectFeatured(f)"
+      >
+        <span class="truncate text-[13px] text-white/90" :style="{ fontFamily: f.source === 'google' ? (f.googleFamily || f.family) : f.family }">{{ f.family }}</span>
+        <span class="shrink-0 text-[10px] text-white/40">{{ f.category }}</span>
+      </button>
+      <p v-if="!filteredFeatured.length" class="px-2 py-1 text-white/40">No matches</p>
     </div>
   </div>
 </template>

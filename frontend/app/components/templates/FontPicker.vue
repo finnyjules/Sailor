@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Check, ChevronDown, Search, Sparkles, X as XIcon } from 'lucide-vue-next'
 import { TEMPLATE_FONTS } from '~~/shared/template-fonts'
-import { filterLibraryGroups, libraryFamily, librariesByFoundry } from '~/data/library-fonts'
+import { filterLibraryGroups, libraryFamily, librariesByFoundry, featuredFamilies, FEATURED_FOUNDRY_ID } from '~/data/library-fonts'
 
 interface FontEntry {
   name: string
@@ -87,7 +87,7 @@ const triggerRef = ref<HTMLButtonElement>()
 const searchRef = ref<HTMLInputElement>()
 const dropdownPos = ref({ top: 0, left: 0, width: 0 })
 
-type FontTab = 'google' | 'pangram' | 'brand'
+type FontTab = 'google' | 'pangram' | 'brand' | 'featured'
 const activeTab = ref<FontTab>('google')
 
 const { suggestions, loading: suggestLoading, error: suggestError, hasRun: suggestRan, suggest, clear: clearSuggest } = useFontSuggest()
@@ -107,6 +107,12 @@ const filteredGoogle = computed(() => {
 })
 
 const filteredLibrary = computed(() => filterLibraryGroups(search.value))
+
+const filteredFeatured = computed(() => featuredFamilies(search.value))
+function selectFeatured(f: { family: string; source?: string; googleFamily?: string }) {
+  if (f.source === 'google') selectGoogle(f.googleFamily || f.family)
+  else selectLibrary(f.family)
+}
 
 const filteredBrand = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -133,6 +139,10 @@ function ensureGooglePreview(f: FontEntry) {
 function preloadTab(tab: FontTab) {
   if (tab === 'google') for (const f of GOOGLE_ENTRIES.value) ensureGooglePreview(f)
   else if (tab === 'pangram') for (const g of librariesByFoundry()) for (const f of g.families) ensureLibFace(f.family)
+  else if (tab === 'featured') for (const f of filteredFeatured.value) {
+    if (f.source === 'google') ensureGoogleFont(f.googleFamily || f.family)
+    else ensureLibFace(f.family)
+  }
   else for (const f of uploadedFonts.value) ensureUploadedFont(f.family)
 }
 
@@ -149,6 +159,7 @@ watch(uploadedFonts, () => { if (activeTab.value === 'brand') preloadTab('brand'
 function ownerTab(): FontTab {
   const fam = props.modelValue
   if (!fam) return 'google'
+  if (libraryFamily(fam)?.foundry === FEATURED_FOUNDRY_ID) return 'featured'
   if (libraryFamily(fam)) return 'pangram'
   if (uploadedFonts.value.some(f => f.family === fam)) return 'brand'
   return 'google'
@@ -292,6 +303,12 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside, true
         <button
           type="button"
           class="rounded px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer"
+          :class="activeTab === 'featured' ? 'bg-white/15 text-white/90' : 'text-white/40 hover:text-white/70'"
+          @click="setTab('featured')"
+        >Featured</button>
+        <button
+          type="button"
+          class="rounded px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer"
           :class="activeTab === 'brand' ? 'bg-white/15 text-white/90' : 'text-white/40 hover:text-white/70'"
           @click="setTab('brand')"
         >Brand</button>
@@ -408,6 +425,31 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside, true
               <Check v-if="f.family === modelValue" class="size-3 text-action shrink-0" />
             </button>
           </template>
+        </template>
+
+        <!-- Featured tab -->
+        <template v-else-if="activeTab === 'featured'">
+          <button
+            v-for="f in filteredFeatured"
+            :key="f.id"
+            type="button"
+            class="w-full px-3 py-2 flex items-center gap-2 hover:bg-white/[0.05] transition-colors cursor-pointer"
+            :class="(f.source === 'google' ? (f.googleFamily || f.family) : f.family) === modelValue ? 'bg-action/[0.08]' : ''"
+            @click="selectFeatured(f)"
+          >
+            <span
+              class="flex-1 text-left text-[15px] text-white leading-tight truncate"
+              :style="{ fontFamily: f.source === 'google' ? (f.googleFamily || f.family) : f.family }"
+            >{{ f.family }}</span>
+            <span class="text-[9px] text-white/20 uppercase tracking-wider shrink-0 select-none">{{ f.category }}</span>
+            <Check v-if="(f.source === 'google' ? (f.googleFamily || f.family) : f.family) === modelValue" class="size-3 text-action shrink-0" />
+          </button>
+          <div
+            v-if="filteredFeatured.length === 0"
+            class="px-3 py-5 text-[12px] text-white/30 text-center italic"
+          >
+            No fonts match "{{ search }}"
+          </div>
         </template>
 
         <!-- Brand tab -->

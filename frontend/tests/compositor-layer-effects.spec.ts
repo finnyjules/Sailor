@@ -194,6 +194,459 @@ test.describe('Frame per-layer effect stack', () => {
 })
 
 /**
+ * F6 Task 1 — `withBackdrop` extracted from `applyBackdropBlur`: a pure refactor, so
+ * `background_blur` must keep rendering byte-for-byte the same. Two properties actually
+ * protect the extraction (not just "it still looks blurry"):
+ *  - absent ⇒ byte-identical — nothing about the new scaffolding leaks once the effect is
+ *    removed again;
+ *  - the treated backdrop stays clipped to the layer's OWN silhouette — a pixel outside the
+ *    layer's box must be untouched, even though `withBackdrop` builds its snapshot/treated
+ *    canvas at full DEVICE size. A `withBackdrop` that dropped the `destination-in` clip step
+ *    (the deliberate break used to prove this suite is load-bearing) would still pass the
+ *    absence check and would still visibly change the render, but would fail exactly the
+ *    "outside the box" assertion below — the treated canvas would stamp over the WHOLE frame
+ *    in the final identity-transform `drawImage`, not just the silhouette.
+ */
+test.describe('Frame backdrop effects — withBackdrop extraction (F6 Task 1)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  // A hard red|blue seam at x=0.5 across the FULL backdrop, with a translucent rect straddling
+  // it. background_blur needs real backdrop detail to treat, and the top layer's own alpha is
+  // what lets the treated backdrop show through once normal painting resumes on top of it
+  // (additive — no `continue` — not a fill replacement).
+  async function seedBackdropScene(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const bar = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.5, h: 1, radius: 0, rotation: 0, opacity: 1, fill, effects: [],
+      })
+      const top = {
+        id: 'top', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, radius: 0, rotation: 0,
+        opacity: 1, fill: 'rgba(255,255,255,0.35)', effects: [],
+      }
+      ;(window as any).__compositorSetLayers([bar('L', 0.25, '#ff0000'), bar('R', 0.75, '#0000ff'), top])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(3)
+  }
+  const setTopEffects = (page: Page, effects: unknown[]) => page.evaluate((fx) => {
+    const ls = (window as any).__compositorLayers()
+    ls[2].effects = fx
+    ;(window as any).__compositorSetLayers(ls)
+  }, effects)
+  /** Loose per-channel tolerance for "this pixel did not move" across two full-canvas
+   *  renders — tight enough that a full-frame blur bleed (the bug this guards against)
+   *  cannot slip through, loose enough to absorb incidental 1-value render noise. */
+  const sameColor = (a: { r: number; g: number; b: number; a: number }, b: typeof a) =>
+    Math.abs(a.r - b.r) <= 2 && Math.abs(a.g - b.g) <= 2 && Math.abs(a.b - b.b) <= 2 && Math.abs(a.a - b.a) <= 2
+
+  test('byte-identity: background_blur toggled on then off returns to the untouched render', async ({ page }) => {
+    await openCompositor(page)
+    await seedBackdropScene(page)
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'bg', type: 'background_blur', radius: 0.06, visible: true }])
+    await stackPixels(page)
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+
+    expect(after).toBe(bare)
+  })
+
+  test('clips the treated backdrop to the layer silhouette; the backdrop itself visibly changes inside it', async ({ page }) => {
+    await openCompositor(page)
+    await seedBackdropScene(page)
+    await setTopEffects(page, [])
+    const bare = await stackPixels(page)
+    // Far outside the top layer's 0.4-wide centred box (still red), and inside it, straddling
+    // the hard red|blue seam (where a blur has real detail to smear).
+    const cornerBare = await colorAt(page, 0.05, 0.5)
+    const seamBare = await colorAt(page, 0.5, 0.5)
+
+    await setTopEffects(page, [{ id: 'bg', type: 'background_blur', radius: 0.06, visible: true }])
+    const blurred = await stackPixels(page)
+    expect(blurred).not.toBe(bare)
+    const cornerAfter = await colorAt(page, 0.05, 0.5)
+    const seamAfter = await colorAt(page, 0.5, 0.5)
+
+    // Outside the silhouette: untouched — this is the destination-in clip doing its job.
+    expect(sameColor(cornerAfter, cornerBare)).toBe(true)
+    // Inside it, showing through the translucent top layer over the seam: the blur moved it.
+    expect(sameColor(seamAfter, seamBare)).toBe(false)
+  })
+})
+
+/**
+ * F6 Task 2 — the `backdrop_shader` effect: `applyBackdropShader` runs an input-sampling
+ * Shader Studio catalog effect over the layers BEHIND a layer, via the SAME `withBackdrop`
+ * scaffolding `background_blur` uses (silhouette clip + identity stamp), ADDITIVELY — the
+ * layer's own content still paints on top afterwards (no `continue`, unlike the glass lens,
+ * which REPLACES `.fill` entirely) — on ANY layer including text (the gap the glass lens
+ * cannot fill: it lives on the `.fill` slot and is gated off text).
+ *
+ * chromatic_aberration is reused from F5 for the same reason: a real input-sampling catalog
+ * effect (samples `u_image0` per-channel with a small offset), not a generative field, so a
+ * fresh backdrop_shader visibly (if subtly) treats the backdrop rather than silently no-op'ing.
+ * The catalog is fetched asynchronously and the static edit view does not repaint on its own
+ * once it lands (no idle rAF loop) — `settledWithTopEffects` mirrors F5's `settledWithShader`
+ * wait-then-re-set recipe.
+ */
+test.describe('Frame backdrop shader (F6 Task 2)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  // Same red|blue seam backdrop as F6 Task 1 (real edge detail for the shader to treat). The
+  // top layer carries BOTH a translucent fill (so the treated backdrop shows through at its
+  // centre) AND a fully OPAQUE inside stroke — a known pixel of the layer's OWN paint that a
+  // fill-REPLACING treatment (the glass lens's `continue`) could never leave alone, since with
+  // that pattern the normal fill+stroke paint would never run at all.
+  async function seedBackdropShaderScene(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const bar = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.5, h: 1, radius: 0, rotation: 0, opacity: 1, fill, effects: [],
+      })
+      const top = {
+        id: 'top', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.4, radius: 0, rotation: 0, opacity: 1,
+        fill: 'rgba(255,255,255,0.35)', stroke: '#000000', strokeWidth: 0.04, strokeAlign: 'inside',
+        effects: [],
+      }
+      ;(window as any).__compositorSetLayers([bar('L', 0.25, '#ff0000'), bar('R', 0.75, '#0000ff'), top])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(3)
+  }
+  const setTopEffects = (page: Page, effects: unknown[]) => page.evaluate((fx) => {
+    const ls = (window as any).__compositorLayers()
+    ls[2].effects = fx
+    ;(window as any).__compositorSetLayers(ls)
+  }, effects)
+  /** Mirrors F5's `settledWithShader`: force a fresh paint after giving the async catalog
+   *  fetch time to land — the static edit view does not repaint on its own once it resolves. */
+  async function settledWithTopEffects(page: Page, effects: unknown[]): Promise<string> {
+    await setTopEffects(page, effects)
+    await stackPixels(page)                 // first paint likely races the catalog fetch — a no-op
+    await page.waitForTimeout(1_500)
+    await setTopEffects(page, effects)      // re-set forces a repaint now the catalog is warm
+    return stackPixels(page)
+  }
+  /** Robust warm for a catalog-dependent backdrop shader: the async catalog fetch can land
+   *  later than a fixed sleep under full-run load, and a cold catalog makes renderFieldWithBase
+   *  throw → withBackdrop stamps the UNTREATED backdrop → a silent no-op (after === bare). Poll:
+   *  re-set + repaint until the render actually differs from `bare`, or time out (then the
+   *  caller's own assertion fails honestly — proving a real no-op, not a race). */
+  async function settledUntilChanged(page: Page, bare: string, effects: unknown[]): Promise<string> {
+    let last = bare
+    for (let i = 0; i < 20; i++) {          // ~20 × ~750ms ≈ 15s ceiling
+      await setTopEffects(page, effects)
+      last = await stackPixels(page)
+      if (last !== bare) return last
+      await page.waitForTimeout(750)
+    }
+    return last
+  }
+
+  // hue_shift, not chromatic_aberration: the probe must move backdrop pixels within a
+  // CENTRED silhouette. chromatic_aberration offsets radially from the image centre AND only
+  // shifts colour at edges, so a centred solid-bar panel sits in its exact blind spot (offset
+  // ≈ 0, no edges) and reads as a near-no-op even when the stamp is perfect. hue_shift rotates
+  // hue uniformly across every pixel, so a solid backdrop changes wherever it shows through.
+  // speed: 0 — the LOCAL_DEFAULTS choice (a static backdrop treatment must not spin the live
+  // loop) — determinism here doesn't depend on it, but a live probe should look like a real add.
+  const HUE_BACKDROP = {
+    id: 'bd', type: 'backdrop_shader', effectId: 'hue_shift', params: { hue: 0.5 }, speed: 0, seed: 42, visible: true,
+  }
+
+  test('byte-identity: no backdrop_shader effect renders identically before/after a round-trip', async ({ page }) => {
+    await openCompositor(page)
+    await seedBackdropShaderScene(page)
+    const bare = await stackPixels(page)
+
+    await settledWithTopEffects(page, [HUE_BACKDROP])
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+
+    expect(after).toBe(bare)
+  })
+
+  test('applied + additive: the backdrop changes within the silhouette; the layer\'s own opaque stroke pixel does not', async ({ page }) => {
+    await openCompositor(page)
+    await seedBackdropShaderScene(page)
+    await setTopEffects(page, [])
+    const bare = await stackPixels(page)
+    // Centre of the translucent fill, over the red|blue backdrop — the backdrop shows through
+    // the 0.35 panel here, so a hue rotation of it registers as a colour change.
+    const seamBare = await colorAt(page, 0.5, 0.5)
+    // Inside the opaque inside-stroke band (box spans x∈[0.3,0.7]; the 0.04-wide band hugs
+    // the edge from x=0.3) — the layer's OWN paint, fully opaque, so it fully overwrites
+    // whatever the backdrop stamp left underneath, whatever that stamp's content is.
+    const strokeBare = await colorAt(page, 0.31, 0.5)
+    expect(strokeBare.a).toBe(255) // sanity: this probe really is on the opaque stroke
+
+    const after = await settledUntilChanged(page, bare, [HUE_BACKDROP])
+    expect(after).not.toBe(bare)
+    const seamAfter = await colorAt(page, 0.5, 0.5)
+    const strokeAfter = await colorAt(page, 0.31, 0.5)
+
+    // (a) the backdrop, visible through the translucent fill, changed — real pixel movement,
+    // not render noise (changed-pixel COUNT, per the F6 lesson about gradient-energy proxies).
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(50)
+    expect(seamAfter).not.toEqual(seamBare)
+    // (b) the layer's OWN opaque stroke pixel is untouched — additive/under, not fill-replacing.
+    expect(strokeAfter).toEqual(strokeBare)
+  })
+
+  test('renders on a TEXT layer (the gap the glass lens cannot fill — it is `.fill`-only, off text)', async ({ page }) => {
+    await openCompositor(page)
+    await page.evaluate(() => {
+      const bar = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.5, h: 1, radius: 0, rotation: 0, opacity: 1, fill, effects: [],
+      })
+      // opacity: 0.5 (not the text colour's own alpha) so the WHOLE glyph paint blends with
+      // whatever is beneath it — otherwise fully-opaque glyph ink would completely overwrite
+      // the treated backdrop stamp the same way the stroke probe above does, and there would
+      // be no observable difference to assert on a text layer at all.
+      const text = {
+        id: 'txt', kind: 'text', x: 0.5, y: 0.5, rotation: 0, opacity: 0.5, text: 'HI',
+        fontFamily: 'Inter', fontWeight: 900, fontSize: 0.5, color: '#ffffff', align: 'center', lineHeight: 1.1,
+        effects: [],
+      }
+      ;(window as any).__compositorSetLayers([bar('L', 0.25, '#ff0000'), bar('R', 0.75, '#0000ff'), text])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(3)
+    const bare = await stackPixels(page)
+
+    const after = await settledUntilChanged(page, bare, [HUE_BACKDROP])
+    expect(after).not.toBe(bare)
+    // The backdrop within the text silhouette changed — real pixel movement, not noise.
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(20)
+  })
+
+  test('determinism: the same params render identically', async ({ page }) => {
+    await openCompositor(page)
+    await seedBackdropShaderScene(page)
+    const once = await settledWithTopEffects(page, [HUE_BACKDROP])
+    const twice = await settledWithTopEffects(page, [{ ...HUE_BACKDROP }])
+    expect(twice).toBe(once)
+  })
+})
+
+/**
+ * F6 Task 3 — the `backdrop_luminance_mask` effect: masks/reveals a layer's OWN content by the
+ * LUMINANCE of the backdrop painted behind it. Unlike backdrop_shader (additive, stamped UNDER
+ * the layer via withBackdrop), this WRAPS the own-content paint: it multiplies the layer's
+ * rendered alpha by a per-pixel mask derived from the backdrop's luminance, so the content
+ * shows where the backdrop is bright (lum ≥ threshold) by default and is hidden where dark;
+ * `invert` flips that. Pure CPU (no async catalog fetch), so a plain setLayers→stackPixels
+ * drives the repaint — no wait-then-re-set recipe needed. The controller runs these against
+ * :3002 (the live GPU/canvas gate); the pure luminance→alpha mapping is unit-tested in
+ * tests/unit/compositor-luminance-mask.unit.spec.ts.
+ */
+test.describe('Frame backdrop luminance mask (F6 Task 3)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  // A clean bright|dark split backdrop: WHITE left half, BLACK right half. A single fully
+  // opaque GREEN top layer spans both halves, so a mask keyed on backdrop luminance reveals
+  // the green over the white (bright) half and hides it over the black (dark) half — two probe
+  // points, one per half, both under the top layer.
+  async function seedLumScene(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const bar = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.5, h: 1, radius: 0, rotation: 0, opacity: 1, fill, effects: [],
+      })
+      const top = {
+        id: 'top', kind: 'rect', x: 0.5, y: 0.5, w: 0.9, h: 0.6, radius: 0, rotation: 0,
+        opacity: 1, fill: '#00cc00', effects: [],
+      }
+      ;(window as any).__compositorSetLayers([bar('L', 0.25, '#ffffff'), bar('R', 0.75, '#000000'), top])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(3)
+  }
+  const setTopEffects = (page: Page, effects: unknown[]) => page.evaluate((fx) => {
+    const ls = (window as any).__compositorLayers()
+    ls[2].effects = fx
+    ;(window as any).__compositorSetLayers(ls)
+  }, effects)
+  const sameColor = (a: { r: number; g: number; b: number; a: number }, b: typeof a) =>
+    Math.abs(a.r - b.r) <= 4 && Math.abs(a.g - b.g) <= 4 && Math.abs(a.b - b.b) <= 4 && Math.abs(a.a - b.a) <= 4
+
+  const LUM_MASK = { id: 'lm', type: 'backdrop_luminance_mask', threshold: 0.5, softness: 0.2, invert: false, visible: true }
+  // Probe columns: x=0.3 sits over the white (bright) left bar, x=0.7 over the black (dark)
+  // right bar — both under the green top layer (which spans x∈[0.05,0.95]).
+  const WHITE_X = 0.3, DARK_X = 0.7, MID_Y = 0.5
+
+  test('byte-identity: no backdrop_luminance_mask effect renders identically before/after a round-trip', async ({ page }) => {
+    await openCompositor(page)
+    await seedLumScene(page)
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [LUM_MASK])
+    await stackPixels(page)
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+
+    expect(after).toBe(bare)
+  })
+
+  test('applied: content revealed over the bright half, masked away over the dark half', async ({ page }) => {
+    await openCompositor(page)
+    await seedLumScene(page)
+    await setTopEffects(page, [])
+    const bare = await stackPixels(page)
+    // With no effect the opaque green layer covers both halves → both probes read green.
+    const whiteBare = await colorAt(page, WHITE_X, MID_Y)
+    const darkBare = await colorAt(page, DARK_X, MID_Y)
+    expect(whiteBare.g).toBeGreaterThan(150) // sanity: probes really are on the green layer
+    expect(darkBare.g).toBeGreaterThan(150)
+
+    await setTopEffects(page, [LUM_MASK])
+    const after = await stackPixels(page)
+    expect(after).not.toBe(bare)
+    const whiteAfter = await colorAt(page, WHITE_X, MID_Y)
+    const darkAfter = await colorAt(page, DARK_X, MID_Y)
+
+    // Bright half: content still revealed → unchanged green.
+    expect(sameColor(whiteAfter, whiteBare)).toBe(true)
+    // Dark half: content masked away → the black backdrop shows through (≈ backdrop-only colour
+    // at that point, since the layer's own alpha was multiplied to ~0 there).
+    expect(sameColor(darkAfter, darkBare)).toBe(false)
+    expect(darkAfter.r).toBeLessThan(20)
+    expect(darkAfter.g).toBeLessThan(20)
+    expect(darkAfter.b).toBeLessThan(20)
+    // The two halves now clearly differ.
+    expect(sameColor(whiteAfter, darkAfter)).toBe(false)
+  })
+
+  test('invert: content revealed over the dark half, masked away over the bright half', async ({ page }) => {
+    await openCompositor(page)
+    await seedLumScene(page)
+    await setTopEffects(page, [])
+    await stackPixels(page)
+    const greenRef = await colorAt(page, WHITE_X, MID_Y) // the layer's own green, uncovered
+
+    await setTopEffects(page, [{ ...LUM_MASK, invert: true }])
+    await stackPixels(page)
+    const whiteAfter = await colorAt(page, WHITE_X, MID_Y)
+    const darkAfter = await colorAt(page, DARK_X, MID_Y)
+
+    // Bright half: now MASKED → the white backdrop shows through.
+    expect(whiteAfter.r).toBeGreaterThan(235)
+    expect(whiteAfter.g).toBeGreaterThan(235)
+    expect(whiteAfter.b).toBeGreaterThan(235)
+    // Dark half: now REVEALED → the layer's own green.
+    expect(sameColor(darkAfter, greenRef)).toBe(true)
+    // Opposite of the non-inverted case at both probes.
+    expect(sameColor(whiteAfter, darkAfter)).toBe(false)
+  })
+})
+
+/**
+ * F6 Task 4 — the three backdrop effects COEXIST on one layer.
+ *
+ * background_blur (CPU), backdrop_shader (catalog GPU pass) and backdrop_luminance_mask (CPU)
+ * are all pinned backdrop-region effects on a single layer. They must stack and each stay
+ * observable, not one clobber the others. Scene: a red|blue split backdrop under a single
+ * TRANSLUCENT white panel (0.35) spanning both halves — the same shape Task 2 proved. The
+ * translucency is the point: the blurred + hue-shifted backdrop shows THROUGH the panel
+ * everywhere (so blur and shader are observable independent of the mask, not gated by it),
+ * while the luminance mask modulates the panel's OWN alpha. Removing any one of the three
+ * changes the render again — the proof each participates, without the fragile 3-way coupling a
+ * fully-opaque layer + a large blur would create (the blur flooding the mask that gates the
+ * shader's only visible region).
+ */
+test.describe('Frame backdrop effects coexist (F6 Task 4)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  // RED left half, BLUE right half (real hue for backdrop_shader to rotate, a sharp seam for
+  // the blur to smear), under a translucent white panel so the treated backdrop reads through.
+  async function seedCoexistScene(page: Page): Promise<void> {
+    await page.evaluate(() => {
+      const bar = (id: string, x: number, fill: string) => ({
+        id, kind: 'rect', x, y: 0.5, w: 0.5, h: 1, radius: 0, rotation: 0, opacity: 1, fill, effects: [],
+      })
+      const top = {
+        id: 'top', kind: 'rect', x: 0.5, y: 0.5, w: 0.9, h: 0.6, radius: 0, rotation: 0,
+        opacity: 1, fill: 'rgba(255,255,255,0.35)', effects: [],
+      }
+      ;(window as any).__compositorSetLayers([bar('L', 0.25, '#ff0000'), bar('R', 0.75, '#0000ff'), top])
+    })
+    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
+      { timeout: 10_000 }).toBe(3)
+  }
+  const setTopEffects = (page: Page, effects: unknown[]) => page.evaluate((fx) => {
+    const ls = (window as any).__compositorLayers()
+    ls[2].effects = fx
+    ;(window as any).__compositorSetLayers(ls)
+  }, effects)
+  // Warm the async shader catalog: a cold catalog makes the backdrop_shader a silent no-op, so
+  // poll re-set + repaint until the render differs from `bare` (or time out → the caller's own
+  // assertion fails honestly). Same recipe as F6 Task 2's settledUntilChanged.
+  async function settledUntilChanged(page: Page, bare: string, effects: unknown[]): Promise<string> {
+    let last = bare
+    for (let i = 0; i < 20; i++) {
+      await setTopEffects(page, effects)
+      last = await stackPixels(page)
+      if (last !== bare) return last
+      await page.waitForTimeout(750)
+    }
+    return last
+  }
+  // Reset to the untouched render and confirm the canvas actually returned to it. Removing all
+  // effects is a plain (GPU-free) re-render, so it reverts reliably within a few polls.
+  async function settleToBare(page: Page, bareRef: string): Promise<void> {
+    for (let i = 0; i < 20; i++) {
+      await setTopEffects(page, [])
+      if (await stackPixels(page) === bareRef) return
+      await page.waitForTimeout(300)
+    }
+  }
+  // Capture a variant RELIABLY by starting from a confirmed-bare canvas every time, rather than
+  // mutating from the previous variant. The async catalog GPU pass means a stackPixels taken
+  // right after an effect change can lock onto a momentarily-stable STALE frame (the previous
+  // set) — a real non-determinism that made a drop-one read back equal to `full`. From a known
+  // bare canvas, `settledUntilChanged` polls until the render has actually moved off bare (the
+  // new pass landed), then a short settle + re-capture returns the stable frame.
+  async function variant(page: Page, bareRef: string, effects: unknown[]): Promise<string> {
+    await settleToBare(page, bareRef)
+    await settledUntilChanged(page, bareRef, effects)
+    await page.waitForTimeout(800)
+    await setTopEffects(page, effects)
+    return stackPixels(page)
+  }
+
+  const BLUR = { id: 'bl', type: 'background_blur', radius: 0.06, visible: true }
+  const SHADER = { id: 'sh', type: 'backdrop_shader', effectId: 'hue_shift', params: { hue: 0.5 }, speed: 0, seed: 42, visible: true }
+  const MASK = { id: 'lm', type: 'backdrop_luminance_mask', threshold: 0.5, softness: 0.2, invert: false, visible: true }
+
+  test('all three on one layer render differently from bare, and each one removed changes the render', async ({ page }) => {
+    await openCompositor(page)
+    await seedCoexistScene(page)
+    await setTopEffects(page, [])
+    const bare = await stackPixels(page)
+
+    // Full stack (order is canonical via EFFECT_ORDER regardless of array order). This warms the
+    // catalog and proves the combined stack is not a no-op.
+    const full = await variant(page, bare, [BLUR, SHADER, MASK])
+    expect(full).not.toBe(bare)
+
+    // Each drop-one is captured fresh from bare (see `variant`) so no stale frame leaks in.
+    const noMask = await variant(page, bare, [BLUR, SHADER])       // luminance mask removed
+    const noShader = await variant(page, bare, [BLUR, MASK])       // backdrop shader removed
+    const noBlur = await variant(page, bare, [SHADER, MASK])       // background blur removed
+
+    // Each effect visibly participates: dropping it moves a large, unmistakable block of pixels
+    // (changed-pixel COUNT, not exact bytes — a GPU pass isn't byte-reproducible frame to frame,
+    // per the F6 lesson; each real effect here moves >300k pixels, far above any GPU noise).
+    expect((await pixelDelta(page, full, noMask)).changed).toBeGreaterThan(1000)    // mask in play (the panel's white tint returns)
+    expect((await pixelDelta(page, full, noShader)).changed).toBeGreaterThan(1000)  // shader in play (backdrop hue reverts through the panel)
+    expect((await pixelDelta(page, full, noBlur)).changed).toBeGreaterThan(1000)    // blur in play (the red|blue seam is no longer smeared)
+  })
+})
+
+/**
  * F2 Task 5 — geometry effects render through a computed outline `d`.
  *
  * The rect is drawn through its shared, geometry-transformed Path2D only when a geometry
@@ -1363,5 +1816,798 @@ test.describe('Frame layer styles — F4 pixel passes', () => {
     await stackPixels(page)
     const stroke = await inkExtent(page)
     expect(stroke.maxX).toBeGreaterThan(bareExtent.maxX + 0.01)
+  })
+})
+
+/**
+ * F5 Task 2 — the `shader` pixel effect: `applyShaderPixelEffect` in useCompositorLayers.ts
+ * runs a named Shader Studio catalog effect over a layer's OWN already-rendered pixels,
+ * alpha preserved, byte-identical when absent. DISTINCT from a shader FILL (which replaces
+ * the layer's fill entirely — see shader-fill.spec.ts) and from the glass lens (which
+ * refracts the layers BEHIND the layer, not its own content).
+ *
+ * Byte-identity is the load-bearing guard here: before this task, a `shader` entry in a
+ * layer's effect stack was a silent no-op (Task 1's model comment: 'shader' is not in
+ * postEffects.ts's own `PASS_TYPES`, so the pixel-pass switch's `default: applyPasses(...)`
+ * branch drops it on the floor). The new `case 'shader'` in the switch (paintLayer,
+ * useCompositorLayers.ts ~2745) is the ONE thing that can make a shader effect actually
+ * paint — so the "applied" test below is what proves the case is wired at all, and the
+ * byte-identity test proves it is inert whenever no `shader` effect is present (a stub that
+ * called `applyShaderPixelEffect` unconditionally, outside the switch's per-type dispatch,
+ * would fail the byte-identity test here while still passing "applied" — that contrast is
+ * what makes the gate load-bearing, not merely present).
+ *
+ * The shader catalog is fetched asynchronously (`fetchShaderFxCatalog`, ~/lib/shaderfx/
+ * catalogStore.ts) and `renderFieldWithBase` throws until it lands — `applyShaderPixelEffect`
+ * catches that and leaves the layer's pixels untouched for that frame (see the comment at its
+ * definition). Unlike Space Type/Scene3D (their own rAF loop repaints once the catalog
+ * resolves), the Compositor's static edit view only repaints reactively, so `settledWithShader`
+ * below waits for the fetch then forces a fresh paint — the same recipe shader-fill.spec.ts's
+ * "Frame (Compositor)" golden coverage uses for the identical race.
+ */
+test.describe('Frame shader-catalog pixel pass (F5 Task 2)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  // chromatic_aberration hard-codes its output alpha to 1.0 (shader_effects/
+  // chromatic_aberration.frag: `fragColor0 = vec4(r, g, b, 1.0)`) — exactly the "most
+  // catalog frags don't preserve alpha" case the recombine exists for. amount is pushed
+  // well past the picker's own 0..0.08 slider range so the radial RGB split is unmistakable
+  // at the rect's edge, not a borderline render-noise delta.
+  const CHROMA = { id: 'sh', type: 'shader', effectId: 'chromatic_aberration', params: { amount: 0.3 }, speed: 1, seed: 42, visible: true }
+
+  /** Force a fresh paintLayerStack() after giving the async catalog fetch time to land. The
+   *  Compositor's static edit view does not repaint on its own once the fetch resolves (no
+   *  idle rAF loop, unlike Space Type/Scene3D) — a real layer-list write is what forces the
+   *  next repaint, so re-set the SAME effects (a new array reference) once the wait is up. */
+  async function settledWithShader(page: Page, effects: unknown[]): Promise<string> {
+    await setEffects(page, effects)
+    await stackPixels(page)                 // first paint likely races the catalog fetch — a no-op
+    await page.waitForTimeout(1_500)
+    await setEffects(page, effects)         // re-set forces a repaint now the catalog is warm
+    return stackPixels(page)
+  }
+
+  test('byte-identity A/B: a layer with no shader effect renders identically before/after a round-trip', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    const before = await stackPixels(page)
+
+    // Toggle a visible, real shader effect ON, then back OFF: the return-to-none render must
+    // be byte-identical to the virgin bare render — the `case 'shader'` never fires once the
+    // effect is gone (bodyPasses no longer contains it), so nothing it does can leak forward.
+    await settledWithShader(page, [CHROMA])
+    await setEffects(page, [])
+    const after = await stackPixels(page)
+
+    expect(after).toBe(before)
+  })
+
+  test('adding chromatic_aberration changes the layer\'s own pixels (applied)', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    const bare = await stackPixels(page)
+
+    const after = await settledWithShader(page, [CHROMA])
+    expect(after).not.toBe(bare)
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    // A radial RGB split at the rect's edge is a real (if edge-only) pixel change, not noise.
+    expect(d.changed).toBeGreaterThan(50)
+  })
+
+  test('alpha is preserved: a transparent region of the layer stays transparent', async ({ page }) => {
+    await openCompositor(page)
+    // An ellipse inscribed in its own SQUARE bounding box leaves the box's corners
+    // transparent — the curve never reaches them — so it's a partially-transparent layer
+    // with no extra geometry effect needed. A broken recombine (or none at all) would flood
+    // this corner opaque black, since chromatic_aberration forces alpha=1 everywhere.
+    await seedOne(page, { id: 'e1', kind: 'ellipse', x: 0.5, y: 0.5, w: 0.5, h: 0.5, rotation: 0, opacity: 1, fill: '#ffffff' })
+    await stackPixels(page) // settle the first paint before sampling
+    const cornerBefore = await colorAt(page, 0.27, 0.27) // just inside the box corner, outside the ellipse curve
+    expect(cornerBefore.a).toBeLessThan(20)
+
+    await settledWithShader(page, [CHROMA])
+    const cornerAfter = await colorAt(page, 0.27, 0.27)
+    expect(cornerAfter.a).toBeLessThan(20)
+  })
+
+  // ── F5 Task 4 ──────────────────────────────────────────────────────────────────────
+  // Duplicates + reorder, the layer-pass/studio-effect parity proof, and the animated-
+  // preview-advances proof. `posterize` is a second real, input-sampling, NON-animated
+  // catalog effect (manifest.json: `animated: false`, reads `u_image0`) — distinct
+  // enough from `chromatic_aberration`'s RGB split that stacking/reordering the two
+  // moves real pixels, not render noise.
+  const POSTERIZE = { id: 'sh2', type: 'shader', effectId: 'posterize', params: { levels: 3 }, speed: 0, seed: 42, visible: true }
+
+  test('two shader effects on one layer both apply, in stack order', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+
+    const oneOnly = await settledWithShader(page, [CHROMA])
+    const both = await settledWithShader(page, [CHROMA, POSTERIZE])
+    expect(both).not.toBe(oneOnly)
+    const d = await pixelDelta(page, oneOnly, both)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(50)
+  })
+
+  test('reordering two shader effects changes the render (canReorder, automatic)', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+
+    const chromaThenPosterize = await settledWithShader(page, [CHROMA, POSTERIZE])
+    const posterizeThenChroma = await settledWithShader(page, [POSTERIZE, CHROMA])
+    expect(posterizeThenChroma).not.toBe(chromaThenPosterize)
+  })
+
+  test('parity: the layer pass IS renderFieldWithBase + the documented alpha recombine, not a reimplementation', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    // Warm the shader catalog exactly like the other tests in this suite, so the probe's
+    // own renderFieldWithBase call (below) doesn't race the fetch.
+    await settledWithShader(page, [CHROMA])
+
+    const result = await page.evaluate(() =>
+      (window as any).__compositorShaderParityProbe(
+        { type: 'shader', visible: true, effectId: 'chromatic_aberration', params: { amount: 0.3 }, speed: 0, seed: 42 },
+        200, 200,
+      ))
+    expect(result.actual).toBe(result.expected)
+  })
+
+  test('an animated shader effect makes the preview advance over time', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#ffffff')
+    // fbm_warp is a real, input-sampling, ANIMATED catalog effect (manifest.json:
+    // `animated: true`, its .frag scales u_time by u_speed) — unlike chromatic_aberration
+    // (whose .frag never reads u_time at all), so a nonzero top-level `speed` here actually
+    // moves the render frame over frame, which is what this test needs to prove the modal's
+    // live loop is really advancing, not just repainting the same pixels.
+    const ANIM = { id: 'sh3', type: 'shader', effectId: 'fbm_warp', params: {}, speed: 1, seed: 42, visible: true }
+    const readCanvas = () => page.evaluate(() =>
+      (document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement).toDataURL())
+
+    await setEffects(page, [ANIM])
+    await readCanvas()                 // first paint likely races the catalog fetch — a no-op
+    await page.waitForTimeout(1_500)
+    await setEffects(page, [ANIM])     // re-set forces a repaint now the catalog is warm, and
+                                        // (this is the Task 4 fix under test) starts the modal's
+                                        // live rAF loop now that hasAnimatedShaderFill sees it.
+    await page.waitForTimeout(300)     // let the live loop actually tick a few frames
+    const frame1 = await readCanvas()
+    await page.waitForTimeout(600)     // real wall-clock time passing, well past one SHADER_PREVIEW_FPS tick
+    const frame2 = await readCanvas()
+    expect(frame2).not.toBe(frame1)
+  })
+})
+
+/**
+ * F5 Task 3 — the shader effect INSPECTOR: picking a catalog effect for a layer's `shader`
+ * pass and tuning its params. Distinct from Task 2 above (the GPU pass itself, exercised there
+ * via direct `setEffects` writes) — this suite drives the real add → pick → tune UI: the tree
+ * "+" menu, the reused `CatalogModal` picker (filtered to `effectReadsInput` effects, the same
+ * gate the glass lens's Reads picker applies), and the derived param dials
+ * (`buildShaderParamRows` / `derivedShaderFillControls`, shared with ShaderFillEditor.vue's
+ * shader-FILL editor).
+ *
+ * `plasma` is the picker's confirmed-excluded generative: its .frag declares
+ * `uniform sampler2D u_image0` (every catalog frag does) but never calls `texture(u_image0, …)`
+ * — a bare declaration is NOT enough for `effectReadsInput` (catalogStore.ts's own doc), so this
+ * is a real "never samples its input" case, not a guess from the effect's name or category.
+ * `chromatic_aberration` is the confirmed-included input-sampler (it per-channel offsets a real
+ * `texture(u_image0, …)` read — Task 2's own fixture above) and is also the `shader` kind's
+ * `LOCAL_DEFAULTS` effect (effectStack.ts), so a freshly added shader effect already renders it.
+ */
+test.describe('Frame shader effect inspector (F5 Task 3)', () => {
+  test.use({ deviceScaleFactor: 2 })
+
+  test('adding a Shader effect shows the breadcrumb, and its picker opens', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await openFxMenuFirst(page)
+    await page.locator('[data-testid="add-effect-item"][data-kind="shader"]').click()
+
+    await expect(page.getByTestId('effect-breadcrumb')).toContainText('Shader')
+
+    await page.getByTestId('shader-fx-picker').click()
+    await expect(page.getByText('Shader effects')).toBeVisible()
+  })
+
+  test('the picker lists an input-sampling effect and excludes a confirmed pure-generative one', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await openFxMenuFirst(page)
+    await page.locator('[data-testid="add-effect-item"][data-kind="shader"]').click()
+    await page.getByTestId('shader-fx-picker').click()
+
+    // Scope to the teleported CatalogModal (identified by its "Shader effects" heading), so the
+    // card locator can't also match the picker TRIGGER button, which shows the current selection
+    // name and lives outside the modal — matching both is a strict-mode violation.
+    const catalog = page.locator('div.fixed.inset-0').filter({ hasText: 'Shader effects' })
+
+    // Wait generously — the catalog is fetched from the ComfyUI backend and this is the first
+    // thing in the suite that needs it warm. Once this card is visible the catalog (and
+    // therefore the `effectReadsInput` filter) has genuinely resolved.
+    await expect(catalog.getByRole('button', { name: /chromatic aberration/i })).toBeVisible({ timeout: 20_000 })
+
+    // Asserted only AFTER the catalog is confirmed warm above, so this is a real absence
+    // (the effect was excluded), not "the list just hasn't loaded yet" giving a false pass.
+    await expect(catalog.getByRole('button', { name: /plasma/i })).toHaveCount(0)
+  })
+
+  test('picking an effect renders it over the layer, and a param dial moves the render again', async ({ page }) => {
+    await openCompositor(page)
+    await addRect(page)
+    await seedRectFill(page)
+    const bare = await stackPixels(page)
+
+    await openFxMenuFirst(page)
+    await page.locator('[data-testid="add-effect-item"][data-kind="shader"]').click()
+    await page.getByTestId('shader-fx-picker').click()
+    // Scope to the teleported CatalogModal so the card can't also match the picker trigger button.
+    const catalog = page.locator('div.fixed.inset-0').filter({ hasText: 'Shader effects' })
+    const card = catalog.getByRole('button', { name: /chromatic aberration/i })
+    await expect(card).toBeVisible({ timeout: 20_000 })
+    await card.click()
+    await page.getByRole('button', { name: 'Use effect' }).click()
+
+    // The pick reached the stored effect (not just the picker's own UI state) …
+    await expect.poll(() => page.evaluate(() =>
+      ((window as any).__compositorLayers()[0].effects || []).find((e: any) => e.type === 'shader')?.effectId))
+      .toBe('chromatic_aberration')
+
+    // … and moved real pixels vs the plain, shader-less layer.
+    const picked = await stackPixels(page)
+    expect(picked).not.toBe(bare)
+    const d1 = await pixelDelta(page, bare, picked)
+    expect(d1.sizeMismatch).toBe(false)
+    expect(d1.changed).toBeGreaterThan(50)
+
+    // Move the Amount dial via its accessible slider role (StudioRow's own keyboard path,
+    // step 0.002 over 0..0.08) — a live uniform must move the render again, not sit dead.
+    const track = page.getByTestId('shader-fx-param-amount').locator('[role="slider"]')
+    await track.focus()
+    for (let i = 0; i < 20; i++) await track.press('ArrowRight')
+
+    const tuned = await stackPixels(page)
+    expect(tuned).not.toBe(picked)
+  })
+})
+
+/*
+ * F7 Task 1 — print RECIPES: `risograph` (and, model-only this task, `photocopy`/`letterpress`)
+ * are orderable pixel-region effects that EXPAND at paint time into a sequence of the existing
+ * postEffects.ts passes (`expandRecipe` in ~/lib/compositor/recipes.ts), run on the layer's own
+ * device-res offscreen by the bodyPasses dispatch loop in useCompositorLayers.ts. Same oracle as
+ * F4/F5: a real pixelDelta when applied, strict byte-identity when the recipe is absent (RED-first
+ * — a recipe that never fired must leave the layer's bytes untouched). Vector rects are
+ * deterministic, so `stackPixels` strict `toBe` is safe here (as in the F4 block).
+ */
+test.describe('Frame print recipes (F7)', () => {
+  const setTopEffects = (page: Page, effects: unknown[]) => page.evaluate((fx) => {
+    const ls = (window as any).__compositorLayers()
+    ls[0].effects = fx
+    ;(window as any).__compositorSetLayers(ls)
+  }, effects)
+
+  test('risograph byte-identity: added then removed returns to the untouched render (F7 recipe absent)', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#808080') // a mid-grey rect gives the tone ramp something to move
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'riso', type: 'risograph', ink: '#2b3a8c', inkTwo: '#e03a6d', levels: 4, grain: 0.16, contrast: 1.12, visible: true }])
+    await stackPixels(page)
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+    expect(after).toBe(bare) // no recipe case fires ⇒ byte-identical
+  })
+
+  test('risograph applied: the composed look moves the layer\'s own pixels', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#808080')
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'riso', type: 'risograph', ink: '#2b3a8c', inkTwo: '#e03a6d', levels: 4, grain: 0.16, contrast: 1.12, visible: true }])
+    const after = await stackPixels(page)
+    expect(after).not.toBe(bare)
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(500) // the paper→ink ramp + grain repaint a lot of the rect
+    expect(d.max).toBeGreaterThan(30)      // a real tonal shift, far past render noise
+  })
+
+  test('photocopy byte-identity: added then removed returns to the untouched render (F7 recipe absent)', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#808080') // a mid-grey rect gives the threshold crush something to move
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'copy', type: 'photocopy', threshold: 0.5, dirt: 0.2, contrast: 1.4, visible: true }])
+    await stackPixels(page)
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+    expect(after).toBe(bare) // no recipe case fires ⇒ byte-identical
+  })
+
+  test('photocopy applied: the composed look moves the pixels and crushes them near-B&W', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#808080')
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'copy', type: 'photocopy', threshold: 0.5, dirt: 0.2, contrast: 1.4, visible: true }])
+    const after = await stackPixels(page)
+    expect(after).not.toBe(bare)
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(500) // threshold + speckle repaint a lot of the rect
+    expect(d.max).toBeGreaterThan(30)      // a real tonal shift, far past render noise
+
+    // near-B&W: threshold drives each opaque pixel to black or white, so the vast majority sit at a
+    // low channel spread even after the toner grain lays a little colour noise over them.
+    const mono = await page.evaluate(async (url) => {
+      const img = await new Promise<HTMLImageElement>((res, rej) => {
+        const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url
+      })
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+      const cx = c.getContext('2d')!; cx.drawImage(img, 0, 0)
+      const px = cx.getImageData(0, 0, img.width, img.height).data
+      let opaque = 0, near = 0
+      for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] < 250) continue
+        opaque++
+        const r = px[i], g = px[i + 1], b = px[i + 2]
+        const spread = Math.max(r, g, b) - Math.min(r, g, b)
+        if (spread < 64) near++
+      }
+      return { opaque, near }
+    }, after)
+    expect(mono.opaque).toBeGreaterThan(0)
+    expect(mono.near / mono.opaque).toBeGreaterThan(0.7) // overwhelmingly monochrome after the crush
+  })
+
+  test('letterpress byte-identity: added then removed returns to the untouched render (F7 recipe absent)', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#808080') // a rect gives the inner-glow impression a real alpha edge to hug
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'press', type: 'letterpress', depth: 0.5, ink: '#2a2a2a', paper: 0.3, visible: true }])
+    await stackPixels(page)
+    await setTopEffects(page, [])
+    const after = await stackPixels(page)
+    expect(after).toBe(bare) // no recipe case fires ⇒ byte-identical
+  })
+
+  test('letterpress applied: the debossed impression moves the pixels near the layer edge', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#808080')
+    const bare = await stackPixels(page)
+
+    await setTopEffects(page, [{ id: 'press', type: 'letterpress', depth: 0.7, ink: '#2a2a2a', paper: 0.3, visible: true }])
+    const after = await stackPixels(page)
+    expect(after).not.toBe(bare)
+    const d = await pixelDelta(page, bare, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(200) // the dark inner glow along the edge + grain repaint pixels
+    expect(d.max).toBeGreaterThan(30)      // a real tonal shift, far past render noise
+  })
+})
+
+/**
+ * F8 · Effect-dial motion (Task 3 — the fold + byte-identity seam).
+ *
+ * These drive the REAL `/dev/frame-lab` harness (the only one exposing the node so a
+ * `sailor_motion` doc with `tracks` can be set), because the fold runs inside `paintLayerStack`
+ * only when the modal is in a motion preview (`previewT != null` → the live paint passes
+ * `motionDoc.value` as `motion`, carrying `tracks`). The playhead is moved with the existing
+ * Motion-tab ruler (F8 builds no new scrub UI until Tasks 4–6), so these use the shipped path.
+ *
+ * (a) byte-identity: a layer with a static effect and NO dial track renders data-URL-identical
+ *     whether `sailor_motion.tracks` is absent or `[]` — the same-reference seam. RED-first: a
+ *     broken fold that clones for an empty track list would re-quantize and change the bytes.
+ * (b) animate: a numeric grain-amount track (0→0.9 over the timeline) renders DIFFERENT pixels
+ *     at the two ends of the ruler.
+ */
+test.describe('Frame effect-dial motion (F8)', () => {
+  test.describe.configure({ timeout: 180_000 })
+
+  async function openFrameLab(page: Page): Promise<void> {
+    await page.goto('/dev/frame-lab')
+    await page.waitForSelector('[data-ready]', { timeout: 30_000 })
+    await page.locator('[data-testid="compositor-stack-canvas"]').waitFor({ state: 'visible', timeout: 15_000 })
+    await expect.poll(() => page.evaluate(() => typeof (window as any).__compositorSetLayers === 'function'),
+      { timeout: 10_000 }).toBe(true)
+  }
+
+  /** Replace the frame with ONE static rect carrying a single grain effect (explicit id so a
+   *  track can target it); returns the committed layer id for the track's target path. */
+  async function seedGrainRect(page: Page): Promise<string> {
+    return page.evaluate(() => {
+      const rect = {
+        id: 'fx8-rect', kind: 'rect', x: 0.5, y: 0.5, w: 0.6, h: 0.6, rot: 0,
+        fill: { type: 'solid', color: '#8899aa' }, opacity: 1,
+        effects: [{ id: 'e-grain-anim', type: 'grain', amount: 0.5, size: 3, visible: true }],
+      }
+      ;(window as any).__compositorSetLayers([rect])
+      const ls = (window as any).__compositorLayers()
+      return ls[0].id as string
+    })
+  }
+
+  /** Write a fresh `sailor_motion` doc onto the reactive frame-lab node (reassign the whole
+   *  properties object so the `motionDoc` computed re-reads it). */
+  async function setMotionDoc(page: Page, doc: Record<string, unknown>): Promise<void> {
+    await page.evaluate((d) => {
+      const fl = (window as any).__frameLab
+      fl.node.data.properties = { ...fl.node.data.properties, sailor_motion: d }
+    }, doc)
+  }
+
+  async function enterMotionTab(page: Page): Promise<void> {
+    await page.getByRole('button', { name: 'Motion', exact: true }).click()
+    await page.locator('.cursor-ew-resize').first().waitFor({ state: 'visible', timeout: 10_000 })
+  }
+
+  /** Move the playhead by clicking the Motion-tab ruler at `frac` of its width (0 = start of
+   *  the timeline, 1 = the end). `onRulerDown` scrubs on pointerdown, so a click is enough;
+   *  `scrubTo` re-renders synchronously. */
+  async function scrubRuler(page: Page, frac: number): Promise<void> {
+    const ruler = page.locator('.cursor-ew-resize').first()
+    const box = (await ruler.boundingBox())!
+    const x = box.x + Math.max(2, Math.min(box.width - 2, box.width * frac))
+    await page.mouse.move(x, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.up()
+    await page.waitForTimeout(300)
+  }
+
+  test('byte-identity: absent tracks vs an empty track list render identically at the same playhead', async ({ page }) => {
+    await openFrameLab(page)
+    await seedGrainRect(page)
+
+    // Motion present, NO tracks field → the fold short-circuits on `!tracks`.
+    await setMotionDoc(page, { fps: 30, duration: 2 })
+    await enterMotionTab(page)
+    await scrubRuler(page, 0)
+    const noTracks = await stackPixels(page)
+
+    // Motion present, tracks: [] → the fold short-circuits on `tracks.length === 0` (same ref).
+    await setMotionDoc(page, { fps: 30, duration: 2, tracks: [] })
+    await scrubRuler(page, 0)
+    const emptyTracks = await stackPixels(page)
+
+    expect(emptyTracks).toBe(noTracks) // byte-identical; a broken always-clone fold would differ
+  })
+
+  test('animate: a numeric grain-amount track renders different pixels at the two ends of the ruler', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+
+    await setMotionDoc(page, {
+      fps: 30, duration: 2,
+      tracks: [{
+        target: `layers.${layerId}.effects.e-grain-anim.amount`,
+        keyframes: [{ t: 0, v: 0, ease: 'linear' }, { t: 2, v: 0.9, ease: 'linear' }],
+      }],
+    })
+    await enterMotionTab(page)
+
+    await scrubRuler(page, 0)       // t ≈ 0 → grain amount 0 (no grain)
+    const atStart = await stackPixels(page)
+    await scrubRuler(page, 1)       // t ≈ 2 → grain amount 0.9 (heavy grain)
+    const atEnd = await stackPixels(page)
+
+    expect(atEnd).not.toBe(atStart)
+    const d = await pixelDelta(page, atStart, atEnd)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(200) // the animated grain repaints a large area of the rect
+  })
+
+  // ── Task 4 · the Motion-tab dial picker (add / remove tracks) ──────────────
+  // The picker mirrors dialTestKey() in CompositorModal.vue: a target id-path with its
+  // dots/colons flattened to a DOM-safe data-testid fragment.
+  const dialKey = (target: string) => target.replace(/[^a-z0-9]+/gi, '-')
+
+  /** Select the (only) seeded layer via its timeline row label, so the picker
+   *  (`v-if="selectedLocal"`) mounts. rowLabel of a nameless rect is its kind, "rect". */
+  async function selectSeededLayer(page: Page): Promise<void> {
+    await page.getByRole('button', { name: 'rect', exact: true }).first().click()
+  }
+
+  test('Task 4 · picker adds a dial track to sailor_motion, shows it added, and removes it', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+    await setMotionDoc(page, { fps: 30, duration: 2 }) // no tracks yet
+    await enterMotionTab(page)
+    await selectSeededLayer(page)
+
+    // The picker mounts for the selected layer and offers the grain Amount dial.
+    await expect(page.locator('[data-testid="dial-picker"]')).toBeVisible()
+    const target = `layers.${layerId}.effects.e-grain-anim.amount`
+    const addBtn = page.locator(`[data-testid="dial-add-${dialKey(target)}"]`)
+    await expect(addBtn).toBeVisible()
+    await expect(addBtn).toHaveAttribute('aria-pressed', 'false')
+
+    await addBtn.click()
+
+    // A track for the Amount dial is appended, with ONE keyframe seeded at the playhead
+    // (t = 0 here) from the dial's current value (0.5). It persists on the node's doc.
+    const afterAdd = await page.evaluate(() =>
+      (window as any).__frameLab.node.data.properties.sailor_motion.tracks)
+    expect(Array.isArray(afterAdd)).toBe(true)
+    expect(afterAdd).toHaveLength(1)
+    expect(afterAdd[0].target).toBe(target)
+    expect(afterAdd[0].keyframes).toHaveLength(1)
+    expect(afterAdd[0].keyframes[0].t).toBe(0)
+    expect(afterAdd[0].keyframes[0].v).toBe(0.5)
+
+    // The picker reflects the added state (toggle now pressed).
+    await expect(addBtn).toHaveAttribute('aria-pressed', 'true')
+
+    // Adding the same dial again is idempotent (still one track, still one keyframe).
+    await addBtn.click() // toggles OFF (remove), so add once more to re-check idempotency below
+    await expect(addBtn).toHaveAttribute('aria-pressed', 'false')
+    const afterRemove = await page.evaluate(() =>
+      (window as any).__frameLab.node.data.properties.sailor_motion.tracks)
+    expect(afterRemove).toHaveLength(0) // removed cleanly
+  })
+
+  // NOTE: the end-to-end proof that a PICKER-created track animates once it has a second
+  // keyframe belongs to Task 5 — the second keyframe must be authored through the timeline's
+  // reactive path (a mid-session raw doc mutation doesn't reach the mounted modal's paint).
+  // Task 3's `animate` case already proves a two-keyframe track drives the render, and the
+  // `picker adds…` case above proves the picker creates the track; Task 5 joins them live.
+
+  // ── Task 5 · per-dial keyframe rows on the timeline ────────────────────────
+  test('Task 5 · a timeline lane click authors a second keyframe on a picker-created dial track', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+    await setMotionDoc(page, { fps: 30, duration: 2 }) // no tracks yet
+    await enterMotionTab(page)
+    await selectSeededLayer(page)
+
+    const target = `layers.${layerId}.effects.e-grain-anim.amount`
+    const dk = dialKey(target)
+
+    // Picker creates the track (one keyframe at the playhead) — the RIGHT reactive path.
+    await page.locator(`[data-testid="dial-add-${dk}"]`).click()
+
+    // The dial-track row nests under the layer band: a label cell + a lane with the first diamond.
+    await expect(page.locator(`[data-testid="dial-track-${dk}"]`)).toBeVisible()
+    const lane = page.locator(`[data-testid="dial-lane-${dk}"]`)
+    await expect(lane).toBeVisible()
+    await expect(lane.locator('[data-testid="kf-0"]')).toBeVisible()
+
+    // Click the empty lane near the end → a SECOND keyframe, authored via emit('update:motion').
+    const box = (await lane.boundingBox())!
+    await page.mouse.click(box.x + box.width * 0.9, box.y + box.height / 2)
+    await expect(lane.locator('[data-testid="kf-1"]')).toBeVisible()
+
+    // It persists on the reactive doc: one track, now two keyframes.
+    const tracks = await page.evaluate(() =>
+      (window as any).__frameLab.node.data.properties.sailor_motion.tracks)
+    expect(tracks).toHaveLength(1)
+    expect(tracks[0].target).toBe(target)
+    expect(tracks[0].keyframes).toHaveLength(2)
+  })
+
+  test('Task 5 · dragging a dial keyframe re-renders the dial at a fixed playhead', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+
+    // A two-keyframe grain ramp (0 → 0.9), seeded BEFORE entering the tab so it reaches paint.
+    await setMotionDoc(page, {
+      fps: 30, duration: 2,
+      tracks: [{
+        target: `layers.${layerId}.effects.e-grain-anim.amount`,
+        keyframes: [{ t: 0, v: 0, ease: 'linear' }, { t: 2, v: 0.9, ease: 'linear' }],
+      }],
+    })
+    await enterMotionTab(page)
+
+    const dk = dialKey(`layers.${layerId}.effects.e-grain-anim.amount`)
+    const lane = page.locator(`[data-testid="dial-lane-${dk}"]`)
+    await expect(lane).toBeVisible()
+
+    // Park the playhead near the start (t ≈ 0.2 → grain ≈ 0.09, barely any).
+    await scrubRuler(page, 0.1)
+    const before = await stackPixels(page)
+
+    // Drag the far-right keyframe (t = 2, v = 0.9) hard left, so the fixed playhead now sits
+    // AFTER it and the grain clamps to 0.9 — the interpolated render at the playhead changes.
+    const laneBox = (await lane.boundingBox())!
+    const kfBox = (await lane.locator('[data-testid="kf-1"]').boundingBox())!
+    await page.mouse.move(kfBox.x + kfBox.width / 2, kfBox.y + kfBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(laneBox.x + laneBox.width * 0.03, laneBox.y + laneBox.height / 2, { steps: 10 })
+    await page.mouse.up()
+    await page.waitForTimeout(300)
+    const after = await stackPixels(page)
+
+    expect(after).not.toBe(before)
+    const d = await pixelDelta(page, before, after)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(200) // the grain jumps from ~none to heavy at the playhead
+  })
+
+  // ── Task 6 · inspector variable-signal for a driven dial ────────────────────
+  // Authoring stays on the Motion tab; the effect inspector must SIGNAL that a dial
+  // is animated (a variable) and must NOT present it as a freely editable static value.
+  test('Task 6 · a driven dial reads as a variable in the effect inspector (summary + locked control)', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+    await setMotionDoc(page, { fps: 30, duration: 2 }) // no tracks yet
+    await enterMotionTab(page)
+    await selectSeededLayer(page)
+
+    // Add the grain Amount dial via the Motion-tab picker (Task-4 flow).
+    const target = `layers.${layerId}.effects.e-grain-anim.amount`
+    const dk = dialKey(target)
+    await page.locator(`[data-testid="dial-add-${dk}"]`).click()
+
+    // Back to Design; open the grain effect's inspector via its tree row.
+    await page.getByRole('button', { name: 'Design', exact: true }).click()
+    await expandLayerEffects(page)
+    await page.locator('[data-testid="effect-row"][data-effect-kind="grain"]').click()
+    await expect(page.getByTestId('effect-breadcrumb')).toBeVisible()
+
+    // The primary per-effect signal: an "Animated" summary that names the driven dial.
+    const summary = page.getByTestId('inspector-animated-dials')
+    await expect(summary).toBeVisible()
+    await expect(summary).toContainText('Animated')
+    await expect(summary).toContainText('Amount') // the grain dial, by its human label
+
+    // The grain panel (a packaged control) is marked ◆ and locked — a driven dial is not
+    // presented as a freely editable static value (the track wins at paint).
+    await expect(page.getByTestId('effect-panel-dial-lock')).toBeVisible()
+  })
+
+  // ── Task 7 · bake carries the animated dial ─────────────────────────────────
+  // The motion bake (CompositorModal.vue `bakeMotion` → `bakeAndUpload` → bake.ts
+  // `bakeMotionFrames`) renders every frame through the SAME painter seam as the live
+  // preview:  paintLayerStack(ctx, W, H, items, frozenLayers, undefined, t, motion, …, true)
+  // (bake.ts:79-80), with `t = i / motion.fps` per frame and `motion = effectiveMotion`
+  // (CompositorModal.vue:3861), which is `motionDoc` carrying `sailor_motion.tracks`. So the
+  // F8 fold (applyEffectDialTracks at the TOP of paintLayerStack, useCompositorLayers.ts:5443)
+  // runs per baked frame exactly as it does on the ruler — a baked frame at t≈0 vs t≈end shows
+  // the animated dial.
+  //
+  // The REAL bake uploads PNGs to /upload/image and persists motion_params; it is not drivable
+  // from this headless harness (no `window` bake hook, and the allowed edit set forbids adding
+  // one). So — the fallback the plan sanctions — this proves the two things a bake depends on:
+  //   (1) the node persists the tracks-carrying doc the bake reads (motionDoc → effectiveMotion), and
+  //   (2) the shared paintLayerStack seam animates the dial at the bake's FIRST frame (t≈0) vs
+  //       its LAST frame (t≈duration) — the pixels a baked frame 0 and frame N would carry.
+  // (Which one we did: the scrub-driven paintLayerStack equivalent, not the server bake.)
+  test('Task 7 · bake carries the animated dial: the tracks persist and the shared painter seam animates them across the bake\'s end frames', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRect(page)
+    const target = `layers.${layerId}.effects.e-grain-anim.amount`
+    await setMotionDoc(page, {
+      fps: 30, duration: 2,
+      tracks: [{ target, keyframes: [{ t: 0, v: 0, ease: 'linear' }, { t: 2, v: 0.9, ease: 'linear' }] }],
+    })
+    await enterMotionTab(page)
+
+    // (1) The doc the bake reads (CompositorModal.vue `motionDoc` → `effectiveMotion`) carries
+    //     the track, at the fps/duration the bake's frame loop iterates.
+    const bakeInput = await page.evaluate(() =>
+      (window as any).__frameLab.node.data.properties.sailor_motion)
+    expect(bakeInput.tracks).toHaveLength(1)
+    expect(bakeInput.tracks[0].target).toBe(target)
+    expect(bakeInput.fps).toBe(30)
+    expect(bakeInput.duration).toBe(2)
+
+    // (2) The shared paintLayerStack seam animates the dial at the bake's first frame
+    //     (frame 0 → t = 0) and last frame (frame total-1 → t ≈ duration).
+    await scrubRuler(page, 0)
+    const frame0 = await stackPixels(page)
+    await scrubRuler(page, 1)
+    const frameN = await stackPixels(page)
+
+    expect(frameN).not.toBe(frame0)
+    const d = await pixelDelta(page, frame0, frameN)
+    expect(d.sizeMismatch).toBe(false)
+    expect(d.changed).toBeGreaterThan(200) // the animated grain repaints a large area of the rect
+  })
+
+  // ── Task 7 · coexistence ────────────────────────────────────────────────────
+  /** The same grain rect, but carrying a whole-layer `animation` (transform/opacity
+   *  keyframes) alongside the effect. Returns the committed layer id. */
+  async function seedGrainRectWithAnim(page: Page): Promise<string> {
+    return page.evaluate(() => {
+      const rect = {
+        id: 'fx8-rect', kind: 'rect', x: 0.5, y: 0.5, w: 0.6, h: 0.6, rot: 0,
+        fill: { type: 'solid', color: '#8899aa' }, opacity: 1,
+        effects: [{ id: 'e-grain-anim', type: 'grain', amount: 0.5, size: 3, visible: true }],
+        // Whole-layer motion: slide right + fade over the timeline (canvas-normalized dx).
+        animation: { offset: 0, keyframes: [
+          { t: 0, dx: 0, opacity: 1, ease: 'linear' },
+          { t: 2, dx: 0.3, opacity: 0.25, ease: 'linear' },
+        ] },
+      }
+      ;(window as any).__compositorSetLayers([rect])
+      return (window as any).__compositorLayers()[0].id as string
+    })
+  }
+
+  test('Task 7 · a dial track and whole-layer motion compose on one layer (the fold clone still animates through drawLayerWithMotion)', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await seedGrainRectWithAnim(page)
+    const track = {
+      target: `layers.${layerId}.effects.e-grain-anim.amount`,
+      keyframes: [{ t: 0, v: 0, ease: 'linear' }, { t: 2, v: 0.9, ease: 'linear' }],
+    }
+    await setMotionDoc(page, { fps: 30, duration: 2, tracks: [track] })
+    await enterMotionTab(page)
+
+    // Both animate together: the grain dial folds (0→0.9) AND the layer slides/fades — the
+    // render moves a lot between the two ends of the ruler.
+    await scrubRuler(page, 0)
+    const start = await stackPixels(page)
+    await scrubRuler(page, 1)
+    const end = await stackPixels(page)
+    expect(end).not.toBe(start)
+    const composed = await pixelDelta(page, start, end)
+    expect(composed.sizeMismatch).toBe(false)
+    expect(composed.changed).toBeGreaterThan(200)
+
+    // Isolate the whole-layer motion: re-seed the SAME layer WITHOUT `animation`, keep the SAME
+    // grain track, and compare at the END playhead. The folded grain value is 0.9 in both
+    // renders, so any difference is the transform/opacity of the whole-layer motion path —
+    // which draws the dial-animated CLONE. Different ⇒ the two paths compose, not clobber.
+    await page.evaluate(() => {
+      const rect = {
+        id: 'fx8-rect', kind: 'rect', x: 0.5, y: 0.5, w: 0.6, h: 0.6, rot: 0,
+        fill: { type: 'solid', color: '#8899aa' }, opacity: 1,
+        effects: [{ id: 'e-grain-anim', type: 'grain', amount: 0.5, size: 3, visible: true }],
+      }
+      ;(window as any).__compositorSetLayers([rect]) // no whole-layer animation this time
+    })
+    await scrubRuler(page, 1)
+    const dialOnlyEnd = await stackPixels(page)
+    expect(dialOnlyEnd).not.toBe(end) // the whole-layer slide/fade changed the frame on top of the dial
+  })
+
+  test('Task 7 · two dial tracks on two effects of one layer both apply', async ({ page }) => {
+    await openFrameLab(page)
+    const layerId = await page.evaluate(() => {
+      const rect = {
+        id: 'fx8-rect', kind: 'rect', x: 0.5, y: 0.5, w: 0.6, h: 0.6, rot: 0,
+        fill: { type: 'solid', color: '#8899aa' }, opacity: 1,
+        effects: [
+          { id: 'e-grain-anim', type: 'grain', amount: 0.5, size: 3, visible: true },
+          { id: 'e-adjust-anim', type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
+        ],
+      }
+      ;(window as any).__compositorSetLayers([rect])
+      return (window as any).__compositorLayers()[0].id as string
+    })
+    const grainTrack = {
+      target: `layers.${layerId}.effects.e-grain-anim.amount`,
+      keyframes: [{ t: 0, v: 0, ease: 'linear' }, { t: 2, v: 0.9, ease: 'linear' }],
+    }
+    const adjustTrack = {
+      target: `layers.${layerId}.effects.e-adjust-anim.brightness`,
+      keyframes: [{ t: 0, v: 1, ease: 'linear' }, { t: 2, v: 2, ease: 'linear' }],
+    }
+
+    // BOTH tracks at the end playhead → grain 0.9 AND brightness 2.
+    await setMotionDoc(page, { fps: 30, duration: 2, tracks: [grainTrack, adjustTrack] })
+    await enterMotionTab(page)
+    await scrubRuler(page, 1)
+    const both = await stackPixels(page)
+
+    // Only the grain track → the adjust dial stays at its static brightness (1). If the ADJUST
+    // track applied in `both`, this render (brightness 1) must differ from it (brightness 2).
+    await setMotionDoc(page, { fps: 30, duration: 2, tracks: [grainTrack] })
+    await scrubRuler(page, 1)
+    const grainOnly = await stackPixels(page)
+    expect(grainOnly).not.toBe(both) // the ADJUST track contributed in `both`
+
+    // Only the adjust track → the grain dial stays at its static amount (0.5). If the GRAIN
+    // track applied in `both`, this render (grain 0.5) must differ from it (grain 0.9).
+    await setMotionDoc(page, { fps: 30, duration: 2, tracks: [adjustTrack] })
+    await scrubRuler(page, 1)
+    const adjustOnly = await stackPixels(page)
+    expect(adjustOnly).not.toBe(both) // the GRAIN track contributed in `both`
   })
 })

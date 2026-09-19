@@ -20,6 +20,8 @@ export const LIBRARY_FONTS = manifest as unknown as LibraryManifest
 
 const byFamily = new Map<string, LibraryFamily>(LIBRARY_FONTS.families.map(f => [f.family, f]))
 
+export const FEATURED_FOUNDRY_ID = 'bram-naus'
+
 export function librariesByFoundry(): { foundry: LibraryFoundry; families: LibraryFamily[] }[] {
   return LIBRARY_FONTS.foundries.map(foundry => ({
     foundry,
@@ -31,14 +33,27 @@ export function librariesByFoundry(): { foundry: LibraryFoundry; families: Libra
  * Search filter over the library catalog, grouped by foundry — pure, no DOM/network.
  * Shared by every library-font picker (FontPicker's Pangram tab first, more to follow)
  * so the "narrow families by substring, drop empty foundry groups" rule lives in one
- * place instead of being re-typed per component.
+ * place instead of being re-typed per component. Excludes the Featured foundry — the
+ * Pangram tab stays licensed-only; Featured families surface via `featuredFamilies`.
  */
 export function filterLibraryGroups(query: string): { foundry: LibraryFoundry; families: LibraryFamily[] }[] {
   const q = query.trim().toLowerCase()
-  return librariesByFoundry().map(g => ({
-    foundry: g.foundry,
-    families: q ? g.families.filter(f => f.family.toLowerCase().includes(q)) : g.families,
-  })).filter(g => g.families.length)
+  return librariesByFoundry()
+    .filter(g => g.foundry.id !== FEATURED_FOUNDRY_ID)
+    .map(g => ({
+      foundry: g.foundry,
+      families: q ? g.families.filter(f => f.family.toLowerCase().includes(q)) : g.families,
+    }))
+    .filter(g => g.families.length)
+}
+
+/** Featured (curated free) families, filtered by name and ordered by curation number. */
+export function featuredFamilies(query: string): LibraryFamily[] {
+  const q = query.trim().toLowerCase()
+  return LIBRARY_FONTS.families
+    .filter(f => f.foundry === FEATURED_FOUNDRY_ID)
+    .filter(f => (q ? f.family.toLowerCase().includes(q) : true))
+    .sort((a, b) => (a.num ?? Infinity) - (b.num ?? Infinity) || a.family.localeCompare(b.family))
 }
 
 export function libraryFamily(family: string): LibraryFamily | null {
