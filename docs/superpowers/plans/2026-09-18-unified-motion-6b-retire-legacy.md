@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the band timeline the only Motion authoring surface in the Frame compositor: convert old effect-dial tracks into timeline bands when a frame opens, keep old In/Loop/Out layer animations rendering exactly as before but visible and removable in the dock, and delete the hidden legacy authoring UI.
+**Goal:** Make the band timeline the only Motion authoring surface in the Frame compositor: when a frame opens, convert old effect-dial tracks AND old In/Loop/Out layer animations into timeline bands, show the few animations that cannot be converted as a locked bar with a Remove action, and delete the hidden legacy authoring UI.
 
-**Architecture:** Two legacy models exist. (B) `sailor_motion.tracks` (effect-dial keyframes) maps 1:1 onto `sailor_motion.motionx` bands — same paths, same interpolation — once motionx colour tracks can use the legacy colour-mix spaces; a pure converter runs when the modal opens and persists the result. (A) `layer.animation` (In/Loop/Out presets) is a *different kind of thing*: a visibility window plus per-character staggering, clip, blur and copies — none of which motionx can express — so it is **not** converted. Its render engine (`lib/motion/evaluate.ts`, `paint.ts`) stays (the video Timeline and Vector Type depend on it too); the dock shows it as a locked bar with a Remove action. The legacy render fold for dial tracks stays as a read-only fallback for frames that are never opened.
+**Architecture:** (B) `sailor_motion.tracks` (effect-dial keyframes) maps 1:1 onto `sailor_motion.motionx` bands — same paths, same interpolation — once motionx colour tracks can use the legacy colour-mix spaces. (A) `layer.animation` (In/Loop/Out presets + keyframes) is converted by **sampling the old evaluator** on the frame grid and simplifying each property (x, y, rotation, scale, opacity) into one band — general, and verified by a parity test against the old engine. User decision 2026-09-19: "just convert" — accepted losses are per-letter staggering on text layers (the layer animates as a whole) and the blur of the blur presets. Animations that use masks, axis flips or tiled copies, or that sit on a layer which already has transform bands, are NOT converted: they keep playing through the old engine and show as a locked bar with Remove. The old engine (`lib/motion/evaluate.ts`, `paint.ts`) stays regardless — the video Timeline and Vector Type use it. Prerequisite found while planning: the motionx `scale` property only works on path/image layers today, so Task 0 makes it work on every layer kind.
 
 **Tech Stack:** Nuxt 4 / Vue 3 `<script setup>` / TypeScript / Tailwind; Vitest (`tests/unit/**/*.unit.spec.ts`); pure motion core in `frontend/app/lib/motionx/`.
 
@@ -25,6 +25,89 @@
 - Colours/font stay Sailor's: surfaces `#1a1a1a` / `#0e0e10`, `border-white/10`, accent `#7c9cff`, behaviour bars emerald, warnings amber.
 - Byte-identity: a frame with no legacy data must render and serialize exactly as before every task.
 - Do **not** delete `frontend/app/lib/motion/evaluate.ts`, `paint.ts`, `animatedText.ts`, `types.ts`, `bake.ts`, or `app/data/kinetic-presets.ts` — the video Timeline (`lib/engine/motionClipRenderer.ts`), Vector Type (`lib/vectortype/presetMotion.ts`) and `PresetThumb.vue` use them.
+
+---
+
+### Task 0: `scale` bands work on every layer kind
+
+Today `applyResolvedValue` writes `scale` onto the layer clone, but only `path` and `image` layers have a `scale` field the painter reads. On rect / ellipse / text / polygon / star / … the Grow in, Pulse and Shrink out behaviours and the "Scale" property do nothing. The old engine scales at draw time about the layer centre (`lib/motion/paint.ts`, `needScale` block) — do the same.
+
+**Files:**
+- Modify: `frontend/app/lib/motionx/adapter/frame.ts`
+- Modify: `frontend/app/composables/useCompositorLayers.ts` (inside `paintLayerStack`'s per-item loop — SHARED file, smallest possible diff)
+- Test: `frontend/tests/unit/motionx/adapter-frame.unit.spec.ts`
+
+**Interfaces:**
+- Produces: a transient, never-persisted clone field `motionScale?: number` on layers WITHOUT a native numeric `scale`; layers WITH one keep receiving `scale`. `frameTarget(layer).get('scale')` returns the native scale or `1`.
+
+- [ ] **Step 1: Failing test** — append to `adapter-frame.unit.spec.ts`:
+
+```ts
+describe('scale on every layer kind', () => {
+  it('a layer with a native scale field still gets `scale`', () => {
+    const l = layer({ kind: 'path', scale: 2 })
+    expect((applyResolvedValue(l, 'scale', 3) as any).scale).toBe(3)
+    expect((applyResolvedValue(l, 'scale', 3) as any).motionScale).toBeUndefined()
+  })
+  it('a layer without one gets the transient motionScale and keeps no `scale` key', () => {
+    const { scale: _drop, ...rect } = layer({ kind: 'rect', w: 0.3, h: 0.2 }) as any
+    const out = applyResolvedValue(rect, 'scale', 1.5) as any
+    expect(out.motionScale).toBe(1.5)
+    expect('scale' in out).toBe(false)
+  })
+  it('behaviours read a base scale of 1 on such layers', () => {
+    const { scale: _drop, ...rect } = layer({ kind: 'rect', w: 0.3, h: 0.2 }) as any
+    expect(frameTarget(rect).get('scale')).toBe(1)
+  })
+})
+```
+
+(Add `applyResolvedValue, frameTarget` to the spec's import from `~/lib/motionx/adapter/frame` if missing. Note the spec's `layer()` helper sets `scale: 1` by default, hence the destructuring.)
+
+- [ ] **Step 2: Run, expect failure** — `cd frontend && npm run test:unit -- motionx/adapter-frame`.
+
+- [ ] **Step 3: Adapter.** In `applyResolvedValue`, replace the TRANSFORM branch with:
+
+```ts
+  if (TRANSFORM.has(prop) && typeof value === 'number') {
+    // Only path/image layers have a native `scale` the painter reads. Everything else gets a
+    // transient `motionScale` that paintLayerStack applies as a draw-time scale about the
+    // layer centre (what the old motion engine did). Clones only — never persisted.
+    if (prop === 'scale' && typeof (layer as unknown as { scale?: unknown }).scale !== 'number') {
+      return { ...layer, motionScale: value } as unknown as LocalLayer
+    }
+    return { ...layer, [prop]: value } as LocalLayer
+  }
+```
+
+In `frameTarget().get`, make `scale` fall back to 1: before the generic TRANSFORM line add `if (prop === 'scale' && typeof rec.scale !== 'number') return 1`.
+
+- [ ] **Step 4: Painter.** In `useCompositorLayers.ts`, find the per-item draw loop inside `paintLayerStack` (the `for` whose body contains `const motionActive = t !== undefined && motion && _motionPainterImpl`). The body has several `continue`s, so do NOT wrap it in try/finally (huge diff in a shared file). Instead add three small insertions:
+
+  1. Immediately before that `for`: `let motionScaleOpen = false`
+  2. As the FIRST statements of the loop body:
+     ```ts
+     if (motionScaleOpen) { ctx.restore(); motionScaleOpen = false }
+     ```
+  3. At the point where the local `layer` for this item is known and BEFORE any drawing for it (just above `const ref = layerMaskRef(layer)`):
+     ```ts
+     // motionx `scale` on a layer kind with no native scale: draw-time scale about the centre.
+     const ms = (layer as unknown as { motionScale?: number }).motionScale
+     if (typeof ms === 'number' && Math.abs(ms - 1) > 1e-4) {
+       ctx.save()
+       ctx.translate(layer.x * W, layer.y * H)
+       ctx.scale(Math.max(0.001, ms), Math.max(0.001, ms))
+       ctx.translate(-layer.x * W, -layer.y * H)
+       motionScaleOpen = true
+     }
+     ```
+  4. Immediately after the loop's closing brace: `if (motionScaleOpen) ctx.restore()`
+
+  If `layer` is only defined inside a `it.type === 'local'` branch, put insertion 3 inside that branch. Byte-identity: with no `motionScale`, none of this runs.
+
+- [ ] **Step 5: Verify.** `npm run test:unit -- motionx compositor` → pass. `npx vue-tsc --noEmit 2>&1 | grep -E "adapter/frame|useCompositorLayers"` → only pre-existing lines (compare with `git stash`-free method: run the same grep on HEAD's count before editing and confirm the count is unchanged). Live (browser pane must be VISIBLE — a hidden pane pauses rendering): open a Frame, add a rectangle, Motion → Add behaviour → Pulse → press Space: the rectangle visibly grows and shrinks about its centre; selection handles and other layers are unaffected.
+
+- [ ] **Step 6: Commit** (private index) — `fix(motionx): scale bands work on every layer kind (draw-time scale about the centre)`.
 
 ---
 
@@ -442,9 +525,251 @@ and the import `import { migrateDialTracks } from '~/lib/motionx/adapter/migrate
 
 ---
 
-### Task 4: Legacy layer animations are visible and removable in the dock
+### Task 4: Pure converter — In/Loop/Out layer animations → bands (by sampling the old engine)
 
-`layer.animation` keeps rendering through the untouched engine. Today it is invisible: the old editor is hidden, so a layer can animate with nothing in the timeline explaining why. Give it one locked bar and one way out.
+**Files:**
+- Create: `frontend/app/lib/motionx/adapter/migrateLayerAnimation.ts`
+- Test: `frontend/tests/unit/motionx/migrate-layer-animation.unit.spec.ts`
+
+**Interfaces:**
+- Consumes: `evaluateAnimation(anim, t, motion, n)`, `layerWindow` from `~/lib/motion/evaluate`; `composeEffectiveLayer(layer, st, W, H)` from `~/lib/motion/paint`; `LayerAnimation`, `FrameMotion` from `~/lib/motion/types`; `Track` from `~/lib/motionx`.
+- Produces:
+  - `UNCONVERTIBLE_PRESETS: ReadonlySet<string>` = `mask-up, mask-down, mask-out-up, mask-out-down, card-flip-h, card-flip-v, card-flip-h-out, card-flip-v-out, inward-echoes, grid-scroll-x, grid-scroll-y, noise-tile`.
+  - `layerAnimationToTracks(layer: LocalLayer, motion: FrameMotion, dims: { w: number; h: number }, existing: Track[]): Track[] | null` — `null` = leave it legacy.
+  - `migrateLayerAnimations(layers: LocalLayer[], motion: FrameMotion & { motionx?: Track[] }, dims): { layers: LocalLayer[]; motionx: Track[]; converted: string[] }` — same `layers` reference and `converted: []` when nothing converts.
+
+Rules:
+1. `null` when: no `animation`; no `in`/`loop`/`out`/`keyframes`; any spec's `presetId` is in `UNCONVERTIBLE_PRESETS`; or `existing` already has a track on any of the layer's `x|y|rotation|scale|opacity` paths (the old engine composed ON TOP of bands — not expressible).
+2. Sample times: every frame `k / fps` for `k = 0 … ceil(duration · fps)`, plus the window/phase boundaries `start`, `start + inDur`, `start + outStart`, `end` (same formulas as `evaluateAnimation`), clamped to `[0, duration]`, de-duplicated, sorted.
+3. At each `t`: `st = evaluateAnimation(anim, t, motion, 1)` — **n = 1 on purpose** (whole layer; per-letter staggering is the accepted loss). Hidden (`!st.visible`) → `{x, y, rotation, scale: base, opacity: 0}` with the layer's own x/y/rotation. Visible → `eff = composeEffectiveLayer(layer, st, w, h)` gives x/y/rotation/opacity; `scale = baseScale · st.layer.scale · (st.units?.[0]?.scale ?? 1)` with `baseScale = typeof layer.scale === 'number' ? layer.scale : 1`.
+4. A property whose samples never differ from the layer's base value (|Δ| ≤ 1e-9) gets no band.
+5. Simplify each property with Ramer–Douglas–Peucker in (t, value) space, tolerance `0.002` for x/y/scale/opacity and `0.25` for rotation (time axis unscaled). Keyframes are `{ t, value, ease: 'linear' }`.
+6. Output tracks are untagged, `type: 'number'`, path `layers.<id>.<prop>`.
+
+- [ ] **Step 1: Failing tests** — create `frontend/tests/unit/motionx/migrate-layer-animation.unit.spec.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest'
+import { layerAnimationToTracks, migrateLayerAnimations, UNCONVERTIBLE_PRESETS } from '~/lib/motionx/adapter/migrateLayerAnimation'
+import { evaluateAnimation } from '~/lib/motion/evaluate'
+import { composeEffectiveLayer } from '~/lib/motion/paint'
+import { applyMotionxTracks } from '~/lib/motionx/adapter/frame'
+import type { LocalLayer } from '~/composables/useCompositorLayers'
+
+const motion = { fps: 30, duration: 4 }
+const dims = { w: 1000, h: 1000 }
+const rect = (animation: any, over: any = {}) => ({ id: 'L1', kind: 'rect', x: 0.5, y: 0.5, rotation: 10, opacity: 0.8, w: 0.3, h: 0.2, fill: '#fff', stroke: '', strokeWidth: 0, radius: 0, animation, ...over }) as unknown as LocalLayer
+
+/** What the OLD engine shows at t (whole layer). */
+function legacy(l: LocalLayer, t: number) {
+  const st = evaluateAnimation((l as any).animation, t, motion as any, 1)
+  if (!st.visible) return { x: l.x, y: l.y, rotation: l.rotation, opacity: 0, scale: 1 }
+  const e = composeEffectiveLayer(l, st, dims.w, dims.h)
+  return { x: e.x, y: e.y, rotation: e.rotation, opacity: e.opacity, scale: st.layer.scale * (st.units?.[0]?.scale ?? 1) }
+}
+/** What the converted bands show at t. */
+function converted(l: LocalLayer, tracks: any[], t: number) {
+  const { animation: _a, ...bare } = l as any
+  const out = applyMotionxTracks([bare], tracks, t)[0] as any
+  return { x: out.x, y: out.y, rotation: out.rotation, opacity: out.opacity, scale: out.motionScale ?? out.scale ?? 1 }
+}
+function expectParity(l: LocalLayer) {
+  const tracks = layerAnimationToTracks(l, motion as any, dims, [])!
+  expect(tracks).not.toBeNull()
+  for (let k = 0; k <= 120; k++) {
+    const t = k / 30
+    // window edges are a 1-frame ramp in band form; skip the frame right at an edge
+    const a = legacy(l, t), b = converted(l, tracks, t)
+    const edge = a.opacity === 0 && legacy(l, t + 1 / 30).opacity > 0 || a.opacity > 0 && legacy(l, Math.max(0, t - 1 / 30)).opacity === 0
+    if (edge) continue
+    expect(b.x, `x @${t}`).toBeCloseTo(a.x, 2)
+    expect(b.y, `y @${t}`).toBeCloseTo(a.y, 2)
+    expect(b.opacity, `opacity @${t}`).toBeCloseTo(a.opacity, 2)
+    expect(b.scale, `scale @${t}`).toBeCloseTo(a.scale, 2)
+    expect(Math.abs(b.rotation - a.rotation), `rotation @${t}`).toBeLessThan(0.6)
+  }
+  return tracks
+}
+
+describe('layerAnimationToTracks', () => {
+  it('fade in: one opacity band from 0 to the layer opacity, nothing else', () => {
+    const tracks = expectParity(rect({ offset: 0, in: { presetId: 'fade-in', duration: 0.8 } }))
+    expect(tracks.map((t) => t.path)).toEqual(['layers.L1.opacity'])
+    const kf = tracks[0]!.keyframes
+    expect(kf[0]).toMatchObject({ t: 0, value: 0 })
+    expect(kf.at(-1)!.value).toBeCloseTo(0.8, 6)
+  })
+  it('slide up + float loop + fade out, inside a 0.5s–3.5s window', () => {
+    const tracks = expectParity(rect({ offset: 0.5, duration: 3, in: { presetId: 'slide-up', duration: 0.6 }, loop: { presetId: 'float', duration: 1.5 }, out: { presetId: 'fade-out', duration: 0.5 } }))
+    expect(new Set(tracks.map((t) => t.path))).toEqual(new Set(['layers.L1.x', 'layers.L1.y', 'layers.L1.opacity']))
+  })
+  it('spin + grow in (rotation, scale, opacity) and an elastic drop', () => {
+    expectParity(rect({ offset: 0, in: { presetId: 'spin-in', duration: 1 } }))
+    expectParity(rect({ offset: 0, in: { presetId: 'elastic-drop', duration: 1.2 } }))
+  })
+  it('hand keyframes compose with a preset, exactly as the old engine did', () => {
+    expectParity(rect({ offset: 0, keyframes: [{ t: 0, dx: 0 }, { t: 2, dx: 0.2, rotation: 45 }], in: { presetId: 'fade-in', duration: 0.5 } }))
+  })
+  it('bands stay small: a 4s sine loop simplifies to far fewer points than frames', () => {
+    const tracks = layerAnimationToTracks(rect({ offset: 0, loop: { presetId: 'sway', duration: 2 } }), motion as any, dims, [])!
+    expect(tracks[0]!.keyframes.length).toBeLessThan(60)
+  })
+  it('refuses masks / flips / copies, empty shells, and layers that already have transform bands', () => {
+    for (const id of UNCONVERTIBLE_PRESETS) {
+      expect(layerAnimationToTracks(rect({ offset: 0, in: { presetId: id, duration: 1 } }), motion as any, dims, [])).toBeNull()
+    }
+    expect(layerAnimationToTracks(rect({ offset: 0 }), motion as any, dims, [])).toBeNull()
+    expect(layerAnimationToTracks(rect(undefined), motion as any, dims, [])).toBeNull()
+    const band = { path: 'layers.L1.rotation', type: 'number' as const, keyframes: [{ t: 0, value: 0, ease: 'linear' as const }] }
+    expect(layerAnimationToTracks(rect({ offset: 0, in: { presetId: 'fade-in', duration: 1 } }), motion as any, dims, [band])).toBeNull()
+  })
+})
+
+describe('migrateLayerAnimations', () => {
+  it('nothing to convert → same references', () => {
+    const layers = [rect(undefined)]
+    const out = migrateLayerAnimations(layers, motion as any, dims)
+    expect(out.layers).toBe(layers)
+    expect(out.converted).toEqual([])
+  })
+  it('removes `animation` from converted layers and appends their bands; leaves the rest', () => {
+    const a = rect({ offset: 0, in: { presetId: 'fade-in', duration: 1 } })
+    const b = rect({ offset: 0, in: { presetId: 'mask-up', duration: 1 } }, { id: 'L2' })
+    const out = migrateLayerAnimations([a, b], { ...motion, motionx: [] } as any, dims)
+    expect(out.converted).toEqual(['L1'])
+    expect('animation' in (out.layers[0] as any)).toBe(false)
+    expect((out.layers[1] as any).animation).toBeTruthy()
+    expect(out.motionx.map((t) => t.path)).toEqual(['layers.L1.opacity'])
+  })
+})
+```
+
+- [ ] **Step 2: Run, expect failure** — `npm run test:unit -- motionx/migrate-layer-animation`.
+
+- [ ] **Step 3: Implement** — create `frontend/app/lib/motionx/adapter/migrateLayerAnimation.ts`:
+
+```ts
+// One-way conversion of the old In/Loop/Out layer animation (`layer.animation`) into motionx
+// bands, by SAMPLING the old evaluator on the frame grid and simplifying each property. General
+// (presets, hand keyframes, windows and their composition all come out right) and checked by a
+// parity spec against the old engine. Accepted losses (user decision 2026-09-19): per-letter
+// staggering on text layers — the layer animates as a whole (n = 1) — and preset blur.
+import { evaluateAnimation, layerWindow } from '~/lib/motion/evaluate'
+import { composeEffectiveLayer } from '~/lib/motion/paint'
+import type { FrameMotion, LayerAnimation } from '~/lib/motion/types'
+import type { LocalLayer } from '~/composables/useCompositorLayers'
+import type { Keyframe, Track } from '../types'
+
+/** Presets whose look is a mask, an axis flip or tiled copies — no band can express them. */
+export const UNCONVERTIBLE_PRESETS: ReadonlySet<string> = new Set([
+  'mask-up', 'mask-down', 'mask-out-up', 'mask-out-down',
+  'card-flip-h', 'card-flip-v', 'card-flip-h-out', 'card-flip-v-out',
+  'inward-echoes', 'grid-scroll-x', 'grid-scroll-y', 'noise-tile',
+])
+
+const PROPS = ['x', 'y', 'rotation', 'scale', 'opacity'] as const
+type Prop = typeof PROPS[number]
+const TOLERANCE: Record<Prop, number> = { x: 0.002, y: 0.002, scale: 0.002, opacity: 0.002, rotation: 0.25 }
+
+/** Ramer–Douglas–Peucker on (t, v); distance is vertical (value) error, which is what the eye sees. */
+function simplify(pts: Array<[number, number]>, eps: number): Array<[number, number]> {
+  if (pts.length <= 2) return pts
+  const keep = new Array<boolean>(pts.length).fill(false)
+  keep[0] = keep[pts.length - 1] = true
+  const stack: Array<[number, number]> = [[0, pts.length - 1]]
+  while (stack.length) {
+    const [a, b] = stack.pop()!
+    const [ta, va] = pts[a]!, [tb, vb] = pts[b]!
+    let worst = -1, dist = eps
+    for (let i = a + 1; i < b; i++) {
+      const [t, v] = pts[i]!
+      const onLine = tb === ta ? va : va + ((vb - va) * (t - ta)) / (tb - ta)
+      const d = Math.abs(v - onLine)
+      if (d > dist) { dist = d; worst = i }
+    }
+    if (worst > 0) { keep[worst] = true; stack.push([a, worst], [worst, b]) }
+  }
+  return pts.filter((_, i) => keep[i])
+}
+
+export function layerAnimationToTracks(layer: LocalLayer, motion: FrameMotion, dims: { w: number; h: number }, existing: Track[]): Track[] | null {
+  const anim = (layer as unknown as { animation?: LayerAnimation }).animation
+  if (!anim) return null
+  const specs = [anim.in, anim.loop, anim.out].filter(Boolean) as Array<{ presetId: string; duration: number }>
+  if (!specs.length && !anim.keyframes?.length) return null
+  if (specs.some((s) => UNCONVERTIBLE_PRESETS.has(s.presetId))) return null
+  const prefix = `layers.${layer.id}.`
+  if (existing.some((t) => PROPS.some((p) => t.path === prefix + p))) return null
+
+  const fps = Math.max(1, motion.fps || 30), duration = Math.max(0.05, motion.duration || 4)
+  const { start, end } = layerWindow(anim, motion)
+  const inDur = anim.in ? Math.max(0.01, anim.in.duration) : 0
+  const outDur = anim.out ? Math.max(0.01, anim.out.duration) : 0
+  const outStart = Math.max(inDur, (end - start) - outDur)
+  const times = new Set<number>()
+  for (let k = 0; k <= Math.ceil(duration * fps); k++) times.add(Math.min(duration, k / fps))
+  for (const t of [start, start + inDur, start + outStart, end]) times.add(Math.min(duration, Math.max(0, t)))
+  const ts = [...times].sort((a, b) => a - b)
+
+  const rec = layer as unknown as Record<string, number>
+  const baseScale = typeof rec.scale === 'number' ? rec.scale : 1
+  const base: Record<Prop, number> = { x: layer.x, y: layer.y, rotation: layer.rotation, scale: baseScale, opacity: layer.opacity }
+  const series: Record<Prop, Array<[number, number]>> = { x: [], y: [], rotation: [], scale: [], opacity: [] }
+  for (const t of ts) {
+    const st = evaluateAnimation(anim, t, motion, 1)
+    let v: Record<Prop, number>
+    if (!st.visible) v = { ...base, opacity: 0 }
+    else {
+      const eff = composeEffectiveLayer(layer, st, dims.w, dims.h)
+      v = { x: eff.x, y: eff.y, rotation: eff.rotation, opacity: eff.opacity, scale: baseScale * st.layer.scale * (st.units?.[0]?.scale ?? 1) }
+    }
+    for (const p of PROPS) series[p].push([t, v[p]])
+  }
+
+  const tracks: Track[] = []
+  for (const p of PROPS) {
+    if (series[p].every(([, v]) => Math.abs(v - base[p]) <= 1e-9)) continue
+    const keyframes: Keyframe[] = simplify(series[p], TOLERANCE[p]).map(([t, value]) => ({ t, value, ease: 'linear' }))
+    tracks.push({ path: prefix + p, type: 'number', keyframes })
+  }
+  return tracks
+}
+
+export function migrateLayerAnimations(
+  layers: LocalLayer[], motion: FrameMotion & { motionx?: Track[] }, dims: { w: number; h: number },
+): { layers: LocalLayer[]; motionx: Track[]; converted: string[] } {
+  const motionx = [...(motion.motionx ?? [])]
+  const converted: string[] = []
+  const next = layers.map((l) => {
+    const tracks = layerAnimationToTracks(l, motion, dims, motionx)
+    if (!tracks) return l
+    motionx.push(...tracks)
+    converted.push(l.id)
+    const { animation: _gone, ...rest } = l as LocalLayer & { animation?: unknown }
+    return rest as LocalLayer
+  })
+  return converted.length ? { layers: next, motionx, converted } : { layers, motionx: motion.motionx ?? [], converted }
+}
+```
+
+- [ ] **Step 4: Run** — `npm run test:unit -- motionx/migrate-layer-animation` → pass. If a parity case fails by a hair, first check it is a genuine window-edge frame (the helper skips those) before touching a tolerance; tightening `TOLERANCE` is fine, loosening the test is not. Then `npm run test:unit -- motionx motion-` → all pass (old-engine specs untouched).
+
+- [ ] **Step 5: Commit** — `feat(motionx): convert old In/Loop/Out layer animations to bands by sampling the old engine (parity-tested)`.
+
+---
+
+### Task 5: Convert layer animations on open; leftovers are visible and removable in the dock
+
+Run Task 4's converter when the frame opens. Whatever it refuses (masks, flips, copies, or a layer that already has transform bands) keeps rendering through the untouched old engine — and must not be invisible: give it one locked bar and one way out.
+
+**On-open hook** (add to `CompositorModal.vue` next to the dial-track watcher from Task 3, same `watch(() => compositor.value?.id, …, { immediate: true })` pattern; import `migrateLayerAnimations` from `~/lib/motionx/adapter/migrateLayerAnimation`):
+
+```ts
+  const res = migrateLayerAnimations(localLayers.value, motionDoc.value, { w: canvasDisplay.w, h: canvasDisplay.h })
+  if (res.converted.length) { commit(res.layers); setMotion({ motionx: res.motionx } as Partial<FrameMotion>) }
+```
+
+No `recordHistory()` — opening a frame is not an undoable edit. If `canvasDisplay` is not yet sized when the watcher first runs (w or h is 0), defer with `nextTick` and bail if still 0; only the W/H *ratio* matters to the converter.
 
 **Files:**
 - Modify: `frontend/app/lib/motionx/bands.ts`
@@ -585,7 +910,7 @@ const legacyMotionLabel = computed(() => {
 
 ---
 
-### Task 5: The Design inspector's "animated" dot follows bands
+### Task 6: The Design inspector's "animated" dot follows bands
 
 `animatedDialKeysFor` in `CompositorModal.vue` (~line 3933) marks a dial as animated from `motion.tracks` only. After Task 3 there are no new tracks, so the dot would never light.
 
@@ -624,9 +949,9 @@ it('a timeline band on the dial counts as animated too', () => {
 
 ---
 
-### Task 6: Delete the hidden legacy authoring UI
+### Task 7: Delete the hidden legacy authoring UI
 
-Only after Tasks 3–5 are committed.
+Only after Tasks 3–6 are committed.
 
 **Files:**
 - Delete: `frontend/app/components/vue-canvas/compositor/MotionLayerEditor.vue`
@@ -645,7 +970,7 @@ grep -rn "addDialTrack\|removeDialTrack\|addKeyframe\|moveKeyframe\|removeKeyfra
 
 Expected: the first prints only `CompositorModal.vue` import/usage lines and the `timelineBands` spec; the second prints only `CompositorModal.vue` lines (the agent no longer imports them after Task 3). Anything else → stop and report; do not delete.
 
-- [ ] **Step 2: `CompositorModal.vue`** — remove: the `legacyMotionUi` ref; the three template blocks gated on it (`data-testid="dial-picker"` block, the `<CompositorMotionTimeline v-if="legacyMotionUi" …>` element, the `<MotionLayerEditor v-if="selectedLocal && legacyMotionUi" …>` element and their lead-in comments); the imports of `CompositorMotionTimeline`, `MotionLayerEditor`, and from the `effectTracks` import line everything except `effectDialTargets`, `animatedDialKeysOf` and the types still referenced; the dial-picker script block (`motionDialTargets`/`addDialTrackFor`/`removeDialTrackFor`-style functions between "Motion tab · animate an effect dial" and the motionx section — delete each function and computed whose only reader was the removed template; keep `motionTracks` because Task 5's call site reads it); the `fillDialTargets` import if it loses its last reader. After each removal run `npx vue-tsc --noEmit 2>&1 | grep CompositorModal` — the list must return to exactly the 6 baseline errors (an unused-import or missing-symbol error means you removed too little or too much).
+- [ ] **Step 2: `CompositorModal.vue`** — remove: the `legacyMotionUi` ref; the three template blocks gated on it (`data-testid="dial-picker"` block, the `<CompositorMotionTimeline v-if="legacyMotionUi" …>` element, the `<MotionLayerEditor v-if="selectedLocal && legacyMotionUi" …>` element and their lead-in comments); the imports of `CompositorMotionTimeline`, `MotionLayerEditor`, and from the `effectTracks` import line everything except `effectDialTargets`, `animatedDialKeysOf` and the types still referenced; the dial-picker script block (`motionDialTargets`/`addDialTrackFor`/`removeDialTrackFor`-style functions between "Motion tab · animate an effect dial" and the motionx section — delete each function and computed whose only reader was the removed template; keep `motionTracks` because Task 6's call site reads it); the `fillDialTargets` import if it loses its last reader. After each removal run `npx vue-tsc --noEmit 2>&1 | grep CompositorModal` — the list must return to exactly the 6 baseline errors (an unused-import or missing-symbol error means you removed too little or too much).
 
 - [ ] **Step 3: `effectTracks.ts`** — delete `addDialTrack`, `removeDialTrack`, `addKeyframe`, `moveKeyframe`, `removeKeyframe`, `setTrack` and their doc comments. Keep types, `effectDialTargets`, `animatedDialKeysOf`, `isGradientValue`, `evaluateDialTrack`, `applyEffectDialTracks` (the read-only render fallback for frames that were never reopened). Update the file's header comment: "Authoring moved to the band timeline (motionx); this file keeps the dial enumeration and the read-only render fold for frames saved before 2026-09."
 
@@ -666,7 +991,7 @@ Expected: all pass; only the 6 baseline `CompositorModal.vue` errors. Timeline/V
 
 ---
 
-### Task 7: Close out
+### Task 8: Close out
 
 - [ ] Append a dated section to `.superpowers/sdd/progress-unified-motion.md` (local, gitignored): 6b done, what was deleted, what deliberately remains (`evaluate.ts`/`paint.ts` engine for `layer.animation`, Timeline and Vector Type; the read-only `applyEffectDialTracks` fold) and why.
 - [ ] Update the memory file `~/.claude/projects/-Users-julien-Documents-GitHub-Sailor/memory/unified-motion-model-programme.md` with the same three facts.
@@ -676,6 +1001,7 @@ Expected: all pass; only the 6 baseline `CompositorModal.vue` errors. Timeline/V
 
 ## Non-goals (decided, with reasons)
 
-- **No conversion of `layer.animation`.** It carries a visibility window, per-letter staggering on every text layer, and 21 presets that use masks, blur, copies or axis flips. None has a band equivalent; converting would visibly change saved frames. It keeps playing through its own engine and can be removed per layer.
+- **Per-letter staggering is not reproduced.** Text layers convert as a whole layer (user decision 2026-09-19, "just convert"). Same for the blur of `blur-in` / `blur-slide-up` / `blur-out`: they convert as fades/slides.
+- **Masks, axis flips and tiled copies are not converted** (12 presets). No band can express them; they keep playing through the old engine and show as a locked bar with Remove.
+- **Converted bands are sampled curves, not tidy two-point bands.** Fidelity over tidiness; the gallery is there to rebuild a move cleanly.
 - **The legacy dial-track render fold stays.** Frames that are never reopened (card previews, batch bakes) still carry `tracks`; deleting the fold would silently stop their animation. It is ~50 pure, tested lines.
-- **No "convert approximately" button for older animations.** YAGNI until someone asks; Remove + the gallery covers the workflow.
