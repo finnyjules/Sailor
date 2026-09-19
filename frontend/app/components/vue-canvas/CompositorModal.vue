@@ -95,6 +95,7 @@ import { compileBehaviourForLayer, animatableProperties } from '~/lib/motionx/ad
 import { type Behaviour, type StoredBehaviour, type Timing, type Track as MotionxTrack } from '~/lib/motionx'
 import { setBehaviourTracks, bakeBehaviour, upsertBehaviour, removeBehaviour } from '~/lib/motionx/behaviourStore'
 import { seedHoldTrack, setBandTrack } from '~/lib/motionx/bandEdit'
+import { migrateDialTracks } from '~/lib/motionx/adapter/migrateDialTracks'
 import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
 import MotionPropertyPicker from '~/components/vue-canvas/compositor/MotionPropertyPicker.vue'
 import { fillDialTargets } from '~/lib/motion/fillTracks'
@@ -1208,10 +1209,10 @@ const {
     if (s.background !== background.value) setBackground(s.background)
     if (JSON.stringify(s.postEffects ?? []) !== JSON.stringify(postEffects.value)) setPostEffects(s.postEffects ?? [])
     if (s.grid && JSON.stringify(s.grid) !== JSON.stringify(gridConfig.value)) setGrid(s.grid)
-    // Only the effect-dial TRACKS flow back (animateDial authors them) — fps/duration are the
-    // timeline's own controls, never touched by the agent.
-    if (JSON.stringify(s.motion?.tracks ?? []) !== JSON.stringify(motionDoc.value.tracks ?? [])) {
-      setMotion({ tracks: s.motion?.tracks ?? [] })
+    // Only the agent's timeline BANDS flow back (animateDial authors them) — fps/duration are
+    // the timeline's own controls, never touched by the agent.
+    if (JSON.stringify(s.motion?.motionx ?? []) !== JSON.stringify(motionDoc.value.motionx ?? [])) {
+      setMotion({ motionx: s.motion?.motionx ?? [] })
       commitMotionTimeline()
     }
   },
@@ -3672,6 +3673,16 @@ function setMotion(patch: Partial<FrameMotion>) {
     renderStack()
   }
 }
+// 6b: a frame saved with the old effect-dial tracks opens with them converted to timeline
+// bands (same paths, same interpolation — see migrateDialTracks + its parity spec). Runs once
+// per node; writes only when something actually converted, so untouched frames stay byte-identical.
+watch(() => compositor.value?.id, () => {
+  const node = compositor.value
+  const stored = (node?.data?.properties as Record<string, any> | undefined)?.sailor_motion
+  if (!node || !stored) return
+  const { motion, converted, dropped } = migrateDialTracks(stored)
+  if (converted || dropped) (node.data.properties as Record<string, any>).sailor_motion = motion
+}, { immediate: true })
 // The docked timeline mutates layer.animation in place during a drag, then
 // emits 'commit' (no payload) on pointerup. `commit()` from the local-layer
 // editor takes the next array — re-assigning the same (already-mutated)

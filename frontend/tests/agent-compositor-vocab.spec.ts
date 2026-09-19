@@ -18,7 +18,7 @@ import { expect, test, type Page } from '@playwright/test'
  *
  * Harness: the REAL CompositorModal over a real Frame node via /dev/frame-lab
  * (same as frame-templates.spec.ts). It exposes `window.__frameLab.node` so the
- * persisted `sailor_motion.tracks` can be read back — and its save()+reload path
+ * persisted `sailor_motion.motionx` can be read back — and its save()+reload path
  * proves animateDial round-trips through persistence — while `__compositorLayers`
  * / `__compositorSetLayers` read and seed the live layer stack.
  */
@@ -51,8 +51,8 @@ async function askAgent(page: Page, phrase: string) {
 }
 
 const layers = (page: Page) => page.evaluate(() => (window as any).__compositorLayers())
-const motionTracks = (page: Page) => page.evaluate(() =>
-  ((window as any).__frameLab?.node?.data?.properties?.sailor_motion?.tracks) ?? [])
+const motionBands = (page: Page) => page.evaluate(() =>
+  ((window as any).__frameLab?.node?.data?.properties?.sailor_motion?.motionx) ?? [])
 
 test.describe('Compositor agent vocabulary (F-cap)', () => {
   test.beforeEach(async ({ page }) => {
@@ -116,7 +116,7 @@ test.describe('Compositor agent vocabulary (F-cap)', () => {
     expect(shader.effectId).toBe('liquify')
   })
 
-  test('animateDial: a mocked plan authors a persisted track that survives save/reload (Task 3)', async ({ page }) => {
+  test('animateDial: a mocked plan authors a persisted timeline band that survives save/reload (Task 3)', async ({ page }) => {
     await seedSingleLayer(page, {
       id: 'L1', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.3, rotation: 0, opacity: 1,
       fill: '#ffffff', stroke: '', strokeWidth: 0, radius: 0,
@@ -130,31 +130,32 @@ test.describe('Compositor agent vocabulary (F-cap)', () => {
 
     await askAgent(page, 'animate the grain from 0 to 0.9')
 
-    // Persisted on the FRAME motion doc (not a layer prop / effect field): a track
-    // for the resolved dial path with two keyframes 0 → 0.9.
-    const expectTrack = (tracks: any[]) => {
-      const tr = tracks.find((t: any) => t.target === 'layers.L1.effects.e-grain.amount')
-      expect(tr, 'animateDial must author a track for the grain amount dial').toBeTruthy()
+    // Persisted on the FRAME motion doc (not a layer prop / effect field): a plain
+    // motionx band for the resolved dial path with two keyframes 0 → 0.9.
+    const expectBand = (bands: any[]) => {
+      const tr = bands.find((t: any) => t.path === 'layers.L1.effects.e-grain.amount')
+      expect(tr, 'animateDial must author a band for the grain amount dial').toBeTruthy()
+      expect(tr).toMatchObject({ path: 'layers.L1.effects.e-grain.amount', type: 'number' })
       expect(tr.keyframes.length).toBe(2)
-      expect(tr.keyframes[0].v).toBe(0)
-      expect(tr.keyframes[tr.keyframes.length - 1].v).toBe(0.9)
+      expect(tr.keyframes[0]).toMatchObject({ value: 0 })
+      expect(tr.keyframes[tr.keyframes.length - 1]).toMatchObject({ value: 0.9 })
       expect(tr.keyframes[0].t).toBeLessThan(tr.keyframes[tr.keyframes.length - 1].t)
     }
 
-    await expect.poll(async () => (await motionTracks(page)).map((t: any) => t.target),
+    await expect.poll(async () => (await motionBands(page)).map((t: any) => t.path),
       { timeout: 15_000 }).toContain('layers.L1.effects.e-grain.amount')
-    expectTrack(await motionTracks(page))
+    expectBand(await motionBands(page))
 
     // Finalize the proposal, then round-trip through the harness's save + reload
     // (persists node props to localStorage, reloads, restores) and re-read the
-    // persisted sailor_motion — the authored track must come back intact.
+    // persisted sailor_motion — the authored band must come back intact.
     await page.getByRole('button', { name: 'Keep all' }).click()
     await page.evaluate(() => (window as any).__frameLab.save())
     await page.reload()
     await page.waitForSelector('[data-ready]', { timeout: 30_000 })
 
-    await expect.poll(async () => (await motionTracks(page)).map((t: any) => t.target),
+    await expect.poll(async () => (await motionBands(page)).map((t: any) => t.path),
       { timeout: 15_000 }).toContain('layers.L1.effects.e-grain.amount')
-    expectTrack(await motionTracks(page))
+    expectBand(await motionBands(page))
   })
 })

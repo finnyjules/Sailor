@@ -30,20 +30,20 @@ describe('F8 · effect-dial motion is agent-drivable via animateDial (F-cap Task
     expect(COMPOSITOR_HINT_CEILING).toBe(27700)
   })
 
-  it('animateDial authors a two-keyframe track on the frame motion doc', () => {
+  it('animateDial authors a two-keyframe timeline band on the frame motion doc', () => {
     const r = applyCompositorCommand(state(), {
       op: 'animateDial', target: 'L1',
       args: { effect: 'grain', dial: 'amount', from: 0, to: 0.9 },
     })
     expect(r.ok).toBe(true); if (!r.ok) return
-    const tracks = r.template.motion?.tracks ?? []
-    const tr = tracks.find(t => t.target === 'layers.L1.effects.e-grain.amount')
+    const bands = r.template.motion?.motionx ?? []
+    const tr = bands.find(t => t.path === 'layers.L1.effects.e-grain.amount')
     expect(tr).toBeTruthy()
     expect(tr!.keyframes.length).toBe(2)
     // from at the start keyframe, to at the end keyframe (sorted ascending by t).
-    expect(tr!.keyframes[0]!.v).toBe(0)
-    expect(tr!.keyframes[tr!.keyframes.length - 1]!.v).toBe(0.9)
-    expect(tr!.keyframes[0]!.t).toBeLessThan(tr!.keyframes[tr!.keyframes.length - 1]!.t)
+    expect(tr!.keyframes[0]!.value).toBe(0)
+    expect(tr!.keyframes.at(-1)!.value).toBe(0.9)
+    expect(tr!.keyframes[0]!.t).toBeLessThan(tr!.keyframes.at(-1)!.t)
   })
 
   it('animateDial rejects an effect kind not on the layer', () => {

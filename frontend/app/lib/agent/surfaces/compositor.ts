@@ -17,8 +17,9 @@ import { sanitizeTornEdge } from '~/lib/compositor/tornEdge'
 import { sanitizeFeather } from '~/lib/compositor/feather'
 import { effectStackOf, writeStackToLayer, addEffect, createEffect, EFFECT_LABELS, EFFECT_ORDER, isEffectKind, isGeometryKind, type EffectInstance, type EffectKind } from '~/lib/compositor/effectStack'
 import { EFFECT_DIAL_SCHEMA, dialSpecsFor } from '~/lib/compositor/effectDials'
-import { addDialTrack, addKeyframe, setTrack } from '~/lib/motion/effectTracks'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
+import { setBandTrack } from '~/lib/motionx/bandEdit'
+import type { Track as MotionxTrack } from '~/lib/motionx'
 import { SHADER_LOOK_WORDS, resolveShaderLook } from '~/lib/compositor/shaderLooks'
 import { booleanOpOf } from '~/lib/compositor/booleanGeometry'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
@@ -79,9 +80,9 @@ export interface CompositorState {
    *  boxes are width-normalized, so a layer that fills the frame is `w: 1,
    *  h: aspect` — the mosaic op's create reads it. Absent = square (1). */
   aspect?: number
-  /** The frame's motion doc (`sailor_motion` — fps/duration/tracks). The agent
-   *  only ever authors `tracks` (via animateDial); fps/duration are the timeline's
-   *  own controls and flow through here read-only. Absent = no motion authored. */
+  /** The frame's motion doc (`sailor_motion` — fps/duration/motionx). The agent
+   *  only ever authors timeline bands (`motion.motionx`, via animateDial); fps/duration
+   *  are the timeline's own controls and flow through here read-only. Absent = no motion authored. */
   motion?: FrameMotion
 }
 
@@ -825,7 +826,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'editImage', hint: 'Edit an existing IMAGE layer from an instruction (Flux Kontext) — "make it brighter", "change the sky". target = image layer id; args: { instruction }.' },
   { op: 'setLayerEffect', hint: 'Add/update/remove an effect ON ONE LAYER. target = layer id; args: { effect: { type: "adjust"|"bloom"|"grain"|"vignette"|"duotone"|"gradientMap"|"dof"|"trim"|"offset"|"round_corners"|"roughen"|"boolean"|"morph"|"warp"|"long_shadow"|"shatter"|"background_blur"|"inner_shadow"|"layer_blur"|"drop_shadow"|"torn_edge"|"feather", ...params }, remove? }. adjust: brightness/contrast/saturation 0..2 (1=neutral), hue -180..180. bloom: threshold 0..1, radius ~0.02, intensity 0..2. grain: amount 0..1, size 1..8. vignette: amount/size/softness 0..1. duotone: shadows/highlights "#RRGGBB", mix 0..1. gradientMap: stops [{pos,color}], contrast -1..1, mix 0..1. dof (IMAGE ONLY, BRIGHT=NEAR): focus 0..1, range 0..1, aperture 0..1 blur, bladeCount 0..12 (6=hex), bladeRotation 0..360, bloomThreshold 0..1, bloomStrength 0..4. GEOMETRY EFFECTS (vector only — rect/ellipse/path/polygon/star + outlined text, no-op elsewhere; widths are canvas-width fractions): trim: start/end 0..1. offset: distance 0..1, negative=inward. round_corners: radius 0..1. roughen: amount 0..1, seed integer. boolean: op unite|subtract|intersect|exclude. morph: amount 0..1. boolean/morph need a SIBLING shape picked in UI (you set params, NOT the partner). warp: field bulge|pinch|wave|twist, amount -1..1 (signed), frequency (wave only). long_shadow: angle 0..360, length 0..1, color "#RRGGBB"/rgba(). shatter: cells 1..96, gap 0..1, seed integer. drop_shadow / inner_shadow (silhouette, out/inward): color "#RRGGBB"/rgba(), x/y -1..1, blur 0..1. layer_blur: radius 0..1. background_blur (behind layer, within silhouette): radius 0..1. torn_edge/feather: patch keys as setLayerTornEdge/setLayerFeather. LAYER STYLES (more "type" values, pixel passes, any layer): outer_glow/inner_glow (color,radius,intensity); color_overlay (color,blend,opacity) and gradient_overlay (from,to,angle,blend,opacity), blend normal|multiply|screen|overlay|soft-light; stroke_from_alpha (width,align inside|center|outside,color); directional_blur (angle,distance), radial_blur/zoom_blur (centerX,centerY,amount); levels (black,white,gamma), posterise (levels), threshold (cutoff), invert (amount); rough_edge/ink_bleed (amount,seed). PRINT RECIPES (pixel passes, any layer): risograph (ink,inkTwo "#RRGGBB"; levels 2..8; grain 0..1; contrast 0.5..2), photocopy (threshold 0..1; dirt 0..1; contrast 0.5..3), letterpress (depth 0..1; ink "#RRGGBB"; paper 0..1). backdrop_luminance_mask (masks the layer to where the backdrop is bright: threshold 0..1; softness 0..1; invert true/false).' + SHADER_LOOK_HINT + ' Numeric params clamp to range. Omitted params keep their value. remove:true deletes that kind.' },
   { op: 'setPostEffect', hint: 'Add/update/remove a post-processing effect on the WHOLE FRAME — applied after all layers composite. Same args and effect vocabulary as setLayerEffect (no target), EXCEPT dof, which is per-image-layer only because it needs that image\'s depth map. This is what "make it warmer", "add film grain", "cinematic colour grade" mean.' },
-  { op: 'animateDial', hint: 'Animate one EFFECT DIAL on a layer over time — "animate the grain from 0 to 0.9", "fade the blur in", "ramp the vignette up". The effect must ALREADY be on the layer (add it with setLayerEffect first). target = layer id; args: { effect (an effect KIND on the layer, e.g. grain), dial (one of that effect\'s animatable dials, e.g. grain: amount|size; adjust: brightness|contrast|saturation|hue; a colour dial like long_shadow: color), from, to (start/end values — a number dial clamps to the dial\'s range, a colour dial takes a hex), start? (seconds, default 0), end? (seconds, default the frame duration) }. Authors a two-keyframe motion track on the frame; re-animating the same dial replaces it.' },
+  { op: 'animateDial', hint: 'Animate one EFFECT DIAL on a layer over time — "animate the grain from 0 to 0.9", "fade the blur in", "ramp the vignette up". The effect must ALREADY be on the layer (add it with setLayerEffect first). target = layer id; args: { effect (an effect KIND on the layer, e.g. grain), dial (one of that effect\'s animatable dials, e.g. grain: amount|size; adjust: brightness|contrast|saturation|hue; a colour dial like long_shadow: color), from, to (start/end values — a number dial clamps to the dial\'s range, a colour dial takes a hex), start? (seconds, default 0), end? (seconds, default the frame duration) }. Authors a two-keyframe motion band on the frame; re-animating the same dial replaces it.' },
   { op: 'setLayerTornEdge', hint: 'Give a layer a TORN-PAPER edge (ragged, grain-dissolved boundary with an optional white "lip"). target = layer id; args: { patch: {...}, remove? }. patch keys: style ("ripped"=organic tear | "deckle"=soft handmade-paper edge | "shredded"=spiky rip), amount (tear depth px, ~10 subtle … 60 deep), roughness (0..1 fray detail), grain (px, edge crumble; 0 = crisp), grainTexture (0..1 paper-fibre on the lip), lipWidth (px white underside band; 0 = none), lipVariation (0..1 lip unevenness), lipColor ("#RRGGBB", warm white default), seed (integer, for a different tear). Omitted keys keep their value. remove:true removes it. This is what "torn paper edge" means.' },
   { op: 'setLayerFeather', hint: 'Feather (soften) a layer\'s edges so they fade smoothly to transparent — a soft edge-mask, uniform on all sides. target = layer id; args: { patch: {...}, remove? }. patch keys: amount (0..1, feather depth relative to the element\'s OWN size; ~0.1 subtle … 0.4 strong … 1 fades in to the centre), curve ("linear" = even fade | "smooth" = eased fade). Omitted keys keep their value. remove:true removes it. This is what "feather the edges" means.' },
   { op: 'setLayerMaskBreak', hint: 'Let a SUBJECT masked to a shape BREAK OUT of one edge — the head pops over the top of the circle while the rest stays clipped. target = the MASKED layer id (must already be masked to a shape, see maskBreak in its description). args: { edge ("top"|"bottom"|"left"|"right"), offset? (0..1, how far the break line sits into the shape from that edge; default 0 = the shape edge), remove? }. This is what "let his head pop out of the top" means.' },
@@ -1326,10 +1327,10 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       return { ok: true, template: state, inverse: snapshot() }
     }
     case 'animateDial': {
-      // Author an EFFECT-DIAL motion track (F8) — "animate the grain from 0 to 0.9".
+      // Author an EFFECT-DIAL timeline band (F8) — "animate the grain from 0 to 0.9".
       // Motion is a FRAME doc, not a layer prop (setLayerProps/setLayerEffect refuse a
-      // smuggled track), so it gets its own op that writes state.motion.tracks through the
-      // shipped engine (addDialTrack/addKeyframe/setTrack).
+      // smuggled track), so it gets its own op that writes state.motion.motionx through the
+      // timeline's own model (setBandTrack).
       const layer = findLayer(state, cmd.target)
       if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
       const a = (cmd.args ?? {}) as Record<string, unknown>
@@ -1358,14 +1359,16 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       const start = Number.isFinite(+(a.start as number)) ? Math.max(0, +(a.start as number)) : 0
       const end = Number.isFinite(+(a.end as number)) ? +(a.end as number) : (state.motion?.duration ?? DEFAULT_FRAME_MOTION.duration)
       const target = `layers.${layer.id}.effects.${fx.id}.${spec.key}`
-      // addDialTrack seeds the START keyframe (idempotent — a no-op when the target already
-      // has a track); re-asserting both keyframes via addKeyframe makes re-animating the same
-      // dial with new from/to fully replace it, and setTrack upserts the extended track.
-      const seeded = addDialTrack(state.motion?.tracks, target, start, from, spec.kind === 'color' ? 'oklch' : undefined)
-      let track = seeded.find(tr => tr.target === target)!
-      track = addKeyframe(track, start, from)
-      track = addKeyframe(track, end, to)
-      state.motion = { ...(state.motion ?? DEFAULT_FRAME_MOTION), tracks: setTrack(seeded, target, track) }
+      // Author a plain motionx band (the timeline's own model): two control points, replacing
+      // any band already on this dial. Colour bands keep the oklch mix the old tracks used.
+      const band: MotionxTrack = {
+        path: target,
+        type: spec.kind === 'color' ? 'color' : 'number',
+        keyframes: [{ t: start, value: from, ease: 'easeInOut' }, { t: end, value: to, ease: 'linear' }],
+        ...(spec.kind === 'color' ? { space: 'oklch' as const } : {}),
+      }
+      const base = state.motion ?? DEFAULT_FRAME_MOTION
+      state.motion = { ...base, motionx: setBandTrack(base.motionx ?? [], target, band) }
       return { ok: true, template: state, inverse: snapshot() }
     }
     // Thin aliases: torn edge and feather are now just two more entries in the
