@@ -105,3 +105,24 @@ describe('gradient behaviours', () => {
     expect(fill.keyframes[1]!.value).toEqual(To)
   })
 })
+
+describe('behaviour easing override (params.ease)', () => {
+  const target = { get: () => 1 }
+  const beh = (params: Record<string, unknown>) =>
+    ({ id: 'b', kind: 'fade', params, timing: { start: 0, duration: 1 } }) as never
+  it('without params.ease the compiled track is unchanged', async () => {
+    const { compileBehaviour } = await import('~/lib/motionx')
+    expect(compileBehaviour(beh({ dir: 'in' }), target as never)[0]!.keyframes.map((k) => k.ease)).toEqual(['easeInOut', 'linear'])
+  })
+  it('a named or bézier params.ease replaces every segment ease (the unused last point is left alone)', async () => {
+    const { compileBehaviour } = await import('~/lib/motionx')
+    const bez = [0.34, 1.56, 0.64, 1]
+    expect(compileBehaviour(beh({ dir: 'in', ease: bez }), target as never)[0]!.keyframes.map((k) => k.ease)).toEqual([bez, 'linear'])
+    const pulse = compileBehaviour({ id: 'p', kind: 'pulse', params: { ease: 'easeOut' }, timing: { start: 0, duration: 1 } } as never, target as never)[0]!
+    expect(pulse.keyframes.map((k) => k.ease)).toEqual(['easeOut', 'easeOut', 'easeInOut'])
+  })
+  it('ignores a malformed params.ease', async () => {
+    const { compileBehaviour } = await import('~/lib/motionx')
+    expect(compileBehaviour(beh({ dir: 'in', ease: [1, 2] }), target as never)[0]!.keyframes[0]!.ease).toBe('easeInOut')
+  })
+})

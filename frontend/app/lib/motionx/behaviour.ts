@@ -5,7 +5,19 @@ type Compiler = (b: Behaviour, target: BehaviourTarget) => Track[]
 const REGISTRY = new Map<string, Compiler>()
 export function registerBehaviour(kind: string, fn: Compiler): void { REGISTRY.set(kind, fn) }
 export function compileBehaviour(b: Behaviour, target: BehaviourTarget): Track[] {
-  return REGISTRY.get(b.kind)?.(b, target) ?? []
+  const tracks = REGISTRY.get(b.kind)?.(b, target) ?? []
+  // `params.ease` (a named ease or bézier handles, set from the curve editor) overrides the
+  // kind's default on every segment. The last keyframe eases nothing, so it is left alone.
+  const ease = asEase(b.params?.ease)
+  if (!ease) return tracks
+  return tracks.map((tr) => ({
+    ...tr, keyframes: tr.keyframes.map((k, i) => (i < tr.keyframes.length - 1 ? { ...k, ease } : k)),
+  }))
+}
+function asEase(v: unknown): Ease | null {
+  if (v === 'linear' || v === 'easeIn' || v === 'easeOut' || v === 'easeInOut') return v
+  return Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === 'number' && Number.isFinite(n))
+    ? (v as Ease) : null
 }
 
 function window(timing: Timing): [number, number] {

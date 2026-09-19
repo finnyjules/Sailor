@@ -9,6 +9,7 @@ export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partia
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
 import { retimeTrack, addPoint, setPointValue, setPointEase, removePoint, setBandTrack } from '~/lib/motionx/bandEdit'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
+import MotionEasingCurve from '~/components/vue-canvas/compositor/MotionEasingCurve.vue'
 import type { Gradient } from '~/lib/compositor/paint'
 
 export interface MotionSelection { kind: 'band' | 'point' | 'behaviour'; path: string; index?: number }
@@ -27,7 +28,7 @@ const emit = defineEmits<{
   commit: []
   'select-point': [sel: { path: string; index: number }]
   clear: []
-  'behaviour-change': [id: string, patch: BehaviourPatch]
+  'behaviour-change': [id: string, patch: BehaviourPatch, record?: boolean]
   'behaviour-open': [id: string]
   'behaviour-delete': [id: string]
 }>()
@@ -44,12 +45,19 @@ function setBehParams(patch: Record<string, unknown>) {
 function setBehTiming(patch: { start?: number; duration?: number; loop?: boolean }) {
   if (behaviour.value) emit('behaviour-change', behaviour.value.id, { timing: patch })
 }
+// The curve shown for a behaviour: its own override, else what its kind compiled to.
+const behEase = computed<Ease>(() => {
+  const own = behParam('ease') as Ease | undefined
+  if (own) return own
+  const compiled = props.motionx.find((t) => t.behaviourId === behaviour.value?.id)
+  return compiled?.keyframes[0]?.ease ?? 'easeInOut'
+})
+// Live during a handle drag: `before-change` already recorded the undo step on grab.
+function setBehEaseLive(e: Ease) {
+  if (behaviour.value) emit('behaviour-change', behaviour.value.id, { params: { ease: e } }, false)
+}
 const SLIDE_DIRS: Array<{ v: string; l: string }> = [
   { v: 'up', l: 'Up' }, { v: 'down', l: 'Down' }, { v: 'left', l: 'Left' }, { v: 'right', l: 'Right' },
-]
-
-const EASES: Array<{ v: Ease; l: string }> = [
-  { v: 'linear', l: 'Linear' }, { v: 'easeIn', l: 'In' }, { v: 'easeOut', l: 'Out' }, { v: 'easeInOut', l: 'Smooth' },
 ]
 
 const track = computed<Track | null>(() =>
@@ -83,20 +91,27 @@ function addAtPlayhead() {
   emit('commit')
   emit('select-point', { path: track.value.path, index: res.index })
 }
-function setAllEase(e: Ease) {
+// ── Easing (curve editor) ────────────────────────────────────────────────────
+// A handle drag is ONE undo step: before-change on grab, live updates while it moves,
+// commit on release. A point eases the segment AFTER it, so the last point has no curve.
+const isLastPoint = computed(() =>
+  !!track.value && props.selection?.index === track.value.keyframes.length - 1)
+function applyLive(next: Track) {
+  if (track.value) emit('update:motionx', setBandTrack(props.motionx, track.value.path, next))
+}
+function setAllEaseLive(e: Ease) {
   if (!track.value) return
-  apply({ ...track.value, keyframes: track.value.keyframes.map((k) => ({ ...k, ease: e })) })
+  applyLive({ ...track.value, keyframes: track.value.keyframes.map((k) => ({ ...k, ease: e })) })
+}
+function setEaseLive(e: Ease) {
+  const i = props.selection?.index
+  if (track.value && i != null) applyLive(setPointEase(track.value, i, e))
 }
 // ── Point value / ease ───────────────────────────────────────────────────────
 function setValue(v: PropertyValue) {
   const i = props.selection?.index
   if (!track.value || i == null) return
   apply(setPointValue(track.value, i, v))
-}
-function setEase(e: Ease) {
-  const i = props.selection?.index
-  if (!track.value || i == null) return
-  apply(setPointEase(track.value, i, e))
 }
 function deleteBand() {
   if (!track.value) return
@@ -179,6 +194,10 @@ function onGradient(g: Gradient) {
       </div>
     </template>
 
+    <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Easing</div>
+    <MotionEasingCurve class="mb-2" :ease="behEase"
+      @start="emit('before-change')" @change="setBehEaseLive" @end="emit('commit')" />
+
     <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Timing</div>
     <div class="mb-2 flex items-center gap-3">
       <label class="flex items-center gap-1">Start
@@ -234,13 +253,11 @@ function onGradient(g: Gradient) {
       <div v-else class="mb-2">
         <GradientEditor :model-value="pointGradient" @update:model-value="onGradient" />
       </div>
-      <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Ease to next</div>
-      <div class="mb-2 inline-flex overflow-hidden rounded border border-white/15">
-        <button v-for="e in EASES" :key="e.v" type="button"
-          class="px-2 py-0.5 cursor-pointer"
-          :class="(point.ease) === e.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-          @click="setEase(e.v)">{{ e.l }}</button>
-      </div>
+      <template v-if="!isLastPoint">
+        <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Ease to next point</div>
+        <MotionEasingCurve class="mb-2" :ease="point.ease"
+          @start="emit('before-change')" @change="setEaseLive" @end="emit('commit')" />
+      </template>
       <button type="button" class="mt-1 rounded border border-white/15 px-2 py-0.5 text-white/70 hover:border-rose-400/60 hover:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
         title="Remove this control point (Delete)" @click="deletePoint">Delete point</button>
     </template>
@@ -258,11 +275,9 @@ function onGradient(g: Gradient) {
             class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
             @change="setDuration(Number(($event.target as HTMLInputElement).value) || 0.05)"></label>
       </div>
-      <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Easing (all points)</div>
-      <div class="mb-2 inline-flex overflow-hidden rounded border border-white/15">
-        <button v-for="e in EASES" :key="e.v" type="button" class="px-2 py-0.5 cursor-pointer text-white/55 hover:text-white/85"
-          @click="setAllEase(e.v)">{{ e.l }}</button>
-      </div>
+      <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">{{ track.keyframes.length > 2 ? 'Easing (all points)' : 'Easing' }}</div>
+      <MotionEasingCurve class="mb-2" :ease="track.keyframes[0]?.ease ?? 'linear'"
+        @start="emit('before-change')" @change="setAllEaseLive" @end="emit('commit')" />
       <div class="flex items-center justify-between">
         <span class="text-white/40">{{ track.keyframes.length }} control points</span>
         <button type="button" class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:bg-white/10 cursor-pointer"

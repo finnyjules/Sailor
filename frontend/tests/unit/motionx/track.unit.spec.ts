@@ -28,3 +28,16 @@ describe('evaluateTrack', () => {
     expect(evaluateTrack(loopT, 3.0)).toBeCloseTo(0.5, 6)
   })
 })
+
+describe('evaluateTrack with a bézier segment ease', () => {
+  it('interpolates through the custom curve (overshoot goes past the end value mid-segment)', async () => {
+    const { evaluateTrack } = await import('~/lib/motionx')
+    const tr = { path: 'x', type: 'number' as const, keyframes: [
+      { t: 0, value: 0, ease: [0.34, 1.56, 0.64, 1] as [number, number, number, number] },
+      { t: 1, value: 10, ease: 'linear' as const },
+    ] }
+    expect(evaluateTrack(tr, 0)).toBe(0)
+    expect(evaluateTrack(tr, 1)).toBe(10)
+    expect(evaluateTrack(tr, 0.7) as number).toBeGreaterThan(10)
+  })
+})

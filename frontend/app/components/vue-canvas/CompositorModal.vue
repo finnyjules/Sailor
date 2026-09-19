@@ -1842,7 +1842,10 @@ function onKeydown(e: KeyboardEvent) {
   // must not also nudge the selection, toggle tools, or start a space-hold pan.
   const shapePickerOpen = libraryPickerOpen.value || inspectorShapePickerOpen.value
   if (shapePickerOpen) return
-  if (!typing && !editingId.value && handleEditorKey(e)) return
+  // A focused control that owns the arrow keys (the easing-curve handles nudge themselves)
+  // must not also nudge the selected layer.
+  const ownsKeys = !!t?.closest?.('[data-owns-keys]')
+  if (!typing && !editingId.value && !ownsKeys && handleEditorKey(e)) return
   // Escape disarms the drag-to-generate gesture — checked before the pen's own
   // Escape and BEFORE handleKeydown's bubble-phase Escape (which closes the whole
   // modal) can see the event, so stopPropagation here wins while armed.

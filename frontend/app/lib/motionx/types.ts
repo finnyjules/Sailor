@@ -1,6 +1,9 @@
 import type { GradientStop } from '~/lib/color/harmony'
 
-export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut'
+export type NamedEase = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut'
+/** CSS-style cubic-bézier handles [x1, y1, x2, y2]: x in 0..1, y free (overshoot allowed). */
+export type BezierEase = [number, number, number, number]
+export type Ease = NamedEase | BezierEase
 export type PropertyType = 'number' | 'color' | 'gradient'
 export type PropertyValue = number | string | GradientStop[]
 
