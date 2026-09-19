@@ -32,8 +32,14 @@
  */
 
 /** Fields of a layer that do NOT change the pixels of its own local box: outer transform,
- *  opacity/blend (applied at stamp time), cloner (paintLayer expands it), bookkeeping. */
-export const SILHOUETTE_KEY_STRIP = ['id', 'x', 'y', 'rotation', 'opacity', 'blend', 'cloner', 'skewX', 'skewY', 'cornerPin', 'name', 'visible', 'locked', 'groupId'] as const
+ *  opacity/blend (applied at stamp time), cloner (paintLayer expands it), bookkeeping.
+ *
+ *  `textMotion` is the odd one out — it very much DOES change the pixels, every single
+ *  frame. It is stripped because a layer carrying it is disqualified from the cache
+ *  outright (see `silhouetteCacheable`), so its key is never asked for; stripping it as
+ *  well keeps a stringify of the whole behaviour list out of the key should that gate ever
+ *  be loosened, and keeps every existing layer's key byte-identical. */
+export const SILHOUETTE_KEY_STRIP = ['id', 'x', 'y', 'rotation', 'opacity', 'blend', 'cloner', 'skewX', 'skewY', 'cornerPin', 'name', 'visible', 'locked', 'groupId', 'textMotion'] as const
 
 /** Recursively sorts object keys (arrays keep their order) so the cache key is
  *  canonical regardless of property insertion order at ANY depth — a top-level-only

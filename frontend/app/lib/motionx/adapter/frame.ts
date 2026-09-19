@@ -1,7 +1,10 @@
 // Frame adapter — the ONE intentionally compositor-coupled file in the motionx package.
 // Applies a resolved motionx property value onto a cloned Frame/Compositor layer. The
 // motionx core stays pure (no compositor imports); only this file bridges the two.
-import { compileBehaviour, evaluateTracks, type Behaviour, type BehaviourTarget, type PropertyValue, type Track } from '~/lib/motionx'
+import { compileBehaviour, evaluateTracks, type Behaviour, type BehaviourTarget, type PropertyValue, type StoredBehaviour, type Track } from '~/lib/motionx'
+// The index, not `./evaluate` — importing it is what REGISTERS the four letter behaviour
+// kinds, and this file is on the only path the painter reaches them by.
+import { isTextBehaviour } from '~/lib/motionx/text'
 import type { GradientStop as ColorStop } from '~/lib/color/harmony'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { isGradient, type Paint } from '~/lib/compositor/paint'
@@ -67,6 +70,46 @@ export function applyMotionxTracks(layers: LocalLayer[], tracks: Track[] | undef
     for (const [prop, value] of props) l = applyResolvedValue(l, prop, value)
     if (l !== layer) changed = true
     return l
+  })
+  return changed ? next : layers
+}
+
+/** A text layer's letter behaviours plus the clock to draw them at, parked on a CLONE for
+ *  one frame. Same contract as `motionScale`: transient, never persisted, read by the text
+ *  draw and by nothing else. */
+export interface TextMotion { behaviours: StoredBehaviour[]; t: number }
+
+/**
+ * Fold letter behaviours onto the layers for this frame.
+ *
+ * Unlike a track, a letter behaviour has nothing to resolve to a property VALUE — it moves
+ * the glyphs inside a layer, which only the text draw can do. So the fold's whole job is to
+ * hand the painter the behaviours and the clock, on a clone of each text layer they target.
+ *
+ * Returns the SAME array reference whenever there is nothing to attach (no clock, no
+ * `text.*` behaviour, none of them targeting a text layer in `layers`), so a frame without
+ * letter behaviours never even allocates — and, downstream, never leaves the byte-identical
+ * static draw. Non-targeted layers come back by identity. A `text.*` behaviour aimed at a
+ * non-text layer is ignored rather than attached: nothing would read it.
+ */
+export function applyTextBehaviours(
+  layers: LocalLayer[], behaviours: StoredBehaviour[] | undefined, t: number | undefined,
+): LocalLayer[] {
+  if (!behaviours || behaviours.length === 0 || t == null) return layers
+  const byLayer = new Map<string, StoredBehaviour[]>()
+  for (const b of behaviours) {
+    if (!isTextBehaviour(b)) continue
+    const list = byLayer.get(b.layerId)
+    if (list) list.push(b); else byLayer.set(b.layerId, [b])
+  }
+  if (byLayer.size === 0) return layers
+  let changed = false
+  const next = layers.map((layer) => {
+    if (layer.kind !== 'text') return layer
+    const own = byLayer.get(layer.id)
+    if (!own) return layer
+    changed = true
+    return { ...layer, textMotion: { behaviours: own, t } as TextMotion } as unknown as LocalLayer
   })
   return changed ? next : layers
 }

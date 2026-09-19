@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import { applyResolvedValue, applyMotionxTracks, frameTarget, animatableProperties } from '~/lib/motionx/adapter/frame'
+import { applyResolvedValue, applyMotionxTracks, applyTextBehaviours, frameTarget, animatableProperties } from '~/lib/motionx/adapter/frame'
 import type { GradientStop } from '~/lib/color/harmony'
-import type { Track } from '~/lib/motionx'
+import type { StoredBehaviour, Track } from '~/lib/motionx'
 
 const grad = () => ({ type: 'linear' as const, angle: 0, stops: [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ff0000' }] })
 const layer = (over: Partial<any> = {}) => ({ id: 'L1', x: 0.5, y: 0.5, rotation: 0, scale: 1, opacity: 1, fill: grad(), effects: [], ...over } as unknown as LocalLayer)
@@ -105,5 +105,73 @@ describe('scale on every layer kind', () => {
   it('behaviours read a base scale of 1 on such layers', () => {
     const { scale: _drop, ...rect } = layer({ kind: 'rect', w: 0.3, h: 0.2 }) as any
     expect(frameTarget(rect).get('scale')).toBe(1)
+  })
+})
+
+// ── letter behaviours: the fold that hands the painter a per-frame `textMotion` ──
+//
+// Same contract as `motionScale`: CLONES only, never persisted, and the SAME array
+// reference back whenever there is nothing to attach — which is what keeps a frame
+// with no letter behaviour byte-identical.
+
+describe('applyTextBehaviours', () => {
+  const text = (id: string, over: Partial<any> = {}) =>
+    ({ id, kind: 'text', x: 0.5, y: 0.5, rotation: 0, opacity: 1, text: 'AB', ...over } as unknown as LocalLayer)
+  const cascade = (layerId: string, over: Partial<StoredBehaviour> = {}): StoredBehaviour => ({
+    id: `b-${layerId}`, layerId, kind: 'text.cascade', timing: { start: 0, duration: 1 }, params: {}, ...over,
+  })
+  const slide = (layerId: string): StoredBehaviour =>
+    ({ id: `s-${layerId}`, layerId, kind: 'text.maskSlide', timing: { start: 0, duration: 1 } })
+  // A non-text behaviour on the same layer — compiled to motionx tracks elsewhere, and
+  // never part of the letter payload.
+  const nudge = (layerId: string): StoredBehaviour =>
+    ({ id: `n-${layerId}`, layerId, kind: 'fadeIn', timing: { start: 0, duration: 1 } })
+
+  it('same reference when there is no clock', () => {
+    const arr = [text('L1')]
+    expect(applyTextBehaviours(arr, [cascade('L1')], undefined)).toBe(arr)
+  })
+
+  it('same reference with no behaviours at all', () => {
+    const arr = [text('L1')]
+    expect(applyTextBehaviours(arr, undefined, 0.5)).toBe(arr)
+    expect(applyTextBehaviours(arr, [], 0.5)).toBe(arr)
+  })
+
+  it('same reference when no behaviour is a text.* one', () => {
+    const arr = [text('L1')]
+    expect(applyTextBehaviours(arr, [nudge('L1')], 0.5)).toBe(arr)
+  })
+
+  it('same reference when the targeted layer is not in the list', () => {
+    const arr = [text('L1')]
+    expect(applyTextBehaviours(arr, [cascade('nope')], 0.5)).toBe(arr)
+  })
+
+  it('clones ONLY the targeted text layer and attaches the clock', () => {
+    const a = text('L1'), b = text('L2')
+    const out = applyTextBehaviours([a, b], [cascade('L1')], 0.25)
+    expect(out).not.toBe([a, b])
+    expect(out[1]).toBe(b)                                    // untargeted: by identity
+    expect(out[0]).not.toBe(a)
+    expect((out[0] as any).textMotion.t).toBe(0.25)
+    expect((a as any).textMotion).toBeUndefined()             // never mutates the input
+  })
+
+  it('a NON-text layer targeted by a text.* behaviour is left alone', () => {
+    const rect = layer({ id: 'R1', kind: 'rect', w: 0.3, h: 0.2 })
+    const arr = [rect]
+    expect(applyTextBehaviours(arr, [cascade('R1')], 0.5)).toBe(arr)
+  })
+
+  it("the clone carries only that layer's own text.* behaviours", () => {
+    const out = applyTextBehaviours(
+      [text('L1'), text('L2')],
+      [cascade('L1'), nudge('L1'), slide('L1'), cascade('L2')],
+      0.5,
+    )
+    const own = (out[0] as any).textMotion.behaviours as StoredBehaviour[]
+    expect(own.map(b => b.id)).toEqual(['b-L1', 's-L1'])       // no 'n-L1', no 'b-L2'
+    expect((out[1] as any).textMotion.behaviours.map((b: StoredBehaviour) => b.id)).toEqual(['b-L2'])
   })
 })

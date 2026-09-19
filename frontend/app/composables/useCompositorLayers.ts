@@ -25,8 +25,12 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
-import { applyMotionxTracks } from '~/lib/motionx/adapter/frame'
-import type { Track as MotionxTrack } from '~/lib/motionx'
+import { applyMotionxTracks, applyTextBehaviours, type TextMotion } from '~/lib/motionx/adapter/frame'
+import type { StoredBehaviour, Track as MotionxTrack } from '~/lib/motionx'
+// Letter behaviours (unified motion, text slice): the per-glyph draw seam. Pure — canvas
+// primitives and plain data only — so the branches it serves inside drawText /
+// drawTextOnPath below stay two lines each.
+import { drawTextCells, lineAtRest, movingTextFrame, pathGlyphCells, textRunCells } from '~/lib/motionx/text/draw'
 import { applyFillPhaseTracks } from '~/lib/motion/fillTracks'
 import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
@@ -89,7 +93,7 @@ import {
 } from '~/lib/compositor/silhouetteCache'
 import { VARY_PALETTE_MAX } from '~/lib/vary'
 import { paintMaskRelease } from '~/lib/compositor/maskBreak'
-import { guideFromSpec, measureRunPx, placeGlyphs, placedGlyphsToCommands, type TextPathSpec } from '~/lib/compositor/textPath'
+import { displayRun, guideFromSpec, measureRunPx, placeGlyphs, placedGlyphsToCommands, type TextPathSpec } from '~/lib/compositor/textPath'
 // Runtime import is safe: wiredLayer.ts only imports the WiredLayer TYPE back from
 // this file, and type imports are erased — so this is not a module cycle.
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
@@ -2559,6 +2563,7 @@ function paintLayer(
     && layer.kind !== 'wired'                                       // graph pixels change under us — no content signature
     && !cp && !dof                                                  // corner-pin / DOF have their own offscreen flows
     && !(layer.kind === 'text' && layer.expressive)                 // expressive layout places words outside localLayerBox
+    && !(layer as unknown as { textMotion?: unknown }).textMotion   // letters move every frame — the raster is never twice the same
     && !layerPaints(layer).some(p => isFill(p) && fillIsShader(p))  // shader fills are live / frame-anchored
     && !isClipLayer                                                 // a living image changes every frame — never bake it
     && silhouetteContentReady(layer, W)
@@ -4368,6 +4373,12 @@ function paintTextStrokeBands(
   }
 }
 
+/** The frame a letter behaviour scatters within (`text.scramble` states its area as a
+ *  fraction of it). The draw chain is handed `W` only, so the height comes from the frame
+ *  state `paintLayerStack` sets; outside a paint that is the sentinel 1, and a square W box
+ *  is a far better answer than scattering into a one-pixel band. */
+const motionFrameBox = (W: number) => ({ w: W, h: _fieldCtx.frameH > 1 ? _fieldCtx.frameH : W })
+
 /**
  * Text along a guide: one glyph at a time, each centred on its own half-advance
  * and turned to the tangent there. Advances come from `placeGlyphs`, which
@@ -4396,11 +4407,32 @@ function drawTextOnPath(
   const textBox = guide.bounds()
   const passes = textStrokePasses(ctx, layer, W, textBox)
   const anyDash = passes.some(p => p.dash)
+  // Letter behaviours: `textMotion` is a transient the fold parks on a CLONE for one frame
+  // (see applyTextBehaviours). Absent — every layer today — this is one property read and
+  // nothing below changes. Present but outside every bar, `movingTextFrame` returns null and
+  // the static loop runs untouched, so a resting glyph keeps its exact placement.
+  const tm = (layer as unknown as { textMotion?: TextMotion }).textMotion
+  const moving = tm
+    ? movingTextFrame(pathGlyphCells(placed, displayRun(layer), layer.fontSize * W), tm.behaviours, tm.t, motionFrameBox(W))
+    : null
   // A run here is one GLYPH, each in its own turned frame — the band dilates all of them
-  // together, so the outline follows the whole word around the curve.
-  paintTextStrokeBands(ctx, layer, W, textBox, placed.map(g => ({ text: g.ch, x: g.x, y: g.y, angle: g.angle })))
+  // together, so the outline follows the whole word around the curve. Skipped while the
+  // letters are moving: the band is one dilation of the WHOLE run, and there is no reading
+  // of "the sticker outline of a run whose glyphs are in different places" — see the
+  // documented limitation in the letter-behaviour spec.
+  if (!moving) paintTextStrokeBands(ctx, layer, W, textBox, placed.map(g => ({ text: g.ch, x: g.x, y: g.y, angle: g.angle })))
   if (passes.length) ctx.lineJoin = 'round'
   ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
+  if (moving) {
+    // Same shape as the loop below, but placed by the evaluated frame instead of the guide.
+    // Styles are already set, once, so a gradient still spans the ring the type sits on.
+    drawTextCells(ctx, moving.cells, moving.frame, (ch) => {
+      strokeTextPasses(ctx, passes, anyDash, ch, 0, 0)
+      ctx.fillText(ch, 0, 0)
+    })
+    if (anyDash) ctx.setLineDash([])
+    return
+  }
   for (const g of placed) {
     ctx.save()
     ctx.translate(g.x, g.y)
@@ -4636,13 +4668,51 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
   }
 
   if (collect) collect.box = textBox
+  // Letter behaviours: `textMotion` is a transient the fold parks on a CLONE for one frame
+  // (see applyTextBehaviours). Absent — every layer today — this is one property read and
+  // not a line below changes. Present but outside every bar, `movingTextFrame` returns null
+  // and the run loop below runs untouched, which is what keeps the kerning and ligatures of
+  // whole-run `fillText` at rest. Cells are built from the draw's OWN runs, by prefix
+  // measurement, so a moving letter starts exactly where the static one sits. Never in
+  // collect mode: an outlined layer is out of scope (it has no per-glyph seam here).
+  const tm = collect ? undefined : (layer as unknown as { textMotion?: TextMotion }).textMotion
+  const moving = tm
+    ? movingTextFrame(
+        textRunCells(ctx, drawn.flatMap((d, i) => d.runs.map(r => ({ text: r.text, x: r.x, y: r.y, line: i }))), fontPx, canvasAlign),
+        tm.behaviours, tm.t, motionFrameBox(W),
+      )
+    : null
   // Distance-band strokes are painted by dilating fillText/strokeText and have no
   // counterpart in the collected outline (F1 renders the outline's own on-edge
   // stroke only); skip them in collect mode rather than inking the measuring ctx.
-  if (!collect) paintTextStrokeBands(ctx, layer, W, textBox, drawn.flatMap(d => d.runs))
+  // Skipped while letters move for the same reason as on a path: one band dilates the
+  // whole block, and a block whose glyphs are scattered has no single silhouette.
+  if (!collect && !moving) paintTextStrokeBands(ctx, layer, W, textBox, drawn.flatMap(d => d.runs))
 
   if (passes.length) ctx.lineJoin = 'round'
   ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
+  if (moving) {
+    // Every glyph is drawn centred on its own placement, exactly as the on-path renderer
+    // does. The fill/stroke styles above are already set, once, so a gradient stays defined
+    // over the whole text BLOCK rather than being re-resolved per letter.
+    ctx.textAlign = 'center'
+    drawTextCells(ctx, moving.cells, moving.frame, (ch) => {
+      strokeTextPasses(ctx, passes, anyDash, ch, 0, 0)
+      ctx.fillText(ch, 0, 0)
+    })
+    // A decoration spans a whole line, so it is drawn only for a line that is WHOLLY at
+    // rest — an underline under letters arriving one at a time has no honest length.
+    if (deco) {
+      for (let i = 0; i < drawn.length; i++) {
+        const dc = drawn[i]!.deco
+        if (!dc || !lineAtRest(moving.cells, moving.frame.cells, i)) continue
+        if (layer.underline) ctx.fillRect(dc.left, dc.y + fontPx * 0.34, dc.w, decoThick)
+        if (layer.strikethrough) ctx.fillRect(dc.left, dc.y - decoThick / 2, dc.w, decoThick)
+      }
+    }
+    if (anyDash) ctx.setLineDash([])   // never leak the pattern to the next layer
+    return
+  }
   for (const d of drawn) {
     for (const r of d.runs) emitRun(r.text, r.x, r.y)
     // Decorations are drawn in the text's own fill so they inherit gradient/pattern fills.
@@ -4655,6 +4725,12 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
   }
   if (anyDash) ctx.setLineDash([])   // never leak the pattern to the next layer
 }
+
+/** TEST-ONLY seam. `drawText` is the innermost text emitter and has no other entry that
+ *  inks (the outline collector runs it in collect mode), so specs that need its exact call
+ *  sequence — letter behaviours, above all — reach it here rather than through `paintLayer`,
+ *  which needs a real DOM. Not used by app code. */
+export const __drawTextForTest = drawText
 
 /**
  * A text layer's glyph outlines as one SVG `d`, plus its measured text box — or
@@ -5442,7 +5518,7 @@ export function paintLayerStack(
   localLayers: LocalLayer[],
   skip?: (layer: LocalLayer) => boolean,
   t?: number,
-  motion?: { fps: number; duration: number; tracks?: EffectDialTrack[]; motionx?: MotionxTrack[] },
+  motion?: { fps: number; duration: number; tracks?: EffectDialTrack[]; motionx?: MotionxTrack[]; behaviours?: StoredBehaviour[] },
   /** Per-key treatments for wired layers (mask ref + showSource). Locals carry their own. */
   wiredTreatments?: Record<string, { maskedByKey?: string; showSource?: boolean }>,
   /** Doc-level background fill, painted first (behind every layer). */
@@ -5469,7 +5545,10 @@ export function paintLayerStack(
   }
   // F8: fold any effect-dial motion tracks into the layers for this frame. Same-reference return
   // when there are no tracks / no clock ⇒ items & localLayers untouched ⇒ byte-identical.
-  const animatedLocals = applyMotionxTracks(
+  // Letter behaviours fold LAST: they are the only ones that hand the painter author state
+  // (the behaviours themselves) rather than a resolved value, so they must see the layer the
+  // rest of the fold already produced. Same-reference return when there are none.
+  const animatedLocals = applyTextBehaviours(applyMotionxTracks(
     applyFillPhaseTracks(
       applyEffectDialTracks(localLayers, motion?.tracks, t),
       motion?.tracks,
@@ -5477,7 +5556,7 @@ export function paintLayerStack(
     ),
     motion?.motionx,
     t,
-  )
+  ), motion?.behaviours, t)
   if (animatedLocals !== localLayers) {
     const byId = new Map(animatedLocals.map(l => [l.id, l]))
     items = items.map(it => (it.type === 'local' && byId.has(it.layer.id))
