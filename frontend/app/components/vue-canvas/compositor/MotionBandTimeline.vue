@@ -182,6 +182,50 @@ function laneSeconds(el: HTMLElement, clientX: number): number {
 function emitTrack(next: Track): void { emit('update:motionx', setBandTrack(props.motionx, next.path, next)) }
 
 // ── Ruler: seek / shift-reset / alt-zoom ─────────────────────────────────────
+// ── Dock shell (DialKit): collapse to a header with an overview scrubber; drag the top edge to
+//    set how tall the rows may grow before they scroll. Both are per-viewer conveniences. ──
+const DOCK_MIN = 96, DOCK_DEFAULT = 260
+const store = {
+  get(k: string): string | null { try { return localStorage.getItem(k) } catch { return null } },
+  set(k: string, v: string) { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
+}
+const open = ref(store.get('sailor:motionDock:open') !== '0')
+const dockMax = ref(Math.max(DOCK_MIN, Number(store.get('sailor:motionDock:height')) || DOCK_DEFAULT))
+function toggleOpen() { open.value = !open.value; store.set('sailor:motionDock:open', open.value ? '1' : '0') }
+const rowsEl = ref<HTMLElement | null>(null)
+function onResizeDown(e: PointerEvent) {
+  if (!rowsEl.value) return
+  e.preventDefault()
+  const y0 = e.clientY, h0 = rowsEl.value.getBoundingClientRect().height
+  drag((ev) => {
+    const viewportMax = Math.max(DOCK_MIN, window.innerHeight - 220)
+    dockMax.value = Math.round(Math.min(viewportMax, Math.max(DOCK_MIN, h0 + y0 - ev.clientY)))
+  }, () => store.set('sailor:motionDock:height', String(dockMax.value)))
+}
+// Overview (collapsed): the whole timeline in one pill — progress, playhead, and the zoomed window.
+const overviewEl = ref<HTMLElement | null>(null)
+const overviewPct = computed(() => (props.duration > 0 ? Math.min(100, Math.max(0, ((props.t ?? 0) / props.duration) * 100)) : 0))
+const overviewWindow = computed(() => ({
+  left: props.duration > 0 ? (dv.value.safeViewStart / props.duration) * 100 : 0,
+  width: props.duration > 0 ? Math.min(100, (dv.value.visibleDuration / props.duration) * 100) : 100,
+}))
+function onOverviewDown(e: PointerEvent) {
+  if (!overviewEl.value) return
+  const rect = overviewEl.value.getBoundingClientRect()
+  emit('pause')
+  const seek = (x: number) => emit('scrub', Math.max(0, Math.min(props.duration, ((x - rect.left) / Math.max(1, rect.width)) * props.duration)))
+  seek(e.clientX)
+  drag((ev) => seek(ev.clientX))
+}
+function onOverviewKey(e: KeyboardEvent) {
+  const step = (e.shiftKey ? 1 : 0.1) * (e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0)
+  if (!step) return
+  e.preventDefault(); e.stopPropagation()
+  emit('pause'); emit('scrub', Math.max(0, Math.min(props.duration, (props.t ?? 0) + step)))
+}
+// The lane only exists while open; re-measure when it comes back.
+watch(open, async (v) => { if (v) { await nextTick(); laneWidth.value = laneEl.value?.clientWidth ?? 0; if (laneEl.value) ro?.observe(laneEl.value) } })
+
 function onRulerDown(e: PointerEvent) {
   if (!laneEl.value) return
   if (e.altKey) return onZoomDown(e)
@@ -333,8 +377,11 @@ function deletePoint(b: Band, i: number) {
 
 <template>
   <div class="relative rounded-[14px] border border-white/10 bg-[#1a1a1a]/95 p-2.5 text-xs text-white/70 font-[var(--font-sans)]" data-testid="band-timeline" @wheel="onWheel">
+    <div v-if="open" role="separator" aria-orientation="horizontal" aria-label="Resize timeline height" title="Drag to resize the timeline"
+      data-testid="dock-resize" class="absolute -top-1 left-3 right-3 z-40 h-2.5 cursor-ns-resize touch-none"
+      @pointerdown.stop="onResizeDown" />
     <!-- Dock header: transport on the left, actions on the right (DialKit section header) -->
-    <div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] whitespace-nowrap">
+    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] whitespace-nowrap" :class="open ? 'mb-2' : ''">
       <button type="button" class="w-7 h-7 shrink-0 grid place-items-center rounded-md cursor-pointer hover:bg-white/10 text-white/85"
         :title="playing ? 'Pause' : 'Play'" data-testid="dock-play" @click="playing ? emit('pause') : emit('play')">
         <svg v-if="!playing" viewBox="0 0 12 12" class="size-3 fill-current"><path d="M2 1.5v9l8-4.5z"/></svg>
@@ -342,29 +389,40 @@ function deletePoint(b: Band, i: number) {
       </button>
       <span class="tabular-nums text-white/70">{{ (t ?? 0).toFixed(2) }} / {{ duration.toFixed(1) }}s</span>
       <span v-if="view.zoom > 1" class="tabular-nums text-white/30">{{ view.zoom.toFixed(1) }}×</span>
-      <div class="flex-1" />
-      <button type="button" data-testid="add-behaviour-toggle"
+      <div v-if="open" class="flex-1" />
+      <!-- collapsed: DialKit's overview pill — drag to scrub the whole timeline -->
+      <div v-else ref="overviewEl" role="slider" tabindex="0" data-owns-keys data-testid="dock-overview"
+        aria-label="Timeline overview" aria-valuemin="0" :aria-valuemax="duration" :aria-valuenow="+(t ?? 0).toFixed(2)"
+        title="Drag to scrub the full timeline"
+        class="relative mx-1 h-3 min-w-[60px] flex-1 cursor-col-resize touch-none select-none overflow-hidden rounded-full bg-white/[0.08] outline-none focus-visible:ring-1 focus-visible:ring-[#7c9cff]/70"
+        @pointerdown.stop.prevent="onOverviewDown" @keydown="onOverviewKey">
+        <div v-if="overviewWindow.width < 99.999" class="absolute inset-y-0 rounded-full bg-white/[0.08] shadow-[inset_0_0_0_1px_rgba(255,255,255,.18)]"
+          :style="{ left: overviewWindow.left + '%', width: overviewWindow.width + '%' }" />
+        <div class="absolute inset-y-0 left-0 rounded-l-full bg-white/30" :style="{ width: overviewPct + '%' }" />
+        <div class="absolute inset-y-0 w-0.5 -translate-x-px rounded-sm bg-[#7c9cff]" :style="{ left: overviewPct + '%' }" />
+      </div>
+      <button v-if="open" type="button" data-testid="add-behaviour-toggle"
         class="flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors"
         :class="galleryOpen ? 'bg-[#7c9cff] text-black' : 'bg-white/10 text-white/85 hover:bg-white/15'"
         @click="emit('toggle-gallery')">
         <span>{{ galleryOpen ? '−' : '+' }}</span><span>Add behaviour</span>
       </button>
-      <button type="button" data-testid="add-property-toggle"
+      <button v-if="open" type="button" data-testid="add-property-toggle"
         class="flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors"
         :class="propertyPickerOpen ? 'bg-[#7c9cff] text-black' : 'bg-white/10 text-white/85 hover:bg-white/15'"
         title="Animate any property directly (transform, fill, effect dials)"
         @click="emit('toggle-property-picker')">
         <span>{{ propertyPickerOpen ? '−' : '+' }}</span><span>Add property</span>
       </button>
-      <label class="flex items-center gap-1 text-white/45">dur
+      <label v-if="open" class="flex items-center gap-1 text-white/45">dur
         <input v-scrubnum type="number" min="0.5" max="60" step="0.5" :value="duration"
           class="w-12 bg-[#0d0d0d] border border-white/10 rounded px-1 py-0.5 text-white/90 outline-none tabular-nums"
           @change="emit('update:motion', { duration: Math.max(0.5, Number(($event.target as HTMLInputElement).value) || 4) })"></label>
-      <label class="flex items-center gap-1 text-white/45">fps
+      <label v-if="open" class="flex items-center gap-1 text-white/45">fps
         <input v-scrubnum type="number" min="1" max="60" step="1" :value="fps ?? 30"
           class="w-11 bg-[#0d0d0d] border border-white/10 rounded px-1 py-0.5 text-white/90 outline-none tabular-nums"
           @change="emit('update:motion', { fps: Math.max(1, Math.min(60, Number(($event.target as HTMLInputElement).value) || 30)) })"></label>
-      <label class="flex items-center gap-1 text-white/45 cursor-pointer" title="Loop playback">
+      <label v-if="open" class="flex items-center gap-1 text-white/45 cursor-pointer" title="Loop playback">
         <input type="checkbox" class="accent-[#7c9cff]" :checked="loop ?? false"
           @change="emit('update:motion', { loop: ($event.target as HTMLInputElement).checked })">loop</label>
       <span v-if="bakeError" class="max-w-[160px] truncate text-rose-400" :title="bakeError">{{ bakeError }}</span>
@@ -373,6 +431,12 @@ function deletePoint(b: Band, i: number) {
         :disabled="baking" :title="stale ? 'Layers changed since last bake' : 'Bake motion to frames'"
         data-testid="dock-bake" @click="emit('bake')">
         {{ baking ? `Baking ${Math.round((bakeProgress ?? 0) * 100)}%` : stale ? 'Re-bake' : 'Bake' }}
+      </button>
+      <button type="button" data-testid="dock-collapse" :aria-expanded="open"
+        class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md text-white/55 hover:bg-white/10 hover:text-white/85"
+        :title="open ? 'Collapse timeline' : 'Expand timeline'" @click="toggleOpen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+          class="size-3.5 transition-transform" :class="open ? '' : 'rotate-180'"><path d="M6 9l6 6 6-6" /></svg>
       </button>
     </div>
     <!-- Add behaviour / Add property open as a POPOVER anchored to the header (upward, the
@@ -384,10 +448,10 @@ function deletePoint(b: Band, i: number) {
       <slot v-else name="property-picker" />
     </div>
 
-    <div class="grid grid-cols-[96px_1fr] gap-x-2">
-      <!-- Ruler row (28px) -->
-      <div class="h-7" />
-      <div ref="laneEl" class="relative h-7 select-none cursor-ew-resize overflow-hidden tabular-nums"
+    <div v-if="open" ref="rowsEl" class="dock-rows grid grid-cols-[96px_1fr] gap-x-2 overflow-y-auto overscroll-contain" :style="{ maxHeight: px(dockMax) }">
+      <!-- Ruler row (28px) — pinned while the rows scroll under it -->
+      <div class="sticky top-0 z-40 h-7 bg-[#1a1a1a]" />
+      <div ref="laneEl" class="sticky top-0 z-40 bg-[#1a1a1a] h-7 select-none cursor-ew-resize overflow-hidden tabular-nums"
         data-testid="timeline-ruler" @pointerdown.stop.prevent="onRulerDown">
         <div v-for="tk in ticks.fine" :key="'f' + tk" class="absolute bottom-0 w-px h-2 bg-white/10" :style="{ left: px(xOf(tk)) }" />
         <div v-for="tk in ticks.medium" :key="'m' + tk" class="absolute bottom-0 w-px h-3.5 bg-white/15" :style="{ left: px(xOf(tk)) }" />
@@ -497,8 +561,8 @@ function deletePoint(b: Band, i: number) {
 
       <!-- Sticky pan scrollbar (only when zoomed) -->
       <template v-if="view.zoom > 1">
-        <div class="h-2.5" />
-        <div ref="scrollEl" class="h-2.5 overflow-x-auto overflow-y-hidden" data-testid="timeline-scrollbar" @scroll="onScroll">
+        <div class="sticky bottom-0 z-40 h-2.5 bg-[#1a1a1a]" />
+        <div ref="scrollEl" class="sticky bottom-0 z-40 h-2.5 bg-[#1a1a1a] overflow-x-auto overflow-y-hidden" data-testid="timeline-scrollbar" @scroll="onScroll">
           <div :style="{ width: px(laneWidth * view.zoom), height: '1px' }" />
         </div>
       </template>
@@ -506,3 +570,11 @@ function deletePoint(b: Band, i: number) {
 
   </div>
 </template>
+
+<style scoped>
+/* DialKit's dock scrollbar, in the compositor's palette. */
+.dock-rows { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+.dock-rows::-webkit-scrollbar { width: 8px; }
+.dock-rows::-webkit-scrollbar-track { background: transparent; }
+.dock-rows::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(255, 255, 255, 0.18); }
+</style>
