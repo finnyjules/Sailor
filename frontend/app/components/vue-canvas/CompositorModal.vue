@@ -99,6 +99,7 @@ import { migrateDialTracks } from '~/lib/motionx/adapter/migrateDialTracks'
 import { mergeAgentBands } from '~/lib/motionx/adapter/agentBands'
 import { migrateLayerAnimations } from '~/lib/motionx/adapter/migrateLayerAnimation'
 import { legacyBandForLayer } from '~/lib/motionx/bands'
+import { isTextBehaviour } from '~/lib/motionx/text'
 import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
 import MotionPropertyPicker from '~/components/vue-canvas/compositor/MotionPropertyPicker.vue'
 import { getByIdPath } from '~/lib/studio/idPath'
@@ -3867,10 +3868,12 @@ watch(() => selectedLocal.value?.id, () => { motionSel.value = null })
 function addBehaviour(kind: string, params: Record<string, unknown> = {}, timing?: { start?: number; duration?: number }, opts: { select?: boolean; record?: boolean } = {}) {
   const l = selectedLocal.value
   if (!l) return
+  const isText = isTextBehaviour({ kind })
+  if (isText && l.kind !== 'text') return
   const total = motionDoc.value.duration ?? 4
   const start = Math.max(0, Math.min(total - 0.05, timing?.start ?? previewT.value ?? 0))
   const duration = Math.max(0.05, Math.min(total - start, timing?.duration ?? (total - start)))
-  const loop = kind === 'gradientScroll' || kind === 'spin' || kind === 'pulse' || kind === 'sway' || kind === 'float'
+  const loop = !isText && (kind === 'gradientScroll' || kind === 'spin' || kind === 'pulse' || kind === 'sway' || kind === 'float')
   const b: StoredBehaviour = {
     id: 'b' + Date.now() + Math.random().toString(36).slice(2, 6),
     layerId: l.id,
@@ -3878,7 +3881,8 @@ function addBehaviour(kind: string, params: Record<string, unknown> = {}, timing
     timing: { start, duration, loop },
     params: { ...(kind === 'fade' ? { dir: 'in' } : {}), ...params },
   }
-  const tracks = compileBehaviourForLayer(l, b as Behaviour)
+  // text.* behaviours are evaluated per-letter at draw time — no compiled tracks.
+  const tracks = isText ? [] : compileBehaviourForLayer(l, b as Behaviour)
   if (opts.record !== false) recordHistory()
   setMotion({
     behaviours: upsertBehaviour(motionBehaviours.value, b),
@@ -3899,7 +3903,8 @@ function editBehaviour(id: string, patch: { params?: Record<string, unknown>; ti
     timing: { ...cur.timing, ...(patch.timing ?? {}) },
     params: { ...cur.params, ...(patch.params ?? {}) },
   }
-  const tracks = compileBehaviourForLayer(l as LocalLayer, next as Behaviour)
+  // text.* behaviours have no compiled tracks — never recompile, just re-store the params.
+  const tracks = isTextBehaviour(next) ? [] : compileBehaviourForLayer(l as LocalLayer, next as Behaviour)
   if (record) recordHistory()
   setMotion({
     behaviours: upsertBehaviour(motionBehaviours.value, next),

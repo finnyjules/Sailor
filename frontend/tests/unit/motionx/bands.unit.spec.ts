@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  trackSpan, bandsForLayer, numberBandCurve, colorBandCss, gradientBandCss,
+  trackSpan, bandsForLayer, numberBandCurve, colorBandCss, gradientBandCss, behaviourLabel,
 } from '~/lib/motionx/bands'
 import type { Track } from '~/lib/motionx'
 
@@ -87,6 +87,26 @@ describe('gradientBandCss', () => {
   })
   it('empty → transparent', () => {
     expect(gradientBandCss({ path: 'layers.a.fill', type: 'gradient', keyframes: [] })).toBe('transparent')
+  })
+})
+
+describe('behaviourLabel — letter behaviours', () => {
+  it('Cascade in / Cascade out by dir', () => {
+    expect(behaviourLabel({ kind: 'text.cascade', params: { dir: 'in' } })).toBe('Cascade in')
+    expect(behaviourLabel({ kind: 'text.cascade', params: { dir: 'out' } })).toBe('Cascade out')
+  })
+  it('Typewriter / Typewriter delete by dir', () => {
+    expect(behaviourLabel({ kind: 'text.typewriter', params: { dir: 'type' } })).toBe('Typewriter')
+    expect(behaviourLabel({ kind: 'text.typewriter', params: { dir: 'delete' } })).toBe('Typewriter delete')
+  })
+  it('Mask slide / Mask slide out by dir', () => {
+    expect(behaviourLabel({ kind: 'text.maskSlide', params: { dir: 'reveal' } })).toBe('Mask slide')
+    expect(behaviourLabel({ kind: 'text.maskSlide', params: { dir: 'hide' } })).toBe('Mask slide out')
+  })
+  it('Scramble + mode suffix', () => {
+    expect(behaviourLabel({ kind: 'text.scramble', params: { mode: 'settle' } })).toBe('Scramble · settle')
+    expect(behaviourLabel({ kind: 'text.scramble', params: { mode: 'scatter' } })).toBe('Scramble · scatter')
+    expect(behaviourLabel({ kind: 'text.scramble', params: { mode: 'loop' } })).toBe('Scramble · keep going')
   })
 })
 

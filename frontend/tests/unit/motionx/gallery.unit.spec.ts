@@ -8,8 +8,11 @@ describe('GALLERY_MOVES catalog', () => {
       expect(m.id).toBeTruthy()
       expect(ids.has(m.id)).toBe(false)   // ids unique
       ids.add(m.id)
-      expect(['fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph']).toContain(m.kind)
-      expect(['In', 'Loop', 'Out', 'Gradient']).toContain(m.group)
+      expect([
+        'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph',
+        'text.cascade', 'text.typewriter', 'text.maskSlide', 'text.scramble',
+      ]).toContain(m.kind)
+      expect(['Letters', 'In', 'Loop', 'Out', 'Gradient']).toContain(m.group)
       expect(m.preview).toBeTruthy()
     }
   })
@@ -35,6 +38,12 @@ describe('movesForLayer', () => {
     const out = movesForLayer({ gradient: true, text: false })
     expect(out.every((m) => m.needs !== 'text')).toBe(true)
   })
+  it('offers the five Letters moves on a text layer', () => {
+    const out = movesForLayer({ gradient: false, text: true })
+    const letters = out.filter((m) => m.group === 'Letters')
+    expect(letters).toHaveLength(5)
+    expect(letters.every((m) => m.needs === 'text')).toBe(true)
+  })
 })
 
 describe('groupedMoves', () => {
@@ -46,6 +55,14 @@ describe('groupedMoves', () => {
     const g = groupedMoves(moves)
     expect(g.map((x) => x.group)).toEqual(['In', 'Gradient'])
     expect(g[0]!.moves.map((m) => m.id)).toEqual(['a'])
+  })
+  it('puts Letters first when present', () => {
+    const moves: GalleryMove[] = [
+      { id: 'a', kind: 'fade', label: 'A', group: 'In', preview: 'fade' },
+      { id: 'c', kind: 'text.cascade', label: 'C', group: 'Letters', preview: 'letters-cascade', needs: 'text' },
+    ]
+    const g = groupedMoves(moves)
+    expect(g.map((x) => x.group)).toEqual(['Letters', 'In'])
   })
 })
 
@@ -62,6 +79,21 @@ describe('recipes + placement defaults', () => {
     expect(defaultDurationFor('In')).toBe(0.8)
     expect(defaultDurationFor('Out')).toBe(0.8)
     expect(defaultDurationFor('Loop')).toBe(2)
+  })
+  it('Letters defaults to 1.2s', async () => {
+    const { defaultDurationFor } = await import('~/lib/motionx/gallery')
+    expect(defaultDurationFor('Letters')).toBe(1.2)
+  })
+})
+
+describe('Letters moves', () => {
+  it('are five text.* moves with the exact ids, kinds and params from the brief', () => {
+    const byId = Object.fromEntries(GALLERY_MOVES.filter((m) => m.group === 'Letters').map((m) => [m.id, m]))
+    expect(byId['letters-cascade-in']).toMatchObject({ kind: 'text.cascade', label: 'Cascade in', params: { dir: 'in', style: 'rise' } })
+    expect(byId['letters-cascade-out']).toMatchObject({ kind: 'text.cascade', label: 'Cascade out', params: { dir: 'out', style: 'rise' } })
+    expect(byId['letters-typewriter']).toMatchObject({ kind: 'text.typewriter', label: 'Typewriter', params: { dir: 'type' } })
+    expect(byId['letters-mask']).toMatchObject({ kind: 'text.maskSlide', label: 'Mask slide', params: { dir: 'reveal', from: 'up' } })
+    expect(byId['letters-scramble']).toMatchObject({ kind: 'text.scramble', label: 'Scramble', params: { mode: 'settle' }, cycle: 2 })
   })
 })
 

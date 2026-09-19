@@ -73,6 +73,10 @@ export const BEHAVIOUR_LABELS: Record<string, string> = {
   float: 'Float',
   gradientScroll: 'Scroll',
   gradientMorph: 'Morph',
+  'text.cascade': 'Cascade',
+  'text.typewriter': 'Typewriter',
+  'text.maskSlide': 'Mask slide',
+  'text.scramble': 'Scramble',
 }
 export function behaviourLabel(b: { kind: string; params?: Record<string, unknown>; timing?: { loop?: boolean } }): string {
   const base = BEHAVIOUR_LABELS[b.kind] ?? b.kind
@@ -81,6 +85,14 @@ export function behaviourLabel(b: { kind: string; params?: Record<string, unknow
   if (b.kind === 'fade') withDir = `${base} ${dir ?? 'in'}`
   else if (b.kind === 'slide') withDir = `${base} ${dir ?? 'up'}`
   else if (b.kind === 'scale') withDir = dir === 'out' ? 'Shrink out' : 'Grow in'
+  else if (b.kind === 'text.cascade') withDir = dir === 'out' ? 'Cascade out' : 'Cascade in'
+  else if (b.kind === 'text.typewriter') withDir = dir === 'delete' ? 'Typewriter delete' : 'Typewriter'
+  else if (b.kind === 'text.maskSlide') withDir = dir === 'hide' ? 'Mask slide out' : 'Mask slide'
+  else if (b.kind === 'text.scramble') {
+    const mode = (b.params?.mode as string | undefined) ?? 'settle'
+    const suffix = mode === 'scatter' ? 'scatter' : mode === 'loop' ? 'keep going' : 'settle'
+    withDir = `${base} · ${suffix}`
+  }
   return b.timing?.loop ? `${withDir} · loop` : withDir
 }
 

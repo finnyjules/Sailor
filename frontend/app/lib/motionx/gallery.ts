@@ -3,11 +3,12 @@
 // capability it needs. The gallery component renders these; clicking one calls
 // addBehaviour(kind, params). Pure — zero Vue/compositor coupling.
 
-export type MoveGroup = 'In' | 'Loop' | 'Out' | 'Gradient'
+export type MoveGroup = 'Letters' | 'In' | 'Loop' | 'Out' | 'Gradient'
 export type PreviewKind =
   | 'fade' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right'
   | 'grow' | 'shrink' | 'spin' | 'pulse' | 'sway' | 'float'
   | 'scroll' | 'morph'
+  | 'letters-cascade' | 'letters-typewriter' | 'letters-mask' | 'letters-scramble'
 
 export interface GalleryMove {
   id: string
@@ -27,6 +28,7 @@ export interface GalleryMove {
 /** Default length (seconds) a new behaviour of this group gets when placed at the playhead.
  *  In / out are short one-shots; a loop's bar is ONE cycle, which then repeats to the end. */
 export function defaultDurationFor(group: MoveGroup): number {
+  if (group === 'Letters') return 1.2
   return group === 'Loop' || group === 'Gradient' ? 2 : 0.8
 }
 export function defaultDurationForMove(m: GalleryMove): number {
@@ -42,6 +44,12 @@ export function behavioursForMove(m: GalleryMove): Array<{ kind: string; params?
 export interface LayerCaps { gradient: boolean; text: boolean }
 
 export const GALLERY_MOVES: GalleryMove[] = [
+  // Letters — text-only, evaluated per-letter at draw time (no compiled tracks)
+  { id: 'letters-cascade-in', kind: 'text.cascade', label: 'Cascade in', group: 'Letters', preview: 'letters-cascade', needs: 'text', params: { dir: 'in', style: 'rise' } },
+  { id: 'letters-cascade-out', kind: 'text.cascade', label: 'Cascade out', group: 'Letters', preview: 'letters-cascade', needs: 'text', params: { dir: 'out', style: 'rise' } },
+  { id: 'letters-typewriter', kind: 'text.typewriter', label: 'Typewriter', group: 'Letters', preview: 'letters-typewriter', needs: 'text', params: { dir: 'type' } },
+  { id: 'letters-mask', kind: 'text.maskSlide', label: 'Mask slide', group: 'Letters', preview: 'letters-mask', needs: 'text', params: { dir: 'reveal', from: 'up' } },
+  { id: 'letters-scramble', kind: 'text.scramble', label: 'Scramble', group: 'Letters', preview: 'letters-scramble', needs: 'text', params: { mode: 'settle' }, cycle: 2 },
   // In
   { id: 'fade-in', kind: 'fade', label: 'Fade in', group: 'In', preview: 'fade', params: { dir: 'in' } },
   { id: 'scale-in', kind: 'scale', label: 'Grow in', group: 'In', preview: 'grow', params: { dir: 'in' },
@@ -67,7 +75,7 @@ export const GALLERY_MOVES: GalleryMove[] = [
   { id: 'gradient-scroll', kind: 'gradientScroll', label: 'Scroll', group: 'Gradient', preview: 'scroll', needs: 'gradient', cycle: 3 },
 ]
 
-const GROUP_ORDER: MoveGroup[] = ['In', 'Loop', 'Out', 'Gradient']
+const GROUP_ORDER: MoveGroup[] = ['Letters', 'In', 'Loop', 'Out', 'Gradient']
 
 /** Filter the catalog to what a layer supports (gradient moves need a gradient fill;
  *  text-only moves need a text layer). Transform/opacity moves are always offered. */
