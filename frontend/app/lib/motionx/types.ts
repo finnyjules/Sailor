@@ -3,7 +3,10 @@ import type { GradientStop } from '~/lib/color/harmony'
 export type NamedEase = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut'
 /** CSS-style cubic-bézier handles [x1, y1, x2, y2]: x in 0..1, y free (overshoot allowed). */
 export type BezierEase = [number, number, number, number]
-export type Ease = NamedEase | BezierEase
+/** A duration-relative spring (DialKit/Motion's "time" spring): the segment length is the
+ *  visual duration; `bounce` 0..1. It may overshoot and keeps settling past the segment. */
+export interface SpringEase { type: 'spring'; bounce: number }
+export type Ease = NamedEase | BezierEase | SpringEase
 export type PropertyType = 'number' | 'color' | 'gradient'
 export type PropertyValue = number | string | GradientStop[]
 

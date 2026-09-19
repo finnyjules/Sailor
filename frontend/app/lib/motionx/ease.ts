@@ -1,6 +1,12 @@
-import type { Ease, BezierEase, NamedEase } from './types'
+import type { Ease, BezierEase, NamedEase, SpringEase } from './types'
+
+export function isSpringEase(e: unknown): e is SpringEase {
+  return !!e && typeof e === 'object' && !Array.isArray(e) && (e as SpringEase).type === 'spring'
+}
 
 export function applyEase(p: number, e: Ease): number {
+  // A spring is NOT clamped at p = 1: it keeps settling past the end of its segment.
+  if (isSpringEase(e)) return springProgress(p, e.bounce)
   const t = p < 0 ? 0 : p > 1 ? 1 : p
   if (typeof e !== 'string') return Array.isArray(e) ? cubicBezier(t, e) : t
   switch (e) {
@@ -9,6 +15,28 @@ export function applyEase(p: number, e: Ease): number {
     case 'easeInOut': return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
     default: return t
   }
+}
+
+// Spring maths ported from DialKit's transition-math.ts (MIT), which mirrors Motion's
+// visualDuration/bounce → stiffness/damping mapping. With p = elapsed / visualDuration the
+// curve depends on p and bounce only, so a segment's LENGTH is the spring's duration.
+const SPRING_W0 = (2 * Math.PI) / 1.2
+const springZeta = (bounce: number) => Math.min(1, Math.max(0.05, 1 - (Number.isFinite(bounce) ? bounce : 0)))
+
+/** p (in segment lengths) after which the spring is within 0.5% of its target. */
+export function springSettle(bounce: number): number {
+  return Math.log(200) / (springZeta(bounce) * SPRING_W0)
+}
+/** Normalized spring position 0 → 1 (may overshoot) at p segment-lengths after the start. */
+export function springProgress(p: number, bounce: number): number {
+  if (!(p > 0)) return 0
+  const zeta = springZeta(bounce), w0 = SPRING_W0
+  if (p >= springSettle(bounce)) return 1
+  if (zeta < 0.9999) {
+    const wd = w0 * Math.sqrt(1 - zeta * zeta)
+    return 1 - Math.exp(-zeta * w0 * p) * (Math.cos(wd * p) + ((zeta * w0) / wd) * Math.sin(wd * p))
+  }
+  return 1 - Math.exp(-w0 * p) * (1 + w0 * p)
 }
 
 /** y at x on the CSS cubic-bézier (0,0)-(x1,y1)-(x2,y2)-(1,1). x handles are clamped to
@@ -53,10 +81,12 @@ const NAMED_HANDLES: Record<NamedEase, BezierEase> = {
   easeInOut: [0.45, 0.03, 0.55, 0.97],
 }
 export function easeToBezier(e: Ease): BezierEase {
+  if (isSpringEase(e)) return [...NAMED_HANDLES.easeInOut] as BezierEase
   return typeof e === 'string' ? [...(NAMED_HANDLES[e] ?? NAMED_HANDLES.linear)] as BezierEase : [...e] as BezierEase
 }
 
 export function easeEquals(a: Ease, b: Ease): boolean {
   if (typeof a === 'string' || typeof b === 'string') return a === b
+  if (isSpringEase(a) || isSpringEase(b)) return isSpringEase(a) && isSpringEase(b) && a.bounce === b.bounce
   return a.length === b.length && a.every((v, i) => v === b[i])
 }

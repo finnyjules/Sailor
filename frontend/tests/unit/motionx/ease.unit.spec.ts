@@ -70,3 +70,32 @@ describe('easeToBezier / bezierLabel', () => {
     expect(easeEquals('linear', [0, 0, 1, 1])).toBe(false)
   })
 })
+
+describe('applyEase — spring { type: "spring", bounce }', () => {
+  const s = (bounce: number) => ({ type: 'spring' as const, bounce })
+  it('starts at 0, is near the target at the end of the bar, and settles to exactly 1', () => {
+    expect(applyEase(0, s(0.2))).toBe(0)
+    expect(applyEase(-1, s(0.2))).toBe(0)
+    expect(Math.abs(applyEase(1, s(0.2)) - 1)).toBeLessThan(0.12)
+    expect(applyEase(6, s(0.2))).toBe(1)
+  })
+  it('bounce 0 never overshoots; a bouncy spring does, past the end of the bar', () => {
+    const ps = Array.from({ length: 60 }, (_, i) => i / 20)
+    expect(Math.max(...ps.map((p) => applyEase(p, s(0))))).toBeLessThanOrEqual(1)
+    expect(Math.max(...ps.map((p) => applyEase(p, s(0.6))))).toBeGreaterThan(1.05)
+  })
+  it('matches DialKit/Motion: visualDuration+bounce → closed-form oscillator', () => {
+    // bounce .2, t = 0.5·visualDuration: w0 = 2π/1.2, ζ = .8
+    const w0 = (2 * Math.PI) / 1.2, z = 0.8, wd = w0 * Math.sqrt(1 - z * z), t = 0.5
+    const want = 1 - Math.exp(-z * w0 * t) * (Math.cos(wd * t) + ((z * w0) / wd) * Math.sin(wd * t))
+    expect(applyEase(0.5, s(0.2))).toBeCloseTo(want, 9)
+  })
+  it('easeEquals + isSpringEase', async () => {
+    const { easeEquals, isSpringEase } = await import('~/lib/motionx/ease')
+    expect(easeEquals(s(0.2), s(0.2))).toBe(true)
+    expect(easeEquals(s(0.2), s(0.3))).toBe(false)
+    expect(easeEquals(s(0.2), 'linear')).toBe(false)
+    expect(isSpringEase(s(0.1))).toBe(true)
+    expect(isSpringEase([0, 0, 1, 1])).toBe(false)
+  })
+})

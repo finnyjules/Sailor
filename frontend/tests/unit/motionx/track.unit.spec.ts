@@ -41,3 +41,28 @@ describe('evaluateTrack with a bézier segment ease', () => {
     expect(evaluateTrack(tr, 0.7) as number).toBeGreaterThan(10)
   })
 })
+
+describe('evaluateTrack — spring tail', () => {
+  const spring = { type: 'spring' as const, bounce: 0.5 }
+  const tr = { path: 'x', type: 'number' as const, keyframes: [
+    { t: 1, value: 0, ease: spring }, { t: 2, value: 10, ease: 'linear' as const },
+  ] }
+  it('keeps bouncing past the last keyframe, then rests on the end value', async () => {
+    const { evaluateTrack } = await import('~/lib/motionx')
+    const tail = [2.1, 2.2, 2.3, 2.4, 2.6].map((t) => evaluateTrack(tr, t) as number)
+    expect(Math.max(...tail)).toBeGreaterThan(10)
+    expect(evaluateTrack(tr, 9)).toBe(10)
+    expect(evaluateTrack(tr, 0.5)).toBe(0)
+  })
+  it('a looping track has no tail (it wraps instead)', async () => {
+    const { evaluateTrack } = await import('~/lib/motionx')
+    const v = evaluateTrack({ ...tr, loop: true }, 2.2) as number
+    expect(v).toBeLessThan(10)
+  })
+  it('non-spring tracks still hold the last value exactly', async () => {
+    const { evaluateTrack } = await import('~/lib/motionx')
+    const plain = { ...tr, keyframes: [{ t: 1, value: 0, ease: 'easeOut' as const }, tr.keyframes[1]!] }
+    expect(evaluateTrack(plain, 2)).toBe(10)
+    expect(evaluateTrack(plain, 2.3)).toBe(10)
+  })
+})

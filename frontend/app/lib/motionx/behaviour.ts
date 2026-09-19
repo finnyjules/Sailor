@@ -16,6 +16,8 @@ export function compileBehaviour(b: Behaviour, target: BehaviourTarget): Track[]
 }
 function asEase(v: unknown): Ease | null {
   if (v === 'linear' || v === 'easeIn' || v === 'easeOut' || v === 'easeInOut') return v
+  if (v && typeof v === 'object' && !Array.isArray(v) && (v as { type?: unknown }).type === 'spring'
+    && Number.isFinite((v as { bounce?: unknown }).bounce)) return v as Ease
   return Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === 'number' && Number.isFinite(n))
     ? (v as Ease) : null
 }
