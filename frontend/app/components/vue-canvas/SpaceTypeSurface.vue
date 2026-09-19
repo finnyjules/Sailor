@@ -99,7 +99,7 @@ const stateSource = computed<SpaceTypeStateSource>(() =>
     ? clipSpaceTypeStateSource(props.clipId)
     : nodeSpaceTypeStateSource(currentNode))
 
-const fps = ref(30)
+const fps = ref(60)
 const FPS_OPTIONS = ['24', '30', '60']
 const seamlessLoop = ref(false)
 // True loop length shown beside the Seamless-loop toggle: loopDuration × k when
@@ -116,9 +116,9 @@ const DIMS: Record<string, [number, number]> = {
   '960 × 540 (16:9)': [960, 540],
 }
 const CUSTOM = 'Custom'
-const dimsKey = ref('960 × 540 (16:9)')
-const W = ref(960)
-const H = ref(540)
+const dimsKey = ref('1920 × 1080 (16:9)')
+const W = ref(1920)
+const H = ref(1080)
 // Editing W/H directly switches to Custom; clamp to an encodable range (even, 16–4096).
 function onCustomDims() {
   const clamp = (v: number) => Math.max(16, Math.min(4096, Math.round((Number(v) || 16) / 2) * 2))
