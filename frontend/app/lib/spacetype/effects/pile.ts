@@ -21,17 +21,17 @@ const controls: ControlSpec[] = [
   { key: 'textAs', label: 'Text as', kind: 'select', options: ['off', 'words', 'letters'], optionLabels: ['None', 'Words', 'Letters'], default: 'words', group: 'Type' },
   // BOX appearance → the Style section.
   { key: 'boxStyle', label: 'Box style', kind: 'select', options: ['filled', 'bare', 'outline'], optionLabels: ['Filled box', 'Just words', 'Outline'], default: 'filled', group: 'Style' },
-  { key: 'padding', label: 'Padding', kind: 'slider', min: 0, max: 0.4, step: 0.01, default: 0.14, group: 'Style', showIf: { key: 'boxStyle', notEquals: 'bare' } },
+  { key: 'padding', label: 'Padding', kind: 'slider', min: 0, max: 0.4, step: 0.01, default: 0.04, group: 'Style', showIf: { key: 'boxStyle', notEquals: 'bare' } },
   // SHAPES (what populates the pile) → the Layout section.
   { key: 'shapeCount', label: 'Shape count', kind: 'slider', min: 0, max: 40, step: 1, default: 0, group: 'Layout' },
   { key: 'shapes', label: 'Shapes', kind: 'shapeList', default: '[]', group: 'Layout', showIf: { key: 'shapeCount', notEquals: 0 } },
   { key: 'shapeSize', label: 'Shape size', kind: 'slider', min: 30, max: 260, step: 2, default: 120, group: 'Layout', showIf: { key: 'shapeCount', notEquals: 0 } },
   { key: 'sizeVariation', label: 'Size variation', kind: 'slider', min: 0, max: 0.9, step: 0.05, default: 0.3, group: 'Layout', showIf: { key: 'shapeCount', notEquals: 0 } },
   // PHYSICS (the fall & settle) → the Stack section.
-  { key: 'container', label: 'Container', kind: 'slider', min: 0.3, max: 1, step: 0.02, default: 0.8, group: 'Stack' },
-  { key: 'gravity', label: 'Gravity', kind: 'slider', min: 0.2, max: 3, step: 0.1, default: 1, group: 'Stack' },
-  { key: 'bounciness', label: 'Bounciness', kind: 'slider', min: 0, max: 0.9, step: 0.05, default: 0.1, group: 'Stack' },
-  { key: 'dropSpread', label: 'Drop spread', kind: 'slider', min: 0, max: 1, step: 0.05, default: 0.5, group: 'Stack' },
+  { key: 'container', label: 'Container', kind: 'slider', min: 0.3, max: 1, step: 0.02, default: 0.4, group: 'Stack' },
+  { key: 'gravity', label: 'Gravity', kind: 'slider', min: 0.2, max: 3, step: 0.1, default: 0.4, group: 'Stack' },
+  { key: 'bounciness', label: 'Bounciness', kind: 'slider', min: 0, max: 0.9, step: 0.05, default: 0.7, group: 'Stack' },
+  { key: 'dropSpread', label: 'Drop spread', kind: 'slider', min: 0, max: 1, step: 0.05, default: 0.8, group: 'Stack' },
   { key: 'seed', label: 'Seed', kind: 'slider', min: 0, max: 999, step: 1, default: 1, group: 'Stack' },
   // COLOR
   { key: 'fills', label: 'Fills', kind: 'fillList', default: defaultFillsFor(6, 'pile'), group: 'Color' },
