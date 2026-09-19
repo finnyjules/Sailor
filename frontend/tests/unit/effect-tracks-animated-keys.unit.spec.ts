@@ -55,4 +55,11 @@ describe('animatedDialKeysOf', () => {
     ]
     expect(animatedDialKeysOf(targets, 'e-grain', foreign).size).toBe(0)
   })
+
+  it('a timeline band on the dial counts as animated too', () => {
+    const spec = targets[0]!
+    expect(animatedDialKeysOf(targets, spec.effectId, [], [spec.path]).has(spec.dialKey)).toBe(true)
+    expect(animatedDialKeysOf(targets, spec.effectId, [], []).has(spec.dialKey)).toBe(false)
+    expect(animatedDialKeysOf(targets, spec.effectId, undefined).size).toBe(0)   // old signature still fine
+  })
 })

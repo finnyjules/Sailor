@@ -3984,7 +3984,7 @@ const animatedDialKeys = computed<Set<string>>(() => {
   const layer = activeEffectLayer.value
   const fx = activeEffect.value
   if (!layer || !fx) return new Set<string>()
-  return animatedDialKeysOf(effectDialTargets(layer as any), (fx as any).id, motionTracks.value)
+  return animatedDialKeysOf(effectDialTargets(layer as any), (fx as any).id, motionTracks.value, motionxTracks.value.map((t) => t.path))
 })
 const animatedDialLabels = computed<string[]>(() => {
   const layer = activeEffectLayer.value

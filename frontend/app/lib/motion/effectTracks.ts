@@ -89,15 +89,19 @@ export function effectDialTargets(layer: LocalLayer): DialTargetSpec[] {
  * (`grain`, `amount`, `color`, …) that a track targets. Empty when there are no tracks,
  * or none resolve to this effect. Pure: no Vue, no lookups beyond the args — so the
  * inspector's variable-marker logic is testable without mounting the modal.
+ *
+ * Also accepts `bandPaths` — an iterable of timeline band paths that target dials. A dial
+ * is animated when a legacy track OR a band path targets it.
  */
 export function animatedDialKeysOf(
   targets: DialTargetSpec[],
   effectId: string,
   tracks: EffectDialTrack[] | undefined,
+  bandPaths: Iterable<string> = [],
 ): Set<string> {
   const out = new Set<string>()
-  if (!tracks || !tracks.length) return out
-  const driven = new Set(tracks.map((tr) => tr?.target))
+  const driven = new Set<string | undefined>([...(tracks ?? []).map((tr) => tr?.target), ...bandPaths])
+  if (driven.size === 0) return out
   for (const spec of targets) {
     if (spec.effectId === effectId && driven.has(spec.path)) out.add(spec.dialKey)
   }
