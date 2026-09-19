@@ -3690,15 +3690,35 @@ watch(() => compositor.value?.id, () => {
   // bands on open too. Whatever it refuses keeps rendering through the old engine and shows up
   // as a locked "Older animation" bar in the dock instead (legacyBandForLayer). Opening a frame
   // is not an undoable edit, so no recordHistory() here. Only the W/H RATIO matters to the
-  // converter — if the canvas isn't sized yet, defer once and bail if it's still 0.
-  const tryMigrateLayerAnimations = () => {
-    const { w, h } = canvasDisplay
-    if (!w || !h) return
-    const res = migrateLayerAnimations(localLayers.value, motionDoc.value, { w, h })
+  // converter — but `canvasDisplay` starts as a 1:1 PLACEHOLDER that fitCanvasToStage() only
+  // overwrites post-mount (onMounted / the non-immediate `watch(baseAspect, …)`), so this
+  // immediate watcher would otherwise bake every vertical move against a square frame. Mirror
+  // baseAspect's OWN resolution (its size widgets, else the base wired layer's decoded natural
+  // size) but return null instead of its `|| 1` fallback, so an unresolved aspect (no size
+  // widgets yet, image not decoded) defers instead of converting on a guess.
+  const knownFrameAspect = (): number | null => {
+    const defs = node.data?.widgetDefs as any[] | undefined
+    const wv = node.data?.widgetsValues as any[] | undefined
+    if (defs && wv) {
+      const wi = defs.findIndex((d: any) => d.name === 'width')
+      const hi = defs.findIndex((d: any) => d.name === 'height')
+      const fw = wi >= 0 ? Number(wv[wi]) || 0 : 0
+      const fh = hi >= 0 ? Number(wv[hi]) || 0 : 0
+      if (fw > 0 && fh > 0) return fw / fh
+    }
+    const base = layers.value[0]
+    if (!base) return null
+    const d = naturalDims.value[base.slot]
+    return d && d.h ? d.w / d.h : null
+  }
+  const tryMigrateLayerAnimations = (aspect: number) => {
+    const dims = { w: 1000, h: 1000 / aspect }
+    const res = migrateLayerAnimations(localLayers.value, motionDoc.value, dims)
     if (res.converted.length) { commit(res.layers); setMotion({ motionx: res.motionx } as Partial<FrameMotion>) }
   }
-  if (canvasDisplay.w && canvasDisplay.h) tryMigrateLayerAnimations()
-  else nextTick(tryMigrateLayerAnimations)
+  const initialAspect = knownFrameAspect()
+  if (initialAspect != null) tryMigrateLayerAnimations(initialAspect)
+  else watch(knownFrameAspect, (a) => { if (a != null) tryMigrateLayerAnimations(a) }, { once: true })
 }, { immediate: true })
 // The docked timeline mutates layer.animation in place during a drag, then
 // emits 'commit' (no payload) on pointerup. `commit()` from the local-layer

@@ -112,4 +112,21 @@ describe('migrateLayerAnimations', () => {
     expect((out.layers[1] as any).animation).toBeTruthy()
     expect(out.motionx.map((t) => t.path)).toEqual(['layers.L1.opacity'])
   })
+  // Regression: CompositorModal used to pass the 1:1 `canvasDisplay` placeholder as `dims`
+  // on every frame open, instead of the frame's real aspect — `composeEffectiveLayer` scales
+  // vertical displacement by W/H, so a non-square frame (e.g. 1280×720) baked wrong `y` values.
+  // This proves the ratio matters and pins the correct value for a real 16:9 frame.
+  it('the y band depends on the frame aspect, not just w/h magnitude', () => {
+    const layer = rect({ offset: 0, in: { presetId: 'slide-up', duration: 0.6 } })
+    const square = layerAnimationToTracks(layer, motion as any, { w: 1000, h: 1000 }, [])!
+    const wide = layerAnimationToTracks(layer, motion as any, { w: 1280, h: 720 }, [])!
+    const ySquare = square.find((t) => t.path.endsWith('.y'))!
+    const yWide = wide.find((t) => t.path.endsWith('.y'))!
+    expect(yWide.keyframes[0]!.t).toBe(0)
+    expect(ySquare.keyframes[0]!.t).toBe(0)
+    expect(yWide.keyframes[0]!.value as number).not.toBeCloseTo(ySquare.keyframes[0]!.value as number, 3)
+    const st = evaluateAnimation((layer as any).animation, 0, motion as any, 1)
+    const expected = composeEffectiveLayer(layer, st, 1280, 720).y
+    expect(yWide.keyframes[0]!.value as number).toBeCloseTo(expected, 3)
+  })
 })

@@ -484,17 +484,17 @@ function deletePoint(b: Band, i: number) {
         <template v-if="!collapsedLayers.has(l.id)">
           <!-- an older In/Loop/Out layer animation (layer.animation) — still plays through the
                old engine; shown as one locked bar, not editable here (Task 5). -->
-          <template v-if="legacyFor(l)">
+          <template v-for="lb in (legacyFor(l) ? [legacyFor(l)!] : [])" :key="lb.key">
             <span class="truncate text-left text-[10px] pl-5 self-center text-white/45">Older animation</span>
             <div data-band-lane class="relative my-0.5 h-6">
               <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
               <button type="button" :data-testid="'legacy-band-' + l.id"
                 class="absolute inset-y-0 flex items-center gap-1.5 overflow-hidden rounded-md border border-dashed px-2 text-left text-[9.5px] cursor-pointer select-none"
                 :class="isLegacySel(l) ? 'ring-2 ring-[#7c9cff] border-white/40 text-white' : 'border-white/25 text-white/60 hover:border-white/45'"
-                :style="{ left: px(xOf(legacyFor(l)!.start)), width: px(wOf(legacyFor(l)!.start, legacyFor(l)!.end)), background: 'rgba(255,255,255,.05)' }"
+                :style="{ left: px(xOf(lb.start)), width: px(wOf(lb.start, lb.end)), background: 'rgba(255,255,255,.05)' }"
                 title="Made with the older animation tools — it still plays, but can't be edited here"
                 @click.stop="emit('select-legacy', l.id)">
-                <span class="truncate">{{ legacyFor(l)!.label.replace('Older animation · ', '') }}</span>
+                <span class="truncate">{{ lb.label.replace('Older animation · ', '') }}</span>
               </button>
             </div>
           </template>
