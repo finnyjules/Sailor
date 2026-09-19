@@ -21,16 +21,16 @@ const SLAB = 500            // static barrier thickness in px — deep enough to
 const DT_MS = 1000 / 120    // fixed physics step (stability)
 const G_BASE = 9           // gravity multiplier: default slider (1) gives a grounded, earth-like drop
 const MAX_STEPS = 900       // hard cap on the raw settle sim (~7.5s physics)
-// Stop the raw sim when the pile is VISUALLY settled — by position change over a WINDOW
-// of steps, not a single step. Per-step change falsely reads as "rest" during the slow
-// start of free-fall (velocity from zero moves < a per-step epsilon for several steps),
-// which froze text-only piles at their spawn point above the frame. Measuring drift over
-// REST_WINDOW steps can't be fooled by the slow start, and still ignores micro-jitter
-// (which would otherwise inflate the trajectory and make the resampled fall look fast).
-// WINDOW_EPS is total WORLD-unit drift over the window.
-const REST_WINDOW = 12
-const WINDOW_EPS = 0.05
-const MIN_STEPS = 8
+// Stop the raw sim only when the pile is TRULY at rest — every body's linear AND angular speed
+// below threshold for a streak. Angular matters: a box that has landed on a corner is still
+// TIPPING to lie flat while its centre barely moves; a position-only test froze it mid-tip in a
+// "weird" pose. The MIN_STEPS guard skips the very start (bodies spawn at v=0, before they fall),
+// which is why position-over-a-window was used before — the guard handles it without hiding tips.
+// Real-time playback means letting the sim run to a true rest costs nothing (no resample stretch).
+const REST_V = 0.12        // px/step (~14 px/s) linear speed below which a body is still
+const REST_W = 0.004       // rad/step (~0.5 rad/s) angular speed below which a body has stopped turning
+const REST_STREAK = 10
+const MIN_STEPS = 24       // ~0.2s: bodies have started falling, so v≈0 now means settled, not spawn
 
 /**
  * Drop the token rectangles into a Matter.js world, simulate to FULL REST, then
@@ -115,16 +115,18 @@ export function bakePile(specs: PileTokenSpec[], params: Params, frame: { width:
     return { x: (b.position.x - (off.x * cos - off.y * sin)) / SCALE, y: (b.position.y - (off.x * sin + off.y * cos)) / SCALE, angle: a }
   }
   const raw: Pose[][] = []
+  let restStreak = 0
   for (let step = 0; step < MAX_STEPS; step++) {
     Engine.update(engine, DT_MS)
     raw.push(bodies.map(scaled))
     if (bodies.length === 0) break
-    // Rest = the pile has barely drifted over the last REST_WINDOW steps.
-    if (raw.length > REST_WINDOW && step >= MIN_STEPS) {
-      const cur = raw[raw.length - 1]!, past = raw[raw.length - 1 - REST_WINDOW]!
-      let drift = 0
-      for (let k = 0; k < cur.length; k++) drift = Math.max(drift, Math.hypot(cur[k]!.x - past[k]!.x, cur[k]!.y - past[k]!.y))
-      if (drift < WINDOW_EPS) break
+    // Rest = EVERY body is still (linear AND angular). Only start checking after MIN_STEPS so the
+    // spawn state (v=0, before falling) isn't mistaken for rest — and so a box mid-tip, which still
+    // has angular speed, keeps the sim running until it lies flat.
+    if (step >= MIN_STEPS) {
+      let moving = false
+      for (const b of bodies) { if (b.speed > REST_V || b.angularSpeed > REST_W) { moving = true; break } }
+      if (!moving) { if (++restStreak >= REST_STREAK) break } else restStreak = 0
     }
   }
   const fallback = specs.map(() => ({ x: 0, y: floorY / SCALE, angle: 0 }))
