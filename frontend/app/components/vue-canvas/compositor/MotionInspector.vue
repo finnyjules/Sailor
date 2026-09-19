@@ -8,7 +8,7 @@ import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
 import { retimeTrack, addPoint, setPointValue, setPointEase, removePoint, setBandTrack, bandTrackAt } from '~/lib/motionx/bandEdit'
-import { isTextBehaviour, pieceRanks, pieceTiming, type Order } from '~/lib/motionx/text'
+import { DEFAULT_TEXT_EASE, isTextBehaviour, pieceRanks, pieceTiming, type Order } from '~/lib/motionx/text'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import MotionEasingCurve from '~/components/vue-canvas/compositor/MotionEasingCurve.vue'
 import type { Gradient } from '~/lib/compositor/paint'
@@ -51,10 +51,13 @@ function setBehParams(patch: Record<string, unknown>) {
 function setBehTiming(patch: { start?: number; duration?: number; loop?: boolean }) {
   if (behaviour.value) emit('behaviour-change', behaviour.value.id, { timing: patch })
 }
-// The curve shown for a behaviour: its own override, else what its kind compiled to.
+// The curve shown for a behaviour: its own override, else what its kind compiled to. A
+// LETTER bar compiles to no track at all — it moves glyphs, not properties — so there is no
+// keyframe to read its curve off, and it falls back to the evaluator's own default instead.
 const behEase = computed<Ease>(() => {
   const own = behParam('ease') as Ease | undefined
   if (own) return own
+  if (behaviour.value && isTextBehaviour(behaviour.value)) return DEFAULT_TEXT_EASE
   const compiled = props.motionx.find((t) => t.behaviourId === behaviour.value?.id)
   return compiled?.keyframes[0]?.ease ?? 'easeInOut'
 })

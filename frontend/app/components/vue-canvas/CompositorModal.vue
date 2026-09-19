@@ -99,7 +99,7 @@ import { migrateDialTracks } from '~/lib/motionx/adapter/migrateDialTracks'
 import { mergeAgentBands } from '~/lib/motionx/adapter/agentBands'
 import { migrateLayerAnimations } from '~/lib/motionx/adapter/migrateLayerAnimation'
 import { legacyBandForLayer } from '~/lib/motionx/bands'
-import { isTextBehaviour } from '~/lib/motionx/text'
+import { isTextBehaviour, canAnimateLetters } from '~/lib/motionx/text'
 import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
 import MotionPropertyPicker from '~/components/vue-canvas/compositor/MotionPropertyPicker.vue'
 import { getByIdPath } from '~/lib/studio/idPath'
@@ -3792,7 +3792,7 @@ function selectMotionBehaviour(id: string) { motionSel.value = { kind: 'behaviou
 const motionLayerCaps = computed(() => {
   const l = selectedLocal.value
   const fill = (l as unknown as { fill?: Paint })?.fill
-  return { gradient: !!l && isGradient(fill), text: l?.kind === 'text' }
+  return { gradient: !!l && isGradient(fill), text: canAnimateLetters(l) }
 })
 // A tile is a RECIPE: one or more single-property behaviours, all placed at the
 // playhead with the group's default length. The first lands selected.
@@ -3881,7 +3881,7 @@ function addBehaviour(kind: string, params: Record<string, unknown> = {}, timing
   const l = selectedLocal.value
   if (!l) return
   const isText = isTextBehaviour({ kind })
-  if (isText && l.kind !== 'text') return
+  if (isText && !canAnimateLetters(l)) return
   const total = motionDoc.value.duration ?? 4
   const start = Math.max(0, Math.min(total - 0.05, timing?.start ?? previewT.value ?? 0))
   const duration = Math.max(0.05, Math.min(total - start, timing?.duration ?? (total - start)))
@@ -4209,10 +4209,12 @@ async function renderStaticComposite(W: number, H: number): Promise<Blob | null>
   return await new Promise<Blob | null>(resolve => off.toBlob(b => resolve(b), 'image/png'))
 }
 
-// True when any local layer carries a motion window OR a wired studio slot is
-// animated — gates "Generate as video". hasAnimatedSlot is defined above
+// True when any local layer carries a motion window, a wired studio slot is
+// animated, or the motion doc holds any band or behaviour (letter bars included —
+// they animate glyphs, not properties, so they compile to no track) — gates
+// "Generate as video". hasAnimatedSlot is defined above
 // (~line 1292), before this computed, so it can be referenced directly.
-const hasMotion = computed(() => localLayers.value.some((l: any) => l.animation) || hasAnimatedSlot.value)
+const hasMotion = computed(() => localLayers.value.some((l: any) => l.animation) || hasAnimatedSlot.value || motionxTracks.value.length > 0 || motionBehaviours.value.length > 0)
 
 // ── outputs (mirror Gradient Studio's generateImage/generateVideo idiom) ────
 async function generateImage() {
