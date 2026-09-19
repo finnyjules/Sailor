@@ -204,7 +204,7 @@ function onGradient(g: Gradient) {
         <input v-scrubnum type="number" step="0.1" min="0" :value="+behaviour.timing.start.toFixed(2)" data-testid="beh-start"
           class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
           @change="setBehTiming({ start: Number(($event.target as HTMLInputElement).value) || 0 })"></label>
-      <label class="flex items-center gap-1">Duration
+      <label class="flex items-center gap-1" :title="behaviour.timing.loop ? 'Length of one cycle — it repeats to the end of the timeline' : ''">{{ behaviour.timing.loop ? 'Cycle' : 'Duration' }}
         <input v-scrubnum type="number" step="0.1" min="0.05" :value="+behaviour.timing.duration.toFixed(2)" data-testid="beh-duration"
           class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
           @change="setBehTiming({ duration: Math.max(0.05, Number(($event.target as HTMLInputElement).value) || 0.05) })"></label>
@@ -278,6 +278,9 @@ function onGradient(g: Gradient) {
       <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">{{ track.keyframes.length > 2 ? 'Easing (all points)' : 'Easing' }}</div>
       <MotionEasingCurve class="mb-2" :ease="track.keyframes[0]?.ease ?? 'linear'"
         @start="emit('before-change')" @change="setAllEaseLive" @end="emit('commit')" />
+      <label class="mb-2 flex items-center justify-between" title="Repeat this band to the end of the timeline — the bar is one cycle">Loop
+        <input type="checkbox" class="accent-[#7c9cff]" data-testid="band-loop" :checked="!!track.loop"
+          @change="apply({ ...track, loop: ($event.target as HTMLInputElement).checked })"></label>
       <div class="flex items-center justify-between">
         <span class="text-white/40">{{ track.keyframes.length }} control points</span>
         <button type="button" class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:bg-white/10 cursor-pointer"

@@ -121,7 +121,7 @@ import CompositorMotionTimeline from '~/components/vue-canvas/compositor/Composi
 import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
 import MotionGallery from '~/components/vue-canvas/compositor/MotionGallery.vue'
 import MotionInspector from '~/components/vue-canvas/compositor/MotionInspector.vue'
-import { behavioursForMove, defaultDurationFor, type GalleryMove } from '~/lib/motionx/gallery'
+import { behavioursForMove, defaultDurationForMove, type GalleryMove } from '~/lib/motionx/gallery'
 import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
@@ -3792,7 +3792,7 @@ const motionLayerCaps = computed(() => {
 // playhead with the group's default length. The first lands selected.
 function onGalleryAdd(move: GalleryMove) {
   const parts = behavioursForMove(move)
-  const timing = { start: previewT.value ?? 0, duration: defaultDurationFor(move.group) }
+  const timing = { start: previewT.value ?? 0, duration: defaultDurationForMove(move) }
   recordHistory()
   parts.forEach((p, i) => addBehaviour(p.kind, p.params ?? {}, timing, { select: i === 0, record: false }))
   behaviourPickerOpen.value = false
@@ -3839,7 +3839,7 @@ watch(() => selectedLocal.value?.id, () => { motionSel.value = null })
 // motionx) is unchanged, while the band UI shows a single labeled behaviour band.
 // Adds ONE single-property behaviour. `timing` defaults to the playhead + the full
 // remaining timeline; gallery tiles pass their group's default length (In/Out 0.8s,
-// Loop → to the end) so new bars sequence naturally instead of all landing at 0–4s.
+// Loop → ONE cycle, which repeats to the end) so new bars sequence naturally.
 function addBehaviour(kind: string, params: Record<string, unknown> = {}, timing?: { start?: number; duration?: number }, opts: { select?: boolean; record?: boolean } = {}) {
   const l = selectedLocal.value
   if (!l) return

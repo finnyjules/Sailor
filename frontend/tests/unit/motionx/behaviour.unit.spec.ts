@@ -126,3 +126,19 @@ describe('behaviour easing override (params.ease)', () => {
     expect(compileBehaviour(beh({ dir: 'in', ease: [1, 2] }), target as never)[0]!.keyframes[0]!.ease).toBe('easeInOut')
   })
 })
+
+describe('timing.loop is the one loop switch for every kind', () => {
+  const target = { get: () => 1 }
+  const c = async (kind: string, loop?: boolean) => {
+    const { compileBehaviour } = await import('~/lib/motionx')
+    return compileBehaviour({ id: 'b', kind, params: {}, timing: { start: 0, duration: 1, ...(loop === undefined ? {} : { loop }) } } as never, target as never)[0]!
+  }
+  it('unset keeps each kind\'s default (pulse loops, fade does not)', async () => {
+    expect((await c('pulse')).loop).toBe(true)
+    expect((await c('fade')).loop ?? false).toBe(false)
+  })
+  it('true / false override it either way', async () => {
+    expect((await c('fade', true)).loop).toBe(true)
+    expect((await c('pulse', false)).loop).toBe(false)
+  })
+})

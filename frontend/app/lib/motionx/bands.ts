@@ -16,6 +16,8 @@ export interface Band {
   end: number
   keyframes: Keyframe[]
   behaviourId?: string   // set on behaviour bands (kind 'behaviour')
+  /** The bar is ONE cycle that repeats to the end of the timeline. */
+  loop?: boolean
 }
 
 interface GradStop { pos: number; color: string }
@@ -54,6 +56,7 @@ export function bandsForLayer(
       start,
       end,
       keyframes: tk.keyframes,
+      loop: !!tk.loop,
     })
   }
   return out
@@ -83,7 +86,7 @@ export function behaviourLabel(b: { kind: string; params?: Record<string, unknow
 
 /** Behaviour bands for one layer — one labeled band per stored behaviour, spanning its
  *  timing window. Their compiled tracks are hidden (represented by the band) until Open. */
-export function behaviourBandsForLayer(layerId: string, behaviours: StoredBehaviour[]): Band[] {
+export function behaviourBandsForLayer(layerId: string, behaviours: StoredBehaviour[], tracks: Track[] = []): Band[] {
   return behaviours
     .filter((b) => b.layerId === layerId)
     .map((b) => {
@@ -98,6 +101,7 @@ export function behaviourBandsForLayer(layerId: string, behaviours: StoredBehavi
         end: start + Math.max(1e-4, b.timing.duration),
         keyframes: [],
         behaviourId: b.id,
+        loop: tracks.some((t) => t.behaviourId === b.id && !!t.loop),
       }
     })
 }

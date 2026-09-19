@@ -57,10 +57,22 @@ describe('recipes + placement defaults', () => {
     const fadeIn = GALLERY_MOVES.find((m) => m.id === 'fade-in')!
     expect(behavioursForMove(fadeIn)).toEqual([{ kind: 'fade', params: { dir: 'in' } }])
   })
-  it('In/Out default to 0.8s; Loop/Gradient run to the end', async () => {
+  it('In/Out default to 0.8s; Loop/Gradient to one 2s cycle', async () => {
     const { defaultDurationFor } = await import('~/lib/motionx/gallery')
     expect(defaultDurationFor('In')).toBe(0.8)
     expect(defaultDurationFor('Out')).toBe(0.8)
-    expect(defaultDurationFor('Loop')).toBe(Infinity)
+    expect(defaultDurationFor('Loop')).toBe(2)
+  })
+})
+
+describe('loop moves default to ONE cycle (the bar is a cycle; ghosts repeat it)', () => {
+  it('each loop / gradient move has a finite cycle; in/out stay 0.8s', async () => {
+    const { defaultDurationForMove } = await import('~/lib/motionx/gallery')
+    for (const m of GALLERY_MOVES) {
+      const d = defaultDurationForMove(m)
+      expect(Number.isFinite(d) && d > 0).toBe(true)
+      if (m.group === 'In' || m.group === 'Out') expect(d).toBe(0.8)
+    }
+    expect(defaultDurationForMove(GALLERY_MOVES.find((m) => m.id === 'spin')!)).toBe(2)
   })
 })

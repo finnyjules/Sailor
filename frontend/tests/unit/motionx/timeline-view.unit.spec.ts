@@ -80,3 +80,19 @@ describe('formatClock / formatRulerSeconds', () => {
     expect(formatRulerSeconds(0.25, 0.05)).toBe('0.25s')
   })
 })
+
+describe('ghostCycles — the repeats of a looping bar', () => {
+  it('repeats the cycle from the end of the bar to the end of the timeline, clipping the last', async () => {
+    const { ghostCycles } = await import('~/lib/motionx/timelineView')
+    expect(ghostCycles(0.5, 1, 4, 0)).toEqual([
+      { index: 1, start: 1.5, duration: 1 }, { index: 2, start: 2.5, duration: 1 }, { index: 3, start: 3.5, duration: 0.5 },
+    ])
+  })
+  it('skips cycles scrolled off to the left, and never runs away on a tiny cycle', async () => {
+    const { ghostCycles } = await import('~/lib/motionx/timelineView')
+    expect(ghostCycles(0, 1, 10, 6.2)[0]!.index).toBe(6)
+    expect(ghostCycles(0, 0.001, 600, 0).length).toBeLessThanOrEqual(256)
+    expect(ghostCycles(0, 0, 4, 0)).toEqual([])
+    expect(ghostCycles(1, 3, 4, 0)).toEqual([])      // the bar already reaches the end
+  })
+})

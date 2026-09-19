@@ -89,3 +89,20 @@ describe('gradientBandCss', () => {
     expect(gradientBandCss({ path: 'layers.a.fill', type: 'gradient', keyframes: [] })).toBe('transparent')
   })
 })
+
+describe('bands carry the loop flag', () => {
+  it('property bands from track.loop; behaviour bands from their compiled track', async () => {
+    const { bandsForLayer, behaviourBandsForLayer } = await import('~/lib/motionx/bands')
+    const kf = [{ t: 0, value: 0, ease: 'linear' as const }, { t: 1, value: 1, ease: 'linear' as const }]
+    const tracks = [
+      { path: 'layers.a.x', type: 'number' as const, keyframes: kf, loop: true },
+      { path: 'layers.a.y', type: 'number' as const, keyframes: kf },
+      { path: 'layers.a.rotation', type: 'number' as const, keyframes: kf, loop: true, behaviourId: 'b1' },
+    ]
+    const props = bandsForLayer('a', tracks)
+    expect(props.find((b) => b.path === 'layers.a.x')!.loop).toBe(true)
+    expect(props.find((b) => b.path === 'layers.a.y')!.loop ?? false).toBe(false)
+    const beh = behaviourBandsForLayer('a', [{ id: 'b1', layerId: 'a', kind: 'spin', params: {}, timing: { start: 0, duration: 1 } } as never], tracks)
+    expect(beh[0]!.loop).toBe(true)
+  })
+})

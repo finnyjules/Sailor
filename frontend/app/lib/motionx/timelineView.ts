@@ -73,3 +73,19 @@ export function formatRulerSeconds(time: number, step: number): string {
   const decimals = Math.min(3, Math.max(1, Math.ceil(-Math.log10(step))))
   return `${time.toFixed(decimals)}s`
 }
+
+/** The repeats of a looping bar (ported from DialKit's TimelineClip): the bar at `at` is ONE
+ *  cycle; ghosts tile it to the end of the timeline, the last one clipped. Cycles scrolled off
+ *  to the left are skipped and the count is capped, so a tiny cycle can't flood the DOM. */
+export function ghostCycles(at: number, cycle: number, timelineDuration: number, viewStart: number): Array<{ index: number; start: number; duration: number }> {
+  const out: Array<{ index: number; start: number; duration: number }> = []
+  if (!(cycle > 0)) return out
+  const first = Math.max(1, Math.floor((viewStart - at) / cycle))
+  for (let offset = 0; offset < 256; offset++) {
+    const index = first + offset
+    const start = at + cycle * index
+    if (start >= timelineDuration - 1e-6) break
+    out.push({ index, start, duration: Math.min(cycle, timelineDuration - start) })
+  }
+  return out
+}

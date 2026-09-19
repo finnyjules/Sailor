@@ -10,7 +10,7 @@ import type { Track, StoredBehaviour } from '~/lib/motionx'
 import { bandsForLayer, behaviourBandsForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
 import { animatableProperties } from '~/lib/motionx/adapter/frame'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setPointValue, setBandTrack } from '~/lib/motionx/bandEdit'
-import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, type View } from '~/lib/motionx/timelineView'
+import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, ghostCycles, type View } from '~/lib/motionx/timelineView'
 
 export interface MotionSelection { kind: 'band' | 'point' | 'behaviour'; path: string; index?: number }
 
@@ -89,7 +89,11 @@ function toggleLayer(id: string) {
   s.has(id) ? s.delete(id) : s.add(id)
   collapsedLayers.value = s
 }
-const behBandsFor = (layerId: string) => behaviourBandsForLayer(layerId, props.behaviours ?? [])
+const behBandsFor = (layerId: string) => behaviourBandsForLayer(layerId, props.behaviours ?? [], props.motionx)
+// A looping bar is ONE cycle; these are its faint repeats out to the end of the timeline.
+const ghostsOf = (b: Band) => (b.loop ? ghostCycles(b.start, b.end - b.start, props.duration, dv.value.safeViewStart) : [])
+// A loop owns its property from its start to the END of the timeline, not just its bar.
+const reachOf = (b: Band) => (b.loop ? Math.max(b.end, props.duration) : b.end)
 // Property bands for any layer (untagged tracks), each its own row.
 function propBandsFor(l: LocalLayer): Band[] {
   const m = new Map<string, string>()
@@ -124,7 +128,7 @@ function rowsFor(l: LocalLayer): PropertyRow[] {
     const bars = [...r.behaviours, ...(r.property ? [r.property] : [])]
     for (let i = 0; i < bars.length; i++) for (let j = i + 1; j < bars.length; j++) {
       const a = bars[i]!, b = bars[j]!
-      if (Math.min(a.end, b.end) - Math.max(a.start, b.start) > 1e-6) { r.conflicts.add(a.key); r.conflicts.add(b.key) }
+      if (Math.min(reachOf(a), reachOf(b)) - Math.max(a.start, b.start) > 1e-6) { r.conflicts.add(a.key); r.conflicts.add(b.key) }
     }
   }
   return rows
@@ -415,20 +419,31 @@ function setSelPointValue(v: number | string) {
             <div data-band-lane class="relative my-0.5 h-6">
               <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
 
+              <!-- loop ghosts: faint repeats of every looping bar (behaviour or property) -->
+              <template v-for="b in [...r.behaviours, ...(r.property ? [r.property] : [])]" :key="'g-' + b.key">
+                <div v-for="g in ghostsOf(b)" :key="b.key + '-' + g.index" aria-hidden="true" data-testid="loop-ghost"
+                  class="absolute top-1 bottom-1 rounded-[5px] opacity-[0.18] pointer-events-none select-none"
+                  :style="{ left: px(xOf(g.start) + 1), width: px(Math.max(1, g.duration * dv.pxPerSecond - 2)), background: b.kind === 'behaviour' ? '#78dcaa' : '#7c9cff' }" />
+              </template>
+              <span v-if="[...r.behaviours, r.property].some((b) => b?.loop)" aria-hidden="true" data-testid="loop-infinity"
+                class="absolute right-[7px] top-1/2 z-20 -translate-y-1/2 text-[13px] font-semibold leading-none text-white/40 pointer-events-none select-none"
+                title="Repeats to the end of the timeline">∞</span>
+
               <!-- behaviour bars -->
               <div v-for="b in r.behaviours" :key="b.key" :data-testid="'beh-band-' + b.behaviourId"
                 class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
                 :class="[isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white' : 'text-white/80',
                          r.conflicts.has(b.key) ? 'border-amber-400/70' : (isBehSel(b) ? 'border-emerald-300' : 'border-emerald-400/40 hover:border-emerald-300/70')]"
                 :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: r.conflicts.has(b.key) ? 'rgba(251,191,36,.14)' : 'rgba(120,220,170,.16)' }"
-                :title="b.label + (r.conflicts.has(b.key) ? ' · overlaps another bar on ' + r.label : '') + ' · drag to move, drag edges to retime'"
+                :title="b.label + (b.loop ? ' · one cycle, repeats through the timeline' : '') + (r.conflicts.has(b.key) ? ' · overlaps another bar on ' + r.label : '') + ' · drag to move, drag edges to ' + (b.loop ? 'change the cycle length' : 'retime')"
                 @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')">
                 <span class="truncate">{{ b.label }}</span>
                 <button v-if="isBehSel(b) && wOf(b.start, b.end) > 120" type="button"
                   class="shrink-0 px-1.5 rounded border border-white/25 text-[9px] text-white/85 hover:bg-white/15 cursor-pointer"
                   title="Bake into editable control-point bands"
                   @pointerdown.stop @click.stop="emit('behaviour-open', b.behaviourId!)">Open ▾</button>
-                <span v-if="wOf(b.start, b.end) > 56" class="ml-auto shrink-0 tabular-nums text-white/50">{{ (b.end - b.start).toFixed(2) }}s</span>
+                <span v-if="wOf(b.start, b.end) > 56" class="ml-auto shrink-0 tabular-nums text-white/50"
+                  :class="b.loop && xOf(b.end) > laneWidth - 26 ? 'mr-4' : ''">{{ (b.end - b.start).toFixed(2) }}s</span>
                 <div class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize hover:bg-white/25"
                   @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'start')" />
                 <div class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize hover:bg-white/25"

@@ -5,7 +5,10 @@ type Compiler = (b: Behaviour, target: BehaviourTarget) => Track[]
 const REGISTRY = new Map<string, Compiler>()
 export function registerBehaviour(kind: string, fn: Compiler): void { REGISTRY.set(kind, fn) }
 export function compileBehaviour(b: Behaviour, target: BehaviourTarget): Track[] {
-  const tracks = REGISTRY.get(b.kind)?.(b, target) ?? []
+  let tracks = REGISTRY.get(b.kind)?.(b, target) ?? []
+  // `timing.loop` is the ONE loop switch: unset keeps the kind's default (pulse loops, fade
+  // doesn't); true / false override it. The bar is one cycle — evaluateTrack repeats it.
+  if (typeof b.timing?.loop === 'boolean') tracks = tracks.map((tr) => ({ ...tr, loop: b.timing.loop }))
   // `params.ease` (a named ease or bézier handles, set from the curve editor) overrides the
   // kind's default on every segment. The last keyframe eases nothing, so it is left alone.
   const ease = asEase(b.params?.ease)
