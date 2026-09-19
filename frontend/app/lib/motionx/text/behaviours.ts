@@ -136,6 +136,13 @@ registerTextBehaviour('text.scramble', {
   },
   // A snap CUTS between hashed spots — only a glide interpolates, and only it reads the curve.
   usesEase: (params) => oneOf(params.move, SCRAMBLE_MOVES, 'snap') === 'glide',
+  // Settling is LANDING, not arriving: the whole word jumps about from the bar's first frame
+  // and the stagger says only which piece stops first. Hiding each piece until its own turn
+  // would materialise a long word left to right like a cascade, and would not mirror scatter
+  // (where every piece is visible from the start and leaves on its own turn); with this flag
+  // scatter mirrors it exactly — every piece keeps hopping until the BAR ends, then all go.
+  // A loop is a span bar, which ignores this.
+  wholeBar: true,
   piece: (c) => {
     const mode = oneOf(c.params.mode, SCRAMBLE_MODES, 'settle')
     const areaW = num(c.params.areaW, 0.6)

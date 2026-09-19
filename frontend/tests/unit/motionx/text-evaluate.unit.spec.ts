@@ -155,6 +155,52 @@ describe('text.scramble', () => {
   })
 })
 
+// SETTLE MEANS LANDING, NOT ARRIVING. "Pieces jump around, then land in place; Order and
+// Stagger decide which pieces LAND first." A staggered settle that kept each piece hidden until
+// its own turn would materialise a long word left to right like a cascade — and would not be
+// the mirror of Scatter, where every piece is visible from the bar's start and leaves on its
+// own turn. So the whole word hops from the bar's first frame, and the stagger says only when
+// each piece stops.
+describe('text.scramble settle hops from the bar\'s first frame, whatever the stagger', () => {
+  // 4 letters, stagger 0.2 over a 2s bar: delays 0 / .2 / .4 / .6, pieceDur 1.4.
+  const S = (params: Record<string, unknown> = {}) =>
+    beh('text.scramble', { areaW: 0.5, areaH: 0.5, interval: 0.2, stagger: 0.2, ...params }, 1, 2)
+  const landed = (f: ReturnType<typeof ev>, i: number) =>
+    f.cells[i]!.x === CELLS[i]!.x && f.cells[i]!.y === CELLS[i]!.y && f.cells[i]!.rotation === 0
+
+  it('every piece is visible and already displaced on the bar\'s first frame', () => {
+    const f = ev(S(), 1.01)
+    expect(f.cells.map((c) => c.opacity)).toEqual([1, 1, 1, 1])
+    f.cells.forEach((c, i) => {
+      expect(Math.abs(c.x - CELLS[i]!.x) + Math.abs(c.y), `cell ${i} sat still`).toBeGreaterThan(1)
+    })
+  })
+
+  it('the pieces LAND in rank order, the last one with the bar', () => {
+    const early = ev(S(), 2.5)                  // barElapsed 1.5: piece 0 landed at 1.4
+    expect(landed(early, 0)).toBe(true)
+    expect(landed(early, 3)).toBe(false)        // its own landing is at 2.0
+    expect(early.atRest).toBe(false)
+    const rtl = ev(S({ order: 'rtl' }), 2.5)     // the order decides WHICH lands first
+    expect(landed(rtl, 3)).toBe(true)
+    expect(landed(rtl, 0)).toBe(false)
+  })
+
+  it('hidden before the bar, exactly at rest after it', () => {
+    expect(ev(S(), 0.5).cells.every((c) => c.opacity === 0)).toBe(true)
+    expect(ev(S(), 3.01).atRest).toBe(true)
+    ev(S(), 3.01).cells.forEach((c, i) => expect(landed(ev(S(), 3.01), i)).toBe(true))
+  })
+
+  it('scatter is its mirror: every piece visible until the bar ends, then all gone at once', () => {
+    const out = S({ mode: 'scatter' })
+    expect(ev(out, 1.01).cells.every((c) => c.opacity === 1)).toBe(true)
+    const late = ev(out, 2.95)                  // piece 0 spent its own progress at 2.4
+    expect(late.cells.every((c) => c.opacity === 1)).toBe(true)
+    expect(ev(out, 3.01).cells.every((c) => c.opacity === 0)).toBe(true)
+  })
+})
+
 describe('composition', () => {
   it('two behaviours combine: offsets add, opacities multiply', () => {
     const a = beh('text.cascade', { style: 'rise', amount: 1 }), b = beh('text.cascade', { style: 'fade' })
