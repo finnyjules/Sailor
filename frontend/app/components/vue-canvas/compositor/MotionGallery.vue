@@ -209,12 +209,25 @@ const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9',
 @keyframes prevJitter3 { 0%, 100% { transform: translate(0, 0) rotate(0); } 33% { transform: translate(1px, 1px) rotate(-2deg); } 66% { transform: translate(-1px, -1px) rotate(3deg); } }
 @keyframes prevJitter4 { 0%, 100% { transform: translate(0, 0) rotate(0); } 33% { transform: translate(-1px, -1px) rotate(2deg); } 66% { transform: translate(1px, 1px) rotate(-3deg); } }
 
+/* Reduced motion: every preview shows its finished word, standing still. Each override repeats
+   the `.letters-*` ancestor of the rule it answers — a single-class override loses to an
+   ancestor-qualified rule and the preview would keep running — and answers that rule's resting
+   opacity and transform too, or the word would stop somewhere off its own window. */
 @media (prefers-reduced-motion: reduce) {
   .prev-mark, .prev-scroll, .prev-morph { animation: none; opacity: 1; }
-  .letter-inner { animation: none; opacity: 1; transform: none; }
+  .letters-cascade .letter-inner,
+  .letters-typewriter .letter-inner,
+  .letters-mask .letter-inner,
+  .letters-scramble .letter-inner,
+  .letters-wave .letter-inner,
+  .letters-bounce .letter-inner,
+  .letters-jitter .letter-inner { animation: none; opacity: 1; transform: none; }
+  /* The per-letter rules that only swap `animation-name` are one step more specific again. */
+  .letters-scramble .letter-piece:nth-child(n) .letter-inner,
+  .letters-jitter .letter-piece:nth-child(n) .letter-inner { animation-name: none; opacity: 1; transform: none; }
   .letters-typewriter::after { animation: none; opacity: 1; }
-  .letter-decode-glyph--flicker { animation: none; opacity: 0; }
-  .letter-decode-glyph--real { animation: none; opacity: 1; }
-  .letter-slot-reel { animation: none; transform: translateY(-200%); }
+  .letters-decode .letter-decode-glyph--flicker { animation: none; opacity: 0; }
+  .letters-decode .letter-decode-glyph--real { animation: none; opacity: 1; }
+  .letters-slot .letter-slot-reel { animation: none; transform: translateY(-200%); }
 }
 </style>

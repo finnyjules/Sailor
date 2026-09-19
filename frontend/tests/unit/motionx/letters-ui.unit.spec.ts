@@ -25,6 +25,7 @@ import type { TextCell } from '~/lib/motionx/text/units'
 
 const MODAL = fileURLToPath(new URL('../../../app/components/vue-canvas/CompositorModal.vue', import.meta.url))
 const INSPECTOR = fileURLToPath(new URL('../../../app/components/vue-canvas/compositor/MotionInspector.vue', import.meta.url))
+const GALLERY = fileURLToPath(new URL('../../../app/components/vue-canvas/compositor/MotionGallery.vue', import.meta.url))
 
 const setupOf = (file: string) =>
   readFileSync(file, 'utf8').match(/<script setup[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? ''
@@ -45,13 +46,19 @@ function statementOf(src: string, name: string): string {
   throw new Error(`unbalanced declaration of \`${name}\``)
 }
 
-/** The only TypeScript the statements below contain: a cast, a generic call argument, and an
- *  `: any` parameter. Anything else left behind is a syntax error when the statement runs. */
+/** The only TypeScript the statements below contain: a cast, a generic call argument, an
+ *  `: any` parameter, and primitive parameter / return annotations. The primitive rules name
+ *  their three types rather than matching any identifier, so an object literal's `key: value`
+ *  cannot be mistaken for an annotation. Anything else left behind is a syntax error when the
+ *  statement runs. */
+const PRIMITIVE = '(?:number|string|boolean)'
 const stripTypeSyntax = (code: string) => code
   .replace(/\s+as\s+unknown\s+as\s+\{[^{}]*\}/g, '')
   .replace(/\s+as\s+[A-Za-z_$][\w$.]*(?:<[^<>]*>)?(?:\[\])?(?:\s*\|\s*(?:undefined|null))?/g, '')
   .replace(/\b([A-Za-z_$][\w$]*)<[^<>()]*>\(/g, '$1(')
   .replace(/([(,]\s*)([A-Za-z_$][\w$]*)\s*:\s*any\b/g, '$1$2')
+  .replace(new RegExp(`([(,]\\s*)([A-Za-z_$][\\w$]*)\\s*:\\s*${PRIMITIVE}\\b`, 'g'), '$1$2')
+  .replace(new RegExp(`\\)\\s*:\\s*${PRIMITIVE}\\b`, 'g'), ')')
 
 /** Lift one statement out of an SFC and run it against `scope`; returns what it declared. */
 function runStatement(file: string, name: string, scope: Record<string, unknown>) {
@@ -169,5 +176,119 @@ describe('behEase', () => {
     const frame = { w: 100, h: 100 }
     expect(evaluateTextBehaviours([bar({})], 0.4, cells, frame))
       .toEqual(evaluateTextBehaviours([bar({ ease: DEFAULT_TEXT_EASE })], 0.4, cells, frame))
+  })
+})
+
+// ── 4. an emptied number field falls back to its DEFAULT, not to its minimum ─
+
+describe('numOrDefault', () => {
+  // Every letter number field goes through this one helper, and each caller clamps the result
+  // to its own range afterwards. `Number('')` is 0, so an emptied field used to land on the
+  // clamp's MINIMUM — Steps emptied to 1 instead of 8, Cascade's amount to 0 instead of 0.6 —
+  // which reads as a field that silently rewrites itself the moment it is cleared.
+  const numOrDefault = runStatement(INSPECTOR, 'numOrDefault', {}) as (raw: string, d: number) => number
+
+  it('an emptied or blank field falls back to the default', () => {
+    expect(numOrDefault('', 8)).toBe(8)
+    expect(numOrDefault('   ', 8)).toBe(8)
+    expect(numOrDefault('\t', 0.6)).toBe(0.6)
+  })
+  it('so does anything that is not a number', () => {
+    expect(numOrDefault('abc', 8)).toBe(8)
+    expect(numOrDefault('1,5', 0.18)).toBe(0.18)
+  })
+  it('a real zero is still a zero', () => {
+    expect(numOrDefault('0', 8)).toBe(0)
+    expect(numOrDefault('0.0', 8)).toBe(0)
+    expect(numOrDefault('-2.5', 8)).toBe(-2.5)
+    expect(numOrDefault('7', 8)).toBe(7)
+  })
+})
+
+// ── 5. reduced motion really stops the letter previews ──────────────────────
+
+/**
+ * The gallery's letter previews are CSS animations. Their base rules are ancestor + class
+ * selectors (`.letters-mask .letter-inner`, specificity 0,2,0) and the reduced-motion
+ * overrides were single-class (`.letter-inner`, 0,1,0), so the overrides lost every cascade
+ * they were written for and the previews kept moving — and kept whatever resting transform or
+ * opacity the base rule gave them (a mask preview is `translateY(100%)`: the word would not
+ * even be on screen). An override has to reach the specificity of the rule it overrides.
+ */
+const styleOf = (file: string) =>
+  readFileSync(file, 'utf8').match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? ''
+
+interface Rule { sel: string; body: string; inMedia: boolean; at: number }
+
+/** Every declaration-carrying rule of a stylesheet, in source order; @keyframes are skipped
+ *  whole and a @media block's rules are flagged. */
+function parseRules(css: string): Rule[] {
+  const out: Rule[] = []
+  const walk = (text: string, inMedia: boolean, base: number) => {
+    let i = 0
+    while (i < text.length) {
+      const open = text.indexOf('{', i)
+      if (open < 0) break
+      const head = text.slice(i, open).trim()
+      let depth = 1, j = open + 1
+      for (; j < text.length && depth > 0; j++) {
+        if (text[j] === '{') depth++
+        else if (text[j] === '}') depth--
+      }
+      const body = text.slice(open + 1, j - 1)
+      if (head.startsWith('@media')) walk(body, true, base + open + 1)
+      else if (!head.startsWith('@') && head) out.push({ sel: head, body, inMedia, at: base + i })
+      i = j
+    }
+  }
+  walk(css.replace(/\/\*[\s\S]*?\*\//g, ''), false, 0)
+  return out
+}
+
+const selectors = (sel: string) => sel.split(',').map((s) => s.trim()).filter(Boolean)
+/** The class-level half of CSS specificity (classes, attributes, pseudo-CLASSES). Nothing here
+ *  uses an id, and a pseudo-ELEMENT weighs less than any of these. */
+const spec = (sel: string) =>
+  (sel.match(/\.[\w-]+/g) ?? []).length + (sel.match(/(?<!:):(?!:)[\w-]+(\([^)]*\))?/g) ?? []).length
+const compounds = (sel: string) => sel.split(/\s+/).filter(Boolean)
+const first = (sel: string) => compounds(sel)[0] ?? ''
+const subject = (sel: string) => compounds(sel).at(-1) ?? ''
+
+describe('the letter previews stop under prefers-reduced-motion', () => {
+  const rules = parseRules(styleOf(GALLERY))
+  const animated = rules.filter((r) => !r.inMedia && /^\.letters-/.test(r.sel) && /\banimation(-name)?\s*:/.test(r.body))
+  const overrides = rules.filter((r) => r.inMedia)
+
+  /** The reduced-motion rules that actually beat `r` in the cascade: same preview, same
+   *  subject, at least as specific, and later in the file. */
+  const winners = (r: Rule) => overrides.filter((o) => o.at > r.at && selectors(o.sel).some((os) =>
+    selectors(r.sel).some((rs) => first(os) === first(rs) && subject(os) === subject(rs) && spec(os) >= spec(rs))))
+
+  it('all nine previews animate, so all nine need an override', () => {
+    const previews = new Set(animated.flatMap((r) => selectors(r.sel).map((s) => first(s).replace(/::.*/, ''))))
+    expect([...previews].sort()).toEqual([
+      '.letters-bounce', '.letters-cascade', '.letters-decode', '.letters-jitter', '.letters-mask',
+      '.letters-scramble', '.letters-slot', '.letters-typewriter', '.letters-wave',
+    ])
+  })
+
+  it('every animated rule is answered at its own specificity, with no !important anywhere', () => {
+    expect(animated.length).toBeGreaterThanOrEqual(9)
+    for (const r of animated) {
+      const beaten = winners(r)
+      expect(beaten.length, `nothing overrides \`${r.sel}\``).toBeGreaterThan(0)
+      expect(beaten.some((o) => /\banimation(-name)?\s*:\s*none/.test(o.body)), `\`${r.sel}\` keeps animating`).toBe(true)
+    }
+    expect(styleOf(GALLERY)).not.toContain('!important')
+  })
+
+  it('and the resting look is answered too, so each preview shows its finished word', () => {
+    for (const r of animated) {
+      for (const prop of ['opacity', 'transform']) {
+        if (!new RegExp(`(^|;)\\s*${prop}\\s*:`).test(r.body)) continue
+        const beaten = winners(r).some((o) => new RegExp(`(^|;)\\s*${prop}\\s*:`).test(o.body))
+        expect(beaten, `\`${r.sel}\` keeps its own ${prop} under reduced motion`).toBe(true)
+      }
+    }
   })
 })

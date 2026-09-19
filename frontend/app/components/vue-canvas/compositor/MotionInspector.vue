@@ -102,8 +102,13 @@ const CHARSET_OPTIONS: Array<{ v: string; l: string }> = [
   { v: 'numbers', l: 'Numbers' }, { v: 'symbols', l: 'Symbols' }, { v: 'mixed', l: 'Mixed' },
 ]
 // A number field must never send NaN — an emptied input sends the behaviour's own default.
+// EMPTY IS NOT ZERO: `Number('')` is 0, and every caller clamps what comes back to its own
+// range, so a cleared field used to land on that range's MINIMUM (Steps on 1 instead of 8,
+// Cascade's distance on 0 instead of 0.6). Blank and unparseable both mean "use the default".
 function numOrDefault(raw: string, d: number): number {
-  const n = Number(raw)
+  const text = typeof raw === 'string' ? raw.trim() : ''
+  if (text === '') return d
+  const n = Number(text)
   return Number.isFinite(n) ? n : d
 }
 // Reads a numeric param straight from storage (not an input string) with its own default.
@@ -369,7 +374,7 @@ function onGradient(g: Gradient) {
             :value="numParam('speed', loopSpeedDefault)"
             class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
             @change="setBehParams({ speed: Math.max(0.1, numOrDefault(($event.target as HTMLInputElement).value, loopSpeedDefault)) })"></div>
-        <div v-if="behaviour.kind === 'text.wave' || behaviour.kind === 'text.bounce'" class="mb-2 flex items-center justify-between">Offset between pieces
+        <div v-if="behaviour.kind === 'text.wave' || behaviour.kind === 'text.bounce'" class="mb-2 flex items-center justify-between">Offset between pieces (cycles)
           <input v-scrubnum type="number" step="0.01" min="0" data-testid="loop-offset"
             :value="numParam('offset', 0.12)"
             class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
