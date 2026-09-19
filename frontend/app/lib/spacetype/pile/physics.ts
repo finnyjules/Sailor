@@ -47,9 +47,12 @@ const SETTLE_FRACTION = 0.8
 export function bakePile(specs: PileTokenSpec[], params: Params, frame: { width: number; height: number }): PileTrajectory {
   const rng = mulberry32(hashSeed(`${num(params, 'seed')}|bake|${specs.length}`))
   const aspect = Math.max(0.1, frame.width / Math.max(1, frame.height))
-  const halfW = Math.max(0.2, num(params, 'container', 0.8)) * FRAME_HALF_H * aspect * SCALE
-  const floorY = -FRAME_HALF_H * SCALE
-  const topY = FRAME_HALF_H * SCALE
+  // The camera zoom (Transform → Scale) shrinks the visible frame to ±FRAME_HALF_H/scale, so the
+  // floor/walls must track it or the pile settles below the canvas bottom. Mirrors tokens.ts.
+  const halfH = FRAME_HALF_H / Math.max(0.1, num(params, 'scale', 1))
+  const halfW = Math.max(0.2, num(params, 'container', 0.8)) * halfH * aspect * SCALE
+  const floorY = -halfH * SCALE
+  const topY = halfH * SCALE
   const spread = Math.min(1, Math.max(0, num(params, 'dropSpread', 0.5)))
 
   const engine = Engine.create()

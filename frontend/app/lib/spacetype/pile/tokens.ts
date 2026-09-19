@@ -28,7 +28,10 @@ const TEXT_ADVANCE = 0.62 // avg glyph width / cap height for condensed display 
  */
 export function planPileTokens(params: Params, frame: { width: number; height: number }): PileTokenSpec[] {
   const rng = mulberry32(hashSeed(`${str(params, 'text')}|${num(params, 'seed')}|pile`))
-  const worldPerPx = (2 * FRAME_HALF_H) / Math.max(1, frame.height)
+  // Camera zoom (Transform → Scale) shrinks the visible frame to ±FRAME_HALF_H/scale; size and
+  // clamp tokens against the VISIBLE frame so they fit and settle within the canvas. Mirrors physics.ts.
+  const halfH = FRAME_HALF_H / Math.max(0.1, num(params, 'scale', 1))
+  const worldPerPx = (2 * halfH) / Math.max(1, frame.height)
   const specs: PileTokenSpec[] = []
   let fillIndex = 0
 
@@ -36,12 +39,12 @@ export function planPileTokens(params: Params, frame: { width: number; height: n
   // falls (looks like it vanished). Clamp every token to the container width and most
   // of the frame height, scaling it down UNIFORMLY so text/shapes keep their aspect.
   const frameAspect = Math.max(0.1, frame.width / Math.max(1, frame.height))
-  const containerHalfW = Math.max(0.2, num(params, 'container', 0.8)) * FRAME_HALF_H * frameAspect
+  const containerHalfW = Math.max(0.2, num(params, 'container', 0.8)) * halfH * frameAspect
   const maxW = containerHalfW * 2 * 0.9
   // Cap a single token to ~45% of the frame height so a couple of stacked tokens still
   // fit in view (the pile builds up from the floor; without this, big type overflows
   // the top and the pile reads as "gone").
-  const maxH = FRAME_HALF_H * 0.9
+  const maxH = halfH * 0.9
   const fit = (w: number, h: number): [number, number] => {
     const s = Math.min(1, maxW / Math.max(1e-4, w), maxH / Math.max(1e-4, h))
     return [w * s, h * s]
