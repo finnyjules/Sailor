@@ -251,7 +251,7 @@ export class SpaceTypeEngine {
       // `async build()` would risk.
       this.root = withShaderFillContext(
         { ownerId: this.id, w: this.opts.width, h: this.opts.height, bake: this._bake },
-        () => this.effect.buildScene(THREE, params, tex, { width: this.opts.width, height: this.opts.height, axes: texOpts.axes, imageTextures: this.imageTextures }),
+        () => this.effect.buildScene(THREE, params, tex, { width: this.opts.width, height: this.opts.height, axes: texOpts.axes, imageTextures: this.imageTextures, loopDuration: this.opts.loopDuration }),
       )
       this.scene.add(this.root)
       this._lastError = null

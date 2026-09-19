@@ -19,7 +19,7 @@ const num = (p: Params, k: string, d = 0): number => { const v = Number(p[k]); r
 
 const SLAB = 500            // static barrier thickness in px — deep enough to catch per-step travel
 const DT_MS = 1000 / 120    // fixed physics step (stability)
-const G_BASE = 3.2          // gravity multiplier so the default slider (1) falls briskly
+const G_BASE = 9           // gravity multiplier: default slider (1) gives a grounded, earth-like drop
 const MAX_STEPS = 900       // hard cap on the raw settle sim (~7.5s physics)
 // Stop the raw sim when the pile is VISUALLY settled — by position change over a WINDOW
 // of steps, not a single step. Per-step change falsely reads as "rest" during the slow
@@ -31,20 +31,16 @@ const MAX_STEPS = 900       // hard cap on the raw settle sim (~7.5s physics)
 const REST_WINDOW = 12
 const WINDOW_EPS = 0.05
 const MIN_STEPS = 8
-// The fall-and-settle is resampled into the first SETTLE_FRACTION of the loop; the
-// settled pile holds for the remainder (so the finished result is visible before it
-// repeats). The animation's LENGTH is the shared loop-duration, not this split.
-const SETTLE_FRACTION = 0.8
 
 /**
  * Drop the token rectangles into a Matter.js world, simulate to FULL REST, then
  * RESAMPLE that settle into the fall window and hold the settled pose after. So the
  * pile ALWAYS fully settles regardless of token count/drop height, and the fall
- * plays over the first SETTLE_FRACTION of the loop, then holds the settled pose.
+ * plays at REAL TIME over the loop (real gravity), then holds the settled pose.
  * World is y-UP (gravity negative-y), floor at y = -FRAME_HALF_H; poses map to scene
  * coordinates with no sign flips. Pure & deterministic in (specs, params).
  */
-export function bakePile(specs: PileTokenSpec[], params: Params, frame: { width: number; height: number }): PileTrajectory {
+export function bakePile(specs: PileTokenSpec[], params: Params, frame: { width: number; height: number }, loopDuration = 6): PileTrajectory {
   const rng = mulberry32(hashSeed(`${num(params, 'seed')}|bake|${specs.length}`))
   const aspect = Math.max(0.1, frame.width / Math.max(1, frame.height))
   // The camera zoom (Transform → Scale) shrinks the visible frame to ±FRAME_HALF_H/scale, so the
@@ -124,16 +120,20 @@ export function bakePile(specs: PileTokenSpec[], params: Params, frame: { width:
       if (drift < WINDOW_EPS) break
     }
   }
-  const settled = raw[raw.length - 1] ?? specs.map(() => ({ x: 0, y: floorY / SCALE, angle: 0 }))
+  const fallback = specs.map(() => ({ x: 0, y: floorY / SCALE, angle: 0 }))
+  if (!raw.length) raw.push(fallback)
 
-  // Resample the raw settle into the fall window, then hold the settled pose.
-  const fallSamples = Math.max(1, Math.round((PILE_SAMPLES - 1) * SETTLE_FRACTION))
+  // Index the trajectory by REAL TIME so the drop plays at real gravity (not stretched to fill
+  // the loop): sample j maps to loop-time (j/(N-1))·loopDuration seconds, shown as the physics
+  // state recorded at that real time, clamped to the settled pose after it comes to rest. This is
+  // what makes the Gravity control — and the earth-like feel — behave like real acceleration.
+  const dtSec = DT_MS / 1000
   const lastRaw = raw.length - 1
   const traj: PileTrajectory = []
-  for (let j = 0; j < fallSamples; j++) {
-    const idx = fallSamples <= 1 ? lastRaw : Math.round((j / (fallSamples - 1)) * lastRaw)
+  for (let j = 0; j < PILE_SAMPLES; j++) {
+    const tSec = (j / Math.max(1, PILE_SAMPLES - 1)) * loopDuration
+    const idx = Math.min(lastRaw, Math.max(0, Math.round(tSec / dtSec)))
     traj.push(raw[idx]!.map(p => ({ ...p })))
   }
-  while (traj.length < PILE_SAMPLES) traj.push(settled.map(p => ({ ...p })))
   return traj
 }

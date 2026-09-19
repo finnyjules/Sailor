@@ -33,11 +33,22 @@ describe('bakePile', () => {
     }
   })
 
-  it('holds the settled pose after the fall (last sample == the settle-fraction sample)', () => {
-    const SETTLE_FRACTION = 0.8 // mirrors physics.ts (control removed; length = loop duration)
-    const traj = bakePile(boxes(4), params(), FRAME)
-    const settleIdx = Math.round((PILE_SAMPLES - 1) * SETTLE_FRACTION)
-    expect(traj[PILE_SAMPLES - 1]).toEqual(traj[settleIdx])
+  it('plays real-time then holds: a short pile settles well before a long loop ends and the tail is static', () => {
+    // A small pile settles in ~1-2s real time; with a long loop it is held settled for the rest.
+    const traj = bakePile(boxes(4), params(), FRAME, 6)
+    expect(traj[PILE_SAMPLES - 1]).toEqual(traj[PILE_SAMPLES - 6]) // tail is the held settled pose
+  })
+
+  it('real-time: a shorter loop shows an EARLIER moment of the same fall (not a slower fall)', () => {
+    // Same physics, sampled by real time — a 1s loop's last frame is earlier in the drop than a
+    // 6s loop's same-index frame (which is already settled). Proves playback tracks real seconds.
+    const short = bakePile(boxes(6), params(), FRAME, 0.3)
+    const long = bakePile(boxes(6), params(), FRAME, 6)
+    const lastShortY = short[PILE_SAMPLES - 1]!.map(p => p.y)
+    const lastLongY = long[PILE_SAMPLES - 1]!.map(p => p.y)
+    // The 6s loop is fully settled at the end; the 1s loop is not (tokens sit higher on average).
+    const avg = (ys: number[]) => ys.reduce((s, y) => s + y, 0) / ys.length
+    expect(avg(lastShortY)).toBeGreaterThan(avg(lastLongY))
   })
 
   it('a small pile settles INSIDE the frame, not frozen at its spawn above the top', () => {

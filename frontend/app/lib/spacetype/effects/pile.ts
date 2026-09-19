@@ -65,7 +65,7 @@ export const pileEffect: SpaceTypeEffect = {
       return mesh
     })
 
-    const trajectory = bakePile(specs, params, frame)
+    const trajectory = bakePile(specs, params, frame, env?.loopDuration ?? 6)
     root.userData.pileState = { meshes, trajectory } as PileState
     pileEffect.update(0, params, root)
     return root

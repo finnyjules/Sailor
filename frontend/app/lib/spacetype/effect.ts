@@ -167,6 +167,9 @@ export interface BuildEnv {
    *  build path is synchronous (withShaderFillContext), so images MUST be loaded
    *  by the caller (setImageTextures) before build; the effect only reads here. */
   imageTextures?: Map<string, import('three').Texture>
+  /** The loop's real duration in seconds. Effects that bake a time-based simulation (Pile)
+   *  need it to play the sim at real wall-clock speed rather than stretched to fill the loop. */
+  loopDuration?: number
 }
 
 export interface SpaceTypeEffect {
