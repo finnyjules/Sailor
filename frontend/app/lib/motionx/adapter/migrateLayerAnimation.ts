@@ -7,7 +7,8 @@ import { evaluateAnimation, layerWindow } from '~/lib/motion/evaluate'
 import { composeEffectiveLayer } from '~/lib/motion/paint'
 import type { FrameMotion, LayerAnimation } from '~/lib/motion/types'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import type { Keyframe, Track } from '../types'
+import { applyEase } from '../ease'
+import type { Ease, BezierEase, Keyframe, Track } from '../types'
 
 /** Presets whose look is a mask, an axis flip or tiled copies — no band can express them. */
 export const UNCONVERTIBLE_PRESETS: ReadonlySet<string> = new Set([
@@ -41,6 +42,86 @@ function simplify(pts: Array<[number, number]>, eps: number): Array<[number, num
   return pts.filter((_, i) => keep[i])
 }
 
+/** Exact cubic-bézier handles for an overshoot back ease, verified bit-identical (to float
+ *  precision) against the polynomial `back.out`/`back.in` GSAP formula the old engine runs
+ *  (see `frontend/app/lib/motion/easing.ts`'s `backOut`/`backIn`). */
+const backOutBezier = (s: number): BezierEase => [1 / 3, (s + 3) / 3, 2 / 3, 1]
+const backInBezier = (s: number): BezierEase => [1 / 3, 0, 2 / 3, -s / 3]
+const BACK_OVERSHOOTS = [1.4, 1.7, 2] as const
+
+/** Candidate eases tried, in order, to replace a sampled span with two keyframes. 'linear'
+ *  comes first so a genuinely straight (or flat) span is never mistaken for a curve. Cubic
+ *  power3 out/in and the back overshoots are exact bézier equivalents of the GSAP formulas
+ *  the old engine's presets actually use (fade/slide = power2, grow/spin = back.out). */
+const CANDIDATE_EASES: readonly Ease[] = [
+  'linear', 'easeIn', 'easeOut', 'easeInOut',
+  [1 / 3, 1, 2 / 3, 1], [1 / 3, 0, 2 / 3, 0],
+  ...BACK_OVERSHOOTS.flatMap((s) => [backOutBezier(s), backInBezier(s)]),
+]
+
+/** Best candidate ease that reproduces every sample in `pts` (anchored at its own first/last
+ *  point) within `tol`, or null if none do. */
+function fitCurve(pts: Array<[number, number]>, tol: number): Ease | null {
+  const [t0, v0] = pts[0]!
+  const [t1, v1] = pts[pts.length - 1]!
+  const span = t1 - t0
+  if (span <= 1e-9) return null
+  for (const ease of CANDIDATE_EASES) {
+    let ok = true
+    for (const [t, v] of pts) {
+      const predicted = v0 + (v1 - v0) * applyEase((t - t0) / span, ease)
+      if (Math.abs(predicted - v) > tol) { ok = false; break }
+    }
+    if (ok) return ease
+  }
+  return null
+}
+
+/** Refit one span (bounded by two adjacent phase-boundary times) into keyframes: a flat hold
+ *  when every sample agrees within tolerance, an exact two-point eased ramp when one of the
+ *  candidate curves reproduces every sample, else the RDP-simplified linear fallback. */
+function refitSpan(pts: Array<[number, number]>, tol: number): Keyframe[] {
+  const [t0, v0] = pts[0]!
+  const [t1, v1] = pts[pts.length - 1]!
+  if (pts.every(([, v]) => Math.abs(v - v0) <= tol)) {
+    return [{ t: t0, value: v0, ease: 'linear' }, { t: t1, value: v0, ease: 'linear' }]
+  }
+  const ease = fitCurve(pts, tol)
+  if (ease) return [{ t: t0, value: v0, ease }, { t: t1, value: v1, ease: 'linear' }]
+  return simplify(pts, tol).map(([t, value]) => ({ t, value, ease: 'linear' as const }))
+}
+
+/** Merge consecutive flat-hold spans that land on the same value — otherwise a constant
+ *  stretch crossed by an internal phase boundary (e.g. the hold after an `in` finishes,
+ *  which shares its value with a further hold once a loop/out region is also flat) shows up
+ *  as two redundant segments instead of one. */
+function mergeFlatSpans(spans: Keyframe[][]): Keyframe[][] {
+  const isFlatHold = (kfs: Keyframe[]) =>
+    kfs.length === 2 && Math.abs((kfs[0]!.value as number) - (kfs[1]!.value as number)) < 1e-9
+  const out: Keyframe[][] = []
+  for (const span of spans) {
+    const prev = out[out.length - 1]
+    if (prev && isFlatHold(prev) && isFlatHold(span) && Math.abs((prev[1]!.value as number) - (span[0]!.value as number)) < 1e-9) {
+      prev[1] = span[1]!
+      continue
+    }
+    out.push([...span])
+  }
+  return out
+}
+
+/** Stitch spans end-to-end: a shared boundary keyframe is kept once, using the version from
+ *  the span that STARTS there (its ease is the one that actually shapes that segment). */
+function stitchSpans(spans: Keyframe[][]): Keyframe[] {
+  const out: Keyframe[] = []
+  for (const span of spans) {
+    if (!span.length) continue
+    if (out.length && Math.abs(out[out.length - 1]!.t - span[0]!.t) < 1e-9) out.pop()
+    out.push(...span)
+  }
+  return out
+}
+
 export function layerAnimationToTracks(layer: LocalLayer, motion: FrameMotion, dims: { w: number; h: number }, existing: Track[]): Track[] | null {
   const anim = (layer as unknown as { animation?: LayerAnimation }).animation
   if (!anim) return null
@@ -59,6 +140,18 @@ export function layerAnimationToTracks(layer: LocalLayer, motion: FrameMotion, d
   for (let k = 0; k <= Math.ceil(duration * fps); k++) times.add(Math.min(duration, k / fps))
   for (const t of [start, start + inDur, start + outStart, end]) times.add(Math.min(duration, Math.max(0, t)))
   const ts = [...times].sort((a, b) => a - b)
+  const tIndex = new Map<number, number>(ts.map((t, i) => [t, i]))
+  // Phase boundaries: window open/close and the in→loop/loop→out handoffs. The old engine's
+  // curve shape can only change at these instants (a hidden↔visible edge is a real step, kept
+  // as-is; everywhere else within a span the sampled curve is one continuous preset function),
+  // so refitting span-by-span never needs to fit across a genuine discontinuity.
+  const clip = (t: number) => Math.min(duration, Math.max(0, t))
+  const boundaries = [...new Set([0, clip(start), clip(start + inDur), clip(start + outStart), clip(end), duration])].sort((a, b) => a - b)
+  const spanIndexRanges: Array<[number, number]> = []
+  for (let i = 0; i < boundaries.length - 1; i++) {
+    const i0 = tIndex.get(boundaries[i]!), i1 = tIndex.get(boundaries[i + 1]!)
+    if (i0 != null && i1 != null && i1 > i0) spanIndexRanges.push([i0, i1])
+  }
 
   const rec = layer as unknown as Record<string, number>
   const baseScale = typeof rec.scale === 'number' ? rec.scale : 1
@@ -88,7 +181,8 @@ export function layerAnimationToTracks(layer: LocalLayer, motion: FrameMotion, d
   const tracks: Track[] = []
   for (const p of PROPS) {
     if (series[p].every(([, v]) => Math.abs(v - base[p]) <= 1e-9)) continue
-    const keyframes: Keyframe[] = simplify(series[p], TOLERANCE[p]).map(([t, value]) => ({ t, value, ease: 'linear' }))
+    const spans = spanIndexRanges.map(([i0, i1]) => refitSpan(series[p].slice(i0, i1 + 1), TOLERANCE[p]))
+    const keyframes = stitchSpans(mergeFlatSpans(spans))
     tracks.push({ path: prefix + p, type: 'number', keyframes })
   }
   return tracks

@@ -69,6 +69,22 @@ describe('layerAnimationToTracks', () => {
     const tracks = layerAnimationToTracks(rect({ offset: 0, loop: { presetId: 'sway', duration: 2 } }), motion as any, dims, [])!
     expect(tracks[0]!.keyframes.length).toBeLessThan(60)
   })
+  it('a plain fade in becomes a tidy two-point eased band', () => {
+    const tracks = layerAnimationToTracks(rect({ offset: 0, in: { presetId: 'fade-in', duration: 0.8 } }), motion as any, dims, [])!
+    const kf = tracks[0]!.keyframes
+    expect(kf.length).toBeLessThanOrEqual(3)            // 0 → 0.8s ramp (+ at most a hold point)
+    expect(kf[0]).toMatchObject({ t: 0, value: 0, ease: 'easeOut' })
+  })
+  it('slide up is two tidy bands (position + opacity), not dozens of points', () => {
+    const tracks = layerAnimationToTracks(rect({ offset: 0, in: { presetId: 'slide-up', duration: 0.6 } }), motion as any, dims, [])!
+    for (const t of tracks) expect(t.keyframes.length, t.path).toBeLessThanOrEqual(3)
+  })
+  it('a back-out grow uses an exact overshoot curve instead of a point cloud', () => {
+    const tracks = layerAnimationToTracks(rect({ offset: 0, in: { presetId: 'grow-in', duration: 1 } }), motion as any, dims, [])!
+    const scale = tracks.find((t) => t.path.endsWith('.scale'))!
+    expect(scale.keyframes.length).toBeLessThanOrEqual(4)
+    expect(Array.isArray(scale.keyframes[0]!.ease)).toBe(true)
+  })
   it('refuses masks / flips / copies, empty shells, and layers that already have transform bands', () => {
     for (const id of UNCONVERTIBLE_PRESETS) {
       expect(layerAnimationToTracks(rect({ offset: 0, in: { presetId: id, duration: 1 } }), motion as any, dims, [])).toBeNull()
