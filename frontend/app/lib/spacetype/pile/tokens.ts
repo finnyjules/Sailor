@@ -83,6 +83,14 @@ export function planPileTokens(params: Params, frame: { width: number; height: n
     }
   }
 
+  // Interleave text and shape tokens (seeded Fisher–Yates) so they rain down MIXED rather than
+  // all the words first then the shapes. The drop order follows this array, so shuffling it here
+  // shuffles which fall together. Each token keeps its own fillIndex, so colours are unaffected.
+  for (let i = specs.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[specs[i], specs[j]] = [specs[j]!, specs[i]!]
+  }
+
   return specs
 }
 

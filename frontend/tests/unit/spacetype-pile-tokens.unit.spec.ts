@@ -37,6 +37,47 @@ describe('planPileTokens', () => {
     expect(specs.filter(s => s.kind === 'shape')).toHaveLength(5)
   })
 
+  it('shape tokens are drawn from the hand-picked set', () => {
+    const shapes = JSON.stringify(['hexagon', 'pentagon'])
+    const specs = planPileTokens(p({ textAs: 'off', shapeCount: 12, shapes }), FRAME)
+    const ids = new Set(specs.map(s => s.shapeId))
+    for (const s of specs) expect(['hexagon', 'pentagon']).toContain(s.shapeId)
+    expect(ids.size).toBeGreaterThan(1) // a real mix, not one repeated
+  })
+
+  it('shape set is deterministic per seed', () => {
+    const shapes = JSON.stringify(['hexagon', 'pentagon', 'polygon'])
+    const a = planPileTokens(p({ textAs: 'off', shapeCount: 10, shapes, seed: 3 }), FRAME)
+    const b = planPileTokens(p({ textAs: 'off', shapeCount: 10, shapes, seed: 3 }), FRAME)
+    expect(b.map(s => s.shapeId)).toEqual(a.map(s => s.shapeId))
+  })
+
+  it('empty shape set falls back to a real catalog shape (never empty when count>0)', () => {
+    const specs = planPileTokens(p({ textAs: 'off', shapeCount: 4, shapes: '[]' }), FRAME)
+    expect(specs).toHaveLength(4)
+    for (const s of specs) expect(typeof s.shapeId).toBe('string')
+    expect(specs.every(s => s.shapeId && s.shapeId !== 'none')).toBe(true)
+  })
+
+  it('legacy single `shape` still works when no `shapes` set', () => {
+    const specs = planPileTokens(p({ textAs: 'off', shapeCount: 3, shapes: '[]', shape: 'hexagon' }), FRAME)
+    for (const s of specs) expect(s.shapeId).toBe('hexagon')
+  })
+
+  it('text and shape tokens are interleaved (mixed drop), not words-then-shapes', () => {
+    const specs = planPileTokens(p({ text: 'ONE TWO THREE', textAs: 'words', shapeCount: 6, shapes: JSON.stringify(['hexagon']) }), FRAME)
+    const kinds = specs.map(s => s.kind)
+    const grouped = [...kinds].sort((a, b) => (a === 'word' ? -1 : 1)) // all words then all shapes
+    expect(kinds).not.toEqual(grouped) // actually interleaved
+    // a shape falls somewhere before the last word (they mix in the drop column)
+    expect(kinds.indexOf('shape')).toBeLessThan(kinds.lastIndexOf('word'))
+  })
+
+  it('interleave is deterministic per seed', () => {
+    const mk = () => planPileTokens(p({ text: 'ONE TWO', textAs: 'words', shapeCount: 5, shapes: JSON.stringify(['hexagon']), seed: 7 }), FRAME).map(s => s.kind)
+    expect(mk()).toEqual(mk())
+  })
+
   it('empty pile when text is off and no shapes', () => {
     expect(planPileTokens(p({ textAs: 'off', shapeCount: 0 }), FRAME)).toEqual([])
   })
