@@ -367,7 +367,7 @@ describe('drawTextCells — reels', () => {
   const REEL_CHARS = ['a', 'b', 'c', 'd', 'e', 'f']
   const oneCell = () => cellsOf('A')   // h = FONT_PX = 100
 
-  it('inks exactly the chars.length-bounded indices from floor(pos)-1 to ceil(pos)+1, offset (k-pos)*h*roll', () => {
+  it('inks exactly the chars.length-bounded indices from floor(pos)-1 to ceil(pos)+1, offset (k-pos)*pitch*roll', () => {
     const { ctx, rec } = recorder()
     const painted: string[] = []
     drawTextCells(ctx, oneCell(), {
@@ -377,8 +377,9 @@ describe('drawTextCells — reels', () => {
     expect(painted).toEqual(['b', 'c', 'd', 'e'])   // indices 1..4
     const translates = calls(rec.log, 'translate')
     expect(translates[0]).toBe('translate(0,0)')    // the outer cell transform
+    // pitch = h × (1 + 2 × 0.15) = 130 — the height of the window the reel rides in.
     expect(translates.slice(1)).toEqual([
-      'translate(0,-150)', 'translate(0,-50)', 'translate(0,50)', 'translate(0,150)',
+      'translate(0,-195)', 'translate(0,-65)', 'translate(0,65)', 'translate(0,195)',
     ])
   })
 
@@ -391,8 +392,47 @@ describe('drawTextCells — reels', () => {
     }, ch => painted.push(ch))
     expect(painted).toEqual(['b', 'c', 'd', 'e'])
     expect(calls(rec.log, 'translate').slice(1)).toEqual([
-      'translate(0,150)', 'translate(0,50)', 'translate(0,-50)', 'translate(0,-150)',
+      'translate(0,195)', 'translate(0,65)', 'translate(0,-65)', 'translate(0,-195)',
     ])
+  })
+
+  // THE PITCH IS THE WINDOW, NOT THE EM BOX. A reel spaced by the cell's `h` puts the next
+  // character exactly one em box away, which is INSIDE a window padded 15% top and bottom: the
+  // neighbour peeks past the edge, and a tall glyph of the real character is shaved by the same
+  // 15% until the static path takes over and un-shaves it.
+  describe('the reel pitch is the height of the window it rides in', () => {
+    const reelCell = (pad: number | undefined, pos: number, roll: 1 | -1 = 1) => ({
+      x: 0, y: 0, rotation: 0, scale: 1, opacity: 1,
+      clip: { x: 0, y: 0, w: 10, h: 100, angle: 0, ...(pad === undefined ? {} : { pad }) },
+      reel: { chars: REEL_CHARS, pos, roll },
+    })
+    // A clipped cell opens with three translates of its own (into the clip frame, back out,
+    // then to the cell) before the first character of the reel.
+    const reelTranslates = (rec: Rec) => calls(rec.log, 'translate').slice(3)
+
+    it('at the standard pad the neighbours sit half a 1.3h window away', () => {
+      const { ctx, rec } = recorder()
+      drawTextCells(ctx, oneCell(), { atRest: false, cells: [reelCell(0.15, 2.5)] }, () => {})
+      expect(reelTranslates(rec)).toEqual([
+        'translate(0,-195)', 'translate(0,-65)', 'translate(0,65)', 'translate(0,195)',
+      ])
+    })
+
+    it('at an integer position the neighbours sit a WHOLE window away — outside it', () => {
+      const { ctx, rec } = recorder()
+      drawTextCells(ctx, oneCell(), { atRest: false, cells: [reelCell(0.15, 3)] }, () => {})
+      expect(reelTranslates(rec)).toEqual([
+        'translate(0,-130)', 'translate(0,0)', 'translate(0,130)',
+      ])
+    })
+
+    it('a window that asks for no padding is spaced by the em box exactly', () => {
+      const { ctx, rec } = recorder()
+      drawTextCells(ctx, oneCell(), { atRest: false, cells: [reelCell(0, 2.5)] }, () => {})
+      expect(reelTranslates(rec)).toEqual([
+        'translate(0,-150)', 'translate(0,-50)', 'translate(0,50)', 'translate(0,150)',
+      ])
+    })
   })
 
   it('an empty-string entry inks nothing for that index', () => {

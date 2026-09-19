@@ -42,13 +42,13 @@ export const HIDDEN: PieceState = Object.freeze({ ...REST, opacity: 0 }) as Piec
  *  - `barElapsed` seconds since the BAR's start (`t - start`, ignoring stagger) — what
  *    scramble's settle/loop modes use, since all pieces jump on one shared clock.
  *  - `barDur` the bar's total duration (`D`, i.e. `max(0.05, timing.duration)`).
- *  - `rank`/`maxRank` this piece's place in the chosen order (0 = first) and the last rank —
- *    what a LOOP lags by, since a loop has no stagger to ride (every piece is live for the
- *    whole bar) and takes its offset from the rank instead. */
+ *  - `rank` this piece's place in the chosen order (0 = first) — what a LOOP lags by, since a
+ *    loop has no stagger to ride (every piece is live for the whole bar) and takes its offset
+ *    from the rank instead. */
 export interface PieceCtx {
   piece: Piece; pieces: Piece[]; p: number; e: number; elapsed: number; pieceDur: number; t: number
   seed: number; frame: FrameBox; params: Record<string, unknown>; delay: number; barElapsed: number; barDur: number
-  rank: number; maxRank: number
+  rank: number
 }
 /** Context for a `cell` callback: one PIECE's state plus which GLYPH of it is being asked
  *  about. `store` is a scratch bag shared by every cell of this behaviour in this frame — the
@@ -163,6 +163,38 @@ interface ComposedCell {
 interface RestClipBox { cx: number; cy: number; w: number; h: number; angle: number; pad?: number }
 
 /**
+ * Two windows on one glyph, INTERSECTED. A reel's window and a mask slide's are both "the part
+ * of the layer this letter may be seen through", so a letter wearing both is seen only through
+ * the OVERLAP — a Slot added on top of a Mask slide must not quietly cancel the Mask slide (nor
+ * the other way round). The padding of the overlap is the tighter of the two.
+ *
+ * Only two windows at the SAME angle have an axis-aligned overlap. At different angles — a
+ * curved-text word or line piece is turned by the average of its letters' angles, while one
+ * letter's own box is turned by its own — the overlap is not a rectangle, and the LAST window
+ * wins, as it did before. An empty overlap becomes a zero-size box at the new window's centre:
+ * nothing inks, which is the right answer, and where a box that crops everything away sits is
+ * not observable (so the two orders of a missed pair agree on the nothing, not on the box).
+ */
+function intersectClips(a: ClipBox, b: ClipBox): ClipBox {
+  if (!(Math.abs(a.angle - b.angle) < 1e-6)) return b
+  const cos = Math.cos(b.angle), sin = Math.sin(b.angle)
+  // Both centres in the frame the two windows share (turned back by their angle), where each is
+  // an axis-aligned rect and the overlap is one interval per axis.
+  const turn = (c: ClipBox): [number, number] => [c.x * cos + c.y * sin, -c.x * sin + c.y * cos]
+  const [ax, ay] = turn(a), [bx, by] = turn(b)
+  const x0 = Math.max(ax - a.w / 2, bx - b.w / 2), x1 = Math.min(ax + a.w / 2, bx + b.w / 2)
+  const y0 = Math.max(ay - a.h / 2, by - b.h / 2), y1 = Math.min(ay + a.h / 2, by + b.h / 2)
+  const pad = a.pad === undefined && b.pad === undefined ? undefined : Math.min(a.pad ?? 0.15, b.pad ?? 0.15)
+  const empty = !(x1 > x0) || !(y1 > y0)
+  const cx = empty ? 0 : (x0 + x1) / 2, cy = empty ? 0 : (y0 + y1) / 2
+  const out: ClipBox = empty
+    ? { x: b.x, y: b.y, w: 0, h: 0, angle: b.angle }
+    : { x: cx * cos - cy * sin, y: cx * sin + cy * cos, w: x1 - x0, h: y1 - y0, angle: b.angle }
+  if (pad !== undefined) out.pad = pad
+  return out
+}
+
+/**
  * Composes one behaviour's piece state onto one cell: the cell's offset from its piece's
  * centre is rotated/scaled by the behaviour, then the behaviour's own dx/dy is added (rotated
  * into the layer frame first when it was stated in the piece's own frame). Rotation adds,
@@ -174,11 +206,12 @@ interface RestClipBox { cx: number; cy: number; w: number; h: number; angle: num
  *  - a behaviour that SETS a clip places it at the piece's resting box seen through the
  *    accumulated transform of the bars before it (its own dx/dy is excluded — that offset is
  *    precisely the letter's travel INSIDE its window);
- *  - a behaviour that sets none carries any clip already on the cell through its own
- *    transform (centre, turn and size alike).
+ *  - any clip already on the cell is carried through this behaviour's own transform (centre,
+ *    turn and size alike), whether or not this behaviour sets one of its own;
+ *  - a cell that ends up wearing two windows is seen through their OVERLAP (`intersectClips`).
  *
- * That also makes the pair order-independent: a mask slide added before or after a scramble
- * or a cascade produces the same window in the same place.
+ * That also makes the pair order-independent: a mask slide added before or after a scramble,
+ * a cascade or a slot produces the same window in the same place.
  *
  * `restClip` is the same mechanism reached from a `cell` callback: a reel's window is ONE
  * cell's box rather than the whole piece's, and it takes precedence over `state.clip` because
@@ -209,6 +242,20 @@ function applyStateToCell(cell: ComposedCell, piece: Piece, state: PieceState, r
 
   const box: RestClipBox | undefined =
     restClip ?? (state.clip ? { cx: piece.cx, cy: piece.cy, w: piece.w, h: piece.h, angle: piece.angle } : undefined)
+  // Whatever window the cell already wears is carried through THIS behaviour's map — including
+  // when this behaviour sets a window of its own, which is what makes the pair symmetric: each
+  // window is placed by the bars BEFORE it and then carried by the bars AFTER it.
+  let carried: ClipBox | undefined
+  if (cell.clip) {
+    const [cx, cy] = map(cell.clip.x, cell.clip.y)
+    carried = {
+      x: cx, y: cy,
+      w: cell.clip.w * state.scale,
+      h: cell.clip.h * state.scale,
+      angle: cell.clip.angle + state.rotation,
+    }
+    if (cell.clip.pad !== undefined) carried.pad = cell.clip.pad
+  }
   if (box) {
     // The resting box, carried into the frame the earlier bars left this piece in.
     const c = Math.cos(cell.accRot), s = Math.sin(cell.accRot)
@@ -220,17 +267,9 @@ function applyStateToCell(cell: ComposedCell, piece: Piece, state: PieceState, r
       angle: box.angle + cell.accRot,
     }
     if (box.pad !== undefined) next.pad = box.pad
-    cell.clip = next
-  } else if (cell.clip) {
-    const [cx, cy] = map(cell.clip.x, cell.clip.y)
-    const next: ClipBox = {
-      x: cx, y: cy,
-      w: cell.clip.w * state.scale,
-      h: cell.clip.h * state.scale,
-      angle: cell.clip.angle + state.rotation,
-    }
-    if (cell.clip.pad !== undefined) next.pad = cell.clip.pad
-    cell.clip = next
+    cell.clip = carried ? intersectClips(carried, next) : next
+  } else if (carried) {
+    cell.clip = carried
   }
 
   const [nx, ny] = map(cell.x, cell.y)
@@ -277,7 +316,6 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
       const reversed = Math.max(0, ...ranks)
       ranks = ranks.map((r) => reversed - r)
     }
-    const maxRank = Math.max(0, ...ranks)
     const { delays, pieceDur } = pieceTiming(ranks, stagger, D)
     const ease = params.ease as Ease
     // Only a kind that opted in (`springTail`) keeps running past its bar under a spring.
@@ -293,7 +331,7 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
 
     const makeCtx = (piece: Piece, delay: number, rawP: number, e: number, barElapsed: number): PieceCtx => ({
       piece, pieces, p: rawP, e, elapsed: t - start - delay, pieceDur, t,
-      seed, frame, params, delay, barElapsed, barDur: D, rank: ranks[piece.index] ?? 0, maxRank,
+      seed, frame, params, delay, barElapsed, barDur: D, rank: ranks[piece.index] ?? 0,
     })
 
     for (const piece of pieces) {

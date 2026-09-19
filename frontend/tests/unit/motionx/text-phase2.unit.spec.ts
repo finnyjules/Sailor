@@ -264,11 +264,24 @@ describe('text.slot', () => {
   const filler = (i: number, j: number, set: Charset = 'letters') => pickChar(set, CELLS[i]!.char, CELLS, hash01(9, i, j))
 
   it('the reel is the fillers it rolls through, then the real character', () => {
-    const r = ev(S(), 1.5).cells[0]!.reel!
+    const r = ev(S(), 1.5).cells[0]!.reel!                             // pos 4 → the window is 3…5
     expect(r.chars.length).toBe(9)                                     // steps 8 + the real one
-    expect(r.chars[8]).toBe('A')
-    expect(r.chars.slice(0, 8)).toEqual([1, 2, 3, 4, 5, 6, 7, 8].map((j) => filler(0, j)))
+    expect(r.chars.slice(3, 6)).toEqual([4, 5, 6].map((j) => filler(0, j)))
     expect(r.roll).toBe(1)
+    const late = ev(S(), 1.95).cells[0]!.reel!                         // pos 7.6 → the window is 6…9
+    expect(late.chars[8]).toBe('A')
+    expect(late.chars[7]).toBe(filler(0, 8))
+  })
+
+  // The draw inks the four characters around `pos` and nothing else, so building all 41 of a
+  // 40-step reel — for every live glyph, every frame — is work thrown away.
+  it('only the characters the draw can reach are built; the rest are empty', () => {
+    const r = ev(S(), 1.5).cells[0]!.reel!                             // pos 4 → floor−1 … ceil+1
+    expect(r.chars.map((c) => c !== '')).toEqual([false, false, false, true, true, true, false, false, false])
+    const big = ev(S({ steps: 40 }), 1.5).cells[0]!.reel!              // pos 20
+    expect(big.chars.length).toBe(41)
+    expect(big.chars.filter((c) => c !== '').length).toBe(3)
+    expect(big.chars.slice(19, 22)).toEqual([20, 21, 22].map((j) => filler(0, j)))
   })
 
   it('steps says how many characters roll past before it lands', () => {
@@ -302,9 +315,13 @@ describe('text.slot', () => {
     })
   })
 
-  it('the reel is clipped to the cell\'s own box, with no padding', () => {
-    expect(ev(S(), 1.5).cells[0]!.clip).toEqual({ x: -15, y: 0, w: 16 * 1.1, h: 20, angle: 0, pad: 0 })
-    expect(ev(S(), 1.5).cells[3]!.clip).toEqual({ x: 15, y: 0, w: 16 * 1.1, h: 20, angle: 0, pad: 0 })
+  // The window carries the painter's standard 15% pad, exactly as a mask slide's does: a box
+  // measured from the font size shaves an accented cap or a tall ascender, and a reel that
+  // shaved its landing character would un-shave it the instant the static path took over. The
+  // neighbours are kept out by the PITCH (a full window apart), not by a tight window.
+  it('the reel is clipped to the cell\'s own box, padded like every other window', () => {
+    expect(ev(S(), 1.5).cells[0]!.clip).toEqual({ x: -15, y: 0, w: 16 * 1.1, h: 20, angle: 0, pad: 0.15 })
+    expect(ev(S(), 1.5).cells[3]!.clip).toEqual({ x: 15, y: 0, w: 16 * 1.1, h: 20, angle: 0, pad: 0.15 })
   })
 
   it('a spring rolls past the landing and comes back', () => {
@@ -315,27 +332,51 @@ describe('text.slot', () => {
     expect(ev(b, 1 + springSettle(0.6) + 0.01).atRest).toBe(true)
   })
 
+  // Steps is a LOOK control — how many characters flick past. A spring's overshoot is a fixed
+  // fraction of its travel, so multiplying the whole position by Steps would multiply the
+  // overshoot too: at 40 steps the reel would fly ten windows past the landing (a blank slot)
+  // before flying back. The overshoot is a fixed number of WINDOWS past the landing instead.
+  it('a spring overshoots the landing by the same amount whatever the Steps', () => {
+    const overshoot = (steps: number) => {
+      let max = -Infinity
+      for (let t = 1; t <= 1 + springSettle(0.6) + 0.01; t += 0.005) {
+        const r = ev(S({ steps, ease: { type: 'spring', bounce: 0.6 } }), t).cells[0]!.reel
+        if (r) max = Math.max(max, r.pos - steps)
+      }
+      return max
+    }
+    const few = overshoot(3), many = overshoot(40)
+    expect(few).toBeGreaterThan(0)
+    expect(few).toBeLessThan(1)                    // never a whole window past the landing
+    expect(Math.abs(few - many)).toBeLessThan(1e-9)
+  })
+
   it('out: the real character leads the reel, which rolls off into nothing', () => {
-    const f = ev(S({ dir: 'out' }), 1.5)
-    const r = f.cells[0]!.reel!
-    expect(r.chars.length).toBe(10)                // real + 8 fillers + the empty landing
-    expect(r.chars[0]).toBe('A')
-    expect(r.chars[9]).toBe('')
-    expect(r.pos).toBeCloseTo(4.5, 6)              // e 0.5 × (steps + 1)
+    const early = ev(S({ dir: 'out' }), 1.05).cells[0]!.reel!   // pos 0.45 → the window is −1…2
+    expect(early.chars.length).toBe(10)             // real + 8 fillers + the empty landing
+    expect(early.chars[0]).toBe('A')
+    expect(early.chars[1]).toBe(filler(0, 1))
+    expect(ev(S({ dir: 'out' }), 1.5).cells[0]!.reel!.pos).toBeCloseTo(4.5, 6)   // e 0.5 × (steps + 1)
+    const late = ev(S({ dir: 'out' }), 1.95).cells[0]!.reel!    // pos 8.55 → the window is 7…10
+    expect(late.chars[9]).toBe('')
+    expect(late.chars[8]).toBe(filler(0, 8))
     expect(ev(S({ dir: 'out' }), 0.5).atRest).toBe(true)
     expect(ev(S({ dir: 'out' }), 2.5).cells.every((c) => c.opacity === 0)).toBe(true)
   })
 
   it('by words: every letter of a word shares one reel position, with its own characters', () => {
-    const f = ev(S({ by: 'words', stagger: 0.2 }), 1.5)
+    const f = ev(S({ by: 'words', stagger: 0.2 }), 1.75)        // piece 0 at pos 7.5 — the landing
     expect(f.cells[1]!.reel!.pos).toBeCloseTo(f.cells[0]!.reel!.pos, 6)
+    expect(f.cells[0]!.reel!.chars[8]).toBe('A')
     expect(f.cells[1]!.reel!.chars[8]).toBe('B')
     expect(f.cells[2]!.reel!.pos).not.toBeCloseTo(f.cells[0]!.reel!.pos, 6)
   })
 
   it('the filler charset is configurable; only the landing is the real character', () => {
-    ev(S({ filler: 'numbers' }), 1.5).cells.forEach((c, i) => {
-      for (const f of c.reel!.chars.slice(0, 8)) expect(NUMBERS).toContain(f)
+    ev(S({ filler: 'numbers' }), 1.5).cells.forEach((c) => {     // pos 4 — fillers only
+      for (const f of c.reel!.chars.filter(Boolean)) expect(NUMBERS).toContain(f)
+    })
+    ev(S({ filler: 'numbers' }), 1.95).cells.forEach((c, i) => { // pos 7.6 — the landing is in reach
       expect(c.reel!.chars[8]).toBe(CELLS[i]!.char)
     })
   })
@@ -354,13 +395,72 @@ describe('a slot reel composed with another bar keeps its window on the glyph', 
       expect(c.clip, `cell ${i} lost its clip`).toBeDefined()
       expect(c.x, `cell ${i} drawn outside its clip in x`).toBeCloseTo(c.clip!.x, 6)
       expect(c.y, `cell ${i} drawn outside its clip in y`).toBeCloseTo(c.clip!.y, 6)
-      expect(c.clip!.pad).toBe(0)
+      expect(c.clip!.pad).toBe(0.15)
     })
   }
 
   it('slot + scramble: the window travels with the scrambled letter, in either order', () => {
     clipRidesTheCell(ev([slot, scramble], 2))
     clipRidesTheCell(ev([scramble, slot], 2))
+  })
+
+  // TWO WINDOWS ON ONE GLYPH INTERSECT. A slot reel's window and a mask slide's window are
+  // both "the part of the layer this letter may be seen through", so wearing both means
+  // wearing both: the last one must not simply replace the first, or a Slot would quietly
+  // cancel the Mask slide it was added on top of (and vice versa).
+  describe('a slot window and a mask window intersect', () => {
+    const slot = { ...beh('text.slot', { steps: 6, seed: 9 }, 1, 2), id: 'sl' }
+    const mask = { ...beh('text.maskSlide', { dir: 'reveal', from: 'up' }, 1, 2), id: 'mk' }
+    // t 1.5 → e 0.25, so the mask has its letters 15px (0.75 × 20) below their place, still
+    // travelling up through a window that reaches only 10px above the resting centre.
+    const T = 1.5
+
+    it('either order draws exactly the same frame', () => {
+      expect(ev([slot, mask], T)).toEqual(ev([mask, slot], T))
+    })
+
+    it('the window is the OVERLAP of the two, hand-computed', () => {
+      // slot's window (the cell box, 17.6 × 20, carried up by the mask's own travel) spans
+      // x −23.8…−6.2, y 5…25; the mask's (the piece box, 10 × 20, left at rest) spans
+      // x −20…−10, y −10…10. The overlap is x −20…−10, y 5…10.
+      expect(ev([slot, mask], T).cells[0]!.clip).toEqual({ x: -15, y: 7.5, w: 10, h: 5, angle: 0, pad: 0.15 })
+    })
+
+    it('and it really masks: the glyph\'s own centre is outside it', () => {
+      const c = ev([slot, mask], T).cells[0]!
+      expect(c.y).toBeCloseTo(15, 6)
+      expect(Math.abs(c.y - c.clip!.y)).toBeGreaterThan(c.clip!.h / 2)
+    })
+
+    it('a window each bar could keep on its own is inside both of them', () => {
+      const both = ev([slot, mask], T).cells[0]!.clip!
+      const alone = ev(slot, T).cells[0]!.clip!          // the cell box, at rest
+      const masked = ev(mask, T).cells[0]!.clip!         // the piece box, at rest
+      // The slot's own window travels with its letter, so it is compared where the mask put it.
+      for (const [w, dy] of [[alone, 15], [masked, 0]] as const) {
+        expect(both.x - both.w / 2).toBeGreaterThanOrEqual(w.x - w.w / 2 - 1e-9)
+        expect(both.x + both.w / 2).toBeLessThanOrEqual(w.x + w.w / 2 + 1e-9)
+        expect(both.y - both.h / 2).toBeGreaterThanOrEqual(w.y + dy - w.h / 2 - 1e-9)
+        expect(both.y + both.h / 2).toBeLessThanOrEqual(w.y + dy + w.h / 2 + 1e-9)
+      }
+    })
+
+    it('two windows that miss each other leave a hole of nothing, not a wrong window', () => {
+      const up = { ...beh('text.maskSlide', { from: 'up' }, 1, 2), id: 'u' }
+      const down = { ...beh('text.maskSlide', { from: 'down' }, 1, 2), id: 'd' }
+      const clip = ev([up, down], T).cells[0]!.clip!     // one window 15px up, the other 15px down
+      expect(clip.w).toBe(0)
+      expect(clip.h).toBe(0)
+    })
+
+    it('windows at DIFFERENT angles cannot be intersected, so the last one wins', () => {
+      // On curved text a word piece's angle is the average of its letters'; one letter's own
+      // box is turned by its own angle. There is no axis-aligned overlap of the two.
+      const curved = [cell('A', -15, 0, 0, 0.2), cell('B', -5, 0, 0, -0.2)]
+      const byWords = (b: any) => ({ ...b, params: { ...b.params, by: 'words' } })
+      expect(ev([byWords(slot), byWords(mask)], T, curved).cells[0]!.clip!.angle).toBeCloseTo(0, 9)
+      expect(ev([byWords(mask), byWords(slot)], T, curved).cells[0]!.clip!.angle).toBeCloseTo(0.2, 9)
+    })
   })
 
   it('a later behaviour that names a character wins', () => {

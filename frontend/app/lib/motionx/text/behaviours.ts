@@ -290,12 +290,27 @@ registerTextBehaviour('text.slot', {
     const pool = framePool(c.store, oneOf(c.params.filler, TEXT_CHARSETS, 'letters'), c.cell.char, c.cells)
     const real = c.cell.char
     const out = dir === 'out'
-    // Built only for a cell that is actually rolling — a landed (or unstarted) one never gets
-    // here, so a resting layer allocates nothing.
-    const chars: string[] = out ? [real] : []
-    for (let j = 1; j <= steps; j++) chars.push(pickFrom(pool, hash01(c.seed, c.cellIndex, j)))
-    chars.push(out ? '' : real)
     // Leaving, the reel rolls one step FURTHER than it has fillers, onto the empty landing.
-    return { reel: { chars, pos: c.e * (out ? steps + 1 : steps), roll }, clipToCell: true, clipPad: 0 }
+    const last = out ? steps + 1 : steps
+    // Steps is a LOOK control — how many characters flick past — and must not scale the
+    // BOUNCE: a spring's overshoot is a fixed fraction of `e`, so `e × steps` would carry the
+    // reel `(e − 1) × steps` windows past the landing (a blank slot at 40 steps) before it
+    // came back. Past the landing the overshoot is counted in WINDOWS instead.
+    const pos = c.e <= 1 ? c.e * last : last + (c.e - 1)
+    // Only the characters the painter can reach are built — it inks `floor(pos) − 1` through
+    // `ceil(pos) + 1` and nothing else, so a 40-step reel would otherwise build 41 strings per
+    // live glyph per frame to show four. The list keeps its full length and its indices; the
+    // entries outside the window are empty, which the painter already skips.
+    const chars: string[] = new Array(last + 1).fill('')
+    const from = Math.max(0, Math.floor(pos) - 1)
+    const to = Math.min(last, Math.ceil(pos) + 1)
+    for (let k = from; k <= to; k++) {
+      // Rolling in, the fillers lead and the real character lands last; rolling out, the real
+      // character leads and the reel runs off onto an empty landing.
+      chars[k] = out
+        ? (k === 0 ? real : k > steps ? '' : pickFrom(pool, hash01(c.seed, c.cellIndex, k)))
+        : (k === steps ? real : pickFrom(pool, hash01(c.seed, c.cellIndex, k + 1)))
+    }
+    return { reel: { chars, pos, roll }, clipToCell: true, clipPad: 0.15 }
   },
 })

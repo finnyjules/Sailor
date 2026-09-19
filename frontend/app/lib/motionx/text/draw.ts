@@ -190,17 +190,17 @@ export function lineAtRest(cells: TextCell[], draws: CellDraw[], line: number): 
  * so the layer's own opacity, a group's cascade and a clone's alpha all still apply. The
  * save/restore pair around each glyph is what keeps that (and the clip) from leaking.
  *
- * A clip (mask slide) is applied in the PIECE's own turned frame and padded, by default, 15%
- * of its height top and bottom (`clip.pad ?? 0.15`): the piece box is measured from the cells'
- * `h`, which is the font size, and a descender or a tall ascender reaches past it — without the
- * pad a resting masked letter would be shaved. A reel's window asks for `pad: 0` instead — its
- * whole point is to hide the neighbours riding past it, so the window must not let them peek.
+ * A clip (mask slide, or a reel's own window) is applied in the PIECE's own turned frame and
+ * padded, by default, 15% of its height top and bottom (`clip.pad ?? 0.15`): the box is measured
+ * from the cells' `h`, which is the font size, and a descender or a tall ascender reaches past
+ * it — without the pad a resting masked letter would be shaved.
  *
  * `d.char` substitutes one character for the cell's own (Decode's flicker); `d.reel` substitutes
- * a whole strip of them riding past the same window (Slot). Only one glyph is inked per cell
- * without a reel; with one, every character close enough to `reel.pos` to still be inside its
- * one-line-tall window is inked, each under its own extra `translate` — so the reel's window
- * (a `clipToCell` clip, sized to the cell) is what actually crops it to one line.
+ * a whole strip of them riding past the same window (Slot), and TAKES PRECEDENCE over `d.char`,
+ * so a Decode under a Slot lands on the real character rather than on a frozen flicker. Only one
+ * glyph is inked per cell without a reel; with one, every character close enough to `reel.pos` to
+ * still be inside the window is inked, each under its own extra `translate` — one WINDOW height
+ * apart, so a neighbour sits fully outside the window the clip crops to.
  */
 export function drawTextCells(
   ctx: CanvasRenderingContext2D, cells: TextCell[], frame: TextFrame, paint: (ch: string) => void,
@@ -232,14 +232,18 @@ export function drawTextCells(
     if (d.scale !== 1) ctx.scale(d.scale, d.scale)
     const reel = d.reel
     if (reel) {
-      const h = cells[i]!.h
+      // The PITCH is the height of the WINDOW, not of the em box: spaced by `h` alone the next
+      // character on the reel would sit inside a window padded 15% top and bottom and peek over
+      // the edge. A reel takes precedence over a substitute `char`, so a Decode under a Slot
+      // lands on the real character rather than on a frozen flicker.
+      const pitch = cells[i]!.h * (1 + 2 * (clip?.pad ?? 0.15))
       const lo = Math.floor(reel.pos) - 1
       const hi = Math.ceil(reel.pos) + 1
       for (let k = lo; k <= hi; k++) {
         const ch = reel.chars[k]
         if (k < 0 || k >= reel.chars.length || !ch) continue
         ctx.save()
-        ctx.translate(0, (k - reel.pos) * h * reel.roll)
+        ctx.translate(0, (k - reel.pos) * pitch * reel.roll)
         paint(ch)
         ctx.restore()
       }

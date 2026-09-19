@@ -62,6 +62,10 @@ export function pickChar(set: Charset, real: string, cells: readonly { char: str
  * standing in for (a layer with fewer than two distinct characters has only one character, so
  * the fallback's case is the same for every cell), so it is built once per behaviour per frame
  * instead of once per glyph. Every other set returns its constant and is not cached.
+ *
+ * One consequence worth naming: when the pool DOES fall back to the alphabet, the case of that
+ * alphabet is decided by the first cell this behaviour evaluated in this frame, and every other
+ * cell then borrows it — which is exactly the "only one character" case, so they agree anyway.
  */
 export function framePool(
   store: Record<string, unknown>, set: Charset, real: string, cells: readonly { char: string }[],
