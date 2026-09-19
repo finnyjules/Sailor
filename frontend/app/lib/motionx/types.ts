@@ -17,7 +17,10 @@ export interface Track {
   keyframes: Keyframe[]
   loop?: boolean                   // when true, evaluateTrack wraps t into the keyframe span
   mode?: 'crossfade' | 'travel'    // gradient tracks only
-  space?: 'oklab' | 'hybrid'       // colour/gradient tracks only
+  /** Colour-blend space. Gradient + colour tracks: 'oklab' (default) | 'hybrid'. Colour tracks
+   *  may also use 'oklch' | 'srgb' — the mix spaces of the legacy effect-dial tracks, so a
+   *  converted colour track shows the same in-between colours. */
+  space?: 'oklab' | 'hybrid' | 'oklch' | 'srgb'
   behaviourId?: string             // set on tracks compiled from a live Behaviour; the
                                    // evaluator ignores it (byte-identity preserved). Property
                                    // bands are untagged; a tagged track belongs to its band.

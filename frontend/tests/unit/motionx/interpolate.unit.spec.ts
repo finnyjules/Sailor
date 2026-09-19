@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { interpolateValue } from '~/lib/motionx/interpolate'
 import type { GradientStop } from '~/lib/color/harmony'
+import { mixHex } from '~/lib/color/mix'
+import { blendHex } from '~/lib/color/gradientTween'
 
 describe('interpolateValue', () => {
   it('number lerps', () => {
@@ -18,5 +20,23 @@ describe('interpolateValue', () => {
     expect(Array.isArray(c)).toBe(true)
     const tr = interpolateValue('gradient', A, B, 0.5, { mode: 'travel' }) as GradientStop[]
     expect(Array.isArray(tr)).toBe(true)
+  })
+})
+
+describe('colour tracks: legacy mix spaces', () => {
+  const a = '#ff0000', b = '#0000ff'
+  it('default is unchanged (oklab via blendHex)', () => {
+    expect(interpolateValue('color', a, b, 0.5)).toBe(blendHex(a, b, 0.5, 'oklab'))
+  })
+  it("space 'oklch' and 'srgb' route to mixHex, and really differ from the default", () => {
+    expect(interpolateValue('color', a, b, 0.5, { space: 'oklch' })).toBe(mixHex(a, b, 0.5, 'oklch'))
+    expect(interpolateValue('color', a, b, 0.5, { space: 'srgb' })).toBe(mixHex(a, b, 0.5, 'rgb'))
+    expect(interpolateValue('color', a, b, 0.5, { space: 'srgb' })).toBe('#800080')
+    expect(interpolateValue('color', a, b, 0.5, { space: 'oklch' })).not.toBe(interpolateValue('color', a, b, 0.5))
+  })
+  it('gradient tracks ignore the colour-only spaces (treated as oklab)', () => {
+    const g1 = [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }]
+    const g2 = [{ pos: 0, color: '#ff0000' }, { pos: 1, color: '#0000ff' }]
+    expect(interpolateValue('gradient', g1, g2, 0.5, { space: 'oklch' })).toEqual(interpolateValue('gradient', g1, g2, 0.5, { space: 'oklab' }))
   })
 })
