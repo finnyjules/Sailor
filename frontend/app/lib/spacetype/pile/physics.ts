@@ -55,16 +55,12 @@ export function bakePile(specs: PileTokenSpec[], params: Params, frame: { width:
   engine.gravity.scale = 0.001
   engine.gravity.y = -Math.max(0.05, num(params, 'gravity', 1)) * G_BASE
 
-  // Walls sit beyond the widest token's ROTATED extent (its half-diagonal), never merely at the
-  // container edge — otherwise a wide token, once tilted, bridges the gap and hangs mid-air instead
-  // of falling. The container still governs where tokens START (drop x below); the walls only stop
-  // them leaving the sides, so pushing them out this far changes nothing except un-jamming.
-  const maxHalfDiag = specs.reduce((m, s) => Math.max(m, 0.5 * Math.hypot(Math.max(0.05, s.w) * SCALE, Math.max(0.05, s.h) * SCALE)), 0)
-  const wallHalfW = Math.max(halfW, maxHalfDiag + 0.6 * SCALE)
-
-  const floor = Bodies.rectangle(0, floorY - SLAB / 2, wallHalfW * 2 + SLAB * 2, SLAB, { isStatic: true, friction: 0.6 })
-  const left = Bodies.rectangle(-wallHalfW - SLAB / 2, 0, SLAB, topY * 8, { isStatic: true, friction: 0.4 })
-  const right = Bodies.rectangle(wallHalfW + SLAB / 2, 0, SLAB, topY * 8, { isStatic: true, friction: 0.4 })
+  // Walls sit at the container width — Container IS the wall width the pile stacks between.
+  // Tokens are sized (in tokens.ts) so their DIAGONAL fits the container, so a tilted box can
+  // never bridge the walls and jam; no need to widen the walls to chase big tokens.
+  const floor = Bodies.rectangle(0, floorY - SLAB / 2, halfW * 2 + SLAB * 2, SLAB, { isStatic: true, friction: 0.6 })
+  const left = Bodies.rectangle(-halfW - SLAB / 2, 0, SLAB, topY * 8, { isStatic: true, friction: 0.4 })
+  const right = Bodies.rectangle(halfW + SLAB / 2, 0, SLAB, topY * 8, { isStatic: true, friction: 0.4 })
   Composite.add(engine.world, [floor, left, right])
 
   const restitution = Math.min(0.9, Math.max(0, num(params, 'bounciness', 0.1)))

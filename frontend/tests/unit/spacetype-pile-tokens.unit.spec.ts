@@ -90,15 +90,22 @@ describe('planPileTokens', () => {
     expect(c.map(s => s.w)).not.toEqual(a.map(s => s.w)) // size jitter reshuffles
   })
 
-  it('clamps oversized tokens to fit the container (or they wedge and never fall)', () => {
-    // A long word at huge type would exceed the container width; it must be scaled to fit.
+  it('clamps a token so its DIAGONAL fits the container (never bridges the walls at any rotation)', () => {
+    // A long word at huge type would exceed the container; its diagonal (widest rotated span)
+    // must fit the wall gap, uniformly scaled.
     const container = 0.8
-    const maxW = container * FRAME_HALF_H * (FRAME.width / FRAME.height) * 2 * 0.9
+    const maxDiag = container * FRAME_HALF_H * (FRAME.width / FRAME.height) * 2 * 0.9
     const specs = planPileTokens(p({ text: 'BREAKING', textAs: 'words', typeSize: 360, container, shapeCount: 0 }), FRAME)
-    expect(specs[0]!.w).toBeLessThanOrEqual(maxW + 1e-6)
+    expect(Math.hypot(specs[0]!.w, specs[0]!.h)).toBeLessThanOrEqual(maxDiag + 1e-6)
     expect(specs[0]!.h).toBeLessThanOrEqual(FRAME_HALF_H * 0.9 + 1e-6)
     // aspect preserved (uniform scale)
     expect(specs[0]!.w / specs[0]!.h).toBeCloseTo(0.62 * 8, 3)
+  })
+
+  it('a narrower Container makes tokens smaller (Container = the wall width)', () => {
+    const wide = planPileTokens(p({ text: 'BREAKING', textAs: 'words', typeSize: 360, container: 1, shapeCount: 0 }), FRAME)
+    const narrow = planPileTokens(p({ text: 'BREAKING', textAs: 'words', typeSize: 360, container: 0.4, shapeCount: 0 }), FRAME)
+    expect(narrow[0]!.w).toBeLessThan(wide[0]!.w)
   })
 
   it('token extents are positive world units', () => {

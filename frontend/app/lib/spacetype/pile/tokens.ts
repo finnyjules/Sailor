@@ -35,18 +35,18 @@ export function planPileTokens(params: Params, frame: { width: number; height: n
   const specs: PileTokenSpec[] = []
   let fillIndex = 0
 
-  // A token must fit inside the container, or it wedges between the walls and never
-  // falls (looks like it vanished). Clamp every token to the container width and most
-  // of the frame height, scaling it down UNIFORMLY so text/shapes keep their aspect.
+  // Container IS the wall width the pile stacks between (a fraction of the frame width). A token
+  // must fit inside it or it wedges between the walls; since a falling token tumbles, its DIAGONAL
+  // (its widest span across any rotation) must fit — clamp on the diagonal, scaling down UNIFORMLY
+  // so text/shapes keep their aspect. Also cap height to ~45% of the frame so a couple of stacked
+  // tokens stay in view. Widen Container for bigger pieces / a wider spread; narrow it to tighten.
   const frameAspect = Math.max(0.1, frame.width / Math.max(1, frame.height))
   const containerHalfW = Math.max(0.2, num(params, 'container', 0.8)) * halfH * frameAspect
-  const maxW = containerHalfW * 2 * 0.9
-  // Cap a single token to ~45% of the frame height so a couple of stacked tokens still
-  // fit in view (the pile builds up from the floor; without this, big type overflows
-  // the top and the pile reads as "gone").
+  const maxDiag = containerHalfW * 2 * 0.9
   const maxH = halfH * 0.9
   const fit = (w: number, h: number): [number, number] => {
-    const s = Math.min(1, maxW / Math.max(1e-4, w), maxH / Math.max(1e-4, h))
+    let s = Math.min(1, maxDiag / Math.max(1e-4, Math.hypot(w, h)))
+    if (h * s > maxH) s = maxH / Math.max(1e-4, h)
     return [w * s, h * s]
   }
 
