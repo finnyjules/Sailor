@@ -13,7 +13,7 @@ import {
   type PostEffect,
   createTextLayer, createRectLayer, createEllipseLayer, createLineLayer, createImageLayer,
   createPolygonLayer, createStarLayer,
-  localLayerBox, shapeToPathLayer, withWiredContent,
+  localLayerBox, textVAlignCenterOffset, shapeToPathLayer, withWiredContent,
   type WiredContentProvider, type WiredLayer,
 } from '~/composables/useCompositorLayers'
 import { svgToPathLayers, pathLayerBoolean, type BooleanOp } from '~/composables/useVectorSvg'
@@ -224,11 +224,32 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   // The editor is the single mutation choke point, so one history stack here
   // covers every vector edit. Discrete ops record before mutating; a drag
   // records once at pointer-down (coalesced) so it's a single undo step.
-  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[] }
+  // `motion` = the AUTHORED parts of `sailor_motion` (motionx bands, live behaviours, effect-dial
+  // tracks), so timeline edits undo like any other edit. fps / duration / loop are transport
+  // settings, not edits: they are never snapshotted, so an undo can't silently rewind them.
+  type MotionSnap = { motionx?: unknown; behaviours?: unknown; tracks?: unknown }
+  const MOTION_KEYS = ['motionx', 'behaviours', 'tracks'] as const
+  function readMotionSnap(): MotionSnap {
+    const m = (node()?.data?.properties as any)?.sailor_motion as Record<string, unknown> | undefined
+    const out: MotionSnap = {}
+    for (const k of MOTION_KEYS) if (m?.[k] !== undefined) out[k] = JSON.parse(JSON.stringify(m[k]))
+    return out
+  }
+  function writeMotionSnap(snap: MotionSnap | undefined) {
+    const n = node(); if (!n) return
+    const cur = (n.data.properties as any)?.sailor_motion as Record<string, unknown> | undefined
+    const has = MOTION_KEYS.some((k) => snap?.[k] !== undefined)
+    if (!cur && !has) return                      // no motion before or after — leave the key absent
+    const next: Record<string, unknown> = { ...(cur ?? {}) }
+    for (const k of MOTION_KEYS) { if (snap?.[k] !== undefined) next[k] = snap[k]; else delete next[k] }
+    if (!n.data.properties) n.data.properties = {}
+    ;(n.data.properties as any).sailor_motion = next
+  }
+  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap }
   const HISTORY_CAP = 120
   const _past = ref<Snapshot[]>([])
   const _future = ref<Snapshot[]>([])
-  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])) } }
+  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap() } }
   function restore(s: Snapshot) {
     commit(s.layers); writeOrder([...s.order]); writeBg(s.bg); writeFx(s.fx?.length ? s.fx : undefined); writeGroups([...s.groups])
     const n = node()
@@ -236,6 +257,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       if (!n.data.properties) n.data.properties = {}
       ;(n.data.properties as any).sailor_frametemplates = s.frameTemplates
     }
+    writeMotionSnap(s.motion)
   }
   function recordHistory() {
     _past.value.push(snapshot())
@@ -444,14 +466,14 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const l = selected.value
     if (!l) return null
     const b = boxPx(l)
-    return boxHandles(l.x * dims().w, l.y * dims().h, b.w / 2, b.h / 2, l.rotation)
+    return boxHandles(l.x * dims().w, l.y * dims().h + textVAlignCenterOffset(l, b.h), b.w / 2, b.h / 2, l.rotation)
   })
 
   /** Union box (px) of the current multi-selection (≥2), else null. */
   const selectionBox = computed<GBox | null>(() => {
     if (selectedIds.value.size < 2) return null
     const W = dims().w, H = dims().h
-    const boxes = selectedLayers.value.map((l) => { const b = boxPx(l); return { cx: l.x * W, cy: l.y * H, w: b.w, h: b.h } })
+    const boxes = selectedLayers.value.map((l) => { const b = boxPx(l); return { cx: l.x * W, cy: l.y * H + textVAlignCenterOffset(l, b.h), w: b.w, h: b.h } })
     return boxes.length ? unionBox(boxes) : null
   })
   const selectionHandles = computed(() => {
@@ -474,7 +496,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     const kind = d.type === 'resize' ? 'scale' : d.type
     const hh = dragHud(kind, { wPx: b.w, hPx: b.h, xPx: l.x * W, yPx: l.y * H, rotation: l.rotation })
     if (!hh) return null
-    return { text: hh.text, left: l.x * W, top: l.y * H - b.h / 2 - 12 }
+    return { text: hh.text, left: l.x * W, top: l.y * H + textVAlignCenterOffset(l, b.h) - b.h / 2 - 12 }
   })
 
   // ── Align / distribute (operates on the multi-selection) ────────────────────
@@ -506,6 +528,30 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       const lo = s[0].l.y, hi = s[s.length - 1].l.y, step = (hi - lo) / (s.length - 1)
       s.forEach((e, i) => patch(e.l.id, { y: lo + step * i }))
     }
+  }
+
+  /** Align every selected layer to the FRAME (canvas), not to each other — so it
+   *  works for a single layer too (centre the headline, pin the meta to a corner).
+   *  Each layer's own box is placed against the frame edge/centre; the vertical
+   *  modes honour a text box's valign offset so the VISIBLE box lands on the edge. */
+  type FrameAlign = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom'
+  function alignToFrame(mode: FrameAlign) {
+    if (!selectedIds.value.size) return
+    const W = dims().w, H = dims().h
+    recordHistory()
+    commit(localLayers.value.map((l) => {
+      if (!selectedIds.value.has(l.id)) return l
+      const b = boxPx(l)
+      const hx = b.w / 2 / W, hy = b.h / 2 / H
+      const oyN = textVAlignCenterOffset(l, b.h) / H   // valign shifts the box off stored y
+      if (mode === 'left') return { ...l, x: hx } as LocalLayer
+      if (mode === 'right') return { ...l, x: 1 - hx } as LocalLayer
+      if (mode === 'hcenter') return { ...l, x: 0.5 } as LocalLayer
+      if (mode === 'top') return { ...l, y: hy - oyN } as LocalLayer
+      if (mode === 'bottom') return { ...l, y: 1 - hy - oyN } as LocalLayer
+      if (mode === 'vcenter') return { ...l, y: 0.5 - oyN } as LocalLayer
+      return l
+    }))
   }
 
   /** Move the whole multi-selection by a normalized delta (keyboard nudge). */
@@ -649,7 +695,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       const gc = resolveGroupCascade(l.groupId, localGroups.value)
       if (gc.hidden || gc.locked) continue
       const b = boxPx(l)
-      const cx = l.x * W, cy = l.y * H
+      const cx = l.x * W, cy = l.y * H + textVAlignCenterOffset(l, b.h)
       const rad = (-l.rotation * Math.PI) / 180
       const dx = px - cx, dy = py - cy
       const lx = dx * Math.cos(rad) - dy * Math.sin(rad)
@@ -732,7 +778,10 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     recordHistory()
     drag.value = {
       type: 'resize', id: l.id, handle, rot: l.rotation,
-      start: { cx: l.x * W, cy: l.y * H, w: sw, h: sh },
+      // Start from the DISPLAYED centre (valign shifts a text box's centre off its
+      // stored y), so the drag maths and the handles share one frame; the writeback
+      // converts the resized centre back through the new offset.
+      start: { cx: l.x * W, cy: l.y * H + textVAlignCenterOffset(l, sh), w: sw, h: sh },
       p0: { x: nx * W, y: ny * H },
     }
     attach()
@@ -802,7 +851,11 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       // box writes its boxW/boxH — the same normalized-to-width fields — instead of
       // a rect's w/h, so the handles resize the box rather than nothing.
       const tb = textBoxResizable(cur)
-      const patch: Record<string, number> = { x: box.cx / W, y: box.cy / H }
+      // `box.cy` is the resized DISPLAY centre; the render re-adds the valign offset
+      // for the NEW height, so store y with that offset removed — this pins the
+      // aligned edge (top/bottom) instead of the centre while the box is dragged.
+      const oy = cur ? textVAlignCenterOffset(cur, box.h) : 0
+      const patch: Record<string, number> = { x: box.cx / W, y: (box.cy - oy) / H }
       patch[tb ? 'boxW' : 'w'] = box.w / W
       if (!locked) patch[tb ? 'boxH' : 'h'] = box.h / W
       setLocal(d.id, patch)
@@ -1069,7 +1122,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     postEffects, setPostEffects,
     grid, setGrid,
     undo, redo, canUndo, canRedo,
-    selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, nudgeSelection, duplicateSelection, handleEditorKey,
+    selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, nudgeSelection, duplicateSelection, handleEditorKey,
     copySelection, pasteClipboard,
     groupSelected, ungroupSelected, ungroupGroup, renameGroup, canGroup, canUngroup,
     setGroupHidden, setGroupLocked, setGroupOpacity, groupCascade,

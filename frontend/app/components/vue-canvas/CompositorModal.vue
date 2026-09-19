@@ -3768,6 +3768,18 @@ const motionBehaviours = computed<StoredBehaviour[]>(() => (motionDoc.value as a
 function updateMotionx(tracks: MotionxTrack[]) {
   setMotion({ motionx: tracks } as Partial<FrameMotion>)
 }
+// Undo / redo (or an agent edit) can remove the selected band, point or behaviour — drop a
+// selection that no longer points at anything so the inspector never edits a ghost.
+watch([() => motionxTracks.value, () => motionBehaviours.value], () => {
+  const s = motionSel.value
+  if (!s) return
+  if (s.kind === 'behaviour') {
+    if (!motionBehaviours.value.some((b) => b.id === s.path)) motionSel.value = null
+    return
+  }
+  const tr = motionxTracks.value.find((t) => t.path === s.path && !t.behaviourId)
+  if (!tr || (s.kind === 'point' && (s.index == null || s.index >= tr.keyframes.length))) motionSel.value = null
+})
 function selectMotionBand(path: string) { motionSel.value = { kind: 'band', path } }
 function selectMotionBehaviour(id: string) { motionSel.value = { kind: 'behaviour', path: id } }
 // Slice 4: what behaviour groups the selected layer supports (gradient fill / text layer).
