@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { EffectDialTrack } from '~/lib/motion/effectTracks'
-import { evaluateDialTrack, isGradientValue, addDialTrack } from '~/lib/motion/effectTracks'
+import { evaluateDialTrack, isGradientValue } from '~/lib/motion/effectTracks'
 
 const A = [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ff0000' }]
 const B = [{ pos: 0, color: '#0000ff' }, { pos: 1, color: '#ffffff' }]
@@ -36,14 +36,5 @@ describe('evaluateDialTrack gradient values', () => {
   it('still lerps numbers', () => {
     const n: EffectDialTrack = { target: 't', keyframes: [{ t: 0, v: 0 }, { t: 1, v: 10 }] }
     expect(evaluateDialTrack(n, 0.5)).toBeCloseTo(5, 6)
-  })
-})
-
-describe('addDialTrack gradient seeding', () => {
-  it('addDialTrack stores mode/blendSpace for a gradient track', () => {
-    const [tr] = addDialTrack(undefined, 'layers.L1.fill', 0, A, undefined, { mode: 'travel', blendSpace: 'hybrid' })
-    expect(tr.mode).toBe('travel')
-    expect(tr.blendSpace).toBe('hybrid')
-    expect(tr.keyframes[0].v).toEqual(A)
   })
 })

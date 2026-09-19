@@ -90,7 +90,7 @@ import { DEFAULT_DISPLACE_MAP } from '~/lib/compositor/displace'
 import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
-import { effectDialTargets, addDialTrack, removeDialTrack, animatedDialKeysOf, type EffectDialTrack, type DialTargetSpec } from '~/lib/motion/effectTracks'
+import { effectDialTargets, animatedDialKeysOf, type EffectDialTrack } from '~/lib/motion/effectTracks'
 import { compileBehaviourForLayer, animatableProperties } from '~/lib/motionx/adapter/frame'
 import { type Behaviour, type StoredBehaviour, type Timing, type Track as MotionxTrack } from '~/lib/motionx'
 import { setBehaviourTracks, bakeBehaviour, upsertBehaviour, removeBehaviour } from '~/lib/motionx/behaviourStore'
@@ -100,7 +100,6 @@ import { migrateLayerAnimations } from '~/lib/motionx/adapter/migrateLayerAnimat
 import { legacyBandForLayer } from '~/lib/motionx/bands'
 import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
 import MotionPropertyPicker from '~/components/vue-canvas/compositor/MotionPropertyPicker.vue'
-import { fillDialTargets } from '~/lib/motion/fillTracks'
 import { getByIdPath } from '~/lib/studio/idPath'
 import { paintStopsToColor } from '~/lib/compositor/gradientPaint'
 import { isGradient } from '~/lib/compositor/paint'
@@ -120,12 +119,10 @@ import '~/lib/motion/paint' // registers the motion painter for paintLayerStack(
 import { bakeAndUpload, motionSourceKey, type MotionParams } from '~/lib/motion/bake'
 import { readGrid } from '~/lib/frame/gridConfig'
 import { resolveGrid, type FrameGrid } from '~/lib/frame/grid'
-import CompositorMotionTimeline from '~/components/vue-canvas/compositor/CompositorMotionTimeline.vue'
 import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
 import MotionGallery from '~/components/vue-canvas/compositor/MotionGallery.vue'
 import MotionInspector from '~/components/vue-canvas/compositor/MotionInspector.vue'
 import { behavioursForMove, defaultDurationForMove, type GalleryMove } from '~/lib/motionx/gallery'
-import MotionLayerEditor from '~/components/vue-canvas/compositor/MotionLayerEditor.vue'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
 import CompositorAnimatePanel from '~/components/vue-canvas/compositor/CompositorAnimatePanel.vue'
@@ -3728,83 +3725,20 @@ watch(() => compositor.value?.id, (_id, _prev, onCleanup) => {
     onCleanup(stop)
   }
 }, { immediate: true })
-// The docked timeline mutates layer.animation in place during a drag, then
-// emits 'commit' (no payload) on pointerup. `commit()` from the local-layer
-// editor takes the next array — re-assigning the same (already-mutated)
-// reference persists it. The timeline emits 'beforeChange' (wired to
-// recordHistory below) before the first mutation of each drag, so the undo
-// snapshot captures the pre-edit state.
+// Re-assigns localLayers to persist an in-place layer.animation mutation (the
+// legacy converter path) and, still, the AI agent's setState after a motionx
+// change (see useCompositorAgent above) — `commit()` from the local-layer
+// editor takes the next array and records it.
 function commitMotionTimeline() {
   commit(localLayers.value)
 }
 
-// ── Motion tab · animate an effect dial ─────────────────────────────────────
-// The picker lists the selected layer's animatable effect dials (F8) and adds/
-// removes a frame-level EffectDialTrack. `sailor_motion.tracks` is an untyped
-// field on the persisted doc (FrameMotion carries it structurally through the
-// painter seam), so it is read through a small cast here.
+// `sailor_motion.tracks` is an untyped field on the persisted doc (FrameMotion
+// carries it structurally through the painter seam) holding effect-dial tracks
+// authored before 2026-09; kept for `animatedDialKeysOf` below (F8 Task 6) and
+// the read-only render fold in effectTracks.ts. Authoring now lives on the
+// band timeline (motionx).
 const motionTracks = computed<EffectDialTrack[]>(() => (motionDoc.value as any).tracks ?? [])
-const animatableDials = computed<DialTargetSpec[]>(() => {
-  const l = selectedLocal.value
-  if (!l) return []
-  // Layer-level fill targets (a gradient fill's scroll phase) precede the effect dials.
-  return [...fillDialTargets(l as any), ...effectDialTargets(l as any)]
-})
-function dialIsAnimated(target: string): boolean {
-  return motionTracks.value.some((tr) => tr.target === target)
-}
-// A stable, DOM-safe id fragment for a dial target's data-testid (paths carry
-// dots and colons from the effect id).
-function dialTestKey(target: string): string {
-  return target.replace(/[^a-z0-9]+/gi, '-')
-}
-function toggleDialTrack(spec: DialTargetSpec) {
-  const l = selectedLocal.value
-  if (!l) return
-  if (dialIsAnimated(spec.path)) {
-    setMotion({ tracks: removeDialTrack(motionTracks.value, spec.path) } as Partial<FrameMotion>)
-    return
-  }
-  if (spec.kind === 'gradient') {
-    // Seed from the CURRENT gradient's stops. `gradientMap.stops` targets already
-    // resolve (via getByIdPath) to a GradientMapStop[] — already {pos,color}. A
-    // `layers.<id>.fill` target resolves to the layer's Paint, so read the fill
-    // directly and adapt it via `paintStopsToColor`; a non-gradient fill falls
-    // back to a sensible 2-stop default.
-    const cur = getByIdPath({ layers: [l] }, spec.path)
-    const fill = (l as unknown as { fill?: Paint }).fill
-    const seed = Array.isArray(cur)
-      ? cur
-      : isGradient(fill)
-        ? paintStopsToColor(fill)
-        : [{ pos: 0, color: '#000000' }, { pos: 1, color: '#ffffff' }]
-    setMotion({
-      tracks: addDialTrack(motionTracks.value, spec.path, previewT.value ?? 0, seed, undefined, {
-        mode: 'crossfade',
-        blendSpace: 'oklab',
-      }),
-    } as Partial<FrameMotion>)
-    return
-  }
-  // Seed the first keyframe from the dial's CURRENT value at the playhead, so the
-  // track starts as a no-op hold until a second keyframe is authored (Task 5).
-  const cur = getByIdPath({ layers: [l] }, spec.path)
-  const seed: number | string =
-    typeof cur === 'number' || typeof cur === 'string'
-      ? cur
-      : spec.kind === 'color'
-        ? '#ffffff'
-        : (spec.min ?? 0)
-  setMotion({
-    tracks: addDialTrack(
-      motionTracks.value,
-      spec.path,
-      previewT.value ?? 0,
-      seed,
-      spec.kind === 'color' ? 'oklch' : undefined,
-    ),
-  } as Partial<FrameMotion>)
-}
 
 // ── Motion tab · unified-motion behaviours (motionx, live slice 1) ──────────
 // Temporary entry point: a behaviour compiles to Track[] (via the Frame
@@ -3814,9 +3748,6 @@ function toggleDialTrack(spec: DialTargetSpec) {
 // timeline yet; that lands next.
 const motionxTracks = computed<MotionxTrack[]>(() => (motionDoc.value as any).motionx ?? [])
 const behaviourPickerOpen = ref(false)
-// The Motion tab renders ONE DialKit-style dock (MotionBandTimeline). The legacy dial
-// picker + dial timeline are kept in code until 6b deletes them, behind this flag.
-const legacyMotionUi = ref(false)
 // Slice 2/3: band-timeline selection (a behaviour band, a property band, or a control point)
 // drives the contextual inspector in the Motion right column. Writes flow through setMotion.
 const motionSel = ref<{ kind: 'band' | 'point' | 'behaviour' | 'legacy'; path: string; index?: number } | null>(null)
@@ -8123,30 +8054,7 @@ onUnmounted(() => {
         :style="{ left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' }"
         @pointerdown.stop @click.stop @dblclick.stop>
         <!-- The Motion tab is ONE DialKit-style dock (MotionBandTimeline): transport +
-             Add behaviour + Bake in its header, the gallery inside it, ruler, grouped rows.
-             The legacy dial picker + dial timeline below stay in code (deleted in 6b) but
-             only render behind `legacyMotionUi`. -->
-        <div v-if="selectedLocal && legacyMotionUi" data-testid="dial-picker"
-          class="glass-panel mb-2 rounded-lg border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-lg px-3 py-2">
-          <div class="text-[11px] font-medium text-white/60 mb-1.5">Animate a dial</div>
-          <p v-if="!animatableDials.length" class="text-[11px] text-white/35">
-            No animatable effect dials on this layer.
-          </p>
-          <div v-else class="flex flex-wrap gap-1.5">
-            <button v-for="spec in animatableDials" :key="spec.path" type="button"
-              :data-testid="'dial-add-' + dialTestKey(spec.path)"
-              :aria-pressed="dialIsAnimated(spec.path)"
-              class="flex items-center gap-1.5 h-7 px-2 rounded text-[11px] cursor-pointer whitespace-nowrap border transition-colors"
-              :class="dialIsAnimated(spec.path)
-                ? 'bg-white/15 text-white border-white/20'
-                : 'text-white/70 border-white/10 hover:bg-white/10'"
-              @click="toggleDialTrack(spec)">
-              <span>{{ dialIsAnimated(spec.path) ? '✓' : '+' }}</span>
-              <span>{{ spec.label }}</span>
-            </button>
-          </div>
-        </div>
-
+             Add behaviour + Bake in its header, the gallery inside it, ruler, grouped rows. -->
         <MotionBandTimeline
           :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
           :motionx="motionxTracks" :behaviours="motionBehaviours"
@@ -8174,14 +8082,6 @@ onUnmounted(() => {
               @add="addProperty" @close="propertyPickerOpen = false" />
           </template>
         </MotionBandTimeline>
-        <CompositorMotionTimeline v-if="legacyMotionUi" class="mt-2"
-          :layers="localLayers" :selected-id="selectedLocal?.id ?? null"
-          :motion="effectiveMotion" :t="previewT" :playing="playing"
-          :baking="baking" :bake-progress="bakeProgress" :stale="motionStale" :bake-error="bakeError"
-          @select="(id: string) => selectLocal(id)"
-          @play="play" @pause="pause" @scrub="scrubTo" @bake="bakeMotion"
-          @update:motion="setMotion" @commit="commitMotionTimeline" @before-change="recordHistory"
-        />
       </div>
     </div>
 
@@ -8445,16 +8345,9 @@ onUnmounted(() => {
             @remove="removeClip(selectedLocal)"
             @take="(t) => restoreTake(selectedLocal, t)"
           />
-          <!-- Legacy In/Loop/Out preset editor (layer.animation). Replaced by behaviours
-               (gallery In/Loop/Out); kept in code behind legacyMotionUi until 6b deletes it. -->
-          <MotionLayerEditor v-if="selectedLocal && legacyMotionUi"
-            :animation="(selectedLocal as any).animation" :frame-duration="effectiveMotion.duration"
-            :layer-kind="selectedLocal.kind"
-            @update="(a) => setLocal(selectedLocal!.id, { animation: a } as any)"
-          />
           <!-- Empty state: the dock owns frame timing (dur/fps/loop) and Add behaviour;
                this panel is the contextual inspector for whatever is selected on it. -->
-          <p v-else-if="!motionSel" class="text-xs text-white/40">
+          <p v-if="!motionSel" class="text-xs text-white/40">
             {{ selectedLocal
               ? 'Select a band on the timeline to edit it, or add a behaviour from the timeline.'
               : 'Select a layer, then add a behaviour from the timeline.' }}
