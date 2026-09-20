@@ -218,3 +218,13 @@ async def test_run_fal_prediction_status_poll_4xx_fails_fast(monkeypatch):
     # Fails on the very first status poll — must not have looped waiting on
     # the 1800s deadline for repeated retries.
     assert len(session.get_calls) == 1
+
+
+def test_poll_delay_starts_fast_and_settles_at_the_old_two_seconds():
+    # A one-second job used to wait a flat 2s for its first status check. The ramp
+    # checks early, never polls faster than the first step, and never slower than before.
+    delays = [fal_refs._poll_delay(i) for i in range(12)]
+    assert delays[0] == pytest.approx(0.35)
+    assert delays == sorted(delays)
+    assert max(delays) == 2.0
+    assert sum(delays[:3]) < 2.0  # three checks inside the old first wait

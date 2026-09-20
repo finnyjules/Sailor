@@ -89,6 +89,17 @@ def all_fal_image_urls(result: dict) -> list[str]:
     ]
 
 
+def _poll_delay(attempt: int) -> float:
+    """Seconds to wait before status poll number `attempt` (0-based).
+
+    Ramps 0.35s → 2s. The old flat 2s meant a sub-second job (flux-schnell
+    renders a 4-up 512px batch in ~1s) spent more wall clock waiting for the
+    poll than for the model, while a long video job barely notices the handful
+    of extra calls the ramp adds.
+    """
+    return min(2.0, 0.35 * (1.5 ** attempt))
+
+
 async def run_fal_prediction(
     app: str, fn: str, input_dict: dict, *, poll_deadline_sec: int = 900,
 ) -> dict:
@@ -122,8 +133,10 @@ async def run_fal_prediction(
 
         deadline = time.time() + poll_deadline_sec
         consecutive_errors = 0
+        polls = 0
         while time.time() < deadline:
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(_poll_delay(polls))
+            polls += 1
             async with session.get(status_url, headers=headers) as r:
                 # fal's queue status endpoint returns 202 while a job is
                 # IN_QUEUE/IN_PROGRESS and 200 once COMPLETED — both carry the
