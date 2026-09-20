@@ -40,7 +40,7 @@ Two rounds of "the fix didn't work" were a PRE-FIX server still holding :3100 �
 
 ## Test-wallet bookkeeping
 
-The pre-fix runs over-clawed the test wallet to 0 (old cumulative code — exactly the bug the fix addresses; kept in ledger history deliberately as evidence). Restored via a proper ledger credit: `admin_grant:test-wallet-reset|2450` keyed `admin:reset-overclawed-testing-1`. Balance at close: **2,450**.
+The pre-fix runs over-clawed the test wallet to 0 (old cumulative code — exactly the bug the fix addresses; kept in ledger history deliberately as evidence). Restored via a proper ledger credit: `admin_grant:test-wallet-reset|2450` keyed `admin:reset-overclawed-testing-1`. Balance after the final browser purchase: **9,000**.
 
 ## Teardown
 

@@ -520,6 +520,67 @@ rm -f "$GIT_INDEX_FILE"; unset GIT_INDEX_FILE
 - `npm run test:unit -- bands` green; whole `motionx` suite still green (`npm run test:unit -- motionx`).
 - In the running app, adding a behaviour shows its property band(s) with the correct interior (curve / colour / gradient) and control points, read-only, beside the still-working old timeline. No console errors. App otherwise unchanged.
 
+---
+
+# Slice 2 — band interactions + contextual inspector (right column, decision A)
+
+**Goal:** make bands editable — select a band/control point, retime by dragging band ends, drag the body to shift, add/move/delete control points; a contextual inspector in the Motion right column edits the selection (property band → timing + easing; control point → typed value editor incl. `GradientEditor`); a minimal control-point popover for quick input. Every edit writes `setMotion({ motionx })` with history.
+
+**Decisions:** continue straight through (check in per slice); inspector lives in the **right column (Motion tab)**, coexisting with the old In/Loop/Out panel until Phase 4.
+
+## File structure (Slice 2)
+
+- Create `frontend/app/lib/motionx/bandEdit.ts` — pure track editors. Zero Vue.
+- Create `frontend/tests/unit/motionx/band-edit.unit.spec.ts` — Vitest.
+- Create `frontend/app/components/vue-canvas/compositor/MotionInspector.vue` — the contextual inspector (right column). Reuses `GradientEditor.vue`.
+- Modify `frontend/app/components/vue-canvas/compositor/MotionBandTimeline.vue` — selection + drag interactions + control-point popover; emits `update:motionx`, `before-change`, `commit`, `select-band`, `select-point`.
+- Modify (SHARED → PRIVATE INDEX) `frontend/app/components/vue-canvas/CompositorModal.vue` — hold motion selection state, pass to timeline + inspector, mount `MotionInspector` in the Motion right column, wire edits through `setMotion`/`recordHistory`.
+
+## Interfaces produced (bandEdit.ts)
+
+```ts
+import type { Track, PropertyValue, Ease } from '~/lib/motionx'
+export function shiftTrack(track: Track, deltaT: number): Track
+export function retimeTrack(track: Track, newStart: number, newEnd: number): Track
+export function addPoint(track: Track, t: number, value?: PropertyValue): { track: Track; index: number }
+export function movePoint(track: Track, index: number, newT: number): { track: Track; index: number }
+export function setPointValue(track: Track, index: number, value: PropertyValue): Track
+export function setPointEase(track: Track, index: number, ease: Ease): Track
+export function removePoint(track: Track, index: number): Track
+export function setBandTrack(tracks: Track[], path: string, next: Track | null): Track[]
+```
+
+## Tasks
+
+- Task 1: `bandEdit.ts` pure editors, full TDD (`band-edit` spec). Commit (pathspec).
+- Task 2: `MotionBandTimeline.vue` interactions — selection highlight, body-shift drag, end-retime handles, control-point add/move/delete, popover. Emits above. Live-verify + commit (pathspec — it's a Slice-1 new file).
+- Task 3: `MotionInspector.vue` — property band (timing start/duration numeric + easing preset seg) / control point (number field | colour hex | GradientEditor + ease-to-next). Commit (pathspec).
+- Task 4: wire selection state + inspector into `CompositorModal.vue` (PRIVATE INDEX). Live-verify.
+
+Done-when: in the app, clicking a band selects+highlights it and shows its inspector; dragging ends retimes; adding/moving/deleting points works; the control-point popover edits a number/colour; a gradient point edits via the inspector's `GradientEditor`; all persist through `setMotion({ motionx })` and animate; old timeline still works; motionx suite green.
+
+---
+
+# Slice 3 — behaviours first-class (store, recompile, Open = bake)
+
+**Goal:** a behaviour is a live, param-editable **band** until Opened. Store `Behaviour[]` on the doc (author state); compiled tracks are tagged with `behaviourId` (still the rendered `motionx`, so the render path is unchanged); editing params recompiles that behaviour's tracks; **Open = bake** strips the tag (tracks become plain property bands) and drops the behaviour.
+
+## Storage model
+- `Track` gains optional `behaviourId?: string` (pure core; evaluator ignores it → byte-identity preserved).
+- `StoredBehaviour = Behaviour & { layerId: string }`; `FrameMotion.behaviours?: StoredBehaviour[]` (SHARED motion/types.ts → private index).
+- `motionx` still holds ALL rendered tracks; behaviour-owned ones carry `behaviourId`. Property bands = untagged tracks; behaviour bands = the `behaviours[]` entries (their tracks hidden until Open).
+
+## Pure additions (TDD)
+- `app/lib/motionx/behaviourStore.ts`: `setBehaviourTracks(tracks, id, newTracks)` (drop tagged-by-id, append newTracks stamped with id), `removeBehaviourTracks(tracks, id)`, `bakeBehaviour(tracks, id)` (strip the tag), `upsertBehaviour(list, b)`, `removeBehaviour(list, id)`.
+- `bands.ts`: `BandKind` gains `'behaviour'`; `bandsForLayer` EXCLUDES tracks with a `behaviourId`; new `behaviourBandsForLayer(layerId, behaviours)` → `Band[]` (kind 'behaviour', span from timing, key=id, `behaviourId` set, keyframes []).
+
+## UI
+- `CompositorModal`: `motionBehaviours` computed; rework `addBehaviour` to store a `StoredBehaviour` + tagged tracks (`setMotion({ behaviours, motionx })`) and select the behaviour band; `editBehaviour(id, patch)` recompiles; `openBehaviour(id)` bakes; selection gains `'behaviour'`.
+- `MotionBandTimeline`: new `behaviours` prop; render behaviour bands on the layer's lane; `select-behaviour` emit; selection kind `'behaviour'`.
+- `MotionInspector`: behaviour selection → kind-specific params (fade dir; gradientScroll loop; slide dir/distance; gradientMorph mode/space) + timing + **Open into keyframes**; emits `behaviour-change`/`behaviour-open`.
+
+Done-when: adding a behaviour shows ONE labeled behaviour band; its inspector edits params and the motion updates live; Open converts it to editable property bands and the behaviour band disappears; render unchanged; motionx suite green.
+
 ## Self-review notes
 
 - Spec coverage (Slice 1 subset of §5): "everything is a band" primitive with value-showing interiors (curve/colour/gradient) + control points on the band — Tasks 1–3. Read-only foundation, old UI intact — Task 4 (Global Constraint: app stays working). Retime/edit/inspector/popover/gallery/preset-port are Slices 2–5 (roadmap above), each its own plan.

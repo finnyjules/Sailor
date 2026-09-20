@@ -18,7 +18,7 @@ rules are unchanged; UI copy sentence case, human names; `CompositorModal.vue` s
 
 ---
 
-## Slice F1 · Text to outlines  (≈6 tasks)
+## Slice F1 · Text to outlines  (≈6 tasks) — ✅ LANDED 2026-09-09 (with F2; see memory frame-effects-programme)
 
 **Interfaces produced**
 - `lib/compositor/textOutline.ts`: `textLayerOutline(layer: TextLayer, W: number): { d: string; bbox } | null`
@@ -73,7 +73,7 @@ rules are unchanged; UI copy sentence case, human names; `CompositorModal.vue` s
 **Acceptance:** byte-identity A/B 0 px; Playwright order test; each kind proven on rect, path,
 library shape and outlined text.
 
-## Slice F3 · Boolean, morph, warp, long shadow, shatter  (≈8 tasks)
+## Slice F3 · Boolean, morph, warp, long shadow, shatter  (≈8 tasks) — ✅ LANDED 2026-09-10 (memory frame-effects-f3-landed)
 1. Sibling reference plumbing (`refLayerId`) with the mask reference's lifecycle (delete/duplicate).
 2. Boolean (unite|subtract|intersect|exclude) via paper.js; unit + Playwright.
 3. Morph toward sibling (amount) via `prepareBlend`/`blendPath`.
@@ -85,13 +85,13 @@ library shape and outlined text.
    (paper.js intersect), gap dial, seed.
 7. Playwright per kind; 8. agent + copy.
 
-## Slice F4 · Missing layer styles  (≈8 tasks)
+## Slice F4 · Missing layer styles  (≈8 tasks) — ✅ LANDED 2026-09-11 (memory frame-effects-f4-landed)
 One task per family, each = pass fn + `PASS_TYPES` + defaults + kind + label + icon + agent + tests:
 1. Outer glow, inner glow. 2. Colour overlay, gradient overlay (blend mode). 3. Stroke from alpha
 (width, align, colour). 4. Directional, radial, zoom blur. 5. Levels, posterise, threshold, invert.
 6. Rough edge, ink bleed (edge kinds). 7. Playwright per family. 8. Copy sweep + agent hint.
 
-## Slice F5 · Shader catalog as a layer pass  (≈6 tasks)
+## Slice F5 · Shader catalog as a layer pass  (≈6 tasks) — ✅ LANDED 2026-09-14 (base 8afbb079a → bc7482d20; whole-slice review Ready-to-merge, live gate 10/10; agent PICKER-ONLY pending the hint-ceiling decision; see 2026-09-09-frame-effects-F5-shader-pass.md + memory frame-effects-f5-landed)
 1. `shader` kind with `effectId` + `params` (manifest-derived controls, the studios' derived-inspector
    pattern). 2. GPU pass over the layer offscreen through `lib/studio/post/chain.ts` (`applyPost`
    with a single-pass settings object), alpha preserved, frame clock for time. 3. Effect picker in the
@@ -99,18 +99,44 @@ One task per family, each = pass fn + `PASS_TYPES` + defaults + kind + label + i
    resolution step when animating, as the modal already does). 5. Parity test vs Shader Studio on
    the same pixels. 6. Agent + copy.
 
-## Slice F6 · Backdrop effects  (≈5 tasks)
-1. Extract `withBackdrop(ctx, layer, fn)` from `applyBackdropBlur`; refactor the glass lens onto it;
-byte-identity A/B. 2. Refraction. 3. Frosted glass. 4. Backdrop distortion. 5. Luminance mask from
-below. All pinned in the backdrop region.
+## Slice F6 · Backdrop effects  (4 tasks) — ✅ LANDED 2026-09-14 (base 3fe58bf59 → HEAD 0b92907d1; live F6 backdrop gate 10/10; whole-slice units 1034/1034; inspector + add-menu verified in-browser; see 2026-09-09-frame-effects-F6-backdrop-effects.md + memory frame-effects-f6-landed)
+Scope chosen by user over the literal four kinds (refraction/frost/distortion overlap the glass lens
++ background_blur): 1. Extract `withBackdrop` from `applyBackdropBlur` (glass lens left as-is —
+follow-up). 2. `backdrop_shader` — any input-sampling catalog effect over the layers behind,
+additively, any layer incl text. 3. `backdrop_luminance_mask` — mask own content by backdrop
+brightness (wraps own paint, not additive-under). 4. Inspector UI (F5 picker shared for the shader;
+threshold/softness/invert for the mask) + animation hook + agent-reject + coexistence proofs. All
+pinned in the backdrop region. Agent PICKER-ONLY (pending the hint-ceiling decision, as F5).
+Follow-ups owed: refactor the glass lens onto withBackdrop; agent vocab (hint-ceiling); a
+shape-following backdrop_shader variant.
 
-## Slice F7 · Print recipes  (≈4 tasks)
-Recipe kinds expanding to passes at paint time: 1. Risograph. 2. Photocopy. 3. Letterpress.
-4. Tree/inspector/agent/copy.
+## Slice F7 · Print recipes  (4 tasks) — ✅ LANDED 2026-09-15 (base 0b92907d1 → HEAD c29607cdd; live gate 6/6, whole-slice units 1116/1116, inspectors + add-menu verified in-browser; see 2026-09-09-frame-effects-F7-print-recipes.md + memory frame-effects-f7-landed)
+Recipe kinds = orderable PIXEL effect kinds whose pure `expandRecipe()` → PostEffect[] runs the
+EXISTING postEffects passes via applyPasses in the bodyPasses loop (no new render machinery, no new
+GLSL, byte-identical when absent): 1. Risograph (contrast→posterise→gradientMap ink ramp→grain).
+2. Photocopy (contrast→threshold→rough_edge+grain). 3. Letterpress (dark inner_glow deboss +
+desaturate + grain; DROPPED the unused `angle` — directional emboss deferred). 4. Inspectors +
+agent-reject (picker/UI-only, hint ceiling full). Follow-ups owed: directional emboss primitive
+(re-adds letterpress angle); agent recipe vocab (hint-ceiling decision); by-eye ink palettes.
 
-## Slice F8 · Effect dials as motion targets  (≈7 tasks; own design first)
-`layers.<id>.effects.<effectId>.<dial>` targets, a track list on the Frame, evaluation in the motion
-painter, id-path resolution through `resolveIdPath` (already nested-aware), UI in the motion tab.
+## Slice F8 · Effect dials as motion targets  (7 tasks) — ✅ LANDED 2026-09-15 (base c29607cdd → HEAD 1fa2af1d3; live gate 9/9, whole-slice units 1107, full Motion-tab UX by-eye verified; see 2026-09-09-frame-effects-F8-motion-targets.md + memory frame-effects-f8-landed)
+Any numeric OR colour effect dial is keyframable via `layers.<id>.effects.<effectId>.<dial>` — resolved
+by the existing nested `resolveIdPath` (effects are id-stamped), evaluated by a pure `applyEffectDialTracks`
+fold at the ONE `paintLayerStack` choke point (byte-identical when absent; runs in preview AND bake).
+Design (Julien): bespoke multi-keyframe tracks; numbers + colours; authoring in the Motion tab (a dial
+picker + per-dial timeline keyframe rows), the inspector showing a variable-signal on driven dials. Agent
+UI-only (ceiling full) — the tripwire test flips when the approved cap slice lands. Follow-ups: extend
+per-dial inspector lock to shader/backdrop/recipe blocks; edit-at-playhead; enum/bool dials.
+
+## 🎉 Frame Effects Programme COMPLETE — F1–F8 all landed (2026-09-09 → 2026-09-15).
+## ✅ Cap slice (agent vocab) LANDED 2026-09-15 (base 1fa2af1d3 → HEAD 5ec450d0d; see
+2026-09-09-frame-effects-Fcap-agent-vocab.md + memory fcap-agent-vocab-landed). Raised
+`COMPOSITOR_HINT_CEILING` 26250→27700 and taught the compositor agent the deferred vocabulary in one pass:
+F7 recipes + F6 backdrop_luminance_mask (schema-driven sanitizer), F5 shader + F6 backdrop_shader (curated
+named looks, effectReadsInput-pinned), and F8 dial-animation (the new `animateDial` op). All four
+"agent picker/UI-only" deferrals are flipped — the agent now drives the whole effect vocabulary by words.
+Owed: a paid/live agent smoke (CI only mocks the model). So the Frame Effects Programme + its agent surface
+are both complete.
 
 ---
 
