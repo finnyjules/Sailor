@@ -2,6 +2,10 @@
   <div style="margin:0;background:#000">
     <canvas ref="canvas" :width="W" :height="H" style="display:block" />
     <div style="position:fixed;top:6px;left:8px;font:11px monospace;color:#666">spacetype harness · {{ effectId }}</div>
+    <!-- The real effect gallery, so its two tabs can be looked at without opening the studio.
+         Picking an entry reloads the harness on it. -->
+    <button type="button" data-open-gallery style="position:fixed;top:6px;right:10px;font:11px monospace;color:#999;background:#222;border:0;border-radius:4px;padding:4px 8px;cursor:pointer" @click="showGallery = true">effect gallery</button>
+    <SpaceTypeEffectGalleryModal v-if="showGallery" :selected-id="effectId" @close="showGallery = false" @select="onPickEffect" />
   </div>
 </template>
 
@@ -15,6 +19,7 @@ import { ensureBoostFont } from '~/lib/spacetype/effects/boost'
 import { defaultsFromControls, type Params } from '~/lib/spacetype/effect'
 import { separatorFromParams } from '~/lib/spacetype/separator'
 import type { TextTextureOptions } from '~/lib/spacetype/textTexture'
+import SpaceTypeEffectGalleryModal from '~/components/vue-canvas/SpaceTypeEffectGalleryModal.vue'
 
 definePageMeta({ layout: false })
 
@@ -33,6 +38,8 @@ let raf = 0
 let frame = 0
 let params: Params = {}
 let animate = false
+const showGallery = ref(false)
+function onPickEffect(id: string) { window.location.search = `?effect=${encodeURIComponent(id)}` }
 
 function texOpts(): TextTextureOptions {
   // Split on newlines into a multi-row atlas (matches SpaceTypeSurface), so effects that
