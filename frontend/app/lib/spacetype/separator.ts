@@ -8,7 +8,7 @@
  * card, the clip renderer, the headless bake and the embed cannot disagree.
  */
 import type { ControlSpec, Params, SpaceTypeEffect } from './effect'
-import { RAW_WORD_EFFECTS, PER_GLYPH_EFFECTS } from './effect'
+import { RAW_WORD_EFFECTS, PER_GLYPH_EFFECTS, isShowcaseEffectId } from './effect'
 import { shapeById, SHAPE_NONE, type LibraryShape } from '~/lib/shapes/catalog'
 
 export const SEPARATOR_DEFAULT_SIZE = 0.7
@@ -31,6 +31,8 @@ export const PER_GLYPH_SEPARATOR_READY: ReadonlySet<string> = new Set(['cylinder
  *  raw-word effects have no tile gap; the rest of the per-glyph effects never sample the tile. */
 export function separatorEligible(effectId: string): boolean {
   if (RAW_WORD_EFFECTS.has(effectId)) return false
+  // Showcase lays out its own tiles (cards, words, letters) and never samples the tile atlas.
+  if (isShowcaseEffectId(effectId)) return false
   return !PER_GLYPH_EFFECTS.has(effectId) || PER_GLYPH_SEPARATOR_READY.has(effectId)
 }
 

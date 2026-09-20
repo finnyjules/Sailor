@@ -20,6 +20,7 @@ export function showIfVisible(c: ControlSpec, read: (key: string) => ParamValue 
   if (c.showIf.notEquals !== undefined) return v !== c.showIf.notEquals
   if (c.showIf.in !== undefined) return c.showIf.in.includes(v as ParamValue)
   if (c.showIf.notIn !== undefined) return !c.showIf.notIn.includes(v as ParamValue)
+  if (c.showIf.matches !== undefined) return new RegExp(c.showIf.matches).test(String(v ?? ''))
   return true
 }
 

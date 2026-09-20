@@ -28,8 +28,10 @@ describe('ringEffect', () => {
     }
   })
 
-  it('loopRates reflects speed as whole turns', () => {
+  it('loopRates reports the true speed, fractions included (the engine closes them over k loops)', () => {
     expect(ringEffect.loopRates!({ ...defaultsFromControls(ringEffect.controls), speed: 3 })).toEqual([3])
+    expect(ringEffect.loopRates!({ ...defaultsFromControls(ringEffect.controls), speed: 0.25 })).toEqual([0.25])
+    expect(ringEffect.loopRates!({ ...defaultsFromControls(ringEffect.controls), speed: 0 })).toEqual([])
   })
 
   it('repeater duplicates tiles around the ring', () => {
@@ -150,7 +152,7 @@ describe('ringEffect', () => {
     const wordFill = ringEffect.controls.find(c => c.key === 'wordFill')
     expect(wordFill).toBeDefined()
     expect(wordFill?.default).toBe('{"type":"solid","a":"#ffffff","b":"#000000","textColor":"#ffffff","angle":45,"density":8}')
-    expect(wordFill?.group).toBe('Color')
+    expect(wordFill?.group).toBe('Type')   // sits with the font dials, and like them shows only while there is text
     expect(ringEffect.liveKeys).not.toContain('wordFill')
     expect(ringEffect.controls.find(c => c.key === 'typeColor')).toBeUndefined()
   })
@@ -246,12 +248,11 @@ describe('ringEffect', () => {
   // Showcase host (Task 2 — see docs/superpowers/sdd/task-2-brief.md): the renamed
   // 'ring' effect now dispatches placement to a pluggable layout via a `layout`
   // control. `id` stays 'ring' for saved-doc compat; only `label` changes.
-  it('effect label is Showcase, id stays ring, layout control defaults to ring', () => {
-    expect(ringEffect.label).toBe('Showcase')
+  it('id stays ring (saved scenes), labelled for its layout, with no layout dial', () => {
     expect(ringEffect.id).toBe('ring')
-    const layoutCtl = ringEffect.controls.find(c => c.key === 'layout')
-    expect(layoutCtl?.default).toBe('ring')
-    expect((layoutCtl as any).options).toContain('ring')
+    expect(ringEffect.label).toBe('Ring')
+    expect(ringEffect.gallery).toBe('layouts')
+    expect(ringEffect.controls.some(c => c.key === 'layout')).toBe(false)
   })
 
   it('builds + updates under layout=ring identical to before (image-only doc)', () => {

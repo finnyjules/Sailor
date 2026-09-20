@@ -19,9 +19,9 @@ describe('showcase layouts registry', () => {
       expect(a.rotY).toBeCloseTo(b.rotY, 9); expect(a.scale).toBeCloseTo(b.scale, 9)
     }
   })
-  it('ring layout declares its own controls (radius/ringTilt/ringOpening), showIf-gated', () => {
+  it('ring layout declares its own controls (radius/ringTilt/ringOpening), ungated — the entry is the layout', () => {
     const c = getLayout('ring').controls
     expect(c.map(x => x.key).sort()).toEqual(['radius', 'ringOpening', 'ringTilt'])
-    expect(c.every(x => (x as any).showIf?.key === 'layout' && (x as any).showIf?.equals === 'ring')).toBe(true)
+    expect(c.every(x => (x as any).showIf === undefined)).toBe(true)
   })
 })

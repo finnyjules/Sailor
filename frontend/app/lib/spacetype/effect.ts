@@ -1,5 +1,7 @@
 import type * as THREE from 'three'
 import type { ParamValue, Params } from '~~/shared/spacetype/state'
+import type { SpaceTypeSection } from './sections'
+import type { ShowcaseLayout } from './layouts/index'
 
 export type { ParamValue, Params } from '~~/shared/spacetype/state'
 
@@ -12,7 +14,10 @@ export type { ParamValue, Params } from '~~/shared/spacetype/state'
 type ControlMeta = {
   hint?: string
   aiEditable?: boolean
-  showIf?: { key: string; equals?: ParamValue; notEquals?: ParamValue; in?: ParamValue[]; notIn?: ParamValue[] }
+  // `matches` is a RegExp source tested against the param as a string — for a control that
+  // only applies when a packed value holds something (Showcase's type dials need a word in
+  // the content list).
+  showIf?: { key: string; equals?: ParamValue; notEquals?: ParamValue; in?: ParamValue[]; notIn?: ParamValue[]; matches?: string }
   /**
    * Set false to declare a control in the schema while withholding it from the
    * agent's vocabulary. Used for controls the agent has never been offered, so
@@ -101,7 +106,9 @@ export type ControlSpec = (
   // read/written/emitted is always the `options[i]` string, never the label — same
   // contract as `label` is to `key`. Stripped from every derived agent vocabulary
   // alongside `bindable`/`entry`, so the model always sees and writes raw option values.
-  | { key: string; label: string; kind: 'select'; options: string[]; optionLabels?: string[]; default: string; group: string }
+  // `optionGroups`, when present, is positionally paired with `options` too: the heading each
+  // option sits under in a long picker. Options sharing a heading must be adjacent.
+  | { key: string; label: string; kind: 'select'; options: string[]; optionLabels?: string[]; optionGroups?: string[]; default: string; group: string }
   | { key: string; label: string; kind: 'font'; default: string; group: string }
   // A shape from the shape library (~/lib/shapes/catalog). Stores a shape id or
   // 'none'. `allowNone: false` for consumers that always need a shape (a base
@@ -199,4 +206,27 @@ export interface SpaceTypeEffect {
    *  Must include every motion that multiplies t01, including per-ring/per-instance variations.
    *  Omit → exports as a single loop. */
   loopRates?(params: Params): number[]
+  /** Sections (see sections.ts) the panel shows FIRST for this effect, open, ahead of the
+   *  shared order. For an effect whose defining choice would otherwise sit deep in the
+   *  list — Showcase's Layout picker belongs at the top, not under Camera and Type.
+   *  Omit → the shared section order. */
+  leadSections?: readonly SpaceTypeSection[]
+  /** Which tab of the effect gallery lists this effect. Omit → 'text' (the type-first effects). */
+  gallery?: 'layouts' | 'text'
+  /** Set on Showcase card-layout effects: the layout this entry draws with — the gallery
+   *  paints its thumbnail from it and groups it under `showcaseLayout.family`. */
+  showcaseLayout?: ShowcaseLayout
+  /** Params that survive a switch to ANOTHER effect declaring the same keys. Every Showcase
+   *  layout shares its content / card / look / motion dials, so changing layout keeps the work
+   *  in progress; any other switch resets to the new effect's defaults as before. */
+  carryKeys?: readonly string[]
+}
+
+/** True for the Showcase card-layout effects: the original `ring`, and every `show…` entry.
+ *  By id, not by registry lookup, so the pure modules that need it (separator eligibility,
+ *  image preloading) stay free of the effect registry. No text effect's id starts with
+ *  'show' — guarded by a unit test. */
+export function isShowcaseEffectId(id: string): boolean {
+  const lc = String(id).toLowerCase()
+  return lc === 'ring' || lc.startsWith('show')
 }

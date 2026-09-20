@@ -12,7 +12,7 @@ export const SPACE_TYPE_SECTIONS = [
   // Framing
   'Camera', 'Transform',
   // Content
-  'Type', 'Color', 'Stroke',
+  'Content', 'Cards', 'Type', 'Color', 'Stroke',
   // Shape & geometry
   'Path', 'Layout', 'Stack', 'Stretch', 'Skew', 'Warp', 'Ribbon', 'Spiral', 'Slice', 'Wave', 'Glitch', 'Doodles',
   // Finish

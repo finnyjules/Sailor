@@ -84,7 +84,7 @@ it('each effect has ≤1 textList control, keyed "text" (surface binds textLines
 it('panel order: framing → content → shape → finish → motion → output', () => {
   expect([...SPACE_TYPE_SECTIONS]).toEqual([
     'Camera', 'Transform',
-    'Type', 'Color', 'Stroke',
+    'Content', 'Cards', 'Type', 'Color', 'Stroke',   // Content + Cards: Showcase's card list and card look
     'Path', 'Layout', 'Stack', 'Stretch', 'Skew', 'Warp', 'Ribbon', 'Spiral', 'Slice', 'Wave', 'Glitch', 'Doodles',
     'Layers', 'Occlusion', 'Look', 'Style', 'Blend', 'Shadow',
     'Motion',

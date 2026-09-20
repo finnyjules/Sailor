@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { SPACE_TYPE_EFFECTS, getEffect } from '../../app/lib/spacetype/effects'
-import { RAW_WORD_EFFECTS, PER_GLYPH_EFFECTS } from '../../app/lib/spacetype/effect'
+import { RAW_WORD_EFFECTS, PER_GLYPH_EFFECTS, isShowcaseEffectId } from '../../app/lib/spacetype/effect'
 import { SEPARATOR_CONTROLS, separatorEligible, separatorFromParams, withSeparatorControls, PER_GLYPH_SEPARATOR_READY } from '../../app/lib/spacetype/separator'
 import { showIfVisible } from '../../app/lib/studio/sections'
 import { texOptsFromState, defaultSpaceTypeState } from '../../app/lib/spacetype/state'
@@ -15,7 +15,17 @@ const KEYS = ['separator', 'separatorSize', 'separatorGap']
 // in or out of those sets. This literal list is the second opinion — an
 // effect changing eligibility has to be a deliberate edit here too. Every id
 // is asserted to still exist below, so the list cannot rot into a no-op.
-const INELIGIBLE = ['coil', 'elastic', 'echo', 'blend', 'cascade', 'onionburst', 'ring', 'slot', 'pile']
+// The Showcase card layouts (one effect each) lay out their own tiles and never sample the
+// tile atlas — `ring` was already here; the rest joined when each layout became an effect.
+const SHOWCASE = [
+  'showcoverring', 'showsphere', 'showglobe', 'showcloud', 'showdome', 'showspiral', 'showbloom',
+  'showcoverflow', 'showfocus', 'showfilmstrip', 'showtotem', 'showfeed', 'showcascade',
+  'showgrid', 'showmarquee', 'showiso', 'showturntable', 'showparallax',
+  'showorbit', 'showhalo', 'showwheel', 'showvortex',
+  'showstack', 'showtunnel', 'showdeck', 'showslide', 'showfan', 'showstage', 'showfocusshift',
+  'showtrail', 'showburst', 'showtoss', 'showdance', 'showmedley',
+]
+const INELIGIBLE = ['coil', 'elastic', 'echo', 'blend', 'cascade', 'onionburst', 'ring', 'slot', 'pile', ...SHOWCASE]
 
 describe('separator controls are injected once at registration', () => {
   it('every ineligible id is still a registered effect', () => {
@@ -32,7 +42,7 @@ describe('separator controls are injected once at registration', () => {
       expect(separatorEligible(e.id)).toBe(eligible)
       // The implementation's own predicate must agree with the literal list. cylinder is the
       // one PER_GLYPH_EFFECTS id carved back in by PER_GLYPH_SEPARATOR_READY (see separator.ts).
-      expect(!RAW_WORD_EFFECTS.has(e.id) && (!PER_GLYPH_EFFECTS.has(e.id) || PER_GLYPH_SEPARATOR_READY.has(e.id))).toBe(eligible)
+      expect(!RAW_WORD_EFFECTS.has(e.id) && !isShowcaseEffectId(e.id) && (!PER_GLYPH_EFFECTS.has(e.id) || PER_GLYPH_SEPARATOR_READY.has(e.id))).toBe(eligible)
       for (const c of e.controls.filter(c => KEYS.includes(c.key))) expect(c.group).toBe('Type')
     })
   }
