@@ -71,7 +71,13 @@ registerBehaviour('scale', (b, target) => {
   const dir = (b.params?.dir as string) ?? 'in'
   const w = window(b.timing)
   const cur = numOr(target.get('scale'), 1)
-  return [dir === 'out' ? numTrack('scale', cur, 0, w) : numTrack('scale', 0, cur, w)]
+  // Start / finish size as a PERCENTAGE of the layer's own size (100 = as it sits now). Absent ⇒
+  // the direction's default: in grows 0 → 100, out shrinks 100 → 0. After the bar the layer
+  // HOLDS the finish size, like every band.
+  const pct = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, v) : d)
+  const from = pct(b.params?.from, dir === 'out' ? 100 : 0)
+  const to = pct(b.params?.to, dir === 'out' ? 0 : 100)
+  return [numTrack('scale', (cur * from) / 100, (cur * to) / 100, w)]
 })
 
 registerBehaviour('spin', (b, target) => {

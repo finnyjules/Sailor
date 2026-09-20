@@ -395,6 +395,23 @@ function onGradient(g: Gradient) {
             @update:model-value="(v) => setBehParams({ dir: v })" />
         </div>
       </template>
+      <template v-else-if="behaviour.kind === 'scale'">
+        <div>
+          <div class="panel-sublabel mb-1">Direction</div>
+          <StudioSegmented data-testid="scale-dir" :model-value="enumParam('dir', 'in')" :options="['in', 'out']" :option-labels="['Grow in', 'Shrink out']"
+            @update:model-value="(v) => setBehParams({ dir: v })" />
+        </div>
+        <StudioSlider data-testid="scale-from" v-bind="gesture('scale-from')"
+          label="Start size %" hint="100% is the layer's own size"
+          :model-value="numParam('from', enumParam('dir', 'in') === 'out' ? 100 : 0)" :min="0" :max="400" :step="1"
+          :default="enumParam('dir', 'in') === 'out' ? 100 : 0"
+          @update:model-value="(v) => setBehNum('scale-from', { from: v })" />
+        <StudioSlider data-testid="scale-to" v-bind="gesture('scale-to')"
+          label="Finish size %" hint="100% is the layer's own size. The layer keeps this size after the bar ends."
+          :model-value="numParam('to', enumParam('dir', 'in') === 'out' ? 0 : 100)" :min="0" :max="400" :step="1"
+          :default="enumParam('dir', 'in') === 'out' ? 0 : 100"
+          @update:model-value="(v) => setBehNum('scale-to', { to: v })" />
+      </template>
       <template v-else-if="behaviour.kind === 'slide'">
         <div>
           <div class="panel-sublabel mb-1">Direction</div>

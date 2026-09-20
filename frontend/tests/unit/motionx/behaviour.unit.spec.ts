@@ -142,3 +142,25 @@ describe('timing.loop is the one loop switch for every kind', () => {
     expect((await c('pulse', false)).loop).toBe(false)
   })
 })
+
+describe('scale — start and finish size as a percentage of the layer', () => {
+  const at = { get: (p: string) => ({ scale: 2 } as Record<string, number>)[p], has: () => true } as never
+  const compile = async (params: Record<string, unknown>) => {
+    const { compileBehaviour } = await import('~/lib/motionx')
+    return compileBehaviour({ id: 's', kind: 'scale', timing: { start: 0, duration: 1 }, params } as never, at)[0]!.keyframes.map((k) => k.value)
+  }
+  it('defaults are unchanged: in = 0% → 100%, out = 100% → 0% (of the layer\'s own size)', async () => {
+    expect(await compile({ dir: 'in' })).toEqual([0, 2])
+    expect(await compile({ dir: 'out' })).toEqual([2, 0])
+    expect(await compile({})).toEqual([0, 2])
+  })
+  it('from / to override either end; 100% is the layer\'s current size', async () => {
+    expect(await compile({ dir: 'in', from: 50, to: 120 })).toEqual([1, 2.4])
+    expect(await compile({ dir: 'in', from: 80 })).toEqual([1.6, 2])
+    expect(await compile({ dir: 'out', to: 25 })).toEqual([2, 0.5])
+  })
+  it('garbage falls back to the direction\'s default; negatives clamp to 0', async () => {
+    expect(await compile({ dir: 'in', from: NaN, to: 'big' })).toEqual([0, 2])
+    expect(await compile({ dir: 'in', from: -40, to: 100 })).toEqual([0, 2])
+  })
+})
