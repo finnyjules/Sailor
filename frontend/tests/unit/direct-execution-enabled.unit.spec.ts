@@ -37,10 +37,12 @@ describe('directExecutionResolved', () => {
     expect(directExecutionResolved('true', true)).toBe(true)
   })
 
-  it('local keeps the default-OFF beta behavior', () => {
-    expect(directExecutionResolved(null, false)).toBe(false)
-    expect(directExecutionResolved('false', false)).toBe(false)
-    expect(directExecutionResolved('garbage', false)).toBe(false)
+  it('local resolves ON too — direct execution is the only dispatch path (bridge retirement, Tier 1)', () => {
+    // Was default-OFF beta in local dev, with the bridge iframe's queuePrompt as the fallback.
+    // 411e392f9 removed that fallback, so the stored value no longer selects anything.
+    expect(directExecutionResolved(null, false)).toBe(true)
+    expect(directExecutionResolved('false', false)).toBe(true)
+    expect(directExecutionResolved('garbage', false)).toBe(true)
     expect(directExecutionResolved('true', false)).toBe(true)
   })
 })

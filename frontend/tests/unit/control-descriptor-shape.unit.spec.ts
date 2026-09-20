@@ -32,7 +32,8 @@ describe('shape control kind — agent describer', () => {
 
 describe('effect family sets', () => {
   it('name the raw-word and per-glyph effects', () => {
-    expect([...RAW_WORD_EFFECTS].sort()).toEqual(['coil', 'echo', 'elastic'])
+    // `pile` joined on 09-18: its letters are physics bodies built from the raw word, never a tile.
+    expect([...RAW_WORD_EFFECTS].sort()).toEqual(['coil', 'echo', 'elastic', 'pile'])
     expect([...PER_GLYPH_EFFECTS].sort()).toEqual(['blend', 'cascade', 'cylinder', 'onionburst', 'ring', 'slot'])
   })
 })

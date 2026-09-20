@@ -521,6 +521,11 @@ describe('scene3d engine GLB material override', () => {
     deferGeometry: false,
     lightView: false,
     clay: new THREE.MeshStandardMaterial(),
+    // The GLB material path asks the engine for the object's AI-restyle spec (S7, 1caae874f).
+    // No restyle here: an empty texture map resolves every object to null.
+    restyleTextures: new Map<string, THREE.Texture>(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    restyleSpecFor: (SceneEngine.prototype as any).restyleSpecFor,
     scene: { add() {}, remove() {} },
   })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

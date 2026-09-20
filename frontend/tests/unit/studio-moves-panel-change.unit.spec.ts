@@ -136,10 +136,14 @@ describe('MovesPanel — nothing selected', () => {
 
   it('changing the Length slider emits patch-clip', async () => {
     const w = mountPanel([], null)
-    const slider = w.find('input[type="range"]')
-    await slider.setValue('6')
-    await slider.trigger('input')
+    // Length was a native range input; since the StudioSlider migration it is the house slider
+    // row (a scrub track, no <input type="range">), so drive it the way the other panel specs
+    // do — through the component's own model event.
+    const slider = w.findAllComponents({ name: 'StudioSlider' }).find(sl => sl.props('label') === 'Length')
+    expect(slider, 'the clip Length slider').toBeTruthy()
+    await slider!.vm.$emit('update:modelValue', 6)
     expect(w.emitted('patch-clip')).toBeTruthy()
+    expect(w.emitted('patch-clip')!.at(-1)![0]).toEqual({ duration: 6 })
   })
 
   it('the Add move button emits open-gallery', async () => {

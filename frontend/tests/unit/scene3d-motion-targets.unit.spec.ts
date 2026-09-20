@@ -21,17 +21,19 @@ describe('animatableTargets', () => {
     expect(t!.label).toBe('Brightness')
   })
 
-  it('offers lighting.sunIntensity with its declared slider range only once Advanced lighting is on', () => {
-    // The raw sun/ambient dials sit behind `lighting.advanced` (controls.ts `when`), and
-    // targets are derived from the same visibility gate the inspector uses.
+  it('offers lighting.sunIntensity with its declared slider range in Studio-look mode, and withholds it under an HDRI', () => {
+    // The raw sun/ambient dials used to sit behind an Advanced switch; since the HDRI work
+    // (09-17/18) they live in the Fine-tune card and are available throughout Studio-look
+    // mode. The gate that remains is the light SOURCE: under an HDRI the studio IS the light,
+    // so no sun dial owns anything. Targets derive from the same `when` the inspector uses.
     const doc = defaultDoc()
-    expect(animatableTargets(doc).find((x) => x.path === 'lighting.sunIntensity')).toBeUndefined()
-    doc.lighting.advanced = true
     const t = animatableTargets(doc).find((x) => x.path === 'lighting.sunIntensity')
     expect(t).toBeTruthy()
     expect(t!.min).toBe(0)
     expect(t!.max).toBe(3)
     expect(t!.label).toBe('Sun intensity')
+    doc.lighting.hdri = 'studio_small_03'
+    expect(animatableTargets(doc).find((x) => x.path === 'lighting.sunIntensity')).toBeUndefined()
   })
 
   it('includes a per-object relief path, id-addressed and labelled with the object name', () => {
@@ -158,21 +160,28 @@ describe('animatableTargets', () => {
     return animatableTargets(doc).map((t) => t.path).filter((p) => p.startsWith(prefix)).sort()
   }
 
-  // Lighting has two modes. Simple (the default) offers the three feel dials plus the
-  // light's direction; Advanced lighting reveals the raw sun/ambient dials on top.
-  // Both lists are exact, so growing either vocabulary has to be deliberate.
-  const SIMPLE_LIGHTING = [
-    'lighting.brightness', 'lighting.softness', 'lighting.sunAzimuth', 'lighting.sunElevation', 'lighting.warmth',
+  // Lighting has two modes, by light source. Studio look (the default) offers the three feel
+  // dials, the light's direction and the two Fine-tune dials; an HDRI offers only its own
+  // exposure and rotation. Both lists are exact, so growing either has to be deliberate.
+  const STUDIO_LIGHTING = [
+    'lighting.ambient', 'lighting.brightness', 'lighting.softness', 'lighting.sunAzimuth',
+    'lighting.sunElevation', 'lighting.sunIntensity', 'lighting.warmth',
   ]
 
-  it('offers exactly these lighting targets in simple mode (the default)', () => {
-    expect(docTargets('lighting.')).toEqual(SIMPLE_LIGHTING)
+  it('offers exactly these lighting targets in Studio-look mode (the default)', () => {
+    expect(docTargets('lighting.')).toEqual(STUDIO_LIGHTING)
   })
 
-  it('offers exactly these lighting targets once Advanced lighting is on', () => {
-    expect(docTargets('lighting.', (doc) => { doc.lighting.advanced = true })).toEqual([
-      ...SIMPLE_LIGHTING, 'lighting.ambient', 'lighting.sunIntensity',
-    ].sort())
+  it('offers exactly these lighting targets under an HDRI', () => {
+    expect(docTargets('lighting.', (doc) => { doc.lighting.hdri = 'studio_small_03' })).toEqual([
+      'lighting.hdriExposure', 'lighting.hdriRotation',
+    ])
+  })
+
+  it('hand-detaching the look to Custom withholds the three feel dials (they would recompute nothing)', () => {
+    expect(docTargets('lighting.', (doc) => { doc.lighting.custom = true })).toEqual(
+      STUDIO_LIGHTING.filter(k => !['lighting.brightness', 'lighting.softness', 'lighting.warmth'].includes(k)),
+    )
   })
 
   it('offers exactly these camera targets', () => {

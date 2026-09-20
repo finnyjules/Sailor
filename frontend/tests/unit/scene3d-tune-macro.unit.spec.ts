@@ -249,10 +249,11 @@ describe('same-kind is a NO-OP that preserves hand-tuned work', () => {
     expect(p[0]!.material.opalStrength).toBe(0.8)
   })
 
-  it('flipping Advanced lighting and setting a raw sun dial land together in ONE patch', async () => {
-    // `lighting.sunIntensity` is withheld until `lighting.advanced` is on, and the two
-    // arrive in the same patch. Without the adapter's gate contract the switch would land
-    // and the dial would be dropped against the pre-patch vocabulary.
+  it('a raw sun dial lands on its own, and a stale "advanced" switch from the model does not take it down', async () => {
+    // `lighting.sunIntensity` used to be withheld until `lighting.advanced` was on, so the two
+    // had to land in one patch. The Advanced switch is gone (the raw dials live in the
+    // Fine-tune card, always reachable in Studio-look mode) — but a model that still emits
+    // the old key must only lose THAT key, never the dial beside it.
     const doc = defaultDoc()
     doc.objects.push(createPrimitive('box', []))
     fetchMock.mockResolvedValueOnce({
@@ -265,8 +266,8 @@ describe('same-kind is a NO-OP that preserves hand-tuned work', () => {
     const node = sceneNode(doc)
     const res = await tuneScene3DNode(node, 'harder sun', KEY)
     expect(res.ok).toBe(true)
-    expect(readDoc(node).lighting.advanced).toBe(true)
     expect(readDoc(node).lighting.sunIntensity).toBe(2.5)
+    expect(readDoc(node).lighting.advanced).toBe(false)     // the retired key is ignored, not applied
   })
 
   it('a DIFFERENT kind adds alongside rather than mutating what is there', async () => {

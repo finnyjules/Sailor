@@ -4,38 +4,26 @@ import { mount } from '@vue/test-utils'
 import Panel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
 import VaryPalette from '~/components/vue-canvas/VaryPalette.vue'
 import { DEFAULT_CLONER, expandClones, type Cloner } from '~/composables/useCloner'
-// THE 3D SCHEMA. The Studio inspector's Cloner card draws its Vary rows from
-// `MODIFIER_SPECS` through `scenePanelControls`, so reading them here is what keeps the
-// two surfaces speaking one language — see the "Vary copy is the 3D Studio schema" block.
+// THE 3D SCHEMA. The Studio's Cloner inspector draws its Vary rows from `MODIFIER_SPECS`, so
+// reading them here is what keeps the two surfaces speaking one language — see the
+// "Vary copy is the 3D Studio schema" block.
 import { MODIFIER_SPECS } from '~/lib/scene3d/primParams'
-import { scenePanelControls } from '~/lib/scene3d/panelPresentation'
-import type { SceneDoc, SceneObject } from '~/lib/scene3d/config'
 
-const DOC = {
-  objects: [], background: '#000000', showFloor: false, camera: { fov: 45 }, lighting: {},
-} as unknown as SceneDoc
-
-/** A cloned primitive with the colour half on. `varyMode` 1 = random (reveals the seed),
- *  2 = falloff (reveals centre + reach) — no single mode shows all three dials. */
-const scene3dObj = (varyMode: number): SceneObject => ({
-  id: 'o', kind: 'primitive', primitive: 'box',
-  position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
-  material: { type: 'standard', color: '#ffffff' },
-  modifiers: { cloneCount: 6, varyMode, varyColor: 1 },
-} as unknown as SceneObject)
-
-/** Every Vary row the 3D inspector actually draws, row key -> the label it shows. */
+// Where the 3D Studio's Vary words come from. They used to be panel rows (`ui.cloner.*` anchors
+// and `object.modifiers.vary*` controls from scenePanelControls); since the modifier stack
+// (S1, 09-10) the Cloner's inspector draws them straight from MODIFIER_SPECS — `optionRowSpec`
+// and `varySliderSpec` in Scene3DStudioSurface.vue both take `label` from there — so THAT is
+// the one source the Frame's copy has to agree with. (The "Vary" heading and the palette
+// editor are literal markup on both sides now, not schema rows, so they are not in this map.)
 const SCENE3D_VARY_LABELS: Record<string, string> = Object.fromEntries(
-  [1, 2].flatMap((m) => scenePanelControls(DOC, scene3dObj(m)))
-    .filter((r) => r.key.toLowerCase().includes('vary'))
-    .map((r) => [r.key, r.label]),
+  MODIFIER_SPECS.filter((sp) => sp.key.startsWith('vary')).map((sp) => [sp.key, sp.label]),
 )
 
 /** The 3D label for one row. Throws rather than comparing against `undefined`, so a row
  *  renamed or gated away on that side fails loudly here instead of passing vacuously. */
 const label3d = (key: string): string => {
   const l = SCENE3D_VARY_LABELS[key]
-  if (!l) throw new Error(`the 3D inspector draws no '${key}' row — its Vary schema moved under this test`)
+  if (!l) throw new Error(`MODIFIER_SPECS has no '${key}' — the 3D Studio's Vary schema moved under this test`)
   return l
 }
 
@@ -172,15 +160,13 @@ describe('Vary copy is the 3D Studio schema, not a hand-copy of it', () => {
   // Every Vary label Frame shows, paired with the mount state that reveals it here and
   // the 3D row key it must agree with word for word.
   const LABELS: { row: string; over: Partial<Cloner> }[] = [
-    { row: 'ui.cloner.vary', over: {} },                                          // Vary
-    { row: 'ui.cloner.varyMode', over: {} },                                      // Pattern
-    { row: 'object.modifiers.varySeed', over: { varyMode: 'random' } },           // Vary seed
-    { row: 'object.modifiers.varyFalloffCenter', over: { varyMode: 'falloff' } }, // Centre
-    { row: 'object.modifiers.varyFalloffRadius', over: { varyMode: 'falloff' } }, // Reach
-    { row: 'ui.cloner.varyColor', over: {} },                                     // Vary colour
-    { row: 'ui.cloner.varyPalette', over: { varyColor: true } },                  // Palette
-    { row: 'ui.cloner.varyColorSpread', over: { varyColor: true } },              // Spread
-    { row: 'object.modifiers.varyColorStrength', over: { varyColor: true } },     // Colour strength
+    { row: 'varyMode', over: {} },                                  // Pattern
+    { row: 'varySeed', over: { varyMode: 'random' } },              // Vary seed
+    { row: 'varyFalloffCenter', over: { varyMode: 'falloff' } },    // Centre
+    { row: 'varyFalloffRadius', over: { varyMode: 'falloff' } },    // Reach
+    { row: 'varyColor', over: {} },                                 // Vary colour
+    { row: 'varyColorSpread', over: { varyColor: true } },          // Spread
+    { row: 'varyColorStrength', over: { varyColor: true } },        // Colour strength
   ]
 
   it('shows the 3D Studio label, word for word, for every Vary row', () => {

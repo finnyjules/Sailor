@@ -363,7 +363,13 @@ describe('the SVG of a solid extrude is ONE <path>, not N overlapping ones', () 
  * appearing in the diff, and the first version of this test missed it. Found by
  * deliberately adding one and watching the test stay green.
  */
-function specifiersOf(src: string): string[] {
+function specifiersOf(source: string): string[] {
+  // A type-only import is erased by the compiler: it is not a runtime edge and can drag
+  // nothing into a bundle. Without this the walk reported paper reachable from Vector Type
+  // through `motion/types.ts -> import type … effectTracks -> import type … useCompositorLayers`
+  // — two erased edges — once the Frame's effect tracks (F8) joined the motion types.
+  // (`import { type A, b }` is a real import and is still followed.)
+  const src = source.replace(/\b(?:import|export)\s+type\s+[^;'"]*?\bfrom\s+'[^']+'/g, '')
   const out: string[] = []
   for (const m of src.matchAll(/\bfrom\s+'([^']+)'/g)) out.push(m[1] as string)
   for (const m of src.matchAll(/\bimport\(\s*'([^']+)'\s*\)/g)) out.push(m[1] as string)

@@ -202,7 +202,9 @@ describe('`entry` is presentation, and is stripped from every derived vocabulary
   // model is handed, or every studio's vocabulary dump shifts the day a row opts in.
   const STRIP_SITES: Array<[string, number]> = [
     ['app/lib/gradientfx/agentControls.ts', 1],
-    ['app/lib/scene3d/agentControls.ts', 2],
+    // four since the modifier stack and the treatments each got their own descriptor walk
+    // (S1/S2, 09-10) — every one of them strips `entry`, which is what the loop below checks.
+    ['app/lib/scene3d/agentControls.ts', 4],
     ['app/lib/shapefx/agentControls.ts', 1],
     ['app/lib/geoshape/agentControls.ts', 1],
     ['app/lib/vectortype/agentControls.ts', 2],

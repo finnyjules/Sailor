@@ -59,7 +59,9 @@ describe('shader fill model', () => {
 
   it('round-trips through serializeFills/parseFills (the save/reload path)', () => {
     const original = shaderFill({
-      shader: { effectId: 'kaleidoscope', params: { segments: 6 }, anchor: 'frame', speed: 0.5,
+      // `seed` is a required ShaderSpec field since 09-03 (5fa4c1c4d); a non-default value here
+      // proves the save/reload path carries the AUTHORED seed rather than re-defaulting it.
+      shader: { effectId: 'kaleidoscope', params: { segments: 6 }, anchor: 'frame', speed: 0.5, seed: 7,
                 input: { ...DEFAULT_FILL, type: 'gradient', a: '#ff0000' } },
     })
     const [back] = parseFills(serializeFills([original]))
@@ -165,12 +167,19 @@ describe('normalizePaint (routing order is a migration-safety condition)', () =>
 })
 
 describe('no migration: a persisted ShaderSpec is untouched by normalizeShaderSpec', () => {
-  it('a Fill input, as persisted today, round-trips through normalizeShaderSpec unchanged', () => {
-    const persisted: ShaderSpec = {
+  // "Untouched" has one deliberate exception: `seed` joined ShaderSpec on 09-03 as a required
+  // field, so a spec saved BEFORE that gains the default seed on read — and nothing else. A spec
+  // saved since carries its own seed and round-trips exactly.
+  const withDefaultSeed = (spec: object) => ({ ...spec, seed: DEFAULT_SHADER_SPEC.seed })
+
+  it('a Fill input round-trips unchanged; one saved before seeds existed gains only the default seed', () => {
+    const preSeed = {
       effectId: 'kaleidoscope', params: { segments: 6 }, anchor: 'frame', speed: 0.5,
       input: { type: 'gradient', a: '#ff0000', b: '#00ff00', textColor: '#ffffff', angle: 12, density: 3 },
     }
-    expect(normalizeShaderSpec(persisted, 0)).toEqual(persisted)
+    expect(normalizeShaderSpec(preSeed, 0)).toEqual(withDefaultSeed(preSeed))
+    const today: ShaderSpec = { ...preSeed, seed: 7 } as ShaderSpec
+    expect(normalizeShaderSpec(today, 0)).toEqual(today)
   })
 
   it('a Fill input missing `density` (the hand-edited case) is repaired exactly as before, not dropped to a fallback', () => {
@@ -187,9 +196,11 @@ describe('no migration: a persisted ShaderSpec is untouched by normalizeShaderSp
 
   it('a Gradient input, as it would be freshly saved by step 3, round-trips unchanged too', () => {
     const persisted: ShaderSpec = {
-      effectId: 'fbm_warp', params: {}, anchor: 'object', speed: 1,
+      effectId: 'fbm_warp', params: {}, anchor: 'object', speed: 1, seed: 11,
       input: { type: 'radial', stops: [{ offset: 0, color: '#000000' }, { offset: 1, color: '#ffffff' }] },
     }
     expect(normalizeShaderSpec(persisted, 0)).toEqual(persisted)
+    const { seed: _seed, ...preSeed } = persisted
+    expect(normalizeShaderSpec(preSeed, 0)).toEqual(withDefaultSeed(preSeed))
   })
 })

@@ -31,10 +31,13 @@ describe('vueNodesResolved', () => {
     expect(vueNodesResolved('garbage', true)).toBe(true)
   })
 
-  it('local keeps the stored setting exactly as before', () => {
+  it('local resolves ON too — the Vue canvas is the only canvas (bridge retirement, Tier 1)', () => {
+    // Until 411e392f9 a stored 'false' routed local dev to the LiteGraph canvas, which rode the
+    // bridge iframe. That iframe is being removed, so 'false' would now wait out a 120 s bridge
+    // timeout on an empty canvas — the resolver ignores the stored value in every mode.
     expect(vueNodesResolved(null, false)).toBe(true)
     expect(vueNodesResolved('true', false)).toBe(true)
-    expect(vueNodesResolved('false', false)).toBe(false)
+    expect(vueNodesResolved('false', false)).toBe(true)
     expect(vueNodesResolved('garbage', false)).toBe(true)
   })
 })

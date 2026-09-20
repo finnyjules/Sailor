@@ -12,10 +12,15 @@ const BLUE = '#2e5be4'
 const direct2 = (): Gradient => ({ type: 'linear', angle: 90, stops: [{ offset: 0, color: ORANGE }, { offset: 1, color: BLUE }] })
 
 const mountWith = (g: Gradient) => mount(GradientEditor, { props: { modelValue: g } })
+// Interpolation was a row of three buttons; since the studio-row polish (98c60a2e0) it is a
+// labelled StudioSelect — a native <select aria-label="Interpolation"> under the row. Pick the
+// option the way a person does; the name is kept so the cases below read as they did.
 const clickInterp = async (w: ReturnType<typeof mountWith>, label: string) => {
-  const btn = w.findAll('button').find(b => b.text() === label)
-  if (!btn) throw new Error('no interpolation button ' + label)
-  await btn.trigger('click')
+  const sel = w.find('select[aria-label="Interpolation"]')
+  if (!sel.exists()) throw new Error('no Interpolation select')
+  const opt = sel.findAll('option').find(o => o.text() === label || o.attributes('value') === label)
+  if (!opt) throw new Error('no interpolation option ' + label)
+  await sel.setValue(opt.attributes('value') ?? label)
 }
 const lastEmit = (w: ReturnType<typeof mountWith>): Gradient & { interp?: string; interpBase?: GradientStop[] } => {
   const ev = w.emitted('update:modelValue')

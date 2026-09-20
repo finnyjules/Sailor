@@ -214,7 +214,13 @@ describe('peekSolidBody — a look, never a computation', () => {
 
 /** Task 5's specifier scanner, verbatim in behaviour: `from '…'`, `import('…')`
  *  AND the bare `import '…'` its first version missed. */
-function specifiersOf(src: string): string[] {
+function specifiersOf(source: string): string[] {
+  // A type-only import is erased by the compiler: it is not a runtime edge and can drag
+  // nothing into a bundle. Without this the walk reported paper reachable from Vector Type
+  // through `motion/types.ts -> import type … effectTracks -> import type … useCompositorLayers`
+  // — two erased edges — once the Frame's effect tracks (F8) joined the motion types.
+  // (`import { type A, b }` is a real import and is still followed.)
+  const src = source.replace(/\b(?:import|export)\s+type\s+[^;'"]*?\bfrom\s+'[^']+'/g, '')
   const out: string[] = []
   for (const m of src.matchAll(/\bfrom\s+'([^']+)'/g)) out.push(m[1] as string)
   for (const m of src.matchAll(/\bimport\(\s*'([^']+)'\s*\)/g)) out.push(m[1] as string)
@@ -255,6 +261,12 @@ describe('the body cache is PAPER-FREE — the reason it is its own module', () 
     expect(offenders).toEqual([])
     expect([...seen].some(f => f.endsWith('extrudeSolid.ts'))).toBe(false)
     expect([...seen].some(f => f.endsWith('canvas.ts'))).toBe(false)
+  })
+
+  it('the walk still SEES a real paper edge (positive control for the type-only skip)', () => {
+    // extrudeSolid.ts is the one Vector Type module that genuinely loads paper. If skipping
+    // erased imports ever made the walk blind, this goes red before the guard above lies.
+    expect(graphFrom('lib/vectortype/extrudeSolid.ts').offenders.length).toBeGreaterThan(0)
   })
 
   it('is a LEAF — it imports types only, so importing it costs nothing at runtime', () => {
