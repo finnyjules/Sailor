@@ -78,8 +78,12 @@ function recordFor(key: string): boolean {
 function gesture(key: string) {
   return {
     'data-owns-keys': '',
-    onPointerdown: () => { undoRun = openRun(undoRun, key) },
-    onKeydown: () => { undoRun = openRun(undoRun, key) },
+    // CAPTURE phase: the row's own keydown / pointerdown handler can emit a value straight
+    // away (an arrow-key nudge does), and a bubbling listener here would only hear about the
+    // gesture AFTER that first value — which then recorded on its own, making a held key two
+    // undo steps instead of one.
+    onPointerdownCapture: () => { undoRun = openRun(undoRun, key) },
+    onKeydownCapture: () => { undoRun = openRun(undoRun, key) },
     onPointerup: () => { undoRun = closeRun() },
     onPointercancel: () => { undoRun = closeRun() },
     onLostpointercapture: () => { undoRun = closeRun() },
