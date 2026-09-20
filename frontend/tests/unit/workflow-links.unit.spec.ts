@@ -122,6 +122,43 @@ describe('assembleWorkflowLinks', () => {
     expect(collection.outputs![0].links).toEqual([2])
   })
 
+  it('is idempotent on the live objects — a repeat call with unchanged edges rewrites nothing', () => {
+    // Regression for the Frame-editor open freeze: convertToLiteGraph hands the
+    // LIVE reactive node inputs/outputs into this function by reference, so any
+    // write here lands on the graph the deep autosave watch observes. The old
+    // code reassigned `output.links = []` (a fresh array) on EVERY call, so a
+    // no-op serialize still tripped the watch → re-dirtied → re-serialized: a
+    // feedback loop. A repeat call with identical connectivity must now leave the
+    // exact same references in place (zero reactive writes).
+    const a = node(1)
+    const b = node(2)
+    assembleWorkflowLinks([a, b], [edge(1, 2)])
+    const outRef = a.outputs![0].links
+    const inVal = b.inputs![0].link
+    expect(outRef).toEqual([1])
+    expect(inVal).toBe(1)
+
+    assembleWorkflowLinks([a, b], [edge(1, 2)])
+    // Same array IDENTITY (not just equal) ⇒ no reactive set fired.
+    expect(a.outputs![0].links).toBe(outRef)
+    expect(b.inputs![0].link).toBe(inVal)
+  })
+
+  it('still rewrites link fields when connectivity actually changes', () => {
+    const a = node(1)
+    const b = node(2)
+    const c = node(3)
+    assembleWorkflowLinks([a, b, c], [edge(1, 2)])
+    expect(b.inputs![0].link).toBe(1)
+    expect(c.inputs![0].link).toBeNull()
+
+    // Move the edge from b to c.
+    assembleWorkflowLinks([a, b, c], [edge(1, 3)])
+    expect(b.inputs![0].link).toBeNull()
+    expect(c.inputs![0].link).toBe(1)
+    expect(a.outputs![0].links).toEqual([1])
+  })
+
   it('round-trips a VARS link tuple: edges → links[] → re-wired inputs, matching a save/reload cycle', () => {
     // Regression for the persistence bug: a workflow's links[] containing a
     // VARS tuple must leave the target input wired when rebuilt — this is the

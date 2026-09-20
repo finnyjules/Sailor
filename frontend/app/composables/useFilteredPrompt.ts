@@ -228,10 +228,21 @@ export function assembleWorkflowLinks(
   const nodeById = new Map<number, LiteGraphNode>()
   for (const n of lgNodes) nodeById.set(n.id, n)
 
-  for (const node of lgNodes) {
-    for (const input of node.inputs || []) input.link = null
-    for (const output of node.outputs || []) output.links = []
-  }
+  // Compute the DESIRED link state from `edges` into scratch maps first, without
+  // touching the node objects. `convertToLiteGraph` passes the live Vue Flow node
+  // data in by reference (`inputs: d.inputs` / `outputs: d.outputs`), so those
+  // objects are reactive — a write here is a write the deep autosave graph watch
+  // observes. The old code cleared and rebuilt every input.link/output.links up
+  // front, which reassigned `output.links` to a fresh `[]` on EVERY call even when
+  // connectivity was unchanged; the watch then saw a change on every serialize,
+  // re-dirtied the canvas, and re-serialized — a feedback loop that froze the UI
+  // for seconds whenever a Frame editor opened (each open dirties once, then the
+  // loop thrashes). Diff-assigning below (write only on an ACTUAL change) makes a
+  // no-op serialize perform zero reactive writes, so it can no longer re-trigger
+  // the watch. The returned tuples and the final per-node link values are
+  // byte-identical to before.
+  const wantInputLink = new Map<LiteGraphNode, Map<number, number>>()
+  const wantOutputLinks = new Map<LiteGraphNode, Map<number, number[]>>()
 
   const lgLinks: any[] = []
   let linkId = 0
@@ -254,14 +265,50 @@ export function assembleWorkflowLinks(
     ])
 
     if (sourceNode.outputs?.[originSlot]) {
-      if (!sourceNode.outputs[originSlot].links) sourceNode.outputs[originSlot].links = []
-      sourceNode.outputs[originSlot].links!.push(linkId)
+      let bySlot = wantOutputLinks.get(sourceNode)
+      if (!bySlot) wantOutputLinks.set(sourceNode, (bySlot = new Map()))
+      let arr = bySlot.get(originSlot)
+      if (!arr) bySlot.set(originSlot, (arr = []))
+      arr.push(linkId)
     }
     if (targetNode.inputs?.[targetSlot]) {
-      targetNode.inputs[targetSlot].link = linkId
+      let bySlot = wantInputLink.get(targetNode)
+      if (!bySlot) wantInputLink.set(targetNode, (bySlot = new Map()))
+      bySlot.set(targetSlot, linkId)
+    }
+  }
+
+  // Diff-assign: an unconnected input's desired link is `null`, an unconnected
+  // output's desired links is `[]`. Write only when the live value differs — a
+  // `null → []` normalisation (fresh nodes load `links: null`) happens once, then
+  // stays stable, so it never loops.
+  for (const node of lgNodes) {
+    const inWant = wantInputLink.get(node)
+    let slot = 0
+    for (const input of node.inputs || []) {
+      const want = inWant?.get(slot++) ?? null
+      if (input.link !== want) input.link = want
+    }
+    const outWant = wantOutputLinks.get(node)
+    slot = 0
+    for (const output of node.outputs || []) {
+      // Fresh `[]` for the unconnected case (not a shared sentinel): after the
+      // one-time `null → []` normalisation the `sameLinkList` guard skips the
+      // write, so a per-output array can't be aliased across nodes and corrupted
+      // by an in-place mutation elsewhere.
+      const want = outWant?.get(slot++) ?? []
+      if (!sameLinkList(output.links, want)) output.links = want
     }
   }
   return lgLinks
+}
+
+/** Shallow array equality; a non-array (null/undefined) is never equal, forcing
+ *  the one-time `null → []` normalisation the callers/tests expect. */
+function sameLinkList(a: number[] | null | undefined, b: number[]): boolean {
+  if (!Array.isArray(a) || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
 }
 
 /**
