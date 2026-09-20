@@ -12,7 +12,7 @@
  *  projection, pan and the gradient — see bakeCfg. */
 import type { SpaceTypeClip, MotionBake } from '~~/shared/timeline/types'
 import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
-import { dimsFromKey } from '~/lib/spacetype/state'
+import { dimsFromState } from '~/lib/spacetype/state'
 import { spaceTypeSourceFrameCount } from '~/composables/timelineSpaceTypeClip'
 import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
 import { renderSpaceTypeClipToCanvas, spaceTypeLoopMultiplier } from './spaceTypeClipRenderer'
@@ -38,7 +38,7 @@ export function spaceTypeBakeFrameCount(clip: SpaceTypeClip): number {
  *  bag is the cheapest correct fix — the key is opaque, so extra entries only
  *  ever cause a (correct) re-bake. */
 export function bakeCfg(clip: SpaceTypeClip) {
-  const [W, H] = dimsFromKey(clip.state.dimsKey)
+  const [W, H] = dimsFromState(clip.state)
   const k = spaceTypeLoopMultiplier(clip)
   return {
     effectId: clip.state.effectId,

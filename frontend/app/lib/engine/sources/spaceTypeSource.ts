@@ -7,7 +7,7 @@
  *  the returned image is valid only until the next getFrame call, and
  *  WebGLPreviewRenderer.renderFrame uploads to a texture before advancing. */
 import type { Clip, SpaceTypeClip } from '~~/shared/timeline/types'
-import { dimsFromKey } from '~/lib/spacetype/state'
+import { dimsFromState } from '~/lib/spacetype/state'
 import { renderSpaceTypeClipToCanvas } from '~/lib/engine/spaceTypeClipRenderer'
 import { acquireSpaceTypeEngine, releaseSpaceTypeEngine, isSpaceTypeEngineHandleLive, type SpaceTypeEngineHandle } from '~/lib/engine/spaceTypeEnginePool'
 import type { FrameSource } from './frameSource'
@@ -20,7 +20,7 @@ export class SpaceTypeSource implements FrameSource {
   private handle: SpaceTypeEngineHandle | null
 
   constructor(private clip: SpaceTypeClip, private fps: number) {
-    const [W, H] = dimsFromKey(clip.state.dimsKey)
+    const [W, H] = dimsFromState(clip.state)
     this.w = W
     this.h = H
     // Acquire ONCE per source, at construction — never per frame. See the

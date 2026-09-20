@@ -5,7 +5,7 @@
 import type { SpaceTypeClip } from '~~/shared/timeline/types'
 import type { SpaceTypeState } from '~~/shared/spacetype/state'
 import { spaceTypeSourceKey } from '~/lib/spacetype/sourceKey'
-import { dimsFromKey } from '~/lib/spacetype/state'
+import { dimsFromState } from '~/lib/spacetype/state'
 
 let seq = 0
 function id(prefix: string): string {
@@ -15,7 +15,7 @@ function id(prefix: string): string {
 
 /** The content hash for a state, used for both bake caching and staleness. */
 export function spaceTypeStateKey(state: SpaceTypeState): string {
-  const [W, H] = dimsFromKey(state.dimsKey)
+  const [W, H] = dimsFromState(state)
   return spaceTypeSourceKey({
     effectId: state.effectId,
     params: state.params,

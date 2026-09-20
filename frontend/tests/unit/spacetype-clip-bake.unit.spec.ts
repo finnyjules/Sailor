@@ -57,7 +57,7 @@ vi.mock('../../app/lib/studio/frameUpload', () => ({
 
 import { spaceTypeBakeFrameCount, spaceTypeLoopMultiplier, bakeCfg, ensureSpaceTypeClipBake } from '../../app/lib/engine/spaceTypeClipBake'
 import { sourceT01 } from '../../app/lib/engine/spaceTypeClipRenderer'
-import { createSpaceTypeClip } from '../../app/composables/timelineSpaceTypeClip'
+import { createSpaceTypeClip, spaceTypeStateKey } from '../../app/composables/timelineSpaceTypeClip'
 import { defaultSpaceTypeState } from '../../app/lib/spacetype/state'
 import { spaceTypeSourceKey } from '../../app/lib/spacetype/sourceKey'
 import { __registerEffect } from '../../app/lib/spacetype/effects/index'
@@ -126,6 +126,15 @@ describe('bakeCfg hashes everything that changes the pixels', () => {
     expect(keyFor(withState({ effectId: 'ribbon' }))).not.toBe(keyFor(withState({ effectId: 'tunnel' })))
     const base = st()
     expect(keyFor(withState({ params: { ...base.params, rows: 3 } }))).not.toBe(keyFor(withState({ params: { ...base.params, rows: 9 } })))
+  })
+
+  it('bakes a Custom size at its saved width and height, not the 960×540 fallback', () => {
+    // 'Custom' is in no preset table — the saved W/H are the only record of the real size.
+    const custom = withState({ dimsKey: 'Custom', W: 1234, H: 567 })
+    expect([bakeCfg(custom).W, bakeCfg(custom).H]).toEqual([1234, 567])
+    expect(keyFor(custom)).not.toBe(keyFor(withState({ dimsKey: 'Custom', W: 800, H: 800 })))
+    // The staleness key must see it too, or resizing the node never marks its clip stale.
+    expect(spaceTypeStateKey(custom.state)).not.toBe(spaceTypeStateKey(withState({ dimsKey: 'Custom', W: 800, H: 800 }).state))
   })
 
   it('does NOT change when only placement, trim or opacity change', () => {
