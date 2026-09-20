@@ -22,11 +22,20 @@ export const TIME_DIALS: readonly string[] = ['u_speed', 'u_shimmer']
  * test covers kaleidoscope and mirror, whose Speed is gated on their mode.
  *
  * A dial at zero means the effect renders the same picture at every `t`, so one
- * frame is the honest answer. An effect with no dial at all (crystal facets,
- * halftone) is unchanged: it never asks.
+ * frame is the honest answer. A STATIC effect (`animated: false`) with no dial
+ * (crystal facets, halftone) is unchanged: it never asks.
+ *
+ * The exception is an effect that is `animated: true` yet declares NO time dial:
+ * it drives itself off `u_time` UNCONDITIONALLY (slice_shift multiplies nothing —
+ * it just reads the clock), so there is no dial to gate it and it always wants a
+ * clock. Without this it renders one frozen frame and its Speed/Step look dead in
+ * the studio while the same effect animates fine as a Compositor fill (whose loop
+ * keys off the fill's own `speed`, not on a per-effect dial).
  */
 export function effectWantsClock(def: EffectDef | null | undefined, overrides: Record<string, ParamValue> = {}): boolean {
   if (!def) return false
+  const hasTimeDial = def.params.some(p => TIME_DIALS.includes(p.uniform))
+  if (!hasTimeDial) return def.animated === true
   // resolveValues fills in defaults and repairs junk, so an unset dial reads its
   // manifest default and a stored nonsense value cannot fake or hide motion.
   const values = resolveValues(def, overrides)
