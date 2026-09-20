@@ -24,9 +24,11 @@ const enumEffect = { id: 'facet-shape', name: 'Facet Shape', params: [
 ] } as any
 
 describe('shader fill controls', () => {
-  it('declares exactly the three frozen keys', () => {
+  it('declares exactly the four frozen keys', () => {
+    // `seed` joined on 09-03 (5fa4c1c4d — a required ShaderSpec field); controls.ts documents
+    // all four as frozen. This expectation was left at three and has been red since.
     expect(getShaderFillControls().map(c => c.key))
-      .toEqual(['fill.shader.effectId', 'fill.shader.anchor', 'fill.shader.speed'])
+      .toEqual(['fill.shader.effectId', 'fill.shader.anchor', 'fill.shader.speed', 'fill.shader.seed'])
   })
   it('derives one spec per effect param addressed at the real ShaderSpec.params path', () => {
     const d = derivedShaderFillControls(effect, 'fill.shader')
