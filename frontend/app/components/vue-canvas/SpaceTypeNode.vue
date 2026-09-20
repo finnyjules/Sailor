@@ -17,6 +17,7 @@ import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { onCanvasOcclusion } from '~/lib/studio/occlusion'
 import { makeSpaceTypeFrameSource } from '~/lib/spacetype/frameSource'
+import { syncImageTextures } from '~/lib/spacetype/imageTextures'
 import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
 import { loadGoogleCatalog } from '~/data/google-fonts'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
@@ -90,6 +91,14 @@ function applyGate() {
   const shouldRun = gate.visible && gate.tabActive && !gate.occluded && gate.hovered && !!engine && webglOk.value
   if (shouldRun && !raf) startPreview()
   else if (!shouldRun && raf) stopPreview()
+}
+
+// A Showcase's image cards are preloaded into the card engine before its synchronous
+// build (see syncImageTextures) — without this the card, and anything wired to it, shows
+// blank cards where the photos should be. Every caller rebuilds straight after.
+async function syncCardImages() {
+  const eng = engine
+  if (eng) await syncImageTextures(eng, state.value.effectId, state.value.params, () => engine === eng)
 }
 
 function rebuild() {
@@ -177,6 +186,7 @@ onMounted(async () => {
     projection: s.projection ?? 'perspective',
   })
   await ensureSpaceTypeFont(String(s.params.font))
+  await syncCardImages()
   rebuild()
   // Weight pinning for static families (texOptsFromState) reads the Google
   // catalog cache; module-cached, one fetch per page. Rebuild both engines when
@@ -194,7 +204,11 @@ onMounted(async () => {
       const k = s.seamless ? loopMultiplier(getEffect(s.effectId).loopRates?.(s.params) ?? []) : 1
       return { duration: effectiveLoopSeconds(s.loopDuration, k), fps: s.fps, width: cw, height: ch }
     },
-    renderAt: (t01, w, h) => {
+    renderAt: async (t01, w, h) => {
+      // A Showcase's image cards must be loaded into THIS engine before its synchronous
+      // build. A no-op (no await on anything real) unless the image set changed.
+      const fresh = createHeadless(w, h)
+      if (fresh && await syncImageTextures(fresh, state.value.effectId, state.value.params, () => headlessEngine === fresh)) headlessDirty = true
       const eng = ensureHeadless(w, h)
       if (!eng || !headlessCanvas) return null
       const s = state.value
@@ -219,7 +233,7 @@ onMounted(async () => {
 // from the frame source's renderAt, so nothing is created until a downstream
 // consumer actually pulls. `headlessDirty` defers geometry rebuilds to the next
 // pull instead of rebuilding an offscreen engine per config keystroke.
-function ensureHeadless(w: number, h: number): SpaceTypeEngine | null {
+function createHeadless(w: number, h: number): SpaceTypeEngine | null {
   if (!detectWebGL()) return null
   if (!headlessEngine) {
     headlessCanvas = document.createElement('canvas')
@@ -237,20 +251,26 @@ function ensureHeadless(w: number, h: number): SpaceTypeEngine | null {
     // a fallback face. Config-driven font changes are primed by the card's own await.
     void ensureSpaceTypeFont(String(s.params.font)).then(() => { headlessDirty = true })
   }
+  return headlessEngine
+}
+
+function ensureHeadless(w: number, h: number): SpaceTypeEngine | null {
+  const eng = createHeadless(w, h)
+  if (!eng) return null
   if (headlessDirty) {
     const s = state.value
-    headlessEngine.setSize(w, h)   // BEFORE build — geometry layout reads the size
-    headlessEngine.setBackground(s.transparent, s.bgColor)
-    headlessEngine.setProjection(s.projection ?? 'perspective')
-    headlessEngine.setPost({ ...(s.post ?? DEFAULT_POST) })
-    headlessEngine.setPan(s.panX ?? 0, s.panY ?? 0)
-    headlessEngine.setFps(s.fps)
-    headlessEngine.setLoopDuration(s.loopDuration)
-    headlessEngine.setEffect(getEffect(s.effectId))
-    headlessEngine.build(s.params, texOptsFromState(s))
+    eng.setSize(w, h)   // BEFORE build — geometry layout reads the size
+    eng.setBackground(s.transparent, s.bgColor)
+    eng.setProjection(s.projection ?? 'perspective')
+    eng.setPost({ ...(s.post ?? DEFAULT_POST) })
+    eng.setPan(s.panX ?? 0, s.panY ?? 0)
+    eng.setFps(s.fps)
+    eng.setLoopDuration(s.loopDuration)
+    eng.setEffect(getEffect(s.effectId))
+    eng.build(s.params, texOptsFromState(s))
     headlessDirty = false
   }
-  return headlessEngine
+  return eng
 }
 
 // Headless full-res frame for the render cascade (generative — no input). Renders
@@ -318,6 +338,7 @@ watch(state, (s) => {
     if (!engine) return
     previewH.value = previewHeight(s)
     await ensureSpaceTypeFont(String(s.params.font))
+    await syncCardImages()
     rebuild()
   }, 80)
 }, { deep: true })

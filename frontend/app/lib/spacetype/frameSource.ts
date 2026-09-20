@@ -13,8 +13,10 @@ import type { StudioFrameSource } from '~/lib/studio/frameSource'
 
 export interface SpaceTypeFrameDeps {
   getClock: () => { duration: number; fps: number; width: number; height: number }
-  /** Render into the engine's canvas and return it, or null if the engine is not ready. */
-  renderAt: (t01: number, w: number, h: number) => TexImageSource | null
+  /** Render into the engine's canvas and return it, or null if the engine is not ready.
+   *  May be async: a Showcase must load its image cards before the engine's (synchronous)
+   *  build, or the first pulled frames carry blank cards. */
+  renderAt: (t01: number, w: number, h: number) => TexImageSource | null | Promise<TexImageSource | null>
 }
 
 export function makeSpaceTypeFrameSource(deps: SpaceTypeFrameDeps): StudioFrameSource {
@@ -26,7 +28,7 @@ export function makeSpaceTypeFrameSource(deps: SpaceTypeFrameDeps): StudioFrameS
     get width() { return deps.getClock().width },
     get height() { return deps.getClock().height },
     getFrame: async (t01, w, h) => {
-      const surface = deps.renderAt(t01, w, h)
+      const surface = await deps.renderAt(t01, w, h)
       // Fail loudly here rather than returning null: a not-yet-mounted engine
       // would otherwise surface several frames later as an opaque WebGL
       // "invalid texture source" error at the consumer's upload call.
