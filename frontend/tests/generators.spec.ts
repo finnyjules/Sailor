@@ -288,44 +288,6 @@ test.describe('Generators panel + use-case nodes', () => {
       expect(entry.outputs?.['3']?.images?.length).toBeGreaterThan(0)
     })
 
-    test('GenerateEmoji returns an image', async ({ page, request }) => {
-      // Same issue as FaceSwap: predictions create but never start.
-      // Verified with a funded account.
-      test.skip(true, 'flux-kontext-apps/kontext-emoji-maker predictions never leave "starting" state')
-      const img = await findInputImage(request)
-      test.skip(!img, 'no image in input/')
-      const entry = await runPrompt(request, page, {
-        '1': { class_type: 'LoadImage',         inputs: { image: img! } },
-        '2': { class_type: 'GenerateEmojiNode', inputs: {
-                  model: 'Flux Kontext · Emoji',
-                  input_image: ['1', 0],
-                  prompt: 'Turn this image into the emoji style of Apple iOS system',
-                  aspect_ratio: 'match_input_image',
-                  lora_strength: 1.0,
-                  output_format: 'png',
-              } },
-        '3': { class_type: 'PreviewImage',      inputs: { images: ['2', 0] } },
-      })
-      expectSuccess(entry, 'GenerateEmoji')
-      expect(entry.outputs?.['3']?.images?.length).toBeGreaterThan(0)
-    })
-
-    test('GenerateAnime returns an image', async ({ page, request }) => {
-      test.setTimeout(5 * 60 * 1000)
-      const entry = await runPrompt(request, page, {
-        '1': { class_type: 'GenerateAnimeNode', inputs: {
-                  model: 'Animagine XL',
-                  prompt: '1girl, school uniform, cherry blossoms, masterpiece',
-                  negative_prompt: 'lowres, bad anatomy',
-                  width: 768, height: 768,
-                  num_inference_steps: 25, guidance_scale: 7.0, seed: 0,
-              } },
-        '2': { class_type: 'PreviewImage',      inputs: { images: ['1', 0] } },
-      })
-      expectSuccess(entry, 'GenerateAnime')
-      expect(entry.outputs?.['2']?.images?.length).toBeGreaterThan(0)
-    })
-
     test('EnhanceVideo (Topaz) returns a video', async ({ page, request }) => {
       test.setTimeout(15 * 60 * 1000)
       const entry = await runPrompt(request, page, {

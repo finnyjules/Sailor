@@ -114,11 +114,10 @@ describe('groupByIntent', () => {
   it('sorts section items by display title (useCase when mapped, label otherwise)', () => {
     const items = [
       fake('SketchToImageNode'),   // "Sketch to image"
-      fake('GenerateAnimeNode'),   // "Generate an anime image"
       fake('GenerateImageNode'),   // "Generate an image"
     ]
     const { sections } = groupByIntent(items, [])
     expect(sections[0]!.items.map(i => i.nodeType))
-      .toEqual(['GenerateAnimeNode', 'GenerateImageNode', 'SketchToImageNode'])
+      .toEqual(['GenerateImageNode', 'SketchToImageNode'])
   })
 })

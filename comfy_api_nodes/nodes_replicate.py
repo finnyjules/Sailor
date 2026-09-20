@@ -482,10 +482,10 @@ class FluxLoRARemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="FluxLoRARemoteNode",
-            display_name="Flux Dev + LoRA (Replicate)",
+            display_name="Flux Dev + LoRA",
             category="api node/image/Replicate",
             description=(
-                "Run Flux Dev with a LoRA on Replicate's GPU. Picks the LoRA "
+                "Run Flux Dev with a LoRA in the cloud. Picks the LoRA "
                 "by filename from models/loras/ (the cloud trainer writes a "
                 "sidecar JSON with the public URL), or use the `lora_url` "
                 "override for LoRAs hosted elsewhere. Requires "
@@ -681,11 +681,11 @@ class FluxMultiLoRARemoteNode(IO.ComfyNode):
         lora_options = folder_paths.get_filename_list("loras") + ["[None]"]
         return IO.Schema(
             node_id="FluxMultiLoRARemoteNode",
-            display_name="Flux Dev + LoRAs (Replicate)",
+            display_name="Flux Dev + LoRAs",
             category="api node/image/Replicate",
             description=(
-                "Stack up to FOUR LoRAs on Flux Dev in a single generation via "
-                "Replicate's lucataco/flux-dev-multi-lora — e.g. a character "
+                "Stack up to FOUR LoRAs on Flux Dev in a single generation "
+                "— e.g. a character "
                 "LoRA + a style LoRA + accents, each with its own scale. Pick "
                 "locally-trained LoRAs (uses the weights artifact from their "
                 "sidecar) or override a slot with a HuggingFace / CivitAI / "
@@ -991,11 +991,11 @@ class FluxProRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="FluxProRemoteNode",
-            display_name="Flux 1.1 Pro (Replicate)",
+            display_name="Flux 1.1 Pro",
             category="api node/image/Replicate",
             description=(
-                "Flux 1.1 Pro on Replicate. Top-tier image quality, ~$0.04 per image, "
-                "~5–10 s. Requires REPLICATE_API_TOKEN."
+                "Flux 1.1 Pro. Top-tier image quality, ~$0.04 per image, "
+                "~5–10 s."
             ),
             inputs=[
                 IO.String.Input("prompt", multiline=True, default="",
@@ -1016,7 +1016,7 @@ class FluxProRemoteNode(IO.ComfyNode):
                              tooltip="1 = strict, 6 = permissive.",
                              advanced=True),
                 IO.Boolean.Input("prompt_upsampling", default=False,
-                                 tooltip="Let Replicate rewrite your prompt for better results.",
+                                 tooltip="Let the model rewrite your prompt for better results.",
                                  advanced=True),
                 IO.Combo.Input("output_format", options=["png", "jpg"], default="png", advanced=True),
                 IO.Int.Input("seed", default=0, min=0, max=0xFFFFFFFF,
@@ -1302,7 +1302,7 @@ class KlingVideoRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="KlingVideoRemoteNode",
-            display_name="Kling 2.1 Video (Replicate)",
+            display_name="Kling 2.1 Video",
             category="api node/video/Replicate",
             description=(
                 "Kling 2.1 text-to-video or image-to-video. ~$0.35 for 5s, "
@@ -1378,7 +1378,7 @@ class ClarityUpscaleRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="ClarityUpscaleRemoteNode",
-            display_name="Clarity Upscale (Replicate)",
+            display_name="Clarity Upscale",
             category="api node/image/Replicate",
             description=(
                 "philz1337x/clarity-upscaler — high-quality detail-enhancing "
@@ -1461,7 +1461,7 @@ class IdeogramV3TurboNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="IdeogramV3TurboRemoteNode",
-            display_name="Ideogram V3 Turbo (Replicate)",
+            display_name="Ideogram V3 Turbo",
             category="api node/image/Replicate",
             description=(
                 "Ideogram V3 Turbo — the strongest model for typography, posters, "
@@ -1510,7 +1510,7 @@ class Veo3RemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="Veo3RemoteNode",
-            display_name="Veo 3 (Replicate)",
+            display_name="Veo 3",
             category="api node/video/Replicate",
             description=(
                 "Google Veo 3 — flagship text-to-video with synchronized audio "
@@ -1565,7 +1565,7 @@ class Seedance2RemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="Seedance2RemoteNode",
-            display_name="Seedance 2.0 (Replicate)",
+            display_name="Seedance 2.0",
             category="api node/video/Replicate",
             description=(
                 "ByteDance Seedance 2.0 — currently the top-ranked text/image-"
@@ -1691,7 +1691,7 @@ class MusicGenRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="MusicGenRemoteNode",
-            display_name="MusicGen (Replicate)",
+            display_name="MusicGen",
             category="api node/audio/Replicate",
             description=(
                 "Meta MusicGen — text-to-music. Describe a mood, genre, "
@@ -1785,7 +1785,7 @@ class MiniMaxSpeechRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="MiniMaxSpeechRemoteNode",
-            display_name="MiniMax Speech-02 HD (Replicate)",
+            display_name="MiniMax Speech-02 HD",
             category="api node/audio/Replicate",
             description=(
                 "MiniMax Speech-02 HD — natural, emotional text-to-speech across "
@@ -1846,7 +1846,7 @@ class Hunyuan3DRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="Hunyuan3DRemoteNode",
-            display_name="Hunyuan3D 2 (Replicate)",
+            display_name="Hunyuan3D 2",
             category="api node/3d/Replicate",
             description=(
                 "Tencent Hunyuan3D 2 — image-to-3D. Feed a single reference "
@@ -1904,7 +1904,7 @@ class Hunyuan3DMultiViewNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="Hunyuan3DMultiViewNode",
-            display_name="Multi-View → 3D (Replicate)",
+            display_name="Multi-View → 3D",
             category="api node/3d/Replicate",
             description=(
                 "Reconstruct a 3D model from a front/back/left/right character sheet "
@@ -2031,7 +2031,7 @@ class RemoveBackgroundRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="RemoveBackgroundRemoteNode",
-            display_name="Remove Background (Replicate)",
+            display_name="Remove Background",
             category="api node/image/Replicate",
             description=(
                 "851-labs/background-remover — fast, clean alpha-matte "
@@ -2065,7 +2065,7 @@ class RestorePhotoRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="RestorePhotoRemoteNode",
-            display_name="Restore Photo (Replicate)",
+            display_name="Restore Photo",
             category="api node/image/Replicate",
             description=(
                 "flux-kontext-apps/restore-image — restore old, damaged, or "
@@ -2104,7 +2104,7 @@ class CodeformerRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="CodeformerRemoteNode",
-            display_name="Fix Faces · CodeFormer (Replicate)",
+            display_name="Fix Faces · CodeFormer",
             category="api node/image/Replicate",
             description=(
                 "sczhou/codeformer — face-specific restoration. Sharpens, "
@@ -2156,7 +2156,7 @@ class DescribeImageRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="DescribeImageRemoteNode",
-            display_name="Describe Image · Moondream 2 (Replicate)",
+            display_name="Describe Image · Moondream 2",
             category="api node/image/Replicate",
             description=(
                 "lucataco/moondream2 — small, fast vision-language model. "
@@ -2205,7 +2205,7 @@ class LipsyncRemoteNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="LipsyncRemoteNode",
-            display_name="Lipsync · sync.so 2-pro (Replicate)",
+            display_name="Lipsync · sync.so 2-pro",
             category="api node/video/Replicate",
             description=(
                 "sync/lipsync-2-pro — drive any face's lips to match an audio "
@@ -4507,7 +4507,7 @@ class FixFacesNode(IO.ComfyNode):
 
 
 # =============================================================================
-# Use case: Layerize a graphic (split a flat design into layers)
+# Use case: Separate text from image (split a flat design into layers)
 # =============================================================================
 
 
@@ -4516,7 +4516,7 @@ class LayerizeGraphicNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="LayerizeGraphicNode",
-            display_name="Layerize a graphic",
+            display_name="Separate text from image",
             category="api node/image/Replicate",
             description=(
                 "Split a flat graphic (poster, ad, thumbnail, UI mockup) into a "
@@ -4596,7 +4596,7 @@ class LayerizeGraphicNode(IO.ComfyNode):
 
 
 # =============================================================================
-# Use case: Split a photo into layers (subject cutout + clean background plate)
+# Use case: Separate background and foreground (subject cutout + clean background plate)
 # =============================================================================
 
 
@@ -4616,7 +4616,7 @@ class SplitPhotoLayersNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="SplitPhotoLayersNode",
-            display_name="Split photo into layers",
+            display_name="Separate background and foreground",
             category="api node/image/Replicate",
             description=(
                 "Decompose a photo into two editable layers, ready for the "
@@ -5177,8 +5177,8 @@ class SketchToImageNode(IO.ComfyNode):
             category="api node/image/Replicate",
             description=(
                 "Turn a rough sketch into a finished image. Google Nano Banana "
-                "(Gemini 2.5 Flash Image) — top of Replicate's sketch-to-image "
-                "collection; very good at preserving composition from line art."
+                "(Gemini 2.5 Flash Image) — one of the best at sketch-to-image; "
+                "very good at preserving composition from line art."
             ),
             inputs=[
                 IO.Combo.Input("model", options=["Nano Banana"], default="Nano Banana"),
@@ -5306,7 +5306,7 @@ class FindObjectsNode(IO.ComfyNode):
 
 
 # =============================================================================
-# Use case: Generate a consistent face
+# Use case: Generate face references
 # =============================================================================
 
 
@@ -5315,7 +5315,7 @@ class ConsistentFaceNode(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="ConsistentFaceNode",
-            display_name="Generate a consistent face",
+            display_name="Generate face references",
             category="api node/image/Replicate",
             description=(
                 "Generate new images of the same character/face across scenes. "
@@ -5349,125 +5349,6 @@ class ConsistentFaceNode(IO.ComfyNode):
         if seed and seed > 0:
             input_dict["seed"] = seed
         pred = await _run_prediction("ideogram-ai/ideogram-character", input_dict)
-        tensor = await download_url_to_image_tensor(_first_output_url(pred), cls=cls)
-        return IO.NodeOutput(tensor)
-
-
-# =============================================================================
-# Use case: Generate an emoji
-# =============================================================================
-
-
-_KONTEXT_EMOJI_LORA = "https://huggingface.co/starsfriday/Kontext-Emoji-LoRA"
-_KONTEXT_EMOJI_TRIGGER = "Turn this image into the emoji style of Apple iOS system"
-_KONTEXT_ASPECT_RATIOS = [
-    "match_input_image", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3",
-]
-
-
-class GenerateEmojiNode(IO.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return IO.Schema(
-            node_id="GenerateEmojiNode",
-            display_name="Generate an emoji",
-            category="api node/image/Replicate",
-            description=(
-                "Image-to-emoji via Flux Kontext Dev + starsfriday's Kontext "
-                "Emoji LoRA. Feed a portrait or subject photo and get an "
-                "iOS-style emoji of it. The LoRA was trained for human "
-                "figures and works best with clean, well-lit subjects. "
-                "~$0.04 per image."
-            ),
-            inputs=[
-                IO.Combo.Input("model", options=["Flux Kontext Dev + Emoji LoRA"],
-                               default="Flux Kontext Dev + Emoji LoRA"),
-                IO.Image.Input("input_image",
-                               tooltip="Photo to turn into an emoji. Faces and clean subjects work best."),
-                IO.String.Input("prompt", multiline=True, default=_KONTEXT_EMOJI_TRIGGER,
-                                tooltip="Edit instruction. The default is the LoRA's trigger; "
-                                        "you can tweak it (e.g., 'sad version, iOS emoji style')."),
-                IO.Combo.Input("aspect_ratio", options=_KONTEXT_ASPECT_RATIOS,
-                               default="match_input_image"),
-                IO.Float.Input("lora_strength", default=1.0, min=0.0, max=2.0, step=0.05,
-                               tooltip="How strongly to apply the emoji LoRA. "
-                                       "1.0 = trained level; lower preserves more of the original."),
-                IO.Float.Input("guidance", default=2.5, min=0.0, max=10.0, step=0.5, advanced=True,
-                               tooltip="Prompt adherence. Kontext defaults to ~2.5 (lower than Flux Dev)."),
-                IO.Int.Input("num_inference_steps", default=30, min=10, max=50, step=5, advanced=True),
-                IO.Combo.Input("output_format", options=["png", "jpg", "webp"], default="png", advanced=True),
-                IO.Int.Input("seed", default=0, min=0, max=0xFFFFFFFF, tooltip="0 = random."),
-            ],
-            outputs=[IO.Image.Output()],
-            price_badge=IO.PriceBadge(expr='{"type":"usd","usd":0.04,"format":{"approximate":true}}'),
-        )
-
-    @classmethod
-    async def execute(cls, model, input_image, prompt, aspect_ratio, lora_strength,
-                      guidance, num_inference_steps, output_format, seed):
-        input_dict = {
-            "input_image":   _image_tensor_to_data_url(input_image),
-            "prompt":        (prompt or _KONTEXT_EMOJI_TRIGGER).strip(),
-            "aspect_ratio":  aspect_ratio,
-            "lora_weights":  _KONTEXT_EMOJI_LORA,
-            "lora_strength": lora_strength,
-            "guidance":      guidance,
-            "num_inference_steps": num_inference_steps,
-            "output_format": output_format,
-        }
-        if seed and seed > 0:
-            input_dict["seed"] = seed
-        pred = await _run_prediction("black-forest-labs/flux-kontext-dev-lora", input_dict)
-        tensor = await download_url_to_image_tensor(_first_output_url(pred), cls=cls)
-        return IO.NodeOutput(tensor)
-
-
-# =============================================================================
-# Use case: Generate an anime image
-# =============================================================================
-
-
-class GenerateAnimeNode(IO.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return IO.Schema(
-            node_id="GenerateAnimeNode",
-            display_name="Generate an anime image",
-            category="api node/image/Replicate",
-            description=(
-                "Anime-style image gen — Animagine XL. Stronger for anime "
-                "aesthetics than general-purpose models. ~$0.01 per image."
-            ),
-            inputs=[
-                IO.Combo.Input("model", options=["Animagine XL"], default="Animagine XL"),
-                IO.String.Input("prompt", multiline=True, default="",
-                                tooltip="Describe the scene/character. Booru tags work well."),
-                IO.String.Input("negative_prompt", default="lowres, bad anatomy, bad hands, text, error",
-                                advanced=True),
-                IO.Int.Input("width",  default=1024, min=512, max=1536, step=64),
-                IO.Int.Input("height", default=1024, min=512, max=1536, step=64),
-                IO.Int.Input("num_inference_steps", default=28, min=10, max=50, advanced=True),
-                IO.Float.Input("guidance_scale", default=7.0, min=1.0, max=20.0, step=0.5, advanced=True),
-                IO.Int.Input("seed", default=0, min=0, max=0xFFFFFFFF),
-            ],
-            outputs=[IO.Image.Output()],
-            price_badge=IO.PriceBadge(expr='{"type":"usd","usd":0.01,"format":{"approximate":true}}'),
-        )
-
-    @classmethod
-    async def execute(cls, model, prompt, negative_prompt, width, height,
-                      num_inference_steps, guidance_scale, seed):
-        input_dict = {
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "width": width,
-            "height": height,
-            "num_inference_steps": num_inference_steps,
-            "guidance_scale": guidance_scale,
-        }
-        if seed and seed > 0:
-            input_dict["seed"] = seed
-        pred = await _run_prediction("charlesmccarthy/animagine-xl", input_dict)
         tensor = await download_url_to_image_tensor(_first_output_url(pred), cls=cls)
         return IO.NodeOutput(tensor)
 
@@ -5535,7 +5416,7 @@ class DescribeVideoNode(IO.ComfyNode):
             category="api node/video/Replicate",
             description=(
                 "Send a video and a question, get back text. Powered by "
-                "Google Gemini 2.5 Flash via Replicate's proxy. Useful for "
+                "Google Gemini 2.5 Flash. Useful for "
                 "captions, summaries, content analysis. ~$0.01 per request."
             ),
             inputs=[
@@ -5708,7 +5589,7 @@ class ChatLLMNode(IO.ComfyNode):
             display_name="Chat with an LLM",
             category="api node/text/Replicate",
             description=(
-                "Send a prompt to a frontier LLM via Replicate. GPT-5 = top "
+                "Send a prompt to a frontier LLM. GPT-5 = top "
                 "general quality. Claude 4.5 Sonnet = thoughtful long-form. "
                 "Gemini 3 Flash = fastest + cheapest. Output is plain text — "
                 "wire downstream as a prompt for image/video gen, or as final."
@@ -6200,12 +6081,10 @@ class ReplicateExtension(ComfyExtension):
         return [
             # ─── Use-case nodes (the user-facing surface) ───
             # Image — generation
-            FluxLoRARemoteNode,         # Generate an image with your LoRA — kept separate
+            FluxLoRARemoteNode,         # Generate an image with a style — kept separate
             FluxMultiLoRARemoteNode,    # Stack up to 4 LoRAs (character + style + accents) · flux-dev-multi-lora
             GenerateImageNode,          # Generate an image · Flux Pro / Ideogram
-            GenerateAnimeNode,          # Generate an anime image · Animagine XL
-            GenerateEmojiNode,          # Generate an emoji · Flux Kontext Emoji
-            ConsistentFaceNode,         # Generate a consistent face · Ideogram Character
+            ConsistentFaceNode,         # Generate face references · Ideogram Character
             SketchToImageNode,          # Sketch to image · Nano Banana
             # Image — manipulation
             GenerateFromReferencesNode, # Generate from references · Seedream 5 Pro/Lite / Nano Banana 2
@@ -6222,8 +6101,8 @@ class ReplicateExtension(ComfyExtension):
             RemoveBackgroundNode,       # Remove background · 851-labs/bg-remover
             RestorePhotoNode,           # Restore an old photo · Flux Kontext Restore
             FixFacesNode,               # Fix faces in a photo · CodeFormer
-            LayerizeGraphicNode,        # Layerize a graphic · Ideogram Layerize
-            SplitPhotoLayersNode,       # Split photo into layers · bg-remover + LaMa/Bria Eraser
+            LayerizeGraphicNode,        # Separate text from image · Ideogram Layerize
+            SplitPhotoLayersNode,       # Separate background and foreground · bg-remover + LaMa/Bria Eraser
             SeedreamLayerizeNode,       # Layerize an image (raster layers) · Seedream 5 Pro Layerize
             OutpaintImageNode,          # Expand / outpaint an image · Flux Fill / Bria Expand
             # Image — analysis

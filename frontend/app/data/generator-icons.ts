@@ -13,8 +13,6 @@
 import type { Component } from 'vue'
 import {
   Sparkles,
-  Drama,
-  SmilePlus,
   UserCircle,
   PenTool,
   Pencil,
@@ -55,8 +53,6 @@ export const GENERATOR_NODE_ICONS: Record<string, Component> = {
   // ----- Image · generation -----
   FluxLoRARemoteNode:   Sparkles,
   GenerateImageNode:    Sparkles,
-  GenerateAnimeNode:    Drama,
-  GenerateEmojiNode:    SmilePlus,
   ConsistentFaceNode:   UserCircle,
   SketchToImageNode:    PenTool,
   PersonSwap:           UsersRound,
@@ -131,8 +127,6 @@ export const NODE_MODEL_BRAND: Record<string, string | null> = {
   // ----- Image · generation -----
   FluxLoRARemoteNode:   'BFL',                // Flux Dev + LoRA
   GenerateImageNode:    'BFL',                // Default model is Flux Pro
-  GenerateAnimeNode:    null,                 // Animagine XL — no major brand
-  GenerateEmojiNode:    'BFL',                // Flux Kontext + Emoji LoRA
   ConsistentFaceNode:   'Ideogram',           // Ideogram Character
   SketchToImageNode:    'Gemini',             // Nano Banana = Google's lightweight model
   RelightNode:          'Gemini',             // Nano Banana 2

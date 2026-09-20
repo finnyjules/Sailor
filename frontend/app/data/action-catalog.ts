@@ -25,13 +25,11 @@ export interface ActionEntry {
 export const ACTION_CATALOG: Record<string, ActionEntry> = {
   // -- Image · create --------------------------------------------------------
   GenerateImageNode:     { useCase: 'Generate an image',              model: 'Many models · pick in gallery',            intent: 'create' },
-  FluxLoRARemoteNode:    { useCase: 'Generate an image with your LoRA', model: 'Flux Dev + LoRA',                        intent: 'create' },
-  GenerateAnimeNode:     { useCase: 'Generate an anime image',        model: 'Animagine XL',                             intent: 'create' },
-  GenerateEmojiNode:     { useCase: 'Generate an emoji',              model: 'Flux Kontext + Emoji LoRA',                intent: 'create' },
-  ConsistentFaceNode:    { useCase: 'Generate a consistent face',     model: 'Ideogram Character',                       intent: 'create' },
+  FluxLoRARemoteNode:    { useCase: 'Generate an image with a style', model: 'Flux Dev + LoRA',                         intent: 'create' },
+  ConsistentFaceNode:    { useCase: 'Generate face references',       model: 'Ideogram Character',                       intent: 'create' },
   SketchToImageNode:     { useCase: 'Sketch to image',                model: 'Nano Banana',                              intent: 'create' },
   GenerateFromReferencesNode: { useCase: 'Generate from references',  model: 'Seedream 5 Pro/Lite · Nano Banana 2',       intent: 'create', source: 'image' },
-  FluxMultiLoRARemoteNode: { useCase: 'Generate with multiple LoRAs', model: 'Flux Dev + LoRAs',                        intent: 'create' },
+  FluxMultiLoRARemoteNode: { useCase: 'Mix styles together',          model: 'Flux Dev + LoRAs',                        intent: 'create' },
   TextEffectNode:        { useCase: 'Render a text effect',           model: 'Typographic art gallery',                  intent: 'create' },
   // -- Image · edit -----------------------------------------------------------
   EditImageNode:         { useCase: 'Edit an image',                  model: 'Nano Banana 2 / Flux Kontext / Flux 2 Pro', intent: 'edit', source: 'image' },
@@ -43,9 +41,9 @@ export const ACTION_CATALOG: Record<string, ActionEntry> = {
   RelightNode:           { useCase: 'Relight a photo',                model: 'Nano Banana 2',                            intent: 'edit' },
   ProductShotNode:       { useCase: 'Make a product shot',            model: 'SDXL Ad-Inpaint',                          intent: 'edit' },
   RemoveBackgroundNode:  { useCase: 'Remove background',              model: '851-labs/bg-remover',                      intent: 'edit' },
-  LayerizeGraphicNode:   { useCase: 'Layerize a graphic',             model: 'Ideogram Layerize',                        intent: 'edit' },
+  LayerizeGraphicNode:   { useCase: 'Separate text from image',       model: 'Ideogram Layerize',                        intent: 'edit' },
   SeedreamLayerizeNode:  { useCase: 'Layerize an image',              model: 'Seedream 5 Pro Layerize',                  intent: 'edit' },
-  SplitPhotoLayersNode:  { useCase: 'Split photo into layers',        model: 'BG Remover + LaMa / Bria Eraser',          intent: 'edit' },
+  SplitPhotoLayersNode:  { useCase: 'Separate background and foreground', model: 'BG Remover + LaMa / Bria Eraser',       intent: 'edit' },
   OutpaintImageNode:     { useCase: 'Expand / outpaint an image',     model: 'Flux Fill / Bria Expand',                  intent: 'edit' },
   BlendSceneNode:        { useCase: 'Blend a composite into a scene', model: 'Flux Kontext Pro / Flux 2 Pro / Nano Banana', intent: 'edit' },
   SwapProductNode:       { useCase: 'Swap a product into a scene', model: 'Nano Banana 2',                            intent: 'edit' },

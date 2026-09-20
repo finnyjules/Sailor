@@ -153,8 +153,6 @@ const PARAPHRASES: { phrase: string; expect: string }[] = [
   // More generators / generation
   { phrase: 'create a watercolor painting of a fox', expect: 'GenerateImageNode' },
   { phrase: 'dream up a sci-fi cityscape', expect: 'GenerateImageNode' },
-  { phrase: 'make an anime version of a samurai', expect: 'GenerateAnimeNode' },
-  { phrase: 'turn this selfie into an emoji', expect: 'GenerateEmojiNode' },
   { phrase: 'compose a chill instrumental beat', expect: 'GenerateMusicNode' },
   { phrase: 'narrate this script in a calm voice', expect: 'GenerateSpeechNode' },
   { phrase: 'build a 3d asset from this reference', expect: 'Generate3DNode' },
@@ -290,8 +288,6 @@ const WIDE: { phrase: string; expect: string }[] = [
   { phrase: 'rewrite this to sound more formal', expect: 'RewriteToneNode' },
   { phrase: 'come up with ten taglines', expect: 'BrainstormIdeasNode' },
   // generation variants
-  { phrase: 'anime portrait of a knight', expect: 'GenerateAnimeNode' },
-  { phrase: 'memoji of my face', expect: 'GenerateEmojiNode' },
   { phrase: 'same person in a different outfit', expect: 'ConsistentFaceNode' },
   { phrase: 'turn my scribble into a real picture', expect: 'SketchToImageNode' },
   { phrase: 'paint my photo in the style of this reference', expect: 'RestyleFromImageNode' },
