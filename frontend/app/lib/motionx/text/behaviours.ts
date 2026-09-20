@@ -22,6 +22,10 @@ const SCRAMBLE_MOVES = ['snap', 'glide'] as const
 const DECODE_DIRS = ['resolve', 'dissolve'] as const
 const SLOT_DIRS = ['in', 'out'] as const
 const SLOT_ROLLS = ['up', 'down'] as const
+// A reel can also roll its OWN letter past — `same` — which no other substituting behaviour
+// wants (a Decode that flickers a letter into itself is no Decode), so it lives here and not
+// in the shared charsets.
+const SLOT_FILLERS = ['same', ...TEXT_CHARSETS] as const
 
 // ---------------------------------------------------------------------------
 // Cascade — fade / rise / drop / grow / spin, in or out.
@@ -297,8 +301,9 @@ registerTextBehaviour('text.slot', {
     const roll: 1 | -1 = oneOf(c.params.roll, SLOT_ROLLS, 'up') === 'down' ? -1 : 1
     // How many characters roll past before it lands.
     const steps = Math.min(40, Math.max(1, Math.round(num(c.params.steps, 8))))
-    const pool = framePool(c.store, oneOf(c.params.filler, TEXT_CHARSETS, 'letters'), c.cell.char, c.cells)
+    const filler = oneOf(c.params.filler, SLOT_FILLERS, 'letters')
     const real = c.cell.char
+    const pool = filler === 'same' ? [real] : framePool(c.store, filler, real, c.cells)
     const out = dir === 'out'
     // Leaving, the reel rolls one step FURTHER than it has fillers, onto the empty landing.
     const last = out ? steps + 1 : steps

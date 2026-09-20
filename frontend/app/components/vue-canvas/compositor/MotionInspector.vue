@@ -164,7 +164,10 @@ const SLOT_ROLL_OPTIONS = ['up', 'down']
 const SLOT_ROLL_LABELS = ['Rolls up', 'Rolls down']
 // Shared by Decode's Characters and Slot slide's Filler — the same five character pools.
 const CHARSET_OPTIONS = ['text', 'letters', 'numbers', 'symbols', 'mixed']
-const CHARSET_LABELS = ['Same as the text', 'Letters', 'Numbers', 'Symbols', 'Mixed']
+const CHARSET_LABELS = ['Letters from the text', 'Letters', 'Numbers', 'Symbols', 'Mixed']
+// A Slot reel can also roll its own letter past; a Decode cannot (it would show no change).
+const SLOT_FILLER_OPTIONS = ['same', ...CHARSET_OPTIONS]
+const SLOT_FILLER_LABELS = ['Same letter', ...CHARSET_LABELS]
 
 /** Reads an enum param with the evaluator's own fallback. */
 const enumParam = (k: string, d: string) => ((behParam(k) as string | undefined) ?? d)
@@ -575,7 +578,7 @@ function onGradient(g: Gradient) {
             :model-value="numParam('steps', 8)" :min="1" :max="40" :step="1" :default="8"
             @update:model-value="(v) => setBehNum('slot-steps', { steps: v })" />
           <StudioSelect data-testid="slot-filler" label="Filler"
-            :model-value="enumParam('filler', 'letters')" :options="CHARSET_OPTIONS" :option-labels="CHARSET_LABELS"
+            :model-value="enumParam('filler', 'letters')" :options="SLOT_FILLER_OPTIONS" :option-labels="SLOT_FILLER_LABELS"
             @update:model-value="(v) => setBehParams({ filler: v })" />
         </template>
       </template>

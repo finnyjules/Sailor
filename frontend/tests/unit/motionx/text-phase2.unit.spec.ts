@@ -602,3 +602,32 @@ describe('finite-number guards on the new params', () => {
     same('text.decode', { rate: NaN }, { rate: 14 })
   })
 })
+
+// "Same as the text" used to mean a SHUFFLE of the text's own letters, which reads on screen
+// as random letters. The two meanings are now two options.
+describe('text.slot filler: the two "from the text" options', () => {
+  const WORD = Array.from('ALBAN').map((ch, i) => cell(ch, i * 10))
+  const reels = (params: Record<string, unknown>) => {
+    const b = beh('text.slot', { ease: 'linear', stagger: 0, steps: 8, ...params }, 0, 2)
+    const out: { real: string; chars: string[] }[] = []
+    for (let t = 0.05; t < 2; t += 0.05) {
+      ev(b, t, WORD).cells.forEach((c, i) => { if (c.reel) out.push({ real: WORD[i]!.char, chars: c.reel.chars.filter(Boolean) }) })
+    }
+    return out
+  }
+  it('"same" rolls every window through its OWN letter, in and out', () => {
+    for (const dir of ['in', 'out']) {
+      const seen = reels({ filler: 'same', dir })
+      expect(seen.length).toBeGreaterThan(0)
+      for (const r of seen) expect(r.chars.every((ch) => ch === r.real)).toBe(true)
+    }
+  })
+  it('"text" rolls through the letters of the whole text and nothing else', () => {
+    const seen = new Set(reels({ filler: 'text' }).flatMap((r) => r.chars))
+    expect([...seen].sort()).toEqual(['A', 'B', 'L', 'N'])
+  })
+  it('"same" is a slot-only option — decode ignores it and keeps its default', () => {
+    const a = beh('text.decode', { charset: 'same' }), d = beh('text.decode', {})
+    expect(ev(a, 1.5)).toEqual(ev(d, 1.5))
+  })
+})
