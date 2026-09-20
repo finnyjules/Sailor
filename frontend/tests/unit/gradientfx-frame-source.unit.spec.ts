@@ -125,4 +125,34 @@ describe('makeGradientFrameSource', () => {
     expect(Number.isFinite(height)).toBe(true)
     expect(height).toBeGreaterThan(0)
   })
+
+  // gradientFx is ONE renderer per page, so every gradient source hands out the SAME
+  // canvas. Two wired gradients asking in the same tick both render before either caller
+  // resumes from its await — without a copy, the first caller reads the second's frame.
+  it('hands each caller its own copy, so a later render cannot overwrite a frame in flight', async () => {
+    const shared = { painted: '' }
+    const fakeCanvas = () => {
+      const c: any = { width: 0, height: 0, holds: '' }
+      c.getContext = () => ({ clearRect() {}, drawImage: (src: any) => { c.holds = src.painted } })
+      return c as HTMLCanvasElement
+    }
+    const source = (name: string) => makeGradientFrameSource({
+      getConfig: () => cfg(),
+      render: () => { shared.painted = name; return shared as any },
+      createCanvas: fakeCanvas,
+    })
+    const [a, b] = await Promise.all([source('first').getFrame(0, 8, 8), source('second').getFrame(0, 8, 8)])
+    expect((a as any).holds).toBe('first')
+    expect((b as any).holds).toBe('second')
+    expect(a).not.toBe(b)
+  })
+
+  it('one source serves several consumers in a tick without handing them the same canvas', async () => {
+    const src = makeGradientFrameSource({
+      getConfig: () => cfg(), render: () => ({ painted: 'x' } as any),
+      createCanvas: () => ({ width: 0, height: 0, getContext: () => ({ clearRect() {}, drawImage() {} }) } as any),
+    })
+    const frames = await Promise.all([0, 0.25, 0.5].map(t => src.getFrame(t, 8, 8)))
+    expect(new Set(frames).size).toBe(3)
+  })
 })
