@@ -19,7 +19,7 @@ import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vu
 import MotionEasingCurve from '~/components/vue-canvas/compositor/MotionEasingCurve.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
-import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import StudioSegmentedRow from '~/components/vue-canvas/studio/StudioSegmentedRow.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
@@ -406,18 +406,14 @@ function onGradient(g: Gradient) {
     <!-- kind-specific params -->
     <div class="space-y-2">
       <template v-if="behaviour.kind === 'fade'">
-        <div>
-          <div class="panel-sublabel mb-1">Direction</div>
-          <StudioSegmented :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
-            @update:model-value="(v) => setBehParams({ dir: v })" />
-        </div>
+        <StudioSegmentedRow label="Direction"
+          :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
+          @update:model-value="(v) => setBehParams({ dir: v })" />
       </template>
       <template v-else-if="behaviour.kind === 'scale'">
-        <div>
-          <div class="panel-sublabel mb-1">Direction</div>
-          <StudioSegmented data-testid="scale-dir" :model-value="enumParam('dir', 'in')" :options="['in', 'out']" :option-labels="['Grow in', 'Shrink out']"
-            @update:model-value="(v) => setBehParams({ dir: v })" />
-        </div>
+        <StudioSegmentedRow label="Direction"
+          data-testid="scale-dir" :model-value="enumParam('dir', 'in')" :options="['in', 'out']" :option-labels="['Grow in', 'Shrink out']"
+          @update:model-value="(v) => setBehParams({ dir: v })" />
         <StudioSlider data-testid="scale-from" v-bind="gesture('scale-from')"
           label="Start size %" hint="100% is the layer's own size"
           :model-value="numParam('from', enumParam('dir', 'in') === 'out' ? 100 : 0)" :min="0" :max="400" :step="1"
@@ -430,27 +426,21 @@ function onGradient(g: Gradient) {
           @update:model-value="(v) => setBehNum('scale-to', { to: v })" />
       </template>
       <template v-else-if="behaviour.kind === 'slide'">
-        <div>
-          <div class="panel-sublabel mb-1">Direction</div>
-          <StudioSegmented :model-value="enumParam('dir', 'up')" :options="SLIDE_DIRS" :option-labels="SLIDE_DIR_LABELS"
-            @update:model-value="(v) => setBehParams({ dir: v })" />
-        </div>
+        <StudioSegmentedRow label="Direction"
+          :model-value="enumParam('dir', 'up')" :options="SLIDE_DIRS" :option-labels="SLIDE_DIR_LABELS"
+          @update:model-value="(v) => setBehParams({ dir: v })" />
         <StudioSlider data-testid="slide-distance" v-bind="gesture('slide-distance')"
           label="Distance" hint="Fraction of the frame (0–1)"
           :model-value="numParam('distance', 0.15)" :min="0" :max="1" :step="0.01" :default="0.15"
           @update:model-value="(v) => setBehNum('slide-distance', { distance: v })" />
       </template>
       <template v-else-if="behaviour.kind === 'gradientMorph'">
-        <div>
-          <div class="panel-sublabel mb-1">Mode</div>
-          <StudioSegmented :model-value="enumParam('mode', 'crossfade')" :options="MORPH_MODES" :option-labels="MORPH_MODE_LABELS"
-            @update:model-value="(v) => setBehParams({ mode: v })" />
-        </div>
-        <div>
-          <div class="panel-sublabel mb-1">Colour</div>
-          <StudioSegmented :model-value="enumParam('space', 'oklab')" :options="MORPH_SPACES" :option-labels="MORPH_SPACE_LABELS"
-            @update:model-value="(v) => setBehParams({ space: v })" />
-        </div>
+        <StudioSegmentedRow label="Mode"
+          :model-value="enumParam('mode', 'crossfade')" :options="MORPH_MODES" :option-labels="MORPH_MODE_LABELS"
+          @update:model-value="(v) => setBehParams({ mode: v })" />
+        <StudioSegmentedRow label="Colour"
+          :model-value="enumParam('space', 'oklab')" :options="MORPH_SPACES" :option-labels="MORPH_SPACE_LABELS"
+          @update:model-value="(v) => setBehParams({ space: v })" />
       </template>
       <template v-else-if="isTextBeh">
         <StudioSelect data-testid="letters-move" label="Behaviour"
@@ -458,11 +448,9 @@ function onGradient(g: Gradient) {
           :model-value="letterMoveId" :options="LETTER_MOVE_IDS" :option-labels="LETTER_MOVE_LABELS"
           @update:model-value="swapMove" />
         <div class="text-[10px] uppercase tracking-wide text-white/35">Text</div>
-        <div data-testid="letters-by">
-          <div class="panel-sublabel mb-1">Animate by</div>
-          <StudioSegmented :model-value="enumParam('by', 'letters')" :options="BY_OPTIONS" :option-labels="BY_LABELS"
-            @update:model-value="(v) => setBehParams({ by: v })" />
-        </div>
+        <StudioSegmentedRow data-testid="letters-by" label="Animate by"
+          :model-value="enumParam('by', 'letters')" :options="BY_OPTIONS" :option-labels="BY_LABELS"
+          @update:model-value="(v) => setBehParams({ by: v })" />
         <StudioSlider v-if="!isLoopBeh" data-testid="letters-stagger" v-bind="gesture('letters-stagger')"
           label="Stagger" hint="Seconds between one piece starting and the next"
           :model-value="numParam('stagger', 0.04)" :min="0" :max="0.5" :step="0.01" :default="0.04"
@@ -497,11 +485,9 @@ function onGradient(g: Gradient) {
         </template>
 
         <template v-if="behaviour.kind === 'text.cascade'">
-          <div data-testid="cascade-dir">
-            <div class="panel-sublabel mb-1">Direction</div>
-            <StudioSegmented :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
-              @update:model-value="(v) => setBehParams({ dir: v })" />
-          </div>
+          <StudioSegmentedRow data-testid="cascade-dir" label="Direction"
+            :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
+            @update:model-value="(v) => setBehParams({ dir: v })" />
           <StudioSelect data-testid="cascade-style" label="Style"
             :model-value="enumParam('style', 'rise')" :options="CASCADE_STYLE_OPTIONS" :option-labels="CASCADE_STYLE_LABELS"
             @update:model-value="(v) => setBehParams({ style: v })" />
@@ -514,11 +500,9 @@ function onGradient(g: Gradient) {
             @update:model-value="(v) => setBehNum('cascade-amount', { amount: v })" />
         </template>
         <template v-else-if="behaviour.kind === 'text.typewriter'">
-          <div data-testid="typewriter-dir">
-            <div class="panel-sublabel mb-1">Direction</div>
-            <StudioSegmented :model-value="enumParam('dir', 'type')" :options="TYPE_DIR_OPTIONS" :option-labels="TYPE_DIR_LABELS"
-              @update:model-value="(v) => setBehParams({ dir: v })" />
-          </div>
+          <StudioSegmentedRow data-testid="typewriter-dir" label="Direction"
+            :model-value="enumParam('dir', 'type')" :options="TYPE_DIR_OPTIONS" :option-labels="TYPE_DIR_LABELS"
+            @update:model-value="(v) => setBehParams({ dir: v })" />
           <StudioSelect data-testid="typewriter-cursor" label="Cursor"
             :model-value="enumParam('cursor', 'bar')" :options="CURSOR_OPTIONS" :option-labels="CURSOR_LABELS"
             @update:model-value="(v) => setBehParams({ cursor: v })" />
@@ -528,21 +512,17 @@ function onGradient(g: Gradient) {
             @update:model-value="(v) => setBehNum('typewriter-blink', { blink: v })" />
         </template>
         <template v-else-if="behaviour.kind === 'text.maskSlide'">
-          <div data-testid="mask-dir">
-            <div class="panel-sublabel mb-1">Direction</div>
-            <StudioSegmented :model-value="enumParam('dir', 'reveal')" :options="MASK_DIR_OPTIONS" :option-labels="MASK_DIR_LABELS"
-              @update:model-value="(v) => setBehParams({ dir: v })" />
-          </div>
+          <StudioSegmentedRow data-testid="mask-dir" label="Direction"
+            :model-value="enumParam('dir', 'reveal')" :options="MASK_DIR_OPTIONS" :option-labels="MASK_DIR_LABELS"
+            @update:model-value="(v) => setBehParams({ dir: v })" />
           <StudioSelect data-testid="mask-from" label="Travel"
             :model-value="enumParam('from', 'up')" :options="MASK_FROM_OPTIONS" :option-labels="MASK_FROM_LABELS"
             @update:model-value="(v) => setBehParams({ from: v })" />
         </template>
         <template v-else-if="behaviour.kind === 'text.scramble'">
-          <div data-testid="scramble-mode">
-            <div class="panel-sublabel mb-1">Mode</div>
-            <StudioSegmented :model-value="enumParam('mode', 'settle')" :options="SCRAMBLE_MODE_OPTIONS" :option-labels="SCRAMBLE_MODE_LABELS"
-              @update:model-value="(v) => setBehParams({ mode: v })" />
-          </div>
+          <StudioSegmentedRow data-testid="scramble-mode" label="Mode"
+            :model-value="enumParam('mode', 'settle')" :options="SCRAMBLE_MODE_OPTIONS" :option-labels="SCRAMBLE_MODE_LABELS"
+            @update:model-value="(v) => setBehParams({ mode: v })" />
           <!-- Stored 0–1; shown as a percentage of the frame, exactly as before. -->
           <StudioSlider data-testid="scramble-area-w" v-bind="gesture('scramble-area-w')"
             label="Area width %" hint="Percent of the frame width"
@@ -556,22 +536,18 @@ function onGradient(g: Gradient) {
             label="Time per jump" hint="Seconds between jumps"
             :model-value="numParam('interval', 0.18)" :min="0.03" :max="1" :step="0.01" :default="0.18"
             @update:model-value="(v) => setBehNum('scramble-interval', { interval: v })" />
-          <div data-testid="scramble-move">
-            <div class="panel-sublabel mb-1">Move</div>
-            <StudioSegmented :model-value="enumParam('move', 'snap')" :options="SCRAMBLE_MOVE_OPTIONS" :option-labels="SCRAMBLE_MOVE_LABELS"
-              @update:model-value="(v) => setBehParams({ move: v })" />
-          </div>
+          <StudioSegmentedRow data-testid="scramble-move" label="Move"
+            :model-value="enumParam('move', 'snap')" :options="SCRAMBLE_MOVE_OPTIONS" :option-labels="SCRAMBLE_MOVE_LABELS"
+            @update:model-value="(v) => setBehParams({ move: v })" />
           <StudioSlider data-testid="scramble-spin" v-bind="gesture('scramble-spin')"
             label="Spin (degrees)"
             :model-value="numParam('spin', 0)" :min="0" :max="180" :step="1" :default="0"
             @update:model-value="(v) => setBehNum('scramble-spin', { spin: v })" />
         </template>
         <template v-else-if="behaviour.kind === 'text.decode'">
-          <div data-testid="decode-dir">
-            <div class="panel-sublabel mb-1">Direction</div>
-            <StudioSegmented :model-value="enumParam('dir', 'resolve')" :options="DECODE_DIR_OPTIONS" :option-labels="DECODE_DIR_LABELS"
-              @update:model-value="(v) => setBehParams({ dir: v })" />
-          </div>
+          <StudioSegmentedRow data-testid="decode-dir" label="Direction"
+            :model-value="enumParam('dir', 'resolve')" :options="DECODE_DIR_OPTIONS" :option-labels="DECODE_DIR_LABELS"
+            @update:model-value="(v) => setBehParams({ dir: v })" />
           <StudioSelect data-testid="decode-charset" label="Characters"
             :model-value="enumParam('charset', 'text')" :options="CHARSET_OPTIONS" :option-labels="CHARSET_LABELS"
             @update:model-value="(v) => setBehParams({ charset: v })" />
@@ -581,16 +557,12 @@ function onGradient(g: Gradient) {
             @update:model-value="(v) => setBehNum('decode-rate', { rate: v })" />
         </template>
         <template v-else-if="behaviour.kind === 'text.slot'">
-          <div data-testid="slot-dir">
-            <div class="panel-sublabel mb-1">Direction</div>
-            <StudioSegmented :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
-              @update:model-value="(v) => setBehParams({ dir: v })" />
-          </div>
-          <div data-testid="slot-roll">
-            <div class="panel-sublabel mb-1">Roll</div>
-            <StudioSegmented :model-value="enumParam('roll', 'up')" :options="SLOT_ROLL_OPTIONS" :option-labels="SLOT_ROLL_LABELS"
-              @update:model-value="(v) => setBehParams({ roll: v })" />
-          </div>
+          <StudioSegmentedRow data-testid="slot-dir" label="Direction"
+            :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
+            @update:model-value="(v) => setBehParams({ dir: v })" />
+          <StudioSegmentedRow data-testid="slot-roll" label="Roll"
+            :model-value="enumParam('roll', 'up')" :options="SLOT_ROLL_OPTIONS" :option-labels="SLOT_ROLL_LABELS"
+            @update:model-value="(v) => setBehParams({ roll: v })" />
           <StudioSlider data-testid="slot-steps" v-bind="gesture('slot-steps')"
             label="Steps" hint="How many characters roll past before it lands"
             :model-value="numParam('steps', 8)" :min="1" :max="40" :step="1" :default="8"

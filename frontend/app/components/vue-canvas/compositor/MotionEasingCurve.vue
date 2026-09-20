@@ -16,7 +16,7 @@ import {
 import { NO_RUN, openRun, closeRun, takeRecord, type UndoRun } from '~/lib/motionx/undoCoalesce'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
-import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import StudioSegmentedRow from '~/components/vue-canvas/studio/StudioSegmentedRow.vue'
 
 const props = defineProps<{ ease: Ease }>()
 const emit = defineEmits<{ start: []; change: [ease: Ease]; end: [] }>()
@@ -225,11 +225,9 @@ function setBounce(b: number) {
     </svg>
 
     <!-- Type -->
-    <div>
-      <div class="panel-sublabel mb-1">Type</div>
-      <StudioSegmented data-testid="ease-mode" :model-value="mode" :options="MODE_OPTIONS" :option-labels="MODE_LABELS"
-        @update:model-value="(v) => setMode(v as Mode)" />
-    </div>
+    <StudioSegmentedRow label="Type"
+      data-testid="ease-mode" :model-value="mode" :options="MODE_OPTIONS" :option-labels="MODE_LABELS"
+      @update:model-value="(v) => setMode(v as Mode)" />
 
     <!-- Easing: bézier coordinates. The one control here that is NOT a Studio row — four
          numbers typed as one string — so it borrows the row's geometry instead. -->
